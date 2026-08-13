@@ -126,8 +126,6 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 - Sandbox: `test/operationEnvelope.test.js` (23). Full suite 11,169 green, lint 0, build green.
 
 
-### B463922 — The grid's viewport moves while editing, and scrollTop is the wrong thing to measure `[Scheduler]` (bug) #scheduler #ui #testing  *(owner chat block 2026-08-13: *"sometimes if I am editing cells I will just jump halfway down the schedule or all the way up."* Minted **B463922**. **DEDUPE-FIRST — searched `scrollTop`, `scrollIntoView`, `goToFocus`, `reveal`, `VIEWPORT-STABLE`, `B837`, `B838`, `B65`: VIEWPORT-STABLE is the SITE PLANNER's canvas rule, a different surface and a different mechanism. Net-new.)*
-`[ ]` **NOT FIXED — instrument shipped, cause not proven.** `ui-audit/diagnose-grid-overlays.mjs`.
 ### B463922 — Collapsing a group above the row you are editing throws that row off the screen `[Scheduler]` (bug) #scheduler #ui #testing  *(owner chat block 2026-08-13: *"sometimes if I am editing cells I will just jump halfway down the schedule or all the way up."* Minted **B463922**. **DEDUPE-FIRST — `scrollTop`, `scrollIntoView`, `goToFocus`, `reveal`, `VIEWPORT-STABLE`, `B837`, `B838`, `B65`: VIEWPORT-STABLE is the SITE PLANNER canvas rule, a different surface and mechanism. Net-new.)*
 `[ ]` **REPRODUCED AND LOCALISED; the fix is the remaining step.** Instrument shipped: `ui-audit/diagnose-grid-view-anchor.mjs`.
 - Verify: live
@@ -145,7 +143,11 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 
 **⛔ THE NAMED SUSPECT IS CLEARED, WITH THE MEASUREMENT THAT CLEARS IT.** The keep-the-selected-row-visible effect (`GridView`, deps `[selectedId, selectedColIdx, tasks]`) was the prime suspect on the theory that it chases a stale INDEX. It made **zero scroll writes** on the path that actually jumps. It is not scrolling to the wrong place — **it is not scrolling at all**. So the row is not dragged away by the app; it is **abandoned**: the content above shrinks, the browser re-anchors on some other element, and nothing brings the selected row back. Any fix must make that effect *act* on this path, not stop it acting.
 
-**WHAT THE NEXT STEP IS.** Find why the effect does not fire (or fires against pre-layout geometry) when `isExpanded` changes, then anchor on identity and re-assert. The seven vacuous paths must also be driven for real — they currently need the row re-selected after the grid re-renders, which is why they no-opped.
+**⛔ HANDOFF DOC: `docs/B463922-SCROLL-JUMP-HANDOFF.md`** — the exact reproduction, how to run the instrument, the cleared suspect *with the measurement that clears it*, the five ways the instruments lied today, and what was and was not driven. Read it before touching `GridView` scrolling.
+
+**THE ARITHMETIC THAT POINTS SOMEWHERE.** `ΔscreenTop = ΔdocumentTop − ΔscrollTop`, so `+477 = ΔdocumentTop + 501` → **the row's own document position moved only ≈ −24 px (one row) while the browser scrolled 501 px.** The scroll movement is twenty times larger than the layout change that provoked it.
+
+**BEST HYPOTHESIS — stated as a hypothesis, not a finding: scroll anchoring lost its anchor.** Chrome anchors on a node near the top of the viewport; collapsing a group **removes the very nodes it was anchored to**, and the forced re-anchor produces a correction out of all proportion to the 24 px that actually left. Fits every number: zero app writes, 501 px against a 24 px change, and only the collapse path affected while date and duration edits are clean. **Cheap decisive test first:** set `overflow-anchor: none` on the scroll container and re-run the instrument. If the jump vanishes, own the adjustment explicitly (record the selected row's screen offset before the layout change, restore it after, in a layout effect, keyed on identity). If it survives, anchoring is cleared too and the next candidate is virtualisation recycling — check the row's absolute `top` and the spacer height across a collapse.
 
 **THE WITNESS IS THE REUSABLE PART.** Before it existed all fourteen paths read green, seven of them earned by doing nothing — the same vacuous-green shape as `close:[0,0]` in `verify-grid-overlay-input` and the paste test that bypassed its own selection. A step that changed nothing is now printed as proving nothing.
 
