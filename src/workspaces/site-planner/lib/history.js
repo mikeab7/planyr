@@ -15,6 +15,17 @@
  * and is reverted in a single undo. Callers must push exactly once per undoable
  * action; this module does not infer transaction boundaries. */
 
+/* Do two snapshots hold the SAME collections, by reference? A React state update replaces the array
+ * it changes, so identical references across every key is proof no collection was committed — the
+ * cheap half of `canUndo` below. */
+const sameRefs = (a, b) => {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
+  const ka = Object.keys(a), kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  return ka.every((k) => a[k] === b[k]);
+};
+
 export function createHistoryStack({ keyOf, limit = 80 } = {}) {
   if (typeof keyOf !== "function") throw new Error("createHistoryStack: keyOf must be a function");
   let past = [];
@@ -67,10 +78,43 @@ export function createHistoryStack({ keyOf, limit = 80 } = {}) {
       return past.length ? past.pop() : null;
     },
 
-    /* Button-enable predicate. Matches the historical behaviour: enabled whenever the
-     * past stack is non-empty (a no-op-only stack can still show enabled, then undo()
-     * cleans it — unchanged from B32). */
-    canUndo() { return past.length > 0; },
+    /* ⛔ NEW-5 — "UNDO IS ENABLED" IS THE ONLY SIGNAL A USER HAS THAT A PLAN WAS MODIFIED, AND A
+     * PLAIN SELECTION CLICK WAS ARMING IT.
+     *
+     * Reported live on production 2026-08-12, isolated: load `smsqi16s9ej4` fresh (Undo correctly
+     * disabled), single left-click inside Building 3 — no drag, no modifier, the pointer does not
+     * move — and Undo turns ENABLED. The database is byte-identical across it: md5 over all 50
+     * `site_elements` rows `e6c520d7dba3b5fa7520aae3012545a9` before AND after, and `updated_at`
+     * does not advance. Six selection clicks produced six entries on the owner's live plan, and
+     * unwinding them was the only way to be sure the plan was untouched. That cost is the item.
+     *
+     * ⛔ THE FIX IS HERE, NOT AT THE 210 `pushHistory()` CALL SITES. A press handler pushes the
+     * pre-mutation snapshot BEFORE it knows whether a mutation follows — that is the transaction
+     * model this module is built on (push at drag-start, mutate freely, one frame), and unpicking
+     * it per call site would be 210 chances to get the drag threshold wrong, which is expressly not
+     * being reopened. So the predicate stops asking "is there a frame?" and starts asking the
+     * question the button actually claims to answer: **does any frame differ from the live state?**
+     * `undo()` has always asked exactly that (its `keyOf` dedup, B32); the button simply never did.
+     *
+     * ⚠ IT IS A REFERENCE SCAN, NOT A STRINGIFY, and that matters: `keyOf` is a JSON.stringify of
+     * every parcel, element, measurement, callout and markup in the plan, and this predicate is read
+     * on every render of the toolbar. React state updates REPLACE the collection arrays on every
+     * real mutation, so an identical set of references is proof nothing was committed — which is the
+     * reported case exactly. It errs only in the safe direction: a value-equal frame that was
+     * reallocated still reads "enabled", and `undo()`'s own key dedup then discards it. Pass
+     * `{ exact: true }` to pay for certainty. */
+    canUndo(current, { exact = false } = {}) {
+      if (!past.length) return false;
+      if (current === undefined) return true;            // legacy callers: unchanged behaviour
+      let refDiff = false;
+      for (let i = past.length - 1; i >= 0; i--) {
+        if (!sameRefs(past[i], current)) { refDiff = true; break; }
+      }
+      if (!refDiff) return false;
+      if (!exact) return true;
+      const curKey = keyOf(current);
+      return past.some((p) => keyOf(p) !== curKey);
+    },
     canRedo() { return future.length > 0; },
 
     reset() { past = []; future = []; },

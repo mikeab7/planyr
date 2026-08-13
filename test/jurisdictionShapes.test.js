@@ -127,7 +127,7 @@ describe("NEW-3 — a regression fixture per jurisdiction SHAPE, from the owner'
     const { b, j } = await badgeFor("Goose Creek");
     // NEW-1 — both halves GOVERN part of the site, so they are slots in the governing chain ("·").
     // Only a non-governing city gets demoted behind the em dash, and there is none here.
-    expect(b.text).toBe("Part in City of Baytown (6 of 14 lots) · rest in its ETJ · Harris County");
+    expect(b.text).toBe("Part in City of Baytown limits (full purpose, 6 of 14 lots) · rest in its ETJ · Harris County");
     expect(b.shape).toBe("split");
     expect(b.tail).toBe(null);
     expect(j.cityContainment).toBe("partial");

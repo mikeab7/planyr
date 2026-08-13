@@ -28,7 +28,7 @@ const num = (v) => (v != null && Number.isFinite(Number(v)) ? Number(v) : null);
  *   "etj"      an extraterritorial jurisdiction — the city's rules may or may not reach here
  *   "edge"     the site only touches this entity at an edge
  * Each carries the FFE rule it implies (basis + freeboard) so the comparison is apples-to-apples. */
-export function administratorCandidates({ authorityId = null, county = null, cityLabel = null, etjLabel = null, edgeLabels = [], rules = {}, floodJurKey = null } = {}) {
+export function administratorCandidates({ authorityId = null, county = null, cityLabel = null, etjLabel = null, edgeLabels = [], limitedAreas = [], rules = {}, floodJurKey = null } = {}) {
   const out = [];
   const push = (rawKey, kind, label, reason) => {
     const key = ruleKeyFor(rawKey);
@@ -47,6 +47,20 @@ export function administratorCandidates({ authorityId = null, county = null, cit
   if (countyKey && rules[countyKey]) push(countyKey, "primary", null, "county floodplain administrator");
   if (cityLabel) push(cityKey(cityLabel), "primary", cityLabel, "incorporated city limits");
   if (etjLabel) push(cityKey(etjLabel), "etj", `${etjLabel} (ETJ)`, "extraterritorial jurisdiction — confirm whether the city's floodplain ordinance reaches here");
+  /* ⛔ NEW-1/NEW-3 — A LIMITED-PURPOSE ANNEXATION AREA IS ITS OWN KIND, AND IT IS NEITHER OF THE
+   * TWO IT LOOKS LIKE. It is not `primary` — the city does NOT hold this land in its full-purpose
+   * limits, so assuming its whole ordinance set applies is exactly the overstatement NEW-1 is
+   * about. It is not `edge` either — an edge-only sliver is a frontage artefact expected to govern
+   * nothing, while the owner's Grand Port site is 99% inside one of these, which is not an artefact
+   * by any reading. So it is raised, named, and REFUSED the governing slot until the city's own
+   * ordinance says how far it reaches. It still counts as a hole in the comparison (`unmodelled`),
+   * because a candidate that plausibly governs with no rule on file is the silent-absence class. */
+  for (const a of limitedAreas || []) {
+    const label = a && a.name ? String(a.name) : null;
+    if (!label) continue;
+    const kind = a.class === "strip" ? "strip annexation" : "limited-purpose annexation";
+    push(cityKey(label), "limited", `${label} (${kind})`, `the site is inside a ${kind} area — whether this city's floodplain ordinance reaches limited-purpose territory has to be confirmed with the city`);
+  }
   for (const e of edgeLabels || []) push(cityKey(e), "edge", `${e} (edge only)`, "the site only touches this entity at an edge");
   return out;
 }
@@ -129,7 +143,13 @@ export function resolveAdministrator(candidates = [], { requiredFfeAt = null } =
   // Only PRIMARY candidates WITH a modeled rule can govern outright; an ETJ, an edge-only touch, or
   // an unmodeled entity is a flag, not an administrator — unless it is the only thing we have.
   const primaries = scored.filter((c) => c.kind === "primary" && c.rule);
-  const pool = primaries.length ? primaries : scored.filter((c) => c.rule).length ? scored.filter((c) => c.rule) : scored;
+  /* ⛔ NEW-1 — a LIMITED-PURPOSE / STRIP annexation candidate may never fall through into the
+   * governing slot, even when nothing else has a rule. Its whole point is that we do NOT know
+   * whether the city's ordinance reaches this land; letting it govern by default would be the
+   * overstatement arriving through the fallback instead of through the front door. */
+  const canGovern = (c) => c.kind !== "limited";
+  const withRule = scored.filter((c) => c.rule && canGovern(c));
+  const pool = primaries.length ? primaries : withRule.length ? withRule : scored.filter(canGovern).length ? scored.filter(canGovern) : scored;
   const sorted = [...pool].sort((a, b) => b.score - a.score);
   const governing = sorted[0];
   // Ambiguity is about REAL disagreement: two candidates whose implied requirements differ, or a
@@ -254,7 +274,7 @@ export function assessAdministrator({ signals = {}, rules = {}, ffeFt = null, re
    * every site and train the reader to ignore it. Only a PRIMARY or ETJ candidate — one that
    * plausibly governs — counts. */
   const unmodelled = (candidates || [])
-    .filter((c) => c && (c.kind === "primary" || c.kind === "etj") && !c.ffe)
+    .filter((c) => c && (c.kind === "primary" || c.kind === "etj" || c.kind === "limited") && !c.ffe)
     .map((c) => ({ key: c.key, label: c.label, kind: c.kind, source: c.rule ? c.rule.source : null }));
   return {
     ...resolved,

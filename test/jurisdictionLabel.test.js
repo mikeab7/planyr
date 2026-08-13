@@ -118,8 +118,36 @@ describe("NEW-1 — the two states that are not shapes stay honest", () => {
     const l = formatJurisdictionLabel(M({
       partialCities: ["Baytown"], splitNote: " (6 of 14 lots)", remainderLabel: "rest in its ETJ", counties: ["Harris"],
     }));
-    expect(l.text).toBe("Part in City of Baytown (6 of 14 lots) · rest in its ETJ · Harris County");
+    // NEW-1 — the noun is "City of X limits", because "City of X" alone is the phrase reserved for
+    // full-purpose limits and this line has to read differently from a limited-purpose annexation.
+    expect(l.text).toBe("Part in City of Baytown limits (6 of 14 lots) · rest in its ETJ · Harris County");
     expect(l.shape).toBe("split");
+  });
+
+  /* NEW-1/NEW-2 — the two wordings that must never be confusable, side by side. */
+  it("SPLIT states the class and an AREA share, not a lot count, when the area pass answered", () => {
+    const l = formatJurisdictionLabel(M({
+      partialCities: ["Baytown"], splitClass: "full", splitNote: " 31% by area",
+      remainderLabel: "rest in its ETJ", counties: ["Harris"],
+    }));
+    expect(l.text).toBe("Part in City of Baytown limits (full purpose, 31% by area) · rest in its ETJ · Harris County");
+  });
+
+  it("a LIMITED-PURPOSE annexation is its own slot and never reads as 'City of X'", () => {
+    const l = formatJurisdictionLabel(M({
+      etjCities: ["Baytown"], counties: ["Chambers"],
+      limitedAreas: [{ name: "Baytown", class: "limited", share: 0.991 }],
+    }));
+    expect(l.text).toBe("City of Baytown ETJ · Baytown limited-purpose annexation (99% by area) · Chambers County");
+    expect(l.text).not.toContain("City of Baytown ·");
+    expect(l.shape).toBe("etj");
+  });
+
+  it("a strip annexation says so, and a site with none gains no characters", () => {
+    const strip = formatJurisdictionLabel(M({ counties: ["Harris"], limitedAreas: [{ name: "Baytown", class: "strip", share: 0.02 }] }));
+    expect(strip.text).toBe("Unincorporated · Baytown strip annexation (2% by area) · Harris County");
+    const none = formatJurisdictionLabel(M({ counties: ["Harris"], limitedAreas: [] }));
+    expect(none.text).toBe("Unincorporated · Harris County");
   });
 
   it("UNKNOWN: a failed containment lookup never lets a city lead", () => {

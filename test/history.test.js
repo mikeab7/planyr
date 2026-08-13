@@ -132,3 +132,72 @@ describe("history stack (site-planner undo/redo)", () => {
     expect(() => createHistoryStack({})).toThrow();
   });
 });
+
+/* ═══ NEW-5 — A SELECTION CLICK IS NOT A DOCUMENT CHANGE ═════════════════════════════════════════
+ *
+ * Reported live on production 2026-08-12 (site `smsqi16s9ej4`, Building 3): load fresh — Undo
+ * correctly DISABLED — single left-click to select, no drag, no modifier, pointer does not move,
+ * and Undo turns ENABLED while the database stays byte-identical (md5 over all 50 `site_elements`
+ * rows unchanged, `updated_at` does not advance). Undo-enabled is the only signal that a plan has
+ * been modified; once selection alone arms it, a plan you merely LOOKED at is indistinguishable
+ * from one you edited.
+ *
+ * ⛔ BOTH DIRECTIONS ARE ASSERTED. A test that only checks "undo works" passes on the defect. */
+describe("NEW-5 — canUndo answers about the DOCUMENT, not about the stack's depth", () => {
+  const doc = (els) => ({ parcels: [], els, markups: [], measures: [], callouts: [] });
+  const key = (s) => JSON.stringify(s);
+
+  it("a frame pushed with no mutation behind it does NOT enable Undo", () => {
+    const h = createHistoryStack({ keyOf: key });
+    const els = [{ id: "b1", x: 0 }];
+    const state = doc(els);
+    expect(h.canUndo(state)).toBe(false);
+    // The press handler pushes the pre-mutation snapshot before it knows a drag is coming…
+    h.push(state);
+    // …and the gesture turns out to be a plain selection click: same collections, same references.
+    expect(h.canUndo({ ...state })).toBe(false);
+    expect(h.canUndo({ ...state }, { exact: true })).toBe(false);
+  });
+
+  it("…and a real edit DOES enable it, in the same shape", () => {
+    const h = createHistoryStack({ keyOf: key });
+    const before = doc([{ id: "b1", x: 0 }]);
+    h.push(before);
+    const after = doc([{ id: "b1", x: 1 }]);      // React replaces the array on a real mutation
+    expect(h.canUndo(after)).toBe(true);
+    expect(h.canUndo(after, { exact: true })).toBe(true);
+    expect(h.undo(after)).toEqual(before);
+  });
+
+  it("six selection clicks leave six frames and Undo still reads disabled", () => {
+    const h = createHistoryStack({ keyOf: key });
+    const state = doc([{ id: "b1" }]);
+    for (let i = 0; i < 6; i++) h.push(state);
+    expect(h.snapshotStacks().past.length).toBe(6);
+    expect(h.canUndo({ ...state })).toBe(false);
+    // …and the honest predicate agrees with what undo() would actually do.
+    expect(h.undo({ ...state })).toBe(null);
+  });
+
+  it("a reallocated but value-identical frame is refused by the exact check", () => {
+    const h = createHistoryStack({ keyOf: key });
+    h.push(doc([{ id: "b1", x: 0 }]));
+    const reallocated = doc([{ id: "b1", x: 0 }]);   // new arrays, same content
+    expect(h.canUndo(reallocated)).toBe(true);        // cheap path errs toward "enabled"…
+    expect(h.canUndo(reallocated, { exact: true })).toBe(false); // …exact tells the truth
+    expect(h.undo(reallocated)).toBe(null);           // and undo() has always agreed with exact
+  });
+
+  it("legacy callers that pass nothing keep the old behaviour exactly", () => {
+    const h = createHistoryStack({ keyOf: key });
+    expect(h.canUndo()).toBe(false);
+    h.push(doc([]));
+    expect(h.canUndo()).toBe(true);
+  });
+
+  it("redo is empty on a fresh stack — the control was mislabelled, the state was right", () => {
+    const h = createHistoryStack({ keyOf: key });
+    expect(h.canRedo()).toBe(false);
+    expect(h.snapshotStacks().future).toEqual([]);
+  });
+});

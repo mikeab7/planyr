@@ -164,7 +164,23 @@ for (const site of fixture.sites) {
     badge = formatJurisdictionBadge(j);
   } catch (e) { err = String(e && e.message || e); }
   const verdict = err ? { unresolved: true, problems: [err] } : judge(site, badge);
-  rows.push({ site: site.site, truth: site.truth, badge: badge ? badge.text : null, shape: badge ? badge.shape : null, verdict });
+  /* ⛔ NEW-2 — THE AREA FRACTION BEHIND THE BADGE, on every row. A portfolio pass that reports only
+   * the STRING cannot tell "a third of this site is in the city" from "a lot line clips it", which
+   * is the difference this whole item is about — and it is what let Grand Port read as plain
+   * unincorporated land through a previous full-portfolio sweep. */
+  const areas = badge && badge.cityAreas ? badge.cityAreas : null;
+  rows.push({
+    site: site.site, truth: site.truth,
+    badge: badge ? badge.text : null, shape: badge ? badge.shape : null,
+    shareMethod: badge ? badge.cityShareMethod : null,
+    siteAcres: areas ? Math.round(areas.totalAcres * 10) / 10 : null,
+    shares: areas ? areas.rows.filter((r) => r.share > 0).map((r) => ({
+      name: r.name, class: r.class, pct: Math.round(r.share * 1000) / 10, acres: Math.round(r.insideAcres * 10) / 10,
+      uniqueIds: r.uniqueIds && r.uniqueIds.length ? r.uniqueIds : undefined,
+    })) : null,
+    limited: badge ? (badge.cityLimitedAreas || []).map((a) => `${a.name} ${a.class} ${Math.round(a.share * 100)}%`) : null,
+    verdict,
+  });
   // Pace the sweep. Twenty-eight sites is ~110 queries at three agencies; fired back to back they
   // throttle, and a throttled run reads as a wall of "couldn't check" that says nothing about the
   // labels. Slower and honest beats fast and unreadable.
@@ -172,6 +188,10 @@ for (const site of fixture.sites) {
   if (!asJson) {
     const mark = verdict.skipped ? "–" : verdict.unresolved ? "?" : verdict.ok ? "✅" : "❌";
     console.log(`${mark} ${site.site.padEnd(19)} ${(badge ? badge.shape : "-").padEnd(15)} ${badge ? badge.text : "(no badge)"}`);
+    const last = rows[rows.length - 1];
+    if (last.shares && last.shares.length) {
+      console.log(`   ↳ by area (${last.siteAcres} ac): ` + last.shares.map((x) => `${x.name} ${x.class} ${x.pct}%`).join(" · "));
+    }
     for (const p of verdict.problems || []) console.log(`   ↳ ${p}`);
   }
 }

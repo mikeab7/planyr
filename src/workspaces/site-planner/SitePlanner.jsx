@@ -4443,13 +4443,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // can't act on a stale baseline (B315). One stack instance, kept across renders.
   const histRef = useRef(null);
   if (!histRef.current) histRef.current = createHistoryStack({ keyOf: histKey });
-  const [, bumpHist] = useState(0);
+  const [histTick, bumpHist] = useState(0);
   const touchHist = () => bumpHist((n) => n + 1); // re-render so undo/redo enabled state updates
   /* NEW-4 — `notePerfEdit()` is one integer increment, and it is the ONE axis of the
    * amplification hypothesis the DOM cannot report: how much this session has been WORKED. Every
    * undoable action funnels through here already, so this is the cheapest complete count there
    * is. It is a no-op unless the perf instrument is installed (a quarter of page loads). */
   const pushHistory = () => { histRef.current.push(stateRef.current); notePerfEdit(); touchHist(); };
+  /* ⛔ NEW-5 — "CAN I UNDO?" IS ASKED OF THE DOCUMENT, ONCE PER REAL CHANGE.
+   *
+   * `history.canUndo(current, {exact:true})` is the honest predicate (see that module: a plain
+   * selection click armed Undo on a plan the database says was never touched). `exact` pays one
+   * `keyOf` — a JSON.stringify of the whole plan — so it may not be read from the render body on
+   * every frame. It does not need to be: the answer can only change when a drawn collection is
+   * replaced or a history command runs, which is exactly this dep list. `stateRef.current` is
+   * rebuilt every render as a fresh WRAPPER over those same references, so it is deliberately not
+   * a dep — depending on it would recompute every frame and defeat the memo. */
+  const canUndoNow = useMemo(
+    () => histRef.current.canUndo(stateRef.current, { exact: true }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [histTick, parcels, els, measures, callouts, markups, underlay, sheetOverlays, deletedIds, layerOverrides, layerAbove, origin],
+  );
   /* NEW-1 — the two context axes the always-on performance recorder cannot read off the DOM.
    * `notePlanContext` is one string compare per plan load (and counts the switches — the axis
    * B1121 §3 measured as a sawtooth and could not see from outside the app); `noteViewScale` is
@@ -13218,6 +13232,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       etjLabel: (drainCtxData?.authority?.overlays || []).find((o) => o.kind === "etj")?.city
         || (jurBadge?.etjLabels || [])[0] || null,
       edgeLabels: (drainCtxData?.authority?.overlays || []).filter((o) => o.kind !== "etj").map((o) => o.city).filter(Boolean),
+      /* ⛔ NEW-1/NEW-3 — LIMITED-PURPOSE AND STRIP ANNEXATION AREAS, handed down as their own fact.
+       * Grand Port is 99% inside one of Baytown's, and before this the whole relationship was
+       * invisible to the administrator resolver: the site read as plain unincorporated Chambers
+       * County and was priced on the county's standard with nothing anywhere saying a city had a
+       * claim on the land. It is raised as a candidate and REFUSED the governing slot — see the
+       * "limited" kind in floodAdministrator. */
+      limitedAreas: jurBadge?.cityLimitedAreas || [],
       // A city ONLY governs when the site is actually inside its limits — containment, never the
       // ring union that also picks up a frontage sliver (B209506).
       // NEW-1 — a PARTIAL containment counts too: a city holding part of the site is a real
@@ -17385,8 +17406,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const plannerToolbar = (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 2, background: "var(--hover-chrome)", borderRadius: 10, padding: 2 }}>
-        <button className="dbtn" style={dIcon} onClick={undo} disabled={!histRef.current.canUndo()} aria-label="Undo" title="Undo (Ctrl+Z)">↶</button>
-        <button className="dbtn" style={dIcon} onClick={redo} disabled={!histRef.current.canRedo()} aria-label="Redo" title="Redo (Ctrl+Shift+Z)">↷</button>
+        {/* ⛔ NEW-5 — UNDO IS ASKED ABOUT THE LIVE STATE, not merely about the stack's depth: a
+            plain selection click pushed a frame and armed this button while the plan was
+            byte-identical, which killed the only "this plan has been modified" signal the owner
+            has. See `history.js` → canUndo. `stateRef.current` is the live snapshot the same
+            predicate compares against inside `undo()`.
+            And BOTH buttons carry `aria-disabled` beside `disabled`: a disabled <button> has no
+            aria-disabled attribute at all, so a checker reading that attribute got null and
+            reported the empty Redo control as ENABLED — a mislabelled control, not a state bug,
+            and it cost a real investigation. */}
+        <button className="dbtn" style={dIcon} onClick={undo} disabled={!canUndoNow} aria-disabled={!canUndoNow} aria-label="Undo" title="Undo (Ctrl+Z)">↶</button>
+        <button className="dbtn" style={dIcon} onClick={redo} disabled={!histRef.current.canRedo()} aria-disabled={!histRef.current.canRedo()} aria-label="Redo" title="Redo (Ctrl+Shift+Z)">↷</button>
         <button className="dbtn" style={dIcon} onClick={fit} disabled={!parcels.length && !els.length && !markups.length && !callouts.length && !underlay} aria-label="Zoom to fit" title="Zoom to fit">⤢</button>
       </div>
       {/* Snap's interactive toggle moved to the on-canvas View (eye) menu with the other

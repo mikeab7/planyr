@@ -5,7 +5,24 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-08-12._
+_Last updated: 2026-08-13._
+
+## 📄 One Baytown document I can't download — it's the last piece of the Baytown flood answer (B393170)
+
+> Your two Baytown-area sites — **Grand Port** and **Goose Creek** — now name the right city and the right
+> kind of city limit. What they still can't tell you is **how high Baytown makes you build the floors**.
+
+- [ ] **Send me Baytown's flood damage prevention ordinance** (the chapter of the city code that sets the
+      finished-floor rule). I tried to read it from the two places the city publishes it and both are blocked
+      from where I run — I get a refused connection, not a missing page, so there's nothing I can do from
+      here. A PDF, or a copy-paste of the flood chapter, is all I need.
+- [ ] **The one question inside it that matters most:** whether that rule applies inside a *limited-purpose*
+      annexation area, or only inside the city's full limits. Grand Port sits almost entirely in a
+      limited-purpose area, so that sentence decides which rulebook prices it. If the ordinance doesn't say,
+      that's a real answer too and I'll record it as "doesn't say" rather than guess.
+- **Until then, nothing has moved.** I did NOT invent a Baytown floor: the pad heights on both sites are
+      unchanged, and the app says plainly that Baytown's rule hasn't been read yet rather than quietly using
+      the county's.
 
 ## ❓ One question on team sharing I deliberately did NOT answer for you (B326416)
 

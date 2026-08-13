@@ -109,7 +109,10 @@ describe("buildIdentifyParams — one connector, parameterized per source", () =
 
 describe("normalizeFeature — source schema → one internal shape", () => {
   it("renames each source's columns onto internal keys", () => {
-    expect(normalizeFeature(JURISDICTION_SOURCES.city, { city_name: "Houston" })).toEqual({ role: "city", name: "Houston" });
+    // NEW-1 — a city feature now carries its LIMIT CLASS. TxGIO declares `fullPurposeOnly`, so
+    // every one of its polygons is full-purpose limits; a source that declares nothing reads
+    // `unknown` and is never upgraded (asserted in test/cityLimitClass.test.js).
+    expect(normalizeFeature(JURISDICTION_SOURCES.city, { city_name: "Houston" })).toEqual({ role: "city", name: "Houston", limitClass: "full" });
     expect(normalizeFeature(JURISDICTION_SOURCES.county, { CNTY_NM: "Harris", FIPS_ST_CNTY_CD: "48201" }))
       .toEqual({ role: "county", name: "Harris", fips: "48201" });
   });

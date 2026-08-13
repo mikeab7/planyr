@@ -113,6 +113,81 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V195264 — B393168/B393169/B393170: the Baytown jurisdiction badges, measured BY AREA, on the owner's own signed-in plans `Blocker: real-data` `Blocker: auth`
+
+**What is proven WITHOUT a browser, and it is the substance of the three items.** The share is now an
+AREA fraction taken on the real parcel rings with clipper booleans in a local metre frame, honouring
+interior rings (`lib/jurisdictionShare.js`); the city-limit CLASS travels from the registry field map
+through `normalizeFeature` into the badge and is never collapsed to a boolean
+(`lib/cityLimitClass.js`). Suites green: `jurisdictionShare` (14), `cityLimitClass` (10),
+`jurisdictionArea` (18 — the REAL identify and the REAL badge driven over recorded agency answers for
+Grand Port and Goose Creek, asserting the exact rendered strings), `jurisdiction` (140),
+`jurisdictionLabel`, `headerNavPriority`, `floodAdministrator` (45). Lint 0, build green.
+
+**The fixtures assert the things the item said a weak fixture would miss.** Grand Port
+(`smqfy2r7pdec`) is asserted at 100% BT_ETJ and ~99% inside OID 1344 `FEATURE = LIMITED ANNEXATION`
+(`Unique_ID CL-20170711-007`) — by AREA, with no centroid anywhere in the suite. Goose Creek
+(`sms69x8rb2qk`) is asserted PER PARCEL: `e1454746tcmstb` 96.2% CITY (OIDs 1368 + 1363) and 100% ETJ,
+`e1454846quvgmx` and `e1454844quvgmx` 0% city / 100% ETJ. The NEGATIVE is asserted too — the nearest
+LIMITED polygon (OID 1362) does NOT touch the site, and the real separation is measured at **662 m**
+segment-to-segment (the brief's 37 m is the latitude gap, not the distance). A point inside one of
+OID 1368's 18 holes is a fixture case. `southIsLargerY` is asserted from the projection, not assumed.
+
+**⚠ Two numbers in the brief were corrected by measurement, and the corrected ones are what ships.**
+The site-total share is **32%** on the dissolved 17-record footprint (the 31.7% figure came from three
+tracts); the LIMITED separation is 662 m as above.
+
+**The 28-site sweep ran here** (`node ui-audit/verify-jurisdiction-portfolio.mjs`, live services):
+27 correct · 0 mislabelled · 0 unresolved · 1 site whose service returned no geometry (reported as
+such, never as "no city"). It also surfaced two independent defects, both fixed in the same branch: a
+second city source erroring poisoned the whole city role, and a split site's `etjLabels` came back
+empty so the floodplain administrator lost its ETJ.
+
+**What still needs a signed-in browser, and why.** The sweep runs the LIBRARY against live services;
+it does not render the owner's own saved plans, and the sandbox proxy CORS-blocks Supabase sign-in.
+
+**Steps:**
+1. Open **Grand Port** (`smqfy2r7pdec`). The header pill must NOT read "unincorporated Chambers
+   County". It must name Baytown's **limited-purpose** annexation and the ETJ, in the limited-purpose
+   wording — distinct from full-purpose wording.
+2. Hover the pill. The plain-English gloss for LIMITED ANNEXATION appears in the popover; the badge
+   itself carries the class name only, never the gloss.
+3. Open **Goose Creek** (`sms69x8rb2qk`). The pill must read *"partly City of Baytown limits — FULL
+   PURPOSE"* with the share by area, and must NOT read the limited-purpose wording.
+4. Walk the other 26 sites and confirm nothing that read correctly before now reads differently.
+   Any change must be explainable by the area fraction — report the fraction beside it.
+5. ⛔ **The FFE half is NOT verifiable and is not claimed.** Baytown's flood damage prevention
+   ordinance could not be read — both `library.municode.com` and `www.baytown.org` are egress-blocked
+   from here (measured: connection refused). `floodplainRules.baytown` therefore records
+   `ffeRule: null`, `verified: false`, `unreadable: {reason:"egress-blocked"}` and
+   `limitedPurposeScope: "unknown"`, and a LIMITED area is excluded from the governing pool rather
+   than guessed at. **The pads move ZERO feet**, because no Baytown rule was adopted. The ordinance
+   PDF is on `OWNER-TODO.md`; until it arrives this step stays open.
+
+### V195265 — B393172: a plain selection click leaves Undo DISABLED, and a real edit still arms it `Blocker: auth` `Blocker: real-data`
+
+**Both directions are asserted here already, logged out.** `e2e/undo-selection-only.spec.js` seeds the
+owner's own Bain rows, picks its press point from the app's own read-only `window.__plannerHitTarget`
+resolution, and asserts Undo stays disabled (property AND `aria-disabled="true"`) across six identical
+selection clicks with the model signature byte-identical — then, as the control, deletes with a REAL
+`page.keyboard.press("Delete")` and requires Undo to become ENABLED and the undo to put the element
+back. Mutation-proven: restore the old predicate and the selection arm goes red. `test/history.test.js`
+(17) pins the predicate itself. The sibling report is answered: **Redo's STATE was always correct** —
+a disabled `<button>` carries no `aria-disabled` attribute at all, so an empty Redo read as "enabled"
+to a probe. Both controls now publish `aria-disabled` explicitly.
+
+**What still needs the signed-in app.** The reported symptom was on a CLOUD plan, and the half that
+only a signed-in session can show is that a selection click writes NOTHING to the database.
+
+**Steps:**
+1. Open `smsqi16s9ej4` (Bain / "Concept A - Quiddity DIA") fresh. Undo and Redo both read disabled.
+2. Single left-click inside Building 3 (`e1454850gyzzln`) — no drag, no modifier, do not move the
+   pointer. It must SELECT (grips appear) and **Undo must stay disabled**. Repeat six times.
+3. Confirm the database is untouched: md5 over all 50 `site_elements` rows still
+   `e6c520d7dba3b5fa7520aae3012545a9`, and `updated_at` has not advanced.
+4. **The other direction, which is the half that makes this a test:** move the same building one foot.
+   Undo must become ENABLED, and the row signature must change.
+5. Undo it and confirm the building returns and Redo becomes enabled.
 ### V193168 — B391072 (×3): a purge is still gone HOURS later, with another window in play `Blocker: auth`
 
 ⛔ **This one has been reported fixed twice and was not.** His instruction, verbatim: *"Do not close this on another same-session test."* Proven without a browser at the layer where it is decided — `test/notesBinPurge.test.js` answers all four of his acceptance conditions as four named tests, including six adopt cycles against a server that keeps being handed a pre-purge tree — but the thing that failed last time was a path nobody exercised, so the account is the last mile.

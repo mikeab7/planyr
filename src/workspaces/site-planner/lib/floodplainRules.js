@@ -86,6 +86,45 @@ export const DEFAULT_FLOODPLAIN_RULES = {
     sourceDate: null, verified: false,
     note: "Placeholder (1% @ 1:1) — VERIFY with the Montgomery County DCM.",
   },
+  /* ⛔ NEW-3 — CITY OF BAYTOWN. THE RECORD EXISTS; THE RULE IS NOT ON FILE, AND THAT IS STATED
+   * RATHER THAN GUESSED.
+   *
+   * Baytown now affects TWO of the owner's sites in TWO counties: Goose Creek (Harris — about a
+   * third of the drawn site is inside Baytown's full-purpose limits, the rest in its ETJ) and Grand
+   * Port (Chambers — 99% inside a Baytown LIMITED-PURPOSE ANNEXATION area, 100% inside its ETJ). So
+   * "which floodplain standard applies" is a live question on both, and the honest answer today is
+   * that we do not know.
+   *
+   * ⛔ WHY THERE IS NO DATUM AND NO FREEBOARD HERE: the adopted ordinance could not be READ from
+   * this environment. `library.municode.com` and `baytown.org` are both refused by the network
+   * egress proxy (measured 2026-08-12: connection refused, not a 404), and this repo's standing
+   * rule is that a rule record is transcribed from the primary source or it is not written at all —
+   * an invented freeboard is a wrong FLOOR, which is the most expensive kind of wrong number this
+   * app can produce. `verified: false` + `ffeRule: null` puts Baytown in `assessAdministrator`'s
+   * `unmodelled` list, so the panel says "no rule on file for City of Baytown" and names the
+   * default it is using meanwhile — which is the behaviour B280706 built for exactly this case.
+   *
+   * ⛔ AND THE SECOND QUESTION, WHICH IS NOT THE SAME ONE: whether Baytown's floodplain ordinance
+   * reaches a LIMITED-PURPOSE annexation area at all. That is Grand Port's whole situation, and it
+   * cannot be answered from the boundary layer — only from the ordinance's own applicability
+   * section and the annexation agreement. Until it is read, `limitedPurposeScope: "unknown"` and
+   * the candidate is raised but refused the governing slot (see floodAdministrator's "limited"
+   * kind). Reporting that the ordinance DOES NOT SAY and reporting that we HAVE NOT READ IT are
+   * different statements, and this is the second one.
+   *
+   * The unblock is on OWNER-TODO.md: the adopted PDF, from any route this sandbox is not refused. */
+  baytown: {
+    label: "City of Baytown",
+    trigger: null, ratio: null, floodwayPolicy: null, offsetScope: null,
+    ffeRule: null,
+    locationRule: "Not on file — confirm with the City of Baytown Public Works & Engineering floodplain administrator.",
+    source: "City of Baytown flood damage prevention ordinance — NOT TRANSCRIBED. Both publication routes (library.municode.com, baytown.org) are refused by this environment's egress proxy; measured 2026-08-12.",
+    sourceDate: null,
+    verified: false,
+    unreadable: { reason: "egress-blocked", hosts: ["library.municode.com", "www.baytown.org"], checkedAt: "2026-08-12" },
+    limitedPurposeScope: "unknown",
+    note: "No Baytown rule on file: the ordinance could not be read from this environment, so neither its datum nor its freeboard is recorded. Whether it reaches limited-purpose annexation territory (Grand Port) is likewise unread — not 'no'.",
+  },
   chambers: {
     label: "Chambers County",
     trigger: "1pct", ratio: 1, floodwayPolicy: "prohibit_fill", offsetScope: "storage",

@@ -21,9 +21,40 @@ const memStore = () => {
 // and so ship verified:true; every OTHER seed is still an honest unverified placeholder.
 const VERIFIED_SEEDS = ["fortbend", "harris", "waller"];
 
+/* B393170 — A THIRD CLASS, and it is deliberately not "a placeholder with worse words".
+ * A placeholder seed is a jurisdiction nobody has GOT TO yet: it carries a plausible schema and a
+ * VERIFY caveat, and someone will transcribe it. An UNREADABLE one is a jurisdiction that was
+ * reached for and could not be obtained — Baytown's ordinance is published only on hosts this
+ * environment's egress proxy refuses (measured, connection refused, not a 404). Such a record must
+ * carry NO trigger, NO ratio and NO policy, because the alternative is a fabricated finished-floor
+ * rule, which is the most expensive wrong number this app can produce. It states what it tried,
+ * where, and when — and `unreadable` is what `floodAdministrator` reads to keep it out of the
+ * governing pool rather than silently pricing a site on it. */
+const UNREADABLE_SEEDS = ["baytown"];
+
 describe("seed integrity", () => {
+  it("an UNREADABLE seed states what it could not read, and asserts NOTHING about the rule", () => {
+    for (const key of UNREADABLE_SEEDS) {
+      const r = DEFAULT_FLOODPLAIN_RULES[key];
+      expect(r, key).toBeTruthy();
+      expect(r.label, key).toBeTruthy();
+      expect(r.verified, key).toBe(false);
+      // the whole point: no invented rule, in any field a number could hide in
+      for (const f of ["trigger", "ratio", "floodwayPolicy", "offsetScope", "ffeRule"]) {
+        expect(r[f], `${key}.${f}`).toBeNull();
+      }
+      expect(r.unreadable?.reason, key).toBeTruthy();
+      expect(r.unreadable?.hosts?.length, key).toBeGreaterThan(0);
+      expect(r.unreadable?.checkedAt, key).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(r.source, key).toMatch(/NOT TRANSCRIBED/);
+      // "we have not read it" and "it does not say" are different statements (NEW-3)
+      expect(["unknown", "governs", "does-not-govern", "silent"], key).toContain(r.limitedPurposeScope);
+    }
+  });
+
   it("every jurisdiction carries the full schema; only the still-placeholder seeds ship UNVERIFIED", () => {
     for (const [key, r] of Object.entries(DEFAULT_FLOODPLAIN_RULES)) {
+      if (UNREADABLE_SEEDS.includes(key)) continue;   // asserted above, on its own terms
       expect(r.label, key).toBeTruthy();
       expect(["1pct", "1pct_plus_02pct"], key).toContain(r.trigger);
       expect(r.ratio, key).toBeGreaterThan(0);

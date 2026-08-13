@@ -432,7 +432,17 @@ export const GIS_SOURCES = {
     fields: { name: "city_name" },
     coverage: "statewide",
     tier: "production",
-    lastVerified: "2026-06-16",
+    /* ⛔ NEW-1 — EVERY CITY-LIMITS ROW MUST DECLARE HOW IT SEPARATES FULL-PURPOSE LIMITS FROM
+     * LIMITED-PURPOSE AND STRIP ANNEXATION, or declare that it carries only the first. This row
+     * declares the second, and it is a MEASUREMENT, not an assumption: TxGIO's Baytown polygon is
+     * 26,691 acres net of its 18 interior holes — the same ground as Baytown's OWN `FEATURE='CITY'`
+     * polygons — while Baytown's twelve LIMITED ANNEXATION polygons appear in it nowhere. Probed at
+     * the owner's Grand Port origin (29.807276 / -94.877079), which is 99% inside Baytown limited-
+     * purpose polygon OID 1344: TxGIO answers with NO city at all. Measured live 2026-08-12.
+     * (`cityLimitClass.declaredLimitClassing` is the reader; `test/cityLimitClass.test.js` fails
+     * any city row that declares neither.) */
+    fullPurposeOnly: true,
+    lastVerified: "2026-08-12",
   },
   road: {
     key: "road",
@@ -532,11 +542,30 @@ export const GIS_SOURCES = {
     serviceUrl: "https://services8.arcgis.com/2iaYWEMdQLPv0ZUw/arcgis/rest/services/City_of_Baytown_Citizen_Map_WFL1/FeatureServer/12",
     layerId: 12,
     geometryType: "polygon",
-    fields: { name: null },
+    /* ⛔ NEW-1 — THREE JURISDICTION CLASSES IN ONE TABLE, and 24 of the 38 polygons are NOT full-
+     * purpose limits. Counted live 2026-08-12: CITY 14 · LIMITED ANNEXATION 12 · StripAnnex 12.
+     * `FEATURE` is the class column; it is NULL on one polygon whose `NAME` and `Comment` both read
+     * CITY, so those are the declared fallbacks and are read in that order. Reading any hit here as
+     * "City of Baytown" is what put the owner's Grand Port site — 99% inside LIMITED ANNEXATION
+     * polygon OID 1344, `CL-20170711-007` — in the wrong jurisdiction. `Unique_ID` rides along
+     * because it is how the city's own annexation file is addressed (`CL-20170711-007`, `ANO307`),
+     * which is what a reader has to quote back to them. */
+    fields: { name: null, limitClass: "FEATURE", uniqueId: "Unique_ID" },
+    limitClassField: "FEATURE",
+    limitClassFallbackFields: ["NAME", "Comment"],
+    // Values are `cityLimitClass.CITY_LIMIT_CLASSES` ids. Registry DATA lives on the registry row —
+    // the reader (`classifyCityLimit`) stays generic, so another city is a row, never new code.
+    limitClassMap: {
+      "CITY": "full",
+      "LIMITED ANNEXATION": "limited",
+      "STRIPANNEX": "strip",
+      "STRIP ANNEX": "strip",
+      "STRIP ANNEXATION": "strip",
+    },
     coverage: "city",
     tier: "production",
     availability: "live",
-    lastVerified: "2026-08-09",
+    lastVerified: "2026-08-12",
   },
   etj_baytown: {
     key: "etj_baytown",
@@ -1179,7 +1208,17 @@ export const GIS_SOURCES = {
     coverage: "colorado",
     states: ["CO"],
     tier: "production",
-    lastVerified: "2026-08-05",
+    /* ⛔ NEW-1 — THE DECLARATION EVERY CITY-LIMITS ROW OWES, and this one was FOUND MISSING by the
+     * guard rather than remembered: `test/cityLimitClass.test.js` failed on it the first time it ran.
+     * The basis, measured live 2026-08-12: the layer's only class-shaped column is `type`, and its
+     * distinct values across all 1,911 polygons are `A` (1,637), null (273) and `S` (exactly ONE —
+     * Commerce City). That is not a jurisdiction class the way Baytown's `FEATURE` is, and Colorado
+     * has no limited-purpose annexation instrument to carry (annexation under C.R.S. 31-12 is
+     * full-purpose), so DOLA publishes municipal boundaries and nothing else.
+     * ⚠ If a class-like column ever appears here, this becomes `limitClassField` + `limitClassMap`;
+     * do NOT leave the declaration standing on a guess. */
+    fullPurposeOnly: true,
+    lastVerified: "2026-08-12",
     // Live 2026-08-05: 1,911 polygons statewide (DOLA_Municipalities). Commerce City 9 ·
     // Denver 1 · Greeley 1 · Fort Collins 2 · Aurora 4 · Broomfield 1 · Colorado Springs 1.
   },
