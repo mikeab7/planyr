@@ -173,31 +173,6 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 - Sandbox: `test/operationEnvelope.test.js` (23). Full suite 11,169 green, lint 0, build green.
 
 
-### B463922 — Collapsing a group above the row you are editing throws that row off the screen `[Scheduler]` (bug) #scheduler #ui #testing  *(owner chat block 2026-08-13: *"sometimes if I am editing cells I will just jump halfway down the schedule or all the way up."* Minted **B463922**. **DEDUPE-FIRST — `scrollTop`, `scrollIntoView`, `goToFocus`, `reveal`, `VIEWPORT-STABLE`, `B837`, `B838`, `B65`: VIEWPORT-STABLE is the SITE PLANNER canvas rule, a different surface and mechanism. Net-new.)*
-`[ ]` **REPRODUCED AND LOCALISED; the fix is the remaining step.** Instrument shipped: `ui-audit/diagnose-grid-view-anchor.mjs`.
-- Verify: live
-- Stopping rule: closed when collapsing a group above the edited row leaves that row on screen, mutation-proven — or when the owner reports it gone.
-
-**⛔ MEASURED ON RENDERED POSITION, WHICH IS THE WHOLE POINT.** The first pass measured `scrollTop`, saw it move ~500 px twice, and was **wrong** — zero programmatic writes and an unchanged `maxScroll` are the signature of Chrome's **scroll anchoring**, which moves the number precisely so the picture holds still. Re-measured as *where the edited row sits on screen*, keyed on the row's **identity** (an index-keyed probe would follow whatever row now occupies that slot and report calm):
-
-| path | ΔanchorTop | verdict |
-|---|---|---|
-| **collapse a group ABOVE the edited row** | **+477 px, 447 → 924, OFF-SCREEN** | **the bug** |
-| start-date edit | +0 px | clean |
-| the same edit driven far the other way | +0 px | clean |
-| duration edit | +0 px | clean |
-| insert · undo-insert · indent · outdent · mark-complete · Enter · Tab | +0 px | **prove nothing** — the witness says the step changed nothing |
-
-**⛔ THE NAMED SUSPECT IS CLEARED, WITH THE MEASUREMENT THAT CLEARS IT.** The keep-the-selected-row-visible effect (`GridView`, deps `[selectedId, selectedColIdx, tasks]`) was the prime suspect on the theory that it chases a stale INDEX. It made **zero scroll writes** on the path that actually jumps. It is not scrolling to the wrong place — **it is not scrolling at all**. So the row is not dragged away by the app; it is **abandoned**: the content above shrinks, the browser re-anchors on some other element, and nothing brings the selected row back. Any fix must make that effect *act* on this path, not stop it acting.
-
-**⛔ HANDOFF DOC: `docs/B463922-SCROLL-JUMP-HANDOFF.md`** — the exact reproduction, how to run the instrument, the cleared suspect *with the measurement that clears it*, the five ways the instruments lied today, and what was and was not driven. Read it before touching `GridView` scrolling.
-
-**THE ARITHMETIC THAT POINTS SOMEWHERE.** `ΔscreenTop = ΔdocumentTop − ΔscrollTop`, so `+477 = ΔdocumentTop + 501` → **the row's own document position moved only ≈ −24 px (one row) while the browser scrolled 501 px.** The scroll movement is twenty times larger than the layout change that provoked it.
-
-**BEST HYPOTHESIS — stated as a hypothesis, not a finding: scroll anchoring lost its anchor.** Chrome anchors on a node near the top of the viewport; collapsing a group **removes the very nodes it was anchored to**, and the forced re-anchor produces a correction out of all proportion to the 24 px that actually left. Fits every number: zero app writes, 501 px against a 24 px change, and only the collapse path affected while date and duration edits are clean. **Cheap decisive test first:** set `overflow-anchor: none` on the scroll container and re-run the instrument. If the jump vanishes, own the adjustment explicitly (record the selected row's screen offset before the layout change, restore it after, in a layout effect, keyed on identity). If it survives, anchoring is cleared too and the next candidate is virtualisation recycling — check the row's absolute `top` and the spacer height across a collapse.
-
-**THE WITNESS IS THE REUSABLE PART.** Before it existed all fourteen paths read green, seven of them earned by doing nothing — the same vacuous-green shape as `close:[0,0]` in `verify-grid-overlay-input` and the paste test that bypassed its own selection. A step that changed nothing is now printed as proving nothing.
-
 ### B454480 — "Tab sometimes doesn't work": instrumented, and the answer is one sentence `[Notes]` (bug) #notes #ui #testing  *(owner chat block 2026-08-13, NEW-1, with his screenshot of a Richfield "Utilities" note — a bulleted list with a nested sub-list and an autolinked email in it. Minted **B454480–B454481 / V249424** LATE via `git fetch origin main && npm run next-id -- --against-main`, from this branch's reserved block B454480–B454495 · V249424–V249439. **DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `Tab`, `notesTabKey`, `indent`, `outdent`, `sinkListItem`, `B1392`, `B291536`, `B36051`.** **B1392** and **B1392 ×2** own this key and are the direct ancestors — the second one wrote the context table this item extends. Neither had driven the FIRST-ITEM case, which is the whole of "sometimes". Not a recurrence: those items fixed contexts that were failing; this one measures which contexts fail now and finds the answer is one, for a structural reason. Net-new.)*
 `[ ]` **⛔ SHIPPED as an INSTRUMENT plus a written rule — and the honest answer is that Tab is right everywhere except one case, which cannot be "fixed" without putting litter in his documents. That trade-off is his call and is flagged in the session reply.**
 - Verify: sandbox (`ui-audit/audit-notes-tab.mjs`, 29 pinned rows)
@@ -3284,6 +3259,40 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
+<<<<<<< HEAD
+### B463922 — Collapsing a group above the row you are editing throws that row off the screen `[Scheduler]` (bug) #scheduler #ui #testing  *(owner chat block 2026-08-13: *"sometimes if I am editing cells I will just jump halfway down the schedule or all the way up."* Minted **B463922**. **DEDUPE-FIRST — `scrollTop`, `scrollIntoView`, `goToFocus`, `reveal`, `VIEWPORT-STABLE`, `B837`, `B838`, `B65`: VIEWPORT-STABLE is the SITE PLANNER canvas rule, a different surface and mechanism. Net-new.)*
+`[⏳]` **AMENDED 2026-08-13 — the committed reproduction is REFUTED, a real defect beside it is FIXED, and the owner's own symptom is NOT yet proven gone (`V275056`).**
+- Verify: live — `V275056`
+- Stopping rule: closed when the owner reports the jump gone, or `V275056` passes on his real schedule. **Disposition taken (NEVER-PARK): reproduce-and-fix for what was found, plus ASK HIM — `OWNER-TODO.md` carries the one question.** It is NOT being closed on a null.
+
+**⛔ THE +477 px JUMP WAS THE HARNESS'S OWN SCROLL, AND "programmatic writes: 0" WAS THE TELL, NOT THE CORROBORATION.** `diagnose-grid-view-anchor.mjs` clicked `[title="Collapse"]` on the **first rendered row** of a **virtualised** grid — and a virtualiser renders a buffer of rows **above** the viewport, so that toggle sat **75 px off screen**. Playwright scrolls a target into view before clicking it, through CDP, where a patched `scrollTop` setter cannot see it. Three measurements on the same build settle it:
+
+| how the SAME collapse was driven | Δ row on screen | ΔscrollTop |
+|---|---|---|
+| the old harness's click, toggle 75 px **above** the view | **+477 px, off screen** | −501 |
+| `.click()` in page JS on that identical toggle (no driver scroll) | **−24 px** | 0 |
+| a click on a toggle **inside** the view | **−48 px** | 0 |
+
+and a toggle **below** the viewport moved it the other way (+459). Magnitude *and* sign follow where the target sat: the driver's signature, not the app's. **A human cannot click a control they cannot see, so the app never had this path.**
+
+**⛔ SCROLL ANCHORING IS CLEARED THREE WAYS — do not spend another session on it.** `overflow-anchor:none` on the container *and every descendant* (computed style verified `none`): jump unchanged, −501 to the pixel. Chromium launched with `--disable-blink-features=ScrollAnchoring`: unchanged. And the positive control that makes those two mean something — inserting **500 px** of content above the viewport moved `scrollTop` by **exactly 0**. These rows are **absolutely positioned** inside a spacer, and an out-of-flow box is never an anchor candidate, so the container was never anchoring anything and could not have lost an anchor. The handoff's "ΔdocumentTop ≈ −24 px against a 501 px scroll" arithmetic was sound; the 501 was simply not the app's.
+
+**⛔ THE CLEARED SUSPECT STAYS CLEARED, BUT ITS COROLLARY IS REVERSED.** The keep-the-selected-row-visible effect still makes zero writes on the collapse path, and the handoff concluded *"any fix must make that effect ACT"*. That followed from a jump that was not real. The effect is not the mechanism in either direction.
+
+**WHAT SHIPPED — the real defect the new witnesses found, and the invariant the owner actually wants.**
+1. **The collapse triangle stole the selection from the cell you were editing.** `onClick` already refused to (`stopPropagation`), but the grid selects on **mousedown**, which was never stopped — so folding a group moved the selection onto the group row: every following keystroke went to the wrong row, and the keep-visible effect began chasing a row nobody was editing. Fixed with `onMouseDown={e=>e.stopPropagation()}` on the toggle, matching the intent already written into the click handler. **Found only because the new harness carries a SELECTION witness** — without it the run reads as three clean passes measuring the wrong row.
+2. **The row you are working on now HOLDS ITS PLACE on screen when the list re-lays out** (`GridView`, a layout effect keyed on `tasks`) — **VIEWPORT-STABLE (a)**, applied to the grid rather than the canvas: fold the **measured** index delta into the scroll position in the SAME frame as the re-layout, before paint. The anchor is the **selected row while it is on screen, otherwise the row at the top of the view**, so the view holds still either way; when the anchor row is itself collapsed away, it walks up to the nearest surviving row (its parent). **What was chosen and why:** collapsing a group above the row you are editing now moves the *rest of the list* rather than the row under your cursor. Measured: without it the edited row slides by exactly the height of what vanished (−48 px in the harness); with it, 0 px.
+
+**GUARD — `ui-audit/lib/visibleClick.mjs` + `ui-audit/verify-grid-row-hold.mjs` + `test/visibleClick.test.js`.** `visibleClick` proves a target is inside the scroll container's viewport **before** clicking and throws if it is not, naming how far outside it sat; `installScrollWitness`/`assertNoDriverScroll` catch the same lie from the other side (the container moved with no app write). The harness asserts **rendered position** (±2 px, identity-keyed), carries a **model witness** and a **selection witness**, and **re-proves the gate every run** by aiming it at the very toggle the old harness clicked and requiring a refusal — a guard nobody has seen fail is not a guard.
+
+**MUTATION-PROVEN, all three:** disable the scroll compensation → three steps go red at ±48 px · drop the mousedown guard → three steps go red on *the selection moved* · make `visibleClick` permissive → the self-test goes red. Restored, green.
+
+**THE PATHS THE EARLIER RUN LEFT UNPROVEN ARE NOW GENUINELY DRIVEN — eight of them, all held at 0 px.** Its seven no-ops happened because the selection was lost after each re-render, so every keystroke went nowhere; each step now re-arms the selection first, and the witness was widened to watch the SELECTED row (its text, its indent, which cell is active) rather than the list length — a length-only witness is blind to indent, to Tab, and to an undo, and reports all three as calm. Driven and green: **insert · undo the insert · outdent · indent back · a start-date edit committed with Enter · undo it · redo it · Tab across six columns.** Two corrections to the method fell out of it: `Alt+Shift+Arrow` is the indent shortcut, not `Alt+Arrow` (the old run pressed a key the app does not bind), and an indent must be driven on a row that HAS a previous sibling — a first child legitimately cannot indent, and a step that legitimately does nothing can never be told from one that is broken. **Still not attempted:** a column filter · the re-derive-on-open banner · a second tab on the same schedule.
+
+**THE SIXTH WAY AN INSTRUMENT LIED HERE, and it belongs on the handoff's list of five:** a browser driver scrolls to reach an off-screen target, and that scroll is invisible to every JS-level scroll probe. **In a virtualised list, "the first rendered row" is NOT "a row on screen."**
+
+**THE WITNESS IS THE REUSABLE PART.** Before it existed all fourteen paths read green, seven of them earned by doing nothing — the same vacuous-green shape as `close:[0,0]` in `verify-grid-overlay-input` and the paste test that bypassed its own selection. A step that changed nothing is now printed as proving nothing.
+=======
 ### B484337 — The tab stops saving and the screen says "synced" `[Site Planner / persistence · UI]` (bug, DATA LOSS) #site-planner #sync #ui  *(found 2026-08-13 answering the owner's "prove a refusal is genuinely visible on the running app rather than from the code — this repo's signature defect is a mechanism that looks right and never fires". It never fired. Minted **B484337** from the same reserved block. DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `client-stale`, `conflictToasts`, `saveState`, `elemSync`, `LOUD-FAILURE`, `B671`, `B673`, `B465`, `B209`, `B595`, `B610`: **B671** wired the engine into the save badge and named `failed`/`syncing`/`retrying` — it never named `stale`; **B673** built the toast matrix including this row, and the row was correct. Nothing owns the delivery. **Net-new.**)*
 `[x]` **SHIPPED** — parks in ⏳ Verify (V273520) for the signed-in click-through.
 - Verify: live — the stale state needs a signed-in cloud session, and this sandbox's proxy answers `403 to CONNECT` for the Supabase host, so no browser here can reach it.
@@ -3292,6 +3301,7 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 - **`stale` IS WORSE THAN `failed`, which is the part that was missed.** `failed` means a commit did not land and the engine is still trying; `stale` means it issues no further commit until `retryNow()` or a reload.
 - **LIVE TODAY, not a group-CAS bug.** The same silence sits on the already-shipped NEW-3 rejected-op streak (`elementSync.js:768`); group CAS merely adds a second door to it.
 - Guard: `test/staleVisible.test.js` — the engine half is BEHAVIOURAL (the real engine is driven to `stale` and its event caught, asserting it carries no kind/id); the rendering half is a source check, stated as weaker than a click-through rather than passed off as one. Both halves mutation-proven.
+>>>>>>> origin/main
 
 ### B463920 — The Enter that accepted the successor prompt re-opened the status menu it had just closed `[Scheduler]` (bug) #scheduler #ui  *(owner chat block 2026-08-13 from a live screenshot, Permitting/Entitlements → SIA. Minted **B463920 / V258864** LATE against fresh main. **DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `overlayOpenRef`, `successorPrompt`, `HealthPicker`, `StatusPicker`, `picker`, `Enter`, `B456208`, `B443536`: nothing owns overlay key ownership.** Net-new.)*
 `[x]` **SHIPPED.** `public/sequence/index.html` — the key guard latches in capture.

@@ -113,6 +113,35 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V275056 — B463922: the schedule stops jumping while HE edits it `Blocker: real-data`
+
+**What is proven here, and it is not nothing.** `ui-audit/verify-grid-row-hold.mjs` drives the real
+scheduler grid in a real browser on the baked seed schedule, logged out, and asserts **rendered
+position**: with a row selected, collapsing a group above it, expanding it again, and collapsing a
+second one each hold that row at **±0 px** (budget ±2), the selection never moves off it, and every
+step is proved to have changed the model. Mutation-proven three ways — disabling the compensation
+takes three steps red at ±48 px, dropping the toggle's mousedown guard takes them red on a wandering
+selection, and making `visibleClick` permissive takes the gate's own self-test red.
+
+**What is NOT proven, and why this entry exists.** The reproduction B463922 was filed on turned out
+to be the old harness's own scroll (a virtualised list renders rows above the viewport; the driver
+scrolled to reach one), so **the owner's original symptom — *"sometimes if I am editing cells I will
+just jump halfway down the schedule or all the way up"* — has never actually been observed by an
+instrument.** What shipped fixes a real defect in the same place (the collapse triangle stealing the
+selection) and makes the edited row hold its place; whether that is what he was hitting is unknown.
+His schedules are far denser than the seed data and are signed-in, which is the density and the
+data path the sandbox cannot reach.
+
+**The check, on his own board:**
+1. Open a real schedule (Tsakiris / Bain), scroll into the middle of it, and click into a cell.
+2. Fold a group above that cell. The cell you are working on must not move on screen.
+3. Keep editing normally for a few minutes — the specific thing to watch for is the view leaving the
+   row you are typing in, in either direction.
+4. If it happens even once, note what was on screen and what you had just done; that is the missing
+   observation, and it is worth more than another sandbox pass.
+
+**Status:** ⏳ pending. **Do not mark B463922 Done on the sandbox evidence alone** — an owner-reported
+symptom is never closed on a null (NEVER-PARK), and the question is on `OWNER-TODO.md`.
 ### V273520 — B484337: does a tab that has STOPPED saving actually say so? `Blocker: auth`
 
 **What was found, so the check is aimed at the right thing.** The owner asked for proof, on the

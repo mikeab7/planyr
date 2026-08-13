@@ -8587,6 +8587,49 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
 
   const colWidthsRef = useRef(null);
 
+  // ── B463922 — hold the row you are working on STILL when the list re-lays out ──────────
+  // Collapsing (or expanding) a group ABOVE the row you are editing changes how much content
+  // sits above it, so with no compensation that row slides up or down the screen by the whole
+  // height of what appeared or vanished — under a cursor that has not moved. Rows here are
+  // ABSOLUTELY POSITIONED inside a spacer, so the browser's own scroll anchoring cannot help:
+  // an out-of-flow row is never an anchor candidate (measured — inserting 500px above this
+  // container moves scrollTop by exactly 0). So the app owns the adjustment explicitly, which
+  // is VIEWPORT-STABLE (a): fold the MEASURED delta into the scroll position in the SAME frame
+  // as the re-layout, in a LAYOUT effect (before paint), so nothing is ever seen to move.
+  //
+  // The anchor is the row the user is working on: the selected row while it is on screen,
+  // otherwise the row at the top of the viewport — so the view holds still either way. When
+  // the anchor row itself disappears (you collapsed the group it lives in) we walk UP the
+  // previous list to the nearest row that survived, which is its parent.
+  const heldListRef = useRef(tasks);
+  React.useLayoutEffect(() => {
+    const el = ref.current;
+    const prev = heldListRef.current;
+    heldListRef.current = tasks;
+    if (!el || prev === tasks || !prev.length || !tasks.length) return;
+    const st = el.scrollTop;
+    // Index into the PREVIOUS list of the row sitting at the top of the viewport. React has not
+    // touched the scroll position, so `st` is still the pre-commit value the old list was laid
+    // out against. (Row N's document top is TL_H + N*ROW_H — the sticky header holds TL_H.)
+    const topIdx = Math.max(0, Math.min(prev.length - 1, Math.round((st - TL_H) / ROW_H)));
+    let anchorIdx = topIdx;
+    if (selectedId != null) {
+      const si = prev.findIndex(t => t.id === selectedId);
+      const sTop = TL_H + si * ROW_H;
+      if (si >= 0 && sTop >= st + TL_H && sTop + ROW_H <= st + el.clientHeight) anchorIdx = si;
+    }
+    // The anchor row may itself have been collapsed away — walk up to the nearest survivor.
+    let now = -1;
+    while (anchorIdx >= 0) {
+      now = tasks.findIndex(t => t.id === prev[anchorIdx].id);
+      if (now >= 0) break;
+      anchorIdx--;
+    }
+    if (now < 0) return;
+    const delta = (now - anchorIdx) * ROW_H;
+    if (delta) el.scrollTop = Math.max(0, st + delta);
+  }, [tasks]);
+
   useEffect(() => {
     if (selectedId === null) return;
     const el = ref.current;
@@ -9658,6 +9701,12 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
         {proj?.tasks.some(t=>t.parentId===task.id) ? (
           <span
             onClick={e=>{e.stopPropagation();updateTask(task.id,{isExpanded:!task.isExpanded});}}
+            /* B463922 — the click already refused to move the selection (stopPropagation), but the
+               grid selects on MOUSEDOWN, so folding a group still stole the selection from the cell
+               you were editing: every keystroke after it went to the group row instead, and the
+               keep-the-selection-visible effect started chasing a row nobody was editing. Stop the
+               press too, so showing/hiding a group is a view action and nothing more. */
+            onMouseDown={e=>e.stopPropagation()}
             onDoubleClick={e=>e.stopPropagation()}
             title={task.isExpanded?"Collapse":"Expand"}
             style={{
