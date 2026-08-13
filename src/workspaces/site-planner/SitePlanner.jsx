@@ -92,6 +92,8 @@ import { districtDrainageNote } from "./lib/floodGroup.js";
 import { useGroundElevation } from "./components/useGroundElevation.js";
 import CursorChip from "./components/CursorChip.jsx";
 import ViewMenu from "./components/ViewMenu.jsx";
+// NEW-4 (B366389 ×2) — the plan menu's icons, in the route-local stroke idiom. See components/icons.jsx.
+import { SaveIcon, HistoryIcon, StorageIcon, PadlockIcon, PlusIcon, DuplicateIcon, CloseXIcon } from "./components/icons.jsx";
 /* LAZY (B1064 tranche a). Site Analysis mounts ONLY when the Analysis panel is the open one
  * (`_pid === "analysis"`, and `leftPanel` starts at null), so it is never on the first-paint
  * path — and it drags lib/siteAnalysis.js with it, which is the larger half of what moves.
@@ -257,7 +259,7 @@ import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand } from "./lib/overlayOrder.js";
-import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
+import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, dockAxisOf, healDockAxes, withDockAxis, rotateDockAxisPatch } from "./lib/dockZones.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/buildingGrid.js";
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent, clipSegmentToRing } from "./lib/footprintEdit.js";
 import { pondAreaLabelLine, pondAreaDeltaLine } from "./lib/pondLabelText.js";
@@ -1890,7 +1892,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [parcels, setParcels] = useState(() => restored?.parcels || []);    // {id, points:[{x,y}]}
   // B416: heal any dock-zone stack stranded on a non-dock side (a court/trailer/buffer left
   // behind when an older plan was reshaped before the guard existed) the moment the plan opens.
-  const [els, setEls] = useState(() => pruneStrandedZones(restored?.els || [])); // {id,type,cx,cy,w,h,rot}
+  /* NEW-2 (B385041) — `healDockAxes` FIRST, then the stranded-zone prune. The heal stamps each
+     plain building's dock orientation from what the plan currently RENDERS, so a record saved
+     before `dockAxis` existed keeps its walls exactly where they are and only stops re-deriving
+     them; running it before the prune means the prune judges "is this zone on a dock side?" against
+     the very same answer it would have given before this change. Identity-stable, so an
+     already-healed plan does no work and is not marked dirty. */
+  const [els, setEls] = useState(() => pruneStrandedZones(healDockAxes(restored?.els || []))); // {id,type,cx,cy,w,h,rot}
   // NEW-2 — which vertices carry a junction, per road: those corners render SHARP so the through
   // road's centerline passes through the node its branch is welded to (roadJunctionVerticesOf).
   // EVERY road-geometry read below takes this, so pavement, curb stripes, paved area and length all
@@ -4635,18 +4643,65 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // in the SAME setOverlays update as the visibility, so an undo that spans both lands in one
     // render rather than two (and one layer rebuild, not two).
     const snapAbove = sanitizeLayerAbove(s.layerAbove);
-    prevLayerSig.current = overridesSig(snapOverrides);
-    prevAboveSig.current = aboveSig(snapAbove);
-    if (setOverlays) setOverlays((cur) => applyAboveOverrides(applyOnOverrides(cur, snapOverrides), snapAbove));
-    setLayerOverrides(snapOverrides);
-    setLayerAbove(snapAbove);
+    /* ⛔ NEW-1 (B385040) — AN UNDO THAT TOUCHED NO LAYER MUST NOT TOUCH THE LAYERS.
+     * This block used to run UNCONDITIONALLY on every undo and every redo. `applyOnOverrides`
+     * returned a fresh outer object every call, and `setLayerOverrides` / `setLayerAbove` were
+     * handed fresh maps, so the `overlays` identity changed on every restore — which re-ran the
+     * layer staging/sync effect (its cleanup clears the intervals and idle callbacks, then re-stages
+     * and RE-ADDS the whole Leaflet overlay stack), the coverage recompute and the autosave. The
+     * owner sees that as the screen flashing on every Ctrl+Z, on edits that never involved a layer.
+     *
+     * `overridesSig` / `aboveSig` are the cheap equality the persist effect already uses, and
+     * `prevLayerSig` / `prevAboveSig` are kept by the tracking effect at exactly "the sig currently
+     * accounted for" — so a match here means the live overlays ALREADY are what this snapshot
+     * describes and there is nothing to restore. The real case is untouched: a layer toggle changes
+     * the sig, so an undo of it still reverts. (`applyOnOverrides` / `applyAboveOverrides` are now
+     * identity-stable too, so a caller that skips this guard still cannot rebuild the stack —
+     * belt and braces, deliberately.) */
+    const snapSig = overridesSig(snapOverrides);
+    const snapAboveSig = aboveSig(snapAbove);
+    if (snapSig !== prevLayerSig.current || snapAboveSig !== prevAboveSig.current) {
+      prevLayerSig.current = snapSig;
+      prevAboveSig.current = snapAboveSig;
+      if (setOverlays) setOverlays((cur) => applyAboveOverrides(applyOnOverrides(cur, snapOverrides), snapAbove));
+      setLayerOverrides(snapOverrides);
+      setLayerAbove(snapAbove);
+    }
     // (B672: the old noteLocalContent thin-clobber rebase is gone with the guard itself — an
     // undo/redo shrink now just diffs into per-element deletes through the rev-checked path.)
     // NEW-1 — clear the MULTI-selection too, not just `sel`. Clearing only `sel` left `multi`
     // pointing at whatever was selected before the undo; with `sel` null and `multi` non-empty the
     // next Delete keypress hit deleteSel's old silent return and the key was dead until an unrelated
     // click reset it. Every other selection store the snapshot invalidates goes with it.
-    setSel(null); setMulti([]); setDrillId(null); setSelVtx(null); setSplitPath([]); setTypeMenu(null);
+    /* NEW-1 (B385040) — A SELECTION THAT THE SNAPSHOT STILL CONTAINS SURVIVES THE UNDO.
+     * This was `setSel(null)` unconditionally, so every Ctrl+Z also dropped the selection — undo a
+     * nudge and the Properties panel you were working in closes under you, which is a second thing
+     * moving on screen for an edit that only moved geometry. The judgement call the block asked for,
+     * made deliberately and NOT silently: a selection is a POINTER at a feature, and a snapshot that
+     * still holds that feature has not invalidated the pointer. So `sel` and `multi` are FILTERED
+     * against the restored collections rather than cleared — a feature the undo deleted (or that a
+     * redo has not created yet) drops out, everything else stays put.
+     *
+     * What is still cleared unconditionally, and why: `selVtx` / `splitPath` / `drillId` /
+     * `typeMenu` address INTERNAL structure (a vertex index, a cut path, a group drill, an open
+     * menu) that the restored geometry may have renumbered or dissolved underneath them — those
+     * pointers really can be stale in a way a plain feature id cannot. */
+    const snapHas = (r) => {
+      if (!r || !r.id) return false;
+      const list = r.kind === "el" ? s.els
+        : r.kind === "parcel" ? s.parcels
+        : r.kind === "measure" ? s.measures
+        : r.kind === "callout" ? (s.callouts || [])
+        : r.kind === "markup" ? (s.markups || [])
+        : null;
+      return !!list && list.some((x) => x && x.id === r.id);
+    };
+    setSel((cur) => (snapHas(cur) ? cur : null));
+    setMulti((cur) => {
+      const keep = (cur || []).filter(snapHas);
+      return keep.length === (cur || []).length ? cur : keep;
+    });
+    setDrillId(null); setSelVtx(null); setSplitPath([]); setTypeMenu(null);
     // Drop EVERY in-progress draft: a snapshot restored under a half-drawn shape (on a redo, or an
     // undo while an uncovered draft — callout/rect/ellipse — is pending) would otherwise leave stale
     // points floating over the reverted geometry. Mirrors DocReview/Stitcher applySnapshot (RC-2).
@@ -4828,11 +4883,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * build that arm is from the app's OWN layer ids: a hand-authored id in the harness would seed a
    * key nothing matches, `sanitizeLayerOverrides` would drop it, and the harness would measure the
    * zero-layer arm while reporting N. Read-only. */
+  /* ⛔ NEW-1 (B385040) — `identityEpoch` IS THE INSTRUMENT, and without it this bug is unobservable.
+   * The layer rebuild the owner sees as a flash is a function of the `overlays` OBJECT IDENTITY and
+   * of nothing else: the staging effect, the coverage recompute and the persist all key off it, and
+   * the layer SET (`ids` / `on` above) is IDENTICAL either side of the defect — so every existing
+   * check in this repo passes on a build that rebuilds the whole stack on every Ctrl+Z. This effect
+   * already re-runs exactly when that identity changes, so the counter is free and exact. Read-only,
+   * same E2E gate, and it makes "an undo that touched no layer rebuilt no layer" a NUMBER a headless
+   * check can assert rather than something a human has to catch out of the corner of their eye.
+   * (DANGEROUS-MEANS-UNOBSERVABLE: build the missing instrument first.) */
+  const layerIdentityEpoch = useRef(0);
   useEffect(() => {
     if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
+    layerIdentityEpoch.current += 1;
+    const epoch = layerIdentityEpoch.current;
     const hook = () => ({
       ids: Object.keys(overlays || {}),
       on: Object.keys(overlays || {}).filter((k) => overlays[k] && overlays[k].on),
+      identityEpoch: epoch,
     });
     window.__plannerLayers = hook;
     return () => { if (window.__plannerLayers === hook) window.__plannerLayers = null; };
@@ -7614,7 +7682,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       } else if (draftRect.w >= 4 && draftRect.h >= 4) {
         const curb = +settings.roadCurb || CURB;
         const roadExtra = draftRect.type === "road" ? { travelW: Math.max(0, Math.min(draftRect.w, draftRect.h) - 2 * curb), curb } : {};
-        const buildingExtra = draftRect.type === "building" ? { dock: buildingDock, dockSide: draftRect.w >= draftRect.h ? "bottom" : "right" } : {};
+        // NEW-2 (B385041) — the orientation is ESTABLISHED here, at creation, from the box the owner
+        // just drew. From this moment a resize reads it rather than re-deriving it from w vs h.
+        const buildingExtra = draftRect.type === "building"
+          ? { dock: buildingDock, dockAxis: draftRect.w >= draftRect.h ? "x" : "y", dockSide: draftRect.w >= draftRect.h ? "bottom" : "right" }
+          : {};
         // B130: a free-drawn parking field runs its stall rows along the LONGER edge.
         // carStalls treats w as row-length and h as depth, so when the drawn box is
         // deeper than it is long, swap the two and rotate 90° — identical footprint on
@@ -9337,6 +9409,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const refitChildren = (a, buildingId, nb, kids, opts = {}) => {
     const resized = a.find((x) => x.id === buildingId);
     const hostIsBuilding = !!resized && resized.type === "building" && !resized.dogEar;
+    /* NEW-2 (B385041) — ESTABLISH THE DOCK ORIENTATION BEFORE THE FOOTPRINT MOVES.
+       This is the one funnel every building resize goes through (grip drag, edge drag, typed
+       Length/Depth, the on-canvas dimension editor), so stamping here — from the PRE-resize
+       `resized`, i.e. from what the building looks like at the instant the user grabs it — is what
+       makes "derive by default, preserve once established" true for a building whose record predates
+       `dockAxis` and which has not been through the load heal (a row seeded mid-session by the sync
+       engine, say). A building that is already stamped is untouched. */
+    const axisStamp = hostIsBuilding ? withDockAxis(resized) : resized;
+    const dockAxisPatch = axisStamp !== resized ? { dockAxis: axisStamp.dockAxis, ...(axisStamp.dockSide !== resized.dockSide ? { dockSide: axisStamp.dockSide } : {}) } : null;
     let next = a.map((x) => {
       if (x.id === buildingId) {
         // A bump-out resized on its own stays GLUED to its building corner: update its stored span
@@ -9352,7 +9433,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           return host ? { ...x, dogEar: de, ...dogEarGeom(host, de) }
             : { ...x, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h, dogEar: de, ...(nb.rot != null ? { rot: nb.rot } : {}) };
         }
-        return { ...x, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h, ...(nb.rot != null ? { rot: nb.rot } : {}) };
+        return { ...x, ...(dockAxisPatch || {}), cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h, ...(nb.rot != null ? { rot: nb.rot } : {}) };
       }
       if (x.attachedTo === buildingId && x.dogEar) return { ...x, ...fitDogEar(nb, x.dogEar) };
       // NEW-2 / NEW-3 — wall strips and side-parking rows are DERIVED by relayoutWallKids below
@@ -9371,7 +9452,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // relay its side so the trailer/buffer beyond it follow — the old "court drags its
     // trailer" behaviour, now extended through the buffer).
     if (hostIsBuilding) {
-      const newB = { ...resized, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h, rot: nb.rot != null ? nb.rot : resized.rot };
+      const newB = { ...resized, ...(dockAxisPatch || {}), cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h, rot: nb.rot != null ? nb.rot : resized.rot };
       next = relayoutAllSides(next, newB);
       // NEW-2 / NEW-3 — the branch that was MISSING: on a host resize the wall strips and side
       // parking must be re-derived from the span rule + the live sidewalk, not left to fitKid's
@@ -16250,6 +16331,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // those zones; tombstone them so they stay gone across a merge and the ≥2 drop doesn't false-conflict.
     if (stranded.length) tombstone(stranded);
   };
+  /* NEW-2 (B385041) — TURN THE DOCK FACE A QUARTER TURN, DELIBERATELY.
+     A resize can no longer move the loaded walls by accident, so the app owes the owner a way to
+     move them ON PURPOSE. Same shape as `changeBuildingDock` above: stamp the new orientation, then
+     prune the apron the old walls owned (a truck court cannot follow its building around a corner —
+     it is a different piece of pavement), and tombstone it so it stays gone across a merge. One undo
+     frame, so a mis-click is one Ctrl+Z. */
+  const rotateBuildingDockFace = () => {
+    if (!selEl || selEl.type !== "building" || selEl.dogEar) return;
+    pushHistory();
+    const src = stateRef.current.els;
+    const b = src.find((x) => x.id === selEl.id);
+    if (!b) return;
+    const patch = rotateDockAxisPatch(b);
+    let next = src.map((e) => (e.id === selEl.id ? { ...e, ...patch } : e));
+    const stranded = strandedZoneIds(next, { ...b, ...patch });
+    if (stranded.length) next = next.filter((x) => !stranded.includes(x.id));
+    // Re-lay the stack onto the walls that are loaded NOW, so the docks visibly move rather than
+    // silently vanishing with their apron.
+    const nb = next.find((x) => x.id === selEl.id);
+    if (nb) next = relayoutAllSides(next, nb);
+    setEls(next);
+    if (stranded.length) tombstone(stranded);
+  };
   // NEW-1 / B872 — reshape a placed rectangular building. PROMOTE it to an editable polygon
   // (`el.points`), pinning the loaded (dock) walls as fixed world-feet lines so the shared B230
   // vertex engine can angle an end wall / clip a corner while the dock frame is preserved: a dock
@@ -17129,8 +17233,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Plan name</div>
           <input value={planLabel} onChange={(e) => setPlanLabel(e.target.value)} onBlur={(e) => commitPlanLabel(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} style={{ ...numInput, width: "100%", fontFamily: "inherit" }} data-testid="plan-name-input" />
-          <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, margin: "11px 0 5px" }}>Plans in this site</div>
-          {plansHere.map((s) => {
+          {/* ⛔ NEW-3 (B385042) — THE CURRENT PLAN'S NAME APPEARED THREE TIMES AT ONCE.
+              Owner: *"it says Concept A three times here. Let's fix that. That seems like a waste."*
+              The crumb button, the PLAN NAME field, and a row in this list all carried it — and on a
+              single-plan site (his case) this list is a ONE-ROW list whose only row is the plan being
+              renamed in the field directly above it. It carries no information at all.
+
+              The three are NOT equivalent, so two were not simply deleted. The crumb is the TRIGGER
+              and must stay. The PLAN NAME input is the EDITOR — it is the rename affordance, not a
+              label. The list is a SWITCHER, and a switcher with nowhere to switch to is the one that
+              earns nothing. Rule enforced: the current plan's name may appear as the crumb and as the
+              editable field; it may NOT additionally appear as a read-only label.
+
+              THE MULTI-PLAN CALL, argued rather than picked silently: the current plan STAYS in the
+              list at ≥2 plans. Dropping it would make the list a switcher only — but this list is
+              also where a plan is DELETED, and the current plan is the one most likely to be deleted
+              right after you look at it; and among five siblings the `current` marker is what tells
+              you where you are. It is also the shape the sibling project switcher already uses (its
+              row list includes the current project, highlighted), so the two breadcrumbs stay
+              consistent. At ≥2 the row is informative; at 1 it is an echo. Only the echo goes. */}
+          {plansHere.length > 1 && <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, margin: "11px 0 5px" }}>Plans in this site</div>}
+          {plansHere.length > 1 && plansHere.map((s) => {
             const cur = s.id === siteId;
             if (planDelArm === s.id) return (
               <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", margin: "1px 0", borderRadius: 7, background: "rgba(179,54,27,0.08)" }}>
@@ -17144,7 +17267,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <button style={{ ...menuItem(cur), flex: 1, minWidth: 0 }} onClick={() => (cur ? setPlanMenu(false) : handleOpenSite(s.id))}>
                   <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
                     <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {s.shareLocked && <span aria-label="View-only for teammates" title="View-only for teammates" style={{ marginRight: 4 }}>🔒</span>}
+                      {s.shareLocked && <span aria-label="View-only for teammates" title="View-only for teammates" style={{ marginRight: 4, display: "inline-flex", verticalAlign: "-2px" }}><PadlockIcon size={11} /></span>}
                       {s.name || "Untitled plan"}
                     </span>
                     {cur && <span style={{ color: PAL.accentText, fontSize: 10.5, fontWeight: 700, flex: "none" }}>current</span>}
@@ -17154,22 +17277,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <button title="Delete this plan" aria-label={`Delete plan ${s.name || "Untitled plan"}`} onClick={(e) => { e.stopPropagation(); setPlanDelArm(s.id); }}
                     style={{ flex: "none", width: 24, height: 24, lineHeight: 1, borderRadius: 6, border: "1px solid transparent", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13 }}
                     onMouseEnter={(e) => { e.currentTarget.style.color = "#b3361b"; e.currentTarget.style.background = "rgba(179,54,27,0.10)"; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.color = PAL.muted; e.currentTarget.style.background = "transparent"; }}>✕</button>
+                    onMouseLeave={(e) => { e.currentTarget.style.color = PAL.muted; e.currentTarget.style.background = "transparent"; }}><span style={{ display: "grid", placeItems: "center" }}><CloseXIcon /></span></button>
                 )}
               </div>
             );
           })}
           <div style={{ display: "flex", gap: 6, marginTop: 9, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
-            <button style={{ ...chip, flex: 1 }} onClick={handleNewPlan} title="New layout on the same parcel">＋ New plan</button>
-            <button style={{ ...chip, flex: 1 }} onClick={handleDuplicate} title="Clone this plan to iterate on">⧉ Duplicate</button>
+            <button style={{ ...chip, flex: 1 }} onClick={handleNewPlan} title="New layout on the same parcel"><span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><PlusIcon size={12} />New plan</span></button>
+            <button style={{ ...chip, flex: 1 }} onClick={handleDuplicate} title="Clone this plan to iterate on"><span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><DuplicateIcon size={12} />Duplicate</span></button>
           </div>
           <button style={{ ...menuItem(false), marginTop: 6, display: "flex", alignItems: "center", gap: 8 }} onClick={saveNow}
             title="Save this plan now and confirm it actually persisted (device + cloud)" data-testid="save-now">
-            <span aria-hidden style={{ flex: "none" }}>💾</span><span>Save now</span>
+            <span aria-hidden style={{ flex: "none", display: "flex" }}><SaveIcon /></span><span>Save now</span>
           </button>
           <button style={{ ...menuItem(false), marginTop: 2, display: "flex", alignItems: "center", gap: 8 }} onClick={openVersionHistory}
             title="Restore an earlier automatically-saved version of this plan">
-            <span aria-hidden style={{ flex: "none" }}>↺</span><span>Version history…</span>
+            <span aria-hidden style={{ flex: "none", display: "flex" }}><HistoryIcon /></span><span>Version history…</span>
           </button>
           {/* B326417 — the per-plan view-only lock. Plan-scoped, so it belongs in the plan menu
               (everything above this line is plan-scoped too; see the B286000 caption below).
@@ -17183,7 +17306,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               title={planShareState.locked
                 ? "Teammates can view this plan but not change it. Click to let them edit again."
                 : "Teammates can edit this plan. Click to make it view-only for them."}>
-              <span aria-hidden style={{ flex: "none" }}>{planShareState.locked ? "🔒" : "🔓"}</span>
+              <span aria-hidden style={{ flex: "none", display: "flex" }}><PadlockIcon open={!planShareState.locked} /></span>
               <span>{planShareState.locked ? "Locked — teammates can view only" : "Lock to view-only for teammates"}</span>
             </button>
           )}
@@ -17202,7 +17325,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, margin: "11px 0 3px" }}>This device</div>
           <button style={{ ...menuItem(false), display: "flex", alignItems: "center", gap: 8 }} onClick={() => { closeHdrMenus(); setStorageOpen(true); }}
             title="How much room this app is using on this device, and what's safe to clear" data-testid="storage-menu-item">
-            <span aria-hidden style={{ flex: "none" }}>🗄</span><span>Storage on this device…</span>
+            <span aria-hidden style={{ flex: "none", display: "flex" }}><StorageIcon /></span><span>Storage on this device…</span>
           </button>
         </AnchoredMenu>
     </div>
@@ -22088,6 +22211,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <option value="none">No docks</option>
                           </select>
                         </Field>
+                        {/* NEW-2 (B385041) — the dock face is now a STORED choice, so it needs a
+                            deliberate control. A resize used to turn it by accident (shrink a
+                            cross-dock past square and the whole apron rotated 90° mid-drag); it
+                            never does now, which is exactly why this button has to exist. One row,
+                            stating the current face and offering the verb — no explanatory prose. */}
+                        {(b.dock || "cross") !== "none" && (() => {
+                          const faces = dockSidesFor(b).dockSides.map((s) => s[0].toUpperCase() + s.slice(1));
+                          return (
+                            <Field label="Dock face">
+                              <span style={ROW4}>
+                                <span style={{ fontSize: 12, color: PAL.ink }}>{faces.join(" / ")}</span>
+                                <button style={resetBtn} data-testid="dock-face-turn"
+                                  title="Turn the loaded walls a quarter turn. Resizing never moves them on its own — the truck courts on the old walls are removed."
+                                  onClick={rotateBuildingDockFace}>turn ⟳</button>
+                              </span>
+                            </Field>
+                          );
+                        })()}
                         {featRow("Dock zones", level, {
                           onAdd: () => addDockZone(b), addOn: !noDock && dockCanAdd(b),
                           addTitle: noDock ? "Pick a dock side first (Docks, above)" : "Extend every dock side out by one zone — truck court → trailer parking → buffer",

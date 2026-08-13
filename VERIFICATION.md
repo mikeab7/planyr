@@ -113,6 +113,98 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V187136 — B385040: an undo really does not rebuild the GIS layer stack on a located, signed-in plan `Blocker: live-GIS` `Blocker: auth`
+
+**What IS proven here, and it is the part that matters most.** The defect was INVISIBLE to every
+check in this repo — the layer SET is byte-identical either side of it — so the first deliverable was
+the instrument: `window.__plannerLayers()` now reports `identityEpoch`, incremented by the very
+effect whose deps are `[overlays]` and which tears the Leaflet overlay stack down and re-adds it.
+Driven headless, logged out: two undos plus a redo of a plain nudge leave the epoch **unchanged**.
+**Mutation-proven** — restore the pre-fix rule (a fresh object every call, no signature guard) and
+the same gesture takes it **2 → 4**, one rebuild per Ctrl+Z, and the spec goes red. Unit side:
+`test/undoLayerStability.test.js` (14). Lint 0 · 534 test files green · build green.
+
+**Why the rest cannot be driven here.** A logged-out sandbox plan has no map origin and the egress
+policy blocks the external GIS hosts, so there are no real overlay layers to tear down and the
+Supabase sign-in is CORS-blocked.
+
+**Steps, in order:**
+1. Open a real, LOCATED plan signed in, with two or three GIS layers turned on (contours, flood,
+   parcels — anything that actually paints).
+2. Open the browser's Network tab and let it settle.
+3. Make an edit that involves no layer at all — nudge a building, drag a pond vertex — then Ctrl+Z.
+4. **Watch the network and the map, not just your eye.** Expected: the geometry reverts and NOTHING
+   else happens — no new tile/feature requests for the overlay layers, no visible wipe-and-repaint.
+   Before this fix the whole overlay stack was removed and re-added on every Ctrl+Z.
+5. Repeat with Ctrl+Shift+Z (redo). Same expectation.
+6. **Now the real case, which must still work:** toggle a layer off in the Layers panel, then Ctrl+Z.
+   The layer must come BACK. Then toggle one on and Ctrl+Z — it must go away again. If either of
+   those stops reverting, the signature guard is too aggressive and that is a regression, not a win.
+7. Also confirm "Show above plan" still reverts on undo (it shares the same guard).
+8. **The selection half:** select a building, nudge it, Ctrl+Z. The building should STILL be selected
+   and its Properties panel still open — that changed deliberately this session. Then undo the
+   CREATION of something; the selection should clear, because the thing it pointed at is gone.
+
+### V187137 — B385041: a cross-dock building's dock walls stay put through a real resize on his own plan `Blocker: real-data`
+
+**What IS proven here.** Driven headless in a real browser with real edge-grip drags (expressed in
+feet, so the gesture is reproducible at any zoom): a cross-dock building dragged lengthwise down past
+square and back never moves its dock face — read off the painted `data-dock-apron` band, not off the
+record — the stored orientation is never re-derived, a single-load building keeps its chosen wall,
+the depth/length readouts follow the stored orientation, and the new `turn ⟳` control moves the face
+deliberately in one undo frame. **Mutation-proven: restoring the live aspect-ratio derivation turns
+all four e2e cases red.** Unit side: `test/dockOrientation.test.js` (14, several replaying the
+pre-fix rule as the mutation check) with `test/dockZones.test.js` (65) unchanged and green.
+Before/after crops: `ui-audit/shots/b385041-{before,after}-shrunk-past-square.png`.
+
+**Why the rest needs him.** The repro he described is on a saved plan of his, with a real dock-zone
+assembly (truck courts, trailer parking, buffers) hanging off the walls — the sandbox builds a bare
+footprint.
+
+**Steps, in order:**
+1. Open a plan with a real CROSS-DOCK building and its truck courts / trailer parking.
+2. Grab an end wall and shrink it lengthwise — slowly, straight through the point where it becomes
+   deeper than it is long, and then back out again.
+3. Expected: the truck courts, trailer parking, buffers, sidewalks and bump-outs **stay on the same
+   two walls the whole time**. Nothing rotates, and nothing rotates back.
+4. Check the Properties panel while you do it: Length and Depth must keep meaning the same thing
+   (depth across the dock face, length along it), and the dock-door count must not jump.
+5. Now do it on a SINGLE-LOAD building whose dock side you set by hand. It must stay on that wall.
+6. **Then check the new control:** with the building selected, open Properties → Loading → `Dock face`
+   → `turn ⟳`. The docks should move to the other pair of walls, the apron on the old walls goes with
+   them, and ONE Ctrl+Z puts everything back.
+7. **Finally, the thing to look hardest at: open a plan you have NOT touched since before this
+   change.** Every building's docks must be exactly where you remember them. The load-time heal stamps
+   the orientation a plan currently RENDERS, so nothing should move — if anything did, say so loudly.
+
+### V187138 — B385042: the plan switcher on his own multi-plan sites `Blocker: real-data`
+
+**What IS proven here.** Driven headless: on a single-plan site the name appears exactly twice
+(the crumb and the editable field) with no third read-only copy anywhere in the document and no
+"Plans in this site" section; on a seeded three-plan site the section is back in full, the current
+plan is in it and marked `current`, and switching to another plan really switches. Unit side:
+`test/planMenuChrome.test.js` (9). Shots: `ui-audit/shots/b385042-before-single-plan-menu.png`,
+`…-after-single-plan-menu.png`, `…-after-multi-plan-menu.png`.
+
+**Steps, in order:**
+1. Open a single-plan site and click the plan crumb. The name should be on screen twice — in the
+   crumb you clicked and in the PLAN NAME box — and there should be no list under it.
+2. Rename it in that box and press Enter. The crumb should follow.
+3. Open Silvestri (5 plans) and Goose Creek (4). "Plans in this site" is back, every plan is listed
+   including the one you are on (marked `current`), and clicking another one opens it.
+4. Delete arm (the ✕ on a row) still works and still asks first.
+
+### V187139 — B366389 (×2): the plan menu's icons on his own display `Blocker: real-data`
+
+**What IS proven here.** The real rendered menu carries no emoji and no stand-in text glyphs, and
+every `<svg>` in it is stroked `currentColor` — so each icon takes its row's colour rather than
+fighting it. Unit + e2e as listed on the item.
+
+**Steps:** open the plan crumb and look at Save now / Version history… / Storage on this device… /
+New plan / Duplicate / the per-row ✕ / the lock row. They should read as one family — same weight,
+same colour as their text, no coloured pictogram among them. Check it in BOTH light and dark theme.
+This is the half only he can judge: if any of them still "looks kinda like shit", say which.
+
 ### V179984 — B1341 stage 2: turning group CAS ON, on a real two-writer plan `Blocker: auth` `Blocker: real-data`
 
 **⛔ THIS IS THE ONE THING STAGE 2 CANNOT PROVE WITHOUT A LIVE RACE, and it ships OFF precisely so
