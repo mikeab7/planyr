@@ -49,6 +49,29 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   The **deed-import readers** that feed the Site Planner metes-and-bounds plotter: `docxText.js`
   (.docx + the `readDeedFile` dispatcher), `docText.js` (legacy binary .doc, OLE/CFB), and
   `pdfText.js` (PDF embedded text layer, lazily loaded).
+- **⛔ `ui/AppHeader.jsx` + `ui/ProjectBreadcrumb.jsx` — NAVIGATION WINS, and it is the ROW-1 ZONE
+  FLEXES that decide it (NEW-2). Read this before changing any of the three.** The owner could not
+  switch plans on a laptop: *"the unincorporated / city of Houston / ETJ / Harris County chip is too
+  big and it covers it."* He reproduced it — the pill overlapped the plan chip's box by a sliver,
+  and `elementFromPoint` along the chip's right edge returned THE PILL'S TEXT SPAN for the last
+  stretch of it, **the ▾ caret included**. **NOT a z-index or overlay problem** (the pill is
+  `position: static`, `z-index: auto`): plain flex overflow. The cause was `left: flex 1 | centre:
+  0 1 auto (max 40%) | right: flex 1` — basis-0 side zones take an EQUAL SHARE regardless of what
+  they hold, so navigation was handed less than the breadcrumb needed while the pill sat under its
+  cap and never shrank, and the centre's `overflow: hidden` clipped nothing because the pill was not
+  over-wide *for its zone*. The rule is now one-directional: **LEFT `0 1 auto` (max 60%)** takes the
+  width it needs and shrinks only after the centre has collapsed · **CENTRE `1 1 0%`** takes what is
+  LEFT OVER, so its width never depends on its own content · **RIGHT `0 0 auto`** (the account
+  controls were never the contended pair). **The stated cost: the badge is centred in the space that
+  remains, not in the window.** `CRUMB_MIN_W` is the ONE floor both crumbs read — the site-planner's
+  plan chip imports it, because two floors that can drift is how one of the pair becomes squeezable
+  again — and the crumb ROW is shrinkable (`0 1 auto`): while it was `flex: none` the zone's
+  `overflow: hidden` clipped the last crumb's caret off, the same lost click by another route. The
+  phone layout is untouched (the row scrolls sideways there). Guards: the repo-root `test/` suite
+  **headerNavPriority** (source guards on all three flexes + the shared floor) and the ui-audit
+  harness **verify-header-nav-clickable** — a real `elementFromPoint` sweep of every point of each
+  chip's box at 1024/1280/1440/1600, mutation-proven (201/201 points lost pre-fix at 1280 AND 1440).
+  ⚠ A CENTRE-ONLY hit test passes on this defect; so does a short jurisdiction string at any width.
 - `theme/palette.js` — JS mirror of the CSS theme tokens (keep in sync; SVG/canvas can't use
   `var()`). `ui/statusTokens.js` — the single project-status palette source. `ui/controls.jsx` —
   shared control primitives (Button/ToggleChip/IconButton/Field/Section/MenuItem) + the one
@@ -65,6 +88,21 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   `ui/PanelChrome.jsx` + pure `ui/floatingPanel.js` — the NEW-1 poppable-panel primitive (a
   left-rail panel detached into a draggable card over the map; clamp/persist/pan-isolation math
   is pure + unit-tested, host wiring lives in the Site Planner workspace).
+- `gis/` also holds the two newest cross-workspace pieces, both pure and both worth reading before you
+  touch a county or the flood layer. **County ROUTING KEYS (B298403): normalise at the MAP, never at the
+  call site.** Two production plans stored `"Harris"`; every `MAP[county]` lookup missed them and, because
+  a missing key is `undefined` and every call site has a `|| fallback`, rendered a confident WRONG answer.
+  So the county-keyed config maps are wrapped rather than each reader patched — patching readers one at a
+  time is HOW the class existed. **⛔ Not the same vocabulary as `floodGroup.countyKey`**, which slugs a
+  DISPLAY NAME to letters-only and would turn `co_larimer` into `colarimer`; here whitespace is REMOVED
+  (the underscore is a state prefix), so `"Fort Bend"` → `fortbend`.
+  **BAKED FEMA FLOOD TILES (B298400–B298402): the model, the drop rule, the tiles-vs-live decision, and the
+  NFHL vintage stamp.** ⛔ THE LINE THAT MUST NOT MOVE: **a tile is a PICTURE, never a NUMBER** — tiles are
+  generalised, so parcel-scale authority stays with the live FEMA query and the mitigation math never reads
+  a tile. The fallback is a property of the pure decision function (every unavailable path answers `live`,
+  with a reason), and the ABSENCE RULE differs by source: on tiles "no polygon" means *outside the mapped
+  floodplain*, on the live layer it means *no effective flood map here* — opposite risk positions, decided
+  in one place. Renderers live in the site-planner workspace; nothing here imports Leaflet.
 - `folders/` — the canonical per-project folder tree (B650): `folderTemplate.js` (the one default
   12-category template) + `folderTree.js` (pure flatten / treeify / validate / seed-row builder).
   Shared by the Library editor + the server Drive-mirror; the server-side reconcile executor lives
@@ -152,6 +190,29 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   `public`/`anon`/`authenticated`, because a definer-rights delete function is a hole. Guard: the
   repo-root `test/` suite **clientErrorsRetention**, which runs the SHIPPED `.sql` files verbatim
   against a real Postgres (PGlite, devDependency only) and mutation-checks both clauses.
+  **⛔ AND THE FOLLOW-UP READER (B369536): `client_errors_retention_check.sql` is `select`-ONLY, and
+  that is load-bearing.** V84560 proved the job FIRES (three unattended runs, all 0/0); nothing has
+  yet proved the DELETE matches anything, because the first row is not eligible until **2026-09-18**.
+  Until then "the delete works" and "the delete matches nothing" still read identically — the same
+  indistinguishability one layer in. The reader answers it in one paste, and its sharpest column is
+  `ordinary_missed`: any ordinary row older than 90 days **at the moment the last run ran** that is
+  still here means the job fires and deletes nothing. **⛔ NEVER call `prune_client_errors()` by hand
+  to "check on it"** — a hand-run writes a byte-identical row, manufacturing the very evidence the
+  check is waiting for; that is why the reader contains no mutating statement and why an off-schedule
+  deletion can never raise its verdict above `WAIT`. Guard: **clientErrorsRetentionCheck**, which
+  produces all five verdicts from a seeded database and mutation-proves the FAIL one.
+- **`prefs/` + `ui/InterfaceSettings.jsx` — SETTINGS THAT ARE ABOUT THE APP, NOT ABOUT A DRAWING
+  (NEW-1/NEW-4).** `prefs/smoothZoom.js` owns the smooth-zoom preference: one key
+  (`planarfit:smoothZoom` — the prefix stays, renaming it would silently reset the setting for
+  anyone who turned it off), one default (ON), one writer, and a subscription that fires for a
+  same-tab change AND for another tab on the device. It is a module rather than a prop **because
+  the control lives outside the planner** (in the Settings modal the Shell mounts, and in the
+  signed-out header gear) while the behaviour lives inside it — the planner subscribes and keeps
+  the half only it can do, `disarmViewAnchor()` on turn-off. `ui/InterfaceSettings.jsx` is the ONE
+  Interface section both Settings homes render (display theme + smooth zoom), so the two can never
+  disagree; ⛔ there must be exactly one smooth-zoom switch in the app, counted in both directions
+  by the repo-root `test/` suite **smoothZoomHome**. Dependency-free and small by construction —
+  this lands in the entry chunk every route downloads.
 - `projects/`, `profile/`, `cloud/`, `presence/`, `gis/`, `geometry/`, `placement/`.
 
 **Convention:** shared logic is pure and unit-tested; per-host state/wiring stays in the workspace.

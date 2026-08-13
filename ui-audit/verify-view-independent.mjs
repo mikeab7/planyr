@@ -35,6 +35,7 @@ import { perfScenarioSeed } from "./lib/perf-scenario.mjs";
 import { classifyGesture, guardVerdict } from "./lib/viewIndependence.mjs";
 import { REGISTRY } from "./lib/viewIndependentRegistry.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { BLANK_POINT_EXCLUDE } from "./lib/featureCensus.mjs";
 
 
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
@@ -92,16 +93,18 @@ if (!(await page.evaluate(() => !!window.__VPROBE__))) {
 
 /* THE CONTROL: press on BARE canvas (a centre press drags an element and is not a view gesture),
  * then pan at constant px-per-foot with nothing else touched. */
-const at = await page.evaluate(() => {
+const at = await page.evaluate((BLANK) => {
   const svg = document.querySelector('[data-testid="planner-canvas"]');
   const r = svg.getBoundingClientRect();
   for (const fy of [0.5, 0.3, 0.7, 0.85]) for (const fx of [0.25, 0.5, 0.75, 0.12, 0.9]) {
     const x = r.left + r.width * fx, y = r.top + r.height * fy;
     const hit = document.elementFromPoint(x, y);
-    if (hit && svg.contains(hit) && !hit.closest("[data-el-id]")) return { x, y };
+    /* ⛔ A BLANK POINT IS FREE OF EVERY FEATURE, not just of elements (NEW-2) — a press on a
+       * markup / measurement / callout / parcel DRAGS IT instead of panning. */
+    if (hit && svg.contains(hit) && !hit.closest(BLANK)) return { x, y };
   }
   return { x: r.left + r.width * 0.15, y: r.top + r.height * 0.85 };
-});
+}, BLANK_POINT_EXCLUDE);
 const before = await page.evaluate(() => window.__plannerView.get());
 await page.evaluate(() => window.__VPROBE__.begin("pan"));
 await page.mouse.move(at.x, at.y);

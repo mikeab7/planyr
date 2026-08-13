@@ -59,6 +59,7 @@ import path from "node:path";
 import { perfScenarioSite } from "./lib/perf-scenario.mjs";
 import { classifyGesture, rankViolations, inverseFindings, formatSite } from "./lib/viewIndependence.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { BLANK_POINT_EXCLUDE } from "./lib/featureCensus.mjs";
 
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const JSON_OUT = process.argv.includes("--json");
@@ -155,17 +156,19 @@ async function waitForServer(url, ms = 30_000) {
 /** A press point on BARE canvas — a centre press lands on an element and drags it instead of
  *  panning, which would make the "pure view gesture" control silently false. */
 async function bareCanvasPoint(page) {
-  return page.evaluate(() => {
+  return page.evaluate((BLANK) => {
     const svg = document.querySelector('[data-testid="planner-canvas"]');
     if (!svg) return null;
     const r = svg.getBoundingClientRect();
     for (const fy of [0.5, 0.3, 0.7, 0.85]) for (const fx of [0.25, 0.5, 0.75, 0.12, 0.9]) {
       const x = r.left + r.width * fx, y = r.top + r.height * fy;
       const hit = document.elementFromPoint(x, y);
-      if (hit && svg.contains(hit) && !hit.closest("[data-el-id]")) return { x, y };
+      /* ⛔ A BLANK POINT IS FREE OF EVERY FEATURE, not just of elements (NEW-2) — a press on a
+       * markup / measurement / callout / parcel DRAGS IT instead of panning. */
+      if (hit && svg.contains(hit) && !hit.closest(BLANK)) return { x, y };
     }
     return { x: r.left + r.width * 0.15, y: r.top + r.height * 0.85 };
-  });
+  }, BLANK_POINT_EXCLUDE);
 }
 
 const GESTURE_DRIVERS = {
@@ -192,6 +195,7 @@ const GESTURE_DRIVERS = {
    * re-derives"; anything else that runs is the plan re-deriving itself for one moved box. */
   async edit(page) {
     const box = await page.evaluate(() => {
+      /* el-tier: the EDIT scenario drags ONE BUILDING by design — a targeted grab, not a census. */
       const n = document.querySelector('[data-el-id]');
       if (!n) return null;
       const r = n.getBoundingClientRect();
@@ -260,6 +264,8 @@ for (const mult of SCALES) {
     process.exit(2);
   }
   const shape = await page.evaluate(() => ({
+    features: new Set([...document.querySelectorAll("[data-feature]")].map((n) => n.getAttribute("data-feature"))).size,
+    /* el-tier: the element slice, reported beside the census as detail. */
     els: document.querySelectorAll("[data-el-id]").length,
     canvasNodes: document.querySelector('[data-testid="planner-canvas"]')?.querySelectorAll("*").length || 0,
   }));

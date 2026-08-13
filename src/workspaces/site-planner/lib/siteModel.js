@@ -25,6 +25,7 @@ import { roadCenterline, dedupeRoadVertices, repairBakedRadii, simplifyRoadVerti
 import { bufferPolyline } from "./metesAndBounds.js";
 import { DEFAULT_ROAD_CLASS, roadClassOf } from "./roadClasses.js";
 import { ensureZ } from "./zOrder.js";
+import { normCountyKey } from "../../../shared/gis/countyKeys.js";
 
 // v12 (B671): every drawn element carries an explicit `z` — the within-type-layer stacking
 // tiebreak that used to be IMPLICIT array position (see planStyle.byZ). `ensureZ` assigns a gapped
@@ -661,6 +662,85 @@ const rot2d = (x, y, deg) => {
 const SIDE_NORMAL = { top: [0, -1], bottom: [0, 1], left: [-1, 0], right: [1, 0] };
 const finiteBoxEl = (o) => o && ["cx", "cy", "w", "h"].every((k) => Number.isFinite(o[k]));
 
+/* ---- NEW-3: MISSING BONDED SIBLINGS, and the one invariant a heal must never paper over --------
+ *
+ * `ID_BOND_KEYS` is the same inventory `lib/bondRemap.js` owns for the COPY path; it is repeated
+ * as a constant here rather than imported to keep this module's dependency direction one-way, and
+ * `test/assemblyMissingSibling.test.js` fails if the two ever disagree.
+ *
+ * A dock-stack member names the member inboard of it. When that referent is gone from the
+ * collection, the assembly is INCOMPLETE — and an incomplete assembly is not something the heal
+ * can derive its way out of, because the geometry it would need (the depth of the thing that is
+ * missing) went with it. So the honest answer is a REPORT, not a repair.
+ */
+export const ID_BOND_KEYS = ["forCourt", "forTrailer", "prevZone"];
+const isBondRef = (v) => typeof v === "string" && v.length > 0;
+// Does this element declare a bond naming an element that is not in the collection?
+function hasDanglingBond(byId, z) {
+  return ID_BOND_KEYS.some((k) => isBondRef(z && z[k]) && !byId.has(z[k]));
+}
+
+/** Every bonded stack member whose declared predecessor is absent from `list`. Pure; no writes.
+ *  One record per (element, bond) so a report names WHICH link broke, not just which element. */
+export function missingBondSiblings(list) {
+  const els = arr(list);
+  if (!els.length) return [];
+  const byId = new Map();
+  for (const e of els) if (e && e.id != null) byId.set(e.id, e);
+  const out = [];
+  for (const z of els) {
+    if (!z || z.points || z.id == null || z.attachedTo == null) continue;
+    for (const k of ID_BOND_KEYS) {
+      if (!isBondRef(z[k]) || byId.has(z[k])) continue;
+      out.push({ id: z.id, host: z.attachedTo, type: z.type || null, bond: k, missing: z[k] });
+    }
+  }
+  return out;
+}
+
+/* ---- NEW-3: THE DIRECT ASSERTION ---------------------------------------------------------------
+ * "A trailer row may never bond at zero offset to its host without an intervening truck court."
+ *
+ * Stated as geometry rather than as bookkeeping ON PURPOSE. Every previous guard in this family
+ * asked whether the BONDS were coherent, and the state the owner was left with had coherent bonds
+ * — the broken one had been tidied away — and an impossible drawing. Trucks reach a trailer row
+ * across the truck court; a trailer row flush against the dock wall is not a layout, it is a
+ * layout with a piece missing, and no reader of the plan can tell which piece.
+ *
+ * Measured shape of the reported case: building 620 × 1198 at rot 270, trailer 1198 × 50 sitting
+ * 335 ft off the centreline on the right-hand wall. 310 (half the host across that wall) + 25
+ * (half the trailer's own depth) = 335 — first in the stack — with the 135 ft court that used to
+ * sit between them soft-deleted.
+ */
+export function impossibleStacks(list, { tol = ANCHOR_TOL_FT } = {}) {
+  const els = arr(list);
+  if (els.length < 2) return [];
+  const byId = new Map();
+  for (const e of els) if (e && e.id != null) byId.set(e.id, e);
+  const out = [];
+  for (const z of els) {
+    if (!z || z.points || z.type !== "trailer" || z.attachedTo == null || !finiteBoxEl(z)) continue;
+    const host = byId.get(z.attachedTo);
+    if (!host || host.type !== "building" || host.points || !finiteBoxEl(host)) continue;
+    const side = sideOfBondedBox(host, z);
+    if (!SIDE_NORMAL[side]) continue;
+    const [nx, ny] = SIDE_NORMAL[side];
+    const u = rot2d(nx, ny, host.rot || 0);
+    const across = (z.cx - host.cx) * u.x + (z.cy - host.cy) * u.y;
+    const halfAcross = (ny !== 0 ? host.h : host.w) / 2;
+    const own = boxExtentAlong(z, u);
+    // Is it FIRST in the stack — i.e. nothing at all between it and the dock wall?
+    if (Math.abs(across - (halfAcross + own / 2)) > tol) continue;
+    // …and is there genuinely no truck court on this wall it could have been sitting beyond?
+    const court = els.find((x) => x && x.attachedTo === host.id && !x.points && x.truckCourt && finiteBoxEl(x)
+      && (SIDE_NORMAL[x.truckCourt.side] ? x.truckCourt.side : sideOfBondedBox(host, x)) === side);
+    if (court) continue;
+    out.push({ id: z.id, host: host.id, type: z.type, side, across: Math.round(across * 1000) / 1000,
+      wantAcross: null, missing: "truck court" });
+  }
+  return out;
+}
+
 // Re-fit every dock-stack member that has been torn off its host. Walks each host's per-side
 // chain exactly as the canvas does (`prevZone` first, falling back to the legacy forCourt /
 // forTrailer bonds), re-derives the chain's geometry from the members' OWN stored depths, and
@@ -668,6 +748,8 @@ const finiteBoxEl = (o) => o && ["cx", "cy", "w", "h"].every((k) => Number.isFin
 function normalizeStrandedZones(list, onHeal) {
   const els = arr(list);
   if (els.length < 2) return els;
+  const byIdAll = new Map();
+  for (const e of els) if (e && e.id != null) byIdAll.set(e.id, e);
   const patch = new Map();
   const nextInChain = (el) => els.find((x) => x && !x.points && !patch.has(x.id) && (
     x.prevZone === el.id ||
@@ -684,8 +766,14 @@ function normalizeStrandedZones(list, onHeal) {
     // COMPUTED anchor below does not scale with host size, so it is now the primary test, and a
     // stack member belonging to no chain is walked as a chain of ONE rooted at its own side
     // instead of being skipped entirely.
+    /* ⛔ NEW-3 — a member whose declared predecessor is MISSING is not a head, it is an ORPHAN.
+     * "Nothing in this collection points at me" is true of a genuine head AND of a member whose
+     * truck court was just deleted, and the two want opposite treatment: a head is laid against
+     * the wall, an orphan must not be laid at all. Reading the second as the first is what put the
+     * owner's trailer row hard against his building. The declared bond is the discriminator, and
+     * it survives precisely because `normalizeCrossHostBonds` no longer drops it. */
     const heads = els.filter((x) => x && x.attachedTo === host.id && !x.points && finiteBoxEl(x) &&
-      isStackMember(x) && !x.dogEar &&
+      isStackMember(x) && !x.dogEar && !hasDanglingBond(byIdAll, x) &&
       !els.some((y) => y && y.id != null && (y.id === x.prevZone || y.id === x.forCourt || y.id === x.forTrailer)));
     const sideOfHead = (x) => (x.truckCourt && SIDE_NORMAL[x.truckCourt.side] ? x.truckCourt.side
       : (SIDE_NORMAL[x.sidewalkSide] ? x.sidewalkSide : sideOfBondedBox(host, x)));
@@ -1002,6 +1090,18 @@ export function normalizeCrossHostBonds(list, onHeal) {
       if (!isRef(refId)) continue;
       const ref = byId.get(refId);
       if (ref && ref.attachedTo === host.id) continue;         // already bonded inside its own host
+      /* ⛔ NEW-3 — A MISSING REFERENT IS NOT A CROSS-HOST BOND, and treating it as one is how a
+       * heal fabricated a layout that cannot be built. Measured on the owner's plan
+       * `smsdrvzr9gzx`: a truck court was deleted, its trailer row's `forCourt` was DROPPED here
+       * as a dangling reference, and the stranded-zone pass then read the trailer as the head of
+       * its own chain and pulled it 135 ft inboard — flush against the building wall, with the
+       * truck court that trucks reach it through simply gone. The heal reported success.
+       * This pass exists for a bond that points at a REAL element on the WRONG host (B1124's
+       * duplicate remap). A bond that points at nothing is a MISSING SIBLING — a tear this module
+       * cannot repair, because the information needed to repair it was deleted. Leave the bond
+       * alone (it is the only remaining record of what belonged here, and it is what a Restore
+       * re-links), leave the geometry alone, and let `missingBondSiblings` surface it. */
+      if (!ref) continue;
       // Find the same-side counterpart on THIS host: a forCourt wants that side's court, a
       // forTrailer wants that side's trailer, a prevZone wants whatever the previous member is.
       const side = finiteBoxEl(z) ? sideOfMember(host, z) : null;
@@ -1075,6 +1175,11 @@ export function createSiteModel(p = {}, { onHeal } = {}) {
     // flat + back-compatible: an old record has neither → both null → behaves exactly as before.
     teamId: p.teamId || null,
     ownerId: p.ownerId || null,
+    // B326417 — the owner's per-plan view-only lock. Like teamId/ownerId this is a read-time
+    // overlay of a DB COLUMN (`sites.share_locked`), stripped again by `slimForCloud` before any
+    // write, so the model never carries a second, staler copy of an access decision. An old
+    // record has no key → false → today's behaviour exactly.
+    shareLocked: !!p.shareLocked,
     // cross-module connection hint (B-cross-module, schema v9; additive). A project (= site
     // group) and a Schedule (Sequence Planyr) project live in SEPARATE cloud backends that
     // can't read each other, so the canonical pairing is stored on the schedule record
@@ -1088,7 +1193,13 @@ export function createSiteModel(p = {}, { onHeal } = {}) {
     scheduleProjectName: p.scheduleProjectName || null,
     // geo anchor + jurisdiction
     origin: p.origin || null,
-    county: p.county || null,
+    /* NEW-4 — the county is a ROUTING KEY, and it is normalised HERE because this function is
+     * the funnel every site record passes through: a localStorage load, a cloud row, an import,
+     * and every save-merge. Two production rows stored "Harris" with a capital H, and every
+     * `MAP[county]` lookup in the app missed them silently — no error, just a plan whose
+     * county-scoped sources resolved to nothing. Normalising at the model boundary fixes both
+     * directions at once (what we read, and what we write back). */
+    county: normCountyKey(p.county),
     // deal stage. Honor an explicit status; otherwise a record stamped with an
     // older schemaVersion is a pre-feature site (→ "active", presumed live), while
     // a fresh record (no prior version) starts in "pursuit".
@@ -1332,7 +1443,8 @@ export function parcelDisplayInfo(parcels) {
     out.set(p.id, {
       tag, depth,
       superseded: (kids.get(p.id) || []).length > 0,
-      name: (p && p.addr) || `Parcel ${tag}`,
+      // NEW-3 — a typed NAME wins over the situs address, which wins over the positional tag.
+      name: (p && p.label) || (p && p.addr) || `Parcel ${tag}`,
       parentId: isRoot(p) ? null : p.parentId,
     });
   }
@@ -1503,6 +1615,58 @@ export const teamShareOf = (m) => ({
   shared: !!(m && m.teamId),
   ownerId: (m && m.ownerId) || null,
 });
+
+/* ⛔ NEW-2 — THE SHARING POINTER IS NOT CONTENT, SO IT IS NEVER DECIDED BY A TIMESTAMP.
+ *
+ * `teamId` / `ownerId` / `shareLocked` are read-time MIRRORS of server-owned COLUMNS
+ * (`sites.team_id` / `user_id` / `share_locked`). Every OTHER scalar on the model is content, and
+ * `mergeSiteContent` resolves content by taking the copy with the newer `updatedAt`. For these
+ * three that rule is always wrong, and it is what made every sharing indicator blank:
+ *
+ *   B458's immediate mirror write advances the LOCAL `updatedAt` on every edit while the cloud
+ *   push lags behind it (stated verbatim in storage.js's B460 note). So on `pullCloud` the local
+ *   copy is routinely the newer one, `...newer` took its STALE `teamId: null`, and the cloud's
+ *   authoritative column was discarded — on every pull, for every project. The owner's two shared
+ *   projects (8 South, RICHEY) therefore read as private on the map list, in the share menu and in
+ *   TeamPanel's shared-projects count, all three at once, while the database said otherwise.
+ *
+ * This is the SAME DEFECT SHAPE as the rename split (B1415–B1418), and it takes the same rule:
+ * ⛔ never re-derive the winner from `updatedAt`. There, `siteRenamedAt` is the fact that decides;
+ * here the deciding fact is simpler — the COLUMN is the authority, full stop, so the mirror is
+ * copied rather than voted on.
+ *
+ * READ-ONLY BY CONSTRUCTION, which is what keeps B714 intact. Nothing here writes a share value
+ * anywhere outward: `shareMirrorOf` only reads what the cloud REPORTED, and `withShareMirror` only
+ * stamps it onto a local model. `team_id` still changes through the explicit share path alone
+ * (`lib/sharing.js` → `set_project_team`), `siteRowFor` still strips all three from every content
+ * update, and the Postgres guard still refuses any UPDATE that moves `team_id` outside the RPC.
+ * That deny-by-default guard is precisely WHY this bug existed — the pointer was deliberately kept
+ * off the content path — so the fix had to make the READ direction authoritative, never the write.
+ *
+ * `absent` is the load-bearing distinction: a pre-migration database returns no `team_id` column at
+ * all, which must read as "the cloud did not say" (leave the local value alone) and never as "the
+ * cloud says private" (blank it). Conflating those would unshare a project on any client whose
+ * database predates db/team_sharing.sql.
+ */
+export const SHARE_MIRROR_FIELDS = ["teamId", "ownerId", "shareLocked"];
+
+// Read the share mirror a cloud row reported, or null when it reported none (pre-migration DB).
+// `cloudList` stamps `shareMirror` on the raw model; it is deliberately NOT a Site Model field, so
+// createSiteModel drops it and it can never be persisted or pushed as a second copy of the truth.
+export function shareMirrorOf(rawCloudModel) {
+  const mir = rawCloudModel && rawCloudModel.shareMirror;
+  if (!mir || typeof mir !== "object") return null;
+  return { teamId: mir.teamId || null, ownerId: mir.ownerId || null, shareLocked: !!mir.shareLocked };
+}
+
+// Stamp an authoritative share mirror onto a model. Identity-preserving when nothing moves, so a
+// pull over an already-correct cache allocates nothing. A null mirror is a no-op (see `absent`).
+export function withShareMirror(model, mirror) {
+  if (!model || !mirror) return model;
+  const same = SHARE_MIRROR_FIELDS.every((k) => (k === "shareLocked" ? !!model[k] === !!mirror[k] : (model[k] || null) === (mirror[k] || null)));
+  if (same) return model;
+  return { ...model, teamId: mirror.teamId || null, ownerId: mirror.ownerId || null, shareLocked: !!mirror.shareLocked };
+}
 
 // Everything that constrains development: title easements + routed easement
 // corridors (from markups), per-parcel setbacks (derived), and the live GIS

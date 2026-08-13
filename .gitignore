@@ -179,3 +179,6 @@ scripts/data/
 
 # Synthesised megapixel rasters for the plan-raster probe (NEW-1) — regenerated on demand, never committed
 ui-audit/.raster-cache/
+
+# B296224 — the ledger-merge evidence trail (local, per-clone)
+.planyr-ledger-merges.log

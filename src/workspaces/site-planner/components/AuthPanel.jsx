@@ -1,11 +1,11 @@
 /* Account UI. Logged OUT: a modal with sign-in / sign-up / password-reset, plus a
- * "set new password" form when arriving from a reset link. Logged IN: a tabbed
- * account panel — Profile (edit name + organization, saved to public.profiles) and
- * Settings (change password, cloud-sync note) — with Sign out always available
- * (B297/B298). Auth state is owned by the Shell; this calls the auth wrappers and
- * the profile hook's save/reload passed in via `profileApi`. */
+ * "set new password" form when arriving from a reset link. Logged IN: the SETTINGS panel —
+ * four named sections behind a nav (Profile · Team · Account & security · Interface), with
+ * Sign out always available (B297/B298, IA rebuilt by NEW-4 — see the note above `SECTIONS`
+ * for what folded in and what deliberately did not ship). Auth state is owned by the Shell;
+ * this calls the auth wrappers and the profile hook's save/reload passed in via `profileApi`. */
 import { lazy, useEffect, useRef, useState } from "react";
-import { signIn, signUp, signOut, resetPassword, updatePassword } from "../lib/auth.js";
+import { signIn, signUp, signOut, signOutEverywhere, resetPassword, updatePassword } from "../lib/auth.js";
 // The confirmation / reset copy NAMES the address the email arrives from (NEW-2) — a user
 // watching for "planyr.io" never finds it otherwise and assumes the signup failed. Both
 // messages are generated from the one sender constant in lib/authMail.js.
@@ -17,7 +17,7 @@ import { SIGNUP_CONFIRM_MSG, PASSWORD_RESET_MSG } from "../lib/authMail.js";
  * lands on all four routes rather than only the Site route. */
 const TeamPanel = lazy(() => import("./TeamPanel.jsx"));
 import LazyPanel from "./LazyPanel.jsx";
-import ThemePicker from "../../../shared/theme/ThemePicker.jsx";
+import InterfaceSettings from "../../../shared/ui/InterfaceSettings.jsx";
 
 const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", paper: "var(--surface-raised)" };
 const field = { width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: 13, border: `1px solid ${PAL.line}`, borderRadius: 8, color: PAL.ink, fontFamily: "inherit", marginTop: 6 };
@@ -68,9 +68,46 @@ function Wrap({ onClose, children, msg, width = 360, title = "Account" }) {
   );
 }
 
-// ── Logged-in account panel: Profile + Settings tabs ───────────────────────────
+/* NEW-4 — THE SETTINGS PANEL'S INFORMATION ARCHITECTURE.
+ *
+ * The report, verbatim: "if I'm in the settings just to change my password, and I don't want it to
+ * be right there… let's build out a more professional settings menu." Settings was one tab of three
+ * whose entire body WAS the change-password form, so the most consequential control in the account
+ * greeted you before anything else.
+ *
+ * Four named sections behind a nav, and change password is now INSIDE one rather than in front of
+ * everything:
+ *   profile   — who you are (name, organization, the address you signed in with)
+ *   team      — your organization's members (lazy; signed-in only)
+ *   security  — Account & security: change password, sign out on all devices
+ *   interface — display theme, smooth zoom — anything about the APP rather than about a DRAWING
+ *
+ * ⛔ PROFILE AND TEAM FOLD IN; THEY ARE NOT A THIRD PARALLEL SURFACE (the owner asked for this to
+ * be stated either way). They were already tabs of this same modal — what made them read as a
+ * separate surface was that "Settings" sat beside them as a peer, as though profile and team were
+ * something other than settings. They are now sections OF Settings, and the account dropdown's
+ * three rows became DEEP LINKS into those sections rather than routes to different places. No
+ * Shell wiring changed; `initialTab` still takes "profile" / "team" / "settings".
+ *
+ * ⛔ AND WHAT DID NOT SHIP, deliberately: an "active sessions" list. Enumerating a user's sessions
+ * needs the service-role admin API, which may never reach the browser (/CLAUDE.md → KEY DECISIONS).
+ * A section that could only have listed this one device would be furniture pretending to be a
+ * security feature, so Account & security carries the action that IS real — sign out everywhere —
+ * and nothing else. An empty section never ships.
+ */
+const SECTIONS = [
+  { id: "profile",   label: "Profile",   hint: "Name & organization" },
+  { id: "team",      label: "Team",      hint: "Who's in your org" },
+  { id: "security",  label: "Account & security", hint: "Password, sessions" },
+  { id: "interface", label: "Interface", hint: "Theme, zoom" },
+];
+/* The account dropdown's "Settings" row lands on INTERFACE, not on security. That is the whole
+ * point of the item: the front door is the ordinary app preference, and the password is one click
+ * away in a section that says what it is. */
+const SECTION_ALIAS = { settings: "interface", profile: "profile", team: "team" };
+
 function AccountView({ user, profileApi, initialTab, onClose }) {
-  const [tab, setTab] = useState(["settings", "team"].includes(initialTab) ? initialTab : "profile");
+  const [tab, setTab] = useState(() => SECTION_ALIAS[initialTab] || "profile");
   const [first, setFirst] = useState("");
   const [last, setLast] = useState("");
   const [org, setOrg] = useState("");
@@ -114,49 +151,91 @@ function AccountView({ user, profileApi, initialTab, onClose }) {
     } finally { setBusy(false); }
   };
 
-  const tabBtn = (id, label) => (
-    <button onClick={() => { setTab(id); setMsg(null); }} style={{ ...btn(tab === id), flex: 1, padding: "7px 0" }}>{label}</button>
+  const signOutAll = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const { error } = await signOutEverywhere();
+      // LOUD-FAILURE: a security action that quietly fails is worse than one not offered.
+      if (error) setMsg({ type: "err", text: error });
+      else onClose();
+    } finally { setBusy(false); }
+  };
+
+  const navBtn = (sec) => {
+    const on = tab === sec.id;
+    return (
+      <button
+        key={sec.id}
+        data-settings-section={sec.id}
+        aria-current={on ? "true" : undefined}
+        onClick={() => { setTab(sec.id); setMsg(null); }}
+        style={{
+          display: "block", width: "100%", textAlign: "left", padding: "7px 9px", borderRadius: 8,
+          border: `1px solid ${on ? PAL.accent : "transparent"}`, cursor: "pointer", fontFamily: "inherit",
+          background: on ? "var(--hover-ghost)" : "transparent", color: PAL.ink,
+        }}
+      >
+        <span style={{ display: "block", fontSize: 12.5, fontWeight: on ? 700 : 500 }}>{sec.label}</span>
+        <span style={{ display: "block", fontSize: 10.5, color: PAL.muted }}>{sec.hint}</span>
+      </button>
+    );
+  };
+
+  const sectionHead = (text) => (
+    <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-tertiary)", padding: "0 0 8px" }}>{text}</div>
   );
 
   return (
-    <Wrap onClose={onClose} msg={msg} width={tab === "team" ? 440 : 360}>
-      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-        {tabBtn("profile", "Profile")}
-        {tabBtn("team", "Team")}
-        {tabBtn("settings", "Settings")}
+    <Wrap onClose={onClose} msg={msg} width={560} title="Settings">
+      <div className="settings-shell" style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+        <nav className="settings-nav" aria-label="Settings sections">{SECTIONS.map(navBtn)}</nav>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {tab === "team" ? (
+            <LazyPanel name="The Team section" minHeight={260} label="Loading team…">
+              <TeamPanel user={user} setMsg={setMsg} />
+            </LazyPanel>
+          ) : tab === "profile" ? (
+            <div>
+              {sectionHead("Profile")}
+              <div style={{ fontSize: 12.5, color: PAL.muted }}>Signed in as</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: PAL.ink, wordBreak: "break-all", margin: "1px 0 12px" }}>{user?.email || "(no email)"}</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input aria-label="First name" autoComplete="given-name" placeholder="First name" value={first} onChange={edit(setFirst)} style={{ ...field, flex: 1, marginTop: 0 }} />
+                <input aria-label="Last name" autoComplete="family-name" placeholder="Last name" value={last} onChange={edit(setLast)} style={{ ...field, flex: 1, marginTop: 0 }} />
+              </div>
+              <input aria-label="Organization or company" autoComplete="organization" placeholder="Organization / company" value={org} onChange={edit(setOrg)} style={field} />
+              <button style={{ ...btn(true), width: "100%", marginTop: 12 }} disabled={busy} onClick={saveProfile}>{busy ? "…" : "Save profile"}</button>
+            </div>
+          ) : tab === "security" ? (
+            <div data-settings-panel="security">
+              {sectionHead("Account & security")}
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink }}>Change password</div>
+              <input aria-label="New password" type="password" autoComplete="new-password" placeholder="New password (min 6 characters)" value={pw} onChange={(e) => setPw(e.target.value)} style={field} onKeyDown={(e) => { if (e.key === "Enter" && pw.length >= 6) changePassword(); }} />
+              <button style={{ ...btn(true), width: "100%", marginTop: 10 }} disabled={busy || pw.length < 6} onClick={changePassword}>{busy ? "…" : "Update password"}</button>
+              <div style={{ height: 1, background: PAL.line, margin: "16px 0 12px" }} />
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink }}>Signed in elsewhere?</div>
+              <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.45, margin: "3px 0 9px" }}>
+                Ends your session on every device, including this one.
+              </div>
+              <button style={{ ...btn(false), width: "100%" }} data-testid="sign-out-everywhere" disabled={busy} onClick={signOutAll}>{busy ? "…" : "Sign out on all devices"}</button>
+            </div>
+          ) : (
+            <div data-settings-panel="interface">
+              {sectionHead("Interface")}
+              {/* Display theme (B389) and smooth zoom (NEW-1) — both per-DEVICE preferences about
+                  the app rather than about a drawing, rendered from the ONE shared component so
+                  this panel and the signed-out header gear can never disagree. */}
+              <InterfaceSettings />
+              <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.5, marginTop: 16 }}>
+                Your sites and reviews are saved to your account in the cloud and sync across your devices.
+              </div>
+              {/* Storage on this device (NEW-3/B1429) lives in the planner's plan menu, NOT here —
+                  this file lands in the shared ENTRY chunk, so even a lazy stub is downloaded by
+                  every route and pushed the Notes route past its bundle ceiling. */}
+            </div>
+          )}
+        </div>
       </div>
-
-      {tab === "team" ? (
-        <LazyPanel name="The Team tab" minHeight={260} label="Loading team…">
-          <TeamPanel user={user} setMsg={setMsg} />
-        </LazyPanel>
-      ) : tab === "profile" ? (
-        <div>
-          <div style={{ fontSize: 12.5, color: PAL.muted }}>Signed in as</div>
-          <div style={{ fontSize: 13, fontWeight: 600, color: PAL.ink, wordBreak: "break-all", margin: "1px 0 12px" }}>{user?.email || "(no email)"}</div>
-          <div style={{ display: "flex", gap: 6 }}>
-            <input aria-label="First name" autoComplete="given-name" placeholder="First name" value={first} onChange={edit(setFirst)} style={{ ...field, flex: 1, marginTop: 0 }} />
-            <input aria-label="Last name" autoComplete="family-name" placeholder="Last name" value={last} onChange={edit(setLast)} style={{ ...field, flex: 1, marginTop: 0 }} />
-          </div>
-          <input aria-label="Organization or company" autoComplete="organization" placeholder="Organization / company" value={org} onChange={edit(setOrg)} style={field} />
-          <button style={{ ...btn(true), width: "100%", marginTop: 12 }} disabled={busy} onClick={saveProfile}>{busy ? "…" : "Save profile"}</button>
-        </div>
-      ) : (
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 700, color: PAL.ink }}>Change password</div>
-          <input aria-label="New password" type="password" autoComplete="new-password" placeholder="New password (min 6 characters)" value={pw} onChange={(e) => setPw(e.target.value)} style={field} onKeyDown={(e) => { if (e.key === "Enter" && pw.length >= 6) changePassword(); }} />
-          <button style={{ ...btn(true), width: "100%", marginTop: 12 }} disabled={busy || pw.length < 6} onClick={changePassword}>{busy ? "…" : "Update password"}</button>
-          <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.5, marginTop: 14 }}>
-            Your sites and reviews are saved to your account in the cloud and sync across your devices.
-          </div>
-          {/* Display theme (B389) — moved here from the row-1 gear so it lives with your account settings */}
-          <div style={{ height: 1, background: PAL.line, margin: "16px 0 12px" }} />
-          <ThemePicker />
-          {/* Storage on this device (NEW-3) lives in the planner's plan menu, NOT here — this file
-              lands in the shared ENTRY chunk, so even a lazy stub is downloaded by every route and
-              pushed the Notes route past its bundle ceiling. See SitePlanner's `storageOpen`. */}
-        </div>
-      )}
 
       <div style={{ height: 1, background: PAL.line, margin: "16px 0 12px" }} />
       <button style={{ ...btn(false), width: "100%" }} disabled={busy} onClick={async () => { setBusy(true); await signOut(); onClose(); }}>Sign out</button>

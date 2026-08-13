@@ -267,7 +267,15 @@ describe("NEW-1 — layers.js honours the lift and rebuilds when it flips", () =
     expect(block).toContain("releaseLayer");
     expect(block).toMatch(/lyr !== "pending"/); // a pending build has no layer — clearing the slot IS its abort
     expect(block).toMatch(/delete bands\[k\]/);
-    expect((layers.match(/release\(k, (refs\[k\]|cur)\)/g) || []).length).toBe(2); // the rebuild + the toggle-off
+    /* A CENSUS OF TEARDOWN SITES, not a style check — it goes red the moment someone adds a
+     * teardown, so each one has to be a deliberate, named entry here.
+     *   1. the "Show above plan" band REBUILD
+     *   2. the ordinary toggle-off
+     *   3. NEW-2 — the baked-flood-tile fallback: a 404/unreadable archive tears the tile layer
+     *      down and re-enters syncOverlayLayers, which then takes the live FEMA raster branch.
+     *      It goes through this SAME helper precisely so it inherits the __pfParts / releaseLayer
+     *      discipline instead of re-deriving it. */
+    expect((layers.match(/release\(k, (refs\[k\]|cur|lyr)\)/g) || []).length).toBe(3);
   });
 
   it("the band memory is scoped to the caller's refs and never pollutes it", () => {
@@ -343,7 +351,7 @@ describe("NEW-1 — the lift is remembered PER SITE, like every other per-plan d
 
   it("the planner persists and undoes it alongside the visibility set", () => {
     const sp = read("SitePlanner.jsx");
-    expect(sp).toMatch(/stateRef\.current = \{[^}]*layerAbove \};/);
+    expect(sp).toMatch(/stateRef\.current = \{[^}]*layerAbove[^}]*\};/);
     expect(sp).toMatch(/const payload = \{[^}]*layerAbove \};/);
     expect(sp).toMatch(/"\|A:" \+ aboveSig\(s\.layerAbove\)/); // its own undo frame
     expect(sp).toMatch(/applyAboveOverrides\(applyOnOverrides\(cur, snapOverrides\), snapAbove\)/);

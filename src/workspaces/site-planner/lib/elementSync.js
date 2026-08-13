@@ -24,6 +24,7 @@
 import { makeWriteSerializer } from "../../../shared/cloud/serializeWrites.js";
 import { KIND_TO_FIELD } from "./elementRows.js";
 import { nextZ } from "./zOrder.js";
+import { assemblyDigest } from "./assemblyDigest.js";
 
 const FIELDS = Object.entries(KIND_TO_FIELD); // [ [kind, field], ... ]
 
@@ -144,6 +145,9 @@ export function createElementSync(opts = {}) {
     // declares itself out of date. A stale client's ops are rejected by the rev guard forever;
     // re-queueing them on the plain debounce is a ~1 RPC/s hot loop with no exit.
     maxRejectStreak = 4,
+    // B1341 stage 2 — () => bool, asked at CALL time. Omitted → group CAS is OFF and every call is
+    // byte-for-byte its pre-stage-2 self, which is what makes this stage inert until switched on.
+    groupCas = null,
   } = opts;
 
   // key -> { kind, id, json, rev, z }  (last COMMITTED state)
@@ -183,6 +187,55 @@ export function createElementSync(opts = {}) {
     for (const [kk, v] of tombstoned) if (t - v.at > recentWindowMs) tombstoned.delete(kk); // bound the 15s map
   }
   const clearDeleteFloor = (key) => { tombstoned.delete(key); maxDeleteRev.delete(key); }; // element is live again
+  /* NEW-1 — BIRTHS, and the reason this map has to exist.
+   *
+   * "Delete wins" is the right rule for delete-vs-EDIT and it is the wrong rule for
+   * delete-vs-CREATE. Measured on the owner's plan `smsdrvzr9gzx` (13:38:49.543–546): one tab
+   * created a building assembly — host + two truck courts + two trailer rows — while another tab
+   * still held a delete formed BEFORE those ids existed. The delete lost its rev guard, the
+   * conflict branch below stripped the stale rev and re-issued at the fresh one, and three rows
+   * that were 1.75 s old died. A delete whose base predates the row's own creation is not a
+   * decision about the row that exists; it is a decision about a row that no longer does.
+   *
+   * Nothing in the wire format says "this row was created at rev N" — `site_elements` has no
+   * `created_at` and the RPC returns none — so the client records what it can honestly observe:
+   * the moment IT first saw an element come into existence (a realtime row for a key the shadow
+   * has never held). That is exactly the signal needed here, because the tab that will issue the
+   * stale delete is the one that watched the creation arrive.
+   *
+   * Never time-pruned to a short window on purpose: a delete can sit in the queue behind a backoff
+   * for tens of seconds, and forgetting the birth is precisely how the guard would fail open. One
+   * small record per key, dropped when the element is deleted for real. */
+  const births = new Map();          // key -> { rev, at }  (when THIS tab first saw the element exist)
+  const noteBirth = (kind, id, rev) => {
+    const k = skey(kind, id);
+    const prev = births.get(k);
+    const r = typeof rev === "number" ? rev : 0;
+    if (prev && prev.rev >= r) return;             // keep the EARLIEST birth we know of for this incarnation
+    births.set(k, { rev: r, at: now() });
+  };
+  /* NEW-1 — AND THE SIGNAL THAT ACTUALLY CATCHES THE MEASURED CASE, which the rev comparison above
+   * cannot: elements the SHADOW learned about from a live remote row that the CANVAS has never
+   * shown.
+   *
+   * The diff mints a delete for exactly one reason — the shadow holds an element and the
+   * collections do not — and it cannot tell the two ways that happens apart. One is a user
+   * deleting something. The other is a row arriving from another tab and never reaching the
+   * canvas: `applyRemoteRow` writes the shadow entry itself, and the upsert it returns can be
+   * dropped on the way (a snapshot applied over it, a gesture buffering it, a remount) — after
+   * which the very next diff invents a delete for an element this tab never held and issues it
+   * against rows that are seconds old. That is the delete "formed before those ids existed": its
+   * base is not stale, it has no base at all.
+   *
+   * A key leaves this map the moment a diff SEES the element in the collections. From then on the
+   * canvas has genuinely held it, so a delete for it is a real user intent and is honoured. */
+  const remoteOnly = new Map();      // key -> { rev, at }  (server has it, this canvas never showed it)
+  /* Keys whose stale delete was DROPPED and whose server row was handed back to the canvas. Until
+   * the canvas actually shows the element again, the shadow holds it and the collections do not —
+   * which is the exact shape the diff reads as "deleted", so without this the next reconcile would
+   * re-mint the very delete we just refused. Cleared the moment the element is seen on the canvas,
+   * and time-bounded so a genuine later delete is never held off for long. */
+  const readopted = new Map();       // key -> at
   // key -> Map(json -> at)  (EVERY data serialization THIS tab put ON THE WIRE for the key within the
   // window — not just the latest). Unlike inflightKeys — cleared the instant an RPC settles — this
   // SURVIVES a transport failure, so a committed-but-unacked write's realtime echo is still recognized
@@ -273,7 +326,13 @@ export function createElementSync(opts = {}) {
   // converged: the client ignored the incoming rows and re-pushed its own copy over them. Fails
   // OPEN — no `selfUid` configured, or a row with no `updated_by`, is treated as possibly ours, so
   // every pre-existing self-echo guarantee (B757 / B812) is untouched.
-  const foreignAuthor = (row) => !!(selfUid && row && row.updated_by && row.updated_by !== selfUid);
+  // NEW-4 — `selfUid` may be a GETTER, read at CALL time. It used to be snapshotted from
+  // `activeUid()` when the engine was built, which is null until the auth session resolves — so on
+  // any load where the planner mounted first this predicate answered "possibly ours" for every row
+  // for the whole session, silently disabling B1116's and B1099's foreign-author gates. Fails open
+  // exactly as before when there is genuinely no id to compare.
+  const selfUidNow = () => { try { return typeof selfUid === "function" ? selfUid() : selfUid; } catch (_) { return null; } };
+  const foreignAuthor = (row) => { const me = selfUidNow(); return !!(me && row && row.updated_by && row.updated_by !== me); };
 
   let debounceHandle = null;
   let backoffHandle = null;
@@ -417,15 +476,41 @@ export function createElementSync(opts = {}) {
       }
     }
     // elements present in the shadow but no longer in any collection → delete
+    const fabricated = [];   // NEW-1 — …unless the canvas never held them at all (see below)
     for (const [key, shad] of shadow) {
-      if (seen.has(key)) continue;
+      if (seen.has(key)) { readopted.delete(key); remoteOnly.delete(key); continue; } // on the canvas → holds spent
       const pend = dirty.get(key);
       const inf = inflightKeys.get(key);
       if (inf && inf.cls === "delete") continue; // the delete is already on the wire
+      // NEW-1 — a row we just re-adopted after refusing a stale delete is mid-flight to the canvas.
+      // Re-minting the delete here is how the refusal would undo itself one tick later.
+      const held = readopted.get(key);
+      if (held != null) {
+        if (now() - held <= recentWindowMs) continue;
+        readopted.delete(key);
+      }
+      // NEW-1 — the element is in the shadow ONLY because a remote row put it there, and no diff
+      // has ever seen it on this canvas. There is no deletion to record, only a canvas that is
+      // missing something the server has: hand the row back instead of inventing a delete.
+      const arrived = remoteOnly.get(key);
+      if (arrived) {
+        if (!pend) fabricated.push({ key, kind: shad.kind, id: shad.id, json: shad.json, stale: shad.stale, rev: arrived.rev });
+        continue;
+      }
       if (!pend || pend.cls !== "delete") {
-        enqueue(key, { kind: shad.kind, id: shad.id, cls: "delete", el: null, z: shad.z, direct: directTag(shad.kind, shad.id, null) });
+        enqueue(key, { kind: shad.kind, id: shad.id, cls: "delete", el: null, z: shad.z,
+          direct: directTag(shad.kind, shad.id, null), baseRev: shad.rev, baseAt: now() });
         sawCreateOrDelete = true;
       }
+    }
+    if (fabricated.length) {
+      const back = [];
+      for (const f of fabricated) {
+        if (!f.json || f.stale) continue;                 // a mixed json↔rev pairing is not an adoption source
+        try { back.push({ kind: f.kind, id: f.id, el: JSON.parse(f.json) }); } catch (_) { /* unparseable → the next row re-tries */ }
+      }
+      report("element-delete-fabricated", "a delete for an element this canvas never held was REFUSED", { siteId, count: fabricated.length, ids: fabricated.slice(0, 20).map((f) => f.id) });
+      if (back.length && onRowsCanonical) { try { onRowsCanonical(back); } catch (_) { /* adoption is best-effort */ } }
     }
     if (rowsWin && rowsWin.length) {
       report("element-rows-canonical", "stale cached copies overruled by the server's rows on seed", { siteId, count: rowsWin.length, ids: rowsWin.slice(0, 20).map((r) => r.id) });
@@ -542,8 +627,15 @@ export function createElementSync(opts = {}) {
     clearDebounce();
     const live = liveIndex();
     closeAssemblies(live);                          // NEW-1 (a) — no assembly may straddle two commits
-    const batch = [...dirty.values()].map((e) => freshen(e, live)); // NEW-1 (b) — state at flush time
+    const fresh = [...dirty.values()].map((e) => freshen(e, live));  // NEW-1 (b) — state at flush time
+    // NEW-1 — never SHIP a delete that has expired. The op is set aside here and its adoption runs
+    // below, after `dirty` is cleared: `onRowsCanonical` re-enters the app synchronously, and a
+    // re-entrant reconcile while the queue still held this batch would send it twice.
+    const expired = fresh.filter((e) => e.cls === "delete" && staleAgainstBirth(e));
+    const batch = expired.length ? fresh.filter((e) => !expired.includes(e)) : fresh;
     dirty.clear();
+    for (const e of expired) dropStaleDelete(e);
+    if (!batch.length) { setState("idle"); return; }                 // the whole batch was expired deletes
     for (const e of batch) { inflightKeys.set(skey(e.kind, e.id), e); recordSent(e.kind, e.id, e.el); } // protected like dirty until the result lands; recentSent survives a transport failure (B757)
     inflight = true;
     setState("syncing");
@@ -553,6 +645,7 @@ export function createElementSync(opts = {}) {
     // batch has nothing to be atomic about, so it keeps the plain 2-arg call and the blast radius
     // of the new overload stays small.
     const atomic = batchSpansAssembly(batch);
+    const groups = atomic ? groupsFor(batch, live) : [];   // B1341 stage 2 — groups ride only on atomic
     // NEW-1 — the post-write assertion. Runs on EVERY settle path (ok, rejected, rolled back,
     // transport failure) via the returns below, exactly once per batch, and never throws into the
     // commit path: a detector that can take the write engine down is worse than the bug it watches.
@@ -565,7 +658,7 @@ export function createElementSync(opts = {}) {
     serialize(siteId, async () => {
       const ops = batch.map(opFor);
       let res;
-      try { res = await commit(ops, { atomic }); }
+      try { res = await commit(ops, groups.length ? { atomic, groups } : { atomic }); }
       finally {
         inflight = false;
         for (const e of batch) inflightKeys.delete(skey(e.kind, e.id));
@@ -590,6 +683,10 @@ export function createElementSync(opts = {}) {
       }
       if (!res || !res.ok) return onTransportFailure(batch, res);
       attempt = 0;
+      // B1341 stage 2 — the server refused the call OUTRIGHT: a named assembly moved underneath
+      // this batch and NOTHING was written. This is the case B1117's rollback could not see, because
+      // every op in the batch may hold a perfectly valid per-row rev.
+      if (Array.isArray(res.groupConflict) && res.groupConflict.length) return onGroupConflict(batch, res.groupConflict);
       // B1117 — `applied === false`: the server rolled the WHOLE call back, so nothing landed —
       // including ops whose own per-op status reads "ok". Treating those as committed is precisely
       // the tear this mode exists to prevent, so the entire batch is re-queued at the fresh revs the
@@ -631,6 +728,52 @@ export function createElementSync(opts = {}) {
     });
   }
 
+  /* B1341 stage 2 — the GROUP REVISIONS this batch is betting on.
+   *
+   * For every assembly the batch touches, the digest of what THIS TAB believes its live members
+   * are, built from the shadow — which is the only honest source, because the shadow IS "the rows
+   * as I last saw them". The server recomputes the same string from its own rows and refuses the
+   * whole call if they differ.
+   *
+   * ⛔ It must include EVERY live member of the assembly, not just the ones being written. A digest
+   * over the written subset would answer "did the rows I am touching move", which is what the
+   * per-row rev guard already answers; the question stage 2 exists to ask is "did the ASSEMBLY
+   * move" — and the tear this whole family is made of is precisely a SIBLING moving underneath you.
+   *
+   * Returns [] when the switch is off, when nothing in the batch is bonded, or when the engine has
+   * no `liveCollections` to resolve roots with — in each case the call goes out exactly as it does
+   * today (B1117 semantics, untouched). */
+  function groupsFor(batch, live) {
+    if (!groupCas || !groupCas()) return [];
+    const roots = new Set();
+    for (const e of batch) {
+      if (e.kind !== "el") continue;
+      const cur = (live && live.byKey.get(skey("el", e.id))) || e.el;
+      const r = rootIdOf(cur, e.id);
+      if (r != null) roots.add(r);
+    }
+    if (!roots.size) return [];
+    // Bucket every LIVE shadow entry by its assembly root, so a member nobody is writing still
+    // counts. The shadow holds only live rows (a delete removes its entry), which matches the
+    // server's `deleted_at is null` filter — the two definitions of "member" must not drift.
+    const members = new Map();
+    for (const [key, shad] of shadow) {
+      if (shad.kind !== "el") continue;
+      const cur = (live && live.byKey.get(key)) || null;
+      let root = cur ? rootIdOf(cur, shad.id) : null;
+      if (root == null) {                       // not on the canvas → read the bond off the shadow json
+        try { root = rootIdOf(JSON.parse(shad.json || "null"), shad.id); } catch (_) { root = shad.id; }
+      }
+      if (root == null || !roots.has(root)) continue;
+      let list = members.get(root);
+      if (!list) { list = []; members.set(root, list); }
+      list.push({ id: shad.id, rev: shad.rev });
+    }
+    const out = [];
+    for (const [root, list] of members) out.push({ assembly: root, expected: assemblyDigest(list) });
+    return out;
+  }
+
   // Does this batch carry more than one member of the same assembly? (B1117 — the atomic gate.)
   function batchSpansAssembly(batch) {
     if (batch.length < 2) return false;
@@ -645,6 +788,40 @@ export function createElementSync(opts = {}) {
       seen.add(root);
     }
     return false;
+  }
+
+  /* B1341 stage 2 — a call refused on the GROUP revision. Nothing was written, so — exactly as in
+   * `onAtomicRollback` — no shadow json may advance; only the REVS the conflict rows carry are
+   * adopted, so the retry is built against the assembly as it actually is. The difference from the
+   * rollback path is that the conflict names MEMBERS THIS BATCH NEVER TOUCHED, which is the whole
+   * point: those are the siblings that moved, and adopting their revs is what makes the next attempt
+   * agree with the server instead of losing the same race again. */
+  function onGroupConflict(batch, conflicts) {
+    for (const c of conflicts || []) {
+      for (const m of (c && c.members) || []) {
+        if (!m || m.id == null || typeof m.rev !== "number") continue;
+        const key = skey(m.kind || "el", m.id);
+        const cur = shadow.get(key);
+        // Keep OUR json as the diff baseline (the canvas still holds it and we still intend to
+        // write it); adopt only the rev, flagged `stale` because json and rev now disagree.
+        if (cur) shadow.set(key, { ...cur, rev: m.rev, stale: true });
+      }
+    }
+    for (const e of batch) { const key = skey(e.kind, e.id); if (!dirty.has(key)) enqueue(key, e); }
+    splitStreak += 1;
+    report("element-group-conflict", "the assembly moved underneath this batch — nothing written, re-committing at fresh revs",
+      { siteId, ops: batch.length, streak: splitStreak, assemblies: conflicts.map((c) => c && c.assembly).filter(Boolean).slice(0, 10) });
+    onEvent({ type: "assembly-split", ids: batch.map((e) => e.id), streak: splitStreak, rolledBack: true, groupConflict: true });
+    if (splitStreak >= maxRejectStreak) {
+      setState("stale");
+      report("element-group-unresolved", "an assembly would not commit whole against its group revision", { siteId, streak: splitStreak });
+      onEvent({ type: "client-stale", streak: splitStreak, pending: dirty.size, reason: "group-conflict" });
+      return;
+    }
+    const wait = backoff[Math.min(splitStreak - 1, backoff.length - 1)];
+    if (backoffHandle != null) clearTimer(backoffHandle);
+    setState("retrying");
+    backoffHandle = setTimer(() => { backoffHandle = null; flush(); }, wait);
   }
 
   // B1117 — an atomic call the server rolled back. NOTHING was written, so no shadow json may be
@@ -679,6 +856,54 @@ export function createElementSync(opts = {}) {
     backoffHandle = setTimer(() => { backoffHandle = null; flush(); }, wait);
   }
 
+  /* NEW-1 — is this delete op a decision about a row that did not exist when it was formed?
+   *
+   * Two independent readings, either of which is enough, because they fail in different
+   * directions and a guard against losing user data should not depend on only one of them:
+   *   • BY REV — the element was seen to come into existence at a rev ABOVE the one this delete
+   *     targets. Revs are server-assigned and monotonic per element, so a birth above our base is
+   *     unambiguously a later incarnation.
+   *   • BY CLOCK — the element was seen to come into existence AFTER the delete was formed. This
+   *     is the one that catches the case where the deleting tab never held a shadow entry at all
+   *     (`revOf` then answers the default 1, which no birth can be "above").
+   * A delete with no recorded birth is untouched: it behaves exactly as it did before this guard,
+   * so every pre-existing delete-vs-edit guarantee is unchanged. */
+  /* NEW-1 — the SEND-side half of the delete-vs-create guard, and it is not redundant with the
+   * conflict-result half below.
+   *
+   * `opFor` sends a delete at the shadow's CURRENT rev, not at the rev the delete was formed
+   * against — so a delete whose shadow was advanced in the meantime (by `applyRemoteRow`'s pending
+   * branch, which adopts a foreign rev while an op is queued) does not lose its rev guard at all:
+   * it goes out expecting exactly the rev the creating tab just wrote, and the server ACCEPTS it.
+   * That path never reaches a conflict branch and would delete the new row in silence. So the
+   * question "is this decision still about the row that exists?" is asked before the op is built,
+   * as well as after a refusal. */
+  function dropStaleDelete(e) {
+    const key = skey(e.kind, e.id);
+    const shad = shadow.get(key);
+    births.delete(key);
+    if (shad && shad.json && !shad.stale) {
+      readopted.set(key, now());
+      try {
+        const el = JSON.parse(shad.json);
+        if (onRowsCanonical) onRowsCanonical([{ kind: e.kind, id: e.id, el }]);
+      } catch (_) { /* unparseable → leave it to the next realtime row / refetch */ }
+    }
+    report("element-delete-vs-create-dropped", "a delete formed before the row existed was DROPPED before it was sent", { siteId, id: e.id, kind: e.kind, baseRev: e.baseRev, shadowRev: shad ? shad.rev : null });
+    onEvent({ type: "delete-vs-create-dropped", id: e.id, kind: e.kind, remote: shad ? { rev: shad.rev } : {}, authoredRecently: isRecent(e.kind, e.id) });
+    return true;
+  }
+
+  function staleAgainstBirth(e) {
+    const key = skey(e.kind, e.id);
+    // The canvas never held it → there was no deletion to express (see `remoteOnly`).
+    if (remoteOnly.has(key)) return true;
+    const born = births.get(key);
+    if (!born) return false;
+    if (typeof e.baseRev === "number" && born.rev > e.baseRev) return true;
+    return typeof e.baseAt === "number" && born.at > e.baseAt;
+  }
+
   function opFor(e) {
     if (e.cls === "create") return { op: "create", id: e.id, kind: e.kind, z: e.z, data: e.el };
     if (e.cls === "delete") return { op: "delete", id: e.id, kind: e.kind, expected: revOf(e) };
@@ -701,7 +926,7 @@ export function createElementSync(opts = {}) {
       if (r.status === "ok") {
         accepted = true;
         acceptedKeys.add(key);
-        if (e.cls === "delete") { shadow.delete(key); recordTombstone(e.kind, e.id, r.rev); } // remember the delete's rev → a stale pre-delete self-echo can't resurrect it (B757)
+        if (e.cls === "delete") { shadow.delete(key); births.delete(key); recordTombstone(e.kind, e.id, r.rev); } // remember the delete's rev → a stale pre-delete self-echo can't resurrect it (B757)
         else {
           // keep the shadow rev MONOTONIC: a foreign realtime row may have advanced it past this
           // commit's rev while the op was in flight (applyRemoteRow's in-flight branch) — adopting
@@ -736,12 +961,28 @@ export function createElementSync(opts = {}) {
             report("element-restore-conflict", "restore raced a live row", { siteId, id: e.id, kind: e.kind });
             onEvent({ type: "restore-conflict", id: e.id, kind: e.kind, remote: row });
           }
+        } else if (e.cls === "delete" && staleAgainstBirth(e)) {
+          /* NEW-1 — DELETE-vs-CREATE. The row this delete lost its rev guard to was CREATED after
+           * the delete was formed, so re-issuing it would kill an element the delete was never
+           * about. That is not the "delete wins" case below it — it is a decision that has expired.
+           * Drop the op, adopt the server's row as canonical, and hand it back to the canvas (the
+           * deleting tab does not have it, having removed it locally), then say so out loud. */
+          shadow.set(key, { kind: e.kind, id: e.id, json: row.data ? stableStringify(row.data) : "", rev: row.rev, z: row.z_index });
+          dirty.delete(key);
+          clearDeleteFloor(key);
+          births.delete(key);                        // this incarnation is settled; a later delete of it is legitimate
+          if (row.data) {
+            readopted.set(key, now());
+            if (onRowsCanonical) { try { onRowsCanonical([{ kind: e.kind, id: e.id, el: row.data }]); } catch (_) { /* adoption is best-effort */ } }
+          }
+          report("element-delete-vs-create-dropped", "a delete formed before the row existed was DROPPED, not re-issued", { siteId, id: e.id, kind: e.kind, baseRev: e.baseRev, rowRev: row.rev });
+          onEvent({ type: "delete-vs-create-dropped", id: e.id, kind: e.kind, remote: row, authoredRecently: isRecent(e.kind, e.id) });
         } else if (e.cls === "delete") {
           // delete-vs-edit: delete WINS — re-issue at the fresh rev (per the B673 matrix).
           // `stale`: the kept json predates the adopted rev — reconcileSeedRows must not
           // substitute this mixed json↔rev pairing into a refetch re-seed (NEW-1 hardening).
           shadow.set(key, { kind: e.kind, id: e.id, json: shadow.get(key)?.json || "", rev: row.rev, z: e.z, stale: true });
-          enqueue(key, { kind: e.kind, id: e.id, cls: "delete", el: null, z: e.z, direct: e.direct });
+          enqueue(key, { kind: e.kind, id: e.id, cls: "delete", el: null, z: e.z, direct: e.direct, baseRev: row.rev, baseAt: e.baseAt });
           report("element-delete-reapplied", "delete re-applied at fresh rev", { siteId, id: e.id, kind: e.kind });
           onEvent({ type: "delete-reapplied", id: e.id, kind: e.kind, remote: row });
         } else if (row.data && stableStringify(row.data) === stableStringify(e.el)) {
@@ -878,7 +1119,9 @@ export function createElementSync(opts = {}) {
   function retryNow() { attempt = 0; rejectStreak = 0; splitStreak = 0; if (backoffHandle != null) { clearTimer(backoffHandle); backoffHandle = null; } flush(); }
 
   // Ops still pending, for the keepalive unload flush (elementApi.keepaliveCommit).
-  function pendingOps() { return [...dirty.values()].map(opFor); }
+  // NEW-1 — the unload path is a send path too, and an expired delete must not ride out on it
+  // (the keepalive has no result handler at all, so a delete that lands here is unobservable).
+  function pendingOps() { return [...dirty.values()].filter((e) => !(e.cls === "delete" && staleAgainstBirth(e))).map(opFor); }
   // The pending local edits themselves — the B672 refetch-replace substitutes these back into the
   // rebuilt canvas so a full refetch never discards work still in flight. Includes the batch
   // currently IN FLIGHT (dirty wins on overlap): a refetch landing mid-commit must not rebuild the
@@ -940,6 +1183,13 @@ export function createElementSync(opts = {}) {
       if (now() - tomb.at > recentWindowMs) tombstoned.delete(key); // aged out — bound memory, let it through
       else if (!row.deleted_at && rev <= tomb.rev) return { action: "ignore" };
     }
+    /* NEW-1 — a LIVE row for a key the shadow has never held is this tab watching the element come
+     * into existence. That observation is the only honest "created at" a client can have here (the
+     * table stores none, and the RPC returns none), and it is what lets a delete formed before this
+     * moment be recognised as a decision about a row that no longer exists. It is recorded BEFORE
+     * the pending branch below on purpose: the case that matters most is precisely the one where a
+     * delete for this key is already queued. See `births` / `staleAgainstBirth`. */
+    if (!shad && !row.deleted_at && row.data) noteBirth(row.kind, row.id, rev);
     const pendDirty = dirty.get(key);
     const pendInflight = inflightKeys.get(key); // an in-flight commit is as "ours" as a dirty one
     const pend = pendDirty || pendInflight;
@@ -1065,6 +1315,9 @@ export function createElementSync(opts = {}) {
     }
     if (!sent && !semEqShadow)
       onEvent({ type: "remote-upsert", id: row.id, kind: row.kind, remote: row, existed: !!shad, authoredRecently: isRecent(row.kind, row.id) });
+    // NEW-1 — the shadow has adopted this row; whether the CANVAS does is out of our hands from
+    // here. Until a diff proves it did, a delete minted from the difference is fabricated.
+    if (!remoteOnly.has(key)) remoteOnly.set(key, { rev, at: now() });
     return { action: "upsert", kind: row.kind, id: row.id, el: row.data, row };
   }
 

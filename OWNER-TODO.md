@@ -5,7 +5,52 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-08-07._
+_Last updated: 2026-08-12._
+
+## ❓ One question on team sharing I deliberately did NOT answer for you (B326416)
+
+> Your new projects are now shared with your team automatically — **new ones only**, nothing you already
+> have moved, and that is enforced by the database rather than by the app being careful. Teammates can
+> edit a shared plan fully, and you can lock any one plan to view-only from the plan menu. Notes,
+> Library, Review and Schedule stay yours, as you asked.
+>
+> **The one thing you said nothing about, so I left it alone:** when a teammate opens a project you
+> shared, what should they see in those four private modules?
+>
+> I checked how it is built, and today the answer is already **(a) they get their own, empty Notes /
+> Library / Review / Schedule for that project** — those four are stored per-person, so this needs no
+> work at all and is what ships. The alternative, **(b) hide or lock those tabs entirely for anyone who
+> isn't the owner**, is a real change and I did not make it.
+>
+> My read is that (a) is the better default anyway — your teammate can keep their own notes on your
+> project without you seeing them, which is usually what people want. But it is a taste call, not a
+> technical one, so it is yours. **Nothing is broken either way; say the word if you'd rather have (b).**
+>
+> **One heads-up while this is waiting to go live:** I applied the database side already (that is what
+> let me prove nothing existing can leak). Until this merges and deploys, the *old* "Share with team"
+> button on the live site will refuse with a message instead of working. It affects one project and it
+> fails loudly rather than silently — but if you go to share something today and it complains, that is
+> why, and merging fixes it.
+
+## 🔎 One note of yours is sitting in the cloud with nothing pointing at it — say the word and I'll put it back (B315716)
+
+> While building the duplicate check you asked for, I found a **different** problem in your account, and it is
+> the one I'd want you to know about: there is a note with real content in it — channel improvements to slow
+> down conveyance, Willow Point MUD providing water and sanitary, the feasibility study in progress, the
+> pricing note about single-family developers offering $3–4 a foot against hoping for $10, and Hilcorp's
+> blanket easement — and **it does not appear anywhere in your notes list.** Not in a project, not in the bin.
+> It has been unreachable for days.
+>
+> **What went wrong:** the app tidies up leftover scraps every time you open Notes. This note lost the entry
+> that says where it lives, so the tidy-up treated it as a scrap and deleted the local copy — and then the next
+> sync downloaded it again, forever, with you never able to see it. That loop is now closed: the tidy-up will
+> **never** delete something that still has words in it, and when it finds one it says so and offers to put it
+> back.
+>
+> **What I need from you: nothing, unless you want it back sooner.** Next time you open Notes signed in, a line
+> at the top will say one note is filed in no project, with a **Put it back** button. It goes to "Not in a
+> project" — I deliberately do not guess which project it belonged to, because that guess is the whole bug we
+> just fixed. If you'd rather I restore it for you directly, say so and I'll do it.
 
 ## ✅ CLOSED — both jurisdiction fixes are LIVE, nothing on your end (B209502–B209509)
 

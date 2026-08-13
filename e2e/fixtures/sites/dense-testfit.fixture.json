@@ -13,10 +13,11 @@
     "updatedAt": 1783000000000,
     "teamId": null,
     "ownerId": null,
+    "shareLocked": false,
     "scheduleProjectId": null,
     "scheduleProjectName": null,
     "origin": null,
-    "county": "Harris",
+    "county": "harris",
     "status": "active",
     "parcels": [
       {

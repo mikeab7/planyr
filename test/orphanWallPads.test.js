@@ -296,7 +296,7 @@ describe("NEW-4 — assembly integrity fails loud on a bonded pad with no wall r
   });
 
   it("is wired into the SAME dev-time seam as the other assembly invariants", () => {
-    const guard = SRC.slice(SRC.indexOf("const assemblyGuard ="), SRC.indexOf("const assemblyGuard =") + 1400);
+    const guard = SRC.slice(SRC.indexOf("const assemblyGuard ="), SRC.indexOf("const assemblyGuard =") + 2600);
     expect(guard).toMatch(/reportClientEvent\("assembly-orphan-pad"/);
     expect(guard).toMatch(/orphanPayload\(res\.orphans\)/);
     // A zero-geometry repair would otherwise be discarded here (this seam ignores sub-tolerance

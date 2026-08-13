@@ -14,10 +14,16 @@
 import L from "leaflet";
 import { gisCache } from "./gisCache.js";
 import { mapillaryRequestUrl, pickDetections } from "./mapillaryClient.js";
+/* NEW-1 — the two gates below used to be module-private numbers here, which is exactly why
+ * the Layers panel could not tell the owner that a checked layer was suppressed by the zoom:
+ * nothing outside this file could see them. They now live in the leaf `layerZoomGate.js`
+ * alongside every other gate in the app, so the panel's live "not showing at this zoom" state
+ * and the runtime that actually suppresses the fetch read ONE number, never two. */
+import { OSM_MIN_ZOOM, MAPILLARY_MIN_ZOOM } from "./layerZoomGate.js";
 
 const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
-const MIN_ZOOM = 14;            // OSM power/hydrant data is dense — don't fetch zoomed out
-const MLY_MIN_ZOOM = 16;        // Mapillary bbox must be < 0.01° — high zoom only
+const MIN_ZOOM = OSM_MIN_ZOOM;       // OSM power/hydrant data is dense — don't fetch zoomed out
+const MLY_MIN_ZOOM = MAPILLARY_MIN_ZOOM; // Mapillary bbox must be < 0.01° — high zoom only
 // Overpass results ride the shared browser-local SWR cache (B75): a view paints its
 // last-known-good copy instantly and refreshes in the background, and now SURVIVES a
 // reload (the old in-memory Map did not). TTL = how long a copy is "fresh" before a

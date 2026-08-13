@@ -42,14 +42,32 @@ const stripComments = (s) => s
 const code = (rel) => stripComments(src(rel));
 
 const MODULE_ID = "notes";
-const JSX_SURFACES = ["Notes.jsx", "components/NotesTree.jsx", "components/NoteEditor.jsx"];
+const JSX_SURFACES = [
+  "Notes.jsx", "components/NotesTree.jsx", "components/NoteEditor.jsx",
+  // NEW-1…NEW-6 chrome. Added to the SURFACE list, not just the file list, so the
+  // theme-token and module-scope guards cover them like every other visible surface.
+  "components/NoteSlashMenu.jsx", "components/NoteOutline.jsx", "components/NoteHistory.jsx",
+  "components/QuickOpen.jsx",
+];
 const ALL_NOTES_FILES = [
   "Notes.jsx", "components/NotesTree.jsx", "components/NoteEditor.jsx", "components/NoteToolbar.jsx",
+  "components/NoteSlashMenu.jsx", "components/NoteOutline.jsx", "components/NoteHistory.jsx", "components/QuickOpen.jsx",
+  "components/IntegrityBanner.jsx",
   "lib/notesModel.js", "lib/notesStore.js", "lib/notesCloud.js", "lib/notesMarkdown.js", "lib/notesExtensions.js",
   "lib/notesTime.js", "lib/notesPrint.js", "lib/notesImageDb.js", "lib/notesImageIntake.js",
   "lib/notesImageNode.js", "lib/notesSearchHighlight.js", "lib/notesDocHtml.js", "lib/notesTabKey.js",
   "lib/notesSketchModel.js", "lib/notesSketchRender.js", "lib/notesSketchNode.js", "lib/notesSketchEditor.js",
   "lib/notesPastePlain.js", "lib/notesBlockKeys.js",
+  "lib/notesSlashMenu.js", "lib/notesQuickOpen.js", "lib/notesVersions.js", "lib/notesTasks.js",
+  "lib/notesOutline.js", "lib/notesFileMeta.js", "lib/notesAttachNode.js", "lib/notesCalloutNode.js",
+  "lib/notesToggleNode.js",
+  // NEW-1/NEW-4 — a copy never changes project, and the machine that notices when one did.
+  "lib/notesDuplicates.js", "lib/notesScan.js",
+  "lib/notesKeys.js", "lib/notesProjectFiling.js", "lib/notesProjectLink.js",
+  // NEW-2/NEW-3 — a block that stays where you put it, and how big the writing is.
+  "lib/notesAnchorNode.js", "lib/notesZoom.js",
+  // An abandoned press leaves nothing behind: the ONE definition of an empty block.
+  "lib/notesAnchorPrune.js",
 ];
 const SKETCH_FILES = ALL_NOTES_FILES.filter((f) => f.includes("Sketch"));
 
@@ -253,8 +271,14 @@ describe("the editor is split off the route's static path", () => {
 
   it("the pending snapshot is plain JSON captured at edit time, not queried at flush time", () => {
     const editor = src("components/NoteEditor.jsx");
-    expect(editor, "onUpdate must snapshot getJSON() into pendingRef").toMatch(/pendingRef\.current = \{ id: pageId, doc: ed\.getJSON\(\) \}/);
+    expect(editor, "onUpdate must read getJSON() at EDIT time").toMatch(/onUpdate: \(\{ editor: ed \}\) => \{\s*\n\s*const doc = ed\.getJSON\(\);/);
+    expect(editor, "…and put that plain object in pendingRef").toMatch(/pendingRef\.current = \{ id: pageId, doc \}/);
     expect(editor, "the flush writes the captured object").toMatch(/writePage\(pending\.id, pending\.doc\)/);
+    /* NEW-3 added a SECOND ref holding the same document for the version snapshot, and the
+     * separation is load-bearing: `pendingRef` is emptied by the flush, whose cleanup runs
+     * BEFORE the snapshot's on unmount, so a snapshot reading it found null every time. */
+    expect(editor, "the version snapshot keeps its own copy, which the flush never clears").toMatch(/lastDocRef\.current = \{ id: pageId, doc \}/);
+    expect(editor, "…and the unmount snapshot reads THAT ref").toMatch(/const last = lastDocRef\.current;/);
   });
 
   it("beforeunload uses the SAME flush as unmount", () => {
@@ -351,10 +375,13 @@ describe("no dialog boxes anywhere in the module (owner rule)", () => {
     expect(bar).not.toMatch(/useState\([^)]*editor\s*\./);
     /* The count stays capped as a second, blunter net. The bar's useStates are: the two
      * colour popovers' open flags, the link editor's open + href, the overflow drawer's
-     * open flag, and the table grid picker's open + hovered size + grown grid (B1372) —
-     * every one of them a transient control-chrome flag, none of them a formatting state. */
+     * open flag, the table grid picker's open + hovered size + grown grid (B1372), and the
+     * callout tone picker's open flag (NEW-7) — every one of them a transient control-chrome
+     * flag, none of them a formatting state. The callout control reads its CURRENT TONE from
+     * `editor.getAttributes("noteCallout")` on every render, which is the sharper assertion
+     * above and the reason raising this blunt cap by one is not a weakening. */
     const states = [...bar.matchAll(/useState\(/g)].length;
-    expect(states, "a mirrored active-state copy drifts the moment the caret moves").toBeLessThanOrEqual(7);
+    expect(states, "a mirrored active-state copy drifts the moment the caret moves").toBeLessThanOrEqual(8);
   });
 });
 
@@ -436,10 +463,37 @@ describe("every node and mark a note may contain has a case in the Markdown expo
  * 5. LOUD-FAILURE + the delete cascade, at the storage seam
  * ═══════════════════════════════════════════════════════════════════════════════════════ */
 describe("LOUD-FAILURE — storage is one seam and it never fails silently", () => {
+  /* ⛔ THE SEAM HAS EXACTLY ONE EXEMPTION, AND IT IS WRITTEN DOWN WITH ITS REASON (NEW-3).
+   *
+   * `lib/notesProjectLink.js` answers "what is this project holding?" for the SHARED HEADER
+   * BREADCRUMB — chrome on every route, very often nowhere near a mounted Notes module. It
+   * cannot go through `notesStore.js` for two independent reasons, both measured:
+   *   • the store points at whichever scope the workspace last set, so asking it while Notes
+   *     has never been opened answers with the SIGNED-OUT tree for a signed-in user — a
+   *     confident wrong number in a delete confirmation, the worst place for one;
+   *   • routing that route's dynamic import through the store pulled the whole storage tier
+   *     into a shared chunk and cost the Notes route 12 KB.
+   * The exemption is kept narrow by the second check below rather than by good intentions. */
+  const SEAM_EXEMPT = new Set(["lib/notesProjectLink.js"]);
+
   it("every read and write goes through lib/notesStore.js, so cloud sync is a change THERE and nowhere else", () => {
-    for (const f of ALL_NOTES_FILES.filter((x) => x !== "lib/notesStore.js")) {
+    for (const f of ALL_NOTES_FILES.filter((x) => x !== "lib/notesStore.js" && !SEAM_EXEMPT.has(x))) {
       expect(code(f), `${f} touches localStorage directly, bypassing the storage seam`).not.toMatch(/localStorage/);
     }
+  });
+
+  it("⛔ THE ONE SEAM EXEMPTION STAYS NARROW — the tree and the ledger, never a body, never a picture", () => {
+    const link = code("lib/notesProjectLink.js");
+    expect(link, "it may read the TREE key").toContain("TREE_KEY_BASE");
+    expect(link, "…and stamp the sync LEDGER, or a seed would undo the move").toContain("SYNC_KEY_BASE");
+    expect(link, "⛔ but never a page BODY — bodies belong to the store").not.toMatch(/PAGE_KEY_BASE|notes:page:/);
+    expect(link, "⛔ and never the picture tier").not.toMatch(/indexedDB|notesImageDb/);
+    expect(link, "⛔ and never the network").not.toMatch(/supabase|notesCloud/i);
+    expect(link, "it takes the account EXPLICITLY rather than reading the module's scope").toMatch(/export function projectNotes\(userId,/);
+    expect(link, "…and never re-points the store's own scope").not.toMatch(/setNotesScope/);
+    // The key strings themselves are never restated here — they come from the one leaf that
+    // holds them, so this file cannot drift from the store's idea of where a tree lives.
+    expect(link, "no hardcoded key string").not.toMatch(/"planyr:notes:/);
   });
 
   it("lib/notesImageDb.js is the ONE file that touches indexedDB — images ride the same seam", () => {
@@ -480,7 +534,13 @@ describe("LOUD-FAILURE — storage is one seam and it never fails silently", () 
     // A catch whose body has no fail() / broadcast() / return is the silent path.
     for (const m of store.matchAll(/catch\s*\([^)]*\)\s*\{([^}]*)\}/g)) {
       const body = m[1].trim();
-      const benign = /a bad listener must not mute the rest|Safari private mode/.test(m[0]) || /return\s+(null|\[\]|false|0)/.test(body);
+      /* ⛔ A CATCH IS BENIGN ONLY WHEN IT SAYS WHY, IN THE CATCH. The list is deliberately a
+         list of NAMED REASONS rather than a shape: "it returns a falsy value" would wave
+         through the next real swallowed failure that happens to return null. "A preference is
+         not data" covers the zoom level (NEW-3) — a refused read means 100%, which is a
+         correct answer, not a hidden one. */
+      const benign = /a bad listener must not mute the rest|Safari private mode|a preference is not data/.test(m[0])
+        || /return\s+(null|\[\]|false|0)/.test(body);
       expect(body.length > 0 && (/fail\(|broadcast\(/.test(body) || benign), `empty or silent catch: ${m[0].slice(0, 90)}`).toBe(true);
     }
   });
@@ -524,10 +584,22 @@ describe("LOUD-FAILURE — storage is one seam and it never fails silently", () 
   });
 
   it("the storage keys are scoped and versioned, so two accounts never read each other's notes", () => {
+    // The strings live in `notesKeys.js` — a dependency-free leaf — so the ONE other module
+    // allowed to touch them (`notesProjectLink.js`, which answers "what is this project
+    // holding?" from a route where Notes is not mounted) cannot drift from the store's idea
+    // of where a tree lives. `notesStore.js` re-exports them, so it is still the seam.
+    const keys = src("lib/notesKeys.js");
+    expect(keys).toMatch(/planyr:notes:tree:v1/);
+    expect(keys).toMatch(/planyr:notes:page:v1/);
+    expect(keys).toMatch(/planyr:notes:sync:v1/);
+    expect(keys).toMatch(/LOCAL_SCOPE = "local"/);
     const store = src("lib/notesStore.js");
-    expect(store).toMatch(/planyr:notes:tree:v1/);
-    expect(store).toMatch(/planyr:notes:page:v1/);
-    expect(store).toMatch(/LOCAL_SCOPE = "local"/);
+    expect(store, "the store re-exports them, so no importer learned they moved")
+      .toMatch(/export \{[^}]*TREE_KEY_BASE[^}]*\} from "\.\/notesKeys\.js"/);
+    const link = src("lib/notesProjectLink.js");
+    expect(link, "and the one outside reader imports them rather than restating them")
+      .toMatch(/from "\.\/notesKeys\.js"/);
+    expect(link, "…and never hardcodes a key of its own").not.toMatch(/"planyr:notes:/);
   });
 
   it("the TREE and the page BODIES are separate keys — one blob would rewrite every note per keystroke", () => {
@@ -672,9 +744,67 @@ describe("cloud sync rides the SAME one seam", () => {
     const root = code("Notes.jsx");
     expect(root).toMatch(/if \(choice === "theirs"\)/);
     expect(root, "the local body must be written to a NEW page before the conflict resolves")
-      .toMatch(/addPage\(base, hit\.parent[\s\S]{0,400}writePage\(r\.pageId, localDoc\)/);
+      .toMatch(/copyPageWithin\(base, pageId[\s\S]{0,600}writePage\(r\.pageId, localDoc\)/);
     expect(root, "and the resolution happens after that").toMatch(/resolveNotesConflict\(pageId, choice\)/);
     expect(root).toContain("ConflictBar");
+  });
+
+  /* ⛔ AND THE COPY NEVER CHANGES PROJECT (NEW-1). A note was copied into an unrelated
+   * pursuit and nobody was told; it was found by hand a week later under a "from a project
+   * you deleted" heading. The behaviour is proven in test/notesProjectIntegrity.test.js and
+   * test/notesTwoClientConflict.test.js — this guards the SHAPE that makes it unprovable to
+   * get wrong: the park may not reach for `projectId` at all, because `copyPageWithin` reads
+   * it off the source record and has no argument for one. */
+  it("⛔ THE PARK CANNOT BE HANDED A PROJECT — the fix is the missing argument", () => {
+    const root = code("Notes.jsx");
+    const park = root.slice(root.indexOf('if (choice === "theirs")'));
+    const call = park.slice(0, park.indexOf("resolveNotesConflict"));
+    expect(call, "the park must go through copyPageWithin, the one copy op").toContain("copyPageWithin(base, pageId");
+    expect(call, "and must not file the copy by a project id of its own").not.toMatch(/projectId:/);
+    expect(call, "an unknown source is REFUSED, never filed somewhere plausible").toMatch(/r\.refused/);
+    expect(call, "and the copy is named out loud when it is made").toMatch(/setExportNote\(/);
+
+    const model = code("lib/notesModel.js");
+    const fn = model.slice(model.indexOf("export function copyPageWithin"));
+    const body = fn.slice(0, fn.indexOf("\n}\n"));
+    expect(body, "the source root's project is the only project it may use")
+      .toContain("const projectId = hit.root.projectId ?? null;");
+    expect(body.match(/^export function copyPageWithin\([^)]*\)/m)[0], "no projectId parameter may exist")
+      .not.toMatch(/projectId/);
+  });
+
+  /* ⛔ SUPERSEDED, AND THE REVERSAL IS THE POINT (NEW-4). This used to pin the opposite
+   * property — "THE DETECTOR SEARCHES THE BIN" — because both copies of the original incident
+   * were binned by the time anyone looked. That is right for a FORENSIC pass and wrong for a
+   * BANNER: what it put on his screen was one copy in the bin and one in a project deleted a
+   * week earlier, with nothing to act on and Dismiss the only exit. A bar that cannot be
+   * satisfied teaches you to dismiss the one that will one day be real. */
+  it("THE BANNER'S SCAN ONLY LOOKS WHERE SOMETHING CAN BE DONE — not the bin, not dead projects", () => {
+    const scan = code("lib/notesScan.js");
+    const fn = scan.slice(scan.indexOf("export function scanNoteDuplicates"));
+    const body = fn.slice(0, fn.indexOf("\n}\n"));
+    expect(body, "the bin is not walked at all").not.toMatch(/trashEntries\(tree\)/);
+    expect(body, "and a copy in a project that no longer exists is filtered out")
+      .toMatch(/known\.has\(r\.projectId\)/);
+    expect(body, "…while a page in NO project is never filtered — nowhere is a real place")
+      .toMatch(/r\.projectId == null \|\|/);
+    expect(body, "and a finding he has settled with 'keep both' stays settled").toMatch(/duplicateKey\(g\)/);
+
+    /* ⛔ AND AN UNKNOWN PROJECT LIST NEVER READS AS "they are all dead". An empty READY list
+     * and a FAILED lookup are opposite facts, and letting the second wear the first's clothes
+     * would silently suppress a real finding. */
+    expect(code("Notes.jsx")).toMatch(/liveProjectIds: projectList\.state === "ready" \? projects\.map\(\(p\) => p\.id\) : null/);
+    // …and it is reached LAZILY, like the cloud tier: nothing on the rail's first paint
+    // needs it, and this route's byte budget is what the lazy boundary exists to protect.
+    expect(code("Notes.jsx")).toMatch(/await import\("\.\/lib\/notesScan\.js"\)/);
+  });
+
+  it("THE ORPHAN SWEEP WILL NOT DESTROY A BODY THAT STILL HAS WORDS IN IT", () => {
+    const store = code("lib/notesStore.js");
+    const fn = store.slice(store.indexOf("export function sweepOrphans"));
+    expect(fn.slice(0, 600)).toMatch(/hasWords\(readPage\(id\)\)/);
+    expect(code("lib/notesScan.js"), "and what it refused is surfaced, not silently kept forever")
+      .toContain("export function unreachableNotes");
   });
 
   it("the applied schema is committed as a record, naming the migration and the date", () => {
@@ -812,14 +942,65 @@ describe("the project a notebook belongs to", () => {
     expect(ed, "Click and Type must not set alignment from where you pressed").not.toMatch(/setTextAlign/);
     expect(ed, "and it must not pad the document to reach the press").not.toMatch(/MAX_CLICK_PARAGRAPHS|paragraphStep|gap \/ step/);
     expect(ed, "the padding's clean-up bookkeeping went with the padding").not.toMatch(/claimRef|dropClaim/);
-    // It still has to decide on the CONTENT's bottom edge — `.ProseMirror` carries a
-    // min-height, so most blank space is INSIDE it and the naive guard never fires.
-    expect(ed).toMatch(/lastElementChild[\s\S]{0,200}contentBottom/);
-    // At most ONE new line, and only when the last block is not already empty.
-    expect(ed).toMatch(/lastIsEmptyParagraph/);
-    expect(ed).toMatch(/insertContentAt\(doc\.content\.size, \{ type: "paragraph" \}\)/);
+    /* ⛔ AND THE RULE ITSELF CHANGED AGAIN, on his measurement: *"If I do a single click, it
+     * goes still goes all the way to the left."* B1393 ×3's "nearest real text position" is a
+     * LONG JUMP on a page that looks empty — the caret flies to the end of a paragraph far
+     * above, or to the end of the document. So the nearest position is now CHECKED against the
+     * page before it is taken, and a press that is not beside a line places at the press point
+     * instead. Two things must therefore be true of this file, and both are properties rather
+     * than spellings: */
+    expect(ed, "the nearest position is checked, not trusted").toMatch(/pressIsBesideLine\(editor, hit\.pos, e\.clientY\)/);
+    expect(ed, "and the tolerance is the LINE'S OWN height, read from the browser")
+      .toMatch(/coordsAtPos\(pos\)[\s\S]{0,300}c\.bottom - c\.top/);
+    // ⛔ THE END OF THE DOCUMENT IS NEVER WHERE A PRESS GOES ANY MORE — that WAS the fling.
+    expect(ed, "no press may send the caret to the end of the document").not.toMatch(/focus\("end"\)/);
+    expect(ed, "and the padding paragraph it used to add is gone with it")
+      .not.toMatch(/insertContentAt\(doc\.content\.size, \{ type: "paragraph" \}\)/);
+    expect(ed, "…along with the bookkeeping that took those paragraphs back").not.toMatch(/matInsertsRef/);
+    // ⛔ ONE GESTURE, ONE RULE: there is no separate double-click handler to disagree with it.
+    expect(ed, "a double-click must not be a second, different gesture").not.toMatch(/onDoubleClick=/);
     // …and a press ON text is still the browser's business, or word-select dies.
     expect(ed).toMatch(/if \(el\.closest\("\.ProseMirror"\)/);
+  });
+
+  it("⛔ AN ABANDONED PRESS IS PROVISIONAL — enforced at the SEAM, not only in the gesture", () => {
+    /* Five double-clicks with nothing typed produced five nodes in his storage, each with
+     * x/y/w and no text, all surviving a reload. An empty block draws nothing and still takes
+     * the press, so the next attempt at that spot lands in the leftover and appears to do
+     * nothing — which is what "it works intermittently" turned out to be. */
+    const store = read(NOTES, "lib", "notesStore.js");
+    const fn = store.slice(store.indexOf("export function writePage"));
+    expect(fn.slice(0, 900), "the save path prunes, so a crash or a closed tab cannot carry one out")
+      .toMatch(/pruneEmptyAnchors\(doc\)/);
+    expect(store, "and the one-time clean-up for notes already carrying them")
+      .toContain("export function sweepEmptyAnchors");
+    const ed = code("components/NoteEditor.jsx");
+    expect(ed, "the caret leaving takes one away").toMatch(/onSelectionUpdate[\s\S]{0,200}dropEmptyAnchors/);
+    expect(ed, "and so does losing focus altogether").toMatch(/onBlur[\s\S]{0,120}dropEmptyAnchors/);
+    expect(ed, "and Escape, for the way out that needs no second click").toMatch(/Escape[\s\S]{0,200}dropEmptyAnchors/);
+    /* ⛔ AND IT IS VISIBLE WHILE IT EXISTS. An invisible obstacle is the bug; the outline is
+     * the fix, and it is driven by the SAME predicate the storage seam uses. */
+    expect(ed).toMatch(/planyr-anchor\[data-empty="1"\]/);
+    expect(read(NOTES, "lib", "notesAnchorNode.js"), "one definition of empty, not two")
+      .toMatch(/anchorIsEmpty\(n\.toJSON\(\)\)/);
+  });
+
+  it("⛔ A PURGE IS A TOMBSTONED FACT, so emptying the bin survives a stale window", () => {
+    /* Measured with revisions: he emptied the bin (cloud rev 991, one entry), a tab still on
+     * rev 966 reloaded, and all 23 entries came back AND were pushed up as rev 992. A union
+     * merge cannot represent a deletion, because a deletion is an absence. */
+    const model = read(NOTES, "lib", "notesModel.js");
+    expect(model).toContain("export function tombstoneIds");
+    expect(model).toContain("export function withTombstones");
+    const purge = model.slice(model.indexOf("export function purgeTrashEntry"));
+    expect(purge.slice(0, 800), "the purge records the entry id AND every page id it named")
+      .toMatch(/withTombstones\(next, \[entryId, e\?\.node\?\.id, \.\.\.pageIds\]/);
+    const cloud = read(NOTES, "lib", "notesCloud.js");
+    const merge = cloud.slice(cloud.indexOf("export function mergeTrees"));
+    expect(merge.slice(0, 4000), "rule 0 runs before the union").toMatch(/const tombs = new Set\(\[\.\.\.tombstoneIds\(L\), \.\.\.tombstoneIds\(S\)\]\)/);
+    expect(merge.slice(0, 6000), "a tombstoned entry never survives").toMatch(/if \(tombs\.has\(String\(e\.id\)\)\) continue;/);
+    expect(merge.slice(0, 9000), "…nor a tombstoned live node").toMatch(/deleted\.has\(pg\.id\) \|\| tombs\.has\(String\(pg\.id\)\)/);
+    expect(merge.slice(0, 9000), "and the ledger rides on to the next stale client").toMatch(/tombs: withTombstones/);
   });
 
   it("⛔ TAB HAS A DEFINED ANSWER IN EVERY CONTEXT, and none of them destroys content (B1392 ×2)", () => {

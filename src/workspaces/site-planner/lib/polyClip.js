@@ -9,6 +9,7 @@
 // for convex AND concave lots, not just rectangles.
 
 import { polyArea } from "./polygonSplit.js";
+import { parcelExceptSqft } from "./parcelArea.js"; // NEW-2 — save-and-except holes come off the site area (leaf module: this file is on the boot path)
 import ClipperLib from "clipper-lib";
 
 const EPS = 1e-9;
@@ -151,14 +152,21 @@ const isValidRing = (r) =>
 // hot render path may pass a precomputed `overlapPairs` (from overlappingParcelPairs) to avoid
 // re-running the O(n²) overlap scan twice per render.
 export function dissolvedParcelSqft(parcels, overlapPairs) {
-  const rings = (Array.isArray(parcels) ? parcels : [])
-    .filter((p) => p && p.active !== false && isValidRing(p.points))
-    .map((p) => p.points);
+  const active = (Array.isArray(parcels) ? parcels : [])
+    .filter((p) => p && p.active !== false && isValidRing(p.points));
+  const rings = active.map((p) => p.points);
   if (rings.length === 0) return 0;
+  /* NEW-2 — SAVE-AND-EXCEPT holes come off the site area. A deed promoted to a parcel carries its
+   * carved-out tracts as `exceptions`; that land is inside the outline but is not part of the
+   * property, so counting it would overstate the site — and every yield, coverage, detention and
+   * mitigation number is computed off this one figure. Deducted from the union too (an exception
+   * is interior to its own parcel, so it survives any dissolve of overlapping neighbours). */
+  const except = active.reduce((s, p) => s + parcelExceptSqft(p), 0);
+  const lessExcept = (a) => Math.max(0, a - except);
   const sum = rings.reduce((s, r) => s + polyArea(r), 0);
-  if (rings.length === 1) return sum;
+  if (rings.length === 1) return lessExcept(sum);
   const pairs = overlapPairs !== undefined ? overlapPairs : overlappingParcelPairs(parcels);
-  if (!pairs || !pairs.length) return sum; // no genuine overlap → the sum already counts each once
+  if (!pairs || !pairs.length) return lessExcept(sum); // no genuine overlap → the sum already counts each once
   try {
     const clip = new ClipperLib.Clipper();
     for (const r of rings) {
@@ -170,11 +178,11 @@ export function dissolvedParcelSqft(parcels, overlapPairs) {
     clip.Execute(ClipperLib.ClipType.ctUnion, sol, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
     // Sum SIGNED areas so any holes (opposite winding) net out; the union can never exceed the
     // additive sum, so clamp — and never silently report 0 for rings that clearly have area.
-    let net = 0;
-    for (const p of sol) net += ClipperLib.Clipper.Area(p);
-    const area = Math.abs(net) / (UNION_SCALE * UNION_SCALE);
-    return area > 0 ? Math.min(area, sum) : sum;
+    let signed = 0;
+    for (const p of sol) signed += ClipperLib.Clipper.Area(p);
+    const area = Math.abs(signed) / (UNION_SCALE * UNION_SCALE);
+    return lessExcept(area > 0 ? Math.min(area, sum) : sum);
   } catch {
-    return sum; // degenerate/self-intersecting geometry → the honest additive sum, never a crash or false 0
+    return lessExcept(sum); // degenerate/self-intersecting geometry → the honest additive sum, never a crash or false 0
   }
 }

@@ -9,6 +9,7 @@ import { casUpsert, keepaliveCasPush, isMissingVersionColumn, isMissingColumn } 
 import { makeWriteSerializer } from "../../../shared/cloud/serializeWrites.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { stableStringify } from "./elementSync.js";
+import { normCountyKey } from "../../../shared/gis/countyKeys.js";
 
 // Per-tab memory of the `version` we last synced for each site, so a save can be a
 // compare-and-swap that REJECTS a stale write instead of silently clobbering (B314).
@@ -83,7 +84,10 @@ export function slimForCloud(model) {
   // teamId — embedding it here (and worse, in the row's team_id column, fixed in cloudUpsertCore)
   // is how one ordinary autosave silently un-shared a just-shared project. ownerId is likewise a
   // read-time overlay of the user_id column. Stripping both also keeps headerSig share-neutral.
-  const { teamId: _team, ownerId: _owner, ...noShare } = m;
+  // shareLocked joins them (B326417): it is a COLUMN the owner sets through set_plan_lock, and a
+  // read-time overlay on the way back. Letting it ride the jsonb would put a second, staler copy of
+  // an access decision in the payload — the exact shape of the B714 bug.
+  const { teamId: _team, ownerId: _owner, shareLocked: _locked, ...noShare } = m;
   return noShare;
 }
 
@@ -98,7 +102,11 @@ export function slimForCloud(model) {
 export function siteRowFor(m, { isNew = false, teamId = null } = {}) {
   const row = {
     id: m.id,
-    group_id: m.groupId || null, site: m.site || null, name: m.name || null, county: m.county || null,
+    // NEW-4 — the `county` COLUMN is normalised on the way out too, not just the model field.
+    // `createSiteModel` already normalises what the app holds, but a row can also be written from
+    // a header-only path that never round-tripped the model; this is the last gate before the
+    // column, so no new mixed-case row can be created from this client whatever route it took.
+    group_id: m.groupId || null, site: m.site || null, name: m.name || null, county: normCountyKey(m.county),
     updated_at: new Date(m.updatedAt || Date.now()).toISOString(),
     data: m,
   };
@@ -338,12 +346,19 @@ export async function cloudList(uid) {
   // reaches the merge, the list, or the map. The filter is dropped on a pre-migration DB (no
   // deleted_at column), where nothing can be soft-deleted anyway.
   const live = (q) => q.is("deleted_at", null);
-  let { data, error } = await live(supabase.from("sites").select("data, version, team_id, user_id")).order("updated_at", { ascending: false });
+  let { data, error } = await live(supabase.from("sites").select("data, version, team_id, user_id, share_locked")).order("updated_at", { ascending: false });
   if (error && isMissingColumn(error, "deleted_at"))
-    ({ data, error } = await supabase.from("sites").select("data, version, team_id, user_id").order("updated_at", { ascending: false }));
+    ({ data, error } = await supabase.from("sites").select("data, version, team_id, user_id, share_locked").order("updated_at", { ascending: false }));
   // Pre-migration fallbacks: team_id (db/team_sharing.sql) then version (db/optimistic_concurrency.sql)
   // may not exist yet → re-select with fewer columns so loading never breaks before they're run.
   // Each tier re-applies the deleted_at filter (and drops it the same way if that column is absent).
+  // B326417 — share_locked (db/team_share_default.sql) is the newest column, so it gets the first
+  // fallback rung: drop only it and keep the sharing columns, which are an older migration.
+  if (error && isMissingColumn(error, "share_locked")) {
+    ({ data, error } = await live(supabase.from("sites").select("data, version, team_id, user_id")).order("updated_at", { ascending: false }));
+    if (error && isMissingColumn(error, "deleted_at"))
+      ({ data, error } = await supabase.from("sites").select("data, version, team_id, user_id").order("updated_at", { ascending: false }));
+  }
   if (error && isMissingColumn(error, "team_id")) {
     ({ data, error } = await live(supabase.from("sites").select("data, version")).order("updated_at", { ascending: false }));
     if (error && isMissingColumn(error, "deleted_at"))
@@ -367,6 +382,16 @@ export async function cloudList(uid) {
     if (!m) return null;
     if (r && "team_id" in r) m.teamId = r.team_id || null;   // DB column is the source of truth for sharing
     if (r && "user_id" in r) m.ownerId = r.user_id || null;  // who created/owns it (for "owned by teammate")
+    if (r && "share_locked" in r) m.shareLocked = !!r.share_locked; // B326417 — owner's view-only lock
+    /* NEW-2 — stamp the mirror EXPLICITLY, so the merge can tell "the cloud says private" (team_id
+     * present and null) from "the cloud did not say" (pre-migration DB, no such column). Overlaying
+     * the three fields above is not enough on its own: `mergePulledSites` folds this row against the
+     * local cache with `mergeSiteContent`, which picks scalars from whichever copy has the newer
+     * `updatedAt` — and the local copy is routinely newer (B458's mirror write), so the authority
+     * read here was being thrown away again one function later. `shareMirror` is NOT a Site Model
+     * field: createSiteModel drops it, so it can never be persisted or pushed back as a second copy
+     * of an access decision (B714). */
+    if (r && "team_id" in r) m.shareMirror = { teamId: r.team_id || null, ownerId: r.user_id || null, shareLocked: !!r.share_locked };
     // Seed the header-content baseline from what the cloud ALREADY has (post-overlay, so it matches
     // the shape a local push would send). If the local copy turns out identical, even the boot
     // re-push skips — no per-load version churn. Any real local difference still pushes.

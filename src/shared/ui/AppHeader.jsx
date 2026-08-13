@@ -27,16 +27,27 @@
  *                                    3-zone tabs|center|toolbar layout (center optically centered
  *                                    like Row 1). Absent (Site/Review) ⇒ unchanged 2-zone layout.
  *
- * Fullscreen (NEW-1): F asks the browser for REAL fullscreen — the Fullscreen API on
- * document.documentElement — and hides the header on top of it, so the workspace fills the
- * screen edge to edge with no tab strip, no address bar and no OS taskbar. The document ROOT
- * is deliberately the target: fullscreening a subtree would hide every position:fixed overlay
- * that lives outside it, the exit button included. Where the request is refused or the API is
- * absent (iOS Safari has no fullscreen for non-video elements) it falls back to the previous
- * behaviour — hiding the header alone — rather than doing nothing. The header is driven FROM
- * the document's real fullscreen state via `fullscreenchange`, so Esc, F11 or the browser's own
- * exit affordance can never leave the two disagreeing. Esc (or the exit button) restores it.
- * When hidden the workspace's flex: 1 content fills 100 % of viewport height.
+ * ⛔ FULLSCREEN (B1156 · B1173 ×2) — THE HEADER STAYS. BOTH ROWS. ALWAYS.
+ * `F` asks the browser for REAL fullscreen (the Fullscreen API on document.documentElement), and
+ * what that reclaims is the BROWSER's chrome: the tab strip, the address bar, the OS taskbar. It
+ * does not reclaim ours. B1156 additionally hid this header, and B1173 — filed because that left
+ * fullscreen a dead end with no way to change plan or workspace — answered with a top-edge hover
+ * reveal. The owner's second report says that answer is not good enough, verbatim: "to switch
+ * between projects, I have to exit full screen, which is kind of annoying. That's not how it's
+ * supposed to work. I should still have the two headers at the top when I go into full screen."
+ * Switching plans is a PRIMARY action during a review, and a hover-to-reveal costs a deliberate
+ * gesture every time. So the header now renders BYTE-IDENTICALLY in and out of fullscreen: in
+ * flow, both rows, no slide, no reveal timers, no floating exit button. If screen area has to come
+ * from somewhere it is never from the navigation.
+ * The document ROOT is deliberately the fullscreen target: fullscreening a subtree would hide
+ * every position:fixed overlay that lives outside it. The header's own state is driven FROM the
+ * document via `fullscreenchange`, so Esc, F11 or the browser's own exit affordance can never
+ * leave the two disagreeing.
+ * ⛔ AND THERE IS NO CHROME-HIDE FALLBACK ANY MORE (LOUD-FAILURE). It existed so a refused request
+ * still did SOMETHING visible; with the header staying put it would now do nothing at all, which
+ * is a silent no-op wearing a feature's clothes. A refusal (a permissions policy, an iframe with
+ * no allow="fullscreen", iOS Safari, which has no fullscreen for a non-video element) says so in
+ * a short notice instead.
  */
 import { useEffect, useRef, useState } from "react";
 import ProjectBreadcrumb from "./ProjectBreadcrumb.jsx";
@@ -47,22 +58,16 @@ import BrandMark from "../brand/BrandMark.jsx";
 import { prefetchModule } from "../../app/modulePrefetch.js";
 import { MODULE_ACCENT } from "./moduleAccent.js";
 import { useTheme } from "../theme/ThemeProvider.jsx";
-import ThemePicker from "../theme/ThemePicker.jsx";
+import InterfaceSettings from "./InterfaceSettings.jsx";
 
 // Chrome colors are theme tokens (var(--chrome-*)) so the header themes WITH the app
 // (B318): light theme = light chrome, dark theme = dark chrome.
 const CHROME = "var(--chrome-bg-elev)";
 const LINE   = "var(--chrome-divider)";
 
-/* NEW-1 — the fullscreen top-edge reveal, tuned so it can't be triggered by accident.
- * ARM on the pointer genuinely REACHING the top edge, not merely being in the upper region — the
- * top row of the screen is a place you only get to deliberately (it is also where the OS parks the
- * pointer on an overshoot, which is why the intent delay exists). HOLD the reveal for a moment
- * after the pointer leaves so a hand travelling to a tab or the switcher never races it. */
-const FS_EDGE_PX = 3;        // how close to the very top edge the pointer must come to arm
-const FS_ARM_MS = 220;       // intent delay: a fast cursor crossing the top must not flash it open
-const FS_HIDE_MS = 400;      // grace before it slides away once the pointer has genuinely left
-const FS_HOLD_PX = 60;       // band below the header that still counts as "on it" (covers the exit button)
+// B1173(×2) — how long the "your browser wouldn't allow full screen" notice stays up. Long enough
+// to read, short enough that it never becomes furniture.
+const FS_NOTICE_MS = 5000;
 // Inactive module tabs: full-opacity, muted-but-legible (meets WCAG AA on the chrome).
 // NOT a low-opacity/disabled treatment — inactive must read as clearly clickable. (B167)
 const TAB_IDLE = "var(--chrome-tab-inactive)";
@@ -110,7 +115,10 @@ function writeableDocumentOnScreen() {
 /* NEW-3/B291538 — fullscreen's VISIBLE home. Before this it had no control at all: the only
  * ways in were a bare `f` and folklore, which is what made the shortcut worth defending even
  * as it swallowed the owner's typing. A button costs one 30×26 slot in the row-1 right zone
- * and makes the mode discoverable, which is the half of the fix that is not a bug fix. */
+ * and makes the mode discoverable, which is the half of the fix that is not a bug fix.
+ * B1173(×2): it is also now the ONLY exit control, and it can be, because the header it sits in
+ * no longer goes anywhere — the floating "✕ Exit fullscreen" button existed solely to give a
+ * hidden header a way back. */
 function FullscreenButton({ active, onToggle }) {
   return (
     <button
@@ -149,7 +157,7 @@ function SettingsMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Settings"
-        title="Settings: display theme"
+        title="Settings: display theme, smooth zoom"
         style={{
           display: "grid", placeItems: "center", width: 30, height: 26, borderRadius: 7,
           border: `1px solid ${LINE}`, background: "var(--chrome-bg)", color: "var(--chrome-text)",
@@ -163,8 +171,10 @@ function SettingsMenu() {
         </svg>
       </button>
       <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchor}
-        placement="below-right" width={206} gap={8} panelStyle={settingsPanel}>
-        <ThemePicker />
+        placement="below-right" width={230} gap={8} panelStyle={settingsPanel}>
+        {/* NEW-1 — the same Interface section the signed-in Settings panel renders (theme +
+            smooth zoom), from the ONE component, so the two homes cannot disagree. */}
+        <InterfaceSettings />
       </AnchoredMenu>
     </>
   );
@@ -414,13 +424,17 @@ export default function AppHeader({
   // mobile). Defaults off so any unwired caller stays silent.
   accountActive = false,
 }) {
-  // `fullscreen` means "the header is collapsed and the workspace owns the whole viewport". It is
-  // true in BOTH modes: real browser fullscreen (the normal case) and the chrome-hide fallback.
+  /* B1173(×2) — `fullscreen` now means exactly one thing: THE BROWSER IS IN FULLSCREEN AND THIS
+     HEADER IS THE ONE ON SCREEN. It no longer means "the chrome is collapsed", because the chrome
+     is never collapsed. Its only effects are the toggle button's pressed state and label, and the
+     `data-fullscreen` marker a headless check reads to prove exactly one header claimed the mode. */
   const [fullscreen, setFullscreen] = useState(false);
   const fullscreenRef = useRef(false); fullscreenRef.current = fullscreen; // live value for the once-bound key handler
-  // NEW-1 — true only while the BROWSER is really in fullscreen. It decides who owns the exit:
-  // the Fullscreen API (and the fullscreenchange that follows) vs. plain React state.
+  // Set when WE adopted the document's fullscreen, so a `fullscreenchange` we did not cause (a
+  // <video> elsewhere on the page exiting) cannot yank this header's state around.
   const nativeFsRef = useRef(false);
+  // B1173(×2) — the refusal notice (see the file header: no silent no-op).
+  const [fsNotice, setFsNotice] = useState("");
   const headerRef = useRef(null); // visibility probe for the keep-alive gate below
   /* NEW-1 (2026-07-30) — the KEEP-ALIVE probe, and why it is `getClientRects()` and not
      `offsetParent`. Workspaces are kept mounted-but-hidden (`display:none`), so every workspace's
@@ -433,12 +447,6 @@ export default function AppHeader({
      no fullscreen exception — which is the hazard #869's own harness caught (two workspaces both
      answering one `fullscreenchange` and each drawing its own exit button). */
   const headerOnScreen = () => !!(headerRef.current && headerRef.current.getClientRects().length);
-  /* NEW-1 — TOP-EDGE REVEAL. `f` is a real mode people stay in, so fullscreen can no longer be a
-     dead end: the WHOLE header (breadcrumb, project + plan switcher, module tabs, toolbar) slides
-     down when the pointer reaches the very top edge, and slides away again when it leaves. The
-     canvas stays edge-to-edge while working because the header is out of flow the entire time. */
-  const [fsReveal, setFsReveal] = useState(false);
-  const fsRevealRef = useRef(false); fsRevealRef.current = fsReveal;
   const { resolved } = useTheme();
   const multiTab = useMultiTab(accountActive && currentProject && !multiEditOk ? currentProject.id : null); // B313 — same-project-in-another-tab warning (signed-in only; suppressed when the workspace multi-writes, B674)
   // NEW-1 (2026-07-15) — the banner is dismissible (a small ×), unlike before. `dismissed` resets
@@ -458,23 +466,19 @@ export default function AppHeader({
   const rowScroll = narrow ? { overflowX: "auto", overflowY: "hidden" } : null;
   const zoneFixed = narrow ? { flex: "0 0 auto" } : null; // don't let a zone compress its content away
 
-  /* NEW-1 — leave fullscreen. Native mode hands the job to the browser and lets the resulting
-     `fullscreenchange` restore the header; fallback mode (the request was refused, or there is
-     no API) never entered browser fullscreen, so it just puts the chrome back. */
-  const leaveFullscreen = () => {
-    if (nativeFsRef.current) { exitFs(); return; }
-    setFullscreen(false);
-  };
-  /* NEW-1 — enter/leave. The keypress IS the user activation the Fullscreen API requires, so the
-     request is made straight out of the key handler, not deferred. `requestFs()` returns a promise
-     that CAN reject (refused, or unsupported — iOS Safari has no fullscreen for a non-video
-     element): on rejection we still hide the header, which is exactly the behaviour this shortcut
-     had before, rather than the keypress appearing to do nothing. */
+  /* Enter/leave. The keypress IS the user activation the Fullscreen API requires, so the request
+     is made straight out of the key handler, not deferred. `requestFs()` can REJECT (a permissions
+     policy, an iframe without allow="fullscreen", or no API at all — iOS Safari has no fullscreen
+     for a non-video element). B1173(×2): there is no chrome-hide fallback to fall into any more,
+     so a rejection SAYS SO rather than doing nothing visible. */
   const toggleFullscreen = () => {
-    if (fullscreenRef.current) { leaveFullscreen(); return; }
-    requestFs().catch(() => { nativeFsRef.current = false; setFullscreen(true); });
-    // On success the header is hidden by the fullscreenchange handler below, not from here —
-    // one owner for the state, so entering can't race the event that reports it.
+    if (fullscreenRef.current) { exitFs(); return; }
+    requestFs().catch(() => {
+      nativeFsRef.current = false;
+      setFsNotice("Your browser wouldn't allow full screen here.");
+    });
+    // On success the state is set by the fullscreenchange handler below, not from here — one
+    // owner for the state, so entering can't race the event that reports it.
   };
   const toggleRef = useRef(toggleFullscreen); toggleRef.current = toggleFullscreen;
 
@@ -518,11 +522,7 @@ export default function AppHeader({
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || e.target.isContentEditable) return;
       // Keep-alive gate: with workspaces kept mounted-but-hidden, EVERY workspace's header has this
       // window listener. A hidden header (a `display:none` ancestor ⇒ no client rects) must ignore
-      // the shortcut, or one keypress toggles fullscreen in all of them. NEW-1 (2026-07-30) — this
-      // used to carry a `!fullscreenRef.current` exception, because the collapsed header rendered
-      // only a position:fixed button and `offsetParent` is null for fixed elements. The header is
-      // now fixed for the whole fullscreen session, so the exception would have swallowed `f` (no
-      // way back out) — `headerOnScreen()` needs no exception and is checked unconditionally.
+      // the shortcut, or one keypress toggles fullscreen in all of them.
       if (!headerOnScreen()) return;
       /* ⛔ A BARE LETTER IS NEVER A GLOBAL COMMAND WHILE A WRITEABLE DOCUMENT IS ON SCREEN
          (B291538). The owner's report was *"double-click on a blank part of the page, then
@@ -541,65 +541,30 @@ export default function AppHeader({
          unreachable. Where there is no document (the Site Planner canvas, the map) the bare
          `f` is untouched, which is why ui-audit/verify-new1-fullscreen.mjs still passes. */
       if ((e.key === "f" || e.key === "F") && !e.altKey && !writeableDocumentOnScreen()) toggleRef.current();
-      // NEW-1 — do NOT fight Esc. In real fullscreen the browser consumes it and exits on its own;
-      // `fullscreenchange` then restores the header. Acting here as well would be a second toggle
-      // over the top of that. Esc only does the work in the chrome-hide fallback, where nothing
-      // else is going to.
-      if (e.key === "Escape" && !nativeFsRef.current) setFullscreen(false);
+      // ⛔ Do NOT fight Esc. In real fullscreen the browser consumes it and exits on its own, and
+      // `fullscreenchange` reports that here. Acting on it as well would be a second toggle over
+      // the top of that. B1173(×2) retired the chrome-hide fallback, which was the only branch Esc
+      // ever owned, so this handler has nothing left to do with it.
     };
     window.addEventListener("keydown", handle);
     return () => window.removeEventListener("keydown", handle);
   }, []);
 
-  /* NEW-1 — drive the top-edge reveal. Bound ONLY while this header is the fullscreen one, and
-     every evaluation re-checks `headerOnScreen()`, so a hidden workspace's header can never reveal
-     itself (the same hazard the shortcut and the fullscreenchange handler are gated for).
-
-     Two guarantees the owner asked for by name:
-       · it arms on the pointer REACHING the top edge (within FS_EDGE_PX), never on being merely
-         "up there", and only after FS_ARM_MS of intent — so a cursor flicking across the top on its
-         way somewhere else never flashes the chrome open;
-       · it does NOT hide while you are reaching for what it revealed. Three things hold it open:
-         the pointer being on the header (or in the band just under it, where the exit button
-         lives), a dropdown opened FROM the header still being on screen (`data-menu-owner`, since
-         AnchoredMenu portals its panel to <body> and so leaves the header's subtree), and keyboard
-         focus living inside it. The hold conditions are re-checked when the hide timer FIRES, not
-         only when it is set, so opening a menu during the grace period cancels the hide. */
+  // B1173(×2) — the refusal notice clears itself; it is a report, not a state to manage.
   useEffect(() => {
-    if (!fullscreen) { setFsReveal(false); return undefined; }
-    let timer = 0;
-    const clearT = () => { if (timer) { clearTimeout(timer); timer = 0; } };
-    const holdOpen = () => {
-      const el = headerRef.current;
-      if (!el) return false;
-      if (document.querySelector('[data-menu-owner="app-header"]')) return true;
-      return el.contains(document.activeElement);
-    };
-    const onMove = (e) => {
-      if (!headerOnScreen()) return;
-      if (fsRevealRef.current) {
-        const r = headerRef.current.getBoundingClientRect();
-        if (e.clientY <= r.bottom + FS_HOLD_PX || holdOpen()) { clearT(); return; }
-        if (!timer) timer = setTimeout(() => { timer = 0; if (!holdOpen()) setFsReveal(false); }, FS_HIDE_MS);
-        return;
-      }
-      if (e.clientY > FS_EDGE_PX) { clearT(); return; }
-      if (!timer) timer = setTimeout(() => { timer = 0; if (headerOnScreen()) setFsReveal(true); }, FS_ARM_MS);
-    };
-    window.addEventListener("pointermove", onMove, { passive: true });
-    return () => { window.removeEventListener("pointermove", onMove); clearT(); };
-  }, [fullscreen]);
+    if (!fsNotice) return undefined;
+    const t = setTimeout(() => setFsNotice(""), FS_NOTICE_MS);
+    return () => clearTimeout(t);
+  }, [fsNotice]);
 
-  /* NEW-1 — HAND THE FULLSCREEN MODE OVER when the workspace changes. Making the module tabs
-     reachable from inside fullscreen creates a case that could not arise before, because you could
-     not switch workspaces at all: every workspace owns its own AppHeader, and the incoming one was
-     `display:none` when `f` was pressed, so the keep-alive gate correctly kept it out of the
-     `fullscreenchange` — leaving it convinced it was NOT fullscreen while the document still was.
-     That would strand you in browser fullscreen behind an ordinary in-flow header, with no exit
-     button and `f` DEAD (requesting fullscreen on an already-fullscreen document resolves without
-     firing another `fullscreenchange`, so nothing would answer the key). The outgoing header has
-     the mirror problem: left claiming fullscreen it renders a second, invisible exit button — the
-     exact "two stacked" defect the #869 harness exists to catch.
+  /* HAND THE FULLSCREEN MODE OVER when the workspace changes. Every workspace owns its own
+     AppHeader, and the incoming one was `display:none` when `f` was pressed, so the keep-alive gate
+     correctly kept it out of the `fullscreenchange` — leaving it convinced it was NOT fullscreen
+     while the document still was. That would strand you in browser fullscreen with `f` DEAD
+     (requesting fullscreen on an already-fullscreen document resolves without firing another
+     `fullscreenchange`, so nothing would answer the key) and the toggle button showing the wrong
+     label. The outgoing header has the mirror problem: left claiming fullscreen, two headers claim
+     the mode at once — which is the "two stacked" defect the #869 harness exists to catch.
 
      A ResizeObserver is the signal, because becoming visible changes no prop and fires no event:
      toggling a `display:none` ancestor takes the header from no box at all to a real one. */
@@ -611,11 +576,11 @@ export default function AppHeader({
         if (fullscreenRef.current) { nativeFsRef.current = false; setFullscreen(false); } // relinquish on the way out
         return;
       }
+      // Adopt the DOCUMENT's truth on the way in. With the chrome-hide fallback gone (B1173 ×2)
+      // the document IS the whole answer — there is no mode this header can be in that the
+      // Fullscreen API does not know about.
       const real = !!fsElement();
-      // Adopt the DOCUMENT's truth on the way in. The `nativeFsRef` half of the condition protects
-      // the chrome-hide fallback (where `fsElement()` is legitimately null while fullscreen is on)
-      // from being cancelled by its own arrival.
-      if (real !== fullscreenRef.current && (real || nativeFsRef.current)) { nativeFsRef.current = real; setFullscreen(real); }
+      if (real !== fullscreenRef.current) { nativeFsRef.current = real; setFullscreen(real); }
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -625,30 +590,13 @@ export default function AppHeader({
   // must be the AA-passing -text token, never the fill (fill-as-text = 3.4:1, B341/B318).
   const accent = ACCENT_TEXT[module] || "var(--accent)";
 
-  /* NEW-1 — the exit affordance. It is a CHILD of the <header>, absolutely positioned just below
-     it, so it rides the same slide transform and needs no measurement of the header's height:
-     while the header sits at translateY(-100%) the button lands at exactly the top-right corner it
-     has always occupied, and when the header slides in the button rides down to sit under it —
-     never overlapping the chrome, never a second thing to keep in sync. `pointerEvents: "auto"`
-     overrides the header's own `none` so it stays clickable the whole time the chrome is hidden. */
-  const exitFullscreenBtn = fullscreen ? (
-    <button
-      onClick={leaveFullscreen}
-      data-testid="exit-fullscreen"
-      title="Exit fullscreen (Esc)"
-      style={{
-        position: "absolute", top: "100%", right: 12, marginTop: 10, zIndex: 1,
-        pointerEvents: "auto",
-        padding: "5px 12px", borderRadius: 8,
-        background: "rgba(20,17,14,0.72)", color: "rgba(255,255,255,0.85)",
-        border: "1px solid rgba(255,255,255,0.18)",
-        cursor: "pointer", fontFamily: "system-ui, sans-serif",
-        fontSize: 11.5, fontWeight: 600,
-      }}
-    >
-      ✕ Exit fullscreen
-    </button>
-  ) : null;
+  /* ⛔ B1173(×2) — THE FLOATING "✕ Exit fullscreen" BUTTON IS GONE, and its removal is the point
+     rather than a tidy-up. It existed for exactly one reason: a hidden header has no exit control,
+     so one had to float over the canvas. The header no longer hides, so the button became a second
+     control for a job the row-1 toggle already does — and a second thing painted over the drawing,
+     which is the opposite of what fullscreen is for. `data-testid="toggle-fullscreen"` with
+     `aria-pressed` is now the one exit affordance, and the three harnesses that reached for
+     `exit-fullscreen` were re-aimed at it in the same commit. */
 
   // Module tabs — shared by both Row-2 layouts (with and without the B387 center slot)
   // so the per-tab wiring is defined once.
@@ -660,44 +608,47 @@ export default function AppHeader({
     <>
     <header
       ref={headerRef}
-      /* NEW-1 — the scope marker AnchoredMenu stamps onto its portalled panels, so the reveal can
-         tell "my own dropdown is open" from "nothing is open" (a portal leaves this subtree). */
+      /* The scope marker AnchoredMenu stamps onto its portalled panels, so a menu opened FROM the
+         header can be recognised as ours after it leaves this subtree. */
       data-menu-scope="app-header"
-      style={{
-        flex: "none",
-        background: CHROME,
-        borderBottom: `1px solid ${LINE}`,
-        /* NEW-1 — in fullscreen the header leaves the flow entirely and becomes a slide-in panel
-           pinned to the top edge, so the workspace canvas keeps the WHOLE viewport while you work
-           and the chrome costs nothing until you ask for it. `translateY(-100%)` is relative to the
-           header's own height, so nothing needs measuring and the two rows can change height freely.
-           `pointerEvents: none` while hidden is the belt to the transform's braces: even mid-
-           transition the header can never swallow a click meant for the canvas underneath. Out of
-           fullscreen this is byte-identical to what it always was. */
-        ...(fullscreen
-          ? {
-              position: "fixed", top: 0, left: 0, right: 0, zIndex: 9998,
-              transform: fsReveal ? "translateY(0)" : "translateY(-100%)",
-              transition: "transform 170ms cubic-bezier(0.4, 0, 0.2, 1)",
-              pointerEvents: fsReveal ? "auto" : "none",
-              boxShadow: fsReveal ? "0 6px 20px rgba(0,0,0,0.28)" : "none",
-              willChange: "transform",
-            }
-          : { position: "relative", zIndex: 60 }),
-      }}
-      data-fs-reveal={fullscreen ? (fsReveal ? "shown" : "hidden") : undefined}
+      /* ⛔ B1173(×2) — ONE STYLE, IN AND OUT OF FULLSCREEN. There is deliberately no `fullscreen`
+         branch here any more: both rows stay in flow, at the top, always. The mode is still
+         REPORTED (`data-fullscreen`) so a headless check can prove exactly one header claims it —
+         it just no longer changes where the chrome is. */
+      style={{ flex: "none", background: CHROME, borderBottom: `1px solid ${LINE}`, position: "relative", zIndex: 60 }}
+      data-fullscreen={fullscreen ? "on" : undefined}
     >
-      {exitFullscreenBtn}
       {/* ── Row 1 — 35px (−20% from 44 per B169; contents stay vertically centered) ── */}
       <div className={narrow ? "no-hscrollbar" : undefined} style={{ height: 35, display: "flex", alignItems: "center", ...rowScroll }}>
 
-        {/* Left zone. Desktop: clip overflow so a long breadcrumb (project + plan) can never
-            paint OVER the centered badge — the "text overlaps and looks like shit" bug the owner
-            reported. The breadcrumb's project crumb already ellipsis-truncates; this guarantees
-            nothing spills past the zone edge if it's still wider than its share. (Dropdowns
-            portal to <body>, so overflow:hidden here never clips a menu.) Narrow keeps the
-            zoneFixed no-shrink so the whole row scrolls sideways instead — unchanged. */}
-        <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 4, paddingLeft: 12, minWidth: 0, ...(narrow ? zoneFixed : { overflow: "hidden" }) }}>
+        {/* ⛔ NEW-2 — NAVIGATION WINS. Read this before changing any of the three zone flexes.
+            The owner could not open the plan switcher on a laptop: "the unincorporated / city of
+            Houston / ETJ / Harris County chip is too big and it covers it." Measured at a 1191 px
+            viewport — the pill overlapped the plan chip's box by a sliver, and `elementFromPoint`
+            along the chip's right edge returned THE PILL'S TEXT SPAN for the last stretch of it,
+            the ▾ CARET INCLUDED. NOT a z-index or overlay problem (the pill is position:static,
+            z-index:auto): plain flex overflow, a pill that would not shrink running over its
+            neighbour.
+
+            The zones used to be `1 | 0 1 auto (max 40%) | 1`, which optically centred the badge by
+            giving the two side zones an EQUAL SHARE regardless of what they held — so the left
+            zone was handed less than the breadcrumb needed while the pill sat comfortably under
+            its cap and never shrank. The rule is now explicit and one-directional:
+
+              LEFT (navigation)  `0 1 auto` — takes the width it needs, capped, and shrinks only
+                                 after the centre has already collapsed (its basis is content, the
+                                 centre's is 0, so negative free space lands here last).
+              CENTRE (the pill)  `1 1 0%`   — takes what is LEFT OVER and centres within it, so its
+                                 width never depends on its own content and it truncates,
+                                 abbreviates (JurisdictionBadge) or collapses on its own.
+              RIGHT (account)    `0 0 auto` — the save badge, fullscreen, gear and auth pill keep
+                                 their size; they were never the contended pair.
+
+            The cost, stated: the badge is centred in the space that remains rather than in the
+            window. That is what "navigation wins" buys. Narrow (phone) is untouched — the row
+            scrolls sideways there and the zoneFixed no-shrink still applies. (Dropdowns portal to
+            <body>, so overflow:hidden here never clips a menu.) */}
+        <div style={{ display: "flex", alignItems: "center", gap: 4, paddingLeft: 12, minWidth: 0, ...(narrow ? { flex: 1, ...zoneFixed } : { flex: "0 1 auto", maxWidth: "60%", overflow: "hidden" }) }}>
           {/* Logo — the Planyr brand mark + wordmark (BrandMark, theme-aware).
               Also a secondary route to the Dashboard (the labeled crumb is primary, B192). */}
           <button
@@ -736,18 +687,19 @@ export default function AppHeader({
           )}
         </div>
 
-        {/* Center zone — the jurisdiction badge. On desktop it's capped at 40% AND allowed to
-            SHRINK (flex 0 1 auto + minWidth 0 + overflow hidden), so when the row gets tight the
-            badge truncates via its own ellipsis instead of holding a fixed width and shoving the
-            breadcrumb into an overlap (the old flexShrink:0 was the root cause). On a phone the cap
-            squeezes the site/plan switcher, so it keeps its natural width and rides the row's
-            sideways scroll (no shrink/clip) as before. */}
+        {/* Center zone — the jurisdiction badge. NEW-2: on desktop it takes the space LEFT OVER
+            after navigation (`1 1 0%`), so its width is a function of its neighbours and never of
+            its own content — which is what lets the pill inside it truncate, abbreviate or
+            collapse without ever pushing into the breadcrumb. The old `0 1 auto` + 40% cap could
+            not shrink below its content while the side zones held equal shares, which is exactly
+            how a 419 px pill came to sit on top of the plan chip. On a phone the row scrolls
+            sideways, so the badge keeps its natural width (no shrink/clip) as before. */}
         <div
           style={{
             display: "flex", alignItems: "center", justifyContent: "center", padding: "0 8px",
             ...(narrow
               ? { flexShrink: 0, maxWidth: "none" }
-              : { flex: "0 1 auto", minWidth: 0, overflow: "hidden", maxWidth: "40%" }),
+              : { flex: "1 1 0%", minWidth: 0, overflow: "hidden" }),
           }}
         >
           {centerContent}
@@ -755,10 +707,13 @@ export default function AppHeader({
 
         {/* Right zone — cloud-sync badge · settings · auth. On narrow use `1 0 auto`: still
             GROWS to pin the auth pill rightward when the row has slack, but never SHRINKS its
-            controls into clipped slivers when it overflows (then the row scrolls instead). */}
+            controls into clipped slivers when it overflows (then the row scrolls instead). On
+            desktop it is now `0 0 auto` (NEW-2): the centre zone grows instead, which still pins
+            these controls to the right edge, and these were never the contended pair — shrinking
+            them would clip the auth pill to buy room for a label. */}
         <div
           style={{
-            flex: narrow ? "1 0 auto" : 1, display: "flex", alignItems: "center",
+            flex: narrow ? "1 0 auto" : "0 0 auto", display: "flex", alignItems: "center",
             justifyContent: "flex-end", gap: 6, paddingRight: 12,
           }}
         >
@@ -837,6 +792,13 @@ export default function AppHeader({
         KEY DECISIONS violation). B850 further found the Scheduler doesn't enforce a lock at all
         (it's genuinely safe for two tabs — see multiEditOk above), so it now suppresses this
         banner entirely via multiEditOk rather than getting its own copy variant here. */}
+    {/* B1173(×2) — LOUD-FAILURE for a refused fullscreen request. With no chrome-hide fallback
+        left, a rejection would otherwise be a keypress that visibly does nothing. */}
+    {fsNotice && (
+      <div role="status" data-testid="fullscreen-refused" style={{ position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: "min(440px, calc(100vw - 16px))", background: "var(--surface-raised)", color: "var(--text-primary)", border: "1px solid var(--warn-text)", borderRadius: 8, padding: "5px 10px", fontSize: 11.5, fontFamily: "system-ui, sans-serif", boxShadow: "0 4px 16px rgba(0,0,0,0.22)" }}>
+        {fsNotice}
+      </div>
+    )}
     {accountActive && multiTab.conflictRisk && !multiTabDismissed && (
       <div role="status" style={{ position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: "min(440px, calc(100vw - 16px))", display: "flex", alignItems: "flex-start", gap: 7, background: "var(--surface-raised)", color: "var(--text-primary)", border: "1px solid var(--warn-text)", borderRadius: 8, padding: "5px 6px 5px 10px", fontSize: 11.5, fontFamily: "system-ui, sans-serif", boxShadow: "0 4px 16px rgba(0,0,0,0.22)" }}>
         <span aria-hidden="true" style={{ color: "var(--warn-text)", fontWeight: 700, lineHeight: 1.5 }}>⧉</span>

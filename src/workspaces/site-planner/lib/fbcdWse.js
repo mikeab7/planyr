@@ -40,7 +40,13 @@ export const FBCDD_WSE02_URL = gisSource("fbcddWse02").serviceUrl;
 /* One getSamples read at a WGS84 point against ONE ImageServer. Returns FEET, null on
  * an empty (out-of-coverage) sample, throws on HTTP/service errors. Private core shared
  * by both public samplers — behavior is the original B770 contract, unchanged. */
-async function getSampleValue(serviceUrl, lat, lng, { timeoutMs = 8000, fetchImpl, signal } = {}) {
+async function getSampleValue(serviceUrl, lat, lng, { timeoutMs = 8000, fetchImpl, signal, onSample, service } = {}) {
+  const t0 = nowMs();
+  const done = (ok, err) => {
+    // NEW-4 — one PER-RASTER timing, reported to the caller so the drainage check can record
+    // which county layer cost what. A hook that can throw would take the sample down with it.
+    if (onSample) { try { onSample({ service: service || serviceUrl, ms: nowMs() - t0, ok, reason: err ? String(err.message || err) : null }); } catch (_) {} }
+  };
   const geometry = JSON.stringify({ x: lng, y: lat, spatialReference: { wkid: 4326 } });
   const u = `${serviceUrl}/getSamples?geometry=${encodeURIComponent(geometry)}&geometryType=esriGeometryPoint` +
     `&interpolation=RSP_BilinearInterpolation&returnFirstValueOnly=true&f=json`;
@@ -49,16 +55,29 @@ async function getSampleValue(serviceUrl, lat, lng, { timeoutMs = 8000, fetchImp
   let r;
   try {
     r = await (fetchImpl || fetch)(u, { signal: signal || (ctrl && ctrl.signal) || undefined });
+  } catch (e) {
+    done(false, e);
+    throw e;
   } finally {
     if (timer) clearTimeout(timer);
   }
-  if (!r.ok) throw new Error(`FBCDD WSE HTTP ${r.status}`);
-  const j = await r.json();
-  if (j.error) throw new Error(j.error.message || "FBCDD WSE error");
-  const raw = j.samples && j.samples[0] ? j.samples[0].value : undefined;
-  const v = parseFloat(raw);
-  return isFinite(v) ? v : null; // empty value = outside the study coverage → honest null
+  let out;
+  try {
+    if (!r.ok) throw new Error(`FBCDD WSE HTTP ${r.status}`);
+    const j = await r.json();
+    if (j.error) throw new Error(j.error.message || "FBCDD WSE error");
+    const raw = j.samples && j.samples[0] ? j.samples[0].value : undefined;
+    const v = parseFloat(raw);
+    out = isFinite(v) ? v : null; // empty value = outside the study coverage → honest null
+  } catch (e) {
+    done(false, e);
+    throw e;
+  }
+  done(true, null);
+  return out;
 }
+
+const nowMs = () => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());
 
 /* Sample the DRAFT 0.2% (500-yr) WSE at ONE point (WGS84 lat/lng). Returns FEET, or
  * null when the point is outside the study rasters' coverage (empty sample value).
@@ -66,11 +85,20 @@ async function getSampleValue(serviceUrl, lat, lng, { timeoutMs = 8000, fetchImp
  * request; `timeoutMs` (default 8s) bounds the call so a hung county server can't
  * stall the drainage check that awaits it. Throws on HTTP/service errors. */
 export async function sampleWse02Point(lat, lng, opts = {}) {
-  const { timeoutMs, fetchImpl, signal, services } = opts;
+  const { timeoutMs, fetchImpl, signal, services, onSample } = opts;
   // 1) MOSAIC FIRST. A finite value wins outright; an ERROR throws (LOUD-FAILURE — an outage
   //    must read "failed", never get masked by a narrower per-watershed answer).
-  const mosaic = await getSampleValue(FBCDD_WSE02_URL, lat, lng, { timeoutMs, fetchImpl, signal });
+  const mosaic = await getSampleValue(FBCDD_WSE02_URL, lat, lng, { timeoutMs, fetchImpl, signal, onSample, service: gisSource("fbcddWse02").serviceName || "FortBend_500YR_WSE" });
   if (mosaic != null) return mosaic;
+  /* ⛔ NEW-2 — THIS SEQUENCING IS A REAL DEPENDENCY, NOT AN ACCIDENT OF WRITING ORDER, and the
+   * owner's timeline caught it: `Willow_500YR_Existing_WSE` starts ~146 ms after the other four
+   * land, because it only exists as a QUESTION once the county-wide mosaic has answered EMPTY.
+   * The router's rule is mosaic-FIRST and a finite mosaic value wins outright, so running the
+   * per-watershed candidates concurrently would fetch rasters whose answers are discarded on
+   * every check where the mosaic covers the point — and it would put that load on the county
+   * server for a saving of one ~146 ms round trip inside a check now measured in hundreds of ms.
+   * Left sequential deliberately; do not "parallelise" it without changing the router's rule,
+   * which is a correctness decision and not a latency one. */
   // 2) Mosaic EMPTY → could be a mosaic HOLE (B827, live-proven at Bain Ditch / Willow Fork):
   //    route through the per-watershed 500YR rasters — the same bbox+seam router as B807's
   //    100YR path (which stays candidates-only BY DESIGN: no county-wide 100-yr mosaic exists).
@@ -81,7 +109,7 @@ export async function sampleWse02Point(lat, lng, opts = {}) {
   const candidates = wse02CandidatesForPoint(lat, lng, services || mux.services);
   if (!candidates.length) return null;
   const values = await Promise.all(candidates.map(({ name }) =>
-    getSampleValue(`${mux.restBase}/${name}/ImageServer`, lat, lng, { timeoutMs, fetchImpl, signal })));
+    getSampleValue(`${mux.restBase}/${name}/ImageServer`, lat, lng, { timeoutMs, fetchImpl, signal, onSample, service: name })));
   let best = null;
   for (const v of values) if (v != null && (best == null || v > best)) best = v;
   return best; // plain number (the pre-B827 caller contract) — or honest null
@@ -117,12 +145,12 @@ export function wse02CandidatesForPoint(lat, lng, services = gisSource("fbcddWse
  * null when no candidate covers the point (zero candidates → null with ZERO fetches).
  * ANY candidate failure rejects the whole call (LOUD-FAILURE — a partial answer could
  * be the wrong watershed's number). Options as sampleWse02Point; `services` injectable. */
-export async function sampleWse100Point(lat, lng, { timeoutMs = 8000, fetchImpl, signal, services } = {}) {
+export async function sampleWse100Point(lat, lng, { timeoutMs = 8000, fetchImpl, signal, services, onSample } = {}) {
   const mux = gisSource("fbcddWse100").multiplex;
   const candidates = wse100CandidatesForPoint(lat, lng, services || mux.services);
   if (!candidates.length) return null;
   const values = await Promise.all(candidates.map(({ name }) =>
-    getSampleValue(`${mux.restBase}/${name}/ImageServer`, lat, lng, { timeoutMs, fetchImpl, signal })));
+    getSampleValue(`${mux.restBase}/${name}/ImageServer`, lat, lng, { timeoutMs, fetchImpl, signal, onSample, service: name })));
   let best = null;
   for (let i = 0; i < values.length; i++) {
     if (values[i] != null && (best == null || values[i] > best.wseFt)) {

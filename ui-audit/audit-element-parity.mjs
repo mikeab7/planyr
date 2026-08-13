@@ -83,9 +83,17 @@ const site = {
   els: ELS, markups: MARKUPS, callouts: CALLOUTS, measures: MEASURES,
   settings: { showDims: false }, updatedAt: Date.now(),
 };
+/* ⛔ SEED ONCE, NOT ON EVERY NAVIGATION. `addInitScript` runs on EVERY page load, so an
+ * unconditional write here silently RESTORES the fixture on a reload — and a reload is exactly how
+ * you check that an edit was persisted. Written that way, the NEW-1 persistence row failed against
+ * a feature that works, which is the same species of wrong-but-plausible result the header above
+ * lists three of. Seed only when the key is absent, so the first load plants the fixture and every
+ * later load reads back whatever the app actually saved. */
 const seed = `(() => { try {
-  localStorage.setItem('planarfit:sites:v1', ${JSON.stringify(JSON.stringify({ [SITE_ID]: site }))});
-  localStorage.removeItem('planarfit:currentSite:v1');
+  if (!localStorage.getItem('planarfit:sites:v1')) {
+    localStorage.setItem('planarfit:sites:v1', ${JSON.stringify(JSON.stringify({ [SITE_ID]: site }))});
+    localStorage.removeItem('planarfit:currentSite:v1');
+  }
 } catch (e) {} })();`;
 
 const results = [];
@@ -105,7 +113,11 @@ const ACTION_PATTERNS = {
   lock: /^(Lock|Unlock)/i,
   arrangeEnds: /^(Bring to Front|Send to Back)/i,
   arrangeSteps: /^(Bring Forward|Send Backward)/i,
-  crossBand: /(behind|above) the plan|behind buildings|in front of buildings/i,
+  /* NEW-1 — the ELEMENT family's escape hatch joined this vocabulary. Its wording is "Force on top
+   * of everything" / "Use the normal layer order" rather than "…the plan", because for a site
+   * element "the plan" IS the thing it is crossing — a row saying "above the plan" on a building
+   * would be describing nothing the owner can picture. Same single-toggle IDEA, plainer words. */
+  crossBand: /(behind|above) the plan|behind buildings|in front of buildings|force on top of everything|use the normal layer order/i,
   delete: /^Delete\b/i,
 };
 
@@ -222,7 +234,10 @@ try {
 
   const contentFill = () => page.evaluate(() => {
     const c = document.querySelector('[data-testid="planner-canvas"]').getBoundingClientRect();
-    const boxes = [...document.querySelectorAll("[data-el-id]")].map((g) => g.getBoundingClientRect()).filter((b) => b.width && b.height);
+    /* ⛔ ALL FIVE DRAWN KINDS (NEW-2). "How much of the canvas does the plan fill" answered from
+     * elements alone under-reports a plan whose extent is set by a parcel ring or a markup, and a
+     * fit check that under-reports is a fit check that passes a fit that did not happen. */
+    const boxes = [...document.querySelectorAll("[data-feature]")].map((g) => g.getBoundingClientRect()).filter((b) => b.width && b.height);
     if (!boxes.length) return 0;
     const x0 = Math.min(...boxes.map((b) => b.left)), x1 = Math.max(...boxes.map((b) => b.right));
     const y0 = Math.min(...boxes.map((b) => b.top)), y1 = Math.max(...boxes.map((b) => b.bottom));
@@ -311,6 +326,106 @@ try {
   ok("an element alone in its layer still SHOWS all four Arrange rows (greyed, not hidden)",
     arrangeRows.length === 4 && arrangeRows.every((r) => r.disabled),
     `${arrangeRows.length} rows, ${arrangeRows.filter((r) => r.disabled).length} greyed`);
+
+  /* ---- NEW-1 · THE ELEMENT ESCAPE HATCH, read off the render ------------------------------- */
+  /* Owner decision: the type-layer DEFAULT does not move, but an explicit action must be able to
+   * force one element across it. Both halves are checked here, in that order, because a run that
+   * proves the forcing works while the default has quietly changed is a failed run. */
+  console.log("\n=== NEW-1 · the element band escape hatch ===");
+
+  const clickMenuRow = async (x, y, text) => {
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(120);
+    await page.mouse.click(x, y, { button: "right" });
+    await page.waitForTimeout(350);
+    const row = page.locator(".menu button", { hasText: text }).first();
+    if (!(await row.count())) return false;
+    await row.click();
+    await page.waitForTimeout(600);
+    return true;
+  };
+
+  // (e) THE DEFAULT, ASSERTED. Nothing on this fixture carries an override, so every paving node
+  //     must still render BEFORE (under) every building node — the rule exactly as it shipped.
+  const dflt = await paintOrder();
+  ok("DEFAULT UNCHANGED: with no override anywhere, paving still renders under both buildings",
+    dflt.indexOf(`el:${PAV}`) >= 0 && dflt.indexOf(`el:${PAV}`) < dflt.indexOf(`el:${B1}`) && dflt.indexOf(`el:${PAV}`) < dflt.indexOf(`el:${B2}`),
+    `paving ${dflt.indexOf(`el:${PAV}`)}, buildings ${dflt.indexOf(`el:${B1}`)}/${dflt.indexOf(`el:${B2}`)}`);
+
+  // (f) AND THAT AN ORDINARY Bring to Front CANNOT BREAK IT. This is the half that must NOT change:
+  //     the loudest ordinary ordering command still stops at the band edge.
+  const pv = await pointOn(`[data-el-id="${PAV}"]`, 0.06, 0.94, `el:${PAV}`);
+  ok("the paving probe lands on the paving", pv && String(pv.under).includes(PAV), JSON.stringify(pv));
+  await page.mouse.click(pv.x, pv.y);
+  await page.waitForTimeout(250);
+  await page.keyboard.press("Control+Shift+BracketRight");
+  await page.waitForTimeout(500);
+  const afterArr = await paintOrder();
+  ok("an ordinary Bring to Front still STOPS at the band edge — paving stays under the buildings",
+    afterArr.indexOf(`el:${PAV}`) < afterArr.indexOf(`el:${B1}`),
+    `paving ${afterArr.indexOf(`el:${PAV}`)}, building ${afterArr.indexOf(`el:${B1}`)}`);
+
+  // (g) THE FORCE. The owner's own case, verbatim: paving over a building.
+  const forced = await clickMenuRow(pv.x, pv.y, "Force on top of everything");
+  ok("the element menu offers the explicit cross-band row", forced);
+  const afterForce = await paintOrder();
+  ok("FORCED: paving now RENDERS above both buildings",
+    afterForce.indexOf(`el:${PAV}`) > afterForce.indexOf(`el:${B1}`) && afterForce.indexOf(`el:${PAV}`) > afterForce.indexOf(`el:${B2}`),
+    `paving ${afterForce.indexOf(`el:${PAV}`)}, buildings ${afterForce.indexOf(`el:${B1}`)}/${afterForce.indexOf(`el:${B2}`)}`);
+  ok("…and nothing else moved: the two buildings keep their relative order",
+    (afterForce.indexOf(`el:${B1}`) < afterForce.indexOf(`el:${B2}`)) === (afterArr.indexOf(`el:${B1}`) < afterArr.indexOf(`el:${B2}`)));
+
+  // (h) VISIBLY FORCED. An override the user cannot see is one they can get stuck in. Reached
+  //     through the menu's own Properties… row, because selecting alone does not open the panel.
+  await clickMenuRow(pv.x, pv.y, "Properties…");
+  await page.waitForTimeout(400);
+  const noted = await page.evaluate(() => ({
+    note: !!document.querySelector('[data-testid="el-band-forced-note"]'),
+    restore: !!document.querySelector('[data-testid="el-band-restore"]'),
+  }));
+  ok("a forced element says so in its inspector, with a restore control", noted.note && noted.restore, JSON.stringify(noted));
+
+  // (i) PDF-PARITY. The sheet is built from a CLONE of the live SVG, so the forced order must be in
+  //     the exported document too — asserted on the real built sheet, never inferred.
+  const sheetOrder = await page.evaluate(async ({ pav, b1 }) => {
+    if (typeof window.__plannerExportSvg !== "function") return null;
+    const html = await window.__plannerExportSvg();
+    if (!html) return null;
+    const doc = new DOMParser().parseFromString(html, "image/svg+xml");
+    const seen = [];
+    doc.querySelectorAll("[data-feature]").forEach((n) => {
+      const id = n.getAttribute("data-feature");
+      if (id && !seen.includes(id)) seen.push(id);
+    });
+    return { pav: seen.indexOf(`el:${pav}`), b1: seen.indexOf(`el:${b1}`), n: seen.length };
+  }, { pav: PAV, b1: B1 });
+  ok("PDF-PARITY: the exported sheet carries the forced order too",
+    sheetOrder && sheetOrder.pav >= 0 && sheetOrder.b1 >= 0 && sheetOrder.pav > sheetOrder.b1,
+    JSON.stringify(sheetOrder));
+
+  // (j) PERSISTED. An override that evaporates on reload is worse than not shipping it. Asserted
+  //     twice: on the STORED bytes, and on the picture the app draws after re-reading them.
+  const stored = await page.evaluate(() => {
+    try { return JSON.stringify(JSON.parse(localStorage.getItem('planarfit:sites:v1') || "{}")).includes('"bandForce"'); }
+    catch (e) { return null; }
+  });
+  ok("PERSISTED (bytes): the override is written into the saved plan", stored === true, `stored=${stored}`);
+  await page.reload({ waitUntil: "load" });
+  await page.waitForSelector('[data-testid="planner-canvas"]', { timeout: 25000 });
+  await page.waitForTimeout(2000);
+  const afterReload = await paintOrder();
+  ok("PERSISTED: the force survives a reload",
+    afterReload.indexOf(`el:${PAV}`) > afterReload.indexOf(`el:${B1}`),
+    `paving ${afterReload.indexOf(`el:${PAV}`)}, building ${afterReload.indexOf(`el:${B1}`)}`);
+
+  // (k) REVERSIBLE. Back to default, from the menu, and the picture returns to the shipped order.
+  const pv2 = await pointOn(`[data-el-id="${PAV}"]`, 0.06, 0.94, `el:${PAV}`);
+  const restored = await clickMenuRow(pv2.x, pv2.y, "Use the normal layer order");
+  ok("the forced element's menu offers the way back", restored);
+  const afterRestore = await paintOrder();
+  ok("REVERSIBLE: paving is back under the buildings",
+    afterRestore.indexOf(`el:${PAV}`) < afterRestore.indexOf(`el:${B1}`) && afterRestore.indexOf(`el:${PAV}`) < afterRestore.indexOf(`el:${B2}`),
+    `paving ${afterRestore.indexOf(`el:${PAV}`)}, buildings ${afterRestore.indexOf(`el:${B1}`)}/${afterRestore.indexOf(`el:${B2}`)}`);
 
   console.log("\n=== FINAL PAINT ORDER ===");
   console.log((await paintOrder()).join("\n"));

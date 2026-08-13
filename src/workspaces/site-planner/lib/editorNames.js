@@ -13,12 +13,39 @@
  */
 import { buildingNumbers, isBuilding } from "./siteModel.js";
 
+/* ⛔ NEW-4 — AN ACTION IS ATTRIBUTED TO A PERSON ONLY ON A POSITIVE DIFFERENT-ACCOUNT ANSWER.
+ *
+ * The owner opened his own plan in a second tab and got ~5 banners crediting the edits to a
+ * teammate who was never there. The mechanism was not the uid comparison itself — it was that
+ * `selfUid` was SNAPSHOTTED at engine-construction time, from `activeUid()`, which is null until
+ * the auth session resolves. On any load where the planner mounted first, `selfUid` stayed null
+ * for the whole plan session, so `uid === selfUid` was false for every row and the final fallback
+ * — "a teammate" — invented a collaborator out of a missing value.
+ *
+ * Two changes, and both are needed:
+ *   • `selfUid` may be a GETTER, and is read at RESOLVE time. A late sign-in is picked up.
+ *   • the fallback is no longer a person. An actor we cannot PROVE is a different account resolves
+ *     as this account in another tab. The uid space makes that the honest default rather than a
+ *     guess: private-site RLS admits nobody else, so on a non-team site a foreign uid cannot occur,
+ *     and with `selfUid` unknown we have no evidence of a second person at all. A roster MISS on a
+ *     real team site (a member who left) still resolves as `a teammate` — that one IS a proven
+ *     different account, and staying silent about it would be the opposite error.
+ *
+ * Returns `{ name, self }`, not a bare string, so the toast layer can pick a sentence that names a
+ * TAB instead of a person. Callers must not re-derive `self` by string-matching `name`.
+ */
+export const SELF_ACTOR = { name: "you (another window)", self: true };
+
 // createNameResolver({ selfUid, teamIdOf, fetchRoster }) → resolve(uid) (async, cached).
+//   selfUid      — the signed-in user's id, OR a function returning it (read at resolve time).
 //   teamIdOf()   — returns the CURRENT site's teamId (or null) at resolve time.
 //   fetchRoster  — async (teamId) => [{ userId, displayName }] (lib/teams.js listMembers).
 export function createNameResolver({ selfUid, teamIdOf, fetchRoster }) {
   const cache = new Map();          // uid -> displayName
   let rosterLoaded = null;          // teamId the cached roster belongs to
+  const selfNow = () => {
+    try { return typeof selfUid === "function" ? selfUid() : selfUid; } catch (_) { return null; }
+  };
   async function loadRoster() {
     const teamId = teamIdOf ? teamIdOf() : null;
     if (!teamId || rosterLoaded === teamId || !fetchRoster) return;
@@ -29,11 +56,16 @@ export function createNameResolver({ selfUid, teamIdOf, fetchRoster }) {
     } catch (_) { /* roster fetch failed → fallbacks below */ }
   }
   return async function resolve(uid) {
-    if (!uid || uid === selfUid) return "you (another window)";
-    if (cache.has(uid)) return cache.get(uid);
+    const me = selfNow();
+    if (!uid || uid === me) return SELF_ACTOR;
+    // No signed-in id to compare against → no evidence of a second PERSON. Never invent one.
+    if (!me) return SELF_ACTOR;
+    if (cache.has(uid)) return { name: cache.get(uid), self: false };
     await loadRoster();
-    if (cache.has(uid)) return cache.get(uid);
-    return "a teammate"; // member left / roster miss — honest generic, never blank
+    if (cache.has(uid)) return { name: cache.get(uid), self: false };
+    // A proven different account that the roster cannot name (member left / roster miss). The uid
+    // itself is the proof, so this one IS a person — honest generic, never blank.
+    return { name: "a teammate", self: false };
   };
 }
 

@@ -67,10 +67,17 @@ const seed = async (d) => {
   await page.waitForTimeout(150);
 };
 const readDoc = () => page.evaluate(() => window.__noteEditor.json());
-const inFullscreen = () => page.evaluate(() => !!document.fullscreenElement || !!document.querySelector('[data-testid="exit-fullscreen"]'));
+/* B1173(×2) — the floating "✕ Exit fullscreen" button is gone (the header no longer hides, so the
+   row-1 toggle is the one exit control). The document's own state plus the header's `data-fullscreen`
+   marker are the two honest signals left. */
+const inFullscreen = () => page.evaluate(() => !!document.fullscreenElement || !!document.querySelector('header[data-fullscreen="on"]'));
 const leaveFullscreen = async () => {
   if (!(await inFullscreen())) return;
-  await page.evaluate(() => { document.querySelector('[data-testid="exit-fullscreen"]')?.click(); });
+  // ⛔ The VISIBLE one. Workspaces are kept mounted-but-hidden, so several headers carry this
+  // control at once and a bare `querySelector` picks whichever is first in the DOM — which may be
+  // a `display:none` workspace's, whose click does nothing at all. (The old `exit-fullscreen`
+  // button existed only on the fullscreen header, so this could not bite before B1173 ×2.)
+  await page.locator('[data-testid="toggle-fullscreen"]:visible').first().click();
   await page.waitForTimeout(500);
 };
 

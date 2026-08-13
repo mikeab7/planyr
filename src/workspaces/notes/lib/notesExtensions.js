@@ -36,6 +36,11 @@ import { TextAlign } from "@tiptap/extension-text-align";
 // already installed as StarterKit's own dependency, and it rides the lazy editor chunk.
 import { Placeholder } from "@tiptap/extensions";
 import NoteImage from "./notesImageNode.js";
+import NoteAttachment from "./notesAttachNode.js";
+import NoteCallout from "./notesCalloutNode.js";
+import NoteToggle, { NoteToggleTitle } from "./notesToggleNode.js";
+import NoteAnchor from "./notesAnchorNode.js";
+import NoteSlashMenu from "./notesSlashMenu.js";
 import NoteSketch from "./notesSketchNode.js";
 import NoteTabKey from "./notesTabKey.js";
 import NotePastePlain from "./notesPastePlain.js";
@@ -82,6 +87,24 @@ export const NOTE_EXTENSIONS = [
   // A picture, held by ID. The bytes are in IndexedDB — see lib/notesImageNode.js.
   NoteImage,
 
+  // ANY OTHER FILE, held the same way (NEW-5). It rides the picture tier rather than a
+  // second one — same store, same bucket, same purge cascade — and its intake runs at a
+  // higher priority so a mixed drop is routed in one place instead of raced. See
+  // lib/notesAttachNode.js.
+  NoteAttachment,
+
+  // A coloured note block and a section that folds away (NEW-7). Both are ordinary schema
+  // nodes, which is what makes them persist, sync, print and export with no new plumbing;
+  // both carry a NAME rather than a colour, so the screen, paper and Markdown each draw
+  // them their own way. See lib/notesCalloutNode.js and lib/notesToggleNode.js.
+  NoteCallout,
+  NoteToggleTitle,
+  NoteToggle,
+  // A block that stays where it was put (NEW-2). Out of flow, so the rest of the document
+  // does not know it exists; its position is two numbers ON THE NODE, which is what makes it
+  // survive a reload, a sync and the PDF without a second store to keep in step.
+  NoteAnchor,
+
   // SKETCH MODE: a chart drawn from an indented outline. It is a NODE IN THIS SCHEMA rather
   // than a canvas store bolted alongside, and that is what makes it persist, sync, print and
   // export with no new plumbing anywhere — see lib/notesSketchNode.js for the full argument.
@@ -106,6 +129,12 @@ export const NOTE_EXTENSIONS = [
   // — see lib/notesBlockKeys.js for the whole-chunk-moves report it closes.
   NoteBlockKeys,
 
+  // Type `/` at the start of a block (or after a space) and name what you want (NEW-1).
+  // Registered ABOVE the default keymap so Enter picks the highlighted item instead of
+  // splitting the paragraph — and it fires on a NARROW trigger by design, so `and/or` and
+  // a pasted URL are untouched. See lib/notesSlashMenu.js.
+  NoteSlashMenu,
+
   Placeholder.configure({ placeholder: NOTE_PLACEHOLDER }),
 ];
 
@@ -115,11 +144,15 @@ export const NOTE_EXTENSIONS = [
  *
  *  `imageContext` is a FUNCTION on purpose: the notebook a picture is charged against gains
  *  and loses pages while the editor is open, so a value captured at mount goes stale. */
-export function noteExtensions({ imageContext = null, onSearchMatches = null, onPasted = null } = {}) {
+export function noteExtensions({
+  imageContext = null, onSearchMatches = null, onPasted = null, onSlash = null, onSlashRun = null,
+} = {}) {
   return NOTE_EXTENSIONS.map((ext) => {
     if (ext.name === "noteImage") return NoteImage.configure({ imageContext });
+    if (ext.name === "noteAttachment") return NoteAttachment.configure({ imageContext });
     if (ext.name === "noteSearchHighlight") return NoteSearchHighlight.configure({ onMatches: onSearchMatches });
     if (ext.name === "notePastePlain") return NotePastePlain.configure({ onPasted });
+    if (ext.name === "noteSlashMenu") return NoteSlashMenu.configure({ onChange: onSlash, onRun: onSlashRun });
     return ext;
   });
 }

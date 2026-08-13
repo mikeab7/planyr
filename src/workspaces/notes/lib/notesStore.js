@@ -103,6 +103,40 @@
  *     same as its title. Asserted in test/notesSync.test.js, not assumed.
  *
  * ═══════════════════════════════════════════════════════════════════════════════════════
+ * EVERY BODY HAS A NODE, AND IDENTITY IS THE ID (NEW-1)
+ * ═══════════════════════════════════════════════════════════════════════════════════════
+ * The reachability guarantee used to be written for NOTEBOOKS — "nothing can become
+ * unreachable" (B1374) — and it was never extended to the thing that actually holds the
+ * words. It is extended here, as two properties, because the gap cost a real note.
+ *
+ * ⛔ PROPERTY 1 — NO BODY MAY EXIST WITHOUT A NODE. For every `planyr:notes:page:v1:<scope>:
+ * <id>` key there must be a node with that id in the tree: live, or inside a bin entry. A
+ * body with no node is not a deleted note and not a corrupt one — it is a note nobody can
+ * reach, and the product has no way to mention it. That is strictly worse than losing it,
+ * because it looks exactly like nothing being wrong.
+ *
+ *   WHAT BROKE IT: `mergeTrees`, twice, and neither was visible in a hand-read (both are in
+ *   test/notesReachability.test.js as minimal cases and as a randomised property). A delete
+ *   lifted out MORE than its entry named, taking pages the deleting device had never heard
+ *   of; and the other side's copy of a page was looked up by POSITION, so re-parenting made
+ *   the merge blind to the children that copy had gained.
+ *
+ *   WHAT ENFORCES IT NOW: the merge rules (rule 5, notesCloud.js), `sweepOrphans` refusing to
+ *   destroy a body that still has words in it, `unreachableNotes` (lib/notesScan.js) looking
+ *   for the property being violated on every load, and `adoptUnreachable` healing it by
+ *   giving the body a node — in a named place, guessing NOTHING.
+ *
+ * ⛔ PROPERTY 2 — A TITLE IS NEVER LOAD-BEARING FOR IDENTITY OR REACHABILITY. A page is its
+ * ID. Nothing in Notes may key, index, dedupe, filter or drop on a title: not the merge, not
+ * the migration, not the recovery path, not a Map somewhere convenient. Two pages may share a
+ * title; a page may have none. This is written down because it was asked directly — *is the
+ * note unreachable BECAUSE it has no title?* — and the answer is NO, proven across five falsy
+ * values and eleven paths. But the reason it is no must stay true, so it is a rule rather
+ * than a happy accident: `makePage` applies the display default at the one constructor, and
+ * the recovery path deliberately has no title-keyed "Recovered" container for exactly this
+ * reason (see `adoptUnreachable`).
+ *
+ * ═══════════════════════════════════════════════════════════════════════════════════════
  * LOUD-FAILURE. A full quota, a disabled store, a private-mode browser, a refused upload or
  * a dead network must NEVER look like a clean save. Every local failure path broadcasts
  * through `onNotesStorageError`, which the workspace renders as a named banner; every write
@@ -112,14 +146,23 @@
  * actually true, with a reason when it failed. There is no swallowed catch in here, and
  * there is no state in which the footer claims a sync that did not happen.
  */
-import { docToText, imageIdsInDoc } from "./notesMarkdown.js";
-import { migrate, searchTitles, pagesInScope, walkPages, SCOPE_ALL, SCOPE_PROJECT } from "./notesModel.js";
+import { assetIdsInDoc, docToText, imageIdsInDoc } from "./notesMarkdown.js";
+import { openTasksInDoc, rollUpOpenTasks, setTaskCheckedInDoc } from "./notesTasks.js";
+import { MAX_VERSIONS_PER_PAGE, planRestore, planRetention, shouldSnapshot } from "./notesVersions.js";
+import { safeAttachmentName } from "./notesFileMeta.js";
+import { migrate, purgeTrashEntry, searchTitles, pagesInScope, trashEntries, walkPages, SCOPE_ALL, SCOPE_PROJECT } from "./notesModel.js";
+import { normalizeZoom, zoomKey, ZOOM_DEFAULT } from "./notesZoom.js";
+import { IGNORED_DUPES_KEY_BASE } from "./notesKeys.js";
+import { countEmptyAnchors, pruneEmptyAnchors } from "./notesAnchorPrune.js";
 import { relativeTime } from "./notesTime.js";
 
-export const TREE_KEY_BASE = "planyr:notes:tree:v1";
-export const PAGE_KEY_BASE = "planyr:notes:page:v1";
-export const SYNC_KEY_BASE = "planyr:notes:sync:v1";
-export const LOCAL_SCOPE = "local";
+/* The key strings live in `notesKeys.js` — a leaf with no dependencies — so the ONE other
+ * module allowed to touch these keys (`notesProjectLink.js`, which answers "what is this
+ * project holding?" from a route where Notes is not mounted) cannot drift from this file's
+ * idea of where a tree lives. Re-exported here so every existing importer is unchanged: this
+ * is still the seam. */
+export { TREE_KEY_BASE, PAGE_KEY_BASE, SYNC_KEY_BASE, LOCAL_SCOPE } from "./notesKeys.js";
+import { LOCAL_SCOPE, PAGE_KEY_BASE, SYNC_KEY_BASE, TREE_KEY_BASE } from "./notesKeys.js";
 
 /* ---- scope ------------------------------------------------------------------------- */
 
@@ -219,6 +262,51 @@ export function writeTree(tree) {
   return ok;
 }
 
+/* ---- how big the writing is (NEW-3) -----------------------------------------------------
+ *
+ * A device preference, so it rides the SAME seam as everything else here rather than a stray
+ * `localStorage` call in a component — and it is scoped like every other notes key, so two
+ * accounts on one machine do not inherit each other's eyesight. It deliberately does NOT
+ * sync: a comfortable size is a property of the screen you are sitting at, not of the
+ * account, and pushing a laptop's zoom onto a desktop would be a bug wearing a feature's
+ * clothes. A failure to read or write it is a no-op at 100%, never an unreadable page. */
+export function readNotesZoom(s = scope) {
+  const st = store();
+  if (!st) return ZOOM_DEFAULT;
+  try { return normalizeZoom(st.getItem(zoomKey(s))); } catch (_) { return ZOOM_DEFAULT; /* a preference is not data — a refused read means 100%, never a banner */ }
+}
+
+export function writeNotesZoom(z, s = scope) {
+  const st = store();
+  if (!st) return false;
+  try { st.setItem(zoomKey(s), String(normalizeZoom(z))); return true; } catch (_) { return false; /* a preference is not data — the level simply does not persist */ }
+}
+
+/* ---- findings the person has settled (NEW-4) --------------------------------------------
+ *
+ * "Keep both and stop telling me" is a real answer to a duplicate, and it has to survive a
+ * reload or it is not an answer at all. Device-scoped like the zoom level: a judgement about
+ * two notes is not data, and a failure to read or write it simply means the bar asks again. */
+const ignoredKey = (s = scope) => `${IGNORED_DUPES_KEY_BASE}:${s}`;
+
+export function readIgnoredDuplicates(s = scope) {
+  const st = store();
+  if (!st) return [];
+  try {
+    const raw = JSON.parse(st.getItem(ignoredKey(s)) || "[]");
+    return Array.isArray(raw) ? raw.filter((x) => typeof x === "string") : [];
+  } catch (_) { return []; /* a preference is not data — the bar simply asks again */ }
+}
+
+export function ignoreDuplicate(key, s = scope) {
+  const st = store();
+  if (!st || !key) return false;
+  try {
+    st.setItem(ignoredKey(s), JSON.stringify([...new Set([...readIgnoredDuplicates(s), key])]));
+    return true;
+  } catch (_) { return false; /* a preference is not data — the bar simply asks again */ }
+}
+
 /* ---- page bodies ---------------------------------------------------------------------- */
 
 /** Read one page's document model, or null when the page has never been written. */
@@ -245,7 +333,15 @@ function writePageLocal(pageId, doc, s = scope) {
  *  and, when signed in, marks THAT page as owing the cloud a push. */
 export function writePage(pageId, doc) {
   if (!pageId) return false;
-  const ok = writePageLocal(pageId, doc);
+  /* ⛔ AN EMPTY ANCHORED BLOCK IS PROVISIONAL AND NEVER LEAVES THE SESSION. Read the header of
+   * `notesAnchorPrune.js` before changing this line: the editor removes one the moment the
+   * caret leaves it, which is what you SEE, and this is what makes it TRUE. Every way an
+   * abandoned double-click could otherwise reach the disk or the cloud — an autosave firing in
+   * the half-second before the first keystroke, a closed tab, a crash, a page switch — comes
+   * through here. This is a discard of something nobody has put anything in, not a deletion of
+   * data, which is why it is silent; the bar for "empty" is a whitelist and refuses to guess. */
+  const clean = pruneEmptyAnchors(doc).doc;
+  const ok = writePageLocal(pageId, clean);
   if (ok && scoped()) {
     const prev = sync.pages[pageId] || {};
     // A deliberate write clears the device-level tombstone: only a real body write can, and
@@ -295,12 +391,70 @@ export function listStoredPageIds(s = scope) {
  *
  *  ⛔ It deliberately does NOT tombstone anything in the cloud. This sweep judges against
  *  THIS DEVICE's tree, which on a fresh sign-in is behind the account's; treating what it
- *  finds as a delete would let a device that has not synced yet erase the account. */
+ *  finds as a delete would let a device that has not synced yet erase the account.
+ *
+ *  ⛔ AND IT WILL NOT DESTROY A BODY THAT STILL HAS WORDS IN IT (NEW-4). Found in the
+ *  owner's own account: a page whose TREE NODE had gone but whose body row was still in the
+ *  cloud, holding real notes. The sweep deleted the local copy, the next seed downloaded it
+ *  again (`planPageSeed` adopts any row this device does not have), and the loop ran for
+ *  days with the note reachable from nowhere and nothing ever saying so. An interrupted
+ *  delete leaves an EMPTY or a stray body; a body with paragraphs in it is somebody's work,
+ *  and the honest thing to do with work whose home is missing is to SAY SO — which
+ *  `unreachableNotes` (lib/notesScan.js) does — not to quietly delete it every time the tab
+ *  opens.
+ *
+ *  Returns `{ removed, kept }`: what it cleared, and what it refused to. */
 export function sweepOrphans(livePageIds) {
   const live = new Set(livePageIds || []);
   const orphans = listStoredPageIds().filter((id) => !live.has(id));
-  if (orphans.length) deletePages(orphans);
-  return orphans;
+  const kept = [];
+  const removed = [];
+  for (const id of orphans) (hasWords(readPage(id)) ? kept : removed).push(id);
+  if (removed.length) deletePages(removed);
+  return { removed, kept };
+}
+
+/** Does this document have anything a person actually wrote in it? The bar for "worth
+ *  keeping" — and deliberately lower than the duplicate detector's, because refusing to
+ *  destroy something is a cheaper mistake than reporting a false duplicate. */
+const hasWords = (doc) => docToText(doc).trim().length > 0;
+
+/**
+ * ⛔ THE ONE-TIME CLEAN-UP FOR NOTES THAT ARE ALREADY CARRYING THE LITTER.
+ *
+ * `writePage` stops any NEW empty anchored block reaching storage, and the editor removes one
+ * as soon as the caret leaves it — but neither of those helps a note that already has a
+ * handful sitting in it from before the fix, and each one is an invisible dead zone that will
+ * go on swallowing double-clicks forever. So every stored body is read once on load and
+ * rewritten if it is holding any.
+ *
+ * Three deliberate properties:
+ *   • It goes through `writePage`, so the CLEANED copy is pushed to the cloud too. Cleaning
+ *     only this device would leave the litter to come straight back down on the next sync.
+ *   • It touches only pages that actually change — a page with nothing to remove is not
+ *     rewritten, so this does not mark the whole account dirty and does not restamp anything.
+ *   • The bar for "empty" is `notesAnchorPrune`'s whitelist, which refuses to guess: a block
+ *     with a picture, an attachment, a sketch or any node type this code has not heard of is
+ *     content and is kept.
+ *
+ * Returns `{ pages, removed }` — how many notes were cleaned and how many blocks went — so
+ * the caller can say so rather than doing it behind his back.
+ */
+export function sweepEmptyAnchors(pageIds) {
+  const ids = Array.isArray(pageIds) ? pageIds.filter(Boolean) : listStoredPageIds();
+  let pages = 0;
+  let removed = 0;
+  for (const id of ids) {
+    const doc = readPage(id);
+    if (!doc) continue;
+    const n = countEmptyAnchors(doc);
+    if (!n) continue;
+    const { doc: clean } = pruneEmptyAnchors(doc);
+    if (!writePage(id, clean)) continue;    // LOUD-FAILURE: a refused write is not counted
+    pages += 1;
+    removed += n;
+  }
+  return { pages, removed };
 }
 
 /* ---- images (B1311) ------------------------------------------------------------------
@@ -322,6 +476,12 @@ export function sweepOrphans(livePageIds) {
 export const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
 /** The most one notebook's pictures may take in total. */
 export const MAX_NOTEBOOK_IMAGE_BYTES = 200 * 1024 * 1024;
+/** The most one ATTACHED FILE may take (NEW-5). Bigger than the picture ceiling because
+ *  nothing downscales a DWG or a survey PDF — and enforced HERE, on the same seam as the
+ *  image ceilings, so no future intake path can slip past it. The number is the stored
+ *  data-URL length, which is ~4/3 of the file's own size; the cloud bucket's own limit is
+ *  set to match in db/notes_attachments.sql. */
+export const MAX_FILE_BYTES = 34 * 1024 * 1024;
 
 /* ⛔ THE IMAGE DATABASE IS LOADED ON DEMAND, and that is a bundle decision, not a style
  * one. This file is on the Notes route's STATIC path (the rail reads the tree through it),
@@ -404,6 +564,66 @@ export async function readNoteImage(imageId) {
   return r.dataUrl;
 }
 
+/* ---- attached files (NEW-5) -------------------------------------------------------------
+ *
+ * ⛔ AN ATTACHMENT RIDES THE PICTURE TIER. Same IndexedDB store, same cloud table, same
+ * bucket, same purge cascade, same orphan sweep — it differs only by `kind: "file"` and by
+ * carrying the file's NAME. That is a deliberate refusal to build a second blob tier: a
+ * parallel one would need its own sync plan, its own cascade and its own way to leak bytes,
+ * and this module already has exactly one of each. The account-side change it needed is one
+ * migration (db/notes_attachments.sql): stop the bucket refusing non-image types, and carry
+ * `name` + `kind` on the row.
+ */
+
+/** Store one attached file's bytes. `{ ok:true, bytes }` only when they actually landed. */
+export async function putNoteFile({ id, pageId, dataUrl, name = "", mime = "", notebookPageIds = null }) {
+  if (!id || !dataUrl) return { ok: false, error: "no file data" };
+  const label = safeAttachmentName(name);
+  const db = await imageDb();
+  if (!db.notesIdbAvailable()) {
+    return { ok: false, error: failImage(`This browser will not let Planyr store files, so “${label}” was NOT attached. Private browsing usually causes this.`).message };
+  }
+  const bytes = dataUrl.length;
+  if (bytes > MAX_FILE_BYTES) {
+    return { ok: false, error: failImage(`“${label}” is too large to attach (${mb(bytes)}; the limit is ${mb(MAX_FILE_BYTES)}), so it was NOT added. Put it in the Library and link to it instead.`).message };
+  }
+  if (Array.isArray(notebookPageIds)) {
+    const used = await noteImageUsage(notebookPageIds);
+    if (used + bytes > MAX_NOTEBOOK_IMAGE_BYTES) {
+      return { ok: false, error: failImage(`This notebook has reached its storage limit (${mb(used)} of ${mb(MAX_NOTEBOOK_IMAGE_BYTES)}), so “${label}” was NOT attached. Delete some pictures or files first.`).message };
+    }
+  }
+  const r = await db.idbPutImage({
+    key: imageKey(id), scope, id, pageId: pageId || null, dataUrl,
+    mime: mime || "application/octet-stream", w: 0, h: 0, bytes,
+    kind: "file", name: label, createdAt: Date.now(),
+  });
+  if (!r.ok) return { ok: false, error: failImage(`“${label}” could NOT be stored, so it was not attached to the page.`, r.error).message };
+  if (syncOn()) uploadImage({ id, pageId, dataUrl, mime: mime || "application/octet-stream", w: 0, h: 0, bytes, kind: "file", name: label });
+  return { ok: true, bytes };
+}
+
+/** One attached file's bytes as a data URL, or null when they are gone. Same cloud
+ *  fall-through as a picture, for the same reason: a file attached on the desktop has to be
+ *  downloadable from the laptop, and it arrives with the page that needs it. */
+export async function readNoteFile(fileId) { return readNoteImage(fileId); }
+
+/** A map of `fileId → data URL` for a set of ids, skipping anything over `maxBytes`.
+ *  The cap is what stops a Markdown export of a note with a 30 MB drawing producing a
+ *  Markdown file no editor will open; the exporter NAMES what it did not embed. */
+export async function readNoteFiles(fileIds, { maxBytes = Infinity } = {}) {
+  const ids = [...new Set((fileIds || []).filter(Boolean))];
+  if (!ids.length) return {};
+  const meta = new Map((await (await imageDb()).idbListImageMeta(scope)).map((m) => [m.id, m]));
+  const out = {};
+  for (const id of ids) {
+    if ((meta.get(id)?.bytes || 0) > maxBytes) continue;
+    const src = await readNoteFile(id);
+    if (src) out[id] = src;
+  }
+  return out;
+}
+
 /** A map of `imageId → data URL` for a set of ids. Missing ids are simply absent, which is
  *  the signal the exporter turns into its named broken reference. */
 export async function readNoteImages(imageIds) {
@@ -474,10 +694,17 @@ export async function purgePages(pageIds) {
   if (!ids.length) return { pages: 0, images: 0 };
   const imageIds = [];
   for (const id of ids) {
-    for (const imgId of imageIdsInDoc(readPage(id))) imageIds.push(imgId);
+    // ⛔ ASSETS, not images (NEW-5). An attachment left behind after its page is gone is
+    // storage nothing can reach and nothing will ever free — the same leak the body
+    // cascade exists to prevent, one layer down, and the reason `assetIdsInDoc` is the
+    // one accessor a delete path may use.
+    for (const assetId of assetIdsInDoc(readPage(id))) imageIds.push(assetId);
   }
   const pages = deletePages(ids);
   const img = await deleteNoteImages(imageIds);
+  // A purged page's HISTORY goes with it (NEW-3). "Delete forever" that left thirty
+  // snapshots of the deleted note on the device would be a bin with a hole in it.
+  await deletePageVersions(ids);
   if (scoped()) {
     for (const id of ids) sync.pages[id] = { rev: sync.pages[id]?.rev ?? null, dirty: false, purged: true };
     for (const id of imageIds) sync.images[id] = { up: false, purged: true };
@@ -715,6 +942,19 @@ function emitPagesChanged(pageIds) {
   for (const fn of pageListeners) { try { fn(ids); } catch (_) { /* a bad listener must not mute the rest */ } }
 }
 
+/** ⛔ THE SAME ANNOUNCEMENT WITHOUT THE DIRTY GUARD — and it has exactly one legitimate
+ *  caller shape (NEW-4). `emitPagesChanged` skips a page this window has unflushed edits
+ *  on, because a remount would discard them: correct for a change arriving from OUTSIDE
+ *  (a sibling window, the cloud seed), where we cannot know what the editor holds. This
+ *  one is for a change THIS module just made itself, to a page it has already established
+ *  no open editor is holding (`openDoc` is checked first). Never call it for a write whose
+ *  page might be on screen. */
+function announcePages(pageIds) {
+  const ids = (pageIds || []).filter(Boolean);
+  if (!ids.length) return;
+  for (const fn of pageListeners) { try { fn(ids); } catch (_) { /* a bad listener must not mute the rest */ } }
+}
+
 const conflictListeners = new Set();
 export function onNotesConflict(fn) { conflictListeners.add(fn); return () => conflictListeners.delete(fn); }
 export function notesConflicts() { return [...conflicts.keys()]; }
@@ -747,6 +987,18 @@ function settleQuietly(pageId, row) {
   if (verdict.why === "nothing-local") {
     if (!writePageLocal(pageId, row.doc)) return false;   // LOUD-FAILURE: a refused write is not a resolution
     emitPagesChanged([pageId]);
+  }
+  /* ⛔ THE COPIES DIFFERED ONLY BY EMPTY BLOCKS — see `judgeConflict`. The CLEAN one wins and
+   * stays owed to the cloud, so the litter leaves the account instead of being kept in silence
+   * on whichever side happened to have it. */
+  if (verdict.why === "litter-only") {
+    const { doc: clean } = pruneEmptyAnchors(localDoc);
+    if (!writePageLocal(pageId, clean)) return false;
+    emitPagesChanged([pageId]);
+    sync.pages[pageId] = { rev: row.rev, dirty: true, purged: false };
+    conflicts.delete(pageId);
+    schedulePush();
+    return true;
   }
   sync.pages[pageId] = { rev: row.rev, dirty: false, purged: false };
   conflicts.delete(pageId);
@@ -972,6 +1224,26 @@ async function seed({ full }) {
       for (const id of imgs) sync.images[id] = { up: false, purged: true };
     }
 
+    /* ⛔ AND THE ZOMBIES GO WITH THEM. A bin entry every one of whose pages the SERVER says is
+     * purged is not recoverable by anybody: `doc` is NULL up there and the bytes are gone. It
+     * was sitting in his bin offering a restore that could only ever produce an empty note —
+     * 15 of his 24 rows, put back by the union merge after he had emptied the bin for real.
+     *
+     * ⛔ THE SERVER'S `purged_at` IS THE ONLY EVIDENCE ACCEPTED. "No body on this device" is
+     * NOT the same claim — a signed-in device legitimately has not downloaded every binned
+     * page's body — and treating the two as one would destroy recoverable entries. Purging the
+     * entry here also TOMBSTONES it, so it cannot come back from a stale window either. */
+    if (plan.purged.length) {
+      const dead = new Set(plan.purged);
+      let t = migrate(readTreeRaw());
+      const zombies = trashEntries(t).filter((e) => (e.pageIds || []).length > 0
+        && (e.pageIds || []).every((id) => dead.has(id)));
+      if (zombies.length) {
+        for (const e of zombies) t = purgeTrashEntry(t, e.id).tree;
+        if (writeTreeLocal(t)) { treeChanged = true; sync.treeDirty = true; }
+      }
+    }
+
     const need = [...plan.adopt, ...plan.conflicts];
     if (need.length) {
       const got = await c.fetchPages(client(), need);
@@ -1018,7 +1290,9 @@ async function seed({ full }) {
         for (const id of imgPlan.upload) {
           const rec = await db.idbGetImage(imageKey(id));
           if (!rec?.dataUrl) continue;
-          await uploadImage({ id, pageId: rec.pageId, dataUrl: rec.dataUrl, mime: rec.mime, w: rec.w, h: rec.h, bytes: rec.bytes });
+          // `kind`/`name` ride along so an ATTACHMENT re-uploads as one (NEW-5) — a v1
+          // record has neither, and absent means picture, which is what every one was.
+          await uploadImage({ id, pageId: rec.pageId, dataUrl: rec.dataUrl, mime: rec.mime, w: rec.w, h: rec.h, bytes: rec.bytes, kind: rec.kind || "image", name: rec.name || "" });
         }
         saveSyncState();
       } else { reportSyncFailure(iIdx.error); }
@@ -1101,8 +1375,275 @@ async function uploadImage(rec) {
   if (r.ok) { sync.images[rec.id] = { up: true, purged: false }; saveSyncState(); return true; }
   // Named, not swallowed — and self-healing: the picture stays unmarked, so the next seed
   // finds it missing on the server and tries again.
-  failImage("A picture was saved on this device but could NOT be copied to your account, so it will not appear on your other computers yet.", r.error);
+  const what = rec.kind === "file" ? `“${rec.name || "a file"}” was attached on this device` : "A picture was saved on this device";
+  failImage(`${what} but could NOT be copied to your account, so it will not appear on your other computers yet.`, r.error);
   return reportSyncFailure(r.error);
+}
+
+/* ---- version history (NEW-3) ------------------------------------------------------------
+ *
+ * ⛔ SNAPSHOTS GO TO INDEXEDDB, NEVER TO LOCALSTORAGE (TIER-BY-REBUILDABILITY). The small
+ * tier was measured at ~78% of a hard ~5 MB cap on the owner's own browser with real saved
+ * plans in it; a note's typing history is bulky and bursty and would crowd irreplaceable
+ * work out of exactly the store that must never fill. Snapshots are user work, so they are
+ * BUDGETED rather than evicted under pressure — the budget is `planRetention`, which runs
+ * after every write.
+ *
+ * ⛔ AND THEY ARE DEVICE-LOCAL IN THIS VERSION, WHICH IS A STATED LIMIT, NOT AN OVERSIGHT.
+ * History does not ride the cloud sync: it needs no schema change, it cannot fight the
+ * server-owned `rev`, and it covers the risk the feature was asked for — a note mangled on
+ * the machine you are sitting at, including by a second window of the same account writing
+ * over it, because THIS device snapshotted the state before that arrived. What it does not
+ * cover is losing the device itself; that is on the backlog by name rather than implied.
+ */
+const versionKey = (pageId, at) => `${scope}:${pageId}:${at}`;
+const versionPageKey = (pageId, s = scope) => `${s}:${pageId}`;
+
+/** A short plain-text preview, stored WITH the row so listing a history costs no document
+ *  reads — the same reasoning as the image metadata index. */
+const previewOf = (doc) => docToText(doc).replace(/\s+/g, " ").slice(0, 160);
+
+/** Take a snapshot of one page, if one is due. `force` is for the moments that always
+ *  deserve a row: leaving the page, and either side of a restore.
+ *
+ *  Returns `{ ok, taken, at }` — never throws, and a refusal is named on the one error
+ *  channel like every other storage failure (LOUD-FAILURE). */
+export async function snapshotPage(pageId, doc, { reason = "typing", pinned = false, force = false, now = Date.now() } = {}) {
+  if (!pageId || !doc) return { ok: false, taken: false, error: "nothing to snapshot" };
+  const db = await imageDb();
+  if (!db.notesIdbAvailable()) return { ok: false, taken: false, error: "this browser will not let Planyr keep version history" };
+
+  const existing = await db.idbListVersions(versionPageKey(pageId));
+  const newest = existing[0] || null;
+  if (!force && !shouldSnapshot(newest?.at, now)) return { ok: true, taken: false, at: newest?.at ?? null };
+  // Nothing changed since the last snapshot → no row. A history of identical entries is
+  // noise that pushes the useful one off the bottom of the list.
+  if (newest && !force) {
+    const prev = await db.idbGetVersion(newest.key);
+    if (prev?.doc && JSON.stringify(prev.doc) === JSON.stringify(doc)) return { ok: true, taken: false, at: newest.at };
+  }
+
+  const at = newest && newest.at >= now ? newest.at + 1 : now;   // one row per instant, always
+  const body = JSON.stringify(doc);
+  const r = await db.idbPutVersion({
+    key: versionKey(pageId, at), page: versionPageKey(pageId), scope, pageId,
+    at, reason, pinned: !!pinned, bytes: body.length, preview: previewOf(doc), doc,
+  });
+  if (!r.ok) {
+    failImage("A version of this note could NOT be kept, so its history may have a gap. Your note itself is unaffected.", r.error);
+    return { ok: false, taken: false, error: r.error };
+  }
+  await applyRetention(pageId, now);
+  return { ok: true, taken: true, at };
+}
+
+/** Enforce the retention plan for one page. Pure decision, storage-side effect — the split
+ *  is what makes every tier boundary a unit test rather than a hope. */
+async function applyRetention(pageId, now = Date.now()) {
+  const db = await imageDb();
+  const rows = await db.idbListVersions(versionPageKey(pageId));
+  const { drop } = planRetention(rows.map((r) => ({ id: r.key, at: r.at, pinned: r.pinned })), { now, max: MAX_VERSIONS_PER_PAGE });
+  if (drop.length) await db.idbDeleteVersions(drop);
+  return drop.length;
+}
+
+/** One page's history, newest first, without the documents (a list of dates costs no
+ *  document reads). */
+export async function readPageVersions(pageId) {
+  if (!pageId) return [];
+  const db = await imageDb();
+  return db.idbListVersions(versionPageKey(pageId));
+}
+
+/** One snapshot's document. */
+export async function readPageVersion(key) {
+  if (!key) return null;
+  const rec = await (await imageDb()).idbGetVersion(key);
+  return rec?.doc || null;
+}
+
+/** ⛔ RESTORE — AND IT CREATES A NEW VERSION RATHER THAN DESTROYING HISTORY.
+ *
+ *  The state being left is snapshotted FIRST and pinned, so restoring the wrong version is
+ *  itself undoable by restoring the one taken a second earlier. Nothing here deletes a row.
+ *  `planRestore` (pure) decides the two writes; this function performs them, in that order,
+ *  and reports honestly if either refuses. */
+export async function restorePageVersion(pageId, key, { now = Date.now() } = {}) {
+  if (!pageId || !key) return { ok: false, error: "nothing to restore" };
+  const rec = await (await imageDb()).idbGetVersion(key);
+  if (!rec?.doc) return { ok: false, error: failImage("That version could not be read back, so nothing was changed.").message };
+
+  const plan = planRestore({ currentDoc: readPage(pageId), versionDoc: rec.doc, versionAt: rec.at, now });
+  if (!plan.ok) return { ok: false, error: plan.error };
+
+  if (plan.snapshotCurrent) {
+    await snapshotPage(pageId, plan.snapshotCurrent.doc, { reason: "before-restore", pinned: true, force: true, now: plan.snapshotCurrent.at });
+  }
+
+  /* ⛔ WHEN THE PAGE IS OPEN, THE RESTORE IS AN **EDIT**, NOT A WRITE BEHIND THE EDITOR'S
+   * BACK. Writing the JSON straight to storage while an editor holds the old document is
+   * the same silent-loss shape the task rollup guards against, only worse: the editor's
+   * own unmount flush would write its stale copy back over the restored one a moment
+   * later. Handed to the editor it becomes one ordinary transaction — undoable, saved
+   * through the one save path, and visible immediately. */
+  if (openDoc && openDoc.pageId === pageId && typeof openDoc.applyDocument === "function") {
+    const applied = openDoc.applyDocument(plan.apply.doc);
+    if (!applied?.ok) return { ok: false, error: applied?.error || "the restored version could not be applied" };
+  } else if (!writePage(pageId, plan.apply.doc)) {
+    return { ok: false, error: "the restored version could not be saved, so nothing was changed" };
+  }
+  await snapshotPage(pageId, plan.apply.doc, { reason: "restored", pinned: true, force: true, now: plan.apply.at });
+  return { ok: true, at: plan.apply.at };
+}
+
+/** Destroy a set of pages' history — the purge's hands only. */
+export async function deletePageVersions(pageIds) {
+  const ids = (Array.isArray(pageIds) ? pageIds : [pageIds]).filter(Boolean);
+  if (!ids.length) return { ok: true, removed: 0 };
+  const db = await imageDb();
+  const keys = [];
+  for (const id of ids) for (const row of await db.idbListVersions(versionPageKey(id))) keys.push(row.key);
+  if (!keys.length) return { ok: true, removed: 0 };
+  return db.idbDeleteVersions(keys);
+}
+
+/* ---- the task rollup (NEW-4) -------------------------------------------------------------
+ *
+ * ⛔ TICKING AN ITEM IN THE ROLLUP GOES THROUGH THE OPEN EDITOR WHEN THERE IS ONE.
+ * The obvious implementation — read the page's JSON, flip the flag, write it back — is a
+ * silent data-loss bug whenever the page being ticked is the page on screen: the editor
+ * holds its document in memory, has up to a debounce of unflushed typing, and would write
+ * the whole of its stale copy back over the change a moment later. So an editor REGISTERS
+ * itself here while it is mounted, and a toggle for that page is handed to it as a real
+ * editor transaction — which lands in the same document, in the same undo history, and
+ * flushes through the same save path as any other edit. Every OTHER page takes the JSON
+ * route and the store announces the change so nothing else is holding a stale copy either.
+ */
+let openDoc = null;
+
+/** The mounted editor claims its page, handing over the two operations that must go
+ *  through it rather than round the back of it: ticking one checklist item (NEW-4) and
+ *  replacing the whole document on a restore (NEW-3). Returns the un-register, so a page
+ *  switch cannot leave a dead claim behind (which would send an edit into a torn-down
+ *  editor). */
+export function registerOpenNoteDoc(pageId, { applyTaskToggle, applyDocument } = {}) {
+  openDoc = { pageId, applyTaskToggle, applyDocument };
+  return () => { if (openDoc && openDoc.pageId === pageId) openDoc = null; };
+}
+
+/** Every UNCHECKED checklist item across a scope, in the rail's own page order. Reads
+ *  bodies, so it lives here rather than in the pure model — the roll-up itself is pure
+ *  (lib/notesTasks.js) and is unit-tested there. */
+export function collectOpenTasks(tree, { projectId = null, scope: sc = SCOPE_PROJECT } = {}) {
+  const pid = sc === SCOPE_ALL ? null : projectId;
+  const pages = [];
+  const scoped = { pages: pagesInScope(tree, pid, pid == null ? SCOPE_ALL : SCOPE_PROJECT) };
+  walkPages(scoped, (pg, { root, trail }) => {
+    pages.push({ pageId: pg.id, pageTitle: pg.title, projectId: root.projectId ?? null, trail: trail || [] });
+  });
+  const bodies = {};
+  for (const p of pages) bodies[p.pageId] = readPage(p.pageId);
+  return rollUpOpenTasks(pages, bodies);
+}
+
+/** Tick (or un-tick) one checklist item from the rollup. Returns `{ ok, changed }`. */
+export function toggleNoteTask(pageId, { index, text }, checked) {
+  if (!pageId) return { ok: false, changed: false };
+  if (openDoc && openDoc.pageId === pageId && typeof openDoc.applyTaskToggle === "function") {
+    return openDoc.applyTaskToggle({ index, text }, checked);
+  }
+  const doc = readPage(pageId);
+  if (!doc) return { ok: false, changed: false };
+  const r = setTaskCheckedInDoc(doc, { index, text }, checked);
+  if (!r.changed) return { ok: true, changed: false };
+  if (!writePage(pageId, r.doc)) return { ok: false, changed: false };
+  announcePages([pageId]);
+  return { ok: true, changed: true };
+}
+
+/** How many open items one page has — used nowhere but the tests and any future badge;
+ *  exported so the rollup's definition of "open" has exactly one home. */
+export function openTaskCount(pageId) {
+  return openTasksInDoc(readPage(pageId)).length;
+}
+
+/* ---- what is actually IN the bin (NEW-3) ------------------------------------------------
+ *
+ * ⛔ THE BIN COULD NOT BE JUDGED. The owner, verbatim: *"figure out the bin thing because
+ * there is, like, a bunch of items in there, but I cannot even see it. Like, if I wanted to
+ * check to see if I should keep it, I cannot."* Twenty-one entries, sixteen of them literally
+ * "Untitled page", showing a title and a countdown and nothing else — so the ONLY way to find
+ * out what one was, was to RESTORE it into his live tree and delete it again. A bin that costs
+ * you a round trip through your own notes to read is a bin nobody empties, which is how it got
+ * to twenty-one.
+ *
+ * This is the half only the storage seam can do: the titles are in the tree, but the WORDS are
+ * in the bodies, and the bodies of binned pages are deliberately still on disk (that is what
+ * makes a restore work). Everything else — the project it came from, when it went, how big it
+ * is — is on the entry already and was simply never shown.
+ */
+export function collectBinFacts(tree, projects = []) {
+  const byId = new Map((projects || []).filter(Boolean).map((p) => [p.id, p.name]));
+  const titles = new Map();
+  const titleWalk = (node) => {
+    if (!node) return;
+    titles.set(node.id, node.title);
+    for (const k of node.pages || []) titleWalk(k);
+  };
+  return trashEntries(tree).map((e) => {
+    titleWalk(e.node);
+    /* ⛔ ONE PASS COMPUTES THE PREVIEW *AND* WHAT "READ IT" WILL OPEN, and that is the whole
+     * of the fix rather than a tidy-up. His report: the row for DEV COORDINATION showed real
+     * text and "656 characters", and pressing Read it showed a heading and nothing else. The
+     * reason, from the database: DEV COORDINATION is the CONTAINER (`sec_…`) and has no row in
+     * `notes_pages` at all — its words live in its child. The list was reading the child and
+     * the reader was opening the parent. Two passes over the same cascade, disagreeing.
+     *
+     * So `reading` is the list the reader opens, built HERE, from the same reads the preview
+     * came from. They cannot disagree because they are the same walk. */
+    const reading = [];
+    let text = "";
+    let anyStored = false;
+    for (const id of e.pageIds || []) {
+      const doc = readPage(id);
+      if (doc) anyStored = true;
+      const t = docToText(doc).replace(/\s+/g, " ").trim();
+      if (!t) continue;
+      reading.push({ pageId: id, title: titles.get(id) || "", chars: t.length });
+      if (!text) text = t;
+    }
+    /* ⛔ FOUR STATES, NOT TWO, AND THE FOURTH IS THE ONE THAT WOULD HAVE BEEN A LIE. An entry
+     * binned before the bin recorded where a page came from has NO `projectId` key at all,
+     * which is not the same fact as `null` — and `null` reads on screen as the definite
+     * statement "Not in a project". Saying that about a note that was in fact filed somewhere
+     * is precisely the conflation NEW-1 exists to stop, so an absent field says so. */
+    const recorded = Object.prototype.hasOwnProperty.call(e, "projectId");
+    const projectId = recorded ? (e.projectId ?? null) : null;
+    return {
+      ...e,
+      preview: text.slice(0, 160),
+      chars: text.length,
+      empty: text.length === 0,
+      reading,
+      /* ⛔ "NOTHING WAS EVER WRITTEN IN THIS" AND "THE WRITING IS GONE" ARE OPPOSITE FACTS and
+       * the bin showed the first for both. 15 of his 24 rows had been purged for real — body
+       * destroyed, `purged_at` set — and then resurrected as bin entries by the union merge,
+       * so the bin was offering to restore notes whose content no longer exists anywhere.
+       * `gone` is the honest third state: there is no body on this device for ANY page in the
+       * cascade, so there is nothing to show and nothing a restore would bring back. */
+      gone: text.length === 0 && !anyStored && (e.pageIds || []).length > 0,
+      // The page the words came from — never blindly the first in the cascade, which for a
+      // container is the container itself and has no body at all.
+      pageId: reading[0]?.pageId || (e.pageIds || [])[0] || null,
+      projectId,
+      /* "No project" is a real place; a project that has since been deleted is NOT the same
+       * thing and must not be captioned as if it were. */
+      projectLabel: !recorded
+        ? "where it came from was not recorded"
+        : (projectId == null ? "Not in a project" : (byId.get(projectId) || "a project that no longer exists")),
+      projectResolved: recorded && (projectId == null || byId.has(projectId)),
+    };
+  });
 }
 
 /* ---- search --------------------------------------------------------------------------- */

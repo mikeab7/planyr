@@ -47,10 +47,12 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ancestorIds, boundProjectIds, findPage, pagesInScope, projectGroups, subtreePageIds, trashEntries,
+  ancestorIds, boundProjectIds, descendantPageIds, findPage, pagesInScope, projectGroups,
+  subpagesPhrase, subtreePageIds, trashEntries,
   NO_PROJECT_LABEL, SCOPE_ALL, SCOPE_PROJECT,
 } from "../lib/notesModel.js";
 import { absoluteStamp, daysLeft } from "../lib/notesTime.js";
+import { QUICK_OPEN_KEY } from "../lib/notesQuickOpen.js";
 
 const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
 const INDENT = 13;
@@ -78,9 +80,16 @@ const rowBase = {
  * `createdAt` / `updatedAt` stay on every page node, `touchPage` still stamps them, they
  * still ride the cloud sync, `recentPages` is still exported and unit-tested, and the hover
  * still reads them. Nothing has to be migrated to bring a Recent view back if he ever wants
- * one — it is a component, not a schema. */
+ * one — it is a component, not a schema.
+ *
+ * ⛔ AND **TASKS** IS BACK TO THREE (NEW-4), which is not a reversal of the above. Recent
+ * was removed because it re-sorted the SAME pages by a fact the owner does not navigate by;
+ * this shows something no other surface in the module can show at all — every unticked
+ * checklist line in every note, which is otherwise trapped one note at a time. It earns a
+ * segment because without it the information does not exist anywhere. */
 const VIEWS = [
   { id: "tree", label: "Pages" },
+  { id: "tasks", label: "Tasks" },
   { id: "bin", label: "Bin" },
 ];
 
@@ -134,8 +143,12 @@ function RenameField({ value, onCommit, onCancel, testid }) {
 function ConfirmDelete({ onYes, onNo, testid, count }) {
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 3, flex: "0 0 auto" }}>
+      {/* ⛔ THE NUMBER NAMES WHAT ELSE GOES, NEVER THE PAGE YOU CLICKED (NEW-4). It used to
+          render the whole cascade set, which includes this page — so one page with one child
+          asked "Delete 2?". A count that is wrong in the alarming direction is how somebody
+          is led to believe they lost something they did not. */}
       <span style={{ fontSize: 11, fontWeight: 700, color: "var(--danger-text)" }}>
-        {count > 1 ? `Delete ${count}?` : "Delete?"}
+        {count > 0 ? `Delete + ${subpagesPhrase(count).replace("its ", "")}?` : "Delete?"}
       </span>
       <MiniButton title="Confirm delete" tone="danger" testid={`${testid}-yes`} onClick={onYes}>✓</MiniButton>
       <MiniButton title="Keep it" testid={`${testid}-no`} onClick={onNo}>✕</MiniButton>
@@ -533,27 +546,89 @@ function SearchResults({ results, onSelectHit, query }) {
   );
 }
 
-function BinList({ entries, onRestore, onPurge, onPurgeAll }) {
+/* ⛔ A BIN YOU CAN ACTUALLY JUDGE (NEW-3).
+ *
+ * What it showed before: a title, a countdown, Restore, Delete forever. Sixteen of his
+ * twenty-one rows read "Untitled page", so the only way to find out what one WAS, was to
+ * restore it into his live tree and delete it again. Every fact needed to decide was already
+ * on hand and simply not rendered — the words are in the bodies (still on disk, because that
+ * is what makes a restore work), and the project, the date and the size are on the entry.
+ *
+ * The row is also a BUTTON now: it opens the note READ-ONLY, so "let me just look at it"
+ * costs nothing and touches nothing. */
+function BinList({ entries, onRestore, onPurge, onPurgeAll, onPeek, onPurgeEmpties }) {
   if (!entries.length) {
     return <p style={{ margin: "8px 10px", fontSize: 12, color: "var(--text-tertiary)" }}>The bin is empty.</p>;
   }
+  const empties = entries.filter((e) => e.empty);
   return (
     <div data-testid="notes-bin" style={{ padding: "2px 6px 10px", display: "flex", flexDirection: "column", gap: 4 }}>
       {/* The count belongs HERE — where it answers a question you actually asked by opening
           the bin — not permanently on the tab (PANEL-BREVITY). */}
       <p style={{ margin: "2px 4px 4px", fontSize: 11, fontWeight: 600, color: "var(--text-tertiary)" }}>
-        {entries.length === 1 ? "1 deleted page" : `${entries.length} deleted pages`} · kept 30 days
+        {/* ⛔ NOTES, NOT PAGES (NEW-6). Each entry is one deleted NOTE, which may have carried
+            subpages with it — calling the entry count a page count was the same miscount the
+            confirmation had, on a third surface. */}
+        {entries.length === 1 ? "1 deleted note" : `${entries.length} deleted notes`} · kept 30 days
       </p>
+
+      {/* ⛔ SIXTEEN OF HIS TWENTY-ONE ROWS WERE EMPTY PAGES. Clearing them one at a time is why
+          they were still there; one action for the whole class is the difference between a bin
+          that gets emptied and one that does not. Absent when there are none. */}
+      {empties.length > 1 ? (
+        <button
+          type="button"
+          data-testid="notes-bin-purge-empties"
+          onMouseDown={(ev) => ev.preventDefault()}
+          onClick={() => onPurgeEmpties(empties.map((e) => e.id))}
+          style={{
+            ...rowBase, width: "auto", alignSelf: "flex-start", padding: "3px 10px", fontSize: 11.5,
+            fontWeight: 650, border: "1px solid var(--border-default)", color: "var(--text-secondary)",
+          }}
+        >Delete the {empties.length} empty ones forever</button>
+      ) : null}
+
       {entries.map((e) => (
         <div key={e.id} data-testid={`notes-bin-${e.id}`} style={{ ...rowBase, flexDirection: "column", alignItems: "stretch", gap: 4, cursor: "default", border: "1px solid var(--border-default)" }}>
           <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
             <span style={{ flex: 1, minWidth: 0, fontWeight: 650, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.title || "Untitled"}</span>
             <span style={{ flex: "0 0 auto", fontSize: 10.5, fontWeight: 600, color: "var(--text-tertiary)" }}>{daysLeft(e.expiresAt)}</span>
           </span>
-          {e.pageIds?.length > 1 ? (
-            <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{e.pageIds.length} pages</span>
-          ) : null}
-          <span style={{ display: "flex", gap: 5 }}>
+
+          {/* ⛔ THE WORDS THEMSELVES — the one thing that makes "should I keep this?" answerable
+              when sixteen rows share a title. An empty note says so rather than showing a gap. */}
+          <span
+            data-testid={`notes-bin-preview-${e.id}`}
+            style={{ fontSize: 11, lineHeight: 1.45, color: e.empty ? "var(--text-tertiary)" : "var(--text-secondary)", fontStyle: e.empty ? "italic" : "normal", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}
+          >{e.gone
+            ? "Its writing was permanently deleted and cannot be brought back"
+            : (e.empty ? "Empty — nothing was ever written in it" : e.preview)}</span>
+
+          <span style={{ display: "flex", flexWrap: "wrap", gap: 6, fontSize: 10.5, color: "var(--text-tertiary)" }}>
+            <span data-testid={`notes-bin-project-${e.id}`} style={{ color: e.projectResolved ? "var(--text-tertiary)" : "var(--warn-text)", fontWeight: e.projectResolved ? 600 : 700 }}>
+              {e.projectLabel}
+            </span>
+            {e.deletedAt ? <span>· deleted {absoluteStamp(e.deletedAt).split(",")[0]}</span> : null}
+            {e.chars ? <span>· {e.chars} character{e.chars === 1 ? "" : "s"}</span> : null}
+            {/* ⛔ AND HERE TOO (NEW-6). `pageIds` is the delete's cascade set and INCLUDES the
+                note itself, so a note with one subpage announced itself as "2 pages" in the bin
+                long after the confirmation had been fixed. */}
+            {e.pageIds?.length > 1 ? <span>· + {subpagesPhrase(e.pageIds.length - 1).replace("its ", "")}</span> : null}
+          </span>
+
+          <span style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+            {e.reading?.length ? (
+              <button
+                type="button"
+                data-testid={`notes-bin-peek-${e.id}`}
+                onMouseDown={(ev) => ev.preventDefault()}
+                onClick={() => onPeek(e)}
+                style={{
+                  ...rowBase, width: "auto", padding: "3px 10px", fontSize: 12, fontWeight: 650,
+                  border: "1px solid var(--border-default)", color: "var(--text-primary)",
+                }}
+              >Read it</button>
+            ) : null}
             <button
               type="button"
               data-testid={`notes-bin-restore-${e.id}`}
@@ -587,6 +662,79 @@ function BinList({ entries, onRestore, onPurge, onPurgeAll }) {
         onClick={onPurgeAll}
         style={{ ...rowBase, justifyContent: "center", fontSize: 12, fontWeight: 650, color: "var(--danger-text)", border: "1px solid var(--border-default)" }}
       >Empty the bin</button>
+    </div>
+  );
+}
+
+/** ⛔ EVERY UNTICKED LINE IN EVERY NOTE, IN ONE PLACE (NEW-4).
+ *
+ *  Ticking a row here flips the checkbox IN THE NOTE — through the store, which hands the
+ *  change to the open editor when the note is the one on screen (see `toggleNoteTask`).
+ *  Clicking the words opens that note. The row shows the item and the note it came from and
+ *  NOTHING else: no owner, no due date, no project badge inside a project (PANEL-BREVITY,
+ *  and the rail's standing rule that everything on screen belongs to where you are
+ *  standing). From the Dashboard the project's name is the group heading, exactly as the
+ *  Pages view already does it.
+ *
+ *  A ticked item LEAVES the list, because "one view of every OPEN item" is what was asked
+ *  for; the note keeps it, ticked, where it was written. */
+function TaskGroup({ group, onToggle, onOpen }) {
+  return (
+    <div style={{ marginBottom: 6 }}>
+      {group.name !== undefined && group.name !== null ? (
+        <div style={{ padding: "3px 8px 2px", fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-tertiary)" }}>
+          {group.name}
+        </div>
+      ) : null}
+      {group.tasks.map((t) => (
+        <div key={t.key} data-testid={`notes-task-${t.key}`} style={{ ...rowBase, alignItems: "flex-start", cursor: "default", gap: 7 }}>
+          <input
+            type="checkbox"
+            checked={false}
+            data-testid={`notes-task-check-${t.key}`}
+            aria-label={`Tick “${t.text}”`}
+            onChange={() => onToggle(t)}
+            style={{ flex: "0 0 auto", marginTop: 2, width: 14, height: 14, accentColor: "var(--accent-notes)", cursor: "pointer" }}
+          />
+          <button
+            type="button"
+            data-testid={`notes-task-open-${t.key}`}
+            title={`Open “${t.pageTitle}” at this line`}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onOpen(t)}
+            style={{
+              flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 1,
+              border: "none", background: "transparent", font: "inherit", textAlign: "left",
+              color: "var(--text-primary)", cursor: "pointer", padding: 0,
+            }}
+          >
+            <span style={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.35 }}>{t.text}</span>
+            <span style={{ fontSize: 11, color: "var(--text-tertiary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {t.pageTitle || "Untitled page"}
+            </span>
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TaskList({ groups, onToggle, onOpen }) {
+  const total = groups.reduce((n, g) => n + g.tasks.length, 0);
+  if (!total) {
+    return (
+      <p data-testid="notes-tasks-empty" style={{ margin: "8px 10px", fontSize: 12, lineHeight: 1.5, color: "var(--text-tertiary)" }}>
+        Nothing outstanding. Checklist lines you write in any note show up here until they are ticked.
+      </p>
+    );
+  }
+  return (
+    <div data-testid="notes-tasks" style={{ padding: "2px 2px 10px" }}>
+      {/* The count answers the question opening this view asked. One line (PANEL-BREVITY). */}
+      <p style={{ margin: "2px 8px 5px", fontSize: 11, fontWeight: 600, color: "var(--text-tertiary)" }}>
+        {total === 1 ? "1 open item" : `${total} open items`}
+      </p>
+      {groups.map((g) => <TaskGroup key={g.projectId ?? "none"} group={g} onToggle={onToggle} onOpen={onOpen} />)}
     </div>
   );
 }
@@ -626,7 +774,8 @@ export default function NotesTree({
   activePageId, query, results,
   onQueryChange, onSelectPage, onSelectHit, onAddPage, onAddSubpage,
   onRename, onDelete, onExportPage, onPrintPage, onSetPageProject,
-  onMovePage, onRestore, onPurge, onPurgeAll, onAllNotes,
+  onMovePage, onRestore, onPurge, onPurgeAll, onPeekBin, onPurgeEmpties, binFacts, onAllNotes,
+  taskGroups = [], onToggleTask, onOpenTask, onViewChange,
 }) {
   /* EXPANDED, not collapsed — the inverse of what this used to hold, and the whole point.
    * An empty set means everything is shut, which is the honest default for a rail whose job
@@ -659,7 +808,11 @@ export default function NotesTree({
     }
     return out;
   }, [projects, tree]);
-  const bin = useMemo(() => trashEntries(tree), [tree]);
+  /* ⛔ THE BIN'S FACTS COME FROM THE WORKSPACE, NOT FROM HERE (NEW-3). Reading every binned
+   * page's BODY is a storage question, and this component is the rail — it renders on every
+   * keystroke of a rename. The workspace computes them once, only while the Bin view is open.
+   * Falls back to the bare entries so a build that has not wired it still lists the bin. */
+  const bin = useMemo(() => (binFacts?.length ? binFacts : trashEntries(tree)), [binFacts, tree]);
 
   /* OPEN THE PATH TO THE PAGE YOU ARE ON, and leave the rest shut. It only ever ADDS: a
    * branch the user opened by hand stays open, because a rail that closes what you just
@@ -689,7 +842,7 @@ export default function NotesTree({
 
   /** How many pages a delete would take — so the inline confirmation can say so before it
    *  happens, rather than the Undo bar saying so afterwards (TOMBSTONE-DELETES made visible). */
-  const cascadeCount = (id) => subtreePageIds(findPage(tree, id)?.page).length;
+  const cascadeCount = (id) => descendantPageIds(findPage(tree, id)?.page).length;
 
   /* Where a page may be filed. Built from the WHOLE visible set, and a page can never be
    * offered ITS OWN SUBTREE — that move would detach the branch, so the model refuses it and
@@ -844,8 +997,16 @@ export default function NotesTree({
           <input
             data-testid="notes-search"
             value={query}
-            placeholder="Search notes…"
+            /* ⛔ THE SHORTCUT IS PRINTED HERE, and it costs no chrome (NEW-2). A keyboard
+               affordance nobody can discover is one that does not exist — B1371's lesson,
+               applied to a key instead of a button — but a third control in this row would
+               crowd a 268px rail for a feature the keyboard already reaches. The placeholder
+               is the one surface someone looking for "how do I find a note" is already
+               reading. */
+            placeholder={`Search notes — ${QUICK_OPEN_KEY} to jump`}
+            title={`Search these notes. Press ${QUICK_OPEN_KEY} to jump straight to a note by name.`}
             aria-label="Search notes"
+            aria-keyshortcuts={QUICK_OPEN_KEY.replace("⌘", "Meta+").replace("Ctrl+", "Control+")}
             onChange={(e) => onQueryChange(e.target.value)}
             /* Esc clears the query and gives the tree back. */
             onKeyDown={(e) => {
@@ -864,7 +1025,7 @@ export default function NotesTree({
             type="button"
             data-testid="notes-new-page"
             title="New page"
-            onClick={() => { setView("tree"); onAddPage(); }}
+            onClick={() => { setView("tree"); onViewChange?.("tree"); onAddPage(); }}
             style={{
               flex: "0 0 auto", height: 28, padding: "0 10px", borderRadius: RADIUS.control,
               border: "1px solid var(--border-default)", background: "var(--surface-page)",
@@ -873,7 +1034,9 @@ export default function NotesTree({
             }}
           >＋ Page</button>
         </div>
-        <ViewTabs view={view} onView={(v) => { setView(v); onQueryChange(""); }} />
+        {/* The workspace root is told which view is showing, so the task rollup — which has
+            to read every page BODY in scope — is computed only while it is on screen. */}
+        <ViewTabs view={view} onView={(v) => { setView(v); onQueryChange(""); onViewChange?.(v); }} />
         <ProjectListBanner
           state={projectsState}
           error={projectsError}
@@ -885,8 +1048,10 @@ export default function NotesTree({
       <div role="tree" aria-label="Notes" style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "6px 6px 14px" }}>
         {query ? (
           <SearchResults results={results} query={query} onSelectHit={onSelectHit} />
+        ) : view === "tasks" ? (
+          <TaskList groups={taskGroups} onToggle={onToggleTask} onOpen={onOpenTask} />
         ) : view === "bin" ? (
-          <BinList entries={bin} onRestore={onRestore} onPurge={onPurge} onPurgeAll={onPurgeAll} />
+          <BinList entries={bin} onRestore={onRestore} onPurge={onPurge} onPurgeAll={onPurgeAll} onPeek={onPeekBin} onPurgeEmpties={onPurgeEmpties} />
         ) : roots.length === 0 ? (
           /* ⛔ AN EMPTY RAIL MUST EXPLAIN ITSELF (B1374, kept). Inside a project with notes
              living elsewhere, the way to all of them is the Dashboard — one click, from here

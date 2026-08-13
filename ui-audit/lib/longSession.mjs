@@ -92,6 +92,13 @@ export function counterScript() {
       // The DRAWN element count, not the model's — the canvas culls to the view (B1345's
       // `cullToView`), so this reads as "how much is on screen", which is what a frame pays for.
       // It is the arm control's evidence: in the `hold` arm it must not trend.
+      /* ⛔ COUNTED ACROSS ALL FIVE DRAWN KINDS (NEW-2). `[data-el-id]` is ELEMENTS ONLY, so a
+       * markup, measurement, callout or parcel appearing or leaving mid-session was invisible to
+       * this control — the arm could trend hard and the control still read flat. Distinct
+       * `data-feature` KEYS, never nodes: chrome (a pond label, a parcel's acreage badge) carries
+       * its owner's key too, so a node count drifts with selection and hover. */
+      featuresDrawn: svg ? new Set([...svg.querySelectorAll("[data-feature]")].map((n) => n.getAttribute("data-feature"))).size : 0,
+      /* el-tier: the element slice of that, kept as detail beside the census. */
       elementsDrawn: svg ? svg.querySelectorAll("[data-el-id]").length : 0,
     };
   };
@@ -274,6 +281,7 @@ async function workload(page, { cx, cy, press, arm, round }) {
       if (await t.count()) { await t.first().click().catch(() => {}); await page.waitForTimeout(180); await t.first().click().catch(() => {}); await page.waitForTimeout(120); }
     }
     // Select and deselect, which is the cheapest state churn a real session produces constantly.
+    /* el-tier: grabbing one thing to select — a targeted lookup, not a census. */
     const el = page.locator("[data-el-id]").first();
     if (await el.count()) { await el.click({ force: true }).catch(() => {}); await page.waitForTimeout(100); }
     await page.keyboard.press("Escape").catch(() => {});
@@ -337,6 +345,7 @@ export async function runLongSession(page, opts) {
       documentNodes: { from: base.counters.documentNodes, to: last.counters.documentNodes },
       tiles: { from: base.counters.tiles, to: last.counters.tiles },
       tilesLoaded: { from: base.counters.tilesLoaded, to: last.counters.tilesLoaded },
+      featuresDrawn: { from: base.counters.featuresDrawn, to: last.counters.featuresDrawn },
       elementsDrawn: { from: base.counters.elementsDrawn, to: last.counters.elementsDrawn },
     },
     correlations: correlate(series),

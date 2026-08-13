@@ -15,7 +15,7 @@ import { planDelete, shouldHintTypingGuard, TYPING_GUARD_HINT } from "./lib/dele
 import { rowsToModel, KIND_TO_FIELD, foldNeverSyncedLocal, foldJournal, reconcileSeedRows } from "./lib/elementRows.js";
 import { writeJournal, readJournal, clearJournal, sweepJournals, journalSessionId } from "./lib/elementJournal.js";
 import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
-import { createNameResolver, describeElement } from "./lib/editorNames.js";
+import { createNameResolver, describeElement, SELF_ACTOR } from "./lib/editorNames.js";
 import { toastForSyncEvent } from "./lib/conflictToasts.js";
 import { listMembers } from "./lib/teams.js";
 import { multiwriterEnabled } from "./lib/multiwriter.js";
@@ -25,7 +25,8 @@ import { commitElements, fetchElements, keepaliveCommit } from "./lib/elementApi
 import { supabase, supabaseRest, currentAccessToken } from "./lib/supabase.js";
 import { createIdMinter, randomIdSalt } from "../../shared/ids.js";
 import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
-import { assemblyIntegrity, tearPayload, orphanPayload } from "./lib/assemblyIntegrity.js";
+import { assemblyIntegrity, tearPayload, orphanPayload, unhealablePayload } from "./lib/assemblyIntegrity.js";
+import { groupCasEnabled } from "./lib/groupCas.js";
 import { extendMergeSelection } from "./lib/parcelSelect.js";
 import { parcelSelectHintDecision, PARCEL_HINT_COOLDOWN_MS } from "./lib/parcelSelectHint.js";
 import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
@@ -59,7 +60,7 @@ import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, a
 import { sanitizeLayerAbove, aboveFromOverlays, applyAboveOverrides, aboveSig } from "./lib/layerPrefs.js";
 import { BASEMAPS } from "./lib/basemaps.js";
 import {
-  ppfToZoom, exactContainerPoint,
+  ppfToZoom, zoomToPpf, exactContainerPoint,
   basemapWrapPoint, registrationShift, sanitizeShift, tileNwFeet,
 } from "./lib/mapLock.js";
 import { overscanPx, keepBufferFor, retinaForZoom, tileWeight, tileCacheLimit } from "./lib/tileBudget.js";
@@ -72,6 +73,13 @@ import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMil
 import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
+/* ⛔ NEW-1..NEW-4 — `lib/groundElevation.js` and `lib/drainageTiming.js` are reached ONLY by the
+ * dynamic import inside `checkDrainage`, never statically. Both are needed exactly when a human
+ * presses ↻, and the bundle audit charges the Site route for anything on its STATIC graph — with
+ * them static this feature put 8.8 KB on the largest chunk and breached its ceiling by 3.2 KB.
+ * Two consequences to preserve: the ground-elevation hover sentence travels WITH the state
+ * (`groundElev.note`) so the render never calls back into the lib, and the save-leg stamp in
+ * `cloudPushWithWatchdog` is gated on a ref so an ordinary save imports nothing at all. */
 import { sampleWse02Point, sampleWse100Point } from "./lib/fbcdWse.js";
 import { sampleEbfePoint } from "./lib/ebfe.js";
 import { sampleMaapnextWse } from "./lib/hcfcdWse.js";
@@ -96,17 +104,33 @@ const SiteAnalysis = lazy(() => import("./components/SiteAnalysis.jsx"));
  * first paint. Both bodies come from the same module, so they share one chunk and one load. */
 const ParcelAppraisal = lazy(() => import("./components/ParcelDataPanel.jsx").then((m) => ({ default: m.ParcelAppraisal })));
 const ParcelTaxes = lazy(() => import("./components/ParcelDataPanel.jsx").then((m) => ({ default: m.ParcelTaxes })));
+/* NEW-1 — "Set this plan's location", the way back for a plan drawn while the county GIS was down.
+ * Lazy for the same reason as the panels above: a modal opened at most once per session, carrying
+ * its own interactive Leaflet map, has no business on the planner's boot chunk. */
+const SetLocationDialog = lazy(() => import("./components/SetLocationDialog.jsx"));
+/* NEW-1 / NEW-3 — the Parcel panel's record + placement bodies, lazily loaded for exactly the reason
+ * the appraisal panels above are: both render only inside the Parcel panel (one only for a selected
+ * lot, one only once the plan has a location), and the Site route's largest chunk has no headroom to
+ * spend on code most sessions never reach. One module, so they share one chunk and one load. */
+const ParcelRecord = lazy(() => import("./components/ParcelRecordPanel.jsx").then((m) => ({ default: m.ParcelRecord })));
+const PlacementControls = lazy(() => import("./components/ParcelRecordPanel.jsx").then((m) => ({ default: m.PlacementControls })));
 import LazyPanel from "./components/LazyPanel.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import PanelChrome from "../../shared/ui/PanelChrome.jsx";
 import FloatingPanel from "../../shared/ui/FloatingPanel.jsx";
 import { clampToBounds, initialFloatPos, reconcileForNarrow, shouldInspectorTakeDock, dockAfterRelinquish, FLOAT_MIN_WIDTH, FLOAT_SIZE } from "../../shared/ui/floatingPanel.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
+/* NEW-2 — the ONE floor a header crumb may be squeezed to, shared with the project crumb so the
+   plan chip beside it cannot be given a different one. No new module reaches any chunk: AppHeader
+   above already imports this file. */
+import { CRUMB_MIN_W } from "../../shared/ui/ProjectBreadcrumb.jsx";
 import RotationStepper, { normalizeDeg } from "../../shared/ui/RotationStepper.jsx";
 import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 /* B1449 — the anchored render (the zoom half of B1440's increment) + the proportional wheel factor.
    `viewAnchor.js` holds the proof that an anchored frame lands exactly where a direct one would. */
 import { anchorTransform, anchorTransformAttr, anchorHolds, wheelZoomFactor, ZOOM_SETTLE_MS } from "../../shared/viewport/viewAnchor.js";
+import { readSmoothZoom, subscribeSmoothZoom } from "../../shared/prefs/smoothZoom.js";
+import { featureEditOpacity, FEAT_CTRL_R, FEAT_CTRL_STROKE } from "./lib/featureEditZoom.js";
 import ColorField from "../../shared/ui/ColorField.jsx";
 /* LAZY (B1064 tranche a). The Standards footer renders only while the Standards panel is the
  * open one, docked or floating — never at first paint. */
@@ -158,7 +182,7 @@ import {
 import { apprRows, apprAll, apprVal, findAttr, situsAddress, ownerName, parcelPanelRows } from "./lib/appraisal.js";
 import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { geocodeAddress } from "./lib/geocode.js";
-import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, setPreviewStyleDefaults, setbackLineStyle, setbackChipStyle, SETBACK_LINE } from "./lib/planStyle.js";
+import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, bandForceOf, setPreviewStyleDefaults, setbackLineStyle, setbackChipStyle, SETBACK_LINE } from "./lib/planStyle.js";
 import { byZAsc, nextZ, Z_GAP } from "./lib/zOrder.js";
 import { reorderByZ, arrangeFlags } from "./lib/arrange.js";
 import { commonStyleState, selectionRingFeet } from "./lib/multiStyle.js";
@@ -200,6 +224,10 @@ import { PARCEL_SURFACES, parcelMenuModel, boundaryEditHint } from "./lib/parcel
 // helpers stay on the critical path.
 import { getKey, setKey } from "./lib/titleKey.js";
 import { identifyJurisdiction, identifyRoadAuthority, polylineDistMeters, formatJurisdictionBadge, countyAtPoint } from "./lib/jurisdiction.js";
+/* NEW-2 — the STRUCTURED accessor for "which city governs here". Never recover this by parsing the
+ * badge label: that coupling silently downgraded the floodplain rule on 16 of the owner's 28 sites
+ * the moment the wording changed. See jurisdictionLabel.js's header. */
+import { governingCityOf } from "./lib/jurisdictionLabel.js";
 import { representativeRing, ringCentroid, ringsSignature } from "./lib/siteAnalysis.js";
 import JurisdictionBadge from "./components/JurisdictionBadge.jsx";
 import SourceTag from "./components/SourceTag.jsx";
@@ -350,6 +378,20 @@ import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea } from "
 import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom } from "./lib/sheetFurniture.js";
 import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab } from "./lib/buildingProps.js";
 import { createHistoryStack } from "./lib/history.js";
+/* NEW-1 — putting an unlocated plan on the earth, and adjusting where it sits (the "GIS is down"
+ * tranche). Pure + unit-tested; `origin` is state below and this module owns the geometry rules. */
+import { normalizeOrigin, sameOrigin, originAtOffset, rotPt } from "./lib/sitePlacement.js";
+/* The whole-plan ROTATION tier is loaded on demand: it is reachable only from the Placement controls
+ * and the Set-location dialog, both of which are themselves lazy. See lib/sitePlacementRotate.js. */
+let placeCmds = null;
+const loadPlaceCmds = () => import("./lib/plannerPlacementCmds.js").then((m) => (placeCmds = m));
+/* NEW-2 / NEW-3 — the parcel RECORD: provenance (drawn / from a deed / from the county), the typed
+ * fields a hand-drawn lot never had, and the ONE net-of-exceptions area every consumer reads. */
+import { parseAcres, parcelNetSqft, parcelGrossSqft, parcelExceptSqft, acreageComparison } from "./lib/parcelArea.js";
+/* The record's VOCABULARY (provenance labels, the typed-field list) is imported only by the lazily
+ * loaded panel — see lib/parcelArea.js's header for why the two tiers are kept apart. `cleanText` is
+ * the one string helper the planner itself needs, and it is three lines, so it lives here. */
+const cleanText = (v) => { const s = (v == null ? "" : String(v)).trim(); return s || null; };
 import { resolveDraftStepBack } from "./lib/drafts.js";
 
 /* Geographic basemap under the planner canvas. The planner stays a feet-based
@@ -404,6 +446,12 @@ const POND_ADD_FILL_DEFAULT = "#A7D3DD"; // B157: default "added area" fill — 
 // its PERPENDICULAR on-screen dimension clears the cluster. ~22px inset + 9px radius on
 // each side means opposite buttons overlap below ~68px; this adds a small legibility
 // margin. Tunable. (The map's Building Pin + Progress Arc live in MapFinder — untouched.)
+// ⛔ NEW-2 — THIS GATE IS ABOUT THE CONTAINER, AND IT IS ONLY HALF THE ANSWER. It asks whether the
+// BUILDING is big enough on screen to seat the cluster, which a 900 ft industrial building clears
+// at almost any zoom a site plan is read at — so on the owner's 109-acre Bain plan the controls
+// armed with the whole site in the viewport, at full size, over the two largest objects on the
+// drawing. The second gate (`lib/featureEditZoom.js`) asks whether the EDIT is legible yet, in
+// feet per pixel. Both must pass; read that module's header before changing either.
 const FEAT_BTN_MIN_PX = 72;
 // Structural column-grid drawing (B568/B569). Subtle gray for the column lines (drafting
 // grid, explicitly allowed a subtle gray by the theme rule) — proven legible on both the
@@ -1950,7 +1998,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return () => { mq.removeEventListener ? mq.removeEventListener("change", on) : mq.removeListener(on); };
   }, []);
   const lsGet = (k, d) => { try { return localStorage.getItem("planarfit:" + k) || d; } catch (_) { return d; } };
-  const lsSet = (k, v) => { try { localStorage.setItem("planarfit:" + k, String(v)); } catch (_) { /* a full/blocked store must never break a toggle */ } };
+  // (Its `lsSet` twin went with NEW-1: smooth zoom was its last caller, and that setting is now
+  // written by `shared/prefs/smoothZoom.js`, which owns the same `planarfit:` prefix.)
   const [parkingRows, setParkingRows] = useState(() => lsGet("parkingRows", "free")); // drawn-parking depth preset
   // Drawn-road width, in feet, as a string. NEW-3: the Road tool no longer has a "free" (drag-a-
   // rectangle) mode — a road is always a clicked centerline at a known width, preset or custom. A
@@ -2117,10 +2166,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      live view — one full render, deliberately, rather than an ever-more-wrong picture. Leaflet's
      own basemap path below re-bases on exactly this principle at ~0.75 zoom levels.
 
-     Behind `smoothZoom` (the on-canvas View ▾ menu → Smooth zoom — moved there from the plan menu
-     by B286000, same localStorage key and same default), so it can be turned off without a deploy.
+     Behind `smoothZoom` (Settings → Interface → Smooth zoom — moved there from the View menu by
+     NEW-1, which moved it from the plan menu by B286000; same localStorage key and same default),
+     so it can be turned off without a deploy.
      Off, the zoom anchor never arms and the pan anchor behaves exactly as B1440 shipped it. */
-  const [smoothZoom, setSmoothZoom] = useState(() => lsGet("smoothZoom", "1") !== "0");
+  const [smoothZoom, setSmoothZoom] = useState(readSmoothZoom);
   const smoothZoomRef = useRef(smoothZoom);
   smoothZoomRef.current = smoothZoom;
   const [viewAnchor, setViewAnchor] = useState(null);
@@ -2152,16 +2202,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   viewAnchorRef.current = viewAnchor;
   const armViewAnchor = useCallback((ppf, offX, offY) => { const a = { ppf, offX, offY }; viewAnchorRef.current = a; setViewAnchor(a); }, []);
   const disarmViewAnchor = useCallback(() => { viewAnchorRef.current = null; setViewAnchor((a) => (a ? null : a)); }, []);
-  /* B286000 — the ONE place turning smooth zoom on/off is decided, so the control can be rendered
-     anywhere (it now lives in the on-canvas View menu) without a second copy of the persist +
-     disarm pair. Turning it OFF must disarm any live anchor in the same commit, or the last
-     gesture's scaled frame is left on screen with nothing to re-bake it. */
-  const applySmoothZoom = useCallback((on) => {
-    const nx = !!on;
-    setSmoothZoom(nx);
-    lsSet("smoothZoom", nx ? "1" : "0");
-    if (!nx) disarmViewAnchor();
-  }, [disarmViewAnchor]);
+  /* B286000 / NEW-1 — the control now lives OUTSIDE this component entirely (Settings → Interface),
+     so the planner cannot be handed a setter: it SUBSCRIBES to the shared preference instead. The
+     persist half is `shared/prefs/smoothZoom.js` (one key, one default, one writer); the half only
+     the planner can do stays here — turning it OFF must disarm any live anchor in the same commit,
+     or the last gesture's scaled frame is left on screen with nothing to re-bake it. That applies
+     to a change made from the modal, from the signed-out gear, or from another tab on this device,
+     which is why the disarm hangs off the SUBSCRIPTION rather than off a click handler. */
+  useEffect(() => subscribeSmoothZoom((on) => {
+    setSmoothZoom(on);
+    if (!on) disarmViewAnchor();
+  }), [disarmViewAnchor]);
   /* The freshest view, readable from a native listener attached once at mount. Written on every
      render AND eagerly by the wheel flush, so two rAF flushes inside one React render cannot lose a
      notch (the reason the pre-B1449 wheel used a functional `setView`). */
@@ -2537,9 +2588,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const xsecBusyRef = useRef(false); // in-flight guard for the async ditch cross-section (B56b)
   const titlePdfRef = useRef(null);
 
-  // Geographic basemap + shared overlay layers under the canvas (Phase 1). Only
-  // meaningful for a located site (one with a real-world origin).
-  const origin = restored?.origin || null;
+  /* Geographic basemap + shared overlay layers under the canvas (Phase 1). Only meaningful for a
+   * located site (one with a real-world origin).
+   *
+   * NEW-1 — this is STATE now, not a read-only field off the restored record. It used to be
+   * `restored?.origin || null` and nothing anywhere could set it, so a plan started with "Start
+   * blank" (the exact thing you do when the county parcel service is down) could NEVER be attached
+   * to the real world: no aerial, no flood layer, no contours, no county — and therefore no
+   * jurisdiction, setbacks or drainage rules — for the life of the plan. `commitOrigin` below is
+   * the one writer; every geo effect already keys off `origin`, so they all come alive the moment
+   * it lands, with no reload. The drawing itself never moves: it lives in local feet, and the
+   * origin only says where that local frame sits on the earth (lib/sitePlacement.js). */
+  const [origin, setOrigin] = useState(() => normalizeOrigin(restored?.origin));
   // B706: ground elevation under the cursor (ft NAVD88) for the coordinate chip —
   // reprojected with the SAME feetToLatLng the chip displays, sampled from the cached
   // terrain grid (instant) or one debounced 3DEP point call at cursor rest.
@@ -2587,6 +2647,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [basemapSrc, setBasemapSrc] = useState(origin ? "esri" : "off");
   const basemapOn = basemapSrc !== "off" && !!origin;
   const [basemapStatus, setBasemapStatus] = useState(null); // "loading" | "loaded" | "failed" | null — the Basemap row's status dot
+  /* NEW-1 / NEW-2 — THE ZOOM THE BACKDROP MAP HAS ACTUALLY COMMITTED TO, which is the zoom every
+   * layer's gate is evaluated against. Distinct from `ppfToZoom(view.ppf, …)`, which is where the
+   * DRAWING is right now: the two agree at rest and diverge for the length of a gesture (the
+   * commit is debounced) and, critically, for the whole window between the plan opening and its
+   * opening view being framed. NEW-2 is that window; nothing was watching it. */
+  const [geoZoom, setGeoZoom] = useState(null);
+  /* NEW-2 — has the plan's OPENING view been framed, and has the basemap committed to it?
+   * Two facts, deliberately separate, because they land one render apart and only the pair
+   * means "the zoom a layer's gate would be answered against is the zoom this plan is at".
+   * `layerGateReady` is a ONE-SHOT latch: it exists to close the opening window, and keeping it
+   * a latch is what stops the overlay sync from re-running on every frame of a zoom gesture. */
+  const [viewFramed, setViewFramed] = useState(false);
+  const [layerGateReady, setLayerGateReady] = useState(false);
   const geoSrcRef = useRef(null); // which BASEMAPS source the live tile layers were built from
   // "Make sure the aerial is on" (identify mode, analysis-layer framing, geocoded add):
   // keeps the user's chosen source if one is already on, else the Esri default.
@@ -2668,8 +2741,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false,
       doubleClickZoom: false, boxZoom: false, keyboard: false, touchZoom: false, tap: false,
       zoomSnap: 0, fadeAnimation: false, zoomAnimation: false, inertia: false,
-    }).setView([origin.lat, origin.lon], 17);
+      /* NEW-2 — BORN AT THE DRAWING'S OWN ZOOM, not at a hardcoded 17.
+       *
+       * This map is a slaved backdrop: its zoom is `ppfToZoom(view.ppf, origin.lat)` by
+       * construction, and every commit re-asserts that. Creating it at 17 meant that between
+       * creation and the first commit it CLAIMED a zoom the plan was never at — and a
+       * zoom-gated layer added in that window (the overlay staging runs on idle callbacks)
+       * evaluated its gate against that claim, painted, and was then correctly withdrawn the
+       * moment the real view landed. That is the owner's "contours paint, then disappear about
+       * two seconds later": not a crash, a gate answered against a zoom nobody was looking at. */
+    }).setView([origin.lat, origin.lon], ppfToZoom(view.ppf, origin.lat));
     geoMapRef.current = map;
+    setGeoZoom(ppfToZoom(view.ppf, origin.lat));
     /* NEW-1 — the THREE stacking bands, created ONCE, each in its own host:
      *   AREA (fills)                → a pane inside Leaflet's map pane, under the planner SVG
      *   AREA-FRONT (lifted fills)   → a pane inside the plan SVG's `data-gis-front-band` group,
@@ -2711,7 +2794,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // E2E-only hook (never runs in production): expose the backdrop map so the panel-toggle
     // flash spec can count Leaflet `viewreset` events — a tile-wipe fires one, a panBy doesn't.
     if (typeof window !== "undefined" && window.__PLANYR_E2E) window.__geoMap = map;
-    return () => { try { map.remove(); } catch (_) {} geoMapRef.current = null; geoBaseRef.current = null; geoBackfillRef.current = null; overlayRefs.current = {}; geoCommitRef.current = null; if (typeof window !== "undefined" && window.__geoMap === map) window.__geoMap = null; };
+    return () => { try { map.remove(); } catch (_) {} geoMapRef.current = null; geoBaseRef.current = null; geoBackfillRef.current = null; overlayRefs.current = {}; geoCommitRef.current = null; setGeoZoom(null); if (typeof window !== "undefined" && window.__geoMap === map) window.__geoMap = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [origin]);
 
@@ -3084,6 +3167,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // `setView` path (B65's snapshot still masks that unavoidable wipe). This
     // supersedes the B821/B837 approach of wiping-then-masking the toggle flash.
     const commit = (c, zoom, ghost) => {
+      /* NEW-2 — publish the zoom the basemap is being committed to. Guarded so a pure PAN (the
+       * common case — same zoom, `panBy`) dispatches nothing: an unguarded setState here is the
+       * B1189 pump, and this effect is exactly the one that produced that runaway. */
+      setGeoZoom((z) => (z != null && Math.abs(z - zoom) < 1e-4 ? z : zoom));
       const cur = map.getZoom();
       if (Math.abs(zoom - cur) < 1e-3) {
         setWrapTransform("");
@@ -3259,6 +3346,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let staged = overlayStagedRef.current ? Infinity : 0;
     let idleId = null, idleTimer = null;
     const order = orderLayersByPriority(overlays, ALL_LAYERS);
+    /* ⛔ NEW-2 — THE ZOOM GATE RESOLVES BEFORE FIRST PAINT, and this is where that is enforced.
+     *
+     * The owner's report: opening the site, contour lines rendered IMMEDIATELY and then vanished
+     * about two seconds later. Diagnosed rather than guessed (ui-audit/diagnose-layer-gate-flash.mjs
+     * measures the whole sequence on the real app): a plan opens on the DEFAULT view — ppf 0.35,
+     * which at this latitude is Leaflet zoom ~17.4, comfortably past the z16 terrain gate — and the
+     * whole-site framing (`requestFit`, 120 ms after the workspace becomes active) then drops it to
+     * roughly z14.6 on a tract the size of Tsakiris. Every layer admitted in that window answered
+     * its gate against a zoom the plan was never going to be at: the contours fetched, painted,
+     * and were then CORRECTLY cleared by the terrain pipeline on the first post-fit `moveend`.
+     * A paint that is withdrawn reads as a crash, which is why this is a separate defect from the
+     * dormant-state work and not a duplicate of it.
+     *
+     * The fix is to answer the gate once, against the view the plan actually opens at: no layer is
+     * ADMITTED until the backdrop map has committed the framed view. `viewFramed` alone is not
+     * enough — it goes true one render BEFORE the commit lands — so the test is that the committed
+     * zoom has caught up with the drawing's own. That is self-correcting by construction: any later
+     * divergence (a gesture in flight) simply defers admissions to the settle, which is what the
+     * staging tier wants anyway.
+     * It gates ADDS ONLY. A removal, an opacity change and a lift are untouched, exactly as with
+     * the staging gate it composes with. */
+    const gateResolved = layerGateReady;
     const sync = () => syncOverlayLayers(geoMapRef.current, overlays, overlayRefs.current, {
       // NEW-1 — the two stacking bands (lib/mapStack.js). Each layer lands in the one its
       // declared ROLE names: fills under the plan, strokes and points over it.
@@ -3267,7 +3376,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         areaFront: PANE_AREA_FRONT, areaFrontLabel: PANE_AREA_FRONT_LABEL, // NEW-1 — the "Show above plan" band
         line: PANE_LINE, lineLabel: PANE_LINE_LABEL,
       },
-      admit: (id) => order.indexOf(id) < staged * LAYER_STAGE_SIZE,
+      admit: (id) => gateResolved && order.indexOf(id) < staged * LAYER_STAGE_SIZE,
+      // NEW-2 — which county's baked flood archive (if any) this plan may use. The plan header's
+      // county is the right key: it is what the site was filed under, and it is stable across a
+      // pan, which the map-view county is not.
+      countyKey: restored?.county || county || null,
       onStatus: (id, state, msg, extra) => setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg, ts: extra?.ts ?? null, stale: extra?.stale ?? false } : null })),
       onError: (cfg, msg) => { flashWarn(`⚠ “${cfg.label}” layer failed: ${msg || "service may be down or moved"}.`, 6000); },
     });
@@ -3290,7 +3403,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (idleId != null && typeof cancelIdleCallback === "function") { try { cancelIdleCallback(idleId); } catch (_) {} }
       if (idleTimer) clearTimeout(idleTimer);
     };
-  }, [overlays, origin, basemapOn]); // eslint-disable-line
+  }, [overlays, origin, basemapOn, layerGateReady]); // eslint-disable-line
+
+  /* NEW-2 — the latch itself. It flips exactly once, when the framed view has been COMMITTED to
+   * the backdrop map, and does nothing thereafter — so a zoom gesture (which moves `view.ppf`
+   * every frame) never re-enters the overlay sync above. Cheap by construction: after the flip
+   * the first line returns. */
+  useEffect(() => {
+    if (layerGateReady || !origin || !viewFramed || geoZoom == null) return;
+    if (Math.abs(geoZoom - ppfToZoom(view.ppf, origin.lat)) < 0.01) setLayerGateReady(true);
+  }, [layerGateReady, viewFramed, geoZoom, view.ppf, origin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* Coverage (NEW-1/B283): which layers' DATA reaches the planner's current view, for
      the Layers panel relevance picker. The geo basemap follows the SVG view, so recompute
@@ -3495,8 +3617,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // current state. A passive-effect mirror lagged a paint behind, so undo right
   // after a drag-move intermittently snapshotted or compared a stale state — the
   // building wouldn't fully snap back, or undo appeared to do nothing (B315).
-  const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], markups: [], underlay: null, sheetOverlays: [], deletedIds: [], layerOverrides: {}, layerAbove: {} });
-  stateRef.current = { parcels, els, measures, callouts, markups, underlay, sheetOverlays, deletedIds, layerOverrides, layerAbove };
+  // NEW-1 — `origin` rides the snapshot too, so setting or adjusting the plan's location is a
+  // normal undoable frame (and a rotate, which moves geometry AND is paired with an anchor, undoes
+  // as ONE step rather than leaving the drawing turned under the old anchor).
+  const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], markups: [], underlay: null, sheetOverlays: [], deletedIds: [], layerOverrides: {}, layerAbove: {}, origin: null });
+  stateRef.current = { parcels, els, measures, callouts, markups, underlay, sheetOverlays, deletedIds, layerOverrides, layerAbove, origin };
   // A site with no parcels / elements / measures / callouts / aerial is "blank".
   // We don't want unedited blank sites cluttering the list, so we never persist
   // them, and drop their record on leave (but only un-located blank-planner
@@ -3551,12 +3676,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // resolve within ~6s it's silently stalled, so we go LOUD (the B125 banner + Retry) rather
   // than leave the badge spinning forever. Tied to the actual in-flight push (not the debounce),
   // so sustained editing never false-triggers it. Reused by autosave + the manual Retry.
+  const drainSaveArmed = useRef(false); // NEW-4 — is a drainage check waiting to charge a save leg?
   const cloudPushWithWatchdog = (id) => {
     setSaveStatus("saving");
     const wd = setTimeout(() => setCloudSaveFailed(true), 6000);
+    /* NEW-4 — the SAVE leg of a flood/drainage check. The check does not issue this write (it
+     * rides the plan's own debounced push), so it is stamped from here, and `noteDrainageSave`
+     * only attributes it when a check settled inside its window — outside it, a save is just a
+     * save and is never charged to a check it had nothing to do with. */
+    const pushT0 = typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
+    const stamp = () => {
+      if (!drainSaveArmed.current) return;   // no check is waiting → import nothing, cost nothing
+      drainSaveArmed.current = false;
+      const ms = (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now()) - pushT0;
+      // Already resident: the check that armed this loaded the module a moment ago.
+      import("./lib/drainageTiming.js").then((m) => m.noteDrainageSave(ms)).catch(() => {});
+    };
     return pushSiteToCloud(id)
-      .then((c) => { clearTimeout(wd); setSaveStatus(c.ok ? "saved" : "unsaved"); setCloudSaveFailed(!c.ok); })
-      .catch(() => { clearTimeout(wd); setSaveStatus("unsaved"); setCloudSaveFailed(true); });
+      .then((c) => { clearTimeout(wd); stamp(); setSaveStatus(c.ok ? "saved" : "unsaved"); setCloudSaveFailed(!c.ok); })
+      .catch(() => { clearTimeout(wd); stamp(); setSaveStatus("unsaved"); setCloudSaveFailed(true); });
   };
   // Autosave this site (debounced). Persists on the FIRST real edit (so a 1-element
   // new site is written, not lost), and never persists a still-blank site.
@@ -3816,6 +3954,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (res.orphans && res.orphans.length)
       reportClientEvent("assembly-orphan-pad", `${res.orphans.length} bonded pad(s) on a building carried no wall role (${seam})`,
         { id: siteId, seam, ...orphanPayload(res.orphans) });
+    /* ⛔ NEW-3 — what the heal CANNOT repair is reported BEFORE anything it can, and is never
+       folded into the tear/repair counts. A missing bonded sibling is a piece of the assembly that
+       was deleted, so there is nothing left to derive the geometry from; the previous behaviour was
+       to invent a layout anyway and log a successful heal. This is the "surface it and leave the
+       geometry alone" half — the leaving-alone half lives in siteModel's two passes. */
+    if (res.unhealable && res.unhealable.length)
+      reportClientEvent("assembly-tear-unhealable",
+        `${res.unhealable.length} bonded assembly defect(s) the heal must NOT repair — a sibling is missing (${seam})`,
+        { id: siteId, seam, ...unhealablePayload(res.unhealable) });
     // Adopt for an orphan even with no tear — the re-tag is a zero-geometry repair, so it would
     // otherwise be thrown away here (this seam deliberately ignores sub-tolerance geometry churn).
     if (!res.tears.length) return (res.orphans && res.orphans.length) ? res.els : list;
@@ -4035,7 +4182,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       onEvent: (ev) => { try { syncEventRef.current(ev); } catch (_) {} }, // B673 — late-bound (the handler needs helpers defined further down)
       patchElement: applyZPatch,
       report: reportClientEvent,
-      selfUid: activeUid(),
+      selfUid: () => activeUid(),   // NEW-4 — a getter, not a snapshot (see editorNames.js)
+      // B1341 stage 2 — asked at CALL time, so the kill switch can be thrown without a reload.
+      groupCas: groupCasEnabled,
       // NEW-1 — bonded (attachedTo) elements are cascade-DERIVED unless the current gesture /
       // selection targets them; everything else (incl. deletes, el = null) stays direct.
       isDirectEdit: (kind, id, el) => kind !== "el" || !el || el.attachedTo == null || isDirectTouched(kind, id),
@@ -4063,7 +4212,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // never move geometry.
       afterCommit: (summary) => {
         try {
-          const tears = assemblyIntegrity(stateRef.current.els).tears;
+          const res = assemblyIntegrity(stateRef.current.els);
+          if (res.unhealable && res.unhealable.length)
+            reportClientEvent("assembly-tear-unhealable",
+              `${res.unhealable.length} bonded assembly defect(s) survive a commit — a sibling is missing (${summary && summary.outcome})`,
+              { id: siteId, seam: "post-commit", ...unhealablePayload(res.unhealable) });
+          const tears = res.tears;
           if (!tears.length) return;
           reportClientEvent("assembly-tear-detected",
             `a bonded child sits ${Math.round(tears[0].dist)} ft off its host after a commit (${summary && summary.outcome})`,
@@ -4075,7 +4229,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // B673 — who to blame in a conflict toast: self → "you (another window)"; teammates via the
     // list_team_members roster RPC (profiles RLS is own-row-only); cached per site session.
     nameResolverRef.current = createNameResolver({
-      selfUid: activeUid(),
+      // NEW-4 — a GETTER, not a snapshot. `activeUid()` is null until the auth session resolves,
+      // and on any load where the planner mounted first a snapshot froze that null for the whole
+      // plan session — which is what let a second tab of this same account be reported as a
+      // teammate. Read at resolve time, a late sign-in is picked up.
+      selfUid: () => activeUid(),
       teamIdOf: () => { try { return loadSite(siteId)?.teamId || null; } catch (_) { return null; } },
       fetchRoster: listMembers,
     });
@@ -4269,6 +4427,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     JSON.stringify({ p: s.parcels, e: s.els, m: s.measures, c: s.callouts, k: s.markups }) +
     "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none") +
     "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${o.x},${o.y},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0},${o.visible === false ? 0 : 1},${o.aboveParcel === true ? 1 : 0}`).join(";") || "no") + // NEW-2: aboveParcel is in the signature so promoting a reference over the plan is its own undo frame (like `visible`). RC-8: no Math.round — a sub-foot overlay nudge must be a distinct undo frame (underlay pos isn't rounded either)
+    "|O:" + (s.origin ? `${s.origin.lat.toFixed(9)},${s.origin.lon.toFixed(9)}` : "none") + // NEW-1 — the geo anchor, so "Set location" / a placement nudge is its own undo frame
     "|L:" + overridesSig(s.layerOverrides) + // NEW-1 — GIS Layers-panel visibility set, so a layer toggle is a distinct, undoable frame (matches sheetOverlays.visible)
     "|A:" + aboveSig(s.layerAbove); // NEW-1 — …and which layers are LIFTED above the plan, so "Show above plan" is its own undoable frame too
   // Pure snapshot stack (lib/history.js) — dedups no-op frames (B32) and always
@@ -4340,7 +4499,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       /* NEW-2 — and the case that used to be pure silence, which is what "the ordering doesn't work
          at all" actually looked like: the object is the only one in its band, so there is nothing
          to reorder it against and the op is a no-op for a reason the user cannot see. Say it. */
-      else if (af) flashWarn(`Nothing to reorder — this is the only one on its layer${s.kind === "el" ? " (a site element always draws in its own type's layer)" : ""}.`, 3500);
+      /* NEW-1 — the parenthetical is now conditional: an element the user has FORCED in front of the
+         plan is deliberately NOT in its own type's layer, and telling it that it is would contradict
+         the state it is visibly in (and the row that put it there). */
+      else if (af) flashWarn(`Nothing to reorder — this is the only one on its layer${s.kind === "el" && !bandForceOf(els.find((e) => e.id === s.id)) ? " (a site element always draws in its own type's layer, unless you force it in front)" : ""}.`, 3500);
       return;
     }
     pushHistory();
@@ -4356,7 +4518,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      whenever `count < 2`, so right-clicking the single pond on a real plan offered no ordering rows
      at all and no reason why. Returns { count, index, atTop, atBottom, band } or null. */
   const arrangePeers = (s) => {
-    if (s?.kind === "el") { const t = els.find((e) => e.id === s.id); if (!t) return null; const b = zOrder(t); return { peers: els.filter((e) => zOrder(e) === b), band: `${TYPE[t.type]?.label || t.type} layer` }; }
+    /* NEW-1 — a FORCED element's band is no longer its type's, so neither is the name of it. Reading
+       the band off `zOrder` (which resolves the override) rather than off `t.type` is what keeps the
+       peer set, the greying and the label describing the same stack. */
+    if (s?.kind === "el") { const t = els.find((e) => e.id === s.id); if (!t) return null; const b = zOrder(t); return { peers: els.filter((e) => zOrder(e) === b), band: bandForceOf(t) ? "elements forced in front of the plan" : `${TYPE[t.type]?.label || t.type} layer` }; }
     if (s?.kind === "markup") { const t = markups.find((m) => m.id === s.id); if (!t) return null; return { peers: markups.filter((m) => (m.behindEls === true) === (t.behindEls === true)), band: t.behindEls ? "markups behind the plan" : "markups" }; }
     if (s?.kind === "callout") { const t = callouts.find((c) => c.id === s.id); if (!t) return null; return { peers: callouts.filter((c) => (c.behindEls === true) === (t.behindEls === true)), band: t.behindEls ? "notes behind the plan" : "notes" }; }
     if (s?.kind === "measure") { const t = s.id ? measures.find((x) => x.id === s.id) : measures[s.i]; if (!t || !t.id) return null; return { peers: measures.filter((x) => x && x.id && (x.behindEls === true) === (t.behindEls === true)), band: t.behindEls ? "measurements behind the plan" : "measurements" }; }
@@ -4409,6 +4574,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return a.map((m) => (m.id === id ? { ...m, behindEls: behind ? true : undefined, z } : m));
     });
   };
+  /* ⛔ NEW-1 — THE ELEMENT ESCAPE HATCH. Force ONE element across the type-layer rule, or put it back.
+     Owner's decision, verbatim: *"I don't think that should be the default. But, like, if I try and
+     force it … I don't see why I shouldn't be able to do that."* So the default is untouched and this
+     is the only way across — a deliberate, named action, never something Arrange can do by accident.
+
+     Shaped on `setMeasureBand` / `setCalloutBand` (and the reference band toggle) rather than as a
+     second mechanism: flip the band field, and re-stack on TOP of the band the element ARRIVES in
+     (`nextZ` over its new peers) so it is never dropped underneath whatever was already there — which
+     for a "force this in front" gesture would read as the feature doing nothing.
+     `force` is a band name ("front") or null to return the element to its own type layer. */
+  const setElBand = (id, force) => {
+    pushHistory();
+    setEls((a) => {
+      const target = a.find((e) => e.id === id);
+      if (!target) return a;
+      const next = { ...target, bandForce: force || undefined };
+      const band = zOrder(next);
+      const z = nextZ(a.filter((e) => e.id !== id && zOrder(e) === band));
+      return a.map((e) => (e.id === id ? { ...next, z } : e));
+    });
+  };
   const applySnapshot = (s) => {
     // NEW-1 — the REVERT seam. An undo/redo restores a whole-canvas snapshot, so the restore itself
     // is assembly-whole; what it cannot fix is a snapshot that was ALREADY torn when it was pushed
@@ -4433,6 +4619,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pendingRemoteRef.current = pendingRemoteRef.current.filter((i) => i && i.action === "remove");
     try { const e = elSyncRef.current; if (e) e.noteLocalAuthority(); } catch (_) {}
     setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setUnderlay(s.underlay); setSheetOverlays(s.sheetOverlays || []); setDeletedIds(s.deletedIds || []);
+    // NEW-1 — restore the geo ANCHOR with the geometry. A placement rotate turns the drawing while
+    // the anchor stays put, and a nudge does the reverse; undoing only one half would leave the plan
+    // sitting somewhere neither state ever described. `undefined` (a pre-NEW-1 frame) leaves it alone.
+    /* Inlined rather than routed through the lazy command module ON PURPOSE: an undo must land in
+       ONE synchronous turn, and awaiting a chunk here would restore the geometry a frame before its
+       anchor. It is the same three effects `applyOriginState` performs. */
+    if (s.origin !== undefined) {
+      const o = normalizeOrigin(s.origin);
+      setOrigin(o);
+      metaRef.current = { ...metaRef.current, origin: o };
+      if (o) ensureBasemapOn();
+    }
     // NEW-1 — restore the GIS Layers-panel visibility too (it lives in the app-shared overlays). Merge
     // the snapshot's on/off onto the LIVE overlays so opacity isn't disturbed, and pre-set prevLayerSig
     // so the [overlays] tracking effect sees this programmatic change as already-accounted-for (no new
@@ -4469,6 +4667,52 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const undo = () => { const prev = histRef.current.undo(stateRef.current); if (prev) { applySnapshot(prev); touchHist(); } };
   const redo = () => { const next = histRef.current.redo(stateRef.current); if (next) { applySnapshot(next); touchHist(); } };
+
+  /* ── NEW-1 / NEW-2 — PLACEMENT + DEED PROMOTION, loaded on demand ────────────────────────────
+   *
+   * The bodies live in `lib/plannerPlacementCmds.js`. Measured: kept inline they added 9.9 KB to
+   * the Site route's largest chunk, which arrives with 2.3 KB of band left — and every one of them
+   * is reached only by a deliberate, rare act (locate a plan, nudge its placement, promote a deed).
+   * This is `exportSheet.js`'s pattern (B1042): a `ctx` rebuilt per call, so a new dependency is
+   * added to `placeCtx` rather than closed over. `placeRef` keeps the current planner values, so
+   * the ctx never serves a command a stale collection.
+   */
+  const placeRef = useRef({});
+  const placeCtx = () => {
+    const r = placeRef.current;
+    return {
+      siteId, uid,
+      origin: () => r.origin, state: () => stateRef.current, live: () => liveRef.current,
+      meta: () => metaRef.current, setMeta: (patch) => { metaRef.current = { ...metaRef.current, ...patch }; },
+      markups: () => r.markups, parcels: () => r.parcels,
+      isDeleted: () => deletedSelfRef.current, readOnly: () => readOnlyRef.current,
+      cloudActive: isCloudActive, loadSite, saveSite, pushModelToCloud, onSiteSaved,
+      report: reportClientEvent, flashWarn, flashPolyWarn, pushHistory, flushElems, ensureBasemapOn,
+      setOrigin, setLocalSaveFailed, setSaveStatus, setCloudSaveFailed,
+      bumpPlaceRot: setPlaceRot,
+      setCollections: (n) => {
+        setParcels(n.parcels || []); setEls(n.els || []); setMeasures(n.measures || []);
+        setCallouts(n.callouts || []); setMarkups(n.markups || []); setSheetOverlays(n.sheetOverlays || []);
+      },
+      addParcel: (pc) => setParcels((a) => [...a, pc]),
+      selectParcel: (id) => { setSel({ kind: "parcel", id }); setLeftPanel("parcel"); },
+      parcelDefaultStyle: () => parcelDefaultStyle(settings),
+      deedLib: () => deedLib(), deedGroupMembers, deedMainOf, // NOT `deed:` — that name is B570's guard subject (the flyout handler)
+    };
+  };
+  const cmds = () => (placeCmds || loadPlaceCmds());
+  /* Every command is async ONLY because its module loads on demand; each still runs in one turn. */
+  const commitOrigin = (next, opts) => { Promise.resolve(cmds()).then((C) => C.commitOrigin(placeCtx(), next, opts)); return true; };
+  const rotatePlan = async (deg) => (await cmds()).rotatePlan(placeCtx(), deg);
+  const nudgePlan = async (dx, dy) => (await cmds()).nudgePlan(placeCtx(), dx, dy);
+  const promoteDeedToParcel = async (id) => { await loadDeed(); (await cmds()).promoteDeedToParcel(placeCtx(), id); };
+  // How far this plan has been turned since the location was set — a readout, not a stored field
+  // (the geometry itself carries the rotation). Reset with the plan; folded to (-180, 180].
+  const [placeRot, setPlaceRot] = useState(0);
+  const [placeStepFt, setPlaceStepFt] = useState(25);   // nudge step
+  const [placeStepDeg, setPlaceStepDeg] = useState(1);  // rotate step
+  const [setLocOpen, setSetLocOpen] = useState(false);  // the Set-location dialog
+  placeRef.current = { origin, markups, parcels };
   // Cancel an in-progress drag-move (Esc / lost focus mid-drag): restore the
   // pre-drag snapshot stashed on drag.current at drag-start and drop the frame
   // pushHistory pushed, so an interrupted move leaves no half-recorded command
@@ -4927,6 +5171,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     return false;
   };
+  /* ⛔ NEW-3 — THE RIGHT-CLICK'S TWIN OF `featureDoubleAction`: ONE decision per family, so a press
+   * forwarded by identity-transparent chrome opens the menu the user aimed at.
+   *
+   * The rule it enforces is CHROME-NEVER-EATS-A-PRESS, in its right-click form: chrome painted over
+   * another feature's body may not answer AS itself. `featureDoubleAction` has had that discipline
+   * since B278576; the context menus had five independent DOM handlers and no shared dispatch, so
+   * a fix to the resolver reached the double-click path and nothing else. Returns true when it took
+   * the press, so a caller can fall back to its own menu when the resolver names it after all.
+   *
+   * A `measure` target carries an INDEX rather than an id — that asymmetry is the measurement
+   * selection model's, not this function's, and it is the reason a bare `on${kind}Context` lookup
+   * table would be wrong here. */
+  const featureContextAction = (t, e) => {
+    if (!t || !e) return false;
+    if (t.kind === "el") { if (!els.some((x) => x.id === t.id)) return false; onElContext(e, t.id); return true; }
+    if (t.kind === "markup") { if (!markups.some((x) => x.id === t.id)) return false; onMarkupContext(e, t.id); return true; }
+    if (t.kind === "callout") { if (!callouts.some((x) => x.id === t.id)) return false; onCalloutContext(e, t.id, -1); return true; }
+    if (t.kind === "measure") { if (!measures[t.i]) return false; onMeasureContext(e, t.i); return true; }
+    if (t.kind === "parcel") {
+      if (!settings.parcelSelect) return false;                     // B311: parcels are click-through
+      if (!parcels.some((p) => p.id === t.id)) return false;
+      onParcelContext(e, t.id); return true;
+    }
+    return false;
+  };
   /* B1125 — the ONE inspector dismissal, so the close control can NEVER read as dead.
    *
    * The bug: the ✕ only dropped the (since-removed) explicit-open marker `propsFor`. That was enough
@@ -5083,7 +5352,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   // Reframe when this view becomes active — its real size is known only once shown.
   useEffect(() => {
-    if (active) { const t = setTimeout(() => requestFit(), 120); return () => clearTimeout(t); }
+    if (active) { const t = setTimeout(() => { requestFit(); setViewFramed(true); }, 120); return () => clearTimeout(t); }
   }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ------------ wheel zoom (non-passive) ------------
@@ -7305,7 +7574,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const localEl = ((stateRef.current && stateRef.current[field]) || []).find((x) => x && x.id === id);
     const elForLabel = localEl || ev.local || (ev.remote && ev.remote.data) || null;
     const label = describeElement(kind, elForLabel, stateRef.current ? stateRef.current.els : []);
-    const spec = toastForSyncEvent(ev, { name: "", label });
+    const spec = toastForSyncEvent(ev, { name: "", label, self: true });
     if (!spec) return;
     if (spec.removeFromCanvas) applyRemoteInstr({ action: "remove", kind, id }); // deletion is showing; Restore re-adds
     if (ev.type === "restore-conflict" && ev.remote) {
@@ -7314,9 +7583,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       else if (ev.remote.data) applyRemoteInstr({ action: "upsert", kind, id, el: ev.remote.data });
     }
     const uid = (ev.remote && (ev.remote.deleted_by || ev.remote.updated_by)) || null;
-    const resolve = nameResolverRef.current ? nameResolverRef.current(uid) : Promise.resolve("a teammate");
-    Promise.resolve(resolve).then((name) => {
-      const finalSpec = toastForSyncEvent(ev, { name, label });
+    // NEW-4 — `actor` is `{ name, self }`; `self` means "this account, another tab" (or an actor we
+    // could not prove is a different account). With no resolver at all we cannot prove anything, so
+    // the unattributed wording is the honest default — never "a teammate".
+    const resolve = nameResolverRef.current ? nameResolverRef.current(uid) : Promise.resolve(SELF_ACTOR);
+    Promise.resolve(resolve).then((actor) => {
+      const { name, self } = actor || SELF_ACTOR;
+      const finalSpec = toastForSyncEvent(ev, { name, label, self });
       if (!finalSpec) return;
       const localCopy = ev.local || localEl || null;
       const action =
@@ -9772,6 +10045,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tool !== "select") return;
     e.preventDefault(); e.stopPropagation();
     if (!parcels.some((p) => p.id === id)) return;
+    /* ⛔ NEW-3 — A RIGHT-CLICK RESOLVES THE SAME WAY A DOUBLE-CLICK DOES, and until this it did not.
+     *
+     * Found on the owner's real Bain plan, not on any fixture: right-click his detention pond and
+     * you get the PARCEL's menu — "Merge parcels · Hide acreage label · Delete parcel" — with the
+     * pond's own Arrange rows, Properties and Delete nowhere in it. Measured stack at that point:
+     * COLD it is `[el:e79404lvnvpt]`; after the cursor merely ARRIVES there it is
+     * `[parcel:…_0 (this badge's rect), el:e79404lvnvpt]` — the badge ENTERS above the pond, exactly
+     * B280402's mechanism, because B1327 gated it on HOVER so it could be dragged at all.
+     *
+     * B280402 answered that for the double-click by making `data-chrome` IDENTITY-TRANSPARENT in
+     * `resolveDoubleClickTarget` — and the app's own resolver still answers `el:e79404lvnvpt` here.
+     * But a right-click never went through that resolver: it is a plain DOM handler on the badge,
+     * so the fix reached one of the two paths. That is why a menu offering **Delete parcel** opened
+     * where the pond's menu belongs — a destructive row standing where a benign one was aimed at.
+     *
+     * So ask the ONE resolver, and forward when the answer is not this lot. The badge keeps its own
+     * menu whenever it is genuinely what was aimed at (over its own lot with nothing else beneath),
+     * which is the affordance B1327/NEW-4 added and this must not take away. */
+    const under = resolveDoubleClickTarget(hitStackAt(e.clientX, e.clientY));
+    if (under && !(under.kind === "parcel" && under.id === id) && featureContextAction(under, e)) return;
     setSel({ kind: "parcel", id });
     setParcelMenu({ x: e.clientX, y: e.clientY, id, fromChip: true });
   };
@@ -9968,6 +10261,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const toggleParcelLock = (id) => {
     pushHistory();
     setParcels((a) => a.map((pc) => (pc.id === id ? { ...pc, locked: !pc.locked } : pc)));
+  };
+  /* NEW-3 — type the facts the county would have supplied. A lot drawn by hand (or promoted from a
+   * deed) had geometry and nothing else; a lot pulled from the county could not be corrected when
+   * its record was wrong. Both are one path now: the field is stored on the parcel, so it rides
+   * `site_elements` like every other parcel property and syncs with no schema change.
+   * `pushHistory` on COMMIT only (blur / Enter), never per keystroke — a typed word is one undo
+   * step, not fifteen. */
+  const setParcelField = (id, key, value) => {
+    const v = key === "statedAcres" ? parseAcres(value) : cleanText(value);
+    const cur = parcels.find((p) => p.id === id);
+    if (!cur || (cur[key] ?? null) === v) return; // no-op edits never burn an undo frame
+    pushHistory();
+    setParcels((a) => a.map((pc) => (pc.id === id ? { ...pc, [key]: v } : pc)));
   };
   // Active/Inactive is independent of lock (B100): inactive parcels drop out of every area
   // calc but stay on the canvas (dimmed). Missing = active, so toggling off sets active:false.
@@ -10183,17 +10489,45 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Keep the prior good answer visible under a "checking…" hint rather than blanking
     // the whole readout (and don't lose it if this re-check then fails).
     setDrainCtx((prev) => ({ busy: true, auto: isAuto, prev: prev?.ctx ? prev : prev?.prev }));
+    // NEW-4 — every leg of this check is timed, and the row goes to the same production sink the
+    // performance recorder uses. `checkT0` is stamped BEFORE the lazy import below, so `total`
+    // measures the check and not the check minus its own module load.
+    const checkT0 = typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
+    const [{ beginGroundElevation }, dtim] = await Promise.all([
+      import("./lib/groundElevation.js"),
+      import("./lib/drainageTiming.js"),
+    ]);
+    const { createDrainageTimer, buildDrainageTimingRow, reportDrainageTiming, wseLegName, armDrainageSaveLeg, SAVE_ATTRIBUTION_MS } = dtim;
+    const timer = createDrainageTimer(undefined, checkT0);
+    let drainGroundState = null;
+    let drainCheckError = null;
     try {
       // The identify takes ONE ring — use the largest active parcel (flagged when several).
       const largest = act.reduce((b, p) => (polyArea(p.points) > polyArea(b.points) ? p : b), act[0]);
       const ring = largest.points.map((pt) => { const [la, ln] = feetToLatLng(pt, origin.lat, origin.lon); return [ln, la]; });
       const c = ring.reduce((s, [x, y]) => [s[0] + x / ring.length, s[1] + y / ring.length], [0, 0]);
-      // Ground elevation: median of a short 3DEP line through the parcel centroid
-      // (bare-earth NAVD88 feet; median shrugs off a stray no-data sample).
-      const sampleGround = async ({ lng, lat }) => {
-        const elev = await sampleProfile([[lng - 0.0004, lat], [lng + 0.0004, lat]], 9);
-        const vals = (elev || []).filter((v) => v != null && isFinite(v)).sort((a, b) => a - b);
-        return vals.length ? vals[Math.floor(vals.length / 2)] : null;
+      /* ⛔ NEW-1 / NEW-2 / NEW-3 — GROUND ELEVATION. Started HERE, at t=0, in parallel with every
+       * GIS pull below rather than in front of them (B1442(d) did exactly this for three point
+       * samplers and left this one out — same fix, same shape, same reason), and CACHED on the
+       * exact request geometry so a repeat check pays nothing at all for a value that changes when
+       * USGS re-flies a county. `state` is what the panel may publish immediately; `fresh` is the
+       * late answer that patches it in. See lib/groundElevation.js for the whole rationale,
+       * including why the explicit ↻ forces a refresh WITHOUT blocking on it. */
+      timer.start("elev");
+      const groundLeg = beginGroundElevation({
+        lng: c[0], lat: c[1],
+        force: !isAuto,                 // the ↻ is the "correct a wrong cached value" button
+        cache: gisCache,
+        onFetchSettled: ({ ms }) => timer.mark("elev", ms),
+      });
+      const groundStatePromise = groundLeg.state;
+      /* `resolveDrainageContext` asks for the ground sample inside its own parallel batch; give it
+       * the already-in-flight answer instead of starting a second one. Past the publish budget
+       * this resolves to null and the context publishes WITHOUT site grade — an honest
+       * `ground-elevation-missing`, never a fabricated elevation — and the patch below fills it. */
+      const sampleGround = async () => {
+        const st = await groundStatePromise;
+        return st && st.status === "value" ? st.ft : null;
       };
       // B707/B712: the NFHL polygon pull rides this same explicit click (house
       // rule: never auto-fetch on an edit), the B96 SWR cache, and the same
@@ -10277,14 +10611,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // retry), never an indefinite spinner. The per-source .catch()es still handle plain outages.
       const DRAIN_FETCH_TIMEOUT_MS = 30000;
       let drainTimeoutId = null;
+      // NEW-4 — one leg per source, all started already; `leg` only stamps when each settles, so
+      // the timing costs nothing and cannot change the ordering it is measuring.
+      const leg = (name, p) => { timer.start(name); return p.then((v) => { timer.end(name); return v; }, (e) => { timer.end(name); throw e; }); };
+      timer.start("gis");
       const [ctx, floodGeo, bfeLines, xs, siteGrid] = await Promise.race([
         Promise.all([
-          resolveDrainageContext({ lng: c[0], lat: c[1], ring }, { sampleGround }),
-          floodGeoP,
-          bfeLinesP,
-          crossSectionsP,
-          siteGridP,
-        ]).then((r) => { if (drainTimeoutId) clearTimeout(drainTimeoutId); return r; }),
+          leg("ctx", resolveDrainageContext({ lng: c[0], lat: c[1], ring }, { sampleGround })),
+          leg("flood", floodGeoP),
+          leg("bfeLines", bfeLinesP),
+          leg("xs", crossSectionsP),
+          leg("siteGrid", siteGridP),
+        ]).then((r) => { if (drainTimeoutId) clearTimeout(drainTimeoutId); timer.end("gis"); return r; }),
         new Promise((_, reject) => { drainTimeoutId = setTimeout(() => reject(new Error("flood-data source timed out — ↻ Re-check")), DRAIN_FETCH_TIMEOUT_MS); }),
       ]);
       if (tok !== drainTok.current) return;
@@ -10320,7 +10658,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       floodGeo.wse100Flags = { state: "not-applicable" };
       if ((ctx?.authority?.jurisdiction?.county || []).some((c) => /fort\s*bend/i.test(String(c)))) {
         const [wLat, wLng] = feetToLatLng(bfePt, origin.lat, origin.lon);
-        const [r02, r100] = await Promise.allSettled([sampleWse02Point(wLat, wLng), sampleWse100Point(wLat, wLng)]);
+        // NEW-4 — per-RASTER timings (`wse:FortBend_500YR_WSE`, `wse:Willow_100YR_Existing_WSE`,
+        // …), which is the granularity the owner's own PerformanceResourceTiming timeline had and
+        // the app did not. `wse` is the group's wall clock.
+        const onSample = ({ service, ms }) => { const n = wseLegName(service); if (n) timer.mark(n, ms); };
+        timer.start("wse");
+        const [r02, r100] = await Promise.allSettled([sampleWse02Point(wLat, wLng, { onSample }), sampleWse100Point(wLat, wLng, { onSample })]);
+        timer.end("wse");
         if (r02.status === "fulfilled") {
           floodGeo.derivedWse02 = r02.value != null ? { wseFt: r02.value, source: "fbcdd-wse02-draft" } : null;
           floodGeo.wse02Flags = { state: r02.value != null ? "loaded" : "empty" };
@@ -10358,8 +10702,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const zoneAUnstudied = (floodGeo.zones || []).some((z) => z.unstudiedA && z.zone === "A");
       const inHarris = (ctx?.authority?.jurisdiction?.county || []).some((c) => /harris/i.test(String(c)));
       const [ptLat, ptLng] = feetToLatLng(bfePt, origin.lat, origin.lon);
-      const ebfeP = zoneAUnstudied ? sampleEbfePoint(ptLat, ptLng) : null;
-      const maapP = zoneAUnstudied && inHarris ? sampleMaapnextWse(ptLat, ptLng) : null;
+      const ebfeP = zoneAUnstudied ? leg("ebfe", sampleEbfePoint(ptLat, ptLng)) : null;
+      const maapP = zoneAUnstudied && inHarris ? leg("maapnext", sampleMaapnextWse(ptLat, ptLng)) : null;
       if (ebfeP) ebfeP.catch(() => {});
       if (maapP) maapP.catch(() => {});
       floodGeo.ebfe = null;
@@ -10412,6 +10756,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       floodGeo.screeningBfeFlags = { state: "not-applicable" };
       if (zoneAUnstudied) {
         const sLat = ptLat, sLng = ptLng;
+        timer.start("screening");
         try {
           // The WIDE, COARSE delineation window — the SAME 3DEP sampler as the site DEM, a
           // different extent (a site-envelope grid would delineate a few acres of a basin that
@@ -10460,6 +10805,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           floodGeo.screeningBfe = { ok: false, stage: "fetch", missing: [`the screening study could not run: ${reason}`], notModeled: NOT_MODELED, clomrNote: CLOMR_NOTE, screening: true };
           floodGeo.screeningBfeFlags = { state: "failed", reason };
         }
+        timer.end("screening");
         if (tok !== drainTok.current) return; // superseded while sampling
       }
       const checkedAt = Date.now();
@@ -10473,7 +10819,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         (ctx?.authority?.flags || []).includes("jurisdiction-unavailable")
         || (ctx?.flood?.state === "failed" && prevLC?.flood?.state === "loaded")
       );
-      setDrainCtx({ ctx: { ...ctx, floodGeo }, sig, multiParcel: act.length > 1, checkedAt, auto: isAuto, degraded: autoDegraded });
+      /* NEW-2(b) / NEW-4 — the GROUND-ELEVATION STATE rides the published context, and the panel
+       * is NOT gated on it. `groundState` is whatever was publishable at this moment: the cached
+       * value (instant), or an honest `pending` if the transect blew its publish budget. It is
+       * carried as a four-state object beside the bare number so a consumer can tell "still
+       * loading" from "3DEP has no value here" from "the service failed" — an unresolved number
+       * must read as UNRESOLVED, never as zero and never as a dash that looks like an answer. */
+      const groundState = await groundStatePromise;
+      // NEW-4 — the app's OWN work: the gap between the last network response and the publish.
+      // The owner measured 1,029 / 1,654 ms of it and it is recorded on B1353, which owns moving
+      // these engines off the main thread. This is a GAP IN THE NETWORK TIMELINE, which is solid;
+      // it is deliberately not called a main-thread blocking figure (FOREGROUND-OR-VOID).
+      timer.mark("calc", timer.sinceNetwork());
+      const ctxOut = { ...ctx, groundElev: groundState, floodGeo };
+      setDrainCtx({ ctx: ctxOut, sig, multiParcel: act.length > 1, checkedAt, auto: isAuto, degraded: autoDegraded });
       // B832 — remember WHAT this check fetched (the raw feet envelope + the two
       // point-sample anchors) so auto-revalidation can tell "moved inside the fetched
       // area" (numbers recompute live, no fetch) from "outgrew it" (refetch). JSON-safe.
@@ -10490,9 +10849,53 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // B750 "remember it": persist a slim summary (no bulky geometry) so the readout
       // survives a reload without re-hitting the (flaky) county GIS. Rides the existing
       // settings autosave — no schema change. (B832: skipped for a degraded AUTO run.)
-      if (!autoDegraded) setSettings((sx) => ({ ...sx, drainage: { ...(sx.drainage || {}), lastCheck: { ...slimDrainageContext(ctx), sig, checkedAt, fetch: fetchRec } } }));
+      if (!autoDegraded) setSettings((sx) => ({ ...sx, drainage: { ...(sx.drainage || {}), lastCheck: { ...slimDrainageContext(ctxOut), sig, checkedAt, fetch: fetchRec } } }));
+      /* NEW-2(b) — THE LATE ELEVATION. Either the transect was still in flight when the panel
+       * published, or the ↻ forced a refresh underneath a cached value. Patch the number (and the
+       * remembered record) in place when it lands; a superseded check never writes. */
+      const freshFetch = await groundLeg.fresh;
+      if (freshFetch) {
+        const fresh = await freshFetch;
+        if (tok === drainTok.current) {
+          setDrainCtx((prev) => (prev && prev.ctx && prev.sig === sig
+            ? { ...prev, ctx: { ...prev.ctx, groundElevFt: fresh.ft, groundElev: fresh } }
+            : prev));
+          if (!autoDegraded) {
+            setSettings((sx) => {
+              const lc = sx.drainage?.lastCheck;
+              if (!lc || lc.sig !== sig) return sx; // a newer check owns the record now
+              return { ...sx, drainage: { ...(sx.drainage || {}), lastCheck: { ...lc, groundElevFt: fresh.ft ?? null } } };
+            });
+          }
+        }
+        drainGroundState = fresh;
+      } else {
+        drainGroundState = groundState;
+      }
     } catch (e) {
       if (tok === drainTok.current) setDrainCtx((prev) => ({ error: String((e && e.message) || e), prev: prev?.prev }));
+      drainCheckError = String((e && e.message) || e);
+    } finally {
+      /* NEW-4 — ONE row per check, through the SAME production sink the recorder uses, and the
+       * SAVE leg is armed for the cloud push this check is about to trigger. Never throws. */
+      timer.mark("total", timer.elapsed());
+      let drainRowSent = false;
+      const emit = () => {
+        if (drainRowSent) return;
+        drainRowSent = true;
+        try {
+          reportDrainageTiming(buildDrainageTimingRow({ legs: timer.legs(), auto: isAuto, ground: drainGroundState }));
+        } catch (_) { /* an instrument may never break the thing it measures */ }
+      };
+      // The SAVE leg belongs to the cloud push this check is about to trigger, so wait for it —
+      // but only for the attribution window. A save that never comes (signed out, nothing
+      // changed, a degraded auto run) must NOT cost the row: an absent report and a zero-cost
+      // save look identical to a reader, which is precisely the ambiguity B265536 exists to kill.
+      if (!drainCheckError) {
+        drainSaveArmed.current = true;
+        armDrainageSaveLeg((ms) => { timer.mark("save", ms); emit(); });
+      }
+      setTimeout(() => { drainSaveArmed.current = false; emit(); }, SAVE_ATTRIBUTION_MS + 250);
     }
   };
   // The context to READ from: the live result, or the prior good one preserved under a
@@ -11985,7 +12388,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }).filter(Boolean);
     const parcelsIn = parcels
       .filter((p) => !supersededParcelIds.has(p.id) && p.points && p.points.length >= 3)
-      .map((p) => ({ id: p.id, name: (parcelInfo.get(p.id) || {}).name || "Parcel", acres: polyArea(p.points) / SQFT_PER_ACRE, active: p.active !== false }));
+      .map((p) => ({ id: p.id, name: (parcelInfo.get(p.id) || {}).name || "Parcel", acres: parcelNetSqft(p) / SQFT_PER_ACRE, active: p.active !== false })); // NEW-2 — net of save-and-except holes
     const pEarthRaw = (settings.prices || {}).earthworkCy;
     const earthPerCy = pEarthRaw == null || pEarthRaw === "" ? null : Number.isFinite(+pEarthRaw) && +pEarthRaw >= 0 ? +pEarthRaw : null;
     return rankLedgerMoves({
@@ -12740,11 +13143,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // candidate, and `resolveAdministrator` picks the STRICTER rule, so including it can only
       // raise the floor. Dropping it would let a site that is half inside a city be priced entirely
       // on the county's laxer standard.
-      cityLabel: jurBadge?.cityContainment === "in"
-        ? (jurBadge?.jur || "").split(" / ")[0].replace(/^City of\s+/, "") || null
-        : jurBadge?.cityContainment === "partial"
-          ? (jurBadge?.partialCities || [])[0] || null
-          : null,
+      /* ⛔ NEW-2 (B367297) — READ THE MODEL, NEVER THE LABEL. This was
+       *     (jurBadge?.jur || "").split(" / ")[0].replace(/^City of\s+/, "")
+       * — the governing city recovered by PARSING the badge string. It survived only because the
+       * old label happened to put the city first and join everything with " / ". Under NEW-1's
+       * grammar the same parse returns "Humble · Houston ETJ" on an in-city-plus-ETJ site; that
+       * matches no rule record, so the CITY's floodplain ordinance is never raised as a candidate
+       * and the site is priced on the county's, which in flat Harris/Fort Bend floodplain commonly
+       * sits 1–2 ft LOWER. `governingCityOf` answers the same question from the structured model
+       * and cannot be broken by a wording change. */
+      cityLabel: governingCityOf(jurBadge),
       // B209508 — what could NOT be checked. This is what makes the result refuse to settle.
       unresolvedRoles: jurBadge?.unresolvedRoles || [],
       // NEW-2 — and what has not been checked YET. Before the first identify returns there is no
@@ -13038,6 +13446,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        `note` is the one short sentence that says WHY it is red. The readout renders this INSTEAD
        of the old auto-refresh spinner copy, so the panel gains no lines (PANEL-BREVITY). */
     freshness: drainFreshness,
+    /* NEW-1 / NEW-2 / NEW-3 — the ground-elevation leg's own four-state answer, and the ONE
+       sentence that states it. A CACHE HIT must be visible (never silent, or somebody debugs
+       stale numbers blind); a blown budget must name the service. Hover copy, so the default
+       view gains no lines (PANEL-BREVITY — a title is not visible copy). */
+    groundElev: drainCtxData?.groundElev || null,
+    groundElevNote: drainCtxData?.groundElev?.note || null,
     // NEW-19 — ONE source of truth for "have flood facts been ESTABLISHED?" A live fetch
     // (floodGeo loaded) OR a remembered/restored check (drainViewCtx.checkedAt) both count.
     // The header keys its checked-state off THIS, so it can never say "not checked" over the
@@ -13286,8 +13700,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       .catch((e) => {
         if (cancelled) return;
         setJurBadge({
-          text: "Jurisdiction · couldn't check", jur: "Jurisdiction · couldn't check", county: null, isd: null,
-          straddle: false, edgeOnlyCities: [], partialCities: [], touchesCities: [],
+          // NEW-1 — no internal separator: in the badge's grammar " · " joins GOVERNING slots, and a
+          // failure is not one of them.
+          text: "Couldn't check jurisdiction", jur: "Couldn't check jurisdiction", county: null, isd: null,
+          tail: null, shape: "unknown",
+          straddle: false, governingCities: [], edgeOnlyCities: [], partialCities: [], touchesCities: [],
           unresolvedRoles: ["city", "etj", "county"], unresolved: true,
           cityContainment: "unknown", etjLabels: [],
           sourceName: "TxDOT / TxGIO / H-GAC",
@@ -13393,8 +13810,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const commitSiteLabel = (v) => { const n = (v || "").trim() || "Untitled site"; setSiteLabel(n); onRenameSite?.(groupId, n); };
   const commitPlanLabel = (v) => { const n = (v || "").trim() || "Untitled plan"; setPlanLabel(n); onRenamePlan?.(siteId, n); };
   const siteName = `${siteLabel} · ${planLabel}`; // used for export filenames / print header
-  // Keep the save metadata current (so the first non-blank save is fully formed).
-  useEffect(() => { metaRef.current = { site: siteLabel, name: planLabel, groupId, county: restored?.county ?? null, origin: restored?.origin ?? null }; });
+  /* Keep the save metadata current (so the first non-blank save is fully formed).
+   * NEW-1 — assigned during RENDER, not in a passive effect, and `origin` reads the live STATE
+   * rather than the restored record. Both matter: the autosave effect is declared far above this
+   * line, so on the very commit that a location lands it would otherwise run first and write the
+   * stale (null) anchor into the mirror — the same lag class the stateRef comment above describes. */
+  metaRef.current = { site: siteLabel, name: planLabel, groupId, county: restored?.county ?? null, origin };
   // Multi-site switching: flush this site's live state first so nothing in the
   // last debounce window is lost (and a Duplicate clones the very latest edits).
   const flushSite = () => { if (siteId && !deletedSelfRef.current && !isBlankSite(liveRef.current)) saveSite({ id: siteId, ...metaRef.current, ...liveRef.current }); };
@@ -13405,9 +13826,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // county-boundary layer (SWR-cached, non-blocking); a confirmed DIFFERENT configured
   // key heals the record through the normal save path. Unrecognized/failed answers
   // change nothing (countyKeyForName never returns an unconfigured key).
+  /* NEW-1 — this runs off the live `origin` STATE (it used to read `restored.origin` and depend on
+   * `[siteId]` only). That one-word change is what makes "Set location" deliver the county — and
+   * therefore jurisdiction, setbacks and drainage rules — on a plan that was drawn with the GIS
+   * down: the anchor lands, this re-runs, and the county resolves without a reload. */
   const [, setCountyHealTick] = useState(0);
   useEffect(() => {
-    const o = restored?.origin;
+    const o = origin;
     if (!siteId || !o || !Number.isFinite(o.lat) || !Number.isFinite(o.lon)) return;
     let live = true;
     countyAtPoint(o.lon, o.lat).then((ans) => {
@@ -13417,15 +13842,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const wrong = restored?.county ?? null;
       if (restored) restored.county = key; // metaRef re-reads restored.county every render
       metaRef.current = { ...metaRef.current, county: key }; // flush below must not save the stale meta
+      // A plan that had NO county (the un-located "Start blank" case) also has no easement/flood
+      // jurisdiction default, so seed one now. A county CORRECTION never touches it — that would
+      // clobber a choice the user may have made deliberately.
+      if (!wrong) setJurKey(defaultJurForCounty(key));
       setCountyHealTick((n) => n + 1);     // re-render the consumers (siteCounty & friends)
       flushSite();                          // persist the healed row to the device mirror
       try { cloudPushWithWatchdog(siteId); } catch (_) {}
-      console.warn(`[B792] Site county healed: "${wrong}" → "${key}" (TxDOT county boundary${ans.fips ? `, FIPS ${ans.fips}` : ""}).`);
+      console.warn(`[B792] Site county ${wrong ? "healed" : "resolved"}: "${wrong}" → "${key}" (TxDOT county boundary${ans.fips ? `, FIPS ${ans.fips}` : ""}).`);
       reportClientEvent("county-healed", `site county corrected ${wrong} → ${key}`, { id: siteId, from: wrong, to: key, fips: ans.fips || null });
     }).catch(() => {});
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [siteId]);
+  }, [siteId, origin]);
   // B466/B471 — ONE "Take over editing here" that resumes saving no matter WHY it stalled:
   //   • Same browser, another TAB holds the editor lock → steal the Web Lock (instant, in place) and
   //     push the pent-up work. The thin-clobber + CAS guards (B459/B314) still protect the cloud.
@@ -13917,7 +14346,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // NEW-1 — hoisted above the label/collision block below: a measurement's summary chip is now
   // part of the collision pool, and its paint depends on whether the drawing is calibrated (the
   // amber warn state overrides the user's colour), so this has to resolve before chips are sized.
-  const isGeoref = restored?.origin || parcels.some((p) => p.attrs);
+  const isGeoref = !!origin || parcels.some((p) => p.attrs); // NEW-1 — the LIVE anchor, so a plan located after the fact stops reading as un-georeferenced
   const calibrationState =
     underlay
       ? (underlay.fromMap ? "georef" : underlay.calibrated ? "calibrated" : "uncalibrated")
@@ -14165,7 +14594,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const c = f2p({ x: base.x + off.x, y: base.y + off.y });
     // PR-Q/O4 — the parcel badge is labeled "Parcel", so a large parcel acreage sitting near a pond
     // (the "15.35 ac" chip) can't be mistaken for a pond water/footprint area. No bare acreage.
-    const txt = `Parcel ${f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac`;
+    const txt = `Parcel ${f2(parcelNetSqft(pc) / SQFT_PER_ACRE)} ac`; // NEW-2 — the badge quotes the NET acreage (save-and-except holes deducted), like every other consumer
     const fs = 12 * ls * labelK, padX = 9 * ls * labelK, padY = 5 * ls * labelK, charW = fs * 0.6;
     const boxW = txt.length * charW + padX * 2, boxH = fs + padY * 2;
     return { pc, c, txt, fs, padX, padY, boxW, boxH, box: boxOf(c.x, c.y, boxW, boxH) };
@@ -14434,12 +14863,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   //  • each long-side corner: a 55′×60′ bump-out (purple)
   // A side/corner handle: a coloured "+" to add a feature, or a red "−" to
   // remove the one already there (so a feature can't be stacked twice).
-  const featNode = (key, pos, exists, color, addTitle, onAdd, onRemove, r = 9) => (
+  // NEW-1: the disc's radius and keyline come from `featureEditZoom.js`, because the zoom gate that
+  // decides whether this control may exist is DERIVED from its outer width (the placed feature is
+  // never smaller on screen than the control that places it). Hardcoding them here again is what
+  // would let the threshold and the real control drift apart.
+  const featNode = (key, pos, exists, color, addTitle, onAdd, onRemove, r = FEAT_CTRL_R) => (
     <g key={key} style={{ cursor: "pointer" }} onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); exists ? onRemove() : onAdd(); }}>
       <title>{exists ? "Remove this — click to subtract" : addTitle}</title>
-      <circle cx={pos.x} cy={pos.y} r={r} fill={exists ? "#b91c1c" : color} stroke="#ffffff" strokeWidth={1.75} />
-      <line x1={pos.x - r * 0.5} y1={pos.y} x2={pos.x + r * 0.5} y2={pos.y} stroke="#ffffff" strokeWidth={1.75} />
-      {!exists && <line x1={pos.x} y1={pos.y - r * 0.5} x2={pos.x} y2={pos.y + r * 0.5} stroke="#ffffff" strokeWidth={1.75} />}
+      <circle cx={pos.x} cy={pos.y} r={r} fill={exists ? "#b91c1c" : color} stroke="#ffffff" strokeWidth={FEAT_CTRL_STROKE} />
+      <line x1={pos.x - r * 0.5} y1={pos.y} x2={pos.x + r * 0.5} y2={pos.y} stroke="#ffffff" strokeWidth={FEAT_CTRL_STROKE} />
+      {!exists && <line x1={pos.x} y1={pos.y - r * 0.5} x2={pos.x} y2={pos.y + r * 0.5} stroke="#ffffff" strokeWidth={FEAT_CTRL_STROKE} />}
     </g>
   );
   // B242 — a "+ / −" PAIR (both visible together) for the on-building controls: a coloured "+"
@@ -14449,19 +14882,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const glyphPlus = (cx, cy, color, r, title, onClick) => (
     <g style={{ cursor: "pointer" }} onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); onClick(); }}>
       <title>{title}</title>
-      <circle cx={cx} cy={cy} r={r} fill={color} stroke="#ffffff" strokeWidth={1.75} />
-      <line x1={cx - r * 0.5} y1={cy} x2={cx + r * 0.5} y2={cy} stroke="#ffffff" strokeWidth={1.75} />
-      <line x1={cx} y1={cy - r * 0.5} x2={cx} y2={cy + r * 0.5} stroke="#ffffff" strokeWidth={1.75} />
+      <circle cx={cx} cy={cy} r={r} fill={color} stroke="#ffffff" strokeWidth={FEAT_CTRL_STROKE} />
+      <line x1={cx - r * 0.5} y1={cy} x2={cx + r * 0.5} y2={cy} stroke="#ffffff" strokeWidth={FEAT_CTRL_STROKE} />
+      <line x1={cx} y1={cy - r * 0.5} x2={cx} y2={cy + r * 0.5} stroke="#ffffff" strokeWidth={FEAT_CTRL_STROKE} />
     </g>
   );
   const glyphMinus = (cx, cy, r, title, onClick) => (
     <g style={{ cursor: "pointer" }} onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); onClick(); }}>
       <title>{title}</title>
-      <circle cx={cx} cy={cy} r={r} fill="#b91c1c" stroke="#ffffff" strokeWidth={1.75} />
-      <line x1={cx - r * 0.5} y1={cy} x2={cx + r * 0.5} y2={cy} stroke="#ffffff" strokeWidth={1.75} />
+      <circle cx={cx} cy={cy} r={r} fill="#b91c1c" stroke="#ffffff" strokeWidth={FEAT_CTRL_STROKE} />
+      <line x1={cx - r * 0.5} y1={cy} x2={cx + r * 0.5} y2={cy} stroke="#ffffff" strokeWidth={FEAT_CTRL_STROKE} />
     </g>
   );
-  const featPair = (key, pos, tan, opt, r = 9) => {
+  const featPair = (key, pos, tan, opt, r = FEAT_CTRL_R) => {
     const both = opt.canAdd && opt.canRemove, gap = r + 3;
     const aP = both ? { x: pos.x - tan.x * gap, y: pos.y - tan.y * gap } : pos;
     const rP = both ? { x: pos.x + tan.x * gap, y: pos.y + tan.y * gap } : pos;
@@ -14478,8 +14911,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // on the building's on-screen footprint size (FEAT_BTN_MIN_PX) so they vanish before
   // they can cluster/spill when zoomed out.
   const featActiveId = sel?.kind === "el" ? sel.id : (tool === "select" ? hoverElId : null);
+  /* NEW-2 — the ZOOM half of the gate, shared by every on-building edit cluster below. 0 means the
+     edit these controls make is not legible yet, so they must not exist at this zoom at all.
+     NEW-1 (third value) — it takes the CANVAS WIDTH as well as the zoom: the floor is the earlier
+     of an owner-set absolute px/ft and a cap on how much of the screen a reference building span
+     may fill, so a laptop does not have to give up half its canvas to reach the controls. Still
+     site-size independent — nothing here reads the plan. */
+  const featEditOpacity = featureEditOpacity(rppf, size.w);
   const sideAddNodes = (() => {
-    if (tool !== "select" || !featActiveId) return null;
+    if (tool !== "select" || !featActiveId || !featEditOpacity) return null;
     const el = els.find((x) => x.id === featActiveId);
     if (el && el.locked) return null;
     // dog-ears / bump-outs are building elements but are NOT standalone buildings —
@@ -14492,7 +14932,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const sides = [["top", 0, -1], ["bottom", 0, 1], ["left", -1, 0], ["right", 1, 0]];
     const depths = zoneDepthDefaults(settings);
     return (
-      <g>
+      /* NEW-2 — a FADE, not a pop. `opacity` is presentation only: the controls are fully
+         clickable the whole time they are on screen, because a half-faded control that ignored a
+         press would be its own bug. */
+      <g opacity={featEditOpacity} data-testid="feature-edit-nodes">
         {sides.map(([name, nx, ny]) => {
           // B225: an inset control needs its wall's PERPENDICULAR on-screen size to clear the
           // cluster; below that it piles onto the opposite wall. A long/narrow footprint keeps
@@ -14636,7 +15079,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // "+ / −" on a selected car-parking field's depth edge: add or remove a row +
   // drive aisle. Keeps stacking, so you can build a multi-aisle lot.
   const parkingAddNodes = (() => {
-    if (tool !== "select" || !featActiveId) return null;
+    if (tool !== "select" || !featActiveId || !featEditOpacity) return null; // NEW-2: the zoom gate
     const el = els.find((x) => x.id === featActiveId);
     if (!el || el.locked || el.points || el.type !== "parking") return null;
     if (Math.min(Math.abs(el.w), Math.abs(el.h)) * rppf < FEAT_BTN_MIN_PX) return null; // B225: hide before it clusters
@@ -14649,7 +15092,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const minus = { x: ms.x + ux * 16 + tx * 12, y: ms.y + uy * 16 + ty * 12 };
     const canShrink = parkRowsForDepth(el.h, cfgOf(el).stallDepth || settings.stallDepth, cfgOf(el).aisle ?? settings.aisle) > 1;
     return (
-      <g>
+      <g opacity={featEditOpacity} data-testid="feature-edit-nodes">
         {featNode("parkAdd", plus, false, "#2563eb", "Add one parking row", () => growParking(el, 1), null)}
         {canShrink && featNode("parkSub", minus, true, "#b91c1c", "", null, () => growParking(el, -1))}
       </g>
@@ -15585,11 +16028,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const DEED_FIT_MIN_AREARATIO = 0.75;
   // Best rigid (rotation+translation, never scaled) fit of a deed ring over every QUALIFYING
   // parcel — the lowest landing residual wins, so a stray neighbour parcel can't hijack it.
-  const bestDeedFit = (deedRing) => {
+  const bestDeedFit = (deedRing, { skipDeedGroup = null } = {}) => {
     const deedA = Math.abs(polyArea(deedRing));
     if (!(deedA > 0)) return null;
     let best = null;
     for (const pc of activeParcelRings()) {
+      // NEW-2 — never fit a deed to the parcel PROMOTED FROM IT. That copy is the deed's own
+      // outline, so it scores a perfect zero-residual "fit" at 0° and would make Align to parcel
+      // silently do nothing forever once the deed had been promoted.
+      if (skipDeedGroup && pc.fromDeedGroup === skipDeedGroup) continue;
       const parcelA = Math.abs(polyArea(pc.points));
       if (!(parcelA > 0)) continue;
       const inter = polyIntersectArea(deedRing, pc.points);
@@ -15613,13 +16060,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const members = deedGroupMembers(m);
     const main = deedMainOf(members, m);
     const memberIds = new Set(members.map((x) => x.id));
-    const best = bestDeedFit(main.pts);
+    const best = bestDeedFit(main.pts, { skipDeedGroup: main.deedGroup || null });
     if (best) {
       const { fit } = best;
       pushHistory();
       setMarkups((a) => a.map((x) => memberIds.has(x.id)
         ? { ...mapDeedGeom(x, fit.apply), rotApplied: x.id === main.id ? normalizeDeg((x.rotApplied || 0) + fit.rotDeg) : x.rotApplied }
         : x));
+      // NEW-2 — a boundary promoted from THIS deed travels with it, or the two would silently
+      // disagree the moment the county map came back.
+      alignPromotedParcel(main.deedGroup, fit.apply);
       setDeedAlignHint(null);
       flashWarn(`Rotated the deed ${describeRotation(fit.rotDeg)} to match the county parcel — the two outlines now agree to within ${fit.residualFt.toFixed(1)}′.${fit.confident ? "" : " ⚠ The fit is loose (the deed and the county outline differ in shape) — verify, or nudge by hand."}`, 9000);
       return;
@@ -15639,10 +16089,43 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setMarkups((a) => a.map((x) => memberIds.has(x.id)
       ? { ...rotateDeedRigid(x, conv, c), rotApplied: x.id === main.id ? normalizeDeg((x.rotApplied || 0) + conv) : x.rotApplied }
       : x));
+    // NEW-2 — the promoted boundary turns with its deed. `rotPt` is the same rotation
+    // `deedAlign.rotatePointsAbout` applies to the markup (identical formula, identical sense), so the
+    // parcel and the deed can never end up at different angles.
+    alignPromotedParcel(main.deedGroup, (pt) => rotPt(pt, conv, c));
     setDeedAlignHint(null);
     flashWarn(`No county parcel to fit — rotated the deed ${describeRotation(conv)} for the State Plane grid convergence here (this assumes the survey's bearings are grid north). Verify against the aerial, or nudge by hand.`, 9000);
   };
   const rotateDeedRigid = (m, deg, pivot) => { const { rotatePointsAbout } = deedLib(); return { ...m, pts: rotatePointsAbout(m.pts, deg, pivot), centerline: rotatePointsAbout(m.centerline || [], deg, pivot) }; };
+
+  /* NEW-2 — SELECT THE DEED A PARCEL CAME FROM. Promotion lays the new parcel over the deed and
+   * docks the Parcel panel, and measurement on the real page showed the consequence: a right-click
+   * where the deed visibly is answers with the PARCEL's menu, so the deed — which we deliberately
+   * KEEP so it can still be compared or aligned — had become unreachable by pointer. This is the
+   * door back in, from the parcel that produced it. Opens the deed's inspector, which is where
+   * "Align to county parcel" and the rotation stepper live. */
+  const selectDeedOfGroup = (group) => {
+    if (!group) return;
+    const members = markups.filter((m) => m.deedGroup === group && m.kind === "encumbrance");
+    const main = deedMainOf(members, members[0]);
+    if (!main) { flashWarn("That deed is no longer on this plan.", 5000); return; }
+    setSel({ kind: "markup", id: main.id });
+    setMulti([]);
+    openInspector();
+  };
+  /* Has this deed already produced a parcel? Both menus read it, so "Use as parcel boundary" can
+   * never quietly mint a second copy of the same tract (which would double-count the acreage in
+   * every yield, coverage and detention number). */
+  const deedAlreadyPromoted = (m) =>
+    !!(m && m.deedGroup && parcels.some((p) => p.fromDeedGroup === m.deedGroup));
+  /* Apply a deed's rigid alignment to the parcel PROMOTED from it, so the two never drift apart:
+   * aligning the deed to the county map moves the boundary the deed produced with it. */
+  const alignPromotedParcel = (deedGroup, apply) => {
+    if (!deedGroup) return;
+    setParcels((a) => a.map((pc) => (pc.fromDeedGroup === deedGroup
+      ? { ...pc, points: pc.points.map(apply), ...(pc.exceptions ? { exceptions: pc.exceptions.map((h) => ({ ...h, pts: h.pts.map(apply) })) } : {}) }
+      : pc)));
+  };
   // Manual fallback: turn a deed to an absolute "applied since plotting" angle (panel stepper),
   // rotating the whole tract group about the boundary's centroid so holes stay seated.
   const rotateDeedTo = async (id, targetDeg) => {
@@ -16622,6 +17105,38 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   /* ------------ Plans dropdown grouping (this site's plans vs. other sites) ------------ */
   const planGroup = (s) => s.groupId || s.id;
   const plansHere = (sites || []).filter((s) => planGroup(s) === groupId);
+
+  /* B326417 — the per-plan lock. `teamId` / `ownerId` / `shareLocked` are read-time overlays of
+   * the DB COLUMNS (cloudSync.cloudList), never the stored jsonb, so this reflects what the server
+   * actually enforces rather than what a stale in-memory model believes.
+   *
+   * `canLock` is deliberately narrow: a SHARED plan (nobody to lock out otherwise) that YOU own
+   * (a teammate's attempt is refused by RLS and the guard trigger, so offering it would be a lie —
+   * CHROME-NEVER-EATS-A-PRESS's sibling failure, a control that cannot do what it says).
+   * `ownerId` absent means a local/pre-migration record, which is only ever your own. */
+  const planRecord = (sites || []).find((s) => s.id === siteId) || null;
+  const planShareState = {
+    locked: !!(planRecord && planRecord.shareLocked),
+    canLock: !!(planRecord && planRecord.teamId && (!planRecord.ownerId || planRecord.ownerId === activeUid())),
+  };
+  const [lockBusy, setLockBusy] = useState(false);
+  const togglePlanLock = async () => {
+    if (!siteId || lockBusy) return;
+    setLockBusy(true);
+    try {
+      // Lazy import: the sharing module is signed-in-only and has no business on the planner's
+      // critical-path chunk (the bundle-budget audit charges the Site route for a static edge).
+      const { setPlanLock } = await import("./lib/sharing.js");
+      const r = await setPlanLock(siteId, !planShareState.locked);
+      // LOUD-FAILURE: a refused lock says so. A padlock that silently didn't take is exactly the
+      // "saved ✓ that didn't save" class this repo keeps paying for.
+      if (!r.ok) flashWarn(r.error || "Couldn’t change the lock.");
+      else { onSiteSaved?.(); flashWarn(r.locked ? "Locked — teammates can view this plan but not change it." : "Unlocked — teammates can edit this plan again."); }
+    } catch (e) {
+      flashWarn((e && e.message) || "Couldn’t change the lock.");
+    } finally { setLockBusy(false); setPlanMenu(false); }
+  };
+
   const otherSites = (() => {
     const seen = new Set([groupId]), out = [];
     (sites || []).forEach((s) => { const g = planGroup(s); if (!seen.has(g)) { seen.add(g); out.push(s); } });
@@ -16634,7 +17149,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // remains, handed to the breadcrumb as a trailing crumb (planSlot) so the header reads
   // Map / 🔒 <Site> ▾ / <Plan> ▾ — project, then its plan right beside it.
   const plannerPlanCrumb = (
-    <div ref={planAnchor} style={{ position: "relative", flex: "none" }}>
+    /* NEW-2 — shrinkable, with a floor (CRUMB_MIN_W), for the same reason the project crumb is:
+       when the header is tight the plan NAME must ellipsise inside the chip rather than the whole
+       chip being clipped by the zone — clipping takes the ▾ caret, which is the control the owner
+       could not reach. */
+    <div ref={planAnchor} style={{ position: "relative", flex: "0 1 auto", minWidth: 0 }}>
       {/* Styled to match the breadcrumb crumbs (height/padding/radius) so the three
           segments share one hit-target geometry; hierarchy is by weight, not by fading. */}
       <button
@@ -16644,13 +17163,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           height: 24, padding: "0 8px", borderRadius: 6, border: "none",
           background: "transparent", cursor: "pointer", fontFamily: "inherit",
           fontSize: 12.5, fontWeight: 500, color: "var(--chrome-text)",
-          maxWidth: 200, whiteSpace: "nowrap",
+          maxWidth: 200, minWidth: CRUMB_MIN_W, whiteSpace: "nowrap",
         }}
         onClick={() => setPlanMenu((o) => !o)}
         title="Switch or rename plan"
         data-testid="plan-crumb"
       >
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{planLabel}</span><span style={{ color: "var(--chrome-muted)", fontSize: 11, flex: "none" }}>▾</span>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{planLabel}</span><span data-testid="plan-caret" style={{ color: "var(--chrome-muted)", fontSize: 11, flex: "none" }}>▾</span>
       </button>
         <AnchoredMenu open={planMenu} onClose={() => { setPlanMenu(false); setPlanDelArm(null); }} anchorRef={planAnchor} placement="below-left" gap={8} width={284} panelStyle={{ ...menuPanel, padding: 10 }}>
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Plan name</div>
@@ -16670,7 +17189,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 2 }}>
                 <button style={{ ...menuItem(cur), flex: 1, minWidth: 0 }} onClick={() => (cur ? setPlanMenu(false) : handleOpenSite(s.id))}>
                   <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name || "Untitled plan"}</span>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {s.shareLocked && <span aria-label="View-only for teammates" title="View-only for teammates" style={{ marginRight: 4 }}>🔒</span>}
+                      {s.name || "Untitled plan"}
+                    </span>
                     {cur && <span style={{ color: PAL.accentText, fontSize: 10.5, fontWeight: 700, flex: "none" }}>current</span>}
                   </span>
                 </button>
@@ -16695,6 +17217,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             title="Restore an earlier automatically-saved version of this plan">
             <span aria-hidden style={{ flex: "none" }}>↺</span><span>Version history…</span>
           </button>
+          {/* B326417 — the per-plan view-only lock. Plan-scoped, so it belongs in the plan menu
+              (everything above this line is plan-scoped too; see the B286000 caption below).
+              Shown only for a SHARED plan you OWN: on a private plan there is nobody to lock out,
+              and on a teammate's plan the control would be a lie — RLS and the guard trigger both
+              refuse it. The row also states the current state rather than only offering the verb,
+              so a locked plan is visibly locked without opening anything. */}
+          {planShareState.canLock && (
+            <button style={{ ...menuItem(false), marginTop: 2, display: "flex", alignItems: "center", gap: 8 }}
+              disabled={lockBusy} onClick={togglePlanLock}
+              title={planShareState.locked
+                ? "Teammates can view this plan but not change it. Click to let them edit again."
+                : "Teammates can edit this plan. Click to make it view-only for them."}>
+              <span aria-hidden style={{ flex: "none" }}>{planShareState.locked ? "🔒" : "🔓"}</span>
+              <span>{planShareState.locked ? "Locked — teammates can view only" : "Lock to view-only for teammates"}</span>
+            </button>
+          )}
           {/* ⛔ B286000 — "This device" IS THE WHOLE POINT OF THIS CAPTION, and Storage staying put
               is a DECIDED trade rather than an oversight. Everything above this line is plan-scoped
               (plan name, plans in this site, New plan, Duplicate, Save now, Version history);
@@ -17129,6 +17667,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // B651 — count the CURRENT lots only: a superseded (split) parent is history, not a
             // counted parcel, so splitting one lot into two still reads "Parcels · 2".
             <Section>
+              {/* NEW-1 — THE LOAD-BEARING ROW. Un-located plan (drawn while the county service was
+                  down): this is the way back to the real world, and it sits at the top of the panel
+                  the owner is already in when drawing a boundary. Located plan: the same control
+                  becomes the placement adjuster below. */}
+              {!origin && (
+                <button data-testid="set-location-cta" onClick={() => setSetLocOpen(true)}
+                  title="Say where this plan sits on the earth — the aerial, flood layer, contours and county rules switch on. Nothing you drew moves."
+                  style={{ ...chip, width: "100%", marginBottom: 9, background: PAL.accent, color: "#fff", borderColor: PAL.accent, fontWeight: 700 }}>
+                  📍 Set this plan's location
+                </button>
+              )}
               {/* B720 — parcel ops row: Add ▾ · Split · Merge, unified at the top of the panel.
                   Add ▾ (B383) opens the add-methods menu (draw / identify / address); Split arms
                   the cut tool; Merge enters click-to-pick mode (plain clicks toggle parcels — no
@@ -17150,10 +17699,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Property lines from the county appraisal district light up on the aerial — click one lot or several.</div>
                     </button>
                   ) : (
-                    <div style={{ padding: "7px 10px" }}>
-                      <div style={{ fontWeight: 650, fontSize: 13, color: PAL.disabled }}>🔍 Click a lot on the map</div>
-                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Add a parcel from the map first to turn this on.</div>
-                    </div>
+                    // NEW-1 — a dead end no more: the reason this is off is that the plan has no
+                    // location, and that is now fixable right here.
+                    <button style={menuItem(false)} onClick={() => { setSetLocOpen(true); setAddParcelMenu(false); }}>
+                      <div style={{ fontWeight: 650, fontSize: 13 }}>🔍 Click a lot on the map</div>
+                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Needs a location first — set one and this turns on.</div>
+                    </button>
                   )}
                   {/* Add by address (B384) — geocode a typed address, then identify-and-add the lot
                       at that point through the SAME quickAddAt path. Needs a georeferenced frame. */}
@@ -17177,10 +17728,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       </div>
                     </div>
                   ) : (
-                    <div style={{ padding: "7px 10px" }}>
-                      <div style={{ fontWeight: 650, fontSize: 13, color: PAL.disabled }}>📍 Add by address</div>
-                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Add a parcel from the map first to turn this on.</div>
-                    </div>
+                    <button style={menuItem(false)} onClick={() => { setSetLocOpen(true); setAddParcelMenu(false); }}>
+                      <div style={{ fontWeight: 650, fontSize: 13 }}>📍 Add by address</div>
+                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Needs a location first — set one and this turns on.</div>
+                    </button>
                   )}
                   {/* Draw a new boundary — always available (no GIS frame needed). */}
                   <button style={menuItem(tool === "parcel")} onClick={() => { selectTool("parcel"); setAddParcelMenu(false); }}>
@@ -17248,7 +17799,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <button onClick={(e) => { if (mergePick) { toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); } else if (e.shiftKey) { shiftPickParcel(pc.id); } else { setCombineSel([]); setSel({ kind: "parcel", id: pc.id }); } }}
                           style={{ flex: 1, minWidth: 0, textAlign: "left", padding: "7px 9px", borderRadius: 8, borderLeft: depth ? `2px solid ${PAL.panelLine || "var(--border-default)"}` : undefined, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "var(--border-default)"}`, background: picked ? "rgba(37,99,235,0.14)" : on ? PAL.accentSoft : SURF_RAISED, cursor: "pointer", fontFamily: "inherit", opacity: superseded ? 0.5 : inactive ? 0.55 : 1 }}>
                           <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}{tag}{picked ? " ✓" : ""}</div>
-                          <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
+                          <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{f2(parcelNetSqft(pc) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
                         </button>
                         {/* B598 — per-row remove (✕). Undo-able (removeParcelById pushes history); the
                             tombstone keeps it deleted across reload/merge. The most discoverable place
@@ -17321,6 +17872,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               )}
             </Section>
           )}
+          {/* NEW-1 — PLACEMENT. A boundary drawn from a deed never lands square on the aerial first
+              try, so once the plan has a location the owner can turn it to true north and slide the
+              anchor until the drawn lines sit on the imagery. Collapsed by default (it is a
+              once-per-plan adjustment, not a daily control). Body in components/ParcelRecordPanel.jsx
+              — LAZY, for the same reason as the appraisal panels below. */}
+          {_pid === "parcel" && origin && (
+            <Section title="Placement" collapsed>
+              <LazyPanel name="Placement" minHeight={120} label="Loading placement…">
+                <PlacementControls
+                  PAL={PAL} chip={chip} border={BORDER_1} surface={SURF_RAISED} numFont={NUM_FONT} tabularNums={TABULAR_NUMS}
+                  rotApplied={placeRot} stepDeg={placeStepDeg} onStepDeg={setPlaceStepDeg} stepFt={placeStepFt} onStepFt={setPlaceStepFt}
+                  onRotate={rotatePlan} onNudge={nudgePlan} onMove={() => setSetLocOpen(true)} />
+              </LazyPanel>
+            </Section>
+          )}
+          {/* NEW-3 — PARCEL RECORD. One place the parcel's facts live, whatever the lot came from:
+              typed by hand for a drawn or deed-derived boundary, and EDITABLE for a county-pulled
+              one (a county record with a wrong address should be correctable). The provenance chip
+              is the load-bearing part — a plan that is later reviewed must never present a
+              hand-drawn boundary as though it came from the county. Body in
+              components/ParcelRecordPanel.jsx — LAZY (B1064 tranche). */}
+          {_pid === "parcel" && selParcel && (
+            <Section title="Parcel record">
+              <LazyPanel name="Parcel record" minHeight={180} label="Loading parcel record…">
+                <ParcelRecord parcel={selParcel} PAL={PAL} border={BORDER_1} surface={SURF_RAISED} chip={chip}
+                  onField={setParcelField} onSelectDeed={selectDeedOfGroup} />
+              </LazyPanel>
+            </Section>
+          )}
           {/* Appraisal record + taxing units for the selected lot — LAZY (B1064 tranche).
               Both bodies live in components/ParcelDataPanel.jsx and load only when a lot that
               came from a county identify is actually selected; they used to ride the planner's
@@ -17344,12 +17924,32 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {_pid === "parcel" && selParcel && (
             <Section title="Boundary">
               <div style={{ fontSize: 12, color: PAL.muted, marginBottom: 8, lineHeight: 1.6 }}>
-                Area: <b style={{ color: PAL.ink }}>{f0(polyArea(selParcel.points))} sf</b> · {f2(polyArea(selParcel.points) / SQFT_PER_ACRE)} ac · {selParcel.points.length} corners
+                Area: <b style={{ color: PAL.ink }}>{f0(parcelNetSqft(selParcel))} sf</b> · {f2(parcelNetSqft(selParcel) / SQFT_PER_ACRE)} ac · {selParcel.points.length} corners
+                {/* NEW-2 — a promoted deed's save-and-except tracts are inside the outline but are
+                    not part of the land, so the number above is NET and says so. */}
+                {parcelExceptSqft(selParcel) > 0 && (
+                  <div style={{ marginTop: 2 }}>
+                    less {selParcel.exceptions.length} save-and-except · {f2(parcelExceptSqft(selParcel) / SQFT_PER_ACRE)} ac (gross {f2(parcelGrossSqft(selParcel) / SQFT_PER_ACRE)} ac)
+                  </div>
+                )}
               </div>
+              {/* NEW-3 — the STATED-vs-measured check, for a lot with no county record: a deed-called
+                  12.50 ac and a drawn 12.43 ac are both true, and the gap is information. Same bands
+                  and same shape as the county geometry check below, so the two read as one idea. */}
+              {(() => {
+                const cmp = acreageComparison(selParcel);
+                if (!cmp.stated || !cmp.measured) return null;
+                const [color, mark] = cmp.agreement === "match" ? ["#2f7a3e", "✓"] : cmp.agreement === "close" ? ["var(--text-secondary)", "≈"] : ["#b45309", "▲"];
+                return (
+                  <div data-testid="parcel-stated-check" style={{ fontSize: 11, color, marginBottom: 8, lineHeight: 1.5, background: "var(--planner-raised)", border: "1px solid var(--planner-border)", borderRadius: 8, padding: "6px 9px" }}>
+                    <b>{mark} Stated vs measured</b> · stated {f2(cmp.stated)} ac vs {f2(cmp.measured)} ac drawn ({f0(cmp.diffFrac * 100)}% {cmp.agreement === "match" ? "match" : "off"})
+                  </div>
+                );
+              })()}
               {(() => {
                 const ca = countyAcres(selParcel.attrs);
                 if (!ca || !ca.acres) return null;
-                const mine = polyArea(selParcel.points) / SQFT_PER_ACRE;
+                const mine = parcelNetSqft(selParcel) / SQFT_PER_ACRE;
                 // A projected Shape area read as ft² but actually in m² lands ~10.76× too small; if
                 // multiplying it back by that factor matches our geometry, treat it as m² and use the
                 // corrected county acreage (so a correct parcel reads ✓, not a false ~900% off).
@@ -18232,7 +18832,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // through the intersection, and no second translucent fill stacking on the first. See roadNetwork.js
   // for why every patch-based attempt (B953…B1006) had to fail on topologies it wasn't tuned for.
   const roadNet = useMemo(() => {
-    const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo);
+    /* NEW-1 — a road the user has FORCED out of its type band leaves the dissolved network with it.
+       The network is one merged region painted in the road band; a forced road has to paint in the
+       forced band instead, so leaving it a member would draw it in BOTH places (the region below,
+       its own strip above). `bandForceOf` is null for every road on every untouched plan, so this
+       filter is an identity no-op there and the dissolve is byte-for-byte what it was. */
+    const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo && !bandForceOf(x));
     if (!roads.length) return { regions: [], stripes: new Map(), outlineCuts: new Map(), memberIds: new Set(), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
     const byId = new Map(roads.map((r) => [r.id, r]));
     const strip = new Map(roads.map((r) => [r.id, roadStripRing(r, settings, sharpFor(r), roundabouts.trims.get(r.id))]));
@@ -19396,7 +20001,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   strokes and the tee-cover knockout mask are all superseded by the dissolved road network
                   painted above: a junction is now a boolean union of pavement, not a patch over a seam. */}
               {/* buildings + any layer at/above the building band, painted OVER the overlay. */}
-              {drawElsZ.above.map((el) => <ElNode key={el.id} el={el} f2p={f2p} isSel={sel?.kind === "el" && sel.id === el.id} tool={tool} settings={settings} H={elHandlers} nb={elNeighbors.get(el.id)} dimHidden={dimSuppressed?.has(el.id) || false} roadNet={null} lf={labelFrame} />)}
+              {/* NEW-1 — `roadNet` is handed to this pass too now. It used to be `null` because the
+                  band above buildings held nothing that reads it; a road FORCED across the band edge
+                  lands here, and it needs the same junction-sharpening + roundabout trims the road
+                  band gets. It is excluded from the dissolve (see the roadNet memo), so `inNetwork`
+                  is false and it paints its own strip here rather than twice. */}
+              {drawElsZ.above.map((el) => <ElNode key={el.id} el={el} f2p={f2p} isSel={sel?.kind === "el" && sel.id === el.id} tool={tool} settings={settings} H={elHandlers} nb={elNeighbors.get(el.id)} dimHidden={dimSuppressed?.has(el.id) || false} roadNet={roadNet} lf={labelFrame} />)}
               {/* markup shapes (neutral line/polyline/rect/ellipse/polygon) on top of the elements */}
               {drawMarkupsZ.filter((m) => !m.behindEls).map(renderMarkupNode)}
               {/* NEW-2 — references the user has explicitly promoted ("Draw above the plan"). Same
@@ -20106,8 +20716,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <div style={{ pointerEvents: "none", display: "flex", gap: 8, alignItems: "flex-start", height: "100%", minHeight: 0 }}>
           <div style={{ pointerEvents: "auto", display: "flex", maxHeight: "100%", minHeight: 0 }}>
             <ViewMenu open={viewMenuOpen} onToggle={() => setViewMenuOpen((o) => !o)} settings={settings}
-              setSnap={setSnap} patchSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} pal={PAL}
-              smoothZoom={smoothZoom} onSmoothZoom={applySmoothZoom} />
+              setSnap={setSnap} patchSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} pal={PAL} />
           </div>
           {/* Layers control — same shared layers as the map finder. ALWAYS rendered
               (B693): an unlocated plan gets the control DISABLED with the plain reason
@@ -20148,9 +20757,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       // Disabled with the reason while unlocated; the control re-enables
                       // the moment a placement lands (a placement reloads the plan with
                       // its new origin, and the aerial comes on by default).
-                      disabledReason: origin ? null : "Place this site on the map first (the Map button, top-left) — the aerial needs a real-world location to anchor to.",
+                      // NEW-1 — the reason is now ACTIONABLE. It used to send the owner back to the
+                      // map to start over, which is exactly the dead end this tranche exists to end.
+                      disabledReason: origin ? null : "This plan has no location yet — the aerial needs a real-world spot to anchor to.",
                     }}
-                    gisNote={origin ? null : "GIS layers (flood, wetlands, boundaries, utilities) appear here once the site is placed on the map."} />
+                    gisNote={origin ? null : "GIS layers (flood, wetlands, boundaries, utilities) appear here once this plan has a location."}
+                    onSetLocation={origin ? null : () => setSetLocOpen(true)}
+                    /* NEW-1 — the LIVE zoom every row's gate is reported against, and the fix.
+                       Deliberately the DRAWING's own zoom rather than `geoZoom` (the backdrop's
+                       last commit): the two agree at rest, and during a gesture the drawing is
+                       the thing the owner is looking at, so a row that says "zoom in 2 levels"
+                       counts down as he zooms instead of lagging a commit behind.
+                       `onZoomTo` zooms about the canvas CENTRE — the same anchor the ＋/－
+                       buttons use — so the plan stays framed where he left it. */
+                    mapZoom={origin ? ppfToZoom(view.ppf, origin.lat) : null}
+                    onZoomTo={origin ? (z) => setView((v) => {
+                      const want = zoomToPpf(z, origin.lat);
+                      if (!(want > v.ppf)) return v; // already past the gate — never zoom OUT to "fix" it
+                      const nv = zoomAround({ scale: v.ppf, tx: v.offX, ty: v.offY }, want / v.ppf, size.w / 2, size.h / 2, 0.02, 8);
+                      return { ppf: nv.scale, offX: nv.tx, offY: nv.ty };
+                    }) : null} />
                   {/* utility-evidence drawing tools (map-dependent — a located site only).
                       Active states ride the theme tokens (accent + on-accent), never raw
                       hexes — the B341/B508 chrome-region rule (B696 sweep). */}
@@ -21042,6 +21668,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         onClick={() => alignDeedToParcel(dm.id)}>
                         📐 {hasParcel ? "Align to county parcel" : "Rotate to grid north"}
                       </button>
+                      {/* NEW-2 — promote the plotted deed to a real parcel boundary. */}
+                      <button data-testid="deed-promote" style={{ ...chip, width: "100%", fontWeight: 700, marginTop: 6 }}
+                        disabled={deedAlreadyPromoted(dm)}
+                        title={deedAlreadyPromoted(dm) ? "This deed is already a parcel on the plan" : "Turn this deed into a real parcel — acreage, setbacks and the area math all start working on it"}
+                        onClick={() => promoteDeedToParcel(dm.id)}>
+                        ▦ {deedAlreadyPromoted(dm) ? "Already the parcel boundary" : "Use as parcel boundary"}
+                      </button>
+                      {!deedAlreadyPromoted(dm) && (
+                        <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.5, marginTop: 6 }}>
+                          With the county map down, the legal description is the best boundary you have. The deed stays on the plan either way.
+                        </div>
+                      )}
                       <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.5, marginTop: 6 }}>
                         {hasParcel
                           ? "Surveys state bearings on State Plane grid north; the parcel and aerial are true north. This spins the deed onto the county parcel to cancel that ~1–2° tilt (which fans out to tens of feet over a long line)."
@@ -21772,6 +22410,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </div>
                 );
               })()}
+              {/* ⛔ NEW-1 — A FORCED ELEMENT MUST BE VISIBLY FORCED, WITH THE WAY BACK RIGHT THERE.
+                  An override that only lives in a right-click menu is an element the owner can end
+                  up stuck out of band with no way to see why. This renders ONLY when the override is
+                  set, so the default inspector gains not one line (PANEL-BREVITY: 0 visible lines
+                  added by default, 2 when forced — and the 2 exist to make the state reversible).
+                  Rendered ABOVE the pond guard because a pond can be forced too. */}
+              {bandForceOf(selEl) && (
+                <div data-testid="el-band-forced-note" style={{ marginTop: 9, padding: "6px 8px", borderRadius: 6, background: PAL.surfacePage, border: `1px solid ${PAL.panelLine}` }}>
+                  <div style={{ fontSize: 11, color: PAL.ink, fontWeight: 600 }}>Forced on top of everything</div>
+                  <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 2 }}>
+                    This {TYPE[selEl.type]?.label?.toLowerCase() || selEl.type} is drawing outside its type layer because you put it there.
+                  </div>
+                  <button style={{ ...chipSm, marginTop: 5 }} data-testid="el-band-restore"
+                    title="Back to the normal order — buildings over parking over pond over paving over roads"
+                    onClick={() => setElBand(selEl.id, null)}>Use the normal layer order</button>
+                </div>
+              )}
               {selEl.type !== "pond" && (
               <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
                 <button style={chip} onClick={() => toggleLock(selEl.id)} title="Pin in place: prevents accidental moves/edits">{selEl.locked ? "📌 Unpin" : "📌 Pin"}</button>
@@ -23378,6 +24033,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         </FloatingPanel>
       ))}
 
+      {/* NEW-1 — the Set-location dialog. Lazy: a session opens it at most once, and it carries its
+          own small Leaflet map, so it has no business on the planner's boot chunk. */}
+      {setLocOpen && (
+        <Suspense fallback={null}>
+          <SetLocationDialog
+            origin={origin} PAL={PAL}
+            onCancel={() => setSetLocOpen(false)}
+            onConfirm={(o) => { if (commitOrigin(o)) setSetLocOpen(false); }} />
+        </Suspense>
+      )}
+
       {showShortcuts && (
         <div onClick={() => setShowShortcuts(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: SURF_RAISED, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 560, maxWidth: "92vw", maxHeight: "86vh", overflowY: "auto" }}>
@@ -23803,7 +24469,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {isDeed && row({ text: hasParcel ? "Align to county parcel" : "Rotate to grid north", dis: !!m.locked, title: m.locked ? "Unlock this deed first" : "", on: () => { alignDeedToParcel(dm.id); close(); } })}
             {/* NEW-1 — a markup reaches its inspector from its own menu, like a measurement always could. */}
             {row({ text: "Properties\u2026", on: () => { setSel({ kind: "markup", id: m.id }); openInspector(); close(); } })}
-            {row({ text: m.locked ? "Unlock" : "Lock", hint: m.locked ? "\ud83d\udd12" : "\ud83d\udd13", on: () => { toggleMarkupLock(m.id); close(); } })}
+            {/* NEW-2 — the way out when the county service is down: the legal description IS the
+                boundary, so turn the plotted deed into a real parcel. Sits beside Align because the
+                two are the same decision from opposite sides (fit MY deed to THEIR map · make my
+                deed the map). Already-promoted deeds say so instead of silently making a second. */}
+            {isDeed && row({
+              text: deedAlreadyPromoted(dm) ? "Already the parcel boundary" : "Use as parcel boundary",
+              dis: deedAlreadyPromoted(dm),
+              title: deedAlreadyPromoted(dm) ? "This deed is already a parcel on the plan" : "Turn this deed into a real parcel — acreage, setbacks and the area math all start working on it",
+              on: () => { promoteDeedToParcel(dm.id); close(); },
+            })}
+            {row({ text: m.locked ? "Unlock" : "Lock", hint: m.locked ? "🔒" : "🔓", on: () => { toggleMarkupLock(m.id); close(); } })}
             {/* NEW-6 — every drawn kind is copyable, and says so in its own menu. */}
             {row({ text: "Copy", hint: `${MOD}C`, on: () => { copyRef({ kind: "markup", id: m.id }); close(); } })}
             {/* NEW-1 — and every drawn kind is DUPLICABLE. Only elements and references had this. */}
@@ -23895,8 +24571,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               // NEW-2 — a greyed row says WHY it is greyed. A disabled control with no explanation is
               // indistinguishable from a broken one, which is how this feature was read.
               const aloneInBand = !af || af.count < 2;
+              // NEW-1 — a forced element is alone for a different reason, and saying "the only
+              // <type> on the plan" about it would be false (there may be five more, all in their
+              // own type layer). Name the band it is actually in.
+              const forcedBand = bandForceOf(t);
               const arrWhy = aloneInBand
-                ? `This is the only ${TYPE[t.type]?.label?.toLowerCase() || t.type} on the plan, so there is nothing to reorder it against. Site elements always draw in their own type's layer — a building over paving, paving over a road.`
+                ? (forcedBand
+                  ? `This is the only element forced in front of the plan, so there is nothing to reorder it against. Put it back in its own layer to order it with the other ${TYPE[t.type]?.label?.toLowerCase() || t.type}.`
+                  : `This is the only ${TYPE[t.type]?.label?.toLowerCase() || t.type} on the plan, so there is nothing to reorder it against. Site elements always draw in their own type's layer — a building over paving, paving over a road.`)
                 : "";
               const arrRow = (text, mode, dis, hint) => (
                 <button disabled={dis} title={dis ? (arrWhy || `Already at the ${(mode === "back" || mode === "backward") ? "back" : "front"}.`) : ""}
@@ -23965,6 +24647,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {arrRow("Bring Forward", "forward", af.atTop || af.count < 2, `${MOD}]`)}
                       {arrRow("Send Backward", "backward", af.atBottom || af.count < 2, `${MOD}[`)}
                       {arrRow("Send to Back", "back", af.atBottom || af.count < 2, `${MOD}⇧[`)}
+                      {/* ⛔ NEW-1 — THE ESCAPE HATCH, and it is ONE row on purpose. The four rows
+                          above move an element inside its band and always did; this is the only way
+                          across the band edge, it is named for what it does, and it is nowhere near
+                          an ordinary Bring to Front. Same single-toggle shape markups, measurements
+                          and callouts already use for "Send behind the plan", so there is one idea
+                          in the product rather than two. PANEL-BREVITY: one row, no second sentence
+                          in the menu body — the why lives in the hover. */}
+                      <button style={{ ...menuItem(false), display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
+                        data-testid="el-band-force"
+                        title={forcedBand
+                          ? "Put this back in its own type layer, where it draws in the usual order (buildings over parking over pond over paving over roads)."
+                          : "Cross the type-layer rule for this one element: draw it on top of everything, buildings included. Everything else keeps the normal order."}
+                        onClick={() => { setElBand(t.id, forcedBand ? null : "front"); setTypeMenu(null); }}>
+                        <span>{forcedBand ? "Use the normal layer order" : "Force on top of everything"}</span>
+                        {forcedBand ? <span style={{ color: PAL.accent, fontWeight: 700 }}>✓</span> : null}
+                      </button>
                     </>
                   )}
                   {/* B875 — pond discoverability: the right-click menu carries the pond-specific
@@ -26156,7 +26854,23 @@ function YieldPanel({
                 } else if (fl.includes("bfe-datum-unpublished")) {
                   detR.push(warnNote("Cause: the published BFE has no vertical datum — confirm it before comparing elevations.", "regime-unk-datum", "An elevation without its datum (usually NAVD88) can be off by feet; confirm against the FIRM panel."));
                 } else if (fl.includes("ground-elevation-missing")) {
-                  detR.push(actionWarn("Cause: site grade isn't sampled yet — ↻ re-check to pull 3DEP and compare against the BFE.", "regime-unk-grade", "The 1% BFE is known but the bare-earth grade (3DEP) hasn't landed, so the regime can't be settled. Re-checking pulls it.", () => d.onCheck && d.onCheck(), "↻ Re-check"));
+                  /* NEW-2(b)/NEW-3 — WHY the grade is missing is now a KNOWN fact with four
+                     outcomes, and they want different words: "still loading" is not a to-do,
+                     "the federal service failed" names the service, and only two of the four are
+                     a ↻. PANEL-BREVITY rule 5 + the B1104/NEW-5 precedent: the SUBJECT is
+                     computed so the budget still counts ONE literal, and WHICH of the four it is
+                     — with the service named and the held value's age — rides `groundElevNote` in
+                     the note's info argument (hover, exempt) rather than a visible line each.
+                     COLLAPSED, never deleted. An unresolved grade reads as UNRESOLVED in every
+                     branch, never as zero; only the two states a re-pull could fix offer the ↻. */
+                  const gs = d.groundElev || null;
+                  const gSt = gs && gs.status;
+                  const gSubject = gSt === "pending" ? "is still loading" : "is unresolved";
+                  const gRetry = gSt !== "pending" && gSt !== "void";
+                  const gLine = `Cause: site grade ${gSubject} — nothing is assumed in its place, so the regime can't settle against the BFE.`;
+                  detR.push(gRetry
+                    ? actionWarn(gLine, "regime-unk-grade", d.groundElevNote, () => d.onCheck && d.onCheck(), "↻ Re-check")
+                    : warnNote(gLine, "regime-unk-grade", d.groundElevNote || undefined));
                 } else {
                   detR.push(warnNote(`Cause: ${(d.regime.reasons && d.regime.reasons[0]) || "flood facts not established"}. ↻ Re-check to resolve.`, "regime-unk-other"));
                 }
@@ -27052,8 +27766,22 @@ function YieldPanel({
                 headless check assert the state without reading colours. */}
             {drainage.freshness && (drainage.freshness.state === "fresh" || drainage.freshness.state === "stale") && (
               <span data-drain-freshness={drainage.freshness.state} aria-label={drainage.freshness.state === "stale" ? "Flood check is out of date" : "Flood check is up to date"}
-                title={drainage.freshness.note || "The flood check still matches what's drawn."}
+                title={[drainage.freshness.note || "The flood check still matches what's drawn.", drainage.groundElevNote].filter(Boolean).join("\n")}
+                data-ground-elev={drainage.groundElev?.status || undefined}
+                data-ground-cached={drainage.groundElev?.fromCache ? "1" : undefined}
                 style={{ color: drainage.freshness.state === "stale" ? Y.dangerText : "var(--success-text)", fontSize: 9, lineHeight: 1, flex: "none" }}>●</span>
+            )}
+            {/* NEW-2(b) / NEW-3 — the elevation leg is the ONLY part of the check that can still be
+                outstanding once the panel has published, and a failed one must never be silent. One
+                muted glyph, no new line: "…" while it is still loading, "!" when the service failed
+                or timed out (named in the hover). Nothing at all in the ordinary case, which is now
+                the common case because the value is cached. */}
+            {drainage.groundElev && (drainage.groundElev.status === "pending" || drainage.groundElev.status === "unavailable") && (
+              <span data-ground-elev={drainage.groundElev.status} title={drainage.groundElevNote || undefined}
+                aria-label={drainage.groundElev.status === "pending" ? "Ground elevation still loading" : "Ground elevation unavailable"}
+                style={{ color: drainage.groundElev.status === "unavailable" ? Y.warnText : Y.faint, fontSize: 10, lineHeight: 1, flex: "none", cursor: "help" }}>
+                {drainage.groundElev.status === "unavailable" ? "!" : "…"}
+              </span>
             )}
             {/* NEW-20(a) — while a fetch is in flight the line says so ("checking…") instead of an
                 unchanging "not checked", and the ↻ spins + disables so the click is never silent.

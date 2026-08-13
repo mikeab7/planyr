@@ -18,6 +18,11 @@ import { JURISDICTION_SOURCES, ETJ_SOURCES, roadAuthorityStyle, ROAD_AUTHORITY_L
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { overpassLayer, mapillaryLayer } from "./evidenceLayers.js";
 import { TERRAIN_MIN_ZOOM } from "./terrainGate.js";
+/* NEW-1 — every zoom gate in the app, declared in ONE leaf so the registry rows below can
+ * state theirs and the Layers panel can report it as live state. `PIPELINE_VECTOR_MIN_ZOOM`
+ * mirrors VECTOR_SOURCES.txrrc_pipe.query.minVectorZoom (pinned by test/layerZoomGate). */
+import { OSM_MIN_ZOOM, MAPILLARY_MIN_ZOOM } from "./layerZoomGate.js";
+const PIPELINE_VECTOR_MIN_ZOOM = 13;
 import { loadTerrain } from "./terrainLazy.js";
 import {
   isTransientStatus, dynamicLayerOptions, imageLayerOptions, featureLayerOptions, featureRetryDecision,
@@ -31,6 +36,9 @@ import { installDefaultMarkerIcon, pointToLayerFor } from "./mapSymbols.js";
 import { PIPELINE_LEGEND } from "./pipelineCommodity.js";
 import { DEFAULT_CORRIDOR_WIDTH_FT } from "./pipelineCorridor.js";
 import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
+// NEW-2 — the baked-flood-tile DECISION only (pure, a few hundred bytes). The renderer and the
+// vector-tile stack behind it are reached by dynamic import at switch-on; see floodTileLayer.js.
+import { floodTilesEnabled, resolveFloodSource } from "../../../shared/gis/floodTiles.js";
 import { releaseLayer } from "./tileLifecycle.js";
 // NEW-1 — THE map stacking model. Every layer's pane comes from its declared ROLE
 // (area under the site elements, line/point over them); nothing here picks a z-order.
@@ -148,6 +156,17 @@ export const STATEWIDE = {
      * reads as the all-clear, so this row opts into the honest gap wording instead (the copy
      * itself lives in floodZone.js `FLOOD_ABSENCE`, with the panel's, so the two can't drift). */
     identifyGap: "flood",
+    /* NEW-2 — this row MAY render from a baked per-county PMTiles archive instead of FEMA's live
+     * /export, when the flag is on and the plan's county has one. It is the same row either way:
+     * a second panel entry would double-paint and would ask the user a question about our
+     * plumbing. `floodTiles` is the opt-in; `syncOverlayLayers` makes the call per plan, and a
+     * missing or unreadable archive falls straight back to the raster path below. */
+    floodTiles: true,
+    /* (B1092) With tiles the geometry is IN HAND, so the canvas can answer an identify with no
+     * network at all. When the raster path is live the ref has no `identifyAt` and
+     * `identifyOverlaysAt` skips this row exactly as it does today — so this costs nothing and
+     * changes nothing while the flag is off. */
+    canvasIdentify: true,
   },
   wetlands: {
     kind: "dynamic", label: "Wetlands",
@@ -207,6 +226,11 @@ export const STATEWIDE = {
     // lines). NOT a surveyed easement — the caveat below is as prominent as the band.
     kind: "pipelineCorridor", label: "Pipeline easement corridor (assumed)",
     pipelineSource: "txrrc_pipe", corridorWidth: true, // corridorWidth → LayerPanel shows the inline width control
+    // NEW-1 — DECLARED so the Layers panel can say "not showing at this zoom" and offer the
+    // fix. The corridor only exists where the centrelines came back as VECTORS, so its gate is
+    // the pipeline source's own `query.minVectorZoom`; `test/layerZoomGate.test.js` pins the two
+    // together, because a declared number that drifts from the runtime one is worse than none.
+    minZoom: PIPELINE_VECTOR_MIN_ZOOM,
     opacity: 0.85,
     note: "ASSUMED screening corridor drawn off a SCHEMATIC centerline — NOT a surveyed easement. Doubly approximate (schematic line × assumed width). Confirm via title commitment / recorded easement instrument + an 811 one-call before relying on it.",
     // NEW-1 stacking role (lib/mapStack.js): A buffered band — a fill, so it goes under the plan (its centreline rides over).
@@ -350,6 +374,7 @@ export const EVIDENCE = {
     // B898: MEMBER of the consolidated "Electric" layer (mergeGroup electric, alongside
     // hifld_tx/hifld_substations below) — `label` is the per-provider ⓘ line, not a solo row.
     kind: "overpass", label: "Power lines & poles", source: "OpenStreetMap", opacity: 0.55,
+    minZoom: OSM_MIN_ZOOM, // NEW-1 — declared so the panel reports the gate as LIVE state, not static advice
     query: { lines: true, poles: true, substations: true },
     note: "OpenStreetMap — transmission solid, distribution dashed; poles/towers as dots. Loads at zoom ≥ 14.",
     // NEW-1 stacking role (lib/mapStack.js): Transmission/distribution lines (poles ride the same layer as its nodes).
@@ -396,6 +421,7 @@ export const EVIDENCE = {
     // B898: MEMBER of the consolidated "Fire hydrants" layer (mergeGroup fire_hydrants,
     // alongside coh_hydrants/mapillary below).
     kind: "overpass", label: "Fire hydrants", source: "OpenStreetMap", opacity: 0.55,
+    minZoom: OSM_MIN_ZOOM, // NEW-1 — declared so the panel reports the gate as LIVE state, not static advice
     query: { hydrants: true },
     note: "OpenStreetMap fire hydrants. Loads at zoom ≥ 14.",
     // NEW-1 stacking role (lib/mapStack.js): Hydrant points.
@@ -422,6 +448,7 @@ export const EVIDENCE = {
     // poles — the note is honest about both; it surfaces under Fire hydrants since that's
     // its primary siting use, per the brief's explicit "3 hydrant layers" grouping).
     kind: "mapillary", label: "Poles & hydrants from street imagery",
+    minZoom: MAPILLARY_MIN_ZOOM, // NEW-1 — declared so the panel reports the gate as LIVE state
     sublabel: "Detected in crowdsourced street-level photos.",
     source: "Mapillary", opacity: 0.55,
     note: "Pole & fire-hydrant detections from crowdsourced street-level photos. Loads at zoom ≥ 16.",
@@ -488,6 +515,10 @@ export const TERRAIN = {
   contours: {
     kind: "contours", label: "Contour lines (1 ft)",
     source: "USGS 3DEP", opacity: 0.9,
+    // NEW-1 — THE ROW THE OWNER REPORTED. Declaring the gate here is what lets the Layers panel
+    // render this row as DORMANT (on, but suppressed) with a live "zoom in N levels" fix,
+    // instead of a static sentence under a checkbox that says ON.
+    minZoom: TERRAIN_MIN_ZOOM,
     note: `1-ft lines traced from LiDAR bare-earth ground heights (NAVD88), heavier line every 5 ft. Lines BREAK where the LiDAR has no data (water). Loads at zoom ≥ ${TERRAIN_MIN_ZOOM}. Screening only — verify with survey; agrees with the cross-section tool (same data).`,
     // NEW-1 stacking role (lib/mapStack.js): THE owner case: 1-ft contour hairlines must cross his buildings, not hide behind them.
     role: "line",
@@ -499,6 +530,7 @@ export const TERRAIN = {
   flowdir: {
     kind: "flowdir", label: "Water flow direction", // B760: plain label; arrow semantics live in the ⓘ note
     source: "USGS 3DEP", opacity: 0.9,
+    minZoom: TERRAIN_MIN_ZOOM, // NEW-1 — same terrain gate as contours; declared for the panel's live state
     note: `Downhill direction of the ground surface — bolder/longer arrow = steeper fall. Flat or unclear spots get no arrow rather than a guess. Loads at zoom ≥ ${TERRAIN_MIN_ZOOM}. Screening only — confirm drainage with your civil engineer.`,
     // NEW-1 stacking role (lib/mapStack.js): Flow arrows — strokes, and useless buried under a pad.
     role: "line",
@@ -1237,6 +1269,28 @@ const rasterComposite = (slots) => ({
  * construction — there is no `setPane`). A WeakMap keyed on the caller's own `refs` object:
  * scoped exactly like the refs it shadows, collected with them, and — unlike a key stashed on
  * `refs` itself — invisible to everything that iterates that map. */
+/* NEW-2 — what we have LEARNED about each baked archive this session. An archive that has
+ * already failed once must not be retried on every sync pass: the whole point of the fallback is
+ * that the layer settles on live FEMA and stays there. Keyed by URL, so a plan switched from a
+ * county with no archive to one with a good archive still gets the fast path. */
+const FLOOD_ARCHIVE_STATE = new Map();
+export const markFloodArchiveMissing = (url) => { if (url) FLOOD_ARCHIVE_STATE.set(url, "missing"); };
+export const floodArchiveState = (url) => FLOOD_ARCHIVE_STATE.get(url) || "unknown";
+/* Test seam — a fresh archive at the same URL must not inherit a previous run's verdict. */
+export const resetFloodArchiveState = () => FLOOD_ARCHIVE_STATE.clear();
+
+/* NEW-2 — which source paints the flood row for THIS plan. Pure decision (floodTiles.js) fed the
+ * three facts it needs; everything about the fallback is a property of that function, which is
+ * what makes it testable without unplugging a server. */
+export function floodSourceFor(cfg, opts) {
+  if (!cfg || !cfg.floodTiles) return null;
+  const enabled = opts && opts.floodTiles != null ? !!opts.floodTiles : floodTilesEnabled();
+  const decided = resolveFloodSource({ enabled, countyKey: opts && opts.countyKey, archiveState: "unknown" });
+  if (decided.source !== "tiles") return decided;
+  // Re-ask with what this session has learned about that specific archive.
+  return resolveFloodSource({ enabled, countyKey: opts && opts.countyKey, archiveState: floodArchiveState(decided.archiveUrl) });
+}
+
 const LAYER_BANDS = new WeakMap();
 const layerBands = (refs) => {
   let m = LAYER_BANDS.get(refs);
@@ -1359,6 +1413,34 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           const lyr = cfg.kind === "contours" ? contourLayer(cfg, report, tOpts) : flowLayer(cfg, report, tOpts);
           lyr.setOpacity(st.opacity); lyr.addTo(map); refs[k] = lyr;
         }, (e) => { if (refs[k] === "pending") fail(k, cfg, `${cfg.label}: ${(e && e.message) || "terrain module failed to load"}`); });
+      } else if (cfg.floodTiles && (floodSourceFor(cfg, opts) || {}).source === "tiles") {
+        /* NEW-2 — BAKED FLOOD TILES. The archive is a static file on this same origin, so this
+         * path has no agency in it at all: no probe, no export, no 20 s timeout.
+         *
+         * ⛔ THE FALLBACK IS THE LOAD-BEARING PART OF THIS BRANCH. Adding tiles must never be
+         * able to make flood data disappear, so EVERY way this can fail — the chunk not
+         * loading, the archive 404ing, a header that will not parse — ends in the SAME place:
+         * mark the archive missing (so no later pass retries it), tear the slot down, and
+         * re-enter this function, which then takes the raster branch below exactly as it does
+         * today. `admit` is dropped on the re-entry because that gate exists to stage the FIRST
+         * paint; a layer that has already been admitted and then lost its source must be
+         * allowed to rebuild immediately, not wait for another staging tick that may never come. */
+        const archiveUrl = floodSourceFor(cfg, opts).archiveUrl;
+        const toLive = (msg) => {
+          markFloodArchiveMissing(archiveUrl);
+          if (refs[k] && refs[k] !== "pending") release(k, refs[k]); else refs[k] = null;
+          onStatus && onStatus(k, "loading", msg || null);
+          syncOverlayLayers(map, overlays, refs, { ...opts, admit: null });
+        };
+        import("./floodTileLayer.js").then(({ floodPmtilesLayer }) => {
+          if (refs[k] !== "pending" || !overlays[k] || !overlays[k].on) return; // toggled off mid-import
+          if (!map || !map._loaded) { refs[k] = null; return; }
+          const lyr = floodPmtilesLayer({
+            url: archiveUrl, opacity: st.opacity, pane: lyrPane, report,
+            onFallback: (msg) => { if (refs[k] === lyr) toLive(msg); },
+          });
+          lyr.addTo(map); refs[k] = lyr;
+        }, () => { if (refs[k] === "pending") toLive("flood tiles: renderer failed to load"); });
       } else if (cfg.kind === "vector") {
         // Cached boundary layer (B694): paints the last-good copy from the browser
         // cache instantly, refreshes in the background, and carries hover/click

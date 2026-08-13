@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { parcelCardRows } from "../lib/appraisal.js";
+import { PinIcon, EmptyCircleIcon, WarnTriangleIcon } from "./icons.jsx";
 
 /* ParcelInfoCard (B233, reshaped by NEW-1) — the card that drops in under the map
  * finder's search pill after a "Go". Three distinct states: found (the parcel's key
@@ -58,6 +59,9 @@ function InfoRow({ label, value, cap = false }) {
 
 export default function ParcelInfoCard({
   info, narrow = false, cachedAsOfLabel = "", onDismiss, onPlan, detailsOpen = false,
+  // NEW-4 — the fallback when the county service is unreachable: start the plan at this point
+  // anyway and draw the boundary. Passed only by the map finder; absent → the card just explains.
+  onStartBlank = null,
 }) {
   // `detailsOpen` seeds the disclosure only — it re-seeds per parcel via the `key` the
   // caller sets, so a new search always opens closed (the whole point of the fold).
@@ -77,7 +81,12 @@ export default function ParcelInfoCard({
         : { top: 64, left: "50%", transform: "translateX(-50%)", width: 348, maxWidth: "calc(100% - 540px)" }),
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 11px", borderBottom: found ? `1px solid ${PAL.panelLine}` : "none" }}>
-        <span style={{ flex: "none", fontSize: 13 }}>{found ? "📍" : info.status === "none" ? "○" : "⚠"}</span>
+        {/* NEW-3 — one slot, one icon family. It used to render a COLOUR emoji pin against two text
+            glyphs, so the three states of the same badge didn't match each other. */}
+        <span style={{ flex: "none", display: "grid", placeItems: "center",
+          color: info.status === "unavailable" ? "var(--warn-text)" : found ? PAL.accent : PAL.muted }}>
+          {found ? <PinIcon size={13} /> : info.status === "none" ? <EmptyCircleIcon size={13} /> : <WarnTriangleIcon size={13} />}
+        </span>
         <span style={{ flex: 1, fontSize: 12.5, fontWeight: 700, color: info.status === "unavailable" ? PAL.accent : PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {found ? (info.addr || info.label || "Parcel")
             : info.status === "none" ? "No parcel at this point"
@@ -129,8 +138,17 @@ export default function ParcelInfoCard({
           The map centered on the address, but no parcel covers that exact point — it may sit on a road or right-of-way. Click the lot directly, or zoom in and use <b>Select parcels</b>.
         </div>
       ) : (
+        /* NEW-4 — an outage used to end here, with the owner left on a map that would not give
+           him a lot and no way forward. The way forward goes in the same breath as the bad news:
+           start the plan anyway, located at this address, and draw the boundary by hand. */
         <div style={{ padding: "9px 11px", fontSize: 11.5, color: PAL.accent, lineHeight: 1.5 }}>
           The map centered on the address, but the county parcel service couldn’t be reached for this area right now. Give it a moment, then click the lot or use <b>Select parcels</b>.
+          {onStartBlank && (
+            <button onClick={onStartBlank} data-testid="parcel-card-start-blank"
+              style={{ display: "block", width: "100%", marginTop: 8, height: 30, borderRadius: 6, border: "none", background: PAL.accent, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+              Start the plan here &amp; draw the boundary →
+            </button>
+          )}
         </div>
       )}
     </div>

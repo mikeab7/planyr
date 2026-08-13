@@ -22,6 +22,15 @@ export function readScene(doc) {
     out.documentNodes = doc.getElementsByTagName("*").length;
     if (svg) {
       out.canvasNodes = svg.getElementsByTagName("*").length;
+      /* ⛔ THE PLAN'S CONTENTS ARE ITS FIVE DRAWN KINDS, NOT ITS ELEMENTS (NEW-2). `[data-el-id]`
+       * is elements only, so this number under-reported every plan that carries markups,
+       * measurements, callouts or parcels — on the owner's own Silvestri plan, 120 against 145.
+       * That is the number `OWNER_SCENE` was sized from, so the under-report reached the fixtures.
+       * Distinct `data-feature` KEYS, never nodes: chrome carries its owner's key too. */
+      const keys = new Set();
+      for (const n of svg.querySelectorAll("[data-feature]")) keys.add(n.getAttribute("data-feature"));
+      out.featuresDrawn = keys.size;
+      /* el-tier: kept beside the census — the element slice, and the column existing baselines use. */
       out.elementsDrawn = svg.querySelectorAll("[data-el-id]").length;
     }
     out.tiles = doc.querySelectorAll("img.leaflet-tile").length;

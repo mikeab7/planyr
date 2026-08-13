@@ -1,0 +1,15 @@
+{
+  "_source": "Owner's plan smsdrvzr9gzx (Richfield / Concept A), building e1454939cgzlnc and its four bonded children, copied verbatim out of public.site_elements on 2026-08-12. NEW-3: the DEFECT is what happens when e1454940cgzlnc (the right-hand truck court) is absent — do not 'fix' these numbers.",
+  "host": "e1454939cgzlnc",
+  "rightCourt": "e1454940cgzlnc",
+  "rightTrailer": "e1454941cgzlnc",
+  "leftCourt": "e1454942cgzlnc",
+  "leftTrailer": "e1454943cgzlnc",
+  "els": [
+    { "h": 1198, "w": 620, "z": 1024, "cx": 1594.19, "cy": -762.81, "id": "e1454939cgzlnc", "rot": 270, "dock": "cross", "type": "building", "dockSide": "right" },
+    { "h": 1198, "w": 135, "z": 2048, "cx": 1594.19, "cy": -1140.31, "id": "e1454940cgzlnc", "zd": 135, "rot": 270, "type": "paving", "attachedTo": "e1454939cgzlnc", "truckCourt": { "side": "right" } },
+    { "h": 50.00000000000044, "w": 1198, "z": 3072, "cx": 1594.19, "cy": -1232.8100000000004, "id": "e1454941cgzlnc", "zd": 50, "cfg": { "single": true, "trailerL": 50, "trailerW": 12, "trailerAisle": 0 }, "rot": 0, "type": "trailer", "noFit": true, "attachedTo": "e1454939cgzlnc", "forCourt": "e1454940cgzlnc", "prevZone": "e1454940cgzlnc" },
+    { "h": 1198, "w": 135, "z": 4096, "cx": 1594.19, "cy": -385.30999999999995, "id": "e1454942cgzlnc", "zd": 135, "rot": 270, "type": "paving", "attachedTo": "e1454939cgzlnc", "truckCourt": { "side": "left" } },
+    { "h": 50.00000000000022, "w": 1198, "z": 5120, "cx": 1594.19, "cy": -292.80999999999983, "id": "e1454943cgzlnc", "zd": 50, "cfg": { "single": true, "trailerL": 50, "trailerW": 12, "trailerAisle": 0 }, "rot": 0, "type": "trailer", "noFit": true, "attachedTo": "e1454939cgzlnc", "forCourt": "e1454942cgzlnc", "prevZone": "e1454942cgzlnc" }
+  ]
+}

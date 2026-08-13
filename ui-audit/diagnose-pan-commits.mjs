@@ -25,6 +25,7 @@
 import { chromium } from "playwright";
 import { perfScenarioSeed } from "./lib/perf-scenario.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { BLANK_POINT_EXCLUDE } from "./lib/featureCensus.mjs";
 
 const BASE = (process.env.BASE_URL || "http://localhost:4173/").replace(/\/?$/, "/");
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
@@ -56,16 +57,18 @@ await page.waitForTimeout(2500);
 
 const box = await page.locator("svg[role=application]").boundingBox();
 /* Press on BARE CANVAS — a centre press lands on an element and never pans (the NEW-1 finding). */
-const at = await page.evaluate(() => {
+const at = await page.evaluate((BLANK) => {
   const svg = document.querySelector('[data-testid="planner-canvas"]');
   const r = svg.getBoundingClientRect();
   for (const fy of [0.5, 0.3, 0.7]) for (const fx of [0.25, 0.5, 0.75, 0.12]) {
     const x = r.left + r.width * fx, y = r.top + r.height * fy;
     const hit = document.elementFromPoint(x, y);
-    if (hit && svg.contains(hit) && !hit.closest("[data-el-id]")) return { x, y };
+    /* ⛔ A BLANK POINT IS FREE OF EVERY FEATURE, not just of elements (NEW-2) — a press on a
+       * markup / measurement / callout / parcel DRAGS IT instead of panning. */
+    if (hit && svg.contains(hit) && !hit.closest(BLANK)) return { x, y };
   }
   return null;
-});
+}, BLANK_POINT_EXCLUDE);
 const px = at ? at.x : box.x + box.width / 2, py = at ? at.y : box.y + box.height / 2;
 
 await page.evaluate(() => {

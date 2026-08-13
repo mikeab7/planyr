@@ -7,7 +7,8 @@ import { createElementSync } from "../src/workspaces/site-planner/lib/elementSyn
 // stays quiet. The mapping is pure; the engine half (restore op + restore-conflict) runs against a
 // scripted RPC.
 
-const ctx = { name: "Sam", label: "Building 3" };
+const ctx = { name: "Sam", label: "Building 3", self: false };   // a PROVEN different account
+const mine = { name: "you (another window)", label: "Building 3", self: true }; // NEW-4 — same account, another tab
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 describe("toastForSyncEvent — the matrix, both sides", () => {
@@ -94,5 +95,58 @@ describe("engine restore op (the Restore action's write path)", () => {
     sync.reconcile({ els: [{ id: "e1", w: 77, z: 0 }] }, {});
     await tick();
     expect(commits).toHaveLength(1); // no second commit — canvas matches the adopted row
+  });
+});
+
+/* ⛔ NEW-4 — an action is attributed to a PERSON only on a proven different account. A second tab
+ * of the owner's own session named a phantom collaborator ~5 times; the wording half of that fix
+ * lives here, and it is asserted for every row of the matrix that names anyone at all. */
+describe("NEW-4 — same account, another tab: the sentence names a TAB, never a person", () => {
+  const rows = [
+    { type: "edit-vs-edit-lost-race" },
+    { type: "remote-while-dirty" },
+    { type: "remote-upsert", authoredRecently: true },
+    { type: "remote-delete", authoredRecently: true },
+    { type: "edit-vs-deleted" },
+    { type: "restore-conflict" },
+    { type: "delete-vs-create-dropped" },
+  ];
+  it("every attributing row has a self variant, and it credits no name", () => {
+    for (const ev of rows) {
+      const t = toastForSyncEvent(ev, mine);
+      expect(t, ev.type).toBeTruthy();
+      expect(t.text, ev.type).toContain("another tab of yours");
+      expect(t.text, ev.type).not.toContain("Sam");
+      expect(t.text, ev.type).not.toContain("a teammate");
+    }
+  });
+
+  it("the SAME rows still name a proven different account", () => {
+    for (const ev of rows) {
+      const t = toastForSyncEvent(ev, ctx);
+      expect(t.text, ev.type).toContain("Sam");
+      expect(t.text, ev.type).not.toContain("another tab of yours");
+    }
+  });
+
+  it("a caller that forgets `self` gets the UNATTRIBUTED wording — wrong in the harmless direction", () => {
+    const t = toastForSyncEvent({ type: "edit-vs-deleted" }, { name: "Sam", label: "Building 3" });
+    expect(t.text).toContain("another tab of yours");
+  });
+});
+
+/* ⛔ NEW-1 — the delete-vs-create row of the matrix, one test per direction. */
+describe("NEW-1 — delete-vs-create, both directions", () => {
+  it("the DELETER is told, because the element visibly comes back", () => {
+    const t = toastForSyncEvent({ type: "delete-vs-create-dropped" }, ctx);
+    expect(t.text).toBe("Sam re-created Building 3 after you deleted it — it's back on the plan.");
+    expect(t.action).toBe("zoom");
+  });
+
+  it("the CREATOR sees nothing: their create simply stands, and there is no event on that side", () => {
+    // `delete-reapplied` is the deleter-side telemetry class and stays silent; the creating tab
+    // never receives a delete-vs-create event at all, so the matrix has nothing to render for it.
+    expect(toastForSyncEvent({ type: "delete-reapplied" }, ctx)).toBeNull();
+    expect(toastForSyncEvent({ type: "remote-upsert", authoredRecently: false }, ctx)).toBeNull();
   });
 });

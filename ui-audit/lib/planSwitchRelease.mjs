@@ -16,7 +16,7 @@
  *     — must leave a LOT. This is the instrument's positive control: it proves the measurement can
  *     still see retention at all. If the control comes back clean, the guard has gone blind and it
  *     fails saying so, rather than reporting a pass it did not earn.
- * Plus `switchProven`: plan B is half of plan A by construction, so if the drawn-element count never
+ * Plus `switchProven`: plan B is half of plan A by construction, so if the drawn-feature count never
  * changed, the route change did not take and neither arm measured a plan switch.
  *
  * Keeping this pure means CI can test the decision table without a browser (test/planSwitchRelease.test.js).
@@ -37,14 +37,14 @@ export const DEFAULTS = {
 /**
  * @param {{detachedBefore:number, detachedAfter:number, rendererBefore:number, rendererAfter:number}} guarded
  * @param {{detachedBefore:number, detachedAfter:number}|null} control
- * @param {boolean} switchProven  did the drawn-element count actually change across the switch?
+ * @param {boolean} switchProven  did the drawn-feature count actually change across the switch?
  */
 export function releaseVerdict(guarded, control, switchProven, opts = {}) {
   const t = { ...DEFAULTS, ...opts };
   const failures = [];
 
   if (!switchProven) {
-    failures.push("the plan switch was never proven — the drawn-element count did not change between plan A and plan B, so neither arm measured a plan switch and every number below is about one plan rendered twice");
+    failures.push("the plan switch was never proven — the drawn-feature count did not change between plan A and plan B, so neither arm measured a plan switch and every number below is about one plan rendered twice");
   }
 
   if (!control) {

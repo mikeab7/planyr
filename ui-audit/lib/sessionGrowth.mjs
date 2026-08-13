@@ -173,10 +173,16 @@ export const GROWTH_CANDIDATES = [
     observable: "CDP LayerTree",
   },
   {
+    id: "featuresDrawn", family: "model", unit: "features", resets: "yes",
+    title: "Drawn features actually in the canvas (all five kinds)",
+    why: "THE CONTROL. This is load, not a leak — if it rises, the gesture got dearer for an honest reason and the run is measuring B1357's r=0.93 axis instead of an accumulation. NEW-2: counted across el / markup / measure / callout / parcel, because the element-only version it replaced was blind to four fifths of a plan and could read flat while the canvas filled up",
+    observable: "distinct [data-feature] keys inside the canvas",
+  },
+  {
     id: "elementsDrawn", family: "model", unit: "elements", resets: "yes",
-    title: "Elements actually drawn in the canvas",
-    why: "THE CONTROL. This is load, not a leak — if it rises, the gesture got dearer for an honest reason and the run is measuring B1357's r=0.93 axis instead of an accumulation",
-    observable: "[data-el-id] count inside the canvas",
+    title: "Of those, the ones that are elements",
+    why: "tier detail beside the control above — useful for attributing a rise, never the control itself",
+    observable: "[data-el-id] count inside the canvas (el-tier: named as the element slice)",
   },
   {
     id: "planSwitches", family: "model", unit: "switches", resets: "yes",

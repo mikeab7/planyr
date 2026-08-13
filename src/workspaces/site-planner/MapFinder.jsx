@@ -268,7 +268,19 @@ function viewportOf(el) {
   return w > 0 && h > 0 ? { width: w, height: h, measured: true } : { width: 1024, height: 768, measured: false };
 }
 
-export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip }) {
+/* NEW-2 — the one "shared with a team" glyph, at MODULE SCOPE (MODULE-SCOPE-COMPONENTS): it is
+ * drawn in three places now (the list row, the share menu's status line, each team row) and three
+ * inline copies of the same path is how they drift. Inherits `currentColor` so each caller keeps
+ * owning the colour. */
+const ShareGlyph = ({ size = 13 }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+    <circle cx="5.5" cy="6" r="2.4" /><circle cx="11" cy="6.6" r="1.9" />
+    <path d="M1.6 13c0-2.1 1.7-3.4 3.9-3.4S9.4 10.9 9.4 13z" />
+    <path d="M9.7 9.8c1.9.1 3.3 1.2 3.3 3.2h-2.2c0-1.2-.4-2.3-1.1-3.2z" />
+  </svg>
+);
+
+export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip, onViewCenter }) {
   const elRef = useRef(null);
   const mapRef = useRef(null);
   const addrTokRef = useRef(0); // B545: address-search generation — a newer search invalidates an older in-flight one
@@ -314,6 +326,19 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const [addr, setAddr] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  /* NEW-4 — a county outage used to produce a banner and nothing else: the owner was left on a map
+   * that would not give him a lot, with no indication that he could proceed anyway. When a source
+   * reports UNAVAILABLE (as opposed to "no parcel right there", which is a different fact), the
+   * way forward is offered in the same breath — start the plan at this point and draw the boundary
+   * by hand, with the location captured so the plan is never stranded. */
+  const [fallbackOffer, setFallbackOffer] = useState(null); // {at:{lat,lon}} | null
+  const onViewCenterRef = useRef(onViewCenter);
+  onViewCenterRef.current = onViewCenter;
+  const failUnavailable = (msg, at) => {
+    setErr(msg);
+    const c = at || (mapRef.current ? mapRef.current.getCenter() : null);
+    setFallbackOffer(c ? { at: { lat: c.lat, lon: c.lon != null ? c.lon : c.lng } } : null);
+  };
   const [basemap, setBasemap] = useState("esri");
   const [labels, setLabels] = useState(true);
   const [selectMode, setSelectMode] = useState(false); // off = pan only; on = add/remove parcels
@@ -437,7 +462,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         const status = statusOf(site);
         if (statusFilter.size && !statusFilter.has(status)) return;   // honor the chip filter (matches the map)
         if (status === "dead" && !statusFilter.has("dead")) return;   // dead recedes unless filtered to (B365)
-        features.push(...siteToFeatures(site, projectFor(site.origin), { extrudeBuildings: extrude, prefix: [site.site || site.name || "Site"] }));
+        // NEW-2: dimensions + dock doors off, stated by the export rather than read off each saved
+        // site's own View ▾ toggles — a multi-site file must not vary with what someone happened to
+        // have shown on screen when they last saved plan #3.
+        features.push(...siteToFeatures(site, projectFor(site.origin), { extrudeBuildings: extrude, includeDimensions: false, includeDockDoors: false, prefix: [site.site || site.name || "Site"] }));
       });
       selected.forEach((sp, i) => {
         (sp.rings || []).forEach((ring) => {
@@ -472,7 +500,30 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     setShareBusy(false);
     setStatusMenu(null);
     if (!r || !r.ok) { setErr((r && r.error) || "Couldn't update sharing."); return; }
-    if (teamId && r.sites === 0) { setErr("This project isn't in the cloud yet — open it once to sync, then share."); return; }
+    /* NEW-1 — branch on the NAMED outcome, never on a row count. The old test was
+     * `if (teamId && r.sites === 0)` → "This project isn't in the cloud yet", which fired every time
+     * an ALREADY-SHARED project was shared again: that write legitimately changes 0 rows, and 0 rows
+     * changed is not 0 rows existing. It was reported on "8 South" at version 587, shared for weeks.
+     * Only "not-found" may say that now, and on a migrated database that state is reported
+     * explicitly rather than inferred from a zero. */
+    if (r.outcome === "not-found") {
+      setErr("This project isn't in the cloud yet — open it once to sync, then share.");
+      return;
+    }
+    /* NEW-3, LOUD-FAILURE: the RPC re-counts its own group after writing, so a share that reached
+     * only some of a project's plans says so instead of looking like a success. A half-UNSHARE is
+     * the dangerous direction — a teammate keeps access the owner thinks he revoked — so it is
+     * named as still-shared rather than softened. */
+    if (r.mismatched > 0) {
+      setErr(teamId
+        ? `Only part of this project was shared — ${r.mismatched} of ${r.matched} plans didn't take. Try again.`
+        : `Only part of this project was made private — ${r.mismatched} of ${r.matched} plans are STILL shared. Try again.`);
+      onSharedChange && onSharedChange();
+      return;
+    }
+    // A project holding a teammate's plan is shared as far as it can be: your rows moved, theirs are
+    // deliberately left alone. Say that rather than reporting a clean success for a partial one.
+    if (teamId && r.foreign > 0) setErr(`Shared your ${r.matched} of ${r.plans} plans — the rest belong to a teammate and were left as they are.`);
     onSharedChange && onSharedChange();
   };
   // Pipeline counts by status across all sites (for the chips / counts strip).
@@ -531,8 +582,15 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       // math). It has to hold when every GIS endpoint is down, which is exactly when a site
       // falls through to a default — the same reason coloradoRegions.js is network-free.
       setViewState(siteState({ lat: c.lat, lng: c.lng }));
+      // NEW-4 — report the centre up so a blank plan started from the header is born LOCATED at
+      // the spot the owner is looking at, instead of nowhere.
+      onViewCenterRef.current && onViewCenterRef.current({ lat: c.lat, lon: c.lng });
     };
     onMove();
+    // NEW-1 — seed the zoom too, not just the centre. `zoom` starts null and only `zoomend`
+    // wrote it, so before the user's first zoom the Layers panel had no idea what zoom it was
+    // looking at and could not report a gated row as dormant at all.
+    onZoom();
     /* B209502 — WARM THE COUNTY GEOMETRY, THEN ASK AGAIN.
      *
      * `countyForView` is synchronous and answers from whatever it has: before the polygon asset
@@ -1282,7 +1340,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // down), or a primary whose breaker is open, are skipped this click.
     const { candidates, realPrimaries } = resolveCandidates(latlng);
     if (!candidates.length) { setErr("Parcel services are still loading — give it a second and click again."); return; }
-    setErr(""); setBackupNotice(null); setCachedNotice(null);
+    setErr(""); setFallbackOffer(null); setBackupNotice(null); setCachedNotice(null);
 
     // Instant local toggle-off: a click inside an already-highlighted parcel deselects
     // it with zero network round-trip — we already have its geometry (B441).
@@ -1338,11 +1396,14 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         const gap = noParcelSourceNote(countyIdentity(latlng.lat, latlng.lng));
         // "Couldn't reach any parcel server" reads differently from "reached one, but
         // there's no parcel at this exact point" (B245).
-        setErr(res.responded === 0
-          ? "The county parcel server isn't responding right now — try again in a moment, or trace the lot from the Aerial underlay."
-          : gap
-            ? `${gap} You can still trace the lot from the Aerial underlay.`
-            : "No parcel right there — zoom in and click directly on a lot.");
+        /* NEW-4 — an OUTAGE carries the fallback; the other two do not. "No parcel right there" is a
+         * real answer about this point, and a county with no wired source (`gap`) is a coverage fact
+         * — neither is a reason to offer "start the plan here anyway", which exists for the case
+         * where the service that WOULD have answered is down. */
+        if (res.responded === 0) failUnavailable("The county parcel server isn't responding right now — try again in a moment, or start the plan here and draw the boundary yourself.", latlng);
+        else setErr(gap
+          ? `${gap} You can still trace the lot from the Aerial underlay.`
+          : "No parcel right there — zoom in and click directly on a lot.");
         return;
       }
       // The authoritative live answer always wins: drop the optimistic outline and rebuild
@@ -1371,7 +1432,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       }
     } catch (e) {
       if (optKey) rollbackHit(optKey);
-      setErr(humanizeError(e));
+      failUnavailable(humanizeError(e), latlng); // NEW-4 — a thrown lookup is an outage too
     } finally {
       setBusy(false);
     }
@@ -1436,7 +1497,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     const q = addr.trim();
     if (!q) return;
     const tok = ++addrTokRef.current; // B545: claim this search's generation; guard every async setState below
-    setBusy(true); setErr(""); setParcelInfo(null);
+    setBusy(true); setErr(""); setFallbackOffer(null); setParcelInfo(null);
     try {
       const center = mapRef.current ? mapRef.current.getCenter() : null;
       const hit = await geocodeAddress(q, center);
@@ -1446,13 +1507,37 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       mapRef.current.flyTo([hit.lat, hit.lon], 18, { duration: 0.75 });
       await selectParcelAt({ lat: hit.lat, lng: hit.lon }, hit.label, tok); // NEW-2: select + surface parcel info
     } catch (_) {
-      if (tok === addrTokRef.current) setErr("Address search is unavailable right now — pan/zoom the map to your site instead.");
+      if (tok === addrTokRef.current) failUnavailable("Address search is unavailable right now — pan/zoom the map to your site, or start the plan where the map is looking and draw the boundary.");
     } finally {
       if (tok === addrTokRef.current) setBusy(false);
     }
   };
 
   const clearSel = () => { clearHilites(); setSelected([]); setParcelInfo(null); setBackupNotice(null); setCachedNotice(null); };
+
+  /* NEW-4 — THE FALLBACK. Start a plan with no parcel, LOCATED at `at` (or wherever the map is
+   * looking), so the owner can draw the boundary himself and still get the aerial, the flood
+   * layer, contours and the county's rules. This is the whole point of capturing the origin here:
+   * a plan born located can never be stranded, and when the county service comes back the drawn
+   * boundary is already sitting on the right ground.
+   *
+   * The county is resolved best-effort on the same 3s race `planSelected` uses — it is a nicety
+   * (the planner re-resolves it from the origin on load), so an outage never blocks the fallback. */
+  const startBlankHere = async (at) => {
+    const c = at || (mapRef.current ? mapRef.current.getCenter() : null);
+    if (!c) { onSkip && onSkip(); return; }
+    const origin = { lat: c.lat, lon: c.lon != null ? c.lon : c.lng };
+    setErr(""); setFallbackOffer(null);
+    let county = null;
+    try {
+      const ans = await Promise.race([
+        countyAtPoint(origin.lon, origin.lat),
+        new Promise((res) => setTimeout(() => res(null), 3000)),
+      ]);
+      county = ans?.name ? countyKeyForName(ans.name) : null;
+    } catch (_) { /* the planner resolves it from the origin on load */ }
+    onSkip && onSkip({ origin, county, name: parcelInfo?.label || addr.trim() || "Untitled site" });
+  };
   // Always capture the planner underlay from Esri: it supports image `export`
   // (USGS tiles render on the map but its export op returns no image). The
   // boundary aligns to either source, so the planner aerial stays reliable.
@@ -1513,7 +1598,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         {s.teamId && (
           <span title={`Shared with ${teamName(s.teamId)}`} aria-label="Shared with team"
             style={{ flex: "none", color: PAL.accent, display: "grid", placeItems: "center", lineHeight: 0 }}>
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><circle cx="5.5" cy="6" r="2.4" /><circle cx="11" cy="6.6" r="1.9" /><path d="M1.6 13c0-2.1 1.7-3.4 3.9-3.4S9.4 10.9 9.4 13z" /><path d="M9.7 9.8c1.9.1 3.3 1.2 3.3 3.2h-2.2c0-1.2-.4-2.3-1.1-3.2z" /></svg>
+            <ShareGlyph />
           </span>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -1530,7 +1615,15 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           ) : (
             <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textDecoration: t.struck ? "line-through" : "none" }}>{s.site || s.name || "Untitled site"}</div>
           )}
-          <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{STATUS_META[st]?.label || st} · {siteAcres(s) > 0 ? `${siteAcres(s).toFixed(1)} ac` : "no boundary"}</div>
+          {/* NEW-2 — the sharing state is NAMED here, not left to an icon's hover title. The owner
+              has 35 projects, exactly 2 are shared, and he could not tell which: an accent glyph on
+              its own says "something", never "shared, and with whom". This rides the existing
+              metadata line (so it costs no new row and truncates with it) and reads in the accent,
+              because PAL.muted is for inert metadata and this is the answer to his question. */}
+          <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {STATUS_META[st]?.label || st} · {siteAcres(s) > 0 ? `${siteAcres(s).toFixed(1)} ac` : "no boundary"}
+            {s.teamId && <> · <span style={{ color: PAL.accent, fontWeight: 700 }}>Shared with {teamName(s.teamId)}</span></>}
+          </div>
         </div>
         {/* (B168) single-click ✕ delete removed — delete lives in the right-click menu;
             only the non-destructive locate (⊕) stays here. */}
@@ -1707,6 +1800,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             cachedAsOfLabel={parcelInfo.cached ? fmtAsOf(parcelInfo.cached.asOf) : ""}
             onDismiss={() => setParcelInfo(null)}
             onPlan={planSelected}
+            // NEW-4 — the unavailable state offers the fallback instead of dead-ending.
+            onStartBlank={parcelInfo.status === "unavailable" ? () => { const m = mapRef.current; startBlankHere(m ? m.getCenter() : null); setParcelInfo(null); } : null}
           />
           </Suspense></PanelErrorBoundary>
         )}
@@ -1828,15 +1923,27 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                  "not available in Colorado" rather than offered as a toggle that produces an
                  empty map. The view centre is the best state fact the finder has (there is no
                  site here), and an unresolved one hides nothing. */
-              siteState={viewState} />
+              siteState={viewState}
+              /* NEW-1 — the live zoom every row's gate is reported against, and the fix. On this
+                 surface the map is the interactive one, so `setZoom` IS the whole action. */
+              mapZoom={zoom}
+              onZoomTo={(z) => { try { mapRef.current && mapRef.current.setZoom(z); } catch (_) {} }} />
           </div>
           </>)}
         </div>
 
         {/* error toast (bottom-left) — surfaced only when there's an error */}
         {err && (
-          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45, pointerEvents: "none" }}>
+          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45, pointerEvents: fallbackOffer ? "auto" : "none" }}>
             {err}
+            {/* NEW-4 — the way forward rides WITH the bad news. Only on a genuine source outage:
+                "no parcel right there" is an answer, not an outage, and gets no button. */}
+            {fallbackOffer && (
+              <button onClick={() => startBlankHere(fallbackOffer.at)} data-testid="map-start-blank-here"
+                style={{ display: "block", width: "100%", marginTop: 8, height: 30, borderRadius: 6, border: "none", background: PAL.accent, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                Start the plan here &amp; draw the boundary →
+              </button>
+            )}
           </div>
         )}
         {/* statewide-backup notice (bottom-left) — the clicked lot was answered by the
@@ -1904,23 +2011,44 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               return (
                 <>
                   <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "4px 0" }} />
-                  <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, padding: "4px 12px 2px" }}>Share with team</div>
+                  {/* NEW-2 — THE MENU STATES ITS CURRENT STATE BEFORE IT OFFERS AN ACTION. The owner's
+                      report was that after sharing, "options still pop up to share it, so it makes it
+                      seem like it hasn't been." Two causes: the ✓ was keyed on `s.teamId`, which was
+                      always blank (the mirror bug above), and even with it lit, a list of team names
+                      reads as an invitation rather than as a state. So the state is now a SENTENCE,
+                      and the actions sit under it. */}
+                  <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, padding: "4px 12px 2px" }}>
+                    {s.teamId ? "Sharing" : "Share with team"}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "1px 12px 5px", fontSize: 12,
+                    color: s.teamId ? PAL.accent : PAL.muted, fontWeight: s.teamId ? 700 : 500 }}>
+                    {s.teamId && <ShareGlyph size={12} />}
+                    <span style={{ flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {s.teamId ? `Shared with ${teamName(s.teamId)}` : "Private — only you can see this"}
+                    </span>
+                  </div>
                   {myTeams.map((tm) => {
                     const on = s.teamId === tm.id;
                     return (
                       <button key={tm.id} disabled={shareBusy} onClick={() => doShare(s, on ? null : tm.id)}
+                        title={on ? `Stop sharing with ${tm.name}` : `Share this project with ${tm.name}`}
                         style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "7px 12px", border: "none",
                           background: on ? "#fbf3ee" : "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: on ? 700 : 500 }}>
                         <span style={{ width: 15, height: 15, flex: "none", display: "grid", placeItems: "center", color: PAL.accent, lineHeight: 0 }}>
-                          <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><circle cx="5.5" cy="6" r="2.4" /><circle cx="11" cy="6.6" r="1.9" /><path d="M1.6 13c0-2.1 1.7-3.4 3.9-3.4S9.4 10.9 9.4 13z" /><path d="M9.7 9.8c1.9.1 3.3 1.2 3.3 3.2h-2.2c0-1.2-.4-2.3-1.1-3.2z" /></svg>
+                          <ShareGlyph />
                         </span>
                         <span style={{ flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tm.name}</span>
-                        {on && <span style={{ color: PAL.accent, fontWeight: 800 }}>✓</span>}
+                        {/* An already-shared team offers the REVERSE action, and says so. Without this
+                            the row is indistinguishable from the offer to share. */}
+                        {on
+                          ? <span style={{ color: PAL.muted, fontWeight: 600, fontSize: 11, flex: "none" }}>✓ Unshare</span>
+                          : <span style={{ color: PAL.muted, fontWeight: 600, fontSize: 11, flex: "none" }}>Share</span>}
                       </button>
                     );
                   })}
                   {s.teamId && (
                     <button disabled={shareBusy} onClick={() => doShare(s, null)}
+                      title="Pull this project back to private — teammates lose access"
                       style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "7px 12px", border: "none",
                         background: "transparent", color: PAL.muted, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600 }}>
                       <span style={{ width: 15, flex: "none" }} />

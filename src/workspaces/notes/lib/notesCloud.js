@@ -54,6 +54,8 @@
  * deleted note comes back from the dead.
  */
 import { supabase } from "../../site-planner/lib/supabase.js";
+import { tombstoneIds, withTombstones } from "./notesModel.js";
+import { pruneEmptyAnchors } from "./notesAnchorPrune.js";
 
 /** The app's ONE Supabase client, handed to the store so every transport function below can
  *  still take its client as a parameter (and therefore still be testable against a fake).
@@ -90,6 +92,10 @@ export const emptySyncState = () => ({ treeRev: null, treeDirty: false, pages: {
  * path is "the server row wins on seed" and never reaches this function. When it does, the
  * rules are, in order:
  *
+ *   0. A PURGE ON EITHER SIDE WINS OVER EVERYTHING, including a copy that still has the entry
+ *      or the page. It is the only rule that can beat a union, and it exists because a
+ *      deletion is otherwise an ABSENCE and absence always loses. See rule 0 in the body, and
+ *      `tombstoneIds` in the model for the measured resurrection that produced it.
  *   1. A DELETE ON EITHER SIDE WINS. The union of both bins IS the merged bin, and any live
  *      node whose id sits in that union is lifted out of the live tree. This is the
  *      conservative direction and it is safe by construction: a "lost" restore leaves the
@@ -103,24 +109,121 @@ export const emptySyncState = () => ({ treeRev: null, treeDirty: false, pages: {
  *      Page timestamps take the LATER `updatedAt` and the EARLIER `createdAt`, which is the
  *      honest reading of both regardless of which side is "winning".
  *   4. A PAGE MOVED ON BOTH DEVICES keeps the LOCAL placement and appears exactly once.
+ *   5. A DELETE ONLY TAKES WHAT IT ACTUALLY NAMED. See below — this is the rule that was
+ *      missing, and its absence is what made a real note unreachable.
+ *
+ * ⛔ RULE 5, AND WHY IT IS NOT A REFINEMENT OF RULE 1 BUT A CORRECTION OF IT (NEW-1).
+ *
+ * THE BUG, reproduced in four lines and then found in the owner's live account. Device A adds
+ * a subpage under a page and keeps typing in it. Device B — which has never seen that subpage
+ * — bins the parent. `deleteNode` stamps the entry with the cascade IT could see, so the
+ * entry names the parent and the children B knew about, and NOT A's new one. The merge then
+ * hit the parent, saw its id in `deleted`, and returned **before recursing** — so A's subpage
+ * was neither kept live nor carried into the bin. It was dropped on the floor, while its BODY
+ * (a different storage key, untouched by any of this) stayed perfectly healthy.
+ *
+ * That is exactly the failure that reached the owner: `deleted_at` NULL, `purged_at` NULL, 215
+ * revisions of real work, no node in the local tree, no node in the cloud tree, and nothing in
+ * the bin naming it. Not destroyed — UNREACHABLE, which is worse, because nothing was
+ * available to say so.
+ *
+ * THE FIX IS A DEFINITION, NOT A PATCH: **a delete's scope is exactly the set of ids its entry
+ * names.** That set is not a guess — `deleteNode` computes the full cascade at delete time and
+ * stamps it on the entry precisely so the scope is a fact rather than a re-derivation. A page
+ * outside that set was not deleted by anybody: no user ever chose it, and the device that did
+ * the deleting had never heard of it. So it is RESCUED — kept live, lifted to the top level of
+ * the project its branch belonged to, and REPORTED through `onRescue` so the workspace can say
+ * out loud that it moved.
+ *
+ * ⛔ THE ALTERNATIVE WAS CONSIDERED AND REFUSED: sweeping the unknown descendants into the bin
+ * entry alongside their parent. It keeps rule 1 tidier, and it is wrong — the bin purges for
+ * real at 30 days, so that choice quietly destroys work whose author never deleted it and
+ * never saw a prompt. TOMBSTONE-DELETES exists to stop a deleted note coming BACK; it is not a
+ * licence to destroy one nobody deleted. Rule 1 is untouched for every id an entry names.
  */
-export function mergeTrees(local, server) {
+export function mergeTrees(local, server, { onRescue } = {}) {
   const L = local && typeof local === "object" ? local : { pages: [], trash: [] };
   const S = server && typeof server === "object" ? server : { pages: [], trash: [] };
+
+  /* ⛔ RULE 0, AND IT RUNS BEFORE EVERYTHING ELSE: A PURGE WINS A UNION.
+   *
+   * THE BUG, measured on the owner's account with revisions. He emptied the bin — cloud tree
+   * rev 991, one entry left. A tab open since rev 966 still held all 23 entries and had
+   * unpushed edits, so its reload took THIS path. The union brought all 23 back, and the stale
+   * tab then pushed the resurrection up as rev 992 and overwrote the good state. **Emptying
+   * the bin could not stick while any other window had not yet seen it**, and the same is true
+   * of any purge from anywhere.
+   *
+   * The cause is structural rather than a slip: in a union an ADDITION wins and a DELETION is
+   * the ABSENCE of an entry, and absence loses to any copy that still has one. So the deletion
+   * is made into a positive fact — a tombstone, carried in the tree itself, merged like
+   * everything else and honoured before any of the rules below. This is TOMBSTONE-DELETES,
+   * which the rest of the product has had since B276.
+   *
+   * It is deliberately the FIRST thing that happens: rule 1 lifts a live node out because a
+   * bin entry names it, and a resurrected entry would do exactly that to a page somebody has
+   * since restored. */
+  const tombs = new Set([...tombstoneIds(L), ...tombstoneIds(S)]);
+  const mergedTombs = [
+    ...(Array.isArray(L.tombs) ? L.tombs : []),
+    ...(Array.isArray(S.tombs) ? S.tombs : []),
+  ];
+
+  /** A bin entry with every purged page taken out of it, or `null` when nothing is left.
+   *
+   * ⛔ THIS IS THE HALF THE FUZZ FOUND, and no hand-written case would have. Two devices that
+   * delete the SAME note mint two DIFFERENT entry ids, so purging one device's entry
+   * tombstones its id and the OTHER device's entry sails through the union untouched — still
+   * naming pages whose bytes are destroyed. That is precisely the zombie state on his account:
+   * bin rows offering to restore notes whose content no longer exists anywhere. So an entry is
+   * filtered by the ids it NAMES, not only by its own id. */
+  const pruneEntry = (e) => {
+    const pageIds = (e.pageIds || []).filter((id) => !tombs.has(String(id)));
+    if ((e.pageIds || []).length && !pageIds.length) return null;   // nothing recoverable left
+    if (pageIds.length === (e.pageIds || []).length && !tombs.has(String(e?.node?.id))) return e;
+    if (tombs.has(String(e?.node?.id))) return null;                // its own root is gone
+    const strip = (n) => (!n || tombs.has(String(n.id))
+      ? null
+      : { ...n, pages: (n.pages || []).map(strip).filter(Boolean) });
+    return { ...e, pageIds, node: strip(e.node) };
+  };
 
   const trash = [];
   const trashIds = new Set();
   for (const e of [...(L.trash || []), ...(S.trash || [])]) {
     if (!e || !e.id || trashIds.has(e.id)) continue;
+    if (tombs.has(String(e.id))) continue;                       // purged for real (rule 0)
+    const kept = pruneEntry(e);
+    if (!kept) continue;
     trashIds.add(e.id);
-    trash.push(e);
+    trash.push(kept);
   }
-  // Every page id any bin claims. A live copy on the other side loses to it (rule 1).
+  // Every page id any bin ACTUALLY NAMES. A live copy on the other side loses to it (rule 1);
+  // a page this set does not name was deleted by nobody and is rescued (rule 5).
   const deleted = new Set();
   for (const e of trash) {
     if (e?.node?.id) deleted.add(e.node.id);
     for (const pid of e?.pageIds || []) deleted.add(pid);
   }
+
+  /* ⛔ THE OTHER SIDE'S COPY OF A PAGE IS FOUND BY ID, ANYWHERE IN ITS TREE — NEVER BY
+   * POSITION (NEW-1, the second hole). The old walk looked the counterpart up among the
+   * SIBLINGS at the same spot, so the moment a page was re-parented on one device, the merge
+   * stopped being able to see the OTHER device's copy of it — and every child that copy had
+   * gained was dropped. Found by a randomised sweep, not by reading: two devices, no bins
+   * involved at all, one `move` on one side and one `add` on the other, and a brand-new page
+   * disappeared. These indexes make "the same page" a question about identity rather than
+   * about where it happens to sit. */
+  const indexTree = (nodes, map) => {
+    for (const n of nodes || []) {
+      if (!n?.id) continue;
+      if (!map.has(n.id)) map.set(n.id, n);
+      indexTree(n.pages, map);
+    }
+    return map;
+  };
+  const aIndex = indexTree(L.pages, new Map());
+  const bIndex = indexTree(S.pages, new Map());
 
   /* ONE RECURSIVE MERGE, because there is now ONE node type (B1420). The old model needed a
    * merge per level — pages inside sections inside notebooks — and each level was its own
@@ -129,30 +232,66 @@ export function mergeTrees(local, server) {
    * page that was re-parented on one device must appear EXACTLY once, in the local
    * placement (rule 4), never in both its old and its new home. */
   const seen = new Set();
-  const mergeList = (a = [], b = []) => {
+  const rescued = [];
+
+  /** Walk one side's list. `fromServer` marks a list that came from the SERVER tree — every id
+   *  the LOCAL tree also holds is skipped there, because local owns the placement (rule 4)
+   *  whether or not the local walk has reached it yet. Ordering must not decide that. */
+  const walk = (nodes, projectId, fromServer) => {
     const out = [];
-    const byId = new Map((b || []).filter(Boolean).map((p) => [p.id, p]));
-    const push = (pg, other) => {
-      if (!pg?.id || deleted.has(pg.id) || seen.has(pg.id)) return;
+    for (const pg of nodes || []) {
+      if (!pg?.id || seen.has(pg.id)) continue;
+      if (fromServer && aIndex.has(pg.id)) continue;          // local placement wins (rule 4)
       seen.add(pg.id);
+      // A node's own project when it has one (a root), otherwise its branch's — which is what
+      // a rescued page needs in order to land somewhere real rather than nowhere.
+      const branchProject = pg.projectId !== undefined ? (pg.projectId ?? null) : projectId;
+      const other = (fromServer ? aIndex : bIndex).get(pg.id) || null;
+      // The children are the UNION of both sides' children of THIS page, local ones first.
+      const kids = fromServer
+        ? [...walk(other?.pages || [], branchProject, false), ...walk(pg.pages || [], branchProject, true)]
+        : [...walk(pg.pages || [], branchProject, false), ...walk(other?.pages || [], branchProject, true)];
+
+      /* ⛔ RULE 0 ON THE LIVE SIDE, AND IT SHARES RULE 5'S BODY DELIBERATELY. A page whose
+       * bytes were destroyed may not come back as a node with nothing behind it — but it is
+       * walked, not skipped, because the other device may have added a child under it AFTER
+       * the purge, and that child is a page nobody deleted. Skipping early here would be
+       * B342992's exact defect in a new costume: a delete taking more than it named. */
+      if (deleted.has(pg.id) || tombs.has(String(pg.id))) {
+        /* ⛔ RULE 5. This node really was deleted, so it goes — but `kids` are the survivors
+         * the merge just built, and every one of them is a page NO bin entry names. Lift them
+         * to the top level of the branch's project rather than letting the early return take
+         * them with it. This is the line whose absence orphaned a real note. */
+        for (const k of kids) rescued.push({ ...k, projectId: branchProject == null ? null : String(branchProject) });
+        continue;
+      }
       const merged = other
         ? { ...pg, updatedAt: laterOf(pg.updatedAt, other.updatedAt), createdAt: earlierOf(pg.createdAt, other.createdAt) }
         : { ...pg };
-      merged.pages = mergeList(pg.pages || [], other?.pages || []);
+      merged.pages = kids;
       out.push(merged);
-    };
-    for (const pg of a || []) push(pg, byId.get(pg?.id));
-    const aIds = new Set((a || []).filter(Boolean).map((p) => p.id));
-    for (const pg of b || []) if (pg?.id && !aIds.has(pg.id)) push(pg, null);
+    }
     return out;
   };
 
   // Roots also carry `projectId`, and rule 3 (the local title wins) covers it: this function
   // is only reached when local has unpushed changes, so a re-filing done here is the one
   // with something to say. A root only the server has keeps the server's project.
-  const pages = mergeList(L.pages || [], S.pages || []);
+  const pages = [...walk(L.pages || [], null, false), ...walk(S.pages || [], null, true)];
 
-  return { v: L.v || S.v || 3, pages, trash };
+  // Rescued pages go at the END of the top level, so nothing that was already there moves.
+  if (rescued.length && typeof onRescue === "function") {
+    try { onRescue(rescued.map((p) => ({ pageId: p.id, title: p.title, projectId: p.projectId ?? null }))); }
+    catch (_) { /* a bad listener must not lose the pages it was told about */ }
+  }
+  return {
+    v: L.v || S.v || 3,
+    pages: [...pages, ...rescued],
+    trash,
+    // The ledger merges like everything else, deduped and aged out by the model's own rule —
+    // a tombstone that reached only one device has to reach the other one.
+    tombs: withTombstones({ tombs: mergedTombs }, []).tombs,
+  };
 }
 
 const laterOf = (a, b) => (Number.isFinite(a) && Number.isFinite(b) ? Math.max(a, b) : (Number.isFinite(a) ? a : (Number.isFinite(b) ? b : null)));
@@ -239,6 +378,21 @@ export function planPageSeed({ index = [], state = emptySyncState(), localIds = 
 export function judgeConflict({ localDoc, serverDoc } = {}) {
   if (sameDoc(localDoc, serverDoc)) return { silent: true, why: "identical" };
   if (isEmptyDoc(localDoc) && !isEmptyDoc(serverDoc)) return { silent: true, why: "nothing-local" };
+  /* ⛔ AN EMPTY BLOCK IS NOT THE SUBSTANCE OF A DISAGREEMENT (the third finding of the live
+   * pass). A conflict prompt appeared on a note the owner had not touched: *"“Load Study” also
+   * changed in another of your windows"*. It was real, and it was a choice with nothing in it —
+   * the one-time clean-up had removed ten empty blocks here while the other window still had
+   * them, so the two copies differed by exactly the litter the app itself had decided is
+   * worthless and is deleting everywhere. Interrupting somebody to pick between "the copy with
+   * ten invisible empty boxes" and "the copy without" is not a decision.
+   *
+   * So the comparison discounts them — the same reasoning `canonNode` already applies to a null
+   * attribute: the difference between *the bytes differ* and *the note differs*. The CLEAN copy
+   * is what survives, and the caller pushes it, so the litter leaves the account rather than
+   * being quietly kept. */
+  if (sameDoc(pruneEmptyAnchors(localDoc).doc, pruneEmptyAnchors(serverDoc).doc)) {
+    return { silent: true, why: "litter-only" };
+  }
   return { silent: false, why: "diverged" };
 }
 
@@ -535,18 +689,27 @@ export async function fetchImageIndex(client) {
   return { ok: true, index: (data || []).map((r) => ({ id: r.id, pageId: r.page_id || null, deleted: !!r.deleted_at })) };
 }
 
-export async function pushImage(client, uid, { id, pageId, dataUrl, mime = "", w = 0, h = 0, bytes = 0 }) {
+export async function pushImage(client, uid, { id, pageId, dataUrl, mime = "", w = 0, h = 0, bytes = 0, kind = "image", name = "" }) {
   const blob = dataUrlToBlob(dataUrl);
-  if (!blob) return { ok: false, error: "the picture could not be read back for upload" };
+  const what = kind === "file" ? "file" : "picture";
+  if (!blob) return { ok: false, error: `the ${what} could not be read back for upload` };
   const type = blob.type || mime || "";
-  // The bucket's allow-list, checked HERE so an unsupported picture is refused by name
-  // instead of coming back as an opaque 400 nobody can act on.
-  if (!IMAGE_MIME_ALLOWED.includes(type)) return { ok: false, error: `pictures of type ${type || "unknown"} cannot be stored in the cloud` };
+  /* The bucket's allow-list, checked HERE so an unsupported picture is refused by name
+   * instead of coming back as an opaque 400 nobody can act on.
+   *
+   * ⛔ IT APPLIES TO PICTURES ONLY (NEW-5). An ATTACHMENT is any file by definition — a
+   * DWG, an XLSX, whatever a consultant sends — and the bucket's own mime restriction was
+   * lifted for exactly that in db/notes_attachments.sql. Keeping the check for images is
+   * still worth it: a picture with an odd type is a mistake worth naming, and this is the
+   * only place that can name it before the network does. */
+  if (kind !== "file" && !IMAGE_MIME_ALLOWED.includes(type)) {
+    return { ok: false, error: `pictures of type ${type || "unknown"} cannot be stored in the cloud` };
+  }
   const path = imagePath(uid, id);
-  const up = await client.storage.from(IMAGE_BUCKET).upload(path, blob, { contentType: type, upsert: true });
+  const up = await client.storage.from(IMAGE_BUCKET).upload(path, blob, { contentType: type || "application/octet-stream", upsert: true });
   if (up.error) return { ok: false, error: up.error.message };
   const { error } = await client.from(IMAGE_TABLE).upsert(
-    { id, page_id: pageId || null, path, mime: type, bytes, width: w, height: h, deleted_at: null },
+    { id, page_id: pageId || null, path, mime: type, bytes, width: w, height: h, kind, name: name || null, deleted_at: null },
     { onConflict: "user_id,id" },
   );
   if (error) return { ok: false, error: error.message };

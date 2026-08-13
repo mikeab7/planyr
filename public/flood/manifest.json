@@ -1,0 +1,151 @@
+{
+  "generatedAt": "2026-08-09T03:22:29.736Z",
+  "source": {
+    "service": "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer",
+    "layerId": 28,
+    "layerName": "Flood Hazard Zones (S_Fld_Haz_Ar)",
+    "panelLayerId": 3,
+    "provider": "FEMA (National Flood Hazard Layer)"
+  },
+  "fields": [
+    "FLD_ZONE",
+    "ZONE_SUBTY",
+    "SFHA_TF",
+    "STATIC_BFE"
+  ],
+  "dropRule": "Unshaded Zone X (areas of minimal flood hazard) is dropped — FEMA's own renderer paints nothing for it, so absence of a polygon means outside the mapped floodplain. Shaded Zone X (the 0.2% annual-chance band) is KEPT: it drives real rules a developer is held to.",
+  "tilePyramid": {
+    "minZoom": 8,
+    "maxZoom": 13,
+    "overzoomBeyondMax": true
+  },
+  "builtWith": "tippecanoe v2.49.0",
+  "counties": {
+    "co_larimer": {
+      "label": "Larimer County, CO",
+      "state": "CO",
+      "fips": "08069",
+      "archive": "flood-co-larimer.pmtiles",
+      "bytes": 900748,
+      "nfhlEffectiveDate": "2021-01-15",
+      "nfhlEffectiveDateOldestPanel": "2006-12-19",
+      "dfirmIds": [
+        "08069C"
+      ],
+      "featuresPublished": 3072,
+      "featuresFetched": 3072,
+      "featuresKept": 2788,
+      "droppedByVariant": {
+        "unshaded-x": 284
+      },
+      "minZoom": 8,
+      "maxZoom": 13,
+      "builtAt": "2026-08-09T03:16:08.469Z"
+    },
+    "harris": {
+      "label": "Harris County, TX",
+      "state": "TX",
+      "fips": "48201",
+      "archive": "flood-tx-harris.pmtiles",
+      "bytes": 6246238,
+      "nfhlEffectiveDate": "2019-11-15",
+      "nfhlEffectiveDateOldestPanel": "2007-06-18",
+      "dfirmIds": [
+        "48201C"
+      ],
+      "featuresPublished": 10802,
+      "featuresFetched": 10802,
+      "featuresKept": 9585,
+      "droppedByVariant": {
+        "unshaded-x": 1217
+      },
+      "minZoom": 8,
+      "maxZoom": 13,
+      "builtAt": "2026-08-09T03:20:20.406Z"
+    },
+    "waller": {
+      "label": "Waller County, TX",
+      "state": "TX",
+      "fips": "48473",
+      "archive": "flood-tx-waller.pmtiles",
+      "bytes": 719659,
+      "nfhlEffectiveDate": "2019-05-16",
+      "nfhlEffectiveDateOldestPanel": "2009-02-18",
+      "dfirmIds": [
+        "48473C"
+      ],
+      "featuresPublished": 1639,
+      "featuresFetched": 1639,
+      "featuresKept": 1510,
+      "droppedByVariant": {
+        "unshaded-x": 129
+      },
+      "minZoom": 8,
+      "maxZoom": 13,
+      "builtAt": "2026-08-09T03:22:29.736Z"
+    },
+    "chambers": {
+      "label": "Chambers County, TX",
+      "state": "TX",
+      "fips": "48071",
+      "archive": "flood-tx-chambers.pmtiles",
+      "bytes": 1739990,
+      "nfhlEffectiveDate": "2018-01-19",
+      "nfhlEffectiveDateOldestPanel": "2015-05-04",
+      "dfirmIds": [
+        "48071C"
+      ],
+      "featuresPublished": 4022,
+      "featuresFetched": 4022,
+      "featuresKept": 2834,
+      "droppedByVariant": {
+        "unshaded-x": 1188
+      },
+      "minZoom": 8,
+      "maxZoom": 13,
+      "builtAt": "2026-08-09T03:22:29.736Z"
+    },
+    "fortbend": {
+      "label": "Fort Bend County, TX",
+      "state": "TX",
+      "fips": "48157",
+      "archive": "flood-tx-fortbend.pmtiles",
+      "bytes": 1469898,
+      "nfhlEffectiveDate": "2021-01-29",
+      "nfhlEffectiveDateOldestPanel": "2014-04-02",
+      "dfirmIds": [
+        "48157C"
+      ],
+      "featuresPublished": 2311,
+      "featuresFetched": 2311,
+      "featuresKept": 1749,
+      "droppedByVariant": {
+        "unshaded-x": 562
+      },
+      "minZoom": 8,
+      "maxZoom": 13,
+      "builtAt": "2026-08-09T03:22:29.736Z"
+    },
+    "co_adams": {
+      "label": "Adams County, CO",
+      "state": "CO",
+      "fips": "08001",
+      "archive": "flood-co-adams.pmtiles",
+      "bytes": 665070,
+      "nfhlEffectiveDate": "2021-12-02",
+      "nfhlEffectiveDateOldestPanel": "2007-03-05",
+      "dfirmIds": [
+        "08001C"
+      ],
+      "featuresPublished": 2006,
+      "featuresFetched": 2006,
+      "featuresKept": 1638,
+      "droppedByVariant": {
+        "unshaded-x": 368
+      },
+      "minZoom": 8,
+      "maxZoom": 13,
+      "builtAt": "2026-08-09T03:22:29.736Z"
+    }
+  }
+}

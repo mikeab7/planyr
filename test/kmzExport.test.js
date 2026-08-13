@@ -1,7 +1,12 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   crc32, zipStore, xmlEscape, buildKml, buildKmz, siteToFeatures, elToRingFeet, kmzFilename, KMZ_MIME,
 } from "../src/workspaces/site-planner/lib/kmzExport.js";
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const enc = (s) => new TextEncoder().encode(s);
 const dec = (bytes) => new TextDecoder().decode(bytes);
@@ -134,10 +139,42 @@ describe("siteToFeatures — layer mapping + reprojection", () => {
     const b = f.find((x) => x.folder[0] === "Boundary");
     expect(b.rings[0][0]).toEqual([1000, -2000]); // (0,0) → (+1000,-2000)
   });
-  it("emits dock-door POINT features for a building (default cross-dock)", () => {
+  /* NEW-2 — dock doors: OFF by default, a RUN per side when asked for, and never decided by a
+   * canvas display toggle. On the owner's Bain plan (five buildings, several hundred doors) the old
+   * behaviour opened Google Earth under a blanket of pins. */
+  it("emits NO dock-door features by default — the includeDimensions precedent", () => {
     const f = siteToFeatures(model, ident, {});
-    const doors = f.filter((x) => x.geom === "point" && x.folder.includes("Dock doors"));
-    expect(doors.length).toBeGreaterThan(0);
+    expect(f.filter((x) => x.folder.includes("Dock doors")).length).toBe(0);
+    expect(f.some((x) => x.geom === "point")).toBe(false);
+  });
+  it("MUTATION CHECK: the pre-fix rule would have emitted them here, and a pin per door", () => {
+    // Verbatim pre-fix gate + geometry: `settings.showDocks !== false` (absent ⇒ on) and a POINT
+    // per door. If this ever agrees with the shipped behaviour above, the guard is guarding nothing.
+    const preFixOn = model.settings.showDocks !== false;
+    expect(preFixOn).toBe(true);
+    const runs = siteToFeatures(model, ident, { includeDockDoors: true }).filter((x) => x.folder.includes("Dock doors"));
+    const doorsThatWouldHaveBeenPins = runs.reduce((n, r) => n + Number(/— (\d+) @/.exec(r.name)[1]), 0);
+    expect(doorsThatWouldHaveBeenPins).toBeGreaterThan(runs.length); // many doors, few runs
+  });
+  it("when asked for, emits ONE LINE per dock side — named with the count and the o.c.", () => {
+    const f = siteToFeatures(model, ident, { includeDockDoors: true });
+    const runs = f.filter((x) => x.folder.includes("Dock doors"));
+    expect(runs.length).toBeGreaterThan(0);
+    expect(runs.length).toBeLessThanOrEqual(4);          // at most one per wall of a box building
+    for (const r of runs) {
+      expect(r.geom).toBe("line");
+      expect(r.coords.length).toBe(2);
+      expect(r.coords[0]).not.toEqual(r.coords[1]);      // a real run, never a degenerate point
+      expect(r.name).toMatch(/^Dock doors — \d+ @ \d+(\.\d+)?′ o\.c\.$/);
+    }
+  });
+  it("⛔ THE CLASS: the canvas display toggle no longer decides — showDocks is inert either way", () => {
+    const on = (s) => ({ ...model, settings: { ...model.settings, ...s } });
+    const count = (m, o) => siteToFeatures(m, ident, o).filter((x) => x.folder.includes("Dock doors")).length;
+    expect(count(on({ showDocks: true }), {})).toBe(0);              // shown on canvas → still out
+    expect(count(on({ showDocks: false }), { includeDockDoors: true }))
+      .toBe(count(on({ showDocks: true }), { includeDockDoors: true })); // hidden on canvas → still in
+    expect(count(on({ showDocks: false }), { includeDockDoors: true })).toBeGreaterThan(0);
   });
   it("includes dimension lines only when asked", () => {
     const m2 = { ...model, measures: [{ mode: "line", pts: [{ x: 0, y: 0 }, { x: 50, y: 0 }] }] };
@@ -185,5 +222,57 @@ describe("buildKmz + kmzFilename", () => {
   });
   it("exposes the correct KMZ MIME type", () => {
     expect(KMZ_MIME).toBe("application/vnd.google-earth.kmz");
+  });
+});
+
+/* ⛔ NEW-2 (b) — THE COUPLING IS THE CLASS, THE DOCK DOORS WERE THE INSTANCE.
+ *
+ * The defect was not "dock doors are on"; it was that a CANVAS DISPLAY PREFERENCE decided what went
+ * into a file built for a different audience. So the guard is the class, not the instance: no module
+ * that builds an export FROM THE MODEL may read one of the View ▾ toggles.
+ *
+ * The audit that produced this list (2026-08-11, every export path in the workspace):
+ *   • `kmzExport.js`      — the instance. `settings.showDocks` gated the dock doors. FIXED.
+ *   • `printSheet.js` · `imagePdf.js` · `overlayVectorSvg.js` · `sheetFurnitureLayout.js` ·
+ *     `exportStyle.js` · `exportLabelScale.js` · `measureSheet.js` — clean, and pinned clean here.
+ *   • `exportSheet.js`'s PDF/PNG path is DELIBERATELY excluded and is NOT the same defect: it
+ *     CLONES the live `<svg>`, so it inherits every display toggle by construction. That artifact is
+ *     the drawing on paper for the same audience, and the user sets those toggles while looking at
+ *     the very drawing they are printing — inheriting them there is the intent, not an accident.
+ *     (`measureSheet.js` is where that path's own rule lives: an export is a document, not a
+ *     screenshot, so ZOOM gates are lifted on the sheet while display toggles are honoured.)
+ *   • `exportJSON` writes `settings` wholesale — a save file that round-trips, not a decision.
+ */
+describe("NEW-2 — no model-built export reads a canvas display toggle", () => {
+  const DISPLAY_ONLY = ["showDocks", "showGrid", "showDims", "showAreas", "showSetback", "parcelSelect"];
+  const MODEL_BUILT_EXPORTS = [
+    "kmzExport.js", "printSheet.js", "imagePdf.js", "overlayVectorSvg.js",
+    "sheetFurnitureLayout.js", "exportStyle.js", "exportLabelScale.js", "measureSheet.js",
+  ];
+  const LIB = join(ROOT, "src/workspaces/site-planner/lib");
+  const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+  for (const file of MODEL_BUILT_EXPORTS) {
+    it(`${file} decides its own contents`, () => {
+      const src = strip(readFileSync(join(LIB, file), "utf8"));
+      for (const key of DISPLAY_ONLY) {
+        expect(src, `${file} reads the View ▾ toggle "${key}"`).not.toContain(key);
+      }
+      // `settings.snap` / `settings.gridSize` are drafting aids — same class, different shape.
+      expect(src).not.toMatch(/settings\.(snap|gridSize)\b/);
+    });
+  }
+
+  it("the KMZ's content flags are all opts with a stated default, and all default OFF", () => {
+    const src = readFileSync(join(LIB, "kmzExport.js"), "utf8");
+    expect(src).toMatch(/extrudeBuildings = false, includeDimensions = false, includeDockDoors = false/);
+  });
+
+  it("both KMZ call sites state the decision rather than defaulting into it", () => {
+    const planner = readFileSync(join(ROOT, "src/workspaces/site-planner/lib/exportSheet.js"), "utf8");
+    const finder = readFileSync(join(ROOT, "src/workspaces/site-planner/MapFinder.jsx"), "utf8");
+    for (const [name, src] of [["exportSheet.js", planner], ["MapFinder.jsx", finder]]) {
+      expect(src, name).toContain("includeDimensions: false, includeDockDoors: false");
+    }
   });
 });

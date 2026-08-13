@@ -381,9 +381,15 @@ describe("NEW-1 — F goes to REAL fullscreen, and the header follows the docume
     expect(header).toContain("const req = el && (el.requestFullscreen || el.webkitRequestFullscreen);");
   });
 
-  it("a REFUSED or unsupported request falls back to hiding the chrome, never to doing nothing", () => {
+  /* B1173(×2) AMENDED THIS ONE. The old assertion required the chrome-hide FALLBACK — a refused
+     request still hid the header, so the keypress did something. With the header now staying put
+     in fullscreen there is nothing for that fallback to do, and keeping it would have been a
+     keypress that visibly changed nothing. The obligation it encoded — never a silent no-op —
+     is unchanged and is now met by a notice. */
+  it("a REFUSED or unsupported request SAYS SO, never does nothing", () => {
     expect(header).toContain('if (!req) return Promise.reject(new Error("fullscreen-unsupported"));');
-    expect(header).toContain("requestFs().catch(() => { nativeFsRef.current = false; setFullscreen(true); });");
+    expect(header).toContain("setFsNotice(\"Your browser wouldn't allow full screen here.\")");
+    expect(header.includes("requestFs().catch(() => { nativeFsRef.current = false; setFullscreen(true); });")).toBe(false);
   });
 
   it("the header state is DERIVED from the document's real fullscreen state", () => {
@@ -400,15 +406,16 @@ describe("NEW-1 — F goes to REAL fullscreen, and the header follows the docume
     expect(header.includes("requestFs().then(() => setFullscreen(true))")).toBe(false);
   });
 
-  it("Esc is not fought: the browser consumes it in real fullscreen, and fullscreenchange restores the header", () => {
-    expect(header).toContain('if (e.key === "Escape" && !nativeFsRef.current) setFullscreen(false);');
-    expect(header.includes('if (e.key === "Escape") setFullscreen(false);')).toBe(false);
+  /* B1173(×2): Esc was only ever the app's job in the chrome-hide fallback, which is gone. In the
+     one mode that remains the browser owns Esc outright, so the handler must not touch it at all —
+     acting here as well would be a second toggle over the top of `fullscreenchange`. */
+  it("Esc is not fought AT ALL: the browser consumes it and fullscreenchange reports it", () => {
+    expect(header.includes('e.key === "Escape"')).toBe(false);
   });
 
-  it("the exit button exits the BROWSER's fullscreen, not just the chrome-hide", () => {
+  it("the toggle exits the BROWSER's fullscreen — there is no other mode to leave", () => {
     expect(header).toContain("const ex = document.exitFullscreen || document.webkitExitFullscreen;");
-    expect(header).toContain("onClick={leaveFullscreen}");
-    expect(header).toContain("if (nativeFsRef.current) { exitFs(); return; }");
+    expect(header).toContain("if (fullscreenRef.current) { exitFs(); return; }");
   });
 
   it("the keep-alive gate that stops a hidden workspace stealing the shortcut is intact", () => {
@@ -431,58 +438,40 @@ describe("NEW-1 — F goes to REAL fullscreen, and the header follows the docume
   });
 });
 
-/* NEW-1 (2026-07-30) — fullscreen is a MODE, not a chrome-hide, so it must not be a dead end:
- * you have to be able to change plan or workspace without leaving it. The header slides in from
- * the top edge instead of being unmounted. These guard the shape of that; the behaviour itself is
- * driven end-to-end in ui-audit/verify-new1-fullscreen.mjs. */
-describe("NEW-1 — the fullscreen header slides in at the top edge instead of vanishing", () => {
-  it("the early return that DELETED the header in fullscreen is gone", () => {
-    // The dead end itself: one `if (fullscreen) return <button/>` replaced the breadcrumb, the
-    // plan switcher and the module tabs with a single floating control.
-    expect(header.includes("  if (fullscreen) {\n    return (\n      <button")).toBe(false);
-    // …and the header is now out of FLOW rather than out of the DOM, so the canvas still owns the
-    // whole viewport while you work.
-    expect(header).toContain('position: "fixed", top: 0, left: 0, right: 0, zIndex: 9998,');
-    expect(header).toContain('transform: fsReveal ? "translateY(0)" : "translateY(-100%)"');
+/* ⛔ B1173(×2) REPLACED THE WHOLE OF THE OLD BLOCK THAT SAT HERE — and the reason is worth keeping,
+ * because the old block was correct about a decision that has since been overruled.
+ *
+ * B1156 made `f` a real browser fullscreen AND hid the header. B1173 (the first pass) filed the
+ * consequence — fullscreen was a dead end, no way to change plan or workspace from inside it — and
+ * answered it with a top-edge hover REVEAL: the header slid in when the pointer reached the very
+ * top of the screen. Ten assertions here pinned the shape of that reveal (the edge band, the intent
+ * delay, the three holds, the floating exit button riding the same transform).
+ *
+ * The owner's second report says the reveal is not the answer: "to switch between projects, I have
+ * to exit full screen, which is kind of annoying. That's not how it's supposed to work. I should
+ * still have the two headers at the top when I go into full screen." Switching plans is a PRIMARY
+ * action during a review, and a hover-to-reveal charges a deliberate gesture for it every time. So
+ * the header stays, both rows, always, and every mechanism those ten assertions guarded is deleted
+ * rather than adjusted — which is why they are deleted here rather than relaxed.
+ *
+ * What replaces them: `test/fullscreenChrome.test.js` asserts the ABSENCE of each of those
+ * mechanisms by name (a merge that brings the reveal back alongside the always-visible header is
+ * the realistic regression), plus the four new obligations. The one assertion below is the one that
+ * survives the change of decision unaltered — mode hand-over between workspaces, which is still
+ * required and is now simpler, because the document is the whole answer. */
+describe("B1173(×2) — the fullscreen MODE is still handed over between workspaces", () => {
+  it("the incoming header adopts, the outgoing relinquishes", () => {
+    // Every workspace owns its own header, and the incoming one was display:none when `f` was
+    // pressed, so it never heard the fullscreenchange. Left unhanded, `f` is dead and the toggle
+    // button shows the wrong label.
+    expect(header).toContain("const ro = new ResizeObserver(() => {");
+    expect(header).toContain("if (fullscreenRef.current) { nativeFsRef.current = false; setFullscreen(false); } // relinquish on the way out");
+    expect(header).toContain("if (real !== fullscreenRef.current) { nativeFsRef.current = real; setFullscreen(real); }");
   });
 
-  it("a hidden header cannot steal the canvas's clicks, transform or no transform", () => {
-    expect(header).toContain('pointerEvents: fsReveal ? "auto" : "none"');
-  });
-
-  it("it arms on REACHING the top edge, after an intent delay — not on being in the upper region", () => {
-    expect(header).toContain("if (e.clientY > FS_EDGE_PX) { clearT(); return; }");
-    expect(header).toContain("timer = setTimeout(() => { timer = 0; if (headerOnScreen()) setFsReveal(true); }, FS_ARM_MS);");
-    // The edge band must stay a genuine EDGE — widen it into a "region" and the chrome starts
-    // ambushing anyone reaching for the top row of the workspace toolbar.
-    expect(Number(header.match(/const FS_EDGE_PX = (\d+);/)[1])).toBeLessThanOrEqual(8);
-    expect(Number(header.match(/const FS_ARM_MS = (\d+);/)[1])).toBeGreaterThanOrEqual(120);
-  });
-
-  it("it never hides while you are reaching for what it revealed", () => {
-    // Three holds, and they are re-checked when the timer FIRES, not only when it is set — so
-    // opening a menu during the grace period cancels the hide rather than racing it.
-    expect(header).toContain(`if (document.querySelector('[data-menu-owner="app-header"]')) return true;`);
-    expect(header).toContain("return el.contains(document.activeElement);");
-    expect(header).toContain("if (e.clientY <= r.bottom + FS_HOLD_PX || holdOpen()) { clearT(); return; }");
-    expect(header).toContain("timer = setTimeout(() => { timer = 0; if (!holdOpen()) setFsReveal(false); }, FS_HIDE_MS);");
-    // The portal stamp that makes the first hold possible — AnchoredMenu leaves the header's tree.
+  it("the portal stamp that scopes a header-opened menu is kept — other things depend on it", () => {
     expect(anchored).toContain(`anchorRef?.current?.closest?.("[data-menu-scope]")?.getAttribute("data-menu-scope")`);
     expect(anchored).toContain("data-menu-owner={ownerScope}");
     expect(header).toContain('data-menu-scope="app-header"');
-  });
-
-  it("the exit button rides the same transform, so it needs no measurement and cannot desync", () => {
-    expect(header).toContain('position: "absolute", top: "100%", right: 12, marginTop: 10,');
-    expect(header).toContain('pointerEvents: "auto",'); // beats the header's own `none` while parked
-    expect(header).toContain('data-testid="exit-fullscreen"');
-  });
-
-  it("switching workspace hands the mode over — the incoming header adopts, the outgoing relinquishes", () => {
-    // The case the reveal creates: every workspace owns its own header, and the incoming one was
-    // display:none when `f` was pressed, so it never heard the fullscreenchange.
-    expect(header).toContain("const ro = new ResizeObserver(() => {");
-    expect(header).toContain("if (fullscreenRef.current) { nativeFsRef.current = false; setFullscreen(false); } // relinquish on the way out");
-    expect(header).toContain("if (real !== fullscreenRef.current && (real || nativeFsRef.current)) { nativeFsRef.current = real; setFullscreen(real); }");
   });
 });

@@ -78,6 +78,7 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   a table crashing on `setContent` against a torn-down instance) — read it before changing the save
   path. There must never be a "sync content on pageId change" effect; the search effect there is
   decorations-only and guards `isDestroyed`, which is the bar any new effect has to clear.
+- `components/IntegrityBanner.jsx` — the bar for the two findings nothing could previously mention (a note in two projects; a note that had lost its place). **Its own lazy chunk** — it renders only when something is actually wrong, so its bytes have no business on the rail's first paint.
 - `components/NoteToolbar.jsx` — formatting bar, **grouped by frequency**: what you reach for while
   writing on the row, the long tail behind **More**. Every active state is read from
   `editor.isActive(...)`, never mirrored into React state; every control cancels `mousedown` so the
@@ -88,6 +89,37 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   **drag-to-size grid** (B1372), never a fixed 3×3 and never a dialog. It re-declares the two shared control radii locally
   instead of importing the shared `shared/ui/controls` primitives: that import makes the bundler
   hoist a third shared chunk onto the **Site** route and the perf audit goes red.
+- **⛔ A PURGE IS A TOMBSTONED FACT, NOT AN ABSENCE (B357011, then B364016) — read this before
+  touching the bin or the merge.** He emptied the bin; the cloud tree went to **rev 991** with one
+  entry. A tab still on **rev 966** with unpushed edits reloaded, came back with **all 23 entries**,
+  and **pushed the resurrection up as rev 992**, overwriting the good state. The cause is
+  structural: the tree merge is a **UNION**, in which an addition wins and a deletion is the
+  ABSENCE of an entry — and absence loses to any copy that still has one. `purgeTrashEntry` records
+  the entry id and every page id it named in a tombstone ledger carried IN THE TREE, and **rule 0**
+  of `mergeTrees` honours it before every other rule. Four things not to undo:
+  1. **Rule 0 runs FIRST.** Rule 1 lifts a live node out when a bin entry names it, and a
+     resurrected entry would do exactly that to a page somebody had since restored.
+  2. **It shares rule 5's body**, so a child added under a purged parent afterwards is still
+     RESCUED — B342992's defect must not arrive through the new door.
+  3. **An entry is filtered by the ids it NAMES, not only its own.** Two devices deleting the same
+     note mint two DIFFERENT entry ids, so purging one leaves the other still naming pages whose
+     bytes are destroyed. That is the zombie state, and only the fuzz found it.
+  4. **⛔ `migrate` MUST PASS `raw.tombs` THROUGH — this is the one that shipped broken (B364016).**
+     It built a fresh object and then asked *that* object for its tombstones, so the ledger was
+     destroyed on every read, and every read goes through `migrate`. Rule 0 was correct and
+     completely inert: purge a page, reload, and it came back **in the LIVE list** as a note with
+     nothing in it, then pushed to the cloud.
+  **⛔ AND THE REASON NOTHING CAUGHT THAT: the tests never went through storage.** The whole suite,
+  including a 6,000-merge fuzz, worked on in-memory trees — so a purge-then-RELOAD on ONE client was
+  not a case anybody had. Every case now round-trips through the real store and the fuzz reloads
+  between rounds. The zombie clean-up accepts the server's `purged_at` as its ONLY evidence ("no
+  body on this device" is a different claim). Guards: the repo-root `test/` suite **notesBinPurge**,
+  mutation-proven in both directions.
+  - **AND A DIFFERENCE THAT IS ONLY LITTER IS NOT A DISAGREEMENT (B364018).** A conflict prompt
+    appeared on a note nobody had edited, because the one-time clean-up had removed ten empty blocks
+    on one device and not yet on the other. `judgeConflict` discounts empty blocks — the CLEAN copy
+    wins and is pushed — while a real edit, an edit made inside a block, and a block holding a
+    picture all still raise one.
 - `lib/notesModel.js` — PURE page-tree schema + every structural op, page **timestamps**, the
   project filing (`pagesInScope` · `projectGroups` · `setPageProject` · `projectOfPage`), the
   **bin**, and **the one-way migration off the superseded four-level shape — read its header
@@ -103,6 +135,151 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   HERE so no intake path can bypass them, and `purgePages` — the ONE place a note's bytes are
   actually destroyed (body **and** images). **Read its header for `ROWS-CANONICAL-ON-SEED`, the
   Notes edition** — which copy of a note wins is written down there, not left to accident.
+- **⛔ NOTHING MAY EXIST WITHOUT A HOME — the reachability guarantee, and the two merge holes
+  that broke it (B342992).** A real note went unreachable in the owner's account: 215 revisions
+  of Bain meeting notes, healthy in storage AND in the cloud, with **no node in either tree and
+  nothing in the bin naming it.** Not destroyed — unreachable, which is worse, because nothing
+  could say so. Root cause was **`mergeTrees`, twice**, and neither hole is visible in a
+  hand-read (both were found by a randomised sweep):
+  1. **A DELETE TOOK MORE THAN IT NAMED.** The merge lifted out every id in a bin entry and
+     returned BEFORE recursing — so a page the *other* device had added under the deleted
+     parent was neither kept live nor carried into the bin. **Rule 5** now says a delete's scope
+     is exactly the ids its entry names; anything else is RESCUED to the top level of its
+     branch's project and reported through `onRescue`.
+  2. **THE OTHER SIDE'S COPY WAS LOOKED UP BY POSITION.** Re-parenting a page on one device made
+     the merge blind to that page's copy on the other, and every child it had gained there went
+     with it — **no bin involved at all**. Counterparts are now found by **id, anywhere in the
+     tree**.
+  Belt to those braces: `sweepOrphans` refuses to destroy a body that still has words in it,
+  `unreachableNotes` looks for the property being violated on every load, and `adoptUnreachable`
+  heals it — **guessing nothing**, which is why there is deliberately **no title-keyed
+  "Recovered" container** (see the next bullet). Guards: the repo-root `test/` suite
+  **notesReachability** (minimal cases + a 6,000-merge property across five seeds) and the
+  headless **verify-notes-project-integrity**. Recovery lives in `lib/notesScan.js` + `adoptUnreachable` (`lib/notesModel.js`).
+- **⛔ AND A TITLE IS NEVER LOAD-BEARING FOR IDENTITY OR REACHABILITY.** Asked directly — *is the
+  note unreachable BECAUSE it has no title?* — and the answer is **no**, proven across five falsy
+  values and eleven paths. The reason every node in his live tree carries a title is not a filter
+  eating the empty ones: **no path can mint one**, and since B342992 that is true at the one
+  constructor (`makePage`) rather than at each caller, which is what let `"   "` through. Nothing
+  here may key, index, dedupe or drop on a title. Identity is the id.
+- **A BLOCK THAT STAYS WHERE YOU PUT IT (B342993, `lib/notesAnchorNode.js`).** Double-click blank
+  space and a **real positioned node** lands at the point pressed — its position is two numbers on
+  the node, so it cannot crawl as you type, cannot leak alignment onto the next paragraph, leaves
+  no padding paragraphs, and rides the document into storage, sync and the PDF. **Read that file's
+  header before touching it**: this is the FOURTH round, and the previous check passed on the wrong
+  property. It inserts **before the document's last block**, deliberately — appending leaves a
+  blank line ProseMirror restores and cannot be deleted away. Proof is geometric, in
+  **verify-notes-anchor-zoom**: the rendered rect against the clicked coordinates.
+  - **⛔ AND THE FIFTH ROUND (B350000/B350001) KILLED THREE MORE WAYS IT MOVED, all of them
+    measured on the owner's own window rather than argued.** (a) **NO CLAMPING BAND.** Everything
+    right of about the three-quarter mark was pushed flush to the right margin — a click at
+    x=1010 and a click at x=900 both produced a block at x=884, a silent slide of up to 126 px,
+    and the clamped number was WRITTEN TO STORAGE. The left edge is the thing he chose, so it is
+    kept unconditionally and the WIDTH is spent instead (`placeAnchor`). There was a second floor
+    hiding under the first: a `min-width: 120px` in the stylesheet, which quietly undid the
+    narrowing — a placement rule and a stylesheet floor cannot both own the width. (b) **NO
+    VERTICAL NUDGE:** a click at y=470 landed at 461; there is now no vertical clamp at all and
+    the page grows to hold the block (`anchorExtent`). (c) **THE GESTURE USED TO MOVE THE EDGE IT
+    THEN MEASURED AGAINST** — the first press of a double-click below the last line adds a line
+    (that is what clicking under text means everywhere else), which pushed the content's bottom
+    edge down, so the double-click decided it was on content and declined: no block, and the
+    added line left behind. The question is now asked against the document as the person FOUND
+    it (`matBottomRef`). His own acceptance test is the guard: a 20 px sweep across the full
+    width, asserting stored left equals click x minus editor left at every step, with the same
+    exactness demanded vertically and the result read back out of storage.
+  - **AND A PRESS INSIDE A BLOCK IS CONTENT (B350004).** His original complaint — *"it keeps
+    wanting to just go to wherever there is text on the left"* — was still live and was NOT the
+    same bug: the mat's "is this blank space?" test measures the last FLOW child, and an anchored
+    block is out of flow, so every block below the text was, to the mat, empty page. It swallowed
+    the press and sent the caret to the end of the document. Verified as a REAL failure with a
+    real mouse in a foreground tab before it was touched, and re-verified after.
+  - **⛔ AND THE SIXTH ROUND COLLAPSED THE TWO GESTURES INTO ONE (B357008/B357009), because the
+    "intermittency" had a mechanical explanation and it was ONE bug, not two.** *(a)* A
+    double-click committed an **empty** block the instant it was pressed — five presses with
+    nothing typed produced five nodes in storage, all surviving a reload. *(b)* An empty block
+    draws nothing and **still occupies its box and still takes the press**, so the second attempt
+    at a spot you already tried lands inside the first attempt's invisible leftover and appears
+    to do nothing. That is the whole of *"it works intermittently"*: it fails exactly where you
+    already tried once and gave up. *(c)* A single click in open page sent the caret to the
+    nearest text position, which on a mostly-empty page is a LONG JUMP — *"it goes still goes all
+    the way to the left."*
+    **So: an empty block is PROVISIONAL** (`lib/notesAnchorPrune.js` — the editor drops one when
+    the caret leaves, on blur and on Escape; `writePage` prunes it so a crash or a closed tab
+    cannot carry one out either), **it is VISIBLY outlined while it exists**, and **a press in
+    blank space places the caret where you pressed** — with the nearest-text-position path kept
+    only for a press genuinely beside a line, measured against where that position actually is.
+    **There is no separate double-click handler any more**, and that removal is the point: one
+    gesture, one rule, no invisible document state choosing between them. Guards: the repo-root
+    `test/` suite **notesAnchorPrune** and the soak harness **verify-notes-anchor-soak** (three
+    window sizes including his ~520-tall one; presses that type nothing must leave the stored
+    document BYTE-IDENTICAL).
+  - **⛔ AND DRIVE IT WITH A REAL MOUSE — A SYNTHETIC CLICK REACHES NOTHING HERE (B364017).** The
+    placement is on `mousedown`, and a synthetic `click`/`dblclick` produces no `mousedown` at
+    all, so it does nothing while the right element is under the cursor and the editor is
+    focused. That cost a false *"the gesture has regressed to nothing"* report on a build where
+    the real mouse worked 32 times out of 32. This is **SYNTHETIC-KEYS-DONT-EDIT on the mouse**:
+    use the press driver **pressFeature** under `ui-audit/lib/`, and **verify-press-drive** re-measures the whole verdict
+    table every run, so the day the wiring moves again it says so rather than a harness reporting
+    a working feature as broken.
+- **HOW BIG THE WRITING IS (B342994, `lib/notesZoom.js`).** Ctrl+wheel and Ctrl+=/−/0 scale the
+  **document**, never the app; the browser's own zoom is suppressed for those gestures so the two
+  cannot fight; the level is per-scope, persisted, and does not sync (a comfortable size belongs to
+  the screen you are at). CSS `zoom`, not a transform — the text must RE-WRAP and the caret must
+  stay the browser's own.
+- **A COPY NEVER CHANGES PROJECT — four files, one rule.** A note was copied into an unrelated
+  pursuit and nobody was told; it was found by hand a week later under a "from a project you
+  deleted" heading. **A page's `projectId` is a property of the PAGE, never of whoever happens to
+  be looking at it.** So `copyPageWithin` (`lib/notesModel.js`) is the ONE copy op and **takes no
+  project argument at all** — the copy lands as the source's next sibling wearing the source
+  root's project, or it is REFUSED and named. There is deliberately no way to say "put the copy
+  over there", because a caller that could would eventually pass the project it happens to be
+  showing. The conflict park in `Notes.jsx` goes through it and **says so on screen at the moment
+  it happens**. Guards: the repo-root `test/` suites **notesProjectIntegrity** (the decisions) and
+  **notesTwoClientConflict** (two real store instances against an in-memory server that owns `rev`
+  like the deployed trigger — the resulting store, the exact page count AND every page's project),
+  plus the headless harness **verify-notes-project-integrity** under `ui-audit/`. All three are
+  mutation-proven: reverting the copy op to take a viewer's project turns 9 rows red with the exact
+  reported fingerprint.
+  - `lib/notesDuplicates.js` — PURE detector: word-pair Dice similarity over normalised text.
+    ⛔ Same project is never a finding (copying inside a project is ordinary), an empty page is
+    never a finding, and **the BIN counts** — both real copies were binned before anyone looked.
+  - `lib/notesScan.js` — the storage half, **lazily imported** (nothing on the rail's first paint
+    needs it): `scanNoteDuplicates` and `unreachableNotes`. The second answers a defect found in
+    the owner's own account — a body whose tree node had gone, swept off the device on every load
+    and re-downloaded on every sync, reachable from nowhere. `sweepOrphans` now **refuses to
+    destroy a body that still has words in it** and reports what it kept.
+    - **⛔ A FINDING IS ONLY REPORTED IF SOMEBODY CAN ACT ON IT (B350003).** The bar told him
+      *"One note appears in 2 different projects… “Coordination” in Grand Port · “Page 1” in a
+      project that no longer exists (in the bin)"* — one copy already binned, the other's project
+      deleted a week earlier. **Nothing to do, and Dismiss the only exit**, which is how you teach
+      somebody to dismiss the one that will one day be real. So `scanNoteDuplicates` no longer
+      walks the bin and drops copies in projects that are gone; the PURE detector
+      (`notesDuplicates.js`) is unchanged and still compares whatever it is handed, because a
+      deliberate forensic pass over everything is a different question from a banner. A finding
+      can also now be ENDED from the bar — keep this one, or keep both and stop being told
+      (`duplicateKey`, remembered per account). ⛔ An unknown project list passes `null`, never
+      `[]`: "the lookup failed" and "there are no projects" are opposite facts, and letting the
+      first wear the second's clothes would silently suppress a real finding.
+  - **THE BIN YOU CAN JUDGE (B350002, `collectBinFacts` in `lib/notesStore.js`).** Twenty-one
+    entries, sixteen of them called "Untitled page", showing a name and a countdown and nothing
+    else — so the only way to find out what one WAS, was to restore it into the live tree and
+    delete it again. Each row now carries the WORDS (borrowed from the first page in the cascade
+    that has any), the project it came from, when it went and how big it is; **"Read it" opens it
+    read-only without restoring it**; and one action clears the empty ones. ⛔ **The row and the
+    reader are ONE walk** (B357012): DEV COORDINATION is a container with no row in `notes_pages`
+    at all, its words live in its child, and the list read the child while the reader opened the
+    parent — so the row said "656 characters" and Read it showed a bare heading. `collectBinFacts`
+    now builds the preview, the count and the reader's page list from the same reads, and the
+    reader renders every page in the entry that has words. ⛔ Four project
+    states, not two: a live project · "Not in a project" · one that no longer exists · and an
+    entry binned before the bin recorded where a page came from, which says so rather than
+    claiming the note belonged nowhere.
+  - `lib/notesProjectFiling.js` + `lib/notesProjectLink.js` + `lib/notesKeys.js` — "what is this
+    project holding?", answerable from a route where Notes is **not mounted**, because the thing
+    that deletes a project is the shared header breadcrumb. The account is passed in EXPLICITLY
+    (reading whatever scope happened to be set would answer with the signed-out tree). ⛔ All three
+    are **leaves**, and that is measured, not stylistic: routing that dynamic import through
+    `notesStore.js` cost the Notes route 12 KB and through `notesModel.js` 9 KB.
 - `lib/notesCloud.js` — **the cloud tier UNDER the seam (B1291), and the only file that may talk to
   Supabase.** The store's public surface did not change when sync landed; this is what grew behind
   it, reached by a cached dynamic `import()` for the same bundle reason as the image DB. Two halves:
@@ -213,6 +390,55 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
 - `lib/notesTime.js` — how a note's age is written, once. `null` means unknown and renders as
   nothing — a migrated page never claims a time it does not have.
 - `lib/notesExtensions.js` — the ONE declaration of what a note may contain.
+
+**TIER 1 — the table stakes (NEW-1…NEW-7).** Seven features the category treats as given, all
+landed together. What each one is, and the ONE decision inside it that is not obvious:
+- `lib/notesSlashMenu.js` + `components/NoteSlashMenu.jsx` — **type `/` and name the block**
+  (NEW-1). ⛔ The whole feature is a rule about when NOT to fire: the `/` must be at the start of
+  the block or after whitespace, and what follows must have no spaces and stay short — which is
+  what makes `and/or`, `w/o`, `24/7` and every pasted URL inert. It is a **reading of the
+  document**, recomputed per transaction, so backspacing past the `/` simply stops matching and
+  leaves the character the user typed exactly where it was; there is no marker node to clean up.
+  ↑↓/Enter/Esc are claimed above the default keymap.
+- `lib/notesQuickOpen.js` + `components/QuickOpen.jsx` — **Ctrl/⌘+K jumps to a note by name**
+  (NEW-2). AUDIT-FIRST: **Ctrl+K was unbound** in this repo — the toolbar's link control is a
+  button opening an inline field, with no shortcut — so nothing was displaced. FUZZY over titles
+  (a subsequence, so `gpent` reaches Grand Port › Entitlements), falling **through to the existing
+  full-text index** for body hits; nothing is re-indexed. Title hits always precede body hits. The
+  shortcut is printed in the rail's search placeholder, because a keyboard affordance nobody can
+  discover is one that does not exist. Lazy-loaded — it costs a note nothing until pressed.
+- `lib/notesVersions.js` + `components/NoteHistory.jsx` — **version history with restore**
+  (NEW-3). The bin protects a note somebody DELETED; this protects one somebody MANGLED.
+  ⛔ **Restoring CREATES a version and destroys nothing** — the state being left is snapshotted
+  and pinned first, so restoring the wrong one is itself undoable (`planRestore`, pure).
+  Retention is denser-recent / coarser-older and the NEWEST row is pinned unconditionally.
+  ⛔ Snapshots live in **IndexedDB, never localStorage** (TIER-BY-REBUILDABILITY), and are
+  **device-local in this version** — a stated limit, not an oversight; it needs no schema change
+  and cannot fight the server-owned `rev`.
+- `lib/notesTasks.js` — **every unticked checklist line, across every note** (NEW-4), shown in the
+  rail's third view. ⛔ Ticking one goes **through the open editor** when that note is on screen
+  (`registerOpenNoteDoc` on the store) — writing its JSON round the back of the editor is a
+  silent-loss bug by construction. The key is index **and** text, and the index is trusted only
+  while it still describes the row the rollup showed.
+- `lib/notesAttachNode.js` + `lib/notesFileMeta.js` — **any file, not just pictures** (NEW-5).
+  ⛔ It rides the PICTURE tier — same IndexedDB store, same cloud table, same bucket, same purge
+  cascade — rather than a second blob tier. The account-side change is one migration,
+  `db/notes_attachments.sql`. `assetIdsInDoc` (not `imageIdsInDoc`) is what every delete path must
+  ask, or a deleted page leaves its files behind forever. It survives Markdown (embedded under a
+  size cap, NAMED above it) and Print (name · type · size).
+- `lib/notesOutline.js` + `components/NoteOutline.jsx` — **the note's headings, as navigation**
+  (NEW-6). PURE over the document; its `pos` values restate ProseMirror's own size rule and the
+  unit test resolves every one against the real schema. **Absent, not empty**, when there are no
+  headings. It sits to the RIGHT of a left-aligned sheet, so showing it cannot shift the text.
+- `lib/notesCalloutNode.js` + `lib/notesToggleNode.js` — **callouts and foldable sections**
+  (NEW-7). A callout stores a TONE NAME, never a colour, so screen / paper / Markdown each draw
+  it their own way — and the five tones are GitHub's five, so the export is `> [!NOTE]` rather
+  than an HTML approximation. A toggle is the browser's own `<details>`; the document owns the
+  fold as an attribute, and ⛔ **`docToHtml` opens every one before serialising**, so a folded
+  section can never print as missing text.
+- `db/notes_attachments.sql` — the migration NEW-5 needs: relax the `notes-images` bucket's
+  image-only MIME list and add `name` + `kind` to `notes_images`. Same "committed as a record"
+  discipline as `notes_cloud_sync.sql`.
 
 **Guards that will fail the build if you break them** (the `notesModule` suite under `test/`): the
 eight-place workspace registration checklist · theme-token-only chrome in the three JSX surfaces ·

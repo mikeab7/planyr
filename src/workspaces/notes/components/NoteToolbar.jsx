@@ -28,6 +28,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { HEADING_LEVELS } from "../lib/notesExtensions.js";
+import { CALLOUT_TONES } from "../lib/notesCalloutNode.js";
 
 /* Mirrored from src/shared/ui/controls.jsx rather than imported — deliberately, and there
  * is a test that fails if the copies drift (test/notesModule.test.js). Importing
@@ -439,6 +440,90 @@ function OverflowMenu({ children, testid = "nt-more" }) {
   );
 }
 
+/** ⛔ THE CALLOUT CONTROL PICKS A **TONE**, NOT A COLOUR (NEW-7).
+ *
+ *  The five are GitHub's five — Note / Tip / Important / Warning / Caution — because the
+ *  Markdown export writes them as `> [!NOTE]` and friends, which is a real rendered
+ *  construct there rather than an HTML approximation. A sixth would have no marker to map
+ *  to; adding one means deciding its fallback first (lib/notesCalloutNode.js says the same).
+ *
+ *  Pressing it with the caret already inside a callout CHANGES that callout's tone rather
+ *  than nesting a second one inside it. Not a dialog (house rule): an inline popover that
+ *  closes on Escape and on an outside press, like every other popover on this bar. */
+function CalloutControl({ editor }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+  const inside = editor.isActive("noteCallout");
+  const tone = inside ? editor.getAttributes("noteCallout")?.tone : null;
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+
+  const pick = (id) => {
+    setOpen(false);
+    const chain = editor.chain().focus();
+    if (inside) chain.setNoteCalloutTone(id).run();
+    else chain.setNoteCallout(id).run();
+  };
+
+  return (
+    <span ref={wrapRef} style={{ position: "relative", display: "inline-flex" }}>
+      <TBButton title={inside ? "Change this callout" : "Callout — a block that says “this matters”"}
+        testid="nt-callout" active={inside} onClick={() => setOpen((o) => !o)}>
+        <Icon><rect x="2" y="3" width="12" height="10" rx="1.5" /><line x1="4.5" y1="3" x2="4.5" y2="13" /><line x1="7.5" y1="6.5" x2="12" y2="6.5" /><line x1="7.5" y1="9.5" x2="12" y2="9.5" /></Icon>
+      </TBButton>
+      {open && (
+        <div
+          data-testid="nt-callout-panel"
+          onMouseDown={stop}
+          style={{
+            position: "absolute", top: 32, left: 0, zIndex: 40, padding: 5, width: 168,
+            display: "flex", flexDirection: "column", gap: 2,
+            background: "var(--surface-raised)", border: "1px solid var(--border-default)",
+            borderRadius: RADIUS.control, boxShadow: "0 12px 32px rgba(0,0,0,0.20)",
+          }}
+        >
+          {CALLOUT_TONES.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              data-testid={`nt-callout-${t.id}`}
+              onMouseDown={stop}
+              onClick={() => pick(t.id)}
+              style={{
+                display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "4px 8px",
+                borderRadius: RADIUS.control, cursor: "pointer",
+                border: `1px solid ${tone === t.id ? "var(--accent-notes)" : "transparent"}`,
+                background: "transparent", color: "var(--text-primary)",
+                font: "inherit", fontSize: 12.5, fontWeight: 650, textAlign: "left",
+              }}
+            >{t.label}</button>
+          ))}
+          {inside ? (
+            <button
+              type="button"
+              data-testid="nt-callout-off"
+              onMouseDown={stop}
+              onClick={() => { setOpen(false); editor.chain().focus().unsetNoteCallout().run(); }}
+              style={{
+                width: "100%", padding: "4px 8px", marginTop: 2, borderRadius: RADIUS.control, cursor: "pointer",
+                border: "1px solid var(--border-default)", background: "transparent",
+                color: "var(--text-secondary)", font: "inherit", fontSize: 12, fontWeight: 650, textAlign: "left",
+              }}
+            >Back to plain text</button>
+          ) : null}
+        </div>
+      )}
+    </span>
+  );
+}
+
 function MenuGroup({ label, children }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -505,7 +590,7 @@ const HEADING_OPTIONS = [
   ...HEADING_LEVELS.map((l) => ({ label: `Heading ${l}`, value: `h${l}` })),
 ];
 
-export default function NoteToolbar({ editor, onExport, onPrint }) {
+export default function NoteToolbar({ editor, onExport, onPrint, onAttach, onHistory, historyOpen }) {
   const fileRef = useRef(null);
   if (!editor) return null;
 
@@ -617,6 +702,13 @@ export default function NoteToolbar({ editor, onExport, onPrint }) {
           one that does not exist (B1371). */}
       <TBButton title="Box this — put a box around the selected words, then drag arrows between boxes"
         testid="nt-box" onClick={() => editor.commands.boxSelection()}><SketchIcon /></TBButton>
+      {/* ATTACH ANY FILE (NEW-5). It sits beside the picture rather than in "More" for the
+          same reason the Box button does: it is the same kind of act — putting a non-text
+          thing on the page — and a control nobody can find is one that does not exist
+          (B1371). Drag-and-drop and the slash menu reach the same intake. */}
+      <TBButton title="Attach a file — a PDF, a spreadsheet, a drawing" testid="nt-attach" onClick={onAttach}>
+        <Icon><path d="M11.5 5.5L6.2 10.8a2 2 0 0 0 2.8 2.8l5.3-5.3a3.4 3.4 0 0 0-4.8-4.8L4.2 8.8a4.8 4.8 0 0 0 6.8 6.8" /></Icon>
+      </TBButton>
 
       <Sep />
 
@@ -655,9 +747,21 @@ export default function NoteToolbar({ editor, onExport, onPrint }) {
           <TBButton title="Divider" testid="nt-hr" onClick={() => chain().setHorizontalRule().run()}>
             <Icon><line x1="2" y1="8" x2="14" y2="8" /></Icon>
           </TBButton>
+          <CalloutControl editor={editor} />
+          <TBButton title="Toggle — a section that folds away" testid="nt-toggle"
+            active={editor.isActive("noteToggle")} onClick={() => chain().setNoteToggle().run()}>
+            <Icon><path d="M3 5.5L5.5 8L3 10.5" /><line x1="7.5" y1="4.5" x2="13.5" y2="4.5" /><line x1="7.5" y1="8" x2="13.5" y2="8" /><line x1="7.5" y1="11.5" x2="13.5" y2="11.5" /></Icon>
+          </TBButton>
         </MenuGroup>
       </OverflowMenu>
 
+      {/* VERSION HISTORY (NEW-3). Beside Print because both are things you do TO the page
+          rather than to the words in it, and because the moment anyone wants it is the
+          moment something has gone wrong — it must not be behind a menu. */}
+      <TBButton title="Earlier versions of this page, and the way back to one"
+        testid="nt-history" active={!!historyOpen} wide label="History" onClick={onHistory}>
+        <Icon><path d="M8 4.5V8l2.5 1.5" /><circle cx="8" cy="8" r="5.5" /></Icon>
+      </TBButton>
       <TBButton title="Print this page, or save it as a PDF" testid="nt-print" wide label="Print" onClick={onPrint}>
         <PrintIcon />
       </TBButton>

@@ -113,15 +113,587 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
-### V91632 — B293073: on ONE OF HIS OWN PLANS, do two overlapping objects actually swap what's on top? `Blocker: real-data`
+### V179984 — B1341 stage 2: turning group CAS ON, on a real two-writer plan `Blocker: auth` `Blocker: real-data`
 
-The three defects behind *"the layers / order feature doesn't work at all"* are fixed and each is proven here by reading paint order back out of the rendered DOM (not from state). What the sandbox cannot know is **which objects he was trying to reorder**, so this is the one check that closes his report rather than mine.
-- planyr.io, signed in, any plan of his with **two overlapping objects of the same kind** — two buildings, two markups, or two text boxes.
-- **The text-box case is the one to run first**, because it is the one that was structurally impossible before: drop two text boxes so they overlap, right-click the lower one → **Bring to Front**. **PASS = the box you clicked is now drawn over the other one.** Pre-fix that menu had no ordering rows at all.
-- Then the case that read as "broken": right-click something that is **the only one of its type on the plan** — a lone pond, a lone paving pad. **PASS = the four Arrange rows are THERE, greyed, and hovering one explains why** ("this is the only … so there is nothing to reorder it against"). Pre-fix the whole group was hidden, with no explanation — which is what "doesn't work at all" looked like.
-- And the cross-the-plan move: right-click a text box → **Send behind the plan**. PASS = the buildings now draw over it.
-- **Report which objects he originally tried**, if he remembers — if it was a building over a paving pad, that is the type-layer question parked on B293072 as an owner decision, NOT a bug, and this V should record that rather than reopen the item.
-- ⏳ **PENDING**
+**⛔ THIS IS THE ONE THING STAGE 2 CANNOT PROVE WITHOUT A LIVE RACE, and it ships OFF precisely so
+that turning it on is a deliberate, reversible act rather than a side effect of a deploy.**
+
+**What IS proven, and it is more than usual.** The server half runs against the REAL production
+database — `db/test/commit_elements_group_cas.test.sql`, 9/9, self-rolling-back (verified afterwards:
+zero rows left), and **mutation-proven** (disable the digest comparison and the stale call is
+accepted, moving the host row to rev 2). The client half is `test/assemblyGroupCas.test.js` (23),
+including the request body through the real transport and three mutants that each go red. Lint 0,
+full unit suite green, build green.
+
+**Why the rest cannot be driven here.** It is a two-signed-in-writer race on one cloud plan, and the
+sandbox proxy CORS-blocks the Supabase sign-in, so a second authenticated client cannot exist.
+
+**Steps, in order — and the first one is the point:**
+1. On ONE device, arm it: `localStorage.setItem("planarfit:groupCas", "1")` in the console, reload.
+2. Ordinary editing must be **completely unchanged**. Drag a building with dock zones, undo, redo,
+   paste an assembly, delete one. ⛔ If anything about normal single-writer use feels different, turn
+   it straight back off (`"0"`, reload) and say so — that is the kill switch doing its job.
+3. Open the same plan in a second tab, both signed in. Move a bonded child in tab B; in tab A, move
+   the HOST. Tab A's call should be refused on the group revision (nothing written) and re-committed
+   at the fresh revs a moment later, with the assembly ending up coherent in BOTH tabs.
+4. In telemetry, `element-group-conflict` should appear for that round, naming the assembly. It is
+   not an error — it is the guard reporting that it fired. `element-group-unresolved` WOULD be a
+   problem (it means the group never settled) and should not appear.
+5. Confirm the digest is being sent at all — a call with `p_groups` absent means the switch is not
+   armed on that device, or the batch did not span an assembly (a single-element batch stays on the
+   per-row path by design).
+6. Leave it on for a working session on a real plan. If it is quiet, that is the result stage 3
+   needs before it can retire the per-row expectation.
+
+### V173456 — B377888: a stale delete no longer eats an element created after it, on the owner's own two-tab plan `Blocker: auth` `Blocker: real-data`
+
+**🚚 DEPLOY CONFIRMED SERVING 2026-08-12** — `node ui-audit/verify-deploy.mjs delete-vs-create-dropped` reports the marker live in `assets/index-fZW_RI6I.js` + `assets/SitePlannerApp-KrpKxn4C.js` on planyr.io, so whoever runs the steps below is testing the fixed build and does not need to check that first.
+
+**What was proven HERE, without a browser, and it is not nothing.** The engine half is driven by
+`test/deleteVsCreate.test.js` (7) against the real `createElementSync`, using the owner's real
+geometry from `smsdrvzr9gzx`, one test per direction and one per seam — the diff, the pre-send
+check, the conflict result, and the unload keepalive — **with both controls**: create-then-delete
+still re-issues at the fresh rev, and delete-vs-edit with no observed birth is byte-for-byte its
+pre-change self. Lint 0, full unit suite green, build green.
+
+**Why the rest cannot be driven here.** This is a TWO-SIGNED-IN-TAB race on one cloud plan. The
+sandbox proxy CORS-blocks the Supabase sign-in, so a second authenticated client cannot exist at
+all, and without one there is no realtime row to race.
+
+**Steps still to run, signed in as the owner:**
+1. Open **Richfield / Concept A** in two tabs of the same browser, both signed in.
+2. In tab B, select any element and press Delete, then **immediately pull the network** (DevTools →
+   Network → Offline) so the delete stays queued.
+3. In tab A, draw a NEW building with dock zones (host + courts + trailer rows).
+4. Bring tab B back online. **The new assembly must survive.** Before the fix, tab B's queued delete
+   re-issued against whichever new row shared its id path and rows seconds old were tombstoned.
+5. Tab B should show a toast reading **"… was re-created in another tab of yours after you deleted
+   it — it's back on the plan."** with a **Show** action that zooms to it. ⛔ It must NOT say a name.
+6. Confirm from the database that nothing new is tombstoned:
+   `select id, rev, deleted_at from site_elements where site_id='smsdrvzr9gzx' and deleted_at is not null order by deleted_at desc limit 10;`
+7. In the telemetry channel, `element-delete-fabricated` and/or `element-delete-vs-create-dropped`
+   should appear for the run. Neither is an error — they are the guard reporting that it fired.
+
+### V173457 — B377889: all five members of Building 3 are back on Richfield / Concept A, and the trailer row sits outboard of a 135 ft truck court `Blocker: real-data`
+
+**✅ PROVEN IN THE DATA 2026-08-12, through the app's own invariant — not by eye, and not by a
+SELECT alone.** All five members are live and correctly bonded, and the real rows were run back
+through `normalizeBondedChildren` / `missingBondSiblings` / `impossibleStacks`:
+
+| element | type | across-wall offset |
+|---|---|---|
+| `e1454940cgzlnc` | truck court (right) | **377.50 ft** |
+| `e1454941cgzlnc` | trailer row (right) | **470.00 ft** |
+| `e1454942cgzlnc` | truck court (left) | **377.50 ft** |
+| `e1454943cgzlnc` | trailer row (left) | **470.00 ft** |
+
+Each trailer row is **outboard of a 135 ft truck court** (470 − 377.5 = 92.5 = half the court plus
+half the trailer). `missingBondSiblings()` → `[]`; `impossibleStacks()` → `[]`; the heal returns the
+list **by identity**, i.e. it agrees there is nothing to repair.
+
+**The route there, recorded honestly.** The restore was executed through
+`commit_elements(..., p_atomic => true)` with `op:"restore"` under the owner's own `auth.uid()`
+(revs 8 / 10 / 7). **Four seconds later a live tab on the un-fixed build undid two of the three
+writes** — the bug caught in the act. Further writes at 14:27 (revs 14 and 11, above this session's)
+put them back, so a client did that, not this session; the outcome is verified, the credit is not
+claimed.
+
+**What is still pending, and it is the only thing.** MERGED ≠ LIVE: a database read is not a
+rendered plan. Open Richfield / Concept A in the served, signed-in app and confirm Building 3 draws
+with five members and neither trailer row flush against the building. Nothing is required from the
+owner.
+
+### V173458 — B377890: the heal refuses to invent a layout when a bonded sibling is missing `Blocker: real-data`
+
+**🚚 DEPLOY CONFIRMED SERVING 2026-08-12** — `node ui-audit/verify-deploy.mjs delete-vs-create-dropped` reports the marker live in `assets/index-fZW_RI6I.js` + `assets/SitePlannerApp-KrpKxn4C.js` on planyr.io, so whoever runs the steps below is testing the fixed build and does not need to check that first.
+
+**What was proven HERE, and it is most of the item.** `test/assemblyMissingSibling.test.js` (12)
+runs the real `normalizeBondedChildren` / `assemblyIntegrity` over the owner's real Building 3
+numbers, and **`e2e/assembly-missing-sibling.spec.js` (3) drives the REAL app in a browser, logged
+out** — seeding his building with the truck court removed, reading the trailer's across-wall offset
+off the live SVG (470 ft, not 335), confirming the stored record keeps its bond and its position,
+and confirming `assembly-tear-unhealable` is reported while `assembly-tear-healed` never claims it,
+with the court-present control beside it. Both are **mutation-proven**: restoring the pre-fix rule
+reddens them and reproduces the 135 ft pull to the decimal. Lint 0, 530 test files / 10,709 tests
+green, build green.
+
+**Steps still to run, on real data:**
+1. On a signed-in plan, delete a truck court that has a trailer row bonded beyond it.
+2. **The trailer row must NOT move.** Before the fix it jumped inboard by exactly the court's depth
+   and ended up flush against the building.
+3. Reload. It must still not have moved — the load-time heal is the seam that used to do this.
+4. `assembly-tear-unhealable` must appear in the telemetry channel naming the element, the bond
+   (`forCourt` / `prevZone`) and the id that is gone. `assembly-tear-healed` must NOT claim it.
+5. Restore the truck court. The trailer must then re-fit to its proper outboard anchor — the heal is
+   correct again the moment the information it needs is back.
+
+### V173459 — B377891: a second tab of the owner's own account never names a teammate `Blocker: auth`
+
+**🚚 DEPLOY CONFIRMED SERVING 2026-08-12** — `node ui-audit/verify-deploy.mjs delete-vs-create-dropped` reports the marker live in `assets/index-fZW_RI6I.js` + `assets/SitePlannerApp-KrpKxn4C.js` on planyr.io, so whoever runs the steps below is testing the fixed build and does not need to check that first.
+
+**What was proven HERE.** `test/editorNames.test.js` (+3, including the pre-fix snapshot
+construction asserted directly) and `test/conflictMatrix.test.js` (+3, every attributing row of the
+matrix × both directions, plus the forgotten-`self` default). The wording is a model fact rather
+than a string, so the matrix is fully unit-testable. Lint, unit suite and build green.
+
+**Why the rest cannot be driven here.** The banner only appears for a signed-in cloud plan with a
+second live writer, and the sandbox cannot sign in.
+
+**Steps still to run, signed in as the owner:**
+1. Open one cloud plan in two tabs of the same browser, both signed in as him.
+2. Edit the same element from both within a few seconds so a conflict banner fires.
+3. **Every banner must read "… in another tab of yours" and must name NOBODY** — not "a teammate",
+   not a display name. ⛔ This is the whole item.
+4. Reload one tab and repeat IMMEDIATELY, before the page settles. This is the case that produced
+   the report: the resolver used to read the signed-in id once, at mount, before auth had resolved.
+5. On a genuinely SHARED project (8 South or RICHEY), have a second account edit an element. That
+   banner **must** name the teammate — the fix must not have made every conflict anonymous.
+
+### V161952 — B366384–B366386: sharing tells the truth about an already-shared project, and the state is visible `Blocker: auth`
+
+**Why this is here and what is NOT pending.** The DATABASE half is done and was proven against the real
+production rows this session, impersonating the owner and writing nothing (all three calls returned
+`changed:0`). That is stronger than a click-through and is **not** awaiting anything:
+
+| scenario (real data) | answer | was |
+|---|---|---|
+| re-share **8 South** (`smqiljx5fngg`, v587) to the team it ALREADY has | `outcome:"already", matched:1, mismatched:0` | returned `0` → *"This project isn't in the cloud yet"* |
+| a group that does not exist | `outcome:"not-found", matched:0` | indistinguishable from the above |
+| **Goose Creek** (4 plans) private→private, corrected group key | `outcome:"already", matched:4, plans:4` | — (proves the key reaches every plan) |
+
+Also verified here (no browser): `db/team_share_state.sql` **applied to production 2026-08-11**, both RPCs
+confirmed keyed on `coalesce(data->>'groupId', id)` with `coalesce(group_id, id)` absent from both bodies ·
+**visibility unchanged by the migration — still exactly 2 shared projects, 8 South + RICHEY** · lint 0 errors ·
+the full unit suite green incl. the new **shareMirror** (18) · build green.
+
+**What is pending, and why it cannot be driven here.** The sandbox proxy CORS-blocks Supabase sign-in, so the
+signed-in UI cannot be reached at all. Every step below needs a real signed-in session.
+
+**Steps still to run, signed in as the owner:**
+1. Open the map list. **8 South and RICHEY must each read `Shared with HIP Houston`** on the row's second
+   line (accent, beside the status and acreage) with the shared glyph at the left. **The other 32 must not.**
+   ⛔ This is the one that proves B366385 — before the fix all three indicators were blank.
+2. Right-click **8 South** → the share section must read **`Shared with HIP Houston`**, the HIP Houston row
+   must show **`✓ Unshare`**, and **Make private** must be offered. Right-click any unshared project → it must
+   read **`Private — only you can see this`** and its team row must offer **`Share`**.
+3. Click the already-shared team row's… no — first just **re-share 8 South to HIP Houston** (click the team it
+   already has is an UNSHARE, so instead reopen and share it again after step 4). **Confirm no
+   "isn't in the cloud yet" message appears at any point.**
+4. Unshare **8 South**, confirm the row's `Shared with…` line disappears, then share it back to HIP Houston
+   and confirm the line returns. Reload and confirm it is still there — that is the mirror surviving a save.
+5. **The multi-plan check (B366386).** Share **Silvestri** (5 plans) → then confirm from the database that
+   **all 5 rows carry the team**:
+   `select id, name, team_id from sites where coalesce(data->>'groupId', id) = 'smrp1wrgg6u5' and deleted_at is null;`
+   Then unshare it and confirm **all 5 clear**. Repeat for **Goose Creek** (4 plans) if you want the second
+   sample. ⚠ Note this is expected to PASS on today's data — the corrected key selects the same rows as the
+   old one for every one of his real groups (measured); the fix is preventive. What the check is really
+   guarding is that the share reaches all 5 at once and the unshare clears all 5 at once.
+6. Open the **Team** tab → the shared-projects count for HIP Houston must read **2**, not 0.
+7. Before/after list-row appearance for the record: BEFORE = status + acreage only, with a small accent
+   figures glyph whose meaning was hover-only. AFTER = the same line plus `· Shared with HIP Houston`.
+
+### V161953 — B366387–B366389: the project switcher is a project LIST again, and its icons match `Blocker:` none — owner judgement only
+
+**⚠ MOST OF THIS IS ALREADY PASSED HERE, in a real browser, per ATTEMPT-BEFORE-YOU-PARK.** The dropdown is
+logged-out reachable, so it was driven rather than parked. `e2e/project-rename.spec.js` — **8/8 passed**
+against Chromium (`PW_CHROME=/opt/pw-browsers/chromium-1234/chrome-linux64/chrome`, the repo's pinned
+Playwright wants revision 1228 which is not in this image):
+
+- ✅ **No "All projects (…)" row** in the open dropdown (`toHaveCount(0)`), and **no `project-rename-current`**.
+- ✅ **The kebab is clicked with NO hover first** — the case that was impossible before — and rename through it
+  still writes **every plan in the group** and survives a reload.
+- ✅ Captured the open dropdown before and after. **BEFORE:** search field → **`▦ All projects (Map)` · current**
+  → the project row (no kebab, timestamp only) → `+ New project`. **AFTER:** search field → the project row
+  carrying **`current` AND the ⋮ kebab, with nothing hovered** → `+ New project`. One row shorter, and it now
+  reads as a list of projects with a New-project action, which is what the owner asked for.
+- ✅ Also green here: lint 0 errors · the full unit suite incl. **projectSwitcherChrome** (21) · build green ·
+  both re-pointed ui-audit harnesses (**verify-new1to3** inverted, **verify-b439-b440-project-manage**
+  strengthened) updated in the same commit as the change they describe.
+
+**What is genuinely left, and neither is something a harness can answer:**
+1. **The owner's own look at the two icons.** *"They just look kinda like shit"* is an aesthetic verdict, and
+   the fix (matched monochrome stroke SVGs inheriting their row's colour, Delete's in the danger red) has to
+   be judged by him on his own display. If the new pencil/wastebasket still read wrong, say so and they get
+   redrawn — this is not a "confirm it works" step.
+2. **A real touch device.** The kebab being reachable without hover is asserted in a browser, but *tapping* it
+   on a phone or tablet is the case the whole precondition exists for, and only real touch hardware proves it.
+   ⛔ If this fails, B366388's removal of the crumb rename is unsafe and must be reverted with it.
+
+### V162864 — B367296: the header pill on Clay & Porter reads just the ETJ, and Bain no longer joins Katy to the answer `Blocker: auth`
+
+**Proven here, as far as this environment can reach — the residual is only the signed-in header on his own account.**
+
+- **THE WHOLE PORTFOLIO, LIVE.** All 28 sites driven through the real `identifyJurisdiction` + `formatJurisdictionBadge` against the real TxDOT / TxGIO / H-GAC services (`node ui-audit/verify-jurisdiction-portfolio.mjs`), before and after: **27 correct → 27 correct**, 0 mislabelled, 0 unresolved, 1 site with no drawn geometry, both runs.
+
+| site | before | after |
+|---|---|---|
+| 8 South | City of Pearland · Harris County | *(unchanged)* |
+| Bain | Unincorporated / City of Houston · ETJ / City of Katy · edge only · Fort Bend County | **City of Houston ETJ · Fort Bend County — touches City of Katy** |
+| Bayport V | City of Pasadena · Harris County | *(unchanged)* |
+| Clay & Porter | Unincorporated / City of Houston · ETJ · Harris County | **City of Houston ETJ · Harris County** |
+| Cravens | City of Missouri City · Fort Bend County | *(unchanged)* |
+| Forbidden Gardens | Unincorporated / City of Houston · ETJ · Harris County | **City of Houston ETJ · Harris County** |
+| Gessner | City of Houston · Harris County | *(unchanged)* |
+| Goose Creek | Part in City of Baytown (6 of 14 lots) / rest in its ETJ · Harris County | **Part in City of Baytown (6 of 14 lots) · rest in its ETJ · Harris County** |
+| Grand Port | Unincorporated / City of Baytown · ETJ · Chambers County | **City of Baytown ETJ · Chambers County** |
+| Hoffmeister · Houston ColdPort · JFK · Jacintoport · Katz · Kennedy Greens · Pappadoupolos · Pinnacle · Pinto II · RICHEY · Richfield · Schiel · Silvestri | Unincorporated / City of Houston · ETJ · Harris County | **City of Houston ETJ · Harris County** |
+| I-10/HWY 90 | Unincorporated / City of Brookshire · edge only · Waller County | **Unincorporated · Waller County — touches City of Brookshire** |
+| Martini · Mesa | City of Houston · Harris County | *(unchanged)* |
+| Tsakiris | Part in City of Katy (2 of 9 lots) / rest outside it · no ETJ published for City of Katy · Waller County | **Part in City of Katy (2 of 9 lots) · rest outside it (no ETJ published for City of Katy) · Waller County** |
+| Will Clayton | City of Humble / City of Houston · ETJ · Harris County | **City of Humble · Houston ETJ · Harris County** |
+
+- **EVERY IN-CITY SITE STILL NAMES ITS CITY** (8 South, Bayport V, Cravens, Gessner, Martini, Mesa, Will Clayton). **EVERY ETJ SITE NOW LEADS WITH THE ETJ** (16). **EVERY NO-ETJ SITE READS UNINCORPORATED** with its nearby city behind the em dash (I-10/HWY 90). **GOOSE CREEK STILL DOES NOT CLAIM BAYTOWN** — it reports 6 of 14 lots and names the ETJ that holds the other 8.
+- **RENDERED, IN A REAL BROWSER.** `npm run verify:jurbadge` — the real `AppHeader` + `JurisdictionBadge` over the real identify chain and the recorded agency answers, 4 widths × both themes: **49/49**, mutation-proven (restoring the "Unincorporated ·" prefix turns 16 rows red). It also measured the clip: Bain 464 px → 349 px at 980 px, and the governing lead always fits — residual tail ellipsising is **B367298**.
+
+**WHAT IS STILL PENDING, AND IT IS ONLY THIS.** The header pill on **his signed-in account, on planyr.io, with Clay & Porter open** — the sandbox cannot sign in to Supabase (proxy CORS), so the one thing not driven here is the real plan loading its real parcels and painting the pill.
+
+- **PASS** = Clay & Porter's header reads exactly `City of Houston ETJ · Harris County` — the words "Unincorporated" and "/" both absent.
+- **AND ON BAIN** = `City of Houston ETJ · Fort Bend County — touches City of Katy`. Katy must be after the dash. If it is ellipsised away at his window width that is B367298 and not a failure of this item — but the part BEFORE the dash must be complete and readable.
+- **AND THE NUMBER THAT MATTERS DID NOT MOVE.** On any of the 16 ETJ sites, open Yield → Stormwater and check the floodplain administrator still names the **City of Houston** candidate and the finished-floor rule is still the Ch. 19 one (0.2% WSE + 2 ft). B367297 is the item that guarantees this in code; this is the eyes-on confirmation that nothing else was reading the label.
+- **A NULL IS NOT A DISPOSITION (STANDING RULE #2).** If the pill cannot be provoked into showing anything, say so and take one of the three admissible routes — do not record "not reproducible" and archive.
+### V165104 — B369536: on or after **2026-09-18**, does the retention job actually DELETE? `Blocker: real-data`
+
+**Due 2026-09-19, and the extra day is not slack — read this before filing a failure.** The oldest row is **2026-06-20 22:16:28 UTC**, so it crosses 90 days at **2026-09-18 22:16 UTC** — *after* that morning's 07:20 run. **The first run that can delete anything is 2026-09-19 07:20 UTC.** A read on 2026-09-18 will correctly return `WAIT` and proves nothing; do not report that as a failure. A one-shot Routine is armed for **2026-09-19 08:00 UTC**; if it is not honoured, run it by hand.
+
+**⛔ THE ONE THING THAT CAN RUIN THIS CHECK, AND IT TAKES ONE KEYSTROKE: do NOT call `select public.prune_client_errors()`.** A hand-run writes a run row byte-identical to a scheduled one, so it manufactures exactly the evidence this check exists to gather, permanently and undetectably. That is the same trap V84560 was written around, and it is why the reader below is `select`-only. Do not seed rows, do not age a row "to test it", do not help it along.
+
+**Steps.** Paste **QUERY 1** from `src/shared/telemetry/client_errors_retention_check.sql` into the Supabase SQL editor on `lyeqzkuiwngunutlkkmi`. One row comes back. Then paste **QUERY 2** from the bottom of the same file (commented out) for the independent pg_cron corroboration.
+
+**Expect / PASS** = `verdict` reads **`PASS-first-deletion-observed`**, with `ordinary_missed 0`, `manual_missed 0`, a non-null `first_deletion_run_id`, and `liveness = ok`. QUERY 2 shows one `succeeded` cron row per calendar day, each paired with exactly one run row.
+
+**FAIL, and they mean different things:**
+- **`FAIL-policy-not-applied`** — the job fired, reported success, and left rows behind that were past 90 days when it ran. **The policy is broken, not the check.** Re-open B369536 with a `Recurrence:` line; the number to report is `ordinary_missed`.
+- **`FAIL-stale`** / **`FAIL-never-run`** — the schedule has stopped. This is a B270913 recurrence (its stopping rule named exactly this), not a new item.
+- **`WAIT-no-eligible-rows-yet` after 2026-09-19** — not a pass and not a "check again later". The 2026-09-18 date is derived from the oldest row (2026-06-20 22:16:28 + 90 days); if nothing was eligible, either that row was removed by something else or the arithmetic is wrong. Re-open and say which.
+- **A `succeeded` cron row in QUERY 2 with NO run row beside it** — worse than any of the above: the function ran and its unconditional insert did not land. That is a new defect, not this one.
+
+**What is already proven, so this is a confirmation and not a discovery.** `test/clientErrorsRetentionCheck.test.js` (26) runs the shipped `.sql` files verbatim against a real Postgres and produces all five verdicts from seeded data at a fast-forwarded clock — including the first deletion, the manual capture surviving beside it, and the `FAIL-policy-not-applied` case mutation-proven by widening the shipped 90-day window to 400. The reader is proven read-only against a live database, and proven unable to be satisfied by an off-schedule (hand) run. It was executed against **production** on 2026-08-11 and returned `WAIT-no-eligible-rows-yet` · 3 scheduled runs · 1 off-schedule · 5,707 rows · next eligible **2026-09-18** — so the query itself is known to work there; only the date is owed.
+
+**A NULL IS NOT A DISPOSITION (STANDING RULE #2).** Whatever comes back, record it here with the date and archive per rule 3. Do not close this on "nothing to see yet".
+
+- Cadence: once · **Due 2026-09-18**
+- Blocker: `real-data` (the production table, and a date that has not arrived)
+
+### V159584 — B364016: Delete forever STAYS deleted across three reloads, on his account `Blocker: auth`
+
+Proven without a browser at the layer where it is decided, and this time through the STORE rather than on in-memory trees — which is the gap that let the first fix ship broken. `test/notesBinPurge.test.js`: purge → reload → three reloads deep, each one also syncing against a server still holding the page live; every earlier case round-tripped through storage too; the 6,000-merge fuzz reloads between rounds. Mutation-proven — restoring the missing argument turns 5 of 19 rows red including the fuzz.
+
+- **HIS OWN STOPPING RULE, ADOPTED VERBATIM.** Create a scratch page, type in it, bin it, press **Delete forever**, reload. PASS = the id is absent from BOTH the live list and the bin, locally and in the cloud, and **stays absent across three reloads**. FAIL = it appears in either, on either side, at any point.
+- **AND IT MUST NOT COME BACK AS A GHOST.** PASS = nothing appears in the sidebar with no content in it. That is the shape this recurrence took and it is the one to look for.
+- **THE 23 ENTRIES AND THE ZOMBIES** — the V152576 checks still stand and are not superseded by this one.
+- **AND AN ORDINARY DELETE STILL WORKS.** Bin a note; check it is still restorable. A tombstone must bury a PURGE, never an ordinary delete.
+- **A NULL IS NOT A DISPOSITION (STANDING RULE #2).** If it cannot be provoked, say so and take one of the three admissible routes. Do not record "not reproducible" and archive — this item has now been reported fixed once and was not.
+
+### V152576 — B357011: the bin he emptied STAYS empty, and the resurrected entries are cleared up `Blocker: auth`
+
+Proven without a browser at the layer where it is decided — `test/notesBinPurge.test.js`: his exact sequence with the revisions, both merge directions, a second equally-stale window, a restore racing a purge, and a 6,000-merge fuzz across five seeds with zero resurrections, mutation-proven. What the sandbox cannot do is sign in, so the account itself is the last mile. **His bin is at 23 entries right now because a reload put them back — that is the defect, not him changing his mind.**
+
+- **OPEN NOTES SIGNED IN, on a tab that has been open a while, and let it sync.** PASS = the entries he emptied are gone and stay gone; the cloud `notes_trees` trash count does not go UP. FAIL = any of the 23 comes back.
+- **THE ZOMBIES.** 15 of his 24 `notes_pages` rows have `purged_at` set and `doc` NULL. PASS = the bin entries naming only those pages are gone from the bin on the next load, and none of them is offering a Restore. FAIL = a row still offers to restore content that no longer exists.
+- **⛔ AND THE TWO-WINDOW TEST, which is the actual repro.** Two windows on the account. In window A, empty the bin. Leave window B alone — it has not seen it. Reload B. PASS = B comes back with the bin EMPTY and the cloud rev does not gain 23 entries. FAIL = they come back.
+- **AND AN ORDINARY DELETE STILL WORKS.** Bin a note in one window; check it is restorable in the other. PASS = it restores. A tombstone must bury a PURGE, never an ordinary delete.
+- **A NULL IS NOT A DISPOSITION (STANDING RULE #2).** If the resurrection cannot be provoked, say so and take one of the three admissible routes — provoke it harder, instrument it, or ask him whether he has seen it again. Do not record "not reproducible" and archive.
+
+### V145568 — B350002: HIS OWN twenty-one-entry bin is now judgeable without restoring anything `Blocker: real-data`
+
+Every mechanism is driven headless against a fixture built to his shape (three useless titles, one empty, one carrying a subpage, one from a deleted project) — `ui-audit/verify-notes-project-integrity.mjs` §7, 21 checks. What this sandbox cannot do is look at HIS bin, which is the thing he asked about.
+
+- **OPEN NOTES → BIN, signed in.** PASS = each of the sixteen "Untitled page" rows now shows the words in it, so you can tell them apart at a glance. FAIL = any row still shows nothing but a name and a countdown.
+- **THE ROW'S FACTS.** PASS = every row names the project it came from (or says plainly that the project no longer exists, or that where it came from was never recorded), when it went, and how much is in it.
+- **READ IT.** Press **Read it** on a row. PASS = the note opens read-only, says "Nothing you do here changes it", and the bin still holds the entry afterwards — nothing has been restored into the live tree. FAIL = it lands back in the rail, or it is editable.
+- **THE BULK CLEAR.** PASS = "Delete the N empty ones forever" names the number of genuinely empty ones, and pressing it takes exactly those and leaves everything with words in it. FAIL = it takes a row that had words, or the count is wrong.
+- **A NULL IS NOT A DISPOSITION (STANDING RULE #2).** If a row still cannot be judged, that is a FAIL to report, not a "could not reproduce".
+
+### V145569 — B350003: the duplicate bar on his real account only names copies he can do something about `Blocker: real-data`
+
+Mutation-proven both ways headless (`ui-audit/verify-notes-project-integrity.mjs` §8): the exact fixture he was shown is silent, and the same two copies both live in live projects is still reported.
+
+- **OPEN NOTES, signed in, and wait for the integrity bar.** PASS = the finding he reported — *"“Coordination” in Grand Port · “Page 1” in a project that no longer exists (in the bin)"* — is **gone**, because neither copy is actionable. FAIL = it is still there.
+- **AND A REAL ONE STILL SPEAKS.** Copy a note into a second live project. PASS = the bar names it. FAIL = it stays silent, which would mean the filter is over-reaching.
+- **ENDING ONE.** On a real finding, press **Keep both**. PASS = it goes, and it is still gone after a reload. FAIL = it comes back.
+
+### V145570 — B350000: a note with a narrowed anchored block PRINTS where it sits `Blocker: print-engine`
+
+Everything on screen is proven — 38 click positions across the full editor width, each landing exactly where it was clicked, read back out of storage (`ui-audit/verify-notes-anchor-zoom.mjs` §9). The print sheet's box arithmetic was changed to match the editor's and the two stylesheets are pinned to each other by unit test, but headless Chromium's `window.print()` produces no paginated output, so the sheet itself has not been seen.
+
+- **PRINT A NOTE that has a block anchored near the RIGHT-HAND edge** (double-click blank space over on the right and type a sentence long enough to wrap). PASS = on the PDF the block sits at the same place across the page as it does on screen, at the same width, with its words breaking in the same places. FAIL = it has moved, changed width, or wrapped differently.
+- **AND ONE ANCHORED LOW ON THE PAGE.** PASS = it prints where it sits rather than being clipped or pushed onto the next sheet mid-block.
+
+### V138560 — B342992: the recovered note opens on his own machine, and a two-window merge no longer loses a page `Blocker: auth`
+
+**Both merge holes are proven without a browser** — `test/notesReachability.test.js` reproduces each in four lines and then sweeps 6,000 randomised two-device merges across five seeds with zero pages left neither live nor binned. **The recovery of his actual note is already done as data**: `notes_trees` went 910 → 911 under a guarded update, and a full re-audit of the account returns zero bodies without a node. What the sandbox cannot do is sign in, so the last mile is his own signed-in session.
+
+- **OPEN NOTES SIGNED IN on planyr.io.** PASS = a top-level note under **“Not in a project”** named `Recovered — Channel Improvements were needed to slow down co…`, and opening it shows the Bain meeting notes intact: channel improvements to slow conveyance, the Quiddity drainage analysis, no offsite easements, Willow Point MUD for water/sanitary, the feasibility study, the $3–4/SF vs $10/SF pricing note, and the Hillcorp blanket easement. FAIL = it is missing, or opens empty.
+- **⛔ ITS NAME IS NOT THE ORIGINAL AND MUST NOT PRETEND TO BE.** The title lived on the entry that went missing. PASS = it is obviously a recovery and the bar (or this note's own row) says the name was lost. Renaming it is his to do.
+- **THE STALE-LOCAL CASE, which is the condition that made the holes reachable:** his local tree was 98 revisions behind AND flagged dirty. After this build lands, open Notes on that machine and let it sync. PASS = the recovered note is still there afterwards, every other note is still there, and nothing in the bin has come back to life.
+- **A REAL TWO-WINDOW MERGE.** Two windows on one account. In window A, bin a note that has a subpage. In window B — which has not seen it — add a NEW subpage under that same note and type in it. Let both sync. PASS = the binned note and the subpage the entry named are in the bin, and **B's new subpage is still live**, at the top level of the same project, with its text. FAIL = it is gone from both the tree and the bin (the exact shape that lost the Bain note).
+- **A NULL IS NOT A DISPOSITION (STANDING RULE #2).** If the two-window case cannot be provoked, say so and take one of the three admissible routes — provoke it harder, instrument it, or ask him whether he has seen another note vanish. Do not record "not reproducible" and archive.
+### V166928 — B371360: do the +/− controls now arrive soon enough, on the REAL Bain plan AND on the laptop `Blocker: real-data`
+
+**Everything mechanical is proven here.** `test/featureEditZoom.test.js` (24) pins the owner-set floor and the viewport cap and replays ALL THREE superseded rules as mutation checks; `e2e/feature-edit-zoom.spec.js` drives a real wheel gesture either side of the floor **in force on the canvas the browser actually opened**, and proves every control answers its own centre to `elementFromPoint` while faded. **What only his own plan can settle is the JUDGEMENT.** This **supersedes V131552**, which he ran and failed — do not chase its 0.359 px/ft steps.
+
+- **STEPS — and please do this ON THE LAPTOP first, because that is the screen the new viewport term is for.** Open **Bain / "Concept - Original"**. Zoom out until the whole site fits: the green `+` / red `−` must still be **absent**. Now zoom in slowly, hovering or selecting Building 3.
+- **PASS** = they fade in while Building 3 still takes up roughly a **fifth to a quarter** of the drawing area — clearly less than before — and they are clickable the instant they are visible. Adding a dock zone or a bump-out at that zoom should feel like a normal working move.
+- **THE SECOND HALF OF THE PASS, and it is the point of this round: do the SAME thing on the 1600 px monitor.** The building should take up about the **same share of the screen** on both machines when the controls appear. If the laptop still makes you give up noticeably more of the screen than the monitor does, the viewport term is not doing its job and that is the thing to report.
+- **FAIL, either direction** = back at whole-site zoom (the original defect returning) · or still waiting until the building fills a third or more. **Report it with the same kind of number you gave last time** — roughly what fraction of the screen the building covers when they appear, and on WHICH machine — and the floor moves again as a stated product decision. **It will not be re-derived from the bump-out again**; that has been tried twice and both times it came in late.
+- Also glance at a SMALL site: the rule is still site-size independent, so a 30-acre plan on the same screen must behave identically.
+
+### V166929 — B371361: can the plan switcher be opened on the laptop, on a site with a long jurisdiction `Blocker: auth` `Blocker: live-GIS`
+
+**The layout is proven here** — the ui-audit harness `verify-header-nav-clickable` (132 checks) drives the real header at 1024 / 1280 / 1440 / 1600 across four jurisdiction strings and asks `elementFromPoint` at every point of each chip's box; it loses 201/201 points on the pre-fix build and 0 after. **What it cannot do is produce a LIVE jurisdiction**: the pill is fed by a signed-in identify against external GIS, both blocked in the sandbox, so the string on his screen is the one thing only his own session renders.
+
+- **STEPS** — on the **laptop** (a normal-sized window, not maximised on the big monitor), open **Bain / "Concept - Original"**, and wait for the jurisdiction chip to fill in.
+- **PASS** = clicking the plan name — **and specifically the little ▾ at its right end** — opens the plan menu, first time, every time. The jurisdiction chip sits clear of it. Try the project name beside it too.
+- **ALSO CHECK A LONGER ONE.** Open **Goose Creek**, whose chip names the city, the share of lots, the remainder's ETJ, the county and the school district. If the chip runs out of room it should shorten to something like **"Part in City of Baytown (6 of 14 lots) +3"** — hovering it must still show the whole thing. **A chip that gets shorter is working as designed; a chip that overlaps the plan name is not.**
+- **FAIL** = any press near the right end of the plan or project chip that does nothing · a chip squeezed so small you cannot aim at it · the jurisdiction disappearing entirely at a width where there was clearly room for a shortened version · or the shortened form hiding the LEADING jurisdiction rather than the trailing detail.
+- Worth one glance while you are there: the Site / Review / Library / Scheduler tabs on the row below. They were measured as unaffected, but you are the one on the real screen.
+
+### V131553 — B335985: a Google Earth export of a real plan opens clean `Blocker: real-data`
+
+**Proven here on his own rows:** `ui-audit/fixtures/bain-concept-original.json` through the real `siteToFeatures` + `buildKml` — **261 placemarks before (209 of them dock-door pins) → 52 now, zero dock doors**; `test/kmzExport.test.js` (40) pins the default, the run-per-side shape, and `settings.showDocks` being inert in both directions. **What cannot be done here is the export itself**: a KMZ needs a plan placed on the map (a signed-in, georeferenced plan), and nothing can open Google Earth in this sandbox.
+
+- **STEPS** — on **Bain / "Concept - Original"**, File ▸ **Export to Google Earth (KMZ)**. Open the file in Google Earth. Then repeat with **Export with 3D buildings**.
+- **PASS** = no dock-door pins anywhere — the site reads as boundary, buildings, parking, ponds and roads, with the folder tree intact. Toggling **Show dock doors** in View ▾ on the canvas and exporting again produces an **identical** file: the canvas checkbox must no longer change what is in the export.
+- **ALSO** — from the map view, right-click the empty map ▸ **Export to Google Earth (KMZ)** with several sites visible: same result across all of them, regardless of what each plan had shown on screen when it was last saved.
+- **FAIL** = dock-door markers still present · the file changes when the View ▾ toggle changes · anything else missing that used to be there (buildings, boundary, ponds, roads, the 3D massing on the second export).
+- **WORTH SAYING IF IT COMES UP:** dock doors can still be exported, as one line per dock side carrying the door count, but **there is no button for it** — that follows the dimension lines, which have been off with no control since this export was built. If you want a checkbox for either, say so and it becomes a small, separate piece of work.
+
+### V124976 — B326416–B326419: new projects are shared with the team by default, the per-plan lock holds, and NOTHING pre-existing changed `Blocker: auth`
+
+**Why this is here and what is NOT pending.** The SECURITY property — an existing project can never become
+visible to a teammate — was verified THIS SESSION directly against the production RLS policies, as a real
+`authenticated` role with a real JWT subject (`db/test/team_share_scope.test.sql`: 15/15 pass; the same suite
+run against the old permissive guard fails 3, including the teammate reading the pre-existing project's
+drawing). That is stronger evidence than a browser click and it is **not** awaiting anything. What is pending
+is the signed-in **UI** pass, which the sandbox cannot drive: the proxy CORS-blocks Supabase sign-in, and this
+needs TWO accounts on one team.
+
+Verified here (no browser needed): lint 0 errors · 10,364 unit tests green · build green ·
+`npm run perf:bundle` back to its pre-existing baseline · `panel-copy-budget --check` green ·
+production row counts unchanged by the migration (65 sites / 1 shared / 0 locked, before and after).
+
+**Steps still to run, signed in, with two accounts (A owner, B teammate on one team):**
+1. As A, create a NEW project → B sees it, and can move a building on it (full edit).
+2. As B, open one of A's PRE-EXISTING projects by id / from the list → **must not be visible at all.**
+   This is the one that matters; anything else failing is a bug, this failing is an incident.
+3. As A, plan menu → **Lock to view-only for teammates** → B can still open and read it, but every edit is
+   refused and the plan list shows 🔒. As A, unlock → B can edit again.
+4. As A, Team tab → untick **Share new site plans with this team** → the NEXT new project is private;
+   existing shared ones are unchanged. Re-tick → the next one is shared again.
+5. As B, open a shared project and confirm **Notes / Library / Review / Schedule are B's own and empty** —
+   they are per-user by construction (no team column), so this is a confirmation, not a behaviour to build.
+6. Sign in as a user on NO team → create a project → nothing about the experience differs from today.
+
+### V121984 — B323424: a layer that is ON, past its zoom gate, and covers NOTHING here reads as dormant `Blocker: live-GIS`
+
+**Three of the four row states are proven here already**, in a real browser, by `e2e/layer-zoom-dormant.spec.js` (6 cases, red on the pre-fix build): checked-below-gate, checked-above-gate, unchecked, the click-to-fix actually moving the map, a second layer KIND with a second gate source, and the map finder. **The fourth state cannot be reached in this sandbox**: it needs the coverage engine's published-extent probes (`prefetchExtents` → `probeService`), and every GIS host is egress-blocked from Chromium here, so coverage resolves to `unknown` rather than `out` and the row correctly reports `drawing`. The pure model is pinned by `test/layerZoomGate.test.js`; what is unproven is the RENDER of that state.
+
+- **HOW TO DRIVE IT** — on planyr.io, open a plan well outside the Houston region (a Colorado plan, or Dallas) and turn on a layer whose data only covers its home region — a City of Houston utility row, or the district drainage rows. Zoom in past its gate first, so the zoom state is not what you are looking at.
+- **PASS** = the row renders in the dormant treatment — **hollow (outlined) status dot, muted label, dimmed row**, checkbox still checked — and carries an honest line saying the data does not reach this area, with **no** "zoom in N levels" affordance offered (no zoom fixes it, and offering one would be a lie). The row's `data-layer-state` attribute reads `dormant-blank`.
+- **ALSO CHECK, in the same pass:** a layer that is ON, in coverage, and simply came back with nothing gets the same dormant treatment and keeps its own specific message rather than a generic one.
+- **FAIL** = the row is indistinguishable from a drawing one (filled dot, full-contrast label), or it offers a zoom-to-fix line it cannot honour, or it claims "no data in this area" while actually being below its zoom gate.
+
+### V121985 — B323425: contours no longer paint-then-vanish on opening a real plan `Blocker: live-GIS`
+
+**The CAUSE and the FIX are both measured here**, on the real app, by `ui-audit/diagnose-layer-gate-flash.mjs`: pre-fix, four terrain DEM grid pulls went out at map zoom **17.25** while the plan settles at **15.08**; post-fix, **zero**, with the gate answered once at the plan's real opening zoom. `e2e/layer-zoom-dormant.spec.js` guards that (proven red pre-fix at 4 pulls). **What this sandbox cannot produce is the PAINT itself** — every `elevation.nationalmap.gov` request from Chromium here is `ERR_CONNECTION_RESET` (curl succeeds; the browser does not), so no contour line can be drawn at all and the "vanishing" half has never been on screen here.
+
+- **HOW TO DRIVE IT** — on planyr.io, open **Tsakiris** (or any tract whose whole-site view sits below the contour gate) with **Contour lines (1 ft)** left checked from a previous visit, so the terrain is already cached. Watch the first five seconds after the plan opens.
+- **PASS** = contour lines **never appear at all** at that zoom. The row reports itself dormant immediately — hollow dot, `Not showing at this zoom — zoom in N levels` — and clicking that line brings the contours in. Nothing is drawn and then taken away.
+- **FAIL** = lines paint on open and disappear a second or two later while the box stays checked. If that happens, re-run `ui-audit/diagnose-layer-gate-flash.mjs` against the deployed build and report the zooms it holds and the zoom each grid pull was issued at — that pair is the whole diagnosis.
+- **WHILE YOU ARE THERE (cheap, same page):** confirm the layers you had on last time still arrive at all. The fix defers every layer's admission until the opening view is framed, so a regression would look like layers that never load rather than layers that flicker.
+### V111104 — B286000 (×2): the smooth-zoom switch is where he now looks for it, on a SIGNED-IN account `Blocker: auth`
+
+**The signed-OUT home is proven here** — `e2e/smooth-zoom-settings.spec.js` (3/3) opens the row-1 Settings gear in a real browser, finds Smooth zoom beside the display theme, confirms it starts ON, flips it, proves `planarfit:smoothZoom` went to `"0"`, reloads, and flips it back; and it proves the row is absent from BOTH the View menu and the plan menu, so there is exactly one switch. **What a sandbox cannot do is sign in** (the egress proxy CORS-blocks Supabase auth), and signed IN the gear is deliberately hidden — the control lives in account → Settings → **Interface** instead. That path has never been rendered here.
+
+- **STEPS** — signed in on planyr.io: click the account pill → **Settings**. The panel should open on **Interface**, with Display theme first and **Smooth zoom** under it.
+- **PASS** = the row is there, checked by default, and toggling it OFF then reloading leaves it OFF; the drawing re-draws on every wheel notch with it off and scales-then-sharpens with it on; and **there is no Smooth zoom row anywhere else** — not in View ▾, not in the plan flyout.
+- **FAIL** = the row is missing, appears in two places, resets on reload, or the setting stops affecting how the wheel zoom draws.
+- **The specific regression to watch for:** a change made in Settings must take effect on the canvas **without a reload** (the planner subscribes to the preference), and turning it OFF mid-gesture must not leave a scaled frame on screen.
+
+### V111106 — B1173 (×2): both header rows survive real fullscreen on HIS screen `Blocker:` none — owner judgement only
+
+**Everything mechanical is proven here** — `ui-audit/verify-new1-fullscreen.mjs` (23/23) shows the header on screen at `top = 0`, at the same height as outside fullscreen, carrying row 1 and all five module tabs, **read before any pointer is moved**, with exactly one header claiming the mode, no stray floating exit button, the drawing still welded to the imagery, a refused request reporting itself, and a workspace switch from inside fullscreen keeping the document fullscreen with `f` still live. `e2e/module-keepalive.spec.js` (7/7) covers the same from the product side. **What a headless browser has none of is browser chrome**, so the one thing it cannot show is the thing fullscreen is FOR.
+
+- **STEPS** — on a plan, press the ⤢ button (or Ctrl/⌘+Shift+F).
+- **PASS** = the browser tab strip, address bar and OS taskbar are gone, AND the Planyr breadcrumb row and workspace-tab row are both still there, unmoved, with no hover needed. Switch **project**, then **plan**, then to **Review** and back — all without leaving fullscreen. Press ⤢ again (or Esc) and everything returns.
+- **FAIL** = either row missing or sliding away · the tabs needing a hover · a duplicate "Exit fullscreen" control floating over the drawing · the drawing shifting relative to the aerial on the way in or out · `f`/⤢ dead after switching workspace.
+- **This supersedes V544**, which was written for the top-edge reveal that no longer exists. Do not chase V544's steps.
+
+### V111107 — B312545: the Settings panel's four sections, rendered `Blocker: auth`
+
+**Nothing below the nav has been rendered here.** Sign-in is impossible in this sandbox, and the whole panel is signed-in only, so this item's evidence is source guards (`test/fullscreenChrome.test.js`, 6) and nothing else. That is stated plainly rather than dressed up: the nav, the section switch, the password form, the sign-out-everywhere round trip and the responsive collapse are all owed.
+
+- **STEPS** — signed in: account pill → **Settings**.
+- **PASS** = it opens on **Interface**, NOT on change password. The nav lists **Profile · Team · Account & security · Interface**; each switches without the modal jumping. **Account & security** holds change password (which still works — set one and sign back in with it) and **Sign out on all devices**. Squeeze the window narrow: the nav becomes a row of chips above the content rather than a squashed column.
+- **CHECK THE SIGN-OUT-EVERYWHERE ACTION PROPERLY, since it is the one new capability** — sign in on a second device or a private window first, press it, and confirm BOTH sessions end. If it fails it must say so on screen; a silent failure here is the worst outcome, because you would believe you were signed out when you were not.
+- **FAIL** = opens on the password form · a section is empty · Profile or Team lost anything they had · the panel overflows its modal at any width · sign-out-everywhere leaves the other session alive, or fails silently.
+### V114272 — B315712/B315716: a REAL conflict between two signed-in windows keeps the copy in its own project, and a note filed nowhere comes back `Blocker: auth`
+
+**Everything decidable without a network is proven here already.** `test/notesTwoClientConflict.test.js` drives TWO real instances of the store — separate localStorage each — against an in-memory server that owns `rev` exactly as the deployed `notes_touch_rev` trigger owns it: both windows edit one note, one loses the guard, the loser's text is parked, and the resulting store is asserted page by page (the exact count, and every page's project equal to its source's). `ui-audit/verify-notes-project-integrity.mjs` drives the banner, the chip, the recovery and the project-delete count in a real browser, 33 rows. Both are mutation-proven. **What the sandbox cannot do is sign in** — the egress proxy CORS-blocks Supabase auth — so the one thing unconfirmed is the conflict as it actually arrives from the cloud.
+
+- **SIGNED IN on planyr.io, TWO WINDOWS on one account.** Open the same note in both. Type something different in each, a few seconds apart, so the second push is genuinely refused. PASS = the conflict bar names the note, offers **Keep this one** / **Use the other**, and never mentions another person.
+- **Press "Use the other" in the window that lost.** PASS = a page appears named `<title> (this window's copy)` **as a sibling of the note it came from, in the SAME project**, and a line says so in as many words at the moment it happens — not something you have to go and find. FAIL = the copy lands anywhere else, or appears with nothing said.
+- **Then check the account**, with the service role on `planyr_production`:
+  ```sql
+  select id, rev, updated_at, left(doc::text, 80) from public.notes_pages order by updated_at desc limit 5;
+  select jsonb_pretty(data->'pages') from public.notes_trees;
+  ```
+  PASS = both bodies exist, and in the tree blob the copy's root carries the **same `projectId`** as the note it was copied from. This is the assertion that matters; the on-screen line is only how you know without looking.
+- **B315716's half, on the same session:** the note `pg_msgaajbf1o61rit` is in the cloud with 1,909 characters of real content (channel improvements / Willow Point MUD / $3–4 vs $10 per SF / the Hilcorp easement) and in **no tree node**. PASS = the banner says one note is filed in no project, **Put it back** files it under "Not in a project", it opens with that text intact, and it is **still there after a reload** — the loop that deleted and re-downloaded it is broken. FAIL = it is gone again on the next load.
+- **A NULL IS NOT A DISPOSITION HERE (STANDING RULE #2).** If the conflict cannot be provoked, say so and take one of the three admissible routes — provoke it harder, instrument it so it captures itself, or ask the owner whether he has seen another stray copy. Do not record "not reproducible" and archive.
+### V115424 — B316864: does a FORCED element survive the CLOUD round trip on a signed-in session? `Blocker: auth`
+
+The on-device half is proven here and does NOT need re-running: the override is written into the saved plan record (asserted on the stored bytes), survives a reload, and rides the export sheet — all on the owner's real Bain plan, 19/19, plus 58/58 on the parity fixture. `bandForce` is an ordinary field on the element object, and `elementRows.rowFor` serializes the WHOLE object as the row's `data`, so there is no new column and no migration. What cannot be run here is the one path that needs a signed-in Supabase session, which this sandbox's proxy CORS-blocks.
+
+- **Where:** planyr.io, **signed in**, any plan with a building and something under it (paving, a pond, a parking field).
+- **The check, three steps.** (1) Right-click the lower object → **Force on top of everything**. PASS = it immediately draws over the building. (2) **Hard-reload the page.** PASS = it is STILL on top, and its Properties panel still shows the "Forced on top of everything" note with its restore button. (3) **Open the same plan on a SECOND device or browser profile** signed in as the same user. PASS = it is on top there too — that is the `site_elements` round trip, and it is the only step this V exists for.
+- **Then put it back:** right-click → **Use the normal layer order**. PASS = it returns under the building, and stays under it after a reload.
+- **FAIL =** the force is lost by any of those three, or the second device shows the old order. A loss at step 2 is local storage; a loss at step 3 is the cloud row — say which, because they are different bugs.
+- **⛔ ALSO CONFIRM THE DEFAULT DID NOT MOVE, on a plan he has NOT touched.** Open any other plan and check nothing has visibly restacked. That property is asserted in `test/elementBandForce.test.js` as a replay of the pre-fix comparator, so this is a belt-and-braces look, not the primary evidence.
+- The **owner never runs this** — Claude-cohort check on a signed-in session. ⏳ **PENDING**
+
+### V115425 — B316865: on a signed-in tab with the GIS layers ON, does a right-click still reach the feature under the acreage badge? `Blocker: auth`
+
+Reproduced, fixed and mutation-proven here on the owner's real Bain plan data (removing the fix turns four rows of `verify-v91632-real-plan.mjs` red). The one configuration this sandbox cannot reach is his live signed-in tab with real GIS layers painting — which matters because that is where OTHER hover-armed chrome could sit in the same stack.
+
+- **Where:** planyr.io, **signed in**, the **Bain / "Concept - Original"** plan (the one this was found on), with the map layers he normally has on.
+- **The check:** move the pointer onto the **detention pond** and let it REST there for a moment (this is the whole point — the badge arms on hover, not on click), then **right-click**. **PASS =** the POND's menu opens — ⚙ Pond settings, the four Arrange rows, Properties, Force on top of everything. **FAIL =** the PARCEL menu opens (*Merge parcels · Hide acreage label · **Delete parcel***), which is the reported defect.
+- **Then the affordance that must NOT have been taken away:** right-click the acreage badge itself where it sits over open ground with nothing beneath it. **PASS =** the badge's own menu still opens (Hide acreage label / Reset label position) — the fix forwards only when something else is genuinely underneath.
+- **And one more, on any plan:** right-click a MARKUP and a MEASUREMENT that sit under a parcel badge. PASS = each opens its own menu. The fix is one shared dispatch across all five families, so a family that regressed would show here.
+- The **owner never runs this** — Claude-cohort check. ⏳ **PENDING**
+
+### V107264 — B296224: the ledger bridge resolves a REAL `dirty` PR, and refuses a REAL amendment race `Blocker: real-data`
+
+**Everything the bridge decides is proven here already** — `test/resolveLedgers.test.js` drives 12 cases, three of them against a genuine `git merge` conflict produced in a throwaway repo (hermetic, no network): two independent appends are unioned, two amendments of one item are refused with the markers left in place, and a clean file passes through byte-identical. **What a sandbox cannot manufacture is the real thing**: this repo's actual `origin/main`, 42 in-flight branches, five bookkeeping files diverging at once, and the specific hunk shapes git produces from them. That is a concurrency class, so it parks.
+
+- **NEXT TIME A PR HERE GOES `mergeable_state: dirty`** — which on this repo's traffic is a matter of hours — resolve it with `git fetch origin main && git merge origin/main` and then `npm run resolve-ledgers` **instead of editing the conflict markers by hand.**
+- **PASS** = it reports the files and hunk counts it unioned, `git status` shows them staged, the conflict markers are gone, `BACKLOG_OPEN.md` and `MAP.md` were regenerated rather than concatenated, and `npm test` is green afterwards (in particular `idUniqueness`, `ledgerDuplicateIds` and `backlogIndex`).
+- **ALSO A PASS, and the more valuable outcome:** it REFUSES, names an id that appears on both sides, and writes nothing. That is the amendment race the bridge exists to stop a union from silently duplicating — record which id, and that the markers were still intact for the hand merge.
+- **FAIL** = it resolves a hunk where the same id really was on both sides, leaves a conflict marker behind, stages a file it did not fully resolve, or reports success while `npm test` then goes red.
+- **Record either way in `.planyr-ledger-merges.log`'s terms** (`resolved` / `refused` / `rolled-back`): that tally is the evidence deciding whether option (c) — the ~1,400-item migration — is worth doing. **If `refused` never fires across a month of merges, the conflicts are 100% arrival-order and (c) is justified by data.** If it fires often, the bridge is already doing the important half and (c) is less urgent than it looks.
+- **✅ PASS — 2026-08-09, PR #989 (`resolved`).** The PR went `mergeable_state: dirty` within a minute of being opened (which is why its `build` check was never created — GitHub cannot build a test-merge ref that does not exist). `git fetch origin main && git merge origin/main` produced conflicts in **`BACKLOG.md`, `BACKLOG_OPEN.md` and `VERIFICATION.md`**; `npm run resolve-ledgers` unioned **2 files / 2 hunks** with no id on both sides, **regenerated `BACKLOG_OPEN.md`** rather than concatenating it, staged them, and left zero conflict markers. `MAP.md` and `BACKLOG_OPEN.md` drift checks passed and the full suite was green afterwards (511 files / 10,268 tests, `idUniqueness` and `backlogIndex` among them). Logged `{"outcome":"resolved","files":2,"hunks":2}`. **The `refused` branch did not fire** — one more data point for the option-(c) tally.
+
+### V97312 — B298756: an attachment reaches the ACCOUNT and comes back on a second machine `Blocker: auth`
+
+**Everything device-side is proven here** — a real file goes through the picker, the chip carries its name, type and size, the document holds only an id, the bytes are in IndexedDB marked `kind: "file"`, the Markdown export embeds it and the print sheet names it (`ui-audit/verify-notes-tier1.mjs` §6, 7 rows). **What the sandbox cannot do is sign in** — the egress proxy CORS-blocks Supabase auth — so the cloud half of the tier is the one thing unconfirmed, and the migration it depends on is exactly what was applied this session.
+
+- **SIGNED IN on planyr.io**, open any note and drop in a **PDF**, an **XLSX** and a **DWG** (the three the owner named). PASS = three chips, each with its own type badge and size.
+- **Then check the account**, with the service role on `planyr_production`:
+  ```sql
+  select id, kind, name, mime, bytes, page_id, deleted_at
+    from public.notes_images where kind = 'file' order by created_at desc limit 10;
+  ```
+  PASS = one row per file, `kind = 'file'`, `name` the real filename, `bytes` non-zero. FAIL = no rows (the upload was refused) or `kind = 'image'` (the client did not tag it).
+- **AND THE BYTES, not just the row:** the object must exist in the private `notes-images` bucket at `<uid>/<id>`. The bucket's MIME allow-list was removed for exactly this; a refusal here means the migration did not take.
+- **THE ONE THAT MATTERS MOST — the SECOND machine.** Sign in on another browser/profile, open the same note, and press **Download** on each chip. PASS = the real file, byte-for-byte, with its own name. FAIL = "File missing", which would mean the lazy cloud fall-through does not cover attachments.
+- **Also confirm nothing regressed for PICTURES**, which share the tier: paste a screenshot into a note on machine A and open it on machine B.
+- Already confirmed, do NOT re-test: the local path, the ceiling refusal, the export and the print sheet — all green headless.
+- The **owner never runs this** — it is a Claude-cohort check on a signed-in session. ⏳ **PENDING**
+
+### V97313 — B298758: a real PDF, from the browser's own dialogue, with a callout and a FOLDED toggle on the page `Blocker: real-data`
+
+The sheet is built and asserted headless (`ui-audit/verify-notes-tier1.mjs` §8): a folded toggle reaches the sheet as an `<details open>` whose contents are in the **laid-out text**, and the callout prints with its tone. What no headless run can do is drive **Save as PDF** — the print dialogue belongs to the browser — so the last hop from sheet to file is unconfirmed, and PDF-PARITY is a mandatory live class.
+
+- **On a real note with real content**, put in: a **danger** callout, a **toggle that is FOLDED on screen**, an **attached file**, a heading or two and a checklist. Press **Print** and choose **Save as PDF**.
+- PASS = the PDF shows **the folded section's contents, expanded**, the callout as a bordered block with its own left rule and glyph, the attachment named with its type and size, and the sheet **light-on-white whatever the app theme is**. FAIL = a blank box where the folded section was — the exact failure the unconditional expand exists to prevent.
+- **Also open the exported Markdown in GitHub** (paste it into a gist preview): the callout must render as a real **NOTE / TIP / IMPORTANT / WARNING / CAUTION** alert, not as a plain quote, and the toggle as an open disclosure.
+- Already confirmed, do NOT re-test: the nodes are in the stored document, the fold survives a reload, the tone changes in place, and the Markdown text is correct — all green headless.
+
+### V97120 — B298560/B298561/B298562: the flood/drainage check's elevation leg, on his own Bain plan `Blocker: real-data` + `Blocker: live-GIS`
+
+**Status: ✅ PASSED (2026-08-09) on (b), (c) and (d) — verified live by the owner on his own Bain plan, signed in, edge `3ecd1e1`. One RESIDUE, (a), and it is a mis-specified criterion of mine rather than a defect — see below.**
+
+**THE HEADLINE, and it is the user-visible one: THE COUNTY LAYERS NOW START AT 5 ms.** Warm run, second ↻, PerformanceResourceTiming, offsets from the first request:
+
+| at | host | duration |
+|---|---|---|
+| 0 ms | elevation.nationalmap.gov | 657 ms |
+| 5 ms | gisportal.fortbendcountytx.gov ×4 | 52 / 52 / 52 / 57 ms |
+| 58 ms | gisportal.fortbendcountytx.gov | 44 ms |
+| 1,596 ms | supabase save | 1,380 ms |
+| 3,093 ms | supabase save | 256 ms |
+| | **TOTAL** | **3,349 ms** |
+
+**Every flood-zone answer is in hand by ~100 ms.** Before this they did not begin until the elevation call returned — 1,000 ms on a good day, 7,702 ms on a bad one. **B298561 (NEW-2) is CONFIRMED on his own plan**, including the county-sampler ordering arm that was explicitly out of the sandbox's reach.
+
+**And the loud state shipped properly (B298560/B298562).** The freshness hover reads, verbatim: *"The flood check still matches what's drawn. Ground elevation 135.4 ft NAVD88 — USGS 3DEP elevation, bare-earth, pulled just now."* Provenance named, `data-ground-elev` present for a headless read, nothing silent.
+
+**⛔ CORRECTION TO MY OWN ACCEPTANCE CRITERIA, recorded so this ledger is honest rather than flattering (owner's own correction).** Criterion (a) asked that a warm re-check **not** hit `elevation.nationalmap.gov`. It DOES — 657 ms — **and that is CORRECT, not a failure**: the explicit ↻ is *specified* to bypass the cache, so hitting USGS is the button doing its job, and the hover saying *"pulled just now"* is the confirmation. **(a) was untestable on the path it was written for** — ↻ is by definition the explicit path — so the cache-HIT half is the residue, and the assertion to use is the hover's provenance line (it must read *"held from an earlier … read"* with an age, not *"pulled just now"*) whenever someone can trigger a NON-explicit check.
+
+**RESIDUE:** (a) only — the cache-hit path, on a non-explicit check. (b) real latency, (c) the county-sampler ordering, (d) the named provenance in the hover: **all discharged live.**
+
+**⛔ AND A NEW DATUM THAT LANDS ON B298562's BUDGET, from the cold run on the same plan minutes earlier: a Fort Bend layer took 5,067 ms.** The county service is **not reliably fast either** — 52 ms warm against 5,067 ms cold, same endpoint. B298562 bounded the elevation call at 8 s and left the county samplers on their own 8 s default; whatever budget covers one should cover the other, or the next eight-second check is blamed on the wrong host. Recorded on B298562 as an open follow-up; **not built in this pass.**
+
+<details><summary>Original pending note (kept for the record)</summary>
+
+**Status: ⏳ PENDING.** Everything reachable from this sandbox is already done and is recorded below; what is left needs the REAL federal service and HIS plan, which is the whole point of the item.
+
+**Why this cannot be closed here.** The claim is a LATENCY claim about `elevation.nationalmap.gov` and about the five Fort Bend county water-surface rasters. The sandbox's egress proxy blocks both hosts, and the county-sampler branch only fires once the live jurisdiction identify resolves the county to Fort Bend. A stub can prove the ORDERING and the GATING (and does — see below); only the live service can prove the numbers.
+
+**Already verified HERE, logged-out, against a seeded georeferenced plan with every host stubbed (e2e `drainage-elevation-latency.spec.js`, 4 arms, mutation-proven both ways):**
+- the transect and the first GIS request are issued within one event-loop turn of each other — the transect is no longer in front of the batch;
+- with 3DEP held 5 s, the panel PUBLISHES and the elevation reads a named `pending` state well inside 4 s, then resolves itself with no second press;
+- a second check publishes the HELD value immediately (`data-ground-cached="1"`) while the forced refresh runs underneath, and the fresh answer then REPLACES it;
+- a 503 from 3DEP produces `unavailable`, whose hover names the service and says nothing was assumed.
+- Mutants: publish budget → 60 s turns arm 2 red alone; `cache: null` turns arm 3 red alone.
+
+**Steps for the live pass (signed in, planyr.io, his Bain plan — "Concept A / Quiddity Hydrologic"):**
+1. Open DevTools → Network, filter `getSamples`. Press **↻ Re-check** in the Yield panel. Record: the wall-clock time from the press to the flood verdicts appearing, and the 3DEP `getSamples` duration. **Expected: the verdicts land in well under a second even when 3DEP takes seconds.**
+2. Confirm the five county rasters (`500YR_WSE`, the `100YR` per-watershed candidates, `Willow_500YR_Existing_WSE`) are requested WITHOUT waiting for `getSamples` to finish. **⚠ `Willow_500YR_Existing_WSE` still starts after the other four — that is correct and deliberate** (mosaic-first; see B298561).
+3. Press **↻** again. Hover the freshness dot. **Expected: the hover states the elevation was HELD from an earlier read, with its age; the press does not wait on USGS; a fresh `getSamples` still goes out.**
+4. Reload the page, open the plan, press **↻**. **Expected: still held — the store is IndexedDB, so a reload must not pay again.**
+5. Record the end-to-end check time for comparison against his measured 3,635 / 8,494 ms.
+
+</details>
+
+### V97121 — B298563: does a `draincheck` timing row actually REACH `client_errors`? `Blocker: auth`
+
+**Status: ⏳ PENDING** — not covered by the 2026-08-09 live pass (that pass read PerformanceResourceTiming, which is a different question from whether the app's own row reached the table). Unchanged below. Same shape as V62544 (B265536) and pending for the same reason: an automated run is suppressed from the network write by design (B270912), so only a real signed-in browser can prove delivery.
+
+**Steps:** signed in on planyr.io, press **↻ Re-check** on any georeferenced plan. Then either (a) in the console read `window.pfTelemetry.delivery()` and confirm `ok` incremented, or (b) query `public.client_errors` for `source = 'event:draincheck'` and confirm one row per press. **Expected:** one row carrying `legs` with `elev`, the `wse:*` per-raster entries, `calc`, `save` and `total`, plus `ground` / `groundCached`. **Also confirm the negative:** nothing in the row names the site, its address or its geometry — the payload is an allowlist and this is the read-back that proves it.
+### V96960 — B298401: on planyr.io with the flood-tile flag on, does a Harris plan draw the floodplain instantly — and does a broken archive still fall back to live FEMA? `Blocker: live-GIS`
+**Filed 2026-08-09 with B298401. What was ALREADY proven headless HERE, so this entry is only the gap:**
+`node ui-audit/verify-flood-tiles.mjs` — **10/10 green** against a real Chromium on a seeded Harris plan:
+tiles paint the flood layer in **286–320 ms**, over **3 HTTP range requests totalling 27,392 bytes** of
+`flood-tx-harris.pmtiles`; **zero** agency requests for the picture; the `NFHL as of Nov 15, 2019` stamp is
+on screen; a **404 archive hands the row back to the live FEMA path** (6 agency requests where the working
+archive made 0 — a real mutation check, not a tautology); a county with **no** archive never asks for one.
+Plus `test/floodTiles.test.js` (48) and `test/floodTileRender.test.js` (22) driving the committed archives.
+
+**⛔ WHY THIS IS STILL OWED A BROWSER — the one thing this sandbox structurally cannot show.**
+Every `hazards.fema.gov` request from **Chromium** here dies with `ERR_CONNECTION_RESET` (the egress
+policy; Node reaches the same host fine — that is how the archives were built). So the harness can prove
+the live path is **ENGAGED** and can never prove it **PAINTS**, which means the number the owner actually
+cares about — *how much faster is this than what I have today* — has no live half in this sandbox. That is
+a `live-GIS` blocker, not a to-do that was skipped.
+
+**The pending steps, on planyr.io with `VITE_FLOOD_TILES=1` in the Pages env:**
+1. Open a **Harris** plan. Turn on **FEMA flood zones**. The floodplain should appear essentially with the
+   map, not seconds later, and should stay put through a pan and a zoom (no re-fetch per gesture).
+2. The **Flood & drainage** group's `REGULATORY` heading should read `· NFHL as of Nov 15, 2019`.
+3. Open a **Waller** (Tsakiris) plan and repeat — vintage there is **Jan 15, 2021** for Larimer,
+   **May 16, 2019** for Waller; confirm the stamp names the county actually on screen.
+4. Compare against a **Montgomery** plan (no baked archive): the layer must still paint from live FEMA,
+   just at today's speed. **Nothing may be blank on any of the three.**
+5. Hover the floodplain on the Harris plan: the identify card should name the zone off the tiles and carry
+   the "the parcel's authoritative zone and acreage still come from the live FEMA query" line.
+6. Zoom past z13 and confirm the overzoomed tiles still read as a flood map rather than mush.
+7. **The measurement to record:** time from the layer switching on to the floodplain being visible, tiles
+   vs. flag-off, on the same plan. That is the number Phase 1 exists to produce and the only one still
+   missing.
+8. **✅ ALREADY PROVEN AGAINST THE REAL HOST, 2026-08-09 — this is no longer owed.** The SHIPPED
+   adaptive reader (`lib/floodArchiveSource.js`) was driven from Node against the live Cloudflare
+   Pages deployment of this branch: **Harris — header + 5 z13 tiles decoded (38/70/19/60/52
+   features) in ONE request, 5.96 MiB, 1,094 ms total**; **Waller — 1 request, 0.69 MiB, 231 ms.**
+   So the whole-file path works on the actual host, not just in a local simulation of it. What is
+   left below is the BROWSER half.
+9. **⛔ Pages does NOT do byte serving** (a ranged GET
+   returns 200 with the full body, on every asset; see B298401). So on the live site the reader fetches
+   each archive **whole, once** (`lib/floodArchiveSource.js`). Confirm on a COLD cache that Harris's
+   **5.96 MiB** arrives once and that the second visit is served from cache (a 304, not a re-download) —
+   that is the one behaviour the sandbox cannot show, because its dev server honours Range and takes the
+   cheap path instead.
+
 ### V90096 — B291536: on the note where Backspace "acts funny", does one press now take exactly one step? `Blocker: real-data`
 
 **⛔ THIS IS THE ONE THE SANDBOX CANNOT SETTLE, and the reason is stated rather than glossed.** The reported symptom — a nested bullet un-nesting AND merging in one press — did **not** reproduce on a plain bulleted list here. What did reproduce, and produces exactly that symptom, is a document that MIXES a checklist with a bulleted list, which an Outlook paste routinely makes: Tiptap's list keymap runs its Backspace handler once per list type without stopping at the first one to act, and one press dissolved BOTH levels into plain paragraphs. That class is fixed and mutation-proven. Whether it is the class HIS note holds is his to confirm.
@@ -132,6 +704,97 @@ The three defects behind *"the layers / order feature doesn't work at all"* are 
 - **⛔ AND IF IT FAILS, CAPTURE THE TREE RATHER THAN DESCRIBING IT.** With `window.__PLANYR_E2E` armed, `window.__noteEditor.json()` returns the document before and after the press; that is what turns a second report into a fixed row in `ui-audit/verify-notes-backspace.mjs` instead of another round of guessing.
 - **Already confirmed here, do NOT re-test:** 37/37 boundary rows against the built app, mutation-proven RED without the fix (11 of 37).
 - The **owner never runs this** — it is a Claude-cohort check on a signed-in session with his real note. ⏳ **PENDING**
+### V85616 — B287056: on the next deploy, does a `chunk-recovery` row actually appear — and does it say `recovered`? `Blocker: real-data`
+
+**⛔ THIS IS THE ONLY CHECK THAT MATTERS AND IT NEEDS A REAL DEPLOY.** Every branch of the guard is unit-tested (`test/chunkRecovery.test.js`, 21) and the sandbox has no deploy at all, so nothing here can fire `landed` or `recovered` — those two require an open tab, a new build replacing its chunks, and a navigation. The item exists because **361 production rows recorded no outcome**; a shipped recorder that turns out to write nothing would be the same defect with a nicer comment.
+
+- **RUN IT AFTER THE NEXT PRODUCTION DEPLOY** (any merge to `main` publishes). Ideally leave a planyr.io tab open on a Site route BEFORE the deploy lands, then switch workspaces (Library / Review / Schedule) once it has — that is the exact gesture that pulls a not-yet-loaded chunk.
+- One read-only query against `planyr_production`:
+  ```sql
+  select at, build, module, message
+  from public.client_errors
+  where source = 'event:chunk-recovery'
+  order by at desc limit 50;
+  ```
+- **PASS** = at least one row whose message JSON carries an `"o"` naming a branch, and — if a rescue happened — the PAIR `{"o":"landed",…}` followed within ~15 s by `{"o":"recovered",…}` from the same `[tab …]` id. **FAIL** = a deploy day with `vite:preloadError` rows and NO `event:chunk-recovery` rows beside them; that means the recorder is not running and the item is not done.
+- **ALSO CHECK THE LADDER HELD.** If a storm recurs, `f` must climb (1, 2, 3, 5, 10, 25…) across a HANDFUL of rows, not one row per failure. A `chunk-recovery` row count that tracks the `preloadError` count 1:1 means the ladder is bypassed and the instrument has become the noise.
+- **THE QUESTION THIS FINALLY ANSWERS, in one query** — of N episodes, how many reached `recovered`. Until it returns rows, the "37 of 54 episodes went quiet, consistent with a rescue" reading on B287056 stays an INFERENCE and must be reported as one.
+- **⛔ READ-ONLY. Do NOT delete, truncate or modify any row in `public.client_errors` — it is the owner's data.**
+- The **owner never runs this** — Claude-cohort check. ⏳ **PENDING**
+
+### V85617 — B287057: do the new `rt` / `ph` / `ltxp` fields arrive on the owner's own rows, and what do they say the ly=0 lane is? `Blocker: real-data`
+
+**The fields are unit-tested (`test/perfInstrument.test.js`, 42) and worth nothing until they ride real rows from his machine** — the instrument enrols a quarter of page loads and sends at most six rows on one of them, so this needs his ordinary use, not a harness. Automated runs are suppressed from production by design (B270912), which is why no sandbox run can produce these.
+
+- **RUN IT ~3 DAYS AFTER THE DEPLOY.** Read-only against `planyr_production`:
+  ```sql
+  select module,
+         (regexp_match(message,'"rt":"([^"]+)"'))[1]  as lane,
+         (regexp_match(message,'"ltxp":"([a-z]+)"'))[1] as worst_block_phase,
+         count(*) n,
+         max((regexp_match(message,'"ltx":([0-9.]+)'))[1]::numeric) max_ltx
+  from public.client_errors
+  where source = 'event:perf' and user_agent not ilike '%Headless%'
+  group by 1,2,3 order by max_ltx desc nulls last;
+  ```
+- **PASS** = rows carrying `rt` and `ph`, and at least one row carrying `ltxp`/`ltxr`/`ltxt`. **FAIL** = new rows still shaped like the old ones (the enrolment gate or the deploy did not take).
+- **THE FINDING TO CONFIRM OR REFUTE.** The pre-ship read said the worst blocks are the **Scheduler mounting** — `scheduler`, k=longtask, mean `t` ≈ 3 s since load, mean worst block **2,268 ms**, max **7,837 ms** — against `site-planner` boot at 320 ms and his working canvas at 407 ms. **PASS on the finding = `ltxp` reads `mount` (or `pre`) with `ltxr` = `p/schedule` on the largest `ltx` values.** If `ltxp` comes back `idle` on those rows the finding is REFUTED and no boot/mount work should be written against it — which is exactly why this attribution shipped before any fix.
+- **⛔ NO FIX MAY BE WRITTEN AGAINST ly=0 UNTIL THIS PASSES.** The owner's instruction was explicit: three mechanisms have already been refuted in this programme for being named before an instrument could see them.
+- **⛔ READ-ONLY. Do NOT delete, truncate or modify any row in `public.client_errors`.**
+- The **owner never runs this** — Claude-cohort check. ⏳ **PENDING**
+
+### V85618 — B287060: does the terrain retry storm stop? `Blocker: real-data`
+
+**Timing/race class — the backoff is deterministic and unit-tested (`test/terrainLazyBackoff.test.js`, 9), but the storm only exists when a chunk is genuinely dead on a real tab.**
+
+- **RUN IT ON THE NEXT DEPLOY DAY**, same read as V85616's, comparing the `vite:preloadError` shape:
+  ```sql
+  select build, regexp_replace(message,'.*/assets/','') chunk, count(*) n,
+         min(at) t0, max(at) t1, max(at)-min(at) span
+  from public.client_errors
+  where source = 'vite:preloadError' and at > '2026-08-09'
+  group by 1,2 having count(*) > 2 order by n desc;
+  ```
+- **PASS** = no episode with a `span` measured in HOURS. The reference failure is build `53d1bac` / `terrainLayers-aE2wQGtV.js` at **2 h 20 m and 81 rows**; after the backoff, an equivalent dead chunk should produce a span bounded by the ladder (attempts thinning to one a minute) rather than one attempt per mouse movement. **FAIL** = another multi-hour, ~10-s-cadence run of identical rows.
+- **ALSO CONFIRM NOTHING REGRESSED FOR A BLIP.** Signed in on a real plan, hover the map and check the ground-elevation readout still resolves normally — the backoff is a DELAY, never a cap, so a transient failure must still recover within a minute.
+- **⛔ READ-ONLY. Do NOT delete, truncate or modify any row in `public.client_errors`.**
+- The **owner never runs this** — Claude-cohort check. ⏳ **PENDING**
+
+### V96464 — B297904: on a plan located AFTER it was drawn, do the third-party layers actually come alive? `Blocker: live-GIS`
+
+The app's own half is measured HERE and is not what this asks about. `e2e/set-location-unlocated-plan.spec.js` drives the real app logged-out: an unlocated plan with a parcel drawn on it, located by typed coordinate, and with no reload the backdrop map is created and anchored at that point, an Esri imagery tile layer is MOUNTED on it, the Layers panel's "no location yet" state is gone, and the drawn ring is byte-identical before and after. It survives a reload. What cannot be driven here is whether the third-party data actually arrives — every imagery, FEMA and TxDOT host is egress-blocked at the sandbox proxy.
+- **Where.** planyr.io. Map → **Start blank** → draw a parcel with the Parcel tool → Parcel panel → **📍 Set this plan's location** → type an address or a lat/long near a known site → **Set location**.
+- **PASS**, all without reloading: the **aerial paints** under the drawing · the Layers panel lists real layers and **FEMA flood** and **contours** can be toggled on and return geometry · the cursor readout shows a **lat/long and a ground elevation** · the header resolves a **county**, and Standards shows that county's **setbacks** rather than a Harris default.
+- **FAIL** = any of those still dead until a reload, or the drawn boundary having MOVED (it must not move by a foot — the origin decides where the local frame sits, nothing else).
+- **Then adjust the placement:** Parcel panel → **Placement** → ↻ turns the drawing onto the aerial, arrows slide it. Undo must step back through both.
+- **What was proven HERE:** the 6 live cases above plus 24 mutation-proven wiring guards; 8 mutations run against the live spec, all red — including the one that first survived (deleting `ensureBasemapOn()` left the map created and the spec green, so the spec now asserts the TILE LAYER, not the map).
+- The **owner never runs this** — Claude-cohort check. ⏳ **PENDING**
+
+### V96465 — B297905: does a REAL recorded description promote to a boundary that measures right? `Blocker: real-data`
+
+Driven here on synthetic traverses (a 0.3′ closure, a 40′ closure and an open one) through the real button, in a real browser. What that cannot cover is a genuine recorded deed with save-and-except tracts and curved calls, which is the case the acreage has to be right for.
+- **Where.** planyr.io, a plan with a real metes-and-bounds description: Parcel tools → plot the deed → right-click it (or its inspector) → **Use as parcel boundary**.
+- **PASS:** the new parcel's acreage matches the deed's called acreage to within the description's own closure · setbacks, edge runs and the acreage chip behave exactly as on a map-clicked lot · the parcel record shows **From deed** and **closes to N′** · a tract with save-and-except holes has that land DEDUCTED from the site acreage in Yield · the deed markup is still on the plan and **Go to the deed this came from** reaches it.
+- **FAIL:** acreage that ignores an exception · an open traverse that promotes anyway · a 40′ closure that looks like a 0.4′ one.
+- **Colorado control (worth one run):** on Colorado ground, promote, then Align — the parcel must turn WITH the deed by Colorado's convergence (~+0.38°), not Texas's −2.885°. Asserted here against B290241's fix; a live pass confirms it on real ground.
+- The **owner never runs this** — Claude-cohort check. ⏳ **PENDING**
+
+### V96466 — B297906: do the typed parcel fields reach the CLOUD, not just the device? `Blocker: auth`
+
+Typed, persisted and re-read across a reload here, logged-out, in a real browser. The sandbox blocks Supabase sign-in, so the one path not exercised is the cloud round-trip — and these fields ride `site_elements` as ordinary parcel properties, so the risk is low but unproven.
+- **Where.** planyr.io **signed in**. Select a parcel → Parcel panel → **Parcel record** → type a name, owner, account, situs and a stated acreage.
+- **PASS:** the values survive a reload **on a second device / browser** · the provenance chip reads **County record** on a map-clicked lot and **Drawn by hand** on a drawn one · editing a county lot's address sticks (that is the point — a wrong county record must be correctable) · the stated-vs-measured line shows both numbers and their gap.
+- **FAIL:** a value that survives locally but not across devices, or a drawn lot presenting as a county record.
+- The **owner never runs this** — Claude-cohort check. ⏳ **PENDING**
+
+### V96467 — B297907: does the fallback appear on a REAL county outage in production? `Blocker: live-GIS`
+
+Measured here against a genuine outage rather than a stub — every county appraisal host is egress-blocked in this environment, so a click on a lot fails the same way it fails when a county server is down, and the offer appears and produces a located plan. What that cannot show is the behaviour on a live network where one county is down and others answer.
+- **Where.** planyr.io, map view, during (or simulating) a county service outage — the Chambers/Waller CAD hosts are the usual candidates.
+- **PASS:** the failure toast carries **Start the plan here & draw the boundary →** · clicking it opens a plan that already has a location (the aerial is on, the county resolves) · a HEALTHY county that simply has no lot at that point still says "No parcel right there" and offers **nothing** — that distinction is the feature working, not a gap.
+- **FAIL:** a bare banner with no way forward, or the fallback offered on a healthy "no parcel here" answer.
+- The **owner never runs this** — Claude-cohort check. ⏳ **PENDING**
+
 ### V88800 — B290240: does an unincorporated COLORADO site now say Colorado's zoning law instead of Texas's? `Blocker: live-GIS`
 
 The sentence itself is pure and unit-tested in both directions; what cannot be driven here is the card, because it only renders once `identifyJurisdiction` returns `unincorporated`, and that needs external GIS hosts this environment blocks (the whole `gis.colorado.gov` space answers 403 at the sandbox egress proxy — a sandbox limitation, not an endpoint failure).
@@ -176,22 +839,6 @@ The gate is pure and mutation-proven; what cannot be driven here is the LINE, be
 - **Also confirm the badge still DRAGS** — this fix is identification-only and must not have cost the affordance B1327 exists for: hover a lot's acreage badge, drag it, and it should move as before.
 - **Already confirmed, do NOT re-test:** the plan is byte-identical across every run; the pond control passes; press gaps are inside `DBLTAP_MS`; the first-gesture fix from #965 is intact.
 - The **owner never runs this** — it is a Claude-cohort check on a signed-in session. ⏳ **PENDING**
-### V84560 — B270913: does the retention job fire ON ITS OWN, tomorrow, with nobody pressing anything? `Blocker: real-data`
-
-**⛔ THIS CHECK IS THE ENTIRE POINT OF THE ITEM, AND IT CANNOT BE DONE IN A SANDBOX.** Everything else about B270913 is proven: the policy is unit-tested against a real Postgres (21 cases, both directions, both clauses mutation-checked), and it was proven a second time **on the production table** with seeded rows that were cleaned up afterwards. What no test here can show is the one thing that decides whether this works: **that `pg_cron` actually runs the job on schedule.** A retention job that silently never runs is indistinguishable from one that correctly had nothing to delete — and since this policy deletes nothing from today's data, that indistinguishability is the EXPECTED state for months. The whole run-log/status half of the item exists for this one question.
-
-- **RUN IT AFTER 07:20 UTC on 2026-08-10** (or any later day — the schedule is daily, `20 7 * * *`), against `planyr_production` with the service role. One query:
-  ```sql
-  select * from public.client_errors_retention_status;
-  select id, ran_at, ordinary_deleted, manual_deleted, rows_before, rows_after, duration_ms
-    from public.client_errors_retention_runs order by id;
-  ```
-- **PASS** = `status = 'ok'` **and** a run row exists that **nobody triggered** — i.e. `ran_at` at ≈07:20 UTC, with an `id` greater than 1. `ordinary_deleted = 0` and `manual_deleted = 0` on that row is the CORRECT result and must be read as a healthy no-op, not as a failure: 0 of ~5,300 rows are eligible and none will be until roughly 2026-09-18.
-- **FAIL** = `status` still reads **`never-run`**, or the only row is `id = 1`. That row is the manual proof run from 2026-08-09 (`ordinary_deleted 2` — three seeded `B270913-live-proof` rows, two of which were correctly deleted); it is evidence the FUNCTION works and says nothing about the SCHEDULE. **`stale`** on a later read means it fired once and stopped.
-- **If it FAILS, the first thing to check is `cron.job` and `cron.job_run_details`,** not the function: `select * from cron.job where jobname = 'planyr-client-errors-retention';` and `select * from cron.job_run_details order by start_time desc limit 10;`. Supabase runs pg_cron jobs in the `postgres` database only; the job was created there, owned by `postgres`, and read back active at apply time.
-- **⛔ DO NOT "verify" this by calling `select public.prune_client_errors()` yourself.** A hand-triggered run writes exactly the same row as a scheduled one, so doing that DESTROYS the only evidence this check exists to gather — it converts an unanswered question into a permanent false pass. If you need to confirm the function still works, the unit suite already does that on every CI run.
-- This is a Claude-cohort check on the production database. **The owner never runs this.** ⏳ **PENDING**
-
 ### V78960 — B280400: does the stub's double-click still work on the SECOND try? `Blocker: real-data` + `Blocker: auth`
 
 **⛔ THIS IS THE ONE THAT DECIDES IT, because the sandbox cannot.** The repeat-gesture failure he reported does NOT reproduce here — the new repeat row passes on the same build it fails on for him, on every one of the 28 fixture features. One real latch was found by reading and is fixed and mutation-proven (the anchor used to survive a deselect, and a press that re-selected the already-selected feature never re-stamped it), but **it is not proven to be his cause**. His re-run is the verdict.
@@ -708,12 +1355,28 @@ On **planyr.io**, signed in, on the **Colorado / Weld County** project, open the
 - **What the sandbox cannot speak for.** Every figure here is a **lower bound**: the proxy blocks Supabase and every GIS host, so flood zones, WSE providers and the aerial underlay are **ABSENT, not slow**. On a signed-in Bain plan `pondSplitFor` takes its `fmZones.length` branch and calls `pondFloodFacts` against real flood geometry — a path that cannot run here at all. The Yield panel's docked state also drives whether `drainFacts()` is read at all, and that is account state.
 - **What to confirm on planyr.io, signed in.** **(a) THE ORIGINAL REPRO, which is his own words — "the original seems to move a lot faster than the Quiddity one."** Open **Bain / "Concept A — Quiddity Hydrologic Analysis"**, dock the Yield panel, and pan the map around at working zoom. It should feel like **Bain / "Concept — Original"** does. Switch between the two and confirm you can no longer tell them apart by feel. **(b) THE PONDS ARE UNCHANGED.** Both detention basins still have exactly the shape you surveyed — same outline, same size, same position, at every zoom. Nothing should look smoother, coarser or simpler. **(c) THE NUMBERS ARE UNCHANGED.** Open each pond's inspector and check the storage figures (holds / usable / rim-to-floor) read what they read before — these numbers size the basins, so a shift of any size is a failure, not a rounding difference. **(d) EDITING STILL FEELS IMMEDIATE.** Drag a pond vertex and change its depth: the panel numbers should keep up with you (measured at 15.4 ms for the larger basin here, inside one frame). **(e) A FLOOD-AFFECTED POND**, which is the branch the sandbox cannot reach: confirm the flood/mitigation split still reports the same values it did.
 
+### V102736 — The plan census reaches a real capture row on a signed-in session (B304177)
+
+`Blocker: auth` — **everything reachable logged out was driven HERE, and the harness half is fully proven; only the product TELEMETRY column needs a signed-in capture.** `e2e/feature-census.spec.js` draws one of each of the five drawn kinds through the real tools and requires the census to answer **FIVE** off the real render, **with the element-only counter answering ONE in the same run** — the 120-vs-145 gap reproduced small enough to assert; a second case adds a markup and confirms the element count does not move while the census names exactly what arrived. `test/featureCensus.test.js` (17) pins the counting rule and sweeps `ui-audit/` + `e2e/` so an element-only census cannot come back, mutation-checked both ways.
+- **What the sandbox cannot speak for.** The proxy CORS-blocks Supabase, so no capture row is ever written here. `readScene` now reports `featuresDrawn` beside `elementsDrawn`, and that column has to survive the capture allowlist (`CAPTURE_NUMERIC_KEYS`) and land in a real `client_errors` `event:perf` row before anything downstream — including a future `OWNER_SCENE` — should be sized from it. Note that the recorder's POSITIONAL counter ring was deliberately NOT widened (`s[3]` is still `elementsDrawn`), so the new column rides the capture rows only.
+- **What to confirm on planyr.io, signed in.** **(a)** Open a plan that carries annotations — **Sylvestri / "Concept D - Sylvestri Retail"** is the one measured (16 callouts, 6 markups, 2 measurements over ~120 elements) — let a perf capture fire, and confirm the row carries **`featuresDrawn` (or `fx`) ABOVE `elementsDrawn`**, by roughly the annotation count. Two identical numbers on that plan means the column is reading the old selector. **(b)** Confirm a plan with no annotations reports the two numbers EQUAL — that is the control, and it is what makes (a) mean something. **(c)** Confirm nothing else in the row changed and the capture is not rejected for an unknown key. **(d)** Record the pair, because `OWNER_SCENE.elementsDrawn: 47` for Bain was sized from the blind column and should be re-sized from the honest one.
+- The **owner never runs this** — it is a Claude-cohort check on a signed-in session. ⏳ **PENDING**
+
 ### V27088 — Copying between plans, signed in, on the owner's own Silvestri project (B230080)
 
 `Blocker: auth` — **everything reachable logged out was driven HERE, with the negative control proven RED first, and that is on the item.** `e2e/clipboard-survives-plan-switch.spec.js` drives the real UI logged out — draw · select · Ctrl+C · switch plans from the header dropdown · Ctrl+V — and asserts the DESTINATION plan's persisted record, for one of EACH kind in `CLIP_KINDS` (element · markup · measure · callout · parcel) plus a mixed marquee selection, plus a workspace switch and a plan rename on the way; the headline case also asserts the pasted polygon's coordinates EQUAL the original's, which is the in-place cross-plan placement proven rather than described. All 4 cases pass; with the pre-fix lifetime injected (payload dies with the mount) all 4 go RED, same run set. Unit half: `test/planClipboardLifetime.test.js`, 24.
 - **What the sandbox cannot speak for, and why.** The proxy CORS-blocks the Supabase auth handshake, so every check above ran on **local, logged-out** plans. A signed-in plan is a different write path: the pasted objects have to reach `site_elements` as rows for the DESTINATION plan through `elementSync`, and none of that runs logged out. The sandbox also has no plan with a DIFFERENT `origin` from its sibling, so the re-projection branch of `resolveClipFrame` is unit-proven but never exercised end to end on real records.
 - **What to confirm on planyr.io, signed in.** **(a) THE ORIGINAL REPRO.** On **Silvestri**, open the print concept, select a polygon, Ctrl+C, switch to the sibling concept from the plan dropdown, Ctrl+V — the polygon arrives, and it arrives on the same ground it occupied on the plan it came from. **(b) EVERY KIND, as he asked for.** Repeat with a building (which must bring its truck court / trailer parking / dock zones with it), a measurement, a callout and a parcel — the pasted parcel arrives **Off** by design and says so. **(c) IT PERSISTS.** Reload the destination plan and confirm the pasted objects are still there — this is the half that needs the cloud write path and is the whole reason this item is parked. **(d) NOTHING LEFT THE SOURCE.** The plan you copied FROM still has everything it had. **(e) THE TWO PLANS OF BAIN**, which resolve different jurisdictions and are the likeliest real pair with differing anchors: copy between them and confirm the shape lands where it belongs, at the size it was drawn — or, if the app refuses, that it says plainly why and pasting at the cursor works. **(f) SAME-PLAN PASTE IS UNCHANGED.** Ctrl+C then Ctrl+V within one plan still drops the copy at the cursor (B417).
-- **HOUSEKEEPING, 2026-08-08 — the test artefact is GONE, so nobody chases it.** The stray easement pasted onto **Bain / "Concept - Original"** while exercising this check has been deleted, and the deletion was confirmed after a reload: that plan is back to **zero easements**. It is not a symptom, it is not a sync failure, and it does not need re-testing.
+
+- **✅ RUN LIVE 2026-08-09 ON HIS OWN SILVESTRI PAIR — (a), (c) and (d) are DISCHARGED. THE ITEM STAYS OPEN; (b), (e) and (f) are unrun.** Signed in, build **7307342**, source **"Concept D - Silvestri Retail PRINT"** → destination **"Concept D - Sylvestri Retail"**.
+  - **(a) ✅ THE ORIGINAL REPRO, exactly as he reported it.** Selected a markup polygon · Ctrl+C · switched plans through the header dropdown (**the remount B230080 fixed**) · Ctrl+V. Toast: *"Pasted where it sat on the plan you copied from."* **Three markup objects arrived** — the polygon is a three-part group, which is also why it showed 37 grips. **Ctrl+Z removed all three cleanly.**
+  - **(c) ✅ THE HALF THIS ITEM WAS PARKED FOR — THE CLOUD WRITE PATH WORKS.** Pasted again, waited for the save, **FULL PAGE RELOAD**: all three present, **with the SAME IDs**. This is the `elementSync` → `site_elements` half that cannot run logged out, and it is now proven on real records.
+  - **(d) ✅ NOTHING LEFT THE SOURCE.** The source plan afterwards: **120 elements, normalised signature byte-identical to the baseline.**
+  - **CLEANUP — both plans are as he left them.** All three pasted markups deleted, second reload, destination back to **exactly 142 features**: nothing missing, nothing extra.
+  - **⛔ WHAT THIS RUN ALSO CAUGHT, and it is a finding in its own right (NEW-2 / B‹census›).** The paste read as a **complete no-op** on the element count — **120 before, 120 after** — while the toast correctly reported success, because `g[data-el-id]` covers only the `el` kind and a markup is invisible to it. A false *"paste succeeds silently but writes nothing"* was one keystroke from being filed **against a feature that is fine**. The same plan reads **145 distinct `[data-feature]` nodes** against those 120 elements. **The thing that rescued it: Ctrl+Z, then diff the feature list — when a count says nothing happened but the app says it did, THE UNDO KNOWS.** Every census in `ui-audit/` and `e2e/` has since been moved to `[data-feature]` and the regression is guarded.
+- **STILL PENDING — the residue, narrowed.** **(b) EVERY KIND** — a building *with its truck court / trailer parking / dock zones*, a measurement, a callout and a parcel; unrun. **(e) THE TWO BAIN PLANS, WITH DIFFERING ANCHORS — this is the important one:** it is the ONLY check that exercises `resolveClipFrame`'s **re-projection branch end to end**, and that branch is currently **unit-proven only**. **(f) SAME-PLAN PASTE AT THE CURSOR (B417)** — unrun.
+- **HOUSEKEEPING, 2026-08-08 — the test artefact is GONE, so nobody chases it.** The stray easement pasted onto **Bain / "Concept - Original"** while exercising this check has been deleted, and the deletion was confirmed after a reload: that plan is back to **zero easements**. It is not a symptom, it is not a sync failure, and it does not need re-testing. ⚠ Cleaning it up, and cleaning up the three Silvestri markups above, each cost a round to a harness that reported a delete it had not performed — see **SYNTHETIC-KEYS-DONT-EDIT** in `CLAUDE.md`; a synthetic Delete keydown is a silent no-op.
+- ⏳ **STILL PENDING** — (b), (e), (f). `Blocker: auth` + `Blocker: real-data`. The **owner never runs this** — it is a Claude-cohort check on a signed-in session.
 ### V24898 — The Bain pair, on his own machine: does the A/B reproduce where he saw it? (B227477)
 
 `Blocker: real-data` + `Blocker: auth` — the sandbox reproduces his report and reproduces it LARGE (see the item for the measured arms), but three things bound it. **(a)** The raster CONTENT is synthesised: dimensions, opacity, rotation, footprint and the IndexedDB storage path are his, the picture is generated — sound for decode/texture/blend, and in any case the overlay is IDENTICAL in both halves so it cancels out of the comparison entirely. **(b)** This container has 4 cores against his 28, and every external host is blocked, so GIS and Supabase are ABSENT rather than slow. **(c)** The arms are subtractions from a fixture, not from his live plan.

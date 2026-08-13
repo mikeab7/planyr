@@ -30,6 +30,33 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   redundant with `editingId` — one project id addresses two inline editors (its list row and the crumb-level
   rename), and keyed on the id alone BOTH mount with `autoFocus`, the second stealing focus from the first,
   whose `onBlur` commits and closes it in the same frame.
+- **⛔ `layerZoomGate.js` (B323424/B323425) — THE ONE ANSWER TO "IS THIS ROW ACTUALLY DRAWING RIGHT
+  NOW?", and the reason it is shared rather than a note on the contour row.** A checked layer that a
+  zoom gate suppresses looked exactly like a broken one: the owner ticked *"Contour lines (1 ft)"*
+  below the z16 gate and sat for a minute believing the feature had failed. The panel DID carry
+  *"Zoom in to ≥ 16 to load"* — **static helper text that renders identically whether the layer is
+  drawing or not, under a checkbox that says ON. That is the defect, not the fix.** Four live states
+  (`off` · `drawing` · `dormant-zoom` · `dormant-blank`) computed from the ACTUAL current zoom; the
+  row renders dormant with a **hollow** status dot (every live state is a filled dot) and one live
+  line — `Not showing at this zoom — zoom in 3 levels` — that **IS the fix**: clicking it takes the
+  map just past that layer's gate. No legend, no key. **Three things not to undo:** **(a)** the gate
+  is asked BEFORE coverage — below it the layer never queried anything, so *"no data in this area"*
+  would be a fabrication; **(b)** `featureLayerOptions` passes `minZoom: cfg.minZoom ?? 10` to
+  Leaflet, so **every `esriFeature` layer is gated at 10 whether its row says so or not** and Leaflet
+  suppresses it SILENTLY — those rows showed a green "loaded" dot over an empty map, which is worse
+  than the case that was reported; **(c)** the kind-gated rows DECLARE their `minZoom` in the registry
+  and `evidenceLayers.js` imports its two constants from here, because the dangerous failure is the
+  panel and the map holding two different numbers. **B323425, the sibling defect:** the gate must be
+  answered ONCE, at the zoom the plan actually opens at — a plan opens on the default view (≈ z17.25)
+  and the whole-site framing drops it 120 ms later, so a layer admitted in that window fetched,
+  painted, and was then correctly cleared (*"contours paint, then disappear about two seconds after
+  load"*). `SitePlanner`'s `layerGateReady` latch defers every ADD until the framed view is committed.
+  Guards: the repo-root `test/` suite **layerZoomGate** (24, which reads the real registry, the real
+  terrain gate, the real `minVectorZoom` and the real Leaflet default and fails on any drift), the
+  e2e spec **layer-zoom-dormant** (6, proven red pre-fix on a selector that exists on both builds),
+  and the repo-root ui-audit instrument **diagnose-layer-gate-flash**. ⚠ That harness can watch the terrain
+  layer ASK but never ANSWER — 3DEP is `ERR_CONNECTION_RESET` from Chromium here — and it says so
+  rather than scoring itself; the paint-then-vanish half is **V121985**.
 - `layers.js` + `components/LayerPanel.jsx` — map-layer system; `layerPrefs.js` (per-site Layers-panel
   toggle memory — NEW-1, sparse on/off overrides restored on open + persisted on toggle); `coverage.js` (coverage engine);
   `arcgis.js`/`counties.js`/`layerRequest.js` — GIS plumbing; **`gisCache.js` — the screening cache;
@@ -182,6 +209,52 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   plus the e2e spec **map-layer-stacking** (whose lift case is mutation-checked three ways: hosting
   the band outside the SVG, rendering it after the handle layer, and dropping its transform mirror
   each turn it red).
+- **⛔ BAKED FEMA FLOOD TILES (B298400–B298402) — the shared model (`shared/gis/`) is the MODEL and the
+  one line in it that must not move: A TILE IS A PICTURE, NEVER A NUMBER.** The flood layer can render
+  from a per-county PMTiles archive under `public/flood/` — range-read off the same Cloudflare Pages
+  origin that serves the app — instead of calling FEMA's `/export` on every pan. Behind
+  `VITE_FLOOD_TILES`, **default OFF**. Four things to know before touching any of it:
+  **(1) PARCEL-SCALE AUTHORITY IS UNCHANGED.** Tiles are generalised, so they answer the fast picture
+  and nothing else; the screening / mitigation math still queries live FEMA, and every tile identify
+  card says so. Never let a number a user acts on come off a tile.
+  **(2) THE FALLBACK IS A PROPERTY OF A PURE FUNCTION, not a hope.** `resolveFloodSource` answers `live`
+  for every way the fast path can be unavailable (flag off · no county · no archive · an archive that
+  failed earlier · called with nothing), each with a stated reason. The runtime half is ONE terminal
+  `_die()` in `floodTileLayer.js`, which tears the slot down through `layers.js`'s **shared `release`
+  helper** and re-enters `syncOverlayLayers` so the raster branch takes over. A per-TILE miss is NOT
+  that — an empty tile is the ordinary case.
+  **(3) THE ABSENCE RULE DIFFERS BY SOURCE.** The build DROPS unshaded Zone X, so on tiles "no polygon"
+  means *outside the mapped floodplain*; on the LIVE layer it means *no effective flood map here*
+  (`identifyGap: "flood"`) — the opposite risk position. `floodAbsenceKindFor` is the one place that
+  decides, and showing the live wording over a tile answer turns a clean result into a scare.
+  **(4) ⛔ CLOUDFLARE PAGES DOES NOT DO HTTP BYTE SERVING — measured, and it refutes the design's own
+  premise.** A ranged GET against a real Pages deployment returns **200 with the full body**, no
+  `accept-ranges`, on EVERY asset (the 6 MiB archive, `manifest.json`, a plain JS bundle); the control
+  through the same proxy returns 206 from other hosts. `pmtiles`' own `FetchSource` REFUSES that, so the
+  layer would have thrown on its first read in production and fallen back to live FEMA **silently** —
+  while the Vite dev server, which DOES honour Range, kept every test and the headless verifier green.
+  The adaptive reader is the flood archive source module: 206 → ranged reads; 200-with-the-whole-body →
+  keep it and serve every later read from memory, so the archive is fetched exactly once (concurrent
+  cold reads deduped, buffer released by `forgetArchive`). `public/_headers` gives `/flood/*` — and the
+  manifest, the same policy, so a refreshed vintage can never appear over stale tiles — an hour of hard
+  cache plus a day of stale-while-revalidate. **Do not replace the source with a bare URL.**
+  **(5) `floodTileLayer.js` IS LAZY BY CONSTRUCTION and must stay so** — it pulls `pmtiles` +
+  `@mapbox/vector-tile` + `pbf` (its own 38 KB chunk). The Leaflet-free half is `floodTileDecode.js`
+  (Leaflet needs a `window`, so anything beside it can only be tested through a browser — the
+  `adminBoundaryData.js` split). `floodTileStyle.js` is the palette + the painter's draw order (a
+  floodway must land ON TOP of the SFHA it sits inside) + the identify wording; `floodManifest.js` is one
+  cached fetch of the build manifest, which is where the **NFHL vintage stamp** comes from — and that
+  stamp may never disappear, it reports "unknown" instead (B1093's rule).
+  The builder is the repo-root build-flood-tiles script (`npm run build:floodtiles`); its
+  `--no-feature-limit --no-tile-size-limit` are deliberate, because tippecanoe's defaults DROP features
+  out of dense tiles and a silently vanishing floodplain is the worst thing this layer could do.
+  Guards: the repo-root `test/` suites **floodTiles** (48 — incl. reading the COMMITTED archives back and
+  asserting the 25 MiB Cloudflare Pages per-file cap), **floodTileRender** (22, driven off the real
+  Harris archive) and **floodArchiveSource** (9 — both measured host behaviours required to decode the
+  same tile feature for feature), plus the ui-audit harness **verify-flood-tiles** (`npm run verify:floodtiles`).
+  ⚠ That harness proves tiles PAINT and proves the fallback ENGAGES; it can never prove the live FEMA
+  layer paints, because every `hazards.fema.gov` request from Chromium in this sandbox is
+  `ERR_CONNECTION_RESET` — it detects that and says so rather than reporting the egress policy as a bug.
 - **`buildingFloodExposure.js` (B1207) answers "is my building in the floodplain?" as a NUMBER** —
   per footprint: overlap by area and percent, the governing zone and its BFE. It **reuses** the
   B707/B712 `zonesFromFeatureCollection` + `gridIntersect` + `zoneWaterSurface` chain (never a second
@@ -395,13 +468,35 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   now rounds coordinates to 6 dp and walks the vertex ladder down until the URL fits `MAX_QUERY_URL`.
   Do not "simplify" it back to a vertex cap, and do not switch to POST — the B445 cache proxy is
   GET-addressed, so a POST body silently bypasses the cache.
-  Guards: the repo-root `test/` suites **jurisdiction** (96) and **jurisdictionShapes** (10 — real parcel
+  **⛔ (7) B367296/B367297 — THE WORDS LIVE IN `jurisdictionLabel.js`, AND THE LABEL IS A LEAF.** The
+  owner reported Clay & Porter reading *"Unincorporated / City of Houston ETJ"* — *"it's either
+  Unincorporated or it's COH ETJ."* He is right about the display and the reason is the opposite of
+  the one he gave, and the code encodes the right one: a Texas ETJ IS the unincorporated band outside
+  a city's limits, so ETJ land is necessarily unincorporated and the pair was REDUNDANT, not
+  contradictory. **Do NOT make the two exclusive in the model** — `cityContainment: "none"` and
+  `unincorporated: true` still hold on every ETJ site, and the county tier reads them. The real defect
+  was the SEPARATOR: one " / " carried both *"Houston governs platting here"* and *"Katy is merely
+  next door"*. Three levels now, each meaning one thing — `·` between GOVERNING slots (authority · ETJ
+  · county · ISD, always leading with what governs) · `+` between co-equal peers in one slot · `—`
+  introducing the non-governing tail. Four shapes and no others; `split` and `unknown` are states, not
+  shapes. **And the label is a LEAF: nothing may read a fact back out of it.** `SitePlanner.jsx`
+  derived the governing city as `(jurBadge?.jur||"").split(" / ")[0].replace(/^City of\s+/,"")` and
+  fed it to `assessAdministrator` as `cityLabel` — under the new grammar that returns
+  `"Humble · Houston ETJ"`, which matches no rule record, so the CITY's floodplain ordinance is never
+  raised and the site is priced on the county's. Read `governingCityOf(badge)` instead.
+  Guards: the repo-root `test/` suites **jurisdiction** (86), **jurisdictionShapes** (11 — real parcel
   geometry through the real query builder against RECORDED real agency answers, one fixture per
-  jurisdiction SHAPE, mutation-checked two ways), plus the live ui-audit harness
-  **verify-jurisdiction-portfolio** (all 28 of the owner's sites against the live services; its fixtures
-  are re-recorded by the sibling harness **record-jurisdiction-shapes**). ⚠ A hand-written badge fixture tests
-  the FORMATTER only — both real mislabels were produced UPSTREAM of it, by what the identify asked and
-  how it read the answer, and 96 green formatter tests passed through both.
+  jurisdiction SHAPE, mutation-checked two ways), **jurisdictionLabel** (18 — the shapes, the grammar,
+  and the guard that the model never became exclusive) and **jurisdictionCoupling** (7 — the RED proof
+  through the real administrator resolver, plus a source sweep for the banned parse; mutation-proven),
+  plus two ui-audit harnesses: **verify-jurisdiction-badge-shapes** (`npm run verify:jurbadge` — the
+  REAL component and header, four widths × both themes, over the same recorded answers via the shared
+  replay helper in the repo-root ui-audit lib; asserts the rendered DOM text, that a clip can only ever eat the tail
+  and never the governing lead, and AA contrast) and the live **verify-jurisdiction-portfolio** (all 28
+  of the owner's sites against the live services; its fixtures are re-recorded by the sibling harness
+  **record-jurisdiction-shapes**). ⚠ A hand-written badge fixture tests the FORMATTER only — both real
+  mislabels were produced UPSTREAM of it, by what the identify asked and how it read the answer, and 96
+  green formatter tests passed through both.
 - `supabase.js` / `auth.js` / `cloudSync.js` — cloud data + auth (shared across workspaces).
 - `elementSync.js` / `elementRows.js` / `elementJournal.js` — the element-level sync engine, the
   rows↔model fold layer (incl. `foldJournal`), and the persisted pending-edit journal (NEW-F4:
@@ -454,6 +549,67 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   real transport**, never through a mock `commit` that accepts more parameters than the shipped
   adapter does — that mismatch is exactly what shipped a dead feature green. **B1118:** the load-time heal's `exempt` set — a repaired element must diff and COMMIT, or
   rows-canonical-on-seed adopts the torn rows straight back over the repair.
+  **⛔ B377888 — DELETE WINS IS THE RULE FOR delete-vs-EDIT AND THE WRONG RULE FOR delete-vs-CREATE.**
+  A delete whose base predates the row's existence is a decision about a row that no longer exists, and
+  re-issuing it kills something it was never about (measured: three deletes re-applied to rows 1.75 s old
+  on `smsdrvzr9gzx`). There is no `created_at` to read, so two client observations stand in, and the
+  SECOND is the one that catches it: `births` (a live row for a key the shadow never held, recorded
+  BEFORE the pending branch in `applyRemoteRow`) and **`remoteOnly` — keys the SHADOW learned from a
+  remote row that the CANVAS never showed.** `reconcile` mints a delete for exactly one reason,
+  shadow-has/collections-lack, and cannot tell a user deleting something from a row that arrived and was
+  dropped on the way to the canvas; such a delete has no base at all, and is refused with the row handed
+  BACK. Asked at THREE seams, because `opFor` sends at the shadow's CURRENT rev — so a delete whose
+  shadow was advanced while it queued is **accepted in silence with no conflict anywhere**: in the diff,
+  before the op is built, and after a refusal (plus the unload keepalive, which has no result handler).
+  Guard: the repo-root `test/` suite **deleteVsCreate** (both directions, every seam, with the two controls).
+  **⛔ B1341 STAGE 2 — GROUP CAS, and it is NOT B1117 with a longer name.** B1117 made a CALL atomic;
+  two calls can each be internally atomic and still disagree, because every per-row rev guard passes
+  while a SIBLING moves underneath you. `assemblyDigest.js` is the GROUP REVISION — `id:rev` pairs of
+  an assembly's LIVE members, sorted, comma-joined — **DERIVED, never stored**: a `group_rev` column
+  would be a second copy of a fact the row revs already carry, which is the defect this family is made
+  of. `db/commit_elements_group_cas.sql` adds a 4th defaulted `p_groups`; a mismatch refuses the call
+  WHOLE (`{applied:false, groupConflict:[…]}`, nothing written) and null/empty delegates to the 3-arg
+  form so no client in the wild changes. `groupCas.js` is the kill switch and **ships OFF** — read at
+  CALL time, so it can be thrown without a reload. Two things not to undo: the digest covers **every
+  live member, not the written subset** (a subset digest asks the question the per-row guard already
+  answers — and a test that missed this passed on a deliberately wrong build until the mutation check
+  caught it), and `elementApi`'s PGRST202 latch degrades to the 3-arg **ATOMIC** call, never to the
+  per-row path. Guards: `db/test/commit_elements_group_cas.test.sql` (self-rolling-back, run against
+  the real database, mutation-proven) + the repo-root `test/` suite **assemblyGroupCas** (23, incl.
+  the real request body). Live-verify: **V179984**.
+  **B377891:** `selfUid` is a GETTER here and in `editorNames.js` — a snapshot taken before auth
+  resolves is null for the whole session, which silently disabled B1116's and B1099's foreign-author
+  gates and made `createNameResolver` invent "a teammate" for the owner's own second tab.
+- **County ROUTING KEYS (the shared `shared/gis/` normaliser) — a county routing key is normalised at the MAP, never at the call
+  site (B298403).** Two production plans stored `"Harris"`; every `MAP[county]` lookup missed them and,
+  because a missing key is `undefined` and every call site has a `|| fallback`, rendered a confident
+  wrong answer (generic easement rules instead of City of Houston's). `COUNTIES`, `COUNTIES_MAP`,
+  `JURISDICTION_LAYERS`, the statewide county-name tables and `SNAPSHOT_COUNTIES` are all wrapped, so a
+  lookup written later cannot miss. **⛔ NOT the same thing as `floodGroup.countyKey`**, which slugs a
+  DISPLAY NAME to letters-only and would turn `co_larimer` into `colarimer`. Whitespace is REMOVED, not
+  turned into an underscore — the underscore is a state prefix, so `"Fort Bend"` must become `fortbend`.
+  Writes normalise at `createSiteModel`, at `cloudSync.siteRowFor`, and in a Postgres trigger
+  (`db/sites_county_normalize.sql`, applied). Guard: the repo-root `test/` suite **countyKeys** (36).
+- **`jurisdictionBadgeFit.js` (NEW-2) — HOW THE HEADER PILL GETS SHORTER, and the rule behind it:
+  ⛔ NAVIGATION WINS.** The pill must shrink, truncate or collapse before it ever overlaps the
+  project / plan chips — never the other way round. The owner could not open the plan switcher on a
+  laptop at all: the pill's own text span answered every point of the chip's right end, the ▾ caret
+  included (*"the unincorporated / city of Houston / ETJ / Harris County chip is too big and it
+  covers it"*). **It was NOT a z-index or overlay problem** — plain flex overflow; the LAYOUT half
+  of the fix is the row-1 zone flexes in the shared app-header component and the shared `CRUMB_MIN_W`
+  floor on both crumbs (see `/src/shared/CLAUDE.md`). This module is the CONTENT half: it drops **whole FACTS, governing one
+  first** ("Unincorporated +3"), never characters — a CSS ellipsis yields *"Part in City of
+  Bayto…"*, which reads as a different, WRONG answer rather than a short one. `formatJurisdictionBadge`
+  publishes `parts` for it, because a segment can itself contain " · " and re-splitting the rendered
+  string shatters one fact into two. **The full string never stops being available** (the tooltip's
+  first line + `data-jurisdiction-full`). Two things not to undo in the component: the fit is
+  measured against the space the PARENT gives, never the pill's own width (measuring the pill
+  LATCHES — abbreviating shrinks it, which then "proves" the short form is all that fits), and the
+  natural width comes from an always-mounted hidden copy of the full text. Guards: the repo-root
+  `test/` suite **headerNavPriority** (pure model through the real formatter + source guards on the
+  zone flexes) and the ui-audit harness **verify-header-nav-clickable** (132 checks, real
+  `elementFromPoint` at every point of each chip's box, at 1024/1280/1440/1600 on the longest string
+  in his portfolio; mutation-proven — 201/201 points lost pre-fix at 1280 AND 1440).
 - **⛔ `assemblyIntegrity.js` (B1340) — THE bonded-assembly invariant, and the reason this bug family
   is closed rather than patched a ninth time. Read it before touching any write, echo or revert path.**
   A bonded child's world position is REDUNDANT: it is derived from its host across the wall, and only
@@ -485,6 +641,21 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   **assemblyIntegrity** (28, incl. all six required races, each proven red with the write seam disabled)
   and the e2e spec **assembly-tear-detector**, which measures BEFORE any reload — a reload heals this
   bug, so any check that reloads first proves nothing.
+  **⛔ B377890 — AND WHAT THE HEAL MUST NOT DO. A heal that meets a state it cannot repair has two honest
+  options: repair it, or say so.** It had a third — quietly produce *a* layout and report success — and
+  it took it: a truck court was deleted, `normalizeCrossHostBonds` dropped its trailer's `forCourt` as
+  "dangling", `normalizeStrandedZones` read the orphan as a chain HEAD, and the trailer was laid flush
+  against the dock wall 135 ft inboard (exactly the missing court's depth) under an
+  `assembly-tear-healed`. B1124's rule is SPLIT on the fact it was always about: a bond naming a REAL
+  element on the WRONG host is still re-pointed; a bond naming NOTHING is a MISSING SIBLING and both the
+  bond and the geometry are left alone. `assemblyIntegrity` returns **`unhealable`** — deliberately
+  separate from `tears`, so "we fixed it" and "we cannot fix it" can never become one number — carrying
+  `missingBondSiblings` (bookkeeping) and **`impossibleStacks` (GEOMETRY: a trailer row first in the
+  stack on a wall with no truck court)**. The geometric one is load-bearing: after the old pass tidied
+  the dangling reference away, every bond in the plan was coherent and the drawing was impossible, so
+  any check reading the bonds would have passed. Guards: the repo-root `test/` suite **assemblyMissingSibling** and the
+  e2e spec **assembly-missing-sibling** (the LOAD seam persists what it decides, so only a browser
+  proves the plan on disk), both mutation-proven on the owner's real Building 3 rows.
 - `bondRemap.js` — the ONE id-bearing bond inventory (`attachedTo` · `forCourt` · `forTrailer` ·
   `prevZone`) + the remap rule EVERY copy path must use (B1124). Both copy paths used to remap only
   `attachedTo`, so a duplicated building's trailer parking stayed bonded to the ORIGINAL building's
@@ -798,12 +969,54 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   drives a real wheel gesture, captures the frame MID-gesture, and fails unless the clean run is
   green AND both deliberate mutants go red). The owner-facing A/B is **zoom-smoothness-ab**
   (`npm run perf:zoomab`), which records the same gesture with the anchor on and off.
-  **The on-canvas `View ▾` menu → Smooth zoom** is the off switch (`components/ViewMenu.jsx`; moved
-  there from the plan menu by **B286000** — a per-device rendering preference does not belong in a
-  plan-scoped flyout, and the owner could not find it there. Same `smoothZoom` localStorage key,
-  same default, same `disarmViewAnchor()` on turn-off; `SitePlanner`'s `applySmoothZoom` is the one
-  place that decides, so the card renders state and owns no copy of the rule). It gates the ZOOM anchor only — the pan anchor is never
-  gated on it.
+  **⛔ `Settings → Interface → Smooth zoom` is the off switch, and it has moved TWICE — do not move
+  it again without reading why.** B1449 put it in the plan menu; **B286000** moved it to the
+  on-canvas `View ▾` menu; the owner still could not find it, and the corrected rule is that
+  **View ▾ is a per-DRAWING display menu** while this follows the DEVICE across every plan and every
+  project. Its one home is now the Interface section of Settings, beside the display theme
+  (the shared `ui/` Interface-settings component, rendered by BOTH Settings homes — the signed-in account panel
+  and the signed-out header gear — so they cannot disagree). The persisted value lives in
+  the shared `prefs/` smooth-zoom module (same `planarfit:smoothZoom` key, same default ON, one writer + a
+  subscription); the planner SUBSCRIBES, because the control is now outside the component, and keeps
+  the half only it can do — `disarmViewAnchor()` on turn-off, hung off the subscription so a change
+  from the modal, the gear or another tab all disarm. ⛔ There must be exactly ONE switch; the
+  repo-root `test/` suite **smoothZoomHome** counts occurrences in both directions, and the e2e spec
+  **smooth-zoom-settings** drives the real control. It gates the ZOOM anchor only — the pan anchor
+  is never gated on it.
+- **⛔ `featureEditZoom.js` (B312544 · B335984 · NEW-1) — WHEN THE ON-BUILDING `+`/`−` CONTROLS MAY
+  EXIST. `FEAT_BTN_MIN_PX` (B225) asks whether the BUILDING has room to seat the cluster; a 900 ft
+  industrial building clears that at almost any zoom a site plan is read at, so on the owner's
+  109-acre Bain plan the controls armed with the whole site in the viewport, at full size, over the
+  two largest objects on the drawing — while the bump-out they place was a few pixels wide. The
+  second gate asks whether the EDIT is legible. Both must pass; neither replaces the other.
+  **⛔ THE VALUE IS OWNER-SET AND MUST NOT BE RE-DERIVED — THREE VALUES HAVE SHIPPED AND THE FIRST
+  TWO WERE BOTH DERIVED FROM THE 55 ft BUMP-OUT AND BOTH CAME IN LATE.** #990 required 44 px across
+  it (a minimum-TOUCH-TARGET figure, and the bump-out is not the touch target); #994 required the
+  disc's own outer width, 19.75 px ÷ 55 ft = 0.359 px/ft; the owner sent BOTH back. The live floor
+  is **0.25 px per foot — 4 FEET PER PIXEL — STATED, not computed**, with both failed derivations
+  named in the module header so a future session that finds it arbitrary is reading the record of
+  why re-deriving fails. `FEAT_CTRL_R` / `FEAT_CTRL_STROKE` are still exported and the cluster still
+  renders from them (that is the CONTROL's size, a real fact) but they no longer feed the threshold,
+  and neither does `DOGEAR_W`. Building 3 on his plan renders about 197 px at the floor.
+  **⛔ AND THE GATE IS NO LONGER PURELY ABSOLUTE — say so, do not "restore" it.** An absolute px/ft
+  floor puts a bigger share of a SMALLER screen under the building: at 0.359 Building 3 was about a
+  third of his 1600 px monitor's canvas and closer to half of his 1191 px laptop's. So the floor is
+  the EARLIER of the owner-set 0.25 px/ft and a **VIEWPORT CAP** — the zoom at which
+  `FEAT_EDIT_REF_SPAN_FT` (800 ft, a CONSTANT) would reach a quarter of the canvas width. **It is
+  still SITE-size independent**, which is the property that was actually asked for: nothing reads
+  the plan, the site, the selected building or any drawn geometry, so a 30-acre and a 900-acre site
+  on one screen arm at the identical zoom. The cap binds below 800 px of canvas and nowhere above.
+  **The B312544 defect cannot return through it at any width, and that is a proof:** whole-site zoom
+  is itself `canvasW ÷ siteSpanFt`, so both sides scale with the canvas and the cap sits a CONSTANT
+  1.48× tighter than the overview on his Bain frontage, on a phone exactly as on a monitor.
+  Above the floor the controls ramp to full strength over the next 35% of zoom (a fade, not a pop)
+  and are **fully clickable the whole time** — opacity is presentation, never a hit-test gate. It is
+  asked with `rppf` and `size.w`, never `view.ppf`. Guards: the repo-root `test/` suite
+  **featureEditZoom** (which replays ALL THREE superseded rules as mutation checks and fails if the
+  floor ever equals either failed derivation again) and the e2e spec **feature-edit-zoom** (a real
+  wheel gesture either side of the floor **in force on the canvas the browser opened** — the
+  viewport half is a function of a measured canvas, which no source reading can evaluate — plus a
+  real `elementFromPoint` hit test on each faded disc).
 - `zOrder.js` — per-element `z` stacking key utilities (`nextZ`/`sortByZ`/`normalizeZ`/`ensureZ`, B671).
   `arrange.js` — pure z-order "Arrange" (`reorderByZ`/`arrangeFlags`, B820): Bring-to-Front/Send-to-Back
   over a peer set. Wired via `arrangeSel` + `arrangePeers` + the right-click menus + the ⌘/Ctrl+]/[
@@ -823,9 +1036,21 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   could reach. `arrangePeers` is now the ONE peer-set resolver for all four families — never re-derive one.
   The three menus that share a shape build their rows from ONE `arrangeGroup` helper; the element menu
   keeps its own `arrRow` (different menu component, different header style) and is asserted separately.
-  **Whether an ELEMENT may cross its type-layer band at all** (paving over a building) is a
-  drawing-convention decision parked for the owner as an `{ open: … }` cell on the capability table —
-  deliberately not decided in code. Guards: the repo-root `e2e/` declaration table **elementCapabilities.table** (a new
+  **⛔ B316864 — THE OWNER ANSWERED THE CROSS-BAND QUESTION, AND THE ANSWER IS BOTH HALVES.** It used
+  to be an `{ open: … }` cell on the capability table (*"paving over a building"*); it is now
+  `crossBand: yes` for all six element types. **The DEFAULT did not move** — `road → paving → pond →
+  parking → building` is still absolute for every untouched element, and ordinary Arrange still stops
+  at the band edge — but an explicit **"Force on top of everything"** row lifts ONE element across it,
+  reversibly. It resolves in **`planStyle.zOrder`** (`bandForceOf` / `EL_BANDS`), the single function
+  every band question already asks, so there is no second stacking mechanism and a forced element gets
+  its own Arrange peer group for free. The shape is BORROWED from the `behindEls` toggle markups /
+  measurements / callouts carry and from `overlayOrder.js`'s `aboveParcel` — do not invent a third.
+  Two things not to undo: a road forced out of its band is excluded from the DISSOLVED `roadNet` (it
+  would otherwise paint twice, once in the merged region and once as its own strip), and `bandForce`
+  is ignored unless it names a known band, because an unreadable override must never silently move a
+  building. Guards: the repo-root `test/` suite **elementBandForce** (which REPLAYS the pre-fix comparator, so a
+  default that drifts goes red; mutation-proven three ways) plus the ui-audit harnesses
+  **audit-element-parity** (58/58) and **verify-v91632-real-plan** (the owner's real Bain plan). Guards: the repo-root `e2e/` declaration table **elementCapabilities.table** (a new
   selectable type cannot ship without answering every capability), the repo-root `test/` suite
   **elementCapabilities** (proven red four ways on the pre-fix source) and the ui-audit harness
   **audit-element-parity** (right-clicks one of every kind on a deliberately OVERLAPPING fixture and
@@ -1013,7 +1238,33 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   Prop from `proposedSurface.sampleProposedAt`, which walks the SAME `grid.owners` the B826
   earthwork rows price off, so chip and ledger cannot drift).
   `fbcdWse.js` — FBCDD Atlas-14 DRAFT WSE samplers (Fort Bend): 0.2% mosaic → `derivedWse02Ft`,
-  per-watershed 100-yr multiplex → `derivedWse1pctFt` (B807).
+  per-watershed 100-yr multiplex → `derivedWse1pctFt` (B807). Its `onSample` hook reports ONE timing
+  per raster to `drainageTiming.js` (B298563) — a group total cannot say WHICH county layer went slow.
+- **⛔ `groundElevation.js` + `drainageTiming.js` (B298560–B298563) — THE DRAINAGE CHECK'S SLOWEST LEG,
+  AND THE INSTRUMENT THAT WOULD HAVE FOUND IT. Read the first module's header before touching
+  `checkDrainage`.** Measured live on the owner's signed-in Bain plan: the whole re-check cost 3.6–8.5 s
+  and ONE call — a USGS 3DEP transect for BARE-EARTH GROUND ELEVATION, whose geometry parameter is
+  **byte-identical run to run** — was 68–90% of it, at 997 / 5,761 / 7,702 ms for the same query.
+  **Four things not to undo:** **(a)** the cache key is built from `elevation.profileQuery`, the SAME
+  derivation that builds the URL, so a change to the georeference, the parcels or the transect rule is a
+  MISS rather than a stale read — never loosen it to a rounded lat/lng or a site id, because serving
+  elevation for the wrong ground is the whole failure mode; it lives in `gisCache`'s IndexedDB tier
+  (TIER-BY-REBUILDABILITY — re-fetchable cache may never compete with saved plans in the ~5 MB store).
+  **(b)** the transect starts at t=0 and the panel is NOT gated on it: `GROUND_PUBLISH_BUDGET_MS` (1.5 s)
+  bounds how long the PUBLISH waits, `GROUND_TIMEOUT_MS` (8 s) bounds the REQUEST, and the late answer
+  patches the number, the freshness dot and the remembered record in place. Four states, never fewer —
+  `value` / `void` / `pending` / `unavailable` — and **NEVER a default elevation**, because an assumed
+  ground surface is how a detention volume comes out confidently wrong. **(c)** the ↻ bypasses the cache
+  as a FORCE REFRESH, not a blocking re-read (the owner needs both "the button corrects a wrong cached
+  value" and "the press is fast"), and a cache hit is LOUD in the freshness hover with its age.
+  **(d)** ⛔ **NEITHER MODULE MAY REJOIN THE SITE ROUTE'S STATIC GRAPH** — both are reached only by the
+  dynamic `import()` inside `checkDrainage`; static they put 8.8 KB on the largest chunk and breached its
+  ceiling. That is why the hover sentence travels WITH the state (`groundElev.note`) instead of the render
+  calling back into the lib, and why the save-leg stamp in `cloudPushWithWatchdog` is gated on a ref.
+  Guards: the repo-root `test/` suites **groundElevation** (28, incl. both source guards),
+  **drainageTiming** (26) and **elevation**, plus the e2e spec **drainage-elevation-latency**
+  (mutation-proven both ways: restoring the gate reddens the publish arm alone, removing the cache
+  reddens the held-value arm alone).
 - Detention outlet / routing / criteria tier (NEW-A, Phase A): `detentionCriteria.js` (the versioned
   jurisdiction criteria registry — cited outlet/geometry criteria, referencing `detentionRules.js` for
   the verified release/storm/freeboard facts; audit + overrides), `outletStructure.js` (per-pond
@@ -1174,6 +1425,22 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   declutter/LOD/collision, label sizes and stroke-zoom are a function of the plan and the paper,
   never of the live zoom. It IS on the boot path (SitePlanner imports it statically, ~1 KB pure). PDF-PARITY: `printMetricPairs`/`printStormwaterBars` deliberately stay in
   `SitePlanner.jsx` so screen and sheet read one derivation.
+  **⛔ NEW-2 — A MODEL-BUILT EXPORT DECIDES ITS OWN CONTENTS; A CANVAS DISPLAY TOGGLE NEVER DOES.**
+  `kmzExport.js` gated its dock doors on `settings.showDocks`, the View ▾ checkbox — so a
+  drawing-legibility preference decided what went into a file for a different audience, and turning
+  dock doors on to check a layout silently changed an exported KMZ (on the owner's Bain plan, five
+  buildings and several hundred doors, Google Earth opened under a blanket of pins). Every content
+  decision in that module is now an `opts` flag with a stated default, all OFF, on the
+  `includeDimensions` precedent; `settings` is read there only for MODEL facts (door o.c./width,
+  building rules) that determine where a thing physically is. **`includeDockDoors` also changed the
+  REPRESENTATION** — one LINE per dock side carrying the door count and the o.c., never a point per
+  door — so even opting in costs a handful of placemarks per building rather than hundreds. There is
+  no UI for it, exactly as `includeDimensions` has none. **The deliberate exception, which is not
+  the same defect:** `exportSheet.js`'s PDF/PNG path CLONES the live `<svg>` and so inherits every
+  display toggle by construction — that artifact is the drawing on paper for the same audience, set
+  by the user while looking at the drawing they are printing. Guard: the repo-root `test/` suite
+  **kmzExport**, which sweeps every model-built export module for the whole class of toggle rather
+  than for the dock doors alone.
 
 - **`lib/numEditBox.js` + `components/NumEditField.jsx` (NEW-1) — the canvas's ONE inline numeric
   editor, and the rule that it may never be bigger than the control it edits.** Clicking a setback

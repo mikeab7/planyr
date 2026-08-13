@@ -68,6 +68,48 @@ body { font: 11.5pt/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sa
 .note-body figure.planyr-note-image, .note-body img { margin: 0; }
 .note-body img { max-width: 100%; height: auto; break-inside: avoid; }
 .note-body .planyr-note-image-missing { display: inline-block; border: 1px dashed #9AA0AC; color: #5B6270; font-size: 0.85em; padding: 0.6em 0.9em; }
+/* A CALLOUT on paper (NEW-7). The node carries a NAME, never a colour, so this is the
+   entire ink for it — printed light-on-white with a coloured rule and the same glyph the
+   screen draws, mirroring components/NoteEditor.jsx → EDITOR_CSS rule for rule. */
+/* ⛔ AN ANCHORED BLOCK PRINTS WHERE IT SITS (NEW-2, PDF-PARITY). Its left/top ride in the
+   serialised markup (the node's own renderHTML writes them), so paper reads the same two
+   numbers the screen does. There is no second stylesheet holding the position and therefore
+   nothing to drift. .note-body is the positioned ancestor, as .ProseMirror is on screen. */
+.note-body { position: relative; }
+/* Same box arithmetic as the screen, deliberately: box-sizing and the LEFT padding are copied
+   across so a narrowed block wraps its words at the same place on paper. The grip is hidden
+   rather than removed from the layout for exactly that reason. */
+.note-body .planyr-anchor { position: absolute; margin: 0 !important; box-sizing: border-box; padding: 3px 6px 3px 16px; break-inside: avoid; }
+.note-body .planyr-anchor-grip { display: none; }
+.note-body .planyr-callout { position: relative; border: 1px solid #D8DBE2; border-left: 3px solid #5B6270; border-radius: 6px; background: #FAFAFC; padding: 7px 9px 7px 26px; break-inside: avoid; }
+.note-body .planyr-callout > * + * { margin-top: 0.5em; }
+.note-body .planyr-callout::before { position: absolute; left: 8px; top: 6px; font-size: 10pt; font-weight: 700; content: "i"; color: #5B6270; }
+.note-body .planyr-callout[data-callout="info"] { border-left-color: #B8418C; }
+.note-body .planyr-callout[data-callout="info"]::before { content: "i"; color: #8C2F69; }
+.note-body .planyr-callout[data-callout="tip"] { border-left-color: #0F6E56; }
+.note-body .planyr-callout[data-callout="tip"]::before { content: "*"; color: #0F6E56; }
+.note-body .planyr-callout[data-callout="important"] { border-left-color: #EF9F27; }
+.note-body .planyr-callout[data-callout="important"]::before { content: "*"; color: #8A5410; }
+.note-body .planyr-callout[data-callout="warning"] { border-left-color: #8A5410; background: #FBEFD5; }
+.note-body .planyr-callout[data-callout="warning"]::before { content: "!"; color: #8A5410; }
+.note-body .planyr-callout[data-callout="danger"] { border-left-color: #B3261E; background: #FBE4E0; }
+.note-body .planyr-callout[data-callout="danger"]::before { content: "!"; color: #B3261E; }
+
+/* ⛔ A TOGGLE PRINTS **OPEN**, ALWAYS (NEW-7). lib/notesDocHtml.js sets the open
+   attribute on every details element before serialising, unconditionally, so a folded section cannot print as
+   missing text — the worst class of export bug, because nothing about the sheet looks
+   wrong. The disclosure marker is hidden here: on paper it points at nothing. */
+.note-body .planyr-toggle { border: 1px solid #D8DBE2; border-radius: 6px; background: #FAFAFC; padding: 6px 9px; break-inside: avoid; }
+.note-body .planyr-toggle > * + * { margin-top: 0.5em; }
+.note-body .planyr-toggle-title { font-weight: 650; list-style: none; }
+.note-body .planyr-toggle-title::-webkit-details-marker { display: none; }
+
+/* AN ATTACHED FILE on paper (NEW-5). Paper cannot carry bytes, so it carries the NAME, the
+   type and the size — which is the whole of what a sheet can honestly say about a file, and
+   is what stops an attachment vanishing silently out of a PDF. */
+.note-body .planyr-note-file { display: inline-flex; align-items: baseline; gap: 6px; padding: 4px 8px; border: 1px solid #9AA0AC; border-radius: 5px; background: #F7F8FA; color: #14161C; text-decoration: none; font-size: 0.92em; font-weight: 650; break-inside: avoid; }
+.note-body .planyr-note-file::before { content: "FILE"; font-size: 0.72em; font-weight: 800; letter-spacing: 0.06em; color: #5B6270; }
+
 /* SKETCH MODE on paper. The drawing itself comes from the schema node's own renderHTML, so
    it cannot drift from the screen; what changes here is only the INK — black on white,
    because a theme token would print a dark page. Every box, every word (label AND body) and
