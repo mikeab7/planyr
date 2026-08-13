@@ -113,6 +113,36 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V215200 — B420256: a real multi-op commit still settles correctly on the plan that holds one id under two kinds `Blocker: auth` + `real-data`
+
+**What is proven HERE, and it is the mechanism itself.** `test/elementResultPairing.test.js` drives the
+REAL sync engine over the owner's actual collision — `e6327` as both `el` and `markup` — through one
+batch carrying both ops, and asserts each op receives its own result across five shapes: conflict beside
+ok (and the mirror), a `deleted` result that must not tombstone the neighbour, the B1117 atomic-rollback
+rev adoption, and an out-of-order response. It was **proven RED on the unfixed code first** — 5 of 7
+failing, with the two passing cases being deliberate controls, so the suite is not merely describing the
+new implementation. Full repo suite green (542 files / 10,931 tests), lint 0 errors, build green, bundle
+audit passing.
+
+**What CANNOT be checked here, and why it is a real blocker rather than a to-do.** The collision lives on
+one signed-in plan (site `smqh3au6aeb4`, Katz / Plan 1) and the pairing only executes against a genuine
+multi-op `commit_elements` round trip. The sandbox proxy CORS-blocks the Supabase auth handshake, so no
+self-test here can sign in, open that plan, or issue a real RPC — every test above injects the commit
+adapter. **This plan must NOT be modified to make the check easier:** the duplicate id is legitimate live
+data and the code's job is to tolerate it.
+
+**The signed-in steps still pending, in order:**
+1. Sign in on planyr.io, open **Katz / Plan 1** (`smqh3au6aeb4`) and confirm both `e6327` objects render —
+   the building AND the markup — as they do today. Nothing about the drawing should change.
+2. Move the building and the markup **in one gesture** (marquee both, drag once) so a single batch carries
+   both ops, then reload and confirm both kept their new positions.
+3. With a second window open on the same plan, edit the building in window A and the markup in window B,
+   then commit both — the loser should toast for the kind that actually lost, and only that kind.
+4. Check `client_errors` for `element-results-unaligned`. It should be **absent**: its presence would mean
+   the live RPC is not returning one result per op in op order, which is the assumption the fix rests on.
+
+Recorded 2026-08-13 · shipped in the same session · ⏳ pending.
+
 ### V209424 — B407328: the screening study still runs, and still returns the SAME numbers, now that its engine arrives by dynamic import `Blocker: real-data` + `live-GIS`
 
 **What is proven HERE, and it is most of it.** The engine is unchanged — not one line of hydrology or
