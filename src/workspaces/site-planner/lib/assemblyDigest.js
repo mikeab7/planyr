@@ -54,8 +54,20 @@ export function assemblyDigest(members) {
  * `rootOf`  — (entry) => the assembly id, or null to exclude the entry.
  *
  * ⛔ ONLY `el`-kind rows form assemblies, exactly as `rootIdOf` has it in elementSync — a markup or
- * a measurement has no host, and folding them in would make an assembly's digest depend on objects
- * the database's `assembly_id` never groups with it.
+ * a measurement has no host, so it is a member of nothing but itself.
+ *
+ * ⛔ B447472 — AND THE DATABASE'S `assembly_id` DOES NOT GROUP BY KIND FOR YOU. This used to say
+ * the SQL side "never groups them with it", which was FALSE and cost a permanent groupConflict.
+ * `assembly_id` is `coalesce(data->>'attachedTo', id)`, and the PK is (site_id, kind, id) — an id
+ * is unique only PER KIND (B420256) — so an unbonded row's assembly key inherits that
+ * non-uniqueness and two unrelated singleton assemblies of DIFFERENT kinds collide on the name.
+ * Live on the owner's Katz plan: `el:e6327` (a building with 27 children) and `markup:e6327` (no
+ * host) share the assembly key `e6327`. `assembly_digest()` therefore carries a matching
+ * `kind = 'el'` predicate. THIS SIDE IS THE CORRECT ONE and does not move: never make the two
+ * agree by folding non-el rows in here. Parity is proven by running BOTH implementations over one
+ * member set in `test/assemblyGroupCas.test.js`, not by matching the SQL against a regex — a
+ * pattern on the projection is structurally blind to the WHERE clause beside it, which is exactly
+ * how this shipped.
  */
 export function digestsByAssembly(entries, rootOf) {
   const groups = new Map();

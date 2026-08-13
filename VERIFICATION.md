@@ -113,6 +113,34 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V242416 — B447472: the corrected `assembly_digest()` against the REAL database, on the assembly that carries the kind collision `Blocker: auth` + `real-data`
+
+**Why this cannot be closed in the sandbox.** The client half is proven here — `test/assemblyGroupCas.test.js`
+runs BOTH implementations over one member set (parity, not a regex on the SQL text), with a fixture drawn from
+the live `e6327` assembly; **32/32 green, and 4 of the new cases proven RED against the pre-fix SQL.** But the
+SQL itself only ever executes in Postgres, and the group-CAS path only runs on a signed-in plan against the live
+RPC. No headless, logged-out pass can reach either.
+
+**Already done this session, so this is a confirmation and not the fix.** The corrected `assembly_digest()` and
+the corrected `commit_elements(text,jsonb,boolean,jsonb)` members subquery were **applied to production**
+(`create or replace`, additive, idempotent — the stage-2 migration was already deployed and the deployed function
+was the broken one). Post-apply read on the live database: `assembly_digest('smqh3au6aeb4','e6327')` returns
+**28 tokens and names no markup**, against **29 rows still sharing the assembly key** — the Katz plan untouched.
+
+**The pending steps, in order:**
+1. Run `src/workspaces/site-planner/db/test/commit_elements_group_cas.test.sql` whole in the Supabase SQL editor.
+   It is self-rolling-back and writes nothing. Expect **ALL PASS**, including the two new checks: **9.** a markup
+   inserted at the host's own id collides on `assembly_id` and stays OUT of the digest; **10.** the
+   `groupConflict` members payload carries the same el-only set the digest does.
+2. On a signed-in tab holding site `smqh3au6aeb4` (Katz / Plan 1), arm group CAS for that device only
+   (`localStorage.setItem("planarfit:groupCas","1")` — read at CALL time, no reload needed), move **building
+   `e6327`** so the batch spans its assembly, and confirm the commit **APPLIES**: no `element-group-conflict`
+   report, no `assembly-split` event, no `client-stale`. Pre-fix that assembly would have been refused forever.
+3. Disarm the flag (`localStorage.setItem("planarfit:groupCas","0")`) — stage 2 still ships OFF.
+
+**Nothing on the owner's side.** The migration is applied; this is a check, not a task.
+
+
 ### V229360 — B434416/B434417/B434418 + B421493: the two-stage box, a resize that persists, and a re-file that travels `Blocker: auth`
 
 **What is proven WITHOUT sign-in, and it is deliberately adversarial** (his instruction: *"Try to
