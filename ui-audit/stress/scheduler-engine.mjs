@@ -289,8 +289,12 @@ export const taskDurValue = t => (t.durValue != null ? t.durValue : (typeof t.du
 export const taskDurUnit  = t => t.durUnit || "d";
 export const resolveTaskSpan = t => resolveDuration(t.start, taskDurValue(t), taskDurUnit(t));
 export const startForEnd = (end, duration) => !end ? "" : (duration <= 1 ? end : addBD(end, -(Math.max(1, duration) - 1)));
-export const fmtTaskDuration = t => {
+// B463072 — a SUMMARY row's only true duration is the span rollupParentDates derived from its children
+// (`duration`); the leftover `durValue`/`durUnit`, which the rollup never rewrites, printed "0d" on a
+// 40-working-day parent. Faithful copy of index.html.
+export const fmtTaskDuration = (t, isSummary = false) => {
   if (t.duration === "" || t.duration == null) return "";
+  if (isSummary) return `${t.duration}d`;
   return `${taskDurValue(t)}${taskDurUnit(t)}`;
 };
 
@@ -422,11 +426,20 @@ export const cascadeDates = (tasks, bodies = []) => {
   queue.forEach(id => {
     const t = map[id];
     const preds = t.predecessors.filter(p => map[p.id]);
+    // B443249 — predecessors that contribute NO date (missing id, or a live row with no dates of its own).
+    // Both were dropped in silence, so the successor showed a date derived from a SUBSET of its inputs.
+    t.predUnresolved = t.predecessors
+      .filter(p => !map[p.id] || !(map[p.id].end || map[p.id].start))
+      .map(p => p.id);
     const bound = !!(t.meetingBound && bodyMap[t.meetingBodyId] && !parentIds.has(t.id) && !(t.pinnedEnd && t.end));
     // B864 — bound to a calendar that no longer exists (a lost meeting body). PRESERVE the stored date
     // (soft-pin, below) instead of reverting to a plain FS date, and flag it. VERBATIM mirror of index.html.
     const bodyMissing = !!(t.meetingBound && !bodyMap[t.meetingBodyId] && !parentIds.has(t.id));
     t.meetingBodyMissing = bodyMissing;
+    // B443248 — a SUMMARY row's dates are OWNED by rollupParentDates. Deriving them here read durValue/
+    // durUnit (fields a parent doesn't carry), collapsing a 40-day parent to a 0-day milestone on its own
+    // start — and every FS successor then scheduled off that collapsed end. VERBATIM mirror of index.html.
+    if (parentIds.has(t.id)) { t.finishConflict = false; t.startConflict = false; return; }
     // Locked FINISH (B616): the end is a FIXED POINT; the start back-calcs; the end never moves.
     if (t.pinnedEnd && t.end) {
       if (t.pinnedStart && t.start) {
@@ -445,10 +458,16 @@ export const cascadeDates = (tasks, bodies = []) => {
       return;
     }
     t.finishConflict = false;
+    t.startConflict = false;
     const predEarly = preds.length
       ? preds.map(p => constrainedStartFrom(map[p.id], p, Math.max(1, t.duration || 1))).filter(Boolean).reduce((a,b)=>a>b?a:b, "")
       : "";
-    if (!preds.length || t.pinnedStart || (bodyMissing && t.start)) { const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration; }
+    if (!preds.length || t.pinnedStart || (bodyMissing && t.start)) {
+      const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration;
+      // B443250 — a pinned start wins over the chain, but a pin BEFORE what the chain allows is a real
+      // conflict that used to be resolved silently. Flag it as a locked finish already does (B616).
+      if (t.pinnedStart && t.start && predEarly && predEarly > t.start) t.startConflict = true;
+    }
     else {
       const starts = preds.map(p => constrainedStartFrom(map[p.id], p, t.duration)).filter(Boolean);
       if (starts.length) t.start = starts.reduce((a,b) => a>b?a:b, starts[0]);
@@ -525,6 +544,20 @@ export const rollupParentDates = tasks => {
 // the corrected leaf tasks so the load path can surface the change LOUDLY (a banner) instead of swapping
 // the number in silence. Pins are exempt (a pinned start is intentional); parents are excluded (their
 // dates are always rollup-derived, not cascade drift). Pure — mirrored in public/sequence/index.html.
+// B443248 — THE recompute: seed with a rollup so the first cascade reads real parent finishes, then
+// iterate cascade→rollup to a FIXED POINT so a move propagates transitively down a chain of any depth.
+// PASS_CAP is a runaway guard, never the normal exit. VERBATIM mirror of index.html.
+export const RECOMPUTE_PASS_CAP = 12;
+export const recomputeSchedule = (tasks, bodies = []) => {
+  let out = rollupParentDates(tasks);
+  for (let i = 0; i < RECOMPUTE_PASS_CAP; i++) {
+    const next = rollupParentDates(cascadeDates(out, bodies));
+    const stable = next.length === out.length && next.every((t, k) => t.start === out[k].start && t.end === out[k].end);
+    out = next;
+    if (stable) break;
+  }
+  return out;
+};
 export const detectCascadeDrift = (storedTasks, engineTasks) => {
   const eng = {}; (engineTasks || []).forEach(t => { eng[t.id] = t; });
   const parentIds = new Set((storedTasks || []).map(t => t.parentId).filter(p => p !== null && p !== undefined));

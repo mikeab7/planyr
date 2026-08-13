@@ -523,7 +523,9 @@ describe("anti-drift: the schedule-input fixes still exist in the real source", 
     expect(src).toMatch(/if \(parsed\.value !== taskDurValue\(t\) \|\| parsed\.unit !== taskDurUnit\(t\)\) updateTask\(t\.id, \{durValue: parsed\.value, durUnit: parsed\.unit\}, t\.projId\)/);
   });
   it("indent/outdent/paste recompute roll-ups after a structural move", () => {
-    expect(src).toMatch(/const recomputeAfterStructureChange = tasks => rollupParentDates\(cascadeDates\(tasks\)\);/);
+    // B443248 re-pointed this at recomputeSchedule (cascade→rollup iterated to a fixed point); the
+    // structural-move call sites below are unchanged.
+    expect(src).toMatch(/const recomputeAfterStructureChange = tasks => recomputeSchedule\(tasks\);/);
     // every structural-move handler routes through it (5 call sites)
     expect((src.match(/renumberTasks\(recomputeAfterStructureChange\(/g) || []).length).toBeGreaterThanOrEqual(4);
     expect(src).toMatch(/recomputeAfterStructureChange\(sortByVisualOrder\(final\)\)/);
@@ -534,7 +536,7 @@ describe("anti-drift: the schedule-input fixes still exist in the real source", 
   });
   it("the duration cell never renders a bare 'd' (fmtTaskDuration guards blank)", () => {
     // B615 routes the cell through fmtTaskDuration, which returns "" for a blank duration → no bare "d".
-    expect(src).toContain("fmtTaskDuration(task)");
+    expect(src).toContain("fmtTaskDuration(task, task.hasChildren)");   // B463072 added the summary flag
     expect(src).toMatch(/if \(t\.duration === "" \|\| t\.duration == null\) return "";/);
   });
   it("grid date input clears, gives feedback on junk, and rejects Finish-before-Start", () => {
@@ -1305,7 +1307,13 @@ describe("anti-drift: the round-3 scheduler fixes still exist in the real source
   });
   it("C1: the global key handler bails while any blocking overlay is open", () => {
     expect(src).toMatch(/const overlayOpenRef = useRef\(false\);/);
-    expect(src).toMatch(/if \(overlayOpenRef\.current\) return;/);
+    /* NEW-1 widened this: the guard now also bails on the keystroke that DISMISSED the overlay.
+     * Asking "is an overlay open?" reads false for that one key, because the modal has already
+     * closed itself by the time this handler runs — and the grid then acted on a key aimed at the
+     * modal, re-opening the status picker. The property C1 cares about is unchanged and strictly
+     * stronger; only the expression moved. Full reasoning + the browser proof live in
+     * test/menuPortalIsolation.test.js and ui-audit/verify-grid-overlay-input.mjs. */
+    expect(src).toMatch(/if \(overlayOpenRef\.current \|\| overlayAtKeyStartRef\.current\) return;/);
   });
   it("C2: Delete blanks the whole multi-cell selection", () => {
     expect(src).toMatch(/Multi-cell range delete/);
@@ -1615,7 +1623,7 @@ describe("anti-drift: the B615/B616 duration + finish-lock engine exists in the 
     expect(src).toContain("_v7");
   });
   it("B615: the duration cell renders the typed unit, parses via parseDurationInput", () => {
-    expect(src).toContain("fmtTaskDuration(task)");
+    expect(src).toContain("fmtTaskDuration(task, task.hasChildren)");   // B463072 added the summary flag
     expect(src).toMatch(/const parsed = parseDurationInput\(val\);/);
     expect(src).toMatch(/if \(parsed\.error\) \{ showToast\(parsed\.error\); return; \}/);
   });
@@ -2081,5 +2089,202 @@ describe("B864(b) — keyed-array (tasks/bodies) merge honors adds, deletes, and
     const m = E.mergeCloudDoc(base, ours, theirs);
     expect(m.projects.a.tasks).toHaveLength(1);   // our task in project a
     expect(m.projects.b).toBeTruthy();            // their new project b
+  });
+});
+
+// ── B443248 / B443249 / B443250 — the owner-reported "Mobilize" defect ────────────────────────
+// Grand Port task 228 "Mobilize" (0d, FS after 106 and 108) sat on 2026-08-10 — which read like the
+// clock, because it was roughly the day the link was made. It was not the clock. It was the next
+// WORKING DAY after predecessor 108's START, because cascadeDates resolved 108 (a SUMMARY row whose
+// three children run to 2026-10-02) as if it were a leaf: a parent carries `duration` from the rollup
+// but leaves `durValue` at 0, so resolveTaskSpan collapsed a 40-working-day parent to a 0-day milestone
+// on its own start. rollupParentDates restored the parent's finish immediately afterwards — which is
+// exactly why the wrong successor date was a STABLE fixed point that re-running the recompute could not
+// correct, and that detectCascadeDrift (stored vs engine) could never see.
+const GP = () => ([
+  // 108 — the summary. duration 40 from a prior rollup, durValue 0 (a parent never carries one).
+  { id: 108, name: "CCID3 Approval", start: "2026-08-07", end: "2026-10-02", duration: 40, durValue: 0, durUnit: "d", predecessors: [], parentId: null },
+  { id: 109, name: "Revise routing", start: "2026-08-07", end: "2026-08-13", duration: 5, durValue: 5, durUnit: "d", predecessors: [], parentId: 108 },
+  { id: 110, name: "CWA Approval",   start: "2026-08-14", end: "2026-08-20", duration: 5, durValue: 5, durUnit: "d", predecessors: [{id:109,type:"FS",lag:0}], parentId: 108 },
+  { id: 111, name: "LONO Approvals", start: "2026-08-21", end: "2026-10-02", duration: 30, durValue: 30, durUnit: "d", predecessors: [{id:110,type:"FS",lag:0}], parentId: 108 },
+  // 106 — an UNSCHEDULED predecessor: a summary with one blank child. Contributes no date at all.
+  { id: 106, name: "ETJ Permit",   start: "", end: "", duration: 0, durValue: 0, durUnit: "d", predecessors: [], parentId: null },
+  { id: 107, name: "Submit Permit", start: "", end: "", duration: 0, durValue: 0, durUnit: "d", predecessors: [], parentId: 106 },
+  // 228 — the reported row.
+  { id: 228, name: "Mobilize", start: "2026-08-10", end: "2026-08-10", duration: 0, durValue: 0, durUnit: "d",
+    predecessors: [{id:106,type:"FS",lag:0},{id:108,type:"FS",lag:0}], parentId: null },
+]);
+const byId = arr => Object.fromEntries(arr.map(t => [t.id, t]));
+
+describe("B443248 — a successor of a SUMMARY row schedules off the summary's real FINISH", () => {
+  it("Mobilize starts the next working day after its summary predecessor's FINISH, not its START", () => {
+    const out = byId(E.recomputeSchedule(GP()));
+    expect(out[108].end).toBe("2026-10-02");            // the parent keeps its rolled-up finish
+    expect(out[228].start).toBe("2026-10-05");          // Monday after Fri 2026-10-02 — NOT 2026-08-10
+    expect(out[228].end).toBe("2026-10-05");            // 0d milestone: finish = start
+  });
+  it("the summary row's own dates come from its children, never from durValue", () => {
+    const out = byId(E.recomputeSchedule(GP()));
+    expect([out[108].start, out[108].end]).toEqual(["2026-08-07", "2026-10-02"]);
+  });
+  it("the recompute is a FIXED POINT — running it again moves nothing", () => {
+    const once = E.recomputeSchedule(GP());
+    const twice = E.recomputeSchedule(once);
+    expect(twice.map(t => [t.id, t.start, t.end])).toEqual(once.map(t => [t.id, t.start, t.end]));
+  });
+  it("a change PROPAGATES transitively: a child moves → the summary moves → the successor and ITS successor move", () => {
+    const tasks = GP().concat([
+      { id: 229, name: "Pour slab", start: "", end: "", duration: 5, durValue: 5, durUnit: "d", predecessors: [{id:228,type:"FS",lag:0}], parentId: null },
+      { id: 230, name: "Steel",     start: "", end: "", duration: 5, durValue: 5, durUnit: "d", predecessors: [{id:229,type:"FS",lag:0}], parentId: null },
+    ]);
+    const before = byId(E.recomputeSchedule(tasks));
+    expect(before[228].start).toBe("2026-10-05");
+    expect(before[230].start).toBe("2026-10-13");
+    // Push the LAST child of the summary out by two working weeks.
+    const moved = tasks.map(t => t.id === 111 ? { ...t, durValue: 40, duration: 40 } : t);
+    const after = byId(E.recomputeSchedule(moved));
+    expect(after[108].end).toBe("2026-10-16");
+    expect(after[228].start).toBe("2026-10-19");        // one hop
+    expect(after[229].start).toBe("2026-10-20");        // two hops
+    expect(after[230].start).toBe("2026-10-27");        // three hops — transitive, in ONE call
+  });
+  it("detectCascadeDrift NAMES the correction, so an existing saved schedule self-corrects visibly on load", () => {
+    const stored = GP();
+    const drift = E.detectCascadeDrift(stored, E.recomputeSchedule(stored));
+    expect(drift.map(d => [d.id, d.from, d.to])).toEqual([[228, "2026-08-10", "2026-10-05"]]);
+  });
+  it("a leaf task's own span is still derived from durValue/durUnit (the parent skip is not a blanket skip)", () => {
+    const out = byId(E.recomputeSchedule(GP()));
+    expect(out[109].end).toBe("2026-08-13");            // 5 working days from 2026-08-07 inclusive
+    expect(out[110].start).toBe("2026-08-14");
+  });
+});
+
+describe("B443249 — a predecessor that drives NOTHING is named, never silently dropped", () => {
+  it("an UNSCHEDULED (dateless) predecessor is recorded on the successor", () => {
+    const out = byId(E.recomputeSchedule(GP()));
+    expect(out[228].predUnresolved).toEqual([106]);     // 106 has no dates; 108 does and is absent
+  });
+  it("a MISSING predecessor id (no such row) is recorded too", () => {
+    const tasks = GP().concat([
+      { id: 300, name: "Orphan link", start: "2026-09-01", end: "2026-09-01", duration: 0, durValue: 0, durUnit: "d",
+        predecessors: [{id:9999,type:"FS",lag:0}], parentId: null },
+    ]);
+    expect(byId(E.recomputeSchedule(tasks))[300].predUnresolved).toEqual([9999]);
+  });
+  it("a fully satisfied row records nothing", () => {
+    const out = byId(E.recomputeSchedule(GP()));
+    expect(out[110].predUnresolved).toEqual([]);
+  });
+});
+
+describe("B443250 — a pinned start still WINS, but a pin that beats the chain says so", () => {
+  it("a pinned start earlier than the predecessors allow flags startConflict and keeps the pin", () => {
+    const tasks = GP().map(t => t.id === 228 ? { ...t, pinnedStart: true } : t);
+    const out = byId(E.recomputeSchedule(tasks));
+    expect(out[228].start).toBe("2026-08-10");          // the pin wins — unchanged contract
+    expect(out[228].startConflict).toBe(true);          // …and it is no longer silent
+  });
+  it("a pinned start at or after the chain's earliest is NOT a conflict", () => {
+    const tasks = GP().map(t => t.id === 228 ? { ...t, pinnedStart: true, start: "2026-11-02", end: "2026-11-02" } : t);
+    expect(byId(E.recomputeSchedule(tasks))[228].startConflict).toBe(false);
+  });
+  it("an unpinned row never carries a start conflict", () => {
+    expect(byId(E.recomputeSchedule(GP()))[228].startConflict).toBe(false);
+  });
+});
+
+describe("anti-drift: B443248/B443249/B443250 exist VERBATIM in src + mirror", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  it("cascadeDates skips date derivation for a summary row in both", () => {
+    for (const s of [src, mjs]) expect(s).toMatch(/if \(parentIds\.has\(t\.id\)\) \{ t\.finishConflict = false; t\.startConflict = false; return; \}/);
+  });
+  it("predUnresolved is computed in both", () => {
+    for (const s of [src, mjs]) expect(s).toMatch(/\.filter\(p => !map\[p\.id\] \|\| !\(map\[p\.id\]\.end \|\| map\[p\.id\]\.start\)\)/);
+  });
+  it("the pinned-start conflict flag is set in both", () => {
+    for (const s of [src, mjs]) expect(s).toMatch(/if \(t\.pinnedStart && t\.start && predEarly && predEarly > t\.start\) t\.startConflict = true;/);
+  });
+  it("recomputeSchedule iterates to a fixed point in both", () => {
+    for (const s of [src, mjs]) expect(s).toMatch(/const next = rollupParentDates\(cascadeDates\(out, bodies\)\);/);
+  });
+  it("no cascade+rollup pair is hand-written outside recomputeSchedule in index.html", () => {
+    // Every call site goes through the one recompute; a hand-paired call is the shape that let the
+    // parent's restored finish arrive one pass too late for its successors.
+    const pairs = src.match(/rollupParentDates\(cascadeDates\(/g) || [];
+    expect(pairs.length).toBe(1);                        // the single occurrence inside recomputeSchedule
+  });
+  it("the grid marks a flagged predecessor entry and the pinned-start conflict", () => {
+    expect(src).toMatch(/flagged=\{p => un\.has\(p\.id\)\}/);
+    expect(src).toMatch(/isStart \? !!task\.startConflict : !!task\.finishConflict/);
+  });
+});
+
+// ── B463072 — the SUMMARY row's Duration cell read the stale leftover ─────────────────────────
+// The audit B443248 provoked: a group header carries TWO durations — the span rollupParentDates derives
+// from its children (`duration`), and the typed value the rollup never rewrites (`durValue`/`durUnit`).
+// B443248 stopped the SCHEDULER reading the stale one. This is the same field, read by the DISPLAY.
+// Measured on the real page before the fix: the owner's "CCID3: Lift Station & Force Main Approval"
+// rendered `08/07/26 · 10/02/26 · 0d` — forty working days of work printed as a zero-day milestone.
+describe("B463072 — a summary row prints its ROLLED span, never the leftover typed duration", () => {
+  const summary = { id: 1, duration: 40, durValue: 0, durUnit: "d" };   // exactly the CCID3 shape
+  it("the summary shape printed the leftover when asked as a leaf (the defect, pinned)", () => {
+    expect(E.fmtTaskDuration(summary)).toBe("0d");
+  });
+  it("…and prints the rolled span when told it is a summary", () => {
+    expect(E.fmtTaskDuration(summary, true)).toBe("40d");
+  });
+  it("a summary NEVER inherits a leftover unit — the rolled span is always working days", () => {
+    // A row that was once typed "2mo" and later became a parent keeps durUnit:'mo'; rendering "2mo"
+    // for a span the children put at 63 working days would be a second wrong number, not a fix.
+    expect(E.fmtTaskDuration({ id: 2, duration: 63, durValue: 2, durUnit: "mo" }, true)).toBe("63d");
+  });
+  it("a LEAF is untouched — typed value and typed unit both survive", () => {
+    expect(E.fmtTaskDuration({ id: 3, duration: 30, durValue: 30, durUnit: "d" }, false)).toBe("30d");
+    expect(E.fmtTaskDuration({ id: 4, duration: 63, durValue: 3, durUnit: "mo" })).toBe("3mo");
+    expect(E.fmtTaskDuration({ id: 5, duration: 21, durValue: 30, durUnit: "cd" })).toBe("30cd");
+  });
+  it("a blank duration still renders blank for a summary too (no bare 'd')", () => {
+    expect(E.fmtTaskDuration({ id: 6, duration: "", durValue: 0, durUnit: "d" }, true)).toBe("");
+    expect(E.fmtTaskDuration({ id: 7, duration: null, durValue: 0, durUnit: "d" }, true)).toBe("");
+  });
+  it("a 0-day summary (all children milestones on one day) still reads 0d", () => {
+    expect(E.fmtTaskDuration({ id: 8, duration: 0, durValue: 0, durUnit: "d" }, true)).toBe("0d");
+  });
+  it("the rolled span the engine produces is what the cell then prints — end to end", () => {
+    const tasks = [
+      { id: 100, name: "Header", start: "2026-08-07", end: "2026-10-02", duration: 40, durValue: 0, durUnit: "d", predecessors: [], parentId: null },
+      { id: 101, name: "A", start: "2026-08-07", end: "2026-08-13", duration: 5, durValue: 5, durUnit: "d", predecessors: [], parentId: 100 },
+      { id: 102, name: "B", start: "2026-08-14", end: "2026-10-02", duration: 35, durValue: 35, durUnit: "d", predecessors: [{id:101,type:"FS",lag:0}], parentId: 100 },
+    ];
+    const out = Object.fromEntries(E.recomputeSchedule(tasks).map(t => [t.id, t]));
+    expect(E.fmtTaskDuration(out[100], true)).toBe(`${out[100].duration}d`);
+    expect(out[100].end).toBe("2026-10-02");
+    expect(E.fmtTaskDuration(out[100], true)).not.toBe("0d");
+  });
+});
+
+describe("anti-drift: B463072 exists VERBATIM in src + mirror, and every render site passes the flag", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  it("fmtTaskDuration takes isSummary and short-circuits to the rolled span in both", () => {
+    for (const s of [src, mjs]) {
+      expect(s).toMatch(/fmtTaskDuration = \(t, isSummary = false\) =>/);
+      expect(s).toMatch(/if \(isSummary\) return `\$\{t\.duration\}d`;/);
+    }
+  });
+  it("the project grid passes hasChildren", () => {
+    expect(src).toMatch(/\{fmtTaskDuration\(task, task\.hasChildren\)\}/);
+  });
+  it("the master view and the export both pass !isLeaf", () => {
+    expect((src.match(/fmtTaskDuration\(t, !t\.isLeaf\)/g) || []).length).toBe(2);
+  });
+  it("NO render or export site calls fmtTaskDuration one-armed except the leaf-only edit seed", () => {
+    // The master view's duration EDITOR seeds from the typed value on purpose — it only opens on a leaf
+    // (the dblclick handler returns unless t.isLeaf), and a leaf must edit in the unit it was typed in.
+    const bare = (src.match(/fmtTaskDuration\(([a-z]+)\)/g) || []);
+    expect(bare).toEqual(["fmtTaskDuration(t)"]);
+    expect(src).toMatch(/if \(!t\.isLeaf\) return; setLocalEdit/);
   });
 });

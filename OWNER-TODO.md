@@ -7,6 +7,29 @@
 
 _Last updated: 2026-08-13._
 
+## ✂️ Two calls on splitting a parcel — the tool now takes real cuts, these are the last two choices (B455360)
+
+Splitting is fixed. You can now cut a parcel along a line with as many bends as you like — following a
+creek, a road centreline, an easement, an old property line — and the cut no longer has to run neatly
+between two opposite sides. If the cut leaves the lot and comes back, you get all the pieces it really
+makes, not two. Acreage is preserved exactly: on your Goose Creek tract a zig-zag cut produced four
+pieces that add back up to the full 95.37 acres, and I checked that by reading the acreage tags off the
+drawing, not off the code.
+
+Two things I deliberately did **not** decide for you, because they're product calls, not engineering ones:
+
+**1. When a cut makes three or more pieces, what should happen?** Right now it keeps **all of them** and
+tells you how many it made. That's the only choice that can't quietly lose you acreage, so it's the safe
+hold — but it may not be what you want. The alternatives: keep the two biggest and throw the scraps away,
+or have it stop and ask you at the moment of the cut.
+
+**2. How should the pieces be named?** Right now they come out **unnamed** — same as before this change,
+so nothing got worse. The options: number them off the original (Parcel 1A, 1B, 1C…), or leave the
+original name on the biggest piece and name the others after it.
+
+Answer either one in a sentence and I'll wire it. Nothing is blocked on you in the meantime — the tool
+works as it stands.
+
 ## 📄 One Baytown document I can't download — it's the last piece of the Baytown flood answer (B393170)
 
 > Your two Baytown-area sites — **Grand Port** and **Goose Creek** — now name the right city and the right

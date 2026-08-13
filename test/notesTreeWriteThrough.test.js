@@ -33,9 +33,14 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { addPage, allPageIds, findPage, migrate, movePage, deleteNode, renameNode } from "../src/workspaces/notes/lib/notesModel.js";
+import { addPage, allPageIds, findPage, migrate, movePage, deleteNode, projectOfPage, renameNode, setPageProject } from "../src/workspaces/notes/lib/notesModel.js";
 
 const UID = "u_writethrough";
+const GRAND_PORT = "smqfy2r7pdec";
+const COLORADO = "sms7v3ua7ksy";
+
+/** Which project a page is filed under, asked the way the rail asks it. */
+const projectOf = (tree, id) => projectOfPage(tree, id);
 
 /* ---- the server: one row per table, `rev` owned by it exactly as the deployed trigger owns
  * it, so a guarded push whose `rev` filter misses returns zero rows and reads as a conflict. */
@@ -349,6 +354,100 @@ describe("⛔ THE RULE: a tree edit that has been WRITTEN survives every sync pa
     A.store.writeTree(renameNode(readTree(A), "p_probe", "Mine", 5000));   // the same instant
     await A.store.refreshNotesSync();
     expect(titleOf(readTree(A), "p_probe")).toBe("Mine");
+  });
+
+  /* ⛔ AND THE HALF B342996 DELIBERATELY LEFT OPEN FOR ONE ROUND (B421493): a RE-FILE travels
+   * too. It is the same defect the name had — the stale computer silently put the note back in
+   * its old project and pushed that up — and it was deferred because `projectId` sits with
+   * PLACEMENT, which rule 4 gives to the local side and which the reachability fuzz is built
+   * around. The distinction that makes it safe: a project is a VALUE on a ROOT, not a position.
+   * Parent and sibling order are untouched, and the case below proves that in the same breath. */
+  it("⛔ A RE-FILE REACHES THE OTHER COMPUTER — and is not put back by it", async () => {
+    const { server, A, B } = await twoWindows();
+    await otherDeviceAddsANote(B, "p_other");
+
+    focus(A);
+    A.store.writeTree(setPageProject(readTree(A), "p_probe", GRAND_PORT, 5000));
+    await A.store.refreshNotesSync();
+    expect(projectOf(readTree(A), "p_probe")).toBe(GRAND_PORT);
+    expect(projectOf(migrate(server.tree), "p_probe")).toBe(GRAND_PORT);
+
+    focus(B);
+    await B.store.refreshNotesSync();
+    expect(projectOf(readTree(B), "p_probe")).toBe(GRAND_PORT);
+    expect(projectOf(migrate(server.tree), "p_probe")).toBe(GRAND_PORT);   // B did not undo it
+
+    focus(A);
+    await A.store.refreshNotesSync();
+    expect(projectOf(readTree(A), "p_probe")).toBe(GRAND_PORT);            // and it stays put
+  });
+
+  it("…in the OTHER direction too — B files it, A picks it up", async () => {
+    const { A, B } = await twoWindows();
+
+    focus(B);
+    B.store.writeTree(setPageProject(readTree(B), "p_rec", COLORADO, 5000));
+    await B.store.refreshNotesSync();
+
+    focus(A);
+    await A.store.refreshNotesSync();
+    expect(projectOf(readTree(A), "p_rec")).toBe(COLORADO);
+  });
+
+  it("…and UN-filing travels, which is the case a truthy check would miss", async () => {
+    const { A, B } = await twoWindows();
+
+    /* ⛔ THE TIMES ARE EXPLICIT, and that is not a convenience. Two `Date.now()` calls inside one
+     * test land in the same millisecond, which the merge correctly reads as a TIE and resolves to
+     * local — so the wall clock made this case pass or fail depending on how busy the machine
+     * was. A test whose verdict depends on its own speed proves nothing either way. */
+    focus(A);
+    A.store.writeTree(setPageProject(readTree(A), "p_probe", GRAND_PORT, 1000));
+    await A.store.refreshNotesSync();
+    focus(B);
+    await B.store.refreshNotesSync();
+    expect(projectOf(readTree(B), "p_probe")).toBe(GRAND_PORT);
+
+    // …now take it back out of every project. `null` is a real answer, not "no answer" — a
+    // truthiness test here would keep the old project forever.
+    focus(B);
+    B.store.writeTree(setPageProject(readTree(B), "p_probe", null, 2000));
+    await B.store.refreshNotesSync();
+    focus(A);
+    await A.store.refreshNotesSync();
+    expect(projectOf(readTree(A), "p_probe")).toBeNull();
+  });
+
+  it("⛔ …and the LATER re-file wins, whichever machine made it", async () => {
+    const { A, B } = await twoWindows();
+
+    focus(B);
+    B.store.writeTree(setPageProject(readTree(B), "p_probe", COLORADO, 1000));
+    await B.store.refreshNotesSync();
+
+    focus(A);
+    A.store.writeTree(setPageProject(readTree(A), "p_probe", GRAND_PORT, 2000));
+    await A.store.refreshNotesSync();
+    focus(B);
+    await B.store.refreshNotesSync();
+    expect(projectOf(readTree(B), "p_probe")).toBe(GRAND_PORT);
+  });
+
+  it("⛔ …and PLACEMENT is NOT swept along with it — a nesting made here survives", async () => {
+    const { A, B } = await twoWindows();
+    await otherDeviceAddsANote(B, "p_other");
+
+    focus(A);
+    A.store.writeTree(movePage(readTree(A), "p_probe", "p_rec", 0));      // nested locally
+    await A.store.refreshNotesSync();
+    focus(B);
+    await B.store.refreshNotesSync();
+    focus(A);
+    await A.store.refreshNotesSync();
+
+    const after = readTree(A);
+    expect(findPage(after, "p_probe")?.parent?.id).toBe("p_rec");         // rule 4 still holds
+    expect(allPageIds(after)).toContain("p_other");
   });
 
   /* ⛔ THE INTERLEAVING, because a single round proves less than it looks like it does: each

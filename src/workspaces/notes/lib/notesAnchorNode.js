@@ -105,6 +105,47 @@ export function anchorExtent(blocks = [], { pad = 40 } = {}) {
   return bottom > 0 ? Math.ceil(bottom + pad) : 0;
 }
 
+/** ⛔ HOW WIDE A BOX IS ALLOWED TO *RENDER*, WHICH IS NOT THE SAME AS HOW WIDE IT IS (B421490).
+ *
+ * `placeAnchor` spends the WIDTH to keep the LEFT EDGE somebody chose — that is B350000's rule and
+ * it is right. But it only runs at PLACEMENT. Narrow the window afterwards, or open the same note
+ * on a smaller screen, and a box placed toward the right of a wide page hangs off the end of the
+ * sheet — where the outline panel is, which paints later and therefore wins the hit test. Measured
+ * on a narrow window: a box's delete button and its width handle both answered `note-outline`
+ * instead of themselves. The box was still there, still editable, and could be neither removed nor
+ * resized.
+ *
+ * So the same rule is applied at RENDER: the left edge is never moved, the width is spent. The
+ * STORED width is deliberately untouched — it is what the person asked for, and widening the
+ * window must give it straight back rather than having quietly overwritten it with a number that
+ * suited one screen. Store the intent, render within the room.
+ */
+export function fitAnchorBox({ x, w, hostWidth, pad = ANCHOR_EDGE_PAD, minWidth = ANCHOR_MIN_WIDTH }) {
+  const want = Math.max(minWidth, num(w, ANCHOR_WIDTH));
+  const left = num(x);
+  const host = num(hostWidth);
+  if (!host) return { x: Math.round(left), w: Math.round(want) };   // unmeasured — never guess
+  /* ⛔ THE LEFT EDGE IS NEVER MOVED. NOT EVEN PAST THE FLOOR (B421490 ×3).
+   *
+   * A first version moved it "by the smallest amount that buys a usable column", on the strength
+   * of a sentence in `placeAnchor`'s header — and `verify-notes-anchor-zoom` went red within the
+   * hour: a click at x=760 stored 751. That harness is the owner's OWN acceptance test for
+   * B350000, the round where everything right of about the three-quarter mark was silently pushed
+   * flush to the margin, and it exists precisely to stop a clamping band coming back by any door.
+   * Reading `placeAnchor`'s CODE rather than its prose settles it: `left = max(EDGE_PAD, x)` — the
+   * edge only ever moves away from the LEFT margin, never in from the right. The prose was wrong
+   * and this fit followed it.
+   *
+   * So past the floor the box simply renders at its minimum and overhangs. The reachability
+   * problem that overhang used to cause — its controls falling under the outline panel — is
+   * solved where it belongs, by stacking, not by moving somebody's box. */
+  const room = host - left - pad;
+  return { x: Math.round(left), w: Math.round(Math.max(minWidth, Math.min(want, room))) };
+}
+
+/** The width alone, for callers that only need that. */
+export const fitAnchorWidth = (args) => fitAnchorBox(args).w;
+
 export const NoteAnchor = Node.create({
   name: "noteAnchor",
   group: "block",
@@ -116,6 +157,18 @@ export const NoteAnchor = Node.create({
 
   addAttributes() {
     return {
+      /* ⛔ A BOX HAS AN IDENTITY, BECAUSE A SELECTION NEEDS ONE (B421494). Multi-select has to
+       * survive every re-render between picking boxes and moving them — a document position
+       * shifts under any edit, and x/y are what the gesture is about to CHANGE, so neither can
+       * name a box. This module's own rule already said it in as many words for pages: identity
+       * is the id. Boxes written before this attribute existed simply have `null`, and the
+       * editor stamps one the first time it needs to refer to them, so nothing has to migrate
+       * and no stored document is rewritten just for opening it. */
+      aid: {
+        default: null,
+        parseHTML: (el) => el.getAttribute("data-anchor-id") || null,
+        renderHTML: (a) => (a.aid ? { "data-anchor-id": String(a.aid) } : {}),
+      },
       x: { default: 0, parseHTML: (el) => num(el.getAttribute("data-anchor-x")), renderHTML: (a) => ({ "data-anchor-x": Math.round(num(a.x)) }) },
       y: { default: 0, parseHTML: (el) => num(el.getAttribute("data-anchor-y")), renderHTML: (a) => ({ "data-anchor-y": Math.round(num(a.y)) }) },
       w: { default: ANCHOR_WIDTH, parseHTML: (el) => num(el.getAttribute("data-anchor-w"), ANCHOR_WIDTH), renderHTML: (a) => ({ "data-anchor-w": Math.round(num(a.w, ANCHOR_WIDTH)) }) },
@@ -249,6 +302,73 @@ export const NoteAnchor = Node.create({
         if (dispatch) dispatch(tr.setNodeMarkup(pos, undefined, { ...node.attrs, x: Math.round(num(x)), y: Math.round(num(y)) }));
         return true;
       },
+
+      /** ⛔ GIVE EVERY BOX AN IDENTITY, IN ONE TRANSACTION THAT DOES NOT COUNT AS AN EDIT.
+       *  Boxes written before `aid` existed have none, and a selection cannot refer to them
+       *  without one. `setMeta("addToHistory", false)` is the load-bearing part: stamping an id
+       *  is bookkeeping, and if it took an undo frame then the first Ctrl+Z after opening an old
+       *  note would appear to do nothing at all. */
+      ensureNoteAnchorIds: () => ({ tr, dispatch, state }) => {
+        const seen = new Set();
+        const missing = [];
+        state.doc.descendants((node, pos) => {
+          if (node.type.name !== "noteAnchor") return;
+          const id = node.attrs.aid;
+          if (!id || seen.has(id)) missing.push(pos); else seen.add(id);
+        });
+        if (!missing.length) return false;
+        if (dispatch) {
+          let n = 0;
+          for (const pos of missing) {
+            const node = tr.doc.nodeAt(pos);
+            if (!node || node.type.name !== "noteAnchor") continue;
+            n += 1;
+            tr.setNodeMarkup(pos, undefined, { ...node.attrs, aid: `a${Date.now().toString(36)}${n}${Math.floor(Math.random() * 1e6).toString(36)}` });
+          }
+          dispatch(tr.setMeta("addToHistory", false));
+        }
+        return true;
+      },
+
+      /** ⛔ MOVE MANY AS ONE UNDO STEP. A group drag that produced N frames would need N presses
+       *  of Ctrl+Z to put back, which is not an undo — it is a chore that looks like a bug. */
+      moveNoteAnchors: (moves = []) => ({ tr, dispatch, state }) => {
+        const want = new Map((moves || []).map((m) => [String(m.id), m]));
+        if (!want.size) return false;
+        const hits = [];
+        state.doc.descendants((node, pos) => {
+          if (node.type.name !== "noteAnchor") return;
+          const m = want.get(String(node.attrs.aid));
+          if (m) hits.push({ pos, m });
+        });
+        if (!hits.length) return false;
+        if (dispatch) {
+          /* Descending, so an earlier `setNodeMarkup` cannot shift a later position. */
+          for (const { pos, m } of hits.sort((a, b) => b.pos - a.pos)) {
+            const node = tr.doc.nodeAt(pos);
+            if (!node || node.type.name !== "noteAnchor") continue;
+            tr.setNodeMarkup(pos, undefined, { ...node.attrs, x: Math.round(num(m.x)), y: Math.round(num(m.y)) });
+          }
+          dispatch(tr);
+        }
+        return true;
+      },
+
+      /** ⛔ DELETE MANY AS ONE UNDO STEP, for the same reason. */
+      removeNoteAnchors: (ids = []) => ({ tr, dispatch, state }) => {
+        const want = new Set((ids || []).map(String));
+        if (!want.size) return false;
+        const hits = [];
+        state.doc.descendants((node, pos) => {
+          if (node.type.name === "noteAnchor" && want.has(String(node.attrs.aid))) hits.push({ pos, size: node.nodeSize });
+        });
+        if (!hits.length) return false;
+        if (dispatch) {
+          for (const { pos, size } of hits.sort((a, b) => b.pos - a.pos)) tr.delete(pos, pos + size);
+          dispatch(tr);
+        }
+        return true;
+      },
     };
   },
 
@@ -263,6 +383,7 @@ export const NoteAnchor = Node.create({
       dom.setAttribute("data-anchor-y", String(Math.round(num(node.attrs.y))));
       dom.setAttribute("data-anchor-w", String(Math.round(num(node.attrs.w, ANCHOR_WIDTH))));
       dom.setAttribute("data-testid", "note-anchor");
+      if (node.attrs.aid) dom.setAttribute("data-anchor-id", String(node.attrs.aid));
       dom.style.left = `${Math.round(num(node.attrs.x))}px`;
       dom.style.top = `${Math.round(num(node.attrs.y))}px`;
       dom.style.width = `${Math.round(num(node.attrs.w, ANCHOR_WIDTH))}px`;
@@ -306,7 +427,16 @@ export const NoteAnchor = Node.create({
         e.preventDefault();
         e.stopPropagation();
         const pos = typeof getPos === "function" ? getPos() : null;
-        if (pos != null) editor.commands.removeNoteAnchor(pos);
+        if (pos == null) return;
+        editor.commands.removeNoteAnchor(pos);
+        /* ⛔ AND THE FOCUS COMES BACK TO THE DOCUMENT, WHICH IS WHAT MAKES THE DELETE UNDOABLE
+         * (B421489). The button suppresses `mousedown` so the press does not move the caret — but
+         * the node the caret was IN has just been removed, so focus landed on `<body>` and Ctrl+Z
+         * went nowhere: the box was gone and could not be brought back. Measured — after the
+         * press, `document.activeElement` was BODY, the editor did not contain it, and a Ctrl+Z
+         * left the box count at zero. A destructive control that cannot be undone is worse than
+         * one that is missing, and this is the control somebody reaches for by accident. */
+        editor.commands.focus();
       });
 
       /* ⛔ AND A WAY TO CHANGE HOW WIDE IT IS. Only the width: a box's height is its words. */
@@ -356,16 +486,41 @@ export const NoteAnchor = Node.create({
         const hostRect = sizing.host.getBoundingClientRect();   // fresh: the page may scroll
         const wanted = (e.clientX - sizing.grab - hostRect.left) / sizing.scale - sizing.left;
         const room = sizing.host.offsetWidth - sizing.left - ANCHOR_EDGE_PAD;
-        dom.style.width = `${Math.round(Math.max(ANCHOR_MIN_WIDTH, Math.min(wanted, room)))}px`;
+        const next = Math.round(Math.max(ANCHOR_MIN_WIDTH, Math.min(wanted, room)));
+        sizing.w = next;                 // ⛔ THE GESTURE'S OWN RECORD — see `endSize`
+        dom.style.width = `${next}px`;
+        /* ⛔ AND THE ATTRIBUTE MOVES WITH IT, OR THE LAYOUT FIT UNDOES THE DRAG IN REAL TIME
+         * (B421490 ×2). `fitAnchorBox` runs from a ResizeObserver and re-derives the rendered
+         * width from `data-anchor-w` — so while this handler wrote only the STYLE, every frame of
+         * the drag was immediately overwritten with the OLD stored width and the handle appeared
+         * dead. Caught by `verify-notes-box-drag` the same hour the fit landed, which is the
+         * argument for that harness existing. The attribute is the live truth during a gesture;
+         * the stored attrs are still only written at the end. */
+        dom.setAttribute("data-anchor-w", String(next));
       });
       const endSize = (e) => {
         if (!sizing) return;
         const changed = sizing.moved;
+        const done = sizing;              // the gesture's record, kept past the reset below
         sizing = null;
         try { size.releasePointerCapture(e.pointerId); } catch (_) { /* already released */ }
         if (!changed) return;                       // a press that never moved writes nothing
         const pos = typeof getPos === "function" ? getPos() : null;
-        if (pos != null) editor.commands.setNoteAnchorWidth(pos, parseFloat(dom.style.width));
+        /* ⛔ COMMIT THE GESTURE'S OWN NUMBER, NEVER THE DOM'S (B434417). This used to read
+         * `parseFloat(dom.style.width)` at pointer-up, and the DOM is not the gesture's memory —
+         * anything that re-renders this node view between the last move and the release rewrites
+         * that style from the node's CURRENT attrs. `num(w, ANCHOR_WIDTH)` then falls back to the
+         * 180px default, so the drag committed the width the box already had.
+         *
+         * ⛔ AND THE FAILURE IS WORSE THAN "IT DOES NOT WORK", WHICH IS WHY THE OWNER'S WORD FOR
+         * IT WAS "DOG SHIT": the box goes on RENDERING at the size you dragged it to, so the
+         * gesture looks like it worked, and the size evaporates on the next reload. Measured on
+         * his account — rendered 300, stored 180, 180 after a reload — and reproduced here by
+         * forcing one interfering update mid-drag, which is what a sync tick does on a signed-in
+         * account and what NOTHING does in a signed-out sandbox. That is exactly why the harness
+         * that shipped this was green: it verified the visual and the storage in a window where
+         * nothing could interfere between them. */
+        if (pos != null && Number.isFinite(done?.w)) editor.commands.setNoteAnchorWidth(pos, done.w);
       };
       size.addEventListener("pointerup", endSize);
       size.addEventListener("pointercancel", endSize);
@@ -410,13 +565,17 @@ export const NoteAnchor = Node.create({
           width: host.offsetWidth,
           preferred: dom.offsetWidth,
         });
+        from.at = c;                     // ⛔ the gesture's own record — same reason as the width
         dom.style.left = `${c.x}px`;
         dom.style.top = `${c.y}px`;
         dom.style.width = `${c.w}px`;
+        dom.setAttribute("data-anchor-x", String(c.x));      // same reason as the width handle
+        dom.setAttribute("data-anchor-y", String(c.y));
       });
       const end = (e) => {
         if (!from) return;
         const dragged = from.moved;
+        const at = from.at;               // kept past the reset below
         from = null;
         try { grip.releasePointerCapture(e.pointerId); } catch (_) { /* already released */ }
         /* ⛔ A PRESS THAT NEVER MOVED WRITES NOTHING AT ALL — not a transaction, not an undo
@@ -426,10 +585,12 @@ export const NoteAnchor = Node.create({
          * the press to have no write path to move it through. */
         if (!dragged) return;
         const pos = typeof getPos === "function" ? getPos() : null;
-        if (pos == null) return;
+        if (pos == null || !at) return;
         // One transaction at the END of the drag, not per pointermove: a hundred undo frames
         // for one gesture is its own bug.
-        editor.commands.moveNoteAnchor(pos, { x: parseFloat(dom.style.left), y: parseFloat(dom.style.top) });
+        // ⛔ FROM THE GESTURE'S RECORD, NOT FROM `dom.style` — the width handle's exact defect
+        // (B434417) applied to the other axis, and it would have been the next one reported.
+        editor.commands.moveNoteAnchor(pos, { x: at.x, y: at.y });
       };
       grip.addEventListener("pointerup", end);
       grip.addEventListener("pointercancel", end);
@@ -444,6 +605,8 @@ export const NoteAnchor = Node.create({
           dom.style.width = `${Math.round(num(next.attrs.w, ANCHOR_WIDTH))}px`;
           dom.setAttribute("data-anchor-x", String(Math.round(num(next.attrs.x))));
           dom.setAttribute("data-anchor-y", String(Math.round(num(next.attrs.y))));
+          dom.setAttribute("data-anchor-w", String(Math.round(num(next.attrs.w, ANCHOR_WIDTH))));
+          if (next.attrs.aid) dom.setAttribute("data-anchor-id", String(next.attrs.aid));
           markEmpty(next);
           return true;
         },

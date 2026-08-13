@@ -140,6 +140,364 @@ proxy CORS-blocks Supabase auth). So the signed-in steps are:
 5. Undo it with **Ctrl+Z** and confirm the truck courts, both bump-outs, the dock face, both parking
    rows and both sidewalks are all back — then **reload** and confirm they are still back, which is
    the leg that proves the restore reached the server rather than only the tab.
+### V258864 — B463920 + B463921: the status menu behaves on his own board `Blocker: auth` `Blocker: real-data`
+
+**Proven here already** — `ui-audit/verify-grid-overlay-input.mjs`, 12/12 in a real browser, mutation-proven three ways: Enter dismissing the successor prompt no longer re-opens the picker (Enter 0/4, Escape 0/4, ✕ 0/4, with all three routes proven to have actually raised prompts) · Enter on a picker column with nothing else open still opens the picker · press-and-drag inside a menu leaks no selection · clicking a swatch still commits · ordinary drag-select still works.
+
+**Pending, signed in on a real project:**
+1. Mark a task Complete from the ● column; when the successor prompt appears, press **Enter**.
+   **Expect:** the prompt applies and closes, and **no colour menu is left on screen**.
+2. Repeat, dismissing with **Escape**, then with the **✕**. Same expectation.
+3. With no prompt in play, select a status cell and press **Enter** — **expect the picker to open** (this is a feature; if it stopped working, that is a regression).
+4. Open the status menu, press a colour and **move the mouse slightly before releasing**. **Expect:** the value is set and **no blue selection band** appears anywhere in the grid.
+5. Drag across several cells normally. **Expect:** drag-select still works exactly as before.
+
+**Result:** ⏳ pending.
+
+### V258016 — B463072: a group header's Duration reads its real span on his own schedules `Blocker: real-data` `Blocker: auth`
+
+**Proven here already, in a real browser.** `ui-audit/verify-summary-pred-dates.mjs`
+(`npm run verify:schedpreds`) renders the real Grid on his CCID3 row shape and reads the Duration CELL by
+column position: **`40d`** for the summary, **`30d`** for the leaf beside it. **Mutation-proven: revert the
+grid to the one-armed call and the same cell reads `0d`.** Unit half in `test/schedulerEngine.test.js`
+(leftover unit not inherited · leaf untouched · blank stays blank · 0-day summary still 0d · end-to-end
+against the engine's own rolled span), also mutation-proven. Full suite green.
+
+**⛔ THE EXPORT STEP IS NOW DONE HERE — ✅ PASSED 2026-08-13, and the premise behind it was WRONG.**
+ATTEMPT-BEFORE-YOU-PARK: this was logged as needing a browser session, and it did not.
+`ui-audit/verify-schedule-export-duration.mjs` (`npm run verify:schedexport`) drives the real `openPrint`
+path on the disagreement case and reads the number **out of the produced artifact** — not off the screen
+and not off the code. **The artifact is HTML, not a raster:** `buildPDFHtml` returns a string the app
+writes into a popup, and the user then presses the browser's own *Save as PDF*, so the exhibit's cells are
+real text nodes in a real `<table>` (`canvas: false`, verified in the same read). Out of the 21,028 bytes
+it emits: **`<td class="c-duration">40d</td>`** on the summary row (`08/07/26` · `10/02/26`), and `30d` on
+the leaf beside it.
+**AND THE CORRECTION THAT MATTERS: the PDF export NEVER carried this defect.** `buildPDFHtml` renders
+duration as `` `${t.duration}d` `` — the inherited span — at both its cell sites. B463072's own first
+write-up and PR #1027's body both said the defect reached "the export"; the third stale read was actually
+`autoSizeMCol`, a column-WIDTH helper in the Master view. **Mutation-proven anyway: point `buildPDFHtml`'s
+duration cell at the leftover and this harness reads `0d`** — so the export now has a guard it never had.
+
+**What still needs his own signed-in session.** His real schedules, which the sandbox cannot reach.
+
+**Steps:**
+1. Open **Grand Port**. Find the group **CCID3: Lift Station & Force Main Approval**. Its Duration should
+   read **40d**, matching its 08/07/26 → 10/02/26 span. Before this it read 0d.
+2. Scan the other group headers in Grand Port, **Goose Creek** and **8 South** — any that used to read a
+   suspiciously small number (0d especially) should now read a span that matches their bars.
+3. Open the **cross-project Master view** and check the same headers there — it had the identical defect.
+4. ~~Export a PDF / exhibit with the Duration column shown.~~ **DONE HERE — ✅ PASSED** (see above): the
+   export was driven and the number read off the produced artifact. Nothing left for anyone on this step.
+5. ⚠ Worth his eye: a leaf still shows the unit he typed (3mo, 30cd, 15d); a group header always shows
+   working days. If a group reading "40d" beside a child reading "2mo" is confusing, say so.
+### V251152 — B456208: does "add as a new contact?" stay out of the way on his OWN registry? `Blocker: auth` `Blocker: real-data`
+
+**What is already proven here, and it is most of the feature.** `ui-audit/verify-contact-confirm.mjs`
+— 21 assertions, real browser, real key events — asserts both what the field SHOWS and what is
+COMMITTED on every route: a new name asks and writes nothing until answered · declining returns the
+typed text unharmed and still editable (Backspace then reads `Jason Berca`, not an empty box) ·
+confirming commits whole · an exact match, a pick from the filtered list, the `+ Add … as new
+contact` row and clearing the field all stay silent · click-away asks instead of creating. Eight
+mutations proven red across the browser and unit halves.
+
+**What is PENDING, and why only he can settle it.** The risk he named himself: *"If it nags on a
+normal selection it will be turned off within a day and you will have made things worse."* The
+sandbox runs against seed data with a handful of contacts. Whether the prompt feels invisible or
+irritating against his **real 17-contact registry**, with the names he actually types, is a
+judgement about frequency that no assertion can make.
+
+1. Sign in on https://planyr.io, open a real Schedule project.
+2. Assign owners the way you normally do — click the cell, type a few letters, pick the person from
+   the list. **Expect: no prompt, ever, on this path.** If it interrupts here, that is a defect, not
+   a preference — say so and it comes straight back out.
+3. Type the full name of someone already on file and press Enter. **Expect: no prompt.**
+4. Now type a name that is NOT on file and press Enter. **Expect:** `No match — add "…" as a new
+   contact?` with **Add contact** / **Keep editing**.
+5. Press **Keep editing** (or Escape). **Expect:** the box still holds every character you typed, with
+   the caret at the end, so a typo can be corrected rather than retyped. Fix it, pick the right
+   person, done.
+6. Repeat 4 and press **Add contact**. Reload. **Expect:** the task holds the full name and the
+   Contacts panel holds exactly one new person — spelled correctly.
+7. Type a new name and click AWAY without pressing Enter. **Expect:** it asks; it does NOT quietly
+   create anyone.
+
+**Result:** ⏳ pending.
+
+### V250304 — B455360: a complicated parcel cut, on his own signed-in cloud plans `Blocker: auth`
+
+**What is proven WITHOUT sign-in, and it is a lot.** `e2e/parcel-split-complex-cut.spec.js` is
+**5/5 driving the REAL app** on his recorded 95-acre Goose Creek tract (24 vertices, 12 of them
+reflex, and a pinched interior exclusion): the Split tool is armed from the parcel rail exactly as
+he would arm it, a four-point bent "creek" cut is clicked across the lot and finished on Enter, and
+the result is read back off **what renders** — the parcel groups on the canvas and the acreage
+badges, each recomputed from its own new outline. A six-crossing zig-zag makes **FOUR pieces**
+(36.00 + 26.97 + 24.47 + 7.93 = 95.37 ac, the whole tract), the bent cut makes two (63.46 + 31.91 =
+95.37 ac), the toast he reported never appears, and a cut drawn in clear space is refused with
+words about THAT cut. Beside it: `test/polygonSplit.test.js` **31 passing** — including the
+pre-fix pipeline reproducing his exact toast on two of his own production parcels, area
+conservation to one part in 10⁹ on three real tracts, and 800 randomised bent cuts — mutation-proven
+three ways. Unit **11,059 passing**, lint 0 errors, build green.
+
+**⛔ WHAT I COULD NOT TEST, stated plainly.**
+1. **The signed-in cloud round-trip.** Parcels live in the site record, so a split writes new
+   parcel rows through the cloud save path. The sandbox proxy CORS-blocks Supabase sign-in, so the
+   split was only ever verified against on-device storage. **Steps:** open a real plan signed in →
+   split a parcel with a bent cut → reload → confirm the same pieces, the same acreages, and the
+   superseded parent still listed greyed under them → open the plan in a second tab and confirm it
+   agrees.
+2. **The per-edge remap on a parcel that actually carries setbacks and role overrides.** The
+   fixtures used here carry the plan default. **Steps:** on a plan where individual sides have
+   different setbacks and at least one hand-assigned role, split it and confirm each piece keeps
+   the setback on the sides it inherited, that a side the CUT created shows the plan default, and
+   that the buildable envelope redraws without a stray line.
+3. **His own screenshot's tract.** He described a wooded tract with a creek running diagonally
+   through it and a road corridor along one side. That specific plan was not identified here;
+   Goose Creek is the nearest recorded equivalent in the repo. **Steps:** run the cut he was
+   trying to make, on the plan he was trying to make it on.
+### V238192 — B443248: "Mobilize" on his own Grand Port opens at 10/05/26, and the correction arrives NAMED `Blocker: real-data` `Blocker: auth`
+
+**Proven here already, in a real browser, on his exact row shape.** `ui-audit/verify-summary-pred-dates.mjs`
+(`npm run verify:schedpreds`) seeds the seven Grand Port rows that matter — 106 "ETJ Permit" (dateless,
+one blank child), 108 "CCID3 Approval" (a summary carrying `duration: 40` / `durValue: 0` with three
+children running to 2026-10-02), and 228 "Mobilize" (0d, FS after both) with the WRONG stored dates
+08/10/26 still in place — renders the real Sequence app, and reads the Start cell off the screen:
+**10/05/26**. **Mutation-proven: revert the `parentIds.has(t.id)` skip in `cascadeDates` and the same cell
+reads 08/10/26** — his screen, reproduced exactly. Engine half: `test/schedulerEngine.test.js` (fixed
+point · three-hop transitive propagation · leaf spans still derived from `durValue` · `detectCascadeDrift`
+naming the correction), also mutation-proven. Full suite 10,987 green.
+
+**Also measured against his LIVE saved document** (read directly from `planar_data`): running the fixed
+engine over all 243 Grand Port rows moves **exactly one — Mobilize, 2026-08-10 → 2026-10-05** — and
+nothing else shifts. Across all six of his projects, **9 predecessor links point at a summary row**
+(Goose Creek 4, 8 South 3, Grand Port 2).
+
+**What still needs his own signed-in session.** The sandbox cannot reach Supabase, so the harness
+necessarily exercises the SEED load path. The B836 drift banner — the thing that tells him which dates
+were corrected — fires on the CLOUD load path (`recascadeWithDrift`), which only runs signed in.
+
+**Steps:**
+1. Open the **Schedule** tab, project **Grand Port**. A banner should appear at the top naming
+   **Mobilize** as a row whose saved start didn't match its predecessors and was recalculated.
+2. Find **Mobilize** in the Construction group. Start and Finish must both read **10/05/26** — the
+   Monday after CCID3's 10/02/26 finish. It must NOT read 08/10/26.
+3. The red "Needs Attn." dot on that row should be **gone** (it was only ever "this finished in the
+   past"; the date is now in the future).
+4. Check **Goose Creek** and **8 South** the same way — they have 4 and 3 links pointing at summary
+   rows, so some of their dates will move too. Anything that moves should be named in the banner.
+5. ⚠ Worth his eye: Mobilize now sits AFTER "Begin Drafting Contract" (08/25/26), which is the sane
+   order he expected. Confirm the new dates read like a schedule someone would actually build.
+
+### V238193 — B443249: the ETJ Permit predecessor is visibly marked as driving nothing `Blocker: real-data` `Blocker: auth`
+
+**Proven here already.** The same browser harness asserts the Predecessor cell renders TWO entries that
+look DIFFERENT: the dateless ETJ Permit one carries a ⚠ and has real box area on screen, the satisfied
+CCID3 one does not. Engine half unit-tested for a dateless predecessor, a missing id, and a fully
+satisfied row (mutation-proven).
+
+**Steps:**
+1. On **Mobilize**, hover the Predecessor cell. It should say plainly that the ETJ Permit row has no
+   dates and that the date shown comes from the remaining predecessor only.
+2. Give **ETJ Permit** (or its child "Submit Permit") a real start and duration. The ⚠ should clear and
+   Mobilize should move if ETJ now finishes later than CCID3.
+3. Scan his three schedules for any other ⚠ in a Predecessor cell — each one is a link he thinks is
+   driving a date and which is not.
+
+### V238194 — B443250: a pinned start that beats its predecessors now says so `Blocker: real-data` `Blocker: auth`
+
+**Proven here already.** Unit-tested three ways (pin before the chain → flagged AND the pin holds · pin
+at/after → not flagged · unpinned → never flagged), mutation-proven.
+
+**Steps:**
+1. Pick a row with a predecessor and type a Start date EARLIER than the predecessor finishes. The
+   padlock appears (as before) and the date should now also turn **red with a ⚠**.
+2. Hover it: it should say the pin is winning and the dependency is being overridden, and how to hand
+   control back.
+3. Click the padlock to unpin. The red should clear and the date should jump to what the predecessor
+   implies.
+4. ⚠ Worth his eye: this may light up rows he pinned deliberately long ago. That is the point — but if
+   it turns out to be noisy across his real schedules, say so and it can be softened.
+### V242416 — B447472: the corrected `assembly_digest()` against the REAL database, on the assembly that carries the kind collision `Blocker: auth` + `real-data`
+
+**Why this cannot be closed in the sandbox.** The client half is proven here — `test/assemblyGroupCas.test.js`
+runs BOTH implementations over one member set (parity, not a regex on the SQL text), with a fixture drawn from
+the live `e6327` assembly; **32/32 green, and 4 of the new cases proven RED against the pre-fix SQL.** But the
+SQL itself only ever executes in Postgres, and the group-CAS path only runs on a signed-in plan against the live
+RPC. No headless, logged-out pass can reach either.
+
+**Already done this session, so this is a confirmation and not the fix.** The corrected `assembly_digest()` and
+the corrected `commit_elements(text,jsonb,boolean,jsonb)` members subquery were **applied to production**
+(`create or replace`, additive, idempotent — the stage-2 migration was already deployed and the deployed function
+was the broken one). Post-apply read on the live database: `assembly_digest('smqh3au6aeb4','e6327')` returns
+**28 tokens and names no markup**, against **29 rows still sharing the assembly key** — the Katz plan untouched.
+
+**The pending steps, in order:**
+1. Run `src/workspaces/site-planner/db/test/commit_elements_group_cas.test.sql` whole in the Supabase SQL editor.
+   It is self-rolling-back and writes nothing. Expect **ALL PASS**, including the two new checks: **9.** a markup
+   inserted at the host's own id collides on `assembly_id` and stays OUT of the digest; **10.** the
+   `groupConflict` members payload carries the same el-only set the digest does.
+2. On a signed-in tab holding site `smqh3au6aeb4` (Katz / Plan 1), arm group CAS for that device only
+   (`localStorage.setItem("planarfit:groupCas","1")` — read at CALL time, no reload needed), move **building
+   `e6327`** so the batch spans its assembly, and confirm the commit **APPLIES**: no `element-group-conflict`
+   report, no `assembly-split` event, no `client-stale`. Pre-fix that assembly would have been refused forever.
+3. Disarm the flag (`localStorage.setItem("planarfit:groupCas","0")`) — stage 2 still ships OFF.
+
+**Nothing on the owner's side.** The migration is applied; this is a check, not a task.
+
+### V238480 — B443536: an owner name typed into a SIGNED-IN project survives the cloud round-trip `Blocker: auth`
+
+**What is already proven here, in a real browser — this is NOT the pending part.**
+`ui-audit/verify-owner-first-char.mjs` (18/18, Chromium, real key events via
+`page.keyboard`, not synthetic `KeyboardEvent`s) drives the actual Owner cell and reads the
+actual input back after every keystroke:
+- type-to-edit `Scott` → the field reads `Scott` (it read `cott` before the fix), and the
+  trace `["S","Sc","Sco","Scot","Scott"]` shows the opening character surviving keystroke 2,
+- the value COMMITTED to the task equals what was typed (read off the closed cell, which
+  renders from the task model — not off the input),
+- an existing contact, a brand-new name, and a PASTE after the opening character all keep it,
+- double-click on an existing owner still SELECTS it, so typing replaces rather than appends,
+- fast typing (no delay between keys) behaves identically — the defect was not a race,
+- Predecessor / Task name / Duration keep their opening character too.
+Mutation-proven in both directions (revert → 8 red · over-fix → the replace case red).
+
+**What is PENDING and why the sandbox cannot reach it.** The scheduler's real projects live in
+Supabase, and the egress proxy CORS-blocks the sign-in handshake, so every check above ran
+against the module's baked seed data in this-device mode. The unverified step is the
+persistence round-trip, which this change does not touch but which is where a truncated name
+would become permanent:
+
+1. Sign in on https://planyr.io and open a real Schedule project.
+2. Click (do not double-click) an Owner cell so it is selected, then type a name straight in —
+   e.g. `Scott` — without pausing.
+3. **Expect:** the field reads `Scott` from the first keystroke on; the dropdown filters as you
+   type; an unknown name offers `+ Add "Scott" as new contact`.
+4. Press Enter, then RELOAD the page.
+5. **Expect:** the cell still reads `Scott`, whole. Open the Contacts panel — the registry holds
+   `Scott`, not `cott`.
+6. Repeat once in the master/table view (the second picker call site, which seeds via
+   `initChar`), and once by double-clicking a cell that already has an owner and typing a
+   different name — that one must REPLACE, not append.
+
+**⛔ THE BUG IS CONFIRMED ON LIVE PRODUCTION, AND THE FIX ON THE DEPLOYED BRANCH BUILD (2026-08-13).**
+The sandbox browser has no egress to `planyr.io` or `*.pages.dev`, but **Node does** — so the
+deployed page bytes were fetched and served locally, and the real built artifact driven. Same
+gesture, two deployed builds, logged out:
+
+| build | keystroke trace | committed |
+|---|---|---|
+| `planyr.io` (main, without the fix) | `["S","c","co","cot","cott"]` | `"cott"` |
+| this branch's Cloudflare preview | `["S","Sc","Sco","Scot","Scott"]` | `"Scott"` |
+
+So the owner's report is reproduced on the app he actually uses, not only in a local server,
+and the shipped artifact carries the fix. **This does not close V238480** — everything above is
+logged out, and the step below is the one the proxy's auth wall blocks.
+
+**Result:** ⏳ pending — signed-in round-trip only.
+
+### V229360 — B434416/B434417/B434418 + B421493: the two-stage box, a resize that persists, and a re-file that travels `Blocker: auth`
+
+**What is proven WITHOUT sign-in, and it is deliberately adversarial** (his instruction: *"Try to
+REFUTE each fix rather than confirm it. Default to refuted if uncertain."*).
+`ui-audit/verify-notes-box-selection.mjs` is **88/88** across a full window, his short one, and a
+zoom other than 100%, and every persistence claim is read at the DOCUMENT level and then again
+AFTER A RELOAD. Its ten attacks are the ones he listed plus the ones that would refute my own
+claims: hover reveals nothing · a click selects · Delete removes and Ctrl+Z restores *and survives
+a reload* · a resize reaches the document, the render agrees with it, and it survives a reload ·
+**a re-render forced mid-drag does not eat the resize** (the condition his account has and a
+sandbox does not) · resizing a box that was MOVED first widens it without moving it · the LAST box
+of a crowded page selects and resizes alone · the two-stage press and the Escape ladder · typing
+and Backspace inside an entered box edit its WORDS, not the box · and a press on blank page still
+places. Beside it: `sweep-notes` **265 checks over 44 controls, clean** · `verify-notes-marquee`
+58/58 · `verify-notes-box-drag` 43/43 · `verify-notes-anchor-soak` 32/32 · `verify-notes-anchor-zoom`
+40/40 · `verify-notes` 294/294 · `verify-press-drive` 6/6 · `verify-notes-rename-live` 15/15.
+Unit **10,955 passing**. Lint 0 errors, build green.
+
+**⛔ WHAT I COULD NOT TEST, stated plainly because skipping this is what produced the round.**
+1. **The signed-in condition itself.** The resize defect only appeared on his account because a
+   sync tick re-renders a node view mid-gesture. The sandbox cannot sign in (the proxy CORS-blocks
+   Supabase auth), so that re-render is SIMULATED — forced by hand at the same moment. The
+   simulation reproduced his exact numbers on the broken build (rendered 300, stored 180, 180 after
+   reload) and passes on the fixed one, but a real sync tick has not been run against it.
+2. **The re-file travelling between two real machines** (B421493) — every case is against an
+   in-memory server that owns `rev` like the deployed trigger, not against Supabase.
+3. **Print and Markdown parity for a resized box** — the export path is exercised for crashes, not
+   compared.
+
+**Steps on his account, in this order:**
+1. Open a note with a box. **Hover it and do not click.** Nothing may appear — no grip, no ×, no
+   corner handle.
+2. **Click it once.** A ring appears and so do the three controls. The caret must NOT be in the
+   text.
+3. Press **Delete**. The box goes. **Ctrl+Z** — it comes back. Reload: still back.
+4. Click a box once, then **drag its bottom-right handle wider**. Let go. **Reload the page.** The
+   box must still be the size you dragged it to. This is the exact check that failed before.
+5. Do step 4 again on a box you have **first moved** with its grip, and again with the document
+   zoomed in. Same result both times.
+6. Click a box **twice** — the caret goes in and you can type. **Escape** backs out to the box being
+   selected; **Escape** again deselects.
+7. Drag on empty page across several boxes: a band appears and they all select. Drag any one of
+   them — they move together. One **Ctrl+Z** puts them all back.
+8. On a second computer: **move a note into a different project** on one, wait for the sync line to
+   settle, then check the other. It must follow, and must not drift back.
+### V237632 — B442688: the View menu's content groups on the owner's OWN signed-in plans `Blocker: auth` + `real-data`
+
+**What is proven HERE, and for this item it is nearly the whole claim.** `ui-audit/verify-content-visibility.mjs`
+drives the owner's REAL Silvestri plan (98 elements over 6 types, 3 parcels, 6 markups, 2 measurements,
+16 callouts — the only fixture carrying all five families at once) and his Bain plan for the pond:
+**33/33**. Every family hidden on its own and restored; the Elements master; a reload; Show all.
+Full suite green (543 files / 10,958 tests) incl. `test/contentVisibility.test.js` (30), lint clean,
+build green, bundle audit passing.
+
+**THE BEFORE / AFTER NUMBERS THE BLOCK ASKED FOR — the point being that they are IDENTICAL.**
+On Silvestri, with **every element hidden** (76 of them: 9 buildings, 23 car parking, 5 trailer
+parking, 7 roads, 14 paving, 18 sidewalks) the Yield panel reads, character for character, what it
+read with everything shown:
+
+| | shown | all elements hidden |
+|---|---|---|
+| Buildings | 62.13 ac · 24% | 62.13 ac · 24% |
+| Open space | 133.81 ac · 51% | 133.81 ac · 51% |
+| Pond | 0.00 ac · 0% | 0.00 ac · 0% |
+| Paving | 66.26 ac · 25% | 66.26 ac · 25% |
+| Site | 262.20 ac · 11.42M sf | 262.20 ac · 11.42M sf |
+| Impervious | 49% | 49% |
+| Easements | 5.82 ac · 253,434 sf | 5.82 ac · 253,434 sf |
+
+The harness does not compare those fields one at a time — it compares the WHOLE metrics region as a
+string and requires byte-identity, so a number nobody thought to list cannot drift either. Screenshots:
+`ui-audit/shots/content-visibility/before.png` and `.../elements-hidden.png` (the second is the whole
+claim in one frame: an empty canvas, the amber "6 groups hidden · Show all" banner, and the panel
+still reading 62.13 ac of buildings). Regenerate with `--shots`.
+
+**Also proven here:** nothing is written — the saved record's `els`/`parcels`/`markups`/`measures`/
+`callouts` are byte-identical after hiding, and no `commit_elements` / `site_elements` request leaves
+the browser. **Mutation-proven:** moving the filter one seam earlier (filtering `els` before the
+metrics pass) leaves the canvas pixel-identical and takes Buildings to `0.00 ac · 0%` — 33/33 → 28/33.
+
+**What CANNOT be checked here, and why each is a real blocker rather than a to-do.**
+1. **`auth`** — the sandbox proxy CORS-blocks Supabase sign-in, so every arm ran SIGNED OUT against a
+   locally-seeded copy of his plans. The "nothing is written" claim is therefore proven for the local
+   store and for the absence of an outbound request; it has not been observed against a live
+   `site_elements` table with realtime attached and a second tab open.
+2. **`real-data`** — the fixtures are redacted snapshots. His live plans carry rasters, GIS layers and
+   a drainage context none of which the sandbox can reach.
+3. **The plan-switch case is proven INDIRECTLY and that is stated rather than glossed.** The harness
+   proves the hide is persisted into the plan record and survives a full reload; a plan switch remounts
+   the planner and re-reads that same record, so the mechanism is the same one. It has not been driven
+   as a two-plan gesture.
+
+**The signed-in steps still pending** (any browser-equipped session, on planyr.io):
+1. Open a plan with buildings, ponds, roads, parcels and markups. Note the Yield panel's numbers.
+2. Open **View ▾**. Hide each group in turn — Elements (and each type under it), Parcels, Markups,
+   Measurements, Text & callouts. Confirm each leaves the canvas and **that not one number in Yield
+   moves by a single unit**, Site Analysis included.
+3. Confirm the header turns amber and NAMES what is hidden while the card is closed.
+4. Reload, and switch to another plan and back. The hidden groups should still be hidden, and the
+   other plan should be unaffected (the state is per plan).
+5. Press **Show all**. Everything returns.
+6. Confirm **Parcel acreage** in *Labels* hides every chip, and that a lot you had hidden by hand
+   (right-click → Hide acreage label) STAYS hidden when you turn the master back off.
+7. Confirm dock doors are drawn on every building with no toggle for them anywhere — and, if you have
+   a plan where you had turned them OFF, that they are back.
 
 ### V230480 — B435536: the easement label on 8 South no longer dwarfs its own easement `Blocker: real-data`
 
@@ -351,6 +709,19 @@ the old name a minute after A set it (the merge's title rule).
 not travel between machines — the merge's placement rule is unchanged and that half of **B342996**
 is still open. Do not read a pass here as covering it.
 
+**✅ PASSED — verified on the owner's own signed-in account, 2026-08-13.** Rename updates the sidebar
+with **no reload** and the stored tree agrees **immediately**; a brand-new page is on disk **the moment
+it is created**, read back out of storage without reloading. Delete-a-box works (a real button with
+the `Delete this box` accessible name). The title deletes one character at a time all the way to
+empty with no snap-back — past the "u" that used to trigger it — and retyping commits. Line spacing
+is present (Single / 1.15 / 1.5 / Double plus space before and after).
+
+**⛔ WHAT HE EXPLICITLY DID NOT VERIFY, kept rather than quietly dropped:** the click-jump (he accepts
+the real-mouse result and discounts his own synthetic no-movement finding as worthless evidence), the
+resize BEHAVIOUR (his "present but unverified" flag is what surfaced the stale-origin defect that
+B400177 then fixed), and the Sketch panel layout. **And the half of B342996 this entry names as out of
+scope — a re-file travelling between computers — is still open and is NEW-3 of the 2026-08-13 block.**
+
 ### V195264 — B393168/B393169/B393170: the Baytown jurisdiction badges, measured BY AREA, on the owner's own signed-in plans `Blocker: real-data` `Blocker: auth`
 
 **What is proven WITHOUT a browser, and it is the substance of the three items.** The share is now an
@@ -435,6 +806,18 @@ only a signed-in session can show is that a selection click writes NOTHING to th
 - **⛔ AND NOTHING WITH A PURGED BODY MAY RENDER AS A NOTE.** PASS = no note in the sidebar opens empty with nothing recoverable behind it. That is the shape this recurrence took.
 - **AN ORDINARY DELETE STILL WORKS.** Bin a note; it is still restorable. A tombstone buries a PURGE, never a delete.
 - **A NULL IS NOT A DISPOSITION (STANDING RULE #2).** Reported fixed twice already — if it cannot be provoked, say so and take one of the three admissible routes, naming which.
+**✅ PASSED — verified on the owner's own signed-in account, 2026-08-13.** He ran the two-window case
+this sandbox cannot reach, and it holds in the STRONGER form: the purge did not merely survive, it
+PROPAGATED. Window B created `TWOWIN` (`pg_msqzi8nj1mghpu8`); window A reloaded, saw it, binned it and
+deleted it forever; window B — still holding `TWOWIN` in its own view at a PRE-PURGE revision — was
+then forced to write and push by creating a new page in it. `TWOWIN` did not come back: not in window
+B, not in local storage, not in the cloud (**tree rev 1307, `twowin_back` false**). **Window B had
+already dropped it from its own list before the forced write**, which is the propagation rather than
+the mere survival. Single-window purge also held across two reloads, twice, local and cloud. His
+baseline is restored exactly: **10 live · bin 24 · `live_but_purged` 0.** This closes the item that
+broke three times — B357011 shipped the rule, B364016 found `migrate` wiping the ledger, B391072
+found it running on only one of the two adopt paths.
+
 ### V187136 — B385040: an undo really does not rebuild the GIS layer stack on a located, signed-in plan `Blocker: live-GIS` `Blocker: auth`
 
 **What IS proven here, and it is the part that matters most.** The defect was INVISIBLE to every

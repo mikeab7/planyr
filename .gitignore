@@ -182,3 +182,4 @@ ui-audit/.raster-cache/
 
 # B296224 — the ledger-merge evidence trail (local, per-clone)
 .planyr-ledger-merges.log
+ui-audit/.vendor/

@@ -211,8 +211,17 @@ async function soak(label, { width, height, zoomSteps }) {
      * edge, so a press 8px in from it is a press on a CONTROL — which is a different test, and
      * one that would delete the box being measured. */
     for (const at of [{ dx: t.width - 36, dy: t.height - 8 }, { dx: 24, dy: t.height / 2 }]) {
+      /* ⛔ TWO PRESSES, BECAUSE ENTERING AN EXISTING BOX NOW TAKES TWO (B434416). The owner asked
+       * for OneNote's model in as many words — press 1 SELECTS the box, press 2 puts the caret in
+       * it — after reporting that he *"can never even click on the box"*, which was true: every
+       * press went straight to the text, so the box itself was never the thing you had hold of.
+       * This harness encoded the old one-press contract; a single press now leaves the caret where
+       * it was and the typed character lands somewhere else, which is what it caught. Placing a
+       * NEW box is unchanged and still puts the caret straight in — that path is asserted above. */
       await page.mouse.click(Math.round(t.x + at.dx), Math.round(t.y + at.dy));
       await pacedWait(page, 130);
+      await page.mouse.click(Math.round(t.x + at.dx), Math.round(t.y + at.dy));
+      await pacedWait(page, 160);
       await page.keyboard.type("*");
       await pacedWait(page, 110);
       inside.push(`${t.docLeft},${t.docTop}`);

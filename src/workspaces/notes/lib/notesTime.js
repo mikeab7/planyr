@@ -43,11 +43,20 @@ export function absoluteStamp(ms) {
   } catch (_) { return new Date(ms).toISOString().slice(0, 16).replace("T", " "); }
 }
 
-/** "Edited 5h ago" / "Edited just now" / "" — the one sentence the page header shows. */
+/** "Edited 5h ago" / "Edited just now" / "Edited 2 Jul 2025" / "" — the page header's one sentence.
+ *
+ * ⛔ THE "ago" GOES ONLY ON AN ELAPSED FORM, AND THIS FUNCTION USED TO SKIP THAT TEST (B421491).
+ * `relativeTime` switches to a CALENDAR DATE past sixty days, so every note the owner has not
+ * touched in two months rendered **"Edited 2 Jul 2025 ago"** at the top of the page. `stampLabel`
+ * below has always had the guard, and its comment states the rule in as many words — the rule was
+ * written down once and applied in one of the two places that needed it, which is the shape of
+ * mistake a sweep exists to find. Invisible to every test in this module because every fixture in
+ * it uses a recent timestamp; found by a harness whose fixture happened to carry an old one. */
 export function editedLabel(ms, { now = Date.now() } = {}) {
   const rel = relativeTime(ms, { now });
   if (!rel) return "";
-  return rel === "just now" ? "Edited just now" : `Edited ${rel} ago`;
+  if (rel === "just now") return "Edited just now";
+  return /^\d+[mhdw]$/.test(rel) ? `Edited ${rel} ago` : `Edited ${rel}`;
 }
 
 /** A moment, as a version-history row says it: "just now" · "12m ago" · "2 Jul".
