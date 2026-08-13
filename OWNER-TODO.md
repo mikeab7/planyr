@@ -7,6 +7,26 @@
 
 _Last updated: 2026-08-13._
 
+## ❓ One question about the schedule jumping while you edit (B463922)
+
+You told me the schedule sometimes throws you halfway down while you're editing cells. I went after it
+and found two things worth telling you plainly.
+
+**The reproduction we thought we had was our own test tool's fault, not the app's.** The tool was
+clicking a fold-away triangle that was sitting just off the top of the screen, and to reach it the
+tool scrolled the list itself — then blamed the app for the movement. A person can't click something
+they can't see, so that path was never real. I proved that three different ways before writing it off.
+
+**But two real things came out of it, and both are fixed and live.** Folding a group used to quietly
+steal your place — the cell you were typing in stopped being the selected one, so the next keystroke
+went somewhere else. And now, when you fold a group above the row you're working on, that row stays
+exactly where it is on screen instead of sliding out from under your cursor.
+
+**What I need from you:** next time you're in a real schedule, does it still happen? If it does, tell
+me roughly what you'd just done — typed in a cell, pressed Enter, folded something, hit undo — and
+whether it threw you up or down. That one sentence is worth more than another week of me guessing,
+because nothing I can run here has ever actually seen it.
+
 ## ✂️ Two calls on splitting a parcel — the tool now takes real cuts, these are the last two choices (B455360)
 
 Splitting is fixed. You can now cut a parcel along a line with as many bends as you like — following a

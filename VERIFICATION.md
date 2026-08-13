@@ -113,6 +113,68 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V275056 — B463922: the schedule stops jumping while HE edits it `Blocker: real-data`
+
+**What is proven here, and it is not nothing.** `ui-audit/verify-grid-row-hold.mjs` drives the real
+scheduler grid in a real browser on the baked seed schedule, logged out, and asserts **rendered
+position**: with a row selected, collapsing a group above it, expanding it again, and collapsing a
+second one each hold that row at **±0 px** (budget ±2), the selection never moves off it, and every
+step is proved to have changed the model. Mutation-proven three ways — disabling the compensation
+takes three steps red at ±48 px, dropping the toggle's mousedown guard takes them red on a wandering
+selection, and making `visibleClick` permissive takes the gate's own self-test red.
+
+**What is NOT proven, and why this entry exists.** The reproduction B463922 was filed on turned out
+to be the old harness's own scroll (a virtualised list renders rows above the viewport; the driver
+scrolled to reach one), so **the owner's original symptom — *"sometimes if I am editing cells I will
+just jump halfway down the schedule or all the way up"* — has never actually been observed by an
+instrument.** What shipped fixes a real defect in the same place (the collapse triangle stealing the
+selection) and makes the edited row hold its place; whether that is what he was hitting is unknown.
+His schedules are far denser than the seed data and are signed-in, which is the density and the
+data path the sandbox cannot reach.
+
+**The check, on his own board:**
+1. Open a real schedule (Tsakiris / Bain), scroll into the middle of it, and click into a cell.
+2. Fold a group above that cell. The cell you are working on must not move on screen.
+3. Keep editing normally for a few minutes — the specific thing to watch for is the view leaving the
+   row you are typing in, in either direction.
+4. If it happens even once, note what was on screen and what you had just done; that is the missing
+   observation, and it is worth more than another sandbox pass.
+
+**Status:** ⏳ pending. **Do not mark B463922 Done on the sandbox evidence alone** — an owner-reported
+symptom is never closed on a null (NEVER-PARK), and the question is on `OWNER-TODO.md`.
+### V273520 — B484337: does a tab that has STOPPED saving actually say so? `Blocker: auth`
+
+**What was found, so the check is aimed at the right thing.** The owner asked for proof, on the
+running app rather than from the code, that a refused save is genuinely visible — "this repo's
+signature defect is a mechanism that looks right and never fires, and a safety check whose warning
+never reaches the screen is precisely that shape." It never fired. Two independent swallows, both
+now fixed: the sync-event handler dropped any event without a `kind`/`id`, and `client-stale` has
+neither; and the save badge never named the `stale` state, so a tab that had given up committing
+painted a green **"synced"**.
+
+**Proven here, and NOT what this entry waits on.** The engine really reaches `stale` and the event
+it emits really carries no element (`test/staleVisible.test.js`, driven through the real engine);
+the matrix really turns it into the reload warning; both source repairs are mutation-proven red
+when reverted. What cannot be done here is the only thing that matters to him — seeing it.
+
+**Why it is blocked.** The `stale` state exists only on a signed-in cloud session, and this
+sandbox's egress proxy answers `403 to CONNECT` for the Supabase host (measured, not assumed), so no
+browser in this environment can sign in and the write engine never starts.
+
+**The signed-in steps, for whoever has a browser:**
+1. Sign in, open a plan with a bonded building, and open the SAME plan in a second tab.
+2. In tab B, drag the building repeatedly. In tab A, drag the same building at the same time.
+3. Keep going until tab A's engine gives up (several consecutive fully-rejected batches).
+4. **PASS** requires BOTH: a toast reading *"This tab is out of date — your recent changes here
+   can't be saved. Reload the page to catch up."*, and the save badge turning to its **error**
+   state with the detail *"This tab is out of date — reload to keep saving"*.
+   **FAIL** is a green "synced" badge, or silence, while edits stop reaching the cloud.
+5. Reload tab A and confirm saving resumes.
+
+**One correction to carry into the check.** A single group refusal is deliberately SILENT — it
+converges on its own and `assembly-split` maps to no toast at all. Only the persistent case shows
+the banner. That is the intended design, not a miss; a toast per transient conflict would be noise.
+
 ### V258992 — B464048 / B464049 / B477808: the inspector keyboard + error-state work, on a SIGNED-IN plan `Blocker: auth`
 
 **Everything below was proven LOGGED OUT on the owner's own rows** — `ui-audit/fixtures/fm359-concept-a.json`
@@ -136,8 +198,6 @@ part of the investigation has to be re-derived.
 bump-outs on opposite corners (id `e1454615maruai`). "Properties" = the right-hand ELEMENT · BUILDING
 inspector; **Depth (ft)** is the field under FOOTPRINT, directly below **Length (ft)**.
 
----
-
 #### ARM 1 — NON-DESTRUCTIVE. Safe on the real plan; changes nothing you cannot undo in place.
 
 Every step here either types into a field or presses a key that must be REFUSED. Nothing is deleted.
@@ -158,8 +218,6 @@ Read the **screen** for each ✅ unless a step says otherwise.
 | 11 | Switch the app to the other theme (Settings → Interface) and repeat steps 2–4. | Same story in dark: focus = accent, error = heavier + red + ⚠ + message. |
 
 If any of 3, 5, 6 or 8 fails, **stop and report** — those are the four findings this work is made of.
-
----
 
 #### ARM 2 — DESTRUCTIVE. ⛔ RUN THIS ON A **DUPLICATE** OF THE PLAN, **NEVER** ON THE ORIGINAL.
 
