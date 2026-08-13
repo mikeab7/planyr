@@ -113,6 +113,67 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V237632 — B442688: the View menu's content groups on the owner's OWN signed-in plans `Blocker: auth` + `real-data`
+
+**What is proven HERE, and for this item it is nearly the whole claim.** `ui-audit/verify-content-visibility.mjs`
+drives the owner's REAL Silvestri plan (98 elements over 6 types, 3 parcels, 6 markups, 2 measurements,
+16 callouts — the only fixture carrying all five families at once) and his Bain plan for the pond:
+**33/33**. Every family hidden on its own and restored; the Elements master; a reload; Show all.
+Full suite green (543 files / 10,958 tests) incl. `test/contentVisibility.test.js` (30), lint clean,
+build green, bundle audit passing.
+
+**THE BEFORE / AFTER NUMBERS THE BLOCK ASKED FOR — the point being that they are IDENTICAL.**
+On Silvestri, with **every element hidden** (76 of them: 9 buildings, 23 car parking, 5 trailer
+parking, 7 roads, 14 paving, 18 sidewalks) the Yield panel reads, character for character, what it
+read with everything shown:
+
+| | shown | all elements hidden |
+|---|---|---|
+| Buildings | 62.13 ac · 24% | 62.13 ac · 24% |
+| Open space | 133.81 ac · 51% | 133.81 ac · 51% |
+| Pond | 0.00 ac · 0% | 0.00 ac · 0% |
+| Paving | 66.26 ac · 25% | 66.26 ac · 25% |
+| Site | 262.20 ac · 11.42M sf | 262.20 ac · 11.42M sf |
+| Impervious | 49% | 49% |
+| Easements | 5.82 ac · 253,434 sf | 5.82 ac · 253,434 sf |
+
+The harness does not compare those fields one at a time — it compares the WHOLE metrics region as a
+string and requires byte-identity, so a number nobody thought to list cannot drift either. Screenshots:
+`ui-audit/shots/content-visibility/before.png` and `.../elements-hidden.png` (the second is the whole
+claim in one frame: an empty canvas, the amber "6 groups hidden · Show all" banner, and the panel
+still reading 62.13 ac of buildings). Regenerate with `--shots`.
+
+**Also proven here:** nothing is written — the saved record's `els`/`parcels`/`markups`/`measures`/
+`callouts` are byte-identical after hiding, and no `commit_elements` / `site_elements` request leaves
+the browser. **Mutation-proven:** moving the filter one seam earlier (filtering `els` before the
+metrics pass) leaves the canvas pixel-identical and takes Buildings to `0.00 ac · 0%` — 33/33 → 28/33.
+
+**What CANNOT be checked here, and why each is a real blocker rather than a to-do.**
+1. **`auth`** — the sandbox proxy CORS-blocks Supabase sign-in, so every arm ran SIGNED OUT against a
+   locally-seeded copy of his plans. The "nothing is written" claim is therefore proven for the local
+   store and for the absence of an outbound request; it has not been observed against a live
+   `site_elements` table with realtime attached and a second tab open.
+2. **`real-data`** — the fixtures are redacted snapshots. His live plans carry rasters, GIS layers and
+   a drainage context none of which the sandbox can reach.
+3. **The plan-switch case is proven INDIRECTLY and that is stated rather than glossed.** The harness
+   proves the hide is persisted into the plan record and survives a full reload; a plan switch remounts
+   the planner and re-reads that same record, so the mechanism is the same one. It has not been driven
+   as a two-plan gesture.
+
+**The signed-in steps still pending** (any browser-equipped session, on planyr.io):
+1. Open a plan with buildings, ponds, roads, parcels and markups. Note the Yield panel's numbers.
+2. Open **View ▾**. Hide each group in turn — Elements (and each type under it), Parcels, Markups,
+   Measurements, Text & callouts. Confirm each leaves the canvas and **that not one number in Yield
+   moves by a single unit**, Site Analysis included.
+3. Confirm the header turns amber and NAMES what is hidden while the card is closed.
+4. Reload, and switch to another plan and back. The hidden groups should still be hidden, and the
+   other plan should be unaffected (the state is per plan).
+5. Press **Show all**. Everything returns.
+6. Confirm **Parcel acreage** in *Labels* hides every chip, and that a lot you had hidden by hand
+   (right-click → Hide acreage label) STAYS hidden when you turn the master back off.
+7. Confirm dock doors are drawn on every building with no toggle for them anywhere — and, if you have
+   a plan where you had turned them OFF, that they are back.
+
 ### V222352 — B427408–B427413: the map-chrome pass on the OWNER'S OWN WINDOW, and on the signed-in surfaces the radius sweep could not reach `Blocker: auth` + `real-data`
 
 **What is proven HERE, and it is nearly all of it — this is deliberately a SHORT list.** The whole

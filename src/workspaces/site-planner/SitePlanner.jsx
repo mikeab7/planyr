@@ -67,6 +67,11 @@ import { overscanPx, keepBufferFor, retinaForZoom, tileWeight, tileCacheLimit } 
 import { preserveTilesAcrossSetView, announceSetView, boundTileCache, releaseLayer } from "./lib/tileLifecycle.js";
 import { buildGhost } from "./lib/ghostSnapshot.js";
 import { cullRectFor, cullToView, shouldCull } from "./lib/viewCull.js";
+/* NEW-1 — the View menu's content-visibility model. Applied ONLY at the five draw-set seams,
+ * beside `cullToView`, because "drawn ≠ exists" is a rule this codebase already relies on and
+ * hiding is that same rule with a different predicate. Read that module's header before adding a
+ * consumer: the metrics pass iterates `els`/`parcels` and must never read a draw set. */
+import { elHidden, isHidden, parcelAcreageHidden, normalizeRetiredToggles } from "./lib/contentVisibility.js";
 import { makeLabelFrame } from "./lib/exportLabelScale.js";
 import { orderLayersByPriority, LAYER_STAGE_SIZE } from "./lib/layerSchedule.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
@@ -2096,8 +2101,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return [sel];
   };
   // snap comes from the global pref (a tool mode), never the per-site saved value.
-  const [settings, setSettings] = useState(() => ({ ...DEFAULT_SETTINGS, ...(restored?.settings || {}), snap: loadSnapPref() }));
+  /* NEW-1 — `normalizeRetiredToggles` runs HERE, in the initializer, because the component is
+   * mounted keyed on the plan id, so this is once per plan open — the "on load" the migration
+   * needs, with no effect to fire and no extra render. It exists because "Show dock doors" left
+   * the View menu (the owner: "If I have dock doors there, I always want them to show"), and a
+   * plan saved with `showDocks: false` would otherwise have no control left to turn them back on.
+   * It returns null when there is nothing to do, so an ordinary plan is untouched. */
+  const [settings, setSettings] = useState(() => {
+    const stored = restored?.settings || {};
+    const retired = normalizeRetiredToggles(stored);
+    if (retired) console.info("[planyr] view-menu migration: restoring dock doors (the toggle was retired)", retired);
+    return { ...DEFAULT_SETTINGS, ...stored, ...(retired || {}), snap: loadSnapPref() };
+  });
   const setSnap = useCallback((on) => { saveSnapPref(on); setSettings((s) => ({ ...s, snap: on })); }, []);
+  /* NEW-1 — the View menu's hidden-content map, read straight off `settings` so it persists per
+   * plan exactly the way the other view settings do. Declared HERE, at the top of the body, rather
+   * than beside its first consumer: the marquee-release handler ~5,600 lines above `drawEls` also
+   * needs it, and a `const` referenced by an earlier-defined closure is legal but reads like a
+   * mistake. Sparse and usually `undefined` — an untouched plan has no such key at all. */
+  const hiddenGroups = settings.hidden;
 
   const [view, setView] = useState({ ppf: 0.35, offX: 60, offY: 60 });
   // `w`/`h` are clamped to a sane minimum for the coordinate math; `rawW` is the TRUE
@@ -7713,10 +7735,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // normBox understands. A degenerate (zero-travel) marquee is treated as "clear" (empty box).
       const box = { x0: Math.min(d.a.x, marquee?.b.x ?? d.a.x), y0: Math.min(d.a.y, marquee?.b.y ?? d.a.y),
                     x1: Math.max(d.a.x, marquee?.b.x ?? d.a.x), y1: Math.max(d.a.y, marquee?.b.y ?? d.a.y) };
+      /* NEW-1 — A MARQUEE MAY ONLY CATCH WHAT THE OWNER CAN SEE. These three passes read the raw
+         model, which is right for culling (a box-select should reach an element scrolled just off
+         screen) and WRONG for hiding: dragging a box over a plan whose markups are hidden would
+         hand back a selection of invisible objects, and the next Delete would take them. Hiding is
+         a statement about what he is working on, so it scopes the gesture too. */
       const picked = [
-        ...pickInMarquee(els, box, { bboxOf: featBBox, refOf: (el) => ({ kind: "el", id: el.id }), filter: (el) => !el.attachedTo && !el.dogEar }),
-        ...pickInMarquee(markups, box, { bboxOf: featBBox, refOf: (m) => ({ kind: "markup", id: m.id }) }),
-        ...pickInMarquee(measures, box, { bboxOf: featBBox, refOf: (m) => ({ kind: "measure", id: m.id }) }),
+        ...pickInMarquee(els, box, { bboxOf: featBBox, refOf: (el) => ({ kind: "el", id: el.id }), filter: (el) => !el.attachedTo && !el.dogEar && !elHidden(hiddenGroups, el) }),
+        ...(isHidden(hiddenGroups, "markups") ? [] : pickInMarquee(markups, box, { bboxOf: featBBox, refOf: (m) => ({ kind: "markup", id: m.id }) })),
+        ...(isHidden(hiddenGroups, "measures") ? [] : pickInMarquee(measures, box, { bboxOf: featBBox, refOf: (m) => ({ kind: "measure", id: m.id }) })),
       ];
       setMulti(picked);
       // A lone pick becomes the single `sel`; a measure must use its INDEX form (B569 — else its
@@ -14428,7 +14455,58 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (drag.current && drag.current.id != null) s.add(drag.current.id);
     return s;
   }, [sel, multi]);
-  const drawEls = useMemo(() => cullToView(els, cullRect, { enabled: !!cullRect, keep: cullKeep }), [els, cullRect, cullKeep]);
+  /* NEW-1 — HIDDEN CONTENT LEAVES THE DRAW SET, and nothing else.
+   *
+   * This filter sits INSIDE the same memo as the viewport cull deliberately: `drawEls` is the one
+   * set the geometry pass, the label pass and the dimension pass all iterate, so filtering here
+   * takes an element's body, its label and its dimension callouts together — three passes, one
+   * predicate, no chance of a label surviving its own building.
+   *
+   * ⛔ It is applied BEFORE `cullToView`'s `keep` set, which force-keeps the selection. That order
+   * matters: `keep` exists so a selected element mid-drag is never culled out from under the
+   * gesture, but a HIDDEN element must not be resurrected by having been selected — hiding a group
+   * clears any selection into it (see the effect below), and this ordering means the two can never
+   * argue about it.
+   *
+   * ⛔ AND IT DOES NOT TOUCH `els`. Every number the app reports is computed by the `els.forEach`
+   * metrics pass over the model; a hidden building is still a building for coverage, impervious,
+   * parking ratio, detention and cost. Verified by test/contentVisibility.test.js and by the
+   * ui-audit harness verify-content-visibility, which asserts the panel's numbers to the unit
+   * across every hide. (`hiddenGroups` is declared at the top of the body — see there for why.) */
+
+  /* NEW-1 — HIDING A GROUP DROPS ANY SELECTION INTO IT, and this is not tidiness.
+   *
+   * The handle layer (`data-handle-layer`, B1197) renders from `sel`/`multi`, NOT from the draw
+   * sets — that is the whole point of it being one always-on-top layer. So without this, hiding a
+   * group whose member is selected leaves its grips, its dimension band and its selection chrome
+   * painted over an object that is no longer there: handles floating on empty ground, draggable,
+   * editing something invisible. Both stores are cleared, per B743's rule that a delete-shaped
+   * operation must clear `sel` AND `multi` (this is not a delete, but it strands a reference the
+   * same way, and the same trap applies).
+   *
+   * The Properties panel follows `sel`, so it closes with it — which is right: a panel editing an
+   * object the owner has just hidden is a panel he cannot see the effect of. */
+  const selKindHidden = (ref) => {
+    if (!ref) return false;
+    if (ref.kind === "el") { const el = els.find((e) => e.id === ref.id); return !!el && elHidden(hiddenGroups, el); }
+    if (ref.kind === "parcel") return isHidden(hiddenGroups, "parcels");
+    if (ref.kind === "markup") return isHidden(hiddenGroups, "markups");
+    if (ref.kind === "measure") return isHidden(hiddenGroups, "measures");
+    if (ref.kind === "callout") return isHidden(hiddenGroups, "callouts");
+    return false;
+  };
+  const selKindHiddenRef = useRef(selKindHidden);
+  selKindHiddenRef.current = selKindHidden;
+  useEffect(() => {
+    const test = selKindHiddenRef.current;
+    setSel((s) => (test(s) ? null : s));
+    setMulti((m) => (Array.isArray(m) && m.some(test) ? m.filter((r) => !test(r)) : m));
+  }, [hiddenGroups]);
+
+  const drawEls = useMemo(() => {
+    const vis = hiddenGroups ? els.filter((el) => !elHidden(hiddenGroups, el)) : els;
+    return cullToView(vis, cullRect, { enabled: !!cullRect, keep: cullKeep });
+  }, [els, cullRect, cullKeep, hiddenGroups]);
 
   /* ------------ grid lines ------------ */
   const gridLines = () => {
@@ -14696,6 +14774,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // render uses just below) and hand them to layoutLabels as immovable obstacles so element
   // labels yield around them. Reused by parcelLabels so the obstacle box and the drawn pill agree.
   const parcelChips = parcels.map((pc) => {
+    /* NEW-1 — the PARCELS group takes its chip with it. This list is built from `parcels`, not
+       `drawParcels`, so the group filter at the draw seam does not reach it and hiding parcels
+       left every acreage badge floating over bare ground — the badge carries
+       `data-feature="parcel:<id>"`, so the feature was still on the plan by every reading. A group
+       that hides an object must hide its chrome, or "hidden" means "mostly hidden". */
+    if (isHidden(hiddenGroups, "parcels")) return null;
     if (pc.active === false) return null; // inactive parcel shows no chip (B213) → not an obstacle
     /* NEW-4 — the owner asked to be able to DELETE an acreage chip, and the only thing that hid one
        was `active === false`, which also drops the lot from the yield math. `chipHidden` is the
@@ -14703,7 +14787,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        render site below) is load-bearing — this list is also `parcelChipBoxes`, the obstacle set
        the B951 label-collision engine avoids, and a label nobody can see must not go on pushing
        every other label around the plan. */
-    if (pc.chipHidden) return null;
+    /* NEW-1 — and the View menu's plan-wide "Parcel acreage" master ORs with that per-lot flag.
+       `parcelAcreageHidden` is the one place the two compose, so the master never has to WRITE
+       `chipHidden` on every parcel to do its job — which would be a model mutation dressed as a
+       view toggle, would sync, and could not restore the lots he had hidden by hand when he turned
+       the master back off. Filtering here keeps both out of the obstacle set, per the note above. */
+    if (parcelAcreageHidden(hiddenGroups, pc)) return null;
     // NEW-3 — the badge sits at the parcel's VISUAL centre (the pole of inaccessibility: the
     // centre of the largest circle that fits inside the ring), not at the vertex average. The
     // vertex average is pulled toward whichever side was digitized with the most points, so on a
@@ -18311,8 +18400,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </Section>
           )}
 
-          {/* metrics */}
-          {_pid === "yield" && (<>
+          {/* metrics. NEW-1 — `data-testid="yield-metrics"` marks the numbers as ONE readable
+              region: the content-visibility harness compares this subtree's text before and after
+              every hide, and its first cut scoped to `[data-surface="planner"]`'s parent instead,
+              which resolved to most of the page — so it was diffing canvas labels and the View
+              menu's own chrome and reported six false failures. A panel worth asserting on is
+              worth being able to select. */}
+          {_pid === "yield" && (<div data-testid="yield-metrics" style={{ display: "contents" }}>
           <YieldPanel
             projectName={siteLabel} conceptName={planLabel}
             buildingCount={els.filter((e) => e.type === "building" && !e.dogEar).length}
@@ -18565,7 +18659,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               muted plain-English definition; Yield panel only). */}
           <YieldFooterDisclaimer />
           <ProvenanceLegend style={{ marginTop: 7, marginBottom: 9 }} />
-          </>)}
+          </div>)}
 
           {/* Standards (B653) — pure per-element-type STARTING VALUES. The what-you-see
               toggles + grid/snap moved to the on-canvas View (eye) menu; each section
@@ -18880,7 +18974,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     onDimNumberDown: (e, id) => elHandlersRef.current.onDimNumberDown?.(e, id),
     onElContext: (e, id) => elHandlersRef.current.onElContext?.(e, id),
   }), []);
-  const drawMarkupsZ = useMemo(() => cullToView(markupsZ, cullRect, { enabled: !!cullRect, keep: cullKeep }), [markupsZ, cullRect, cullKeep]);
+  // NEW-1 — "I should be able to hide all markups", the owner's second named group.
+  const drawMarkupsZ = useMemo(() => {
+    if (isHidden(hiddenGroups, "markups")) return [];
+    return cullToView(markupsZ, cullRect, { enabled: !!cullRect, keep: cullKeep });
+  }, [markupsZ, cullRect, cullKeep, hiddenGroups]);
   /* NEW-2 — MEASUREMENTS JOIN THE STACKING MODEL. A measurement used to be structurally
      un-layerable: it lives in its own `measures` collection, never enters the `zOrder`/`byZ` system
      (which reasons over `els`), and painted in ONE unconditional pass after `drawElsZ.above` — a
@@ -18894,10 +18992,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      ever saved and on every newly drawn one, and only `=== true` sends one down, so no stored plan
      changes on load and a fresh measurement still lands on top. */
   const measureBands = useMemo(() => {
+    // NEW-1 — hidden measurements leave both bands. `i` is still each measurement's index in
+    // `measures` (its selection identity), so nothing about indexing changes — the set is smaller.
+    if (isHidden(hiddenGroups, "measures")) return { below: [], above: [] };
     const idx = measures.map((m, i) => ({ m, i }));
     idx.sort((a, b) => byZAsc(a.m, b.m));
     return { below: idx.filter(({ m }) => m.behindEls === true), above: idx.filter(({ m }) => m.behindEls !== true) };
-  }, [measures]);
+  }, [measures, hiddenGroups]);
   /* NEW-2 — CALLOUTS AND TEXT BOXES JOIN THE STACKING MODEL, and this memo is where the owner's
      "the layers / order feature doesn't work at all" was structurally true rather than merely
      awkward. The callout pass rendered `callouts.map(...)` — the RAW state array — so an annotation
@@ -18912,9 +19013,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      callout ever saved and only `=== true` sends one down, and byZAsc falls back to (0, id) so an
      un-migrated set keeps a stable order rather than shuffling on load. */
   const calloutBands = useMemo(() => {
+    if (isHidden(hiddenGroups, "callouts")) return { below: [], above: [] };   // NEW-1
     const sorted = [...callouts].sort(byZAsc);
     return { below: sorted.filter((c) => c.behindEls === true), above: sorted.filter((c) => c.behindEls !== true) };
-  }, [callouts]);
+  }, [callouts, hiddenGroups]);
   /* NEW-2 — one callout/text-box node, lifted out of the render body so annotations can be
      drawn in TWO passes like markups and measurements: `calloutBands.below` paints BEFORE the
      site elements ("send behind the plan"), `calloutBands.above` after. Body is unchanged —
@@ -18989,7 +19091,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </g>
                 );
   };
-  const drawParcels = useMemo(() => cullToView(parcels, cullRect, { enabled: !!cullRect, keep: cullKeep }), [parcels, cullRect, cullKeep]);
+  /* NEW-1 — parcels are their own row, not part of "elements": a parcel is the site BOUNDARY,
+   * not something drawn on the site. Hiding it drops the outline, the setback ring and the acreage
+   * chip together — but never `p.active`, which is the thing that DOES change the math (B100/B213)
+   * and is deliberately reachable only from the parcel itself. */
+  const drawParcels = useMemo(() => {
+    if (isHidden(hiddenGroups, "parcels")) return [];
+    return cullToView(parcels, cullRect, { enabled: !!cullRect, keep: cullKeep });
+  }, [parcels, cullRect, cullKeep, hiddenGroups]);
   // B953/NEW-1 — clean-tee junction geometry (world feet), recomputed only when els/settings change;
   // rendered through f2p each frame. Drawn as an overlay after the element pass (see the render below).
   const teeJunctions = useMemo(() => teeJunctionsOf(els, settings), [els, settings]);
@@ -20888,8 +20997,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               pointer and each card claims its own presses back. */}
           <div style={{ pointerEvents: "none", display: "flex", gap: 8, alignItems: "flex-start", height: "100%", minHeight: 0 }}>
           <div style={{ pointerEvents: "auto", display: "flex", maxHeight: "100%", minHeight: 0 }}>
+            {/* NEW-1 — counts come from the MODEL (`els`, `parcels`, …), never from the draw sets:
+                a hidden group must still report how much it is hiding, or the menu becomes a mirror
+                of the canvas and can no longer say what to turn back on. */}
             <ViewMenu open={viewMenuOpen} onToggle={() => setViewMenuOpen((o) => !o)} settings={settings}
-              setSnap={setSnap} patchSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} pal={PAL} />
+              setSnap={setSnap} patchSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} pal={PAL}
+              counts={{ els, parcels: parcels.length, markups: markups.length, measures: measures.length, callouts: callouts.length }} />
           </div>
           {/* Layers control — same shared layers as the map finder. ALWAYS rendered
               (B693): an unlocated plan gets the control DISABLED with the plain reason

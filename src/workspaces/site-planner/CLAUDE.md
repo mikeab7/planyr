@@ -1063,6 +1063,30 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   wheel gesture either side of the floor **in force on the canvas the browser opened** — the
   viewport half is a function of a measured canvas, which no source reading can evaluate — plus a
   real `elementFromPoint` hit test on each faded disc).
+- **⛔ `contentVisibility.js` (B442688) — WHAT THE DRAWING IS SHOWING RIGHT NOW, and the one rule that
+  makes it safe: HIDE NEVER DELETES.** The owner's View menu used to toggle ORNAMENT (dock doors,
+  column grid, dimension callouts, area lines); what he reaches for is *"being able to hide a whole
+  set of stuff … And when I say remove, I don't mean remove, I just mean hide temporarily."* So the
+  menu leads with content GROUPS — a tri-state **Elements** master over per-type rows (the Layers
+  panel's "Show all flood & drainage" shape, same `{all, any, onCount, ids}` object, asserted against
+  `LayerPanel`'s own `floodMaster` so the two cannot become two mechanisms), plus one row each for
+  parcels, markups, measurements and callouts. **The predicate is applied ONLY where `cullToView`
+  already is** — `drawEls` · `drawParcels` · `drawMarkupsZ` · `measureBands` · `calloutBands` —
+  because "drawn ≠ exists" is a rule this codebase already relies on and hiding is that rule with a
+  different predicate. **⛔ The metrics pass (`els.forEach` → bldg/paving/parkArea/pondArea/stalls/
+  providedDetCf, and `dissolvedParcelSqft(parcels…)`) iterates the MODEL and must never read a draw
+  set** — that is what keeps every number identical, and it is the ONE thing to check before adding a
+  consumer. Storage is `settings.hidden`, SPARSE and naming only what is hidden, so an untouched plan
+  gains no keys. Three traps it closes, each found by the harness rather than by reading: the acreage
+  BADGE is built from `parcels` (not `drawParcels`) so a group must hide its chrome explicitly; the
+  handle layer renders from `sel`/`multi`, so hiding must clear a selection into the group or grips
+  float over nothing; and the three MARQUEE passes read the raw model, so a box-select would
+  otherwise return invisible objects that the next Delete would take. `normalizeRetiredToggles`
+  restores `showDocks` on load — deleting a shipped control STRANDS any plan saved with it off.
+  Guards: the repo-root `test/` suite **contentVisibility** (30) and the ui-audit harness
+  **verify-content-visibility** (33/33 on the owner's real Silvestri + Bain plans; mutation-proven —
+  filtering `els` one seam earlier leaves the canvas PIXEL-IDENTICAL and takes Buildings from
+  62.13 ac to 0.00 ac, which no visual test in this repo could see). Live-verify: **V237632**.
 - `zOrder.js` — per-element `z` stacking key utilities (`nextZ`/`sortByZ`/`normalizeZ`/`ensureZ`, B671).
   `arrange.js` — pure z-order "Arrange" (`reorderByZ`/`arrangeFlags`, B820): Bring-to-Front/Send-to-Back
   over a peer set. Wired via `arrangeSel` + `arrangePeers` + the right-click menus + the ⌘/Ctrl+]/[
