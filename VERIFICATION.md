@@ -126,7 +126,6 @@ was never clicked" quietly ships broken.
 6. Repeat 2–5 for the aerial underlay (a plan made with **New plan, same parcel**), and for **deleting plan A entirely** — plan B's image must survive that too.
 7. Last-holder cleanup: remove the drawing from every plan, then confirm the object is finally released (no permanent orphan).
 
-### V258992 — B464048: a keystroke typed in an inspector field can no longer delete the plan — the SIGNED-IN leg `Blocker: auth`
 ### V275056 — B463922: the schedule stops jumping while HE edits it `Blocker: real-data`
 
 **What is proven here, and it is not nothing.** `ui-audit/verify-grid-row-hold.mjs` drives the real
