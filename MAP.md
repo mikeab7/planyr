@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-13 @ `651849d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-13 @ `38bc8a2` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_506 source files mapped._
+_509 source files mapped._
 
 ## infra
 
@@ -88,7 +88,7 @@ _506 source files mapped._
 - **`src/workspaces/notes/lib/notesMarkdown.js`** — PURE Markdown export of a note's document model (GFM tables/task lists, HTML fallback for what Markdown cannot spell, plus a lossiness report) and `docToText` for body search.
   - _exports_: `assetIdsInDoc`, `attachmentIdsInDoc`, `attachmentIdsInDocs`, `docToMarkdown`, `docToText`, `escapeText`, `imageIdsInDoc`, `imageIdsInDocs`, `lossyNote`, `MD_INLINE_ATTACHMENT_MAX`, `MD_MAX_HEADING`, `NOTE_MD_HANDLED`, `pageToMarkdown`, `safeFileName`
 - **`src/workspaces/notes/lib/notesModel.js`** — PURE notebook › section › page tree schema, page timestamps, every structural op (add/rename/move/delete/search/migrate) and the 30-day BIN. `deleteNode` is a soft delete that still computes the FULL cascade of orphaned page ids and stamps it on the trash entry.
-  - _exports_: `addPage`, `adoptUnreachable`, `allPageIds`, `ancestorIds`, `boundProjectIds`, `COPY_SUFFIX`, `copyPageWithin`, `DEFAULT_PAGE_TITLE`, `deleteNode`, `descendantPageIds`, `emptyTree`, `expiredTrashIds`, `findPage`, `firstPageId`, `makePage`, `migrate`, `movePage`, `moveProjectNotes`, `newId`, `NO_PROJECT`, `NO_PROJECT_LABEL`, `NOTES_TREE_VERSION`, `pageProjectIndex`, `pagesInScope`, `projectGroups`, `projectNoteCensus`, `projectOfPage`, `purgeTrashEntry`, `recentPages`, `recoveredTitle`, `renameNode`, `restoreNode`, `SCOPE_ALL`, `SCOPE_PROJECT`, `searchTitles`, `setPageProject`, `subpagesPhrase`, `subtreePageIds`, `TOMB_RETENTION_DAYS`, `tombstoneIds`, `touchPage`, `TRASH_RETENTION_DAYS`, `trashEntries`, `trashPageIds`, `walkPages`, `withTombstones`
+  - _exports_: `addPage`, `adoptUnreachable`, `allPageIds`, `ancestorIds`, `boundProjectIds`, `commitTitle`, `COPY_SUFFIX`, `copyPageWithin`, `countNodes`, `DEFAULT_PAGE_TITLE`, `deleteNode`, `descendantPageIds`, `displayTitle`, `dropPages`, `emptyTree`, `expiredTrashIds`, `findPage`, `firstPageId`, `makePage`, `migrate`, `movePage`, `moveProjectNotes`, `newId`, `NO_PROJECT`, `NO_PROJECT_LABEL`, `NOTES_TREE_VERSION`, `pageProjectIndex`, `pagesInScope`, `projectGroups`, `projectNoteCensus`, `projectOfPage`, `purgeTrashEntry`, `recentPages`, `recoveredTitle`, `renameNode`, `restoreNode`, `SCOPE_ALL`, `SCOPE_PROJECT`, `searchTitles`, `setPageProject`, `subpagesPhrase`, `subtreePageIds`, `TOMB_RETENTION_DAYS`, `tombstoneIds`, `touchPage`, `TRASH_RETENTION_DAYS`, `trashEntries`, `trashPageIds`, `walkPages`, `withTombstones`
 - **`src/workspaces/notes/lib/notesOutline.js`** — PURE outline of a document: headings, their ProseMirror positions, the active section, and which rows fold.
   - _exports_: `activeOutlineIndex`, `LEAF_NODES`, `nodeSize`, `outlineFromDoc`, `outlineHasChildren`, `textOfNode`, `visibleOutline`
 - **`src/workspaces/notes/lib/notesPastePlain.js`** — Word's three paste modes (keep source · merge formatting · keep text only) plus the structural sanitisation — nbsp spacer collapse, layout-table unwrap, list-lift — that runs in all three.
@@ -115,6 +115,8 @@ _506 source files mapped._
   - _exports_: `sketchAltText`, `sketchSpec`, `specToDom`
 - **`src/workspaces/notes/lib/notesSlashMenu.js`** — The slash-menu trigger rule (never mid-word), the command catalogue, and the extension that owns the arrows, Enter and Escape.
   - _exports_: `applySlashCommand`, `default`, `filterSlashCommands`, `NoteSlashMenu`, `readSlashState`, `SLASH_COMMANDS`, `SLASH_MAX_QUERY`, `slashPluginKey`, `slashQueryFromText`, `stepIndex`
+- **`src/workspaces/notes/lib/notesSpacing.js`** — how far apart the lines are: a BLOCK property (paragraph/heading), written into the markup so it saves, syncs and prints with no second stylesheet
+  - _exports_: `BLOCK_SPACES`, `LINE_SPACINGS`, `spacingFromElement`, `spacingLabel`, `spacingStyle`
 - **`src/workspaces/notes/lib/notesStore.js`** — The ONE storage seam for Notes — per-account scoped keys, tree and page bodies kept separate, image bytes in IndexedDB behind enforced ceilings, `purgePages` as the one place bytes are destroyed, every failure broadcast (LOUD-FAILURE). Cloud sync would be a change here and nowhere else.
   - _exports_: `clearNotesStorageError`, `collectBinFacts`, `collectOpenTasks`, `deleteNoteImages`, `deletePages`, `deletePageVersions`, `ignoreDuplicate`, `lastNotesStorageError`, `listStoredPageIds`, `LOCAL_SCOPE`, `markPagesBinned`, `markPagesRestored`, `MAX_FILE_BYTES`, `MAX_IMAGE_BYTES`, `MAX_NOTEBOOK_IMAGE_BYTES`, `noteImageUsage`, `notesConflictFor`, `notesConflictLine`, `notesConflicts`, `notesScope`, `notesScopeLabel`, `notesStorageLine`, `notesSyncState`, `onNotesConflict`, `onNotesPagesChanged`, `onNotesStorageError`, `onNotesSyncState`, `openTaskCount`, `PAGE_KEY_BASE`, `pageKey`, `purgePages`, `putNoteFile`, `putNoteImage`, `readIgnoredDuplicates`, `readNoteFile`, `readNoteFiles`, `readNoteImage`, `readNoteImages`, `readNotesZoom`, `readPage`, `readPageVersion`, `readPageVersions`, `readTreeRaw`, `refreshNotesSync`, `registerOpenNoteDoc`, `reportImageProblem`, `resolveNotesConflict`, `restorePageVersion`, `searchNotes`, `setNotesScope`, `snapshotPage`, `startNotesSync`, `stopNotesSync`, `sweepEmptyAnchors`, `sweepImagesOfMissingPages`, `sweepOrphans`, `SYNC_KEY_BASE`, `syncKey`, `toggleNoteTask`, `TREE_KEY_BASE`, `treeKey`, `writeNotesZoom`, `writePage`, `writeTree`
 - **`src/workspaces/notes/lib/notesTabKey.js`** — Tab belongs to the document: a low-priority fallback behind the table and list handlers, plus the Escape-then-Tab keyboard-trap escape
@@ -332,6 +334,8 @@ _506 source files mapped._
   - _exports_: `clampToBounds`, `dockAfterRelinquish`, `FLOAT_MIN_WIDTH`, `FLOAT_SIZE`, `initialFloatPos`, `reconcileForNarrow`, `shouldInspectorTakeDock`
 - **`src/shared/ui/FloatingPanel.jsx`** — NEW-1 poppable panels: a left-rail panel detached into a portal-to-body draggable card over the map (drag-clamp, session-remembered position, map pan/zoom isolation); composes PanelChrome
   - _exports_: `default (FloatingPanel)`
+- **`src/shared/ui/headerCenterFit.js`** — how wide the row-1 centre slot may be so it is centred on the HEADER rather than on the leftover space, and which of the three layouts to run (`centered` / `tight` / `unmeasured`) — `centerSlotMaxWidth`, `centerSlotPlan`, `CENTER_SLOT_GAP`, `CENTER_SLOT_MIN`
+  - _exports_: `CENTER_SLOT_GAP`, `CENTER_SLOT_MIN`, `centerSlotMaxWidth`, `centerSlotPlan`
 - **`src/shared/ui/InterfaceSettings.jsx`** — The Interface section of Settings (display theme + smooth zoom), rendered by both Settings homes so they cannot disagree.
   - _exports_: `default (InterfaceSettings)`
 - **`src/shared/ui/MiddleTruncate.jsx`** — CSS middle-ellipsis label: head ellipsizes, tail always drawn, full text on hover (NEW-4).
@@ -376,7 +380,7 @@ _506 source files mapped._
 - **`src/workspaces/site-planner/components/CursorChip.jsx`** — the ONE cursor chip both map surfaces paint: coordinate pair + the always-present elevation readout (coords give way first so no elevation field is ever truncated)
   - _exports_: `default (CursorChip)`
 - **`src/workspaces/site-planner/components/icons.jsx`** — Small stroke icons (pin / empty-circle / warn-triangle) shared by the planner's panel components, replacing the 📍 emoji that ignored its row's theme colour; route-local on purpose so the bytes stay off every other route's chunk. — `PinIcon`, `EmptyCircleIcon`, `WarnTriangleIcon`
-  - _exports_: `EmptyCircleIcon`, `PinIcon`, `WarnTriangleIcon`
+  - _exports_: `CloseXIcon`, `DuplicateIcon`, `EmptyCircleIcon`, `HistoryIcon`, `PadlockIcon`, `PinIcon`, `PlusIcon`, `SaveIcon`, `StorageIcon`, `WarnTriangleIcon`
 - **`src/workspaces/site-planner/components/JurisdictionBadge.jsx`** — Passive site-header chip showing the active parcel's jurisdiction (city/ETJ/county) from the auto-run B93 identify; display-only, ⚑ on straddle (B763)
   - _exports_: `default (JurisdictionBadge)`
 - **`src/workspaces/site-planner/components/LayerPanel.jsx`** — Shared map-layer toggle UI (both finder + planner): checkbox/opacity/status/vintage per layer + coverage relevance picker
@@ -524,13 +528,15 @@ _506 source files mapped._
 - **`src/workspaces/site-planner/lib/districtFacilities.js`** — PR-K/K7 drainage-district facilities ingest scaffold: discover BKDD ArcGIS REST services behind its Web AppBuilder viewer (injectable fetch, graceful degradation), classify a DISTRICT floodway/ROW distinct from a FEMA floodway, name the receiving channel
   - _exports_: `ASSUMED_CHANNEL_TAG`, `BKDD_APPVIEWER`, `classifyDistrictFacilities`, `discoverDistrictServices`, `districtFloodwayNote`, `districtIdNote`, `facilityKind`
 - **`src/workspaces/site-planner/lib/dockZones.js`** — Building-anchored dock-zone stack geometry: outward court/trailer/buffer chain, catalog layers, dock-side axes, stranded-zone pruning
-  - _exports_: `ALONG_ANCHOR`, `alongAnchorFromDrag`, `alongLenIsChainEcho`, `alongOffsetFor`, `anchoredAlongSpan`, `boxExtentAlong`, `catalogDepthDefault`, `DOCK_ZONES`, `dockSidesFor`, `footprintAxes`, `footprintDepth`, `footprintLength`, `layoutStack`, `layoutZone`, `layoutZoneByKind`, `MAX_DOCK_ZONES`, `normalizeAlongAnchor`, `pruneStrandedZones`, `resizedAlongLen`, `resizedZoneAlongFit`, `resizedZoneAlongLen`, `strandedZoneIds`, `usableCourtSpan`, `ZONE_CATALOG`, `zoneAlongExtent`, `zoneAlongPlacement`, `zoneAlongSpan`, `zoneDepthDefault`, `zoneDepthDefaults`, `zoneDepthExtent`
+  - _exports_: `ALONG_ANCHOR`, `alongAnchorFromDrag`, `alongLenIsChainEcho`, `alongOffsetFor`, `anchoredAlongSpan`, `boxExtentAlong`, `catalogDepthDefault`, `DOCK_AXES`, `DOCK_ZONES`, `dockAxisEstablished`, `dockAxisOf`, `dockSidesFor`, `establishDockAxisPatch`, `footprintAxes`, `footprintDepth`, `footprintLength`, `healDockAxes`, `layoutStack`, `layoutZone`, `layoutZoneByKind`, `MAX_DOCK_ZONES`, `normalizeAlongAnchor`, `pruneStrandedZones`, `resizedAlongLen`, `resizedZoneAlongFit`, `resizedZoneAlongLen`, `rotateDockAxisPatch`, `strandedZoneIds`, `usableCourtSpan`, `withDockAxis`, `ZONE_CATALOG`, `zoneAlongExtent`, `zoneAlongPlacement`, `zoneAlongSpan`, `zoneDepthDefault`, `zoneDepthDefaults`, `zoneDepthExtent`
 - **`src/workspaces/site-planner/lib/dogEar.js`** — Corner bump-out geometry (flush corner placement + resize round-trip) AND the wall-hugging-child placement rule: the sidewalk span over the extended side, plus the always-flush perpendicular offset every wall strip / side-parking row is derived from
   - _exports_: `bumpSidewalkSide`, `bumpsOfHost`, `DOGEAR_D`, `DOGEAR_W`, `dogEarDesc`, `dogEarGeom`, `dogEarSize`, `hostAxisExtents`, `isDogEarSide`, `localToWorld`, `ownExtents`, `SIDE_PARK_PIN_TOL_FT`, `sideOfBondedBox`, `sideParkAlongRun`, `sideParkStack`, `sidewalkSpanForBumps`, `wallKidAlong`, `wallKidBox`, `wallKidPerp`, `wallStripBox`
 - **`src/workspaces/site-planner/lib/doubleTap.js`** — the reconstructed double-click gesture, budgeted on the EVENT's own clock (never a wall clock read inside the handler)
   - _exports_: `DBLTAP_MS`, `DBLTAP_PX`, `EMPTY_TAP`, `pairsWithLastTap`, `stepDoubleTap`, `tapRecord`, `tapTime`
 - **`src/workspaces/site-planner/lib/drafts.js`** — Pure resolver for Bluebeam-style mid-draw undo: decides which in-progress multi-point draft to trim by one vertex (Backspace + Ctrl-Z), and returns null when no draft is active so Ctrl-Z falls through to a global undo
   - _exports_: `resolveDraftStepBack`
+- **`src/workspaces/site-planner/lib/dragGate.js`** — The click-vs-drag gate: a press writes nothing until the pointer travels past the shared slop (TRAVEL only, never duration), and the point is rebased on arming so a real drag starts without a jump (opt-out for point drags).
+  - _exports_: `DRAG_SLOP_PX`, `dragArmed`, `dragTravelPx`, `gatedPoint`, `makeDragGate`, `stepDragGate`
 - **`src/workspaces/site-planner/lib/drainageTiming.js`** — NEW-4 per-leg timings for the flood/drainage check (elevation, each county WSE raster, each FEMA pull, the app's own calc, the cloud save), built from a leg-name ALLOWLIST and reported through the production telemetry sink with its delivery outcome kept (no silent sink)
   - _exports_: `__resetDrainageTiming`, `armDrainageSaveLeg`, `buildDrainageTimingRow`, `createDrainageTimer`, `DRAIN_LEG_KEYS`, `drainageTimingDelivery`, `drainageTimingRecent`, `MAX_LEGS`, `noteDrainageSave`, `reportDrainageTiming`, `SAVE_ATTRIBUTION_MS`, `WSE_LEG_PREFIX`, `wseLegName`
 - **`src/workspaces/site-planner/lib/drawdownStatute.js`** — NEW-7 C.R.S. 37-92-602(8) as a rule record — 97% of a 5-year storm out in 72 hr, 99% of larger events in 120 hr — turning the existing drawdown number into a Colorado water-rights verdict (fail / not-ruled-out / unknown, never 'pass') plus the post-2015 State Engineer notification. Texas is untouched

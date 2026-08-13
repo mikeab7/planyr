@@ -26,7 +26,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import NotesTree from "./components/NotesTree.jsx";
 import {
-  addPage, adoptUnreachable, allPageIds, ancestorIds, copyPageWithin, deleteNode, emptyTree, expiredTrashIds, findPage,
+  addPage, adoptUnreachable, allPageIds, ancestorIds, commitTitle, copyPageWithin, deleteNode, displayTitle, emptyTree, expiredTrashIds, findPage,
   firstPageId, migrate, movePage, pagesInScope, purgeTrashEntry, recentPages, renameNode, restoreNode,
   setPageProject, subpagesPhrase, subtreePageIds, touchPage, trashEntries, trashPageIds,
   NO_PROJECT_LABEL, SCOPE_ALL, SCOPE_PROJECT,
@@ -870,6 +870,17 @@ export default function Notes({
     if (activePageId) handleRename(activePageId, title);
   }, [activePageId, handleRename]);
 
+  /** ⛔ THE DEFAULT NAME IS APPLIED WHEN THE FIELD IS LEFT, NEVER WHILE IT IS BEING TYPED IN.
+   *  Coercing on every keystroke is what made the title impossible to clear: backspacing it to
+   *  nothing wrote "Untitled page" back and the controlled field re-rendered with all thirteen
+   *  characters restored. */
+  const handleTitleCommit = useCallback(() => {
+    if (!activePageId) return;
+    const base = treeRef.current || tree;
+    const next = commitTitle(base, activePageId);
+    if (next !== base) persistTree(next);
+  }, [activePageId, tree, persistTree]);
+
   /** Stamp the edited time — driven by the editor's write, NOT by a keystroke, so the field
    *  can only ever record a save that actually landed. */
   const handleSaved = useCallback((pageId) => {
@@ -1278,6 +1289,7 @@ export default function Notes({
                 status={status}
                 scopeLabel={scopeLabel}
                 onTitleChange={handleTitleChange}
+                onTitleCommit={handleTitleCommit}
                 onStatus={setStatus}
                 onSaved={handleSaved}
                 onExportMarkdown={handleExportPage}

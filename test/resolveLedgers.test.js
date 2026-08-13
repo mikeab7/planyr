@@ -12,7 +12,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "nod
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveConflicts, UNION_FILES, GENERATED } from "../scripts/resolve-ledgers.mjs";
+import { resolveConflicts, seedSide, describedPaths, lostDescriptions, UNION_FILES, GENERATED } from "../scripts/resolve-ledgers.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -180,5 +180,118 @@ describe("end to end, against a real git merge conflict", () => {
 
   it("the CLI reports 'nothing to resolve' on a clean tree instead of inventing work", () => {
     expect(run(REPO, "--dry-run")).toMatch(/No conflicted files/);
+  });
+});
+
+/* B384432 — the half of the bridge nobody had checked.
+ *
+ * "Generated" was read as "fully derived", so the generated pair was seeded with `git checkout
+ * --ours` before regenerating. But `MAP.md` carries a hand-authored one-liner per path that
+ * `build-map.mjs` PRESERVES by parsing the copy on disk — so seeding from one side threw away every
+ * description the other side wrote. Measured on PR #978, the bridge's first outing on a PR it did
+ * not author: 48 of main's descriptions came back as `TODO — describe` and `--check` went red on a
+ * merge the bridge had just declared resolved. These pin the seed rule, not the wording. */
+describe("the generated pair: a seed that keeps BOTH sides' preserved descriptions", () => {
+  const line = (path, desc) => `- **\`${path}\`** — ${desc}`;
+  const TODO = "TODO — describe";
+
+  it("keeps a description that exists on ONLY ONE side — the PR #978 data loss, directly", () => {
+    const ours = `# MAP\n${line("src/a.js", "the one our branch knows")}\n`;
+    const theirs = `# MAP\n${line("src/a.js", "the one our branch knows")}\n${line("src/b.js", "described on main while we sat")}\n`;
+    const seed = `${seedSide(theirs)}\n${seedSide(ours)}\n`;
+    // `--ours` alone could not have carried this line, which is the whole defect.
+    expect(seedSide(ours)).not.toContain("described on main while we sat");
+    expect(seed).toContain("described on main while we sat");
+    expect(seed).toContain("the one our branch knows");
+  });
+
+  it("drops TODO placeholders so an undescribed side cannot clobber a described one", () => {
+    // build-map's parse is last-write-wins, and the seed puts OURS last. Without the TODO filter an
+    // `ours` placeholder would overwrite main's real description with an empty one.
+    const ours = `${line("src/b.js", TODO)}\n`;
+    const theirs = `${line("src/b.js", "a real description")}\n`;
+    const seed = `${seedSide(theirs)}\n${seedSide(ours)}\n`;
+    expect(seed).not.toContain(TODO);
+    expect(seed).toContain("a real description");
+  });
+
+  it("lets OURS win a path BOTH sides describe — the branch's own wording for its own file", () => {
+    const ours = `${line("src/a.js", "our wording")}\n`;
+    const theirs = `${line("src/a.js", "their wording")}\n`;
+    const seed = `${seedSide(theirs)}\n${seedSide(ours)}\n`;
+    expect(seed.indexOf("their wording")).toBeLessThan(seed.indexOf("our wording"));
+  });
+
+  it("strips conflict markers, so a seed can never carry them into a generated file", () => {
+    const raw = `<<<<<<< HEAD\n${line("src/a.js", "ours")}\n=======\n${line("src/a.js", "theirs")}\n>>>>>>> origin/main\n`;
+    expect(seedSide(raw)).not.toMatch(/^[<>=|]{7}/m);
+    expect(seedSide(raw)).toContain("ours");
+  });
+
+  it("still refuses to union the generated pair — they are regenerated, never concatenated as output", () => {
+    // The seed is an INPUT to the generator, not the committed file. Guard the distinction, since
+    // conflating them is how a concatenated MAP.md would get committed with every path twice.
+    for (const g of GENERATED) expect(UNION_FILES).not.toContain(g.file);
+    expect(GENERATED.map((g) => g.file)).toEqual(["BACKLOG_OPEN.md", "MAP.md"]);
+  });
+});
+
+/* B384433 — THE POST-CONDITION: a bridge run may never reduce the set of described paths.
+ *
+ * B384432 fixed the seed. This asserts the PROPERTY, at the place the loss would happen, because the
+ * failure it replaced was SILENT: the bridge printed `✅ … MAP.md (regenerated)` while dropping 48 of
+ * main's one-liners, and only an unrelated `--check` in a later step noticed. A future change to
+ * build-map's preservation, to the line format, or to the seed re-opens exactly that hole with the
+ * report still green.
+ *
+ * MUTATION-PROVEN AGAINST THE REAL PR #978 DATA, not a constructed case. Driving `lostDescriptions`
+ * over the two actual MAP.md sides of that merge (ours `d0728b1`, theirs `651849d`): the pre-fix
+ * `git checkout --ours` seed loses **48** paths and the union seed loses **0** — the 48 matching the
+ * count measured live when the defect was found. That run is not committed as a test because CI
+ * checks out at depth 1 and could not reach those commits; a history-dependent test would pass
+ * vacuously, which is the rot this guard exists to prevent. The cases below are its structural
+ * mirror, and `parses the REAL committed MAP.md` is the check that keeps the whole thing honest. */
+describe("B384433 · the generated pair may never come back with fewer descriptions", () => {
+  const TODO = "TODO — describe";
+  const line = (p, d) => "- **`" + p + "`** — " + d;
+
+  it("REPORTS a path that was described on one side and came back TODO — the PR #978 shape", () => {
+    const ours = line("src/a.js", "ours knows this one");
+    const theirs = [line("src/a.js", "ours knows this one"), line("src/b.js", "main described this while we sat")].join("\n");
+    // What `--ours` seeding produces: b.js still exists in the tree, but its description is gone.
+    const result = [line("src/a.js", "ours knows this one"), line("src/b.js", TODO)].join("\n");
+    expect(lostDescriptions(ours, theirs, result)).toEqual(["src/b.js"]);
+  });
+
+  it("is GREEN on the union seed — the mutation contrast, in the same two inputs", () => {
+    const ours = line("src/a.js", "ours knows this one");
+    const theirs = [line("src/a.js", "ours knows this one"), line("src/b.js", "main described this while we sat")].join("\n");
+    const seed = describedPaths(`${seedSide(theirs)}\n${seedSide(ours)}\n`);
+    const inventory = ["src/a.js", "src/b.js"];
+    const result = inventory.map((p) => line(p, seed.get(p) ?? TODO)).join("\n");
+    expect(lostDescriptions(ours, theirs, result)).toEqual([]);
+  });
+
+  it("does NOT fire when the merge DELETED the file — the fresh scan is right to drop it", () => {
+    // The precision that stops this being a nuisance: scoped to paths the result still LISTS.
+    const ours = line("src/gone.js", "a described file this merge removes");
+    const theirs = line("src/kept.js", "still here");
+    const result = line("src/kept.js", "still here");
+    expect(lostDescriptions(ours, theirs, result)).toEqual([]);
+  });
+
+  it("does NOT fire on a path that was TODO on BOTH sides — nothing was lost", () => {
+    const ours = line("src/new.js", TODO);
+    const theirs = line("src/new.js", TODO);
+    expect(lostDescriptions(ours, theirs, line("src/new.js", TODO))).toEqual([]);
+  });
+
+  it("⛔ parses the REAL committed MAP.md — the anti-rot check", () => {
+    // If the line format drifts, the regex stops matching, `lostDescriptions` returns [] for
+    // everything, and the guard above becomes a permanent green that can never fail. Pin it to the
+    // real artefact so a format change reddens the guard instead of silently disarming it.
+    const real = describedPaths(readFileSync(join(REPO, "MAP.md"), "utf8"));
+    expect(real.size).toBeGreaterThan(400);
+    expect([...real.values()].filter((d) => d === TODO)).toEqual([]);
   });
 });

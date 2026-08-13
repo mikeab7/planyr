@@ -19,7 +19,7 @@ import { describe, it, expect } from "vitest";
 import {
   addPage, allPageIds, ancestorIds, boundProjectIds, deleteNode, emptyTree, expiredTrashIds,
   findPage, firstPageId, migrate, movePage, pagesInScope, projectGroups, projectOfPage,
-  purgeTrashEntry, recentPages, renameNode, restoreNode, searchTitles, setPageProject,
+  commitTitle, displayTitle, purgeTrashEntry, recentPages, renameNode, restoreNode, searchTitles, setPageProject,
   subtreePageIds, touchPage, trashEntries, trashPageIds, walkPages,
   NOTES_TREE_VERSION, NO_PROJECT_LABEL, SCOPE_ALL, SCOPE_PROJECT,
 } from "../src/workspaces/notes/lib/notesModel.js";
@@ -331,7 +331,16 @@ describe("reorder, rename, timestamps, Recent and search", () => {
 
   it("renames any page at any depth, and refuses to leave one nameless", () => {
     expect(findPage(renameNode(sample(), "a1x", "Surety"), "a1x").page.title).toBe("Surety");
-    expect(findPage(renameNode(sample(), "a1x", "   "), "a1x").page.title).toBe("Untitled page");
+    /* ⛔ SUPERSEDED (B370527). This used to coerce a blank name to the default ON EVERY
+     * KEYSTROKE, and the title field is a controlled input — so backspacing a name to nothing
+     * wrote the default straight back and you could not clear the field to retype it. A blank
+     * title is a legal, momentary state; the default is applied when the field is LEFT. */
+    expect(findPage(renameNode(sample(), "a1x", "   "), "a1x").page.title).toBe("   ");
+    expect(findPage(renameNode(sample(), "a1x", ""), "a1x").page.title).toBe("");
+    expect(findPage(commitTitle(renameNode(sample(), "a1x", ""), "a1x"), "a1x").page.title).toBe("Untitled page");
+    expect(findPage(commitTitle(renameNode(sample(), "a1x", "Surety"), "a1x"), "a1x").page.title).toBe("Surety");
+    expect(displayTitle("")).toBe("Untitled page");
+    expect(displayTitle("Surety")).toBe("Surety");
   });
 
   it("touchPage stamps only the page it names", () => {

@@ -105,6 +105,41 @@ export function tombstoneIds(tree) {
   return out;
 }
 
+/** How many nodes a tree holds, live and binned — the cheap way to ask "did the tombstone
+ *  filter actually remove something?" without diffing two whole trees. */
+export function countNodes(tree) {
+  let n = 0;
+  const walk = (p) => { n += 1; for (const k of p.pages || []) walk(k); };
+  for (const p of tree?.pages || []) walk(p);
+  for (const e of tree?.trash || []) n += (e.pageIds || []).length;
+  return n;
+}
+
+/** Lift a set of ids out of the LIVE tree, keeping their children where a delete would keep
+ *  them: at the top level of their branch's project, never dropped. Used by the seed to remove
+ *  a page the server says was purged — the ghost case (B370524). */
+export function dropPages(tree, ids) {
+  const dead = new Set(ids || []);
+  if (!dead.size) return tree;
+  const rescued = [];
+  const strip = (nodes, projectId) => {
+    const out = [];
+    for (const p of nodes || []) {
+      const branchProject = p.projectId !== undefined ? (p.projectId ?? null) : projectId;
+      const kids = strip(p.pages, branchProject);
+      if (dead.has(p.id)) {
+        // TOMBSTONE-DELETES: a purge takes what it names, never a page nobody deleted.
+        for (const k of kids) rescued.push({ ...k, projectId: branchProject == null ? null : String(branchProject) });
+        continue;
+      }
+      out.push({ ...p, pages: kids });
+    }
+    return out;
+  };
+  const pages = strip(tree?.pages, null);
+  return { ...tree, pages: [...pages, ...rescued] };
+}
+
 /** Add tombstones, keeping one row per id and dropping any that have outlived their purpose. */
 export function withTombstones(tree, ids, { at = Date.now() } = {}) {
   const next = { ...tree };
@@ -340,12 +375,40 @@ export function touchPage(tree, pageId, at = Date.now()) {
 }
 
 /** Rename any page by id. Unknown id is a no-op clone. */
+/**
+ * ⛔ IT STORES WHAT IT IS GIVEN, INCLUDING NOTHING — and that is the fix for a title that
+ * could not be edited.
+ *
+ * THE BUG: this used to coerce a blank title to `DEFAULT_PAGE_TITLE`. The title field is a
+ * CONTROLLED input that writes on every keystroke, so backspacing "Untitled page" down to
+ * nothing wrote the default straight back and re-rendered the field with all thirteen
+ * characters restored — you could not clear it to type something else. The snap-back happens
+ * at exactly **zero non-whitespace characters**, and it restores the DEFAULT, not what was
+ * there before.
+ *
+ * A blank title is a legal state of the model: since B342992 a title is never load-bearing for
+ * identity or reachability, so nothing breaks when one is empty for the few seconds between
+ * clearing the field and typing. The DEFAULT is applied on COMMIT (`commitTitle` below, called
+ * when the field is left), and the rail shows a placeholder for a page whose name is empty.
+ */
 export function renameNode(tree, id, title) {
   const next = clone(tree);
   const hit = findPage(next, id);
-  if (hit) hit.page.title = String(title ?? "").trim() || DEFAULT_PAGE_TITLE;
+  if (hit) hit.page.title = String(title ?? "");
   return next;
 }
+
+/** The name a page ends up with when the field is LEFT — this is where the default belongs,
+ *  and it is the only place a blank title is turned into words. */
+export function commitTitle(tree, id) {
+  const hit = findPage(tree, id);
+  if (!hit || String(hit.page.title ?? "").trim()) return tree;
+  return renameNode(tree, id, DEFAULT_PAGE_TITLE);
+}
+
+/** What to SHOW for a page whose title is momentarily empty. Display only — it is never
+ *  written back, because writing it back is the bug. */
+export const displayTitle = (title) => (String(title ?? "").trim() ? String(title) : DEFAULT_PAGE_TITLE);
 
 /* Index clamping is shared so every move behaves the same at the bounds: a negative index
  * lands first, an over-long index lands last, and neither throws. */

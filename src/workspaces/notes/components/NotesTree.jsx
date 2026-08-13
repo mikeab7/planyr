@@ -47,7 +47,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ancestorIds, boundProjectIds, descendantPageIds, findPage, pagesInScope, projectGroups,
+  ancestorIds, boundProjectIds, descendantPageIds, displayTitle, findPage, pagesInScope, projectGroups,
   subpagesPhrase, subtreePageIds, trashEntries,
   NO_PROJECT_LABEL, SCOPE_ALL, SCOPE_PROJECT,
 } from "../lib/notesModel.js";
@@ -458,7 +458,9 @@ function TreeRow({
         <RenameField value={title} testid={`notes-rename-${id}`} onCommit={onCommitRename} onCancel={onCancelRename} />
       ) : (
         <>
-          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
+          {/* ⛔ DISPLAY ONLY — the placeholder is never written back. Writing it back on every
+              keystroke is exactly what made the title field impossible to clear (B370527). */}
+          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", opacity: String(title ?? "").trim() ? 1 : 0.55 }}>{displayTitle(title)}</span>
           {confirming ? (
             <ConfirmDelete testid={`notes-del-${id}`} count={confirmCount} onYes={onConfirmDelete} onNo={onCancelDelete} />
           ) : null}
