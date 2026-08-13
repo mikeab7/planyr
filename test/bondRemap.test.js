@@ -203,10 +203,37 @@ describe("normalizeCrossHostBonds — heals the live cross-linked plan", () => {
     expect(healed.length).toBeGreaterThan(0);
   });
 
-  it("DROPS a reference that names nothing reachable, rather than leaving it dangling", () => {
+  /* ⛔ SUPERSEDED BY NEW-3, and this replaces the assertion rather than relaxing it.
+   *
+   * This pass used to drop ANY reference it could not resolve, on the reasoning that "a bond nobody
+   * can walk is strictly better than a bond that walks somewhere impossible". That is true of the
+   * case it was written for — a duplicate's bond pointing at ANOTHER building's court — and false
+   * of a bond pointing at NOTHING, which is a different fact wearing the same shape: a sibling that
+   * was deleted. Dropping it there destroys the only record of what belonged in the assembly, and
+   * the stranded-zone pass downstream then reads the orphan as the head of its own chain and lays
+   * it flat against the dock wall. On the owner's plan `smsdrvzr9gzx` that moved a trailer row
+   * 135 ft — exactly the depth of the deleted truck court — and logged a successful heal.
+   *
+   * So the two cases are now separated by whether the referent EXISTS, and only the resolvable one
+   * is repaired. Coverage for the missing-sibling half lives in test/assemblyMissingSibling.test.js.
+   */
+  it("KEEPS a reference that names a DELETED element — it is the record of the missing sibling", () => {
     const els = [...stackedBuilding("only")].map((e) => (e.type === "trailer" ? { ...e, forCourt: "ghost", prevZone: "ghost" } : e));
     const out = normalizeCrossHostBonds(els.filter((e) => !e.truckCourt), () => {}); // no court to re-bond to
     const t = out.find((e) => e.type === "trailer");
+    expect(t.forCourt).toBe("ghost");
+    expect(t.prevZone).toBe("ghost");
+  });
+
+  it("…but still DROPS a reference to a real element on a FOREIGN host when this host has no counterpart", () => {
+    // The B1124 case with nothing to re-point at: the referent EXISTS, so this is a cross-host
+    // bond, and leaving it pointing at another building's court is the thing that must not stand.
+    const other = stackedBuilding("other");
+    const mine = stackedBuilding("only").filter((e) => !e.truckCourt);
+    const foreignCourt = other.find((e) => e.truckCourt);
+    const els = [...other, ...mine.map((e) => (e.type === "trailer" ? { ...e, forCourt: foreignCourt.id, prevZone: foreignCourt.id } : e))];
+    const out = normalizeCrossHostBonds(els, () => {});
+    const t = out.find((e) => e.id.startsWith("only") && e.type === "trailer");
     expect("forCourt" in t).toBe(false);
     expect("prevZone" in t).toBe(false);
     expect(danglingBonds(out, new Set(out.map((e) => e.id)))).toEqual([]);

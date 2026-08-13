@@ -5,7 +5,7 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-08-09._
+_Last updated: 2026-08-12._
 
 ## ❓ One question on team sharing I deliberately did NOT answer for you (B326416)
 

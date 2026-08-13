@@ -48,7 +48,7 @@
  *
  * Pure: no DOM, no clock, no I/O. Safe in a worker and in a Node test.
  */
-import { normalizeBondedChildren, orphanWallPads } from "./siteModel.js";
+import { normalizeBondedChildren, orphanWallPads, missingBondSiblings, impossibleStacks } from "./siteModel.js";
 
 /* The reporting floor, in feet. The heal's own passes re-derive to ~1e-6 ft, so a coherent plan
  * read off disk routinely gets sub-inch corrections (stored rounding, a legacy record's drift) —
@@ -95,6 +95,19 @@ export function assemblyIntegrity(els, { tol = ASSEMBLY_TEAR_TOL_FT, mintId = nu
    * owner noticed missing sidewalks. A bonded child with no role is now a reported defect in its
    * own right, whatever its coordinates say. */
   const orphans = orphanWallPads(list);
+  /* ⛔ NEW-3 — WHAT THE HEAL CANNOT DO, measured on the INPUT and reported whether or not anything
+   * was rewritten. A heal that meets a state it cannot repair has exactly two honest options:
+   * repair it, or say so. It had a third — quietly produce *a* layout and report success — and it
+   * took it, leaving a trailer row hard against a building with the truck court trucks reach it
+   * through deleted, and a `changed: true` that read like the tear had been fixed.
+   *
+   * These two are NOT tears in the `repairs` sense (nothing moved, and nothing should): they are
+   * assemblies with a piece missing. `unhealable` is deliberately separate from `tears` so a
+   * caller cannot accidentally treat "we fixed it" and "we cannot fix it" as one number. */
+  const unhealable = [
+    ...missingBondSiblings(list).map((r) => ({ ...r, kind: "missing-sibling" })),
+    ...impossibleStacks(list).map((r) => ({ ...r, kind: "impossible-stack" })),
+  ];
   const notes = new Map(); // id -> Set(kind)
   const healed = normalizeBondedChildren(list, (h) => {
     if (!h || h.id == null) return;
@@ -102,7 +115,7 @@ export function assemblyIntegrity(els, { tol = ASSEMBLY_TEAR_TOL_FT, mintId = nu
     if (!s) { s = new Set(); notes.set(h.id, s); }
     if (h.kind) s.add(h.kind);
   }, { mintId });
-  if (healed === list) return { els: list, changed: false, repairs: [], tears: [], orphans };
+  if (healed === list) return { els: list, changed: false, repairs: [], tears: [], orphans, unhealable };
   const before = new Map();
   for (const e of list) if (e && e.id != null) before.set(e.id, e);
   const repairs = [];
@@ -134,13 +147,24 @@ export function assemblyIntegrity(els, { tol = ASSEMBLY_TEAR_TOL_FT, mintId = nu
     });
   }
   // A tear is a disagreement with the host past tolerance on EITHER axis of the child's geometry.
-  return { els: healed, changed: true, repairs, tears: repairs.filter((r) => r.dist > tol || r.span > tol), orphans };
+  return { els: healed, changed: true, repairs, tears: repairs.filter((r) => r.dist > tol || r.span > tol), orphans, unhealable };
 }
 
 /* Detector-only: does this collection HOLD a tear right now? Same derivation, nothing written.
  * Used where we want to assert without adopting (e.g. straight after a commit result, to report
  * that the rows we just wrote are coherent). */
 export function assemblyTears(els, opts) { return assemblyIntegrity(els, opts).tears; }
+
+/* NEW-3 — bounded telemetry for the states the heal REFUSES to repair. Same shape rule as
+ * `tearPayload`: the ids and the broken link are what turn a recurrence into a query. */
+export function unhealablePayload(records, cap = 20) {
+  const list = Array.isArray(records) ? records : [];
+  return {
+    count: list.length,
+    kinds: [...new Set(list.map((r) => r && r.kind).filter(Boolean))],
+    items: list.slice(0, cap).map((r) => ({ id: r.id, host: r.host, type: r.type, kind: r.kind, bond: r.bond, missing: r.missing, side: r.side })),
+  };
+}
 
 /* NEW-4 — bounded telemetry for the role invariant. Same shape rule as `tearPayload`: the ids and
  * the wall are what turn a recurrence into a query. */

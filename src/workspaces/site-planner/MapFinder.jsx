@@ -268,6 +268,18 @@ function viewportOf(el) {
   return w > 0 && h > 0 ? { width: w, height: h, measured: true } : { width: 1024, height: 768, measured: false };
 }
 
+/* NEW-2 — the one "shared with a team" glyph, at MODULE SCOPE (MODULE-SCOPE-COMPONENTS): it is
+ * drawn in three places now (the list row, the share menu's status line, each team row) and three
+ * inline copies of the same path is how they drift. Inherits `currentColor` so each caller keeps
+ * owning the colour. */
+const ShareGlyph = ({ size = 13 }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+    <circle cx="5.5" cy="6" r="2.4" /><circle cx="11" cy="6.6" r="1.9" />
+    <path d="M1.6 13c0-2.1 1.7-3.4 3.9-3.4S9.4 10.9 9.4 13z" />
+    <path d="M9.7 9.8c1.9.1 3.3 1.2 3.3 3.2h-2.2c0-1.2-.4-2.3-1.1-3.2z" />
+  </svg>
+);
+
 export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip, onViewCenter }) {
   const elRef = useRef(null);
   const mapRef = useRef(null);
@@ -488,7 +500,30 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     setShareBusy(false);
     setStatusMenu(null);
     if (!r || !r.ok) { setErr((r && r.error) || "Couldn't update sharing."); return; }
-    if (teamId && r.sites === 0) { setErr("This project isn't in the cloud yet — open it once to sync, then share."); return; }
+    /* NEW-1 — branch on the NAMED outcome, never on a row count. The old test was
+     * `if (teamId && r.sites === 0)` → "This project isn't in the cloud yet", which fired every time
+     * an ALREADY-SHARED project was shared again: that write legitimately changes 0 rows, and 0 rows
+     * changed is not 0 rows existing. It was reported on "8 South" at version 587, shared for weeks.
+     * Only "not-found" may say that now, and on a migrated database that state is reported
+     * explicitly rather than inferred from a zero. */
+    if (r.outcome === "not-found") {
+      setErr("This project isn't in the cloud yet — open it once to sync, then share.");
+      return;
+    }
+    /* NEW-3, LOUD-FAILURE: the RPC re-counts its own group after writing, so a share that reached
+     * only some of a project's plans says so instead of looking like a success. A half-UNSHARE is
+     * the dangerous direction — a teammate keeps access the owner thinks he revoked — so it is
+     * named as still-shared rather than softened. */
+    if (r.mismatched > 0) {
+      setErr(teamId
+        ? `Only part of this project was shared — ${r.mismatched} of ${r.matched} plans didn't take. Try again.`
+        : `Only part of this project was made private — ${r.mismatched} of ${r.matched} plans are STILL shared. Try again.`);
+      onSharedChange && onSharedChange();
+      return;
+    }
+    // A project holding a teammate's plan is shared as far as it can be: your rows moved, theirs are
+    // deliberately left alone. Say that rather than reporting a clean success for a partial one.
+    if (teamId && r.foreign > 0) setErr(`Shared your ${r.matched} of ${r.plans} plans — the rest belong to a teammate and were left as they are.`);
     onSharedChange && onSharedChange();
   };
   // Pipeline counts by status across all sites (for the chips / counts strip).
@@ -1563,7 +1598,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         {s.teamId && (
           <span title={`Shared with ${teamName(s.teamId)}`} aria-label="Shared with team"
             style={{ flex: "none", color: PAL.accent, display: "grid", placeItems: "center", lineHeight: 0 }}>
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><circle cx="5.5" cy="6" r="2.4" /><circle cx="11" cy="6.6" r="1.9" /><path d="M1.6 13c0-2.1 1.7-3.4 3.9-3.4S9.4 10.9 9.4 13z" /><path d="M9.7 9.8c1.9.1 3.3 1.2 3.3 3.2h-2.2c0-1.2-.4-2.3-1.1-3.2z" /></svg>
+            <ShareGlyph />
           </span>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -1580,7 +1615,15 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           ) : (
             <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textDecoration: t.struck ? "line-through" : "none" }}>{s.site || s.name || "Untitled site"}</div>
           )}
-          <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{STATUS_META[st]?.label || st} · {siteAcres(s) > 0 ? `${siteAcres(s).toFixed(1)} ac` : "no boundary"}</div>
+          {/* NEW-2 — the sharing state is NAMED here, not left to an icon's hover title. The owner
+              has 35 projects, exactly 2 are shared, and he could not tell which: an accent glyph on
+              its own says "something", never "shared, and with whom". This rides the existing
+              metadata line (so it costs no new row and truncates with it) and reads in the accent,
+              because PAL.muted is for inert metadata and this is the answer to his question. */}
+          <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {STATUS_META[st]?.label || st} · {siteAcres(s) > 0 ? `${siteAcres(s).toFixed(1)} ac` : "no boundary"}
+            {s.teamId && <> · <span style={{ color: PAL.accent, fontWeight: 700 }}>Shared with {teamName(s.teamId)}</span></>}
+          </div>
         </div>
         {/* (B168) single-click ✕ delete removed — delete lives in the right-click menu;
             only the non-destructive locate (⊕) stays here. */}
@@ -1968,23 +2011,44 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               return (
                 <>
                   <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "4px 0" }} />
-                  <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, padding: "4px 12px 2px" }}>Share with team</div>
+                  {/* NEW-2 — THE MENU STATES ITS CURRENT STATE BEFORE IT OFFERS AN ACTION. The owner's
+                      report was that after sharing, "options still pop up to share it, so it makes it
+                      seem like it hasn't been." Two causes: the ✓ was keyed on `s.teamId`, which was
+                      always blank (the mirror bug above), and even with it lit, a list of team names
+                      reads as an invitation rather than as a state. So the state is now a SENTENCE,
+                      and the actions sit under it. */}
+                  <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, padding: "4px 12px 2px" }}>
+                    {s.teamId ? "Sharing" : "Share with team"}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "1px 12px 5px", fontSize: 12,
+                    color: s.teamId ? PAL.accent : PAL.muted, fontWeight: s.teamId ? 700 : 500 }}>
+                    {s.teamId && <ShareGlyph size={12} />}
+                    <span style={{ flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {s.teamId ? `Shared with ${teamName(s.teamId)}` : "Private — only you can see this"}
+                    </span>
+                  </div>
                   {myTeams.map((tm) => {
                     const on = s.teamId === tm.id;
                     return (
                       <button key={tm.id} disabled={shareBusy} onClick={() => doShare(s, on ? null : tm.id)}
+                        title={on ? `Stop sharing with ${tm.name}` : `Share this project with ${tm.name}`}
                         style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "7px 12px", border: "none",
                           background: on ? "#fbf3ee" : "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: on ? 700 : 500 }}>
                         <span style={{ width: 15, height: 15, flex: "none", display: "grid", placeItems: "center", color: PAL.accent, lineHeight: 0 }}>
-                          <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><circle cx="5.5" cy="6" r="2.4" /><circle cx="11" cy="6.6" r="1.9" /><path d="M1.6 13c0-2.1 1.7-3.4 3.9-3.4S9.4 10.9 9.4 13z" /><path d="M9.7 9.8c1.9.1 3.3 1.2 3.3 3.2h-2.2c0-1.2-.4-2.3-1.1-3.2z" /></svg>
+                          <ShareGlyph />
                         </span>
                         <span style={{ flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tm.name}</span>
-                        {on && <span style={{ color: PAL.accent, fontWeight: 800 }}>✓</span>}
+                        {/* An already-shared team offers the REVERSE action, and says so. Without this
+                            the row is indistinguishable from the offer to share. */}
+                        {on
+                          ? <span style={{ color: PAL.muted, fontWeight: 600, fontSize: 11, flex: "none" }}>✓ Unshare</span>
+                          : <span style={{ color: PAL.muted, fontWeight: 600, fontSize: 11, flex: "none" }}>Share</span>}
                       </button>
                     );
                   })}
                   {s.teamId && (
                     <button disabled={shareBusy} onClick={() => doShare(s, null)}
+                      title="Pull this project back to private — teammates lose access"
                       style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "7px 12px", border: "none",
                         background: "transparent", color: PAL.muted, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600 }}>
                       <span style={{ width: 15, flex: "none" }} />

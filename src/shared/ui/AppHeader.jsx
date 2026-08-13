@@ -49,7 +49,7 @@
  * no allow="fullscreen", iOS Safari, which has no fullscreen for a non-video element) says so in
  * a short notice instead.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import ProjectBreadcrumb from "./ProjectBreadcrumb.jsx";
 import CloudSyncBadge from "./CloudSyncBadge.jsx";
 import AnchoredMenu from "./AnchoredMenu.jsx";
@@ -59,6 +59,7 @@ import { prefetchModule } from "../../app/modulePrefetch.js";
 import { MODULE_ACCENT } from "./moduleAccent.js";
 import { useTheme } from "../theme/ThemeProvider.jsx";
 import InterfaceSettings from "./InterfaceSettings.jsx";
+import { centerSlotPlan, CENTER_SLOT_GAP } from "./headerCenterFit.js";
 
 // Chrome colors are theme tokens (var(--chrome-*)) so the header themes WITH the app
 // (B318): light theme = light chrome, dark theme = dark chrome.
@@ -466,6 +467,61 @@ export default function AppHeader({
   const rowScroll = narrow ? { overflowX: "auto", overflowY: "hidden" } : null;
   const zoneFixed = narrow ? { flex: "0 0 auto" } : null; // don't let a zone compress its content away
 
+  /* ── NEW-1 — THE ROW-1 CENTRE SLOT IS CENTRED ON THE HEADER, NOT ON THE LEFTOVER SPACE ─────────
+     Owner, 2026-08-09: "now the jurisdiction is not centered." The chip was perfectly centred inside
+     its slot; the SLOT was off-centre, because `flex: 1 1 0%` makes it the space that remains between
+     the breadcrumb and the account controls — so the chip's position was a function of how long the
+     project and plan names are, and drifted from site to site and on every rename. (Long-standing, not
+     a regression from the label-text change, which only made it visible.)
+
+     The slot is therefore taken OUT OF FLOW — pinned at the row's midpoint — so the side groups keep
+     their natural widths and NAVIGATION WINS (B371361) is untouched. Its width is then BOUNDED by
+     measurement (`headerCenterFit`) so it can never reach either side group: out of flow, nothing else
+     would stop it, and an overlapping pill is exactly the defect B371361 closed. Inside that bound the
+     pill truncates / abbreviates / collapses on its own, as before, and keeps its full string in the
+     tooltip and in `data-jurisdiction-full`.
+
+     Measurement is a LAYOUT effect (VIEWPORT-STABLE): the width is folded in before paint, so a panel
+     toggle or a window resize never shows one frame of a mis-sized slot. It cannot feed back on itself
+     — the slot is out of flow, so its own width changes neither side group's.
+
+     THREE OUTCOMES, never two (`headerCenterFit.centerSlotPlan`, and `data-center-mode` reports which
+     is live): `centered` · `tight` — a wide breadcrumb in a narrow window leaves no room for a real
+     centre, so the slot goes back in flow and takes what remains, off-centre but READABLE rather than
+     a sliver · `unmeasured` — LOUD-FAILURE: nothing could be measured, so the old visible layout runs,
+     and it is kept distinct from `tight` so a header that never measures cannot hide behind a
+     legitimate-looking verdict. */
+  const rowRef = useRef(null);
+  const leftZoneRef = useRef(null);
+  const rightZoneRef = useRef(null);
+  const [center, setCenter] = useState({ mode: "unmeasured", max: null });
+  useLayoutEffect(() => {
+    if (narrow) return undefined; // phone: the row scrolls sideways, everything stays in flow
+    const row = rowRef.current, left = leftZoneRef.current, right = rightZoneRef.current;
+    if (!row || !left || !right) return undefined;
+    const measure = () => {
+      const next = centerSlotPlan({
+        rowW: row.clientWidth,
+        leftW: left.getBoundingClientRect().width,
+        rightW: right.getBoundingClientRect().width,
+      });
+      // Sub-pixel churn would re-render every frame of a drag for no visible change.
+      setCenter((prev) => (prev.mode === next.mode && prev.max != null && next.max != null
+        && Math.abs(prev.max - next.max) < 0.5 ? prev : next));
+    };
+    measure();
+    if (typeof ResizeObserver !== "function") {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
+    const ro = new ResizeObserver(measure);
+    ro.observe(row); ro.observe(left); ro.observe(right);
+    return () => ro.disconnect();
+  }, [narrow]);
+  // `centered` is the only mode that leaves the flow; the other two are the row as it has always been.
+  const centered = !narrow && center.mode === "centered";
+  const centerMode = narrow ? "narrow" : center.mode;
+
   /* Enter/leave. The keypress IS the user activation the Fullscreen API requires, so the request
      is made straight out of the key handler, not deferred. `requestFs()` can REJECT (a permissions
      policy, an iframe without allow="fullscreen", or no API at all — iOS Safari has no fullscreen
@@ -619,15 +675,36 @@ export default function AppHeader({
       data-fullscreen={fullscreen ? "on" : undefined}
     >
       {/* ── Row 1 — 35px (−20% from 44 per B169; contents stay vertically centered) ── */}
-      <div className={narrow ? "no-hscrollbar" : undefined} style={{ height: 35, display: "flex", alignItems: "center", ...rowScroll }}>
+      <div ref={rowRef} className={narrow ? "no-hscrollbar" : undefined} style={{ height: 35, display: "flex", alignItems: "center", position: "relative", ...rowScroll }}>
 
-        {/* Left zone. Desktop: clip overflow so a long breadcrumb (project + plan) can never
-            paint OVER the centered badge — the "text overlaps and looks like shit" bug the owner
-            reported. The breadcrumb's project crumb already ellipsis-truncates; this guarantees
-            nothing spills past the zone edge if it's still wider than its share. (Dropdowns
-            portal to <body>, so overflow:hidden here never clips a menu.) Narrow keeps the
-            zoneFixed no-shrink so the whole row scrolls sideways instead — unchanged. */}
-        <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 4, paddingLeft: 12, minWidth: 0, ...(narrow ? zoneFixed : { overflow: "hidden" }) }}>
+        {/* ⛔ NEW-2 — NAVIGATION WINS. Read this before changing any of the three zone flexes.
+            The owner could not open the plan switcher on a laptop: "the unincorporated / city of
+            Houston / ETJ / Harris County chip is too big and it covers it." Measured at a 1191 px
+            viewport — the pill overlapped the plan chip's box by a sliver, and `elementFromPoint`
+            along the chip's right edge returned THE PILL'S TEXT SPAN for the last stretch of it,
+            the ▾ CARET INCLUDED. NOT a z-index or overlay problem (the pill is position:static,
+            z-index:auto): plain flex overflow, a pill that would not shrink running over its
+            neighbour.
+
+            The zones used to be `1 | 0 1 auto (max 40%) | 1`, which optically centred the badge by
+            giving the two side zones an EQUAL SHARE regardless of what they held — so the left
+            zone was handed less than the breadcrumb needed while the pill sat comfortably under
+            its cap and never shrank. The rule is now explicit and one-directional:
+
+              LEFT (navigation)  `0 1 auto` — takes the width it needs, capped, and shrinks only
+                                 after the centre has already collapsed (its basis is content, the
+                                 centre's is 0, so negative free space lands here last).
+              CENTRE (the pill)  `1 1 0%`   — takes what is LEFT OVER and centres within it, so its
+                                 width never depends on its own content and it truncates,
+                                 abbreviates (JurisdictionBadge) or collapses on its own.
+              RIGHT (account)    `0 0 auto` — the save badge, fullscreen, gear and auth pill keep
+                                 their size; they were never the contended pair.
+
+            The cost, stated: the badge is centred in the space that remains rather than in the
+            window. That is what "navigation wins" buys. Narrow (phone) is untouched — the row
+            scrolls sideways there and the zoneFixed no-shrink still applies. (Dropdowns portal to
+            <body>, so overflow:hidden here never clips a menu.) */}
+        <div ref={leftZoneRef} data-header-zone="left" style={{ display: "flex", alignItems: "center", gap: 4, paddingLeft: 12, minWidth: 0, ...(narrow ? { flex: 1, ...zoneFixed } : { flex: "0 1 auto", maxWidth: "60%", overflow: "hidden" }) }}>
           {/* Logo — the Planyr brand mark + wordmark (BrandMark, theme-aware).
               Also a secondary route to the Dashboard (the labeled crumb is primary, B192). */}
           <button
@@ -666,29 +743,56 @@ export default function AppHeader({
           )}
         </div>
 
-        {/* Center zone — the jurisdiction badge. On desktop it's capped at 40% AND allowed to
-            SHRINK (flex 0 1 auto + minWidth 0 + overflow hidden), so when the row gets tight the
-            badge truncates via its own ellipsis instead of holding a fixed width and shoving the
-            breadcrumb into an overlap (the old flexShrink:0 was the root cause). On a phone the cap
-            squeezes the site/plan switcher, so it keeps its natural width and rides the row's
-            sideways scroll (no shrink/clip) as before. */}
+        {/* Center zone — the jurisdiction badge.
+            NEW-1 (`absolute`): pinned at the row's midpoint and out of flow, so the chip is centred
+            on the HEADER and its position no longer depends on how long the breadcrumb or the
+            account controls are. `centerMax` (measured above) keeps it clear of both side groups —
+            without that bound, an out-of-flow slot would run straight back over the plan chip, which
+            is the B371361 defect. Inside the bound the pill truncates / abbreviates / collapses on
+            its own and keeps the full string in its tooltip.
+            NEW-2 (`tight` / `unmeasured`): the space LEFT OVER after navigation (`1 1 0%`) — kept for
+            the two cases a true centre cannot serve, because a visible off-centre chip beats a sliver
+            and beats a silently collapsed one.
+            On a phone (`narrow`) the row scrolls sideways, so the badge keeps its natural width. */}
         <div
+          data-header-center="1"
+          data-center-mode={centerMode}
           style={{
-            display: "flex", alignItems: "center", justifyContent: "center", padding: "0 8px",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            // The clear space is already IN the measured bound when centred, so padding here would
+            // only eat the chip's own room.
+            padding: centered ? 0 : "0 8px",
             ...(narrow
               ? { flexShrink: 0, maxWidth: "none" }
-              : { flex: "0 1 auto", minWidth: 0, overflow: "hidden", maxWidth: "40%" }),
+              : centered
+                ? {
+                  position: "absolute", left: "50%", transform: "translateX(-50%)",
+                  top: 0, bottom: 0, maxWidth: center.max, minWidth: 0, overflow: "hidden",
+                }
+                : { flex: "1 1 0%", minWidth: 0, overflow: "hidden" }),
           }}
         >
           {centerContent}
         </div>
 
+        {/* NEW-1 — the slack the centre slot used to absorb. With the centre out of flow, something
+            in flow has to hold the right zone against the right edge; a growing right zone would
+            report its own measured width as "the whole slack" and destroy the bound above. An empty,
+            inert spacer keeps that measurement honest. (In `tight` / `unmeasured` / `narrow` mode the
+            centre is back in flow and absorbs the slack itself, so the spacer stands down.) */}
+        {centered && <div aria-hidden="true" style={{ flex: "1 1 0%", minWidth: CENTER_SLOT_GAP }} />}
+
         {/* Right zone — cloud-sync badge · settings · auth. On narrow use `1 0 auto`: still
             GROWS to pin the auth pill rightward when the row has slack, but never SHRINKS its
-            controls into clipped slivers when it overflows (then the row scrolls instead). */}
+            controls into clipped slivers when it overflows (then the row scrolls instead). On
+            desktop it is now `0 0 auto` (NEW-2): the centre zone grows instead, which still pins
+            these controls to the right edge, and these were never the contended pair — shrinking
+            them would clip the auth pill to buy room for a label. */}
         <div
+          ref={rightZoneRef}
+          data-header-zone="right"
           style={{
-            flex: narrow ? "1 0 auto" : 1, display: "flex", alignItems: "center",
+            flex: narrow ? "1 0 auto" : "0 0 auto", display: "flex", alignItems: "center",
             justifyContent: "flex-end", gap: 6, paddingRight: 12,
           }}
         >

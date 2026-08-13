@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-13 @ `89e5403` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-13 @ `b03ccdb` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_500 source files mapped._
+_507 source files mapped._
 
 ## infra
 
@@ -334,6 +334,8 @@ _500 source files mapped._
   - _exports_: `clampToBounds`, `dockAfterRelinquish`, `FLOAT_MIN_WIDTH`, `FLOAT_SIZE`, `initialFloatPos`, `reconcileForNarrow`, `shouldInspectorTakeDock`
 - **`src/shared/ui/FloatingPanel.jsx`** — NEW-1 poppable panels: a left-rail panel detached into a portal-to-body draggable card over the map (drag-clamp, session-remembered position, map pan/zoom isolation); composes PanelChrome
   - _exports_: `default (FloatingPanel)`
+- **`src/shared/ui/headerCenterFit.js`** — TODO — describe
+  - _exports_: `CENTER_SLOT_GAP`, `CENTER_SLOT_MIN`, `centerSlotMaxWidth`, `centerSlotPlan`
 - **`src/shared/ui/InterfaceSettings.jsx`** — The Interface section of Settings (display theme + smooth zoom), rendered by both Settings homes so they cannot disagree.
   - _exports_: `default (InterfaceSettings)`
 - **`src/shared/ui/MiddleTruncate.jsx`** — CSS middle-ellipsis label: head ellipsizes, tail always drawn, full text on hover (NEW-4).
@@ -351,7 +353,7 @@ _500 source files mapped._
 - **`src/shared/ui/persistedSet.js`** — Tiny localStorage Set-of-ids persistence (loadIdSet/saveIdSet/pruneSet) for remembered UI state like Library tree expansion; corrupt payloads read empty + clear
   - _exports_: `loadIdSet`, `pruneSet`, `saveIdSet`
 - **`src/shared/ui/ProjectBreadcrumb.jsx`** — Row-1 Dashboard/Project breadcrumb + switcher dropdown: search, recents, New project, inline rename/delete kebab, at-risk-save surfacing, cloud-cache warm
-  - _exports_: `default (ProjectBreadcrumb)`
+  - _exports_: `CRUMB_MIN_W`, `default (ProjectBreadcrumb)`
 - **`src/shared/ui/RotationStepper.jsx`** — The one app-wide rotation control: type-to-set 2dp field + spinner nudges, wrap to [0,360), fine Shift+Arrow, invalid-flash-revert, locked-disable
   - _exports_: `default (RotationStepper)`, `formatDeg`, `normalizeDeg`, `parseRotationInput`
 - **`src/shared/ui/statusTokens.js`** — STATUS_TOKENS: single project-lifecycle status palette (color/glyph/map-pin tier/opacity/z) with monotonic salience rules; statusToken() + darken()
@@ -377,6 +379,8 @@ _500 source files mapped._
   - _exports_: `collapseStorageKey`, `default (Collapse)`, `readOpen`
 - **`src/workspaces/site-planner/components/CursorChip.jsx`** — the ONE cursor chip both map surfaces paint: coordinate pair + the always-present elevation readout (coords give way first so no elevation field is ever truncated)
   - _exports_: `default (CursorChip)`
+- **`src/workspaces/site-planner/components/icons.jsx`** — TODO — describe
+  - _exports_: `EmptyCircleIcon`, `PinIcon`, `WarnTriangleIcon`
 - **`src/workspaces/site-planner/components/JurisdictionBadge.jsx`** — Passive site-header chip showing the active parcel's jurisdiction (city/ETJ/county) from the auto-run B93 identify; display-only, ⚑ on straddle (B763)
   - _exports_: `default (JurisdictionBadge)`
 - **`src/workspaces/site-planner/components/LayerPanel.jsx`** — Shared map-layer toggle UI (both finder + planner): checkbox/opacity/status/vintage per layer + coverage relevance picker
@@ -433,8 +437,10 @@ _500 source files mapped._
   - _exports_: `aerialPlacement`, `aerialTileGrid`, `BACKUP_GRACE_MS`, `featureToParcel`, `feetExtentToBbox`, `feetToLatLng`, `geoJsonToEsriFeature`, `getLayerInfo`, `humanizeError`, `identifyAtPoint`, `identifyParcelAcross`, `identifyParcelDetailed`, `identifyParcelEager`, `isQueryCapabilityError`, `largestRingLngLat`, `listLayers`, `lngLatFeatureToParcel`, `lngLatRingToFeet`, `lngLatToGlobalPixel`, `outerRingsLngLat`, `overlayExportPlacement`, `PARCEL_FETCH_TIMEOUT_MS`, `ParcelFetchError`, `pickAerialTileZoom`, `queryAtPoint`, `queryFeatures`, `resolveLayerUrl`
 - **`src/workspaces/site-planner/lib/arrange.js`** — element/markup z-order "Arrange" (B820): `reorderByZ`/`arrangeFlags`/`ARRANGE_MODES` — pure z-based Bring-to-Front/Send-to-Back over a peer set (within a type-layer band for elements, the markup layer for markups)
   - _exports_: `ARRANGE_MODES`, `arrangeFlags`, `reorderByZ`
+- **`src/workspaces/site-planner/lib/assemblyDigest.js`** — TODO — describe
+  - _exports_: `assemblyDigest`, `digestsByAssembly`, `memberToken`
 - **`src/workspaces/site-planner/lib/assemblyIntegrity.js`** — the bonded-assembly invariant + tear detector: re-derives every `attachedTo` child from its host (via `normalizeBondedChildren`) and reports what moved, so a partial apply can reach neither the canvas nor the wire
-  - _exports_: `ASSEMBLY_TEAR_TOL_FT`, `assemblyIntegrity`, `assemblyTears`, `orphanPayload`, `tearPayload`
+  - _exports_: `ASSEMBLY_TEAR_TOL_FT`, `assemblyIntegrity`, `assemblyTears`, `orphanPayload`, `tearPayload`, `unhealablePayload`
 - **`src/workspaces/site-planner/lib/auth.js`** — Thin Supabase Auth wrappers: signUp/signIn/signOut/reset/updatePassword, getUser, onAuthChange with pinned redirect origin
   - _exports_: `getUser`, `onAuthChange`, `resetPassword`, `signIn`, `signOut`, `signOutEverywhere`, `signUp`, `updatePassword`
 - **`src/workspaces/site-planner/lib/authMail.js`** — The one source of truth for who auth email comes from, and the confirmation / password-reset copy generated from it
@@ -527,6 +533,8 @@ _500 source files mapped._
   - _exports_: `DBLTAP_MS`, `DBLTAP_PX`, `EMPTY_TAP`, `pairsWithLastTap`, `stepDoubleTap`, `tapRecord`, `tapTime`
 - **`src/workspaces/site-planner/lib/drafts.js`** — Pure resolver for Bluebeam-style mid-draw undo: decides which in-progress multi-point draft to trim by one vertex (Backspace + Ctrl-Z), and returns null when no draft is active so Ctrl-Z falls through to a global undo
   - _exports_: `resolveDraftStepBack`
+- **`src/workspaces/site-planner/lib/dragGate.js`** — TODO — describe
+  - _exports_: `DRAG_SLOP_PX`, `dragArmed`, `dragTravelPx`, `gatedPoint`, `makeDragGate`, `stepDragGate`
 - **`src/workspaces/site-planner/lib/drainageTiming.js`** — NEW-4 per-leg timings for the flood/drainage check (elevation, each county WSE raster, each FEMA pull, the app's own calc, the cloud save), built from a leg-name ALLOWLIST and reported through the production telemetry sink with its delivery outcome kept (no silent sink)
   - _exports_: `__resetDrainageTiming`, `armDrainageSaveLeg`, `buildDrainageTimingRow`, `createDrainageTimer`, `DRAIN_LEG_KEYS`, `drainageTimingDelivery`, `drainageTimingRecent`, `MAX_LEGS`, `noteDrainageSave`, `reportDrainageTiming`, `SAVE_ATTRIBUTION_MS`, `WSE_LEG_PREFIX`, `wseLegName`
 - **`src/workspaces/site-planner/lib/drawdownStatute.js`** — NEW-7 C.R.S. 37-92-602(8) as a rule record — 97% of a 5-year storm out in 72 hr, 99% of larger events in 120 hr — turning the existing drawdown number into a Colorado water-rights verdict (fail / not-ruled-out / unknown, never 'pass') plus the post-2015 State Engineer notification. Texas is untouched
@@ -552,7 +560,7 @@ _500 source files mapped._
 - **`src/workspaces/site-planner/lib/edgeRuns.js`** — Group parcel boundary edges into logical sides (runs) by bearing tolerance, with per-run length, midpoint, and shared setback value
   - _exports_: `bearingDelta`, `edgeRuns`, `resizeRunLength`, `runOfEdge`, `runSetbackValue`, `segBearing`
 - **`src/workspaces/site-planner/lib/editorNames.js`** — conflict-toast naming (B673): cached editor display names via the team roster RPC (self → "you (another window)") + describeElement labels
-  - _exports_: `createNameResolver`, `describeElement`
+  - _exports_: `createNameResolver`, `describeElement`, `SELF_ACTOR`
 - **`src/workspaces/site-planner/lib/elementApi.js`** — network seam for per-element sync (B671): the commit_elements RPC wrapper, element-row fetch, and the pure unload keepalive commit
   - _exports_: `COMMIT_TIMEOUT_MS`, `commitElements`, `ELEMENT_SELECT`, `fetchElements`, `keepaliveCommit`
 - **`src/workspaces/site-planner/lib/elementJournal.js`** — persisted pending-edit journal (NEW-F4): quota-safe per-site localStorage of un-committed element ops (+ baseRev) so a reload after a failed commit re-folds instead of reverting
@@ -578,7 +586,7 @@ _500 source files mapped._
 - **`src/workspaces/site-planner/lib/fbcdWse.js`** — FBCDD Atlas-14 watershed-study DRAFT WSE point samplers (getSamples, feet, honest-null out of coverage): 0.2% off the county 500YR_WSE mosaic → derivedWse02Ft; 1% off the per-watershed 100YR rasters via extent-routed multiplex (max-finite governing, LOUD on any candidate failure) → derivedWse1pctFt (B807) — Fort Bend drainage checks
   - _exports_: `FBCDD_WSE02_URL`, `sampleWse02Point`, `sampleWse100Point`, `wse02CandidatesForPoint`, `wse100CandidatesForPoint`
 - **`src/workspaces/site-planner/lib/featureEditZoom.js`** — The zoom floor below which the on-building +/- edit controls must not exist, derived from a bump-out's own legibility, plus its fade-in ramp.
-  - _exports_: `FEAT_CTRL_R`, `FEAT_CTRL_STROKE`, `FEAT_EDIT_FADE_SPAN`, `FEAT_EDIT_MAX_FT_PER_PX`, `FEAT_EDIT_MIN_OPACITY`, `FEAT_EDIT_MIN_PPF`, `FEAT_EDIT_MIN_PX`, `featureEditOpacity`
+  - _exports_: `FEAT_CTRL_R`, `FEAT_CTRL_STROKE`, `FEAT_EDIT_FADE_SPAN`, `FEAT_EDIT_FLOOR_MIN_PPF`, `FEAT_EDIT_MAX_CANVAS_FRAC`, `FEAT_EDIT_MAX_FT_PER_PX`, `FEAT_EDIT_MIN_OPACITY`, `FEAT_EDIT_MIN_PPF`, `FEAT_EDIT_MIN_PX`, `FEAT_EDIT_REF_SPAN_FT`, `featureEditFloorPpf`, `featureEditOpacity`
 - **`src/workspaces/site-planner/lib/featureHover.js`** — pure hover WORDING for the vector feature overlays: registry-driven `<Title> (<Source>) · <detail>` matching the OSM tooltips, with HIFLD's withheld sentinels treated as absence and ALL-CAPS agency text title-cased.
   - _exports_: `cleanAttr`, `HOVER_CLEANERS`, `HOVER_MAX_CHARS`, `hoverDetails`, `hoverIdentifyEnabled`, `hoverText`, `hoverTitle`, `pickAttr`, `sourceTag`, `titleCaseAgency`
 - **`src/workspaces/site-planner/lib/featureHoverAttach.js`** — lazily-loaded attach layer for the vector overlays' hover identify: binds the sticky tooltip on an esri featureLayer and installs the planner-canvas `identifyAt` accessor, kept off the boot bundle to pay the bundle budget.
@@ -629,6 +637,8 @@ _500 source files mapped._
   - _exports_: `COARSE_CELL_FT`, `deltaColor`, `groundReadout`
 - **`src/workspaces/site-planner/lib/groundwater.js`** — Depth-to-water screen for pond feasibility (NEW-B3): combines SSURGO seasonal-high water table + TWDB well signals (provenanced), screens wet-vs-dry pond (permanent-pool depth, suggested pool elev). Pure.
   - _exports_: `combineDepthToWater`, `pondGroundwaterScreen`
+- **`src/workspaces/site-planner/lib/groupCas.js`** — TODO — describe
+  - _exports_: `GROUP_CAS_KEY`, `groupCasEnabled`
 - **`src/workspaces/site-planner/lib/hcfcdWse.js`** — HCFCD MAAPnext model WSE sampler (B882, Harris County): registry-driven ImageServer getSamples for the 1% + 0.2% WSE rasters; no-op until the provisional endpoints are confirmed live. `sampleMaapnextWse`/`maapnextEndpoints`/`clearMaapnextCache`.
   - _exports_: `clearMaapnextCache`, `maapnextEndpoints`, `maapnextOutage`, `sampleMaapnextWse`
 - **`src/workspaces/site-planner/lib/history.js`** — Pure undo/redo snapshot stack for the planner canvas: keyOf-based no-op dedup, explicit live-state compare, drop-on-abort drag transactions
@@ -643,6 +653,10 @@ _500 source files mapped._
   - _exports_: `bermNeedsInlets`, `bermPinched`, `bermRingAreaSf`, `bermWaterAreaSf`, `bindingBermCap`, `crestRingForBerm`, `crestTopRing`, `drainageBermCapFt`, `EXT_BERM_SLOPE`, `geometricMaxBermFt`, `INFLOW_HEAD_ALLOWANCE_FT`, `INLETS_THROUGH_BERM_NOTE`, `inwardBermSplit`
 - **`src/workspaces/site-planner/lib/jurisdiction.js`** — Registry-driven ArcGIS jurisdiction/road-authority identify (city/ETJ/county intersect + nearest-road maintainer) over the SWR cache with map-overlay styling
   - _exports_: `buildIdentifyParams`, `countyAtPoint`, `countySourcesForPoint`, `ETJ_SOURCES`, `etjCoverageFor`, `etjSourceCovers`, `etjSourcesForPoint`, `fitIdentifyParams`, `formatHighway`, `formatJurisdictionBadge`, `identifyJurisdiction`, `identifyRoadAuthority`, `identifySource`, `JURISDICTION_SOURCES`, `MAX_QUERY_URL`, `normalizeFeature`, `parcelProbePoints`, `placeKey`, `polylineDistMeters`, `polylineLengthMeters`, `proxiedQueryUrl`, `ROAD_AUTHORITY_COLORS`, `ROAD_AUTHORITY_LEGEND`, `ROAD_MAINT_AGENCY`, `roadAuthority`, `roadAuthorityStyle`, `roadDisplayName`, `round6`, `samePlace`, `simplifyRing`, `VERTEX_LADDER`
+- **`src/workspaces/site-planner/lib/jurisdictionBadgeFit.js`** — TODO — describe
+  - _exports_: `abbreviateJurisdiction`, `jurisdictionSegments`
+- **`src/workspaces/site-planner/lib/jurisdictionLabel.js`** — TODO — describe
+  - _exports_: `formatJurisdictionLabel`, `governingCityOf`, `JURISDICTION_SHAPES`, `jurisdictionShapeOf`, `PEER_SEP`, `SLOT_SEP`, `TOUCH_SEP`
 - **`src/workspaces/site-planner/lib/kmzExport.js`** — Google Earth (.kmz) export (B684): pure, dependency-free CRC32 + hand-rolled STORE-only ZIP writer, KML builder (lon,lat order, ring closure/holes, per-layer styles, building extrude), and the site→layer feature mapping; reprojection is injected (the shared feetToLatLng), so it never drifts from the map render.
   - _exports_: `buildKml`, `buildKmz`, `crc32`, `elToRingFeet`, `KMZ_MIME`, `kmzFilename`, `siteToFeatures`, `xmlEscape`, `zipStore`
 - **`src/workspaces/site-planner/lib/labelFitLadder.js`** — NEW-1/NEW-2 the ONE ordered fit/fallback ladder for a map label that must sit inside a shape (inline → stacked → abbrev → outside-with-leader) plus the polygon INTERIOR measurer (largest inscribed rectangles, so fit is judged against real room, not a bounding box). Terminates in `outside`, never in a hide — a fit failure may relocate or shorten a label, never blank it.
@@ -866,7 +880,7 @@ _500 source files mapped._
 - **`src/workspaces/site-planner/lib/siteAnalysis.js`** — Registry-driven environmental/regulatory screen of active-parcel rings (flood, wetlands, wells, pipelines, jurisdiction, road, zoning) with silent-error present/absent/unknown/unavailable states over the SWR cache
   - _exports_: `ANALYSIS_SOURCES`, `analyzeProximitySource`, `analyzeSource`, `buildAnalysisParams`, `buildJurisdictionFinding`, `buildProximityParams`, `buildQueryUrl`, `buildRoadFinding`, `classifyFlood`, `classifyStatus`, `deriveZoning`, `epaProgram`, `isSFHA`, `normalizeAttrs`, `pipelineSummary`, `representativeRing`, `ringCentroid`, `ringsBBox`, `ringsSignature`, `runSiteAnalysis`, `simplifyRing`, `wetlandSummary`, `zoneSummary`
 - **`src/workspaces/site-planner/lib/siteModel.js`** — Canonical per-plan Site Model schema v10: createSiteModel/migrate, semantic selectors, cross-copy union merge with delete-tombstones, and bonded-child/dog-ear/road-centerline load-time repairs
-  - _exports_: `activeParcelsOf`, `ANNOTATION_KINDS`, `annotationsOf`, `bondedChildRot`, `buildingNumbers`, `constraintsOf`, `contentCount`, `countJunkEntries`, `createSiteModel`, `crossSectionsOf`, `developableArea`, `EASEMENT_KINDS`, `easementsOf`, `elementsOf`, `exclusionZonesOf`, `isBuilding`, `lineageConflicts`, `mergeSiteContent`, `migrate`, `migrateRoads`, `normalizeBondedChildren`, `normalizeCrossHostBonds`, `normalizeHostRuns`, `normalizeOrphanWallPads`, `normalizeZoneAlongLen`, `offAnchor`, `orphanWallPads`, `parcelAncestors`, `parcelChildrenMap`, `parcelDescendants`, `parcelDisplayInfo`, `parcelDrawingsOf`, `parcelOutline`, `parcelsOf`, `quarterOffset`, `rectRoadEndpoints`, `RESTORED_STRIP_W_FT`, `roadStripBBox`, `roadTravelWidth`, `setbacksOf`, `sheetOverlaysOf`, `SITE_MODEL_VERSION`, `STATUS_META`, `STATUSES`, `statusOf`, `strandedFromHost`, `teamShareOf`, `toMs`, `utilitiesOf`, `UTILITY_KINDS`
+  - _exports_: `activeParcelsOf`, `ANNOTATION_KINDS`, `annotationsOf`, `bondedChildRot`, `buildingNumbers`, `constraintsOf`, `contentCount`, `countJunkEntries`, `createSiteModel`, `crossSectionsOf`, `developableArea`, `EASEMENT_KINDS`, `easementsOf`, `elementsOf`, `exclusionZonesOf`, `ID_BOND_KEYS`, `impossibleStacks`, `isBuilding`, `lineageConflicts`, `mergeSiteContent`, `migrate`, `migrateRoads`, `missingBondSiblings`, `normalizeBondedChildren`, `normalizeCrossHostBonds`, `normalizeHostRuns`, `normalizeOrphanWallPads`, `normalizeZoneAlongLen`, `offAnchor`, `orphanWallPads`, `parcelAncestors`, `parcelChildrenMap`, `parcelDescendants`, `parcelDisplayInfo`, `parcelDrawingsOf`, `parcelOutline`, `parcelsOf`, `quarterOffset`, `rectRoadEndpoints`, `RESTORED_STRIP_W_FT`, `roadStripBBox`, `roadTravelWidth`, `setbacksOf`, `SHARE_MIRROR_FIELDS`, `shareMirrorOf`, `sheetOverlaysOf`, `SITE_MODEL_VERSION`, `STATUS_META`, `STATUSES`, `statusOf`, `strandedFromHost`, `teamShareOf`, `toMs`, `utilitiesOf`, `UTILITY_KINDS`, `withShareMirror`
 - **`src/workspaces/site-planner/lib/sitePlacement.js`** — putting an UNLOCATED plan on the earth: origin validation, a typed lat/lon parser, and anchor nudging (no drawn coordinate moves).
   - _exports_: `normalizeOrigin`, `nudgeOrigin`, `originAtOffset`, `parseLatLon`, `rotPt`, `sameOrigin`
 - **`src/workspaces/site-planner/lib/sitePlacementRotate.js`** — rotating a WHOLE plan rigidly about its body centre. Loaded on demand.

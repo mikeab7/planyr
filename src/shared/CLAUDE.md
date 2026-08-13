@@ -49,6 +49,47 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   The **deed-import readers** that feed the Site Planner metes-and-bounds plotter: `docxText.js`
   (.docx + the `readDeedFile` dispatcher), `docText.js` (legacy binary .doc, OLE/CFB), and
   `pdfText.js` (PDF embedded text layer, lazily loaded).
+- **⛔ `ui/AppHeader.jsx` + `ui/ProjectBreadcrumb.jsx` — NAVIGATION WINS, and it is the ROW-1 ZONE
+  FLEXES that decide it (NEW-2). Read this before changing any of the three.** The owner could not
+  switch plans on a laptop: *"the unincorporated / city of Houston / ETJ / Harris County chip is too
+  big and it covers it."* He reproduced it — the pill overlapped the plan chip's box by a sliver,
+  and `elementFromPoint` along the chip's right edge returned THE PILL'S TEXT SPAN for the last
+  stretch of it, **the ▾ caret included**. **NOT a z-index or overlay problem** (the pill is
+  `position: static`, `z-index: auto`): plain flex overflow. The cause was `left: flex 1 | centre:
+  0 1 auto (max 40%) | right: flex 1` — basis-0 side zones take an EQUAL SHARE regardless of what
+  they hold, so navigation was handed less than the breadcrumb needed while the pill sat under its
+  cap and never shrank, and the centre's `overflow: hidden` clipped nothing because the pill was not
+  over-wide *for its zone*. The rule is now one-directional: **LEFT `0 1 auto` (max 60%)** takes the
+  width it needs and shrinks only after the centre has collapsed · **CENTRE `1 1 0%`** takes what is
+  LEFT OVER, so its width never depends on its own content · **RIGHT `0 0 auto`** (the account
+  controls were never the contended pair). **The stated cost: the badge is centred in the space that
+  remains, not in the window.** `CRUMB_MIN_W` is the ONE floor both crumbs read — the site-planner's
+  plan chip imports it, because two floors that can drift is how one of the pair becomes squeezable
+  again — and the crumb ROW is shrinkable (`0 1 auto`): while it was `flex: none` the zone's
+  `overflow: hidden` clipped the last crumb's caret off, the same lost click by another route. The
+  phone layout is untouched (the row scrolls sideways there).
+  **⛔ B384064 AMENDS THAT STATED COST — "the badge is centred in the space that remains, not in the
+  window" WAS the behaviour and is no longer.** The owner: *"now the jurisdiction is not centered"* —
+  measured on Clay & Porter at 1600 px, the chip's centre sat 94 px right of the window's, PERFECTLY
+  centred inside a slot that was itself off-centre. **Not a regression from the label change (B367296):
+  a leftover-space slot has always positioned the chip relative to the side groups, so the chip's
+  position has always depended on the project and plan names — proven by measurement, the offset moves
+  156.7 px with the BREADCRUMB and 0.0 px with the LABEL.** The centre slot is now taken OUT OF FLOW
+  (`left: 50%` + `translateX(-50%)` in a `position: relative` row) — deliberately NOT by giving the two
+  side groups an equal flex-basis, which is the exact rule B371361 removed. Its width is MEASURED
+  (`ui/headerCenterFit.js`: `rowW − 2 × (max(leftW, rightW) + gap)`, read in a LAYOUT effect off a
+  `ResizeObserver`), because out of flow nothing else stops it running back over the plan chip. **Three
+  verdicts, never two:** `centered` · `tight` (a wide breadcrumb in a narrow window — back in flow,
+  off-centre but readable, which beats a sliver) · `unmeasured` (LOUD-FAILURE, kept DISTINCT so a header
+  that stopped measuring cannot hide behind a plausible-looking `tight`); `data-center-mode` publishes
+  which is live. The in-flow slack is held by an inert spacer — a growing right zone would measure the
+  whole remainder and poison its own bound. Guards: the repo-root `test/` suites
+  **headerNavPriority** (source guards on all three flexes + the shared floor) and **headerCenterSlot**
+  (the pure bound + all three verdicts + source guards), and the ui-audit harnesses
+  **verify-header-center** (the {shortest, longest} label × {shortest, longest} breadcrumb matrix at
+  four widths, mutation-proven — 41 of 86 checks red pre-fix) and **verify-header-nav-clickable** — a real `elementFromPoint` sweep of every point of each
+  chip's box at 1024/1280/1440/1600, mutation-proven (201/201 points lost pre-fix at 1280 AND 1440).
+  ⚠ A CENTRE-ONLY hit test passes on this defect; so does a short jurisdiction string at any width.
 - `theme/palette.js` — JS mirror of the CSS theme tokens (keep in sync; SVG/canvas can't use
   `var()`). `ui/statusTokens.js` — the single project-status palette source. `ui/controls.jsx` —
   shared control primitives (Button/ToggleChip/IconButton/Field/Section/MenuItem) + the one
@@ -167,6 +208,17 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   `public`/`anon`/`authenticated`, because a definer-rights delete function is a hole. Guard: the
   repo-root `test/` suite **clientErrorsRetention**, which runs the SHIPPED `.sql` files verbatim
   against a real Postgres (PGlite, devDependency only) and mutation-checks both clauses.
+  **⛔ AND THE FOLLOW-UP READER (B369536): `client_errors_retention_check.sql` is `select`-ONLY, and
+  that is load-bearing.** V84560 proved the job FIRES (three unattended runs, all 0/0); nothing has
+  yet proved the DELETE matches anything, because the first row is not eligible until **2026-09-18**.
+  Until then "the delete works" and "the delete matches nothing" still read identically — the same
+  indistinguishability one layer in. The reader answers it in one paste, and its sharpest column is
+  `ordinary_missed`: any ordinary row older than 90 days **at the moment the last run ran** that is
+  still here means the job fires and deletes nothing. **⛔ NEVER call `prune_client_errors()` by hand
+  to "check on it"** — a hand-run writes a byte-identical row, manufacturing the very evidence the
+  check is waiting for; that is why the reader contains no mutating statement and why an off-schedule
+  deletion can never raise its verdict above `WAIT`. Guard: **clientErrorsRetentionCheck**, which
+  produces all five verdicts from a seeded database and mutation-proves the FAIL one.
 - **`prefs/` + `ui/InterfaceSettings.jsx` — SETTINGS THAT ARE ABOUT THE APP, NOT ABOUT A DRAWING
   (NEW-1/NEW-4).** `prefs/smoothZoom.js` owns the smooth-zoom preference: one key
   (`planarfit:smoothZoom` — the prefix stays, renaming it would silently reset the setting for

@@ -122,6 +122,284 @@ was never clicked" quietly ships broken.
 - **⛔ AND NOTHING WITH A PURGED BODY MAY RENDER AS A NOTE.** PASS = no note in the sidebar opens empty with nothing recoverable behind it. That is the shape this recurrence took.
 - **AN ORDINARY DELETE STILL WORKS.** Bin a note; it is still restorable. A tombstone buries a PURGE, never a delete.
 - **A NULL IS NOT A DISPOSITION (STANDING RULE #2).** Reported fixed twice already — if it cannot be provoked, say so and take one of the three admissible routes, naming which.
+### V186160 — B384064: is the jurisdiction chip on the header's centre line, on his own sites and after a rename? `Blocker: real-data`
+
+**What shipped.** The row-1 centre slot is pinned at the header's midpoint and out of flow, bounded by a measured width so it can never reach the breadcrumb or the account controls. Both hosts (planner + Review/Library) share it.
+
+**Verified HERE, headless, logged out** (`node ui-audit/verify-header-center.mjs`, 86/86, real `AppHeader` + `ProjectBreadcrumb` + `JurisdictionBadge`, measured with `getBoundingClientRect`):
+- at 1600 px all four corners of the {shortest, longest} label × {shortest, longest} breadcrumb matrix read chip centre **800.0** against a true centre of 800 — **offset 0.0, spread 0.0 px**;
+- pre-fix on the same matrix: **+95.0** with the short breadcrumb and **+251.7** with the long one, IDENTICAL across the two label lengths — the offset tracked the breadcrumb, not the label (which is what says this was never a regression from B367296). The +95.0 reproduces the owner's own production reading of +94.
+- at every width the chip overlaps neither side group, the nav chips keep a usable width, and the full string stays in `data-jurisdiction-full` + the tooltip. `verify-header-nav-clickable` (B371361) still 142/142.
+
+**Still to see on the SERVED, SIGNED-IN app** (MERGED ≠ LIVE — the harness mounts the components, it does not open his account):
+1. Open **Clay & Porter** at his usual window size. The jurisdiction chip should sit on the header's centre line — the same line the row-2 module tabs are measured from — not pushed right of it.
+2. Open a **second site with a clearly different breadcrumb length** (a long project name and/or a long plan name, e.g. Goose Creek or Bain / "Concept - Original"). The chip should be in the SAME place on screen as it was on Clay & Porter.
+3. **Rename a plan** to something much longer, then much shorter. The chip must not move.
+4. **Narrow the window** until the breadcrumb crowds the middle. Expected: the chip never touches or covers the project / plan chips or the account controls, and the plan switcher still opens on the first click (including its ▾). Very narrow with a long breadcrumb, it is EXPECTED to give up the true centre and take the leftover space again — readable-but-off-centre is the stated degradation, not a failure.
+5. Switch to **Review** (the 🗂 Library button is that host's centre content) and confirm the same.
+
+**Record here:** ✅/❌ + date, and for (1)–(3) roughly where the chip sits relative to the middle. Nothing is needed from Michael.
+
+### V179984 — B1341 stage 2: turning group CAS ON, on a real two-writer plan `Blocker: auth` `Blocker: real-data`
+
+**⛔ THIS IS THE ONE THING STAGE 2 CANNOT PROVE WITHOUT A LIVE RACE, and it ships OFF precisely so
+that turning it on is a deliberate, reversible act rather than a side effect of a deploy.**
+
+**What IS proven, and it is more than usual.** The server half runs against the REAL production
+database — `db/test/commit_elements_group_cas.test.sql`, 9/9, self-rolling-back (verified afterwards:
+zero rows left), and **mutation-proven** (disable the digest comparison and the stale call is
+accepted, moving the host row to rev 2). The client half is `test/assemblyGroupCas.test.js` (23),
+including the request body through the real transport and three mutants that each go red. Lint 0,
+full unit suite green, build green.
+
+**Why the rest cannot be driven here.** It is a two-signed-in-writer race on one cloud plan, and the
+sandbox proxy CORS-blocks the Supabase sign-in, so a second authenticated client cannot exist.
+
+**Steps, in order — and the first one is the point:**
+1. On ONE device, arm it: `localStorage.setItem("planarfit:groupCas", "1")` in the console, reload.
+2. Ordinary editing must be **completely unchanged**. Drag a building with dock zones, undo, redo,
+   paste an assembly, delete one. ⛔ If anything about normal single-writer use feels different, turn
+   it straight back off (`"0"`, reload) and say so — that is the kill switch doing its job.
+3. Open the same plan in a second tab, both signed in. Move a bonded child in tab B; in tab A, move
+   the HOST. Tab A's call should be refused on the group revision (nothing written) and re-committed
+   at the fresh revs a moment later, with the assembly ending up coherent in BOTH tabs.
+4. In telemetry, `element-group-conflict` should appear for that round, naming the assembly. It is
+   not an error — it is the guard reporting that it fired. `element-group-unresolved` WOULD be a
+   problem (it means the group never settled) and should not appear.
+5. Confirm the digest is being sent at all — a call with `p_groups` absent means the switch is not
+   armed on that device, or the batch did not span an assembly (a single-element batch stays on the
+   per-row path by design).
+6. Leave it on for a working session on a real plan. If it is quiet, that is the result stage 3
+   needs before it can retire the per-row expectation.
+
+### V173456 — B377888: a stale delete no longer eats an element created after it, on the owner's own two-tab plan `Blocker: auth` `Blocker: real-data`
+
+**🚚 DEPLOY CONFIRMED SERVING 2026-08-12** — `node ui-audit/verify-deploy.mjs delete-vs-create-dropped` reports the marker live in `assets/index-fZW_RI6I.js` + `assets/SitePlannerApp-KrpKxn4C.js` on planyr.io, so whoever runs the steps below is testing the fixed build and does not need to check that first.
+
+**What was proven HERE, without a browser, and it is not nothing.** The engine half is driven by
+`test/deleteVsCreate.test.js` (7) against the real `createElementSync`, using the owner's real
+geometry from `smsdrvzr9gzx`, one test per direction and one per seam — the diff, the pre-send
+check, the conflict result, and the unload keepalive — **with both controls**: create-then-delete
+still re-issues at the fresh rev, and delete-vs-edit with no observed birth is byte-for-byte its
+pre-change self. Lint 0, full unit suite green, build green.
+
+**Why the rest cannot be driven here.** This is a TWO-SIGNED-IN-TAB race on one cloud plan. The
+sandbox proxy CORS-blocks the Supabase sign-in, so a second authenticated client cannot exist at
+all, and without one there is no realtime row to race.
+
+**Steps still to run, signed in as the owner:**
+1. Open **Richfield / Concept A** in two tabs of the same browser, both signed in.
+2. In tab B, select any element and press Delete, then **immediately pull the network** (DevTools →
+   Network → Offline) so the delete stays queued.
+3. In tab A, draw a NEW building with dock zones (host + courts + trailer rows).
+4. Bring tab B back online. **The new assembly must survive.** Before the fix, tab B's queued delete
+   re-issued against whichever new row shared its id path and rows seconds old were tombstoned.
+5. Tab B should show a toast reading **"… was re-created in another tab of yours after you deleted
+   it — it's back on the plan."** with a **Show** action that zooms to it. ⛔ It must NOT say a name.
+6. Confirm from the database that nothing new is tombstoned:
+   `select id, rev, deleted_at from site_elements where site_id='smsdrvzr9gzx' and deleted_at is not null order by deleted_at desc limit 10;`
+7. In the telemetry channel, `element-delete-fabricated` and/or `element-delete-vs-create-dropped`
+   should appear for the run. Neither is an error — they are the guard reporting that it fired.
+
+### V173457 — B377889: all five members of Building 3 are back on Richfield / Concept A, and the trailer row sits outboard of a 135 ft truck court `Blocker: real-data`
+
+**✅ PROVEN IN THE DATA 2026-08-12, through the app's own invariant — not by eye, and not by a
+SELECT alone.** All five members are live and correctly bonded, and the real rows were run back
+through `normalizeBondedChildren` / `missingBondSiblings` / `impossibleStacks`:
+
+| element | type | across-wall offset |
+|---|---|---|
+| `e1454940cgzlnc` | truck court (right) | **377.50 ft** |
+| `e1454941cgzlnc` | trailer row (right) | **470.00 ft** |
+| `e1454942cgzlnc` | truck court (left) | **377.50 ft** |
+| `e1454943cgzlnc` | trailer row (left) | **470.00 ft** |
+
+Each trailer row is **outboard of a 135 ft truck court** (470 − 377.5 = 92.5 = half the court plus
+half the trailer). `missingBondSiblings()` → `[]`; `impossibleStacks()` → `[]`; the heal returns the
+list **by identity**, i.e. it agrees there is nothing to repair.
+
+**The route there, recorded honestly.** The restore was executed through
+`commit_elements(..., p_atomic => true)` with `op:"restore"` under the owner's own `auth.uid()`
+(revs 8 / 10 / 7). **Four seconds later a live tab on the un-fixed build undid two of the three
+writes** — the bug caught in the act. Further writes at 14:27 (revs 14 and 11, above this session's)
+put them back, so a client did that, not this session; the outcome is verified, the credit is not
+claimed.
+
+**What is still pending, and it is the only thing.** MERGED ≠ LIVE: a database read is not a
+rendered plan. Open Richfield / Concept A in the served, signed-in app and confirm Building 3 draws
+with five members and neither trailer row flush against the building. Nothing is required from the
+owner.
+
+### V173458 — B377890: the heal refuses to invent a layout when a bonded sibling is missing `Blocker: real-data`
+
+**🚚 DEPLOY CONFIRMED SERVING 2026-08-12** — `node ui-audit/verify-deploy.mjs delete-vs-create-dropped` reports the marker live in `assets/index-fZW_RI6I.js` + `assets/SitePlannerApp-KrpKxn4C.js` on planyr.io, so whoever runs the steps below is testing the fixed build and does not need to check that first.
+
+**What was proven HERE, and it is most of the item.** `test/assemblyMissingSibling.test.js` (12)
+runs the real `normalizeBondedChildren` / `assemblyIntegrity` over the owner's real Building 3
+numbers, and **`e2e/assembly-missing-sibling.spec.js` (3) drives the REAL app in a browser, logged
+out** — seeding his building with the truck court removed, reading the trailer's across-wall offset
+off the live SVG (470 ft, not 335), confirming the stored record keeps its bond and its position,
+and confirming `assembly-tear-unhealable` is reported while `assembly-tear-healed` never claims it,
+with the court-present control beside it. Both are **mutation-proven**: restoring the pre-fix rule
+reddens them and reproduces the 135 ft pull to the decimal. Lint 0, 530 test files / 10,709 tests
+green, build green.
+
+**Steps still to run, on real data:**
+1. On a signed-in plan, delete a truck court that has a trailer row bonded beyond it.
+2. **The trailer row must NOT move.** Before the fix it jumped inboard by exactly the court's depth
+   and ended up flush against the building.
+3. Reload. It must still not have moved — the load-time heal is the seam that used to do this.
+4. `assembly-tear-unhealable` must appear in the telemetry channel naming the element, the bond
+   (`forCourt` / `prevZone`) and the id that is gone. `assembly-tear-healed` must NOT claim it.
+5. Restore the truck court. The trailer must then re-fit to its proper outboard anchor — the heal is
+   correct again the moment the information it needs is back.
+
+### V173459 — B377891: a second tab of the owner's own account never names a teammate `Blocker: auth`
+
+**🚚 DEPLOY CONFIRMED SERVING 2026-08-12** — `node ui-audit/verify-deploy.mjs delete-vs-create-dropped` reports the marker live in `assets/index-fZW_RI6I.js` + `assets/SitePlannerApp-KrpKxn4C.js` on planyr.io, so whoever runs the steps below is testing the fixed build and does not need to check that first.
+
+**What was proven HERE.** `test/editorNames.test.js` (+3, including the pre-fix snapshot
+construction asserted directly) and `test/conflictMatrix.test.js` (+3, every attributing row of the
+matrix × both directions, plus the forgotten-`self` default). The wording is a model fact rather
+than a string, so the matrix is fully unit-testable. Lint, unit suite and build green.
+
+**Why the rest cannot be driven here.** The banner only appears for a signed-in cloud plan with a
+second live writer, and the sandbox cannot sign in.
+
+**Steps still to run, signed in as the owner:**
+1. Open one cloud plan in two tabs of the same browser, both signed in as him.
+2. Edit the same element from both within a few seconds so a conflict banner fires.
+3. **Every banner must read "… in another tab of yours" and must name NOBODY** — not "a teammate",
+   not a display name. ⛔ This is the whole item.
+4. Reload one tab and repeat IMMEDIATELY, before the page settles. This is the case that produced
+   the report: the resolver used to read the signed-in id once, at mount, before auth had resolved.
+5. On a genuinely SHARED project (8 South or RICHEY), have a second account edit an element. That
+   banner **must** name the teammate — the fix must not have made every conflict anonymous.
+
+### V161952 — B366384–B366386: sharing tells the truth about an already-shared project, and the state is visible `Blocker: auth`
+
+**Why this is here and what is NOT pending.** The DATABASE half is done and was proven against the real
+production rows this session, impersonating the owner and writing nothing (all three calls returned
+`changed:0`). That is stronger than a click-through and is **not** awaiting anything:
+
+| scenario (real data) | answer | was |
+|---|---|---|
+| re-share **8 South** (`smqiljx5fngg`, v587) to the team it ALREADY has | `outcome:"already", matched:1, mismatched:0` | returned `0` → *"This project isn't in the cloud yet"* |
+| a group that does not exist | `outcome:"not-found", matched:0` | indistinguishable from the above |
+| **Goose Creek** (4 plans) private→private, corrected group key | `outcome:"already", matched:4, plans:4` | — (proves the key reaches every plan) |
+
+Also verified here (no browser): `db/team_share_state.sql` **applied to production 2026-08-11**, both RPCs
+confirmed keyed on `coalesce(data->>'groupId', id)` with `coalesce(group_id, id)` absent from both bodies ·
+**visibility unchanged by the migration — still exactly 2 shared projects, 8 South + RICHEY** · lint 0 errors ·
+the full unit suite green incl. the new **shareMirror** (18) · build green.
+
+**What is pending, and why it cannot be driven here.** The sandbox proxy CORS-blocks Supabase sign-in, so the
+signed-in UI cannot be reached at all. Every step below needs a real signed-in session.
+
+**Steps still to run, signed in as the owner:**
+1. Open the map list. **8 South and RICHEY must each read `Shared with HIP Houston`** on the row's second
+   line (accent, beside the status and acreage) with the shared glyph at the left. **The other 32 must not.**
+   ⛔ This is the one that proves B366385 — before the fix all three indicators were blank.
+2. Right-click **8 South** → the share section must read **`Shared with HIP Houston`**, the HIP Houston row
+   must show **`✓ Unshare`**, and **Make private** must be offered. Right-click any unshared project → it must
+   read **`Private — only you can see this`** and its team row must offer **`Share`**.
+3. Click the already-shared team row's… no — first just **re-share 8 South to HIP Houston** (click the team it
+   already has is an UNSHARE, so instead reopen and share it again after step 4). **Confirm no
+   "isn't in the cloud yet" message appears at any point.**
+4. Unshare **8 South**, confirm the row's `Shared with…` line disappears, then share it back to HIP Houston
+   and confirm the line returns. Reload and confirm it is still there — that is the mirror surviving a save.
+5. **The multi-plan check (B366386).** Share **Silvestri** (5 plans) → then confirm from the database that
+   **all 5 rows carry the team**:
+   `select id, name, team_id from sites where coalesce(data->>'groupId', id) = 'smrp1wrgg6u5' and deleted_at is null;`
+   Then unshare it and confirm **all 5 clear**. Repeat for **Goose Creek** (4 plans) if you want the second
+   sample. ⚠ Note this is expected to PASS on today's data — the corrected key selects the same rows as the
+   old one for every one of his real groups (measured); the fix is preventive. What the check is really
+   guarding is that the share reaches all 5 at once and the unshare clears all 5 at once.
+6. Open the **Team** tab → the shared-projects count for HIP Houston must read **2**, not 0.
+7. Before/after list-row appearance for the record: BEFORE = status + acreage only, with a small accent
+   figures glyph whose meaning was hover-only. AFTER = the same line plus `· Shared with HIP Houston`.
+
+### V161953 — B366387–B366389: the project switcher is a project LIST again, and its icons match `Blocker:` none — owner judgement only
+
+**⚠ MOST OF THIS IS ALREADY PASSED HERE, in a real browser, per ATTEMPT-BEFORE-YOU-PARK.** The dropdown is
+logged-out reachable, so it was driven rather than parked. `e2e/project-rename.spec.js` — **8/8 passed**
+against Chromium (`PW_CHROME=/opt/pw-browsers/chromium-1234/chrome-linux64/chrome`, the repo's pinned
+Playwright wants revision 1228 which is not in this image):
+
+- ✅ **No "All projects (…)" row** in the open dropdown (`toHaveCount(0)`), and **no `project-rename-current`**.
+- ✅ **The kebab is clicked with NO hover first** — the case that was impossible before — and rename through it
+  still writes **every plan in the group** and survives a reload.
+- ✅ Captured the open dropdown before and after. **BEFORE:** search field → **`▦ All projects (Map)` · current**
+  → the project row (no kebab, timestamp only) → `+ New project`. **AFTER:** search field → the project row
+  carrying **`current` AND the ⋮ kebab, with nothing hovered** → `+ New project`. One row shorter, and it now
+  reads as a list of projects with a New-project action, which is what the owner asked for.
+- ✅ Also green here: lint 0 errors · the full unit suite incl. **projectSwitcherChrome** (21) · build green ·
+  both re-pointed ui-audit harnesses (**verify-new1to3** inverted, **verify-b439-b440-project-manage**
+  strengthened) updated in the same commit as the change they describe.
+
+**What is genuinely left, and neither is something a harness can answer:**
+1. **The owner's own look at the two icons.** *"They just look kinda like shit"* is an aesthetic verdict, and
+   the fix (matched monochrome stroke SVGs inheriting their row's colour, Delete's in the danger red) has to
+   be judged by him on his own display. If the new pencil/wastebasket still read wrong, say so and they get
+   redrawn — this is not a "confirm it works" step.
+2. **A real touch device.** The kebab being reachable without hover is asserted in a browser, but *tapping* it
+   on a phone or tablet is the case the whole precondition exists for, and only real touch hardware proves it.
+   ⛔ If this fails, B366388's removal of the crumb rename is unsafe and must be reverted with it.
+
+### V162864 — B367296: the header pill on Clay & Porter reads just the ETJ, and Bain no longer joins Katy to the answer `Blocker: auth`
+
+**Proven here, as far as this environment can reach — the residual is only the signed-in header on his own account.**
+
+- **THE WHOLE PORTFOLIO, LIVE.** All 28 sites driven through the real `identifyJurisdiction` + `formatJurisdictionBadge` against the real TxDOT / TxGIO / H-GAC services (`node ui-audit/verify-jurisdiction-portfolio.mjs`), before and after: **27 correct → 27 correct**, 0 mislabelled, 0 unresolved, 1 site with no drawn geometry, both runs.
+
+| site | before | after |
+|---|---|---|
+| 8 South | City of Pearland · Harris County | *(unchanged)* |
+| Bain | Unincorporated / City of Houston · ETJ / City of Katy · edge only · Fort Bend County | **City of Houston ETJ · Fort Bend County — touches City of Katy** |
+| Bayport V | City of Pasadena · Harris County | *(unchanged)* |
+| Clay & Porter | Unincorporated / City of Houston · ETJ · Harris County | **City of Houston ETJ · Harris County** |
+| Cravens | City of Missouri City · Fort Bend County | *(unchanged)* |
+| Forbidden Gardens | Unincorporated / City of Houston · ETJ · Harris County | **City of Houston ETJ · Harris County** |
+| Gessner | City of Houston · Harris County | *(unchanged)* |
+| Goose Creek | Part in City of Baytown (6 of 14 lots) / rest in its ETJ · Harris County | **Part in City of Baytown (6 of 14 lots) · rest in its ETJ · Harris County** |
+| Grand Port | Unincorporated / City of Baytown · ETJ · Chambers County | **City of Baytown ETJ · Chambers County** |
+| Hoffmeister · Houston ColdPort · JFK · Jacintoport · Katz · Kennedy Greens · Pappadoupolos · Pinnacle · Pinto II · RICHEY · Richfield · Schiel · Silvestri | Unincorporated / City of Houston · ETJ · Harris County | **City of Houston ETJ · Harris County** |
+| I-10/HWY 90 | Unincorporated / City of Brookshire · edge only · Waller County | **Unincorporated · Waller County — touches City of Brookshire** |
+| Martini · Mesa | City of Houston · Harris County | *(unchanged)* |
+| Tsakiris | Part in City of Katy (2 of 9 lots) / rest outside it · no ETJ published for City of Katy · Waller County | **Part in City of Katy (2 of 9 lots) · rest outside it (no ETJ published for City of Katy) · Waller County** |
+| Will Clayton | City of Humble / City of Houston · ETJ · Harris County | **City of Humble · Houston ETJ · Harris County** |
+
+- **EVERY IN-CITY SITE STILL NAMES ITS CITY** (8 South, Bayport V, Cravens, Gessner, Martini, Mesa, Will Clayton). **EVERY ETJ SITE NOW LEADS WITH THE ETJ** (16). **EVERY NO-ETJ SITE READS UNINCORPORATED** with its nearby city behind the em dash (I-10/HWY 90). **GOOSE CREEK STILL DOES NOT CLAIM BAYTOWN** — it reports 6 of 14 lots and names the ETJ that holds the other 8.
+- **RENDERED, IN A REAL BROWSER.** `npm run verify:jurbadge` — the real `AppHeader` + `JurisdictionBadge` over the real identify chain and the recorded agency answers, 4 widths × both themes: **49/49**, mutation-proven (restoring the "Unincorporated ·" prefix turns 16 rows red). It also measured the clip: Bain 464 px → 349 px at 980 px, and the governing lead always fits — residual tail ellipsising is **B367298**.
+
+**WHAT IS STILL PENDING, AND IT IS ONLY THIS.** The header pill on **his signed-in account, on planyr.io, with Clay & Porter open** — the sandbox cannot sign in to Supabase (proxy CORS), so the one thing not driven here is the real plan loading its real parcels and painting the pill.
+
+- **PASS** = Clay & Porter's header reads exactly `City of Houston ETJ · Harris County` — the words "Unincorporated" and "/" both absent.
+- **AND ON BAIN** = `City of Houston ETJ · Fort Bend County — touches City of Katy`. Katy must be after the dash. If it is ellipsised away at his window width that is B367298 and not a failure of this item — but the part BEFORE the dash must be complete and readable.
+- **AND THE NUMBER THAT MATTERS DID NOT MOVE.** On any of the 16 ETJ sites, open Yield → Stormwater and check the floodplain administrator still names the **City of Houston** candidate and the finished-floor rule is still the Ch. 19 one (0.2% WSE + 2 ft). B367297 is the item that guarantees this in code; this is the eyes-on confirmation that nothing else was reading the label.
+- **A NULL IS NOT A DISPOSITION (STANDING RULE #2).** If the pill cannot be provoked into showing anything, say so and take one of the three admissible routes — do not record "not reproducible" and archive.
+### V165104 — B369536: on or after **2026-09-18**, does the retention job actually DELETE? `Blocker: real-data`
+
+**Due 2026-09-19, and the extra day is not slack — read this before filing a failure.** The oldest row is **2026-06-20 22:16:28 UTC**, so it crosses 90 days at **2026-09-18 22:16 UTC** — *after* that morning's 07:20 run. **The first run that can delete anything is 2026-09-19 07:20 UTC.** A read on 2026-09-18 will correctly return `WAIT` and proves nothing; do not report that as a failure. A one-shot Routine is armed for **2026-09-19 08:00 UTC**; if it is not honoured, run it by hand.
+
+**⛔ THE ONE THING THAT CAN RUIN THIS CHECK, AND IT TAKES ONE KEYSTROKE: do NOT call `select public.prune_client_errors()`.** A hand-run writes a run row byte-identical to a scheduled one, so it manufactures exactly the evidence this check exists to gather, permanently and undetectably. That is the same trap V84560 was written around, and it is why the reader below is `select`-only. Do not seed rows, do not age a row "to test it", do not help it along.
+
+**Steps.** Paste **QUERY 1** from `src/shared/telemetry/client_errors_retention_check.sql` into the Supabase SQL editor on `lyeqzkuiwngunutlkkmi`. One row comes back. Then paste **QUERY 2** from the bottom of the same file (commented out) for the independent pg_cron corroboration.
+
+**Expect / PASS** = `verdict` reads **`PASS-first-deletion-observed`**, with `ordinary_missed 0`, `manual_missed 0`, a non-null `first_deletion_run_id`, and `liveness = ok`. QUERY 2 shows one `succeeded` cron row per calendar day, each paired with exactly one run row.
+
+**FAIL, and they mean different things:**
+- **`FAIL-policy-not-applied`** — the job fired, reported success, and left rows behind that were past 90 days when it ran. **The policy is broken, not the check.** Re-open B369536 with a `Recurrence:` line; the number to report is `ordinary_missed`.
+- **`FAIL-stale`** / **`FAIL-never-run`** — the schedule has stopped. This is a B270913 recurrence (its stopping rule named exactly this), not a new item.
+- **`WAIT-no-eligible-rows-yet` after 2026-09-19** — not a pass and not a "check again later". The 2026-09-18 date is derived from the oldest row (2026-06-20 22:16:28 + 90 days); if nothing was eligible, either that row was removed by something else or the arithmetic is wrong. Re-open and say which.
+- **A `succeeded` cron row in QUERY 2 with NO run row beside it** — worse than any of the above: the function ran and its unconditional insert did not land. That is a new defect, not this one.
+
+**What is already proven, so this is a confirmation and not a discovery.** `test/clientErrorsRetentionCheck.test.js` (26) runs the shipped `.sql` files verbatim against a real Postgres and produces all five verdicts from seeded data at a fast-forwarded clock — including the first deletion, the manual capture surviving beside it, and the `FAIL-policy-not-applied` case mutation-proven by widening the shipped 90-day window to 400. The reader is proven read-only against a live database, and proven unable to be satisfied by an off-schedule (hand) run. It was executed against **production** on 2026-08-11 and returned `WAIT-no-eligible-rows-yet` · 3 scheduled runs · 1 off-schedule · 5,707 rows · next eligible **2026-09-18** — so the query itself is known to work there; only the date is owed.
+
+**A NULL IS NOT A DISPOSITION (STANDING RULE #2).** Whatever comes back, record it here with the date and archive per rule 3. Do not close this on "nothing to see yet".
+
+- Cadence: once · **Due 2026-09-18**
+- Blocker: `real-data` (the production table, and a date that has not arrived)
 
 ### V159584 — B364016: Delete forever STAYS deleted across three reloads, on his account `Blocker: auth`
 
@@ -177,14 +455,25 @@ Everything on screen is proven — 38 click positions across the full editor wid
 - **THE STALE-LOCAL CASE, which is the condition that made the holes reachable:** his local tree was 98 revisions behind AND flagged dirty. After this build lands, open Notes on that machine and let it sync. PASS = the recovered note is still there afterwards, every other note is still there, and nothing in the bin has come back to life.
 - **A REAL TWO-WINDOW MERGE.** Two windows on one account. In window A, bin a note that has a subpage. In window B — which has not seen it — add a NEW subpage under that same note and type in it. Let both sync. PASS = the binned note and the subpage the entry named are in the bin, and **B's new subpage is still live**, at the top level of the same project, with its text. FAIL = it is gone from both the tree and the bin (the exact shape that lost the Bain note).
 - **A NULL IS NOT A DISPOSITION (STANDING RULE #2).** If the two-window case cannot be provoked, say so and take one of the three admissible routes — provoke it harder, instrument it, or ask him whether he has seen another note vanish. Do not record "not reproducible" and archive.
-### V131552 — B335984: the +/− controls now arrive at a zoom he'd actually work at, on the REAL Bain plan `Blocker: real-data`
+### V166928 — B371360: do the +/− controls now arrive soon enough, on the REAL Bain plan AND on the laptop `Blocker: real-data`
 
-**Everything mechanical is proven here.** `test/featureEditZoom.test.js` (14) pins the re-derived floor and replays BOTH superseded rules as mutation checks — the pre-gate rule must arm across his whole-site band, and the 44 px rule must refuse across the band this amendment re-opens. `e2e/feature-edit-zoom.spec.js` drives a real wheel gesture either side of the new floor on a real drawn building, reading the app's own `data-render-ppf` **only once the gesture has settled**, and confirms the controls are clickable the whole time they are faded. **What only his own plan can settle is the JUDGEMENT** — whether this zoom is the one at which offering the edit feels right on a 109-acre site. **This supersedes V111105**, whose second FAIL clause he tripped; do not chase V111105's 0.80 px/ft steps.
+**Everything mechanical is proven here.** `test/featureEditZoom.test.js` (24) pins the owner-set floor and the viewport cap and replays ALL THREE superseded rules as mutation checks; `e2e/feature-edit-zoom.spec.js` drives a real wheel gesture either side of the floor **in force on the canvas the browser actually opened**, and proves every control answers its own centre to `elementFromPoint` while faded. **What only his own plan can settle is the JUDGEMENT.** This **supersedes V131552**, which he ran and failed — do not chase its 0.359 px/ft steps.
 
-- **STEPS** — open **Bain / "Concept - Original"**. Zoom out until the whole site fits (scale bar about 0–1,000 ft): the green `+` / red `−` must still be **absent**. Now zoom in slowly, hovering or selecting Building 3.
-- **PASS** = they fade in when Building 3 takes up roughly a **third** of the drawing area — not two thirds. They are clickable the instant they are visible, and adding a dock zone or a bump-out at that zoom feels like a normal working move rather than a close-up.
-- **FAIL, either direction, and BOTH are worth reporting** = back at whole-site zoom (the original defect returning) · or still waiting until the building fills most of the screen. **Report it with the same kind of number you gave last time** — roughly what fraction of the screen the building covers when they appear — and the threshold moves again as a stated product decision, never a quiet nudge.
-- Also glance at a SMALL site at the same scale-bar reading: the rule is absolute zoom, so a 30-acre plan must behave identically.
+- **STEPS — and please do this ON THE LAPTOP first, because that is the screen the new viewport term is for.** Open **Bain / "Concept - Original"**. Zoom out until the whole site fits: the green `+` / red `−` must still be **absent**. Now zoom in slowly, hovering or selecting Building 3.
+- **PASS** = they fade in while Building 3 still takes up roughly a **fifth to a quarter** of the drawing area — clearly less than before — and they are clickable the instant they are visible. Adding a dock zone or a bump-out at that zoom should feel like a normal working move.
+- **THE SECOND HALF OF THE PASS, and it is the point of this round: do the SAME thing on the 1600 px monitor.** The building should take up about the **same share of the screen** on both machines when the controls appear. If the laptop still makes you give up noticeably more of the screen than the monitor does, the viewport term is not doing its job and that is the thing to report.
+- **FAIL, either direction** = back at whole-site zoom (the original defect returning) · or still waiting until the building fills a third or more. **Report it with the same kind of number you gave last time** — roughly what fraction of the screen the building covers when they appear, and on WHICH machine — and the floor moves again as a stated product decision. **It will not be re-derived from the bump-out again**; that has been tried twice and both times it came in late.
+- Also glance at a SMALL site: the rule is still site-size independent, so a 30-acre plan on the same screen must behave identically.
+
+### V166929 — B371361: can the plan switcher be opened on the laptop, on a site with a long jurisdiction `Blocker: auth` `Blocker: live-GIS`
+
+**The layout is proven here** — the ui-audit harness `verify-header-nav-clickable` (132 checks) drives the real header at 1024 / 1280 / 1440 / 1600 across four jurisdiction strings and asks `elementFromPoint` at every point of each chip's box; it loses 201/201 points on the pre-fix build and 0 after. **What it cannot do is produce a LIVE jurisdiction**: the pill is fed by a signed-in identify against external GIS, both blocked in the sandbox, so the string on his screen is the one thing only his own session renders.
+
+- **STEPS** — on the **laptop** (a normal-sized window, not maximised on the big monitor), open **Bain / "Concept - Original"**, and wait for the jurisdiction chip to fill in.
+- **PASS** = clicking the plan name — **and specifically the little ▾ at its right end** — opens the plan menu, first time, every time. The jurisdiction chip sits clear of it. Try the project name beside it too.
+- **ALSO CHECK A LONGER ONE.** Open **Goose Creek**, whose chip names the city, the share of lots, the remainder's ETJ, the county and the school district. If the chip runs out of room it should shorten to something like **"Part in City of Baytown (6 of 14 lots) +3"** — hovering it must still show the whole thing. **A chip that gets shorter is working as designed; a chip that overlaps the plan name is not.**
+- **FAIL** = any press near the right end of the plan or project chip that does nothing · a chip squeezed so small you cannot aim at it · the jurisdiction disappearing entirely at a width where there was clearly room for a shortened version · or the shortened form hiding the LEADING jurisdiction rather than the trailing detail.
+- Worth one glance while you are there: the Site / Review / Library / Scheduler tabs on the row below. They were measured as unaffected, but you are the one on the real screen.
 
 ### V131553 — B335985: a Google Earth export of a real plan opens clean `Blocker: real-data`
 
@@ -554,6 +843,19 @@ The gate is pure and mutation-proven; what cannot be driven here is the LINE, be
 - **The Texas control:** on any Texas plan the statute must render NOTHING at all (`applies:false`) and the existing informational drawdown readout must be unchanged.
 - **What was proven HERE:** `test/coloradoAudit.test.js` (6 assertions across all five input states, mutation-proven — delete the precondition and 2 go red), plus the Texas golden master green.
 - The **owner never runs this** — it is a Claude-cohort check. ⏳ **PENDING**
+
+### V93568 — B295008/B295009: on a REAL plan, a click selects and never moves — and a plain click writes no row `Blocker: real-data` + `Blocker: auth`
+
+**Most of this pair is ALREADY PROVEN HERE and must not be re-tested.** The logged-out half was driven in a headless browser this session (`e2e/click-never-moves.spec.js`, 4 cases, **all four proven RED on the pre-fix build**), and the pure rule plus the wiring across all 28 gated drag starts is unit-guarded and mutation-checked. What a sandbox cannot reach is the owner's own case: his real plans, where neighbouring edges are inside the 20 ft flush-snap tolerance, and the SIGNED-IN write path, where a stray write would bump an element's `rev` and read as a foreign edit to another device.
+
+- **THE NUMBERS ALREADY ON RECORD, so this is a confirmation and not a hunt.** Logged out, blank site, one building, Alt held (snap bypassed so any write at all shows): pre-fix, a five-move tremor click moved it **cy 771.4300000000001 → 774.29 ft**, and a 4-second slow press moved it **cx 1028.5700000000002 → 1034.28 · cy 771.4300000000001 → 774.29**. Post-fix, both gestures leave it at **cx 1028.5700000000002 · cy 771.4300000000001** — identical to the last digit.
+- **RUN 1 — the tremor click, on a REAL plan** (planyr.io, signed in, **Bain / "Concept - Original"** or **Tsakiris**, snap ON — the flush-snap is the half that makes this a couple of FEET). Note a building's stored `cx`/`cy` first (plan menu → the element's Properties, or a console read of the saved record). Press it, let the pointer drift a pixel or two, release. **PASS = it is SELECTED and `cx`/`cy` are unchanged to the digit.** FAIL = any change, and especially a jump of feet as it lands on a neighbour's edge.
+- **RUN 2 — the slow press.** Press the same building, hold still for several seconds, release. **PASS = identical, because duration is not part of the test.** This is the mirror-image bug the fix was written to avoid, so it is the one worth checking on a busy plan where the handler runs late.
+- **RUN 3 — a real drag still feels right.** Drag it properly: it must move as before, with **no visible jump at the moment the drag begins**, and **exactly ONE** Ctrl+Z must put it back.
+- **RUN 4 — the undo hygiene, on his own plan.** Make one real edit, then click around the canvas a dozen times (elements, parcels, measurements). Press Ctrl+Z once. **PASS = the real edit reverses on the FIRST press.**
+- **⛔ RUN 5 — THE ONE THIS ITEM EXISTS FOR, and the only step that truly needs the account: a plain click must produce NO ELEMENT ROW WRITE.** Signed in, open the plan in **two tabs**. In tab A, click (do not drag) an element ten times. In tab B, watch for any "changed in another session" prompt or any element re-render. Then read the row: `select id, rev, updated_at from site_elements where site_id = '<id>' and id = '<el>'` before and after. **PASS = `rev` and `updated_at` are unchanged and tab B saw nothing.** FAIL = any bump — that is the multiwriter pollution B295009 removes, and it cannot be seen from a logged-out sandbox.
+- **Also confirm the point drags still snap:** drag a road ENDPOINT onto another road's endpoint. **PASS = they weld/merge as before** — the first cut of this fix rebased every drag and silently put the endpoint outside the magnet's tolerance. `e2e/road-connect-radius` now covers it, but it is worth one live look on real road geometry.
+- The **owner never runs this** — it is a Claude-cohort check on a signed-in session. ⏳ **PENDING**
 
 ### V78961 — B280402: the acreage badge no longer takes press 2, on his stub, on the repeat `Blocker: real-data` + `Blocker: auth`
 
