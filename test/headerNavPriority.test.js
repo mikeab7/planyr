@@ -57,21 +57,32 @@ describe("the shortened pill drops whole FACTS, governing one first", () => {
     });
   });
 
-  it("⛔ never cuts a segment in half — the split lead survives intact", () => {
-    // A CSS ellipsis on this line yields "Part in City of Bayto…", which reads as a DIFFERENT,
-    // wrong answer rather than a short one. The lead is kept whole or not at all — and on a split
-    // site the lead names BOTH halves, because both really govern.
+  /* ⚠ AMENDED BY B367298, and the amendment is a correction of THIS test's premise rather than of
+   * its rule. The rule — never cut a segment in half — is unchanged and is now enforced further
+   * down the ladder. What changed is the claim in the old comment that "on a split site the lead
+   * names BOTH halves": it did, as ONE pre-joined slot, and that is exactly what made the pill
+   * unfittable. Driven in a real browser (`npm run verify:jurbadge`) on Goose Creek and Tsakiris at
+   * 761 and 860 px, this short form is still ~330 px in a ~150 px box, so the pill fell back to a
+   * CSS ellipsis and produced the very "Part in City of Bayto…" this test names. The two halves are
+   * now two SLOTS — both still govern, both still lead, and now the shortener can drop one. */
+  it("⛔ never cuts a segment in half — each governing half survives intact", () => {
     const short = abbreviateJurisdiction(gooseCreek);
-    expect(short.text).toBe("Part in City of Baytown limits (full purpose, 6 of 14 lots) · rest in its ETJ +2");
+    expect(short.text).toBe("Part in City of Baytown limits (full purpose, 6 of 14 lots) +3");
     expect(gooseCreek.text.startsWith("Part in City of Baytown limits (full purpose, 6 of 14 lots)")).toBe(true);
     expect(short.full).toBe(gooseCreek.text);
   });
 
   it("⛔ takes the SLOTS the label built, never a re-split of the rendered string", () => {
-    // The split shape's lead slot contains the same middle dot the chain is joined with. Splitting
-    // the rendered text would shatter that one governing fact into two and mis-count the rest.
-    expect(jurisdictionSegments(gooseCreek)).toContain("Part in City of Baytown limits (full purpose, 6 of 14 lots) · rest in its ETJ");
-    expect(abbreviateJurisdiction(gooseCreek).hidden).toBe(2);
+    /* The principle is untouched: the segments come from `formatJurisdictionLabel`'s own `slots`,
+     * never from splitting the rendered text. B367298 changed what the LABEL puts in those slots —
+     * a split now contributes its two governing facts separately — so this pins the two real slots
+     * instead of the one pre-joined blob. Splitting the rendered string would still be wrong, and
+     * the guard against it is `test/jurisdictionCoupling`. */
+    expect(jurisdictionSegments(gooseCreek)).toContain("Part in City of Baytown limits (full purpose, 6 of 14 lots)");
+    expect(jurisdictionSegments(gooseCreek)).toContain("rest in its ETJ");
+    // Three hidden, not two: splitting the governing chain into its real slots means the count
+    // finally matches the number of facts the pill is standing in for.
+    expect(abbreviateJurisdiction(gooseCreek).hidden).toBe(3);
   });
 
   it("says nothing about a count it does not have, and survives a null", () => {
@@ -155,14 +166,22 @@ describe("the pill keeps the whole answer even when it shows part of it", () => 
   });
 
   it("⛔ measures against the SPACE IT IS GIVEN, not against its own width", () => {
-    // Measuring the pill would latch: abbreviating shrinks it, which then "proves" the short form
-    // is all that fits, and it could never come back when the window widened.
+    /* The rule is unchanged and is the important one: measuring the PILL latches — abbreviating
+     * shrinks it, which then "proves" the short form is all that fits, and it can never come back
+     * when the window widens. (B367298 measured that latch: shortest rung at 860 px, still shortest
+     * at 1440 px.) What B367298 changed is HOW the granted width is read, because
+     * `host.clientWidth` alone was not content-independent in every mode: the centred zone is out
+     * of flow and its budget is its measured `max-width`, while the in-flow zone still tracks its
+     * content once the row is over-subscribed, so the span is briefly filled with the FULL label
+     * before the width is read. Both readings are asked of the ZONE, never of the pill. */
     expect(badgeSrc).toContain("const host = pill.parentElement;");
-    expect(badgeSrc).toContain("const avail = host.clientWidth - pad;");
+    expect(badgeSrc).toContain("cs.maxWidth");                 // the out-of-flow budget
+    expect(badgeSrc).toContain("span.textContent = text;");    // ask for everything, then read
+    expect(badgeSrc).not.toMatch(/avail\s*=\s*pill\./);       // ⛔ never the pill's own width
     expect(badgeSrc).toContain("ro.observe(host);");
-    // …and the natural width comes from an always-mounted hidden copy of the FULL text, so the
-    // measurement is independent of the decision it drives.
-    expect(badgeSrc).toContain('data-jurisdiction-measure="1"');
+    // …and the candidate widths come from always-mounted hidden copies, so the measurement is
+    // independent of the decision it drives.
+    expect(badgeSrc).toContain("data-jurisdiction-measure=");
     expect(badgeSrc).toContain("visibility: \"hidden\"");
   });
 });

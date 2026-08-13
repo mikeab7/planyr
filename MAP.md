@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-13 @ `b1a2ee2d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-13 @ `9102446a` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -664,7 +664,7 @@ _517 source files mapped._
 - **`src/workspaces/site-planner/lib/jurisdiction.js`** — Registry-driven ArcGIS jurisdiction/road-authority identify (city/ETJ/county intersect + nearest-road maintainer) over the SWR cache with map-overlay styling
   - _exports_: `buildIdentifyParams`, `CITY_SHARE_MIN`, `CITY_SHARE_WHOLE`, `CITY_SOURCES`, `cityAreasFromFeatures`, `citySourcesForPoint`, `countyAtPoint`, `countySourcesForPoint`, `ETJ_SOURCES`, `etjCoverageFor`, `etjSourceCovers`, `etjSourcesForPoint`, `fitIdentifyParams`, `formatHighway`, `formatJurisdictionBadge`, `identifyCityShares`, `identifyJurisdiction`, `identifyRoadAuthority`, `identifySource`, `JURISDICTION_SOURCES`, `MAX_QUERY_URL`, `mergeCityAreas`, `normalizeFeature`, `parcelProbePoints`, `placeKey`, `polylineDistMeters`, `polylineLengthMeters`, `proxiedQueryUrl`, `ROAD_AUTHORITY_COLORS`, `ROAD_AUTHORITY_LEGEND`, `ROAD_MAINT_AGENCY`, `roadAuthority`, `roadAuthorityStyle`, `roadDisplayName`, `round6`, `samePlace`, `shareQueryRing`, `simplifyRing`, `VERTEX_LADDER`
 - **`src/workspaces/site-planner/lib/jurisdictionBadgeFit.js`** — How the header jurisdiction pill shortens when the row is tight: whole facts, governing one first (NAVIGATION WINS)
-  - _exports_: `abbreviateJurisdiction`, `jurisdictionSegments`
+  - _exports_: `abbreviateJurisdiction`, `governingIdentity`, `jurisdictionRungs`, `jurisdictionSegments`
 - **`src/workspaces/site-planner/lib/jurisdictionLabel.js`** — The ONE canonical jurisdiction label: the four shapes (in-city · in-city+ETJ · ETJ · unincorporated) plus the split/unknown states, and the three-level separator grammar that keeps a GOVERNING authority (`·`), its co-equal peers (`+`) and a merely-adjacent city (`—`) from ever sharing a mark. Once an ETJ is named "Unincorporated" is implied and not printed. Also `governingCityOf`, the structured accessor that replaced parsing the label to find the city whose floodplain rule applies.
   - _exports_: `formatJurisdictionLabel`, `governingCityOf`, `JURISDICTION_SHAPES`, `jurisdictionShapeOf`, `LIMIT_CLASS_NOUN`, `PEER_SEP`, `shareNote`, `SLOT_SEP`, `TOUCH_SEP`
 - **`src/workspaces/site-planner/lib/jurisdictionShare.js`** — A jurisdiction share measured as an AREA fraction on the real ring (clipper-lib booleans in a local metre frame), never by sampling vertices or points — vertex sampling read 70–85% on a site that is 99% inside. Honours interior rings: each polygon is even-odd differenced against its own holes FIRST, then the set is unioned non-zero, so duplicate parcel records cannot cancel. Also the honesty half: `distanceToBoundaryM` (segment-to-segment, both ways) and `shareConfidence`, which refuses to state a share when the geometry's tolerance is a material fraction of the answer, plus `southIsLargerY`, which reads the planner's y-sign from the projection instead of assuming it.
