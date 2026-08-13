@@ -3154,8 +3154,20 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
   the project **Grid** duration cell (`hasChildren` was already in hand — it drove the cell's colour and
   its "Computed from subtasks" tooltip, but not its VALUE); the **Master** cross-project view (whose own
   comment already read *"Parent durations roll up from children — locked, same as the project grid"*
-  while it rendered the leftover); and the **export / exhibit column** layout, whose `||` fallback to
-  `${t.duration}d` only fires on a blank duration and so never caught a leftover of `0`.
+  while it rendered the leftover); and **`autoSizeMCol`**, the Master view's auto-fit-column-width helper,
+  which measures the widest value to pick a width and so sized the column to "0d" instead of "40d".
+- **⛔ CORRECTION TO THIS ITEM'S OWN FIRST WRITE-UP, and to PR #1027's body (2026-08-13, same session).**
+  Both said the defect reached "the export". **It did not reach the PDF/print export.** `buildPDFHtml`
+  renders duration as `` `${t.duration}d` `` — the INHERITED span, at both its cell sites — and was never
+  affected. The third stale read is `autoSizeMCol`, a column-WIDTH measurement in the Master view, which
+  is not an export at all. The error was calling a site "the export" from its neighbourhood in the file
+  instead of reading what consumed it — the same species of unverified inference as the "Goose Creek and
+  8 South will move too" claim corrected earlier in this session. **PROVEN, not re-reasoned:**
+  `ui-audit/verify-schedule-export-duration.mjs` (`npm run verify:schedexport`) drives the real
+  `openPrint` path and reads the number out of the 21,028 bytes the export emits —
+  `<td class="c-duration">40d</td>` on the summary, `30d` on the leaf. **Mutation-proven: point
+  `buildPDFHtml`'s duration cell at the leftover and the same harness reads `0d`** — so the export path
+  now has a guard it never had, even though it never carried the bug.
 - **MEASURED ON THE REAL PAGE, pre-fix**, on the owner's own row shape: `CCID3: Lift Station & Force Main
   Approval` rendered **`08/07/26 · 10/02/26 · 0d`** — forty working days of permitting printed as a
   zero-day milestone, in the grid and in the export. Post-fix the same cell reads **`40d`**, while the
@@ -3187,7 +3199,8 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 - PANEL-BREVITY: no copy added — one cell's VALUE corrected, and the master view's tooltip repointed to
   the same "Computed from subtasks" string the grid already used.
 - Files: `public/sequence/index.html`, `ui-audit/stress/scheduler-engine.mjs` (verbatim mirror),
-  `test/schedulerEngine.test.js`, `ui-audit/verify-summary-pred-dates.mjs`.
+  `test/schedulerEngine.test.js`, `ui-audit/verify-summary-pred-dates.mjs`,
+  `ui-audit/verify-schedule-export-duration.mjs` (new — the export artifact check).
 ### B456208 — The Owner field turned any typo into a person, silently `[Scheduler]` (feature) #scheduler #ui #persistence  *(owner chat block 2026-08-13, arrived as the answer to a question this session raised off the B443536 sweep — his instruction, verbatim: *"YES - make it ask before adding a new contact. Build it. Right now that field silently turns a typo into a person. That is the same shape as everything else this repo keeps producing: something that looks like an answer without anyone having decided it."* Minted **B456208 / V251152** LATE via `git fetch origin main && npm run next-id -- --against-main`, from this branch's reserved block B456208–B456223 · V251152–V251167; code and tests keep the provisional `NEW-1` label. **DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `ContactPicker`, `commitTyped`, `ensureContacts`, `contacts`, `registry`, `auto-add`, `confirm`, `B443536`, `B291538`, `B865`, `B418`.** **B443536** is the parent — it fixed the CARET in this same component and its data sweep is what exposed this — but it is a different defect (a character eaten by a selection) and is NOT re-opened; this is the create-on-commit behaviour beside it. Nothing else owns contact creation. Net-new.)*
 `[x]` **SHIPPED.** `public/sequence/index.html` — `ContactPicker` asks before creating.
 - Verify: **live** — `V251152`, `Blocker: auth` + `real-data`. Narrowly scoped: the whole interaction is proven here (21 browser assertions, mutation-proven). What the sandbox cannot settle is whether it NAGS in real use against his own 17-contact registry — and a guard that nags gets switched off, which would leave things worse than before.

@@ -122,8 +122,22 @@ grid to the one-armed call and the same cell reads `0d`.** Unit half in `test/sc
 (leftover unit not inherited · leaf untouched · blank stays blank · 0-day summary still 0d · end-to-end
 against the engine's own rolled span), also mutation-proven. Full suite green.
 
-**What still needs his own signed-in session.** The sandbox renders a seeded project, not his real ones,
-and cannot exercise the PDF/exhibit export path end to end (it needs a real export run).
+**⛔ THE EXPORT STEP IS NOW DONE HERE — ✅ PASSED 2026-08-13, and the premise behind it was WRONG.**
+ATTEMPT-BEFORE-YOU-PARK: this was logged as needing a browser session, and it did not.
+`ui-audit/verify-schedule-export-duration.mjs` (`npm run verify:schedexport`) drives the real `openPrint`
+path on the disagreement case and reads the number **out of the produced artifact** — not off the screen
+and not off the code. **The artifact is HTML, not a raster:** `buildPDFHtml` returns a string the app
+writes into a popup, and the user then presses the browser's own *Save as PDF*, so the exhibit's cells are
+real text nodes in a real `<table>` (`canvas: false`, verified in the same read). Out of the 21,028 bytes
+it emits: **`<td class="c-duration">40d</td>`** on the summary row (`08/07/26` · `10/02/26`), and `30d` on
+the leaf beside it.
+**AND THE CORRECTION THAT MATTERS: the PDF export NEVER carried this defect.** `buildPDFHtml` renders
+duration as `` `${t.duration}d` `` — the inherited span — at both its cell sites. B463072's own first
+write-up and PR #1027's body both said the defect reached "the export"; the third stale read was actually
+`autoSizeMCol`, a column-WIDTH helper in the Master view. **Mutation-proven anyway: point `buildPDFHtml`'s
+duration cell at the leftover and this harness reads `0d`** — so the export now has a guard it never had.
+
+**What still needs his own signed-in session.** His real schedules, which the sandbox cannot reach.
 
 **Steps:**
 1. Open **Grand Port**. Find the group **CCID3: Lift Station & Force Main Approval**. Its Duration should
@@ -131,8 +145,8 @@ and cannot exercise the PDF/exhibit export path end to end (it needs a real expo
 2. Scan the other group headers in Grand Port, **Goose Creek** and **8 South** — any that used to read a
    suspiciously small number (0d especially) should now read a span that matches their bars.
 3. Open the **cross-project Master view** and check the same headers there — it had the identical defect.
-4. **Export a PDF / exhibit with the Duration column shown.** The printed group rows must carry the same
-   number as the screen. This is the one path that could not be exercised here.
+4. ~~Export a PDF / exhibit with the Duration column shown.~~ **DONE HERE — ✅ PASSED** (see above): the
+   export was driven and the number read off the produced artifact. Nothing left for anyone on this step.
 5. ⚠ Worth his eye: a leaf still shows the unit he typed (3mo, 30cd, 15d); a group header always shows
    working days. If a group reading "40d" beside a child reading "2mo" is confusing, say so.
 ### V251152 — B456208: does "add as a new contact?" stay out of the way on his OWN registry? `Blocker: auth` `Blocker: real-data`
