@@ -95,6 +95,60 @@ export function semanticallyEqual(a, b, eps = 1e-6) {
 const skey = (kind, id) => kind + ":" + id;
 const DEFAULT_BACKOFF = [1000, 2000, 4000, 8000, 16000, 30000];
 
+/* NEW-1 — a commit result names an ID; an OP names a (kind, id). Those are not the same thing.
+ *
+ * `site_elements`' primary key is (site_id, kind, id) BY DESIGN — legacy pre-salt ids are reused
+ * verbatim across collections, so one id can name two different live rows. That is not theoretical:
+ * site `smqh3au6aeb4` (Katz / Plan 1) holds `e6327` as kind `el` AND as kind `markup`, both live,
+ * both at the identical `updated_at`, i.e. written by ONE batch. Two places here keyed a batch's
+ * results by `r.id` alone (under a comment claiming ids are unique within a batch), so the second
+ * result overwrote the first and each op was handed the OTHER row's status and rev, in silence.
+ *
+ * ⚠ The obvious fix — key by `skey(r.kind, r.id)` — is NOT available: the RPC builds every result
+ * from `v_id` alone (`db/site_elements.sql`), so there is no `r.kind` to key on, and keying by a
+ * field the server never sends would miss on every op and break the whole write path. What the RPC
+ * DOES guarantee is ORDER: it loops over `p_ops` appending exactly one result per op, and `flush()`
+ * builds `ops = batch.map(opFor)` — so `results[i]` belongs to `batch[i]`.
+ *
+ * So pair POSITIONALLY, and VERIFY the pairing rather than trusting it: the ids must agree, and so
+ * must the kind whenever a returned `row` names one. A response that fails that check falls back to
+ * a per-id FIFO that consumes each result once (preferring one whose row names this op's kind), and
+ * says so out loud (LOUD-FAILURE) — a pairing we cannot justify must never look like a clean one.
+ */
+const resultKindOf = (r) => (r && (r.kind || (r.row && r.row.kind))) || null;
+
+function pairCommitResults(batch, results, onUnaligned) {
+  const list = Array.isArray(results) ? results : [];
+  const out = new Map();
+  let aligned = list.length === batch.length;
+  for (let i = 0; aligned && i < batch.length; i++) {
+    const r = list[i], e = batch[i];
+    const rk = resultKindOf(r);
+    if (!r || (r.id != null && r.id !== e.id) || (rk && rk !== e.kind)) aligned = false;
+  }
+  if (aligned) {
+    for (let i = 0; i < batch.length; i++) out.set(skey(batch[i].kind, batch[i].id), list[i]);
+    return out;
+  }
+  const queues = new Map();
+  for (const r of list) {
+    if (!r || r.id == null) continue;
+    const q = queues.get(r.id);
+    if (q) q.push(r); else queues.set(r.id, [r]);
+  }
+  for (const e of batch) {
+    const q = queues.get(e.id);
+    if (!q || !q.length) continue;
+    let i = q.findIndex((r) => resultKindOf(r) === e.kind);      // a result that NAMES this kind wins
+    if (i < 0) i = q.findIndex((r) => !resultKindOf(r));         // …else the next result that names none
+    if (i < 0) continue;                                        // every one left belongs to another kind
+    out.set(skey(e.kind, e.id), q.splice(i, 1)[0]);
+  }
+  // An EMPTY response is already reported per-op as `element-no-result`; don't say it twice.
+  if (list.length && onUnaligned) onUnaligned(list.length);
+  return out;
+}
+
 export function createElementSync(opts = {}) {
   const {
     siteId,
@@ -230,6 +284,12 @@ export function createElementSync(opts = {}) {
    * A key leaves this map the moment a diff SEES the element in the collections. From then on the
    * canvas has genuinely held it, so a delete for it is a real user intent and is honoured. */
   const remoteOnly = new Map();      // key -> { rev, at }  (server has it, this canvas never showed it)
+  /* B1341 stage 2 — key -> assembly id, learned from a group conflict. An adopted-from-conflict
+   * member carries a rev but NO data, so its host cannot be read off its json the way every other
+   * membership question is answered — and without this it buckets under its own id, drops out of
+   * the next digest, and the very deadlock the adoption exists to break stays shut. The server
+   * named the assembly in the conflict; that is the honest source, so record it rather than infer. */
+  const assemblyOf = new Map();
   /* Keys whose stale delete was DROPPED and whose server row was handed back to the canvas. Until
    * the canvas actually shows the element again, the shadow holds it and the collections do not —
    * which is the exact shape the diff reads as "deleted", so without this the next reconcile would
@@ -763,6 +823,9 @@ export function createElementSync(opts = {}) {
       let root = cur ? rootIdOf(cur, shad.id) : null;
       if (root == null) {                       // not on the canvas → read the bond off the shadow json
         try { root = rootIdOf(JSON.parse(shad.json || "null"), shad.id); } catch (_) { root = shad.id; }
+        // …and a member adopted from a conflict has no json at all, so fall back to what the
+        // SERVER told us its assembly was.
+        if (root === shad.id && assemblyOf.has(key)) root = assemblyOf.get(key);
       }
       if (root == null || !roots.has(root)) continue;
       let list = members.get(root);
@@ -804,7 +867,31 @@ export function createElementSync(opts = {}) {
         const cur = shadow.get(key);
         // Keep OUR json as the diff baseline (the canvas still holds it and we still intend to
         // write it); adopt only the rev, flagged `stale` because json and rev now disagree.
-        if (cur) shadow.set(key, { ...cur, rev: m.rev, stale: true });
+        if (cur) { shadow.set(key, { ...cur, rev: m.rev, stale: true }); continue; }
+        /* ⛔ A MEMBER WE HAVE NEVER HEARD OF, and without this the guard DEADLOCKS.
+         *
+         * The server's digest covers every live row of the assembly; ours covers every row in the
+         * shadow. If another writer CREATED a member and this tab's realtime has not delivered it
+         * yet, the two can never agree — our digest omits it, every retry recomputes the same
+         * omission, and after `maxRejectStreak` the tab declares itself stale and stops saving.
+         * Loud and recoverable (a reload fixes it), but it is a stuck state reachable by exactly
+         * the two-writer case this feature exists for, which is the worst possible place for one.
+         *
+         * The conflict payload carries what is needed to converge: id, kind and rev. Adopt it as a
+         * shadow entry with NO json — a mixed json↔rev pairing, which is already a representable,
+         * handled state (`stale` keeps `reconcileSeedRows` from substituting it into a re-seed).
+         * The next digest then includes the member at the right rev and the retry can succeed, with
+         * no refetch and no extra round trip.
+         *
+         * ⛔ AND IT MUST BE MARKED `remoteOnly`, or B377888 fires on our own repair: the shadow now
+         * holds an element the CANVAS has never shown, which is precisely the shape `reconcile`
+         * reads as "the user deleted this". Same fact, same guard — the row is the server's, and
+         * this tab has no deletion to express. */
+        shadow.set(key, { kind: m.kind || "el", id: m.id, json: "", rev: m.rev, z: 0, stale: true });
+        if (!remoteOnly.has(key)) remoteOnly.set(key, { rev: m.rev, at: now() });
+        if (c.assembly != null) assemblyOf.set(key, c.assembly);   // the only record of where it belongs
+        report("element-group-member-unknown", "the conflict named a member this tab has never seen — adopted so the retry can converge",
+          { siteId, id: m.id, kind: m.kind || "el", rev: m.rev });
       }
     }
     for (const e of batch) { const key = skey(e.kind, e.id); if (!dirty.has(key)) enqueue(key, e); }
@@ -828,11 +915,10 @@ export function createElementSync(opts = {}) {
   // advanced; only the REVS are adopted (from the conflict rows) so the retry targets the current
   // rows instead of repeating the same stale expectation. The whole batch is re-queued.
   function onAtomicRollback(batch, results) {
-    const byId = new Map();
-    for (const r of results) if (r && r.id) byId.set(r.id, r);
+    const byKey = pairResults(batch, results);
     for (const e of batch) {
       const key = skey(e.kind, e.id);
-      const row = (byId.get(e.id) || {}).row;
+      const row = (byKey.get(key) || {}).row;
       if (row && typeof row.rev === "number") {
         const cur = shadow.get(key);
         // Keep OUR json as the diff baseline (our data is still what the canvas holds and what we
@@ -912,17 +998,22 @@ export function createElementSync(opts = {}) {
   }
   const revOf = (e) => { const s = shadow.get(skey(e.kind, e.id)); return s ? s.rev : 1; };
 
+  // NEW-1 — pair each op with ITS OWN result (see `pairCommitResults` above: one id can name two
+  // live rows, and the results carry no kind). Both settle paths go through this and nothing else.
+  const pairResults = (batch, results) => pairCommitResults(batch, results, (n) =>
+    report("element-results-unaligned", "the commit response did not pair one result per op — matched by id instead",
+      { siteId, ops: batch.length, results: n }));
+
   // Apply the RPC's per-op results back onto the shadow + emit conflict events.
   // Returns TRUE if at least one op was ACCEPTED (NEW-3 — a batch with none is a stale client).
   function processResults(batch, results) {
     let accepted = false;
     const acceptedKeys = new Set();   // NEW-1 (round 4) — which ops the server actually took…
     const refusedKeys = new Map();    // …and which it refused (key -> entry), for the split check
-    const byId = new Map();
-    for (const r of results) if (r && r.id) byId.set(r.id, r); // ids are unique within a batch
+    const byKey = pairResults(batch, results);
     for (const e of batch) {
-      const r = byId.get(e.id) || {};
       const key = skey(e.kind, e.id);
+      const r = byKey.get(key) || {};
       if (r.status === "ok") {
         accepted = true;
         acceptedKeys.add(key);

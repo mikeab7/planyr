@@ -592,6 +592,18 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   per-row path. Guards: `db/test/commit_elements_group_cas.test.sql` (self-rolling-back, run against
   the real database, mutation-proven) + the repo-root `test/` suite **assemblyGroupCas** (23, incl.
   the real request body). Live-verify: **V179984**.
+  **⛔ B420256 — A COMMIT RESULT NAMES AN ID; AN OP NAMES A (kind, id).** The PK is (site_id, kind, id)
+  because legacy pre-salt ids are reused across collections, so one id can name two LIVE rows — the
+  owner's Katz plan holds `e6327` as both `el` and `markup`, written by one batch. Two settle paths keyed
+  results by `r.id` alone under the comment *"ids are unique within a batch"*, so the second `set()`
+  overwrote the first and each op got the OTHER's rev and status, silently. **The fix is NOT
+  `skey(r.kind, r.id)` — there is no `r.kind`:** `commit_elements` builds every result from `v_id` alone,
+  so keying on a field the server never sends would miss on EVERY op and break the whole write path. The
+  RPC guarantees ORDER instead (one result per op, in op order; `flush` builds `ops = batch.map(opFor)`),
+  so `pairCommitResults` pairs POSITIONALLY and **verifies** the pairing — ids must agree, and kinds too
+  whenever a returned `row` names one — falling back to a per-id FIFO and reporting
+  `element-results-unaligned` when a response breaks that contract. Guard: the repo-root `test/` suite
+  **elementResultPairing** (7, proven 5-red pre-fix, with two deliberate controls). Live-verify: **V215200**.
   **B377891:** `selfUid` is a GETTER here and in `editorNames.js` — a snapshot taken before auth
   resolves is null for the whole session, which silently disabled B1116's and B1099's foreign-author
   gates and made `createNameResolver` invent "a teammate" for the owner's own second tab.
