@@ -104,7 +104,18 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   3. **An entry is filtered by the ids it NAMES, not only its own.** Two devices deleting the same
      note mint two DIFFERENT entry ids, so purging one leaves the other still naming pages whose
      bytes are destroyed. That is the zombie state, and only the fuzz found it.
-  4. **⛔ `migrate` MUST PASS `raw.tombs` THROUGH — this is the one that shipped broken (B364016).**
+  4. **⛔ RULE 0 IS UNCONDITIONAL — it must run on BOTH paths that adopt a tree (B391072 ×3).** The
+     seed MERGES when this device owes an edit and ADOPTS WHOLESALE when it does not, and rule 0
+     lived only in the merge. The adopt path took the server's tree with no filter at all and
+     discarded this device's ledger in the same breath, so any client holding a pre-purge tree
+     could put a purged page back and every other device would adopt it. Measured: absent at tree
+     rev 1061, back in the LIVE list at 1211, gone again at 1274 — a rule that heals itself
+     eventually is a rule that is conditional. The adopt path is now a merge against a local side
+     that is nothing but the LEDGER, so it reuses rules 0 and 5 rather than growing a second copy,
+     and a filtered result is pushed back up.
+  5. **AND A LIVE PAGE WHOSE BODY THE SERVER SAYS IS PURGED IS LIFTED OUT AND TOMBSTONED** — its
+     children rescued — because a note that cannot be opened, restored or explained must not render.
+  6. **⛔ `migrate` MUST PASS `raw.tombs` THROUGH — this is the one that shipped broken (B364016).**
      It built a fresh object and then asked *that* object for its tombstones, so the ledger was
      destroyed on every read, and every read goes through `migrate`. Rule 0 was correct and
      completely inert: purge a page, reload, and it came back **in the LIVE list** as a note with
@@ -120,6 +131,31 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
     on one device and not yet on the other. `judgeConflict` discounts empty blocks — the CLEAN copy
     wins and is pushed — while a real edit, an edit made inside a block, and a block holding a
     picture all still raise one.
+- **A BOX CAN BE DELETED AND RESIZED, AND A PRESS THAT DOES NOT MOVE WRITES NOTHING (B391073).** A
+  box had a grab handle and no way to remove it and no way to change its width; both are now on the
+  box, both hidden until you hover or put the caret in it, and neither reaches paper. ⛔ **Only the
+  WIDTH is settable** — a box's height is its words, and a fixed height can only be honoured by
+  clipping them. ⛔ **A press with no movement commits nothing at all** — not a transaction, not an
+  undo frame — and the drag keeps its grab offset and re-reads the editor's box on every move, so a
+  page scrolling underneath the gesture cannot move the box. Both were removed as candidate causes
+  of a reported click-jump that could NOT be reproduced with a real mouse (25/25 across three window
+  sizes); the item is instrumented rather than closed.
+- **A TITLE MAY BE BLANK WHILE YOU TYPE AND MAY NEVER SETTLE BLANK (B391074).** `renameNode` used to
+  coerce a blank name to the default, and the title field is a CONTROLLED input that writes on every
+  keystroke — so backspacing a name to nothing wrote the default straight back and you could not
+  clear the field. The default now lands on COMMIT (`commitTitle`, when the field is left) and the
+  rail shows a dimmed placeholder (`displayTitle`) that is never written back.
+- **A SKETCH NEVER GOES INSIDE AN ANCHORED BOX (B391075).** Measured: inside one it gets 156 px, and
+  its own three buttons are ~190 px of content, so they spilled outside the panel — the "labels
+  overlap their own buttons" report — with the drawing's words squeezed to one character a line. A
+  box's width is a choice about a column of TEXT. `boxSelection` places the sketch after the box, and
+  the panel additionally cannot overflow whatever container it is in.
+- `lib/notesSpacing.js` — **HOW FAR APART THE LINES ARE (B391076).** A BLOCK property on paragraph
+  and heading, never a text style: half a line cannot be one-and-a-half spaced. Written into the
+  markup by one attribute (three that each wrote `style` would overwrite one another), so it saves,
+  syncs and prints with no second stylesheet. ⛔ The control is **one glyph wide** because the
+  formatting row is full at a laptop width and a normal-width select re-broke the no-wrap guard —
+  PANEL-BREVITY, paid for rather than added.
 - `lib/notesModel.js` — PURE page-tree schema + every structural op, page **timestamps**, the
   project filing (`pagesInScope` · `projectGroups` · `setPageProject` · `projectOfPage`), the
   **bin**, and **the one-way migration off the superseded four-level shape — read its header

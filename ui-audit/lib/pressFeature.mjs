@@ -32,7 +32,7 @@ export const blocksOn = (page) => page.evaluate(() =>
     left: parseFloat(el.style.left),
     top: parseFloat(el.style.top),
     empty: el.getAttribute("data-empty") === "1",
-    text: el.innerText.trim(),
+    text: (el.querySelector(".planyr-anchor-content") || el).innerText.trim(),
   })));
 
 /**

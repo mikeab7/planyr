@@ -113,6 +113,16 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V193168 — B391072 (×3): a purge is still gone HOURS later, with another window in play `Blocker: auth`
+
+⛔ **This one has been reported fixed twice and was not.** His instruction, verbatim: *"Do not close this on another same-session test."* Proven without a browser at the layer where it is decided — `test/notesBinPurge.test.js` answers all four of his acceptance conditions as four named tests, including six adopt cycles against a server that keeps being handed a pre-purge tree — but the thing that failed last time was a path nobody exercised, so the account is the last mile.
+
+- **PURGE SOMETHING, THEN COME BACK HOURS LATER.** PASS = the id is absent from the live list AND the bin, locally and in the cloud, on a re-look **hours** after the purge — not minutes, not the same session.
+- **WITH ANOTHER WINDOW IN PLAY.** Leave a second window open that has not seen the purge. PASS = it does not put the page back, and the cloud's live page count does not go up.
+- **⛔ AND NOTHING WITH A PURGED BODY MAY RENDER AS A NOTE.** PASS = no note in the sidebar opens empty with nothing recoverable behind it. That is the shape this recurrence took.
+- **AN ORDINARY DELETE STILL WORKS.** Bin a note; it is still restorable. A tombstone buries a PURGE, never a delete.
+- **A NULL IS NOT A DISPOSITION (STANDING RULE #2).** Reported fixed twice already — if it cannot be provoked, say so and take one of the three admissible routes, naming which.
+
 ### V159584 — B364016: Delete forever STAYS deleted across three reloads, on his account `Blocker: auth`
 
 Proven without a browser at the layer where it is decided, and this time through the STORE rather than on in-memory trees — which is the gap that let the first fix ship broken. `test/notesBinPurge.test.js`: purge → reload → three reloads deep, each one also syncing against a server still holding the page live; every earlier case round-tripped through storage too; the 6,000-merge fuzz reloads between rounds. Mutation-proven — restoring the missing argument turns 5 of 19 rows red including the fuzz.

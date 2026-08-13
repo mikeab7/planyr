@@ -25,7 +25,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   addPage, adoptUnreachable, allPageIds, deleteNode, descendantPageIds, emptyTree, findPage,
-  migrate, movePage, recoveredTitle, renameNode, restoreNode, setPageProject, subpagesPhrase,
+  commitTitle, displayTitle, migrate, movePage, recoveredTitle, renameNode, restoreNode, setPageProject, subpagesPhrase,
   subtreePageIds, trashPageIds,
 } from "../src/workspaces/notes/lib/notesModel.js";
 import { mergeTrees } from "../src/workspaces/notes/lib/notesCloud.js";
@@ -223,9 +223,24 @@ describe("a page with no title is still a page", () => {
       const r = addPage(emptyTree(), { title });
       expect(String(findPage(r.tree, r.pageId).page.title).trim()).not.toBe("");
     }
+    /* ⛔ AMENDED (B370527), AND THE AMENDMENT IS DELIBERATE. `renameNode` used to coerce a
+     * blank name to the default too — and the title field is a CONTROLLED input that writes on
+     * every keystroke, so backspacing a name to nothing wrote the default straight back and the
+     * field re-rendered with every character restored. You could not clear it to retype it.
+     *
+     * So a blank title is now a legal MOMENTARY state, which costs nothing: since B342992 a
+     * title is never load-bearing for identity or reachability. What must still hold — and is
+     * what this test was really protecting — is that a page never SETTLES without a name. The
+     * default is applied when the field is left (`commitTitle`), and the rail shows the
+     * placeholder for one that is momentarily empty (`displayTitle`), never writing it back. */
     const t = addPage(emptyTree(), { id: "X", title: "Real" }).tree;
     for (const title of FALSY) {
-      expect(String(findPage(renameNode(t, "X", title), "X").page.title).trim()).not.toBe("");
+      const renamed = renameNode(t, "X", title);
+      expect(String(findPage(renamed, "X").page.title).trim(), "a rename may leave it blank while you type").toBe("");
+      expect(String(findPage(commitTitle(renamed, "X"), "X").page.title).trim(), "…and it may never SETTLE blank").not.toBe("");
+      expect(displayTitle(findPage(renamed, "X").page.title).trim(), "…and it never SHOWS blank either").not.toBe("");
+      // ⛔ And the node is still reachable by ID throughout, which is the guarantee that counts.
+      expect(findPage(renamed, "X").page.id).toBe("X");
     }
   });
 

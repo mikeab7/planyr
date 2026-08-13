@@ -150,7 +150,10 @@ import { assetIdsInDoc, docToText, imageIdsInDoc } from "./notesMarkdown.js";
 import { openTasksInDoc, rollUpOpenTasks, setTaskCheckedInDoc } from "./notesTasks.js";
 import { MAX_VERSIONS_PER_PAGE, planRestore, planRetention, shouldSnapshot } from "./notesVersions.js";
 import { safeAttachmentName } from "./notesFileMeta.js";
-import { migrate, purgeTrashEntry, searchTitles, pagesInScope, trashEntries, walkPages, SCOPE_ALL, SCOPE_PROJECT } from "./notesModel.js";
+import {
+  allPageIds, countNodes, dropPages, migrate, purgeTrashEntry, searchTitles, pagesInScope,
+  trashEntries, walkPages, withTombstones, SCOPE_ALL, SCOPE_PROJECT,
+} from "./notesModel.js";
 import { normalizeZoom, zoomKey, ZOOM_DEFAULT } from "./notesZoom.js";
 import { IGNORED_DUPES_KEY_BASE } from "./notesKeys.js";
 import { countEmptyAnchors, pruneEmptyAnchors } from "./notesAnchorPrune.js";
@@ -1197,7 +1200,31 @@ async function seed({ full }) {
     if (!srv.ok) return reportSyncFailure(srv.error);
     if (srv.tree) {
       if (!sync.treeDirty) {
-        if (srv.rev !== sync.treeRev) { treeChanged = writeTreeLocal(migrate(srv.tree)); }
+        /* ⛔ THE ADOPT PATH HONOURS THE TOMBSTONES TOO, AND THAT OMISSION IS WHAT LET A PURGED
+         * NOTE COME BACK HOURS LATER. Rule 0 lived only in `mergeTrees`, which runs only when
+         * this device has unpushed edits. With nothing owed, the server's tree was taken
+         * WHOLESALE — no tombstone filter at all, and this device's own ledger discarded in the
+         * same breath. So any client still holding a pre-purge tree could put the page back on
+         * the server, and every other device would then adopt it and forget it had ever known
+         * better. Measured on his account: purged and verified absent at tree rev 1061, back in
+         * the LIVE list at rev 1211, gone again at 1274 — a resurrection that healed itself once
+         * a dirty merge finally ran, which is exactly the shape of a rule that is conditional
+         * when it should be unconditional.
+         *
+         * Expressed as a merge against a LOCAL SIDE THAT IS NOTHING BUT THE LEDGER, so it reuses
+         * rule 0 and rule 5 rather than growing a second copy of them: the server's structure
+         * wins in full (there is no local page to compete), every tombstoned id is refused, and
+         * the two ledgers are carried forward as one. */
+        if (srv.rev !== sync.treeRev) {
+          const ledger = { v: 3, pages: [], trash: [], tombs: migrate(readTreeRaw())?.tombs || [] };
+          const adopted = c.mergeTrees(ledger, migrate(srv.tree));
+          treeChanged = writeTreeLocal(adopted);
+          /* ⛔ AND IF THE FILTER ACTUALLY REMOVED SOMETHING, THE CORRECTION IS OWED UPWARDS.
+           * Otherwise the server keeps the ghost and every device goes on quietly deleting it
+           * again on every load, forever, while his sidebar shows it on whichever one lost the
+           * race. A purge that has to be re-applied on each device is not a purge. */
+          if (countNodes(adopted) !== countNodes(migrate(srv.tree))) { sync.treeDirty = true; schedulePush(); }
+        }
         sync.treeRev = srv.rev;
       } else {
         treeChanged = writeTreeLocal(c.mergeTrees(migrate(readTreeRaw()), migrate(srv.tree)));
@@ -1236,12 +1263,24 @@ async function seed({ full }) {
     if (plan.purged.length) {
       const dead = new Set(plan.purged);
       let t = migrate(readTreeRaw());
+      let healed = false;
       const zombies = trashEntries(t).filter((e) => (e.pageIds || []).length > 0
         && (e.pageIds || []).every((id) => dead.has(id)));
       if (zombies.length) {
         for (const e of zombies) t = purgeTrashEntry(t, e.id).tree;
-        if (writeTreeLocal(t)) { treeChanged = true; sync.treeDirty = true; }
+        healed = true;
       }
+      /* ⛔ AND THE SAME RULE ON THE LIVE SIDE, which is where his ghost actually appeared. A
+       * page the SERVER says is purged — `doc` NULL, `purged_at` set — has nothing behind it,
+       * so rendering it in the sidebar offers a note that cannot be opened, cannot be restored
+       * and cannot be explained. It is lifted out and TOMBSTONED, so it cannot arrive again by
+       * the same door. */
+      const ghosts = allPageIds(t).filter((id) => dead.has(id));
+      if (ghosts.length) {
+        t = withTombstones(dropPages(t, ghosts), ghosts);
+        healed = true;
+      }
+      if (healed && writeTreeLocal(t)) { treeChanged = true; sync.treeDirty = true; schedulePush(); }
     }
 
     const need = [...plan.adopt, ...plan.conflicts];

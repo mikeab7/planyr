@@ -25,6 +25,9 @@
  * We hand-roll the entire UI. We never hand-roll the engine.
  */
 import StarterKit from "@tiptap/starter-kit";
+import { Extension } from "@tiptap/core";
+
+import { spacingFromElement, spacingStyle } from "./notesSpacing.js";
 import { TextStyleKit } from "@tiptap/extension-text-style";
 import { TableKit } from "@tiptap/extension-table";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
@@ -77,6 +80,50 @@ export const NOTE_EXTENSIONS = [
 
   // Resizable columns — dragging a column edge is the first thing anyone tries.
   TableKit.configure({ table: { resizable: true, allowTableNodeSelection: true } }),
+
+  // ⛔ HOW FAR APART THE LINES ARE (NEW-7). A BLOCK property, extending paragraph and heading
+  // rather than riding textStyle — half a line cannot be one-and-a-half spaced. The value is
+  // written into the markup, so it saves, syncs and PRINTS with no second stylesheet; the
+  // shape of that markup is decided once, in lib/notesSpacing.js.
+  Extension.create({
+    name: "noteSpacing",
+    addGlobalAttributes() {
+      return [{
+        types: ["paragraph", "heading"],
+        attributes: {
+          lineHeight: { default: null, parseHTML: (el) => spacingFromElement(el).lineHeight, renderHTML: () => ({}) },
+          spaceBefore: { default: null, parseHTML: (el) => spacingFromElement(el).spaceBefore, renderHTML: () => ({}) },
+          spaceAfter: {
+            default: null,
+            parseHTML: (el) => spacingFromElement(el).spaceAfter,
+            // ⛔ ONE attribute writes the whole style string. Three that each wrote `style`
+            // would overwrite one another — the last one rendered would win and the other two
+            // would vanish, which is the sort of bug that only shows up on the third setting.
+            renderHTML: (attrs) => {
+              const style = spacingStyle(attrs);
+              return style ? { style } : {};
+            },
+          },
+        },
+      }];
+    },
+    addCommands() {
+      return {
+        setNoteSpacing: (patch) => ({ state, tr, dispatch }) => {
+          const { from, to } = state.selection;
+          let touched = false;
+          state.doc.nodesBetween(from, to, (node, pos) => {
+            if (node.type.name !== "paragraph" && node.type.name !== "heading") return true;
+            tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...patch });
+            touched = true;
+            return true;
+          });
+          if (touched && dispatch) dispatch(tr);
+          return touched;
+        },
+      };
+    },
+  }),
 
   TaskList,
   TaskItem.configure({ nested: true }),

@@ -124,6 +124,14 @@ const EDITOR_CSS = `
 .planyr-note .ProseMirror .planyr-anchor-grip { position: absolute; left: 3px; top: 5px; width: 9px; height: 14px; cursor: grab; border-radius: 2px; opacity: 0; background: repeating-linear-gradient(to bottom, var(--text-tertiary) 0 2px, transparent 2px 4px); }
 .planyr-note .ProseMirror .planyr-anchor:hover .planyr-anchor-grip, .planyr-note .ProseMirror .planyr-anchor:focus-within .planyr-anchor-grip { opacity: 1; }
 .planyr-note .ProseMirror .planyr-anchor-grip:active { cursor: grabbing; }
+/* ⛔ A DELETE AND A WIDTH HANDLE, on the box itself. Both appear on hover or while the caret is
+   in the box — the same rule the grab handle already followed, so a page of boxes is not a page
+   of chrome. Neither prints: notesPrint.js hides every one of them. */
+.planyr-note .ProseMirror .planyr-anchor-del { position: absolute; right: 2px; top: 2px; width: 16px; height: 16px; padding: 0; line-height: 14px; border: 1px solid var(--border-default); border-radius: 4px; background: var(--surface-raised); color: var(--text-secondary); font: inherit; font-size: 12px; cursor: pointer; opacity: 0; }
+.planyr-note .ProseMirror .planyr-anchor:hover .planyr-anchor-del, .planyr-note .ProseMirror .planyr-anchor:focus-within .planyr-anchor-del { opacity: 1; }
+.planyr-note .ProseMirror .planyr-anchor-del:hover { border-color: var(--danger); color: var(--danger); }
+.planyr-note .ProseMirror .planyr-anchor-size { position: absolute; right: -3px; bottom: -3px; width: 12px; height: 12px; cursor: ew-resize; border-right: 2px solid var(--border-strong); border-bottom: 2px solid var(--border-strong); border-bottom-right-radius: 4px; opacity: 0; }
+.planyr-note .ProseMirror .planyr-anchor:hover .planyr-anchor-size, .planyr-note .ProseMirror .planyr-anchor:focus-within .planyr-anchor-size { opacity: 1; }
 
 /* An empty page says what to do. Both halves — the extension and this rule — landed
    together; a rule with no extension matches nothing, which is what a blank page was. */
@@ -189,7 +197,15 @@ const EDITOR_CSS = `
    rule below at paper weight; change one, change both. */
 .planyr-note .planyr-sketch-host { position: relative; border: 1px solid var(--border-default); border-radius: ${RADIUS.control}px; background: var(--surface-raised); padding: 8px; }
 .planyr-note .planyr-sketch-host.ProseMirror-selectednode { outline: 2px solid var(--accent-notes); outline-offset: 1px; }
-.planyr-note .planyr-sketch-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 7px; }
+/* ⛔ THE PANEL NEVER SPILLS OUT OF ITS OWN CONTAINER, however narrow that container is. Its
+   three buttons are ~190px of content, so in anything narrower they used to overflow to the
+   LEFT and paint on top of whatever was beside them — his "the labels overlap their own
+   buttons". A zero min-width lets the flex row shrink instead of pushing, and the row scrolls
+   sideways at the point where wrapping stops helping. Belt to the brace of not putting a
+   sketch inside a text box in the first place (see boxSelection). */
+.planyr-note .planyr-sketch-host { min-width: 0; overflow: hidden; }
+.planyr-note .planyr-sketch-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 7px; min-width: 0; max-width: 100%; overflow-x: auto; }
+.planyr-note .planyr-sketch-btn { flex: 0 0 auto; }
 .planyr-note .planyr-sketch-kind { font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-tertiary); }
 .planyr-note .planyr-sketch-btn { height: 24px; padding: 0 9px; border: 1px solid var(--border-default); border-radius: ${RADIUS.pill}px; background: transparent; color: var(--text-secondary); font: inherit; font-size: 11.5px; font-weight: 650; cursor: pointer; }
 .planyr-note .planyr-sketch-btn.is-on { background: var(--accent-notes); border-color: var(--accent-notes); color: var(--on-accent-notes); }
@@ -495,7 +511,7 @@ function DocMenu({ at, onPlainPaste, onClose }) {
 }
 
 export default function NoteEditor({
-  pageId, title, onTitleChange, onStatus, onExportMarkdown, onPrintNotice, onSaved,
+  pageId, title, onTitleChange, onTitleCommit, onStatus, onExportMarkdown, onPrintNotice, onSaved,
   scopeLabel, status, updatedAt, searchTerm = "", onClearSearch, notebookPageIds, trail = [],
   projectLabel = null, readOnly = false, readOnlyNote = "",
 }) {
@@ -1352,8 +1368,10 @@ export default function NoteEditor({
                  surface B1392 never covered. Forward means "start writing"; Shift+Tab is
                  left alone so the way BACK to the toolbar and the rail still exists. */
               onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); return; }
                 if (e.key !== "Tab" || e.shiftKey) return;
                 if (!editor || editor.isDestroyed) return;
+                onTitleCommit?.();
                 e.preventDefault();
                 editor.commands.focus("start");
               }}
@@ -1364,7 +1382,12 @@ export default function NoteEditor({
                 padding: "2px 0", outline: "none",
               }}
               onFocus={(e) => { e.target.style.borderBottomColor = "var(--accent-notes)"; }}
-              onBlur={(e) => { e.target.style.borderBottomColor = "transparent"; }}
+              /* ⛔ THE DEFAULT NAME LANDS HERE, ON THE WAY OUT — never on a keystroke. See
+                 renameNode's header for the measurement: coercing a blank name on every change
+                 made the field impossible to clear, because the write came straight back into a
+                 controlled input. Folded into the existing blur rather than added beside it —
+                 two onBlur props on one element and the second silently wins. */
+              onBlur={(e) => { e.target.style.borderBottomColor = "transparent"; onTitleCommit?.(); }}
             />
             {/* ⛔ WHICH PROJECT THIS NOTE BELONGS TO, WHILE YOU ARE READING IT (NEW-2).
                 The owner could not see a note's filing anywhere near the note itself: the

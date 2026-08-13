@@ -28,6 +28,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { HEADING_LEVELS } from "../lib/notesExtensions.js";
+import { BLOCK_SPACES, LINE_SPACINGS, spacingLabel } from "../lib/notesSpacing.js";
 import { CALLOUT_TONES } from "../lib/notesCalloutNode.js";
 
 /* Mirrored from src/shared/ui/controls.jsx rather than imported — deliberately, and there
@@ -646,10 +647,36 @@ export default function NoteToolbar({ editor, onExport, onPrint, onAttach, onHis
           size". Changing size is a while-writing action, which is exactly what B1317 says
           belongs on the row. Moved, not added: it is gone from the overflow drawer, so the
           control count is unchanged. */}
-      <TBSelect title="Font size" testid="nt-size" width={72}
+      <TBSelect title="Font size" testid="nt-size" width={62}
         value={currentSize ? String(parseInt(currentSize, 10)) : null}
         options={SIZES.map((s) => ({ label: s == null ? "Size" : String(s), value: s }))}
         onChange={(e) => (e.target.value ? chain().setFontSize(`${e.target.value}px`).run() : chain().unsetFontSize().run())} />
+
+      {/* ⛔ SPACING SITS BESIDE SIZE, ON THE ROW (NEW-7) — for the same reason the font size
+          does (B1371): a control nobody can find is one that does not exist, and "how far
+          apart are my lines" is asked while writing, not while hunting through More. One
+          select rather than three: line spacing is the question people actually have, and the
+          space before/after live in the same list rather than as two more controls. */}
+      <TBSelect title={`Line spacing — ${spacingLabel(editor.getAttributes("paragraph").lineHeight)}`} testid="nt-spacing" width={40}
+        value=""
+        options={[
+          /* ⛔ ONE GLYPH, NOT A WORD. The row is FULL at a laptop width — the bar wrapping
+             onto a second line is its own reported defect — so this control is paid for out of
+             its own footprint rather than out of the row. The current setting is in the hover
+             title, and the list spells every option out in words. */
+          { label: "↕", value: "" },
+          ...LINE_SPACINGS.map((s) => ({ label: `Lines: ${s.label}`, value: `lh:${s.value ?? ""}` })),
+          ...BLOCK_SPACES.map((s) => ({ label: `Space before: ${s.label}`, value: `sb:${s.value ?? ""}` })),
+          ...BLOCK_SPACES.map((s) => ({ label: `Space after: ${s.label}`, value: `sa:${s.value ?? ""}` })),
+        ]}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (!v) return;
+          const [kind, raw] = v.split(":");
+          const n = raw === "" ? null : Number(raw);
+          const key = kind === "lh" ? "lineHeight" : (kind === "sb" ? "spaceBefore" : "spaceAfter");
+          chain().setNoteSpacing({ [key]: n }).run();
+        }} />
 
       <Sep />
 

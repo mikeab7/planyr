@@ -220,6 +220,28 @@ export const NoteAnchor = Node.create({
         return true;
       },
 
+      /** ⛔ REMOVE ONE. A box had a grab handle and no way to get rid of it — the only exits
+       *  were emptying it and clicking away (which is a discard, not a delete, and does not
+       *  work on a box with words in it) or backspacing through its text. One transaction, so
+       *  Ctrl+Z brings it back whole. */
+      removeNoteAnchor: (pos) => ({ tr, dispatch }) => {
+        const node = tr.doc.nodeAt(pos);
+        if (!node || node.type.name !== "noteAnchor") return false;
+        if (dispatch) dispatch(tr.delete(pos, pos + node.nodeSize));
+        return true;
+      },
+
+      /** ⛔ SET ONE'S WIDTH. Height is deliberately NOT settable: a box's height is its words,
+       *  and a fixed height can only be honoured by clipping them or by scrolling inside a box
+       *  the size of a postage stamp. The width is the real control — the text reflows, the box
+       *  grows downward, and the page grows to hold it (`anchorExtent`). */
+      setNoteAnchorWidth: (pos, w) => ({ tr, dispatch }) => {
+        const node = tr.doc.nodeAt(pos);
+        if (!node || node.type.name !== "noteAnchor") return false;
+        if (dispatch) dispatch(tr.setNodeMarkup(pos, undefined, { ...node.attrs, w: Math.round(num(w, ANCHOR_WIDTH)) }));
+        return true;
+      },
+
       /** Move one — the drag's commit, and the only way an anchor's position ever changes. */
       moveNoteAnchor: (pos, { x, y }) => ({ tr, dispatch }) => {
         const node = tr.doc.nodeAt(pos);
@@ -268,8 +290,70 @@ export const NoteAnchor = Node.create({
       const content = document.createElement("div");
       content.className = "planyr-anchor-content";
 
+      /* ⛔ A WAY TO GET RID OF IT. The box had a grab handle and no delete, so the only exits
+       * were emptying it and clicking away — which is a discard and does not work once there
+       * are words in it — or backspacing through the text. */
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "planyr-anchor-del";
+      del.setAttribute("contenteditable", "false");
+      del.setAttribute("title", "Delete this box");
+      del.setAttribute("aria-label", "Delete this box");
+      del.setAttribute("data-testid", "note-anchor-delete");
+      del.textContent = "×";
+      del.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); });
+      del.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const pos = typeof getPos === "function" ? getPos() : null;
+        if (pos != null) editor.commands.removeNoteAnchor(pos);
+      });
+
+      /* ⛔ AND A WAY TO CHANGE HOW WIDE IT IS. Only the width: a box's height is its words. */
+      const size = document.createElement("div");
+      size.className = "planyr-anchor-size";
+      size.setAttribute("contenteditable", "false");
+      size.setAttribute("title", "Drag to change how wide this box is");
+      size.setAttribute("data-testid", "note-anchor-size");
+
       dom.appendChild(grip);
+      dom.appendChild(del);
+      dom.appendChild(size);
       dom.appendChild(content);
+
+      let sizing = null;
+      size.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const host = editor.view.dom;
+        const hostRect = host.getBoundingClientRect();
+        sizing = {
+          scale: hostRect.width / (host.offsetWidth || 1) || 1,
+          left: num(node.attrs.x),
+          host,
+          moved: false,
+        };
+        size.setPointerCapture(e.pointerId);
+      });
+      size.addEventListener("pointermove", (e) => {
+        if (!sizing) return;
+        sizing.moved = true;
+        const hostRect = sizing.host.getBoundingClientRect();   // fresh: the page may scroll
+        const wanted = (e.clientX - hostRect.left) / sizing.scale - sizing.left;
+        const room = sizing.host.offsetWidth - sizing.left - ANCHOR_EDGE_PAD;
+        dom.style.width = `${Math.round(Math.max(ANCHOR_MIN_WIDTH, Math.min(wanted, room)))}px`;
+      });
+      const endSize = (e) => {
+        if (!sizing) return;
+        const changed = sizing.moved;
+        sizing = null;
+        try { size.releasePointerCapture(e.pointerId); } catch (_) { /* already released */ }
+        if (!changed) return;                       // a press that never moved writes nothing
+        const pos = typeof getPos === "function" ? getPos() : null;
+        if (pos != null) editor.commands.setNoteAnchorWidth(pos, parseFloat(dom.style.width));
+      };
+      size.addEventListener("pointerup", endSize);
+      size.addEventListener("pointercancel", endSize);
 
       /* The drag. Pointer capture rather than a document-level listener, so releasing outside
        * the window still ends it — a drag that never ends is a note you cannot type in. */
@@ -277,25 +361,52 @@ export const NoteAnchor = Node.create({
       grip.addEventListener("pointerdown", (e) => {
         e.preventDefault();
         e.stopPropagation();
+        /* ⛔ WHERE IN THE BOX YOU GRABBED IT, kept — so the box cannot re-seat itself under the
+         * cursor when the drag starts. Every position below is then derived from the pointer's
+         * offset INSIDE THE EDITOR, read fresh on each move, which makes the whole gesture
+         * immune to the page scrolling underneath it: the old form measured a delta between two
+         * CLIENT coordinates, and a client coordinate means something different the moment the
+         * scroller moves. That is one of the two mechanisms that could produce the reported
+         * jump; it is now impossible rather than merely unobserved. */
         const host = editor.view.dom;
-        const scale = host.getBoundingClientRect().width / (host.offsetWidth || 1) || 1;
-        from = { px: e.clientX, py: e.clientY, x: num(node.attrs.x), y: num(node.attrs.y), scale };
+        const hostRect = host.getBoundingClientRect();
+        const boxRect = dom.getBoundingClientRect();
+        from = {
+          grabX: e.clientX - boxRect.left,
+          grabY: e.clientY - boxRect.top,
+          x: num(node.attrs.x),
+          y: num(node.attrs.y),
+          scale: hostRect.width / (host.offsetWidth || 1) || 1,
+          moved: false,
+        };
         grip.setPointerCapture(e.pointerId);
       });
       grip.addEventListener("pointermove", (e) => {
         if (!from) return;
-        const nx = from.x + (e.clientX - from.px) / from.scale;
-        const ny = from.y + (e.clientY - from.py) / from.scale;
+        from.moved = true;
         const host = editor.view.dom;
-        const c = placeAnchor({ x: nx, y: ny, width: host.offsetWidth, preferred: dom.offsetWidth });
+        const hostRect = host.getBoundingClientRect();       // read FRESH: the page may scroll
+        const c = placeAnchor({
+          x: (e.clientX - from.grabX - hostRect.left) / from.scale,
+          y: (e.clientY - from.grabY - hostRect.top) / from.scale,
+          width: host.offsetWidth,
+          preferred: dom.offsetWidth,
+        });
         dom.style.left = `${c.x}px`;
         dom.style.top = `${c.y}px`;
         dom.style.width = `${c.w}px`;
       });
       const end = (e) => {
         if (!from) return;
+        const dragged = from.moved;
         from = null;
         try { grip.releasePointerCapture(e.pointerId); } catch (_) { /* already released */ }
+        /* ⛔ A PRESS THAT NEVER MOVED WRITES NOTHING AT ALL — not a transaction, not an undo
+         * frame, not a save. It used to commit the box's own coordinates back over themselves,
+         * which is a no-op only for as long as nothing in that round trip is ever wrong; the
+         * reported symptom is a box moving on a press with no drag, so the honest answer is for
+         * the press to have no write path to move it through. */
+        if (!dragged) return;
         const pos = typeof getPos === "function" ? getPos() : null;
         if (pos == null) return;
         // One transaction at the END of the drag, not per pointermove: a hundred undo frames
