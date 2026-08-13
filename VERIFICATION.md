@@ -113,6 +113,39 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V266993 — B472049: a completed split no longer leaves the parent drawn `Blocker: real-data`
+
+**Proven here:** `test/splitIntegrity.test.js` (20) — conservation, union-outline equality and no
+overlap, all across ACTIVE **and not deleted**, plus the five cut topologies driven through the real
+engine. Both single-column mutation checks are in the suite. Full suite 11,169 green.
+
+**Steps (on a COPY of Bain / Concept A - Quiddity DIA, not the live plan):**
+1. Notch split — both cut endpoints on ONE edge. **The parent must disappear.** Exactly the pieces
+   remain; the acreage of the live parcels sums to the parent's within a hair.
+2. Repeat the 18:58:56 through-cut and confirm it still yields 100.388 + 8.617 = 109.005, residual
+   0.000 — the regression guard for the path that already worked.
+3. Undo the split: the parent comes back and the pieces go. Redo: the reverse.
+4. Confirm no orphan: the children keep their address / account data, and nothing errors where the
+   parent used to be nested.
+5. ⚠ **Existing plans are NOT migrated.** Bain still holds `e1454855gyzzln` and `e1455071mkspvo` as
+   drawable superseded parents (3 such rows across 2 plans). They keep drawing until removed — the
+   owner's call, deliberately not automated.
+
+### V266992 — B472048: the operation envelope, end to end `Blocker: auth` `Blocker: real-data`
+
+**⛔ NOT YET VERIFIABLE — the foundation shipped, the wiring did not.** Recorded now so the pending
+steps are in the one canonical place rather than only on the item.
+
+**Steps, once the migration and wiring land:**
+1. Two tabs, same account, one plan. In tab A merge two parcels.
+2. In tab B without reloading: the activity view names it as ONE merge by that session, with both
+   source parcels and the result — never as net row arithmetic.
+3. Presence names both sessions and marks which is me.
+4. Undo in tab B either refuses or warns BY NAME before touching tab A's merge.
+5. Reproduce the 8 South case: `e56` + `e1454594huuiov` consumed, `e1454919qhgshe` created — and
+   confirm it reads as one merge, not as 77 − 2 + 1.
+6. A split emits `op_kind:"split"` with one parent modified, one child created, one `op_id`, atomic.
+
 ### V258864 — B463920 + B463921: the status menu behaves on his own board `Blocker: auth` `Blocker: real-data`
 
 **Proven here already** — `ui-audit/verify-grid-overlay-input.mjs`, 12/12 in a real browser, mutation-proven three ways: Enter dismissing the successor prompt no longer re-opens the picker (Enter 0/4, Escape 0/4, ✕ 0/4, with all three routes proven to have actually raised prompts) · Enter on a picker column with nothing else open still opens the picker · press-and-drag inside a menu leaks no selection · clicking a swatch still commits · ordinary drag-select still works.
