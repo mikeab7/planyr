@@ -68,6 +68,8 @@ const ALL_NOTES_FILES = [
   "lib/notesAnchorNode.js", "lib/notesZoom.js",
   // An abandoned press leaves nothing behind: the ONE definition of an empty block.
   "lib/notesAnchorPrune.js",
+  // How far apart the lines are — a BLOCK property, never a text style.
+  "lib/notesSpacing.js",
 ];
 const SKETCH_FILES = ALL_NOTES_FILES.filter((f) => f.includes("Sketch"));
 
@@ -961,6 +963,39 @@ describe("the project a notebook belongs to", () => {
     expect(ed, "a double-click must not be a second, different gesture").not.toMatch(/onDoubleClick=/);
     // …and a press ON text is still the browser's business, or word-select dies.
     expect(ed).toMatch(/if \(el\.closest\("\.ProseMirror"\)/);
+  });
+
+  /* ⛔ A BACKTICK INSIDE THE CSS TEMPLATE LITERALS ENDS THEM, and it has broken the build three
+   * separate times — always in a COMMENT, where it reads as ordinary prose and nothing about it
+   * looks like code. The failure is a parse error hundreds of lines away from the cause. */
+  it("no backtick inside the editor's or the print sheet's CSS template literal", () => {
+    for (const [file, marker] of [["components/NoteEditor.jsx", "const EDITOR_CSS = `"], ["lib/notesPrint.js", "const PRINT_CSS = `"]]) {
+      const src = read(NOTES, ...file.split("/"));
+      const at = src.indexOf(marker);
+      expect(at, `${file} no longer has ${marker}`).toBeGreaterThan(-1);
+      const body = src.slice(at + marker.length);
+      const end = body.indexOf("\n`;");
+      expect(end, `${file}: the CSS literal is unterminated`).toBeGreaterThan(-1);
+      expect(body.slice(0, end), `${file}: a backtick inside the CSS ends the literal early`).not.toContain("`");
+    }
+  });
+
+  it("⛔ A BOX CAN BE DELETED AND RESIZED, and neither control reaches the paper", () => {
+    const node = read(NOTES, "lib", "notesAnchorNode.js");
+    expect(node, "a delete, as one undoable transaction").toContain("removeNoteAnchor:");
+    expect(node, "and a width — height is the words, deliberately").toContain("setNoteAnchorWidth:");
+    expect(node).toMatch(/data-testid", "note-anchor-delete"/);
+    expect(node).toMatch(/data-testid", "note-anchor-size"/);
+    // ⛔ A press that never moved writes NOTHING — not a transaction, not an undo frame.
+    expect(node, "the drag commits only if it moved").toMatch(/if \(!dragged\) return;/);
+    expect(node, "and so does the resize").toMatch(/if \(!changed\) return;/);
+    /* ⛔ THE DRAG IS SCROLL-PROOF: it keeps the grab offset and reads the host rect FRESH on
+     * every move. The old form measured a delta between two CLIENT coordinates, which mean
+     * different things once the scroller moves underneath the gesture. */
+    expect(node).toMatch(/grabX: e\.clientX - boxRect\.left/);
+    expect(node.slice(node.indexOf('grip.addEventListener("pointermove"'))).toMatch(/host\.getBoundingClientRect\(\);\s+\/\/ read FRESH/);
+    const print = read(NOTES, "lib", "notesPrint.js");
+    expect(print, "no chrome on paper").toMatch(/planyr-anchor-grip, \.note-body \.planyr-anchor-del, \.note-body \.planyr-anchor-size \{ display: none; \}/);
   });
 
   it("⛔ AN ABANDONED PRESS IS PROVISIONAL — enforced at the SEAM, not only in the gesture", () => {

@@ -25,8 +25,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
-  addPage, deleteNode, emptyTree, migrate, purgeTrashEntry, restoreNode, tombstoneIds,
-  trashEntries, withTombstones, TOMB_RETENTION_DAYS,
+  addPage, countNodes, deleteNode, dropPages, emptyTree, migrate, purgeTrashEntry, restoreNode,
+  tombstoneIds, trashEntries, withTombstones, TOMB_RETENTION_DAYS,
 } from "../src/workspaces/notes/lib/notesModel.js";
 import { judgeConflict, mergeTrees } from "../src/workspaces/notes/lib/notesCloud.js";
 
@@ -355,5 +355,107 @@ describe("judgeConflict — empty blocks cannot be what two windows disagree abo
     const mine = doc(para("Same"), anchor([{ type: "noteImage", attrs: { imageId: "img1" } }]));
     const theirs = doc(para("Same"));
     expect(judgeConflict({ localDoc: mine, serverDoc: theirs }).silent).toBe(false);
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════════════════════════
+ * ⛔ THE GHOST THAT CAME BACK HOURS LATER — his four acceptance conditions, one test each.
+ *
+ * Measured on his account with revisions: `pg_msp58czl1dsdtd8` was purged and VERIFIED absent
+ * from pages and trash, locally and in the cloud, across three reloads at tree rev **1061**. At
+ * rev **1211** it was back in the LIVE page list while its `notes_pages` row still had
+ * `deleted_at` set, `purged_at` set and `doc` NULL — a resurrection, not a restore. At rev
+ * **1274** it was gone again.
+ *
+ * THE CAUSE: rule 0 was CONDITIONAL. It lived only in `mergeTrees`, which runs only when this
+ * device has unpushed edits. With nothing owed, the seed took the server's tree WHOLESALE —
+ * no tombstone filter, and this device's own ledger discarded in the same breath. So one client
+ * still holding a pre-purge tree could put the page back on the server, and every other device
+ * would adopt it and forget it had ever known better. It healed itself once a dirty merge
+ * finally ran, which is exactly what a conditional rule looks like from outside.
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("⛔ A PURGE SURVIVES ALL FOUR OF HIS CONDITIONS", () => {
+  /** The seed's adopt path, expressed exactly as the store expresses it: a merge against a
+   *  local side that is NOTHING BUT THE LEDGER. */
+  const adopt = (localTree, serverTree) =>
+    mergeTrees({ v: 3, pages: [], trash: [], tombs: localTree?.tombs || [] }, serverTree);
+
+  const purgedScratch = () => {
+    let t = addPage(emptyTree(), { id: "pg_msp58czl1dsdtd8", title: "Scratch" }).tree;
+    const prePurge = clone(t);
+    const del = deleteNode(t, "pg_msp58czl1dsdtd8");
+    return { tree: purgeTrashEntry(del.tree, del.entry.id).tree, prePurge };
+  };
+
+  it("(1) it survives a RELOAD", () => {
+    const { tree } = purgedScratch();
+    const back = reload(tree);
+    expect(liveIds(back)).toEqual([]);
+    expect(trashIds(back)).toEqual([]);
+    expect(tombstoneIds(back).has("pg_msp58czl1dsdtd8")).toBe(true);
+  });
+
+  it("⛔ (2) it survives A SECOND CLIENT PUSHING A TREE THAT PREDATES THE PURGE — the ghost", () => {
+    const { tree, prePurge } = purgedScratch();
+    // The other client has never heard of any of it and pushes its own tree up. This device
+    // owes nothing, so the seed ADOPTS — which is the path that had no rule 0 at all.
+    const adopted = adopt(reload(tree), prePurge);
+    expect(liveIds(adopted), "back in the LIVE list is the exact shape he saw").toEqual([]);
+    expect(trashIds(adopted)).toEqual([]);
+    expect(tombstoneIds(adopted).has("pg_msp58czl1dsdtd8"), "and the ledger is carried FORWARD, never replaced").toBe(true);
+  });
+
+  it("…and the adopt path keeps everything the server legitimately has", () => {
+    const { tree } = purgedScratch();
+    let server = addPage(emptyTree(), { id: "keep", title: "Real note" }).tree;
+    server = addPage(server, { id: "kid", title: "Sub", parentId: "keep" }).tree;
+    const adopted = adopt(reload(tree), server);
+    expect(liveIds(adopted)).toEqual(["keep", "kid"]);
+  });
+
+  it("…and a child the other client added UNDER the purged page is rescued, never dropped", () => {
+    const { tree, prePurge } = purgedScratch();
+    const server = addPage(clone(prePurge), { id: "fresh", title: "Theirs", parentId: "pg_msp58czl1dsdtd8" }).tree;
+    const adopted = adopt(reload(tree), server);
+    expect(liveIds(adopted)).toEqual(["fresh"]);
+  });
+
+  it("⛔ (3) NO SWEEP PRUNES THE LEDGER — the only thing that ever removes a row is age", () => {
+    let { tree } = purgedScratch();
+    const ids = [...tombstoneIds(tree)].sort();
+    // Every read, every write, a merge with itself, and a merge with a stranger.
+    for (let i = 0; i < 5; i += 1) tree = reload(mergeTrees(tree, reload(tree)));
+    expect([...tombstoneIds(tree)].sort()).toEqual(ids);
+    tree = reload(adopt(tree, addPage(emptyTree(), { id: "other", title: "Other" }).tree));
+    expect([...tombstoneIds(tree)].sort()).toEqual(ids);
+  });
+
+  it("⛔ (4) AND HOURS LATER — the ledger's own expiry is 400 days, not a session", () => {
+    const { tree, prePurge } = purgedScratch();
+    let t = reload(tree);
+    // Six hours of a device that owes nothing, adopting from a server that keeps being handed
+    // the pre-purge tree by somebody else. Every one of these used to be a chance to lose it.
+    for (let hour = 0; hour < 6; hour += 1) t = reload(adopt(t, prePurge));
+    expect(liveIds(t)).toEqual([]);
+    expect(trashIds(t)).toEqual([]);
+    expect(tombstoneIds(t).has("pg_msp58czl1dsdtd8")).toBe(true);
+  });
+
+  it("⛔ A LIVE PAGE WHOSE BODY IS PURGED IS LIFTED OUT AND TOMBSTONED — it may never render", () => {
+    // The heal for an account that is ALREADY carrying one, which his is.
+    let t = addPage(emptyTree(), { id: "ghost", title: "Ghost" }).tree;
+    t = addPage(t, { id: "kid", title: "Real child", parentId: "ghost" }).tree;
+    t = addPage(t, { id: "safe", title: "Untouched" }).tree;
+    const healed = withTombstones(dropPages(t, ["ghost"]), ["ghost"]);
+    expect(liveIds(healed)).toEqual(["kid", "safe"]);      // the child is RESCUED, not destroyed
+    expect(tombstoneIds(healed).has("ghost")).toBe(true);
+    expect(liveIds(reload(mergeTrees(healed, t))), "and it cannot arrive again by the same door").toEqual(["kid", "safe"]);
+  });
+
+  it("countNodes sees a filtered tree as different, which is what makes the correction get pushed", () => {
+    const { tree, prePurge } = purgedScratch();
+    const adopted = adopt(reload(tree), prePurge);
+    expect(countNodes(adopted)).not.toBe(countNodes(prePurge));
+    expect(countNodes(adopt(reload(tree), emptyTree()))).toBe(countNodes(emptyTree()));
   });
 });

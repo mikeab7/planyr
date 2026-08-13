@@ -66,7 +66,7 @@ const DRIVER = {
     left: parseFloat(el.style.left),
     top: parseFloat(el.style.top),
     empty: el.getAttribute("data-empty") === "1",
-    text: el.innerText.trim(),
+    text: (el.querySelector(".planyr-anchor-content") || el).innerText.trim(),
   }))),
 };
 
@@ -192,27 +192,38 @@ async function soak(label, { width, height, zoomSteps }) {
     `${afterReload.length} blocks, ${afterReload.filter((b) => b.empty).length} empty`);
 
   /* ---- 3. TEN PRESSES INSIDE EXISTING BLOCKS ------------------------------------------ */
+  /* ⛔ IDENTIFIED BY ITS OWN COORDINATES, NOT BY ITS INDEX. The index was taken from the
+   * FILTERED on-screen list and then used against the FULL list further down, which agrees
+   * only while the first on-screen box happens to be the first box — true at 100% and false
+   * the moment a zoom pushes one off the top. A row that is right by coincidence is the thing
+   * this whole file exists to stop. */
   const targets = await page.evaluate(() => [...document.querySelectorAll('[data-testid="note-anchor"]')]
-    .map((el, i) => ({ i, ...el.getBoundingClientRect().toJSON() }))
+    /* The DOCUMENT-space key is named apart from the rect, because a DOMRect has its own
+     * `left`/`top` and spreading it second silently overwrote them — the key then matched
+     * nothing and the row failed for a reason that had nothing to do with the app. */
+    .map((el) => ({ ...el.getBoundingClientRect().toJSON(), docLeft: parseFloat(el.style.left), docTop: parseFloat(el.style.top) }))
     .filter((r) => r.top > 60 && r.bottom < window.innerHeight - 20)
     .slice(0, 5));
   const countBefore = afterReload.length;
   const inside = [];
   for (const t of targets) {
-    for (const at of [{ dx: t.width - 8, dy: t.height - 6 }, { dx: 20, dy: t.height / 2 }]) {
-      await page.mouse.click(Math.round(t.left + at.dx), Math.round(t.top + at.dy));
+    /* ⛔ CLEAR OF THE BOX'S OWN CHROME. The delete and the width handle live at the right-hand
+     * edge, so a press 8px in from it is a press on a CONTROL — which is a different test, and
+     * one that would delete the box being measured. */
+    for (const at of [{ dx: t.width - 36, dy: t.height - 8 }, { dx: 24, dy: t.height / 2 }]) {
+      await page.mouse.click(Math.round(t.x + at.dx), Math.round(t.y + at.dy));
       await pacedWait(page, 130);
       await page.keyboard.type("*");
       await pacedWait(page, 110);
-      inside.push(t.i);
+      inside.push(`${t.docLeft},${t.docTop}`);
     }
   }
   await pacedWait(page, 900);
   const afterInside = await DRIVER.blocks(page);
   ok(`${label} · ⛔ ${inside.length} PRESSES INSIDE EXISTING BLOCKS MADE NO NEW BLOCK`,
     afterInside.length === countBefore, `${countBefore} → ${afterInside.length}`);
-  const wrongBlock = afterInside.filter((b, i) => {
-    const expected = inside.filter((x) => x === i).length;
+  const wrongBlock = afterInside.filter((b) => {
+    const expected = inside.filter((k) => k === `${b.left},${b.top}`).length;
     return (b.text.match(/\*/g) || []).length !== expected;
   });
   ok(`${label} · ⛔ …AND EVERY CHARACTER LANDED IN THE BLOCK THAT WAS PRESSED`,

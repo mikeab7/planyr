@@ -134,11 +134,24 @@ export const NoteSketch = Node.create({
           : state.doc.textBetween(selection.from, selection.to, "\n", " ")));
         if (!dispatch) return true;
 
+        /* ⛔ A SKETCH NEVER GOES INSIDE AN ANCHORED BOX. A box's width is a choice somebody
+         * made about a COLUMN OF TEXT — 180 px by default — and a diagram in it is unusable:
+         * measured at 156 px of usable width, the panel's own three buttons (Box · Arrow ·
+         * Delete) are wider than their container and spill outside it, which is the "labels
+         * overlap their own buttons" in his screenshot, and the drawing's words squeeze down
+         * to one character a line. A box's content is `block+` deliberately, so this is
+         * reachable simply by pressing blank space and then pressing Box. The sketch lands
+         * AFTER the box instead, at the top level, where it has the page's full width. */
+        const anchorDepth = (() => {
+          for (let d = $from.depth; d > 0; d -= 1) if ($from.node(d).type.name === "noteAnchor") return d;
+          return 0;
+        })();
+        if (anchorDepth) tr.insert($from.after(anchorDepth), node);
         /* Caret in a top-level block: the block BECOMES the sketch, so boxing a paragraph
          * does not leave the emptied paragraph behind it. Anywhere else (a list item, a
          * table cell, a real selection) replaces just the selection and lets ProseMirror do
          * its own splitting. */
-        if (empty && $from.depth === 1 && $from.parent.isTextblock) tr.replaceWith($from.before(1), $from.after(1), node);
+        else if (empty && $from.depth === 1 && $from.parent.isTextblock) tr.replaceWith($from.before(1), $from.after(1), node);
         else tr.replaceSelectionWith(node);
 
         /* A sketch is an ATOM. If it ends up last in the document there is nowhere left to
