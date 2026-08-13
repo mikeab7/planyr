@@ -1,0 +1,111 @@
+{
+  "_note": "THE OWNER'S REAL FM 359 PLAN, VERBATIM. Site `smsrpaiqu5sv`, \"Concept A\" (FM 359 RD, Fulshear, TX 77441 — Fort Bend), pulled from `public.sites` JOINED to `public.site_elements` on 2026-08-13 for the NEW-1 inspector-field investigation (a Backspace typed into the ELEMENT · BUILDING Depth field deleted Building 1). Building 1 is `e1454615maruai` — 1675 x 613, cross-dock, ROTATED 336.2 degrees, with two 55x60 bump-outs, two 135 ft truck courts, two sidewalks and two side-parking rows bonded to it. That assembly is the point: the defect is about what a stray keystroke does to a building that takes eight other elements with it.",
+  "_redacted": [
+    "attrs (county appraisal record — third-party owner names, mailing addresses, valuations)",
+    "acct (county appraisal record)",
+    "addr (county appraisal record)",
+    "raster bytes (src data URLs → rasterSpec)"
+  ],
+  "schemaVersion": 13,
+  "origin": { "lat": 29.74838480839905, "lon": -95.924816029035 },
+  "county": "fortbend",
+  "name": "Concept A",
+  "site": "FM 359 RD, Fulshear, TX 77441",
+  "parcels": [
+    {
+      "z": 0,
+      "id": "e1454614maruai",
+      "locked": true,
+      "points": [
+        { "x": 680.6389632051174, "y": 1030.6017714230088 },
+        { "x": -1346.6739869898452, "y": -303.8992837452824 },
+        { "x": 1295.315191091154, "y": -1468.4281828879111 },
+        { "x": 1298.9524414635287, "y": -1289.9231090783057 },
+        { "x": 1346.6739869898452, "y": 1468.3692943411925 }
+      ]
+    }
+  ],
+  "parcelDrawings": [],
+  "els": [
+    { "h": 613, "w": 1675, "z": 0, "cx": 298.91, "cy": -481.43, "id": "e1454615maruai", "rot": 336.2132030868854, "dock": "cross", "type": "building", "dockAxis": "x", "dockSide": "bottom" },
+    { "h": 135, "w": 1620, "z": 1024, "cx": 122.8989701808724, "cy": -812.5679884308205, "id": "e1454616maruai", "zd": 135, "rot": 336.2132030868854, "type": "paving", "attachedTo": "e1454615maruai", "truckCourt": { "side": "top" } },
+    { "h": 135, "w": 1620, "z": 2048, "cx": 424.5931348688342, "cy": -128.10861710682943, "id": "e1454617maruai", "zd": 135, "rot": 336.2132030868854, "type": "paving", "attachedTo": "e1454615maruai", "truckCourt": { "side": "bottom" } },
+    { "h": 60, "w": 55, "z": 3072, "cx": 1175.8246753876094, "cy": -500.215688431452, "id": "e1454618maruai", "rot": 336.2132030868854, "dock": "none", "type": "building", "noFit": true, "dogEar": { "side": "bottom", "sign": 1 }, "noLabel": true, "attachedTo": "e1454615maruai" },
+    { "h": 60, "w": 55, "z": 4096, "cx": 904.3805940573977, "cy": -1116.046112095952, "id": "e1454619maruai", "rot": 336.2132030868854, "dock": "none", "type": "building", "noFit": true, "dogEar": { "side": "top", "sign": 1 }, "noLabel": true, "attachedTo": "e1454615maruai" },
+    { "h": 733, "w": 5, "z": 5120, "cx": 1067.5542137863001, "cy": -820.230933606802, "id": "e1454620maruai", "rot": 336.2132030868854, "type": "sidewalk", "attachedTo": "e1454615maruai", "sidewalkSide": "right" },
+    { "h": 60, "w": 733, "z": 6144, "cx": 1097.2934244387461, "cy": -833.3393030618271, "id": "e1454621maruai", "rot": 246.21320308688541, "type": "parking", "attachedTo": "e1454615maruai", "sideParkSide": "right" },
+    { "h": 613, "w": 5, "z": 7168, "cx": -469.7342137863, "cy": -142.629066393198, "id": "e1454622maruai", "rot": 336.2132030868854, "type": "sidewalk", "attachedTo": "e1454615maruai", "sidewalkSide": "left" },
+    { "h": 60, "w": 613, "z": 8192, "cx": -499.4734244387461, "cy": -129.52069693817293, "id": "e1454623maruai", "rot": 66.21320308688541, "type": "parking", "attachedTo": "e1454615maruai", "sideParkSide": "left" },
+    { "h": 615.66, "w": 1045, "z": 0, "cx": 816.8089480281797, "cy": 344.4131443890996, "id": "e1454624maruai", "rot": 336.2132030868854, "dock": "cross", "type": "building", "dockAxis": "x", "dockSide": "bottom" },
+    { "h": 135, "w": 990, "z": 1024, "cx": 640.261483397508, "cy": 12.058135953117562, "id": "e1454625maruai", "zd": 135, "rot": 336.2132030868854, "type": "paving", "attachedTo": "e1454624maruai", "truckCourt": { "side": "top" } },
+    { "h": 135, "w": 990, "z": 2048, "cx": 943.0285177085578, "cy": 698.9515472874318, "id": "e1454626maruai", "zd": 135, "rot": 336.2132030868854, "type": "paving", "attachedTo": "e1454624maruai", "truckCourt": { "side": "bottom" } },
+    { "h": 60, "w": 55, "z": 3072, "cx": 1406.0184780574707, "cy": 453.89482606536, "id": "e1454627maruai", "rot": 336.2132030868854, "dock": "none", "type": "building", "noFit": true, "dogEar": { "side": "bottom", "sign": 1 }, "noLabel": true, "attachedTo": "e1454624maruai" },
+    { "h": 60, "w": 55, "z": 4096, "cx": 1133.5015271041707, "cy": -164.36963760946315, "id": "e1454628maruai", "rot": 336.2132030868854, "dock": "none", "type": "building", "noFit": true, "dogEar": { "side": "top", "sign": 1 }, "noLabel": true, "attachedTo": "e1454624maruai" },
+    { "h": 735.66, "w": 5, "z": 5120, "cx": 1297.2115816446171, "cy": 132.66256088484835, "id": "e1454629maruai", "rot": 336.2132030868854, "type": "sidewalk", "attachedTo": "e1454624maruai", "sidewalkSide": "right" },
+    { "h": 60, "w": 735.66, "z": 6144, "cx": 1326.9507922970633, "cy": 119.55419142982328, "id": "e1454630maruai", "rot": 246.21320308688541, "type": "parking", "attachedTo": "e1454624maruai", "sideParkSide": "right" },
+    { "h": 615.66, "w": 5, "z": 7168, "cx": 336.40631441174213, "cy": 556.1637278933508, "id": "e1454631maruai", "rot": 336.2132030868854, "type": "sidewalk", "attachedTo": "e1454624maruai", "sidewalkSide": "left" },
+    { "h": 60, "w": 615.66, "z": 8192, "cx": 306.66710375929597, "cy": 569.272097348376, "id": "e1454632maruai", "rot": 66.21320308688541, "type": "parking", "attachedTo": "e1454624maruai", "sideParkSide": "left" }
+  ],
+  "markups": [],
+  "measures": [
+    { "z": 0, "id": "e1454633maruai", "pts": [{ "x": 1524.557773548181, "y": -1470.035090207448 }, { "x": 1577.412582457027, "y": 1468.663092680463 }], "mode": "line" },
+    { "z": 1024, "id": "e1454634maruai", "pts": [{ "x": 1345.3361250627845, "y": 1467.489952443393 }, { "x": -1346.94, "y": -302.53 }], "mode": "line" },
+    { "z": 2048, "id": "e1454635maruai", "pts": [{ "x": 1295.360948722637, "y": -1466.1825389126616 }, { "x": -1345.88, "y": -304.04 }], "mode": "line" }
+  ],
+  "callouts": [],
+  "elevation": { "crossSections": [] },
+  "settings": {
+    "snap": false,
+    "aisle": 24,
+    "bayMax": 58,
+    "bayMin": 50,
+    "doorOC": 12,
+    "stallW": 9,
+    "bufferD": 15,
+    "setback": 25,
+    "drainage": {},
+    "gridSize": 10,
+    "roadCurb": 0.5,
+    "showDims": true,
+    "showGrid": true,
+    "speedBay": 60,
+    "trailerL": 53,
+    "trailerW": 12,
+    "doorWidth": 9,
+    "parkAngle": 90,
+    "showAreas": true,
+    "showDocks": true,
+    "roadWidths": "24, 26, 30, 36, 40",
+    "stallDepth": 18,
+    "typeStyles": {},
+    "parcelStyle": {},
+    "showSetback": true,
+    "truckCourtD": 135,
+    "parcelSelect": true,
+    "trailerAisle": 60,
+    "trailerParkD": 50,
+    "bayDepthTarget": 50,
+    "bayLengthTarget": 56
+  },
+  "layerOverrides": {},
+  "layerAbove": {},
+  "rasters": [
+    {
+      "role": "underlay",
+      "id": "underlay",
+      "imgW": 1800,
+      "imgH": 1704,
+      "opacity": 1,
+      "ftPerPx": 2.6933479739796904,
+      "ftPerPxY": 3.102250865655381,
+      "x": -2424.0131765817214,
+      "y": -2643.2131369913686,
+      "rotation": 0,
+      "locked": true,
+      "encodedBytes": null,
+      "fromIdb": false,
+      "fromMap": true,
+      "visible": true
+    }
+  ]
+}

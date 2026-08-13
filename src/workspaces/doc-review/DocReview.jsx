@@ -46,6 +46,7 @@ import { bboxOfMarkup, calloutParts, addCalloutLeader, removeCalloutLeader } fro
 import { pickInMarquee, selMods, nextSelection, hasSelMod } from "../../shared/markup/selection.js";
 import { pickMarkup, hitCalloutLeaderIndex, calloutBoxWH, calloutDblZone } from "../../shared/markup/hitTest.js";
 import SelectionChrome from "../../shared/markup/SelectionChrome.jsx";
+import { touchLatch, touchFactsOf, TOUCH } from "../../shared/keyboard/keyScope.js";
 
 // Last cross-workspace "open this review" intent already acted on. Module-scoped (not a
 // ref) so it survives this lazy workspace unmounting/remounting — otherwise switching back
@@ -174,6 +175,9 @@ export default function DocReview({
   const isActiveRef = useRef(isActive); isActiveRef.current = isActive; // live value for once-bound handlers
   const hiddenFitPending = useRef(false); // a fit computed at display:none fallback size → redo on activation
   const wrapRef = useRef(null);
+  /* NEW-1 — the keyboard latch (shared/keyboard/keyScope.js): did the last pointer press / focus
+   * move land on the drawing, or on chrome? Only the destructive keys consult it. */
+  const canvasTouchRef = useRef(TOUCH.CANVAS);
   const backdropRef = useRef(null);     // whole-page floor canvas — always present, no white (B415)
   const detailRef = useRef(null);       // viewport-clipped sharp canvas over the backdrop (B415)
   const pdfRef = useRef(null);
@@ -1782,7 +1786,19 @@ export default function DocReview({
   // onPointerMove re-renders dozens of times/sec while drawing (B41).
   const onKeyRef = useRef(null);
   onKeyRef.current = (e) => {
+    /* NEW-1 — the same scope rule the planner now uses, for the same measured defect. The old
+     * guard read `e.target`, which after a committed field / an Escape / a click on inert chrome
+     * is `<body>` — so Delete or Backspace typed a moment after leaving a panel field destroyed
+     * the SELECTED MARKUP here exactly as it destroyed a building there. A focused `<button>`
+     * (a stepper, a toolbar control) was never in the tag list at all. Rule + measurement:
+     * shared/keyboard/keyScope.js. Only the two DESTRUCTIVE keys are scoped — Review's other
+     * shortcuts (paging, tools, Escape, undo) are unchanged, so this closes the data-loss path
+     * without touching how the workspace is driven. */
     if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable) return; // RC-9: also skip SELECT/contentEditable so a focused field's Ctrl-Z isn't hijacked (matches Site Planner)
+    // While the user is working in a VALUE ROW, Delete and Backspace belong to that row — even
+    // after it has been committed with Enter, abandoned with Escape or tabbed away from, all of
+    // which leave `e.target` reading `<body>` and used to destroy the selected markup.
+    if ((e.key === "Delete" || e.key === "Backspace") && canvasTouchRef.current === TOUCH.FIELD) return;
     const mod = e.ctrlKey || e.metaKey;
     if (mod && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else if (!removeLastVertex()) undo(); return; } // ⌘/Ctrl-Z (B303)
     if (mod && (e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); return; }                                                        // Ctrl-Y redo
@@ -1830,9 +1846,17 @@ export default function DocReview({
     // (or actually delete markups on the hidden canvas) while another module is on screen.
     const onKey = (e) => { if (isActiveRef.current && onKeyRef.current) onKeyRef.current(e); };
     const onKeyUp = (e) => { if (isActiveRef.current && (e.key === " " || e.code === "Space")) setSpaceHeld(false); };
+    /* NEW-1 — drive the keyboard latch, capture phase, pointer AND focus (a Tab into a stepper
+     * button fires no pointer event, and that was one of the measured leaks in the planner). */
+    const note = (e) => { canvasTouchRef.current = touchLatch(touchFactsOf(e.target, wrapRef.current)); };
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKeyUp);
-    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
+    window.addEventListener("pointerdown", note, true);
+    window.addEventListener("focusin", note, true);
+    return () => {
+      window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("pointerdown", note, true); window.removeEventListener("focusin", note, true);
+    };
   }, []);
 
   const zoom = (f) => doZoom(f, null, null); // ± buttons zoom about the viewport centre (B290/B329)

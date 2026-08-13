@@ -11,7 +11,9 @@ import { reportClientEvent, SUPPRESSED_AUTOMATED } from "../../shared/telemetry/
 import { notePerfEdit } from "../../shared/telemetry/perfSampling.js";
 import { notePlanContext, noteViewScale, requestPerfCapture, perfCaptureDelivery } from "../../shared/telemetry/perfRecorderHandle.js";
 import { createElementSync, stableStringify } from "./lib/elementSync.js";
-import { planDelete, shouldHintTypingGuard, TYPING_GUARD_HINT } from "./lib/deletePlan.js";
+import { planDelete, TYPING_GUARD_HINT } from "./lib/deletePlan.js";
+import { focusScope, resolveKeyEntry, keyScopeVerdict, shouldHintRefusal, SCOPE_GUARD_HINT } from "./lib/keyContract.js";
+import { touchLatch, touchFactsOf, TOUCH } from "../../shared/keyboard/keyScope.js";
 import { rowsToModel, KIND_TO_FIELD, foldNeverSyncedLocal, foldJournal, reconcileSeedRows } from "./lib/elementRows.js";
 import { writeJournal, readJournal, clearJournal, sweepJournals, journalSessionId } from "./lib/elementJournal.js";
 import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
@@ -2082,8 +2084,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // `leftPanel`, which is not in that listener's dep list.
   const inspectorShowingRef = useRef(false);
   const multiRef = useRef(multi); multiRef.current = multi;
-  // NEW-1 — which focused field we've already told "your Delete went into the box you're typing in",
-  // so the hint fires once per field rather than once per keystroke. Cleared when focus leaves.
+  /* NEW-1 — THE KEYBOARD LATCH: has the user's last pointer press / focus move landed on the
+   * drawing, or on chrome? `document.activeElement` cannot answer this — <body> is where focus
+   * goes after ANY dismissal (a committed field, an Escape, a click on inert panel background),
+   * and reading that as "the drawing has the keyboard" is what let a Backspace typed a moment
+   * after leaving the Depth box delete the owner's building. See shared/keyboard/keyScope.js.
+   *
+   * `keyEpisodeRef` counts uninterrupted stretches of chrome ownership, so the refusal hint can
+   * fire once per episode instead of once per keypress (there may be no focused FIELD to key it
+   * to — two of the seven measured leaks had focus on a <button>, two on <body>). */
+  const canvasTouchRef = useRef(TOUCH.CANVAS);
+  const keyEpisodeRef = useRef(0);
+  // Which episode we've already explained. (Was: which focused field — an episode is the general
+  // case and covers the field one, since entering a field starts an episode.)
   const typingHintRef = useRef(null);
   // NEW-1: live mirrors read by the takeover / restore layout effects (whose deps intentionally
   // EXCLUDE leftPanel/dockMemo so a deliberate manual rail switch can't re-trigger a takeover).
@@ -5602,35 +5615,69 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return () => { window.removeEventListener("blur", recover); document.removeEventListener("visibilitychange", onVis); };
   }, []);
 
+  /* NEW-1 — drive the keyboard latch. ONE rule, two listeners, both in the CAPTURE phase so a
+   * handler that stops propagation (the canvas stops plenty) cannot hide the fact that a press
+   * happened. `pointerdown` covers the mouse/touch half, `focusin` the keyboard-tab half — a Tab
+   * out of the Depth box into the stepper button never fires a pointer event, and it was one of
+   * the seven measured leaks.
+   *
+   * ⛔ NO CLOCK. The latch is a fact about which surface was last addressed, not about how long
+   * ago; a time budget here would be unanswerable and un-measurable (FOREGROUND-OR-VOID). */
+  useEffect(() => {
+    const note = (n) => {
+      const next = touchLatch(touchFactsOf(n, wrapRef.current || svgRef.current));
+      // A fresh stretch away from the drawing is a new episode — so the refusal explains itself
+      // again the next time the user leaves it, but not on every key in between.
+      if (next !== TOUCH.CANVAS && canvasTouchRef.current === TOUCH.CANVAS) keyEpisodeRef.current += 1;
+      canvasTouchRef.current = next;
+    };
+    const onDown = (e) => note(e.target);
+    const onFocusIn = (e) => note(e.target);
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("focusin", onFocusIn, true);
+    return () => { window.removeEventListener("pointerdown", onDown, true); window.removeEventListener("focusin", onFocusIn, true); };
+  }, []);
+
   /* ------------ keyboard ------------ */
   useEffect(() => {
     const onKey = (e) => {
       if (!active) return; // keep-alive: a hidden planner must never eat keys (or Delete markups) while another module is on screen
+      /* NEW-1 — WHO OWNS THE KEYBOARD. This replaces the old "is a text field focused" guard, which
+       * covered ONE of the eight states a user is in while editing a value and let the other seven
+       * through: measured on the owner's real FM 359 plan, an Enter / Escape / Tab / stepper-click /
+       * panel-click after typing in the Depth box each armed the next Backspace to delete Building 1
+       * AND its eight bonded elements. Full measurement + the rule in shared/keyboard/keyScope.js;
+       * the per-shortcut declarations (and the CI sweep that keeps them honest) in lib/keyContract.js.
+       *
+       * The old guard's two behaviours are both preserved, as SCOPES rather than special cases: a
+       * focused text field still swallows every key (you must be able to type), and B746/V258's
+       * slider exception for Ctrl/Cmd+Z / +Y still holds. */
       const t = document.activeElement;
-      // B746/V258 — a range/slider (e.g. the Properties panel's Fill-opacity drag) has no native
-      // browser undo to protect and doesn't consume Ctrl/Cmd+Z or +Y, so it must not trip the
-      // "don't hijack keys while typing" guard for that one chord — otherwise Ctrl-Z silently
-      // no-ops while an element with an opacity slider stays selected post-drag. Every OTHER
-      // shortcut (arrows, Delete, letter tools) still respects the guard while a slider has focus,
-      // since those DO have real native slider behavior (or would nudge/delete the still-selected
-      // element out from under the user).
-      const isSliderFocus = t && t.tagName === "INPUT" && t.type === "range";
-      const isUndoRedoChord = (e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z" || e.key === "y" || e.key === "Y");
-      if (t && !(isSliderFocus && isUndoRedoChord) && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA" || t.isContentEditable)) {
-        // NEW-1 — the guard stays (you must be able to type), but it no longer swallows Delete in
-        // SILENCE. Editing a building's width in Properties and then pressing Delete looked exactly
-        // like "delete is broken": the element sat visibly selected and the key did nothing, with no
-        // explanation. shouldHintTypingGuard keeps this from becoming noise — Delete only (never
-        // Backspace, the natural editing key), only with a live selection, once per focused field.
-        const fieldKey = t.id || t.name || t.getAttribute("aria-label") || t.placeholder || t.tagName;
-        if (shouldHintTypingGuard({ key: e.key, hasSelection: !!(selRef.current || multiRef.current.length), fieldKey, lastHintedField: typingHintRef.current })) {
-          typingHintRef.current = fieldKey;
-          flashWarn(TYPING_GUARD_HINT, 4500);
-          reportClientEvent("delete-attempt", "key:delete → swallowed by a focused field", { entry: "key:delete", result: "no-op", reason: "typing-guard", field: String(fieldKey).slice(0, 60) });
+      const canvasEl = wrapRef.current || svgRef.current;
+      const scope = focusScope({
+        tag: t ? t.tagName : null,
+        type: t ? t.type : null,
+        isContentEditable: !!(t && t.isContentEditable),
+        insideCanvas: !!(t && canvasEl && (canvasEl === t || canvasEl.contains(t))),
+        lastTouchedCanvas: canvasTouchRef.current === TOUCH.CANVAS,
+      });
+      const verdict = keyScopeVerdict({ entry: resolveKeyEntry(e), scope, fieldEdit: canvasTouchRef.current === TOUCH.FIELD });
+      if (!verdict.allow) {
+        /* LOUD-FAILURE — a refused key that would have CHANGED the plan says so, once per episode.
+         * A refused tool letter stays quiet: nothing was lost and nothing looks broken. */
+        const hasSelection = !!(selRef.current || multiRef.current.length);
+        if (shouldHintRefusal({ entry: verdict.entry, reason: verdict.reason, hasSelection, episode: keyEpisodeRef.current, lastHintedEpisode: typingHintRef.current })) {
+          typingHintRef.current = keyEpisodeRef.current;
+          flashWarn(SCOPE_GUARD_HINT[verdict.reason] || TYPING_GUARD_HINT, 4500);
+          if (verdict.entry.destructive) {
+            reportClientEvent("delete-attempt", `key:delete → refused (${verdict.reason})`, {
+              entry: "key:delete", result: "no-op", reason: verdict.reason,
+              field: String((t && (t.getAttribute("aria-label") || t.title || t.tagName)) || "").slice(0, 60),
+            });
+          }
         }
-        return; // don't hijack keys while typing in a field
+        return;
       }
-      typingHintRef.current = null; // focus left the field — the hint may fire again next time
       if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else if (!removeLastVertex()) undo(); return; } // Bluebeam: mid-draw Ctrl-Z peels the last placed vertex; only a no-draft Ctrl-Z does a global undo (matches Doc Review / Stitcher)
       if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); return; }
       // NEW-6 — Ctrl+C/X now copy WHATEVER is selected (element, markup, measurement, callout,
@@ -25786,9 +25833,14 @@ function Section({ title, children, collapsed, accent }) {
     </div>
   );
 }
+/* NEW-1 — `data-field-group` marks a VALUE-ENTRY ROW as one unit to the keyboard latch
+ * (shared/keyboard/keyScope.js). The label, the input and its ▲▼ steppers are one thing to the
+ * user, and pressing any of them means "I am editing this number" — so Delete and Backspace
+ * belong to the number, not to the plan, until the user touches the drawing again. Two of the
+ * seven measured ways the owner's building could be destroyed were presses on those steppers. */
 function Field({ label, children, title }) {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 8 }}>
+    <div data-field-group="1" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 8 }}>
       <span style={{ fontSize: 12, color: "var(--text-secondary)", ...(title ? { cursor: "help" } : null) }} title={title}>{label}</span>{children}
     </div>
   );
@@ -25868,20 +25920,75 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse,
     if (v !== value) onCommit(v);
   };
   const coarseStep = coarse != null ? coarse : (step != null ? step * 5 : 0);
+
+  /* NEW-1 — IS WHAT IS TYPED ACTUALLY REJECTED? Until now nothing in this control could answer that,
+   * and that is half of the owner's report. He said the Depth box "wasn't letting" him enter a value
+   * and sent a frame of it outlined in red; driven every way it can be driven — select-all-and-type,
+   * clear-with-Backspace-and-type, type-a-partial-and-Tab, type-and-click-away — the field took the
+   * value every single time. What he was looking at was the FOCUS ring, which was the app's accent
+   * and sat ~14 ΔE00 from its own error colour. So the focus ring moved to blue (src/index.css), and
+   * this is the state --danger is now reserved for: a value the control genuinely will not take.
+   *
+   * ⛔ AN EMPTY FIELD IS NOT AN ERROR. Clearing it is the first half of retyping it, and flagging
+   * that instant would recreate the very "it's rejecting me" impression this exists to remove. An
+   * empty draft still reverts on blur exactly as before (or clears, for an `allowClear` caller). */
+  const parsed = draft.trim() === "" ? null : Number(draft.trim());
+  const invalidReason = (() => {
+    if (draft.trim() === "") return null;
+    if (!Number.isFinite(parsed)) return "Not a number";
+    if (min != null && parsed < min) return `Smallest allowed is ${min}`;
+    if (max != null && parsed > max) return `Largest allowed is ${max}`;
+    return null;
+  })();
+
   const input = (
     <input style={style} value={draft} placeholder={placeholder} inputMode="decimal" aria-label={ariaLabel}
+      aria-invalid={invalidReason ? "true" : undefined}
+      aria-errormessage={invalidReason || undefined}
+      title={invalidReason || undefined}
       onFocus={() => { editing.current = true; }}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => {
-        if (e.key === "Enter") e.currentTarget.blur();
-        else if (e.key === "Escape") { setDraft(value == null ? "" : String(value)); e.currentTarget.blur(); }
+        /* NEW-1 — ENTER COMMITS IN PLACE AND KEEPS THE CARET. It used to `blur()`, which is the
+         * root of the owner's data loss: focus landed on <body>, the building stayed selected, and
+         * his next Backspace deleted it and its eight bonded elements. The keyboard latch refuses
+         * that key now whatever happens here, but a field that ejects you on Enter is wrong on its
+         * own terms — every spreadsheet and CAD input in the world commits and stays put, and being
+         * silently thrown out of the box is half of "it's not letting me input the depth".
+         *
+         * The value is selected after the commit, so the next digits RETYPE it (you never have to
+         * clear it first) and the commit is visible: the number you get back is the one the app
+         * took, highlighted. */
+        if (e.key === "Enter" || e.key === "Escape") {
+          e.preventDefault();
+          if (e.key === "Enter") commit(); else setDraft(value == null ? "" : String(value));
+          /* Still focused, so we are still editing — `commit()` clears this flag for the blur
+           * path, and leaving it cleared would let an incoming `value` change overwrite what the
+           * user types next. */
+          editing.current = true;
+          const el = e.currentTarget;
+          requestAnimationFrame(() => { try { el.select(); } catch (_) {} });
+        }
         else if (step != null && e.key === "ArrowUp") { e.preventDefault(); nudge(e.shiftKey ? coarseStep : step); }
         else if (step != null && e.key === "ArrowDown") { e.preventDefault(); nudge(-(e.shiftKey ? coarseStep : step)); }
       }}
     />
   );
-  if (step == null) return input;
+  /* ⛔ COLOUR IS NEVER THE ONLY CUE (owner requirement, and blue-vs-red is precisely the pair a
+   * red-green colour-blind reader cannot separate). Four independent signals carry this state: the
+   * ⚠ glyph, its accessible name, `aria-invalid` on the input itself, and — last — the colour. */
+  const warnGlyph = invalidReason ? (
+    <span data-testid="numinput-invalid" role="img" aria-label={`Invalid: ${invalidReason}`} title={invalidReason}
+      style={{ fontSize: 12, lineHeight: 1, color: "var(--danger)", cursor: "help", userSelect: "none" }}>⚠</span>
+  ) : null;
+
+  if (step == null) {
+    if (!warnGlyph) return input;
+    return (
+      <span data-field-group="1" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>{input}{warnGlyph}</span>
+    );
+  }
   // preventDefault on mousedown keeps the input focused so a click nudges rather than firing a
   // blur-commit on a half-typed draft first (same trick as RotationStepper's spinner).
   const spinBtn = {
@@ -25890,8 +25997,9 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse,
     background: SURF_RAISED, color: "var(--text-secondary)", cursor: "pointer", fontFamily: "inherit",
   };
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+    <span data-field-group="1" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
       {input}
+      {warnGlyph}
       <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <button type="button" style={spinBtn} aria-label="Increase" title="Increase (↑ · Shift for a larger step)"
           onMouseDown={(e) => e.preventDefault()} onClick={() => nudge(step)}>▲</button>
