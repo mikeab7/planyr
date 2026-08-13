@@ -113,6 +113,39 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V251152 — B456208: does "add as a new contact?" stay out of the way on his OWN registry? `Blocker: auth` `Blocker: real-data`
+
+**What is already proven here, and it is most of the feature.** `ui-audit/verify-contact-confirm.mjs`
+— 21 assertions, real browser, real key events — asserts both what the field SHOWS and what is
+COMMITTED on every route: a new name asks and writes nothing until answered · declining returns the
+typed text unharmed and still editable (Backspace then reads `Jason Berca`, not an empty box) ·
+confirming commits whole · an exact match, a pick from the filtered list, the `+ Add … as new
+contact` row and clearing the field all stay silent · click-away asks instead of creating. Eight
+mutations proven red across the browser and unit halves.
+
+**What is PENDING, and why only he can settle it.** The risk he named himself: *"If it nags on a
+normal selection it will be turned off within a day and you will have made things worse."* The
+sandbox runs against seed data with a handful of contacts. Whether the prompt feels invisible or
+irritating against his **real 17-contact registry**, with the names he actually types, is a
+judgement about frequency that no assertion can make.
+
+1. Sign in on https://planyr.io, open a real Schedule project.
+2. Assign owners the way you normally do — click the cell, type a few letters, pick the person from
+   the list. **Expect: no prompt, ever, on this path.** If it interrupts here, that is a defect, not
+   a preference — say so and it comes straight back out.
+3. Type the full name of someone already on file and press Enter. **Expect: no prompt.**
+4. Now type a name that is NOT on file and press Enter. **Expect:** `No match — add "…" as a new
+   contact?` with **Add contact** / **Keep editing**.
+5. Press **Keep editing** (or Escape). **Expect:** the box still holds every character you typed, with
+   the caret at the end, so a typo can be corrected rather than retyped. Fix it, pick the right
+   person, done.
+6. Repeat 4 and press **Add contact**. Reload. **Expect:** the task holds the full name and the
+   Contacts panel holds exactly one new person — spelled correctly.
+7. Type a new name and click AWAY without pressing Enter. **Expect:** it asks; it does NOT quietly
+   create anyone.
+
+**Result:** ⏳ pending.
+
 ### V250304 — B455360: a complicated parcel cut, on his own signed-in cloud plans `Blocker: auth`
 
 **What is proven WITHOUT sign-in, and it is a lot.** `e2e/parcel-split-complex-cut.spec.js` is
