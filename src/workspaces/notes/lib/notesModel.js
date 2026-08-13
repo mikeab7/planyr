@@ -391,10 +391,19 @@ export function touchPage(tree, pageId, at = Date.now()) {
  * clearing the field and typing. The DEFAULT is applied on COMMIT (`commitTitle` below, called
  * when the field is left), and the rail shows a placeholder for a page whose name is empty.
  */
-export function renameNode(tree, id, title) {
+export function renameNode(tree, id, title, at = Date.now()) {
   const next = clone(tree);
   const hit = findPage(next, id);
-  if (hit) hit.page.title = String(title ?? "");
+  if (hit) {
+    hit.page.title = String(title ?? "");
+    /* ⛔ A RENAME IS AN EDIT, AND IT HAS TO BE DATED OR THE MERGE CANNOT ARBITRATE IT
+     * (B342996). Two computers holding the same page can disagree about its name, and the
+     * only honest way to settle that is which name was typed LAST. Without a stamp there is
+     * no answer to ask for, so `mergeTrees` fell back to "whichever side is local" — which
+     * meant a rename made on one machine was reverted by the other and pushed back up. */
+    hit.page.updatedAt = at;
+    if (!Number.isFinite(hit.page.createdAt)) hit.page.createdAt = at;
+  }
   return next;
 }
 
@@ -456,10 +465,13 @@ export function movePage(tree, pageId, toParentId = null, index, { projectId } =
 /** Re-bind a ROOT page to a project (or to `null` = not in a project). A non-root id is a
  *  no-op: a subpage's project is its root's, and letting a child claim a different one is
  *  exactly the redundant-state trap this model exists to avoid. */
-export function setPageProject(tree, pageId, projectId) {
+export function setPageProject(tree, pageId, projectId, at = Date.now()) {
   const next = clone(tree);
   const root = next.pages.find((p) => p.id === pageId);
-  if (root) root.projectId = projectId == null ? null : String(projectId);
+  if (root) {
+    root.projectId = projectId == null ? null : String(projectId);
+    root.updatedAt = at;   // re-filing is an edit too — same reason as `renameNode` (B342996)
+  }
   return next;
 }
 

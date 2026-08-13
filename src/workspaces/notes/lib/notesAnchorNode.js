@@ -321,15 +321,30 @@ export const NoteAnchor = Node.create({
       dom.appendChild(size);
       dom.appendChild(content);
 
+      /* ⛔ THE LEFT EDGE IS READ FROM THE RENDERED BOX, NOT FROM THE CLOSURE'S `node`
+       * (B400177). The node view is created once and `update()` re-styles the element without
+       * rebinding `node`, so `node.attrs` describes the box as it was when the view was BUILT.
+       * Resize a box you have already dragged and the width was computed against its OLD left
+       * edge: measured on a ten-box page, a drag asking for 90 more produced 34 LESS. The
+       * element's own geometry cannot go stale, so that is what it asks. (Found by driving the
+       * control with a real mouse — it had been reported as present but never exercised, which
+       * is the whole distance between "the button is there" and "the button works".) */
       let sizing = null;
       size.addEventListener("pointerdown", (e) => {
         e.preventDefault();
         e.stopPropagation();
         const host = editor.view.dom;
         const hostRect = host.getBoundingClientRect();
+        const scale = hostRect.width / (host.offsetWidth || 1) || 1;
+        const boxRect = dom.getBoundingClientRect();
         sizing = {
-          scale: hostRect.width / (host.offsetWidth || 1) || 1,
-          left: num(node.attrs.x),
+          scale,
+          left: (boxRect.left - hostRect.left) / scale,
+          /* ⛔ WHERE ON THE HANDLE YOU GRABBED IT, kept — the same rule the move drag follows,
+           * for the same reason. Without it the box's right edge jumps to the pointer the
+           * instant you press, so asking for 90 more gave 86: a small silent re-seat, which is
+           * precisely what the move drag's own comment forbids. */
+          grab: e.clientX - boxRect.right,
           host,
           moved: false,
         };
@@ -339,7 +354,7 @@ export const NoteAnchor = Node.create({
         if (!sizing) return;
         sizing.moved = true;
         const hostRect = sizing.host.getBoundingClientRect();   // fresh: the page may scroll
-        const wanted = (e.clientX - hostRect.left) / sizing.scale - sizing.left;
+        const wanted = (e.clientX - sizing.grab - hostRect.left) / sizing.scale - sizing.left;
         const room = sizing.host.offsetWidth - sizing.left - ANCHOR_EDGE_PAD;
         dom.style.width = `${Math.round(Math.max(ANCHOR_MIN_WIDTH, Math.min(wanted, room)))}px`;
       });
@@ -371,11 +386,14 @@ export const NoteAnchor = Node.create({
         const host = editor.view.dom;
         const hostRect = host.getBoundingClientRect();
         const boxRect = dom.getBoundingClientRect();
+        /* ⛔ NOTHING HERE READS `node.attrs` — deliberately, and the two fields that used to
+         * are gone rather than left unused. The closure's `node` is the node as it was when
+         * this view was BUILT (see the width handle above), so a stale read of it is a bug
+         * waiting for whoever edits this next. Every number below comes from the pointer and
+         * from live geometry. */
         from = {
           grabX: e.clientX - boxRect.left,
           grabY: e.clientY - boxRect.top,
-          x: num(node.attrs.x),
-          y: num(node.attrs.y),
           scale: hostRect.width / (host.offsetWidth || 1) || 1,
           moved: false,
         };

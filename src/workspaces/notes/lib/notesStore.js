@@ -261,7 +261,17 @@ function writeTreeLocal(tree, s = scope) {
  *  in, marks the tree as owing the cloud a push. */
 export function writeTree(tree) {
   const ok = writeTreeLocal(tree);
-  if (ok && scoped()) { sync.treeDirty = true; saveSyncState(); schedulePush(); }
+  if (ok && scoped()) {
+    /* ⛔ THE LEDGER IS ONLY REWRITTEN WHEN THE FLAG ACTUALLY CHANGES (B400176). The workspace
+     * now writes the tree THROUGH on every edit rather than on a debounce — because the copy
+     * the sync reads must never be staler than the copy on screen — so this runs on every
+     * keystroke of a rename. Re-serialising the whole sync ledger to say "still dirty" is the
+     * one part of that which was genuinely wasted. The push stays debounced (`schedulePush`),
+     * which is where a keystroke stream belongs: local durability is immediate, the network is
+     * not. */
+    if (!sync.treeDirty) { sync.treeDirty = true; saveSyncState(); }
+    schedulePush();
+  }
   return ok;
 }
 

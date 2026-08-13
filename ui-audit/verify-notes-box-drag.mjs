@@ -182,6 +182,91 @@ async function run(label, { width, height, zoomSteps = 0 }) {
     }
   }
 
+  /* ---- 3b. THE WIDTH HANDLE ACTUALLY RESIZES ------------------------------------------
+   *
+   * ⛔ REPORTED AS "PRESENT BUT NOT BEHAVIOUR-VERIFIED" — the control was found in the DOM, but
+   * a synthetic drag moves nothing on this build (the whole reason this file exists), so its
+   * BEHAVIOUR had never been driven. A control that exists and does nothing is worse than one
+   * that is missing, because nothing says so. Real mouse, stored attributes, both directions.
+   *
+   * The other assertions are the ones that would catch a plausible-but-wrong implementation:
+   * only the pressed box changes, its POSITION does not move while its width does, and the
+   * number that changes is the STORED `w` rather than a style the next reload forgets. */
+  const sizer = await page.evaluate((idx) => {
+    const el = [...document.querySelectorAll('[data-testid="note-anchor"]')]
+      .filter((e) => { const r = e.getBoundingClientRect(); return r.top > 70 && r.bottom < window.innerHeight - 20; })[idx];
+    const s = el?.querySelector('[data-testid="note-anchor-size"]');
+    if (!s) return null;
+    const r = s.getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  }, onScreen.length - 1);
+  ok(`${label} · the box has a width handle to press`, !!sizer);
+  if (sizer) {
+    const pre = await storedBoxes(page);
+    const scale2 = await page.evaluate(() => {
+      const dom = document.querySelector('[data-testid="note-body"]');
+      return dom.getBoundingClientRect().width / (dom.offsetWidth || 1) || 1;
+    });
+    const widen = 90;
+    await page.mouse.move(sizer.x, sizer.y);
+    await page.mouse.down();
+    for (let i = 1; i <= 6; i += 1) {
+      await page.mouse.move(Math.round(sizer.x + (widen * i) / 6), sizer.y);
+      await pacedWait(page, 30);
+    }
+    await page.mouse.up();
+    await pacedWait(page, 900);
+    const wide = await storedBoxes(page);
+    const changed = wide.map((b, i) => ({ i, dw: (b.w || 0) - (pre[i].w || 0) })).filter((m) => m.dw);
+    ok(`${label} · ⛔ A REAL DRAG ON THE WIDTH HANDLE RESIZES EXACTLY ONE BOX`,
+      changed.length === 1, JSON.stringify(changed));
+    if (changed.length === 1) {
+      ok(`${label} · ⛔ …BY THE POINTER DELTA, and the box does NOT move while it resizes`,
+        Math.abs(changed[0].dw - widen / scale2) <= 3
+          && wide[changed[0].i].x === pre[changed[0].i].x && wide[changed[0].i].y === pre[changed[0].i].y,
+        `asked ${Math.round(widen / scale2)} · got ${changed[0].dw} · x,y ${pre[changed[0].i].x},${pre[changed[0].i].y} → ${wide[changed[0].i].x},${wide[changed[0].i].y}`);
+
+      /* Narrowing is the direction a min-width floor silently eats — B350000 had exactly that
+       * bug, a stylesheet floor quietly undoing a width the code had chosen.
+       *
+       * ⛔ THE HANDLE IS RE-QUERIED, NOT ASSUMED. It travels with the box's right edge, so the
+       * first resize moved it; pressing where it USED to be presses empty page and reports "it
+       * did not narrow" about a gesture that never touched the control. That false failure
+       * happened on this harness's first run, beside the real one it found. */
+      const sizer2 = await page.evaluate((idx) => {
+        const el = [...document.querySelectorAll('[data-testid="note-anchor"]')]
+          .filter((e) => { const r = e.getBoundingClientRect(); return r.top > 70 && r.bottom < window.innerHeight - 20; })[idx];
+        const s = el?.querySelector('[data-testid="note-anchor-size"]');
+        if (!s) return null;
+        const r = s.getBoundingClientRect();
+        return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+      }, onScreen.length - 1);
+      ok(`${label} · the width handle is still findable after a resize`, !!sizer2);
+      const narrow = -140;
+      await page.mouse.move(sizer2.x, sizer2.y);
+      await page.mouse.down();
+      for (let i = 1; i <= 6; i += 1) {
+        await page.mouse.move(Math.round(sizer2.x + (narrow * i) / 6), sizer2.y);
+        await pacedWait(page, 30);
+      }
+      await page.mouse.up();
+      await pacedWait(page, 900);
+      const thin = await storedBoxes(page);
+      ok(`${label} · ⛔ …AND IT NARROWS AGAIN — no floor quietly undoing the chosen width`,
+        thin[changed[0].i].w < wide[changed[0].i].w,
+        `${wide[changed[0].i].w} → ${thin[changed[0].i].w}`);
+
+      /* ⛔ AND IT SURVIVES A RELOAD, which is the difference between a width and a style. */
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.waitForSelector('[data-testid="note-anchor"]', { timeout: 20000 });
+      await pacedWait(page, 600);
+      const back = await storedBoxes(page);
+      ok(`${label} · ⛔ …AND THE NEW WIDTH IS STILL THERE AFTER A RELOAD`,
+        back[changed[0].i]?.w === thin[changed[0].i].w,
+        `${thin[changed[0].i].w} → ${back[changed[0].i]?.w}`);
+    }
+  }
+
   /* ---- 4. AND THE WORDS ARE ALL STILL THERE ------------------------------------------- */
   const end = await storedBoxes(page);
   ok(`${label} · ⛔ EVERY BOX STILL HAS ITS WORDS — nothing was emptied or removed`,
