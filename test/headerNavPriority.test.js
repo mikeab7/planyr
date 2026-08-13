@@ -62,15 +62,15 @@ describe("the shortened pill drops whole FACTS, governing one first", () => {
     // wrong answer rather than a short one. The lead is kept whole or not at all — and on a split
     // site the lead names BOTH halves, because both really govern.
     const short = abbreviateJurisdiction(gooseCreek);
-    expect(short.text).toBe("Part in City of Baytown (6 of 14 lots) · rest in its ETJ +2");
-    expect(gooseCreek.text.startsWith("Part in City of Baytown (6 of 14 lots)")).toBe(true);
+    expect(short.text).toBe("Part in City of Baytown limits (full purpose, 6 of 14 lots) · rest in its ETJ +2");
+    expect(gooseCreek.text.startsWith("Part in City of Baytown limits (full purpose, 6 of 14 lots)")).toBe(true);
     expect(short.full).toBe(gooseCreek.text);
   });
 
   it("⛔ takes the SLOTS the label built, never a re-split of the rendered string", () => {
     // The split shape's lead slot contains the same middle dot the chain is joined with. Splitting
     // the rendered text would shatter that one governing fact into two and mis-count the rest.
-    expect(jurisdictionSegments(gooseCreek)).toContain("Part in City of Baytown (6 of 14 lots) · rest in its ETJ");
+    expect(jurisdictionSegments(gooseCreek)).toContain("Part in City of Baytown limits (full purpose, 6 of 14 lots) · rest in its ETJ");
     expect(abbreviateJurisdiction(gooseCreek).hidden).toBe(2);
   });
 

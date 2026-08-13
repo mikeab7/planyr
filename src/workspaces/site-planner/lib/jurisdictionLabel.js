@@ -61,6 +61,22 @@ export const JURISDICTION_SHAPES = Object.freeze([
 
 const list = (v) => (Array.isArray(v) ? v.filter((s) => s != null && s !== "").map(String) : []);
 
+/* ⛔ NEW-1 — LIMITED-PURPOSE AND STRIP ANNEXATION GET THEIR OWN SLOT AND THEIR OWN NOUN.
+ *
+ * "City of Baytown" is the phrase a reader takes to mean the city's whole ordinance set, so it is
+ * reserved for FULL-PURPOSE limits. Limited-purpose and strip annexation are named as what they
+ * are — they are real, they belong on the badge, and they are not the same fact. The plain-English
+ * explanation of each rides the info popover (`cityLimitClass.cityLimitGloss`), never the badge:
+ * PANEL-BREVITY rule 3, a named state beats a sentence explaining the state. */
+export const LIMIT_CLASS_NOUN = {
+  limited: (name) => `${name} limited-purpose annexation`,
+  strip: (name) => `${name} strip annexation`,
+  unknown: (name) => `${name} city-limits layer, class not stated`,
+};
+// A share, as the badge says it. Null share (no area pass) prints nothing — a lot count is NOT a
+// share and may never stand in for one (NEW-2).
+export const shareNote = (share) => (share == null ? "" : `${Math.round(share * 100)}% by area`);
+
 /* Which of the six the model is. Asked BEFORE any string is built, so the shape is a fact about
  * the jurisdiction rather than a description of the text that came out. */
 export function jurisdictionShapeOf(model = {}) {
@@ -82,7 +98,18 @@ function leadFor(model, shape) {
   const etj = list(model.etjCities);
   if (shape === "unknown") return "Couldn't check city limits";
   if (shape === "split") {
-    const cities = part.map((c) => `Part in City of ${c}${model.splitNote || ""}`).join(PEER_SEP);
+    /* NEW-1/NEW-2 — the split lead names the CLASS and states the share as an AREA fraction. Both
+     * halves are the item: "part in City of Baytown" gave no idea whether that is a third of the
+     * site or a lot line, and it did not distinguish full-purpose limits (Goose Creek) from a
+     * limited-purpose annexation (Grand Port), which are different amounts of authority. */
+    // `splitNote` arrives either already parenthesised (the legacy lot count) or bare (the area
+    // share). One pair of brackets, either way.
+    const bare = String(model.splitNote || "").trim().replace(/^\((.*)\)$/, "$1");
+    const note = [model.splitClass === "full" ? "full purpose" : null, bare].filter(Boolean).join(", ");
+    const noun = (c) => (model.splitClass && model.splitClass !== "full"
+      ? (LIMIT_CLASS_NOUN[model.splitClass] || LIMIT_CLASS_NOUN.unknown)(c)
+      : `City of ${c} limits`);
+    const cities = part.map((c) => `Part in ${noun(c)}${note ? ` (${note})` : ""}`).join(PEER_SEP);
     // The remainder is MEASURED upstream (B280704) — never assumed to be "unincorporated", because
     // at Goose Creek the other 8 of 14 lots sit inside Baytown's own ETJ, and calling ETJ land
     // unincorporated drops the city's floodplain standard out of the FFE comparison entirely.
@@ -112,9 +139,23 @@ function etjSlotFor(model, shape) {
 /* Format the whole label. Returns the pieces as well as the joined text, so a consumer that wants
  * one part (the county line, the tail) never has to split a string apart to get it — which is the
  * coupling NEW-2 exists to prevent. */
+/* The limited-purpose / strip slot. It sits AFTER the ETJ because it is the weaker claim of the
+ * two on land outside a city's limits — an ETJ is a defined statutory reach, a limited-purpose
+ * annexation is a specific instrument whose scope has to be confirmed with the city. It is
+ * omitted entirely when there is none, so no site that has never met one gains a character. */
+function limitedSlotFor(model) {
+  const areas = Array.isArray(model.limitedAreas) ? model.limitedAreas : [];
+  if (!areas.length) return null;
+  return areas.map((a) => {
+    const noun = (LIMIT_CLASS_NOUN[a.class] || LIMIT_CLASS_NOUN.unknown)(String(a.name || "").replace(/^City of\s+/i, ""));
+    const note = shareNote(a.share);
+    return note ? `${noun} (${note})` : noun;
+  }).join(PEER_SEP);
+}
+
 export function formatJurisdictionLabel(model = {}) {
   const shape = jurisdictionShapeOf(model);
-  const slots = [leadFor(model, shape), etjSlotFor(model, shape)].filter(Boolean);
+  const slots = [leadFor(model, shape), etjSlotFor(model, shape), limitedSlotFor(model)].filter(Boolean);
   const jur = slots.join(SLOT_SEP);
 
   const counties = list(model.counties);

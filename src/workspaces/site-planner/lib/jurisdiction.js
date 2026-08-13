@@ -38,6 +38,14 @@ import { resolveCounty } from "./countyPolygons.js";
  * wording: it owns the four shapes and the three-level separator grammar that keeps a governing
  * authority from being joined to a merely-adjacent city by the same mark. */
 import { formatJurisdictionLabel } from "./jurisdictionLabel.js";
+/* ⛔ NEW-2 — A SHARE IS AN AREA FRACTION ON THE REAL RING. Read `jurisdictionShare.js`'s header
+ * before touching how membership is decided here: point/vertex sampling measured 75% where the
+ * area is 96.2% on the owner's own Goose Creek parcel, and 70–85% where it is 99% at Grand Port. */
+import {
+  areaShare, unionAreaSqM, ringsAsPolygons, esriPolygons, SQM_PER_ACRE,
+} from "./jurisdictionShare.js";
+/* ⛔ NEW-1 — "city limits" is three jurisdiction classes, not a boolean. */
+import { classifyCityLimit, CITY_LIMIT_CLASSES, dominantClass } from "./cityLimitClass.js";
 
 // ---------------------------------------------------------------------------
 // Source registry — one row per layer. `kind` picks the query: "polygon" = a
@@ -69,6 +77,11 @@ export const JURISDICTION_SOURCES = {
     id: "city", role: "city", label: "City limits", kind: "polygon",
     url: GIS_SOURCES.city.serviceUrl,
     fields: { name: "city_name" },
+    /* NEW-1 — this source carries FULL-PURPOSE limits only, and that is measured, not assumed:
+     * see the `fullPurposeOnly` note on its registry row. */
+    fullPurposeOnly: GIS_SOURCES.city.fullPurposeOnly,
+    /* NEW-2 — the city role answers a SHARE, so it needs the polygons, not just their names. */
+    needGeometry: true,
     ttl: 7 * 24 * 3600 * 1000,
     sourceName: "TxGIO (statewide)",
     note: "Texas city limits (TxGIO). A point in no city reads as unincorporated. Screening only — verify with the city.",
@@ -212,6 +225,38 @@ export function countySourcesForPoint(lat, lng) {
   const inCo = Number.isFinite(lat) && Number.isFinite(lng) &&
     lat >= CO_ENVELOPE.latMin && lat <= CO_ENVELOPE.latMax && lng >= CO_ENVELOPE.lonMin && lng <= CO_ENVELOPE.lonMax;
   return [inCo ? JURISDICTION_SOURCES.countyCo : JURISDICTION_SOURCES.county];
+}
+
+/* ⛔ NEW-1 — THE CITY ROLE BECOMES A REGION-ROUTED LIST, exactly as ETJ already is, and for the
+ * same reason: a statewide layer is not the only publisher of a city boundary, and here it is not
+ * the complete one. TxGIO carries Baytown's FULL-PURPOSE limits and nothing else — its answer at
+ * the owner's Grand Port origin is "no city", while Baytown's own layer puts that ground 99% inside
+ * a LIMITED ANNEXATION polygon. Both are true; they are answers to different questions, and only
+ * the city's own layer can tell them apart.
+ *
+ * ⚠ B286307's caution still stands and is honoured: the statewide row is FIRST and is never
+ * replaced. A city row ADDS what the statewide layer cannot say (the class, and the polygons it
+ * does not publish); it does not overrule it. Where both answer full-purpose limits for one city,
+ * the shares are merged by taking the larger measured area, with both sources named. */
+export const CITY_SOURCES = [
+  JURISDICTION_SOURCES.city,
+  {
+    id: "city_baytown", role: "city", label: "City limits — City of Baytown", kind: "polygon",
+    region: "Baytown", bbox: [29.6, -95.15, 30.0, -94.75],
+    url: GIS_SOURCES.city_baytown.serviceUrl,
+    fields: GIS_SOURCES.city_baytown.fields, nameConst: "Baytown",
+    limitClassField: GIS_SOURCES.city_baytown.limitClassField,
+    limitClassFallbackFields: GIS_SOURCES.city_baytown.limitClassFallbackFields,
+    limitClassMap: GIS_SOURCES.city_baytown.limitClassMap,
+    needGeometry: true,
+    ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "City of Baytown GIS",
+    coverage: "City of Baytown — full-purpose limits, limited-purpose annexation and strip annexation, in one layer",
+    note: "City of Baytown's own city-limits layer. It carries three jurisdiction classes; only FEATURE='CITY' is full-purpose limits. Screening only — verify with the city.",
+  },
+];
+export function citySourcesForPoint(lat, lng) {
+  return CITY_SOURCES.filter((s) => !s.bbox || bboxHas(s.bbox, lat, lng));
 }
 
 // ---------------------------------------------------------------------------
@@ -393,8 +438,14 @@ export function buildIdentifyParams(source, geom) {
     outFields,
     inSR: 4326, outSR: 4326,
     spatialRel: "esriSpatialRelIntersects",
-    returnGeometry: source.kind === "line" ? "true" : "false",
+    /* NEW-2 — a caller that needs a SHARE asks for the polygons (`geom.returnGeometry`). Nothing
+     * else changed: the name-union identify still asks for attributes only, so no existing query
+     * gains a payload. `geometryPrecision: 6` is ~4 inches — finer than any published boundary and
+     * a large saving on a 26,000-acre city polygon. The generalisation knob is deliberately NOT
+     * set: a share must be computed from the boundary as published (jurisdictionShare rule 2). */
+    returnGeometry: source.kind === "line" || geom.returnGeometry ? "true" : "false",
   };
+  if (geom.returnGeometry) p.geometryPrecision = 6;
   /* NEW-1 — a MULTIPOINT geometry: "which cities contain ANY of these points". One query answers
    * the whole-assemblage containment question that a single point cannot (see the parcel-coverage
    * block in `identifyJurisdiction`). Verified live against all three agency services 2026-08-08 —
@@ -446,6 +497,12 @@ export function normalizeFeature(source, attrs) {
   if ((out.name == null || out.name === "") && source.nameConst) out.name = source.nameConst;
   // Some sources publish the name ALL-CAPS (e.g. H-GAC ETJ `CITY`) → title-case it.
   if (out.name != null && out.name !== "" && source.titleCaseName) out.name = titleCase(out.name);
+  /* ⛔ NEW-1 — THE JURISDICTION CLASS TRAVELS WITH THE FEATURE, from here on. Baytown's one
+   * city-limits table mixes full-purpose limits with limited-purpose and strip annexation, and a
+   * consumer that reads only `name` cannot tell them apart — which is how 24 of 38 polygons came to
+   * read as "City of Baytown". A source that declares `fullPurposeOnly` classifies as `full`; one
+   * that declares neither classifies as `unknown` and is never upgraded. */
+  if (source.role === "city") out.limitClass = classifyCityLimit(source, attrs).id;
   return out;
 }
 
@@ -629,6 +686,150 @@ export function parcelProbePoints(rings) {
   };
 }
 
+/* ═══ NEW-2 — THE CITY SHARE, MEASURED ═══════════════════════════════════════════════════════
+ *
+ * Two thresholds, both stated in AREA because that is what the question is about:
+ *   • `CITY_SHARE_WHOLE` — at or above this, a city holds the site and leads unqualified. It is
+ *     not 1.0 because a boundary digitised by two different agencies never closes to the inch, and
+ *     half a percent of a 100-acre tract is a strip four feet wide down one lot line.
+ *   • `CITY_SHARE_MIN` — below this, the polygon clips the site without holding any of it. This is
+ *     B793's "edge only" frontage sliver, and it is now MEASURED rather than inferred from whether
+ *     a centroid happened to land inside: at Bain, Katy's sliver is a fraction of one percent of
+ *     the site, which is exactly what the badge should be saying.
+ */
+export const CITY_SHARE_WHOLE = 0.995;
+export const CITY_SHARE_MIN = 0.005;
+
+/* The query envelope for a share lookup: the bbox of every active parcel, padded. Five vertices,
+ * so it never touches the URL ladder that decimates a finely-digitised ring (B276755) — the
+ * boundary geometry comes back whole and the intersection is computed here, against the REAL ring,
+ * not against a 10-vertex caricature of it. */
+export function shareQueryRing(rings, padDeg = 0.0008) {
+  let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+  for (const r of rings || []) for (const [x, y] of r || []) {
+    if (x < minx) minx = x; if (x > maxx) maxx = x;
+    if (y < miny) miny = y; if (y > maxy) maxy = y;
+  }
+  if (!Number.isFinite(minx)) return null;
+  minx -= padDeg; miny -= padDeg; maxx += padDeg; maxy += padDeg;
+  return [[minx, miny], [maxx, miny], [maxx, maxy], [minx, maxy], [minx, miny]];
+}
+
+/* Turn one source's returned features into per-city, per-CLASS area shares — whole-site and
+ * per-parcel. Pure (no network): the fetch is the caller's. */
+export function cityAreasFromFeatures(src, features, rings, ref, opts = {}) {
+  const toleranceM = Number(opts.toleranceM) || 0;
+  const site = ringsAsPolygons(rings);
+  const totalSqM = unionAreaSqM(site, ref);
+  const parcels = (rings || []).map((r) => ringsAsPolygons([r]));
+  const groups = new Map();
+  for (const f of features || []) {
+    const n = normalizeFeature(src, f.attrs || {});
+    if (n.name == null || n.name === "") continue;
+    const cls = n.limitClass || CITY_LIMIT_CLASSES.unknown.id;
+    const key = placeKey(n.name) + "|" + cls;
+    const g = groups.get(key) || { name: String(n.name), class: cls, polys: [], uniqueIds: [] };
+    g.polys.push(...esriPolygons(f.geometry));
+    if (n.uniqueId) g.uniqueIds.push(String(n.uniqueId));
+    groups.set(key, g);
+  }
+  /* ⛔ A SOURCE THAT ANSWERED WITHOUT GEOMETRY HAS NOT MEASURED ANYTHING, and saying "0% in the
+   * city" off that is the worst possible failure of this module — a confident negative. Features
+   * with no usable polygons return NULL so the caller falls back to the point probe and records
+   * `shareMethod: "points"`. (This is not hypothetical: every recorded regression fixture in this
+   * repo predates the geometry request, and without this they would all have read "no city".) */
+  const withGeom = (features || []).filter((f) => f && f.geometry && (f.geometry.rings || []).length).length;
+  if ((features || []).length && !withGeom) return null;
+  const rows = [];
+  for (const g of groups.values()) {
+    if (!g.polys.length) continue;
+    const whole = areaShare(site, g.polys, ref, { toleranceM, totalSqM });
+    rows.push({
+      name: g.name, class: g.class, sourceId: src.id, uniqueIds: uniq(g.uniqueIds),
+      share: whole.share, rawShare: whole.rawShare,
+      insideAcres: whole.insideAcres, distanceM: whole.distanceM,
+      confident: whole.confident, refusedReason: whole.refusedReason,
+      perParcel: parcels.map((p, i) => {
+        const r = areaShare(p, g.polys, ref, { toleranceM });
+        return { index: i, id: (opts.parcelIds || [])[i] || null, acres: r.totalAcres, share: r.share, insideAcres: r.insideAcres };
+      }),
+    });
+  }
+  rows.sort((a, b) => (b.rawShare || 0) - (a.rawShare || 0));
+  return {
+    method: "area", sourceId: src.id, toleranceM,
+    totalSqM, totalAcres: totalSqM / SQM_PER_ACRE,
+    parcelCount: (rings || []).length,
+    parcelAcres: parcels.map((p) => unionAreaSqM(p, ref) / SQM_PER_ACRE),
+    parcelIds: (opts.parcelIds || []).slice(0, (rings || []).length),
+    rows,
+  };
+}
+
+/* Merge several sources' answers. Where two sources both hold a city in the same class, the larger
+ * measured area wins and BOTH are named — the statewide layer and the city's own layer are two
+ * observations of one boundary, and reporting the smaller of them would silently under-state the
+ * city's reach (B286307's caution, honoured: nothing is replaced, the fuller answer is used). */
+export function mergeCityAreas(results) {
+  const live = (results || []).filter((r) => r && r.rows);
+  if (!live.length) return null;
+  const byKey = new Map();
+  for (const res of live) {
+    for (const row of res.rows) {
+      const key = placeKey(row.name) + "|" + row.class;
+      const cur = byKey.get(key);
+      if (!cur) { byKey.set(key, { ...row, sources: [res.sourceId], sourceShares: { [res.sourceId]: row.rawShare } }); continue; }
+      cur.sources = uniq([...cur.sources, res.sourceId]);
+      cur.uniqueIds = uniq([...cur.uniqueIds, ...row.uniqueIds]);
+      /* ⛔ THE DISAGREEMENT IS RECORDED, NOT RESOLVED AWAY. Two publishers of one boundary do not
+       * agree to the acre — at Goose Creek TxGIO's Baytown polygon holds 31.95% of the site and
+       * Baytown's own holds 31.01%, about a point apart. The larger is used (never under-state a
+       * city's reach), and both are kept so a reader who needs to know they differ can. */
+      const keptShares = { ...cur.sourceShares, [res.sourceId]: row.rawShare };
+      if ((row.rawShare || 0) > (cur.rawShare || 0)) {
+        Object.assign(cur, { ...row, sources: cur.sources, uniqueIds: cur.uniqueIds });
+      }
+      cur.sourceShares = keptShares;
+    }
+  }
+  const base = live[0];
+  return {
+    method: "area",
+    toleranceM: Math.max(...live.map((r) => r.toleranceM || 0)),
+    totalSqM: base.totalSqM, totalAcres: base.totalAcres,
+    parcelCount: base.parcelCount, parcelAcres: base.parcelAcres, parcelIds: base.parcelIds,
+    sources: live.map((r) => r.sourceId),
+    rows: Array.from(byKey.values()).sort((a, b) => (b.rawShare || 0) - (a.rawShare || 0)),
+  };
+}
+
+/* Fetch + compute one source's shares, through the SWR cache. ⚠ What is CACHED is the small
+ * derived answer, never the polygons: TxGIO's Baytown feature alone is 335 KB as published, and
+ * the screening cache's whole budget is 3 MB (TIER-BY-REBUILDABILITY — a cache may not crowd out
+ * the tier that holds the owner's work). The geometry is fetched, measured and dropped. */
+export function identifyCityShares(src, rings, ref, opts = {}) {
+  const cache = opts.cache || defaultCache;
+  const fetchJson = opts.fetchJson || defaultFetchJson;
+  const ring = shareQueryRing(rings);
+  if (!ring) return Promise.resolve(null);
+  const key = "jurshare:" + src.id + ":" + ringKey(rings.flat());
+  const fetcher = async () => {
+    const params = buildIdentifyParams(src, { ring, returnGeometry: true, maxVerts: 8 });
+    const direct = buildQueryUrl(src.url, params);
+    const proxied = src.viaProxy ? proxiedQueryUrl(src.url, params) : null;
+    let j;
+    if (proxied) { try { j = await fetchJson(proxied); } catch (_) { j = await fetchJson(direct); } }
+    else j = await fetchJson(direct);
+    const feats = (j.features || []).map((f) => ({ attrs: f.attributes || {}, geometry: f.geometry || null }));
+    const res = cityAreasFromFeatures(src, feats, rings, ref, { parcelIds: opts.parcelIds });
+    // A null here is "could not measure" — cache nothing, so the next call retries.
+    if (!res) throw new Error("city share: source answered without geometry");
+    return res;
+  };
+  const { fresh } = cache.swr(key, fetcher, { ttl: src.ttl || 0 });
+  return fresh.then((r) => (r && r.data && r.data.rows ? r.data : null)).catch(() => null);
+}
+
 export async function identifyJurisdiction(lng, lat, opts = {}) {
   const geom = opts.ring && opts.ring.length >= 3 ? { ring: opts.ring } : { lng, lat };
   const roles = opts.roles || ["county", "city", "etj", "isd"]; // B764: ISD joins the default identify
@@ -648,7 +849,11 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
   const sourcesForRole = (role) =>
     role === "etj" ? etjSourcesForPoint(lat, lng)
     : role === "county" ? countySourcesForPoint(lat, lng)   // NEW-5 — Texas-identical outside Colorado
+    : role === "city" ? citySourcesForPoint(lat, lng)       // NEW-1 — the statewide row, plus any city's own
     : (JURISDICTION_SOURCES[role] ? [JURISDICTION_SOURCES[role]] : []);
+  // NEW-2 — the rings the SHARE is measured on: every active parcel when the caller has them.
+  const shareRings = (opts.rings && opts.rings.length ? opts.rings : (opts.ring ? [opts.ring] : []))
+    .filter((r) => r && r.length >= 3);
   await Promise.all(roles.map(async (role) => {
     const srcs = sourcesForRole(role).filter((s) => s && !s.unavailable && s.url);
     if (!srcs.length) {
@@ -663,7 +868,16 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
     const parts = await Promise.all(srcs.map(async (src) => {
       const q = identifySource(src, geom, opts);
       const r = await q.fresh;
-      const names = uniq(r.items.map((it) => normalizeFeature(src, it.attrs).name).filter((v) => v != null && v !== "").map(String));
+      /* ⛔ NEW-1 — the CITY name union carries FULL-PURPOSE hits only. Baytown's layer names every
+       * one of its three classes "Baytown", so an unfiltered union put a limited-purpose annexation
+       * into the same set that decides `unincorporated` and feeds the floodplain administrator —
+       * i.e. exactly the overstatement this item is about, arriving through the back door. The
+       * other two classes are reported, in their own field, by the area pass below. */
+      const feats = r.items.map((it) => normalizeFeature(src, it.attrs));
+      const kept = src.role === "city"
+        ? feats.filter((f) => (f.limitClass || CITY_LIMIT_CLASSES.unknown.id) === CITY_LIMIT_CLASSES.full.id)
+        : feats;
+      const names = uniq(kept.map((f) => f.name).filter((v) => v != null && v !== "").map(String));
       return { names, error: r.error || null, ageMs: r.ageMs, ts: r.ts, stale: q.stale };
     }));
     const names = uniq(parts.flatMap((p) => p.names));
@@ -671,8 +885,21 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
     out[role] = names;
     out.ages[role] = ages.length ? Math.min(...ages) : null;
     const errPart = parts.find((p) => p.error);
-    const state = names.length ? "loaded" : errPart ? "failed" : "empty";
-    out.sources.push({ id: role, state, ageMs: out.ages[role], msg: errPart ? humanize(errPart.error) : null });
+    /* ⛔ NEW-1 — A ROLE IS "FAILED" ONLY WHEN NOTHING ANSWERED IT. Adding a second city source made
+     * this bite: with the statewide layer healthy and a city's own layer down, `parts.find(error)`
+     * declared the whole role unresolved, so the badge led with "Couldn't check city limits" on a
+     * site the statewide layer had answered perfectly well. One source going quiet degrades the
+     * answer; it does not erase it. (`citySourceErrors` still records WHICH one, so the degradation
+     * is visible rather than silent — LOUD-FAILURE.) */
+    const allErrored = parts.length > 0 && parts.every((p) => p.error);
+    const state = names.length ? "loaded" : allErrored ? "failed" : "empty";
+    out.sources.push({ id: role, state, ageMs: out.ages[role], msg: errPart ? humanize(errPart.error) : null,
+      degraded: !!errPart && !allErrored });
+    if (role === "city" && errPart) {
+      out.citySourceErrors = srcs
+        .map((s, i) => (parts[i] && parts[i].error ? { id: s.id, msg: humanize(parts[i].error) } : null))
+        .filter(Boolean);
+    }
     opts.onStatus && opts.onStatus(role, state, errPart ? humanize(errPart.error) : null, { ts: parts[0]?.ts ?? null, stale: parts.some((p) => p.stale) });
     /* B793 — a ring query unions EVERY touching city, so a frontage sliver reads exactly
      * like real membership. Test the CENTROID point too (same SWR cache) so the badge can
@@ -686,6 +913,46 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
      * from "we know, and it's this". Every branch now sets it explicitly, so null means UNKNOWN and
      * nothing else. */
     if (role === "city") {
+      /* ⛔ NEW-2 — THE AREA PASS, AND IT IS THE AUTHORITY WHEN IT ANSWERS.
+       *
+       * One query per city source returns the boundary polygons over the site's bbox; every share
+       * and every membership below is then measured HERE, against the real rings, with the
+       * jurisdiction's own interior holes subtracted. What it replaces is a multipoint query plus
+       * one point query per parcel — so this is FEWER requests, not more, and the answer it gives
+       * is the one the question asked for.
+       *
+       * It is allowed to fail. A source that returns no geometry (an outage, or a caller in a unit
+       * test injecting attribute-only fixtures) leaves `cityAreas` null and the point probe below
+       * runs exactly as it always did — with `shareMethod: "points"` recorded, and NO share stated,
+       * because a lot count is not a share. */
+      if (shareRings.length) {
+        const areaParts = await Promise.all(srcs.map((s) =>
+          identifyCityShares(s, shareRings, [lng, lat], { ...opts, parcelIds: opts.parcelIds })));
+        const merged = mergeCityAreas(areaParts);
+        if (merged && merged.rows.length >= 0 && areaParts.some(Boolean)) {
+          out.cityAreas = merged;
+          const stated = merged.rows.filter((r) => r.share != null);
+          const full = stated.filter((r) => r.class === CITY_LIMIT_CLASSES.full.id);
+          const held = full.filter((r) => r.share >= CITY_SHARE_MIN);
+          out.cityAll = full.filter((r) => r.share >= CITY_SHARE_WHOLE).map((r) => r.name);
+          out.citySome = held.filter((r) => r.share < CITY_SHARE_WHOLE).map((r) => r.name);
+          out.cityCentroid = uniq([...out.cityAll, ...out.citySome]);
+          out.cityEdgeShares = full.filter((r) => r.rawShare > 0 && r.share < CITY_SHARE_MIN);
+          /* ⛔ NEW-1 — LIMITED-PURPOSE AND STRIP ANNEXATION ARE THEIR OWN FACT AND NEVER JOIN
+           * `out.city`. Folding them in would make `unincorporated` false on land that is not in
+           * any city's full-purpose limits — Grand Port exactly — and would hand the city's whole
+           * ordinance set, floodplain rules included, authority it does not have there. */
+          out.cityLimitedAreas = stated
+            .filter((r) => r.class !== CITY_LIMIT_CLASSES.full.id && r.share >= CITY_SHARE_MIN)
+            .map((r) => ({ name: r.name, class: r.class, share: r.share, insideAcres: r.insideAcres, uniqueIds: r.uniqueIds, sources: r.sources }));
+          out.cityShareMethod = "area";
+          out.cityShareTolerance = merged.toleranceM;
+          out.cityPerParcel = merged.parcelAcres.map((_, i) =>
+            held.filter((r) => (r.perParcel[i] || {}).share >= CITY_SHARE_MIN).map((r) => r.name));
+          out.city = uniq([...out.city, ...out.cityAll, ...out.citySome]);
+          return;
+        }
+      }
       if (state === "failed") {
         out.cityCentroid = null;                 // genuinely unknown — never claim edge-only or unincorporated off this
         out.cityAll = null; out.citySome = [];
@@ -752,6 +1019,8 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
        * parcel probe — left out of this union, Baytown would have been discovered and then silently
        * dropped, which is a worse failure than never looking. */
       out.city = uniq([...out.city, ...(out.cityAll || []), ...out.citySome]);
+      // NEW-2 — say which instrument answered. "points" may never state a share (see the badge).
+      out.cityShareMethod = "points";
     }
   }));
   /* ⛔ B209506 — ONE DEFINITION OF "WHAT CITY IS THIS IN", AND IT IS CONTAINMENT.
@@ -773,8 +1042,20 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
     : out.cityAll.length ? "in"
     : out.citySome.length ? "partial"
     : "none";
-  out.cityCoverage = {
-    tested: probe.tested, total: probe.total,
+  /* NEW-2 — with the area pass the coverage IS complete: every active parcel is measured, not a
+   * largest-first sample to 98% of drawn area, so `sampled`/`truncated` are both false by
+   * construction and `areaShare` (the share of the site the TEST covered) is 1. The city shares
+   * themselves ride `cityAreas`, never this object — do not conflate "how much of the site did we
+   * test" with "how much of the site is in the city". */
+  const areaCov = out.cityAreas || null;
+  out.cityCoverage = areaCov ? {
+    tested: areaCov.parcelCount, total: areaCov.parcelCount,
+    sampled: false, truncated: false, areaShare: 1, method: "area",
+    siteAcres: areaCov.totalAcres,
+    inCity: (out.cityPerParcel || []).filter((p) => p && p.length).length,
+    outsideCity: (out.cityPerParcel || []).filter((p) => p && !p.length).length,
+  } : {
+    tested: probe.tested, total: probe.total, method: "points",
     sampled: probe.sampled, truncated: probe.truncated, areaShare: probe.areaShare,
     // NEW-1a — HOW MANY of the tested parcels each city holds. A straddle is not a yes/no; the
     // reader needs to know whether it is one lot of fourteen or thirteen.
@@ -899,9 +1180,21 @@ export function formatJurisdictionBadge(j, opts = {}) {
    * `remainderLabel` names what the REST of the site is, and it is the fact that the first cut of
    * this got wrong by assuming. */
   const cov = j.cityCoverage || null;
-  const splitCount = cov && Number.isFinite(cov.inCity) && Number.isFinite(cov.tested) && cov.tested > 0
+  /* ⛔ NEW-2 — WHEN THERE IS AN AREA ANSWER, THE BADGE STATES IT, AND THE LOT COUNT GOES AWAY.
+   * "6 of 14 lots" is a count of records, not a measure of land: at Goose Creek the lots inside
+   * Baytown are the biggest one on the plan, so the count reads 43% where the land reads 31%. The
+   * count survives ONLY as the fallback when no geometry could be measured, where it is at least
+   * honestly a count. */
+  const areas = j.cityAreas || null;
+  const shareOfCity = (name) => {
+    if (!areas) return null;
+    const row = areas.rows.find((r) => r.class === CITY_LIMIT_CLASSES.full.id && samePlace(r.name, name));
+    return row && row.share != null ? row.share : null;
+  };
+  const lotNote = cov && Number.isFinite(cov.inCity) && Number.isFinite(cov.tested) && cov.tested > 0
     ? ` (${cov.inCity} of ${cov.tested} lot${cov.tested === 1 ? "" : "s"})`
     : "";
+  const splitCount = areas ? "" : lotNote;
 
   /* ⛔ B209506/B209507 — THE LEAD IS WHAT GOVERNS, AND SILENCE IS NEVER AN ANSWER.
    *
@@ -994,10 +1287,15 @@ export function formatJurisdictionBadge(j, opts = {}) {
    * in `jurisdictionLabel.js` so there is exactly one place that decides how a governing authority
    * and a next-door city are told apart. Nothing reads back out of the strings — the structured
    * fields are returned alongside them for that (NEW-2). */
+  // NEW-2 — the share the split lead states, taken from the same measurement the split came from,
+  // so the words and the number cannot disagree.
+  const splitShare = partCities.length ? shareOfCity(partCities[0]) : null;
   const label = formatJurisdictionLabel({
     governingCities: coreCities,
     partialCities: partCities,
-    splitNote: splitCount,
+    splitClass: partCities.length ? CITY_LIMIT_CLASSES.full.id : null,
+    limitedAreas: j.cityLimitedAreas || [],
+    splitNote: splitShare != null ? ` ${Math.round(splitShare * 100)}% by area` : splitCount,
     remainderLabel,
     etjCities: etjs,
     counties,
@@ -1039,6 +1337,14 @@ export function formatJurisdictionBadge(j, opts = {}) {
     touchesCities: touchCities,
     // NEW-1a — the split, in numbers, and the cities whose ETJ nobody publishes.
     cityCoverage: cov,
+    /* NEW-1/NEW-2 — the measured answer, as data: every city × class with its AREA share, the
+     * limited-purpose / strip areas as their own list, and WHICH instrument answered. A consumer
+     * that needs "how much of this site is in Baytown" reads `cityAreas`; nothing takes the
+     * percentage back out of the string. */
+    cityAreas: areas,
+    cityLimitedAreas: j.cityLimitedAreas || [],
+    cityShareMethod: j.cityShareMethod || null,
+    citySharePct: splitShare != null ? splitShare : (coreCities.length ? shareOfCity(coreCities[0]) : null),
     etjUnmappedCities: j.etjUnmappedCities || [],
     // B209507 — what the badge could NOT establish, carried explicitly so a consumer (the floodplain
     // administrator especially) can refuse to settle rather than reading silence as absence.
@@ -1046,7 +1352,20 @@ export function formatJurisdictionBadge(j, opts = {}) {
     unresolved: unresolvedRoles.length > 0,
     cityContainment: j.cityContainment
       || (containmentUnknown ? "unknown" : coreCities.length ? "in" : partCities.length ? "partial" : centroid === null ? "unknown" : "none"),
-    etjLabels: etjs,
+    /* ⛔ NEW-3 — ON A SPLIT SITE THE CITY'S OWN ETJ IS STILL A GOVERNING FACT, AND IT WAS BEING
+     * DROPPED FROM THE DATA WHILE THE TEXT KEPT SAYING IT.
+     *
+     * `etjs` is deduped against the city limits that hold the site (B276754), which is right for a
+     * WHOLE-site answer — you do not print "City of Houston · Houston ETJ". On a SPLIT it removed
+     * the ETJ that governs the part the limits do NOT cover: the label still said "rest in its ETJ"
+     * (from `remainderLabel`), but `etjLabels` came back EMPTY, and `SitePlanner` reads exactly that
+     * field to hand `etjLabel` to the floodplain administrator. So on every split site the city's
+     * ETJ ordinance silently stopped being a candidate — at JFK that is City of Houston Ch. 19
+     * (500-yr WSE + 2 ft), commonly 1–2 ft above the county rule that then won by default. Found by
+     * the portfolio sweep, which flagged the badge for naming an ETJ nowhere in its own data. */
+    etjLabels: partCities.length
+      ? uniq([...etjs, ...etjsRaw.filter((e) => partCities.some((c) => samePlace(c, e)))])
+      : etjs,
   };
 }
 

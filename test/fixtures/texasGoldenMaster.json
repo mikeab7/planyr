@@ -1951,6 +1951,18 @@
       "source": "Montgomery County drainage criteria (not yet transcribed).",
       "sourceDate": null
     },
+    "baytown": {
+      "label": "City of Baytown",
+      "trigger": null,
+      "ratio": null,
+      "floodwayPolicy": null,
+      "offsetScope": null,
+      "offsetElevBasis": null,
+      "floodwayBufferFt": null,
+      "verified": false,
+      "source": "City of Baytown flood damage prevention ordinance — NOT TRANSCRIBED. Both publication routes (library.municode.com, baytown.org) are refused by this environment's egress proxy; measured 2026-08-12.",
+      "sourceDate": null
+    },
     "chambers": {
       "label": "Chambers County",
       "trigger": "1pct",
