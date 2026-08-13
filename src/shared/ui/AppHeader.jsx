@@ -50,6 +50,7 @@
  * a short notice instead.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { RADIUS } from "./radius.js";
 import ProjectBreadcrumb from "./ProjectBreadcrumb.jsx";
 import CloudSyncBadge from "./CloudSyncBadge.jsx";
 import AnchoredMenu from "./AnchoredMenu.jsx";
@@ -82,7 +83,7 @@ const ACCENT_TEXT = { "site-planner": "var(--accent-site-text)", "scheduler": "v
 // visitor can still switch (preserves B342's "reachable signed-out" without duplicating the
 // control when signed in). The picker UI itself is the shared <ThemePicker/>. (B317/B342/B389)
 const settingsPanel = {
-  padding: 6, borderRadius: 10, background: "var(--surface-raised)", color: "var(--text-primary)",
+  padding: 6, borderRadius: RADIUS.lg, background: "var(--surface-raised)", color: "var(--text-primary)",
   border: "1px solid var(--border-default)", boxShadow: "0 14px 34px rgba(0,0,0,0.28)",
   fontFamily: "system-ui, sans-serif",
 };
@@ -132,7 +133,7 @@ function FullscreenButton({ active, onToggle }) {
          is a strict-mode failure, so this control says it a different way on purpose. */
       title={active ? "Leave full screen (Ctrl/⌘+Shift+F)" : "Full screen (Ctrl/⌘+Shift+F)"}
       style={{
-        display: "grid", placeItems: "center", width: 30, height: 26, borderRadius: 7,
+        display: "grid", placeItems: "center", width: 30, height: 26, borderRadius: RADIUS.sm,
         border: `1px solid ${LINE}`, background: "var(--chrome-bg)", color: "var(--chrome-text)",
         cursor: "pointer", flex: "none",
       }}
@@ -160,7 +161,7 @@ function SettingsMenu() {
         aria-label="Settings"
         title="Settings: display theme, smooth zoom"
         style={{
-          display: "grid", placeItems: "center", width: 30, height: 26, borderRadius: 7,
+          display: "grid", placeItems: "center", width: 30, height: 26, borderRadius: RADIUS.sm,
           border: `1px solid ${LINE}`, background: "var(--chrome-bg)", color: "var(--chrome-text)",
           cursor: "pointer", flex: "none",
         }}
@@ -714,7 +715,7 @@ export default function AppHeader({
               display: "flex", alignItems: "center", flex: "none",
               background: "transparent", border: "none",
               cursor: onDashboard ? "pointer" : "default",
-              padding: "2px 4px", borderRadius: 6,
+              padding: "2px 4px", borderRadius: RADIUS.sm,
             }}
           >
             {/* Phone: just the mark (no wordmark) — reclaims width so the breadcrumb + switcher fit. */}
@@ -874,12 +875,12 @@ export default function AppHeader({
     {/* B1173(×2) — LOUD-FAILURE for a refused fullscreen request. With no chrome-hide fallback
         left, a rejection would otherwise be a keypress that visibly does nothing. */}
     {fsNotice && (
-      <div role="status" data-testid="fullscreen-refused" style={{ position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: "min(440px, calc(100vw - 16px))", background: "var(--surface-raised)", color: "var(--text-primary)", border: "1px solid var(--warn-text)", borderRadius: 8, padding: "5px 10px", fontSize: 11.5, fontFamily: "system-ui, sans-serif", boxShadow: "0 4px 16px rgba(0,0,0,0.22)" }}>
+      <div role="status" data-testid="fullscreen-refused" style={{ position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: "min(440px, calc(100vw - 16px))", background: "var(--surface-raised)", color: "var(--text-primary)", border: "1px solid var(--warn-text)", borderRadius: RADIUS.lg, padding: "5px 10px", fontSize: 11.5, fontFamily: "system-ui, sans-serif", boxShadow: "0 4px 16px rgba(0,0,0,0.22)" }}>
         {fsNotice}
       </div>
     )}
     {accountActive && multiTab.conflictRisk && !multiTabDismissed && (
-      <div role="status" style={{ position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: "min(440px, calc(100vw - 16px))", display: "flex", alignItems: "flex-start", gap: 7, background: "var(--surface-raised)", color: "var(--text-primary)", border: "1px solid var(--warn-text)", borderRadius: 8, padding: "5px 6px 5px 10px", fontSize: 11.5, fontFamily: "system-ui, sans-serif", boxShadow: "0 4px 16px rgba(0,0,0,0.22)" }}>
+      <div role="status" style={{ position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: "min(440px, calc(100vw - 16px))", display: "flex", alignItems: "flex-start", gap: 7, background: "var(--surface-raised)", color: "var(--text-primary)", border: "1px solid var(--warn-text)", borderRadius: RADIUS.lg, padding: "5px 6px 5px 10px", fontSize: 11.5, fontFamily: "system-ui, sans-serif", boxShadow: "0 4px 16px rgba(0,0,0,0.22)" }}>
         <span aria-hidden="true" style={{ color: "var(--warn-text)", fontWeight: 700, lineHeight: 1.5 }}>⧉</span>
         <span style={{ lineHeight: 1.4, paddingTop: 1 }}>
           Also open in <b>another tab</b> — that tab is the active editor; this one is read-only until you switch there or close it.

@@ -67,3 +67,30 @@ export const MAP_CHROME_Z = {
 export function panelMaxHeight({ topPx = 10, bottomPx = 96, minPx = 220 } = {}) {
   return `max(${minPx}px, calc(100% - ${topPx + bottomPx}px))`;
 }
+
+/* ⛔ B427408 — WHICH CORNER OF THE MAP OWNS WHAT, and the clearance that follows from it.
+ *
+ * The owner could not press the map's `+` button at all. The Leaflet zoom control was at
+ * `topleft` on desktop, which is the SAME corner the Your-sites panel occupies (`top: 10,
+ * left: 10`) — so the panel covered it, and only the bottom sliver of `−` showed underneath.
+ * The fix moved the control to the one corner nothing else claims. This constant is what stops
+ * the next thing that wants a corner from re-creating the collision by accident.
+ *
+ *   topleft      Your-sites panel (desktop) · the full-width search bar (phone)
+ *   topright     Layers panel
+ *   bottomright  scale bar
+ *   bottomleft   THE ZOOM CONTROL — at every breakpoint, with no responsive branch
+ *
+ * The no-branch part is deliberate: the defect existed because the phone path was fixed and the
+ * desktop path was left behind, and a position that does not depend on the breakpoint cannot
+ * drift apart again.
+ *
+ * ⛔ Do NOT resolve a future collision here with z-index. Raising the control above a panel only
+ * moves the problem — the buttons then sit on top of that panel's content and eat presses meant
+ * for it. Give the newcomer a corner, or stack it clear using the clearance below.
+ *
+ * ZOOM_CONTROL_CLEARANCE_PX is the room a bottom-LEFT floating element must leave beneath itself
+ * so it never covers the control: Leaflet's two ~30px buttons, their border, and the container's
+ * own 10px margin, rounded up. The transient map banners (the offline/fallback offers and the
+ * "drop a file" hint) sit on this rather than on a hand-picked number each. */
+export const ZOOM_CONTROL_CLEARANCE_PX = 84;

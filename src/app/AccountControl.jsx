@@ -18,6 +18,7 @@
  * the same import depth Shell uses, so src/shared/ui stays free of workspace-lib imports.
  */
 import { useEffect, useRef, useState } from "react";
+import { RADIUS } from "../shared/ui/radius.js";
 import { supabaseConfigured } from "../workspaces/site-planner/lib/supabase.js";
 import { signOut } from "../workspaces/site-planner/lib/auth.js";
 import AnchoredMenu from "../shared/ui/AnchoredMenu.jsx";
@@ -31,12 +32,12 @@ const MUTED = "var(--chrome-muted)";
 // stacking/clipping context and lines up under the pill, consistent with that menu.
 const pill = {
   display: "flex", alignItems: "center", gap: 7,
-  maxWidth: 220, padding: "4px 9px 4px 5px", borderRadius: 99,
+  maxWidth: 220, padding: "4px 9px 4px 5px", borderRadius: RADIUS.pill,
   cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
   border: `1px solid ${LINE}`, background: "var(--chrome-bg-elev)", color: "var(--chrome-text)",
 };
 const avatar = (signedIn, size = 20) => ({
-  width: size, height: size, borderRadius: 99, flex: "none",
+  width: size, height: size, borderRadius: RADIUS.pill, flex: "none",
   display: "grid", placeItems: "center",
   fontSize: size >= 28 ? 12.5 : 10.5, fontWeight: 800,
   // Signed-in: white initial on the green gradient. Signed-out: the badge sits on the
@@ -46,13 +47,13 @@ const avatar = (signedIn, size = 20) => ({
   background: signedIn ? "linear-gradient(150deg,#16a34a,#15803d)" : "var(--chrome-bg)",
 });
 const acctPanel = {
-  padding: 6, borderRadius: 10, background: "var(--surface-raised)", color: "var(--text-primary)",
+  padding: 6, borderRadius: RADIUS.lg, background: "var(--surface-raised)", color: "var(--text-primary)",
   border: "1px solid var(--border-default)", boxShadow: "0 14px 34px rgba(0,0,0,0.28)",
   fontFamily: "system-ui, sans-serif",
 };
 const acctRow = {
   display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left",
-  padding: "8px 9px", borderRadius: 7, border: "none", background: "transparent",
+  padding: "8px 9px", borderRadius: RADIUS.sm, border: "none", background: "transparent",
   cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, color: "var(--text-primary)",
 };
 const acctDivider = { height: 1, background: "var(--border-default)", margin: "4px 4px" };
@@ -107,7 +108,7 @@ export default function AccountControl({ user, profileApi, onOpenAuth, onOpenAcc
           title="Cloud sync isn't set up — your work is saved on this device only"
           style={{
             display: "flex", alignItems: "center", gap: 7,
-            padding: "4px 10px 4px 6px", borderRadius: 99,
+            padding: "4px 10px 4px 6px", borderRadius: RADIUS.pill,
             cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
             border: `1px solid ${LINE}`, background: "var(--chrome-bg-elev)",
             color: MUTED,
@@ -115,7 +116,7 @@ export default function AccountControl({ user, profileApi, onOpenAuth, onOpenAcc
         >
           <span
             style={{
-              width: 20, height: 20, borderRadius: 99, flex: "none",
+              width: 20, height: 20, borderRadius: RADIUS.pill, flex: "none",
               display: "grid", placeItems: "center",
               fontSize: 12, fontWeight: 800, color: MUTED,
               background: "var(--chrome-divider)",
@@ -132,7 +133,7 @@ export default function AccountControl({ user, profileApi, onOpenAuth, onOpenAcc
               role="dialog"
               style={{
                 position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 41,
-                width: 256, padding: "11px 13px", borderRadius: 10,
+                width: 256, padding: "11px 13px", borderRadius: RADIUS.lg,
                 background: "var(--surface-raised)", color: "var(--text-primary)",
                 border: "1px solid var(--border-default)",
                 boxShadow: "0 12px 30px rgba(0,0,0,0.28)",
