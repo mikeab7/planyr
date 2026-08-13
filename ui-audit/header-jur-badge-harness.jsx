@@ -101,6 +101,21 @@ function HeaderCase({ scope, badge, project, plan }) {
   );
 }
 
+/* ── NEW-1 — THE CENTRING CASES (`verify-header-center.mjs`) ────────────────────────────────────
+ * The owner's second report on this header: "now the jurisdiction is not centered." The chip was
+ * centred inside its slot; the SLOT was the leftover space between the two side groups, so the chip's
+ * position was a function of how long the project and plan names are.
+ *
+ * ⛔ THE MATRIX IS THE POINT: the LONGEST and SHORTEST label shapes crossed with the LONGEST and
+ * SHORTEST breadcrumbs. One case cannot show this — the claim under test is that the chip's centre
+ * does NOT move between them, which needs at least the four corners to be false. The `crumb` axis is
+ * also what proves this was never a regression from the label-text change: the pre-fix offset tracks
+ * the BREADCRUMB (a rename moves the chip) and not the label. */
+const CRUMB_SHORT = { project: "A", plan: "P" };
+const CRUMB_LONG = { project: "Goose Creek Assemblage — North Tract", plan: "Concept - Original (renamed 2026)" };
+// The shortest label the formatter can produce, and the longest his portfolio produces.
+const badgeShortest = { ...formatJurisdictionBadge({ city: [], cityCentroid: [], etj: [], county: [] }), ...src };
+
 function App() {
   return (
     <ThemeProvider>
@@ -108,6 +123,10 @@ function App() {
       <HeaderCase scope="long" badge={badgeLong} project="0 MUESCHKE RD, TOMBALL" plan="Plan A" />
       <HeaderCase scope="bain" badge={badgeBain} project="Bain" plan="Concept - Original" />
       <HeaderCase scope="portfolio" badge={badgePortfolio} project="Goose Creek Assemblage" plan="Concept - Original" />
+      <HeaderCase scope="ctr-short-short" badge={badgeShortest} {...CRUMB_SHORT} />
+      <HeaderCase scope="ctr-short-long" badge={badgeShortest} {...CRUMB_LONG} />
+      <HeaderCase scope="ctr-long-short" badge={badgePortfolio} {...CRUMB_SHORT} />
+      <HeaderCase scope="ctr-long-long" badge={badgePortfolio} {...CRUMB_LONG} />
     </ThemeProvider>
   );
 }
