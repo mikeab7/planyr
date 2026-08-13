@@ -21,40 +21,50 @@ const memStore = () => {
 // and so ship verified:true; every OTHER seed is still an honest unverified placeholder.
 const VERIFIED_SEEDS = ["fortbend", "harris", "waller"];
 
-/* B393170 — A THIRD CLASS, and it is deliberately not "a placeholder with worse words".
- * A placeholder seed is a jurisdiction nobody has GOT TO yet: it carries a plausible schema and a
- * VERIFY caveat, and someone will transcribe it. An UNREADABLE one is a jurisdiction that was
- * reached for and could not be obtained — Baytown's ordinance is published only on hosts this
- * environment's egress proxy refuses (measured, connection refused, not a 404). Such a record must
- * carry NO trigger, NO ratio and NO policy, because the alternative is a fabricated finished-floor
- * rule, which is the most expensive wrong number this app can produce. It states what it tried,
- * where, and when — and `unreadable` is what `floodAdministrator` reads to keep it out of the
- * governing pool rather than silently pricing a site on it. */
-const UNREADABLE_SEEDS = ["baytown"];
+/* B393170 → ⛔ SUPERSEDED BY NEW-8 (B435537): BAYTOWN IS NO LONGER UNREADABLE, IT IS PARTIAL.
+ *
+ * B393170 introduced a third class for a jurisdiction that was REACHED FOR and could not be
+ * obtained — Baytown's ordinance is published only on hosts this environment's egress proxy refuses
+ * — and required such a record to assert NOTHING about the rule. That was right at the time and the
+ * discipline it encoded is unchanged; what changed is the fact. The ordinance was read (owner-read
+ * via Municode 2026-08-13, version JUL 2 2026 codified through Ord. No. 16,449) and transcribed.
+ *
+ * What replaces it is the class the transcription actually produced: PARTIAL. The excerpt read was
+ * Art. II's ELEVATION standard plus applicability and definitions, so `trigger` is transcribed and
+ * carries a citation, while `ratio` / `floodwayPolicy` / `offsetScope` were not in that text and are
+ * still null. The rule that matters is the same one either way: a field is transcribed from the
+ * primary source or it is null, and the record SAYS WHICH — a partial record must name both halves
+ * (`partial.transcribed`, `partial.notTranscribed`) rather than looking like a complete one. */
+const PARTIAL_SEEDS = ["baytown"];
 
 describe("seed integrity", () => {
-  it("an UNREADABLE seed states what it could not read, and asserts NOTHING about the rule", () => {
-    for (const key of UNREADABLE_SEEDS) {
+  it("a PARTIAL seed names what it transcribed AND what it did not, and cites the source", () => {
+    for (const key of PARTIAL_SEEDS) {
       const r = DEFAULT_FLOODPLAIN_RULES[key];
       expect(r, key).toBeTruthy();
       expect(r.label, key).toBeTruthy();
-      expect(r.verified, key).toBe(false);
-      // the whole point: no invented rule, in any field a number could hide in
-      for (const f of ["trigger", "ratio", "floodwayPolicy", "offsetScope", "ffeRule"]) {
-        expect(r[f], `${key}.${f}`).toBeNull();
-      }
-      expect(r.unreadable?.reason, key).toBeTruthy();
-      expect(r.unreadable?.hosts?.length, key).toBeGreaterThan(0);
-      expect(r.unreadable?.checkedAt, key).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-      expect(r.source, key).toMatch(/NOT TRANSCRIBED/);
-      // "we have not read it" and "it does not say" are different statements (NEW-3)
+      expect(r.partial, key).toBeTruthy();
+      expect(r.partial.transcribed.length, key).toBeGreaterThan(0);
+      expect(r.partial.notTranscribed.length, key).toBeGreaterThan(0);
+      expect(r.partial.reason, key).toBeTruthy();
+      // the two halves are disjoint — a field cannot be both
+      for (const f of r.partial.transcribed) expect(r.partial.notTranscribed, key).not.toContain(f);
+      // every transcribed field is actually present, and every untranscribed one is actually null
+      for (const f of r.partial.transcribed) expect(r[f] == null, `${key}.${f} claims transcribed`).toBe(false);
+      for (const f of r.partial.notTranscribed) expect(r[f], `${key}.${f} claims untranscribed`).toBeNull();
+      // a partial record still has to cite what it DID read, like every verified seed
+      expect(r.source, key).toBeTruthy();
+      expect(r.sourceDate, key).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      // "we have not read it" and "it does not say" stay distinguishable (NEW-3 / NEW-8)
       expect(["unknown", "governs", "does-not-govern", "silent"], key).toContain(r.limitedPurposeScope);
+      // and it must no longer claim to be unreachable
+      expect(r.unreadable, key).toBeUndefined();
     }
   });
 
   it("every jurisdiction carries the full schema; only the still-placeholder seeds ship UNVERIFIED", () => {
     for (const [key, r] of Object.entries(DEFAULT_FLOODPLAIN_RULES)) {
-      if (UNREADABLE_SEEDS.includes(key)) continue;   // asserted above, on its own terms
+      if (PARTIAL_SEEDS.includes(key)) continue;   // asserted above, on its own terms
       expect(r.label, key).toBeTruthy();
       expect(["1pct", "1pct_plus_02pct"], key).toContain(r.trigger);
       expect(r.ratio, key).toBeGreaterThan(0);

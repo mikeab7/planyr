@@ -174,6 +174,63 @@ metrics pass) leaves the canvas pixel-identical and takes Buildings to `0.00 ac 
 7. Confirm dock doors are drawn on every building with no toggle for them anywhere — and, if you have
    a plan where you had turned them OFF, that they are back.
 
+### V230480 — B435536: the easement label on 8 South no longer dwarfs its own easement `Blocker: real-data`
+
+**Proven here already, logged out, in a real browser.** `e2e/easement-label-fit.spec.js` seeds his own
+production easement row (`e1454917vfjirh`, 60 ft centreline, ~513 ft, the 30-character
+`CONVEYANCE CHANNEL 2 DIVERSION` override), selects it, sweeps a real wheel zoom from below his
+reported frame inward, and at every step reads the REAL `getBBox()` of the label and of the easement
+polygon off every rendered copy — asserting the label is never wider than the feature. It also
+asserts the label is HIDDEN at his reported zoom, that it does REVEAL further in (a spec that hid it
+forever would prove nothing), and that the font CHANGES across the sweep (shrinking to a smaller
+constant is explicitly not the fix). **Mutation-proven: restoring the pre-fix line fails it at
+199.5 px of label over 10.3 px of feature** — his reported 199 px, reproduced. Unit half:
+`test/featureNameLabel.test.js` (18). Full suite 10,969 green, lint 0, build green.
+
+**What still needs his own plan.** The seeded site is not 8 South: it has one easement, no aerial, no
+GIS and none of his 77 other features competing for the same space.
+
+**Steps:**
+1. Open **8 South / Concept A** (`smqiljx5fngg`) at whole-site zoom. Select the easement
+   `CONVEYANCE CHANNEL 2 DIVERSION`. **The label must not draw.** The hatched band, the centreline
+   and the edit handles must all still be there — only the name is gone.
+2. Zoom in until the easement reads as a band rather than a line. The label appears, and it should
+   look like it belongs to the same drawing as the labels beside it rather than sitting on top of it.
+3. Check the two siblings, which got the same fix and which he did NOT report: a **traced** overlay
+   line and a **deed encumbrance** boundary. Same behaviour — name hidden when the feature is small,
+   revealed and consistently sized when it is not.
+4. ⚠ Judgement call worth his eye: the reveal is later for a LONG name than a short one on the same
+   easement. That is deliberate (the label has to fit the feature) but it means renaming an easement
+   changes when its name appears. If that reads as a bug rather than as a rule, say so.
+5. Export a PDF at whole-site zoom and confirm the same: no name printed across the sheet, and no
+   easement printed with a name wider than itself.
+
+### V230481 — B435537: Baytown's ordinance on his two Baytown-area sites `Blocker: real-data` `Blocker: auth`
+
+**Proven without a browser.** `test/baytownFlood.test.js` (23) drives the real rule records through the
+real resolver: the higher-of rule at three surface pairs, the shaded-Zone-X case, both hazard areas,
+the provenance, the `silent` applicability finding, the governance refusals, and the guard that no
+other city changed behaviour. Texas golden master regenerated with **all 14 differing paths proven to
+be under a `baytown` key**. Full suite 10,969 green.
+
+**Steps:**
+1. **Goose Creek** (`sms69x8rb2qk`), southern parcel (`e1454746tcmstb`, 96.2% inside full-purpose
+   city limits): the floodplain authority must NAME the City of Baytown and cite **Sec. 110-102(2)**.
+   ⚠ Expect the printed FFE to still come from **Harris County**, which is the stricter of the two by
+   2 ft — that is the existing strictest-wins design, and step 5 is the question it raises.
+2. The northern and middle parcels (ETJ only): Baytown and Harris County must appear **side by side**
+   with the authority marked unresolved, and no settled floor printed.
+3. **Grand Port** (`smqfy2r7pdec`): the same side-by-side against Chambers County, which has no
+   modelled rule — so Baytown's is the only number, and it must still not read as settled.
+4. **A site in shaded Zone X inside Baytown must get a Baytown floor, not a no-rule answer.** This is
+   the one most likely to be wrong in the wild, because most administrators in this metro do not
+   regulate the 500-year band and a generic "outside the SFHA" path would swallow it.
+5. **No site outside Baytown's ETJ may gain a Baytown rule** — walk a few of the other 26.
+6. ⚠ **A decision for him, not a check:** inside Baytown's full-purpose limits the resolver still
+   ranks Harris County above the city because it is stricter, so the county's number prints on land
+   the city administers. Conservative (it can only over-elevate) but arguably wrong. Changing it moves
+   numbers across the portfolio, so it was reported rather than altered under this ticket.
+
 ### V222352 — B427408–B427413: the map-chrome pass on the OWNER'S OWN WINDOW, and on the signed-in surfaces the radius sweep could not reach `Blocker: auth` + `real-data`
 
 **What is proven HERE, and it is nearly all of it — this is deliberately a SHORT list.** The whole
