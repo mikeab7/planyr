@@ -45,6 +45,10 @@ export const FIXTURE_FILES = {
   "sylvestri-lite": "sylvestri-concept-d.json",
   tsakiris: "tsakiris-concept-a-live.json",
   weld: "weld-concept-a.json",
+  /* The owner's FM 359 / Woods Road plan, the one NEW-1 and NEW-2 were reported on. It is the only
+   * fixture carrying CENTRELINE ROADS beside ponds and side-parking assemblies, which is what makes
+   * it the plan that can see the dissolved-road defect. */
+  woods: "woods-road-1m-sf.json",
 };
 
 /** Resolve a short name (or a bare filename) to a parsed fixture. Throws NAMING the options,

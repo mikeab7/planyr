@@ -240,3 +240,49 @@ describe("⛔ THE INVARIANT: this module cannot touch the model", () => {
     }
   });
 });
+
+/* ⛔ NEW-1 — THE SEAM SWEEP, AND WHY A PREDICATE TEST WAS NEVER ENOUGH.
+ *
+ * Every test above proves the MODEL is right, and the model was right the whole time. The owner
+ * still watched four roads stay on his drawing after unchecking Roads, because the predicate was
+ * never asked at one of the seams that paints: the DISSOLVED ROAD NETWORK draws a road's pavement
+ * once per connected cluster, from its own memo over `els`, so a filter applied to `drawEls` reaches
+ * everything about a road EXCEPT the road.
+ *
+ * This is the CI-runnable half of the guard. The browser half is the ink census in
+ * `ui-audit/verify-content-visibility.mjs`, which catches the whole class on any future surface;
+ * this one names the seams that exist today so a refactor cannot quietly drop one.
+ */
+describe("⛔ every render pass that paints for an element asks the predicate", () => {
+  const planner = readFileSync(resolve(here, "../src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+  /** The body of a `const <name> = useMemo(() => { … }, [deps]);` block. */
+  const memoBody = (name) => {
+    const i = planner.indexOf(`const ${name} = useMemo(`);
+    expect(i, `no ${name} memo in SitePlanner.jsx`).toBeGreaterThan(-1);
+    return planner.slice(i, planner.indexOf("\n  }, [", i) + 400);
+  };
+
+  it("drawEls — the seam that already worked, pinned so it cannot drift", () => {
+    expect(memoBody("drawEls")).toMatch(/elHidden\(hiddenGroups/);
+  });
+
+  /* THE REPORTED DEFECT. `roadNet` reads `els` rather than `drawEls` deliberately — a culled
+   * neighbour still shapes a curb return — so it can never inherit the cull's filter and has to ask
+   * for itself. Removing this line is exactly the build the owner reported on. */
+  it("roadNet — the dissolved pavement drops hidden roads, and re-renders when the map changes", () => {
+    const body = memoBody("roadNet");
+    expect(body, "the dissolved road network paints hidden roads").toMatch(/elHidden\(hiddenGroups/);
+    expect(body, "the memo cannot see a visibility change").toMatch(/\}, \[[^\]]*hiddenGroups[^\]]*\]/);
+  });
+
+  it("roadRadiusFlags — review chrome never flags a road nobody can see", () => {
+    const body = memoBody("roadRadiusFlags");
+    expect(body).toMatch(/elHidden\(hiddenGroups/);
+    expect(body).toMatch(/\}, \[[^\]]*hiddenGroups[^\]]*\]/);
+  });
+
+  it("MUTATION CHECK — the sweep really does read the source it claims to", () => {
+    expect(planner).toContain("const roadNet = useMemo(");
+    expect(memoBody("roadNet")).toContain("isCenterlineRoad");
+  });
+});

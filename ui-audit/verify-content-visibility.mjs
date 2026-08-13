@@ -30,6 +30,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { pacedWait } from "./lib/tabTiming.mjs";
 import { readFixture, buildFixtureState } from "./lib/fixtureSeeding.mjs";
+import { inkCensus, leakedInk } from "./lib/inkCensus.mjs";
 
 const arg = (f, d) => { const i = process.argv.indexOf(f); return i > -1 ? process.argv[i + 1] : d; };
 const BASE = arg("--url", "http://localhost:4319/");
@@ -180,13 +181,40 @@ try {
     { testid: "view-row-el:road", kind: null, elType: "road", label: "Roads" },
   ];
 
+  /* ⛔ NEW-1 — THE INK CHECK, AND THE REASON IT EXISTS BESIDE THE CENSUS RATHER THAN INSTEAD OF IT.
+   *
+   * This harness scored Roads ✓ on a build where the owner was looking at four unbroken grey ribbons.
+   * The census is not wrong — every road's `[data-el-id]` node really did leave the canvas — it is
+   * counting the wrong noun. A road's PAVEMENT is drawn once per connected cluster by the dissolved
+   * network, from a `<path>` that carries no feature key, so a census of registrations cannot see it.
+   * Any render path that draws on behalf of several features at once is invisible the same way, and
+   * this codebase prefers exactly that kind of path. So the promise is asserted on INK from here on:
+   * ui-audit/lib/inkCensus.mjs walks every painted node and attributes it, `data-road-cluster`
+   * included. `expectedKeys` is what must have NO ink left. */
+  const expectedKeys = (f) => (f.kind
+    ? (fixture[{ markup: "markups", measure: "measures", callout: "callouts", parcel: "parcels" }[f.kind]] || [])
+      .map((x, i) => (f.kind === "measure" ? `measure:${i}` : `${f.kind}:${x.id}`))
+    : (fixture.els || []).filter((e) => e.type === f.elType).map((e) => `el:${e.id}`));
+
+  const baseInk = await inkCensus(page);
   for (const f of FAMILIES) {
+    /* ⛔ A ROW WITH NO INK TO LOSE PASSES FOR FREE. Assert the subject exists before asking it to go. */
+    const keys = expectedKeys(f);
+    const hadInk = keys.filter((k) => (baseInk.byOwner || {})[k]).length;
+    check(`${f.label} · SETUP: it is actually painted at baseline`, hadInk > 0,
+      hadInk ? `${hadInk} of ${keys.length} keys carry ink` : "⛔ nothing attributable — the ink check below would be vacuous");
+
     await toggleRow(page, f.testid);
     const now = { census: await census(page), panel: await panelText(page) };
 
     const wasDrawn = f.kind ? (base.census.by[f.kind] || 0) : drawnOfType(base.census, typeById, f.elType);
     const nowDrawn = f.kind ? (now.census.by[f.kind] || 0) : drawnOfType(now.census, typeById, f.elType);
     check(`${f.label} · leave the canvas when hidden`, wasDrawn > 0 && nowDrawn === 0, `${wasDrawn} drawn → ${nowDrawn}`);
+
+    const leaked = leakedInk(await inkCensus(page), keys);
+    check(`${f.label} · ⛔ put NO INK on the drawing when hidden`, leaked.length === 0,
+      leaked.length ? `${leaked.reduce((a, b) => a + b.nodes, 0)} painted nodes remain: ${leaked.slice(0, 4).map((x) => `${x.key}(${x.nodes})`).join(" ")}`
+        : "nothing attributable to this group is still painted");
 
     /* ⛔ THE ONE THAT MATTERS. */
     check(`${f.label} · every number is unchanged`, now.panel === base.panel,
@@ -197,6 +225,29 @@ try {
     check(`${f.label} · come back when shown again`, back.total === base.census.total,
       `${now.census.total} → ${back.total} (was ${base.census.total})`);
   }
+
+  /* ⛔ PDF-PARITY — WHAT YOU SEE IS WHAT PRINTS, ASSERTED ON THE REAL BUILT SHEET.
+   *
+   * The owner asked the question directly: "PDF-PARITY: what you see is what prints." The answer is
+   * meant to be free — `buildExportSvg` CLONES the live `<svg>`, so content that is not in the DOM
+   * cannot reach the sheet — but "free by construction" is a claim about code, and this defect was
+   * ink drawn by a pass nobody had enumerated. So it is measured on the artefact instead: hide
+   * Roads, build the sheet the export path really builds, and look for road pavement in it.
+   *
+   * ⚠ The KMZ path is deliberately NOT covered here and is NOT a gap: a model-built export decides
+   * its own contents and never inherits a canvas display toggle (that rule is `kmzExport.js`'s, and
+   * `test/kmzExport.test.js` enforces it). The PDF/PNG sheet is the opposite case on purpose — it is
+   * the drawing on paper, for the same reader, set while looking at the drawing being printed. */
+  await toggleRow(page, "view-row-el:road");
+  const sheetHidden = await page.evaluate(() => (window.__plannerExportSvg ? window.__plannerExportSvg() : null));
+  await toggleRow(page, "view-row-el:road");
+  const sheetShown = await page.evaluate(() => (window.__plannerExportSvg ? window.__plannerExportSvg() : null));
+  const roadInk = (svg) => (String(svg || "").match(/data-export="road-network"/g) || []).length;
+  check("PDF-PARITY · SETUP: the sheet builds, and prints road pavement when roads are shown",
+    !!sheetShown && roadInk(sheetShown) > 0,
+    sheetShown ? `${roadInk(sheetShown)} road-network paths on the sheet` : "⛔ no export sheet — the parity check below would be vacuous");
+  check("PDF-PARITY · ⛔ a hidden road does not print", !!sheetHidden && roadInk(sheetHidden) === 0,
+    `${roadInk(sheetHidden)} road-network paths on the sheet with Roads hidden`);
 
   // ── the master, and the glanceable state ────────────────────────────────────────────────────
   await openViewMenu(page);
