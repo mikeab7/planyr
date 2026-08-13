@@ -635,6 +635,39 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
      be a double-click. `audit-doubleclick-properties` now measures and asserts its own gap, and that
      assertion caught a defect in ITSELF on its first run (it was timing deselect→press-1, not
      press-1→press-2), which is the argument for measuring rather than assuming in one line.
+- **DRIVER-SCROLL-IS-NOT-APP-SCROLL** — **AN AUTOMATION TOOL THAT SCROLLS TO REACH AN OFF-SCREEN TARGET
+  CANNOT BE USED TO MEASURE SCROLL BEHAVIOUR. In a VIRTUALISED list, "the first rendered row" is NOT
+  "a row on screen."** (B463922, 2026-08-13 — the sixth instrument failure of the day, and the first
+  that survived long enough to be reported to the owner as a finding about his product.)
+  1. **THE CASE.** `diagnose-grid-view-anchor.mjs` clicked the fold triangle on the FIRST RENDERED row
+     of the scheduler grid. A virtualiser renders a buffer of rows ABOVE the viewport, so that toggle
+     sat 75 px off screen; Playwright — like every browser driver — scrolls a target into view before
+     clicking it, **through CDP, where a patched `scrollTop` setter cannot see it.** The harness then
+     reported its own scroll as the app throwing the edited row 477 px down the screen and out of view.
+  2. **⛔ "PROGRAMMATIC SCROLL WRITES: 0" IS THE TELL, NOT THE CORROBORATION.** That reading was taken
+     as proof the app was innocent of *causing* the scroll, and used to argue the row was "abandoned".
+     It actually meant the scroll came from OUTSIDE the page's JavaScript entirely. Whenever a
+     container moves with no app write, the first two suspects are **the driver** and **the browser** —
+     not a subtle app defect.
+  3. **THE DISCRIMINATOR IS ONE LINE: drive the same control from inside the page.** `.click()` in page
+     JS performs no actionability scroll. Same toggle, same build: driver click **+477 px**, page-JS
+     click **−24 px**, a click on a toggle genuinely inside the viewport **−48 px** — and a target
+     BELOW the viewport moved it the other way (+459). **Magnitude and sign follow where the target
+     sat**, which is the driver's signature.
+  4. **THE RULE.** Inside a scroll container, click only what a human could actually see. Enforced by
+     `ui-audit/lib/visibleClick.mjs`: `visibleClick` proves the target is inside the container's
+     viewport BEFORE clicking and THROWS if it is not, naming how far outside it sat;
+     `installScrollWitness` + `assertNoDriverScroll` catch the same lie from the other side (the
+     container moved during an action with no app write → the measurement is void). Pure verdict
+     unit-tested in `test/visibleClick.test.js`; the refusal path is re-proved against the real app on
+     every run of `ui-audit/verify-grid-row-hold.mjs`, aimed at the very toggle that produced the false
+     finding — a guard nobody has seen fail is not a guard.
+  5. **IT WILL BITE AGAIN ON ANY VIRTUALISED LIST** — the scheduler grid, the Gantt, the Library file
+     list, any future long table. It is not specific to scrolling either: a driver's actionability
+     scroll changes what is on screen, so ANY geometry read taken across it is suspect. Sibling of
+     FOREGROUND-OR-VOID (a background tab cannot be measured) and SYNTHETIC-KEYS-DONT-EDIT (a
+     synthetic keystroke does not mutate the plan): three ways for a harness to believe its own
+     instrument.
 - **COUNT-EVERY-KIND** — **A PLAN'S CONTENTS ARE ITS FIVE DRAWN KINDS. A count that reads `[data-el-id]`
   sees ONE of them and reports the other four as NOTHING HAPPENED.** (NEW-2, 2026-08-09.) Measured live on
   the owner's Silvestri pair: a cross-plan paste landed three markup objects, the app correctly said so, and

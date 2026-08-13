@@ -19289,7 +19289,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        forced band instead, so leaving it a member would draw it in BOTH places (the region below,
        its own strip above). `bandForceOf` is null for every road on every untouched plan, so this
        filter is an identity no-op there and the dissolve is byte-for-byte what it was. */
-    const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo && !bandForceOf(x));
+    /* ⛔ NEW-1 — HIDDEN ROADS LEAVE THE DISSOLVED NETWORK, AND THIS ONE FILTER IS THE WHOLE DEFECT.
+     *
+     * The owner unchecked Roads in the View panel, the banner said "6 groups hidden", and the roads
+     * were still on the drawing as grey ribbons. `drawEls` was filtered correctly — every road's own
+     * `[data-el-id]` node left the canvas — but a road's PAVEMENT is not drawn by the road. It is
+     * drawn ONCE per connected cluster, here, from a memo over `els` that no visibility filter ever
+     * reached. Hiding removed the hit target and the label and left the ink.
+     *
+     * ⚠ THIS IS NOT THE CULL, AND IT MUST NOT BECOME THE CULL. `roadNet` reads `els` rather than
+     * `drawEls` on purpose (see `elNeighbors` above): a road scrolled off screen still shapes the
+     * curb return of one that is on screen, so culling here would change the drawn geometry. HIDING
+     * is a different statement — a hidden road contributes nothing at all, including its junctions —
+     * so it is filtered, and the two filters stay distinct. */
+    const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo && !bandForceOf(x) && !elHidden(hiddenGroups, x));
     if (!roads.length) return { regions: [], stripes: new Map(), outlineCuts: new Map(), memberIds: new Set(), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
     const byId = new Map(roads.map((r) => [r.id, r]));
     const strip = new Map(roads.map((r) => [r.id, roadStripRing(r, settings, sharpFor(r), roundabouts.trims.get(r.id))]));
@@ -19303,6 +19316,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const pairs = [];
     const addExtra = (id, polys) => { const a = extra.get(id); if (a) for (const p of polys || []) if (p && p.length >= 3) a.push(p); };
     for (const tj of teeJunctions) {
+      /* A junction between two roads is only a junction while BOTH are on the drawing. `addExtra`
+       * already no-ops for a hidden side road (it has no `extra` entry), but `stripeCut` below is
+       * unconditional — leave it in and a visible road's curb stripe is interrupted by a road that
+       * is not there, which reads as a gap in the kerb for no visible reason. */
+      if (!byId.has(tj.sideId) || !byId.has(tj.throughId)) continue;
       addExtra(tj.sideId, tj.geom.wedges);
       pairs.push([tj.sideId, tj.throughId]);
       const G = byId.get(tj.throughId), n = tj.geom.nTee, [t1, t2] = tj.geom.throughTangents || [];
@@ -19319,7 +19337,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       addExtra(wj.ids[0], [wj.cover]);
       for (let i = 1; i < wj.ids.length; i++) pairs.push([wj.ids[0], wj.ids[i]]);
     }
-    const cluster = clusterIds(roads.map((r) => r.id), pairs);
+    /* A pair naming a road that is hidden is not a connection any more — drop it rather than let it
+     * chain two visible clusters together through something nobody can see. */
+    const cluster = clusterIds(roads.map((r) => r.id), pairs.filter(([a, b]) => byId.has(a) && byId.has(b)));
     const groups = new Map();
     for (const r of roads) {
       const k = cluster.get(r.id);
@@ -19360,7 +19380,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       outlineCuts.set(dj.targetId, [...(outlineCuts.get(dj.targetId) || []), ...cutters]);
     }
     return { regions, stripes, outlineCuts, memberIds: new Set(roads.map((r) => r.id)), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
-  }, [els, settings, teeJunctions, driveJunctions, weldJunctions, sharpFor, roadJunctionVerts, roundabouts]);
+  }, [els, settings, teeJunctions, driveJunctions, weldJunctions, sharpFor, roadJunctionVerts, roundabouts, hiddenGroups]);
   /* VIEW-INDEPENDENT-ONCE (NEW-2). The dissolved network's SVG path data and per-cluster style were
      built inside the render's `roadNet.regions.map(…)`, so a 60-move pan rebuilt them 187 times —
      561 `regionPathD` calls and 37 ms on the reference plan, the second-ranked violation the
@@ -19387,13 +19407,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const roadRadiusFlags = useMemo(() => {
     const out = [];
     for (const el of els || []) {
-      if (!isCenterlineRoad(el) || el.attachedTo) continue;
+      // NEW-1 — a hidden road raises no review flags: chrome about an object you cannot see is a
+      // marker floating on empty ground, and its corner dot is a live one-click Fix (B278577).
+      if (!isCenterlineRoad(el) || el.attachedTo || elHidden(hiddenGroups, el)) continue;
       const cls = roadClassOf(settings, el.roadClass);
       const conflicts = roadRadiusConflicts(el.pts, el.vtx, classMinRadius(cls), { defaultRadius: roadDefaultRadius(el, settings) });
       for (const c of conflicts) out.push({ id: el.id, label: cls && cls.label ? cls.label : "Road", ...c });
     }
     return out;
-  }, [els, settings]);
+  }, [els, settings, hiddenGroups]);
   // E2E/self-audit hook (same `window.__PLANYR_E2E` gate as above; never runs in production) — lets the
   // headless regression assert the DISSOLVED geometry (region count, holes, curb-return radii) directly
   // instead of inferring it from pixels.

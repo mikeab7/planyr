@@ -22,10 +22,12 @@ steal your place — the cell you were typing in stopped being the selected one,
 went somewhere else. And now, when you fold a group above the row you're working on, that row stays
 exactly where it is on screen instead of sliding out from under your cursor.
 
-**What I need from you:** next time you're in a real schedule, does it still happen? If it does, tell
-me roughly what you'd just done — typed in a cell, pressed Enter, folded something, hit undo — and
-whether it threw you up or down. That one sentence is worth more than another week of me guessing,
-because nothing I can run here has ever actually seen it.
+**What I need from you — two things, and the second one matters most.** Next time it throws you:
+(1) what had you *just* done — typed in a cell, pressed Enter, folded or unfolded a group, pressed
+undo, or nothing at all; and (2) **did it go up or down?** Up means toward the start of the
+schedule, down toward the end. That direction alone rules out half the possible causes. Nothing I
+can run here has ever seen this happen, so those two facts are worth more than another week of me
+guessing — and until I have them I'm leaving it open rather than calling it fixed.
 
 ## ✂️ Two calls on splitting a parcel — the tool now takes real cuts, these are the last two choices (B455360)
 

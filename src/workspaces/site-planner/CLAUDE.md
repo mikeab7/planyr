@@ -1083,8 +1083,21 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   float over nothing; and the three MARQUEE passes read the raw model, so a box-select would
   otherwise return invisible objects that the next Delete would take. `normalizeRetiredToggles`
   restores `showDocks` on load — deleting a shipped control STRANDS any plan saved with it off.
-  Guards: the repo-root `test/` suite **contentVisibility** (30) and the ui-audit harness
-  **verify-content-visibility** (33/33 on the owner's real Silvestri + Bain plans; mutation-proven —
+  **⛔ B3296 — AND THE SEAM THE PREDICATE NEVER REACHED, which is the part to read before adding a
+  render pass.** The owner unchecked Roads and the roads stayed on his drawing. `drawEls` was filtered
+  correctly — every road's own node left the canvas — but a road's PAVEMENT is drawn ONCE per connected
+  cluster by the dissolved network (`roadNetwork.js`), from a `roadNet` memo over `els` that no
+  visibility filter reached. **`roadNet` reads `els` rather than `drawEls` DELIBERATELY** (a culled
+  neighbour still shapes a curb return), so it can never inherit the cull's filter and must ask
+  `elHidden` for itself — as must its junction wedges, stripe cuts, cluster pairs and the
+  `roadRadiusFlags` review chrome. Hiding and CULLING are different statements; keep the two filters
+  distinct. **⛔ The harness certified this green**, because a feature census counts REGISTRATIONS and
+  this is INK drawn on behalf of several features at once — the guard is now the ui-audit **ink census** helper,
+  which attributes every painted node (reading `data-road-cluster`) and reports what it cannot attribute
+  rather than dropping it. PDF-parity is asserted on the REAL built sheet, not argued from the clone.
+  Guards: the repo-root `test/` suite **contentVisibility** (34, incl. the CI-runnable seam sweep naming
+  `drawEls` · `roadNet` · `roadRadiusFlags`) and the ui-audit harness
+  **verify-content-visibility** (47/47 on the owner's real Silvestri + Bain plans; mutation-proven —
   filtering `els` one seam earlier leaves the canvas PIXEL-IDENTICAL and takes Buildings from
   62.13 ac to 0.00 ac, which no visual test in this repo could see). Live-verify: **V237632**.
 - `zOrder.js` — per-element `z` stacking key utilities (`nextZ`/`sortByZ`/`normalizeZ`/`ensureZ`, B671).

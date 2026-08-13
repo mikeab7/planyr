@@ -113,6 +113,53 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V2576 — B3296: a hidden road leaves the drawing, and leaves the PRINT `Blocker: real-data`
+
+**Everything reachable logged-out is proven here, on his own plan, and is NOT what this is waiting
+for.** `ui-audit/fixtures/woods-road-1m-sf.json` is his FM 359 / Woods Road plan pulled verbatim from
+production (site `smsrrlk9u576`, "Concept A 1M SF" — the plan he reported as "Concept A (copy) (copy)")
+and redacted through `scripts/plan-dump-to-fixture.mjs`. Two instruments drive it in a real browser:
+`ui-audit/diagnose-hide-ink.mjs` sweeps **every** content group and now reports 9/9 honouring the
+toggle (roads were 8 painted nodes before the fix), and `ui-audit/verify-content-visibility.mjs`
+passes **47/47** including the new per-family ink check and the PDF-parity pair read off the REAL
+built sheet (5 road-network paths shown → 0 hidden). Both are mutation-proven: removing the one-line
+filter turns the ink check red at 14 painted nodes while the old feature census stays green.
+
+**WHAT IS PENDING, and it is one path.** Everything above reads the built export SVG, not a
+downloaded PDF, and it runs against a seeded logged-out store rather than his signed-in plan. The
+class is mandatory-live (PDF/export parity, and a repro citing real project data), so:
+
+1. Open **FM 359 / Woods Road** on planyr.io, signed in, and uncheck **Roads** in the View panel.
+2. Confirm the grey pavement ribbons leave the canvas — not just the road labels and dimensions.
+3. Confirm the other groups still behave: Buildings, Car parking, Trailer parking, Ponds,
+   Paving / drive, Sidewalks, Parcels, Measurements.
+4. Confirm the Yield panel's numbers are unchanged across every hide (they must not move at all).
+5. **Export a PDF with Roads hidden** and confirm no road pavement prints. Then show Roads again and
+   confirm it comes back, on screen and in the export.
+
+### V2577 — B3297: Delete works from every state the inspector can leave you in — the SIGNED-IN leg `Blocker: real-data`
+
+**Everything logged-out is proven here, on his own plan.** `ui-audit/verify-delete-key-scope.mjs`
+drives ten arms on the real AREA measurement from his plan with real key events
+(SYNTHETIC-KEYS-DONT-EDIT), re-reading until the feature is genuinely absent: Delete now works after
+touching the Fill opacity slider and after touching the Line style dropdown, still refuses while a
+text box holds focus, and now **explains itself on the second press as well as the first**. Seven of
+those ten are red on the pre-fix build. Its three controls re-prove B464048's data-loss bug dead —
+Enter / Escape / Tab out of the real Depth (ft) row, each followed by Backspace, leaves the building
+and its bonded elements untouched (43 → 43 features).
+
+**WHAT IS PENDING.** The signed-in tab, on the real record, where a delete also has to reach the
+cloud rather than just the canvas:
+
+1. Open his plan signed in, select the **area measurement**, open its inspector.
+2. Drag **Fill opacity**, then press **Delete** — it must delete.
+3. Undo. Change **Line style**, then press **Delete** — it must delete.
+4. Undo. Click into the **width value box**, then press **Delete** twice — it must NOT delete, and it
+   must say why **both** times.
+5. Reload and confirm the deletion persisted (a delete that never reached storage comes back).
+6. **The control, and it matters more than the rest:** select a building, type in **Depth (ft)**,
+   press Enter, then press **Backspace**. The building must survive.
+
 ### V278320 — B487600: a shared reference file survives a delete in a sibling plan — the SIGNED-IN leg `Blocker: auth`
 **Status:** ⏳ pending — needs a signed-in account against real Supabase Storage.
 **Verified here (sandbox, 2026-08-13):** the pure rule + all three call sites (repo-root `test/sharedAssetRefs.test.js`, 17, with the pre-fix rule replayed as a mutation check); lint 0 errors; build green; bundle audit inside band with no new breach. **The database guard was proven against PRODUCTION on the real deletion path** — `storage.allow_delete_query` set exactly as the Storage API sets it: a shared object was REFUSED naming all four Goose Creek plans, an unreferenced object passed through, and neither probe committed.
@@ -152,6 +199,16 @@ data path the sandbox cannot reach.
    row you are typing in, in either direction.
 4. If it happens even once, note what was on screen and what you had just done; that is the missing
    observation, and it is worth more than another sandbox pass.
+
+**Confirmed on the DEPLOYED build (2026-08-13), because merged and deployed are different claims.**
+`planyr.io/sequence/` fetched and hashed: byte-identical to `origin/main`, so the deploy is current.
+Driven on those exact bytes: the edited row holds its place through a fold, the selection stays on
+it, what is typed next lands in the cell it was in, and #1028's Enter-latch and portal mousedown
+guard still hold (12/12). Scope: Chromium cannot reach the public internet from this sandbox, so the
+deployed bytes are served locally — the artifact is the deployed one, the edge is not under test.
+
+**⛔ What that does NOT settle: his symptom has never been seen by any instrument here.** Both fixes
+are real; neither is known to be the thing he described.
 
 **Status:** ⏳ pending. **Do not mark B463922 Done on the sandbox evidence alone** — an owner-reported
 symptom is never closed on a null (NEVER-PARK), and the question is on `OWNER-TODO.md`.
