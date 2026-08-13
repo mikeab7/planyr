@@ -236,7 +236,21 @@ would become permanent:
    `initChar`), and once by double-clicking a cell that already has an owner and typing a
    different name — that one must REPLACE, not append.
 
-**Result:** ⏳ pending.
+**⛔ THE BUG IS CONFIRMED ON LIVE PRODUCTION, AND THE FIX ON THE DEPLOYED BRANCH BUILD (2026-08-13).**
+The sandbox browser has no egress to `planyr.io` or `*.pages.dev`, but **Node does** — so the
+deployed page bytes were fetched and served locally, and the real built artifact driven. Same
+gesture, two deployed builds, logged out:
+
+| build | keystroke trace | committed |
+|---|---|---|
+| `planyr.io` (main, without the fix) | `["S","c","co","cot","cott"]` | `"cott"` |
+| this branch's Cloudflare preview | `["S","Sc","Sco","Scot","Scott"]` | `"Scott"` |
+
+So the owner's report is reproduced on the app he actually uses, not only in a local server,
+and the shipped artifact carries the fix. **This does not close V238480** — everything above is
+logged out, and the step below is the one the proxy's auth wall blocks.
+
+**Result:** ⏳ pending — signed-in round-trip only.
 
 ### V229360 — B434416/B434417/B434418 + B421493: the two-stage box, a resize that persists, and a re-file that travels `Blocker: auth`
 
