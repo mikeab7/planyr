@@ -202,6 +202,41 @@ was the broken one). Post-apply read on the live database: `assembly_digest('smq
 
 **Nothing on the owner's side.** The migration is applied; this is a check, not a task.
 
+### V238480 — B443536: an owner name typed into a SIGNED-IN project survives the cloud round-trip `Blocker: auth`
+
+**What is already proven here, in a real browser — this is NOT the pending part.**
+`ui-audit/verify-owner-first-char.mjs` (18/18, Chromium, real key events via
+`page.keyboard`, not synthetic `KeyboardEvent`s) drives the actual Owner cell and reads the
+actual input back after every keystroke:
+- type-to-edit `Scott` → the field reads `Scott` (it read `cott` before the fix), and the
+  trace `["S","Sc","Sco","Scot","Scott"]` shows the opening character surviving keystroke 2,
+- the value COMMITTED to the task equals what was typed (read off the closed cell, which
+  renders from the task model — not off the input),
+- an existing contact, a brand-new name, and a PASTE after the opening character all keep it,
+- double-click on an existing owner still SELECTS it, so typing replaces rather than appends,
+- fast typing (no delay between keys) behaves identically — the defect was not a race,
+- Predecessor / Task name / Duration keep their opening character too.
+Mutation-proven in both directions (revert → 8 red · over-fix → the replace case red).
+
+**What is PENDING and why the sandbox cannot reach it.** The scheduler's real projects live in
+Supabase, and the egress proxy CORS-blocks the sign-in handshake, so every check above ran
+against the module's baked seed data in this-device mode. The unverified step is the
+persistence round-trip, which this change does not touch but which is where a truncated name
+would become permanent:
+
+1. Sign in on https://planyr.io and open a real Schedule project.
+2. Click (do not double-click) an Owner cell so it is selected, then type a name straight in —
+   e.g. `Scott` — without pausing.
+3. **Expect:** the field reads `Scott` from the first keystroke on; the dropdown filters as you
+   type; an unknown name offers `+ Add "Scott" as new contact`.
+4. Press Enter, then RELOAD the page.
+5. **Expect:** the cell still reads `Scott`, whole. Open the Contacts panel — the registry holds
+   `Scott`, not `cott`.
+6. Repeat once in the master/table view (the second picker call site, which seeds via
+   `initChar`), and once by double-clicking a cell that already has an owner and typing a
+   different name — that one must REPLACE, not append.
+
+**Result:** ⏳ pending.
 
 ### V229360 — B434416/B434417/B434418 + B421493: the two-stage box, a resize that persists, and a re-file that travels `Blocker: auth`
 

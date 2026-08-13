@@ -3344,7 +3344,14 @@ const _cpCanvas = (typeof document !== 'undefined') ? document.createElement('ca
 const _cpCtx = _cpCanvas ? _cpCanvas.getContext('2d') : null;
 function _cpMeasure(text, font) { if (!_cpCtx) return 0; _cpCtx.font = font; return _cpCtx.measureText(text).width; }
 
-function ContactPicker({ value, contacts, onCommit, onCancel, variant = "master" }) {
+/* B443536 — `seeded` says WHERE the opening `value` came from, and it decides the caret.
+ * Type-to-edit hands the picker the single character that opened it; select-all would then
+ * highlight that character so the NEXT keystroke REPLACES it — typing "Scott" gave "cott",
+ * with the search correctly filtered on "S" the whole time (the character was captured and
+ * written, then destroyed on keystroke 2, which is why the report says the search sees it).
+ * Opening on an EXISTING owner is the opposite case: select-all is right there, so typing a
+ * new name replaces the old one instead of appending to it. One flag, two correct behaviours. */
+function ContactPicker({ value, contacts, onCommit, onCancel, variant = "master", seeded = false }) {
   const isGrid = variant === "grid";
   const [query, setQuery] = React.useState(value || '');
   const [highlight, setHighlight] = React.useState(-1);
@@ -3353,7 +3360,13 @@ function ContactPicker({ value, contacts, onCommit, onCancel, variant = "master"
   const inputRef = React.useRef(null);
   const wrapRef = React.useRef(null);
 
-  React.useEffect(() => { inputRef.current?.focus(); inputRef.current?.select(); }, []);
+  React.useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus();
+    if (seeded) { const n = el.value.length; el.setSelectionRange(n, n); }  // caret AFTER the typed char
+    else el.select();                                                       // replace the existing owner
+  }, []);
 
   const q = query.trim().toLowerCase();
   const suggestions = (q
@@ -9458,6 +9471,7 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
           <ContactPicker
             variant="grid"
             value={editStartChar != null ? editStartChar : (task.responsibleParty || "")}
+            seeded={editStartChar != null}
             contacts={contacts || []}
             onCommit={(name, newContact) => { if (newContact && addContact) addContact(newContact); commit(task.id, "responsibleParty", name); }}
             onCancel={() => setEdit(null)}
@@ -11665,6 +11679,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
           {isE(t,"responsibleParty")
             ? <ContactPicker
                 value={localEdit?.initChar != null ? localEdit.initChar : (t.responsibleParty||"")}
+                seeded={localEdit?.initChar != null}
                 contacts={data.settings?.contacts||[]}
                 onCommit={(name, newContact) => {
                   if (newContact) {
