@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-13 @ `b362e551` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-13 @ `6188056a` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -223,7 +223,7 @@ _518 source files mapped._
 - **`src/shared/ids.js`** — Collision-resistant element-id minter: per-tab random letter salt + seedAbove counter so no two tabs mint a tombstoned id (B591)
   - _exports_: `createIdMinter`, `randomIdSalt`
 - **`src/shared/keyboard/keyScope.js`** — which surface owns the keyboard: the four scopes, and the three-valued last-touched latch that answers when focus has fallen to `<body>`
-  - _exports_: `FIELD_GROUP_ATTR`, `focusScope`, `SCOPE`, `scopeOwnsCanvas`, `TEXT_ENTRY_TAGS`, `TOUCH`, `touchFactsOf`, `touchLatch`
+  - _exports_: `FIELD_GROUP_ATTR`, `focusScope`, `PICKER_TAGS`, `SCOPE`, `scopeOwnsCanvas`, `SLIDER_TYPES`, `TEXT_ENTRY_TAGS`, `TOUCH`, `touchFactsOf`, `touchLatch`
 - **`src/shared/markup/geometry.js`** — Pure unit-agnostic point math for all markup surfaces: length, shoelace area, arc-midpoint, point-in-poly, clamped centroid, snap45, projToSeg, bbox
   - _exports_: `bboxOf`, `CALLOUT_CORNER_FRAC`, `calloutCornerRadius`, `centroidOf`, `dist`, `midOfPath`, `nearestRectPerimeterPoint`, `pathLength`, `pointInPoly`, `polyArea`, `projToSeg`, `rot2`, `snap45`
 - **`src/shared/markup/hitTest.js`** — Shared JS-picker hit-testing: pickMarkup click selection (nearest, smallest-interior-wins) and hitEditPath vertex/edge grab for the selected markup
@@ -670,7 +670,7 @@ _518 source files mapped._
 - **`src/workspaces/site-planner/lib/jurisdictionShare.js`** — A jurisdiction share measured as an AREA fraction on the real ring (clipper-lib booleans in a local metre frame), never by sampling vertices or points — vertex sampling read 70–85% on a site that is 99% inside. Honours interior rings: each polygon is even-odd differenced against its own holes FIRST, then the set is unioned non-zero, so duplicate parcel records cannot cancel. Also the honesty half: `distanceToBoundaryM` (segment-to-segment, both ways) and `shareConfidence`, which refuses to state a share when the geometry's tolerance is a material fraction of the answer, plus `southIsLargerY`, which reads the planner's y-sign from the projection instead of assuming it.
   - _exports_: `areaShare`, `boundaryLengthNearM`, `distanceToBoundaryM`, `esriPolygons`, `intersectionAreaSqM`, `metresPerDegree`, `normalizePolys`, `pointInPolygons`, `pointInRing`, `polygonAreaSqM`, `ringsAsPolygons`, `SHARE_MAX_UNCERTAINTY`, `shareConfidence`, `signedArea`, `southIsLargerY`, `SQM_PER_ACRE`, `toLocal`, `unionAreaSqM`
 - **`src/workspaces/site-planner/lib/keyContract.js`** — the planner's declared keyboard shortcuts + the scope verdict for each (swept against the real handler by test/keyContract.test.js)
-  - _exports_: `focusScope`, `KEY_CONTRACT`, `keyScopeVerdict`, `REFUSAL`, `resolveKeyEntry`, `SCOPE`, `SCOPE_GUARD_HINT`, `shouldHintRefusal`
+  - _exports_: `CONTROL_CONSUMES`, `focusScope`, `KEY_CONTRACT`, `keyScopeVerdict`, `REFUSAL`, `resolveKeyEntry`, `SCOPE`, `SCOPE_GUARD_HINT`, `shouldHintRefusal`
 - **`src/workspaces/site-planner/lib/kmzExport.js`** — Google Earth (.kmz) export (B684): pure, dependency-free CRC32 + hand-rolled STORE-only ZIP writer, KML builder (lon,lat order, ring closure/holes, per-layer styles, building extrude), and the site→layer feature mapping; reprojection is injected (the shared feetToLatLng), so it never drifts from the map render.
   - _exports_: `buildKml`, `buildKmz`, `crc32`, `elToRingFeet`, `KMZ_MIME`, `kmzFilename`, `siteToFeatures`, `xmlEscape`, `zipStore`
 - **`src/workspaces/site-planner/lib/labelFitLadder.js`** — NEW-1/NEW-2 the ONE ordered fit/fallback ladder for a map label that must sit inside a shape (inline → stacked → abbrev → outside-with-leader) plus the polygon INTERIOR measurer (largest inscribed rectangles, so fit is judged against real room, not a bounding box). Terminates in `outside`, never in a hide — a fit failure may relocate or shorten a label, never blank it.

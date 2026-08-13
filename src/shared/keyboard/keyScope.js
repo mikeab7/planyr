@@ -66,12 +66,39 @@
 export const SCOPE = Object.freeze({
   FIELD: "field",
   SLIDER: "slider",
+  PICKER: "picker",
   CHROME: "chrome",
   CANVAS: "canvas",
 });
 
-/** Tags whose focus means "the user is entering text/values into a control". */
-export const TEXT_ENTRY_TAGS = Object.freeze(["INPUT", "TEXTAREA", "SELECT"]);
+/* ⛔ NEW-1 — `<select>` LEFT `TEXT_ENTRY_TAGS`, AND THAT IS A CORRECTION, NOT A LOOSENING.
+ *
+ * The owner could not delete a selected area measurement. Measured on his own plan: touching the
+ * inspector's **Line style dropdown** left focus on a `<select>`, which this list called text entry,
+ * so Delete was refused — and TOLD HIM "Delete went to the box you're typing in", about a dropdown
+ * he was not typing in. Touching the **Fill opacity slider** refused it too. Neither control does
+ * ANYTHING with Delete or Backspace; the keys went nowhere and the object stayed on the drawing.
+ *
+ * A `<select>` is a PICKER: it consumes arrows, Enter, Space and letters (type-ahead), and nothing
+ * else. A range input is a SLIDER: arrows, and nothing else. Only a text box owns the whole
+ * keyboard — and that is the one this guard was built for, which is why it is untouched. What each
+ * control actually consumes is declared in the planner's `lib/keyContract.js` (`CONTROL_CONSUMES`);
+ * a guard may only refuse a key the focused control can really use.
+ *
+ * ⚠ NOT A REGRESSION FROM B464048, and the record matters because it was the leading suspect:
+ * measured against the build BEFORE that work, the slider refused Delete identically. The old guard
+ * asked `tagName === "INPUT" || "SELECT" || "TEXTAREA"`, and a range input and a dropdown are both
+ * in that list — so this defect is as old as the guard (B746/V258's comment states it outright:
+ * "Every OTHER shortcut … still respects the guard while a slider has focus"). The scope model
+ * inherited it; it did not introduce it.
+ */
+export const TEXT_ENTRY_TAGS = Object.freeze(["INPUT", "TEXTAREA"]);
+
+/** Tags that pick from a fixed set rather than accept text. */
+export const PICKER_TAGS = Object.freeze(["SELECT"]);
+
+/** Input types that are a CONTROL rather than a text box. */
+export const SLIDER_TYPES = Object.freeze(["range"]);
 
 /**
  * Which surface owns the keyboard, from facts the caller reads off the DOM once.
@@ -88,7 +115,8 @@ export const TEXT_ENTRY_TAGS = Object.freeze(["INPUT", "TEXTAREA", "SELECT"]);
 export function focusScope({ tag, type, isContentEditable, insideCanvas, lastTouchedCanvas } = {}) {
   const T = typeof tag === "string" ? tag.toUpperCase() : tag;
   if (isContentEditable) return SCOPE.FIELD;
-  if (T === "INPUT" && String(type || "").toLowerCase() === "range") return SCOPE.SLIDER;
+  if (T === "INPUT" && SLIDER_TYPES.includes(String(type || "").toLowerCase())) return SCOPE.SLIDER;
+  if (PICKER_TAGS.includes(T)) return SCOPE.PICKER;
   if (TEXT_ENTRY_TAGS.includes(T)) return SCOPE.FIELD;
   /* A focused node inside the drawing IS the drawing — this is what keeps a future focusable
    * canvas (or a focusable handle inside it) from reading as chrome. */
@@ -145,12 +173,34 @@ export function touchLatch({ insideCanvas, isTextEntry, inFieldGroup } = {}) {
   return TOUCH.CHROME;
 }
 
-/** Read the two DOM facts `touchLatch` needs off a real event target. */
+/** Does this node accept typed text (as opposed to picking or dragging a value)? */
+const isTextControl = (el) => !!el && (
+  el.isContentEditable
+  || (el.tagName === "TEXTAREA")
+  || (el.tagName === "INPUT" && !SLIDER_TYPES.includes(String(el.type || "").toLowerCase()))
+);
+
+/**
+ * Read the DOM facts `touchLatch` needs off a real event target.
+ *
+ * ⛔ NEW-1 — A FIELD GROUP LATCHES `FIELD` ONLY IF IT CONTAINS SOMETHING YOU CAN TYPE IN.
+ *
+ * The latch exists because the owner's building died to a Backspace pressed just AFTER working in
+ * the Depth box — the state outlives the field's focus, which is the whole insight. But it was keyed
+ * on the ROW, and `data-field-group` marks every value row, including rows whose only control is a
+ * fill-opacity SLIDER or a line-style DROPDOWN. Touching one of those latched "the user is typing a
+ * number" about a control with no digits in it, so Delete stayed refused after focus had moved on.
+ *
+ * A row is a typing row when it holds a text-entry control. The Depth row does (an `<input>` plus its
+ * ▲▼ steppers, which is exactly the case the latch was built for, and it is unchanged). A row holding
+ * only a range or only a `<select>` does not.
+ */
 export function touchFactsOf(node, canvasEl) {
   const el = node && node.nodeType === 1 ? node : null;
+  const group = el && typeof el.closest === "function" ? el.closest(`[${FIELD_GROUP_ATTR}]`) : null;
   return {
     insideCanvas: !!(canvasEl && node && (canvasEl === node || (el && canvasEl.contains(el)))),
-    isTextEntry: !!(el && (TEXT_ENTRY_TAGS.includes(el.tagName) || el.isContentEditable)),
-    inFieldGroup: !!(el && typeof el.closest === "function" && el.closest(`[${FIELD_GROUP_ATTR}]`)),
+    isTextEntry: isTextControl(el),
+    inFieldGroup: !!(group && (isTextControl(group) || group.querySelector("input:not([type=range]), textarea, [contenteditable=true]"))),
   };
 }

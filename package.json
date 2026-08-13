@@ -36,6 +36,8 @@
     "verify:schedpreds": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-summary-pred-dates.mjs",
     "verify:floodtiles": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-flood-tiles.mjs",
     "verify:deployed": "PLANYR_URL=https://planyr.io/sequence/ node ui-audit/verify-grid-row-hold.mjs && PLANYR_URL=https://planyr.io/sequence/ node ui-audit/verify-grid-overlay-input.mjs",
+    "verify:deletescope": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-delete-key-scope.mjs",
+    "verify:hideink": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/diagnose-hide-ink.mjs",
     "verify:gridrowhold": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-grid-row-hold.mjs",
     "verify:jurbadge": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-jurisdiction-badge-shapes.mjs",
     "build:floodtiles": "node scripts/build-flood-tiles.mjs",
