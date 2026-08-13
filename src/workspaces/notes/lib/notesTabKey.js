@@ -37,6 +37,35 @@
  *   sketch box LABEL field        moves to that box's detail field        — notesSketchEditor
  *   sketch box DETAIL field       closes the box and returns to the document — same file
  *
+ * ⛔ AND THE ONE CONTEXT WHERE TAB LOOKS BROKEN AND IS NOT: THE FIRST ITEM OF A LIST (B454480).
+ *
+ * The report was *"tab sometimes doesnt work"*, and "sometimes" was the whole finding, so it was
+ * INSTRUMENTED rather than guessed at: `ui-audit/audit-notes-tab.mjs` drives a real Tab in fourteen
+ * contexts, captures the caret's node chain and depth at the moment of the press, and judges by the
+ * STORED document. Twenty-nine rows. Tab does the right thing in every one of them except three,
+ * and all three are the same fact wearing different hats:
+ *
+ *     the first TOP-LEVEL bullet          Tab → nothing
+ *     the first bullet of a NESTED list   Tab → nothing
+ *     a range whose START is a first item Tab → nothing
+ *
+ * ⛔ IT IS STRUCTURAL, NOT A SLIP. A `listItem`'s content is `paragraph block*`, so a bullet is
+ * nested by becoming a child of the bullet ABOVE it — and the first bullet has none. There is no
+ * "indent anyway": the only way to fake it is to mint an empty parent bullet, which puts a bullet
+ * with no words in it into the document, and this module has spent six rounds removing exactly that
+ * kind of litter.
+ *
+ * ⛔ SO THE RULE, IN ONE SENTENCE, AND IT IS THE ANSWER TO "SOMETIMES": **a bullet tucks under the
+ * bullet above it; the first bullet has nothing to tuck under.** Shift+Tab is unaffected — it
+ * outdents from anywhere, including a first item. Everything else on his list — mid-word, end of
+ * line, an empty item, an already-nested item, immediately after an autolinked email or URL, inside
+ * a table cell, the last cell of a table, inside a positioned box, and the page title — behaves,
+ * and each is a pinned row in that harness so a change announces itself.
+ *
+ * ⛔ AND TAB IS REVERSIBLE where it inserts: in a plain paragraph Tab adds a tab character and
+ * Shift+Tab takes it back. "Shift+Tab did nothing" is only correct when there was nothing to undo,
+ * and that is asserted rather than assumed.
+ *
  * So this is a FALLBACK, not a blanket swallow: it is registered at a LOW PRIORITY, which
  * puts its keymap after the table's and the list's. Those still run first and still win
  * whenever they can act, and this only ever sees the presses they turned down.

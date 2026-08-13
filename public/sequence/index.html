@@ -3365,6 +3365,7 @@ function ContactPicker({ value, contacts, onCommit, onCancel, variant = "master"
   const [highlight, setHighlight] = React.useState(-1);
   const [pos, setPos] = React.useState(null);      // portal dropdown rect {left,top,width}
   const [ghost, setGhost] = React.useState(null);  // {left, fontSize, fontFamily, fontWeight}
+  const [pendingNew, setPendingNew] = React.useState(null); // NEW-1 — name awaiting "create?" confirmation
   const inputRef = React.useRef(null);
   const wrapRef = React.useRef(null);
 
@@ -3416,11 +3417,37 @@ function ContactPicker({ value, contacts, onCommit, onCancel, variant = "master"
     return () => { window.removeEventListener('scroll', fn, true); window.removeEventListener('resize', fn); };
   }, [reposition]);
 
+  /* NEW-1 — creating a person is a DECISION, so it is asked rather than assumed.
+   * This field used to auto-add any unrecognised text as a contact, silently: a typo became a
+   * person that then looked exactly as real as one meant on purpose (the registry really has held
+   * `Can give up trailer parlking` and a bare email address this way).
+   *
+   * ⛔ WHY "DECLINE" MEANS "DON'T COMMIT THE NAME EITHER", which is not arbitrary: `ensureContacts`
+   * (the load pipeline) re-derives a contact for EVERY task owner name missing from the registry,
+   * on every load. So committing an owner without its contact does not avoid creating the contact —
+   * it just defers it to the next reload, where nobody is asked. The owner field and the registry
+   * are already one decision; this makes that visible instead of changing it. Confirm = assign AND
+   * create; decline = neither, and you are returned to the text to fix it.
+   *
+   * Only genuinely-new text asks. An exact match, a pick from the list, and the ghost-prefix
+   * completion all commit straight through — a guard that nags on a normal selection gets switched
+   * off, and then it has made things worse. */
+  function createTyped() { onCommit(trimmed, { name: trimmed, email: '' }); }
   function commitTyped() {
     if (!trimmed) { onCommit(''); return; }
     const existing = contacts.find(c => c.name.toLowerCase() === trimmed.toLowerCase());
-    if (existing) onCommit(existing.name);
-    else onCommit(trimmed, { name: trimmed, email: '' }); // auto-add as new contact
+    if (existing) { onCommit(existing.name); return; }
+    setPendingNew(trimmed);   // ask first — nothing is written yet
+  }
+  // Decline: keep the editor open with the TYPED TEXT INTACT so a typo can be corrected rather than
+  // retyped. `query` is controlled state and is never touched here — the text cannot be truncated on
+  // the way back, which is the failure this field just shipped a fix for.
+  function declineNew() {
+    setPendingNew(null);
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (el) { el.focus(); const n = el.value.length; el.setSelectionRange(n, n); }
+    });
   }
   function selectItem(i) { if (i < suggestions.length) onCommit(suggestions[i].name); else commitTyped(); }
   function acceptGhost() {
@@ -3430,18 +3457,31 @@ function ContactPicker({ value, contacts, onCommit, onCancel, variant = "master"
     requestAnimationFrame(() => { const el = inputRef.current; if (el) el.setSelectionRange(full.length, full.length); });
   }
 
-  // Outside click commits typed text (don't lose work). Clicks in the portal dropdown are ignored.
+  /* Outside click commits typed text (don't lose work). Clicks in the portal dropdown are ignored.
+   * NEW-1 — clicking away with UNRECOGNISED text routes through commitTyped, so it now raises the
+   * same question instead of creating a person behind your back. The editor stays open rather than
+   * discarding: silently committing would defeat the whole item, and silently discarding would
+   * throw away typing. Recognised text and an empty field commit on blur exactly as before. */
   React.useEffect(() => {
     function onDocMouseDown(e) {
       if (wrapRef.current && wrapRef.current.contains(e.target)) return;
       if (e.target.closest && e.target.closest('[data-contact-dd]')) return;
+      if (pendingNew) return;   // already asking — don't re-ask on every stray click
       commitTyped();
     }
     document.addEventListener('mousedown', onDocMouseDown);
     return () => document.removeEventListener('mousedown', onDocMouseDown);
-  }, [query]);
+  }, [query, pendingNew]);
 
   function onKeyDown(e) {
+    /* NEW-1 — while the "add as a new contact?" question is up it owns Enter and Escape, so the
+     * choice is deliberate either way. Escape answers NO and returns to the text (it does not
+     * cancel the edit); a second Escape then cancels as it always has. */
+    if (pendingNew) {
+      if (e.key === 'Enter')  { e.preventDefault(); e.stopPropagation(); createTyped(); return; }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); declineNew(); return; }
+      return;
+    }
     if (e.key === 'Escape') { e.stopPropagation(); onCancel(); return; }
     if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight(h => Math.min(h + 1, totalItems - 1)); return; }
     if (e.key === 'ArrowUp')   { e.preventDefault(); setHighlight(h => Math.max(h - 1, -1)); return; }
@@ -3467,7 +3507,27 @@ function ContactPicker({ value, contacts, onCommit, onCancel, variant = "master"
   const masterInputStyle = { display:'block', width:'100%', height:'18px', border:'none', borderBottom:'1.5px solid var(--blue)',
     outline:'none', background:'transparent', color:'var(--txt)', fontSize:12, fontFamily:'inherit', padding:'0 2px' };
 
-  const dropdown = (totalItems > 0 && pos) ? ReactDOM.createPortal(
+  /* NEW-1 — the question. One plain sentence, in the space the dropdown already occupies, so it
+   * reads as the field answering back rather than a dialog box (PANEL-BREVITY: no heading, no
+   * explanatory paragraph). "No" is a real button AND the Escape key AND is what a stray click
+   * leaves you on — saying no must never be the hard path. */
+  const confirmNew = (pendingNew && pos) ? ReactDOM.createPortal(
+    <div data-contact-dd data-contact-confirm style={{position:'fixed', left:pos.left, top:pos.top, width:pos.width, zIndex:100000,
+      background:'#fff', border:'1px solid var(--bd2)', borderRadius:7, boxShadow:'0 6px 20px rgba(0,0,0,.13)', padding:'9px 11px'}}>
+      <div style={{fontSize:12, color:'var(--txt)', lineHeight:1.4, marginBottom:8}}>
+        No match — add "<span style={{fontWeight:600}}>{pendingNew}</span>" as a new contact?
+      </div>
+      <div style={{display:'flex', gap:7}}>
+        <button data-contact-confirm-yes onMouseDown={e=>{ e.preventDefault(); createTyped(); }}
+          style={{flex:1, fontSize:11.5, fontWeight:600, padding:'5px 0', borderRadius:5, cursor:'pointer',
+            border:'1px solid var(--blue)', background:'var(--blue)', color:'#fff'}}>Add contact</button>
+        <button data-contact-confirm-no onMouseDown={e=>{ e.preventDefault(); declineNew(); }}
+          style={{flex:1, fontSize:11.5, padding:'5px 0', borderRadius:5, cursor:'pointer',
+            border:'1px solid var(--bd2)', background:'var(--surf)', color:'var(--txt)'}}>Keep editing</button>
+      </div>
+    </div>, document.body) : null;
+
+  const dropdown = (!pendingNew && totalItems > 0 && pos) ? ReactDOM.createPortal(
     <div data-contact-dd style={{position:'fixed', left:pos.left, top:pos.top, width:pos.width, zIndex:100000,
       background:'#fff', border:'1px solid var(--bd2)', borderRadius:7, boxShadow:'0 6px 20px rgba(0,0,0,.13)',
       overflow:'hidden', maxHeight:220, overflowY:'auto'}}>
@@ -3487,7 +3547,7 @@ function ContactPicker({ value, contacts, onCommit, onCancel, variant = "master"
       ))}
       {isNewName && (
         <div onMouseEnter={()=>setHighlight(suggestions.length)}
-          onMouseDown={e=>{ e.preventDefault(); commitTyped(); }}
+          onMouseDown={e=>{ e.preventDefault(); createTyped(); }}
           style={{display:'flex', alignItems:'center', gap:7, padding:'7px 10px', cursor:'pointer',
             borderTop: suggestions.length ? '1px solid var(--bd)' : 'none',
             color:'var(--blue)', fontSize:11, fontWeight:500,
@@ -3503,7 +3563,9 @@ function ContactPicker({ value, contacts, onCommit, onCancel, variant = "master"
       <input {...NO_AUTOFILL} ref={inputRef} value={query}
         className={isGrid ? "ei" : undefined}
         style={isGrid ? undefined : masterInputStyle}
-        onChange={e=>setQuery(e.target.value)}
+        /* NEW-1 — editing the text IS "keep editing": any change dismisses the question rather than
+           leaving it up quoting a name that is no longer what the field says. */
+        onChange={e=>{ if (pendingNew) setPendingNew(null); setQuery(e.target.value); }}
         onKeyDown={onKeyDown}
         placeholder="Type a name…" />
       {ghostText && ghost && (
@@ -3514,6 +3576,7 @@ function ContactPicker({ value, contacts, onCommit, onCancel, variant = "master"
           maxWidth:`calc(100% - ${ghost.left}px - 4px)`}}>{ghostText}</span>
       )}
       {dropdown}
+      {confirmNew}
     </div>
   );
 }

@@ -482,6 +482,33 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   structure is broken input, not a style choice. And a multi-block paste with the caret in a
   list lands AFTER the list, never nested inside the item (an Outlook signature four levels
   deep inside one bullet is the report it closes).
+- **⛔ WHY TAB "SOMETIMES DOESN'T WORK", ANSWERED WITH A MEASUREMENT (B454480).** The report was one
+  word — *"sometimes"* — so it was INSTRUMENTED rather than guessed at: **audit-notes-tab** under
+  `ui-audit/` drives a real Tab in fourteen contexts on a fixture shaped like his own note (a
+  bulleted list with a nested sub-list and an autolinked email in it), captures the caret's node
+  chain and depth at the moment of the press, and judges by the STORED document. **Tab is right in
+  every context but one, and that one is structural: a bullet tucks under the bullet ABOVE it, and
+  the first bullet has none.** All three failing rows are that same fact — the first top-level
+  bullet, the first bullet of the nested list, and a range whose start is a first item. `listItem`
+  content is `paragraph block*`, so faking an indent means minting an empty parent bullet, which is
+  the litter this module has spent six rounds removing. ⛔ The instrument itself needed correcting
+  twice before it could be believed: it could not tell *"did nothing"* from *"moved the caret"* (so
+  it called Tab-between-table-cells a defect), and its node column read `p` for all twenty-eight
+  rows because `closest` with a selector list returns the NEAREST match. The measured table is
+  pinned, so any change to Tab announces itself.
+- **⛔ TYPING AND FORMATTING, ATTACKED (B454481) — and what it actually found.** **audit-notes-formatting**
+  under `ui-audit/` applies · removes · re-applies · undoes every mark, block conversion, alignment,
+  list type, link and spacing setting, at a caret AND across a selection, **judged on the STORED
+  document** — plus his hardest ask, twenty mixed operations undone back to a byte-identical
+  document. **Sixty checks, and nothing wrong with the app.** ⛔ What it did find is SIX defects in
+  ITSELF, every one of which produced a confident false report: a fixture that put marks on the
+  paragraph instead of the text node (20 findings), reads that raced the 600 ms save debounce (16
+  findings — the wait now lives INSIDE the reader so a caller cannot skip it), a baseline compared
+  against hand-authored seed bytes rather than the editor's own serialisation (11), a spacing option
+  that was the DEFAULT (3), a colour swatch that was "Default", i.e. REMOVE (2), and a fingerprint
+  that recorded `level` and `textAlign` but not `lineHeight`, so it was blind to the property it was
+  judging (3). ⛔ **A fingerprint blind to the property under test is worse than no fingerprint** —
+  it returns a confident wrong answer. Read that file's header before adding a case to it.
 - `lib/notesTabKey.js` — **Tab belongs to the DOCUMENT while the caret is in it** (B1392, and
   B1392 ×2 which made it true in EVERY context rather than usually — **its header carries the
   full table of what Tab does in each one; read that before touching it**, and note that the
