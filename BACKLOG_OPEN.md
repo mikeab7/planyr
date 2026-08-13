@@ -13,7 +13,7 @@
 | B477808 | The inspector can hand back a different number than you typed, and says nothing | [Site Planner / inspector] | #site-planner #ui | sandbox |
 | B464048 | Typing in an inspector number box could DELETE the selected building — SEVEN of eight ordinary interactions armed the next Backspace | [Site Planner / keyboard] | #site-planner #selection #ui #testing | live |
 | B464049 (×2) | The Depth box "wasn't letting" him type. Nothing was rejecting it — and the app had NO error state at all | [Site Planner / UI · a11y] | #site-planner #ui | sandbox |
-| B464050 | Undo after a delete re-spaces every element's layer key | [Site Planner / undo] | #site-planner #selection #sync | sandbox |
+| B464050 | "Undo re-spaces every element's layer key" — IT IS NOT UNDO. Legacy duplicate `z`, repaired at load | [Site Planner / undo] | #site-planner #selection #sync | sandbox |
 | B472049 | A notch split left the superseded parent drawn, so it read as a duplicate | [Site Planner] | #site-planner #parcel | live |
 | B472048 | An operation envelope: who did a write, and what operation it was part of | [Site Planner / data] | #site-planner #persistence #infra | live |
 | B463922 | Collapsing a group above the row you are editing throws that row off the screen | [Scheduler] | #scheduler #ui #testing | live |

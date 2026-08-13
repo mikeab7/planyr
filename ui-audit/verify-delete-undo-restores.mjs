@@ -62,6 +62,15 @@ const onScreen = (page) => page.evaluate(() => {
   return { total: keys.size, by, keys: [...keys].sort() };
 });
 
+/** How many elements share a `z` with an earlier one — the legacy-migration signal. */
+const dupZ = (page) => page.evaluate(() => {
+  const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const s = m[Object.keys(m)[0]] || {};
+  const seen = new Set(); let d = 0;
+  for (const e of s.els || []) { if (seen.has(e.z)) d++; seen.add(e.z); }
+  return d;
+});
+
 /* ON SCREEN, GEOMETRICALLY: every painted feature's box relative to the canvas origin. Canvas-
  * relative on purpose — chrome around the drawing can move by a pixel between two readings, and
  * that must not read as "the plan changed". */
@@ -152,6 +161,25 @@ for (const route of ["keyboard Delete", "Properties → Delete element"]) {
   console.log(`\n=== undo after ${route} — on the owner's real FM 359 "Concept A" ===`);
   const { ctx, page } = await open(browser);
   await selectBuilding1(page);
+
+  /* ⛔ B464050's CORRECTION, measured here so it cannot drift back into folklore. The item was filed
+   * as "undo re-spaces every element's layer key", off a real 17-element diff after Ctrl+Z. Undo is
+   * NOT what does it: this plan carries 9 DUPLICATE `z` values (both buildings are z:0, each
+   * assembly numbered from 0 — legacy rows from before B671 gave elements an explicit z), and
+   * `createSiteModel` repairs them with `ensureZ` on LOAD. The next SAVE of any kind persists the
+   * repair; undo was merely the first save. One arrow nudge proves it. */
+  if (route === "keyboard Delete") {
+    const dupBefore = await dupZ(page);
+    await page.keyboard.press("ArrowRight");   // a mutation that is NOT a delete and NOT an undo
+    await page.waitForTimeout(900);
+    const dupAfter = await dupZ(page);
+    await page.keyboard.press("Control+z");    // put it back before the real measurement starts
+    await page.waitForTimeout(700);
+    ok("B464050 — the z re-spacing is the LOAD-TIME migration, not undo (one nudge does it too)",
+      dupBefore > 0 && dupAfter === 0,
+      `${dupBefore} duplicate z values in the saved plan → ${dupAfter} after a single arrow nudge`);
+    await selectBuilding1(page, { soft: true });
+  }
 
   const before = await committed(page);
   const screenBefore = await onScreen(page);
