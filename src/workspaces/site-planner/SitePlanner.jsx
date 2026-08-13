@@ -6515,11 +6515,41 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           roleOverrides: remapEdgeVector(pc.roleOverrides, edgeSrc, null),
           roles: remapEdgeVector(pc.roles, edgeSrc, null),
         }));
-        // Retain the parent (active:false = superseded, non-counting) followed by its children.
-        // Do NOT tombstone it — it is no longer deleted; a tombstone would strip it on the next
-        // cross-copy merge. (The mutual-exclusion guard + the overlap warning, B652, cover the
-        // rare merge-skew case where a stale copy re-activates the parent.)
-        setParcels((arr) => arr.flatMap((p) => (p.id === pc.id ? [{ ...p, active: false }, ...made] : [p])));
+        /* ⛔ NEW-9 (B472049) — THE PARENT IS REMOVED, NOT RETAINED. THIS REVERSES B651 DELIBERATELY.
+         *
+         * B651 kept the parent as a SUPERSEDED, non-counting, still-DRAWN parcel so the original
+         * surveyed outline stayed visible. The owner reported the consequence: *"it seems like the
+         * tool now just leaves the parent parcel and creates a new parcel almost with the split
+         * tool."* On a NOTCH cut the remainder is 99.4% of the parent (his numbers: 104.475 of
+         * 105.122 ac), so the drawing showed two near-identical outlines and read as a duplicate
+         * rather than a cut.
+         *
+         * ⛔ HIS REASONING IS THE REASON, AND IT IS BETTER THAN THE ALTERNATIVES EITHER OF US
+         * FRAMED: *"no because the two new parcels would have the same exterior outline."* The
+         * union of a split's children REPRODUCES the parent's exterior outline exactly — that is
+         * what a split IS. So the retained parent adds NO information to the drawing; it only adds
+         * a second coincident boundary. There is nothing to preserve visually.
+         * The dimmed / dashed / superseded-styling route was considered and rejected on the merits.
+         * `splitIntegrity.unionOutlineMatches` turns that reasoning into the assertion.
+         *
+         * ⛔ AND IT IS TOMBSTONED, which REVERSES B651's explicit instruction not to. That
+         * instruction was correct while the parent remained a live record — a tombstone would have
+         * stripped it on the next cross-copy merge. Now that the parent is genuinely gone, the
+         * tombstone is what makes it STAY gone: without it, a merge from another device that still
+         * holds the parent would resurrect it, overlapping its own children.
+         *
+         * LINEAGE SURVIVES WITHOUT A DRAWABLE PARCEL, and nothing is lost:
+         *   • the HCAD-derived facts (`addr`, `acct`, `attrs`) are COPIED onto every child by
+         *     `inherit` above — they were never read back off the parent row;
+         *   • `parentId` stays on each child as a historical STAMP rather than a live reference,
+         *     and `siteModel.childrenByParent` already ignores a child whose parent is absent
+         *     (`has.has(p.parentId)`), so the nesting simply stops rather than dangling.
+         * ⚠ EXISTING PLANS ARE NOT MIGRATED BY THIS. Parents superseded by earlier splits are
+         * already on disk as `active:false` drawable rows (on the owner's Bain plan alone:
+         * `e1454855gyzzln` and `e1455071mkspvo`). They keep drawing until someone removes them.
+         * That cleanup is REPORTED to the owner, never run automatically over his live data. */
+        tombstone([pc.id]);
+        setParcels((arr) => arr.flatMap((p) => (p.id === pc.id ? made : [p])));
         setSel({ kind: "parcel", id: made[0].id });
         /* Say what happened. Three or more pieces is a real outcome of a real cut and the plan
          * should not leave you counting them; a scrap dropped or a parent whose outline overlaps
