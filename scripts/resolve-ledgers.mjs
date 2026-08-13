@@ -35,6 +35,11 @@
  * files; their conflicts cost nothing and require no judgement. They are regenerated from the
  * merged inputs, which is the only correct answer and cannot be got wrong by concatenation.
  *
+ * ⛔ BUT "GENERATED" DID NOT MEAN "FULLY DERIVED", AND THAT COST 48 DESCRIPTIONS (B384432). This
+ * step used to `git checkout --ours` before regenerating. `MAP.md` carries a hand-authored one-liner
+ * per path which `build-map.mjs` preserves by parsing the copy on disk — so seeding that parse from
+ * ONE side silently threw away every description the other side had written. See `seedGenerated`.
+ *
  * ⛔ NOT A MIGRATION. This is the bridge, deliberately: it is also the INSTRUMENT that decides
  * whether option (c) — entries as data the generator assembles — is worth its ~1,400-item cost. If
  * the "ids overlap on both sides" branch never fires in a month of merges, the conflicts really are
@@ -105,7 +110,58 @@ export function resolveConflicts(raw) {
   return { ok: overlaps.length === 0, hunks, overlaps, text: out.join("\n") };
 }
 
-const git = (...args) => execFileSync("git", args, { cwd: REPO, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+const git = (...args) => execFileSync("git", args, { cwd: REPO, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1 << 28 });
+
+/** The placeholder `build-map.mjs` writes for a file nobody has described yet. */
+const TODO_DESC = "TODO — describe";
+
+/**
+ * Strip the conflict markers and the `TODO — describe` lines out of one side of a generated file.
+ * PURE, so the rule is unit-testable without a git repo. A TODO line carries no information and the
+ * generator re-defaults to TODO on its own, so dropping it stops an empty placeholder on one side
+ * from overwriting a real description on the other.
+ */
+export function seedSide(text) {
+  return (text || "")
+    .split("\n")
+    .filter((l) => !/^(<{7} |={7}$|>{7} |\|{7} )/.test(l) && !l.includes(TODO_DESC))
+    .join("\n");
+}
+
+/**
+ * Build the seed a GENERATED file is regenerated FROM, as both sides concatenated.
+ *
+ * ⛔ NOT `git checkout --ours`, which is what this did until B384432 and which LOSES DATA. A file
+ * being generated does not mean all of its content is derived: `MAP.md` carries a hand-authored
+ * one-line responsibility per path, and `build-map.mjs` PRESERVES those by parsing the copy already
+ * on disk. Seeding that parse from one side therefore discards every description the other side
+ * wrote. Measured on PR #978 (2026-08-13, the bridge's first outing on a PR it did not author):
+ * `--ours` regenerated `MAP.md` with **48 descriptions from `main` replaced by `TODO — describe`**,
+ * and `build-map.mjs --check` went red on a merge the bridge had just reported as resolved. Silently
+ * dropping another session's work is the one failure this script exists to be incapable of, and the
+ * generated pair was the half of it nobody had checked.
+ *
+ * Both sides concatenated is the correct seed because the generator rebuilds the file from a FRESH
+ * SCAN and reads the seed only for its preserved-content map, keyed by path — so a path appearing
+ * twice costs nothing. Order is theirs-then-ours because the map is last-write-wins: a path both
+ * sides describe keeps OURS, the branch's own wording for its own file.
+ *
+ * Returns false when the file has no conflict stages (already resolved) — then the copy on disk is
+ * left exactly as it is and only the regeneration runs, which is the pre-existing behaviour.
+ */
+function seedGenerated(file) {
+  const stage = (n) => { try { return git("show", `:${n}:${file}`); } catch { return ""; } };
+  let ours = stage(2), theirs = stage(3);
+  if (!ours && !theirs) {
+    // Staged already (or resolved by hand): recover the two sides from the merge parents instead,
+    // so a re-run is still correct rather than quietly seeding from a half-written file.
+    try { ours = git("show", `HEAD:${file}`); } catch { ours = ""; }
+    try { theirs = git("show", `MERGE_HEAD:${file}`); } catch { theirs = ""; }
+  }
+  if (!ours && !theirs) return false;
+  writeFileSync(join(REPO, file), `${seedSide(theirs)}\n${seedSide(ours)}\n`);
+  return true;
+}
 
 /** Files git currently reports as unmerged. */
 function conflictedFiles() {
@@ -190,7 +246,7 @@ function main(argv) {
   // ---- 3. the generated pair: regenerate rather than union, then stage everything we fixed
   for (const g of GENERATED) {
     if (!mine.includes(g.file)) continue;
-    try { git("checkout", "--ours", "--", g.file); } catch { /* may already be resolved */ }
+    seedGenerated(g.file);
     execFileSync(process.execPath, [join(REPO, ...g.build[0].split("/"))], { cwd: REPO, stdio: ["ignore", "pipe", "pipe"] });
   }
   for (const f of mine) { try { git("add", "--", f); } catch { /* reported below by status */ } }
