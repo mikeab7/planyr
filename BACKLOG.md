@@ -83,6 +83,22 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 `[x]` **SHIPPED. Fixed, mutation-proven, and merged this session.**
 - Verify: live → **V258992** (`Blocker: auth` — the signed-in leg only; every logged-out path is proven here).
 - Origin: filed 2026-08-13 from chat.
+- **RECURRENCE vs NET-NEW — the owner asked at the start and asked twice more; the answer, kept verbatim:**
+  **net-new against both, borrowing B293072's shape — declare it, fail the build on an undeclared entry — as the keyboard counterpart to B1188's mouse rule.**
+  Expanded once, so the shorthand can be re-derived: **B1188** is the CLICK contract (a panel whose
+  open/closed state was wrongly DERIVED from the selection); **B293072** is the element CAPABILITIES
+  table (element types drifting apart on properties and right-click actions, closed by a declaration
+  plus a build-failing check). Neither covers WHERE A KEY IS ALLOWED TO ACT — nothing did.
+- **EVERYTHING SHIPPED IN THIS STRAND, one table so it never has to be reconstructed:**
+
+  | id | what |
+  |---|---|
+  | **B464048** | the keystroke that deleted the building — keyboard scope + the declared key contract (PR #1030) |
+  | **B464049 (×2)** | the field that "looked broken" — first fix wrong and REVERTED, real error state built (PR #1030, corrected in #1033) |
+  | **B464050** | **NOT an undo bug** — legacy duplicate `z` repaired at load; invariant pinned (PR #1034) |
+  | **B477808** | the silent clamp: typing 200,000 for a depth stored 100,000 and said nothing (PR #1033) |
+  | **B481328** | a red e2e check that was a STALE TEST, not a defect — diagnosed, fixed, filed (PR #1035) |
+  | **V258992** | the signed-in click-through — the only thing still open (`Blocker: auth`) |
 - **HIS WORDS.** *"go check out this site and figure out what's wrong with these text boxes where I'm trying to input the depth, and it's not letting me... I think I had pressed backspace or something in the text box and ended up deleting my building. That was really weird."* Site FM 359 RD, Fulshear — plan **"Concept A"**, Building 1 (`e1454615maruai`, 1675 × 613, cross-dock, two bump-outs), editing **Depth (ft)** in the ELEMENT · BUILDING inspector.
 - **⛔ THE NUMBER THAT MAKES THIS A DATA-LOSS BUG RATHER THAN A CURIOSITY: SEVEN OF EIGHT.** Measured on his real plan, pulled verbatim from production into `ui-audit/fixtures/fm359-concept-a.json` and driven logged out (`ui-audit/diagnose-key-scope-paths.mjs`). After each ordinary interaction, ONE keystroke:
 
