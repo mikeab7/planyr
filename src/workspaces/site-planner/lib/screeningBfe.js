@@ -69,29 +69,22 @@ export const MANNING_N = {
   overbank: 0.08,      // brush / trees on the floodplain fringe
 };
 
-/* What a screening estimate does NOT do. Returned with every result so a call site cannot quietly
- * present the number without them. Owner brief: "Name what is NOT modeled, explicitly and visibly." */
-export const NOT_MODELED = [
-  "no field survey — the channel shape is sampled from public terrain data, not surveyed",
-  "no bridges or culverts — a constriction raises the real water surface, sometimes by feet",
-  "no ineffective-flow areas — every part of the section is assumed to carry water",
-  "no floodway encroachment analysis",
-  "no stream-gauge calibration",
-  "steady uniform flow (normal depth), not a backwater profile",
-];
-
-/* The regulatory pathway a developer-derived BFE runs through when it changes the mapped
- * floodplain. Reused verbatim from the B710 lineage rather than forked — one sentence, one home. */
-/* B1089 — the ONE wording of the screening disclaimer. It was written out independently in
- * `screeningBfeSite.screeningStudyNote` and in `floodplainMitigation.EST_SCREENING_BFE_NOTE`, so the
- * same sentence shipped three times. Composing from here is PANEL-BREVITY rule 5 (state a fact once)
- * doing double duty as a bundle optimization — and it means the disclaimer can never drift between
- * the two surfaces that show it. */
-export const SCREENING_DISCLAIMER =
-  "SCREENING ONLY — not engineering-grade and not a substitute for a sealed engineer's study.";
-
-export const CLOMR_NOTE =
-  "A developer-derived flood elevation that changes the mapped floodplain goes to FEMA as a CLOMR before construction and a LOMR after it, on a sealed engineer's study.";
+/* NEW-1 — NOT_MODELED / SCREENING_DISCLAIMER / CLOMR_NOTE now LIVE in `screeningBfeCopy.js` and are
+ * re-exported here so every existing importer keeps working unchanged.
+ *
+ * ⛔ Do NOT move them back. They are read by the RENDER BODY (`SitePlanner.jsx`) and by
+ * `floodplainMitigation.js`, both of which are on the Site route's boot path. A static import of a
+ * constant pulls its whole module — so while they lived here, the render body's need for one string
+ * hoisted this entire hydrology + hydraulics engine onto the critical path of every page load, on
+ * every site, for a branch that runs only on an unstudied Zone A site behind an explicit user
+ * action. Re-exporting is what lets `SitePlanner.jsx` reach the MATH through a dynamic `import()`.
+ * (Tree-shaking cannot save you here: it drops unused exports, never an export a sibling uses.)
+ *
+ * IMPORTED and then re-exported, NOT forwarded with a bare `export … from`: the functions below
+ * reference `NOT_MODELED` and `CLOMR_NOTE` in their own scope, and a bare re-export forwards the
+ * names to consumers WITHOUT binding them here. (Same trap `titleReader.js` documents.) */
+import { NOT_MODELED, SCREENING_DISCLAIMER, CLOMR_NOTE } from "./screeningBfeCopy.js";
+export { NOT_MODELED, SCREENING_DISCLAIMER, CLOMR_NOTE };
 
 /* ─── WHY THIS IS NOT OPTIONAL WHERE THE ORDINANCE HAS BEEN READ ─────────────────────────────
  * UPDATE (NEW-3, 2026-07-29): for WALLER COUNTY this is no longer open research. The county's own
@@ -130,47 +123,14 @@ export const CLOMR_NOTE =
  *   2. This is research to CONFIRM WITH THE COUNTY, not a legal conclusion. Product copy must
  *      present it as "commonly adopted, confirm locally" — never as a determination.
  * Source: 44 CFR 60.3(b)(3)–(b)(4), https://www.ecfr.gov/current/title-44/chapter-I/subchapter-B/part-60/subpart-A/section-60.3 */
-export const BFE_DATA_REQUIREMENT = {
-  citation: "44 CFR 60.3(b)(3)",
-  url: "https://www.ecfr.gov/current/title-44/chapter-I/subchapter-B/part-60/subpart-A/section-60.3",
-  lotsThreshold: 50,
-  acresThreshold: 5,
-  verified: false, // the CFR text is quoted; whether THIS county adopted it verbatim is not
-  quote:
-    "all new subdivision proposals and other proposed developments (including proposals for manufactured home parks and subdivisions) greater than 50 lots or 5 acres, whichever is the lesser, include within such proposals base flood elevation data",
-  plain:
-    "In an approximate A zone with no published flood elevation, the NFIP minimum standard most communities adopt makes a development over 50 lots or 5 acres (whichever is smaller) submit base flood elevation data with the proposal. Confirm the exact wording in this county's own floodplain ordinance.",
-};
-
-/* Does the BFE-data threshold bite on this site? ONE engine, two provenances: pass the
- * jurisdiction's own `requirement` record (floodplainRules.bfeDataRequirementFor) and the answer
- * is a VERIFIED ordinance determination; omit it and the generic NFIP-minimum record applies as
- * unverified research. There is deliberately no second code path for the county case.
+/* NEW-1 — BFE_DATA_REQUIREMENT + bfeDataLikelyRequired now live in `screeningBfeCopy.js`,
+ * re-exported here so every existing importer (and test) keeps working unchanged.
  *
- * Returns null when it cannot be answered honestly (no acreage/lot count, or the site isn't in an
- * approximate A zone — a studied zone already HAS a published elevation, so nothing is triggered).
- * The returned `verified` flag is the record's own, so a call site can never present unconfirmed
- * research as settled law. */
-export function bfeDataLikelyRequired({ acres = null, lots = null, inApproximateAZone = false, requirement = null } = {}) {
-  if (!inApproximateAZone) return null;
-  const rec = requirement || BFE_DATA_REQUIREMENT;
-  const a = Number.isFinite(acres) ? acres : null;
-  const l = Number.isFinite(lots) ? lots : null;
-  if (a == null && l == null) return null;
-  const acresThreshold = Number.isFinite(rec.acresThreshold) ? rec.acresThreshold : BFE_DATA_REQUIREMENT.acresThreshold;
-  const lotsThreshold = Number.isFinite(rec.lotsThreshold) ? rec.lotsThreshold : BFE_DATA_REQUIREMENT.lotsThreshold;
-  const overAcres = a != null && a > acresThreshold;
-  const overLots = l != null && l > lotsThreshold;
-  if (!overAcres && !overLots) return null;
-  return {
-    likely: true,
-    by: overAcres && overLots ? "both" : overAcres ? "acres" : "lots",
-    // The measured value that tripped it, so the panel can say WHY without recomputing.
-    acres: a, lots: l,
-    jurisdictional: !!requirement,
-    ...rec,
-  };
-}
+ * ⛔ Do NOT move them back. `SitePlanner.jsx` calls `bfeDataLikelyRequired` from its RENDER
+ * BODY, so exporting it from this module kept the whole hydrology + hydraulics engine on the
+ * Site route's boot path. It is a THRESHOLD test over acres and lots — it runs no hydrology.
+ * The research note above still documents WHY the threshold exists; only the record moved. */
+export { BFE_DATA_REQUIREMENT, bfeDataLikelyRequired } from "./screeningBfeCopy.js";
 
 const num = (v) => (Number.isFinite(v) ? v : null);
 const r2 = (v) => (Number.isFinite(v) ? Math.round(v * 100) / 100 : null);

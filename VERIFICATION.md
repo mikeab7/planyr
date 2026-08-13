@@ -113,6 +113,37 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V209424 — B407328: the screening study still runs, and still returns the SAME numbers, now that its engine arrives by dynamic import `Blocker: real-data` + `live-GIS`
+
+**What is proven HERE, and it is most of it.** The engine is unchanged — not one line of hydrology or
+hydraulics was touched; the change is which chunk the code sits in and when it downloads. The full
+suite is green (541 files / 10,917 tests), and that includes `test/screeningBfe.test.js` driving the
+engine through the new re-exports, so the derivation, its constants and its threshold test all behave
+identically. Lint 0 errors, build green. On the BUILT app, headless: the planner boots and paints, and
+the engine chunk is **not** among the 13 scripts fetched on load — which is the whole point of the
+change, measured rather than asserted (`siteRouteJsBytes` 2471.0 → 2457.7 KB, `largestChunkBytes`
+1554.3 → 1541.0 KB).
+
+**What CANNOT be checked here, and why it is a real blocker rather than a to-do.** The screening study
+only executes on an **unstudied Zone A** site with no published or manual 1% surface, and it needs four
+live services — FEMA NFHL, USGS 3DEP, SSURGO and NOAA Atlas-14 (PFDS) — every one of which is
+egress-blocked from this sandbox (`ERR_CONNECTION_RESET` / tunnel refused). There is no fixture path
+that exercises the `import()` at runtime on real ground: the unit tests import the module statically.
+
+**The signed-in steps still pending** (any browser-equipped session, on planyr.io):
+1. Open a plan on an **unstudied Zone A** site — a Waller-county tract is the case the engine was built
+   for — and run **↻ Re-check** in the drainage/flood group.
+2. Confirm the screening line still resolves to a NUMBER (or to one of its named honest-unknown states
+   — "flat reach, no defined channel", "watershed larger than the terrain window", "data sources
+   unreachable"), exactly as before. **A blank line, a permanent spinner, or a "could not run" naming a
+   module/chunk instead of a data source is the failure mode this change could introduce** — that
+   wording would mean the chunk fetch itself failed.
+3. In DevTools → Network, confirm `screeningBfeSite-*.js` is fetched **at that moment**, not at page
+   load, and that the panel's numbers match what the same site reported before this change.
+4. Confirm the behind-the-fold study note and the decline copy still render (they moved file, so a
+   missing re-export would blank them) — and that the est-BFE row still shows its provenance.
+
+
 ### V202272 — B400176 + B342996: a rename made in one window is not undone by another, on his account `Blocker: auth`
 
 **What is proven WITHOUT sign-in, and it is most of the substance.** The root cause was reproduced

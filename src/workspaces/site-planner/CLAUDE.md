@@ -1344,6 +1344,27 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   better method was tried and declined (that suppression WAS the B1089 bug).
   The §5.C(3) submittal trigger itself is a VERIFIED, firing rule —
   `floodplainRules.waller.bfeDataRequirement` + `bfeDataRequirementFor` / `atlas14Mandated`.
+  **⛔ NEW-1 — THE ENGINE IS OFF THE BOOT PATH, AND `screeningBfeCopy.js` IS WHAT KEEPS IT THERE.**
+  This engine runs in exactly ONE place — `checkDrainage`'s async block, on an unstudied Zone A site
+  with no published or manual 1% surface — and yet every byte of it rode the Site route's critical
+  path on every load of every site, because a handful of CONSTANTS and three pure COPY functions were
+  exported from the same modules and are needed by the RENDER BODY. A static import of one export
+  pulls the whole module (tree-shaking drops unused exports, never an export a sibling uses), so the
+  render body's need for `screeningBfeHeadline` was enough to hoist the lot. `screeningBfeCopy.js` is
+  the dependency-free LEAF holding the words (`screeningBfeHeadline` / `screeningDeclined` /
+  `screeningStudyNote`), the constants (`NOT_MODELED` · `CLOMR_NOTE` · `SCREENING_DISCLAIMER` ·
+  `WATERSHED_*` — the last two needed to build the terrain bounds BEFORE the engine is awaited) and
+  the acres/lots threshold test (`BFE_DATA_REQUIREMENT` / `bfeDataLikelyRequired`, called every
+  render). `screeningBfe.js` and `screeningBfeSite.js` re-export all of it, so no importer changed.
+  Measured: **43.6 KB of source out of the largest chunk, −13.3 KB minified off BOTH the Site route
+  and `largestChunkBytes`**; the engine now downloads concurrently with the three data pulls it needs,
+  so the branch costs no wall-clock. **Three things not to undo:** the leaf may NEVER import the
+  engine or anything that does (one edge back and the split silently buys nothing); the constants in
+  `screeningBfe.js` are IMPORTED-then-re-exported, not forwarded with a bare `export … from`, because
+  its own functions reference them in scope (the trap `titleReader.js` documents); and
+  `floodplainMitigation.js` — also on the boot path — must take its two constants from the LEAF, never
+  from the engine. Same shape as `terrainGate.js`/`terrainLazy.js`. Run the ui-audit bundle audit
+  before pushing any change to these imports: lint, tests and build all stay green on the regression.
 - Pond economics optimizer (NEW-D, Phase D): `pondOptimizer.js` — searches depth × placement pond
   configurations (deeper-smaller vs shallower-bigger, pond-cut-as-pad-fill dirt balance) under
   constraints (max depth, Phase-B groundwater ceiling, 30-ft maintenance berm, pipeline-corridor

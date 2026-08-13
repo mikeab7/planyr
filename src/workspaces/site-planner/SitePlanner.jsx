@@ -321,11 +321,23 @@ import { loadTerrain, contourHover } from "./lib/terrainLazy.js";
 // the terrain→watershed/section derivation that feeds screeningBfe.js.
 import { resolvePfds } from "./lib/pfdsClient.js";
 import { resolveSoils } from "./lib/soils.js";
+// ⛔ NEW-1 — THE SCREENING ENGINE IS OFF THE BOOT PATH. Everything below comes from the COPY LEAF
+// (`screeningBfeCopy.js`), which imports nothing: the words the render body prints, the two
+// WATERSHED_* numbers `checkDrainage` needs to build its terrain bounds before the engine runs, and
+// the acres/lots threshold test. The MATH — `terrainInputsForScreeningBfe` / `atlas14Depths` /
+// `screeningBfeForSite`, and with them `screeningBfe.js`, `upstreamArea.js` and `channelSection.js`
+// — arrives through a dynamic `import("./lib/screeningBfeSite.js")` inside `checkDrainage`, on the
+// unstudied-Zone-A branch that is the only place it runs.
+//
+// Do NOT add a static import of `screeningBfeSite.js` or `screeningBfe.js` to this file. It rebuilds
+// green and looks harmless; what it does is put the app's entire hydrology + hydraulics engine back
+// on the critical path of every page load, for every site. The bundle audit in the ui-audit folder
+// is what notices — run it before pushing any change to this import block.
 import {
-  terrainInputsForScreeningBfe, atlas14Depths, screeningBfeForSite, screeningBfeHeadline,
-  screeningStudyNote, screeningDeclined, WATERSHED_GRID_ZOOM, WATERSHED_PAD_DEG,
-} from "./lib/screeningBfeSite.js";
-import { bfeDataLikelyRequired, NOT_MODELED, CLOMR_NOTE } from "./lib/screeningBfe.js";
+  screeningBfeHeadline, screeningStudyNote, screeningDeclined,
+  WATERSHED_GRID_ZOOM, WATERSHED_PAD_DEG,
+  bfeDataLikelyRequired, NOT_MODELED, CLOMR_NOTE,
+} from "./lib/screeningBfeCopy.js";
 import { paintHeatmap, heatmapLegend, heatmapTotals, cellAt as heatCellAt, cutFillPaint, cutFillLegend, cutFillTotals } from "./lib/mitigationHeatmap.js";
 import { buildProposedSurface, balanceAssist, netImportCy, classifyGradeElement, sampleProposedAt, TIE_DROP_FT } from "./lib/proposedSurface.js";
 import { solveBalanceFfe, ffeDualDisplay } from "./lib/ffeBalance.js";
@@ -10860,6 +10872,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             west: sLng - WATERSHED_PAD_DEG, east: sLng + WATERSHED_PAD_DEG,
             south: sLat - WATERSHED_PAD_DEG, north: sLat + WATERSHED_PAD_DEG,
           };
+          // NEW-1 — the engine is fetched CONCURRENTLY with the three data pulls it needs, and
+          // awaited only where its first function is called. Moving it off the boot path therefore
+          // costs this branch no wall-clock: the module download overlaps network round-trips that
+          // were already happening. Started BEFORE the `await` below on purpose — kick it off, then
+          // let it ride. A failed chunk fetch rejects at the await and lands in the existing catch,
+          // which reports it as the named LOUD-FAILURE "could not run" state like any other outage.
+          const enginePromise = import("./lib/screeningBfeSite.js");
           const [wideR, pfdsR, soilsR] = await Promise.allSettled([
             loadTerrain().then((t) => t.fetchSiteGrid(wideBounds, { zoom: Math.min(WATERSHED_GRID_ZOOM, t.siteGridZoom(sLat)) })),
             resolvePfds({ lat: sLat, lng: sLng }),
@@ -10868,6 +10887,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           const wide = wideR.status === "fulfilled" ? wideR.value : null;
           const pfds = pfdsR.status === "fulfilled" && pfdsR.value?.ok ? pfdsR.value : null;
           const soils = soilsR.status === "fulfilled" && soilsR.value?.ok ? soilsR.value : null;
+          const { terrainInputsForScreeningBfe, atlas14Depths, screeningBfeForSite } = await enginePromise;
 
           const terrain = terrainInputsForScreeningBfe({
             sectionGrid: siteGrid?.grid || null,
