@@ -113,6 +113,24 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V186160 — B384064: is the jurisdiction chip on the header's centre line, on his own sites and after a rename? `Blocker: real-data`
+
+**What shipped.** The row-1 centre slot is pinned at the header's midpoint and out of flow, bounded by a measured width so it can never reach the breadcrumb or the account controls. Both hosts (planner + Review/Library) share it.
+
+**Verified HERE, headless, logged out** (`node ui-audit/verify-header-center.mjs`, 86/86, real `AppHeader` + `ProjectBreadcrumb` + `JurisdictionBadge`, measured with `getBoundingClientRect`):
+- at 1600 px all four corners of the {shortest, longest} label × {shortest, longest} breadcrumb matrix read chip centre **800.0** against a true centre of 800 — **offset 0.0, spread 0.0 px**;
+- pre-fix on the same matrix: **+95.0** with the short breadcrumb and **+251.7** with the long one, IDENTICAL across the two label lengths — the offset tracked the breadcrumb, not the label (which is what says this was never a regression from B367296). The +95.0 reproduces the owner's own production reading of +94.
+- at every width the chip overlaps neither side group, the nav chips keep a usable width, and the full string stays in `data-jurisdiction-full` + the tooltip. `verify-header-nav-clickable` (B371361) still 142/142.
+
+**Still to see on the SERVED, SIGNED-IN app** (MERGED ≠ LIVE — the harness mounts the components, it does not open his account):
+1. Open **Clay & Porter** at his usual window size. The jurisdiction chip should sit on the header's centre line — the same line the row-2 module tabs are measured from — not pushed right of it.
+2. Open a **second site with a clearly different breadcrumb length** (a long project name and/or a long plan name, e.g. Goose Creek or Bain / "Concept - Original"). The chip should be in the SAME place on screen as it was on Clay & Porter.
+3. **Rename a plan** to something much longer, then much shorter. The chip must not move.
+4. **Narrow the window** until the breadcrumb crowds the middle. Expected: the chip never touches or covers the project / plan chips or the account controls, and the plan switcher still opens on the first click (including its ▾). Very narrow with a long breadcrumb, it is EXPECTED to give up the true centre and take the leftover space again — readable-but-off-centre is the stated degradation, not a failure.
+5. Switch to **Review** (the 🗂 Library button is that host's centre content) and confirm the same.
+
+**Record here:** ✅/❌ + date, and for (1)–(3) roughly where the chip sits relative to the middle. Nothing is needed from Michael.
+
 ### V179984 — B1341 stage 2: turning group CAS ON, on a real two-writer plan `Blocker: auth` `Blocker: real-data`
 
 **⛔ THIS IS THE ONE THING STAGE 2 CANNOT PROVE WITHOUT A LIVE RACE, and it ships OFF precisely so

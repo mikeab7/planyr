@@ -67,9 +67,27 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   plan chip imports it, because two floors that can drift is how one of the pair becomes squeezable
   again — and the crumb ROW is shrinkable (`0 1 auto`): while it was `flex: none` the zone's
   `overflow: hidden` clipped the last crumb's caret off, the same lost click by another route. The
-  phone layout is untouched (the row scrolls sideways there). Guards: the repo-root `test/` suite
-  **headerNavPriority** (source guards on all three flexes + the shared floor) and the ui-audit
-  harness **verify-header-nav-clickable** — a real `elementFromPoint` sweep of every point of each
+  phone layout is untouched (the row scrolls sideways there).
+  **⛔ B384064 AMENDS THAT STATED COST — "the badge is centred in the space that remains, not in the
+  window" WAS the behaviour and is no longer.** The owner: *"now the jurisdiction is not centered"* —
+  measured on Clay & Porter at 1600 px, the chip's centre sat 94 px right of the window's, PERFECTLY
+  centred inside a slot that was itself off-centre. **Not a regression from the label change (B367296):
+  a leftover-space slot has always positioned the chip relative to the side groups, so the chip's
+  position has always depended on the project and plan names — proven by measurement, the offset moves
+  156.7 px with the BREADCRUMB and 0.0 px with the LABEL.** The centre slot is now taken OUT OF FLOW
+  (`left: 50%` + `translateX(-50%)` in a `position: relative` row) — deliberately NOT by giving the two
+  side groups an equal flex-basis, which is the exact rule B371361 removed. Its width is MEASURED
+  (`ui/headerCenterFit.js`: `rowW − 2 × (max(leftW, rightW) + gap)`, read in a LAYOUT effect off a
+  `ResizeObserver`), because out of flow nothing else stops it running back over the plan chip. **Three
+  verdicts, never two:** `centered` · `tight` (a wide breadcrumb in a narrow window — back in flow,
+  off-centre but readable, which beats a sliver) · `unmeasured` (LOUD-FAILURE, kept DISTINCT so a header
+  that stopped measuring cannot hide behind a plausible-looking `tight`); `data-center-mode` publishes
+  which is live. The in-flow slack is held by an inert spacer — a growing right zone would measure the
+  whole remainder and poison its own bound. Guards: the repo-root `test/` suites
+  **headerNavPriority** (source guards on all three flexes + the shared floor) and **headerCenterSlot**
+  (the pure bound + all three verdicts + source guards), and the ui-audit harnesses
+  **verify-header-center** (the {shortest, longest} label × {shortest, longest} breadcrumb matrix at
+  four widths, mutation-proven — 41 of 86 checks red pre-fix) and **verify-header-nav-clickable** — a real `elementFromPoint` sweep of every point of each
   chip's box at 1024/1280/1440/1600, mutation-proven (201/201 points lost pre-fix at 1280 AND 1440).
   ⚠ A CENTRE-ONLY hit test passes on this defect; so does a short jurisdiction string at any width.
 - `theme/palette.js` — JS mirror of the CSS theme tokens (keep in sync; SVG/canvas can't use
