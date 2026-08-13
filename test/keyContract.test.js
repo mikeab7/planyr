@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import { SCOPE, focusScope, touchLatch, touchFactsOf, scopeOwnsCanvas, TOUCH, FIELD_GROUP_ATTR } from "../src/shared/keyboard/keyScope.js";
 import {
   KEY_CONTRACT, resolveKeyEntry, keyScopeVerdict, shouldHintRefusal, REFUSAL, SCOPE_GUARD_HINT,
+  CONTROL_CONSUMES,
 } from "../src/workspaces/site-planner/lib/keyContract.js";
 
 const src = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
@@ -83,8 +84,16 @@ describe("focusScope — who owns the keyboard", () => {
 
   it("a text field wins over the latch — typing must never be hijacked", () => {
     expect(focusScope({ tag: "TEXTAREA", lastTouchedCanvas: true })).toBe(SCOPE.FIELD);
-    expect(focusScope({ tag: "SELECT", lastTouchedCanvas: true })).toBe(SCOPE.FIELD);
     expect(focusScope({ tag: "DIV", isContentEditable: true, lastTouchedCanvas: true })).toBe(SCOPE.FIELD);
+  });
+
+  /* NEW-1 — a `<select>` is a PICKER, not a text box. It used to answer FIELD, which is what refused
+   * the owner's Delete on a selected measurement after he touched the Line style dropdown — and told
+   * him it had gone to "the box you're typing in". */
+  it("a dropdown is its own scope, and it is NOT a text field", () => {
+    expect(focusScope({ tag: "SELECT", lastTouchedCanvas: true })).toBe(SCOPE.PICKER);
+    expect(focusScope({ tag: "SELECT", lastTouchedCanvas: false })).toBe(SCOPE.PICKER);
+    expect(focusScope({ tag: "SELECT" })).not.toBe(SCOPE.FIELD);
   });
 
   it("no focus at all, nothing touched yet → chrome (refuse rather than guess)", () => {
@@ -105,10 +114,28 @@ describe("focusScope — who owns the keyboard", () => {
   });
 
   it("touchFactsOf reads the marker the value rows actually carry", () => {
-    const stub = (tag, closestHit) => ({ nodeType: 1, tagName: tag, isContentEditable: false, closest: (sel) => (sel === `[${FIELD_GROUP_ATTR}]` && closestHit ? {} : null) });
-    expect(touchFactsOf(stub("BUTTON", true), null).inFieldGroup).toBe(true);
-    expect(touchFactsOf(stub("BUTTON", false), null).inFieldGroup).toBe(false);
-    expect(touchFactsOf(stub("INPUT", false), null).isTextEntry).toBe(true);
+    /* A row is a TYPING row only if it holds something you can type in — the group stub answers
+     * `querySelector` the way a real Depth row would (an input beside its ▲▼ steppers). */
+    const group = (hasText) => ({ tagName: "DIV", querySelector: () => (hasText ? {} : null) });
+    const stub = (tag, g, type) => ({ nodeType: 1, tagName: tag, type, isContentEditable: false,
+      closest: (sel) => (sel === `[${FIELD_GROUP_ATTR}]` ? g : null) });
+    expect(touchFactsOf(stub("BUTTON", group(true)), null).inFieldGroup).toBe(true);
+    expect(touchFactsOf(stub("BUTTON", null), null).inFieldGroup).toBe(false);
+    expect(touchFactsOf(stub("INPUT", null, "text"), null).isTextEntry).toBe(true);
+  });
+
+  /* ⛔ NEW-1 — THE LATCH OUTLIVES FOCUS, SO A NON-TYPING ROW LATCHING `FIELD` REFUSED DELETE LONG
+   * AFTER THE CONTROL WAS RELEASED. A fill-opacity slider row and a line-style dropdown row are both
+   * `[data-field-group]`, and neither has a digit in it. */
+  it("a value row holding only a SLIDER or a DROPDOWN is not a typing row", () => {
+    const group = (hasText) => ({ tagName: "DIV", querySelector: () => (hasText ? {} : null) });
+    const stub = (tag, g, type) => ({ nodeType: 1, tagName: tag, type, isContentEditable: false,
+      closest: (sel) => (sel === `[${FIELD_GROUP_ATTR}]` ? g : null) });
+    expect(touchFactsOf(stub("INPUT", group(false), "range"), null).inFieldGroup).toBe(false);
+    expect(touchFactsOf(stub("INPUT", group(false), "range"), null).isTextEntry).toBe(false);
+    expect(touchFactsOf(stub("SELECT", group(false)), null).isTextEntry).toBe(false);
+    // …and the row the guard was BUILT for is unchanged.
+    expect(touchFactsOf(stub("BUTTON", group(true)), null).inFieldGroup).toBe(true);
   });
 });
 
@@ -176,11 +203,45 @@ describe("keyScopeVerdict — what each scope may fire", () => {
     }
   });
 
-  it("B746/V258 survives: only undo/redo pass while a range slider has focus", () => {
+  /* ⛔ NEW-1 — A CONTROL REFUSES ONLY WHAT IT CONSUMES, and B746/V258's undo/redo carve-out is no
+   * longer a carve-out: it falls out of the rule, because a range input does not consume ⌘Z either. */
+  it("a range slider takes the arrows and NOTHING else", () => {
     for (const k of KEY_CONTRACT) {
       const allowed = keyScopeVerdict({ entry: k, scope: SCOPE.SLIDER }).allow;
-      expect(allowed, k.id).toBe(k.id === "undo" || k.id === "redo");
+      expect(allowed, k.id).toBe(k.id !== "nudge");
     }
+    expect(CONTROL_CONSUMES[SCOPE.SLIDER]).toEqual(["nudge"]);
+  });
+
+  it("B746/V258 still holds — undo and redo are live on a slider", () => {
+    for (const id of ["undo", "redo"]) {
+      expect(keyScopeVerdict({ entry: KEY_CONTRACT.find((k) => k.id === id), scope: SCOPE.SLIDER }).allow, id).toBe(true);
+    }
+  });
+
+  /* THE REPORTED DEFECT, as a property: neither control can use a destructive key, so neither may
+   * eat one. This is the assertion that goes red on the build the owner was using. */
+  it("⛔ neither a slider nor a dropdown may swallow Delete", () => {
+    const del = KEY_CONTRACT.find((k) => k.id === "delete");
+    expect(keyScopeVerdict({ entry: del, scope: SCOPE.SLIDER }).allow).toBe(true);
+    expect(keyScopeVerdict({ entry: del, scope: SCOPE.PICKER }).allow).toBe(true);
+    // …while a real text box still does, which is the whole point of the guard.
+    expect(keyScopeVerdict({ entry: del, scope: SCOPE.FIELD }).allow).toBe(false);
+  });
+
+  it("a dropdown takes arrows, Enter, Space, Escape and the type-ahead letters", () => {
+    const takes = CONTROL_CONSUMES[SCOPE.PICKER];
+    for (const id of ["nudge", "commit", "hand-pan", "escape", "tool-select", "tool-pan"]) {
+      expect(takes, id).toContain(id);
+      expect(keyScopeVerdict({ entry: KEY_CONTRACT.find((k) => k.id === id), scope: SCOPE.PICKER }).allow, id).toBe(false);
+    }
+    for (const id of ["delete", "copy", "cut", "paste", "duplicate", "undo", "redo"]) {
+      expect(keyScopeVerdict({ entry: KEY_CONTRACT.find((k) => k.id === id), scope: SCOPE.PICKER }).allow, id).toBe(true);
+    }
+  });
+
+  it("every refusal reason has words to say", () => {
+    for (const r of Object.values(REFUSAL)) expect(SCOPE_GUARD_HINT[r], r).toBeTruthy();
   });
 
   it("an UNDECLARED key falls through untouched — the table guards, it does not gate", () => {
@@ -207,7 +268,13 @@ describe("resolveKeyEntry — the modified form of a letter beats the bare one",
 describe("the refusal is LOUD, and once per episode", () => {
   const base = { entry: KEY_CONTRACT.find((k) => k.id === "delete"), reason: REFUSAL.CHROME, hasSelection: true, episode: 3, lastHintedEpisode: null };
   it("a refused Delete with a live selection explains itself", () => expect(shouldHintRefusal(base)).toBe(true));
-  it("…once per episode, not once per keystroke", () => expect(shouldHintRefusal({ ...base, lastHintedEpisode: 3 })).toBe(false));
+  /* ⛔ NEW-1 — A DESTRUCTIVE KEY IS THE EXCEPTION, and the reason is the owner's own words:
+   * "I was pressing delete on it" — plural. The second press was silent, which is the experience of
+   * a key that does nothing at all. */
+  it("a refused DELETE explains itself on every press, not once per episode", () =>
+    expect(shouldHintRefusal({ ...base, lastHintedEpisode: 3 })).toBe(true));
+  it("…while a non-destructive mutating key keeps the once-per-episode rule", () =>
+    expect(shouldHintRefusal({ ...base, entry: KEY_CONTRACT.find((k) => k.id === "nudge"), lastHintedEpisode: 3 })).toBe(false));
   it("…and again on the NEXT episode", () => expect(shouldHintRefusal({ ...base, episode: 4, lastHintedEpisode: 3 })).toBe(true));
   it("nothing selected → nothing was lost → stay quiet", () => expect(shouldHintRefusal({ ...base, hasSelection: false })).toBe(false));
   it("a refused TOOL letter stays quiet — it changes nothing", () => {

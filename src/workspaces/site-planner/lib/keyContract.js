@@ -42,9 +42,9 @@ const M = { NONE: "none", MOD: "mod", SHIFT: "shift", ALT: "alt" }; // "mod" = C
  */
 export const KEY_CONTRACT = Object.freeze([
   // ── app-wide ──────────────────────────────────────────────────────────────────────────────────
-  { id: "undo", label: "Undo", keys: ["z", "Z"], mod: M.MOD, scope: "app", mutates: true, allowOnSlider: true,
-    why: "B746/V258 — a range slider has no native browser undo to consume, so this one chord is live there too." },
-  { id: "redo", label: "Redo", keys: ["y", "Y"], mod: M.MOD, scope: "app", mutates: true, allowOnSlider: true,
+  { id: "undo", label: "Undo", keys: ["z", "Z"], mod: M.MOD, scope: "app", mutates: true,
+    why: "B746/V258 — a range slider has no native browser undo to consume, so this one chord is live there too. It is no longer a special case: CONTROL_CONSUMES below says a slider takes arrows and nothing else, so this falls out of the rule." },
+  { id: "redo", label: "Redo", keys: ["y", "Y"], mod: M.MOD, scope: "app", mutates: true,
     why: "Same as undo." },
   { id: "escape", label: "Cancel / close the inspector", keys: ["Escape"], mod: M.NONE, scope: "app", mutates: false,
     why: "B1125 — Escape is the GUARANTEED escape hatch; a panel you can get stuck in is the bug it closes." },
@@ -105,7 +105,48 @@ export function resolveKeyEntry(e) {
 export const REFUSAL = Object.freeze({
   FIELD: "typing-guard",     // a text field has focus — the key is text
   SLIDER: "slider-guard",    // a range slider has focus and consumes the key itself
+  PICKER: "picker-guard",    // a dropdown has focus and consumes the key itself
   CHROME: "panel-scope",     // the panel owns the keyboard; the drawing does not
+});
+
+/* ⛔ NEW-1 — WHAT A FOCUSED CONTROL ACTUALLY CONSUMES. A GUARD MAY ONLY REFUSE A KEY THE CONTROL
+ * CAN REALLY USE; ANYTHING ELSE IS THE GUARD TAKING A KEY NOBODY WANTED.
+ *
+ * The owner could not delete a selected area measurement, and this table is the fix. Measured on his
+ * own plan, with the measurement selected and its inspector open:
+ *
+ *     after touching…                       press   focus            result
+ *     the Fill opacity SLIDER               Delete  INPUT[range]     ❌ refused ("belongs to the slider")
+ *     the Line style DROPDOWN               Delete  SELECT           ❌ refused ("the box you're typing in")
+ *     a value row's text box                Delete  INPUT[text]      ✓ correctly refused — you ARE typing
+ *     nothing in the panel / a plain button Delete  BUTTON / BODY    ✓ deleted
+ *
+ * A range input does nothing at all with Delete or Backspace. Neither does a closed `<select>`. So
+ * the keys went nowhere, the measurement stayed on the drawing, and the explanation named a text box
+ * that did not exist. The old rule was an ALLOW-LIST of exceptions (`allowOnSlider`, added by
+ * B746/V258 for undo/redo alone) bolted onto "refuse everything", which is the wrong default: every
+ * key a control cannot use has to be added by hand, one bug report at a time.
+ *
+ * Inverted here. Each control scope declares the SHORT list it genuinely takes, and everything else
+ * passes. B746/V258's undo/redo exception is not lost — it stops being an exception, because a
+ * slider does not consume ⌘Z under this rule either.
+ *
+ * ⚠ FIELD IS DELIBERATELY ABSENT AND MUST STAY ABSENT. A text box owns the entire keyboard —
+ * letters, arrows, Enter, and above all Delete and Backspace, which is what B464048's guard exists
+ * for. Nothing in this change reaches it; the control row above is the proof, re-run every build.
+ */
+const PRINTABLE_KEY = (k) => typeof k === "string" && k.length === 1;
+
+/** A `<select>` type-aheads on letters, so every bare printable shortcut is genuinely its key. */
+const PICKER_TYPEAHEAD = KEY_CONTRACT.filter((k) => k.mod === M.NONE && (k.keys || []).some(PRINTABLE_KEY)).map((k) => k.id);
+
+export const CONTROL_CONSUMES = Object.freeze({
+  /* A range input: arrows move the thumb. Home/End/PageUp/PageDown do too, but the planner declares
+   * no shortcut on any of them, so there is nothing to refuse. */
+  [SCOPE.SLIDER]: Object.freeze(["nudge"]),
+  /* A dropdown: arrows change the option, Enter commits it, Space opens it, Escape closes it, and a
+   * letter jumps to the option starting with it. */
+  [SCOPE.PICKER]: Object.freeze([...new Set(["nudge", "commit", "hand-pan", "escape", ...PICKER_TYPEAHEAD])]),
 });
 
 /**
@@ -119,10 +160,12 @@ export const REFUSAL = Object.freeze({
 export function keyScopeVerdict({ entry, scope, fieldEdit = false }) {
   if (!entry) return { allow: true, reason: null, entry: null };
   if (scope === SCOPE.CANVAS) return { allow: true, reason: null, entry };
-  if (scope === SCOPE.SLIDER) {
-    return entry.allowOnSlider
-      ? { allow: true, reason: null, entry }
-      : { allow: false, reason: REFUSAL.SLIDER, entry };
+  /* A focused CONTROL refuses only what it consumes (CONTROL_CONSUMES above) — never the rest. */
+  if (scope === SCOPE.SLIDER || scope === SCOPE.PICKER) {
+    const takes = CONTROL_CONSUMES[scope] || [];
+    return takes.includes(entry.id)
+      ? { allow: false, reason: scope === SCOPE.SLIDER ? REFUSAL.SLIDER : REFUSAL.PICKER, entry }
+      : { allow: true, reason: null, entry };
   }
   if (scope === SCOPE.FIELD) return { allow: false, reason: REFUSAL.FIELD, entry };
   /* CHROME — and the line here is MUTATION, not canvas-ness, which is a correction worth stating.
@@ -164,6 +207,7 @@ export function keyScopeVerdict({ entry, scope, fieldEdit = false }) {
 export const SCOPE_GUARD_HINT = Object.freeze({
   [REFUSAL.FIELD]: "Delete went to the box you're typing in. Click the plan, then press Delete.",
   [REFUSAL.SLIDER]: "That key belongs to the slider you're holding. Click the plan first.",
+  [REFUSAL.PICKER]: "That key belongs to the dropdown. Click the plan first.",
   [REFUSAL.CHROME]: "The keyboard is still on the panel. Click the plan, then press Delete.",
 });
 
@@ -178,5 +222,18 @@ export function shouldHintRefusal({ entry, reason, hasSelection, episode, lastHi
   if (!entry || !reason) return false;
   if (!entry.mutates) return false;
   if (!hasSelection) return false;
+  /* ⛔ NEW-1 — A DESTRUCTIVE KEY EXPLAINS ITSELF ON *EVERY* PRESS, AND THE ONCE-PER-EPISODE RULE IS
+   * EXACTLY WHAT MADE THE OWNER'S REPORT READ AS SILENCE.
+   *
+   * He said "I was pressing delete on it, and it was not deleting" — pressing, plural. Measured:
+   * the FIRST refused Delete showed its hint, and every press after it in the same episode showed
+   * NOTHING, because the episode had already been hinted. So the experience of a user who did not
+   * catch the first toast is a key that does nothing, repeatedly, in silence — the LOUD-FAILURE
+   * violation this hint was added to close, surviving inside the hint's own de-duplication.
+   *
+   * Repetition is not noise here, it is the signal that the explanation did not land. The
+   * once-per-episode rule stays for everything else (a refused tool letter loses nothing and a hint
+   * per keypress IS noise there); it is lifted only for the keys that destroy work. */
+  if (entry.destructive) return true;
   return episode !== lastHintedEpisode;
 }
