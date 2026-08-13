@@ -204,6 +204,23 @@ fighting it. Unit + e2e as listed on the item.
 New plan / Duplicate / the per-row ✕ / the lock row. They should read as one family — same weight,
 same colour as their text, no coloured pictogram among them. Check it in BOTH light and dark theme.
 This is the half only he can judge: if any of them still "looks kinda like shit", say which.
+### V186160 — B384064: is the jurisdiction chip on the header's centre line, on his own sites and after a rename? `Blocker: real-data`
+
+**What shipped.** The row-1 centre slot is pinned at the header's midpoint and out of flow, bounded by a measured width so it can never reach the breadcrumb or the account controls. Both hosts (planner + Review/Library) share it.
+
+**Verified HERE, headless, logged out** (`node ui-audit/verify-header-center.mjs`, 86/86, real `AppHeader` + `ProjectBreadcrumb` + `JurisdictionBadge`, measured with `getBoundingClientRect`):
+- at 1600 px all four corners of the {shortest, longest} label × {shortest, longest} breadcrumb matrix read chip centre **800.0** against a true centre of 800 — **offset 0.0, spread 0.0 px**;
+- pre-fix on the same matrix: **+95.0** with the short breadcrumb and **+251.7** with the long one, IDENTICAL across the two label lengths — the offset tracked the breadcrumb, not the label (which is what says this was never a regression from B367296). The +95.0 reproduces the owner's own production reading of +94.
+- at every width the chip overlaps neither side group, the nav chips keep a usable width, and the full string stays in `data-jurisdiction-full` + the tooltip. `verify-header-nav-clickable` (B371361) still 142/142.
+
+**Still to see on the SERVED, SIGNED-IN app** (MERGED ≠ LIVE — the harness mounts the components, it does not open his account):
+1. Open **Clay & Porter** at his usual window size. The jurisdiction chip should sit on the header's centre line — the same line the row-2 module tabs are measured from — not pushed right of it.
+2. Open a **second site with a clearly different breadcrumb length** (a long project name and/or a long plan name, e.g. Goose Creek or Bain / "Concept - Original"). The chip should be in the SAME place on screen as it was on Clay & Porter.
+3. **Rename a plan** to something much longer, then much shorter. The chip must not move.
+4. **Narrow the window** until the breadcrumb crowds the middle. Expected: the chip never touches or covers the project / plan chips or the account controls, and the plan switcher still opens on the first click (including its ▾). Very narrow with a long breadcrumb, it is EXPECTED to give up the true centre and take the leftover space again — readable-but-off-centre is the stated degradation, not a failure.
+5. Switch to **Review** (the 🗂 Library button is that host's centre content) and confirm the same.
+
+**Record here:** ✅/❌ + date, and for (1)–(3) roughly where the chip sits relative to the middle. Nothing is needed from Michael.
 
 ### V179984 — B1341 stage 2: turning group CAS ON, on a real two-writer plan `Blocker: auth` `Blocker: real-data`
 
@@ -908,6 +925,19 @@ The gate is pure and mutation-proven; what cannot be driven here is the LINE, be
 - **The Texas control:** on any Texas plan the statute must render NOTHING at all (`applies:false`) and the existing informational drawdown readout must be unchanged.
 - **What was proven HERE:** `test/coloradoAudit.test.js` (6 assertions across all five input states, mutation-proven — delete the precondition and 2 go red), plus the Texas golden master green.
 - The **owner never runs this** — it is a Claude-cohort check. ⏳ **PENDING**
+
+### V93568 — B295008/B295009: on a REAL plan, a click selects and never moves — and a plain click writes no row `Blocker: real-data` + `Blocker: auth`
+
+**Most of this pair is ALREADY PROVEN HERE and must not be re-tested.** The logged-out half was driven in a headless browser this session (`e2e/click-never-moves.spec.js`, 4 cases, **all four proven RED on the pre-fix build**), and the pure rule plus the wiring across all 28 gated drag starts is unit-guarded and mutation-checked. What a sandbox cannot reach is the owner's own case: his real plans, where neighbouring edges are inside the 20 ft flush-snap tolerance, and the SIGNED-IN write path, where a stray write would bump an element's `rev` and read as a foreign edit to another device.
+
+- **THE NUMBERS ALREADY ON RECORD, so this is a confirmation and not a hunt.** Logged out, blank site, one building, Alt held (snap bypassed so any write at all shows): pre-fix, a five-move tremor click moved it **cy 771.4300000000001 → 774.29 ft**, and a 4-second slow press moved it **cx 1028.5700000000002 → 1034.28 · cy 771.4300000000001 → 774.29**. Post-fix, both gestures leave it at **cx 1028.5700000000002 · cy 771.4300000000001** — identical to the last digit.
+- **RUN 1 — the tremor click, on a REAL plan** (planyr.io, signed in, **Bain / "Concept - Original"** or **Tsakiris**, snap ON — the flush-snap is the half that makes this a couple of FEET). Note a building's stored `cx`/`cy` first (plan menu → the element's Properties, or a console read of the saved record). Press it, let the pointer drift a pixel or two, release. **PASS = it is SELECTED and `cx`/`cy` are unchanged to the digit.** FAIL = any change, and especially a jump of feet as it lands on a neighbour's edge.
+- **RUN 2 — the slow press.** Press the same building, hold still for several seconds, release. **PASS = identical, because duration is not part of the test.** This is the mirror-image bug the fix was written to avoid, so it is the one worth checking on a busy plan where the handler runs late.
+- **RUN 3 — a real drag still feels right.** Drag it properly: it must move as before, with **no visible jump at the moment the drag begins**, and **exactly ONE** Ctrl+Z must put it back.
+- **RUN 4 — the undo hygiene, on his own plan.** Make one real edit, then click around the canvas a dozen times (elements, parcels, measurements). Press Ctrl+Z once. **PASS = the real edit reverses on the FIRST press.**
+- **⛔ RUN 5 — THE ONE THIS ITEM EXISTS FOR, and the only step that truly needs the account: a plain click must produce NO ELEMENT ROW WRITE.** Signed in, open the plan in **two tabs**. In tab A, click (do not drag) an element ten times. In tab B, watch for any "changed in another session" prompt or any element re-render. Then read the row: `select id, rev, updated_at from site_elements where site_id = '<id>' and id = '<el>'` before and after. **PASS = `rev` and `updated_at` are unchanged and tab B saw nothing.** FAIL = any bump — that is the multiwriter pollution B295009 removes, and it cannot be seen from a logged-out sandbox.
+- **Also confirm the point drags still snap:** drag a road ENDPOINT onto another road's endpoint. **PASS = they weld/merge as before** — the first cut of this fix rebased every drag and silently put the endpoint outside the magnet's tolerance. `e2e/road-connect-radius` now covers it, but it is worth one live look on real road geometry.
+- The **owner never runs this** — it is a Claude-cohort check on a signed-in session. ⏳ **PENDING**
 
 ### V78961 — B280402: the acreage badge no longer takes press 2, on his stub, on the repeat `Blocker: real-data` + `Blocker: auth`
 
