@@ -113,6 +113,16 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V295136 — B519907: on his real Richfield plan, signed in, an undo no longer rebuilds the aerial `Blocker: auth` `Blocker: real-data`
+**What was verified here (sandbox, logged out, on his redacted Richfield fixture):** per-action tile churn measured with a `MutationObserver` — click 0/0 · drag 0/0 · **undo 272/272 → 0/0** · redo 0/0 — with the map alive and all 274 tiles still on screen; the controlled A/B over 12 rounds × 6 edits (listeners +6/round → flat; retained heap +1.66 → +0.65 MB/round; RSS delta 457.2 → 241.2 MB); `npm run perf:undochurn` green and **red with the fix stashed**; full suite 11,404 green; bundle budgets within ceiling.
+**Still pending, and it needs his machine because the sandbox cannot sign in:**
+1. Open **Richfield → Concept A** signed in on planyr.io, with the aerial basemap ON.
+2. Drag any element, then **Ctrl+Z**. The aerial must NOT blink, reload or go grey — the imagery should stay put while the element snaps back.
+3. Repeat ten or so times, then check Chrome's task manager: the tab should no longer climb the way it did (it was ~600–700 MB on 2026-08-14).
+4. Work normally for several minutes with edits and undos, and confirm the "gets slow after a while" lag does not return. **If it still degrades, that is the RESIDUAL heap slope on B1121, not a failure of this fix** — say so and re-open B1121 rather than this item.
+5. Confirm a genuine location change still works: move a site's map anchor and check the aerial re-centres (the fix must not pin the map to a stale origin).
+
+
 ### V294384 — B342996 ×3: a rename travels between his two computers, and "Last edited" does not move `Blocker: auth` `Blocker: real-data`
 - **WHY IT NEEDS A LIVE PASS AND CANNOT BE CLOSED HERE.** The whole claim is about **two signed-in clients disagreeing**, which is a LIVE-VERIFY class twice over (concurrency / multi-writer, and real project data). The sandbox proves the merge rule against two real store instances and an in-memory server — `test/notesTreeWriteThrough.test.js`, 24 cases, mutation-proven twice — but this sandbox cannot sign in (the proxy CORS-blocks Supabase auth), so the real `notes_trees` row, the real `rev` trigger and his real note titles have never been through it.
 - **WHAT WAS VERIFIED HERE:** lint · the full unit suite · the build · 24 cases in `test/notesTreeWriteThrough.test.js` including his exact two-client test in both directions · two deliberate mutations of the real source (restoring `updatedAt` stamping → 8 red; making an absent stamp read as newest → 9 red).

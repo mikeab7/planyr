@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* diagnose-richfield-memory — WHERE DOES RICHFIELD'S MEMORY GO, AND IS IT EVER GIVEN BACK? (B558048)
+/* diagnose-richfield-memory — WHERE DOES RICHFIELD'S MEMORY GO, AND IS IT EVER GIVEN BACK? (B519904)
  *
  *   node ui-audit/diagnose-richfield-memory.mjs [--rounds N] [--arm visible|hidden|nopdf] [--snapshots]
  *
@@ -52,6 +52,10 @@ import { sheetPdfBytes } from "./lib/sheetPdf.mjs";
 import { fakeTilePng, parseTileUrl } from "./lib/fakeTile.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { pacedWait } from "./lib/tabTiming.mjs";
+/* ⛔ B1439 — an undisposed ElementHandle is a strong GC root that retains the whole tree above the
+ * element, which silently inflates every memory reading taken afterwards. In a harness whose entire
+ * purpose is measuring retention that is not a style point, it is a contaminated instrument. */
+import { waitForSelectorReleased } from "./lib/waitRelease.mjs";
 import { aggregateSnapshot, diffAggregates } from "./lib/heapSnapshot.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -218,7 +222,7 @@ async function run() {
     if (wrote !== true) throw new Error(`IndexedDB write for ${key} did not confirm`);
   }
   await page.reload({ waitUntil: "load" });
-  await page.waitForSelector("svg[data-view-ppf]", { timeout: 30000 });
+  await waitForSelectorReleased(page, "svg[data-view-ppf]", { timeout: 30000 });
   await assertMeasurable(page, "diagnose-richfield-memory/post-load");
 
   /* ⛔ PRE-GC AND POST-GC ARE DIFFERENT QUESTIONS AND MUST BOTH BE ANSWERED.
@@ -279,7 +283,10 @@ async function run() {
    * edited nothing is visible instead of being averaged in as a clean result. */
   const editOnce = async (i) => {
     const spot = await page.evaluate(() => {
-      const ns = [...document.querySelectorAll("[data-el-id]")];
+      /* el-tier: picking ONE element to drag. This is a targeted pick of a drag target, not a
+       * census of plan contents — nothing here counts what the plan holds (COUNT-EVERY-KIND). */
+      /* el-tier: picking ONE element to drag — a targeted pick, never a census. */
+  const ns = [...document.querySelectorAll("[data-el-id]")];
       if (!ns.length) return null;
       const n = ns[Math.floor(ns.length / 2)];
       const r = n.getBoundingClientRect();

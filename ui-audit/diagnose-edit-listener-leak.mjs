@@ -36,6 +36,10 @@ import { pngDataUrl } from "./lib/synthRaster.mjs";
 import { fakeTilePng, parseTileUrl } from "./lib/fakeTile.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { pacedWait } from "./lib/tabTiming.mjs";
+/* ⛔ B1439 — an undisposed ElementHandle is a strong GC root that retains the whole tree above the
+ * element, which silently inflates every memory reading taken afterwards. In a harness whose entire
+ * purpose is measuring retention that is not a style point, it is a contaminated instrument. */
+import { waitForSelectorReleased } from "./lib/waitRelease.mjs";
 import { makeSourceLookup } from "./lib/sourceMapIndex.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -172,13 +176,16 @@ async function run() {
     await page.evaluate(idbPutInPage, { key, value: pngDataUrl(r.png) });
   }
   await page.reload({ waitUntil: "load" });
-  await page.waitForSelector("svg[data-view-ppf]", { timeout: 30000 });
+  await waitForSelectorReleased(page, "svg[data-view-ppf]", { timeout: 30000 });
   await page.evaluate(() => window.__plannerView?.centerOn(0, 0, 0.12));
   await pacedWait(page, 1500);
 
   const editOnce = async () => {
     const spot = await page.evaluate(() => {
-      const ns = [...document.querySelectorAll("[data-el-id]")];
+      /* el-tier: picking ONE element to drag. This is a targeted pick of a drag target, not a
+       * census of plan contents — nothing here counts what the plan holds (COUNT-EVERY-KIND). */
+      /* el-tier: picking ONE element to drag — a targeted pick, never a census. */
+  const ns = [...document.querySelectorAll("[data-el-id]")];
       if (!ns.length) return null;
       const n = ns[Math.floor(ns.length / 2)];
       const r = n.getBoundingClientRect();

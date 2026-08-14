@@ -2663,7 +2663,32 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * the one writer; every geo effect already keys off `origin`, so they all come alive the moment
    * it lands, with no reload. The drawing itself never moves: it lives in local feet, and the
    * origin only says where that local frame sits on the earth (lib/sitePlacement.js). */
-  const [origin, setOrigin] = useState(() => normalizeOrigin(restored?.origin));
+  const [originRaw, setOrigin] = useState(() => normalizeOrigin(restored?.origin));
+  /* ⛔ B519907 — `origin`'s IDENTITY IS STABLE WHILE ITS VALUE IS UNCHANGED, and this is the fix for
+   * B1121 (×4), the owner's "it gets slow after a while".
+   *
+   * `pushHistory` snapshots the WHOLE app state, so an undo restores `origin` as a FRESH OBJECT
+   * carrying identical numbers. Ten effects key on it, and the worst is the Leaflet map-CREATION
+   * effect, whose cleanup is `map.remove()` — React runs that cleanup before re-running, so every
+   * Ctrl+Z destroyed and rebuilt the entire basemap. Measured on the owner's Richfield plan, per
+   * action: click 0 tiles · drag 0 · **undo 272 destroyed and 272 recreated** · pan 14 · Escape 0,
+   * with the retained count never leaving 274. Each undo therefore paid 272 element destructions,
+   * 272 image decodes and 544 Leaflet subscriptions for a basemap that had not moved.
+   *
+   * This is B1189's rule — *an effect must depend on VALUES, never on a state object's identity* —
+   * and B1189 fixed exactly ONE effect (the registration layout effect) by listing `origin.lat/lon`
+   * in its deps. That leaves every OTHER consumer, and every future one, to remember. Stabilising
+   * the VALUE instead fixes all ten at once and cannot be forgotten by the next effect that lands:
+   * `normalizeOrigin` already returns a bare `{lat, lon}`, so equal-valued means interchangeable.
+   *
+   * ⚠ Deliberately keyed on the two SCALARS, not on a deep compare and not on `sameOrigin` (whose
+   * 1e-12 tolerance is right for "is this the same site?" and wrong here — a tolerance would pin a
+   * genuinely moved origin to its old object and strand the map at the previous location). */
+  const origin = useMemo(
+    () => originRaw,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [originRaw ? originRaw.lat : null, originRaw ? originRaw.lon : null]
+  );
   // B706: ground elevation under the cursor (ft NAVD88) for the coordinate chip —
   // reprojected with the SAME feetToLatLng the chip displays, sampled from the cached
   // terrain grid (instant) or one debounced 3DEP point call at cursor rest.
