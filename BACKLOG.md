@@ -56,6 +56,16 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 `[x]` **SHIPPED, and the build flag is flipped ON for everyone.**
 - Verify: sandbox — 20 seeded ordinary hours through the real write engine, each fix mutation-proven red when reverted, plus discriminating unit tests.
 - Origin: filed 2026-08-13 from the owner's chat instruction.
+- **⛔ THE ARGUMENT FOR DRIVING ORDINARY EDITING RATHER THAN A TARGETED REPRO, in one line: a
+  re-bond produced 865 SPURIOUS REFUSALS ON THE CLEAN BUILD — a third distinct cause the first trial
+  hour never reached, for one reason only, that the first run never performed that action shape.**
+  No amount of re-reading the code found it; adding the gesture found it in one run. A repro can only
+  ever confirm a defect someone already suspects.
+- **THE ROOT CAUSE IN PLAIN TERMS.** The expected digest was built from the CANVAS's bonding rather
+  than the SERVER's, so this tab's belief about which assembly a row belongs to can go stale while
+  its revision is current — and a refusal does not teach it otherwise. One variant is a genuine
+  **DEADLOCK**: a conflict naming an EMPTY assembly carries no members, so it teaches the client
+  nothing at all and the identical wrong claim is re-derived forever.
 - **WHAT `expected` IS A CLAIM ABOUT, which is the one idea behind all three.** It says *"refuse me unless this assembly is STILL exactly this"* — a statement about the **server's** current state. The canvas holds the state we are trying to **create**. Those coincide for a move, a resize or a delete and diverge for exactly one ordinary gesture: **re-bonding a child to a different host** (indent/outdent), the only edit that touches `attachedTo`, which is the generated `assembly_id`'s sole input.
 - **THE THREE, each proven necessary by reverting it:**
   1. **Membership was read off the CANVAS.** A pending re-bond put the mover in its DESTINATION's expected digest while the server still had it in the SOURCE — two digests wrong in opposite directions, call refused whole, retry re-derived the identical wrong claim from the same unchanged canvas. **383 refusals, 865 spurious, 50 of 433 calls applied.** Fixed: bucket by the SHADOW's bond, and stake BOTH ends of a re-bond.
@@ -65,8 +75,28 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 - **THE RUN THAT JUSTIFIED IT:** 20 seeded hours · **8,042 commits · 3,880 group bets · 312 refusals, every one caused by a real concurrent edit and every one converged · 0 spurious · 0 stuck · 0 lost.** `--mutate order` and `--mutate membership` still go red on DIFFERENT assemblies.
 - **THE HOUR IS GENUINELY ORDINARY NOW, and the coverage is MEASURED.** Added the two shapes the first run lacked: **re-bond** (the indent/outdent analogue — the only action that moves an element between assemblies, and the one that found defect 1) and **non-geometric field edits** (owner / status / label). The prefix-pair traps are planted in the two characters that actually invert a token sort — a DIGIT (`b1` ⊂ `b11`) and a HYPHEN — after the first fixture used `b1x`, where `x` (0x78) sorts ABOVE `:` and does **not** invert; and one trap uses the owner's OWN live ids, `e2e-bldg-1` ⊂ `e2e-bldg-11`. The run REPORTS which traps it staked a bet on and FAILS if it missed one.
 - **⛔ THE HARNESS CONVICTED WORKING CODE TWICE MORE, both kept as comments.** It modelled `create` over a tombstone as a rev reset to 1, and `delete` against a tombstone as a conflict; `site_elements.sql` continues the rev on the first and returns idempotent `ok` on the second. Both produced confident, permanent "spurious refusals" that the real server cannot generate. When the instrument and the code disagree, the instrument is on trial.
+- **⛔ AN INSTRUMENT THAT GETS CORRECTED IS WORTH MORE THAN ONE THAT WAS NEVER QUESTIONED.** Twice in
+  this run the driver reported a confident, permanent spurious refusal that the real server **cannot
+  produce**, and both times the correct move was to put the instrument on trial rather than the app:
+  a `create` over a tombstone CONTINUES the rev (it does not reset to 1), and a `delete` against an
+  already-tombstoned row is **idempotent success**, not a conflict (`site_elements.sql`). And the LAST
+  failing seed was the oracle mis-attributing — not a defect at all. Every one of those was a step
+  toward the real finding, not away from it.
+- **⛔ A GUARD THAT A COMMENT CAN SATISFY OR BREAK IS NOT GUARDING ANYTHING.** The stage-1 assertion
+  *"no client code may reference `assembly_id`"* went red on a COMMENT explaining that very rule — so
+  it was forbidding the code from documenting its own invariant. It now strips comments and asserts
+  CODE, with the stripper itself proven non-vacuous. Same family as the panel-brevity check that
+  counted question marks in source and caught a ternary: a guard whose subject is text rather than
+  behaviour eventually measures the wrong thing.
 - **AND THE ORACLE ITSELF WAS CORRECTED, in the open:** a foreign write now marks BOTH assembly keys the element can be counted under (its host's and its own id), because a stale client bets under the latter; and "stuck" now means *kept trying and kept failing*, not *never bet on again*. Both corrections were re-proven not to hide anything — all three defects and both mutants still go red with them in place.
-- **THE HONEST BOUNDARY, asserted rather than assumed:** group bets ride the ATOMIC gate, so a LONE re-bond (and an outdent that empties its host) stakes nothing and is guarded by the per-row rev check exactly as before stage 2. That is stage 3's territory.
+- **⛔ THE BATCHING BOUNDARY, written down so the next session does not rediscover it the hard way.**
+  Group bets ride the ATOMIC gate, and `batchSpansAssembly` opens that gate only for a batch carrying
+  MORE THAN ONE member of one assembly. So a **LONE re-bond makes no group claim at all** — and so
+  does an OUTDENT that empties its host, because the batch stops spanning one assembly the moment the
+  child leaves. Both are guarded by the per-row rev check exactly as before stage 2, which is correct
+  and is stage 3's territory (retire the per-row expectation for bonded elements). It is asserted in
+  `test/assemblyGroupCas.test.js` rather than left implicit, so nobody reads the re-bond tests beside
+  it as covering the lone case.
 
 ### B487601 — Three near-identical plan names and no visible cue for which one you are editing `[Site Planner / wayfinding]` (bug) #site-planner #ui  *(found 2026-08-13, from the owner's data-loss report. Minted **B487601** from this branch's reserved block B487600–B487615 against `origin/main` 79be535. DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `plan switcher`, `plan name`, `copy`, `duplicate`, `breadcrumb`, `conceptName`, `B1415`–`B1418`, `projectName`: **B1415–B1418** own the PROJECT name's one authoritative value per group (a different axis — project vs plan); `conceptName.js` mints "Concept A/B/C" for NEW plans but not for copies. No item owns plan-level wayfinding. Net-new.)*
 `[ ]` **OPEN.**
