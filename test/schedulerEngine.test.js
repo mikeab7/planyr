@@ -536,7 +536,7 @@ describe("anti-drift: the schedule-input fixes still exist in the real source", 
   });
   it("the duration cell never renders a bare 'd' (fmtTaskDuration guards blank)", () => {
     // B615 routes the cell through fmtTaskDuration, which returns "" for a blank duration → no bare "d".
-    expect(src).toContain("fmtTaskDuration(task)");
+    expect(src).toContain("fmtTaskDuration(task, task.hasChildren)");   // B463072 added the summary flag
     expect(src).toMatch(/if \(t\.duration === "" \|\| t\.duration == null\) return "";/);
   });
   it("grid date input clears, gives feedback on junk, and rejects Finish-before-Start", () => {
@@ -1307,7 +1307,13 @@ describe("anti-drift: the round-3 scheduler fixes still exist in the real source
   });
   it("C1: the global key handler bails while any blocking overlay is open", () => {
     expect(src).toMatch(/const overlayOpenRef = useRef\(false\);/);
-    expect(src).toMatch(/if \(overlayOpenRef\.current\) return;/);
+    /* NEW-1 widened this: the guard now also bails on the keystroke that DISMISSED the overlay.
+     * Asking "is an overlay open?" reads false for that one key, because the modal has already
+     * closed itself by the time this handler runs — and the grid then acted on a key aimed at the
+     * modal, re-opening the status picker. The property C1 cares about is unchanged and strictly
+     * stronger; only the expression moved. Full reasoning + the browser proof live in
+     * test/menuPortalIsolation.test.js and ui-audit/verify-grid-overlay-input.mjs. */
+    expect(src).toMatch(/if \(overlayOpenRef\.current \|\| overlayAtKeyStartRef\.current\) return;/);
   });
   it("C2: Delete blanks the whole multi-cell selection", () => {
     expect(src).toMatch(/Multi-cell range delete/);
@@ -1617,7 +1623,7 @@ describe("anti-drift: the B615/B616 duration + finish-lock engine exists in the 
     expect(src).toContain("_v7");
   });
   it("B615: the duration cell renders the typed unit, parses via parseDurationInput", () => {
-    expect(src).toContain("fmtTaskDuration(task)");
+    expect(src).toContain("fmtTaskDuration(task, task.hasChildren)");   // B463072 added the summary flag
     expect(src).toMatch(/const parsed = parseDurationInput\(val\);/);
     expect(src).toMatch(/if \(parsed\.error\) \{ showToast\(parsed\.error\); return; \}/);
   });
@@ -2212,5 +2218,73 @@ describe("anti-drift: B443248/B443249/B443250 exist VERBATIM in src + mirror", (
   it("the grid marks a flagged predecessor entry and the pinned-start conflict", () => {
     expect(src).toMatch(/flagged=\{p => un\.has\(p\.id\)\}/);
     expect(src).toMatch(/isStart \? !!task\.startConflict : !!task\.finishConflict/);
+  });
+});
+
+// ── B463072 — the SUMMARY row's Duration cell read the stale leftover ─────────────────────────
+// The audit B443248 provoked: a group header carries TWO durations — the span rollupParentDates derives
+// from its children (`duration`), and the typed value the rollup never rewrites (`durValue`/`durUnit`).
+// B443248 stopped the SCHEDULER reading the stale one. This is the same field, read by the DISPLAY.
+// Measured on the real page before the fix: the owner's "CCID3: Lift Station & Force Main Approval"
+// rendered `08/07/26 · 10/02/26 · 0d` — forty working days of work printed as a zero-day milestone.
+describe("B463072 — a summary row prints its ROLLED span, never the leftover typed duration", () => {
+  const summary = { id: 1, duration: 40, durValue: 0, durUnit: "d" };   // exactly the CCID3 shape
+  it("the summary shape printed the leftover when asked as a leaf (the defect, pinned)", () => {
+    expect(E.fmtTaskDuration(summary)).toBe("0d");
+  });
+  it("…and prints the rolled span when told it is a summary", () => {
+    expect(E.fmtTaskDuration(summary, true)).toBe("40d");
+  });
+  it("a summary NEVER inherits a leftover unit — the rolled span is always working days", () => {
+    // A row that was once typed "2mo" and later became a parent keeps durUnit:'mo'; rendering "2mo"
+    // for a span the children put at 63 working days would be a second wrong number, not a fix.
+    expect(E.fmtTaskDuration({ id: 2, duration: 63, durValue: 2, durUnit: "mo" }, true)).toBe("63d");
+  });
+  it("a LEAF is untouched — typed value and typed unit both survive", () => {
+    expect(E.fmtTaskDuration({ id: 3, duration: 30, durValue: 30, durUnit: "d" }, false)).toBe("30d");
+    expect(E.fmtTaskDuration({ id: 4, duration: 63, durValue: 3, durUnit: "mo" })).toBe("3mo");
+    expect(E.fmtTaskDuration({ id: 5, duration: 21, durValue: 30, durUnit: "cd" })).toBe("30cd");
+  });
+  it("a blank duration still renders blank for a summary too (no bare 'd')", () => {
+    expect(E.fmtTaskDuration({ id: 6, duration: "", durValue: 0, durUnit: "d" }, true)).toBe("");
+    expect(E.fmtTaskDuration({ id: 7, duration: null, durValue: 0, durUnit: "d" }, true)).toBe("");
+  });
+  it("a 0-day summary (all children milestones on one day) still reads 0d", () => {
+    expect(E.fmtTaskDuration({ id: 8, duration: 0, durValue: 0, durUnit: "d" }, true)).toBe("0d");
+  });
+  it("the rolled span the engine produces is what the cell then prints — end to end", () => {
+    const tasks = [
+      { id: 100, name: "Header", start: "2026-08-07", end: "2026-10-02", duration: 40, durValue: 0, durUnit: "d", predecessors: [], parentId: null },
+      { id: 101, name: "A", start: "2026-08-07", end: "2026-08-13", duration: 5, durValue: 5, durUnit: "d", predecessors: [], parentId: 100 },
+      { id: 102, name: "B", start: "2026-08-14", end: "2026-10-02", duration: 35, durValue: 35, durUnit: "d", predecessors: [{id:101,type:"FS",lag:0}], parentId: 100 },
+    ];
+    const out = Object.fromEntries(E.recomputeSchedule(tasks).map(t => [t.id, t]));
+    expect(E.fmtTaskDuration(out[100], true)).toBe(`${out[100].duration}d`);
+    expect(out[100].end).toBe("2026-10-02");
+    expect(E.fmtTaskDuration(out[100], true)).not.toBe("0d");
+  });
+});
+
+describe("anti-drift: B463072 exists VERBATIM in src + mirror, and every render site passes the flag", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  it("fmtTaskDuration takes isSummary and short-circuits to the rolled span in both", () => {
+    for (const s of [src, mjs]) {
+      expect(s).toMatch(/fmtTaskDuration = \(t, isSummary = false\) =>/);
+      expect(s).toMatch(/if \(isSummary\) return `\$\{t\.duration\}d`;/);
+    }
+  });
+  it("the project grid passes hasChildren", () => {
+    expect(src).toMatch(/\{fmtTaskDuration\(task, task\.hasChildren\)\}/);
+  });
+  it("the master view and the export both pass !isLeaf", () => {
+    expect((src.match(/fmtTaskDuration\(t, !t\.isLeaf\)/g) || []).length).toBe(2);
+  });
+  it("NO render or export site calls fmtTaskDuration one-armed except the leaf-only edit seed", () => {
+    // The master view's duration EDITOR seeds from the typed value on purpose — it only opens on a leaf
+    // (the dblclick handler returns unless t.isLeaf), and a leaf must edit in the unit it was typed in.
+    const bare = (src.match(/fmtTaskDuration\(([a-z]+)\)/g) || []);
+    expect(bare).toEqual(["fmtTaskDuration(t)"]);
+    expect(src).toMatch(/if \(!t\.isLeaf\) return; setLocalEdit/);
   });
 });

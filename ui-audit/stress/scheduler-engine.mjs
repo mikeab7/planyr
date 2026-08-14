@@ -289,8 +289,12 @@ export const taskDurValue = t => (t.durValue != null ? t.durValue : (typeof t.du
 export const taskDurUnit  = t => t.durUnit || "d";
 export const resolveTaskSpan = t => resolveDuration(t.start, taskDurValue(t), taskDurUnit(t));
 export const startForEnd = (end, duration) => !end ? "" : (duration <= 1 ? end : addBD(end, -(Math.max(1, duration) - 1)));
-export const fmtTaskDuration = t => {
+// B463072 — a SUMMARY row's only true duration is the span rollupParentDates derived from its children
+// (`duration`); the leftover `durValue`/`durUnit`, which the rollup never rewrites, printed "0d" on a
+// 40-working-day parent. Faithful copy of index.html.
+export const fmtTaskDuration = (t, isSummary = false) => {
   if (t.duration === "" || t.duration == null) return "";
+  if (isSummary) return `${t.duration}d`;
   return `${taskDurValue(t)}${taskDurUnit(t)}`;
 };
 

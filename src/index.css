@@ -205,8 +205,28 @@
      Replaces the retired ember (#e8590c); tracks the drafting accent. */
   --accent:          #C2410C;
   --on-accent:       #FFFFFF;   /* text/icon ON a solid --accent fill (active tool/btn) */
+
+  /* ⛔ THE FOCUS RING STAYS THE BRAND ACCENT, AND THAT IS A CORRECTED DECISION — read this before
+     "fixing" it again (B464049). The owner reported the Depth box "wasn't letting" him type and
+     sent a frame of it outlined in orange-red. Nothing was rejecting his input: every drive path
+     took the value. The first cut of this fix concluded that the FOCUS ring was impersonating an
+     error (--accent sits ~14 ΔE00 from --danger) and moved focus to blue. **That was the wrong
+     end of the problem.** Orange-red IS Planyr's accent — it is on the Select tool, the "Select
+     parcels: on" pill, every active control — so a field you are typing in glowing in it is
+     normal and correct, and restyling ~194 inputs across five workspaces is a large visible
+     change aimed at something that was never the cause.
+
+     THE ACTUAL DEFECT IS THE ERROR STATE, and it was an accessibility failure in its own right:
+     this app had NO invalid state at all, so an unusable value was reported by nothing — not a
+     colour, not an icon, not a message. WCAG 1.4.1 (Use of Color) requires that colour is never
+     the only visual means of conveying information, and identifying a field as in error by a
+     coloured border alone does not satisfy it. So the error now carries an ICON, a SHORT TEXT
+     MESSAGE naming what is wrong, and `aria-describedby` so it reaches a screen reader — and it
+     is separated from focus by WEIGHT as well as hue, so the two never read alike even before
+     the message is read. A bare ring with no message is unambiguous: you are simply typing. */
   --focus-ring:      rgba(194, 65, 12, .45);
   --focus-ring-soft: rgba(194, 65, 12, .10);
+  --invalid-ring-soft: rgba(226, 75, 74, .18);  /* the halo on a genuinely REJECTED value */
 
   /* Interaction surfaces (hovers, scrollbars, kbd chips) — theme-aware. */
   --hover-ghost:         #eef1f5;
@@ -322,6 +342,7 @@
   --on-accent:       #15171C;
   --focus-ring:      rgba(242, 107, 58, .50);
   --focus-ring-soft: rgba(242, 107, 58, .16);
+  --invalid-ring-soft: rgba(242, 112, 111, .24);
 
   /* Interaction surfaces */
   --hover-ghost:         rgba(255, 255, 255, .06);
@@ -410,6 +431,33 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 input:not([type="checkbox"]):not([type="range"]):not([type="color"]):focus, select:focus {
   border-color: var(--accent) !important;
   box-shadow: 0 0 0 3px var(--focus-ring-soft);
+  outline: none;
+}
+/* A GENUINELY REJECTED VALUE (NEW-1). This is the state --danger is reserved for, and it beats
+   :focus deliberately — a field you are typing in that has just refused your value must keep
+   saying so while you fix it, or the message disappears exactly when it is needed.
+   ⛔ COLOUR IS NEVER THE ONLY CUE. Red-versus-blue is the pair that fails a red-green colour-blind
+   reader, so `aria-invalid` carries it to a screen reader, the control renders a ⚠ glyph beside
+   the field, and the reason is in the glyph's title. The colour is the fourth signal, not the
+   first. */
+/* ⛔ THE SELECTOR MIRRORS THE FOCUS RULE'S `:not()` CHAIN ON PURPOSE, and this is not cosmetic —
+   it is the whole reason the state renders at all. `!important` does not decide between two
+   `!important` declarations; SPECIFICITY does, and the focus rule above carries three `:not()`
+   attribute arguments (0,4,1) against a bare `input[aria-invalid]:focus` (0,2,1). The first cut of
+   this rule was written the short way, sat LATER in the file, and lost: `aria-invalid="true"` was
+   on the element, the ⚠ was on screen, and the border stayed blue. Caught only because the
+   verifier reads the COMPUTED style off the rendered element rather than this file. */
+input:not([type="checkbox"]):not([type="range"]):not([type="color"])[aria-invalid="true"],
+select[aria-invalid="true"], textarea[aria-invalid="true"],
+input:not([type="checkbox"]):not([type="range"]):not([type="color"])[aria-invalid="true"]:focus,
+select[aria-invalid="true"]:focus, textarea[aria-invalid="true"]:focus {
+  /* ⛔ WEIGHT, not only hue. Focus and error are both warm here by design, so the error is a
+     HEAVIER border (2px against the 1px every other state uses) plus a stronger halo — legible
+     as "different" before any colour is judged, which is what a red-green colour-blind reader
+     needs and what a glance needs. The icon and the message carry the rest. */
+  border-color: var(--danger) !important;
+  border-width: 2px !important;
+  box-shadow: 0 0 0 3px var(--invalid-ring-soft);
   outline: none;
 }
 input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }

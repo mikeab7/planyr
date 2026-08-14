@@ -90,6 +90,18 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   four widths, mutation-proven — 41 of 86 checks red pre-fix) and **verify-header-nav-clickable** — a real `elementFromPoint` sweep of every point of each
   chip's box at 1024/1280/1440/1600, mutation-proven (201/201 points lost pre-fix at 1280 AND 1440).
   ⚠ A CENTRE-ONLY hit test passes on this defect; so does a short jurisdiction string at any width.
+- **⛔ `keyboard/keyScope.js` — WHICH SURFACE OWNS THE KEYBOARD, and the correction B3297 made to it.**
+  Read its header first; it holds the eight-arm measurement that produced the rule. The one thing to know
+  before touching it: **a guard may only refuse a key the focused control can actually use.** A `<select>`
+  is a `PICKER`, not a text field, and a range input is a `SLIDER` — neither does anything with Delete or
+  Backspace, and both used to swallow them, which is how the owner ended up unable to delete a selected
+  area measurement while its inspector was open. What each control consumes is declared in the planner's
+  its key-contract module (`CONTROL_CONSUMES`, in the site-planner workspace's `lib/`), and everything not on that short list passes; B746/V258's
+  undo-on-a-slider carve-out falls out of the rule rather than being a special case. **`TEXT_ENTRY_TAGS`
+  is the one scope that keeps the whole keyboard and must stay that way** — it is the guard B464048 built
+  to stop a Backspace destroying a building, and the ui-audit harness **verify-delete-key-scope** re-proves that defect dead
+  on every run. The `FIELD` LATCH is likewise narrowed: `data-field-group` marks every value row, so a row
+  whose only control is a slider or a dropdown is NOT a typing row.
 - `theme/palette.js` — JS mirror of the CSS theme tokens (keep in sync; SVG/canvas can't use
   `var()`). `ui/statusTokens.js` — the single project-status palette source. `ui/controls.jsx` —
   shared control primitives (Button/ToggleChip/IconButton/Field/Section/MenuItem) + the one

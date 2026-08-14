@@ -32,6 +32,32 @@ const CASES = [
   { scope: "unknown", site: "Bain", why: "the containment lookup could not answer", fail: ["city"] },
 ];
 
+/* ⛔ B367298 — THE LONGEST LABELS IN HIS ACTUAL PORTFOLIO, because a narrow-header guarantee proved
+ * on a short label is proved on nothing. These two are the awkward ones, and Tsakiris is the worst
+ * label the app can produce: two governing slots, the second of them a measured remainder naming a
+ * city whose ETJ nobody publishes. Their identify results are transcribed from the live
+ * `verify-jurisdiction-portfolio` run (2026-08-11) rather than replayed, because the portfolio
+ * fixture carries no recorded per-parcel answers for them — the FORMATTER and the COMPONENT are
+ * still the real ones, which is what this harness is for. */
+const LONGEST = [
+  {
+    scope: "longest-tsakiris",
+    j: {
+      city: ["Katy"], cityAll: [], citySome: ["Katy"], cityCentroid: ["Katy"], etj: [], county: ["Waller"],
+      cityCoverage: { inCity: 2, tested: 9 }, etjUnmappedCities: ["Katy"],
+      sources: [{ id: "city", state: "loaded" }, { id: "etj", state: "empty" }, { id: "county", state: "loaded" }],
+    },
+  },
+  {
+    scope: "longest-goosecreek",
+    j: {
+      city: ["Baytown"], cityAll: [], citySome: ["Baytown"], cityCentroid: ["Baytown"], etj: ["Baytown"], county: ["Harris"],
+      cityCoverage: { inCity: 6, tested: 14 },
+      sources: [{ id: "city", state: "loaded" }, { id: "etj", state: "loaded" }, { id: "county", state: "loaded" }],
+    },
+  },
+];
+
 async function badgeFor(name, fail) {
   const rec = SHAPES.shapes.find((s) => s.site === name);
   const rings = PORTFOLIO.sites.find((p) => p.site === name).rings
@@ -73,13 +99,18 @@ function Case({ c, badge }) {
 }
 
 const badges = await Promise.all(CASES.map((c) => badgeFor(c.site, c.fail)));
+const longest = LONGEST.map((l) => ({
+  ...l, badge: { ...formatJurisdictionBadge(l.j), ageMs: 120000, sourceName: "TxDOT / TxGIO / H-GAC" },
+}));
+const ALL = [...CASES.map((c, i) => ({ scope: c.scope, site: c.site, badge: badges[i] })),
+             ...longest.map((l) => ({ scope: l.scope, site: l.scope, badge: l.badge }))];
 
 createRoot(document.getElementById("root")).render(
   <ThemeProvider>
-    {CASES.map((c, i) => <Case key={c.scope} c={c} badge={badges[i]} />)}
+    {ALL.map((c) => <Case key={c.scope} c={c} badge={c.badge} />)}
   </ThemeProvider>,
 );
 // The probe reads the rendered DOM; the badges are also published so a failure can be diagnosed
 // against what the formatter actually returned rather than against a guess.
-window.__BADGES__ = Object.fromEntries(CASES.map((c, i) => [c.scope, badges[i]]));
+window.__BADGES__ = Object.fromEntries(ALL.map((c) => [c.scope, c.badge]));
 window.__READY__ = true;

@@ -1463,6 +1463,32 @@ const NO_AUTOFILL = {
   "data-bwignore": true,
   "data-form-type": "other",
 };
+
+/* NEW-2 — ⛔ A REACT PORTAL BUBBLES TO ITS REACT PARENT, NOT ITS DOM PARENT. A floating menu
+ * rendered by a grid cell lives in <body> visually, but its events still travel up the REACT tree
+ * and land on that cell's handlers. So a press inside the menu reaches the cell's `onMouseDown` —
+ * which is what arms drag-select — and dragging a few pixels before release (what a real hand does)
+ * paints a selection band down the grid that the user never asked for.
+ *
+ * Measured: a plain click leaks nothing; press-move-release on a status swatch selected rows 2-8 of
+ * the status column. The press does NOT arrive through the DOM — a DOM-level listener on the cell
+ * never fires — which is the evidence that rules out "the click is falling through to what's
+ * underneath" and pins it on React's tree.
+ *
+ * This is the whole fix, in one place, spread onto the ROOT of every menu a grid cell portals out:
+ * the pointer events that arm grid selection stop at the menu's edge. It is deliberately only the
+ * grid-arming pair — `click` is left alone so each menu's own item handlers keep working, and
+ * nothing here touches ordinary drag-select in the grid, which still works normally whenever the
+ * press did not start inside a menu. Both of those are asserted, because a fix that killed
+ * drag-select would be a worse bug than the leak.
+ *
+ * Enforced by test/menuPortalIsolation.test.js, which sweeps the file so a NEW cell-level menu
+ * cannot be added without it. */
+const MENU_STOPS_GRID = {
+  onMouseDown: e => e.stopPropagation(),
+  onMouseUp:   e => e.stopPropagation(),
+  "data-menu-isolated": "1",
+};
 // Excel-style fill palette: 5 columns x 4 rows = 20 swatches. Top rows = pastel tints
 // (read well on light grid rows + leave room for text); bottom rows = stronger fills
 // (work well as Gantt-bar accents). Used by the right-click Format toolbar.
@@ -2045,8 +2071,16 @@ const resolveTaskSpan = t => resolveDuration(t.start, taskDurValue(t), taskDurUn
 const startForEnd = (end, duration) => !end ? "" : (duration <= 1 ? end : addBD(end, -(Math.max(1, duration) - 1)));
 // Display: a task's duration with its typed unit. Month/year bars also expose the derived
 // working-day count via the cell tooltip (nothing hidden — B615).
-const fmtTaskDuration = t => {
+// B463072 — `isSummary` is NOT optional decoration. A parent row carries TWO durations: the span
+// rollupParentDates derives from its children (`duration`, always working days) and the leftover typed
+// value a parent never legitimately owns (`durValue`/`durUnit`, which the rollup does not rewrite, so it
+// keeps whatever it happened to hold). Reading the leftover printed **"0d" on a 40-working-day summary**
+// — measured on the owner's Grand Port row "CCID3: Lift Station & Force Main Approval", which rendered
+// 08/07/26 · 10/02/26 · 0d. Same family as B443248: that one let a stale leftover drive a SUCCESSOR'S
+// DATE, this one let it drive the NUMBER ON SCREEN. For a summary the rolled span is the only truth.
+const fmtTaskDuration = (t, isSummary = false) => {
   if (t.duration === "" || t.duration == null) return "";
+  if (isSummary) return `${t.duration}d`;
   const u = taskDurUnit(t);
   return `${taskDurValue(t)}${u}`;
 };
@@ -3504,7 +3538,7 @@ function ContactPicker({ value, contacts, onCommit, onCancel, variant = "master"
    * explanatory paragraph). "No" is a real button AND the Escape key AND is what a stray click
    * leaves you on — saying no must never be the hard path. */
   const confirmNew = (pendingNew && pos) ? ReactDOM.createPortal(
-    <div data-contact-dd data-contact-confirm style={{position:'fixed', left:pos.left, top:pos.top, width:pos.width, zIndex:100000,
+    <div data-contact-dd data-contact-confirm {...MENU_STOPS_GRID} style={{position:'fixed', left:pos.left, top:pos.top, width:pos.width, zIndex:100000,
       background:'#fff', border:'1px solid var(--bd2)', borderRadius:7, boxShadow:'0 6px 20px rgba(0,0,0,.13)', padding:'9px 11px'}}>
       <div style={{fontSize:12, color:'var(--txt)', lineHeight:1.4, marginBottom:8}}>
         No match — add "<span style={{fontWeight:600}}>{pendingNew}</span>" as a new contact?
@@ -3520,7 +3554,7 @@ function ContactPicker({ value, contacts, onCommit, onCancel, variant = "master"
     </div>, document.body) : null;
 
   const dropdown = (!pendingNew && totalItems > 0 && pos) ? ReactDOM.createPortal(
-    <div data-contact-dd style={{position:'fixed', left:pos.left, top:pos.top, width:pos.width, zIndex:100000,
+    <div data-contact-dd {...MENU_STOPS_GRID} style={{position:'fixed', left:pos.left, top:pos.top, width:pos.width, zIndex:100000,
       background:'#fff', border:'1px solid var(--bd2)', borderRadius:7, boxShadow:'0 6px 20px rgba(0,0,0,.13)',
       overflow:'hidden', maxHeight:220, overflowY:'auto'}}>
       {suggestions.map((c, i) => (
@@ -5447,9 +5481,42 @@ function App() {
   }, [successorPrompt, notesCtx, projCtx, taskCtx, renameModal, pdfExportOpen, formatOpen, settingsOpen,
       automationOpen, contactsOpen, historyOpen, reviewOpen, meetingCalOpen]);
 
+  /* NEW-1 — ⛔ THE GUARD ABOVE ASKS "IS AN OVERLAY OPEN?" AND THE RIGHT QUESTION IS "DID THIS
+   * KEYSTROKE BEGIN WHILE ONE WAS?" — those differ for exactly one keystroke, the one that
+   * DISMISSES the overlay, and that is the keystroke that caused the bug.
+   *
+   * Measured: press Enter on the successor prompt and the modal applies and closes itself
+   * synchronously, so by the time this same event reaches the document-level handler below the ref
+   * already reads false. The handler then does what Enter on a picker column is designed to do —
+   * fire a synthetic click on the dot and open the picker — so the status menu the user had just
+   * closed REAPPEARS. It is not the first menu left orphaned; it is a second one, opened by the
+   * keystroke that dismissed the prompt. Enter left a menu up 7/7; Escape 0/7; the ✕ button 0/7;
+   * and with no prompt in play, picking a swatch left one up 0/9.
+   *
+   * WHY LATCHING AND NOT "THE MODAL SWALLOWS THE KEY": making SuccessorPromptModal call
+   * stopImmediatePropagation fixes SuccessorPromptModal. Thirteen overlays feed the ref above, and
+   * the next one added would arrive with the same hole — the defect is in the QUESTION the guard
+   * asks, not in any one modal's manners. Latching in capture (window capture runs before anything
+   * on document, and before React's root handler) records the answer while it is still true, so
+   * every overlay is covered by construction and no modal has to remember anything.
+   *
+   * It deliberately does NOT touch the legitimate feature: with no overlay in play the latch is
+   * false at keydown, and Enter on a picker column still opens the picker. Both directions asserted
+   * in ui-audit/verify-grid-overlay-input.mjs. */
+  const overlayAtKeyStartRef = useRef(false);
+  useEffect(() => {
+    const latch = () => { overlayAtKeyStartRef.current = overlayOpenRef.current; };
+    window.addEventListener("keydown", latch, true);
+    return () => window.removeEventListener("keydown", latch, true);
+  }, []);
+
   useEffect(() => {
     const onKey = (e) => {
-      if (overlayOpenRef.current) return;  // a modal/menu owns the keyboard — don't run grid shortcuts behind it
+      // A modal/menu owns the keyboard — don't run grid shortcuts behind it. `overlayAtKeyStart`
+      // also covers the keystroke that DISMISSED the overlay: by the time that one arrives here the
+      // modal has already closed itself, so the live ref reads false and the grid would act on a key
+      // the user aimed at the modal (NEW-1 — that is what re-opened the status menu).
+      if (overlayOpenRef.current || overlayAtKeyStartRef.current) return;
       const tag = document.activeElement.tagName;
       const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
       if (e.key === "Insert" && !typing) {
@@ -8520,6 +8587,49 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
 
   const colWidthsRef = useRef(null);
 
+  // ── B463922 — hold the row you are working on STILL when the list re-lays out ──────────
+  // Collapsing (or expanding) a group ABOVE the row you are editing changes how much content
+  // sits above it, so with no compensation that row slides up or down the screen by the whole
+  // height of what appeared or vanished — under a cursor that has not moved. Rows here are
+  // ABSOLUTELY POSITIONED inside a spacer, so the browser's own scroll anchoring cannot help:
+  // an out-of-flow row is never an anchor candidate (measured — inserting 500px above this
+  // container moves scrollTop by exactly 0). So the app owns the adjustment explicitly, which
+  // is VIEWPORT-STABLE (a): fold the MEASURED delta into the scroll position in the SAME frame
+  // as the re-layout, in a LAYOUT effect (before paint), so nothing is ever seen to move.
+  //
+  // The anchor is the row the user is working on: the selected row while it is on screen,
+  // otherwise the row at the top of the viewport — so the view holds still either way. When
+  // the anchor row itself disappears (you collapsed the group it lives in) we walk UP the
+  // previous list to the nearest row that survived, which is its parent.
+  const heldListRef = useRef(tasks);
+  React.useLayoutEffect(() => {
+    const el = ref.current;
+    const prev = heldListRef.current;
+    heldListRef.current = tasks;
+    if (!el || prev === tasks || !prev.length || !tasks.length) return;
+    const st = el.scrollTop;
+    // Index into the PREVIOUS list of the row sitting at the top of the viewport. React has not
+    // touched the scroll position, so `st` is still the pre-commit value the old list was laid
+    // out against. (Row N's document top is TL_H + N*ROW_H — the sticky header holds TL_H.)
+    const topIdx = Math.max(0, Math.min(prev.length - 1, Math.round((st - TL_H) / ROW_H)));
+    let anchorIdx = topIdx;
+    if (selectedId != null) {
+      const si = prev.findIndex(t => t.id === selectedId);
+      const sTop = TL_H + si * ROW_H;
+      if (si >= 0 && sTop >= st + TL_H && sTop + ROW_H <= st + el.clientHeight) anchorIdx = si;
+    }
+    // The anchor row may itself have been collapsed away — walk up to the nearest survivor.
+    let now = -1;
+    while (anchorIdx >= 0) {
+      now = tasks.findIndex(t => t.id === prev[anchorIdx].id);
+      if (now >= 0) break;
+      anchorIdx--;
+    }
+    if (now < 0) return;
+    const delta = (now - anchorIdx) * ROW_H;
+    if (delta) el.scrollTop = Math.max(0, st + delta);
+  }, [tasks]);
+
   useEffect(() => {
     if (selectedId === null) return;
     const el = ref.current;
@@ -9241,7 +9351,7 @@ function HealthPicker({value, onChange}) {
         </span>
       </span>
       {open && ReactDOM.createPortal(
-        <div ref={menuRef}
+        <div ref={menuRef} {...MENU_STOPS_GRID}
           style={{position:"fixed",top:pos.top,left:pos.left,
             background:"#fff",border:"1px solid var(--bd2)",borderRadius:6,
             padding:"5px 4px",display:"flex",flexDirection:"column",gap:2,
@@ -9342,7 +9452,7 @@ function StatusPicker({value, onChange}) {
         {(HEALTH[value]||HEALTH.gray).label}
       </span>
       {open && ReactDOM.createPortal(
-        <div ref={menuRef}
+        <div ref={menuRef} {...MENU_STOPS_GRID}
           style={{position:"fixed",top:pos.top,left:pos.left,background:"#fff",
             border:"1px solid var(--bd2)",borderRadius:6,padding:"5px 6px",
             display:"flex",flexDirection:"column",gap:3,
@@ -9401,7 +9511,7 @@ function DepCell({items, renderLabel, renderName, s, title, flagged}) {
         ))}
       </div>
       {hovered && extra > 0 && ReactDOM.createPortal(
-        <div
+        <div {...MENU_STOPS_GRID}
           style={{position:"fixed", top:pos.top, left:pos.left, minWidth:pos.width, background:"#fff", border:"1px solid var(--bd2)", borderRadius:6, padding:"8px 10px", zIndex:9999, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", display:"flex", flexDirection:"column", gap:5}}
           onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
           {items.map((item, i) => (
@@ -9591,6 +9701,12 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
         {proj?.tasks.some(t=>t.parentId===task.id) ? (
           <span
             onClick={e=>{e.stopPropagation();updateTask(task.id,{isExpanded:!task.isExpanded});}}
+            /* B463922 — the click already refused to move the selection (stopPropagation), but the
+               grid selects on MOUSEDOWN, so folding a group still stole the selection from the cell
+               you were editing: every keystroke after it went to the group row instead, and the
+               keep-the-selection-visible effect started chasing a row nobody was editing. Stop the
+               press too, so showing/hiding a group is a view action and nothing more. */
+            onMouseDown={e=>e.stopPropagation()}
             onDoubleClick={e=>e.stopPropagation()}
             title={task.isExpanded?"Collapse":"Expand"}
             style={{
@@ -9813,7 +9929,7 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
     case "duration":
       return <span style={{...s,...mono,color: task.hasChildren ? "#94a3b8" : "var(--mut)"}}
         title={task.hasChildren ? "Computed from subtasks" : (durTooltip(task) || undefined)}>
-        {fmtTaskDuration(task)}
+        {fmtTaskDuration(task, task.hasChildren)}
       </span>;
     case "predecessors": {
       const preds = normPreds(task.predecessors);
@@ -11574,7 +11690,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
         case 'name': val = t.name||''; break;
         case 'start': val = fmtD(t.start); break;
         case 'end': val = fmtD(t.end); break;
-        case 'duration': val = fmtTaskDuration(t)||`${t.duration}d`; break;   // match the unit-aware cell display
+        case 'duration': val = fmtTaskDuration(t, !t.isLeaf)||`${t.duration}d`; break;   // match the unit-aware cell display (B463072: a summary prints its ROLLED span)
         case 'health': val = HEALTH[t.health]?.label||''; break;
         case 'percentComplete': val = `${t.percentComplete||0}%`; break;
         case 'responsibleParty': val = t.responsibleParty||''; break;
@@ -11713,7 +11829,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
         return <td key={col.k} style={{...tdBase,cursor:t.isLeaf?"text":"default"}} onClick={onCellClick} onDoubleClick={()=>{ if (!t.isLeaf) return; setLocalEdit({id:t.id,projId:t.projId,col:"duration"}); }}>
           {isE(t,"duration")
             ? <input {...NO_AUTOFILL} autoFocus style={{display:"block",width:"100%",height:"18px",border:"none",borderBottom:"1.5px solid var(--blue)",outline:"none",background:"transparent",fontSize:12,fontFamily:"inherit",color:"var(--txt)",padding:"0 2px"}} defaultValue={localEdit?.initChar ?? fmtTaskDuration(t)} onBlur={e=>commit(t,"duration",e.target.value)} onKeyDown={e=>{if(e.key==="Enter")commit(t,"duration",e.target.value);if(e.key==="Escape")setLocalEdit(null);}} />
-            : <span style={{color:"var(--mut)"}} title={durTooltip(t)||undefined}>{fmtTaskDuration(t)||"0d"}</span>}
+            : <span style={{color:"var(--mut)"}} title={t.isLeaf ? (durTooltip(t)||undefined) : "Computed from subtasks"}>{fmtTaskDuration(t, !t.isLeaf)||"0d"}</span>}
         </td>;
       case "health":
         return <td key={col.k} data-hmenu="1" onClick={onCellClick}

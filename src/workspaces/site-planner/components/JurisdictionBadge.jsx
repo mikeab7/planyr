@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { formatAge } from "../lib/gisCache.js";
 import { PinIcon } from "./icons.jsx";
-import { abbreviateJurisdiction } from "../lib/jurisdictionBadgeFit.js";
+import { abbreviateJurisdiction, jurisdictionRungs } from "../lib/jurisdictionBadgeFit.js";
 
 /* B763 — the passive jurisdiction badge in the site header. Display-only screening
  * info from the B93 identify, auto-run once per active-parcel activation (never per
@@ -31,31 +31,87 @@ import { abbreviateJurisdiction } from "../lib/jurisdictionBadgeFit.js";
 export default function JurisdictionBadge({ badge }) {
   const pillRef = useRef(null);
   const textRef = useRef(null);
-  const fullRef = useRef(null);
-  const [abbrev, setAbbrev] = useState(false);
   const text = badge && badge.text ? badge.text : "";
-  const short = abbreviateJurisdiction(badge);
+  /* ⛔ B367298 — A LADDER, NOT A SWITCH. One short form was not enough: on a SPLIT site
+   * `abbreviateJurisdiction`'s output is nearly the whole line, so at laptop widths the pill fell
+   * back to a CSS ellipsis and cut it mid-word — the very thing dropping whole facts exists to
+   * prevent, reached from underneath. Measured in a browser on Goose Creek and Tsakiris at 761 and
+   * 860 px. The last rung is the empty string: below a certain width no TRUE statement about a split
+   * jurisdiction fits, and showing nothing (with the whole answer still on hover) is the only option
+   * that cannot mislead. See `jurisdictionRungs`. */
+  const rungs = jurisdictionRungs(badge);
+  const [rung, setRung] = useState(0);
 
+  /* ⛔ B367298 — HOW MUCH ROOM THE PILL HAS, MEASURED WITHOUT ASKING THE PILL. Three readings were
+   * built before this one and each failed in a way worth recording, because the trap is the same
+   * every time — a budget that depends on the text makes the comparison `shown <= shown`:
+   *   • `host.clientWidth` while the zone was `flex: 0 1 auto` — the zone IS its content when the
+   *     content fits, so the label RATCHETED DOWN as the window narrowed and never came back up
+   *     (shortest rung at 860 px, still shortest at 1440 px).
+   *   • row width minus the sibling zones' content — content-independent, but not what flex grants
+   *     once the row is over-subscribed; too generous, and the pill overflowed its box.
+   *   • step DOWN a rung whenever the span clips — terminates, but each step changes the layout, so
+   *     it overshot by a rung and sat blank with 213 px going spare (measured, Goose Creek at 761).
+   *
+   * The honest budget is a property of the ZONE's mode, and `AppHeader` gives us both:
+   *   • CENTRED — the zone is out of flow with a measured `max-width`, so it competes with nothing
+   *     and its budget IS that max-width, whatever the pill puts inside it.
+   *   • TIGHT / UNMEASURED — the zone is `flex: 1 1 0%`, i.e. basis ZERO plus grow, so its width is
+   *     the row's leftover space and is likewise independent of the text.
+   * Either way the number is stable, so one pass picks the rung and there is nothing to oscillate.
+   */
   useLayoutEffect(() => {
-    const pill = pillRef.current, span = textRef.current, ghost = fullRef.current;
-    if (!pill || !span || !ghost || !pill.parentElement) return undefined;
+    const pill = pillRef.current, span = textRef.current;
+    if (!pill || !span || !pill.parentElement) return undefined;
     const host = pill.parentElement;
     const measure = () => {
-      /* The pill's chrome — pin, gaps, padding, border, the ⚑ — is whatever the pill is beyond its
-         text span, and that difference holds whether the text is truncated or not. */
-      const chrome = pill.offsetWidth - span.offsetWidth;
       const cs = typeof getComputedStyle === "function" ? getComputedStyle(host) : null;
       const pad = cs ? (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0) : 0;
-      const avail = host.clientWidth - pad;
-      const needed = chrome + ghost.offsetWidth;
-      setAbbrev(needed > avail + 0.5);
+      const capPx = cs && /px$/.test(cs.maxWidth) ? parseFloat(cs.maxWidth) : null;
+      const outOfFlow = cs && cs.position === "absolute";
+      /* ⛔ ASK FOR EVERYTHING, THEN SEE WHAT YOU ARE GIVEN. In the in-flow (`tight`) mode the zone's
+       * width still tracks its content once the row is over-subscribed, so reading it while a SHORT
+       * rung is showing answers "how much room does the short rung need" — the latch again. So the
+       * span is briefly filled with the FULL label, the granted width is read, and it is put back,
+       * all inside this layout effect: no paint happens in between and no React state is touched. */
+      const restore = span.textContent;
+      span.textContent = text;
+      const granted = outOfFlow && capPx != null ? capPx : host.clientWidth;
+      span.textContent = restore;
+      const avail = Math.max(0, granted - pad);
+      // The pill's chrome — pin, gaps, padding, border, the ⚑ — is whatever it is beyond its text.
+      const chrome = pill.offsetWidth - span.offsetWidth;
+      const ghosts = Array.from(pill.querySelectorAll("[data-jurisdiction-measure]"));
+      const widths = ghosts.map((g) => g.offsetWidth);
+      let pick = Math.max(0, widths.length - 1);
+      for (let i = 0; i < widths.length; i++) if (chrome + widths[i] <= avail + 0.5) { pick = i; break; }
+      setRung((prev) => (prev === pick ? prev : pick));   // B1189 — guard the DISPATCH, always
+
+      /* ⛔ B371362 — DECLARE THE LEAST WIDTH AT WHICH THIS PILL CAN STILL SAY SOMETHING TRUE, so the
+       * header can decide whether a CENTRED slot is worth having for THIS content rather than for a
+       * constant. `AppHeader`'s threshold was 120 px — the width of the word "Unincorporated" — while
+       * the owner's Goose Creek label needs 199 for its shortest true form, so at 1000 px the header
+       * ruled a 136 px centred slot worthwhile and handed it a slot it could not use. The pill then
+       * correctly fell to pin-only (B367298) while, one band lower, the in-flow `tight` layout showed
+       * the WHOLE label. This is the number that closes that gap.
+       *
+       * It is a function of the TEXT, never of the width granted, so it cannot feed back on the
+       * layout that reads it. Written to the DOM rather than lifted through React state because the
+       * consumer is an ancestor in another workspace's module — one attribute, no new prop chain. */
+      const trueRungs = ghosts.map((g, i) => (g.textContent ? widths[i] : null)).filter((w) => w != null);
+      const minFit = trueRungs.length ? Math.ceil(Math.min(...trueRungs) + chrome) : 0;
+      if (minFit > 0) pill.setAttribute("data-center-min-fit", String(minFit));
+      else pill.removeAttribute("data-center-min-fit");
     };
     measure();
     if (typeof ResizeObserver !== "function") return undefined;
     const ro = new ResizeObserver(measure);
+    // Observe the ROW as well as the zone: in centred mode the zone's own box does not change when
+    // the row does, but its measured max-width does.
     ro.observe(host);
+    if (host.parentElement) ro.observe(host.parentElement);
     return () => ro.disconnect();
-  }, [text, short.text]);
+  }, [text, rungs.length]);
 
   if (!badge || !badge.text) return null;
   const age = badge.ageMs != null ? formatAge(badge.ageMs) : null;
@@ -91,7 +147,7 @@ export default function JurisdictionBadge({ badge }) {
       data-testid="jurisdiction-badge"
       /* The complete answer, always, whatever the visible text is doing. */
       data-jurisdiction-full={text}
-      data-jurisdiction-abbrev={abbrev ? "1" : undefined}
+      data-jurisdiction-abbrev={rung > 0 ? "1" : undefined}
       style={{
         position: "relative",
         display: "inline-flex", alignItems: "center", gap: 5, maxWidth: "100%", minWidth: 0,
@@ -102,20 +158,27 @@ export default function JurisdictionBadge({ badge }) {
     >
       {/* NEW-3 — drawn pin, not the 📍 emoji: it now inherits the pill's own text colour. */}
       <span style={{ flex: "none", display: "grid", placeItems: "center" }}><PinIcon size={11} /></span>
-      <span ref={textRef} data-jurisdiction-text="1" style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-        {abbrev ? short.text : text}
+      {/* ⛔ `textOverflow: clip`, not `ellipsis`, ON PURPOSE: the rung ladder is what makes the text
+          fit, and an ellipsis here would quietly paper over a rung that does not — turning a
+          measurable failure back into the silent mid-word cut this item removed. If nothing fits,
+          the chosen rung is the empty string and the pill is the pin alone. */}
+      <span ref={textRef} data-jurisdiction-text="1" data-rung={rung} style={{ overflow: "hidden", textOverflow: "clip" }}>
+        {rungs[Math.min(rung, rungs.length - 1)]}
       </span>
       {badge.straddle && <span aria-hidden="true" style={{ flex: "none", color: "var(--warn-text)", fontWeight: 700 }}>⚑</span>}
-      {/* The measuring copy: always the FULL string, never laid out, never read by a user. It is
-          what makes the fit decision independent of its own outcome. */}
-      <span
-        ref={fullRef}
-        aria-hidden="true"
-        data-jurisdiction-measure="1"
-        style={{ position: "absolute", left: 0, top: 0, visibility: "hidden", whiteSpace: "nowrap", pointerEvents: "none" }}
-      >
-        {text}
-      </span>
+      {/* The rungs, published for a headless check to read (and never laid out or shown). The FIT is
+          decided by asking the browser whether the visible span clipped — see above — so these are a
+          DOM contract, not a measuring device. */}
+      {rungs.map((r, i) => (
+        <span
+          key={`rung${i}`}
+          aria-hidden="true"
+          data-jurisdiction-measure={i}
+          style={{ position: "absolute", left: 0, top: 0, visibility: "hidden", whiteSpace: "nowrap", pointerEvents: "none" }}
+        >
+          {r}
+        </span>
+      ))}
     </span>
   );
 }

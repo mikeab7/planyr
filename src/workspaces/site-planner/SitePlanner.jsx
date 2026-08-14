@@ -1,9 +1,10 @@
-import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, memo, Fragment, lazy, Suspense } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, useId, memo, Fragment, lazy, Suspense } from "react";
 import { flushSync } from "react-dom";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { loadSite, saveSite, deleteSite, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud } from "./lib/storage.js";
+import { loadSite, saveSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud } from "./lib/storage.js";
+import { collectAssetRefs, releasePlanForOverlay } from "./lib/sharedAssetRefs.js";
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
 import { registerFlush } from "../../app/flushRegistry.js";
 import { createEditorLock } from "../../shared/presence/editorLock.js";
@@ -11,7 +12,9 @@ import { reportClientEvent, SUPPRESSED_AUTOMATED } from "../../shared/telemetry/
 import { notePerfEdit } from "../../shared/telemetry/perfSampling.js";
 import { notePlanContext, noteViewScale, requestPerfCapture, perfCaptureDelivery } from "../../shared/telemetry/perfRecorderHandle.js";
 import { createElementSync, stableStringify } from "./lib/elementSync.js";
-import { planDelete, shouldHintTypingGuard, TYPING_GUARD_HINT } from "./lib/deletePlan.js";
+import { planDelete, TYPING_GUARD_HINT } from "./lib/deletePlan.js";
+import { focusScope, resolveKeyEntry, keyScopeVerdict, shouldHintRefusal, SCOPE_GUARD_HINT } from "./lib/keyContract.js";
+import { touchLatch, touchFactsOf, TOUCH } from "../../shared/keyboard/keyScope.js";
 import { rowsToModel, KIND_TO_FIELD, foldNeverSyncedLocal, foldJournal, reconcileSeedRows } from "./lib/elementRows.js";
 import { writeJournal, readJournal, clearJournal, sweepJournals, journalSessionId } from "./lib/elementJournal.js";
 import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
@@ -71,7 +74,7 @@ import { cullRectFor, cullToView, shouldCull } from "./lib/viewCull.js";
  * beside `cullToView`, because "drawn ≠ exists" is a rule this codebase already relies on and
  * hiding is that same rule with a different predicate. Read that module's header before adding a
  * consumer: the metrics pass iterates `els`/`parcels` and must never read a draw set. */
-import { elHidden, isHidden, parcelAcreageHidden, normalizeRetiredToggles } from "./lib/contentVisibility.js";
+import { elHidden, isHidden, parcelAcreageHidden, normalizeRetiredToggles, visibleEls, visibleParcels, visibleMeasures } from "./lib/contentVisibility.js";
 import { makeLabelFrame } from "./lib/exportLabelScale.js";
 import { orderLayersByPriority, LAYER_STAGE_SIZE } from "./lib/layerSchedule.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
@@ -2087,8 +2090,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // `leftPanel`, which is not in that listener's dep list.
   const inspectorShowingRef = useRef(false);
   const multiRef = useRef(multi); multiRef.current = multi;
-  // NEW-1 — which focused field we've already told "your Delete went into the box you're typing in",
-  // so the hint fires once per field rather than once per keystroke. Cleared when focus leaves.
+  /* NEW-1 — THE KEYBOARD LATCH: has the user's last pointer press / focus move landed on the
+   * drawing, or on chrome? `document.activeElement` cannot answer this — <body> is where focus
+   * goes after ANY dismissal (a committed field, an Escape, a click on inert panel background),
+   * and reading that as "the drawing has the keyboard" is what let a Backspace typed a moment
+   * after leaving the Depth box delete the owner's building. See shared/keyboard/keyScope.js.
+   *
+   * `keyEpisodeRef` counts uninterrupted stretches of chrome ownership, so the refusal hint can
+   * fire once per episode instead of once per keypress (there may be no focused FIELD to key it
+   * to — two of the seven measured leaks had focus on a <button>, two on <body>). */
+  const canvasTouchRef = useRef(TOUCH.CANVAS);
+  const keyEpisodeRef = useRef(0);
+  // Which episode we've already explained. (Was: which focused field — an episode is the general
+  // case and covers the field one, since entering a field starts an episode.)
   const typingHintRef = useRef(null);
   // NEW-1: live mirrors read by the takeover / restore layout effects (whose deps intentionally
   // EXCLUDE leftPanel/dockMemo so a deliberate manual rail switch can't re-trigger a takeover).
@@ -5001,7 +5015,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const snapToBoundary = useCallback((p) => {
     const tol = Math.max(5, 10 / view.ppf);
     let best = null, bestD = Infinity;
-    for (const pc of parcels) {
+    // ⛔ B494049 — same rule as the flush-snap: a hidden parcel's edge may not pull the cursor.
+    for (const pc of visibleParcels(hiddenGroups, parcels)) {
       const pts = pc.points;
       for (let i = 0; i < pts.length; i++) {
         const q = nearestPointOnSeg(p, pts[i], pts[(i + 1) % pts.length]);
@@ -5026,7 +5041,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const connectTolFt = () => Math.min(12 / (view.ppf || 1), ROAD_CONNECT_MAX_FT);
   // halfW = centerline → outer curb line (travelW/2 + curb): findRoadConnect measures the connect
   // tolerance to the visible pavement EDGE (B961/NEW-3), not the hidden centerline.
-  const connectableRoads = () => els.filter((x) => x.type === "road" && isCenterlineRoad(x) && !x.attachedTo).map((x) => ({ id: x.id, pts: x.pts, halfW: Math.max(0, (+x.travelW || 0) / 2) + roadCurbWidth(x) }));
+  // ⛔ B494049 — a hidden road is not a magnet. Welding the endpoint of the road you are drawing to
+  // something that is not on screen moves your geometry for a reason you cannot see.
+  const connectableRoads = () => visibleEls(hiddenGroups, els).filter((x) => x.type === "road" && isCenterlineRoad(x) && !x.attachedTo).map((x) => ({ id: x.id, pts: x.pts, halfW: Math.max(0, (+x.travelW || 0) / 2) + roadCurbWidth(x) }));
   // Apply a planRoadConnect() result (merge / weld / tee) in ONE setEls. The caller has already
   // pushed history, so the whole connect is a single undo. A merge absorbs the target road
   // (tombstoned so a later sync can't resurrect it — TOMBSTONE-DELETES) and rounds the fresh
@@ -5152,9 +5169,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   /* ------------ fit to content ------------ */
   const fit = useCallback(() => {
+    /* ⛔ B494048 — FRAME WHAT IS ON SCREEN, NOT WHAT IS IN THE MODEL. Measured on the owner's plan:
+       hiding both ponds — 2,616 ft of the drawing's width — left Zoom to fit at a byte-identical
+       zoom, so the buildings he could actually see stayed squeezed into the middle of a frame built
+       around two things that were not there. An extent is a picture decision, so it reads the
+       visible subset; every COUNT still reads the model (see lib/hiddenContentReads.js). */
     const pts = [];
-    parcels.forEach((pc) => pts.push(...pc.points));
-    els.forEach((e) => pts.push(...(e.points ? e.points : elCorners(e))));
+    visibleParcels(hiddenGroups, parcels).forEach((pc) => pts.push(...pc.points));
+    visibleEls(hiddenGroups, els).forEach((e) => pts.push(...(e.points ? e.points : elCorners(e))));
     if (underlay) {
       const sy = underlay.ftPerPxY || underlay.ftPerPx;
       pts.push({ x: underlay.x, y: underlay.y });
@@ -5167,7 +5189,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const pad = 60;
     const ppf = Math.min((size.w - pad * 2) / bw, (size.h - pad * 2) / bh);
     setView({ ppf, offX: pad - minX * ppf + (size.w - pad * 2 - bw * ppf) / 2, offY: pad - minY * ppf + (size.h - pad * 2 - bh * ppf) / 2 });
-  }, [parcels, els, underlay, size]);
+  }, [parcels, els, underlay, size, hiddenGroups]);
 
   // Fit *after* a state change has committed: bump the nonce instead of calling
   // fit() from a stale closure (which would frame the view without the content
@@ -5624,35 +5646,69 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return () => { window.removeEventListener("blur", recover); document.removeEventListener("visibilitychange", onVis); };
   }, []);
 
+  /* NEW-1 — drive the keyboard latch. ONE rule, two listeners, both in the CAPTURE phase so a
+   * handler that stops propagation (the canvas stops plenty) cannot hide the fact that a press
+   * happened. `pointerdown` covers the mouse/touch half, `focusin` the keyboard-tab half — a Tab
+   * out of the Depth box into the stepper button never fires a pointer event, and it was one of
+   * the seven measured leaks.
+   *
+   * ⛔ NO CLOCK. The latch is a fact about which surface was last addressed, not about how long
+   * ago; a time budget here would be unanswerable and un-measurable (FOREGROUND-OR-VOID). */
+  useEffect(() => {
+    const note = (n) => {
+      const next = touchLatch(touchFactsOf(n, wrapRef.current || svgRef.current));
+      // A fresh stretch away from the drawing is a new episode — so the refusal explains itself
+      // again the next time the user leaves it, but not on every key in between.
+      if (next !== TOUCH.CANVAS && canvasTouchRef.current === TOUCH.CANVAS) keyEpisodeRef.current += 1;
+      canvasTouchRef.current = next;
+    };
+    const onDown = (e) => note(e.target);
+    const onFocusIn = (e) => note(e.target);
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("focusin", onFocusIn, true);
+    return () => { window.removeEventListener("pointerdown", onDown, true); window.removeEventListener("focusin", onFocusIn, true); };
+  }, []);
+
   /* ------------ keyboard ------------ */
   useEffect(() => {
     const onKey = (e) => {
       if (!active) return; // keep-alive: a hidden planner must never eat keys (or Delete markups) while another module is on screen
+      /* NEW-1 — WHO OWNS THE KEYBOARD. This replaces the old "is a text field focused" guard, which
+       * covered ONE of the eight states a user is in while editing a value and let the other seven
+       * through: measured on the owner's real FM 359 plan, an Enter / Escape / Tab / stepper-click /
+       * panel-click after typing in the Depth box each armed the next Backspace to delete Building 1
+       * AND its eight bonded elements. Full measurement + the rule in shared/keyboard/keyScope.js;
+       * the per-shortcut declarations (and the CI sweep that keeps them honest) in lib/keyContract.js.
+       *
+       * The old guard's two behaviours are both preserved, as SCOPES rather than special cases: a
+       * focused text field still swallows every key (you must be able to type), and B746/V258's
+       * slider exception for Ctrl/Cmd+Z / +Y still holds. */
       const t = document.activeElement;
-      // B746/V258 — a range/slider (e.g. the Properties panel's Fill-opacity drag) has no native
-      // browser undo to protect and doesn't consume Ctrl/Cmd+Z or +Y, so it must not trip the
-      // "don't hijack keys while typing" guard for that one chord — otherwise Ctrl-Z silently
-      // no-ops while an element with an opacity slider stays selected post-drag. Every OTHER
-      // shortcut (arrows, Delete, letter tools) still respects the guard while a slider has focus,
-      // since those DO have real native slider behavior (or would nudge/delete the still-selected
-      // element out from under the user).
-      const isSliderFocus = t && t.tagName === "INPUT" && t.type === "range";
-      const isUndoRedoChord = (e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z" || e.key === "y" || e.key === "Y");
-      if (t && !(isSliderFocus && isUndoRedoChord) && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA" || t.isContentEditable)) {
-        // NEW-1 — the guard stays (you must be able to type), but it no longer swallows Delete in
-        // SILENCE. Editing a building's width in Properties and then pressing Delete looked exactly
-        // like "delete is broken": the element sat visibly selected and the key did nothing, with no
-        // explanation. shouldHintTypingGuard keeps this from becoming noise — Delete only (never
-        // Backspace, the natural editing key), only with a live selection, once per focused field.
-        const fieldKey = t.id || t.name || t.getAttribute("aria-label") || t.placeholder || t.tagName;
-        if (shouldHintTypingGuard({ key: e.key, hasSelection: !!(selRef.current || multiRef.current.length), fieldKey, lastHintedField: typingHintRef.current })) {
-          typingHintRef.current = fieldKey;
-          flashWarn(TYPING_GUARD_HINT, 4500);
-          reportClientEvent("delete-attempt", "key:delete → swallowed by a focused field", { entry: "key:delete", result: "no-op", reason: "typing-guard", field: String(fieldKey).slice(0, 60) });
+      const canvasEl = wrapRef.current || svgRef.current;
+      const scope = focusScope({
+        tag: t ? t.tagName : null,
+        type: t ? t.type : null,
+        isContentEditable: !!(t && t.isContentEditable),
+        insideCanvas: !!(t && canvasEl && (canvasEl === t || canvasEl.contains(t))),
+        lastTouchedCanvas: canvasTouchRef.current === TOUCH.CANVAS,
+      });
+      const verdict = keyScopeVerdict({ entry: resolveKeyEntry(e), scope, fieldEdit: canvasTouchRef.current === TOUCH.FIELD });
+      if (!verdict.allow) {
+        /* LOUD-FAILURE — a refused key that would have CHANGED the plan says so, once per episode.
+         * A refused tool letter stays quiet: nothing was lost and nothing looks broken. */
+        const hasSelection = !!(selRef.current || multiRef.current.length);
+        if (shouldHintRefusal({ entry: verdict.entry, reason: verdict.reason, hasSelection, episode: keyEpisodeRef.current, lastHintedEpisode: typingHintRef.current })) {
+          typingHintRef.current = keyEpisodeRef.current;
+          flashWarn(SCOPE_GUARD_HINT[verdict.reason] || TYPING_GUARD_HINT, 4500);
+          if (verdict.entry.destructive) {
+            reportClientEvent("delete-attempt", `key:delete → refused (${verdict.reason})`, {
+              entry: "key:delete", result: "no-op", reason: verdict.reason,
+              field: String((t && (t.getAttribute("aria-label") || t.title || t.tagName)) || "").slice(0, 60),
+            });
+          }
         }
-        return; // don't hijack keys while typing in a field
+        return;
       }
-      typingHintRef.current = null; // focus left the field — the hint may fire again next time
       if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else if (!removeLastVertex()) undo(); return; } // Bluebeam: mid-draw Ctrl-Z peels the last placed vertex; only a no-draft Ctrl-Z does a global undo (matches Doc Review / Stitcher)
       if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); return; }
       // NEW-6 — Ctrl+C/X now copy WHATEVER is selected (element, markup, measurement, callout,
@@ -6515,11 +6571,41 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           roleOverrides: remapEdgeVector(pc.roleOverrides, edgeSrc, null),
           roles: remapEdgeVector(pc.roles, edgeSrc, null),
         }));
-        // Retain the parent (active:false = superseded, non-counting) followed by its children.
-        // Do NOT tombstone it — it is no longer deleted; a tombstone would strip it on the next
-        // cross-copy merge. (The mutual-exclusion guard + the overlap warning, B652, cover the
-        // rare merge-skew case where a stale copy re-activates the parent.)
-        setParcels((arr) => arr.flatMap((p) => (p.id === pc.id ? [{ ...p, active: false }, ...made] : [p])));
+        /* ⛔ NEW-9 (B472049) — THE PARENT IS REMOVED, NOT RETAINED. THIS REVERSES B651 DELIBERATELY.
+         *
+         * B651 kept the parent as a SUPERSEDED, non-counting, still-DRAWN parcel so the original
+         * surveyed outline stayed visible. The owner reported the consequence: *"it seems like the
+         * tool now just leaves the parent parcel and creates a new parcel almost with the split
+         * tool."* On a NOTCH cut the remainder is 99.4% of the parent (his numbers: 104.475 of
+         * 105.122 ac), so the drawing showed two near-identical outlines and read as a duplicate
+         * rather than a cut.
+         *
+         * ⛔ HIS REASONING IS THE REASON, AND IT IS BETTER THAN THE ALTERNATIVES EITHER OF US
+         * FRAMED: *"no because the two new parcels would have the same exterior outline."* The
+         * union of a split's children REPRODUCES the parent's exterior outline exactly — that is
+         * what a split IS. So the retained parent adds NO information to the drawing; it only adds
+         * a second coincident boundary. There is nothing to preserve visually.
+         * The dimmed / dashed / superseded-styling route was considered and rejected on the merits.
+         * `splitIntegrity.unionOutlineMatches` turns that reasoning into the assertion.
+         *
+         * ⛔ AND IT IS TOMBSTONED, which REVERSES B651's explicit instruction not to. That
+         * instruction was correct while the parent remained a live record — a tombstone would have
+         * stripped it on the next cross-copy merge. Now that the parent is genuinely gone, the
+         * tombstone is what makes it STAY gone: without it, a merge from another device that still
+         * holds the parent would resurrect it, overlapping its own children.
+         *
+         * LINEAGE SURVIVES WITHOUT A DRAWABLE PARCEL, and nothing is lost:
+         *   • the HCAD-derived facts (`addr`, `acct`, `attrs`) are COPIED onto every child by
+         *     `inherit` above — they were never read back off the parent row;
+         *   • `parentId` stays on each child as a historical STAMP rather than a live reference,
+         *     and `siteModel.childrenByParent` already ignores a child whose parent is absent
+         *     (`has.has(p.parentId)`), so the nesting simply stops rather than dangling.
+         * ⚠ EXISTING PLANS ARE NOT MIGRATED BY THIS. Parents superseded by earlier splits are
+         * already on disk as `active:false` drawable rows (on the owner's Bain plan alone:
+         * `e1454855gyzzln` and `e1455071mkspvo`). They keep drawing until someone removes them.
+         * That cleanup is REPORTED to the owner, never run automatically over his live data. */
+        tombstone([pc.id]);
+        setParcels((arr) => arr.flatMap((p) => (p.id === pc.id ? made : [p])));
         setSel({ kind: "parcel", id: made[0].id });
         /* Say what happened. Three or more pieces is a real outcome of a real cut and the plan
          * should not leave you counting them; a scrap dropped or a parent whose outline overlaps
@@ -7588,7 +7674,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           let ncx = snap(g.cx + dx), ncy = snap(g.cy + dy);
           const ids = new Set(d.members.map((m) => m.id));
           if (snapOn && gbox) { // ambient flush-snap along world axes (pure alignment, no bond)
-            const others = els.filter((x) => !ids.has(x.id)).map(ortho).filter(Boolean);
+            // ⛔ B494049 — the ambient flush-snap's neighbour set. An invisible object must never pull
+            // the cursor; this one can shift an element by its whole tolerance (up to 20 ft).
+            const others = visibleEls(hiddenGroups, els).filter((x) => !ids.has(x.id)).map(ortho).filter(Boolean);
             const sc = edgeSnapCenter({ cx: ncx, cy: ncy, w: gbox.w, h: gbox.h }, others, Math.min(20, 10 / view.ppf));
             ncx = sc.cx; ncy = sc.cy;
           }
@@ -7728,7 +7816,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // name (async, cached roster), labels the element, applies any canvas side-effect, and pushes.
   syncEventRef.current = (ev) => {
     const kind = ev && ev.kind, id = ev && ev.id;
-    if (!kind || !id) return;
+    /* ⛔ NEW-1 — A PLAN-WIDE EVENT HAS NO ELEMENT, AND THIS GUARD WAS EATING THE ONE WARNING THAT
+     * MATTERS. Every row of the B673 matrix is about a single element, so this handler opened by
+     * requiring `kind` and `id` — and `client-stale` carries NEITHER (`elementSync.js` emits it as
+     * `{ type, streak, pending }`). So the toast that says "your recent changes here can't be saved"
+     * was built, mapped and unit-tested, and then dropped on the floor before it could be pushed.
+     * The engine has STOPPED committing at that point and will not resume without a reload, so the
+     * screen said nothing at the exact moment the user needed to be told something.
+     *
+     * This is not a group-CAS bug — the same silence is live today on the NEW-3 rejected-op streak.
+     * It was found by asking whether a refusal is genuinely VISIBLE rather than reading the mapping
+     * and assuming, which is the whole lesson: a mechanism that looks right and never fires. The
+     * companion half — a `stale` engine still painting a green "synced" badge — is fixed at the
+     * save-badge switch below. Guarded by `test/staleVisible.test.js` and the e2e spec
+     * `stale-tab-is-loud`. */
+    if (!kind || !id) {
+      const wide = toastForSyncEvent(ev, { name: "", label: "", self: true });
+      if (wide) pushToast({ text: wide.text, action: null });
+      return;
+    }
     const field = KIND_TO_FIELD[kind];
     const localEl = ((stateRef.current && stateRef.current[field]) || []).find((x) => x && x.id === id);
     const elForLabel = localEl || ev.local || (ev.remote && ev.remote.data) || null;
@@ -8405,6 +8511,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (hist) pushHistory();
     setSheetOverlays((arr) => arr.map((o) => (o.id === id ? { ...o, ...patch } : o)));
   };
+  /* ⛔ NEW-1 — THE AERIAL UNDERLAY IS SHARED TOO, and this path had NO ref-count at all. `New plan,
+   * same parcel` copies `underlay: src.underlay` (SitePlannerApp), so two plans routinely point at
+   * one backdrop; removing it from either used to delete both tiers outright. Same rule, same
+   * module — and B474's hazard makes it the worst tier to get wrong: an underlay whose `src` was
+   * dropped and whose bytes are gone is unrecoverable. */
+  const releaseUnderlayAssets = (u) => {
+    if (!u) return;
+    const refs = collectAssetRefs(loadSitesList());
+    const { release, kept } = releasePlanForOverlay(refs, u, siteId);
+    for (const r of release) { if (r.tier === "storage") deleteOverlayObject(r.key); else idbDelete(r.key); }
+    if (kept.length)
+      reportClientEvent("underlay-asset-retained", "kept an aerial backdrop another plan still references", {
+        siteId, kept: kept.map((k) => ({ what: k.what, reason: k.reason, heldBy: k.heldBy })),
+      });
+  };
   const removeOverlay = (id) => {
     const o = sheetOverlays.find((x) => x.id === id);
     if (!o) { flashWarn("Couldn't delete that drawing — it's no longer in the list.", 5000); return; } // count-check: never a phantom no-op delete (B461)
@@ -8412,17 +8533,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const doc = overlayDocs.current.get(id);
     if (doc) { try { doc.destroy(); } catch (_) {} overlayDocs.current.delete(id); }
     overlayDocTouch.current.delete(id);   // NEW-5(ii) — never leave an LRU entry for a gone overlay
-    // Ref-count the shared source: a Duplicate/Paste (B461) copies the storageKey, so only drop the
-    // cloud object when no OTHER overlay still points at it (else we'd orphan the sibling's image).
-    const shared = o.storageKey && sheetOverlays.some((x) => x.id !== id && x.storageKey === o.storageKey);
-    if (o.storageKey && !shared) deleteOverlayObject(o.storageKey); // clean up the cloud copy (B72 polish)
-    // B748 — the DWG provenance object rides its own key; drop it too (ref-counted) so a delete doesn't orphan it in Storage.
-    const sharedDwg = o.sourceDwgKey && sheetOverlays.some((x) => x.id !== id && x.sourceDwgKey === o.sourceDwgKey);
-    if (o.sourceDwgKey && !sharedDwg) deleteOverlayObject(o.sourceDwgKey);
-    // B474 review (#23) — evict the cached IndexedDB raster too, ref-counted like storageKey (a Duplicate/Paste
-    // copies the key, so only drop the entry when no other overlay still points at it).
-    const sharedIdb = o.idbKey && sheetOverlays.some((x) => x.id !== id && x.idbKey === o.idbKey);
-    if (o.idbKey && !sharedIdb) idbDelete(o.idbKey);
+    /* ⛔ NEW-1 — THE REF-COUNT SPANS EVERY PLAN, NOT THIS ONE. `⧉ Duplicate plan` copies an overlay
+     * record wholesale, so a sibling plan can hold the SAME `storageKey` / `idbKey`; ref-counting
+     * against `sheetOverlays` (this plan's list) could not see it, and removing the picture from a
+     * duplicate DESTROYED the original's image in both tiers. That happened in production on
+     * 2026-08-13 — the bytes for the owner's Woods Road overlay are gone. `sharedAssetRefs` asks
+     * the question against the whole plan list, releases BOTH tiers together or neither, and
+     * refuses on any unknown answer (an orphaned object is recoverable; a deleted one is not).
+     * The DATABASE is the authority — `db/overlay_object_release_guard.sql` refuses the delete
+     * outright when a live plan still references the key, so a stale tab cannot orphan bytes. */
+    const assetRefs = collectAssetRefs(loadSitesList());
+    const { release, kept } = releasePlanForOverlay(assetRefs, o, siteId);
+    for (const r of release) {
+      if (r.tier === "storage") deleteOverlayObject(r.key); // cloud copy (B72 polish / B748 DWG provenance)
+      else idbDelete(r.key);                                // this device's cached raster (B474 review #23)
+    }
+    // LOUD-FAILURE: a refusal is reported, never silent — this is the line that says the bytes were KEPT.
+    if (kept.length)
+      reportClientEvent("overlay-asset-retained", "kept a source file another plan still references", {
+        siteId, overlayId: id, kept: kept.map((k) => ({ what: k.what, reason: k.reason, heldBy: k.heldBy })),
+      });
     setSheetOverlays((arr) => arr.filter((x) => x.id !== id));
     setDeletedIds((d) => (d.includes(id) ? d : [...d, id])); // B276: tombstone the deletion so a stale/cloud copy can't resurrect it on reload/merge
     setSelOverlay((s) => (s === id ? null : s));
@@ -14273,6 +14403,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const exportCtx = () => ({
     parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays,
     DEV_TYPES, devExtent, elCorners, f2p, view, size, origin,
+    hidden: hiddenGroups,   // B494050 — the export's fallback crop asks the same predicate the canvas does
     svgRef, stateRef, overlayRefs, geoMapRef,
     basemapOn, basemapSrc, overlays, layerStatus,
     PAL, f0,
@@ -14299,8 +14430,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Bounding box (feet) of the development — the placed elements, not bare parcels.
   const DEV_TYPES = ["building", "paving", "parking", "trailer", "pond", "road"];
   const devExtent = () => {
+    /* ⛔ B494050 — THE PRINT CROP. This seeds the print frame AND is handed to the export path as the
+       one source of truth for what the sheet crops to, so an extent over the whole model prints
+       blank paper around content the drawing is not showing. PDF-PARITY: what you see is what
+       prints, and that has to include how much paper it takes. */
     const pts = [];
-    els.forEach((e) => { if (!DEV_TYPES.includes(e.type)) return; e.points ? pts.push(...e.points) : pts.push(...elCorners(e)); });
+    visibleEls(hiddenGroups, els).forEach((e) => { if (!DEV_TYPES.includes(e.type)) return; e.points ? pts.push(...e.points) : pts.push(...elCorners(e)); });
     if (!pts.length) return null;
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     pts.forEach((p) => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
@@ -14873,7 +15008,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * the one-line form still collides we fall back to drawing that one line rather than hiding the
    * chip — a number the user asked for is never silently dropped, only shortened.
    */
-  const measureChips = measures.map((m, i) => {
+  /* ⛔ B494051 — the chips are OBSTACLES for the element-label collision pass as well as things that
+     are drawn. The render is already gated (a hidden measurement's chip is not painted), but an
+     unfiltered obstacle set makes a building's label yield around a chip that is not on screen. */
+  const measureChips = visibleMeasures(hiddenGroups, measures).map((m, i) => {
     const fpts = measPts(m);
     const mode = measMode(m);
     if (mode === "count" ? fpts.length < 1 : fpts.length < 2) return null;
@@ -17651,6 +17789,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (cloudActive && readOnly) return "readonly";
     // B671 — the per-element write engine feeds the SAME badge: a dropped element commit is
     // crash-severity (LOUD-FAILURE) → "error"; in-flight / retrying element commits → "saving".
+    /* ⛔ NEW-1 — `stale` IS THE LOUDEST STATE THERE IS, and it used to fall through to green.
+     * `failed` means a commit did not land and the engine is still trying; `stale` means it has
+     * GIVEN UP — no further commit is issued until `retryNow()` or a reload. That is strictly worse,
+     * and it was not in this switch at all, so the badge landed on the resting `"synced"` case and
+     * told the user their work was in the cloud while nothing was being written. Ahead of `failed`
+     * because it subsumes it. */
+    if (cloudActive && elemSync.state === "stale") return "error";
     if (cloudActive && elemSync.state === "failed") return "error";
     if (saveStatus === "saving" || (cloudActive && (elemSync.state === "syncing" || elemSync.state === "retrying"))) return "saving";
     if (cloudSaveFailed) return "error";
@@ -17716,7 +17861,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
                     <button style={{ ...iconBtn, color: showAerial ? PAL.ink : PAL.muted }} title={showAerial ? "Hide aerial" : "Show aerial"} onClick={() => setShowAerial((v) => !v)}>{showAerial ? <EyeIcon /> : <EyeOffIcon />}</button>
                     <button style={iconBtn} title={underlay.locked ? "Unlock (drag to reposition)" : "Lock (click-through)"} onClick={() => { pushHistory(); setUnderlay((u) => (u ? { ...u, locked: !u.locked } : u)); }}>{underlay.locked ? <LockIcon /> : <UnlockIcon />}</button>
-                    <button style={{ ...iconBtn, color: PAL.accent }} title="Remove" onClick={() => { pushHistory(); if (underlay?.idbKey) idbDelete(underlay.idbKey); if (underlay?.storageKey) deleteOverlayObject(underlay.storageKey); setUnderlay(null); setShowAerial(false); setUnderlayLost(false); }}><XIcon /></button>
+                    <button style={{ ...iconBtn, color: PAL.accent }} title="Remove" onClick={() => { pushHistory(); releaseUnderlayAssets(underlay); setUnderlay(null); setShowAerial(false); setUnderlayLost(false); }}><XIcon /></button>
                   </div>
                   {aerialSel && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 8 }}>
@@ -19162,7 +19307,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        forced band instead, so leaving it a member would draw it in BOTH places (the region below,
        its own strip above). `bandForceOf` is null for every road on every untouched plan, so this
        filter is an identity no-op there and the dissolve is byte-for-byte what it was. */
-    const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo && !bandForceOf(x));
+    /* ⛔ NEW-1 — HIDDEN ROADS LEAVE THE DISSOLVED NETWORK, AND THIS ONE FILTER IS THE WHOLE DEFECT.
+     *
+     * The owner unchecked Roads in the View panel, the banner said "6 groups hidden", and the roads
+     * were still on the drawing as grey ribbons. `drawEls` was filtered correctly — every road's own
+     * `[data-el-id]` node left the canvas — but a road's PAVEMENT is not drawn by the road. It is
+     * drawn ONCE per connected cluster, here, from a memo over `els` that no visibility filter ever
+     * reached. Hiding removed the hit target and the label and left the ink.
+     *
+     * ⚠ THIS IS NOT THE CULL, AND IT MUST NOT BECOME THE CULL. `roadNet` reads `els` rather than
+     * `drawEls` on purpose (see `elNeighbors` above): a road scrolled off screen still shapes the
+     * curb return of one that is on screen, so culling here would change the drawn geometry. HIDING
+     * is a different statement — a hidden road contributes nothing at all, including its junctions —
+     * so it is filtered, and the two filters stay distinct. */
+    const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo && !bandForceOf(x) && !elHidden(hiddenGroups, x));
     if (!roads.length) return { regions: [], stripes: new Map(), outlineCuts: new Map(), memberIds: new Set(), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
     const byId = new Map(roads.map((r) => [r.id, r]));
     const strip = new Map(roads.map((r) => [r.id, roadStripRing(r, settings, sharpFor(r), roundabouts.trims.get(r.id))]));
@@ -19176,6 +19334,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const pairs = [];
     const addExtra = (id, polys) => { const a = extra.get(id); if (a) for (const p of polys || []) if (p && p.length >= 3) a.push(p); };
     for (const tj of teeJunctions) {
+      /* A junction between two roads is only a junction while BOTH are on the drawing. `addExtra`
+       * already no-ops for a hidden side road (it has no `extra` entry), but `stripeCut` below is
+       * unconditional — leave it in and a visible road's curb stripe is interrupted by a road that
+       * is not there, which reads as a gap in the kerb for no visible reason. */
+      if (!byId.has(tj.sideId) || !byId.has(tj.throughId)) continue;
       addExtra(tj.sideId, tj.geom.wedges);
       pairs.push([tj.sideId, tj.throughId]);
       const G = byId.get(tj.throughId), n = tj.geom.nTee, [t1, t2] = tj.geom.throughTangents || [];
@@ -19192,7 +19355,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       addExtra(wj.ids[0], [wj.cover]);
       for (let i = 1; i < wj.ids.length; i++) pairs.push([wj.ids[0], wj.ids[i]]);
     }
-    const cluster = clusterIds(roads.map((r) => r.id), pairs);
+    /* A pair naming a road that is hidden is not a connection any more — drop it rather than let it
+     * chain two visible clusters together through something nobody can see. */
+    const cluster = clusterIds(roads.map((r) => r.id), pairs.filter(([a, b]) => byId.has(a) && byId.has(b)));
     const groups = new Map();
     for (const r of roads) {
       const k = cluster.get(r.id);
@@ -19233,7 +19398,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       outlineCuts.set(dj.targetId, [...(outlineCuts.get(dj.targetId) || []), ...cutters]);
     }
     return { regions, stripes, outlineCuts, memberIds: new Set(roads.map((r) => r.id)), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
-  }, [els, settings, teeJunctions, driveJunctions, weldJunctions, sharpFor, roadJunctionVerts, roundabouts]);
+  }, [els, settings, teeJunctions, driveJunctions, weldJunctions, sharpFor, roadJunctionVerts, roundabouts, hiddenGroups]);
   /* VIEW-INDEPENDENT-ONCE (NEW-2). The dissolved network's SVG path data and per-cluster style were
      built inside the render's `roadNet.regions.map(…)`, so a 60-move pan rebuilt them 187 times —
      561 `regionPathD` calls and 37 ms on the reference plan, the second-ranked violation the
@@ -19260,13 +19425,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const roadRadiusFlags = useMemo(() => {
     const out = [];
     for (const el of els || []) {
-      if (!isCenterlineRoad(el) || el.attachedTo) continue;
+      // NEW-1 — a hidden road raises no review flags: chrome about an object you cannot see is a
+      // marker floating on empty ground, and its corner dot is a live one-click Fix (B278577).
+      if (!isCenterlineRoad(el) || el.attachedTo || elHidden(hiddenGroups, el)) continue;
       const cls = roadClassOf(settings, el.roadClass);
       const conflicts = roadRadiusConflicts(el.pts, el.vtx, classMinRadius(cls), { defaultRadius: roadDefaultRadius(el, settings) });
       for (const c of conflicts) out.push({ id: el.id, label: cls && cls.label ? cls.label : "Road", ...c });
     }
     return out;
-  }, [els, settings]);
+  }, [els, settings, hiddenGroups]);
   // E2E/self-audit hook (same `window.__PLANYR_E2E` gate as above; never runs in production) — lets the
   // headless regression assert the DISSOLVED geometry (region count, holes, curb-return radii) directly
   // instead of inferring it from pixels.
@@ -19747,7 +19914,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // Conflict needs a reload, not a blind retry — so only offer "Retry now" for a plain
         // failed write; the conflict case gets its own explanation (the loud banner handles reload).
         onRetrySave={() => { retryCloudSave(); retryElems(); }}
-        saveDetail={elemSync.state === "failed" ? "Some changes haven't reached the cloud — Retry" : elemSync.pending > 0 && (elemSync.state === "syncing" || elemSync.state === "retrying") ? `Syncing ${elemSync.pending} change${elemSync.pending === 1 ? "" : "s"}…` : undefined}
+        saveDetail={elemSync.state === "stale" ? "This tab is out of date — reload to keep saving" :
+          elemSync.state === "failed" ? "Some changes haven't reached the cloud — Retry" : elemSync.pending > 0 && (elemSync.state === "syncing" || elemSync.state === "retrying") ? `Syncing ${elemSync.pending} change${elemSync.pending === 1 ? "" : "s"}…` : undefined}
         centerContent={<JurisdictionBadge badge={jurBadge} />}
         planSlot={plannerPlanCrumb}
         authControl={authControl}
@@ -25934,9 +26102,14 @@ function Section({ title, children, collapsed, accent }) {
     </div>
   );
 }
+/* NEW-1 — `data-field-group` marks a VALUE-ENTRY ROW as one unit to the keyboard latch
+ * (shared/keyboard/keyScope.js). The label, the input and its ▲▼ steppers are one thing to the
+ * user, and pressing any of them means "I am editing this number" — so Delete and Backspace
+ * belong to the number, not to the plan, until the user touches the drawing again. Two of the
+ * seven measured ways the owner's building could be destroyed were presses on those steppers. */
 function Field({ label, children, title }) {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 8 }}>
+    <div data-field-group="1" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 8 }}>
       <span style={{ fontSize: 12, color: "var(--text-secondary)", ...(title ? { cursor: "help" } : null) }} title={title}>{label}</span>{children}
     </div>
   );
@@ -25971,7 +26144,15 @@ function AlignIcon({ dir }) {
 // behind a visible <Field> label — e.g. the Custom width… entry inside the Road flyout.
 function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse, ariaLabel, allowClear = false }) {
   const [draft, setDraft] = useState(value == null ? "" : String(value));
+  /* The one-line note shown when a commit did not take the number as typed (rounded / clamped).
+   * Cleared by the next keystroke — it reports THIS commit, never a stale one. */
+  const [altered, setAltered] = useState(null);
+  const msgId = useId();
   const editing = useRef(false);
+  /* What we last handed to `onCommit`, so the effect below can notice the caller handing back
+   * something different. Cleared once compared — it is about ONE commit, never a standing state. */
+  const committedRef = useRef(null);
+  const fmtNum = (n) => String(Math.round(n * 1000) / 1000);
   useEffect(() => { if (!editing.current) setDraft(value == null ? "" : String(value)); }, [value]);
   // Clamp a candidate value the same way for a typed commit AND a stepper nudge: floor at min,
   // ceil at max (default 1e7 bounds the absurd). Reject NaN AND ±Infinity here — parseFloat("1e999")
@@ -25985,6 +26166,7 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse,
   };
   const commit = () => {
     editing.current = false;
+    setAltered(null);
     // B901 — an intentionally EMPTIED field is a CLEAR, not a typo: for a field whose caller
     // opted in (allowClear — every call site already null-coalesces its own onCommit), commit
     // null so the value actually clears. Without this branch an empty draft fell into the
@@ -26000,9 +26182,42 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse,
     }
     const v = clampNum(parseFloat(draft));
     if (v == null) { setDraft(value == null ? "" : String(value)); return; }
+    /* ⛔ B464051 / LOUD-FAILURE — IF WE CHANGED HIS NUMBER, SAY SO, IN THE MOMENT. Measured on
+     * the real inspector before this line existed: type `613.7` into Depth and the field commits
+     * 613.7, then re-renders showing **614** — because every dimension call site passes
+     * `value={Math.round(...)}`, so the round-trip silently rounds. Type `200000` and `clampNum`
+     * silently returns MAX_DIM (100,000). Neither said anything. Silently swapping a developer's
+     * dimension for a different one is exactly what LOUD-FAILURE exists to stop, and it is the
+     * honest half of the owner's "it's not letting me": sometimes it genuinely was not taking
+     * what he typed, it was taking something near it.
+     *
+     * Reported, never prevented — the clamp and the round are both correct behaviour. */
+    const typed = parseFloat(draft);
+    const shown = Math.abs(v - typed) > 1e-9 ? v : null;
+    setAltered(shown != null ? `Using ${fmtNum(v)}` : null);
     setDraft(String(v));
+    committedRef.current = v;
     if (v !== value) onCommit(v);
   };
+  /* ⛔ B464051, THE OTHER HALF — AND THE FIRST GUESS ABOUT IT WAS WRONG, which is why it is worth
+   * writing down. It looked like these fields silently ROUND: every dimension call site passes
+   * `value={Math.round(...)}`, so type `613.7` into Depth and 614 is what you see afterwards. The
+   * browser measurement says otherwise — the MODEL stores 613.7 exactly; nothing alters the number
+   * the user committed. What is rounded is the DISPLAY, so the figure on screen stops being the
+   * figure in the drawing, silently. That is a smaller problem than a swapped dimension and a real
+   * one all the same, and it deserves the true words rather than the dramatic ones.
+   *
+   * Detected by watching what the CALLER hands back: we know what we committed, so a `value` that
+   * returns different is the display disagreeing with the model, whatever caused it. No call site
+   * had to be changed and no rounding was removed — the rounding is deliberate. */
+  useEffect(() => {
+    if (committedRef.current == null || value == null) return;
+    const sent = committedRef.current;
+    committedRef.current = null;
+    if (Math.abs(value - sent) > 1e-9) setAltered(`Showing ${fmtNum(value)}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
   // B618 — stepper / arrow-key nudge (opt-in via `step`). Nudges about the COMMITTED value
   // (falls back to the current draft when the prop isn't yet a number) so repeated presses never
   // drift, rounds to kill float dust (0.1+0.2 → 0.30000000000000004), and commits immediately.
@@ -26012,24 +26227,114 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse,
     const v = clampNum(Math.round((base + d) * 1000) / 1000);
     if (v == null) return;
     editing.current = false;
+    setAltered(null); // a stepper's own clamp is self-evident; never leave a stale note behind it
     setDraft(String(v));
     if (v !== value) onCommit(v);
   };
   const coarseStep = coarse != null ? coarse : (step != null ? step * 5 : 0);
+
+  /* NEW-1 — IS WHAT IS TYPED ACTUALLY REJECTED? Until now nothing in this control could answer that,
+   * and that is half of the owner's report. He said the Depth box "wasn't letting" him enter a value
+   * and sent a frame of it outlined in red; driven every way it can be driven — select-all-and-type,
+   * clear-with-Backspace-and-type, type-a-partial-and-Tab, type-and-click-away — the field took the
+   * value every single time. What he was looking at was the FOCUS ring, which was the app's accent
+   * and sat ~14 ΔE00 from its own error colour. So the focus ring moved to blue (src/index.css), and
+   * this is the state --danger is now reserved for: a value the control genuinely will not take.
+   *
+   * ⛔ AN EMPTY FIELD IS NOT AN ERROR. Clearing it is the first half of retyping it, and flagging
+   * that instant would recreate the very "it's rejecting me" impression this exists to remove. An
+   * empty draft still reverts on blur exactly as before (or clears, for an `allowClear` caller). */
+  const parsed = draft.trim() === "" ? null : Number(draft.trim());
+  const invalidReason = (() => {
+    if (draft.trim() === "") return null;
+    if (!Number.isFinite(parsed)) return "Not a number";
+    if (min != null && parsed < min) return `Smallest allowed is ${min}`;
+    if (max != null && parsed > max) return `Largest allowed is ${max}`;
+    return null;
+  })();
+
+  /* The one message this control shows: what is WRONG with the value, or what we DID to it.
+   * They are mutually exclusive by construction — a rejected draft never commits, so it can never
+   * also have been rounded. */
+  const note = invalidReason || altered;
   const input = (
     <input style={style} value={draft} placeholder={placeholder} inputMode="decimal" aria-label={ariaLabel}
+      aria-invalid={invalidReason ? "true" : undefined}
+      /* ⛔ `aria-describedby`, not `aria-errormessage`: it is universally supported, and it also
+       * carries the non-error "Using 614" note, which is not an error message at all. */
+      aria-describedby={note ? msgId : undefined}
       onFocus={() => { editing.current = true; }}
-      onChange={(e) => setDraft(e.target.value)}
+      onChange={(e) => { setAltered(null); setDraft(e.target.value); }}
       onBlur={commit}
       onKeyDown={(e) => {
-        if (e.key === "Enter") e.currentTarget.blur();
-        else if (e.key === "Escape") { setDraft(value == null ? "" : String(value)); e.currentTarget.blur(); }
+        /* NEW-1 — ENTER COMMITS IN PLACE AND KEEPS THE CARET. It used to `blur()`, which is the
+         * root of the owner's data loss: focus landed on <body>, the building stayed selected, and
+         * his next Backspace deleted it and its eight bonded elements. The keyboard latch refuses
+         * that key now whatever happens here, but a field that ejects you on Enter is wrong on its
+         * own terms — every spreadsheet and CAD input in the world commits and stays put, and being
+         * silently thrown out of the box is half of "it's not letting me input the depth".
+         *
+         * The value is selected after the commit, so the next digits RETYPE it (you never have to
+         * clear it first) and the commit is visible: the number you get back is the one the app
+         * took, highlighted. */
+        if (e.key === "Enter" || e.key === "Escape") {
+          e.preventDefault();
+          if (e.key === "Enter") commit(); else setDraft(value == null ? "" : String(value));
+          /* Still focused, so we are still editing — `commit()` clears this flag for the blur
+           * path, and leaving it cleared would let an incoming `value` change overwrite what the
+           * user types next. */
+          editing.current = true;
+          const el = e.currentTarget;
+          requestAnimationFrame(() => { try { el.select(); } catch (_) {} });
+        }
         else if (step != null && e.key === "ArrowUp") { e.preventDefault(); nudge(e.shiftKey ? coarseStep : step); }
         else if (step != null && e.key === "ArrowDown") { e.preventDefault(); nudge(-(e.shiftKey ? coarseStep : step)); }
       }}
     />
   );
-  if (step == null) return input;
+  /* ⛔ COLOUR IS NEVER THE ONLY CUE — WCAG 1.4.1 (Use of Color), and it is not satisfied by a
+   * coloured border, nor by an icon on its own: the user has to be able to tell WHICH field is
+   * wrong and WHAT is wrong with it. Before this, Planyr had no invalid state whatsoever, so an
+   * unusable value was reported by nothing at all — an accessibility failure independent of the
+   * bug that surfaced it. Four signals now, and the colour is the last of them:
+   *   1  a short TEXT MESSAGE naming the problem
+   *   2  `aria-describedby` tying that message to the input, so a screen reader reads it
+   *   3  an icon beside the field (⚠ for a refusal, ✎ for "we adjusted it")
+   *   4  the border — heavier AND red, so it differs from focus in weight as well as hue
+   * The FOCUS ring is untouched and stays the brand accent: a bare ring with no message means you
+   * are simply typing, which is unambiguous once every real error carries words. */
+  const glyph = note ? (
+    <span data-testid={invalidReason ? "numinput-invalid" : "numinput-altered"} aria-hidden="true"
+      style={{ fontSize: 11, lineHeight: 1, color: invalidReason ? "var(--danger-text)" : "var(--text-secondary)", userSelect: "none" }}>
+      {invalidReason ? "⚠" : "✎"}
+    </span>
+  ) : null;
+
+  /* PANEL-BREVITY: ONE short line, and only while there is something to say — the default view of
+   * every panel that uses this control is byte-identical to before. */
+  const noteLine = note ? (
+    <span id={msgId} data-testid="numinput-note" role={invalidReason ? "alert" : "status"}
+      style={{ fontSize: 10.5, lineHeight: 1.25, textAlign: "right", maxWidth: 168,
+        color: invalidReason ? "var(--danger-text)" : "var(--text-secondary)" }}>
+      {glyph} {note}
+    </span>
+  ) : null;
+
+  /* ⛔ THE WRAPPER IS UNCONDITIONAL, AND THAT IS LOAD-BEARING. The first cut returned the bare row
+   * when there was nothing to say and a wrapped column when there was — so the moment a message
+   * appeared, React saw a different tree shape at that position, REMOUNTED the <input>, and the
+   * field lost focus mid-keystroke. Typing `-5` left `-` in the box and dropped the `5`: a control
+   * that genuinely stops accepting input the instant it has something to tell you, which is a
+   * crueller version of the very complaint this work started from. Caught by the browser harness,
+   * invisible to every unit test. Same family as MODULE-SCOPE-COMPONENTS: keep the tree stable and
+   * let the CONTENT change. */
+  const stack = (row) => (
+    <span data-field-group="1" style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: noteLine ? 3 : 0 }}>
+      {row}{noteLine}
+    </span>
+  );
+
+  if (step == null) return stack(input);
   // preventDefault on mousedown keeps the input focused so a click nudges rather than firing a
   // blur-commit on a half-typed draft first (same trick as RotationStepper's spinner).
   const spinBtn = {
@@ -26037,7 +26342,7 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse,
     lineHeight: 1, border: BORDER_1, borderRadius: 4,
     background: SURF_RAISED, color: "var(--text-secondary)", cursor: "pointer", fontFamily: "inherit",
   };
-  return (
+  return stack(
     <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
       {input}
       <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>

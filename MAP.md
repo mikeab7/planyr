@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-14 @ `f986796` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-14 @ `eecb0836` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_515 source files mapped._
+_522 source files mapped._
 
 ## infra
 
@@ -226,6 +226,8 @@ _515 source files mapped._
   - _exports_: `ANALYSIS_KEYS`, `auditRegistry`, `availabilityOf`, `availabilityProblems`, `DETENTION_KEYS`, `FIXTURE_REACH_CLASSES`, `fixtureCount`, `fixturePoints`, `fixtureReachClassFor`, `fixtureReachProblems`, `fixtureSpreadKm`, `GIS_SOURCES`, `gisSource`, `haversineKm`, `JURISDICTION_KEYS`, `looksNonProduction`, `NON_PRODUCTION_URL_PATTERNS`, `outFieldsFor`, `SOURCE_FIXTURE_REACH`, `SOURCE_FIXTURE_REACH_PENDING`, `SOURCE_STATE_SCOPE`, `sourceCoversState`, `statesFor`, `tierProblems`, `VALID_AVAILABILITY`, `VALID_TIERS`
 - **`src/shared/ids.js`** — Collision-resistant element-id minter: per-tab random letter salt + seedAbove counter so no two tabs mint a tombstoned id (B591)
   - _exports_: `createIdMinter`, `randomIdSalt`
+- **`src/shared/keyboard/keyScope.js`** — which surface owns the keyboard: the four scopes, and the three-valued last-touched latch that answers when focus has fallen to `<body>`
+  - _exports_: `FIELD_GROUP_ATTR`, `focusScope`, `PICKER_TAGS`, `SCOPE`, `scopeOwnsCanvas`, `SLIDER_TYPES`, `TEXT_ENTRY_TAGS`, `TOUCH`, `touchFactsOf`, `touchLatch`
 - **`src/shared/markup/geometry.js`** — Pure unit-agnostic point math for all markup surfaces: length, shoelace area, arc-midpoint, point-in-poly, clamped centroid, snap45, projToSeg, bbox
   - _exports_: `bboxOf`, `CALLOUT_CORNER_FRAC`, `calloutCornerRadius`, `centroidOf`, `dist`, `midOfPath`, `nearestRectPerimeterPoint`, `pathLength`, `pointInPoly`, `polyArea`, `projToSeg`, `rot2`, `snap45`
 - **`src/shared/markup/hitTest.js`** — Shared JS-picker hit-testing: pickMarkup click selection (nearest, smallest-interior-wins) and hitEditPath vertex/edge grab for the selected markup
@@ -446,7 +448,7 @@ _515 source files mapped._
 - **`src/workspaces/site-planner/lib/arrange.js`** — element/markup z-order "Arrange" (B820): `reorderByZ`/`arrangeFlags`/`ARRANGE_MODES` — pure z-based Bring-to-Front/Send-to-Back over a peer set (within a type-layer band for elements, the markup layer for markups)
   - _exports_: `ARRANGE_MODES`, `arrangeFlags`, `reorderByZ`
 - **`src/workspaces/site-planner/lib/assemblyDigest.js`** — B1341 stage 2: the GROUP REVISION of a bonded assembly, DERIVED from its live members' `id:rev` pairs (never stored, so it cannot drift). Twin of the `assembly_digest` SQL function.
-  - _exports_: `assemblyDigest`, `digestsByAssembly`, `memberToken`
+  - _exports_: `assemblyDigest`, `compareIds`, `digestsByAssembly`, `memberToken`
 - **`src/workspaces/site-planner/lib/assemblyIntegrity.js`** — the bonded-assembly invariant + tear detector: re-derives every `attachedTo` child from its host (via `normalizeBondedChildren`) and reports what moved, so a partial apply can reach neither the canvas nor the wire
   - _exports_: `ASSEMBLY_TEAR_TOL_FT`, `assemblyIntegrity`, `assemblyTears`, `orphanPayload`, `tearPayload`, `unhealablePayload`
 - **`src/workspaces/site-planner/lib/auth.js`** — Thin Supabase Auth wrappers: signUp/signIn/signOut/reset/updatePassword, getUser, onAuthChange with pinned redirect origin
@@ -490,7 +492,7 @@ _515 source files mapped._
 - **`src/workspaces/site-planner/lib/conflictToasts.js`** — the B673 conflict policy matrix as a pure mapping: elementSync event → toast spec (who gets told what, which action rides along)
   - _exports_: `toastForSyncEvent`
 - **`src/workspaces/site-planner/lib/contentVisibility.js`** — the View menu's content model: which GROUPS (elements by type, parcels, markups, measurements, callouts, the acreage-label master) are temporarily hidden. Pure predicates over a sparse hidden-map; never touches geometry, so no number moves
-  - _exports_: `anyHidden`, `EL_GROUPS`, `EL_KEY_PREFIX`, `EL_KEYS`, `elHidden`, `elKey`, `groupsFor`, `groupState`, `hiddenKeys`, `hiddenSummary`, `isHidden`, `KNOWN_KEYS`, `normalizeRetiredToggles`, `OTHER_GROUPS`, `parcelAcreageHidden`, `setManyVisible`, `setVisible`, `showAll`
+  - _exports_: `anyHidden`, `EL_GROUPS`, `EL_KEY_PREFIX`, `EL_KEYS`, `elHidden`, `elKey`, `groupsFor`, `groupState`, `hiddenKeys`, `hiddenSummary`, `isHidden`, `KNOWN_KEYS`, `normalizeRetiredToggles`, `OTHER_GROUPS`, `parcelAcreageHidden`, `setManyVisible`, `setVisible`, `showAll`, `visibleEls`, `visibleMeasures`, `visibleParcels`
 - **`src/workspaces/site-planner/lib/contours.js`** — Pure contour-line math (B704): 1-ft interval auto-pick, sentinel-embedded voids, d3-contour marching squares, grid-border + dilated-void strip passes, pixel-space simplify, index flags + sparse labels
   - _exports_: `buildContourIndex`, `composeContourPaint`, `contourLabelText`, `DOUBLE_STAMP_PX`, `hitContour`, `HOVER_LABEL_GAP_PX`, `HOVER_TOL_PX`, `hoverLabelPlacement`, `hoverLabelSize`, `joinSeams`, `LABEL_CAP`, `LABEL_MIN_SEP_CELLS`, `pickLabels`
 - **`src/workspaces/site-planner/lib/contourTrace.js`** — worker-only marching-squares contour tracer (the sole `d3-contour` consumer): border/void strips, tile-interior clip, deterministic label anchors
@@ -653,6 +655,8 @@ _515 source files mapped._
   - _exports_: `GROUP_CAS_KEY`, `groupCasEnabled`
 - **`src/workspaces/site-planner/lib/hcfcdWse.js`** — HCFCD MAAPnext model WSE sampler (B882, Harris County): registry-driven ImageServer getSamples for the 1% + 0.2% WSE rasters; no-op until the provisional endpoints are confirmed live. `sampleMaapnextWse`/`maapnextEndpoints`/`clearMaapnextCache`.
   - _exports_: `clearMaapnextCache`, `maapnextEndpoints`, `maapnextOutage`, `sampleMaapnextWse`
+- **`src/workspaces/site-planner/lib/hiddenContentReads.js`** — the declaration table for every read of the raw element/parcel/markup/measure/callout collections: which call sites MUST filter by visibility (pictures, merged surfaces, the print crop, click targets, snap magnets, extents) and which are deliberately correct unfiltered (counts, saves, undo, ledgers, regulatory inferences), each with its reason. Plus `visibleEls`/`visibleParcels`/`visibleMeasures` consumers.
+  - _exports_: `DECLARATIONS`, `RAW_COLLECTIONS`, `VERDICT`
 - **`src/workspaces/site-planner/lib/history.js`** — Pure undo/redo snapshot stack for the planner canvas: keyOf-based no-op dedup, explicit live-state compare, drop-on-abort drag transactions
   - _exports_: `createHistoryStack`
 - **`src/workspaces/site-planner/lib/hyetograph.js`** — NRCS Type III design-storm hyetograph (B904, CE roadmap #2 stage 1): dimensionless Gulf Coast 24-hr mass-curve lookup, scaled to a total design-storm depth + duration to produce a time-distributed rainfall series feeding the pond routing pass.
@@ -666,11 +670,13 @@ _515 source files mapped._
 - **`src/workspaces/site-planner/lib/jurisdiction.js`** — Registry-driven ArcGIS jurisdiction/road-authority identify (city/ETJ/county intersect + nearest-road maintainer) over the SWR cache with map-overlay styling
   - _exports_: `buildIdentifyParams`, `CITY_SHARE_MIN`, `CITY_SHARE_WHOLE`, `CITY_SOURCES`, `cityAreasFromFeatures`, `citySourcesForPoint`, `countyAtPoint`, `countySourcesForPoint`, `ETJ_SOURCES`, `etjCoverageFor`, `etjSourceCovers`, `etjSourcesForPoint`, `fitIdentifyParams`, `formatHighway`, `formatJurisdictionBadge`, `identifyCityShares`, `identifyJurisdiction`, `identifyRoadAuthority`, `identifySource`, `JURISDICTION_SOURCES`, `MAX_QUERY_URL`, `mergeCityAreas`, `normalizeFeature`, `parcelProbePoints`, `placeKey`, `polylineDistMeters`, `polylineLengthMeters`, `proxiedQueryUrl`, `ROAD_AUTHORITY_COLORS`, `ROAD_AUTHORITY_LEGEND`, `ROAD_MAINT_AGENCY`, `roadAuthority`, `roadAuthorityStyle`, `roadDisplayName`, `round6`, `samePlace`, `shareQueryRing`, `simplifyRing`, `VERTEX_LADDER`
 - **`src/workspaces/site-planner/lib/jurisdictionBadgeFit.js`** — How the header jurisdiction pill shortens when the row is tight: whole facts, governing one first (NAVIGATION WINS)
-  - _exports_: `abbreviateJurisdiction`, `jurisdictionSegments`
+  - _exports_: `abbreviateJurisdiction`, `governingIdentity`, `jurisdictionRungs`, `jurisdictionSegments`
 - **`src/workspaces/site-planner/lib/jurisdictionLabel.js`** — The ONE canonical jurisdiction label: the four shapes (in-city · in-city+ETJ · ETJ · unincorporated) plus the split/unknown states, and the three-level separator grammar that keeps a GOVERNING authority (`·`), its co-equal peers (`+`) and a merely-adjacent city (`—`) from ever sharing a mark. Once an ETJ is named "Unincorporated" is implied and not printed. Also `governingCityOf`, the structured accessor that replaced parsing the label to find the city whose floodplain rule applies.
   - _exports_: `formatJurisdictionLabel`, `governingCityOf`, `JURISDICTION_SHAPES`, `jurisdictionShapeOf`, `LIMIT_CLASS_NOUN`, `PEER_SEP`, `shareNote`, `SLOT_SEP`, `TOUCH_SEP`
 - **`src/workspaces/site-planner/lib/jurisdictionShare.js`** — A jurisdiction share measured as an AREA fraction on the real ring (clipper-lib booleans in a local metre frame), never by sampling vertices or points — vertex sampling read 70–85% on a site that is 99% inside. Honours interior rings: each polygon is even-odd differenced against its own holes FIRST, then the set is unioned non-zero, so duplicate parcel records cannot cancel. Also the honesty half: `distanceToBoundaryM` (segment-to-segment, both ways) and `shareConfidence`, which refuses to state a share when the geometry's tolerance is a material fraction of the answer, plus `southIsLargerY`, which reads the planner's y-sign from the projection instead of assuming it.
   - _exports_: `areaShare`, `boundaryLengthNearM`, `distanceToBoundaryM`, `esriPolygons`, `intersectionAreaSqM`, `metresPerDegree`, `normalizePolys`, `pointInPolygons`, `pointInRing`, `polygonAreaSqM`, `ringsAsPolygons`, `SHARE_MAX_UNCERTAINTY`, `shareConfidence`, `signedArea`, `southIsLargerY`, `SQM_PER_ACRE`, `toLocal`, `unionAreaSqM`
+- **`src/workspaces/site-planner/lib/keyContract.js`** — the planner's declared keyboard shortcuts + the scope verdict for each (swept against the real handler by test/keyContract.test.js)
+  - _exports_: `CONTROL_CONSUMES`, `focusScope`, `KEY_CONTRACT`, `keyScopeVerdict`, `REFUSAL`, `resolveKeyEntry`, `SCOPE`, `SCOPE_GUARD_HINT`, `shouldHintRefusal`
 - **`src/workspaces/site-planner/lib/kmzExport.js`** — Google Earth (.kmz) export (B684): pure, dependency-free CRC32 + hand-rolled STORE-only ZIP writer, KML builder (lon,lat order, ring closure/holes, per-layer styles, building extrude), and the site→layer feature mapping; reprojection is injected (the shared feetToLatLng), so it never drifts from the map render.
   - _exports_: `buildKml`, `buildKmz`, `crc32`, `elToRingFeet`, `KMZ_MIME`, `kmzFilename`, `siteToFeatures`, `xmlEscape`, `zipStore`
 - **`src/workspaces/site-planner/lib/labelFitLadder.js`** — NEW-1/NEW-2 the ONE ordered fit/fallback ladder for a map label that must sit inside a shape (inline → stacked → abbrev → outside-with-leader) plus the polygon INTERIOR measurer (largest inscribed rectangles, so fit is judged against real room, not a bounding box). Terminates in `outside`, never in a hide — a fit failure may relocate or shorten a label, never blank it.
@@ -739,6 +745,8 @@ _515 source files mapped._
   - _exports_: `flowlineSummary`, `flowlineTitle`, `ftypeLabel`, `NHD_FTYPE`, `NHD_INVENTORY_NOTE`
 - **`src/workspaces/site-planner/lib/numEditBox.js`** — where the inline numeric editor paints and at what size: in-place chip box, floating fallback, the not-bigger-than-its-spawn invariant, keyboard nudge
   - _exports_: `nudgeNumEditValue`, `NUMEDIT_FLOAT`, `numEditBox`, `numEditFitsSpawn`, `SETBACK_CHIP`, `setbackChipPlateW`, `setbackChipSpawn`
+- **`src/workspaces/site-planner/lib/operationEnvelope.js`** — WHO did a write and WHAT operation it was part of. Mints one `op_id` per user-visible action (not per row or per batch) and stamps it with `op_kind` from a CLOSED vocabulary, the per-tab `actor_session_id` and the account id. The session id is the load-bearing field — both of the owner's live sessions authenticate as the same account, so `updated_by` can never answer "was that my other tab?". Also reads rows back as grouped operations for a plain-English activity list, so a merge reads "merged 2 parcels into 1" and never as net row arithmetic, and decides undo ownership: your own operation undoes silently, another session's needs confirmation naming them, an un-enveloped legacy frame warns without blocking.
+  - _exports_: `createOperationTracker`, `describeOperation`, `envelopeAnswersWhoAndWhat`, `groupRowsIntoOperations`, `halfLandedComposites`, `isCompositeOpKind`, `isOpKind`, `makeEnvelope`, `mintOpId`, `OP_KIND_LIST`, `OP_KINDS`, `undoOwnership`
 - **`src/workspaces/site-planner/lib/outletStructure.js`** — Pond OUTLET STRUCTURE model + stage→discharge rating curve (NEW-A2): orifice / weir / restrictor / multistage discharge (with tailwater submergence), inverse orifice sizing, default-outlet proposal, validation. Pure hydraulics.
   - _exports_: `DEFAULT_ORIFICE_C`, `DEFAULT_WEIR_C`, `defaultOutletForPond`, `orificeAreaSf`, `OUTLET_KINDS`, `outletDischarge`, `outletLowestElev`, `outletProblems`, `sizeOrificeForRelease`, `sizeWeirForRelease`, `stageDischarge`
 - **`src/workspaces/site-planner/lib/overlayAlign.js`** — Pure overlay alignment math: image-point-to-world, scale-about-a-point, 2-point and least-squares Procrustes similarity transforms (scale+rotate+translate) with RMS residual
@@ -887,6 +895,8 @@ _515 source files mapped._
   - _exports_: `CHIP_MIN_EDGE_PX`, `CHIP_MIN_GAP_PX`, `CHIP_MIN_SEP_PX`, `CHIP_TURN_BREAK_DEG`, `chipRoleWords`, `chipRunOfEdge`, `setbackChipRuns`, `setbackChipsVisible`
 - **`src/workspaces/site-planner/lib/setbackRoles.js`** — the regulatory setback tier: auto-assigns Front / Side / Street side / Rear to every side from frontage geometry, honours the user's own assignment, and groups the boundary into the four ordinance rows
   - _exports_: `autoAssignRoles`, `hasRoleOverrides`, `isRole`, `resolveOverrides`, `resolveRoles`, `ROLE_LABEL`, `ROLE_SHORT`, `roleGroups`, `roleRuns`, `runOverridden`, `runRole`, `SETBACK_ROLES`, `setRunOverride`, `setRunRole`, `shiftOverridesOnDelete`, `shiftOverridesOnInsert`, `STREET_ABUT_FT`
+- **`src/workspaces/site-planner/lib/sharedAssetRefs.js`** — Who else is using this source file? The one cross-plan ref-count for shared overlay/underlay assets (cloud object + device raster), so a delete in one plan can never destroy bytes another plan still renders from.
+  - _exports_: `ASSET_TIERS`, `assetHolders`, `canReleaseAsset`, `collectAssetRefs`, `idbKeysHeldByOtherPlans`, `idbKeysReleasableOnPlanDelete`, `planAssetKeys`, `releasePlanForOverlay`
 - **`src/workspaces/site-planner/lib/sharing.js`** — Project team sharing: stamp/clear team_id on a group's sites, doc_reviews, and file_facts then re-pull the local cache
   - _exports_: `makeProjectPrivate`, `setPlanLock`, `shareProject`
 - **`src/workspaces/site-planner/lib/sheetFurniture.js`** — Map sheet furniture: graphic scale bar and two-tone north arrow, output-unit sized with no-occlude corner placement, screen + export
@@ -907,6 +917,8 @@ _515 source files mapped._
   - _exports_: `buildSdaRequest`, `buildSoilQuery`, `parseSoilResponse`, `resolveSoils`, `SDA_ENDPOINT`, `SDA_PROXY_PATH`
 - **`src/workspaces/site-planner/lib/sourceHealth.js`** — Per-source circuit breaker for county parcel servers: track consecutive failures, open/cooldown/half-open, filter healthy candidates, and decide the honest statewide-backup badge
   - _exports_: `filterHealthyCandidates`, `isSourceOpen`, `isStatewideBackup`, `recordSourceResult`, `resetSourceHealth`, `SOURCE_COOLDOWN_MS`, `SOURCE_FAIL_THRESHOLD`, `sourceCooldownMs`
+- **`src/workspaces/site-planner/lib/splitIntegrity.js`** — What a parcel split must conserve, measured across the parcels that are ACTIVE **and not deleted** — reading either column alone silently passes (`active` alone balances a piece that has vanished; `!deleted` alone double-counts a superseded parent). Three checks: area conservation, union-outline equality against the parent (the owner's own argument for dropping the superseded parent — the children's union reproduces its outline, so it adds nothing but a duplicate boundary; it also catches a cut that balances area while leaving a gap), and whether a split's own emitted pieces survived its operation window. Names no culprit for a piece that did not — the rows cannot say.
+  - _exports_: `AREA_TOLERANCE_SQFT`, `auditSplit`, `isLiveActive`, `liveActive`, `OUTLINE_TOLERANCE_SQFT`, `overlappingPairs`, `ringAreaAcres`, `ringAreaSqft`, `SPLIT_SURVIVAL_WINDOW_MS`, `splitConservation`, `splitOutputsSurvived`, `SQFT_PER_ACRE`, `unionOutlineMatches`
 - **`src/workspaces/site-planner/lib/stageStorageDischarge.js`** — Stage-storage-discharge curve (NEW-A3): pairs pondGeom storage (volumeBetween) with the outlet rating curve over the basin's stage range; interpolation helpers feed the reservoir routing. Anchored ponds only. Pure.
   - _exports_: `buildStageStorageDischarge`, `dischargeAtElev`, `dischargeAtStorage`, `elevAtStorage`, `storageAtElev`
 - **`src/workspaces/site-planner/lib/standardsApply.js`** — Standards "Apply now" (NEW-3): push a standard onto existing parcels (stamped → write) or existing elements (render-resolved → clear the per-element override), plus the impact counts the chip shows.
@@ -1011,6 +1023,8 @@ _515 source files mapped._
   - _exports_: `factsRowToPatch`, `mergeFactsIntoReviews`, `toFactsRow`
 - **`src/workspaces/doc-review/lib/lastDoc.js`** — Per-PROJECT last-document map for Review resume ({projectId: {id,mode}}) + legacy-global fallback and resolveResume boot-candidate ordering
   - _exports_: `readLastDoc`, `readLastDocMap`, `readLegacyPointers`, `resolveResume`, `resumeAllowedForRoute`, `writeLastDoc`
+- **`src/workspaces/doc-review/lib/layerVisibilityReads.js`** — the Doc Review hidden-content verdicts: which PDF render paths MUST honour the optional-content (layer) toggle and which are correct without it, plus which markup reads are page-scoped and which are correctly whole-document. Records both answers with reasons (B503184).
+  - _exports_: `MARKUP_PAGE_SCOPING`, `RENDER_PATHS`, `VERDICT`
 - **`src/workspaces/doc-review/lib/localRead.js`** — Tier-1 free local title-block read: extract every page text (OCR scanned pages), classify per-page, pick majority discipline, emit multi-discipline filing decision
   - _exports_: `localTitleBlockRead`
 - **`src/workspaces/doc-review/lib/matchLineRefine.js`** — Stitcher raster match-line refinement: fit true seam line in pixels, remap neighbor placement onto anchor line and slide to connect crossing linework
