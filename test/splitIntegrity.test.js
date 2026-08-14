@@ -23,6 +23,7 @@ import { describe, it, expect } from "vitest";
 import {
   ringAreaSqft, ringAreaAcres, SQFT_PER_ACRE, isLiveActive, liveActive,
   splitConservation, overlappingPairs, splitOutputsSurvived, auditSplit,
+  lineageAudit, ancestorChain, liveExisting, isActive, parentCycles,
   AREA_TOLERANCE_SQFT, SPLIT_SURVIVAL_WINDOW_MS,
 } from "../src/workspaces/site-planner/lib/splitIntegrity.js";
 import { splitPolygonByCut } from "../src/workspaces/site-planner/lib/polygonSplit.js";
@@ -288,5 +289,141 @@ describe("NEW-9 · auditSplit ties the three together", () => {
     expect(bad.conservation.ok).toBe(false);
     expect(bad.outline.ok).toBe(false);
     expect(bad.survival.ok).toBe(false);
+  });
+});
+
+/* ══ LINEAGE INTEGRITY (B540768) — THE SECOND ORIENTATION ══════════════════════════════════════
+ *
+ * ⛔ THE CENTRAL CASE HERE IS A REFUTATION, AND IT IS ASSERTED SO IT CANNOT BE UNDONE QUIETLY.
+ * The assertion requested was *"a split's children must not ALL be inactive"*. RICHEY / Concept A
+ * (`smrdl6frtt6r`) is exactly that shape — parent ON, both children off — and it is CORRECT data
+ * produced by B651's mutual-exclusion guard in one user action. Shipping the rule as requested
+ * would have reported a working feature as a defect on the owner's live plan.
+ *
+ * The real invariant is EXACTLY ONE ACTIVE MEMBER PER ANCESTOR CHAIN, asserted in both directions.
+ * Every fixture below is the real production shape, measured 2026-08-13.
+ */
+describe("B540768 · lineage integrity — exactly one generation counts", () => {
+  const sq = (x0, y0, x1, y1) => [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }];
+  const P = (id, extra = {}) => ({ id, points: sq(0, 0, 100, 100), ...extra });
+
+  /* RICHEY / Concept A, verbatim: 7.874 ac parent live, 6.606 + 1.268 children switched off. */
+  const RICHEY = [
+    P("psmrdl6frtt6r_2", { active: true }),
+    P("e666fqvqmq", { active: false, parentId: "psmrdl6frtt6r_2" }),
+    P("e667fqvqmq", { active: false, parentId: "psmrdl6frtt6r_2" }),
+  ];
+
+  it("⛔ RICHEY IS NOT A DEFECT — parent on with every child off is a legitimate, deliberate state", () => {
+    const a = lineageAudit(RICHEY);
+    expect(a.ok).toBe(true);
+    expect(a.doubleCounted).toEqual([]);
+    expect(a.vanished).toEqual([]);
+    expect(a.messages).toEqual([]);
+  });
+
+  it("…and the rule as originally requested would have failed it — pinned so it is not re-introduced", () => {
+    // The refuted rule, replayed verbatim: "a split's children must not ALL be inactive".
+    const kids = RICHEY.filter((p) => p.parentId);
+    expect(kids.every((k) => k.active === false)).toBe(true);   // it WOULD fire…
+    expect(lineageAudit(RICHEY).ok).toBe(true);                 // …and the shipped rule does not.
+  });
+
+  it("⛔ THE DEFECT THAT COSTS A NUMBER: an ancestor and a descendant both active", () => {
+    const a = lineageAudit([
+      P("parent", { active: true }),
+      P("kid", { active: true, parentId: "parent" }),
+    ]);
+    expect(a.ok).toBe(false);
+    expect(a.doubleCounted).toEqual([{ ancestor: "parent", descendant: "kid" }]);
+    expect(a.messages[0]).toMatch(/counted twice/);
+  });
+
+  it("catches a double count across a GRANDPARENT, not just the immediate parent", () => {
+    const a = lineageAudit([
+      P("g", { active: true }),
+      P("p", { active: false, parentId: "g" }),
+      P("c", { active: true, parentId: "p" }),
+    ]);
+    expect(a.doubleCounted).toEqual([{ ancestor: "g", descendant: "c" }]);
+  });
+
+  it("⛔ THE OPPOSITE DIRECTION: a split lineage with NO active member is vanished land", () => {
+    const a = lineageAudit([
+      P("parent", { active: false }),
+      P("kid", { active: false, parentId: "parent" }),
+    ]);
+    expect(a.ok).toBe(false);
+    expect(a.vanished).toHaveLength(1);
+    expect(a.vanished[0].members).toEqual(["parent", "kid"]);
+    expect(a.messages[0]).toMatch(/counts nowhere/);
+  });
+
+  it("a lone inactive parcel with no lineage is NOT vanished land — it is a deliberate exclusion", () => {
+    // Sixteen of the owner's nineteen inactive parcels are exactly this.
+    expect(lineageAudit([P("solo", { active: false })]).ok).toBe(true);
+  });
+
+  /* Bain / Concept A - Quiddity DIA: a TWO-LEVEL chain, which a parent-keyed grouping misreads as
+   * two lineages — one of which then looks like it has no active member at all. */
+  const BAIN = [
+    P("e1454855gyzzln", { active: false }),
+    P("e1455071mkspvo", { active: false, parentId: "e1454855gyzzln" }),
+    P("e1455075mkspvo", { active: true, parentId: "e1455071mkspvo" }),
+  ];
+
+  it("⛔ a two-level chain is ONE lineage — the grouping mistake that manufactures a false finding", () => {
+    const a = lineageAudit(BAIN);
+    expect(a.ok).toBe(true);
+    expect(a.vanished).toEqual([]);                              // NOT two lineages, one of them empty
+    expect(ancestorChain(BAIN, "e1455075mkspvo").map((p) => p.id))
+      .toEqual(["e1455071mkspvo", "e1454855gyzzln"]);            // the full chain, nearest first
+  });
+
+  it("⛔ THE COUNTING TRAP: `supersededParents` requires a LIVE DESCENDANT, never active:false alone", () => {
+    const set = [...BAIN, P("excluded", { active: false })];     // a deliberate exclusion beside them
+    const ids = lineageAudit(set).supersededParents.map((s) => s.id);
+    expect(ids).toEqual(["e1454855gyzzln", "e1455071mkspvo"]);
+    expect(ids).not.toContain("excluded");                       // …which a naive sweep would delete
+  });
+
+  it("a superseded parent is a LEFTOVER, not a defect — it must not fail the audit", () => {
+    expect(lineageAudit(BAIN).ok).toBe(true);
+    expect(lineageAudit(BAIN).supersededParents).toHaveLength(2);
+  });
+
+  it("4050 CR 50 JOHNSTOWN — one piece switched off is the owner's business, not a fault", () => {
+    const a = lineageAudit([
+      P("psmsdmqosh4sx_0", { active: false }),
+      P("e7416custbd", { active: true, parentId: "psmsdmqosh4sx_0" }),
+      P("e7417custbd", { active: false, parentId: "psmsdmqosh4sx_0" }),
+    ]);
+    expect(a.ok).toBe(true);
+    expect(a.supersededParents.map((s) => s.id)).toEqual(["psmsdmqosh4sx_0"]);
+  });
+
+  it("a DELETED ancestor ends the chain rather than dangling", () => {
+    const a = lineageAudit([
+      P("gone", { active: true, deleted_at: "2026-01-01T00:00:00Z" }),
+      P("kid", { active: true, parentId: "gone" }),
+    ]);
+    expect(a.ok).toBe(true);                       // no double count: the ancestor is not there
+    expect(ancestorChain([{ id: "kid", parentId: "gone" }], "kid")).toEqual([]);
+  });
+
+  it("⛔ a parentId cycle is REPORTED, never walked — a hung planner is worse than a finding", () => {
+    const a = lineageAudit([
+      P("a", { active: true, parentId: "b" }),
+      P("b", { active: true, parentId: "a" }),
+    ]);
+    expect(a.cycles.length).toBeGreaterThan(0);
+    expect(a.ok).toBe(false);
+    expect(a.messages.some((m) => /points back at itself/.test(m))).toBe(true);
+  });
+
+  it("an empty or junk plan audits clean rather than throwing", () => {
+    for (const input of [[], null, undefined, [null, { id: "x" }]]) {
+      expect(lineageAudit(input).ok).toBe(true);
+    }
   });
 });

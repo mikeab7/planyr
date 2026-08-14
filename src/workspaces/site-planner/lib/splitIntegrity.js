@@ -208,6 +208,155 @@ export function auditSplit({ parentRing, resulting = [], emittedIds = [], rows =
   };
 }
 
+/* ══ LINEAGE INTEGRITY (B540768) — THE SECOND ORIENTATION, AND THE ONE THE OWNER ASKED FOR ═════
+ *
+ * The audit above measures ONE split at the moment it happens. This measures a whole plan's split
+ * LINEAGE at rest, and it exists because an account-wide sweep found a case the first orientation
+ * is blind to.
+ *
+ * ⛔ THE ASSERTION AS IT WAS REQUESTED IS WRONG, AND THIS IS THE RECORD OF WHY — DO NOT "RESTORE"
+ * IT. The request was: *"a parent with live children must NOT be active, and a split's children
+ * must not ALL be inactive. Assert both directions."* The second half fires on CORRECT data.
+ *
+ * The case that refutes it — RICHEY / Concept A, site `smrdl6frtt6r`, and it was read as a
+ * geometrically perfect split with INVERTED flags:
+ *
+ *     psmrdl6frtt6r_2  active=TRUE   7.874 ac   (the parent, still live)
+ *     e666fqvqmq       active=false  6.606 ac   (child, switched off)
+ *     e667fqvqmq       active=false  1.268 ac   (child, switched off)
+ *
+ * 6.606 + 1.268 = 7.874, residual −0.0002 ac, all three rows written at ONE identical microsecond
+ * (2026-07-13 15:48:35.91822+00). That is not an inversion and not an abandoned split: it is
+ * `SitePlanner.toggleParcelActive` — B651's mutual-exclusion guard — doing precisely its job. Turn
+ * a parcel back ON and the guard deactivates its ancestors AND descendants in the SAME
+ * `setParcels` call, which is why one action produces one flush and three rows sharing a
+ * microsecond. The parent carries an EXPLICIT `active:true`, and the only two writers of that
+ * value in the tree are that toggle and a split's own children — never a split's parent, which is
+ * written `active:false`. So the rows say which path wrote them.
+ *
+ * ⛔ AND THE STATED RISK IS REFUTED BY THE SAME GUARD: *"the moment anyone toggles those children
+ * on, RICHEY double-counts by 7.874 ac."* It cannot. Turning a child ON runs `lineageConflicts`
+ * and switches the parent OFF in the same update. Measured across the owner's whole account:
+ * ZERO lineages anywhere have an active ancestor and an active descendant.
+ *
+ * ⛔ SO THE INVARIANT IS NOT ABOUT PARENTS OR CHILDREN — IT IS ABOUT GENERATIONS. Along any
+ * ancestor chain, EXACTLY ONE member may be active:
+ *   MORE than one — an ancestor and a descendant both live — is a DOUBLE COUNT. The land under
+ *     the descendant is counted twice, and this is the failure that actually costs a number.
+ *   ZERO — no member of a split lineage active — is VANISHED LAND: the plan is silently missing
+ *     ground it holds geometry for.
+ * Both directions, asserted over the quantity that decides an acreage. Which member is active is
+ * the owner's business and is NOT a defect in either direction: parent-on/children-off (RICHEY)
+ * and parent-off/children-on (an ordinary split) are both legitimate, deliberate states.
+ *
+ * ⛔ AND THE COUNTING TRAP, which would have been destructive: `active:false` ALONE does not mean
+ * "superseded split parent". Nineteen parcels across eight plans carry `active:false`; only THREE
+ * of them have live descendants. The other sixteen are parcels deliberately excluded from the
+ * active set — the same flag, the opposite meaning — on plans in daily use. `supersededParents`
+ * is therefore defined as active:false AND at least one LIVE descendant, and nothing else may be
+ * used to drive a cleanup.
+ *
+ * Cycle-safe by construction (a chain walk that revisits an id stops), because a `parentId` cycle
+ * must degrade to a finding rather than hang the planner.
+ */
+
+/* Live parcels indexed by id. A parentId naming no live parcel simply ends the chain — the same
+ * rule `childrenByParent` already applies, so nesting stops rather than dangles. */
+const liveIndex = (parcels) => new Map(liveActive0(parcels).map((p) => [p.id, p]));
+
+/* ⛔ NOT `liveActive`. This tier reasons about parcels that EXIST (not soft-deleted) regardless of
+ * their active flag — the flag is the thing being audited, so filtering on it first would hide
+ * every case. Deletion is the only exclusion. */
+export const liveExisting = (parcels) => (parcels || []).filter((p) => p && !p.deletedAt && !p.deleted_at);
+const liveActive0 = liveExisting;
+export const isActive = (p) => !!(p && p.active !== false);
+
+/* The ancestor chain of a parcel, nearest first, over parcels that still exist. */
+export function ancestorChain(parcels, id, index = null) {
+  const byId = index || liveIndex(parcels);
+  const out = [];
+  const seen = new Set([id]);
+  let cur = byId.get(id);
+  while (cur && cur.parentId && !seen.has(cur.parentId)) {
+    const next = byId.get(cur.parentId);
+    if (!next) break;
+    seen.add(next.id);
+    out.push(next);
+    cur = next;
+  }
+  return out;
+}
+
+/* A `parentId` cycle — never seen in production, reported rather than trusted. */
+export function parentCycles(parcels) {
+  const byId = liveIndex(parcels);
+  const out = [];
+  for (const p of byId.values()) {
+    const seen = new Set([p.id]);
+    let cur = p;
+    while (cur && cur.parentId) {
+      if (seen.has(cur.parentId)) { out.push({ id: p.id, at: cur.parentId }); break; }
+      seen.add(cur.parentId);
+      cur = byId.get(cur.parentId);
+    }
+  }
+  return out;
+}
+
+export function lineageAudit(parcels) {
+  const existing = liveExisting(parcels);
+  const byId = liveIndex(existing);
+  const hasDescendant = new Set();
+  for (const p of existing) for (const a of ancestorChain(existing, p.id, byId)) hasDescendant.add(a.id);
+
+  /* ⛔ THE DEFECT THAT COSTS A NUMBER: an ancestor and a descendant both active. */
+  const doubleCounted = [];
+  for (const p of existing) {
+    if (!isActive(p)) continue;
+    for (const a of ancestorChain(existing, p.id, byId)) {
+      if (isActive(a)) doubleCounted.push({ ancestor: a.id, descendant: p.id });
+    }
+  }
+
+  /* THE OPPOSITE DEFECT: a lineage with no active member at all — geometry held, land not counted.
+   * Measured per maximal TREE (a root plus every descendant), so a two-level chain is one lineage
+   * and not two — the mistake a parent-keyed grouping makes. */
+  const rootOf = (p) => { const c = ancestorChain(existing, p.id, byId); return c.length ? c[c.length - 1].id : p.id; };
+  const trees = new Map();
+  for (const p of existing) {
+    const r = rootOf(p);
+    if (!trees.has(r)) trees.set(r, []);
+    trees.get(r).push(p);
+  }
+  const vanished = [];
+  for (const [root, members] of trees) {
+    if (members.length < 2) continue;                 // not a split lineage at all
+    if (members.some(isActive)) continue;
+    vanished.push({ root, members: members.map((m) => m.id), acres: members.reduce((s, m) => s + ringAreaAcres(m.points || m.pts), 0) });
+  }
+
+  /* ⛔ THE CLEANUP PREDICATE, AND THE ONLY ONE THAT MAY DRIVE A REMOVAL. Not a defect — a
+   * superseded parent counts nowhere and breaks nothing. It is the legacy leftover B472049 stops
+   * NEW splits from creating. `active:false` alone would take sixteen deliberate exclusions with it. */
+  const supersededParents = existing
+    .filter((p) => !isActive(p) && hasDescendant.has(p.id))
+    .map((p) => ({ id: p.id, acres: ringAreaAcres(p.points || p.pts) }));
+
+  const cycles = parentCycles(existing);
+  return {
+    ok: doubleCounted.length === 0 && vanished.length === 0 && cycles.length === 0,
+    doubleCounted,
+    vanished,
+    supersededParents,
+    cycles,
+    messages: [
+      ...doubleCounted.map((d) => `Double-counted land: ${d.ancestor} and its split descendant ${d.descendant} are both active, so the ground under ${d.descendant} is counted twice.`),
+      ...vanished.map((v) => `Vanished land: the split lineage under ${v.root} has ${v.members.length} parcels and none is active, so ${v.acres.toFixed(3)} ac of drawn ground counts nowhere.`),
+      ...cycles.map((c) => `A parcel's split lineage points back at itself (${c.id} → ${c.at}).`),
+    ],
+  };
+}
+
 /* ── THE OWNER'S OWN ARGUMENT, TURNED INTO THE ASSERTION ──────────────────────────────────────
  *
  * Asked whether a completed split should still draw the superseded parent, he answered:
