@@ -82,7 +82,10 @@ const WAS = {
  * first width where the centre zone's cap actually squeezes the pill — the worst case of the band
  * the owner asked about. */
 const NARROWEST = 761;
-const WIDTHS = [1440, 1280, 1100, 980, 860, NARROWEST];
+/* 1040 and 1000 are B371362's band — where the centred slot's symmetric bound falls below what the
+ * longest label needs while the row still has room. They are in the list because that is the band
+ * where the header and the pill were each behaving correctly and the ANSWER was still wrong. */
+const WIDTHS = [1440, 1280, 1100, 1040, 1000, 980, 860, NARROWEST];
 const THEMES = ["light", "dark"];
 
 // ---- WCAG contrast, from the rendered computed colours (the repo's own AA floor: 4.5 for body) ---
@@ -167,11 +170,24 @@ try {
       const zcs = zone ? getComputedStyle(zone) : null;
       const zpad = zcs ? (parseFloat(zcs.paddingLeft) || 0) + (parseFloat(zcs.paddingRight) || 0) : 0;
       const grantedW = zone ? zone.clientWidth - zpad : 0;
+      /* ⛔ B371362 — what the HEADER decided, and what the pill told it that it needs. A centred slot
+       * the content cannot use is not a centred chip; it is an empty space where a chip used to be. */
+      const centerMode = zone ? zone.getAttribute("data-center-mode") : null;
+      const zoneCap = zcs && /px$/.test(zcs.maxWidth) ? parseFloat(zcs.maxWidth) : null;
+      const declaredMinFit = Number(pill.getAttribute("data-center-min-fit")) || null;
+      /* ⛔ AND THE RULE THE CENTRING WORK EXISTS TO KEEP (B371361): the pill may never reach the plan
+       * switcher. Read as real geometry — the chip's box against the crumb's — not as a style. */
+      const crumb = document.querySelector('[data-testid="plan-crumb"]');
+      const a = pill.getBoundingClientRect();
+      const overlapPx = crumb
+        ? Math.max(0, Math.min(a.right, crumb.getBoundingClientRect().right) - Math.max(a.left, crumb.getBoundingClientRect().left))
+        : 0;
       // The pill's non-text chrome: pin, gaps, padding, border, the ⚑. With the text empty the pill
       // IS its chrome, so a blank pill measures it exactly.
       const chromeW = pill.offsetWidth - (textEl ? textEl.offsetWidth : 0);
       return {
-        rungs, shortestRungW, grantedW, chromeW, shown, clipped, abbreviated: !!(textEl && textEl.textContent !== full),
+        rungs, shortestRungW, grantedW, chromeW, shown, clipped,
+        centerMode, zoneCap, declaredMinFit, overlapPx, abbreviated: !!(textEl && textEl.textContent !== full),
         shownScrollW: textEl ? textEl.scrollWidth : 0, shownClientW: textEl ? textEl.clientWidth : 0,
         preFixVisible,
         leadW: measure(lead), wasW: measure(was), nowW: measure(full), lead,
@@ -250,6 +266,23 @@ try {
           fail(`${at}: the pill went BLANK with ${m.grantedW}px granted — its shortest true form needs only ${needShortest}px`);
         if (m.shown === "") console.log(`   ⓘ ${at}: pin only — granted ${m.grantedW}px, shortest true form needs ${needShortest}px (nothing true fits)`);
         if (m.abbreviated) console.log(`   ⓘ ${at}: shortened to "${m.shown || "(pin only)"}" — whole facts dropped, full string in the tooltip`);
+
+        /* ⛔ 9b — B371362: THE HEADER MAY NOT OFFER A CENTRED SLOT THIS CONTENT CANNOT USE. Neither
+         * side was malfunctioning in that band — the symmetric bound was right and the pill's
+         * fallback to pin-only was right — but the verdict BETWEEN them was decided against a
+         * constant (120 px, the width of the word "Unincorporated") while the content's own minimum
+         * is a variable (199 px for Goose Creek). The content now declares it; this asserts the
+         * header honours it. Measured pre-fix: at 1000 px, offered 136, needed 199, pill blank —
+         * while at 980 px the in-flow `tight` layout showed the WHOLE label. */
+        if (m.centerMode === "centered" && m.declaredMinFit && m.zoneCap != null && m.zoneCap + 0.5 < m.declaredMinFit)
+          fail(`${at}: header stayed CENTRED offering ${m.zoneCap.toFixed(0)}px while the pill declared it needs ${m.declaredMinFit}px — a slot the content cannot use`);
+
+        /* ⛔ 9c — AND THE RULE THAT CENTRING WORK EXISTS TO KEEP, NEVER TRADED AWAY FOR THIS ONE
+         * (B371361): NAVIGATION WINS. The owner could not open his plan switcher because the pill ran
+         * over it. Asserted as geometry at every width and both themes — if a fix for the sliver ever
+         * buys its room back from the crumb, this goes red in the same run. */
+        if (m.overlapPx > 0.5)
+          fail(`${at}: the pill OVERLAPS the plan switcher by ${m.overlapPx.toFixed(1)}px — B371361's defect is back`);
 
         /* 10 — ⛔ AND WHATEVER WAS TRIMMED IS STILL REACHABLE. Silently unreachable text is the
          * defect; a deliberate short form with the whole thing one hover away is not. */

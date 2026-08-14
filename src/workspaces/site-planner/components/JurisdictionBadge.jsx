@@ -81,10 +81,27 @@ export default function JurisdictionBadge({ badge }) {
       const avail = Math.max(0, granted - pad);
       // The pill's chrome — pin, gaps, padding, border, the ⚑ — is whatever it is beyond its text.
       const chrome = pill.offsetWidth - span.offsetWidth;
-      const widths = Array.from(pill.querySelectorAll("[data-jurisdiction-measure]")).map((g) => g.offsetWidth);
+      const ghosts = Array.from(pill.querySelectorAll("[data-jurisdiction-measure]"));
+      const widths = ghosts.map((g) => g.offsetWidth);
       let pick = Math.max(0, widths.length - 1);
       for (let i = 0; i < widths.length; i++) if (chrome + widths[i] <= avail + 0.5) { pick = i; break; }
       setRung((prev) => (prev === pick ? prev : pick));   // B1189 — guard the DISPATCH, always
+
+      /* ⛔ B371362 — DECLARE THE LEAST WIDTH AT WHICH THIS PILL CAN STILL SAY SOMETHING TRUE, so the
+       * header can decide whether a CENTRED slot is worth having for THIS content rather than for a
+       * constant. `AppHeader`'s threshold was 120 px — the width of the word "Unincorporated" — while
+       * the owner's Goose Creek label needs 199 for its shortest true form, so at 1000 px the header
+       * ruled a 136 px centred slot worthwhile and handed it a slot it could not use. The pill then
+       * correctly fell to pin-only (B367298) while, one band lower, the in-flow `tight` layout showed
+       * the WHOLE label. This is the number that closes that gap.
+       *
+       * It is a function of the TEXT, never of the width granted, so it cannot feed back on the
+       * layout that reads it. Written to the DOM rather than lifted through React state because the
+       * consumer is an ancestor in another workspace's module — one attribute, no new prop chain. */
+      const trueRungs = ghosts.map((g, i) => (g.textContent ? widths[i] : null)).filter((w) => w != null);
+      const minFit = trueRungs.length ? Math.ceil(Math.min(...trueRungs) + chrome) : 0;
+      if (minFit > 0) pill.setAttribute("data-center-min-fit", String(minFit));
+      else pill.removeAttribute("data-center-min-fit");
     };
     measure();
     if (typeof ResizeObserver !== "function") return undefined;
