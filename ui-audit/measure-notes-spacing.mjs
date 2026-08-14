@@ -150,5 +150,59 @@ for (const [name, r] of [["a WHOLE paragraph set smaller", WHOLE], ["a RUN insid
     + `in proportion it would be ${proportional}px)`);
 }
 
+
+/* ⛔ COMPACT, END TO END (NEW-SPACING-3): pick it, measure, RELOAD and measure again, then read
+ * the printed sheet. His requirement was "persists with the note, and applies to print and
+ * export" — a control that only changes the screen until you close the tab is not that, and only
+ * the reload leg can tell the difference. */
+await seed();
+const before = await rows();
+const beforeDoc = await docHeight();
+
+const picked = await page.evaluate(() => {
+  const sel = document.querySelector('[data-testid="nt-spacing"]');
+  if (!sel) return false;
+  const opt = [...sel.options].find((o) => o.value === "den:compact");
+  if (!opt) return false;
+  sel.value = opt.value;
+  sel.dispatchEvent(new Event("change", { bubbles: true }));
+  return true;
+});
+if (!picked) {
+  console.log("\n⛔ COULD NOT FIND the Whole note: Compact option — the control moved.");
+} else {
+  await pacedWait(page, 900);
+  const after = await rows();
+  table("AFTER picking Whole note: Compact", after);
+  const afterDoc = await docHeight();
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="note-body"]', { timeout: 20000 });
+  await pacedWait(page, 1200);
+  const reloaded = await rows();
+  const reloadedDoc = await docHeight();
+
+  const printed = await page.evaluate(async () => {
+    const btn = document.querySelector('[data-testid="nt-print"]');
+    if (!btn) return null;
+    btn.click();
+    await new Promise((r) => setTimeout(r, 1600));
+    const f = document.querySelector('[data-testid="notes-print-frame"]');
+    const d = f && f.contentDocument;
+    const li = d && d.querySelector(".note-body p");
+    if (!li) return null;
+    return { line: d.defaultView.getComputedStyle(li).lineHeight, hasVar: (d.documentElement.innerHTML || "").includes("var(--") };
+  });
+
+  const b = before.find((r) => r.label === "BASE");
+  const a = after.find((r) => r.label === "BASE");
+  const rl = reloaded.find((r) => r.label === "BASE");
+  console.log("\nCOMPACT");
+  console.log(`  a row              : ${b?.height} → ${a?.height} (after picking) → ${rl?.height} (after RELOAD)`);
+  console.log(`  the whole document : ${beforeDoc} → ${afterDoc} → ${reloadedDoc}`);
+  console.log(`  survives a reload  : ${rl && a && Math.abs(rl.height - a.height) < 0.5 ? "✓ yes" : "⛔ NO — it did not persist"}`);
+  console.log(`  the printed sheet  : ${printed ? `line-height ${printed.line}${printed.hasVar ? " ⛔ and it carries a CSS variable" : ""}` : "⛔ no print frame"}`);
+}
+
 console.log(`\npage errors: ${errs.length ? errs.slice(0, 3).join(" | ") : "clean"}`);
 await browser.close();

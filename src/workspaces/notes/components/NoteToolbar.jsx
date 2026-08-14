@@ -28,7 +28,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { HEADING_LEVELS } from "../lib/notesExtensions.js";
-import { BLOCK_SPACES, LINE_SPACINGS, spacingLabel } from "../lib/notesSpacing.js";
+import { BLOCK_SPACES, DENSITIES, LINE_SPACINGS, spacingLabel } from "../lib/notesSpacing.js";
 import { CALLOUT_TONES } from "../lib/notesCalloutNode.js";
 
 /* Mirrored from src/shared/ui/controls.jsx rather than imported — deliberately, and there
@@ -672,6 +672,10 @@ export default function NoteToolbar({ editor, onExport, onPrint, onAttach, onHis
              its own footprint rather than out of the row. The current setting is in the hover
              title, and the list spells every option out in words. */
           { label: "↕", value: "" },
+          /* ⛔ THE WHOLE-NOTE CHOICE COMES FIRST (NEW-SPACING-3), because it is the one he
+             actually wants: *"save space and see more information on screen"*. Per-paragraph
+             spacing makes him do that a line at a time; this is one action for the note. */
+          ...DENSITIES.map((d) => ({ label: `Whole note: ${d.label}`, value: `den:${d.id}` })),
           ...LINE_SPACINGS.map((s) => ({ label: `Lines: ${s.label}`, value: `lh:${s.value ?? ""}` })),
           ...BLOCK_SPACES.map((s) => ({ label: `Space before: ${s.label}`, value: `sb:${s.value ?? ""}` })),
           ...BLOCK_SPACES.map((s) => ({ label: `Space after: ${s.label}`, value: `sa:${s.value ?? ""}` })),
@@ -680,6 +684,7 @@ export default function NoteToolbar({ editor, onExport, onPrint, onAttach, onHis
           const v = e.target.value;
           if (!v) return;
           const [kind, raw] = v.split(":");
+          if (kind === "den") { chain().setNoteDensity(raw).run(); return; }
           const n = raw === "" ? null : Number(raw);
           const key = kind === "lh" ? "lineHeight" : (kind === "sb" ? "spaceBefore" : "spaceAfter");
           chain().setNoteSpacing({ [key]: n }).run();

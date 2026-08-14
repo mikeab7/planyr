@@ -269,6 +269,16 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   rightly forbids a CSS custom property in it. **⛔ AND NO BACKTICKS IN A COMMENT INSIDE
   `PRINT_CSS`** — it is a template literal, one backtick ends the string and the module stops
   parsing. Sixth time in this repo.
+- **⛔ AND ONE ACTION FOR A WHOLE NOTE: COMFORTABLE / COMPACT (B532642).** His goal was *"save
+  space and see more information on screen"*, which a per-paragraph control makes him do a line at
+  a time. ⛔ **THE DENSITY LIVES ON THE DOCUMENT, NOT ON THE TREE**, through ProseMirror's own
+  `setDocAttribute` — so it is saved, synced, printed and exported for free, exactly as this
+  module's stated principle promises, and it touches NO tree code. That is the whole reason it was
+  safe: it was first deferred on the ground that it needed a per-note field (tree schema,
+  `migratePageNode`, the cloud merge — the very thing that caused B342996 ×3 the same day), and
+  that reasoning turned out to be wrong about the mechanism. **A blocker that dissolves when you
+  check it was never a blocker.** Measured end to end: a row 17.25 → 15.30px, still 15.30 after a
+  reload, and the printed sheet carries it with no CSS custom property.
 - `lib/notesSpacing.js` — **HOW FAR APART THE LINES ARE (B391076).** A BLOCK property on paragraph
   and heading, never a text style: half a line cannot be one-and-a-half spaced. Written into the
   markup by one attribute (three that each wrote `style` would overwrite one another), so it saves,

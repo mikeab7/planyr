@@ -44,6 +44,7 @@ import {
 } from "../lib/notesZoom.js";
 import { PASTE_MODES } from "../lib/notesPastePlain.js";
 import { keysBelongToTheCaret } from "../lib/notesKeyScope.js";
+import { DEFAULT_DENSITY, densityFor } from "../lib/notesSpacing.js";
 import {
   readNoteFiles, readNoteImages, readPage, readPageVersions, registerOpenNoteDoc,
   restorePageVersion, snapshotPage, writePage,
@@ -805,6 +806,15 @@ export default function NoteEditor({
     editor.on("selectionUpdate", bump);
     return () => { editor.off("update", bump); editor.off("selectionUpdate", bump); };
   }, [editor]);
+
+  /* The note's own density, read off the document and recomputed with it — see the wrapper
+   * below and lib/notesSpacing.js. `densityFor` falls back rather than throwing, so a document
+   * carrying an unknown id still renders. */
+  const density = useMemo(() => {
+    if (!editor || editor.isDestroyed) return densityFor(DEFAULT_DENSITY);
+    return densityFor(editor.state.doc.attrs?.density);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, docTick]);
 
   const outline = useMemo(() => {
     if (!editor || editor.isDestroyed) return [];
@@ -1594,6 +1604,7 @@ export default function NoteEditor({
       title: title || "Untitled page",
       meta: (trail || []).filter(Boolean).join(" › "),
       pages: [{ title, html: docToHtml(json, images), updatedAt }],
+      density: json?.attrs?.density,          // PDF-PARITY: the sheet gets the note's own density
     });
     const r = await printHtmlDocument(html);
     if (!r.ok) onPrintNotice?.(r.error);
@@ -1608,7 +1619,15 @@ export default function NoteEditor({
   const edited = editedLabel(updatedAt);
 
   return (
-    <div className="planyr-note" style={{ display: "flex", flexDirection: "column", minHeight: 0, flex: 1, background: "var(--surface-page)" }}>
+    /* ⛔ THE DENSITY IS SET AS TWO CUSTOM PROPERTIES ON THE WRAPPER (NEW-SPACING-3), so ONE
+       document attribute drives the line height and the gap between list items together — which
+       is what makes Compact one action rather than two controls. The values come from
+       lib/notesSpacing.js, the same record the print sheet reads. */
+    <div className="planyr-note" style={{
+      display: "flex", flexDirection: "column", minHeight: 0, flex: 1, background: "var(--surface-page)",
+      "--note-line": density.line,
+      "--note-list-gap": `${density.listGap}px`,
+    }}>
       <EditorStyles />
       <NoteToolbar
         editor={editor}

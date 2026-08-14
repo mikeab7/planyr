@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { blockFontSize,
+import { DENSITIES, DEFAULT_DENSITY, SINGLE, densityFor, densityStyle, blockFontSize,
   BLOCK_SPACES, LINE_SPACINGS, spacingFromElement, spacingLabel, spacingStyle,
 } from "../src/workspaces/notes/lib/notesSpacing.js";
 
@@ -137,5 +137,39 @@ describe("blockFontSize — the size a whole block agrees on", () => {
   it("junk is not a size", () => {
     expect(blockFontSize([{ fontSize: "inherit" }])).toBe(null);
     expect(blockFontSize([{ fontSize: "-4px" }])).toBe(null);
+  });
+});
+
+/* ⛔ ONE ACTION FOR A WHOLE NOTE (NEW-SPACING-3). His goal in his own words is *"save space and
+ * see more information on screen"*, and a per-paragraph control makes him do it a line at a time.
+ *
+ * ⛔ THE DENSITY LIVES ON THE **DOCUMENT**, NOT ON THE TREE, and that is the decision worth
+ * keeping: the module's stated principle is that anything riding the document is saved, synced,
+ * printed and exported for free. A page-node field would have meant the tree schema,
+ * `migratePageNode` and the cloud merge — and B342996 ×3, the same day, was exactly that: a new
+ * per-node field `migratePageNode` silently destroyed on every read. */
+describe("the note's density", () => {
+  it("offers exactly two, and Compact is the tighter one", () => {
+    expect(DENSITIES.map((d) => d.id)).toEqual(["comfortable", "compact"]);
+    expect(densityFor("compact").line).toBeLessThan(densityFor("comfortable").line);
+    expect(densityFor("compact").listGap).toBeLessThanOrEqual(densityFor("comfortable").listGap);
+  });
+
+  it("Comfortable IS Single — the two names must not drift apart", () => {
+    expect(densityFor("comfortable").line).toBe(SINGLE);
+  });
+
+  it("⛔ an unknown id RENDERS rather than throwing — a stored document must always open", () => {
+    expect(densityFor("nonsense").id).toBe("comfortable");
+    expect(densityFor(undefined).id).toBe("comfortable");
+    expect(densityFor(null).id).toBe("comfortable");
+  });
+
+  it("the default is a real member of the list, not a string nobody defines", () => {
+    expect(DENSITIES.some((d) => d.id === DEFAULT_DENSITY)).toBe(true);
+  });
+
+  it("densityStyle hands out both numbers together, so one control moves both", () => {
+    expect(densityStyle("compact")).toEqual({ lineHeight: densityFor("compact").line, listGap: 0 });
   });
 });

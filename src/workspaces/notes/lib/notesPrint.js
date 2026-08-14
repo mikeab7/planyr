@@ -20,7 +20,7 @@
  */
 
 import { absoluteStamp } from "./notesTime.js";
-import { SINGLE } from "./notesSpacing.js";
+import { DEFAULT_DENSITY, SINGLE, densityFor } from "./notesSpacing.js";
 
 const esc = (s) => String(s == null ? "" : s)
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -164,7 +164,13 @@ function pageBlock({ title, html, updatedAt, headingClass = "note-page-head", sh
  *  which the screen shows by indentation and paper shows as a **trail line** above the
  *  title — `Grand Port › Entitlements`. It is the same information the rail carries, and it
  *  is the reason a printed branch is still readable when the sheets get separated. */
-export function buildPrintDocument({ title, meta = "", pages = [] } = {}) {
+/** The note's density as two literal rules, appended after the base sheet so it wins. */
+function densityCss(id) {
+  const d = densityFor(id);
+  return `\n.note-body { line-height: ${d.line}; }\n.note-body li { margin: ${d.listGap}px 0; }`;
+}
+
+export function buildPrintDocument({ title, meta = "", pages = [], density = DEFAULT_DENSITY } = {}) {
   const body = [];
   const single = pages.length === 1;
 
@@ -181,7 +187,12 @@ export function buildPrintDocument({ title, meta = "", pages = [] } = {}) {
     "<!doctype html>",
     '<html lang="en"><head><meta charset="utf-8">',
     `<title>${esc(title || "Note")}</title>`,
-    `<style>${PRINT_CSS}</style>`,
+    /* ⛔ PDF-PARITY FOR THE NOTE'S DENSITY (NEW-SPACING-3). The chosen density is appended as a
+       LITERAL override rather than a custom property, for the same reason the base number is
+       interpolated: paper has no theme and no cascade to inherit from, and the round-two suite
+       rightly forbids a CSS custom property anywhere in the sheet. One record in
+       lib/notesSpacing.js feeds both the screen and this. */
+    `<style>${PRINT_CSS}${densityCss(density)}</style>`,
     "</head><body>",
     `<div class="sheet">${body.join("\n")}</div>`,
     "</body></html>",

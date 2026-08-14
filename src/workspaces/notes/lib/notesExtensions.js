@@ -28,7 +28,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 
-import { blockFontSize, spacingFromElement, spacingStyle } from "./notesSpacing.js";
+import { DEFAULT_DENSITY, blockFontSize, densityFor, spacingFromElement, spacingStyle } from "./notesSpacing.js";
 import { TextStyleKit } from "@tiptap/extension-text-style";
 import { TableKit } from "@tiptap/extension-table";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
@@ -139,6 +139,25 @@ export const NOTE_EXTENSIONS = [
 
     addGlobalAttributes() {
       return [{
+        /* ⛔ THE NOTE'S DENSITY LIVES ON THE **DOCUMENT**, NOT ON THE TREE (NEW-SPACING-3).
+         * That is the whole reason this was cheap and safe to add: the module's own stated
+         * principle is that anything riding the document is saved, synced, printed and exported
+         * for free. Putting it on the page node instead would have meant the tree schema,
+         * `migratePageNode` and the cloud merge — and TODAY's other defect (B342996 ×3) was
+         * exactly that: a new per-node field `migratePageNode` silently destroyed on every read.
+         * A document attribute touches none of it. */
+        types: ["doc"],
+        attributes: {
+          density: {
+            default: DEFAULT_DENSITY,
+            // The doc node is never serialised to HTML by name, so there is nothing to render;
+            // the editor reads it and sets two custom properties, and the print sheet is handed
+            // the same id. `parseHTML` keeps a pasted document from inventing one.
+            parseHTML: () => DEFAULT_DENSITY,
+            renderHTML: () => ({}),
+          },
+        },
+      }, {
         types: ["paragraph", "heading"],
         attributes: {
           lineHeight: { default: null, parseHTML: (el) => spacingFromElement(el).lineHeight, renderHTML: () => ({}) },
@@ -188,6 +207,17 @@ export const NOTE_EXTENSIONS = [
          * for a block whose runs disagree or whose runs are not all sized. So a MIXED line keeps
          * the default strut and takes its height from the tallest run, which is ordinary inline
          * layout and exactly right; and clearing the size clears the block attribute with it. */
+        /* ⛔ ONE ACTION FOR A WHOLE NOTE (NEW-SPACING-3). His goal, in his words, is *"save space
+         * and see more information on screen"*, and a per-paragraph control makes him do that a
+         * line at a time. `setDocAttribute` is a real ProseMirror step, so this is undoable,
+         * rides the document into storage and sync, and needs no schema anywhere else. */
+        setNoteDensity: (id) => ({ state, tr, dispatch }) => {
+          const next = densityFor(id).id;
+          if (state.doc.attrs.density === next) return false;
+          if (dispatch) dispatch(tr.setDocAttribute("density", next));
+          return true;
+        },
+
         syncBlockFontSize: () => ({ state, tr, dispatch }) => {
           const touched = deriveBlockSizes(state.doc, tr);
           if (touched && dispatch) dispatch(tr);

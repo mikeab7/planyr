@@ -1115,6 +1115,9 @@ export default function Notes({
          so the total is the honest number. */
       meta: `${pages.length === 1 ? "1 page" : `${pages.length} pages`} · Planyr Notes`,
       pages: pages.map((p) => ({ ...p, html: docToHtml(bodies[p.id], images) })),
+      /* PDF-PARITY (NEW-SPACING-3): a branch print carries the ROOT note's density. One sheet
+         has one line height, and the root is the note the person asked to print. */
+      density: bodies[pages[0]?.id]?.attrs?.density,
     });
     const r = await printHtmlDocument(html);
     if (!r.ok) setExportNote(r.error);
