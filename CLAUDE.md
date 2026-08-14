@@ -424,8 +424,16 @@ Runtime deps are kept few and deliberate. New client dependency added 2026-07-10
   the NORMAL reading for a run that is queued or in progress, and it is **NOT evidence that the trigger was
   suppressed**. Acting on it cost two unnecessary `Nudge CI` commits and a hunt through `build.yml` for a
   `paths:` filter that does not exist — while three runs were already `in_progress` for those very shas. The
-  authoritative read is the WORKFLOW RUN: `actions_list method=list_workflow_runs event=pull_request`, matched
-  on `head_sha`. Nudge on the absence of a RUN, never on `total_count: 0`.
+  authoritative read is the CHECK RUN, and there is a purpose-built endpoint for it that this session
+  only found on its third attempt: **`pull_request_read method=get_check_runs`** returns the head
+  commit's check runs directly — a handful of lines, no pagination, no matching on `head_sha`. Prefer
+  it. `actions_list method=list_workflow_runs event=pull_request` matched on `head_sha` answers the
+  same question but returns tens of thousands of characters and has to be parsed out of a file.
+  Nudge on the absence of a RUN, never on `total_count: 0`.
+  **⚠ AND WHEN A NUDGE IS GENUINELY OWED, PREFER MERGING `origin/main` OVER AN EMPTY COMMIT** — it
+  fires the same real push event AND refreshes a branch that has drifted, so it fixes the stale-merge
+  case at the same time. Resolve the inevitable `BACKLOG.md` conflict by keeping both sides, and
+  REGENERATE `BACKLOG_OPEN.md` / `MAP.md` rather than hand-merging them.
   **⚠ CHECK `mergeable_state` FIRST — a "dirty" (merge-conflicted) PR silently swallows EVERY nudge
   (learned 2026-07-06 on PR #518).** GitHub only creates `pull_request` build runs against the PR's
   test-MERGE ref; while the PR conflicts with `main` that ref can't exist, so nudges, close/reopen —

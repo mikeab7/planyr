@@ -123,17 +123,28 @@ underneath, and a tract with a street address gave all its pieces the identical 
 > Your two Baytown-area sites — **Grand Port** and **Goose Creek** — now name the right city and the right
 > kind of city limit. What they still can't tell you is **how high Baytown makes you build the floors**.
 
-- [ ] **Send me Baytown's flood damage prevention ordinance** (the chapter of the city code that sets the
-      finished-floor rule). I tried to read it from the two places the city publishes it and both are blocked
-      from where I run — I get a refused connection, not a missing page, so there's nothing I can do from
-      here. A PDF, or a copy-paste of the flood chapter, is all I need.
-- [ ] **The one question inside it that matters most:** whether that rule applies inside a *limited-purpose*
-      annexation area, or only inside the city's full limits. Grand Port sits almost entirely in a
-      limited-purpose area, so that sentence decides which rulebook prices it. If the ordinance doesn't say,
-      that's a real answer too and I'll record it as "doesn't say" rather than guess.
-- **Until then, nothing has moved.** I did NOT invent a Baytown floor: the pad heights on both sites are
-      unchanged, and the app says plainly that Baytown's rule hasn't been read yet rather than quietly using
-      the county's.
+- [x] ~~**Send me Baytown's flood damage prevention ordinance.**~~ **Done — you sent it, and it's in.** Baytown's
+      rule turned out to be *looser* than Harris County's wherever the 500-year level sits well above the
+      base flood, so **no pad on Goose Creek moves**.
+- [x] ~~**Whether that rule applies inside a *limited-purpose* annexation area.**~~ **Answered, and the answer
+      is "the ordinance doesn't say."** It reads *"within the jurisdiction of the city"* and never mentions
+      limited-purpose or extraterritorial areas. Recorded as *doesn't say* — not as a yes and not as a no.
+
+### 🆕 The Grand Port piece you told me about — one document, and no rush
+
+- [ ] **When you get a chance, send me the development agreement between the MUD and Baytown** (the one you
+      described as covering the couple-hundred-acre tract Grand Port was carved out of — you mentioned LBA as
+      the other side of it). **Nothing is waiting on this** and you said you don't care about it right now, so
+      it's parked here purely so it isn't lost.
+- **Why it's worth having eventually, in one sentence:** you told me Grand Port is bound to the city's
+      **drainage** requirements by that agreement. That's an authority arriving through a *contract*, and the
+      app decides who governs a site purely by *where the site is on the map* — so there is no map anywhere
+      that could ever tell it. It has to be typed in as a fact about that site, and the agreement is the thing
+      that says what to type.
+- **⛔ And I have deliberately NOT stretched it.** You said drainage. Baytown's drainage rules and Baytown's
+      flood chapter (the finished-floor rule) are potentially two different documents, so I have **not**
+      concluded that the floor rule binds Grand Port just because drainage does. That stays an open question
+      until someone reads the agreement.
 
 ## ❓ One question on team sharing I deliberately did NOT answer for you (B326416)
 
