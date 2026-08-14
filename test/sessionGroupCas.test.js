@@ -30,8 +30,12 @@ const run = (...args) => {
 };
 
 describe("an ordinary hour with group CAS on", () => {
-  it("is QUIET on the shipped build — no spurious refusal, nothing stuck, nothing lost", () => {
-    const r = run("--seed", "20260813");
+  /* ⛔ TWO SEEDS, AND THE SECOND ONE IS NOT PADDING. Each of the three client defects this driver
+   * found shows up on a different hour: the canvas-membership one is on nearly every seed, the
+   * unknown-bond deadlock appeared on seed 14 alone out of twenty. A one-seed gate would have
+   * shipped that third fix with nothing watching it. */
+  it.each([20260813, 14])("is QUIET on the shipped build (seed %i) — no spurious refusal, nothing stuck, nothing lost", (seed) => {
+    const r = run("--seed", String(seed));
     expect(r.mutation).toBe("none");
     expect(r.spuriousRefusals).toBe(0);
     expect(r.nonConvergingRefusals).toBe(0);
@@ -42,6 +46,9 @@ describe("an ordinary hour with group CAS on", () => {
     expect(r.assembliesBet).toBeGreaterThan(50);
     expect(r.refusals).toBeGreaterThan(0);      // genuine conflicts DO happen and DO converge
     expect(r.retries).toBe(r.refusals);
+    // ⛔ …and it really staked a bet on the PREFIX-PAIR assemblies, rather than happening to miss
+    // the case the ordering defect lives in. `e2e-bldg-1` ⊂ `e2e-bldg-11` are the owner's own ids.
+    expect(r.prefixPairAssembliesBetOn).toEqual(["b1", "e2e-bldg-1"]);
   }, 60_000);
 
   it("⛔ goes RED on the ORDERING defect NEW-1 found — a prefix pair the two sides sort differently", () => {
