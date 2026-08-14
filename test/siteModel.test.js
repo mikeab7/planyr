@@ -5,7 +5,7 @@ import {
   constraintsOf, setbacksOf, developableArea, parcelDrawingsOf,
   buildingNumbers, isBuilding, roadTravelWidth,
   parcelChildrenMap, parcelDescendants, parcelAncestors, lineageConflicts,
-  parcelDisplayInfo, parcelOutline,
+  parcelDisplayInfo, parcelOutline, parcelSplitNames,
 } from "../src/workspaces/site-planner/lib/siteModel.js";
 
 describe("Site Model — schema, lifecycle status, selectors", () => {
@@ -361,6 +361,62 @@ describe("Parcel split lineage (B651)", () => {
       const info = parcelDisplayInfo(parcels);
       expect(info.get("a").name).toBe("The Wooded Half");
       expect(info.get("a1").name).toBe("The Wooded Half 1"); // and the chain continues off it
+    });
+
+    /* ⛔ THE SPLIT DELETES ITS PARENT (B472048, merged after B455360), so a piece is an ORPHAN and
+     * there is no lineage left to walk. Both halves of the name must therefore be STAMPED at the
+     * cut — the name AND the depth — and the depth is the one that is easy to forget. */
+    describe("the name survives the parent being deleted", () => {
+      const RING = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }];
+      // The real sequence: name the pieces, then REMOVE the parent, exactly as performSplit does.
+      const cut = (plan, pid, n) => {
+        const born = parcelSplitNames(plan, pid, n);
+        return [...plan.filter((p) => p.id !== pid),
+          ...born.map((b, i) => ({ id: `${pid}_${i}`, parentId: pid, splitName: b.name, splitDepth: b.depth, points: RING }))];
+      };
+      const names = (plan) => plan.map((p) => parcelDisplayInfo(plan).get(p.id).name);
+
+      it("pieces keep 1A / 1B / 1C with the parent gone", () => {
+        const plan = cut([{ id: "p1", points: RING }], "p1", 3);
+        expect(names(plan).sort()).toEqual(["Parcel 1A", "Parcel 1B", "Parcel 1C"]);
+      });
+
+      it("RED without the stamped DEPTH: re-splitting 1A gives 1A1 / 1A2, never 1AA / 1AB", () => {
+        /* The defect this pins: with only the NAME stamped, the orphan's walked depth is 0, so the
+         * next cut appended a LETTER — and `1AA` is ALSO the 27th sibling of Parcel 1 under the
+         * past-Z carry. Two different lots, one name, on one plan. */
+        let plan = cut([{ id: "p1", points: RING }], "p1", 2);
+        plan = cut(plan, "p1_0", 2);
+        expect(names(plan).sort()).toEqual(["Parcel 1A1", "Parcel 1A2", "Parcel 1B"]);
+        plan = cut(plan, "p1_0_0", 2);           // and it keeps alternating
+        expect(names(plan)).toContain("Parcel 1A1A");
+      });
+
+      it("the 27th sibling and a re-split can never draw the same name", () => {
+        const wide = cut([{ id: "w", points: RING }], "w", 28);
+        const twentySeventh = parcelDisplayInfo(wide).get("w_26").name;
+        expect(twentySeventh).toBe("Parcel 1AA");
+        let deep = cut([{ id: "w", points: RING }], "w", 1);
+        deep = cut(deep, "w_0", 2);
+        expect(parcelDisplayInfo(deep).get("w_0_0").name).toBe("Parcel 1A1");
+        expect(parcelDisplayInfo(deep).get("w_0_0").name).not.toBe(twentySeventh);
+      });
+
+      it("a stamped name never equals a name already live on the plan", () => {
+        let plan = cut([{ id: "p1", points: RING }], "p1", 4);
+        for (const pid of ["p1_0", "p1_1"]) plan = cut(plan, pid, 3);
+        const all = names(plan);
+        expect(new Set(all).size).toBe(all.length);
+        expect(plan.every((p) => parcelDisplayInfo(plan).get(p.id).nameCollision === false)).toBe(true);
+      });
+
+      it("a typed name still wins over the stamp, and the chain continues off it", () => {
+        let plan = cut([{ id: "p1", points: RING }], "p1", 2);
+        plan = plan.map((p) => (p.id === "p1_0" ? { ...p, label: "The Wooded Half" } : p));
+        expect(parcelDisplayInfo(plan).get("p1_0").name).toBe("The Wooded Half");
+        plan = cut(plan, "p1_0", 2);
+        expect(names(plan)).toContain("The Wooded Half 1");
+      });
     });
 
     it("LOUD-FAILURE: two parcels the user named the same are flagged, never silently renamed", () => {

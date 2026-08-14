@@ -152,11 +152,25 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
     `mergeTrees` rule 3 was an unconditional "the local title wins", justified by the merge only
     running when this device owes an edit — which says nothing about ANOTHER page's name, or about
     which name is newer. A rename therefore could not travel between two machines in either
-    direction: the stale side reverted it AND pushed the old name back up. `renameNode` /
-    `setPageProject` now stamp `updatedAt` (there was nothing to compare before), and a tie or a
-    missing stamp still resolves to LOCAL. ⛔ **PLACEMENT IS DELIBERATELY UNCHANGED** — parent, order
-    and `projectId` stay on rule 4 (local wins), which the reachability fuzz and the project-integrity
-    suites are built around; that half of B342996 is still open.
+    direction: the stale side reverted it AND pushed the old name back up. ⛔ **PLACEMENT IS
+    DELIBERATELY UNCHANGED** — parent and sibling order stay on rule 4 (local wins), which the
+    reachability fuzz and the project-integrity suites are built around.
+  - **⛔ AND A RENAME HAS ITS OWN CLOCK, SEPARATE FROM THE EDIT CLOCK (B342996 ×3, owner decision).**
+    The first fix made `renameNode` stamp `updatedAt`, because that was the only stamp a node had.
+    It works for the merge and lies to the reader: `updatedAt` is what the page header renders as
+    **Last edited**, so a note nobody had written a word in for months claimed it was edited today
+    because somebody fixed its title. There are now THREE independent stamps, each answering exactly
+    one question — `updatedAt` (the TEXT changed; rendered; moved only by `touchPage`), `renamedAt`
+    (the TITLE changed) and `filedAt` (the PROJECT changed). The last two are never rendered and are
+    read only to settle their own conflict. ⛔ **ABSENT IS OLDEST, NEVER NEWEST**: every node written
+    before these fields existed has neither, and reading a missing stamp as "just now" would let a
+    machine that has never renamed anything win every disagreement by default. With neither side
+    stamped the old rule stands (local wins) and `mergeTrees` says so.
+    ⛔ **AND THE DEFECT THIS FOUND, which was nowhere near the merge:** `migratePageNode` rebuilds
+    every node from a NAMED FIELD LIST and every read of the tree goes through it, so the two new
+    stamps were written correctly, **destroyed on the next read**, and the merge then compared two
+    absent stamps, called it a tie and kept local — indistinguishable from the old behaviour, in
+    total silence. **If you add a per-node field, add it to `migratePageNode` in the SAME commit.**
 - **⛔ A NODE VIEW'S CLOSURE `node` IS THE NODE AS IT WAS BUILT — never read `node.attrs` in a handler
   (B400177).** `update(next)` re-styles the element and does NOT rebind `node`, so the width handle,
   which measured from `num(node.attrs.x)`, resized against the box's OLD left edge once the box had
@@ -482,14 +496,62 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   structure is broken input, not a style choice. And a multi-block paste with the caret in a
   list lands AFTER the list, never nested inside the item (an Outlook signature four levels
   deep inside one bullet is the report it closes).
+- **⛔ WHY TAB "SOMETIMES DOESN'T WORK", ANSWERED WITH A MEASUREMENT (B454480).** The report was one
+  word — *"sometimes"* — so it was INSTRUMENTED rather than guessed at: **audit-notes-tab** under
+  `ui-audit/` drives a real Tab in fourteen contexts on a fixture shaped like his own note (a
+  bulleted list with a nested sub-list and an autolinked email in it), captures the caret's node
+  chain and depth at the moment of the press, and judges by the STORED document. **Tab is right in
+  every context but one, and that one was structural: a bullet tucks under the bullet ABOVE it, and
+  the first bullet has none.** All three failing rows were that same fact — the first top-level
+  bullet, the first bullet of the nested list, and a range whose start is a first item. ⛔ The
+  instrument itself needed correcting
+  twice before it could be believed: it could not tell *"did nothing"* from *"moved the caret"* (so
+  it called Tab-between-table-cells a defect), and its node column read `p` for all twenty-eight
+  rows because `closest` with a selector list returns the NEAREST match. The measured table is
+  pinned, so any change to Tab announces itself.
+- **⛔ TYPING AND FORMATTING, ATTACKED (B454481) — and what it actually found.** **audit-notes-formatting**
+  under `ui-audit/` applies · removes · re-applies · undoes every mark, block conversion, alignment,
+  list type, link and spacing setting, at a caret AND across a selection, **judged on the STORED
+  document** — plus his hardest ask, twenty mixed operations undone back to a byte-identical
+  document. **Sixty checks, and nothing wrong with the app.** ⛔ What it did find is SIX defects in
+  ITSELF, every one of which produced a confident false report: a fixture that put marks on the
+  paragraph instead of the text node (20 findings), reads that raced the 600 ms save debounce (16
+  findings — the wait now lives INSIDE the reader so a caller cannot skip it), a baseline compared
+  against hand-authored seed bytes rather than the editor's own serialisation (11), a spacing option
+  that was the DEFAULT (3), a colour swatch that was "Default", i.e. REMOVE (2), and a fingerprint
+  that recorded `level` and `textAlign` but not `lineHeight`, so it was blind to the property it was
+  judging (3). ⛔ **A fingerprint blind to the property under test is worse than no fingerprint** —
+  it returns a confident wrong answer. Read that file's header before adding a case to it.
+- **⛔ AND WHAT TAB DOES ON A FIRST ITEM, SETTLED (NEW-TAB, owner decision 2026-08-13): TAB CHANGES
+  THE LEVEL OF THE CURRENT ITEM; IT NEVER CREATES A NODE THE USER DID NOT TYPE.** The three
+  `nothing` rows above are now an indent. Where real nesting can happen it still does, unchanged;
+  where it cannot, the item's own `indent` attribute goes up by one — same nodes, same order, same
+  parents, one number different. **The option that was refused, so it is not re-proposed:** mint an
+  empty parent bullet and sink into it. It gets the picture right and puts a bullet with no words
+  in it into the document, which then has to be exported, printed, counted, outlined, searched and
+  deleted by hand — the litter this module has spent six rounds removing. Shift+Tab is `n − 1`, and
+  at `n === 0` the attribute renders NOTHING, so an indent/outdent pair leaves the stored document
+  **byte-identical** (asserted, on the bytes, in both halves of the guard). Markdown carries the
+  level as indentation, which is how Markdown spells nesting, so the export is not lossy.
+  See `lib/notesListIndent.js` (the rule) and `lib/notesIndentLevel.js` (the pure reader, split out
+  because the Markdown exporter is on the static path and may not pull the engine).
+- `lib/notesListIndent.js` — the `indent` attribute on `listItem`/`taskItem` and the two keys that
+  move it. **Registered ABOVE the list keymap** (priority 200) and declines whenever
+  `can().sinkListItem(...)` says real nesting is possible — that `can()` IS the boundary between the
+  two mechanisms. Above rather than below because an item sitting at level 2 by attribute is, to
+  ProseMirror, an ordinary first item, so `liftListItem` would lift it clean out of its list while
+  it still owed two outdents.
+- `lib/notesIndentLevel.js` — the pure half: `readIndent`, the ceiling, and the markup
+  (`margin-left` **on the item**, so the bullet moves with its words). Renders nothing at level 0,
+  which is the clause the byte-identical round-trip rests on.
 - `lib/notesTabKey.js` — **Tab belongs to the DOCUMENT while the caret is in it** (B1392, and
   B1392 ×2 which made it true in EVERY context rather than usually — **its header carries the
   full table of what Tab does in each one; read that before touching it**, and note that the
   destructive case it closed was a selected picture or sketch being REPLACED by a tab
   character). A
-  low-priority FALLBACK: the table's next-cell and the list's indent/outdent are asked first and
-  still win; this catches only what they decline — a plain paragraph, an empty page, the first
-  item of a list — which is where Tab used to escape into Chrome's toolbar mid-sentence. It keeps
+  low-priority FALLBACK: the indent extension, the table's next-cell and the list's
+  indent/outdent are all asked first and still win; this catches only what they decline — a plain
+  paragraph, an empty page — which is where Tab used to escape into Chrome's toolbar mid-sentence. It keeps
   a deliberate keyboard-trap escape: **Escape releases the next Tab**, and the editor's accessible
   name says so.
 - `lib/notesSearchHighlight.js` — search marking as ProseMirror **decorations** (never marks: it

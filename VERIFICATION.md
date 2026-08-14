@@ -166,23 +166,407 @@ correct — the point is to confirm he SEES them rather than that they are absen
 **WHAT IS ALREADY PROVEN WITHOUT SIGN-IN, so it need not be re-checked by hand.**
 `e2e/parcel-split-complex-cut.spec.js`
 drives the REAL app on his recorded 95-acre Goose Creek tract (24 vertices, 12 of them
-reflex, and a pinched interior exclusion): the Split tool is armed from the parcel rail exactly as
-he would arm it, a four-point bent "creek" cut is clicked across the lot and finished on Enter, and
-the result is read back off **what renders** — the parcel groups on the canvas and the acreage
-badges, each recomputed from its own new outline. A six-crossing zig-zag makes **FOUR pieces**
-(36.00 + 26.97 + 24.47 + 7.93 = 95.37 ac, the whole tract), the bent cut makes two (63.46 + 31.91 =
-95.37 ac), the toast he reported never appears, and a cut drawn in clear space is refused with
-words about THAT cut. Beside it: `test/polygonSplit.test.js` **31 passing** — including the
-pre-fix pipeline reproducing his exact toast on two of his own production parcels, area
-conservation to one part in 10⁹ on three real tracts, and 800 randomised bent cuts — mutation-proven
-three ways. Unit **11,059 passing**, lint 0 errors, build green.
+### V294384 — B342996 ×3: a rename travels between his two computers, and "Last edited" does not move `Blocker: auth` `Blocker: real-data`
+- **WHY IT NEEDS A LIVE PASS AND CANNOT BE CLOSED HERE.** The whole claim is about **two signed-in clients disagreeing**, which is a LIVE-VERIFY class twice over (concurrency / multi-writer, and real project data). The sandbox proves the merge rule against two real store instances and an in-memory server — `test/notesTreeWriteThrough.test.js`, 24 cases, mutation-proven twice — but this sandbox cannot sign in (the proxy CORS-blocks Supabase auth), so the real `notes_trees` row, the real `rev` trigger and his real note titles have never been through it.
+- **WHAT WAS VERIFIED HERE:** lint · the full unit suite · the build · 24 cases in `test/notesTreeWriteThrough.test.js` including his exact two-client test in both directions · two deliberate mutations of the real source (restoring `updatedAt` stamping → 8 red; making an absent stamp read as newest → 9 red).
+- **THE STEPS, on his account, in two windows or on two machines:**
+  1. Open the same note in both. Rename it on A. Watch B: within a sync tick the new name appears in B's rail, **and B does not push the old one back** (rename again on A afterwards and it must still stick).
+  2. Rename it on B instead, with A stale. A must adopt B's name.
+  3. **The one that is new:** look at the note's **Edited** label before and after a rename. **It must not move.** A note last written in weeks ago must still say so after its title is changed.
+  4. Re-file a note into a project on A; B must pick it up. Take it back out of every project on B; A must pick THAT up too (an empty project is a real answer, not "no answer").
+- **STOPPING RULE.** Closes when steps 1–4 pass on his account, or when he says a rename is behaving. A failure on step 3 re-opens B342996 at ×4; a failure on 1/2/4 is the same item, not a new one.
 
-**AND THE NAMING HALF, proven the same way.** The naming half adds `test/siteModel.test.js` (+7, two of them proven RED against the exact rule
-each replaced) and three more real-app cases in the same e2e spec — the badge names, a four-piece
-cut numbering every piece, and re-splitting a piece to `1A1`/`1A2` — **8/8**. Unit **11,098
-passing**. The sandbox proxy CORS-blocks Supabase sign-in, which is the whole of what is left: every
-check above that does not say "cloud" or "his own plan" is already green here, and the six numbered
-steps are the ones no sandbox can reach.
+### V294385 — B512672: Tab indents the first bullet on a real signed-in note, and nothing is left behind `Blocker: auth`
+- **⛔ THIS IS A COURTESY PASS, NOT A GATE, and it says so rather than implying it.** Per ATTEMPT-BEFORE-YOU-PARK this check is Claude-doable here and **was done here**: a real Tab keystroke, logged out, judged by the stored document — `ui-audit/audit-notes-tab.mjs`, 33 pinned rows, all green, including the two properties his decision names (no node invented; the indent/outdent pair byte-identical) and the printed sheet. It is logged only because his own lists live on signed-in notes that sync, and a level that fails to survive a round trip through the cloud would show up nowhere else.
+- **WHAT WAS VERIFIED HERE:** 17 cases in `test/notesListIndent.test.js` against the real schema and the real command · the 33-row keystroke harness · the printed sheet's first bullet (`indented-on-paper`) · a Markdown export that is byte-identical again after an outdent.
+- **THE STEPS, on one of his own notes:**
+  1. Put the caret in the **first** bullet of a list and press Tab. The bullet and its words move right together. **No empty bullet appears above it.**
+  2. Press Shift+Tab. It goes back exactly where it was.
+  3. Reload the page. The level is still whatever you left it at.
+  4. Print the note. The indented bullet is indented on the sheet too.
+  5. Export to Markdown and re-open the file. The indented item reads as a nested item.
+- **STOPPING RULE.** Closes when steps 1–3 pass on a signed-in note. Steps 4–5 are already measured here and are listed so he can spot-check, not because they are in doubt.
+
+
+### V287376 — B503184: the Layers toggle actually hides, on a REAL drawing `Blocker: real-data`
+
+**⛔ STEP 1 IS THE ONE THAT DECIDES WHETHER THE REST MATTERS, and it could not be answered from the
+sandbox.** His 30 source PDFs live in Supabase Storage / Drive; the bytes are not reachable there, so
+whether any of his drawings carries optional content ("layers") at all is unknown. If none does, the
+Layers control never appears and this whole surface is empty in practice — which is a complete and
+useful answer, not a failed check.
+
+**⛔ NOTHING HERE CHANGES DATA.** Layer visibility is a view filter held in memory for the current
+load and is never persisted, so this can be run on a live review with no duplicate needed and nothing
+to undo. Closing the document discards it.
+
+| # | Do exactly this | Read this off the SCREEN | Pass |
+|---|---|---|---|
+| 1 | Open Review and load each of a few real drawings in turn (the biggest sheet sets are the likeliest) | does a **▤ Layers** button appear in the toolbar? | ☐ |
+| 2 | **If it never appears on any drawing — STOP and record that.** The feature has no subject in his documents, and steps 3–8 are moot | — | ☐ |
+| 3 | On a drawing that DOES have it, open the Layers popover | the groups are listed by name (e.g. Electrical, Grading) | ☐ |
+| 4 | Untick one layer whose content you can clearly see | **that content disappears immediately, at the zoom you are already at** | ☐ |
+| 5 | ⛔ Look closely — this is the exact defect | no ghost of it remains in the sharp, crisp part of the drawing | ☐ |
+| 6 | Zoom in on where it was, then zoom back out | it stays gone at every zoom | ☐ |
+| 7 | Confirm the rest of the drawing is untouched | every other layer, and all unlayered linework, still there | ☐ |
+| 8 | Tick it again | it comes back | ☐ |
+| 9 | Reload the page and reopen the drawing | **all layers are on again** — visibility is deliberately not saved | ☐ |
+
+**Already proven here:** `ui-audit/verify-pdf-layer-hiding.mjs` drives all ten checks on a hand-built
+two-layer PDF, 10/10 after the fix, and it was **red on unmodified main** (backdrop 0 blue pixels
+while the tile above it held 579,121 — 12.2% of the tile, exactly the hidden square's share). The
+fixture is synthetic on purpose: whether OUR render honours the config is a property of our code, not
+of his files. **What is pending is only whether his documents have layers to hide, and that the same
+behaviour holds on a real construction sheet.**
+
+### V273520 — B484337: does a tab that has STOPPED saving actually SAY so, on screen? `Blocker: auth`
+
+**⛔ THIS ONE IS ON MICHAEL'S LIST, deliberately, and it is the only such item.** Every other entry
+here is the Claude cohort's job and must never reach him. This one cannot be: the state only exists
+on a signed-in cloud session, and this sandbox's egress proxy answers `403 to CONNECT` for the
+Supabase host (measured, not assumed), so no browser here can sign in and the write engine never
+starts. It also needs two real tabs racing each other on one real plan. Mirrored on `OWNER-TODO.md`.
+
+**⛔ THIS ENTRY WAS SILENTLY LOST ONCE.** It merged to `main` in 11ff31f7 and was gone by 1da150a —
+dropped by another branch's conflict resolution, not by anything here. If it disappears again, it is
+the merge, not the work.
+
+**⛔ RUN THIS ON A DUPLICATE PLAN.** Steps 4–7 MOVE A BUILDING, twice, from two different tabs, and
+the whole point is that one of those moves is *not saved*. An interrupted run leaves the plan
+geometry changed. Plan menu → **Duplicate plan**, work in the copy, delete it after. Steps 1–3 and
+8–9 change nothing.
+
+**Plan:** any duplicate holding at least one building with a bonded truck court — e.g. a copy of
+**Bain / "Concept - Original"**. Signed in, on planyr.io, in **two tabs of the same browser**.
+
+**Why it has to be a race:** the tab gives up only after **four consecutive batches in which not one
+edit was accepted** (`maxRejectStreak`), with a 1s / 2s / 4s / 8s backoff between them. So the
+window from the first rejection to the banner is roughly **ten to fifteen seconds** of one tab
+losing every write — which is why steps 4–6 have you edit the SAME building from both tabs rather
+than different ones.
+
+| # | Do exactly this | Read this off the SCREEN | Changes data? | Pass |
+|---|---|---|---|---|
+| 1 | Open the duplicate in **tab A**; wait for the drawing to settle | save badge reads its normal resting state (**"synced"**, green) | no | — |
+| 2 | Open the SAME plan in **tab B** | both tabs show the same drawing | no | — |
+| 3 | In tab A, note the save badge's exact wording (screenshot it) | your baseline for step 7 | no | — |
+| 4 | In **tab B**, drag one building a short distance. Repeat 5–6 times, pausing about a second between drags | tab B saves normally | **YES** | — |
+| 5 | **Without letting tab B finish**, switch to **tab A** and drag the SAME building repeatedly, in the opposite direction | tab A appears to accept the drags | **YES** | — |
+| 6 | Alternate: 2 drags in B, 2 in A, 2 in B, 2 in A — keep it up for about **30 seconds** | — | **YES** | — |
+| 7 | Stop dragging in tab A and **watch tab A for 15 seconds** | **BOTH must appear:** a message reading *"This tab is out of date — your recent changes here can't be saved. Reload the page to catch up."* **AND** the save badge in its **error** state showing *"This tab is out of date — reload to keep saving"* | no | ☐ |
+| 8 | Reload **tab A** | badge returns to its resting state; saving resumes | no | ☐ |
+| 9 | Delete the duplicate plan | — | **YES** (removes the copy) | — |
+
+**FAIL is a green "synced" badge, or silence, while tab A's edits stop reaching the cloud.** That is
+the exact defect B484337 fixed, and it was live in the product before it: the warning was built,
+mapped, unit-tested and then **dropped one step before it could be shown**, and the badge had no
+branch for the state at all.
+
+**If step 7 shows nothing at all after a full minute**, the race probably never went four-for-four —
+tab A's edits kept winning. Try again with tab B dragging *continuously* rather than in bursts.
+Report that outcome as "could not force it" rather than as a pass; **not reproducible is a finding,
+never a disposition.**
+
+**One thing NOT to read as a failure:** a single refusal is deliberately SILENT. It resolves itself
+and a toast per transient conflict would be noise. Only the persistent case — the one this drives —
+shows the banner.
+
+**Proven here and NOT what this is waiting for:** the real engine really reaches the `stale` state
+and the event it emits really carries no element; the matrix really turns that into the reload
+warning; and both rendering repairs are mutation-proven red when reverted
+(`test/staleVisible.test.js`). What cannot be done here is the only thing that matters to him —
+**seeing it**. *"The message is wired up"* is not *"the message paints."*
+
+### V2576 — B3296: a hidden road leaves the drawing, and leaves the PRINT `Blocker: real-data`
+
+**⛔ RUN THIS ON A DUPLICATE, NOT THE LIVE PLAN.** Steps 4–5 hide content and step 8 exports; hiding
+is view state and is saved on the plan, so a run left half-finished leaves his plan filtered. Open
+the plan menu → **Duplicate plan**, work in the copy, delete it after. **No step below changes any
+element** — the only writes are the `settings.hidden` view flags, which step 9 clears.
+
+**Plan:** FM 359 / **Woods Road**, plan **"Concept A 1M SF"** (site `smsrrlk9u576`). Signed in, on
+planyr.io. Elements: 2 buildings · 10 car parking · 3 trailer parking · 2 ponds · 4 roads ·
+7 paving · 4 sidewalks · 1 parcel · 4 measurements.
+
+| # | Do exactly this | Read this off the SCREEN | Pass |
+|---|---|---|---|
+| 1 | Open the plan; wait for the drawing to settle | roads visible as grey ribbons | — |
+| 2 | Open the on-canvas **View ▾** menu | rows for each group with counts | — |
+| 3 | Note the Yield panel's numbers (screenshot it) | Building sf, coverage, detention | — |
+| 4 | Untick **Roads** | **the grey pavement ribbons disappear**, not just the road labels/numbers | ☐ |
+| 5 | Untick each of Buildings · Car parking · Trailer parking · Ponds · Paving / drive · Sidewalks · Parcels · Measurements, one at a time, re-ticking each before the next | each group's shapes leave the canvas completely | ☐ |
+| 6 | With something hidden, look at the collapsed View header | a chip saying "N groups hidden" | ☐ |
+| 7 | Compare the Yield panel to the step-3 screenshot | **every number identical** — hiding may not move one | ☐ |
+| 8 | With **Roads** hidden, File → **Export PDF** and open it | no road pavement anywhere on the sheet | ☐ |
+| 9 | View ▾ → **Show all**, then reload the page | everything is back, on screen and in a fresh export | ☐ |
+
+**Already proven here and NOT what this is waiting for:** `ui-audit/diagnose-hide-ink.mjs` reports
+9/9 groups honouring the toggle on this exact plan (roads were 8 painted nodes before the fix), and
+`verify-content-visibility.mjs` passes 47/47 including the PDF-parity pair read off the real built
+sheet (5 road-network paths → 0). Both mutation-proven. **What is pending is only step 8 as a real
+downloaded PDF, and the signed-in store.**
+
+### V2577 — B3297: Delete works from every state the inspector can leave you in `Blocker: real-data`
+
+**⛔ RUN THIS ON A DUPLICATE.** Steps 3–6 DELETE a measurement and step 9 presses Backspace with a
+building selected. Each is undone in the next step, but an interrupted run leaves the plan changed.
+
+**Plan:** the same duplicate of **"Concept A 1M SF"**. **Subject:** the **AREA measurement** — the
+inspector header reads `MEASUREMENT · AREA`, roughly 98,501 sf / 2.26 ac.
+
+| # | Do exactly this | Expected | Pass |
+|---|---|---|---|
+| 1 | Click the area measurement on the canvas | it selects; handles appear | — |
+| 2 | Open the left rail's **Properties** tab | header reads MEASUREMENT · AREA | — |
+| 3 | Drag the **Fill opacity** slider, then press **Delete** | **the measurement is deleted** | ☐ |
+| 4 | **Ctrl+Z** | it comes back | — |
+| 5 | Re-select it; change **Line style** in the dropdown; press **Delete** | **the measurement is deleted** | ☐ |
+| 6 | **Ctrl+Z** | it comes back | — |
+| 7 | Re-select it; click into the **line-width value box**; press **Delete** | it is **NOT** deleted, and a message says why | ☐ |
+| 8 | Press **Delete** a second time without clicking anything | **the message appears again** (it used to be silent) | ☐ |
+| 9 | ⛔ **THE CONTROL.** Click a building; in Properties click **Depth (ft)**, press **Enter**, then press **Backspace** | **the building and its truck courts / trailer parking survive** | ☐ |
+| 10 | Delete the area measurement for real, then **reload the page** | it is still gone (a delete that never reached storage comes back) | ☐ |
+| 11 | Delete the duplicate plan | — | — |
+
+**Read out of STORAGE, not the screen, for step 10:** after the reload the measurement must be
+absent from the drawing — that is the same read, and it is the one that proves the delete reached
+the server rather than only the canvas.
+
+**Already proven here:** `ui-audit/verify-delete-key-scope.mjs` drives all ten arms on this plan's
+real area measurement with real key events, 10/10, with 7 of 10 red on the pre-fix build; its three
+controls re-prove B464048's data-loss bug dead (43 → 43 features). **Pending: the signed-in tab,
+where a delete also has to reach the cloud.**
+
+### V284768 — B494050: a hidden group does not change how much PAPER the sheet uses `Blocker: real-data`
+
+**⛔ RUN THIS ON A DUPLICATE** — it hides content and exports.
+
+**Plan:** the duplicate of **"Concept A 1M SF"**. This is the half V2576 step 8 does not cover: not
+"is the road on the sheet" but "is the sheet still framed around where it used to be".
+
+| # | Do exactly this | Read this off the ARTEFACT | Pass |
+|---|---|---|---|
+| 1 | With everything visible, File → **Export PDF**; keep it | note how much of the page the drawing fills | — |
+| 2 | Untick **Roads** (and/or Ponds), export again | the drawing **fills MORE of the page** — no wide blank margin where the hidden group used to be | ☐ |
+| 3 | Untick **Parcels** as well; export again | the crop tightens again onto what remains | ☐ |
+| 4 | Show all; export once more | the sheet matches the step-1 export | ☐ |
+| 5 | Delete the duplicate plan | — | — |
+
+**Proven here:** on Silvestri the built sheet's viewBox width goes **782 → 595** when roads are
+hidden, and **782 → 782** on a deliberately broken build. **Pending: a real downloaded PDF on a
+signed-in plan** — the harness reads the sheet SVG the export path builds, not the rasterised file.
+
+### V284769 — B494049: an invisible object does not pull the cursor `Blocker: real-data`
+
+**⛔ RUN THIS ON A DUPLICATE — every step MOVES GEOMETRY.** This is the one live check in this set
+that writes to the model, and it is why the duplicate matters most here.
+
+**Plan:** the duplicate of **"Concept A 1M SF"**. **Snap must be ON** — press **S** on the canvas
+(or check the toolbar's snap toggle) before starting, or every arm is vacuous.
+
+| # | Do exactly this | Expected | Pass |
+|---|---|---|---|
+| 1 | Press **S** to arm snap | the snap toggle reads on | — |
+| 2 | Untick **Buildings** in View ▾ | the buildings leave the canvas | — |
+| 3 | Drag a **paving pad** slowly across where a hidden building's edge was | it does **NOT** jump or stick to the invisible edge | ☐ |
+| 4 | **Ctrl+Z** | the pad returns | — |
+| 5 | Show buildings; untick **Roads**; draw a **new road** whose endpoint lands near a hidden road's end | the new endpoint does **NOT** weld to the invisible road | ☐ |
+| 6 | **Ctrl+Z** | the new road is removed | — |
+| 7 | Untick **Parcels**; drag any element near where the boundary was | it does **NOT** snap to the invisible boundary | ☐ |
+| 8 | **Ctrl+Z**, View ▾ → **Show all**, delete the duplicate plan | — | — |
+
+**NOT proven here, and this is the honest gap:** the three magnets were found by reading the code and
+fixed there; unlike the extent and print halves they were **not** driven in a browser, because a
+drag-and-see-if-it-sticks arm needs a hidden neighbour positioned precisely against a dragged
+element and no fixture in the repo has that geometry. The unit-level guard
+(`test/hiddenContentReads.test.js`) proves each call site asks the predicate; **this checklist is
+what proves it in the hand.**
+
+### V258992 — B464048 / B464049 / B477808: the inspector keyboard + error-state work, on a SIGNED-IN plan `Blocker: auth`
+
+**Everything below was proven LOGGED OUT on the owner's own rows** — `ui-audit/fixtures/fm359-concept-a.json`
+is his real FM 359 "Concept A" (site `smsrpaiqu5sv`) pulled verbatim from production, and three
+instruments drive it in a real browser: `diagnose-key-scope-paths` (all eight arms: was 7 of 8
+deleting Building 1 and its eight bonded elements, 18 → 9; now 0 of 8) · `verify-delete-undo-restores`
+(**32/32**, both delete routes, property-for-property, same pixels, survives a reload; its `--no-undo`
+self-test takes 26 of those 32 red) · `verify-field-focus-vs-invalid` (**20/20**, both themes,
+computed styles off the live element). `e2e/inspector-key-scope.spec.js` is mutation-proven RED on
+the pre-fix build (7 failed / 3 passed, the 3 being its controls).
+
+**WHY THIS IS PARKED AND NOT SKIPPED.** All of that reads the LOGGED-OUT store. A signed-in plan
+writes through `elementSync` — the atomic group commit, the pending journal, the rows-canonical seed
+— and the sandbox cannot sign in (the proxy CORS-blocks Supabase auth). The delete and the undo take
+a genuinely different path there. ⛔ **Do not spend a session trying to defeat the sign-in wall; run
+the checklist below in a real signed-in browser instead.** It is written to be executed cold — no
+part of the investigation has to be re-derived.
+
+**WHAT YOU NEED:** planyr.io, signed in · the project **FM 359 RD, Fulshear, TX 77441** · plan
+**"Concept A"** · **Building 1** is the large cross-dock building, **1675 × 613**, with two small
+bump-outs on opposite corners (id `e1454615maruai`). "Properties" = the right-hand ELEMENT · BUILDING
+inspector; **Depth (ft)** is the field under FOOTPRINT, directly below **Length (ft)**.
+
+#### ARM 1 — NON-DESTRUCTIVE. Safe on the real plan; changes nothing you cannot undo in place.
+
+Every step here either types into a field or presses a key that must be REFUSED. Nothing is deleted.
+Read the **screen** for each ✅ unless a step says otherwise.
+
+| # | Do this | Read this ON SCREEN |
+|---|---|---|
+| 1 | Click Building 1 once, then open **Properties** from the right rail. | The FOOTPRINT group shows **Length (ft) 1675** and **Depth (ft) 613**. |
+| 2 | Click into **Depth (ft)**. | The box takes a **1 px orange-red border** (the brand accent). This is ORDINARY FOCUS and must NOT look like an error — no message, no icon. |
+| 3 | Select all and type **`-5`**. Do not press Enter. | A **2 px red border**, a **⚠**, and one line: **"Smallest allowed is 1"**. Compare with step 2 — the error must be obviously heavier, not just a different shade. |
+| 4 | Select all and type **`613`**. | The message and ⚠ **disappear**; the border returns to the 1 px accent. |
+| 5 | **THE CLAMP — the most valuable check here.** Select all, type **`200000`**, press **Enter**. | The field shows **100000** and a line reads **"✎ Using 100000"**. ⛔ Before this work the app silently stored 100,000 and said nothing. If the note is missing, that is the defect back. |
+| 6 | Select all, type **`613.7`**, press **Enter**. | The field shows **613.7** and a line reads **"✎ Showing 614"** — the model keeps 613.7 exactly; only the display rounds. |
+| 7 | Still in the box, press **Enter**. | Focus **stays in the field** (the caret is still there, the value selected). It must NOT jump out to the page. |
+| 8 | Now press **Backspace** — the reported gesture. | **The building is still there.** A note reads *"The keyboard is still on the panel. Click the plan, then press Delete."* |
+| 9 | Press **Delete**. Then **Escape**, then **Backspace**. Then **Tab**, then **Backspace**. Then click the **▲** stepper, then **Backspace**. | The building survives **every** one of them. These are four of the seven measured ways it used to die. |
+| 10 | Set **Depth** back to **613** and press **Enter**. Click the drawing once to leave the field. | The plan is exactly as you found it. |
+| 11 | Switch the app to the other theme (Settings → Interface) and repeat steps 2–4. | Same story in dark: focus = accent, error = heavier + red + ⚠ + message. |
+
+If any of 3, 5, 6 or 8 fails, **stop and report** — those are the four findings this work is made of.
+
+#### ARM 2 — DESTRUCTIVE. ⛔ RUN THIS ON A **DUPLICATE** OF THE PLAN, **NEVER** ON THE ORIGINAL.
+
+**Why the warning is written down rather than assumed.** This arm deliberately deletes Building 1,
+which takes **eight bonded elements** with it (two truck courts, two bump-outs, two sidewalks, two
+side-parking rows — 18 elements down to 9), and then relies on undo to bring them back. Undo is
+proven whole on the fixture — **and proven-on-a-fixture is not proven on his production document.
+The entire reason to run this signed in is that we do not yet know the two behave identically.** A
+verification step that can destroy the thing it is verifying does not get to assume its own result.
+
+**FIRST:** open the plan menu and **duplicate "Concept A"** (e.g. "Concept A (copy)"). Confirm the
+title bar shows the COPY. Everything below happens on the copy. If anything goes wrong, delete the
+copy — the original is untouched.
+
+| # | Do this | Read this |
+|---|---|---|
+| 1 | On the copy, click Building 1 on the **drawing** (not the panel), then press **Delete**. | **ON SCREEN:** the building AND its truck courts, bump-outs, sidewalks and parking all disappear together. This is the control — a guard that broke deleting would be worse than the bug. |
+| 2 | Press **Ctrl+Z** **once**. | **ON SCREEN:** every one of them is back in the same place — both truck courts, both bump-outs on their original corners, both parking rows, both sidewalks, the dock face on the same side. ⛔ **One press must be enough.** If a second Ctrl+Z is needed to complete it, that is a NEW defect — file it, because a user who sees the building reappear will assume they are whole. |
+| 3 | Open Properties on the restored building. | **ON SCREEN:** Length **1675**, Depth **613**, and the Loading group still reads cross-dock on the same face. |
+| 4 | **Reload the page** (this is the leg the sandbox cannot do — it proves the restore reached the SERVER, not just the tab). | **OUT OF STORAGE:** after the reload the building and all eight bonded elements are still present. If anything is missing only after the reload, the undo did not reach `site_elements` — that is a data-loss defect and outranks everything else in this entry. |
+| 5 | Open the plan in a **second tab / another device**, signed in as the same user. | The same 18 elements. (Catches an undo that settled locally but never synced.) |
+| 6 | Delete the duplicate plan. | The original "Concept A" is untouched. |
+
+**Record the result here** (date · who · which arms · what you saw), and move the entry to
+`VERIFICATION-DONE.md` only when BOTH arms have passed.
+
+### V266993 — B472049: a completed split no longer leaves the parent drawn `Blocker: real-data`
+
+**Proven here:** `test/splitIntegrity.test.js` (20) — conservation, union-outline equality and no
+overlap, all across ACTIVE **and not deleted**, plus the five cut topologies driven through the real
+engine. Both single-column mutation checks are in the suite. Full suite 11,169 green.
+
+**Steps (on a COPY of Bain / Concept A - Quiddity DIA, not the live plan):**
+1. Notch split — both cut endpoints on ONE edge. **The parent must disappear.** Exactly the pieces
+   remain; the acreage of the live parcels sums to the parent's within a hair.
+2. Repeat the 18:58:56 through-cut and confirm it still yields 100.388 + 8.617 = 109.005, residual
+   0.000 — the regression guard for the path that already worked.
+3. Undo the split: the parent comes back and the pieces go. Redo: the reverse.
+4. Confirm no orphan: the children keep their address / account data, and nothing errors where the
+   parent used to be nested.
+5. ⚠ **Existing plans are NOT migrated.** Bain still holds `e1454855gyzzln` and `e1455071mkspvo` as
+   drawable superseded parents (3 such rows across 2 plans). They keep drawing until removed — the
+   owner's call, deliberately not automated.
+
+### V266992 — B472048: the operation envelope, end to end `Blocker: auth` `Blocker: real-data`
+
+**⛔ NOT YET VERIFIABLE — the foundation shipped, the wiring did not.** Recorded now so the pending
+steps are in the one canonical place rather than only on the item.
+
+**Steps, once the migration and wiring land:**
+1. Two tabs, same account, one plan. In tab A merge two parcels.
+2. In tab B without reloading: the activity view names it as ONE merge by that session, with both
+   source parcels and the result — never as net row arithmetic.
+3. Presence names both sessions and marks which is me.
+4. Undo in tab B either refuses or warns BY NAME before touching tab A's merge.
+5. Reproduce the 8 South case: `e56` + `e1454594huuiov` consumed, `e1454919qhgshe` created — and
+   confirm it reads as one merge, not as 77 − 2 + 1.
+6. A split emits `op_kind:"split"` with one parent modified, one child created, one `op_id`, atomic.
+
+### V258864 — B463920 + B463921: the status menu behaves on his own board `Blocker: auth` `Blocker: real-data`
+
+**Proven here already** — `ui-audit/verify-grid-overlay-input.mjs`, 12/12 in a real browser, mutation-proven three ways: Enter dismissing the successor prompt no longer re-opens the picker (Enter 0/4, Escape 0/4, ✕ 0/4, with all three routes proven to have actually raised prompts) · Enter on a picker column with nothing else open still opens the picker · press-and-drag inside a menu leaks no selection · clicking a swatch still commits · ordinary drag-select still works.
+
+**Pending, signed in on a real project:**
+1. Mark a task Complete from the ● column; when the successor prompt appears, press **Enter**.
+   **Expect:** the prompt applies and closes, and **no colour menu is left on screen**.
+2. Repeat, dismissing with **Escape**, then with the **✕**. Same expectation.
+3. With no prompt in play, select a status cell and press **Enter** — **expect the picker to open** (this is a feature; if it stopped working, that is a regression).
+4. Open the status menu, press a colour and **move the mouse slightly before releasing**. **Expect:** the value is set and **no blue selection band** appears anywhere in the grid.
+5. Drag across several cells normally. **Expect:** drag-select still works exactly as before.
+
+**Result:** ⏳ pending.
+
+### V258016 — B463072: a group header's Duration reads its real span on his own schedules `Blocker: real-data` `Blocker: auth`
+
+**Proven here already, in a real browser.** `ui-audit/verify-summary-pred-dates.mjs`
+(`npm run verify:schedpreds`) renders the real Grid on his CCID3 row shape and reads the Duration CELL by
+column position: **`40d`** for the summary, **`30d`** for the leaf beside it. **Mutation-proven: revert the
+grid to the one-armed call and the same cell reads `0d`.** Unit half in `test/schedulerEngine.test.js`
+(leftover unit not inherited · leaf untouched · blank stays blank · 0-day summary still 0d · end-to-end
+against the engine's own rolled span), also mutation-proven. Full suite green.
+
+**⛔ THE EXPORT STEP IS NOW DONE HERE — ✅ PASSED 2026-08-13, and the premise behind it was WRONG.**
+ATTEMPT-BEFORE-YOU-PARK: this was logged as needing a browser session, and it did not.
+`ui-audit/verify-schedule-export-duration.mjs` (`npm run verify:schedexport`) drives the real `openPrint`
+path on the disagreement case and reads the number **out of the produced artifact** — not off the screen
+and not off the code. **The artifact is HTML, not a raster:** `buildPDFHtml` returns a string the app
+writes into a popup, and the user then presses the browser's own *Save as PDF*, so the exhibit's cells are
+real text nodes in a real `<table>` (`canvas: false`, verified in the same read). Out of the 21,028 bytes
+it emits: **`<td class="c-duration">40d</td>`** on the summary row (`08/07/26` · `10/02/26`), and `30d` on
+the leaf beside it.
+**AND THE CORRECTION THAT MATTERS: the PDF export NEVER carried this defect.** `buildPDFHtml` renders
+duration as `` `${t.duration}d` `` — the inherited span — at both its cell sites. B463072's own first
+write-up and PR #1027's body both said the defect reached "the export"; the third stale read was actually
+`autoSizeMCol`, a column-WIDTH helper in the Master view. **Mutation-proven anyway: point `buildPDFHtml`'s
+duration cell at the leftover and this harness reads `0d`** — so the export now has a guard it never had.
+
+**What still needs his own signed-in session.** His real schedules, which the sandbox cannot reach.
+
+**Steps:**
+1. Open **Grand Port**. Find the group **CCID3: Lift Station & Force Main Approval**. Its Duration should
+   read **40d**, matching its 08/07/26 → 10/02/26 span. Before this it read 0d.
+2. Scan the other group headers in Grand Port, **Goose Creek** and **8 South** — any that used to read a
+   suspiciously small number (0d especially) should now read a span that matches their bars.
+3. Open the **cross-project Master view** and check the same headers there — it had the identical defect.
+4. ~~Export a PDF / exhibit with the Duration column shown.~~ **DONE HERE — ✅ PASSED** (see above): the
+   export was driven and the number read off the produced artifact. Nothing left for anyone on this step.
+5. ⚠ Worth his eye: a leaf still shows the unit he typed (3mo, 30cd, 15d); a group header always shows
+   working days. If a group reading "40d" beside a child reading "2mo" is confusing, say so.
+### V251152 — B456208: does "add as a new contact?" stay out of the way on his OWN registry? `Blocker: auth` `Blocker: real-data`
+
+**What is already proven here, and it is most of the feature.** `ui-audit/verify-contact-confirm.mjs`
+— 21 assertions, real browser, real key events — asserts both what the field SHOWS and what is
+COMMITTED on every route: a new name asks and writes nothing until answered · declining returns the
+typed text unharmed and still editable (Backspace then reads `Jason Berca`, not an empty box) ·
+confirming commits whole · an exact match, a pick from the filtered list, the `+ Add … as new
+contact` row and clearing the field all stay silent · click-away asks instead of creating. Eight
+mutations proven red across the browser and unit halves.
+
+**What is PENDING, and why only he can settle it.** The risk he named himself: *"If it nags on a
+normal selection it will be turned off within a day and you will have made things worse."* The
+sandbox runs against seed data with a handful of contacts. Whether the prompt feels invisible or
+irritating against his **real 17-contact registry**, with the names he actually types, is a
+judgement about frequency that no assertion can make.
+
+1. Sign in on https://planyr.io, open a real Schedule project.
+2. Assign owners the way you normally do — click the cell, type a few letters, pick the person from
+   the list. **Expect: no prompt, ever, on this path.** If it interrupts here, that is a defect, not
+   a preference — say so and it comes straight back out.
+3. Type the full name of someone already on file and press Enter. **Expect: no prompt.**
+4. Now type a name that is NOT on file and press Enter. **Expect:** `No match — add "…" as a new
+   contact?` with **Add contact** / **Keep editing**.
+5. Press **Keep editing** (or Escape). **Expect:** the box still holds every character you typed, with
+   the caret at the end, so a typo can be corrected rather than retyped. Fix it, pick the right
+   person, done.
+6. Repeat 4 and press **Add contact**. Reload. **Expect:** the task holds the full name and the
+   Contacts panel holds exactly one new person — spelled correctly.
+7. Type a new name and click AWAY without pressing Enter. **Expect:** it asks; it does NOT quietly
+   create anyone.
+
+**Result:** ⏳ pending.
+
 ### V238192 — B443248: "Mobilize" on his own Grand Port opens at 10/05/26, and the correction arrives NAMED `Blocker: real-data` `Blocker: auth`
 
 **Proven here already, in a real browser, on his exact row shape.** `ui-audit/verify-summary-pred-dates.mjs`

@@ -102,6 +102,19 @@ async function escapeOut() {
 /* Type `text` one REAL key at a time into a cell opened by the type-to-edit route
    (select the cell with a single click, then just type — the first key opens the editor).
    Records the input's value after EVERY keystroke, so a lost character is located exactly. */
+/* NEW-1 — creating a contact is now ASKED rather than assumed, so committing a name the registry
+   has never seen raises "No match — add … as a new contact?" and writes nothing until answered.
+   This harness is about the CARET, not that question, so it answers YES and carries on — which
+   also keeps it honest: the committed-value assertions below still have to hold afterwards. */
+async function confirmIfAsked() {
+  const yes = page.locator("[data-contact-confirm-yes]");
+  for (let i = 0; i < 6; i++) {
+    if (await yes.count()) { await yes.click(); await pacedWait(page, 250); return true; }
+    await pacedWait(page, 90);
+  }
+  return false;
+}
+
 async function typeToEdit(rowId, colIdx, text) {
   await cellOf(rowId, colIdx).click();
   await pacedWait(page, 120);
@@ -167,7 +180,9 @@ if (booted && leaves.length >= 5) {
     `after two keys the field reads ${JSON.stringify(ownerTrace[1])}, expected ${JSON.stringify(NAME.slice(0, 2))}`);
 
   await page.keyboard.press("Enter");
-  await pacedWait(page, 300);
+  await pacedWait(page, 200);
+  await confirmIfAsked();
+  await pacedWait(page, 250);
   const savedOwner = await committed(r0, COL.owner, NAME);
   ok("Owner · what is COMMITTED equals what was typed (no silent truncation)",
     savedOwner === NAME, `stored ${JSON.stringify(savedOwner)}, typed ${JSON.stringify(NAME)}`);
@@ -182,7 +197,9 @@ if (booted && leaves.length >= 5) {
     ownerTrace2[ownerTrace2.length - 1] === NAME,
     `field reads ${JSON.stringify(ownerTrace2[ownerTrace2.length - 1])}`);
   await page.keyboard.press("Enter");
-  await pacedWait(page, 300);
+  await pacedWait(page, 200);
+  await confirmIfAsked();
+  await pacedWait(page, 250);
   const saved1 = await committed(r1, COL.owner, NAME);
   ok("Owner · existing contact commits the full name", saved1 === NAME, `stored ${JSON.stringify(saved1)}`);
   await escapeOut();
@@ -197,7 +214,9 @@ if (booted && leaves.length >= 5) {
     dblTrace[dblTrace.length - 1] === rep,
     `field reads ${JSON.stringify(dblTrace[dblTrace.length - 1])}, expected ${JSON.stringify(rep)}`);
   await page.keyboard.press("Enter");
-  await pacedWait(page, 300);
+  await pacedWait(page, 200);
+  await confirmIfAsked();
+  await pacedWait(page, 250);
   const saved2 = await committed(r1, COL.owner, rep);
   ok("Owner · double-click replacement commits the replacement, whole", saved2 === rep, `stored ${JSON.stringify(saved2)}`);
   await escapeOut();
@@ -224,7 +243,9 @@ if (booted && leaves.length >= 5) {
     /add\s+"?priya"?\s+as new contact/i.test(addRow), JSON.stringify(addRow.slice(0, 120)));
 
   await page.keyboard.press("Enter");
-  await pacedWait(page, 300);
+  await pacedWait(page, 200);
+  await confirmIfAsked();
+  await pacedWait(page, 250);
   const savedPaste = await committed(r2, COL.owner, "Priya");
   ok("Owner · the pasted free-text name commits whole", savedPaste === "Priya", `stored ${JSON.stringify(savedPaste)}`);
   await escapeOut();

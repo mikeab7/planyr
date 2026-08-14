@@ -126,9 +126,15 @@ export async function idbDelete(key) {
 // Remove every key with the given prefix (one cursor pass). Used to evict all of a deleted site's
 // cached rasters (`raster:<siteId>:*`) so IndexedDB doesn't accumulate orphans forever. Resolves
 // true/false; never throws. (B474 review — idbDelete was dead code; deletes leaked their rasters. #13/#24)
-export async function idbDeleteByPrefix(prefix) {
+/* ⛔ NEW-1 — `keep` IS NOT AN OPTIMISATION, IT IS THE DATA-SAFETY HALF. A duplicated plan carries
+ * the SOURCE plan's `idbKey`, so the prefix `raster:<sourceId>:` matches rasters a SIBLING plan is
+ * still rendering from; sweeping it blindly wiped their device copies. The sweep stays (it is what
+ * evicts genuine orphans — rasters no plan names any more), but every key a surviving plan still
+ * references is skipped. Callers build `keep` from `sharedAssetRefs.idbKeysHeldByOtherPlans`. */
+export async function idbDeleteByPrefix(prefix, { keep } = {}) {
   const db = await openDb();
   if (!db || !prefix) return false;
+  const spare = keep instanceof Set ? keep : new Set(Array.isArray(keep) ? keep : []);
   return new Promise((resolve) => {
     let tx;
     try { tx = db.transaction(STORE, "readwrite"); } catch (_) { resolve(false); return; }
@@ -139,7 +145,10 @@ export async function idbDeleteByPrefix(prefix) {
       // Half-open string range [prefix, prefix+￿): catches every key that begins with `prefix`.
       const range = IDBKeyRange.bound(prefix, prefix + "￿", false, true);
       const cur = tx.objectStore(STORE).openCursor(range);
-      cur.onsuccess = () => { const c = cur.result; if (c) { try { c.delete(); } catch (_) {} c.continue(); } };
+      cur.onsuccess = () => {
+        const c = cur.result;
+        if (c) { if (!spare.has(c.key)) { try { c.delete(); } catch (_) {} } c.continue(); }
+      };
       cur.onerror = () => {}; // tx.onerror/onabort settles the promise
     } catch (_) { try { tx.abort(); } catch (_2) {} resolve(false); }
   });

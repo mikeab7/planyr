@@ -803,37 +803,94 @@ export function createElementSync(opts = {}) {
    * Returns [] when the switch is off, when nothing in the batch is bonded, or when the engine has
    * no `liveCollections` to resolve roots with — in each case the call goes out exactly as it does
    * today (B1117 semantics, untouched). */
+  /* ⛔ NEW-1 — WHICH ASSEMBLY THE *SERVER* BELIEVES THIS ROW IS IN, which is not always the one the
+   * canvas shows. The membership half of a group bet must be answered from here and never from the
+   * live canvas; see `groupsFor` below for what that cost. */
+  /* ⛔ NEW-1 — "I DO NOT KNOW WHICH ASSEMBLY THIS ROW IS IN" IS A REAL ANSWER, AND BETTING ANYWAY
+   * IS THE DEADLOCK. A `stale` shadow entry is one whose json and rev deliberately disagree — the
+   * rev came from the server, the json is the last bytes THIS TAB committed — and the bond is read
+   * out of the json. On such an entry, with no server statement (`assemblyOf`) to override it, the
+   * bond is a GUESS: the row the server handed back may already contradict it. A group bet built on
+   * a guess can be refused forever, because the assembly the client claims membership of is not the
+   * one the server has the row in, and a conflict on an assembly the server considers EMPTY names
+   * no member to learn from.
+   *
+   * ⛔ ITS RARITY IS THE POINT, NOT A REASON TO DROP IT: this variant appeared on ONE of twenty
+   * ordinary hours (seed 14), which is why that exact seed is pinned in `test/sessionGroupCas.test.js`
+   * alongside the unit test below. A one-seed gate would have shipped it unguarded.
+   *
+   * Group CAS is an ADDITIONAL guard over the per-row rev check, so withdrawing a claim we cannot
+   * substantiate degrades that group to the per-row path — never to a hole. */
+  const UNKNOWN_ROOT = Symbol("unknown-assembly");
+
+  function shadowRootOf(key, shad) {
+    /* ⛔ THE SERVER'S OWN STATEMENT WINS. `assemblyOf` is set only from a conflict payload — the
+     * server enumerating an assembly — and is DELETED the moment anything fresher lands (our own
+     * accepted commit, or a remote row), so preferring it can never mask a newer fact. It used to
+     * be consulted only when the json produced no bond, which meant a stale-but-current-rev shadow
+     * kept its wrong assembly forever; see the note in `onGroupConflict`. */
+    if (assemblyOf.has(key)) return assemblyOf.get(key);
+    if (shad.stale) return UNKNOWN_ROOT;      // json↔rev disagree and the server has said nothing
+    let root = null;
+    try { root = rootIdOf(JSON.parse(shad.json || "null"), shad.id); } catch (_) { root = shad.id; }
+    if (root == null) root = shad.id;
+    return root;
+  }
+
   function groupsFor(batch, live) {
     if (!groupCas || !groupCas()) return [];
+    /* WHICH assemblies to stake a revision on. Both ends of a RE-BOND, deliberately: moving a child
+     * from one host to another changes the membership of the assembly it LEFT as well as the one it
+     * JOINED, and the batch's canvas roots name only the second. Betting on the source too is what
+     * makes an indent/outdent as safe as a drag. */
     const roots = new Set();
+    const unsafe = new Set();
     for (const e of batch) {
       if (e.kind !== "el") continue;
       const cur = (live && live.byKey.get(skey("el", e.id))) || e.el;
       const r = rootIdOf(cur, e.id);
       if (r != null) roots.add(r);
+      const shad = shadow.get(skey("el", e.id));
+      const was = shad ? shadowRootOf(skey("el", e.id), shad) : null;
+      if (was === UNKNOWN_ROOT) {
+        // We cannot say where the server has this row, so neither the assembly it is JOINING nor
+        // the singleton it may still be sitting in can be claimed. Both are withdrawn below.
+        unsafe.add(r); unsafe.add(e.id);
+      } else if (was != null) roots.add(was);
     }
+    for (const u of unsafe) roots.delete(u);
     if (!roots.size) return [];
-    // Bucket every LIVE shadow entry by its assembly root, so a member nobody is writing still
-    // counts. The shadow holds only live rows (a delete removes its entry), which matches the
-    // server's `deleted_at is null` filter — the two definitions of "member" must not drift.
+    /* ⛔ NEW-1 — MEMBERSHIP COMES OFF THE SHADOW, NEVER OFF THE CANVAS, AND THAT IS THE WHOLE BET.
+     *
+     * `expected` is a claim about what the SERVER currently holds: "refuse me if this assembly is
+     * not still exactly this." The canvas holds the state we are trying to CREATE. Those agree for
+     * a move, a resize or a delete — none of them change `attachedTo` — and they disagree for
+     * exactly one ordinary edit: re-bonding a child to a different host (the indent/outdent
+     * gesture). This used to read `live.byKey`, so a pending re-bond put the mover in its
+     * DESTINATION assembly's expected digest while the server's `assembly_id` — generated from
+     * `data->>'attachedTo'` — still had it in the source. Two digests wrong in opposite directions,
+     * the call refused whole, nothing written, and the retry re-derived the identical wrong claim
+     * from the same unchanged canvas: a PERMANENT refusal, on a plain edit, with no way out.
+     *
+     * Measured, on the clean build, the first hour that included a re-bond: 383 refusals, 865 of
+     * them spurious, 50 of 433 calls applied. It is the THIRD distinct cause of one symptom in this
+     * feature — after B447472 (membership by KIND) and B484336 (ORDERING) — which is the argument
+     * for the driver rather than for another reading of the code.
+     *
+     * The shadow holds only live rows (a delete removes its entry), matching the server's
+     * `deleted_at is null` filter — the two definitions of "member" must not drift. An element the
+     * server has never seen has no shadow entry and correctly counts toward nothing. */
     const members = new Map();
     for (const [key, shad] of shadow) {
       if (shad.kind !== "el") continue;
-      const cur = (live && live.byKey.get(key)) || null;
-      let root = cur ? rootIdOf(cur, shad.id) : null;
-      if (root == null) {                       // not on the canvas → read the bond off the shadow json
-        try { root = rootIdOf(JSON.parse(shad.json || "null"), shad.id); } catch (_) { root = shad.id; }
-        // …and a member adopted from a conflict has no json at all, so fall back to what the
-        // SERVER told us its assembly was.
-        if (root === shad.id && assemblyOf.has(key)) root = assemblyOf.get(key);
-      }
-      if (root == null || !roots.has(root)) continue;
+      const root = shadowRootOf(key, shad);
+      if (root === UNKNOWN_ROOT || root == null || !roots.has(root)) continue;
       let list = members.get(root);
       if (!list) { list = []; members.set(root, list); }
       list.push({ id: shad.id, rev: shad.rev });
     }
     const out = [];
-    for (const [root, list] of members) out.push({ assembly: root, expected: assemblyDigest(list) });
+    for (const root of roots) out.push({ assembly: root, expected: assemblyDigest(members.get(root) || []) });
     return out;
   }
 
@@ -864,6 +921,23 @@ export function createElementSync(opts = {}) {
       for (const m of (c && c.members) || []) {
         if (!m || m.id == null || typeof m.rev !== "number") continue;
         const key = skey(m.kind || "el", m.id);
+        /* ⛔ NEW-1 — ADOPT THE ASSEMBLY FOR *EVERY* MEMBER THE CONFLICT NAMES, NOT ONLY THE ONES
+         * THIS TAB HAS NEVER SEEN. The unknown-member case below was the deadlock found by asking
+         * "how could turning this on go wrong?"; this is its sibling, found by driving an ordinary
+         * hour, and it is the one that actually fires.
+         *
+         * The shadow's json is the last bytes THIS TAB wrote, and its rev can be advanced past that
+         * json by the monotonic guard in `processResults` (a foreign row landing while our op was in
+         * flight). So a tab can hold a CURRENT rev alongside a STALE bond — and the bond is the only
+         * input to which assembly a row belongs. Measured on the clean build: the client bucketed
+         * `e107` under itself while the server had it under `e2e-bldg-1`, at the same rev 5, and the
+         * refusal could not teach it otherwise because this branch kept the stale json AND said
+         * nothing about the assembly. Every retry re-derived the same wrong membership: permanent.
+         *
+         * The payload is authoritative about membership — the server just enumerated the assembly —
+         * so record it. `assemblyOf` is cleared the moment anything FRESHER arrives (a successful
+         * commit of our own, or a remote row), so this can never outlive the fact it describes. */
+        if (c.assembly != null) assemblyOf.set(key, c.assembly);
         const cur = shadow.get(key);
         // Keep OUR json as the diff baseline (the canvas still holds it and we still intend to
         // write it); adopt only the rev, flagged `stale` because json and rev now disagree.
@@ -1017,13 +1091,17 @@ export function createElementSync(opts = {}) {
       if (r.status === "ok") {
         accepted = true;
         acceptedKeys.add(key);
-        if (e.cls === "delete") { shadow.delete(key); births.delete(key); recordTombstone(e.kind, e.id, r.rev); } // remember the delete's rev → a stale pre-delete self-echo can't resurrect it (B757)
+        if (e.cls === "delete") { shadow.delete(key); births.delete(key); assemblyOf.delete(key); recordTombstone(e.kind, e.id, r.rev); } // remember the delete's rev → a stale pre-delete self-echo can't resurrect it (B757)
         else {
           // keep the shadow rev MONOTONIC: a foreign realtime row may have advanced it past this
           // commit's rev while the op was in flight (applyRemoteRow's in-flight branch) — adopting
           // the older r.rev back would make the next commit a guaranteed spurious conflict.
           const cur = shadow.get(key);
           shadow.set(key, { kind: e.kind, id: e.id, json: stableStringify(e.el), rev: cur && cur.rev > r.rev ? cur.rev : r.rev, z: e.z });
+          // NEW-1 — our own accepted bytes are now the freshest statement about this row's bond, so
+          // any assembly the server named in an earlier conflict is superseded. Never let a stale
+          // `assemblyOf` outlive the json it was standing in for.
+          assemblyOf.delete(key);
           clearDeleteFloor(key); // element is live again → drop the stale-delete floor (incl. the never-pruned refetch high-water)
         }
         // NEW-1 — only a DIRECT user edit claims authorship: a cascade-derived relayout write
@@ -1242,6 +1320,13 @@ export function createElementSync(opts = {}) {
     const shad = shadow.get(key);
     const rev = typeof row.rev === "number" ? row.rev : 0;
     if (shad && rev <= shad.rev) return { action: "ignore" }; // own echo or stale replay
+    /* NEW-1 — a NEWER row is the freshest statement there is about which assembly this element is
+     * in, so record it here, before any of the branches below decide whether to keep our json.
+     * Several of them deliberately do keep it (an in-flight op, a foreign row we are overtaking),
+     * and that is exactly how a shadow ends up holding a current rev beside a stale bond — which
+     * group CAS then bets on. A tombstone drops the record with the membership it described. */
+    if (row.deleted_at) assemblyOf.delete(key);
+    else if (row.data) { const r = rootIdOf(row.data, row.id); if (r != null) assemblyOf.set(key, r); }
     // OWN-ECHO-BY-REV (B812) — the definitive single-tab self-echo guard. An incoming NON-tombstone row
     // whose rev is one THIS tab's own commit produced within the window is unambiguously our realtime
     // echo, EVEN when a stale refetch rolled the shadow's rev BACKWARD or DROPPED the entry (so the rev

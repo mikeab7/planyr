@@ -12,7 +12,8 @@ import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding, t
   shareMirrorOf, withShareMirror } from "./siteModel.js";
 import { cloudUpsert, cloudDelete, cloudHardDelete, cloudRestore, cloudDeletedRows, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile } from "./cloudSync.js";
 import { reconcileGroupNames, resolveNameFor, groupKeyOf, maxStampOf } from "./projectName.js";
-import { idbGet, idbPut, idbAvailable, idbDeleteByPrefix } from "./localDb.js";
+import { idbGet, idbPut, idbAvailable, idbDelete, idbDeleteByPrefix } from "./localDb.js";
+import { idbKeysReleasableOnPlanDelete, idbKeysHeldByOtherPlans } from "./sharedAssetRefs.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 
 /* Cloud backend (Phase 4). When a user is signed in, `activeUser` holds their id:
@@ -1236,9 +1237,30 @@ export function saveSite(partial, { skipHistory = false } = {}) {
 // reappear on reload — B372). Logged out, it resolves ok (nothing to remove server-side).
 export function deleteSite(id) {
   const sites = readSites();
+  const all = Object.values(sites);   // read the WHOLE list before the plan leaves it (below)
   delete sites[id];
   writeSites(sites);
-  if (id) idbDeleteByPrefix(`raster:${id}:`); // B474 review — evict this site's cached underlay/overlay/drawing rasters from IndexedDB so they don't orphan forever (#13/#24); no-op when idb is absent
+  /* ⛔ NEW-1 — EVICT BY REFERENCE, NEVER BY PREFIX. This evicted `raster:${id}:*` blindly, and a
+   * duplicate carries the SOURCE plan's `idbKey` (⧉ Duplicate plan copies the overlay record
+   * wholesale) — so deleting the source plan wiped the device copy for every plan copied from it.
+   * Same defect as the overlay delete, one tier down and with a bigger blast radius. Ask which of
+   * this plan's rasters no SURVIVING plan still names, and keep the rest. `all` still contains the
+   * plan being deleted, which is required: its own keys are what we are deciding about, and its
+   * reference is excluded BY ID inside the rule rather than by being absent from the list. */
+  if (id) {
+    let keep = new Set();
+    try {
+      keep = idbKeysHeldByOtherPlans(all, id);
+      const kept = idbKeysReleasableOnPlanDelete(all, id).kept;
+      if (kept.length) // LOUD-FAILURE: say that a cached image was KEPT for a sibling plan
+        reportClientEvent("plan-delete-raster-retained", "kept cached images a sibling plan still references", {
+          id, kept: kept.map((k) => ({ key: k.key, heldBy: k.heldBy })),
+        });
+    } catch (_) { /* never let cache bookkeeping change what gets swept */ }
+    // Sweep this plan's raster namespace (evicting genuine orphans, B474 #13/#24) while SPARING
+    // every key a surviving plan still names — a duplicate carries the source plan's idbKey.
+    idbDeleteByPrefix(`raster:${id}:`, { keep });
+  }
   recentlyDeleted.add(id); // in-tab tombstone so no in-flight flush can resurrect it this session (B372)
   if (activeUser && id) recordSiteTombstone(activeUser, id, Date.now()); // B757 — DURABLE tombstone: survives reload so a failed/offline cloud delete can't resurrect the plan on the next pull
   if (getCurrentSiteId() === id) setCurrentSiteId(null);

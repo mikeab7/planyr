@@ -5,7 +5,98 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-08-13._
+_Last updated: 2026-08-14._
+
+## 👀 One thing only you can check: does the app actually TELL you when it has stopped saving? (V273520 / B484337)
+
+**Why this one is yours, when browser checks never are.** It needs a signed-in account and two real
+tabs racing each other on one real plan. I cannot sign in from where I run — the connection to the
+database is blocked — so no test I can write will ever see this. It is the single item on this list
+of that kind.
+
+**What I found, and why it matters more than the feature it came out of.** There was a state where
+the app **quietly stopped saving your work and kept showing a green "synced" badge**. Not an error
+message, not a spinner — a confident, wrong answer. Two separate things were swallowing the warning:
+the message that says *"reload to keep saving"* was built correctly and then thrown away one step
+before it reached the screen, and the little save indicator had no setting for "given up" at all, so
+it fell through to the resting green one. **Both are fixed and live.** What I cannot prove from here
+is that the fixed message actually *paints* on your machine — only that it is wired to.
+
+**⛔ DO THIS ON A DUPLICATE PLAN.** Steps 4–6 move a building from two tabs at once, and the whole
+point is that one of those moves does *not* get saved. Open the plan menu → **Duplicate plan**, work
+in the copy, delete it when you're done. Steps 1–3 and 8–9 change nothing.
+
+Use a copy of a plan with a building on it — Bain / "Concept - Original" is fine. Signed in, on
+planyr.io, **two tabs of the same browser**.
+
+| # | Do exactly this | What you should see | Changes anything? |
+|---|---|---|---|
+| 1 | Open the duplicate in **tab A**, let the drawing settle | the save badge in its normal green state | no |
+| 2 | Open the **same plan** in **tab B** | both tabs showing the same drawing | no |
+| 3 | Screenshot tab A's save badge | your before-picture | no |
+| 4 | In **tab B**, drag one building a short way. Do it 5 or 6 times, about a second apart | tab B saving normally | **yes** |
+| 5 | Switch to **tab A** and drag the **same building** repeatedly the other way | tab A looks like it's accepting the drags | **yes** |
+| 6 | Alternate — 2 drags in B, 2 in A, 2 in B, 2 in A — for about **30 seconds** | — | **yes** |
+| 7 | Stop, and **watch tab A for 15 seconds** | **BOTH:** a message saying *"This tab is out of date — your recent changes here can't be saved. Reload the page to catch up."* **and** the save badge turning to its error look with *"This tab is out of date — reload to keep saving"* | no |
+| 8 | Reload tab A | badge back to normal, saving works again | no |
+| 9 | Delete the duplicate plan | — | **yes** (deletes the copy) |
+
+**What a failure looks like:** step 7 shows a green "synced" badge, or nothing at all, while tab A's
+edits have stopped reaching the cloud. That is exactly the bug that was fixed — so if you see it,
+the fix did not land and I need to know.
+
+**If nothing happens after a full minute**, the race probably never bit — tab A's edits kept winning.
+Try again with tab B dragging continuously rather than in bursts. Tell me *"couldn't force it"*
+rather than *"it passed"*; those are different answers and I'd rather have the honest one.
+
+**One thing that is NOT a failure:** a single hiccup is meant to be silent — it fixes itself, and a
+pop-up every time two tabs brush past each other would just be noise. Only the case where the app
+has genuinely given up shows the message.
+
+## ❓ One question about the schedule jumping while you edit (B463922)
+
+You told me the schedule sometimes throws you halfway down while you're editing cells. I went after it
+and found two things worth telling you plainly.
+
+**The reproduction we thought we had was our own test tool's fault, not the app's.** The tool was
+clicking a fold-away triangle that was sitting just off the top of the screen, and to reach it the
+tool scrolled the list itself — then blamed the app for the movement. A person can't click something
+they can't see, so that path was never real. I proved that three different ways before writing it off.
+
+**But two real things came out of it, and both are fixed and live.** Folding a group used to quietly
+steal your place — the cell you were typing in stopped being the selected one, so the next keystroke
+went somewhere else. And now, when you fold a group above the row you're working on, that row stays
+exactly where it is on screen instead of sliding out from under your cursor.
+
+**What I need from you — two things, and the second one matters most.** Next time it throws you:
+(1) what had you *just* done — typed in a cell, pressed Enter, folded or unfolded a group, pressed
+undo, or nothing at all; and (2) **did it go up or down?** Up means toward the start of the
+schedule, down toward the end. That direction alone rules out half the possible causes. Nothing I
+can run here has ever seen this happen, so those two facts are worth more than another week of me
+guessing — and until I have them I'm leaving it open rather than calling it fixed.
+
+## ✂️ Two calls on splitting a parcel — the tool now takes real cuts, these are the last two choices (B455360)
+
+Splitting is fixed. You can now cut a parcel along a line with as many bends as you like — following a
+creek, a road centreline, an easement, an old property line — and the cut no longer has to run neatly
+between two opposite sides. If the cut leaves the lot and comes back, you get all the pieces it really
+makes, not two. Acreage is preserved exactly: on your Goose Creek tract a zig-zag cut produced four
+pieces that add back up to the full 95.37 acres, and I checked that by reading the acreage tags off the
+drawing, not off the code.
+
+Two things I deliberately did **not** decide for you, because they're product calls, not engineering ones:
+
+**1. When a cut makes three or more pieces, what should happen?** Right now it keeps **all of them** and
+tells you how many it made. That's the only choice that can't quietly lose you acreage, so it's the safe
+hold — but it may not be what you want. The alternatives: keep the two biggest and throw the scraps away,
+or have it stop and ask you at the moment of the cut.
+
+**2. How should the pieces be named?** Right now they come out **unnamed** — same as before this change,
+so nothing got worse. The options: number them off the original (Parcel 1A, 1B, 1C…), or leave the
+original name on the biggest piece and name the others after it.
+
+Answer either one in a sentence and I'll wire it. Nothing is blocked on you in the meantime — the tool
+works as it stands.
 
 ## ✅ ANSWERED AND SHIPPED — both split decisions are live, nothing on your end (B455360 / B520560)
 

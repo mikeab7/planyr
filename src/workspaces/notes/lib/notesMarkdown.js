@@ -25,6 +25,7 @@
  * on the Notes route's STATIC path — can name a file without reaching into
  * lib/notesAttachNode.js, which imports the editor engine. */
 import { attachmentLabel } from "./notesFileMeta.js";
+import { readIndent } from "./notesIndentLevel.js";
 
 /* The node and mark names this exporter handles. test/notesModule.test.js asserts this
  * covers everything lib/notesExtensions.js lets into a document — so adding an extension
@@ -414,18 +415,24 @@ function table(node, lossy, images) {
 
 /* ---- blocks ------------------------------------------------------------------------ */
 
+/* ⛔ AN ITEM'S OWN LEVEL RIDES IN THE INDENTATION, WHICH IS HOW MARKDOWN SPELLS NESTING
+ * ANYWAY — so this is not lossy and nothing joins the lossy list. `readIndent` returns 0 for
+ * an item that was never indented, and 0 extra pad is byte-identical to the old output, which
+ * is what makes an indent/outdent pair round-trip through the export unchanged. See
+ * lib/notesListIndent.js. */
 function listBlock(node, lossy, depth, ordered, images) {
-  const pad = "  ".repeat(depth);
   const out = [];
   let n = Number(node.attrs?.start || 1);
   for (const item of node.content || []) {
+    const at = depth + readIndent(item.attrs);
+    const pad = "  ".repeat(at);
     const marker = ordered ? `${n++}. ` : "- ";
     const inner = (item.content || []);
     const first = inner[0];
-    const head = first?.type === "paragraph" ? inline(first.content, lossy) : blocks(first ? [first] : [], lossy, depth, images).trim();
+    const head = first?.type === "paragraph" ? inline(first.content, lossy) : blocks(first ? [first] : [], lossy, at, images).trim();
     out.push(`${pad}${marker}${head}`);
     for (const rest of inner.slice(1)) {
-      const sub = blocks([rest], lossy, depth + 1, images).replace(/\n+$/, "");
+      const sub = blocks([rest], lossy, at + 1, images).replace(/\n+$/, "");
       if (sub) out.push(sub);
     }
   }
@@ -433,16 +440,17 @@ function listBlock(node, lossy, depth, ordered, images) {
 }
 
 function taskBlock(node, lossy, depth, images) {
-  const pad = "  ".repeat(depth);
   const out = [];
   for (const item of node.content || []) {
+    const at = depth + readIndent(item.attrs);          // the item's own level — see listBlock
+    const pad = "  ".repeat(at);
     const box = item.attrs?.checked ? "[x]" : "[ ]";
     const inner = item.content || [];
     const first = inner[0];
     const head = first?.type === "paragraph" ? inline(first.content, lossy) : "";
     out.push(`${pad}- ${box} ${head}`.trimEnd());
     for (const rest of inner.slice(1)) {
-      const sub = blocks([rest], lossy, depth + 1, images).replace(/\n+$/, "");
+      const sub = blocks([rest], lossy, at + 1, images).replace(/\n+$/, "");
       if (sub) out.push(sub);
     }
   }

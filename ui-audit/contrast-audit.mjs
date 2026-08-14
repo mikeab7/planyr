@@ -201,6 +201,13 @@ const PAIRS = [
   // Global interactive accent as a focus/active graphic on surfaces
   ["--accent", "--surface-raised", "accent stroke · card", U],
   ["--accent", "--chrome-bg", "accent stroke · chrome", U],
+  /* B464049 — the REJECTED-field border and its message, on the surfaces the inspector's fields
+     actually sit on. The focus ring stays the accent (already covered above); what had to become
+     legible is the error, and it carries an icon + a text message besides, because colour is never
+     the only cue (WCAG 1.4.1). --danger-text is the message copy, so it takes the TEXT floor. */
+  ["--danger", "--planner-raised", "rejected-field border · planner card", U],
+  ["--danger", "--planner-panel", "rejected-field border · planner panel", U],
+  ["--danger-text", "--planner-raised", "rejected-field message · planner card", T],
   // kbd chips (text), borders (subtle graphic — owner rule exempts borders/grid)
   ["--kbd-text", "--kbd-bg", "kbd text · kbd chip", T],
   ["--border-strong", "--surface-page", "strong border · page", U, "subtle hover border — owner rule explicitly allows low-contrast for borders/grid"],

@@ -635,6 +635,39 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
      be a double-click. `audit-doubleclick-properties` now measures and asserts its own gap, and that
      assertion caught a defect in ITSELF on its first run (it was timing deselect→press-1, not
      press-1→press-2), which is the argument for measuring rather than assuming in one line.
+- **DRIVER-SCROLL-IS-NOT-APP-SCROLL** — **AN AUTOMATION TOOL THAT SCROLLS TO REACH AN OFF-SCREEN TARGET
+  CANNOT BE USED TO MEASURE SCROLL BEHAVIOUR. In a VIRTUALISED list, "the first rendered row" is NOT
+  "a row on screen."** (B463922, 2026-08-13 — the sixth instrument failure of the day, and the first
+  that survived long enough to be reported to the owner as a finding about his product.)
+  1. **THE CASE.** `diagnose-grid-view-anchor.mjs` clicked the fold triangle on the FIRST RENDERED row
+     of the scheduler grid. A virtualiser renders a buffer of rows ABOVE the viewport, so that toggle
+     sat 75 px off screen; Playwright — like every browser driver — scrolls a target into view before
+     clicking it, **through CDP, where a patched `scrollTop` setter cannot see it.** The harness then
+     reported its own scroll as the app throwing the edited row 477 px down the screen and out of view.
+  2. **⛔ "PROGRAMMATIC SCROLL WRITES: 0" IS THE TELL, NOT THE CORROBORATION.** That reading was taken
+     as proof the app was innocent of *causing* the scroll, and used to argue the row was "abandoned".
+     It actually meant the scroll came from OUTSIDE the page's JavaScript entirely. Whenever a
+     container moves with no app write, the first two suspects are **the driver** and **the browser** —
+     not a subtle app defect.
+  3. **THE DISCRIMINATOR IS ONE LINE: drive the same control from inside the page.** `.click()` in page
+     JS performs no actionability scroll. Same toggle, same build: driver click **+477 px**, page-JS
+     click **−24 px**, a click on a toggle genuinely inside the viewport **−48 px** — and a target
+     BELOW the viewport moved it the other way (+459). **Magnitude and sign follow where the target
+     sat**, which is the driver's signature.
+  4. **THE RULE.** Inside a scroll container, click only what a human could actually see. Enforced by
+     `ui-audit/lib/visibleClick.mjs`: `visibleClick` proves the target is inside the container's
+     viewport BEFORE clicking and THROWS if it is not, naming how far outside it sat;
+     `installScrollWitness` + `assertNoDriverScroll` catch the same lie from the other side (the
+     container moved during an action with no app write → the measurement is void). Pure verdict
+     unit-tested in `test/visibleClick.test.js`; the refusal path is re-proved against the real app on
+     every run of `ui-audit/verify-grid-row-hold.mjs`, aimed at the very toggle that produced the false
+     finding — a guard nobody has seen fail is not a guard.
+  5. **IT WILL BITE AGAIN ON ANY VIRTUALISED LIST** — the scheduler grid, the Gantt, the Library file
+     list, any future long table. It is not specific to scrolling either: a driver's actionability
+     scroll changes what is on screen, so ANY geometry read taken across it is suspect. Sibling of
+     FOREGROUND-OR-VOID (a background tab cannot be measured) and SYNTHETIC-KEYS-DONT-EDIT (a
+     synthetic keystroke does not mutate the plan): three ways for a harness to believe its own
+     instrument.
 - **COUNT-EVERY-KIND** — **A PLAN'S CONTENTS ARE ITS FIVE DRAWN KINDS. A count that reads `[data-el-id]`
   sees ONE of them and reports the other four as NOTHING HAPPENED.** (NEW-2, 2026-08-09.) Measured live on
   the owner's Silvestri pair: a cross-plan paste landed three markup objects, the app correctly said so, and
@@ -651,6 +684,48 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
   and undoing it names exactly what went in. A counter can be blind to a kind; the model's own history cannot.
   The same trap applies to picking a "blank" canvas point: free of ELEMENTS is not free of FEATURES, and a
   pan started on a markup DRAGS IT (`BLANK_POINT_EXCLUDE`).
+- **NO-ONE-OWNS-A-COMPOSITE** — **A SURFACE BUILT FROM SEVERAL OBJECTS AT ONCE IS OWNED BY NONE OF THEM,
+  SO NO PER-OBJECT PREDICATE CAN REACH IT AND NO FEATURE CENSUS CAN SEE IT.** (B505664, 2026-08-14, after
+  the same species surfaced THREE times in one day.) A composite is a dissolved region, a merged outline,
+  a union, or a **cached raster** — anything drawn once on behalf of many.
+  1. **THE OBLIGATION.** When you add a hide, an exclusion, or **ANY** per-object state, ask separately
+     **what composites read that object**, and invalidate them EXPLICITLY. A per-object filter applied at
+     the object's own draw site is not enough and never was: the composite has already been built.
+  2. **⛔ THE GUARD IS INK OR PIXELS, NEVER REGISTRATIONS.** A census counts things that REGISTERED
+     themselves — `data-feature` keys, `[data-el-id]` nodes, model entries. A composite registers nothing,
+     so it is invisible to every count by construction. Assert on what is PAINTED
+     (`ui-audit/lib/inkCensus.mjs` attributes every painted node; a canvas pixel count answers where even
+     that cannot).
+  3. **⛔ AND THIS IS EXACTLY WHERE `COUNT-EVERY-KIND` STOPS, WHICH IS WHY THE TWO ARE NAMED TOGETHER.**
+     That rule guarantees you counted every FAMILY of object, and it is the closest thing this repo had —
+     so the next reader will reach for it and believe they are covered. **They are not.** COUNT-EVERY-KIND
+     is the instrument half, and it is the very rule that certified the road pavement green: every road's
+     own node correctly left the canvas, `4 drawn → 0`, ✓, while four unbroken grey ribbons stayed on the
+     drawing. A rule about counting every kind of object says nothing about ink belonging to several at once.
+  4. **THE THREE INSTANCES, so this entry carries its own evidence rather than reading as theory:**
+     · **B3296 — the dissolved road pavement.** Hiding Roads removed every road's hit target, label and
+       dimension and left the merged pavement painted, because `roadNet` unions the cluster from `els`.
+     · **B494050 — the export crop.** `devExtent`/`exportFeetExtent` framed the printed sheet from the whole
+       model, so a hidden group left blank paper where it used to be (PDF-PARITY).
+     · **B503184 — Doc Review's cached sharp tile.** `renderDetail`'s `tileCovers` check asks *"does what I
+       already drew still cover this view"* and knows nothing about the drawing having changed, so a
+       switched-off PDF layer stayed on screen: backdrop 0 blue px, the tile above it **579,121** — exactly
+       that shape's share of the page.
+  5. **⛔ THE SHAPE THEY SHARE, and it is why each survived review: IN EVERY ONE, THE PER-OBJECT SIDE WAS
+     CORRECT AND LOOKED CORRECT.** The filter was applied, the predicate was asked, the object's own node
+     left the DOM, the unit tests passed. Nothing in the per-object code reads as wrong on inspection —
+     which is precisely why "I checked the filter" is not evidence here.
+  ⚠ **PROSE, WITH PER-INSTANCE GUARDS — there is no generic detector and this entry does not imply one.**
+  "Is this surface a composite?" is not decidable from source, so the enforcement is behavioural and lives
+  with each instance: the repo-root `test/` suites **contentVisibility** (the seam sweep), **hiddenContentReads**
+  (the declaration table + its teeth proof) and **docReviewLayerVisibility**, plus the ui-audit harnesses
+  **verify-content-visibility** (per-family ink), **verify-hidden-content-behaviour** and
+  **verify-pdf-layer-hiding** (canvas pixels). `test/compositeSurfaceRule.test.js` guards the ENTRY itself:
+  that the rule is still stated with its operative line, and that every guard it cites still exists —
+  a rule whose evidence has been deleted has rotted, and reads as covered.
+  **⛔ AND THE PREFERRED FORM OF THE TEETH PROOF, learned on B503184: point the new check at UNTOUCHED
+  code and require it to go RED there BEFORE writing the fix.** That is stronger than planting a synthetic
+  defect, because a planted one only proves the check can see the thing you already built it to see.
 - **SYNTHETIC-KEYS-DONT-EDIT** — **A SYNTHETIC KEYSTROKE DOES NOT MUTATE THE PLAN, AND ONE DOM READ IS NOT
   A CHECK. Drive the real input, then RE-READ UNTIL THE FEATURE IS GENUINELY ABSENT.** (NEW-3, 2026-08-09.
   Sits beside FOREGROUND-OR-VOID because it is the same species: a harness that believes its own instrument.)

@@ -34,6 +34,7 @@ import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { addPage, allPageIds, findPage, migrate, movePage, deleteNode, projectOfPage, renameNode, setPageProject } from "../src/workspaces/notes/lib/notesModel.js";
+import { mergeTrees } from "../src/workspaces/notes/lib/notesCloud.js";
 
 const UID = "u_writethrough";
 const GRAND_PORT = "smqfy2r7pdec";
@@ -477,5 +478,169 @@ describe("⛔ THE RULE: a tree edit that has been WRITTEN survives every sync pa
       expect(onB).toContain(`p_other_${i}`);
     }
     expect(onA.sort()).toEqual(onB.sort());
+  });
+});
+
+/* ⛔ A RENAME HAS ITS OWN CLOCK (B342996 ×3, owner decision 2026-08-13).
+ *
+ * THE QUESTION HE SETTLED. The merge has to know which of two titles was typed last, and the
+ * only stamp a node carried was `updatedAt` — so the first fix moved `updatedAt` on a rename.
+ * That works for the merge and lies to the reader: `updatedAt` is what the page header renders
+ * as **Last edited**, so a note nobody had written a word in for months began claiming it was
+ * edited today because somebody fixed a typo in its title. His decision, verbatim: *"'Last
+ * edited' keeps meaning what it says: the text changed. A rename must not move it, and the
+ * label he sees must not change because someone renamed a note."*
+ *
+ * SO THERE ARE NOW THREE INDEPENDENT STAMPS on a node and each answers exactly one question:
+ *   • `updatedAt` — the TEXT changed. Rendered. Moved only by `touchPage`.
+ *   • `renamedAt` — the TITLE changed. Never rendered; read only to settle a title conflict.
+ *   • `filedAt`   — the PROJECT changed. Never rendered; read only to settle a filing conflict.
+ *
+ * ⛔ MIGRATION, AND IT IS THE CLAUSE THAT DECIDES WHETHER THIS IS SAFE TO SHIP. Every node
+ * written before today has neither new stamp. ABSENT IS OLDEST, NEVER NEWEST — treat a missing
+ * stamp as "just now" and a machine that has never renamed anything wins every disagreement by
+ * default, which is the exact failure the stamps exist to stop, arriving through the migration
+ * door. When NEITHER side has a stamp the rule falls back to what it was — local wins — and
+ * says so in `mergeTrees`.
+ *
+ * ⛔ AND THE DEFECT THIS BLOCK FOUND ON ITS FIRST RUN, which is the one worth remembering
+ * because it was nowhere near the merge: `migratePageNode` rebuilds every node from a NAMED
+ * FIELD LIST, and every read of the tree goes through it. It did not name the two new fields,
+ * so they were written correctly, destroyed on the next read, and the merge then compared two
+ * absent stamps, called it a tie and kept local — indistinguishable from the old behaviour, in
+ * total silence. Seven cases went red at the merge; the cause was in the reader.
+ */
+describe("⛔ A RENAME IS STAMPED SEPARATELY FROM AN EDIT", () => {
+  it("a rename does NOT move Last edited — the label he reads keeps meaning what it says", () => {
+    const before = migrate(seedTree());
+    const edited = titleOf(before, "p_probe");
+    expect(edited).toBe("Untitled page");
+
+    const after = renameNode(before, "p_probe", "A new name", 999_000);
+    const node = findPage(after, "p_probe").page;
+
+    expect(node.title).toBe("A new name");
+    expect(node.updatedAt).toBe(findPage(before, "p_probe").page.updatedAt);   // untouched
+    expect(node.renamedAt).toBe(999_000);                                      // its own stamp
+  });
+
+  it("…and a re-file does not move it either — moving a note is not writing in it", () => {
+    const before = migrate(seedTree());
+    const after = setPageProject(before, "p_probe", GRAND_PORT, 999_000);
+    const node = findPage(after, "p_probe").page;
+
+    expect(node.projectId).toBe(GRAND_PORT);
+    expect(node.updatedAt).toBe(findPage(before, "p_probe").page.updatedAt);
+    expect(node.filedAt).toBe(999_000);
+  });
+
+  /* ⛔ THE STAMPS SURVIVE A READ. Written as its own case rather than left implicit in the
+   * merge cases, because when the reader dropped them every merge case failed and none of them
+   * pointed at the reader. */
+  it("⛔ …and both stamps survive `migrate`, which is where they were being destroyed", () => {
+    const stamped = setPageProject(renameNode(migrate(seedTree()), "p_probe", "X", 111), "p_probe", GRAND_PORT, 222);
+    const reread = migrate(JSON.parse(JSON.stringify(stamped)));
+    const node = findPage(reread, "p_probe").page;
+    expect(node.renamedAt).toBe(111);
+    expect(node.filedAt).toBe(222);
+  });
+
+  it("…and an older node with no stamps reads back with none, rather than with zeros", () => {
+    const node = findPage(migrate(seedTree()), "p_probe").page;
+    expect("renamedAt" in node).toBe(false);
+    expect("filedAt" in node).toBe(false);
+  });
+
+  /* ⛔ HIS TEST, VERBATIM: *"two clients, one stale; rename on A, then have B push a tree that
+   * predates the rename — A's name must survive, in both directions."* B is stale in the way
+   * that actually happens: it has its own unpushed edit, so it MERGES rather than adopting, and
+   * its copy of the renamed note is the one it was holding before the rename was typed. */
+  it("⛔ A STALE COMPUTER'S PUSH DOES NOT UNDO A RENAME — A renames, B pushes an older tree", async () => {
+    const { server, A, B } = await twoWindows();
+
+    focus(A);
+    A.store.writeTree(renameNode(readTree(A), "p_probe", "THE NAME HE TYPED", 9000));
+    await A.store.refreshNotesSync();
+    expect(titleOf(migrate(server.tree), "p_probe")).toBe("THE NAME HE TYPED");
+
+    // B never saw the rename and has an edit of its own to push.
+    focus(B);
+    B.store.writeTree(addPage(readTree(B), { id: "p_b_edit", title: "B was busy" }).tree);
+    await B.store.refreshNotesSync();
+
+    expect(titleOf(readTree(B), "p_probe")).toBe("THE NAME HE TYPED");        // B adopted it
+    expect(titleOf(migrate(server.tree), "p_probe")).toBe("THE NAME HE TYPED"); // and did not push the old one back
+
+    focus(A);
+    await A.store.refreshNotesSync();
+    expect(titleOf(readTree(A), "p_probe")).toBe("THE NAME HE TYPED");        // and it stays
+    expect(allPageIds(readTree(A))).toContain("p_b_edit");                    // B's work still arrived
+  });
+
+  it("…and in the OTHER direction — B renames, A pushes an older tree", async () => {
+    const { server, A, B } = await twoWindows();
+
+    focus(B);
+    B.store.writeTree(renameNode(readTree(B), "p_probe", "TYPED ON THE LAPTOP", 9000));
+    await B.store.refreshNotesSync();
+
+    focus(A);
+    A.store.writeTree(addPage(readTree(A), { id: "p_a_edit", title: "A was busy" }).tree);
+    await A.store.refreshNotesSync();
+
+    expect(titleOf(readTree(A), "p_probe")).toBe("TYPED ON THE LAPTOP");
+    expect(titleOf(migrate(server.tree), "p_probe")).toBe("TYPED ON THE LAPTOP");
+  });
+
+  /* ⛔ THE MIGRATION CLAUSE, AS A CASE RATHER THAN AS A COMMENT: a machine whose copy has NO
+   * rename stamp may not win a title fight by default. This is the whole of "absent is oldest"
+   * — if absent read as "just now", the stale side below would take the title back. */
+  it("⛔ A MACHINE THAT HAS NEVER RENAMED ANYTHING CANNOT WIN BY DEFAULT", async () => {
+    const { server, A, B } = await twoWindows();
+
+    focus(A);
+    A.store.writeTree(renameNode(readTree(A), "p_probe", "STAMPED", 9000));
+    await A.store.refreshNotesSync();
+
+    // B edits the note's TITLE the old way — a tree written before the stamps existed, so the
+    // title differs with no `renamedAt` anywhere on it.
+    focus(B);
+    const stale = readTree(B);
+    const hit = findPage(stale, "p_probe").page;
+    hit.title = "UNSTAMPED — WRITTEN BY AN OLD BUILD";
+    delete hit.renamedAt;
+    hit.updatedAt = 9_999_999;                 // …and it even claims a newer EDIT
+    B.store.writeTree(stale);
+    await B.store.refreshNotesSync();
+
+    expect(titleOf(readTree(B), "p_probe")).toBe("STAMPED");
+    expect(titleOf(migrate(server.tree), "p_probe")).toBe("STAMPED");
+  });
+
+  /* ⛔ THE MUTATION CHECK he asked for: *"include a mutation check that the suite goes red on
+   * the old behaviour."* A guard nobody has watched fail is a guard that rots green, and the
+   * failure mode here is specifically SILENT — the reader dropping the field produced exactly
+   * the old answers with nothing to show for it. So the old rule is re-implemented here, run
+   * against the same input, and asserted to give the WRONG answer. If someone reverts the
+   * stamps, the cases above start agreeing with this one and this case says so. */
+  it("⛔ MUTATION: the OLD rule — local title always wins — fails these cases", () => {
+    const stale = { id: "p", title: "THE OLD NAME", updatedAt: 9_999_999, projectId: null, pages: [] };
+    const fresh = { id: "p", title: "THE NAME HE TYPED", updatedAt: 1, renamedAt: 9000, projectId: null, pages: [] };
+
+    // TODAY: the stale side merges and adopts the newer rename.
+    const now = mergeTrees({ v: 3, pages: [stale], trash: [] }, { v: 3, pages: [fresh], trash: [] });
+    expect(now.pages[0].title).toBe("THE NAME HE TYPED");
+
+    // THE OLD RULE, reconstructed: local wins unconditionally. Same input, wrong answer.
+    const oldRule = (local) => local.pages[0].title;
+    expect(oldRule({ pages: [stale] })).toBe("THE OLD NAME");
+    expect(oldRule({ pages: [stale] })).not.toBe(now.pages[0].title);
+
+    /* AND THE FIRST FIX'S RULE — judge by `updatedAt` — reconstructed the same way. It gets
+     * this case wrong too, because the stale side had been TYPED IN more recently than the
+     * side that was RENAMED, which is a different fact and used to be indistinguishable. */
+    const byUpdatedAt = (l, s) => (s.pages[0].updatedAt > l.pages[0].updatedAt ? s : l).pages[0].title;
+    expect(byUpdatedAt({ pages: [stale] }, { pages: [fresh] })).toBe("THE OLD NAME");
+    expect(byUpdatedAt({ pages: [stale] }, { pages: [fresh] })).not.toBe(now.pages[0].title);
   });
 });

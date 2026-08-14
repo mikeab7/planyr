@@ -20,8 +20,8 @@
  * ═══════════════════════════════════════════════════════════════════════════════════════
  *   plain paragraph               inserts a real tab character            (was: ✓)
  *   empty document                inserts a real tab character            (was: ✓)
- *   FIRST item of a list          nothing — a list has nothing to indent INTO, and a tab
- *                                 wedged into a bullet is a document nobody asked for
+ *   FIRST item of a list          ⛔ CHANGED — the ITEM's own level goes up by one, and no
+ *                                 node is created. See lib/notesListIndent.js. (Was: nothing.)
  *   nested / later list item      LIST indents (Shift+Tab outdents)       — never reached here
  *   table cell                    TABLE steps to the next cell            — never reached here
  *   LAST cell of a table          ⛔ NEW — adds a ROW and lands in its first cell, which is
@@ -36,6 +36,41 @@
  *                                 back out to the toolbar) — handled in NoteEditor.jsx
  *   sketch box LABEL field        moves to that box's detail field        — notesSketchEditor
  *   sketch box DETAIL field       closes the box and returns to the document — same file
+ *
+ * ⛔ THE ONE CONTEXT THAT USED TO DO NOTHING: THE FIRST ITEM OF A LIST (B454480, settled by
+ * the owner 2026-08-13).
+ *
+ * The report was *"tab sometimes doesnt work"*, and "sometimes" was the whole finding, so it was
+ * INSTRUMENTED rather than guessed at: `ui-audit/audit-notes-tab.mjs` drives a real Tab in fourteen
+ * contexts, captures the caret's node chain and depth at the moment of the press, and judges by the
+ * STORED document. Twenty-nine rows. Tab did the right thing in every one of them except three,
+ * and all three were the same fact wearing different hats:
+ *
+ *     the first TOP-LEVEL bullet          Tab → nothing
+ *     the first bullet of a NESTED list   Tab → nothing
+ *     a range whose START is a first item Tab → nothing
+ *
+ * The cause was structural rather than a slip: a `listItem`'s content is `paragraph block*`, so
+ * ProseMirror nests a bullet by making it a CHILD of the bullet above it — and the first bullet has
+ * none, so `sinkListItem` declines. This module's answer was to swallow the key and say so:
+ * *"a bullet tucks under the bullet above it; the first bullet has nothing to tuck under."* True
+ * about the structure, and the wrong answer for the person pressing the key.
+ *
+ * ⛔ SO THE RULE, IN ONE SENTENCE, AND IT IS NOW THE WHOLE SPECIFICATION: **TAB CHANGES THE LEVEL
+ * OF THE CURRENT ITEM; IT NEVER CREATES A NODE THE USER DID NOT TYPE.** Where real nesting can
+ * happen it still does, unchanged. Where it cannot, the item's own `indent` level goes up by one —
+ * an attribute on the node that is already there, so nothing is inserted, nothing is re-parented,
+ * and Shift+Tab is exactly `n − 1` with nothing left behind. The mechanism, the option that was
+ * refused (minting an empty parent bullet), and the export/print parity all live in
+ * **lib/notesListIndent.js**, which registers ABOVE the list keymap and is why this file no longer
+ * sees a list press at all. Everything else on his list — mid-word, end of line, an empty item, an
+ * already-nested item, immediately after an autolinked email or URL, inside a table cell, the last
+ * cell of a table, inside a positioned box, and the page title — behaves, and each is a pinned row
+ * in that harness so a change announces itself.
+ *
+ * ⛔ AND TAB IS REVERSIBLE where it inserts: in a plain paragraph Tab adds a tab character and
+ * Shift+Tab takes it back. "Shift+Tab did nothing" is only correct when there was nothing to undo,
+ * and that is asserted rather than assumed.
  *
  * So this is a FALLBACK, not a blanket swallow: it is registered at a LOW PRIORITY, which
  * puts its keymap after the table's and the list's. Those still run first and still win
@@ -62,10 +97,12 @@ export const TAB_PRIORITY = 50;
 
 const releaseKey = new PluginKey("noteTabRelease");
 
-/** In a list item, Tab means INDENT and the list extension has already had its turn. When it
- *  declined (the first item of a list, which has nothing to indent into) the honest answer
- *  is "nothing to do" — NOT a tab character wedged into a bullet, which is a document nobody
- *  asked for and cannot outdent again. */
+/** ⛔ A BACKSTOP, NOT THE BEHAVIOUR. By the time a list press reaches this fallback both the
+ *  indent extension (priority 200) and the list keymap (100) have declined it, so there is
+ *  genuinely nothing left to do — but the key must still not escape to the browser, because
+ *  Tab out of a note mid-sentence is the original bug this whole file exists for. What Tab
+ *  actually DOES in a list is decided in lib/notesListIndent.js; a tab character is never
+ *  wedged into a bullet, which is a document nobody asked for and cannot outdent again. */
 const inList = (editor) => editor.isActive("listItem") || editor.isActive("taskItem");
 
 /** ⛔ A NON-TEXT SELECTION IS A NODE THE USER HAS SELECTED — a picture, a sketch. Inserting

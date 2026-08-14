@@ -82,19 +82,48 @@ export function wherePredicates(statement) {
   return conds.map(conditionToPredicate);
 }
 
+/* ⛔ NEW-1 — THE ORDER IS PART OF THE DIGEST, SO THE INTERPRETER HAS TO MODEL IT, NOT GUESS IT.
+ *
+ * This used to sort with `localeCompare(…, "en")` — a stand-in for "whatever the database's default
+ * collation does", which is a guess wearing a plausible face. Two orderings can hold the same
+ * members and produce different STRINGS, and a different string is a permanent groupConflict; that
+ * is precisely the defect NEW-1 found. So: the migration must SAY which collation it orders under,
+ * and this refuses to run one that does not. `collate "C"` is byte order, which for UTF-8 is
+ * code-point order — modelled below by comparing code points, not UTF-16 code units.
+ */
+const byCodePoint = (a, b) => {
+  const A = Array.from(String(a));
+  const B = Array.from(String(b));
+  const n = Math.min(A.length, B.length);
+  for (let i = 0; i < n; i += 1) {
+    const x = A[i].codePointAt(0);
+    const y = B[i].codePointAt(0);
+    if (x !== y) return x < y ? -1 : 1;
+  }
+  return A.length === B.length ? 0 : A.length < B.length ? -1 : 1;
+};
+
 /** The `string_agg(...)` projection, as a function over an already-filtered row set. */
 export function aggProjection(statement) {
   const m =
-    /string_agg\(\s*t\.(\w+)\s*\|\|\s*'([^']*)'\s*\|\|\s*t\.(\w+)\s*,\s*'([^']*)'\s+order by\s+t\.(\w+)\s*\)/i.exec(statement);
+    /string_agg\(\s*t\.(\w+)\s*\|\|\s*'([^']*)'\s*\|\|\s*t\.(\w+)\s*,\s*'([^']*)'\s+order by\s+t\.(\w+)(\s+collate\s+"(\w+)")?\s*\)/i.exec(statement);
   if (!m) throw new Error("sqlDigestParity: could not read the string_agg projection");
-  const [, left, glue, right, join, orderBy] = m;
+  const [, left, glue, right, join, orderBy, , collation] = m;
   for (const c of [left, right, orderBy]) if (!SQL_COLUMNS.has(c)) throw new Error(`sqlDigestParity: unknown column t.${c}`);
+  if (collation !== "C") {
+    throw new Error(
+      `sqlDigestParity: the digest orders by t.${orderBy} under ${collation ? `collate "${collation}"` : "the DATABASE DEFAULT collation"}, ` +
+      `which this interpreter will not guess at and the JS twin cannot follow. The ordering is part of ` +
+      `the digest STRING: pin it with \`collate "C"\` (byte order) so both sides sort identically.`,
+    );
+  }
   const empty = /coalesce\(\s*string_agg/i.test(statement) ? (/,\s*''\s*\)/.test(statement) ? "" : null) : null;
   return {
     orderBy,
+    collation,
     empty,
     run(rows) {
-      const sorted = [...rows].sort((a, b) => String(a[orderBy]).localeCompare(String(b[orderBy]), "en"));
+      const sorted = [...rows].sort((a, b) => byCodePoint(a[orderBy], b[orderBy]));
       if (!sorted.length) {
         if (empty == null) throw new Error("sqlDigestParity: the projection has no coalesce — an empty group is NULL, not ''");
         return empty;
@@ -115,6 +144,8 @@ export function sqlAssemblyDigest(sql) {
   const filter = (rows, params) => rows.filter((row) => preds.every((p) => p.fn(row, params)));
   return {
     conditions: preds.map((p) => p.text),
+    orderBy: proj.orderBy,
+    collation: proj.collation,     // NEW-1 — the ordering is part of the digest, so it is inspectable
     members: (rows, params) => filter(rows, params),
     digest: (rows, params) => proj.run(filter(rows, params)),
   };

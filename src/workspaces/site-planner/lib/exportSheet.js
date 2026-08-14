@@ -25,6 +25,7 @@
  * blank sheet.
  */
 import L from "leaflet";
+import { visibleEls, visibleParcels } from "./contentVisibility.js";
 import { flushSync } from "react-dom";
 import { BASEMAPS } from "./basemaps.js";
 import { releaseCanvas } from "./releaseCanvas.js";
@@ -63,7 +64,7 @@ export function createExportSheet(ctx) {
   const {
     // --- drawn model + geometry -------------------------------------------------
     parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays,
-    DEV_TYPES, devExtent, elCorners, f2p, view, size, origin,
+    DEV_TYPES, devExtent, elCorners, f2p, view, size, origin, hidden,
     // --- live DOM / Leaflet handles ---------------------------------------------
     svgRef, stateRef, overlayRefs, geoMapRef,
     // --- map + layer state ------------------------------------------------------
@@ -125,7 +126,14 @@ export function createExportSheet(ctx) {
     let pts = [];
     const dev = devExtent();
     if (dev) pts = [{ x: dev.cx - dev.w / 2, y: dev.cy - dev.h / 2 }, { x: dev.cx + dev.w / 2, y: dev.cy + dev.h / 2 }];
-    else { parcels.forEach((p) => pts.push(...p.points)); els.forEach((e) => (e.points ? pts.push(...e.points) : pts.push(...elCorners(e)))); }
+    /* ⛔ B494050 — the FALLBACK crop (a plan with no development yet, only parcels or bare shapes).
+       `devExtent` above is already visibility-aware because the planner hands it in; this branch
+       reads the collections directly and would otherwise crop the sheet to content the drawing is
+       not showing. `hidden` rides the ctx for exactly this. */
+    else {
+      visibleParcels(hidden, parcels).forEach((p) => pts.push(...p.points));
+      visibleEls(hidden, els).forEach((e) => (e.points ? pts.push(...e.points) : pts.push(...elCorners(e))));
+    }
     if (!pts.length && underlay) {
       const sy = underlay.ftPerPxY || underlay.ftPerPx;
       pts = [{ x: underlay.x, y: underlay.y }, { x: underlay.x + underlay.imgW * underlay.ftPerPx, y: underlay.y + underlay.imgH * sy }];

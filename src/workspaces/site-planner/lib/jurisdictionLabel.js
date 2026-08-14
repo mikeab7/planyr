@@ -113,7 +113,13 @@ function leadFor(model, shape) {
     // The remainder is MEASURED upstream (B280704) — never assumed to be "unincorporated", because
     // at Goose Creek the other 8 of 14 lots sit inside Baytown's own ETJ, and calling ETJ land
     // unincorporated drops the city's floodplain standard out of the FFE comparison entirely.
-    return [cities, model.remainderLabel].filter(Boolean).join(SLOT_SEP);
+    /* ⛔ B367298 — TWO SLOTS, NOT ONE PRE-JOINED STRING, and this is a fit bug rather than a wording
+     * one. `slots` is what the header pill drops whole facts FROM; a split that hands it one string
+     * containing its own " · " gives the shortener nothing to drop, so the pill fell back to a CSS
+     * ellipsis and cut mid-word — measured on the owner's two longest labels (Goose Creek and
+     * Tsakiris) at laptop widths. `jur` and `text` are unchanged: the caller joins these with the
+     * same separator. Asserted in test/jurisdictionLabel.test.js. */
+    return [cities, model.remainderLabel].filter(Boolean);
   }
   if (gov.length) return gov.map((c) => `City of ${c}`).join(PEER_SEP);
   // ⛔ THE ITEM ITSELF: an ETJ leads, and "Unincorporated" is NOT printed beside it. An ETJ is
@@ -155,7 +161,9 @@ function limitedSlotFor(model) {
 
 export function formatJurisdictionLabel(model = {}) {
   const shape = jurisdictionShapeOf(model);
-  const slots = [leadFor(model, shape), etjSlotFor(model, shape), limitedSlotFor(model)].filter(Boolean);
+  const slots = [leadFor(model, shape), etjSlotFor(model, shape), limitedSlotFor(model)]
+    .flat()               // B367298 — a split lead is TWO governing slots; every other lead is one
+    .filter(Boolean);
   const jur = slots.join(SLOT_SEP);
 
   const counties = list(model.counties);

@@ -19,9 +19,9 @@
  * — by reading the real source — the layout rule it feeds.
  */
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 import { centerSlotMaxWidth, centerSlotPlan, CENTER_SLOT_GAP, CENTER_SLOT_MIN } from "../src/shared/ui/headerCenterFit.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -144,5 +144,62 @@ describe("the layout rule, read off the real source", () => {
   it("the phone layout is untouched — the row still scrolls sideways there", () => {
     expect(header).toContain(`{ flexShrink: 0, maxWidth: "none" }`);
     expect(header).toContain("if (narrow) return undefined; // phone");
+  });
+});
+
+/* ═══ B371362 — THE WORTHWHILENESS TEST TAKES ITS THRESHOLD FROM THE CONTENT ══════════════════════
+ *
+ * The owner's report: the jurisdiction pill goes to its pin-only floor while roughly half the row
+ * sits empty beside it. Measured on the real header at 1000 px: the symmetric bound comes out at
+ * 136 px, `centerSlotPlan` reads `centered` because 136 ≥ CENTER_SLOT_MIN (120), and the pill is
+ * handed a slot it cannot use — its shortest TRUE form on the owner's Goose Creek label needs 199.
+ * One band lower, at 980 px, `tight` puts the slot back in flow and the WHOLE label shows.
+ *
+ * ⛔ NEITHER SIDE WAS MALFUNCTIONING, and that is the point worth keeping. The symmetric bound is
+ * correct and is untouched here — it is the only thing standing between an out-of-flow slot and
+ * B371361's overlap defect. The pill's fallback is correct too. What was wrong is that the verdict
+ * BETWEEN them was decided against a CONSTANT (120 px — the width of the word "Unincorporated")
+ * while the quantity it stands for is a VARIABLE. The content declares it now; the constant remains
+ * the default for anything that does not. */
+describe("B371362 — a centred slot the content cannot use is not worth having", () => {
+  it("stays CENTRED when the bound clears what the content actually needs", () => {
+    // 1100 px, the owner's own side groups: bound 236, the pill's shortest true form 200.
+    const plan = centerSlotPlan({ rowW: 1100, leftW: 420, rightW: 128, min: 200 });
+    expect(plan.mode).toBe("centered");
+    expect(Math.round(plan.max)).toBe(236);
+  });
+
+  it("⛔ goes TIGHT when it does not — the exact band the owner reported", () => {
+    // 1000 px: bound 136. Against the constant this read `centered` and starved the pill.
+    expect(centerSlotPlan({ rowW: 1000, leftW: 420, rightW: 128 }).mode).toBe("centered");
+    expect(centerSlotPlan({ rowW: 1000, leftW: 420, rightW: 128, min: 199 }).mode).toBe("tight");
+  });
+
+  it("the constant is still the default, so anything that declares nothing is unchanged", () => {
+    const bare = centerSlotPlan({ rowW: 1000, leftW: 420, rightW: 128 });
+    expect(bare).toEqual(centerSlotPlan({ rowW: 1000, leftW: 420, rightW: 128, min: CENTER_SLOT_MIN }));
+  });
+
+  /* ⛔ THE BOUND ITSELF IS NOT NEGOTIABLE. It is what replaced flex as the thing keeping an
+   * out-of-flow slot off the plan switcher, so a fix for the sliver may never widen it. Pinned by
+   * value so "just give the centre a bit more" cannot be done quietly. */
+  it("does not buy the pill's room back from the side groups", () => {
+    for (const min of [120, 199, 400]) {
+      expect(centerSlotMaxWidth({ rowW: 1000, leftW: 420, rightW: 128 })).toBe(1000 - 2 * (420 + CENTER_SLOT_GAP));
+      const plan = centerSlotPlan({ rowW: 1000, leftW: 420, rightW: 128, min });
+      // A centred plan never reports MORE room than the symmetric bound allows, whatever it was asked for.
+      if (plan.max != null) expect(plan.max).toBeLessThanOrEqual(centerSlotMaxWidth({ rowW: 1000, leftW: 420, rightW: 128 }));
+    }
+  });
+
+  it("the wiring exists at both ends — the pill declares, the header reads", () => {
+    const badge = readFileSync(new URL("../src/workspaces/site-planner/components/JurisdictionBadge.jsx", import.meta.url), "utf8");
+    const header = readFileSync(new URL("../src/shared/ui/AppHeader.jsx", import.meta.url), "utf8");
+    expect(badge).toContain('pill.setAttribute("data-center-min-fit"');
+    expect(header).toContain("data-center-min-fit");
+    // …and the declared value is a function of the TEXT, never of the width granted — otherwise the
+    // header's verdict would depend on the slot it is deciding, which is the loop this repo keeps
+    // relearning (B1189, and the three readings B367298 recorded).
+    expect(badge).toMatch(/trueRungs[\s\S]{0,200}Math\.min/);
   });
 });
