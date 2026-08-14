@@ -1095,6 +1095,25 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   this is INK drawn on behalf of several features at once — the guard is now the ui-audit **ink census** helper,
   which attributes every painted node (reading `data-road-cluster`) and reports what it cannot attribute
   rather than dropping it. PDF-parity is asserted on the REAL built sheet, not argued from the clone.
+  **⛔ B494048–B494051 — AND THE AUDIT B3296 FORCED, whose SECOND HALF is the one to read.** The
+  question "who else reads the whole model where the drawing wants the visible subset" is answered
+  once, per call site, in **`hiddenContentReads.js`**: 47 bindings produce one of six artefact kinds
+  (a picture · a merged surface · the print crop · a click target · a snap magnet · an extent), and
+  each carries a verdict. **10 must-filter; 37 are CORRECT unfiltered and are recorded as such** —
+  the yield metrics, `checkDrainage`, `gsInputs`, the saved record, the undo frame, the KMZ, the
+  bonded heal, `elNeighbors`, and `parcelStreets`, a REGULATORY answer that may not move because a
+  checkbox was unticked. **Filtering one of those would be a worse bug than B3296 was**, which is why
+  "we checked this and it is right" is written down rather than left as silence. Five more seams were
+  wrong and are fixed through `visibleEls`/`visibleParcels`/`visibleMeasures`: `fit` (Zoom to fit),
+  `devExtent`+`exportFeetExtent` (the PRINT CROP — PDF-PARITY), and three MAGNETS (the ambient
+  flush-snap, `connectableRoads`, `snapToBoundary`). Click targets were checked and are correct BY
+  CONSTRUCTION. ⚠ `fit` also frames the AERIAL, which on a real plan is wider than the drawing, so
+  that defect was invisible to the owner and its harness arm needs the raster removed to see it.
+  Guards: the repo-root `test/` suite **hiddenContentReads** (whose mutation check replays the REAL
+  pre-B3296 `roadNet` body from git) and the ui-audit enumerator **audit-hidden-content-reads**,
+  which **refuses to report a clean result unless `--teeth` first finds the known defect on the
+  pre-fix tree**, plus the harness **verify-hidden-content-behaviour** (5/5, both new arms
+  mutation-proven, every arm carrying a vacuity guard).
   Guards: the repo-root `test/` suite **contentVisibility** (34, incl. the CI-runnable seam sweep naming
   `drawEls` · `roadNet` · `roadRadiusFlags`) and the ui-audit harness
   **verify-content-visibility** (47/47 on the owner's real Silvestri + Bain plans; mutation-proven —
