@@ -52,16 +52,47 @@ import { INDENTABLE, MAX_INDENT, indentAttrs, parseIndent, readIndent } from "./
 
 export { INDENTABLE, INDENT_STEP_EM, MAX_INDENT, indentAttrs, readIndent } from "./notesIndentLevel.js";
 
-/** Every indentable item touched by the current selection, innermost-last so `setNodeMarkup`
- *  positions stay valid as the transaction is built. */
+/** ⛔ THE ITEMS THE SELECTION IS ACTUALLY IN — WHICH IS **NOT** WHAT `nodesBetween` RETURNS
+ *  (NEW-OUTDENT, reported by the owner with a screenshot).
+ *
+ *  THE BUG THIS REPLACES, because the shape is subtle enough to be re-introduced. The first
+ *  version asked `doc.nodesBetween(from, to)` for every `listItem` and moved all of them.
+ *  `nodesBetween` visits every node whose range CONTAINS the position — so for a caret sitting in
+ *  a level-three bullet it returns that bullet **and its level-two parent and its level-one
+ *  grandparent**. Every ancestor moved with it, and an ancestor moving takes its ENTIRE subtree,
+ *  including branches that sit above and beside the line the user pressed on.
+ *
+ *  MEASURED on his outline (`ui-audit/diagnose-notes-outdent.mjs`): Tab on "Active" — one line,
+ *  caret collapsed — indented "Active" AND its untouched parent "MUD 377", so the whole MUD 377
+ *  branch shifted. His report was Shift+Tab on "MUD ATTORNEY" dragging "Dustin O'Neal" and its
+ *  two children; those are not its descendants, they are its NEPHEWS, which is the tell that an
+ *  ancestor moved rather than a sibling being captured.
+ *
+ *  THE RULE, and it answers the ancestor question and the range question in one pass: **an item
+ *  moves when the selection is inside ITS OWN text, not merely somewhere beneath it.** So the walk
+ *  collects TEXTBLOCKS in the range and maps each to its NEAREST indentable ancestor. A collapsed
+ *  caret yields exactly one item; a range across two bullets yields both; a range that genuinely
+ *  spans a parent's text and its child's text yields both, which is right because both lines were
+ *  selected. An ancestor whose own words the user never touched is never in the set.
+ *
+ *  ⛔ STRUCTURE ONLY, NEVER GEOMETRY — he asked for this explicitly, having noticed that the odd
+ *  line out in his outline carries a smaller font. Nothing here reads a rendered size, a position
+ *  or a box; it walks the document. */
 const itemsInSelection = (state) => {
   const { from, to } = state.selection;
-  const hits = [];
+  const hits = new Map();                       // keyed by position, so an item is counted once
   state.doc.nodesBetween(from, to, (node, pos) => {
-    if (INDENTABLE.includes(node.type.name)) hits.push({ node, pos });
+    if (!node.isTextblock) return true;
+    const $at = state.doc.resolve(pos);
+    for (let d = $at.depth; d > 0; d -= 1) {
+      if (!INDENTABLE.includes($at.node(d).type.name)) continue;
+      const owner = $at.before(d);
+      if (!hits.has(owner)) hits.set(owner, { node: $at.node(d), pos: owner });
+      break;                                    // NEAREST ancestor only — never its parents
+    }
     return true;
   });
-  return hits;
+  return [...hits.values()];
 };
 
 /** Which list-item type the caret is in, or null. */

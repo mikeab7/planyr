@@ -264,3 +264,107 @@ describe("⛔ MUTATION: the OLD behaviour — Tab on a first item does nothing �
     expect(typesIn(fabricated)).not.toEqual(typesIn(bullets("first", "second")));  // …and structural
   });
 });
+
+/* ⛔ AN ANCESTOR IS NOT A SELECTION (NEW-OUTDENT, reported by the owner with a screenshot).
+ *
+ * HIS REPORT: *"I'm trying to press shift tab to promote MUD ATTORNEY: BRIAN YATES … but it takes
+ * Dustin O'Neal, the phone number, and the email with it."* Those three are not its descendants —
+ * they are its NEPHEWS, which is the tell: an ANCESTOR moved, and an ancestor takes its whole
+ * subtree, including branches sitting above and beside the pressed line.
+ *
+ * THE CAUSE: `doc.nodesBetween(from, to)` visits every node whose range CONTAINS the position, so
+ * a caret in a level-three bullet returns that bullet AND its parent AND its grandparent. The
+ * command moved all of them.
+ *
+ * ⛔ AND THE REASON THIS BLOCK EXISTS RATHER THAN A ONE-LINE FIX: every case in this file passed
+ * BOTH BEFORE AND AFTER the fix. They all use FLAT lists, where an item has no indentable
+ * ancestor, so the bug was unreachable — a suite that cannot distinguish the broken build from the
+ * fixed one. Depth is the variable that matters and nothing here had any. */
+describe("⛔ only the item the caret is IN moves — never its ancestors", () => {
+  /** His outline, three levels deep, with the deep branch BESIDE the pressed line. */
+  const nested = () => ({
+    type: "doc",
+    content: [{ type: "bulletList", content: [
+      { type: "listItem", content: [para("MUD 377"), { type: "bulletList", content: [
+        item("Active"),
+        { type: "listItem", content: [para("Engineer"), { type: "bulletList", content: [
+          { type: "listItem", content: [para("Dustin O'Neal"), { type: "bulletList", content: [
+            item("P: 713-428-2400"), item("doneal@pape-dawson.com"),
+          ] }] },
+        ] }] },
+        item("MUD ATTORNEY"),
+      ] }] },
+    ] }],
+  });
+
+  /** The position just inside a named item's own paragraph. */
+  const caretIn = (json, text) => {
+    const doc = PMNode.fromJSON(schema, json);
+    let at = null;
+    doc.descendants((node, pos) => {
+      if (at != null || !node.isTextblock) return true;
+      if (node.textContent === text) at = pos + 1;
+      return true;
+    });
+    if (at == null) throw new Error(`no item reads "${text}"`);
+    return at;
+  };
+
+  it("⛔ HIS CASE — Tab on a nested item leaves every ancestor at the level it was", () => {
+    const before = nested();
+    const { ok, json } = run(before, +1, { at: caretIn(before, "MUD ATTORNEY") });
+    expect(ok).toBe(true);
+
+    const levels = Object.fromEntries(itemsOf(json));
+    expect(levels["MUD ATTORNEY"]).toBe(1);        // the one he pressed on
+    for (const other of ["MUD 377", "Active", "Engineer", "Dustin O'Neal", "P: 713-428-2400", "doneal@pape-dawson.com"]) {
+      expect(levels[other], `${other} moved and nobody asked it to`).toBe(0);
+    }
+  });
+
+  it("…and the same on the DEEPEST item, where there are three ancestors to get wrong", () => {
+    const before = nested();
+    const { json } = run(before, +1, { at: caretIn(before, "P: 713-428-2400") });
+    const levels = Object.fromEntries(itemsOf(json));
+    expect(levels["P: 713-428-2400"]).toBe(1);
+    for (const other of ["MUD 377", "Engineer", "Dustin O'Neal", "doneal@pape-dawson.com"]) {
+      expect(levels[other]).toBe(0);
+    }
+  });
+
+  it("…and Shift+Tab is the same rule in reverse — one item gives a level back, alone", () => {
+    const before = nested();
+    const up = run(before, +1, { at: caretIn(before, "MUD ATTORNEY") });
+    const down = run(up.json, -1, { at: caretIn(up.json, "MUD ATTORNEY") });
+    expect(JSON.stringify(down.json)).toBe(JSON.stringify(PMNode.fromJSON(schema, before).toJSON()));
+  });
+
+  /* An item's own DESCENDANTS are a different question and the answer is the opposite: they are
+   * carried by the tree itself, because they live inside it. Nothing here has to move them, and
+   * this asserts that nothing tries to move them TWICE (which would double their level). */
+  it("an item's own children keep their level relative to it — they ride the tree, not the command", () => {
+    const before = nested();
+    const { json } = run(before, +1, { at: caretIn(before, "Dustin O'Neal") });
+    const levels = Object.fromEntries(itemsOf(json));
+    expect(levels["Dustin O'Neal"]).toBe(1);
+    expect(levels["P: 713-428-2400"]).toBe(0);     // its child is untouched by the attribute
+    expect(levels["doneal@pape-dawson.com"]).toBe(0);
+  });
+
+  /* ⛔ THE MUTATION CHECK: the OLD walk, reconstructed. It returns the ancestors too, which is the
+   * whole defect — so this asserts the two walks DISAGREE on his structure. If someone restores
+   * `nodesBetween`-collects-listItems, the cases above start agreeing with this one. */
+  it("⛔ MUTATION: the OLD walk returns the ancestors, which is what moved his lines", () => {
+    const doc = PMNode.fromJSON(schema, nested());
+    const at = caretIn(nested(), "MUD ATTORNEY");
+
+    const oldWalk = [];
+    doc.nodesBetween(at, at, (node, pos) => {
+      if (INDENTABLE.includes(node.type.name)) oldWalk.push(node.textContent.split("\n")[0]);
+      return true;
+    });
+    // Two items for one collapsed caret: the bullet, and the parent nobody pressed on.
+    expect(oldWalk.length).toBeGreaterThan(1);
+    expect(oldWalk.some((t) => t.startsWith("MUD 377"))).toBe(true);
+  });
+});
