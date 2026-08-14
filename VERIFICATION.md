@@ -115,135 +115,108 @@ was never clicked" quietly ships broken.
 
 ### V2576 — B3296: a hidden road leaves the drawing, and leaves the PRINT `Blocker: real-data`
 
-**Everything reachable logged-out is proven here, on his own plan, and is NOT what this is waiting
-for.** `ui-audit/fixtures/woods-road-1m-sf.json` is his FM 359 / Woods Road plan pulled verbatim from
-production (site `smsrrlk9u576`, "Concept A 1M SF" — the plan he reported as "Concept A (copy) (copy)")
-and redacted through `scripts/plan-dump-to-fixture.mjs`. Two instruments drive it in a real browser:
-`ui-audit/diagnose-hide-ink.mjs` sweeps **every** content group and now reports 9/9 honouring the
-toggle (roads were 8 painted nodes before the fix), and `ui-audit/verify-content-visibility.mjs`
-passes **47/47** including the new per-family ink check and the PDF-parity pair read off the REAL
-built sheet (5 road-network paths shown → 0 hidden). Both are mutation-proven: removing the one-line
-filter turns the ink check red at 14 painted nodes while the old feature census stays green.
+**⛔ RUN THIS ON A DUPLICATE, NOT THE LIVE PLAN.** Steps 4–5 hide content and step 8 exports; hiding
+is view state and is saved on the plan, so a run left half-finished leaves his plan filtered. Open
+the plan menu → **Duplicate plan**, work in the copy, delete it after. **No step below changes any
+element** — the only writes are the `settings.hidden` view flags, which step 9 clears.
 
-**WHAT IS PENDING, and it is one path.** Everything above reads the built export SVG, not a
-downloaded PDF, and it runs against a seeded logged-out store rather than his signed-in plan. The
-class is mandatory-live (PDF/export parity, and a repro citing real project data), so:
+**Plan:** FM 359 / **Woods Road**, plan **"Concept A 1M SF"** (site `smsrrlk9u576`). Signed in, on
+planyr.io. Elements: 2 buildings · 10 car parking · 3 trailer parking · 2 ponds · 4 roads ·
+7 paving · 4 sidewalks · 1 parcel · 4 measurements.
 
-1. Open **FM 359 / Woods Road** on planyr.io, signed in, and uncheck **Roads** in the View panel.
-2. Confirm the grey pavement ribbons leave the canvas — not just the road labels and dimensions.
-3. Confirm the other groups still behave: Buildings, Car parking, Trailer parking, Ponds,
-   Paving / drive, Sidewalks, Parcels, Measurements.
-4. Confirm the Yield panel's numbers are unchanged across every hide (they must not move at all).
-5. **Export a PDF with Roads hidden** and confirm no road pavement prints. Then show Roads again and
-   confirm it comes back, on screen and in the export.
+| # | Do exactly this | Read this off the SCREEN | Pass |
+|---|---|---|---|
+| 1 | Open the plan; wait for the drawing to settle | roads visible as grey ribbons | — |
+| 2 | Open the on-canvas **View ▾** menu | rows for each group with counts | — |
+| 3 | Note the Yield panel's numbers (screenshot it) | Building sf, coverage, detention | — |
+| 4 | Untick **Roads** | **the grey pavement ribbons disappear**, not just the road labels/numbers | ☐ |
+| 5 | Untick each of Buildings · Car parking · Trailer parking · Ponds · Paving / drive · Sidewalks · Parcels · Measurements, one at a time, re-ticking each before the next | each group's shapes leave the canvas completely | ☐ |
+| 6 | With something hidden, look at the collapsed View header | a chip saying "N groups hidden" | ☐ |
+| 7 | Compare the Yield panel to the step-3 screenshot | **every number identical** — hiding may not move one | ☐ |
+| 8 | With **Roads** hidden, File → **Export PDF** and open it | no road pavement anywhere on the sheet | ☐ |
+| 9 | View ▾ → **Show all**, then reload the page | everything is back, on screen and in a fresh export | ☐ |
 
-### V2577 — B3297: Delete works from every state the inspector can leave you in — the SIGNED-IN leg `Blocker: real-data`
+**Already proven here and NOT what this is waiting for:** `ui-audit/diagnose-hide-ink.mjs` reports
+9/9 groups honouring the toggle on this exact plan (roads were 8 painted nodes before the fix), and
+`verify-content-visibility.mjs` passes 47/47 including the PDF-parity pair read off the real built
+sheet (5 road-network paths → 0). Both mutation-proven. **What is pending is only step 8 as a real
+downloaded PDF, and the signed-in store.**
 
-**Everything logged-out is proven here, on his own plan.** `ui-audit/verify-delete-key-scope.mjs`
-drives ten arms on the real AREA measurement from his plan with real key events
-(SYNTHETIC-KEYS-DONT-EDIT), re-reading until the feature is genuinely absent: Delete now works after
-touching the Fill opacity slider and after touching the Line style dropdown, still refuses while a
-text box holds focus, and now **explains itself on the second press as well as the first**. Seven of
-those ten are red on the pre-fix build. Its three controls re-prove B464048's data-loss bug dead —
-Enter / Escape / Tab out of the real Depth (ft) row, each followed by Backspace, leaves the building
-and its bonded elements untouched (43 → 43 features).
+### V2577 — B3297: Delete works from every state the inspector can leave you in `Blocker: real-data`
 
-**WHAT IS PENDING.** The signed-in tab, on the real record, where a delete also has to reach the
-cloud rather than just the canvas:
+**⛔ RUN THIS ON A DUPLICATE.** Steps 3–6 DELETE a measurement and step 9 presses Backspace with a
+building selected. Each is undone in the next step, but an interrupted run leaves the plan changed.
 
-1. Open his plan signed in, select the **area measurement**, open its inspector.
-2. Drag **Fill opacity**, then press **Delete** — it must delete.
-3. Undo. Change **Line style**, then press **Delete** — it must delete.
-4. Undo. Click into the **width value box**, then press **Delete** twice — it must NOT delete, and it
-   must say why **both** times.
-5. Reload and confirm the deletion persisted (a delete that never reached storage comes back).
-6. **The control, and it matters more than the rest:** select a building, type in **Depth (ft)**,
-   press Enter, then press **Backspace**. The building must survive.
+**Plan:** the same duplicate of **"Concept A 1M SF"**. **Subject:** the **AREA measurement** — the
+inspector header reads `MEASUREMENT · AREA`, roughly 98,501 sf / 2.26 ac.
 
-### V278320 — B487600: a shared reference file survives a delete in a sibling plan — the SIGNED-IN leg `Blocker: auth`
-**Status:** ⏳ pending — needs a signed-in account against real Supabase Storage.
-**Verified here (sandbox, 2026-08-13):** the pure rule + all three call sites (repo-root `test/sharedAssetRefs.test.js`, 17, with the pre-fix rule replayed as a mutation check); lint 0 errors; build green; bundle audit inside band with no new breach. **The database guard was proven against PRODUCTION on the real deletion path** — `storage.allow_delete_query` set exactly as the Storage API sets it: a shared object was REFUSED naming all four Goose Creek plans, an unreferenced object passed through, and neither probe committed.
-**Why it still needs a live pass:** the sandbox blocks sign-in, so the CLIENT half — the app actually reaching `loadSitesList()` at delete time and skipping the release — has never run against a real signed-in session with real Storage.
-**Steps:**
-1. Sign in. Open a project with two plans sharing one reference drawing (**Goose Creek** has four; **Bain** has two). ⚠ Do this on a THROWAWAY duplicate first — the whole point is that a wrong result destroys a real file.
-2. In plan A, remove the reference drawing. Expect: it goes from plan A only.
-3. Open plan B. **Expect the drawing still renders.** Pre-fix it would be gone (and gone from every other plan too).
-4. Reload plan B with the device cache cleared, so it must fetch from the cloud. Expect it still loads — proving the CLOUD object survived, not just the device copy.
-5. Check `client_errors` for `overlay-asset-retained` naming plan B as the holder.
-6. Repeat 2–5 for the aerial underlay (a plan made with **New plan, same parcel**), and for **deleting plan A entirely** — plan B's image must survive that too.
-7. Last-holder cleanup: remove the drawing from every plan, then confirm the object is finally released (no permanent orphan).
+| # | Do exactly this | Expected | Pass |
+|---|---|---|---|
+| 1 | Click the area measurement on the canvas | it selects; handles appear | — |
+| 2 | Open the left rail's **Properties** tab | header reads MEASUREMENT · AREA | — |
+| 3 | Drag the **Fill opacity** slider, then press **Delete** | **the measurement is deleted** | ☐ |
+| 4 | **Ctrl+Z** | it comes back | — |
+| 5 | Re-select it; change **Line style** in the dropdown; press **Delete** | **the measurement is deleted** | ☐ |
+| 6 | **Ctrl+Z** | it comes back | — |
+| 7 | Re-select it; click into the **line-width value box**; press **Delete** | it is **NOT** deleted, and a message says why | ☐ |
+| 8 | Press **Delete** a second time without clicking anything | **the message appears again** (it used to be silent) | ☐ |
+| 9 | ⛔ **THE CONTROL.** Click a building; in Properties click **Depth (ft)**, press **Enter**, then press **Backspace** | **the building and its truck courts / trailer parking survive** | ☐ |
+| 10 | Delete the area measurement for real, then **reload the page** | it is still gone (a delete that never reached storage comes back) | ☐ |
+| 11 | Delete the duplicate plan | — | — |
 
-### V275056 — B463922: the schedule stops jumping while HE edits it `Blocker: real-data`
+**Read out of STORAGE, not the screen, for step 10:** after the reload the measurement must be
+absent from the drawing — that is the same read, and it is the one that proves the delete reached
+the server rather than only the canvas.
 
-**What is proven here, and it is not nothing.** `ui-audit/verify-grid-row-hold.mjs` drives the real
-scheduler grid in a real browser on the baked seed schedule, logged out, and asserts **rendered
-position**: with a row selected, collapsing a group above it, expanding it again, and collapsing a
-second one each hold that row at **±0 px** (budget ±2), the selection never moves off it, and every
-step is proved to have changed the model. Mutation-proven three ways — disabling the compensation
-takes three steps red at ±48 px, dropping the toggle's mousedown guard takes them red on a wandering
-selection, and making `visibleClick` permissive takes the gate's own self-test red.
+**Already proven here:** `ui-audit/verify-delete-key-scope.mjs` drives all ten arms on this plan's
+real area measurement with real key events, 10/10, with 7 of 10 red on the pre-fix build; its three
+controls re-prove B464048's data-loss bug dead (43 → 43 features). **Pending: the signed-in tab,
+where a delete also has to reach the cloud.**
 
-**What is NOT proven, and why this entry exists.** The reproduction B463922 was filed on turned out
-to be the old harness's own scroll (a virtualised list renders rows above the viewport; the driver
-scrolled to reach one), so **the owner's original symptom — *"sometimes if I am editing cells I will
-just jump halfway down the schedule or all the way up"* — has never actually been observed by an
-instrument.** What shipped fixes a real defect in the same place (the collapse triangle stealing the
-selection) and makes the edited row hold its place; whether that is what he was hitting is unknown.
-His schedules are far denser than the seed data and are signed-in, which is the density and the
-data path the sandbox cannot reach.
+### V284768 — B494050: a hidden group does not change how much PAPER the sheet uses `Blocker: real-data`
 
-**The check, on his own board:**
-1. Open a real schedule (Tsakiris / Bain), scroll into the middle of it, and click into a cell.
-2. Fold a group above that cell. The cell you are working on must not move on screen.
-3. Keep editing normally for a few minutes — the specific thing to watch for is the view leaving the
-   row you are typing in, in either direction.
-4. If it happens even once, note what was on screen and what you had just done; that is the missing
-   observation, and it is worth more than another sandbox pass.
+**⛔ RUN THIS ON A DUPLICATE** — it hides content and exports.
 
-**Confirmed on the DEPLOYED build (2026-08-13), because merged and deployed are different claims.**
-`planyr.io/sequence/` fetched and hashed: byte-identical to `origin/main`, so the deploy is current.
-Driven on those exact bytes: the edited row holds its place through a fold, the selection stays on
-it, what is typed next lands in the cell it was in, and #1028's Enter-latch and portal mousedown
-guard still hold (12/12). Scope: Chromium cannot reach the public internet from this sandbox, so the
-deployed bytes are served locally — the artifact is the deployed one, the edge is not under test.
+**Plan:** the duplicate of **"Concept A 1M SF"**. This is the half V2576 step 8 does not cover: not
+"is the road on the sheet" but "is the sheet still framed around where it used to be".
 
-**⛔ What that does NOT settle: his symptom has never been seen by any instrument here.** Both fixes
-are real; neither is known to be the thing he described.
+| # | Do exactly this | Read this off the ARTEFACT | Pass |
+|---|---|---|---|
+| 1 | With everything visible, File → **Export PDF**; keep it | note how much of the page the drawing fills | — |
+| 2 | Untick **Roads** (and/or Ponds), export again | the drawing **fills MORE of the page** — no wide blank margin where the hidden group used to be | ☐ |
+| 3 | Untick **Parcels** as well; export again | the crop tightens again onto what remains | ☐ |
+| 4 | Show all; export once more | the sheet matches the step-1 export | ☐ |
+| 5 | Delete the duplicate plan | — | — |
 
-**Status:** ⏳ pending. **Do not mark B463922 Done on the sandbox evidence alone** — an owner-reported
-symptom is never closed on a null (NEVER-PARK), and the question is on `OWNER-TODO.md`.
-### V273520 — B484337: does a tab that has STOPPED saving actually say so? `Blocker: auth`
+**Proven here:** on Silvestri the built sheet's viewBox width goes **782 → 595** when roads are
+hidden, and **782 → 782** on a deliberately broken build. **Pending: a real downloaded PDF on a
+signed-in plan** — the harness reads the sheet SVG the export path builds, not the rasterised file.
 
-**What was found, so the check is aimed at the right thing.** The owner asked for proof, on the
-running app rather than from the code, that a refused save is genuinely visible — "this repo's
-signature defect is a mechanism that looks right and never fires, and a safety check whose warning
-never reaches the screen is precisely that shape." It never fired. Two independent swallows, both
-now fixed: the sync-event handler dropped any event without a `kind`/`id`, and `client-stale` has
-neither; and the save badge never named the `stale` state, so a tab that had given up committing
-painted a green **"synced"**.
+### V284769 — B494049: an invisible object does not pull the cursor `Blocker: real-data`
 
-**Proven here, and NOT what this entry waits on.** The engine really reaches `stale` and the event
-it emits really carries no element (`test/staleVisible.test.js`, driven through the real engine);
-the matrix really turns it into the reload warning; both source repairs are mutation-proven red
-when reverted. What cannot be done here is the only thing that matters to him — seeing it.
+**⛔ RUN THIS ON A DUPLICATE — every step MOVES GEOMETRY.** This is the one live check in this set
+that writes to the model, and it is why the duplicate matters most here.
 
-**Why it is blocked.** The `stale` state exists only on a signed-in cloud session, and this
-sandbox's egress proxy answers `403 to CONNECT` for the Supabase host (measured, not assumed), so no
-browser in this environment can sign in and the write engine never starts.
+**Plan:** the duplicate of **"Concept A 1M SF"**. **Snap must be ON** — press **S** on the canvas
+(or check the toolbar's snap toggle) before starting, or every arm is vacuous.
 
-**The signed-in steps, for whoever has a browser:**
-1. Sign in, open a plan with a bonded building, and open the SAME plan in a second tab.
-2. In tab B, drag the building repeatedly. In tab A, drag the same building at the same time.
-3. Keep going until tab A's engine gives up (several consecutive fully-rejected batches).
-4. **PASS** requires BOTH: a toast reading *"This tab is out of date — your recent changes here
-   can't be saved. Reload the page to catch up."*, and the save badge turning to its **error**
-   state with the detail *"This tab is out of date — reload to keep saving"*.
-   **FAIL** is a green "synced" badge, or silence, while edits stop reaching the cloud.
-5. Reload tab A and confirm saving resumes.
+| # | Do exactly this | Expected | Pass |
+|---|---|---|---|
+| 1 | Press **S** to arm snap | the snap toggle reads on | — |
+| 2 | Untick **Buildings** in View ▾ | the buildings leave the canvas | — |
+| 3 | Drag a **paving pad** slowly across where a hidden building's edge was | it does **NOT** jump or stick to the invisible edge | ☐ |
+| 4 | **Ctrl+Z** | the pad returns | — |
+| 5 | Show buildings; untick **Roads**; draw a **new road** whose endpoint lands near a hidden road's end | the new endpoint does **NOT** weld to the invisible road | ☐ |
+| 6 | **Ctrl+Z** | the new road is removed | — |
+| 7 | Untick **Parcels**; drag any element near where the boundary was | it does **NOT** snap to the invisible boundary | ☐ |
+| 8 | **Ctrl+Z**, View ▾ → **Show all**, delete the duplicate plan | — | — |
 
-**One correction to carry into the check.** A single group refusal is deliberately SILENT — it
-converges on its own and `assembly-split` maps to no toast at all. Only the persistent case shows
-the banner. That is the intended design, not a miss; a toast per transient conflict would be noise.
+**NOT proven here, and this is the honest gap:** the three magnets were found by reading the code and
+fixed there; unlike the extent and print halves they were **not** driven in a browser, because a
+drag-and-see-if-it-sticks arm needs a hidden neighbour positioned precisely against a dragged
+element and no fixture in the repo has that geometry. The unit-level guard
+(`test/hiddenContentReads.test.js`) proves each call site asks the predicate; **this checklist is
+what proves it in the hand.**
 
 ### V258992 — B464048 / B464049 / B477808: the inspector keyboard + error-state work, on a SIGNED-IN plan `Blocker: auth`
 

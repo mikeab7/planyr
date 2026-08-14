@@ -74,7 +74,7 @@ import { cullRectFor, cullToView, shouldCull } from "./lib/viewCull.js";
  * beside `cullToView`, because "drawn ≠ exists" is a rule this codebase already relies on and
  * hiding is that same rule with a different predicate. Read that module's header before adding a
  * consumer: the metrics pass iterates `els`/`parcels` and must never read a draw set. */
-import { elHidden, isHidden, parcelAcreageHidden, normalizeRetiredToggles } from "./lib/contentVisibility.js";
+import { elHidden, isHidden, parcelAcreageHidden, normalizeRetiredToggles, visibleEls, visibleParcels, visibleMeasures } from "./lib/contentVisibility.js";
 import { makeLabelFrame } from "./lib/exportLabelScale.js";
 import { orderLayersByPriority, LAYER_STAGE_SIZE } from "./lib/layerSchedule.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
@@ -5015,7 +5015,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const snapToBoundary = useCallback((p) => {
     const tol = Math.max(5, 10 / view.ppf);
     let best = null, bestD = Infinity;
-    for (const pc of parcels) {
+    // ⛔ B494049 — same rule as the flush-snap: a hidden parcel's edge may not pull the cursor.
+    for (const pc of visibleParcels(hiddenGroups, parcels)) {
       const pts = pc.points;
       for (let i = 0; i < pts.length; i++) {
         const q = nearestPointOnSeg(p, pts[i], pts[(i + 1) % pts.length]);
@@ -5040,7 +5041,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const connectTolFt = () => Math.min(12 / (view.ppf || 1), ROAD_CONNECT_MAX_FT);
   // halfW = centerline → outer curb line (travelW/2 + curb): findRoadConnect measures the connect
   // tolerance to the visible pavement EDGE (B961/NEW-3), not the hidden centerline.
-  const connectableRoads = () => els.filter((x) => x.type === "road" && isCenterlineRoad(x) && !x.attachedTo).map((x) => ({ id: x.id, pts: x.pts, halfW: Math.max(0, (+x.travelW || 0) / 2) + roadCurbWidth(x) }));
+  // ⛔ B494049 — a hidden road is not a magnet. Welding the endpoint of the road you are drawing to
+  // something that is not on screen moves your geometry for a reason you cannot see.
+  const connectableRoads = () => visibleEls(hiddenGroups, els).filter((x) => x.type === "road" && isCenterlineRoad(x) && !x.attachedTo).map((x) => ({ id: x.id, pts: x.pts, halfW: Math.max(0, (+x.travelW || 0) / 2) + roadCurbWidth(x) }));
   // Apply a planRoadConnect() result (merge / weld / tee) in ONE setEls. The caller has already
   // pushed history, so the whole connect is a single undo. A merge absorbs the target road
   // (tombstoned so a later sync can't resurrect it — TOMBSTONE-DELETES) and rounds the fresh
@@ -5166,9 +5169,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   /* ------------ fit to content ------------ */
   const fit = useCallback(() => {
+    /* ⛔ B494048 — FRAME WHAT IS ON SCREEN, NOT WHAT IS IN THE MODEL. Measured on the owner's plan:
+       hiding both ponds — 2,616 ft of the drawing's width — left Zoom to fit at a byte-identical
+       zoom, so the buildings he could actually see stayed squeezed into the middle of a frame built
+       around two things that were not there. An extent is a picture decision, so it reads the
+       visible subset; every COUNT still reads the model (see lib/hiddenContentReads.js). */
     const pts = [];
-    parcels.forEach((pc) => pts.push(...pc.points));
-    els.forEach((e) => pts.push(...(e.points ? e.points : elCorners(e))));
+    visibleParcels(hiddenGroups, parcels).forEach((pc) => pts.push(...pc.points));
+    visibleEls(hiddenGroups, els).forEach((e) => pts.push(...(e.points ? e.points : elCorners(e))));
     if (underlay) {
       const sy = underlay.ftPerPxY || underlay.ftPerPx;
       pts.push({ x: underlay.x, y: underlay.y });
@@ -5181,7 +5189,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const pad = 60;
     const ppf = Math.min((size.w - pad * 2) / bw, (size.h - pad * 2) / bh);
     setView({ ppf, offX: pad - minX * ppf + (size.w - pad * 2 - bw * ppf) / 2, offY: pad - minY * ppf + (size.h - pad * 2 - bh * ppf) / 2 });
-  }, [parcels, els, underlay, size]);
+  }, [parcels, els, underlay, size, hiddenGroups]);
 
   // Fit *after* a state change has committed: bump the nonce instead of calling
   // fit() from a stale closure (which would frame the view without the content
@@ -7666,7 +7674,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           let ncx = snap(g.cx + dx), ncy = snap(g.cy + dy);
           const ids = new Set(d.members.map((m) => m.id));
           if (snapOn && gbox) { // ambient flush-snap along world axes (pure alignment, no bond)
-            const others = els.filter((x) => !ids.has(x.id)).map(ortho).filter(Boolean);
+            // ⛔ B494049 — the ambient flush-snap's neighbour set. An invisible object must never pull
+            // the cursor; this one can shift an element by its whole tolerance (up to 20 ft).
+            const others = visibleEls(hiddenGroups, els).filter((x) => !ids.has(x.id)).map(ortho).filter(Boolean);
             const sc = edgeSnapCenter({ cx: ncx, cy: ncy, w: gbox.w, h: gbox.h }, others, Math.min(20, 10 / view.ppf));
             ncx = sc.cx; ncy = sc.cy;
           }
@@ -14393,6 +14403,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const exportCtx = () => ({
     parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays,
     DEV_TYPES, devExtent, elCorners, f2p, view, size, origin,
+    hidden: hiddenGroups,   // B494050 — the export's fallback crop asks the same predicate the canvas does
     svgRef, stateRef, overlayRefs, geoMapRef,
     basemapOn, basemapSrc, overlays, layerStatus,
     PAL, f0,
@@ -14419,8 +14430,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Bounding box (feet) of the development — the placed elements, not bare parcels.
   const DEV_TYPES = ["building", "paving", "parking", "trailer", "pond", "road"];
   const devExtent = () => {
+    /* ⛔ B494050 — THE PRINT CROP. This seeds the print frame AND is handed to the export path as the
+       one source of truth for what the sheet crops to, so an extent over the whole model prints
+       blank paper around content the drawing is not showing. PDF-PARITY: what you see is what
+       prints, and that has to include how much paper it takes. */
     const pts = [];
-    els.forEach((e) => { if (!DEV_TYPES.includes(e.type)) return; e.points ? pts.push(...e.points) : pts.push(...elCorners(e)); });
+    visibleEls(hiddenGroups, els).forEach((e) => { if (!DEV_TYPES.includes(e.type)) return; e.points ? pts.push(...e.points) : pts.push(...elCorners(e)); });
     if (!pts.length) return null;
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     pts.forEach((p) => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
@@ -14993,7 +15008,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * the one-line form still collides we fall back to drawing that one line rather than hiding the
    * chip — a number the user asked for is never silently dropped, only shortened.
    */
-  const measureChips = measures.map((m, i) => {
+  /* ⛔ B494051 — the chips are OBSTACLES for the element-label collision pass as well as things that
+     are drawn. The render is already gated (a hidden measurement's chip is not painted), but an
+     unfiltered obstacle set makes a building's label yield around a chip that is not on screen. */
+  const measureChips = visibleMeasures(hiddenGroups, measures).map((m, i) => {
     const fpts = measPts(m);
     const mode = measMode(m);
     if (mode === "count" ? fpts.length < 1 : fpts.length < 2) return null;
