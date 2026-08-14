@@ -451,35 +451,19 @@ export const NoteAnchor = Node.create({
       const content = document.createElement("div");
       content.className = "planyr-anchor-content";
 
-      /* ⛔ A WAY TO GET RID OF IT. The box had a grab handle and no delete, so the only exits
-       * were emptying it and clicking away — which is a discard and does not work once there
-       * are words in it — or backspacing through the text. */
-      const del = document.createElement("button");
-      del.type = "button";
-      del.className = "planyr-anchor-del";
-      del.setAttribute("contenteditable", "false");
-      del.setAttribute("title", "Delete this box");
-      del.setAttribute("aria-label", "Delete this box");
-      del.setAttribute("data-testid", "note-anchor-delete");
-      del.textContent = "×";
-      del.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); });
-      del.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const pos = typeof getPos === "function" ? getPos() : null;
-        if (pos == null) return;
-        editor.commands.removeNoteAnchor(pos);
-        /* ⛔ AND THE FOCUS COMES BACK TO THE DOCUMENT, WHICH IS WHAT MAKES THE DELETE UNDOABLE
-         * (B421489). The button suppresses `mousedown` so the press does not move the caret — but
-         * the node the caret was IN has just been removed, so focus landed on `<body>` and Ctrl+Z
-         * went nowhere: the box was gone and could not be brought back. Measured — after the
-         * press, `document.activeElement` was BODY, the editor did not contain it, and a Ctrl+Z
-         * left the box count at zero. A destructive control that cannot be undone is worse than
-         * one that is missing, and this is the control somebody reaches for by accident. */
-        editor.commands.focus();
-      });
-
-      /* ⛔ AND A WAY TO CHANGE HOW WIDE IT IS. Only the width: a box's height is its words. */
+      /* ⛔ THE DELETE × IS GONE (B539651, owner instruction 2026-08-14). *"the delete option
+       * shouldn't just be shown, like, anytime I click on the box… I should only be able to use
+       * the keystroke to delete or a right click and then delete option."*
+       *
+       * Selecting a box now shows the ring and the resize handle and NOTHING destructive. There
+       * are still two ways to remove one, and both are deliberate acts rather than a button
+       * sitting under the pointer: **Delete/Backspace** while it is selected, and **Delete this
+       * box** on the right-click menu, where it is last and separated because it is the
+       * destructive one. Do not re-add a visible ×.
+       *
+       * ⛔ WHAT MUST SURVIVE ITS REMOVAL, because it was learned the hard way (B421489): both
+       * remaining routes hand FOCUS BACK TO THE DOCUMENT after removing the node, or Ctrl+Z has
+       * nowhere to land and a destructive action becomes un-undoable. Both do. */
       const size = document.createElement("div");
       size.className = "planyr-anchor-size";
       size.setAttribute("contenteditable", "false");
@@ -487,7 +471,6 @@ export const NoteAnchor = Node.create({
       size.setAttribute("data-testid", "note-anchor-size");
 
       dom.appendChild(grip);
-      dom.appendChild(del);
       dom.appendChild(size);
       dom.appendChild(content);
 
@@ -549,7 +532,23 @@ export const NoteAnchor = Node.create({
         const done = sizing;              // the gesture's record, kept past the reset below
         sizing = null;
         try { size.releasePointerCapture(e.pointerId); } catch (_) { /* already released */ }
-        if (!changed) return;                       // a press that never moved writes nothing
+        /* ⛔ A PRESS THAT NEVER MOVED IS A PRESS ON THE BOX, NOT A RESIZE (B539652) — and this is
+         * CHROME-NEVER-EATS-A-PRESS clause 4 in its purest form. The handle only EXISTS once the
+         * box is selected, so press 1 of the two-stage gesture summons it and press 2, at the very
+         * same point, lands on chrome that was not there when the gesture began. The result was
+         * measured by the owner's own acceptance harness (§10 of `verify-notes-anchor-zoom`): type
+         * into box A, then B, then A again, and the markers come back in the wrong boxes.
+         *
+         * ⛔ THE FIX IS AT THE RESOLVER, NOT ON THE OBJECT (clause 5): a handle is chrome belonging
+         * to its box, so a press on it that did not DRAG is transparent — it forwards to the box
+         * and puts the caret where it landed, which is what press 2 was always for. A press that
+         * did drag is a resize and is untouched. The handle keeps its own gesture; it just stops
+         * swallowing the one gesture it was never meant to take. */
+        if (!changed) {
+          const pos = typeof getPos === "function" ? getPos() : null;
+          if (pos != null) editor.chain().focus().setTextSelection(pos + 1).run();
+          return;                                   // …and it still writes nothing
+        }
         const pos = typeof getPos === "function" ? getPos() : null;
         /* ⛔ COMMIT THE GESTURE'S OWN NUMBER, NEVER THE DOM'S (B434417). This used to read
          * `parseFloat(dom.style.width)` at pointer-up, and the DOM is not the gesture's memory —

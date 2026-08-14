@@ -200,7 +200,13 @@ async function run(label, { width, height, zoomSteps = 0 }) {
   await page.mouse.click(c0.x, c0.y);
   await pacedWait(page, 400);
   ok(`${label} · ⛔ CLICKING A BOX SELECTS IT`, (await renderedBoxes(page))[0].selected);
-  ok(`${label} · …and NOW the controls are there`, (await visibleControls(page)).length === 3, JSON.stringify(await visibleControls(page)));
+  /* ⛔ AMENDED (B539651): TWO controls, not three — the delete × is gone. *"the delete option
+   * shouldn't just be shown, like, anytime I click on the box… I should only be able to use the
+   * keystroke to delete or a right click and then delete option."* So this now asserts BOTH
+   * halves: the non-destructive controls appear, and the destructive one does NOT. */
+  const shown = await visibleControls(page);
+  ok(`${label} · …and NOW the controls are there`, shown.length === 2, JSON.stringify(shown));
+  ok(`${label} · ⛔ …and NOTHING destructive is among them`, !shown.some((c) => /delete/.test(c)), JSON.stringify(shown));
 
   /* ═══ ATTACK 3 — SELECTED, DELETE REMOVES IT; UNDO BRINGS IT BACK ═════════════════════════ */
   const beforeDel = await storedBoxes(page);

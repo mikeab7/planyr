@@ -1004,11 +1004,25 @@ describe("the project a notebook belongs to", () => {
     const node = read(NOTES, "lib", "notesAnchorNode.js");
     expect(node, "a delete, as one undoable transaction").toContain("removeNoteAnchor:");
     expect(node, "and a width — height is the words, deliberately").toContain("setNoteAnchorWidth:");
-    expect(node).toMatch(/data-testid", "note-anchor-delete"/);
+    /* ⛔ AMENDED (B539651, owner instruction 2026-08-14): the visible delete × is GONE. *"the
+     * delete option shouldn't just be shown, like, anytime I click on the box… I should only be
+     * able to use the keystroke to delete or a right click and then delete option."* The COMMAND
+     * is still asserted above — both remaining routes (the key, and the right-click item) run it
+     * — but no destructive control sits under the pointer any more, and this guard now says so in
+     * the direction that matters: it must not come back. */
+    expect(node, "no visible delete × on a box").not.toMatch(/note-anchor-delete/);
     expect(node).toMatch(/data-testid", "note-anchor-size"/);
+    const editor = read(NOTES, "components", "NoteEditor.jsx");
+    expect(editor, "delete lives on the right-click menu instead").toMatch(/note-menu-delete-box|onDeleteBox/);
     // ⛔ A press that never moved writes NOTHING — not a transaction, not an undo frame.
     expect(node, "the drag commits only if it moved").toMatch(/if \(!dragged\) return;/);
-    expect(node, "and so does the resize").toMatch(/if \(!changed\) return;/);
+    /* ⛔ AMENDED (B539652): the resize's no-move branch no longer just RETURNS — it forwards the
+     * press to the box and puts the caret in it, because a handle that only exists once the box is
+     * selected was swallowing press 2 of the two-stage gesture (CHROME-NEVER-EATS-A-PRESS clause
+     * 4). It still writes nothing, which is the property this line was guarding. */
+    expect(node, "and so does the resize").toMatch(/if \(!changed\) \{/);
+    expect(node, "…and a press that did not drag forwards to the box instead of vanishing")
+      .toMatch(/setTextSelection\(pos \+ 1\)/);
     /* ⛔ THE DRAG IS SCROLL-PROOF: it keeps the grab offset and reads the host rect FRESH on
      * every move. The old form measured a delta between two CLIENT coordinates, which mean
      * different things once the scroller moves underneath the gesture. */

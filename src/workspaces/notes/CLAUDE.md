@@ -611,6 +611,39 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   an item has no indentable ancestor — depth was the variable that mattered and nothing had any.
   Fixture and diff harness: **diagnose-notes-outdent** under `ui-audit/`.
 - `lib/notesKeyScope.js` — the one predicate above, plus the measured two states it separates.
+  ⛔ **AND `UNGATED_KEYS` — ESCAPE IS NEVER GATED (B539653), which is a rule rather than a hole.**
+  The gate exists so a binding cannot steal a key the person typing NEEDS; a caret has no use for
+  Escape. Gating it broke the two-stage box gesture: Escape #1 backs out of editing, Escape #2
+  deselects — and **after #1 the editor still HOLDS FOCUS** (measured at every step:
+  `activeElement` is the ProseMirror div, `isContentEditable` true), so #2 was declined forever
+  and a box could not be deselected from the keyboard. ⛔ The FIRST attempt assumed the blur had
+  landed and only required focus inside the selection's own host; it changed nothing, because
+  focus never left. **Reasoning about the state twice cost two builds; probing it took one.** It
+  does not reopen B434418's "handled twice" — the mat's Escape was deleted then, so there is still
+  exactly one handler.
+- **⛔ RIGHT-CLICK IS WORD'S MENU, AND NOTHING DESTRUCTIVE SITS UNDER THE POINTER (B539651).** *"the
+  delete option shouldn't just be shown, like, anytime I click on the box… I should only be able to
+  use the keystroke to delete or a right click and then delete option. And then the right click
+  should have the normal formatting option, like it's a Word document or an email… Just copy
+  Word."* The delete × is **gone from the box**; selecting one shows the ring and the resize handle
+  and nothing else. Delete/Backspace still removes it, and `Delete this box` is last and separated
+  on the box's right-click menu. **The items are a TABLE, not markup**, which is what lets the
+  document menu and the box menu be one component — a box's menu is the document's PLUS its own
+  action, because right-clicking a box is still right-clicking inside text. ⛔ Every row cancels
+  `mousedown` or the command acts on a selection the menu already stole, and that failure is
+  SILENT. ⛔ Cut/copy go through the browser's own editing command deliberately: the async
+  Clipboard API needs a permission a menu click cannot ask for, and a refusal there is a silent
+  no-op — `execCommand` reports, so a refusal names the shortcut that always works. Harness:
+  **verify-notes-context-menu**, 26 checks, real right-clicks, judged on the stored document.
+- **⛔ AND A HANDLE THAT DID NOT DRAG IS TRANSPARENT (B539652)** — CHROME-NEVER-EATS-A-PRESS clause
+  4 in its purest form. The resize handle only EXISTS once the box is selected, so press 1 of the
+  two-stage gesture summons it and press 2, at the same point, lands on chrome that was not there
+  when the gesture began: type into box A, then B, then A again, and the markers come back in the
+  wrong boxes. **The fix is at the RESOLVER (clause 5)**: a press on the handle that did not drag
+  forwards to the box and puts the caret where it landed. A press that DID drag is a resize and is
+  untouched. It was PRE-EXISTING and proven so — the same check failed identically with the day's
+  other changes stashed out — and closing it took `verify-notes-anchor-zoom` to **40/40** for the
+  first time.
 - **⛔ THE RIGHT EDGE GROWS THE PAGE; IT DOES NOT CRUSH THE BOX (B539648).** He photographed a box
   rendering *"literally one character wide"* against the right margin, and **named the cause as an
   instruction of his own**: when the block used to JUMP LEFT he asked for *"if it will not fit,

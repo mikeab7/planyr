@@ -21,7 +21,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-import { caretOwnsTheKey, readCaretScope, FIELD_SELECTOR } from "../src/workspaces/notes/lib/notesKeyScope.js";
+import { caretOwnsTheKey, readCaretScope, bindingShouldDecline, UNGATED_KEYS, FIELD_SELECTOR } from "../src/workspaces/notes/lib/notesKeyScope.js";
 
 const NOTES = join(process.cwd(), "src/workspaces/notes");
 
@@ -122,8 +122,10 @@ describe("⛔ THE PROPERTY: every global keydown binding in Notes declines to th
       if (!binds.length) continue;
       const r = rel(f);
       if (EXEMPT.has(r)) continue;
-      if (!/keysBelongToTheCaret\s*\(/.test(src)) {
-        offenders.push(`${r} binds keydown on window/document but never asks keysBelongToTheCaret()`);
+      /* Either entry point counts: `bindingShouldDecline` is `keysBelongToTheCaret` plus the
+       * named Escape exemption (B539653), so a binding using it has asked the question. */
+      if (!/keysBelongToTheCaret\s*\(|bindingShouldDecline\s*\(/.test(src)) {
+        offenders.push(`${r} binds keydown on window/document but never asks the key-scope predicate`);
       }
     }
     expect(offenders, `\n${offenders.join("\n")}\n`).toEqual([]);
@@ -152,6 +154,24 @@ describe("⛔ THE PROPERTY: every global keydown binding in Notes declines to th
 
   it("the leaking binding is fixed at its own site — NoteEditor asks before nudging", () => {
     const src = readFileSync(join(NOTES, "components/NoteEditor.jsx"), "utf8");
-    expect(src).toMatch(/if \(keysBelongToTheCaret\(\)\) return;/);
+    expect(src).toMatch(/if \(bindingShouldDecline\(e\)\) return;/);
+  });
+
+  /* ⛔ ESCAPE IS EXEMPT, AND THAT IS A RULE RATHER THAN A HOLE (B539653). The gate exists so a
+   * binding cannot steal a key the person typing NEEDS. A caret has no use for Escape, and
+   * gating it broke the two-stage box gesture: after backing out of editing the editor still
+   * holds focus, so the second Escape — the one that deselects — was declined forever. */
+  it("⛔ Escape is never gated — the caret has no use for it", () => {
+    expect(UNGATED_KEYS.has("Escape")).toBe(true);
+    // …even in the state that broke it: focus still inside the editor.
+    const typing = { activeElement: { isContentEditable: true, closest: () => null }, getSelection: () => ({ anchorNode: null }) };
+    expect(bindingShouldDecline({ key: "Escape" }, typing)).toBe(false);
+  });
+
+  it("…and every key the caret DOES want is still gated in that same state", () => {
+    const typing = { activeElement: { isContentEditable: true, closest: () => null }, getSelection: () => ({ anchorNode: null }) };
+    for (const key of ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Delete", "Backspace", "a"]) {
+      expect(bindingShouldDecline({ key }, typing), `${key} must still be gated`).toBe(true);
+    }
   });
 });

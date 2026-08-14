@@ -57,12 +57,26 @@ export function readCaretScope(doc = typeof document === "undefined" ? null : do
   const inField = !!(active && active.closest && active.closest(FIELD_SELECTOR));
   const activeEditable = inField || !!(active && active.isContentEditable);
 
+  /* ⛔ A SELECTION IS NOT A CARET UNLESS ITS EDITABLE ALSO HAS FOCUS (B539653).
+   *
+   * The DOM selection SURVIVES a blur. So after `editor.commands.blur()` — which is exactly what
+   * backing out of a box with Escape does — the anchor node is still sitting inside the
+   * contenteditable while nobody is typing in it. Reading that as "the caret owns the key" made
+   * this predicate answer TRUE forever after, and every global binding stayed dead: the SECOND
+   * Escape, the one that deselects the box, did nothing at all.
+   *
+   * Caught by `verify-notes-box-selection` — six rows across three window sizes — and it is worth
+   * naming the shape: the arrow fix this predicate exists for was correct, and it was correct in
+   * the two states that were MEASURED. This is the third state, which nobody measured because it
+   * only exists for the instant after a blur. */
   let caretInEditable = false;
   const sel = typeof doc.getSelection === "function" ? doc.getSelection() : null;
   const node = sel && sel.anchorNode;
   if (node) {
     const el = node.nodeType === 3 ? node.parentElement : node;
-    caretInEditable = !!(el && el.closest && (el.isContentEditable || el.closest('[contenteditable="true"]')));
+    const host = el && el.closest && (el.isContentEditable ? el : el.closest('[contenteditable="true"]'));
+    // …and the focus has to actually be in that host, or this is a leftover range, not a caret.
+    caretInEditable = !!(host && active && (host === active || (host.contains && host.contains(active))));
   }
   return { activeEditable, caretInEditable };
 }
@@ -74,4 +88,29 @@ export function readCaretScope(doc = typeof document === "undefined" ? null : do
  *  without anybody remembering this file exists. */
 export function keysBelongToTheCaret(doc) {
   return caretOwnsTheKey(readCaretScope(doc));
+}
+
+/* ⛔ ESCAPE IS NOT A KEY THE CARET WANTS, AND GATING IT BROKE A REAL GESTURE (B539653).
+ *
+ * This predicate exists so a binding cannot STEAL a key the person typing needs — arrows, Delete,
+ * Backspace, a character. **Escape is not one of those.** A caret has no use for it, so "someone
+ * is typing" is not a reason to withhold it, and withholding it broke the two-stage box gesture:
+ * Escape #1 backs out of editing, Escape #2 deselects — but after #1 the editor still HOLDS FOCUS
+ * (measured: `activeElement` is the ProseMirror div, `isContentEditable` true, at every step), so
+ * the gate declined #2 and the box could never be deselected from the keyboard.
+ *
+ * ⛔ MEASURED, not reasoned — the first attempt at this fix assumed the blur had landed and only
+ * required the focus to be inside the selection's own host. It made no difference, because focus
+ * never left. Six rows across three window sizes in `verify-notes-box-selection` said so both
+ * times, which is the argument for that harness running on every change here.
+ *
+ * ⛔ AND IT DOES NOT REOPEN B434418's "HANDLED TWICE": that defect was Escape running in the mat
+ * AND the window binding, and the mat's call was deleted then. There is still exactly one
+ * handler; this only stops the gate from silencing it. */
+export const UNGATED_KEYS = new Set(["Escape"]);
+
+/** The one call a global binding should make with the event in hand. */
+export function bindingShouldDecline(event, doc) {
+  if (event && UNGATED_KEYS.has(event.key)) return false;
+  return keysBelongToTheCaret(doc);
 }

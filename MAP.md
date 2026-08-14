@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-14 @ `dac69293` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-14 @ `a8ec5fdd` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -88,7 +88,7 @@ _524 source files mapped._
 - **`src/workspaces/notes/lib/notesKeys.js`** — the device storage KEY FORMAT and the scope rule, written down once — a dependency-free leaf so the one module allowed to read these keys from outside the Notes route cannot drift from the store.
   - _exports_: `IGNORED_DUPES_KEY_BASE`, `LOCAL_SCOPE`, `PAGE_KEY_BASE`, `scopeFor`, `SYNC_KEY_BASE`, `TREE_KEY_BASE`
 - **`src/workspaces/notes/lib/notesKeyScope.js`** — who owns a keypress: while there is a live caret in editable text, every global binding in Notes is inert. One shared predicate, asserted as a source property.
-  - _exports_: `caretOwnsTheKey`, `FIELD_SELECTOR`, `keysBelongToTheCaret`, `readCaretScope`
+  - _exports_: `bindingShouldDecline`, `caretOwnsTheKey`, `FIELD_SELECTOR`, `keysBelongToTheCaret`, `readCaretScope`, `UNGATED_KEYS`
 - **`src/workspaces/notes/lib/notesListIndent.js`** — Tab changes the LEVEL of the current item and never creates a node the user did not type: the `indent` attribute on listItem/taskItem, above the list keymap.
   - _exports_: `default`, `INDENT_STEP_EM`, `INDENTABLE`, `indentAttrs`, `LIST_INDENT_PRIORITY`, `MAX_INDENT`, `readIndent`, `shiftIndent`
 - **`src/workspaces/notes/lib/notesMarkdown.js`** — PURE Markdown export of a note's document model (GFM tables/task lists, HTML fallback for what Markdown cannot spell, plus a lossiness report) and `docToText` for body search.
