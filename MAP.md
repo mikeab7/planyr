@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-13 @ `f6d252a` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-14 @ `f986796` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_513 source files mapped._
+_515 source files mapped._
 
 ## infra
 
@@ -83,8 +83,12 @@ _513 source files mapped._
   - _exports_: `isImageFile`, `MAX_IMAGE_DIM`, `prepareNoteImage`
 - **`src/workspaces/notes/lib/notesImageNode.js`** — The `noteImage` schema node: the document holds an image ID, never the bytes. Owns the paste/drop intake plugin and the node view that draws a VISIBLE broken-image state when a picture's bytes are gone.
   - _exports_: `default`, `NoteImage`
+- **`src/workspaces/notes/lib/notesIndentLevel.js`** — a list item's own indent LEVEL, decided once: reader, ceiling and markup. Pure and engine-free so the Markdown exporter (static path) can read it.
+  - _exports_: `INDENT_STEP_EM`, `INDENTABLE`, `indentAttrs`, `MAX_INDENT`, `parseIndent`, `readIndent`
 - **`src/workspaces/notes/lib/notesKeys.js`** — the device storage KEY FORMAT and the scope rule, written down once — a dependency-free leaf so the one module allowed to read these keys from outside the Notes route cannot drift from the store.
   - _exports_: `IGNORED_DUPES_KEY_BASE`, `LOCAL_SCOPE`, `PAGE_KEY_BASE`, `scopeFor`, `SYNC_KEY_BASE`, `TREE_KEY_BASE`
+- **`src/workspaces/notes/lib/notesListIndent.js`** — Tab changes the LEVEL of the current item and never creates a node the user did not type: the `indent` attribute on listItem/taskItem, above the list keymap.
+  - _exports_: `default`, `INDENT_STEP_EM`, `INDENTABLE`, `indentAttrs`, `LIST_INDENT_PRIORITY`, `MAX_INDENT`, `readIndent`, `shiftIndent`
 - **`src/workspaces/notes/lib/notesMarkdown.js`** — PURE Markdown export of a note's document model (GFM tables/task lists, HTML fallback for what Markdown cannot spell, plus a lossiness report) and `docToText` for body search.
   - _exports_: `assetIdsInDoc`, `attachmentIdsInDoc`, `attachmentIdsInDocs`, `docToMarkdown`, `docToText`, `escapeText`, `imageIdsInDoc`, `imageIdsInDocs`, `lossyNote`, `MD_INLINE_ATTACHMENT_MAX`, `MD_MAX_HEADING`, `NOTE_MD_HANDLED`, `pageToMarkdown`, `safeFileName`
 - **`src/workspaces/notes/lib/notesMarquee.js`** — PURE: one gesture on empty page, two meanings, decided by distance — place below the slop, marquee above it. Also the band's rectangle, which boxes it caught, shift-toggling, arrow nudges, and moving a whole set by ONE clamped delta so the arrangement cannot deform.
