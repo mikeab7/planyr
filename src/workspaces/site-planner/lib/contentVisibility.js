@@ -274,3 +274,21 @@ export function normalizeRetiredToggles(settings) {
   if (!settings || settings.showDocks !== false) return null;
   return { showDocks: true };
 }
+
+/* ---------------------------------------------------------------- the visible subset
+ *
+ * ⛔ B494048–B494050 — THE SEAMS B3296 DID NOT REACH, and one helper so they cannot drift apart.
+ *
+ * B3296 filtered the dissolved road pavement and raised the obvious question: who else reads the
+ * whole model where the drawing wants the visible subset? The audit
+ * (`ui-audit/audit-hidden-content-reads.mjs`, and the declaration table in `hiddenContentReads.js`)
+ * answered it, and the answer was five more — an extent, a print crop and three magnets.
+ *
+ * ⚠ THESE ARE FOR PICTURES AND MAGNETS ONLY. Every count, save, undo frame, ledger and regulatory
+ * inference still reads the raw collections, deliberately, and the declaration table records which
+ * is which. Reaching for `visibleEls` inside a metrics pass would silently drop hidden objects out
+ * of the owner's yield numbers — a worse bug than the one this closes.
+ */
+export const visibleEls = (hidden, els) => (hidden ? (els || []).filter((e) => !elHidden(hidden, e)) : (els || []));
+export const visibleParcels = (hidden, parcels) => (isHidden(hidden, "parcels") ? [] : (parcels || []));
+export const visibleMeasures = (hidden, measures) => (isHidden(hidden, "measures") ? [] : (measures || []));
