@@ -81,6 +81,13 @@ const FIXTURE = arg("fixture", "richfield");
  * ran. Real pointer and key input only — a synthetic KeyboardEvent does not mutate the plan
  * (SYNTHETIC-KEYS-DONT-EDIT). */
 const EDITS = Number(arg("edits", 0));
+/* ⛔ THE DISCRIMINATOR FOR B1121'S RESIDUE. The edit cycle is drag-THEN-undo, so a residue could sit
+ * in either half: the COMMIT path (the drag itself) or the RESTORE path (`applySnapshot`). Undo
+ * history cannot be the answer on its own — it is capped at 80 frames AND a drag+undo pair nets to
+ * zero growth in the ring — so the two paths have to be separated by measurement rather than
+ * reasoned about. `--no-undo` drags without undoing; if the slope survives, the residue is in the
+ * commit path, and if it vanishes it is in the restore path. */
+const NO_UNDO = process.argv.includes("--no-undo");
 
 /* The hi-res gate for THIS overlay, derived rather than hard-coded, so the cycle stays correct if
  * the ladder constants move. Below → base raster; above → the Tier-2 re-raster path. */
@@ -299,8 +306,7 @@ async function run() {
     for (let k = 1; k <= 6; k++) await page.mouse.move(spot.x + k * 5, spot.y + k * 3);
     await page.mouse.up();
     await pacedWait(page, 90);
-    await page.keyboard.press("Control+z");
-    await pacedWait(page, 90);
+    if (!NO_UNDO) { await page.keyboard.press("Control+z"); await pacedWait(page, 90); }
     return true;
   };
 
@@ -326,7 +332,7 @@ async function run() {
 
   const first = rows[0], last = rows.at(-1);
   const out = {
-    arm: ARM, rounds: ROUNDS, fixture: FIXTURE, editsPerRound: EDITS, census, pdfServed,
+    arm: ARM, rounds: ROUNDS, fixture: FIXTURE, editsPerRound: EDITS, undoAfterEachEdit: !NO_UNDO, census, pdfServed,
     ppfCycle: [PPF_LOW, PPF_HIGH],
     budgetHeapMB: 160,
     rows,
