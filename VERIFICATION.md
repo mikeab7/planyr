@@ -113,6 +113,16 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V295136 — B519907: on his real Richfield plan, signed in, an undo no longer rebuilds the aerial `Blocker: auth` `Blocker: real-data`
+**What was verified here (sandbox, logged out, on his redacted Richfield fixture):** per-action tile churn measured with a `MutationObserver` — click 0/0 · drag 0/0 · **undo 272/272 → 0/0** · redo 0/0 — with the map alive and all 274 tiles still on screen; the controlled A/B over 12 rounds × 6 edits (listeners +6/round → flat; retained heap +1.66 → +0.65 MB/round; RSS delta 457.2 → 241.2 MB); `npm run perf:undochurn` green and **red with the fix stashed**; full suite 11,404 green; bundle budgets within ceiling.
+**Still pending, and it needs his machine because the sandbox cannot sign in:**
+1. Open **Richfield → Concept A** signed in on planyr.io, with the aerial basemap ON.
+2. Drag any element, then **Ctrl+Z**. The aerial must NOT blink, reload or go grey — the imagery should stay put while the element snaps back.
+3. Repeat ten or so times, then check Chrome's task manager: the tab should no longer climb the way it did (it was ~600–700 MB on 2026-08-14).
+4. Work normally for several minutes with edits and undos, and confirm the "gets slow after a while" lag does not return. **If it still degrades, that is the RESIDUAL heap slope on B1121, not a failure of this fix** — say so and re-open B1121 rather than this item.
+5. Confirm a genuine location change still works: move a site's map anchor and check the aerial re-centres (the fix must not pin the map to a stale origin).
+
+
 ### V250304 — B455360: a complicated parcel cut, on his own signed-in cloud plans `Blocker: auth`
 
 **SCOPE WIDENED (B520560) — this entry now also covers keeping every piece and the naming of

@@ -49,6 +49,12 @@ export const FIXTURE_FILES = {
    * fixture carrying CENTRELINE ROADS beside ponds and side-parking assemblies, which is what makes
    * it the plan that can see the dissolved-road defect. */
   woods: "woods-road-1m-sf.json",
+  /* The owner's Richfield plan — the LARGEST in his database (129 live features) and the one he
+   * recorded as slow on 2026-08-14. It is the only fixture whose sheet overlay is a 2160 × 3024 pt
+   * ARCH-E1 page with `knockout: true`, which is the combination the re-raster path is dearest on;
+   * hiding that overlay is what relieved his symptom, so an instrument that cannot open this plan
+   * cannot see the defect. */
+  richfield: "richfield-concept-a.json",
 };
 
 /** Resolve a short name (or a bare filename) to a parsed fixture. Throws NAMING the options,

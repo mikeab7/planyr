@@ -418,6 +418,14 @@ Runtime deps are kept few and deliberate. New client dependency added 2026-07-10
   build, it passes in ~40s, and the armed auto-merge then completes on its own with zero owner
   involvement. This is a known, self-serviceable hiccup — **do the nudge automatically as part
   of shipping; do NOT report it as a blocker.** (Learned 2026-06-22 on PR #274.)
+  **⛔ AND READ THE RIGHT ENDPOINT BEFORE CONCLUDING THE CHECK NEVER STARTED (measured 2026-08-14, and this
+  session got it wrong twice before checking).** `pull_request_read method=get_status` returns the COMMIT
+  STATUS API; this repo's `build` reports a **CHECK RUN**. So `{"state":"pending","total_count":0}` there is
+  the NORMAL reading for a run that is queued or in progress, and it is **NOT evidence that the trigger was
+  suppressed**. Acting on it cost two unnecessary `Nudge CI` commits and a hunt through `build.yml` for a
+  `paths:` filter that does not exist — while three runs were already `in_progress` for those very shas. The
+  authoritative read is the WORKFLOW RUN: `actions_list method=list_workflow_runs event=pull_request`, matched
+  on `head_sha`. Nudge on the absence of a RUN, never on `total_count: 0`.
   **⚠ CHECK `mergeable_state` FIRST — a "dirty" (merge-conflicted) PR silently swallows EVERY nudge
   (learned 2026-07-06 on PR #518).** GitHub only creates `pull_request` build runs against the PR's
   test-MERGE ref; while the PR conflicts with `main` that ref can't exist, so nudges, close/reopen —
@@ -668,6 +676,36 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
      FOREGROUND-OR-VOID (a background tab cannot be measured) and SYNTHETIC-KEYS-DONT-EDIT (a
      synthetic keystroke does not mutate the plan): three ways for a harness to believe its own
      instrument.
+  6. **⛔ AND THE FOURTH WAY, WHICH IS THIS RULE ONE STEP FURTHER: THE HARNESS'S OWN *QUERY* PRODUCED
+     THE READING. POINT A PROBE AT A CASE WHOSE ANSWER IS ALREADY KNOWN, AND REQUIRE IT TO REPORT THAT
+     KNOWN ANSWER, BEFORE TRUSTING IT ON THE UNKNOWN CASE.** (B532112, 2026-08-14, owner-adopted.)
+     Clauses 1–5 are *the harness's own ACTION* changed what it then measured; this is *the harness's
+     own QUESTION* was never about the thing it claims. Same species, same remedy shape as clause 3 —
+     ask a second, known way and compare the two answers.
+     - **⛔ WHY THIS REPO DID NOT ALREADY HAVE IT, and it is the sharpest part: EVERY DISCIPLINE HERE
+       PROVES A GUARD CAN GO *RED* ON KNOWN-BROKEN CODE, AND NOTHING FORCES A PROBE TO GO *GREEN* ON
+       KNOWN-GOOD CODE.** The teeth proof (NO-ONE-OWNS-A-COMPOSITE), the mutation check,
+       `mintGateE2E`'s rejection path, VIEW-INDEPENDENT-ONCE §6's never-OBSERVED failure — all of them
+       guard the red side. **That asymmetry is not incidental: it is exactly why both failures below
+       landed on the unguarded side**, each reporting a defect in code that was correct.
+     - **THE TWO CASES**, from one session's aerial-backdrop diagnostic: a page-wide
+       `document.querySelectorAll('label input[type=range]')` swept in a slider belonging to a
+       DIFFERENT panel and reported the row as carrying a control it does not have; and a control that
+       only renders once its row is SELECTED was read COLLAPSED, reporting a working row broken. A
+       third the same day is the same species one level up — a position check compared the empty state
+       against the OCCUPIED one and reported those two branches' *intended* difference as a regression.
+     - **WHAT CAUGHT ALL THREE was a known-good arm sitting beside the unknown ones** — it stayed green
+       while the others failed, which is what localised each fault to the probe rather than to the app.
+       **It was there by luck of the question's shape, not by rule.** That is what this clause fixes.
+     - **THE CHECKABLE FORM, because a caution rots and a check does not:** a harness asserting a
+       property must carry **at least one arm whose expected value is known INDEPENDENTLY of the code
+       under test**, and must FAIL if that arm does not report its known value. **A run that exercises
+       only the unknown arms is VACUOUS and must say so rather than print a score.** The vocabulary
+       already exists — `MUST_BE_PRESENT` in `count-pond-invocations`, the vacuity guards in
+       `verify-hidden-content-behaviour` — this makes it the default rather than a per-harness habit.
+     - Scope every query to the element under test, and put a surface into the state the assertion is
+       about before measuring it. Precedent harnesses: `ui-audit/verify-aerial-empty-state-copy.mjs`
+       (its with-an-aerial arm is the known case) and `ui-audit/diagnose-aerial-backdrop-row.mjs`.
 - **COUNT-EVERY-KIND** — **A PLAN'S CONTENTS ARE ITS FIVE DRAWN KINDS. A count that reads `[data-el-id]`
   sees ONE of them and reports the other four as NOTHING HAPPENED.** (NEW-2, 2026-08-09.) Measured live on
   the owner's Silvestri pair: a cross-plan paste landed three markup objects, the app correctly said so, and

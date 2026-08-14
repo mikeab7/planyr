@@ -35,7 +35,12 @@ describe("NEW-1 — a plan's location is SETTABLE, and everything gated on it re
   /* Mutation: change `useState(() => normalizeOrigin(restored?.origin))` back to
      `const origin = restored?.origin || null` → this goes red. */
   it("`origin` is REACT STATE, not a read-only field off the restored record", () => {
-    expect(planner).toMatch(/const \[origin, setOrigin\] = useState\(\(\) => normalizeOrigin\(restored\?\.origin\)\)/);
+    /* B519907 renamed the STATE to `originRaw` and derives an identity-stable `origin` from it, so
+       an undo restoring an equal-valued origin no longer re-runs ten effects (and no longer tears
+       the basemap down). The invariant this guards is unchanged — the anchor is SETTABLE React
+       state, not a read-only field off the restored record — so the guard tracks the new name. */
+    expect(planner).toMatch(/const \[originRaw, setOrigin\] = useState\(\(\) => normalizeOrigin\(restored\?\.origin\)\)/);
+    expect(planner, "`origin` must still be derived from that state").toMatch(/const origin = useMemo\(\s*\(\) => originRaw,/);
     // …and the old read-only form is gone, so it cannot come back by accident.
     expect(planner.includes("const origin = restored?.origin || null;")).toBe(false);
   });
