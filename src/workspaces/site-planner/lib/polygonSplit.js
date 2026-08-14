@@ -199,8 +199,8 @@ const CUT_REASONS = {
 // encloses before the split refuses rather than reports it. One part in ten thousand.
 const SELF_OVERLAP_TOL = 1e-4;
 
-// A resulting piece smaller than this fraction of the parent is a scrap, not a parcel. Dropped —
-// and always reported back, so nothing about the drop is silent.
+// A resulting piece smaller than this fraction of the parent is too small to see on the drawing.
+// It is still KEPT as a piece (B520560) — this only decides whether the caller is told it is there.
 const SLIVER_FRACTION = 1e-5;
 
 const fail = (code, extra) => ({ ok: false, pieces: null, code, message: CUT_REASONS[code] || CUT_REASONS["no-division"], ...extra });
@@ -553,19 +553,25 @@ function splitPolygonByCut(points, path, opts = {}) {
   const traced = keep
     .map((f) => ({ ring: f.ring, edgeSrc: f.edgeSrc, area: Math.abs(f.signed) }))
     .sort((a, b) => b.area - a.area);
-  /* SLIVERS. A scrap a millionth the size of the tract is not a parcel — it is either a corner
-   * clipped by the cut or, on the Bain tract, the doubly-wound crumb its own broken outline
-   * leaves behind. Two zero-acre "parcels" appearing on his plan would be worse than useless. So
-   * they are dropped — but their count and total area are RETURNED, never swallowed, and the
-   * caller says so on screen. */
-  const slivered = traced.filter((p) => p.area <= whole * SLIVER_FRACTION);
-  const pieces = traced.filter((p) => p.area > whole * SLIVER_FRACTION);
-  const slivers = slivered.length
-    ? { count: slivered.length, area: slivered.reduce((a, p) => a + p.area, 0) }
+  /* ⛔ SLIVERS ARE KEPT — B520560, owner decision, and it REVERSES what B455360 shipped.
+   * That first cut dropped any piece under a hundred-thousandth of the parent (a corner clipped by
+   * the cut, or the doubly-wound crumb the Bain tract's own broken outline leaves behind) and
+   * reported the loss. His instruction is the opposite and it is the safer rule:
+   *   "Nothing may be discarded silently — if a cut produces a sliver, he gets it as a parcel
+   *    rather than losing the acreage."
+   * So every traced piece is returned. `tiny` still NAMES the ones too small to notice on screen,
+   * because an eight-square-foot parcel on a hundred-acre plan is invisible and he should be told
+   * it exists — but it is a notice, not a removal. The only faces that never become pieces are
+   * those with no measurable area at all (already dropped at the trace, at one part in a billion),
+   * which are numerical noise rather than land. */
+  const pieces = traced;
+  const small = pieces.filter((p) => p.area <= whole * SLIVER_FRACTION);
+  const tiny = small.length
+    ? { count: small.length, area: small.reduce((a, p) => a + p.area, 0) }
     : null;
   if (pieces.length < 2) return fail("no-division");
   if (pieces.some((p) => polySelfIntersects(p.ring))) return fail("self-intersecting");
-  return { ok: true, pieces, extended, outlineDrift, slivers };
+  return { ok: true, pieces, extended, outlineDrift, tiny };
 }
 
 /* A point strictly inside a traced face. Its centroid is not usable — a face can be any shape at
