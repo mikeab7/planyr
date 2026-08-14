@@ -1,0 +1,2957 @@
+{
+  "_redacted": [
+    "storageKey (identity / cloud row)",
+    "callout text (shape-preserving stand-in: exact line count, per-line length and whitespace positions; content destroyed)",
+    "acct (county appraisal record — third-party owner names, mailing addresses, valuations)",
+    "addr (county appraisal record — third-party owner names, mailing addresses, valuations)",
+    "attrs (county appraisal record — third-party owner names, mailing addresses, valuations)",
+    "plan / site display names"
+  ],
+  "schemaVersion": 13,
+  "origin": {
+    "lat": 29.98731176112534,
+    "lon": -95.77730343242138
+  },
+  "county": "harris",
+  "name": "Concept A",
+  "site": "Richfield",
+  "parcels": [
+    {
+      "z": 0,
+      "id": "psmsdrvzr9gzx_0",
+      "locked": true,
+      "points": [
+        {
+          "x": 2360.932529191199,
+          "y": -1157.6952307162683
+        },
+        {
+          "x": 2302.329416681085,
+          "y": -284.00792547559433
+        },
+        {
+          "x": 2292.912419259286,
+          "y": -136.603882707307
+        },
+        {
+          "x": 2282.2200820689254,
+          "y": 52.113723240140146
+        },
+        {
+          "x": 2273.057129592694,
+          "y": 240.91089586469354
+        },
+        {
+          "x": 2265.4246985048085,
+          "y": 429.77655263544244
+        },
+        {
+          "x": 2258.8249288921797,
+          "y": 636.5046386124918
+        },
+        {
+          "x": 2253.4391190584574,
+          "y": 877.9203748322651
+        },
+        {
+          "x": 2250.5522704198834,
+          "y": 1119.378167717111
+        },
+        {
+          "x": 2247.961807563876,
+          "y": 3151.4033281225734
+        },
+        {
+          "x": 2192.466341154184,
+          "y": 3201.5934038397295
+        },
+        {
+          "x": 2192.347559505415,
+          "y": 3219.2461180645196
+        },
+        {
+          "x": 1430.304201975933,
+          "y": 3224.4901287617813
+        },
+        {
+          "x": 687.1201301306712,
+          "y": 3229.62331448484
+        },
+        {
+          "x": 586.9479886373238,
+          "y": 3230.310145196353
+        },
+        {
+          "x": -2257.7897099122974,
+          "y": 3248.450205179765
+        },
+        {
+          "x": -2275.0457275572626,
+          "y": 1858.1576570462212
+        },
+        {
+          "x": -2293.897056571412,
+          "y": 458.00651660426774
+        },
+        {
+          "x": -2303.29302567079,
+          "y": -108.98771864738916
+        },
+        {
+          "x": -2323.9627368554156,
+          "y": -1132.8019511449675
+        },
+        {
+          "x": -2335.1441247887515,
+          "y": -1551.6959354084772
+        },
+        {
+          "x": -2344.983393802923,
+          "y": -2162.1847125979652
+        },
+        {
+          "x": -2347.4553591753443,
+          "y": -2339.6055589915777
+        },
+        {
+          "x": -2350.407566134113,
+          "y": -2508.293965310736
+        },
+        {
+          "x": -2352.050901661932,
+          "y": -2600.850725717071
+        },
+        {
+          "x": -2352.165420810483,
+          "y": -2608.759650930327
+        },
+        {
+          "x": -2352.1657049711703,
+          "y": -2608.772154255684
+        },
+        {
+          "x": -2354.585383698225,
+          "y": -2747.045639538159
+        },
+        {
+          "x": -2354.902797803213,
+          "y": -2765.20132869653
+        },
+        {
+          "x": -2355.5498451789827,
+          "y": -2802.1779410292907
+        },
+        {
+          "x": -2360.7404325566604,
+          "y": -3237.8326405360453
+        },
+        {
+          "x": -2360.932529191199,
+          "y": -3248.7412285206055
+        },
+        {
+          "x": -2155.472394651996,
+          "y": -3157.5862620173834
+        },
+        {
+          "x": -2098.8868651034386,
+          "y": -3131.6873168059155
+        },
+        {
+          "x": -2003.9610076467961,
+          "y": -3089.390252957379
+        },
+        {
+          "x": -1714.9223568826562,
+          "y": -2955.5068576993044
+        },
+        {
+          "x": -1669.220692828632,
+          "y": -2935.2059947795997
+        },
+        {
+          "x": -1623.5193129352954,
+          "y": -2914.9057002071177
+        },
+        {
+          "x": -1577.8199222162193,
+          "y": -2894.603132278335
+        },
+        {
+          "x": -1532.1188264970558,
+          "y": -2874.301985210305
+        },
+        {
+          "x": -1445.0555750816363,
+          "y": -2835.6294665178225
+        },
+        {
+          "x": -1077.6440563013446,
+          "y": -2673.67040976735
+        }
+      ],
+      "chipHidden": true,
+      "labelOffset": {
+        "x": -2945.6920294405613,
+        "y": -884.563726369337
+      }
+    }
+  ],
+  "parcelDrawings": [],
+  "els": [
+    {
+      "z": 0,
+      "id": "e1454881kaaymz",
+      "rot": 0,
+      "type": "pond",
+      "points": [
+        {
+          "x": 2221.63,
+          "y": 2190.67
+        },
+        {
+          "x": 1191.87,
+          "y": 2172.02
+        },
+        {
+          "x": 885.8,
+          "y": 2012.37
+        },
+        {
+          "x": 837.28,
+          "y": 2030.68
+        },
+        {
+          "x": 798.13,
+          "y": 2078.29
+        },
+        {
+          "x": 784.06,
+          "y": 2446.15
+        },
+        {
+          "x": 739.03,
+          "y": 2787.42
+        },
+        {
+          "x": 682.15,
+          "y": 2997.16
+        },
+        {
+          "x": 722.29,
+          "y": 3186.77
+        },
+        {
+          "x": 2163.82,
+          "y": 3191.7
+        },
+        {
+          "x": 2226.16,
+          "y": 3132.19
+        },
+        {
+          "x": 2225.22,
+          "y": 2841.24
+        }
+      ]
+    },
+    {
+      "h": 1139,
+      "w": 391,
+      "z": 1024,
+      "cx": 1537.92,
+      "cy": -284.68,
+      "id": "e1454883kaaymz",
+      "rot": 270,
+      "dock": "cross",
+      "type": "building",
+      "dockSide": "right"
+    },
+    {
+      "h": 1029,
+      "w": 135,
+      "z": 2048,
+      "cx": 1537.92,
+      "cy": -547.68,
+      "id": "e1454884kaaymz",
+      "zd": 135,
+      "rot": 270,
+      "type": "paving",
+      "attachedTo": "e1454883kaaymz",
+      "truckCourt": {
+        "side": "right"
+      }
+    },
+    {
+      "h": 50,
+      "w": 1029,
+      "z": 3072,
+      "cx": 1537.92,
+      "cy": -640.18,
+      "id": "e1454885kaaymz",
+      "zd": 50,
+      "cfg": {
+        "single": true,
+        "trailerL": 50,
+        "trailerW": 12,
+        "trailerAisle": 0
+      },
+      "rot": 0,
+      "type": "trailer",
+      "noFit": true,
+      "forCourt": "e1454884kaaymz",
+      "prevZone": "e1454884kaaymz",
+      "attachedTo": "e1454883kaaymz"
+    },
+    {
+      "h": 1029,
+      "w": 135,
+      "z": 4096,
+      "cx": 1537.92,
+      "cy": -21.68,
+      "id": "e1454886kaaymz",
+      "zd": 135,
+      "rot": 270,
+      "type": "paving",
+      "attachedTo": "e1454883kaaymz",
+      "truckCourt": {
+        "side": "left"
+      }
+    },
+    {
+      "h": 50,
+      "w": 1029,
+      "z": 5120,
+      "cx": 1537.92,
+      "cy": 70.82,
+      "id": "e1454887kaaymz",
+      "zd": 50,
+      "cfg": {
+        "single": true,
+        "trailerL": 50,
+        "trailerW": 12,
+        "trailerAisle": 0
+      },
+      "rot": 0,
+      "type": "trailer",
+      "noFit": true,
+      "forCourt": "e1454886kaaymz",
+      "prevZone": "e1454886kaaymz",
+      "attachedTo": "e1454883kaaymz"
+    },
+    {
+      "h": 620,
+      "w": 2152,
+      "z": 6144,
+      "cx": -426.6647699331746,
+      "cy": -1757.8899546474072,
+      "id": "e1454907cgzlnc",
+      "rot": 23.791381659316926,
+      "dock": "cross",
+      "type": "building",
+      "dockAxis": "x",
+      "dockSide": "bottom"
+    },
+    {
+      "h": 135,
+      "w": 2042,
+      "z": 7168,
+      "cx": -274.37837639598996,
+      "cy": -2103.310139847169,
+      "id": "e1454908cgzlnc",
+      "zd": 135,
+      "rot": 23.791381659316926,
+      "type": "paving",
+      "attachedTo": "e1454907cgzlnc",
+      "truckCourt": {
+        "side": "top"
+      }
+    },
+    {
+      "h": 135,
+      "w": 2042,
+      "z": 8192,
+      "cx": -578.9511634703592,
+      "cy": -1412.4697694476454,
+      "id": "e1454909cgzlnc",
+      "zd": 135,
+      "rot": 23.791381659316926,
+      "type": "paving",
+      "attachedTo": "e1454907cgzlnc",
+      "truckCourt": {
+        "side": "bottom"
+      }
+    },
+    {
+      "h": 50,
+      "w": 2042,
+      "z": 9216,
+      "cx": -237.06316738356725,
+      "cy": -2187.9495229755876,
+      "id": "e1454910cgzlnc",
+      "zd": 50,
+      "cfg": {
+        "single": true,
+        "trailerL": 50,
+        "trailerW": 12,
+        "trailerAisle": 0
+      },
+      "rot": 23.791381659316926,
+      "type": "trailer",
+      "noFit": true,
+      "forCourt": "e1454908cgzlnc",
+      "prevZone": "e1454908cgzlnc",
+      "attachedTo": "e1454907cgzlnc"
+    },
+    {
+      "h": 50,
+      "w": 2042,
+      "z": 10240,
+      "cx": -616.266372482782,
+      "cy": -1327.8303863192268,
+      "id": "e1454911cgzlnc",
+      "zd": 50,
+      "cfg": {
+        "single": true,
+        "trailerL": 50,
+        "trailerW": 12,
+        "trailerAisle": 0
+      },
+      "rot": 23.791381659316926,
+      "type": "trailer",
+      "noFit": true,
+      "forCourt": "e1454909cgzlnc",
+      "prevZone": "e1454909cgzlnc",
+      "attachedTo": "e1454907cgzlnc"
+    },
+    {
+      "h": 740,
+      "w": 5,
+      "z": 11264,
+      "cx": 560.1846863262773,
+      "cy": -1322.8147879458077,
+      "id": "e1454912cgzlnc",
+      "rot": 23.791381659316926,
+      "type": "sidewalk",
+      "attachedTo": "e1454907cgzlnc",
+      "sidewalkSide": "right"
+    },
+    {
+      "h": 60,
+      "w": 740,
+      "z": 12288,
+      "cx": 589.922847965992,
+      "cy": -1309.7040388333348,
+      "id": "e1454913cgzlnc",
+      "rot": 293.7913816593169,
+      "type": "parking",
+      "attachedTo": "e1454907cgzlnc",
+      "sideParkSide": "right"
+    },
+    {
+      "h": 60,
+      "w": 55,
+      "z": 13312,
+      "cx": 669.8926816816414,
+      "cy": -1646.023939665105,
+      "id": "e1454914cgzlnc",
+      "rot": 23.791381659316926,
+      "dock": "none",
+      "type": "building",
+      "noFit": true,
+      "dogEar": {
+        "side": "top",
+        "sign": 1
+      },
+      "noLabel": true,
+      "attachedTo": "e1454907cgzlnc"
+    },
+    {
+      "h": 60,
+      "w": 55,
+      "z": 14336,
+      "cx": 395.5754694822094,
+      "cy": -1023.8100961264613,
+      "id": "e1454915cgzlnc",
+      "rot": 23.791381659316926,
+      "dock": "none",
+      "type": "building",
+      "noFit": true,
+      "dogEar": {
+        "side": "bottom",
+        "sign": 1
+      },
+      "noLabel": true,
+      "attachedTo": "e1454907cgzlnc"
+    },
+    {
+      "h": 60,
+      "w": 55,
+      "z": 15360,
+      "cx": -1248.9050093485587,
+      "cy": -2491.969813168353,
+      "id": "e1454916cgzlnc",
+      "rot": 23.791381659316926,
+      "dock": "none",
+      "type": "building",
+      "noFit": true,
+      "dogEar": {
+        "side": "top",
+        "sign": -1
+      },
+      "noLabel": true,
+      "attachedTo": "e1454907cgzlnc"
+    },
+    {
+      "h": 60,
+      "w": 55,
+      "z": 16384,
+      "cx": -1523.2222215479906,
+      "cy": -1869.7559696297094,
+      "id": "e1454917cgzlnc",
+      "rot": 23.791381659316926,
+      "dock": "none",
+      "type": "building",
+      "noFit": true,
+      "dogEar": {
+        "side": "bottom",
+        "sign": -1
+      },
+      "noLabel": true,
+      "attachedTo": "e1454907cgzlnc"
+    },
+    {
+      "h": 740,
+      "w": 5,
+      "z": 17408,
+      "cx": -1413.5142261926267,
+      "cy": -2192.965121349006,
+      "id": "e1454918cgzlnc",
+      "rot": 23.791381659316926,
+      "type": "sidewalk",
+      "attachedTo": "e1454907cgzlnc",
+      "sidewalkSide": "left"
+    },
+    {
+      "h": 60,
+      "w": 740,
+      "z": 18432,
+      "cx": -1443.2523878323411,
+      "cy": -2206.075870461479,
+      "id": "e1454919cgzlnc",
+      "rot": 113.79138165931693,
+      "type": "parking",
+      "attachedTo": "e1454907cgzlnc",
+      "sideParkSide": "left"
+    },
+    {
+      "h": 875,
+      "w": 456,
+      "z": 19456,
+      "cx": 184.25,
+      "cy": -429.12,
+      "id": "e1454920cgzlnc",
+      "rot": 270,
+      "dock": "cross",
+      "type": "building",
+      "dockAxis": "y",
+      "dockSide": "right"
+    },
+    {
+      "h": 5,
+      "w": 456,
+      "z": 20480,
+      "cx": -255.75,
+      "cy": -429.12,
+      "id": "e1454921cgzlnc",
+      "rot": 270,
+      "type": "sidewalk",
+      "attachedTo": "e1454920cgzlnc",
+      "sidewalkSide": "top"
+    },
+    {
+      "h": 60,
+      "w": 456,
+      "z": 21504,
+      "cx": -288.25,
+      "cy": -429.12,
+      "id": "e1454922cgzlnc",
+      "rot": 90,
+      "type": "parking",
+      "attachedTo": "e1454920cgzlnc",
+      "sideParkSide": "top"
+    },
+    {
+      "h": 875,
+      "w": 135,
+      "z": 22528,
+      "cx": 184.25,
+      "cy": -133.62,
+      "id": "e1454923cgzlnc",
+      "zd": 135,
+      "rot": 270,
+      "type": "paving",
+      "attachedTo": "e1454920cgzlnc",
+      "truckCourt": {
+        "side": "left"
+      }
+    },
+    {
+      "h": 875,
+      "w": 135,
+      "z": 23552,
+      "cx": 184.25,
+      "cy": -724.62,
+      "id": "e1454924cgzlnc",
+      "zd": 135,
+      "rot": 270,
+      "type": "paving",
+      "attachedTo": "e1454920cgzlnc",
+      "truckCourt": {
+        "side": "right"
+      }
+    },
+    {
+      "h": 50,
+      "w": 875,
+      "z": 24576,
+      "cx": 184.25,
+      "cy": -817.12,
+      "id": "e1454925cgzlnc",
+      "zd": 50,
+      "cfg": {
+        "single": true,
+        "trailerL": 50,
+        "trailerW": 12,
+        "trailerAisle": 0
+      },
+      "rot": 0,
+      "type": "trailer",
+      "noFit": true,
+      "forCourt": "e1454924cgzlnc",
+      "prevZone": "e1454924cgzlnc",
+      "attachedTo": "e1454920cgzlnc"
+    },
+    {
+      "h": 50,
+      "w": 875,
+      "z": 25600,
+      "cx": 184.25,
+      "cy": -41.12,
+      "id": "e1454926cgzlnc",
+      "zd": 50,
+      "cfg": {
+        "single": true,
+        "trailerL": 50,
+        "trailerW": 12,
+        "trailerAisle": 0
+      },
+      "rot": 0,
+      "type": "trailer",
+      "noFit": true,
+      "forCourt": "e1454923cgzlnc",
+      "prevZone": "e1454923cgzlnc",
+      "attachedTo": "e1454920cgzlnc"
+    },
+    {
+      "h": 5,
+      "w": 456,
+      "z": 26624,
+      "cx": 624.25,
+      "cy": -429.12,
+      "id": "e1454927cgzlnc",
+      "rot": 270,
+      "type": "sidewalk",
+      "attachedTo": "e1454920cgzlnc",
+      "sidewalkSide": "bottom"
+    },
+    {
+      "h": 60,
+      "w": 456,
+      "z": 27648,
+      "cx": 656.75,
+      "cy": -429.12,
+      "id": "e1454928cgzlnc",
+      "rot": 270,
+      "type": "parking",
+      "attachedTo": "e1454920cgzlnc",
+      "sideParkSide": "bottom"
+    },
+    {
+      "h": 1054,
+      "w": 491,
+      "z": 19456,
+      "cx": -988.38,
+      "cy": -687.51,
+      "id": "e1454929cgzlnc",
+      "rot": 270,
+      "dock": "cross",
+      "type": "building",
+      "dockAxis": "y",
+      "dockSide": "right"
+    },
+    {
+      "h": 5,
+      "w": 491,
+      "z": 20480,
+      "cx": -1517.88,
+      "cy": -687.51,
+      "id": "e1454930cgzlnc",
+      "rot": 270,
+      "type": "sidewalk",
+      "attachedTo": "e1454929cgzlnc",
+      "sidewalkSide": "top"
+    },
+    {
+      "h": 60,
+      "w": 491,
+      "z": 21504,
+      "cx": -1550.38,
+      "cy": -687.51,
+      "id": "e1454931cgzlnc",
+      "rot": 90,
+      "type": "parking",
+      "attachedTo": "e1454929cgzlnc",
+      "sideParkSide": "top"
+    },
+    {
+      "h": 1054,
+      "w": 135,
+      "z": 22528,
+      "cx": -988.38,
+      "cy": -374.51,
+      "id": "e1454932cgzlnc",
+      "zd": 135,
+      "rot": 270,
+      "type": "paving",
+      "attachedTo": "e1454929cgzlnc",
+      "truckCourt": {
+        "side": "left"
+      }
+    },
+    {
+      "h": 1054,
+      "w": 135,
+      "z": 23552,
+      "cx": -988.38,
+      "cy": -1000.51,
+      "id": "e1454933cgzlnc",
+      "zd": 135,
+      "rot": 270,
+      "type": "paving",
+      "attachedTo": "e1454929cgzlnc",
+      "truckCourt": {
+        "side": "right"
+      }
+    },
+    {
+      "h": 50,
+      "w": 1054,
+      "z": 24576,
+      "cx": -988.38,
+      "cy": -1093.01,
+      "id": "e1454934cgzlnc",
+      "zd": 50,
+      "cfg": {
+        "single": true,
+        "trailerL": 50,
+        "trailerW": 12,
+        "trailerAisle": 0
+      },
+      "rot": 0,
+      "type": "trailer",
+      "noFit": true,
+      "forCourt": "e1454933cgzlnc",
+      "prevZone": "e1454933cgzlnc",
+      "attachedTo": "e1454929cgzlnc"
+    },
+    {
+      "h": 50,
+      "w": 1054,
+      "z": 25600,
+      "cx": -988.38,
+      "cy": -282.01,
+      "id": "e1454935cgzlnc",
+      "zd": 50,
+      "cfg": {
+        "single": true,
+        "trailerL": 50,
+        "trailerW": 12,
+        "trailerAisle": 0
+      },
+      "rot": 0,
+      "type": "trailer",
+      "noFit": true,
+      "forCourt": "e1454932cgzlnc",
+      "prevZone": "e1454932cgzlnc",
+      "attachedTo": "e1454929cgzlnc"
+    },
+    {
+      "h": 5,
+      "w": 491,
+      "z": 26624,
+      "cx": -458.88,
+      "cy": -687.51,
+      "id": "e1454936cgzlnc",
+      "rot": 270,
+      "type": "sidewalk",
+      "attachedTo": "e1454929cgzlnc",
+      "sidewalkSide": "bottom"
+    },
+    {
+      "h": 60,
+      "w": 491,
+      "z": 27648,
+      "cx": -426.38,
+      "cy": -687.51,
+      "id": "e1454937cgzlnc",
+      "rot": 270,
+      "type": "parking",
+      "attachedTo": "e1454929cgzlnc",
+      "sideParkSide": "bottom"
+    },
+    {
+      "h": 850.9332384848467,
+      "w": 4717.026166606573,
+      "z": 28672,
+      "cx": 28.668838207408044,
+      "cy": -2280.61078326701,
+      "id": "e1454943jjatdk",
+      "pts": [
+        {
+          "x": 2386.42,
+          "y": -1875.63
+        },
+        {
+          "x": 1615.03,
+          "y": -1904.32
+        },
+        {
+          "x": 1011.55,
+          "y": -2041.07
+        },
+        {
+          "x": 309.51,
+          "y": -2371.78
+        },
+        {
+          "x": -249.22,
+          "y": -2572.18
+        },
+        {
+          "x": -1015.53,
+          "y": -2685.8
+        },
+        {
+          "x": -2327.4,
+          "y": -2528.26
+        }
+      ],
+      "rot": 0,
+      "vtx": [
+        {},
+        {},
+        {},
+        {},
+        {
+          "radius": 25,
+          "treatment": "arc"
+        },
+        {
+          "radius": 25,
+          "treatment": "arc"
+        },
+        {}
+      ],
+      "curb": 0.5,
+      "type": "road",
+      "travelW": 40,
+      "roadClass": "aisle"
+    },
+    {
+      "h": 5,
+      "w": 511,
+      "z": 38912,
+      "cx": 2109.92,
+      "cy": -284.68,
+      "id": "e1454955epkkus",
+      "rot": 270,
+      "type": "sidewalk",
+      "attachedTo": "e1454883kaaymz",
+      "sidewalkSide": "bottom"
+    },
+    {
+      "h": 102,
+      "w": 511,
+      "z": 39936,
+      "cx": 2163.42,
+      "cy": -284.68,
+      "id": "e1454956epkkus",
+      "rot": 270,
+      "type": "parking",
+      "attachedTo": "e1454883kaaymz",
+      "sideParkSide": "bottom"
+    },
+    {
+      "h": 5,
+      "w": 511,
+      "z": 40960,
+      "cx": 965.92,
+      "cy": -284.68,
+      "id": "e1454957epkkus",
+      "rot": 270,
+      "type": "sidewalk",
+      "attachedTo": "e1454883kaaymz",
+      "sidewalkSide": "top"
+    },
+    {
+      "h": 60,
+      "w": 511,
+      "z": 41984,
+      "cx": 933.42,
+      "cy": -284.68,
+      "id": "e1454958epkkus",
+      "rot": 90,
+      "type": "parking",
+      "attachedTo": "e1454883kaaymz",
+      "sideParkSide": "top"
+    },
+    {
+      "h": 55,
+      "w": 60,
+      "z": 51200,
+      "cx": 2079.92,
+      "cy": -59.18,
+      "id": "e1454967epkkus",
+      "rot": 270,
+      "dock": "none",
+      "type": "building",
+      "noFit": true,
+      "dogEar": {
+        "side": "left",
+        "sign": 1
+      },
+      "noLabel": true,
+      "attachedTo": "e1454883kaaymz"
+    },
+    {
+      "h": 55,
+      "w": 60,
+      "z": 52224,
+      "cx": 995.92,
+      "cy": -59.18,
+      "id": "e1454968epkkus",
+      "rot": 270,
+      "dock": "none",
+      "type": "building",
+      "noFit": true,
+      "dogEar": {
+        "side": "left",
+        "sign": -1
+      },
+      "noLabel": true,
+      "attachedTo": "e1454883kaaymz"
+    },
+    {
+      "h": 55,
+      "w": 60,
+      "z": 53248,
+      "cx": 995.92,
+      "cy": -510.18,
+      "id": "e1454969epkkus",
+      "rot": 270,
+      "dock": "none",
+      "type": "building",
+      "noFit": true,
+      "dogEar": {
+        "side": "right",
+        "sign": -1
+      },
+      "noLabel": true,
+      "attachedTo": "e1454883kaaymz"
+    },
+    {
+      "h": 55,
+      "w": 60,
+      "z": 54272,
+      "cx": 2079.92,
+      "cy": -510.18,
+      "id": "e1454970epkkus",
+      "rot": 270,
+      "dock": "none",
+      "type": "building",
+      "noFit": true,
+      "dogEar": {
+        "side": "right",
+        "sign": 1
+      },
+      "noLabel": true,
+      "attachedTo": "e1454883kaaymz"
+    },
+    {
+      "h": 627,
+      "w": 380,
+      "z": 1024,
+      "cx": 1292.48,
+      "cy": -1088.75,
+      "id": "e1454971epkkus",
+      "rot": 0,
+      "dock": "cross",
+      "type": "building",
+      "dockSide": "right"
+    },
+    {
+      "h": 517,
+      "w": 135,
+      "z": 2048,
+      "cx": 1549.98,
+      "cy": -1088.75,
+      "id": "e1454972epkkus",
+      "zd": 135,
+      "rot": 0,
+      "type": "paving",
+      "attachedTo": "e1454971epkkus",
+      "truckCourt": {
+        "side": "right"
+      }
+    },
+    {
+      "h": 50,
+      "w": 517,
+      "z": 3072,
+      "cx": 1642.48,
+      "cy": -1088.75,
+      "id": "e1454973epkkus",
+      "zd": 50,
+      "cfg": {
+        "single": true,
+        "trailerL": 50,
+        "trailerW": 12,
+        "trailerAisle": 0
+      },
+      "rot": 90,
+      "type": "trailer",
+      "noFit": true,
+      "forCourt": "e1454972epkkus",
+      "prevZone": "e1454972epkkus",
+      "attachedTo": "e1454971epkkus"
+    },
+    {
+      "h": 517,
+      "w": 135,
+      "z": 4096,
+      "cx": 1034.98,
+      "cy": -1088.75,
+      "id": "e1454974epkkus",
+      "zd": 135,
+      "rot": 0,
+      "type": "paving",
+      "attachedTo": "e1454971epkkus",
+      "truckCourt": {
+        "side": "left"
+      }
+    },
+    {
+      "h": 50,
+      "w": 517,
+      "z": 5120,
+      "cx": 942.48,
+      "cy": -1088.75,
+      "id": "e1454975epkkus",
+      "zd": 50,
+      "cfg": {
+        "single": true,
+        "trailerL": 50,
+        "trailerW": 12,
+        "trailerAisle": 0
+      },
+      "rot": 90,
+      "type": "trailer",
+      "noFit": true,
+      "forCourt": "e1454974epkkus",
+      "prevZone": "e1454974epkkus",
+      "attachedTo": "e1454971epkkus"
+    },
+    {
+      "h": 5,
+      "w": 500,
+      "z": 30720,
+      "cx": 1292.48,
+      "cy": -772.75,
+      "id": "e1454976epkkus",
+      "rot": 0,
+      "type": "sidewalk",
+      "attachedTo": "e1454971epkkus",
+      "sidewalkSide": "bottom"
+    },
+    {
+      "h": 60,
+      "w": 500,
+      "z": 31744,
+      "cx": 1292.48,
+      "cy": -740.25,
+      "id": "e1454977epkkus",
+      "rot": 0,
+      "type": "parking",
+      "attachedTo": "e1454971epkkus",
+      "sideParkSide": "bottom"
+    },
+    {
+      "h": 5,
+      "w": 500,
+      "z": 32768,
+      "cx": 1292.48,
+      "cy": -1404.75,
+      "id": "e1454978epkkus",
+      "rot": 0,
+      "type": "sidewalk",
+      "attachedTo": "e1454971epkkus",
+      "sidewalkSide": "top"
+    },
+    {
+      "h": 60,
+      "w": 500,
+      "z": 33792,
+      "cx": 1292.48,
+      "cy": -1437.25,
+      "id": "e1454979epkkus",
+      "rot": 180,
+      "type": "parking",
+      "attachedTo": "e1454971epkkus",
+      "sideParkSide": "top"
+    },
+    {
+      "h": 260,
+      "w": 436,
+      "z": 37888,
+      "cx": 1855.11,
+      "cy": -982.96,
+      "id": "e1454981epkkus",
+      "rot": 270,
+      "dock": "single",
+      "type": "building",
+      "dockAxis": "x",
+      "dockSide": "bottom",
+      "dimOffset": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "h": 135,
+      "w": 326,
+      "z": 43008,
+      "cx": 2052.61,
+      "cy": -982.96,
+      "id": "e1454982epkkus",
+      "zd": 135,
+      "rot": 270,
+      "type": "paving",
+      "attachedTo": "e1454981epkkus",
+      "truckCourt": {
+        "side": "bottom"
+      }
+    },
+    {
+      "h": 50,
+      "w": 326,
+      "z": 44032,
+      "cx": 2145.11,
+      "cy": -982.96,
+      "id": "e1454983epkkus",
+      "zd": 50,
+      "cfg": {
+        "single": true,
+        "trailerL": 50,
+        "trailerW": 12,
+        "trailerAisle": 0
+      },
+      "rot": 270,
+      "type": "trailer",
+      "noFit": true,
+      "forCourt": "e1454982epkkus",
+      "prevZone": "e1454982epkkus",
+      "attachedTo": "e1454981epkkus"
+    },
+    {
+      "h": 320,
+      "w": 5,
+      "z": 45056,
+      "cx": 1885.11,
+      "cy": -1203.46,
+      "id": "e1454984epkkus",
+      "rot": 270,
+      "type": "sidewalk",
+      "attachedTo": "e1454981epkkus",
+      "sidewalkSide": "right"
+    },
+    {
+      "h": 60,
+      "w": 320,
+      "z": 46080,
+      "cx": 1885.11,
+      "cy": -1235.96,
+      "id": "e1454985epkkus",
+      "rot": 180,
+      "type": "parking",
+      "attachedTo": "e1454981epkkus",
+      "sideParkSide": "right"
+    },
+    {
+      "h": 320,
+      "w": 5,
+      "z": 47104,
+      "cx": 1885.11,
+      "cy": -762.46,
+      "id": "e1454986epkkus",
+      "rot": 270,
+      "type": "sidewalk",
+      "attachedTo": "e1454981epkkus",
+      "sidewalkSide": "left"
+    },
+    {
+      "h": 42,
+      "w": 320,
+      "z": 48128,
+      "cx": 1885.11,
+      "cy": -738.96,
+      "id": "e1454987epkkus",
+      "rot": 0,
+      "type": "parking",
+      "attachedTo": "e1454981epkkus",
+      "sideParkSide": "left"
+    },
+    {
+      "h": 60,
+      "w": 55,
+      "z": 49152,
+      "cx": 2015.11,
+      "cy": -792.46,
+      "id": "e1454988epkkus",
+      "rot": 270,
+      "dock": "none",
+      "type": "building",
+      "noFit": true,
+      "dogEar": {
+        "side": "bottom",
+        "sign": -1
+      },
+      "noLabel": true,
+      "attachedTo": "e1454981epkkus"
+    },
+    {
+      "h": 60,
+      "w": 55,
+      "z": 50176,
+      "cx": 2015.11,
+      "cy": -1173.46,
+      "id": "e1454989epkkus",
+      "rot": 270,
+      "dock": "none",
+      "type": "building",
+      "noFit": true,
+      "dogEar": {
+        "side": "bottom",
+        "sign": 1
+      },
+      "noLabel": true,
+      "attachedTo": "e1454981epkkus"
+    },
+    {
+      "h": 3957.953323999046,
+      "w": 217.45508234973147,
+      "z": 55296,
+      "cx": 662.7716509563147,
+      "cy": 1240.970298416727,
+      "id": "e1454990epkkus",
+      "pts": [
+        {
+          "x": 628.88,
+          "y": 3212.6
+        },
+        {
+          "x": 584.26,
+          "y": 3032.82
+        },
+        {
+          "x": 604.17,
+          "y": 2833.75
+        },
+        {
+          "x": 671.86,
+          "y": 2622.73
+        },
+        {
+          "x": 717.03,
+          "y": 2366.39
+        },
+        {
+          "x": 741,
+          "y": 1946.04
+        },
+        {
+          "x": 738.1008569462318,
+          "y": 38.85863815839002
+        },
+        {
+          "x": 737.8345406602103,
+          "y": -136.33570294007419
+        },
+        {
+          "x": 736.92,
+          "y": -737.96
+        }
+      ],
+      "rot": 0,
+      "vtx": [
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {}
+      ],
+      "curb": 0.5,
+      "type": "road",
+      "travelW": 60,
+      "roadClass": "aisle"
+    },
+    {
+      "h": 1064,
+      "w": 600,
+      "z": 1024,
+      "cx": 1538.53,
+      "cy": 1502.07,
+      "id": "e1454992epkkus",
+      "rot": 270,
+      "dock": "cross",
+      "type": "building",
+      "dockAxis": "y",
+      "dockSide": "right"
+    },
+    {
+      "h": 954,
+      "w": 135,
+      "z": 2048,
+      "cx": 1538.53,
+      "cy": 1134.57,
+      "id": "e1454993epkkus",
+      "zd": 135,
+      "rot": 270,
+      "type": "paving",
+      "attachedTo": "e1454992epkkus",
+      "truckCourt": {
+        "side": "right"
+      }
+    },
+    {
+      "h": 50,
+      "w": 954,
+      "z": 3072,
+      "cx": 1538.53,
+      "cy": 1042.07,
+      "id": "e1454994epkkus",
+      "zd": 50,
+      "cfg": {
+        "single": true,
+        "trailerL": 50,
+        "trailerW": 12,
+        "trailerAisle": 0
+      },
+      "rot": 0,
+      "type": "trailer",
+      "noFit": true,
+      "forCourt": "e1454993epkkus",
+      "prevZone": "e1454993epkkus",
+      "attachedTo": "e1454992epkkus"
+    },
+    {
+      "h": 954,
+      "w": 135,
+      "z": 4096,
+      "cx": 1538.53,
+      "cy": 1869.57,
+      "id": "e1454995epkkus",
+      "zd": 135,
+      "rot": 270,
+      "type": "paving",
+      "attachedTo": "e1454992epkkus",
+      "truckCourt": {
+        "side": "left"
+      }
+    },
+    {
+      "h": 50,
+      "w": 926,
+      "z": 5120,
+      "cx": 1552.53,
+      "cy": 1962.07,
+      "id": "e1454996epkkus",
+      "zd": 50,
+      "cfg": {
+        "single": true,
+        "trailerL": 50,
+        "trailerW": 12,
+        "trailerAisle": 0
+      },
+      "rot": 0,
+      "type": "trailer",
+      "noFit": true,
+      "alongLen": 926,
+      "alongOff": 0,
+      "forCourt": "e1454995epkkus",
+      "prevZone": "e1454995epkkus",
+      "attachedTo": "e1454992epkkus",
+      "alongAnchor": 1
+    },
+    {
+      "h": 5,
+      "w": 720,
+      "z": 30720,
+      "cx": 2073.03,
+      "cy": 1502.07,
+      "id": "e1454997epkkus",
+      "rot": 270,
+      "type": "sidewalk",
+      "attachedTo": "e1454992epkkus",
+      "sidewalkSide": "bottom"
+    },
+    {
+      "h": 60,
+      "w": 720,
+      "z": 31744,
+      "cx": 2105.53,
+      "cy": 1502.07,
+      "id": "e1454998epkkus",
+      "rot": 270,
+      "type": "parking",
+      "attachedTo": "e1454992epkkus",
+      "sideParkSide": "bottom"
+    },
+    {
+      "h": 5,
+      "w": 720,
+      "z": 32768,
+      "cx": 1004.03,
+      "cy": 1502.07,
+      "id": "e1454999epkkus",
+      "rot": 270,
+      "type": "sidewalk",
+      "attachedTo": "e1454992epkkus",
+      "sidewalkSide": "top"
+    },
+    {
+      "h": 60,
+      "w": 499,
+      "z": 33792,
+      "cx": 971.53,
+      "cy": 1501.57,
+      "id": "e1455000epkkus",
+      "rot": 90,
+      "type": "parking",
+      "attachedTo": "e1454992epkkus",
+      "sideParkFit": {
+        "run": 499,
+        "alongShift": 0.5000000000001074
+      },
+      "sideParkSide": "top"
+    },
+    {
+      "h": 42,
+      "w": 720,
+      "z": 34816,
+      "cx": 2156.53,
+      "cy": 1502.07,
+      "id": "e1455001epkkus",
+      "rot": 270,
+      "type": "parking",
+      "attachedTo": "e1454992epkkus",
+      "sideParkSide": "bottom"
+    },
+    {
+      "h": 55,
+      "w": 60,
+      "z": 56320,
+      "cx": 1034.03,
+      "cy": 1832.07,
+      "id": "e1455002epkkus",
+      "rot": 270,
+      "dock": "none",
+      "type": "building",
+      "noFit": true,
+      "dogEar": {
+        "side": "left",
+        "sign": -1
+      },
+      "noLabel": true,
+      "attachedTo": "e1454992epkkus"
+    },
+    {
+      "h": 55,
+      "w": 60,
+      "z": 57344,
+      "cx": 2043.03,
+      "cy": 1832.07,
+      "id": "e1455003epkkus",
+      "rot": 270,
+      "dock": "none",
+      "type": "building",
+      "noFit": true,
+      "dogEar": {
+        "side": "left",
+        "sign": 1
+      },
+      "noLabel": true,
+      "attachedTo": "e1454992epkkus"
+    },
+    {
+      "h": 55,
+      "w": 60,
+      "z": 58368,
+      "cx": 2043.03,
+      "cy": 1172.07,
+      "id": "e1455004epkkus",
+      "rot": 270,
+      "dock": "none",
+      "type": "building",
+      "noFit": true,
+      "dogEar": {
+        "side": "right",
+        "sign": 1
+      },
+      "noLabel": true,
+      "attachedTo": "e1454992epkkus"
+    },
+    {
+      "h": 55,
+      "w": 60,
+      "z": 59392,
+      "cx": 1034.03,
+      "cy": 1172.07,
+      "id": "e1455005epkkus",
+      "rot": 270,
+      "dock": "none",
+      "type": "building",
+      "noFit": true,
+      "dogEar": {
+        "side": "right",
+        "sign": -1
+      },
+      "noLabel": true,
+      "attachedTo": "e1454992epkkus"
+    },
+    {
+      "h": 55,
+      "w": 60,
+      "z": 60416,
+      "cx": 1512.48,
+      "cy": -1374.75,
+      "id": "e1455006epkkus",
+      "rot": 0,
+      "dock": "none",
+      "type": "building",
+      "noFit": true,
+      "dogEar": {
+        "side": "right",
+        "sign": -1
+      },
+      "noLabel": true,
+      "attachedTo": "e1454971epkkus"
+    },
+    {
+      "h": 55,
+      "w": 60,
+      "z": 61440,
+      "cx": 1072.48,
+      "cy": -1374.75,
+      "id": "e1455007epkkus",
+      "rot": 0,
+      "dock": "none",
+      "type": "building",
+      "noFit": true,
+      "dogEar": {
+        "side": "left",
+        "sign": -1
+      },
+      "noLabel": true,
+      "attachedTo": "e1454971epkkus"
+    },
+    {
+      "h": 55,
+      "w": 60,
+      "z": 62464,
+      "cx": 1072.48,
+      "cy": -802.75,
+      "id": "e1455008epkkus",
+      "rot": 0,
+      "dock": "none",
+      "type": "building",
+      "noFit": true,
+      "dogEar": {
+        "side": "left",
+        "sign": 1
+      },
+      "noLabel": true,
+      "attachedTo": "e1454971epkkus"
+    },
+    {
+      "h": 55,
+      "w": 60,
+      "z": 63488,
+      "cx": 1512.48,
+      "cy": -802.75,
+      "id": "e1455009epkkus",
+      "rot": 0,
+      "dock": "none",
+      "type": "building",
+      "noFit": true,
+      "dogEar": {
+        "side": "right",
+        "sign": 1
+      },
+      "noLabel": true,
+      "attachedTo": "e1454971epkkus"
+    },
+    {
+      "h": 1074,
+      "w": 440,
+      "z": 1024,
+      "cx": 1531.61,
+      "cy": 565.76,
+      "id": "e1455010epkkus",
+      "rot": 270,
+      "dock": "cross",
+      "type": "building",
+      "dockSide": "right"
+    },
+    {
+      "h": 964,
+      "w": 135,
+      "z": 2048,
+      "cx": 1531.61,
+      "cy": 278.26,
+      "id": "e1455011epkkus",
+      "zd": 135,
+      "rot": 270,
+      "type": "paving",
+      "attachedTo": "e1455010epkkus",
+      "truckCourt": {
+        "side": "right"
+      }
+    },
+    {
+      "h": 50,
+      "w": 964,
+      "z": 3072,
+      "cx": 1531.61,
+      "cy": 185.76,
+      "id": "e1455012epkkus",
+      "zd": 50,
+      "cfg": {
+        "single": true,
+        "trailerL": 50,
+        "trailerW": 12,
+        "trailerAisle": 0
+      },
+      "rot": 0,
+      "type": "trailer",
+      "noFit": true,
+      "forCourt": "e1455011epkkus",
+      "prevZone": "e1455011epkkus",
+      "attachedTo": "e1455010epkkus"
+    },
+    {
+      "h": 964,
+      "w": 135,
+      "z": 4096,
+      "cx": 1531.61,
+      "cy": 853.26,
+      "id": "e1455013epkkus",
+      "zd": 135,
+      "rot": 270,
+      "type": "paving",
+      "attachedTo": "e1455010epkkus",
+      "truckCourt": {
+        "side": "left"
+      }
+    },
+    {
+      "h": 50,
+      "w": 964,
+      "z": 5120,
+      "cx": 1531.61,
+      "cy": 945.76,
+      "id": "e1455014epkkus",
+      "zd": 50,
+      "cfg": {
+        "single": true,
+        "trailerL": 50,
+        "trailerW": 12,
+        "trailerAisle": 0
+      },
+      "rot": 0,
+      "type": "trailer",
+      "noFit": true,
+      "forCourt": "e1455013epkkus",
+      "prevZone": "e1455013epkkus",
+      "attachedTo": "e1455010epkkus"
+    },
+    {
+      "h": 5,
+      "w": 560,
+      "z": 38912,
+      "cx": 2071.11,
+      "cy": 565.76,
+      "id": "e1455015epkkus",
+      "rot": 270,
+      "type": "sidewalk",
+      "attachedTo": "e1455010epkkus",
+      "sidewalkSide": "bottom"
+    },
+    {
+      "h": 102,
+      "w": 560,
+      "z": 39936,
+      "cx": 2124.61,
+      "cy": 565.76,
+      "id": "e1455016epkkus",
+      "rot": 270,
+      "type": "parking",
+      "attachedTo": "e1455010epkkus",
+      "sideParkSide": "bottom"
+    },
+    {
+      "h": 5,
+      "w": 560,
+      "z": 40960,
+      "cx": 992.11,
+      "cy": 565.76,
+      "id": "e1455017epkkus",
+      "rot": 270,
+      "type": "sidewalk",
+      "attachedTo": "e1455010epkkus",
+      "sidewalkSide": "top"
+    },
+    {
+      "h": 60,
+      "w": 560,
+      "z": 41984,
+      "cx": 959.61,
+      "cy": 565.76,
+      "id": "e1455018epkkus",
+      "rot": 90,
+      "type": "parking",
+      "attachedTo": "e1455010epkkus",
+      "sideParkSide": "top"
+    },
+    {
+      "h": 55,
+      "w": 60,
+      "z": 51200,
+      "cx": 2041.11,
+      "cy": 815.76,
+      "id": "e1455019epkkus",
+      "rot": 270,
+      "dock": "none",
+      "type": "building",
+      "noFit": true,
+      "dogEar": {
+        "side": "left",
+        "sign": 1
+      },
+      "noLabel": true,
+      "attachedTo": "e1455010epkkus"
+    },
+    {
+      "h": 55,
+      "w": 60,
+      "z": 52224,
+      "cx": 1022.11,
+      "cy": 815.76,
+      "id": "e1455020epkkus",
+      "rot": 270,
+      "dock": "none",
+      "type": "building",
+      "noFit": true,
+      "dogEar": {
+        "side": "left",
+        "sign": -1
+      },
+      "noLabel": true,
+      "attachedTo": "e1455010epkkus"
+    },
+    {
+      "h": 55,
+      "w": 60,
+      "z": 53248,
+      "cx": 1022.11,
+      "cy": 315.76,
+      "id": "e1455021epkkus",
+      "rot": 270,
+      "dock": "none",
+      "type": "building",
+      "noFit": true,
+      "dogEar": {
+        "side": "right",
+        "sign": -1
+      },
+      "noLabel": true,
+      "attachedTo": "e1455010epkkus"
+    },
+    {
+      "h": 55,
+      "w": 60,
+      "z": 54272,
+      "cx": 2041.11,
+      "cy": 315.76,
+      "id": "e1455022epkkus",
+      "rot": 270,
+      "dock": "none",
+      "type": "building",
+      "noFit": true,
+      "dogEar": {
+        "side": "right",
+        "sign": 1
+      },
+      "noLabel": true,
+      "attachedTo": "e1455010epkkus"
+    },
+    {
+      "z": 64512,
+      "id": "e1455052brxkkr",
+      "rot": 0,
+      "type": "pond",
+      "points": [
+        {
+          "x": -1488.84,
+          "y": -201.77
+        },
+        {
+          "x": -1521.01,
+          "y": 706.45
+        },
+        {
+          "x": 673.2,
+          "y": 709.63
+        },
+        {
+          "x": 663.77,
+          "y": 89.54
+        },
+        {
+          "x": -397.12,
+          "y": 78.96
+        },
+        {
+          "x": -397.84,
+          "y": -202.25
+        }
+      ]
+    },
+    {
+      "h": 447.9675584069506,
+      "w": 2325.4408678557916,
+      "z": 65536,
+      "cx": -424.54813768665645,
+      "cy": -162.50776012628415,
+      "id": "e1455053brxkkr",
+      "pts": [
+        {
+          "x": -1515.38,
+          "y": -365.99790782911754
+        },
+        {
+          "x": -1573.76,
+          "y": -370.22
+        },
+        {
+          "x": -1552.67,
+          "y": -246.23
+        },
+        {
+          "x": -1521.47,
+          "y": -220.93
+        },
+        {
+          "x": -355.85,
+          "y": -225.99
+        },
+        {
+          "x": -354.6039537727434,
+          "y": -126.80029647761465
+        },
+        {
+          "x": -352.47,
+          "y": 43.07
+        },
+        {
+          "x": 738.1008569462318,
+          "y": 38.85863815839002
+        }
+      ],
+      "rot": 0,
+      "vtx": [
+        {},
+        {
+          "radius": 25,
+          "treatment": "arc"
+        },
+        {
+          "radius": 25,
+          "treatment": "arc"
+        },
+        {
+          "radius": 25,
+          "treatment": "arc"
+        },
+        {
+          "radius": 25,
+          "treatment": "arc"
+        },
+        {},
+        {
+          "radius": 25,
+          "treatment": "arc"
+        },
+        {}
+      ],
+      "curb": 0.5,
+      "type": "road",
+      "travelW": 36,
+      "roadClass": "aisle"
+    },
+    {
+      "h": 1160.3644685024801,
+      "w": 3905.008100339276,
+      "z": 66560,
+      "cx": 295.50585348680397,
+      "cy": -1249.7600446224603,
+      "id": "e1455054brxkkr",
+      "pts": [
+        {
+          "x": -1525.639410819352,
+          "y": -1796.1135231259016
+        },
+        {
+          "x": -1594.25,
+          "y": -1816.09
+        },
+        {
+          "x": -1648.28,
+          "y": -1715.24
+        },
+        {
+          "x": -354.59337258974483,
+          "y": -1146.2212846995294
+        },
+        {
+          "x": 291.83668652005883,
+          "y": -866.562027978958
+        },
+        {
+          "x": 643.6266865200589,
+          "y": -868.9620279789581
+        },
+        {
+          "x": 722.086686520059,
+          "y": -817.402027978958
+        },
+        {
+          "x": 736.9166865200589,
+          "y": -737.9620279789581
+        },
+        {
+          "x": 959.4766865200588,
+          "y": -688.0720279789581
+        },
+        {
+          "x": 2247.966686520059,
+          "y": -691.0820279789581
+        }
+      ],
+      "rot": 0,
+      "vtx": [
+        {},
+        {
+          "radius": 25,
+          "treatment": "arc"
+        },
+        {
+          "radius": 25,
+          "treatment": "arc"
+        },
+        {},
+        {
+          "radius": 25,
+          "treatment": "arc"
+        },
+        {
+          "radius": 25,
+          "treatment": "arc"
+        },
+        {
+          "radius": 25,
+          "treatment": "arc"
+        },
+        {
+          "radius": 25,
+          "treatment": "arc"
+        },
+        {
+          "radius": 25,
+          "treatment": "arc"
+        },
+        {}
+      ],
+      "curb": 0.5,
+      "type": "road",
+      "travelW": 36,
+      "driveTee": {
+        "kind": "truckcourt",
+        "flare": 0,
+        "returnR": 24,
+        "targetId": "e1454909cgzlnc"
+      },
+      "roadClass": "aisle"
+    },
+    {
+      "h": 810.1871229231709,
+      "w": 124.03067356019011,
+      "z": 67584,
+      "cx": -399.3653580333804,
+      "cy": -631.0555191523921,
+      "id": "e1455055brxkkr",
+      "pts": [
+        {
+          "x": -355.85,
+          "y": -225.99
+        },
+        {
+          "x": -356.63418447444826,
+          "y": -743.3295675347603
+        },
+        {
+          "x": -357.05,
+          "y": -1017.65
+        },
+        {
+          "x": -461.38,
+          "y": -1017.6460816275719
+        }
+      ],
+      "rot": 0,
+      "vtx": [
+        {},
+        {},
+        {
+          "radius": 25,
+          "treatment": "arc"
+        },
+        {}
+      ],
+      "curb": 0.5,
+      "type": "road",
+      "travelW": 36,
+      "driveTee": {
+        "kind": "truckcourt",
+        "flare": 0,
+        "returnR": 24,
+        "targetId": "e1454933cgzlnc"
+      },
+      "roadClass": "aisle"
+    },
+    {
+      "h": 37.47844157910424,
+      "w": 103.55555335656445,
+      "z": 68608,
+      "cx": -304.94209223722413,
+      "cy": -743.568986753037,
+      "id": "e1455056brxkkr",
+      "pts": [
+        {
+          "x": -253.25,
+          "y": -743.808405971314
+        },
+        {
+          "x": -356.63418447444826,
+          "y": -743.3295675347603
+        }
+      ],
+      "rot": 0,
+      "vtx": [
+        {},
+        {}
+      ],
+      "curb": 0.5,
+      "type": "road",
+      "travelW": 36,
+      "driveTee": {
+        "kind": "truckcourt",
+        "flare": 0,
+        "returnR": 24,
+        "targetId": "e1454924cgzlnc"
+      },
+      "roadClass": "aisle"
+    },
+    {
+      "h": 37.48950473126986,
+      "w": 116.24066568056958,
+      "z": 69632,
+      "cx": 679.7922703301051,
+      "cy": -136.58062000253668,
+      "id": "e1455057brxkkr",
+      "pts": [
+        {
+          "x": 621.75,
+          "y": -136.8255370649992
+        },
+        {
+          "x": 737.8345406602103,
+          "y": -136.33570294007419
+        }
+      ],
+      "rot": 0,
+      "vtx": [
+        {},
+        {}
+      ],
+      "curb": 0.5,
+      "type": "road",
+      "travelW": 36,
+      "roadClass": "aisle"
+    },
+    {
+      "h": 38.572442918308454,
+      "w": 101.92955039208599,
+      "z": 70656,
+      "cx": -303.9269768863717,
+      "cy": -126.01183629200241,
+      "id": "e1455058brxkkr",
+      "pts": [
+        {
+          "x": -354.6039537727434,
+          "y": -126.80029647761465
+        },
+        {
+          "x": -253.25,
+          "y": -125.2233761063902
+        }
+      ],
+      "rot": 0,
+      "vtx": [
+        {},
+        {}
+      ],
+      "curb": 0.5,
+      "type": "road",
+      "travelW": 36,
+      "driveTee": {
+        "kind": "truckcourt",
+        "flare": 0,
+        "returnR": 24,
+        "targetId": "e1454923cgzlnc"
+      },
+      "roadClass": "aisle"
+    },
+    {
+      "h": 179.8953258361903,
+      "w": 1219.7432029659171,
+      "z": 71680,
+      "cx": -964.3890812093343,
+      "cy": -1079.5999678653468,
+      "id": "e1455059brxkkr",
+      "pts": [
+        {
+          "x": -1515.38,
+          "y": -1008.0674561818063
+        },
+        {
+          "x": -1554.53,
+          "y": -1011.83
+        },
+        {
+          "x": -1556.03,
+          "y": -1151.15
+        },
+        {
+          "x": -354.59337258974483,
+          "y": -1146.2212846995294
+        }
+      ],
+      "rot": 0,
+      "vtx": [
+        {},
+        {
+          "radius": 25,
+          "treatment": "arc"
+        },
+        {
+          "radius": 25,
+          "treatment": "arc"
+        },
+        {}
+      ],
+      "curb": 0.5,
+      "type": "road",
+      "travelW": 36,
+      "roadClass": "aisle"
+    },
+    {
+      "h": 908.0735944396381,
+      "w": 492.1493400286929,
+      "z": 72704,
+      "cx": -1435.7396231290045,
+      "cy": -2165.3658470909204,
+      "id": "e1455060brxkkr",
+      "pts": [
+        {
+          "x": -1197.4558661529195,
+          "y": -2540.498919409235
+        },
+        {
+          "x": -1345.85,
+          "y": -2609.4
+        },
+        {
+          "x": -1664.37,
+          "y": -1871.51
+        },
+        {
+          "x": -1632.022687643626,
+          "y": -1715.0751980091325
+        }
+      ],
+      "rot": 0,
+      "vtx": [
+        {},
+        {
+          "radius": 25,
+          "treatment": "arc"
+        },
+        {
+          "radius": 25,
+          "treatment": "arc"
+        },
+        {}
+      ],
+      "curb": 0.5,
+      "type": "road",
+      "travelW": 36,
+      "roadClass": "aisle"
+    },
+    {
+      "h": 2742.299679182504,
+      "w": 1036.3640101697931,
+      "z": 73728,
+      "cx": 1748.2842567541243,
+      "cy": 679.9424600344666,
+      "id": "e1455061brxkkr",
+      "pts": [
+        {
+          "x": 2247.966686520059,
+          "y": -691.0820279789581
+        },
+        {
+          "x": 2243.05,
+          "y": 34.53
+        },
+        {
+          "x": 2203.01,
+          "y": 1049.7
+        },
+        {
+          "x": 2205.93,
+          "y": 1944.62
+        },
+        {
+          "x": 2179.17,
+          "y": 2006.41
+        },
+        {
+          "x": 2017.13,
+          "y": 2032.63
+        },
+        {
+          "x": 1230.45,
+          "y": 2017.84
+        }
+      ],
+      "rot": 0,
+      "vtx": [
+        {},
+        {
+          "radius": 25,
+          "treatment": "arc"
+        },
+        {
+          "radius": 25,
+          "treatment": "arc"
+        },
+        {
+          "radius": 25,
+          "treatment": "arc"
+        },
+        {
+          "radius": 25,
+          "treatment": "arc"
+        },
+        {
+          "radius": 25,
+          "treatment": "arc"
+        },
+        {}
+      ],
+      "curb": 0.5,
+      "type": "road",
+      "travelW": 36,
+      "roadClass": "aisle"
+    }
+  ],
+  "markups": [
+    {
+      "z": 0,
+      "id": "e1454839kbxbff",
+      "pts": [
+        {
+          "x": 2365.88,
+          "y": -1153.56
+        },
+        {
+          "x": 2424.56,
+          "y": -2001.46
+        },
+        {
+          "x": -1454.07,
+          "y": -2843.5
+        }
+      ],
+      "dash": "solid",
+      "fill": "#1815bc",
+      "kind": "polygon",
+      "stroke": "#1815bc",
+      "weight": 2,
+      "fillOpacity": 0.3
+    },
+    {
+      "z": 2048,
+      "id": "e1454880kaaymz",
+      "pts": [
+        {
+          "x": 2248.8193453033414,
+          "y": 2059.971515920632
+        },
+        {
+          "x": 1532.362429300234,
+          "y": 2054.392364063758
+        },
+        {
+          "x": 1222.621977748546,
+          "y": 2034.6981065031505
+        },
+        {
+          "x": 1001.8151269717896,
+          "y": 1909.9665529529302
+        },
+        {
+          "x": 910.2199336472002,
+          "y": 1723.373643230311
+        },
+        {
+          "x": 877.6254352860763,
+          "y": 1596.4363334965299
+        },
+        {
+          "x": 869.7098670600044,
+          "y": -1836.1652995311777
+        },
+        {
+          "x": 769.7101329399957,
+          "y": -1835.9347004688223
+        },
+        {
+          "x": 777.6545647139237,
+          "y": 1609.18366650347
+        },
+        {
+          "x": 815.9200663528,
+          "y": 1758.206356769689
+        },
+        {
+          "x": 925.6848730282104,
+          "y": 1981.81344704707
+        },
+        {
+          "x": 1193.398022251454,
+          "y": 2133.0418934968493
+        },
+        {
+          "x": 1528.7975706997659,
+          "y": 2154.367635936242
+        },
+        {
+          "x": 2248.0406546966583,
+          "y": 2159.9684840793675
+        }
+      ],
+      "kind": "easement",
+      "mode": "centerline",
+      "notes": "",
+      "width": 100,
+      "holder": "",
+      "status": "existing",
+      "easeType": "storm",
+      "parcelId": null,
+      "exclusive": false,
+      "recording": "",
+      "centerline": [
+        {
+          "x": 2248.43,
+          "y": 2109.97
+        },
+        {
+          "x": 1530.58,
+          "y": 2104.38
+        },
+        {
+          "x": 1208.01,
+          "y": 2083.87
+        },
+        {
+          "x": 963.75,
+          "y": 1945.89
+        },
+        {
+          "x": 863.07,
+          "y": 1740.79
+        },
+        {
+          "x": 827.64,
+          "y": 1602.81
+        },
+        {
+          "x": 819.71,
+          "y": -1836.05
+        }
+      ],
+      "restrictsPaving": false,
+      "restrictsBuildings": false
+    }
+  ],
+  "measures": [
+    {
+      "z": 0,
+      "id": "e1454898kaaymz",
+      "pts": [
+        {
+          "x": -2017.1236975532508,
+          "y": -3093.497682276225
+        },
+        {
+          "x": -2039.5845264086236,
+          "y": -2805.73
+        },
+        {
+          "x": -1954.6445264086235,
+          "y": -2477.93
+        },
+        {
+          "x": -1732.1145264086235,
+          "y": -1613.26
+        },
+        {
+          "x": -1678.9645264086234,
+          "y": -1368.47
+        },
+        {
+          "x": -1672.9445264086235,
+          "y": -1279.6
+        },
+        {
+          "x": -1604.7645264086234,
+          "y": -308.69
+        },
+        {
+          "x": -1539.1645264086235,
+          "y": 35.16
+        },
+        {
+          "x": -1589.4645264086234,
+          "y": 777.45
+        },
+        {
+          "x": -1515.2445264086234,
+          "y": 916.62
+        },
+        {
+          "x": -1423.3045264086234,
+          "y": 931.8
+        },
+        {
+          "x": -1369.3245264086236,
+          "y": 1025.42
+        },
+        {
+          "x": -1435.9645264086234,
+          "y": 1158.68
+        },
+        {
+          "x": -1513.5545264086234,
+          "y": 1254.84
+        },
+        {
+          "x": -1629.9145264086235,
+          "y": 1981.69
+        },
+        {
+          "x": -1542.3145264086234,
+          "y": 2160.85
+        },
+        {
+          "x": -1558.2245264086234,
+          "y": 2284.87
+        },
+        {
+          "x": -1701.5545264086234,
+          "y": 2442.8
+        },
+        {
+          "x": -1763.9345264086235,
+          "y": 2813.08
+        },
+        {
+          "x": -1713.5045264086234,
+          "y": 3005.51
+        },
+        {
+          "x": -1663.0645264086234,
+          "y": 3249.71
+        },
+        {
+          "x": -2261.6145264086235,
+          "y": 3249.71
+        },
+        {
+          "x": -2364.6145264086235,
+          "y": -3247.11
+        }
+      ],
+      "mode": "area",
+      "labelOffset": {
+        "x": -424.25754706868975,
+        "y": -3.1739407085247535
+      }
+    },
+    {
+      "z": -1024,
+      "id": "e1454938cgzlnc",
+      "pts": [
+        {
+          "x": 667.34,
+          "y": 765.83
+        },
+        {
+          "x": -1498.05,
+          "y": 757.33
+        },
+        {
+          "x": -1313.74,
+          "y": 1026.37
+        },
+        {
+          "x": -1466.1503520270317,
+          "y": 1240.2639670737224
+        },
+        {
+          "x": -1585.1403520270314,
+          "y": 1945.4739670737224
+        },
+        {
+          "x": -1496.2603520270313,
+          "y": 2141.9339670737227
+        },
+        {
+          "x": -1507.960352027032,
+          "y": 2251.863967073723
+        },
+        {
+          "x": -1631.9203520270312,
+          "y": 2445.993967073722
+        },
+        {
+          "x": -1699.750352027031,
+          "y": 2768.7639670737226
+        },
+        {
+          "x": -1664.660352027031,
+          "y": 2967.563967073723
+        },
+        {
+          "x": -1610.745990229053,
+          "y": 3240.6134282561297
+        },
+        {
+          "x": 571.8640097709472,
+          "y": 3221.7234282561294
+        },
+        {
+          "x": 498.1740097709471,
+          "y": 2959.543428256129
+        },
+        {
+          "x": 619.8840097709472,
+          "y": 2476.1334282561293
+        },
+        {
+          "x": 691.4440097709471,
+          "y": 1906.9334282561294
+        }
+      ],
+      "mode": "area",
+      "labelOffset": {
+        "x": 597.0066146749848,
+        "y": -278.80846757023096
+      }
+    }
+  ],
+  "callouts": [
+    {
+      "z": 0,
+      "id": "e1454840kbxbff",
+      "box": {
+        "x": 1575.2832622612425,
+        "y": -2594.984132441701
+      },
+      "tip": {
+        "x": 909.11504990212,
+        "y": -2359.0061275554626
+      },
+      "text": "NN NNN NN NNNN NN NNNNN NN NNNN NNNNN"
+    },
+    {
+      "z": 1024,
+      "id": "e1454859xdbcen",
+      "box": {
+        "x": 3563.45437275342,
+        "y": 33.934195578414666
+      },
+      "tip": {
+        "x": 2344.7118628820854,
+        "y": 394.58395690823835
+      },
+      "boxW": null,
+      "text": "nnnnn nn n nnnn nnnnn nnnn  nnnn nn  nnnnnnnnnnnn nnnnnnn nnnnnnn nnn nnnn"
+    },
+    {
+      "z": 3072,
+      "id": "e1454861xdbcen",
+      "box": {
+        "x": 1033.98527510043,
+        "y": 1072.6383574648542
+      },
+      "tip": {
+        "x": 1369.6267778731985,
+        "y": 791.8211432316408
+      },
+      "text": "nnnnnnnnn nnnnnn . nnnnnnnnn"
+    },
+    {
+      "z": 4096,
+      "id": "e1454862xdbcen",
+      "box": {
+        "x": 3278.254026996824,
+        "y": 948.4810205872823
+      },
+      "tip": {
+        "x": 2312.178429459707,
+        "y": 1077.5026741756474
+      },
+      "text": "nnnn nnnnnnnnnnnnn nnnnn nnnnnnnnnnnn nnn nnnnn"
+    },
+    {
+      "z": 5120,
+      "id": "e1454863xdbcen",
+      "box": {
+        "x": 3166.8748724217203,
+        "y": 1494.1682969458889
+      },
+      "tip": {
+        "x": 2669.4128238939343,
+        "y": 2013.6420725264254
+      },
+      "text": "nnnnn nnnnnnn nnnnnnn "
+    },
+    {
+      "z": 6144,
+      "id": "e1454864xdbcen",
+      "box": {
+        "x": 3030.937420984377,
+        "y": 1237.7693216918678
+      },
+      "tip": {
+        "x": 2114.720201397286,
+        "y": 1982.8257382842862
+      },
+      "text": "nnnn nnnnnnn nn nnnnn nnnnnnnn nnn nnn nnnnnnn nnnnn"
+    },
+    {
+      "z": 8192,
+      "id": "e1454866xdbcen",
+      "box": {
+        "x": -2927.1539516932735,
+        "y": -925.1851725310505
+      },
+      "tip": {
+        "x": -1642.7122872675088,
+        "y": -498.15675148052424
+      },
+      "text": "nnnnn nn nnnnnnn  nnnnn nnn nnnnnnnn"
+    },
+    {
+      "z": 9216,
+      "id": "e1454867xdbcen",
+      "box": {
+        "x": 3029.4750875173027,
+        "y": 2401.788075570402
+      },
+      "tip": {
+        "x": 1989.8017146752036,
+        "y": 2789.5374701727847
+      },
+      "text": "nnnnn nnnn nn nnnnnn nnnnn nnnn nnn nnnnnnnnn nnnn "
+    },
+    {
+      "z": 11264,
+      "id": "e1454869xdbcen",
+      "box": {
+        "x": -2816.0502586262683,
+        "y": 172.96749571019276
+      },
+      "tip": {
+        "x": -2292.5651420589647,
+        "y": 351.1629078283338
+      },
+      "text": "nnnnnnnnnnnnnn nnnnnnn\n. nn nnnnnn nnnnnnn nn nnn nnnnnnnnn\n. 0.0 nnnnn  nn "
+    },
+    {
+      "z": 20480,
+      "id": "e1454870xdbcen",
+      "box": {
+        "x": -3518.050241595585,
+        "y": -454.76790151973574
+      },
+      "tip": {
+        "x": -2230.8822011094817,
+        "y": -320.90498752811084
+      },
+      "text": "nnnnnnnnnnnn nnnn nnnnn nnnn nnnnnnn nnnnn nnnn nnnnnnnn \n00.00 nnnnn nnnnnnn nnnnnn nn nnnnnnnn nnnn"
+    },
+    {
+      "z": 13312,
+      "id": "e1454872xdbcen",
+      "box": {
+        "x": 1335.1574816857308,
+        "y": -1659.5806820096484
+      },
+      "tip": {
+        "x": 897.3116244448411,
+        "y": -1129.5984366262132
+      },
+      "text": "NNNNNNNN NNNNNNN NNNNNNNNN\n"
+    },
+    {
+      "z": 14336,
+      "id": "e1454873xdbcen",
+      "box": {
+        "x": 2591.1709647549937,
+        "y": -662.9739344130029
+      },
+      "tip": {
+        "x": 2168.6158331045935,
+        "y": -600.6298353359294
+      },
+      "text": ".0 nnnn.nn. nnnn"
+    },
+    {
+      "z": 15360,
+      "id": "e1454875xdbcen",
+      "box": {
+        "x": 2700.7919123095803,
+        "y": -1098.426456898528
+      },
+      "tip": {
+        "x": 2381.8479993375977,
+        "y": -1076.0444201476482
+      },
+      "text": " 000 nnnnn nnn  nnnnnnnnn"
+    },
+    {
+      "z": 16384,
+      "id": "e1454876xdbcen",
+      "box": {
+        "x": 2974.9715746149222,
+        "y": -1422.9657683301798
+      },
+      "tip": {
+        "x": 2429.40968348675,
+        "y": -1266.2915996564634
+      },
+      "text": "nnnnnnnnn nnnnnnnn nnnnn nnnnnnnnn"
+    },
+    {
+      "z": 17408,
+      "id": "e1454877xdbcen",
+      "box": {
+        "x": 3186.5305521562505,
+        "y": -840.404001567859
+      },
+      "tip": {
+        "x": 1883.8477923585779,
+        "y": -815.8532539914783
+      },
+      "text": "nnnnnnnn nnnnnn nnn nn 00 nnnnnn "
+    },
+    {
+      "z": 19456,
+      "id": "e1454879hribtn",
+      "box": {
+        "x": -3453.5871243953543,
+        "y": -1677.1791218317815
+      },
+      "tip": {
+        "x": -1613.5235486637946,
+        "y": -1059.5505968736684
+      },
+      "text": "NNNN NNNNNNNN.\n0.0 N NN\n000. 000. 000.000. 000 \nNNNNN NNNNN NNNN NN 000\nNNN NN 000.000 NNN NNNNNNNNNNN\n\nNN.NN NNNN 000 NNN NNNNNN\nNNNNNNNNNNN NNNN 000 NNN NNNNNN "
+    },
+    {
+      "z": 21504,
+      "id": "e1454944jjatdk",
+      "box": {
+        "x": -104.73806004356595,
+        "y": -2960.311230967968
+      },
+      "tip": {
+        "x": -1230.143294518632,
+        "y": -2621.448023947878
+      },
+      "text": "NNNNNNN NNN NNNNN NNNNNNNNNNNN NNNN NN NNNNNN NNN NNNNN NNNNNNN\nnnnnn...nnn.nnnnnnnnn.nnn.nnnnnnnn.nnnnnnnnnnnnnn.NNNN.nnnn"
+    },
+    {
+      "z": 22528,
+      "id": "e1454991epkkus",
+      "box": {
+        "x": 2730.848508816806,
+        "y": 2038.68211626913
+      },
+      "tip": {
+        "x": 993.1374609894816,
+        "y": 2047.8749771672833
+      },
+      "boxW": 1115.5112959845874,
+      "text": "NNNN NNNN NN NNNNN NN NNNNNNNN NNN NNN NNNNNNN. NN NNN NNNN NNN NN NNNNNNNN NNNN."
+    }
+  ],
+  "elevation": {
+    "crossSections": []
+  },
+  "settings": {
+    "snap": false,
+    "aisle": 24,
+    "bayMax": 58,
+    "bayMin": 50,
+    "doorOC": 12,
+    "hidden": {},
+    "stallW": 9,
+    "bufferD": 15,
+    "setback": 25,
+    "drainage": {},
+    "gridSize": 10,
+    "roadCurb": 0.5,
+    "showDims": true,
+    "showGrid": true,
+    "speedBay": 60,
+    "trailerL": 53,
+    "trailerW": 12,
+    "doorWidth": 9,
+    "parkAngle": 90,
+    "showAreas": true,
+    "showDocks": true,
+    "roadWidths": "24, 26, 30, 36, 40",
+    "stallDepth": 18,
+    "typeStyles": {},
+    "parcelStyle": {},
+    "showSetback": true,
+    "truckCourtD": 135,
+    "parcelSelect": true,
+    "trailerAisle": 60,
+    "trailerParkD": 50,
+    "bayDepthTarget": 50,
+    "bayLengthTarget": 56
+  },
+  "layerOverrides": {},
+  "layerAbove": {},
+  "rasters": [
+    {
+      "role": "underlay",
+      "id": "underlay",
+      "imgW": 1510,
+      "imgH": 1800,
+      "opacity": 1,
+      "ftPerPx": 5.628713314630407,
+      "ftPerPxY": 6.49719153109359,
+      "x": -4249.678552545957,
+      "y": -5847.943835804305,
+      "rotation": 0,
+      "locked": true,
+      "visible": true,
+      "encodedBytes": null,
+      "fromIdb": false,
+      "fromMap": true
+    },
+    {
+      "role": "sheetOverlay",
+      "id": "e1455071lxvizi",
+      "imgW": 2160,
+      "imgH": 3024,
+      "opacity": 0.85,
+      "ftPerPx": 4.166666666666667,
+      "x": 3077.989786170895,
+      "y": -4560.304017583239,
+      "rotation": 1.5,
+      "locked": false,
+      "page": 1,
+      "pageCount": 1,
+      "pdfBacked": true,
+      "visible": true,
+      "encodedBytes": null,
+      "fromIdb": true
+    }
+  ],
+  "_source": {
+    "siteId": "smsdrvzr9gzx",
+    "table": "public.sites JOIN public.site_elements ON site_id, deleted_at IS NULL",
+    "pulledAt": null,
+    "schemaVersion": 13
+  },
+  "_census": {
+    "note": "Counted from this file by fixtureCensus at build time, and asserted against the owner's measured values in test/realPlanFixtures.test.js.",
+    "elements": 106,
+    "parcels": 1,
+    "byType": {
+      "pond": 2,
+      "building": 30,
+      "paving": 15,
+      "trailer": 15,
+      "sidewalk": 16,
+      "parking": 17,
+      "road": 11
+    },
+    "markups": 2,
+    "measures": 2,
+    "callouts": 18,
+    "crossSections": 0
+  }
+}
