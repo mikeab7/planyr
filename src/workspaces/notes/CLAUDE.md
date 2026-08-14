@@ -544,6 +544,40 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
 - `lib/notesIndentLevel.js` — the pure half: `readIndent`, the ceiling, and the markup
   (`margin-left` **on the item**, so the bullet moves with its words). Renders nothing at level 0,
   which is the clause the byte-identical round-trip rests on.
+- **⛔ AND ONE KEYPRESS BELONGS TO THE CARET WHENEVER THERE IS ONE (B519681, `lib/notesKeyScope.js`).**
+  The owner: *"the direction keys on my keyboard arent working."* His prior was right in shape and
+  one level off in detail. The box-nudge binding (B421494) is on the `window`, armed only while a
+  box selection exists, and it declined for `input, textarea, select` — **the document is a
+  contenteditable DIV, which is none of those**, and was excluded deliberately on the argument that
+  clicking into the document clears the box selection on the way. **Measured: it does not.** With a
+  box selected and the caret then in ordinary flow text, every arrow moved the BOX and left the
+  caret alone — reachable in three clicks, and invisible once you have looked away from the selected
+  box, which is the whole profile of an intermittent input bug. ⛔ **The guard is the PROPERTY, not a
+  key list** (his instruction, after the second leak): every global `keydown` binding in this module
+  must ask `keysBelongToTheCaret()`, asserted by a SOURCE SWEEP in the repo-root `test/` suite
+  **notesKeyScope**, so the next binding somebody adds is covered by construction. Exemptions are
+  named individually with a reason and are checked to still exist. The behavioural half is
+  **audit-notes-arrows** under `ui-audit/` — 7 contexts × 14 keys, real keystrokes, four independent
+  observations per press (caret · box · document · scroll) plus `defaultPrevented` read off the real
+  event. ⛔ The marquee case the window binding exists for is UNAFFECTED and that is measured, not
+  assumed: the press that starts a band is `preventDefault`ed, so focus is on `<body>` and there is
+  no caret to own the key.
+- **⛔ AND AN ANCESTOR IS NOT A SELECTION (B519680) — a REGRESSION IN B512672, reported by the owner
+  with a screenshot an hour after it merged.** *"I'm trying to press shift tab to promote MUD
+  ATTORNEY … but it takes Dustin O'Neal, the phone number, and the email with it."* Those three are
+  not its descendants, they are its **nephews** — which is the tell, because only an ANCESTOR moving
+  can drag a branch that sits beside the pressed line. Cause: `itemsInSelection` asked
+  `doc.nodesBetween(from, to)` for every `listItem`, and **`nodesBetween` visits every node whose
+  range CONTAINS the position**, so a collapsed caret in a level-three bullet returned that bullet
+  AND its parent AND its grandparent. Measured before any fix: Tab on one line produced
+  `Active [indent=1]` **and `MUD 377 [indent=1]`**. The rule now: **an item moves when the selection
+  is inside ITS OWN text, not merely somewhere beneath it** — collect TEXTBLOCKS and map each to its
+  NEAREST indentable ancestor. **Structure only, never geometry** (he asked for that explicitly,
+  having noticed the odd line out carries a smaller font). ⛔ **The coverage hole is the more useful
+  finding:** all 17 cases passed before AND after the fix, because every one used a FLAT list where
+  an item has no indentable ancestor — depth was the variable that mattered and nothing had any.
+  Fixture and diff harness: **diagnose-notes-outdent** under `ui-audit/`.
+- `lib/notesKeyScope.js` — the one predicate above, plus the measured two states it separates.
 - `lib/notesTabKey.js` — **Tab belongs to the DOCUMENT while the caret is in it** (B1392, and
   B1392 ×2 which made it true in EVERY context rather than usually — **its header carries the
   full table of what Tab does in each one; read that before touching it**, and note that the

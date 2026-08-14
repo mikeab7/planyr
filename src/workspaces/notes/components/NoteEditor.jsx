@@ -43,6 +43,7 @@ import {
   normalizeZoom, scrollTopAfterZoom, zoomForKey, zoomForWheel, zoomLabel, ZOOM_DEFAULT,
 } from "../lib/notesZoom.js";
 import { PASTE_MODES } from "../lib/notesPastePlain.js";
+import { keysBelongToTheCaret } from "../lib/notesKeyScope.js";
 import {
   readNoteFiles, readNoteImages, readPage, readPageVersions, registerOpenNoteDoc,
   restorePageVersion, snapshotPage, writePage,
@@ -1177,8 +1178,18 @@ export default function NoteEditor({
   useEffect(() => {
     if (!selection.size) return undefined;
     const onKey = (e) => {
-      const el = document.activeElement;
-      if (el && el.closest && el.closest("input, textarea, select")) return;
+      /* ⛔ THE CARET OWNS THE KEY WHENEVER THERE IS ONE (NEW-ARROWS). This used to decline only
+       * for `input, textarea, select` — and the document is a CONTENTEDITABLE DIV, which is none
+       * of those. It was excluded deliberately, on the argument that clicking into the document
+       * clears the box selection on the way; measured, it does not, so with a box selected and
+       * the caret in ordinary flow text every arrow moved the BOX and left the caret alone. That
+       * is the owner's reported "direction keys aren't working", reachable in three clicks and
+       * invisible once you have looked away from the selected box.
+       *
+       * The marquee case this binding exists for is UNAFFECTED: the press that starts a band is
+       * `preventDefault`ed, so there is no caret and focus is on `<body>` — measured, not assumed.
+       * See lib/notesKeyScope.js for both states and the property the guard asserts. */
+      if (keysBelongToTheCaret()) return;
       selectionKeyDown(e);
     };
     window.addEventListener("keydown", onKey);
