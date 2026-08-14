@@ -495,16 +495,32 @@ export default function AppHeader({
   const rowRef = useRef(null);
   const leftZoneRef = useRef(null);
   const rightZoneRef = useRef(null);
+  const centerZoneRef = useRef(null);
   const [center, setCenter] = useState({ mode: "unmeasured", max: null });
   useLayoutEffect(() => {
     if (narrow) return undefined; // phone: the row scrolls sideways, everything stays in flow
     const row = rowRef.current, left = leftZoneRef.current, right = rightZoneRef.current;
     if (!row || !left || !right) return undefined;
     const measure = () => {
+      /* ⛔ B371362 — THE THRESHOLD COMES FROM THE CONTENT WHEN THE CONTENT KNOWS IT. `CENTER_SLOT_MIN`
+       * is a constant standing in for "the least width at which the chip can still say something",
+       * and that quantity is a property of what is IN the slot: 120 px fits "Unincorporated" and does
+       * not fit the owner's Goose Creek label, whose shortest true form needs 199. Measured on the
+       * real header: at 1000 px the bound is 136, `centered` wins because 136 ≥ 120, and the pill is
+       * handed a slot it cannot use — while at 980 px `tight` shows the whole label. A slot the
+       * content cannot use is not a centred chip, it is an empty space where a chip used to be.
+       *
+       * The content declares it on `data-center-min-fit`; anything that declares nothing gets the
+       * constant and behaves exactly as before. Reading it cannot loop: the value is a function of
+       * the content's TEXT, never of the width it is granted. */
+      const declared = centerZoneRef.current
+        ? Number(centerZoneRef.current.querySelector("[data-center-min-fit]")?.getAttribute("data-center-min-fit"))
+        : NaN;
       const next = centerSlotPlan({
         rowW: row.clientWidth,
         leftW: left.getBoundingClientRect().width,
         rightW: right.getBoundingClientRect().width,
+        ...(Number.isFinite(declared) && declared > 0 ? { min: declared } : null),
       });
       // Sub-pixel churn would re-render every frame of a drag for no visible change.
       setCenter((prev) => (prev.mode === next.mode && prev.max != null && next.max != null
@@ -517,6 +533,11 @@ export default function AppHeader({
     }
     const ro = new ResizeObserver(measure);
     ro.observe(row); ro.observe(left); ro.observe(right);
+    /* The centre too — not for ITS width (which is never an input) but because the content's declared
+     * minimum changes when the content does, and a new jurisdiction label must be able to move the
+     * verdict. The plan is computed from row/left/right + the declared minimum, none of which is the
+     * centre's rendered width, so observing it cannot feed back. */
+    if (centerZoneRef.current) ro.observe(centerZoneRef.current);
     return () => ro.disconnect();
   }, [narrow]);
   // `centered` is the only mode that leaves the flow; the other two are the row as it has always been.
@@ -756,6 +777,7 @@ export default function AppHeader({
             and beats a silently collapsed one.
             On a phone (`narrow`) the row scrolls sideways, so the badge keeps its natural width. */}
         <div
+          ref={centerZoneRef}
           data-header-center="1"
           data-center-mode={centerMode}
           style={{
