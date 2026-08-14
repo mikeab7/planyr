@@ -98,6 +98,26 @@ original name on the biggest piece and name the others after it.
 Answer either one in a sentence and I'll wire it. Nothing is blocked on you in the meantime — the tool
 works as it stands.
 
+## ✅ ANSWERED AND SHIPPED — both split decisions are live, nothing on your end (B455360 / B520560)
+
+You answered both, and both are in.
+
+**Keep every piece.** That is what it does. One thing genuinely changed: it used to quietly drop a
+scrap too small to be worth a lot and tell you it had. It doesn't any more — you get the scrap as a
+parcel, with its acreage, exactly as you said. On your Bain tract that's the difference between three
+pieces plus a small loss and five pieces with nothing lost. It still tells you when a piece is too
+small to see on screen, so you can delete it if you want to — but that's a heads-up, not a deletion.
+
+**Numbered off the original.** Cut Parcel 1 and you get Parcel 1A, 1B, 1C — on the drawing, not just
+in the list. Cut 1A again and you get 1A1 and 1A2, which is the same way your appraisal districts
+write a tract number. Past 26 pieces it carries on AA, AB — nothing ever wraps around onto a name
+already in use. If you've given a parcel your own name, the pieces extend YOUR name — "Creek Tract"
+becomes "Creek Tract A" — rather than falling back to a number.
+
+Two things I found while wiring that up, both of which were live and neither of which you'd reported:
+the drawing was showing the bare word "Parcel" on every lot even though the numbering already existed
+underneath, and a tract with a street address gave all its pieces the identical name. Both fixed.
+
 ## 📄 One Baytown document I can't download — it's the last piece of the Baytown flood answer (B393170)
 
 > Your two Baytown-area sites — **Grand Port** and **Goose Creek** — now name the right city and the right

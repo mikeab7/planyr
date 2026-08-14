@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-14 @ `78e4adb` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-14 @ `bc2d21f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_522 source files mapped._
+_523 source files mapped._
 
 ## infra
 
@@ -87,6 +87,8 @@ _522 source files mapped._
   - _exports_: `INDENT_STEP_EM`, `INDENTABLE`, `indentAttrs`, `MAX_INDENT`, `parseIndent`, `readIndent`
 - **`src/workspaces/notes/lib/notesKeys.js`** — the device storage KEY FORMAT and the scope rule, written down once — a dependency-free leaf so the one module allowed to read these keys from outside the Notes route cannot drift from the store.
   - _exports_: `IGNORED_DUPES_KEY_BASE`, `LOCAL_SCOPE`, `PAGE_KEY_BASE`, `scopeFor`, `SYNC_KEY_BASE`, `TREE_KEY_BASE`
+- **`src/workspaces/notes/lib/notesKeyScope.js`** — who owns a keypress: while there is a live caret in editable text, every global binding in Notes is inert. One shared predicate, asserted as a source property.
+  - _exports_: `caretOwnsTheKey`, `FIELD_SELECTOR`, `keysBelongToTheCaret`, `readCaretScope`
 - **`src/workspaces/notes/lib/notesListIndent.js`** — Tab changes the LEVEL of the current item and never creates a node the user did not type: the `indent` attribute on listItem/taskItem, above the list keymap.
   - _exports_: `default`, `INDENT_STEP_EM`, `INDENTABLE`, `indentAttrs`, `LIST_INDENT_PRIORITY`, `MAX_INDENT`, `readIndent`, `shiftIndent`
 - **`src/workspaces/notes/lib/notesMarkdown.js`** — PURE Markdown export of a note's document model (GFM tables/task lists, HTML fallback for what Markdown cannot spell, plus a lossiness report) and `docToText` for body search.
@@ -122,7 +124,7 @@ _522 source files mapped._
 - **`src/workspaces/notes/lib/notesSlashMenu.js`** — The slash-menu trigger rule (never mid-word), the command catalogue, and the extension that owns the arrows, Enter and Escape.
   - _exports_: `applySlashCommand`, `default`, `filterSlashCommands`, `NoteSlashMenu`, `readSlashState`, `SLASH_COMMANDS`, `SLASH_MAX_QUERY`, `slashPluginKey`, `slashQueryFromText`, `stepIndex`
 - **`src/workspaces/notes/lib/notesSpacing.js`** — how far apart the lines are: a BLOCK property (paragraph/heading), written into the markup so it saves, syncs and prints with no second stylesheet
-  - _exports_: `BLOCK_SPACES`, `LINE_SPACINGS`, `spacingFromElement`, `spacingLabel`, `spacingStyle`
+  - _exports_: `BLOCK_SPACES`, `blockFontSize`, `DEFAULT_DENSITY`, `DENSITIES`, `densityFor`, `densityStyle`, `LINE_SPACINGS`, `SINGLE`, `spacingFromElement`, `spacingLabel`, `spacingStyle`
 - **`src/workspaces/notes/lib/notesStore.js`** — The ONE storage seam for Notes — per-account scoped keys, tree and page bodies kept separate, image bytes in IndexedDB behind enforced ceilings, `purgePages` as the one place bytes are destroyed, every failure broadcast (LOUD-FAILURE). Cloud sync would be a change here and nowhere else.
   - _exports_: `clearNotesStorageError`, `collectBinFacts`, `collectOpenTasks`, `deleteNoteImages`, `deletePages`, `deletePageVersions`, `ignoreDuplicate`, `lastNotesStorageError`, `listStoredPageIds`, `LOCAL_SCOPE`, `markPagesBinned`, `markPagesRestored`, `MAX_FILE_BYTES`, `MAX_IMAGE_BYTES`, `MAX_NOTEBOOK_IMAGE_BYTES`, `noteImageUsage`, `notesConflictFor`, `notesConflictLine`, `notesConflicts`, `notesScope`, `notesScopeLabel`, `notesStorageLine`, `notesSyncState`, `onNotesConflict`, `onNotesPagesChanged`, `onNotesStorageError`, `onNotesSyncState`, `openTaskCount`, `PAGE_KEY_BASE`, `pageKey`, `purgePages`, `putNoteFile`, `putNoteImage`, `readIgnoredDuplicates`, `readNoteFile`, `readNoteFiles`, `readNoteImage`, `readNoteImages`, `readNotesZoom`, `readPage`, `readPageVersion`, `readPageVersions`, `readTreeRaw`, `refreshNotesSync`, `registerOpenNoteDoc`, `reportImageProblem`, `resolveNotesConflict`, `restorePageVersion`, `searchNotes`, `setNotesScope`, `snapshotPage`, `startNotesSync`, `stopNotesSync`, `sweepEmptyAnchors`, `sweepImagesOfMissingPages`, `sweepOrphans`, `SYNC_KEY_BASE`, `syncKey`, `toggleNoteTask`, `TREE_KEY_BASE`, `treeKey`, `writeNotesZoom`, `writePage`, `writeTree`
 - **`src/workspaces/notes/lib/notesTabKey.js`** — Tab belongs to the document: a low-priority fallback behind the table and list handlers, plus the Escape-then-Tab keyboard-trap escape
@@ -906,7 +908,7 @@ _522 source files mapped._
 - **`src/workspaces/site-planner/lib/siteAnalysis.js`** — Registry-driven environmental/regulatory screen of active-parcel rings (flood, wetlands, wells, pipelines, jurisdiction, road, zoning) with silent-error present/absent/unknown/unavailable states over the SWR cache
   - _exports_: `ANALYSIS_SOURCES`, `analyzeProximitySource`, `analyzeSource`, `buildAnalysisParams`, `buildJurisdictionFinding`, `buildProximityParams`, `buildQueryUrl`, `buildRoadFinding`, `classifyFlood`, `classifyStatus`, `deriveZoning`, `epaProgram`, `isSFHA`, `normalizeAttrs`, `pipelineSummary`, `representativeRing`, `ringCentroid`, `ringsBBox`, `ringsSignature`, `runSiteAnalysis`, `simplifyRing`, `wetlandSummary`, `zoneSummary`
 - **`src/workspaces/site-planner/lib/siteModel.js`** — Canonical per-plan Site Model schema v10: createSiteModel/migrate, semantic selectors, cross-copy union merge with delete-tombstones, and bonded-child/dog-ear/road-centerline load-time repairs
-  - _exports_: `activeParcelsOf`, `ANNOTATION_KINDS`, `annotationsOf`, `bondedChildRot`, `buildingNumbers`, `constraintsOf`, `contentCount`, `countJunkEntries`, `createSiteModel`, `crossSectionsOf`, `developableArea`, `EASEMENT_KINDS`, `easementsOf`, `elementsOf`, `exclusionZonesOf`, `ID_BOND_KEYS`, `impossibleStacks`, `isBuilding`, `lineageConflicts`, `mergeSiteContent`, `migrate`, `migrateRoads`, `missingBondSiblings`, `normalizeBondedChildren`, `normalizeCrossHostBonds`, `normalizeHostRuns`, `normalizeOrphanWallPads`, `normalizeZoneAlongLen`, `offAnchor`, `orphanWallPads`, `parcelAncestors`, `parcelChildrenMap`, `parcelDescendants`, `parcelDisplayInfo`, `parcelDrawingsOf`, `parcelOutline`, `parcelsOf`, `quarterOffset`, `rectRoadEndpoints`, `RESTORED_STRIP_W_FT`, `roadStripBBox`, `roadTravelWidth`, `setbacksOf`, `SHARE_MIRROR_FIELDS`, `shareMirrorOf`, `sheetOverlaysOf`, `SITE_MODEL_VERSION`, `STATUS_META`, `STATUSES`, `statusOf`, `strandedFromHost`, `teamShareOf`, `toMs`, `utilitiesOf`, `UTILITY_KINDS`, `withShareMirror`
+  - _exports_: `activeParcelsOf`, `ANNOTATION_KINDS`, `annotationsOf`, `bondedChildRot`, `buildingNumbers`, `constraintsOf`, `contentCount`, `countJunkEntries`, `createSiteModel`, `crossSectionsOf`, `developableArea`, `EASEMENT_KINDS`, `easementsOf`, `elementsOf`, `exclusionZonesOf`, `ID_BOND_KEYS`, `impossibleStacks`, `isBuilding`, `lineageConflicts`, `mergeSiteContent`, `migrate`, `migrateRoads`, `missingBondSiblings`, `normalizeBondedChildren`, `normalizeCrossHostBonds`, `normalizeHostRuns`, `normalizeOrphanWallPads`, `normalizeZoneAlongLen`, `offAnchor`, `orphanWallPads`, `parcelAncestors`, `parcelChildrenMap`, `parcelDescendants`, `parcelDisplayInfo`, `parcelDrawingsOf`, `parcelOutline`, `parcelsOf`, `parcelSplitNames`, `quarterOffset`, `rectRoadEndpoints`, `RESTORED_STRIP_W_FT`, `roadStripBBox`, `roadTravelWidth`, `setbacksOf`, `SHARE_MIRROR_FIELDS`, `shareMirrorOf`, `sheetOverlaysOf`, `SITE_MODEL_VERSION`, `STATUS_META`, `STATUSES`, `statusOf`, `strandedFromHost`, `teamShareOf`, `toMs`, `utilitiesOf`, `UTILITY_KINDS`, `withShareMirror`
 - **`src/workspaces/site-planner/lib/sitePlacement.js`** — putting an UNLOCATED plan on the earth: origin validation, a typed lat/lon parser, and anchor nudging (no drawn coordinate moves).
   - _exports_: `normalizeOrigin`, `nudgeOrigin`, `originAtOffset`, `parseLatLon`, `rotPt`, `sameOrigin`
 - **`src/workspaces/site-planner/lib/sitePlacementRotate.js`** — rotating a WHOLE plan rigidly about its body centre. Loaded on demand.

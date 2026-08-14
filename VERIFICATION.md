@@ -123,6 +123,59 @@ was never clicked" quietly ships broken.
 5. Confirm a genuine location change still works: move a site's map anchor and check the aerial re-centres (the fix must not pin the map to a stale origin).
 
 
+### V250304 — B455360: a complicated parcel cut, on his own signed-in cloud plans `Blocker: auth`
+
+**SCOPE WIDENED (B520560) — this entry now also covers keeping every piece and the naming of
+the pieces.** The heading is left exactly as it merged on purpose: it is one live pass, not two,
+and a second V number would split the work the owner-chat agent has already claimed.
+
+**⛔ OWNED — DO NOT DOUBLE-WORK IT.** The owner-chat agent drives Michael's own signed-in browser and
+has claimed this check (it closed four previously-blocked live checks the same day: V93568 both
+halves, B316865, B316864). It is NOT waiting for "a session that can sign in" — a second session
+running it would be duplicated effort on his live plans. **Covers BOTH items**: B455360 (the general
+cut) and B520560 (keep every piece + the lineage names). One pass, one entry, deliberately not split.
+
+**WHAT TO CHECK BEYOND "cut a real parcel, reload, confirm the pieces and their acreage persist".**
+Six things, in the order that makes a failure cheapest to localise. Each names what a WRONG answer
+looks like, so a null is distinguishable from a pass.
+
+1. **THE NAMES ON THE DRAWING, not in the panel.** The acreage badges must read `Parcel 1A 63.46 ac`,
+   `Parcel 1B …` — distinct names, one per piece. **The failure this is for:** the numbering has
+   existed in the model for a long time and the Parcel PANEL always showed it; only the canvas badge
+   was blind. So a check that reads the panel proves nothing about what was fixed. **Wrong answer
+   looks like:** two or more chips reading the bare word "Parcel", or the same name twice.
+2. **AN ADDRESSED TRACT — the one collision that was live.** Pick a parcel that carries a situs
+   address (the badge shows the address rather than "Parcel N"). Split it. Pieces must read
+   `<address> A`, `<address> B`. **Wrong answer looks like:** every piece showing the identical
+   address — that was the shipped behaviour until this round, because a split copies `addr` onto each
+   piece and the address outranked the derived name.
+3. **A TYPED NAME.** Rename a parcel to something of his own ("Creek Tract"), split it, and confirm
+   the pieces extend HIS name — `Creek Tract A`, `Creek Tract B` — not `Parcel 3A`.
+4. **SPLIT A PIECE AGAIN.** `1A` must yield `1A1` / `1A2`, and its sibling `1B` must be untouched.
+   This is the case where a wrong separator shows up (`1A 1`), and it is also the case where a
+   lineage bug would surface as a name that has restarted from scratch.
+5. **THE CLOUD ROUND-TRIP, which is the part only he can test.** After the split: reload, confirm the
+   pieces, their acreages AND their names all come back; then open the same plan in a SECOND TAB and
+   confirm it agrees. **Wrong answer looks like:** the pieces surviving but the superseded parent
+   coming back ACTIVE (that would double-count the acreage in Yield), or a piece missing after the
+   round-trip. Worth a glance at the Yield panel's site area before and after — it must not move.
+6. **THE PER-EDGE REMAP, on a parcel that actually carries per-side data.** The fixtures here all
+   carry the plan default, so this is genuinely unverified. Use a plan where individual sides have
+   different setbacks and at least one hand-assigned role. After the split: each piece keeps the
+   setback on the sides it inherited, a side the CUT created shows the plan default, and the
+   buildable envelope redraws with no stray line. **Wrong answer looks like:** a setback value
+   appearing on a side that never had one, or the envelope collapsing.
+
+**Two more, cheap, if he has a minute.** (a) His own screenshot's tract — the wooded one with the
+creek and the road corridor. That plan was never identified here; Goose Creek is the nearest recorded
+equivalent. Run the cut he was actually trying to make. (b) On the **Bain** tract specifically, a cut
+should now produce a toast naming two pieces too small to see, kept rather than dropped, plus a note
+that that parcel's own outline overlaps itself by about eight square feet. Both are expected and
+correct — the point is to confirm he SEES them rather than that they are absent.
+
+**WHAT IS ALREADY PROVEN WITHOUT SIGN-IN, so it need not be re-checked by hand.**
+`e2e/parcel-split-complex-cut.spec.js`
+drives the REAL app on his recorded 95-acre Goose Creek tract (24 vertices, 12 of them
 ### V294384 — B342996 ×3: a rename travels between his two computers, and "Last edited" does not move `Blocker: auth` `Blocker: real-data`
 - **WHY IT NEEDS A LIVE PASS AND CANNOT BE CLOSED HERE.** The whole claim is about **two signed-in clients disagreeing**, which is a LIVE-VERIFY class twice over (concurrency / multi-writer, and real project data). The sandbox proves the merge rule against two real store instances and an in-memory server — `test/notesTreeWriteThrough.test.js`, 24 cases, mutation-proven twice — but this sandbox cannot sign in (the proxy CORS-blocks Supabase auth), so the real `notes_trees` row, the real `rev` trigger and his real note titles have never been through it.
 - **WHAT WAS VERIFIED HERE:** lint · the full unit suite · the build · 24 cases in `test/notesTreeWriteThrough.test.js` including his exact two-client test in both directions · two deliberate mutations of the real source (restoring `updatedAt` stamping → 8 red; making an absent stamp read as newest → 9 red).
@@ -524,37 +577,6 @@ judgement about frequency that no assertion can make.
 
 **Result:** ⏳ pending.
 
-### V250304 — B455360: a complicated parcel cut, on his own signed-in cloud plans `Blocker: auth`
-
-**What is proven WITHOUT sign-in, and it is a lot.** `e2e/parcel-split-complex-cut.spec.js` is
-**5/5 driving the REAL app** on his recorded 95-acre Goose Creek tract (24 vertices, 12 of them
-reflex, and a pinched interior exclusion): the Split tool is armed from the parcel rail exactly as
-he would arm it, a four-point bent "creek" cut is clicked across the lot and finished on Enter, and
-the result is read back off **what renders** — the parcel groups on the canvas and the acreage
-badges, each recomputed from its own new outline. A six-crossing zig-zag makes **FOUR pieces**
-(36.00 + 26.97 + 24.47 + 7.93 = 95.37 ac, the whole tract), the bent cut makes two (63.46 + 31.91 =
-95.37 ac), the toast he reported never appears, and a cut drawn in clear space is refused with
-words about THAT cut. Beside it: `test/polygonSplit.test.js` **31 passing** — including the
-pre-fix pipeline reproducing his exact toast on two of his own production parcels, area
-conservation to one part in 10⁹ on three real tracts, and 800 randomised bent cuts — mutation-proven
-three ways. Unit **11,059 passing**, lint 0 errors, build green.
-
-**⛔ WHAT I COULD NOT TEST, stated plainly.**
-1. **The signed-in cloud round-trip.** Parcels live in the site record, so a split writes new
-   parcel rows through the cloud save path. The sandbox proxy CORS-blocks Supabase sign-in, so the
-   split was only ever verified against on-device storage. **Steps:** open a real plan signed in →
-   split a parcel with a bent cut → reload → confirm the same pieces, the same acreages, and the
-   superseded parent still listed greyed under them → open the plan in a second tab and confirm it
-   agrees.
-2. **The per-edge remap on a parcel that actually carries setbacks and role overrides.** The
-   fixtures used here carry the plan default. **Steps:** on a plan where individual sides have
-   different setbacks and at least one hand-assigned role, split it and confirm each piece keeps
-   the setback on the sides it inherited, that a side the CUT created shows the plan default, and
-   that the buildable envelope redraws without a stray line.
-3. **His own screenshot's tract.** He described a wooded tract with a creek running diagonally
-   through it and a road corridor along one side. That specific plan was not identified here;
-   Goose Creek is the nearest recorded equivalent in the repo. **Steps:** run the cut he was
-   trying to make, on the plan he was trying to make it on.
 ### V238192 — B443248: "Mobilize" on his own Grand Port opens at 10/05/26, and the correction arrives NAMED `Blocker: real-data` `Blocker: auth`
 
 **Proven here already, in a real browser, on his exact row shape.** `ui-audit/verify-summary-pred-dates.mjs`
@@ -712,7 +734,6 @@ places. Beside it: `sweep-notes` **265 checks over 44 controls, clean** · `veri
 40/40 · `verify-notes` 294/294 · `verify-press-drive` 6/6 · `verify-notes-rename-live` 15/15.
 Unit **10,955 passing**. Lint 0 errors, build green.
 
-**⛔ WHAT I COULD NOT TEST, stated plainly because skipping this is what produced the round.**
 1. **The signed-in condition itself.** The resize defect only appeared on his account because a
    sync tick re-renders a node view mid-gesture. The sandbox cannot sign in (the proxy CORS-blocks
    Supabase auth), so that re-render is SIMULATED — forced by hand at the same moment. The

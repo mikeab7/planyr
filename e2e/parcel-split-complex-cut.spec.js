@@ -64,6 +64,10 @@ const parcelKeys = (page) => page.evaluate(() =>
 /* Every acreage badge currently painted, as numbers. These are RECOMPUTED from each outline at
  * render — reading them back is how "the pieces add up" is checked against the drawing rather
  * than against the model that drew it. */
+const badgeNames = (page) => page.evaluate(() =>
+  [...document.querySelectorAll('[data-chrome="acreage-badge"] [data-chip-text]')]
+    .map((t) => (t.textContent || "").replace(/\s+[\d,.]+\s*ac$/i, "").trim()));
+
 const badgeAcres = (page) => page.evaluate(() => {
   const out = [];
   for (const g of document.querySelectorAll('[data-chrome="acreage-badge"]')) {
@@ -190,5 +194,67 @@ test.describe("parcel split — a complicated cut", () => {
     await expect(page.getByText(/never crosses the parcel/i).first()).toBeVisible({ timeout: 8_000 });
     // …and nothing was changed.
     expect((await parcelKeys(page)).length).toBe(1);
+  });
+});
+
+/* ⛔ B520560 — THE PIECES ARE NUMBERED OFF THE ORIGINAL, ON THE DRAWING.
+ *
+ * Owner decision, verbatim: "number them off the original — a cut on Parcel 1 yields Parcel 1A,
+ * 1B, 1C", with the lineage staying visible. `parcelDisplayInfo` already derived exactly that
+ * chain and the Parcel panel already showed it — but the CANVAS badge hardcoded the word "Parcel"
+ * for every lot, so from his seat every piece was unnamed and identical. That gap is invisible to
+ * a unit test on the naming function, which is why it is asserted here on the rendered badge.
+ */
+test.describe("parcel split — the pieces are named", () => {
+  test("the badges on the canvas read Parcel 1A / 1B, not two identical 'Parcel' chips", async ({ page }) => {
+    await loadPlan(page);
+    expect(await badgeNames(page)).toEqual(["Parcel 1"]);
+
+    await armSplitTool(page);
+    await drawCut(page, "creek");
+    await expect.poll(async () => (await parcelKeys(page)).length, { timeout: 10_000 }).toBe(2);
+
+    const names = await badgeNames(page);
+    expect(names.sort()).toEqual(["Parcel 1A", "Parcel 1B"]);
+    expect(new Set(names).size).toBe(names.length);   // never two lots wearing one name
+  });
+
+  test("a four-piece cut numbers every piece, and the acreage still adds up", async ({ page }) => {
+    await loadPlan(page);
+    await armSplitTool(page);
+    await drawCut(page, "zigzag");
+    await expect.poll(async () => (await parcelKeys(page)).length, { timeout: 10_000 }).toBeGreaterThanOrEqual(3);
+
+    const names = await badgeNames(page);
+    expect(names.length).toBeGreaterThanOrEqual(3);
+    expect(names.every((n) => /^Parcel 1[A-Z]+$/.test(n))).toBe(true);
+    expect(new Set(names).size).toBe(names.length);
+    expect(sumBadges(await badgeAcres(page))).toBeCloseTo(ORIGINAL_ACRES, 1);
+  });
+
+  test("splitting a piece AGAIN continues the chain — 1A becomes 1A1 / 1A2", async ({ page }) => {
+    await loadPlan(page);
+    await armSplitTool(page);
+    await drawCut(page, "creek");
+    await expect.poll(async () => (await parcelKeys(page)).length, { timeout: 10_000 }).toBe(2);
+
+    // Cut the FIRST piece again, across its own painted box.
+    const pieceKey = (await parcelKeys(page))[0];
+    const pieceId = pieceKey.slice("parcel:".length);
+    await armSplitTool(page);
+    const b = await page.locator(`[data-feature="${pieceKey}"] polygon`).first().boundingBox();
+    for (const pt of [
+      { x: b.x + b.width * 0.45, y: b.y - 25 },
+      { x: b.x + b.width * 0.55, y: b.y + b.height + 25 },
+    ]) await page.mouse.click(pt.x, pt.y);
+    await page.keyboard.press("Enter");
+
+    await expect.poll(async () => (await parcelKeys(page)).length, { timeout: 10_000 }).toBeGreaterThanOrEqual(3);
+    const names = await badgeNames(page);
+    // The re-cut piece's own children carry its letter and add a digit; its sibling is untouched.
+    expect(names.filter((n) => /^Parcel 1[A-Z]\d+$/.test(n)).length).toBeGreaterThanOrEqual(2);
+    expect(new Set(names).size).toBe(names.length);
+    expect(names).not.toContain(pieceId);
+    expect(sumBadges(await badgeAcres(page))).toBeCloseTo(ORIGINAL_ACRES, 1);
   });
 });

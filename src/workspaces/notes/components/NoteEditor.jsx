@@ -43,6 +43,8 @@ import {
   normalizeZoom, scrollTopAfterZoom, zoomForKey, zoomForWheel, zoomLabel, ZOOM_DEFAULT,
 } from "../lib/notesZoom.js";
 import { PASTE_MODES } from "../lib/notesPastePlain.js";
+import { keysBelongToTheCaret } from "../lib/notesKeyScope.js";
+import { DEFAULT_DENSITY, densityFor } from "../lib/notesSpacing.js";
 import {
   readNoteFiles, readNoteImages, readPage, readPageVersions, registerOpenNoteDoc,
   restorePageVersion, snapshotPage, writePage,
@@ -72,7 +74,13 @@ const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.js
  * PDF-PARITY: lib/notesPrint.js mirrors this list construct for construct, on paper.
  * Add a construct here and add it there in the same commit. */
 const EDITOR_CSS = `
-.planyr-note .ProseMirror { outline: none; min-height: 46vh; color: var(--text-primary); line-height: 1.65; font-size: 15px; tab-size: 4; }
+/* ⛔ THE NOTE'S DENSITY, AND IT IS THE ONE PLACE THE NUMBER LIVES (NEW-SPACING-1/3).
+   It was a hard-coded 1.65 here — which measured as 15px text in a 24.75px line box, while
+   Word and OneNote call ~1.15 single. So the loosest setting in the spacing control's own
+   list was also its default, and picking "Single" changed nothing. The value now comes from
+   lib/notesSpacing.js through a custom property, so the editor, the Compact control and the
+   print sheet cannot drift. */
+.planyr-note .ProseMirror { outline: none; min-height: 46vh; color: var(--text-primary); line-height: var(--note-line, 1.15); font-size: 15px; tab-size: 4; }
 .planyr-note .ProseMirror > * + * { margin-top: 0.7em; }
 .planyr-note .ProseMirror p { margin: 0; }
 .planyr-note .ProseMirror h1 { font-size: 1.9em; font-weight: 700; line-height: 1.25; margin: 0; }
@@ -80,7 +88,7 @@ const EDITOR_CSS = `
 .planyr-note .ProseMirror h3 { font-size: 1.22em; font-weight: 650; margin: 0; }
 .planyr-note .ProseMirror h4 { font-size: 1.06em; font-weight: 650; margin: 0; }
 .planyr-note .ProseMirror ul, .planyr-note .ProseMirror ol { padding-left: 1.5em; margin: 0; }
-.planyr-note .ProseMirror li { margin: 0.15em 0; }
+.planyr-note .ProseMirror li { margin: var(--note-list-gap, 2px) 0; }
 .planyr-note .ProseMirror li p { margin: 0; }
 .planyr-note .ProseMirror blockquote { border-left: 3px solid var(--accent-notes); padding-left: 0.9em; color: var(--text-secondary); margin: 0; }
 .planyr-note .ProseMirror code { background: var(--surface-page); border: 1px solid var(--border-default); border-radius: 4px; padding: 0.1em 0.32em; font-family: ui-monospace, "Courier New", monospace; font-size: 0.9em; }
@@ -799,6 +807,15 @@ export default function NoteEditor({
     return () => { editor.off("update", bump); editor.off("selectionUpdate", bump); };
   }, [editor]);
 
+  /* The note's own density, read off the document and recomputed with it — see the wrapper
+   * below and lib/notesSpacing.js. `densityFor` falls back rather than throwing, so a document
+   * carrying an unknown id still renders. */
+  const density = useMemo(() => {
+    if (!editor || editor.isDestroyed) return densityFor(DEFAULT_DENSITY);
+    return densityFor(editor.state.doc.attrs?.density);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, docTick]);
+
   const outline = useMemo(() => {
     if (!editor || editor.isDestroyed) return [];
     return outlineFromDoc(editor.getJSON());
@@ -1177,8 +1194,18 @@ export default function NoteEditor({
   useEffect(() => {
     if (!selection.size) return undefined;
     const onKey = (e) => {
-      const el = document.activeElement;
-      if (el && el.closest && el.closest("input, textarea, select")) return;
+      /* ⛔ THE CARET OWNS THE KEY WHENEVER THERE IS ONE (NEW-ARROWS). This used to decline only
+       * for `input, textarea, select` — and the document is a CONTENTEDITABLE DIV, which is none
+       * of those. It was excluded deliberately, on the argument that clicking into the document
+       * clears the box selection on the way; measured, it does not, so with a box selected and
+       * the caret in ordinary flow text every arrow moved the BOX and left the caret alone. That
+       * is the owner's reported "direction keys aren't working", reachable in three clicks and
+       * invisible once you have looked away from the selected box.
+       *
+       * The marquee case this binding exists for is UNAFFECTED: the press that starts a band is
+       * `preventDefault`ed, so there is no caret and focus is on `<body>` — measured, not assumed.
+       * See lib/notesKeyScope.js for both states and the property the guard asserts. */
+      if (keysBelongToTheCaret()) return;
       selectionKeyDown(e);
     };
     window.addEventListener("keydown", onKey);
@@ -1577,6 +1604,7 @@ export default function NoteEditor({
       title: title || "Untitled page",
       meta: (trail || []).filter(Boolean).join(" › "),
       pages: [{ title, html: docToHtml(json, images), updatedAt }],
+      density: json?.attrs?.density,          // PDF-PARITY: the sheet gets the note's own density
     });
     const r = await printHtmlDocument(html);
     if (!r.ok) onPrintNotice?.(r.error);
@@ -1591,7 +1619,15 @@ export default function NoteEditor({
   const edited = editedLabel(updatedAt);
 
   return (
-    <div className="planyr-note" style={{ display: "flex", flexDirection: "column", minHeight: 0, flex: 1, background: "var(--surface-page)" }}>
+    /* ⛔ THE DENSITY IS SET AS TWO CUSTOM PROPERTIES ON THE WRAPPER (NEW-SPACING-3), so ONE
+       document attribute drives the line height and the gap between list items together — which
+       is what makes Compact one action rather than two controls. The values come from
+       lib/notesSpacing.js, the same record the print sheet reads. */
+    <div className="planyr-note" style={{
+      display: "flex", flexDirection: "column", minHeight: 0, flex: 1, background: "var(--surface-page)",
+      "--note-line": density.line,
+      "--note-list-gap": `${density.listGap}px`,
+    }}>
       <EditorStyles />
       <NoteToolbar
         editor={editor}

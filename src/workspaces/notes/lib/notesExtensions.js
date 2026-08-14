@@ -26,8 +26,9 @@
  */
 import StarterKit from "@tiptap/starter-kit";
 import { Extension } from "@tiptap/core";
+import { Plugin, PluginKey } from "@tiptap/pm/state";
 
-import { spacingFromElement, spacingStyle } from "./notesSpacing.js";
+import { DEFAULT_DENSITY, blockFontSize, densityFor, spacingFromElement, spacingStyle } from "./notesSpacing.js";
 import { TextStyleKit } from "@tiptap/extension-text-style";
 import { TableKit } from "@tiptap/extension-table";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
@@ -63,6 +64,32 @@ export const HEADING_LEVELS = [1, 2, 3, 4];
  *  prompt is a nudge, not an instruction manual. */
 export const NOTE_PLACEHOLDER = "Start typing — or paste a picture straight in.";
 
+/** ⛔ WRITE EACH BLOCK'S OWN SIZE FROM ITS RUNS (NEW-SPACING-2). Returns whether anything
+ *  changed, which is what makes it safe to run on every transaction — see the plugin below.
+ *
+ *  The DECISION is `blockFontSize` in lib/notesSpacing.js and is unit-tested there; this is only
+ *  the walk that feeds it and applies the answer. A block whose runs disagree, or which holds
+ *  anything that is not text, gets `null` — the default strut, with inline layout deciding the
+ *  height, which is exactly right for a line carrying two sizes. */
+function deriveBlockSizes(doc, tr) {
+  let touched = false;
+  doc.descendants((node, pos) => {
+    if (node.type.name !== "paragraph" && node.type.name !== "heading") return true;
+    const runs = [];
+    node.forEach((child) => {
+      if (!child.isText) { runs.push({ fontSize: null }); return; }
+      const mark = child.marks.find((m) => m.type.name === "textStyle");
+      runs.push({ fontSize: mark?.attrs?.fontSize || null });
+    });
+    const next = blockFontSize(runs);
+    if ((node.attrs.fontSize || null) === next) return true;
+    tr.setNodeMarkup(pos, undefined, { ...node.attrs, fontSize: next });
+    touched = true;
+    return true;
+  });
+  return touched;
+}
+
 export const NOTE_EXTENSIONS = [
   // Document · paragraph · text · bold · italic · strike · code · codeBlock · heading ·
   // blockquote · bullet/ordered lists · hardBreak · horizontalRule · underline · link ·
@@ -88,11 +115,57 @@ export const NOTE_EXTENSIONS = [
   // shape of that markup is decided once, in lib/notesSpacing.js.
   Extension.create({
     name: "noteSpacing",
+
+    /* ⛔ THE DERIVATION RUNS FOR EVERY DOCUMENT, NOT ONLY FOR TEXT TYPED TODAY
+     * (NEW-SPACING-2). Doing it only in the toolbar command would fix the next paragraph he
+     * makes smaller and leave every paragraph he ALREADY made smaller exactly as tall — which
+     * is the note he was looking at when he reported this. So it also runs as an
+     * `appendTransaction`: any change to the document re-derives the block sizes.
+     *
+     * ⛔ IT IS SAFE TO RUN ON EVERY TRANSACTION because it is IDEMPOTENT — `deriveBlockSizes`
+     * returns false when every block already agrees with its runs, and returning `null` from
+     * `appendTransaction` ends the round. A rule that rewrote something every pass would loop
+     * forever, so the "did anything change" answer is the loop guard, not a counter. */
+    addProseMirrorPlugins() {
+      return [new Plugin({
+        key: new PluginKey("noteSpacingBlockSize"),
+        appendTransaction: (trs, _old, newState) => {
+          if (!trs.some((t) => t.docChanged)) return null;
+          const tr = newState.tr;
+          return deriveBlockSizes(newState.doc, tr) ? tr : null;
+        },
+      })];
+    },
+
     addGlobalAttributes() {
       return [{
+        /* ⛔ THE NOTE'S DENSITY LIVES ON THE **DOCUMENT**, NOT ON THE TREE (NEW-SPACING-3).
+         * That is the whole reason this was cheap and safe to add: the module's own stated
+         * principle is that anything riding the document is saved, synced, printed and exported
+         * for free. Putting it on the page node instead would have meant the tree schema,
+         * `migratePageNode` and the cloud merge — and TODAY's other defect (B342996 ×3) was
+         * exactly that: a new per-node field `migratePageNode` silently destroyed on every read.
+         * A document attribute touches none of it. */
+        types: ["doc"],
+        attributes: {
+          density: {
+            default: DEFAULT_DENSITY,
+            // The doc node is never serialised to HTML by name, so there is nothing to render;
+            // the editor reads it and sets two custom properties, and the print sheet is handed
+            // the same id. `parseHTML` keeps a pasted document from inventing one.
+            parseHTML: () => DEFAULT_DENSITY,
+            renderHTML: () => ({}),
+          },
+        },
+      }, {
         types: ["paragraph", "heading"],
         attributes: {
           lineHeight: { default: null, parseHTML: (el) => spacingFromElement(el).lineHeight, renderHTML: () => ({}) },
+          /* ⛔ THE BLOCK'S OWN SIZE (NEW-SPACING-2). A size set on the whole paragraph lands
+           * HERE rather than only on an inline span, because a block's line box can never be
+           * shorter than its own font's strut — measured: every word set to 11px still rendered
+           * in the 24.75px row the 15px paragraph above it used. See lib/notesSpacing.js. */
+          fontSize: { default: null, parseHTML: (el) => spacingFromElement(el).fontSize, renderHTML: () => ({}) },
           spaceBefore: { default: null, parseHTML: (el) => spacingFromElement(el).spaceBefore, renderHTML: () => ({}) },
           spaceAfter: {
             default: null,
@@ -119,6 +192,34 @@ export const NOTE_EXTENSIONS = [
             touched = true;
             return true;
           });
+          if (touched && dispatch) dispatch(tr);
+          return touched;
+        },
+
+        /* ⛔ SET THE SIZE ON THE BLOCK TOO, WHEN THE BLOCK ENTIRELY AGREES (NEW-SPACING-2).
+         *
+         * Called after the inline mark has been applied, so the document already says what the
+         * runs are; this reads them back and, when every run in a block names the SAME size,
+         * writes that size onto the block. That is what makes the strut follow the content and
+         * a smaller paragraph a genuinely shorter row.
+         *
+         * ⛔ IT IS DERIVED, NEVER GUESSED — the decision is `blockFontSize`, which returns null
+         * for a block whose runs disagree or whose runs are not all sized. So a MIXED line keeps
+         * the default strut and takes its height from the tallest run, which is ordinary inline
+         * layout and exactly right; and clearing the size clears the block attribute with it. */
+        /* ⛔ ONE ACTION FOR A WHOLE NOTE (NEW-SPACING-3). His goal, in his words, is *"save space
+         * and see more information on screen"*, and a per-paragraph control makes him do that a
+         * line at a time. `setDocAttribute` is a real ProseMirror step, so this is undoable,
+         * rides the document into storage and sync, and needs no schema anywhere else. */
+        setNoteDensity: (id) => ({ state, tr, dispatch }) => {
+          const next = densityFor(id).id;
+          if (state.doc.attrs.density === next) return false;
+          if (dispatch) dispatch(tr.setDocAttribute("density", next));
+          return true;
+        },
+
+        syncBlockFontSize: () => ({ state, tr, dispatch }) => {
+          const touched = deriveBlockSizes(state.doc, tr);
           if (touched && dispatch) dispatch(tr);
           return touched;
         },

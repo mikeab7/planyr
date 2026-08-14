@@ -178,7 +178,9 @@ describe("NEW-3 — a hand-drawn parcel carries the same record as a clicked one
   /* Mutation: point the badge / list / Boundary rows back at `polyArea(pc.points)` → red.
      One area function, so a promoted deed's carve-outs come off every number that quotes acreage. */
   it("every acreage consumer reads the NET area, not the raw ring", () => {
-    expect(planner).toContain("const txt = `Parcel ${f2(parcelNetSqft(pc) / SQFT_PER_ACRE)} ac`;"); // canvas badge
+    // B520560 moved the LABEL from the bare word "Parcel" to the parcel's own lineage name
+    // (Parcel 1A / 1B); the AREA function under test is unchanged and is still the net one.
+    expect(planner).toContain('const txt = `${(parcelInfo.get(pc.id) || {}).name || "Parcel"} ${f2(parcelNetSqft(pc) / SQFT_PER_ACRE)} ac`;'); // canvas badge
     expect(planner).toContain("{f2(parcelNetSqft(pc) / SQFT_PER_ACRE)} ac{pc.acct");                 // panel list
     expect(planner).toContain("Area: <b style={{ color: PAL.ink }}>{f0(parcelNetSqft(selParcel))} sf</b>"); // Boundary
     expect(planner).toContain("acres: parcelNetSqft(p) / SQFT_PER_ACRE");                            // report/print

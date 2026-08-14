@@ -20,6 +20,7 @@
  */
 
 import { absoluteStamp } from "./notesTime.js";
+import { DEFAULT_DENSITY, SINGLE, densityFor } from "./notesSpacing.js";
 
 const esc = (s) => String(s == null ? "" : s)
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -39,6 +40,13 @@ body { font: 11.5pt/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sa
 .note-trail { font-size: 9pt; font-weight: 600; letter-spacing: 0.03em; color: #5A6070; margin: 0 0 1mm; }
 .note-page-head { font-size: 12.5pt; font-weight: 700; margin: 6mm 0 2mm; }
 .note-page-meta { font-size: 8pt; font-weight: 600; color: #5B6270; margin: 0 0 2mm; }
+/* PDF-PARITY for the note's density (NEW-SPACING-1): the number is INTERPOLATED from
+   lib/notesSpacing.js's SINGLE constant rather than left as a CSS variable — paper has no theme
+   and no cascade to inherit from, and test/notesRoundTwo.test.js rightly forbids a CSS custom
+   property anywhere in the sheet. One constant, two stylesheets, no drift.
+   ⛔ NO BACKTICKS IN THIS COMMENT: it lives INSIDE the PRINT_CSS template literal, so one
+   backtick ends the string and the whole module stops parsing. Sixth time in this repo. */
+.note-body { line-height: ${SINGLE}; }
 .note-body > * + * { margin-top: 0.7em; }
 /* PDF-PARITY for the Tab indent (B1392): a tab typed in a paragraph is a real character
    in the document, so the sheet has to honour it — and at the SAME width the screen
@@ -49,7 +57,7 @@ body { font: 11.5pt/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sa
 .note-body h3 { font-size: 1.18em; font-weight: 650; margin: 0; break-after: avoid; }
 .note-body h4 { font-size: 1.05em; font-weight: 650; margin: 0; break-after: avoid; }
 .note-body ul, .note-body ol { padding-left: 1.5em; margin: 0; }
-.note-body li { margin: 0.15em 0; }
+.note-body li { margin: 2px 0; }
 .note-body li p { margin: 0; }
 .note-body blockquote { border-left: 3px solid #B8418C; padding-left: 0.9em; color: #3A3F4B; margin: 0; }
 .note-body code { background: #F2F3F6; border: 1px solid #D8DBE2; border-radius: 3px; padding: 0.1em 0.32em; font-family: ui-monospace, "Courier New", monospace; font-size: 0.9em; }
@@ -156,7 +164,13 @@ function pageBlock({ title, html, updatedAt, headingClass = "note-page-head", sh
  *  which the screen shows by indentation and paper shows as a **trail line** above the
  *  title — `Grand Port › Entitlements`. It is the same information the rail carries, and it
  *  is the reason a printed branch is still readable when the sheets get separated. */
-export function buildPrintDocument({ title, meta = "", pages = [] } = {}) {
+/** The note's density as two literal rules, appended after the base sheet so it wins. */
+function densityCss(id) {
+  const d = densityFor(id);
+  return `\n.note-body { line-height: ${d.line}; }\n.note-body li { margin: ${d.listGap}px 0; }`;
+}
+
+export function buildPrintDocument({ title, meta = "", pages = [], density = DEFAULT_DENSITY } = {}) {
   const body = [];
   const single = pages.length === 1;
 
@@ -173,7 +187,12 @@ export function buildPrintDocument({ title, meta = "", pages = [] } = {}) {
     "<!doctype html>",
     '<html lang="en"><head><meta charset="utf-8">',
     `<title>${esc(title || "Note")}</title>`,
-    `<style>${PRINT_CSS}</style>`,
+    /* ⛔ PDF-PARITY FOR THE NOTE'S DENSITY (NEW-SPACING-3). The chosen density is appended as a
+       LITERAL override rather than a custom property, for the same reason the base number is
+       interpolated: paper has no theme and no cascade to inherit from, and the round-two suite
+       rightly forbids a CSS custom property anywhere in the sheet. One record in
+       lib/notesSpacing.js feeds both the screen and this. */
+    `<style>${PRINT_CSS}${densityCss(density)}</style>`,
     "</head><body>",
     `<div class="sheet">${body.join("\n")}</div>`,
     "</body></html>",

@@ -246,6 +246,39 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   overlap their own buttons" report — with the drawing's words squeezed to one character a line. A
   box's width is a choice about a column of TEXT. `boxSelection` places the sketch after the box, and
   the panel additionally cannot overflow whatever container it is in.
+- **⛔ "SINGLE" WAS 1.65, SO THE CONTROL LOOKED INERT (B532640/B532641, owner report 2026-08-14).**
+  He asked *"is this a line spacing issue?"* and he was right twice over. **(a)** Measured: 15px
+  text in a **24.75px** line box — a ratio of **1.65**, where Word and OneNote call ~**1.15**
+  single. The loosest setting in the control's own list was also its DEFAULT, so picking "Single"
+  changed nothing. The scale is rebased (`Default · Single=1.15 · 1.15→1.3 · 1.5 · Double`) and
+  every named value above Single is asserted looser than it. Rows went **24.75 → 17.25px**, about
+  30% less vertical space per line. ⛔ **Existing notes REFLOW tighter, deliberately, and he was
+  told** — the alternative (stamping 1.65 onto every old paragraph to freeze them) writes a
+  setting nobody chose into thousands of blocks. **(b) ⛔ AND THE CSS LOOKED CORRECT THE WHOLE
+  TIME, which is why reading it never found this:** the stylesheet already used a proportional
+  multiplier, but the size a person picks lands on an **inline span** while the **block** stays at
+  the default — and a block's line box can never be shorter than its own font's **strut**. So a
+  paragraph whose every word was 11px still rendered at 24.75px. **Bigger text grew the row; smaller
+  text could not shrink it.** The block now carries its own size when its runs all agree
+  (`blockFontSize`, applied by `deriveBlockSizes` as an **appendTransaction** so it holds for every
+  document, not only for text typed today). Measured after: 11px paragraph → **12.64px** row, where
+  proportional is 12.65; mixed sizes on one line still take the **tallest run**. Instrument:
+  **measure-notes-spacing** under `ui-audit/`, which reports RENDERED ROW HEIGHTS — the owner's
+  instruction was *"verify with a measurement, not by eye."* ⛔ The number lives ONCE, as `SINGLE`;
+  the print sheet **interpolates the literal** because paper has no theme and the round-two suite
+  rightly forbids a CSS custom property in it. **⛔ AND NO BACKTICKS IN A COMMENT INSIDE
+  `PRINT_CSS`** — it is a template literal, one backtick ends the string and the module stops
+  parsing. Sixth time in this repo.
+- **⛔ AND ONE ACTION FOR A WHOLE NOTE: COMFORTABLE / COMPACT (B532642).** His goal was *"save
+  space and see more information on screen"*, which a per-paragraph control makes him do a line at
+  a time. ⛔ **THE DENSITY LIVES ON THE DOCUMENT, NOT ON THE TREE**, through ProseMirror's own
+  `setDocAttribute` — so it is saved, synced, printed and exported for free, exactly as this
+  module's stated principle promises, and it touches NO tree code. That is the whole reason it was
+  safe: it was first deferred on the ground that it needed a per-note field (tree schema,
+  `migratePageNode`, the cloud merge — the very thing that caused B342996 ×3 the same day), and
+  that reasoning turned out to be wrong about the mechanism. **A blocker that dissolves when you
+  check it was never a blocker.** Measured end to end: a row 17.25 → 15.30px, still 15.30 after a
+  reload, and the printed sheet carries it with no CSS custom property.
 - `lib/notesSpacing.js` — **HOW FAR APART THE LINES ARE (B391076).** A BLOCK property on paragraph
   and heading, never a text style: half a line cannot be one-and-a-half spaced. Written into the
   markup by one attribute (three that each wrote `style` would overwrite one another), so it saves,
@@ -544,6 +577,40 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
 - `lib/notesIndentLevel.js` — the pure half: `readIndent`, the ceiling, and the markup
   (`margin-left` **on the item**, so the bullet moves with its words). Renders nothing at level 0,
   which is the clause the byte-identical round-trip rests on.
+- **⛔ AND ONE KEYPRESS BELONGS TO THE CARET WHENEVER THERE IS ONE (B519681, `lib/notesKeyScope.js`).**
+  The owner: *"the direction keys on my keyboard arent working."* His prior was right in shape and
+  one level off in detail. The box-nudge binding (B421494) is on the `window`, armed only while a
+  box selection exists, and it declined for `input, textarea, select` — **the document is a
+  contenteditable DIV, which is none of those**, and was excluded deliberately on the argument that
+  clicking into the document clears the box selection on the way. **Measured: it does not.** With a
+  box selected and the caret then in ordinary flow text, every arrow moved the BOX and left the
+  caret alone — reachable in three clicks, and invisible once you have looked away from the selected
+  box, which is the whole profile of an intermittent input bug. ⛔ **The guard is the PROPERTY, not a
+  key list** (his instruction, after the second leak): every global `keydown` binding in this module
+  must ask `keysBelongToTheCaret()`, asserted by a SOURCE SWEEP in the repo-root `test/` suite
+  **notesKeyScope**, so the next binding somebody adds is covered by construction. Exemptions are
+  named individually with a reason and are checked to still exist. The behavioural half is
+  **audit-notes-arrows** under `ui-audit/` — 7 contexts × 14 keys, real keystrokes, four independent
+  observations per press (caret · box · document · scroll) plus `defaultPrevented` read off the real
+  event. ⛔ The marquee case the window binding exists for is UNAFFECTED and that is measured, not
+  assumed: the press that starts a band is `preventDefault`ed, so focus is on `<body>` and there is
+  no caret to own the key.
+- **⛔ AND AN ANCESTOR IS NOT A SELECTION (B519680) — a REGRESSION IN B512672, reported by the owner
+  with a screenshot an hour after it merged.** *"I'm trying to press shift tab to promote MUD
+  ATTORNEY … but it takes Dustin O'Neal, the phone number, and the email with it."* Those three are
+  not its descendants, they are its **nephews** — which is the tell, because only an ANCESTOR moving
+  can drag a branch that sits beside the pressed line. Cause: `itemsInSelection` asked
+  `doc.nodesBetween(from, to)` for every `listItem`, and **`nodesBetween` visits every node whose
+  range CONTAINS the position**, so a collapsed caret in a level-three bullet returned that bullet
+  AND its parent AND its grandparent. Measured before any fix: Tab on one line produced
+  `Active [indent=1]` **and `MUD 377 [indent=1]`**. The rule now: **an item moves when the selection
+  is inside ITS OWN text, not merely somewhere beneath it** — collect TEXTBLOCKS and map each to its
+  NEAREST indentable ancestor. **Structure only, never geometry** (he asked for that explicitly,
+  having noticed the odd line out carries a smaller font). ⛔ **The coverage hole is the more useful
+  finding:** all 17 cases passed before AND after the fix, because every one used a FLAT list where
+  an item has no indentable ancestor — depth was the variable that mattered and nothing had any.
+  Fixture and diff harness: **diagnose-notes-outdent** under `ui-audit/`.
+- `lib/notesKeyScope.js` — the one predicate above, plus the measured two states it separates.
 - `lib/notesTabKey.js` — **Tab belongs to the DOCUMENT while the caret is in it** (B1392, and
   B1392 ×2 which made it true in EVERY context rather than usually — **its header carries the
   full table of what Tab does in each one; read that before touching it**, and note that the

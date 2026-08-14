@@ -1,3 +1,42 @@
+### B519680 — ⛔ REGRESSION IN B512672: Shift+Tab moved an ANCESTOR, so one keypress dragged whole branches the user never touched `[Notes]` (bug) #notes #ui  *(owner chat block 2026-08-14, WITH A SCREENSHOT, on his live MUD 377 note. Minted **B519680** LATE via `git fetch origin main && npm run next-id -- --against-main`, from this branch's reserved block B519680–B519695 against origin/main 55dcdb5. **DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `Tab`, `indent`, `outdent`, `sinkListItem`, `liftListItem`, `nodesBetween`, `B512672`, `B454480`, `B1392`, `B291536`.** **B512672** is the change that introduced this, shipped in #1050 roughly an hour before he hit it — this is a REGRESSION IN it, filed on its own number rather than as a recurrence because B512672's own promise (Tab indents a first item) is correct and shipped; what is broken is which items the command applies to. Net-new.)*
+`[ ]` **⛔ SHIPPED. Caused by me, in the change that merged an hour before he reported it.**
+- Verify: sandbox — reproduced and fixed against a browser-driven fixture built from his screenshot (`ui-audit/diagnose-notes-outdent.mjs`), plus five depth cases in `test/notesListIndent.test.js`. Mutation-proven.
+- **HIS REPORT, verbatim:** *"I'm trying to press shift tab to promote MUD ATTORNEY: BRIAN YATES, that line. I'm trying to promote it to the left, but it takes Dustin O'Neal, the phone number, and the email with it."*
+- **⛔ THE TELL, AND IT IS THE THING THAT NAMES THE BUG.** Dustin O'Neal and its two children are not MUD ATTORNEY's DESCENDANTS — they are its NEPHEWS, sitting under a sibling branch. A lift capturing preceding siblings or following siblings cannot produce that. **Only an ANCESTOR moving can**, because an ancestor takes its entire subtree, including branches above and beside the pressed line. He was right that the screenshot alone could not distinguish the three candidate bugs, and right to demand the document diff.
+- **THE CAUSE, one line.** `itemsInSelection` asked `doc.nodesBetween(from, to)` for every `listItem`. **`nodesBetween` visits every node whose range CONTAINS the position** — so a collapsed caret in a level-three bullet returns that bullet AND its parent AND its grandparent, and the command moved all of them.
+- **MEASURED, before any fix** (`diagnose-notes-outdent`, his exact four-level outline including the smaller font on "Dustin O'Neal" that he flagged): Tab on **"Active"** — one line, caret collapsed — produced `Active [indent=1]` **and `MUD 377 [indent=1]`**. One keypress, two items, one of them a parent nobody pressed on.
+- **THE FIX: an item moves when the selection is inside ITS OWN text, not merely somewhere beneath it.** The walk collects TEXTBLOCKS in the range and maps each to its NEAREST indentable ancestor. A collapsed caret yields exactly one item; a range across two bullets yields both; a range genuinely spanning a parent's text and its child's text yields both, which is right because both lines were selected. **STRUCTURE ONLY, NEVER GEOMETRY** — he asked for that explicitly, having noticed the odd line out carries a smaller font; nothing in this path reads a rendered size, position or box.
+- **⛔ AND THE COVERAGE HOLE THAT LET IT SHIP, which is the more useful finding.** All 17 cases in `test/notesListIndent.test.js` passed **before and after** the fix. Every one used a FLAT list, where an item has no indentable ancestor — so the bug was unreachable by construction and the suite could not tell the broken build from the fixed one. **Depth was the variable that mattered and nothing had any.** Five nested cases added; mutation-proven (restoring the old walk turns 2 red).
+- **THE MIRROR CASES he asked for, all measured on his structure and all correct:** Shift+Tab on an item WITH children (they follow, attached, nothing else moves) · on an item with following siblings (they stay) · on the last item of a nested list · on the first item of a nested list · his own case · and Tab as the inverse, with the indent/outdent round-trip **byte-identical**.
+
+### B532640 — "Single" line spacing was 1.65, so the control looked inert and nothing could be made compact `[Notes]` (bug) #notes #ui  *(owner chat block 2026-08-14, measured on his live Richfield "Utilities" note. Minted **B532640–B532642** LATE via `git fetch origin main && npm run next-id -- --against-main`, from this branch's reserved block B532640–B532655 against origin/main d4a88a0. **DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `spacing`, `line-height`, `lineHeight`, `notesSpacing`, `density`, `compact`, `B391076`, `B823`.** **B391076** built the per-paragraph spacing control and is the direct ancestor — it shipped the control, and this is the finding that its DEFAULT was the loosest option it offered, which no case in it could have caught. Not a recurrence: that item's promise (a working per-paragraph control) is intact. Net-new.)*
+`[ ]` **⛔ SHIPPED.**
+- Verify: sandbox — measured before and after with `ui-audit/measure-notes-spacing.mjs`, which reports rendered row heights rather than computed properties.
+- **HIS REPORT:** *"you see how I made some text smaller? I was hoping to just make the spacing smaller so I can save space and see more information on screen. I put this on single line spacing. It gets this default single line spacing. So I'm not really sure. Is this a line spacing issue?"*
+- **MEASURED, and he was right on both counts.** 15px text in a **24.75px** line box — a ratio of **1.65**, where Word and OneNote call roughly **1.15** single. So the loosest setting in the control's own list was ALSO its default, and picking "Single" changed nothing because he was already on it. **A control whose default option is the loosest one it offers reads as inert**, which is exactly what he experienced.
+- **THE SCALE IS REBASED so the names mean what they say:** `Default` (the note's density) · **`Single` = 1.15, and it is now the tightest** · `1.15` → 1.3 · `1.5` · `Double` = 2.0. Every named value above Single is asserted to be looser than it, so the list cannot go dishonest again.
+- **MEASURED AFTER:** every ordinary row **24.75px → 17.25px**, a ratio of exactly 1.15. That is roughly **30% less vertical space per line**, which is the "see more information on screen" he asked for.
+- **⛔ EXISTING NOTES REFLOW, DELIBERATELY, AND HE IS TOLD IN THE SESSION REPLY — he asked to be.** Every note written before today carries no explicit spacing, so it inherits the density and gets tighter the moment this ships. That is the decision: it is what he asked for ("must actually tighten his notes today"), it loses no content, and it is reversible per-note and per-paragraph. **The alternative was refused:** stamping 1.65 onto every existing paragraph to freeze them would write a setting nobody chose into thousands of blocks and leave him unable to tighten an old note without re-selecting all of it.
+- **PDF-PARITY.** The number lives once, as `SINGLE` in `lib/notesSpacing.js`. The editor takes it through a custom property; the print sheet **interpolates the literal**, because paper has no theme and `test/notesRoundTwo.test.js` rightly forbids a CSS custom property in the sheet.
+
+### B532641 — Line height was pinned to the block's own font, so smaller text did not make a shorter row `[Notes]` (bug) #notes #ui  *(owner chat block 2026-08-14, the half underneath B532640 and the thing he was actually trying to do. Minted **B532641** from the same reserved block. DEDUPE-FIRST: same search as B532640; **B391076** owns the control, **B1371** put font size on the toolbar row. Neither is "the row does not shrink". Net-new.)*
+`[ ]` **⛔ SHIPPED.**
+- Verify: sandbox — `ui-audit/measure-notes-spacing.mjs`, row heights before and after, plus 6 pure cases in `test/notesSpacing.test.js`.
+- **HIS REQUIREMENT:** *"Measured: 15px text in a 24.75px line box. Expected: the line box scales with the text, so a smaller run or a smaller paragraph produces a shorter row and he actually saves space."*
+- **⛔ THE CAUSE, AND THE CSS LOOKED CORRECT THE WHOLE TIME — which is why nobody found it by reading.** The stylesheet already used a proportional multiplier. The size a person picks lands on an **inline span**, while the **block** stays at the default 15px — and a block's line box can never be shorter than its own font's **strut**. Measured: a paragraph whose every word was set to 11px rendered at **24.75px**, exactly as tall as the 15px paragraph above it. **Bigger text grew the row (a 22px run made it 36.3px); smaller text could not shrink it.** Asymmetric, and invisible to the CSS.
+- **THE FIX: the block carries its own size when its runs all agree.** `blockFontSize` is the pure decision — every run at one size wins; any unsized run, or two different sizes, returns null. It is applied by `deriveBlockSizes` as an **`appendTransaction`**, so it holds for EVERY document rather than only for text typed after today — which matters, because the smaller text he was looking at was already there.
+- **MEASURED AFTER, and it satisfies all three of his sub-requirements:** a whole paragraph at 11px → row **17.25 → 12.64px**, where in proportion it would be 12.65 · **mixed sizes on one line: tallest run wins** (22px + 9px → 25.3px, block unchanged) · **lists follow the same rule** (a small list item shrank identically). Headings and positioned boxes take the same line-height.
+- **IT IS IDEMPOTENT, which is the loop guard rather than a counter:** `deriveBlockSizes` returns false when every block already agrees with its runs, and `appendTransaction` returning null ends the round.
+
+### B532642 — A one-click Compact density for a whole note `[Notes]` (feature) #notes #ui  *(owner chat block 2026-08-14, NEW-3 — his actual goal, in his words "save space and see more information on screen". Minted **B532642**. DEDUPE-FIRST: same search; nothing on the board is a document-level density.)*
+`[ ]` **⛔ SHIPPED.**
+- Verify: sandbox — driven end to end in `ui-audit/measure-notes-spacing.mjs`: pick it, measure, RELOAD, measure again, then read the printed sheet.
+- **ONE ACTION FOR THE WHOLE NOTE.** `Whole note: Comfortable` / `Whole note: Compact`, first in the spacing menu because it is the thing he actually wants — per-paragraph controls make him do it a line at a time. One choice moves the line height AND the gap between list items together.
+- **⛔ THE DECISION THAT MADE IT SAFE, AND IT REVERSED THE DEFERRAL ON THIS ITEM: THE DENSITY LIVES ON THE DOCUMENT, NOT ON THE TREE.** This item was first filed as deferred, on the stated ground that it needed a per-note stored field — the tree schema, `migratePageNode` and the cloud merge — which is precisely what caused **B342996 ×3** the same day (a new per-node field `migratePageNode` silently destroyed on every read). **That reasoning was examined again rather than accepted, and it was wrong about the mechanism:** a `doc`-node attribute set through ProseMirror's own `setDocAttribute` rides the DOCUMENT, which this module's own stated principle says is saved, synced, printed and exported for free. It touches no tree code at all, so the risk that justified deferring simply does not exist on that path. **A blocker that dissolves when you check it was never a blocker.**
+- **MEASURED, end to end:** a row **17.25 → 15.30px** on picking Compact · **15.30px after a full reload**, so it persists with the note · the printed sheet carries the compact line height and **no CSS custom property** (paper has no cascade to inherit from).
+- **PDF-PARITY:** `buildPrintDocument` takes the density and appends two LITERAL rules after the base sheet. Both print call sites pass it — the editor's from the note's own document, and a branch print from the ROOT note's, because one sheet has one line height and the root is the note the person asked to print.
+- **GUARDS:** 5 cases in `test/notesSpacing.test.js` — the two members and which is tighter, Comfortable being exactly `SINGLE` so the two names cannot drift apart, an unknown id RENDERING rather than throwing (a stored document must always open), the default being a real member, and `densityStyle` handing out both numbers together.
+
 ### B512673 — The three harness traps that keep coming back, written down `[Infra / CI · testing]` (task) #testing #infra  *(owner chat block 2026-08-13, in the same message as B512672: "Worth a short note in the repo about the ones that are reusable traps: reads landing before the save, comparing against the wrong baseline, and picking the option that means 'do nothing'." Minted **B512673** from the same reserved block. DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `harness`, `trap`, `debounce`, `baseline`, `instrument`, `FOREGROUND-OR-VOID`, `SYNTHETIC-KEYS-DONT-EDIT`, `B1439`, `B454481`: the two named RULES in `CLAUDE.md` cover their own traps and are cross-referenced rather than repeated; nothing on the board is the short reference note itself. Net-new.)*
 `[ ]` **⛔ SHIPPED — `ui-audit/TRAPS.md`.**
 - Verify: sandbox (it is a document)
@@ -8722,3 +8761,110 @@ click#2, dblclick → rect{transparent}             18×18, inside g[data-export
 - **DESKTOP 1600×900, Your sites EXPANDED, Layers OPEN** — the reported state, seeded and then ASSERTED (`232×457 at 10,90`) before anything is measured against it, because a silently empty panel is this harness's own worst failure mode and it had it once already.
 - **PHONE 390×844** — the other direction the owner asked for. All three phone checks pass on both builds, which is the point: four of these six defects existed because a phone fix was not carried to the desktop, and the reverse must not now be true.
 - **THE MUTATION ARM IS THE EVIDENCE.** Built `origin/main` in a throwaway worktree, served it beside the fixed build, and ran the identical harness: **4/15**. Zoom `covered by span` / `covered by input` · no collapse control · `Imagery` strip present · `Labels` still present · no `Place names` · basemap control not in the panel · `Find a site — address or place…` · **208 off-scale radii (7px, 99px)**. Before/after screenshots of the full map view are in the V222352 note.
+
+### B525632 — A plan with no aerial announced one; now it invites you to add one `[Site Planner / references]` (task) #site-planner #ui  *(owner instruction 2026-08-14, following the B519152 audit: "Reword it, and ship that as its own small item… the heading is what confused the owner, so the fix should remove the confusion rather than document it. On a plan with no aerial the row should not announce one." Minted **B525632** from this branch's reserved block B525632-B525647 against `origin/main` c48e370. DEDUPE-FIRST - **B519152** is the AUDIT that produced this and deliberately left the reword as an open product decision rather than fixing it; **B654** built this panel. Net-new.)*
+`[x]` **SHIPPED.** The References panel's empty state now reads **"Add an aerial"** instead of **"Aerial backdrop"**; a plan that HAS one still reads "Aerial backdrop", unchanged.
+- Verify: sandbox - `ui-audit/verify-aerial-empty-state-copy.mjs`, three arms, 6/6, proven RED pre-fix and mutation-proven post-fix.
+- Origin: filed 2026-08-14 from owner chat.
+- **THE CHANGE IS ONE STRING PLUS ITS GUARD.** The two headings already lived in separate branches of
+  the `!underlay` ternary (a `<span>` on the empty state, a `<button>` on the real row), so the fix
+  touched the empty branch alone - no restructuring, no shared string, no risk to the occupied row.
+- **⛔ THE WORDING IS "Add an aerial", NOT THE "Add an aerial backdrop" FIRST PROPOSED, AND THAT IS A
+  MEASUREMENT RATHER THAN A PREFERENCE - do not "restore" the longer phrase.** The row is
+  `[heading][spacer][Load screenshot…]`; measured in the real app the row is **248px**, the CTA
+  **116px**, leaving the heading **124px**. The longer phrase needs **134px**, so it WRAPPED to two
+  lines and pushed the explainer and everything under it down - **the exact reflow the owner asked us
+  to avoid**, arrived at by fixing the wording correctly. "Add an aerial" needs **76px**. The app
+  already uses "aerial" as a noun throughout ("the aerial sits beneath everything", "Hide aerial"),
+  and PANEL-BREVITY prefers the shorter form independently.
+- **⛔ THE HEIGHT ASSERTION IS WHY THAT WAS CAUGHT, AND IT IS THE REUSABLE PART.** A copy-only check -
+  the obvious shape for a reword - reads the heading text, finds exactly what was asked for, and
+  reports green **on a build that reflowed the panel**. The guard pins the empty row's own pre-fix
+  geometry (`top 322 · left 90 · height 15` at 1440x900) so a longer string fails on the HEIGHT even
+  when the words are right. The position baseline is the **pre-fix empty state**, deliberately: the
+  first cut compared empty-vs-present and reported the two branches' intended 7px difference as a
+  regression this change had caused.
+- **⛔ AND THE MATCHER IS KEYED ON BOTH KNOWN HEADINGS, not on a shared fragment.** Keying the node
+  search on "aerial backdrop" made the harness return `null` the moment the invitation stopped
+  containing that phrase - which reports as "the heading vanished" rather than "the wording changed".
+  A regex over the bare word "aerial" is the opposite failure: it also matches the explainer sentence
+  and the Hide/Show aerial controls.
+- **PANEL-BREVITY (rule 7) - measured before and after with `ui-audit/panel-copy-budget.mjs`:** all
+  five budgeted regions **byte-identical** across the change (`pond-inspector-default` 0/0,
+  `yield-detention-detail` 12 lines/557 chars, `yield-stormwater-notes` 147/12581, `lib-pond-verdict`
+  5/258, `lib-yield-verdicts` 13/615-of-638), `--check` green both sides. **The References panel is
+  not a budgeted region** (budgets cover the pond inspector and yield surfaces only), so this is
+  budget-NEUTRAL rather than budget-tested - stated plainly instead of implying a budget governs it.
+  The visible copy is a net **-2 chars** ("Aerial backdrop" 15 -> "Add an aerial" 13): the heading was
+  REPLACED, not added to, and the explainer line beneath is untouched.
+- **What was deliberately NOT changed:** the "Load screenshot…" button and the explainer sentence
+  below it. The audit found the panel honest underneath - the confusion was entirely in the heading -
+  and the guard asserts the CTA survives, so the reword removed an announcement, not an affordance.
+- Checks: `vitest run` **11,397 passed / 563 files** · `eslint .` **0 errors** (23 pre-existing
+  warnings) · `vite build` green · harness **6/6**, mutant (heading reverted) **2 red**.
+
+### B519152 — ✅ "Aerial backdrop" reads as a thing every project has, because the row's HEADING renders before its data does `[Site Planner / references]` (task, LOW — naming/cosmetic; **NOT A BUG**) #site-planner #ui  *(owner observation 2026-08-14: "planner always shows this aerial backdrop overlay no matter the project, but i dont know if this is even a thing." Audited read-only against production BEFORE any change, per the brief. Minted **B519152** from this branch's reserved block B519152–B519167 against `origin/main` 55dcdb5. DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `underlay`, `Aerial backdrop`, `sheetOverlays`, `B654`, `B487600`, `B952`, `releaseUnderlayAssets`: **B654** MERGED the aerial and overlay panels and is where this heading came from, **B487600** is the shared-asset delete bug, **B952** is the Library-vs-references separation. None covers the heading's unconditional render. **Net-new.**)*
+`[ ]` The References panel prints the heading **"Aerial backdrop"** on every plan — including the 13 of 71 that hold no aerial at all — because the heading sits OUTSIDE the `!underlay` ternary that chooses between the empty state and the real row. The panel is honest (the empty state says "Load screenshot…" and explains what an aerial is); the heading simply arrives before the thing it names.
+- Verify: sandbox — `ui-audit/diagnose-aerial-backdrop-row.mjs`, three arms, 4/4.
+- Origin: filed 2026-08-14 from owner chat.
+- **⛔ THE VERDICT IS (b) + (c), AND IT IS EXPLICITLY NOT (a) OR (d). Recorded with the evidence so
+  this is not re-audited from the same one-line report.** The brief asked which of four things was
+  true; two are, and the two serious ones are refuted rather than merely unobserved:
+  - **NOT (a), an unscoped query.** There is no references table and no references query. Both
+    reference kinds are fields INSIDE each plan's own `sites.data` jsonb — `underlay` (the aerial)
+    and `sheetOverlays` (sheet references) — read by `cloudSync.loadSite` as
+    `from("sites").select("data, version").eq("id", id)`. A single-row fetch by primary key cannot
+    return one row for every project.
+  - **(b) IS TRUE where an aerial exists — 58 of 71 plans**, each carrying its OWN object in its OWN
+    row, with its own georeference. Intended: `newPlanSameParcel` copies `underlay: src.underlay` so
+    a second concept of the same land opens over the same imagery.
+  - **(c) IS TRUE for the heading itself** — proven behaviourally, not by reading source. Three plans
+    differing in EXACTLY ONE fact (no `underlay` key · `underlay: null` · a real aerial) all print
+    "Aerial backdrop"; only the empty arms show "Load screenshot…" and only the real arm has the
+    opacity/lock controls.
+  - **NOT (d), a cross-project leak.** Nine `src` values repeat across plans, and every repeat is the
+    SAME GROUND rather than a shared row. `fromMap` aerials store a DERIVED Esri `/export` URL built
+    from the site's bbox, so identical ground yields an identical string BY CONSTRUCTION. The two
+    repeats that cross a project NAME were checked individually and both are one site entered twice:
+    `FM 359 RD, Fulshear` / `Woods Road` share `groupId smsrpaiqu5sv` and origin 29.74838/-95.92482
+    (the B487600 restore); `2221 E LAMAR BLVD STE 790` / `4050 CR 50 JOHNSTOWN` share origin
+    40.34597/-104.97794 — the same Weld County parcel, the first named by the `appraisal.js` situs
+    defect that read Forestar's Arlington office address off `ADDRESS1`.
+- **⛔ THE #1040/#1043 REF-COUNT INTERACTION, ANSWERED EXPLICITLY AS ASKED — NO INTERACTION, ON TWO
+  INDEPENDENT GROUNDS.** The concern was that a leaked row could be counted as a legitimate holder of
+  a stored file and refuse a delete that should proceed, or mis-decide which file is safe to remove.
+  - **First: there is nothing for the aerial to hold.** `sharedAssetRefs.planAssetKeys` indexes an
+    underlay by `storageKey` and `idbKey`. Across all 71 production plans, **0 carry either** — every
+    aerial is a `fromMap` URL, which references no stored object in either tier. The aerial
+    contributes no entries to the index at all today.
+  - **Second: the index cannot admit a foreign row even if it did.** `collectAssetRefs` walks the plan
+    list and attributes each key to the plan whose own record names it, so a holder set is by
+    construction a set of real plan ids. There is no path by which one plan's row is counted under
+    another's identity — which is exactly what makes the duplicate-plan case (Goose Creek ×4,
+    Silvestri ×5, Bain ×3) come out RIGHT: those siblings genuinely each hold the asset, so a refusal
+    to release is the #1040 fix working, not a false positive.
+  - Guards re-run unchanged: `test/sharedAssetRefs.test.js` **17/17**. Nothing in the delete path was
+    touched, and no stored bytes were read for deletion or removed during the audit.
+- **RESOLVED 2026-08-14 — the owner chose the reword, shipped as B525632.** He asked for it as its
+  own small item, with the rationale on the record: *"the heading is what confused the owner, so the
+  fix should remove the confusion rather than document it."* The empty state now reads **"Add an
+  aerial"**; a plan that HAS one still reads "Aerial backdrop".
+- **⛔ STANDING RULE #2 DISPOSITION, NAMED AS REQUIRED: `reproduce it and fix it`.** This item was an
+  owner-reported symptom and it is NOT being closed on a null. The audit reproduced exactly what he
+  saw — the heading does render on every plan — established that the cause was cosmetic rather than
+  the data leak it resembled, and the cause has now been removed in B525632. Nothing here was closed
+  as "not reproducible" and nothing was silently de-prioritised.
+
+### B532112 — A probe must answer a KNOWN case correctly before it is trusted on an unknown one `[ui-audit / harness]` (task) #testing  *(owner instruction 2026-08-14, after the B519152/B525632 session's own diagnostic returned two false positives: "Write it as a checkable rule rather than a caution." Minted **B532112** from this branch's reserved block B532112-B532127 against `origin/main` d4a88a0. DEDUPE-FIRST - searched Open / Verify / Done for `positive control`, `known-good`, `teeth`, `mutation check`, `harness`, `instrument`, `FOREGROUND-OR-VOID`, `DRIVER-SCROLL`, `SYNTHETIC-KEYS`, `vacuity`: the repo has the NEGATIVE half everywhere (a guard must be proven RED - NO-ONE-OWNS-A-COMPOSITE's teeth proof, VIEW-INDEPENDENT-ONCE section 6, mintGateE2E) and **no item owns the POSITIVE half**. Net-new.)*
+`[x]` **SHIPPED — the clause is ADOPTED into `DRIVER-SCROLL-IS-NOT-APP-SCROLL` as clause 6 (owner decision 2026-08-14).** Before a probe is trusted on the case under investigation, point it at a case whose answer is already known and require it to report that known answer. A probe that cannot pass the known case is measuring something other than what it claims.
+- Verify: sandbox
+- Origin: filed 2026-08-14 from owner chat.
+- **⛔ THIS IS THE POSITIVE HALF OF A RULE THIS REPO ONLY HAS THE NEGATIVE HALF OF, and that asymmetry is the finding.** Every existing discipline here proves a guard can go **RED** on a known-bad build - the teeth proof, the mutation check, `mintGateE2E`'s rejection path, VIEW-INDEPENDENT-ONCE's "a registered memo that was never OBSERVED fails". **Nothing requires it to go GREEN on a known-good one.** Both failures below were green-side: the probe reported a defect in code that was correct.
+- **THE TWO FALSE POSITIVES, recorded because a rule without its evidence reads as theory.** Both came from `ui-audit/diagnose-aerial-backdrop-row.mjs` / `verify-aerial-empty-state-copy.mjs` in one session:
+  1. **A SELECTOR THAT LEFT THE THING IT WAS ASKING ABOUT.** A page-wide `document.querySelectorAll('label input[type=range]')` swept in a slider belonging to a DIFFERENT panel, so the aerial row was reported as carrying a control it does not have. Fix: scope every query to the element under test (walk up from the row's own label), never the document.
+  2. **A CONTROL READ IN A STATE THE USER WOULD NOT SEE IT IN.** The aerial row's opacity slider only renders once the row is SELECTED, so a probe that read it collapsed reported a working row broken. Fix: put the surface into the state the assertion is about before measuring it.
+  - A third, on the same day, is the same species one level up: the position check compared the empty state against the OCCUPIED one and reported those two branches' **intended** difference as a regression - a control that was never a control.
+- **WHAT ACTUALLY CAUGHT ALL THREE was a known-good arm sitting beside the unknown one.** The with-an-aerial arm was expected to be green and was; that it stayed green while the others failed is what localised each fault to the probe rather than to the app. **The arm was there by luck of the question's shape, not by rule** - the audit needed a three-way comparison anyway. That is the gap this closes.
+- **THE CHECKABLE FORM, so this is not a caution:** a harness asserting a property must include at least one arm whose expected value is known INDEPENDENTLY of the code under test, and must fail if that arm does not report its known value. A run in which only the unknown arms are exercised is VACUOUS and must say so rather than print a score. (`ui-audit/` already has the vocabulary: `MUST_BE_PRESENT` in `count-pond-invocations`, and the vacuity guards in `verify-hidden-content-behaviour`.)
+- **⛔ HOUSE RULES: YES, AND AS A CLAUSE ON AN EXISTING RULE - NOT A NEW NUMBERED RULE.** It belongs beside **`DRIVER-SCROLL-IS-NOT-APP-SCROLL`**, which is the closest fit and already carries the right machinery: that rule is *"the harness's own ACTION produced the reading"* and this is *"the harness's own QUERY produced the reading"* - the same species, and its remedy is already the discriminator pattern (drive the same control a second, known way and compare the two answers). It also joins the family **`SYNTHETIC-KEYS-DONT-EDIT`** names explicitly - *"three ways for a harness to believe its own instrument"* (with `FOREGROUND-OR-VOID`) - which would become four. **The `/CLAUDE.md` edit IS made, on the owner's explicit adoption** (2026-08-14, verbatim: *"yes, add the clause to DRIVER-SCROLL-IS-NOT-APP-SCROLL and ship it in that same PR… your reasoning for putting it there rather than minting a new rule is right and I am adopting it"*). It landed as **clause 6** of that rule, keeping the check-not-caution framing, the known-case-before-unknown-case formulation, and — at his instruction — the red/green asymmetry observation in the RULE TEXT rather than only on this item.
+- **Stopping rule — MET:** adopted into `DRIVER-SCROLL-IS-NOT-APP-SCROLL` (clause 6). The machine check for the vacuous-run case is deliberately NOT bundled: the clause names the existing vocabulary (`MUST_BE_PRESENT`, the `verify-hidden-content-behaviour` vacuity guards) and making it universal is a sweep across 347 harnesses, which is its own item and not a rider on a rule edit. Stated rather than silently dropped.
