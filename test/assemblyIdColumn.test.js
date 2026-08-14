@@ -31,12 +31,24 @@ describe("NEW-5 — site_elements.assembly_id", () => {
     expect(expr.startsWith("coalesce(")).toBe(true); // …in that order
   });
 
-  it("is ADDITIVE and reversible: nothing reads it, nothing writes it, and the rollback is in the file", () => {
+  it("is ADDITIVE and reversible: the client never reads or writes the COLUMN, and the rollback is in the file", () => {
     expect(SQL).toMatch(/drop column if exists assembly_id/);            // the rollback, commented out
-    // No client code may read or write it while it is stage 1 — that is what makes this shippable
-    // on its own. (`elementRows.js` is the whole rows↔model seam; the RPC ops are built there.)
+    /* ⛔ THE INVARIANT SURVIVED STAGE 2 AND ITS WORDING DID NOT. It used to read "no client code may
+     * read or write it WHILE IT IS STAGE 1"; stage 2 is now on by default, and the property that
+     * actually matters is unchanged and permanent: `assembly_id` is a GENERATED server column, and
+     * the client must keep deriving its own grouping from `attachedTo` (`rootIdOf`). If the client
+     * ever started reading the column, the two definitions could drift — which is the entire bug
+     * family B447472 and B484336 come from.
+     *
+     * Asserted against CODE, not prose: comments are stripped first, because this went red on a
+     * COMMENT explaining that very rule. A guard that forbids naming the thing it protects makes
+     * the protection undocumentable. (`elementRows.js` is the whole rows↔model seam; the RPC ops
+     * are built there.) */
+    const codeOnly = (src) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
     const rows = read("../src/workspaces/site-planner/lib/elementRows.js");
-    for (const src of [SYNC, rows]) expect(src).not.toMatch(/assembly_id/);
+    for (const src of [SYNC, rows]) expect(codeOnly(src)).not.toMatch(/assembly_id/);
+    // …and the stripper is not vacuous: the prose it removes really does name the column.
+    expect(SYNC).toMatch(/assembly_id/);
   });
 
   it("indexes the group on LIVE rows only — a tombstone is not a member of an assembly", () => {

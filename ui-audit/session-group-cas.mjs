@@ -102,6 +102,7 @@ const serverMembers = (assembly) =>
 
 /** Which assemblies a writer OTHER than this tab has moved, and when — the spurious-refusal oracle. */
 const foreignTouch = new Map();               // assembly -> monotonic mark
+const betOn = new Set();                      // assemblies a group revision was actually staked on
 let mark = 0;
 
 const stats = {
@@ -114,6 +115,10 @@ function commit(ops, opts = {}) {
   stats.calls += 1;
   const groups = opts.groups || [];
   if (groups.length) stats.groupsBet += groups.length;
+  // ⛔ Which assemblies this hour actually STAKED a group revision on. The owner asked that the
+  // re-run cover the prefix-pair case rather than happen to miss it, so coverage is a MEASUREMENT
+  // taken off the real wire payload — never an assertion about the fixture.
+  for (const g of groups) betOn.add(g.assembly);
 
   // The group gate, read-only and BEFORE anything is applied.
   const bad = [];
@@ -144,9 +149,17 @@ function commit(ops, opts = {}) {
       lastRefusal.set(b.assembly, b.actual);
       const spurious = unexplained || stuck;
       if (spurious) stats.spurious += 1;
+      const expIds = new Set(b.expected.split(",").filter(Boolean).map((t) => t.slice(0, t.lastIndexOf(":"))));
+      const actIds = new Set(b.actual.split(",").filter(Boolean).map((t) => t.slice(0, t.lastIndexOf(":"))));
+      const ghosts = [...expIds].filter((id) => !actIds.has(id)).map((id) => {
+        const row = rows.get(rowKey("el", id));
+        const shad = sync.shadowSnapshot().get(`el:${id}`);
+        return { id, row: row ? { assembly: row.assembly_id, rev: row.rev, deleted: row.deleted_at != null } : null,
+                 shadowRev: shad && shad.rev, shadowBond: shad && (() => { try { return JSON.parse(shad.json || "null")?.attachedTo ?? null; } catch (_) { return "?"; } })() };
+      });
       stats.refusalDetail.push({
         at: clock, assembly: b.assembly, spurious, why: stuck ? "re-refused an unchanged world" : unexplained ? "nothing else wrote it" : "",
-        expected: b.expected, actual: b.actual,
+        expected: b.expected, actual: b.actual, ghosts,
       });
     }
     return { ok: true, sentAtomic: true, applied: false, groupConflict: bad, results: [] };
@@ -175,6 +188,14 @@ function commit(ops, opts = {}) {
       results.push({ id: op.id, status: "ok", rev: (row ? row.rev : 0) + 1 });
     } else if (op.op === "delete") {
       if (!row) { results.push({ id: op.id, status: "missing" }); continue; }
+      /* ⛔ A DELETE AGAINST AN ALREADY-TOMBSTONED ROW IS IDEMPOTENT SUCCESS, not a conflict —
+       * `site_elements.sql` returns `ok` at the row's current rev. Modelling it as a conflict made
+       * this driver report a permanent spurious refusal that the real server cannot produce: the
+       * client adopted the tombstone's rev back into its shadow, counted a deleted row as a live
+       * member, and disagreed with the digest forever. That is the SECOND time this harness has
+       * convicted working code by mis-modelling a settle path (the first was `create` over a
+       * tombstone) — when the instrument and the code disagree, the instrument is on trial. */
+      if (row.deleted_at != null) { results.push({ id: op.id, status: "ok", rev: row.rev }); continue; }
       if (row.rev !== op.expected) { stats.rowConflicts += 1; results.push({ id: op.id, status: "conflict", row: { ...row } }); continue; }
       writes.push(() => { row.deleted_at = clock; row.rev += 1; row.lastWriter = "me"; });
       results.push({ id: op.id, status: "ok", rev: row.rev + 1 });
@@ -238,17 +259,32 @@ for (let b = 0; b < 3; b += 1) {
   els.push({ id: `${host}-walk`, type: "sidewalk", cx: b * 900, cy: -160, w: 600, h: 8, attachedTo: host });
 }
 /* ⛔ THE FIXTURE CARRIES BOTH TRAPS ON PURPOSE, or the mutation checks pass vacuously.
- * `b1x` is bonded to `b1` and `b1` is a PREFIX of it — the shape the token sort inverts, and the
- * shape the owner's real data does NOT yet contain (0 prefix pairs inside an assembly, 2026-08-13),
- * which is why an hour on a realistic plan alone could never have found NEW-1.
+ *
+ * NEW-1's trap is a PREFIX PAIR, and it is planted TWICE, in the two characters that actually
+ * trigger it — a digit and a hyphen — because the first cut of this fixture used `b1x` and `x`
+ * (0x78) sorts ABOVE the separator `:` (0x3A), so that pair does NOT invert and the trap it was
+ * named for was being carried entirely by the hyphenated children beside it.
+ *   • `b1` ⊂ `b11`                — a DIGIT extension
+ *   • `e2e-bldg-1` ⊂ `e2e-bldg-11` — the owner's OWN ids, verbatim: the one prefix pair his live
+ *     table already holds (2026-08-13). His data holds zero such pairs INSIDE one assembly, which
+ *     is why an hour on a realistic plan could never have found NEW-1 by luck — so the case is
+ *     planted rather than hoped for, and the run REPORTS which traps it actually exercised.
  * `markup:b2` collides with building `b2` across the kind namespace — B447472's shape. */
-els.push({ id: "b1x", type: "parking", cx: 900, cy: 700, w: 300, h: 60, attachedTo: "b1" });
+els.push({ id: "b11", type: "parking", cx: 900, cy: 700, w: 300, h: 60, attachedTo: "b1" });
+els.push({ id: "e2e-bldg-1", type: "building", cx: 2700, cy: 0, w: 500, h: 260 });
+els.push({ id: "e2e-bldg-11", type: "paving", cx: 2700, cy: 250, w: 500, h: 135, attachedTo: "e2e-bldg-1" });
+els.push({ id: "e2e-bldg-1-walk", type: "sidewalk", cx: 2700, cy: -150, w: 500, h: 8, attachedTo: "e2e-bldg-1" });
 els.push({ id: "pond", type: "pond", cx: -700, cy: 300, w: 400, h: 260 });
 els.push({ id: "ease", type: "easement", cx: -700, cy: -300, w: 400, h: 40 });
 els = els.map((e, i) => ({ ...e, z: i }));
 let zTop = els.length;
 els.forEach((e, i) => putRow("el", e.id, e, 1, i, "seed"));
 putRow("markup", "b2", { id: "b2", type: "line" }, 1, 99, "seed");   // B447472's namespace collision
+
+/* The prefix-pair assemblies this run MUST exercise, named here so the report can prove it did.
+ * `b1` holds `b1` ⊂ `b11` (digit) and `b1` ⊂ `b1-court` (hyphen); `e2e-bldg-1` is the owner's own
+ * live pair, verbatim. A run that never bets on one of these has not tested NEW-1's case. */
+const PREFIX_TRAPS = ["b1", "e2e-bldg-1"];
 
 const failures = [];
 const events = [];
@@ -278,7 +314,16 @@ function otherWriterEdits() {
   target.rev += 1;
   target.data = { ...target.data, cy: (target.data.cy || 0) + 5 };
   target.lastWriter = "other";
-  foreignTouch.set(target.assembly_id, ++mark);
+  /* ⛔ MARK BOTH ASSEMBLY KEYS THIS ELEMENT CAN BE COUNTED UNDER, and the reason is the whole point
+   * of the oracle. A stale client may still believe an element is unbonded, in which case it bets on
+   * an assembly named by the element's OWN id; the server has it under its host. Keying the foreign
+   * write only by the server's current `assembly_id` therefore reported "nothing else wrote it" for
+   * a refusal a foreign write had directly caused — the instrument mis-attributing, not the feature
+   * misbehaving. This is a correction to the ORACLE and it does NOT loosen it: both mutants and the
+   * re-bond defect below still go red with it in place (proven, `test/sessionGroupCas.test.js`). */
+  const bump = ++mark;
+  foreignTouch.set(target.assembly_id, bump);
+  foreignTouch.set(target.id, bump);
   if (chance(DELIVERY)) {                // realtime delivers most of the time
     const row = { kind: target.kind, id: target.id, data: target.data, rev: target.rev, z_index: target.z_index, deleted_at: null, updated_by: "other-uid" };
     setTimer(() => sync.applyRemoteRow(row), 200 + Math.floor(rnd() * 500));
@@ -331,6 +376,31 @@ const ACTIONS = [
     const v = pick(victims);
     els = els.filter((e) => e.id !== v.id && e.attachedTo !== v.id);
   }],
+  /* ⛔ RE-BOND — the indent/outdent analogue, and the ONLY action here that moves an element
+   * BETWEEN assemblies. It changes `attachedTo`, which is the generated `assembly_id`'s only
+   * input, so ONE edit invalidates TWO digests at once: the assembly it left and the one it
+   * joined. Nothing else in this hour does that, and it is the shape most likely to expose a
+   * group bet built from the wrong membership — it was missing from the first run. */
+  ["re-bond a child to a different building (indent/outdent)", () => {
+    const hosts = hostIds();
+    if (hosts.length < 2) return;
+    const movable = els.filter((e) => e.attachedTo != null && e.type === "parking");
+    if (!movable.length) return;
+    const kid = pick(movable);
+    const to = pick(hosts.filter((h) => h !== kid.attachedTo));
+    if (!to) return;
+    els = els.map((e) => (e.id === kid.id ? { ...e, attachedTo: to } : e));
+  }],
+  /* A field edit that is not geometry — the owner / status / date / duration analogue. It changes
+   * the row's bytes and its rev without moving anything, which is exactly the case where a group
+   * refusal would be hardest to justify to the person who lost the save. */
+  ["edit a non-geometric field", () => {
+    const target = pick(els);
+    if (!target) return;
+    els = els.map((e) => (e.id === target.id
+      ? { ...e, label: `note ${Math.floor(rnd() * 1000)}`, owner: pick(["mike", "ops", "civil", null]), status: pick(["draft", "issued", "hold"]) }
+      : e));
+  }],
   ["undo", () => { const prev = undoStack.pop(); if (prev) { redoStack.push(snapshot()); els = prev; } }],
   ["redo", () => { const nxt = redoStack.pop(); if (nxt) { undoStack.push(snapshot()); els = nxt; } }],
 ];
@@ -367,7 +437,14 @@ stats.retries = reports.filter((r) => r.name === "element-group-conflict").lengt
  * stamped by the commit model at the moment a group bet passes, so this is a real observation of
  * the retry succeeding — not an inference from the absence of a later refusal, which would count a
  * permanently-stuck assembly as converged the instant the user stopped touching it. */
-stats.nonConverging = stats.refusalDetail.filter((r) => (appliedAt.get(r.assembly) ?? -1) < r.at).length;
+/* STUCK means KEPT TRYING AND KEPT FAILING — a later refusal on the same assembly with no accepted
+ * call in between. An assembly that is simply never bet on again (its element was re-bonded away,
+ * or the hour ended) has not cost anyone a save, and counting it as stuck measured the end of the
+ * session rather than the health of the guard. */
+stats.nonConverging = stats.refusalDetail.filter((r, i) => {
+  if ((appliedAt.get(r.assembly) ?? -1) >= r.at) return false;           // it converged
+  return stats.refusalDetail.some((o, j) => j > i && o.assembly === r.assembly); // …and it tried again
+}).length;
 
 const canvas = new Map(els.map((e) => [e.id, e]));
 const stored = new Map(liveRows().filter((r) => r.kind === "el").map((r) => [r.id, r.data]));
@@ -386,6 +463,8 @@ const divergentAll = [...canvas.keys()].filter((id) => {
 });
 const lastWriterOf = (id) => (rows.get(rowKey("el", id)) || {}).lastWriter;
 const divergent = divergentAll.filter((id) => lastWriterOf(id) !== "other");
+const trapsMissed = PREFIX_TRAPS.filter((a) => !betOn.has(a));
+if (trapsMissed.length) failures.push(`the prefix-pair case was never exercised: no group bet on ${trapsMissed.join(", ")} — this run does NOT cover NEW-1`);
 if (sync.pendingCount() > 0) failures.push(`${sync.pendingCount()} edits still unsent after the session settled`);
 if (missing.length) failures.push(`${missing.length} element(s) on the canvas never reached the store: ${missing.slice(0, 6).join(", ")}`);
 if (divergent.length) failures.push(`${divergent.length} element(s) THIS tab wrote last disagree between canvas and store: ` +
@@ -397,6 +476,7 @@ const report = {
   seed: SEED, minutes: MINUTES, edits: log.length, mutation: MUTATE || "none", realtimeDelivery: `${Math.round(DELIVERY * 100)}%`,
   commits: stats.calls, applied: stats.applied, opsWritten: stats.opsWritten,
   assembliesBet: stats.groupsBet,
+  prefixPairAssembliesBetOn: PREFIX_TRAPS.filter((a) => betOn.has(a)),
   refusals: stats.refusals, retries: stats.retries,
   spuriousDetail: stats.refusalDetail.filter((r) => r.spurious).slice(0, 8),
   spuriousRefusals: stats.spurious, nonConvergingRefusals: stats.nonConverging,
