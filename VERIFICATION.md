@@ -113,6 +113,64 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V273520 — B484337: does a tab that has STOPPED saving actually SAY so, on screen? `Blocker: auth`
+
+**⛔ THIS ONE IS ON MICHAEL'S LIST, deliberately, and it is the only such item.** Every other entry
+here is the Claude cohort's job and must never reach him. This one cannot be: the state only exists
+on a signed-in cloud session, and this sandbox's egress proxy answers `403 to CONNECT` for the
+Supabase host (measured, not assumed), so no browser here can sign in and the write engine never
+starts. It also needs two real tabs racing each other on one real plan. Mirrored on `OWNER-TODO.md`.
+
+**⛔ THIS ENTRY WAS SILENTLY LOST ONCE.** It merged to `main` in 11ff31f7 and was gone by 1da150a —
+dropped by another branch's conflict resolution, not by anything here. If it disappears again, it is
+the merge, not the work.
+
+**⛔ RUN THIS ON A DUPLICATE PLAN.** Steps 4–7 MOVE A BUILDING, twice, from two different tabs, and
+the whole point is that one of those moves is *not saved*. An interrupted run leaves the plan
+geometry changed. Plan menu → **Duplicate plan**, work in the copy, delete it after. Steps 1–3 and
+8–9 change nothing.
+
+**Plan:** any duplicate holding at least one building with a bonded truck court — e.g. a copy of
+**Bain / "Concept - Original"**. Signed in, on planyr.io, in **two tabs of the same browser**.
+
+**Why it has to be a race:** the tab gives up only after **four consecutive batches in which not one
+edit was accepted** (`maxRejectStreak`), with a 1s / 2s / 4s / 8s backoff between them. So the
+window from the first rejection to the banner is roughly **ten to fifteen seconds** of one tab
+losing every write — which is why steps 4–6 have you edit the SAME building from both tabs rather
+than different ones.
+
+| # | Do exactly this | Read this off the SCREEN | Changes data? | Pass |
+|---|---|---|---|---|
+| 1 | Open the duplicate in **tab A**; wait for the drawing to settle | save badge reads its normal resting state (**"synced"**, green) | no | — |
+| 2 | Open the SAME plan in **tab B** | both tabs show the same drawing | no | — |
+| 3 | In tab A, note the save badge's exact wording (screenshot it) | your baseline for step 7 | no | — |
+| 4 | In **tab B**, drag one building a short distance. Repeat 5–6 times, pausing about a second between drags | tab B saves normally | **YES** | — |
+| 5 | **Without letting tab B finish**, switch to **tab A** and drag the SAME building repeatedly, in the opposite direction | tab A appears to accept the drags | **YES** | — |
+| 6 | Alternate: 2 drags in B, 2 in A, 2 in B, 2 in A — keep it up for about **30 seconds** | — | **YES** | — |
+| 7 | Stop dragging in tab A and **watch tab A for 15 seconds** | **BOTH must appear:** a message reading *"This tab is out of date — your recent changes here can't be saved. Reload the page to catch up."* **AND** the save badge in its **error** state showing *"This tab is out of date — reload to keep saving"* | no | ☐ |
+| 8 | Reload **tab A** | badge returns to its resting state; saving resumes | no | ☐ |
+| 9 | Delete the duplicate plan | — | **YES** (removes the copy) | — |
+
+**FAIL is a green "synced" badge, or silence, while tab A's edits stop reaching the cloud.** That is
+the exact defect B484337 fixed, and it was live in the product before it: the warning was built,
+mapped, unit-tested and then **dropped one step before it could be shown**, and the badge had no
+branch for the state at all.
+
+**If step 7 shows nothing at all after a full minute**, the race probably never went four-for-four —
+tab A's edits kept winning. Try again with tab B dragging *continuously* rather than in bursts.
+Report that outcome as "could not force it" rather than as a pass; **not reproducible is a finding,
+never a disposition.**
+
+**One thing NOT to read as a failure:** a single refusal is deliberately SILENT. It resolves itself
+and a toast per transient conflict would be noise. Only the persistent case — the one this drives —
+shows the banner.
+
+**Proven here and NOT what this is waiting for:** the real engine really reaches the `stale` state
+and the event it emits really carries no element; the matrix really turns that into the reload
+warning; and both rendering repairs are mutation-proven red when reverted
+(`test/staleVisible.test.js`). What cannot be done here is the only thing that matters to him —
+**seeing it**. *"The message is wired up"* is not *"the message paints."*
+
 ### V2576 — B3296: a hidden road leaves the drawing, and leaves the PRINT `Blocker: real-data`
 
 **⛔ RUN THIS ON A DUPLICATE, NOT THE LIVE PLAN.** Steps 4–5 hide content and step 8 exports; hiding
