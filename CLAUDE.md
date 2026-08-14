@@ -418,6 +418,14 @@ Runtime deps are kept few and deliberate. New client dependency added 2026-07-10
   build, it passes in ~40s, and the armed auto-merge then completes on its own with zero owner
   involvement. This is a known, self-serviceable hiccup — **do the nudge automatically as part
   of shipping; do NOT report it as a blocker.** (Learned 2026-06-22 on PR #274.)
+  **⛔ AND READ THE RIGHT ENDPOINT BEFORE CONCLUDING THE CHECK NEVER STARTED (measured 2026-08-14, and this
+  session got it wrong twice before checking).** `pull_request_read method=get_status` returns the COMMIT
+  STATUS API; this repo's `build` reports a **CHECK RUN**. So `{"state":"pending","total_count":0}` there is
+  the NORMAL reading for a run that is queued or in progress, and it is **NOT evidence that the trigger was
+  suppressed**. Acting on it cost two unnecessary `Nudge CI` commits and a hunt through `build.yml` for a
+  `paths:` filter that does not exist — while three runs were already `in_progress` for those very shas. The
+  authoritative read is the WORKFLOW RUN: `actions_list method=list_workflow_runs event=pull_request`, matched
+  on `head_sha`. Nudge on the absence of a RUN, never on `total_count: 0`.
   **⚠ CHECK `mergeable_state` FIRST — a "dirty" (merge-conflicted) PR silently swallows EVERY nudge
   (learned 2026-07-06 on PR #518).** GitHub only creates `pull_request` build runs against the PR's
   test-MERGE ref; while the PR conflicts with `main` that ref can't exist, so nudges, close/reopen —
