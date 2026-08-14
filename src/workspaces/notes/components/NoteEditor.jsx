@@ -35,7 +35,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { noteExtensions, EMPTY_DOC } from "../lib/notesExtensions.js";
-import { anchorExtent, anchorPosAtSelection, fitAnchorBox, placeAnchor } from "../lib/notesAnchorNode.js";
+import { anchorExtent, anchorExtentX, anchorPosAtSelection, fitAnchorBox, placeAnchor } from "../lib/notesAnchorNode.js";
 import {
   applyMarquee, boxesInMarquee, gestureOutcome, marqueeRect, moveSelection, nudgeDelta, toggleSelection,
 } from "../lib/notesMarquee.js";
@@ -1462,17 +1462,33 @@ export default function NoteEditor({
        * than the room left to it hangs off the sheet — under the outline panel, which paints later
        * and takes its presses. Same rule as placement: keep the left edge, spend the width. The
        * stored width is not touched, so widening the window gives it straight back. */
-      const hostWidth = dom.clientWidth;
+      /* ⛔ THE ROOM IS THE SCROLLER'S, NOT THE EDITOR'S OWN (NEW-RIGHT-EDGE). Reading
+       * `dom.clientWidth` here creates a genuine FEEDBACK LOOP once the page can grow: the fit
+       * narrows a box to the room, the extent widens `dom` to hold it, the next measure reads the
+       * WIDER dom as "the room", re-fits the box wider, and round again. It happened to settle
+       * rather than oscillate, which is worse than failing — a loop that settles at the wrong
+       * number looks correct. The SCROLLER's width is the one thing in this chain that a box
+       * cannot change, so it is the honest denominator, and the loop cannot form. */
+      const hostWidth = scrollerRef.current?.clientWidth || dom.clientWidth;
       const blocks = nodes.map((el) => {
         const x = parseFloat(el.getAttribute("data-anchor-x")) || parseFloat(el.style.left) || 0;
         const w = parseFloat(el.getAttribute("data-anchor-w")) || parseFloat(el.style.width);
         const fit = fitAnchorBox({ x, w, hostWidth });
         if (Math.round(parseFloat(el.style.width)) !== fit.w) el.style.width = `${fit.w}px`;
         if (Math.round(parseFloat(el.style.left)) !== fit.x) el.style.left = `${fit.x}px`;
-        return { y: parseFloat(el.style.top) || 0, height: el.offsetHeight };
+        return { x: fit.x, w: fit.w, y: parseFloat(el.style.top) || 0, height: el.offsetHeight };
       });
       const need = anchorExtent(blocks);
       dom.style.minHeight = need ? `max(46vh, ${need}px)` : "";
+      /* ⛔ AND THE PAGE GROWS SIDEWAYS TOO (NEW-RIGHT-EDGE). This is the line that was missing,
+       * and its absence is the whole of his *"there's a wall"*: vertically the sheet has always
+       * stretched to hold a block that runs past the bottom, horizontally it did not, so the only
+       * way to keep a block on the sheet was to crush it. Now the sheet widens and the scroller
+       * takes over — the page grows, the content does not get squeezed. `minWidth` cannot feed
+       * back into a block's own width (they are out of flow and positioned absolutely), so there
+       * is no loop here, exactly as there is none on the vertical side. */
+      const needX = anchorExtentX(blocks);
+      dom.style.minWidth = needX > hostWidth ? `${needX}px` : "";
     };
     measure();
     /* Re-measured as the text inside a block reflows, which is the half that matters: the
@@ -1609,12 +1625,6 @@ export default function NoteEditor({
     const r = await printHtmlDocument(html);
     if (!r.ok) onPrintNotice?.(r.error);
   }, [editor, title, updatedAt, trail, onPrintNotice]);
-
-  const badge = status === "error"
-    ? { text: "Not saved", color: "var(--danger-text)" }
-    : status === "unsaved"
-      ? { text: "Unsaved", color: "var(--warn-text)" }
-      : { text: "Saved", color: "var(--save-badge)" };
 
   const edited = editedLabel(updatedAt);
 
@@ -1823,15 +1833,14 @@ export default function NoteEditor({
                 style={{ flex: "0 0 auto", fontSize: 11.5, fontWeight: 600, color: "var(--text-tertiary)" }}
               >{edited}</span>
             ) : null}
-            <span
-              data-testid="note-save-badge"
-              title={scopeLabel}
-              style={{
-                flex: "0 0 auto", fontSize: 11, fontWeight: 700, letterSpacing: "0.06em",
-                textTransform: "uppercase", color: badge.color,
-                border: "1px solid var(--border-default)", borderRadius: RADIUS.pill, padding: "3px 9px",
-              }}
-            >{badge.text}</span>
+            {/* ⛔ THE SAVE INDICATOR IS NOT HERE ANY MORE (NEW-SAVE-BADGE). It used to be a pill
+                in this row, which meant a note showed "SAVED" here AND the app-wide badge said
+                "Saved on this device" in the header — two indicators, different words, one fact.
+                The Site Planner, the Scheduler and Doc Review all retired their local chips for
+                the shared `CloudSyncBadge` in AppHeader's Row-1 top-right; Notes was the one
+                module that never did. It does now, via `notesSaveState`. Do not re-add a local
+                one: the owner's instruction was "literally, all the modules should show that save
+                icon in the exact same place." */}
           </div>
 
           {/* ⛔ THE BAND IS DRAWN IN THE EDITOR'S OWN FRAME, which is the frame its coordinates

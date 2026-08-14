@@ -611,6 +611,32 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   an item has no indentable ancestor — depth was the variable that mattered and nothing had any.
   Fixture and diff harness: **diagnose-notes-outdent** under `ui-audit/`.
 - `lib/notesKeyScope.js` — the one predicate above, plus the measured two states it separates.
+- **⛔ THE RIGHT EDGE GROWS THE PAGE; IT DOES NOT CRUSH THE BOX (B539648).** He photographed a box
+  rendering *"literally one character wide"* against the right margin, and **named the cause as an
+  instruction of his own**: when the block used to JUMP LEFT he asked for *"if it will not fit,
+  NARROW the block to the space available."* Right about not sliding, **wrong about narrowing with
+  no floor** — `ANCHOR_MIN_WIDTH` was 32 px, about two characters, so a press near the margin left
+  a few pixels and the box became them. The floor is **160 px** now (≈20 characters, close to the
+  180 default), and past it **the page grows sideways and scrolls** — `anchorExtentX`, the
+  horizontal twin of `anchorExtent`, whose ABSENCE was the bug: vertically the sheet had always
+  stretched to hold a block past the bottom, horizontally there was no equivalent, so the only way
+  to keep a block on the sheet was to squeeze it. The resize drag is no longer capped at the page
+  edge either. ⛔ **His original acceptance test is untouched and still passes** — the LEFT EDGE is
+  never moved; raising the floor spends the PAGE's width, never the block's position. ⛔ **And the
+  room is measured from the SCROLLER, never from the editor's own width** — reading `dom.clientWidth`
+  makes a real feedback loop (fit narrows → extent widens → the wider element becomes "the room"),
+  and it SETTLED on a stable wrong number rather than oscillating, which is worse because it looks
+  correct. Instrument: **measure-notes-right-edge** under `ui-audit/`, running his own sweep.
+- `lib/notesSaveState.js` — **ONE SAVE INDICATOR, WHERE EVERY OTHER MODULE PUTS IT (B539649).** He
+  photographed two: a `SAVED` pill in the note header and a sync line in a footer under the rail,
+  while the app-wide `CloudSyncBadge` said the same thing in `AppHeader` Row-1. *"Literally, all the
+  modules should show that save icon in the exact same place."* The Site Planner, the Scheduler and
+  Doc Review had all retired their local chips for that badge; **Notes was the one module that never
+  did.** Both local surfaces are gone and this normaliser feeds the shared badge, in the same shape
+  as doc-review's `docSaveState`. ⛔ **LOUD-FAILURE survives the footer's removal** — the storage
+  line still decides the wording once, in `notesStorageLine`, and now rides the badge's `saveDetail`
+  instead of being painted twice. Measured: Notes and the Site Planner render it at the identical
+  position. **Library feeds nothing and that is right** — a file browser has no document to save.
 - `lib/notesTabKey.js` — **Tab belongs to the DOCUMENT while the caret is in it** (B1392, and
   B1392 ×2 which made it true in EVERY context rather than usually — **its header carries the
   full table of what Tab does in each one; read that before touching it**, and note that the

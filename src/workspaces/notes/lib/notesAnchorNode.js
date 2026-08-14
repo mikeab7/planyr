@@ -48,13 +48,36 @@ import { anchorIsEmpty } from "./notesAnchorPrune.js";
 
 /** The width a block gets when there is room for it. */
 export const ANCHOR_WIDTH = 180;
-/** ⛔ THE NARROWEST A BLOCK MAY BE SQUEEZED TO — small on purpose. An earlier version of this
- *  fix used a READABLE floor (90 px) and slid the block left when the click did not leave room
- *  for one. That is the same defect in a smaller coat: his own acceptance test says "assert
- *  stored left equals click x minus editor left, for EVERY step. No clamping band anywhere."
- *  A narrow column at the far edge is a choice he is allowed to make, and he can drag it; a
- *  block that quietly went somewhere else is not. */
-export const ANCHOR_MIN_WIDTH = 32;
+/** ⛔ THE NARROWEST A BLOCK MAY BE, AND IT IS A USABLE COLUMN — NOT A SLIVER (NEW-RIGHT-EDGE,
+ *  owner report 2026-08-14, and he named the instruction of his own that caused it).
+ *
+ *  THE REPORT: *"it's not letting me expand this box out to the right… it seems like there's a
+ *  wall where when I go past it, it squeezes my text box down to where it's literally one
+ *  character wide."* His screenshot shows "High Voltage Planning Study" rendered ONE LETTER PER
+ *  LINE in a sliver against the right margin.
+ *
+ *  ⛔ THE CAUSE IS THIS CONSTANT, AND THE REASONING ABOVE IT WAS HALF RIGHT. When the block used
+ *  to JUMP LEFT away from the click, he asked for *"if it will not fit, NARROW the block to the
+ *  space available — do not slide it sideways."* That was right about not sliding and **wrong
+ *  about narrowing without a usable floor**: 32 px is about two characters at the note's own text
+ *  size, so a press near the right margin left a few pixels of room and the box was narrowed to
+ *  them. The old comment here defended the small number on the grounds that "a narrow column at
+ *  the far edge is a choice he is allowed to make" — but a column he cannot read or type in is
+ *  not a choice, it is the failure, and he has now said so.
+ *
+ *  ⛔ THE FLOOR IS 160 PX and it is chosen rather than guessed: the default block is 180, and 160
+ *  is about twenty characters at the note's 15 px text — a column somebody can actually write in,
+ *  and close enough to the default that a box at the margin does not look like a different kind
+ *  of thing. **Past this floor the block does NOT narrow further — THE PAGE GROWS TO THE RIGHT**
+ *  and scrolls, exactly as it already grows downward when text runs past the bottom
+ *  (`anchorExtent`). That is the symmetry that was missing: vertically the page grew, horizontally
+ *  the content was crushed.
+ *
+ *  ⛔ AND HIS ORIGINAL ACCEPTANCE TEST STILL HOLDS, which is why this is safe: *"assert stored
+ *  left equals click x minus editor left, for EVERY step. No clamping band anywhere."* The LEFT
+ *  EDGE is still never moved by any of this — raising the floor spends the page's width, never
+ *  the block's position. `verify-notes-anchor-zoom` is that test and it still passes. */
+export const ANCHOR_MIN_WIDTH = 160;
 /** How far from the editor's RIGHT edge a block keeps clear. */
 export const ANCHOR_EDGE_PAD = 4;
 
@@ -95,6 +118,23 @@ export function placeAnchor({ x, y, width, minWidth = ANCHOR_MIN_WIDTH, preferre
 /** How far down the page the anchored blocks reach, so the editor can be told to be at least
  *  that tall. Pure, and deliberately takes the measured heights rather than guessing them —
  *  a block's height is its text, which only the browser knows. */
+/** ⛔ HOW FAR RIGHT THE BLOCKS REACH — the horizontal twin of `anchorExtent`, and the half that
+ *  was missing (NEW-RIGHT-EDGE). Vertically the page has always grown to hold a block that runs
+ *  past the bottom; horizontally there was no equivalent, so a block near the right margin was
+ *  narrowed into a sliver instead. Same arithmetic, same shape, one axis over.
+ *
+ *  The pad is smaller than the vertical one on purpose: a reader needs breathing room BELOW the
+ *  last line far more than they need it to the right of a box they placed deliberately. */
+export function anchorExtentX(blocks = [], { pad = 16 } = {}) {
+  let right = 0;
+  for (const b of blocks || []) {
+    const x = num(b?.x);
+    const w = num(b?.w, ANCHOR_WIDTH);
+    if (x + w > right) right = x + w;
+  }
+  return right > 0 ? Math.ceil(right + pad) : 0;
+}
+
 export function anchorExtent(blocks = [], { pad = 40 } = {}) {
   let bottom = 0;
   for (const b of blocks || []) {
@@ -485,8 +525,13 @@ export const NoteAnchor = Node.create({
         sizing.moved = true;
         const hostRect = sizing.host.getBoundingClientRect();   // fresh: the page may scroll
         const wanted = (e.clientX - sizing.grab - hostRect.left) / sizing.scale - sizing.left;
-        const room = sizing.host.offsetWidth - sizing.left - ANCHOR_EDGE_PAD;
-        const next = Math.round(Math.max(ANCHOR_MIN_WIDTH, Math.min(wanted, room)));
+        /* ⛔ THE DRAG IS NOT CAPPED AT THE PAGE EDGE ANY MORE (NEW-RIGHT-EDGE). It used to be
+         * `min(wanted, room)`, so pulling the handle rightward stopped dead at the margin —
+         * *"there's a wall"*. The page grows instead: the layout effect in NoteEditor.jsx reads
+         * `anchorExtentX` and widens the sheet, and the scroller takes it from there. The FLOOR
+         * still applies, because a box narrower than a usable column is the defect this whole
+         * change exists to remove. */
+        const next = Math.round(Math.max(ANCHOR_MIN_WIDTH, wanted));
         sizing.w = next;                 // ⛔ THE GESTURE'S OWN RECORD — see `endSize`
         dom.style.width = `${next}px`;
         /* ⛔ AND THE ATTRIBUTE MOVES WITH IT, OR THE LAYOUT FIT UNDOES THE DRAG IN REAL TIME

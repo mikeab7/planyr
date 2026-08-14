@@ -24,6 +24,7 @@
  */
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
+import { notesSaveState } from "./lib/notesSaveState.js";
 import NotesTree from "./components/NotesTree.jsx";
 import {
   addPage, adoptUnreachable, allPageIds, ancestorIds, commitTitle, copyPageWithin, deleteNode, displayTitle, emptyTree, expiredTrashIds, findPage,
@@ -59,14 +60,10 @@ const QuickOpen = lazy(() => import("./components/QuickOpen.jsx"));
 const IntegrityBanner = lazy(() => import("./components/IntegrityBanner.jsx"));
 
 const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
-/* The footer's one line is coloured by what it SAYS, never by anything else — a failed sync
- * has to read as a failure at a glance, not as quiet grey furniture. Tokens only (B341). */
-const TONE_COLOR = {
-  quiet: "var(--text-tertiary)",
-  good: "var(--save-badge)",
-  warn: "var(--warn-text)",
-  error: "var(--danger-text)",
-};
+/* ⛔ THE FOOTER'S TONE MAP IS GONE WITH THE FOOTER (B539649). It coloured a sync line that no
+ * longer exists — Notes now feeds the ONE app-wide badge, which does its own colouring. Deleted
+ * rather than left "in case": a dead lookup table is exactly what the dead-store guard exists to
+ * catch, and it caught this one. */
 const UNDO_MS = 14000;
 /* The integrity scan reads every page body, so it waits for the tree to settle rather than
  * riding a rename's keystrokes. Long on purpose: nothing here is urgent, and being late is
@@ -1139,6 +1136,15 @@ export default function Notes({
         onNewProject={onNewProject}
         authControl={authControl}
         accountActive={accountActive}
+        /* ⛔ THE ONE SAVE INDICATOR IN THE APP (NEW-SAVE-BADGE). Notes used to render its own
+           pill inside the note header as well, so a signed-out note said "SAVED" there and
+           "Saved on this device" up here — two indicators, different words, one fact. The other
+           three modules retired their local chips for this shared badge long ago; this is Notes
+           joining them. `notesSaveState` is the same shape as doc-review's `docSaveState`. */
+        saveState={notesSaveState(status, { signedIn: accountActive, idle: !activePageId })}
+        /* The storage line's own words, carried to the ONE badge when there is something wrong
+           to say. `quiet`/`good` need no detail — the badge already says it. */
+        saveDetail={storageLine.tone === "warn" || storageLine.tone === "error" ? storageLine.text : undefined}
         // Notes are per-page documents with no single-active-editor lock, so two tabs can
         // both be open safely and the "read-only until you take over" banner would be false.
         multiEditOk
@@ -1321,22 +1327,18 @@ export default function Notes({
             <EmptyState onCreate={handleAddPage} />
           )}
 
-          <div
-            data-testid="notes-scope-label"
-            data-sync-tone={storageLine.tone}
-            style={{
-              flex: "none", padding: "5px 14px", borderTop: "1px solid var(--border-default)",
-              background: "var(--surface-raised)", color: TONE_COLOR[storageLine.tone] || "var(--text-tertiary)",
-              fontSize: 11.5, fontWeight: 600,
-            }}
-          >
-            {/* ONE line, and it is whatever is TRUE right now — saved locally / syncing /
-                synced with a real time / offline / failed with a reason. It REPLACES the
-                old "{scope} · not synced to the cloud yet" sentence rather than joining it
-                (PANEL-BREVITY); the wording is decided once, in notesStore.notesStorageLine,
-                so this surface cannot claim a sync the store did not make. */}
-            {storageLine.text}
-          </div>
+          {/* ⛔ THE FOOTER SYNC LINE IS GONE (NEW-SAVE-BADGE). It said "Saved on this device"
+              under the rail while the app-wide badge said the same thing in the header — the
+              second of the two indicators he photographed, and the one no other module has.
+              His instruction: "literally, all the modules should show that save icon in the
+              exact same place."
+
+              ⛔ LOUD-FAILURE IS NOT LOST WITH IT, which is the only reason removing it is safe:
+              this line's job was to make a FAILED sync unmissable, and that job now rides the
+              shared badge's `saveDetail`, which is the same route Doc Review uses for its
+              conflict message. The wording is still decided once, in
+              `notesStore.notesStorageLine`, so no surface can claim a sync the store did not
+              make — it is now READ into the badge rather than painted twice. */}
         </div>
       </div>
 
