@@ -46,6 +46,7 @@ import NoteAnchor from "./notesAnchorNode.js";
 import NoteSlashMenu from "./notesSlashMenu.js";
 import NoteSketch from "./notesSketchNode.js";
 import NoteTabKey from "./notesTabKey.js";
+import NoteListIndent from "./notesListIndent.js";
 import NotePastePlain from "./notesPastePlain.js";
 import NoteBlockKeys from "./notesBlockKeys.js";
 import NoteSearchHighlight from "./notesSearchHighlight.js";
@@ -127,6 +128,12 @@ export const NOTE_EXTENSIONS = [
 
   TaskList,
   TaskItem.configure({ nested: true }),
+
+  // ⛔ TAB CHANGES THE LEVEL OF THE CURRENT ITEM; IT NEVER CREATES A NODE THE USER DID NOT
+  // TYPE. Registered ABOVE the list keymap on purpose — real nesting still wins wherever it
+  // can act, and this only reaches the presses it declines (the first item of a list). See
+  // lib/notesListIndent.js for the whole rule and the option that was refused.
+  NoteListIndent,
 
   Highlight.configure({ multicolor: true }),
   TextAlign.configure({ types: ["heading", "paragraph"] }),

@@ -396,12 +396,21 @@ export function renameNode(tree, id, title, at = Date.now()) {
   const hit = findPage(next, id);
   if (hit) {
     hit.page.title = String(title ?? "");
-    /* ⛔ A RENAME IS AN EDIT, AND IT HAS TO BE DATED OR THE MERGE CANNOT ARBITRATE IT
-     * (B342996). Two computers holding the same page can disagree about its name, and the
-     * only honest way to settle that is which name was typed LAST. Without a stamp there is
-     * no answer to ask for, so `mergeTrees` fell back to "whichever side is local" — which
-     * meant a rename made on one machine was reverted by the other and pushed back up. */
-    hit.page.updatedAt = at;
+    /* ⛔ A RENAME GETS ITS OWN STAMP, AND IT IS **NOT** `updatedAt` (B342996, owner decision
+     * 2026-08-13).
+     *
+     * The merge needs a date to settle which of two names is newer — without one it fell back to
+     * "whichever side is local", so a rename made on one machine was reverted by the other and
+     * pushed back up. The obvious fix was to stamp `updatedAt`, and that is exactly why this item
+     * sat parked: `updatedAt` MEANS "the text changed", the rail and the page header render it as
+     * *"Edited 2h ago"*, and a note nobody has written in for months would start claiming it was
+     * edited today because somebody corrected its title. The label would be lying.
+     *
+     * So the two facts are stored separately. `renamedAt` answers "whose title wins" and NOTHING
+     * else reads it; `updatedAt` goes on meaning what it says and is moved only by `touchPage`,
+     * which is driven by a real save of the body. Absent is treated as OLDEST, never newest, so a
+     * machine that has never renamed anything cannot win by default — see `mergeTrees` rule 3. */
+    hit.page.renamedAt = at;
     if (!Number.isFinite(hit.page.createdAt)) hit.page.createdAt = at;
   }
   return next;
@@ -470,7 +479,9 @@ export function setPageProject(tree, pageId, projectId, at = Date.now()) {
   const root = next.pages.find((p) => p.id === pageId);
   if (root) {
     root.projectId = projectId == null ? null : String(projectId);
-    root.updatedAt = at;   // re-filing is an edit too — same reason as `renameNode` (B342996)
+    /* Its OWN stamp too, for the same reason as `renameNode` above: moving a note between
+     * projects is not writing in it, and must not make "Edited" claim otherwise. */
+    root.filedAt = at;
   }
   return next;
 }
@@ -843,13 +854,28 @@ function migratePageNode(pg) {
   for (const k of Array.isArray(pg?.pages) ? pg.pages : []) {
     if (k && typeof k === "object") kids.push(migratePageNode(k));
   }
-  return {
+  /* ⛔ EVERY FIELD A NODE IS ALLOWED TO CARRY HAS TO BE NAMED HERE, BECAUSE THIS FUNCTION IS AN
+   * ALLOW-LIST AND EVERY READ OF THE TREE GOES THROUGH IT. A field this list forgets is not
+   * merely un-migrated — it is DESTROYED on the next read, silently, with no error anywhere.
+   *
+   * That is exactly what happened to `renamedAt` / `filedAt` on their first run: the writer
+   * stamped them, the merge asked for them, and this rebuild dropped them in between, so every
+   * comparison saw two absent stamps, read it as a tie, and kept the local copy — the precise
+   * behaviour the stamps were added to replace. Seven cases went red at the merge, which is a
+   * long way from where the field was lost. If you add a per-node field, add it here in the
+   * SAME commit. */
+  const out = {
     id: String(pg?.id || newId("pg")),
     title: typeof pg?.title === "string" ? pg.title : DEFAULT_PAGE_TITLE,
     createdAt: num(pg?.createdAt),
     updatedAt: num(pg?.updatedAt),
     pages: kids,
   };
+  /* Absent stays ABSENT rather than becoming 0 — the merge reads a missing stamp as "oldest",
+   * and writing a zero in would make that a stated fact instead of a default. */
+  if (Number.isFinite(pg?.renamedAt)) out.renamedAt = pg.renamedAt;
+  if (Number.isFinite(pg?.filedAt)) out.filedAt = pg.filedAt;
+  return out;
 }
 
 const withProject = (node, projectId) => ({ ...node, projectId: projectId == null ? null : String(projectId) });

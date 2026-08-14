@@ -295,6 +295,113 @@ rows.push({
   focusKept: true,
 });
 
+/* ⛔ HIS TWO CONSTRAINTS, DRIVEN WITH REAL KEYS ON THE FIRST BULLET OF A LIST (NEW-TAB).
+ *
+ *   *"No empty parent node in the document, ever — assert this in the test by reading the STORED
+ *   document after the indent, not the screen."*
+ *   *"Round-trip: indent, outdent … the document is byte-identical to before the indent/outdent
+ *   pair."*
+ *
+ * Both are asked of the STORED document, and both are asked HERE rather than only in the unit
+ * suite because the unit suite cannot press a key: it drives the command, so it proves the rule
+ * and not the keymap. Only this half can tell you that Tab reaches the right handler at all, and
+ * that Shift+Tab gives the level back instead of `liftListItem` lifting the bullet clean out of
+ * its list — the specific thing the priority ordering exists to prevent. */
+await seed(page);
+/* ⛔ AND THE PLACEMENT IS CHECKED, NOT ASSUMED — this probe's first run reported
+ * "TAB-DID-NOTHING" for a caret that was never in the list at all, because it named a string the
+ * fixture does not contain. `placeCaret` returns false in that case and the old code threw the
+ * answer away, so an instrument failure was one edit from being read as a product failure. That is
+ * the same trap the CONTEXTS loop already guards with COULD-NOT-PLACE. */
+const placedFirst = await placeCaret(page, { text: "MUD Engineer", at: "end" });   // the FIRST bullet
+if (!placedFirst) throw new Error("could not place the caret on the first bullet — the fixture changed");
+const indBefore = await storedDoc(page);
+await page.keyboard.press("Tab");
+await pacedWait(page, 900);
+const indAfter = await storedDoc(page);
+await page.keyboard.press("Shift+Tab");
+await pacedWait(page, 900);
+const indBack = await storedDoc(page);
+
+/** Every list item in a stored document, as `[text, level]` — read from the DOCUMENT. */
+const itemsIn = (raw) => {
+  let doc = null;
+  try { doc = JSON.parse(raw || "null"); } catch (_) { return null; }
+  const out = [];
+  const walk = (n) => {
+    if (!n) return;
+    if (n.type === "listItem" || n.type === "taskItem") {
+      let text = "";
+      const dig = (x) => { if (x?.type === "text") text += x.text; (x?.content || []).forEach(dig); };
+      (n.content || []).forEach(dig);
+      out.push([text, Number(n.attrs?.indent) || 0]);
+    }
+    (n.content || []).forEach(walk);
+  };
+  walk(doc);
+  return out;
+};
+
+const wasItems = itemsIn(indBefore) || [];
+const nowItems = itemsIn(indAfter) || [];
+const backItems = itemsIn(indBack) || [];
+/* ⛔ EVERY ONE OF THESE IS RELATIVE TO THE DOCUMENT AS IT WAS, NOT TO AN ABSOLUTE. The first
+ * version asked "is any bullet empty?" and the answer was YES before the key was ever pressed —
+ * the fixture deliberately contains an empty nested bullet, because that is one of the contexts
+ * he named. So a working feature measured as NODE-INVENTED against a baseline nobody checked.
+ * The claim is "Tab did not ADD one", and that is a comparison, not a property. */
+const firstLevelRose = (nowItems[0]?.[1] ?? 0) > (wasItems[0]?.[1] ?? 0);
+const noNewNode = nowItems.length === wasItems.length;
+const emptyCount = (list) => list.filter(([t]) => t.trim() === "").length;
+const noNewEmpty = emptyCount(nowItems) === emptyCount(wasItems);
+const sameTexts = JSON.stringify(nowItems.map(([t]) => t)) === JSON.stringify(wasItems.map(([t]) => t));
+
+rows.push({
+  name: "FIRST bullet: no empty node", key: "Tab",
+  ctx: { node: "ul>li", listDepth: 1 },
+  verdict: !nowItems.length ? "COULD-NOT-READ"
+    : !firstLevelRose ? "TAB-DID-NOTHING"
+      : !noNewNode ? "NODE-INVENTED"
+        : !noNewEmpty ? "EMPTY-NODE-INVENTED"
+          : !sameTexts ? "TEXT-MOVED" : "level-only",
+  focusKept: true,
+});
+rows.push({
+  name: "FIRST bullet: round-trip", key: "Tab then Shift+Tab",
+  ctx: { node: "ul>li", listDepth: 1 },
+  verdict: indBack === indBefore ? "byte-identical"
+    : (backItems[0]?.[1] ?? -1) === (wasItems[0]?.[1] ?? 0) ? "SAME-LEVEL-DIFFERENT-BYTES" : "NOT-REVERSIBLE",
+  focusKept: true,
+});
+
+/* ⛔ PDF-PARITY, MEASURED RATHER THAN ARGUED. The print sheet is built by `lib/notesDocHtml.js`
+ * through ProseMirror's own `DOMSerializer`, using the very `renderHTML` that paints the screen —
+ * so a level that shows on screen shows on paper BY CONSTRUCTION, and that is a good argument and
+ * not a measurement. PDF-PARITY is a mandatory live-verify class here, so the sheet is opened and
+ * its first bullet is read. What this would catch: a print stylesheet whose `margin` shorthand beat
+ * the item's own margin, which is exactly the shape `.note-body li { margin: 0.15em 0 }` has. */
+await placeCaret(page, { text: "MUD Engineer", at: "end" });
+await page.keyboard.press("Tab");
+await pacedWait(page, 900);
+await page.locator('[data-testid="nt-print"]').first().click().catch(() => {});
+await pacedWait(page, 1600);
+const printed = await page.evaluate(() => {
+  const f = document.querySelector('[data-testid="notes-print-frame"]');
+  const d = f && f.contentDocument;
+  const li = d && d.querySelector(".note-body li");
+  if (!li) return null;
+  const win = d.defaultView;
+  return { attr: li.getAttribute("data-indent"), margin: win.getComputedStyle(li).marginLeft };
+});
+rows.push({
+  name: "FIRST bullet: the PRINTED sheet", key: "Tab",
+  ctx: { node: "ul>li", listDepth: 1 },
+  verdict: !printed ? "NO-PRINT-FRAME"
+    : printed.attr !== "1" ? "LEVEL-LOST-IN-EXPORT"
+      : parseFloat(printed.margin) > 0 ? "indented-on-paper" : "MARGIN-OVERRIDDEN",
+  focusKept: true,
+});
+
 /* ---- the table ------------------------------------------------------------------------- */
 console.log("\n" + "=".repeat(112));
 console.log("TAB, IN EVERY CONTEXT — measured with a real key, judged by the STORED document");
@@ -327,11 +434,23 @@ console.log(`  page errors : ${pageErrors.length ? pageErrors.slice(0, 3).join("
  * GUARD. Any row that changes is announced rather than discovered — which is the whole point of
  * having driven every context with a real key instead of reasoning about the keymap.
  *
- * The one genuine failure is the first item of a list, and it is STRUCTURAL rather than a slip:
- * a `listItem`'s content is `paragraph block*`, so a bullet can only tuck UNDER the bullet above
- * it, and the first bullet has none. All three "nothing" rows below are that same fact wearing
- * three different hats — the first top-level bullet, the first bullet of the nested list, and a
- * range whose start is the first bullet.
+ * The one genuine failure the first run found was the first item of a list, and it was STRUCTURAL
+ * rather than a slip: a `listItem`'s content is `paragraph block*`, so a bullet can only tuck UNDER
+ * the bullet above it, and the first bullet has none. Three "nothing" rows, one fact wearing three
+ * hats — the first top-level bullet, the first bullet of the nested list, and a range whose start
+ * is the first bullet.
+ *
+ * ⛔ ALL THREE NOW READ `restructured`, AND THAT IS THE OWNER'S DECISION LANDING (NEW-TAB,
+ * 2026-08-13): **Tab changes the LEVEL of the current item; it never creates a node the user did
+ * not type.** Where real nesting can happen it still does; where it cannot, the item's own
+ * `indent` attribute goes up by one — so the document changes (hence `restructured`) with the same
+ * nodes in the same order. `lib/notesListIndent.js` holds the rule and the option that was refused.
+ *
+ * ⛔ AND THREE ROWS CHANGING FROM "nothing" TO "restructured" IS NOT SUFFICIENT EVIDENCE FOR IT,
+ * which is why two PROPERTIES are driven below the contexts. "The document changed" is equally
+ * true of the fabricated-parent implementation he refused, and equally true of an outdent that
+ * leaves litter behind. So the harness asks the two questions his constraints actually name — is
+ * there an empty node in there, and does the pair round-trip byte-identical — with real keys.
  */
 const EXPECTED = {
   "start of a list item|Tab": "restructured",
@@ -342,15 +461,15 @@ const EXPECTED = {
   "end of a list item|Shift+Tab": "restructured",
   "EMPTY nested list item|Tab": "restructured",
   "EMPTY nested list item|Shift+Tab": "restructured",
-  "FIRST item of a list|Tab": "nothing",            // structural — see the note above
+  "FIRST item of a list|Tab": "restructured",       // ⛔ CHANGED — its own level goes up by one
   "FIRST item of a list|Shift+Tab": "restructured",
-  "already-nested item|Tab": "nothing",             // also a first item, of the nested list
+  "already-nested item|Tab": "restructured",        // ⛔ CHANGED — also a first item, of the nest
   "already-nested item|Shift+Tab": "restructured",
   "after an autolinked EMAIL|Tab": "restructured",
   "after an autolinked EMAIL|Shift+Tab": "restructured",
   "after an autolinked URL|Tab": "restructured",
   "after an autolinked URL|Shift+Tab": "restructured",
-  "range across two list items|Tab": "nothing",     // the range STARTS on a first item
+  "range across two list items|Tab": "restructured",   // ⛔ CHANGED — every item in the range
   "range across two list items|Shift+Tab": "restructured",
   "inside a table cell|Tab": "moved-caret",
   "inside a table cell|Shift+Tab": "moved-caret",
@@ -363,6 +482,10 @@ const EXPECTED = {
   "the page TITLE field|Tab": "moved-caret",
   "the page TITLE field|Shift+Tab": "moved-caret",
   "REVERSIBILITY (plain para)|Tab then Shift+Tab": "reversible",
+  // ⛔ The two properties his decision names, asked of the STORED document (NEW-TAB).
+  "FIRST bullet: no empty node|Tab": "level-only",
+  "FIRST bullet: round-trip|Tab then Shift+Tab": "byte-identical",
+  "FIRST bullet: the PRINTED sheet|Tab": "indented-on-paper",
 };
 
 let drift = 0;

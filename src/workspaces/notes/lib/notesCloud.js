@@ -104,13 +104,15 @@ export const emptySyncState = () => ({ treeRev: null, treeDirty: false, pages: {
  *      the B276 / B556 / B596 / B612 failure TOMBSTONE-DELETES exists to prevent.
  *   2. NOTHING ELSE IS EVER DROPPED. A notebook, section or page present on only one side is
  *      appended, never discarded. A merge cannot lose a note.
- *   3. FOR A NODE ON BOTH SIDES, THE MORE RECENTLY EDITED SIDE OWNS ITS NAME AND ITS PROJECT
- *      (B342996 ×2, extended by B421493). It used to be an unconditional "local wins",
- *      justified by this function only running when local has unpushed changes — but owing an
- *      edit on ONE page says nothing about another page's name, and a rename or a re-file made
- *      on the other computer since this one last synced is simply newer. So `renameNode` and
- *      `setPageProject` stamp `updatedAt`, and the later stamp takes both fields; a tie or a
- *      missing stamp still resolves to LOCAL, which is the conservative answer.
+ *   3. FOR A NODE ON BOTH SIDES, THE MORE RECENTLY RENAMED SIDE OWNS ITS NAME, AND THE MORE
+ *      RECENTLY FILED SIDE OWNS ITS PROJECT (B342996 ×2, extended by B421493, and given its own
+ *      stamps by B342996 ×3). It used to be an unconditional "local wins", justified by this
+ *      function only running when local has unpushed changes — but owing an edit on ONE page
+ *      says nothing about another page's name. The stamps are `renamedAt` and `filedAt`, NOT
+ *      `updatedAt`: `updatedAt` means "the text changed" and the page header renders it, so
+ *      moving it on a rename would make a note nobody has written in for months claim it was
+ *      edited today. ⛔ ABSENT IS OLDEST, NEVER NEWEST — otherwise a machine that has never
+ *      renamed anything wins every disagreement by default. A tie keeps LOCAL.
  *      ⛔ NAME AND PROJECT ONLY — both are VALUES. PLACEMENT (parent, order) stays rule 4's.
  *      Page timestamps take the LATER `updatedAt` and the EARLIER `createdAt`, which is the
  *      honest reading of both regardless of which side is "winning".
@@ -292,9 +294,27 @@ export function mergeTrees(local, server, { onRescue } = {}) {
        * what the reachability fuzz and the project-integrity suites are built around, and the
        * walk below is unchanged. A note's project is a VALUE on a root, not a position, which is
        * the distinction that makes one safe and the other not. See the merge site below. */
-      const theirsIsNewer = other
-        && Number.isFinite(other.updatedAt)
-        && (!Number.isFinite(pg.updatedAt) || other.updatedAt > pg.updatedAt);
+      /* ⛔ THE NAME AND THE PROJECT ARE JUDGED BY THEIR OWN STAMPS, NOT BY `updatedAt`
+       * (B342996, owner decision 2026-08-13).
+       *
+       * They used to be judged by `updatedAt`, which forced `renameNode` to move it — and
+       * `updatedAt` means "the text changed", so a note nobody had written in for months began
+       * claiming it was edited today because somebody fixed its title. `renamedAt` and `filedAt`
+       * carry those two facts now and nothing else reads them.
+       *
+       * ⛔ ABSENT IS OLDEST, NEVER NEWEST. Every page written before these fields existed has
+       * neither, and treating "no stamp" as "just now" would let a machine that has never renamed
+       * anything win every disagreement by default — the exact failure this rule exists to stop,
+       * arriving through the migration door. `stampOf` returns 0 for absent, and when NEITHER side
+       * has a stamp the old rule stands: local wins, which is the conservative answer. */
+      const newerBy = (field) => {
+        if (!other) return false;
+        const mine = Number.isFinite(pg[field]) ? pg[field] : 0;
+        const theirs = Number.isFinite(other[field]) ? other[field] : 0;
+        return theirs > mine;                       // a tie (including 0 vs 0) keeps LOCAL
+      };
+      const theirsIsNewer = newerBy("renamedAt");
+      const theirFilingIsNewer = newerBy("filedAt");
       /* ⛔ AND THE PROJECT A NOTE IS FILED UNDER TRAVELS THE SAME WAY (B421493). B342996 fixed
        * the NAME by recency and deliberately left this half alone, because `projectId` sits with
        * PLACEMENT — parent, order, project — and rule 4 gives placement to the local side, which
@@ -319,9 +339,15 @@ export function mergeTrees(local, server, { onRescue } = {}) {
         ? {
           ...pg,
           ...(theirsIsNewer ? { title: other.title } : null),
-          ...(theirsIsNewer && bothRoots ? { projectId: other.projectId ?? null } : null),
+          ...(theirFilingIsNewer && bothRoots ? { projectId: other.projectId ?? null } : null),
           updatedAt: laterOf(pg.updatedAt, other.updatedAt),
           createdAt: earlierOf(pg.createdAt, other.createdAt),
+          /* Both stamps take the LATER of the two, or the merged node would forget that the
+           * rename happened and the next merge would re-litigate it. */
+          ...(Number.isFinite(pg.renamedAt) || Number.isFinite(other.renamedAt)
+            ? { renamedAt: laterOf(pg.renamedAt, other.renamedAt) } : null),
+          ...(Number.isFinite(pg.filedAt) || Number.isFinite(other.filedAt)
+            ? { filedAt: laterOf(pg.filedAt, other.filedAt) } : null),
         }
         : { ...pg };
       merged.pages = kids;

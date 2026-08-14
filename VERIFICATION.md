@@ -113,6 +113,28 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V294384 — B342996 ×3: a rename travels between his two computers, and "Last edited" does not move `Blocker: auth` `Blocker: real-data`
+- **WHY IT NEEDS A LIVE PASS AND CANNOT BE CLOSED HERE.** The whole claim is about **two signed-in clients disagreeing**, which is a LIVE-VERIFY class twice over (concurrency / multi-writer, and real project data). The sandbox proves the merge rule against two real store instances and an in-memory server — `test/notesTreeWriteThrough.test.js`, 24 cases, mutation-proven twice — but this sandbox cannot sign in (the proxy CORS-blocks Supabase auth), so the real `notes_trees` row, the real `rev` trigger and his real note titles have never been through it.
+- **WHAT WAS VERIFIED HERE:** lint · the full unit suite · the build · 24 cases in `test/notesTreeWriteThrough.test.js` including his exact two-client test in both directions · two deliberate mutations of the real source (restoring `updatedAt` stamping → 8 red; making an absent stamp read as newest → 9 red).
+- **THE STEPS, on his account, in two windows or on two machines:**
+  1. Open the same note in both. Rename it on A. Watch B: within a sync tick the new name appears in B's rail, **and B does not push the old one back** (rename again on A afterwards and it must still stick).
+  2. Rename it on B instead, with A stale. A must adopt B's name.
+  3. **The one that is new:** look at the note's **Edited** label before and after a rename. **It must not move.** A note last written in weeks ago must still say so after its title is changed.
+  4. Re-file a note into a project on A; B must pick it up. Take it back out of every project on B; A must pick THAT up too (an empty project is a real answer, not "no answer").
+- **STOPPING RULE.** Closes when steps 1–4 pass on his account, or when he says a rename is behaving. A failure on step 3 re-opens B342996 at ×4; a failure on 1/2/4 is the same item, not a new one.
+
+### V294385 — B512672: Tab indents the first bullet on a real signed-in note, and nothing is left behind `Blocker: auth`
+- **⛔ THIS IS A COURTESY PASS, NOT A GATE, and it says so rather than implying it.** Per ATTEMPT-BEFORE-YOU-PARK this check is Claude-doable here and **was done here**: a real Tab keystroke, logged out, judged by the stored document — `ui-audit/audit-notes-tab.mjs`, 33 pinned rows, all green, including the two properties his decision names (no node invented; the indent/outdent pair byte-identical) and the printed sheet. It is logged only because his own lists live on signed-in notes that sync, and a level that fails to survive a round trip through the cloud would show up nowhere else.
+- **WHAT WAS VERIFIED HERE:** 17 cases in `test/notesListIndent.test.js` against the real schema and the real command · the 33-row keystroke harness · the printed sheet's first bullet (`indented-on-paper`) · a Markdown export that is byte-identical again after an outdent.
+- **THE STEPS, on one of his own notes:**
+  1. Put the caret in the **first** bullet of a list and press Tab. The bullet and its words move right together. **No empty bullet appears above it.**
+  2. Press Shift+Tab. It goes back exactly where it was.
+  3. Reload the page. The level is still whatever you left it at.
+  4. Print the note. The indented bullet is indented on the sheet too.
+  5. Export to Markdown and re-open the file. The indented item reads as a nested item.
+- **STOPPING RULE.** Closes when steps 1–3 pass on a signed-in note. Steps 4–5 are already measured here and are listed so he can spot-check, not because they are in doubt.
+
+
 ### V287376 — B503184: the Layers toggle actually hides, on a REAL drawing `Blocker: real-data`
 
 **⛔ STEP 1 IS THE ONE THAT DECIDES WHETHER THE REST MATTERS, and it could not be answered from the

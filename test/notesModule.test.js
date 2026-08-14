@@ -72,6 +72,9 @@ const ALL_NOTES_FILES = [
   "lib/notesSpacing.js",
   // B421494 — select several boxes and move them together; the place/select boundary lives here.
   "lib/notesMarquee.js",
+  // NEW-TAB — Tab changes the LEVEL of the current item and never creates a node the user did
+  // not type. The pure reader is split out because the Markdown exporter is on the static path.
+  "lib/notesListIndent.js", "lib/notesIndentLevel.js",
 ];
 const SKETCH_FILES = ALL_NOTES_FILES.filter((f) => f.includes("Sketch"));
 
