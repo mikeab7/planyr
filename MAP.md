@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-14 @ `7dcc8f1b` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-14 @ `3d6724d1` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_519 source files mapped._
+_520 source files mapped._
 
 ## infra
 
@@ -1019,6 +1019,8 @@ _519 source files mapped._
   - _exports_: `factsRowToPatch`, `mergeFactsIntoReviews`, `toFactsRow`
 - **`src/workspaces/doc-review/lib/lastDoc.js`** — Per-PROJECT last-document map for Review resume ({projectId: {id,mode}}) + legacy-global fallback and resolveResume boot-candidate ordering
   - _exports_: `readLastDoc`, `readLastDocMap`, `readLegacyPointers`, `resolveResume`, `resumeAllowedForRoute`, `writeLastDoc`
+- **`src/workspaces/doc-review/lib/layerVisibilityReads.js`** — the Doc Review hidden-content verdicts: which PDF render paths MUST honour the optional-content (layer) toggle and which are correct without it, plus which markup reads are page-scoped and which are correctly whole-document. Records both answers with reasons (B503184).
+  - _exports_: `MARKUP_PAGE_SCOPING`, `RENDER_PATHS`, `VERDICT`
 - **`src/workspaces/doc-review/lib/localRead.js`** — Tier-1 free local title-block read: extract every page text (OCR scanned pages), classify per-page, pick majority discipline, emit multi-discipline filing decision
   - _exports_: `localTitleBlockRead`
 - **`src/workspaces/doc-review/lib/matchLineRefine.js`** — Stitcher raster match-line refinement: fit true seam line in pixels, remap neighbor placement onto anchor line and slide to connect crossing linework

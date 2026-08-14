@@ -8,6 +8,33 @@ internals in `/docs/REFERENCE.md` (Document Review persistence section).
 - `DocReview.jsx` — workspace root (lazy chunk). `Stitcher.jsx` — multi-sheet stitch/align.
 
 **Key `lib/`**
+- **⛔ `layerVisibilityReads.js` (B503184) — WHAT "HIDDEN" MEANS IN THIS WORKSPACE, and it is NOT the
+  planner's model. Read this before porting anything from the site-planner audit.** Markups carry **no
+  visibility concept at all** — the shared markup engine has no `hidden`, no per-object filter, no
+  layer assignment — so the planner's question ("which reads of our collection forget the visibility
+  predicate", B3296 / B494048) is **degenerate here: there is no predicate to forget.** What markups
+  have is the PAGE, and every path that matters is already page-scoped on purpose (`pageMarks`,
+  `eraseInBox`'s `m.page !== page`, B569's selection net, `arrange.js` deriving same-page peers from
+  the global array it is deliberately handed). Those, and the ones that are correctly WHOLE-document
+  (the takeoff `rollup`, the saved snapshot, undo state), are recorded there **with their reasons** —
+  so a later session can tell "checked and right" from "nobody looked". Doc Review also has **no
+  export/print path, no thumbnails and no text search**, so four of the audit's artefact categories
+  have no subject here at all.
+  **The ONE real hide is the PDF optional-content ("layer") toggle (B490)** — it hides part of the
+  immutable BACKDROP, pdf.js does the hiding via the `OptionalContentConfig` handed to `page.render`,
+  and nothing is persisted (group ids are per-load refs). So our code can only get it wrong by
+  rendering without that config **or by serving a CACHED raster made before the toggle**, and it was
+  the second: `renderDetail`'s `tileCovers` short-circuit asks "does my tile cover this view at this
+  scale" and knows nothing about content changing underneath it, so the sharp tile — which paints ON
+  TOP of the backdrop — kept showing the switched-off layer **at rest, not only on zoom** (backdrop 0
+  blue px, tile above it 579,121). ⛔ Every other change to what the tile should contain already
+  invalidates it (new document · page/size change · clear); **visibility must too.** Guards: the
+  repo-root `test/` suite **docReviewLayerVisibility** (source guard + the render-path table covering
+  every `page.render` call site + a mutation check against the pinned pre-fix commit) and the ui-audit
+  harness **verify-pdf-layer-hiding** (`npm run verify:pdflayers`, 10/10, red on unmodified main).
+  ⚠ Whether the owner's own drawings carry layers at all is **unknown from the sandbox** — his PDFs'
+  bytes are not reachable there — which is why the fixture is a hand-built two-layer PDF and why
+  **V287376's first step is "does the Layers button ever appear?"**.
 - `reviewStore.js` — all persistence I/O (Supabase `doc_reviews` + Drive-first file storage);
   `usePersistence.js` — the data-loss hook (first-edit save, honest badge, flush on unload).
 - `lastDoc.js` — per-PROJECT "last document reviewed" map + legacy-pointer fallback and the

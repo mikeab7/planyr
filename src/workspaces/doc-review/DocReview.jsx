@@ -217,6 +217,22 @@ export default function DocReview({
     if (!cfg) return;
     cfg.setVisibility(id, visible);
     setOcgLayers((rows) => deriveLayerVisibility(cfg, rows));
+    /* ⛔ B503184 — DROP THE RETAINED DETAIL TILE, OR THE TOGGLE HIDES NOTHING YOU CAN SEE.
+     *
+     * `renderDetail` opens with `if (tileCovers(detailTileRef.current, …)) return` — a cache check
+     * that asks "does the tile I already have cover this view at this scale", and knows nothing
+     * about the drawing's CONTENT having changed underneath it. So bumping `detailReq` re-entered
+     * that function and it returned immediately, leaving the previous tile on screen — and the
+     * detail tile paints ON TOP of the backdrop, so the layer the user just switched off was still
+     * the thing they were looking at. Measured on a two-layer PDF: the backdrop correctly went to
+     * zero blue pixels while the tile above it held 579,121 of them, 12.2% of the tile, which is
+     * exactly the hidden square's share of the page.
+     *
+     * Every OTHER change to what the tile should contain already invalidates it this way — a new
+     * document (`openFile`/`loadReview`), a page or size change, a clear. Visibility was the one
+     * mutation that did not, so this is the file's existing rule applied to the case it missed
+     * rather than a new mechanism. `tileCovers(null, …)` is false, so the next render is forced. */
+    detailTileRef.current = null; setDetailTile(null);
     setBackdropReq((n) => n + 1); setDetailReq((n) => n + 1);
   };
 

@@ -113,6 +113,37 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V287376 — B503184: the Layers toggle actually hides, on a REAL drawing `Blocker: real-data`
+
+**⛔ STEP 1 IS THE ONE THAT DECIDES WHETHER THE REST MATTERS, and it could not be answered from the
+sandbox.** His 30 source PDFs live in Supabase Storage / Drive; the bytes are not reachable there, so
+whether any of his drawings carries optional content ("layers") at all is unknown. If none does, the
+Layers control never appears and this whole surface is empty in practice — which is a complete and
+useful answer, not a failed check.
+
+**⛔ NOTHING HERE CHANGES DATA.** Layer visibility is a view filter held in memory for the current
+load and is never persisted, so this can be run on a live review with no duplicate needed and nothing
+to undo. Closing the document discards it.
+
+| # | Do exactly this | Read this off the SCREEN | Pass |
+|---|---|---|---|
+| 1 | Open Review and load each of a few real drawings in turn (the biggest sheet sets are the likeliest) | does a **▤ Layers** button appear in the toolbar? | ☐ |
+| 2 | **If it never appears on any drawing — STOP and record that.** The feature has no subject in his documents, and steps 3–8 are moot | — | ☐ |
+| 3 | On a drawing that DOES have it, open the Layers popover | the groups are listed by name (e.g. Electrical, Grading) | ☐ |
+| 4 | Untick one layer whose content you can clearly see | **that content disappears immediately, at the zoom you are already at** | ☐ |
+| 5 | ⛔ Look closely — this is the exact defect | no ghost of it remains in the sharp, crisp part of the drawing | ☐ |
+| 6 | Zoom in on where it was, then zoom back out | it stays gone at every zoom | ☐ |
+| 7 | Confirm the rest of the drawing is untouched | every other layer, and all unlayered linework, still there | ☐ |
+| 8 | Tick it again | it comes back | ☐ |
+| 9 | Reload the page and reopen the drawing | **all layers are on again** — visibility is deliberately not saved | ☐ |
+
+**Already proven here:** `ui-audit/verify-pdf-layer-hiding.mjs` drives all ten checks on a hand-built
+two-layer PDF, 10/10 after the fix, and it was **red on unmodified main** (backdrop 0 blue pixels
+while the tile above it held 579,121 — 12.2% of the tile, exactly the hidden square's share). The
+fixture is synthetic on purpose: whether OUR render honours the config is a property of our code, not
+of his files. **What is pending is only whether his documents have layers to hide, and that the same
+behaviour holds on a real construction sheet.**
+
 ### V273520 — B484337: does a tab that has STOPPED saving actually SAY so, on screen? `Blocker: auth`
 
 **⛔ THIS ONE IS ON MICHAEL'S LIST, deliberately, and it is the only such item.** Every other entry
