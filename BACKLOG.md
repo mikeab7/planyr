@@ -53,52 +53,24 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 
 ## 🔲 Open
 
-### B519152 — "Aerial backdrop" reads as a thing every project has, because the row's HEADING renders before its data does `[Site Planner / references]` (task, LOW — naming/cosmetic; **NOT A BUG**) #site-planner #ui  *(owner observation 2026-08-14: "planner always shows this aerial backdrop overlay no matter the project, but i dont know if this is even a thing." Audited read-only against production BEFORE any change, per the brief. Minted **B519152** from this branch's reserved block B519152–B519167 against `origin/main` 55dcdb5. DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `underlay`, `Aerial backdrop`, `sheetOverlays`, `B654`, `B487600`, `B952`, `releaseUnderlayAssets`: **B654** MERGED the aerial and overlay panels and is where this heading came from, **B487600** is the shared-asset delete bug, **B952** is the Library-vs-references separation. None covers the heading's unconditional render. **Net-new.**)*
-`[ ]` The References panel prints the heading **"Aerial backdrop"** on every plan — including the 13 of 71 that hold no aerial at all — because the heading sits OUTSIDE the `!underlay` ternary that chooses between the empty state and the real row. The panel is honest (the empty state says "Load screenshot…" and explains what an aerial is); the heading simply arrives before the thing it names.
-- Verify: sandbox — `ui-audit/diagnose-aerial-backdrop-row.mjs`, three arms, 4/4.
-- Origin: filed 2026-08-14 from owner chat.
-- **⛔ THE VERDICT IS (b) + (c), AND IT IS EXPLICITLY NOT (a) OR (d). Recorded with the evidence so
-  this is not re-audited from the same one-line report.** The brief asked which of four things was
-  true; two are, and the two serious ones are refuted rather than merely unobserved:
-  - **NOT (a), an unscoped query.** There is no references table and no references query. Both
-    reference kinds are fields INSIDE each plan's own `sites.data` jsonb — `underlay` (the aerial)
-    and `sheetOverlays` (sheet references) — read by `cloudSync.loadSite` as
-    `from("sites").select("data, version").eq("id", id)`. A single-row fetch by primary key cannot
-    return one row for every project.
-  - **(b) IS TRUE where an aerial exists — 58 of 71 plans**, each carrying its OWN object in its OWN
-    row, with its own georeference. Intended: `newPlanSameParcel` copies `underlay: src.underlay` so
-    a second concept of the same land opens over the same imagery.
-  - **(c) IS TRUE for the heading itself** — proven behaviourally, not by reading source. Three plans
-    differing in EXACTLY ONE fact (no `underlay` key · `underlay: null` · a real aerial) all print
-    "Aerial backdrop"; only the empty arms show "Load screenshot…" and only the real arm has the
-    opacity/lock controls.
-  - **NOT (d), a cross-project leak.** Nine `src` values repeat across plans, and every repeat is the
-    SAME GROUND rather than a shared row. `fromMap` aerials store a DERIVED Esri `/export` URL built
-    from the site's bbox, so identical ground yields an identical string BY CONSTRUCTION. The two
-    repeats that cross a project NAME were checked individually and both are one site entered twice:
-    `FM 359 RD, Fulshear` / `Woods Road` share `groupId smsrpaiqu5sv` and origin 29.74838/-95.92482
-    (the B487600 restore); `2221 E LAMAR BLVD STE 790` / `4050 CR 50 JOHNSTOWN` share origin
-    40.34597/-104.97794 — the same Weld County parcel, the first named by the `appraisal.js` situs
-    defect that read Forestar's Arlington office address off `ADDRESS1`.
-- **⛔ THE #1040/#1043 REF-COUNT INTERACTION, ANSWERED EXPLICITLY AS ASKED — NO INTERACTION, ON TWO
-  INDEPENDENT GROUNDS.** The concern was that a leaked row could be counted as a legitimate holder of
-  a stored file and refuse a delete that should proceed, or mis-decide which file is safe to remove.
-  - **First: there is nothing for the aerial to hold.** `sharedAssetRefs.planAssetKeys` indexes an
-    underlay by `storageKey` and `idbKey`. Across all 71 production plans, **0 carry either** — every
-    aerial is a `fromMap` URL, which references no stored object in either tier. The aerial
-    contributes no entries to the index at all today.
-  - **Second: the index cannot admit a foreign row even if it did.** `collectAssetRefs` walks the plan
-    list and attributes each key to the plan whose own record names it, so a holder set is by
-    construction a set of real plan ids. There is no path by which one plan's row is counted under
-    another's identity — which is exactly what makes the duplicate-plan case (Goose Creek ×4,
-    Silvestri ×5, Bain ×3) come out RIGHT: those siblings genuinely each hold the asset, so a refusal
-    to release is the #1040 fix working, not a false positive.
-  - Guards re-run unchanged: `test/sharedAssetRefs.test.js` **17/17**. Nothing in the delete path was
-    touched, and no stored bytes were read for deletion or removed during the audit.
-- **What is left, and it is a naming/clarity call rather than a defect:** the heading could move
-  inside the ternary (so a plan with no aerial reads "Add an aerial backdrop" rather than announcing
-  one), or stay as-is on the argument that a stable row teaches where the aerial lives. Owner's call;
-  **not fixed in this pass because the brief said not to manufacture a bug out of (b)/(c).**
+### B519680 — ⛔ REGRESSION IN B512672: Shift+Tab moved an ANCESTOR, so one keypress dragged whole branches the user never touched `[Notes]` (bug) #notes #ui  *(owner chat block 2026-08-14, WITH A SCREENSHOT, on his live MUD 377 note. Minted **B519680** LATE via `git fetch origin main && npm run next-id -- --against-main`, from this branch's reserved block B519680–B519695 against origin/main 55dcdb5. **DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `Tab`, `indent`, `outdent`, `sinkListItem`, `liftListItem`, `nodesBetween`, `B512672`, `B454480`, `B1392`, `B291536`.** **B512672** is the change that introduced this, shipped in #1050 roughly an hour before he hit it — this is a REGRESSION IN it, filed on its own number rather than as a recurrence because B512672's own promise (Tab indents a first item) is correct and shipped; what is broken is which items the command applies to. Net-new.)*
+`[ ]` **⛔ SHIPPED. Caused by me, in the change that merged an hour before he reported it.**
+- Verify: sandbox — reproduced and fixed against a browser-driven fixture built from his screenshot (`ui-audit/diagnose-notes-outdent.mjs`), plus five depth cases in `test/notesListIndent.test.js`. Mutation-proven.
+- **HIS REPORT, verbatim:** *"I'm trying to press shift tab to promote MUD ATTORNEY: BRIAN YATES, that line. I'm trying to promote it to the left, but it takes Dustin O'Neal, the phone number, and the email with it."*
+- **⛔ THE TELL, AND IT IS THE THING THAT NAMES THE BUG.** Dustin O'Neal and its two children are not MUD ATTORNEY's DESCENDANTS — they are its NEPHEWS, sitting under a sibling branch. A lift capturing preceding siblings or following siblings cannot produce that. **Only an ANCESTOR moving can**, because an ancestor takes its entire subtree, including branches above and beside the pressed line. He was right that the screenshot alone could not distinguish the three candidate bugs, and right to demand the document diff.
+- **THE CAUSE, one line.** `itemsInSelection` asked `doc.nodesBetween(from, to)` for every `listItem`. **`nodesBetween` visits every node whose range CONTAINS the position** — so a collapsed caret in a level-three bullet returns that bullet AND its parent AND its grandparent, and the command moved all of them.
+- **MEASURED, before any fix** (`diagnose-notes-outdent`, his exact four-level outline including the smaller font on "Dustin O'Neal" that he flagged): Tab on **"Active"** — one line, caret collapsed — produced `Active [indent=1]` **and `MUD 377 [indent=1]`**. One keypress, two items, one of them a parent nobody pressed on.
+- **THE FIX: an item moves when the selection is inside ITS OWN text, not merely somewhere beneath it.** The walk collects TEXTBLOCKS in the range and maps each to its NEAREST indentable ancestor. A collapsed caret yields exactly one item; a range across two bullets yields both; a range genuinely spanning a parent's text and its child's text yields both, which is right because both lines were selected. **STRUCTURE ONLY, NEVER GEOMETRY** — he asked for that explicitly, having noticed the odd line out carries a smaller font; nothing in this path reads a rendered size, position or box.
+- **⛔ AND THE COVERAGE HOLE THAT LET IT SHIP, which is the more useful finding.** All 17 cases in `test/notesListIndent.test.js` passed **before and after** the fix. Every one used a FLAT list, where an item has no indentable ancestor — so the bug was unreachable by construction and the suite could not tell the broken build from the fixed one. **Depth was the variable that mattered and nothing had any.** Five nested cases added; mutation-proven (restoring the old walk turns 2 red).
+- **THE MIRROR CASES he asked for, all measured on his structure and all correct:** Shift+Tab on an item WITH children (they follow, attached, nothing else moves) · on an item with following siblings (they stay) · on the last item of a nested list · on the first item of a nested list · his own case · and Tab as the inverse, with the indent/outdent round-trip **byte-identical**.
+
+### B519681 — The arrow keys, instrumented: no global binding swallows them in text, and the failing set is elsewhere `[Notes]` (bug) #notes #ui #testing  *(owner chat block 2026-08-14 — *"okay the direction keys on my keyboard arent working, debug"* — with an explicit prior to TEST FIRST rather than start from scratch. Minted **B519681** from the same reserved block. DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `Arrow`, `nudge`, `keydown`, `window.addEventListener`, `selectionKeyDown`, `B421494`, `B434416`, `B434418`, `B1392`: **B421494** added the nudge this prior points at and **B434418** is the Escape-handled-twice defect he cites as the precedent; neither is "which contexts do the arrows fail in". Net-new.)*
+`[ ]` **⏳ OPEN AND STAYING OPEN — he reports it has gone quiet, and quiet is not fixed.**
+- Verify: live (V301392) — an intermittent input bug that resolves itself is exactly the profile of the empty-box dead zones from earlier this week, so this closes on his word or on a capture, never on a clean sweep.
+- **HIS PRIOR, TESTED FIRST AS INSTRUCTED, AND IT IS REFUTED FOR THE TEXT CONTEXTS.** The nudge binding IS on the window, but it is armed only while `selection.size > 0` and it declines while a form field has focus. Driven with real keys in every context he named, the arrows move the caret correctly in **ordinary paragraph text, a list item, a table cell, the page title, and inside a box being edited** — 5 contexts × 4 arrows, plus Shift+Arrow, Ctrl+Arrow and Home/End.
+- **⛔ WHAT THE SWEEP DID FIND, and it is the shape he predicted one level along: the binding does NOT exclude the editor.** It declines for `input, textarea, select`; the document is a **contenteditable div**, deliberately not excluded, on the argument that clicking into the document clears the box selection on the way. **Measured: that argument does not hold.** With a box selected and the caret then placed in ordinary flow text, every arrow **moves the BOX and leaves the caret where it was** — the exact symptom he reported, reachable in three clicks. This is a real defect and it is the live candidate for his intermittency: it depends on whether a box happens to be selected, which is invisible once you have looked away.
+- Origin: owner chat block 2026-08-14.
+- **STOPPING RULE (STANDING RULE #2 clause 5):** closes when he says the arrows are behaving on his own machine, or when the box-selection leak above is fixed AND a capture confirms it was the cause. A clean sweep is a FINDING, never a disposition — the instrument is `ui-audit/audit-notes-arrows.mjs` and it is pinned so a change announces itself.
 
 ### B500576 — Group CAS: three more ways one bad bet refused every save on a building, found by a second ordinary hour — and the flag is now ON `[Site Planner / persistence]` (bug, DATA LOSS) #site-planner #sync #testing  *(owner instruction 2026-08-13: re-run the trial hour on the fixed build and flip it on if quiet, with the prefix-pair case covered rather than missed. Minted **B500576** from this branch's reserved block B500576–B500591 against `origin/main` 1da150a. DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `groupsFor`, `assemblyOf`, `groupConflict`, `assemblyDigest`, `attachedTo`, `rootIdOf`, `B1341`, `B484336`, `B447472`, `B1117`, `B1124`, `bondRemap`: **B484336** is ORDERING and **B447472** is MEMBERSHIP-BY-KIND — both are the digest disagreeing on the same member set; these three are the client claiming the WRONG SET, which no prior item covers. **B1124/bondRemap** is `attachedTo` remapping on COPY, a different path. **Net-new.**)*
 `[x]` **SHIPPED, and the build flag is flipped ON for everyone.**

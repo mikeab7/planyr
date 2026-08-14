@@ -8722,3 +8722,96 @@ click#2, dblclick → rect{transparent}             18×18, inside g[data-export
 - **DESKTOP 1600×900, Your sites EXPANDED, Layers OPEN** — the reported state, seeded and then ASSERTED (`232×457 at 10,90`) before anything is measured against it, because a silently empty panel is this harness's own worst failure mode and it had it once already.
 - **PHONE 390×844** — the other direction the owner asked for. All three phone checks pass on both builds, which is the point: four of these six defects existed because a phone fix was not carried to the desktop, and the reverse must not now be true.
 - **THE MUTATION ARM IS THE EVIDENCE.** Built `origin/main` in a throwaway worktree, served it beside the fixed build, and ran the identical harness: **4/15**. Zoom `covered by span` / `covered by input` · no collapse control · `Imagery` strip present · `Labels` still present · no `Place names` · basemap control not in the panel · `Find a site — address or place…` · **208 off-scale radii (7px, 99px)**. Before/after screenshots of the full map view are in the V222352 note.
+
+### B525632 — A plan with no aerial announced one; now it invites you to add one `[Site Planner / references]` (task) #site-planner #ui  *(owner instruction 2026-08-14, following the B519152 audit: "Reword it, and ship that as its own small item… the heading is what confused the owner, so the fix should remove the confusion rather than document it. On a plan with no aerial the row should not announce one." Minted **B525632** from this branch's reserved block B525632-B525647 against `origin/main` c48e370. DEDUPE-FIRST - **B519152** is the AUDIT that produced this and deliberately left the reword as an open product decision rather than fixing it; **B654** built this panel. Net-new.)*
+`[x]` **SHIPPED.** The References panel's empty state now reads **"Add an aerial"** instead of **"Aerial backdrop"**; a plan that HAS one still reads "Aerial backdrop", unchanged.
+- Verify: sandbox - `ui-audit/verify-aerial-empty-state-copy.mjs`, three arms, 6/6, proven RED pre-fix and mutation-proven post-fix.
+- Origin: filed 2026-08-14 from owner chat.
+- **THE CHANGE IS ONE STRING PLUS ITS GUARD.** The two headings already lived in separate branches of
+  the `!underlay` ternary (a `<span>` on the empty state, a `<button>` on the real row), so the fix
+  touched the empty branch alone - no restructuring, no shared string, no risk to the occupied row.
+- **⛔ THE WORDING IS "Add an aerial", NOT THE "Add an aerial backdrop" FIRST PROPOSED, AND THAT IS A
+  MEASUREMENT RATHER THAN A PREFERENCE - do not "restore" the longer phrase.** The row is
+  `[heading][spacer][Load screenshot…]`; measured in the real app the row is **248px**, the CTA
+  **116px**, leaving the heading **124px**. The longer phrase needs **134px**, so it WRAPPED to two
+  lines and pushed the explainer and everything under it down - **the exact reflow the owner asked us
+  to avoid**, arrived at by fixing the wording correctly. "Add an aerial" needs **76px**. The app
+  already uses "aerial" as a noun throughout ("the aerial sits beneath everything", "Hide aerial"),
+  and PANEL-BREVITY prefers the shorter form independently.
+- **⛔ THE HEIGHT ASSERTION IS WHY THAT WAS CAUGHT, AND IT IS THE REUSABLE PART.** A copy-only check -
+  the obvious shape for a reword - reads the heading text, finds exactly what was asked for, and
+  reports green **on a build that reflowed the panel**. The guard pins the empty row's own pre-fix
+  geometry (`top 322 · left 90 · height 15` at 1440x900) so a longer string fails on the HEIGHT even
+  when the words are right. The position baseline is the **pre-fix empty state**, deliberately: the
+  first cut compared empty-vs-present and reported the two branches' intended 7px difference as a
+  regression this change had caused.
+- **⛔ AND THE MATCHER IS KEYED ON BOTH KNOWN HEADINGS, not on a shared fragment.** Keying the node
+  search on "aerial backdrop" made the harness return `null` the moment the invitation stopped
+  containing that phrase - which reports as "the heading vanished" rather than "the wording changed".
+  A regex over the bare word "aerial" is the opposite failure: it also matches the explainer sentence
+  and the Hide/Show aerial controls.
+- **PANEL-BREVITY (rule 7) - measured before and after with `ui-audit/panel-copy-budget.mjs`:** all
+  five budgeted regions **byte-identical** across the change (`pond-inspector-default` 0/0,
+  `yield-detention-detail` 12 lines/557 chars, `yield-stormwater-notes` 147/12581, `lib-pond-verdict`
+  5/258, `lib-yield-verdicts` 13/615-of-638), `--check` green both sides. **The References panel is
+  not a budgeted region** (budgets cover the pond inspector and yield surfaces only), so this is
+  budget-NEUTRAL rather than budget-tested - stated plainly instead of implying a budget governs it.
+  The visible copy is a net **-2 chars** ("Aerial backdrop" 15 -> "Add an aerial" 13): the heading was
+  REPLACED, not added to, and the explainer line beneath is untouched.
+- **What was deliberately NOT changed:** the "Load screenshot…" button and the explainer sentence
+  below it. The audit found the panel honest underneath - the confusion was entirely in the heading -
+  and the guard asserts the CTA survives, so the reword removed an announcement, not an affordance.
+- Checks: `vitest run` **11,397 passed / 563 files** · `eslint .` **0 errors** (23 pre-existing
+  warnings) · `vite build` green · harness **6/6**, mutant (heading reverted) **2 red**.
+
+### B519152 — ✅ "Aerial backdrop" reads as a thing every project has, because the row's HEADING renders before its data does `[Site Planner / references]` (task, LOW — naming/cosmetic; **NOT A BUG**) #site-planner #ui  *(owner observation 2026-08-14: "planner always shows this aerial backdrop overlay no matter the project, but i dont know if this is even a thing." Audited read-only against production BEFORE any change, per the brief. Minted **B519152** from this branch's reserved block B519152–B519167 against `origin/main` 55dcdb5. DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `underlay`, `Aerial backdrop`, `sheetOverlays`, `B654`, `B487600`, `B952`, `releaseUnderlayAssets`: **B654** MERGED the aerial and overlay panels and is where this heading came from, **B487600** is the shared-asset delete bug, **B952** is the Library-vs-references separation. None covers the heading's unconditional render. **Net-new.**)*
+`[ ]` The References panel prints the heading **"Aerial backdrop"** on every plan — including the 13 of 71 that hold no aerial at all — because the heading sits OUTSIDE the `!underlay` ternary that chooses between the empty state and the real row. The panel is honest (the empty state says "Load screenshot…" and explains what an aerial is); the heading simply arrives before the thing it names.
+- Verify: sandbox — `ui-audit/diagnose-aerial-backdrop-row.mjs`, three arms, 4/4.
+- Origin: filed 2026-08-14 from owner chat.
+- **⛔ THE VERDICT IS (b) + (c), AND IT IS EXPLICITLY NOT (a) OR (d). Recorded with the evidence so
+  this is not re-audited from the same one-line report.** The brief asked which of four things was
+  true; two are, and the two serious ones are refuted rather than merely unobserved:
+  - **NOT (a), an unscoped query.** There is no references table and no references query. Both
+    reference kinds are fields INSIDE each plan's own `sites.data` jsonb — `underlay` (the aerial)
+    and `sheetOverlays` (sheet references) — read by `cloudSync.loadSite` as
+    `from("sites").select("data, version").eq("id", id)`. A single-row fetch by primary key cannot
+    return one row for every project.
+  - **(b) IS TRUE where an aerial exists — 58 of 71 plans**, each carrying its OWN object in its OWN
+    row, with its own georeference. Intended: `newPlanSameParcel` copies `underlay: src.underlay` so
+    a second concept of the same land opens over the same imagery.
+  - **(c) IS TRUE for the heading itself** — proven behaviourally, not by reading source. Three plans
+    differing in EXACTLY ONE fact (no `underlay` key · `underlay: null` · a real aerial) all print
+    "Aerial backdrop"; only the empty arms show "Load screenshot…" and only the real arm has the
+    opacity/lock controls.
+  - **NOT (d), a cross-project leak.** Nine `src` values repeat across plans, and every repeat is the
+    SAME GROUND rather than a shared row. `fromMap` aerials store a DERIVED Esri `/export` URL built
+    from the site's bbox, so identical ground yields an identical string BY CONSTRUCTION. The two
+    repeats that cross a project NAME were checked individually and both are one site entered twice:
+    `FM 359 RD, Fulshear` / `Woods Road` share `groupId smsrpaiqu5sv` and origin 29.74838/-95.92482
+    (the B487600 restore); `2221 E LAMAR BLVD STE 790` / `4050 CR 50 JOHNSTOWN` share origin
+    40.34597/-104.97794 — the same Weld County parcel, the first named by the `appraisal.js` situs
+    defect that read Forestar's Arlington office address off `ADDRESS1`.
+- **⛔ THE #1040/#1043 REF-COUNT INTERACTION, ANSWERED EXPLICITLY AS ASKED — NO INTERACTION, ON TWO
+  INDEPENDENT GROUNDS.** The concern was that a leaked row could be counted as a legitimate holder of
+  a stored file and refuse a delete that should proceed, or mis-decide which file is safe to remove.
+  - **First: there is nothing for the aerial to hold.** `sharedAssetRefs.planAssetKeys` indexes an
+    underlay by `storageKey` and `idbKey`. Across all 71 production plans, **0 carry either** — every
+    aerial is a `fromMap` URL, which references no stored object in either tier. The aerial
+    contributes no entries to the index at all today.
+  - **Second: the index cannot admit a foreign row even if it did.** `collectAssetRefs` walks the plan
+    list and attributes each key to the plan whose own record names it, so a holder set is by
+    construction a set of real plan ids. There is no path by which one plan's row is counted under
+    another's identity — which is exactly what makes the duplicate-plan case (Goose Creek ×4,
+    Silvestri ×5, Bain ×3) come out RIGHT: those siblings genuinely each hold the asset, so a refusal
+    to release is the #1040 fix working, not a false positive.
+  - Guards re-run unchanged: `test/sharedAssetRefs.test.js` **17/17**. Nothing in the delete path was
+    touched, and no stored bytes were read for deletion or removed during the audit.
+- **RESOLVED 2026-08-14 — the owner chose the reword, shipped as B525632.** He asked for it as its
+  own small item, with the rationale on the record: *"the heading is what confused the owner, so the
+  fix should remove the confusion rather than document it."* The empty state now reads **"Add an
+  aerial"**; a plan that HAS one still reads "Aerial backdrop".
+- **⛔ STANDING RULE #2 DISPOSITION, NAMED AS REQUIRED: `reproduce it and fix it`.** This item was an
+  owner-reported symptom and it is NOT being closed on a null. The audit reproduced exactly what he
+  saw — the heading does render on every plan — established that the cause was cosmetic rather than
+  the data leak it resembled, and the cause has now been removed in B525632. Nothing here was closed
+  as "not reproducible" and nothing was silently de-prioritised.

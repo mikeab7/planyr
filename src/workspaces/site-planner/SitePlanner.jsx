@@ -17871,7 +17871,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {!underlay ? (
                 <div style={{ border: "1px dashed var(--border-default)", borderRadius: 9, padding: 9, background: SURF_RAISED }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontSize: 12, color: PAL.ink, fontWeight: 600 }}>Aerial backdrop</span>
+                    {/* B525632 — a plan with NO aerial must not ANNOUNCE one. The owner read the
+                        old heading ("Aerial backdrop", printed here whether or not an aerial
+                        existed) as a fixture every project carried: "planner always shows this
+                        aerial backdrop overlay no matter the project, but i dont know if this is
+                        even a thing." B519152 proved the row was honest underneath — the CTA and
+                        the explainer below are unchanged — so the confusion lived entirely in the
+                        heading, and the fix removes it rather than documenting it. The occupied
+                        row's heading (the <button> in the sibling branch) stays "Aerial backdrop":
+                        once there IS one, naming it is right. Same slot, same one line — the words
+                        change, never the position.
+                        ⛔ IT IS "Add an aerial", NOT "Add an aerial backdrop", AND THAT IS MEASURED
+                        RATHER THAN PREFERRED — do not "restore" the longer phrase. This row is
+                        [heading][spacer][Load screenshot…], which leaves the heading 124px; the
+                        longer phrase needs 134px, so it WRAPPED to two lines and pushed the
+                        explainer and everything under it down — the exact reflow the owner asked
+                        us to avoid. "Add an aerial" needs 76px. The app already uses "aerial" as a
+                        noun throughout ("the aerial sits beneath everything", "Hide aerial"), and
+                        PANEL-BREVITY prefers the shorter form independently. Lengthening it again
+                        turns the harness's height assertion red rather than failing silently.
+                        Guard: ui-audit/verify-aerial-empty-state-copy.mjs. */}
+                    <span style={{ fontSize: 12, color: PAL.ink, fontWeight: 600 }}>Add an aerial</span>
                     <span style={{ flex: 1 }} />
                     <button style={chip} onClick={() => fileRef.current?.click()}>Load screenshot…</button>
                   </div>

@@ -75,6 +75,8 @@ const ALL_NOTES_FILES = [
   // NEW-TAB — Tab changes the LEVEL of the current item and never creates a node the user did
   // not type. The pure reader is split out because the Markdown exporter is on the static path.
   "lib/notesListIndent.js", "lib/notesIndentLevel.js",
+  // NEW-ARROWS — while there is a caret in editable text, every global binding here is inert.
+  "lib/notesKeyScope.js",
 ];
 const SKETCH_FILES = ALL_NOTES_FILES.filter((f) => f.includes("Sketch"));
 
