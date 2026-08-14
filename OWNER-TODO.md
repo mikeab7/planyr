@@ -7,28 +7,25 @@
 
 _Last updated: 2026-08-13._
 
-## ✂️ Two calls on splitting a parcel — the tool now takes real cuts, these are the last two choices (B455360)
+## ✅ ANSWERED AND SHIPPED — both split decisions are live, nothing on your end (B455360 / B520560)
 
-Splitting is fixed. You can now cut a parcel along a line with as many bends as you like — following a
-creek, a road centreline, an easement, an old property line — and the cut no longer has to run neatly
-between two opposite sides. If the cut leaves the lot and comes back, you get all the pieces it really
-makes, not two. Acreage is preserved exactly: on your Goose Creek tract a zig-zag cut produced four
-pieces that add back up to the full 95.37 acres, and I checked that by reading the acreage tags off the
-drawing, not off the code.
+You answered both, and both are in.
 
-Two things I deliberately did **not** decide for you, because they're product calls, not engineering ones:
+**Keep every piece.** That is what it does. One thing genuinely changed: it used to quietly drop a
+scrap too small to be worth a lot and tell you it had. It doesn't any more — you get the scrap as a
+parcel, with its acreage, exactly as you said. On your Bain tract that's the difference between three
+pieces plus a small loss and five pieces with nothing lost. It still tells you when a piece is too
+small to see on screen, so you can delete it if you want to — but that's a heads-up, not a deletion.
 
-**1. When a cut makes three or more pieces, what should happen?** Right now it keeps **all of them** and
-tells you how many it made. That's the only choice that can't quietly lose you acreage, so it's the safe
-hold — but it may not be what you want. The alternatives: keep the two biggest and throw the scraps away,
-or have it stop and ask you at the moment of the cut.
+**Numbered off the original.** Cut Parcel 1 and you get Parcel 1A, 1B, 1C — on the drawing, not just
+in the list. Cut 1A again and you get 1A1 and 1A2, which is the same way your appraisal districts
+write a tract number. Past 26 pieces it carries on AA, AB — nothing ever wraps around onto a name
+already in use. If you've given a parcel your own name, the pieces extend YOUR name — "Creek Tract"
+becomes "Creek Tract A" — rather than falling back to a number.
 
-**2. How should the pieces be named?** Right now they come out **unnamed** — same as before this change,
-so nothing got worse. The options: number them off the original (Parcel 1A, 1B, 1C…), or leave the
-original name on the biggest piece and name the others after it.
-
-Answer either one in a sentence and I'll wire it. Nothing is blocked on you in the meantime — the tool
-works as it stands.
+Two things I found while wiring that up, both of which were live and neither of which you'd reported:
+the drawing was showing the bare word "Parcel" on every lot even though the numbering already existed
+underneath, and a tract with a street address gave all its pieces the identical name. Both fixed.
 
 ## 📄 One Baytown document I can't download — it's the last piece of the Baytown flood answer (B393170)
 

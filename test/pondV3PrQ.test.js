@@ -51,6 +51,10 @@ describe("O4 — every acreage says what it measures (no bare numbers on pond ma
   it("the parcel badge is labeled 'Parcel' so a big parcel acreage can't read as a pond area", () => {
     // The subject is the LABEL ("Parcel"), not which area function feeds it: NEW-2 repointed the
     // badge at `parcelNetSqft` so a promoted deed's save-and-except holes come off the number.
-    expect(src).toContain("const txt = `Parcel ${f2(parcelNetSqft(pc) / SQFT_PER_ACRE)} ac`;");
+    // B520560: the label is now the parcel's own name — "Parcel 1A 63.46 ac" — which is
+    // strictly MORE specific than the bare word, so O4's rule (never a bare acreage) holds
+    // a fortiori. The fallback to "Parcel" is what keeps it true when no name resolves.
+    expect(src).toContain('const txt = `${(parcelInfo.get(pc.id) || {}).name || "Parcel"} ${f2(parcelNetSqft(pc) / SQFT_PER_ACRE)} ac`;');
+    expect(src).toContain('|| "Parcel"');   // an unnamed lot still says what the number measures
   });
 });
