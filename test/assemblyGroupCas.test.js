@@ -238,7 +238,7 @@ describe("PARITY — both implementations, one member set", () => {
   });
 });
 
-describe("the kill switch — stage 2 ships OFF", () => {
+describe("the kill switch — ON by default since NEW-1, and instantly reversible", () => {
   const store = {};
   beforeEach(() => {
     globalThis.localStorage = {
@@ -250,19 +250,22 @@ describe("the kill switch — stage 2 ships OFF", () => {
   });
   afterEach(() => { delete globalThis.localStorage; });
 
-  it("is OFF by default", () => { expect(groupCasEnabled()).toBe(false); });
+  /* Flipped ON 2026-08-13 after 20 seeded ordinary hours came back clean — 8,042 commits, 3,880
+   * group bets, 312 refusals all genuine and all converged, 0 spurious, 0 stuck, 0 lost — on a
+   * driver mutation-proven to go red on each of the defects those hours found. */
+  it("is ON by default", () => { expect(groupCasEnabled()).toBe(true); });
 
-  it("a device can arm it without a deploy, and disarm it again", () => {
-    globalThis.localStorage.setItem(GROUP_CAS_KEY, "1");
-    expect(groupCasEnabled()).toBe(true);
+  it("⛔ ONE DEVICE can disarm it without a deploy — the written-out undo", () => {
     globalThis.localStorage.setItem(GROUP_CAS_KEY, "0");
     expect(groupCasEnabled()).toBe(false);       // an explicit OFF beats the build flag
+    globalThis.localStorage.setItem(GROUP_CAS_KEY, "1");
+    expect(groupCasEnabled()).toBe(true);
   });
 
   it("is read at CALL time — a switch you must reload to use is not a kill switch", () => {
-    expect(groupCasEnabled()).toBe(false);
-    globalThis.localStorage.setItem(GROUP_CAS_KEY, "1");
-    expect(groupCasEnabled()).toBe(true);        // same module instance, no reload
+    expect(groupCasEnabled()).toBe(true);
+    globalThis.localStorage.setItem(GROUP_CAS_KEY, "0");
+    expect(groupCasEnabled()).toBe(false);       // same module instance, no reload
   });
 });
 
@@ -351,6 +354,173 @@ describe("the engine sends a group revision for an assembly batch", () => {
     await tick();
     expect(h.calls[0].opts).toEqual({ atomic: true });
     expect(h.calls[0].opts.groups).toBeUndefined();
+  });
+});
+
+/* ⛔ NEW-1 — WHAT THE `expected` DIGEST IS A CLAIM ABOUT, and three ways it was getting that wrong.
+ *
+ * `expected` says "refuse me unless this assembly is STILL exactly this" — a statement about the
+ * SERVER's current state. The canvas holds the state we are trying to CREATE. Those coincide for a
+ * move, a resize or a delete, and diverge for exactly one ordinary gesture: re-bonding a child to a
+ * different host (indent/outdent), which is the only edit that changes `attachedTo` — the sole
+ * input to the generated `assembly_id`.
+ *
+ * All three defects below produce ONE symptom — a refusal no retry can clear — and all three were
+ * found by driving an ordinary hour rather than by reading the code (`ui-audit/session-group-cas.mjs`).
+ * Each is proven necessary: reverting any one of them turns that driver red.
+ */
+describe("⛔ NEW-1 — the bet describes the SERVER's assembly, never the canvas's", () => {
+  /** A harness whose shadow and canvas can be made to disagree about a bond, on purpose. */
+  function bondHarness() {
+    const calls = [];
+    const timers = [];
+    let clock = 1000;
+    let responder = (ops) => ({ ok: true, sentAtomic: true, applied: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) });
+    const els = [
+      { id: "h", type: "building", cx: 0, cy: 0, w: 100, h: 100 },
+      { id: "k1", type: "paving", cx: 0, cy: 90, w: 100, h: 20, attachedTo: "h" },
+      { id: "g", type: "building", cx: 900, cy: 0, w: 100, h: 100 },
+      { id: "g1", type: "paving", cx: 900, cy: 90, w: 100, h: 20, attachedTo: "g" },
+    ];
+    const sync = createElementSync({
+      siteId: "s1",
+      commit: async (ops, opts) => { calls.push({ ops, opts }); return responder(ops, opts); },
+      now: () => clock,
+      setTimer: (fn, ms) => { const id = timers.length + 1; timers.push({ fn, ms, id }); return id; },
+      clearTimer: (id) => { const i = timers.findIndex((t) => t.id === id); if (i >= 0) timers.splice(i, 1); },
+      onEvent: () => {},
+      report: () => {},
+      liveCollections: () => ({ els: cur }),
+      groupCas: () => true,
+      backoff: [10, 10, 10, 10, 10],
+    });
+    let cur = els;
+    sync.seed(els.map((e, i) => ({ kind: "el", id: e.id, data: e, rev: i + 1, z_index: i })));
+    return {
+      sync, calls, els,
+      setCanvas: (next) => { cur = next; },
+      setResponder: (r) => { responder = r; },
+      groupsOf: (i) => (calls[i].opts.groups || []).map((g) => g.assembly).sort(),
+      expectedFor: (i, a) => (calls[i].opts.groups || []).find((g) => g.assembly === a),
+    };
+  }
+
+  /* ⛔ THE HONEST BOUNDARY, asserted rather than assumed: group bets ride on the ATOMIC gate, and
+   * `batchSpansAssembly` opens it only for a batch carrying more than one member of one assembly.
+   * A LONE re-bond therefore stakes nothing at all — it is guarded by the per-row rev check exactly
+   * as it was before stage 2. That is stage 3's territory (retire the per-row expectation for
+   * bonded elements), and it is stated here so nobody reads the tests below as covering it. The
+   * same boundary bites an OUTDENT that empties its host: the batch stops spanning one assembly, so
+   * the gate closes and the gesture rides the per-row path. */
+  it("a LONE re-bond makes no group claim — stage 2's boundary, unchanged", async () => {
+    const h = bondHarness();
+    const next = h.els.map((e) => (e.id === "k1" ? { ...e, attachedTo: null, cx: 5 } : e));
+    h.setCanvas(next);
+    h.sync.reconcile({ els: next }, {});
+    h.sync.flushGesture();
+    await tick();
+    expect(h.calls[0].opts.groups).toBeUndefined();
+  });
+
+  it("a RE-BOND inside a spanning batch stakes both ends — the assembly left and the one joined", async () => {
+    const h = bondHarness();
+    // Move k1 from h to g, in a batch that also drags g's own assembly so the atomic gate opens.
+    // The bet must name BOTH `g` (where k1 is going, from the canvas) and `h` (where the server
+    // still has it, from the shadow) — naming only the first is what leaves the source assembly's
+    // membership change unguarded.
+    const next = h.els.map((e) => {
+      if (e.id === "k1") return { ...e, attachedTo: "g" };
+      if (e.id === "g" || e.id === "g1") return { ...e, cx: e.cx + 40 };
+      return e;
+    });
+    h.setCanvas(next);
+    h.sync.reconcile({ els: next }, {});
+    h.sync.flushGesture();
+    await tick();
+    expect(h.groupsOf(0)).toEqual(["g", "h"]);
+  });
+
+  it("⛔ membership comes off the SHADOW — a pending re-bond is NOT in the destination's bet", async () => {
+    const h = bondHarness();
+    // move k1 from h to g, in a batch that also drags g's assembly so the gate opens. The server
+    // still has k1 under h, so g's bet must NOT name k1 …
+    const next = h.els.map((e) => {
+      if (e.id === "k1") return { ...e, attachedTo: "g" };
+      if (e.id === "g" || e.id === "g1") return { ...e, cx: e.cx + 40 };
+      return e;
+    });
+    h.setCanvas(next);
+    h.sync.reconcile({ els: next }, {});
+    h.sync.flushGesture();
+    await tick();
+    const g = h.expectedFor(0, "g");
+    const hh = h.expectedFor(0, "h");
+    expect(g.expected).toBe("g:3,g1:4");           // the destination as the SERVER has it
+    expect(g.expected).not.toMatch(/k1/);
+    expect(hh.expected).toBe("h:1,k1:2");          // …and the source still contains it
+  });
+
+  it("a plain move is unaffected — the two views agree when no bond changes", async () => {
+    const h = bondHarness();
+    const next = h.els.map((e) => (e.id === "h" || e.attachedTo === "h" ? { ...e, cx: e.cx + 40 } : e));
+    h.setCanvas(next);
+    h.sync.reconcile({ els: next }, {});
+    h.sync.flushGesture();
+    await tick();
+    expect(h.expectedFor(0, "h").expected).toBe("h:1,k1:2");
+  });
+
+  it("⛔ a conflict teaches the assembly of EVERY member it names, not only unseen ones", async () => {
+    const h = bondHarness();
+    h.setResponder(() => ({
+      ok: true, sentAtomic: true, applied: false, results: [],
+      groupConflict: [{
+        assembly: "h", expected: "h:1,k1:2", actual: "h:1,k1:2,k9:4",
+        members: [{ id: "h", kind: "el", rev: 1 }, { id: "k1", kind: "el", rev: 9 }, { id: "k9", kind: "el", rev: 4 }],
+      }],
+    }));
+    const next = h.els.map((e) => (e.id === "h" || e.attachedTo === "h" ? { ...e, cx: e.cx + 40 } : e));
+    h.setCanvas(next);
+    h.sync.reconcile({ els: next }, {});
+    h.sync.flushGesture();
+    await tick();
+    // k1 is a member this tab ALREADY knew — its rev is adopted and its assembly recorded, so a
+    // later stale json cannot bucket it somewhere else.
+    expect(h.sync.shadowSnapshot().get("el:k1").rev).toBe(9);
+    expect(h.sync.shadowSnapshot().get("el:k9").rev).toBe(4);
+  });
+
+  it("⛔ an UNKNOWABLE bond withdraws the member rather than guessing at it", async () => {
+    const h = bondHarness();
+    /* Drive the shadow into the one state where its bond cannot be trusted. An atomic ROLLBACK
+     * adopts the server's rev while deliberately KEEPING our json as the diff baseline, so the two
+     * disagree and the entry is flagged `stale`. Here the row the server hands back shows k1 under
+     * `g` while our json still has it under `h` — so this tab holds a CURRENT rev beside a bond it
+     * has no basis for, and nothing in the reply states the assembly. */
+    h.setResponder(() => ({
+      ok: true, sentAtomic: true, applied: false,
+      results: [
+        { id: "h", status: "conflict", row: { id: "h", kind: "el", rev: 7, data: { id: "h", type: "building" }, z_index: 0 } },
+        { id: "k1", status: "conflict", row: { id: "k1", kind: "el", rev: 9, data: { id: "k1", type: "paving", attachedTo: "g" }, z_index: 1 } },
+      ],
+    }));
+    const next = h.els.map((e) => (e.id === "h" || e.attachedTo === "h" ? { ...e, cx: e.cx + 40 } : e));
+    h.setCanvas(next);
+    h.sync.reconcile({ els: next }, {});
+    h.sync.flushGesture();
+    await tick();
+    expect(h.sync.shadowSnapshot().get("el:k1").stale).toBe(true);
+
+    /* The RETRY must not count k1 as a member of ANY assembly: claiming it for `h` on the strength
+     * of a json the server has already contradicted is a bet that can be refused forever. Dropping
+     * the member degrades that group to the per-row rev guard — which still runs, and still refuses
+     * a stale row — never to no guard at all. */
+    h.setResponder((ops) => ({ ok: true, sentAtomic: true, applied: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }));
+    h.sync.flushGesture();
+    await tick();
+    const later = h.calls[h.calls.length - 1];
+    expect(later.opts.atomic).toBe(true);                                   // still all-or-nothing
+    for (const g of later.opts.groups || []) expect(g.expected).not.toMatch(/\bk1:/);
   });
 });
 

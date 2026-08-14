@@ -52,6 +52,52 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 
 ## 🔲 Open
 
+### B500576 — Group CAS: three more ways one bad bet refused every save on a building, found by a second ordinary hour — and the flag is now ON `[Site Planner / persistence]` (bug, DATA LOSS) #site-planner #sync #testing  *(owner instruction 2026-08-13: re-run the trial hour on the fixed build and flip it on if quiet, with the prefix-pair case covered rather than missed. Minted **B500576** from this branch's reserved block B500576–B500591 against `origin/main` 1da150a. DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `groupsFor`, `assemblyOf`, `groupConflict`, `assemblyDigest`, `attachedTo`, `rootIdOf`, `B1341`, `B484336`, `B447472`, `B1117`, `B1124`, `bondRemap`: **B484336** is ORDERING and **B447472** is MEMBERSHIP-BY-KIND — both are the digest disagreeing on the same member set; these three are the client claiming the WRONG SET, which no prior item covers. **B1124/bondRemap** is `attachedTo` remapping on COPY, a different path. **Net-new.**)*
+`[x]` **SHIPPED, and the build flag is flipped ON for everyone.**
+- Verify: sandbox — 20 seeded ordinary hours through the real write engine, each fix mutation-proven red when reverted, plus discriminating unit tests.
+- Origin: filed 2026-08-13 from the owner's chat instruction.
+- **⛔ THE ARGUMENT FOR DRIVING ORDINARY EDITING RATHER THAN A TARGETED REPRO, in one line: a
+  re-bond produced 865 SPURIOUS REFUSALS ON THE CLEAN BUILD — a third distinct cause the first trial
+  hour never reached, for one reason only, that the first run never performed that action shape.**
+  No amount of re-reading the code found it; adding the gesture found it in one run. A repro can only
+  ever confirm a defect someone already suspects.
+- **THE ROOT CAUSE IN PLAIN TERMS.** The expected digest was built from the CANVAS's bonding rather
+  than the SERVER's, so this tab's belief about which assembly a row belongs to can go stale while
+  its revision is current — and a refusal does not teach it otherwise. One variant is a genuine
+  **DEADLOCK**: a conflict naming an EMPTY assembly carries no members, so it teaches the client
+  nothing at all and the identical wrong claim is re-derived forever.
+- **WHAT `expected` IS A CLAIM ABOUT, which is the one idea behind all three.** It says *"refuse me unless this assembly is STILL exactly this"* — a statement about the **server's** current state. The canvas holds the state we are trying to **create**. Those coincide for a move, a resize or a delete and diverge for exactly one ordinary gesture: **re-bonding a child to a different host** (indent/outdent), the only edit that touches `attachedTo`, which is the generated `assembly_id`'s sole input.
+- **THE THREE, each proven necessary by reverting it:**
+  1. **Membership was read off the CANVAS.** A pending re-bond put the mover in its DESTINATION's expected digest while the server still had it in the SOURCE — two digests wrong in opposite directions, call refused whole, retry re-derived the identical wrong claim from the same unchanged canvas. **383 refusals, 865 spurious, 50 of 433 calls applied.** Fixed: bucket by the SHADOW's bond, and stake BOTH ends of a re-bond.
+  2. **A conflict taught the assembly of members this tab had never seen, and nothing about the ones it had.** The shadow's rev can be advanced past its own json by the monotonic guard, so a tab holds a CURRENT rev beside a STALE bond — and the refusal could not correct it. Measured: client bucketed `e107` under itself, server under `e2e-bldg-1`, same rev 5, forever. Fixed: `assemblyOf` is recorded for EVERY member a conflict names, preferred over the json, and cleared the instant anything fresher lands (our own accepted commit, or a remote row).
+  3. **A bond it could not state was guessed at.** On a `stale` entry with no server statement the bond is a guess; a bet built on one is refused forever when the server considers that assembly empty, because an empty conflict payload names no member to learn from. Fixed: the member is WITHDRAWN, degrading that group to the per-row rev guard — never to no guard. **Appeared on ONE of twenty hours (seed 14)**, which is why that seed is pinned in CI beside its unit test.
+- **THE FLIP, and the one-line undo, written out.** `groupCas.js`'s build default is now ON (absence of `VITE_GROUP_CAS` means on). **Per device:** `localStorage.setItem("planarfit:groupCas","0")` then reload — beats the build flag, no deploy. **Everyone:** `VITE_GROUP_CAS=0` in the Cloudflare Pages build env, redeploy. **The database needs no rollback** — the 4-arg overload is inert for a client that stops sending `p_groups`.
+- **THE RUN THAT JUSTIFIED IT:** 20 seeded hours · **8,042 commits · 3,880 group bets · 312 refusals, every one caused by a real concurrent edit and every one converged · 0 spurious · 0 stuck · 0 lost.** `--mutate order` and `--mutate membership` still go red on DIFFERENT assemblies.
+- **THE HOUR IS GENUINELY ORDINARY NOW, and the coverage is MEASURED.** Added the two shapes the first run lacked: **re-bond** (the indent/outdent analogue — the only action that moves an element between assemblies, and the one that found defect 1) and **non-geometric field edits** (owner / status / label). The prefix-pair traps are planted in the two characters that actually invert a token sort — a DIGIT (`b1` ⊂ `b11`) and a HYPHEN — after the first fixture used `b1x`, where `x` (0x78) sorts ABOVE `:` and does **not** invert; and one trap uses the owner's OWN live ids, `e2e-bldg-1` ⊂ `e2e-bldg-11`. The run REPORTS which traps it staked a bet on and FAILS if it missed one.
+- **⛔ THE HARNESS CONVICTED WORKING CODE TWICE MORE, both kept as comments.** It modelled `create` over a tombstone as a rev reset to 1, and `delete` against a tombstone as a conflict; `site_elements.sql` continues the rev on the first and returns idempotent `ok` on the second. Both produced confident, permanent "spurious refusals" that the real server cannot generate. When the instrument and the code disagree, the instrument is on trial.
+- **⛔ AN INSTRUMENT THAT GETS CORRECTED IS WORTH MORE THAN ONE THAT WAS NEVER QUESTIONED.** Twice in
+  this run the driver reported a confident, permanent spurious refusal that the real server **cannot
+  produce**, and both times the correct move was to put the instrument on trial rather than the app:
+  a `create` over a tombstone CONTINUES the rev (it does not reset to 1), and a `delete` against an
+  already-tombstoned row is **idempotent success**, not a conflict (`site_elements.sql`). And the LAST
+  failing seed was the oracle mis-attributing — not a defect at all. Every one of those was a step
+  toward the real finding, not away from it.
+- **⛔ A GUARD THAT A COMMENT CAN SATISFY OR BREAK IS NOT GUARDING ANYTHING.** The stage-1 assertion
+  *"no client code may reference `assembly_id`"* went red on a COMMENT explaining that very rule — so
+  it was forbidding the code from documenting its own invariant. It now strips comments and asserts
+  CODE, with the stripper itself proven non-vacuous. Same family as the panel-brevity check that
+  counted question marks in source and caught a ternary: a guard whose subject is text rather than
+  behaviour eventually measures the wrong thing.
+- **AND THE ORACLE ITSELF WAS CORRECTED, in the open:** a foreign write now marks BOTH assembly keys the element can be counted under (its host's and its own id), because a stale client bets under the latter; and "stuck" now means *kept trying and kept failing*, not *never bet on again*. Both corrections were re-proven not to hide anything — all three defects and both mutants still go red with them in place.
+- **⛔ THE BATCHING BOUNDARY, written down so the next session does not rediscover it the hard way.**
+  Group bets ride the ATOMIC gate, and `batchSpansAssembly` opens that gate only for a batch carrying
+  MORE THAN ONE member of one assembly. So a **LONE re-bond makes no group claim at all** — and so
+  does an OUTDENT that empties its host, because the batch stops spanning one assembly the moment the
+  child leaves. Both are guarded by the per-row rev check exactly as before stage 2, which is correct
+  and is stage 3's territory (retire the per-row expectation for bonded elements). It is asserted in
+  `test/assemblyGroupCas.test.js` rather than left implicit, so nobody reads the re-bond tests beside
+  it as covering the lone case.
+
 ### B487601 — Three near-identical plan names and no visible cue for which one you are editing `[Site Planner / wayfinding]` (bug) #site-planner #ui  *(found 2026-08-13, from the owner's data-loss report. Minted **B487601** from this branch's reserved block B487600–B487615 against `origin/main` 79be535. DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `plan switcher`, `plan name`, `copy`, `duplicate`, `breadcrumb`, `conceptName`, `B1415`–`B1418`, `projectName`: **B1415–B1418** own the PROJECT name's one authoritative value per group (a different axis — project vs plan); `conceptName.js` mints "Concept A/B/C" for NEW plans but not for copies. No item owns plan-level wayfinding. Net-new.)*
 `[ ]` **OPEN.**
 - Verify: sandbox — a rendered-DOM check on the switcher + header is Claude-doable logged-out.
@@ -72,6 +118,13 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 - Verify: sandbox — proven against the PRODUCTION database (`assembly_digest` returns `e6327:4,e63271:2` where the old client returned `e63271:2,e6327:4`), the shipped SQL self-test extended to 11 checks (ALL PASS), and mutation-proven red on the pre-fix build.
 - Origin: filed 2026-08-13 while collecting rollout evidence for B1341 stage 2.
 - **THE MECHANISM.** Sorting the finished token compares the separator `:` (0x3A) against the longer id's next character, and every digit (0x30–0x39) and the hyphen (0x2D) sort below it. So the two sides disagree the moment one member's id is a PREFIX of another's. Uniqueness — which the old comment cited — is not the property that makes those orders agree; PREFIX-FREEDOM is.
+- **⛔ THE CONSEQUENCE, WHICH IS THE POINT — NOT THE MECHANISM.** The naming pattern that triggers
+  this **ALREADY EXISTS IN THE OWNER'S DATA**. Had the switch gone on with one of those two ids
+  bonded into the same assembly, **every save on that building would have been refused,
+  permanently**, with no escape available to him — not a reload, not re-drawing it, not a different
+  browser. The only exit is a code fix. That is the concrete reason the careful route — collect the
+  evidence first, park the flip on a spurious refusal — was worth what it cost: it turned a silent,
+  unrecoverable data-loss bug into a one-line ordering change made before anyone was exposed to it.
 - **NOT YET BITING, and one bond away.** Across the owner's 403 client-named assemblies and 1,104 ids there are ZERO prefix pairs inside a single assembly — but there is already one on a site (`e2e-bldg-1` ⊂ `e2e-bldg-11`). Group CAS was about to be switched on for everyone.
 - **THE FIX, both sides.** Client sorts by the ID through a code-POINT comparator (`compareIds`); SQL says `order by t.id collate "C"` — byte order STATED rather than inherited, because the database default is `en_US.UTF-8` and a linguistic collation may reorder on a version bump. Applied to production 2026-08-13.
 - **THE INSTRUMENT IS THE DELIVERABLE** (DANGEROUS-MEANS-UNOBSERVABLE). `ui-audit/session-group-cas.mjs` drives an ordinary hour — moves, resizes, child edits, adds, deletes, undo/redo, saves, idle gaps, a second tab writing, realtime dropping a quarter of its rows — through the real `elementSync` against a server model EVALUATED OUT OF THE SHIPPED MIGRATION. Clean build, 20 seeds: 8,389 commits · 366 refusals · every one genuine and converged · **0 spurious, 0 stuck, 0 lost**. `--mutate order` and `--mutate membership` re-introduce this defect and B447472's; both go red on DIFFERENT assemblies, and the fixture plants both shapes or the check is vacuous. Pinned by `test/sessionGroupCas.test.js`.
@@ -3394,6 +3447,22 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 `[x]` **SHIPPED** — parks in ⏳ Verify (V273520) for the signed-in click-through.
 - Verify: live — the stale state needs a signed-in cloud session, and this sandbox's proxy answers `403 to CONNECT` for the Supabase host, so no browser here can reach it.
 - Origin: filed 2026-08-13 from the owner's chat instruction.
+- **⛔ THIS WAS PRE-EXISTING AND USER-FACING. IT IS NOT A SIDE EFFECT OF THE GROUP-CAS WORK, AND
+  THAT IS WHAT MAKES IT THE MOST VALUABLE THING IN THIS BATCH.** The silence sits on the
+  already-shipped NEW-3 rejected-op streak (`elementSync.js:768`), which has been live in the
+  product the whole time; group CAS merely adds a second door into the same state. It was FOUND
+  while arming that feature — because the owner asked for proof that a refusal is visible on the
+  running app rather than read out of the code — but it was not CAUSED by it, and it would have
+  gone on losing saves silently whether stage 2 ever shipped or not.
+- **⛔ AND IT IS THE WORST SHAPE A DEFECT TAKES IN THIS CODEBASE: NOT AN ERROR, AN ANSWER THAT IS
+  CONFIDENTLY WRONG.** A visible failure gets investigated; a green "synced" badge over a tab that
+  has stopped writing gets trusted. Same family, and the list is long enough now to be a pattern
+  rather than a coincidence: the scheduler group header reading **0d** for a real span (B463072),
+  the Layers panel showing a green **loaded** light over a map drawing nothing (B323424 — *"those
+  rows showed a green loaded dot over an empty map, which is worse than the case that was
+  reported"*), the jurisdiction label being CHOPPED and its lead re-parsed to pick a floodplain rule
+  (B367297), and `deriveZoning` asserting Texas law in Colorado (B290240). Every one of them
+  answers, and the answer is wrong. LOUD-FAILURE exists for exactly this.
 - **TWO INDEPENDENT SWALLOWS, and neither is in the sync engine.** (1) `SitePlanner.jsx`'s sync-event handler opened `if (!kind || !id) return;` — correct for every row of the B673 matrix, all of which are about one element, and fatal for the one event that is about the whole plan: `client-stale` carries neither. The toast was built, mapped, unit-tested and dropped before `pushToast`. (2) The save badge named `failed`, `syncing` and `retrying` and not `stale`, so a tab that had GIVEN UP landed on the resting case and painted green "synced".
 - **`stale` IS WORSE THAN `failed`, which is the part that was missed.** `failed` means a commit did not land and the engine is still trying; `stale` means it issues no further commit until `retryNow()` or a reload.
 - **LIVE TODAY, not a group-CAS bug.** The same silence sits on the already-shipped NEW-3 rejected-op streak (`elementSync.js:768`); group CAS merely adds a second door to it.
