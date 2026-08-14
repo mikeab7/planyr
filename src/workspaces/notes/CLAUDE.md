@@ -611,6 +611,65 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   an item has no indentable ancestor — depth was the variable that mattered and nothing had any.
   Fixture and diff harness: **diagnose-notes-outdent** under `ui-audit/`.
 - `lib/notesKeyScope.js` — the one predicate above, plus the measured two states it separates.
+  ⛔ **AND `UNGATED_KEYS` — ESCAPE IS NEVER GATED (B539653), which is a rule rather than a hole.**
+  The gate exists so a binding cannot steal a key the person typing NEEDS; a caret has no use for
+  Escape. Gating it broke the two-stage box gesture: Escape #1 backs out of editing, Escape #2
+  deselects — and **after #1 the editor still HOLDS FOCUS** (measured at every step:
+  `activeElement` is the ProseMirror div, `isContentEditable` true), so #2 was declined forever
+  and a box could not be deselected from the keyboard. ⛔ The FIRST attempt assumed the blur had
+  landed and only required focus inside the selection's own host; it changed nothing, because
+  focus never left. **Reasoning about the state twice cost two builds; probing it took one.** It
+  does not reopen B434418's "handled twice" — the mat's Escape was deleted then, so there is still
+  exactly one handler.
+- **⛔ RIGHT-CLICK IS WORD'S MENU, AND NOTHING DESTRUCTIVE SITS UNDER THE POINTER (B539651).** *"the
+  delete option shouldn't just be shown, like, anytime I click on the box… I should only be able to
+  use the keystroke to delete or a right click and then delete option. And then the right click
+  should have the normal formatting option, like it's a Word document or an email… Just copy
+  Word."* The delete × is **gone from the box**; selecting one shows the ring and the resize handle
+  and nothing else. Delete/Backspace still removes it, and `Delete this box` is last and separated
+  on the box's right-click menu. **The items are a TABLE, not markup**, which is what lets the
+  document menu and the box menu be one component — a box's menu is the document's PLUS its own
+  action, because right-clicking a box is still right-clicking inside text. ⛔ Every row cancels
+  `mousedown` or the command acts on a selection the menu already stole, and that failure is
+  SILENT. ⛔ Cut/copy go through the browser's own editing command deliberately: the async
+  Clipboard API needs a permission a menu click cannot ask for, and a refusal there is a silent
+  no-op — `execCommand` reports, so a refusal names the shortcut that always works. Harness:
+  **verify-notes-context-menu**, 26 checks, real right-clicks, judged on the stored document.
+- **⛔ AND A HANDLE THAT DID NOT DRAG IS TRANSPARENT (B539652)** — CHROME-NEVER-EATS-A-PRESS clause
+  4 in its purest form. The resize handle only EXISTS once the box is selected, so press 1 of the
+  two-stage gesture summons it and press 2, at the same point, lands on chrome that was not there
+  when the gesture began: type into box A, then B, then A again, and the markers come back in the
+  wrong boxes. **The fix is at the RESOLVER (clause 5)**: a press on the handle that did not drag
+  forwards to the box and puts the caret where it landed. A press that DID drag is a resize and is
+  untouched. It was PRE-EXISTING and proven so — the same check failed identically with the day's
+  other changes stashed out — and closing it took `verify-notes-anchor-zoom` to **40/40** for the
+  first time.
+- **⛔ THE RIGHT EDGE GROWS THE PAGE; IT DOES NOT CRUSH THE BOX (B539648).** He photographed a box
+  rendering *"literally one character wide"* against the right margin, and **named the cause as an
+  instruction of his own**: when the block used to JUMP LEFT he asked for *"if it will not fit,
+  NARROW the block to the space available."* Right about not sliding, **wrong about narrowing with
+  no floor** — `ANCHOR_MIN_WIDTH` was 32 px, about two characters, so a press near the margin left
+  a few pixels and the box became them. The floor is **160 px** now (≈20 characters, close to the
+  180 default), and past it **the page grows sideways and scrolls** — `anchorExtentX`, the
+  horizontal twin of `anchorExtent`, whose ABSENCE was the bug: vertically the sheet had always
+  stretched to hold a block past the bottom, horizontally there was no equivalent, so the only way
+  to keep a block on the sheet was to squeeze it. The resize drag is no longer capped at the page
+  edge either. ⛔ **His original acceptance test is untouched and still passes** — the LEFT EDGE is
+  never moved; raising the floor spends the PAGE's width, never the block's position. ⛔ **And the
+  room is measured from the SCROLLER, never from the editor's own width** — reading `dom.clientWidth`
+  makes a real feedback loop (fit narrows → extent widens → the wider element becomes "the room"),
+  and it SETTLED on a stable wrong number rather than oscillating, which is worse because it looks
+  correct. Instrument: **measure-notes-right-edge** under `ui-audit/`, running his own sweep.
+- `lib/notesSaveState.js` — **ONE SAVE INDICATOR, WHERE EVERY OTHER MODULE PUTS IT (B539649).** He
+  photographed two: a `SAVED` pill in the note header and a sync line in a footer under the rail,
+  while the app-wide `CloudSyncBadge` said the same thing in `AppHeader` Row-1. *"Literally, all the
+  modules should show that save icon in the exact same place."* The Site Planner, the Scheduler and
+  Doc Review had all retired their local chips for that badge; **Notes was the one module that never
+  did.** Both local surfaces are gone and this normaliser feeds the shared badge, in the same shape
+  as doc-review's `docSaveState`. ⛔ **LOUD-FAILURE survives the footer's removal** — the storage
+  line still decides the wording once, in `notesStorageLine`, and now rides the badge's `saveDetail`
+  instead of being painted twice. Measured: Notes and the Site Planner render it at the identical
+  position. **Library feeds nothing and that is right** — a file browser has no document to save.
 - `lib/notesTabKey.js` — **Tab belongs to the DOCUMENT while the caret is in it** (B1392, and
   B1392 ×2 which made it true in EVERY context rather than usually — **its header carries the
   full table of what Tab does in each one; read that before touching it**, and note that the

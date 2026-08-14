@@ -35,7 +35,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { noteExtensions, EMPTY_DOC } from "../lib/notesExtensions.js";
-import { anchorExtent, anchorPosAtSelection, fitAnchorBox, placeAnchor } from "../lib/notesAnchorNode.js";
+import { anchorExtent, anchorExtentX, anchorPosAtSelection, fitAnchorBox, placeAnchor } from "../lib/notesAnchorNode.js";
 import {
   applyMarquee, boxesInMarquee, gestureOutcome, marqueeRect, moveSelection, nudgeDelta, toggleSelection,
 } from "../lib/notesMarquee.js";
@@ -43,7 +43,7 @@ import {
   normalizeZoom, scrollTopAfterZoom, zoomForKey, zoomForWheel, zoomLabel, ZOOM_DEFAULT,
 } from "../lib/notesZoom.js";
 import { PASTE_MODES } from "../lib/notesPastePlain.js";
-import { keysBelongToTheCaret } from "../lib/notesKeyScope.js";
+import { bindingShouldDecline } from "../lib/notesKeyScope.js";
 import { DEFAULT_DENSITY, densityFor } from "../lib/notesSpacing.js";
 import {
   readNoteFiles, readNoteImages, readPage, readPageVersions, registerOpenNoteDoc,
@@ -495,7 +495,73 @@ function PasteOptions({ offer, expanded, onExpand, onPick, onDismiss }) {
  *  that the keyboard route hides (B36051). Not a dialog, closes on Escape and on an outside
  *  press, and reachable from the keyboard through the context-menu key like every other
  *  menu in this module. */
-function DocMenu({ at, onPlainPaste, onClose }) {
+/* ⛔ THE RIGHT-CLICK MENU IS WORD'S, NOT AN INVENTION (B539651, owner instruction 2026-08-14).
+ *
+ * HIS WORDS: *"the right click should have the normal formatting option, like it's a Word
+ * document or an email where I can change text, I can underline, make it the exact same format.
+ * Just copy Word."* And, in the same breath, the thing that must NOT be on screen: *"the delete
+ * option shouldn't just be shown, like, anytime I click on the box… I should only be able to use
+ * the keystroke to delete or a right click and then delete option."*
+ *
+ * ⛔ THE ITEMS ARE A TABLE, NOT MARKUP, and that is what lets the DOCUMENT menu and the BOX menu
+ * be the same component with different rows rather than two menus that drift apart. A box's menu
+ * is the document's plus its own actions — because right-clicking a box is still right-clicking
+ * inside text, and everything that applied to the words still applies.
+ *
+ * ⛔ EVERY ITEM CANCELS `mousedown`. A menu that steals the selection cannot act on it, and the
+ * failure is silent: the command runs against an empty range and appears to do nothing. This is
+ * the same rule the toolbar has had since B1370.
+ */
+
+/** One separator row. A named constant so the table below reads as a menu rather than as a list
+ *  with holes in it. */
+const SEP = { sep: true };
+
+/** The formatting rows every context gets — Word's order, which is the order his hand already
+ *  knows. Each `run` takes the editor's command chain. */
+const FORMAT_ITEMS = (editor) => {
+  const chain = () => editor.chain().focus();
+  return [
+    { id: "bold", label: "Bold", accel: "Ctrl+B", active: editor.isActive("bold"), run: () => chain().toggleBold().run() },
+    { id: "italic", label: "Italic", accel: "Ctrl+I", active: editor.isActive("italic"), run: () => chain().toggleItalic().run() },
+    { id: "underline", label: "Underline", accel: "Ctrl+U", active: editor.isActive("underline"), run: () => chain().toggleUnderline().run() },
+    { id: "strike", label: "Strikethrough", active: editor.isActive("strike"), run: () => chain().toggleStrike().run() },
+    SEP,
+    { id: "bullets", label: "Bullets", active: editor.isActive("bulletList"), run: () => chain().toggleBulletList().run() },
+    { id: "numbering", label: "Numbering", active: editor.isActive("orderedList"), run: () => chain().toggleOrderedList().run() },
+    { id: "indent", label: "Increase indent", accel: "Tab", run: () => chain().sinkListItem(editor.isActive("taskItem") ? "taskItem" : "listItem").run() || chain().indentListItem().run() },
+    { id: "outdent", label: "Decrease indent", accel: "Shift+Tab", run: () => chain().outdentListItem().run() || chain().liftListItem(editor.isActive("taskItem") ? "taskItem" : "listItem").run() },
+  ];
+};
+
+function MenuRow({ item, onClose }) {
+  if (item.sep) {
+    return <div style={{ height: 1, background: "var(--border-default)", margin: "4px 0" }} />;
+  }
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      data-testid={`note-menu-${item.id}`}
+      aria-pressed={item.active ? "true" : undefined}
+      /* ⛔ THE SELECTION SURVIVES THE PRESS, or every command here acts on nothing. */
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => { item.run(); onClose(); }}
+      style={{
+        display: "flex", alignItems: "center", gap: 9,
+        width: "100%", padding: "5px 12px", border: "none", background: "transparent",
+        color: item.danger ? "var(--danger-text)" : "var(--text-primary)",
+        font: "inherit", fontSize: 13, fontWeight: item.active ? 700 : 500,
+        textAlign: "left", cursor: "pointer",
+      }}
+    >
+      <span style={{ flex: 1 }}>{item.label}</span>
+      {item.accel ? <span style={{ color: "var(--text-tertiary)", fontWeight: 600 }}>{item.accel}</span> : null}
+    </button>
+  );
+}
+
+function DocMenu({ at, editor, onPlainPaste, onClose, onDeleteBox, onClipboardNote }) {
   const ref = useRef(null);
   /* ⛔ GATED ON `at`. Registered unconditionally, this effect put a CAPTURE-phase Escape
    * listener on the document that called preventDefault — while the menu was CLOSED. That
@@ -511,42 +577,57 @@ function DocMenu({ at, onPlainPaste, onClose }) {
     ref.current?.querySelector("button")?.focus();
     return () => { document.removeEventListener("pointerdown", down, true); document.removeEventListener("keydown", key, true); };
   }, [at, onClose]);
-  if (!at) return null;
+  if (!at || !editor || editor.isDestroyed) return null;
+
+  /* ⛔ CUT AND COPY GO THROUGH THE BROWSER'S OWN EDITING COMMAND, deliberately. The async
+   * Clipboard API needs a permission this app has no way to ask for from a menu click, and a
+   * refused permission is a SILENT no-op. `execCommand` acts on the live selection and REPORTS
+   * whether it worked, so a refusal can be said out loud (LOUD-FAILURE) rather than looking like
+   * the menu item is broken. */
+  const clip = (kind) => {
+    let ok = false;
+    try { ok = document.execCommand(kind); } catch (_) { ok = false; }
+    if (!ok) onClipboardNote?.(`Your browser would not let the menu ${kind} — Ctrl+${kind === "cut" ? "X" : "C"} always works.`);
+  };
+
+  const items = [
+    { id: "cut", label: "Cut", accel: "Ctrl+X", run: () => clip("cut") },
+    { id: "copy", label: "Copy", accel: "Ctrl+C", run: () => clip("copy") },
+    SEP,
+    ...PASTE_MODES.map((mode) => ({
+      id: mode === "text" ? "paste-plain" : `paste-${mode}`,
+      label: PASTE_MODE_META[mode].label,
+      accel: mode === "text" ? "Ctrl+Shift+V" : PASTE_MODE_META[mode].key,
+      run: () => onPlainPaste(mode),
+    })),
+    SEP,
+    ...FORMAT_ITEMS(editor),
+    { id: "link", label: editor.isActive("link") ? "Remove link" : "Link…", accel: "Ctrl+K",
+      run: () => (editor.isActive("link")
+        ? editor.chain().focus().unsetLink().run()
+        : editor.chain().focus().extendMarkRange("link").run()) },
+    /* ⛔ AND THE BOX'S OWN ACTION, WHICH IS THE ONLY PLACE DELETE LIVES NOW (besides the key).
+     * It is LAST and separated, because it is the destructive one and Word puts destructive
+     * actions where a slip cannot reach them. */
+    ...(onDeleteBox ? [SEP, { id: "delete-box", label: "Delete this box", accel: "Del", danger: true, run: onDeleteBox }] : []),
+  ];
+
   return (
     <div
       ref={ref}
       role="menu"
       data-testid="note-doc-menu"
+      data-menu-kind={onDeleteBox ? "box" : "document"}
       style={{
-        position: "fixed", left: Math.min(at.x, (typeof window !== "undefined" ? window.innerWidth : 1200) - 230),
-        top: at.y, zIndex: 60, minWidth: 214, padding: "5px 0",
+        position: "fixed", left: Math.min(at.x, (typeof window !== "undefined" ? window.innerWidth : 1200) - 240),
+        top: Math.min(at.y, (typeof window !== "undefined" ? window.innerHeight : 800) - 420),
+        zIndex: 60, minWidth: 224, padding: "5px 0", maxHeight: "82vh", overflowY: "auto",
         background: "var(--surface-raised)", border: "1px solid var(--border-default)",
         borderRadius: RADIUS.control, boxShadow: "0 14px 36px rgba(0,0,0,0.22)",
         display: "flex", flexDirection: "column",
       }}
     >
-      {PASTE_MODES.map((mode) => (
-        <button
-          key={mode}
-          type="button"
-          role="menuitem"
-          data-testid={mode === "text" ? "note-menu-paste-plain" : `note-menu-paste-${mode}`}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => onPlainPaste(mode)}
-          style={{
-            display: "flex", alignItems: "center", gap: 9,
-            width: "100%", padding: "5px 12px", border: "none", background: "transparent",
-            font: "inherit", fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)",
-            textAlign: "left", cursor: "pointer",
-          }}
-        >
-          <PasteIcon mode={mode} />
-          <span style={{ flex: 1 }}>{PASTE_MODE_META[mode].label}</span>
-          <span style={{ color: "var(--text-tertiary)", fontWeight: 600 }}>
-            {mode === "text" ? "Ctrl+Shift+V" : PASTE_MODE_META[mode].key}
-          </span>
-        </button>
-      ))}
+      {items.map((item, i) => <MenuRow key={item.sep ? `sep${i}` : item.id} item={item} onClose={onClose} />)}
     </div>
   );
 }
@@ -1205,7 +1286,7 @@ export default function NoteEditor({
        * The marquee case this binding exists for is UNAFFECTED: the press that starts a band is
        * `preventDefault`ed, so there is no caret and focus is on `<body>` — measured, not assumed.
        * See lib/notesKeyScope.js for both states and the property the guard asserts. */
-      if (keysBelongToTheCaret()) return;
+      if (bindingShouldDecline(e)) return;
       selectionKeyDown(e);
     };
     window.addEventListener("keydown", onKey);
@@ -1462,17 +1543,33 @@ export default function NoteEditor({
        * than the room left to it hangs off the sheet — under the outline panel, which paints later
        * and takes its presses. Same rule as placement: keep the left edge, spend the width. The
        * stored width is not touched, so widening the window gives it straight back. */
-      const hostWidth = dom.clientWidth;
+      /* ⛔ THE ROOM IS THE SCROLLER'S, NOT THE EDITOR'S OWN (NEW-RIGHT-EDGE). Reading
+       * `dom.clientWidth` here creates a genuine FEEDBACK LOOP once the page can grow: the fit
+       * narrows a box to the room, the extent widens `dom` to hold it, the next measure reads the
+       * WIDER dom as "the room", re-fits the box wider, and round again. It happened to settle
+       * rather than oscillate, which is worse than failing — a loop that settles at the wrong
+       * number looks correct. The SCROLLER's width is the one thing in this chain that a box
+       * cannot change, so it is the honest denominator, and the loop cannot form. */
+      const hostWidth = scrollerRef.current?.clientWidth || dom.clientWidth;
       const blocks = nodes.map((el) => {
         const x = parseFloat(el.getAttribute("data-anchor-x")) || parseFloat(el.style.left) || 0;
         const w = parseFloat(el.getAttribute("data-anchor-w")) || parseFloat(el.style.width);
         const fit = fitAnchorBox({ x, w, hostWidth });
         if (Math.round(parseFloat(el.style.width)) !== fit.w) el.style.width = `${fit.w}px`;
         if (Math.round(parseFloat(el.style.left)) !== fit.x) el.style.left = `${fit.x}px`;
-        return { y: parseFloat(el.style.top) || 0, height: el.offsetHeight };
+        return { x: fit.x, w: fit.w, y: parseFloat(el.style.top) || 0, height: el.offsetHeight };
       });
       const need = anchorExtent(blocks);
       dom.style.minHeight = need ? `max(46vh, ${need}px)` : "";
+      /* ⛔ AND THE PAGE GROWS SIDEWAYS TOO (NEW-RIGHT-EDGE). This is the line that was missing,
+       * and its absence is the whole of his *"there's a wall"*: vertically the sheet has always
+       * stretched to hold a block that runs past the bottom, horizontally it did not, so the only
+       * way to keep a block on the sheet was to crush it. Now the sheet widens and the scroller
+       * takes over — the page grows, the content does not get squeezed. `minWidth` cannot feed
+       * back into a block's own width (they are out of flow and positioned absolutely), so there
+       * is no loop here, exactly as there is none on the vertical side. */
+      const needX = anchorExtentX(blocks);
+      dom.style.minWidth = needX > hostWidth ? `${needX}px` : "";
     };
     measure();
     /* Re-measured as the text inside a block reflows, which is the half that matters: the
@@ -1610,12 +1707,6 @@ export default function NoteEditor({
     if (!r.ok) onPrintNotice?.(r.error);
   }, [editor, title, updatedAt, trail, onPrintNotice]);
 
-  const badge = status === "error"
-    ? { text: "Not saved", color: "var(--danger-text)" }
-    : status === "unsaved"
-      ? { text: "Unsaved", color: "var(--warn-text)" }
-      : { text: "Saved", color: "var(--save-badge)" };
-
   const edited = editedLabel(updatedAt);
 
   return (
@@ -1691,7 +1782,11 @@ export default function NoteEditor({
         onContextMenu={(e) => {
           if (!(e.target instanceof Element) || !e.target.closest(".ProseMirror")) return;
           e.preventDefault();
-          setDocMenu({ x: e.clientX, y: e.clientY });
+          /* ⛔ RIGHT-CLICKING A BOX IS STILL RIGHT-CLICKING INSIDE TEXT (B539651), so the box menu
+             is the document's plus the box's own action rather than a different menu. The id is
+             what tells them apart, and it comes from the DOM the press actually landed on. */
+          const box = e.target.closest(".planyr-anchor");
+          setDocMenu({ x: e.clientX, y: e.clientY, boxId: box?.getAttribute("data-anchor-id") || null });
         }}
         ref={scrollerRef}
         style={{ flex: 1, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column", position: "relative" }}
@@ -1823,15 +1918,14 @@ export default function NoteEditor({
                 style={{ flex: "0 0 auto", fontSize: 11.5, fontWeight: 600, color: "var(--text-tertiary)" }}
               >{edited}</span>
             ) : null}
-            <span
-              data-testid="note-save-badge"
-              title={scopeLabel}
-              style={{
-                flex: "0 0 auto", fontSize: 11, fontWeight: 700, letterSpacing: "0.06em",
-                textTransform: "uppercase", color: badge.color,
-                border: "1px solid var(--border-default)", borderRadius: RADIUS.pill, padding: "3px 9px",
-              }}
-            >{badge.text}</span>
+            {/* ⛔ THE SAVE INDICATOR IS NOT HERE ANY MORE (NEW-SAVE-BADGE). It used to be a pill
+                in this row, which meant a note showed "SAVED" here AND the app-wide badge said
+                "Saved on this device" in the header — two indicators, different words, one fact.
+                The Site Planner, the Scheduler and Doc Review all retired their local chips for
+                the shared `CloudSyncBadge` in AppHeader's Row-1 top-right; Notes was the one
+                module that never did. It does now, via `notesSaveState`. Do not re-add a local
+                one: the owner's instruction was "literally, all the modules should show that save
+                icon in the exact same place." */}
           </div>
 
           {/* ⛔ THE BAND IS DRAWN IN THE EDITOR'S OWN FRAME, which is the frame its coordinates
@@ -1883,7 +1977,20 @@ export default function NoteEditor({
           onClose={() => setHistoryOpen(false)}
         />
       </div>
-      <DocMenu at={docMenu} onPlainPaste={pastePlainFromClipboard} onClose={() => setDocMenu(null)} />
+      <DocMenu
+        at={docMenu}
+        editor={editor}
+        onPlainPaste={pastePlainFromClipboard}
+        onClose={() => setDocMenu(null)}
+        onClipboardNote={(m) => onPrintNotice?.(m)}
+        /* Only a box's menu carries Delete — which is the whole of "the delete option shouldn't
+           just be shown anytime I click on the box". The keystroke is unchanged. */
+        onDeleteBox={docMenu?.boxId ? () => {
+          editor.commands.removeNoteAnchors([docMenu.boxId]);
+          clearSelection();
+          editor.commands.focus();          // …so Ctrl+Z can reach it (B421489)
+        } : null}
+      />
     </div>
   );
 }

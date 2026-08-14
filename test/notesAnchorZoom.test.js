@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import {
+import { anchorExtentX,
   anchorExtent, placeAnchor, ANCHOR_EDGE_PAD, ANCHOR_MIN_WIDTH, ANCHOR_WIDTH,
 } from "../src/workspaces/notes/lib/notesAnchorNode.js";
 import {
@@ -33,12 +33,18 @@ describe("placeAnchor — a block starts where you clicked, and is NARROWED to f
     expect(placeAnchor({ x: 69, y: 99, ...box })).toEqual({ x: 69, y: 99, w: ANCHOR_WIDTH });
   });
 
-  it("⛔ HIS CASE: a click near the right edge KEEPS ITS LEFT EDGE and gives up width instead", () => {
+  /* ⛔ AMENDED (NEW-RIGHT-EDGE, owner report 2026-08-14). The LEFT EDGE assertion is the point of
+   * this case and is UNCHANGED — that is his original acceptance test and it still holds. What
+   * changed is the width: it used to be spent all the way down to whatever room was left, which
+   * near the margin is a few pixels, and he reported the result — a box rendering "literally one
+   * character wide". The block now stops at a USABLE floor and THE PAGE GROWS instead, which is
+   * what already happens vertically. So the box may now legitimately overhang the old margin. */
+  it("⛔ HIS CASE: a click near the right edge KEEPS ITS LEFT EDGE and gives up width to the FLOOR", () => {
     // x=1010 client → 729 inside the editor. The old rule answered 603 (a 126 px slide).
     const r = placeAnchor({ x: 729, y: 200, ...box });
-    expect(r.x).toBe(729);
-    expect(r.w).toBe(787 - 729 - ANCHOR_EDGE_PAD);
-    expect(r.x + r.w).toBeLessThanOrEqual(787 - ANCHOR_EDGE_PAD);   // still inside the margin
+    expect(r.x).toBe(729);                                          // his left edge, kept
+    expect(r.w).toBe(ANCHOR_MIN_WIDTH);                             // …and a column he can type in
+    expect(r.w).toBeGreaterThan(787 - 729 - ANCHOR_EDGE_PAD);       // wider than the room: the PAGE grows
   });
 
   it("…and so does a click hard against the edge, at the narrowest the block goes", () => {
@@ -234,5 +240,58 @@ describe("the screen and the paper measure an anchored block the same way", () =
   it("⛔ AND NEITHER PUTS A WIDTH FLOOR UNDER IT — that floor defeated the whole of NEW-1", () => {
     expect(screen).not.toContain("min-width");
     expect(paper).not.toContain("min-width");
+  });
+});
+
+/* ⛔ THE PAGE GROWS RIGHT INSTEAD OF CRUSHING THE BOX (NEW-RIGHT-EDGE, owner report 2026-08-14).
+ *
+ * HIS REPORT: *"there's a wall where when I go past it, it squeezes my text box down to where
+ * it's literally one character wide."* And he named the cause as his OWN earlier instruction —
+ * *"if it will not fit, NARROW the block to the space available"* — which was right about not
+ * sliding the block and wrong about narrowing with no usable floor.
+ *
+ * `anchorExtentX` is the horizontal twin of `anchorExtent`, and its absence WAS the bug:
+ * vertically the page had always grown to hold a block past the bottom; horizontally there was
+ * no equivalent, so the only way to keep a block on the sheet was to squeeze it. */
+describe("anchorExtentX — how far right the blocks reach", () => {
+  it("is the rightmost edge plus a pad", () => {
+    expect(anchorExtentX([{ x: 100, w: 180 }], { pad: 16 })).toBe(296);
+  });
+
+  it("takes the FURTHEST block, not the last one", () => {
+    expect(anchorExtentX([{ x: 900, w: 200 }, { x: 10, w: 50 }], { pad: 0 })).toBe(1100);
+  });
+
+  it("is 0 when there is nothing to hold — the page keeps its natural width", () => {
+    expect(anchorExtentX([])).toBe(0);
+    expect(anchorExtentX(null)).toBe(0);
+  });
+
+  it("assumes the default width for a block that does not state one, rather than 0", () => {
+    expect(anchorExtentX([{ x: 100 }], { pad: 0 })).toBe(100 + ANCHOR_WIDTH);
+  });
+
+  it("⛔ mirrors anchorExtent's shape — the two axes must not drift apart", () => {
+    expect(anchorExtent([{ y: 100, height: 50 }], { pad: 0 })).toBe(150);
+    expect(anchorExtentX([{ x: 100, w: 50 }], { pad: 0 })).toBe(150);
+  });
+});
+
+describe("⛔ THE FLOOR IS A USABLE COLUMN, not a sliver", () => {
+  it("is wide enough to write in — measured against the note's own text size", () => {
+    // 15px text: ~20 characters. A 32px floor was about two, which is what he photographed.
+    expect(ANCHOR_MIN_WIDTH).toBeGreaterThanOrEqual(140);
+    expect(ANCHOR_MIN_WIDTH).toBeLessThanOrEqual(ANCHOR_WIDTH);
+  });
+
+  it("⛔ a click hard against the right margin keeps its edge AND a usable width", () => {
+    const r = placeAnchor({ x: 780, y: 0, width: 787, minWidth: ANCHOR_MIN_WIDTH, preferred: ANCHOR_WIDTH });
+    expect(r.x).toBe(780);                       // his acceptance test, unchanged
+    expect(r.w).toBe(ANCHOR_MIN_WIDTH);          // and never a sliver
+  });
+
+  it("…and the page is then asked to be wide enough to hold it", () => {
+    const r = placeAnchor({ x: 780, y: 0, width: 787, minWidth: ANCHOR_MIN_WIDTH, preferred: ANCHOR_WIDTH });
+    expect(anchorExtentX([r], { pad: 0 })).toBeGreaterThan(787);
   });
 });

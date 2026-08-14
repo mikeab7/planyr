@@ -31,6 +31,7 @@ import { chromium } from "playwright";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { pacedWait } from "./lib/tabTiming.mjs";
 
+const ANCHOR_MIN_WIDTH = 160;   // lib/notesAnchorNode.js — pinned by test/notesAnchorZoom.test.js
 const BASE = process.env.BASE_URL || "http://localhost:4173";
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 
@@ -416,10 +417,17 @@ ok("⛔ TWO DIFFERENT CLICKS IN THE RIGHT QUARTER LAND IN TWO DIFFERENT PLACES",
   Math.abs(farRight.left - lessFarRight.left) > 80,
   `${Math.round(lessFarRight.left)} vs ${Math.round(farRight.left)}`);
 ok("…and the narrow one is NARROWER, which is how its left edge was kept",
-  farRight.w < lessFarRight.w, `${Math.round(farRight.w)}px vs ${Math.round(lessFarRight.w)}px`);
-ok("…and neither of them hangs off the right-hand edge of the page",
-  farRight.left + farRight.w <= f2.width && lessFarRight.left + lessFarRight.w <= f2.width,
-  `${Math.round(farRight.left + farRight.w)} / ${Math.round(lessFarRight.left + lessFarRight.w)} within ${f2.width}`);
+  farRight.w <= lessFarRight.w, `${Math.round(farRight.w)}px vs ${Math.round(lessFarRight.w)}px`);
+/* ⛔ AMENDED (B539648, owner report 2026-08-14). This used to assert that NEITHER block hangs off
+ * the right edge — which was true because a block near the margin was NARROWED to whatever room
+ * was left, and he photographed the result: "literally one character wide". The rule is now that
+ * the block stops at a usable floor and THE PAGE GROWS, so a block MAY legitimately overhang the
+ * old margin. What must still hold — and is the thing this section exists for — is that the LEFT
+ * EDGE is never moved, which the two checks above assert. So the overhang check becomes its
+ * complement: no block is ever squeezed below the floor. */
+ok("…and neither of them is CRUSHED — the page grows instead of the block shrinking",
+  farRight.w >= ANCHOR_MIN_WIDTH - 1 && lessFarRight.w >= ANCHOR_MIN_WIDTH - 1,
+  `${Math.round(farRight.w)}px / ${Math.round(lessFarRight.w)}px, floor ${ANCHOR_MIN_WIDTH}`);
 
 /* THE CRAWL. 300 characters into a fresh block, checked after every batch — his measurement
  * was a block anchored at y=380 sitting at y=343 once its text had wrapped. */

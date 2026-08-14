@@ -77,6 +77,8 @@ const ALL_NOTES_FILES = [
   "lib/notesListIndent.js", "lib/notesIndentLevel.js",
   // NEW-ARROWS — while there is a caret in editable text, every global binding here is inert.
   "lib/notesKeyScope.js",
+  // NEW-SAVE-BADGE — Notes joins the one app-wide save indicator.
+  "lib/notesSaveState.js",
 ];
 const SKETCH_FILES = ALL_NOTES_FILES.filter((f) => f.includes("Sketch"));
 
@@ -576,6 +578,12 @@ describe("LOUD-FAILURE — storage is one seam and it never fails silently", () 
    * old "not synced to the cloud yet" sentence must be gone rather than sitting beside it. */
   it("the footer says what is TRUE — a `Synced` state exists, and it is derived, never hardcoded", () => {
     const store = src("lib/notesStore.js");
+    /* ⛔ AMENDED (B539649). This used to assert that Notes' own FOOTER rendered the line. The
+     * footer is gone — it was the second of two save indicators, and no other module has one.
+     * The line itself is unchanged and still the single source of the wording; what changed is
+     * that it is READ into the shared badge's detail rather than painted in a bar of its own.
+     * So the store half below is asserted exactly as before, and the surface half now checks the
+     * badge is being fed instead. */
     const root = code("Notes.jsx");   // CODE, not prose — the comments discuss the old sentence
     expect(store).toMatch(/Saved on this device/);
     expect(store).toMatch(/Synced to your account/);
@@ -588,8 +596,13 @@ describe("LOUD-FAILURE — storage is one seam and it never fails silently", () 
     expect(store, "a failed sync must say WHY").toMatch(/sync failed: \$\{syncState\.reason\}/);
     // PANEL-BREVITY: the new line REPLACES the old sentence; it does not accumulate beside it.
     expect(root, "the pre-sync sentence must be gone, not joined").not.toMatch(/not synced to the cloud yet/);
-    expect(root, "the footer renders the store's one line, never its own wording").toContain("{storageLine.text}");
-    expect(root.match(/data-testid="notes-scope-label"/g), "there is exactly ONE storage line").toHaveLength(1);
+    expect(root, "the storage line must still reach a surface — now the shared badge's detail")
+      .toMatch(/saveDetail=\{storageLine\./);
+    /* ⛔ AMENDED (B539649): there is no longer a storage-line SURFACE in Notes at all — it was
+     * the second of two save indicators. The line still exists and is still the single source of
+     * the wording; "exactly one" is now asserted of where it GOES, which is the shared badge. */
+    expect(root.match(/data-testid="notes-scope-label"/g), "the footer bar must stay gone").toBe(null);
+    expect(root.match(/saveDetail=\{storageLine\./g), "the line reaches exactly one surface").toHaveLength(1);
   });
 
   it("the storage keys are scoped and versioned, so two accounts never read each other's notes", () => {
@@ -991,11 +1004,25 @@ describe("the project a notebook belongs to", () => {
     const node = read(NOTES, "lib", "notesAnchorNode.js");
     expect(node, "a delete, as one undoable transaction").toContain("removeNoteAnchor:");
     expect(node, "and a width — height is the words, deliberately").toContain("setNoteAnchorWidth:");
-    expect(node).toMatch(/data-testid", "note-anchor-delete"/);
+    /* ⛔ AMENDED (B539651, owner instruction 2026-08-14): the visible delete × is GONE. *"the
+     * delete option shouldn't just be shown, like, anytime I click on the box… I should only be
+     * able to use the keystroke to delete or a right click and then delete option."* The COMMAND
+     * is still asserted above — both remaining routes (the key, and the right-click item) run it
+     * — but no destructive control sits under the pointer any more, and this guard now says so in
+     * the direction that matters: it must not come back. */
+    expect(node, "no visible delete × on a box").not.toMatch(/note-anchor-delete/);
     expect(node).toMatch(/data-testid", "note-anchor-size"/);
+    const editor = read(NOTES, "components", "NoteEditor.jsx");
+    expect(editor, "delete lives on the right-click menu instead").toMatch(/note-menu-delete-box|onDeleteBox/);
     // ⛔ A press that never moved writes NOTHING — not a transaction, not an undo frame.
     expect(node, "the drag commits only if it moved").toMatch(/if \(!dragged\) return;/);
-    expect(node, "and so does the resize").toMatch(/if \(!changed\) return;/);
+    /* ⛔ AMENDED (B539652): the resize's no-move branch no longer just RETURNS — it forwards the
+     * press to the box and puts the caret in it, because a handle that only exists once the box is
+     * selected was swallowing press 2 of the two-stage gesture (CHROME-NEVER-EATS-A-PRESS clause
+     * 4). It still writes nothing, which is the property this line was guarding. */
+    expect(node, "and so does the resize").toMatch(/if \(!changed\) \{/);
+    expect(node, "…and a press that did not drag forwards to the box instead of vanishing")
+      .toMatch(/setTextSelection\(pos \+ 1\)/);
     /* ⛔ THE DRAG IS SCROLL-PROOF: it keeps the grab offset and reads the host rect FRESH on
      * every move. The old form measured a delta between two CLIENT coordinates, which mean
      * different things once the scroller moves underneath the gesture. */
@@ -1406,5 +1433,41 @@ describe("sketch mode is a schema node, and there is no second store", () => {
     // The superseded "insert an empty sketch and go type an outline" command is gone.
     expect(code("components/NoteToolbar.jsx")).not.toMatch(/insertNoteSketch/);
     expect(code("lib/notesSketchNode.js")).not.toMatch(/insertNoteSketch/);
+  });
+});
+
+/* ⛔ ONE SAVE INDICATOR, IN THE PLACE EVERY OTHER MODULE PUTS IT (B539649).
+ *
+ * His words: *"it should just mimic the Site Planning module exactly. Literally, all the modules
+ * should show that save icon in the exact same place."* Notes had TWO of its own — a pill in the
+ * note header and a sync line in a footer under the rail — while the app-wide `CloudSyncBadge`
+ * said the same thing in the header. This guard is a source sweep rather than a screenshot,
+ * because the failure mode is somebody re-adding a local one, and that is a fact about the code. */
+describe("the save indicator", () => {
+  it("⛔ Notes renders NO save chip of its own — the shared badge is the only one", () => {
+    for (const f of ["components/NoteEditor.jsx", "Notes.jsx"]) {
+      const code = src(f);
+      expect(code, `${f} still renders a local save badge`).not.toMatch(/data-testid="note-save-badge"/);
+      expect(code, `${f} still renders the footer sync line`).not.toMatch(/data-testid="notes-scope-label"/);
+    }
+  });
+
+  it("…and it FEEDS the shared badge instead, like the other three modules do", () => {
+    expect(src("Notes.jsx")).toMatch(/saveState=\{notesSaveState\(/);
+  });
+
+  it("⛔ a failed write is still LOUD — the storage line rides the badge's detail", () => {
+    expect(src("Notes.jsx")).toMatch(/saveDetail=/);
+  });
+
+  it("the normaliser never dresses a failed write as success (LOUD-FAILURE)", async () => {
+    const { notesSaveState } = await import("../src/workspaces/notes/lib/notesSaveState.js");
+    expect(notesSaveState("error")).toBe("error");
+    expect(notesSaveState("unsaved")).toBe("error");
+    expect(notesSaveState("saving")).toBe("saving");
+    expect(notesSaveState("saved", { signedIn: true })).toBe("synced");
+    expect(notesSaveState("saved")).toBe("local");
+    // Nothing open yet: say nothing rather than claim a save that never happened.
+    expect(notesSaveState("saved", { idle: true })).toBe(null);
   });
 });

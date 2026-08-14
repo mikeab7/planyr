@@ -222,11 +222,15 @@ describe("fitAnchorBox — the render-time fit (B421490)", () => {
     expect(fitAnchorBox({ x: 60, w: 200, hostWidth: 800 })).toEqual({ x: 60, w: 200 });
   });
 
-  it("spends the WIDTH and keeps the LEFT EDGE when the room runs short", () => {
+  /* ⛔ AMENDED (NEW-RIGHT-EDGE). The LEFT EDGE half is unchanged and is the guarantee that
+   * matters. The width no longer collapses into whatever room is left — that is what produced a
+   * one-character-wide box against the right margin — so a block may overhang and THE PAGE GROWS
+   * to hold it (`anchorExtentX`), exactly as it already grows downward. */
+  it("keeps the LEFT EDGE when the room runs short, and stops at the usable floor", () => {
     const fit = fitAnchorBox({ x: 340, w: 180, hostWidth: 420 });
     expect(fit.x).toBe(340);                    // the edge he chose is kept
-    expect(fit.w).toBe(420 - 340 - ANCHOR_EDGE_PAD);
-    expect(fit.x + fit.w).toBeLessThanOrEqual(420);
+    expect(fit.w).toBe(ANCHOR_MIN_WIDTH);       // a column, not a sliver
+    expect(fit.w).toBeGreaterThan(420 - 340 - ANCHOR_EDGE_PAD);   // wider than the room, on purpose
   });
 
   it("never renders narrower than the readable floor", () => {
