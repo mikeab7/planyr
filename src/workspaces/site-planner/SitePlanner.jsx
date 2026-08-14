@@ -250,7 +250,7 @@ import RowInfo from "./components/RowInfo.jsx";
 import { pondInspectorChips, POND_CHIP_DEFS, pondGroupSummary, POND_FLOOD_NOTES, POND_PURPOSE_TOOLTIP, POND_PURPOSE_DESCRIPTOR } from "./lib/pondInspectorCopy.js";
 import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
-import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, lineageConflicts } from "./lib/siteModel.js";
+import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, parcelSplitNames, lineageConflicts } from "./lib/siteModel.js";
 import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, nodeJunction, cardinalTeePoint, roadBearingDeg } from "./lib/roadGeometry.js";
 import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD, rectOutlineCutSegments } from "./lib/roadNetwork.js";
 import {
@@ -6565,8 +6565,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
          * backlog item), and copying one name onto three parcels would pre-empt it. */
         const baseSb = +settings.setback || 0;
         const inherit = { addr: pc.addr || null, acct: pc.acct || null, attrs: pc.attrs || null };
-        const made = pieces.map(({ ring, edgeSrc }) => ({
+        /* B520560 — each piece is BORN with its name (Parcel 1 → 1A / 1B / 1C), stamped rather
+         * than re-derived: B472048 deletes the parent, so there is no lineage left to walk. The
+         * DEPTH is stamped with it — it decides whether the next cut appends a letter or a digit,
+         * and without it a re-split of 1A produced 1AA, which is also the 27th sibling's name. One
+         * derivation, in siteModel, shared with the panel. */
+        const bornNames = parcelSplitNames(parcels, pc.id, pieces.length);
+        const made = pieces.map(({ ring, edgeSrc }, pi) => ({
           id: uid(), points: ring, locked: true, active: true, parentId: pc.id, ...inherit,
+          splitName: bornNames[pi] && bornNames[pi].name, splitDepth: bornNames[pi] && bornNames[pi].depth,
           setbacks: remapEdgeVector(pc.setbacks, edgeSrc, baseSb),
           roleOverrides: remapEdgeVector(pc.roleOverrides, edgeSrc, null),
           roles: remapEdgeVector(pc.roles, edgeSrc, null),
@@ -6612,8 +6619,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
          * itself is never swallowed. Every clause here is a fact about THIS cut. */
         const notes = [];
         if (made.length > 2) notes.push(`Cut made ${made.length} pieces`);
-        if (res.slivers) notes.push(`${res.slivers.count === 1 ? "one scrap" : `${res.slivers.count} scraps`} too small to be a parcel left out (${Math.round(res.slivers.area).toLocaleString()} sf)`);
+        /* B520560 — a piece too small to SEE is still a parcel and still keeps its acreage (owner
+         * rule: nothing discarded silently). It is named here only because an eight-square-foot lot
+         * on a hundred-acre plan is invisible, and he should know it is there to delete. */
+        if (res.tiny) notes.push(`${res.tiny.count === 1 ? "one piece is" : `${res.tiny.count} pieces are`} too small to see (${Math.round(res.tiny.area).toLocaleString()} sf) — kept, not dropped`);
         if (res.outlineDrift) notes.push(`this parcel's outline overlaps itself, so its stated acreage runs ${Math.round(res.outlineDrift.sqft).toLocaleString()} sf above the land it encloses`);
+        /* LOUD-FAILURE on a name clash. The lineage names cannot collide with each other, but a
+         * name the user TYPED on another parcel can duplicate one — so the check runs against the
+         * plan the split actually produced (the parent is REMOVED by B472048, not retained), and
+         * reports rather than silently renaming his parcel. */
+        const clashes = [...parcelDisplayInfo(parcels.flatMap((p) => (p.id === pc.id ? made : [p])))]
+          .filter(([, v]) => v.nameCollision);
+        if (clashes.length) notes.push(`heads up: “${clashes[0][1].name}” is now the name of ${clashes.length > 2 ? "several parcels" : "two parcels"} on this plan — rename one`);
         if (notes.length) flashWarn(`${notes.join(" — ")}.`, 9000);
         return;
       }
@@ -14983,7 +15000,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const c = f2p({ x: base.x + off.x, y: base.y + off.y });
     // PR-Q/O4 — the parcel badge is labeled "Parcel", so a large parcel acreage sitting near a pond
     // (the "15.35 ac" chip) can't be mistaken for a pond water/footprint area. No bare acreage.
-    const txt = `Parcel ${f2(parcelNetSqft(pc) / SQFT_PER_ACRE)} ac`; // NEW-2 — the badge quotes the NET acreage (save-and-except holes deducted), like every other consumer
+    /* ⛔ B520560 — THE LABEL IS THE PARCEL'S OWN NAME, not the bare word "Parcel". The lineage
+       numbering the owner asked for (a cut on Parcel 1 yields 1A / 1B / 1C) was already derived by
+       `parcelDisplayInfo` and shown in the Parcel panel — but the canvas, which is where he looks,
+       hardcoded "Parcel" for every lot, so from his seat the pieces were unnamed and identical.
+       PANEL-BREVITY: this REPLACES the word, it does not add a line — "Parcel 1A 63.46 ac". */
+    const txt = `${(parcelInfo.get(pc.id) || {}).name || "Parcel"} ${f2(parcelNetSqft(pc) / SQFT_PER_ACRE)} ac`; // NEW-2 — the badge quotes the NET acreage (save-and-except holes deducted), like every other consumer
     const fs = 12 * ls * labelK, padX = 9 * ls * labelK, padY = 5 * ls * labelK, charW = fs * 0.6;
     const boxW = txt.length * charW + padX * 2, boxH = fs + padY * 2;
     return { pc, c, txt, fs, padX, padY, boxW, boxH, box: boxOf(c.x, c.y, boxW, boxH) };

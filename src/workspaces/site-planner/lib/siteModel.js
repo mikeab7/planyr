@@ -1408,10 +1408,29 @@ function birthLetter(i) {
   do { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1; } while (n >= 0);
   return s;
 }
-// Derived, lineage-aware display info per parcel id → { tag, depth, superseded, name, parentId }.
-// Roots number among roots in array order ("Parcel 3"); a child's tag = the parent's tag + a
-// birth-order suffix, alternating letters (odd depth) / digits (even depth) — so 3 → 3A/3B and
-// 3A → 3A1/3A2. A parcel with a street address keeps the address as its name.
+/* Derived, lineage-aware display info per parcel id →
+ * { tag, depth, superseded, name, parentId, nameCollision }.
+ *
+ * Roots number among roots in array order ("Parcel 3"); a child's tag = the parent's tag + a
+ * birth-order suffix, alternating letters (odd depth) / digits (even depth) — so 3 → 3A/3B and
+ * 3A → 3A1/3A2, and past Z the letters carry spreadsheet-style (…Y, Z, AA, AB), so a birth order
+ * of any size has a distinct suffix and nothing ever wraps onto a name already in use.
+ *
+ * ⛔ B520560 — A PIECE'S NAME IS BUILT FROM ITS PARENT'S NAME, NOT FROM THE POSITIONAL TAG ALONE,
+ * AND AN INHERITED ADDRESS MAY NEVER BE IT. Two defects the owner's naming decision exposed:
+ *   1. The name was `label || addr || "Parcel <tag>"` at every depth. A split COPIES the parent's
+ *      situs `addr` onto every piece (it is an inherited attribute), and `addr` outranked the
+ *      derived name — so cutting an addressed tract in three produced THREE PARCELS DISPLAYING THE
+ *      SAME NAME, on the canvas and in the panel. An inherited address is now ignored for a CHILD;
+ *      only a name the user TYPED on that piece (`label`) still wins, at any depth.
+ *   2. A parent carrying a typed name ("Creek Tract") had children named "Parcel 3A" — the letters
+ *      restarted off the positional tag instead of extending the name he gave it. A child's name
+ *      is now `<parent's name><suffix>`, so the lineage stays readable whatever the root is called:
+ *      Creek Tract → Creek Tract A → Creek Tract A1.
+ * The separator is empty when the parent's name already ends in a digit ("Parcel 3" → "Parcel 3A")
+ * and a single space when it does not ("Creek Tract" → "Creek Tract A"); below depth 1 the parent's
+ * name ends in a suffix this function generated, so it is always empty.
+ */
 export function parcelDisplayInfo(parcels) {
   const list = arr(parcels);
   const byId = new Map(list.map((p) => [p && p.id, p]));
@@ -1437,19 +1456,94 @@ export function parcelDisplayInfo(parcels) {
     memo.set(p.id, res);
     return res;
   };
+  // Names resolve down the lineage, so a child can read the name its parent ended up with.
+  const nameMemo = new Map();
+  /* Returns { name, suffixed } — `suffixed` meaning the name ENDS in a birth suffix this function
+   * appended. That is what decides the separator, and it cannot be inferred from the text: a name
+   * ending in a letter may be a suffix ("Parcel 1A" → "Parcel 1A1") or the last word of something
+   * the user typed ("The Wooded Half" → "The Wooded Half 1"). Depth cannot answer it either, since
+   * a typed name can appear at any depth and restarts the question. */
+  const nameOf = (p, seen) => {
+    if (!p) return { name: "Parcel ?", suffixed: false };
+    if (nameMemo.has(p.id)) return nameMemo.get(p.id);
+    if (seen.has(p.id)) return { name: "Parcel ?", suffixed: false }; // cycle guard, as `compute`
+    seen.add(p.id);
+    let res;
+    if (p.label) res = { name: p.label, suffixed: false };   // a name the user TYPED always wins
+    /* ⛔ THE STAMP, and it is what keeps the lineage readable now that a SPLIT DELETES ITS PARENT
+     * (B472048, merged after B455360). A piece's name was derived by walking `parentId` to the
+     * parent's name — but that parent is now removed and tombstoned, so every piece reads as an
+     * orphan, `isRoot` answers true, and a cut on Parcel 1 would name its pieces "Parcel 1" and
+     * "Parcel 2": two roots, the lineage gone, which is the one thing the owner's decision was
+     * explicit about. So the resolved name is STAMPED on each piece at the cut (`splitName`,
+     * written only by `performSplit`) and read back here. It is a SECOND benefit as well as a
+     * repair: a stamped name never drifts, so deleting piece 1A cannot renumber 1B.
+     * The derivation below stays as the fallback for plans split before the stamp existed, whose
+     * superseded parents are still on disk as `active:false` rows. */
+    else if (p.splitName) res = { name: p.splitName, suffixed: true };   // depth comes from `splitDepth`
+    else if (isRoot(p)) res = { name: p.addr || `Parcel ${compute(p, new Set()).tag}`, suffixed: false };
+    else {
+      const base = nameOf(byId.get(p.parentId), seen);
+      const depth = compute(p, new Set()).depth;
+      const idx = Math.max(0, (kids.get(p.parentId) || []).indexOf(p.id));
+      const suffix = depth % 2 === 1 ? birthLetter(idx) : String(idx + 1);
+      const sep = base.suffixed || /[0-9]$/.test(base.name) ? "" : " ";
+      res = { name: base.name + sep + suffix, suffixed: true };
+    }
+    nameMemo.set(p.id, res);
+    return res;
+  };
   const out = new Map();
+  const nameCount = new Map();
+  for (const p of list) {
+    const n = nameOf(p, new Set()).name;
+    nameCount.set(n, (nameCount.get(n) || 0) + 1);
+  }
   for (const p of list) {
     const { tag, depth } = compute(p, new Set());
+    const name = nameOf(p, new Set()).name;
+    /* ⛔ THE DEPTH IS STAMPED TOO, and leaving it out was a real collision. Depth decides whether
+     * the NEXT cut appends a letter or a digit. With the parent deleted (B472048) a piece is an
+     * orphan, so the walked depth is 0 and re-splitting `Parcel 1A` produced `1AA` / `1AB` instead
+     * of `1A1` / `1A2` — and `1AA` is ALSO what the 27th sibling of Parcel 1 is called under the
+     * past-Z carry. Two different lots, one name, on one plan. `splitDepth` is stamped beside
+     * `splitName` at the cut and wins here; the walked value remains for legacy plans. */
+    const stampedDepth = p && p.splitName && Number.isFinite(p.splitDepth) ? p.splitDepth : depth;
     out.set(p.id, {
-      tag, depth,
+      tag, depth: stampedDepth,
       superseded: (kids.get(p.id) || []).length > 0,
-      // NEW-3 — a typed NAME wins over the situs address, which wins over the positional tag.
-      name: (p && p.label) || (p && p.addr) || `Parcel ${tag}`,
+      name,
+      suffixed: nameOf(p, new Set()).suffixed,   // does this name already end in a birth suffix?
+      /* LOUD-FAILURE: a derived name cannot collide with itself (birth order is unique among
+       * siblings and the chain is unique down the tree), but a name the USER typed can duplicate
+       * one — his own, or one a lineage happens to produce. Reported rather than silently
+       * de-duplicated: renaming a parcel he named is not this function's decision to make. */
+      nameCollision: (nameCount.get(name) || 0) > 1,
       parentId: isRoot(p) ? null : p.parentId,
     });
   }
   return out;
 }
+/* The names a split's pieces are born with — THE one place that builds them (B520560).
+ * Cutting `Parcel 1` yields `Parcel 1A / 1B / 1C`; cutting `1A` yields `1A1 / 1A2`, alternating
+ * letters and digits by depth exactly as `parcelDisplayInfo` derives them, with the spreadsheet
+ * carry past Z. The separator reads the parent's `suffixed` flag rather than its text, because a
+ * trailing letter may be a generated suffix ("Parcel 1A" → "Parcel 1A1") or the last word of a
+ * name the user typed ("The Wooded Half" → "The Wooded Half 1").
+ * `performSplit` stamps each result on its piece as `splitName` + `splitDepth`, so BOTH the name
+ * and the letter/digit alternation survive the parent being deleted. Returns
+ * `[{ name, depth }, …]`. Never duplicate this arithmetic at a call site. */
+export function parcelSplitNames(parcels, parentId, count) {
+  const info = parcelDisplayInfo(parcels);
+  const parent = info.get(parentId);
+  const base = parent ? parent.name : "Parcel ?";
+  const depth = (parent ? parent.depth : 0) + 1;
+  const sep = (parent && parent.suffixed) || /[0-9]$/.test(base) ? "" : " ";
+  const names = Array.from({ length: Math.max(0, count | 0) }, (_, i) =>
+    base + sep + (depth % 2 === 1 ? birthLetter(i) : String(i + 1)));
+  return names.map((name) => ({ name, depth }));
+}
+
 // Render-ready ordering for the Parcel panel: each root (array order) immediately followed by
 // its descendants depth-first, carrying `depth` (for indentation) + the display info — so the
 // panel shows children nested under a greyed, superseded parent.

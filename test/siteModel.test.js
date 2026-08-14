@@ -5,7 +5,7 @@ import {
   constraintsOf, setbacksOf, developableArea, parcelDrawingsOf,
   buildingNumbers, isBuilding, roadTravelWidth,
   parcelChildrenMap, parcelDescendants, parcelAncestors, lineageConflicts,
-  parcelDisplayInfo, parcelOutline,
+  parcelDisplayInfo, parcelOutline, parcelSplitNames,
 } from "../src/workspaces/site-planner/lib/siteModel.js";
 
 describe("Site Model — schema, lifecycle status, selectors", () => {
@@ -286,9 +286,150 @@ describe("Parcel split lineage (B651)", () => {
     expect(info.get("b").superseded).toBe(false);
   });
 
-  it("a street address overrides the derived Parcel-N name", () => {
+  it("a street address overrides the derived Parcel-N name ON A ROOT", () => {
     const info = parcelDisplayInfo([{ id: "p1", addr: "123 Main St", points: [] }]);
     expect(info.get("p1").name).toBe("123 Main St");
+  });
+
+  /* ⛔ B520560 — HOW A SPLIT'S PIECES ARE NAMED. Owner decision, verbatim: "number them off the
+   * original — a cut on Parcel 1 yields Parcel 1A, 1B, 1C", with the lineage staying visible.
+   * The alternating letter/digit chain (1 → 1A → 1A1) and the spreadsheet carry past Z already
+   * existed; the two defects below did not, and each is proven against the rule it replaced. */
+  describe("split-piece names (B520560)", () => {
+    const kid = (id, parentId) => ({ id, parentId, points: [] });
+
+    it("a cut on Parcel 1 yields Parcel 1A / 1B / 1C", () => {
+      const info = parcelDisplayInfo([
+        { id: "p1", points: [] }, kid("a", "p1"), kid("b", "p1"), kid("c", "p1"),
+      ]);
+      expect(info.get("p1").name).toBe("Parcel 1");
+      expect(["a", "b", "c"].map((k) => info.get(k).name)).toEqual(["Parcel 1A", "Parcel 1B", "Parcel 1C"]);
+    });
+
+    it("splitting a piece again alternates: 1A → 1A1 / 1A2, and 1A1 → 1A1A", () => {
+      const info = parcelDisplayInfo([
+        { id: "p1", points: [] }, kid("a", "p1"), kid("a1", "a"), kid("a2", "a"), kid("a1a", "a1"),
+      ]);
+      expect(info.get("a1").name).toBe("Parcel 1A1");
+      expect(info.get("a2").name).toBe("Parcel 1A2");
+      expect(info.get("a1a").name).toBe("Parcel 1A1A");
+    });
+
+    it("past Z the letters carry (…Z, AA, AB) — nothing wraps onto a name already in use", () => {
+      const parcels = [{ id: "p1", points: [] }];
+      for (let i = 0; i < 28; i++) parcels.push(kid(`k${i}`, "p1"));
+      const info = parcelDisplayInfo(parcels);
+      expect(info.get("k25").name).toBe("Parcel 1Z");
+      expect(info.get("k26").name).toBe("Parcel 1AA");
+      expect(info.get("k27").name).toBe("Parcel 1AB");
+      const names = parcels.map((p) => info.get(p.id).name);
+      expect(new Set(names).size).toBe(names.length);          // every name distinct
+      expect(names.every((n) => !info.get(parcels[names.indexOf(n)].id).nameCollision)).toBe(true);
+    });
+
+    it("DEFECT 1 (RED pre-fix): an inherited situs address must not name every piece the same", () => {
+      /* A split COPIES the parent's `addr` onto each piece, and the pre-fix rule was
+       * `label || addr || "Parcel <tag>"` at every depth — so three pieces of an addressed tract
+       * all displayed "9204 Bay Area Blvd". This is the collision the owner asked about. */
+      const parcels = [
+        { id: "p1", addr: "9204 Bay Area Blvd", points: [] },
+        { ...kid("a", "p1"), addr: "9204 Bay Area Blvd" },
+        { ...kid("b", "p1"), addr: "9204 Bay Area Blvd" },
+      ];
+      const preFix = (p) => p.label || p.addr || null;         // the rule this replaced
+      expect(preFix(parcels[1])).toBe(preFix(parcels[2]));     // …produced identical names
+      const info = parcelDisplayInfo(parcels);
+      expect(info.get("p1").name).toBe("9204 Bay Area Blvd");  // the ROOT keeps its address
+      expect(info.get("a").name).toBe("9204 Bay Area Blvd A"); // the pieces do not
+      expect(info.get("b").name).toBe("9204 Bay Area Blvd B");
+      expect(info.get("a").name).not.toBe(info.get("b").name);
+      expect(info.get("a").nameCollision).toBe(false);
+    });
+
+    it("DEFECT 2 (RED pre-fix): the letters extend the name he GAVE it, not the positional tag", () => {
+      // Pre-fix, a parent labelled "Creek Tract" had children named "Parcel 1A" — the lineage
+      // restarted off the tag and the name he typed vanished from its own pieces.
+      const parcels = [{ id: "p1", label: "Creek Tract", points: [] }, kid("a", "p1"), kid("a1", "a")];
+      const info = parcelDisplayInfo(parcels);
+      expect(info.get("a").name).toBe("Creek Tract A");   // space: the base does not end in a digit
+      expect(info.get("a1").name).toBe("Creek Tract A1"); // no space: the base ends in a suffix
+      expect(info.get("a").name).not.toMatch(/^Parcel /);
+    });
+
+    it("a name the user TYPED on a piece still wins at any depth", () => {
+      const parcels = [{ id: "p1", points: [] }, { ...kid("a", "p1"), label: "The Wooded Half" }, kid("a1", "a")];
+      const info = parcelDisplayInfo(parcels);
+      expect(info.get("a").name).toBe("The Wooded Half");
+      expect(info.get("a1").name).toBe("The Wooded Half 1"); // and the chain continues off it
+    });
+
+    /* ⛔ THE SPLIT DELETES ITS PARENT (B472048, merged after B455360), so a piece is an ORPHAN and
+     * there is no lineage left to walk. Both halves of the name must therefore be STAMPED at the
+     * cut — the name AND the depth — and the depth is the one that is easy to forget. */
+    describe("the name survives the parent being deleted", () => {
+      const RING = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }];
+      // The real sequence: name the pieces, then REMOVE the parent, exactly as performSplit does.
+      const cut = (plan, pid, n) => {
+        const born = parcelSplitNames(plan, pid, n);
+        return [...plan.filter((p) => p.id !== pid),
+          ...born.map((b, i) => ({ id: `${pid}_${i}`, parentId: pid, splitName: b.name, splitDepth: b.depth, points: RING }))];
+      };
+      const names = (plan) => plan.map((p) => parcelDisplayInfo(plan).get(p.id).name);
+
+      it("pieces keep 1A / 1B / 1C with the parent gone", () => {
+        const plan = cut([{ id: "p1", points: RING }], "p1", 3);
+        expect(names(plan).sort()).toEqual(["Parcel 1A", "Parcel 1B", "Parcel 1C"]);
+      });
+
+      it("RED without the stamped DEPTH: re-splitting 1A gives 1A1 / 1A2, never 1AA / 1AB", () => {
+        /* The defect this pins: with only the NAME stamped, the orphan's walked depth is 0, so the
+         * next cut appended a LETTER — and `1AA` is ALSO the 27th sibling of Parcel 1 under the
+         * past-Z carry. Two different lots, one name, on one plan. */
+        let plan = cut([{ id: "p1", points: RING }], "p1", 2);
+        plan = cut(plan, "p1_0", 2);
+        expect(names(plan).sort()).toEqual(["Parcel 1A1", "Parcel 1A2", "Parcel 1B"]);
+        plan = cut(plan, "p1_0_0", 2);           // and it keeps alternating
+        expect(names(plan)).toContain("Parcel 1A1A");
+      });
+
+      it("the 27th sibling and a re-split can never draw the same name", () => {
+        const wide = cut([{ id: "w", points: RING }], "w", 28);
+        const twentySeventh = parcelDisplayInfo(wide).get("w_26").name;
+        expect(twentySeventh).toBe("Parcel 1AA");
+        let deep = cut([{ id: "w", points: RING }], "w", 1);
+        deep = cut(deep, "w_0", 2);
+        expect(parcelDisplayInfo(deep).get("w_0_0").name).toBe("Parcel 1A1");
+        expect(parcelDisplayInfo(deep).get("w_0_0").name).not.toBe(twentySeventh);
+      });
+
+      it("a stamped name never equals a name already live on the plan", () => {
+        let plan = cut([{ id: "p1", points: RING }], "p1", 4);
+        for (const pid of ["p1_0", "p1_1"]) plan = cut(plan, pid, 3);
+        const all = names(plan);
+        expect(new Set(all).size).toBe(all.length);
+        expect(plan.every((p) => parcelDisplayInfo(plan).get(p.id).nameCollision === false)).toBe(true);
+      });
+
+      it("a typed name still wins over the stamp, and the chain continues off it", () => {
+        let plan = cut([{ id: "p1", points: RING }], "p1", 2);
+        plan = plan.map((p) => (p.id === "p1_0" ? { ...p, label: "The Wooded Half" } : p));
+        expect(parcelDisplayInfo(plan).get("p1_0").name).toBe("The Wooded Half");
+        plan = cut(plan, "p1_0", 2);
+        expect(names(plan)).toContain("The Wooded Half 1");
+      });
+    });
+
+    it("LOUD-FAILURE: two parcels the user named the same are flagged, never silently renamed", () => {
+      const info = parcelDisplayInfo([
+        { id: "p1", label: "Creek Tract", points: [] },
+        { id: "p2", label: "Creek Tract", points: [] },
+        { id: "p3", points: [] },
+      ]);
+      expect(info.get("p1").nameCollision).toBe(true);
+      expect(info.get("p2").nameCollision).toBe(true);
+      expect(info.get("p1").name).toBe("Creek Tract");    // reported, not rewritten
+      expect(info.get("p3").nameCollision).toBe(false);
+    });
   });
 
   it("parcelOutline nests each parcel's descendants right after it, with depth for indentation", () => {

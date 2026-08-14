@@ -341,21 +341,26 @@ describe("splitPolygonByCut — the owner's real parcels", () => {
     expect(Math.abs(cutSum(r) - polyArea(SYLVESTRI)) / polyArea(SYLVESTRI)).toBeLessThan(1e-9);
   });
 
-  it("Bain (109 ac) splits into three real pieces, and its broken outline is REPORTED not hidden", () => {
+  it("Bain (109 ac): every piece is KEPT, the tiny ones are named, and the broken outline is reported", () => {
     /* This ring runs 1,296 ft out along a zero-width prong and back, and the returning leg clips
      * the outgoing one about two tenths of an inch above its base. The quoted (shoelace) acreage
-     * therefore counts an 8 sf crumb twice. The split is still correct — but the discrepancy and
-     * the scraps it leaves are handed back to the caller, never swallowed. */
+     * therefore counts an 8 sf crumb twice.
+     * ⛔ B520560, owner rule: "Nothing may be discarded silently — if a cut produces a sliver, he
+     * gets it as a parcel rather than losing the acreage." B455360 dropped scraps under a
+     * hundred-thousandth of the parent and reported the loss; this asserts the REVERSAL. */
     const r = splitPolygonByCut(BAIN, creekCut(BAIN));
     expect(r.ok).toBe(true);
-    expect(r.pieces).toHaveLength(3);
+    expect(r.pieces).toHaveLength(5);               // 3 real pieces + the 2 crumbs, all KEPT
+    expect(r.tiny).not.toBeNull();
+    expect(r.tiny.count).toBe(2);
     expect(r.outlineDrift).not.toBeNull();
     expect(r.outlineDrift.sqft).toBeGreaterThan(0);
     expect(r.outlineDrift.sqft).toBeLessThan(polyArea(BAIN) * 1e-4);
-    expect(r.slivers).not.toBeNull();
-    expect(r.slivers.count).toBe(2);
-    // Everything the parcel is made of is accounted for: pieces + reported scraps + reported drift.
-    expect(cutSum(r) + r.slivers.area + r.outlineDrift.sqft).toBeCloseTo(polyArea(BAIN), 3);
+    // Nothing left the plan: the pieces themselves plus the reported outline drift are the parcel.
+    expect(cutSum(r) + r.outlineDrift.sqft).toBeCloseTo(polyArea(BAIN), 3);
+    // And the tiny ones are pieces, not a subtraction — their area is inside the sum above.
+    expect(r.tiny.area).toBeGreaterThan(0);
+    expect(cutSum(r)).toBeGreaterThan(polyArea(BAIN) - r.outlineDrift.sqft - 1e-6);
   });
 });
 
@@ -440,7 +445,7 @@ describe("splitPolygonByCut — randomized property check over BENT cuts", () =>
       const r = splitPolygonByCut(P, path);
       if (!r.ok) continue;
       checked++;
-      const claimed = cutSum(r) + (r.slivers ? r.slivers.area : 0);
+      const claimed = cutSum(r);   // every piece is kept, so the pieces ARE the parcel
       expect(Math.abs(claimed - whole)).toBeLessThan(whole * 1e-6 + 1e-6);
       r.pieces.forEach((p) => expect(selfIntersects(p.ring)).toBe(false));
       // membership: no point may be claimed by two pieces, and nothing outside the parent may be
