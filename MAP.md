@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-14 @ `f0213ff9` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-14 @ `3ea6f4e` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
