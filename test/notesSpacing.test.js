@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import {
+import { blockFontSize,
   BLOCK_SPACES, LINE_SPACINGS, spacingFromElement, spacingLabel, spacingStyle,
 } from "../src/workspaces/notes/lib/notesSpacing.js";
 
@@ -46,24 +46,30 @@ describe("spacingFromElement — the round trip, which is what a paste and a rel
 
   it("reads all three back", () => {
     expect(spacingFromElement(el({ lineHeight: "1.5", marginTop: "6px", marginBottom: "12px" })))
-      .toEqual({ lineHeight: 1.5, spaceBefore: 6, spaceAfter: 12 });
+      .toEqual({ lineHeight: 1.5, spaceBefore: 6, spaceAfter: 12, fontSize: null });
   });
 
   it("an absent value comes back as null, which is the attribute's default", () => {
-    expect(spacingFromElement(el({}))).toEqual({ lineHeight: null, spaceBefore: null, spaceAfter: null });
-    expect(spacingFromElement(null)).toEqual({ lineHeight: null, spaceBefore: null, spaceAfter: null });
+    expect(spacingFromElement(el({}))).toEqual({ lineHeight: null, spaceBefore: null, spaceAfter: null, fontSize: null });
+    expect(spacingFromElement(null)).toEqual({ lineHeight: null, spaceBefore: null, spaceAfter: null, fontSize: null });
   });
 
   it("⛔ SURVIVES THE ROUND TRIP — what renderHTML writes is what parseHTML reads", () => {
+    /* ⛔ `fontSize` JOINS THE ROUND TRIP (NEW-SPACING-2). A block's own size is written into the
+     * same style string, so it has to survive a reload and a paste like the other three — and if
+     * it did not, a paragraph made smaller would come back full height on the next load. */
+    const KEY = { "line-height": "lineHeight", "margin-top": "marginTop", "margin-bottom": "marginBottom", "font-size": "fontSize" };
     for (const attrs of [
-      { lineHeight: 1.15, spaceBefore: null, spaceAfter: null },
-      { lineHeight: 2, spaceBefore: 12, spaceAfter: 20 },
-      { lineHeight: null, spaceBefore: 6, spaceAfter: null },
+      { lineHeight: 1.15, spaceBefore: null, spaceAfter: null, fontSize: null },
+      { lineHeight: 2, spaceBefore: 12, spaceAfter: 20, fontSize: null },
+      { lineHeight: null, spaceBefore: 6, spaceAfter: null, fontSize: null },
+      { lineHeight: null, spaceBefore: null, spaceAfter: null, fontSize: 11 },
+      { lineHeight: 1.15, spaceBefore: 6, spaceAfter: 6, fontSize: 24 },
     ]) {
       const style = {};
       for (const rule of spacingStyle(attrs).split(";").filter(Boolean)) {
         const [k, v] = rule.split(":");
-        style[k === "line-height" ? "lineHeight" : (k === "margin-top" ? "marginTop" : "marginBottom")] = v;
+        style[KEY[k]] = v;
       }
       expect(spacingFromElement({ style })).toEqual(attrs);
     }
@@ -72,12 +78,19 @@ describe("spacingFromElement — the round trip, which is what a paste and a rel
 
 describe("the choices", () => {
   it("Single is the absence of a setting, not a number — so a note keeps its own spacing", () => {
-    expect(LINE_SPACINGS[0]).toEqual({ label: "Single", value: null });
+    expect(LINE_SPACINGS[0]).toEqual({ label: "Default", value: null });
+    expect(LINE_SPACINGS[1]).toEqual({ label: "Single", value: 1.15 });
+    // …and every named value ABOVE Single is looser than it, so the names are honest.
+    for (const s of LINE_SPACINGS.slice(2)) expect(s.value).toBeGreaterThan(1.15);
     expect(spacingStyle({ lineHeight: LINE_SPACINGS[0].value })).toBe("");
   });
 
   it("offers Word's four, in Word's order", () => {
-    expect(LINE_SPACINGS.map((s) => s.label)).toEqual(["Single", "1.15", "1.5", "Double"]);
+    /* ⛔ REBASED (NEW-SPACING-1): "Single" is an explicit 1.15 and is the TIGHTEST option, and
+       `Default` is the note's own density. It used to be the other way round — "Single" WAS the
+       default and the default measured 1.65, so the loosest setting in the list was also the one
+       every paragraph started on, and picking it changed nothing. */
+    expect(LINE_SPACINGS.map((s) => s.label)).toEqual(["Default", "Single", "1.15", "1.5", "Double"]);
   });
 
   it("space before/after are coarse on purpose — a points box is a preference panel", () => {
@@ -90,5 +103,39 @@ describe("the choices", () => {
     expect(spacingLabel(1.5)).toBe("1.5");
     expect(spacingLabel(2)).toBe("Double");
     expect(spacingLabel(1.37)).toBe("1.37");     // a value from elsewhere is shown, not hidden
+  });
+});
+
+/* ⛔ WHICH SIZE A WHOLE BLOCK SHARES (NEW-SPACING-2) — the decision that makes a smaller
+ * paragraph a shorter row. Measured cause: the size lived on an inline span while the BLOCK
+ * stayed at the default, and a block's line box can never be shorter than its own font's strut,
+ * so 11px words rendered in the 24.75px row a 15px paragraph uses. Bigger text grew the row;
+ * smaller text could not shrink it. */
+describe("blockFontSize — the size a whole block agrees on", () => {
+  it("every run at one size → that size", () => {
+    expect(blockFontSize([{ fontSize: "11px" }, { fontSize: "11px" }])).toBe(11);
+  });
+
+  it("⛔ two sizes on one line → null, so the TALLEST RUN wins by ordinary inline layout", () => {
+    expect(blockFontSize([{ fontSize: "22px" }, { fontSize: "9px" }])).toBe(null);
+  });
+
+  it("⛔ any UNSIZED run → null — the rest of the line is still at the default size", () => {
+    expect(blockFontSize([{ fontSize: "11px" }, { fontSize: null }])).toBe(null);
+    expect(blockFontSize([{ fontSize: null }])).toBe(null);
+  });
+
+  it("an empty block keeps the default", () => {
+    expect(blockFontSize([])).toBe(null);
+    expect(blockFontSize(null)).toBe(null);
+  });
+
+  it("a size equal to the default writes nothing — no attribute for a no-op", () => {
+    expect(blockFontSize([{ fontSize: "15px" }], { defaultPx: 15 })).toBe(null);
+  });
+
+  it("junk is not a size", () => {
+    expect(blockFontSize([{ fontSize: "inherit" }])).toBe(null);
+    expect(blockFontSize([{ fontSize: "-4px" }])).toBe(null);
   });
 });

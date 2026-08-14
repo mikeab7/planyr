@@ -73,7 +73,13 @@ const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.js
  * PDF-PARITY: lib/notesPrint.js mirrors this list construct for construct, on paper.
  * Add a construct here and add it there in the same commit. */
 const EDITOR_CSS = `
-.planyr-note .ProseMirror { outline: none; min-height: 46vh; color: var(--text-primary); line-height: 1.65; font-size: 15px; tab-size: 4; }
+/* ⛔ THE NOTE'S DENSITY, AND IT IS THE ONE PLACE THE NUMBER LIVES (NEW-SPACING-1/3).
+   It was a hard-coded 1.65 here — which measured as 15px text in a 24.75px line box, while
+   Word and OneNote call ~1.15 single. So the loosest setting in the spacing control's own
+   list was also its default, and picking "Single" changed nothing. The value now comes from
+   lib/notesSpacing.js through a custom property, so the editor, the Compact control and the
+   print sheet cannot drift. */
+.planyr-note .ProseMirror { outline: none; min-height: 46vh; color: var(--text-primary); line-height: var(--note-line, 1.15); font-size: 15px; tab-size: 4; }
 .planyr-note .ProseMirror > * + * { margin-top: 0.7em; }
 .planyr-note .ProseMirror p { margin: 0; }
 .planyr-note .ProseMirror h1 { font-size: 1.9em; font-weight: 700; line-height: 1.25; margin: 0; }
@@ -81,7 +87,7 @@ const EDITOR_CSS = `
 .planyr-note .ProseMirror h3 { font-size: 1.22em; font-weight: 650; margin: 0; }
 .planyr-note .ProseMirror h4 { font-size: 1.06em; font-weight: 650; margin: 0; }
 .planyr-note .ProseMirror ul, .planyr-note .ProseMirror ol { padding-left: 1.5em; margin: 0; }
-.planyr-note .ProseMirror li { margin: 0.15em 0; }
+.planyr-note .ProseMirror li { margin: var(--note-list-gap, 2px) 0; }
 .planyr-note .ProseMirror li p { margin: 0; }
 .planyr-note .ProseMirror blockquote { border-left: 3px solid var(--accent-notes); padding-left: 0.9em; color: var(--text-secondary); margin: 0; }
 .planyr-note .ProseMirror code { background: var(--surface-page); border: 1px solid var(--border-default); border-radius: 4px; padding: 0.1em 0.32em; font-family: ui-monospace, "Courier New", monospace; font-size: 0.9em; }

@@ -650,7 +650,14 @@ export default function NoteToolbar({ editor, onExport, onPrint, onAttach, onHis
       <TBSelect title="Font size" testid="nt-size" width={62}
         value={currentSize ? String(parseInt(currentSize, 10)) : null}
         options={SIZES.map((s) => ({ label: s == null ? "Size" : String(s), value: s }))}
-        onChange={(e) => (e.target.value ? chain().setFontSize(`${e.target.value}px`).run() : chain().unsetFontSize().run())} />
+        /* ⛔ THE INLINE MARK, THEN THE BLOCK (NEW-SPACING-2). Setting the size only on the runs
+         * leaves the paragraph's own strut at the default, so a whole line made smaller stayed
+         * exactly as tall — measured, 11px words in the 24.75px row a 15px paragraph uses.
+         * `syncBlockFontSize` reads the runs back and writes the size onto any block whose runs
+         * all agree, so the row scales with its text. It is one chain, so it is one undo step. */
+        onChange={(e) => (e.target.value
+          ? chain().setFontSize(`${e.target.value}px`).syncBlockFontSize().run()
+          : chain().unsetFontSize().syncBlockFontSize().run())} />
 
       {/* ⛔ SPACING SITS BESIDE SIZE, ON THE ROW (NEW-7) — for the same reason the font size
           does (B1371): a control nobody can find is one that does not exist, and "how far
