@@ -8970,6 +8970,30 @@ section is the backlog-side mirror so an item is never "done" until it's actuall
 - **Applied to the site NAME too.** `siteNameFromParcel` seeds the plan from situs → what was searched → the account id → "Untitled site", and **refuses any candidate that equals a value the record files under a mailing key**, whatever supplied it. The ladder already prevents that on every schema we have; this catches the one we have not.
 - **One ladder, four call sites.** The four copies of the loose `ADDR_RE` — `MapFinder` (the card + the plan name), `SitePlanner` (the canvas identify), `counties.detectField` (which column an address SEARCH queries) and `appraisal.APPR_FIELDS` (the "Situs address" row) — now share it, so they cannot drift or disagree about which column is the address.
 - **Verified here (sandbox).** `test/situsAddress.test.js` (15 cases) over realistic county attribute sets: the REAL Weld bag (in the service's own key order) resolves `SITUS`, and still does when the mailing column is moved to the front — the exact ordering the old resolver flipped on; the Waller shape (`SITUS_ADDR` + `MAIL_ADDR`) resolves the situs; a record with ONLY a mailing address — named or as an un-named numbered line — yields **no address rather than the mailing one**; a plainly-named `ADDRESS` column still resolves; the seeded name is the land on Weld, falls back to the searched string with no situs, and never equals a mailing value on any shape; `apprRows`' Situs row and `detectField` follow the same ladder. Existing `appraisal` / `parcelCard` / `counties` suites unchanged and green. lint 0 errors · full suite green · build green.
+- **⛔ AMENDED 2026-08-14 (B519152 audit) — SEVERITY, STATED FIRST SO IT CANNOT BE SKIM-READ UPWARD: THIS
+  IS A NAMING DEFECT. **NO MAP IS WRONG. NO COORDINATE IS WRONG. NO AERIAL SHOWS THE WRONG GROUND.**
+  The real worst case, measured rather than reasoned, is **8 plans with a slightly wrong NAME, exactly 1
+  of them confirmed wrong** — the rest read as genuine situs addresses.**
+- **WHAT THE BUG TOUCHES, precisely: the NAME ONLY.** The coordinates come from the owner picking the
+  parcel on the MAP; only the card's TITLE was resolved through the broken ladder. The two are
+  independent paths, which is why a wrong title never moved a plan. Verified read-only on both affected
+  rows: `sms7v3ua7ksy` ("2221 E LAMAR BLVD STE 790") and `smsdmqosh4sx` ("4050 CR 50 JOHNSTOWN") carry
+  the **identical** origin `40.3460 / -104.9779` and the **identical** aerial bbox
+  `-104.98235,40.34019,-104.97354,40.35174` — the same point in **Weld County, Colorado**, the correct
+  land. Arlington, TX is ≈`32.7 / -97.1`; **no coordinate in the database is near it.**
+- **EXPOSURE, established cheaply from those coordinates:** of **71** plans, **8** are named from an
+  appraisal address at all — the only ones this resolver can reach — and **1** carries the office-address
+  hallmark of a suite token (the known `STE 790` row). 58 plans carry a coordinate-derived aerial; that
+  number is listed only to close the question, since the defect cannot reach coordinates.
+- **⛔ A HYPOTHESIS THAT WAS TESTED AND IS FALSE — recorded ONLY so it is not re-derived, NOT as a
+  residual risk.** Because a `fromMap` aerial's image address is derived from the site's coordinates, it
+  is a natural inference that a wrong situs address would silently produce an aerial of the wrong ground.
+  **It does not, and could not: the two paths are independent, as measured above.** Both the owner's
+  brief and this session's first reply to him asserted the wrong-ground consequence as fact; **both were
+  inference, not evidence, and both are struck.** A wrong name is a wrong name; it was never a wrong
+  picture. **An item that overstates its own severity is how a small naming defect gets treated as a
+  data-integrity incident six months from now** — hence this block leads with the severity and not with
+  the hypothesis.
 - **Not fixed, deliberately and stated:** the site named `2221 E LAMAR BLVD STE 790` in the database keeps that name until it is renamed — this stops the next plan being misnamed, it does not rewrite a saved record's name behind the owner's back. Renaming that one plan is a one-click owner action (filed in `OWNER-TODO.md`).
 
 _(new `Verify: live` items land here after implementation.)_
