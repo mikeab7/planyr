@@ -19,7 +19,6 @@
  * — by reading the real source — the layout rule it feeds.
  */
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
