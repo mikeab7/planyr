@@ -1,7 +1,7 @@
 /* How a measurement PRESENTS its numbers (NEW-3).
  *
  * The complaint being fixed, verbatim: the area label was one run-on line —
- * "250,000 sf · 5.74 ac · 2,100′ perim" — three unrelated quantities at identical weight, with
+ * "250,000 SF · 5.74 AC · 2,100′ perim" — three unrelated quantities at identical weight, with
  * both area units competing when only one matters at any scale, an abbreviation carrying the
  * headline's emphasis, and no dominant value at all.
  */
@@ -17,8 +17,8 @@ describe("(f) one number convention, applied everywhere", () => {
     expect(fmtInt(2100.4)).toBe("2,100");
     expect(fmt2(5.7392)).toBe("5.74");
     expect(fmt2(5)).toBe("5.00");
-    expect(fmtSf(250000)).toBe("250,000 sf");
-    expect(fmtAcres(250000 / SQFT_PER_ACRE)).toBe("5.74 ac");
+    expect(fmtSf(250000)).toBe("250,000 SF");
+    expect(fmtAcres(250000 / SQFT_PER_ACRE)).toBe("5.74 AC");
   });
   it("ONE feet convention — the prime mark, never a second spelling", () => {
     expect(fmtFeet(2100)).toBe("2,100′");
@@ -40,26 +40,26 @@ describe("(f) one number convention, applied everywhere", () => {
 describe("(a)+(b) one dominant value, the headline unit chosen by magnitude", () => {
   it("below an acre it leads with square feet, with acres demoted to the detail line", () => {
     const m = measureLabelModel("area", { areaSf: 20000, perimFt: 600 });
-    expect(m.headline).toBe("20,000 sf");
-    expect(m.detail).toBe("0.46 ac · 600′ perimeter");
+    expect(m.headline).toBe("20,000 SF");
+    expect(m.detail).toBe("0.46 AC · 600′ perimeter");
   });
   it("above an acre it leads with acres, with square feet demoted", () => {
     const m = measureLabelModel("area", { areaSf: 250000, perimFt: 2100 });
-    expect(m.headline).toBe("5.74 ac");
-    expect(m.detail).toBe("250,000 sf · 2,100′ perimeter");
+    expect(m.headline).toBe("5.74 AC");
+    expect(m.detail).toBe("250,000 SF · 2,100′ perimeter");
   });
   it("the flip point is one acre exactly", () => {
-    expect(measureLabelModel("area", { areaSf: ACRE_LEAD_MIN_SF - 1 }).headline).toMatch(/sf$/);
-    expect(measureLabelModel("area", { areaSf: ACRE_LEAD_MIN_SF }).headline).toMatch(/ac$/);
+    expect(measureLabelModel("area", { areaSf: ACRE_LEAD_MIN_SF - 1 }).headline).toMatch(/SF$/);
+    expect(measureLabelModel("area", { areaSf: ACRE_LEAD_MIN_SF }).headline).toMatch(/AC$/);
   });
   it("NEVER both units at equal weight — each appears exactly once, on different lines", () => {
     const m = measureLabelModel("area", { areaSf: 250000, perimFt: 2100 });
     expect(m.headline).not.toContain("sf");
     expect(m.detail).not.toContain(" ac ");
-    expect(m.detail.startsWith("250,000 sf")).toBe(true);
+    expect(m.detail.startsWith("250,000 SF")).toBe(true);
   });
   it("a perimeter of zero simply isn't printed", () => {
-    expect(measureLabelModel("area", { areaSf: 250000, perimFt: 0 }).detail).toBe("250,000 sf");
+    expect(measureLabelModel("area", { areaSf: 250000, perimFt: 0 }).detail).toBe("250,000 SF");
   });
 });
 
@@ -85,8 +85,8 @@ describe("the user's own label rides ABOVE the headline as a name", () => {
   it("is its own line, never concatenated into the number", () => {
     const m = measureLabelModel("area", { areaSf: 250000, perimFt: 2100 }, { label: "Detention take" });
     expect(m.name).toBe("Detention take");
-    expect(m.headline).toBe("5.74 ac");
-    expect(measureChipLines(m)).toEqual(["Detention take", "5.74 ac", "250,000 sf · 2,100′ perimeter"]);
+    expect(m.headline).toBe("5.74 AC");
+    expect(measureChipLines(m)).toEqual(["Detention take", "5.74 AC", "250,000 SF · 2,100′ perimeter"]);
     expect(headlineIndex(m)).toBe(1);
   });
   it("with no label the headline is the first line", () => {
@@ -104,8 +104,8 @@ describe("the user's own label rides ABOVE the headline as a name", () => {
     const lines = measureChipLines(m);
     expect(lines).toHaveLength(3);
     expect(lines[0]).toBe(long);
-    expect(lines[1]).toBe("1,000.00 ac");
-    expect(lines[2]).toBe("43,560,000 sf · 98,000′ perimeter");
+    expect(lines[1]).toBe("1,000.00 AC");
+    expect(lines[2]).toBe("43,560,000 SF · 98,000′ perimeter");
   });
   it("the uncalibrated flag rides on the model, so the chip can carry the ⚠", () => {
     expect(measureLabelModel("area", { areaSf: 100 }, { uncalibrated: true }).warn).toBe(true);

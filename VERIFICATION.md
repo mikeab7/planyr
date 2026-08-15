@@ -113,6 +113,35 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V303184 — B548816: the measurement is a different colour from a markup, on his own signed-in plan `Blocker: auth`
+**The defect, stated so this can be closed by anyone:** a measurement drawn over a markup used to VANISH. It was not behind it — the two classes shipped the same default colour (#c2410c), so a hairline plus a 10% tint over a solid slab of the same colour left nothing to see. The measurement's default ink is now magenta.
+**What was verified here (sandbox, logged out, on his real Richfield plan data):** `ui-audit/verify-paint-order-contract.mjs` — the measurement paints `rgb(162, 28, 175)` and stands **ΔE00 42.8** from the markup family's default (bar 10). **Mutation-proven both ways:** with the old colour restored the same run exits 1 and prints "❌ CAMOUFLAGED" at ΔE00 0.0. Plus `test/familyInk.test.js` 10 green, including the pre-fix colour asserted as a REJECT.
+**Still pending on his machine, because the sandbox cannot sign in:**
+1. Open any plan. Draw a **markup rectangle** with the rectangle tool and **do not change its colour** (the default is the whole point — a markup you have recoloured never had this problem).
+2. Draw an **area measurement** over the top of it, and again leave its colour alone.
+3. **Expected: you can see the measurement.** Its outline and its number read clearly as magenta against the orange markup. (Before: it was invisible, and looked exactly as if it had gone behind.)
+4. Right-click the measurement → **Properties…** → change its line colour to something else, then reload. **Expected: your colour is kept.** The new default must never overwrite a colour you chose.
+5. **Print / export a PDF of that view. Expected: the sheet shows the same magenta measurement over the markup** — the screen and the sheet must not disagree (PDF-PARITY).
+
+### V303185 — B548818: measurement plates are sized to their text, on his own signed-in plan `Blocker: auth`
+**What was verified here (sandbox):** `test/labelWidthMeasured.test.js` 10 green — the box is sized from measured text, the widest line is the one that DRAWS widest rather than the one with the most characters, letter-spacing counts as width, and a source sweep proves all three label passes were converted rather than only the one that was reported. Full suite green.
+**Still pending on his machine:**
+1. Open a plan with an area measurement on it, at ordinary working zoom.
+2. **Expected: the dark plate behind the measurement's number now hugs the text** — noticeably less empty space left and right than before, and roughly even on both sides.
+3. Check a **parcel acreage badge** and a **building's name/area label** the same way. **Expected: both tighter too, and no text touching or overflowing its plate at any zoom.**
+4. Zoom right in and right out. **Expected: nothing clipped, nothing overlapping, at either end.**
+5. **Print / export a PDF. Expected: the plates on the sheet match the screen.**
+
+### V303186 — B548819: one name for "send it behind the plan", everywhere `Blocker: auth`
+**What was verified here (sandbox, on his real Richfield plan data):** `ui-audit/verify-paint-order-contract.mjs` — **30 of 30 ordered pairs observed, 0 failed**, read two independent ways with a disagreement check, plus two known-good arms that make the run print VACUOUS rather than a score if the instrument stops seeing them. `test/paintOrder.test.js` 18 green (the enumeration, both owner defaults asserted by name, the retired synonyms banned from the menus, the capability cells required to state both directions).
+**Still pending on his machine:**
+1. Right-click, in turn: a **markup**, a **measurement**, a **text box / callout**, and a **dropped reference drawing**. **Expected: all four offer the same words — "Send behind the plan", and once behind, "Bring in front of the plan".** (Before: three different pairs of words for the same thing.)
+2. Right-click a **building**. **Expected: it still reads "Force on top of everything"** — deliberately different words for a deliberately different move, and it must NOT have changed.
+3. Send a measurement behind the plan, then bring it back. **Expected: it lands on top of markups and callouts again** — a measurement outranks decoration, which is the default you chose.
+4. Check that a **parcel** still draws under everything except a reference you have not promoted.
+5. **Print / export a PDF. Expected: the sheet stacks everything the same way the screen does.**
+
+
 ### V302432 — B548064: "Send to Back" on a markup over a BUILDING, on his own signed-in plan `Blocker: auth`
 **⛔ THIS V IS WRITTEN THE WAY V91632 SHOULD HAVE BEEN (B548066).** It names the objects, the plan, the steps and the expected result for each step, so anyone can close it. No step depends on knowing what the owner was thinking.
 **What was verified here (sandbox, logged out, on his real Bain / "Concept - Original" plan data):** `ui-audit/verify-markup-over-building.mjs` **18/18** — a markup rectangle DRAWN WITH THE REAL TOOL over a real building, then: "Send to Back" offered rather than greyed · the markup moves behind the building (paint order read off the rendered DOM, and the browser's own hit test agreeing) · the row greys only afterwards, with the reason *"Already behind everything on the plan."* · Send Backward / Bring Forward cross the band edge and are inverses · the move survives a hard reload · and the REAL BUILT SHEET stacks it the same way (PDF-PARITY). **Mutation-proven: 12 of the 18 go red on the pre-fix build**, which reproduces his report verbatim including the greyed row. Plus `test/arrangeAcrossBands.test.js` 23 green with the pre-fix rule replayed as the mutation check; full suite green.
@@ -129,7 +158,7 @@ was never clicked" quietly ships broken.
 **What was verified here (sandbox, logged out, real Bain plan data):** the NEW-2 arms of the same harness — with the markup behind the building, a right-click over the overlap reaches the MARKUP while it is selected; deselected, an ordinary press correctly reaches the building and the building's own menu then carries **"Bring the markup back in front"** and **"Select the markup underneath"**; one click restores it. Both arms mutation-proven red on the pre-fix build. `test/markupBehindReach.test.js` 20 green.
 **Still pending on his machine:**
 1. On the same plan, send a markup behind a building (V302432 step 2).
-2. **Without clicking anywhere else**, right-click it again over the building. **Expected: the MARKUP's menu, with "Bring in front of buildings" in it** — not the building's menu.
+2. **Without clicking anywhere else**, right-click it again over the building. **Expected: the MARKUP's menu, with "Bring in front of the plan" in it** (B548819 gave that command one name across every family; it read "Bring in front of buildings" when this V was written) — not the building's menu.
 3. Now press **Esc** to deselect, and right-click the same spot. **Expected: the BUILDING's menu, and near the bottom a "Behind this" group naming the markup.**
 4. Click **"Bring the markup back in front."** **Expected: the markup is on top of the building again, in one click, without having to hunt for a corner of it that no building covers.**
 5. Send it behind again, deselect, right-click, and click **"Select the markup underneath"** instead. **Expected: the markup becomes selected and does NOT move** — it stays behind the building, and its own menu is now reachable over the overlap.

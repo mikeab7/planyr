@@ -49,8 +49,8 @@ function transcribedRule() {
 
 describe("B1105 · the volume-curve math (proved against synthetic curves)", () => {
   it("converts a watershed depth to acre-feet", () => {
-    expect(depthInToAcFt(12, 1)).toBe(1);      // 12 in over 1 ac = 1 ac-ft
-    expect(depthInToAcFt(6, 10)).toBe(5);      // 6 in over 10 ac = 5 ac-ft
+    expect(depthInToAcFt(12, 1)).toBe(1);      // 12 in over 1 AC = 1 AC-FT
+    expect(depthInToAcFt(6, 10)).toBe(5);      // 6 in over 10 AC = 5 AC-FT
     expect(depthInToAcFt(null, 10)).toBeNull();
     expect(depthInToAcFt(1, null)).toBeNull();
   });
@@ -115,8 +115,8 @@ describe("B1105 · the calculator combines WQCV and EURV without collapsing them
   it("computes the governing total from the components", () => {
     const r = computeMhfdDetention(args);
     expect(r.kind).toBe("point");
-    // WQCV: a(40)=2 × i(0.5) = 1.0 in → 1.0/12 × 40 ac = 3.3333 ac-ft
-    // EURV: B coeff 2 × i 0.5 = 1.0 in → 3.3333 ac-ft
+    // WQCV: a(40)=2 × i(0.5) = 1.0 in → 1.0/12 × 40 AC = 3.3333 AC-FT
+    // EURV: B coeff 2 × i 0.5 = 1.0 in → 3.3333 AC-FT
     const wqcv = r.components.find((c) => c.id === "wqcv");
     const eurv = r.components.find((c) => c.id === "eurv");
     expect(wqcv.acFt).toBeCloseTo(3.3333, 3);
@@ -140,7 +140,7 @@ describe("B1105 · the calculator combines WQCV and EURV without collapsing them
   });
 
   it("NEVER reports a per-acre rate for a full-spectrum volume", () => {
-    // Back-computing 6.67/40 = 0.167 ac-ft/ac would invent a criterion MHFD does not publish.
+    // Back-computing 6.67/40 = 0.167 AC-FT/ac would invent a criterion MHFD does not publish.
     expect(computeMhfdDetention(args).rateAcFtPerAc).toBeNull();
     expect(computeMhfdDetention({ ...args, drainTimeHr: null }).rateAcFtPerAc).toBeNull();
   });
@@ -473,6 +473,6 @@ describe("B1127 · the Colorado state RENDERS, and is never a spinner", () => {
     const row = stripFor(req);
     expect(row.pill).toBe("SHORT");
     expect(row.unavailable).toBeUndefined();
-    expect(row.sentence).toBe("0.0 of 30.0 ac-ft");
+    expect(row.sentence).toBe("0.0 of 30.0 AC-FT");
   });
 });

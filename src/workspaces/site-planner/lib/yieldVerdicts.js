@@ -33,7 +33,7 @@ export function fmtAcFt(v) {
 
 // The provided/required pair (A2): "0.0 of 33.8 ac-ft". Rendered ONCE per panel (G1).
 export function fmtProvidedOfRequired(provided, required) {
-  return `${fmtAcFt(provided)} of ${fmtAcFt(required)} ac-ft`;
+  return `${fmtAcFt(provided)} of ${fmtAcFt(required)} AC-FT`;
 }
 
 // Signed 1-decimal ac-ft for a delta (surplus/shortfall): a sub-0.05 residue reads "0.0" with
@@ -96,13 +96,13 @@ export function fmtMargin(margin) {
   const abs = fmtSignedAcFt(margin.absAcFt);
   if (margin.pct == null) {
     return Number.isFinite(margin.requiredAcFt) && margin.requiredAcFt > EPS
-      ? `${abs} ac-ft over a ${fmtAcFt(margin.requiredAcFt)} ac-ft requirement`
-      : `${abs} ac-ft`;
+      ? `${abs} AC-FT over a ${fmtAcFt(margin.requiredAcFt)} AC-FT requirement`
+      : `${abs} AC-FT`;
   }
   const p = Math.abs(margin.pct * 100);
   const pStr = p >= 10 ? Math.round(p) : (Math.round(p * 10) / 10).toFixed(1);
   const sign = margin.absAcFt < -EPS ? "−" : margin.absAcFt > EPS ? "+" : "";
-  return `${abs} ac-ft (${sign}${pStr}%)`;
+  return `${abs} AC-FT (${sign}${pStr}%)`;
 }
 
 const finish = (v) => ({ ...v, text: `${v.label}: ${v.sentence}` });
@@ -128,7 +128,7 @@ const pairRow = (key, label, provided, required, short, opts = {}) => {
     tone: short ? "danger" : thin ? "warn" : "good",
     // NEW-2 (B1033) — `pairText` is the bare provided/required pair, kept stable so later clauses
     // can append to `sentence` without the renderer having to unpick them back out again.
-    pair: { provided, required }, pairText: `${provStr} of ${reqStr} ac-ft`, sentence: `${provStr} of ${reqStr} ac-ft`,
+    pair: { provided, required }, pairText: `${provStr} of ${reqStr} AC-FT`, sentence: `${provStr} of ${reqStr} AC-FT`,
     margin, marginText: fmtMargin(margin), thin,
     short, action: short, sortRank: short ? 0 : thin ? 1.5 : 2,
   });
@@ -356,10 +356,10 @@ function applyReconciliation(rows, d) {
       // provided/required pair so it can WRAP. Concatenated into one nowrap headline it was
       // clipped mid-word at the panel edge ("…12.2 ac-ft counted twi").
       suffix: rec.overlapCf > 0
-        ? `${fmtAcFt(rec.overlapCf / AC_FT)} ac-ft counted twice`
+        ? `${fmtAcFt(rec.overlapCf / AC_FT)} AC-FT counted twice`
         : "duty split not declared",
       sentence: rec.overlapCf > 0
-        ? `${r.sentence} — ${fmtAcFt(rec.overlapCf / AC_FT)} ac-ft counted twice`
+        ? `${r.sentence} — ${fmtAcFt(rec.overlapCf / AC_FT)} AC-FT counted twice`
         : `${r.sentence} — duty split not declared`,
     };
     return { ...v, text: `${v.label}: ${v.sentence}` };

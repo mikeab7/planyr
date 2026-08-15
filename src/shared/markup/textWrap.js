@@ -26,10 +26,14 @@ export function heuristicCharWidth(ch, fs) {
   if (ch >= "0" && ch <= "9") return fs * 0.58;
   return fs * 0.54;
 }
-export function heuristicWidth(str, fs) {
+export function heuristicWidth(str, fs, opts = {}) {
+  const s = String(str ?? "");
   let w = 0;
-  for (const ch of String(str ?? "")) w += heuristicCharWidth(ch, fs);
-  return w;
+  for (const ch of s) w += heuristicCharWidth(ch, fs);
+  // B548818 — letter-spacing is real width. A canvas `measureText` does NOT include it (it is a
+  // CSS/SVG property, not a font metric), so both measurers add it the same way or the two
+  // disagree by a couple of percent on exactly the lines that carry it.
+  return w + (Number(opts.letterSpacing) || 0) * fs * s.length;
 }
 
 /* A real <canvas> 2D context measurer, memoized (module-singleton — text measurement is a
@@ -55,14 +59,17 @@ export function canvasWidth(str, fs, opts = {}) {
   if (typeof document === "undefined") return null;
   if (!_ctx) { const c = document.createElement("canvas"); _ctx = c.getContext("2d"); }
   if (!_ctx) return null;
-  const weight = opts.bold ? "700" : "400";
+  const weight = opts.bold ? "700" : opts.weight ? String(opts.weight) : "400";
   const style = opts.italic ? "italic" : "normal";
+  const ls = Number(opts.letterSpacing) || 0;
   const s = String(str ?? "");
-  const key = `${style}|${weight}|${fs}|${s}`;
+  const key = `${style}|${weight}|${fs}|${ls}|${s}`;
   const hit = _wCache.get(key);
   if (hit !== undefined) return hit;
   _ctx.font = `${style} ${weight} ${fs}px "Inter", system-ui, sans-serif`;
-  const w = _ctx.measureText(s).width;
+  // `measureText` reports GLYPH advance only — letter-spacing is a CSS/SVG property the canvas
+  // knows nothing about, so it is added here (B548818).
+  const w = _ctx.measureText(s).width + ls * fs * s.length;
   if (_wCache.size >= W_CACHE_MAX) _wCache.clear();
   _wCache.set(key, w);
   return w;
@@ -70,7 +77,7 @@ export function canvasWidth(str, fs, opts = {}) {
 
 /** The best measurer available: real canvas metrics in a browser, the heuristic elsewhere. */
 export function bestMeasurer(opts = {}) {
-  return (str, fs) => canvasWidth(str, fs, opts) ?? heuristicWidth(str, fs);
+  return (str, fs) => canvasWidth(str, fs, opts) ?? heuristicWidth(str, fs, opts);
 }
 
 /* Force-break ONE space-free run (a long URL, a run-on word — repro case (b)) into chunks that

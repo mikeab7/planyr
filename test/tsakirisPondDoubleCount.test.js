@@ -1,7 +1,7 @@
 /* NEW-1 / B1032 — REGRESSION, seeded from the real Tsakiris / Concept A pond.
  *
- * The owner report (2026-07-28): the Yield panel showed Detention FAIL "63.4 of 33.8 ac-ft" AND
- * Mitigation FAIL "29.6 of 0.2 ac-ft" over a SINGLE pond, with "12.2 ac-ft counted twice".
+ * The owner report (2026-07-28): the Yield panel showed Detention FAIL "63.4 of 33.8 AC-FT" AND
+ * Mitigation FAIL "29.6 of 0.2 AC-FT" over a SINGLE pond, with "12.2 AC-FT counted twice".
  *
  * Every number below is the live record, not a hand-made fixture: the ring and `det` are the
  * element as saved (site smrjdgmlinea, element e1454684splyoj), the grade is the check's
@@ -13,11 +13,11 @@
  *   • the geometry that produced the bug (usable 63.41 · below-flood void 29.65 · drawn 80.82),
  *   • that the two ledgers no longer claim the same acre-foot,
  *   • that the reconciliation is run against the storage the BERMED model actually holds (63.41),
- *     not the drawn-ring gross (80.82) — reconciling against 80.82 is what masked a 29.65 ac-ft
- *     overlap as a 12.24 ac-ft one.
+ *     not the drawn-ring gross (80.82) — reconciling against 80.82 is what masked a 29.65 AC-FT
+ *     overlap as a 12.24 AC-FT one.
  *
  * AGAINST THE PRE-FIX CODE this file fails on its central assertions: the ledger credited the full
- * 29.65 ac-ft below-flood band while the detention ledger was also counting it (claimed 93.06 vs
+ * 29.65 AC-FT below-flood band while the detention ledger was also counting it (claimed 93.06 vs
  * 63.41 that exists), and `reconcileStorage` was fed the drawn 80.82 as "physical".
  */
 import { describe, it, expect } from "vitest";
@@ -36,7 +36,7 @@ const DET = { role: "detention", depth: 16.2, slope: 3, freeboard: 1, tobElev: 1
 const GRADE_FT = 152.8603582845775;   // check record groundElevFt (3DEP grid)
 const WSE_FT = 153.1;                 // check record detSplit.wseFt (est-boundary-grade, Zone A)
 const DET_REQUIRED_ACFT = 33.8;       // panel's required detention
-const MIT_REQUIRED_CF = 6972.810732143457; // check record mitigation volumeCf (0.16 ac-ft)
+const MIT_REQUIRED_CF = 6972.810732143457; // check record mitigation volumeCf (0.16 AC-FT)
 
 const splitOf = () => usablePondVolume(RING, DET, { wseFt: WSE_FT, gradeFt: GRADE_FT, coincidentStorm: false });
 const entryOf = () => {
@@ -48,7 +48,7 @@ const entryOf = () => {
   };
 };
 
-describe("Tsakiris / Concept A — the 12.2 ac-ft double-count (NEW-1 / B1032)", () => {
+describe("Tsakiris / Concept A — the 12.2 AC-FT double-count (NEW-1 / B1032)", () => {
   it("reproduces the reported geometry exactly", () => {
     const e = entryOf();
     expect(e.drawnGrossCf / AC_FT).toBeCloseTo(80.82, 1);   // panel "holds 80.8"
@@ -56,13 +56,13 @@ describe("Tsakiris / Concept A — the 12.2 ac-ft double-count (NEW-1 / B1032)",
     expect(e.grossCf / AC_FT).toBeCloseTo(63.41, 1);        // the bermed model holds 63.4, NOT 80.8
     expect(e.bands.mitigationCandidateCf / AC_FT).toBeCloseTo(29.65, 1); // panel "29.6" provided
     expect(e.bands.aboveWseCf / AC_FT).toBeCloseTo(33.77, 1);
-    // The pond has ZERO dead storage: the 17.4 ac-ft the panel used to call "below the flood
+    // The pond has ZERO dead storage: the 17.4 AC-FT the panel used to call "below the flood
     // level" is the volume the INWARD BERM RING takes out of the drawn footprint.
     expect(e.deadCf).toBeCloseTo(0, 6);
     expect((e.drawnGrossCf - e.grossCf) / AC_FT).toBeCloseTo(17.41, 1);
   });
 
-  it("the below-flood band lands in exactly ONE ledger — 29.65 ac-ft is no longer credited twice", () => {
+  it("the below-flood band lands in exactly ONE ledger — 29.65 AC-FT is no longer credited twice", () => {
     const led = accumulatePondLedger([entryOf()], { mitigationRequiredCf: MIT_REQUIRED_CF });
     const e = entryOf();
     // Mitigation gets exactly what the requirement needs; detention keeps the rest.
@@ -70,9 +70,9 @@ describe("Tsakiris / Concept A — the 12.2 ac-ft double-count (NEW-1 / B1032)",
     expect(led.usableCf).toBeCloseTo(e.usableCf - MIT_REQUIRED_CF, 6);
     // THE INVARIANT: the two ledgers together never claim more than the pond holds.
     expect(led.usableCf + led.creditedMitCf).toBeLessThanOrEqual(e.grossCf + 1e-6);
-    // Pre-fix this sum was 93.06 ac-ft against 63.41 ac-ft of storage.
+    // Pre-fix this sum was 93.06 AC-FT against 63.41 AC-FT of storage.
     expect((led.usableCf + led.creditedMitCf) / AC_FT).toBeCloseTo(63.41, 1);
-    // Detention still clears its requirement — dedicating 0.16 ac-ft does not break it.
+    // Detention still clears its requirement — dedicating 0.16 AC-FT does not break it.
     expect(led.usableCf / AC_FT).toBeGreaterThan(DET_REQUIRED_ACFT);
   });
 

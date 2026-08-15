@@ -4,7 +4,7 @@ import {
   cleanText, parseAcres, parcelNetSqft, parcelGrossSqft, parcelExceptSqft, acreageComparison, SQFT_PER_ACRE,
 } from "../src/workspaces/site-planner/lib/parcelRecord.js";
 
-// A 43,560 sf square = exactly one acre.
+// A 43,560 SF square = exactly one acre.
 const ONE_ACRE = [{ x: 0, y: 0 }, { x: 208.7103, y: 0 }, { x: 208.7103, y: 208.7103 }, { x: 0, y: 208.7103 }];
 const sq = (x0, y0, s) => [{ x: x0, y: y0 }, { x: x0 + s, y: y0 }, { x: x0 + s, y: y0 + s }, { x: x0, y: y0 + s }];
 
@@ -45,7 +45,7 @@ describe("typed field normalization", () => {
   });
   it("reads an acreage, and refuses anything that isn't a positive number", () => {
     expect(parseAcres("12.50")).toBe(12.5);
-    expect(parseAcres("12.5 ac")).toBe(12.5);
+    expect(parseAcres("12.5 AC")).toBe(12.5);
     expect(parseAcres(12.5)).toBe(12.5);
     expect(parseAcres("0")).toBe(null);    // never 0 — that would read as "the record says zero"
     expect(parseAcres("-3")).toBe(null);

@@ -15,7 +15,7 @@ describe("offsetOutward — the berm ring", () => {
   it("grows a square by the berm width; area matches the rounded-corner hand calc", () => {
     const [ring] = offsetOutward(SQ, 30);
     expect(ring.length).toBeGreaterThan(4); // round joins add arc points
-    // Exact grown area = A + P·d + π·d² = 10000 + 400·30 + π·900 ≈ 24827 sf.
+    // Exact grown area = A + P·d + π·d² = 10000 + 400·30 + π·900 ≈ 24827 SF.
     const grown = ringsArea([ring]);
     expect(grown).toBeGreaterThan(24827 * 0.99);
     expect(grown).toBeLessThan(24827 * 1.01);

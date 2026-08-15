@@ -14,7 +14,7 @@ const OPTS = { maxCells: 12000, minCellFt: 1 };
 describe("transition wedges — the daylight fringe joins the grid (B833 a)", () => {
   it("a 1-ft pad over flat ground grows a ~perimeter × h²·ratio/2 fill fringe at 3:1", () => {
     // 100×100 pad at FFE 100 over ground 99 → edge drop 1 ft → wedge cross-section
-    // 1×3/2 = 1.5 sf → volume ≈ 400 × 1.5 = 600 cf (corners add a little).
+    // 1×3/2 = 1.5 SF → volume ≈ 400 × 1.5 = 600 cf (corners add a little).
     const s = buildProposedSurface({
       els: [{ id: "b", type: "building", ring: rect(0, 0, 100, 100) }],
       ffeFt: FFE, existAt: flat(99), opts: OPTS,

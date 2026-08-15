@@ -65,7 +65,7 @@ export function measureLabel(m, ftPerUnit, opts = {}) {
   const v = measureValue(m, ftPerUnit);
   if (v.kind === "count") return `${v.count}`;
   if (!v.calibrated) return "set scale";
-  if (v.kind === "area") return Number.isFinite(v.areaSf) ? `${f2(v.areaAc)} ac · ${f0(v.areaSf)} sf` : "—";
+  if (v.kind === "area") return Number.isFinite(v.areaSf) ? `${f2(v.areaAc)} AC · ${f0(v.areaSf)} SF` : "—";
   return Number.isFinite(v.lengthFt) ? `${f1(v.lengthFt)} ft` : "—";
 }
 

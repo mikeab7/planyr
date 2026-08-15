@@ -72,6 +72,6 @@ describe("C4 — the pond's earthen berm ring on the plan + the LAND USE legend 
   });
   it("the site-wide berm-ring area is summed for the Pond legend title (PR-D: inward ring area)", () => {
     expect(src).toContain("const pondBermRingSf = els.reduce((s, e) => {");
-    expect(src).toContain("ac berm (inside ${f2(pondArea / SQFT_PER_ACRE)} ac footprint)");
+    expect(src).toContain("AC berm (inside ${f2(pondArea / SQFT_PER_ACRE)} AC footprint)");
   });
 });

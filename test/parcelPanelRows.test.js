@@ -83,7 +83,7 @@ describe("(b) the long tail folds away", () => {
     const { primary } = parcelPanelRows(weldish(), { acres: 62.6569553 });
     expect(primary.map((r) => r.label)).toEqual(["Situs address", "Account / ID", "Acreage (measured)"]);
     expect(primary.find((r) => r.label === "Situs address").value).toBe("1234 COUNTY ROAD 17");
-    expect(primary.find((r) => r.label === "Acreage (measured)").value).toBe("62.66 ac");
+    expect(primary.find((r) => r.label === "Acreage (measured)").value).toBe("62.66 AC");
     // The owner's mailing address never reaches the situs row (the B1196 ladder, still in force).
     expect(primary.some((r) => /LAMAR/.test(r.value))).toBe(false);
   });

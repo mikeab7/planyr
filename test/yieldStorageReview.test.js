@@ -1,7 +1,7 @@
 /* Cowork Yield-panel design review (Bain / Concept A) — NEW-1 … NEW-10.
  *
  * The Bain numbers are used as REGRESSION PINS throughout: Detention 150.9 of 76.7 "OK",
- * Mitigation 98.2 of 97.7 "OK", total physical pond storage 206.3 ac-ft, ~80.34 ac, FBCDD max
+ * Mitigation 98.2 of 97.7 "OK", total physical pond storage 206.3 AC-FT, ~80.34 AC, FBCDD max
  * release 0.125 cfs/ac, pads assumed at 144.8' FFE. Pure — no browser.
  */
 import { describe, it, expect } from "vitest";
@@ -137,7 +137,7 @@ describe("NEW-1 — site reconciliation: claimed service vs storage that physica
 
 /* --------------------------------------------------------------------------------------- NEW-2 */
 describe("NEW-2 — drawdown time at the allowable release rate", () => {
-  it("reproduces the Bain worked example: 10.04 cfs, 150.9 ac-ft → 7.6 days", () => {
+  it("reproduces the Bain worked example: 10.04 cfs, 150.9 AC-FT → 7.6 days", () => {
     const rel = allowableReleaseCfs({ rateCfsPerAc: 0.125, acres: 80.34 });
     expect(rel.cfs).toBeCloseTo(10.0425, 3);
     const hrs = drawdownHours({ volumeCf: 150.9 * ACFT, releaseCfs: rel.cfs });
@@ -203,7 +203,7 @@ describe("NEW-3 — mitigation by 1-ft elevation increment, not lump sum", () =>
   });
 
   it("FAILS when a band is short even though the totals net positive — the Bain 98.2-vs-97.7 trap", () => {
-    // 10 ac-ft lost high in the column; 10.2 ac-ft created low. Totals tie (and then some); the
+    // 10 AC-FT lost high in the column; 10.2 AC-FT created low. Totals tie (and then some); the
     // elevations do not — no storage was replaced where it was taken.
     const lost = { bands: [{ loFt: 143, hiFt: 144, cf: 10 * ACFT }], totalCf: 10 * ACFT, bandFt: 1 };
     const created = { bands: [{ loFt: 138, hiFt: 139, cf: 10.2 * ACFT }], totalCf: 10.2 * ACFT, bandFt: 1, excludedBelowBottomCf: 0, unanchoredIds: [], known: true };
@@ -390,15 +390,15 @@ describe("NEW-7 — signed margin replaces the flat OK/FAIL chip", () => {
     expect(fat.band).toBe("ok");
     expect(thin.band).toBe("thin");
     expect(thin.pct).toBeCloseTo(0.00512, 4);
-    expect(fmtMargin(thin)).toBe("+0.5 ac-ft (+0.5%)");
-    expect(fmtMargin(fat)).toBe("+74.2 ac-ft (+97%)");
+    expect(fmtMargin(thin)).toBe("+0.5 AC-FT (+0.5%)");
+    expect(fmtMargin(fat)).toBe("+74.2 AC-FT (+97%)");
   });
 
   it("a shortfall bands as short and reports the signed absolute", () => {
     const m = marginFor(60, 76.7, { key: "det" });
     expect(m.band).toBe("short");
     expect(m.absAcFt).toBeCloseTo(-16.7, 6);
-    expect(fmtMargin(m)).toMatch(/^−16\.7 ac-ft \(−22%\)$/);
+    expect(fmtMargin(m)).toMatch(/^−16\.7 AC-FT \(−22%\)$/);
   });
 
   it("thresholds are configurable per check type", () => {
@@ -419,7 +419,7 @@ describe("NEW-7 — signed margin replaces the flat OK/FAIL chip", () => {
     const mit = strip.find((r) => r.key === "mit");
     expect(det_.pill).toBe("OK");
     expect(mit.pill).toBe("THIN");
-    expect(mit.marginText).toBe("+0.5 ac-ft (+0.5%)");
+    expect(mit.marginText).toBe("+0.5 AC-FT (+0.5%)");
   });
 });
 

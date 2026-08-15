@@ -151,7 +151,7 @@ describe("reshape pipeline — clip a corner end-to-end", () => {
     let el = { ...B() };
     el = { ...el, ...convertBuildingToPolygon(el) };
     expect(el.footEdit).toBe(true);
-    const areaBefore = polyArea(el.points); // 150,000 sf
+    const areaBefore = polyArea(el.points); // 150,000 SF
     expect(areaBefore).toBeCloseTo(150000, 3);
 
     // 2. grab the top-right corner (index 1, ON the top dock line) and drag it toward the middle.

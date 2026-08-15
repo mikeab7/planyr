@@ -29,7 +29,7 @@ const changed = (a, b, eps) => a != null && b != null && Math.abs(a - b) > eps;
 export function gapProposalNote({ bermFt = null, extraAcres = null } = {}) {
   const hasBerm = bermFt != null && Number.isFinite(bermFt) && bermFt > 0;
   const berm = hasBerm ? `keep the ${f1(bermFt)}-ft berm and ` : "";
-  const acres = extraAcres > 0 ? ` by about ${f2(extraAcres)} ac` : "";
+  const acres = extraAcres > 0 ? ` by about ${f2(extraAcres)} AC` : "";
   return `To close the gap: ${berm}enlarge the pond${acres}, or add a second basin.`;
 }
 
@@ -39,7 +39,7 @@ export function gapProposalNote({ bermFt = null, extraAcres = null } = {}) {
  * drainage case `controllingGradeFt` + `designWaterFt` explain WHY; for the geometry case
  * `geometricMaxFt` is the footprint's ceiling. `extraAcres` names the enlargement if estimable. */
 export function bermCapProposalNote({ binding = "geometry", bermFt = null, controllingGradeFt = null, designWaterFt = null, geometricMaxFt = null, extraAcres = null } = {}) {
-  const enlarge = extraAcres != null && extraAcres > 0 ? `enlarge the pond by about ${f2(extraAcres)} ac` : "enlarge the pond";
+  const enlarge = extraAcres != null && extraAcres > 0 ? `enlarge the pond by about ${f2(extraAcres)} AC` : "enlarge the pond";
   if (binding === "drainage") {
     const g = controllingGradeFt != null ? f1(controllingGradeFt) : "?";
     const w = designWaterFt != null ? f1(designWaterFt) : "?";
@@ -91,11 +91,11 @@ export function buildChangeSummaryRows({
       const providedNow = siteDetProvidedOtherAcFt + afterAcFt;
       note = providedNow >= siteDetReqAcFt - 0.005
         ? "requirement met"
-        : `site still short by ${f1(Math.max(0, siteDetReqAcFt - providedNow))} ac-ft`;
+        : `site still short by ${f1(Math.max(0, siteDetReqAcFt - providedNow))} AC-FT`;
     }
     // E4 (owner 2026-07-22) — ac-ft render at 1dp everywhere, matching the pond/yield cards;
     // the 2dp form ("16.97") disagreed with the status card's 1dp ("17.0") for the same number.
-    rows.push({ key: "usable", label: "Usable detention", from: `${f1(beforeAcFt)} ac-ft`, to: `${f1(afterAcFt)} ac-ft`, note });
+    rows.push({ key: "usable", label: "Usable detention", from: `${f1(beforeAcFt)} AC-FT`, to: `${f1(afterAcFt)} AC-FT`, note });
   }
 
   if (changed(before.mitCandidateCf, after.mitCandidateCf, EPS_CF)) {
@@ -105,17 +105,17 @@ export function buildChangeSummaryRows({
       const providedNow = siteMitProvidedOtherAcFt + afterAcFt;
       note = providedNow >= siteMitReqAcFt - 0.005
         ? "requirement met"
-        : `site still short by ${f1(Math.max(0, siteMitReqAcFt - providedNow))} ac-ft`;
+        : `site still short by ${f1(Math.max(0, siteMitReqAcFt - providedNow))} AC-FT`;
     }
-    rows.push({ key: "mit", label: "Mitigation credit", from: `${f1(beforeAcFt)} ac-ft`, to: `${f1(afterAcFt)} ac-ft`, note });
+    rows.push({ key: "mit", label: "Mitigation credit", from: `${f1(beforeAcFt)} AC-FT`, to: `${f1(afterAcFt)} AC-FT`, note });
   }
 
   if (changed(before.landTakeSf, after.landTakeSf, EPS_SF)) {
     rows.push({
       key: "land",
       label: "Pond land take",
-      from: `${f2(before.landTakeSf / AC_FT)} ac`,
-      to: `${f2(after.landTakeSf / AC_FT)} ac`,
+      from: `${f2(before.landTakeSf / AC_FT)} AC`,
+      to: `${f2(after.landTakeSf / AC_FT)} AC`,
       note: after.bermFillCf > 0 ? "berm ring" : null,
     });
   }

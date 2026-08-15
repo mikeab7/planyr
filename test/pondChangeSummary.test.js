@@ -22,8 +22,8 @@ describe("buildChangeSummaryRows", () => {
     expect(rim.from).toBe("at grade");
     expect(rim.to).toBe("+4.0 ft berm");
     const usable = rows.find((r) => r.key === "usable");
-    expect(usable.from).toBe("0.0 ac-ft"); // E4 — ac-ft render at 1dp everywhere
-    expect(usable.to).toBe("34.0 ac-ft");
+    expect(usable.from).toBe("0.0 AC-FT"); // E4 — ac-ft render at 1dp everywhere
+    expect(usable.to).toBe("34.0 AC-FT");
     expect(usable.note).toBe("requirement met");
   });
 
@@ -32,7 +32,7 @@ describe("buildChangeSummaryRows", () => {
     const after = { depthFt: 12, tobElevFt: 104, gradeFt: 100, usableCf: 20 * AF, mitCandidateCf: 0, landTakeSf: 5 * AF, excavationCf: 1000, bermFillCf: 500 };
     const rows = buildChangeSummaryRows({ before, after, siteDetReqAcFt: 34, siteDetProvidedOtherAcFt: 0 });
     const usable = rows.find((r) => r.key === "usable");
-    expect(usable.note).toMatch(/still short by 14\.0 ac-ft/); // E4 — 1dp
+    expect(usable.note).toMatch(/still short by 14\.0 AC-FT/); // E4 — 1dp
   });
 
   it("land-take delta names the berm ring as the reason when a berm exists", () => {
@@ -40,8 +40,8 @@ describe("buildChangeSummaryRows", () => {
     const after = { depthFt: 8, tobElevFt: 104, gradeFt: 100, usableCf: 10 * AF, mitCandidateCf: 0, landTakeSf: 5.6 * AF, excavationCf: 1000, bermFillCf: 800 };
     const rows = buildChangeSummaryRows({ before, after });
     const land = rows.find((r) => r.key === "land");
-    expect(land.from).toBe("5.00 ac");
-    expect(land.to).toBe("5.60 ac");
+    expect(land.from).toBe("5.00 AC");
+    expect(land.to).toBe("5.60 AC");
     expect(land.note).toBe("berm ring");
   });
 
@@ -72,14 +72,14 @@ describe("buildChangeSummaryRows", () => {
 // richer lib/pondSectionModel.js (`pondSectionModel`); its tests live in test/pondSectionModel.test.js.
 
 describe("gapProposalNote — v3 A5: the atomic infeasibility proposal (exact concise form)", () => {
-  it("matches the owner's exact v3 sentence: 'To close the gap: keep the {x}-ft berm and enlarge the pond by about {y} ac, or add a second basin.'", () => {
+  it("matches the owner's exact v3 sentence: 'To close the gap: keep the {x}-ft berm and enlarge the pond by about {y} AC, or add a second basin.'", () => {
     const note = gapProposalNote({ bermFt: 4, extraAcres: 2.5 });
-    expect(note).toBe("To close the gap: keep the 4.0-ft berm and enlarge the pond by about 2.50 ac, or add a second basin.");
+    expect(note).toBe("To close the gap: keep the 4.0-ft berm and enlarge the pond by about 2.50 AC, or add a second basin.");
   });
 
   it("no berm (a floor cap, e.g. mitigation) drops the berm clause", () => {
     const note = gapProposalNote({ bermFt: null, extraAcres: 0.3 });
-    expect(note).toBe("To close the gap: enlarge the pond by about 0.30 ac, or add a second basin.");
+    expect(note).toBe("To close the gap: enlarge the pond by about 0.30 AC, or add a second basin.");
   });
 
   it("no extraAcres estimate drops the acreage rather than fabricating one", () => {
@@ -102,12 +102,12 @@ describe("gapProposalNote — v3 A5: the atomic infeasibility proposal (exact co
 describe("bermCapProposalNote — v3 D5: the computed berm cap names the BINDING constraint", () => {
   it("drainage-bound: names the controlling grade + design water and the ways to close the rest", () => {
     const note = bermCapProposalNote({ binding: "drainage", bermFt: 3.2, controllingGradeFt: 101.4, designWaterFt: 100.9, extraAcres: 2.5 });
-    expect(note).toBe("Berm capped at 3.2 ft: above that, the site can no longer drain into the pond by gravity (controlling grade 101.4 ft, design water 100.9 ft). More storage needs regrading, pumped inflow, enlarge the pond by about 2.50 ac, or a second basin.");
+    expect(note).toBe("Berm capped at 3.2 ft: above that, the site can no longer drain into the pond by gravity (controlling grade 101.4 ft, design water 100.9 ft). More storage needs regrading, pumped inflow, enlarge the pond by about 2.50 AC, or a second basin.");
   });
 
   it("geometry-bound: names the footprint's ceiling before the pond closes on itself", () => {
     const note = bermCapProposalNote({ binding: "geometry", bermFt: 6, geometricMaxFt: 6.4, extraAcres: 1.0 });
-    expect(note).toBe("This footprint tops out at 6.4 ft of berm before the pond closes in on itself; to hold more, enlarge the pond by about 1.00 ac or add a second basin.");
+    expect(note).toBe("This footprint tops out at 6.4 ft of berm before the pond closes in on itself; to hold more, enlarge the pond by about 1.00 AC or add a second basin.");
   });
 
   it("drops the acreage clause when no estimate is available", () => {

@@ -17,15 +17,15 @@ describe("structuralHash — the comparison that reference equality cannot make"
   it("two FRESHLY BUILT objects holding the same answer hash the same", () => {
     // This is the entire reason the class hid: every instance of the bug returns a new object with
     // an identical answer, so `Object.is` — which is all React's memo does — says "changed".
-    const a = { rung: "inline", lines: ["Detention Pond", "6.58 ac"], box: { x: 1.5, y: 2.5 } };
-    const b = { rung: "inline", lines: ["Detention Pond", "6.58 ac"], box: { x: 1.5, y: 2.5 } };
+    const a = { rung: "inline", lines: ["Detention Pond", "6.58 AC"], box: { x: 1.5, y: 2.5 } };
+    const b = { rung: "inline", lines: ["Detention Pond", "6.58 AC"], box: { x: 1.5, y: 2.5 } };
     expect(a).not.toBe(b);
     expect(structuralHash(a).hash).toBe(structuralHash(b).hash);
   });
 
   it("a real difference changes the hash", () => {
-    const a = { lines: ["Detention Pond", "6.58 ac"] };
-    const b = { lines: ["Detention Pond", "6.59 ac"] };
+    const a = { lines: ["Detention Pond", "6.58 AC"] };
+    const b = { lines: ["Detention Pond", "6.59 AC"] };
     expect(structuralHash(a).hash).not.toBe(structuralHash(b).hash);
   });
 

@@ -467,17 +467,17 @@ export function surfaceViolations({ planes, grid } = {}) {
   });
   if (grid && grid.plFillSf > 200) out.push({
     kind: "pl-fill", legal: false,
-    short: `${f2(grid.plFillSf / SQFT_PER_ACRE)} ac of graded fill lies OUTSIDE the parcel — no fill across the property line.`,
+    short: `${f2(grid.plFillSf / SQFT_PER_ACRE)} AC of graded fill lies OUTSIDE the parcel — no fill across the property line.`,
     detail: "The proposed planes OR their daylight transition wedges extend past the parcel boundary — offsite fill needs the neighbor's land. Pull the element back, steepen the tie (3:1 max), or plan a retaining wall at the line so grade daylights inside it.",
   });
   if (grid && grid.wedgeEasementSf > 200) out.push({
     kind: "wedge-easement", legal: false,
-    short: `Transition-slope fill reaches into a drawn easement (${f2(grid.wedgeEasementSf / SQFT_PER_ACRE)} ac) — daylight runs out of room.`,
+    short: `Transition-slope fill reaches into a drawn easement (${f2(grid.wedgeEasementSf / SQFT_PER_ACRE)} AC) — daylight runs out of room.`,
     detail: "The daylight wedge off a graded edge crosses an easement — fill there usually needs the easement holder's consent. Pull the element back, steepen the tie (3:1 max), or plan a retaining wall so grade daylights before the easement line.",
   });
   if (grid && grid.tieShortSf > 200) out.push({
     kind: "tie-short", legal: false,
-    short: `Fill near the property line too tall for a 3:1 tie-down inside the parcel (${f2(grid.tieShortSf / SQFT_PER_ACRE)} ac).`,
+    short: `Fill near the property line too tall for a 3:1 tie-down inside the parcel (${f2(grid.tieShortSf / SQFT_PER_ACRE)} AC).`,
     detail: "The landscape tie between the graded plane and existing ground at the PL needs 3 ft of run per foot of fill (3:1 max, 4:1 preferred — mowable); that run doesn't fit before the line here. Lower the field, pull back, or plan a wall.",
   });
   if (grid && grid.dockBreaks.count > 0) out.push({

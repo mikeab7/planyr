@@ -44,11 +44,11 @@ function pondCand(ring, ppf) {
   };
 }
 
-// The parcel-area badge ("Parcel 20.20 ac") that paints at the parcel centroid and is fed to
+// The parcel-area badge ("Parcel 20.20 AC") that paints at the parcel centroid and is fed to
 // layoutLabels as an immovable obstacle (B951).
 function parcelChipBox(parcel, ppf) {
   const c = centroid(parcel.points);
-  const txt = `Parcel ${f2(parcel.acres)} ac`;
+  const txt = `Parcel ${f2(parcel.acres)} AC`;
   const ls = Math.max(0.34, Math.min(1, ppf / 0.45));
   const fs = 12 * ls, padX = 9 * ls, padY = 5 * ls, charW = fs * 0.6;
   return boxOf(c.x * ppf, c.y * ppf, txt.length * charW + padX * 2, fs + padY * 2);
@@ -82,7 +82,7 @@ function oldEngine(items, obstacles = []) {
 const oldItem = (ring, ppf, id) => {
   const c = pondCand(ring, ppf); const a = polyArea(ring);
   return { id, cx: c.cx, cy: c.cy, halfW: c.halfW, halfH: c.halfH, lh: c.lh, charW: c.charW, importance: a,
-    lines: ["Detention Pond", `footprint ${f2(a / SQFT_PER_ACRE)} ac · ${f0(a)} sf`] };
+    lines: ["Detention Pond", `footprint ${f2(a / SQFT_PER_ACRE)} AC · ${f0(a)} SF`] };
 };
 
 test("AUDIT — ONE trigger (leader-out), TWO endings; the hide is downstream of the fit failure", () => {
@@ -124,7 +124,7 @@ test("AUDIT — ONE trigger (leader-out), TWO endings; the hide is downstream of
   // Footnote on the owner's theory: "too wide" is exactly right as the trigger. It is not,
   // by itself, what removes the label — that took the hide branch underneath it.
   const m = metrics(WORKING_PPF), a = polyArea(FX.northPond.points);
-  assert.ok(`footprint ${f2(a / SQFT_PER_ACRE)} ac · ${f0(a)} sf`.length * m.charW >
+  assert.ok(`footprint ${f2(a / SQFT_PER_ACRE)} AC · ${f0(a)} SF`.length * m.charW >
             pondCand(FX.northPond.points, WORKING_PPF).halfW * 2,
     "the wide single line really is wider than the north pond at working zoom");
 });
@@ -166,20 +166,20 @@ test("interiorFitter measures the ACTUAL interior, not the bounding box", () => 
 });
 
 test("labelForms walks inline → stacked → abbreviated, and never empties the label", () => {
-  const forms = labelForms(["Detention Pond", { parts: ["footprint 6.11 ac", "266,354 sf"], sep: " · ", keep: 1 }]);
+  const forms = labelForms(["Detention Pond", { parts: ["footprint 6.11 AC", "266,354 SF"], sep: " · ", keep: 1 }]);
   assert.deepEqual(forms.map((f) => f.rung), ["inline", "stacked", "abbrev"]);
-  assert.deepEqual(forms[0].lines, ["Detention Pond", "footprint 6.11 ac · 266,354 sf"]);
-  assert.deepEqual(forms[1].lines, ["Detention Pond", "footprint 6.11 ac", "266,354 sf"]);
-  assert.deepEqual(forms[2].lines, ["Detention Pond", "footprint 6.11 ac"]);
+  assert.deepEqual(forms[0].lines, ["Detention Pond", "footprint 6.11 AC · 266,354 SF"]);
+  assert.deepEqual(forms[1].lines, ["Detention Pond", "footprint 6.11 AC", "266,354 SF"]);
+  assert.deepEqual(forms[2].lines, ["Detention Pond", "footprint 6.11 AC"]);
   for (const f of forms) assert.ok(f.lines.length >= 1 && f.lines[0], "no form may be empty");
   // A plain string list has exactly one form — nothing to stack or abbreviate.
-  assert.deepEqual(labelForms(["Building 3", "166,240 sf"]).map((f) => f.rung), ["inline"]);
+  assert.deepEqual(labelForms(["Building 3", "166,240 SF"]).map((f) => f.rung), ["inline"]);
 });
 
 test("NORTHERN pond — the label sits INSIDE the outline, and the trim buys it the INLINE rung", () => {
   // NEW-1 follow-up. Before the label trim this pond could only fit by STACKING
-  // ("Detention Pond" / "footprint 6.11 ac" / "266,354 sf") — three lines, and at some zooms it
-  // leadered outside instead. With the area line down to "6.11 ac" the whole label fits on the
+  // ("Detention Pond" / "footprint 6.11 AC" / "266,354 SF") — three lines, and at some zooms it
+  // leadered outside instead. With the area line down to "6.11 AC" the whole label fits on the
   // widest rung, unreflowed. This is the assertion that records the rung actually moving.
   const ppf = WORKING_PPF;
   const cand = pondCand(FX.northPond.points, ppf);
@@ -188,7 +188,7 @@ test("NORTHERN pond — the label sits INSIDE the outline, and the trim buys it 
   assert.ok(p, "north pond must be labelled");
   assert.equal(p.leader, null, "north pond label must no longer be leadered outside");
   assert.equal(p.rung, "inline", `the trimmed label should need no reflow at working zoom, got ${p.rung}`);
-  assert.deepEqual(p.lines, ["Detention Pond", "6.11 ac"], "and it keeps BOTH facts — name and acreage");
+  assert.deepEqual(p.lines, ["Detention Pond", "6.11 AC"], "and it keeps BOTH facts — name and acreage");
   // Every corner of the committed box is inside the real ring.
   const fit = interiorFitter(FX.northPond.points);
   const c = centroid(FX.northPond.points);
@@ -239,12 +239,12 @@ test("INVARIANT — a fit failure alone can never produce no label (NEW-2 guard)
 // line. If this line is ever removed, the rungs go untested, not merely unused.
 // A pond narrow enough that the storage line cannot ride inline, wide enough that it still fits
 // once stacked — i.e. the shape class the stacked rung exists for. 420 × 500 ft, a perfectly
-// ordinary detention basin, and the same 210,000 sf as the wide-and-shallow ring below.
+// ordinary detention basin, and the same 210,000 SF as the wide-and-shallow ring below.
 const TALL_RING = [{ x: 0, y: 0 }, { x: 420, y: 0 }, { x: 420, y: 500 }, { x: 0, y: 500 }];
 
 const pondCandWithHolds = (ring, ppf) => {
   const c = pondCand(ring, ppf);
-  return { ...c, lines: [...c.lines, { parts: ["Holds 12.4 ac-ft usable", "8.0′ rim to floor"], sep: " · ", keep: 1 }] };
+  return { ...c, lines: [...c.lines, { parts: ["Holds 12.4 AC-FT usable", "8.0′ rim to floor"], sep: " · ", keep: 1 }] };
 };
 
 test("ASPECT-AWARE — a long THIN pond keeps the single line rather than stacking", () => {
@@ -256,7 +256,7 @@ test("ASPECT-AWARE — a long THIN pond keeps the single line rather than stacki
   const p = layoutLabels([pondCandWithHolds(ring, ppf)], {}).get("pond");
   assert.ok(p, "long thin pond must be labelled");
   assert.equal(p.rung, "inline", "a wide, shallow pond must keep the single-line form");
-  // And a tall NARROW pond of the SAME area (420 × 500 = 210,000 sf) takes the stack instead.
+  // And a tall NARROW pond of the SAME area (420 × 500 = 210,000 SF) takes the stack instead.
   const pt = layoutLabels([pondCandWithHolds(TALL_RING, ppf)], {}).get("pond");
   assert.ok(pt, "tall narrow pond must be labelled");
   assert.ok(pt.rung !== "inline", "a tall narrow pond must reflow rather than keep the wide line");

@@ -98,8 +98,8 @@ export function splitConservation({ parentRing, resulting = [], toleranceSqft = 
     message: Math.abs(residualSqft) <= toleranceSqft
       ? null
       : residualSqft < 0
-        ? `A split lost ${(Math.abs(residualSqft) / SQFT_PER_ACRE).toFixed(3)} ac: the parent covered ${(before / SQFT_PER_ACRE).toFixed(3)} ac and the parcels left on the plan cover ${(after / SQFT_PER_ACRE).toFixed(3)} ac.`
-        : `A split double-counts ${(residualSqft / SQFT_PER_ACRE).toFixed(3)} ac: the parcels left on the plan cover ${(after / SQFT_PER_ACRE).toFixed(3)} ac over a ${(before / SQFT_PER_ACRE).toFixed(3)} ac parent.`,
+        ? `A split lost ${(Math.abs(residualSqft) / SQFT_PER_ACRE).toFixed(3)} AC: the parent covered ${(before / SQFT_PER_ACRE).toFixed(3)} AC and the parcels left on the plan cover ${(after / SQFT_PER_ACRE).toFixed(3)} AC.`
+        : `A split double-counts ${(residualSqft / SQFT_PER_ACRE).toFixed(3)} AC: the parcels left on the plan cover ${(after / SQFT_PER_ACRE).toFixed(3)} AC over a ${(before / SQFT_PER_ACRE).toFixed(3)} AC parent.`,
   };
 }
 
@@ -351,7 +351,7 @@ export function lineageAudit(parcels) {
     cycles,
     messages: [
       ...doubleCounted.map((d) => `Double-counted land: ${d.ancestor} and its split descendant ${d.descendant} are both active, so the ground under ${d.descendant} is counted twice.`),
-      ...vanished.map((v) => `Vanished land: the split lineage under ${v.root} has ${v.members.length} parcels and none is active, so ${v.acres.toFixed(3)} ac of drawn ground counts nowhere.`),
+      ...vanished.map((v) => `Vanished land: the split lineage under ${v.root} has ${v.members.length} parcels and none is active, so ${v.acres.toFixed(3)} AC of drawn ground counts nowhere.`),
       ...cycles.map((c) => `A parcel's split lineage points back at itself (${c.id} → ${c.at}).`),
     ],
   };
@@ -417,7 +417,7 @@ export function unionOutlineMatches({ parentRing, resulting = [], toleranceSqft 
     unionSqft: pathsArea(unioned),
     parentSqft: pathsArea([parent]),
     message: ok ? null
-      : `A split's pieces do not cover the same ground as the parent: ${symmetricDiffSqft.toFixed(1)} sf differs ` +
+      : `A split's pieces do not cover the same ground as the parent: ${symmetricDiffSqft.toFixed(1)} SF differs ` +
         `(a gap, a slit or an overhang). The union of a split's pieces must reproduce the parent's outline exactly.`,
   };
 }

@@ -99,11 +99,11 @@ describe("assessBuildability — hard limits (a, c) block; floodway is a no-rise
 describe("copy helpers", () => {
   it("the AMBER heading names the volume but never says OK", () => {
     const h = unbuildableHeading({ requiredAcFt: 33.8 });
-    expect(h).toBe("Meets the 33.8 ac-ft volume, but not buildable as drawn");
+    expect(h).toBe("Meets the 33.8 AC-FT volume, but not buildable as drawn");
     expect(h).not.toMatch(/\bOK\b/);
   });
   it("make-it-buildable options list the four escapes; enlarge carries acreage when known", () => {
-    expect(makeItBuildableOptions({ extraAcres: 4 })).toBe("To make it buildable: enlarge the pond by ~4.0 ac, add a second basin, raise the outfall or add a pump, or provide inlets through the berm.");
+    expect(makeItBuildableOptions({ extraAcres: 4 })).toBe("To make it buildable: enlarge the pond by ~4.0 AC, add a second basin, raise the outfall or add a pump, or provide inlets through the berm.");
     expect(makeItBuildableOptions({})).toMatch(/^To make it buildable: enlarge the pond,/);
   });
   it("unbuildableNote joins the hard reasons with the options and has NO em-dash", () => {

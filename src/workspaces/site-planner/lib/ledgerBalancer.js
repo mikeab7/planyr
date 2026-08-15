@@ -134,7 +134,7 @@ export function rankLedgerMoves({
       moves.push({
         kind: "shrink-overdug", id: p.id,
         label: `Shrink ${short(p.name)} toward required+10% — saves ~${f0(cy)} cy of cut${cost != null ? ` (~$${f0(cost)})` : ""}`,
-        info: `The mitigation ledger is over-dug by ~${f2(mitOverAcFt)} ac-ft beyond required + margin — cut past the requirement earns no credit. Shallowing/shrinking this pond's below-WSE band by ${f2(shrinkCf / AC_FT)} ac-ft keeps the ledger covered and saves the dirt. Screening: 1 ac-ft of below-WSE cut = 1 ac-ft of credit. The tool proposes — redraw the pond to take it.`,
+        info: `The mitigation ledger is over-dug by ~${f2(mitOverAcFt)} AC-FT beyond required + margin — cut past the requirement earns no credit. Shallowing/shrinking this pond's below-WSE band by ${f2(shrinkCf / AC_FT)} AC-FT keeps the ledger covered and saves the dirt. Screening: 1 ac-ft of below-WSE cut = 1 ac-ft of credit. The tool proposes — redraw the pond to take it.`,
         deltas: { detAcFt: 0, mitAcFt: -(shrinkCf / AC_FT), dirtCy: -Math.round(cy), costUsd: cost != null ? -Math.round(cost) : null, buildingSf: null },
         confirmFlags: [], destructive: false,
         score: shrinkCf / AC_FT,
@@ -152,8 +152,8 @@ export function rankLedgerMoves({
       const fbNote = criteriaRule?.minFreeboardFt != null ? `Freeboard is preserved (${criteriaRule.minFreeboardFt}′ min per ${criteriaRule.label || "criteria"}).` : "Freeboard is preserved.";
       moves.push({
         kind: "berm-raise", id: "berm-joint",
-        label: `⛰ Berm +${f1(s.hFt)}′ on ${n} upland pond${n > 1 ? "s" : ""} → +${f2(gainAcFt)} ac-ft usable${s.ok ? " (site closes)" : " (partial)"}`,
-        info: `Auto-solved: one +${f1(s.hFt)}′ berm on every eligible upland detention pond ${s.ok ? "closes" : "cuts into"} the ${f2(detGapAcFt)} ac-ft detention gap. One shared height means each pond adds volume in proportion to its area (the distribution rule). Clamped to +${f1(BERM_MAX_RAISE_FT)}′ (screening convention — no published berm cap modeled). ${fbNote} The berm itself is FILL above grade — it joins the earthwork balance (B833) and may block conveyance; floodplain-fringe ponds are excluded (berming below the WSE is levee-adjacent hydraulics — engineer territory). Applying sets each pond's top of bank with "berm — auto-solved" provenance; × on the field restores auto.`,
+        label: `⛰ Berm +${f1(s.hFt)}′ on ${n} upland pond${n > 1 ? "s" : ""} → +${f2(gainAcFt)} AC-FT usable${s.ok ? " (site closes)" : " (partial)"}`,
+        info: `Auto-solved: one +${f1(s.hFt)}′ berm on every eligible upland detention pond ${s.ok ? "closes" : "cuts into"} the ${f2(detGapAcFt)} AC-FT detention gap. One shared height means each pond adds volume in proportion to its area (the distribution rule). Clamped to +${f1(BERM_MAX_RAISE_FT)}′ (screening convention — no published berm cap modeled). ${fbNote} The berm itself is FILL above grade — it joins the earthwork balance (B833) and may block conveyance; floodplain-fringe ponds are excluded (berming below the WSE is levee-adjacent hydraulics — engineer territory). Applying sets each pond's top of bank with "berm — auto-solved" provenance; × on the field restores auto.`,
         deltas: { detAcFt: gainAcFt, mitAcFt: 0, dirtCy: null, costUsd: null, buildingSf: null },
         confirmFlags: ["berm-is-fill", "engineer-confirm"], destructive: false,
         apply: { hFt: s.hFt, perPond: s.perPond },
@@ -170,8 +170,8 @@ export function rankLedgerMoves({
       const delta = p.acres * effRate;
       moves.push({
         kind: "deactivate-parcel", id: p.id,
-        label: `Phase out ${short(p.name)} (${f2(p.acres)} ac) — req −${f2(delta)} ac-ft at the current rate`,
-        info: `Deactivating this parcel removes its ${f2(p.acres)} acres from the drainage area, cutting the requirement by ~${f2(delta)} ac-ft at the effective rate of ${f2(effRate)} ac-ft/ac${Number.isFinite(detention.rateAcFtPerAc) ? "" : " (derived: required ÷ acres — the rule's own rate wasn't a single point)"}. Screening only — phasing changes yield, access, and the site plan itself. The tool proposes; toggle the parcel in the Parcel panel to take it.`,
+        label: `Phase out ${short(p.name)} (${f2(p.acres)} AC) — req −${f2(delta)} AC-FT at the current rate`,
+        info: `Deactivating this parcel removes its ${f2(p.acres)} acres from the drainage area, cutting the requirement by ~${f2(delta)} AC-FT at the effective rate of ${f2(effRate)} AC-FT/ac${Number.isFinite(detention.rateAcFtPerAc) ? "" : " (derived: required ÷ acres — the rule's own rate wasn't a single point)"}. Screening only — phasing changes yield, access, and the site plan itself. The tool proposes; toggle the parcel in the Parcel panel to take it.`,
         deltas: { detAcFt: Math.min(delta, detGapAcFt), mitAcFt: null, dirtCy: null, costUsd: null, buildingSf: null },
         confirmFlags: [], destructive: true,
         score: Math.min(delta, detGapAcFt) * 0.7,
@@ -200,8 +200,8 @@ export function rankLedgerMoves({
       const gain = u.usableCf / AC_FT + (reqDelta != null ? -reqDelta : 0);
       moves.push({
         kind: "convert-building", id: b.id,
-        label: `Convert ${short(b.name)}+court to a basin: +${f2(u.usableCf / AC_FT)} ac-ft, −${f0(sf / 1000)}k sf`,
-        info: `Replacing this building and its court with a bermed basin at the site pond pattern (${f1(synthDet.depth)}′ deep, ${synthDet.slope}:1 sides, ${f1(synthDet.freeboard)}′ freeboard) stores ~${f2(u.usableCf / AC_FT)} ac-ft usable${reqDelta != null ? ` and drops the requirement by ~${f2(-reqDelta)} ac-ft (impervious falls with the roof/paving)` : ""}. It costs ${f0(sf)} sf of yield: the most expensive move here; ranked accordingly. The tool proposes; redrawing the plan is your call.`,
+        label: `Convert ${short(b.name)}+court to a basin: +${f2(u.usableCf / AC_FT)} AC-FT, −${f0(sf / 1000)}k SF`,
+        info: `Replacing this building and its court with a bermed basin at the site pond pattern (${f1(synthDet.depth)}′ deep, ${synthDet.slope}:1 sides, ${f1(synthDet.freeboard)}′ freeboard) stores ~${f2(u.usableCf / AC_FT)} AC-FT usable${reqDelta != null ? ` and drops the requirement by ~${f2(-reqDelta)} AC-FT (impervious falls with the roof/paving)` : ""}. It costs ${f0(sf)} SF of yield: the most expensive move here; ranked accordingly. The tool proposes; redrawing the plan is your call.`,
         deltas: { detAcFt: Math.min(gain, detGapAcFt), mitAcFt: null, dirtCy: null, costUsd: null, buildingSf: -Math.round(sf) },
         confirmFlags: [], destructive: true,
         score: Math.min(gain, detGapAcFt) * 0.5,
@@ -234,8 +234,8 @@ export function rankLedgerMoves({
       if (credit > 0.01) {
         moves.push({
           kind: "pumped-system", id: "pump",
-          label: `Pumped outfall ≈ ${f1(cfs)} cfs: credits ~${f2(credit)} ac-ft (rate-method)${clampNote}`,
-          info: `${detRule?.params?.gravityDrainNote ? detRule.params.gravityDrainNote + " " : ""}A pump running at rated capacity raises the allowable release, shrinking required storage by ~${f2(credit)} ac-ft on the Modified-Rational screen. Pumps cycle, need power and redundancy, and reviewers treat pumped systems as an exception; engineer-confirm before relying on this. The tool proposes only.`,
+          label: `Pumped outfall ≈ ${f1(cfs)} cfs: credits ~${f2(credit)} AC-FT (rate-method)${clampNote}`,
+          info: `${detRule?.params?.gravityDrainNote ? detRule.params.gravityDrainNote + " " : ""}A pump running at rated capacity raises the allowable release, shrinking required storage by ~${f2(credit)} AC-FT on the Modified-Rational screen. Pumps cycle, need power and redundancy, and reviewers treat pumped systems as an exception; engineer-confirm before relying on this. The tool proposes only.`,
           deltas: { detAcFt: Math.min(credit, detGapAcFt), mitAcFt: null, dirtCy: null, costUsd: null, buildingSf: null },
           confirmFlags: gdf != null ? ["engineer-confirm", "fbcdd-gravity-rule"] : ["engineer-confirm"], destructive: false,
           score: Math.min(credit, detGapAcFt) * 0.6,

@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import { assessAnalysisTier } from "../src/workspaces/site-planner/lib/detentionRules.js";
 
 describe("assessAnalysisTier", () => {
-  it("Goose Creek composite: AE + floodway + HCFCD channel + ~300 ac → Full DIA, all triggers listed", () => {
+  it("Goose Creek composite: AE + floodway + HCFCD channel + ~300 AC → Full DIA, all triggers listed", () => {
     const t = assessAnalysisTier({
       acres: 300,
       authorityId: "hcfcd",
@@ -59,7 +59,7 @@ describe("assessAnalysisTier", () => {
     expect(assessAnalysisTier({ acres: 5, floodZones: [{ zone: "VE" }], channel: { near: false } }).tier).toBe("dia");
   });
 
-  it("per-authority tract thresholds: Chambers 200 ac, Fort Bend 50 ac (HEC-HMS), COH/HCFCD 20 ac", () => {
+  it("per-authority tract thresholds: Chambers 200 AC, Fort Bend 50 AC (HEC-HMS), COH/HCFCD 20 AC", () => {
     const clean = { floodZones: [], channel: { near: false } };
     expect(assessAnalysisTier({ ...clean, acres: 150, authorityId: "chambers" }).tier).toBe("rate");
     expect(assessAnalysisTier({ ...clean, acres: 250, authorityId: "chambers" }).tier).toBe("dia");

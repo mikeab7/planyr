@@ -19,7 +19,7 @@ describe("shared/coordinates (cross-workspace spine)", () => {
     expect(FT_PER_M).toBeCloseTo(3937 / 1200, 9);
   });
 
-  it("ftToAcres: 43,560 sf == 1 acre", () => {
+  it("ftToAcres: 43,560 SF == 1 acre", () => {
     expect(ftToAcres(43560)).toBe(1);
     expect(ftToAcres(0)).toBe(0);
   });

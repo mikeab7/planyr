@@ -972,7 +972,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       if (status === "dead" && !statusFilter.has("dead")) return;
       const { lat, lon } = site.origin;
       const active = site.id === activeSiteId;
-      const tip = `${site.site || site.name || "Site"} · ${siteAcres(site).toFixed(1)} ac · ${STATUS_META[status]?.label || status} · click to open`;
+      const tip = `${site.site || site.name || "Site"} · ${siteAcres(site).toFixed(1)} AC · ${STATUS_META[status]?.label || status} · click to open`;
       const openSiteNow = () => onOpenSiteRef.current && onOpenSiteRef.current(site.id);
       // Right-click anywhere on a site → status picker at the cursor. (Suppress
       // the browser's native menu via the underlying DOM event.)
@@ -1660,7 +1660,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               metadata line (so it costs no new row and truncates with it) and reads in the accent,
               because PAL.muted is for inert metadata and this is the answer to his question. */}
           <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {STATUS_META[st]?.label || st} · {siteAcres(s) > 0 ? `${siteAcres(s).toFixed(1)} ac` : "no boundary"}
+            {STATUS_META[st]?.label || st} · {siteAcres(s) > 0 ? `${siteAcres(s).toFixed(1)} AC` : "no boundary"}
             {s.teamId && <> · <span style={{ color: PAL.accent, fontWeight: 700 }}>Shared with {teamName(s.teamId)}</span></>}
           </div>
         </div>
@@ -1803,7 +1803,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                 flex: "none", color: PAL.chromeInk, fontSize: 12.5, fontWeight: 600,
                 padding: "0 8px", whiteSpace: "nowrap",
               }}>
-                {selected.length} parcel{selected.length > 1 ? "s" : ""} · {asm ? `${asm.totalAc.toFixed(2)} ac` : "…"}
+                {selected.length} parcel{selected.length > 1 ? "s" : ""} · {asm ? `${asm.totalAc.toFixed(2)} AC` : "…"}
               </span>
               <button
                 onClick={clearSel}

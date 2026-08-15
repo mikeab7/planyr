@@ -1076,7 +1076,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
                 if (m.kind === "distance") { const a = m.pts[0], b = m.pts[1]; const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; return <g key={m.id}><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0e7490" strokeWidth={ls(2)} /><text x={mid.x} y={mid.y - ls(4)} fontSize={ls(12)} fontWeight="700" fill="#0e7490" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: ls(3) }}>{ftPerUnit ? `${f1(dist(a, b) * ftPerUnit)} ft` : "set scale"}</text></g>; }
                 const c = centroidOf(m.pts); // area-weighted centroid, clamped inside concave shapes (B307)
                 const sf = polyArea(m.pts) * ftPerUnit * ftPerUnit;
-                return <g key={m.id}><polygon points={m.pts.map((q) => `${q.x},${q.y}`).join(" ")} fill="#0e749022" stroke="#0e7490" strokeWidth={ls(2)} /><text x={c.x} y={c.y} fontSize={ls(12)} fontWeight="700" fill="#0e7490" textAnchor="middle" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: ls(3) }}>{ftPerUnit ? `${f2(ftToAcres(sf))} ac` : "set scale"}</text></g>;
+                return <g key={m.id}><polygon points={m.pts.map((q) => `${q.x},${q.y}`).join(" ")} fill="#0e749022" stroke="#0e7490" strokeWidth={ls(2)} /><text x={c.x} y={c.y} fontSize={ls(12)} fontWeight="700" fill="#0e7490" textAnchor="middle" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: ls(3) }}>{ftPerUnit ? `${f2(ftToAcres(sf))} AC` : "set scale"}</text></g>;
               })}
               {/* draft */}
               {draft && (() => {
@@ -1274,7 +1274,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
               <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, marginBottom: 4 }}>Takeoff (stitched)</div>
               <div style={{ fontSize: 11, color: ftPerUnit ? "#15803d" : "#b45309", marginBottom: 6 }}>{ftPerUnit ? "Calibrated" : "Not calibrated — use Calibrate once"}</div>
               {/* B547: Number.isFinite guard — one degenerate/NaN measure must not propagate "NaN ac · NaN sf · NaN ft" into the rollup. */}
-              {[["Area", Number.isFinite(totals.areaSf) ? `${f2(ftToAcres(totals.areaSf))} ac` : "—"], ["", Number.isFinite(totals.areaSf) ? `${f0(totals.areaSf)} sf` : "—"], ["Distance", Number.isFinite(totals.distFt) ? `${f1(totals.distFt)} ft` : "—"], ["Measures", `${measures.length}`]].map(([k, v], i) => (
+              {[["Area", Number.isFinite(totals.areaSf) ? `${f2(ftToAcres(totals.areaSf))} AC` : "—"], ["", Number.isFinite(totals.areaSf) ? `${f0(totals.areaSf)} SF` : "—"], ["Distance", Number.isFinite(totals.distFt) ? `${f1(totals.distFt)} ft` : "—"], ["Measures", `${measures.length}`]].map(([k, v], i) => (
                 <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 12 }}><span style={{ color: PAL.muted }}>{k}</span><span style={{ color: PAL.ink, fontWeight: 650, fontFamily: "ui-monospace, monospace" }}>{v}</span></div>
               ))}
               {/* Per-measure list with a × delete (B376): the stitched canvas has no select-and-delete,
@@ -1284,7 +1284,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
                 <div style={{ marginTop: 6, borderTop: `1px solid ${PAL.line}`, paddingTop: 6 }}>
                   {measures.map((m) => {
                     const val = m.kind === "area"
-                      ? (ftPerUnit ? `${f2(ftToAcres(polyArea(m.pts) * ftPerUnit * ftPerUnit))} ac` : "set scale")
+                      ? (ftPerUnit ? `${f2(ftToAcres(polyArea(m.pts) * ftPerUnit * ftPerUnit))} AC` : "set scale")
                       : (ftPerUnit ? `${f1(dist(m.pts[0], m.pts[1]) * ftPerUnit)} ft` : "set scale");
                     return (
                       <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 0" }}>

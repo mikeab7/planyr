@@ -86,7 +86,7 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isL
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
         <div style={{ color: muted, lineHeight: 1.4 }}>
           Screening <b style={{ color: ink }}>{parcelCount}</b> active parcel{parcelCount === 1 ? "" : "s"}
-          {acres != null && <> · <b style={{ color: ink }}>{acres.toFixed(2)} ac</b></>}
+          {acres != null && <> · <b style={{ color: ink }}>{acres.toFixed(2)} AC</b></>}
         </div>
         <button style={{ ...chip, padding: "3px 9px", fontSize: 11 }} onClick={run} disabled={state.loading} title="Re-run the screen (refreshes from the GIS sources)">
           {state.loading ? "Screening…" : "↻ Refresh"}

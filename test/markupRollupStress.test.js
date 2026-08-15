@@ -28,8 +28,8 @@ describe("STRESS · rollup counts only measurements, never redline annotations",
 
   it("redline shapes on a CALIBRATED sheet are ignored, not summed into the totals", () => {
     const markups = [
-      { kind: "rect", page: 1, pts: sq(10) },           // would be 100 sf if mistaken for area
-      { kind: "area", page: 1, pts: sq(10) },           // the real measurement: 100 sf
+      { kind: "rect", page: 1, pts: sq(10) },           // would be 100 SF if mistaken for area
+      { kind: "area", page: 1, pts: sq(10) },           // the real measurement: 100 SF
     ];
     const r = rollup(markups, { 1: 1 });                // 1 ft/unit
     expect(r.areaSf).toBe(100);                         // only the real area, the rect is not counted
@@ -48,7 +48,7 @@ describe("STRESS · rollup counts only measurements, never redline annotations",
     const markups = [
       { kind: "distance", page: 1, pts: [{ x: 0, y: 0 }, { x: 10, y: 0 }] }, // 10 * 2 = 20 ft
       { kind: "perimeter", page: 1, pts: sq(10) },                            // perimeter 40 * 2 = 80 ft
-      { kind: "area", page: 1, pts: sq(10) },                                 // 100 * 2*2 = 400 sf
+      { kind: "area", page: 1, pts: sq(10) },                                 // 100 * 2*2 = 400 SF
       { kind: "count", page: 1, pts: [{}, {}, {}] },                          // 3
       { kind: "text", page: 1, pts: [{ x: 0, y: 0 }] },                       // ignored
     ];
