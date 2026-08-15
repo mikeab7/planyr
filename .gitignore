@@ -70,6 +70,10 @@ web_modules/
 .env.*
 !.env.example
 
+# real production data pulled for local golden-test runs (ui-audit/stress/golden-health-migration.mjs)
+# — never committed, may contain real customer plan/task/contact data
+.golden/
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache
