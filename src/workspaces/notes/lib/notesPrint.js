@@ -88,9 +88,27 @@ body { font: 11.5pt/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sa
    across so a narrowed block wraps its words at the same place on paper. The grip is hidden
    rather than removed from the layout for exactly that reason. */
 .note-body .planyr-anchor { position: absolute; margin: 0 !important; box-sizing: border-box; padding: 3px 6px 3px 16px; break-inside: avoid; }
-/* No chrome on paper: the grab handle, the delete and the width handle are all ways to
-   CHANGE the box, and none of them is part of what it says. */
-.note-body .planyr-anchor-grip, .note-body .planyr-anchor-del, .note-body .planyr-anchor-size { display: none; }
+/* No chrome on paper: the grab handle and every resize handle are ways to CHANGE the box, and
+   none of them is part of what it says. Matched on the SHARED class rather than on each of the
+   eight, so a handle added later cannot start printing by omission. */
+.note-body .planyr-anchor-grip, .note-body .planyr-anchor-del, .note-body .planyr-anchor-size, .note-body .planyr-anchor-h { display: none; }
+/* ⛔ A BOX HOLDING A PICTURE PRINTS AT THE SIZE IT WAS DRAGGED TO (PDF-PARITY). The height rides
+   the node's own style attribute, exactly as the position does, so paper reads it for free — but
+   the padding and the image fit have to be mirrored here or the picture prints inset inside its
+   own frame and cropped by a fraction. This block is the deliberate mirror of the image-box rules
+   in NoteEditor.jsx EDITOR_CSS; change one, change both. */
+.note-body .planyr-anchor[data-anchor-kind="image"] { padding: 0; overflow: hidden; }
+.note-body .planyr-anchor[data-anchor-kind="image"] .planyr-anchor-content { height: 100%; overflow: hidden; }
+.note-body .planyr-anchor[data-anchor-kind="image"] .planyr-note-image { margin: 0; height: 100%; }
+/* ⛔ BOTH SHAPES ARE NAMED, AND THAT IS NOT BELT-AND-BRACES — THEY ARE DIFFERENT DOM. The node
+   VIEW builds a figure.planyr-note-image wrapping the img; renderHTML — which is what this sheet
+   and the HTML export actually serialise through — emits a BARE img.planyr-note-img with no
+   figure at all. A rule written against only the screen's shape matches nothing on paper, and the
+   picture prints inset inside its own frame at its natural size, cropped by whatever the box was
+   dragged to. That is precisely the screen/paper drift PDF-PARITY exists to catch, and it is
+   invisible until somebody prints. */
+.note-body .planyr-anchor[data-anchor-kind="image"] .planyr-note-image img,
+.note-body .planyr-anchor[data-anchor-kind="image"] > img.planyr-note-img { display: block; width: 100%; height: 100%; object-fit: fill; max-width: none; }
 .note-body .planyr-callout { position: relative; border: 1px solid #D8DBE2; border-left: 3px solid #5B6270; border-radius: 6px; background: #FAFAFC; padding: 7px 9px 7px 26px; break-inside: avoid; }
 .note-body .planyr-callout > * + * { margin-top: 0.5em; }
 .note-body .planyr-callout::before { position: absolute; left: 8px; top: 6px; font-size: 10pt; font-weight: 700; content: "i"; color: #5B6270; }
