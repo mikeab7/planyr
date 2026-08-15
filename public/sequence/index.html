@@ -3293,10 +3293,30 @@ function SuccessorPromptModal({ prompt, updateTask, onClose, onOpenTask }) {
   });
 
   const changeCount = Object.values(pending).filter(v => v !== null).length;
+  // NEW-1 — the bulk "Mark Complete" action's target: only the Ready to Start group. This is
+  // never empty while the modal is open — the caller only opens this modal when
+  // `successors.some(t => t.health === 'gray')` — but it's still read defensively rather than
+  // assumed, so a future change to that invariant degrades to "button disabled", not a crash.
+  const readyIds = React.useMemo(() => new Set(readyToStart.map(t => t.id)), [readyToStart]);
+  const canComplete = readyIds.size > 0;
 
   function apply() {
     Object.entries(pending).forEach(([tid, hk]) => {
       if (hk !== null) updateTask(Number(tid), { health: hk }, projId);
+    });
+    onClose();
+  }
+
+  // NEW-1 — a SEPARATE accept path from `apply()`/Enter, on purpose (see the file-level hazard
+  // note above the modal's onKeyDown). It forces every Ready-to-Start successor to Complete
+  // regardless of what's pending for it; an Already Active successor keeps whatever the user
+  // picked for it (or "no change" by default) — this button is about the successors the
+  // completed task just unblocked, not a blanket status wipe over ones already being worked.
+  function applyComplete() {
+    if (!canComplete) return;
+    Object.entries(pending).forEach(([tid, hk]) => {
+      const forced = readyIds.has(Number(tid)) ? 'green' : hk;
+      if (forced !== null) updateTask(Number(tid), { health: forced }, projId);
     });
     onClose();
   }
@@ -3306,13 +3326,14 @@ function SuccessorPromptModal({ prompt, updateTask, onClose, onOpenTask }) {
       { k:'gray',   label:'Not Started' },
       { k:'yellow', label:'In Progress' },
       { k:'red',    label:'Needs Attn.' },
+      { k:'green',  label:'Complete' },
     ];
     const cur = pending[task.id];
     const isGray = task.health === 'gray';
     return (
       <div style={{display:'flex',alignItems:'center',gap:5,flexWrap:'wrap',marginTop:6}}>
         {!isGray && (
-          <button onClick={()=>setPending(p=>({...p,[task.id]:null}))}
+          <button data-successor-pill="nochange" onClick={()=>setPending(p=>({...p,[task.id]:null}))}
             style={{fontSize:10,padding:'3px 8px',borderRadius:12,fontFamily:'inherit',cursor:'pointer',
               border: cur===null?'1.5px solid #6366f1':'1px solid #d1d5db',
               background:cur===null?'#eef2ff':'#f9fafb',
@@ -3324,7 +3345,7 @@ function SuccessorPromptModal({ prompt, updateTask, onClose, onOpenTask }) {
           const h = HEALTH[o.k]||HEALTH.gray;
           const sel = pending[task.id]===o.k;
           return (
-            <button key={o.k} onClick={()=>setPending(p=>({...p,[task.id]:o.k}))}
+            <button key={o.k} data-successor-pill={o.k} onClick={()=>setPending(p=>({...p,[task.id]:o.k}))}
               style={{display:'flex',alignItems:'center',gap:5,fontSize:10,padding:'3px 9px',
                 borderRadius:12,fontFamily:'inherit',cursor:'pointer',
                 border: sel?`1.5px solid ${h.dot==='#ffffff'?'#d1d5db':h.dot}`:'1px solid #e5e7eb',
@@ -3343,7 +3364,7 @@ function SuccessorPromptModal({ prompt, updateTask, onClose, onOpenTask }) {
   function TaskRow({ task, accent }) {
     const h = HEALTH[task.health]||HEALTH.gray;
     return (
-      <div style={{padding:'10px 14px',borderRadius:7,marginBottom:8,
+      <div data-successor-row={task.id} style={{padding:'10px 14px',borderRadius:7,marginBottom:8,
         background:accent?'#fafbff':'#f9fafb',
         border:`1px solid ${accent?'#e0e4f8':'#e5e7eb'}`}}>
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
@@ -3372,13 +3393,27 @@ function SuccessorPromptModal({ prompt, updateTask, onClose, onOpenTask }) {
   }
 
   return (
-    <div onMouseDown={e=>{if(e.target===e.currentTarget)onClose();}}
+    <div data-successor-modal onMouseDown={e=>{if(e.target===e.currentTarget)onClose();}}
       style={{position:'fixed',inset:0,zIndex:4000,display:'flex',alignItems:'center',
         justifyContent:'center',background:'rgba(15,23,42,.35)'}}>
       <div style={{background:'#fff',borderRadius:12,boxShadow:'0 16px 48px rgba(0,0,0,.18)',
         width:480,maxWidth:'94vw',maxHeight:'82vh',display:'flex',flexDirection:'column',overflow:'hidden'}}
         tabIndex={-1} ref={el=>el?.focus()}
-        onKeyDown={e=>{if(e.key==='Escape')onClose();if(e.key==='Enter'&&changeCount>0)apply();}}>
+        /* NEW-1 — ⛔ Enter's meaning here does NOT change: it still applies `pending` exactly as
+         * it does today (defaults every Ready-to-Start row to In Progress; that is the muscle
+         * memory the owner keeps). Complete is reachable ONLY through applyComplete(), wired to a
+         * DIFFERENT control (the "Mark Complete" button) and a DIFFERENT key (Ctrl/Cmd+Enter,
+         * matching the FormulaBar's existing accelerator at handleKey above). A second control
+         * that shared the plain Enter key would re-arm the exact bug fixed for this modal
+         * (B463920): the overlayAtKeyStartRef latch only needs ONE thing to stay true — that a
+         * keystroke which dismisses this modal never reads as "no overlay was open" to the grid's
+         * key handler — and that holds for ANY key, including Ctrl/Cmd+Enter, because the latch
+         * records overlayOpenRef at keydown-capture time regardless of which key was pressed. */
+        onKeyDown={e=>{
+          if (e.key==='Escape') { onClose(); return; }
+          if ((e.metaKey||e.ctrlKey) && e.key==='Enter') { e.preventDefault(); if (canComplete) applyComplete(); return; }
+          if (e.key==='Enter' && changeCount>0) apply();
+        }}>
         {/* Header */}
         <div style={{padding:'18px 20px 14px',borderBottom:'1px solid #e5e7eb',flexShrink:0}}>
           <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}}>
@@ -3419,12 +3454,27 @@ function SuccessorPromptModal({ prompt, updateTask, onClose, onOpenTask }) {
           <span style={{fontSize:11,color:'#9ca3af',marginRight:'auto'}}>
             {changeCount>0?`${changeCount} update${changeCount!==1?'s':''} pending`:'No changes'}
           </span>
-          <button onClick={onClose}
+          <button data-successor-apply="skip" onClick={onClose}
             style={{fontSize:12,padding:'7px 16px',borderRadius:6,border:'1px solid #e5e7eb',background:'#fff',color:'#374151',cursor:'pointer',fontFamily:'inherit',fontWeight:500}}
             onMouseEnter={e=>e.currentTarget.style.borderColor='#6b7280'} onMouseLeave={e=>e.currentTarget.style.borderColor='#e5e7eb'}>
             Skip
           </button>
-          <button onClick={apply} disabled={!changeCount}
+          {/* NEW-1 — a SEPARATE control from "Update Successors", not a 3rd StatusPills value applied
+              through the same button: this is the fast path for "the successor is done too", scoped to
+              the Ready to Start group (title spells out the scope since the button label can't). */}
+          <button data-successor-apply="complete" onClick={applyComplete} disabled={!canComplete}
+            title="Marks every Ready to Start successor Complete · Ctrl/Cmd+Enter"
+            style={{fontSize:12,padding:'7px 18px',borderRadius:6,fontFamily:'inherit',fontWeight:600,
+              cursor:canComplete?'pointer':'not-allowed',
+              border:canComplete?'1px solid #16a34a':'1px solid #e5e7eb',
+              background:canComplete?'#fff':'#f3f4f6',
+              color:canComplete?'#16a34a':'#9ca3af'}}
+            onMouseEnter={e=>{if(canComplete)e.currentTarget.style.background='#f0fdf4';}}
+            onMouseLeave={e=>{if(canComplete)e.currentTarget.style.background='#fff';}}>
+            Mark Complete
+          </button>
+          <button data-successor-apply="update" onClick={apply} disabled={!changeCount}
+            title="Applies the status picked for each row above · Enter"
             style={{fontSize:12,padding:'7px 18px',borderRadius:6,fontFamily:'inherit',fontWeight:600,
               cursor:changeCount?'pointer':'not-allowed',
               border:changeCount?'1px solid #4f46e5':'1px solid #e5e7eb',
@@ -5058,6 +5108,22 @@ function App() {
   // the initial id column is hidden), snap onto the nearest visible column toward `dir`.
   const stepGridCol = (curIdx, dir) => stepVisibleColIdx(visibleColIdxs(), curIdx, dir);
   const [successorPrompt, setSuccessorPrompt] = useState(null);
+  /* NEW-1 — a completion can unblock MORE THAN ONE successor at once (the bulk "Mark Complete"
+   * action below can flip several to green in one apply(), and so can hand-picking the Complete
+   * pill on more than one row). Each green transition independently schedules its own follow-up
+   * prompt 80ms later (see the "fire when task transitions to complete" block), so two completions
+   * in the same batch would race to overwrite the single `successorPrompt` slot — whichever
+   * setTimeout lands last wins, and the other's follow-up prompt is silently lost. That is exactly
+   * the silent-cascade shape the owner ruled out. A small FIFO queue makes it deterministic instead:
+   * every triggered prompt is queued, and the queue drains one at a time as each prompt closes —
+   * "one hop at a time, prompting again" holds even when the batch had more than one hop to offer. */
+  const [successorPromptQueue, setSuccessorPromptQueue] = useState([]);
+  useEffect(() => {
+    if (!successorPrompt && successorPromptQueue.length > 0) {
+      setSuccessorPrompt(successorPromptQueue[0]);
+      setSuccessorPromptQueue(q => q.slice(1));
+    }
+  }, [successorPrompt, successorPromptQueue]);
   const [notesCtx,   setNotesCtx]   = useState(null);
   const [isMobile,   setIsMobile]   = useState(() => typeof window!=='undefined' && window.innerWidth < 768);
   const [mobMenuOpen, setMobMenuOpen] = useState(false);
@@ -6038,7 +6104,10 @@ function App() {
             // Already-active successors still ride along as context when the prompt does open.
             const hasReadyToStart = successors.some(t => t.health === 'gray');
             if (hasReadyToStart) {
-              setSuccessorPrompt({ completedTask, projId: pid2, projName: p.name, successors });
+              // NEW-1 — queued, not set directly: see the queue-drain effect near successorPrompt's
+              // declaration. A batch completion (the modal's own "Mark Complete") can fire this twice
+              // in close succession; queueing keeps both prompts instead of the second clobbering the first.
+              setSuccessorPromptQueue(q => [...q, { completedTask, projId: pid2, projName: p.name, successors }]);
             }
           }, 80);
         }

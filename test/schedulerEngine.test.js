@@ -2667,3 +2667,51 @@ describe("anti-drift: the NEW-schedule-health engine exists VERBATIM in src + mi
     }
   });
 });
+
+// ── NEW-1 — the successor prompt can mark a successor Complete, not just In Progress ──
+// Owner report: "it should also allow me to mark it complete." Full browser + mutation proof
+// lives in ui-audit/verify-successor-complete.mjs; these are the fast, CI-runnable source anchors
+// that pin the shape so a future edit can't quietly drift back to the pre-fix behaviour.
+describe("NEW-1: the successor prompt's Complete option and its own accept path", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+
+  it("StatusPills offers Complete alongside the three original options", () => {
+    expect(src).toMatch(/\{ k:'gray',   label:'Not Started' \},\s*\{ k:'yellow', label:'In Progress' \},\s*\{ k:'red',    label:'Needs Attn\.' \},\s*\{ k:'green',  label:'Complete' \},/);
+  });
+
+  it("applyComplete is a SEPARATE function from apply() — Complete never routes through the plain-Enter path", () => {
+    expect(src).toMatch(/function applyComplete\(\) \{/);
+    expect(src).toMatch(/const forced = readyIds\.has\(Number\(tid\)\) \? 'green' : hk;/);
+  });
+
+  it("plain Enter's own line is UNCHANGED — it still just applies `pending`, never applyComplete", () => {
+    // The exact literal from before this feature existed. If this ever needs to become
+    // `applyComplete()` or gain new conditions, Enter's muscle-memory meaning changed — which the
+    // owner explicitly ruled out — so this must be a deliberate, discussed change, not a drift.
+    expect(src).toMatch(/if \(e\.key==='Enter' && changeCount>0\) apply\(\);/);
+  });
+
+  it("Complete's key is Ctrl/Cmd+Enter — a DIFFERENT key from plain Enter, matching the FormulaBar precedent", () => {
+    expect(src).toMatch(/if \(\(e\.metaKey\|\|e\.ctrlKey\) && e\.key==='Enter'\) \{ e\.preventDefault\(\); if \(canComplete\) applyComplete\(\); return; \}/);
+  });
+
+  it("Complete has its own footer BUTTON, distinct from Skip and Update Successors", () => {
+    expect(src).toMatch(/data-successor-apply="complete"/);
+    expect(src).toMatch(/data-successor-apply="update"/);
+    expect(src).toMatch(/data-successor-apply="skip"/);
+  });
+
+  it("a completion is QUEUED, never written directly to the single successorPrompt slot — the batch-race guard", () => {
+    // Two Ready-to-Start successors completed in the SAME action (the bulk button) each
+    // independently schedule their own 80ms-later chain check; writing directly to one state
+    // slot lets the second clobber the first, silently losing a follow-up prompt. Proven live
+    // (and proven load-bearing by mutation) in ui-audit/verify-successor-complete.mjs section B/C2.
+    expect(src).toMatch(/const \[successorPromptQueue, setSuccessorPromptQueue\] = useState\(\[\]\);/);
+    expect(src).toMatch(/setSuccessorPromptQueue\(q => \[\.\.\.q, \{ completedTask, projId: pid2, projName: p\.name, successors \}\]\);/);
+    expect(src).not.toMatch(/setSuccessorPrompt\(\{ completedTask, projId: pid2, projName: p\.name, successors \}\);/);
+  });
+
+  it("an already-complete task is excluded from the successors list at the source (never reaches the modal)", () => {
+    expect(src).toMatch(/normPreds\(t\.predecessors\)\.some\(pr => pr\.id === taskId\) && t\.health !== 'green'/);
+  });
+});
