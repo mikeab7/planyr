@@ -12543,7 +12543,6 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
     winStart=start; winEnd=addDays(start,vis); totalDays=Math.max(1,vis); ppd=ganttW/totalDays;
   }
   const xOf=d=>LABEL_W+Math.round((pd(d)-pd(winStart))/DAY*ppd);
-  const HC={gray:"#94a3b8",yellow:"#d97706",red:"#dc2626",green:"#16a34a",paused:"#9ca3af"};
   // Build full month list with date metadata for the axis + adaptive label density.
   const months=[], cur2=new Date(pd(winStart));cur2.setDate(1);
   // Bound the header loop: a valid-but-extreme end date (e.g. a typo'd year 9999, or
@@ -12578,7 +12577,6 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
     // coords (an invisible, broken row). Mirror the on-screen Gantt's "Unscheduled" treatment.
     const blank = !t.start || !t.end || isNaN(pd(t.start)) || isNaN(pd(t.end));
     const bx=xOf(t.start), bw=Math.max(3,Math.round((pd(t.end)-pd(t.start))/86400000*ppd));
-    const color=HC[t.health]||"#94a3b8";
     const isMilestone=t.duration===0;
     const proj=projects.find(p=>p.tasks.some(x=>x.id===t.id));
     const depth=proj?getDepth(proj.tasks,t.id):0;
@@ -12872,12 +12870,34 @@ function buildPDFHtml(cfg, data, forPreview) {
   });
   // Rolled cost for the exhibit: parent = sum of descendant leaf costs; leaf = own value.
   const costOfIn = (tasks, id) => { const kids = tasks.filter(x=>x.parentId===id); const own = Number(tasks.find(x=>x.id===id)?.cost)||0; return kids.length ? own + kids.reduce((s,c)=>s+costOfIn(tasks,c.id),0) : own; };
+  // The exhibit's Status column must show what the SCREEN shows, not the raw stored `health`
+  // field: a task with no manual override is colored live by the automation rule engine
+  // (computeDisplayHealth, #1073) and that computed color is never written back to `health` —
+  // so reading `t.health` directly here silently printed the pre-automation color on every
+  // un-overridden task (B568128, measured live: an overdue leaf read "Not Started" in the PDF while
+  // the grid showed "Needs Attn." for the same task at the same moment). Mirrors the grid Cell's
+  // own rule exactly: a parent shows the worst-of-children ROLLED health, a leaf runs the engine.
+  // Memoized per project (keyed by the project's task array identity) — O(n) once, not per cell.
+  let _healthCtxTasks = null, _healthCtxById = null, _healthCtxRolled = null;
+  const healthCtxFor = tasks => {
+    if (_healthCtxTasks !== tasks) {
+      _healthCtxTasks = tasks;
+      _healthCtxById = {}; tasks.forEach(x => { _healthCtxById[x.id] = x; });
+      _healthCtxRolled = computeRolledHealth(tasks);
+    }
+    return { byId: _healthCtxById, rolled: _healthCtxRolled };
+  };
+  const displayHealthOf = (t, tasks) => {
+    const { byId, rolled } = healthCtxFor(tasks);
+    const isParent = tasks.some(x => x.parentId === t.id);
+    return isParent ? (rolled[t.id] || t.health) : computeDisplayHealth(t, data.settings, byId);
+  };
   const cellVal = (t,k,tasks,projId) => {    switch(k){
       case "start": case "end": return fmtD(t[k]);
       case "duration": return `${t.duration}d`;
       case "percentComplete": return `${t.health==="green" ? 100 : (t.percentComplete||0)}%`;  // match the Gantt bar's green→100 convention
       case "predecessors": return (t.predecessors||[]).map(p=>p.id||p).join(", ");
-      case "health":{const h=HC[t.health]||{l:t.health,c:"#94a3b8"};return `<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:${h.c};flex-shrink:0;display:inline-block"></span>${escapeHtml(h.l)}</span>`;}
+      case "health":{const dh=displayHealthOf(t,tasks);const h=HC[dh]||{l:dh,c:"#94a3b8"};return `<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:${h.c};flex-shrink:0;display:inline-block"></span>${escapeHtml(h.l)}</span>`;}
       case "name":{const dep=getDepth(tasks,t.id);const ind=dep*14;const fw=dep===0?700:dep===1?600:400;const fs=dep===0?10.5:dep===1?10:9.5;const isP=tasks.some(x=>x.parentId===t.id);const key=projId+":"+t.id;const col=collapsedSet.has(key);const tri=(forPreview&&isP)?`<span class="pl-tri${col?"":" open"}" data-collapse="${key}" title="${col?"Expand":"Collapse"}">${col?"\u25B8":"\u25BE"}</span>`:"";return `<span class="pl-name" style="padding-left:${ind}px;font-weight:${fw};font-size:${fs}px">${tri}${escapeHtml(t.name)}</span>`;}
       case "cost":{const v=costOfIn(tasks,t.id);return v?("$"+Number(v).toLocaleString("en-US",{maximumFractionDigits:2})):"";}
       default: return escapeHtml(t[k]);
@@ -12905,8 +12925,11 @@ function buildPDFHtml(cfg, data, forPreview) {
     // start/end/duration. cfg.colWidths (a user's drag, B392) overrides a column's width.
     const projTaskLists = selProjs.map(proj=>{
       let tasks=visibleTasks(proj);
-      if(cfg.healthFilter==="active") tasks=tasks.filter(t=>t.health==="yellow"||t.health==="red");
-      if(cfg.healthFilter==="complete") tasks=tasks.filter(t=>t.health==="green");
+      // Filter by the same DISPLAY health the Status column now prints (not the raw stored
+      // field) — otherwise an automatically-red/green task with no manual override could be
+      // silently dropped from (or kept out of) the "Active"/"Done" filtered exhibit.
+      if(cfg.healthFilter==="active") tasks=tasks.filter(t=>{const h=displayHealthOf(t,proj.tasks);return h==="yellow"||h==="red";});
+      if(cfg.healthFilter==="complete") tasks=tasks.filter(t=>displayHealthOf(t,proj.tasks)==="green");
       return {proj, tasks};
     });
     // Plain-text form of each cell, for width measurement (cellVal returns marked-up HTML).
@@ -12915,7 +12938,7 @@ function buildPDFHtml(cfg, data, forPreview) {
       case "duration": return `${t.duration}d`;
       case "percentComplete": return `${t.health==="green" ? 100 : (t.percentComplete||0)}%`;  // match the Gantt bar's green→100 convention
       case "predecessors": return (t.predecessors||[]).map(p=>p.id||p).join(", ");
-      case "health": { const h=HC[t.health]; return h?h.l:(t.health||""); }
+      case "health": { const dh=displayHealthOf(t,tasks); const h=HC[dh]; return h?h.l:(dh||""); }
       case "name": return t.name==null?"":String(t.name);
       case "cost": { const v=costOfIn(tasks,t.id); return v?("$"+Number(v).toLocaleString("en-US",{maximumFractionDigits:2})):""; }
       default: return t[k]==null?"":String(t[k]);
@@ -13008,8 +13031,8 @@ function buildPDFHtml(cfg, data, forPreview) {
     // Tables only (no Gantt) — full width
     selProjs.forEach(proj=>{
       let tasks=visibleTasks(proj);
-      if(cfg.healthFilter==="active") tasks=tasks.filter(t=>t.health==="yellow"||t.health==="red");
-      if(cfg.healthFilter==="complete") tasks=tasks.filter(t=>t.health==="green");
+      if(cfg.healthFilter==="active") tasks=tasks.filter(t=>{const h=displayHealthOf(t,proj.tasks);return h==="yellow"||h==="red";});
+      if(cfg.healthFilter==="complete") tasks=tasks.filter(t=>displayHealthOf(t,proj.tasks)==="green");
       const thCols=colDefs.map(c=>`<th${c.w?` style="width:${c.w}px"`:""}>${COL_LABELS[c.k]}</th>`).join("");
       const rows=tasks.map((t,i)=>{
         const cells=colDefs.map(c=>`<td class="c-${c.k}">${cellVal(t,c.k,proj.tasks,proj.id)}</td>`).join("");
