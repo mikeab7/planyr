@@ -36,7 +36,7 @@ import { rolesOf, exportsOverPlan, exportBandFor, configCanLift, FRONT_BAND_ATTR
 import { overlayExportRequest } from "./layerRequest.js";
 import {
   lngLatRingToFeet, feetToLatLng, aerialPlacement, overlayExportPlacement,
-  feetExtentToBbox, aerialTileGrid, pickAerialTileZoom,
+  feetExtentToBbox, aerialTileGrid, pickAerialTileZoom, deepenZoomFor,
 } from "./arcgis.js";
 import { siteToFeatures, buildKmz, kmzFilename, KMZ_MIME } from "./kmzExport.js";
 import { buildSheetFurnitureSvg } from "./sheetFurnitureLayout.js";
@@ -542,6 +542,8 @@ export function createExportSheet(ctx) {
   const AERIAL_TILE_TIMEOUT_MS = 8000;
   // Load ONE tile as a canvas-clean <img> (crossOrigin — Esri/USGS send Access-Control-Allow-Origin:*
   // so drawing it never taints the canvas), time-boxed, retried once. Rejects on error/timeout.
+  // This is the STRICT base-fetch loader — the sharpen pass below (B550512) uses its own
+  // fetchTileImageByDeadline, deliberately NOT this one (see its header for why).
   const fetchTileImage = (url) => new Promise((resolve, reject) => {
     let tries = 0;
     const attempt = () => {
@@ -555,26 +557,116 @@ export function createExportSheet(ctx) {
     };
     attempt();
   });
+  // B550512 — the ONE wall-clock ceiling for the "reach one zoom level sharper" attempt below.
+  // Owner's constraint, verbatim: fine at +1s, not fine at +5s — treat 1000ms as a ceiling to
+  // design against, not a target to approach. Export-time only; nothing here runs on a pan/zoom/edit.
+  const AERIAL_DEEPEN_BUDGET_MS = 1000;
+  // Load ONE tile against a SHARED deadline, and — this is the part that matters — GENUINELY ABORT
+  // it the instant the deadline passes (blank `img.src`, drop the handlers), the same technique
+  // fetchTileImage's own timeout already uses. A first version raced fetchTileImage's PROMISE and
+  // simply stopped awaiting it on timeout; the underlying request kept running regardless (up to its
+  // own 8s budget), and a worker lane immediately started ANOTHER one — so under real load the count
+  // of genuinely in-flight-but-abandoned requests kept growing well past DEEPEN_CONCURRENCY, and that
+  // untracked pile is what starved the base fetch a second way (measured: 6s+ for a call that should
+  // cut off near 1000ms). Aborting on timeout is what makes "at most DEEPEN_CONCURRENCY in flight" an
+  // actual invariant instead of a lower bound.
+  const fetchTileImageByDeadline = (url, deadline) => new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.fetchPriority = "low";
+    let done = false;
+    const finish = (result) => { if (done) return; done = true; clearTimeout(timer); img.onload = img.onerror = null; resolve(result); };
+    const timer = setTimeout(() => { img.src = ""; finish(null); }, Math.max(0, deadline - Date.now()));
+    img.onload = () => finish(img);
+    img.onerror = () => finish(null);
+    img.src = url;
+  });
+  // At most this many deepen-tile requests are ever in flight AT ONCE (a small worker pool, not a
+  // Promise.all burst). MEASURED, not assumed: a burst of 150-240 simultaneous requests — the size
+  // a real "one zoom level deeper" frame needs — starves the connection pool badly enough that even
+  // the STRICT base fetch (which the whole export depends on) slowed from its normal sub-second time
+  // to multiple seconds, and the deadline race itself lost precision under the contention (a clean
+  // ~1000ms cutoff measured in isolation drifted to 4s+ once real tile decode + hundreds of pending
+  // streams were in the mix — reproduced with both an HTTP/1.1 mock, capped at Chromium's ~6
+  // connections per origin, and an HTTP/2 mock at Node's default 100-stream cap). Bounding OUR OWN
+  // concurrency removes the dependency on guessing the transport's limit: a small worker pool can
+  // never contend with the base fetch and stays fast under either protocol.
+  const DEEPEN_CONCURRENCY = 24;
+  const mapWithConcurrency = async (items, limit, worker) => {
+    const results = new Array(items.length);
+    let next = 0;
+    const lane = async () => { while (next < items.length) { const i = next++; results[i] = await worker(items[i], i); } };
+    await Promise.all(Array.from({ length: Math.min(limit, items.length) }, lane));
+    return results;
+  };
   // B839 — stitch the source's cached XYZ tiles into a frame-exact data: URL covering `bbox`. Picks a
   // print-crisp zoom (≤ the source's native ceiling), fetches every covering tile in parallel, crops
   // to the exact bbox pixel box, and returns a JPEG data URL. STRICT: if any tile can't be loaded we
   // return null (clean output — the caller then tries the alternate source, then the dynamic /export
   // fallback), rather than stitching a gappy sheet. Returns null on any DOM/canvas error too.
+  //
+  // B550512 — layered on top, a BUDGET-DRIVEN sharpen pass, not a bigger fixed pixel cap. The base
+  // zoom above is picked to keep the TILE COUNT bounded (maxPx 3072), which is the right call for
+  // fetch cost but leaves a big frame capped below the source's native resolution even though sharper
+  // tiles exist. Re-fetching two zoom levels deeper for the WHOLE frame was measured and rejected
+  // (16x the tiles — an order of magnitude over budget on a normal view); instead this tries exactly
+  // ONE zoom level deeper (≈2x linear resolution — the same ratio the live map's `detectRetina`
+  // uplift uses, B170) for the SAME frame, in parallel with the base fetch, capped at
+  // AERIAL_DEEPEN_BUDGET_MS. Esri/USGS serve no same-URL @2x tile (verified against World_Imagery's
+  // own tileInfo — one fixed 256px/96dpi tile set), so a deeper zoom is the only lever. Whichever
+  // sharp tiles land within budget are drawn over the (upscaled) base image; any that don't are left
+  // as the base — never a hole, never a wait past the budget, and a no-op (zero extra fetches) once
+  // the base pick is already at the source's native ceiling (deepenZoomFor → null).
   const stitchAerialDataUrl = async (bm, bbox) => {
     try {
       const z = pickAerialTileZoom(bbox, { maxNative: bm.maxNative, maxPx: 3072 });
       const grid = aerialTileGrid(bbox, z);
       if (!grid.tiles.length) return null;
-      const loaded = await Promise.all(grid.tiles.map(async (t) => {
+      const deepenZ = deepenZoomFor(z, bm.maxNative);
+      const deepenGrid = deepenZ ? aerialTileGrid(bbox, deepenZ) : null;
+      // BASE tiles are DISPATCHED FIRST — `img.src=` for all of them runs before a single deepen
+      // request is created. This is not cosmetic ordering: a Priority Hint only re-sorts requests
+      // still WAITING to be dispatched, it cannot pre-empt one already holding a connection. On a
+      // busy per-origin connection queue (~6 concurrent over HTTP/1.1), firing the larger deepen
+      // swarm first let its low-priority tiles grab every slot before the base tiles even reached
+      // the queue, delaying the STRICT base fetch itself (measured: 3s+ instead of its normal
+      // sub-second time). Queuing base first, still with no `await` between the two `Promise.all`s
+      // below, keeps them running in the same window (bounded added latency) while guaranteeing
+      // the base fetch is never the one left waiting.
+      const loadedPromise = Promise.all(grid.tiles.map(async (t) => {
         const url = bm.tiles.replace("{z}", z).replace("{y}", t.y).replace("{x}", t.x);
         try { return { t, img: await fetchTileImage(url) }; } catch (_) { return { t, img: null }; }
       }));
-      if (loaded.some((r) => !r.img)) return null; // any missing tile → fall back (never a gappy exhibit)
+      const deepenDeadline = Date.now() + AERIAL_DEEPEN_BUDGET_MS;
+      const sharpPromise = deepenGrid && deepenGrid.tiles.length
+        ? mapWithConcurrency(deepenGrid.tiles, DEEPEN_CONCURRENCY, async (t) => {
+            const url = bm.tiles.replace("{z}", deepenZ).replace("{y}", t.y).replace("{x}", t.x);
+            const img = await fetchTileImageByDeadline(url, deepenDeadline);
+            return img ? { t, img } : null;
+          })
+        : null;
+      const loaded = await loadedPromise;
+      if (loaded.some((r) => !r.img)) return null; // any missing BASE tile → fall back (never a gappy exhibit)
       const canvas = document.createElement("canvas");
       canvas.width = grid.canvasW; canvas.height = grid.canvasH;
       const ctx = canvas.getContext("2d");
       if (!ctx) return null;
       for (const { t, img } of loaded) ctx.drawImage(img, Math.round(t.dx), Math.round(t.dy), 256, 256);
+      if (sharpPromise) {
+        const arrived = (await sharpPromise).filter(Boolean);
+        if (arrived.length) {
+          const sc = document.createElement("canvas");
+          sc.width = deepenGrid.canvasW; sc.height = deepenGrid.canvasH;
+          const sctx = sc.getContext("2d");
+          if (sctx) {
+            sctx.drawImage(canvas, 0, 0, sc.width, sc.height); // base, upscaled — covers every cell the sharp fetch missed
+            for (const { t, img } of arrived) sctx.drawImage(img, Math.round(t.dx), Math.round(t.dy), 256, 256);
+            const sharpOut = sc.toDataURL("image/jpeg", 0.92);
+            releaseCanvas(canvas); releaseCanvas(sc);
+            return sharpOut;
+          }
+        }
+      }
       // NEW-5 — the stitched aerial can run to many megapixels; encode, then hand the buffer back.
       const out = canvas.toDataURL("image/jpeg", 0.92);
       releaseCanvas(canvas);

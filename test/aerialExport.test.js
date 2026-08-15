@@ -12,6 +12,7 @@ import {
   lngLatToGlobalPixel,
   aerialTileGrid,
   pickAerialTileZoom,
+  deepenZoomFor,
 } from "../src/workspaces/site-planner/lib/arcgis.js";
 
 // A Katy-area origin (the app's home turf), same latitude band as EPSG:2278.
@@ -139,5 +140,37 @@ describe("pickAerialTileZoom (B839)", () => {
     expect(g.canvasW).toBeLessThanOrEqual(3072);
     expect(g.canvasH).toBeLessThanOrEqual(3072);
     expect(z).toBeLessThan(19); // a 24000ft sheet can't stay under maxPx at z19
+  });
+});
+
+// B550512 — the export-time SHARPEN target: one zoom level past whatever pickAerialTileZoom
+// picked for the maxPx-bounded base stitch, capped at the source's ceiling. Esri/USGS serve no
+// same-URL @2x tile (confirmed live against World_Imagery's tileInfo — one fixed 256px/96dpi
+// tile set), so a deeper zoom is the only lever, exactly mirroring how B170's retina uplift
+// works on the live map (request z+1, never a distinct high-DPI asset).
+describe("deepenZoomFor (B550512)", () => {
+  it("returns one zoom level deeper when headroom remains under the ceiling", () => {
+    expect(deepenZoomFor(17, 19)).toBe(18);
+    expect(deepenZoomFor(18, 19)).toBe(19);
+  });
+  it("returns null once already at (or past) the source's native ceiling — nothing to gain", () => {
+    expect(deepenZoomFor(19, 19)).toBeNull();
+    expect(deepenZoomFor(20, 19)).toBeNull(); // defensive: a caller-supplied z past the ceiling
+  });
+  it("respects a shallower ceiling (USGS tops out at z16, not Esri's z19)", () => {
+    expect(deepenZoomFor(15, 16)).toBe(16);
+    expect(deepenZoomFor(16, 16)).toBeNull();
+  });
+  it("matches pickAerialTileZoom's own base pick for realistic frame sizes — a mid-size site has\n     headroom to deepen, a small one is already at the ceiling with nothing to gain", () => {
+    // ~2200ft frame: pickAerialTileZoom already lands at z19 (see the test above) — no headroom.
+    const small = feetExtentToBbox({ minX: -1100, minY: -1100, maxX: 1100, maxY: 1100 }, lat0, lon0);
+    const zSmall = pickAerialTileZoom(small, { maxNative: 19, maxPx: 3072 });
+    expect(deepenZoomFor(zSmall, 19)).toBeNull();
+    // ~6000ft frame (a large industrial tract): the base pick backs off from z19 to keep the
+    // canvas under maxPx, so there IS real headroom — this is the case B550512 exists for.
+    const big = feetExtentToBbox({ minX: -3000, minY: -3000, maxX: 3000, maxY: 3000 }, lat0, lon0);
+    const zBig = pickAerialTileZoom(big, { maxNative: 19, maxPx: 3072 });
+    expect(zBig).toBeLessThan(19);
+    expect(deepenZoomFor(zBig, 19)).toBe(zBig + 1);
   });
 });
