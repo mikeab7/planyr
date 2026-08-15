@@ -21,8 +21,8 @@ describe("pondEncumbranceConflicts — hand-computed overlaps", () => {
   });
   it("sums easement + corridor legs into totalSf", () => {
     const pond = { id: "p1", ring: rect(0, 0, 100, 100) };
-    const ease = { id: "e1", ring: rect(0, 0, 100, 20) };       // 2 000 sf
-    const corridor = rect(0, 80, 100, 120);                      // 2 000 sf inside
+    const ease = { id: "e1", ring: rect(0, 0, 100, 20) };       // 2 000 SF
+    const corridor = rect(0, 80, 100, 120);                      // 2 000 SF inside
     const out = pondEncumbranceConflicts({ ponds: [pond], easements: [ease], corridorRings: [corridor] });
     expect(out[0].easementSf).toBeCloseTo(2000, -1);
     expect(out[0].corridorSf).toBeCloseTo(2000, -1);
@@ -30,7 +30,7 @@ describe("pondEncumbranceConflicts — hand-computed overlaps", () => {
   });
   it("a sliver under minSf is not a finding; a clear pond reports nothing", () => {
     const pond = { id: "p1", ring: rect(0, 0, 100, 100) };
-    const sliver = { id: "e1", ring: rect(99, 99, 199, 199) };   // 1 sf overlap
+    const sliver = { id: "e1", ring: rect(99, 99, 199, 199) };   // 1 SF overlap
     expect(pondEncumbranceConflicts({ ponds: [pond], easements: [sliver] })).toEqual([]);
     const far = { id: "e2", ring: rect(5000, 5000, 5100, 5100) }; // bbox prefilter path
     expect(pondEncumbranceConflicts({ ponds: [pond], easements: [far] })).toEqual([]);

@@ -127,13 +127,13 @@ export function requirementNote({ requirements = [] } = {}) {
 /* The AMBER "not buildable as drawn" heading (G2): the volume is met but only by a design
  * that breaks a hard limit. Never GREEN. Pure copy. */
 export function unbuildableHeading({ requiredAcFt = null } = {}) {
-  const y = Number.isFinite(requiredAcFt) ? `${F1(requiredAcFt)} ac-ft` : "required";
+  const y = Number.isFinite(requiredAcFt) ? `${F1(requiredAcFt)} AC-FT` : "required";
   return `Meets the ${y} volume, but not buildable as drawn`;
 }
 
 /* The make-it-buildable options sentence (G2/G3). Pure copy. */
 export function makeItBuildableOptions({ extraAcres = null } = {}) {
-  const enlarge = Number.isFinite(extraAcres) && extraAcres > 0 ? `enlarge the pond by ~${F1(extraAcres)} ac` : "enlarge the pond";
+  const enlarge = Number.isFinite(extraAcres) && extraAcres > 0 ? `enlarge the pond by ~${F1(extraAcres)} AC` : "enlarge the pond";
   return `To make it buildable: ${enlarge}, add a second basin, raise the outfall or add a pump, or provide inlets through the berm.`;
 }
 

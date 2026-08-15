@@ -97,7 +97,7 @@ export function stackedBarLayout({ segments = [], markerValue = null, total = nu
  * the DOM and the print-string renderer walk. Each mark carries a `role` (never a colour);
  * the renderer resolves role → fill/stroke from its own palette. `barH` is the bar band's
  * height; the total svg height should leave room for a label row below when `showDelta`. */
-export function bulletBarMarks(layout, { w = 200, barH = 12, unit = "ac-ft", showDelta = true } = {}) {
+export function bulletBarMarks(layout, { w = 200, barH = 12, unit = "AC-FT", showDelta = true } = {}) {
   const marks = [];
   const y = 0;
   // Track (the full-width baseline the provided bar sits on).
@@ -158,7 +158,7 @@ export function stormwaterBarSpecs(d) {
   } else if (req && req.kind === "point" && req.requiredAcFt > ACFT_EPS) {
     const dv = usableAcFt - req.requiredAcFt;
     const short = dv < -ACFT_EPS;
-    out.det = { label: "Detention", layout: bulletBarLayout({ provided: usableAcFt, required: req.requiredAcFt, reference: providedAcFt }), status: short ? "short" : "covered", verdict: `${_signed(dv)} ac-ft` };
+    out.det = { label: "Detention", layout: bulletBarLayout({ provided: usableAcFt, required: req.requiredAcFt, reference: providedAcFt }), status: short ? "short" : "covered", verdict: `${_signed(dv)} AC-FT` };
   } else if (req && req.kind === "point") {
     out.det = { label: "Detention", layout: bulletBarLayout({ provided: usableAcFt ?? providedAcFt, required: 0 }), status: null, verdict: "none required" };
   } else if (req && req.kind === "band" && usableAcFt == null) {
@@ -166,7 +166,7 @@ export function stormwaterBarSpecs(d) {
   } else if (req && req.kind === "band") {
     const prov = usableAcFt; // never gross — gross rides the reference tick only
     const status = prov >= req.bandAcFt[1] - ACFT_EPS ? "covered" : prov < req.bandAcFt[0] - ACFT_EPS ? "short" : "needs-input";
-    out.det = { label: "Detention", layout: bulletBarLayout({ provided: prov, bandLo: req.bandAcFt[0], bandHi: req.bandAcFt[1], reference: providedAcFt }), status, verdict: `${_f2(req.bandAcFt[0])}–${_f2(req.bandAcFt[1])} ac-ft` };
+    out.det = { label: "Detention", layout: bulletBarLayout({ provided: prov, bandLo: req.bandAcFt[0], bandHi: req.bandAcFt[1], reference: providedAcFt }), status, verdict: `${_f2(req.bandAcFt[0])}–${_f2(req.bandAcFt[1])} AC-FT` };
   } else if (req && req.kind === "unknown") {
     out.det = { label: "Detention", layout: bulletBarLayout({ unknown: true }), status: "unknown", verdict: "required unknown" };
   }
@@ -191,7 +191,7 @@ export function stormwaterBarSpecs(d) {
           label: "Mitigation",
           layout: bulletBarLayout({ provided: provAcFt, required: mit.volumeAcFt }),
           status: short ? "short" : "covered",
-          verdict: short ? `${_signed(bal)} ac-ft` : "covered",
+          verdict: short ? `${_signed(bal)} AC-FT` : "covered",
         };
       }
     } else {
@@ -235,7 +235,7 @@ const _r2 = (n) => Number(Number(n).toFixed(2));
  * caller to the same Inter/tabular-nums numeric font the screen uses, never monospace)
  * is the delta label's font-family; `colors` overrides the print palette. Pure — used
  * by printSheet.js so the export bar matches the screen bar (PDF-PARITY). */
-export function bulletBarSvg(layout, { x = 0, y = 0, w = 200, barH = 12, status = null, unit = "ac-ft", mono = "Inter, system-ui, sans-serif", colors = PRINT_BAR_COLORS } = {}) {
+export function bulletBarSvg(layout, { x = 0, y = 0, w = 200, barH = 12, status = null, unit = "AC-FT", mono = "Inter, system-ui, sans-serif", colors = PRINT_BAR_COLORS } = {}) {
   const C = colors;
   const built = layout && layout.mode === "stacked" ? stackedBarMarks(layout, { w, barH }) : bulletBarMarks(layout, { w, barH, unit });
   let s = "";

@@ -56,9 +56,9 @@ describe("polyClip — polygon intersection area (B652)", () => {
 });
 
 describe("overlappingParcelPairs — the B652 safety net", () => {
-  const parent = { id: "p", points: sq(0, 0, 20) };            // 400 sf
-  const childA = { id: "a", parentId: "p", points: [{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 10 }, { x: 0, y: 10 }] };  // bottom half (200 sf)
-  const childB = { id: "b", parentId: "p", points: [{ x: 0, y: 10 }, { x: 20, y: 10 }, { x: 20, y: 20 }, { x: 0, y: 20 }] }; // top half (200 sf)
+  const parent = { id: "p", points: sq(0, 0, 20) };            // 400 SF
+  const childA = { id: "a", parentId: "p", points: [{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 10 }, { x: 0, y: 10 }] };  // bottom half (200 SF)
+  const childB = { id: "b", parentId: "p", points: [{ x: 0, y: 10 }, { x: 20, y: 10 }, { x: 20, y: 20 }, { x: 0, y: 20 }] }; // top half (200 SF)
 
   it("flags a parent + child both active (the double-count case)", () => {
     const pairs = overlappingParcelPairs([{ ...parent }, { ...childA }]);
@@ -94,12 +94,12 @@ describe("dissolvedParcelSqft — union/dissolve site area (B715)", () => {
   const P = (id, ring, extra = {}) => ({ id, points: ring, ...extra });
 
   it("no overlap → the exact additive sum (byte-identical to the old number, no clipper jitter)", () => {
-    // Two disjoint 10×10 squares = 200 sf, exact.
+    // Two disjoint 10×10 squares = 200 SF, exact.
     expect(dissolvedParcelSqft([P("a", sq(0, 0, 10)), P("b", sq(100, 100, 10))])).toBe(200);
   });
 
   it("edge-adjacent parcels (shared boundary, no interior overlap) → the exact sum", () => {
-    // Two 10×10 lots sharing the x=10 edge → 200 sf, still the fast-path sum (no union rounding).
+    // Two 10×10 lots sharing the x=10 edge → 200 SF, still the fast-path sum (no union rounding).
     expect(dissolvedParcelSqft([P("a", sq(0, 0, 10)), P("b", sq(10, 0, 10))])).toBe(200);
   });
 
@@ -118,8 +118,8 @@ describe("dissolvedParcelSqft — union/dissolve site area (B715)", () => {
   });
 
   it("the Martini shape: two hand-drawn outlines over the real parcels → footprint, not the tripled sum", () => {
-    // Two identical 100×100 "drawn boundary outlines" (10,000 sf each) laid over four 50×50 real
-    // parcels (2,500 sf each) that tile the same 100×100 ground. Additive = 10k+10k+4·2.5k = 30,000;
+    // Two identical 100×100 "drawn boundary outlines" (10,000 SF each) laid over four 50×50 real
+    // parcels (2,500 SF each) that tile the same 100×100 ground. Additive = 10k+10k+4·2.5k = 30,000;
     // the true dissolved footprint is the 100×100 = 10,000. (Mirrors Martini's 176.6 → ~88.6 collapse.)
     const outlineA = P("o1", sq(0, 0, 100), { attrs: null });
     const outlineB = P("o2", sq(0, 0, 100), { attrs: null });

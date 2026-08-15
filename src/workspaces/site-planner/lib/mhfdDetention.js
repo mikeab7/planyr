@@ -194,7 +194,7 @@ export const MHFD_DETENTION_RULES = {
           "independent ponds: the WQCV occupies the lowest zone and drains over the elected " +
           "12/24/40 hours, the EURV is captured and released slowly above it, and the " +
           "flood-control event routes through the volume above that. The governing REQUIRED " +
-          "volume is therefore set by the components together, which is why no single ac-ft/ac " +
+          "volume is therefore set by the components together, which is why no single AC-FT/AC " +
           "rate can express it.",
         memberCounties: MHFD_MEMBER_COUNTIES,
         targetCounties: MHFD_TARGET_COUNTIES,
@@ -559,7 +559,7 @@ export function computeMhfdDetention({
     requiredAcFt: totalAcFt,
     bandAcFt: null,
     rateAcFtPerAc: null, // a full-spectrum volume has NO per-acre rate — never fabricate one
-    basis: `${rec.authorityShort} full spectrum detention: ${requiredComps.map((c) => `${c.short} ${c.acFt}`).join(" + ")} ac-ft`,
+    basis: `${rec.authorityShort} full spectrum detention: ${requiredComps.map((c) => `${c.short} ${c.acFt}`).join(" + ")} AC-FT`,
     panelLine: `${rec.authorityShort} ${MHFD_PANEL_LINE}`,
     verdictSubject: verdictSubjectFor(rec, components),
     components,
@@ -780,7 +780,7 @@ export function mhfdMethodNotes({ carrier = null, jurisdiction = null, drawdown 
   const fmt1 = (n) => (n == null ? null : (Math.round(n * 10) / 10).toFixed(1));
   for (const c of carrier.components || []) {
     const value = c.state === "computed" && c.acFt != null
-      ? `: ${fmt1(c.acFt)} ac-ft`
+      ? `: ${fmt1(c.acFt)} AC-FT`
       : ` · ${c.state === "needs-input" ? "needs input" : "not carried"}`;
     out.push({
       key: `mhfd-comp-${c.id}`,

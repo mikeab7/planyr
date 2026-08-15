@@ -96,7 +96,7 @@ describe("L1 — the section shows what a developer needs", () => {
     // band lives between the left and right faces (inside the section, not a floating box)
     expect(Math.min(...xs)).toBeGreaterThan(80);
     expect(Math.max(...xs)).toBeLessThan(520 - 80);
-    expect(has((l) => l.s === "usable 15.3 ac-ft")).toBe(true);
+    expect(has((l) => l.s === "usable 15.3 AC-FT")).toBe(true);
   });
   it("shows the outlet + receiving water, with the receiving level ABOVE the outlet (the gravity problem)", () => {
     expect(m.outlet).toBeTruthy();

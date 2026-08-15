@@ -103,8 +103,8 @@ export function offsiteDrainageFlag({ upstreamAcres = null, siteAcres = null, ma
   const r1 = (n) => Math.round(n * 10) / 10;
   if (!material) {
     return { known: true, offsite: false, upstreamAcres: r1(upstreamAcres), offsiteAcres: r1(offsiteAcres), ratio: Math.round(ratio * 100) / 100, severity: "ok",
-      message: `Upstream contributing area ≈ ${r1(upstreamAcres)} ac (~${r1(offsiteAcres)} ac offsite) — not materially larger than the ${r1(siteAcres)}-ac site. Screening only; confirm the drainage path.` };
+      message: `Upstream contributing area ≈ ${r1(upstreamAcres)} AC (~${r1(offsiteAcres)} AC offsite) — not materially larger than the ${r1(siteAcres)}-ac site. Screening only; confirm the drainage path.` };
   }
   return { known: true, offsite: true, upstreamAcres: r1(upstreamAcres), offsiteAcres: r1(offsiteAcres), ratio: Math.round(ratio * 100) / 100, severity: "warn",
-    message: `⚠ Offsite flow: ~${r1(upstreamAcres)} ac drains to this site's outfall — ${Math.round((ratio - 1) * 100)}% MORE than the ${r1(siteAcres)}-ac site (~${r1(offsiteAcres)} ac from uphill). That offsite runoff is NOT modeled in the on-site detention screen; it may need bypass/conveyance and its own detention — engineer's check. (Screening from the 3DEP DEM, not a delineated study.)` };
+    message: `⚠ Offsite flow: ~${r1(upstreamAcres)} AC drains to this site's outfall — ${Math.round((ratio - 1) * 100)}% MORE than the ${r1(siteAcres)}-ac site (~${r1(offsiteAcres)} AC from uphill). That offsite runoff is NOT modeled in the on-site detention screen; it may need bypass/conveyance and its own detention — engineer's check. (Screening from the 3DEP DEM, not a delineated study.)` };
 }

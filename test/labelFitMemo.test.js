@@ -161,7 +161,7 @@ test("END TO END — the same pond laid out twice through layoutLabels places id
   const c = ring.reduce((s, p) => ({ x: s.x + p.x / ring.length, y: s.y + p.y / ring.length }), { x: 0, y: 0 });
   const mk = (cx, cy) => [{
     id: "pond", cx, cy,
-    lines: ["Detention Pond", { parts: ["footprint 6.11 ac", "266,354 sf"], sep: " · ", keep: 1 }],
+    lines: ["Detention Pond", { parts: ["footprint 6.11 AC", "266,354 SF"], sep: " · ", keep: 1 }],
     lh: 14.5, charW: 6.6, halfW: 300, halfH: 200,
     ring, ringOrigin: c, ringPpf: ppf, mustLabel: true, importance: 1,
   }];

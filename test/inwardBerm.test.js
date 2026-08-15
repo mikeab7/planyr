@@ -63,7 +63,7 @@ describe("D1 — geometric ceiling: the footprint pinches closed", () => {
 });
 
 describe("D1 — the storage integrates on the inward solid, not a straight prism", () => {
-  const ring = square(400); // 160,000 sf toe
+  const ring = square(400); // 160,000 SF toe
   const gradeFt = 100, wseFt = 100;
   const det = { depth: 8, freeboard: 1, slope: 3, tobElev: 104 }; // rim 4 ft above grade
 

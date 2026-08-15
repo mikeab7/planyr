@@ -17,7 +17,11 @@ const EXPORT_SHEET = read("../src/workspaces/site-planner/lib/exportSheet.js");
 
 describe("NEW-1: measurements are styled through the ONE resolver, on every mode", () => {
   it("the render calls measureStyle and no longer hardcodes the accent", () => {
-    expect(SP).toMatch(/const st = measureStyle\(m, \{ accent: PAL\.accent, uncalibrated: calibrationState === "uncalibrated", selected: isSel \}\)/);
+    /* B548816 — the `accent` OPTION is gone, not merely un-hardcoded. Passing PAL.accent is what
+       gave a measurement the markup family's default fill colour and camouflaged it, so the
+       resolver now owns the built-in ink and refuses to take one from a caller. */
+    expect(SP).toMatch(/const st = measureStyle\(m, \{ uncalibrated: calibrationState === "uncalibrated", selected: isSel \}\)/);
+    expect(SP).not.toMatch(/measureStyle\(m, \{ accent:/);
     // the old hardcoded line — the whole point of the item — must be gone
     expect(SP).not.toMatch(/const mcolor = warn \? "#b45309" : PAL\.accent/);
   });
@@ -244,7 +248,7 @@ describe("NEW-2: the label reveal zoom is per-measurement, captured by click", (
 describe("NEW-3: the summary chip, the segment dimensions, and print parity", () => {
   it("the run-on one-liner is gone", () => {
     expect(SP).not.toMatch(/′ perim`/);
-    expect(SP).not.toMatch(/\$\{f0\(polyArea\(fpts\)\)\} sf · \$\{f2\(polyArea\(fpts\) \/ SQFT_PER_ACRE\)\} ac/);
+    expect(SP).not.toMatch(/\$\{f0\(polyArea\(fpts\)\)\} SF · \$\{f2\(polyArea\(fpts\) \/ SQFT_PER_ACRE\)\} AC/);
   });
   it("the panel reads the same formatters as the canvas (one number convention)", () => {
     expect(SP).toMatch(/rows\.push\(\["Perimeter", fmtFeet\(pathLen\(\[\.\.\.fpts, fpts\[0\]\]\)\)\]\)/);

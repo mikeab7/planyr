@@ -18,8 +18,18 @@
  * test/measureStyle.test.js.
  */
 
+import { MEASURE_INK } from "../../../shared/theme/familyInk.js";
+
 // The amber the uncalibrated state has always used (matches the Doc Review calibration warning).
 export const MEASURE_WARN_COLOR = "#b45309";
+
+/* ⛔ B548816 — THE MEASUREMENT'S DEFAULT INK IS ITS OWN, NOT THE APP ACCENT. It used to be
+ * PAL.accent, which is byte-for-byte the markup family's default FILL (#c2410c), so a
+ * default-coloured measurement drawn over a default-coloured markup was INVISIBLE while being
+ * painted on top of it — a hairline and a 10% tint over a solid slab of the same colour. That
+ * read as a layering bug for weeks and is not one; the whole reasoning, and why the obvious teal
+ * alternative was measured and rejected, is in shared/theme/familyInk.js. */
+export const MEASURE_DEFAULT_COLOR = MEASURE_INK;
 
 /* Built-in look, chosen to reproduce EXACTLY what a measurement looked like before it had any
  * style at all — an untouched plan must render byte-identically. weight 1.5 / +1 when selected,
@@ -69,13 +79,16 @@ export function measureDefaultStyle(settings) {
 /**
  * Resolved paint for one measurement.
  * @param m            the measure object (may carry stroke/weight/dash/fill/fillOpacity)
- * @param accent       the theme accent — the built-in colour when the user has set none
  * @param uncalibrated true when the drawing has no scale yet (forces the amber warn state)
  * @param selected     bumps weight + fill opacity, exactly as the old hardcoded render did
  * @returns { stroke, fill, fillOpacity, weight, dash, warn } — `dash` is the NAME
  *          ("solid"/"dashed"/"dotted"), turned into a dash array by the caller's shared helper.
+ *
+ * B548816 — the `accent` option is GONE rather than defaulted, deliberately: a caller passing
+ * the app accent is exactly the defect, and a silently-ignored option would let it come back.
  */
-export function measureStyle(m, { accent = "#f97316", uncalibrated = false, selected = false } = {}) {
+export function measureStyle(m, { uncalibrated = false, selected = false } = {}) {
+  const accent = MEASURE_DEFAULT_COLOR;
   const o = m || {};
   const warn = !!uncalibrated;
   // The correctness override: amber wins over any user colour, for BOTH the line and the fill.

@@ -29,6 +29,8 @@
  * A capability is in here only if more than one family plausibly wants it — this is a parity
  * vocabulary, not an inventory of every control in the app.
  */
+import { CROSS_BAND } from "../src/workspaces/site-planner/lib/paintOrder.js";
+
 export const PROP_CAPS = [
   "stroke",        // outline / line colour
   "fill",          // fill colour + opacity
@@ -47,7 +49,7 @@ export const ACTION_CAPS = [
   "lock",          // Lock / Unlock (or Pin / Unpin — see the NAMING rule below)
   "arrangeEnds",   // Bring to Front / Send to Back
   "arrangeSteps",  // Bring Forward / Send Backward — the one-step siblings of the above
-  "crossBand",     // the explicit escape hatch across the plan (e.g. "Send behind buildings")
+  "crossBand",     // the explicit escape hatch across the plan — see CROSS_BAND_CELLS below
   "delete",        // Delete
 ];
 
@@ -58,6 +60,24 @@ export const ACTION_CAPS = [
 export const CANONICAL_LOCK_VERB = "Lock";
 
 const YES = "yes";
+
+/* ⛔ B548819 — `crossBand` DECLARES ITS NAME AND BOTH DIRECTIONS, not merely that it exists.
+ *
+ * Every row used to read a bare `crossBand: XB_ANNOT`, which is a true statement and a useless one: it
+ * says the escape hatch is there and nothing about what it is CALLED. That gap is precisely how
+ * FIVE different pairs of words came to be live for one idea — "Send behind buildings" on a
+ * markup, "Send behind the plan" on a measurement and a callout, "Draw above / below the plan" on
+ * a reference, "Force on top of everything" on an element — and the drift is not cosmetic: it is
+ * why the owner's fifth report of "send to back never works" read as a different bug from the
+ * first four. `CANONICAL_LOCK_VERB` already pins ONE NAME PER CONCEPT for Lock/Pin; this is the
+ * same rule applied to the capability that actually kept breaking.
+ *
+ * A cell is `{ behind, front }` — the exact strings the menu renders, in both directions — plus a
+ * `divergentName` REASON whenever they are not the canonical pair. The strings come from
+ * `paintOrder.js`, which is also what the planner imports, so the declaration cannot drift from
+ * the menu by construction. */
+const XB_ANNOT = { behind: CROSS_BAND.markup.behind, front: CROSS_BAND.markup.front };
+const XB_EL = { behind: CROSS_BAND.element.behind, front: CROSS_BAND.element.front, divergentName: CROSS_BAND.element.divergentName };
 
 /* ---------------------------------------------------------------------------------------------
  * THE MATRIX.
@@ -89,14 +109,14 @@ export const ELEMENT_CAPABILITIES = [
     actions: {
       properties: YES, copy: YES, duplicate: YES, lock: YES,
       arrangeEnds: YES, arrangeSteps: YES,
-      crossBand: YES,
+      crossBand: XB_EL,
       delete: YES,
     },
   },
   {
     type: "paving", label: "Paving", family: "el",
     props: { stroke: YES, fill: YES, lineWeight: YES, dash: YES, size: YES, rotation: YES, label: YES, lock: YES },
-    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: YES, delete: YES },
+    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: XB_EL, delete: YES },
   },
   {
     type: "road", label: "Road", family: "el",
@@ -104,22 +124,22 @@ export const ELEMENT_CAPABILITIES = [
       stroke: YES, fill: YES, lineWeight: YES, dash: YES, rotation: YES, label: YES, lock: YES,
       size: { na: "a centreline road is sized by its travel width + its drawn centreline, not by a W×H box; the width field lives in the road card and the length is the geometry the user drew" },
     },
-    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: YES, delete: YES },
+    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: XB_EL, delete: YES },
   },
   {
     type: "parking", label: "Car Parking", family: "el",
     props: { stroke: YES, fill: YES, lineWeight: YES, dash: YES, size: YES, rotation: YES, label: YES, lock: YES },
-    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: YES, delete: YES },
+    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: XB_EL, delete: YES },
   },
   {
     type: "trailer", label: "Trailer Parking", family: "el",
     props: { stroke: YES, fill: YES, lineWeight: YES, dash: YES, size: YES, rotation: YES, label: YES, lock: YES },
-    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: YES, delete: YES },
+    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: XB_EL, delete: YES },
   },
   {
     type: "pond", label: "Detention Pond", family: "el",
     props: { stroke: YES, fill: YES, lineWeight: YES, dash: YES, size: YES, rotation: YES, label: YES, lock: YES },
-    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: YES, delete: YES },
+    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: XB_EL, delete: YES },
   },
 
   /* ---- MARKUPS (`kind: "markup"`) ----------------------------------------------------------
@@ -134,7 +154,7 @@ export const ELEMENT_CAPABILITIES = [
       size: { na: "a line is sized by dragging either end dot; a W×H box would not describe it" },
       rotation: { na: "rotating a two-point line is the same gesture as moving one end — the end dots ARE the rotation control" },
     },
-    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: YES, delete: YES },
+    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: XB_ANNOT, delete: YES },
   },
   {
     type: "mpolyline", label: "Polyline markup", family: "markup",
@@ -144,7 +164,7 @@ export const ELEMENT_CAPABILITIES = [
       size: { na: "sized by its vertices — drag a dot to reshape, ＋ adds one, Shift-click removes one" },
       rotation: { na: "a free vertex path has no single rotation axis; reshape by its dots instead" },
     },
-    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: YES, delete: YES },
+    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: XB_ANNOT, delete: YES },
   },
   {
     type: "mpolygon", label: "Polygon markup", family: "markup",
@@ -153,17 +173,17 @@ export const ELEMENT_CAPABILITIES = [
       size: { na: "sized by its vertices, like the polyline it closes" },
       rotation: { na: "a free vertex ring has no single rotation axis" },
     },
-    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: YES, delete: YES },
+    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: XB_ANNOT, delete: YES },
   },
   {
     type: "mrect", label: "Rectangle markup", family: "markup",
     props: { stroke: YES, fill: YES, lineWeight: YES, dash: YES, size: YES, rotation: YES, label: YES, lock: YES },
-    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: YES, delete: YES },
+    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: XB_ANNOT, delete: YES },
   },
   {
     type: "mellipse", label: "Ellipse markup", family: "markup",
     props: { stroke: YES, fill: YES, lineWeight: YES, dash: YES, size: YES, rotation: YES, label: YES, lock: YES },
-    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: YES, delete: YES },
+    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: XB_ANNOT, delete: YES },
   },
   {
     type: "easement", label: "Easement", family: "markup",
@@ -171,7 +191,7 @@ export const ELEMENT_CAPABILITIES = [
       stroke: YES, fill: YES, lineWeight: YES, dash: YES, size: YES, label: YES, lock: YES,
       rotation: { na: "an easement's corridor is DERIVED from its centreline and width; a free rotation would desync the two" },
     },
-    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: YES, delete: YES },
+    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: XB_ANNOT, delete: YES },
   },
 
   /* ---- ANNOTATIONS (`kind: "callout"`) -----------------------------------------------------
@@ -186,7 +206,7 @@ export const ELEMENT_CAPABILITIES = [
       dash: { na: "a dashed callout box is not a convention anyone draws; the leader is what carries meaning" },
       rotation: { na: "annotation text is always read horizontally — a rotated callout is a legibility bug, not a feature" },
     },
-    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: YES, delete: YES },
+    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: XB_ANNOT, delete: YES },
   },
   {
     type: "text", label: "Text box", family: "callout",
@@ -196,7 +216,7 @@ export const ELEMENT_CAPABILITIES = [
       dash: { na: "see callout" },
       rotation: { na: "see callout — annotation text stays horizontal" },
     },
-    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: YES, delete: YES },
+    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: XB_ANNOT, delete: YES },
   },
 
   /* ---- MEASUREMENTS (`kind: "measure"`) ---------------------------------------------------- */
@@ -208,7 +228,7 @@ export const ELEMENT_CAPABILITIES = [
       dash: { na: "a measurement's line style is what makes it READ as a measurement rather than as drawn work — authoring it away is the one change that would make it lie" },
       rotation: { na: "a measurement describes geometry that already exists; rotating it would change the number it reports, which is the one thing it must never do" },
     },
-    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: YES, delete: YES },
+    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: XB_ANNOT, delete: YES },
   },
 
   /* ---- PARCELS (`kind: "parcel"`) ----------------------------------------------------------
@@ -239,6 +259,8 @@ export const capabilityFor = (type) => ELEMENT_CAPABILITIES.find((r) => r.type =
 /* Every cell's verdict, normalised: "yes" | "na" | "open". */
 export function verdict(cell) {
   if (cell === YES) return "yes";
+  // B548819 — a crossBand cell states the command in both directions; that IS a "yes".
+  if (cell && typeof cell === "object" && typeof cell.behind === "string" && typeof cell.front === "string") return "yes";
   if (cell && typeof cell === "object" && typeof cell.na === "string" && cell.na.trim()) return "na";
   if (cell && typeof cell === "object" && typeof cell.open === "string" && cell.open.trim()) return "open";
   return null;                                    // malformed — the guard fails on this

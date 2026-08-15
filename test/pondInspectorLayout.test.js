@@ -21,7 +21,7 @@ const pondBody = src.slice(pondStart, pondEnd);
 describe("B1/B2 — header + status card sit above the Dimensions rows", () => {
   it("header (water area) → status card → design-change card → Dimensions render in order", () => {
     const order = [
-      "ac water surface",
+      "AC water surface",
       "statusCards.length > 0",
       "<DesignChangeSummaryCard",
       "{g_atAGlance}",
@@ -84,7 +84,7 @@ describe("B3 — Dimensions rows carry the v3 labels (not the old ones)", () => 
 describe("B2 — the provided/required pair renders once, in the status card (G1)", () => {
   it("the 'ac-ft required' pair lives in the status card, never in the Dimensions rows", () => {
     // The status card is the ONE place the pair is stated.
-    expect(pondBody).toContain("ac-ft required");
+    expect(pondBody).toContain("AC-FT required");
     const glanceStart = pondBody.indexOf("const g_atAGlance =");
     const glanceEnd = pondBody.indexOf("const g_sizingSummary");
     const glance = pondBody.slice(glanceStart, glanceEnd);
@@ -168,8 +168,8 @@ describe("PR-B — pond inspector fixes", () => {
     // NEW-1 — the headline now NAMES its ledger ("Detention short 4.6 ac-ft") and the figure
     // keeps its own sub-line; both come from the ONE pure derivation (lib/pondVerdict.js).
     expect(pondBody).toContain("const dv = detentionVerdict({");
-    expect(detentionVerdict({ providedAcFt: 72.1, requiredAcFt: 76.7 }).heading).toBe("Detention short 4.6 ac-ft");
-    expect(detentionVerdict({ providedAcFt: 72.1, requiredAcFt: 76.7 }).subline).toBe("72.1 of 76.7 ac-ft");
+    expect(detentionVerdict({ providedAcFt: 72.1, requiredAcFt: 76.7 }).heading).toBe("Detention short 4.6 AC-FT");
+    expect(detentionVerdict({ providedAcFt: 72.1, requiredAcFt: 76.7 }).subline).toBe("72.1 of 76.7 AC-FT");
     expect(pondBody.includes("of the ${f1(detReqAcFt)}")).toBe(false);
   });
   it("B5 — the OUTLET & STORMS summary is fed the real routed fail count", () => {
@@ -182,9 +182,9 @@ describe("PR-B — pond inspector fixes", () => {
     expect(src).toContain("title={p.label}"); // per-pond row: full name in title
   });
   it("B7 — Stored volume is one ac-ft row (cf in the tag); the split rows are 1dp", () => {
-    expect(sizingGroup).toContain('pondRow("Stored volume", `${f1(r.vol / 43560)} ac-ft`');
+    expect(sizingGroup).toContain('pondRow("Stored volume", `${f1(r.vol / 43560)} AC-FT`');
     expect(sizingGroup.includes('pondRow("", `${f2(r.vol / 43560)} ac-ft`)')).toBe(false);
-    expect(sizingGroup).toContain('pondRow("Usable detention (above flood WSE)", `${f1(split.usableCf / 43560)} ac-ft`)');
+    expect(sizingGroup).toContain('pondRow("Usable detention (above flood WSE)", `${f1(split.usableCf / 43560)} AC-FT`)');
   });
   it("B7 — the Purpose 'Auto' segment drops the parenthetical; the hint reads 'picks by site needs · now:'", () => {
     expect(pondBody).toContain('g_purposeBtn(null, "Auto"');

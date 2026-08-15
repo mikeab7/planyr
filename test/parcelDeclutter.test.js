@@ -1,6 +1,6 @@
 /* NEW-1 / NEW-2 / NEW-3 — the parcel-chrome declutter trio.
  *
- * Owner report 2026-07-30 (Weld County CO, ~62.7 ac, every edge 25 ft): the parcel boundary
+ * Owner report 2026-07-30 (Weld County CO, ~62.7 AC, every edge 25 ft): the parcel boundary
  * follows a subdivision edge with a long curved run, so it carries dozens of short segments.
  * One curved corner rendered ~12 vertex handles and ~12 overlapping "25′" chips stacked into an
  * illegible pile, and the whole parcel carried 30+.

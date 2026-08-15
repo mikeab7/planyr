@@ -40,7 +40,7 @@ describe("auto slab by sf (B198)", () => {
 });
 
 describe("effectiveBuildingProps — auto default + optional override (override wins)", () => {
-  it("a 250,000 sf building with no override defaults to 36' / 7\"", () => {
+  it("a 250,000 SF building with no override defaults to 36' / 7\"", () => {
     const p = effectiveBuildingProps({}, 250000);
     expect(p.clearHeight.value).toBe(36);
     expect(p.clearHeight.auto).toBe(36);

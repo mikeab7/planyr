@@ -12,6 +12,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   MEASURE_LINE, MEASURE_WARN_COLOR, MEASURE_STD_KEYS, MEASURE_SEL_WEIGHT_BUMP, MEASURE_SEL_FILL_BUMP,
+  MEASURE_DEFAULT_COLOR,
   measureStyle, measureDefaultStyle, measureStdValue, setAccountMeasureDefaults, getAccountMeasureDefaults,
   measureLabelThreshold, measureLabelVisible, hasLabelThreshold, zoomBandLabel, labelRevealNote,
 } from "../src/workspaces/site-planner/lib/measureStyle.js";
@@ -20,24 +21,28 @@ import {
   EMPTY_STD_DRAFT, withMeasureDraft, draftMeasureValue, draftDirty, mergeDraftIntoSettings,
 } from "../src/workspaces/site-planner/lib/standardsApply.js";
 
-const ACCENT = "#f97316";
+/* B548816 — the measurement's built-in ink is now its OWN (familyInk.MEASURE_INK), not whatever
+ * accent a caller passed; `measureStyle` no longer takes an `accent` option at all. These tests
+ * assert against the constant, so the "an untouched plan is unchanged" guarantee below now means
+ * "unchanged except the one colour this item deliberately moved". */
+const ACCENT = MEASURE_DEFAULT_COLOR;
 const MODES = ["line", "polyline", "area", "count"];
 
 beforeEach(() => setAccountMeasureDefaults({}));
 
 describe("the built-in look is EXACTLY the pre-styling render (an untouched plan is unchanged)", () => {
   it("an unstyled measurement resolves to accent / weight 1.5 / solid / 10% fill", () => {
-    const st = measureStyle({}, { accent: ACCENT });
+    const st = measureStyle({});
     expect(st).toMatchObject({ stroke: ACCENT, fill: ACCENT, weight: 1.5, dash: "solid", fillOpacity: 0.1, warn: false });
   });
   it("selection bumps weight and fill opacity by the historic amounts", () => {
-    const st = measureStyle({}, { accent: ACCENT, selected: true });
+    const st = measureStyle({}, { selected: true });
     expect(st.weight).toBe(MEASURE_LINE.weight + MEASURE_SEL_WEIGHT_BUMP); // 1.5 → 2.5
     expect(st.fillOpacity).toBeCloseTo(MEASURE_LINE.fillOpacity + MEASURE_SEL_FILL_BUMP, 6); // 0.10 → 0.16
   });
   it("fill follows the line until a separate fill colour is set", () => {
-    expect(measureStyle({ stroke: "#123456" }, { accent: ACCENT }).fill).toBe("#123456");
-    expect(measureStyle({ stroke: "#123456", fill: "#abcdef" }, { accent: ACCENT }).fill).toBe("#abcdef");
+    expect(measureStyle({ stroke: "#123456" }, { }).fill).toBe("#123456");
+    expect(measureStyle({ stroke: "#123456", fill: "#abcdef" }, { }).fill).toBe("#abcdef");
   });
 });
 
@@ -50,8 +55,8 @@ describe("NEW-1: every mode round-trips a FULL style through save and reload", (
       const drawn = { id: `m-${mode}`, mode, pts: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }], ...FULL };
       const reloaded = JSON.parse(JSON.stringify(drawn));
       MEASURE_STD_KEYS.forEach((k) => expect(reloaded[k]).toEqual(FULL[k]));
-      const a = measureStyle(drawn, { accent: ACCENT });
-      const b = measureStyle(reloaded, { accent: ACCENT });
+      const a = measureStyle(drawn, { });
+      const b = measureStyle(reloaded, { });
       expect(b).toEqual(a);
       expect(b).toMatchObject({ stroke: "#0ea5e9", weight: 3, dash: "dashed", fill: "#f43f5e", fillOpacity: 0.42 });
       // and NEW-2's threshold survives the trip on every mode, not just area
@@ -66,18 +71,18 @@ describe("NEW-1: every mode round-trips a FULL style through save and reload", (
 describe("NEW-1: the uncalibrated amber still WINS over a user colour", () => {
   it("overrides both the line and the fill, and reports warn", () => {
     const m = { stroke: "#0ea5e9", fill: "#f43f5e" };
-    const st = measureStyle(m, { accent: ACCENT, uncalibrated: true });
+    const st = measureStyle(m, { uncalibrated: true });
     expect(st.stroke).toBe(MEASURE_WARN_COLOR);
     expect(st.fill).toBe(MEASURE_WARN_COLOR);
     expect(st.warn).toBe(true);
   });
   it("does not DESTROY the user's colour — it comes back once the sheet is calibrated", () => {
     const m = { stroke: "#0ea5e9" };
-    expect(measureStyle(m, { accent: ACCENT, uncalibrated: true }).stroke).toBe(MEASURE_WARN_COLOR);
-    expect(measureStyle(m, { accent: ACCENT, uncalibrated: false }).stroke).toBe("#0ea5e9");
+    expect(measureStyle(m, { uncalibrated: true }).stroke).toBe(MEASURE_WARN_COLOR);
+    expect(measureStyle(m, { uncalibrated: false }).stroke).toBe("#0ea5e9");
   });
   it("still overrides while selected (the bump changes weight, never the warn colour)", () => {
-    const st = measureStyle({ stroke: "#0ea5e9" }, { accent: ACCENT, uncalibrated: true, selected: true });
+    const st = measureStyle({ stroke: "#0ea5e9" }, { uncalibrated: true, selected: true });
     expect(st.stroke).toBe(MEASURE_WARN_COLOR);
     expect(st.weight).toBe(MEASURE_LINE.weight + MEASURE_SEL_WEIGHT_BUMP);
   });
@@ -99,7 +104,7 @@ describe("NEW-1: a new measurement is born with the Standards defaults (the parc
     const settings = { measureStyle: { stroke: "#16a34a", weight: 2.5, dash: "dotted", fill: "#fde047", fillOpacity: 0.3 } };
     for (const mode of MODES) {
       const born = { id: `m${mode}`, mode, pts: [], ...measureDefaultStyle(settings) };
-      expect(measureStyle(born, { accent: ACCENT })).toMatchObject({
+      expect(measureStyle(born, { })).toMatchObject({
         stroke: "#16a34a", weight: 2.5, dash: "dotted", fill: "#fde047", fillOpacity: 0.3,
       });
     }

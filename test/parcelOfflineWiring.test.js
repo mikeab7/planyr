@@ -180,9 +180,9 @@ describe("NEW-3 — a hand-drawn parcel carries the same record as a clicked one
   it("every acreage consumer reads the NET area, not the raw ring", () => {
     // B520560 moved the LABEL from the bare word "Parcel" to the parcel's own lineage name
     // (Parcel 1A / 1B); the AREA function under test is unchanged and is still the net one.
-    expect(planner).toContain('const txt = `${(parcelInfo.get(pc.id) || {}).name || "Parcel"} ${f2(parcelNetSqft(pc) / SQFT_PER_ACRE)} ac`;'); // canvas badge
-    expect(planner).toContain("{f2(parcelNetSqft(pc) / SQFT_PER_ACRE)} ac{pc.acct");                 // panel list
-    expect(planner).toContain("Area: <b style={{ color: PAL.ink }}>{f0(parcelNetSqft(selParcel))} sf</b>"); // Boundary
+    expect(planner).toContain('const txt = `${(parcelInfo.get(pc.id) || {}).name || "Parcel"} ${f2(parcelNetSqft(pc) / SQFT_PER_ACRE)} AC`;'); // canvas badge
+    expect(planner).toContain("{f2(parcelNetSqft(pc) / SQFT_PER_ACRE)} AC{pc.acct");                 // panel list
+    expect(planner).toContain("Area: <b style={{ color: PAL.ink }}>{f0(parcelNetSqft(selParcel))} SF</b>"); // Boundary
     expect(planner).toContain("acres: parcelNetSqft(p) / SQFT_PER_ACRE");                            // report/print
   });
 

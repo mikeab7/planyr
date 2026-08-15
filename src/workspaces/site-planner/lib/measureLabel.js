@@ -30,8 +30,8 @@ export const SQFT_PER_ACRE = 43560;
 export const fmtInt = (n) => Math.round(n).toLocaleString();
 export const fmt2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 export const fmtFeet = (n) => `${fmtInt(n)}′`;
-export const fmtSf = (n) => `${fmtInt(n)} sf`;
-export const fmtAcres = (n) => `${fmt2(n)} ac`;
+export const fmtSf = (n) => `${fmtInt(n)} SF`;
+export const fmtAcres = (n) => `${fmt2(n)} AC`;
 
 /* Where the headline flips from square feet to acres. "Roughly an acre" — one acre exactly,
  * because that is the number a developer already thinks in and a fuzzed threshold would just

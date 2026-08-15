@@ -61,16 +61,16 @@ describe("labelLayout — shared label level-of-detail + collision engine (B121)
   });
 
   it("buildingLabelLines (B123): name → sf → (incl. N bump-outs) → dims; parenthetical only with bump-outs", () => {
-    expect(buildingLabelLines({ name: "Building 1", sqft: "198,000 sf", bumpCount: 2, dims: "300′ × 638′" }))
-      .toEqual(["Building 1", "198,000 sf", "(incl. 2 bump-outs)", "300′ × 638′"]);
-    expect(buildingLabelLines({ name: "Building 3", sqft: "90,000 sf", bumpCount: 0, dims: "300′ × 300′" }))
-      .toEqual(["Building 3", "90,000 sf", "300′ × 300′"]); // no parenthetical line when no bump-outs
-    expect(buildingLabelLines({ name: "Building 2", sqft: "50,000 sf", bumpCount: 1, dims: "200′ × 250′" })[2])
+    expect(buildingLabelLines({ name: "Building 1", sqft: "198,000 SF", bumpCount: 2, dims: "300′ × 638′" }))
+      .toEqual(["Building 1", "198,000 SF", "(incl. 2 bump-outs)", "300′ × 638′"]);
+    expect(buildingLabelLines({ name: "Building 3", sqft: "90,000 SF", bumpCount: 0, dims: "300′ × 300′" }))
+      .toEqual(["Building 3", "90,000 SF", "300′ × 300′"]); // no parenthetical line when no bump-outs
+    expect(buildingLabelLines({ name: "Building 2", sqft: "50,000 SF", bumpCount: 1, dims: "200′ × 250′" })[2])
       .toBe("(incl. 1 bump-out)"); // singular
     // Drop order: feeding the stack to the LOD keeps name + sf and drops the dimensions
     // (and the parenthetical) first — so square footage outlives the dimensions on zoom-out.
-    const stack = buildingLabelLines({ name: "Building 1", sqft: "198,000 sf", bumpCount: 2, dims: "300′ × 638′" });
-    expect(fitLines(stack, 10, 25)).toEqual(["Building 1", "198,000 sf"]);
+    const stack = buildingLabelLines({ name: "Building 1", sqft: "198,000 SF", bumpCount: 2, dims: "300′ × 638′" });
+    expect(fitLines(stack, 10, 25)).toEqual(["Building 1", "198,000 SF"]);
   });
 
   it("dimCalloutVisible (B121 r2): red edge-dimension callouts hide only when zoomed out", () => {
@@ -211,7 +211,7 @@ describe("labelLayout — shared label level-of-detail + collision engine (B121)
   });
 
   it("B951: obstacles (parcel-area badges) are pre-committed boxes an element label must avoid", () => {
-    // A parcel "5.24 ac" badge sits at the origin as a fixed obstacle. A building label dropped at
+    // A parcel "5.24 AC" badge sits at the origin as a fixed obstacle. A building label dropped at
     // the same spot must NOT overprint it — it yields (shrinks to fewer lines that clear the badge,
     // leaders out, or hides), exactly as it would to a higher-importance label.
     const badge = boxOf(0, 0, 60, 24); // the parcel-area pill, immovable
@@ -222,14 +222,14 @@ describe("labelLayout — shared label level-of-detail + collision engine (B121)
     expect(hidden.has("bldg")).toBe(false); // one-line label can't clear the badge at the same centre → hidden
     // Same building far from the badge places normally (the obstacle only bites where it overlaps).
     const clear = layoutLabels([
-      { id: "bldg", cx: 500, cy: 500, lines: ["Building 4", "166,240 sf", "260′ × 614′"], lh: 12, charW: 6, halfW: 400, halfH: 400, importance: 1e12 },
+      { id: "bldg", cx: 500, cy: 500, lines: ["Building 4", "166,240 SF", "260′ × 614′"], lh: 12, charW: 6, halfW: 400, halfH: 400, importance: 1e12 },
     ], { pad: 0, obstacles: [badge] });
-    expect(clear.get("bldg").lines).toEqual(["Building 4", "166,240 sf", "260′ × 614′"]);
+    expect(clear.get("bldg").lines).toEqual(["Building 4", "166,240 SF", "260′ × 614′"]);
     // A multi-line stack near (not on) the badge drops its lowest lines to clear it rather than piling.
     // badge spans y −12..12; centred at y=18: 3 lines span 0..36 (clips), 2 lines 6..30 (clips), 1 line
     // 12..24 (clears at the seam) → the engine shrinks the stack to the one line that no longer overprints.
     const shrunk = layoutLabels([
-      { id: "bldg", cx: 0, cy: 18, lines: ["Building 4", "166,240 sf", "260′ × 614′"], lh: 12, charW: 6, halfW: 400, halfH: 400, importance: 1e12 },
+      { id: "bldg", cx: 0, cy: 18, lines: ["Building 4", "166,240 SF", "260′ × 614′"], lh: 12, charW: 6, halfW: 400, halfH: 400, importance: 1e12 },
     ], { pad: 0, obstacles: [badge] });
     expect(shrunk.get("bldg").lines).toEqual(["Building 4"]); // dropped to the one line that clears the badge
     // Obstacles are order-independent and never appear in the output map (they aren't reflowable labels).

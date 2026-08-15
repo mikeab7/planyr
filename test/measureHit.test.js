@@ -44,8 +44,8 @@ describe("measureHit · geometry primitives", () => {
 });
 
 describe("measuresUnderPoint · which measurements a click lands on", () => {
-  const big = { mode: "area", pts: sq(0, 0, 100) };      // 10,000 sf, index 0
-  const small = { mode: "area", pts: sq(40, 40, 10) };   // 100 sf,   index 1 (stacked on top)
+  const big = { mode: "area", pts: sq(0, 0, 100) };      // 10,000 SF, index 0
+  const small = { mode: "area", pts: sq(40, 40, 10) };   // 100 SF,   index 1 (stacked on top)
   const line = { mode: "line", pts: [{ x: 0, y: 50 }, { x: 100, y: 50 }] }; // index 2
   const count = { mode: "count", pts: [{ x: 90, y: 90 }] };                 // index 3
 

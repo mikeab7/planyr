@@ -26,9 +26,9 @@ const RINGS = {
 };
 const LABELS = {
   short: ["Pond"],
-  reflowable: ["Detention Pond", { parts: ["footprint 6.11 ac", "266,354 sf"], sep: " · ", keep: 1 }],
-  plainWide: ["A Very Long Element Name Indeed", "1,234,567 sf", "1,400′ × 900′"],
-  fourLine: ["Building 12", "584,231 sf", "(incl. 4 bump-outs)", "516′ × 1,107′"],
+  reflowable: ["Detention Pond", { parts: ["footprint 6.11 AC", "266,354 SF"], sep: " · ", keep: 1 }],
+  plainWide: ["A Very Long Element Name Indeed", "1,234,567 SF", "1,400′ × 900′"],
+  fourLine: ["Building 12", "584,231 SF", "(incl. 4 bump-outs)", "516′ × 1,107′"],
 };
 const bbox = (r) => { let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity; for (const p of r) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); } return { x0, x1, y0, y1 }; };
 const centroid = (r) => { let a = 0, cx = 0, cy = 0; for (let i = 0; i < r.length; i++) { const p = r[i], q = r[(i + 1) % r.length]; const f = p.x * q.y - q.x * p.y; a += f; cx += (p.x + q.x) * f; cy += (p.y + q.y) * f; } a /= 2; return { x: cx / (6 * a), y: cy / (6 * a) }; };
@@ -170,14 +170,14 @@ test("SitePlanner feeds the shared ladder its ring, and marks ponds mustLabel", 
   assert.match(src, /mustLabel: el\.type === "pond"/, "a pond label may never be blanked");
   assert.match(src, /ring: d\.ring, ringOrigin: d\.ringOrigin, ringPpf: d\.ringPpf, mustLabel: d\.mustLabel/,
     "the ring/mustLabel keys must actually reach layoutLabels");
-  // NEW-1 — the pond's area line is now a single atom ("6.58 ac"), so there is nothing left to
+  // NEW-1 — the pond's area line is now a single atom ("6.58 AC"), so there is nothing left to
   // pre-join; what this guard protects is that both pond call sites still go through ONE shared
   // builder rather than each growing its own string. The reflow rungs stay exercised by the
   // pond's "Holds … ac-ft usable · …′ rim to floor" line, asserted just below.
   assert.match(src, /lines\.push\(pondAreaLabelLine\(area\)\);/, "the pond area line comes from the shared builder");
   assert.match(src, /lines\.push\(pondAreaLabelLine\(exA\)\);/, "…and so does the existing-basin one");
   assert.ok(!/footprintLabelLine/.test(src), "the old footprint+sf line is gone, not merely unused");
-  assert.match(src, /parts: \[`Holds \$\{f1\(usableAcFt\)\} ac-ft usable`/,
+  assert.match(src, /parts: \[`Holds \$\{f1\(usableAcFt\)\} AC-FT usable`/,
     "a reflowable multi-atom pond line must still exist, or the stacked/abbrev rungs go dead");
   // The ladder is the ONE place fit is decided: no second bounding-box fit test may grow beside it.
   const engine = readFileSync(new URL("../src/workspaces/site-planner/lib/labelLayout.js", import.meta.url), "utf8");

@@ -1,7 +1,7 @@
 // BKDD criteria-truth (owner-supplied full-text payload, 2026-07-24) — Michael read the signed BKDD
 // Rules & Regulations 22-01 PDFs and extracted the technical criteria. This flips the registry's BKDD
 // row from ASSUMED to VERIFIED with exact section citations, adds the rows the registry didn't carry
-// (0.65 ac-ft/ac floor, emergency spillway required, sediment/WQ not required), reconciles orifice C to
+// (0.65 AC-FT/ac floor, emergency spillway required, sediment/WQ not required), reconciles orifice C to
 // 0.8 (§5.D.2), the pumped share to a VERIFIED 50% (§5.B.7.g, TxDOT-ditch exception 75%), and the
 // coincident-storm policy to a VERIFIED non-coincident 25-yr receiving tailwater (§5.D.2/§5.D.3).
 // Pure registry assertions + the Table C maintenance-berm helper.
@@ -46,7 +46,7 @@ describe("BKDD Rules 22-01 — VERIFIED criteria (owner full-text read)", () => 
     expect(pol.source).toMatch(/25-YR receiving/);
   });
 
-  it("the 0.65 ac-ft/ac detention floor is carried + VERIFIED (§5.C.2/§5.C.3)", () => {
+  it("the 0.65 AC-FT/ac detention floor is carried + VERIFIED (§5.C.2/§5.C.3)", () => {
     expect(c.minDetentionRateAcFtPerAc.value).toBe(0.65);
     expect(c.minDetentionRateAcFtPerAc.verified).toBe(true);
     expect(c.minDetentionRateAcFtPerAc.source).toMatch(/5\.C\.[23]/);

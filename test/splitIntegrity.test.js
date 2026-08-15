@@ -3,9 +3,9 @@
  *
  * The reported case, Bain / Concept A - Quiddity DIA (`smsqi16s9ej4`), 2026-08-13 18:59:46:
  *
- *     e1455071mkspvo  active=false  deleted_at=null                        105.122 ac  parent
- *     e1455075mkspvo  active=true   deleted_at=null                        104.475 ac  remainder
- *     e1455076mkspvo  active=TRUE   deleted_at=18:59:49.847+00               0.647 ac  the notch
+ *     e1455071mkspvo  active=false  deleted_at=null                        105.122 AC  parent
+ *     e1455075mkspvo  active=true   deleted_at=null                        104.475 AC  remainder
+ *     e1455076mkspvo  active=TRUE   deleted_at=18:59:49.847+00               0.647 AC  the notch
  *
  * ⛔ THE COLUMN THAT DECIDES WHETHER THIS SUITE IS WORTH ANYTHING IS `deleted_at`. Read `active`
  * alone and the sum is 104.475 + 0.647 = 105.122 — balanced, green, and the piece has silently
@@ -29,7 +29,7 @@ import {
 import { splitPolygonByCut } from "../src/workspaces/site-planner/lib/polygonSplit.js";
 
 /* A rectangle whose area is exactly the owner's parent, so the numbers below read as his do.
- * 105.122 ac = 4,579,114.32 sqft. A 2400 ft × 1908.0 ft rectangle is 4,579,200 — close enough that
+ * 105.122 AC = 4,579,114.32 sqft. A 2400 ft × 1908.0 ft rectangle is 4,579,200 — close enough that
  * the fixture's own arithmetic is exact and the acreages read at his scale. */
 const W = 2400, H = 1908;
 const RECT = [{ x: 0, y: 0 }, { x: W, y: 0 }, { x: W, y: H }, { x: 0, y: H }];
@@ -48,7 +48,7 @@ describe("NEW-9 · the live set is ACTIVE and NOT DELETED — both halves, alway
   });
 
   /* ⛔ THE REPORTED CASE, AND THE ONE THAT PROVES THE SUITE CAN FAIL. */
-  it("catches the 2026-08-13 notch split: 0.647 ac short", () => {
+  it("catches the 2026-08-13 notch split: 0.647 AC short", () => {
     // his three rows, at his acreages
     const parent = 105.122 * SQFT_PER_ACRE;
     const parentRing = [{ x: 0, y: 0 }, { x: parent / 1000, y: 0 }, { x: parent / 1000, y: 1000 }, { x: 0, y: 1000 }];
@@ -307,7 +307,7 @@ describe("B540768 · lineage integrity — exactly one generation counts", () =>
   const sq = (x0, y0, x1, y1) => [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }];
   const P = (id, extra = {}) => ({ id, points: sq(0, 0, 100, 100), ...extra });
 
-  /* RICHEY / Concept A, verbatim: 7.874 ac parent live, 6.606 + 1.268 children switched off. */
+  /* RICHEY / Concept A, verbatim: 7.874 AC parent live, 6.606 + 1.268 children switched off. */
   const RICHEY = [
     P("psmrdl6frtt6r_2", { active: true }),
     P("e666fqvqmq", { active: false, parentId: "psmrdl6frtt6r_2" }),

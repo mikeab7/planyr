@@ -41,7 +41,7 @@ const SQFT_PER_ACRE = 43560;
 const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /** The pond's area line: acreage only. `sf` is the drawn footprint area in square feet. */
-export const pondAreaLabelLine = (sf) => `${f2((Number(sf) || 0) / SQFT_PER_ACRE)} ac`;
+export const pondAreaLabelLine = (sf) => `${f2((Number(sf) || 0) / SQFT_PER_ACRE)} AC`;
 
 /**
  * The expansion-mode increment line (B139/B157): how much ground a pond gained or lost against
@@ -51,5 +51,5 @@ export const pondAreaLabelLine = (sf) => `${f2((Number(sf) || 0) / SQFT_PER_ACRE
  */
 export const pondAreaDeltaLine = (deltaSf) => {
   const n = Number(deltaSf) || 0;
-  return `${n >= 0 ? "+" : "−"}${f2(Math.abs(n) / SQFT_PER_ACRE)} ac`;
+  return `${n >= 0 ? "+" : "−"}${f2(Math.abs(n) / SQFT_PER_ACRE)} AC`;
 };

@@ -21,7 +21,7 @@ describe("registry", () => {
 
 describe("feeInLieuCompare", () => {
   it("recovers buildable SF from the pond land-take at the coverage ratio", () => {
-    // 2 ac land-take × 43560 × 0.40 = 34,848 SF
+    // 2 AC land-take × 43560 × 0.40 = 34,848 SF
     const c = feeInLieuCompare({ pondLandTakeAc: 2, coverageRatio: 0.4 });
     expect(c.landRecoveredAc).toBe(2);
     expect(c.buildableSfRecovered).toBe(Math.round(2 * 43560 * 0.4));

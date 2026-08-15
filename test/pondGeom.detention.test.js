@@ -32,7 +32,7 @@ describe("detentionStorage — lift parity", () => {
 
   it("rings are {x,y} world-feet; volume is CUBIC FEET (ac-ft conversion is the caller's)", () => {
     const r = detentionStorage(rect(300, 300), 8, 1, 3);
-    // 522,774 cf ≈ 12.0 ac-ft — sanity that nobody silently converted units.
+    // 522,774 cf ≈ 12.0 AC-FT — sanity that nobody silently converted units.
     expect(r.vol / 43560).toBeGreaterThan(11.5);
     expect(r.vol / 43560).toBeLessThan(12.5);
   });

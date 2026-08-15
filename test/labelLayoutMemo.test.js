@@ -30,14 +30,14 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 /* ---- fixtures ------------------------------------------------------------------------------- */
 
 const item = (over = {}) => ({
-  id: "a", cx: 400, cy: 300, lines: ["Building A", "166,240 sf"], lh: 13, charW: 7,
+  id: "a", cx: 400, cy: 300, lines: ["Building A", "166,240 SF"], lh: 13, charW: 7,
   halfW: 120, halfH: 60, importance: 10, ...over,
 });
 
 /* A reflow spec, so the stacked/abbrev rungs are exercised rather than only the inline one. */
 const reflowItem = (over = {}) => item({
   id: "r",
-  lines: ["Detention Pond", { parts: ["Holds 17.4 ac-ft usable", "12.2 below flood"], sep: " · ", keep: 1, stack: true }],
+  lines: ["Detention Pond", { parts: ["Holds 17.4 AC-FT usable", "12.2 below flood"], sep: " · ", keep: 1, stack: true }],
   ...over,
 });
 
@@ -46,7 +46,7 @@ const reflowItem = (over = {}) => item({
 const crowded = () => Array.from({ length: 12 }, (_, i) => item({
   id: `e${i}`,
   cx: 200 + (i % 4) * 90, cy: 200 + Math.floor(i / 4) * 40,
-  lines: [`Element ${i}`, `${(i + 1) * 1000} sf`, "300' × 120'"],
+  lines: [`Element ${i}`, `${(i + 1) * 1000} SF`, "300' × 120'"],
   importance: 20 - i,
 }));
 
@@ -116,8 +116,8 @@ describe("⛔ a changed input re-solves — the key IS the inputs, so a stale pl
     "moved (cx)": { cx: 401 },
     "moved (cy)": { cy: 301 },
     "a sub-pixel move": { cx: 400.5 },
-    "different text": { lines: ["Building B", "166,240 sf"] },
-    "an added line": { lines: ["Building A", "166,240 sf", "300' × 120'"] },
+    "different text": { lines: ["Building B", "166,240 SF"] },
+    "an added line": { lines: ["Building A", "166,240 SF", "300' × 120'"] },
     "line height": { lh: 14 },
     "char width": { charW: 7.5 },
     "half width": { halfW: 121 },
@@ -154,7 +154,7 @@ describe("⛔ a changed input re-solves — the key IS the inputs, so a stale pl
     // Two specs can inline to identical text and still have different rungs available, which
     // changes the placement. Keying the joined string would serve one the other's answer.
     const a = reflowItem();
-    const b = reflowItem({ lines: ["Detention Pond", { parts: ["Holds 17.4 ac-ft usable", "12.2 below flood"], sep: " · ", keep: 2, stack: true }] });
+    const b = reflowItem({ lines: ["Detention Pond", { parts: ["Holds 17.4 AC-FT usable", "12.2 below flood"], sep: " · ", keep: 2, stack: true }] });
     layoutLabels([a], OPTS);
     layoutLabels([b], OPTS);
     expect(__labelLayoutProbe.solves).toBe(2);
@@ -216,7 +216,7 @@ describe("⛔ memoised === un-memoised — placement for placement, order for or
     for (const { id, ring } of rings) {
       for (const ppf of [0.02, 0.1031, 0.35, 0.523]) {
         const items = [{
-          id, cx: 500, cy: 400, lines: ["Detention Pond", { parts: ["Holds 17.4 ac-ft usable", "9' rim to floor"], sep: " · ", keep: 1, stack: true }],
+          id, cx: 500, cy: 400, lines: ["Detention Pond", { parts: ["Holds 17.4 AC-FT usable", "9' rim to floor"], sep: " · ", keep: 1, stack: true }],
           lh: 13, charW: 7, halfW: Infinity, halfH: Infinity, importance: 10,
           ring, ringOrigin: ring[0], ringPpf: ppf, mustLabel: true,
         }];
