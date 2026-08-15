@@ -102,16 +102,27 @@ describe("B717 anti-drift: the single-source-of-truth fix is present in the real
 
   it("flatTasks captures settings and the leaf branch classifies via computeDisplayHealth", () => {
     expect(src).toMatch(/const settings = data\?\.settings;/);
-    expect(src).toMatch(/const h = computeDisplayHealth\(byId\[id\], settings\);/);
+    // NEW-schedule-health: byId is now also passed as the taskById arg (for the "a predecessor
+    // is late" condition) — was `computeDisplayHealth(byId[id], settings)`, no 3rd arg, before
+    // that condition existed.
+    expect(src).toMatch(/const h = computeDisplayHealth\(byId\[id\], settings, byId\);/);
   });
 
   it("the flatTasks memo depends on settings and NOW so Focus tracks the grid's overdue rollover", () => {
     expect(src).toMatch(/\}, \[proj, data\?\.settings, NOW\]\);/);
   });
 
-  it("the engine mirror's computeDisplayHealth matches the source overdueRed rule", () => {
-    const rule = /cf\.overdueRed && task\.end && task\.end < NOW && \(task\.percentComplete\|\|0\) < 100/;
-    expect(src).toMatch(rule);
-    expect(mjs).toMatch(rule);
+  // NEW-schedule-health: the fixed 3-toggle cfRules (completeGreen/overdueRed/dueSoonYellow) was
+  // replaced by a configurable ordered rule list. The literal `cf.overdueRed && task.end &&
+  // task.end < NOW...` line this test used to pin no longer exists in computeDisplayHealth — see
+  // test/schedulerEngine.test.js's "NEW-schedule-health" describe blocks for the new engine's own
+  // coverage (including the equivalent "not 100% complete" gate, now in evalHealthCondition's
+  // finishPastDays case). This test is retired in favor of that coverage plus the behavioral B717
+  // tests above (lines 40-96), which still exercise the exact same overdueRed/dueSoonYellow cfRules
+  // shape end-to-end via the legacy-migration fallback (getHealthRules → migrateCfRulesToHealthRules)
+  // and already passed unchanged.
+  it("computeDisplayHealth no longer contains the retired cf.overdueRed literal comparison", () => {
+    expect(src).not.toMatch(/cf\.overdueRed && task\.end && task\.end < NOW/);
+    expect(mjs).not.toMatch(/cf\.overdueRed && task\.end && task\.end < NOW/);
   });
 });

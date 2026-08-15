@@ -637,12 +637,25 @@ describe("anti-drift: the schedule-output fixes still exist in the real source",
   it("MasterView uses rolled health for parents (shared helper) and live deps", () => {
     expect(src).toMatch(/const computeRolledHealth = \(all\) =>/);
     expect(src).toMatch(/const rolled = computeRolledHealth\(p\.tasks\);/);
-    expect(src).toMatch(/_disp: dispOf\(t, !isLeaf, rolled\)/);
+    // NEW-schedule-health: dispOf now threads a per-project `byId` map through so the
+    // "a predecessor is late" health condition can resolve predecessor tasks — was
+    // `dispOf(t, !isLeaf, rolled)`, no third arg, before that condition existed.
+    expect(src).toMatch(/_disp: dispOf\(t, !isLeaf, rolled, byId\)/);
     expect(src).toMatch(/\}, \[data\.projects, masterHealthFilter, data\.settings, NOW\]\);/);
     expect(src).toMatch(/const rolledHealthMap = useMemo\(\(\) => proj \? computeRolledHealth\(proj\.tasks\) : \{\}/);
   });
-  it("the overdue rule no longer fires on a 100%-complete task", () => {
-    expect(src).toMatch(/cf\.overdueRed && task\.end && task\.end < NOW && \(task\.percentComplete\|\|0\) < 100/);
+  // NEW-schedule-health: the fixed 3-toggle cfRules (completeGreen/overdueRed/dueSoonYellow) was
+  // replaced by a configurable ordered rule list (HEALTH_CONDITIONS / evalHealthRules) — see the
+  // "configurable health automation" describe block below for its own coverage, including the
+  // equivalent of this exact case ("finishPastDays" requires percentComplete < 100, same as the
+  // old overdueRed literal did). This assertion is retired rather than chasing the new source
+  // text, since the new engine's "not 100% complete" gate lives in a shared `evalHealthCondition`
+  // switch, not in a single line naming `cf.overdueRed`.
+  it("computeDisplayHealth no longer reads the retired cf.overdueRed literal", () => {
+    // "cf.overdueRed" itself still appears once, inside migrateCfRulesToHealthRules (the legacy
+    // fallback) — what's retired is the inline comparison that used to live in computeDisplayHealth.
+    expect(src).not.toMatch(/cf\.overdueRed && task\.end && task\.end < NOW/);
+    expect(src).toMatch(/case "finishPastDays":\s*\n\s*if \(!task\.end \|\| pct >= 100\) return false;/);
   });
   it("the engine mirror carries computeRolledHealth verbatim", () => {
     expect(sjsx).toMatch(/export const computeRolledHealth = \(all\) =>/);
@@ -2286,5 +2299,371 @@ describe("anti-drift: B463072 exists VERBATIM in src + mirror, and every render 
     const bare = (src.match(/fmtTaskDuration\(([a-z]+)\)/g) || []);
     expect(bare).toEqual(["fmtTaskDuration(t)"]);
     expect(src).toMatch(/if \(!t\.isLeaf\) return; setLocalEdit/);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// NEW-schedule-health — configurable health automation (replaces the fixed 3-toggle cfRules)
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// An ORDERED list of {id, type, days?, color} rules, first match wins. See
+// public/sequence/index.html's own comment above computeDisplayHealth for the full design.
+
+describe("NEW-schedule-health — the condition vocabulary is finite (locks scope)", () => {
+  it("exactly the 7 named conditions exist, no more, no fewer", () => {
+    expect(E.HEALTH_CONDITIONS.map(c => c.k)).toEqual([
+      "finishPastDays", "finishWithinDays", "finishToday",
+      "notStarted", "predecessorLate", "noOwner", "complete",
+    ]);
+  });
+  it("every condition is keyed for O(1) lookup and needsDays is a real boolean on each", () => {
+    for (const c of E.HEALTH_CONDITIONS) {
+      expect(E.HEALTH_CONDITION_BY_KEY[c.k]).toBe(c);
+      expect(typeof c.needsDays).toBe("boolean");
+      if (c.needsDays) expect(typeof c.defaultDays).toBe("number");
+    }
+  });
+});
+
+describe("NEW-schedule-health — evalHealthCondition: one condition, one fact, absence-safe", () => {
+  const base = { id: 1, name: "t", percentComplete: 0, responsibleParty: "", predecessors: [] };
+
+  it("finishPastDays: matches N+ calendar days late, not on the due date itself, not once complete", () => {
+    expect(E.evalHealthCondition("finishPastDays", 1, { ...base, end: "2026-08-14" }, "2026-08-15")).toBe(true);  // 1 day late
+    expect(E.evalHealthCondition("finishPastDays", 1, { ...base, end: "2026-08-15" }, "2026-08-15")).toBe(false); // due TODAY is not "past"
+    expect(E.evalHealthCondition("finishPastDays", 2, { ...base, end: "2026-08-14" }, "2026-08-15")).toBe(false); // 1 day late, threshold is 2
+    expect(E.evalHealthCondition("finishPastDays", 1, { ...base, end: "2026-08-01", percentComplete: 100 }, "2026-08-15")).toBe(false); // done work is never "overdue"
+  });
+  it("finishPastDays: a MISSING finish date never reads as \"not overdue ⇒ safe\" — it fails the condition outright", () => {
+    expect(E.evalHealthCondition("finishPastDays", 1, { ...base, end: "" }, "2026-08-15")).toBe(false);
+    expect(E.evalHealthCondition("finishPastDays", 1, { ...base }, "2026-08-15")).toBe(false); // end entirely absent
+  });
+
+  it("finishWithinDays: matches inside the window, not once overdue, not once complete", () => {
+    expect(E.evalHealthCondition("finishWithinDays", 7, { ...base, end: "2026-08-20" }, "2026-08-15")).toBe(true);  // 5 days out
+    expect(E.evalHealthCondition("finishWithinDays", 7, { ...base, end: "2026-08-25" }, "2026-08-15")).toBe(false); // 10 days out, outside the window
+    expect(E.evalHealthCondition("finishWithinDays", 7, { ...base, end: "2026-08-10" }, "2026-08-15")).toBe(false); // already overdue, not "approaching"
+    expect(E.evalHealthCondition("finishWithinDays", 7, { ...base, end: "2026-08-20", percentComplete: 100 }, "2026-08-15")).toBe(false);
+  });
+  it("finishWithinDays: a MISSING finish date fails the condition, never a silent pass", () => {
+    expect(E.evalHealthCondition("finishWithinDays", 7, { ...base, end: null }, "2026-08-15")).toBe(false);
+  });
+
+  it("finishToday: matches only an exact calendar-date match, and never a completed task", () => {
+    expect(E.evalHealthCondition("finishToday", null, { ...base, end: "2026-08-15" }, "2026-08-15")).toBe(true);
+    expect(E.evalHealthCondition("finishToday", null, { ...base, end: "2026-08-14" }, "2026-08-15")).toBe(false);
+    expect(E.evalHealthCondition("finishToday", null, { ...base, end: "2026-08-15", percentComplete: 100 }, "2026-08-15")).toBe(false);
+  });
+  it("finishToday: a MISSING finish date can't be \"today\"", () => {
+    expect(E.evalHealthCondition("finishToday", null, { ...base, end: "" }, "2026-08-15")).toBe(false);
+  });
+
+  it("notStarted: start in the past + 0% complete matches; already-touched work does not", () => {
+    expect(E.evalHealthCondition("notStarted", null, { ...base, start: "2026-08-10" }, "2026-08-15")).toBe(true);
+    expect(E.evalHealthCondition("notStarted", null, { ...base, start: "2026-08-10", percentComplete: 5 }, "2026-08-15")).toBe(false);
+    expect(E.evalHealthCondition("notStarted", null, { ...base, start: "2026-08-15" }, "2026-08-15")).toBe(false); // starts today, not yet "past"
+  });
+  it("notStarted: a MISSING start date fails the condition, never a silent pass", () => {
+    expect(E.evalHealthCondition("notStarted", null, { ...base, start: "" }, "2026-08-15")).toBe(false);
+    expect(E.evalHealthCondition("notStarted", null, { ...base }, "2026-08-15")).toBe(false);
+  });
+
+  it("predecessorLate: true only when a resolvable predecessor is itself overdue and incomplete", () => {
+    const byId = { 9: { id: 9, end: "2026-08-10", percentComplete: 50 } };  // 5 days late, unfinished
+    expect(E.evalHealthCondition("predecessorLate", null, { ...base, predecessors: [{ id: 9 }] }, "2026-08-15", byId)).toBe(true);
+  });
+  it("predecessorLate: NO predecessors, an UNRESOLVABLE id, and a FINISHED predecessor all fail (never a false positive)", () => {
+    const byId = { 9: { id: 9, end: "2026-08-10", percentComplete: 100 } };
+    expect(E.evalHealthCondition("predecessorLate", null, { ...base, predecessors: [] }, "2026-08-15", byId)).toBe(false);
+    expect(E.evalHealthCondition("predecessorLate", null, { ...base, predecessors: [{ id: 404 }] }, "2026-08-15", byId)).toBe(false);
+    expect(E.evalHealthCondition("predecessorLate", null, { ...base, predecessors: [{ id: 9 }] }, "2026-08-15", byId)).toBe(false);
+  });
+  it("predecessorLate: with NO taskById map at all, it never guesses — always false, never a crash", () => {
+    expect(E.evalHealthCondition("predecessorLate", null, { ...base, predecessors: [{ id: 9 }] }, "2026-08-15", undefined)).toBe(false);
+  });
+
+  it("noOwner: true for empty/whitespace-only, false once a real name is entered — not gated on % complete", () => {
+    expect(E.evalHealthCondition("noOwner", null, { ...base, responsibleParty: "" }, "2026-08-15")).toBe(true);
+    expect(E.evalHealthCondition("noOwner", null, { ...base, responsibleParty: "   " }, "2026-08-15")).toBe(true);
+    expect(E.evalHealthCondition("noOwner", null, { ...base, responsibleParty: "Bob" }, "2026-08-15")).toBe(false);
+    expect(E.evalHealthCondition("noOwner", null, { ...base, responsibleParty: "", percentComplete: 100 }, "2026-08-15")).toBe(true);
+  });
+
+  it("complete: exactly the 100%-or-more boundary", () => {
+    expect(E.evalHealthCondition("complete", null, { ...base, percentComplete: 100 }, "2026-08-15")).toBe(true);
+    expect(E.evalHealthCondition("complete", null, { ...base, percentComplete: 99 }, "2026-08-15")).toBe(false);
+    expect(E.evalHealthCondition("complete", null, { ...base, percentComplete: 0 }, "2026-08-15")).toBe(false);
+  });
+
+  it("an unknown condition type is a no-match, never a throw (forward-compat with a stale saved rule)", () => {
+    expect(E.evalHealthCondition("somethingRemovedInAFutureVersion", 3, { ...base, end: "2020-01-01" }, "2026-08-15")).toBe(false);
+  });
+});
+
+describe("NEW-schedule-health — evalHealthRules: ordering IS the mechanism (first match wins)", () => {
+  const task = { id: 1, name: "t", percentComplete: 100, responsibleParty: "" };  // matches BOTH "complete" and "noOwner"
+  it("complete-then-noOwner picks green; noOwner-then-complete picks red — same task, same rules, different order", () => {
+    const greenFirst = E.evalHealthRules(task, { healthRules: [
+      { id: "a", type: "complete", color: "green" },
+      { id: "b", type: "noOwner", color: "red" },
+    ] }, "2026-08-15");
+    const redFirst = E.evalHealthRules(task, { healthRules: [
+      { id: "b", type: "noOwner", color: "red" },
+      { id: "a", type: "complete", color: "green" },
+    ] }, "2026-08-15");
+    expect(greenFirst).toBe("green");
+    expect(redFirst).toBe("red");
+  });
+  it("no rule matches → null, so the caller falls back to the stored health (never invents a color)", () => {
+    expect(E.evalHealthRules({ id: 1, percentComplete: 0, responsibleParty: "Bob" }, { healthRules: [
+      { id: "a", type: "complete", color: "green" },
+    ] }, "2026-08-15")).toBeNull();
+  });
+  it("an empty rule list is a legitimate \"automation off\" state, not an error", () => {
+    expect(E.evalHealthRules({ id: 1, percentComplete: 0 }, { healthRules: [] }, "2026-08-15")).toBeNull();
+  });
+});
+
+describe("NEW-schedule-health — migrateCfRulesToHealthRules reproduces the old 3-toggle order exactly", () => {
+  it("all three on → [complete, overdue(1d), duesoon(7d)], the SAME precedence computeDisplayHealth used", () => {
+    expect(E.migrateCfRulesToHealthRules({ completeGreen: true, overdueRed: true, dueSoonYellow: true })).toEqual([
+      { id: "legacy-complete", type: "complete", color: "green" },
+      { id: "legacy-overdue", type: "finishPastDays", days: 1, color: "red" },
+      { id: "legacy-duesoon", type: "finishWithinDays", days: 7, color: "yellow" },
+    ]);
+  });
+  it("only overdueRed on (the real shape found in production data) → a single rule", () => {
+    expect(E.migrateCfRulesToHealthRules({ overdueRed: true })).toEqual([
+      { id: "legacy-overdue", type: "finishPastDays", days: 1, color: "red" },
+    ]);
+  });
+  it("nothing on, or no cfRules at all → an empty list (matches the old \"automation off\" default)", () => {
+    expect(E.migrateCfRulesToHealthRules({})).toEqual([]);
+    expect(E.migrateCfRulesToHealthRules(undefined)).toEqual([]);
+  });
+  it("getHealthRules prefers a real healthRules array over the legacy fallback, even an empty one", () => {
+    expect(E.getHealthRules({ healthRules: [], cfRules: { overdueRed: true } })).toEqual([]);
+    expect(E.getHealthRules({ cfRules: { overdueRed: true } })).toEqual(E.migrateCfRulesToHealthRules({ overdueRed: true }));
+    expect(E.getHealthRules({})).toEqual([]);
+  });
+});
+
+describe("NEW-schedule-health — STEP 3.A: manual override wins, and wins over EVERYTHING automated", () => {
+  const orig = E.NOW;
+  afterEach(() => E.setNOW(orig));
+
+  it("an overridden task keeps its hand-picked color even though a rule would otherwise recolor it", () => {
+    E.setNOW("2026-08-15");
+    const settings = { healthRules: [{ id: "a", type: "finishPastDays", days: 1, color: "red" }] };
+    const overridden = { id: 1, health: "green", healthOverride: true, end: "2020-01-01", percentComplete: 0 };
+    expect(E.computeDisplayHealth(overridden, settings)).toBe("green");
+    // Prove the rule really would have fired if it weren't overridden — otherwise this test is vacuous.
+    const notOverridden = { ...overridden, healthOverride: false };
+    expect(E.computeDisplayHealth(notOverridden, settings)).toBe("red");
+  });
+  it("override wins over the meeting-bound risk block too — not just the configurable rule list", () => {
+    // health:"yellow" deliberately — NOT green/paused, so the meeting-bound block's own
+    // (pre-existing, untouched) exclusion can't be what's protecting it; only healthOverride can.
+    E.setNOW("2026-08-24");
+    const task = { id: 1, health: "yellow", healthOverride: true, meetingBound: true, meetingInfeasible: true,
+      meetingDeadline: "2026-08-25", percentComplete: 0 };
+    expect(E.computeDisplayHealth(task, { healthRules: [] })).toBe("yellow");
+    // Same task, override cleared: the meeting-infeasible signal reaches through and wins.
+    expect(E.computeDisplayHealth({ ...task, healthOverride: false }, { healthRules: [] })).toBe("red");
+  });
+  it("override wins over the deadline-row risk block too", () => {
+    E.setNOW("2026-08-24");
+    const task = { id: 1, health: "yellow", healthOverride: true, deadlineForTaskId: 2, deadlineInfeasible: true, percentComplete: 0 };
+    expect(E.computeDisplayHealth(task, { healthRules: [] })).toBe("yellow");
+    expect(E.computeDisplayHealth({ ...task, healthOverride: false }, { healthRules: [] })).toBe("red");
+  });
+  it("a non-overridden task with no matching rule still falls back to its raw stored health, unchanged", () => {
+    E.setNOW("2026-08-15");
+    expect(E.computeDisplayHealth({ id: 1, health: "yellow", healthOverride: false, percentComplete: 40 }, { healthRules: [] })).toBe("yellow");
+  });
+});
+
+describe("NEW-schedule-health — normalizeToV9: override seeded once, survives a reload, a clear STAYS cleared", () => {
+  const doc = (tasks) => ({ projects: { p1: { id: "p1", name: "P", tasks } } });
+
+  it("seeds healthOverride=true for green/red/paused (the old overdueRed/meetingBound protected set) and false for gray/yellow", () => {
+    const before = doc([
+      { id: 1, health: "gray" }, { id: 2, health: "yellow" },
+      { id: 3, health: "green" }, { id: 4, health: "red" }, { id: 5, health: "paused" },
+    ]);
+    const after = E.normalizeToV9(before);
+    const byId = Object.fromEntries(after.projects.p1.tasks.map(t => [t.id, t]));
+    expect(byId[1].healthOverride).toBe(false);
+    expect(byId[2].healthOverride).toBe(false);
+    expect(byId[3].healthOverride).toBe(true);
+    expect(byId[4].healthOverride).toBe(true);
+    expect(byId[5].healthOverride).toBe(true);
+  });
+  it("is idempotent — a second pass changes nothing (the _v9 flag short-circuits it)", () => {
+    const once = E.normalizeToV9(doc([{ id: 1, health: "green" }]));
+    const twice = E.normalizeToV9(once);
+    expect(twice).toEqual(once);
+  });
+  it("STAYS WON across a reload — the whole-doc _v9 stamp alone guarantees it: once stamped, a later load never re-enters the migration at all", () => {
+    // Simulate: migration ran once (v9 stamped), the user then picked "Automatic" on a green
+    // task (updateTask(id,{healthOverride:false}) — health itself is untouched), and the doc
+    // reloads. The doc is already _v9-stamped, so a later normalizeToV9 call is a pure no-op —
+    // it must return the SAME object, never re-derive anything from `health`.
+    const migrated = E.normalizeToV9(doc([{ id: 1, health: "green" }]));
+    const userCleared = {
+      ...migrated,
+      projects: { p1: { ...migrated.projects.p1, tasks: migrated.projects.p1.tasks.map(t => t.id === 1 ? { ...t, healthOverride: false } : t) } },
+    };
+    const reloaded = E.normalizeToV9(userCleared);
+    expect(reloaded).toBe(userCleared);   // same reference — the _v9 guard returned immediately
+    expect(reloaded.projects.p1.tasks[0].healthOverride).toBe(false);
+  });
+  it("the PER-TASK guard: a task that already carries an explicit healthOverride (true OR false) is never re-derived from `health`, even on a doc that hasn't been _v9-stamped yet", () => {
+    // This is the scenario the whole-doc _v9 stamp above can't cover on its own — a doc that is
+    // NOT yet _v9 (so the migration genuinely runs) but already has SOME tasks with an explicit
+    // healthOverride (a multi-device sync landing an old, unstamped copy next to an already-
+    // cleared task; or simply hand-authored/imported data). The per-task `=== undefined` check,
+    // not the doc-level flag, is what protects THIS task.
+    const raw = doc([
+      { id: 1, health: "green", healthOverride: false },  // explicitly cleared already — must stay false
+      { id: 2, health: "red", healthOverride: true },      // explicitly set already — must stay true
+      { id: 3, health: "green" },                          // never touched — gets seeded true
+    ]);
+    expect(raw._v9).toBeUndefined();   // sanity: this doc genuinely has NOT been migrated yet
+    const out = E.normalizeToV9(raw);
+    const byId = Object.fromEntries(out.projects.p1.tasks.map(t => [t.id, t]));
+    expect(byId[1].healthOverride).toBe(false);
+    expect(byId[2].healthOverride).toBe(true);
+    expect(byId[3].healthOverride).toBe(true);
+  });
+  it("a corrupt/garbage project or task is skipped, not a crash (matches the sibling v6/v7/v8 migrations)", () => {
+    expect(() => E.normalizeToV9({ projects: { bad: null, p1: { tasks: [null, { id: 1, health: "gray" }] } } })).not.toThrow();
+    const out = E.normalizeToV9({ projects: { bad: null, p1: { tasks: [null, { id: 1, health: "gray" }] } } });
+    expect(out.projects.p1.tasks).toHaveLength(1);
+  });
+});
+
+describe("NEW-schedule-health — absence-safety (STEP 3.C): a missing date is an explicit non-match, never a passing answer", () => {
+  const orig = E.NOW;
+  afterEach(() => E.setNOW(orig));
+
+  it("a task with NO finish date, next to one WITH the same overdue finish date: only the dated one goes red", () => {
+    E.setNOW("2026-08-15");
+    const settings = { healthRules: [{ id: "a", type: "finishPastDays", days: 1, color: "red" }] };
+    const dated = { id: 1, health: "gray", healthOverride: false, end: "2026-08-01", percentComplete: 0 };
+    const undated = { id: 2, health: "gray", healthOverride: false, end: "", percentComplete: 0 };
+    expect(E.computeDisplayHealth(dated, settings)).toBe("red");
+    expect(E.computeDisplayHealth(undated, settings)).toBe("gray"); // falls to raw stored health — an explicit "unknown", not red, not green
+  });
+  it("a task with NO start date next to one with a genuinely stale start: only the dated one matches \"not started\"", () => {
+    E.setNOW("2026-08-15");
+    const settings = { healthRules: [{ id: "a", type: "notStarted", color: "yellow" }] };
+    const dated = { id: 1, health: "gray", healthOverride: false, start: "2026-08-01", percentComplete: 0 };
+    const undated = { id: 2, health: "gray", healthOverride: false, start: "", percentComplete: 0 };
+    expect(E.computeDisplayHealth(dated, settings)).toBe("yellow");
+    expect(E.computeDisplayHealth(undated, settings)).toBe("gray");
+  });
+  it("a task with NO predecessors next to one whose predecessor is late: only the one with a real late predecessor matches", () => {
+    E.setNOW("2026-08-15");
+    const settings = { healthRules: [{ id: "a", type: "predecessorLate", color: "red" }] };
+    const byId = { 9: { id: 9, end: "2026-08-01", percentComplete: 0 } };
+    const withLatePred = { id: 1, health: "gray", healthOverride: false, predecessors: [{ id: 9 }], percentComplete: 0 };
+    const noPreds = { id: 2, health: "gray", healthOverride: false, predecessors: [], percentComplete: 0 };
+    expect(E.computeDisplayHealth(withLatePred, settings, byId)).toBe("red");
+    expect(E.computeDisplayHealth(noPreds, settings, byId)).toBe("gray");
+  });
+});
+
+describe("NEW-schedule-health — group headers: the engine NEVER runs on a parent/summary row", () => {
+  // B463072's lesson generalized: a parent's OWN start/end/duration can be a stale rollup
+  // leftover. The health engine sidesteps this entirely by never being called on a parent at
+  // all — every call site (GridView, GanttView, MasterView, Focus) branches on
+  // hasChildren/isSummary and shows computeRolledHealth's worst-of-children result instead,
+  // reading each child's RAW `.health`, never a rule-computed value. This test proves the
+  // rolled result is exactly the worst-of-children raw health regardless of what any health
+  // rule would have computed for those children.
+  it("a parent's rolled health reflects children's RAW health, not their rule-computed display health", () => {
+    const tasks = [
+      { id: 1, parentId: null, health: "gray" },   // parent — stale/irrelevant end date, never read by rollup
+      { id: 2, parentId: 1, health: "gray", end: "2020-01-01", percentComplete: 0 },  // would be RED under a rule
+      { id: 3, parentId: 1, health: "green", end: "2020-01-01", percentComplete: 100 },
+    ];
+    const rolled = E.computeRolledHealth(tasks);
+    // The child is raw "gray", not the rule-computed "red" — HEALTH_PRIO has no "red" contender here.
+    expect(rolled[1]).toBe("green"); // worst of {gray, green} by HEALTH_PRIO is green (gray=0 < green=1)
+  });
+  it("computeDisplayHealth itself is never even asked about the parent in the real call sites (source check)", () => {
+    const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+    // Every real call site branches hasChildren/isSummary BEFORE reaching computeDisplayHealth.
+    expect(src).toMatch(/task\.hasChildren\s*\n\s*\? \(rolledHealthMap\?\.\[task\.id\] \|\| task\.health\)\s*\n\s*: computeDisplayHealth\(task, data\.settings, taskById\)/);
+    expect(src).toMatch(/const displayHealth = isSummary/);
+    expect(src).toMatch(/: computeDisplayHealth\(task, settings, taskById\);/);
+  });
+});
+
+describe("NEW-schedule-health — adjacent cases: milestones, completed tasks, undated tasks, reordered rules", () => {
+  it("a milestone (duration 0, start===end) evaluates finish-date rules exactly like any other leaf", () => {
+    E.setNOW("2026-08-15");
+    const settings = { healthRules: [{ id: "a", type: "finishToday", color: "yellow" }] };
+    const milestone = { id: 1, health: "gray", healthOverride: false, start: "2026-08-15", end: "2026-08-15", duration: 0, percentComplete: 0 };
+    expect(E.computeDisplayHealth(milestone, settings)).toBe("yellow");
+  });
+  it("a completed task (100%) never lights up an overdue/due-soon/not-started rule, only \"complete\" can match it", () => {
+    E.setNOW("2026-08-15");
+    const settings = { healthRules: [
+      { id: "a", type: "finishPastDays", days: 1, color: "red" },
+      { id: "b", type: "notStarted", color: "yellow" },
+      { id: "c", type: "complete", color: "green" },
+    ] };
+    const done = { id: 1, health: "yellow", healthOverride: false, start: "2020-01-01", end: "2020-01-01", percentComplete: 100 };
+    expect(E.computeDisplayHealth(done, settings)).toBe("green");
+  });
+  it("a task with no dates at all and an empty rule list just shows its raw stored health", () => {
+    const bare = { id: 1, health: "gray", healthOverride: false, percentComplete: 0 };
+    expect(E.computeDisplayHealth(bare, { healthRules: [] })).toBe("gray");
+  });
+  it("reordering the SAME rules changes the outcome for a task both rules would otherwise match — this is the whole mechanism", () => {
+    E.setNOW("2026-08-15");
+    const task = { id: 1, health: "gray", healthOverride: false, end: "2026-08-01", start: "2026-07-01", percentComplete: 0 }; // overdue AND not-started
+    const overdueFirst = { healthRules: [
+      { id: "a", type: "finishPastDays", days: 1, color: "red" },
+      { id: "b", type: "notStarted", color: "yellow" },
+    ] };
+    const notStartedFirst = { healthRules: [
+      { id: "b", type: "notStarted", color: "yellow" },
+      { id: "a", type: "finishPastDays", days: 1, color: "red" },
+    ] };
+    expect(E.computeDisplayHealth(task, overdueFirst)).toBe("red");
+    expect(E.computeDisplayHealth(task, notStartedFirst)).toBe("yellow");
+  });
+});
+
+describe("anti-drift: the NEW-schedule-health engine exists VERBATIM in src + mirror", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  it("the condition vocabulary is defined identically in both", () => {
+    const vocab = /const HEALTH_CONDITIONS = \[\s*\n\s*\{k:"finishPastDays",   label:"Finish date is N\+ days past due",     needsDays:true,  defaultDays:1\},/;
+    expect(src).toMatch(vocab);
+    expect(mjs).toMatch(/export const HEALTH_CONDITIONS = \[\s*\n\s*\{k:"finishPastDays",   label:"Finish date is N\+ days past due",     needsDays:true,  defaultDays:1\},/);
+  });
+  it("evalHealthCondition's switch cases are present in both, same order", () => {
+    for (const s of [src, mjs]) {
+      expect(s).toMatch(/case "finishPastDays":/);
+      expect(s).toMatch(/case "finishWithinDays": \{/);
+      expect(s).toMatch(/case "finishToday":/);
+      expect(s).toMatch(/case "notStarted":/);
+      expect(s).toMatch(/case "predecessorLate": \{/);
+      expect(s).toMatch(/case "noOwner":/);
+      expect(s).toMatch(/case "complete":/);
+    }
+  });
+  it("computeDisplayHealth checks healthOverride first, in both", () => {
+    for (const s of [src, mjs]) {
+      expect(s).toMatch(/if \(task\.healthOverride\) return task\.health;/);
+    }
+  });
+  it("normalizeToV9's override-seed predicate is present in both", () => {
+    for (const s of [src, mjs]) {
+      expect(s).toMatch(/healthOverride: t\.health === "green" \|\| t\.health === "red" \|\| t\.health === "paused"/);
+    }
   });
 });

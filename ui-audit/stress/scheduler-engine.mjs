@@ -323,14 +323,82 @@ export const setNOW = v => { NOW = v; };
 // HOLIDAY_SET from settings.holidays on load; mirror that here so business-day math matches).
 export const setHOLIDAY_SET = s => { HOLIDAY_SET = s; };
 
-// Conditional-format display health (faithful copy from index.html ~L1976). Applies the cfRules
-// (completeGreen / overdueRed / dueSoonYellow) on top of the raw stored health — this is the value
-// the grid's Status column shows.
-export const computeDisplayHealth = (task, settings) => {
-  const cf = settings?.cfRules || {};
+// ── Configurable health automation (faithful copy from index.html; NEW-schedule-health) ──────
+// Replaces the old fixed 3-toggle cfRules with an ORDERED list of {id, type, days?, color} rules,
+// first match wins. See index.html's own comment block for the full rationale; kept verbatim here.
+export const HEALTH_CONDITIONS = [
+  {k:"finishPastDays",   label:"Finish date is N+ days past due",     needsDays:true,  defaultDays:1},
+  {k:"finishWithinDays", label:"Finish date is within N days",         needsDays:true,  defaultDays:7},
+  {k:"finishToday",      label:"Finish date is today",                 needsDays:false},
+  {k:"notStarted",       label:"Start date has passed, not started",   needsDays:false},
+  {k:"predecessorLate",  label:"A predecessor is late",                needsDays:false},
+  {k:"noOwner",          label:"No owner assigned",                    needsDays:false},
+  {k:"complete",         label:"Task is 100% complete",                needsDays:false},
+];
+export const HEALTH_CONDITION_BY_KEY = Object.fromEntries(HEALTH_CONDITIONS.map(c => [c.k, c]));
+
+export const evalHealthCondition = (type, days, task, NOWv, taskById) => {
+  const pct = task.percentComplete || 0;
+  switch (type) {
+    case "finishPastDays":
+      if (!task.end || pct >= 100) return false;
+      return dif(task.end, NOWv) >= (days ?? 1);
+    case "finishWithinDays": {
+      if (!task.end || pct >= 100) return false;
+      const d = dif(NOWv, task.end);
+      return d >= 0 && d <= (days ?? 7);
+    }
+    case "finishToday":
+      return !!task.end && pct < 100 && task.end === NOWv;
+    case "notStarted":
+      return !!task.start && pct <= 0 && dif(task.start, NOWv) >= 1;
+    case "predecessorLate": {
+      const preds = Array.isArray(task.predecessors) ? task.predecessors : [];
+      if (!preds.length || !taskById) return false;
+      return preds.some(p => {
+        const pt = taskById[p?.id];
+        return !!pt && !!pt.end && (pt.percentComplete||0) < 100 && dif(pt.end, NOWv) >= 1;
+      });
+    }
+    case "noOwner":
+      return !String(task.responsibleParty || "").trim();
+    case "complete":
+      return pct >= 100;
+    default:
+      return false;
+  }
+};
+
+export const migrateCfRulesToHealthRules = cfRules => {
+  const cf = cfRules || {};
+  const out = [];
+  if (cf.completeGreen) out.push({id:"legacy-complete", type:"complete", color:"green"});
+  if (cf.overdueRed)    out.push({id:"legacy-overdue",  type:"finishPastDays", days:1, color:"red"});
+  if (cf.dueSoonYellow) out.push({id:"legacy-duesoon",  type:"finishWithinDays", days:7, color:"yellow"});
+  return out;
+};
+export const DEFAULT_HEALTH_RULES = [
+  {id:"default-complete", type:"complete", color:"green"},
+  {id:"default-overdue",  type:"finishPastDays", days:1, color:"red"},
+  {id:"default-duesoon",  type:"finishWithinDays", days:3, color:"yellow"},
+];
+export const getHealthRules = settings => Array.isArray(settings?.healthRules) ? settings.healthRules : migrateCfRulesToHealthRules(settings?.cfRules);
+export const evalHealthRules = (task, settings, NOWv, taskById) => {
+  const rules = getHealthRules(settings);
+  for (const r of rules) { if (evalHealthCondition(r.type, r.days, task, NOWv, taskById)) return r.color; }
+  return null;
+};
+
+// Compute display health (faithful copy from index.html ~L2461). A manual override
+// (healthOverride) wins outright and skips everything below, including the meeting/deadline
+// blocks. Otherwise: the configurable rule list runs first (first match wins), THEN the
+// meeting-bound / deadline-row blocks (unrelated, always-on feature, unchanged), THEN the raw
+// stored health as the final fallback.
+export const computeDisplayHealth = (task, settings, taskById) => {
   if (!task) return task?.health;
-  // Rule order matters: more specific overrides general
-  if (cf.completeGreen && (task.percentComplete||0) >= 100) return "green";
+  if (task.healthOverride) return task.health;
+  const ruleResult = evalHealthRules(task, settings, NOW, taskById);
+  if (ruleResult) return ruleResult;
   // B817 — a meeting-bound task surfaces its schedule risk BEFORE it slips: infeasible = red (a genuine
   // alert), ≤2 working days of float to the agenda deadline = at-risk yellow. Reads the cascade-derived
   // fields (no body lookup). Opt-in (only fires on bound rows); complete/paused rows are exempt.
@@ -341,14 +409,6 @@ export const computeDisplayHealth = (task, settings) => {
   if (task.deadlineForTaskId != null && (task.percentComplete||0) < 100 && task.health !== "green" && task.health !== "paused") {
     if (task.deadlineInfeasible) return "red";
     if (task.end && difBD(NOW, task.end) >= 0 && difBD(NOW, task.end) <= 2) return "yellow";
-  }
-  if (cf.overdueRed && task.end && task.end < NOW && (task.percentComplete||0) < 100 && task.health !== "green" && task.health !== "paused" && task.health !== "red") return "red";
-  if (cf.dueSoonYellow && task.end && task.end >= NOW && task.health === "gray") {
-    // Within 7 calendar days
-    const today = new Date(NOW + "T12:00:00");
-    const end = new Date(task.end + "T12:00:00");
-    const days = Math.ceil((end - today) / 86400000);
-    if (days <= 7) return "yellow";
   }
   return task.health;
 };
@@ -752,6 +812,29 @@ export const normalizeToV7 = d => {
     projects[id] = {...proj, tasks: rollupParentDates(tasks)};
   });
   return {...d, projects, _v7: true};
+};
+// v9 — faithful copy of normalizeToV9 in index.html. One-time seed of the per-task
+// `healthOverride` flag: green/red/paused was necessarily hand-set (nothing else ever wrote
+// those), so it becomes an override, reproducing the old overdueRed/meetingBound exclusion of
+// green/paused/red exactly. Idempotent via _v9 — only ever touches a task that has never seen
+// this migration (healthOverride === undefined), so a value the user later clears to `false` is
+// never re-locked on a later load.
+export const normalizeToV9 = d => {
+  if (!d || typeof d !== "object") d = {};
+  if (d._v9) return d;
+  const projects = {};
+  const srcProjects = (d.projects && typeof d.projects === "object") ? d.projects : {};
+  Object.entries(srcProjects).forEach(([id, proj]) => {
+    if (!proj || typeof proj !== "object") return;
+    const srcTasks = Array.isArray(proj.tasks) ? proj.tasks : [];
+    const tasks = srcTasks.filter(t => t && typeof t === "object").map(t =>
+      t.healthOverride === undefined
+        ? {...t, healthOverride: t.health === "green" || t.health === "red" || t.health === "paused"}
+        : t
+    );
+    projects[id] = {...proj, tasks};
+  });
+  return {...d, projects, _v9: true};
 };
 export const ensureHolidays = d => {
   if (!d?.settings) return d;
