@@ -298,12 +298,20 @@ export const fmtTaskDuration = (t, isSummary = false) => {
   return `${taskDurValue(t)}${taskDurUnit(t)}`;
 };
 
-// Worst-of-descendants rolled status for each parent task (faithful copy from index.html).
+// Worst-of-descendants rolled status for each parent task (faithful copy from index.html). A
+// leaf child's contribution is its RULE-COMPUTED display health (computeDisplayHealth), never
+// its raw stored `health` field — see index.html's own comment on this function for the full
+// rationale and the no-self-reference argument. NOTE: computeDisplayHealth here is declared
+// further down this file, but a `const` arrow function is only READ when rollup() is actually
+// invoked at call time (not at parse time), so the forward reference is safe exactly as it is
+// in index.html's own top-to-bottom script evaluation order.
 export const HEALTH_PRIO = { red: 4, yellow: 3, paused: 2, green: 1, gray: 0, "": 0 };
-export const computeRolledHealth = (all) => {
+export const computeRolledHealth = (all, settings) => {
+  const byId = {}; all.forEach(t => { byId[t.id] = t; });
   const rollup = (id, stack) => {
+    if (stack.has(id)) return byId[id]?.health || "";
     const children = all.filter(t => t.parentId === id);
-    if (!children.length || stack.has(id)) return all.find(t => t.id === id)?.health || "";
+    if (!children.length) { const t = byId[id]; return t ? (computeDisplayHealth(t, settings, byId) || "") : ""; }
     stack.add(id);
     let best = "", bestP = 0;
     for (const c of children) { const h = rollup(c.id, stack); const p = HEALTH_PRIO[h] || 0; if (p > bestP) { bestP = p; best = h; } }

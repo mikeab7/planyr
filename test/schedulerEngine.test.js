@@ -635,14 +635,16 @@ describe("anti-drift: the schedule-output fixes still exist in the real source",
     expect(src).toMatch(/return `\$\{t\.health==="green" \? 100 : \(t\.percentComplete\|\|0\)\}%`/);
   });
   it("MasterView uses rolled health for parents (shared helper) and live deps", () => {
-    expect(src).toMatch(/const computeRolledHealth = \(all\) =>/);
-    expect(src).toMatch(/const rolled = computeRolledHealth\(p\.tasks\);/);
+    // NEW (group-header-rule-rollup): computeRolledHealth now takes `settings` too, so a leaf
+    // child's contribution is its RULE-COMPUTED health, not its raw stored `health` field.
+    expect(src).toMatch(/const computeRolledHealth = \(all, settings\) =>/);
+    expect(src).toMatch(/const rolled = computeRolledHealth\(p\.tasks, data\.settings\);/);
     // NEW-schedule-health: dispOf now threads a per-project `byId` map through so the
     // "a predecessor is late" health condition can resolve predecessor tasks — was
     // `dispOf(t, !isLeaf, rolled)`, no third arg, before that condition existed.
     expect(src).toMatch(/_disp: dispOf\(t, !isLeaf, rolled, byId\)/);
     expect(src).toMatch(/\}, \[data\.projects, masterHealthFilter, data\.settings, NOW\]\);/);
-    expect(src).toMatch(/const rolledHealthMap = useMemo\(\(\) => proj \? computeRolledHealth\(proj\.tasks\) : \{\}/);
+    expect(src).toMatch(/const rolledHealthMap = useMemo\(\(\) => proj \? computeRolledHealth\(proj\.tasks, data\.settings\) : \{\}/);
   });
   // NEW-schedule-health: the fixed 3-toggle cfRules (completeGreen/overdueRed/dueSoonYellow) was
   // replaced by a configurable ordered rule list (HEALTH_CONDITIONS / evalHealthRules) — see the
@@ -658,7 +660,7 @@ describe("anti-drift: the schedule-output fixes still exist in the real source",
     expect(src).toMatch(/case "finishPastDays":\s*\n\s*if \(!task\.end \|\| pct >= 100\) return false;/);
   });
   it("the engine mirror carries computeRolledHealth verbatim", () => {
-    expect(sjsx).toMatch(/export const computeRolledHealth = \(all\) =>/);
+    expect(sjsx).toMatch(/export const computeRolledHealth = \(all, settings\) =>/);
   });
   it("the schedule export name uses the Site-Planner format helper (mirrored)", () => {
     expect(src).toMatch(/const scheduleExportName = \(projects, date = new Date\(\)\) =>/);
@@ -2575,21 +2577,76 @@ describe("NEW-schedule-health — absence-safety (STEP 3.C): a missing date is a
 
 describe("NEW-schedule-health — group headers: the engine NEVER runs on a parent/summary row", () => {
   // B463072's lesson generalized: a parent's OWN start/end/duration can be a stale rollup
-  // leftover. The health engine sidesteps this entirely by never being called on a parent at
-  // all — every call site (GridView, GanttView, MasterView, Focus) branches on
-  // hasChildren/isSummary and shows computeRolledHealth's worst-of-children result instead,
-  // reading each child's RAW `.health`, never a rule-computed value. This test proves the
-  // rolled result is exactly the worst-of-children raw health regardless of what any health
-  // rule would have computed for those children.
-  it("a parent's rolled health reflects children's RAW health, not their rule-computed display health", () => {
+  // leftover. The health engine sidesteps this entirely by never being called WITH a parent
+  // task — every call site (GridView, GanttView, MasterView, buildPDFHtml) branches on
+  // hasChildren/isSummary and shows computeRolledHealth's worst-of-children result instead of
+  // calling computeDisplayHealth on the parent directly.
+  //
+  // ⛔ SUPERSEDED (group-header-rule-rollup session, branch claude/group-header-rule-rollup-84yspo):
+  // the test that used to live right here (PR #1073) asserted the OPPOSITE of what's below —
+  // that a parent's rolled health reflects children's RAW stored `.health`, "not their
+  // rule-computed display health". That assertion was correct about what the code did, and
+  // WRONG about what the product needs: it pinned a real defect in place. computeRolledHealth
+  // read each LEAF child's raw `.health` field, but health rules are display-only and never
+  // write back to `.health` (that's the whole point of computeDisplayHealth existing) — so a
+  // child that was automatically red by rule but still "gray" in storage could never turn its
+  // parent red, on the grid OR in the PDF export, even though both surfaces separately agree
+  // the child itself is red. Measured live before this fix, screen and export identical: an
+  // overdue child with no manual override read "Needs Attn." on its own row while its
+  // collapsed parent read "Not Started" on both surfaces. Two assertions cannot both hold for
+  // the same fixture below (a dated, rule-matching child rolls up as "green" under the old
+  // claim and "red" under the new one) — this is not a preference resolved by whichever was
+  // touched last, it is the defect fix, and the old claim is retired for that stated reason.
+  //
+  // The two call sites' own branch pattern (task.hasChildren ? rolledHealthMap : compute
+  // DisplayHealth(...)) is UNCHANGED — a parent is still never itself handed to
+  // computeDisplayHealth. What changed is only what computeRolledHealth feeds itself
+  // internally for each LEAF descendant: computeDisplayHealth's rule-computed answer, not
+  // task.health. See computeRolledHealth's own comment in index.html for the full rationale
+  // and why this cannot create a self-reference cycle (a leaf's rules never read another
+  // task's rolled or computed health, only raw scheduling fields).
+  it("a parent's rolled health now reflects a leaf child's RULE-COMPUTED display health, not its raw stored health", () => {
+    const settings = { healthRules: [
+      { id: "r-complete", type: "complete", color: "green" },
+      { id: "r-overdue",  type: "finishPastDays", days: 1, color: "red" },
+    ]};
     const tasks = [
       { id: 1, parentId: null, health: "gray" },   // parent — stale/irrelevant end date, never read by rollup
-      { id: 2, parentId: 1, health: "gray", end: "2020-01-01", percentComplete: 0 },  // would be RED under a rule
+      { id: 2, parentId: 1, health: "gray", healthOverride: false, end: "2020-01-01", percentComplete: 0 },  // genuinely RED under the rule above
+      { id: 3, parentId: 1, health: "green", healthOverride: false, end: "2020-01-01", percentComplete: 100 },
+    ];
+    // Prove the rule really fires red for the un-overridden child — otherwise this test is vacuous.
+    expect(E.computeDisplayHealth(tasks[1], settings)).toBe("red");
+    const rolled = E.computeRolledHealth(tasks, settings);
+    expect(rolled[1]).toBe("red"); // worst of {rule-computed red, rule-computed green} is red
+  });
+  it("with NO settings passed (the old call shape), the rollup degrades to raw health — never throws", () => {
+    // A caller that hasn't been updated to pass settings (there should be none left in the real
+    // app after this fix, but the function must not crash if one is ever missed) sees the SAME
+    // answer as before: with no health rules configured, computeDisplayHealth falls through to
+    // task.health for every un-overridden leaf, so the rollup is unchanged from the pre-fix shape.
+    const tasks = [
+      { id: 1, parentId: null, health: "gray" },
+      { id: 2, parentId: 1, health: "gray", end: "2020-01-01", percentComplete: 0 },
       { id: 3, parentId: 1, health: "green", end: "2020-01-01", percentComplete: 100 },
     ];
-    const rolled = E.computeRolledHealth(tasks);
-    // The child is raw "gray", not the rule-computed "red" — HEALTH_PRIO has no "red" contender here.
-    expect(rolled[1]).toBe("green"); // worst of {gray, green} by HEALTH_PRIO is green (gray=0 < green=1)
+    expect(() => E.computeRolledHealth(tasks)).not.toThrow();
+    expect(E.computeRolledHealth(tasks)[1]).toBe("green");
+  });
+  it("a parentId CYCLE still falls back to the cyclic task's raw health, never computeDisplayHealth", () => {
+    // The cycle guard (stack.has(id)) is a different case from a genuine leaf: a task caught in
+    // a parentId loop is a corrupt SUMMARY row, not a leaf, so its own start/end/percentComplete
+    // can be stale rollup leftovers — exactly what computeDisplayHealth must never see (the
+    // B463072 lesson this whole describe block is named for). A rule that would fire red on
+    // those stale fields must NOT reach the cyclic task.
+    const settings = { healthRules: [{ id: "r-overdue", type: "finishPastDays", days: 1, color: "red" }] };
+    const tasks = [
+      { id: 1, parentId: 2, health: "yellow", end: "2020-01-01", percentComplete: 0 },  // would be RED under the rule if evaluated
+      { id: 2, parentId: 1, health: "yellow", end: "2020-01-01", percentComplete: 0 },
+    ];
+    expect(() => E.computeRolledHealth(tasks, settings)).not.toThrow();
+    const rolled = E.computeRolledHealth(tasks, settings);
+    expect(rolled[1]).toBe("yellow"); // raw, not rule-computed red — the cycle guard, not the leaf path
   });
   it("computeDisplayHealth itself is never even asked about the parent in the real call sites (source check)", () => {
     const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
@@ -2597,6 +2654,87 @@ describe("NEW-schedule-health — group headers: the engine NEVER runs on a pare
     expect(src).toMatch(/task\.hasChildren\s*\n\s*\? \(rolledHealthMap\?\.\[task\.id\] \|\| task\.health\)\s*\n\s*: computeDisplayHealth\(task, data\.settings, taskById\)/);
     expect(src).toMatch(/const displayHealth = isSummary/);
     expect(src).toMatch(/: computeDisplayHealth\(task, settings, taskById\);/);
+  });
+
+  // ── Adjacent cases the group-header-rule-rollup fix must not break ──────────────────────────
+  const OVERDUE_SETTINGS = { healthRules: [
+    { id: "r-complete", type: "complete", color: "green" },
+    { id: "r-overdue",  type: "finishPastDays", days: 1, color: "red" },
+  ]};
+
+  it("nested parents more than one level deep: a rule-computed red leaf bubbles through a middle parent to the grandparent", () => {
+    const tasks = [
+      { id: 1, parentId: null, health: "gray" },                      // grandparent
+      { id: 2, parentId: 1, health: "gray" },                          // middle parent — itself has no raw health worth reading
+      { id: 3, parentId: 2, health: "gray", healthOverride: false, end: "2020-01-01", percentComplete: 0 }, // leaf, rule-computed red
+      { id: 4, parentId: 2, health: "green", healthOverride: false, end: "2020-01-01", percentComplete: 100 }, // leaf, rule-computed green
+    ];
+    const rolled = E.computeRolledHealth(tasks, OVERDUE_SETTINGS);
+    expect(rolled[2]).toBe("red");  // middle parent rolls up its own leaves' rule-computed health
+    expect(rolled[1]).toBe("red");  // grandparent rolls up the middle parent's ROLLED value (still red), not the middle parent's raw "gray"
+  });
+
+  it("a parent whose children are ALL hand-overridden: rollup is unaffected — override still wins per child before any rule runs", () => {
+    const tasks = [
+      { id: 1, parentId: null, health: "gray" },
+      { id: 2, parentId: 1, health: "yellow", healthOverride: true, end: "2020-01-01", percentComplete: 0 },  // overdue by the rule, but overridden — override wins
+      { id: 3, parentId: 1, health: "green", healthOverride: true, end: "2099-01-01", percentComplete: 0 },
+    ];
+    const rolled = E.computeRolledHealth(tasks, OVERDUE_SETTINGS);
+    // Same answer with or without settings — override short-circuits computeDisplayHealth before any rule is even evaluated.
+    expect(rolled[1]).toBe("yellow");
+    expect(E.computeRolledHealth(tasks)[1]).toBe("yellow");
+  });
+
+  it("a parent with one DATED and one UNDATED child: only the dated one is rule-eligible, matching the leaf-level absence-safety rule", () => {
+    const tasks = [
+      { id: 1, parentId: null, health: "gray" },
+      { id: 2, parentId: 1, health: "gray", healthOverride: false, end: "2020-01-01", percentComplete: 0 },   // dated + overdue → rule-computed red
+      { id: 3, parentId: 1, health: "gray", healthOverride: false, end: "", percentComplete: 0 },              // no end date → no rule can match, falls to raw "gray"
+    ];
+    const rolled = E.computeRolledHealth(tasks, OVERDUE_SETTINGS);
+    expect(rolled[1]).toBe("red"); // worst of {red, gray} is red — the dated child alone is enough to flip the parent
+  });
+
+  it("a milestone (duration 0) as a child: the rule engine doesn't care about duration, so it rolls up exactly like any other leaf", () => {
+    const tasks = [
+      { id: 1, parentId: null, health: "gray" },
+      { id: 2, parentId: 1, health: "gray", healthOverride: false, duration: 0, start: "2020-01-01", end: "2020-01-01", percentComplete: 0 }, // overdue milestone
+    ];
+    const rolled = E.computeRolledHealth(tasks, OVERDUE_SETTINGS);
+    expect(rolled[1]).toBe("red");
+  });
+
+  it("collapsed vs expanded parent: the rolled value is IDENTICAL either way — computeRolledHealth never reads task.isExpanded", () => {
+    // Live-browser follow-up (group-header-rule-rollup session) found that the GRID and GANTT
+    // deliberately render a BLANK status cell for an expanded parent (index.html's GridView
+    // "status"/"health" cases and GanttView's rowBg both gate on isExpandedParent) — pre-existing
+    // B222/B211 design ("the red/paused/overdue signal stays in the row background... never
+    // collides with the navy hierarchy of the summary brackets"), unrelated to this fix. So the
+    // two surfaces are not literally comparable on screen once expanded — there is no color to
+    // compare against. What DOES have to hold, and does: the rolled MAP entry itself is exactly
+    // the same whether the parent is collapsed or expanded, because isExpanded never enters the
+    // computation at all. The PDF export has no such gate (buildPDFHtml's cellVal always renders
+    // the computed health for whatever rows collapsedIds includes), so it shows this value
+    // unconditionally — verified live in ui-audit/verify-schedule-export-health-colours.mjs's
+    // "autoRollupExpanded" scenario.
+    const collapsed = [
+      { id: 1, parentId: null, health: "gray", isExpanded: false },
+      { id: 2, parentId: 1, health: "gray", healthOverride: false, end: "2020-01-01", percentComplete: 0 },
+      { id: 3, parentId: 1, health: "green", healthOverride: false, end: "2020-01-01", percentComplete: 100 },
+    ];
+    const expanded = collapsed.map(t => t.id === 1 ? { ...t, isExpanded: true } : t);
+    expect(E.computeRolledHealth(collapsed, OVERDUE_SETTINGS)).toEqual(E.computeRolledHealth(expanded, OVERDUE_SETTINGS));
+    expect(E.computeRolledHealth(expanded, OVERDUE_SETTINGS)[1]).toBe("red");
+  });
+
+  it("source check: computeRolledHealth and computeDisplayHealth never reference task.isExpanded (the invariant the test above relies on)", () => {
+    const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+    const between = (startRe, endRe) => { const s = src.match(startRe); if (!s) return ""; const from = s.index; const rest = src.slice(from); const e = rest.match(endRe); return e ? rest.slice(0, e.index) : rest; };
+    const computeRolledHealthBody = between(/const computeRolledHealth = /, /\n\nconst fmtD = /);
+    const computeDisplayHealthBody = between(/const computeDisplayHealth = /, /\n\n\/\/ Worst-of-descendants/);
+    expect(computeRolledHealthBody).not.toMatch(/isExpanded/);
+    expect(computeDisplayHealthBody).not.toMatch(/isExpanded/);
   });
 });
 
