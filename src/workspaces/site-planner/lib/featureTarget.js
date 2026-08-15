@@ -223,6 +223,50 @@ export function stackEntries(nodes) {
   return out;
 }
 
+/* ⛔ NEW-2 — EVERY FEATURE UNDER THE POINT, TOP-MOST FIRST, not just the winner.
+ *
+ * THE DEFECT THIS EXISTS FOR. Sending a markup behind the buildings is a ONE-WAY DOOR from the
+ * user's seat: the building paints over it, so the building's node takes every press across the
+ * whole overlap, and the markup can only be grabbed on whatever sliver no element covers. Measured
+ * on the owner's plan — right-click the markup anywhere it overlaps the building and you get the
+ * BUILDING's menu, with nothing in it that mentions the markup. On a markup drawn to cover a
+ * building there is no sliver at all, and the object is simply unreachable.
+ *
+ * `resolveDoubleClickTarget` answers "which ONE feature is this press about", which is the right
+ * question for a gesture and the wrong one for "what did I put under here". Same stack, same
+ * skip-the-chrome rule (a handle or a `data-chrome` affordance belongs to a feature and is never
+ * one), read all the way down instead of stopping at the first hit. Deduped, because one feature
+ * contributes as many stack entries as it has painted nodes at that point.
+ *
+ * Pure — the caller owns the `elementsFromPoint` call, exactly as above.
+ */
+export function featureStack(entries) {
+  const out = [], seen = new Set();
+  for (const en of entries || []) {
+    if (!en) continue;
+    if (en.handle) continue;                 // chrome belonging to a feature, not a feature
+    if (!en.feature || seen.has(en.feature)) continue;
+    const target = parseFeatureKey(en.feature);
+    if (!target) continue;
+    seen.add(en.feature);
+    out.push({ key: en.feature, target });
+  }
+  return out;
+}
+
+/* The features BELOW the top-most one at this point — i.e. what the press could not reach. */
+export function featuresBeneath(entries) {
+  return featureStack(entries).slice(1);
+}
+
+/* Is `key` (a `data-feature` value) anywhere in this stack at all? The selected-annotation
+ * priority rule below needs exactly this and nothing more: not "is it on top" — it is under an
+ * element BY DESIGN — but "does it paint here", so the press can be handed back to it. */
+export function stackHoldsFeature(entries, key) {
+  if (typeof key !== "string" || !key) return false;
+  return featureStack(entries).some((f) => f.key === key);
+}
+
 /* NEW-3 — did this press land on the element's own BODY, or only on its dimension chrome?
  *
  * The dimension NUMBER is a click target (single click selects, and historically a double-tap

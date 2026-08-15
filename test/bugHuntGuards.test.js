@@ -566,7 +566,10 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     // NEW-8 also records the WORLD point of the right-click (`w`) so "Branch a road from here" starts
     // from the spot the user pointed at, not the element's centre — so the menu payload is now
     // { id, x, y, w }. The guard still pins that the SCREEN position drives the menu placement.
-    expect(src).toMatch(/const onElContext = \(e, id\) => \{[\s\S]*?setTypeMenu\(\{ id, x: e\.clientX, y: e\.clientY, w \}\);/);
+    // NEW-2 also records what is painted UNDERNEATH the click (`under`), so an annotation sent
+    // behind the plan can be named and reversed from the element that is covering it — the payload
+    // is now { id, x, y, w, under }. The guard still pins that the SCREEN position drives the menu.
+    expect(src).toMatch(/const onElContext = \(e, id\) => \{[\s\S]*?setTypeMenu\(\{ id, x: e\.clientX, y: e\.clientY, w, under: /);
   });
 
   it("NEW-1: single-occupancy left dock — inspector TAKES OVER the dock when it opens, never stacks", () => {
