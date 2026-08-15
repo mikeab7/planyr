@@ -2543,9 +2543,10 @@ const evalHealthRules = (task, settings, NOW, taskById) => {
 // be stomped by automation of any kind until the user clears it back to Automatic). Otherwise: the
 // configurable rule list runs first (first match wins), THEN the meeting-bound / deadline-row
 // blocks (an unrelated, always-on feature, byte-identical to before), THEN the raw stored health
-// as the final fallback. Only ever called on LEAF tasks — a parent/summary row always shows the
-// worst-of-children ROLLED health (computeRolledHealth) reading each child's raw `health`, never
-// this function, so a parent's own stale rollup fields can never leak into a health rule.
+// as the final fallback. Only ever called with a LEAF task — a parent/summary row always shows
+// the worst-of-children ROLLED health (computeRolledHealth) instead, which itself calls this
+// function once per LEAF descendant (never on a parent — a parent's own stale rollup fields can
+// never leak into a health rule; see computeRolledHealth's own comment for why that's safe).
 const computeDisplayHealth = (task, settings, taskById) => {
   if (!task) return task?.health;
   if (task.healthOverride) return task.health;
@@ -2569,13 +2570,31 @@ const computeDisplayHealth = (task, settings, taskById) => {
 
 // Worst-of-descendants rolled status for each PARENT task — the value the grid shows on a
 // collapsed parent. Shared by the project grid (rolledHealthMap) and the cross-project
-// dashboard (MasterView) so the two never disagree about a parent's status. Pure; uses raw
-// stored child health (a parent reflects what its children actually are).
+// dashboard (MasterView) so the two never disagree about a parent's status. Pure.
+//
+// A LEAF child's contribution is its RULE-COMPUTED display health (computeDisplayHealth) —
+// the same value the grid/PDF would print for that row if it were shown on its own — never the
+// raw stored `health` field. Before this fix, a child that was automatically red by rule but
+// still "gray" in storage (health rules are display-only; they never write back to `.health`)
+// could not turn its parent red on either the grid or the export, even though both surfaces
+// agree the child itself is red (measured live, screen and PDF export identical: a "gray"-
+// stored overdue child read "Needs Attn." on its own row but its collapsed parent stayed "Not
+// Started" on both surfaces — B6864-class defect). A cycle-guarded parentId loop still falls
+// back to that task's raw `.health` (never computeDisplayHealth — a summary row's own
+// start/end/percentComplete can be stale rollup leftovers, exactly what computeDisplayHealth's
+// own doc comment warns a health rule must never see).
+//
+// No self-reference risk: computeDisplayHealth only ever reads a LEAF's own start/end/percent-
+// Complete/predecessors/healthOverride/health/meetingBound/deadlineForTaskId — predecessorLate
+// reads a predecessor's raw `.end`/`.percentComplete`, never another task's rolled or computed
+// health — so nothing here ever asks a parent's rolled colour to explain itself.
 const HEALTH_PRIO = { red: 4, yellow: 3, paused: 2, green: 1, gray: 0, "": 0 };
-const computeRolledHealth = (all) => {
+const computeRolledHealth = (all, settings) => {
+  const byId = {}; all.forEach(t => { byId[t.id] = t; });
   const rollup = (id, stack) => {
+    if (stack.has(id)) return byId[id]?.health || "";
     const children = all.filter(t => t.parentId === id);
-    if (!children.length || stack.has(id)) return all.find(t => t.id === id)?.health || "";
+    if (!children.length) { const t = byId[id]; return t ? (computeDisplayHealth(t, settings, byId) || "") : ""; }
     stack.add(id);
     let best = "", bestP = 0;
     for (const c of children) { const h = rollup(c.id, stack); const p = HEALTH_PRIO[h] || 0; if (p > bestP) { bestP = p; best = h; } }
@@ -7197,7 +7216,7 @@ function App() {
       `${scheduleExportName(Object.values(data.projects))}.html`, "text/html");  // match the Site Planner PDF filename format
   };
 
-  const rolledHealthMap = useMemo(() => proj ? computeRolledHealth(proj.tasks) : {}, [proj?.tasks]);
+  const rolledHealthMap = useMemo(() => proj ? computeRolledHealth(proj.tasks, data.settings) : {}, [proj?.tasks, data?.settings]);
 
   if (!data) return (
     <div style={{height:"100vh",background:"#ffffff",display:"flex",alignItems:"center",justifyContent:"center",color:"#e6a817",fontFamily:"'Inter',system-ui,sans-serif",fontSize:14,letterSpacing:".1em"}}>LOADING...</div>
@@ -11855,7 +11874,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
     const dispOf = (t, isParent, rolled, byId) => isParent ? (rolled[t.id] || t.health) : computeDisplayHealth(t, data.settings, byId);
     return Object.values(data.projects).flatMap(p => {
       const childIds = new Set(p.tasks.filter(t => t.parentId !== null).map(t => t.parentId));
-      const rolled = computeRolledHealth(p.tasks);
+      const rolled = computeRolledHealth(p.tasks, data.settings);
       const byId = {}; p.tasks.forEach(t => byId[t.id] = t);   // predecessorLate lookup, one per project
       return p.tasks
         .filter(t => !masterHealthFilter || (h => h==="red" || h==="yellow")(dispOf(t, childIds.has(t.id), rolled, byId)))
@@ -12883,7 +12902,7 @@ function buildPDFHtml(cfg, data, forPreview) {
     if (_healthCtxTasks !== tasks) {
       _healthCtxTasks = tasks;
       _healthCtxById = {}; tasks.forEach(x => { _healthCtxById[x.id] = x; });
-      _healthCtxRolled = computeRolledHealth(tasks);
+      _healthCtxRolled = computeRolledHealth(tasks, data.settings);
     }
     return { byId: _healthCtxById, rolled: _healthCtxRolled };
   };
