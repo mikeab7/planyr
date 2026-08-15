@@ -65,7 +65,7 @@ export function overProvision(overAcFt, { earthPerCy = null } = {}) {
     overAcFt,
     cy,
     costUsd,
-    text: `Over by ~${f1(overAcFt)} ac-ft — about ${f0(cy)} CY of excavation that buys no detention credit${costUsd != null ? ` (~$${f0(costUsd)} at your $/CY)` : ""}.`,
+    text: `Over by ~${f1(overAcFt)} AC-FT — about ${f0(cy)} CY of excavation that buys no detention credit${costUsd != null ? ` (~$${f0(costUsd)} at your $/CY)` : ""}.`,
     basis: `Screening: 1 ac-ft of storage = 1 ac-ft of cut, the same convention the ledger balancer's shrink moves use. ${costUsd != null ? "Priced at the Earthwork card's $/CY unit price." : "Enter a $/CY unit price in Yield → Costs → Earthwork to see this as a dollar figure."}`,
   };
 }
@@ -104,11 +104,11 @@ export function detentionVerdict({
   const heading = hardBlocked
     ? (short ? "Detention not achievable here" : "Detention volume met — not buildable as drawn")
     : short
-      ? `Detention short ${f1(shortByAcFt)} ac-ft`
+      ? `Detention short ${f1(shortByAcFt)} AC-FT`
       : "Detention covered";
   const subline = prov == null || req == null
     ? null
-    : `${f1(prov)} of ${f1(req)} ac-ft${hardBlocked && short ? " achievable" : ""}`;
+    : `${f1(prov)} of ${f1(req)} AC-FT${hardBlocked && short ? " achievable" : ""}`;
   // The buildability answer, DEMOTED off the headline but never deleted. The caller's body
   // copy (the floodway / no-rise gloss, the below-flood-level explanation) still renders
   // underneath — this line is the one-glance version of it.
@@ -151,7 +151,7 @@ export function mitigationVerdict({ providedAcFt, requiredAcFt } = {}) {
     // Unchanged wording (the brief holds this row up as the correct pattern) — only its
     // derivation moved here, so the two rows can never drift apart again.
     heading: short ? "Mitigation short" : "Mitigation covered",
-    subline: prov == null || req == null ? null : `${f1(prov)} of ${f1(req)} ac-ft`,
+    subline: prov == null || req == null ? null : `${f1(prov)} of ${f1(req)} AC-FT`,
     qualifier: null,
   };
 }

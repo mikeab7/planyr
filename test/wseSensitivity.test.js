@@ -1,9 +1,9 @@
 /* NEW-4 — flood-level sensitivity.
  *
  * The question this answers is an underwriting one, not a design one: on Tsakiris the whole
- * floodplain-mitigation obligation is 0.2 ac-ft, and it is 0.2 only because the ESTIMATED flood
+ * floodplain-mitigation obligation is 0.2 AC-FT, and it is 0.2 only because the ESTIMATED flood
  * surface sits about a quarter foot above existing ground in unstudied Zone A. Does a flood level
- * two feet higher make that 2 ac-ft, or 20?
+ * two feet higher make that 2 AC-FT, or 20?
  *
  * Two properties matter more than the arithmetic:
  *   • the rows come from the SAME evaluator the live panel uses, so a scenario cannot contradict
@@ -36,7 +36,7 @@ describe("the sweep answers the owner's question: how fast does the obligation g
     expect(sweep.rows[0].mitigationDeltaAcFt).toBe(0); // the baseline is a delta of zero from itself
   });
 
-  it("a 0.2 ac-ft obligation today becomes an order of magnitude more two feet up", () => {
+  it("a 0.2 AC-FT obligation today becomes an order of magnitude more two feet up", () => {
     const now = sweep.rows.find((r) => r.stepFt === 0).mitigationAcFt;
     const up2 = sweep.rows.find((r) => r.stepFt === 2).mitigationAcFt;
     expect(now).toBeCloseTo(0.2, 2);

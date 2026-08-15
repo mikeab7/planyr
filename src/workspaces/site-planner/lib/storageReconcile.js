@@ -114,7 +114,7 @@ function reconcileMessage({ state, overlapCf, offenders, undeclared, physicalCf,
   const names = (list) => list.map((p) => p.name || p.id || "a pond").join(", ");
   if (overlapCf > OVERLAP_TOL_CF) {
     const who = offenders.length ? ` — ${names(offenders)}` : "";
-    return `Detention and mitigation together claim ${acft(claimedCf)} ac-ft of storage, but only ${acft(physicalCf)} ac-ft physically exists. ${acft(overlapCf)} ac-ft is counted twice${who}.`;
+    return `Detention and mitigation together claim ${acft(claimedCf)} AC-FT of storage, but only ${acft(physicalCf)} AC-FT physically exists. ${acft(overlapCf)} AC-FT is counted twice${who}.`;
   }
   if (undeclared.length) {
     return `${names(undeclared)} serve${undeclared.length === 1 ? "s" : ""} both detention and mitigation without a declared vertical split. Set the flood elevation that divides the two bands so the same storage cannot be credited twice.`;

@@ -197,7 +197,7 @@ describe("the export renders the COMPLETE LABEL SET, whatever the view (V481(f))
       const c = f2p({ x: el.cx, y: el.cy });
       return {
         id: el.id, cx: c.x, cy: c.y,
-        lines: buildingLabelLines({ name: el.name, sqft: `${el.w * el.h} sf`, dims: `${el.w}′ × ${el.h}′` }),
+        lines: buildingLabelLines({ name: el.name, sqft: `${el.w * el.h} SF`, dims: `${el.w}′ × ${el.h}′` }),
         lh, charW, halfW: (el.w / 2) * view.ppf, halfH: (el.h / 2) * view.ppf, importance: el.w * el.h,
       };
     });

@@ -20,7 +20,7 @@ const UPLAND = { depth: 8, freeboard: 1, slope: 3, tobElev: 100 };
 describe("solveBermRaise — the NEW-13 joint solve", () => {
   it("solves the smallest 0.1-ft H that closes the deficit on one upland pond", () => {
     const p = pondEntry("p1", SQ(400), UPLAND);
-    // one foot of berm on a 400-ft square adds roughly a top-band prism (~3.6 ac-ft)
+    // one foot of berm on a 400-ft square adds roughly a top-band prism (~3.6 AC-FT)
     const oneFt = usablePondVolume(SQ(400), { ...UPLAND, depth: 9, tobElev: 101 }, {}).usableCf - p.usableCf;
     const s = solveBermRaise({ ponds: [p], deficitCf: oneFt * 0.55 });
     expect(s.ok).toBe(true);
@@ -77,11 +77,11 @@ describe("rankLedgerMoves — the five screening kinds", () => {
     earthPerCy: 6,
   });
 
-  it("Bain-shaped: parcel deactivation prices at the effective rate (29.71 ac ≈ −20.9)", () => {
+  it("Bain-shaped: parcel deactivation prices at the effective rate (29.71 AC ≈ −20.9)", () => {
     const r = rankLedgerMoves(bainish());
     const mv = r.moves.find((m) => m.kind === "deactivate-parcel" && m.id === "pb");
     expect(mv).toBeTruthy();
-    // effRate = 76.54 / 108.8 ≈ 0.7035 → 29.71 ac ≈ 20.9 ac-ft
+    // effRate = 76.54 / 108.8 ≈ 0.7035 → 29.71 AC ≈ 20.9 AC-FT
     expect(mv.deltas.detAcFt).toBeGreaterThan(20.5);
     expect(mv.deltas.detAcFt).toBeLessThan(21.3);
     expect(mv.destructive).toBe(true);

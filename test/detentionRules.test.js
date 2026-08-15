@@ -76,7 +76,7 @@ describe("ruleFor — the versioning seam", () => {
 });
 
 describe("computeRequiredDetention — HCFCD (the Goose Creek merge gate)", () => {
-  it("276 ac × 0.65 ac-ft/ac (PCPM methods baseline) = 179.4 ac-ft — matches the DIA", () => {
+  it("276 AC × 0.65 ac-ft/ac (PCPM methods baseline) = 179.4 ac-ft — matches the DIA", () => {
     // Source check (owner-verified): the Goose Creek drainage impact analysis states a
     // MINIMUM REQUIRED detention of 179.38 ac-ft for the ~276-ac tract under the HCFCD
     // Atlas-14 PCPM rate; 276 × 0.65 = 179.40. The 0.02 delta is the DIA's exact surveyed
@@ -155,8 +155,8 @@ describe("computeRequiredDetention — HCFCD outfall-type minimum (B761, unincor
 });
 
 describe("computeRequiredDetention — COH tiers (2026 record, IDMS-2025-01 primary)", () => {
-  it("≤20 ac: flat 0.8 ac-ft/ac × PROPOSED IMPERVIOUS AREA (Table 9.5), not the gross tract", () => {
-    // 10 ac at 80% impervious → 8 ac impervious → 0.8 × 8 = 6.4 ac-ft.
+  it("≤20 AC: flat 0.8 ac-ft/ac × PROPOSED IMPERVIOUS AREA (Table 9.5), not the gross tract", () => {
+    // 10 AC at 80% impervious → 8 AC impervious → 0.8 × 8 = 6.4 ac-ft.
     const r = computeRequiredDetention({ acres: 10, impPct: 80, authorityId: "coh" });
     expect(r.kind).toBe("point");
     expect(r.rateAcFtPerAc).toBe(0.8);
@@ -169,16 +169,16 @@ describe("computeRequiredDetention — COH tiers (2026 record, IDMS-2025-01 prim
   it("impervious % unknown → conservative full-tract upper bound, flagged", () => {
     const r = computeRequiredDetention({ acres: 10, authorityId: "coh" });
     expect(r.kind).toBe("point");
-    expect(r.requiredAcFt).toBeCloseTo(8.0, 2); // 0.8 × 10 ac (tract, conservative upper bound)
+    expect(r.requiredAcFt).toBeCloseTo(8.0, 2); // 0.8 × 10 AC (tract, conservative upper bound)
     expect(r.flags).toContain("impervious-unknown");
   });
   it("redevelopment credit: Detention = (Ap × 0.8) − (Ae × 0.4)", () => {
-    // 10 ac at 100% impervious (Ap = 10 ac) with 5 ac existing impervious removed (Ae = 5).
+    // 10 AC at 100% impervious (Ap = 10 AC) with 5 AC existing impervious removed (Ae = 5).
     const r = computeRequiredDetention({ acres: 10, impPct: 100, authorityId: "coh", removedImperviousAcres: 5 });
     expect(r.requiredAcFt).toBeCloseTo(0.8 * 10 - 0.4 * 5, 2); // 8.0 − 2.0 = 6.0
     expect(r.basis).toMatch(/removed impervious/);
   });
-  it("single-family lot <15,000 sf: exempt at ≤65% impervious, else 0.75 × impervious IN EXCESS of 65%", () => {
+  it("single-family lot <15,000 SF: exempt at ≤65% impervious, else 0.75 × impervious IN EXCESS of 65%", () => {
     const acres = 6000 / 43560;
     const exempt = computeRequiredDetention({ acres, impPct: 60, authorityId: "coh", singleFamily: true, lotSf: 6000 });
     expect(exempt.kind).toBe("none");
@@ -193,12 +193,12 @@ describe("computeRequiredDetention — COH tiers (2026 record, IDMS-2025-01 prim
 
 describe("computeRequiredDetention — COH 2019 record (grandfathered dates)", () => {
   const onDate = "2024-01-01";
-  it("<1 ac non-single-family: 0.75 ac-ft/ac", () => {
+  it("<1 AC non-single-family: 0.75 ac-ft/ac", () => {
     const r = computeRequiredDetention({ acres: 0.5, impPct: 90, authorityId: "coh", onDate });
     expect(r.requiredAcFt).toBeCloseTo(0.375, 3);
     expect(r.rule.id).toBe("coh-idm9-2019");
   });
-  it("1–20 ac: Table 9.3 / Fig 9.2 curve interpolation (now transcribed — no approximate flag)", () => {
+  it("1–20 AC: Table 9.3 / Fig 9.2 curve interpolation (now transcribed — no approximate flag)", () => {
     // Real Table 9.3: 85% → 0.93, 90% → 0.95, so 87.5% interpolates to 0.94 ac-ft/ac.
     const r = computeRequiredDetention({ acres: 10, impPct: 87.5, authorityId: "coh", onDate });
     expect(r.kind).toBe("point");
@@ -221,13 +221,13 @@ describe("computeRequiredDetention — COH 2019 record (grandfathered dates)", (
 });
 
 describe("computeRequiredDetention — boundary + rate-purity fixes (review)", () => {
-  it("exactly 20.00 ac under the 2026 flat-rate record defers to HCFCD, not 'unknown'", () => {
+  it("exactly 20.00 AC under the 2026 flat-rate record defers to HCFCD, not 'unknown'", () => {
     const r = computeRequiredDetention({ acres: 20, impPct: 85, authorityId: "coh" });
     expect(r.kind).toBe("point");
     expect(r.rule.id).toBe("hcfcd-pcpm-atlas14-2021"); // >20 defers; == threshold with no mid-tract → large tract
     expect(r.requiredAcFt).toBeCloseTo(0.65 * 20, 2);
   });
-  it("exactly 20.00 ac under the 2019 record still uses the mid-tract curve (inclusive band)", () => {
+  it("exactly 20.00 AC under the 2019 record still uses the mid-tract curve (inclusive band)", () => {
     const r = computeRequiredDetention({ acres: 20, impPct: 85, authorityId: "coh", onDate: "2024-01-01" });
     expect(r.rule.id).toBe("coh-idm9-2019");
     expect(r.kind).toBe("point");
@@ -243,7 +243,7 @@ describe("computeRequiredDetention — boundary + rate-purity fixes (review)", (
 
 describe("computeRequiredDetention — the >20-ac greater-of conflict rule", () => {
   it("in city limits, draining to an HCFCD channel: max(0.65×tract, 0.75×impervious) — HCFCD wins at low impervious", () => {
-    // 30 ac at 85% impervious → HCFCD 0.65×30 = 19.5 vs COH 0.75×25.5 = 19.125.
+    // 30 AC at 85% impervious → HCFCD 0.65×30 = 19.5 vs COH 0.75×25.5 = 19.125.
     const r = computeRequiredDetention({ acres: 30, impPct: 85, authorityId: "coh", inCityLimits: true, drainsToHcfcdChannel: true });
     expect(r.kind).toBe("point");
     expect(r.requiredAcFt).toBeCloseTo(19.5, 2);
@@ -252,7 +252,7 @@ describe("computeRequiredDetention — the >20-ac greater-of conflict rule", () 
     expect(r.governing.candidates).toHaveLength(2);
   });
   it("…and COH wins when impervious is high enough (both directions of the max)", () => {
-    // 30 ac at 90% → COH 0.75×27 = 20.25 > HCFCD 19.5.
+    // 30 AC at 90% → COH 0.75×27 = 20.25 > HCFCD 19.5.
     const r = computeRequiredDetention({ acres: 30, impPct: 90, authorityId: "coh", inCityLimits: true, drainsToHcfcdChannel: true });
     expect(r.requiredAcFt).toBeCloseTo(20.25, 2);
     expect(r.governing.picked).toBe("coh");
@@ -274,7 +274,7 @@ describe("computeRequiredDetention — rate-less band authorities can NEVER emit
   it.each(["chambers", "waller"])("%s → band + flags, requiredAcFt null (even with impervious known)", (auth) => {
     for (const acres of [0.5, 5, 45, 150, 500]) {
       const r = computeRequiredDetention({ acres, impPct: 85, authorityId: auth });
-      expect(r.kind, `${auth} @ ${acres} ac`).toBe("band");
+      expect(r.kind, `${auth} @ ${acres} AC`).toBe("band");
       expect(r.requiredAcFt).toBeNull();
       expect(r.bandAcFt[0]).toBeLessThan(r.bandAcFt[1]);
       expect(r.flags).toContain("screening-band");
@@ -324,7 +324,7 @@ describe("computeRequiredDetention — Fort Bend Table 6-1 (transcribed → poin
     expect(r.flags).toContain("impervious-unknown");
     expect(r.basis).toMatch(/Table 6-1/);
   });
-  it("≥640 ac (HEC-HMS range) → band even with impervious known", () => {
+  it("≥640 AC (HEC-HMS range) → band even with impervious known", () => {
     const r = computeRequiredDetention({ acres: 700, impPct: 60, authorityId: "fortbend" });
     expect(r.kind).toBe("band");
     expect(r.flags).toContain("large-tract-modeling");
@@ -353,12 +353,12 @@ describe("B764 — Fort Bend (fbcdd) record params + tier note", () => {
     expect(TIER_THRESHOLDS.fortbend.diaAcres).toBe(50);
     expect(TIER_THRESHOLDS.fortbend.note).toMatch(/640/);
     expect(TIER_THRESHOLDS.fortbend.note).toMatch(/optional 50/i);
-    expect(TIER_THRESHOLDS.fortbend.note).not.toMatch(/above 50 ac/i); // the old (wrong) note is gone
+    expect(TIER_THRESHOLDS.fortbend.note).not.toMatch(/above 50 AC/i); // the old (wrong) note is gone
   });
 });
 
 
-describe("computeRequiredDetention — Montgomery Eq. 6-2 (≤20 ac, transcribed → point)", () => {
+describe("computeRequiredDetention — Montgomery Eq. 6-2 (≤20 AC, transcribed → point)", () => {
   it("≤25% impervious → flat 0.35 ac-ft/ac", () => {
     const r = computeRequiredDetention({ acres: 5, impPct: 20, authorityId: "montgomery" });
     expect(r.kind).toBe("point");
@@ -371,7 +371,7 @@ describe("computeRequiredDetention — Montgomery Eq. 6-2 (≤20 ac, transcribed
     expect(r.requiredAcFt).toBeCloseTo(6.05, 2);
     expect(r.rule.id).toBe("moco-dcm-2025");
   });
-  it(">20 ac contributing area → simplified path doesn't apply → band, requiredAcFt null", () => {
+  it(">20 AC contributing area → simplified path doesn't apply → band, requiredAcFt null", () => {
     const r = computeRequiredDetention({ acres: 25, impPct: 60, authorityId: "montgomery" });
     expect(r.kind).toBe("band");
     expect(r.requiredAcFt).toBeNull();
@@ -386,18 +386,18 @@ describe("computeRequiredDetention — Montgomery Eq. 6-2 (≤20 ac, transcribed
 });
 
 describe("computeRequiredDetention — municipal overlays", () => {
-  it("Missouri City <20 ac with known added impervious: 0.75 × ADDED impervious", () => {
+  it("Missouri City <20 AC with known added impervious: 0.75 × ADDED impervious", () => {
     const r = computeRequiredDetention({ acres: 15, authorityId: "missouricity", addedImperviousAcres: 10 });
     expect(r.kind).toBe("point");
     expect(r.requiredAcFt).toBeCloseTo(7.5, 2);
     expect(r.flags).toContain("municipal-overlay");
   });
-  it("Missouri City <20 ac, added impervious unknown → screening fallback, flagged", () => {
+  it("Missouri City <20 AC, added impervious unknown → screening fallback, flagged", () => {
     const r = computeRequiredDetention({ acres: 15, impPct: 80, authorityId: "missouricity" });
     expect(r.kind).toBe("point");
     expect(r.flags).toContain("added-impervious-unknown");
   });
-  it("Missouri City ≥20 ac: parent depends on watershed — surfaced, not guessed", () => {
+  it("Missouri City ≥20 AC: parent depends on watershed — surfaced, not guessed", () => {
     const r = computeRequiredDetention({ acres: 25, impPct: 85, authorityId: "missouricity" });
     expect(r.kind).toBe("unknown");
     expect(r.flags).toContain("overlay-parent-ambiguous");

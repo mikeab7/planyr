@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-15 @ `8612b20` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-15 @ `c8aa7aa` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_524 source files mapped._
+_527 source files mapped._
 
 ## infra
 
@@ -310,6 +310,8 @@ _524 source files mapped._
   - _exports_: `readScene`
 - **`src/shared/telemetry/perfTrigger.js`** — The self-calibrating trigger: a baseline median taken from the window right after a load, then a sustained-deviation test (level × slow-fraction × perceptibility floor) over a time-qualified window.
   - _exports_: `createTrigger`, `feedFrame`, `sealBaselineLate`, `TRIGGER_DEFAULTS`, `triggerState`
+- **`src/shared/theme/familyInk.js`** — the default ink of each drawn family + the rule that keeps them perceptually apart (a measurement and a markup shared #c2410c, so the number vanished into the shape)
+  - _exports_: `ELEMENT_DEFAULT_PAINT`, `FAMILY_DEFAULT_INK`, `INK_DISTINCT_MIN_DE`, `MEASURE_INK`, `parseHex`
 - **`src/shared/theme/palette.js`** — JS mirror of index.css theme tokens as concrete light/dark hex for the SVG canvas and Markup viewer where var() cannot resolve; paletteFor(resolved) selector
   - _exports_: `paletteFor`, `PALETTES`
 - **`src/shared/theme/ThemePicker.jsx`** — Light/Dark/System theme picker UI reading useTheme, mounted in signed-in Settings and the signed-out header gear, styled purely from theme tokens
@@ -376,6 +378,8 @@ _524 source files mapped._
   - _exports_: `pushToastPure`, `TOAST_CAP`, `TOAST_TTL_MS`, `ToastHost`, `useToasts`, `visibleToasts`
 - **`src/shared/ui/ToolRail.jsx`** — Shared Bluebeam-style vertical icon rail: presentational items list (tool/header/divider/spacer/node), active-tool accent highlight, theme-token chrome
   - _exports_: `default (ToolRail)`, `RailButton`
+- **`src/shared/units/areaUnits.js`** — how an area unit is spelled: AC / SF / AC-FT, one place, so every surface agrees
+  - _exports_: `AC`, `AC_FT`, `fmtAc`, `fmtAcFromSf`, `fmtSf`, `SF`, `SQFT_PER_ACRE`
 - **`src/shared/viewport/viewAnchor.js`** — the ANCHORED RENDER: the one group transform (`translate(tx ty) scale(k)`) that carries geometry emitted at a held view to where the live view wants it, the drift cap that decides when to re-bake, and the proportional wheel→zoom factor. Pure; the exactness is proved in `test/viewAnchor.test.js`.
   - _exports_: `ANCHOR_K_EPS`, `ANCHOR_MAX_K`, `anchoredEqualsDirect`, `anchorHolds`, `anchorTransform`, `anchorTransformAttr`, `WHEEL_MAX_NOTCHES`, `WHEEL_NOTCH_LINES`, `WHEEL_NOTCH_PAGES`, `WHEEL_NOTCH_PX`, `wheelNotches`, `wheelZoomFactor`, `ZOOM_PER_NOTCH`, `ZOOM_SETTLE_MS`
 - **`src/shared/viewport/viewportTransform.js`** — Pure shared pan/zoom engine for both canvases: world<->screen, cursor-anchored zoom, fitView, NaN-safe clamps, pinch, Bluebeam pan/tool collision rule
@@ -730,7 +734,7 @@ _524 source files mapped._
 - **`src/workspaces/site-planner/lib/measureSheet.js`** — How a measurement renders on an EXPORT sheet rather than the canvas: drafting terminators in place of the editing discs, and the enforced invariant that a measurement never prints its geometry without its value.
   - _exports_: `CHIP_TEXT_ATTR`, `droppedMeasureWarning`, `enforceMeasureValueOnSheet`, `MEASURE_GROUP_ATTR`, `MEASURE_MODE_ATTR`, `MEASURE_TERM_ATTR`, `MEASURE_VERTEX_ATTR`, `sheetMeasureVerdict`, `TERMINATED_MODES`, `terminatedMode`, `TERMINATOR_HALF_PX`, `TERMINATOR_WEIGHT_PX`, `terminatorTicks`
 - **`src/workspaces/site-planner/lib/measureStyle.js`** — Per-measurement style (stroke/weight/dash/fill/opacity) + the Standards defaults stamped at creation + the per-measurement label-reveal zoom threshold and its named zoom bands; the uncalibrated amber override lives here
-  - _exports_: `getAccountMeasureDefaults`, `hasLabelThreshold`, `labelRevealNote`, `MEASURE_LINE`, `MEASURE_SEL_FILL_BUMP`, `MEASURE_SEL_WEIGHT_BUMP`, `MEASURE_STD_KEYS`, `MEASURE_WARN_COLOR`, `measureDefaultStyle`, `measureLabelThreshold`, `measureLabelVisible`, `measureStdValue`, `measureStyle`, `setAccountMeasureDefaults`, `zoomBandLabel`
+  - _exports_: `getAccountMeasureDefaults`, `hasLabelThreshold`, `labelRevealNote`, `MEASURE_DEFAULT_COLOR`, `MEASURE_LINE`, `MEASURE_SEL_FILL_BUMP`, `MEASURE_SEL_WEIGHT_BUMP`, `MEASURE_STD_KEYS`, `MEASURE_WARN_COLOR`, `measureDefaultStyle`, `measureLabelThreshold`, `measureLabelVisible`, `measureStdValue`, `measureStyle`, `setAccountMeasureDefaults`, `zoomBandLabel`
 - **`src/workspaces/site-planner/lib/metesAndBounds.js`** — Pure polyline offset / buffer / ring-overlap primitives, shared by easements, road corridors, pipeline corridors and the KMZ export (the deed PARSER that used to live here moved to deedParse.js so it could be deferred)
   - _exports_: `bufferPolyline`, `offsetPolyline`, `ringsOverlap`
 - **`src/workspaces/site-planner/lib/mhfdDetention.js`** — B1105 the MHFD (Mile High Flood District) detention engine: the `volume-curve` ruleType — WQCV and EURV as DISTINCT cited components plus the routed 100-yr, each carrying its own evidence state — the component combiner, the C.R.S. 37-92-602(8) drawdown reconciliation, and the panel's own copy (`panelLine` / `verdictSubject` / `mhfdPanelBag`, composed here so Colorado prose stays off the boot path). The volume coefficients are deliberately `null`/`transcribed:false` (every primary MHFD host is egress-blocked and two secondary reads of the EURV memo disagreed), so it names what each component needs instead of computing a number. MHFD counties ONLY; Larimer/Weld/El Paso are refused. Lazy-loaded with the Colorado tier.
@@ -767,6 +771,8 @@ _524 source files mapped._
   - _exports_: `BUCKET`, `classifyStorageError`, `deleteOverlayObject`, `downloadOverlayBytes`, `downloadOverlayDataUrl`, `fetchOverlayBytes`, `fetchOverlayDataUrl`, `fileKind`, `MAX_BYTES`, `overlayKey`, `siteUnderlayKey`, `uploadOverlayFile`, `uploadUnderlayDataUrl`
 - **`src/workspaces/site-planner/lib/overlayVectorSvg.js`** — Pure vector-overlay SVG emitter for the print export (B745): reprojects normalized [lon,lat] line/polygon/point features via an injected projection into styled `<path>`/`<circle>` (LOUD-skip on non-finite), plus esri/terrain normalizers (contour lines, drainage-arrow glyphs)
   - _exports_: `arrowGlyphFeatures`, `buildOverlayVectorFragment`, `contourFeatures`, `esriLineFeatures`, `esriPolygonFeatures`, `featureToSvg`, `overlayVectorSvg`, `swapLatLng`
+- **`src/workspaces/site-planner/lib/paintOrder.js`** — the paint-order ladder + every ordered pair of drawn families, and the ONE name for the cross-band command
+  - _exports_: `CROSS_BAND`, `CROSS_BAND_BEHIND`, `CROSS_BAND_FRONT`, `defaultRelation`, `defaultRung`, `FAMILIES`, `orderedPairs`, `PAINT_LADDER`, `reversal`, `rungsFor`
 - **`src/workspaces/site-planner/lib/parcelActions.js`** — THE inventory of every parcel action and the pure model behind the right rail's "Parcel tools" menu: grouped create → modify → remove, per-row enabled/active/why-not, plus the rail-owns-actions / Land-panel-owns-attributes naming split
   - _exports_: `boundaryEditHint`, `PARCEL_ACTIONS`, `PARCEL_GROUPS`, `PARCEL_SURFACES`, `parcelMenuModel`
 - **`src/workspaces/site-planner/lib/parcelArea.js`** — a parcel's MEASURED area, net of save-and-except holes (`parcelNetSqft`) — the one derivation every acreage consumer reads. A leaf module: polyClip.js is on the boot path.

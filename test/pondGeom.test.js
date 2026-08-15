@@ -107,7 +107,7 @@ describe("incrementalExcavationCf — nets an ENLARGED pond's cut against its pr
 
 describe("estimateFootprintSf — footprint ≈ volume / typical depth", () => {
   it("a known volume and depth yield the expected footprint", () => {
-    expect(estimateFootprintSf({ volumeCf: 43560 * 8, avgDepthFt: 8 })).toBeCloseTo(43560, 3); // 1 ac-ft at 8 ft deep = 1 ac
+    expect(estimateFootprintSf({ volumeCf: 43560 * 8, avgDepthFt: 8 })).toBeCloseTo(43560, 3); // 1 AC-FT at 8 ft deep = 1 AC
   });
   it("a deeper assumed pond takes LESS footprint for the same volume", () => {
     const shallow = estimateFootprintSf({ volumeCf: 100000, avgDepthFt: 5 });
@@ -123,7 +123,7 @@ describe("estimateFootprintSf — footprint ≈ volume / typical depth", () => {
 
 describe("detentionLandTakeEstimate — the site-level forward-looking land-take advisory", () => {
   it("a real shortfall (required > provided) estimates the additional footprint at the assumed depth", () => {
-    // Required 5 ac-ft, provided 2 ac-ft → 3 ac-ft (130680 cf) short, at 8-ft assumed depth.
+    // Required 5 AC-FT, provided 2 AC-FT → 3 AC-FT (130680 cf) short, at 8-ft assumed depth.
     const r = detentionLandTakeEstimate({ requiredAcFt: 5, providedUsableCf: 2 * 43560, avgDepthFt: 8 });
     expect(r).not.toBeNull();
     expect(r.deficitAcFt).toBeCloseTo(3, 3);

@@ -23,13 +23,13 @@ describe("NEW-1 — the detention heading names its ledger and its verdict", () 
     const v = detentionVerdict({ providedAcFt: 80, requiredAcFt: 76.7 });
     expect(v.heading).toBe("Detention covered");
     expect(v.heading).not.toMatch(/buildable/i);
-    expect(v.subline).toBe("80.0 of 76.7 ac-ft");
+    expect(v.subline).toBe("80.0 of 76.7 AC-FT");
     expect(v.tone).toBe("ok");
   });
 
-  it("names the shortfall in the headline: 'Detention short 4.6 ac-ft'", () => {
+  it("names the shortfall in the headline: 'Detention short 4.6 AC-FT'", () => {
     const v = detentionVerdict({ providedAcFt: 72.1, requiredAcFt: 76.7 });
-    expect(v.heading).toBe("Detention short 4.6 ac-ft");
+    expect(v.heading).toBe("Detention short 4.6 AC-FT");
     expect(v.tone).toBe("short");
     expect(v.short).toBe(true);
   });
@@ -37,7 +37,7 @@ describe("NEW-1 — the detention heading names its ledger and its verdict", () 
   it("hard-blocked + short reads 'Detention not achievable here' and keeps the 'achievable' qualifier on the sub-line", () => {
     const v = detentionVerdict({ providedAcFt: 40, requiredAcFt: 76.7, hardBlocked: true });
     expect(v.heading).toBe("Detention not achievable here");
-    expect(v.subline).toBe("40.0 of 76.7 ac-ft achievable");
+    expect(v.subline).toBe("40.0 of 76.7 AC-FT achievable");
     expect(v.tone).toBe("amber");
   });
 
@@ -64,7 +64,7 @@ describe("NEW-1 — the detention heading names its ledger and its verdict", () 
   it("the mitigation row's shipped wording is unchanged (the brief holds it up as correct)", () => {
     expect(mitigationVerdict({ providedAcFt: 98.2, requiredAcFt: 97.7 }).heading).toBe("Mitigation covered");
     expect(mitigationVerdict({ providedAcFt: 90, requiredAcFt: 97.7 }).heading).toBe("Mitigation short");
-    expect(mitigationVerdict({ providedAcFt: 98.2, requiredAcFt: 97.7 }).subline).toBe("98.2 of 97.7 ac-ft");
+    expect(mitigationVerdict({ providedAcFt: 98.2, requiredAcFt: 97.7 }).subline).toBe("98.2 of 97.7 AC-FT");
   });
 });
 
@@ -74,7 +74,7 @@ describe("NEW-2 — the over-provision (over-dug) state", () => {
     expect(v.over).toBe(true);
     expect(Math.round(v.overAcFt)).toBe(67); // 150.9 − 76.7 − max(1, 7.67) slack
     expect(v.qualifier.tone).toBe("warn");
-    expect(v.qualifier.text).toMatch(/Over by ~66\.5 ac-ft/);
+    expect(v.qualifier.text).toMatch(/Over by ~66\.5 AC-FT/);
     expect(v.qualifier.text).toMatch(/buys no detention credit/);
   });
 

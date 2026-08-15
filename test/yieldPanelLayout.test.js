@@ -101,19 +101,19 @@ describe("punch 4 — DETENTION DETAIL: prior detail folds into Assumptions & me
     expect(src).toContain('groupFold("det", "Detention detail"');
     expect(src).toContain("method: detR");
     expect(src).toContain("Requirement basis");
-    expect(src).toContain("ac-ft counts");
+    expect(src).toContain("AC-FT counts");
     // NEW-2 (2026-07-28, PANEL-BREVITY) — B1032's term-by-term account is KEPT but no longer
     // spent as prose in the default view. The visible line is the counted-of-held NUMBER PAIR
     // (which covers the partial and total-dead cases alike — "0.0 of 63.4" says "none counts"
     // without a sentence), each deduction is a short labelled term, and the account itself moves
     // into "Assumptions & method ▸". Nothing was deleted: assert the terms still exist.
-    expect(src).toContain("{f1(siteCounts)} of {f1(siteHolds)} ac-ft held");
+    expect(src).toContain("{f1(siteCounts)} of {f1(siteHolds)} AC-FT held");
     expect(src).toContain("berm ring ${f1(bermAcFt)}");
     expect(src).toContain("permanent water ${f1(deadAcFt)}");
     expect(src).toContain("floodplain compensation ${f1(mitAcFt)}");
     expect(src).toContain("below flood level ${f1(unusedAcFt)}");
     // …and they are FOLDED (keyedNote → opts.method), not inline.
-    expect(src).toContain('`Not counted: ${terms.join(" · ")} ac-ft.');
+    expect(src).toContain('`Not counted: ${terms.join(" · ")} AC-FT.');
     expect(src).toContain('"det-terms"');
   });
 });
@@ -139,7 +139,7 @@ describe("punch 5 — the cited em dashes are swept to colons / middots", () => 
 
 describe("punch 6/7/8 — group summaries", () => {
   it("BUILDINGS is '{n} · {sf} sf'; COSTS is 'not priced yet' when unpriced; the BUILDABILITY group is gone (B2)", () => {
-    expect(src).toContain("${buildingCount || 0} · ${f0(bldg)} sf");
+    expect(src).toContain("${buildingCount || 0} · ${f0(bldg)} SF");
     expect(src).toContain('"not priced yet"');
     expect(src.includes('summary="road + earthwork"')).toBe(false);
     // v3 B2 — the BUILDABILITY group was deleted; its verdict is a permanent strip row.
@@ -198,7 +198,7 @@ describe("PR-B — Yield panel + shared copy fixes", () => {
   it("B4 — the requirement basis reads the appendix off source.section too (Waller Co. App. E)", () => {
     expect(src).toContain("req.rule.governingManual?.section || req.rule.source?.section");
     expect(src).toContain("Adopted criteria.");
-    expect(src).toContain("Screening range ${f1(req.bandAcFt[0])} to ${f1(req.bandAcFt[1])} ac-ft; planned to the conservative end.");
+    expect(src).toContain("Screening range ${f1(req.bandAcFt[0])} to ${f1(req.bandAcFt[1])} AC-FT; planned to the conservative end.");
     expect(src).toContain("Criteria values still unverified: confirm in Standards.");
   });
   it("B6 — the COSTS body is two flat CostDisclosure rows, Earthwork before Road, no '(screening)' sub-headers", () => {

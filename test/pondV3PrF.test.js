@@ -36,7 +36,7 @@ const entryFrom = (split, extra = {}) => ({
 describe("F1 — the status-card headline usable IS the pond's Usable-detention row (same inward number)", () => {
   it("the headline reads the ledger's usableCf, not the drawn-gross-minus-dead formula that overstated it", () => {
     // The row: `pondRow('Usable detention (above flood WSE)', f1(split.usableCf / 43560))` (16825).
-    expect(src).toContain('pondRow("Usable detention (above flood WSE)", `${f1(split.usableCf / 43560)} ac-ft`)');
+    expect(src).toContain('pondRow("Usable detention (above flood WSE)", `${f1(split.usableCf / 43560)} AC-FT`)');
     // The headline: providedUsableCf now = pondLedger.usableCf — the SAME per-pond usableCf, summed.
     expect(src).toContain("const providedUsableCf = pondLedger.usableCf;");
     // The old overstating formula is GONE.

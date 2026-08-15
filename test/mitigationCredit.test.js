@@ -104,7 +104,7 @@ describe("NEW-26 — the ledger and the optimizer AGREE (both read mitigationCre
     expect(r.ok).toBe(true);
     expect(r.mitigation.gated).toBe(null);
     expect(r.mitigation.providedCf).toBeGreaterThan(0);
-    expect(r.mitigation.covered).toBe(true); // the candidate dwarfs the small 0.2 ac-ft target
+    expect(r.mitigation.covered).toBe(true); // the candidate dwarfs the small 0.2 AC-FT target
   });
 
   it("sizePondForTargets on a GATED outfall GATES mitigation (never 'covered'), matching the ledger's 0", () => {

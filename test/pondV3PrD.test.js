@@ -37,7 +37,7 @@ describe("D2 — rows/land-use flip to the fixed-footprint model", () => {
   it("the site-wide berm-ring area is the INWARD ring area, and the legend names water + berm inside footprint", () => {
     expect(src).toContain("const pondBermRingSf = els.reduce((s, e) => {");
     expect(src).toContain("inwardBermSplit(ring, det.tobElev - fmElev.existGradeFt, { extSlope: EXT_BERM_SLOPE }).bermRingSf");
-    expect(src).toContain("ac berm (inside ${f2(pondArea / SQFT_PER_ACRE)} ac footprint)");
+    expect(src).toContain("AC berm (inside ${f2(pondArea / SQFT_PER_ACRE)} AC footprint)");
   });
 });
 

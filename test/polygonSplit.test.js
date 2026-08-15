@@ -307,9 +307,9 @@ describe("splitPolygonByCut — more than two crossings (reading (b) of 'more co
 describe("splitPolygonByCut — the owner's real parcels", () => {
   /* These are recorded production rings, not textbook polygons, and each one carries a condition
    * that broke an earlier draft of this engine. Do not "tidy" the numbers. */
-  const GOOSE = fixture("goose-creek-plan1copy.json", "e1454746tcmstb");       // 95 ac, pinched hole
-  const SYLVESTRI = fixture("sylvestri-concept-d-full.json", "e1454631bfeaps"); // 158 ac, 56 verts
-  const BAIN = fixture("bain-quiddity.json", "e1454855gyzzln");                 // 109 ac, zero-width prong
+  const GOOSE = fixture("goose-creek-plan1copy.json", "e1454746tcmstb");       // 95 AC, pinched hole
+  const SYLVESTRI = fixture("sylvestri-concept-d-full.json", "e1454631bfeaps"); // 158 AC, 56 verts
+  const BAIN = fixture("bain-quiddity.json", "e1454855gyzzln");                 // 109 AC, zero-width prong
 
   it("the pre-fix pipeline reproduces the owner's toast on his own land", () => {
     // This is the reported bug, measured. Both refusals are the "concave shape" path.
@@ -317,7 +317,7 @@ describe("splitPolygonByCut — the owner's real parcels", () => {
     expect(preFixSplit(BAIN, creekCut(BAIN)).refused).toBe("ambiguous-toast");
   });
 
-  it("Goose Creek (95 ac, concave) takes a bent creek-shaped cut, area conserved to the last foot", () => {
+  it("Goose Creek (95 AC, concave) takes a bent creek-shaped cut, area conserved to the last foot", () => {
     const r = splitPolygonByCut(GOOSE, creekCut(GOOSE));
     expect(r.ok).toBe(true);
     expect(r.pieces.length).toBeGreaterThanOrEqual(2);
@@ -329,22 +329,22 @@ describe("splitPolygonByCut — the owner's real parcels", () => {
     /* Its ring runs out to a point, clockwise around an interior exclusion while the rest of the
      * lot runs counter-clockwise, and back through that same point — a hole reached by a
      * zero-width slit. Under an even-odd containment test that hole reads as land and the split
-     * invents ~13,400 sf of acreage that the parcel does not own. */
+     * invents ~13,400 SF of acreage that the parcel does not own. */
     const r = splitPolygonByCut(GOOSE, creekCut(GOOSE));
     expect(cutSum(r)).toBeLessThan(polyArea(GOOSE) * (1 + 1e-9));
     expect(r.pieces.every((p) => p.area > 0)).toBe(true);
   });
 
-  it("Sylvestri (158 ac, 56 vertices) splits and conserves area", () => {
+  it("Sylvestri (158 AC, 56 vertices) splits and conserves area", () => {
     const r = splitPolygonByCut(SYLVESTRI, creekCut(SYLVESTRI));
     expect(r.ok).toBe(true);
     expect(Math.abs(cutSum(r) - polyArea(SYLVESTRI)) / polyArea(SYLVESTRI)).toBeLessThan(1e-9);
   });
 
-  it("Bain (109 ac): every piece is KEPT, the tiny ones are named, and the broken outline is reported", () => {
+  it("Bain (109 AC): every piece is KEPT, the tiny ones are named, and the broken outline is reported", () => {
     /* This ring runs 1,296 ft out along a zero-width prong and back, and the returning leg clips
      * the outgoing one about two tenths of an inch above its base. The quoted (shoelace) acreage
-     * therefore counts an 8 sf crumb twice.
+     * therefore counts an 8 SF crumb twice.
      * ⛔ B520560, owner rule: "Nothing may be discarded silently — if a cut produces a sliver, he
      * gets it as a parcel rather than losing the acreage." B455360 dropped scraps under a
      * hundred-thousandth of the parent and reported the loss; this asserts the REVERSAL. */

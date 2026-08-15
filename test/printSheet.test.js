@@ -21,14 +21,14 @@ const ROWS = [
 describe("printSheetLayout — metrics band grows with pair count (B712)", () => {
   it("REAL pair widths size the band: wide detention/mitigation pairs get their row", () => {
     const base = [
-      ["Site area", "24.79 ac (1,080,000 sf)"], ["Building", "72,000 sf"], ["Lot coverage", "7%"],
+      ["Site area", "24.79 AC (1,080,000 SF)"], ["Building", "72,000 SF"], ["Lot coverage", "7%"],
       ["FAR (1-story)", "0.07"], ["Car stalls", "0"], ["Trailer stalls", "0"],
-      ["Impervious", "7%"], ["Detention", "66,000 sf"], ["Open / green", "21.63 ac"],
+      ["Impervious", "7%"], ["Detention", "66,000 SF"], ["Open / green", "21.63 AC"],
     ];
     const wide = [...base,
-      ["Det. req / prov (usable)", "12.34 / 8.49 ac-ft ⚠ unanchored pond"],
-      ["Floodplain mitigation", "3.21 ac-ft (straddle — a candidate is unknown)"],
-      ["Combined basin", "15.55 ac-ft"],
+      ["Det. req / prov (usable)", "12.34 / 8.49 AC-FT ⚠ unanchored pond"],
+      ["Floodplain mitigation", "3.21 AC-FT (straddle — a candidate is unknown)"],
+      ["Combined basin", "15.55 AC-FT"],
     ];
     const a = printSheetLayout({ metricsPairs: base });
     const b = printSheetLayout({ metricsPairs: wide });
@@ -112,7 +112,7 @@ describe("buildPrintSheetSvg — ONE svg, ONE viewBox, all layers share it (B200
     title: "Cypress Logistics",
     sub: "Plan 1",
     date: "2026.06.19",
-    metrics: [["Site area", "42.0 ac"], ["Building", "870,000 sf"]],
+    metrics: [["Site area", "42.0 AC"], ["Building", "870,000 SF"]],
     note: "Concept site plan — planning-level estimates, not a survey.",
     buildings: ROWS,
     pal: PAL,
@@ -182,14 +182,14 @@ describe("B862 (chat NEW-3) — the Stormwater required-vs-provided bar strip (P
   });
   it("buildStormwaterSvg draws a labelled row + a bar (rect) per spec", () => {
     const bars = [
-      { label: "Detention", verdict: "+5.02 ac-ft", status: "covered", layout: bulletBarLayout({ provided: 15, required: 10 }), unit: "ac-ft" },
-      { label: "Mitigation", verdict: "−1.20 ac-ft", status: "short", layout: bulletBarLayout({ provided: 3, required: 4.2 }), unit: "ac-ft" },
+      { label: "Detention", verdict: "+5.02 AC-FT", status: "covered", layout: bulletBarLayout({ provided: 15, required: 10 }), unit: "ac-ft" },
+      { label: "Mitigation", verdict: "−1.20 AC-FT", status: "short", layout: bulletBarLayout({ provided: 3, required: 4.2 }), unit: "ac-ft" },
     ];
     const svg = buildStormwaterSvg({ x: 28, y: 700, w: 1044, bars, pal: PAL });
     expect(svg).toMatch(/STORMWATER/);
     expect(svg).toMatch(/Detention/);
     expect(svg).toMatch(/Mitigation/);
-    expect(svg).toMatch(/\+5\.02 ac-ft/);
+    expect(svg).toMatch(/\+5\.02 AC-FT/);
     expect((svg.match(/<rect/g) || []).length).toBeGreaterThanOrEqual(2); // ≥1 track/provided rect per bar
     expect(svg).toMatch(/#15803D/); // the covered (green) provided fill
     expect(svg).toMatch(/#B3361B/); // the short (red) provided fill
@@ -198,8 +198,8 @@ describe("B862 (chat NEW-3) — the Stormwater required-vs-provided bar strip (P
     const L = printSheetLayout({ stormwaterBars: 1 });
     const svg = buildPrintSheetSvg({
       layout: L, planSvg: "", title: "T", buildings: [], pal: PAL,
-      metrics: [["Site area", "10 ac"]],
-      stormwater: [{ label: "Detention", verdict: "+5.02 ac-ft", status: "covered", layout: bulletBarLayout({ provided: 15, required: 10 }), unit: "ac-ft" }],
+      metrics: [["Site area", "10 AC"]],
+      stormwater: [{ label: "Detention", verdict: "+5.02 AC-FT", status: "covered", layout: bulletBarLayout({ provided: 15, required: 10 }), unit: "ac-ft" }],
     });
     expect(svg).toMatch(/STORMWATER/);
     expect(svg).toMatch(/Detention/);

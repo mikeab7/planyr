@@ -80,7 +80,7 @@ describe("I5 — the verdict is a HEADLINE + a separate achieved/required sub-li
     // (test/pondVerdict.test.js asserts the strings themselves).
     expect(src).toContain("const dv = detentionVerdict({");
     expect(src).toContain("out.push({ ...dv, body });");
-    expect(detentionVerdict({ providedAcFt: 40, requiredAcFt: 76.7, hardBlocked: true }).subline).toBe("40.0 of 76.7 ac-ft achievable");
+    expect(detentionVerdict({ providedAcFt: 40, requiredAcFt: 76.7, hardBlocked: true }).subline).toBe("40.0 of 76.7 AC-FT achievable");
     expect(detentionVerdict({ providedAcFt: 80, requiredAcFt: 76.7 }).heading).toBe("Detention covered");
   });
   it("the render draws heading and sub-line as SEPARATE elements, wrap-safe", () => {

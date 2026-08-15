@@ -133,14 +133,14 @@ describe("G1(c/d) — the tailwater + max-excavation inputs exist in the inspect
 
 describe("G4 — the Optimize success-toast sweep", () => {
   it("the grammar fix: the raise message is the owner's exact sentence", () => {
-    expect(dp).toContain("This pond's rim was raised above the flood level and sized for the required ${fmtAcFt(detTargetCf / 43560)} ac-ft of detention.");
+    expect(dp).toContain("This pond's rim was raised above the flood level and sized for the required ${fmtAcFt(detTargetCf / 43560)} AC-FT of detention.");
     // the broken shared verb-prefix is gone
     expect(dp.includes('${isNew ? "Placed a pond — " : "This pond was "}')).toBe(false);
     expect(dp).toContain('${isNew ? "Placed a pond. " : ""}');
   });
-  it("the '0.0 ac-ft of mitigation' filler is dropped when the requirement rounds to 0", () => {
+  it("the '0.0 AC-FT of mitigation' filler is dropped when the requirement rounds to 0", () => {
     expect(dp).toContain("const mitReqShown = mitTargetCf / 43560 >= 0.05;");
-    expect(dp).toContain('mitMsg = mitReqShown ? `This pond already covers the required ${fmtAcFt(mitTargetCf / 43560)} ac-ft of mitigation.` : "";');
+    expect(dp).toContain('mitMsg = mitReqShown ? `This pond already covers the required ${fmtAcFt(mitTargetCf / 43560)} AC-FT of mitigation.` : "";');
   });
   it("the overlap note is NEUTRAL — no 'drag it clear' action (the footprint never moves)", () => {
     expect(dp).toContain("Note: the footprint overlaps");

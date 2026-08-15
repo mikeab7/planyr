@@ -41,7 +41,7 @@ describe("doc-review takeoff geometry + unit conversion", () => {
 
   it("measureValue area scales by ftPerUnit^2 and reports acres", () => {
     const m = { kind: "area", pts: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }] };
-    const v = measureValue(m, 3);                // raw area 100 * 3^2 = 900 sf
+    const v = measureValue(m, 3);                // raw area 100 * 3^2 = 900 SF
     expect(v.areaSf).toBe(900);
     expect(v.areaAc).toBeCloseTo(900 / 43560, 9);
   });
@@ -115,7 +115,7 @@ describe("doc-review takeoff geometry + unit conversion", () => {
   });
 
   it("B302: the degenerate shapes the gate blocks really are meaningless", () => {
-    expect(polyArea([{ x: 0, y: 0 }, { x: 10, y: 0 }])).toBe(0);                        // 2-pt area = 0 sf
+    expect(polyArea([{ x: 0, y: 0 }, { x: 10, y: 0 }])).toBe(0);                        // 2-pt area = 0 SF
     expect(pathLength([{ x: 0, y: 0 }, { x: 10, y: 0 }], true)).toBe(10);               // 2-pt "loop" = one 10-unit segment, not 20
     expect(pathLength([{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 4 }], true)).toBe(12); // a real 3-pt loop closes (3+4+5)
   });
@@ -128,8 +128,8 @@ describe("doc-review takeoff geometry + unit conversion", () => {
     expect(measureLabel({ kind: "distance", pts: [{ x: 0, y: 0 }, { x: 10, y: 0 }] }, 1.06)).toBe("10.6 ft");
     // perimeter of a 3-4-5 triangle closed = 12 → "12.0 ft" (one decimal even when whole)
     expect(measureLabel({ kind: "perimeter", pts: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 4 }] }, 1)).toBe("12.0 ft");
-    // area still acres-2dp · whole-sf (10×10 raw × 3² = 900 sf)
-    expect(measureLabel({ kind: "area", pts: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }] }, 3)).toBe("0.02 ac · 900 sf");
+    // area still acres-2dp · whole-sf (10×10 raw × 3² = 900 SF)
+    expect(measureLabel({ kind: "area", pts: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }] }, 3)).toBe("0.02 AC · 900 SF");
   });
 
   it("rollup totals calibrated items and counts uncalibrated ones", () => {

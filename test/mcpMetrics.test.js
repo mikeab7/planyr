@@ -22,10 +22,10 @@ describe("summarizeSite", () => {
 
   it("sums w×h and polygon buildings and computes coverage", () => {
     const s = summarizeSite({
-      parcels: [{ points: square(1000) }], // 1,000,000 sf
+      parcels: [{ points: square(1000) }], // 1,000,000 SF
       els: [
         { type: "building", w: 100, h: 200, name: "Bldg A", clearHeightOverride: 32 },
-        { type: "building", points: square(100) }, // 10,000 sf
+        { type: "building", points: square(100) }, // 10,000 SF
       ],
     });
     expect(s.buildings.count).toBe(2);

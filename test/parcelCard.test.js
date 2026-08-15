@@ -55,7 +55,7 @@ describe("parcelCardRows — the three-row split (NEW-1)", () => {
     expect(primary.map((r) => r.label.replace(/ \(measured\)$/, ""))).toEqual(PARCEL_CARD_PRIMARY_LABELS);
     expect(primary[0].value).toBe("ACME INDUSTRIAL PARTNERS LP");
     expect(primary[1].value).toBe("R0041234");
-    expect(primary[2].value).toBe("41.72 ac");
+    expect(primary[2].value).toBe("41.72 AC");
   });
 
   it("never repeats the situs address — it is the card's title", () => {

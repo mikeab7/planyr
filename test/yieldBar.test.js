@@ -59,7 +59,7 @@ describe("bulletBarMarks — the shared primitive list", () => {
     expect(marks.find((m) => m.role === "provided")).toBeTruthy();
     expect(marks.find((m) => m.role === "required")).toBeTruthy();
     const delta = marks.find((m) => m.t === "text" && m.role === "good");
-    expect(delta.s).toMatch(/\+2\.0 ac-ft/);
+    expect(delta.s).toMatch(/\+2\.0 AC-FT/);
     expect(delta.mono).toBe(true);
   });
   it("band requirement emits a span rect + an edge tick, no point tick", () => {
@@ -97,7 +97,7 @@ describe("stormwaterBarSpecs — the ONE shared derivation (screen == PDF)", () 
     const d = { req: { kind: "point", requiredAcFt: 10 }, providedUsableCf: 15 * AF, providedCf: 15 * AF };
     const { det } = stormwaterBarSpecs(d);
     expect(det.status).toBe("covered");
-    expect(det.verdict).toMatch(/\+5\.0 ac-ft/);
+    expect(det.verdict).toMatch(/\+5\.0 AC-FT/);
     expect(det.layout.delta).toBeCloseTo(5, 5);
   });
   it("point detention: short → −delta + short status", () => {
@@ -145,7 +145,7 @@ describe("stormwaterBarSpecs — the ONE shared derivation (screen == PDF)", () 
     const d = { mitigation: { intersectAcres: 2, volumeCf: 8 * AF, volumeAcFt: 8 }, mitProvided: { creditedCf: 3 * AF } };
     const { mit } = stormwaterBarSpecs(d);
     expect(mit.status).toBe("short");
-    expect(mit.verdict).toMatch(/−5\.0 ac-ft/);
+    expect(mit.verdict).toMatch(/−5\.0 AC-FT/);
   });
   it("mitigation volume UNKNOWN → an unknown bar", () => {
     const d = { mitigation: { intersectAcres: 2, volumeCf: null } };
@@ -158,7 +158,7 @@ describe("stormwaterBarSpecs — the ONE shared derivation (screen == PDF)", () 
 });
 
 describe("B909 round 3 polish — a shortfall/requirement inside display-precision epsilon reads as MET, never a false SHORT", () => {
-  it("mitigation: an epsilon requirement (1e-9 ac-ft) with zero provided is NOT SHORT — it's not required", () => {
+  it("mitigation: an epsilon requirement (1e-9 AC-FT) with zero provided is NOT SHORT — it's not required", () => {
     const d = { mitigation: { intersectAcres: 2, volumeCf: 1e-9 * AF, volumeAcFt: 1e-9 }, mitProvided: { creditedCf: 0 } };
     const { mit } = stormwaterBarSpecs(d);
     expect(mit.status).not.toBe("short");
@@ -175,7 +175,7 @@ describe("B909 round 3 polish — a shortfall/requirement inside display-precisi
     const { mit } = stormwaterBarSpecs(d);
     expect(mit.status).toBe("short");
   });
-  it("detention point: an epsilon requirement (1e-9 ac-ft) with zero usable is NOT SHORT — none required", () => {
+  it("detention point: an epsilon requirement (1e-9 AC-FT) with zero usable is NOT SHORT — none required", () => {
     const d = { req: { kind: "point", requiredAcFt: 1e-9 }, providedUsableCf: 0, providedCf: 0 };
     const { det } = stormwaterBarSpecs(d);
     expect(det.status).not.toBe("short");

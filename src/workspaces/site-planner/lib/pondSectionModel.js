@@ -207,8 +207,8 @@ export function pondSectionModel(facts = {}, { w = 520, h = 260 } = {}) {
   const usableName = purpose === "mitigation" ? "mitigation" : "usable";
   const right = [];
   for (const b of bands) {
-    if (b.kind === "usable" && finite(usableAcFt)) right.push({ key: "usable", anchorY: yOf(b.midFt), s: `${usableName} ${f1(usableAcFt)} ac-ft`, role: "usable", leaderX: rightX(b.midFt) });
-    if (b.kind === "dead" && finite(deadAcFt)) right.push({ key: "dead", anchorY: yOf(b.midFt), s: `dead ${f1(deadAcFt)} ac-ft`, role: "dead", leaderX: rightX(b.midFt) });
+    if (b.kind === "usable" && finite(usableAcFt)) right.push({ key: "usable", anchorY: yOf(b.midFt), s: `${usableName} ${f1(usableAcFt)} AC-FT`, role: "usable", leaderX: rightX(b.midFt) });
+    if (b.kind === "dead" && finite(deadAcFt)) right.push({ key: "dead", anchorY: yOf(b.midFt), s: `dead ${f1(deadAcFt)} AC-FT`, role: "dead", leaderX: rightX(b.midFt) });
     if (b.kind === "freeboard") right.push({ key: "fb", anchorY: yOf(b.midFt), s: `freeboard ${f1(Math.max(0, freeboardFt || 0))} ft`, role: "freeboard", leaderX: rightX(b.midFt) });
   }
   if (outlet) right.push({ key: "outlet", anchorY: outlet.y, s: `outlet ${f1(outletInvertFt)}'`, role: "outlet", leaderX: xFloorR });

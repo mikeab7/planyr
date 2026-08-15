@@ -153,7 +153,7 @@ describe("suggestedPreDevReleaseCfs — pre-dev peak as the auto-suggested relea
 // routing model has no data above top of bank) can compare ≤ the pre-development peak even
 // while the basin is actively overtopping. That used to read PASS; it must read SHORT — the
 // exact "a pond that passes the small storm but fails a larger one" bug the compound-outlet
-// solver exists to fix. A 300x300 ft, 8-ft-deep pond (small footprint, ~2 ac) draining a
+// solver exists to fix. A 300x300 ft, 8-ft-deep pond (small footprint, ~2 AC) draining a
 // realistic 45-ac watershed with only a single 10-in floor orifice: the 10-yr storm passes
 // cleanly (plenty of headroom), the 100-yr storm overtops the basin — confirmed empirically
 // against the real routing engine before locking in this fixture.

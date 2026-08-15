@@ -17,9 +17,9 @@ describe("G4 — ac-ft number format (1 decimal, no signed zero)", () => {
     expect(fmtAcFt(-0.0)).toBe("0.0");
     expect(fmtAcFt(-15)).toBe("-15.0");
   });
-  it("provided/required renders the '0.0 of 33.8 ac-ft' pair shape (A2)", () => {
-    expect(fmtProvidedOfRequired(0, 33.8)).toBe("0.0 of 33.8 ac-ft");
-    expect(fmtProvidedOfRequired(34, 33.8)).toBe("34.0 of 33.8 ac-ft");
+  it("provided/required renders the '0.0 of 33.8 AC-FT' pair shape (A2)", () => {
+    expect(fmtProvidedOfRequired(0, 33.8)).toBe("0.0 of 33.8 AC-FT");
+    expect(fmtProvidedOfRequired(34, 33.8)).toBe("34.0 of 33.8 AC-FT");
   });
 });
 
@@ -42,15 +42,15 @@ describe("A2 — verdict-strip grammar: label + pill + sentence", () => {
   // by signed margin, so 34.0 of 33.8 (+0.6% headroom) reads THIN, not OK. A margin that thin is
   // erased by a side-slope change or an as-built survey, and the reader has to be able to see that.
   // The sentence, label and no-action behaviour are unchanged.
-  it("detention COVERED but THIN → THIN pill, '{label}: 34.0 of 33.8 ac-ft', no action button", () => {
+  it("detention COVERED but THIN → THIN pill, '{label}: 34.0 of 33.8 AC-FT', no action button", () => {
     const [det] = yieldVerdictStrip({ req: detReqPoint(33.8), providedUsableCf: 34.0 * AC_FT });
     expect(det.pill).toBe("THIN");
     expect(det.tone).toBe("warn");
     expect(det.thin).toBe(true);
-    expect(det.marginText).toBe("+0.2 ac-ft (+0.6%)");
+    expect(det.marginText).toBe("+0.2 AC-FT (+0.6%)");
     expect(det.label).toBe("Detention");
-    expect(det.sentence).toBe("34.0 of 33.8 ac-ft");
-    expect(det.text).toBe("Detention: 34.0 of 33.8 ac-ft");
+    expect(det.sentence).toBe("34.0 of 33.8 AC-FT");
+    expect(det.text).toBe("Detention: 34.0 of 33.8 AC-FT");
     expect(det.short).toBeFalsy();
     expect(det.action).toBeFalsy();
   });
@@ -63,13 +63,13 @@ describe("A2 — verdict-strip grammar: label + pill + sentence", () => {
     expect(det.margin.band).toBe("ok");
   });
 
-  it("detention SHORT → SHORT pill, '0.0 of 33.8 ac-ft', action button", () => {
+  it("detention SHORT → SHORT pill, '0.0 of 33.8 AC-FT', action button", () => {
     const [det] = yieldVerdictStrip({ req: detReqPoint(33.8), providedUsableCf: 0 });
     expect(det.pill).toBe("SHORT");
     expect(det.tone).toBe("danger");
     expect(det.short).toBe(true);
     expect(det.action).toBe(true);
-    expect(det.sentence).toBe("0.0 of 33.8 ac-ft");
+    expect(det.sentence).toBe("0.0 of 33.8 AC-FT");
   });
 
   it("a screening BAND uses its conservative (upper) end as the single required number", () => {
@@ -77,10 +77,10 @@ describe("A2 — verdict-strip grammar: label + pill + sentence", () => {
     const covered = yieldVerdictStrip({ req: detReqBand(28.6, 33.8), providedUsableCf: 34 * AC_FT })[0];
     expect(covered.pill).toBe("THIN");
     expect(covered.short).toBeFalsy();
-    expect(covered.sentence).toBe("34.0 of 33.8 ac-ft");
+    expect(covered.sentence).toBe("34.0 of 33.8 AC-FT");
     const short = yieldVerdictStrip({ req: detReqBand(28.6, 33.8), providedUsableCf: 30 * AC_FT })[0];
     expect(short.pill).toBe("SHORT");
-    expect(short.sentence).toBe("30.0 of 33.8 ac-ft");
+    expect(short.sentence).toBe("30.0 of 33.8 AC-FT");
   });
 
   it("detention LOADING → '…' pill, 'checking flood data', loading flag", () => {
@@ -102,16 +102,16 @@ describe("A2 — verdict-strip grammar: label + pill + sentence", () => {
     const base = { req: detReqPoint(33.8), providedUsableCf: 34 * AC_FT };
     const covered = yieldVerdictStrip({ ...base, mitigation: { intersectAcres: 2, volumeCf: 5 * AC_FT, volumeAcFt: 5 }, mitProvided: { creditedCf: 6 * AC_FT } })[1];
     expect(covered.pill).toBe("OK");
-    expect(covered.sentence).toBe("6.0 of 5.0 ac-ft");
+    expect(covered.sentence).toBe("6.0 of 5.0 AC-FT");
     const short = yieldVerdictStrip({ ...base, mitigation: { intersectAcres: 2, volumeCf: 20 * AC_FT, volumeAcFt: 20 }, mitProvided: { creditedCf: 12.4 * AC_FT } })[0];
     expect(short.pill).toBe("SHORT");
-    expect(short.sentence).toBe("12.4 of 20.0 ac-ft");
+    expect(short.sentence).toBe("12.4 of 20.0 AC-FT");
   });
 
   // NEW-16 — a TRACE mitigation requirement (grid-cell crumbs at a zone edge) must never
   // render as a red SHORT over two identical zeros; it reads "not required (trace)" and
   // carries the raw ac-ft for the ⓘ.
-  it("a trace mitigation requirement (< 0.05 ac-ft) reads 'not required (trace)', never a SHORT", () => {
+  it("a trace mitigation requirement (< 0.05 AC-FT) reads 'not required (trace)', never a SHORT", () => {
     const base = { req: detReqPoint(33.8), providedUsableCf: 34 * AC_FT };
     const [, mit] = yieldVerdictStrip({ ...base, mitigation: { intersectAcres: 0.3, volumeCf: 0.01 * AC_FT, volumeAcFt: 0.01 }, mitProvided: { creditedCf: 0 } });
     expect(mit.pill).toBe("OK");
@@ -132,14 +132,14 @@ describe("A2 — verdict-strip grammar: label + pill + sentence", () => {
     const base = { req: detReqPoint(33.8), providedUsableCf: 34 * AC_FT };
     const short = yieldVerdictStrip({ ...base, mitigation: { intersectAcres: 2, volumeCf: 0.4 * AC_FT, volumeAcFt: 0.4 }, mitProvided: { creditedCf: 0 } })[0];
     expect(short.pill).toBe("SHORT");
-    expect(short.sentence).toBe("0.0 of 0.4 ac-ft");
+    expect(short.sentence).toBe("0.0 of 0.4 AC-FT");
   });
   it("DISPLAY INVARIANT — a SHORT pair never shows two identical numbers (1-dp collision bumps to 2 dp)", () => {
     const base = { req: detReqPoint(33.8), providedUsableCf: 34 * AC_FT };
     // provided 10.41 vs required 10.44 both round to "10.4" at 1 dp but differ by > EPS → real SHORT.
     const short = yieldVerdictStrip({ ...base, mitigation: { intersectAcres: 2, volumeCf: 10.44 * AC_FT, volumeAcFt: 10.44 }, mitProvided: { creditedCf: 10.41 * AC_FT } })[0];
     expect(short.pill).toBe("SHORT");
-    expect(short.sentence).toBe("10.41 of 10.44 ac-ft");
+    expect(short.sentence).toBe("10.41 of 10.44 AC-FT");
     // the two sides are never string-identical on a SHORT
     const [p, q] = short.sentence.replace(" ac-ft", "").split(" of ");
     expect(p).not.toBe(q);
@@ -207,7 +207,7 @@ describe("G2 — no em dash anywhere in the verdict copy", () => {
 /* ── The Tsakiris / Concept A panel batch (owner report 2026-07-28) ─────────────────────────── */
 
 // The reported panel: ONE pond, detention 63.4 of 33.8, mitigation 29.6 of 0.2, reconciliation
-// FAIL naming 12.2 ac-ft counted twice.
+// FAIL naming 12.2 AC-FT counted twice.
 const tsakiris = (over = {}) => ({
   req: { kind: "point", requiredAcFt: 33.8 },
   providedUsableCf: 63.4 * AC_FT,
@@ -215,7 +215,7 @@ const tsakiris = (over = {}) => ({
   mitProvided: { creditedCf: 29.6 * AC_FT },
   reconcile: { state: "fail", overlapCf: 12.24 * AC_FT, physicalCf: 80.8 * AC_FT, claimedCf: 93.06 * AC_FT,
     offenders: [{ name: "Detention Pond" }], undeclared: [],
-    message: "Detention and mitigation together claim 93.1 ac-ft of storage, but only 80.8 ac-ft physically exists. 12.2 ac-ft is counted twice — Detention Pond." },
+    message: "Detention and mitigation together claim 93.1 AC-FT of storage, but only 80.8 AC-FT physically exists. 12.2 AC-FT is counted twice — Detention Pond." },
   ...over,
 });
 
@@ -224,12 +224,12 @@ describe("NEW-2 (B1033) — the verdict headline never truncates mid-word", () =
     const rows = yieldVerdictStrip(tsakiris());
     const det = rows.find((r) => r.key === "det");
     // The bold nowrap element is ONLY the provided/required pair (G1); the clause that used to be
-    // clipped at the panel edge ("…12.2 ac-ft counted twi") rides its own wrappable span.
-    expect(det.pairText).toBe("63.4 of 33.8 ac-ft");
-    expect(det.suffix).toBe("12.2 ac-ft counted twice");
+    // clipped at the panel edge ("…12.2 AC-FT counted twi") rides its own wrappable span.
+    expect(det.pairText).toBe("63.4 of 33.8 AC-FT");
+    expect(det.suffix).toBe("12.2 AC-FT counted twice");
     expect(det.pairText.includes("counted")).toBe(false);
     // The one-line sentence stays intact for legacy readers + the title attribute.
-    expect(det.sentence).toBe("63.4 of 33.8 ac-ft — 12.2 ac-ft counted twice");
+    expect(det.sentence).toBe("63.4 of 33.8 AC-FT — 12.2 AC-FT counted twice");
     expect(det.text.endsWith("twice")).toBe(true);
   });
   it("an elevation-band shortfall carries the same wrappable suffix", () => {
@@ -240,7 +240,7 @@ describe("NEW-2 (B1033) — the verdict headline never truncates mid-word", () =
       mitBands: { known: true, overallPass: false, totalWouldPass: true, shortBands: [1, 2], totals: { shortCf: 100 } },
     }));
     const mit = rows.find((r) => r.key === "mit");
-    expect(mit.pairText).toBe("21.0 of 20.0 ac-ft");
+    expect(mit.pairText).toBe("21.0 of 20.0 AC-FT");
     expect(mit.suffix).toBe("2 elevation bands short");
   });
 });
@@ -249,14 +249,14 @@ describe("NEW-3 (B1034) — a percentage of a near-zero requirement is suppresse
   it("below the floor the margin drops the percentage and states the requirement", () => {
     const m = marginFor(29.6, 0.16, { key: "mit" });
     expect(m.pct).toBeNull();
-    expect(fmtMargin(m)).toBe("+29.4 ac-ft over a 0.2 ac-ft requirement");
+    expect(fmtMargin(m)).toBe("+29.4 AC-FT over a 0.2 AC-FT requirement");
     expect(fmtMargin(m).includes("%")).toBe(false);
   });
   it("the pre-fix five-digit percentage can no longer render on the strip", () => {
     const rows = yieldVerdictStrip(tsakiris({ reconcile: null }));
     const mit = rows.find((r) => r.key === "mit");
     expect(mit.marginText.includes("%")).toBe(false);
-    expect(mit.marginText).toContain("0.2 ac-ft requirement");
+    expect(mit.marginText).toContain("0.2 AC-FT requirement");
   });
   it("at or above the floor the percentage returns", () => {
     const m = marginFor(34, 33.8, { key: "det" });
@@ -267,14 +267,14 @@ describe("NEW-3 (B1034) — a percentage of a near-zero requirement is suppresse
     expect(DEFAULT_MARGIN_PCT_FLOOR_ACFT).toBe(1.0);
     // A jurisdiction that wants percentages down to a tenth of an acre-foot passes its own floor.
     expect(marginFor(29.6, 0.16, { key: "mit", pctFloorAcFt: 0.1 }).pct).not.toBeNull();
-    // …and one that wants them only above 50 ac-ft suppresses a normally-shown percentage.
+    // …and one that wants them only above 50 AC-FT suppresses a normally-shown percentage.
     expect(marginFor(34, 33.8, { key: "det", pctFloorAcFt: 50 }).pct).toBeNull();
   });
   it("the same rule governs the DETENTION group, not just mitigation", () => {
     const rows = yieldVerdictStrip({ req: { kind: "point", requiredAcFt: 0.3 }, providedUsableCf: 12 * AC_FT });
     const det = rows.find((r) => r.key === "det");
     expect(det.margin.pct).toBeNull();
-    expect(det.marginText).toContain("0.3 ac-ft requirement");
+    expect(det.marginText).toContain("0.3 AC-FT requirement");
   });
 });
 

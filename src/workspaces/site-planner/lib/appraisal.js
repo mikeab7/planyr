@@ -231,7 +231,7 @@ export function splitCuratedRows(attrs, { primary: primaryLabels = [], hero = nu
       push(primary, "Account / ID", acct != null && String(acct) !== "" ? String(acct) : (cad ? cad.value : null));
     } else if (label === "Acreage") {
       // …and the MEASURED acreage (from the returned ring) wins over the CAD's own number.
-      if (Number.isFinite(acres)) push(primary, "Acreage (measured)", `${Number(acres).toFixed(2)} ac`);
+      if (Number.isFinite(acres)) push(primary, "Acreage (measured)", `${Number(acres).toFixed(2)} AC`);
       else { const cad = pick("Acreage"); if (cad) push(primary, "Acreage", apprVal("Acreage", cad.value)); }
     } else {
       const r = pick(label);
