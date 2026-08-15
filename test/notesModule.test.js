@@ -79,6 +79,9 @@ const ALL_NOTES_FILES = [
   "lib/notesKeyScope.js",
   // NEW-SAVE-BADGE — Notes joins the one app-wide save indicator.
   "lib/notesSaveState.js",
+  // NEW-PICTURE-CANVAS — the placed box holds CONTENT, not only text, so it needed a geometry
+  // rule: the floors, the edge pad, and resizing from any of eight handles.
+  "lib/notesBoxResize.js",
 ];
 const SKETCH_FILES = ALL_NOTES_FILES.filter((f) => f.includes("Sketch"));
 
@@ -1011,7 +1014,12 @@ describe("the project a notebook belongs to", () => {
      * — but no destructive control sits under the pointer any more, and this guard now says so in
      * the direction that matters: it must not come back. */
     expect(node, "no visible delete × on a box").not.toMatch(/note-anchor-delete/);
-    expect(node).toMatch(/data-testid", "note-anchor-size"/);
+    /* ⛔ AMENDED AGAIN (NEW-PICTURE-CANVAS): there are EIGHT handles now, built in a loop, so the
+     * test id is composed rather than written out. The east handle deliberately keeps the old
+     * class and id — it IS the width handle three existing harnesses were written against, and
+     * renaming it would take working guards red for no behavioural reason. */
+    expect(node, "the east handle keeps the id the harnesses drive").toMatch(/"note-anchor-size"/);
+    expect(node, "and the rest are built from the shared handle list").toMatch(/handlesFor\(/);
     const editor = read(NOTES, "components", "NoteEditor.jsx");
     expect(editor, "delete lives on the right-click menu instead").toMatch(/note-menu-delete-box|onDeleteBox/);
     // ⛔ A press that never moved writes NOTHING — not a transaction, not an undo frame.
@@ -1020,7 +1028,7 @@ describe("the project a notebook belongs to", () => {
      * press to the box and puts the caret in it, because a handle that only exists once the box is
      * selected was swallowing press 2 of the two-stage gesture (CHROME-NEVER-EATS-A-PRESS clause
      * 4). It still writes nothing, which is the property this line was guarding. */
-    expect(node, "and so does the resize").toMatch(/if \(!changed\) \{/);
+    expect(node, "and so does the resize").toMatch(/if \(!done\.moved\) \{/);
     expect(node, "…and a press that did not drag forwards to the box instead of vanishing")
       .toMatch(/setTextSelection\(pos \+ 1\)/);
     /* ⛔ THE DRAG IS SCROLL-PROOF: it keeps the grab offset and reads the host rect FRESH on
@@ -1029,7 +1037,21 @@ describe("the project a notebook belongs to", () => {
     expect(node).toMatch(/grabX: e\.clientX - boxRect\.left/);
     expect(node.slice(node.indexOf('grip.addEventListener("pointermove"'))).toMatch(/host\.getBoundingClientRect\(\);\s+\/\/ read FRESH/);
     const print = read(NOTES, "lib", "notesPrint.js");
-    expect(print, "no chrome on paper").toMatch(/planyr-anchor-grip, \.note-body \.planyr-anchor-del, \.note-body \.planyr-anchor-size \{ display: none; \}/);
+    /* ⛔ MATCHED ON THE SHARED HANDLE CLASS (NEW-PICTURE-CANVAS). There are eight resize handles
+     * now, and pinning the exact selector LIST would mean this guard has to be edited every time
+     * one is added — which is the shape of a guard that gets edited to stay green rather than one
+     * that catches anything. `.planyr-anchor-h` is the class they all carry, so a ninth handle is
+     * covered by construction and cannot start printing by omission. */
+    expect(print, "no chrome on paper").toMatch(/\.note-body \.planyr-anchor-h \{ display: none; \}/);
+    expect(print, "…and the grip still does not print either").toMatch(/\.note-body \.planyr-anchor-grip/);
+    /* ⛔ AND A PICTURE BOX PRINTS AT THE SIZE IT WAS DRAGGED TO (PDF-PARITY). The height rides the
+     * node's own style attribute exactly as the position does, but BOTH DOM shapes have to be
+     * named here: the node view builds a figure wrapping the img, while `renderHTML` — which is
+     * what this sheet serialises through — emits a bare img with no figure. A rule written against
+     * only the screen's shape matches nothing on paper. */
+    expect(print, "an image box prints unpadded").toMatch(/data-anchor-kind="image"\]\s*\{ padding: 0/);
+    expect(print, "…and the bare serialised img is named, not just the node view's figure")
+      .toMatch(/img\.planyr-note-img/);
   });
 
   it("⛔ AN ABANDONED PRESS IS PROVISIONAL — enforced at the SEAM, not only in the gesture", () => {

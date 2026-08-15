@@ -154,25 +154,61 @@ const EDITOR_CSS = `
 .planyr-note .ProseMirror .planyr-anchor-grip { position: absolute; left: 3px; top: 5px; width: 9px; height: 14px; cursor: grab; border-radius: 2px; opacity: 0; background: repeating-linear-gradient(to bottom, var(--text-tertiary) 0 2px, transparent 2px 4px); }
 .planyr-note .ProseMirror .planyr-anchor[data-selected="1"] .planyr-anchor-grip { opacity: 1; }
 .planyr-note .ProseMirror .planyr-anchor-grip:active { cursor: grabbing; }
-/* ⛔ A DELETE AND A WIDTH HANDLE, on the box itself. Both appear on hover or while the caret is
-   in the box — the same rule the grab handle already followed, so a page of boxes is not a page
-   of chrome. Neither prints: notesPrint.js hides every one of them. */
 /* ⛔ THE BOX'S OWN CHROME SITS ABOVE THE BOX'S OWN TEXT, AND THAT z-index IS THE WHOLE FIX
-   (B421488). The delete button is inside the box's padding box, so its 16px square overlaps the
-   first line of text; the content wrapper below is position:relative (it has to be, for the empty
-   box's "Type here" hint) and is appended LAST, so with both at z-index:auto the CONTENT painted
-   on top. Paint order is hit-test order, so a press at the button's own centre landed on the
-   paragraph: the control was visible, enabled, correctly labelled, and impossible to click. This
-   is CHROME-NEVER-EATS-A-PRESS with the sides reversed — the content ate the chrome — and it is
-   why the grip and the width handle were unaffected: both sit OUTSIDE the content's box (the grip
-   in the left padding, the handle past the bottom-right corner) and neither ever overlapped it.
-   The rule the z-index encodes: a control drawn ON the box belongs to the box's chrome layer. */
-.planyr-note .ProseMirror .planyr-anchor-grip, .planyr-note .ProseMirror .planyr-anchor-del, .planyr-note .ProseMirror .planyr-anchor-size { z-index: 1; }
-.planyr-note .ProseMirror .planyr-anchor-del { position: absolute; right: 2px; top: 2px; width: 16px; height: 16px; padding: 0; line-height: 14px; border: 1px solid var(--border-default); border-radius: 4px; background: var(--surface-raised); color: var(--text-secondary); font: inherit; font-size: 12px; cursor: pointer; opacity: 0; }
-.planyr-note .ProseMirror .planyr-anchor[data-selected="1"] .planyr-anchor-del { opacity: 1; }
-.planyr-note .ProseMirror .planyr-anchor-del:hover { border-color: var(--danger); color: var(--danger); }
-.planyr-note .ProseMirror .planyr-anchor-size { position: absolute; right: -3px; bottom: -3px; width: 12px; height: 12px; cursor: ew-resize; border-right: 2px solid var(--border-strong); border-bottom: 2px solid var(--border-strong); border-bottom-right-radius: 4px; opacity: 0; }
-.planyr-note .ProseMirror .planyr-anchor[data-selected="1"] .planyr-anchor-size { opacity: 1; }
+   (B421488). A control inside the box's padding box overlaps the first line of text; the content
+   wrapper below is position:relative (it has to be, for the empty box's "Type here" hint) and is
+   appended LAST, so with both at z-index:auto the CONTENT painted on top. Paint order is hit-test
+   order, so a press at a control's own centre landed on the paragraph: the control was visible,
+   enabled, correctly labelled, and impossible to click. This is CHROME-NEVER-EATS-A-PRESS with the
+   sides reversed — the content ate the chrome. The rule the z-index encodes: a control drawn ON the
+   box belongs to the box's chrome layer. */
+.planyr-note .ProseMirror .planyr-anchor-grip, .planyr-note .ProseMirror .planyr-anchor-h { z-index: 1; }
+/* ⛔ EIGHT HANDLES, PAINTED FROM ONE RULE PLUS EIGHT POSITIONS (NEW-PICTURE-CANVAS / NEW-2).
+   Bluebeam's and Office's convention: small square grips on every corner and every edge, visible
+   only while the box is SELECTED — never on hover, which B434418 removed for good reasons. The
+   cursor is set in the node view from HANDLE_CURSOR rather than here, so the loop that builds them
+   and the shape they wear cannot drift apart the way a parallel list of selectors does.
+   ⛔ A text box only gets east and west; its height is its words. That is decided in
+   notesBoxResize.js handlesFor(), not by hiding handles here — a handle hidden in CSS still takes
+   the press, which is this module's most-repeated defect. */
+.planyr-note .ProseMirror .planyr-anchor-h { position: absolute; width: 10px; height: 10px; box-sizing: border-box; border: 1px solid var(--accent-notes); border-radius: 2px; background: var(--surface-raised); opacity: 0; pointer-events: none; }
+.planyr-note .ProseMirror .planyr-anchor[data-selected="1"] .planyr-anchor-h { opacity: 1; pointer-events: auto; }
+.planyr-note .ProseMirror .planyr-anchor-h-nw { left: -6px; top: -6px; }
+.planyr-note .ProseMirror .planyr-anchor-h-ne { right: -6px; top: -6px; }
+.planyr-note .ProseMirror .planyr-anchor-h-sw { left: -6px; bottom: -6px; }
+.planyr-note .ProseMirror .planyr-anchor-h-se { right: -6px; bottom: -6px; }
+.planyr-note .ProseMirror .planyr-anchor-h-n { left: 50%; top: -6px; margin-left: -5px; }
+.planyr-note .ProseMirror .planyr-anchor-h-s { left: 50%; bottom: -6px; margin-left: -5px; }
+.planyr-note .ProseMirror .planyr-anchor-h-w { left: -6px; top: 50%; margin-top: -5px; }
+.planyr-note .ProseMirror .planyr-anchor-h-e { right: -6px; top: 50%; margin-top: -5px; }
+
+/* ⛔ A BOX HOLDING A PICTURE IS THE PICTURE — no padding, and the image fills it exactly
+   (NEW-PICTURE-CANVAS). The owner asked for pictures to behave like the positioned text boxes:
+   *"dropped where he drops it, moved wherever he wants, resized, deleted, the same as everything
+   else on the page."* A text box's padding buys a readable column; on a picture it is a border of
+   dead space that makes the drawn box and the visible image disagree about where the edges are,
+   which makes a corner drag feel wrong.
+   ⛔ object-fit: fill, deliberately — an EDGE drag is meant to stretch, which is exactly what the
+   owner asked for ("corners keep the aspect ratio, edges stretch"). Anything that preserves the
+   ratio here would silently overrule the gesture and leave the picture floating inside a box the
+   right size, which reads as the drag not having worked. */
+/* ⛔ THE CLIP GOES ON THE CONTENT, NEVER ON THE BOX — AND THAT ONE WORD COST THE WHOLE FEATURE
+   ONCE ALREADY. Every resize handle is positioned OUTSIDE the border box (they straddle the edge,
+   which is what makes them grabbable), so an overflow:hidden on the anchor clips all eight of them
+   away. They still lay out, so getBoundingClientRect returns a perfectly sensible 10px square in a
+   perfectly sensible place, and every DOM reading says the control is present and correct — but a
+   clipped element is not hit-testable, so elementFromPoint at the handle's own centre answers the
+   EDITOR, and a real press does nothing at all. That is CHROME-NEVER-EATS-A-PRESS inverted: not
+   chrome swallowing a press, but the box swallowing its own chrome, invisibly to anything short of
+   an actual mouse. Clip the picture; never clip the frame. */
+.planyr-note .ProseMirror .planyr-anchor[data-anchor-kind="image"] { padding: 0; }
+.planyr-note .ProseMirror .planyr-anchor[data-anchor-kind="image"] .planyr-anchor-content { height: 100%; overflow: hidden; }
+.planyr-note .ProseMirror .planyr-anchor[data-anchor-kind="image"] .planyr-note-image { margin: 0; height: 100%; }
+.planyr-note .ProseMirror .planyr-anchor[data-anchor-kind="image"] .planyr-note-image img,
+.planyr-note .ProseMirror .planyr-anchor[data-anchor-kind="image"] > img.planyr-note-img { display: block; width: 100%; height: 100%; object-fit: fill; max-width: none; }
+/* The grip has to read over any picture, so on an image box it carries its own backdrop rather
+   than relying on the page behind it. */
+.planyr-note .ProseMirror .planyr-anchor[data-anchor-kind="image"] .planyr-anchor-grip { left: 2px; top: 2px; padding: 0 1px; border-radius: 3px; background-color: color-mix(in srgb, var(--surface-raised) 82%, transparent); }
 
 /* An empty page says what to do. Both halves — the extension and this rule — landed
    together; a rule with no extension matches nothing, which is what a blank page was. */
@@ -1360,9 +1396,27 @@ export default function NoteEditor({
      * select rather than page you write on. The mat claiming those presses would put an
      * anchored block ON TOP of a drawing — caught by the sketch rows of `verify-notes`, which
      * is why this list exists rather than being assumed. */
-    if (el.closest(".planyr-sketch-host, .planyr-note-image, .planyr-note-file")) return;
-
     const inBlock = el.closest(".planyr-anchor");
+    /* ⛔ …BUT NOT WHEN THAT OBJECT IS ITSELF INSIDE A POSITIONED BOX (NEW-PICTURE-CANVAS), AND
+     * THIS IS THE PAIR OF LINES THAT MADE THE WHOLE FEATURE INERT. The rule above was written when a
+     * picture could only ever be inline, where "a picture is an object you select rather than
+     * page you write on" is exactly right. The moment a picture can BE the content of a box, the
+     * early return fires on every press on that box — so the box was never selected, and because
+     * every resize handle is gated on the selection (`pointer-events: none` until then), all
+     * eight were painted, correctly positioned, and completely dead.
+     *
+     * ⛔ IT COST NOTHING TO FIND ONLY BECAUSE THE HARNESS DROVE A REAL MOUSE AND JUDGED THE
+     * STORED DOCUMENT. Every unit test passed, the handles were present in the DOM with the right
+     * ids and the right cursors, and `handlesFor` returned all eight — every static reading of
+     * this feature said it worked. What said otherwise was eight rows of "400×200 → 400×200".
+     * This is CHROME-NEVER-EATS-A-PRESS's mirror image: not chrome swallowing a press, but a
+     * guard clause swallowing it before the chrome could ever be armed.
+     *
+     * The sketch keeps its unconditional bail — it owns its own double-click, and B391075 already
+     * establishes that a sketch never goes inside a box, so the case cannot arise. */
+    if (!inBlock && el.closest(".planyr-note-image, .planyr-note-file")) return;
+    if (el.closest(".planyr-sketch-host")) return;
+
     if (inBlock) {
       /* ⛔ A PRESS ON A BOX THAT IS PART OF A SELECTION MOVES THE WHOLE SELECTION (B421494), and
        * a press on any other box CLEARS it — anything else leaves somebody dragging one box
@@ -1401,6 +1455,16 @@ export default function NoteEditor({
           e.preventDefault();
           setEditingId(null);
           setSelection(new Set([String(id)]));
+          return;
+        }
+        /* ⛔ A BOX HOLDING A PICTURE HAS NO STAGE 2, because it has no words to enter (NEW-
+         * PICTURE-CANVAS). Falling through would hand the press to the browser's ordinary text
+         * behaviour, which on an atom means collapsing the box's selection to a caret beside it —
+         * i.e. the second press would silently DESELECT the picture and take its handles away
+         * again. Keeping it selected is also what Word and Bluebeam do: a picture stays picked up
+         * until you click off it. */
+        if (inBlock.getAttribute("data-anchor-kind") === "image") {
+          e.preventDefault();
           return;
         }
         /* Stage 2: it was already selected, so this press is about its words. Fall through to the

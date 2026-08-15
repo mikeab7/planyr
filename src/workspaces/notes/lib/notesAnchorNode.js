@@ -45,46 +45,33 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 
 import { anchorIsEmpty } from "./notesAnchorPrune.js";
+import {
+  ANCHOR_EDGE_PAD, ANCHOR_MIN_HEIGHT, ANCHOR_MIN_WIDTH, ANCHOR_WIDTH,
+  HANDLES, HANDLE_CURSOR, handlesFor, hasFixedHeight, resizeBox,
+} from "./notesBoxResize.js";
 
-/** The width a block gets when there is room for it. */
-export const ANCHOR_WIDTH = 180;
-/** ⛔ THE NARROWEST A BLOCK MAY BE, AND IT IS A USABLE COLUMN — NOT A SLIVER (NEW-RIGHT-EDGE,
- *  owner report 2026-08-14, and he named the instruction of his own that caused it).
- *
- *  THE REPORT: *"it's not letting me expand this box out to the right… it seems like there's a
- *  wall where when I go past it, it squeezes my text box down to where it's literally one
- *  character wide."* His screenshot shows "High Voltage Planning Study" rendered ONE LETTER PER
- *  LINE in a sliver against the right margin.
- *
- *  ⛔ THE CAUSE IS THIS CONSTANT, AND THE REASONING ABOVE IT WAS HALF RIGHT. When the block used
- *  to JUMP LEFT away from the click, he asked for *"if it will not fit, NARROW the block to the
- *  space available — do not slide it sideways."* That was right about not sliding and **wrong
- *  about narrowing without a usable floor**: 32 px is about two characters at the note's own text
- *  size, so a press near the right margin left a few pixels of room and the box was narrowed to
- *  them. The old comment here defended the small number on the grounds that "a narrow column at
- *  the far edge is a choice he is allowed to make" — but a column he cannot read or type in is
- *  not a choice, it is the failure, and he has now said so.
- *
- *  ⛔ THE FLOOR IS 160 PX and it is chosen rather than guessed: the default block is 180, and 160
- *  is about twenty characters at the note's 15 px text — a column somebody can actually write in,
- *  and close enough to the default that a box at the margin does not look like a different kind
- *  of thing. **Past this floor the block does NOT narrow further — THE PAGE GROWS TO THE RIGHT**
- *  and scrolls, exactly as it already grows downward when text runs past the bottom
- *  (`anchorExtent`). That is the symmetry that was missing: vertically the page grew, horizontally
- *  the content was crushed.
- *
- *  ⛔ AND HIS ORIGINAL ACCEPTANCE TEST STILL HOLDS, which is why this is safe: *"assert stored
- *  left equals click x minus editor left, for EVERY step. No clamping band anywhere."* The LEFT
- *  EDGE is still never moved by any of this — raising the floor spends the page's width, never
- *  the block's position. `verify-notes-anchor-zoom` is that test and it still passes. */
-export const ANCHOR_MIN_WIDTH = 160;
-/** How far from the editor's RIGHT edge a block keeps clear. */
-export const ANCHOR_EDGE_PAD = 4;
+/* ⛔ THE GEOMETRY CONSTANTS LIVE IN `notesBoxResize.js` AND ARE RE-EXPORTED HERE. A resize has to
+ * honour the same floor a placement does; the two modules importing each other would be a cycle,
+ * and each declaring its own copy of the floor is the two-sources-of-truth bug that produced
+ * B539648. Their reasoning moved with them — read it there. Nothing that already imported these
+ * names from this file had to change. */
+export { ANCHOR_EDGE_PAD, ANCHOR_MIN_HEIGHT, ANCHOR_MIN_WIDTH, ANCHOR_WIDTH };
+
 
 const num = (v, fallback = 0) => {
   const n = typeof v === "number" ? v : parseFloat(v);
   return Number.isFinite(n) ? n : fallback;
 };
+
+/** ⛔ THE ONE PLACE A BOX'S GEOMETRY BECOMES CSS — used by `renderHTML` (which is what the print
+ *  sheet and the HTML export serialise through) AND by the node view. Two copies of this string
+ *  is how the screen and the paper drift apart by a height nobody notices until a PDF comes out
+ *  wrong, which is exactly what PDF-PARITY exists to stop. A non-finite height writes NOTHING,
+ *  so a text box's height stays its words. */
+function boxStyle({ x, y, w, h }) {
+  const base = `left:${Math.round(num(x))}px;top:${Math.round(num(y))}px;width:${Math.round(num(w, ANCHOR_WIDTH))}px`;
+  return Number.isFinite(num(h, NaN)) ? `${base};height:${Math.round(num(h))}px` : base;
+}
 
 /** ⛔ A BLOCK STARTS WHERE YOU CLICKED. IT IS NARROWED TO FIT — IT IS NEVER SLID SIDEWAYS.
  *
@@ -212,6 +199,26 @@ export const NoteAnchor = Node.create({
       x: { default: 0, parseHTML: (el) => num(el.getAttribute("data-anchor-x")), renderHTML: (a) => ({ "data-anchor-x": Math.round(num(a.x)) }) },
       y: { default: 0, parseHTML: (el) => num(el.getAttribute("data-anchor-y")), renderHTML: (a) => ({ "data-anchor-y": Math.round(num(a.y)) }) },
       w: { default: ANCHOR_WIDTH, parseHTML: (el) => num(el.getAttribute("data-anchor-w"), ANCHOR_WIDTH), renderHTML: (a) => ({ "data-anchor-w": Math.round(num(a.w, ANCHOR_WIDTH)) }) },
+      /* ⛔ A HEIGHT, AND `null` IS A MEANING RATHER THAN A MISSING NUMBER (NEW-PICTURE-CANVAS).
+       *
+       * `null` = **the content decides** — which is a text box, whose height is its words, and
+       * which is what every box written before this attribute existed is. A NUMBER = the box is
+       * that tall because somebody dragged it that tall, which only a box holding a PICTURE can
+       * honour (B391073: a fixed height on text can only be kept by clipping the text).
+       *
+       * ⛔ SO NOTHING MIGRATES AND NOTHING IS REWRITTEN. An old box parses back with `h: null`
+       * and behaves exactly as it did; the attribute renders NOTHING at `null`, so a document
+       * that never had a picture in it is still byte-identical through a round trip. That is the
+       * same discipline `indent` follows in `notesIndentLevel.js`, and for the same reason. */
+      h: {
+        default: null,
+        parseHTML: (el) => {
+          const raw = el.getAttribute("data-anchor-h");
+          const n = raw == null ? NaN : parseFloat(raw);
+          return Number.isFinite(n) ? n : null;
+        },
+        renderHTML: (a) => (Number.isFinite(num(a.h, NaN)) ? { "data-anchor-h": Math.round(num(a.h)) } : {}),
+      },
     };
   },
 
@@ -227,9 +234,15 @@ export const NoteAnchor = Node.create({
     const x = Math.round(num(node?.attrs?.x));
     const y = Math.round(num(node?.attrs?.y));
     const w = Math.round(num(node?.attrs?.w, ANCHOR_WIDTH));
+    /* ⛔ THE HEIGHT RIDES THE SAME STYLE STRING AS THE POSITION, so paper and the HTML export get
+     * a dragged picture at the size it was dragged to — PDF-PARITY by construction, exactly as
+     * the position already is. A height applied only in the node view would print at the natural
+     * size and nothing would say so. */
+    const h = num(node?.attrs?.h, NaN);
+    const box = boxStyle({ x, y, w, h });
     return [
       "div",
-      mergeAttributes({ class: "planyr-anchor", style: `left:${x}px;top:${y}px;width:${w}px` }, HTMLAttributes),
+      mergeAttributes({ class: "planyr-anchor", style: box, ...(hasFixedHeight(node) ? { "data-anchor-kind": "image" } : {}) }, HTMLAttributes),
       0,
     ];
   },
@@ -249,18 +262,35 @@ export const NoteAnchor = Node.create({
        *  text block it already ended in, so nothing needs restoring and nothing is left
        *  behind. The node is out of flow, so where it sits in the document order changes
        *  nothing about what anybody sees. */
-      addNoteAnchorAt: ({ x, y, w = ANCHOR_WIDTH }) => ({ chain, state }) => {
+      /** ⛔ AND IT TAKES CONTENT NOW, WHICH IS THE WHOLE OF "GENERALISE THE BOX" (NEW-PICTURE-
+       *  CANVAS). The owner asked for pictures to behave like the positioned text boxes and named
+       *  the reason himself: *"a parallel image object implementation would be a second copy of
+       *  every bug we have spent two days finding once."* So there is still exactly ONE placed
+       *  node and ONE placement command — a box holding a paragraph is what a press makes, a box
+       *  holding a picture is what a drop makes, and press-to-place, the selection ring, the drag
+       *  grip, resize, Delete, the right-click menu, undo, the stored round trip and the tombstone
+       *  cascade are all already written and are not written twice.
+       *
+       *  ⛔ THE CARET ONLY FOLLOWS INTO A BOX SOMEBODY IS GOING TO TYPE IN. Dropping a picture is
+       *  not the start of a sentence, and an atom has no text position to land in anyway — asking
+       *  for one puts the selection somewhere arbitrary. */
+      addNoteAnchorAt: ({ x, y, w = ANCHOR_WIDTH, h = null, content = null }) => ({ chain, state }) => {
         const { doc } = state;
         const tail = doc.lastChild;
         const at = tail && tail.isTextblock ? doc.content.size - tail.nodeSize : doc.content.size;
-        return chain()
-          .insertContentAt(at, {
-            type: "noteAnchor",
-            attrs: { x: Math.round(num(x)), y: Math.round(num(y)), w: Math.round(num(w, ANCHOR_WIDTH)) },
-            content: [{ type: "paragraph" }],
-          })
-          .focus(at + 2)
-          .run();
+        const body = Array.isArray(content) && content.length ? content : [{ type: "paragraph" }];
+        const typing = !content;
+        const c = chain().insertContentAt(at, {
+          type: "noteAnchor",
+          attrs: {
+            x: Math.round(num(x)),
+            y: Math.round(num(y)),
+            w: Math.round(num(w, ANCHOR_WIDTH)),
+            h: Number.isFinite(num(h, NaN)) ? Math.round(num(h)) : null,
+          },
+          content: body,
+        });
+        return (typing ? c.focus(at + 2) : c).run();
       },
 
       /** ⛔ AND NOT ONE BLANK LINE LEFT BEHIND. Appending a block at the very end leaves a
@@ -332,6 +362,31 @@ export const NoteAnchor = Node.create({
         const node = tr.doc.nodeAt(pos);
         if (!node || node.type.name !== "noteAnchor") return false;
         if (dispatch) dispatch(tr.setNodeMarkup(pos, undefined, { ...node.attrs, w: Math.round(num(w, ANCHOR_WIDTH)) }));
+        return true;
+      },
+
+      /** ⛔ THE WHOLE BOX IN ONE TRANSACTION — position AND size (NEW-PICTURE-CANVAS).
+       *
+       *  A west or north drag changes `x`/`y` and `w`/`h` together, and committing those as two
+       *  commands would put TWO frames in the undo history for one gesture: the first Ctrl+Z
+       *  would leave the box half-resized, at a position it was never in. That is the same
+       *  reasoning `moveNoteAnchors` gives for a group drag, one gesture smaller.
+       *
+       *  ⛔ `h: null` is passed THROUGH, not treated as absent — it is how a box says "my height
+       *  is my content", and dropping it here would let a text box quietly keep a stale height
+       *  from whatever it held before. */
+      setNoteAnchorBox: (pos, { x, y, w, h } = {}) => ({ tr, dispatch }) => {
+        const node = tr.doc.nodeAt(pos);
+        if (!node || node.type.name !== "noteAnchor") return false;
+        if (dispatch) {
+          dispatch(tr.setNodeMarkup(pos, undefined, {
+            ...node.attrs,
+            x: Math.round(num(x, node.attrs.x)),
+            y: Math.round(num(y, node.attrs.y)),
+            w: Math.round(num(w, node.attrs.w)),
+            h: Number.isFinite(num(h, NaN)) ? Math.round(num(h)) : null,
+          }));
+        }
         return true;
       },
 
@@ -424,9 +479,12 @@ export const NoteAnchor = Node.create({
       dom.setAttribute("data-anchor-w", String(Math.round(num(node.attrs.w, ANCHOR_WIDTH))));
       dom.setAttribute("data-testid", "note-anchor");
       if (node.attrs.aid) dom.setAttribute("data-anchor-id", String(node.attrs.aid));
-      dom.style.left = `${Math.round(num(node.attrs.x))}px`;
-      dom.style.top = `${Math.round(num(node.attrs.y))}px`;
-      dom.style.width = `${Math.round(num(node.attrs.w, ANCHOR_WIDTH))}px`;
+      /* The same builder `renderHTML` uses, so the first paint and the printed sheet cannot
+       * disagree about a box's geometry (PDF-PARITY by construction). */
+      dom.style.cssText = boxStyle(node.attrs);
+      if (Number.isFinite(num(node.attrs.h, NaN))) {
+        dom.setAttribute("data-anchor-h", String(Math.round(num(node.attrs.h))));
+      }
 
       /* ⛔ AN EMPTY BLOCK IS NEVER INVISIBLE. One that draws nothing still occupies its box
        * and still takes the press, so it becomes a dead zone at the exact spot somebody just
@@ -455,7 +513,7 @@ export const NoteAnchor = Node.create({
        * shouldn't just be shown, like, anytime I click on the box… I should only be able to use
        * the keystroke to delete or a right click and then delete option."*
        *
-       * Selecting a box now shows the ring and the resize handle and NOTHING destructive. There
+       * Selecting a box now shows the ring and the resize handles and NOTHING destructive. There
        * are still two ways to remove one, and both are deliberate acts rather than a button
        * sitting under the pointer: **Delete/Backspace** while it is selected, and **Delete this
        * box** on the right-click menu, where it is last and separated because it is the
@@ -464,110 +522,187 @@ export const NoteAnchor = Node.create({
        * ⛔ WHAT MUST SURVIVE ITS REMOVAL, because it was learned the hard way (B421489): both
        * remaining routes hand FOCUS BACK TO THE DOCUMENT after removing the node, or Ctrl+Z has
        * nowhere to land and a destructive action becomes un-undoable. Both do. */
-      const size = document.createElement("div");
-      size.className = "planyr-anchor-size";
-      size.setAttribute("contenteditable", "false");
-      size.setAttribute("title", "Drag to change how wide this box is");
-      size.setAttribute("data-testid", "note-anchor-size");
 
       dom.appendChild(grip);
-      dom.appendChild(size);
       dom.appendChild(content);
 
-      /* ⛔ THE LEFT EDGE IS READ FROM THE RENDERED BOX, NOT FROM THE CLOSURE'S `node`
-       * (B400177). The node view is created once and `update()` re-styles the element without
-       * rebinding `node`, so `node.attrs` describes the box as it was when the view was BUILT.
-       * Resize a box you have already dragged and the width was computed against its OLD left
-       * edge: measured on a ten-box page, a drag asking for 90 more produced 34 LESS. The
-       * element's own geometry cannot go stale, so that is what it asks. (Found by driving the
-       * control with a real mouse — it had been reported as present but never exercised, which
-       * is the whole distance between "the button is there" and "the button works".) */
+      /* ⛔ THE LIVE NODE, TRACKED EXPLICITLY — never the closure's `node` (B400177, generalised).
+       * That rule was written about `node.attrs` and the reason is broader than attributes: a node
+       * view is built ONCE and `update(next)` re-styles it without rebinding `node`, so every read
+       * of the closure describes the box as it was when the view was created. Now that a box's
+       * CONTENT decides which handles it may offer, a stale content read would leave a box that
+       * has become a picture still wearing a text box's two handles — and nothing would say so. */
+      let live = node;
+
+      /* ═══ EIGHT HANDLES, ONE GESTURE (NEW-PICTURE-CANVAS / NEW-2) ═════════════════════════════
+       *
+       * ⛔ HIS ASK: *"resize from all four corners and all four edges, Bluebeam-style; left/top
+       * handles move the anchor as well as the size."* Every decision about WHERE the box ends up
+       * lives in `notesBoxResize.js` and is unit-tested there against every handle, the floors,
+       * the ratio and Shift both ways. Nothing below decides geometry — it reads a pointer,
+       * asks, and paints the answer. Eight handles each doing their own arithmetic is eight
+       * chances to get it subtly different, and those failures are the quiet kind.
+       *
+       * ⛔ WHICH handles exist is read from the CONTENT (`handlesFor`), because a text box's
+       * height is its words (B391073) and a north handle on one would have to mean something
+       * other than "resize" — an open question with the owner (B539650). A picture has a real
+       * height, so all eight are honest on one. East and west are offered to everything.
+       *
+       * ⛔ AND THE EAST HANDLE KEEPS THE OLD CLASS AND TEST ID. `verify-notes-anchor-zoom`,
+       * `measure-notes-right-edge` and `verify-notes-context-menu` all drive `.planyr-anchor-size`
+       * / `note-anchor-size`, and east IS the width handle they were written against. Renaming it
+       * would take three working guards red for no behavioural reason, and a guard that has to be
+       * rewritten to stay green is a guard nobody trusts. */
+      const handles = new Map();
+      const makeHandle = (name) => {
+        const el = document.createElement("div");
+        el.className = `planyr-anchor-h planyr-anchor-h-${name}${name === "e" ? " planyr-anchor-size" : ""}`;
+        el.setAttribute("contenteditable", "false");
+        el.setAttribute("data-handle", name);
+        el.setAttribute("data-testid", name === "e" ? "note-anchor-size" : `note-anchor-h-${name}`);
+        el.setAttribute("title", name === "e" || name === "w"
+          ? "Drag to change how wide this box is"
+          : "Drag to resize — hold Shift to ignore the picture's proportions");
+        el.style.cursor = HANDLE_CURSOR[name];
+        el.addEventListener("pointerdown", (e) => beginSize(e, name));
+        el.addEventListener("pointermove", moveSize);
+        el.addEventListener("pointerup", endSize);
+        el.addEventListener("pointercancel", endSize);
+        return el;
+      };
+
+      /** Paint exactly the handles this box may offer, adding and removing only what changed —
+       *  rebuilding them all on every transaction would drop a pointer capture mid-drag. */
+      const syncHandles = (n) => {
+        const want = new Set(handlesFor(n));
+        for (const [name, el] of handles) {
+          if (want.has(name)) continue;
+          el.remove();
+          handles.delete(name);
+        }
+        for (const name of HANDLES) {
+          if (!want.has(name) || handles.has(name)) continue;
+          const el = makeHandle(name);
+          handles.set(name, el);
+          dom.appendChild(el);
+        }
+        dom.setAttribute("data-anchor-kind", hasFixedHeight(n) ? "image" : "text");
+      };
+
+      /* ⛔ THE BOX IS MEASURED FROM THE RENDERED ELEMENT, NOT FROM ANY STORED ATTRIBUTE (B400177).
+       * The node view is created once and re-styled in place, so the closure's attrs describe the
+       * box as it was BUILT: a drag asking for 90 more once produced 34 LESS because the width was
+       * computed against a left edge the box had since been dragged away from. Live geometry
+       * cannot go stale, so that is what this asks — and it is read ONCE, at the press, because a
+       * resize is relative to where the gesture began (re-reading each move compounds rounding
+       * and lets the box chase its own tail). */
       let sizing = null;
-      size.addEventListener("pointerdown", (e) => {
+      function beginSize(e, name) {
         e.preventDefault();
         e.stopPropagation();
         const host = editor.view.dom;
         const hostRect = host.getBoundingClientRect();
         const scale = hostRect.width / (host.offsetWidth || 1) || 1;
         const boxRect = dom.getBoundingClientRect();
+        const fixedH = hasFixedHeight(live);
+        const w0 = boxRect.width / scale;
+        const h0 = boxRect.height / scale;
         sizing = {
+          name,
           scale,
-          left: (boxRect.left - hostRect.left) / scale,
-          /* ⛔ WHERE ON THE HANDLE YOU GRABBED IT, kept — the same rule the move drag follows,
-           * for the same reason. Without it the box's right edge jumps to the pointer the
-           * instant you press, so asking for 90 more gave 86: a small silent re-seat, which is
-           * precisely what the move drag's own comment forbids. */
-          grab: e.clientX - boxRect.right,
           host,
+          startX: e.clientX,
+          startY: e.clientY,
+          /* The box in the document's own frame — the same frame every stored coordinate is in. */
+          box: {
+            x: (boxRect.left - hostRect.left) / scale,
+            y: (boxRect.top - hostRect.top) / scale,
+            w: w0,
+            ...(fixedH ? { h: h0 } : {}),
+          },
+          /* ⛔ THE RATIO IS THE ONE IT CURRENTLY HAS, not the picture's intrinsic one. A picture
+           * somebody has deliberately stretched must not snap back to its original proportions
+           * the first time they touch a corner — that is Word's and Bluebeam's behaviour and it
+           * is what "keeps the aspect ratio" means to somebody who has already changed it. */
+          aspect: fixedH && h0 > 0 ? w0 / h0 : null,
           moved: false,
         };
-        size.setPointerCapture(e.pointerId);
-      });
-      size.addEventListener("pointermove", (e) => {
+        try { e.target.setPointerCapture(e.pointerId); } catch (_) { /* not capturable */ }
+      }
+
+      function moveSize(e) {
         if (!sizing) return;
         sizing.moved = true;
-        const hostRect = sizing.host.getBoundingClientRect();   // fresh: the page may scroll
-        const wanted = (e.clientX - sizing.grab - hostRect.left) / sizing.scale - sizing.left;
-        /* ⛔ THE DRAG IS NOT CAPPED AT THE PAGE EDGE ANY MORE (NEW-RIGHT-EDGE). It used to be
-         * `min(wanted, room)`, so pulling the handle rightward stopped dead at the margin —
-         * *"there's a wall"*. The page grows instead: the layout effect in NoteEditor.jsx reads
-         * `anchorExtentX` and widens the sheet, and the scroller takes it from there. The FLOOR
-         * still applies, because a box narrower than a usable column is the defect this whole
-         * change exists to remove. */
-        const next = Math.round(Math.max(ANCHOR_MIN_WIDTH, wanted));
-        sizing.w = next;                 // ⛔ THE GESTURE'S OWN RECORD — see `endSize`
-        dom.style.width = `${next}px`;
-        /* ⛔ AND THE ATTRIBUTE MOVES WITH IT, OR THE LAYOUT FIT UNDOES THE DRAG IN REAL TIME
-         * (B421490 ×2). `fitAnchorBox` runs from a ResizeObserver and re-derives the rendered
-         * width from `data-anchor-w` — so while this handler wrote only the STYLE, every frame of
-         * the drag was immediately overwritten with the OLD stored width and the handle appeared
-         * dead. Caught by `verify-notes-box-drag` the same hour the fit landed, which is the
-         * argument for that harness existing. The attribute is the live truth during a gesture;
-         * the stored attrs are still only written at the end. */
-        dom.setAttribute("data-anchor-w", String(next));
-      });
-      const endSize = (e) => {
+        const next = resizeBox({
+          box: sizing.box,
+          handle: sizing.name,
+          dx: (e.clientX - sizing.startX) / sizing.scale,
+          dy: (e.clientY - sizing.startY) / sizing.scale,
+          aspect: sizing.aspect,
+          /* Read LIVE, per move: somebody presses and releases Shift mid-drag and expects the
+           * box to follow, which a value captured at pointer-down cannot do. */
+          shift: e.shiftKey,
+        });
+        if (!next) return;
+        sizing.at = next;                // ⛔ THE GESTURE'S OWN RECORD — see `endSize`
+        paint(next);
+      }
+
+      /* ⛔ THE ATTRIBUTES MOVE WITH THE STYLE, OR THE LAYOUT FIT UNDOES THE DRAG IN REAL TIME
+       * (B421490 ×2). `fitAnchorBox` runs from a ResizeObserver and re-derives the rendered width
+       * from `data-anchor-w` — so while a handler wrote only the STYLE, every frame of the drag
+       * was immediately overwritten with the OLD stored width and the handle appeared dead. The
+       * attribute is the live truth DURING a gesture; the stored attrs are still only written at
+       * the end. */
+      function paint({ x, y, w, h }) {
+        dom.style.left = `${x}px`;
+        dom.style.top = `${y}px`;
+        dom.style.width = `${w}px`;
+        dom.setAttribute("data-anchor-x", String(x));
+        dom.setAttribute("data-anchor-y", String(y));
+        dom.setAttribute("data-anchor-w", String(w));
+        if (Number.isFinite(h)) {
+          dom.style.height = `${h}px`;
+          dom.setAttribute("data-anchor-h", String(h));
+        }
+      }
+
+      function endSize(e) {
         if (!sizing) return;
-        const changed = sizing.moved;
         const done = sizing;              // the gesture's record, kept past the reset below
         sizing = null;
-        try { size.releasePointerCapture(e.pointerId); } catch (_) { /* already released */ }
+        try { e.target.releasePointerCapture(e.pointerId); } catch (_) { /* already released */ }
+        const pos = typeof getPos === "function" ? getPos() : null;
         /* ⛔ A PRESS THAT NEVER MOVED IS A PRESS ON THE BOX, NOT A RESIZE (B539652) — and this is
-         * CHROME-NEVER-EATS-A-PRESS clause 4 in its purest form. The handle only EXISTS once the
-         * box is selected, so press 1 of the two-stage gesture summons it and press 2, at the very
-         * same point, lands on chrome that was not there when the gesture began. The result was
-         * measured by the owner's own acceptance harness (§10 of `verify-notes-anchor-zoom`): type
-         * into box A, then B, then A again, and the markers come back in the wrong boxes.
+         * CHROME-NEVER-EATS-A-PRESS clause 4 in its purest form. The handles only EXIST once the
+         * box is selected, so press 1 of the two-stage gesture summons them and press 2, at the
+         * very same point, lands on chrome that was not there when the gesture began. The result
+         * was measured by the owner's own acceptance harness (§10 of `verify-notes-anchor-zoom`):
+         * type into box A, then B, then A again, and the markers come back in the wrong boxes.
          *
-         * ⛔ THE FIX IS AT THE RESOLVER, NOT ON THE OBJECT (clause 5): a handle is chrome belonging
-         * to its box, so a press on it that did not DRAG is transparent — it forwards to the box
-         * and puts the caret where it landed, which is what press 2 was always for. A press that
-         * did drag is a resize and is untouched. The handle keeps its own gesture; it just stops
-         * swallowing the one gesture it was never meant to take. */
-        if (!changed) {
-          const pos = typeof getPos === "function" ? getPos() : null;
+         * ⛔ THE FIX IS AT THE RESOLVER, NOT ON THE OBJECT (clause 5): a handle is chrome
+         * belonging to its box, so a press on it that did not DRAG is transparent — it forwards
+         * to the box and puts the caret where it landed, which is what press 2 was always for. A
+         * press that did drag is a resize and is untouched. ⛔ Eight handles is eight times the
+         * surface for that defect, which is why this branch is shared by all of them rather than
+         * living on the one handle that was reported. */
+        if (!done.moved) {
           if (pos != null) editor.chain().focus().setTextSelection(pos + 1).run();
           return;                                   // …and it still writes nothing
         }
-        const pos = typeof getPos === "function" ? getPos() : null;
         /* ⛔ COMMIT THE GESTURE'S OWN NUMBER, NEVER THE DOM'S (B434417). This used to read
          * `parseFloat(dom.style.width)` at pointer-up, and the DOM is not the gesture's memory —
          * anything that re-renders this node view between the last move and the release rewrites
-         * that style from the node's CURRENT attrs. `num(w, ANCHOR_WIDTH)` then falls back to the
-         * 180px default, so the drag committed the width the box already had.
-         *
-         * ⛔ AND THE FAILURE IS WORSE THAN "IT DOES NOT WORK", WHICH IS WHY THE OWNER'S WORD FOR
-         * IT WAS "DOG SHIT": the box goes on RENDERING at the size you dragged it to, so the
-         * gesture looks like it worked, and the size evaporates on the next reload. Measured on
-         * his account — rendered 300, stored 180, 180 after a reload — and reproduced here by
-         * forcing one interfering update mid-drag, which is what a sync tick does on a signed-in
-         * account and what NOTHING does in a signed-out sandbox. That is exactly why the harness
-         * that shipped this was green: it verified the visual and the storage in a window where
-         * nothing could interfere between them. */
-        if (pos != null && Number.isFinite(done?.w)) editor.commands.setNoteAnchorWidth(pos, done.w);
-      };
-      size.addEventListener("pointerup", endSize);
-      size.addEventListener("pointercancel", endSize);
+         * that style from the node's CURRENT attrs, so the drag committed the width the box
+         * already had. ⛔ AND THE FAILURE IS WORSE THAN "IT DOES NOT WORK": the box goes on
+         * RENDERING at the size you dragged it to, so the gesture looks like it worked and the
+         * size evaporates on the next reload. Measured on his account — rendered 300, stored 180,
+         * 180 after a reload. That is why the harness that shipped it was green: a signed-out
+         * sandbox has nothing that re-renders mid-gesture. */
+        if (pos != null && done.at) editor.commands.setNoteAnchorBox(pos, done.at);
+      }
+
+      syncHandles(node);
 
       /* The drag. Pointer capture rather than a document-level listener, so releasing outside
        * the window still ends it — a drag that never ends is a note you cannot type in. */
@@ -644,14 +779,28 @@ export const NoteAnchor = Node.create({
         contentDOM: content,
         update(next) {
           if (next.type.name !== "noteAnchor") return false;
+          live = next;                    // ⛔ the closure's `node` is the node as BUILT (B400177)
+          const h = num(next.attrs.h, NaN);
           dom.style.left = `${Math.round(num(next.attrs.x))}px`;
           dom.style.top = `${Math.round(num(next.attrs.y))}px`;
           dom.style.width = `${Math.round(num(next.attrs.w, ANCHOR_WIDTH))}px`;
           dom.setAttribute("data-anchor-x", String(Math.round(num(next.attrs.x))));
           dom.setAttribute("data-anchor-y", String(Math.round(num(next.attrs.y))));
           dom.setAttribute("data-anchor-w", String(Math.round(num(next.attrs.w, ANCHOR_WIDTH))));
+          /* ⛔ A HEIGHT THAT HAS GONE BACK TO `null` MUST CLEAR THE STYLE, not merely stop being
+           * written. Leaving the last number in place is how an undone resize keeps rendering at
+           * the size it was undone from — the document says one thing and the screen another,
+           * with nothing to notice the difference until a reload. */
+          if (Number.isFinite(h)) {
+            dom.style.height = `${Math.round(h)}px`;
+            dom.setAttribute("data-anchor-h", String(Math.round(h)));
+          } else {
+            dom.style.removeProperty("height");
+            dom.removeAttribute("data-anchor-h");
+          }
           if (next.attrs.aid) dom.setAttribute("data-anchor-id", String(next.attrs.aid));
           markEmpty(next);
+          syncHandles(next);
           return true;
         },
         ignoreMutation: (m) => m.type === "attributes" && m.target === dom,

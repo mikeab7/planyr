@@ -460,7 +460,55 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
 - `lib/notesImageIntake.js` — a pasted/dropped file → a downscaled, re-encoded data URL. GIF and
   SVG pass through untouched (a canvas would silently flatten them).
 - `lib/notesImageNode.js` — the `noteImage` schema node + the paste/drop plugin + the node view
-  that draws the **visible broken-image state** when the bytes are gone.
+  that draws the **visible broken-image state** when the bytes are gone. **A DROP lands where it
+  was dropped** (see the picture-canvas entry below); a PASTE stays at the caret, unchanged.
+- **⛔ A PICTURE IS A CANVAS OBJECT, AND THE BOX WAS GENERALISED RATHER THAN COPIED
+  (NEW-PICTURE-CANVAS).** *"I feel like I should just be able to drop a picture in there and move
+  it around, like, however I want to, like a proper canvas."* The owner also wrote the design
+  instruction: `noteAnchor` is a box at an (x, y) with a width that happened to hold TEXT, so it
+  now holds **CONTENT** — text or a picture — and press-to-place, the selection ring, the drag
+  grip, Delete, the right-click menu, undo, the stored round trip, the sync and the tombstone
+  cascade all come free and stay consistent. **There is still exactly ONE placed node and ONE
+  placement command.** Four things worth knowing before touching it:
+  1. **`h: null` MEANS "the content decides"**, and renders nothing — so no existing note is
+     rewritten and a text box behaves exactly as it did (the `indent` discipline, again). Only a
+     box whose single child is a `noteImage` may carry a number.
+  2. **⛔ THE BUG THAT MADE THE WHOLE FEATURE INERT WAS ONE GUARD CLAUSE IN `NoteEditor.jsx`.**
+     `if (el.closest(".planyr-sketch-host, .planyr-note-image, .planyr-note-file")) return;`
+     predates a picture ever being INSIDE a box, so every press on a picture box returned before
+     the selection logic — the box was never selected, and every handle is gated on the selection,
+     so all eight were painted, correctly placed, correctly labelled and **completely dead**. Every
+     unit test passed and every DOM reading said the control was there. What said otherwise was
+     eight harness rows reading `400×200 → 400×200`.
+  3. **⛔ AND `overflow: hidden` ON THE BOX CLIPS ITS OWN HANDLES.** They straddle the border box
+     by design (that is what makes them grabbable), so clipping the anchor leaves them laid out —
+     `getBoundingClientRect` returns a sensible square in a sensible place — but not hit-testable:
+     `elementFromPoint` at a handle's own centre answers the EDITOR. Clip the picture
+     (`.planyr-anchor-content`), never the frame. Both of these are CHROME-NEVER-EATS-A-PRESS
+     inverted — not chrome swallowing a press, but the box swallowing its own chrome.
+  4. **A drop outside the sheet is not a case**: ProseMirror runs `posAtCoords` first and returns
+     before `handleDrop` when it is null, so only a drop ON the editor can reach the app.
+  Harness: **measure-notes-picture-canvas** (30 checks, real files through a real `DataTransfer`,
+  every verdict the STORED document, and a **vacuity guard** that exits non-zero rather than
+  scoring geometry it never measured). Guards: the repo-root `test/` suites **notesBoxResize** (the
+  pure rule) and **notesPictureCanvas** (the four properties that were true only by inheritance —
+  the prune must not eat a picture box, the purge cascade must reach a nested picture, Markdown
+  must carry it AND name the lost position, and a note with no pictures must round-trip
+  byte-identical).
+- `lib/notesBoxResize.js` — **the placed box's geometry: the floors, the edge pad, and the pure
+  rule for resizing from any of its eight handles.** Corners hold the ratio, edges stretch,
+  **Shift inverts that**, and left/top handles move the anchor as well as the size — Bluebeam's
+  convention, which the owner named. ⛔ The invariant is stated once, structurally: **the edges you
+  are not holding do not move** — every result is derived from the FIXED edges rather than by
+  adding deltas to `x` and `w` independently, which is how a west drag past the floor comes to
+  slide the box across the page with a frozen width. ⛔ It also owns `ANCHOR_WIDTH` /
+  `ANCHOR_MIN_WIDTH` / `ANCHOR_EDGE_PAD`, which MOVED here from `notesAnchorNode.js` (which
+  re-exports them, so nothing else changed): a resize must honour the same floor a placement does,
+  and the two files importing each other would be a cycle while each holding its own copy is the
+  two-sources-of-truth bug that caused B539648. ⛔ `handlesFor` is a PRODUCT rule, not a mechanical
+  one: a picture box offers all eight, a **text box offers east and west only**, because a text
+  box's height is its words (B391073) and what north/south should mean on one is an open question
+  with the owner (B539650).
 - **SKETCH MODE — four files, and ONE rule that makes them make sense.** *The **CANVAS** owns
   everything: each **box owns its own text AND its own position**, and the arrows are an explicit
   list of `{from,to}` box references.* There is no second representation, so there is nothing to
