@@ -1150,7 +1150,31 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   Two things not to undo: a road forced out of its band is excluded from the DISSOLVED `roadNet` (it
   would otherwise paint twice, once in the merged region and once as its own strip), and `bandForce`
   is ignored unless it names a known band, because an unreadable override must never silently move a
-  building. Guards: the repo-root `test/` suite **elementBandForce** (which REPLAYS the pre-fix comparator, so a
+  building.
+  **⛔ B548064/B548065 — AND THE CASE FOUR FIXES NEVER DROVE: A MARKUP OVER A BUILDING. Read this before
+  touching `arrange.js` or building a fixture for an ordering report.** The three ANNOTATION families
+  (markups · callouts/text boxes · measurements) carry a `behindEls` band, and `arrangeSel` used to
+  reorder within the object's OWN band only — so on a markup over a building, **Send to Back sent it to
+  the back of a band that is entirely above the elements**, nothing moved on screen, and the row then
+  **greyed itself**, which reads as completion. The operation he wanted lived two rows lower under a
+  different name. `arrangeAcrossBands` / `arrangeBandFlags` make the four modes address the WHOLE stack:
+  "back" crosses the band, "backward" steps across the edge exactly one place, the forward pair mirror
+  it, and a row greys only at a true end (`"Already behind everything on the plan."`). A deed crossing
+  carries its save-and-except group. **⛔ ELEMENTS ARE DELIBERATELY EXCLUDED — B316864's absolute type
+  bands and its one explicit "Force on top of everything" row are unchanged**, because an element's band
+  is an engineering statement while an annotation's is pure presentation. **B548065 is its inseparable
+  half:** paint order is hit-test order, so a markup sent behind an element is unreachable across the
+  whole overlap — a SELECTED behind-band annotation therefore keeps the right-click wherever it paints,
+  and the covering element's menu grows a **"Behind this"** group (`featuresBeneath`, read at menu-OPEN
+  time because the menu paints over the point) with one row to lift it back and one to select it.
+  ⛔ The fixture is the whole lesson (`/CLAUDE.md` → **WRONG-CASE**): a scene whose markups do not overlap
+  an element reports PASS on a dead implementation. Guards: the repo-root `test/` suites
+  **arrangeAcrossBands** (the pre-fix rule replayed as the mutation check) and **markupBehindReach**, the
+  e2e spec **markup-behind-building**, and the ui-audit harness **verify-markup-over-building** (the
+  owner's real Bain plan, the markup DRAWN WITH THE REAL TOOL, 18/18 — **12 red pre-fix**, with two
+  preconditions that refuse to report a score unless the markup really is over the building).
+  Live-verify: **V302432 / V302433**.
+  Guards: the repo-root `test/` suite **elementBandForce** (which REPLAYS the pre-fix comparator, so a
   default that drifts goes red; mutation-proven three ways) plus the ui-audit harnesses
   **audit-element-parity** (58/58) and **verify-v91632-real-plan** (the owner's real Bain plan). Guards: the repo-root `e2e/` declaration table **elementCapabilities.table** (a new
   selectable type cannot ship without answering every capability), the repo-root `test/` suite

@@ -38,7 +38,7 @@ import { markupsUnderPoint, nextMarkupSelection, boxCorners } from "./lib/markup
 import { EMPTY_TAP, tapTime, stepDoubleTap } from "./lib/doubleTap.js";
 import { DRAG_SLOP_PX, makeDragGate, stepDragGate, dragArmed } from "./lib/dragGate.js";
 import { isDiagArmed, latchDiagArm } from "./lib/diagArm.js";
-import { resolveDoubleClickTarget, gestureAnchorTarget, stackEntries, pressIsOverElementBody } from "./lib/featureTarget.js";
+import { resolveDoubleClickTarget, gestureAnchorTarget, stackEntries, pressIsOverElementBody, featuresBeneath, stackHoldsFeature, parseFeatureKey } from "./lib/featureTarget.js";
 import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving } from "./lib/parking.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFile, rasterizeStoredPdf, rasterizeStoredDxf, baseRasterScale, chooseOverlayRasterScale, overlayRasterKey, HIRES_CACHE_PER_OVERLAY } from "./lib/overlayPdf.js";
@@ -193,8 +193,8 @@ import { apprRows, apprAll, apprVal, findAttr, situsAddress, ownerName, parcelPa
 import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { geocodeAddress } from "./lib/geocode.js";
 import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, bandForceOf, setPreviewStyleDefaults, setbackLineStyle, setbackChipStyle, SETBACK_LINE } from "./lib/planStyle.js";
-import { byZAsc, nextZ, Z_GAP } from "./lib/zOrder.js";
-import { reorderByZ, arrangeFlags } from "./lib/arrange.js";
+import { byZAsc, nextZ, sortByZ, Z_GAP } from "./lib/zOrder.js";
+import { reorderByZ, arrangeFlags, arrangeAcrossBands, arrangeBandFlags } from "./lib/arrange.js";
 import { commonStyleState, selectionRingFeet } from "./lib/multiStyle.js";
 import { bufferPolyline, offsetPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
 // The deed workflow (parser + parcel-alignment solver) is loaded on demand — nothing on the boot
@@ -4566,30 +4566,89 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // (zOrder from planStyle) so the guardrail holds — a building can never drop under a road/parking;
   // a markup reorders within the markup layer. reorderByZ returns a minimal {id->z} patch (or null on
   // a no-op / end-of-stack); undo rides pushHistory + the setter like every other edit.
+  /* NEW-1 — the ONE resolver for "which annotation family is this selection, and how do I read and
+     write it". Markups, callouts/text boxes and measurements share the `behindEls` two-band model
+     verbatim, and every place that used to re-derive that per family is where the four earlier
+     fixes drifted apart. `items` is the whole family (both bands — `arrangeAcrossBands` does the
+     splitting), `groupOf` names everything that must travel with a band crossing, and `band` is the
+     plain-English name of the band the object is in now, for the menu's hover reasons.
+     A measurement's selection carries an INDEX, not an id; that is resolved here, once. */
+  const annotationFamily = (s) => {
+    if (s?.kind === "markup") {
+      const t = markups.find((m) => m.id === s.id);
+      if (!t) return null;
+      return {
+        kind: "markup", id: t.id, items: markups, setAll: setMarkups,
+        groupOf: (id) => {
+          const m = markups.find((x) => x.id === id);
+          if (!m?.deedGroup) return [id];
+          return sortByZ(markups.filter((x) => x.deedGroup === m.deedGroup)).map((x) => x.id);
+        },
+        band: t.behindEls ? "markups behind the plan" : "markups over the plan",
+      };
+    }
+    if (s?.kind === "callout") {
+      const t = callouts.find((c) => c.id === s.id);
+      if (!t) return null;
+      return { kind: "callout", id: t.id, items: callouts, setAll: setCallouts, groupOf: (id) => [id],
+        band: t.behindEls ? "notes behind the plan" : "notes over the plan" };
+    }
+    if (s?.kind === "measure") {
+      const t = s.id ? measures.find((x) => x.id === s.id) : measures[s.i];
+      if (!t || !t.id) return null;
+      return { kind: "measure", id: t.id, items: measures.filter((x) => x && x.id), setAll: setMeasures, groupOf: (id) => [id],
+        band: t.behindEls ? "measurements behind the plan" : "measurements over the plan" };
+    }
+    return null;
+  };
   const arrangeSel = (mode, target) => {
     let s = target || selRef.current;
     // Resolve the peer set once (a building reorders within its type-layer band; a markup within the
     // markup layer) so the patch AND the B921/NEW-2 no-op cue read the same list.
     let peers = null;
+    /* ⛔ NEW-1 — THE ANNOTATION FAMILIES ARRANGE ACROSS THEIR TWO BANDS, so "Send to Back" means
+       behind everything under it — the building included. See `arrangeAcrossBands`'s header for the
+       measured defect (the command ran, sent the markup to the back of a band that is entirely
+       above the elements, nothing moved, and the row then greyed itself as if it had worked).
+       Elements deliberately keep the band-bounded behaviour B316864 settled; they fall through to
+       the original path below. */
+    if (s?.kind === "markup" || s?.kind === "callout" || s?.kind === "measure") {
+      const fam = annotationFamily(s);
+      if (!fam) return;
+      const res = arrangeAcrossBands(fam.items, fam.id, mode);
+      if (!res) {
+        // A TRUE end of the whole stack now — not a band edge with something still underneath.
+        flashWarn(`Already ${mode === "back" || mode === "backward" ? `behind everything on the plan` : `in front of everything on the plan`}.`, 2500);
+        return;
+      }
+      pushHistory();
+      /* A plotted deed and its save-and-except courses are ONE drawing, so a band crossing carries
+         the whole group — leaving the exceptions in front of the buildings while the deed goes
+         behind them would tear a single legal description in half. They keep their relative order
+         (consecutive z from the moved course's landing z). Within-band moves are untouched: those
+         are ordinary reordering and the group is already contiguous. */
+      const travelling = res.cross ? fam.groupOf(res.cross.id) : [];
+      fam.setAll((a) => {
+        // `travelling` is z-ascending, so ascending assignment preserves the group's own order; a
+        // move toward the BACK starts low enough that the whole group lands at/under the target z.
+        const backward = mode === "back" || mode === "backward";
+        let z = res.cross ? res.patch[res.cross.id] - (backward ? (travelling.length - 1) * Z_GAP : 0) : 0;
+        const crossZ = new Map();
+        for (const m of travelling) { crossZ.set(m, z); z += Z_GAP; }
+        return a.map((o) => {
+          if (!o || o.id == null) return o;
+          const crossed = crossZ.has(o.id);
+          const nz = crossed ? crossZ.get(o.id) : res.patch[o.id];
+          if (nz == null && !crossed) return o;
+          const next = { ...o };
+          if (nz != null) next.z = nz;
+          if (crossed) next.behindEls = res.cross.behind ? true : undefined;
+          return next;
+        });
+      });
+      return;
+    }
     if (s?.kind === "el") { const t = els.find((e) => e.id === s.id); if (!t) return; const band = zOrder(t); peers = els.filter((e) => zOrder(e) === band); }
-    /* NEW-2 — a markup reorders within ITS OWN BAND, not against every markup on the plan. The
-       markup layer renders in TWO passes split on `behindEls` (below), so a markup sent behind the
-       buildings can never paint above one that was not — yet the peer set here was the whole
-       `markups` array. That made both halves of Arrange lie on a mixed plan: `arrangeFlags` could
-       grey out "Bring to Front" on a markup that WAS at the front of everything it can reach, and
-       "Bring to Front" could hand out a z above a peer in the other band, which changes the number
-       and nothing on screen. Measurements already did this correctly; markups now match. */
-    else if (s?.kind === "markup") { const t = markups.find((m) => m.id === s.id); if (!t) return; peers = markups.filter((m) => (m.behindEls === true) === (t.behindEls === true)); }
-    /* NEW-2 — CALLOUTS AND TEXT BOXES JOIN THE STACKING MODEL. Until this they were the only drawn
-       object with no ordering at ALL: no `z`, no Arrange rows, no chord, and a render pass that
-       mapped the raw `callouts` array — so two overlapping text boxes could not be reordered by any
-       means the app offered. Same model as markups and measurements (explicit `z` + a `behindEls`
-       band), deliberately reused rather than reinvented. */
-    else if (s?.kind === "callout") { const t = callouts.find((c) => c.id === s.id); if (!t) return; peers = callouts.filter((c) => (c.behindEls === true) === (t.behindEls === true)); }
-    // NEW-2 — a measurement reorders within the MEASUREMENT band, the same way a markup reorders
-    // within the markup layer. `sel` for a measurement carries an index, not an id, so resolve the
-    // id here; a legacy measurement saved without one simply has nothing to reorder against.
-    else if (s?.kind === "measure") { const t = s.id ? measures.find((x) => x.id === s.id) : measures[s.i]; if (!t || !t.id) return; peers = measures.filter((x) => x && x.id && (x.behindEls === true) === (t.behindEls === true)); s = { kind: "measure", id: t.id }; }
     else return;
     const patch = reorderByZ(peers, s.id, mode);
     if (!patch) {
@@ -4609,10 +4668,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return;
     }
     pushHistory();
-    if (s.kind === "el") setEls((a) => a.map((e) => (patch[e.id] != null ? { ...e, z: patch[e.id] } : e)));
-    else if (s.kind === "measure") setMeasures((a) => a.map((m) => (m.id && patch[m.id] != null ? { ...m, z: patch[m.id] } : m)));
-    else if (s.kind === "callout") setCallouts((a) => a.map((c) => (patch[c.id] != null ? { ...c, z: patch[c.id] } : c)));
-    else setMarkups((a) => a.map((m) => (patch[m.id] != null ? { ...m, z: patch[m.id] } : m)));
+    setEls((a) => a.map((e) => (patch[e.id] != null ? { ...e, z: patch[e.id] } : e)));
   };
   /* NEW-2 — the peer set an Arrange op would act on, for the CURRENT selection. The menus need it
      to answer two different questions with one fact: is the object at an end of its stack (grey the
@@ -4624,16 +4680,50 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     /* NEW-1 — a FORCED element's band is no longer its type's, so neither is the name of it. Reading
        the band off `zOrder` (which resolves the override) rather than off `t.type` is what keeps the
        peer set, the greying and the label describing the same stack. */
-    if (s?.kind === "el") { const t = els.find((e) => e.id === s.id); if (!t) return null; const b = zOrder(t); return { peers: els.filter((e) => zOrder(e) === b), band: bandForceOf(t) ? "elements forced in front of the plan" : `${TYPE[t.type]?.label || t.type} layer` }; }
-    if (s?.kind === "markup") { const t = markups.find((m) => m.id === s.id); if (!t) return null; return { peers: markups.filter((m) => (m.behindEls === true) === (t.behindEls === true)), band: t.behindEls ? "markups behind the plan" : "markups" }; }
-    if (s?.kind === "callout") { const t = callouts.find((c) => c.id === s.id); if (!t) return null; return { peers: callouts.filter((c) => (c.behindEls === true) === (t.behindEls === true)), band: t.behindEls ? "notes behind the plan" : "notes" }; }
-    if (s?.kind === "measure") { const t = s.id ? measures.find((x) => x.id === s.id) : measures[s.i]; if (!t || !t.id) return null; return { peers: measures.filter((x) => x && x.id && (x.behindEls === true) === (t.behindEls === true)), band: t.behindEls ? "measurements behind the plan" : "measurements" }; }
-    return null;
+    if (s?.kind === "el") {
+      const t = els.find((e) => e.id === s.id); if (!t) return null;
+      const b = zOrder(t);
+      const peers = els.filter((e) => zOrder(e) === b);
+      const f = arrangeFlags(peers, s.id);
+      if (!f) return null;
+      return { flags: f, alone: f.count < 2, band: bandForceOf(t) ? "elements forced in front of the plan" : `${TYPE[t.type]?.label || t.type} layer` };
+    }
+    /* ⛔ NEW-1 — AND THIS IS WHERE THE GREYING STOPPED LYING. The three annotation families read
+       band-aware flags, so a row is disabled only at a TRUE end of the whole stack. Two consequences
+       worth stating, because both were the reported symptom:
+        · a markup ALONE on the plan is no longer greyed — it has somewhere real to go (under the
+          buildings), so `alone` is false for these families by construction; and
+        · "Send to Back" on a markup over a building is ENABLED, does the visible thing, and only
+          greys once the markup is genuinely behind everything. */
+    const fam = annotationFamily(s);
+    if (!fam) return null;
+    const f = arrangeBandFlags(fam.items, fam.id);
+    if (!f) return null;
+    return { flags: f, alone: false, band: fam.band };
   };
   /* NEW-2 — cross-band move for a CALLOUT / text box: "Send behind the plan" / "Bring above the
      plan". The exact sibling of `setMeasureBand` and the markup menu's "Send behind buildings" —
      annotations were the one drawn family with no way across the plan at all. Re-stacks on arrival
      so it is never dropped underneath whatever was already in the band it lands in. */
+  /* NEW-2 — the markup's band toggle, LIFTED OUT of the right-click menu's closure so it has a name
+     and more than one caller. It was the only one of the three annotation families whose band move
+     lived inline in the menu body, which is why the element menu's new "Bring the markup back in
+     front" row had nothing to call. Carries the whole deed group, exactly as the menu row always
+     did, and re-stacks on top of the band it arrives in so it is never dropped underneath whatever
+     was already there. */
+  const setMarkupBand = (id, behind) => {
+    const m = markups.find((x) => x.id === id);
+    if (!m) return;
+    pushHistory();
+    const grp = m.deedGroup;
+    setMarkups((a) => {
+      const moving = (x) => x.id === id || (grp && x.deedGroup === grp);
+      let z = nextZ(a.filter((x) => !moving(x) && (x.behindEls === true) === !!behind));
+      const zs = new Map();
+      for (const x of sortByZ(a.filter(moving))) { zs.set(x.id, z); z += Z_GAP; }
+      return a.map((x) => (moving(x) ? { ...x, behindEls: behind ? true : undefined, z: zs.get(x.id) ?? x.z } : x));
+    });
+  };
   const setCalloutBand = (id, behind) => {
     pushHistory();
     setCallouts((a) => {
@@ -10528,12 +10618,84 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const onElContext = (e, id) => {
     e.preventDefault();
     e.stopPropagation();
+    /* ⛔ NEW-2 — A SELECTED ANNOTATION THAT WAS SENT BEHIND THE PLAN KEEPS THE RIGHT-CLICK WHEREVER
+       IT PAINTS. Without this the send-behind door is one-way: the element on top takes every
+       press across the whole overlap, so the object you just sent under a building cannot be
+       right-clicked back — and on a markup drawn to COVER a building there is no uncovered sliver
+       to grab it by at all. Narrow on purpose: it applies only to an annotation that is BOTH
+       already selected AND actually painted under this point, so nothing changes for an element
+       that merely overlaps something. The selection survives the send, so the way back is
+       available in the very next gesture. Sibling of `gestureAnchorTarget` — same idea (what the
+       user is working on wins the hit test), different trigger. */
+    const backKey = behindSelKey();
+    if (backKey && stackHoldsFeature(hitStackAt(e.clientX, e.clientY), backKey)) {
+      const t = parseFeatureKey(backKey);
+      if (t && featureContextAction(t, e)) return;
+    }
     if (!(multi.length > 1 && inMulti("el", id))) setSel({ kind: "el", id });
     // NEW-8 — carry the WORLD point of the right-click. "Branch a road from here" means from the
     // spot the user actually pointed at, not from the element's centre.
     let w = null;
     try { w = p2f(e.clientX, e.clientY); } catch (_) { w = null; }
-    setTypeMenu({ id, x: e.clientX, y: e.clientY, w });
+    /* NEW-2 — WHAT IS UNDERNEATH, captured NOW. The menu is about to paint over the very point the
+       user aimed at, so the stack has to be read at open time; asking again at render would hit the
+       menu instead. Only annotations sent BEHIND the plan are listed — an element under another
+       element has always been reachable through its own uncovered geometry, and listing everything
+       would turn a menu into a scene graph. */
+    setTypeMenu({ id, x: e.clientX, y: e.clientY, w, under: behindAnnotationsUnder(e.clientX, e.clientY) });
+  };
+  /* NEW-2 — the `data-feature` key of the CURRENTLY SELECTED annotation, but only while it is in
+     the behind-the-plan band. Anything else returns null, so the priority rule above cannot fire
+     for an annotation that is already on top (where it needs no help) or for any other family. */
+  const behindSelKey = () => {
+    const s = selRef.current;
+    if (!s) return null;
+    if (s.kind === "markup") return markups.find((m) => m.id === s.id)?.behindEls ? `markup:${s.id}` : null;
+    if (s.kind === "callout") return callouts.find((c) => c.id === s.id)?.behindEls ? `callout:${s.id}` : null;
+    if (s.kind === "measure") {
+      const i = Number.isInteger(s.i) ? s.i : measures.findIndex((m) => m && m.id === s.id);
+      return i >= 0 && measures[i]?.behindEls ? `measure:${i}` : null;
+    }
+    return null;
+  };
+  /* NEW-2 — the two actions the "Behind this" rows offer, both reusing the band setters that
+     already exist rather than a fifth copy of "flip the flag and re-stack".
+     `liftUnderToFront` is the direct reversal — it is the same operation the object's own menu
+     offers, made reachable from the element that is covering it.
+     `selectUnder` is the softer one: leave it where it is, but make it the SELECTION, which arms
+     the selected-annotation priority rule so the next right-click over the overlap reaches it. */
+  const liftUnderToFront = (t) => {
+    if (!t) return;
+    if (t.kind === "markup") setMarkupBand(t.id, false);
+    else if (t.kind === "callout") setCalloutBand(t.id, false);
+    else if (t.kind === "measure") { const m = measures[t.i]; if (m?.id) setMeasureBand(m.id, false); }
+  };
+  const selectUnder = (t) => {
+    if (!t) return;
+    setMulti([]);
+    if (t.kind === "measure") setSel({ kind: "measure", i: t.i });
+    else setSel({ kind: t.kind, id: t.id });
+  };
+  /* NEW-2 — the behind-the-plan annotations painted under a client point, top-most first, each with
+     a plain-English name for the menu row. `featuresBeneath` skips the element that won the press
+     and every piece of chrome, so what is left is exactly "what I put under here and can no longer
+     reach". */
+  const behindAnnotationsUnder = (x, y) => {
+    const out = [];
+    for (const f of featuresBeneath(hitStackAt(x, y))) {
+      const t = f.target;
+      if (t.kind === "markup") {
+        const m = markups.find((o) => o.id === t.id);
+        if (m?.behindEls) out.push({ target: t, label: m.kind === "encumbrance" ? "deed" : m.kind === "easement" ? "easement" : "markup" });
+      } else if (t.kind === "callout") {
+        const c = callouts.find((o) => o.id === t.id);
+        if (c?.behindEls) out.push({ target: t, label: c.noLeader ? "text box" : "callout" });
+      } else if (t.kind === "measure") {
+        const m = measures[t.i];
+        if (m?.behindEls) out.push({ target: t, label: "measurement" });
+      }
+    }
+    return out;
   };
   /* NEW-8 — start a NEW road branching off an existing one, tee'd at the point clicked.
    *
@@ -25027,12 +25189,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const arrangeGroup = (ref, { hdr }) => {
           const info = arrangePeers(ref);
           if (!info) return null;
-          const af = arrangeFlags(info.peers, ref.id);
-          if (!af) return null;
-          const alone = af.count < 2;
+          const af = info.flags;
+          const alone = info.alone;
           const why = alone ? `This is the only one on the ${info.band} layer, so there is nothing to reorder it against.` : "";
+          /* NEW-1 — a disabled row now says what END it is at, in the terms the user is thinking in.
+             For an annotation that end is the WHOLE drawing ("behind everything on the plan"), not
+             the band's — because with cross-band Arrange there is nothing invisible left to do, and
+             a row that greys while something is still underneath is exactly the claim of completion
+             this item exists to kill. Elements keep the band-relative wording their band rule makes
+             true. */
+          const endWord = (mode) => {
+            const back = mode === "back" || mode === "backward";
+            if (ref.kind === "el") return `Already at the ${back ? "back" : "front"} of the ${info.band}.`;
+            return `Already ${back ? "behind" : "in front of"} everything on the plan.`;
+          };
           const r = (text, mode, dis, hint) => row({
-            text, hint, dis: dis || alone, title: dis && !alone ? `Already at the ${(mode === "back" || mode === "backward") ? "back" : "front"}.` : why,
+            text, hint, dis: dis || alone, title: dis && !alone ? endWord(mode) : why,
             on: () => { arrangeSel(mode, ref); close(); },
           });
           return <>
@@ -25057,7 +25229,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           // B820/NEW-1 — Arrange (z-order) among the markups IN THIS BAND (see arrangePeers), plus
           // "Send behind buildings" (a markup normally floats over the elements; this drops it —
           // the whole deed group, if it's a deed — beneath them).
-          const setBehind = () => { pushHistory(); const nextBehind = !m.behindEls; const grp = m.deedGroup; setMarkups((a) => a.map((x) => (x.id === m.id || (grp && x.deedGroup === grp)) ? { ...x, behindEls: nextBehind } : x)); close(); };
+          // NEW-2 — one named setter, shared with the covering element's "Bring it back in front"
+          // row (see setMarkupBand). It also gained the re-stack its two siblings always had: the
+          // old inline version flipped the flag and left `z` alone, so a markup brought back in
+          // front could land underneath a markup it used to be above.
+          const setBehind = () => { setMarkupBand(m.id, !m.behindEls); close(); };
           body = <>
             {isDeed && row({ text: hasParcel ? "Align to county parcel" : "Rotate to grid north", dis: !!m.locked, title: m.locked ? "Unlock this deed first" : "", on: () => { alignDeedToParcel(dm.id); close(); } })}
             {/* NEW-1 — a markup reaches its inspector from its own menu, like a measurement always could. */}
@@ -25256,6 +25432,36 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <span>{forcedBand ? "Use the normal layer order" : "Force on top of everything"}</span>
                         {forcedBand ? <span style={{ color: PAL.accent, fontWeight: 700 }}>✓</span> : null}
                       </button>
+                    </>
+                  )}
+                  {/* ⛔ NEW-2 — WHAT IS UNDERNEATH THIS, AND HOW TO GET IT BACK. An annotation sent
+                      behind the plan is unreachable across its whole overlap with an element: the
+                      element on top answers every press, so the markup you just sent under a
+                      building can only be grabbed on a sliver no element covers — and on one drawn
+                      to cover the building, on nothing at all. This is the way back that does not
+                      depend on finding uncovered geometry: right-click ANYWHERE over the overlap
+                      and the thing beneath is named, with one row to select it and one to lift it
+                      back in front. Rendered only when something really is under this point, so an
+                      ordinary element menu is unchanged. */}
+                  {(typeMenu.under || []).length > 0 && (
+                    <>
+                      <div style={hdr(true)}>Behind this</div>
+                      {typeMenu.under.map((u, i) => (
+                        <button key={`${u.target.kind}:${u.target.id ?? u.target.i}`} style={{ ...menuItem(false), display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
+                          data-testid={`under-lift-${i}`}
+                          title={`This ${u.label} is drawn under the plan here. Bring it back in front of the buildings.`}
+                          onClick={() => { liftUnderToFront(u.target); setTypeMenu(null); }}>
+                          <span>Bring the {u.label} back in front</span>
+                        </button>
+                      ))}
+                      {typeMenu.under.map((u, i) => (
+                        <button key={`sel-${u.target.kind}:${u.target.id ?? u.target.i}`} style={menuItem(false)}
+                          data-testid={`under-select-${i}`}
+                          title={`Select the ${u.label} underneath and open its own menu, leaving it where it is.`}
+                          onClick={() => { selectUnder(u.target); setTypeMenu(null); }}>
+                          Select the {u.label} underneath
+                        </button>
+                      ))}
                     </>
                   )}
                   {/* B875 — pond discoverability: the right-click menu carries the pond-specific

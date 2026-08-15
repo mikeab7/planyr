@@ -113,6 +113,28 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V302432 — B548064: "Send to Back" on a markup over a BUILDING, on his own signed-in plan `Blocker: auth`
+**⛔ THIS V IS WRITTEN THE WAY V91632 SHOULD HAVE BEEN (B548066).** It names the objects, the plan, the steps and the expected result for each step, so anyone can close it. No step depends on knowing what the owner was thinking.
+**What was verified here (sandbox, logged out, on his real Bain / "Concept - Original" plan data):** `ui-audit/verify-markup-over-building.mjs` **18/18** — a markup rectangle DRAWN WITH THE REAL TOOL over a real building, then: "Send to Back" offered rather than greyed · the markup moves behind the building (paint order read off the rendered DOM, and the browser's own hit test agreeing) · the row greys only afterwards, with the reason *"Already behind everything on the plan."* · Send Backward / Bring Forward cross the band edge and are inverses · the move survives a hard reload · and the REAL BUILT SHEET stacks it the same way (PDF-PARITY). **Mutation-proven: 12 of the 18 go red on the pre-fix build**, which reproduces his report verbatim including the greyed row. Plus `test/arrangeAcrossBands.test.js` 23 green with the pre-fix rule replayed as the mutation check; full suite green.
+**Still pending, and it needs his machine because the sandbox cannot sign in — the cloud round trip of a reorder, which is the one thing on-device persistence cannot prove:**
+1. Open the plan he reproduced this on — **"ZZ TEST - split naming V250304 - safe to delete"** (site `smqfy48tlk9j`) — or any plan with a building on it.
+2. Draw a markup rectangle over a building. Right-click it → **Send to Back**. **Expected: the building is now drawn on top of the markup, immediately.** (Before this fix: nothing visible happened.)
+3. Re-open the same menu. **Expected: "Send to Back" and "Send Backward" are greyed, and hovering one reads "Already behind everything on the plan."** (Before: greyed with a reason naming a "markups layer".)
+4. Choose **Send Backward** from a fresh markup instead, then **Bring Forward**. **Expected: one step down and one step back — the markup ends up exactly where it started.**
+5. **Reload the page.** **Expected: the markup is still behind the building.** Then open it on a SECOND device or tab signed into the same account — **expected: still behind the building there too** (this is the cloud leg the sandbox cannot reach).
+6. **Print / export a PDF of that view.** **Expected: the sheet shows the building over the markup, exactly like the screen.**
+7. Confirm the deliberate boundary still holds: right-click a **building** and check that "Send to Back" still keeps it inside its own type layer, with **"Force on top of everything"** as the only way across. **Expected: unchanged from before** — that is B316864's owner decision and this item must not have moved it.
+
+### V302433 — B548065: getting a markup back once it is behind a building, on his own signed-in plan `Blocker: auth`
+**What was verified here (sandbox, logged out, real Bain plan data):** the NEW-2 arms of the same harness — with the markup behind the building, a right-click over the overlap reaches the MARKUP while it is selected; deselected, an ordinary press correctly reaches the building and the building's own menu then carries **"Bring the markup back in front"** and **"Select the markup underneath"**; one click restores it. Both arms mutation-proven red on the pre-fix build. `test/markupBehindReach.test.js` 20 green.
+**Still pending on his machine:**
+1. On the same plan, send a markup behind a building (V302432 step 2).
+2. **Without clicking anywhere else**, right-click it again over the building. **Expected: the MARKUP's menu, with "Bring in front of buildings" in it** — not the building's menu.
+3. Now press **Esc** to deselect, and right-click the same spot. **Expected: the BUILDING's menu, and near the bottom a "Behind this" group naming the markup.**
+4. Click **"Bring the markup back in front."** **Expected: the markup is on top of the building again, in one click, without having to hunt for a corner of it that no building covers.**
+5. Send it behind again, deselect, right-click, and click **"Select the markup underneath"** instead. **Expected: the markup becomes selected and does NOT move** — it stays behind the building, and its own menu is now reachable over the overlap.
+6. Right-click a building with **nothing** underneath it. **Expected: no "Behind this" group at all** — an ordinary element menu is unchanged.
+
 ### V295136 — B519907: on his real Richfield plan, signed in, an undo no longer rebuilds the aerial `Blocker: auth` `Blocker: real-data`
 **What was verified here (sandbox, logged out, on his redacted Richfield fixture):** per-action tile churn measured with a `MutationObserver` — click 0/0 · drag 0/0 · **undo 272/272 → 0/0** · redo 0/0 — with the map alive and all 274 tiles still on screen; the controlled A/B over 12 rounds × 6 edits (listeners +6/round → flat; retained heap +1.66 → +0.65 MB/round; RSS delta 457.2 → 241.2 MB); `npm run perf:undochurn` green and **red with the fix stashed**; full suite 11,404 green; bundle budgets within ceiling.
 **Still pending, and it needs his machine because the sandbox cannot sign in:**

@@ -26,6 +26,118 @@ import { Z_GAP, needsZ, normalizeZ, sortByZ } from "./zOrder.js";
 
 export const ARRANGE_MODES = ["front", "forward", "backward", "back"];
 
+/* ⛔ NEW-1 — "SEND TO BACK" MEANS BEHIND EVERYTHING UNDER IT. The two annotation BANDS are one
+ * stack from the user's seat, and this is the function that says so.
+ *
+ * THE DEFECT, measured on the owner's own account (a throwaway duplicate of Goose Creek Plan II),
+ * and the reason four correct fixes all missed it. A markup drawn over open land reorders against
+ * another markup perfectly — that is the case B421, B820, B671 and B293072/B293073 each tested, and
+ * it worked before all four of them. A markup drawn over a BUILDING is the case nobody drove:
+ *
+ *     right-click the markup → Send to Back → the markup still completely covers the building
+ *     re-open the menu       → Send to Back and Send Backward are now GREYED OUT
+ *
+ * The command RAN. It sent the markup to the back of the MARKUP band, which is entirely above the
+ * elements, so nothing moved on screen — and then reported completion by greying itself. The
+ * operation the user asked for lived two rows below under a different name ("Send behind
+ * buildings"). That is LOUD-FAILURE in its purest form: the app succeeded at a DIFFERENT operation
+ * than the one that was asked for, and the only feedback it gave was a disabled row claiming the
+ * work was done.
+ *
+ * THE RULE. For the three annotation families that carry a `behindEls` band — markups, callouts /
+ * text boxes, measurements — the ordered stack is `behind` (bottom) then `above` (top), and the
+ * four modes address THAT stack, not one band of it:
+ *   "back"     → the bottom of the WHOLE stack; crosses the band if it is not already below.
+ *   "front"    → the top of the whole stack; crosses up if it is not already above.
+ *   "backward" → one step down; at the bottom of the upper band that step CROSSES, landing on top
+ *                of the lower band (which is exactly one step down, no more).
+ *   "forward"  → the mirror.
+ * A move is a no-op — and a row is greyed — only at a TRUE end of the whole stack. Greying can no
+ * longer claim completion of something invisible, because there is nothing invisible left to do.
+ *
+ * ⛔ ELEMENTS ARE DELIBERATELY NOT IN THIS FUNCTION, and that is an owner decision, not an
+ * oversight. B316864 settled the cross-band question for site elements: `road → paving → pond →
+ * parking → building` stays ABSOLUTE for every untouched element and ordinary Arrange stops at the
+ * band edge, with one explicit, named, reversible "Force on top of everything" row as the only way
+ * across. The difference that justifies the split: an element's band is an ENGINEERING statement
+ * (pavement does not cover a building) that the drawing should keep by default, while an
+ * annotation's band is pure presentation — the user drew a rectangle and wants it under or over the
+ * plan, and no other meaning attaches. Which is also why the element menu's no-op flash already
+ * NAMES the band rule instead of going silent.
+ *
+ * Returns `{ patch: { id: z, … }, cross: { id, behind } | null }` — or null when the move is a true
+ * no-op (already at that end of the whole stack, unknown id/mode). `cross` is present only when the
+ * band itself changed, so a caller writes `behindEls` exactly when the band moved.
+ */
+export function arrangeAcrossBands(items, id, mode) {
+  if (!ARRANGE_MODES.includes(mode)) return null;
+  const list = (Array.isArray(items) ? items : []).filter((p) => p && p.id != null);
+  const t = list.find((p) => p.id === id);
+  if (!t) return null;
+
+  const isBehind = (p) => p.behindEls === true;
+  const behind = isBehind(t);
+  const below = list.filter(isBehind);
+  const above = list.filter((p) => !isBehind(p));
+  const own = behind ? below : above;
+  const flags = arrangeFlags(own, id);
+  if (!flags) return null;
+
+  // A move that stays inside the band is the ORIGINAL operation, unchanged — same patch, same
+  // minimal-write property. Only the band EDGE cases below are new.
+  const within = () => {
+    const patch = reorderByZ(own, id, mode);
+    return patch ? { patch, cross: null } : null;
+  };
+  // Land on top of / underneath a destination band, which may be empty (then any z will do).
+  const overBand = (band) => (band.length ? zNum(sortByZ(band)[band.length - 1]) + Z_GAP : 0);
+  const underBand = (band) => (band.length ? zNum(sortByZ(band)[0]) - Z_GAP : 0);
+
+  if (mode === "back") {
+    if (behind) return flags.atBottom ? null : within();
+    return { patch: { [id]: underBand(below) }, cross: { id, behind: true } };
+  }
+  if (mode === "front") {
+    if (!behind) return flags.atTop ? null : within();
+    return { patch: { [id]: overBand(above) }, cross: { id, behind: false } };
+  }
+  if (mode === "backward") {
+    if (!flags.atBottom) return within();
+    if (behind) return null;                    // already at the bottom of the whole stack
+    return { patch: { [id]: overBand(below) }, cross: { id, behind: true } };
+  }
+  // "forward"
+  if (!flags.atTop) return within();
+  if (!behind) return null;                     // already at the top of the whole stack
+  return { patch: { [id]: underBand(above) }, cross: { id, behind: false } };
+}
+
+/* The band-aware twin of `arrangeFlags`, for the menu's greying. `atTop` / `atBottom` are now
+ * properties of the WHOLE stack: an object is at the back only when it is in the lower band AND at
+ * the bottom of it. This is what stops a greyed row claiming an invisible success — a markup alone
+ * in the upper band reads `atBottom: false`, because it genuinely has somewhere to go.
+ *
+ * `count` is the whole family, so "this is the only one on the plan" stays answerable; `alone` is
+ * deliberately NOT derived from it here, because a lone annotation over a building is precisely the
+ * case that must NOT be greyed. */
+export function arrangeBandFlags(items, id) {
+  const list = (Array.isArray(items) ? items : []).filter((p) => p && p.id != null);
+  const t = list.find((p) => p.id === id);
+  if (!t) return null;
+  const isBehind = (p) => p.behindEls === true;
+  const behind = isBehind(t);
+  const own = list.filter((p) => isBehind(p) === behind);
+  const f = arrangeFlags(own, id);
+  if (!f) return null;
+  return {
+    count: list.length,
+    behind,
+    index: f.index,
+    atTop: !behind && f.atTop,
+    atBottom: behind && f.atBottom,
+  };
+}
+
 const zNum = (p) => (typeof p?.z === "number" && Number.isFinite(p.z) ? p.z : 0);
 
 // Where `id` sits within `peers` by z order, and whether an op is a no-op. Mirrors the Review

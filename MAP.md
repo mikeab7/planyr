@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-14 @ `6a3022ff` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-15 @ `e902b95` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -450,7 +450,7 @@ _524 source files mapped._
 - **`src/workspaces/site-planner/lib/arcgis.js`** — Esri ArcGIS REST client: bounded parcel identify (query+identify fallback, multi-county eager race) and lon/lat↔State-Plane-feet conversion
   - _exports_: `aerialPlacement`, `aerialTileGrid`, `BACKUP_GRACE_MS`, `featureToParcel`, `feetExtentToBbox`, `feetToLatLng`, `geoJsonToEsriFeature`, `getLayerInfo`, `humanizeError`, `identifyAtPoint`, `identifyParcelAcross`, `identifyParcelDetailed`, `identifyParcelEager`, `isQueryCapabilityError`, `largestRingLngLat`, `listLayers`, `lngLatFeatureToParcel`, `lngLatRingToFeet`, `lngLatToGlobalPixel`, `outerRingsLngLat`, `overlayExportPlacement`, `PARCEL_FETCH_TIMEOUT_MS`, `ParcelFetchError`, `pickAerialTileZoom`, `queryAtPoint`, `queryFeatures`, `resolveLayerUrl`
 - **`src/workspaces/site-planner/lib/arrange.js`** — element/markup z-order "Arrange" (B820): `reorderByZ`/`arrangeFlags`/`ARRANGE_MODES` — pure z-based Bring-to-Front/Send-to-Back over a peer set (within a type-layer band for elements, the markup layer for markups)
-  - _exports_: `ARRANGE_MODES`, `arrangeFlags`, `reorderByZ`
+  - _exports_: `ARRANGE_MODES`, `arrangeAcrossBands`, `arrangeBandFlags`, `arrangeFlags`, `reorderByZ`
 - **`src/workspaces/site-planner/lib/assemblyDigest.js`** — B1341 stage 2: the GROUP REVISION of a bonded assembly, DERIVED from its live members' `id:rev` pairs (never stored, so it cannot drift). Twin of the `assembly_digest` SQL function.
   - _exports_: `assemblyDigest`, `compareIds`, `digestsByAssembly`, `memberToken`
 - **`src/workspaces/site-planner/lib/assemblyIntegrity.js`** — the bonded-assembly invariant + tear detector: re-derives every `attachedTo` child from its host (via `normalizeBondedChildren`) and reports what moved, so a partial apply can reach neither the canvas nor the wire
@@ -610,7 +610,7 @@ _524 source files mapped._
 - **`src/workspaces/site-planner/lib/featureHoverAttach.js`** — lazily-loaded attach layer for the vector overlays' hover identify: binds the sticky tooltip on an esri featureLayer and installs the planner-canvas `identifyAt` accessor, kept off the boot bundle to pay the bundle budget.
   - _exports_: `attachFeatureCanvasIdentify`, `wireFeatureHover`
 - **`src/workspaces/site-planner/lib/featureTarget.js`** — which feature a canvas double-click is about, resolved at the SVG root off the live hit stack (plus the dimension-number-over-body test)
-  - _exports_: `CHROME_ATTR`, `EL_DIM_ATTR`, `FEATURE_ATTR`, `FEATURE_KINDS`, `gestureAnchorTarget`, `HANDLE_ATTR`, `parseFeatureKey`, `pressIsOverElementBody`, `resolveDoubleClickTarget`, `stackEntries`
+  - _exports_: `CHROME_ATTR`, `EL_DIM_ATTR`, `FEATURE_ATTR`, `FEATURE_KINDS`, `featuresBeneath`, `featureStack`, `gestureAnchorTarget`, `HANDLE_ATTR`, `parseFeatureKey`, `pressIsOverElementBody`, `resolveDoubleClickTarget`, `stackEntries`, `stackHoldsFeature`
 - **`src/workspaces/site-planner/lib/ffeBalance.js`** — grading milestone (DECISION 3): the balance-optimal finished-floor solver (`solveBalanceFfe` floats the pad UP off the regulatory code minimum to reuse basin spoil as fill, never below it) + the dual FFE readout (`ffeDualDisplay`, "FFE X (code floor Y + Z for balance)"). The net earthwork residual is reported in CY (owner preference), not truckloads. Pure, Node-tested.
   - _exports_: `ffeDualDisplay`, `solveBalanceFfe`
 - **`src/workspaces/site-planner/lib/floodAdministrator.js`** — NEW-8 governing floodplain administrator: candidate resolution from county/city/ETJ/edge signals, deliberate strictest-wins selection with an ambiguity flag, and the BFE back-solved from an assumed FFE
