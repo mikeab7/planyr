@@ -607,6 +607,19 @@ export function pickAerialTileZoom(bbox, { maxNative = 19, maxPx = 4096, minZoom
   return minZoom;
 }
 
+// B550512 — export-time SHARPEN target: one zoom level past `z` (≈2x linear resolution, the
+// same ratio the live map's `detectRetina` uplift uses — B170), capped at the source's native
+// ceiling. Esri/USGS serve no same-URL @2x tile (confirmed live: World_Imagery's tileInfo
+// reports one fixed 256px/96dpi tile set with no retina variant, matching why B170 got its
+// sharpening by requesting z+1 rather than a `@2x` asset) — a deeper zoom is the only lever.
+// Returns null when `z` is already at (or past) the ceiling: nothing to gain, so the caller's
+// budgeted fetch attempt should not even start (zero added network, zero added time).
+export function deepenZoomFor(z, maxNative = 19) {
+  const cap = Math.round(maxNative);
+  const dz = Math.min(z + 1, cap);
+  return dz > z ? dz : null;
+}
+
 // Turn fetch/CORS failures into something actionable for a non-technical user.
 export function humanizeError(e) {
   // Typed parcel-fetch failures (B244/B245) carry a `kind` — give each its own plain
