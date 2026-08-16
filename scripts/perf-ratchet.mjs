@@ -252,6 +252,7 @@ const measured = measureBundle(build);
 const CURRENT = {
   "bundle.siteRouteJsBytes": measured.routes.site?.bytes ?? null,
   "bundle.notesRouteJsBytes": measured.routes.notes?.bytes ?? null,
+  "bundle.foodRouteJsBytes": measured.routes.food?.bytes ?? null,
   "bundle.totalJsBytes": measured.totalJsBytes,
   "bundle.largestChunkBytes": measured.largest.bytes,
 };

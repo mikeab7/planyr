@@ -111,8 +111,8 @@
       "note": "Seeded at 0 so the FIRST measurement of a brand-new route lands through `npm run perf:ratchet` with a stated reason, exactly like any other baseline move \u2014 a hand-typed seed is the thing that step exists to prevent. WHAT THIS NUMBER DOES AND DOES NOT INCLUDE, because it is the whole reason the split is load-bearing: it counts the notebook TREE and its chrome, and deliberately NOT the rich-text engine. Notes.jsx pulls components/NoteEditor.jsx (and through it the only @tiptap imports in the module) via a lazy() import inside a Suspense, so the engine is a separate on-demand chunk of ~464 KB that a user pays for only when a page is actually opened, and the rail paints first. A future rise in THIS metric therefore means something moved onto the static path that belongs behind that boundary \u2014 most likely a new static import of the editor, or a shared module that got hoisted. test/notesModule.test.js source-scans for the first case; this budget is the backstop for the second."
     },
     "foodRouteJsBytes": {
-      "baseline": 0,
-      "target": 0,
+      "baseline": 925460,
+      "target": 925460,
       "unit": "bytes",
       "what": "Total JS a plain Food route must download: the entry chunk plus FoodApp and its static-import closure.",
       "note": "Seeded at 0 (B568400, the same precedent as notesRouteJsBytes) so the FIRST measurement of this brand-new route lands through `npm run perf:ratchet` with a stated reason, exactly like any other baseline move -- a hand-typed seed is the thing that step exists to prevent. This route is measured SEPARATELY from siteRouteJsBytes/notesRouteJsBytes/largestChunkBytes by design: the owner's explicit ask was that a personal restaurant tracker never share a metric with, or draw headroom from, the routes the actual product depends on. leaflet (the map vendor chunk) is reused from the existing shared map-vendor split -- that's what it's for -- but nothing from site-planner may come with it (this module has zero imports from src/workspaces/site-planner, source-guarded by test/foodModule.test.js)."
@@ -395,6 +395,17 @@
           "commit": "35697b13fb2b661dac34e97289bd644c0bc94538",
           "sourceHash": "4479041a34d9e656",
           "reason": "OWNER DECISION 2026-08-13, same call as bundle.totalJsBytes. The largest chunk is SitePlannerApp, and SitePlanner.jsx alone is 1488 KB of source inside it \u2014 38% of the chunk and more than the next twenty modules combined. No dependency trimming touches that; shrinking it means extracting panels (pond inspector, yield, layers) into lazy React components, which is the B1064 work. Baseline moves to the measured value so main can go green; TARGET stays at 878.9 KB so the gap keeps reporting ABOVE TARGET, loudly and owned."
+        },
+        {
+          "metric": "bundle.foodRouteJsBytes",
+          "from": 0,
+          "to": 925460,
+          "direction": "raise",
+          "item": "B568400",
+          "date": "2026-08-16",
+          "commit": "9af49a1f3d49956b46104f5757df701cb40a40f7",
+          "sourceHash": "cdbb16c0a763f662",
+          "reason": "First measurement of the new /food route (FoodApp.jsx + FoodMap.jsx pulling the shared map-vendor/leaflet chunk); baseline seeded at 0 per the notesRouteJsBytes precedent, ratcheting to the real measured value from a clean build."
         }
       ]
     }
