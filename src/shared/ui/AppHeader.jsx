@@ -75,8 +75,8 @@ const FS_NOTICE_MS = 5000;
 const TAB_IDLE = "var(--chrome-tab-inactive)";
 // Per-module accent: the FILL (the 2px underline) is fixed in both themes; the active
 // tab TEXT uses the -text token, which swaps by theme (sits on chrome). (B318)
-const ACCENT_FILL = { "site-planner": "var(--accent-site)", "scheduler": "var(--accent-schedule)", "doc-review": "var(--accent-review)", "library": "var(--accent-library)", "notes": "var(--accent-notes)", "food": "var(--accent-food)" };
-const ACCENT_TEXT = { "site-planner": "var(--accent-site-text)", "scheduler": "var(--accent-schedule-text)", "doc-review": "var(--accent-review-text)", "library": "var(--accent-library-text)", "notes": "var(--accent-notes-text)", "food": "var(--accent-food-text)" };
+const ACCENT_FILL = { "site-planner": "var(--accent-site)", "scheduler": "var(--accent-schedule)", "doc-review": "var(--accent-review)", "library": "var(--accent-library)", "notes": "var(--accent-notes)" };
+const ACCENT_TEXT = { "site-planner": "var(--accent-site-text)", "scheduler": "var(--accent-schedule-text)", "doc-review": "var(--accent-review-text)", "library": "var(--accent-library-text)", "notes": "var(--accent-notes-text)" };
 
 // The Light/Dark/System picker now lives in the account → Settings panel (B389, AuthPanel)
 // for signed-in users. The row-1 gear below is kept ONLY when signed out, so a logged-out
@@ -250,19 +250,12 @@ const MODULES = [
       </>
     ),
   },
-  {
-    id: "food",
-    label: "Food",
-    // simplified fork-and-knife outline (16×16 viewBox)
-    icon: (
-      <>
-        <line x1="4" y1="2.5" x2="4" y2="13.5" />
-        <path d="M2.5 2.5v4a1.5 1.5 0 0 0 3 0v-4" />
-        <path d="M12.5 2.5c-1.4 0-2 1.6-2 3.5s.6 2.5 2 2.5v5" />
-      </>
-    ),
-  },
 ];
+// ⛔ NO "food" ENTRY HERE, DELIBERATELY (NEW-2, owner correction to B568400). /food is an
+// UNLISTED route — reachable only by typing the URL — not a workspace tab. Do not re-add it:
+// the guard test in test/foodModule.test.js fails the build if this array ever names it again.
+// The route itself is untouched (src/app/Shell.jsx's WORKSPACES + src/app/route.js's slug
+// map still resolve #/food to FoodApp) — this file is purely the header's visible tab list.
 
 // One module tab. Inactive tabs are full-opacity and legible (never dimmed/disabled);
 // the module accent reveals on hover, and the active tab keeps the accent + a 2px
