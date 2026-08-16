@@ -155,6 +155,8 @@ const PAIRS = [
   ["--accent-library-text", "--chrome-bg-elev", "Library tab text · chrome-elev", T],
   ["--accent-notes-text", "--chrome-bg", "Notes tab text · chrome", T],
   ["--accent-notes-text", "--chrome-bg-elev", "Notes tab text · chrome-elev", T],
+  ["--accent-food-text", "--chrome-bg", "Food tab text · chrome", T],
+  ["--accent-food-text", "--chrome-bg-elev", "Food tab text · chrome-elev", T],
   // Module accent TEXT on a light card (breadcrumb "current"/"New project" labels use
   // the -text token after the B341 fix — verifies accent-as-foreground is legible).
   ["--accent-site-text", "--surface-raised", "Site accent text · card", T],
@@ -162,6 +164,7 @@ const PAIRS = [
   ["--accent-review-text", "--surface-raised", "Review accent text · card", T],
   ["--accent-library-text", "--surface-raised", "Library accent text · card", T],
   ["--accent-notes-text", "--surface-raised", "Notes accent text · card", T],
+  ["--accent-food-text", "--surface-raised", "Food accent text · card", T],
   // Semantic text colors (success/danger/info/warn) — used for colored labels on the
   // themed panels (B354). A hardcoded #15803d/#b3361b/#1d4ed8/#b45309 reads on a light
   // card but fails on a dark card, so these MUST stay tokens. Checked on both surfaces.
@@ -181,6 +184,7 @@ const PAIRS = [
   // Notes audits its fill as TEXT, not as a decorative underline, because the fill really
   // does carry body text: the selected page row in the rail and every active toolbar toggle.
   ["--on-accent-notes", "--accent-notes", "on-fill · Notes (white on plum)", T],
+  ["--on-accent-food", "--accent-food", "on-fill · Food (white on chili red)", T],
   // B657-5B: the shared Button primary/active variant — on-accent text on the global accent fill.
   ["--on-accent", "--accent", "on-fill · global accent button", T],
   // The 2px active-tab underline (a UI graphic) — fill on chrome
@@ -189,6 +193,7 @@ const PAIRS = [
   ["--accent-review", "--chrome-bg-elev", "Review underline · chrome", U, "decorative 2px indicator on white chrome; active state is also carried by the (passing) review-text label + bold weight"],
   ["--accent-library", "--chrome-bg-elev", "Library underline · chrome", U],
   ["--accent-notes", "--chrome-bg-elev", "Notes underline · chrome", U],
+  ["--accent-food", "--chrome-bg-elev", "Food underline · chrome", U],
   // Status as a glyph/dot/border (graphic) on the app surface
   ["--status-pursuit", "--surface-raised", "status Pursuit glyph · card", U],
   ["--status-active", "--surface-raised", "status Active glyph · card", U],
