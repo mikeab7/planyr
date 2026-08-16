@@ -124,6 +124,10 @@ if (site) {
  * the notebook tree and its chrome, never the ~464 KB rich-text engine, which rides its own
  * on-demand chunk. A rise here means something crossed back onto the static path. */
 if (routes.notes) check("bundle.notesRouteJsBytes", routes.notes.bytes, b.notesRouteJsBytes);
+/* The /food route's own budget (B568400) — measured separately forever, per the owner's
+ * explicit ask that this module never share a metric with (or draw headroom from) the routes
+ * the actual product depends on. */
+if (routes.food) check("bundle.foodRouteJsBytes", routes.food.bytes, b.foodRouteJsBytes);
 check("bundle.totalJsBytes", totalJsBytes, b.totalJsBytes);
 check("bundle.largestChunkBytes", largest.bytes, b.largestChunkBytes);
 

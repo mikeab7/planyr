@@ -8,4 +8,5 @@ export const MODULE_ACCENT = {
   "doc-review":   "#EF9F27",
   "library":      "#0E7490",
   "notes":        "#B8418C",
+  "food":         "#BE3B22",
 };

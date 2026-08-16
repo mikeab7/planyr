@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-15 @ `4d62099` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-16 @ `2836bd4` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_528 source files mapped._
+_535 source files mapped._
 
 ## infra
 
@@ -41,6 +41,20 @@ _528 source files mapped._
   - _exports_: `default (Shell)`
 - **`src/main.jsx`** — Entry point: installs client-error telemetry + chunk-reload guard, retires old GIS service worker, renders Shell inside ThemeProvider/StrictMode
   - _exports_: _(none)_
+- **`src/workspaces/food/components/FoodMap.jsx`** — Leaflet map: canvas-rendered pins (snapshot places, live Overpass results, manual pins), drop-a-pin mode, "search live for more here"
+  - _exports_: `default (FoodMap)`
+- **`src/workspaces/food/components/VisitList.jsx`** — Every logged visit, searchable by name and sortable by date/rating/cost
+  - _exports_: `default (VisitList)`
+- **`src/workspaces/food/components/VisitPanel.jsx`** — Right-side panel: past visits at a place + the log-a-visit form (rating, cost, what I had, notes, would-return)
+  - _exports_: `default (VisitPanel)`
+- **`src/workspaces/food/FoodApp.jsx`** — `/food` workspace root (lazy chunk): map/list view state, visit CRUD wiring, manual-pin drop flow
+  - _exports_: `default (FoodApp)`
+- **`src/workspaces/food/lib/foodStore.js`** — The one seam to Supabase: place/visit queries, visit CRUD, manual-pin grouping, the logged-place-id set
+  - _exports_: `deleteVisit`, `fetchAllVisits`, `fetchPlaceById`, `fetchPlacesByIds`, `fetchPlacesInBounds`, `insertVisit`, `loggedPlaceIds`, `manualPinsFromVisits`, `supabaseConfigured`, `updateVisit`
+- **`src/workspaces/food/lib/overpass.js`** — OpenStreetMap Overpass fallback: cached per-bbox live query, called only on explicit user request
+  - _exports_: `fromElement`, `queryFor`, `roundKey`, `searchOverpass`
+- **`src/workspaces/food/lib/supabaseClient.js`** — This module's own Supabase client (deliberately not a site-planner import — see BUNDLE ISOLATION)
+  - _exports_: `supabase`, `supabaseConfigured`
 - **`src/workspaces/notes/components/IntegrityBanner.jsx`** — the bar for the two findings nothing could previously mention: one note living in two projects, and a note that had lost its place (already recovered by the time it renders, and named / openable / re-filable inline). Its own lazy chunk — it renders only when something is wrong.
   - _exports_: `default (IntegrityBanner)`
 - **`src/workspaces/notes/components/NoteEditor.jsx`** — One note page (title · toolbar · document) and the module's ONLY editor-engine import — the lazy boundary. Snapshots the document as plain JSON at edit time so the flush never queries a torn-down instance.

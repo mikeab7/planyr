@@ -1,20 +1,20 @@
 {
   "$comment": [
-    "Planyr standing performance budgets (NEW-8). THESE ARE THE CEILING — a feature that",
+    "Planyr standing performance budgets (NEW-8). THESE ARE THE CEILING \u2014 a feature that",
     "breaches one ships with a matching optimization, or does not ship. See docs/PERF-BUDGETS.md",
     "for the rule, the measurement blockers, and how to change a number here.",
     "",
     "THE BUNDLE METRICS CARRY A BASELINE, NOT A HAND-PINNED CEILING (NEW-1, 2026-07-30):",
-    "  baseline — the last DELIBERATELY recorded measurement. Only `npm run perf:ratchet` writes",
+    "  baseline \u2014 the last DELIBERATELY recorded measurement. Only `npm run perf:ratchet` writes",
     "             it, and only with a --reason and an --item, which land in `ratchetLog` below.",
     "             Nothing in an ordinary merge path can move it.",
-    "  ceiling  — DERIVED, never stored: baseline + max(baseline x pctOfBaseline, minBytes), from",
+    "  ceiling  \u2014 DERIVED, never stored: baseline + max(baseline x pctOfBaseline, minBytes), from",
     "             the one `headroom` band below. A breach of it FAILS the check.",
-    "  target   — where the metric SHOULD be. Where target < baseline the metric is knowingly out",
+    "  target   \u2014 where the metric SHOULD be. Where target < baseline the metric is knowingly out",
     "             of budget today; the harness reports the gap loudly (never silently passing) and",
     "             names the backlog item that owns closing it.",
     "  Growth ABOVE the baseline but INSIDE the band prints a loud ABOVE BASELINE line and does",
-    "  NOT fail — that is the whole point: three consecutive PRs (#858 x4, #859 x2, #860) failed",
+    "  NOT fail \u2014 that is the whole point: three consecutive PRs (#858 x4, #859 x2, #860) failed",
     "  on 0.8-0.9% breaches of ceilings pinned to within 0.06% of measured, which is a headroom",
     "  problem wearing a regression's red X. Beyond the band still fails hard.",
     "  Count metrics (siteRouteChunks) keep a hard `ceiling` and get no band: a chunk count is a",
@@ -51,7 +51,7 @@
       "target": 1600000,
       "unit": "bytes",
       "what": "Total JS a plain Site route must download: the entry chunk plus SitePlannerApp and its static-import closure.",
-      "note": "Was 3094689 before NEW-9 removed the boot-time idle prefetch of the other workspaces, and 2270513 before B1042 deferred the export path + the LERC codec. Ceiling ratcheted 2400000 -> 2320000 with that landing. STILL ABOVE TARGET, and dynamic imports alone cannot close the rest — see largestChunkBytes.note for the measured floor, plus ~200 KB of Supabase client in the shared entry chunk (auth-js/realtime-js/phoenix/storage-js) that only a signed-in-verifiable change can defer. CEILING RAISED 2320000 -> 2332000 by B1130/B1131 (2026-07-30), and this is the justification the standing rule demands, stated in full because raising a ceiling is a product decision. WHAT SHIPPED: two owner-reported defects on the Electric layer — substations painting as broken-image glyphs labelled \"Mark\" (a GeoJSON point with no pointToLayer falling through to L.Icon.Default), and no way to hover a line or substation to learn what it is. WHAT WAS PAID FIRST, measured: the feature started at +20.2 KB on this metric and was cut to +7.4 KB by four optimizations before any number here was touched — (1) the raster identify glue + state machine moved behind a dynamic import (rasterIdentifyLazy.js), (2) the vector hover/identify attach layer and its wording engine likewise (featureHoverAttach.js, imported at layer-toggle time), (3) identifyCapable moved into this file so layers.js can gate on it without pulling the identify module onto the boot path, (4) the L.Icon.Default fallback rendered from a ~400-byte inline SVG pin instead of leaflet's three PNGs, which Vite base64-inlines at ~6 KB (both Vite-5 ways of emitting them as files were tried; ?no-inline is Vite 6 and new URL(...) against node_modules emits nothing). WHY A RAISE WAS STILL NEEDED: main was already at 2262.9 KB against a 2265.6 KB ceiling — 2.7 KB of headroom — so this metric now trips on essentially ANY feature, which is a headroom problem rather than a regression in this PR. The residual ~7 KB is SitePlanner.jsx's hover card + effect, the geometry-aware point styling, and the per-layer hoverIdentify flags: all synchronous, all on this route, none deferrable by import(). NOTE THE CONTRAST, which is the honest read: largestChunkBytes was NOT raised — the same four optimizations brought it back under its existing ceiling (1719.5 -> 1706.8 KB). B1064 remains the metric owner for closing the real gap. NEW-1 (2026-07-30) RETIRED THE HAND-PINNED CEILING ON THIS METRIC, which is the honest fix for the paragraph immediately above: three PRs failed on 0.8-0.9% breaches of a ceiling pinned 0.06% over measured, and the answer to that is a policy, not a fourth hand-typed number. The ceiling is now DERIVED from `baseline` + the shared `headroom` band, and the baseline moves only through `npm run perf:ratchet` with a reason recorded in `ratchetLog`."
+      "note": "Was 3094689 before NEW-9 removed the boot-time idle prefetch of the other workspaces, and 2270513 before B1042 deferred the export path + the LERC codec. Ceiling ratcheted 2400000 -> 2320000 with that landing. STILL ABOVE TARGET, and dynamic imports alone cannot close the rest \u2014 see largestChunkBytes.note for the measured floor, plus ~200 KB of Supabase client in the shared entry chunk (auth-js/realtime-js/phoenix/storage-js) that only a signed-in-verifiable change can defer. CEILING RAISED 2320000 -> 2332000 by B1130/B1131 (2026-07-30), and this is the justification the standing rule demands, stated in full because raising a ceiling is a product decision. WHAT SHIPPED: two owner-reported defects on the Electric layer \u2014 substations painting as broken-image glyphs labelled \"Mark\" (a GeoJSON point with no pointToLayer falling through to L.Icon.Default), and no way to hover a line or substation to learn what it is. WHAT WAS PAID FIRST, measured: the feature started at +20.2 KB on this metric and was cut to +7.4 KB by four optimizations before any number here was touched \u2014 (1) the raster identify glue + state machine moved behind a dynamic import (rasterIdentifyLazy.js), (2) the vector hover/identify attach layer and its wording engine likewise (featureHoverAttach.js, imported at layer-toggle time), (3) identifyCapable moved into this file so layers.js can gate on it without pulling the identify module onto the boot path, (4) the L.Icon.Default fallback rendered from a ~400-byte inline SVG pin instead of leaflet's three PNGs, which Vite base64-inlines at ~6 KB (both Vite-5 ways of emitting them as files were tried; ?no-inline is Vite 6 and new URL(...) against node_modules emits nothing). WHY A RAISE WAS STILL NEEDED: main was already at 2262.9 KB against a 2265.6 KB ceiling \u2014 2.7 KB of headroom \u2014 so this metric now trips on essentially ANY feature, which is a headroom problem rather than a regression in this PR. The residual ~7 KB is SitePlanner.jsx's hover card + effect, the geometry-aware point styling, and the per-layer hoverIdentify flags: all synchronous, all on this route, none deferrable by import(). NOTE THE CONTRAST, which is the honest read: largestChunkBytes was NOT raised \u2014 the same four optimizations brought it back under its existing ceiling (1719.5 -> 1706.8 KB). B1064 remains the metric owner for closing the real gap. NEW-1 (2026-07-30) RETIRED THE HAND-PINNED CEILING ON THIS METRIC, which is the honest fix for the paragraph immediately above: three PRs failed on 0.8-0.9% breaches of a ceiling pinned 0.06% over measured, and the answer to that is a policy, not a fourth hand-typed number. The ceiling is now DERIVED from `baseline` + the shared `headroom` band, and the baseline moves only through `npm run perf:ratchet` with a reason recorded in `ratchetLog`."
     },
     "siteRouteChunks": {
       "ceiling": 8,
@@ -59,7 +59,7 @@
       "measured": 7,
       "unit": "chunks",
       "what": "How many JS chunks a plain Site route pulls.",
-      "note": "THE PREFETCH GUARD. Was 11 before NEW-9. Any workspace chunk reappearing here means something warms a route-irrelevant module at boot again. NO HEADROOM BAND, deliberately: a chunk count is a structural guard, not a size, and 'four chunks plus two percent' is not a sentence. RAISED 4 -> 7 across NEW-2 and B1064(a) (2026-07-30) with the reason on the record, which is the only way this number is allowed to move: the three new members are `map-vendor`, `cjs-interop` and `teams`, each named in siteRouteAllowlist.$comment with what it contains and why. The count is the coarse guard; the ALLOWLIST is the sharp one, and it still fails by name on anything not enumerated. RAISED 7 -> 8 on 2026-08-09 (B326418), same rule, reason on the record: `userPrefs` joined siteRouteAllowlist for the identical mechanical reason `teams` did — a module with a STATIC planner consumer and a LAZY Team-tab consumer gets its own shared chunk. This ceiling tracks the allowlist LENGTH (test/perfBudgets.test.js asserts they match), so it moves whenever the allowlist does; the MEASURED count is still 7, i.e. no new chunk actually loads. Not ratchetable — a hard-ceiling metric has no baseline, so `npm run perf:ratchet` refuses it by design and a documented edit here is the sanctioned path."
+      "note": "THE PREFETCH GUARD. Was 11 before NEW-9. Any workspace chunk reappearing here means something warms a route-irrelevant module at boot again. NO HEADROOM BAND, deliberately: a chunk count is a structural guard, not a size, and 'four chunks plus two percent' is not a sentence. RAISED 4 -> 7 across NEW-2 and B1064(a) (2026-07-30) with the reason on the record, which is the only way this number is allowed to move: the three new members are `map-vendor`, `cjs-interop` and `teams`, each named in siteRouteAllowlist.$comment with what it contains and why. The count is the coarse guard; the ALLOWLIST is the sharp one, and it still fails by name on anything not enumerated. RAISED 7 -> 8 on 2026-08-09 (B326418), same rule, reason on the record: `userPrefs` joined siteRouteAllowlist for the identical mechanical reason `teams` did \u2014 a module with a STATIC planner consumer and a LAZY Team-tab consumer gets its own shared chunk. This ceiling tracks the allowlist LENGTH (test/perfBudgets.test.js asserts they match), so it moves whenever the allowlist does; the MEASURED count is still 7, i.e. no new chunk actually loads. Not ratchetable \u2014 a hard-ceiling metric has no baseline, so `npm run perf:ratchet` refuses it by design and a documented edit here is the sanctioned path."
     },
     "siteRouteAllowlist": {
       "$comment": [
@@ -67,25 +67,25 @@
         "An unexpected member fails the audit by NAME, so the diagnosis is immediate.",
         "GREW BY THREE ON 2026-07-30 (NEW-2 + B1064(a)), deliberately and with each reason stated,",
         "because this list is the guard's teeth and a silent addition would blunt them:",
-        "  map-vendor  — leaflet + esri-leaflet + clipper-lib + @terraformer, split out of",
+        "  map-vendor  \u2014 leaflet + esri-leaflet + clipper-lib + @terraformer, split out of",
         "                SitePlannerApp. Same bytes on the Site route (siteRouteJsBytes is",
         "                unchanged within noise); what changes is that the largest INDIVISIBLE",
         "                parse/compile unit drops ~314 KB, and a planner edit no longer re-hashes",
         "                the file holding ~310 KB of unchanged libraries in a returning user's cache.",
-        "  teams       — src/workspaces/site-planner/lib/teams.js (~4.6 KB), which the planner needs",
+        "  teams       \u2014 src/workspaces/site-planner/lib/teams.js (~4.6 KB), which the planner needs",
         "                statically (member lookup) and the now-lazy Team tab also needs. Rollup gives a",
         "                module shared between a static and a lazy consumer its own chunk; the Site route",
         "                downloads the same bytes it always did, in one more file. Added by B1064(a).",
-        "  userPrefs   — src/workspaces/site-planner/lib/userPrefs.js (~12.6 KB incl. its newProjectSharing",
+        "  userPrefs   \u2014 src/workspaces/site-planner/lib/userPrefs.js (~12.6 KB incl. its newProjectSharing",
         "                leaf), added by B326418 for exactly the same mechanical reason as `teams` above:",
         "                the planner imports it statically (Standards' account scope) and the now-lazy",
         "                Team tab needs it too for the new-project sharing switch, so Rollup gives a module",
         "                shared between a static and a lazy consumer its own chunk. The Site route downloads",
-        "                the SAME BYTES it always did, in one more file — siteRouteJsBytes moved +3.8 KB,",
+        "                the SAME BYTES it always did, in one more file \u2014 siteRouteJsBytes moved +3.8 KB,",
         "                which is the new feature's own code and not this split. Three dynamic-import",
         "                arrangements were measured first and all were WORSE (they added chunks rather than",
         "                moving them: 7 -> 8 -> 9); the static edge is the arrangement that keeps the count at 7.",
-        "  cjs-interop — rollup's shared CommonJS interop helper (~0.3 KB), pinned to its own chunk",
+        "  cjs-interop \u2014 rollup's shared CommonJS interop helper (~0.3 KB), pinned to its own chunk",
         "                so it cannot be absorbed into map-vendor. See the trap note in",
         "                vite.config.js: without this pin every route statically pulls the map",
         "                vendor bytes to reach a few hundred bytes of interop.",
@@ -108,21 +108,28 @@
       "target": 673962,
       "unit": "bytes",
       "what": "Total JS a plain Notes route must download: the entry chunk plus Notes and its static-import closure.",
-      "note": "Seeded at 0 so the FIRST measurement of a brand-new route lands through `npm run perf:ratchet` with a stated reason, exactly like any other baseline move — a hand-typed seed is the thing that step exists to prevent. WHAT THIS NUMBER DOES AND DOES NOT INCLUDE, because it is the whole reason the split is load-bearing: it counts the notebook TREE and its chrome, and deliberately NOT the rich-text engine. Notes.jsx pulls components/NoteEditor.jsx (and through it the only @tiptap imports in the module) via a lazy() import inside a Suspense, so the engine is a separate on-demand chunk of ~464 KB that a user pays for only when a page is actually opened, and the rail paints first. A future rise in THIS metric therefore means something moved onto the static path that belongs behind that boundary — most likely a new static import of the editor, or a shared module that got hoisted. test/notesModule.test.js source-scans for the first case; this budget is the backstop for the second."
+      "note": "Seeded at 0 so the FIRST measurement of a brand-new route lands through `npm run perf:ratchet` with a stated reason, exactly like any other baseline move \u2014 a hand-typed seed is the thing that step exists to prevent. WHAT THIS NUMBER DOES AND DOES NOT INCLUDE, because it is the whole reason the split is load-bearing: it counts the notebook TREE and its chrome, and deliberately NOT the rich-text engine. Notes.jsx pulls components/NoteEditor.jsx (and through it the only @tiptap imports in the module) via a lazy() import inside a Suspense, so the engine is a separate on-demand chunk of ~464 KB that a user pays for only when a page is actually opened, and the rail paints first. A future rise in THIS metric therefore means something moved onto the static path that belongs behind that boundary \u2014 most likely a new static import of the editor, or a shared module that got hoisted. test/notesModule.test.js source-scans for the first case; this budget is the backstop for the second."
+    },
+    "foodRouteJsBytes": {
+      "baseline": 925460,
+      "target": 925460,
+      "unit": "bytes",
+      "what": "Total JS a plain Food route must download: the entry chunk plus FoodApp and its static-import closure.",
+      "note": "Seeded at 0 (B568400, the same precedent as notesRouteJsBytes) so the FIRST measurement of this brand-new route lands through `npm run perf:ratchet` with a stated reason, exactly like any other baseline move -- a hand-typed seed is the thing that step exists to prevent. This route is measured SEPARATELY from siteRouteJsBytes/notesRouteJsBytes/largestChunkBytes by design: the owner's explicit ask was that a personal restaurant tracker never share a metric with, or draw headroom from, the routes the actual product depends on. leaflet (the map vendor chunk) is reused from the existing shared map-vendor split -- that's what it's for -- but nothing from site-planner may come with it (this module has zero imports from src/workspaces/site-planner, source-guarded by test/foodModule.test.js)."
     },
     "totalJsBytes": {
       "baseline": 5089980,
       "target": 5089980,
       "unit": "bytes",
       "what": "Every JS chunk EMITTED into dist/assets, summed. Catches overall bundle growth even when it lands off the Site route.",
-      "note": "Larger than the 3016 KB the owner's 2026-07-28 pass reported, and correctly so: that figure counted the 11 chunks a browser actually FETCHED, while this counts all 20 emitted — the extra 5 are Web Worker bundles (terrainWorker, dxfWorker) and small helper chunks that only a dynamic import ever pulls. Two different questions; the per-route budgets above answer the owner's. CEILING RAISED 3960000 -> 3985000 by B1130/B1131 (2026-07-30), stated in full because raising a ceiling is a product decision. THE KEY POINT: this metric counts EVERY emitted chunk, lazy ones included, BY DESIGN — that is exactly what makes it the honest catch-all. So the four deferrals that paid the two per-route budgets (see siteRouteJsBytes.note) move bytes OFF the critical path without reducing this number at all, and no amount of further code-splitting can. The residual is ~19 KB of genuine minified code implementing two owner-reported defects on the Electric layer: substations painting as broken-image glyphs labelled \"Mark\", and no way to hover a line or substation to learn what it is. WHAT WAS PAID ELSEWHERE FIRST, so this is not a shortcut: largestChunkBytes was brought back UNDER its existing ceiling with no raise at all (1719.5 -> 1706.8 KB), and siteRouteJsBytes was cut from +20.2 KB to +7.4 KB before its ceiling moved. HEADROOM CONTEXT: main was at 3861.4 KB against the 3867.2 KB ceiling — 5.8 KB — so like the other two, this metric now trips on essentially any feature; that is a headroom problem to be closed by B1064, not a regression in this PR. Ceiling and target are kept EQUAL here, as they were before, so this metric continues to assert no known gap rather than quietly acquiring one. NEW-1 (2026-07-30): baseline and target are still kept EQUAL for exactly that reason, and the derived headroom band now applies to this metric too — it was 4.3 KB (0.11%) under its old hand-pinned ceiling and would have been the next surprise."
+      "note": "Larger than the 3016 KB the owner's 2026-07-28 pass reported, and correctly so: that figure counted the 11 chunks a browser actually FETCHED, while this counts all 20 emitted \u2014 the extra 5 are Web Worker bundles (terrainWorker, dxfWorker) and small helper chunks that only a dynamic import ever pulls. Two different questions; the per-route budgets above answer the owner's. CEILING RAISED 3960000 -> 3985000 by B1130/B1131 (2026-07-30), stated in full because raising a ceiling is a product decision. THE KEY POINT: this metric counts EVERY emitted chunk, lazy ones included, BY DESIGN \u2014 that is exactly what makes it the honest catch-all. So the four deferrals that paid the two per-route budgets (see siteRouteJsBytes.note) move bytes OFF the critical path without reducing this number at all, and no amount of further code-splitting can. The residual is ~19 KB of genuine minified code implementing two owner-reported defects on the Electric layer: substations painting as broken-image glyphs labelled \"Mark\", and no way to hover a line or substation to learn what it is. WHAT WAS PAID ELSEWHERE FIRST, so this is not a shortcut: largestChunkBytes was brought back UNDER its existing ceiling with no raise at all (1719.5 -> 1706.8 KB), and siteRouteJsBytes was cut from +20.2 KB to +7.4 KB before its ceiling moved. HEADROOM CONTEXT: main was at 3861.4 KB against the 3867.2 KB ceiling \u2014 5.8 KB \u2014 so like the other two, this metric now trips on essentially any feature; that is a headroom problem to be closed by B1064, not a regression in this PR. Ceiling and target are kept EQUAL here, as they were before, so this metric continues to assert no known gap rather than quietly acquiring one. NEW-1 (2026-07-30): baseline and target are still kept EQUAL for exactly that reason, and the derived headroom band now applies to this metric too \u2014 it was 4.3 KB (0.11%) under its old hand-pinned ceiling and would have been the next surprise."
     },
     "largestChunkBytes": {
       "baseline": 1577961,
       "target": 900000,
       "unit": "bytes",
       "what": "The single biggest chunk (today SitePlannerApp).",
-      "note": "B1092 (2026-07-29) shipped its canvas-identify + flood-scoping work against this budget the way the standing rule requires -- with a matching optimization rather than a raised ceiling: the signed-in-only legacy-import review modal (SiteReviewModal, ~7.7 KB) moved behind a React.lazy dynamic import, so the chunk came out BELOW where it started (1754932 -> 1746620). SitePlannerApp sits on the critical path. B1042 deferred the export path, the aerial Stitcher, the KMZ writer and the LERC codec (1711381 -> 1667946; 1680007 after merging main) and ratcheted the ceiling 1800000 -> 1750000. THE TARGET IS DELIBERATELY LEFT UNMET, because it cannot be reached with dynamic imports and the reader should know why: source-map attribution of the remaining chunk shows an INDIVISIBLE FLOOR of ~1085000 bytes that no import() can move -- SitePlanner.jsx itself 703 KB (ONE React component; a dynamic import cannot split a component), leaflet 148 KB, clipper-lib 98 KB (road-network dissolve, needed at first paint), esri-leaflet 59 KB, MapFinder.jsx 46 KB (mounted in both modes), @terraformer 5 KB. That floor alone is 24% above the 900000 target. The remaining ~580 KB is the drainage/pond/criteria analysis stack, which is called synchronously during render. Closing the gap therefore needs a DIFFERENT kind of work -- extracting panels out of the SitePlanner component into lazily-loaded children -- which is what targetOwner now names. NEW-1 (2026-07-30) replaced this metric's hand-pinned ceiling with baseline + the shared headroom band. NEW-2 additionally split the map/geometry vendor closure (leaflet, clipper-lib, esri-leaflet, @terraformer) into its own chunk: that does NOT reduce siteRouteJsBytes — the same bytes still load on a Site route — but it does cut this metric, because this metric measures the largest INDIVISIBLE parse/compile unit, and it stops every planner edit invalidating the vendor bytes in a returning user's cache."
+      "note": "B1092 (2026-07-29) shipped its canvas-identify + flood-scoping work against this budget the way the standing rule requires -- with a matching optimization rather than a raised ceiling: the signed-in-only legacy-import review modal (SiteReviewModal, ~7.7 KB) moved behind a React.lazy dynamic import, so the chunk came out BELOW where it started (1754932 -> 1746620). SitePlannerApp sits on the critical path. B1042 deferred the export path, the aerial Stitcher, the KMZ writer and the LERC codec (1711381 -> 1667946; 1680007 after merging main) and ratcheted the ceiling 1800000 -> 1750000. THE TARGET IS DELIBERATELY LEFT UNMET, because it cannot be reached with dynamic imports and the reader should know why: source-map attribution of the remaining chunk shows an INDIVISIBLE FLOOR of ~1085000 bytes that no import() can move -- SitePlanner.jsx itself 703 KB (ONE React component; a dynamic import cannot split a component), leaflet 148 KB, clipper-lib 98 KB (road-network dissolve, needed at first paint), esri-leaflet 59 KB, MapFinder.jsx 46 KB (mounted in both modes), @terraformer 5 KB. That floor alone is 24% above the 900000 target. The remaining ~580 KB is the drainage/pond/criteria analysis stack, which is called synchronously during render. Closing the gap therefore needs a DIFFERENT kind of work -- extracting panels out of the SitePlanner component into lazily-loaded children -- which is what targetOwner now names. NEW-1 (2026-07-30) replaced this metric's hand-pinned ceiling with baseline + the shared headroom band. NEW-2 additionally split the map/geometry vendor closure (leaflet, clipper-lib, esri-leaflet, @terraformer) into its own chunk: that does NOT reduce siteRouteJsBytes \u2014 the same bytes still load on a Site route \u2014 but it does cut this metric, because this metric measures the largest INDIVISIBLE parse/compile unit, and it stops every planner edit invalidating the vendor bytes in a returning user's cache."
     },
     "ratchetLog": {
       "$comment": [
@@ -130,12 +137,12 @@
         "be written by `npm run perf:ratchet -- --metric <name> --item <B###> --reason \"...\"`,",
         "which measures a fresh build itself and appends here. test/perfBudgetPolicy.test.js",
         "asserts every baseline equals the `to` of its own latest entry, so a baseline edited by",
-        "hand — with no reason on the record — goes RED in CI. That is the enforcement the rule",
+        "hand \u2014 with no reason on the record \u2014 goes RED in CI. That is the enforcement the rule",
         "'a ceiling ratchets DOWN only when an optimization lands, never as a side effect of an",
         "ordinary merge' needs in order to mean anything.",
         "A `direction` of 'raise' is legal but deliberately noisy: it needs --allow-raise on top",
         "of the reason and item, and it is what a genuine, justified regression looks like on the",
-        "record. Growth inside the headroom band needs NO entry at all — it is annotated by the",
+        "record. Growth inside the headroom band needs NO entry at all \u2014 it is annotated by the",
         "audit and passes."
       ],
       "entries": [
@@ -146,7 +153,7 @@
           "direction": "ratchet",
           "item": "B1344",
           "date": "2026-07-30",
-          "reason": "Policy migration: the hand-pinned ceiling 2332000 is retired and this becomes a measured baseline (a real build of main at d5476d0), with the ceiling derived from the shared headroom band. Not an optimization — a re-seed of the same measurement onto the new shape."
+          "reason": "Policy migration: the hand-pinned ceiling 2332000 is retired and this becomes a measured baseline (a real build of main at d5476d0), with the ceiling derived from the shared headroom band. Not an optimization \u2014 a re-seed of the same measurement onto the new shape."
         },
         {
           "metric": "bundle.totalJsBytes",
@@ -173,7 +180,7 @@
           "direction": "ratchet",
           "item": "NEW-2 + B1064(a)",
           "date": "2026-07-30",
-          "reason": "Two optimizations landed and are the whole of this move. NEW-2 split the map/geometry vendor closure (leaflet + esri-leaflet + clipper-lib + @terraformer) into its own map-vendor chunk, which cuts the largest INDIVISIBLE parse/compile unit by ~314 KB and stops a planner edit re-hashing ~310 KB of unchanged libraries in a returning user's cache. B1064 tranche (a) moved three conditional, closed-by-default panels behind React.lazy — SiteAnalysis (-7.6 KB on the Site route, and it takes lib/siteAnalysis.js with it), TeamPanel (-10.3 KB, and it lands in the shared entry chunk so every route gains), StandardsBar (-2.6 KB). No ceiling was raised to make anything pass."
+          "reason": "Two optimizations landed and are the whole of this move. NEW-2 split the map/geometry vendor closure (leaflet + esri-leaflet + clipper-lib + @terraformer) into its own map-vendor chunk, which cuts the largest INDIVISIBLE parse/compile unit by ~314 KB and stops a planner edit re-hashing ~310 KB of unchanged libraries in a returning user's cache. B1064 tranche (a) moved three conditional, closed-by-default panels behind React.lazy \u2014 SiteAnalysis (-7.6 KB on the Site route, and it takes lib/siteAnalysis.js with it), TeamPanel (-10.3 KB, and it lands in the shared entry chunk so every route gains), StandardsBar (-2.6 KB). No ceiling was raised to make anything pass."
         },
         {
           "metric": "bundle.totalJsBytes",
@@ -182,7 +189,7 @@
           "direction": "ratchet",
           "item": "NEW-2 + B1064(a)",
           "date": "2026-07-30",
-          "reason": "Two optimizations landed and are the whole of this move. NEW-2 split the map/geometry vendor closure (leaflet + esri-leaflet + clipper-lib + @terraformer) into its own map-vendor chunk, which cuts the largest INDIVISIBLE parse/compile unit by ~314 KB and stops a planner edit re-hashing ~310 KB of unchanged libraries in a returning user's cache. B1064 tranche (a) moved three conditional, closed-by-default panels behind React.lazy — SiteAnalysis (-7.6 KB on the Site route, and it takes lib/siteAnalysis.js with it), TeamPanel (-10.3 KB, and it lands in the shared entry chunk so every route gains), StandardsBar (-2.6 KB). No ceiling was raised to make anything pass."
+          "reason": "Two optimizations landed and are the whole of this move. NEW-2 split the map/geometry vendor closure (leaflet + esri-leaflet + clipper-lib + @terraformer) into its own map-vendor chunk, which cuts the largest INDIVISIBLE parse/compile unit by ~314 KB and stops a planner edit re-hashing ~310 KB of unchanged libraries in a returning user's cache. B1064 tranche (a) moved three conditional, closed-by-default panels behind React.lazy \u2014 SiteAnalysis (-7.6 KB on the Site route, and it takes lib/siteAnalysis.js with it), TeamPanel (-10.3 KB, and it lands in the shared entry chunk so every route gains), StandardsBar (-2.6 KB). No ceiling was raised to make anything pass."
         },
         {
           "metric": "bundle.largestChunkBytes",
@@ -191,7 +198,7 @@
           "direction": "ratchet",
           "item": "NEW-2 + B1064(a)",
           "date": "2026-07-30",
-          "reason": "Two optimizations landed and are the whole of this move. NEW-2 split the map/geometry vendor closure (leaflet + esri-leaflet + clipper-lib + @terraformer) into its own map-vendor chunk, which cuts the largest INDIVISIBLE parse/compile unit by ~314 KB and stops a planner edit re-hashing ~310 KB of unchanged libraries in a returning user's cache. B1064 tranche (a) moved three conditional, closed-by-default panels behind React.lazy — SiteAnalysis (-7.6 KB on the Site route, and it takes lib/siteAnalysis.js with it), TeamPanel (-10.3 KB, and it lands in the shared entry chunk so every route gains), StandardsBar (-2.6 KB). No ceiling was raised to make anything pass."
+          "reason": "Two optimizations landed and are the whole of this move. NEW-2 split the map/geometry vendor closure (leaflet + esri-leaflet + clipper-lib + @terraformer) into its own map-vendor chunk, which cuts the largest INDIVISIBLE parse/compile unit by ~314 KB and stops a planner edit re-hashing ~310 KB of unchanged libraries in a returning user's cache. B1064 tranche (a) moved three conditional, closed-by-default panels behind React.lazy \u2014 SiteAnalysis (-7.6 KB on the Site route, and it takes lib/siteAnalysis.js with it), TeamPanel (-10.3 KB, and it lands in the shared entry chunk so every route gains), StandardsBar (-2.6 KB). No ceiling was raised to make anything pass."
         },
         {
           "metric": "bundle.largestChunkBytes",
@@ -200,7 +207,7 @@
           "direction": "raise",
           "item": "B1205",
           "date": "2026-07-30",
-          "reason": "B1205/B1206/B1207: the map stacking model (mapStack.js), a declared area/line/point role on all 36 GIS sources plus the role-split raster plumbing and the map-top pane host, the one unified layer-opacity control, and the per-building floodplain-exposure engine + its Yield readout. +8.4 KB minified on the Site chunk, all app-route, no new dependency and no new chunk (siteRouteChunks still 7). Raised rather than optimised because origin/main b2cfd08 already measured 1410.5 KB against a 1410.9 KB derived ceiling — 0.4 KB of band left, so any feature at all would have breached; the two lazy-load candidates in this diff's reach were checked and refused (screeningBfeSite.js has three render-path exports, pondOptimizer.js is called during render by the options card). Payback is tracked by B1064."
+          "reason": "B1205/B1206/B1207: the map stacking model (mapStack.js), a declared area/line/point role on all 36 GIS sources plus the role-split raster plumbing and the map-top pane host, the one unified layer-opacity control, and the per-building floodplain-exposure engine + its Yield readout. +8.4 KB minified on the Site chunk, all app-route, no new dependency and no new chunk (siteRouteChunks still 7). Raised rather than optimised because origin/main b2cfd08 already measured 1410.5 KB against a 1410.9 KB derived ceiling \u2014 0.4 KB of band left, so any feature at all would have breached; the two lazy-load candidates in this diff's reach were checked and refused (screeningBfeSite.js has three render-path exports, pondOptimizer.js is called during render by the options card). Payback is tracked by B1064."
         },
         {
           "metric": "bundle.siteRouteJsBytes",
@@ -209,7 +216,7 @@
           "direction": "raise",
           "item": "B1253",
           "date": "2026-07-30",
-          "reason": "Derived landing view (B1253): +3.5 KB on the Site route for lib/landingView.js + counties.countyForView + the MapFinder wiring. It cannot be lazy-loaded — it decides the map's FIRST frame. The remaining +43.7 KB of this move is accumulated drift that rode inside the 44.8 KB headroom band unrecorded before this item: origin/main a748911 already measured 2285.9 KB against the 2287.1 KB derived ceiling, i.e. 1.2 KB of band left, so any feature at all would have breached it. Recording it here resets the band rather than leaving the next session to trip on 1.2 KB. Payback stays tracked by B1064."
+          "reason": "Derived landing view (B1253): +3.5 KB on the Site route for lib/landingView.js + counties.countyForView + the MapFinder wiring. It cannot be lazy-loaded \u2014 it decides the map's FIRST frame. The remaining +43.7 KB of this move is accumulated drift that rode inside the 44.8 KB headroom band unrecorded before this item: origin/main a748911 already measured 2285.9 KB against the 2287.1 KB derived ceiling, i.e. 1.2 KB of band left, so any feature at all would have breached it. Recording it here resets the band rather than leaving the next session to trip on 1.2 KB. Payback stays tracked by B1064."
         },
         {
           "metric": "bundle.siteRouteJsBytes",
@@ -218,7 +225,7 @@
           "direction": "raise",
           "item": "B1254",
           "date": "2026-07-30",
-          "reason": "Per-layer 'Show above plan' (B1254 — the correction that opacity was never the escape hatch, amending B1205/B1206): a new mapStack tier (gisAreaFront) plus its in-SVG foreignObject band host, the pane-resolution and band-rebuild plumbing in layers.js, the per-site layerAbove persistence in layerPrefs/siteModel, the panel control, and a third export band in exportSheet. +3.7 KB, all app-route, no new dependency and no new chunk (siteRouteChunks still 7) - and that figure is this diff's OWN share, measured against B1253's freshly recorded baseline rather than banking anyone else's in-band growth. ~1.1 KB was PAID BACK IN-DIFF first: MAP_STACK's per-tier label strings and ROLE_SPLIT_NOTE moved into comments (pure documentation that shipped to every visitor's browser and no runtime code ever read), the three panel call sites deduped behind one aboveRow, and layerPrefs' four functions plus layers.js' two teardown blocks folded into one path each. Raised rather than optimised further because the lifted band cannot be lazy-loaded - it is a render tier of the planner canvas itself. Payback stays tracked by B1064."
+          "reason": "Per-layer 'Show above plan' (B1254 \u2014 the correction that opacity was never the escape hatch, amending B1205/B1206): a new mapStack tier (gisAreaFront) plus its in-SVG foreignObject band host, the pane-resolution and band-rebuild plumbing in layers.js, the per-site layerAbove persistence in layerPrefs/siteModel, the panel control, and a third export band in exportSheet. +3.7 KB, all app-route, no new dependency and no new chunk (siteRouteChunks still 7) - and that figure is this diff's OWN share, measured against B1253's freshly recorded baseline rather than banking anyone else's in-band growth. ~1.1 KB was PAID BACK IN-DIFF first: MAP_STACK's per-tier label strings and ROLE_SPLIT_NOTE moved into comments (pure documentation that shipped to every visitor's browser and no runtime code ever read), the three panel call sites deduped behind one aboveRow, and layerPrefs' four functions plus layers.js' two teardown blocks folded into one path each. Raised rather than optimised further because the lifted band cannot be lazy-loaded - it is a render tier of the planner canvas itself. Payback stays tracked by B1064."
         },
         {
           "metric": "bundle.totalJsBytes",
@@ -245,7 +252,7 @@
           "direction": "raise",
           "item": "B1290",
           "date": "2026-07-30",
-          "reason": "The new Notes workspace. Measured head-to-head in ONE container: origin/main 3929.9 KB vs this branch 4411.9 KB, so the whole +482.0 KB delta is the new module (Notes route chunk 28.2 KB + the lazily-loaded editor engine 463.8 KB). This metric counts EVERY emitted chunk by design — that is what makes it the honest catch-all — so no amount of further splitting reduces it, and the lazy boundary that keeps the engine off the route is already proven by bundle.notesRouteJsBytes and by the live harness. The Site route was NOT taxed: siteRouteJsBytes moved +1.0 KB (the header tab) and largestChunkBytes is byte-identical to main. The owner explicitly accepted this growth: a new module is supposed to add weight, and the Site route is what his slowness complaint was about. A future rise in this metric WITHOUT a new route is a regression."
+          "reason": "The new Notes workspace. Measured head-to-head in ONE container: origin/main 3929.9 KB vs this branch 4411.9 KB, so the whole +482.0 KB delta is the new module (Notes route chunk 28.2 KB + the lazily-loaded editor engine 463.8 KB). This metric counts EVERY emitted chunk by design \u2014 that is what makes it the honest catch-all \u2014 so no amount of further splitting reduces it, and the lazy boundary that keeps the engine off the route is already proven by bundle.notesRouteJsBytes and by the live harness. The Site route was NOT taxed: siteRouteJsBytes moved +1.0 KB (the header tab) and largestChunkBytes is byte-identical to main. The owner explicitly accepted this growth: a new module is supposed to add weight, and the Site route is what his slowness complaint was about. A future rise in this metric WITHOUT a new route is a regression."
         },
         {
           "metric": "bundle.siteRouteJsBytes",
@@ -254,7 +261,7 @@
           "direction": "raise",
           "item": "B1290",
           "date": "2026-07-30",
-          "reason": "The Notes workspace adds a module TAB to the shared header, and that is the entire Site-route cost. Measured head-to-head in one container: origin/main a748911 alone is 2340801 bytes, this branch 2341801 — a delta of exactly 1000 bytes, all of it the AppHeader tab (label + inline SVG icon) plus four one-line registry entries (route slug maps, moduleAccent, moduleLoaderTheme, modulePrefetch). It is IRREDUCIBLE by construction: a module tab must render before its workspace chunk loads, so it is the one part of a new workspace that cannot be lazy. The workspace itself is behind lazy() and contributes nothing else here — bundle.notesRouteJsBytes carries its real weight, and the rich-text engine is a separate on-demand chunk. WHY A RAISE RATHER THAN AN OPTIMIZATION: main was ALREADY within 1189 bytes of the derived ceiling before this branch existed, so this metric now trips on essentially any feature — the same headroom problem the note above records for B1130/B1131, recurring exactly as predicted. Shaving the icon to squeeze under a ceiling main has already consumed would be a fake optimization that the next session pays for again. B1064 remains the metric owner for closing the real gap."
+          "reason": "The Notes workspace adds a module TAB to the shared header, and that is the entire Site-route cost. Measured head-to-head in one container: origin/main a748911 alone is 2340801 bytes, this branch 2341801 \u2014 a delta of exactly 1000 bytes, all of it the AppHeader tab (label + inline SVG icon) plus four one-line registry entries (route slug maps, moduleAccent, moduleLoaderTheme, modulePrefetch). It is IRREDUCIBLE by construction: a module tab must render before its workspace chunk loads, so it is the one part of a new workspace that cannot be lazy. The workspace itself is behind lazy() and contributes nothing else here \u2014 bundle.notesRouteJsBytes carries its real weight, and the rich-text engine is a separate on-demand chunk. WHY A RAISE RATHER THAN AN OPTIMIZATION: main was ALREADY within 1189 bytes of the derived ceiling before this branch existed, so this metric now trips on essentially any feature \u2014 the same headroom problem the note above records for B1130/B1131, recurring exactly as predicted. Shaving the icon to squeeze under a ceiling main has already consumed would be a fake optimization that the next session pays for again. B1064 remains the metric owner for closing the real gap."
         },
         {
           "metric": "bundle.notesRouteJsBytes",
@@ -263,7 +270,7 @@
           "direction": "raise",
           "item": "B1291",
           "date": "2026-07-31",
-          "reason": "B1291 puts cloud sync behind the Notes storage seam. Measured head-to-head in ONE container: origin/main alone 576.9 KB vs this branch 588.0 KB, so this branch's own delta is +11.1 KB and main had ALREADY consumed 22.1 KB of the 32.0 KB band (B1310-B1318 round two, which passed inside it). The +11.1 KB is the store's sync ledger, the seed/push orchestration and the conflict bar. The transport and every merge decision live in lib/notesCloud.js, which is dynamic-imported and therefore NOT in this metric at all (9.3 KB, fetched only when signed in — ui-audit/verify-notes.mjs asserts a signed-out visit never requests it). siteRouteJsBytes and largestChunkBytes are BYTE-IDENTICAL to main. Not shaved further on purpose: the remaining bytes are the orchestration that must be reachable from the synchronous writeTree/writePage entry points, and hiding it behind a third lazy boundary would buy ~5 KB for a fifteen-value injection surface — the fake optimization this file's siteRouteJsBytes note warns about."
+          "reason": "B1291 puts cloud sync behind the Notes storage seam. Measured head-to-head in ONE container: origin/main alone 576.9 KB vs this branch 588.0 KB, so this branch's own delta is +11.1 KB and main had ALREADY consumed 22.1 KB of the 32.0 KB band (B1310-B1318 round two, which passed inside it). The +11.1 KB is the store's sync ledger, the seed/push orchestration and the conflict bar. The transport and every merge decision live in lib/notesCloud.js, which is dynamic-imported and therefore NOT in this metric at all (9.3 KB, fetched only when signed in \u2014 ui-audit/verify-notes.mjs asserts a signed-out visit never requests it). siteRouteJsBytes and largestChunkBytes are BYTE-IDENTICAL to main. Not shaved further on purpose: the remaining bytes are the orchestration that must be reachable from the synchronous writeTree/writePage entry points, and hiding it behind a third lazy boundary would buy ~5 KB for a fifteen-value injection surface \u2014 the fake optimization this file's siteRouteJsBytes note warns about."
         },
         {
           "metric": "bundle.totalJsBytes",
@@ -272,7 +279,7 @@
           "direction": "raise",
           "item": "B1291",
           "date": "2026-07-31",
-          "reason": "B1291 cloud sync for Notes. Head-to-head in ONE container: origin/main alone 4488.9 KB vs this branch 4509.2 KB = +20.3 KB, of which 9.3 KB is the lazily-loaded notesCloud chunk (transport + the pure merge decisions) and 11.0 KB is the store and workspace. This metric counts EVERY emitted chunk BY DESIGN — that is what makes it the honest catch-all — so no amount of further splitting reduces it: the code has to exist for a note to survive clearing browsing data, which is the whole point of the item. main had already consumed 76.9 KB of the 88.2 KB band before this branch existed. A future rise in this metric WITHOUT a new capability is a regression."
+          "reason": "B1291 cloud sync for Notes. Head-to-head in ONE container: origin/main alone 4488.9 KB vs this branch 4509.2 KB = +20.3 KB, of which 9.3 KB is the lazily-loaded notesCloud chunk (transport + the pure merge decisions) and 11.0 KB is the store and workspace. This metric counts EVERY emitted chunk BY DESIGN \u2014 that is what makes it the honest catch-all \u2014 so no amount of further splitting reduces it: the code has to exist for a note to survive clearing browsing data, which is the whole point of the item. main had already consumed 76.9 KB of the 88.2 KB band before this branch existed. A future rise in this metric WITHOUT a new capability is a regression."
         },
         {
           "metric": "bundle.largestChunkBytes",
@@ -281,7 +288,7 @@
           "direction": "raise",
           "item": "B1405",
           "date": "2026-08-03",
-          "reason": "NEW-1..NEW-5 (B1401-B1405) add 10.4 KB to the Site route's largest chunk — the roundabout geometry module + its canvas wiring, the acreage-chip hover/menu tier, and the URL-keyed parcel-source policy. Measured against main at ccbfcf2 with no changes applied: main ALONE already builds 22.7 KB over its own recorded baseline (the B1178 unreproducible-baseline defect), so 22.7 of the 23.7 KB above baseline is pre-existing drift this branch did not cause, and this feature's own 10.4 KB sits well inside the 32 KB headroom band. Payback is owned by B1064 (extract SitePlanner's panels into lazily-loaded children)."
+          "reason": "NEW-1..NEW-5 (B1401-B1405) add 10.4 KB to the Site route's largest chunk \u2014 the roundabout geometry module + its canvas wiring, the acreage-chip hover/menu tier, and the URL-keyed parcel-source policy. Measured against main at ccbfcf2 with no changes applied: main ALONE already builds 22.7 KB over its own recorded baseline (the B1178 unreproducible-baseline defect), so 22.7 of the 23.7 KB above baseline is pre-existing drift this branch did not cause, and this feature's own 10.4 KB sits well inside the 32 KB headroom band. Payback is owned by B1064 (extract SitePlanner's panels into lazily-loaded children)."
         },
         {
           "metric": "bundle.siteRouteJsBytes",
@@ -290,7 +297,7 @@
           "direction": "raise",
           "item": "B1401",
           "date": "2026-08-03",
-          "reason": "Re-seed onto a REAL BUILD OF MAIN (ccbfcf2), the same policy-migration shape B1344 used. The recorded 2286.9 KB is not reproducible from a clean clone — measured this session, main with zero changes builds 2322.2 KB, i.e. 35.2 KB above its own baseline (the filed B1178 defect), which was silently consuming the whole headroom band and left 0.1 KB for any change at all. This records what main actually builds; the B1401-B1405 feature growth (10.3 KB) then rides the band as intended. No optimization is claimed. Payback for the site route's bytes is owned by B1064."
+          "reason": "Re-seed onto a REAL BUILD OF MAIN (ccbfcf2), the same policy-migration shape B1344 used. The recorded 2286.9 KB is not reproducible from a clean clone \u2014 measured this session, main with zero changes builds 2322.2 KB, i.e. 35.2 KB above its own baseline (the filed B1178 defect), which was silently consuming the whole headroom band and left 0.1 KB for any change at all. This records what main actually builds; the B1401-B1405 feature growth (10.3 KB) then rides the band as intended. No optimization is claimed. Payback for the site route's bytes is owned by B1064."
         },
         {
           "metric": "bundle.totalJsBytes",
@@ -299,7 +306,7 @@
           "direction": "raise",
           "item": "B1414",
           "date": "2026-08-04",
-          "reason": "RE-RECORDS ACCUMULATED DRIFT, NOT THIS FEATURE'S COST — read the numbers before reusing this entry. B1414 (the right rail's parcel-tools menu) costs ~6.3 KB on the Site route, already net of ~0.8 KB paid back by deleting shipped-but-unused provenance data from lib/parcelActions.js. That 6.3 KB breached totalJsBytes by ~1 KB only because the band was ~90 percent consumed before this branch existed: the same CI run measured notesRouteJsBytes +22.9 KB, siteRouteJsBytes +18.1 KB and largestChunkBytes +17.8 KB over their baselines, none of it this feature. The baseline is therefore re-recorded at a measured build, exactly the 2026-07-30 precedent, because the alternative is a ceiling that any honest 7 KB feature breaches, which is the failure PERF-BUDGETS.md changed the shape to prevent. Deliberately NOT a blanket amnesty: siteRouteJsBytes and largestChunkBytes are left UNratcheted and still name B1064 as the owner of paying them back."
+          "reason": "RE-RECORDS ACCUMULATED DRIFT, NOT THIS FEATURE'S COST \u2014 read the numbers before reusing this entry. B1414 (the right rail's parcel-tools menu) costs ~6.3 KB on the Site route, already net of ~0.8 KB paid back by deleting shipped-but-unused provenance data from lib/parcelActions.js. That 6.3 KB breached totalJsBytes by ~1 KB only because the band was ~90 percent consumed before this branch existed: the same CI run measured notesRouteJsBytes +22.9 KB, siteRouteJsBytes +18.1 KB and largestChunkBytes +17.8 KB over their baselines, none of it this feature. The baseline is therefore re-recorded at a measured build, exactly the 2026-07-30 precedent, because the alternative is a ceiling that any honest 7 KB feature breaches, which is the failure PERF-BUDGETS.md changed the shape to prevent. Deliberately NOT a blanket amnesty: siteRouteJsBytes and largestChunkBytes are left UNratcheted and still name B1064 as the owner of paying them back."
         },
         {
           "metric": "bundle.notesRouteJsBytes",
@@ -332,7 +339,7 @@
           "date": "2026-08-07",
           "commit": "c55ce526",
           "commitSource": "recovered-2026-08-08",
-          "reason": "Shipped B230080 (the canvas clipboard hoisted above the plan-switch remount boundary, plus resolveClipFrame — the cross-plan coordinate decision — and revealPasted): +2.0 KB measured. Optimized first: the drawn-object and reference-drawing Ctrl+V paths had their placement logic collapsed into ONE shared pure decision (clipPlacement) instead of the two copies the brief warned would diverge; the three refusal messages share one tail; the modifier-label derivation was deduped to the existing MOD_LABEL. This raise records accumulated reality, not this feature's cost: clean main already measured 2367.3 KB, i.e. 45.1 KB of the 46.4 KB band was consumed by earlier merged work that never ratcheted, leaving 1.3 KB for the next feature of any size. B1064 still owns getting the route back down."
+          "reason": "Shipped B230080 (the canvas clipboard hoisted above the plan-switch remount boundary, plus resolveClipFrame \u2014 the cross-plan coordinate decision \u2014 and revealPasted): +2.0 KB measured. Optimized first: the drawn-object and reference-drawing Ctrl+V paths had their placement logic collapsed into ONE shared pure decision (clipPlacement) instead of the two copies the brief warned would diverge; the three refusal messages share one tail; the modifier-label derivation was deduped to the existing MOD_LABEL. This raise records accumulated reality, not this feature's cost: clean main already measured 2367.3 KB, i.e. 45.1 KB of the 46.4 KB band was consumed by earlier merged work that never ratcheted, leaving 1.3 KB for the next feature of any size. B1064 still owns getting the route back down."
         },
         {
           "metric": "bundle.totalJsBytes",
@@ -365,7 +372,7 @@
           "date": "2026-08-13",
           "commit": "35697b13fb2b661dac34e97289bd644c0bc94538",
           "sourceHash": "4479041a34d9e656",
-          "reason": "OWNER DECISION 2026-08-13, after main's push build had been red on this metric for 12+ consecutive merges and an audit found nothing to delete. Total JS counts EVERY emitted chunk, so the lazy-splitting that fixes the route metrics is a no-op here — closing the 183 KB gap meant removing ~12% of the app. The audit found: zero modules duplicated across chunks; zero dead code in the bundle (27 unreferenced source files exist, none bundled); every heavy dependency genuinely used and already lazily chunked (pdfjs-dist reads PDFs, pdf-lib writes them, the Anthropic SDK sits behind two dynamic imports, clipper-lib is core planner geometry). The growth is the features the owner asked for, not drift. Baseline moved to the measured value; TARGET deliberately left at the old baseline so the gap keeps reporting ABOVE TARGET, loudly and owned, instead of going quiet."
+          "reason": "OWNER DECISION 2026-08-13, after main's push build had been red on this metric for 12+ consecutive merges and an audit found nothing to delete. Total JS counts EVERY emitted chunk, so the lazy-splitting that fixes the route metrics is a no-op here \u2014 closing the 183 KB gap meant removing ~12% of the app. The audit found: zero modules duplicated across chunks; zero dead code in the bundle (27 unreferenced source files exist, none bundled); every heavy dependency genuinely used and already lazily chunked (pdfjs-dist reads PDFs, pdf-lib writes them, the Anthropic SDK sits behind two dynamic imports, clipper-lib is core planner geometry). The growth is the features the owner asked for, not drift. Baseline moved to the measured value; TARGET deliberately left at the old baseline so the gap keeps reporting ABOVE TARGET, loudly and owned, instead of going quiet."
         },
         {
           "metric": "bundle.siteRouteJsBytes",
@@ -376,7 +383,7 @@
           "date": "2026-08-13",
           "commit": "35697b13fb2b661dac34e97289bd644c0bc94538",
           "sourceHash": "4479041a34d9e656",
-          "reason": "OWNER DECISION 2026-08-13, same call as bundle.totalJsBytes. This metric IS reachable by lazy-splitting and the work continues (B407328 moved the screening hydrology engine off the boot path, -13.3 KB), but every remaining candidate is reached from the RENDER BODY rather than from an async gate, so each needs a lazy React panel rather than a dynamic import — a real refactor of SitePlanner.jsx, not the same shape as B407328. Rather than leave main's build red for the weeks that takes, the baseline moves to the measured value and the TARGET stays at 1562.5 KB, so the gap keeps reporting ABOVE TARGET, loudly and owned by B1064."
+          "reason": "OWNER DECISION 2026-08-13, same call as bundle.totalJsBytes. This metric IS reachable by lazy-splitting and the work continues (B407328 moved the screening hydrology engine off the boot path, -13.3 KB), but every remaining candidate is reached from the RENDER BODY rather than from an async gate, so each needs a lazy React panel rather than a dynamic import \u2014 a real refactor of SitePlanner.jsx, not the same shape as B407328. Rather than leave main's build red for the weeks that takes, the baseline moves to the measured value and the TARGET stays at 1562.5 KB, so the gap keeps reporting ABOVE TARGET, loudly and owned by B1064."
         },
         {
           "metric": "bundle.largestChunkBytes",
@@ -387,24 +394,35 @@
           "date": "2026-08-13",
           "commit": "35697b13fb2b661dac34e97289bd644c0bc94538",
           "sourceHash": "4479041a34d9e656",
-          "reason": "OWNER DECISION 2026-08-13, same call as bundle.totalJsBytes. The largest chunk is SitePlannerApp, and SitePlanner.jsx alone is 1488 KB of source inside it — 38% of the chunk and more than the next twenty modules combined. No dependency trimming touches that; shrinking it means extracting panels (pond inspector, yield, layers) into lazy React components, which is the B1064 work. Baseline moves to the measured value so main can go green; TARGET stays at 878.9 KB so the gap keeps reporting ABOVE TARGET, loudly and owned."
+          "reason": "OWNER DECISION 2026-08-13, same call as bundle.totalJsBytes. The largest chunk is SitePlannerApp, and SitePlanner.jsx alone is 1488 KB of source inside it \u2014 38% of the chunk and more than the next twenty modules combined. No dependency trimming touches that; shrinking it means extracting panels (pond inspector, yield, layers) into lazy React components, which is the B1064 work. Baseline moves to the measured value so main can go green; TARGET stays at 878.9 KB so the gap keeps reporting ABOVE TARGET, loudly and owned."
+        },
+        {
+          "metric": "bundle.foodRouteJsBytes",
+          "from": 0,
+          "to": 925460,
+          "direction": "raise",
+          "item": "B568400",
+          "date": "2026-08-16",
+          "commit": "9af49a1f3d49956b46104f5757df701cb40a40f7",
+          "sourceHash": "cdbb16c0a763f662",
+          "reason": "First measurement of the new /food route (FoodApp.jsx + FoodMap.jsx pulling the shared map-vendor/leaflet chunk); baseline seeded at 0 per the notesRouteJsBytes precedent, ratcheting to the real measured value from a clean build."
         }
       ]
     }
   },
   "runtime": {
     "$comment": [
-      "Browser-measured, by ui-audit/perf-harness.mjs. NOT gated in the required CI build check —",
+      "Browser-measured, by ui-audit/perf-harness.mjs. NOT gated in the required CI build check \u2014",
       "frame timing and heap on a shared CI runner are too noisy to gate a merge on, and the aerial",
       "budget needs live external tile hosts. Run on demand; see docs/PERF-BUDGETS.md for why and for",
       "what IS gated.",
       "",
       "THE REFERENCE SCENARIO WAS REPLACED 2026-07-31 (NEW-1), AND THE FRAME SEEDS BEFORE THAT DATE",
-      "ARE WITHDRAWN — the SECOND withdrawal of these two metrics, for a reason unrelated to the",
+      "ARE WITHDRAWN \u2014 the SECOND withdrawal of these two metrics, for a reason unrelated to the",
       "first. The 2026-07-29 re-seed fixed the INSTRUMENT (a hidden tab starving rAF). It did not,",
       "and could not, fix the SCENE or the GESTURE, and both were broken:",
       "  1. THE SCENE HAD THE EXPENSIVE WORK TAKEN OUT. The hand-authored stand-in's road was a",
-      "     RECTANGLE — {type:'road', cx, cy, w, h}, no `pts`, no `vtx` — and it had NO PONDS and no",
+      "     RECTANGLE \u2014 {type:'road', cx, cy, w, h}, no `pts`, no `vtx` \u2014 and it had NO PONDS and no",
       "     polygon elements at all. So roadNet / teeJunctionsOf / driveJunctionsOf / dissolveRings",
       "     and the whole of lib/roadGeometry.js, plus lib/detentionRules.js, lib/floodplainMitigation",
       "     .js and the pond ledger, executed ZERO TIMES in the benchmark that certified them.",
@@ -419,13 +437,13 @@
       "",
       "WHAT THAT COST, MEASURED AND REPORTED PLAINLY RATHER THAN SMOOTHED: canvas DOM nodes went",
       "1197 -> 2822 at the innermost rung (+136%) and peak JS heap 41.7 -> 68.8-98.0 MB. The frame",
-      "medians did NOT move at 1x (16.7 / 16.7, 3 reps) — not because the scene is free, but because",
+      "medians did NOT move at 1x (16.7 / 16.7, 3 reps) \u2014 not because the scene is free, but because",
       "this container has no dynamic range at 1x: it renders the heavier scene at a full 60 fps too.",
       "NO CEILING WAS RAISED to accommodate any of this, and B1178 remains open and unexplained.",
       "",
       "THE INSTRUMENT WITH DYNAMIC RANGE IS `--cpu-throttle N`. On the same build and scene at 4x,",
-      "the pan runs at 14.8 fps (49.9 ms median) and the WHEEL ZOOM at 6.4 fps — 199.9 ms median,",
-      "250 ms p90 — which is the first time any instrument in this repo has reproduced the owner's",
+      "the pan runs at 14.8 fps (49.9 ms median) and the WHEEL ZOOM at 6.4 fps \u2014 199.9 ms median,",
+      "250 ms p90 \u2014 which is the first time any instrument in this repo has reproduced the owner's",
       "'I scroll out and it takes probably a whole second'. Emulated numbers are MEASURED BUT NEVER",
       "JUDGED against anything below: these ceilings describe a 1x machine, and the ratchet refuses",
       "an emulated run outright. Use them only to compare two builds at identical settings.",
@@ -439,7 +457,7 @@
       "localFloor": 999,
       "unit": "ms",
       "what": "Navigation start until the planner canvas actually responds to a drag: canvas mounted AND a synthetic pointerdown/move/up round-trip commits a frame.",
-      "note": "PROVISIONAL CEILING — not yet measured under trustworthy conditions. The owner's 2026-07-28 pass deliberately did NOT report a TTFD number, and warned that first-contentful-paint (328ms) is a different, much earlier moment that must not be read as TTFD. This harness defines it; the sandbox cannot measure it honestly because the render-blocking webfont stylesheet is egress-blocked and inflates every paint timing. localFloor is what the stand-in scenario measures locally with all cross-origin traffic aborted — a lower bound on lighter geometry, NOT a production figure. Re-seed the ceiling from the first production run."
+      "note": "PROVISIONAL CEILING \u2014 not yet measured under trustworthy conditions. The owner's 2026-07-28 pass deliberately did NOT report a TTFD number, and warned that first-contentful-paint (328ms) is a different, much earlier moment that must not be read as TTFD. This harness defines it; the sandbox cannot measure it honestly because the render-blocking webfont stylesheet is egress-blocked and inflates every paint timing. localFloor is what the stand-in scenario measures locally with all cross-origin traffic aborted \u2014 a lower bound on lighter geometry, NOT a production figure. Re-seed the ceiling from the first production run."
     },
     "firstAerialCoverageMs": {
       "ceiling": 9000,
@@ -456,16 +474,16 @@
       "unit": "ms",
       "what": "Median frame time during a scripted drag across the planner canvas.",
       "seededFrom": "ui-audit/perf-harness.mjs, headless, perf-reference-goose-creek, 2026-07-31 (280 samples at 59.2 fps, tab visible, view panned)",
-      "note": "RE-SEEDED 2026-07-29, and the previous seed is WITHDRAWN. The old numbers (ceiling 24, measured 20) came from a browser session whose tab visibility could not be guaranteed; that surface reports document.visibilityState === 'hidden', and Chrome SUSPENDS requestAnimationFrame in a backgrounded tab — six real drag gestures there produced ZERO frames, and sample counts wandering 1525 -> 316 -> 0 across otherwise-identical runs are the signature of that throttling, not of a performance change. So the 20ms was a median over a starved sample, of unknown provenance, and it must not be treated as measured truth. The instrument of record is now perf-harness.mjs run headless, where the page is guaranteed visible and rAF runs at full rate, and where the harness now REFUSES to report a median at all if the tab is not visible or the observed rate falls below 30 fps (ui-audit/lib/frameSampling.mjs). SCOPE, stated plainly: this ceiling describes the committed reference scenario in that harness, which is LIGHTER than Sylvestri / Concept C — it catches a render regression in the reference scene, it is NOT a claim about the owner's plan on production. Confirming production needs a signed-in live run on an instrument with guaranteed visibility, which a Cowork browser session is not (V480(e) / V481(g))."
+      "note": "RE-SEEDED 2026-07-29, and the previous seed is WITHDRAWN. The old numbers (ceiling 24, measured 20) came from a browser session whose tab visibility could not be guaranteed; that surface reports document.visibilityState === 'hidden', and Chrome SUSPENDS requestAnimationFrame in a backgrounded tab \u2014 six real drag gestures there produced ZERO frames, and sample counts wandering 1525 -> 316 -> 0 across otherwise-identical runs are the signature of that throttling, not of a performance change. So the 20ms was a median over a starved sample, of unknown provenance, and it must not be treated as measured truth. The instrument of record is now perf-harness.mjs run headless, where the page is guaranteed visible and rAF runs at full rate, and where the harness now REFUSES to report a median at all if the tab is not visible or the observed rate falls below 30 fps (ui-audit/lib/frameSampling.mjs). SCOPE, stated plainly: this ceiling describes the committed reference scenario in that harness, which is LIGHTER than Sylvestri / Concept C \u2014 it catches a render regression in the reference scene, it is NOT a claim about the owner's plan on production. Confirming production needs a signed-in live run on an instrument with guaranteed visibility, which a Cowork browser session is not (V480(e) / V481(g))."
     },
     "frameP90Ms": {
       "ceiling": 40,
       "target": 33,
       "measured": 16.7,
       "unit": "ms",
-      "what": "90th-percentile frame time during the same scripted drag — the stutter the owner actually feels.",
+      "what": "90th-percentile frame time during the same scripted drag \u2014 the stutter the owner actually feels.",
       "seededFrom": "ui-audit/perf-harness.mjs, headless, perf-reference-goose-creek, 2026-07-31 (280 samples at 59.2 fps, tab visible, view panned)",
-      "note": "RE-SEEDED 2026-07-29 alongside frameMedianMs, same withdrawal of the same untrustworthy seed — the old 96 ceiling / 80 measured came from that hidden-tab session (its later 'post-fix' sample of p90 120 over 316 frames is the same artefact, which is why neither is kept). The reference scene runs a clean 60fps headless, so the ceiling is the measurement plus real headroom rather than pinned to it: p90 is the metric a single scheduler hiccup on a shared runner moves most, and a ceiling that trips on machine noise teaches people to re-run until green. Read the SCOPE note on frameMedianMs before quoting this number for production."
+      "note": "RE-SEEDED 2026-07-29 alongside frameMedianMs, same withdrawal of the same untrustworthy seed \u2014 the old 96 ceiling / 80 measured came from that hidden-tab session (its later 'post-fix' sample of p90 120 over 316 frames is the same artefact, which is why neither is kept). The reference scene runs a clean 60fps headless, so the ceiling is the measurement plus real headroom rather than pinned to it: p90 is the metric a single scheduler hiccup on a shared runner moves most, and a ceiling that trips on machine noise teaches people to re-run until green. Read the SCOPE note on frameMedianMs before quoting this number for production."
     },
     "peakHeapMB": {
       "ceiling": 160,
@@ -474,7 +492,7 @@
       "localFloor": 56.9,
       "unit": "MB",
       "what": "Peak performance.memory.usedJSHeapSize across a scripted pan/zoom + overlay-toggle loop.",
-      "note": "JS HEAP ONLY, not tab memory. performance.measureUserAgentSpecificMemory() is unavailable on planyr.io (no cross-origin isolation), so decoded tile bitmaps and GPU memory are invisible here — the owner observed ~555MB for the tab while the JS heap peaked at 134.6MB. Do not read this budget as a tab-memory budget."
+      "note": "JS HEAP ONLY, not tab memory. performance.measureUserAgentSpecificMemory() is unavailable on planyr.io (no cross-origin isolation), so decoded tile bitmaps and GPU memory are invisible here \u2014 the owner observed ~555MB for the tab while the JS heap peaked at 134.6MB. Do not read this budget as a tab-memory budget."
     },
     "aerialTileRequests": {
       "ceiling": 240,
@@ -483,7 +501,7 @@
       "localFloor": 182,
       "unit": "requests",
       "what": "Aerial basemap tile requests ISSUED per scenario load, counted across all zoom levels.",
-      "note": "ABOVE TARGET — 221 on the owner's baseline vs 120. Counted as REQUESTS, not bytes: cross-origin tile responses carry no Timing-Allow-Origin, so transferSize reads 0 and a byte budget would silently never fire. Counting requests ISSUED (not completed) also keeps the metric meaningful where tile hosts are blocked, as they are in the sandbox — the app still asks for 182 tiles there."
+      "note": "ABOVE TARGET \u2014 221 on the owner's baseline vs 120. Counted as REQUESTS, not bytes: cross-origin tile responses carry no Timing-Allow-Origin, so transferSize reads 0 and a byte budget would silently never fire. Counting requests ISSUED (not completed) also keeps the metric meaningful where tile hosts are blocked, as they are in the sandbox \u2014 the app still asks for 182 tiles there."
     },
     "ratchetLog": {
       "$comment": [
@@ -491,10 +509,10 @@
         "half above learned this lesson first; the frame metrics had to learn it twice, because a",
         "runtime number cannot be measured from a file and so kept being typed in by hand with a",
         "paragraph of justification bolted onto its `note`. `npm run perf:ratchet -- --metric",
-        "runtime.<name> --from-harness <a perf-harness --json run> --item … --reason …` now takes",
+        "runtime.<name> --from-harness <a perf-harness --json run> --item \u2026 --reason \u2026` now takes",
         "the value from the INSTRUMENT'S OWN OUTPUT and refuses the run outright if it was emulated,",
         "if the frame sampler raised a fault, or if the scripted drag never panned. A metric with no",
-        "`seededFrom` (peakHeapMB, aerialTileRequests — production figures) cannot be written at all.",
+        "`seededFrom` (peakHeapMB, aerialTileRequests \u2014 production figures) cannot be written at all.",
         "The array is `runtimeRatchetEntries`, not `entries`, so the two logs are never confusable."
       ],
       "runtimeRatchetEntries": [
@@ -535,8 +553,8 @@
     "runtime.firstAerialCoverageMs": "B1040 / V477 live check (re-seed the provisional ceiling from a production run; tile hosts are unreachable from the sandbox)",
     "bundle.siteRouteJsBytes": "B1064 (extract SitePlanner's panels into lazily-loaded child components) -- B1042 did the dynamic-import half and is Done",
     "bundle.largestChunkBytes": "B1064 (extract SitePlanner's panels into lazily-loaded child components) -- B1042 did the dynamic-import half and is Done; see this metric's note for the measured floor that blocks the rest",
-    "runtime.frameMedianMs": "V480(e) / V481(g) — a PRODUCTION frame-time reading on the real Sylvestri scenario, from an instrument with guaranteed tab visibility (NOT a Cowork browser session; see this metric's note). The reference scene already meets the 16.7ms target headless, so the remaining gap between ceiling and target is measurement headroom, not known slowness.",
-    "runtime.frameP90Ms": "V480(e) / V481(g) — a PRODUCTION frame-time reading on the real Sylvestri scenario, from an instrument with guaranteed tab visibility (NOT a Cowork browser session; see this metric's note). Until that exists the ceiling describes the reference scene only.",
+    "runtime.frameMedianMs": "V480(e) / V481(g) \u2014 a PRODUCTION frame-time reading on the real Sylvestri scenario, from an instrument with guaranteed tab visibility (NOT a Cowork browser session; see this metric's note). The reference scene already meets the 16.7ms target headless, so the remaining gap between ceiling and target is measurement headroom, not known slowness.",
+    "runtime.frameP90Ms": "V480(e) / V481(g) \u2014 a PRODUCTION frame-time reading on the real Sylvestri scenario, from an instrument with guaranteed tab visibility (NOT a Cowork browser session; see this metric's note). Until that exists the ceiling describes the reference scene only.",
     "runtime.aerialTileRequests": "companion map-side perf session, 2026-07-28 nine-item run (tile-footprint reduction)"
   }
 }

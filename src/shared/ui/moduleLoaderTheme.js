@@ -16,6 +16,7 @@ export const LOADER_SKINS = {
   "doc-review":   { kind: "gantt", label: "Loading review…" },
   "library":      { kind: "gantt", label: "Opening library…" },  // B524: was hitting the generic "Loading…" fallback
   "notes":        { kind: "gantt", label: "Opening notes…" },
+  "food":         { kind: "gantt", label: "Loading food places…" },
 };
 
 const FALLBACK = "#e8590c";

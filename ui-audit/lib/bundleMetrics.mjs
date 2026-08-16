@@ -35,6 +35,7 @@ export const ROUTE_KEYS = {
   library: { src: "src/workspaces/library/Library.jsx", stem: "Library" },
   scheduler: { src: "src/workspaces/scheduler/Scheduler.jsx", stem: "Scheduler" },
   notes: { src: "src/workspaces/notes/Notes.jsx", stem: "Notes" },
+  food: { src: "src/workspaces/food/FoodApp.jsx", stem: "FoodApp" },
 };
 
 /* Chunk stem = the file name with Vite's content hash and extension stripped, so budgets can
@@ -219,6 +220,10 @@ export function statsSnapshot(measured, attribution, meta = {}) {
       // written before this field existed simply reports `null` and falls back to the
       // un-attributed verdict.
       notesRouteJsBytes: measured.routes.notes?.bytes ?? null,
+      // B568400 — the /food route, measured separately forever per the owner's explicit ask
+      // that a restaurant tracker never share a metric with (or draw headroom from) the
+      // routes that matter to the actual product.
+      foodRouteJsBytes: measured.routes.food?.bytes ?? null,
       totalJsBytes: measured.totalJsBytes,
       largestChunkBytes: measured.largest.bytes,
       largestChunkStem: measured.largest.stem,
@@ -233,6 +238,7 @@ export function statsSnapshot(measured, attribution, meta = {}) {
 export const METRIC_UNITS = {
   siteRouteJsBytes: "bytes",
   notesRouteJsBytes: "bytes",
+  foodRouteJsBytes: "bytes",
   totalJsBytes: "bytes",
   largestChunkBytes: "bytes",
   siteRouteChunks: "chunks",

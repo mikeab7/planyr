@@ -37,6 +37,7 @@ const IMPORTERS = {
   "library":      () => import("../workspaces/library/Library.jsx"),
   "scheduler":    () => import("../workspaces/scheduler/Scheduler.jsx"),
   "notes":        () => import("../workspaces/notes/Notes.jsx"),
+  "food":         () => import("../workspaces/food/FoodApp.jsx"),
 };
 
 // The Schedule iframe loads this exact path (absolute from the site root); mirror
