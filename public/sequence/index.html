@@ -12911,12 +12911,25 @@ function buildPDFHtml(cfg, data, forPreview) {
     const isParent = tasks.some(x => x.parentId === t.id);
     return isParent ? (rolled[t.id] || t.health) : computeDisplayHealth(t, data.settings, byId);
   };
+  // The grid blanks the Status/Health cell for an EXPANDED parent (Cell(), case "status"/"health"
+  // — B222/B211: the rolled color only ever shows on the COLLAPSED row, because the children are
+  // ALSO shown as their own rows right below it). The exhibit's analog of "expanded" is its OWN
+  // `collapsedSet` — not the live task's `.isExpanded` — because collapsedSet is what actually
+  // decides whether this task's children appear as separate rows in THIS SAME document
+  // (visibleTasks() and the preview's own ▾/▸ collapse triangle both key off it too, and a user
+  // can toggle it independently of the live grid via Expand/Collapse All or the triangle). Using
+  // `.isExpanded` instead would self-contradict the exhibit's own triangle the moment someone
+  // collapses/expands a row inside the PDF preview without touching the live grid. Defaults agree
+  // with `.isExpanded` (collapsedIds is seeded from it — PDFExportModal's seedCollapsed), so this
+  // is a strict improvement, not a behavior change, for every schedule that hasn't been
+  // interactively re-collapsed inside the export preview (B575904, PDF-PARITY).
+  const isExpandedParentOf = (t, tasks, projId) => tasks.some(x => x.parentId === t.id) && !collapsedSet.has(projId + ":" + t.id);
   const cellVal = (t,k,tasks,projId) => {    switch(k){
       case "start": case "end": return fmtD(t[k]);
       case "duration": return `${t.duration}d`;
-      case "percentComplete": return `${t.health==="green" ? 100 : (t.percentComplete||0)}%`;  // match the Gantt bar's green→100 convention
+      case "percentComplete": return `${displayHealthOf(t,tasks)==="green" ? 100 : (t.percentComplete||0)}%`;  // match the Gantt bar's green→100 convention
       case "predecessors": return (t.predecessors||[]).map(p=>p.id||p).join(", ");
-      case "health":{const dh=displayHealthOf(t,tasks);const h=HC[dh]||{l:dh,c:"#94a3b8"};return `<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:${h.c};flex-shrink:0;display:inline-block"></span>${escapeHtml(h.l)}</span>`;}
+      case "health":{if(isExpandedParentOf(t,tasks,projId)) return "";const dh=displayHealthOf(t,tasks);const h=HC[dh]||{l:dh,c:"#94a3b8"};return `<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:${h.c};flex-shrink:0;display:inline-block"></span>${escapeHtml(h.l)}</span>`;}
       case "name":{const dep=getDepth(tasks,t.id);const ind=dep*14;const fw=dep===0?700:dep===1?600:400;const fs=dep===0?10.5:dep===1?10:9.5;const isP=tasks.some(x=>x.parentId===t.id);const key=projId+":"+t.id;const col=collapsedSet.has(key);const tri=(forPreview&&isP)?`<span class="pl-tri${col?"":" open"}" data-collapse="${key}" title="${col?"Expand":"Collapse"}">${col?"\u25B8":"\u25BE"}</span>`:"";return `<span class="pl-name" style="padding-left:${ind}px;font-weight:${fw};font-size:${fs}px">${tri}${escapeHtml(t.name)}</span>`;}
       case "cost":{const v=costOfIn(tasks,t.id);return v?("$"+Number(v).toLocaleString("en-US",{maximumFractionDigits:2})):"";}
       default: return escapeHtml(t[k]);
@@ -12952,12 +12965,12 @@ function buildPDFHtml(cfg, data, forPreview) {
       return {proj, tasks};
     });
     // Plain-text form of each cell, for width measurement (cellVal returns marked-up HTML).
-    const cellText=(t,k,tasks)=>{ switch(k){
+    const cellText=(t,k,tasks,projId)=>{ switch(k){
       case "start": case "end": return fmtD(t[k]);
       case "duration": return `${t.duration}d`;
-      case "percentComplete": return `${t.health==="green" ? 100 : (t.percentComplete||0)}%`;  // match the Gantt bar's green→100 convention
+      case "percentComplete": return `${displayHealthOf(t,tasks)==="green" ? 100 : (t.percentComplete||0)}%`;  // match the Gantt bar's green→100 convention
       case "predecessors": return (t.predecessors||[]).map(p=>p.id||p).join(", ");
-      case "health": { const dh=displayHealthOf(t,tasks); const h=HC[dh]; return h?h.l:(dh||""); }
+      case "health": { if(isExpandedParentOf(t,tasks,projId)) return ""; const dh=displayHealthOf(t,tasks); const h=HC[dh]; return h?h.l:(dh||""); }
       case "name": return t.name==null?"":String(t.name);
       case "cost": { const v=costOfIn(tasks,t.id); return v?("$"+Number(v).toLocaleString("en-US",{maximumFractionDigits:2})):""; }
       default: return t[k]==null?"":String(t[k]);
@@ -12985,7 +12998,7 @@ function buildPDFHtml(cfg, data, forPreview) {
             const tri=forPreview&&proj.tasks.some(x=>x.parentId===t.id)?15:0; // collapse triangle (preview only)
             w=approxTextPx(cellText(t,'name',proj.tasks),fs)+dep*14+tri;
           } else {
-            w=approxTextPx(cellText(t,c.k,proj.tasks),f.fs)+f.extra;
+            w=approxTextPx(cellText(t,c.k,proj.tasks,proj.id),f.fs)+f.extra;
           }
           if(w>base) base=w;
         }
