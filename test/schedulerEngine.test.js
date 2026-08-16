@@ -631,8 +631,16 @@ describe("anti-drift: the schedule-output fixes still exist in the real source",
   it("the on-screen Gantt renders a duration-0 parent as a bracket, not a diamond", () => {
     expect(src).toMatch(/\(isMilestone && !isSummary\) \? \(<>/);
   });
-  it("the exhibit table %Done matches the green→100 bar convention", () => {
-    expect(src).toMatch(/return `\$\{t\.health==="green" \? 100 : \(t\.percentComplete\|\|0\)\}%`/);
+  it("the exhibit table %Done matches the green→100 bar convention, using the COMPUTED health", () => {
+    // ⛔ UPDATED (schedule-export-pdf-parity session, B575904 defect 2): this used to pin
+    // `t.health==="green"` — the parent/leaf's own RAW stored field — which silently printed "0%"
+    // next to a Status column already reading "Complete" for a rolled-green parent (rolled by
+    // rule, not by its own raw storage): a self-contradictory row in the SAME export, live-measured
+    // pre-fix. Both percentComplete cases (cellVal and its cellText width-measurement twin) now
+    // route through the same displayHealthOf(t,tasks) the (already-fixed, #1074) Status column
+    // uses. Verified live in ui-audit/verify-schedule-export-health-colours.mjs's
+    // "Rolled Complete Parent" / "Auto Rollup Collapsed Parent" (control) percentComplete checks.
+    expect(src).toMatch(/return `\$\{displayHealthOf\(t,tasks\)==="green" \? 100 : \(t\.percentComplete\|\|0\)\}%`/);
   });
   it("MasterView uses rolled health for parents (shared helper) and live deps", () => {
     // NEW (group-header-rule-rollup): computeRolledHealth now takes `settings` too, so a leaf
@@ -2714,10 +2722,19 @@ describe("NEW-schedule-health — group headers: the engine NEVER runs on a pare
     // two surfaces are not literally comparable on screen once expanded — there is no color to
     // compare against. What DOES have to hold, and does: the rolled MAP entry itself is exactly
     // the same whether the parent is collapsed or expanded, because isExpanded never enters the
-    // computation at all. The PDF export has no such gate (buildPDFHtml's cellVal always renders
-    // the computed health for whatever rows collapsedIds includes), so it shows this value
-    // unconditionally — verified live in ui-audit/verify-schedule-export-health-colours.mjs's
-    // "autoRollupExpanded" scenario.
+    // computation at all.
+    // ⛔ UPDATED (schedule-export-pdf-parity session, B575904): the PDF export previously had NO
+    // such gate at all and unconditionally printed the rolled colour even for an expanded parent
+    // — a PDF-PARITY violation (the export showed a colour the screen never did). Fixed by
+    // blanking buildPDFHtml's health cell whenever the task is a parent AND the EXHIBIT's own
+    // collapsedSet treats it as expanded (children rendered as separate rows in that document) —
+    // not task.isExpanded directly, because the exhibit's collapse state is its own, independently
+    // user-toggleable copy (seeded from task.isExpanded, but divergeable via the preview's own
+    // collapse triangle or Expand/Collapse All). computeRolledHealth/computeDisplayHealth
+    // themselves stay exactly as this test proves — pure of isExpanded — the blanking lives one
+    // layer up, at buildPDFHtml's own cellVal/cellText, mirroring where the grid's gate lives too.
+    // Verified live in ui-audit/verify-schedule-export-health-colours.mjs's "autoRollupExpanded"
+    // scenario (now checks BOTH surfaces are blank) and its collapsedSet-override proof.
     const collapsed = [
       { id: 1, parentId: null, health: "gray", isExpanded: false },
       { id: 2, parentId: 1, health: "gray", healthOverride: false, end: "2020-01-01", percentComplete: 0 },

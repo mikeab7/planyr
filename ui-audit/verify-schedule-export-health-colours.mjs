@@ -60,6 +60,44 @@
 //      monkey-patch of `computeRolledHealth` was tried first and doesn't work: it's a `const`
 //      closed over by every real caller's lexical scope, not a `window` property, so
 //      `window.computeRolledHealth = …` shadows nothing.)
+//
+// ⛔ EXTENDED AGAIN (schedule-export-pdf-parity session, B575904): TWO more PDF-PARITY violations
+// in buildPDFHtml, live-measured (not code-read) before fixing, plus a verification gap closed.
+//   1. EXPANDED PARENT PRINTED A COLOUR THE SCREEN NEVER SHOWS. The grid blanks an EXPANDED
+//      parent's status/health cell (Cell(), case "status"/"health" — B222/B211: the rolled colour
+//      only ever shows on a COLLAPSED row, since an expanded row's children are ALSO shown
+//      separately right below it). buildPDFHtml had no such concept at all. Measured live
+//      pre-fix: "Auto Rollup Expanded Parent" read screen="null" (blank, by design) but
+//      export="Needs Attn." (#dc2626) — same task, same data, same moment. Fixed by blanking
+//      buildPDFHtml's health cell whenever the task is a parent AND the EXHIBIT's own
+//      `collapsedSet` treats it as expanded (children rendered as separate rows in THIS
+//      document) — not `task.isExpanded` directly, because the exhibit has its OWN independent,
+//      user-toggleable collapse state (seeded from `task.isExpanded` by PDFExportModal's
+//      `seedCollapsed`, but freely divergeable via Expand/Collapse All or the preview's own ▾/▸
+//      triangle — the same `collapsedSet` that already gates `visibleTasks()` and that triangle).
+//      Proven discriminating below by an explicit override call that inverts collapsedIds against
+//      what seedCollapsed would produce for both an expanded and a collapsed parent — if the fix
+//      ever regressed to reading `task.isExpanded` directly, that override fails while the main
+//      TASKS loop (whose default collapsedIds happens to agree with isExpanded) stays green. The
+//      harness's own cfg-building was also fixed to seed collapsedIds from isExpanded the way the
+//      real app does — it previously hardcoded `collapsedIds: []`, a state the real app never
+//      produces, which would have hidden this defect from ever being caught here.
+//   2. PERCENT COLUMN READ RAW STORED HEALTH. Both `percentComplete` cases (`cellVal` and its
+//      `cellText` width-measurement twin) read raw `t.health==="green"` for the "green shows 100%"
+//      convention — same shape as #1074's original Status-column bug, deliberately left untouched
+//      by both #1074 and #1075. Measured live pre-fix on a rolled-green parent (all children
+//      complete, parent's own raw health/percentComplete both stale defaults): the SAME exported
+//      row read Status="Complete" (already fixed, rolled) next to Percent="0%" — self-contradictory
+//      within the export's own output. Fixed by routing both through the same `displayHealthOf`
+//      already used by the Status column.
+//   3. VERIFICATION GAP: GanttView had NEVER been live-rendered by any guard here — every prior run
+//      forced d.view="grid" and only read GridView's DOM, so the claim that GanttView also receives
+//      the rule-computed rollup rested on a source-code read of one shared `rolledHealthMap`
+//      useMemo, never on watching a bar/row actually turn red. Closed by switching to the real
+//      Gantt view via the real view-switcher button and reading the real rendered row background
+//      (B222 keeps a Gantt bar's own fill a neutral identity color always — the ROW background is
+//      what actually carries health/rollup color) for the #1075 core repro scenario plus two leaf
+//      cases and the expanded-parent neutral-row control.
 import { chromium } from "playwright";
 import { createServer } from "node:http";
 import { readFile, mkdir } from "node:fs/promises";
@@ -138,6 +176,17 @@ const INJECT = `<script>(function(){try{
         health:"gray",healthOverride:false,isExpanded:false}),
     mk({id:961,name:"Milestone Rollup Child",start:iso(-10),end:iso(-10),duration:0,durValue:0,percentComplete:0,
         health:"gray",healthOverride:false,parentId:960}),
+    // B575904 defect 2 — a collapsed parent whose ROLLED health is green (both children complete)
+    // though the parent's OWN raw .health/.percentComplete are untouched stale defaults (gray/0).
+    // The old buggy percentComplete read t.health==="green" (the parent's own raw field, never
+    // "green") and fell through to the parent's own raw percentComplete (0) — printing "Complete
+    // · 0%" in the SAME exported row, self-contradictory.
+    mk({id:970,name:"Rolled Complete Parent",start:iso(-20),end:iso(-5),duration:15,durValue:15,percentComplete:0,
+        health:"gray",healthOverride:false,isExpanded:false}),
+    mk({id:971,name:"Rolled Complete Child A",start:iso(-20),end:iso(-15),duration:5,durValue:5,percentComplete:100,
+        health:"gray",healthOverride:false,parentId:970}),
+    mk({id:972,name:"Rolled Complete Child B",start:iso(-15),end:iso(-5),duration:10,durValue:10,percentComplete:100,
+        health:"gray",healthOverride:false,parentId:970}),
   ];
   d.settings = Object.assign({}, d.settings, { healthRules: [
     {id:"r-complete", type:"complete", color:"green"},
@@ -231,31 +280,39 @@ const TASKS = [
   { label: "autoOverdueMilestone",    name: "Auto Overdue Milestone",         expectAuto: "Needs Attn." },
   { label: "groupHeader",             name: "Group Header Parent",            expectAuto: "Needs Attn.",  control: true },
   { label: "autoRollupCollapsed",     name: "Auto Rollup Collapsed Parent",   expectAuto: "Needs Attn.",  rollupFix: true },
-  // The grid/Gantt deliberately blank the status cell for an EXPANDED parent (pre-existing
-  // B222/B211 design, unrelated to this fix — see the "collapsed vs expanded" test in
-  // test/schedulerEngine.test.js for the full explanation and the data-layer proof that the
-  // rolled value itself doesn't depend on isExpanded). So this scenario's on-screen read is
-  // expected to be BLANK, not a color — only the export is checked against expectAuto.
-  { label: "autoRollupExpanded",      name: "Auto Rollup Expanded Parent",    expectAuto: "Needs Attn.",  rollupFix: true, expectScreenBlank: true },
+  // The grid deliberately blanks the status cell for an EXPANDED parent (pre-existing B222/B211
+  // design — see the "collapsed vs expanded" test in test/schedulerEngine.test.js for the
+  // data-layer proof that the rolled value itself doesn't depend on isExpanded).
+  // ⛔ B575904: buildPDFHtml had NO such concept at all and printed a colour here the screen never
+  // shows for the same task at the same moment — a PDF-PARITY violation. Fixed by blanking the
+  // export's health cell whenever the EXHIBIT's own collapsedSet treats this parent as expanded
+  // (children shown as separate rows in this document) — the harness now seeds cfg.collapsedIds
+  // from task.isExpanded exactly like the real PDFExportModal's seedCollapsed does, so this
+  // scenario's un-collapsed task.isExpanded:true genuinely produces an expanded exhibit row.
+  // Both surfaces must now be blank together.
+  { label: "autoRollupExpanded",      name: "Auto Rollup Expanded Parent",    expectAuto: "Needs Attn.",  rollupFix: true, expectBothBlank: true },
   { label: "nestedRollupGrandparent", name: "Nested Rollup Grandparent",      expectAuto: "Needs Attn.",  rollupFix: true },
   { label: "mixedDatesRollup",        name: "Mixed Dates Rollup Parent",      expectAuto: "Needs Attn.",  rollupFix: true },
   { label: "milestoneRollup",         name: "Milestone Rollup Parent",        expectAuto: "Needs Attn.",  rollupFix: true },
+  { label: "rolledCompleteParent",    name: "Rolled Complete Parent",         expectAuto: "Complete",     rollupFix: true },
 ];
 
 // ── On-screen read: the StatusPicker's own text node, driven by dispHealth (computeDisplayHealth
 // for leaves, rolledHealthMap for a collapsed parent) — exactly what a human reads in the grid.
 // Looked up by NAME, not the id the fixture assigned: normalizeIds() renumbers every task on load
 // (measured: my seeded 901–912 came back as 1–6), so a hardcoded id would silently match nothing.
-const onScreen = await page.evaluate((names) => {
+const onScreenRead = await page.evaluate((names) => {
   const rows = [...document.querySelectorAll("[data-task-row]")];
-  const out = {};
+  const out = {}, found = {};
   for (const name of names) {
     const row = rows.find(r => (r.textContent || "").includes(name));
+    found[name] = !!row;
     const statusEl = row ? row.querySelector('[data-picker-cell^="status-"]') : null;
     out[name] = statusEl ? statusEl.textContent.trim() : null;
   }
-  return out;
+  return { out, found };
 }, TASKS.map(t => t.name));
+const onScreen = onScreenRead.out, onScreenFound = onScreenRead.found;
 await page.screenshot({ path: OUT + "schedule-onscreen-grid.png", fullPage: false });
 
 // ── Export read: drive the REAL openPrint() path — buildPDFHtml() called in-page, written into a
@@ -265,6 +322,15 @@ const opened = await page.evaluate(() => {
   if (typeof buildPDFHtml !== "function") return { ok: false, why: "buildPDFHtml not reachable in page scope" };
   const d = window.__PLANAR_DATA__;
   const pid = d.aPid != null ? String(d.aPid) : String(Object.keys(d.projects)[0]);
+  // Seed collapsedIds exactly the way PDFExportModal's own seedCollapsed does (a parent whose
+  // task.isExpanded===false starts collapsed in the exhibit too) — never hardcode [] here. The
+  // exhibit's OWN collapsedSet (not task.isExpanded) is what buildPDFHtml actually renders
+  // children-visible-or-not from, so a harness that always passes [] tests a state the real app
+  // never produces and would hide the B575904 expanded-parent-blanking defect entirely.
+  const seedCollapsed = [];
+  Object.values(d.projects).forEach(p => p.tasks.forEach(t => {
+    if (p.tasks.some(x => x.parentId === t.id) && t.isExpanded === false) seedCollapsed.push(p.id + ":" + t.id);
+  }));
   const cfg = {
     exhibitLabel: "", projectTitle: "Health-colour diagnostic", preparedBy: "", preparedFor: "",
     docDate: "", orientation: "landscape", pageSize: "letter",
@@ -273,7 +339,7 @@ const opened = await page.evaluate(() => {
     columns: ["id","name","start","end","duration","health","percentComplete"],
     includeGantt: true, showToday: true, showArrows: true, barNames: true,
     labelAlign: "auto", healthFilter: "all", confidential: "",
-    collapsedIds: [], detailLevel: "all", colWidths: {},
+    collapsedIds: seedCollapsed, detailLevel: seedCollapsed.length ? "custom" : "all", colWidths: {},
     timeUnit: null, zoomMul: 1, panFrac: 0,
   };
   const html = buildPDFHtml(cfg, d);
@@ -290,6 +356,54 @@ if (popup) {
 }
 const emitted = await page.evaluate(() => window.__EXPORT_HTML__ || "");
 console.log("EMITTED HTML:", emitted.length, "bytes | popup opened:", !!popup);
+
+// ── Discriminating proof that the fix keys off the EXHIBIT's own collapsedSet, not task.isExpanded
+// (B575904). buildPDFHtml has its OWN collapse state (cfg.collapsedIds — seeded from isExpanded by
+// PDFExportModal, but freely re-toggled inside the export preview via Expand/Collapse All or the
+// ▾/▸ triangle, independent of the live grid). Calling buildPDFHtml a second time with collapsedIds
+// DELIBERATELY INVERTED from what seedCollapsed would produce proves the export's blank/show
+// decision tracks the exhibit's actual rendered structure (children shown as separate rows or not
+// in THIS document) — not merely a copy of the live task flag. If this ever regressed to reading
+// task.isExpanded directly, this override would fail while the main TASKS loop above stays green
+// (their default collapsedIds already happens to agree with task.isExpanded).
+const overrideResult = await page.evaluate(() => {
+  const d = window.__PLANAR_DATA__;
+  const pid = d.aPid != null ? String(d.aPid) : String(Object.keys(d.projects)[0]);
+  const proj = Object.values(d.projects).find(p => String(p.id) === pid) || Object.values(d.projects)[0];
+  const findId = name => { const t = proj.tasks.find(x => x.name === name); return t ? t.id : null; };
+  const expandedParentId = findId("Auto Rollup Expanded Parent");   // task.isExpanded: true
+  const collapsedParentId = findId("Auto Rollup Collapsed Parent"); // task.isExpanded: false
+  const cfg = {
+    exhibitLabel: "", projectTitle: "collapsedSet override diagnostic", preparedBy: "", preparedFor: "",
+    docDate: "", orientation: "landscape", pageSize: "letter",
+    margins: {top:"0.75", right:"0.75", bottom:"0.75", left:"0.75"},
+    selProjects: [pid],
+    columns: ["id","name","health"],
+    includeGantt: false, showToday: true, showArrows: true, barNames: true,
+    labelAlign: "auto", healthFilter: "all", confidential: "",
+    // Inverted from seedCollapsed: force the LIVE-expanded parent INTO the exhibit's collapsed set,
+    // and leave the LIVE-collapsed parent OUT of it — the opposite of what task.isExpanded implies.
+    collapsedIds: expandedParentId != null ? [pid + ":" + expandedParentId] : [],
+    detailLevel: "custom", colWidths: {}, timeUnit: null, zoomMul: 1, panFrac: 0,
+  };
+  return { html: buildPDFHtml(cfg, d), foundExpanded: expandedParentId != null, foundCollapsed: collapsedParentId != null };
+});
+const overrideRowFor = name => { const rows = overrideResult.html.split(/<tr\b/).filter(r => r.includes(name)); return rows.length ? rows[0] : null; };
+const overrideStatusOf = rowHtml => {
+  if (!rowHtml) return { label: null };
+  const m = rowHtml.match(/<td class="c-health"[^>]*>([\s\S]*?)<\/td>/);
+  return { label: m ? m[1].replace(/<[^>]*>/g, "").trim() : null };
+};
+// Forced INTO collapsedSet despite isExpanded:true → must now show the ROLLED colour, not blank.
+const overrideExpandedNowShows = overrideStatusOf(overrideRowFor("Auto Rollup Expanded Parent")).label;
+// Left OUT of collapsedSet despite isExpanded:false → must now be BLANK, not the rolled colour.
+const overrideCollapsedNowBlank = overrideStatusOf(overrideRowFor("Auto Rollup Collapsed Parent")).label;
+const collapsedSetOverrideOk = overrideResult.foundExpanded && overrideResult.foundCollapsed
+  && overrideExpandedNowShows === "Needs Attn." && overrideCollapsedNowBlank === "";
+console.log("\ncollapsedSet-override proof (inverted vs task.isExpanded):");
+console.log(`  Auto Rollup Expanded Parent forced INTO collapsedSet → export now shows "${overrideExpandedNowShows}" (expect "Needs Attn.")`);
+console.log(`  Auto Rollup Collapsed Parent forced OUT of collapsedSet → export now shows "${JSON.stringify(overrideCollapsedNowBlank)}" (expect "")`);
+console.log("collapsedSet-override proof passes (fix keys off the exhibit's own state, not task.isExpanded):", collapsedSetOverrideOk);
 
 // Parse the export's own row for each task by NAME (never re-derive by regexing the whole doc),
 // then pull the Status cell's dot color + label out of the exact markup buildPDFHtml emits:
@@ -308,32 +422,66 @@ const statusOf = rowHtml => {
   return { label, color };
 };
 
+// ── B575904 defect 2 — buildPDFHtml's percentComplete column ("green shows 100%") must read the
+// SAME computed health as the (already-fixed) Status column, never the parent's own raw stored
+// `.health`. "Rolled Complete Parent" is rolled green purely by rule (both children complete,
+// parent's own raw health/percentComplete are stale defaults) — pre-fix this printed
+// Status="Complete" next to Percent="0%" in the SAME row, self-contradictory. "Auto Rollup
+// Collapsed Parent" is the control: its rolled health is red, not green, so its percent must stay
+// the parent's own raw percentComplete (0%) — proving the fix isn't just "always print 100%".
+const percentOf = rowHtml => {
+  if (!rowHtml) return null;
+  const m = rowHtml.match(/<td class="c-percentComplete"[^>]*>([\s\S]*?)<\/td>/);
+  return m ? m[1].replace(/<[^>]*>/g, "").trim() : null;
+};
+const PERCENT_TASKS = [
+  { name: "Rolled Complete Parent",       expectPercent: "100%" },
+  { name: "Auto Rollup Collapsed Parent", expectPercent: "0%",  control: true },
+];
+const percentResults = PERCENT_TASKS.map(t => {
+  const pct = percentOf(rowFor(t.name));
+  return { ...t, pct, correct: pct === t.expectPercent };
+});
+console.log("\n=== EXPORT percentComplete column (green→100% convention, computed health not raw) ===");
+for (const r of percentResults) {
+  console.log(`${r.correct ? "  pass  " : "❌ FAIL "}  ${r.name.padEnd(30)} percent="${r.pct}"  expected="${r.expectPercent}"${r.control ? " (control: must NOT be forced to 100%)" : ""}`);
+}
+const percentOk = percentResults.every(r => r.correct) && percentResults.length === 2;
+console.log("percentComplete matches the computed (not raw) health:", percentOk);
+
 const results = TASKS.map(t => {
-  const exp = statusOf(rowFor(t.name));
+  const rowHtml = rowFor(t.name);
+  const exp = statusOf(rowHtml);
   const screen = onScreen[t.name];
-  // expectScreenBlank (only "autoRollupExpanded"): the grid intentionally shows no status text
-  // for an expanded parent, so "correct" here means genuinely blank, not a color; "agree" with
-  // the export is meaningless for this one row (the export never blanks) and isn't required.
-  const screenCorrect = t.expectScreenBlank ? screen == null : screen === t.expectAuto;
+  const rowFoundInExport = rowHtml != null;
+  const rowFoundOnScreen = !!onScreenFound[t.name];
+  // expectBothBlank (only "autoRollupExpanded", B575904): the grid intentionally shows no status
+  // text for an expanded parent, and the export must now match — genuinely blank on BOTH sides,
+  // not a color. A blank export cell renders as `label === ""` (the row itself still exists,
+  // `<td class="c-health"></td>`), which is distinct from `label === null` (the row was never
+  // found at all — a vacuous miss, not a pass).
+  const screenCorrect = t.expectBothBlank ? screen == null : screen === t.expectAuto;
+  const exportCorrect = t.expectBothBlank ? (rowFoundInExport && exp.label === "") : exp.label === t.expectAuto;
+  const agree = t.expectBothBlank ? (screenCorrect && exportCorrect) : screen === exp.label;
   return {
-    ...t, screen, exportLabel: exp.label, exportColor: exp.color,
-    agree: screen === exp.label,
-    screenCorrect,
-    exportCorrect: exp.label === t.expectAuto,
+    ...t, screen, exportLabel: exp.label, exportColor: exp.color, rowFoundInExport, rowFoundOnScreen,
+    agree, screenCorrect, exportCorrect,
   };
 });
 
 console.log("\n=== SCREEN vs EXPORT vs KNOWN-CORRECT, same data, same moment ===");
 for (const r of results) {
-  const need = r.expectScreenBlank ? (r.screenCorrect && r.exportCorrect) : (r.agree && r.screenCorrect);
+  const need = r.screenCorrect && r.exportCorrect && r.agree;
   const tag = need ? "  pass  " : "❌ FAIL ";
-  console.log(`${tag}  ${r.name.padEnd(30)} screen="${r.screen}" export="${r.exportLabel}" (${r.exportColor})  expected="${r.expectAuto}"${r.expectScreenBlank ? " (screen expected BLANK by design)" : ""}`);
+  console.log(`${tag}  ${r.name.padEnd(30)} screen="${r.screen}" export="${r.exportLabel}" (${r.exportColor})  expected="${r.expectBothBlank ? "BLANK on both surfaces" : r.expectAuto}"`);
 }
 
-// Vacuity guard — every scenario must have actually been READ from both instruments. A silent
-// selector miss must not read as agreement (DRIVER-SCROLL §6) — but for "autoRollupExpanded" a
-// null screen IS the correct reading (see screenCorrect above), so it's checked there instead.
-const allFound = results.every(r => (r.expectScreenBlank || r.screen != null) && r.exportLabel != null);
+// Vacuity guard — every scenario must have actually been READ from both instruments, the row
+// genuinely found on BOTH sides. A silent selector miss must not read as agreement or as a
+// correct blank (DRIVER-SCROLL §6) — a missing row and a genuinely blank cell are NOT the same
+// reading, so a missing row fails this even when expectBothBlank made screenCorrect/exportCorrect
+// look satisfied.
+const allFound = results.every(r => r.rowFoundInExport && r.rowFoundOnScreen && (r.expectBothBlank || (r.screen != null && r.exportLabel != null)));
 
 // The known-good control arms (manualLeaf, noRuleLeaf, groupHeader — all-overridden, so
 // unaffected by the rollup fix) MUST match their known-correct expected value AND agree with
@@ -350,18 +498,68 @@ const autoOk = autoOnes.every(r => r.agree && r.screenCorrect) && autoOnes.lengt
 // (the `agree` field) would have passed on the pre-fix code too, since screen and export shared
 // the same buggy rollup input and were both wrong together.
 const rollupOnes = results.filter(r => r.rollupFix);
-const rollupOk = rollupOnes.every(r => r.screenCorrect && r.exportCorrect && (r.expectScreenBlank || r.agree)) && rollupOnes.length === 5;
+const rollupOk = rollupOnes.every(r => r.screenCorrect && r.exportCorrect && r.agree) && rollupOnes.length === 6;
+
+// ── VERIFICATION GAP CLOSED: GanttView has NEVER been live-rendered by this (or any) guard — every
+// prior pass here forced d.view="grid" and only ever read GridView's DOM. The claim that GanttView
+// also gets the rule-computed rollup (not just GridView) rested entirely on a source-code read (one
+// shared `rolledHealthMap` useMemo feeds both), never on observation — exactly the gap
+// VIEW-INDEPENDENT-ONCE and DRIVER-SCROLL-IS-NOT-APP-SCROLL §6 warn about. Switch to the REAL Gantt
+// view via the REAL view-switcher button (never simulate it by writing to __PLANAR_DATA__) and read
+// the REAL rendered row. B222 keeps a Gantt bar's own fill a neutral identity color always (0→100%
+// complete reads as hollow→solid, not health) — the row BACKGROUND is what actually carries health/
+// rollup color (GanttView's `rowBg`), so that's the one true signal to read here.
+await page.click('.hdr-view button:has-text("Gantt")');
+await page.waitForSelector("[data-gantt-bar]", { timeout: 10000 }).catch(() => {});
+await page.waitForTimeout(600);
+await page.screenshot({ path: OUT + "schedule-onscreen-gantt.png", fullPage: false });
+
+const GANTT_TASKS = [
+  { name: "Auto Overdue Leaf",            expect: "red" },      // leaf: computeDisplayHealth, rule-matched overdue
+  { name: "Auto Complete Leaf",           expect: "green" },    // leaf: computeDisplayHealth, rule-matched complete
+  // The #1075 core repro, now watched as PIXELS: both children raw-stored "gray"; only rule-computed
+  // health rolls this collapsed parent red. Pre-#1075 (raw-health rollup) this row rendered
+  // INDISTINGUISHABLE from a neutral/expanded row — the exact invisible-regression class this check
+  // exists to close.
+  { name: "Auto Rollup Collapsed Parent", expect: "red" },
+  // isExpandedParent: GanttView's OWN blank-the-tint rule (same B222/B211 family as the grid/export
+  // fix above, but pre-existing and screen-only) — must stay neutral, never health-tinted.
+  { name: "Auto Rollup Expanded Parent",  expect: "neutral" },
+];
+const HEALTH_RGB = { red: "rgb(255, 223, 223)", yellow: "rgb(255, 247, 185)", green: "rgb(214, 250, 226)", paused: "rgb(243, 244, 246)" };
+const ganttRows = await page.evaluate((names) => {
+  const out = {};
+  for (const name of names) {
+    const nameEl = [...document.querySelectorAll("[data-gantt-name]")].find(e => e.textContent === name);
+    const row = nameEl ? nameEl.parentElement : null;
+    out[name] = row ? getComputedStyle(row).backgroundColor : null;
+  }
+  return out;
+}, GANTT_TASKS.map(t => t.name));
+const ganttResults = GANTT_TASKS.map(t => {
+  const rgb = ganttRows[t.name];
+  const found = rgb != null;
+  const correct = !found ? false : (t.expect === "neutral" ? !Object.values(HEALTH_RGB).includes(rgb) : rgb === HEALTH_RGB[t.expect]);
+  return { ...t, rgb, found, correct };
+});
+console.log("\n=== GANTT (live-rendered, real view-switcher button, real DOM) ===");
+for (const r of ganttResults) {
+  console.log(`${r.correct ? "  pass  " : "❌ FAIL "}  ${r.name.padEnd(30)} row-bg="${r.rgb}"  expected=${r.expect}`);
+}
+const ganttOk = ganttResults.every(r => r.found && r.correct) && ganttResults.length === 4;
+console.log("Gantt rows correct (no scenario ever watched turning red before this guard):", ganttOk);
 
 console.log("\nAll scenarios found on both sides (no vacuous miss):", allFound);
 console.log("Control arms correct + agree (harness sanity):", controlsOk);
 console.log("Every ORIGINAL automatic-health case (leaf/milestone) matches screen vs export:", autoOk);
 console.log("Every group-header-rule-rollup scenario is CORRECT on both surfaces (not just self-consistent):", rollupOk);
+console.log("percentComplete matches computed health, not raw (B575904 defect 2):", percentOk);
 console.log("REAL ERRORS (" + real.length + "):"); real.slice(0,20).forEach(e=>console.log("  - "+e));
-console.log("\nScreenshots: " + OUT + "schedule-onscreen-grid.png, " + OUT + "schedule-export-popup.png");
+console.log("\nScreenshots: " + OUT + "schedule-onscreen-grid.png, " + OUT + "schedule-onscreen-gantt.png, " + OUT + "schedule-export-popup.png");
 
-const pass = rendered && opened.ok && allFound && controlsOk && autoOk && rollupOk && real.length === 0;
-console.log(pass ? "\n✅ PASS — every scenario's health colour is correct and matches on screen and in the export"
-                 : "\n❌ FAIL" + (MUTATE_ROLLUP ? " (expected under --mutate-rollup if only rollupOk flipped and controls/autoOk stayed green — that's the discriminating proof)" : ""));
+const pass = rendered && opened.ok && allFound && controlsOk && autoOk && rollupOk && collapsedSetOverrideOk && ganttOk && percentOk && real.length === 0;
+console.log(pass ? "\n✅ PASS — every scenario's health colour is correct and matches on screen, in the export, and in the Gantt"
+                 : "\n❌ FAIL" + (MUTATE_ROLLUP ? " (expected under --mutate-rollup if rollupOk/ganttOk flip and controls/autoOk stay green — that's the discriminating proof)" : ""));
 
 await browser.close(); server.close();
 process.exit(pass ? 0 : 1);
