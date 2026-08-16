@@ -66,9 +66,9 @@ describe("bundle isolation — zero site-planner imports", () => {
 });
 
 /* ════════════════════════════════════════════════════════════════════════════════════════
- * 2. WORKSPACE REGISTRATION — the same eight places every module registers
+ * 2. THE ROUTE WORKS — Shell + route.js still resolve #/food to FoodApp
  * ═══════════════════════════════════════════════════════════════════════════════════════ */
-describe("workspace registration", () => {
+describe("the route itself still works (NEW-2 changes discoverability, not the route)", () => {
   it("(1) the Shell's WORKSPACES registry lazy-loads the workspace", () => {
     const shell = read(REPO, "src/app/Shell.jsx");
     expect(shell).toMatch(/id:\s*"food"[\s\S]{0,120}?FoodApp\.jsx/);
@@ -85,35 +85,11 @@ describe("workspace registration", () => {
     expect(buildHash({ module: "food" })).toBe("#/food");
   });
 
-  it("(3) modulePrefetch can warm the chunk on navigation intent", () => {
-    const prefetch = read(REPO, "src/app/modulePrefetch.js");
-    expect(prefetch).toMatch(/"food":\s*\(\)\s*=>\s*import\(["']\.\.\/workspaces\/food\/FoodApp\.jsx["']\)/);
-  });
-
-  it("(4) moduleAccent carries the module's hue", () => {
-    expect(MODULE_ACCENT.food).toBe("#BE3B22");
-  });
-
-  it("(5) moduleLoaderTheme gives it a named caption, not the generic fallback", () => {
-    expect(LOADER_SKINS.food).toBeTruthy();
-    const theme = resolveLoaderTheme("food");
-    expect(theme.label).not.toBe("Loading…");
-    expect(theme.accent).toBe(MODULE_ACCENT.food);
-  });
-
-  it("(6) AppHeader has a module tab, with an icon and both accent maps", () => {
-    const hdr = read(REPO, "src/shared/ui/AppHeader.jsx");
-    expect(hdr).toMatch(/id:\s*"food",\s*\n\s*label:\s*"Food"/);
-    expect(hdr, "the tab needs an inline SVG icon like its peers").toMatch(/id:\s*"food"[\s\S]{0,400}?<(path|line)/);
-    expect(hdr).toMatch(/"food":\s*"var\(--accent-food\)"/);
-    expect(hdr).toMatch(/"food":\s*"var\(--accent-food-text\)"/);
-  });
-
-  it("(7) bundleMetrics ROUTE_KEYS names the route, so its budget can be evaluated at all", () => {
+  it("(3) bundleMetrics ROUTE_KEYS names the route, so its budget can be evaluated at all", () => {
     expect(ROUTE_KEYS.food).toEqual({ src: "src/workspaces/food/FoodApp.jsx", stem: "FoodApp" });
   });
 
-  it("(8) the route carries a committed byte budget, wired into the audit AND the ratchet", () => {
+  it("(4) the route carries a committed byte budget, wired into the audit AND the ratchet", () => {
     const budgets = JSON.parse(read(REPO, "ui-audit/perf-budgets.json"));
     expect(budgets.bundle.foodRouteJsBytes, "no budget = the route can grow without limit").toBeTruthy();
     expect(budgets.bundle.foodRouteJsBytes.baseline).toBeTypeOf("number");
@@ -122,13 +98,55 @@ describe("workspace registration", () => {
     expect(read(REPO, "ui-audit/perf-bundle-audit.mjs")).toContain("bundle.foodRouteJsBytes");
     expect(read(REPO, "scripts/perf-ratchet.mjs")).toContain("bundle.foodRouteJsBytes");
   });
+});
 
-  it("every registry that names the peer workspaces also names food — no gaps", () => {
+/* ════════════════════════════════════════════════════════════════════════════════════════
+ * 2b. ⛔ UNLISTED, NOT A WORKSPACE (NEW-2, owner correction to B568400) — /food is reachable
+ *     ONLY by typing the URL. "an Easter egg", verbatim. Every surface that enumerates
+ *     workspaces FOR DISPLAY must not name it; the route plumbing above is untouched.
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("/food is unlisted — no discoverability surface names it", () => {
+  it("the workspace tab list must not contain a food entry (the guard NEW-2 asks for)", () => {
+    const hdr = read(REPO, "src/shared/ui/AppHeader.jsx");
+    const modulesBlock = hdr.slice(hdr.indexOf("const MODULES = ["), hdr.indexOf("\n];", hdr.indexOf("const MODULES = [")));
+    expect(modulesBlock).not.toMatch(/id:\s*"food"/);
+    expect(modulesBlock, "and no peer went missing in the edit").toMatch(/id:\s*"notes"/);
+  });
+
+  it("neither accent map in AppHeader names food (no tab underline/label color to wire up)", () => {
+    const hdr = read(REPO, "src/shared/ui/AppHeader.jsx");
+    expect(hdr).not.toMatch(/"food":\s*"var\(--accent-food\)"/);
+    expect(hdr).not.toMatch(/"food":\s*"var\(--accent-food-text\)"/);
+  });
+
+  it("modulePrefetch has no food importer — nothing would ever call it (no tab to hover)", () => {
+    const prefetch = read(REPO, "src/app/modulePrefetch.js");
+    expect(prefetch).not.toMatch(/"food":\s*\(\)\s*=>/);
+  });
+
+  it("moduleAccent and moduleLoaderTheme don't name food — it gets the generic loader fallback", () => {
+    expect(MODULE_ACCENT.food).toBeUndefined();
+    expect(LOADER_SKINS.food).toBeUndefined();
+    const theme = resolveLoaderTheme("food");
+    expect(theme.label).toBe("Loading…");
+  });
+
+  it("navigating to module='food' renders NO active tab — same as any unrecognized route, no special case", () => {
+    const hdr = read(REPO, "src/shared/ui/AppHeader.jsx");
+    // moduleTabButtons maps MODULES (not some food-aware superset) and marks isActive by
+    // m.id === module — with no food entry in MODULES, module="food" cannot match any tab.
+    // This asserts the MECHANISM (one map, one predicate, no branch for an unlisted module)
+    // rather than a rendered snapshot, so the property holds regardless of chrome styling.
+    expect(hdr).toMatch(/MODULES\.map\(\(m\)\s*=>\s*[\s\S]{0,80}?isActive=\{m\.id === module\}/);
+  });
+
+  it("every OTHER (listed) workspace is still fully wired — this is a food-only removal", () => {
     const peers = ["site-planner", "doc-review", "library", "scheduler", "notes"];
     for (const registry of [MODULE_ACCENT, LOADER_SKINS, SLUG_BY_MODULE]) {
       for (const p of peers) expect(registry[p], `peer ${p}`).toBeTruthy();
-      expect(registry[MODULE_ID], "food is missing from a registry every peer is in").toBeTruthy();
     }
+    const hdr = read(REPO, "src/shared/ui/AppHeader.jsx");
+    for (const p of peers) expect(hdr, `peer ${p}'s tab`).toMatch(new RegExp(`id:\\s*"${p}"`));
   });
 });
 
