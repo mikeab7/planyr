@@ -44,8 +44,8 @@ export default function VisitList({ visits, onSelect }) {
               aria-pressed={sortKey === key}
               style={{
                 ...fieldStyle(), cursor: "pointer",
-                background: sortKey === key ? "var(--accent-food, #E2572B)" : "var(--surface-page)",
-                color: sortKey === key ? "#fff" : "var(--text-primary)", fontWeight: sortKey === key ? 700 : 500,
+                background: sortKey === key ? "var(--accent-food)" : "var(--surface-page)",
+                color: sortKey === key ? "var(--on-accent-food)" : "var(--text-primary)", fontWeight: sortKey === key ? 700 : 500,
               }}
             >
               {s.label}

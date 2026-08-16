@@ -140,8 +140,8 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
                   key={v} type="button" onClick={() => setView(v)} aria-pressed={view === v}
                   style={{
                     border: "none", padding: "6px 14px", cursor: "pointer", font: "inherit", fontSize: 12.5, fontWeight: 700,
-                    background: view === v ? "var(--accent-food, #E2572B)" : "transparent",
-                    color: view === v ? "#fff" : "var(--text-primary)",
+                    background: view === v ? "var(--accent-food)" : "transparent",
+                    color: view === v ? "var(--on-accent-food)" : "var(--text-primary)",
                   }}
                 >
                   {v === "map" ? "Map" : "List"}
@@ -155,8 +155,8 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
                 style={{
                   border: "1px solid var(--border-default)", borderRadius: 8, padding: "6px 12px", cursor: "pointer",
                   font: "inherit", fontSize: 12.5, fontWeight: 700,
-                  background: pinMode ? "var(--accent-food, #E2572B)" : "transparent",
-                  color: pinMode ? "#fff" : "var(--text-primary)",
+                  background: pinMode ? "var(--accent-food)" : "transparent",
+                  color: pinMode ? "var(--on-accent-food)" : "var(--text-primary)",
                 }}
               >
                 📍 {pinMode ? "Click the map…" : "Drop a pin"}

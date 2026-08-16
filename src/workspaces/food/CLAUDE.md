@@ -9,8 +9,8 @@ may import from `src/workspaces/site-planner/` — not the Supabase client, not 
 That's why `lib/supabaseClient.js` is a three-line duplicate of the site-planner one instead of
 an import: a shared edge would hoist this module's bytes onto the Site route, and the owner was
 explicit that a restaurant tracker may not cost that route a single byte. `FoodApp.jsx` is its
-own `React.lazy` entry in `Shell.jsx`, measured separately forever as `foodRouteJsBytes`
-(`ui-audit/lib/bundleMetrics.mjs` `ROUTE_KEYS`).
+own `React.lazy` entry in the app Shell's workspace registry, measured separately forever as
+`foodRouteJsBytes` (the bundle-metrics module's `ROUTE_KEYS`).
 
 **Data has two very different shapes, and the RLS split follows the shape:**
 - `food_places` — the reference snapshot. **Public read, service-role write only** (same
@@ -20,7 +20,7 @@ own `React.lazy` entry in `Shell.jsx`, measured separately forever as `foodRoute
   once or twice a year to refresh it; it is documented in its own header, including why it's
   Python and not Node (remote GeoParquet row-group pruning needs pyarrow's column stats).
 - `food_visits` — the owner's own log (rating, cost, what he had, notes). **Owner-only RLS**,
-  the exact own-row shape as `site-planner/db/profiles.sql`/`user_prefs.sql`
+  the exact own-row shape as the site-planner's `profiles`/user-prefs tables
   (`(select auth.uid()) = user_id`, `to authenticated`, no anon policy at all). Deliberately
   **not** covered by the site-planner's default-team-sharing path (B326416) — this table has no
   `project_id` and joins nothing team-shaped, so it's exempt by construction. Proven with a

@@ -15,6 +15,10 @@ const DEFAULT_CENTER = [29.76, -95.37];
 const DEFAULT_ZOOM = 12;
 const MIN_PIN_ZOOM = 12; // below this the snapshot query would ask for a huge box; ask the user to zoom in instead
 
+// Literal (not theme tokens) DELIBERATELY: these are Leaflet canvas-renderer fill/stroke
+// values, not CSS applied to a DOM element — a canvas 2D context has no cascade to resolve
+// var(--x) against, so a token here would just paint as the literal string "var(--accent)".
+// Same reasoning as the Notes toolbar's content palette (see its header).
 const COLORS = {
   unlogged: "#8a8f98",
   logged: "#1D9E75",

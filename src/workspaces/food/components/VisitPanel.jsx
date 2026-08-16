@@ -77,8 +77,8 @@ function VisitForm({ onSubmit, onCancel, pending }) {
         Would return?
         <button type="button" onClick={() => setWouldReturn(wouldReturn === true ? null : true)}
           style={{ border: "1px solid var(--border-default)", borderRadius: 999, padding: "3px 10px", cursor: "pointer",
-            background: wouldReturn === true ? "var(--accent-food, #E2572B)" : "transparent",
-            color: wouldReturn === true ? "#fff" : "var(--text-primary)", font: "inherit", fontSize: 12, fontWeight: 700 }}>
+            background: wouldReturn === true ? "var(--accent-food)" : "transparent",
+            color: wouldReturn === true ? "var(--on-accent-food)" : "var(--text-primary)", font: "inherit", fontSize: 12, fontWeight: 700 }}>
           Yes
         </button>
         <button type="button" onClick={() => setWouldReturn(wouldReturn === false ? null : false)}
@@ -91,7 +91,7 @@ function VisitForm({ onSubmit, onCancel, pending }) {
       <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
         <button type="submit" disabled={pending} style={{
           flex: 1, border: "none", borderRadius: 8, padding: "8px 0", cursor: pending ? "default" : "pointer",
-          background: "var(--accent-food, #E2572B)", color: "#fff", font: "inherit", fontSize: 13, fontWeight: 700,
+          background: "var(--accent-food)", color: "var(--on-accent-food)", font: "inherit", fontSize: 13, fontWeight: 700,
           opacity: pending ? 0.6 : 1,
         }}>
           {pending ? "Saving…" : "Log this visit"}

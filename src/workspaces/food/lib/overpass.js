@@ -20,12 +20,13 @@ const OSM_TAGS = "restaurant|cafe|bar|fast_food|pub|food_court|ice_cream|biergar
 
 const cache = new Map(); // roundedBboxKey -> places[]
 
-function roundKey(bounds) {
+// Exported for unit testing (pure, no network) — not meant as a public API surface.
+export function roundKey(bounds) {
   const r = (n) => Math.round(n * 100) / 100; // ~0.01deg, a neighborhood
   return `${r(bounds.south)},${r(bounds.west)},${r(bounds.north)},${r(bounds.east)}`;
 }
 
-function queryFor({ south, west, north, east }) {
+export function queryFor({ south, west, north, east }) {
   return `[out:json][timeout:25];
 (
   node["amenity"~"^(${OSM_TAGS})$"](${south},${west},${north},${east});
@@ -34,7 +35,7 @@ function queryFor({ south, west, north, east }) {
 out body;`;
 }
 
-function fromElement(el) {
+export function fromElement(el) {
   const tags = el.tags || {};
   return {
     id: `osm:${el.type}/${el.id}`,
