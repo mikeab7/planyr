@@ -9441,20 +9441,6 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
 // One picker open at a time — any picker dispatches this when opening; others listen and close
 const PICKER_EVENT = "planar-picker-open";
 
-// Small corner badge marking a manually-overridden status — shown only on the exceptional
-// (locked) state, never on the default automatic one, per PANEL-BREVITY (don't add visual noise
-// for the common case).
-function OverrideBadge({size=8}) {
-  // A tiny detailed glyph (a pin/lock) reads as a smudge at 7-8px — a plain ring with a
-  // solid-color center is legible at any size and unambiguous next to a status dot.
-  return (
-    <span title="Manually set — not automatic"
-      style={{position:"absolute",right:-3,bottom:-3,width:size,height:size,borderRadius:"50%",
-        background:"var(--mut)",border:"1.5px solid #fff",boxShadow:"0 0 0 0.5px rgba(0,0,0,.15)",
-        pointerEvents:"none",display:"block"}} />
-  );
-}
-
 function HealthPicker({value, onChange, overridden=false}) {
   const [open, setOpen]   = useState(false);
   const [pos, setPos]     = useState({top:0, left:0});
@@ -9544,7 +9530,6 @@ function HealthPicker({value, onChange, overridden=false}) {
           outline:open?`1.5px solid ${dot === "#ffffff" ? "#d1d5db" : dot}`:"1.5px solid transparent",
           outlineOffset:0,transition:"outline-color .1s"}}>
           <DotSpan hk={value} active={open} noPointer />
-          {overridden && <OverrideBadge />}
         </span>
       </span>
       {open && ReactDOM.createPortal(
@@ -9658,7 +9643,6 @@ function StatusPicker({value, onChange, overridden=false}) {
       <span ref={ref} onClick={handleClick} title={overridden ? "Manually overridden — pick Automatic to clear" : undefined}
         style={{cursor:"pointer",display:"inline-flex",alignItems:"center",gap:4,color:"var(--mut)",fontSize:11,fontFamily:"'Inter',system-ui,sans-serif"}}>
         {(HEALTH[value]||HEALTH.gray).label}
-        {overridden && <span style={{position:"relative",width:7,height:7,display:"inline-block"}}><OverrideBadge size={7} /></span>}
       </span>
       {open && ReactDOM.createPortal(
         <div ref={menuRef} {...MENU_STOPS_GRID}
@@ -12180,7 +12164,6 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
             padding:"3px 8px",fontSize:11,display:"inline-flex",alignItems:"center",gap:4,
             color:HDARK[dispHealth]||"#374151",fontWeight:500,whiteSpace:"nowrap",maxWidth:"100%"}}>
             <span style={{width:6,height:6,borderRadius:"50%",background:h.dot==="#ffffff"?"#d1d5db":h.dot,flexShrink:0}} />{h.label}
-            {t.healthOverride && <span style={{position:"relative",width:7,height:7,display:"inline-block"}}><OverrideBadge size={7} /></span>}
           </span>
         </td>;
       case "percentComplete":
