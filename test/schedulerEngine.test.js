@@ -2827,40 +2827,55 @@ describe("anti-drift: the NEW-schedule-health engine exists VERBATIM in src + mi
 // Owner report: "it should also allow me to mark it complete." Full browser + mutation proof
 // lives in ui-audit/verify-successor-complete.mjs; these are the fast, CI-runnable source anchors
 // that pin the shape so a future edit can't quietly drift back to the pre-fix behaviour.
+//
+// ── REVERT (this branch) — the bulk "Mark Complete" footer button + its Ctrl/Cmd+Enter twin ──
+// Owner report, verbatim: "the buttons aren't the same size... you've got mark complete, update
+// successors... the UI is horrible." That button was a redundant THIRD control (the Complete pill
+// already reaches the same outcome via Enter/Update Successors); it and its keyboard accelerator
+// are removed. The Complete CAPABILITY is unchanged — only these two anchors below flip from
+// asserting presence to asserting absence; everything else in this block is untouched.
 describe("NEW-1: the successor prompt's Complete option and its own accept path", () => {
   const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
 
-  it("StatusPills offers Complete alongside the three original options", () => {
+  it("StatusPills still offers Complete alongside the three original options", () => {
     expect(src).toMatch(/\{ k:'gray',   label:'Not Started' \},\s*\{ k:'yellow', label:'In Progress' \},\s*\{ k:'red',    label:'Needs Attn\.' \},\s*\{ k:'green',  label:'Complete' \},/);
   });
 
-  it("applyComplete is a SEPARATE function from apply() — Complete never routes through the plain-Enter path", () => {
-    expect(src).toMatch(/function applyComplete\(\) \{/);
-    expect(src).toMatch(/const forced = readyIds\.has\(Number\(tid\)\) \? 'green' : hk;/);
+  it("REVERT: applyComplete()/canComplete/readyIds are gone — no separate bulk-force-Complete function exists", () => {
+    expect(src).not.toMatch(/function applyComplete\(\)/);
+    expect(src).not.toMatch(/\bcanComplete\b/);
+    expect(src).not.toMatch(/\breadyIds\b/);
   });
 
-  it("plain Enter's own line is UNCHANGED — it still just applies `pending`, never applyComplete", () => {
-    // The exact literal from before this feature existed. If this ever needs to become
-    // `applyComplete()` or gain new conditions, Enter's muscle-memory meaning changed — which the
-    // owner explicitly ruled out — so this must be a deliberate, discussed change, not a drift.
+  it("plain Enter's own line is UNCHANGED — it still just applies `pending`, and it is the ONLY accept path", () => {
+    // The exact literal from before the NEW-1 feature existed. If this ever needs new conditions,
+    // Enter's muscle-memory meaning changed — which the owner explicitly ruled out — so this must
+    // be a deliberate, discussed change, not a drift.
     expect(src).toMatch(/if \(e\.key==='Enter' && changeCount>0\) apply\(\);/);
   });
 
-  it("Complete's key is Ctrl/Cmd+Enter — a DIFFERENT key from plain Enter, matching the FormulaBar precedent", () => {
-    expect(src).toMatch(/if \(\(e\.metaKey\|\|e\.ctrlKey\) && e\.key==='Enter'\) \{ e\.preventDefault\(\); if \(canComplete\) applyComplete\(\); return; \}/);
+  it("REVERT: Ctrl/Cmd+Enter no longer has its own branch — it is not a distinct accept key any more", () => {
+    expect(src).not.toMatch(/\(e\.metaKey\|\|e\.ctrlKey\) && e\.key==='Enter'/);
   });
 
-  it("Complete has its own footer BUTTON, distinct from Skip and Update Successors", () => {
-    expect(src).toMatch(/data-successor-apply="complete"/);
+  it("REVERT: the footer holds exactly two controls, Skip and Update Successors — no 'complete' button", () => {
+    expect(src).not.toMatch(/data-successor-apply="complete"/);
     expect(src).toMatch(/data-successor-apply="update"/);
     expect(src).toMatch(/data-successor-apply="skip"/);
   });
 
+  it("REVERT: Skip and Update Successors share one style object, so their size cannot drift apart independently", () => {
+    expect(src).toMatch(/const FOOTER_BTN_STYLE = \{/);
+    expect(src).toMatch(/<button data-successor-apply="skip" onClick=\{onClose\} style=\{FOOTER_BTN_STYLE\}/);
+    expect(src).toMatch(/<button data-successor-apply="update" onClick=\{apply\} disabled=\{!changeCount\}[\s\S]{0,120}style=\{\{\.\.\.FOOTER_BTN_STYLE,/);
+  });
+
   it("a completion is QUEUED, never written directly to the single successorPrompt slot — the batch-race guard", () => {
-    // Two Ready-to-Start successors completed in the SAME action (the bulk button) each
-    // independently schedule their own 80ms-later chain check; writing directly to one state
-    // slot lets the second clobber the first, silently losing a follow-up prompt. Proven live
-    // (and proven load-bearing by mutation) in ui-audit/verify-successor-complete.mjs section B/C2.
+    // Two Ready-to-Start successors completed in the SAME action (now: picking the Complete pill
+    // on more than one row, then Update Successors) each independently schedule their own
+    // 80ms-later chain check; writing directly to one state slot lets the second clobber the
+    // first, silently losing a follow-up prompt. Proven live (and proven load-bearing by mutation)
+    // in ui-audit/verify-successor-complete.mjs section B/C2.
     expect(src).toMatch(/const \[successorPromptQueue, setSuccessorPromptQueue\] = useState\(\[\]\);/);
     expect(src).toMatch(/setSuccessorPromptQueue\(q => \[\.\.\.q, \{ completedTask, projId: pid2, projName: p\.name, successors \}\]\);/);
     expect(src).not.toMatch(/setSuccessorPrompt\(\{ completedTask, projId: pid2, projName: p\.name, successors \}\);/);

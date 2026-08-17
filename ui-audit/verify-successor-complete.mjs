@@ -19,13 +19,25 @@
  *      selection — mutation-proven, not just observed once.
  *
  * WHAT THIS FILE ALSO CATCHES THAT WASN'T EXPLICITLY ASKED FOR: completing more than one
- * Ready-to-Start successor in the same action (the bulk "Mark Complete" button can do exactly
- * that) fires more than one independent 80ms-delayed "does THIS successor have its own ready
- * successor?" check. Both checks used to write directly into the single `successorPrompt` state
- * slot — a genuine race where the second write silently clobbers the first, losing a follow-up
- * prompt the owner's "one hop at a time, prompting again" rule requires. Section B below
- * reproduces the race, and section C's mutation proves the FIFO queue that was added to fix it
- * (successorPromptQueue) is load-bearing, not decorative.
+ * Ready-to-Start successor in the same action (picking the Complete pill on more than one row,
+ * then Update Successors, can do exactly that) fires more than one independent 80ms-delayed "does
+ * THIS successor have its own ready successor?" check. Both checks used to write directly into the
+ * single `successorPrompt` state slot — a genuine race where the second write silently clobbers
+ * the first, losing a follow-up prompt the owner's "one hop at a time, prompting again" rule
+ * requires. Section B below reproduces the race, and section C's mutation proves the FIFO queue
+ * that was added to fix it (successorPromptQueue) is load-bearing, not decorative.
+ *
+ * ── REVERT (PR #1072 → this fix) ──────────────────────────────────────────────────────────────
+ * Owner report, verbatim: "the buttons aren't the same size, and the button should be the same
+ * size... you've got mark complete, update successors... the UI is horrible." The bulk "Mark
+ * Complete" footer button (and its Ctrl/Cmd+Enter keyboard twin) was a redundant THIRD control —
+ * the Complete pill (per-row, always present since NEW-1) already reaches the same outcome one
+ * click away through Update Successors — and it broke the footer's two-button balance. Both were
+ * removed. The Complete CAPABILITY is unchanged: the pill still offers Complete, and Enter/
+ * Update Successors still applies it. What changed here is DELETED, not renamed — Sections A3/A4
+ * below assert the button and the distinct Ctrl/Cmd+Enter behaviour are actually gone, not just
+ * relabeled, and every other section was re-pointed at the pill+apply() path so the race/latch/
+ * selection guards below still exercise real, reachable UI.
  *
  * Run:  node ui-audit/verify-successor-complete.mjs      [PW_CHROME=<chrome>]
  */
@@ -186,36 +198,48 @@ async function runSectionA(url) {
   ok("A2 · no stray grid selection after the pill+Enter accept",
     Object.keys(await staleGridSelection(page)).length === 0);
 
-  // A3 — the "Mark Complete" BUTTON (mouse), a separate control from "Update Successors".
+  // A3 — REVERT: the bulk "Mark Complete" button is GONE, not just relabeled — assert its absence
+  // directly, and that the footer holds exactly the two remaining controls, same width/height
+  // (FOOTER_BTN_STYLE is a single shared object, so equal size is structural, not eyeballed).
   await bootAndImport(page, url);
   await markGreenViaGrid(page, 7);
-  ok("A3 · Mark Complete button present and enabled",
-    await page.locator('[data-successor-apply="complete"]').isEnabled());
-  await page.locator('[data-successor-apply="complete"]').click();
-  await pacedWait(page, 550);
-  ok("A3 · clicking Mark Complete marks the Ready-to-Start successor Complete",
-    /Complete/.test(await healthOf(page, 8) || ""));
-  ok("A3 · no stray colour menu after the button accept", (await menuCount(page)) === 0);
-  ok("A3 · no stray grid selection after the button accept",
-    Object.keys(await staleGridSelection(page)).length === 0);
+  ok("A3 · the 'Mark Complete' button no longer exists in the footer",
+    (await page.locator('[data-successor-apply="complete"]').count()) === 0);
+  const footerBtnIds = await page.locator('[data-successor-apply]').evaluateAll(els => els.map(e => e.getAttribute("data-successor-apply")).sort());
+  ok("A3 · exactly two footer buttons remain: Skip and Update Successors",
+    JSON.stringify(footerBtnIds) === JSON.stringify(["skip","update"]), JSON.stringify(footerBtnIds));
+  const [skipBox, updateBox] = await Promise.all([
+    page.locator('[data-successor-apply="skip"]').boundingBox(),
+    page.locator('[data-successor-apply="update"]').boundingBox(),
+  ]);
+  ok("A3 · Skip and Update Successors render at the same width and height",
+    !!skipBox && !!updateBox && skipBox.width === updateBox.width && skipBox.height === updateBox.height,
+    `skip=${JSON.stringify(skipBox)} update=${JSON.stringify(updateBox)}`);
 
-  // A4 — Ctrl/Cmd+Enter, the distinct KEY (never plain Enter) for the same action.
+  // A4 — REVERT: Ctrl/Cmd+Enter was that button's keyboard twin and had its own dedicated branch
+  // in the modal's onKeyDown; that branch is gone too. A Ctrl+Enter press now falls through to the
+  // SAME plain-Enter apply() line Enter always used — so with no interaction it still defaults the
+  // Ready-to-Start row to In Progress, never force-Completes it. This is the explicit "removed, not
+  // half-wired" proof for the keyboard binding.
   await bootAndImport(page, url);
   await markGreenViaGrid(page, 7);
   await page.locator('[data-successor-modal]').press("Control+Enter");
-  await pacedWait(page, 550);
-  ok("A4 · Ctrl+Enter marks the Ready-to-Start successor Complete (same as the button)",
-    /Complete/.test(await healthOf(page, 8) || ""));
+  await pacedWait(page, 450);
+  ok("A4 · Ctrl+Enter with no interaction behaves exactly like plain Enter (In Progress, never a force-Complete)",
+    /In Progress/.test(await healthOf(page, 8) || ""));
   ok("A4 · no stray colour menu after the Ctrl+Enter accept", (await menuCount(page)) === 0);
   ok("A4 · no stray grid selection after the Ctrl+Enter accept",
     Object.keys(await staleGridSelection(page)).length === 0);
 
-  // A5 — CHAIN: completing a successor that itself has a Ready successor opens ONE new prompt
-  // (one hop), not a silent multi-level cascade. The grandchild must stay untouched until THAT
-  // prompt is acted on.
+  // A5 — CHAIN: completing a successor (via the Complete pill + Update Successors — the only
+  // accept path left for Complete) that itself has a Ready successor opens ONE new prompt (one
+  // hop), not a silent multi-level cascade. The grandchild must stay untouched until THAT prompt
+  // is acted on.
   await bootAndImport(page, url);
-  await markGreenViaGrid(page, 7);                                    // Root of the solo chain
-  await page.locator('[data-successor-apply="complete"]').click();    // completes Solo Child (8)
+  await markGreenViaGrid(page, 7);                                              // Root of the solo chain
+  await page.locator('[data-successor-row="8"] [data-successor-pill="green"]').click();
+  await pacedWait(page, 150);
+  await page.locator('[data-successor-apply="update"]').click();                // completes Solo Child (8)
   await pacedWait(page, 700);
   const secondPromptText = (await modalUp(page)) ? await page.locator('[data-successor-modal]').innerText() : "";
   ok("A5 · completing successor #8 opens a NEW prompt for ITS successor (one hop, not silent)",
@@ -263,10 +287,16 @@ async function runSectionB(url) {
   ok("B1 · the ALREADY-COMPLETE successor (#6, health:green) never appears in the prompt at all",
     !modalText.includes("Already Done Sibling"));
 
-  // B2 — bulk-complete BOTH ready branches in one action; each independently unblocks its own
-  // child. Both follow-up prompts must be offered, IN SEQUENCE (one hop at a time) — neither
+  // B2 — REVERT: complete BOTH ready branches in one action via the Complete pill on each row
+  // (the bulk-force button this used to exercise is gone; picking Complete on every Ready-to-Start
+  // row then Update Successors is the user-reachable equivalent). Each independently unblocks its
+  // own child. Both follow-up prompts must be offered, IN SEQUENCE (one hop at a time) — neither
   // silently lost to the other.
-  await page.locator('[data-successor-apply="complete"]').click();
+  await page.locator('[data-successor-row="2"] [data-successor-pill="green"]').click();
+  await pacedWait(page, 150);
+  await page.locator('[data-successor-row="3"] [data-successor-pill="green"]').click();
+  await pacedWait(page, 150);
+  await page.locator('[data-successor-apply="update"]').click();
   await pacedWait(page, 700);
   const seen = [];
   for (let i = 0; i < 4; i++) {
@@ -308,25 +338,18 @@ async function runMutationLatch(url) {
   ok("C1a · MUTATION (latch reverted): Enter accept now LEAKS a colour menu, as expected",
     (await menuCount(page)) > 0);
 
-  // C1b — the NEW Ctrl+Enter path: structurally excluded from this mechanism by the grid's own
-  // key handler (`!e.ctrlKey && !e.metaKey` guards the Enter-opens-picker branch), so it should
-  // stay clean even with the latch gone. This is reported explicitly, not assumed — see the
-  // session notes: this assertion cannot be "turned red" by this particular mutation, and that is
-  // the honest result, not a gap in the test.
+  // C1b — REVERT: Ctrl+Enter no longer has its own branch in the modal — it falls through to the
+  // exact same `apply()` line plain Enter uses, so it is NOT a structurally-separate accept path
+  // any more. What still protects it is a DIFFERENT, unrelated guard on the GRID's own key
+  // handler (`!e.ctrlKey && !e.metaKey` on the Enter-opens-picker branch), which this mutation
+  // never touches — so it should stay clean even with the modal's own latch gone. Reported
+  // explicitly, not assumed: this assertion cannot be "turned red" by THIS particular mutation,
+  // and that is the honest result, not a gap in the test.
   await bootAndImport(page, murl);
   await markGreenViaGrid(page, 7);
   await page.locator('[data-successor-modal]').press("Control+Enter");
   await pacedWait(page, 550);
-  ok("C1b · MUTATION (latch reverted): Ctrl+Enter accept stays clean regardless (structurally excluded, not latch-dependent)",
-    (await menuCount(page)) === 0);
-
-  // C1c — the "Mark Complete" mouse click never dispatches a keydown at all, so it too is
-  // unaffected by a keyboard-latch mutation. Reported for the same reason as C1b.
-  await bootAndImport(page, murl);
-  await markGreenViaGrid(page, 7);
-  await page.locator('[data-successor-apply="complete"]').click();
-  await pacedWait(page, 550);
-  ok("C1c · MUTATION (latch reverted): the Mark Complete BUTTON click stays clean (no keydown involved)",
+  ok("C1b · MUTATION (latch reverted): Ctrl+Enter accept stays clean regardless (immune via the grid's own ctrl/meta guard, not this latch)",
     (await menuCount(page)) === 0);
 
   await browser.close(); server.close();
@@ -340,9 +363,15 @@ async function runMutationQueue(url) {
   const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
   const page = await browser.newPage({ viewport: { width: 1600, height: 950 } });
 
+  // REVERT: reach the same both-branches-completed-at-once trigger via the Complete pill on each
+  // row + Update Successors (the bulk-force button this used to click is gone).
   await bootAndImport(page, murl);
   await markGreenViaGrid(page, 1);
-  await page.locator('[data-successor-apply="complete"]').click();
+  await page.locator('[data-successor-row="2"] [data-successor-pill="green"]').click();
+  await pacedWait(page, 150);
+  await page.locator('[data-successor-row="3"] [data-successor-pill="green"]').click();
+  await pacedWait(page, 150);
+  await page.locator('[data-successor-apply="update"]').click();
   await pacedWait(page, 700);
   const seen = [];
   for (let i = 0; i < 4; i++) {
