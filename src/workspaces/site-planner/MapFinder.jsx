@@ -441,6 +441,18 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const [myUid, setMyUid] = useState(null);
   const [myTeams, setMyTeams] = useState([]);
   const [shareBusy, setShareBusy] = useState(false);
+  // NEW-2 — a confirmation the owner asked for: "not really clear that it's sharing anything."
+  // A clean share/unshare used to close the menu and say nothing at all — the only evidence was
+  // the project row eventually relabelling itself, with no causal link back to the click. Reuses
+  // the map's existing bottom-left toast slot (mutually exclusive with `err`), auto-dismissing.
+  const [shareNotice, setShareNotice] = useState(null);
+  const shareNoticeTimer = useRef(null);
+  useEffect(() => () => clearTimeout(shareNoticeTimer.current), []);
+  const flashShareNotice = (msg) => {
+    clearTimeout(shareNoticeTimer.current);
+    setShareNotice(msg);
+    shareNoticeTimer.current = setTimeout(() => setShareNotice(null), 6000);
+  };
   const teamName = (id) => { const t = myTeams.find((x) => x.id === id); return t ? t.name : "a team"; };
   const refreshTeams = async () => {
     const { uid } = await currentIdentity();
@@ -512,6 +524,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   // Share a project (site group) with a team, or make it private again (teamId=null).
   const doShare = async (site, teamId) => {
     const gid = site.groupId || site.id;
+    const label = site.site || site.name || "This project";
     setShareBusy(true);
     const r = await sharingLib().then(
       ({ shareProject, makeProjectPrivate }) => (teamId ? shareProject(gid, teamId) : makeProjectPrivate(gid)),
@@ -521,6 +534,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     );
     setShareBusy(false);
     setStatusMenu(null);
+    setShareNotice(null); // an error and a confirmation never both stand — the outcome below picks one
     if (!r || !r.ok) { setErr((r && r.error) || "Couldn't update sharing."); return; }
     /* NEW-1 — branch on the NAMED outcome, never on a row count. The old test was
      * `if (teamId && r.sites === 0)` → "This project isn't in the cloud yet", which fired every time
@@ -545,7 +559,18 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     }
     // A project holding a teammate's plan is shared as far as it can be: your rows moved, theirs are
     // deliberately left alone. Say that rather than reporting a clean success for a partial one.
-    if (teamId && r.foreign > 0) setErr(`Shared your ${r.matched} of ${r.plans} plans — the rest belong to a teammate and were left as they are.`);
+    if (teamId && r.foreign > 0) {
+      setErr(`Shared your ${r.matched} of ${r.plans} plans — the rest belong to a teammate and were left as they are.`);
+      onSharedChange && onSharedChange();
+      return;
+    }
+    // NEW-2 — the clean-success case: the RPC changed exactly the rows it meant to and nothing is
+    // left unsaid. Confirm it happened, scoped to what actually moved (site plans only — Notes,
+    // Library, Review and Schedule were never touched), so the click has a visible after-state
+    // beyond the row eventually relabelling itself on the next render.
+    flashShareNotice(teamId
+      ? `Shared “${label}”'s site plans with ${teamName(teamId)} — Notes, Library, Review and Schedule stay private.`
+      : `“${label}” is private again — its site plans are no longer shared.`);
     onSharedChange && onSharedChange();
   };
   // Pipeline counts by status across all sites (for the chips / counts strip).
@@ -2013,6 +2038,13 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             )}
           </div>
         )}
+        {/* NEW-2 — share/unshare confirmation (bottom-left, same slot as the error toast, mutually
+            exclusive with it): the visible after-state the owner asked for. */}
+        {!err && shareNotice && (
+          <div role="status" style={{ position: "absolute", left: 12, bottom: ZOOM_CONTROL_CLEARANCE_PX, zIndex: 1000, maxWidth: 380, background: "var(--success-bg)", border: "1px solid var(--success-border)", borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12.5, color: "var(--success-text)", lineHeight: 1.45 }}>
+            {shareNotice}
+          </div>
+        )}
         {/* statewide-backup notice (bottom-left) — the clicked lot was answered by the
             all-Texas TxGIO layer because the county's own server was down; be honest
             about provenance so a possibly-staler source is never mistaken for the
@@ -2093,6 +2125,14 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                     <span style={{ flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                       {s.teamId ? `Shared with ${teamName(s.teamId)}` : "Private — only you can see this"}
                     </span>
+                  </div>
+                  {/* NEW-2 — WHAT gets shared, stated before the click. Owner: "not really clear
+                      that it's sharing anything." A team NAME answers WHO; nothing here answered
+                      WHAT, and the honest answer is narrower than "this project" — sharing today
+                      moves the site plans (the drawings) only. Notes/Library/Review/Schedule have
+                      no team column at all and are never touched (see B326416's scope guarantee). */}
+                  <div style={{ padding: "0 12px 6px", fontSize: 10.5, color: PAL.muted, lineHeight: 1.35 }}>
+                    Shares this project's site plans (the drawings) — Notes, Library, Review and Schedule stay private.
                   </div>
                   {myTeams.map((tm) => {
                     const on = s.teamId === tm.id;
