@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mergePulledSites, saveSite, loadSite, loadSitesList, renameSiteGroup, repairSplitProjectNames, snapshotVersion, listVersions, getVersion, summarizeVersion, backupNow, pruneMigratedLegacy } from "../src/workspaces/site-planner/lib/storage.js";
+import { mergePulledSites, groupCountDivergence, saveSite, loadSite, loadSitesList, renameSiteGroup, repairSplitProjectNames, snapshotVersion, listVersions, getVersion, summarizeVersion, backupNow, pruneMigratedLegacy } from "../src/workspaces/site-planner/lib/storage.js";
 import { mergeSiteContent, contentCount, createSiteModel } from "../src/workspaces/site-planner/lib/siteModel.js";
 import { idbAvailable } from "../src/workspaces/site-planner/lib/localDb.js";
 
@@ -83,6 +83,64 @@ describe("mergePulledSites — pullCloud must never drop local-only work (B124)"
   it("tolerates empty / missing inputs", () => {
     expect(mergePulledSites(undefined, undefined).map).toEqual({});
     expect(mergePulledSites({}, []).toPush).toEqual([]);
+  });
+});
+
+/* NEW-1 — DANGEROUS-MEANS-UNOBSERVABLE instrument (see cloudListIdIntegrity.test.js for the full
+ * repro this defends). `map` is keyed by id, so two DIFFERENT cloud rows sharing one id can only
+ * ever leave ONE survivor in the merge — there is no way for this data shape to keep both. The
+ * real fix lives in cloudSync.cloudList (the row's real primary key wins over a drifted jsonb
+ * id); these are the belt-and-suspenders detectors that make a collision LOUD instead of silent,
+ * whatever its cause. */
+describe("mergePulledSites — idCollisions: a same-pull id collision is named, not silently dropped (NEW-1)", () => {
+  it("two same-id cloud rows: only ONE survives the merge, but the collision is reported", () => {
+    const cloud = [rec("g1", 1000, { groupId: "g", name: "Concept A" }), rec("g1", 1000, { groupId: "g", name: "Concept B" })];
+    const { map, idCollisions } = mergePulledSites({}, cloud);
+    expect(Object.keys(map)).toEqual(["g1"]); // ← the defect: "Concept B" is gone, no trace in `map`
+    expect(map.g1.name).toBe("Concept A");    // mergeSiteContent's tie-break (equal updatedAt → first side wins)
+    expect(idCollisions).toEqual([{ id: "g1", groupId: "g" }]);
+  });
+
+  it("five distinct ids in one pull — no collision reported", () => {
+    const cloud = ["a", "b", "c", "d", "e"].map((id) => rec(id, 1000, { groupId: "g" }));
+    expect(mergePulledSites({}, cloud).idCollisions).toEqual([]);
+  });
+
+  it("a local id colliding with a cloud id is NOT an idCollisions hit (that's the ordinary local∪cloud merge, not a same-pull cloud collision)", () => {
+    const { idCollisions } = mergePulledSites({ a: rec("a", 1) }, [rec("a", 2)]);
+    expect(idCollisions).toEqual([]);
+  });
+});
+
+describe("groupCountDivergence — a group's plan count silently shrinking between fetch and merge (NEW-1)", () => {
+  it("no divergence when every cloud row for a group survives into the map", () => {
+    const cloud = ["a", "b", "c"].map((id) => rec(id, 1000, { groupId: "g" }));
+    const { map } = mergePulledSites({}, cloud);
+    expect(groupCountDivergence(cloud, map, [])).toEqual([]);
+  });
+
+  it("reports the group when the merge holds fewer rows than the cloud fetch did", () => {
+    // Direct unit of the pure comparator: 3 cloud rows claimed for group "g", only 2 survived
+    // into the merged map (simulating any collapse mechanism, not just the id-collision one).
+    const cloud = [{ id: "a", groupId: "g" }, { id: "b", groupId: "g" }, { id: "c", groupId: "g" }];
+    const mergedMap = { a: { id: "a", groupId: "g" }, b: { id: "b", groupId: "g" } }; // "c" never made it
+    expect(groupCountDivergence(cloud, mergedMap, [])).toEqual([{ groupId: "g", cloudCount: 3, mergedCount: 2 }]);
+  });
+
+  it("a SERVER-DELETED row is a legitimate shrink — excluded, no false positive", () => {
+    const cloud = [{ id: "a", groupId: "g" }, { id: "b", groupId: "g" }];
+    const mergedMap = { a: { id: "a", groupId: "g" } }; // "b" is soft-deleted server-side, correctly dropped
+    expect(groupCountDivergence(cloud, mergedMap, ["b"])).toEqual([]);
+  });
+
+  it("end-to-end via mergePulledSites: a same-pull id collision surfaces as a group divergence too", () => {
+    const cloud = [rec("g1", 1000, { groupId: "g", name: "Concept A" }), rec("g1", 1000, { groupId: "g", name: "Concept B" })];
+    const { groupDivergence } = mergePulledSites({}, cloud);
+    expect(groupDivergence).toEqual([{ groupId: "g", cloudCount: 2, mergedCount: 1 }]);
+  });
+
+  it("tolerates empty / missing inputs", () => {
+    expect(groupCountDivergence(undefined, undefined, undefined)).toEqual([]);
   });
 });
 
