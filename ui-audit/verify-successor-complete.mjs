@@ -389,11 +389,229 @@ async function runMutationQueue(url) {
 }
 
 // =================================================================================================
+// SECTION D — NARROW-SCREEN SWEEP (NEW-#, filed after a prior session flagged this dialog had
+// NEVER been rendered below 1600x950 — no owner-observed bug, a coverage gap the owner then asked
+// to have checked). Renders the real modal at a spread of real device widths and measures actual
+// geometry — not an impression. If nothing here goes red, the honest conclusion is "not broken,"
+// and this section is what keeps that conclusion true going forward instead of just asserted once.
+//
+// WIDTHS, and why each one: 1600 is the desktop baseline every other section already exercises —
+// included here too so the sweep proves, not assumes, that this section's own instrumentation
+// reads the unchanged desktop case as unchanged. 768 is the exact isMobile breakpoint (still the
+// desktop header at this width — the app's own `window.innerWidth < 768` test). 430 is the widest
+// common phone (iPhone Pro Max class). 393 covers mainstream iPhone/Android widths. 375 is
+// iPhone SE/mini. 360 is the single most common Android width worldwide. 320 is the narrowest
+// viewport any real phone still ships — the true floor; nothing narrower is a real device.
+const WIDTH_SWEEP = [
+  { width: 1600, label: "desktop baseline" },
+  { width: 768,  label: "isMobile breakpoint (still desktop header)" },
+  { width: 430,  label: "widest common phone (iPhone Pro Max class)" },
+  { width: 393,  label: "mainstream iPhone/Android" },
+  { width: 375,  label: "iPhone SE/mini" },
+  { width: 360,  label: "most common Android width" },
+  { width: 320,  label: "narrowest real phone floor" },
+];
+
+// A live-measured floor, not a guessed one: sweeping every 5px from 320-500 (public/../_tmp probe,
+// not committed) found Chromium's flex-shrink distribution lands the two buttons off by exactly
+// ±0.015625 CSS px (1/64 px — Blink's internal LayoutUnit snap grid) at ~9 of 37 widths sampled in
+// the 340-460px shrink range, alternating sign. That is a browser layout-engine rounding artifact
+// of two independently-shrinking same-basis flex items, not a design defect: at any real display
+// and DPR it is at least an order of magnitude below one device pixel. The tolerance below is 6x
+// that measured floor — enough to absorb the engine's own rounding noise, while staying orders of
+// magnitude tighter than anything a human or a mutated button could produce (see the two mutation
+// proofs below, which move the delta by 15-160px — nothing like 0.02px survives either mutation).
+const EQUAL_WIDTH_TOLERANCE_PX = 0.1;
+
+async function bootAndImportAtWidth(page, url) {
+  page.removeAllListeners("dialog");
+  page.on("dialog", d => d.accept());
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+  await page.waitForSelector("[data-task-row]", { timeout: 40000 });
+  await assertMeasurable(page, "verify-successor-complete:sectionD");
+  // The header collapses to a single overflow menu below the app's own 768px isMobile
+  // breakpoint (SitePlanner/Schedule shared pattern) — open Version History the way a user
+  // actually would at that width, not by assuming the desktop button exists.
+  const isMobileHeader = await page.evaluate(() => window.innerWidth < 768);
+  if (isMobileHeader) {
+    await page.locator('button[aria-label="More actions"]').click();
+    await pacedWait(page, 150);
+    await page.locator('[data-testid="open-history-mobile"]').click();
+  } else {
+    await page.locator('[data-testid="open-history-desktop"]').click();
+  }
+  await pacedWait(page, 250);
+  await page.setInputFiles('input[type="file"][accept=".json"]', {
+    name: "fixture.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(FIXTURE)),
+  });
+  await pacedWait(page, 700);
+  await page.locator('[data-testid="history-panel"] button:has-text("Close")').click();
+  await pacedWait(page, 4200);
+}
+
+// Measures the modal's footer geometry and, critically, actually CLICKS Update Successors — proof
+// the control is genuinely reachable at this width, not just geometrically present under an
+// overlay it can't receive events through (CHROME-NEVER-EATS-A-PRESS is exactly this species of
+// bug one layer up).
+async function measureAndDriveAtWidth(url, width, label) {
+  const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
+  const page = await browser.newPage({ viewport: { width, height: 900 } });
+  const pageErrors = []; page.on("pageerror", e => pageErrors.push(e.message));
+  await bootAndImportAtWidth(page, url);
+  await markGreenViaGrid(page, 7); // Solo Parent -> prompt for Solo Child (8)
+  await pacedWait(page, 200);
+
+  const tag = `D · ${width}px (${label})`;
+  ok(`${tag} · modal opened`, (await modalUp(page)) > 0);
+
+  const geo = await page.evaluate(() => {
+    const modal = document.querySelector('[data-successor-modal]');
+    const card = modal ? modal.firstElementChild : null;
+    const skip = document.querySelector('[data-successor-apply="skip"]');
+    const update = document.querySelector('[data-successor-apply="update"]');
+    const footer = skip ? skip.closest('div') : null;
+    const label = footer ? [...footer.children].find(c => c.tagName === 'SPAN') : null;
+    const rectOf = el => el ? (({ x, y, width, height, right, bottom }) => ({ x, y, width, height, right, bottom }))(el.getBoundingClientRect()) : null;
+    const overlap = (a, b) => (!a || !b) ? null : !(a.right <= b.x || b.right <= a.x || a.bottom <= b.y || b.bottom <= a.y);
+    const lineCount = el => el ? new Set([...el.getClientRects()].map(r => Math.round(r.y))).size : null;
+    const cardR = rectOf(card), skipR = rectOf(skip), updateR = rectOf(update), labelR = rectOf(label), footerR = rectOf(footer);
+    return {
+      cardR, skipR, updateR, labelR,
+      footerOverflows: footer ? footer.scrollWidth > footer.clientWidth + 0.5 : null,
+      skipWraps: skip ? lineCount(skip) > 1 : null,
+      updateWraps: update ? lineCount(update) > 1 : null,
+      labelSkipOverlap: overlap(labelR, skipR),
+      labelUpdateOverlap: overlap(labelR, updateR),
+      cardWithinViewport: cardR ? (cardR.x >= -0.5 && cardR.right <= window.innerWidth + 0.5) : null,
+      updateWithinViewport: updateR ? (updateR.x >= -0.5 && updateR.right <= window.innerWidth + 0.5) : null,
+      widthDelta: (skipR && updateR) ? Math.abs(updateR.width - skipR.width) : null,
+      heightDelta: (skipR && updateR) ? Math.abs(updateR.height - skipR.height) : null,
+    };
+  });
+
+  ok(`${tag} · footer does not overflow its container`, geo.footerOverflows === false, JSON.stringify(geo.footerR));
+  ok(`${tag} · Skip's label does not wrap`, geo.skipWraps === false);
+  ok(`${tag} · Update Successors' label does not wrap`, geo.updateWraps === false);
+  ok(`${tag} · the "N updates pending" label does not collide with either button`,
+    geo.labelSkipOverlap === false && geo.labelUpdateOverlap === false);
+  ok(`${tag} · the modal card stays within the viewport (no horizontal clip)`, geo.cardWithinViewport === true, JSON.stringify(geo.cardR));
+  ok(`${tag} · Update Successors stays within the viewport (reachable, not clipped off-screen)`, geo.updateWithinViewport === true, JSON.stringify(geo.updateR));
+  ok(`${tag} · Skip and Update Successors render the same size (within ${EQUAL_WIDTH_TOLERANCE_PX}px — see rounding-floor note above)`,
+    geo.widthDelta !== null && geo.widthDelta <= EQUAL_WIDTH_TOLERANCE_PX && geo.heightDelta <= EQUAL_WIDTH_TOLERANCE_PX,
+    `widthDelta=${geo.widthDelta} heightDelta=${geo.heightDelta}`);
+  if (width === 1600) {
+    ok(`${tag} · exact desktop rendering unchanged (150x34, bit-identical to the pre-existing A3 check)`,
+      geo.skipR && geo.updateR && geo.skipR.width === 150 && geo.updateR.width === 150 && geo.skipR.height === 34 && geo.updateR.height === 34);
+  }
+
+  // The interaction proof: actually drive Update Successors and confirm it really applied — not
+  // just present, but reachable and functional at this width (SYNTHETIC-KEYS-DONT-EDIT's sibling
+  // concern, one layer up: a geometry check that never clicks anything can't tell "present" from
+  // "present but dead").
+  await page.locator('[data-successor-apply="update"]').click();
+  await pacedWait(page, 450);
+  const healthAfter = await page.evaluate(() => {
+    const cell = document.querySelector('[data-picker-cell="status-8"]');
+    return cell ? cell.innerText : null;
+  });
+  ok(`${tag} · Update Successors is actually clickable and applies the change (not just geometrically present)`,
+    /In Progress/.test(healthAfter || ""), healthAfter);
+
+  ok(`${tag} · no uncaught page errors at this width`, pageErrors.length === 0, pageErrors.slice(0, 3).join(" | "));
+  await browser.close();
+}
+
+async function runSectionD(url) {
+  for (const { width, label } of WIDTH_SWEEP) {
+    await measureAndDriveAtWidth(url, width, label);
+  }
+}
+
+// ── MUTATION D1 — proves the viewport-overflow assertions are discriminating. Dropping the
+// card's `maxWidth:'94vw'` clamp AND pinning `flexShrink:0` (so the backdrop's default flex-shrink
+// can no longer act as a silent fallback either — measured live: removing maxWidth alone left the
+// card contained because it's the sole flex item in the backdrop's centering flex row, and default
+// flex-shrink:1 already resizes a lone over-wide item down to fit; only defeating BOTH mechanisms
+// reproduces a real overflow) is exactly the kind of "simplify the inline style" edit that could
+// land by accident; at 320px a fixed 480px-wide card then genuinely overflows the viewport, and
+// the check above must catch it. At 1600px, 480 < 1600 regardless, so the desktop case must stay
+// green — proving this mutation is narrow-width-specific, not a blunt instrument.
+async function runMutationCardClamp(url) {
+  const NEEDLE = "width:480,maxWidth:'94vw',maxHeight:'82vh'";
+  if (!realBody.includes(NEEDLE)) { ok("D-mut1 · card-clamp mutation target found in source", false); return; }
+  const mutated = realBody.replace(NEEDLE, "width:480,maxHeight:'82vh',flexShrink:0");
+  const { server, url: murl } = await makeServer(mutated);
+  const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
+
+  for (const width of [320, 1600]) {
+    const page = await browser.newPage({ viewport: { width, height: 900 } });
+    await bootAndImportAtWidth(page, murl);
+    await markGreenViaGrid(page, 7);
+    await pacedWait(page, 200);
+    const withinViewport = await page.evaluate(() => {
+      const card = document.querySelector('[data-successor-modal]').firstElementChild;
+      const r = card.getBoundingClientRect();
+      return r.x >= -0.5 && r.right <= window.innerWidth + 0.5;
+    });
+    if (width === 320) {
+      ok("D-mut1 · MUTATION (maxWidth:94vw removed): the card now overflows a 320px viewport, as expected",
+        withinViewport === false);
+    } else {
+      ok("D-mut1 · MUTATION (maxWidth:94vw removed): the 1600px desktop case stays unaffected (control, discriminating)",
+        withinViewport === true);
+    }
+    await page.close();
+  }
+  await browser.close(); server.close();
+}
+
+// ── MUTATION D2 — proves the equal-width assertion is discriminating. Pinning a `minWidth` onto
+// only the Update button (a plausible real mistake — e.g. someone padding it out to fit longer
+// text) breaks the equal-shrink symmetry by tens of pixels at narrow widths, while both buttons
+// still sit at their un-shrunk 150px at 1600px regardless — so the desktop control must stay
+// green while the narrow-width check goes red.
+async function runMutationButtonMinWidth(url) {
+  const NEEDLE = '<button data-successor-apply="update" onClick={apply} disabled={!changeCount}';
+  if (!realBody.includes(NEEDLE)) { ok("D-mut2 · button-minWidth mutation target found in source", false); return; }
+  const mutated = realBody.replace(
+    "style={{...FOOTER_BTN_STYLE,\n              cursor:changeCount?'pointer':'not-allowed',",
+    "style={{...FOOTER_BTN_STYLE, minWidth:130,\n              cursor:changeCount?'pointer':'not-allowed',"
+  );
+  if (mutated === realBody) { ok("D-mut2 · button-minWidth mutation target found in source", false); return; }
+  const { server, url: murl } = await makeServer(mutated);
+  const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
+
+  for (const width of [320, 1600]) {
+    const page = await browser.newPage({ viewport: { width, height: 900 } });
+    await bootAndImportAtWidth(page, murl);
+    await markGreenViaGrid(page, 7);
+    await pacedWait(page, 200);
+    const delta = await page.evaluate(() => {
+      const s = document.querySelector('[data-successor-apply="skip"]').getBoundingClientRect();
+      const u = document.querySelector('[data-successor-apply="update"]').getBoundingClientRect();
+      return Math.abs(u.width - s.width);
+    });
+    if (width === 320) {
+      ok("D-mut2 · MUTATION (Update given its own minWidth:130): the buttons are now visibly UNEQUAL at 320px, as expected",
+        delta > EQUAL_WIDTH_TOLERANCE_PX, `delta=${delta}`);
+    } else {
+      ok("D-mut2 · MUTATION (Update given its own minWidth:130): the 1600px desktop case stays equal (control, discriminating)",
+        delta <= EQUAL_WIDTH_TOLERANCE_PX, `delta=${delta}`);
+    }
+    await page.close();
+  }
+  await browser.close(); server.close();
+}
+
+// =================================================================================================
 const { server, url } = await makeServer(null);
 await runSectionA(url);
 await runSectionB(url);
 await runMutationLatch(url);
 await runMutationQueue(url);
+await runSectionD(url);
+await runMutationCardClamp(url);
+await runMutationButtonMinWidth(url);
 server.close();
 
 const passed = results.filter(r => r.pass).length;
