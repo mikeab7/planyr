@@ -82,6 +82,8 @@ const ALL_NOTES_FILES = [
   // NEW-PICTURE-CANVAS — the placed box holds CONTENT, not only text, so it needed a geometry
   // rule: the floors, the edge pad, and resizing from any of eight handles.
   "lib/notesBoxResize.js",
+  // NEW-ENTER-INHERIT — a new line continues the one above it.
+  "lib/notesEnterInherit.js",
 ];
 const SKETCH_FILES = ALL_NOTES_FILES.filter((f) => f.includes("Sketch"));
 
@@ -1052,6 +1054,63 @@ describe("the project a notebook belongs to", () => {
     expect(print, "an image box prints unpadded").toMatch(/data-anchor-kind="image"\]\s*\{ padding: 0/);
     expect(print, "…and the bare serialised img is named, not just the node view's figure")
       .toMatch(/img\.planyr-note-img/);
+  });
+
+  /* ════════════════════════════════════════════════════════════════════════════════════════
+   * THE CARET IS EXPOSED WHERE IT ACTUALLY IS (NEW-CARET-BOUNDS)
+   * ═══════════════════════════════════════════════════════════════════════════════════════ */
+  it("⛔ THE WRITING SURFACE IS EXPOSED AS A REAL MULTILINE TEXTBOX, not a generic container", () => {
+    /* The owner runs Windows 11's Text cursor indicator and reported its markers landing up and
+     * to the LEFT of the box he is typing in. Windows takes that rectangle from the ACCESSIBILITY
+     * layer, never from what is painted. Measured from the real tree before the fix:
+     *     note-title  →  role=textbox   editable=plaintext   multiline=false   ✅
+     *     note-body   →  role=GENERIC   editable=richtext    multiline=—       ⛔
+     * A generic node exposes no text pattern to read a caret rectangle out of, so the platform
+     * falls back to the bounds of the editable REGION — whose top-left is up and left of any
+     * placed box, which is the direction he photographed. */
+    const editor = read(NOTES, "components", "NoteEditor.jsx");
+    expect(editor, "the body must declare itself a textbox").toMatch(/role:\s*"textbox"/);
+    expect(editor, "…and that it is multiline, or its caret rect is one line's geometry")
+      .toMatch(/"aria-multiline":\s*"true"/);
+    // The keyboard-trap escape (B1392) rides the same accessible name and must not be lost to it.
+    expect(editor).toMatch(/aria-label":\s*"Note body\./);
+    expect(editor).toMatch(/press Escape then Tab to leave the note/);
+  });
+
+  it("⛔ A MOVE DRAG NEVER TOUCHES THE WIDTH (NEW-DRAG-NARROWS)", () => {
+    /* *"when I grab this, it's normally wider if I let go, but when I grab it, it shortens up."*
+     * The move handler ran `placeAnchor`, whose whole job is to narrow a block to the space
+     * available — B539648's right-edge crush surviving in the one path that item did not touch.
+     * The guard is on the SHAPE rather than on a number: the move path may not reach the width. */
+    const node = read(NOTES, "lib", "notesAnchorNode.js");
+    const move = node.slice(node.indexOf('grip.addEventListener("pointermove"'), node.indexOf("const end = (e) =>"));
+    expect(move, "the move drag uses the point-only rule").toMatch(/moveAnchorPoint\(/);
+    expect(move, "⛔ …and never calls the placement rule, which spends the width").not.toMatch(/placeAnchor\(/);
+    expect(move, "⛔ …and never writes a width at all").not.toMatch(/style\.width/);
+    const resize = read(NOTES, "lib", "notesBoxResize.js");
+    expect(resize, "the move rule has no width arithmetic to re-enable")
+      .toMatch(/export function moveAnchorPoint/);
+  });
+
+  it("⛔ A NEW LINE CONTINUES THE ONE ABOVE IT (NEW-ENTER-INHERIT)", () => {
+    /* *"it doesn't seem like when I start a new line, it carries the formatting."* The owner
+     * called the cause and was right about the mechanism: ProseMirror asks `defaultBlockAt` for
+     * the new node when the caret is at the END of a block, and a default block has default
+     * attributes. Measured before the fix: block fontSize 22 → null, run fontSize 22px → null,
+     * marks bold+textStyle → none. */
+    const ext = read(NOTES, "lib", "notesExtensions.js");
+    expect(ext, "the rule is registered").toMatch(/noteEnterInherit/);
+    expect(ext, "…above the list keymap, so it can run the split it displaces").toMatch(/priority:\s*200/);
+
+    /* ⛔ THE TWO WAYS THE HOUSEKEEPING PASS UNDID THE CARRY, both guarded, because the fix was
+     * complete and INVISIBLE until these were found: `deriveBlockSizes` ran one transaction
+     * later, saw a brand-new EMPTY block, decided its runs disagreed and wrote null over the
+     * inherited size — and cleared the stored marks in the same breath. */
+    expect(ext, "an empty block keeps the size it was given").toMatch(/if \(node\.content\.size === 0\) return true;/);
+    expect(ext, "…and the pass hands the stored marks back").toMatch(/tr\.setStoredMarks\(newState\.storedMarks\)/);
+    // A line break is not a run, so a soft break must not make a block disagree with itself.
+    expect(ext, "a hardBreak is skipped rather than counted as an unsized run")
+      .toMatch(/if \(child\.type\.name === "hardBreak"\) return;/);
   });
 
   it("⛔ AN ABANDONED PRESS IS PROVISIONAL — enforced at the SEAM, not only in the gesture", () => {

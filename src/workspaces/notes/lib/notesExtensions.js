@@ -48,6 +48,7 @@ import NoteSlashMenu from "./notesSlashMenu.js";
 import NoteSketch from "./notesSketchNode.js";
 import NoteTabKey from "./notesTabKey.js";
 import NoteListIndent from "./notesListIndent.js";
+import { enterInheritHandler } from "./notesEnterInherit.js";
 import NotePastePlain from "./notesPastePlain.js";
 import NoteBlockKeys from "./notesBlockKeys.js";
 import NoteSearchHighlight from "./notesSearchHighlight.js";
@@ -75,8 +76,25 @@ function deriveBlockSizes(doc, tr) {
   let touched = false;
   doc.descendants((node, pos) => {
     if (node.type.name !== "paragraph" && node.type.name !== "heading") return true;
+    /* ⛔ AN EMPTY BLOCK KEEPS THE SIZE IT WAS GIVEN (NEW-ENTER-INHERIT), AND THIS IS WHAT MADE
+     * THE ENTER FIX LOOK BROKEN WHILE IT WAS ALREADY WORKING. A brand-new line has no runs at
+     * all, `blockFontSize([])` is null by its own rule, and this walk then wrote that null
+     * straight over the size the split had just inherited — so the carry was performed and
+     * immediately undone, one transaction later, by a plugin that had no idea a split had
+     * happened. An empty block has nothing to disagree with; its declared size is a statement
+     * about what the NEXT character will be, and it is also what gives the caret its height
+     * before anything is typed. Leave it alone. */
+    if (node.content.size === 0) return true;
     const runs = [];
     node.forEach((child) => {
+      /* ⛔ A LINE BREAK IS NOT AN UNSIZED RUN — IT IS NOT A RUN AT ALL (NEW-ENTER-INHERIT).
+       * `hardBreak` used to be pushed as `{fontSize: null}`, which `blockFontSize` reads as "a
+       * run with no size", which means "the runs disagree", which drops the block's size to
+       * null. So pressing SHIFT+ENTER in a sized paragraph silently reset that paragraph's line
+       * box to the default height while every word in it kept its size — measured, 22 → null,
+       * and it reads as a spacing bug rather than the formatting bug it is. A break carries no
+       * text and no size, so it has no opinion to disagree with. */
+      if (child.type.name === "hardBreak") return;
       if (!child.isText) { runs.push({ fontSize: null }); return; }
       const mark = child.marks.find((m) => m.type.name === "textStyle");
       runs.push({ fontSize: mark?.attrs?.fontSize || null });
@@ -132,7 +150,15 @@ export const NOTE_EXTENSIONS = [
         appendTransaction: (trs, _old, newState) => {
           if (!trs.some((t) => t.docChanged)) return null;
           const tr = newState.tr;
-          return deriveBlockSizes(newState.doc, tr) ? tr : null;
+          if (!deriveBlockSizes(newState.doc, tr)) return null;
+          /* ⛔ AND IT MUST HAND THE STORED MARKS BACK (NEW-ENTER-INHERIT). ProseMirror clears
+           * `storedMarks` on any transaction that does not restate them, so this housekeeping
+           * pass was silently stripping the marks a split had just carried to the new line — the
+           * user pressed Enter in bold 22px text and typed in plain default text, with nothing
+           * anywhere reporting a mark had been dropped. A pass that only means to adjust a
+           * block attribute must not also decide what the next keystroke looks like. */
+          tr.setStoredMarks(newState.storedMarks);
+          return tr;
         },
       })];
     },
@@ -235,6 +261,21 @@ export const NOTE_EXTENSIONS = [
   // can act, and this only reaches the presses it declines (the first item of a list). See
   // lib/notesListIndent.js for the whole rule and the option that was refused.
   NoteListIndent,
+
+  /* ⛔ A NEW LINE CONTINUES THE ONE ABOVE IT (NEW-ENTER-INHERIT). Registered ABOVE the list
+   * keymap at priority 200, the same rung as the indent rule, and for the same reason: it has to
+   * see the press BEFORE `splitListItem` and `splitBlock` in order to run them itself and repair
+   * their result in the SAME transaction. It DECLINES everywhere it is not needed — a range
+   * split, a caret that is not at the end of its block, an EMPTY block (which is the "leave the
+   * list" case the owner named), and a code block — so everything it does not claim behaves
+   * exactly as it did. The whole decision table is pure and lives in lib/notesEnterInherit.js. */
+  Extension.create({
+    name: "noteEnterInherit",
+    priority: 200,
+    addKeyboardShortcuts() {
+      return { Enter: () => enterInheritHandler({ editor: this.editor }) };
+    },
+  }),
 
   Highlight.configure({ multicolor: true }),
   TextAlign.configure({ types: ["heading", "paragraph"] }),

@@ -279,6 +279,32 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   that reasoning turned out to be wrong about the mechanism. **A blocker that dissolves when you
   check it was never a blocker.** Measured end to end: a row 17.25 → 15.30px, still 15.30 after a
   reload, and the printed sheet carries it with no CSS custom property.
+- **⛔ A NEW LINE CONTINUES THE ONE ABOVE IT (NEW-ENTER-INHERIT, `lib/notesEnterInherit.js`).**
+  *"it doesn't seem like when I start a new line, it carries the formatting."* He named the cause
+  and was right: ProseMirror asks `defaultBlockAt` for the new node when the caret is at the END of
+  a block, and a default block has default attributes. **Measured before a line was written:** block
+  `fontSize` 22 → null, run `fontSize` 22px → null, marks `bold+textStyle` → none, colour → null —
+  so BOTH tiers were lost, not just the block one he suspected. ⛔ **The shape is why it read as
+  intermittent:** a split in the MIDDLE or at the START keeps everything; only a split at the END
+  loses it, which is the one people do constantly. The rule is registered at priority 200 (above
+  the list keymap, so it can run the split it displaces and repair it in the SAME transaction — two
+  dispatches would mean the first Ctrl+Z strips formatting off a line and leaves it there), and it
+  **DECLINES** for a range split, a caret that is not at the end, a code block, and an **empty
+  block** — that last one being the *leave the list* case the owner named as not-to-break.
+  - **⛔ AND THE FIX WAS COMPLETE AND INVISIBLE UNTIL TWO THINGS IN `deriveBlockSizes` STOPPED
+    UNDOING IT.** The handler ran, the chain returned `true`, and the attributes were still null —
+    because that housekeeping pass runs one transaction later, saw a brand-new **empty** block,
+    decided its runs disagreed, and wrote `null` over the size the split had just inherited, while
+    ProseMirror cleared the stored marks in the same breath. So: an empty block now KEEPS the size
+    it was given (its declared size is a statement about the next character, and it is what gives
+    the caret its height before anything is typed), and the pass hands `storedMarks` back. **A pass
+    that only means to adjust a block attribute must not also decide what the next keystroke looks
+    like.** Found by probing whether the handler ran at all rather than by re-reading it.
+  - **AND A LINE BREAK IS NOT A RUN.** `hardBreak` was pushed as `{fontSize: null}`, which reads as
+    "the runs disagree", so **Shift+Enter** silently reset its own paragraph's line box to the
+    default height while every word kept its size — a formatting bug wearing a spacing bug's
+    clothes. Harness: **audit-notes-enter-inherit** (38 checks, real keys, judged on the stored
+    document, both tiers printed side by side); decision unit-tested in `test/notesEnterInherit.js`.
 - `lib/notesSpacing.js` — **HOW FAR APART THE LINES ARE (B391076).** A BLOCK property on paragraph
   and heading, never a text style: half a line cannot be one-and-a-half spaced. Written into the
   markup by one attribute (three that each wrote `style` would overwrite one another), so it saves,

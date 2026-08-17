@@ -47,7 +47,7 @@ import { Node, mergeAttributes } from "@tiptap/core";
 import { anchorIsEmpty } from "./notesAnchorPrune.js";
 import {
   ANCHOR_EDGE_PAD, ANCHOR_MIN_HEIGHT, ANCHOR_MIN_WIDTH, ANCHOR_WIDTH,
-  HANDLES, HANDLE_CURSOR, handlesFor, hasFixedHeight, resizeBox,
+  HANDLES, HANDLE_CURSOR, handlesFor, hasFixedHeight, moveAnchorPoint, resizeBox,
 } from "./notesBoxResize.js";
 
 /* ⛔ THE GEOMETRY CONSTANTS LIVE IN `notesBoxResize.js` AND ARE RE-EXPORTED HERE. A resize has to
@@ -738,16 +738,19 @@ export const NoteAnchor = Node.create({
         from.moved = true;
         const host = editor.view.dom;
         const hostRect = host.getBoundingClientRect();       // read FRESH: the page may scroll
-        const c = placeAnchor({
+        /* ⛔ A MOVE NEVER TOUCHES THE WIDTH (NEW-DRAG-NARROWS) — and this line used to be
+         * `placeAnchor`, whose whole job is to narrow a block to the space available. Dragging
+         * rightward shrank that space, so the box REFLOWED UNDER HIS HAND, then sprang back on
+         * release because the commit below writes only x/y. It is the B539648 right-edge crush
+         * surviving in the one path that item did not touch. `moveAnchorPoint` has no width
+         * arithmetic in it at all, so the gesture cannot resize by any route. */
+        const c = moveAnchorPoint({
           x: (e.clientX - from.grabX - hostRect.left) / from.scale,
           y: (e.clientY - from.grabY - hostRect.top) / from.scale,
-          width: host.offsetWidth,
-          preferred: dom.offsetWidth,
         });
         from.at = c;                     // ⛔ the gesture's own record — same reason as the width
         dom.style.left = `${c.x}px`;
         dom.style.top = `${c.y}px`;
-        dom.style.width = `${c.w}px`;
         dom.setAttribute("data-anchor-x", String(c.x));      // same reason as the width handle
         dom.setAttribute("data-anchor-y", String(c.y));
       });
