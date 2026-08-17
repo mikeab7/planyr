@@ -884,6 +884,78 @@ describe("cloud sync rides the SAME one seam", () => {
 /* ════════════════════════════════════════════════════════════════════════════════════════
  * 6. THE FOLDER POINTER
  * ═══════════════════════════════════════════════════════════════════════════════════════ */
+/* ════════════════════════════════════════════════════════════════════════════════════════
+ * THE CARRY-FORWARD — a fresh session must be able to start cheap
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("⛔ docs/NOTES-CARRY-FORWARD.md is wired so a fresh session reads it WITHOUT being told", () => {
+  /* ⛔ WHY THIS IS A TEST AND NOT A CONVENTION. The project rule is one task per session, then
+   * archive. It was ignored for a week because everything a fresh session needed lived only in one
+   * long-running session's memory — so continuing always looked cheaper than starting, until that
+   * session was re-reading ~500k tokens of history on every dispatch. The write-up existed; it was
+   * filed somewhere a Claude Code session does not read, which is the same mistake wearing a
+   * different hat. These assertions are the wiring, so it cannot quietly come loose again. */
+  const CARRY = join(process.cwd(), "docs/NOTES-CARRY-FORWARD.md");
+  const carry = () => readFileSync(CARRY, "utf8");
+
+  it("the file exists and carries its substance", () => {
+    const t = carry();
+    expect(t.length, "a stub is worse than nothing — it reads as covered").toBeGreaterThan(3000);
+    for (const must of [
+      "Instrument traps",            // the four false findings, plus the ones found since
+      "MUD 377",                     // the fixture that finds real bugs
+      "planyr:notes:tree:v1",        // the storage keys
+      "live_but_purged",             // the standing health check
+      "recurring bug families",      // what to suspect first
+      "new session",                 // the standing instruction it exists to make cheap
+    ]) {
+      expect(t, `the carry-forward has lost its "${must}" section`).toContain(must);
+    }
+  });
+
+  /* ⛔ THE WIRING. A carry-forward nobody reads is the failure this replaces, so BOTH doors are
+   * pinned: the always-loaded root file, and the pointer that auto-loads inside the module. */
+  it("⛔ the always-loaded CLAUDE.md points at it", () => {
+    expect(readFileSync(join(process.cwd(), "CLAUDE.md"), "utf8"))
+      .toMatch(/docs\/NOTES-CARRY-FORWARD\.md/);
+  });
+
+  it("⛔ …and so does the module's own pointer", () => {
+    expect(read(NOTES, "CLAUDE.md")).toMatch(/docs\/NOTES-CARRY-FORWARD\.md/);
+  });
+
+  /* ⛔ AND IT MAY NOT ROT INTO NAMING THINGS THAT NO LONGER EXIST — the same rule the per-folder
+   * pointers already live under. A document that confidently names a deleted harness sends the
+   * next session looking for it, which is worse than saying nothing. */
+  it("⛔ every repo path it names still exists", () => {
+    const named = [...carry().matchAll(/`((?:src|ui-audit|test|docs)\/[A-Za-z0-9_\-./]+\.(?:m?js|jsx|md))`/g)]
+      .map((m) => m[1]);
+    expect(named.length, "it should be naming real files").toBeGreaterThan(3);
+    const missing = named.filter((f) => !existsSync(join(process.cwd(), f)));
+    expect(missing, `the carry-forward names files that do not exist: ${missing.join(", ")}`).toEqual([]);
+  });
+
+  /* ⛔ AND IT MAY NOT CONTRADICT A MEASURED FACT IN THE ROOT RULES. The version this file was
+   * written from claimed "keyboard events do not register at all in this app" — measurably wrong
+   * (a synthetic event with `bubbles: true`, or dispatched on `window`, works fine; see
+   * SYNTHETIC-KEYS-DONT-EDIT). A false fact inside an always-read document is exactly the failure
+   * mode the document exists to prevent, so the corrected mechanism is pinned here. */
+  it("⛔ its synthetic-key guidance matches what the repo actually MEASURED", () => {
+    const t = carry();
+    expect(t, "it must name the real mechanism, not an absolute that is false").toContain("bubbles: false");
+    expect(t).toMatch(/SYNTHETIC-KEYS-DONT-EDIT/);
+    /* ⛔ THE PHRASE IS ALLOWED ONLY AS A QUOTED CORRECTION, never as an assertion. The document
+     * deliberately QUOTES the wrong claim in order to correct it — that is how a reader learns the
+     * difference — so a blunt "must not appear" ban would forbid the fix along with the fault.
+     * What must hold is that every occurrence sits AFTER the correction marker. */
+    const wrong = [...t.matchAll(/do not register at all/gi)].map((m) => m.index);
+    const marker = t.indexOf("CORRECTED HERE");
+    expect(marker, "the correction block itself has gone").toBeGreaterThan(-1);
+    for (const at of wrong) {
+      expect(at, "the overstated claim has come back as an assertion").toBeGreaterThan(marker);
+    }
+  });
+});
+
 describe("the folder pointer", () => {
   it("exists", () => {
     expect(existsSync(join(NOTES, "CLAUDE.md"))).toBe(true);

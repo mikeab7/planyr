@@ -14,6 +14,18 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > - **`docs/REFERENCE.md`** — deep implementation detail (Site Model schema, layer/GIS
 >   plumbing, Supabase DDL/RLS, persistence internals, the sandbox Playwright quirk).
 >
+> **⛔ WORKING ON NOTES? READ `docs/NOTES-CARRY-FORWARD.md` FIRST — before the module pointer, before
+> the code.** It is the one file that makes starting a FRESH session on this module cheap: the eight
+> instrument traps that have each produced a confident FALSE finding about working code, the one
+> fixture that finds real bugs (simplifying it hides them — measured), the storage keys and the
+> standing SQL health check, the verification bar, and the three recurring bug families to suspect
+> first. **It exists because the alternative was tried and failed:** everything a fresh session
+> needed lived only in one long-running session's memory, so continuing always looked cheaper than
+> starting — until that session was re-reading ~500k tokens of history on every dispatch. A
+> carry-forward filed anywhere a session does not automatically read is the same mistake.
+> **When a new instrument trap or bug family turns up, it goes in that file in the SAME commit** —
+> never left in a session.
+>
 > **⛔ Never slurp a giant tracking file to find one thing.** `BACKLOG.md`, `VERIFICATION.md`,
 > and the two `*-DONE.md` archives are large. To pick work, **Grep the item headings**
 > (`^### B` / `^### V`) — a few KB — then **Read only the one block** you'll act on. Reading a

@@ -19,6 +19,14 @@ project is its root's, derived. Root rules in `/CLAUDE.md`.
 > all deleted. The one-way migration off the old shape is the ONLY code that may mention a
 > notebook or a section; its rules are written out in the header of `lib/notesModel.js`.
 
+> **⛔ READ `docs/NOTES-CARRY-FORWARD.md` BEFORE THIS FILE.** This pointer says what each file IS;
+> that one says what will WASTE YOUR SESSION — the eight instrument traps that have each produced a
+> confident false finding about working code, the fixture that finds real bugs (simplifying it
+> hides them), the storage keys and the standing SQL health check, and the three recurring bug
+> families. It also carries the standing instruction: **default to a NEW session per task, on
+> Sonnet**, and continue an existing one only when it holds a rig that file cannot replace.
+> **A new trap or bug family goes in there in the same commit that finds it.**
+
 **The decision everything else follows from:** the **document model** (ProseMirror JSON) is what
 persists — never Markdown. Markdown cannot express a merged table cell, a text colour, a font
 size, a highlight or a checked task, so storing it would cap the editor at what Markdown can
