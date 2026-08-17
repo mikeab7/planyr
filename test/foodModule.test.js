@@ -151,6 +151,88 @@ describe("/food is unlisted — no discoverability surface names it", () => {
 });
 
 /* ════════════════════════════════════════════════════════════════════════════════════════
+ * 2c. CLEAN-PATH ENTRANCES (B576000/NEW-3) — planyr.io/food (no hash) must not 404.
+ *     "The Food module was not supposed to be its own item in the header... it's basically
+ *     an Easter egg" (NEW-2) made /food unlisted, but the owner still types the clean path
+ *     into the address bar — that's the whole point of "an Easter egg you have to know about".
+ *     Cloudflare Pages has no SPA catch-all (B449, see public/_redirects's own header), so a
+ *     bare /food request never reaches the React app at all — it hits public/404.html, a
+ *     static file with none of the app's JS. No in-app fix (a boot-time shim, a route.js
+ *     change) can run in a request that never loads the app's JS in the first place. So the
+ *     fix lives in public/_redirects: one real HTTP redirect per KNOWN slug, straight to its
+ *     hash form, before the browser ever requests page content.
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("clean-path entrances — public/_redirects sends every known slug to its hash route", () => {
+  const redirectsText = read(REPO, "public/_redirects");
+  const rules = redirectsText
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"))
+    .map((line) => {
+      const [from, to, status] = line.split(/\s+/);
+      return { from, to, status };
+    });
+
+  const ruleFor = (path) => rules.find((r) => r.from === path);
+
+  it("found the redirect rules (the scan below is not vacuous)", () => {
+    expect(rules.length).toBeGreaterThan(0);
+  });
+
+  it("the /assets/* stale-chunk 404 (B449) is untouched by this addition", () => {
+    const assetsRule = ruleFor("/assets/*");
+    expect(assetsRule).toBeTruthy();
+    expect(assetsRule.to).toBe("/404.html");
+    expect(assetsRule.status).toBe("404");
+  });
+
+  for (const [module, slug] of Object.entries(SLUG_BY_MODULE)) {
+    describe(`slug "${slug}" (module "${module}")`, () => {
+      it(`/${slug} redirects to /#/${slug} with a real HTTP redirect status`, () => {
+        const rule = ruleFor(`/${slug}`);
+        expect(rule, `no /_redirects rule for /${slug} — planyr.io/${slug} will 404`).toBeTruthy();
+        expect(rule.to).toBe(`/#/${slug}`);
+        expect(Number(rule.status), "a 200 here would rewrite silently, not redirect — the hash still wouldn't be set").toBeGreaterThanOrEqual(300);
+        expect(Number(rule.status)).toBeLessThan(400);
+      });
+
+      it(`/${slug}/ (trailing slash) redirects too — Cloudflare's matching is exact-path, not prefix`, () => {
+        const rule = ruleFor(`/${slug}/`);
+        expect(rule, `no /_redirects rule for /${slug}/ — planyr.io/${slug}/ will 404`).toBeTruthy();
+        expect(rule.to).toBe(`/#/${slug}`);
+        expect(Number(rule.status)).toBeGreaterThanOrEqual(300);
+        expect(Number(rule.status)).toBeLessThan(400);
+      });
+
+      it(`the redirect target round-trips back to module "${module}" via parseRoute`, () => {
+        expect(parseRoute(`#/${slug}`).module).toBe(module);
+      });
+    });
+  }
+
+  it("no slug in SLUG_BY_MODULE is missing a rule, and no stray top-level rule names an unknown slug", () => {
+    const knownSlugs = new Set(Object.values(SLUG_BY_MODULE));
+    const topLevelSlugPattern = /^\/([a-z-]+)\/?$/;
+    const namedInRedirects = new Set(
+      rules
+        .map((r) => r.from.match(topLevelSlugPattern))
+        .filter(Boolean)
+        .map((m) => m[1])
+    );
+    for (const slug of knownSlugs) expect(namedInRedirects, `${slug} has no /_redirects rule`).toContain(slug);
+    for (const named of namedInRedirects) expect(knownSlugs, `/_redirects names unknown slug "${named}"`).toContain(named);
+  });
+
+  it("/food specifically still resolves to the food module with no visible surface added", () => {
+    // The route mapping is proven generically above; this pins the one slug NEW-3 was filed
+    // for, so a future refactor of SLUG_BY_MODULE can't silently drop "food" and pass anyway.
+    const rule = ruleFor("/food");
+    expect(rule.to).toBe("/#/food");
+    expect(MODULE_BY_SLUG.food).toBe("food");
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════════════════════════
  * 3. HOUSE RULES: no dialog boxes, chrome is theme tokens
  * ═══════════════════════════════════════════════════════════════════════════════════════ */
 describe("no dialog boxes", () => {
