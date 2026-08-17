@@ -11515,25 +11515,62 @@ function FormatPanel({data, setData, onClose}) {
 // Small inline color-swatch picker for one rule row — click the dot to choose which existing
 // health color the rule assigns. No new colors: options come straight from this plan's own HK
 // palette (the same list every StatusPicker offers), never invented here.
+//
+// B1449(schedule) — the dropdown used to render INLINE (position:absolute, no portal) inside
+// AutomationPanel, whose own root has onMouseDown={e=>e.stopPropagation()} (line ~11579, the same
+// pattern every side panel in this file uses — SettingsPanel, ContactsPanel, MeetingCalendarsModal
+// — to keep a click anywhere inside the panel from being misread as an "outside click" by some
+// OTHER already-open picker's own document-level dismiss listener). That's fine for a panel with
+// no floating sub-menu of its own, but this picker's dropdown DOES need to hear document-level
+// mousedowns to know when to close — and the panel's blanket stopPropagation was eating every one
+// of them before they ever left the panel's own DOM subtree, not just clicks on the menu itself.
+// Measured live: with the dropdown open, a click on the panel's own blank space, or on a DIFFERENT
+// rule row's <select>, left it open and floating over that control — only a click that landed
+// outside the whole panel (on the grid behind it) closed it. That's exactly Michael's report ("I
+// clicked everywhere else, but it just closed off that drop down").
+// Two-part fix, matching how every other menu in this app behaves (HealthPicker/StatusPicker, the
+// Status-options editor at ~8301): (1) portal the dropdown to document.body as position:fixed
+// computed from the trigger's own rect, with the stopPropagation pair on the MENU's own root
+// ({...MENU_STOPS_GRID}) — a click landing inside the menu still can't leak out and arm grid
+// drag-select (NEW-2). (2) Listen for the outside-click in the CAPTURE phase, not bubble — a
+// capture-phase document listener runs before the event ever reaches AutomationPanel's bubble-
+// phase stopPropagation, so it fires for every click outside this picker regardless of which
+// stopPropagation-wrapped panel it's sitting inside. Every other picker here is bubble-phase, but
+// none of them live inside a panel that blanket-stops propagation the way this one does — this is
+// the minimal change that makes the DISMISS RULE (click anywhere outside it closes it) match
+// theirs exactly, without touching AutomationPanel or any other panel's own behavior.
 function RuleColorPicker({value, onChange}) {
   const [open, setOpen] = useState(false);
-  const ref = useRef(null);
+  const [pos, setPos]   = useState({top:0, left:0});
+  const dotRef  = useRef(null);
+  const menuRef = useRef(null);
+
   useEffect(() => {
     if (!open) return;
-    const onDown = e => { if (!ref.current?.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
+    const onDown = e => {
+      if (!dotRef.current?.contains(e.target) && !menuRef.current?.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown, true);
+    return () => document.removeEventListener("mousedown", onDown, true);
   }, [open]);
+
+  const openMenu = () => {
+    const r = dotRef.current.getBoundingClientRect();
+    setPos({top: r.bottom + 4, left: r.right - 110});
+    setOpen(o => !o);
+  };
+
   const hh = HEALTH[value] || HEALTH.gray;
   return (
-    <span ref={ref} style={{position:"relative",flexShrink:0}}>
-      <span onClick={()=>setOpen(o=>!o)} title={hh.label}
+    <span style={{position:"relative",flexShrink:0}}>
+      <span ref={dotRef} onClick={openMenu} title={hh.label} data-rule-color-swatch="1"
         style={{width:16,height:16,borderRadius:"50%",background:hh.dot,border:hh.dot==="#ffffff"?"1.5px solid #d1d5db":hh.border,
           display:"block",cursor:"pointer"}} />
-      {open && (
-        <div style={{position:"absolute",top:"calc(100% + 4px)",right:0,background:"#fff",border:"1px solid var(--bd2)",
-          borderRadius:6,padding:"4px",display:"flex",flexDirection:"column",gap:2,zIndex:10000,
-          boxShadow:"0 4px 14px rgba(0,0,0,0.15)",minWidth:110}}>
+      {open && ReactDOM.createPortal(
+        <div ref={menuRef} {...MENU_STOPS_GRID} data-rule-color-menu="1"
+          style={{position:"fixed",top:pos.top,left:pos.left,background:"#fff",border:"1px solid var(--bd2)",
+            borderRadius:6,padding:"4px",display:"flex",flexDirection:"column",gap:2,zIndex:10000,
+            boxShadow:"0 4px 14px rgba(0,0,0,0.15)",minWidth:110}}>
           {HK.map(hk => { const h = HEALTH[hk]; return (
             <span key={hk} onClick={()=>{onChange(hk);setOpen(false);}}
               style={{display:"flex",alignItems:"center",gap:6,padding:"3px 6px",borderRadius:4,cursor:"pointer",
@@ -11544,7 +11581,8 @@ function RuleColorPicker({value, onChange}) {
               <span style={{fontSize:11,color:"var(--txt)"}}>{h.label}</span>
             </span>
           ); })}
-        </div>
+        </div>,
+        document.body
       )}
     </span>
   );

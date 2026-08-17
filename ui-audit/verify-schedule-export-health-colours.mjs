@@ -107,6 +107,7 @@ import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { ensureVendored, rewriteCdn, serveVendored } from "./lib/vendorCdn.mjs";
 
 const MUTATE_ROLLUP = process.argv.includes("--mutate-rollup");
+const MUTATE_DROPDOWN = process.argv.includes("--mutate-dropdown");
 
 const ROOT = new URL("../public/", import.meta.url).pathname;
 const MIME = { ".html":"text/html", ".js":"text/javascript", ".css":"text/css", ".svg":"image/svg+xml", ".json":"application/json" };
@@ -236,6 +237,18 @@ const MUTATED_ROLLUP = `const computeRolledHealth = (all, settings) => {
   return map;
 };`;
 
+// --mutate-dropdown: exact string swap of RuleColorPicker's outside-click listener back to the
+// bubble-phase form (drops the `true` capture-phase argument on both add/removeEventListener).
+// This alone reproduces the reported stuck-open dropdown even with the portal still in place,
+// because AutomationPanel's own onMouseDown={stopPropagation} eats a bubble-phase mousedown
+// before it ever reaches `document` for any click inside the panel that isn't on the menu itself
+// — exactly the defect this guard exists to catch. Same exact-string-swap discipline as
+// --mutate-rollup: throws rather than silently no-op-ing if the harness's copy has drifted.
+const FIXED_DROPDOWN_LISTENER = `    document.addEventListener("mousedown", onDown, true);
+    return () => document.removeEventListener("mousedown", onDown, true);`;
+const MUTATED_DROPDOWN_LISTENER = `    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);`;
+
 await ensureVendored();
 
 const server = createServer(async (req, res) => {
@@ -250,15 +263,25 @@ const server = createServer(async (req, res) => {
         if (!body.includes(FIXED_ROLLUP)) throw new Error("--mutate-rollup: FIXED_ROLLUP text not found in served source — the harness's copy has drifted from index.html, fix the harness before trusting this run");
         body = body.replace(FIXED_ROLLUP, MUTATED_ROLLUP);
       }
+      if (MUTATE_DROPDOWN) {
+        if (!body.includes(FIXED_DROPDOWN_LISTENER)) throw new Error("--mutate-dropdown: FIXED_DROPDOWN_LISTENER text not found in served source — the harness's copy has drifted from index.html, fix the harness before trusting this run");
+        body = body.replace(FIXED_DROPDOWN_LISTENER, MUTATED_DROPDOWN_LISTENER);
+      }
     }
     res.writeHead(200, { "Content-Type": MIME[extname(fp)] || "application/octet-stream" }); res.end(body);
-  } catch { res.writeHead(404); res.end("not found"); }
+  } catch (e) { console.error("SERVER ERROR:", e.message); res.writeHead(404); res.end("not found"); }
 });
 await new Promise(r => server.listen(0, r));
 const url = `http://localhost:${server.address().port}/sequence/`;
 console.log("serving", url, MUTATE_ROLLUP ? "(ROLLUP MUTATED — expect the rollup-fix scenarios to FAIL)" : "");
 
-const BENIGN = [/supabase\.co/i, /CORS policy/i, /ERR_FAILED/i, /WebSocket/i, /Failed to load resource/i, /Cloud unreachable/i, /realtime/i, /BABEL/i, /deoptimised/i];
+// B1449(schedule) — "Supabase set error" joins this list here: the new RuleColorPicker dismiss
+// checks below are the first scenarios in this file that mutate state through REAL clicks on the
+// live UI (picking a rule color) rather than only pre-seeding window.__PLANAR_DATA__ before the
+// app boots, so this is the first run to trigger the app's own autosave — which fails with this
+// message in this network-sandboxed harness (no egress to Supabase), same root cause as the
+// already-benign "Cloud unreachable" banner text, just a different code path's own console.error.
+const BENIGN = [/supabase\.co/i, /CORS policy/i, /ERR_FAILED/i, /WebSocket/i, /Failed to load resource/i, /Cloud unreachable/i, /realtime/i, /BABEL/i, /deoptimised/i, /Supabase set error/i];
 const EXEC = process.env.PW_CHROME
   || ["/opt/pw-browsers/chromium", "/opt/pw-browsers/chromium-1234/chrome-linux64/chrome", "/opt/pw-browsers/chromium-1194/chrome-linux/chrome"].find(existsSync);
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox","--ignore-certificate-errors"] });
@@ -549,6 +572,98 @@ for (const r of ganttResults) {
 const ganttOk = ganttResults.every(r => r.found && r.correct) && ganttResults.length === 4;
 console.log("Gantt rows correct (no scenario ever watched turning red before this guard):", ganttOk);
 
+// ── B1449(schedule) — RuleColorPicker dismiss behavior. Owner report: click the red swatch in a
+// rule row, a dropdown opens, click elsewhere and "it just closed off that drop down" (rough,
+// inconsistent). Live diagnosis (before any fix) found the real defect: AutomationPanel's own
+// onMouseDown={stopPropagation} — the same pattern every side panel here uses — ate every mousedown
+// inside the panel before it could reach the picker's own outside-click listener, so a click on the
+// panel's blank space or on a DIFFERENT rule row's own <select> left the dropdown stuck open,
+// floating over that control; only a click that landed outside the whole panel closed it. Three
+// scenarios below reproduce exactly that and must all now close it — plus a functional check that
+// picking a color still works and a click on another row's control still reaches it (the fix must
+// not trade a stuck-open menu for an eaten click).
+console.log("\n=== RuleColorPicker dismiss behavior (Automation panel) ===");
+await page.click('.hdr-view button:has-text("Grid")').catch(()=>{});
+await page.click('button:has-text("Automation")');
+await page.waitForTimeout(300);
+const rcpDropdownOpen = () => page.evaluate(() => !!document.querySelector('[data-rule-color-menu]'));
+const rcpPanelOpen = () => page.evaluate(() => [...document.querySelectorAll('span')].some(s => s.textContent === "Automation" && s.style.fontWeight));
+const rcpSwatchBox = await page.evaluate(() => {
+  const swatch = document.querySelectorAll('[data-rule-color-swatch]')[0];
+  if (!swatch) return null;
+  const r = swatch.getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+});
+const rcpResults = {};
+if (!rcpSwatchBox) {
+  console.log("❌ FAIL  could not find a rule row's color swatch — the Automation panel didn't render the injected rules");
+} else {
+  await page.mouse.click(rcpSwatchBox.x, rcpSwatchBox.y);
+  await page.waitForTimeout(150);
+  rcpResults.opensOnClick = await rcpDropdownOpen();
+
+  // Scenario A — click blank panel space (not the picker, not any other control).
+  const blankPoint = await page.evaluate(() => {
+    const addRule = [...document.querySelectorAll('span')].find(s => s.textContent === "+ Add rule");
+    const r = addRule.getBoundingClientRect();
+    return { x: r.left + 5, y: r.top - 15 };
+  });
+  await page.mouse.click(blankPoint.x, blankPoint.y);
+  await page.waitForTimeout(150);
+  rcpResults.closesOnBlankPanelClick = !(await rcpDropdownOpen());
+  rcpResults.panelSurvivesBlankClick = await rcpPanelOpen();
+
+  // Scenario B — click a DIFFERENT rule row's own <select>; must both dismiss AND let the click
+  // through (the select must actually receive focus, not just eat the click as a dismiss).
+  if (!(await rcpDropdownOpen())) { await page.mouse.click(rcpSwatchBox.x, rcpSwatchBox.y); await page.waitForTimeout(150); }
+  const otherSelectBox = await page.evaluate(() => {
+    const sel = document.querySelectorAll('select')[1];
+    if (!sel) return null;
+    const r = sel.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  if (otherSelectBox) {
+    await page.mouse.click(otherSelectBox.x, otherSelectBox.y);
+    await page.waitForTimeout(150);
+    rcpResults.closesOnOtherRowClick = !(await rcpDropdownOpen());
+    rcpResults.otherRowClickReachesSelect = await page.evaluate(() => document.activeElement?.tagName === "SELECT");
+  } else {
+    rcpResults.closesOnOtherRowClick = false;
+    rcpResults.otherRowClickReachesSelect = false;
+  }
+
+  // Scenario C — click fully outside the panel (the grid behind it): must close the dropdown
+  // WITHOUT closing the panel itself (panel has no outside-click-to-close of its own).
+  if (!(await rcpDropdownOpen())) { await page.mouse.click(rcpSwatchBox.x, rcpSwatchBox.y); await page.waitForTimeout(150); }
+  await page.mouse.click(400, 400);
+  await page.waitForTimeout(150);
+  rcpResults.closesOnOutsidePanelClick = !(await rcpDropdownOpen());
+  rcpResults.panelSurvivesOutsideClick = await rcpPanelOpen();
+
+  // Scenario D — functional: picking a color from the dropdown still updates the rule and closes it.
+  if (!(await rcpDropdownOpen())) { await page.mouse.click(rcpSwatchBox.x, rcpSwatchBox.y); await page.waitForTimeout(150); }
+  const greenOptionBox = await page.evaluate(() => {
+    const opt = [...document.querySelectorAll('[data-rule-color-menu] span[style]')].find(s => s.textContent === "Complete");
+    if (!opt) return null;
+    const r = opt.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  if (greenOptionBox) {
+    await page.mouse.click(greenOptionBox.x, greenOptionBox.y);
+    await page.waitForTimeout(150);
+    rcpResults.pickApplies = (await page.evaluate(() => document.querySelectorAll('[data-rule-color-swatch]')[0]?.title)) === "Complete";
+    rcpResults.closesOnPick = !(await rcpDropdownOpen());
+  } else {
+    rcpResults.pickApplies = false;
+    rcpResults.closesOnPick = false;
+  }
+}
+await page.screenshot({ path: OUT + "schedule-automation-panel.png" });
+for (const [k, v] of Object.entries(rcpResults)) console.log(`${v ? "  pass  " : "❌ FAIL "}  ${k}`);
+const dropdownDismissOk = !!rcpSwatchBox && Object.values(rcpResults).every(Boolean) && Object.keys(rcpResults).length === 9;
+console.log("RuleColorPicker dismiss behavior matches every other menu in the app:", dropdownDismissOk);
+await page.click('button:has-text("Automation")').catch(()=>{}); // close the panel again, tidy state
+
 console.log("\nAll scenarios found on both sides (no vacuous miss):", allFound);
 console.log("Control arms correct + agree (harness sanity):", controlsOk);
 console.log("Every ORIGINAL automatic-health case (leaf/milestone) matches screen vs export:", autoOk);
@@ -557,9 +672,11 @@ console.log("percentComplete matches computed health, not raw (B575904 defect 2)
 console.log("REAL ERRORS (" + real.length + "):"); real.slice(0,20).forEach(e=>console.log("  - "+e));
 console.log("\nScreenshots: " + OUT + "schedule-onscreen-grid.png, " + OUT + "schedule-onscreen-gantt.png, " + OUT + "schedule-export-popup.png");
 
-const pass = rendered && opened.ok && allFound && controlsOk && autoOk && rollupOk && collapsedSetOverrideOk && ganttOk && percentOk && real.length === 0;
-console.log(pass ? "\n✅ PASS — every scenario's health colour is correct and matches on screen, in the export, and in the Gantt"
-                 : "\n❌ FAIL" + (MUTATE_ROLLUP ? " (expected under --mutate-rollup if rollupOk/ganttOk flip and controls/autoOk stay green — that's the discriminating proof)" : ""));
+const pass = rendered && opened.ok && allFound && controlsOk && autoOk && rollupOk && collapsedSetOverrideOk && ganttOk && percentOk && dropdownDismissOk && real.length === 0;
+console.log(pass ? "\n✅ PASS — every scenario's health colour is correct and matches on screen, in the export, and in the Gantt; RuleColorPicker dismiss behavior matches the rest of the app"
+                 : "\n❌ FAIL"
+                   + (MUTATE_ROLLUP ? " (expected under --mutate-rollup if rollupOk/ganttOk flip and controls/autoOk stay green — that's the discriminating proof)" : "")
+                   + (MUTATE_DROPDOWN ? " (expected under --mutate-dropdown if dropdownDismissOk flips and every other check stays green — that's the discriminating proof)" : ""));
 
 await browser.close(); server.close();
 process.exit(pass ? 0 : 1);
