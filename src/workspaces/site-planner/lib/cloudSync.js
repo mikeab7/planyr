@@ -346,34 +346,57 @@ export async function cloudList(uid) {
   // reaches the merge, the list, or the map. The filter is dropped on a pre-migration DB (no
   // deleted_at column), where nothing can be soft-deleted anyway.
   const live = (q) => q.is("deleted_at", null);
-  let { data, error } = await live(supabase.from("sites").select("data, version, team_id, user_id, share_locked")).order("updated_at", { ascending: false });
+  // NEW-1 — `id` (the row's real PostgREST primary key) is selected alongside `data` at every
+  // tier below, so the read side can tell a healthy row from one whose jsonb `id` has drifted
+  // from its own identity — see the correction loop after the fallback ladder. `id` has been a
+  // real column since day one (unlike team_id/version/share_locked, which are migrations that
+  // may not have run yet), so it needs no fallback rung of its own.
+  let { data, error } = await live(supabase.from("sites").select("id, data, version, team_id, user_id, share_locked")).order("updated_at", { ascending: false });
   if (error && isMissingColumn(error, "deleted_at"))
-    ({ data, error } = await supabase.from("sites").select("data, version, team_id, user_id, share_locked").order("updated_at", { ascending: false }));
+    ({ data, error } = await supabase.from("sites").select("id, data, version, team_id, user_id, share_locked").order("updated_at", { ascending: false }));
   // Pre-migration fallbacks: team_id (db/team_sharing.sql) then version (db/optimistic_concurrency.sql)
   // may not exist yet → re-select with fewer columns so loading never breaks before they're run.
   // Each tier re-applies the deleted_at filter (and drops it the same way if that column is absent).
   // B326417 — share_locked (db/team_share_default.sql) is the newest column, so it gets the first
   // fallback rung: drop only it and keep the sharing columns, which are an older migration.
   if (error && isMissingColumn(error, "share_locked")) {
-    ({ data, error } = await live(supabase.from("sites").select("data, version, team_id, user_id")).order("updated_at", { ascending: false }));
+    ({ data, error } = await live(supabase.from("sites").select("id, data, version, team_id, user_id")).order("updated_at", { ascending: false }));
     if (error && isMissingColumn(error, "deleted_at"))
-      ({ data, error } = await supabase.from("sites").select("data, version, team_id, user_id").order("updated_at", { ascending: false }));
+      ({ data, error } = await supabase.from("sites").select("id, data, version, team_id, user_id").order("updated_at", { ascending: false }));
   }
   if (error && isMissingColumn(error, "team_id")) {
-    ({ data, error } = await live(supabase.from("sites").select("data, version")).order("updated_at", { ascending: false }));
+    ({ data, error } = await live(supabase.from("sites").select("id, data, version")).order("updated_at", { ascending: false }));
     if (error && isMissingColumn(error, "deleted_at"))
-      ({ data, error } = await supabase.from("sites").select("data, version").order("updated_at", { ascending: false }));
+      ({ data, error } = await supabase.from("sites").select("id, data, version").order("updated_at", { ascending: false }));
   }
   if (error && isMissingVersionColumn(error)) {
-    ({ data, error } = await live(supabase.from("sites").select("data")).order("updated_at", { ascending: false }));
+    ({ data, error } = await live(supabase.from("sites").select("id, data")).order("updated_at", { ascending: false }));
     if (error && isMissingColumn(error, "deleted_at"))
-      ({ data, error } = await supabase.from("sites").select("data").order("updated_at", { ascending: false }));
+      ({ data, error } = await supabase.from("sites").select("id, data").order("updated_at", { ascending: false }));
   }
   // THROW on a real fetch error so callers can tell it apart from a genuinely-empty
   // result. Returning [] here let `pullCloud` wipe the local cache to empty on a
   // transient/offline error, showing a scary "no sites" state (B54).
   if (error) throw new Error(error.message || "cloud list failed");
   const rows = data || [];
+  /* NEW-1 — THE ROW'S REAL PRIMARY KEY IS AUTHORITATIVE OVER WHATEVER ID IS EMBEDDED IN ITS
+   * JSONB `data`. Under every normal write path (siteRowFor: `row = { id: m.id, ... }`) the two
+   * are kept in lockstep, so this is a no-op for a healthy row. But `mergePulledSites` keys its
+   * ENTIRE merge map on the jsonb-embedded id (`map[n.id] = ...`) — before this fix that field
+   * was never checked against anything, so two DIFFERENT physical rows whose jsonb happened to
+   * carry the same `id` (a stale duplicate, a hand-edited row, a migration slip — cloudList
+   * never even fetched the row's own PK to catch it) silently collapsed to ONE surviving plan
+   * in the map, with no error anywhere: exactly the shape of "the database has 5 rows, the app
+   * shows fewer." Correct it here, at the read boundary — the same pattern B714 already uses to
+   * overlay DB-column truth (team_id/user_id/share_locked) onto the jsonb rather than trusting
+   * it wholesale — and report it loudly (LOUD-FAILURE): a jsonb id drifting from its row is a
+   * genuine data anomaly worth surfacing even though this heals it in place. */
+  for (const r of rows) {
+    if (r && r.data && r.id != null && r.data.id !== r.id) {
+      reportClientEvent("cloud-id-mismatch", "a site row's jsonb id disagreed with its own primary key — corrected to the row's id", { rowId: r.id, jsonId: r.data.id });
+      r.data.id = r.id;
+    }
+  }
   for (const r of rows) if (r && r.data && r.data.id != null) {
     if (r.version != null) siteVersions[r.data.id] = r.version;
   }

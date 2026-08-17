@@ -143,6 +143,35 @@ function contentSig(m, headerOnly) {
 //                   "deleted", so the cloud-absent half of heal-the-split is suspended for this pull
 //                   (a fail-safe: nothing local is dropped, the heal just waits for the next pull).
 //   now           — injectable clock for the tombstone grace window (tests).
+//
+// NEW-1 — DANGEROUS-MEANS-UNOBSERVABLE instrument (see /CLAUDE.md): a group's plan count silently
+// diverging between "what the cloud fetch returned" and "what survived the merge" was previously
+// unobservable anywhere in this app — a real report ("the DB has 5 plans, I see fewer") could only
+// be chased by re-deriving the whole pipeline by hand. Pure per-group row-count comparison, called
+// from mergePulledSites (below) and independently unit-testable. A SERVER-DELETED row is the only
+// legitimate shrink (a soft-deleted plan is meant to disappear) and is excluded before comparing —
+// anything else that shrinks a group's count is exactly the class of bug this exists to catch.
+export function groupCountDivergence(cloudModels, mergedMap, serverDeletedIds) {
+  const dead = new Set(serverDeletedIds || []);
+  const cloudByGroup = new Map();
+  for (const m of (cloudModels || [])) {
+    if (!m || m.id == null || dead.has(m.id)) continue;
+    const g = m.groupId || m.id;
+    cloudByGroup.set(g, (cloudByGroup.get(g) || 0) + 1);
+  }
+  const mergedByGroup = new Map();
+  for (const m of Object.values(mergedMap || {})) {
+    const g = m && (m.groupId || m.id);
+    if (g == null) continue;
+    mergedByGroup.set(g, (mergedByGroup.get(g) || 0) + 1);
+  }
+  const out = [];
+  for (const [g, cloudCount] of cloudByGroup) {
+    const mergedCount = mergedByGroup.get(g) || 0;
+    if (mergedCount < cloudCount) out.push({ groupId: g, cloudCount, mergedCount });
+  }
+  return out;
+}
 export function mergePulledSites(existing, cloudModels, selfUid, tombstones, opts) {
   const { serverDeleted, healAbsent = true, now = Date.now() } = opts || {};
   const serverDead = new Set(serverDeleted || []);
@@ -153,9 +182,20 @@ export function mergePulledSites(existing, cloudModels, selfUid, tombstones, opt
   const cloudSig = {};
   const cloudSlim = {};
   const cloudIds = new Set();
+  // NEW-1 — DANGEROUS-MEANS-UNOBSERVABLE instrument: `map` (below) is keyed by id, so two
+  // DIFFERENT cloud rows that happen to carry the same id can only ever leave ONE survivor —
+  // there is no way for this data shape to keep both. cloudSync.cloudList now corrects the
+  // usual cause of that (a jsonb id that drifted from its own row's real primary key), but this
+  // detector is the belt-and-suspenders net: if two rows in ONE pull still collide on id — from
+  // that fix missing an edge case, a pre-migration DB, or a cause nobody has found yet — it is
+  // named here rather than silently dropping a plan with no trace anywhere. Reported by the
+  // caller (pullCloud), which is where telemetry side-effects belong; this stays pure.
+  const seenThisPull = new Set();
+  const idCollisions = [];
   for (const m of (cloudModels || [])) {
     const slim = !!(m && m.elementsInRows);
     const n = createSiteModel(m); if (!n.id) continue;
+    if (seenThisPull.has(n.id)) idCollisions.push({ id: n.id, groupId: n.groupId }); else seenThisPull.add(n.id);
     cloudIds.add(n.id);
     cloudAt[n.id] = n.updatedAt || 0;
     cloudSlim[n.id] = slim;
@@ -225,7 +265,13 @@ export function mergePulledSites(existing, cloudModels, selfUid, tombstones, opt
   // so this can never push a thinner row; an identical re-open now pushes nothing (no version churn).
   const toPush = Object.keys(map).filter((id) =>
     mine(map[id]) && (!(id in cloudAt) ? healAbsent : contentSig(map[id], cloudSlim[id]) !== cloudSig[id]));
-  return { map, toPush, deleteRetry, tombClear, tombAdd };
+  // NEW-1 — the general form of the same instrument: not just "did two cloud rows collide on
+  // id this pull" but "did any GROUP lose rows between what cloudList() fetched and what
+  // actually survived into the merged map" — catching a cause the id-collision detector above
+  // can't see (e.g. a LOCAL cache entry colliding with a cloud one under a shared id). See
+  // groupCountDivergence's own comment for what counts as a legitimate shrink.
+  const groupDivergence = groupCountDivergence(cloudModels, map, serverDead);
+  return { map, toPush, deleteRetry, tombClear, tombAdd, idCollisions, groupDivergence };
 }
 
 // Pull the signed-in user's sites from the cloud into their local cache. Returns
@@ -249,10 +295,18 @@ export async function pullCloud(uid) {
   if (!dead.ok) reportClientEvent("cloud-read-failed", "deleted-id fetch failed (sites) — suppressing absent-row heal this pull", { error: dead.error || "" });
   let existing = {};
   try { existing = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
-  const { map, toPush, deleteRetry, tombClear, tombAdd } = mergePulledSites(existing, models, uid, readSiteTombs(uid), {
+  const { map, toPush, deleteRetry, tombClear, tombAdd, idCollisions, groupDivergence } = mergePulledSites(existing, models, uid, readSiteTombs(uid), {
     serverDeleted: dead.ok ? dead.rows.map((r) => r && r.id).filter(Boolean) : [],
     healAbsent: dead.ok,
   });
+  // NEW-1 — LOUD-FAILURE: either of these means a plan the cloud fetch returned did NOT survive
+  // into the local store the plan switcher reads from — the exact shape of "the database has N
+  // plans, the app shows fewer." Report every occurrence by name (never just a count), so the
+  // next time this is reported the divergence is a query against telemetry, not a re-investigation.
+  for (const c of (idCollisions || []))
+    reportClientEvent("cloud-id-collision", "two cloud rows shared one id in the same pull — the second overwrote the first in the merge", { id: c.id, groupId: c.groupId });
+  for (const d of (groupDivergence || []))
+    reportClientEvent("cloud-group-count-diverged", "a project's plan count shrank between the cloud fetch and the merged store", { groupId: d.groupId, cloudCount: d.cloudCount, mergedCount: d.mergedCount });
   try { localStorage.setItem(cloudKey(uid), JSON.stringify(map)); } catch (_) {}
   // A row the SERVER says is deleted gets a local tombstone too, so this browser's saveSite gate
   // (and a still-mounted planner's late flush) can't re-create it before the next pull.
