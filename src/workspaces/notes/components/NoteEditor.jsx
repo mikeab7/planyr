@@ -768,6 +768,35 @@ export default function NoteEditor({
      * announced rather than known: Escape releases the next Tab. */
     editorProps: {
       attributes: {
+        /* ⛔ THE WRITING SURFACE IS A TEXTBOX, AND SAYING SO IS AN ACCESSIBILITY FIX RATHER THAN
+         * A TIDY-UP (NEW-CARET-BOUNDS). The owner runs Windows 11's **Text cursor indicator** —
+         * the coloured markers the OS paints above and below the caret so it can be found — and
+         * reported that on this module they land *"up and to the LEFT"* of the box he is typing
+         * in. Windows takes that rectangle from the accessibility layer, never from what is
+         * painted.
+         *
+         * ⛔ MEASURED, and the measurement is what makes this the fix rather than a guess. Dumped
+         * from the real accessibility tree (`ui-audit/verify-notes-caret-a11y.mjs`):
+         *     note-title  →  role=textbox   editable=plaintext   multiline=false   ✅
+         *     note-body   →  role=GENERIC   editable=richtext    multiline=—       ⛔
+         * The page title is a proper text control and the note body was not: a `generic` node
+         * that merely happens to be editable. A generic node exposes no text pattern for a
+         * platform client to read a caret rectangle out of, so the OS falls back to the bounds of
+         * the editable REGION — whose top-left corner is up and to the left of any box placed on
+         * the page. That is his screenshot, and it explains why the offset gets worse the further
+         * into the page the box sits.
+         *
+         * ⛔ AND THE OBVIOUS SUSPECT WAS CHECKED FIRST AND REFUTED, so nobody re-opens it: the
+         * boxes are NOT transform-positioned. `diagnose-notes-caret-bounds` prints `transform:
+         * none` for every editing host and finds painted and layout-tree geometry identical to
+         * the pixel at 80%, 100% and 200% zoom, scrolled and not. The geometry was never wrong —
+         * the thing reading it had nothing to read.
+         *
+         * `aria-multiline` matters as much as the role: a textbox that does not say it is
+         * multiline is treated as a single-line field, and a single-line field's caret rectangle
+         * is computed from one line's geometry. */
+        role: "textbox",
+        "aria-multiline": "true",
         "aria-label": "Note body. Tab indents; press Escape then Tab to leave the note.",
         "aria-keyshortcuts": "Tab Shift+Tab Escape",
         "data-testid": "note-body",

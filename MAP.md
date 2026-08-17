@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-16 @ `2836bd4` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-17 @ `0aea4929` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_535 source files mapped._
+_536 source files mapped._
 
 ## infra
 
@@ -80,7 +80,7 @@ _535 source files mapped._
 - **`src/workspaces/notes/lib/notesBlockKeys.js`** — Backspace at the START of a block undoes a formatting difference before it restructures anything, so one keypress can never silently merge a multi-block region.
   - _exports_: `BLOCK_KEYS_PRIORITY`, `blockStartAction`, `default`
 - **`src/workspaces/notes/lib/notesBoxResize.js`** — The placed box's geometry: the floors, the edge pad, and the pure rule for resizing one from any of its eight handles (corners hold the ratio, edges stretch, Shift inverts, the edges you are not holding never move). Also decides which handles a box may offer, read off its content.
-  - _exports_: `ANCHOR_EDGE_PAD`, `ANCHOR_MIN_HEIGHT`, `ANCHOR_MIN_WIDTH`, `ANCHOR_WIDTH`, `default`, `HANDLE_CURSOR`, `HANDLES`, `handlesFor`, `hasFixedHeight`, `isCorner`, `locksAspect`, `MOVES_ORIGIN`, `resizeBox`
+  - _exports_: `ANCHOR_EDGE_PAD`, `ANCHOR_MIN_HEIGHT`, `ANCHOR_MIN_WIDTH`, `ANCHOR_WIDTH`, `default`, `HANDLE_CURSOR`, `HANDLES`, `handlesFor`, `hasFixedHeight`, `isCorner`, `locksAspect`, `moveAnchorPoint`, `MOVES_ORIGIN`, `resizeBox`
 - **`src/workspaces/notes/lib/notesCalloutNode.js`** — The `noteCallout` schema node: a coloured block storing a TONE NAME, never a colour.
   - _exports_: `CALLOUT_TONE_IDS`, `CALLOUT_TONES`, `default`, `DEFAULT_CALLOUT_TONE`, `NoteCallout`
 - **`src/workspaces/notes/lib/notesCloud.js`** — The cloud tier under the notes storage seam: pure sync decisions (tree merge, which-copy-wins page seed, picture plan, sign-in adoption) plus the revision-guarded Supabase transport for `notes_trees` / `notes_pages` / `notes_images` and the private `notes-images` bucket. Imported only by `notesStore.js`, and only dynamically.
@@ -89,6 +89,8 @@ _535 source files mapped._
   - _exports_: `docToHtml`
 - **`src/workspaces/notes/lib/notesDuplicates.js`** — pure detector for THE SAME NOTE LIVING IN TWO PROJECTS: word-pair Dice similarity over normalised text, same-project and empty pages deliberately excluded, groups (not pairs) out.
   - _exports_: `duplicateNotice`, `findCrossProjectDuplicates`, `MIN_TEXT_CHARS`, `NEAR_DUPLICATE_SIMILARITY`, `normalizeText`, `shingles`, `similarity`
+- **`src/workspaces/notes/lib/notesEnterInherit.js`** — Enter carries the line's formatting to the new line: the pure decision about when to claim the press (only a collapsed caret at the end of a non-empty textblock) and the handler that runs the split it displaces and repairs it in the same transaction.
+  - _exports_: `default`, `enterInheritHandler`, `enterShouldInherit`, `inheritedAttrs`
 - **`src/workspaces/notes/lib/notesExtensions.js`** — The ONE declaration of what a note may contain — the editor extension set (incl. images, the empty-page placeholder and search marking), the empty-document constant, and the per-page configured variant.
   - _exports_: `EMPTY_DOC`, `HEADING_LEVELS`, `NOTE_EXTENSIONS`, `NOTE_PLACEHOLDER`, `noteExtensions`
 - **`src/workspaces/notes/lib/notesFileMeta.js`** — How an attached file is described in words — size, type badge, safe name — shared by the chip, the export and the print sheet.
