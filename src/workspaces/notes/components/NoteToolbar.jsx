@@ -30,6 +30,7 @@ import { useEffect, useRef, useState } from "react";
 import { HEADING_LEVELS } from "../lib/notesExtensions.js";
 import { BLOCK_SPACES, DENSITIES, LINE_SPACINGS, spacingLabel } from "../lib/notesSpacing.js";
 import { CALLOUT_TONES } from "../lib/notesCalloutNode.js";
+import { FONTS, HIGHLIGHT_COLORS, SIZES, TEXT_COLORS } from "../lib/notesFormatPalette.js";
 
 /* Mirrored from src/shared/ui/controls.jsx rather than imported — deliberately, and there
  * is a test that fails if the copies drift (test/notesModule.test.js). Importing
@@ -38,32 +39,11 @@ import { CALLOUT_TONES } from "../lib/notesCalloutNode.js";
  * duplicated with a guard beats a cross-route regression. */
 const RADIUS = { control: 8, pill: 999 };
 
-/* ---- content colours -------------------------------------------------------------------
- * THE ONLY literal colours in the Notes module, and they are CONTENT, not chrome: a text
- * colour the user picks is a value that gets written into their document and must mean the
- * same thing on every device and in every export. Theme tokens would make a note's own text
- * change colour when the app theme flips, which is wrong. Everything else in this file — and
- * everything in Notes.jsx / NotesTree.jsx / NoteEditor.jsx — is a theme token. */
-const TEXT_COLORS = [
-  { name: "Default", value: null },
-  { name: "Black", value: "#1B1E26" }, { name: "Gray", value: "#5B6270" },
-  { name: "Red", value: "#C0392B" }, { name: "Orange", value: "#C2410C" },
-  { name: "Green", value: "#15803D" }, { name: "Teal", value: "#0E7490" },
-  { name: "Blue", value: "#1D4ED8" }, { name: "Purple", value: "#6D28D9" },
-];
-const HIGHLIGHT_COLORS = [
-  { name: "None", value: null },
-  { name: "Yellow", value: "#FEF08A" }, { name: "Green", value: "#BBF7D0" },
-  { name: "Blue", value: "#BFDBFE" }, { name: "Pink", value: "#FBCFE8" },
-  { name: "Orange", value: "#FED7AA" }, { name: "Purple", value: "#DDD6FE" },
-];
-
-const FONTS = [
-  { label: "Default", value: null }, { label: "Arial", value: "Arial, Helvetica, sans-serif" },
-  { label: "Georgia", value: "Georgia, serif" }, { label: "Times New Roman", value: "'Times New Roman', Times, serif" },
-  { label: "Calibri", value: "Calibri, Candara, sans-serif" }, { label: "Courier New", value: "'Courier New', Courier, monospace" },
-];
-const SIZES = [null, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48, 64];
+/* ⛔ THE PALETTES MOVED TO `lib/notesFormatPalette.js` (NEW-MINI-TOOLBAR). The right-click
+ * mini-toolbar offers the same choices, and two copies of a palette is how this bar and that
+ * menu come to disagree about what "Teal" is — a difference nobody notices until two paragraphs
+ * of one note are subtly different colours. The reasoning for these being LITERAL colours rather
+ * than theme tokens moved with them; read it there. */
 
 /* The table grid picker's shape (B1372). It OPENS at this size and GROWS as the pointer
  * reaches its edge, up to the max — the Word/OneNote behaviour, where a big table is

@@ -42,6 +42,7 @@ import {
 import {
   normalizeZoom, scrollTopAfterZoom, zoomForKey, zoomForWheel, zoomLabel, ZOOM_DEFAULT,
 } from "../lib/notesZoom.js";
+import { HIGHLIGHT_COLORS, SIZES, TEXT_COLORS } from "../lib/notesFormatPalette.js";
 import { PASTE_MODES } from "../lib/notesPastePlain.js";
 import { bindingShouldDecline } from "../lib/notesKeyScope.js";
 import { DEFAULT_DENSITY, densityFor } from "../lib/notesSpacing.js";
@@ -553,26 +554,227 @@ function PasteOptions({ offer, expanded, onExpand, onPick, onDismiss }) {
  *  with holes in it. */
 const SEP = { sep: true };
 
-/** The formatting rows every context gets — Word's order, which is the order his hand already
- *  knows. Each `run` takes the editor's command chain. */
-const FORMAT_ITEMS = (editor) => {
-  const chain = () => editor.chain().focus();
-  return [
-    { id: "bold", label: "Bold", accel: "Ctrl+B", active: editor.isActive("bold"), run: () => chain().toggleBold().run() },
-    { id: "italic", label: "Italic", accel: "Ctrl+I", active: editor.isActive("italic"), run: () => chain().toggleItalic().run() },
-    { id: "underline", label: "Underline", accel: "Ctrl+U", active: editor.isActive("underline"), run: () => chain().toggleUnderline().run() },
-    { id: "strike", label: "Strikethrough", active: editor.isActive("strike"), run: () => chain().toggleStrike().run() },
-    SEP,
-    { id: "bullets", label: "Bullets", active: editor.isActive("bulletList"), run: () => chain().toggleBulletList().run() },
-    { id: "numbering", label: "Numbering", active: editor.isActive("orderedList"), run: () => chain().toggleOrderedList().run() },
-    { id: "indent", label: "Increase indent", accel: "Tab", run: () => chain().sinkListItem(editor.isActive("taskItem") ? "taskItem" : "listItem").run() || chain().indentListItem().run() },
-    { id: "outdent", label: "Decrease indent", accel: "Shift+Tab", run: () => chain().outdentListItem().run() || chain().liftListItem(editor.isActive("taskItem") ? "taskItem" : "listItem").run() },
-  ];
+/** ⛔ THE FORMATTING LIVES ON A HORIZONTAL MINI-TOOLBAR, NOT IN THE VERTICAL LIST
+ *  (NEW-MINI-TOOLBAR, owner instruction 2026-08-17).
+ *
+ *  HIS WORDS: *"there's too many things — bold, italic, underline, strike, bullets, numbering.
+ *  That should be in the Microsoft Word format or OneNote format where you right click something
+ *  and there's one menu that's the typical menu with cut, copy, paste, whatever. And then there's
+ *  another menu that kind of goes horizontal that has text size, text colour, bold italic
+ *  underline strikethrough, all that good stuff."*
+ *
+ *  That is Office's floating mini-toolbar, exactly: a compact strip of ICONS above a short
+ *  vertical menu of COMMANDS. The split is not cosmetic — it took the vertical list from fourteen
+ *  rows to six, which is most of why `Delete this box` was disappearing behind his taskbar.
+ *
+ *  ⛔ NO SHORTCUT LABELS ON THE STRIP. Every one of these keys still works; they simply stop
+ *  being printed twice, which is what let the list grow past the screen in the first place. The
+ *  accessible name carries the shortcut instead, so the keyboard route is announced rather than
+ *  drawn. */
+const MINI_GLYPHS = {
+  bold: <text x="8" y="12" textAnchor="middle" fontSize="12" fontWeight="800" fill="currentColor" stroke="none">B</text>,
+  italic: <text x="8" y="12" textAnchor="middle" fontSize="12" fontStyle="italic" fontWeight="600" fill="currentColor" stroke="none">I</text>,
+  underline: <><text x="8" y="11" textAnchor="middle" fontSize="11" fontWeight="600" fill="currentColor" stroke="none">U</text><path d="M4 13.6h8" /></>,
+  strike: <><text x="8" y="12" textAnchor="middle" fontSize="11" fontWeight="600" fill="currentColor" stroke="none">S</text><path d="M3.4 8h9.2" /></>,
+  bullets: <><circle cx="3.6" cy="4.5" r="1.1" fill="currentColor" stroke="none" /><circle cx="3.6" cy="8" r="1.1" fill="currentColor" stroke="none" /><circle cx="3.6" cy="11.5" r="1.1" fill="currentColor" stroke="none" /><path d="M6.6 4.5h6.6M6.6 8h6.6M6.6 11.5h6.6" /></>,
+  numbering: <><text x="3" y="6" fontSize="5.5" fill="currentColor" stroke="none">1</text><text x="3" y="10" fontSize="5.5" fill="currentColor" stroke="none">2</text><text x="3" y="14" fontSize="5.5" fill="currentColor" stroke="none">3</text><path d="M7 4.5h6.4M7 8.6h6.4M7 12.7h6.4" /></>,
+  indent: <><path d="M6.4 4h7M6.4 8h7M6.4 12h7" /><path d="M2.4 5.6 4.6 8l-2.2 2.4z" fill="currentColor" stroke="none" /></>,
+  outdent: <><path d="M6.4 4h7M6.4 8h7M6.4 12h7" /><path d="M4.6 5.6 2.4 8l2.2 2.4z" fill="currentColor" stroke="none" /></>,
 };
 
+/** One icon button on the strip. */
+function MiniButton({ id, title, active, disabled, onRun, children }) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      data-testid={`note-menu-${id}`}
+      title={title}
+      aria-label={title}
+      aria-pressed={active ? "true" : undefined}
+      disabled={disabled}
+      /* ⛔ THE SELECTION SURVIVES THE PRESS, or the command acts on nothing and does so SILENTLY. */
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={onRun}
+      style={{
+        display: "inline-flex", alignItems: "center", justifyContent: "center",
+        width: 26, height: 26, padding: 0, flex: "0 0 auto",
+        border: "1px solid transparent", borderRadius: RADIUS.control,
+        background: active ? "color-mix(in srgb, var(--accent-notes) 16%, transparent)" : "transparent",
+        color: active ? "var(--accent-notes)" : "var(--text-primary)",
+        cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.4 : 1,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+const miniIcon = (id) => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"
+    strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ display: "block" }}>
+    {MINI_GLYPHS[id]}
+  </svg>
+);
+
+/** A colour swatch button that opens its palette inline, so the strip stays one row high. */
+function MiniColor({ id, title, colors, current, onPick }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span style={{ position: "relative", flex: "0 0 auto" }}>
+      <MiniButton id={id} title={title} active={open} onRun={() => setOpen((v) => !v)}>
+        <span style={{ display: "grid", placeItems: "center", width: 16, height: 16 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1 }}>{id === "color" ? "A" : "▨"}</span>
+          <span style={{ width: 13, height: 3, borderRadius: 1, background: current || "var(--border-strong)", marginTop: 1 }} />
+        </span>
+      </MiniButton>
+      {open ? (
+        <div
+          role="menu"
+          data-testid={`note-menu-${id}-swatches`}
+          style={{
+            position: "absolute", top: 30, left: 0, zIndex: 2, padding: 5,
+            display: "grid", gridTemplateColumns: "repeat(5, 18px)", gap: 4,
+            background: "var(--surface-raised)", border: "1px solid var(--border-default)",
+            borderRadius: RADIUS.control, boxShadow: "0 10px 26px rgba(0,0,0,0.2)",
+          }}
+        >
+          {colors.map((c) => (
+            <button
+              key={c.name}
+              type="button"
+              role="menuitem"
+              title={c.name}
+              aria-label={c.name}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { onPick(c.value); setOpen(false); }}
+              style={{
+                width: 18, height: 18, padding: 0, cursor: "pointer",
+                border: "1px solid var(--border-default)", borderRadius: 4,
+                background: c.value || "transparent",
+                color: "var(--text-tertiary)", fontSize: 10, lineHeight: 1,
+              }}
+            >{c.value ? "" : "✕"}</button>
+          ))}
+        </div>
+      ) : null}
+    </span>
+  );
+}
+
+/** ⛔ THE STRIP ITSELF. Font size first, then the character formats, then the list formats —
+ *  Word's order, which is the order his hand already knows. */
+function MiniBar({ editor }) {
+  const chain = () => editor.chain().focus();
+  const size = editor.getAttributes("textStyle")?.fontSize || "";
+  const items = [
+    { id: "bold", title: "Bold (Ctrl+B)", active: editor.isActive("bold"), run: () => chain().toggleBold().run() },
+    { id: "italic", title: "Italic (Ctrl+I)", active: editor.isActive("italic"), run: () => chain().toggleItalic().run() },
+    { id: "underline", title: "Underline (Ctrl+U)", active: editor.isActive("underline"), run: () => chain().toggleUnderline().run() },
+    { id: "strike", title: "Strikethrough", active: editor.isActive("strike"), run: () => chain().toggleStrike().run() },
+  ];
+  const lists = [
+    { id: "bullets", title: "Bullets", active: editor.isActive("bulletList"), run: () => chain().toggleBulletList().run() },
+    { id: "numbering", title: "Numbering", active: editor.isActive("orderedList"), run: () => chain().toggleOrderedList().run() },
+    { id: "indent", title: "Increase indent (Tab)", run: () => chain().sinkListItem(editor.isActive("taskItem") ? "taskItem" : "listItem").run() || chain().indentListItem().run() },
+    { id: "outdent", title: "Decrease indent (Shift+Tab)", run: () => chain().outdentListItem().run() || chain().liftListItem(editor.isActive("taskItem") ? "taskItem" : "listItem").run() },
+  ];
+  const divider = <span style={{ width: 1, alignSelf: "stretch", margin: "3px 2px", background: "var(--border-default)", flex: "0 0 auto" }} />;
+  return (
+    <div
+      role="menu"
+      aria-label="Formatting"
+      data-testid="note-menu-mini"
+      style={{
+        display: "flex", alignItems: "center", gap: 1, padding: "3px 5px", marginBottom: 4,
+        background: "var(--surface-raised)", border: "1px solid var(--border-default)",
+        borderRadius: RADIUS.control, boxShadow: "0 10px 26px rgba(0,0,0,0.18)",
+      }}
+    >
+      <select
+        data-testid="note-menu-size"
+        title="Text size"
+        aria-label="Text size"
+        value={size}
+        onMouseDown={(e) => e.stopPropagation()}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (!v) chain().unsetFontSize?.().run();
+          else chain().setFontSize(v).run();
+        }}
+        style={{
+          height: 24, maxWidth: 62, border: "1px solid var(--border-default)", borderRadius: RADIUS.control,
+          background: "var(--surface-base)", color: "var(--text-primary)", font: "inherit", fontSize: 12,
+          padding: "0 2px", flex: "0 0 auto",
+        }}
+      >
+        {SIZES.map((n) => <option key={String(n)} value={n == null ? "" : `${n}px`}>{n == null ? "Size" : n}</option>)}
+      </select>
+      {divider}
+      {items.map((it) => <MiniButton key={it.id} {...it} onRun={it.run}>{miniIcon(it.id)}</MiniButton>)}
+      <MiniColor
+        id="color" title="Text colour" colors={TEXT_COLORS}
+        current={editor.getAttributes("textStyle")?.color || null}
+        onPick={(v) => (v ? chain().setColor(v).run() : chain().unsetColor().run())}
+      />
+      <MiniColor
+        id="highlight" title="Highlight" colors={HIGHLIGHT_COLORS}
+        current={editor.getAttributes("highlight")?.color || null}
+        onPick={(v) => (v ? chain().setHighlight({ color: v }).run() : chain().unsetHighlight().run())}
+      />
+      {divider}
+      {lists.map((it) => <MiniButton key={it.id} {...it} onRun={it.run}>{miniIcon(it.id)}</MiniButton>)}
+    </div>
+  );
+}
+
 function MenuRow({ item, onClose }) {
+  const [openSub, setOpenSub] = useState(false);
   if (item.sep) {
     return <div style={{ height: 1, background: "var(--border-default)", margin: "4px 0" }} />;
+  }
+  /* ⛔ THE PASTE MODES ARE A SUBMENU, NOT THREE TOP-LEVEL ROWS — his instruction, and the reason
+   * is the same one behind the whole split: three rows for one command is three quarters of the
+   * space `Delete this box` needed to stay on screen. */
+  if (item.sub) {
+    return (
+      <div
+        style={{ position: "relative" }}
+        onMouseEnter={() => setOpenSub(true)}
+        onMouseLeave={() => setOpenSub(false)}
+      >
+        <button
+          type="button"
+          role="menuitem"
+          aria-haspopup="menu"
+          aria-expanded={openSub ? "true" : "false"}
+          data-testid={`note-menu-${item.id}`}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => setOpenSub((v) => !v)}
+          style={{
+            display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "5px 12px",
+            border: "none", background: "transparent", color: "var(--text-primary)",
+            font: "inherit", fontSize: 13, fontWeight: 500, textAlign: "left", cursor: "pointer",
+          }}
+        >
+          <span style={{ flex: 1 }}>{item.label}</span>
+          <span style={{ color: "var(--text-tertiary)", fontWeight: 600 }}>▸</span>
+        </button>
+        {openSub ? (
+          <div
+            role="menu"
+            data-testid={`note-menu-${item.id}-sub`}
+            style={{
+              position: "absolute", left: "100%", top: -4, minWidth: 208, padding: "5px 0", zIndex: 1,
+              background: "var(--surface-raised)", border: "1px solid var(--border-default)",
+              borderRadius: RADIUS.control, boxShadow: "0 12px 30px rgba(0,0,0,0.22)",
+            }}
+          >
+            {item.sub.map((s) => <MenuRow key={s.id} item={s} onClose={onClose} />)}
+          </div>
+        ) : null}
+      </div>
+    );
   }
   return (
     <button
@@ -597,8 +799,50 @@ function MenuRow({ item, onClose }) {
   );
 }
 
+/** ⛔ WHERE THE MENU GOES, MEASURED RATHER THAN GUESSED (NEW-MENU-OFFSCREEN).
+ *
+ *  HIS REPORT: *"you can't see everything on the menu because the delete part is hidden behind my
+ *  start menu or task bar."* The old rule was `top: Math.min(at.y, window.innerHeight - 420)` — a
+ *  HARD-CODED 420px guess at the menu's own height. Two things wrong with it, and the second is
+ *  why it failed him: a menu taller than the guess still runs off the bottom, and the guess was
+ *  never re-checked against what actually rendered.
+ *
+ *  ⛔ SO IT IS MEASURED, AFTER MOUNT, IN A LAYOUT EFFECT — before paint, so the menu is never seen
+ *  in the wrong place and then corrected. The rule is Office's: prefer below-and-right of the
+ *  pointer; FLIP above if the assembly does not fit below; then clamp into the viewport with a
+ *  margin so it can never sit under an edge either way.
+ *
+ *  ⛔ `visualViewport` IS PREFERRED OVER `innerHeight`, deliberately: on a maximised window it
+ *  already excludes the taskbar, which is the exact case he is hitting. It also follows a pinch
+ *  zoom and an on-screen keyboard, neither of which `innerHeight` knows about. */
+const MENU_MARGIN = 8;
+
+export function placeMenu({ x, y, w, h, viewW, viewH, margin = MENU_MARGIN }) {
+  const vw = Number.isFinite(viewW) ? viewW : 1200;
+  const vh = Number.isFinite(viewH) ? viewH : 800;
+  const width = Number.isFinite(w) ? w : 0;
+  const height = Number.isFinite(h) ? h : 0;
+
+  // Below the pointer if it fits; otherwise ABOVE it — a flip, not a nudge, so the pointer is
+  // never left sitting on top of the first row.
+  let top = y;
+  const fitsBelow = y + height + margin <= vh;
+  const fitsAbove = y - height - margin >= 0;
+  if (!fitsBelow && fitsAbove) top = y - height;
+  // Whichever branch ran, the result is clamped: a menu taller than the whole viewport still has
+  // to start on screen, and `max` is what keeps the TOP visible rather than the bottom.
+  top = Math.max(margin, Math.min(top, vh - height - margin));
+  if (height + margin * 2 > vh) top = margin;
+
+  let left = x;
+  if (left + width + margin > vw) left = vw - width - margin;   // the right edge, same rule
+  left = Math.max(margin, left);
+  return { left: Math.round(left), top: Math.round(top), flipped: !fitsBelow && fitsAbove };
+}
+
 function DocMenu({ at, editor, onPlainPaste, onClose, onDeleteBox, onClipboardNote }) {
   const ref = useRef(null);
+  const [box, setBox] = useState(null);
   /* ⛔ GATED ON `at`. Registered unconditionally, this effect put a CAPTURE-phase Escape
    * listener on the document that called preventDefault — while the menu was CLOSED. That
    * silently ate every Escape in the note, which killed the Escape-then-Tab keyboard escape
@@ -610,9 +854,26 @@ function DocMenu({ at, editor, onPlainPaste, onClose, onDeleteBox, onClipboardNo
     const key = (e) => { if (e.key === "Escape") { e.preventDefault(); onClose(); } };
     document.addEventListener("pointerdown", down, true);
     document.addEventListener("keydown", key, true);
-    ref.current?.querySelector("button")?.focus();
     return () => { document.removeEventListener("pointerdown", down, true); document.removeEventListener("keydown", key, true); };
   }, [at, onClose]);
+
+  /* ⛔ MEASURED BEFORE PAINT (NEW-MENU-OFFSCREEN). The assembly — mini-toolbar AND list — is
+   * measured as one thing, because measuring only the list is how `Delete this box` ended up
+   * behind his taskbar: the strip above it is part of what has to fit. A layout effect runs
+   * before the browser paints, so the menu is never seen in the wrong place and then corrected. */
+  useLayoutEffect(() => {
+    if (!at || !ref.current) { setBox(null); return; }
+    const r = ref.current.getBoundingClientRect();
+    const vv = typeof window !== "undefined" ? window.visualViewport : null;
+    setBox(placeMenu({
+      x: at.x, y: at.y, w: r.width, h: r.height,
+      viewW: vv?.width ?? (typeof window !== "undefined" ? window.innerWidth : 1200),
+      viewH: vv?.height ?? (typeof window !== "undefined" ? window.innerHeight : 800),
+    }));
+  }, [at]);
+
+  useEffect(() => { if (box) ref.current?.querySelector("button")?.focus(); }, [box]);
+
   if (!at || !editor || editor.isDestroyed) return null;
 
   /* ⛔ CUT AND COPY GO THROUGH THE BROWSER'S OWN EDITING COMMAND, deliberately. The async
@@ -626,44 +887,58 @@ function DocMenu({ at, editor, onPlainPaste, onClose, onDeleteBox, onClipboardNo
     if (!ok) onClipboardNote?.(`Your browser would not let the menu ${kind} — Ctrl+${kind === "cut" ? "X" : "C"} always works.`);
   };
 
+  /* ⛔ SIX ROWS, NOT FOURTEEN. Everything that formats moved to the strip above; what is left is
+   * what Word leaves: the clipboard, the link, and the one destructive action, last and
+   * separated so a slip cannot reach it. */
   const items = [
     { id: "cut", label: "Cut", accel: "Ctrl+X", run: () => clip("cut") },
     { id: "copy", label: "Copy", accel: "Ctrl+C", run: () => clip("copy") },
+    {
+      id: "paste",
+      label: "Paste",
+      sub: PASTE_MODES.map((mode) => ({
+        id: mode === "text" ? "paste-plain" : `paste-${mode}`,
+        label: PASTE_MODE_META[mode].label,
+        accel: mode === "text" ? "Ctrl+Shift+V" : PASTE_MODE_META[mode].key,
+        run: () => onPlainPaste(mode),
+      })),
+    },
     SEP,
-    ...PASTE_MODES.map((mode) => ({
-      id: mode === "text" ? "paste-plain" : `paste-${mode}`,
-      label: PASTE_MODE_META[mode].label,
-      accel: mode === "text" ? "Ctrl+Shift+V" : PASTE_MODE_META[mode].key,
-      run: () => onPlainPaste(mode),
-    })),
-    SEP,
-    ...FORMAT_ITEMS(editor),
     { id: "link", label: editor.isActive("link") ? "Remove link" : "Link…", accel: "Ctrl+K",
       run: () => (editor.isActive("link")
         ? editor.chain().focus().unsetLink().run()
         : editor.chain().focus().extendMarkRange("link").run()) },
-    /* ⛔ AND THE BOX'S OWN ACTION, WHICH IS THE ONLY PLACE DELETE LIVES NOW (besides the key).
-     * It is LAST and separated, because it is the destructive one and Word puts destructive
-     * actions where a slip cannot reach them. */
     ...(onDeleteBox ? [SEP, { id: "delete-box", label: "Delete this box", accel: "Del", danger: true, run: onDeleteBox }] : []),
   ];
 
   return (
     <div
       ref={ref}
-      role="menu"
       data-testid="note-doc-menu"
       data-menu-kind={onDeleteBox ? "box" : "document"}
+      data-menu-flipped={box?.flipped ? "1" : undefined}
       style={{
-        position: "fixed", left: Math.min(at.x, (typeof window !== "undefined" ? window.innerWidth : 1200) - 240),
-        top: Math.min(at.y, (typeof window !== "undefined" ? window.innerHeight : 800) - 420),
-        zIndex: 60, minWidth: 224, padding: "5px 0", maxHeight: "82vh", overflowY: "auto",
-        background: "var(--surface-raised)", border: "1px solid var(--border-default)",
-        borderRadius: RADIUS.control, boxShadow: "0 14px 36px rgba(0,0,0,0.22)",
-        display: "flex", flexDirection: "column",
+        position: "fixed",
+        left: box ? box.left : at.x,
+        top: box ? box.top : at.y,
+        /* Hidden for the one frame between mount and measurement, so it cannot be seen at the
+         * unmeasured position — the flicker that a post-paint effect would produce. */
+        visibility: box ? "visible" : "hidden",
+        zIndex: 60, display: "flex", flexDirection: "column", alignItems: "flex-start",
       }}
     >
-      {items.map((item, i) => <MenuRow key={item.sep ? `sep${i}` : item.id} item={item} onClose={onClose} />)}
+      <MiniBar editor={editor} />
+      <div
+        role="menu"
+        data-testid="note-doc-menu-list"
+        style={{
+          minWidth: 224, padding: "5px 0", width: "100%",
+          background: "var(--surface-raised)", border: "1px solid var(--border-default)",
+          borderRadius: RADIUS.control, boxShadow: "0 14px 36px rgba(0,0,0,0.22)",
+        }}
+      >
+        {items.map((item, i) => <MenuRow key={item.sep ? `sep${i}` : item.id} item={item} onClose={onClose} />)}
+      </div>
     </div>
   );
 }

@@ -734,6 +734,34 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   makes a real feedback loop (fit narrows → extent widens → the wider element becomes "the room"),
   and it SETTLED on a stable wrong number rather than oscillating, which is worse because it looks
   correct. Instrument: **measure-notes-right-edge** under `ui-audit/`, running his own sweep.
+- **⛔ RIGHT-CLICK IS WORD'S *TWO* MENUS NOW (B590016/B590017).** *"there's too many things… there's
+  one menu that's the typical menu with cut, copy, paste, whatever. And then there's another menu
+  that kind of goes horizontal that has text size, text colour, bold italic underline
+  strikethrough."* A floating horizontal **mini-toolbar** (icons, no shortcut labels) sits above a
+  vertical list of **commands only**: Cut · Copy · Paste ▸ · Link… · Delete this box. **Fourteen
+  rows → four.** Every shortcut still works; they simply stop being printed twice, which is what let
+  the list grow past the screen. ⛔ **Where it goes is MEASURED, not guessed** — the old rule was
+  `top: min(at.y, innerHeight - 420)`, a hard-coded estimate of the menu's own height, so a taller
+  menu ran off the bottom and the row that fell off was the last one: `Delete this box`, behind his
+  taskbar. `placeMenu` is pure, takes the measured size of the WHOLE assembly (strip included),
+  flips above the pointer when it will not fit below, and prefers `visualViewport` because on a
+  maximised window that already excludes the taskbar. Mutation-proven: the 420 guess fails 7 tests
+  and 2,046 placements in the property sweep. Harness: **verify-notes-menu-layout**.
+- `lib/notesFormatPalette.js` — the text colours, highlights, fonts and sizes. **The module's ONLY
+  literal colours, and they are CONTENT, not chrome** — a colour written into a document must mean
+  the same thing in every theme and every export. They moved out of `NoteToolbar.jsx` when the
+  mini-toolbar started offering the same choices: two copies is how a bar and a menu come to
+  disagree about what "Teal" is. `NoteToolbar.jsx` is now pure chrome and the guard says so.
+- **⛔ GRABBING ONE OF SEVERAL SELECTED BOXES MOVES THEM ALL (B590018).** The group drag
+  (`beginGroupDrag`, B421494) was correct and **unreachable**: it is wired to the MAT's press
+  handler, and the grip calls `preventDefault()` on `pointerdown`, which suppresses the
+  compatibility `mousedown` the mat listens for — so the one control built for moving a box was the
+  single path the group drag could not see. The grip now reads the live selection **from the DOM**
+  (`[data-selected="1"]` — the same attribute the ring is painted with, so what moves is what he can
+  see is selected) and moves the set through the existing `moveSelection` rule: ONE delta, ONE undo
+  frame. ⛔ **An instrument note worth keeping:** `page.mouse.click` silently ignores a `modifiers`
+  option (it belongs to `locator.click`), which made every Shift+click replace the selection and
+  produced a confident false report that the group drag was broken.
 - `lib/notesSaveState.js` — **ONE SAVE INDICATOR, WHERE EVERY OTHER MODULE PUTS IT (B539649).** He
   photographed two: a `SAVED` pill in the note header and a sync line in a footer under the rail,
   while the app-wide `CloudSyncBadge` said the same thing in `AppHeader` Row-1. *"Literally, all the
