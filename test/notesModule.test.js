@@ -84,6 +84,8 @@ const ALL_NOTES_FILES = [
   "lib/notesBoxResize.js",
   // NEW-ENTER-INHERIT — a new line continues the one above it.
   "lib/notesEnterInherit.js",
+  // NEW-MINI-TOOLBAR — the content palettes, shared by the toolbar and the right-click strip.
+  "lib/notesFormatPalette.js",
 ];
 const SKETCH_FILES = ALL_NOTES_FILES.filter((f) => f.includes("Sketch"));
 
@@ -315,13 +317,29 @@ describe("chrome is theme tokens only", () => {
     });
   }
 
-  it("the toolbar's only literal colours are the CONTENT palettes — a text colour is not chrome", () => {
-    const text = code("components/NoteToolbar.jsx");
-    const paletteBlock = text.slice(text.indexOf("const TEXT_COLORS"), text.indexOf("const FONTS"));
-    const all = [...text.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map((m) => m[0]);
-    const inPalette = [...paletteBlock.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map((m) => m[0]);
-    expect(all.length).toBeGreaterThan(0);
-    expect(all.sort(), "a hex outside the content palette is chrome and must be a token").toEqual(inPalette.sort());
+  /* ⛔ AMENDED (NEW-MINI-TOOLBAR): the content palettes MOVED OUT of the toolbar into
+   * `lib/notesFormatPalette.js`, because the right-click mini-toolbar offers the same choices and
+   * two copies of a palette is how the bar and the menu come to disagree about what "Teal" is.
+   * That makes this guard STRONGER rather than weaker: the toolbar is now pure chrome and may
+   * carry no literal colour at all, and there is exactly ONE file in the module that may. */
+  it("⛔ the content palettes live in ONE file, and it is not a component", () => {
+    const palette = code("lib/notesFormatPalette.js");
+    const hexes = [...palette.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map((m) => m[0]);
+    expect(hexes.length, "the palette file must actually hold the colours").toBeGreaterThan(8);
+    expect(palette).toMatch(/export const TEXT_COLORS/);
+    expect(palette).toMatch(/export const HIGHLIGHT_COLORS/);
+  });
+
+  it("⛔ the toolbar is now pure chrome — no literal colour survives in it", () => {
+    const hits = [...code("components/NoteToolbar.jsx").matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map((m) => m[0]);
+    expect(hits, `NoteToolbar hardcodes ${hits.join(", ")}; content colours belong in lib/notesFormatPalette.js`).toEqual([]);
+  });
+
+  it("…and both consumers read that one list rather than keeping a copy", () => {
+    for (const f of ["components/NoteToolbar.jsx", "components/NoteEditor.jsx"]) {
+      expect(code(f), `${f} must import the shared palette`).toMatch(/from "\.\.\/lib\/notesFormatPalette\.js"/);
+      expect(code(f), `${f} must not redeclare it`).not.toMatch(/const TEXT_COLORS\s*=/);
+    }
   });
 
   it("the module's chrome actually USES its accent tokens", () => {

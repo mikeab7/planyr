@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-17 @ `0aea4929` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-17 @ `68ac2ea1` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_536 source files mapped._
+_537 source files mapped._
 
 ## infra
 
@@ -58,7 +58,7 @@ _536 source files mapped._
 - **`src/workspaces/notes/components/IntegrityBanner.jsx`** — the bar for the two findings nothing could previously mention: one note living in two projects, and a note that had lost its place (already recovered by the time it renders, and named / openable / re-filable inline). Its own lazy chunk — it renders only when something is wrong.
   - _exports_: `default (IntegrityBanner)`
 - **`src/workspaces/notes/components/NoteEditor.jsx`** — One note page (title · toolbar · document) and the module's ONLY editor-engine import — the lazy boundary. Snapshots the document as plain JSON at edit time so the flush never queries a torn-down instance.
-  - _exports_: `default (NoteEditor)`, `PASTE_MODE_META`
+  - _exports_: `default (NoteEditor)`, `PASTE_MODE_META`, `placeMenu`
 - **`src/workspaces/notes/components/NoteHistory.jsx`** — Version-history pane: earlier snapshots of the open page, with a preview and Restore.
   - _exports_: `default (NoteHistory)`
 - **`src/workspaces/notes/components/NoteOutline.jsx`** — Outline pane derived from the open note's headings — click to go, caret section highlighted, collapsible, absent with no headings.
@@ -95,6 +95,8 @@ _536 source files mapped._
   - _exports_: `EMPTY_DOC`, `HEADING_LEVELS`, `NOTE_EXTENSIONS`, `NOTE_PLACEHOLDER`, `noteExtensions`
 - **`src/workspaces/notes/lib/notesFileMeta.js`** — How an attached file is described in words — size, type badge, safe name — shared by the chip, the export and the print sheet.
   - _exports_: `attachmentLabel`, `fileExtLabel`, `fileSizeLabel`, `safeAttachmentName`
+- **`src/workspaces/notes/lib/notesFormatPalette.js`** — The text colours, highlights, fonts and point sizes the formatting controls offer. The module's ONLY literal colours, and content rather than chrome: shared by the toolbar and the right-click mini-toolbar so the two cannot disagree about what a colour is.
+  - _exports_: `FONTS`, `HIGHLIGHT_COLORS`, `SIZES`, `TEXT_COLORS`
 - **`src/workspaces/notes/lib/notesImageDb.js`** — The raw IndexedDB tier under the note-image store — the ONE file that touches `indexedDB`. Every call resolves rather than rejects, and reports whether the bytes actually landed.
   - _exports_: `idbDeleteImages`, `idbDeleteVersions`, `idbGetImage`, `idbGetVersion`, `idbListImageMeta`, `idbListVersions`, `idbPutImage`, `idbPutVersion`, `notesIdbAvailable`
 - **`src/workspaces/notes/lib/notesImageIntake.js`** — A pasted or dropped file → a downscaled, re-encoded data URL, choosing PNG vs JPEG by whichever is smaller. GIF and SVG pass through untouched rather than being silently flattened.
