@@ -3300,6 +3300,13 @@ function notifyRowsDeleted(rowCount, totalCount) {
 }
 
 // ── Successor Prompt ──────────────────────────────────────
+// NEW-1 — shared by both footer buttons (Skip, Update Successors) so "same size" is a single
+// object, not two style literals kept in sync by hand.
+const FOOTER_BTN_STYLE = {
+  fontSize:12, width:150, height:34, display:'flex', alignItems:'center', justifyContent:'center',
+  borderRadius:6, fontFamily:'inherit', fontWeight:600, cursor:'pointer',
+  border:'1px solid #e5e7eb', background:'#fff', color:'#374151',
+};
 function SuccessorPromptModal({ prompt, updateTask, onClose, onOpenTask }) {
   const { completedTask, projId, projName, successors } = prompt;
   const readyToStart  = successors.filter(t => t.health === 'gray');
@@ -3312,30 +3319,10 @@ function SuccessorPromptModal({ prompt, updateTask, onClose, onOpenTask }) {
   });
 
   const changeCount = Object.values(pending).filter(v => v !== null).length;
-  // NEW-1 — the bulk "Mark Complete" action's target: only the Ready to Start group. This is
-  // never empty while the modal is open — the caller only opens this modal when
-  // `successors.some(t => t.health === 'gray')` — but it's still read defensively rather than
-  // assumed, so a future change to that invariant degrades to "button disabled", not a crash.
-  const readyIds = React.useMemo(() => new Set(readyToStart.map(t => t.id)), [readyToStart]);
-  const canComplete = readyIds.size > 0;
 
   function apply() {
     Object.entries(pending).forEach(([tid, hk]) => {
       if (hk !== null) updateTask(Number(tid), { health: hk }, projId);
-    });
-    onClose();
-  }
-
-  // NEW-1 — a SEPARATE accept path from `apply()`/Enter, on purpose (see the file-level hazard
-  // note above the modal's onKeyDown). It forces every Ready-to-Start successor to Complete
-  // regardless of what's pending for it; an Already Active successor keeps whatever the user
-  // picked for it (or "no change" by default) — this button is about the successors the
-  // completed task just unblocked, not a blanket status wipe over ones already being worked.
-  function applyComplete() {
-    if (!canComplete) return;
-    Object.entries(pending).forEach(([tid, hk]) => {
-      const forced = readyIds.has(Number(tid)) ? 'green' : hk;
-      if (forced !== null) updateTask(Number(tid), { health: forced }, projId);
     });
     onClose();
   }
@@ -3418,19 +3405,17 @@ function SuccessorPromptModal({ prompt, updateTask, onClose, onOpenTask }) {
       <div style={{background:'#fff',borderRadius:12,boxShadow:'0 16px 48px rgba(0,0,0,.18)',
         width:480,maxWidth:'94vw',maxHeight:'82vh',display:'flex',flexDirection:'column',overflow:'hidden'}}
         tabIndex={-1} ref={el=>el?.focus()}
-        /* NEW-1 — ⛔ Enter's meaning here does NOT change: it still applies `pending` exactly as
-         * it does today (defaults every Ready-to-Start row to In Progress; that is the muscle
-         * memory the owner keeps). Complete is reachable ONLY through applyComplete(), wired to a
-         * DIFFERENT control (the "Mark Complete" button) and a DIFFERENT key (Ctrl/Cmd+Enter,
-         * matching the FormulaBar's existing accelerator at handleKey above). A second control
-         * that shared the plain Enter key would re-arm the exact bug fixed for this modal
-         * (B463920): the overlayAtKeyStartRef latch only needs ONE thing to stay true — that a
-         * keystroke which dismisses this modal never reads as "no overlay was open" to the grid's
-         * key handler — and that holds for ANY key, including Ctrl/Cmd+Enter, because the latch
-         * records overlayOpenRef at keydown-capture time regardless of which key was pressed. */
+        /* NEW-1 — Enter's meaning does not change: it applies `pending` exactly as it always has
+         * (defaults every Ready-to-Start row to In Progress; that's the muscle memory the owner
+         * keeps). Completing a successor goes through this SAME Enter/apply() path — pick the
+         * Complete pill on its row, then Enter — there is no second accept mechanism here.
+         * ⛔ The former "Mark Complete" bulk button and its Ctrl/Cmd+Enter twin were removed as a
+         * redundant third footer control (the Complete pill already does the job); do not re-add a
+         * second Enter-adjacent accept key without re-reading B463920 first — the
+         * overlayAtKeyStartRef latch only needs ONE thing to stay true: a keystroke that dismisses
+         * this modal must never read as "no overlay was open" to the grid's own key handler. */
         onKeyDown={e=>{
           if (e.key==='Escape') { onClose(); return; }
-          if ((e.metaKey||e.ctrlKey) && e.key==='Enter') { e.preventDefault(); if (canComplete) applyComplete(); return; }
           if (e.key==='Enter' && changeCount>0) apply();
         }}>
         {/* Header */}
@@ -3468,33 +3453,23 @@ function SuccessorPromptModal({ prompt, updateTask, onClose, onOpenTask }) {
             {alreadyActive.map(t=><TaskRow key={t.id} task={t} accent={false}/>)}
           </>)}
         </div>
-        {/* Footer */}
+        {/* Footer — NEW-1: back to TWO buttons, same width/weight/height (FOOTER_BTN_STYLE). The
+            owner flagged the three-button footer as "horrible UI" — the removed "Mark Complete"
+            button was redundant with the Complete pill two lines up (pick Complete on the pill,
+            press Update Successors — same outcome), and having it as its own control broke the
+            row's visual balance. Completing a successor is still one click away; it just no
+            longer gets its own footer button. */}
         <div style={{padding:'12px 20px',borderTop:'1px solid #e5e7eb',display:'flex',alignItems:'center',justifyContent:'flex-end',gap:8,background:'#f9fafb',flexShrink:0}}>
           <span style={{fontSize:11,color:'#9ca3af',marginRight:'auto'}}>
             {changeCount>0?`${changeCount} update${changeCount!==1?'s':''} pending`:'No changes'}
           </span>
-          <button data-successor-apply="skip" onClick={onClose}
-            style={{fontSize:12,padding:'7px 16px',borderRadius:6,border:'1px solid #e5e7eb',background:'#fff',color:'#374151',cursor:'pointer',fontFamily:'inherit',fontWeight:500}}
+          <button data-successor-apply="skip" onClick={onClose} style={FOOTER_BTN_STYLE}
             onMouseEnter={e=>e.currentTarget.style.borderColor='#6b7280'} onMouseLeave={e=>e.currentTarget.style.borderColor='#e5e7eb'}>
             Skip
           </button>
-          {/* NEW-1 — a SEPARATE control from "Update Successors", not a 3rd StatusPills value applied
-              through the same button: this is the fast path for "the successor is done too", scoped to
-              the Ready to Start group (title spells out the scope since the button label can't). */}
-          <button data-successor-apply="complete" onClick={applyComplete} disabled={!canComplete}
-            title="Marks every Ready to Start successor Complete · Ctrl/Cmd+Enter"
-            style={{fontSize:12,padding:'7px 18px',borderRadius:6,fontFamily:'inherit',fontWeight:600,
-              cursor:canComplete?'pointer':'not-allowed',
-              border:canComplete?'1px solid #16a34a':'1px solid #e5e7eb',
-              background:canComplete?'#fff':'#f3f4f6',
-              color:canComplete?'#16a34a':'#9ca3af'}}
-            onMouseEnter={e=>{if(canComplete)e.currentTarget.style.background='#f0fdf4';}}
-            onMouseLeave={e=>{if(canComplete)e.currentTarget.style.background='#fff';}}>
-            Mark Complete
-          </button>
           <button data-successor-apply="update" onClick={apply} disabled={!changeCount}
             title="Applies the status picked for each row above · Enter"
-            style={{fontSize:12,padding:'7px 18px',borderRadius:6,fontFamily:'inherit',fontWeight:600,
+            style={{...FOOTER_BTN_STYLE,
               cursor:changeCount?'pointer':'not-allowed',
               border:changeCount?'1px solid #4f46e5':'1px solid #e5e7eb',
               background:changeCount?'#4f46e5':'#f3f4f6',
