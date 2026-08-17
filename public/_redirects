@@ -19,3 +19,36 @@
 # can never 404 a live asset. Force those to a real 404 so a stale-chunk load fails
 # cleanly and src/app/chunkReload.js + ErrorBoundary can recover or surface honestly.
 /assets/*  /404.html  404
+
+# ── Clean-path ENTRANCES for the top-level workspace slugs (B576000/NEW-3) ─────────────────
+#
+# "No SPA catch-all" (above) means a bare top-level path like /food answers with 404.html —
+# Planyr's own "That page isn't here" screen, a small STATIC file with none of the app's JS,
+# not index.html silently mis-routing. The React app never even boots at that path, so no
+# amount of in-app JavaScript can fix this — read src/app/route.js's own header before
+# "fixing" this again in the app instead of here.
+#
+# These are the exact, narrow exception the no-catch-all rule above was protecting against a
+# BLANKET version of: one 302 per KNOWN top-level workspace slug (never a wildcard), each
+# straight to its hash form. A real HTTP redirect — not a 200 rewrite — so the browser lands
+# on /#/<slug> before it ever requests page content; by the time index.html's own inline
+# landing-page redirect (below) and src/app/route.js run, the hash is already the deep link,
+# so NEITHER needed a single line changed for this to work. /assets/* is untouched — a
+# content-hashed chunk still 404s cleanly, exactly as B449 requires.
+#
+# ⛔ KEEP THIS LIST IN SYNC WITH src/app/route.js's SLUG_BY_MODULE — test/foodModule.test.js's
+# "clean-path entrances" suite fails the build if a slug is added there and not here (or here
+# and not there). Both the bare and the trailing-slash form need their own line; Cloudflare's
+# redirect matching is exact-path, not prefix, so /food does not also match /food/.
+/site        /#/site       302
+/site/       /#/site       302
+/schedule    /#/schedule   302
+/schedule/   /#/schedule   302
+/markup      /#/markup     302
+/markup/     /#/markup     302
+/library     /#/library    302
+/library/    /#/library    302
+/notes       /#/notes      302
+/notes/      /#/notes      302
+/food        /#/food       302
+/food/       /#/food       302
