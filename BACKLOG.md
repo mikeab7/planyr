@@ -55,6 +55,19 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 
 ## 🔲 Open
 
+### B583011 — Ctrl+Z after ANY formatting change leaves a `density` attribute on the document, so 14 undo checks fail `[Notes]` (bug) #notes #ui #testing  *(found 2026-08-15 by `audit-notes-formatting` while regression-testing B583008–B583010 — **NOT an owner report, and NOT introduced by that work**: the identical 14 failures with the identical fingerprint were reproduced on a build with all three of this session's fixes stashed out (46 checks passed / 14 undo failures, both runs, byte-for-byte the same list). Minted **B583011** from the same reserved block. DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `undo`, `Ctrl+Z`, `density`, `setDocAttribute`, `B532642`, `B421489`, `B454481`: **B532642** ADDED the document-level `density` attribute this is about and is Done; **B454481** is the formatting audit itself, which found nothing wrong with the app on its first run — this is a defect it has found since. Net-new.)*
+`🔲` **Open — FILED, NOT FIXED this session, and flagged plainly rather than left in a log.**
+- Verify: sandbox
+- **THE MEASUREMENT.** Every undo row in `audit-notes-formatting` fails with the same diff — the document GAINS an attribute it did not have:
+
+        before: <doc>|<heading:level=2>|«Utilities»|<paragraph>|«ALPHA bravo charlie…»
+        after : <doc:density=comfortable>|<heading:level=2>|«Utilities»|<paragraph>|…
+
+  So Ctrl+Z restores the CONTENT correctly and leaves `density=comfortable` written onto the doc where the seeded document had no `density` at all. 14 rows: every mark (bold/italic/underline/strike/code), the block conversions (quote, code block, divider, heading-from-list-item), the alignments (centre, right) and all three line-spacing rows.
+- **WHY IT IS FILED RATHER THAN FIXED.** It is a different root from the three items shipped alongside it (that is proven, not assumed — see the provenance note), it belongs to B532642's `setDocAttribute` path, and this session already carried three owner reports. **It is not cosmetic:** a document that gains an attribute on undo is not byte-identical to the one you undid to, which is exactly the property `audit-notes-formatting` exists to protect, and it will make every future undo assertion in this module noisy until it is fixed.
+- **LIKELY SHAPE, to be confirmed rather than assumed:** the density attribute is applied on mount/normalisation rather than only when somebody picks a density, so undo rolls the content back past the point where it was written and the next pass re-applies it. If so the fix is that a doc with no density stays without one, and `DEFAULT_DENSITY` is a READING default rather than a written value.
+- **STOPPING RULE:** closes when `audit-notes-formatting` reaches 60/60 with the undo rows green, and a document that never had a density still has none after a formatting change and an undo.
+
 ### B583008 — A box NARROWED while it was being dragged, then sprang wide again on release `[Notes]` (bug) #notes #ui  *(owner chat 2026-08-15, NEW-1, with a screenshot caught mid-gesture. Minted **B583008** LATE via `git fetch origin main && npm run next-id -- --against-main`, from this branch's reserved block B583008–B583023. DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `placeAnchor`, `moveNoteAnchor`, `drag`, `narrow`, `clamp`, `B539648`, `B434417`, `B400177`, `B391073`, `B421490`: **this IS the same root as B539648** and he guessed as much — but B539648 is Done and shipped, and this is the clamp surviving in a path that item did not touch, so per the recurrence rule it takes its own number and cross-links rather than re-opening a correct fix. Net-new.)*
 `✅` **Done — shipped this session. 30/30 in `ui-audit/measure-notes-drag-width.mjs`, mutation-proven in both directions.**
 - Verify: sandbox
