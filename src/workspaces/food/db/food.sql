@@ -67,8 +67,19 @@ create table if not exists public.food_visits (
   rating       numeric(3,1) check (rating is null or (rating between 1 and 10 and rating * 2 = round(rating * 2))),
                        -- half-point steps (owner, 2026-08-18: "let me pick intervals of .5 too");
                        -- numeric not smallint, matching this table's own `cost numeric(8,2)` precedent
+  rating_ambiance numeric(3,1) check (rating_ambiance is null or (rating_ambiance between 1 and 10 and rating_ambiance * 2 = round(rating_ambiance * 2))),
+                       -- a SECOND, independent rating (owner, 2026-08-19: "add an ambiance rating too,
+                       -- matching scale") -- same 1-10 half-point representation as `rating`, entirely
+                       -- optional and independent of it. The MAP PIN stays keyed to `rating` (food) only
+                       -- -- this column is never read by avgRatingByPlaceId/manualPinsFromVisits.
   cost         numeric(8,2),
   what_i_had   text,
+  what_was_good text,  -- the SHORTLIST of what's worth ordering again -- deliberately separate from
+                       -- what_i_had (owner, 2026-08-19: "'What I had' is the record of the meal; this
+                       -- is the shortlist of what was actually GOOD... he orders four things and two
+                       -- are worth repeating"). Free text, same weight/shape as what_i_had, never merged
+                       -- with it. The PLACE panel aggregates this across every visit at that place
+                       -- (VisitPanel.jsx) rather than burying it one visit deep.
   notes        text,
   would_return boolean,
   created_at   timestamptz not null default now(),
@@ -132,6 +143,27 @@ alter table public.food_visits alter column rating type numeric(3,1) using ratin
 alter table public.food_visits drop constraint if exists food_visits_rating_check;
 alter table public.food_visits add constraint food_visits_rating_check
   check (rating is null or (rating between 1 and 10 and rating * 2 = round(rating * 2)));
+
+-- ── food_visits.rating_ambiance (owner chat block, 2026-08-19: "add an ambiance rating too,
+-- matching scale"). A SECOND, independent 1-10 half-point rating per visit -- nullable and
+-- unrelated to `rating`: he must be able to rate the food and skip ambiance, or the reverse.
+-- Same representation as `rating` (numeric(3,1), same halves-only check), for the identical
+-- PostgREST-numeric-as-string reason documented above. ⛔ THE MAP PIN STAYS KEYED TO `rating`
+-- (food) ONLY -- avgRatingByPlaceId/manualPinsFromVisits (foodStore.js) never read this column;
+-- ambiance surfaces only in the panel and the list. Idempotent: safe to re-run.
+alter table public.food_visits add column if not exists rating_ambiance numeric(3,1);
+do $$ begin
+  alter table public.food_visits add constraint food_visits_rating_ambiance_check
+    check (rating_ambiance is null or (rating_ambiance between 1 and 10 and rating_ambiance * 2 = round(rating_ambiance * 2)));
+exception when duplicate_object then null; end $$;
+
+-- ── food_visits.what_was_good (owner chat block, 2026-08-19: "add a place where I can log the
+-- food that I liked"). Deliberately SEPARATE from `what_i_had` -- that column is the record of
+-- the meal; this is the shortlist of what's worth ordering again. Plain nullable text, no dish
+-- taxonomy/entity table (owner: "KEEP IT TEXT... if you think [a taxonomy] is warranted, say so
+-- and stop rather than building it" -- it is not warranted; a free-text shortlist is all this
+-- asks for). Idempotent: safe to re-run.
+alter table public.food_visits add column if not exists what_was_good text;
 
 -- ── food_places.metro (owner chat block, 2026-08-18: "add dallas and austin too" -- which
 -- metro registered by scripts/load-food-places.py's METROS loaded this row). The inline column
@@ -236,26 +268,56 @@ create extension if not exists pg_trgm;
 create index if not exists food_places_name_trgm_idx
   on public.food_places using gin (lower(name) gin_trgm_ops);
 
+-- ⛔ DISTANCE-AWARE SEARCH RANKING (B632178, owner chat block 2026-08-18, once the snapshot
+-- spanned three metros: "Searching Torchy's must not return fifteen indistinguishable rows...
+-- results in or near the current map view should rank above far-away ones"). Every location of
+-- a searched chain scores an IDENTICAL trigram similarity (the name text is the same), so
+-- without a centre point they'd fall back to alphabetical order. `p_center_lat`/`p_center_lon`
+-- (the current map view's midpoint, optional) add a `distance_km` column and break ties by it --
+-- NAME RELEVANCE STILL COMES FIRST (`order by sim desc, distance_km asc nulls last`): a worse
+-- name match never outranks a better one just for being closer. Also now returns `metro`, so a
+-- chain search across three metros can show which city each result is in.
+--
+-- ⛔ B634980 (self-discovered 2026-08-19): this file DRIFTED from production after B632178 -- the
+-- rewrite above was applied directly to the live database (confirmed via `pg_get_functiondef`)
+-- but the matching edit to THIS file was lost before it was ever committed, so the version that
+-- shipped to git was still the old 2-arg, no-distance function. AUDIT-FIRST caught it while
+-- starting on an unrelated request: re-reading this file to plan the next change surfaced that it
+-- no longer matched what `execute_sql` had just shown was actually live. Fixed by rewriting this
+-- definition to match production byte-for-byte rather than re-deriving it from memory.
+--
+-- The OLD 2-arg overload (`food_places_search_by_name(text, integer)`) must be DROPPED, not just
+-- replaced -- Postgres treats a different parameter list as a distinct OVERLOAD, not a
+-- replacement, so `create or replace` alone would leave both versions callable side by side.
+drop function if exists public.food_places_search_by_name(text, integer);
+
 create or replace function public.food_places_search_by_name(
-  p_query text, p_cap integer default 15
+  p_query text, p_cap integer default 15,
+  p_center_lat double precision default null, p_center_lon double precision default null
 )
 returns table (
   id text, name text, lat double precision, lon double precision,
   category text, cuisine text, address text, brand text,
-  source text, source_licence text, sim real
+  source text, source_licence text, metro text, sim real, distance_km double precision
 )
 language sql stable
 set pg_trgm.word_similarity_threshold = 0.3
 as $$
-  select id, name, lat, lon, category, cuisine, address, brand, source, source_licence,
-    word_similarity(lower(p_query), lower(name)) as sim
+  select id, name, lat, lon, category, cuisine, address, brand, source, source_licence, metro,
+    word_similarity(lower(p_query), lower(name)) as sim,
+    case when p_center_lat is null or p_center_lon is null then null
+      else extensions.st_distance(
+        geom,
+        extensions.st_setsrid(extensions.st_makepoint(p_center_lon, p_center_lat), 4326)::extensions.geography
+      ) / 1000.0
+    end as distance_km
   from public.food_places
   where lower(p_query) <% lower(name)
-  order by sim desc, name asc
+  order by sim desc, distance_km asc nulls last, name asc
   limit greatest(1, p_cap);
 $$;
 
-grant execute on function public.food_places_search_by_name(text, integer) to anon, authenticated;
+grant execute on function public.food_places_search_by_name(text, integer, double precision, double precision) to anon, authenticated;
 
 -- 3) Verify (read-only; safe to run any time) ---------------------------------
 --   select relrowsecurity from pg_class where oid = 'public.food_visits'::regclass;   -- expect true
