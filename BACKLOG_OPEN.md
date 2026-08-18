@@ -224,7 +224,7 @@
 | B568400 | /food: a private place-tracker for where the owner has eaten | [Food] | #food #infra #perf #testing | ⏳ live — awaiting |
 | B575952 | /food is an unlisted route, not a workspace tab | [Food] | #food #ui #testing #perf | ⏳ live — awaiting |
 | B576000 | planyr.io/food (no hash) 404s — the clean path he actually types | [Food] | #food #infra #testing | ⏳ live — awaiting |
-| B576001 (×2) | Food pins look geographically lopsided at metro-wide zoom | [Food] | #food #gis #testing | ⏳ live — awaiting |
+| B576001 | Food pins look geographically lopsided at metro-wide zoom | [Food] | #food #gis #testing | ⏳ live — awaiting |
 | B623728 | Food map: cleaner basemap + marker clustering | [Food] | #food #ui #testing | ⏳ live — awaiting |
 | B623776 | Food rating scale: 1-10, not 1-5 | [Food] | #food #testing | ⏳ live — awaiting |
 | B559376 | The successor prompt could mark a successor In Progress but never Complete | [Schedule] | #scheduler #ui | ⏳ live — awaiting |
