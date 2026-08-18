@@ -82,6 +82,10 @@ const ALL_NOTES_FILES = [
   // NEW-PICTURE-CANVAS — the placed box holds CONTENT, not only text, so it needed a geometry
   // rule: the floors, the edge pad, and resizing from any of eight handles.
   "lib/notesBoxResize.js",
+  // NEW-ENTER-INHERIT — a new line continues the one above it.
+  "lib/notesEnterInherit.js",
+  // NEW-MINI-TOOLBAR — the content palettes, shared by the toolbar and the right-click strip.
+  "lib/notesFormatPalette.js",
 ];
 const SKETCH_FILES = ALL_NOTES_FILES.filter((f) => f.includes("Sketch"));
 
@@ -313,13 +317,29 @@ describe("chrome is theme tokens only", () => {
     });
   }
 
-  it("the toolbar's only literal colours are the CONTENT palettes — a text colour is not chrome", () => {
-    const text = code("components/NoteToolbar.jsx");
-    const paletteBlock = text.slice(text.indexOf("const TEXT_COLORS"), text.indexOf("const FONTS"));
-    const all = [...text.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map((m) => m[0]);
-    const inPalette = [...paletteBlock.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map((m) => m[0]);
-    expect(all.length).toBeGreaterThan(0);
-    expect(all.sort(), "a hex outside the content palette is chrome and must be a token").toEqual(inPalette.sort());
+  /* ⛔ AMENDED (NEW-MINI-TOOLBAR): the content palettes MOVED OUT of the toolbar into
+   * `lib/notesFormatPalette.js`, because the right-click mini-toolbar offers the same choices and
+   * two copies of a palette is how the bar and the menu come to disagree about what "Teal" is.
+   * That makes this guard STRONGER rather than weaker: the toolbar is now pure chrome and may
+   * carry no literal colour at all, and there is exactly ONE file in the module that may. */
+  it("⛔ the content palettes live in ONE file, and it is not a component", () => {
+    const palette = code("lib/notesFormatPalette.js");
+    const hexes = [...palette.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map((m) => m[0]);
+    expect(hexes.length, "the palette file must actually hold the colours").toBeGreaterThan(8);
+    expect(palette).toMatch(/export const TEXT_COLORS/);
+    expect(palette).toMatch(/export const HIGHLIGHT_COLORS/);
+  });
+
+  it("⛔ the toolbar is now pure chrome — no literal colour survives in it", () => {
+    const hits = [...code("components/NoteToolbar.jsx").matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map((m) => m[0]);
+    expect(hits, `NoteToolbar hardcodes ${hits.join(", ")}; content colours belong in lib/notesFormatPalette.js`).toEqual([]);
+  });
+
+  it("…and both consumers read that one list rather than keeping a copy", () => {
+    for (const f of ["components/NoteToolbar.jsx", "components/NoteEditor.jsx"]) {
+      expect(code(f), `${f} must import the shared palette`).toMatch(/from "\.\.\/lib\/notesFormatPalette\.js"/);
+      expect(code(f), `${f} must not redeclare it`).not.toMatch(/const TEXT_COLORS\s*=/);
+    }
   });
 
   it("the module's chrome actually USES its accent tokens", () => {
@@ -864,6 +884,78 @@ describe("cloud sync rides the SAME one seam", () => {
 /* ════════════════════════════════════════════════════════════════════════════════════════
  * 6. THE FOLDER POINTER
  * ═══════════════════════════════════════════════════════════════════════════════════════ */
+/* ════════════════════════════════════════════════════════════════════════════════════════
+ * THE CARRY-FORWARD — a fresh session must be able to start cheap
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("⛔ docs/NOTES-CARRY-FORWARD.md is wired so a fresh session reads it WITHOUT being told", () => {
+  /* ⛔ WHY THIS IS A TEST AND NOT A CONVENTION. The project rule is one task per session, then
+   * archive. It was ignored for a week because everything a fresh session needed lived only in one
+   * long-running session's memory — so continuing always looked cheaper than starting, until that
+   * session was re-reading ~500k tokens of history on every dispatch. The write-up existed; it was
+   * filed somewhere a Claude Code session does not read, which is the same mistake wearing a
+   * different hat. These assertions are the wiring, so it cannot quietly come loose again. */
+  const CARRY = join(process.cwd(), "docs/NOTES-CARRY-FORWARD.md");
+  const carry = () => readFileSync(CARRY, "utf8");
+
+  it("the file exists and carries its substance", () => {
+    const t = carry();
+    expect(t.length, "a stub is worse than nothing — it reads as covered").toBeGreaterThan(3000);
+    for (const must of [
+      "Instrument traps",            // the four false findings, plus the ones found since
+      "MUD 377",                     // the fixture that finds real bugs
+      "planyr:notes:tree:v1",        // the storage keys
+      "live_but_purged",             // the standing health check
+      "recurring bug families",      // what to suspect first
+      "new session",                 // the standing instruction it exists to make cheap
+    ]) {
+      expect(t, `the carry-forward has lost its "${must}" section`).toContain(must);
+    }
+  });
+
+  /* ⛔ THE WIRING. A carry-forward nobody reads is the failure this replaces, so BOTH doors are
+   * pinned: the always-loaded root file, and the pointer that auto-loads inside the module. */
+  it("⛔ the always-loaded CLAUDE.md points at it", () => {
+    expect(readFileSync(join(process.cwd(), "CLAUDE.md"), "utf8"))
+      .toMatch(/docs\/NOTES-CARRY-FORWARD\.md/);
+  });
+
+  it("⛔ …and so does the module's own pointer", () => {
+    expect(read(NOTES, "CLAUDE.md")).toMatch(/docs\/NOTES-CARRY-FORWARD\.md/);
+  });
+
+  /* ⛔ AND IT MAY NOT ROT INTO NAMING THINGS THAT NO LONGER EXIST — the same rule the per-folder
+   * pointers already live under. A document that confidently names a deleted harness sends the
+   * next session looking for it, which is worse than saying nothing. */
+  it("⛔ every repo path it names still exists", () => {
+    const named = [...carry().matchAll(/`((?:src|ui-audit|test|docs)\/[A-Za-z0-9_\-./]+\.(?:m?js|jsx|md))`/g)]
+      .map((m) => m[1]);
+    expect(named.length, "it should be naming real files").toBeGreaterThan(3);
+    const missing = named.filter((f) => !existsSync(join(process.cwd(), f)));
+    expect(missing, `the carry-forward names files that do not exist: ${missing.join(", ")}`).toEqual([]);
+  });
+
+  /* ⛔ AND IT MAY NOT CONTRADICT A MEASURED FACT IN THE ROOT RULES. The version this file was
+   * written from claimed "keyboard events do not register at all in this app" — measurably wrong
+   * (a synthetic event with `bubbles: true`, or dispatched on `window`, works fine; see
+   * SYNTHETIC-KEYS-DONT-EDIT). A false fact inside an always-read document is exactly the failure
+   * mode the document exists to prevent, so the corrected mechanism is pinned here. */
+  it("⛔ its synthetic-key guidance matches what the repo actually MEASURED", () => {
+    const t = carry();
+    expect(t, "it must name the real mechanism, not an absolute that is false").toContain("bubbles: false");
+    expect(t).toMatch(/SYNTHETIC-KEYS-DONT-EDIT/);
+    /* ⛔ THE PHRASE IS ALLOWED ONLY AS A QUOTED CORRECTION, never as an assertion. The document
+     * deliberately QUOTES the wrong claim in order to correct it — that is how a reader learns the
+     * difference — so a blunt "must not appear" ban would forbid the fix along with the fault.
+     * What must hold is that every occurrence sits AFTER the correction marker. */
+    const wrong = [...t.matchAll(/do not register at all/gi)].map((m) => m.index);
+    const marker = t.indexOf("CORRECTED HERE");
+    expect(marker, "the correction block itself has gone").toBeGreaterThan(-1);
+    for (const at of wrong) {
+      expect(at, "the overstated claim has come back as an assertion").toBeGreaterThan(marker);
+    }
+  });
+});
+
 describe("the folder pointer", () => {
   it("exists", () => {
     expect(existsSync(join(NOTES, "CLAUDE.md"))).toBe(true);
@@ -1052,6 +1144,63 @@ describe("the project a notebook belongs to", () => {
     expect(print, "an image box prints unpadded").toMatch(/data-anchor-kind="image"\]\s*\{ padding: 0/);
     expect(print, "…and the bare serialised img is named, not just the node view's figure")
       .toMatch(/img\.planyr-note-img/);
+  });
+
+  /* ════════════════════════════════════════════════════════════════════════════════════════
+   * THE CARET IS EXPOSED WHERE IT ACTUALLY IS (NEW-CARET-BOUNDS)
+   * ═══════════════════════════════════════════════════════════════════════════════════════ */
+  it("⛔ THE WRITING SURFACE IS EXPOSED AS A REAL MULTILINE TEXTBOX, not a generic container", () => {
+    /* The owner runs Windows 11's Text cursor indicator and reported its markers landing up and
+     * to the LEFT of the box he is typing in. Windows takes that rectangle from the ACCESSIBILITY
+     * layer, never from what is painted. Measured from the real tree before the fix:
+     *     note-title  →  role=textbox   editable=plaintext   multiline=false   ✅
+     *     note-body   →  role=GENERIC   editable=richtext    multiline=—       ⛔
+     * A generic node exposes no text pattern to read a caret rectangle out of, so the platform
+     * falls back to the bounds of the editable REGION — whose top-left is up and left of any
+     * placed box, which is the direction he photographed. */
+    const editor = read(NOTES, "components", "NoteEditor.jsx");
+    expect(editor, "the body must declare itself a textbox").toMatch(/role:\s*"textbox"/);
+    expect(editor, "…and that it is multiline, or its caret rect is one line's geometry")
+      .toMatch(/"aria-multiline":\s*"true"/);
+    // The keyboard-trap escape (B1392) rides the same accessible name and must not be lost to it.
+    expect(editor).toMatch(/aria-label":\s*"Note body\./);
+    expect(editor).toMatch(/press Escape then Tab to leave the note/);
+  });
+
+  it("⛔ A MOVE DRAG NEVER TOUCHES THE WIDTH (NEW-DRAG-NARROWS)", () => {
+    /* *"when I grab this, it's normally wider if I let go, but when I grab it, it shortens up."*
+     * The move handler ran `placeAnchor`, whose whole job is to narrow a block to the space
+     * available — B539648's right-edge crush surviving in the one path that item did not touch.
+     * The guard is on the SHAPE rather than on a number: the move path may not reach the width. */
+    const node = read(NOTES, "lib", "notesAnchorNode.js");
+    const move = node.slice(node.indexOf('grip.addEventListener("pointermove"'), node.indexOf("const end = (e) =>"));
+    expect(move, "the move drag uses the point-only rule").toMatch(/moveAnchorPoint\(/);
+    expect(move, "⛔ …and never calls the placement rule, which spends the width").not.toMatch(/placeAnchor\(/);
+    expect(move, "⛔ …and never writes a width at all").not.toMatch(/style\.width/);
+    const resize = read(NOTES, "lib", "notesBoxResize.js");
+    expect(resize, "the move rule has no width arithmetic to re-enable")
+      .toMatch(/export function moveAnchorPoint/);
+  });
+
+  it("⛔ A NEW LINE CONTINUES THE ONE ABOVE IT (NEW-ENTER-INHERIT)", () => {
+    /* *"it doesn't seem like when I start a new line, it carries the formatting."* The owner
+     * called the cause and was right about the mechanism: ProseMirror asks `defaultBlockAt` for
+     * the new node when the caret is at the END of a block, and a default block has default
+     * attributes. Measured before the fix: block fontSize 22 → null, run fontSize 22px → null,
+     * marks bold+textStyle → none. */
+    const ext = read(NOTES, "lib", "notesExtensions.js");
+    expect(ext, "the rule is registered").toMatch(/noteEnterInherit/);
+    expect(ext, "…above the list keymap, so it can run the split it displaces").toMatch(/priority:\s*200/);
+
+    /* ⛔ THE TWO WAYS THE HOUSEKEEPING PASS UNDID THE CARRY, both guarded, because the fix was
+     * complete and INVISIBLE until these were found: `deriveBlockSizes` ran one transaction
+     * later, saw a brand-new EMPTY block, decided its runs disagreed and wrote null over the
+     * inherited size — and cleared the stored marks in the same breath. */
+    expect(ext, "an empty block keeps the size it was given").toMatch(/if \(node\.content\.size === 0\) return true;/);
+    expect(ext, "…and the pass hands the stored marks back").toMatch(/tr\.setStoredMarks\(newState\.storedMarks\)/);
+    // A line break is not a run, so a soft break must not make a block disagree with itself.
+    expect(ext, "a hardBreak is skipped rather than counted as an unsized run")
+      .toMatch(/if \(child\.type\.name === "hardBreak"\) return;/);
   });
 
   it("⛔ AN ABANDONED PRESS IS PROVISIONAL — enforced at the SEAM, not only in the gesture", () => {

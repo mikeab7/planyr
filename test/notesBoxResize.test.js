@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ANCHOR_MIN_HEIGHT, HANDLES, HANDLE_CURSOR, MOVES_ORIGIN,
-  handlesFor, hasFixedHeight, isCorner, locksAspect, resizeBox,
+  handlesFor, hasFixedHeight, isCorner, locksAspect, moveAnchorPoint, resizeBox,
 } from "../src/workspaces/notes/lib/notesBoxResize.js";
 import { ANCHOR_MIN_WIDTH } from "../src/workspaces/notes/lib/notesAnchorNode.js";
 
@@ -243,5 +243,49 @@ describe("⛔ which handles a box may OFFER — a product rule, read off its con
 
   it("and it never throws on rubbish", () => {
     for (const junk of [null, undefined, 0, "", "noteAnchor", []]) expect(hasFixedHeight(junk)).toBe(false);
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════════════════════════════
+ * A MOVE CHANGES WHERE A BOX IS. IT NEVER CHANGES HOW BIG IT IS.
+ * ═══════════════════════════════════════════════════════════════════════════════════════════ */
+describe("⛔ a move never resizes (NEW-DRAG-NARROWS)", () => {
+  /* ⛔ THE REPORT: *"when I grab this, it's normally wider if I let go, but when I grab it, it
+   * shortens up."* The drag ran `placeAnchor`, whose job is to narrow a block to the space
+   * available — so dragging rightward shrank the room and the box reflowed under his hand, then
+   * sprang back on release because only x/y are committed. It is B539648's right-edge crush
+   * surviving in the one path that item did not touch. */
+  it("⛔ returns a POINT and nothing else — there is no width to get wrong", () => {
+    expect(Object.keys(moveAnchorPoint({ x: 500, y: 200 })).sort()).toEqual(["x", "y"]);
+  });
+
+  it("⛔ the far right of the page is not a wall — a move there is still just a move", () => {
+    // The old rule turned x=740 into a 160px box; this one has no opinion about width at all.
+    expect(moveAnchorPoint({ x: 740, y: 200 })).toEqual({ x: 740, y: 200 });
+    expect(moveAnchorPoint({ x: 5000, y: 200 })).toEqual({ x: 5000, y: 200 });
+  });
+
+  it("keeps the left and top guards — a drag past the corner of the page is not a place", () => {
+    expect(moveAnchorPoint({ x: -80, y: -80 })).toEqual({ x: 4, y: 0 });
+  });
+
+  it("rounds to whole pixels, like every other stored coordinate here", () => {
+    expect(moveAnchorPoint({ x: 120.6, y: 40.4 })).toEqual({ x: 121, y: 40 });
+  });
+
+  it("never throws on rubbish, which is what a listener gets before the first move", () => {
+    expect(moveAnchorPoint()).toEqual({ x: 4, y: 0 });
+    expect(moveAnchorPoint({})).toEqual({ x: 4, y: 0 });
+    expect(moveAnchorPoint({ x: NaN, y: "abc" })).toEqual({ x: 4, y: 0 });
+  });
+
+  /* ⛔ THE CONTRAST THAT IS THE WHOLE POINT, asserted rather than described: at the same x,
+   * `placeAnchor` narrows and `moveAnchorPoint` does not. If these two ever agree about width
+   * again, the defect is back. */
+  it("⛔ `placeAnchor` still narrows at the margin — and a MOVE deliberately does not", async () => {
+    const { placeAnchor } = await import("../src/workspaces/notes/lib/notesAnchorNode.js");
+    const placed = placeAnchor({ x: 740, y: 200, width: 787, preferred: 300 });
+    expect(placed.w, "placement still spends the width, which is its job").toBe(ANCHOR_MIN_WIDTH);
+    expect(moveAnchorPoint({ x: 740, y: 200 })).not.toHaveProperty("w");
   });
 });

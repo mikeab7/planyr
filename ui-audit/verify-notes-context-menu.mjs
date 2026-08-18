@@ -129,9 +129,20 @@ ok("a real right-click on selected text opens the menu", opened);
 const rows = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="note-menu-"]')]
   .map((b) => b.getAttribute("data-testid").replace("note-menu-", "")));
 console.log(`    rows: ${rows.join(" · ")}`);
-for (const want of ["cut", "copy", "paste-plain", "bold", "italic", "underline", "bullets", "numbering", "indent", "outdent", "link"]) {
+/* ⛔ AMENDED (NEW-MINI-TOOLBAR, owner instruction 2026-08-17). The menu is now Word's TWO menus:
+ * a horizontal formatting STRIP above a short vertical list of COMMANDS. So the formatting rows
+ * are still asserted — they moved, they did not go — and the three paste modes are now under a
+ * `paste` submenu rather than being three top-level rows, which is what he asked for. Everything
+ * here is still enumerated from the DOM, so a control that quietly disappeared still fails. */
+for (const want of ["cut", "copy", "paste", "bold", "italic", "underline", "bullets", "numbering", "indent", "outdent", "link"]) {
   ok(`…offers ${want}`, rows.includes(want));
 }
+await page.locator('[data-testid="note-menu-paste"]').first().hover();
+await pacedWait(page, 300);
+const pasteModes = await page.evaluate(() => [...document.querySelectorAll('[data-testid="note-menu-paste-sub"] [data-testid^="note-menu-"]')]
+  .map((b) => b.getAttribute("data-testid").replace("note-menu-", "")));
+ok("⛔ …and the three paste modes live under it, not as three top-level rows",
+  pasteModes.length === 3 && pasteModes.includes("paste-plain"), pasteModes.join(","));
 ok("⛔ …and the DOCUMENT menu offers no Delete-this-box", !rows.includes("delete-box"));
 
 console.log("\n4 · AN ITEM ACTS ON THE REAL SELECTION — judged on the STORED document");

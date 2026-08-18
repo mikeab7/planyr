@@ -81,6 +81,33 @@ export const ANCHOR_EDGE_PAD = 4;
  *  the other direction, so the number is chosen against the chrome rather than against the text. */
 export const ANCHOR_MIN_HEIGHT = 48;
 
+/** ⛔ A MOVE CHANGES WHERE A BOX IS. IT NEVER CHANGES HOW BIG IT IS (NEW-DRAG-NARROWS).
+ *
+ *  THE REPORT: *"when I grab this, it's normally wider if I let go, but when I grab it, it
+ *  shortens up."* His screenshot catches it mid-gesture — "High Voltage Planning Study" wrapped
+ *  onto two lines while held, one line at rest.
+ *
+ *  ⛔ AND IT IS THE RIGHT-EDGE CRUSH AGAIN (B539648), IN THE ONE PATH THAT ITEM DID NOT TOUCH.
+ *  The drag ran `placeAnchor`, whose whole job is *"narrow the block to the space available"* —
+ *  `w = max(floor, min(preferred, hostWidth - left - pad))`. So dragging rightward shrank `room`
+ *  and the box reflowed under his hand; on release `moveNoteAnchor` writes only x/y, so the
+ *  stored width came straight back and it sprang wide again. B539648 replaced "narrow it" with
+ *  "grow the page" at PLACEMENT and in the RESIZE drag, and the move drag kept the old rule.
+ *
+ *  ⛔ SO THE FIX IS A SEPARATE FUNCTION RATHER THAN A FLAG ON `placeAnchor`, deliberately. The two
+ *  gestures are answering different questions — *"how big should a NEW box be here?"* versus
+ *  *"where is THIS box now?"* — and a boolean parameter would leave the width arithmetic sitting
+ *  in the move path for somebody to re-enable. A move cannot resize because there is no width in
+ *  the function at all.
+ *
+ *  The left/top guard is kept: a drag past the top-left of the page is not a place. */
+export function moveAnchorPoint({ x, y, edgePad = ANCHOR_EDGE_PAD } = {}) {
+  return {
+    x: Math.round(Math.max(edgePad, num(x))),
+    y: Math.round(Math.max(0, num(y))),
+  };
+}
+
 /** Every handle, in the order they are painted. `""` would be the box itself and is not one. */
 export const HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 

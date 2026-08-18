@@ -45,9 +45,10 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 
 import { anchorIsEmpty } from "./notesAnchorPrune.js";
+import { moveSelection } from "./notesMarquee.js";
 import {
   ANCHOR_EDGE_PAD, ANCHOR_MIN_HEIGHT, ANCHOR_MIN_WIDTH, ANCHOR_WIDTH,
-  HANDLES, HANDLE_CURSOR, handlesFor, hasFixedHeight, resizeBox,
+  HANDLES, HANDLE_CURSOR, handlesFor, hasFixedHeight, moveAnchorPoint, resizeBox,
 } from "./notesBoxResize.js";
 
 /* ⛔ THE GEOMETRY CONSTANTS LIVE IN `notesBoxResize.js` AND ARE RE-EXPORTED HERE. A resize has to
@@ -725,10 +726,41 @@ export const NoteAnchor = Node.create({
          * this view was BUILT (see the width handle above), so a stale read of it is a bug
          * waiting for whoever edits this next. Every number below comes from the pointer and
          * from live geometry. */
+        /* ⛔ IF SEVERAL BOXES ARE SELECTED, THE GRIP MOVES ALL OF THEM (NEW-MULTI-DRAG).
+         *
+         * HIS REPORT: *"if I select multiple things and then I grab one of them to move it, it
+         * should move all of the items together."* He also guessed the cause and was right about
+         * its shape: a group drag DOES exist (`beginGroupDrag` in NoteEditor.jsx) and it is wired
+         * to the MAT's press handler — but the grip calls `preventDefault()` on `pointerdown`,
+         * which suppresses the compatibility `mousedown` the mat listens for. So grabbing a box
+         * by the one affordance built for moving it was the single path the group drag could
+         * never see, and marquee-select became pointless for the thing people select for.
+         *
+         * ⛔ THE SELECTION IS READ FROM THE DOM, NOT PASSED IN. A node view has no access to the
+         * editor's React state, and opening a channel for it would be a second copy of "what is
+         * selected" that can disagree with the ring on screen. `[data-selected="1"]` IS the ring
+         * — the same attribute the stylesheet uses to paint it — so the boxes that move are
+         * exactly the boxes he can see are selected, by construction. */
+        const selected = [...host.querySelectorAll('.planyr-anchor[data-selected="1"][data-anchor-id]')];
+        const mine = String(node.attrs.aid || dom.getAttribute("data-anchor-id") || "");
+        const group = selected.length > 1 && selected.some((el) => el.getAttribute("data-anchor-id") === mine)
+          ? selected.map((el) => ({
+            id: el.getAttribute("data-anchor-id"),
+            el,
+            x: Math.round(parseFloat(el.style.left) || 0),
+            y: Math.round(parseFloat(el.style.top) || 0),
+            w: Math.round(parseFloat(el.style.width) || ANCHOR_WIDTH),
+          }))
+          : null;
+
         from = {
           grabX: e.clientX - boxRect.left,
           grabY: e.clientY - boxRect.top,
+          startX: e.clientX,
+          startY: e.clientY,
           scale: hostRect.width / (host.offsetWidth || 1) || 1,
+          hostWidth: host.offsetWidth,
+          group,
           moved: false,
         };
         grip.setPointerCapture(e.pointerId);
@@ -738,16 +770,41 @@ export const NoteAnchor = Node.create({
         from.moved = true;
         const host = editor.view.dom;
         const hostRect = host.getBoundingClientRect();       // read FRESH: the page may scroll
-        const c = placeAnchor({
+        /* ⛔ A MOVE NEVER TOUCHES THE WIDTH (NEW-DRAG-NARROWS) — and this line used to be
+         * `placeAnchor`, whose whole job is to narrow a block to the space available. Dragging
+         * rightward shrank that space, so the box REFLOWED UNDER HIS HAND, then sprang back on
+         * release because the commit below writes only x/y. It is the B539648 right-edge crush
+         * surviving in the one path that item did not touch. `moveAnchorPoint` has no width
+         * arithmetic in it at all, so the gesture cannot resize by any route. */
+        /* ⛔ A GROUP MOVES BY ONE DELTA, APPLIED TO THE WHOLE SET (NEW-MULTI-DRAG). Clamping each
+         * box against the page individually DEFORMS the arrangement — the ones at the edge stop
+         * while the rest keep going — which is why `moveSelection` clamps the set's bounding box
+         * once and shifts every member by the same amount. It is the same pure rule the marquee's
+         * own group drag already uses; reusing it is what keeps the two gestures agreeing. */
+        if (from.group) {
+          const moves = moveSelection(from.group, {
+            dx: (e.clientX - from.startX) / from.scale,
+            dy: (e.clientY - from.startY) / from.scale,
+          }, { maxX: from.hostWidth });
+          from.moves = moves;            // ⛔ the gesture's own record — same reason as the width
+          const byId = new Map(from.group.map((g) => [String(g.id), g.el]));
+          for (const m of moves) {
+            const el = byId.get(String(m.id));
+            if (!el) continue;
+            el.style.left = `${m.x}px`;
+            el.style.top = `${m.y}px`;
+            el.setAttribute("data-anchor-x", String(m.x));
+            el.setAttribute("data-anchor-y", String(m.y));
+          }
+          return;
+        }
+        const c = moveAnchorPoint({
           x: (e.clientX - from.grabX - hostRect.left) / from.scale,
           y: (e.clientY - from.grabY - hostRect.top) / from.scale,
-          width: host.offsetWidth,
-          preferred: dom.offsetWidth,
         });
         from.at = c;                     // ⛔ the gesture's own record — same reason as the width
         dom.style.left = `${c.x}px`;
         dom.style.top = `${c.y}px`;
-        dom.style.width = `${c.w}px`;
         dom.setAttribute("data-anchor-x", String(c.x));      // same reason as the width handle
         dom.setAttribute("data-anchor-y", String(c.y));
       });
@@ -755,6 +812,7 @@ export const NoteAnchor = Node.create({
         if (!from) return;
         const dragged = from.moved;
         const at = from.at;               // kept past the reset below
+        const moves = from.moves;         // …and the group's, when this was a group drag
         from = null;
         try { grip.releasePointerCapture(e.pointerId); } catch (_) { /* already released */ }
         /* ⛔ A PRESS THAT NEVER MOVED WRITES NOTHING AT ALL — not a transaction, not an undo
@@ -763,6 +821,10 @@ export const NoteAnchor = Node.create({
          * reported symptom is a box moving on a press with no drag, so the honest answer is for
          * the press to have no write path to move it through. */
         if (!dragged) return;
+        /* ⛔ ONE TRANSACTION FOR THE WHOLE GROUP, so ONE Ctrl+Z puts it back. N frames for one
+         * gesture is not an undo, it is a chore that looks like a bug — `moveNoteAnchors` exists
+         * for exactly this and is what the marquee's own drag commits through. */
+        if (moves) { editor.commands.moveNoteAnchors(moves); return; }
         const pos = typeof getPos === "function" ? getPos() : null;
         if (pos == null || !at) return;
         // One transaction at the END of the drag, not per pointermove: a hundred undo frames

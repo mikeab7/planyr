@@ -19,6 +19,14 @@ project is its root's, derived. Root rules in `/CLAUDE.md`.
 > all deleted. The one-way migration off the old shape is the ONLY code that may mention a
 > notebook or a section; its rules are written out in the header of `lib/notesModel.js`.
 
+> **⛔ READ `docs/NOTES-CARRY-FORWARD.md` BEFORE THIS FILE.** This pointer says what each file IS;
+> that one says what will WASTE YOUR SESSION — the eight instrument traps that have each produced a
+> confident false finding about working code, the fixture that finds real bugs (simplifying it
+> hides them), the storage keys and the standing SQL health check, and the three recurring bug
+> families. It also carries the standing instruction: **default to a NEW session per task, on
+> Sonnet**, and continue an existing one only when it holds a rig that file cannot replace.
+> **A new trap or bug family goes in there in the same commit that finds it.**
+
 **The decision everything else follows from:** the **document model** (ProseMirror JSON) is what
 persists — never Markdown. Markdown cannot express a merged table cell, a text colour, a font
 size, a highlight or a checked task, so storing it would cap the editor at what Markdown can
@@ -279,6 +287,32 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   that reasoning turned out to be wrong about the mechanism. **A blocker that dissolves when you
   check it was never a blocker.** Measured end to end: a row 17.25 → 15.30px, still 15.30 after a
   reload, and the printed sheet carries it with no CSS custom property.
+- **⛔ A NEW LINE CONTINUES THE ONE ABOVE IT (NEW-ENTER-INHERIT, `lib/notesEnterInherit.js`).**
+  *"it doesn't seem like when I start a new line, it carries the formatting."* He named the cause
+  and was right: ProseMirror asks `defaultBlockAt` for the new node when the caret is at the END of
+  a block, and a default block has default attributes. **Measured before a line was written:** block
+  `fontSize` 22 → null, run `fontSize` 22px → null, marks `bold+textStyle` → none, colour → null —
+  so BOTH tiers were lost, not just the block one he suspected. ⛔ **The shape is why it read as
+  intermittent:** a split in the MIDDLE or at the START keeps everything; only a split at the END
+  loses it, which is the one people do constantly. The rule is registered at priority 200 (above
+  the list keymap, so it can run the split it displaces and repair it in the SAME transaction — two
+  dispatches would mean the first Ctrl+Z strips formatting off a line and leaves it there), and it
+  **DECLINES** for a range split, a caret that is not at the end, a code block, and an **empty
+  block** — that last one being the *leave the list* case the owner named as not-to-break.
+  - **⛔ AND THE FIX WAS COMPLETE AND INVISIBLE UNTIL TWO THINGS IN `deriveBlockSizes` STOPPED
+    UNDOING IT.** The handler ran, the chain returned `true`, and the attributes were still null —
+    because that housekeeping pass runs one transaction later, saw a brand-new **empty** block,
+    decided its runs disagreed, and wrote `null` over the size the split had just inherited, while
+    ProseMirror cleared the stored marks in the same breath. So: an empty block now KEEPS the size
+    it was given (its declared size is a statement about the next character, and it is what gives
+    the caret its height before anything is typed), and the pass hands `storedMarks` back. **A pass
+    that only means to adjust a block attribute must not also decide what the next keystroke looks
+    like.** Found by probing whether the handler ran at all rather than by re-reading it.
+  - **AND A LINE BREAK IS NOT A RUN.** `hardBreak` was pushed as `{fontSize: null}`, which reads as
+    "the runs disagree", so **Shift+Enter** silently reset its own paragraph's line box to the
+    default height while every word kept its size — a formatting bug wearing a spacing bug's
+    clothes. Harness: **audit-notes-enter-inherit** (38 checks, real keys, judged on the stored
+    document, both tiers printed side by side); decision unit-tested in `test/notesEnterInherit.js`.
 - `lib/notesSpacing.js` — **HOW FAR APART THE LINES ARE (B391076).** A BLOCK property on paragraph
   and heading, never a text style: half a line cannot be one-and-a-half spaced. Written into the
   markup by one attribute (three that each wrote `style` would overwrite one another), so it saves,
@@ -708,6 +742,34 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   makes a real feedback loop (fit narrows → extent widens → the wider element becomes "the room"),
   and it SETTLED on a stable wrong number rather than oscillating, which is worse because it looks
   correct. Instrument: **measure-notes-right-edge** under `ui-audit/`, running his own sweep.
+- **⛔ RIGHT-CLICK IS WORD'S *TWO* MENUS NOW (B590016/B590017).** *"there's too many things… there's
+  one menu that's the typical menu with cut, copy, paste, whatever. And then there's another menu
+  that kind of goes horizontal that has text size, text colour, bold italic underline
+  strikethrough."* A floating horizontal **mini-toolbar** (icons, no shortcut labels) sits above a
+  vertical list of **commands only**: Cut · Copy · Paste ▸ · Link… · Delete this box. **Fourteen
+  rows → four.** Every shortcut still works; they simply stop being printed twice, which is what let
+  the list grow past the screen. ⛔ **Where it goes is MEASURED, not guessed** — the old rule was
+  `top: min(at.y, innerHeight - 420)`, a hard-coded estimate of the menu's own height, so a taller
+  menu ran off the bottom and the row that fell off was the last one: `Delete this box`, behind his
+  taskbar. `placeMenu` is pure, takes the measured size of the WHOLE assembly (strip included),
+  flips above the pointer when it will not fit below, and prefers `visualViewport` because on a
+  maximised window that already excludes the taskbar. Mutation-proven: the 420 guess fails 7 tests
+  and 2,046 placements in the property sweep. Harness: **verify-notes-menu-layout**.
+- `lib/notesFormatPalette.js` — the text colours, highlights, fonts and sizes. **The module's ONLY
+  literal colours, and they are CONTENT, not chrome** — a colour written into a document must mean
+  the same thing in every theme and every export. They moved out of `NoteToolbar.jsx` when the
+  mini-toolbar started offering the same choices: two copies is how a bar and a menu come to
+  disagree about what "Teal" is. `NoteToolbar.jsx` is now pure chrome and the guard says so.
+- **⛔ GRABBING ONE OF SEVERAL SELECTED BOXES MOVES THEM ALL (B590018).** The group drag
+  (`beginGroupDrag`, B421494) was correct and **unreachable**: it is wired to the MAT's press
+  handler, and the grip calls `preventDefault()` on `pointerdown`, which suppresses the
+  compatibility `mousedown` the mat listens for — so the one control built for moving a box was the
+  single path the group drag could not see. The grip now reads the live selection **from the DOM**
+  (`[data-selected="1"]` — the same attribute the ring is painted with, so what moves is what he can
+  see is selected) and moves the set through the existing `moveSelection` rule: ONE delta, ONE undo
+  frame. ⛔ **An instrument note worth keeping:** `page.mouse.click` silently ignores a `modifiers`
+  option (it belongs to `locator.click`), which made every Shift+click replace the selection and
+  produced a confident false report that the group drag was broken.
 - `lib/notesSaveState.js` — **ONE SAVE INDICATOR, WHERE EVERY OTHER MODULE PUTS IT (B539649).** He
   photographed two: a `SAVED` pill in the note header and a sync line in a footer under the rail,
   while the app-wide `CloudSyncBadge` said the same thing in `AppHeader` Row-1. *"Literally, all the
