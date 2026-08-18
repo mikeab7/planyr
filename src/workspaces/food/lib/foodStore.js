@@ -45,6 +45,22 @@ export async function fetchPlaceById(id) {
   return { data, error };
 }
 
+/** Search the WHOLE 34,000+-place snapshot by name — deliberately NOT scoped to the current
+ *  viewport (owner, 2026-08-18: "the entire point of search is finding a place you cannot
+ *  see"). Backed by `food_places_search_by_name` (db/food.sql): a trigram word-similarity
+ *  match on a GIN index, so "taco" finds "Bandito's Taco Grill" and "mcdon" fuzzy-matches
+ *  "McDonald's" — a plain ILIKE prefix search would miss both. Returns [] for a query with no
+ *  reasonable match (never throws, mirrors fetchPlacesInBounds' error-shape). */
+const SEARCH_RESULT_CAP = 15; // more than the ~10 shown, so client-side "his places first" reordering never runs dry
+
+export async function searchPlacesByName(query) {
+  if (!supabase || !query || !query.trim()) return { data: [], error: null };
+  const { data, error } = await supabase.rpc("food_places_search_by_name", {
+    p_query: query.trim(), p_cap: SEARCH_RESULT_CAP,
+  });
+  return { data: data || [], error };
+}
+
 /** Batch name/location lookup for a set of place ids — used to label the visit LIST, which
  *  can reference places far outside whatever the map happens to have in view right now. */
 export async function fetchPlacesByIds(ids) {

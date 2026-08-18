@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-18 @ `2d3f01a` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-18 @ `2ee90c8` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_538 source files mapped._
+_539 source files mapped._
 
 ## infra
 
@@ -43,6 +43,8 @@ _538 source files mapped._
   - _exports_: _(none)_
 - **`src/workspaces/food/components/FoodMap.jsx`** — Leaflet map: canvas-rendered pins (snapshot places, live Overpass results, manual pins), drop-a-pin mode, "search live for more here"
   - _exports_: `default (FoodMap)`
+- **`src/workspaces/food/components/SearchBox.jsx`** — one search box: whole-snapshot name search (Map view, flies to + opens a result) or a plain list filter (List view); his own places rank first, with an inline live-Overpass fallback and a drop-a-pin escape hatch.
+  - _exports_: `default (SearchBox)`
 - **`src/workspaces/food/components/VisitList.jsx`** — Every logged visit, searchable by name and sortable by date/rating/cost
   - _exports_: `default (VisitList)`
 - **`src/workspaces/food/components/VisitPanel.jsx`** — Right-side panel: past visits at a place + the log-a-visit form (rating, cost, what I had, notes, would-return)
@@ -50,7 +52,7 @@ _538 source files mapped._
 - **`src/workspaces/food/FoodApp.jsx`** — `/food` workspace root (lazy chunk): map/list view state, visit CRUD wiring, manual-pin drop flow
   - _exports_: `default (FoodApp)`
 - **`src/workspaces/food/lib/foodStore.js`** — The one seam to Supabase: place/visit queries, visit CRUD, manual-pin grouping, the logged-place-id set
-  - _exports_: `avgRatingByPlaceId`, `deleteVisit`, `fetchAllVisits`, `fetchPlaceById`, `fetchPlacesByIds`, `fetchPlacesInBounds`, `insertVisit`, `loggedPlaceIds`, `manualPinsFromVisits`, `supabaseConfigured`, `updateVisit`
+  - _exports_: `avgRatingByPlaceId`, `deleteVisit`, `fetchAllVisits`, `fetchPlaceById`, `fetchPlacesByIds`, `fetchPlacesInBounds`, `insertVisit`, `loggedPlaceIds`, `manualPinsFromVisits`, `searchPlacesByName`, `supabaseConfigured`, `updateVisit`
 - **`src/workspaces/food/lib/overpass.js`** — OpenStreetMap Overpass fallback: cached per-bbox live query, called only on explicit user request
   - _exports_: `fromElement`, `queryFor`, `roundKey`, `searchOverpass`
 - **`src/workspaces/food/lib/ratingColor.js`** — the 1-10 rating colour ramp for map pins/list/panel (warm cream to deep red-brown, WCAG-measured contrast, no green)

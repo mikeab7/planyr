@@ -1,6 +1,10 @@
-/* VisitList — everywhere he's been. Sortable by rating, cost and date; searchable by name.
+/* VisitList — everywhere he's been. Sortable by rating, cost and date; filterable by name.
  * Pure presentational component: FoodApp resolves each visit's display name (from the
  * snapshot, from a manual pin, or "Unknown place") before handing rows in here.
+ *
+ * `query` is a CONTROLLED prop, not local state (owner, 2026-08-18: "ONE CONTROL. A search
+ * box" — the same header SearchBox that searches the whole 34,000-place snapshot in Map view
+ * doubles as this list's filter in List view; this component owns no text input of its own).
  */
 import { useMemo, useState } from "react";
 import { colorForRating, textColorForRating } from "../lib/ratingColor.js";
@@ -28,12 +32,11 @@ function fieldStyle() {
   };
 }
 
-export default function VisitList({ visits, onSelect }) {
-  const [query, setQuery] = useState("");
+export default function VisitList({ visits, query, onSelect }) {
   const [sortKey, setSortKey] = useState("date");
 
   const rows = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = (query || "").trim().toLowerCase();
     const filtered = q ? visits.filter((v) => (v.placeName || "").toLowerCase().includes(q)) : visits;
     const { get, dir } = SORTS[sortKey];
     return [...filtered].sort((a, b) => (get(a) < get(b) ? -1 : get(a) > get(b) ? 1 : 0) * dir);
@@ -42,10 +45,6 @@ export default function VisitList({ visits, onSelect }) {
   return (
     <div data-testid="food-visit-list" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", padding: "12px 16px", overflow: "hidden" }}>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
-        <input
-          type="search" value={query} onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by name…" style={{ ...fieldStyle(), flex: "1 1 180px" }}
-        />
         <div style={{ display: "flex", gap: 4 }}>
           {Object.entries(SORTS).map(([key, s]) => (
             <button

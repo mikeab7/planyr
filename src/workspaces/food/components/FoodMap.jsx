@@ -85,9 +85,14 @@ function boundsOf(map) {
   return { south: b.getSouth(), north: b.getNorth(), west: b.getWest(), east: b.getEast() };
 }
 
+// Above MIN_PIN_ZOOM so a search result reliably lands somewhere the reference snapshot
+// already draws — "arrived at this one restaurant" scale, not just "past the threshold."
+const FLY_TO_ZOOM = 16;
+
 export default function FoodMap({
   places, placesCapped, placesTotalMatched, loggedPlaces, loggedIds, manualPins, overpassPlaces,
   onSelectPlace, onSelectManualPin, pinMode, onDropPin, onViewChanged, onRequestSearchHere,
+  flyToTarget,
 }) {
   const hostRef = useRef(null);
   const mapRef = useRef(null);
@@ -115,6 +120,17 @@ export default function FoodMap({
     return () => { map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Search result selected — fly to it (owner, 2026-08-18: "selecting a result flies the map
+  // to it"). Keyed on flyToTarget.nonce (not just lat/lon) so re-selecting the SAME result
+  // twice in a row still flies — two identical lat/lon values wouldn't otherwise re-trigger
+  // a dependency-array effect.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !flyToTarget) return;
+    map.flyTo([flyToTarget.lat, flyToTarget.lon], Math.max(map.getZoom(), FLY_TO_ZOOM));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flyToTarget?.nonce]);
 
   // Drop-a-pin mode: next map click reports its lat/lon.
   useEffect(() => {

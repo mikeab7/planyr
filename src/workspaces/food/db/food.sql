@@ -187,6 +187,49 @@ grant execute on function public.food_places_in_bounds_sampled(
   double precision, double precision, double precision, double precision, integer, integer
 ) to anon, authenticated;
 
+-- ── food_places_search_by_name (owner chat block, 2026-08-18: "add a search bar to search
+-- restaurants... the entire point of search is finding a place you cannot see" -- so this
+-- searches the WHOLE 34,000+-row snapshot, never scoped to the current viewport, unlike the
+-- bounds-based RPC above). TRIGRAM WORD-SIMILARITY, not a plain ILIKE prefix search: a
+-- restaurant name is usually multiple words ("Bandito's Taco Grill"), and the owner is far more
+-- likely to type one distinctive word ("taco") than the exact start of the string -- pg_trgm's
+-- word_similarity()/`<%` finds the best-matching SUBSTRING of a longer name against a short
+-- query, which a prefix index cannot. Chose a GIN index on lower(name) (not GiST): GIN is
+-- slower to build/update but faster to QUERY, and this table is bulk-loaded ~once or twice a
+-- year (see the module's CLAUDE.md) -- read-heavy by a wide margin, so GIN is the right trade.
+-- Measured directly against production (34k+ rows): a real query like 'taco' or 'sushi' returns
+-- in ~30-50ms via the index (confirmed with EXPLAIN ANALYZE -- Bitmap Index Scan on
+-- food_places_name_trgm_idx, not a sequential scan), comfortably inside a debounced search box's
+-- budget. threshold 0.3 (word_similarity's default is 0.6, which is tuned for whole-document
+-- search and misses short, close variants like "mcdon" -> "McDonald's" at 0.83) -- loose enough
+-- for typo/partial tolerance, tight enough that a nonsense query returns nothing rather than
+-- padding out the cap with noise (verified: 'zzznonexistentxyz' returns zero rows).
+create extension if not exists pg_trgm;
+
+create index if not exists food_places_name_trgm_idx
+  on public.food_places using gin (lower(name) gin_trgm_ops);
+
+create or replace function public.food_places_search_by_name(
+  p_query text, p_cap integer default 15
+)
+returns table (
+  id text, name text, lat double precision, lon double precision,
+  category text, cuisine text, address text, brand text,
+  source text, source_licence text, sim real
+)
+language sql stable
+set pg_trgm.word_similarity_threshold = 0.3
+as $$
+  select id, name, lat, lon, category, cuisine, address, brand, source, source_licence,
+    word_similarity(lower(p_query), lower(name)) as sim
+  from public.food_places
+  where lower(p_query) <% lower(name)
+  order by sim desc, name asc
+  limit greatest(1, p_cap);
+$$;
+
+grant execute on function public.food_places_search_by_name(text, integer) to anon, authenticated;
+
 -- 3) Verify (read-only; safe to run any time) ---------------------------------
 --   select relrowsecurity from pg_class where oid = 'public.food_visits'::regclass;   -- expect true
 --   select polname from pg_policy where polrelid = 'public.food_visits'::regclass;    -- 4 owner-only rows, no anon
