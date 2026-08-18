@@ -44,6 +44,17 @@ jobs:
         run: npm ci
       - name: Lint (fails the build on a dangling/undefined identifier)
         run: npm run lint
+      # Scheduler syntax guard (B643105). `public/sequence/index.html` — the single largest
+      # surface in this app, ~13,900 lines — is invisible to BOTH of the checks above it: ESLint's
+      # `files:` glob is `**/*.{js,jsx}` and never matches an `.html` file, and its
+      # `<script type="text/babel">` content is transformed at RUNTIME in the browser via
+      # `@babel/standalone` loaded from a CDN — Vite copies the file verbatim as a static asset and
+      # never parses it. So a hard syntax error here previously passed every check in this job and
+      # shipped, failing silently in the first browser that opened the Scheduler tab. This walks
+      # both `<script type="text/babel">` blocks through esbuild's JSX transform — syntax only, the
+      # same class of check as the lint step above it, not a logic or type check.
+      - name: Scheduler syntax guard (public/sequence/index.html — B643105)
+        run: node ui-audit/stress/check-babel.mjs
       # Required-check contract guard (NEW-2). On 2026-08-06 seven PRs were stuck at
       # "build — Expected — Waiting for status to be reported" with nothing red anywhere, and GitHub
       # offers no merge control at all in that state. This asserts that every context the ruleset
