@@ -655,6 +655,100 @@ describe("VisitPanel — rating slider (not a button row) and a date field that 
 });
 
 /* ════════════════════════════════════════════════════════════════════════════════════════
+ * 4e. SEARCH (owner chat block, 2026-08-18): the whole 34,000+-place snapshot, searched by
+ *     name, never scoped to the viewport. His own places (manual pins + anywhere logged) rank
+ *     first. The existing "Search live for more here" Overpass path is reused inline as a
+ *     fallback, and a no-results state offers the manual drop-a-pin flow. ONE control — ties
+ *     into VisitList's own filtering rather than adding a second search box.
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("SearchBox — whole-snapshot name search, his places first, one control", () => {
+  it("foodStore.searchPlacesByName calls the trigram RPC, not a client-side scan of 34,000 rows", () => {
+    const store = src("lib/foodStore.js");
+    expect(store).toContain('supabase.rpc("food_places_search_by_name"');
+    expect(store).toMatch(/p_query:\s*query\.trim\(\)/);
+  });
+
+  it("the migration defines a trigram-indexed, word-similarity search RPC over the WHOLE table (no bbox filter)", () => {
+    const sql = src("db/food.sql");
+    expect(sql).toContain("create extension if not exists pg_trgm");
+    expect(sql).toContain("using gin (lower(name) gin_trgm_ops)");
+    expect(sql).toContain("create or replace function public.food_places_search_by_name(");
+    expect(sql).toMatch(/word_similarity\(lower\(p_query\), lower\(name\)\)/);
+    expect(sql).toMatch(/lower\(p_query\) <% lower\(name\)/);
+    expect(sql).toMatch(/grant execute on function public\.food_places_search_by_name\(text, integer\) to anon, authenticated/);
+    // Whole-snapshot: this function must never filter by south/west/north/east like the
+    // viewport RPC does — that would silently reintroduce the "can't find what's off-screen"
+    // defect the owner explicitly called out ("a viewport-scoped search would be useless").
+    const fnBody = sql.slice(sql.indexOf("food_places_search_by_name("), sql.indexOf("$$;", sql.indexOf("food_places_search_by_name(")));
+    expect(fnBody).not.toMatch(/p_south|p_west|p_north|p_east/);
+  });
+
+  it("SearchBox debounces, requires a minimum query length, and never fires the snapshot RPC in List view", () => {
+    const box = src("components/SearchBox.jsx");
+    expect(box).toMatch(/const DEBOUNCE_MS = \d+;/);
+    expect(box).toMatch(/const MIN_QUERY_LEN = \d+;/);
+    expect(box).toMatch(/if \(view !== "map"\) return undefined;/);
+  });
+
+  it("his own places (manual pins + logged snapshot places) are ranked ahead of everywhere he hasn't been", () => {
+    const box = src("components/SearchBox.jsx");
+    // The merge order is the ranking: manual matches, then logged snapshot hits, then the rest.
+    const order = box.slice(box.indexOf("const results = ["), box.indexOf("];", box.indexOf("const results = [")));
+    const manualIdx = order.indexOf("manualMatches");
+    const mineIdx = order.indexOf("snapshotRanked.filter((p) => p.mine)");
+    const restIdx = order.indexOf("snapshotRanked.filter((p) => !p.mine)");
+    expect(manualIdx).toBeGreaterThanOrEqual(0);
+    expect(manualIdx).toBeLessThan(mineIdx);
+    expect(mineIdx).toBeLessThan(restIdx);
+    // And a result carrying `mine` renders a visible "Been here" mark, not just a sort position.
+    expect(box).toMatch(/Been here/);
+  });
+
+  it("selecting a result flies the map AND opens the panel — both, not one or the other", () => {
+    const box = src("components/SearchBox.jsx");
+    const selectPlace = box.slice(box.indexOf("const selectPlace ="), box.indexOf("const selectManual ="));
+    expect(selectPlace).toMatch(/onSelectPlace\(place\)/);
+    expect(selectPlace).toMatch(/onFlyTo\(/);
+  });
+
+  it("FoodMap flies to a search result, keyed on a nonce (so re-selecting the same place still flies)", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/map\.flyTo\(\[flyToTarget\.lat, flyToTarget\.lon\]/);
+    expect(map).toMatch(/\[flyToTarget\?\.nonce\]/);
+  });
+
+  it("the live-Overpass path is REUSED, not duplicated — offered inline only when the snapshot has few/no good matches", () => {
+    const box = src("components/SearchBox.jsx");
+    expect(box).toMatch(/onRequestLiveSearch\(\)/); // the same searchHere already wired to the existing button
+    expect(box).toMatch(/results\.length < 3/);
+    expect(box).not.toMatch(/overpass-api\.de/); // no second network client — goes through the prop, not a new fetch
+  });
+
+  it("a genuine no-results state offers the manual drop-a-pin escape hatch, pre-seeded with what he typed", () => {
+    const box = src("components/SearchBox.jsx");
+    expect(box).toMatch(/onStartDropPinFor\(trimmed\)/);
+    const app = src("FoodApp.jsx");
+    const startDropPinFor = app.slice(app.indexOf("const startDropPinFor"), app.indexOf("}, []);", app.indexOf("const startDropPinFor")));
+    expect(startDropPinFor).toMatch(/setManualDraftName\(name\)/);
+    expect(startDropPinFor).toMatch(/setView\("map"\)/);
+    expect(startDropPinFor).toMatch(/setPinMode\(true\)/);
+  });
+
+  it("ONE control: FoodApp renders exactly one SearchBox, wired to both views", () => {
+    const app = src("FoodApp.jsx");
+    expect([...app.matchAll(/<SearchBox\b/g)]).toHaveLength(1);
+    expect(app).toMatch(/query=\{searchQuery\}\s+onQueryChange=\{setSearchQuery\}/);
+  });
+
+  it("VisitList takes `query` as a controlled prop — no local search input of its own", () => {
+    const list = src("components/VisitList.jsx");
+    expect(list).not.toMatch(/useState\(""\)/); // the old local `const [query, setQuery] = useState("")` is gone
+    expect(list).not.toMatch(/type="search"/); // no input element left in this file
+    expect(list).toMatch(/function VisitList\(\{ visits, query, onSelect \}\)/);
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════════════════════════
  * 5. THE RLS SHAPE, AS COMMITTED SQL (the live-database proof is db/test/food_rls.test.sql,
  *    already run against production — see its own header for the 7/7 result)
  * ═══════════════════════════════════════════════════════════════════════════════════════ */

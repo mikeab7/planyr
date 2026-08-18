@@ -1,0 +1,186 @@
+/* SearchBox — ONE control (owner, 2026-08-18: "do NOT build a filter panel... if you think one
+ * is needed, say so and stop" — no facets, no sort controls, no distance slider here).
+ *
+ * Searches the WHOLE 34,000+-place snapshot by name, never scoped to the current viewport
+ * ("the entire point of search is finding a place you cannot see") — backed by
+ * `food_places_search_by_name` (db/food.sql), a debounced trigram lookup over a GIN index.
+ * His own places (manual pins + anywhere he's logged) rank first and carry a small "You've
+ * been here" mark, ahead of the snapshot's relevance order — he is far more often looking for
+ * somewhere he's been than somewhere he hasn't.
+ *
+ * The dropdown (fly-to-and-open results, the live-Overpass fallback, the drop-a-pin escape
+ * hatch) only matters in MAP view — there's a map to fly. In LIST view, this same input just
+ * feeds FoodApp's shared `query` state straight into VisitList as a plain text filter over his
+ * own visit history ("filter the list rather than fly the map") — no separate second search
+ * box, no separate RPC call; `view === "list"` skips the snapshot lookup entirely.
+ */
+import { useEffect, useRef, useState } from "react";
+
+const DEBOUNCE_MS = 220;
+const MIN_QUERY_LEN = 2;
+const SHOWN_CAP = 10;
+
+function fieldStyle() {
+  return {
+    boxSizing: "border-box", padding: "6px 10px", borderRadius: 999,
+    border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-primary)",
+    font: "inherit", fontSize: 12.5,
+  };
+}
+
+const nameMatches = (name, q) => (name || "").toLowerCase().includes(q);
+
+export default function SearchBox({
+  query, onQueryChange, view, manualPins, loggedIds, bounds,
+  searchSnapshot, onSelectPlace, onSelectManualPin, onFlyTo,
+  onRequestLiveSearch, overpassPlaces, onStartDropPinFor,
+}) {
+  const [snapshotResults, setSnapshotResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [liveState, setLiveState] = useState("idle"); // idle | pending | done
+  const debounceRef = useRef(null);
+  const requestRef = useRef(0);
+
+  const trimmed = query.trim();
+  const q = trimmed.toLowerCase();
+
+  // Debounced whole-snapshot search — MAP view only; LIST view never fires this RPC at all.
+  useEffect(() => {
+    if (view !== "map") return undefined;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (trimmed.length < MIN_QUERY_LEN) {
+      setSnapshotResults([]); setLoading(false); setLiveState("idle");
+      return undefined;
+    }
+    setLoading(true);
+    setLiveState("idle");
+    const myRequest = ++requestRef.current;
+    debounceRef.current = setTimeout(async () => {
+      const { data } = await searchSnapshot(trimmed);
+      if (myRequest !== requestRef.current) return; // a newer keystroke already superseded this
+      setSnapshotResults(data || []);
+      setLoading(false);
+    }, DEBOUNCE_MS);
+    return () => clearTimeout(debounceRef.current);
+  }, [trimmed, view, searchSnapshot]);
+
+  // A live-search press already fired (FoodApp's existing Overpass wiring, reused as-is) —
+  // once its results land, filter them by the CURRENT query and fold matches in.
+  const liveMatches = liveState === "done" ? (overpassPlaces || []).filter((p) => nameMatches(p.name, q)) : [];
+
+  // "His own places rank first" — manual pins (never in the snapshot) matched client-side,
+  // plus every snapshot hit he's already logged, ahead of everywhere he hasn't been. Each
+  // bucket keeps the relevance order it already arrived in.
+  const manualMatches = view === "map" && trimmed.length >= MIN_QUERY_LEN
+    ? (manualPins || []).filter((p) => nameMatches(p.name, q)).map((p) => ({ ...p, kind: "manual", mine: true }))
+    : [];
+  const snapshotRanked = snapshotResults.map((p) => ({ ...p, kind: "place", mine: loggedIds?.has(p.id) }));
+  const results = [
+    ...manualMatches,
+    ...snapshotRanked.filter((p) => p.mine),
+    ...snapshotRanked.filter((p) => !p.mine),
+    ...liveMatches.map((p) => ({ ...p, kind: "live" })),
+  ].slice(0, SHOWN_CAP);
+
+  const settled = !loading && trimmed.length >= MIN_QUERY_LEN;
+  const showLiveOffer = view === "map" && settled && liveState === "idle" && results.length < 3 && bounds;
+  const showNoResults = view === "map" && settled && results.length === 0 && liveState !== "pending";
+  const showDropdown = view === "map" && open && trimmed.length >= MIN_QUERY_LEN;
+
+  const selectPlace = (place) => {
+    onSelectPlace(place);
+    onFlyTo({ lat: place.lat, lon: place.lon });
+    setOpen(false);
+  };
+  const selectManual = (pin) => {
+    onSelectManualPin(pin);
+    onFlyTo({ lat: pin.lat, lon: pin.lon });
+    setOpen(false);
+  };
+  const runLiveSearch = () => {
+    setLiveState("pending");
+    onRequestLiveSearch().finally(() => setLiveState("done"));
+  };
+
+  return (
+    <div style={{ position: "relative" }}>
+      <input
+        type="search" value={query} data-testid="food-search-box"
+        onChange={(e) => { onQueryChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)} // let a click on a result land first
+        placeholder={view === "map" ? "Search restaurants…" : "Filter your visits…"}
+        style={{ ...fieldStyle(), width: 220 }}
+        aria-label="Search restaurants"
+      />
+      {showDropdown && (
+        <div data-testid="food-search-results" style={{
+          position: "absolute", top: "calc(100% + 4px)", left: 0, width: 280, maxHeight: 360, overflowY: "auto",
+          background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: 10,
+          boxShadow: "0 10px 28px rgba(0,0,0,0.22)", zIndex: 700, padding: 6,
+        }}>
+          {loading && <div style={{ padding: "8px 10px", fontSize: 12.5, color: "var(--text-tertiary)" }}>Searching…</div>}
+
+          {!loading && results.map((p) => (
+            <button
+              key={`${p.kind}:${p.id || p.key || p.name}`} type="button"
+              onClick={() => (p.kind === "manual" ? selectManual(p) : selectPlace(p))}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, width: "100%",
+                textAlign: "left", border: "none", background: "transparent", borderRadius: 6, padding: "7px 8px",
+                cursor: "pointer", font: "inherit", fontSize: 13, color: "var(--text-primary)",
+              }}
+            >
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {p.name}{p.kind === "live" && <span style={{ color: "var(--text-tertiary)" }}> (live search)</span>}
+              </span>
+              {p.mine && (
+                <span style={{
+                  flex: "0 0 auto", fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em",
+                  color: "var(--on-accent-food)", background: "var(--accent-food)", borderRadius: 999, padding: "2px 6px",
+                }}>
+                  Been here
+                </span>
+              )}
+            </button>
+          ))}
+
+          {!loading && showLiveOffer && (
+            <button
+              type="button" onClick={runLiveSearch} data-testid="food-search-live-fallback"
+              style={{
+                display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent",
+                borderRadius: 6, padding: "7px 8px", cursor: "pointer", font: "inherit", fontSize: 12.5,
+                fontWeight: 700, color: "var(--accent-food)",
+              }}
+            >
+              🔍 Search live for "{trimmed}" nearby
+            </button>
+          )}
+          {!loading && liveState === "pending" && (
+            <div style={{ padding: "7px 8px", fontSize: 12.5, color: "var(--text-tertiary)" }}>Searching live…</div>
+          )}
+
+          {!loading && showNoResults && (
+            <div style={{ padding: "8px" }}>
+              <div style={{ fontSize: 12.5, color: "var(--text-tertiary)", marginBottom: 6 }}>
+                No matches{liveState === "done" ? ", even live" : ""} for "{trimmed}".
+              </div>
+              <button
+                type="button" onClick={() => onStartDropPinFor(trimmed)} data-testid="food-search-drop-pin"
+                style={{
+                  display: "block", width: "100%", textAlign: "left", border: "1px dashed var(--border-default)",
+                  borderRadius: 6, padding: "7px 8px", cursor: "pointer", font: "inherit", fontSize: 12.5,
+                  fontWeight: 700, color: "var(--text-primary)", background: "transparent",
+                }}
+              >
+                📍 Drop a pin for "{trimmed}" — not in any dataset
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

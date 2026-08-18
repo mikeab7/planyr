@@ -11,14 +11,16 @@
  * (lib/supabaseClient.js) instead of reusing site-planner's, so this route's bundle can never
  * grow because a planner file changed.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import FoodMap from "./components/FoodMap.jsx";
 import VisitPanel from "./components/VisitPanel.jsx";
 import VisitList from "./components/VisitList.jsx";
+import SearchBox from "./components/SearchBox.jsx";
 import {
   supabaseConfigured, fetchPlacesInBounds, fetchAllVisits, fetchPlacesByIds,
   insertVisit, updateVisit, deleteVisit, manualPinsFromVisits, loggedPlaceIds, avgRatingByPlaceId,
+  searchPlacesByName,
 } from "./lib/foodStore.js";
 import { searchOverpass } from "./lib/overpass.js";
 
@@ -35,6 +37,9 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   const [pending, setPending] = useState(false);
   const [error, setError] = useState(null);
   const [manualDraftName, setManualDraftName] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [flyToTarget, setFlyToTarget] = useState(null);
+  const flyNonceRef = useRef(0);
 
   // Places in the current map viewport — public read, works signed out too.
   useEffect(() => {
@@ -91,11 +96,37 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   const openManualPin = useCallback((pin) => { setSelected({ kind: "manualPin", pin }); setError(null); }, []);
   const dropPin = useCallback((lat, lon) => {
     setSelected({ kind: "newPin", lat, lon });
-    setManualDraftName("");
+    // manualDraftName is NOT reset here — startDropPinFor (below) may have pre-seeded it from
+    // a search box's no-results state; togglePinMode (below) is what clears it for the plain
+    // "Drop a pin" toolbar entry.
     setPinMode(false);
     setError(null);
   }, []);
   const closePanel = useCallback(() => setSelected(null), []);
+
+  // Toolbar's plain "Drop a pin" button: blank name, exactly as before.
+  const togglePinMode = useCallback(() => {
+    if (!pinMode) setManualDraftName("");
+    setPinMode((m) => !m);
+  }, [pinMode]);
+
+  // Search box's no-results escape hatch: pre-seed the name he already typed and jump straight
+  // to "click the map" (owner, 2026-08-18: "the manual drop-a-pin path should be reachable from
+  // a no-results state, because sometimes the answer is that the place simply is not in any
+  // dataset").
+  const startDropPinFor = useCallback((name) => {
+    setManualDraftName(name);
+    setView("map");
+    setPinMode(true);
+    setSearchQuery("");
+  }, []);
+
+  // Search result selected — fly the map to it (FoodMap watches flyToTarget.nonce so
+  // re-selecting the SAME result twice in a row still flies).
+  const flyTo = useCallback(({ lat, lon }) => {
+    flyNonceRef.current += 1;
+    setFlyToTarget({ lat, lon, nonce: flyNonceRef.current });
+  }, []);
 
   const submitVisit = useCallback(async (fields) => {
     if (!selected) return;
@@ -163,7 +194,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
             </div>
             {view === "map" && (
               <button
-                type="button" onClick={() => setPinMode((m) => !m)} aria-pressed={pinMode}
+                type="button" onClick={togglePinMode} aria-pressed={pinMode}
                 title="Drop a pin for a place not on the map"
                 style={{
                   border: "1px solid var(--border-default)", borderRadius: 8, padding: "6px 12px", cursor: "pointer",
@@ -175,6 +206,13 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
                 📍 {pinMode ? "Click the map…" : "Drop a pin"}
               </button>
             )}
+            <SearchBox
+              query={searchQuery} onQueryChange={setSearchQuery} view={view}
+              manualPins={manualPins} loggedIds={loggedIds} bounds={bounds}
+              searchSnapshot={searchPlacesByName} onSelectPlace={openPlace} onSelectManualPin={openManualPin}
+              onFlyTo={flyTo} onRequestLiveSearch={searchHere} overpassPlaces={overpassPlaces}
+              onStartDropPinFor={startDropPinFor}
+            />
           </div>
         }
       />
@@ -206,9 +244,10 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
             onDropPin={dropPin}
             onViewChanged={setBounds}
             onRequestSearchHere={searchHere}
+            flyToTarget={flyToTarget}
           />
         ) : (
-          <VisitList visits={listRows} onSelect={(v) => {
+          <VisitList visits={listRows} query={searchQuery} onSelect={(v) => {
             if (v.place_id && placeNames[v.place_id]) {
               openPlace({ id: v.place_id, name: placeNames[v.place_id].name });
             } else if (!v.place_id) {
