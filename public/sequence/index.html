@@ -2930,6 +2930,135 @@ const sortByVisualOrder = (tasks) => {
   return result;
 };
 
+// Visual (tree-walk) order with each task's depth attached — the same walk the grid itself uses
+// to decide what's visible (respects isExpanded), needed by indent/outdent to find "the row above
+// at the same level."
+const flatOrderWithLevel = (tasks) => {
+  const kidsBy = new Map();
+  tasks.forEach(t => { const p = t.parentId ?? null; if (!kidsBy.has(p)) kidsBy.set(p, []); kidsBy.get(p).push(t); });
+  const out = [];
+  const walk = (parentId, level) => {
+    (kidsBy.get(parentId) || []).forEach(t => {
+      out.push({ ...t, level });
+      if (t.isExpanded) walk(t.id, level + 1);
+    });
+  };
+  walk(null, 0);
+  return out;
+};
+
+// ── Multi-row indent/outdent — the whole selected block moves as ONE unit, not just whichever
+// row happens to be the keyboard anchor or the right-clicked row (the B<NEW> bug: a 6-row
+// selection indented only one of the six, on both the keyboard and the context-menu path — both
+// read a single task id and never consulted the selection range at all).
+//
+// SEMANTICS (Smartsheet-style, decided here rather than left emergent):
+//  - A contiguous block indents/outdents AS A BLOCK: only its "root" rows — selected rows whose
+//    PARENT is not itself selected — get reparented. A selected row whose parent IS also selected
+//    is left untouched, so it keeps its existing depth relative to the row above it. That is how
+//    "select a parent and its own children together" preserves relative depth for free, with no
+//    special case: the child was never a root row, so nothing about it changes.
+//  - INDENT is all-or-nothing, gated on the TOPMOST selected row only. Every root row in the block
+//    moves to the SAME new parent (the row immediately above the topmost row, at the topmost
+//    row's own level — identical eligibility rule to the pre-existing single-row indent). If the
+//    topmost row has no eligible predecessor (e.g. it's already the first child of its parent),
+//    the whole block is a clean no-op rather than indenting some rows under a target the topmost
+//    one couldn't reach — there is no sensible partial result when every row shares one destination.
+//  - OUTDENT has no shared destination — each promoted row's new parent is ITS OWN grandparent, so
+//    a per-row skip cannot corrupt structure the way a partial multi-target indent could. Rows
+//    already at depth 0 are left exactly where they are; everything else that can outdent, does,
+//    independently. Adjacent root rows sharing the same current parent move together as one batch
+//    (see outdentSelection below for why: moving them one at a time re-derives the insertion point
+//    off the shrinking remainder and scrambles their relative order).
+//  - Non-contiguous selection (e.g. rows 11, 14, 16 with gaps) cannot occur: the app's selection
+//    model (`selRange`) is a single rectangle of rows × columns — there is no ctrl-click or other
+//    discontiguous multi-select anywhere in this codebase. Nothing here needs to special-case it.
+
+const indentSelection = (tasks, selectedIds) => {
+  const flatOrder = flatOrderWithLevel(tasks);
+  const posById = new Map(flatOrder.map((t, i) => [t.id, i]));
+  const idSet = new Set(selectedIds.filter(id => posById.has(id)));
+  if (!idSet.size) return null;
+  let topPos = Infinity;
+  idSet.forEach(id => { const p = posById.get(id); if (p < topPos) topPos = p; });
+  if (topPos <= 0) return null; // nothing above the topmost row at all
+  const top = flatOrder[topPos];
+  const L = top.level;
+  let newParent = null;
+  for (let i = topPos - 1; i >= 0; i--) {
+    if (flatOrder[i].level === L) { newParent = flatOrder[i]; break; }
+    if (flatOrder[i].level < L) break; // hit the topmost row's own parent first — no eligible sibling above it
+  }
+  if (!newParent) return null;
+  const rootIds = [...idSet].filter(id => !idSet.has(flatOrder[posById.get(id)].parentId));
+  if (rootIds.every(id => flatOrder[posById.get(id)].parentId === newParent.id)) return null; // already there
+  const rootSet = new Set(rootIds);
+  return tasks.map(t => {
+    if (rootSet.has(t.id)) return { ...t, parentId: newParent.id };
+    if (t.id === newParent.id) return { ...t, isExpanded: true, focused: false };
+    return t;
+  });
+};
+
+const outdentSelection = (tasks, selectedIds) => {
+  const byId = new Map(tasks.map(t => [t.id, t]));
+  const idSet = new Set(selectedIds.filter(id => byId.has(id)));
+  if (!idSet.size) return null;
+  const rootIds = selectedIds.filter(id => idSet.has(id) && !idSet.has(byId.get(id).parentId));
+  // Group ADJACENT (in the given top-to-bottom order) root ids that share the same CURRENT parent
+  // into one batch, so a whole run of siblings is promoted and re-sequenced together in a single
+  // splice — moving them one row at a time would recompute "the end of the old parent's remaining
+  // subtree" against an array that's already lost the earlier movers, placing later movers ahead
+  // of earlier ones and reversing the block's visual order.
+  const groups = [];
+  rootIds.forEach(id => {
+    const t = byId.get(id);
+    const last = groups[groups.length - 1];
+    if (last && last.parentId === t.parentId) last.ids.push(id);
+    else groups.push({ parentId: t.parentId, ids: [id] });
+  });
+  let working = [...tasks];
+  let changed = false;
+  groups.forEach(g => {
+    if (g.parentId === null || g.parentId === undefined) return; // already depth 0 — clean no-op for this run
+    const parent = working.find(t => t.id === g.parentId);
+    if (!parent) return; // orphaned parentId — nothing sane to promote to
+    const grandParentId = parent.parentId ?? null;
+    const moveSet = new Set(g.ids);
+    const subtreeIds = new Set([g.parentId]);
+    const collect = pid => { working.filter(t => t.parentId === pid && !moveSet.has(t.id)).forEach(c => { subtreeIds.add(c.id); collect(c.id); }); };
+    collect(g.parentId);
+    const moved = g.ids.map(id => working.find(t => t.id === id)).filter(Boolean).map(t => ({ ...t, parentId: grandParentId }));
+    const remaining = working.filter(t => !moveSet.has(t.id));
+    let insertAfter = -1;
+    remaining.forEach((t, i) => { if (subtreeIds.has(t.id)) insertAfter = i; });
+    const reordered = [...remaining];
+    reordered.splice(insertAfter + 1, 0, ...moved);
+    working = grandParentId !== null ? reordered.map(t => t.id === grandParentId ? { ...t, focused: false } : t) : reordered;
+    changed = true;
+  });
+  return changed ? working : null;
+};
+
+// ── Delete-with-children: "keep subtasks" path — promote survivors to the nearest ancestor NOT
+// being deleted. Handles a whole deleted CHAIN transitively (delete a parent and its own selected
+// child together, and the child's own children promote past both, straight to the grandparent) —
+// survivingAncestor walks past every deleted ancestor, not just the immediate one. No repositioning
+// is needed: filtering never changes the relative order of the rows that remain, so a promoted row
+// already sits exactly where it needs to among its new parent's other children.
+const promoteChildrenAndDelete = (tasks, deleteIds) => {
+  const delSet = new Set(deleteIds);
+  const byId = new Map(tasks.map(t => [t.id, t]));
+  const survivingAncestor = (parentId) => {
+    let cur = parentId;
+    while (cur !== null && cur !== undefined && delSet.has(cur)) cur = byId.get(cur)?.parentId ?? null;
+    return cur ?? null;
+  };
+  return tasks.filter(t => !delSet.has(t.id)).map(t => (
+    t.parentId != null && delSet.has(t.parentId) ? { ...t, parentId: survivingAncestor(t.parentId) } : t
+  ));
+};
+
 const COLS = [
   {k:"id",              l:"ID",      w:30,  e:false           },
   {k:"name",            l:"Task",    w:220, e:true            },
@@ -3475,6 +3604,52 @@ function SuccessorPromptModal({ prompt, updateTask, onClose, onOpenTask }) {
               background:changeCount?'#4f46e5':'#f3f4f6',
               color:changeCount?'#fff':'#9ca3af'}}>
             Update Successors
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Delete-with-children prompt ────────────────────────────
+// Owner correction (verbatim): don't silently cascade, don't silently promote — ask, with exactly
+// two choices plus Cancel, and "the action buttons must be the same size as each other" (his
+// standing complaint about the successor modal above, before that one was fixed). Reuses
+// FOOTER_BTN_STYLE directly rather than a look-alike copy, so equal sizing is the SAME shared
+// object, not two literals that could drift apart independently — measured in
+// ui-audit/verify-schedule-indent-outdent-delete.mjs via getBoundingClientRect on all three.
+function DeleteChildrenModal({ rowCount, totalCount, onCascade, onPromote, onCancel }) {
+  const subtaskCount = totalCount - rowCount;
+  const title = rowCount > 1 ? `Delete ${rowCount} tasks?` : "Delete this task?";
+  const body = rowCount > 1
+    ? `${subtaskCount} subtask${subtaskCount !== 1 ? "s" : ""} would come with ${rowCount > 1 ? "them" : "it"}.`
+    : `This task has ${subtaskCount} subtask${subtaskCount !== 1 ? "s" : ""}.`;
+  return (
+    <div data-delete-children-modal onMouseDown={e=>{if(e.target===e.currentTarget)onCancel();}}
+      style={{position:'fixed',inset:0,zIndex:4000,display:'flex',alignItems:'center',
+        justifyContent:'center',background:'rgba(15,23,42,.35)'}}>
+      <div style={{background:'#fff',borderRadius:12,boxShadow:'0 16px 48px rgba(0,0,0,.18)',
+        width:460,maxWidth:'94vw',display:'flex',flexDirection:'column',overflow:'hidden'}}
+        tabIndex={-1} ref={el=>el?.focus()}
+        onKeyDown={e=>{ if (e.key==='Escape') onCancel(); }}>
+        <div style={{padding:'18px 20px 14px',borderBottom:'1px solid #e5e7eb'}}>
+          <div style={{fontSize:14,fontWeight:600,color:'#1f2328'}}>{title}</div>
+          <div style={{fontSize:12,color:'#6b7280',marginTop:6}}>
+            {body} Delete them too, or keep them — they'll move up to this task's parent, in the same order.
+          </div>
+        </div>
+        <div style={{padding:'14px 20px',display:'flex',alignItems:'center',justifyContent:'flex-end',gap:8,background:'#f9fafb'}}>
+          <button data-delete-children-choice="cancel" onClick={onCancel} style={FOOTER_BTN_STYLE}
+            onMouseEnter={e=>e.currentTarget.style.borderColor='#6b7280'} onMouseLeave={e=>e.currentTarget.style.borderColor='#e5e7eb'}>
+            Cancel
+          </button>
+          <button data-delete-children-choice="promote" onClick={onPromote} style={FOOTER_BTN_STYLE}
+            onMouseEnter={e=>e.currentTarget.style.borderColor='#6b7280'} onMouseLeave={e=>e.currentTarget.style.borderColor='#e5e7eb'}>
+            Keep subtasks
+          </button>
+          <button data-delete-children-choice="cascade" onClick={onCascade}
+            style={{...FOOTER_BTN_STYLE, border:'1px solid #dc2626', background:'#dc2626', color:'#fff'}}>
+            Delete all {totalCount}
           </button>
         </div>
       </div>
@@ -5136,6 +5311,7 @@ function App() {
   const pasteSelectRef = useRef(null); // new id of the just-pasted root → select + scroll to it after paste
   const [, setClipboardTick] = useState(0); // bump to force re-render when clipboard changes (for menu/visual cues)
   const [renameModal, setRenameModal] = useState(null);
+  const [deleteChoice, setDeleteChoice] = useState(null); // {ids, rowCount, totalCount} | null — delete-with-children prompt
   const [edit,       setEdit]       = useState(null);
   const [editStartChar, setEditStartChar] = useState(null);
   const [selectedId,    setSelectedId]    = useState(null);
@@ -5642,10 +5818,10 @@ function App() {
   const overlayOpenRef = useRef(false);
   useEffect(() => {
     overlayOpenRef.current = !!(successorPrompt || notesCtx || projCtx || taskCtx || renameModal ||
-      pdfExportOpen || formatOpen || settingsOpen || automationOpen || contactsOpen || historyOpen ||
-      reviewOpen || meetingCalOpen);
-  }, [successorPrompt, notesCtx, projCtx, taskCtx, renameModal, pdfExportOpen, formatOpen, settingsOpen,
-      automationOpen, contactsOpen, historyOpen, reviewOpen, meetingCalOpen]);
+      deleteChoice || pdfExportOpen || formatOpen || settingsOpen || automationOpen || contactsOpen ||
+      historyOpen || reviewOpen || meetingCalOpen);
+  }, [successorPrompt, notesCtx, projCtx, taskCtx, renameModal, deleteChoice, pdfExportOpen, formatOpen,
+      settingsOpen, automationOpen, contactsOpen, historyOpen, reviewOpen, meetingCalOpen]);
 
   /* NEW-1 — ⛔ THE GUARD ABOVE ASKS "IS AN OVERLAY OPEN?" AND THE RIGHT QUESTION IS "DID THIS
    * KEYSTROKE BEGIN WHILE ONE WAS?" — those differ for exactly one keystroke, the one that
@@ -5698,10 +5874,10 @@ function App() {
             Math.max(selRange.c1, selRange.c2) === activeEffectiveCols(dataRef.current).length - 1;
           if (isFullRow) {
             // Delete every row in the selected span (ID-column drag /
-            // shift-click), each with its subtasks — not just the focused row.
+            // shift-click) — asks first if any of them have subtasks (requestDelete);
+            // otherwise deletes immediately, exactly as before.
             const ids = fullRowSelIds();
-            deleteTasks(ids.length ? ids : [selectedId]);
-            setSelectedId(null); setSelRange(null);
+            requestDelete(ids.length ? ids : [selectedId]);
             return;
           }
           // Multi-cell range delete (Excel-style): blank every editable, non-locked, non-picker cell in
@@ -5786,16 +5962,17 @@ function App() {
           return;
         }
       }
-      // Alt+Shift+Right → indent (make subtask of row above)
+      // Alt+Shift+Right → indent (make subtask of row above) — acts on the WHOLE selected row
+      // range when one is active, not just the anchor cell (see rowRangeSelIds/structuralTargets).
       if (e.altKey && e.shiftKey && e.key === "ArrowRight" && !typing) {
         e.preventDefault();
-        if (!e.repeat) indentTaskById(selectedId);
+        if (!e.repeat && selectedId !== null) indentSelectionByIds(structuralTargets(selectedId));
         return;
       }
-      // Alt+Shift+Left → outdent (promote one level up)
+      // Alt+Shift+Left → outdent (promote one level up) — same whole-selection scope as indent.
       if (e.altKey && e.shiftKey && e.key === "ArrowLeft" && !typing) {
         e.preventDefault();
-        if (!e.repeat) outdentTaskById(selectedId);
+        if (!e.repeat && selectedId !== null) outdentSelectionByIds(structuralTargets(selectedId));
         return;
       }
       // Fix #2: Tab / Shift+Tab — advance to next/previous column (Excel-style)
@@ -5948,10 +6125,11 @@ function App() {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-    // NOTE: deleteTask/insertTask/indentTaskById/outdentTaskById are intentionally NOT in this
-    // dependency array. They are defined later in this component; the indent/outdent by-id helpers
-    // are stable (useCallback([])) and read the current selection via `selectedId`, which IS a
-    // dependency here — so the listener re-binds (capturing the fresh selectedId) whenever it
+    // NOTE: deleteTask/insertTask/requestDelete/indentSelectionByIds/outdentSelectionByIds/
+    // structuralTargets/rowRangeSelIds/fullRowSelIds are intentionally NOT in this dependency
+    // array. They are defined later in this component; the by-id helpers are stable
+    // (useCallback([])) and read the current selection via `selectedId`/`selRange`, which ARE
+    // dependencies here — so the listener re-binds (capturing the fresh selection) whenever either
     // changes. Referencing the helpers directly here would read them before initialization if the
     // build ever kept `const` block-scoping instead of hoisting to `var`.
   }, [selectedId, selectedColIdx, selRange, isUndoing]);
@@ -6148,6 +6326,68 @@ function App() {
     if (r2 < r1) return [];
     return ft.slice(r1, r2 + 1).map(t => t.id);
   };
+
+  // Ids of every task in the current row selection, regardless of which COLUMNS it spans.
+  // Indent/outdent are row-level structural moves, never ambiguous with "clear cell content" the
+  // way keyboard Delete is (fullRowSelIds' full-column requirement exists only to make THAT
+  // distinction) — so a drag/shift-click selection made by dragging across the Name column (not
+  // the ID column) still moves the whole block. Returns [] for a single row or no selection at
+  // all, so callers fall back to [selectedId] exactly as before this existed.
+  const rowRangeSelIds = () => {
+    if (!selRange) return [];
+    const ft = flatTasksRef.current || [];
+    const r1 = Math.max(0, Math.min(selRange.r1, selRange.r2));
+    const r2 = Math.min(ft.length - 1, Math.max(selRange.r1, selRange.r2));
+    if (r2 <= r1) return [];
+    return ft.slice(r1, r2 + 1).map(t => t.id);
+  };
+
+  // Resolve "the ids a structural op (indent/outdent/delete) should act on" for a caller that
+  // has a definite anchor task (the right-clicked row, or the keyboard selection) — the row range
+  // when the anchor is part of one, else just the anchor alone. One shared rule for both entry
+  // points so they can never again diverge into "acts on the whole selection" vs "acts on one row."
+  const structuralTargets = (anchorId) => {
+    const ids = rowRangeSelIds();
+    return ids.length > 1 && ids.includes(anchorId) ? ids : [anchorId];
+  };
+
+  // ── Delete-with-children: ask, never silently cascade or silently promote ──────────────────
+  // Owner correction (verbatim): "maybe it should delete all the subtasks... or allow all subtasks
+  // to get migrated to the next task above" — followed by "don't give me a menu, just... an option
+  // to delete all subtasks with it or allow subtasks to get migrated." A row with NO children is
+  // untouched by this — deletes immediately, exactly as before, no prompt, no extra click.
+  const requestDelete = useCallback((taskIds) => {
+    if (!taskIds || taskIds.length === 0) return;
+    const pid = dataRef.current?.aPid;
+    const all = dataRef.current?.projects?.[pid]?.tasks || [];
+    const hasAnyChildren = taskIds.some(id => all.some(t => t.parentId === id));
+    if (!hasAnyChildren) {
+      // No subtasks anywhere in this selection — delete immediately, no prompt, no extra click,
+      // exactly as before this existed.
+      deleteTasks(taskIds);
+      setSelectedId(null); setSelRange(null);
+      return;
+    }
+    // The TRUE total, including any collapsed/hidden descendants — the number that matters on a
+    // real schedule is how much is actually being removed, not how many rows happen to be
+    // rendered when the prompt appears. Selection is left alone here so Cancel leaves it intact;
+    // the modal's own choice handlers clear it once a delete actually happens.
+    const del = new Set();
+    const mark = id => { del.add(id); all.filter(t => t.parentId === id).forEach(t => mark(t.id)); };
+    taskIds.forEach(mark);
+    setDeleteChoice({ ids: taskIds, rowCount: taskIds.length, totalCount: del.size });
+  }, [deleteTasks]);
+
+  const promoteAndDeleteTasks = useCallback((taskIds) => {
+    setData(d => {
+      const pid = d.aPid;
+      const proj = d.projects[pid];
+      if (!proj) return d;
+      const newTasks = promoteChildrenAndDelete(proj.tasks, taskIds);
+      return {...d, projects: {...d.projects, [pid]: {...proj, tasks: renumberTasks(recomputeAfterStructureChange(newTasks))}}};
+    });
+    notifyRowsDeleted(taskIds.length, taskIds.length); // exactly these rows go; every child survives, promoted
+  }, []);
 
   // ── Formatting scope (row vs cell) ────────────────────────
   // The right-click menu's format toolbar targets whatever was selected when
@@ -6410,7 +6650,8 @@ function App() {
   }, [selectedId]);
 
   // (indentTask/outdentTask removed — the keyboard handler now calls the identical
-  //  indentTaskById/outdentTaskById helpers below with the current selection. B255.)
+  //  indentSelectionByIds/outdentSelectionByIds helpers below with the resolved selection. B255,
+  //  extended to whole-selection scope by B<NEW> — see structuralTargets/rowRangeSelIds.)
 
   const insertTaskBelow = useCallback((taskId) => {
     setData(d => {
@@ -6657,64 +6898,26 @@ function App() {
     setSelectedColIdx(1);
   }, [data]);
 
-  const indentTaskById = useCallback((taskId) => {
+  // B<NEW> — both entry points (Alt+Shift+Right/Left and the right-click menu) now resolve the
+  // FULL selected row range first (see rowRangeSelIds below) and pass every id through in one
+  // batch — one setData call, one undo step, one recompute, matching the pre-existing single-row
+  // behaviour exactly when the selection is just one row. The tree-mutation itself lives in the
+  // pure indentSelection/outdentSelection above so it can be exercised without a live DOM.
+  const indentSelectionByIds = useCallback((taskIds) => {
     setData(d => {
       const pid = d.aPid;
-      const tasks = d.projects[pid].tasks;
-      const flatOrder = [];
-      const walk = (parentId, level) => {
-        tasks.filter(t => t.parentId === parentId).forEach(t => {
-          flatOrder.push({...t, level});
-          if (t.isExpanded) walk(t.id, level + 1);
-        });
-      };
-      walk(null, 0);
-      const idx = flatOrder.findIndex(t => t.id === taskId);
-      if (idx <= 0) return d;
-      const sel = flatOrder[idx];
-      const L = sel.level;
-      let newParent = null;
-      for (let i = idx - 1; i >= 0; i--) {
-        if (flatOrder[i].level === L) { newParent = flatOrder[i]; break; }
-        if (flatOrder[i].level < L) { break; }
-      }
-      if (!newParent || sel.parentId === newParent.id) return d;
-      const newTasks = tasks.map(t => {
-        if (t.id === sel.id)       return {...t, parentId: newParent.id};
-        if (t.id === newParent.id) return {...t, isExpanded: true, focused: false};
-        return t;
-      });
+      const newTasks = indentSelection(d.projects[pid].tasks, taskIds);
+      if (!newTasks) return d;
       return {...d, projects: {...d.projects, [pid]: {...d.projects[pid], tasks: renumberTasks(recomputeAfterStructureChange(sortByVisualOrder(newTasks)))}}};
     });
   }, []);
 
-  const outdentTaskById = useCallback((taskId) => {
+  const outdentSelectionByIds = useCallback((taskIds) => {
     setData(d => {
       const pid = d.aPid;
-      const tasks = d.projects[pid].tasks;
-      const sel = tasks.find(t => t.id === taskId);
-      if (!sel || sel.parentId === null) return d;
-      const parent = tasks.find(t => t.id === sel.parentId);
-      const grandParentId = parent ? parent.parentId : null;
-
-      const updated = tasks.map(t => t.id === sel.id ? {...t, parentId: grandParentId}
-        : (grandParentId !== null && t.id === grandParentId) ? {...t, focused: false} : t);
-
-      const getSubtreeIds = (rootId, tList) => {
-        const ids = new Set([rootId]);
-        tList.filter(t => t.parentId === rootId && t.id !== sel.id)
-             .forEach(c => getSubtreeIds(c.id, tList).forEach(x => ids.add(x)));
-        return ids;
-      };
-      const subtreeIds = parent ? getSubtreeIds(parent.id, updated) : new Set();
-
-      const withoutSel = updated.filter(t => t.id !== sel.id);
-      let insertAfter = -1;
-      withoutSel.forEach((t, i) => { if (subtreeIds.has(t.id)) insertAfter = i; });
-      const reordered = [...withoutSel];
-      reordered.splice(insertAfter + 1, 0, updated.find(t => t.id === sel.id));
-
-      return {...d, projects: {...d.projects, [pid]: {...d.projects[pid], tasks: renumberTasks(recomputeAfterStructureChange(sortByVisualOrder(reordered)))}}};
+      const newTasks = outdentSelection(d.projects[pid].tasks, taskIds);
+      if (!newTasks) return d;
+      return {...d, projects: {...d.projects, [pid]: {...d.projects[pid], tasks: renumberTasks(recomputeAfterStructureChange(sortByVisualOrder(newTasks)))}}};
     });
   }, []);
 
@@ -7198,7 +7401,7 @@ function App() {
   );
 
   const setHoverZone = zone => { hoverZoneRef.current = zone; };
-  const shared = {tasks: flatTasks, succMap, updateTask, deleteTask, getTaskName, proj, setData, setNotesCtx, edit, setEdit, editStartChar, selectedId, setSelectedId, selRange, setSelRange, selectedColIdx, setSelectedColIdx, goToFocus, ganttPPD, setGanttPPD, gridZoom, setHoverZone, insertTask, insertTaskBelow, addTask, addSubtask, duplicateTask, indentTaskById, outdentTaskById, setTaskCtx, rolledHealthMap, healthColStyle: data.healthColStyle || "stoplight", setHealthColStyle: v => setData(d => ({...d, healthColStyle: v})), data};
+  const shared = {tasks: flatTasks, succMap, updateTask, deleteTask, getTaskName, proj, setData, setNotesCtx, edit, setEdit, editStartChar, selectedId, setSelectedId, selRange, setSelRange, selectedColIdx, setSelectedColIdx, goToFocus, ganttPPD, setGanttPPD, gridZoom, setHoverZone, insertTask, insertTaskBelow, addTask, addSubtask, duplicateTask, setTaskCtx, rolledHealthMap, healthColStyle: data.healthColStyle || "stoplight", setHealthColStyle: v => setData(d => ({...d, healthColStyle: v})), data};
 
   let section = data.section ?? "projects";
   if (section === "suggestions") section = "projects";   // Suggestions tab removed — Review now lives inside Projects
@@ -7583,6 +7786,15 @@ function App() {
       {contactsOpen    && <ContactsPanel    data={data} setData={setData} onClose={()=>setContactsOpen(false)} />}
       {historyOpen     && <HistoryPanel     data={data} setData={setData} exportJSON={exportJSON} importJSON={importJSON} applyLoadedData={(parsed)=>applyLoadedDataRef.current?.(parsed)} onClose={()=>setHistoryOpen(false)} />}
       {successorPrompt && <SuccessorPromptModal prompt={successorPrompt} updateTask={updateTask} onClose={()=>setSuccessorPrompt(null)} onOpenTask={(pid, taskId)=>{ goToTask(pid, taskId); setSuccessorPrompt(null); }} />}
+      {deleteChoice && (
+        <DeleteChildrenModal
+          rowCount={deleteChoice.rowCount}
+          totalCount={deleteChoice.totalCount}
+          onCascade={() => { deleteTasks(deleteChoice.ids); setSelectedId(null); setSelRange(null); setDeleteChoice(null); }}
+          onPromote={() => { promoteAndDeleteTasks(deleteChoice.ids); setSelectedId(null); setSelRange(null); setDeleteChoice(null); }}
+          onCancel={() => setDeleteChoice(null)}
+        />
+      )}
 
       {/* BODY */}
       <div style={{flex:1,overflow:"hidden",display:"flex"}}>
@@ -7616,8 +7828,14 @@ function App() {
           onPasteTask={() => { pasteTaskAfter(taskCtx.task.id); setTaskCtx(null); }}
           hasClipboard={!!clipboardRef.current}
           onCopyName={() => { navigator.clipboard?.writeText(taskCtx.task.name).catch(()=>{}); setTaskCtx(null); }}
-          onIndent={() => { indentTaskById(taskCtx.task.id); setTaskCtx(null); }}
-          onOutdent={() => { outdentTaskById(taskCtx.task.id); setTaskCtx(null); }}
+          onIndent={() => { indentSelectionByIds(structuralTargets(taskCtx.task.id)); setTaskCtx(null); }}
+          onOutdent={() => { outdentSelectionByIds(structuralTargets(taskCtx.task.id)); setTaskCtx(null); }}
+          canOutdent={(() => {
+            const targets = structuralTargets(taskCtx.task.id);
+            const ts = (data.projects[taskCtx.projId] || {}).tasks || [];
+            const byId = new Map(ts.map(t => [t.id, t]));
+            return targets.some(id => (byId.get(id)?.parentId ?? null) !== null);
+          })()}
           onAddNote={() => { setNotesCtx({taskId: taskCtx.task.id, projectId: taskCtx.projId}); setTaskCtx(null); }}
           meetingBodies={(data.projects[taskCtx.projId] || {}).meetingBodies || []}
           bindCount={(() => { const ids = fullRowSelIds(); return ids.length > 1 && ids.includes(taskCtx.task.id) ? ids.length : 1; })()}
@@ -7651,10 +7869,11 @@ function App() {
           onUnlinkDeadline={() => { updateTask(taskCtx.task.id, {deadlineForTaskId: null}, taskCtx.projId); setTaskCtx(null); }}
           onAddMeetingCalendar={() => { setMeetingCalOpen(true); setSettingsOpen(false); setAutomationOpen(false); setContactsOpen(false); setFormatOpen(false); setTaskCtx(null); }}
           onDelete={() => {
-            // Right-click inside a multi-row selection deletes the whole selection
+            // Right-click inside a multi-row selection deletes the whole selection — asks first
+            // if any row in it has subtasks (requestDelete); otherwise deletes immediately.
             const ids = fullRowSelIds();
-            deleteTasks(ids.length > 1 && ids.includes(taskCtx.task.id) ? ids : [taskCtx.task.id]);
-            setSelectedId(null); setSelRange(null); setTaskCtx(null);
+            requestDelete(ids.length > 1 && ids.includes(taskCtx.task.id) ? ids : [taskCtx.task.id]);
+            setTaskCtx(null);
           }}
           deleteCount={(() => { const ids = fullRowSelIds(); return ids.length > 1 && ids.includes(taskCtx.task.id) ? ids.length : 1; })()}
           onSetHealth={hk => { updateTask(taskCtx.task.id, {health: hk}, taskCtx.projId); setTaskCtx(null); }}
@@ -7896,7 +8115,7 @@ function ProjContextMenu({x, y, projId, canDelete, onRename, onDuplicate, onDele
 }
 
 // ── TaskContextMenu ───────────────────────────────────────
-function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAddSubtask, onDuplicate, onCopyName, onCutTask, onCopyTaskFull, onPasteTask, hasClipboard, onIndent, onOutdent, onAddNote, meetingBodies = [], bindCount = 1, boundTasks = [], deadlineAnchorName = null, onBindMeeting, onUnbindMeeting, onAddDeadlineRow, onLinkAsDeadline, onUnlinkDeadline, onAddMeetingCalendar, onDelete, deleteCount = 1, onSetHealth, onSetRowColor, onSetBold, onSetItalic, onClearFormat, fmt, onClose}) {
+function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAddSubtask, onDuplicate, onCopyName, onCutTask, onCopyTaskFull, onPasteTask, hasClipboard, onIndent, onOutdent, canOutdent, onAddNote, meetingBodies = [], bindCount = 1, boundTasks = [], deadlineAnchorName = null, onBindMeeting, onUnbindMeeting, onAddDeadlineRow, onLinkAsDeadline, onUnlinkDeadline, onAddMeetingCalendar, onDelete, deleteCount = 1, onSetHealth, onSetRowColor, onSetBold, onSetItalic, onClearFormat, fmt, onClose}) {
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -7959,7 +8178,9 @@ function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAd
     </button>
   );
 
-  const canOutdent = task.parentId !== null;
+  // canOutdent is now passed in as a prop — computed by the caller against the WHOLE resolved
+  // selection (structuralTargets), not just this one row, so a multi-row right-click correctly
+  // disables Outdent only when every targeted row is already at depth 0.
   // B844 — meeting-calendar flyout. Parent label reflects the row's CURRENT state (bound body /
   // deadline link / unbound); the flyout is one radio list ("— none —" + bodies, ✓ on the current
   // choice) plus the deadline-row actions. Opens leftward when the menu is near the right edge.
@@ -8718,7 +8939,7 @@ function measuredColWidth(headerLabel, cellValues, floor) {
   return Math.max(floor, Math.ceil(maxW));
 }
 
-function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, setData, setNotesCtx, edit, setEdit, editStartChar, selectedId, setSelectedId, selRange, setSelRange, selectedColIdx, setSelectedColIdx, goToFocus, scrollRef, onScroll, setTaskCtx, insertTask, insertTaskBelow, addTask, addSubtask, duplicateTask, indentTaskById, outdentTaskById, rolledHealthMap, healthColStyle, setHealthColStyle, data, gridZoom=1, setHoverZone, onColWidths, review}) {
+function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, setData, setNotesCtx, edit, setEdit, editStartChar, selectedId, setSelectedId, selRange, setSelRange, selectedColIdx, setSelectedColIdx, goToFocus, scrollRef, onScroll, setTaskCtx, insertTask, insertTaskBelow, addTask, addSubtask, duplicateTask, rolledHealthMap, healthColStyle, setHealthColStyle, data, gridZoom=1, setHoverZone, onColWidths, review}) {
   // Predecessor lookup for the "a predecessor is late" health condition — memoized on the
   // project's own task array so it's built once per data change, not once per row.
   const taskById = useMemo(() => { const m = {}; (proj?.tasks||[]).forEach(t => m[t.id] = t); return m; }, [proj?.tasks]);
