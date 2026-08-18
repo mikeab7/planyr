@@ -23,6 +23,7 @@ import {
   searchPlacesByName,
 } from "./lib/foodStore.js";
 import { searchOverpass } from "./lib/overpass.js";
+import { formatCategory, formatAddress } from "./lib/formatPlace.js";
 
 export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, authControl, accountActive, userId }) {
   const [view, setView] = useState("map"); // "map" | "list"
@@ -164,7 +165,18 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   const panelTitle = selected?.kind === "place" ? selected.place.name
     : selected?.kind === "manualPin" ? selected.pin.name : null;
   const panelSubtitle = selected?.kind === "place"
-    ? [selected.place.category?.replace(/_/g, " "), selected.place.address].filter(Boolean).join(" · ")
+    ? [formatCategory(selected.place.category), formatAddress(selected.place.address)].filter(Boolean).join(" · ")
+    : null;
+
+  // Identifies the currently-selected PLACE or MANUAL PIN the exact same way across the map's
+  // pin-highlight, the list's row-highlight, and the panel's own key (B634976) — owner, 2026-08-19: "it's
+  // not exactly clear once a spot is selected... give the selected pin its own state" and "the
+  // selected row highlights too." A manual pin is keyed by NAME ONLY (not the lat/lon-qualified
+  // key `manualPinsFromVisits` groups by) because a plain visit ROW (in the list) only carries
+  // `custom_name` — matching this repo's existing precedent of disambiguating manual pins by
+  // name alone (see the List `onSelect` handler below, unchanged by this item).
+  const selectedKey = selected?.kind === "place" ? `place:${selected.place.id}`
+    : selected?.kind === "manualPin" ? `pin:${selected.pin.name}`
     : null;
 
   return (
@@ -245,15 +257,28 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
             onViewChanged={setBounds}
             onRequestSearchHere={searchHere}
             flyToTarget={flyToTarget}
+            selectedKey={selectedKey}
           />
         ) : (
-          <VisitList visits={listRows} query={searchQuery} onSelect={(v) => {
-            if (v.place_id && placeNames[v.place_id]) {
-              openPlace({ id: v.place_id, name: placeNames[v.place_id].name });
-            } else if (!v.place_id) {
-              openManualPin({ name: v.custom_name, lat: v.custom_lat, lon: v.custom_lon, visitIds: visits.filter((x) => !x.place_id && x.custom_name === v.custom_name).map((x) => x.id) });
-            }
-          }} />
+          <VisitList
+            visits={listRows} query={searchQuery} selectedKey={selectedKey}
+            onSelect={(v) => {
+              // Selecting from the LIST centres the map on it too (owner, 2026-08-19: "centre it
+              // in the visible map... applies to selecting from search AND from the list") — the
+              // map isn't mounted while in List view, but flyToTarget is honoured on FoodMap's
+              // next mount (its fly effect runs on mount whenever a target is already set), so
+              // switching to Map view afterward lands already centred, no second click needed.
+              if (v.place_id && placeNames[v.place_id]) {
+                const p = placeNames[v.place_id];
+                openPlace({ id: v.place_id, name: p.name, lat: p.lat, lon: p.lon });
+                if (p.lat != null && p.lon != null) flyTo({ lat: p.lat, lon: p.lon });
+              } else if (!v.place_id) {
+                const pin = { name: v.custom_name, lat: v.custom_lat, lon: v.custom_lon, visitIds: visits.filter((x) => !x.place_id && x.custom_name === v.custom_name).map((x) => x.id) };
+                openManualPin(pin);
+                if (pin.lat != null && pin.lon != null) flyTo({ lat: pin.lat, lon: pin.lon });
+              }
+            }}
+          />
         )}
 
         {selected && (

@@ -51,6 +51,50 @@
  * (the halo that makes the fill colour read against ANY backdrop); satellite mode widens it
  * (2px -> 3px) so the same 1-10 rating ramp stays legible over photo detail instead of just over
  * a street map's calm tones.
+ *
+ * ⛔ B634981 — THE SATELLITE TOGGLE SHIPPED CRASHING THE WHOLE MODULE, and this is the actual fix
+ * (owner, with a live console stack trace, 2026-08-19: clicking Satellite threw
+ * "Cannot read properties of undefined (reading 'length')" inside Leaflet's `_getSubdomain`,
+ * caught by the workspace error boundary — the entire /food route blanked to an error screen).
+ * ROOT CAUSE: the tile-layer options were built as `{ subdomains: source.subdomains, ... }`
+ * unconditionally — for SATELLITE_TILES, which declares no `subdomains` key, that evaluates to
+ * `subdomains: undefined`, and passing that EXPLICIT `undefined` clobbers Leaflet's own internal
+ * default (`'abc'`) rather than leaving it alone. `_getSubdomain` reads
+ * `this.options.subdomains.length` UNCONDITIONALLY on every tile request — not gated on whether
+ * `{s}` appears in the URL template, contrary to what the URL alone would suggest — so the very
+ * first tile threw, synchronously, inside the mount effect. Fix: `subdomains` is only added to the
+ * options object AT ALL when the source actually declares one (STREET_TILES's `"abcd"`); Esri gets
+ * no key, exactly as the Site Planner's own imagery layer already does it (`MapFinder.jsx` never
+ * passes `subdomains` for its Esri layer either — this was the exact bug an explicit-undefined
+ * introduces that an omitted key does not).
+ * MIRRORED FROM THE PLANNER, PER INSTRUCTION, rather than re-derived: `maxZoom: 21` +
+ * `maxNativeZoom: 19` (not a flat `maxZoom: 19`) so Leaflet upscales past Esri's native ceiling
+ * instead of just refusing to zoom further; a second, faint LABELS overlay
+ * (`Reference/World_Transportation`, opacity 0.4, added ONLY in satellite mode) so street names
+ * still read over the photography — satellite imagery with no labels is much harder to navigate.
+ * Axis order `{z}/{y}/{x}` (Y before X — Esri's convention, backwards from Leaflet's own default)
+ * was already correct here; flagged in case a future edit "corrects" it back to `{z}/{x}/{y}` and
+ * silently starts requesting the wrong tiles.
+ * GUARDED SO A BAD TILE CONFIG CAN NEVER TAKE THE MODULE DOWN AGAIN: the tile-layer mount is
+ * wrapped in try/catch; a thrown error degrades to a small "Imagery unavailable" state instead of
+ * propagating into the workspace error boundary.
+ *
+ * ⛔ SELECTED-PIN HIGHLIGHT + PANEL-AWARE CENTRING (B634976, owner, 2026-08-19, after searching "soto" and
+ * opening it: "it's not exactly clear once a spot is selected via map or search that it is
+ * selected... give the selected pin its own state"). `selectedKey` (computed once in FoodApp,
+ * shared verbatim with VisitList's row highlight and VisitPanel's own key) drives TWO things
+ * here: (1) the matching pin draws noticeably larger, with an accent-coloured ring AND a soft
+ * halo behind it — never just a bigger version of the same white-stroke look the unrated/rated
+ * states already use, so it reads as a genuinely different state at a glance; (2) `flyToTarget`'s
+ * pan offsets the destination so the pin lands centred in the area the user can actually SEE, not
+ * the raw map element centre — `VisitPanel` covers roughly the right third once a place is
+ * selected (`PANEL_WIDTH` below, matching its own literal width), so panning to the raw centre
+ * can leave the pin behind the panel or crammed against its edge. Computed via
+ * `map.project`/`unproject` (the standard Leaflet pixel-offset-pan pattern): shift the target
+ * point right by half the panel's width before flying, so it re-centres left of true-centre by
+ * exactly that much — i.e. the middle of the VISIBLE (unobstructed) region. This one flyTo path
+ * is shared by search AND by list-driven selection (FoodApp's List `onSelect` now sets
+ * `flyToTarget` too), so both get the same corrected centring for free.
  */
 import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
@@ -62,10 +106,21 @@ const STREET_TILES = {
   maxZoom: 19, subdomains: "abcd",
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
 };
+// Esri World Imagery — mirrors the Site Planner's own layer verbatim (MapFinder.jsx), including
+// maxZoom 21 with maxNativeZoom 19 (upscale past Esri's native ceiling rather than hard-refuse),
+// and NO `subdomains` key at all — see the B634981 header comment for why an explicit
+// `subdomains: undefined` (a single ArcGIS host has none) is what crashed this the first time.
 const SATELLITE_TILES = {
   url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-  maxZoom: 19, // no {s} subdomains — this is a single ArcGIS host, unlike the Voyager tiles
+  maxZoom: 21, maxNativeZoom: 19,
   attribution: "Imagery &copy; Esri, Maxar",
+};
+// Faint road/place labels, overlaid ONLY in satellite mode (owner: "a satellite view with no
+// street labels is much harder to navigate") — same source + same opacity the planner already
+// uses for the identical reason.
+const LABELS_TILES = {
+  url: "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}",
+  maxZoom: 21, maxNativeZoom: 19, opacity: 0.4,
 };
 
 // Houston, so a first-ever visit opens somewhere useful rather than on the world map.
@@ -110,6 +165,15 @@ const COLORS = {
   manual: "#E2572B",
 };
 
+// Matches VisitPanel's own literal width (`position: absolute`, `width: 340`) — the pixel
+// amount the panel-aware fly-to offset shifts the pan by. Duplicated as a literal for the same
+// canvas/no-cascade reason as COLORS above, and because sharing it would mean importing across
+// two components for one number — not worth a new shared-constants module for this module's size.
+const PANEL_WIDTH = 340;
+// --accent-food, literal for the same canvas reason as COLORS — ties the selected pin's ring
+// and halo to the panel's own accent dot (VisitPanel.jsx), "the eye connects them."
+const SELECTED_ACCENT = "#BE3B22";
+
 function boundsOf(map) {
   const b = map.getBounds();
   return { south: b.getSouth(), north: b.getNorth(), west: b.getWest(), east: b.getEast() };
@@ -122,14 +186,16 @@ const FLY_TO_ZOOM = 16;
 export default function FoodMap({
   places, placesCapped, placesTotalMatched, loggedPlaces, loggedIds, manualPins, overpassPlaces,
   onSelectPlace, onSelectManualPin, pinMode, onDropPin, onViewChanged, onRequestSearchHere,
-  flyToTarget,
+  flyToTarget, selectedKey,
 }) {
   const hostRef = useRef(null);
   const mapRef = useRef(null);
   const layerRef = useRef(null);
   const tileLayerRef = useRef(null);
+  const labelsLayerRef = useRef(null);
   const [tooSmall, setTooSmall] = useState(false);
   const [basemap, setBasemap] = useState("street"); // "street" | "satellite"
+  const [basemapError, setBasemapError] = useState(false);
 
   // Mount once. The tile layer itself is NOT created here — see the basemap effect below —
   // so toggling satellite never tears down/recreates the map, the marker layer or its handlers.
@@ -153,26 +219,67 @@ export default function FoodMap({
   // Basemap tile layer — swapped whole on toggle (see header comment for why not `setUrl`).
   // React runs this effect's cleanup (removing the PREVIOUS tile layer) before re-running the
   // body on a `basemap` change, so there is never a moment with two tile layers stacked.
+  //
+  // ⛔ B634981 — WRAPPED IN TRY/CATCH ON PURPOSE. A bad tile-layer config (this file's own crash,
+  // see the header comment) must degrade to "Imagery unavailable" rather than throwing out of a
+  // useEffect and taking the whole module down through the workspace error boundary — a basemap
+  // toggle is never worth losing the map, the pins, and every other feature on this route.
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return undefined;
     const source = basemap === "satellite" ? SATELLITE_TILES : STREET_TILES;
-    const layer = L.tileLayer(source.url, {
-      maxZoom: source.maxZoom, subdomains: source.subdomains, attribution: source.attribution,
-    }).addTo(map);
-    layer.bringToBack(); // stays under the marker layer regardless of add order
-    tileLayerRef.current = layer;
-    return () => map.removeLayer(layer);
+    const layers = [];
+    try {
+      // `subdomains` is only added to the options object when the source actually declares one —
+      // never pass an explicit `subdomains: undefined`, which clobbers Leaflet's own internal
+      // default and is exactly what crashed this the first time (see the header comment).
+      const opts = { maxZoom: source.maxZoom, attribution: source.attribution };
+      if (source.subdomains) opts.subdomains = source.subdomains;
+      if (source.maxNativeZoom) opts.maxNativeZoom = source.maxNativeZoom;
+      const layer = L.tileLayer(source.url, opts).addTo(map);
+      layer.bringToBack(); // stays under the marker layer regardless of add order
+      tileLayerRef.current = layer;
+      layers.push(layer);
+
+      if (basemap === "satellite") {
+        const labelsLayer = L.tileLayer(LABELS_TILES.url, {
+          maxZoom: LABELS_TILES.maxZoom, maxNativeZoom: LABELS_TILES.maxNativeZoom, opacity: LABELS_TILES.opacity,
+        }).addTo(map);
+        labelsLayerRef.current = labelsLayer;
+        layers.push(labelsLayer);
+      } else {
+        labelsLayerRef.current = null;
+      }
+      setBasemapError(false);
+    } catch (err) {
+      console.error("FoodMap: basemap tile layer failed to mount", err);
+      setBasemapError(true);
+    }
+    return () => {
+      for (const layer of layers) { try { map.removeLayer(layer); } catch (_) { /* already gone */ } }
+    };
   }, [basemap]);
 
-  // Search result selected — fly to it (owner, 2026-08-18: "selecting a result flies the map
-  // to it"). Keyed on flyToTarget.nonce (not just lat/lon) so re-selecting the SAME result
-  // twice in a row still flies — two identical lat/lon values wouldn't otherwise re-trigger
-  // a dependency-array effect.
+  // Search or list result selected — fly to it, offset so it lands centred in the area the user
+  // can actually SEE (see header comment: the detail panel covers roughly the right third).
+  // Keyed on flyToTarget.nonce (not just lat/lon) so re-selecting the SAME result twice in a row
+  // still flies — two identical lat/lon values wouldn't otherwise re-trigger a dependency-array
+  // effect.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !flyToTarget) return;
-    map.flyTo([flyToTarget.lat, flyToTarget.lon], Math.max(map.getZoom(), FLY_TO_ZOOM));
+    const targetZoom = Math.max(map.getZoom(), FLY_TO_ZOOM);
+    // Standard Leaflet pixel-offset-pan pattern: project the target at the destination zoom,
+    // shift it RIGHT by half the panel's width, then unproject back — flying to that shifted
+    // point puts the ORIGINAL target left-of-true-centre by the same amount, i.e. dead centre of
+    // the visible (unobstructed) region. Clamped to 40% of the map's own width so a narrow/phone
+    // viewport (where the panel can approach the map's full width) never shifts the target off
+    // the visible area entirely in the other direction.
+    const containerWidth = map.getSize().x;
+    const panelOffsetPx = Math.min(PANEL_WIDTH, containerWidth * 0.8) / 2;
+    const targetPoint = map.project([flyToTarget.lat, flyToTarget.lon], targetZoom);
+    const shiftedLatLng = map.unproject(targetPoint.add([panelOffsetPx, 0]), targetZoom);
+    map.flyTo(shiftedLatLng, targetZoom);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flyToTarget?.nonce]);
 
@@ -198,8 +305,22 @@ export default function FoodMap({
     // Wider white keyline on satellite — see the header comment on PIN LEGIBILITY ON IMAGERY.
     const strokeWeight = basemap === "satellite" ? 3 : 2;
     const addPin = (lat, lon, color, title, onClick, opts = {}) => {
+      const isSelected = opts.key != null && opts.key === selectedKey;
+      const baseRadius = opts.radius ?? 7;
+      // Selected: noticeably larger, an accent-coloured ring (never the plain white every other
+      // state uses), PLUS a soft halo behind it — unmistakable at a glance, distinct from both
+      // the unrated-neutral and the rated-colour states (owner, 2026-08-19).
+      if (isSelected) {
+        L.circleMarker([lat, lon], {
+          renderer: layer.options.renderer, radius: baseRadius + 12, weight: 0,
+          fillColor: SELECTED_ACCENT, fillOpacity: 0.22, interactive: false,
+        }).addTo(layer);
+      }
       const m = L.circleMarker([lat, lon], {
-        renderer: layer.options.renderer, radius: opts.radius ?? 7, weight: strokeWeight, color: "#fff",
+        renderer: layer.options.renderer,
+        radius: isSelected ? baseRadius + 5 : baseRadius,
+        weight: isSelected ? 4 : strokeWeight,
+        color: isSelected ? SELECTED_ACCENT : "#fff",
         fillColor: color, fillOpacity: opts.fillOpacity ?? 0.95,
       });
       m.bindTooltip(title, { direction: "top", offset: [0, -6] });
@@ -212,10 +333,10 @@ export default function FoodMap({
     // 1-10 ramp so a glance shows where the good ones are; a visited-but-not-yet-rated place
     // falls back to the flat logged/manual colour.
     for (const p of loggedPlaces || []) {
-      addPin(p.lat, p.lon, colorForRating(p.avgRating) || COLORS.logged, p.name, () => onSelectPlace?.(p));
+      addPin(p.lat, p.lon, colorForRating(p.avgRating) || COLORS.logged, p.name, () => onSelectPlace?.(p), { key: `place:${p.id}` });
     }
     for (const pin of manualPins || []) {
-      addPin(pin.lat, pin.lon, colorForRating(pin.avgRating) || COLORS.manual, pin.name, () => onSelectManualPin?.(pin));
+      addPin(pin.lat, pin.lon, colorForRating(pin.avgRating) || COLORS.manual, pin.name, () => onSelectManualPin?.(pin), { key: `pin:${pin.name}` });
     }
 
     // The reference snapshot — a lookup table he reaches into once zoomed to a neighbourhood,
@@ -228,14 +349,14 @@ export default function FoodMap({
     if (!tooSmall) {
       for (const p of places || []) {
         if (loggedIds?.has(p.id)) continue;
-        addPin(p.lat, p.lon, COLORS.unlogged, p.name, () => onSelectPlace?.(p), REFERENCE_PIN);
+        addPin(p.lat, p.lon, COLORS.unlogged, p.name, () => onSelectPlace?.(p), { ...REFERENCE_PIN, key: `place:${p.id}` });
       }
       for (const p of overpassPlaces || []) {
         if (loggedIds?.has(p.id)) continue; // already shown from the snapshot pass, avoid a double pin
-        addPin(p.lat, p.lon, COLORS.unlogged, `${p.name} (live search)`, () => onSelectPlace?.(p), REFERENCE_PIN);
+        addPin(p.lat, p.lon, COLORS.unlogged, `${p.name} (live search)`, () => onSelectPlace?.(p), { ...REFERENCE_PIN, key: `place:${p.id}` });
       }
     }
-  }, [places, loggedPlaces, loggedIds, manualPins, overpassPlaces, tooSmall, basemap, onSelectPlace, onSelectManualPin]);
+  }, [places, loggedPlaces, loggedIds, manualPins, overpassPlaces, tooSmall, basemap, selectedKey, onSelectPlace, onSelectManualPin]);
 
   const showCappedNotice = !tooSmall && placesCapped;
   const hasOwnPlaces = (loggedPlaces?.length || 0) + (manualPins?.length || 0) > 0;
@@ -276,6 +397,15 @@ export default function FoodMap({
         >
           🔍 Search live for more here
         </button>
+      )}
+      {basemapError && (
+        <div data-testid="food-basemap-error" role="status" style={{
+          position: "absolute", top: 56, right: 12, zIndex: 500,
+          background: "var(--surface-raised)", color: "var(--text-secondary)", border: "1px solid var(--border-default)",
+          borderRadius: 8, padding: "6px 10px", fontSize: 12, boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
+        }}>
+          Imagery unavailable
+        </div>
       )}
       <button
         type="button" onClick={() => setBasemap((b) => (b === "satellite" ? "street" : "satellite"))}

@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-18 @ `ebeea8c` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-18 @ `e80c023` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_539 source files mapped._
+_540 source files mapped._
 
 ## infra
 
@@ -53,6 +53,8 @@ _539 source files mapped._
   - _exports_: `default (FoodApp)`
 - **`src/workspaces/food/lib/foodStore.js`** — The one seam to Supabase: place/visit queries, visit CRUD, manual-pin grouping, the logged-place-id set
   - _exports_: `avgRatingByPlaceId`, `deleteVisit`, `fetchAllVisits`, `fetchPlaceById`, `fetchPlacesByIds`, `fetchPlacesInBounds`, `insertVisit`, `loggedPlaceIds`, `manualPinsFromVisits`, `searchPlacesByName`, `supabaseConfigured`, `updateVisit`
+- **`src/workspaces/food/lib/formatPlace.js`** — Display-only category title-casing (with an acronym exception list) and address ZIP+4 tidy — never mutates the stored value
+  - _exports_: `formatAddress`, `formatCategory`
 - **`src/workspaces/food/lib/overpass.js`** — OpenStreetMap Overpass fallback: cached per-bbox live query, called only on explicit user request
   - _exports_: `fromElement`, `queryFor`, `roundKey`, `searchOverpass`
 - **`src/workspaces/food/lib/ratingColor.js`** — the 1-10 rating colour ramp for map pins/list/panel (warm cream to deep red-brown, WCAG-measured contrast, no green)
