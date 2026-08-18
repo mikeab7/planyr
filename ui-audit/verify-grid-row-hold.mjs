@@ -19,6 +19,16 @@
  * silently moves the selection, and then the harness measures a row nobody is editing and reports
  * calm. Both were caught happening while this file was being written.
  *
+ * ⛔ B463922 (×2), owner repro 2026-08-18: "clicking to open up the ALTA & Topo Survey stuff...
+ * jumps me down to the middle of the schedule so I can't even see what I just opened." The FIRST
+ * fix (above) made the row you're EDITING hold still — but it anchored on `selectedId` even when
+ * nothing is actively being edited, just clicked-on-a-while-ago. Expanding a group with a stale,
+ * merely-selected row sitting BELOW it and still on screen threw the toggled group and its brand
+ * new children off screen ABOVE, to hold that stale row's screen position instead. Section 6 below
+ * reproduces this exactly (a distant selection, no open editor, an expand target above it, both on
+ * screen) and section 7 covers the sibling defect a row-height change has the same shape: rescaling
+ * every row with no scrollTop compensation threw the on-screen row clean out of the render window.
+ *
  * Run:  node ui-audit/verify-grid-row-hold.mjs      [PW_CHROME=<chrome>]
  *       PLANYR_URL=https://planyr.io/sequence/ node ui-audit/verify-grid-row-hold.mjs   (the deployed bytes)
  * Exit 0 = every anchor held. Exit 1 = a real jump, a vacuous step, or a wandering selection.
@@ -189,7 +199,13 @@ let rowTop = await page.evaluate(i => window.__rowTop(i), ROW);
 line(`editing row ${ROW}, on screen at ${rowTop}px from the top of the grid`);
 const g1 = await pickToggleRow("Collapse", rowTop);
 await step(`collapse group ${g1}, ABOVE the row being edited`, ROW, ROW, () => clickToggle(g1, "Collapse"));
-await step(`expand group ${g1} again`, ROW, ROW, () => clickToggle(g1, "Expand"));
+/* B463922 (×2) — this step's anchor changed from ROW to g1. A collapse never reveals anything, so
+   protecting the row being edited (ROW) is still correct there (above). But an EXPAND's whole point
+   is to reveal what it just uncovered — g1's own new children — so g1, the row that was actually
+   clicked, is the anchor now, and ROW (merely selected, not being typed into) is expected to drift
+   as those new rows push it down. Section 6 below is the owner's exact repro of the OLD behaviour
+   choosing wrong here; this step proves the new priority holds for the toggle itself. */
+await step(`expand group ${g1} again — the CLICKED row is the anchor, not the merely-selected one`, g1, ROW, () => clickToggle(g1, "Expand"));
 rowTop = await page.evaluate(i => window.__rowTop(i), ROW);
 const g2 = await pickToggleRow("Collapse", rowTop);
 await step(`collapse a second group (${g2}) above it`, ROW, ROW, () => clickToggle(g2, "Collapse"));
@@ -316,6 +332,131 @@ await keyStep("edit the start date (Enter commits)", async () => {
 await keyStep("undo that edit", () => page.keyboard.press("Control+z"));
 await keyStep("redo it", () => page.keyboard.press("Control+y"));
 await keyStep("Tab across six columns", async () => { for (let i = 0; i < 6; i++) { await page.keyboard.press("Tab"); await pacedWait(page, 90); } });
+
+/* 6. ⛔ THE OWNER'S EXACT REPRO (B463922 ×2, 2026-08-18): "clicking to open up the ALTA & Topo
+   Survey stuff... jumps me down to the middle of the schedule so I can't even see what I just
+   opened." Stage it precisely: a row clicked (selected) a while ago, NOT being edited, sitting
+   BELOW a currently-collapsed group that is also on screen — then expand that group. Before the
+   fix, `installScrollWitness` caught a real APP write (not a driver artifact — the toggle and the
+   distant row are proven on-screen with `targetVisibility` first, so nothing here needed
+   Playwright's own scroll-into-view) throwing the toggled row and its new children off screen
+   above by exactly the height of what was revealed, to hold the stale selection's position instead.
+   The assertion: the toggled row itself holds (it's the anchor now), and the row that appears
+   immediately below it afterward is BOTH new (wasn't there before — the reveal genuinely happened)
+   and actually on screen (not just rendered off in the virtualiser's buffer). */
+line("\nB463922 (×2) — the owner's exact repro: expand a group while a stale selection sits below it, on screen\n");
+await boot();
+await page.evaluate(() => { window.__g.scrollTop = 0; });
+await pacedWait(page, 300);
+const TOGGLE = await pickToggleRow("Collapse", null);
+await clickToggle(TOGGLE, "Collapse");             // start collapsed — like the group he reopened
+await pacedWait(page, 300);
+// A row ~400px below the toggle — comfortably clear of it, and (after we scroll the toggle near
+// the top) still on screen at the same time, matching a tall-viewport real-world layout.
+const DISTANT = await page.evaluate(id => {
+  const rows = [...document.querySelectorAll("[data-task-row]")];
+  const tTop = document.querySelector(`[data-task-row="${id}"]`).getBoundingClientRect().top;
+  let best = null, bestDelta = Infinity;
+  for (const r of rows) {
+    const rid = r.getAttribute("data-task-row");
+    if (rid === String(id)) continue;
+    const delta = Math.abs((r.getBoundingClientRect().top - tTop) - 400);
+    if (delta < bestDelta) { bestDelta = delta; best = rid; }
+  }
+  return best;
+}, TOGGLE);
+await selectRow(DISTANT);                          // a click, a while ago — not an open editor
+await page.evaluate(id => {
+  const g = window.__g, t = document.querySelector(`[data-task-row="${id}"]`);
+  g.scrollTop = Math.max(0, g.scrollTop + (t.getBoundingClientRect().top - g.getBoundingClientRect().top) - 40);
+}, TOGGLE);
+await pacedWait(page, 300);
+const toggleVis = await targetVisibility(page, GRID, page.locator(`[data-task-row="${TOGGLE}"] span[title="Expand"]`));
+const distantVis = await targetVisibility(page, GRID, page.locator(`[data-task-row="${DISTANT}"] > div`).nth(1));
+if (!toggleVis.visible || !distantVis.visible) {
+  failures.push(`owner-repro: could not stage both rows on screen at once (toggle ${JSON.stringify(toggleVis)}, distant ${JSON.stringify(distantVis)})`);
+  line("  ✗ owner-repro — could not stage the scenario (toggle or distant row not on screen together)");
+} else {
+  const before = await page.evaluate((ids) => ({
+    toggle: window.__rowTop(ids[0]), distant: window.__rowTop(ids[1]), len: window.__listLen(), sel: window.__selRow(),
+    nextRow: (() => { const rows = [...document.querySelectorAll("[data-task-row]")]; const i = rows.findIndex(r => r.getAttribute("data-task-row") === String(ids[0])); return i >= 0 && i + 1 < rows.length ? rows[i + 1].getAttribute("data-task-row") : null; })(),
+  }), [TOGGLE, DISTANT]);
+  await page.evaluate(() => { window.__scrollWitness.writes.length = 0; });
+  await visibleClick(page, GRID, page.locator(`[data-task-row="${TOGGLE}"] span[title="Expand"]`), "expand the owner's group");
+  await pacedWait(page, 500);
+  const after = await page.evaluate((ids) => ({
+    toggle: window.__rowTop(ids[0]), distant: window.__rowTop(ids[1]), len: window.__listLen(), sel: window.__selRow(),
+    nextRow: (() => { const rows = [...document.querySelectorAll("[data-task-row]")]; const i = rows.findIndex(r => r.getAttribute("data-task-row") === String(ids[0])); return i >= 0 && i + 1 < rows.length ? rows[i + 1].getAttribute("data-task-row") : null; })(),
+  }), [TOGGLE, DISTANT]);
+  const writes = await page.evaluate(() => window.__scrollWitness.writes.slice());
+  line(`  toggle ${TOGGLE}: ${before.toggle}px → ${after.toggle}px   distant ${DISTANT}: ${before.distant}px → ${after.distant}px` +
+       `   list ${before.len} → ${after.len}   app scroll writes ${writes.length}`);
+  if (after.len === before.len) {
+    failures.push("owner-repro: NOTHING CHANGED — the expand did nothing, so this proves nothing");
+    line("  ✗ owner-repro — ⚠ the model did not change");
+  } else if (after.sel !== String(DISTANT)) {
+    failures.push(`owner-repro: the selection moved (${before.sel} → ${after.sel}) — the toggle stole it`);
+    line(`  ✗ owner-repro — the selection moved to ${after.sel}; the toggle click is supposed to leave it alone`);
+  } else if (after.toggle === null) {
+    failures.push("owner-repro: the toggled row itself left the rendered window");
+    line("  ✗ owner-repro — the toggled row is no longer rendered");
+  } else if (Math.abs(after.toggle - before.toggle) > TOL) {
+    failures.push(`owner-repro: the toggled row moved ${after.toggle - before.toggle}px on screen (budget ±${TOL}) — what he opened is not where he left it`);
+    line(`  ✗ owner-repro — the toggled row moved ${after.toggle - before.toggle}px; budget ±${TOL}`);
+  } else if (after.nextRow === before.nextRow) {
+    failures.push(`owner-repro: no new row appeared below the toggle (still ${after.nextRow}) — nothing was actually revealed`);
+    line(`  ✗ owner-repro — the row below the toggle didn't change (${after.nextRow}); the expand revealed nothing`);
+  } else {
+    const revealedVis = await targetVisibility(page, GRID, page.locator(`[data-task-row="${after.nextRow}"] > div`).nth(1));
+    if (!revealedVis.visible) {
+      failures.push(`owner-repro: the newly revealed row ${after.nextRow} is NOT on screen (${revealedVis.reason}) — exactly what he reported`);
+      line(`  ✗ owner-repro — the newly revealed row ${after.nextRow} is off screen: ${revealedVis.reason}`);
+    } else {
+      line(`  ✓ owner-repro — the toggled row held its place (Δ ${after.toggle - before.toggle}px) and its new child (row ${after.nextRow}) is on screen at ${revealedVis.offset}px`);
+    }
+  }
+}
+
+/* 7. B548xxx — a row-height change (Format panel slider) must not throw the on-screen view out of
+   the rendered window. Stage a mid-viewport row, change the height, and require it to still be
+   RENDERED (virtualisation didn't drop it) — the pre-fix failure was `getBoundingClientRect()`
+   returning nothing at all because the row fell entirely outside the buffered render window, with
+   zero app scrollTop writes (a re-render nobody compensated for, not a jump somewhere else). */
+line("\nB548xxx — a row-height change must not throw the view out of the rendered window\n");
+await boot();
+await page.evaluate(() => { window.__g.scrollTop = Math.floor(window.__g.scrollHeight / 2); });
+await pacedWait(page, 300);
+const RHROW = await midRow();
+await selectRow(RHROW);
+const rhBefore = await page.evaluate(i => ({ top: window.__rowTop(i) }), RHROW);
+await page.click('button[title="Format — row height & bar labels"]');
+await pacedWait(page, 300);
+const slider = page.locator('input[type="range"][max="34"]');
+const sliderCount = await slider.count();
+if (!sliderCount) {
+  failures.push("row-height: the Format panel's row-height slider was not found — could not drive it");
+  line("  ✗ row-height — slider not found");
+} else {
+  await page.evaluate(() => {
+    const inp = document.querySelector('input[type="range"][max="34"]');
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(inp, "34");
+    inp.dispatchEvent(new Event("input", { bubbles: true }));
+    inp.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await pacedWait(page, 400);
+  await page.keyboard.press("Escape");               // close the Format panel so it's not covering the grid for later runs
+  const rhAfter = await page.evaluate(i => ({ top: window.__rowTop(i) }), RHROW);
+  if (rhAfter.top === null) {
+    failures.push(`row-height: row ${RHROW} left the rendered window entirely after the resize`);
+    line(`  ✗ row-height — row ${RHROW} is no longer rendered (was at ${rhBefore.top}px)`);
+  } else if (Math.abs(rhAfter.top - rhBefore.top) > TOL) {
+    // A selected row is the anchor for this compensation too — it should hold near-exactly, not just "somewhere on screen".
+    failures.push(`row-height: the selected row moved ${rhAfter.top - rhBefore.top}px on screen (budget ±${TOL})`);
+    line(`  ✗ row-height — selected row ${RHROW} moved ${rhAfter.top - rhBefore.top}px: ${rhBefore.top}px → ${rhAfter.top}px`);
+  } else {
+    line(`  ✓ row-height — selected row ${RHROW} held its place across the resize (${rhBefore.top}px → ${rhAfter.top}px)`);
+  }
+}
 
 /* 5. THE GUARD'S OWN MUTATION PROOF, run every time so it cannot rot green: aim `visibleClick` at
    the exact target the old harness clicked — the first toggle the virtualiser renders, which sits

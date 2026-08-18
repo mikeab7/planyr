@@ -1,5 +1,37 @@
 # B463922 — the Schedule grid throws the edited row off screen. Handoff.
 
+> ## ✅ RESOLVED (×2) 2026-08-18 — the owner's own symptom, unobserved as of the note below, WAS
+> observed, reproduced, and fixed. Read this note first; the REFUTED section below it is still
+> correct about the OLD, driver-artifact "reproduction" — do not re-open that hypothesis either.
+>
+> **The owner's concrete repro:** *"I was clicking [the Goose Creek schedule] to open up the ALTA
+> and Topo survey stuff... it jumps me down to the middle of the schedule so I can't even see what
+> I just opened."* Reproduced headlessly against the app's own baked-in Goose Creek seed data —
+> the same plan and the same group (task 9, "ALTA & Topo Survey") — with a real, app-owned
+> `scrollTop` write proven via `installScrollWitness` (not a driver artifact; every click went
+> through `visibleClick`, which refuses to click anything not already on screen).
+>
+> **Root cause:** the anchor-preservation effect this document's earlier work shipped (see the
+> "what replaced this" note in the REFUTED section) holds the row the user is "working on" fixed
+> on screen — priority: the selected row while it's on screen, else the top-of-viewport row. That
+> is correct for protecting a live edit against an unrelated background change. It is wrong for a
+> click whose entire point is to REVEAL rows: a stale `selectedId` — a row merely clicked at some
+> earlier point, no editor open — sitting below the toggle and still on screen, outranked the
+> group that was just clicked, throwing it and its new children off screen above by exactly the
+> height of what was revealed.
+>
+> **The fix:** the expand toggle's `onClick` now records which row it's expanding
+> (`expandAnchorRef`); the scroll-anchor effect prefers that row over a stale `selectedId` UNLESS
+> a cell editor is genuinely open elsewhere (`edit != null`), in which case the live edit still
+> wins — so the vaguer, separately-reported complaint ("sometimes if I'm editing cells... I'll
+> jump") stays covered by the original, unchanged protection. A second, distinct bug was found and
+> fixed in the same session: changing the row-height slider (Format panel) threw the on-screen row
+> completely out of the rendered window, with zero compensation for the rescale.
+>
+> Both are mutation-proven in `ui-audit/verify-grid-row-hold.mjs` (sections added 2026-08-18: the
+> owner's exact repro, and the row-height resize) — each fails on the pre-fix code and passes on
+> the fix. Full writeup: `BACKLOG-DONE.md`, B463922.
+>
 > ## ⛔⛔ REFUTED 2026-08-13 — READ THIS BEFORE ANYTHING BELOW IT.
 >
 > **The +477 px jump this document reports is the instrument's own scroll.** Everything below was
