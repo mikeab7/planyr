@@ -96,6 +96,11 @@ METROS = [
     {"name": "Dallas-Fort Worth", "bbox": (-97.6, 32.2, -96.3, 33.4)},
     # Dripping Springs/Lake Travis -> Manor/Elgin, Buda -> Round Rock/Georgetown.
     {"name": "Austin", "bbox": (-98.1, 29.9, -97.35, 30.75)},
+    # Maui, Hawaii (owner, 2026-08-19: "add maui too" — the parameterisation test: this is
+    # ONE config row, nothing else). West of Lahaina to Hana, Kahului to the Haleakala coast.
+    # The island is mostly ocean inside its own bbox, so a sane row count here is expected to
+    # be much smaller than the mainland metros, not evidence something failed (see B634982).
+    {"name": "Maui", "bbox": (-156.75, 20.55, -155.95, 21.05)},
 ]
 DEFAULT_MIN_CONFIDENCE = 0.5
 

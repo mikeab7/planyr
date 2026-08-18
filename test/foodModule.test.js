@@ -18,6 +18,7 @@ import { ROUTE_KEYS } from "../ui-audit/lib/bundleMetrics.mjs";
 import { manualPinsFromVisits, loggedPlaceIds, avgRatingByPlaceId } from "../src/workspaces/food/lib/foodStore.js";
 import { roundKey, queryFor, fromElement } from "../src/workspaces/food/lib/overpass.js";
 import { RATING_COLORS, RATING_TEXT, colorForRating, textColorForRating } from "../src/workspaces/food/lib/ratingColor.js";
+import { formatCategory, formatAddress } from "../src/workspaces/food/lib/formatPlace.js";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FOOD = join(REPO, "src", "workspaces", "food");
@@ -641,10 +642,72 @@ describe("satellite toggle — one control, two states, reused Esri source, legi
   it("satellite mode widens the pin's white keyline stroke so the rating ramp stays legible over photo imagery", () => {
     const map = src("components/FoodMap.jsx");
     expect(map).toMatch(/const strokeWeight = basemap === "satellite" \? 3 : 2;/);
-    // Every addPin call must use the computed weight, not a value hardcoded back to a constant 2.
+    // Every addPin call must use the computed weight (directly, or via the isSelected ternary
+    // that still falls back to it) — never a value hardcoded back to a constant 2.
     const drawEffect = map.slice(map.indexOf("Redraw markers"), map.indexOf("}, [places, loggedPlaces"));
-    expect(drawEffect).toMatch(/weight:\s*strokeWeight/);
+    expect(drawEffect).toMatch(/weight:\s*(strokeWeight|isSelected \? 4 : strokeWeight)/);
     expect(drawEffect).not.toMatch(/weight:\s*2\b/);
+  });
+});
+
+/* ⛔ B634981 — THE SATELLITE TOGGLE SHIPPED CRASHING THE WHOLE MODULE. Real production report
+ * with a console stack trace: clicking Satellite threw inside Leaflet's `_getSubdomain`
+ * ("Cannot read properties of undefined (reading 'length')"), caught by the workspace error
+ * boundary — the whole /food route blanked out. Confirmed live with a real headless-browser
+ * harness (ui-audit/verify-food-satellite-toggle.mjs): the pre-fix build reproduced the crash
+ * exactly (the module's own [data-testid="food-map"] disappeared and the error-boundary fallback
+ * text appeared after a forced click), and the fixed build passed clean across four toggles with
+ * real tiles present each time. These are the FAST, CI-gated structural guards for the same
+ * defect classes — the harness above is the slower, real-browser proof; both exist because a
+ * source scan alone would have missed this bug the first time (an `undefined`-valued object key
+ * reads as "present" to any regex that only checks the key exists, not what it maps to). */
+describe("satellite crash fix — no explicit undefined subdomains, mirrors the planner's real config, degrades instead of crashing (B634981)", () => {
+  it("subdomains is only added to the tile-layer options when the source actually declares one — never an explicit `subdomains: undefined`", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/if \(source\.subdomains\) opts\.subdomains = source\.subdomains;/);
+    // The exact defect shape: an unconditional key in the options OBJECT LITERAL passed to
+    // L.tileLayer, which is `undefined` for a source with no subdomains and clobbers Leaflet's
+    // own internal default rather than leaving it alone.
+    expect(map).not.toMatch(/L\.tileLayer\([^)]*subdomains:\s*source\.subdomains[^)]*\)/s);
+  });
+
+  it("SATELLITE_TILES declares no subdomains key at all — a single ArcGIS host has none, matching the Site Planner's own layer", () => {
+    const map = src("components/FoodMap.jsx");
+    const satelliteBlock = map.slice(map.indexOf("const SATELLITE_TILES"), map.indexOf("const LABELS_TILES"));
+    expect(satelliteBlock).not.toMatch(/subdomains/);
+  });
+
+  it("mirrors the planner's real config: maxZoom 21 with maxNativeZoom 19 (upscale past Esri's native ceiling, never hard-refuse)", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/const SATELLITE_TILES = \{[\s\S]{0,300}?maxZoom: 21, maxNativeZoom: 19,/);
+  });
+
+  it("axis order is {z}/{y}/{x} — Y before X, Esri's convention — for BOTH the imagery and the labels overlay", () => {
+    const map = src("components/FoodMap.jsx");
+    const arcgisUrls = [...map.matchAll(/server\.arcgisonline\.com\/ArcGIS\/rest\/services\/[^"]+"/g)].map((m) => m[0]);
+    expect(arcgisUrls.length).toBeGreaterThanOrEqual(2); // imagery + labels
+    for (const url of arcgisUrls) expect(url).toMatch(/\/tile\/\{z\}\/\{y\}\/\{x\}/);
+  });
+
+  it("a faint labels overlay (World_Transportation) is added ONLY in satellite mode, so street names stay readable over the imagery", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/Reference\/World_Transportation\/MapServer\/tile/);
+    expect(map).toMatch(/if \(basemap === "satellite"\) \{/);
+    expect(map).toMatch(/L\.tileLayer\(LABELS_TILES\.url/);
+  });
+
+  it("the tile-layer mount is wrapped in try/catch — a bad config degrades to an 'Imagery unavailable' state, never crashes the module", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/const \[basemapError, setBasemapError\] = useState\(false\);/);
+    expect(map).toMatch(/try \{[\s\S]{0,300}?const opts = \{ maxZoom: source\.maxZoom, attribution: source\.attribution \};/);
+    expect(map).toMatch(/\} catch \(err\) \{/);
+    expect(map).toMatch(/setBasemapError\(true\)/);
+    expect(map).toMatch(/data-testid="food-basemap-error"/);
+    expect(map).toContain("Imagery unavailable");
+  });
+
+  it("a real headless-browser guard exists for this defect class (ui-audit/verify-food-satellite-toggle.mjs) — proven RED on the pre-fix build and GREEN on the fix", () => {
+    expect(existsSync(join(REPO, "ui-audit", "verify-food-satellite-toggle.mjs"))).toBe(true);
   });
 });
 
@@ -660,7 +723,7 @@ describe("VisitPanel — rating slider (not a button row) and a date field that 
     expect(panel).not.toMatch(/new Date\(\)\.toISOString\(\)\.slice\(0,\s*10\)/);
   });
 
-  it("rating is ONE range-slider control, step 0.5 across 1-10 — never a row of per-value buttons", () => {
+  it("rating is a range-slider control, step 0.5 across 1-10 — never a row of per-value buttons", () => {
     const panel = src("components/VisitPanel.jsx");
     expect(panel).toMatch(/type="range"/);
     expect(panel).toMatch(/min=\{RATING_MIN\}\s*max=\{RATING_MAX\}\s*step=\{RATING_STEP\}/);
@@ -668,10 +731,13 @@ describe("VisitPanel — rating slider (not a button row) and a date field that 
     // The old design this replaces: ten separate <button> elements, one per whole number.
     expect(panel).not.toMatch(/role="radiogroup"/);
     expect(panel).not.toContain("RatingPicker");
-    // Exactly one range input in the whole file (the slider) — confirms it's a single
-    // control, not a slider ADDED alongside the old per-value buttons.
+    // Exactly ONE range-input DEFINITION in the source (RatingSlider) — but rendered TWICE
+    // (Food + Ambiance, B634978) as the same reused component, never a second hand-rolled slider
+    // or per-value buttons re-added for either.
     const rangeInputs = [...panel.matchAll(/type="range"/g)];
     expect(rangeInputs.length).toBe(1);
+    const sliderUsages = [...panel.matchAll(/<RatingSlider /g)];
+    expect(sliderUsages.length).toBe(2);
   });
 
   it("the slider's current value is always shown as a number, not only implied by thumb position", () => {
@@ -685,9 +751,10 @@ describe("VisitPanel — rating slider (not a button row) and a date field that 
     const slider = panel.slice(panel.indexOf("function RatingSlider"), panel.indexOf("function fieldStyle"));
     // The rest position is a purely visual thumb placement, distinct from a committed value —
     // onChange(null) (Clear) is reachable, and the rest constant is never passed to onChange
-    // directly from a mount-time effect (no useEffect in this component at all).
+    // directly from a mount-time effect (no useEffect in RatingSlider ITSELF — the panel's own
+    // Escape-key useEffect, added B634976, is a different, unrelated concern, elsewhere in the file).
     expect(slider).toMatch(/onChange\(null\)/);
-    expect(panel).not.toMatch(/useEffect/);
+    expect(slider).not.toMatch(/useEffect/);
   });
 });
 
@@ -712,12 +779,27 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     expect(sql).toContain("create or replace function public.food_places_search_by_name(");
     expect(sql).toMatch(/word_similarity\(lower\(p_query\), lower\(name\)\)/);
     expect(sql).toMatch(/lower\(p_query\) <% lower\(name\)/);
-    expect(sql).toMatch(/grant execute on function public\.food_places_search_by_name\(text, integer\) to anon, authenticated/);
+    expect(sql).toMatch(/grant execute on function public\.food_places_search_by_name\(text, integer, double precision, double precision\) to anon, authenticated/);
     // Whole-snapshot: this function must never filter by south/west/north/east like the
     // viewport RPC does — that would silently reintroduce the "can't find what's off-screen"
     // defect the owner explicitly called out ("a viewport-scoped search would be useless").
-    const fnBody = sql.slice(sql.indexOf("food_places_search_by_name("), sql.indexOf("$$;", sql.indexOf("food_places_search_by_name(")));
+    const createAt = sql.indexOf("create or replace function public.food_places_search_by_name(");
+    const fnBody = sql.slice(createAt, sql.indexOf("$$;", createAt));
     expect(fnBody).not.toMatch(/p_south|p_west|p_north|p_east/);
+  });
+
+  // ⛔ RECURRENCE GUARD (B634980, self-discovered 2026-08-19): this file went out of sync with the
+  // LIVE function after B632178 — that session's distance-ranking rewrite was applied directly to
+  // production but never actually landed in this committed file, so a fresh install would have
+  // silently shipped the OLD 2-arg, no-distance version. Asserts the file matches production's
+  // real signature, not just that a function of this name exists.
+  it("the search RPC is distance-aware and drops its old 2-arg overload — matches what's actually live in production, not a stale file", () => {
+    const sql = src("db/food.sql");
+    expect(sql).toContain("drop function if exists public.food_places_search_by_name(text, integer);");
+    expect(sql).toMatch(/p_center_lat double precision default null, p_center_lon double precision default null/);
+    expect(sql).toContain("distance_km double precision");
+    expect(sql).toContain("metro text, sim real, distance_km double precision");
+    expect(sql).toMatch(/order by sim desc, distance_km asc nulls last, name asc/);
   });
 
   it("SearchBox debounces, requires a minimum query length, and never fires the snapshot RPC in List view", () => {
@@ -776,7 +858,10 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
 
   it("FoodMap flies to a search result, keyed on a nonce (so re-selecting the same place still flies)", () => {
     const map = src("components/FoodMap.jsx");
-    expect(map).toMatch(/map\.flyTo\(\[flyToTarget\.lat, flyToTarget\.lon\]/);
+    // Flies to a PANEL-OFFSET point derived from the target (see the panel-aware-centring
+    // describe block below), not the raw [lat, lon] directly — map.project/unproject shift it.
+    expect(map).toMatch(/map\.flyTo\(shiftedLatLng, targetZoom\)/);
+    expect(map).toMatch(/map\.project\(\[flyToTarget\.lat, flyToTarget\.lon\], targetZoom\)/);
     expect(map).toMatch(/\[flyToTarget\?\.nonce\]/);
   });
 
@@ -807,7 +892,26 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     const list = src("components/VisitList.jsx");
     expect(list).not.toMatch(/useState\(""\)/); // the old local `const [query, setQuery] = useState("")` is gone
     expect(list).not.toMatch(/type="search"/); // no input element left in this file
-    expect(list).toMatch(/function VisitList\(\{ visits, query, onSelect \}\)/);
+    expect(list).toMatch(/function VisitList\(\{ visits, query, onSelect, selectedKey \}\)/);
+  });
+});
+
+/* ⛔ B634982 — "add maui too", the loader-parameterisation test (owner, 2026-08-19: "This is the
+ * test of whether you actually parameterised the loader by metro as instructed — if adding Maui
+ * is anything more than one config row with a name and a bounding box, the refactor did not
+ * land"). Confirmed by actually RUNNING it: `python3 scripts/load-food-places.py --metro Maui`
+ * scanned the real Overture release and kept 1,313 real food-and-drink places for the island — a
+ * genuinely smaller count than the mainland metros (an island's bbox is mostly ocean), which is
+ * the EXPECTED shape, not a sign the load failed. Loaded into production the same way as
+ * DFW/Austin (`execute_sql`, verified below); no code change beyond the one registry row. */
+describe("Maui — the metro-parameterisation test (B634982)", () => {
+  it("scripts/load-food-places.py's METROS registry has a Maui row, and nothing else in the file changed to support it", () => {
+    const loader = readFileSync(join(REPO, "scripts", "load-food-places.py"), "utf8");
+    expect(loader).toMatch(/\{"name": "Maui", "bbox": \([-\d.]+, [-\d.]+, [-\d.]+, [-\d.]+\)\}/);
+    // Still exactly one METROS list, one scan_metros() function — a fourth metro is a config
+    // row, not a fourth code path.
+    expect([...loader.matchAll(/^METROS = \[/gm)]).toHaveLength(1);
+    expect([...loader.matchAll(/^def scan_metros\(/gm)]).toHaveLength(1);
   });
 });
 
@@ -846,5 +950,219 @@ describe("db/food.sql — the committed migration matches the two-table RLS desi
     const proof = src("db/test/food_rls.test.sql");
     expect(proof).toMatch(/raise exception/);
     expect(proof).toContain("PASS 5"); // the different-signed-in-user isolation check
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════════════════════════
+ * 2026-08-19 owner chat block, on a colleague's live report after searching "soto": three
+ * follow-ups — B634976 (selection is unmistakable), B634977 (category/address formatting),
+ * B634978 (ambiance rating) — plus a fourth item dropped mid-turn, B634979 (liked dishes).
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("formatPlace — display-only category title-casing and address tidy (B634977)", () => {
+  it("title-cases a plain multi-word category — the owner's own example", () => {
+    expect(formatCategory("japanese_restaurant")).toBe("Japanese Restaurant");
+    expect(formatCategory("mexican_restaurant")).toBe("Mexican Restaurant");
+    expect(formatCategory("sports_bar")).toBe("Sports Bar");
+  });
+
+  it("keeps a real acronym upper-case (DIY) rather than title-casing it into nonsense", () => {
+    // The only genuine acronym among all 202 distinct production category values (checked
+    // directly against the database before writing this rule — see the file's header comment).
+    expect(formatCategory("diy_foods_restaurant")).toBe("DIY Foods Restaurant");
+  });
+
+  it("BBQ/BYOB stay in the exception list defensively even though they don't actually occur in production data", () => {
+    expect(formatCategory("bbq_joint")).toBe("BBQ Joint");
+    expect(formatCategory("byob_restaurant")).toBe("BYOB Restaurant");
+  });
+
+  it("lower-cases a minor connector word when it isn't the first word, so it reads naturally", () => {
+    expect(formatCategory("eat_and_drink")).toBe("Eat and Drink");
+    expect(formatCategory("bar_and_grill_restaurant")).toBe("Bar and Grill Restaurant");
+  });
+
+  it("handles null/empty without throwing", () => {
+    expect(formatCategory(null)).toBe(null);
+    expect(formatCategory("")).toBe(null);
+  });
+
+  it("trims a ZIP+4 suffix and the comma before it — the owner's own example", () => {
+    expect(formatAddress("224 Westheimer Rd, Houston, TX, 77006-3222")).toBe("224 Westheimer Rd, Houston, TX 77006");
+  });
+
+  it("fixes the same extra comma even without a ZIP+4 suffix", () => {
+    expect(formatAddress("100 Main St, Houston, TX, 77002")).toBe("100 Main St, Houston, TX 77002");
+  });
+
+  it("leaves an address with no matching trailing-zip pattern completely unchanged — never mangles a shape it wasn't built for", () => {
+    const odd = "Somewhere, no zip on the end";
+    expect(formatAddress(odd)).toBe(odd);
+  });
+
+  it("null passthrough", () => {
+    expect(formatAddress(null)).toBe(null);
+  });
+
+  it("is DISPLAY-ONLY — FoodApp's panel subtitle uses it, never the old naive underscore-swap, and the raw stored value is never mutated", () => {
+    const app = src("FoodApp.jsx");
+    expect(app).toContain('import { formatCategory, formatAddress } from "./lib/formatPlace.js";');
+    expect(app).toMatch(/formatCategory\(selected\.place\.category\)/);
+    expect(app).toMatch(/formatAddress\(selected\.place\.address\)/);
+    expect(app).not.toMatch(/\.category\?\.replace\(\/_\/g/); // the old lowercase-with-spaces version is gone
+  });
+});
+
+describe("selected-place highlight — unmistakable pin, tied panel, centred pan, row highlight, Escape clears (B634976)", () => {
+  it("FoodApp computes ONE selectedKey and hands the identical string to both FoodMap and VisitList", () => {
+    const app = src("FoodApp.jsx");
+    expect(app).toMatch(/const selectedKey = selected\?\.kind === "place" \? `place:\$\{selected\.place\.id\}`/);
+    expect(app).toMatch(/: selected\?\.kind === "manualPin" \? `pin:\$\{selected\.pin\.name\}`/);
+    const matches = [...app.matchAll(/selectedKey=\{selectedKey\}/g)];
+    expect(matches.length).toBe(2); // <FoodMap> and <VisitList>, both fed the same value
+  });
+
+  it("FoodMap draws the selected pin larger, with an accent-coloured ring AND a soft halo behind it — never just the plain white-stroke look every other state uses", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/const SELECTED_ACCENT = "#BE3B22";/); // literal — canvas context, see COLORS' own comment
+    expect(map).toMatch(/radius: baseRadius \+ 12, weight: 0,/); // the halo, non-interactive
+    expect(map).toMatch(/fillColor: SELECTED_ACCENT, fillOpacity: 0\.22, interactive: false,/);
+    expect(map).toMatch(/radius: isSelected \? baseRadius \+ 5 : baseRadius,/); // noticeably larger
+    expect(map).toMatch(/color: isSelected \? SELECTED_ACCENT : "#fff",/); // accent ring, not the usual white
+  });
+
+  it("every addPin call carries a stable key matching selectedKey's own scheme — his places, the reference snapshot, and overpass results alike", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/key: `place:\$\{p\.id\}`/);
+    expect(map).toMatch(/key: `pin:\$\{pin\.name\}`/);
+    // The reference-snapshot AND overpass passes both key by place id too (loggedIds already
+    // excludes anything drawn above, so there's no double-draw to worry about).
+    const refKeys = [...map.matchAll(/key: `place:\$\{p\.id\}`/g)];
+    expect(refKeys.length).toBeGreaterThanOrEqual(3); // his logged places + reference snapshot + overpass
+  });
+
+  it("the fly-to pan offsets the destination by half the panel's width — lands in the VISIBLE area, not the raw map centre", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/const PANEL_WIDTH = 340;/); // matches VisitPanel's own literal width
+    expect(map).toMatch(/const panelOffsetPx = Math\.min\(PANEL_WIDTH, containerWidth \* 0\.8\) \/ 2;/);
+    expect(map).toMatch(/map\.project\(\[flyToTarget\.lat, flyToTarget\.lon\], targetZoom\)/);
+    expect(map).toMatch(/targetPoint\.add\(\[panelOffsetPx, 0\]\)/);
+    expect(map).toMatch(/map\.flyTo\(shiftedLatLng, targetZoom\)/);
+  });
+
+  it("selecting from the LIST also sets flyToTarget with real lat/lon — not just from search", () => {
+    const app = src("FoodApp.jsx");
+    expect(app).toMatch(/openPlace\(\{ id: v\.place_id, name: p\.name, lat: p\.lat, lon: p\.lon \}\);/);
+    expect(app).toMatch(/if \(p\.lat != null && p\.lon != null\) flyTo\(\{ lat: p\.lat, lon: p\.lon \}\);/);
+    expect(app).toMatch(/if \(pin\.lat != null && pin\.lon != null\) flyTo\(\{ lat: pin\.lat, lon: pin\.lon \}\);/);
+  });
+
+  it("VisitList highlights the matching row with a light tint + accent stripe — never a solid fill that would clash with the rating pills' own colours", () => {
+    const list = src("components/VisitList.jsx");
+    expect(list).toMatch(/function rowKey\(v\) \{/);
+    expect(list).toMatch(/const isSelected = selectedKey != null && rowKey\(v\) === selectedKey;/);
+    expect(list).toMatch(/color-mix\(in srgb, var\(--accent-food\) 12%, transparent\)/);
+    expect(list).toMatch(/boxShadow: isSelected \? "inset 3px 0 0 var\(--accent-food\)" : "none",/);
+  });
+
+  it("VisitPanel shows a small accent dot tied to the exact colour FoodMap's ring uses — a theme TOKEN, not a raw hex, since this is real DOM/CSS chrome", () => {
+    const panel = src("components/VisitPanel.jsx");
+    expect(panel).toMatch(/data-testid="food-panel-accent-dot"/);
+    expect(panel).toMatch(/const SELECTED_ACCENT = "var\(--accent-food\)";/);
+  });
+
+  it("Escape clears the selection exactly like the close button — same onClose, no separate escape state", () => {
+    const panel = src("components/VisitPanel.jsx");
+    expect(panel).toMatch(/const onKey = \(e\) => \{ if \(e\.key === "Escape"\) onClose\(\); \};/);
+    expect(panel).toMatch(/window\.addEventListener\("keydown", onKey\)/);
+    expect(panel).toMatch(/return \(\) => window\.removeEventListener\("keydown", onKey\)/);
+  });
+});
+
+describe("ambiance rating — a second, independent 1-10 rating; the map pin stays keyed to FOOD only (B634978)", () => {
+  it("db/food.sql defines rating_ambiance with the SAME halves-only 1-10 check as rating — nullable and independent", () => {
+    const sql = src("db/food.sql");
+    expect(sql).toMatch(/rating_ambiance numeric\(3,1\) check \(rating_ambiance is null or \(rating_ambiance between 1 and 10 and rating_ambiance \* 2 = round\(rating_ambiance \* 2\)\)\)/);
+    expect(sql).toContain("alter table public.food_visits add column if not exists rating_ambiance numeric(3,1);");
+    expect(sql).toContain("food_visits_rating_ambiance_check");
+  });
+
+  it("VisitForm renders the RatingSlider TWICE, clearly labelled Food and Ambiance — never a bare 'Rating' now that there are two", () => {
+    const panel = src("components/VisitPanel.jsx");
+    const sliderUsages = [...panel.matchAll(/<RatingSlider /g)];
+    expect(sliderUsages.length).toBe(2);
+    expect(panel).toMatch(/Food\s*<RatingSlider value=\{rating\} onChange=\{setRating\} label="Food rating" \/>/);
+    expect(panel).toMatch(/Ambiance\s*<RatingSlider value=\{ratingAmbiance\} onChange=\{setRatingAmbiance\} label="Ambiance rating" \/>/);
+    expect(panel).not.toMatch(/>Rating</); // the old ambiguous bare label is gone
+  });
+
+  it("the submit payload includes rating_ambiance as its own independent field — never averaged or merged with rating", () => {
+    const panel = src("components/VisitPanel.jsx");
+    expect(panel).toMatch(/rating_ambiance: ratingAmbiance,/);
+  });
+
+  it("VisitList sorts by Ambiance independently of Rating, and shows both as their own column", () => {
+    const list = src("components/VisitList.jsx");
+    expect(list).toMatch(/ambiance: \{ label: "Ambiance", get: \(v\) => \(v\.rating_ambiance == null \? -1 : Number\(v\.rating_ambiance\)\), dir: -1 \}/);
+    expect(list).toContain('<th style={{ padding: "4px 8px", fontWeight: 700 }}>Ambiance</th>');
+  });
+
+  it("⛔ THE MAP PIN NEVER READS rating_ambiance — the colour-driving code stays food-only, structurally asserted so it can't silently drift", () => {
+    expect(src("lib/foodStore.js")).not.toMatch(/rating_ambiance/);
+    expect(src("components/FoodMap.jsx")).not.toMatch(/rating_ambiance/);
+  });
+
+  it("VisitRow shows Food and Ambiance pills independently — a visit with only one set still renders sensibly, same principle as a dateless visit", () => {
+    const panel = src("components/VisitPanel.jsx");
+    expect(panel).toMatch(/const hasRating = visit\.rating != null;/);
+    expect(panel).toMatch(/const hasAmbiance = visit\.rating_ambiance != null;/);
+    expect(panel).toMatch(/\{hasRating && <RatingPill label="Food" value=\{visit\.rating\} \/>\}/);
+    expect(panel).toMatch(/\{hasAmbiance && <RatingPill label="Ambiance" value=\{visit\.rating_ambiance\} \/>\}/);
+    expect(panel).toMatch(/\{!hasRating && !hasAmbiance && <span/); // both-absent fallback, only when BOTH missing
+  });
+});
+
+describe("'What was good' — a liked-dishes shortlist, separate from 'What I had', accumulated across every visit at a place (B634979)", () => {
+  it("db/food.sql adds what_was_good as its own nullable text column, distinct from what_i_had", () => {
+    const sql = src("db/food.sql");
+    expect(sql).toMatch(/what_was_good text,\s*-- the SHORTLIST/);
+    expect(sql).toContain("alter table public.food_visits add column if not exists what_was_good text;");
+  });
+
+  it("the form has a SEPARATE 'What was good' field, sitting directly under 'What I had' — never merged into it", () => {
+    const panel = src("components/VisitPanel.jsx");
+    const whatIHadIdx = panel.indexOf("What I had");
+    const whatWasGoodIdx = panel.indexOf("What was good");
+    expect(whatIHadIdx).toBeGreaterThan(-1);
+    expect(whatWasGoodIdx).toBeGreaterThan(whatIHadIdx);
+    expect(panel).toMatch(/placeholder="The hamachi, the agedashi…"/);
+    expect(panel).toMatch(/what_was_good: whatWasGood \|\| null,/);
+    // Genuinely a separate field — never appended onto what_i_had's own value.
+    expect(panel).not.toMatch(/whatIHad \+ .*whatWasGood/);
+  });
+
+  it("the PLACE PANEL aggregates liked dishes across ALL past visits, rendered ABOVE 'Past visits' — not buried one visit deep", () => {
+    const panel = src("components/VisitPanel.jsx");
+    expect(panel).toMatch(/function LikedDishes\(\{ pastVisits \}\) \{/);
+    expect(panel).toMatch(/const entries = \(pastVisits \|\| \[\]\)\.map\(\(v\) => v\.what_was_good\)\.filter\(Boolean\);/);
+    expect(panel).toMatch(/entries\.join\("; "\)/);
+    expect(panel.indexOf("<LikedDishes")).toBeGreaterThan(-1);
+    expect(panel.indexOf("<LikedDishes")).toBeLessThan(panel.indexOf("Past visits ("));
+  });
+
+  it("renders NOTHING when no past visit has a liked entry — no empty heading, quiet by default", () => {
+    const panel = src("components/VisitPanel.jsx");
+    expect(panel).toMatch(/if \(!entries\.length\) return null;/);
+  });
+
+  it("kept as plain unparsed text — never split into a dish taxonomy, tags, or a separate entity", () => {
+    const panel = src("components/VisitPanel.jsx");
+    expect(panel).not.toMatch(/\.split\(","\)/);
+    expect(panel).not.toMatch(/dishTag|DishEntity|dish_taxonomy|dishAutocomplete/i);
+  });
+
+  it("VisitList shows 'What was good' as its own per-row column — that visit's own value, never an aggregate (the panel owns aggregation)", () => {
+    const list = src("components/VisitList.jsx");
+    expect(list).toContain('<th style={{ padding: "4px 8px", fontWeight: 700 }}>What was good</th>');
+    expect(list).toMatch(/\{v\.what_was_good \|\| "—"\}/);
   });
 });

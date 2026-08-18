@@ -220,6 +220,65 @@ This is the redirect RULE itself, live, on Cloudflare's actual routing engine �
 5. Confirm there is still no city picker, region switcher, or per-metro toggle anywhere in the UI. **Expect:** none — which metro's data shows is purely a function of where the map is pointed.
 **Result:** ⏳ pending.
 
+### V325696 — B634976: selected place is unmistakable (pin ring/halo, panel accent tie, centred pan, list row highlight, Escape clears), on his own signed-in account `Blocker: real-data`
+**What was verified here (sandbox):** every mechanism structurally proven against the real source — the shared `selectedKey` computed once and fed identically to `FoodMap`/`VisitList`; the selected pin's halo/ring/radius styling; the pixel-offset fly-to math (`map.project`/`unproject`, shifted by half the panel's width); the accent dot's colour token matching the pin's literal hex at runtime; the Escape listener calling the same `onClose` the ✕ button does; the row-highlight CSS. `npx vitest run` — food suite 153/153 green (incl. 8 new tests for this item). Full repo suite green, lint clean, build green, bundle audit clean.
+**Why this needs his machine:** whether the halo genuinely reads as "selected, unmistakably" at a glance, whether the pan lands the pin comfortably clear of the panel at his real window size, and the actual list-view highlight all need eyes on the real render, not a structural read of the CSS.
+**Steps, each with a named expected result:**
+1. On planyr.io, signed in, Map view, search for a place and select it (or click a pin directly). **Expect:** that pin is unmistakably different from every neighbour — larger, a coloured ring, a soft glow behind it.
+2. Look at where the map centred. **Expect:** the pin sits clear of the detail panel, not crammed against it or hidden behind it.
+3. Look at the panel's title. **Expect:** a small coloured dot before the name, matching the pin's ring colour.
+4. Switch to List view, click a different visit's row. **Expect:** that row highlights (light tint + a coloured left stripe) and stays highlighted while its panel is open.
+5. Press Escape (or click ✕). **Expect:** the panel closes and BOTH the pin's highlight and the row's highlight disappear — nothing stays lit.
+**Result:** ⏳ pending.
+
+### V325697 — B634977: category reads title-cased, address drops the noisy ZIP+4, on his own signed-in account `Blocker: real-data`
+**What was verified here (sandbox):** `formatCategory`/`formatAddress` unit-tested directly against the owner's own reported example ("japanese_restaurant" → "Japanese Restaurant", the Westheimer Rd address), the one real acronym found in all 202 production category values (DIY), the defensive BBQ/BYOB entries, minor-word lower-casing, and null handling; a structural test confirms `FoodApp.jsx` actually calls both functions and the old naive `.replace(/_/g, " ")` is gone. `npx vitest run` — food suite 153/153 green. Full repo suite green, lint clean, build green, bundle audit clean.
+**Why this needs his machine:** the functions are proven correct against real category/address text pulled from production, but nobody has watched the actual panel render the corrected text for a real selected place.
+**Steps, each with a named expected result:**
+1. On planyr.io, search "soto" and select it. **Expect:** the panel subtitle reads "Japanese Restaurant" (title-cased) — never lowercase.
+2. Look at the address line. **Expect:** it reads "...TX 77006" — no ZIP+4, no extra comma before the state.
+3. Select a place whose category contains "and" (a bar-and-grill). **Expect:** it reads naturally, e.g. "Bar and Grill Restaurant".
+**Result:** ⏳ pending.
+
+### V325698 — B634978: ambiance rating — second slider, independent pills, sortable, pin stays food-only, on his own signed-in account `Blocker: real-data`
+**What was verified here (sandbox / against production via `execute_sql`):** `rating_ambiance` column + its halves-only 1-10 check constraint confirmed live on production; structural tests for the two labelled sliders ("Food"/"Ambiance"), the submit payload carrying `rating_ambiance` as its own field, the list's Ambiance column + sort, and — the one that matters most — a source-level assertion that `foodStore.js` (the pin-colour logic) and `FoodMap.jsx` never contain the string `rating_ambiance` at all. `npx vitest run` — food suite 153/153 green. Full repo suite green, lint clean, build green, bundle audit clean.
+**Why this needs his machine:** the schema and the never-touches-the-pin guarantee are proven directly; the slider drag feel and a real save round-tripping through Supabase need a signed-in session.
+**Steps, each with a named expected result:**
+1. On planyr.io, signed in, log a visit rating only Ambiance, leaving Food unrated. **Expect:** it saves; the panel and list both show an Ambiance pill with no Food pill.
+2. Look at the map pin for that place. **Expect:** it shows the flat "logged" colour, NOT a ramp colour.
+3. Log a second visit there rating both Food and Ambiance. **Expect:** the pin now takes on the FOOD rating's colour only.
+4. In List view, sort by Ambiance. **Expect:** rows reorder by that column, independent of the Rating sort.
+**Result:** ⏳ pending.
+
+### V325699 — B634979: liked dishes accumulate across visits into one "You liked" summary, on his own signed-in account `Blocker: real-data`
+**What was verified here (sandbox):** `what_was_good` column confirmed live on production, separate from `what_i_had`; structural tests for the field's placement directly under "What I had", its placeholder, the payload never merging the two fields, the `LikedDishes` aggregation function (joins every past visit's non-empty entry with "; ", never splits/parses), its position ABOVE "Past visits", and the empty-render-nothing guard. `npx vitest run` — food suite 153/153 green. Full repo suite green, lint clean, build green, bundle audit clean.
+**Why this needs his machine:** the aggregation logic is proven correct in isolation; watching it actually accumulate across two REAL logged visits, in order, needs a signed-in session.
+**Steps, each with a named expected result:**
+1. On planyr.io, signed in, log a visit to a place with something in "What was good" (e.g. "the hamachi"). **Expect:** saves without error.
+2. Log a SECOND visit to the SAME place with a different entry (e.g. "the agedashi"). **Expect:** also saves.
+3. Look at the place's panel. **Expect:** a "You liked" summary near the top reads both — "the hamachi; the agedashi" — before opening either individual visit row.
+4. Switch to List view. **Expect:** each visit row shows its OWN entry in a "What was good" column, not the combined summary.
+5. Select a place with no liked-dish entries. **Expect:** no "You liked" section appears at all.
+**Result:** ⏳ pending.
+
+### V325700 — B634981: satellite toggle no longer crashes — imagery + labels load, pins stay readable, on his own signed-in account `Blocker: real-data`
+**What was verified here — the strongest evidence in this file, a real RED/GREEN browser reproduction, not just structural assertions:** built `dist/` from the pre-fix commit, served with `vite preview`, drove real headless Chromium against `#/food`, and reproduced the owner's crash exactly — after a click on Satellite, `[data-testid="food-map"]` disappeared and the error-boundary's "hit an error and couldn't load" text appeared. The IDENTICAL script (`ui-audit/verify-food-satellite-toggle.mjs`) run against the fixed build passed clean across four toggles (street → satellite → street → satellite): zero uncaught exceptions, real `.leaflet-tile` elements present every time (24 on street, 48 on satellite — imagery + the new labels overlay). Structural guards (8 new tests) pin the specific defect shapes. Full food suite 153/153 green, lint clean, build green, bundle audit clean.
+**Why this still needs his machine:** this sandbox's egress can't reach the real Esri/CARTO tile hosts, so the RED/GREEN proof above is about the CODE crashing or not — not about whether the actual photography and labels visibly load and read well over a real network connection.
+**Steps, each with a named expected result:**
+1. On planyr.io/#/food, click Satellite. **Expect:** imagery loads — no crash, ever.
+2. Look at the imagery. **Expect:** faint street/road names are visible over the photography.
+3. Look at a cluster of pins. **Expect:** every pin's colour is still clearly readable against the imagery.
+4. Click back to Street, then Satellite again. **Expect:** both swaps are clean, no degradation from toggling repeatedly.
+**Result:** ⏳ pending.
+
+### V325701 — B634982: Maui pins render at neighbourhood zoom, on his own signed-in account `Blocker: real-data`
+**What was verified here (against real production data via `execute_sql`, not a browser):** the loader change is genuinely one config row (structurally confirmed — one `METROS` list, one `scan_metros()` function, untouched otherwise); the load was actually run against the live Overture release (scanned 67,703 candidates, kept 1,313 real food-and-drink rows for the island in 11.1s) and confirmed live in production — Houston 34,103 · Dallas-Fort Worth 35,318 · Austin 11,576 · **Maui 1,313** · total 82,310 rows. The count is sane for an island bbox that's mostly ocean, not a sign the load silently failed.
+**Why this needs his machine:** the row count and the loader's shape are proven directly against the source and the database; nobody has watched an actual pin render on Maui at neighbourhood zoom in a real browser.
+**Steps, each with a named expected result:**
+1. On planyr.io/#/food, pan to Maui (e.g. Lahaina or Kahului) and zoom to a neighbourhood. **Expect:** individual restaurant pins render, same as any mainland metro.
+2. Zoom out to a whole-island view. **Expect:** only his own logged/manual places show, per the existing zoomed-out rule — unchanged by adding a fourth metro.
+**Result:** ⏳ pending.
+
 ### V306832 — B575952: /food is genuinely unlisted, on his own signed-in account
 **What was verified here (sandbox, real headless Chromium against a `vite preview` build of this branch, signed out — 14/14 checks green, `/tmp/.../verify_food_unlisted.mjs`):** navigated to every listed workspace — `#/` (Site), `#/schedule`, `#/markup` (Review), `#/library`, `#/notes` — and on each one confirmed zero elements matching a "Food" button/tab AND zero occurrences of the bare word "Food" anywhere in the rendered page text. Separately navigated straight to `#/food`: no console error, the map host (`[data-testid="food-map"]`) renders, the Leaflet map mounts (`.leaflet-container` present) — proving the route itself is untouched — and even while standing on that route, its own header shows no "Food" tab (there is none to highlight), confirming the "no special case for the active state" claim by direct observation. Also confirmed structurally: `AppHeader.jsx`'s tab list and both accent maps no longer name `food`; `modulePrefetch.js`, `moduleAccent.js`, `moduleLoaderTheme.js` likewise; `Shell.jsx` and `route.js` still do. Bundle bytes measured against the TRUE pre-food baseline (`origin/main` at `a517e2c`, before B568400 ever merged): `siteRouteJsBytes`/`notesRouteJsBytes` both **+174 bytes (0.17 KB)** — `perf-bundle-audit.mjs` itself reports both as "unchanged within noise." Full suite 11,764 green (43 in `test/foodModule.test.js`, including a new guard that fails the build if a `food` tab entry is ever reintroduced), lint 0, build green.
 **Why this still needs his machine:** everything above was checked SIGNED OUT. Nothing in the removed code reads auth state — the tab list (`AppHeader`'s `MODULES` array) is a static constant, not conditioned on `accountActive` — so a signed-in render is not expected to differ. But that is a claim read off the source, not an observation of his real account, and B568400's own not-yet-closed V306784 already needs a signed-in pass regardless — this can piggyback on that same visit rather than needing a separate one.

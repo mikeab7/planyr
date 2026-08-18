@@ -8989,6 +8989,17 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
 
   const colWidthsRef = useRef(null);
 
+  // B463922 (×2) — a toggle click sets this to the row it just EXPANDED, so the layout effect
+  // below can prefer it over a stale `selectedId`. Expand-only: collapsing never needs its own
+  // row protected (nothing new needs to become visible), so leaving it null there keeps the
+  // existing selectedId/top-of-viewport anchor in charge, unchanged. See the click handler
+  // below (search `expandAnchorRef.current = task.id`) and the layout effect that consumes it.
+  const expandAnchorRef = useRef(null);
+  // Set for exactly one effect pass when the layout effect below chose the expand-anchor over
+  // `selectedId` — tells the next effect (which otherwise chases `selectedId` back into view) to
+  // sit this one out, so it doesn't undo the reveal it just decided to prioritize.
+  const suppressSelChaseRef = useRef(false);
+
   // ── B463922 — hold the row you are working on STILL when the list re-lays out ──────────
   // Collapsing (or expanding) a group ABOVE the row you are editing changes how much content
   // sits above it, so with no compensation that row slides up or down the screen by the whole
@@ -8999,15 +9010,29 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
   // is VIEWPORT-STABLE (a): fold the MEASURED delta into the scroll position in the SAME frame
   // as the re-layout, in a LAYOUT effect (before paint), so nothing is ever seen to move.
   //
-  // The anchor is the row the user is working on: the selected row while it is on screen,
-  // otherwise the row at the top of the viewport — so the view holds still either way. When
-  // the anchor row itself disappears (you collapsed the group it lives in) we walk UP the
+  // The anchor is, in priority order: (1) a row just EXPANDED by a click, so what he opened it
+  // to see is what stays put — UNLESS a cell editor is actually open elsewhere, in which case
+  // losing keystrokes is worse than a delayed reveal and the edit keeps priority; (2) the
+  // selected row while it is on screen; (3) otherwise the row at the top of the viewport.
+  //
+  // (×2, B548xxx-class recurrence, owner repro 2026-08-18): "clicking to open up the ALTA &
+  // Topo Survey stuff... jumps me down to the middle of the schedule so I can't even see what I
+  // just opened." Measured cause: a stale `selectedId` — a row merely clicked earlier, with no
+  // editor open, sitting BELOW the toggle and still on screen — was winning the anchor. Holding
+  // IT fixed forced the toggled row and its brand-new children off screen above by exactly the
+  // height of what was revealed (144px for 6 rows in the reproduction). The old priority was
+  // right for protecting a live edit against an unrelated background change; it was wrong for
+  // the click whose entire point was to reveal the rows it just threw away.
+  //
+  // When the anchor row itself disappears (you collapsed the group it lives in) we walk UP the
   // previous list to the nearest row that survived, which is its parent.
   const heldListRef = useRef(tasks);
   React.useLayoutEffect(() => {
     const el = ref.current;
     const prev = heldListRef.current;
     heldListRef.current = tasks;
+    const expandAnchorId = expandAnchorRef.current;
+    expandAnchorRef.current = null;
     if (!el || prev === tasks || !prev.length || !tasks.length) return;
     const st = el.scrollTop;
     // Index into the PREVIOUS list of the row sitting at the top of the viewport. React has not
@@ -9015,11 +9040,17 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     // out against. (Row N's document top is TL_H + N*ROW_H — the sticky header holds TL_H.)
     const topIdx = Math.max(0, Math.min(prev.length - 1, Math.round((st - TL_H) / ROW_H)));
     let anchorIdx = topIdx;
-    if (selectedId != null) {
+    let usedExpandAnchor = false;
+    if (expandAnchorId != null && edit == null) {
+      const ei = prev.findIndex(t => t.id === expandAnchorId);
+      if (ei >= 0) { anchorIdx = ei; usedExpandAnchor = true; }
+    }
+    if (!usedExpandAnchor && selectedId != null) {
       const si = prev.findIndex(t => t.id === selectedId);
       const sTop = TL_H + si * ROW_H;
       if (si >= 0 && sTop >= st + TL_H && sTop + ROW_H <= st + el.clientHeight) anchorIdx = si;
     }
+    suppressSelChaseRef.current = usedExpandAnchor;
     // The anchor row may itself have been collapsed away — walk up to the nearest survivor.
     let now = -1;
     while (anchorIdx >= 0) {
@@ -9032,12 +9063,40 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     if (delta) el.scrollTop = Math.max(0, st + delta);
   }, [tasks]);
 
+  // B548xxx — a row-height change (Format panel slider) rescales every row's absolute `top`,
+  // but the raw pixel scrollTop doesn't rescale with it: measured, changing 24px rows to 34px
+  // rows with no compensation threw the row that had been on screen clean out of the rendered
+  // window (virtualisation dropped it) with ZERO app scroll write — the same "view abandoned,
+  // not dragged" failure shape as the B463922 layout-count case, just triggered by a style
+  // knob instead of a row count. Same anchor priority as that effect (selected row while it's
+  // on screen, else the row at the top of the viewport) and the same algebra: holding a row's
+  // index N fixed on screen across a uniform per-row rescale needs scrollTop += N*(new−old);
+  // that reduces to the fractional top-of-viewport case when N is a fraction, so one formula
+  // covers both anchors.
+  const heldRowHRef = useRef(ROW_H);
+  React.useLayoutEffect(() => {
+    const el = ref.current;
+    const prevRH = heldRowHRef.current;
+    heldRowHRef.current = ROW_H;
+    if (!el || prevRH === ROW_H) return;
+    const st = el.scrollTop;
+    let anchor = (st - TL_H) / prevRH;
+    if (selectedId != null) {
+      const si = tasks.findIndex(t => t.id === selectedId);
+      const sTop = TL_H + si * prevRH;
+      if (si >= 0 && sTop >= st + TL_H && sTop + prevRH <= st + el.clientHeight) anchor = si;
+    }
+    el.scrollTop = Math.max(0, st + anchor * (ROW_H - prevRH));
+  }, [ROW_H]);
+
   useEffect(() => {
+    const suppressSelChase = suppressSelChaseRef.current;
+    suppressSelChaseRef.current = false;
     if (selectedId === null) return;
     const el = ref.current;
     if (!el) return;
     const idx = tasks.findIndex(t => t.id === selectedId);
-    if (idx >= 0) {
+    if (idx >= 0 && !suppressSelChase) {
       const rowTop = idx * ROW_H, rowBottom = rowTop + ROW_H;
       const visTop = el.scrollTop + TL_H, visBottom = el.scrollTop + el.clientHeight;
       if (rowTop < visTop)            el.scrollTop = rowTop - TL_H;
@@ -9590,7 +9649,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                       contacts={data?.settings?.contacts||[]}
                       formulaCell={c.t === "formula" ? (formulaValues[task.id]?.[c.k]) : undefined}
                       addContact={(nc)=>setData(d=>({...d, settings:{...d.settings, contacts:[...(d.settings?.contacts||[]), {id:Date.now(), ...nc}]}}))}
-                      isExpandedParent={isExpandedParent} dispHealth={displayHealth} setSelectedColIdx={setSelectedColIdx} />
+                      isExpandedParent={isExpandedParent} dispHealth={displayHealth} setSelectedColIdx={setSelectedColIdx} expandAnchorRef={expandAnchorRef} />
 
                   </div>
                 );
@@ -9996,7 +10055,7 @@ function PredEditor({ seedVal, taskId, colKey, commit, commitAndAdvance, setEdit
 }
 
 // ── Cell ─────────────────────────────────────────────────
-function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance, proj, succMap, getTaskName, setNotesCtx, projId, updateTask, editStartChar, isExpandedParent, dispHealth, setSelectedColIdx, contacts, addContact, formulaCell}) {
+function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance, proj, succMap, getTaskName, setNotesCtx, projId, updateTask, editStartChar, isExpandedParent, dispHealth, setSelectedColIdx, contacts, addContact, formulaCell, expandAnchorRef}) {
   // B212 — Tab/Shift+Tab while editing advance only through VISIBLE columns (display order),
   // skipping hidden ones, via the shared stepVisibleColIdx helper.
   const tabStep = back => setSelectedColIdx(i => stepVisibleColIdx(colMasterIdxs, i, back ? -1 : +1));
@@ -10124,7 +10183,15 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
       <span style={{...s,paddingLeft:4+task.level*14,gap:0,flex:1,minWidth:0}}>
         {proj?.tasks.some(t=>t.parentId===task.id) ? (
           <span
-            onClick={e=>{e.stopPropagation();updateTask(task.id,{isExpanded:!task.isExpanded});}}
+            onClick={e=>{
+              e.stopPropagation();
+              const opening = !task.isExpanded;
+              // B463922 (×2) — tell GridView's scroll-anchor effect this row is the one whose
+              // reveal the click was FOR, so a stale selection elsewhere can't outrank it and
+              // throw the new children off screen. Expand only: a collapse never needs this.
+              if (opening && expandAnchorRef) expandAnchorRef.current = task.id;
+              updateTask(task.id,{isExpanded:opening});
+            }}
             /* B463922 — the click already refused to move the selection (stopPropagation), but the
                grid selects on MOUSEDOWN, so folding a group still stole the selection from the cell
                you were editing: every keystroke after it went to the group row instead, and the

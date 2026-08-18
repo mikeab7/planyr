@@ -5,6 +5,20 @@
  * `query` is a CONTROLLED prop, not local state (owner, 2026-08-18: "ONE CONTROL. A search
  * box" — the same header SearchBox that searches the whole 34,000-place snapshot in Map view
  * doubles as this list's filter in List view; this component owns no text input of its own).
+ *
+ * ⛔ AMBIANCE (B634978, owner, 2026-08-19: "add an ambiance rating too... sortable by either, and both
+ * visible on a row"). A second, independent column + sort, same shape as Rating's own. THE MAP
+ * PIN STAYS KEYED TO FOOD ONLY — this file's Ambiance handling never touches pin colour, which
+ * lives entirely in foodStore.js and never reads rating_ambiance.
+ *
+ * ⛔ ROW HIGHLIGHT (B634976, owner, 2026-08-19: "the selected row highlights too, and stays highlighted
+ * while its panel is open"). `selectedKey` is the exact same string FoodMap.jsx uses to pick the
+ * highlighted PIN and VisitPanel uses as its own key — computed once in FoodApp so all three
+ * agree without re-deriving the identity logic three times.
+ *
+ * "What was good" (B634979) gets its own column here too — each row shows THAT visit's own
+ * value (never an aggregate; the panel's own accumulated summary is a separate concern, see
+ * VisitPanel.jsx's LikedDishes) — same shape as the existing "What I had" column beside it.
  */
 import { useMemo, useState } from "react";
 import { colorForRating, textColorForRating } from "../lib/ratingColor.js";
@@ -20,9 +34,16 @@ const SORTS = {
   // ("7.5") — comparing those as strings breaks as soon as a two-digit value like "10.0"
   // exists ("10.0" < "9.5" lexically), so both are coerced through Number() here.
   rating: { label: "Rating", get: (v) => (v.rating == null ? -1 : Number(v.rating)), dir: -1 },
+  ambiance: { label: "Ambiance", get: (v) => (v.rating_ambiance == null ? -1 : Number(v.rating_ambiance)), dir: -1 },
   cost: { label: "Cost", get: (v) => (v.cost == null ? -1 : Number(v.cost)), dir: -1 },
   name: { label: "Name", get: (v) => (v.placeName || "").toLowerCase(), dir: 1 },
 };
+
+// Same identity FoodApp/FoodMap/VisitPanel already use — a row's OWN key, for comparing against
+// the shared `selectedKey` prop.
+function rowKey(v) {
+  return v.place_id ? `place:${v.place_id}` : `pin:${v.custom_name}`;
+}
 
 function fieldStyle() {
   return {
@@ -32,7 +53,7 @@ function fieldStyle() {
   };
 }
 
-export default function VisitList({ visits, query, onSelect }) {
+export default function VisitList({ visits, query, onSelect, selectedKey }) {
   const [sortKey, setSortKey] = useState("date");
 
   const rows = useMemo(() => {
@@ -73,35 +94,61 @@ export default function VisitList({ visits, query, onSelect }) {
               <tr style={{ textAlign: "left", color: "var(--text-tertiary)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.04em" }}>
                 <th style={{ padding: "4px 8px", fontWeight: 700 }}>Place</th>
                 <th style={{ padding: "4px 8px", fontWeight: 700 }}>Rating</th>
+                <th style={{ padding: "4px 8px", fontWeight: 700 }}>Ambiance</th>
                 <th style={{ padding: "4px 8px", fontWeight: 700 }}>Cost</th>
                 <th style={{ padding: "4px 8px", fontWeight: 700 }}>Date</th>
                 <th style={{ padding: "4px 8px", fontWeight: 700 }}>What I had</th>
+                <th style={{ padding: "4px 8px", fontWeight: 700 }}>What was good</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((v) => (
-                <tr
-                  key={v.id} onClick={() => onSelect?.(v)} data-testid="food-visit-row"
-                  style={{ cursor: onSelect ? "pointer" : "default", borderTop: "1px solid var(--border-default)" }}
-                >
-                  <td style={{ padding: "7px 8px", color: "var(--text-primary)", fontWeight: 600 }}>{v.placeName}</td>
-                  <td style={{ padding: "7px 8px" }}>
-                    {v.rating ? (
-                      <span style={{
-                        display: "inline-block", borderRadius: 5, padding: "1px 6px", fontWeight: 700,
-                        background: colorForRating(v.rating), color: textColorForRating(v.rating),
-                      }}>
-                        {v.rating}/10
-                      </span>
-                    ) : (
-                      <span style={{ color: "var(--text-tertiary)" }}>—</span>
-                    )}
-                  </td>
-                  <td style={{ padding: "7px 8px" }}>{v.cost != null ? `$${Number(v.cost).toFixed(2)}` : "—"}</td>
-                  <td style={{ padding: "7px 8px", color: "var(--text-secondary)" }}>{v.visited_on || "—"}</td>
-                  <td style={{ padding: "7px 8px", color: "var(--text-secondary)" }}>{v.what_i_had || "—"}</td>
-                </tr>
-              ))}
+              {rows.map((v) => {
+                const isSelected = selectedKey != null && rowKey(v) === selectedKey;
+                return (
+                  <tr
+                    key={v.id} onClick={() => onSelect?.(v)} data-testid="food-visit-row"
+                    aria-selected={isSelected}
+                    style={{
+                      cursor: onSelect ? "pointer" : "default", borderTop: "1px solid var(--border-default)",
+                      // A light tint + left accent stripe, never a solid fill — the rating/ambiance
+                      // pills carry their OWN ramp colours (cream through deep red-brown) and a
+                      // solid accent-food row background would fight them for legibility.
+                      background: isSelected ? "color-mix(in srgb, var(--accent-food) 12%, transparent)" : "transparent",
+                      boxShadow: isSelected ? "inset 3px 0 0 var(--accent-food)" : "none",
+                    }}
+                  >
+                    <td style={{ padding: "7px 8px", color: "var(--text-primary)", fontWeight: 600 }}>{v.placeName}</td>
+                    <td style={{ padding: "7px 8px" }}>
+                      {v.rating ? (
+                        <span style={{
+                          display: "inline-block", borderRadius: 5, padding: "1px 6px", fontWeight: 700,
+                          background: colorForRating(v.rating), color: textColorForRating(v.rating),
+                        }}>
+                          {v.rating}/10
+                        </span>
+                      ) : (
+                        <span style={{ color: "var(--text-tertiary)" }}>—</span>
+                      )}
+                    </td>
+                    <td style={{ padding: "7px 8px" }}>
+                      {v.rating_ambiance ? (
+                        <span style={{
+                          display: "inline-block", borderRadius: 5, padding: "1px 6px", fontWeight: 700,
+                          background: colorForRating(v.rating_ambiance), color: textColorForRating(v.rating_ambiance),
+                        }}>
+                          {v.rating_ambiance}/10
+                        </span>
+                      ) : (
+                        <span style={{ color: "var(--text-tertiary)" }}>—</span>
+                      )}
+                    </td>
+                    <td style={{ padding: "7px 8px", color: "var(--text-primary)" }}>{v.cost != null ? `$${Number(v.cost).toFixed(2)}` : "—"}</td>
+                    <td style={{ padding: "7px 8px", color: "var(--text-secondary)" }}>{v.visited_on || "—"}</td>
+                    <td style={{ padding: "7px 8px", color: "var(--text-secondary)" }}>{v.what_i_had || "—"}</td>
+                    <td style={{ padding: "7px 8px", color: "var(--text-secondary)" }}>{v.what_was_good || "—"}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
