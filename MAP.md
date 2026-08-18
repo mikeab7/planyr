@@ -51,7 +51,7 @@ _538 source files mapped._
   - _exports_: `default (FoodApp)`
 - **`src/workspaces/food/lib/foodStore.js`** — The one seam to Supabase: place/visit queries, visit CRUD, manual-pin grouping, the logged-place-id set
   - _exports_: `deleteVisit`, `fetchAllVisits`, `fetchPlaceById`, `fetchPlacesByIds`, `fetchPlacesInBounds`, `insertVisit`, `loggedPlaceIds`, `manualPinsFromVisits`, `supabaseConfigured`, `updateVisit`
-- **`src/workspaces/food/lib/markerCluster.js`** — TODO — describe
+- **`src/workspaces/food/lib/markerCluster.js`** — pure grid clustering for the food map (groups nearby pins on screen, no Leaflet/DOM dependency)
   - _exports_: `clusterPoints`, `dominantKind`
 - **`src/workspaces/food/lib/overpass.js`** — OpenStreetMap Overpass fallback: cached per-bbox live query, called only on explicit user request
   - _exports_: `fromElement`, `queryFor`, `roundKey`, `searchOverpass`

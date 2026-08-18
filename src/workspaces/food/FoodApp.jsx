@@ -26,6 +26,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   const [view, setView] = useState("map"); // "map" | "list"
   const [bounds, setBounds] = useState(null);
   const [places, setPlaces] = useState([]);
+  const [placesCap, setPlacesCap] = useState({ capped: false, totalMatched: 0 });
   const [overpassPlaces, setOverpassPlaces] = useState([]);
   const [visits, setVisits] = useState([]);
   const [placeNames, setPlaceNames] = useState({}); // id -> {name, lat, lon}
@@ -39,7 +40,11 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   useEffect(() => {
     if (!bounds) return;
     let cancelled = false;
-    fetchPlacesInBounds(bounds).then(({ data }) => { if (!cancelled) setPlaces(data); });
+    fetchPlacesInBounds(bounds).then(({ data, capped, totalMatched }) => {
+      if (cancelled) return;
+      setPlaces(data);
+      setPlacesCap({ capped, totalMatched });
+    });
     return () => { cancelled = true; };
   }, [bounds]);
 
@@ -181,6 +186,8 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
         {view === "map" ? (
           <FoodMap
             places={places}
+            placesCapped={placesCap.capped}
+            placesTotalMatched={placesCap.totalMatched}
             loggedIds={loggedIds}
             manualPins={manualPins}
             overpassPlaces={overpassPlaces}

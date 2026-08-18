@@ -17,6 +17,7 @@ import { LOADER_SKINS, resolveLoaderTheme } from "../src/shared/ui/moduleLoaderT
 import { ROUTE_KEYS } from "../ui-audit/lib/bundleMetrics.mjs";
 import { manualPinsFromVisits, loggedPlaceIds } from "../src/workspaces/food/lib/foodStore.js";
 import { roundKey, queryFor, fromElement } from "../src/workspaces/food/lib/overpass.js";
+import { clusterPoints, dominantKind } from "../src/workspaces/food/lib/markerCluster.js";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FOOD = join(REPO, "src", "workspaces", "food");
@@ -351,6 +352,120 @@ describe("overpass — pure query/response shaping (no network)", () => {
     const place = fromElement({ type: "node", id: 1, lat: 0, lon: 0 });
     expect(place.name).toBe("Unnamed place");
     expect(place.address).toBeNull();
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════════════════════════
+ * 4b. NEW-4 — the viewport-aware, spatially-distributed capped query (the LIMIT-with-no-
+ *     ORDER-BY bug the owner reported as "clearly all grouped in a specific section").
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("NEW-4 — food_places_in_bounds_sampled wiring", () => {
+  it("foodStore calls the grid-sampled RPC, not a plain capped .limit() query", () => {
+    const store = src("lib/foodStore.js");
+    expect(store).toContain('supabase.rpc("food_places_in_bounds_sampled"');
+    expect(store).not.toMatch(/\.from\("food_places"\)[\s\S]{0,200}?\.limit\(/);
+  });
+
+  it("fetchPlacesInBounds reports capped/totalMatched so the UI can say so, never silently truncate", () => {
+    const store = src("lib/foodStore.js");
+    expect(store).toMatch(/capped:\s*totalMatched\s*>\s*rows\.length/);
+  });
+
+  it("the committed migration defines the RPC and grants it the same public-read shape as the table", () => {
+    const sql = src("db/food.sql");
+    expect(sql).toContain("create or replace function public.food_places_in_bounds_sampled(");
+    expect(sql).toMatch(/grant execute on function public\.food_places_in_bounds_sampled\([\s\S]{0,120}?\) to anon, authenticated/);
+  });
+
+  it("the RPC partitions the bbox into a grid and takes an even share per cell (never a bare LIMIT)", () => {
+    const sql = src("db/food.sql");
+    expect(sql).toContain("width_bucket(lat, p_south, p_north, greatest(p_grid, 1)) as gy");
+    expect(sql).toContain("width_bucket(lon, p_west, p_east, greatest(p_grid, 1)) as gx");
+    expect(sql).toContain("partition by gy, gx");
+    expect(sql).toContain("count(*) over () as total_matched");
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════════════════════════
+ * 4c. NEW-5 — the basemap swap (reused what already exists first, chose the free/no-key/
+ *     no-account/no-billing option) + the hand-rolled grid clusterer (pure, so it's unit-
+ *     tested directly rather than only through a browser).
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("NEW-5 — basemap + clustering", () => {
+  it("FoodMap uses the free, key-less CARTO Positron tiles, not the busy default OSM raster", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toContain("basemaps.cartocdn.com/light_all");
+    expect(map).not.toContain("tile.openstreetmap.org");
+  });
+
+  it("the tile attribution still credits OpenStreetMap (CARTO's own tiles are OSM data restyled)", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/openstreetmap\.org\/copyright/);
+    expect(map).toMatch(/carto\.com\/attributions/);
+  });
+
+  it("no marker-clustering package was added — package.json still names no clustering dependency", () => {
+    const pkg = JSON.parse(read(REPO, "package.json"));
+    const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+    expect(Object.keys(allDeps).some((k) => /cluster/i.test(k))).toBe(false);
+  });
+
+  it("FoodMap draws through the pure clusterer rather than one marker per point unconditionally", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toContain("clusterPoints(combined, project, CLUSTER_CELL_PX)");
+  });
+});
+
+describe("markerCluster — pure grid clustering (no Leaflet, no DOM)", () => {
+  it("dominantKind prefers manual > logged > unlogged, so a cluster never hides a visited place", () => {
+    expect(dominantKind(["unlogged", "unlogged"])).toBe("unlogged");
+    expect(dominantKind(["unlogged", "logged"])).toBe("logged");
+    expect(dominantKind(["logged", "manual"])).toBe("manual");
+    expect(dominantKind(["manual", "logged", "unlogged"])).toBe("manual");
+  });
+
+  it("two points that land in the same screen cell merge into one cluster", () => {
+    const items = [
+      { lat: 29.76, lon: -95.37, kind: "unlogged" },
+      { lat: 29.7601, lon: -95.3701, kind: "unlogged" },
+    ];
+    const project = () => [100, 100]; // both land at the identical screen point
+    const clusters = clusterPoints(items, project, 60);
+    expect(clusters).toHaveLength(1);
+    expect(clusters[0].count).toBe(2);
+  });
+
+  it("two points far apart on screen stay as two singleton clusters", () => {
+    const items = [
+      { lat: 29.76, lon: -95.37, kind: "unlogged" },
+      { lat: 29.9, lon: -95.1, kind: "logged" },
+    ];
+    const project = (lat) => (lat === 29.76 ? [10, 10] : [900, 900]);
+    const clusters = clusterPoints(items, project, 60);
+    expect(clusters).toHaveLength(2);
+    expect(clusters.every((c) => c.count === 1)).toBe(true);
+  });
+
+  it("a singleton cluster carries its original item back out, so a caller needs no second lookup", () => {
+    const item = { lat: 29.76, lon: -95.37, kind: "manual", name: "Taco Truck" };
+    const clusters = clusterPoints([item], () => [50, 50], 60);
+    expect(clusters[0].items[0]).toMatchObject({ name: "Taco Truck" });
+  });
+
+  it("a mixed-kind cluster reports the dominant kind, not the first or last point's kind", () => {
+    const items = [
+      { lat: 1, lon: 1, kind: "unlogged" },
+      { lat: 1, lon: 1, kind: "logged" },
+      { lat: 1, lon: 1, kind: "unlogged" },
+    ];
+    const clusters = clusterPoints(items, () => [0, 0], 60);
+    expect(clusters[0].kind).toBe("logged");
+  });
+
+  it("empty input returns no clusters, and a non-finite projection is skipped rather than thrown", () => {
+    expect(clusterPoints([], () => [0, 0], 60)).toEqual([]);
+    const items = [{ lat: 999, lon: 999, kind: "unlogged" }];
+    expect(clusterPoints(items, () => [NaN, NaN], 60)).toEqual([]);
   });
 });
 
