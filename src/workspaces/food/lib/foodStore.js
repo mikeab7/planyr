@@ -93,22 +93,46 @@ export async function deleteVisit(id) {
  *  (custom_name, rounded custom_lat/lon) among the user's place_id-null visits is one pin,
  *  carrying the list of visit ids logged there so a second visit at the same spot is a
  *  click on the SAME pin, not a new one (rounding to 4dp is ~11m, tight enough that two
- *  presses a few feet apart still count as "the same taco truck"). */
+ *  presses a few feet apart still count as "the same taco truck"). Also carries `avgRating` —
+ *  the mean of that pin's own rated visits (undefined if none are rated yet) — so the map can
+ *  colour a manual pin by rating exactly like a snapshot place (owner redesign, 2026-08-18:
+ *  "his rated places coloured along the 1-10 scale"). */
 export function manualPinsFromVisits(visits) {
   const groups = new Map();
   for (const v of visits) {
     if (v.place_id) continue;
     const key = `${v.custom_name}|${Number(v.custom_lat).toFixed(4)}|${Number(v.custom_lon).toFixed(4)}`;
     if (!groups.has(key)) {
-      groups.set(key, { key, name: v.custom_name, lat: v.custom_lat, lon: v.custom_lon, visitIds: [] });
+      groups.set(key, { key, name: v.custom_name, lat: v.custom_lat, lon: v.custom_lon, visitIds: [], ratings: [] });
     }
-    groups.get(key).visitIds.push(v.id);
+    const g = groups.get(key);
+    g.visitIds.push(v.id);
+    if (v.rating != null) g.ratings.push(v.rating);
   }
-  return [...groups.values()];
+  return [...groups.values()].map(({ ratings, ...pin }) => ({
+    ...pin,
+    avgRating: ratings.length ? ratings.reduce((a, b) => a + b, 0) / ratings.length : undefined,
+  }));
 }
 
 /** Which food_places ids the user has already logged at least once — drives the
  *  "logged vs not logged" pin styling on the map. */
 export function loggedPlaceIds(visits) {
   return new Set(visits.filter((v) => v.place_id).map((v) => v.place_id));
+}
+
+/** Mean rating per logged food_places id (undefined for a place with visits but none rated
+ *  yet) — the map colours a rated place along the 1-10 ramp; an unrated-but-visited place
+ *  falls back to the flat "logged" colour instead. */
+export function avgRatingByPlaceId(visits) {
+  const sums = new Map(); // id -> {sum, n}
+  for (const v of visits) {
+    if (!v.place_id || v.rating == null) continue;
+    const cur = sums.get(v.place_id) || { sum: 0, n: 0 };
+    cur.sum += v.rating; cur.n += 1;
+    sums.set(v.place_id, cur);
+  }
+  const out = new Map();
+  for (const [id, { sum, n }] of sums) out.set(id, sum / n);
+  return out;
 }

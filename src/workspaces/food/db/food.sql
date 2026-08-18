@@ -61,7 +61,7 @@ create table if not exists public.food_visits (
   custom_lat   double precision,
   custom_lon   double precision,
   visited_on   date,
-  rating       smallint check (rating between 1 and 5),
+  rating       smallint check (rating between 1 and 10),  -- NEW-4 redesign: 1-10, not 1-5 (table was empty when this changed, checked first)
   cost         numeric(8,2),
   what_i_had   text,
   notes        text,
@@ -103,16 +103,32 @@ drop trigger if exists food_visits_touch on public.food_visits;
 create trigger food_visits_touch before update on public.food_visits
   for each row execute function public.food_visits_touch_updated_at();
 
--- ── food_places_in_bounds_sampled (NEW-4) — a VIEWPORT-WIDE, SPATIALLY-DISTRIBUTED capped
--- read. The plain "just add ORDER BY" fix is wrong here: an ORDER BY id/name/whatever still
--- returns an arbitrary prefix that happens to sit wherever those ids/names cluster. What the
--- owner actually needs is "spread across the box I'm looking at, not bunched in one corner" —
--- so this partitions the bbox into a p_grid × p_grid lattice (default 8×8 = 64 cells) and takes
--- an even share from EVERY cell that has anything in it, via one window-function pass (no N+1
--- queries, no client-side looping). `total_matched` rides along (a `count(*) over ()` on the
--- SAME scan, so it costs nothing extra) so the client can tell the user "showing 2,000 of
--- 30,620" instead of silently truncating. SECURITY INVOKER (the default) — it runs under the
--- caller's own RLS, and food_places is already public-read, so this grants no new access.
+-- ── rating scale, 1-10 not 1-5 (owner redesign, 2026-08-18). `create table if not exists`
+-- above won't touch an already-existing table, so an ALTER is required to actually widen it —
+-- the inline `check` clause above only governs a FIRST-EVER creation of this table. Checked
+-- production first: food_visits had 0 rows when this changed, so this is a pure widen, never a
+-- silent rescale of anyone's real data. Idempotent: safe to re-run (drops-then-adds under the
+-- same fixed name every time, so a second run just recreates the identical constraint).
+alter table public.food_visits drop constraint if exists food_visits_rating_check;
+alter table public.food_visits add constraint food_visits_rating_check check (rating between 1 and 10);
+
+-- ── food_places_in_bounds_sampled (NEW-4) — a VIEWPORT-WIDE, PROPORTIONALLY-DISTRIBUTED
+-- capped read. The plain "just add ORDER BY" fix is wrong here: an ORDER BY id/name/whatever
+-- still returns an arbitrary prefix that happens to sit wherever those ids/names cluster. So
+-- this partitions the bbox into a p_grid × p_grid lattice (default 8×8 = 64 cells) — but each
+-- cell's SHARE OF THE CAP IS PROPORTIONAL TO ITS OWN TRUE COUNT, not a flat 1/64th each.
+-- ⛔ THE FLAT VERSION WAS ITSELF A BIASED SLICE, MEASURED (owner report 2026-08-18, "focusing on
+-- showing places in the middle of the screen... the distribution is uneven"): giving every cell
+-- the SAME fixed cap (p_cap/64) meant a dense cell (e.g. 1,959 real places) returned only ~6%
+-- of its true content while a sparse cell (114 real places) returned ~88% — over a real
+-- production viewport, coverage fraction ranged 0.063–0.877 cell to cell, a >13x disparity.
+-- Weighting each cell's cap by `cell_count / total_matched` (both cheap window functions on the
+-- SAME scan) flattened that to a near-constant ~0.23 across every cell in the identical test —
+-- a genuinely representative sample of the viewport, not a shape that favors wherever a cell
+-- happens to be dense or centrally located. `total_matched` still rides along free, so the
+-- client can say "showing 2,000 of 30,620" instead of silently truncating. SECURITY INVOKER
+-- (the default) — runs under the caller's own RLS, and food_places is already public-read, so
+-- this grants no new access.
 create or replace function public.food_places_in_bounds_sampled(
   p_south double precision, p_west double precision,
   p_north double precision, p_east double precision,
@@ -127,18 +143,23 @@ language sql stable as $$
   with matched as (
     select id, name, lat, lon, category, cuisine, address, brand, source, source_licence,
       width_bucket(lat, p_south, p_north, greatest(p_grid, 1)) as gy,
-      width_bucket(lon, p_west, p_east, greatest(p_grid, 1)) as gx,
-      count(*) over () as total_matched
+      width_bucket(lon, p_west, p_east, greatest(p_grid, 1)) as gx
     from public.food_places
     where lat >= p_south and lat <= p_north and lon >= p_west and lon <= p_east
   ),
+  counted as (
+    select *,
+      count(*) over (partition by gy, gx) as cell_count,
+      count(*) over () as total_matched
+    from matched
+  ),
   ranked as (
     select *, row_number() over (partition by gy, gx order by id) as rn
-    from matched
+    from counted
   )
   select id, name, lat, lon, category, cuisine, address, brand, source, source_licence, total_matched
   from ranked
-  where rn <= greatest(1, p_cap / (greatest(p_grid, 1) * greatest(p_grid, 1)))
+  where rn <= greatest(1, ceil(p_cap::numeric * cell_count / greatest(total_matched, 1)))
   order by gy, gx, rn
   limit p_cap;
 $$;

@@ -18,7 +18,7 @@ import VisitPanel from "./components/VisitPanel.jsx";
 import VisitList from "./components/VisitList.jsx";
 import {
   supabaseConfigured, fetchPlacesInBounds, fetchAllVisits, fetchPlacesByIds,
-  insertVisit, updateVisit, deleteVisit, manualPinsFromVisits, loggedPlaceIds,
+  insertVisit, updateVisit, deleteVisit, manualPinsFromVisits, loggedPlaceIds, avgRatingByPlaceId,
 } from "./lib/foodStore.js";
 import { searchOverpass } from "./lib/overpass.js";
 
@@ -66,6 +66,14 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
 
   const loggedIds = useMemo(() => loggedPlaceIds(visits), [visits]);
   const manualPins = useMemo(() => manualPinsFromVisits(visits), [visits]);
+  const avgRatings = useMemo(() => avgRatingByPlaceId(visits), [visits]);
+  // Every place he's logged, anywhere — independent of the current map viewport, per the
+  // redesign's "his places are always visible, at every zoom level." Carries avgRating so
+  // the map can colour the pin along the 1-10 ramp.
+  const loggedPlaces = useMemo(
+    () => Object.values(placeNames).map((p) => ({ ...p, avgRating: avgRatings.get(p.id) })),
+    [placeNames, avgRatings]
+  );
 
   const visitsForSelected = useMemo(() => {
     if (!selected) return [];
@@ -188,6 +196,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
             places={places}
             placesCapped={placesCap.capped}
             placesTotalMatched={placesCap.totalMatched}
+            loggedPlaces={loggedPlaces}
             loggedIds={loggedIds}
             manualPins={manualPins}
             overpassPlaces={overpassPlaces}
