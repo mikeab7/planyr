@@ -41,7 +41,31 @@ import { colorForRating } from "../lib/ratingColor.js";
 // Houston, so a first-ever visit opens somewhere useful rather than on the world map.
 const DEFAULT_CENTER = [29.76, -95.37];
 const DEFAULT_ZOOM = 12;
-const MIN_PIN_ZOOM = 12; // below this, only HIS OWN places draw — the reference snapshot doesn't
+
+// ⛔ MIN_PIN_ZOOM (corrected 2026-08-19, B623728 recurrence — read before nudging this constant again).
+// Shipped at 12 first, which is STILL the whole-metro view: measured against a typical
+// 1440px-wide browser window centred on Houston, z12 shows ~30 miles across (Katy toward
+// Baytown, exactly the view the owner screenshotted and rejected twice) and the reference
+// snapshot query already returns 13,000-22,000+ matches there — so the "only his own places
+// at low zoom" rule NEVER actually engaged at the zoom people look at Houston from by default.
+// Below this now-corrected value, only HIS OWN places draw; the reference snapshot doesn't.
+//
+// Chosen at 15, not nudged — MEASURED against Houston's own density, not guessed:
+//   - Ground scale is zoom-level-intrinsic (independent of any one screen's pixel width):
+//     at z12, 1 screen px covers ~33 m at this latitude; at z15, ~4 m — z15 is the first
+//     zoom where a city block reads as more than a few pixels, the "neighbourhood you could
+//     actually drive to and recognise" scale, not "half the metro."
+//   - On a 1440px-wide window, z15 shows ~3.7 miles across — comparable to a single named
+//     Houston neighbourhood (the Heights, Montrose), not several stitched together (z14, the
+//     next step down, is already ~7.4 miles — multiple neighbourhoods at once).
+//   - THE STRONGEST reason: at z15, even DOWNTOWN/MIDTOWN — the single densest food_places
+//     cluster in the whole metro — returns only 1,251 places, comfortably under the RPC's
+//     2,000 cap (measured directly against production). At z14 the same box already returns
+//     2,641 — OVER the cap. So z15 is the tightest zoom where the reference snapshot is
+//     GENUINELY COMPLETE everywhere in the metro, never sampled, not even in the one place
+//     dense enough to matter — no proportional-share algorithm needed to be "fair" once
+//     nothing is ever left out to begin with.
+const MIN_PIN_ZOOM = 15;
 
 // Literal (not theme tokens) DELIBERATELY: these are Leaflet canvas-renderer fill/stroke
 // values, not CSS applied to a DOM element — a canvas 2D context has no cascade to resolve
@@ -111,18 +135,20 @@ export default function FoodMap({
     if (!map || !layer) return;
     layer.clearLayers();
 
-    const addPin = (lat, lon, color, title, onClick) => {
+    const addPin = (lat, lon, color, title, onClick, opts = {}) => {
       const m = L.circleMarker([lat, lon], {
-        renderer: layer.options.renderer, radius: 7, weight: 2, color: "#fff", fillColor: color, fillOpacity: 0.95,
+        renderer: layer.options.renderer, radius: opts.radius ?? 7, weight: 2, color: "#fff",
+        fillColor: color, fillOpacity: opts.fillOpacity ?? 0.95,
       });
       m.bindTooltip(title, { direction: "top", offset: [0, -6] });
       if (onClick) m.on("click", onClick);
       m.addTo(layer);
     };
 
-    // HIS places — always drawn, at every zoom, never hidden by the threshold below. A RATED
-    // place is coloured along the 1-10 ramp so a glance at the map shows where the good ones
-    // are; a visited-but-not-yet-rated place falls back to the flat logged/manual colour.
+    // HIS places — always drawn, at every zoom, never hidden by the threshold below, always at
+    // full size/opacity: they are the point of the map. A RATED place is coloured along the
+    // 1-10 ramp so a glance shows where the good ones are; a visited-but-not-yet-rated place
+    // falls back to the flat logged/manual colour.
     for (const p of loggedPlaces || []) {
       addPin(p.lat, p.lon, colorForRating(p.avgRating) || COLORS.logged, p.name, () => onSelectPlace?.(p));
     }
@@ -130,16 +156,21 @@ export default function FoodMap({
       addPin(pin.lat, pin.lon, colorForRating(pin.avgRating) || COLORS.manual, pin.name, () => onSelectManualPin?.(pin));
     }
 
-    // The 34,000-place reference snapshot — a lookup table he reaches into once zoomed to a
-    // neighbourhood, never metro-wide content. loggedIds excludes places already drawn above.
+    // The reference snapshot — a lookup table he reaches into once zoomed to a neighbourhood,
+    // never metro-wide content. loggedIds excludes places already drawn above. Deliberately
+    // SMALLER and more TRANSPARENT than his own places (owner note, 2026-08-18: make sure the
+    // unrated pin style isn't itself a flat grey blob at density) — a quieter background layer
+    // that still reads as "considered" where it overlaps, rather than a uniform solid mass, and
+    // never competes with his own places for attention.
+    const REFERENCE_PIN = { radius: 5, fillOpacity: 0.7 };
     if (!tooSmall) {
       for (const p of places || []) {
         if (loggedIds?.has(p.id)) continue;
-        addPin(p.lat, p.lon, COLORS.unlogged, p.name, () => onSelectPlace?.(p));
+        addPin(p.lat, p.lon, COLORS.unlogged, p.name, () => onSelectPlace?.(p), REFERENCE_PIN);
       }
       for (const p of overpassPlaces || []) {
         if (loggedIds?.has(p.id)) continue; // already shown from the snapshot pass, avoid a double pin
-        addPin(p.lat, p.lon, COLORS.unlogged, `${p.name} (live search)`, () => onSelectPlace?.(p));
+        addPin(p.lat, p.lon, COLORS.unlogged, `${p.name} (live search)`, () => onSelectPlace?.(p), REFERENCE_PIN);
       }
     }
   }, [places, loggedPlaces, loggedIds, manualPins, overpassPlaces, tooSmall, onSelectPlace, onSelectManualPin]);

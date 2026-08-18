@@ -536,6 +536,33 @@ describe("NEW-5 (revised) — colourful basemap, no clustering, his places alway
     expect(map).toMatch(/Zoom in to browse restaurants near you/);
     expect(map).toMatch(/Showing only places you've been/);
   });
+
+  it("⛔ RECURRENCE GUARD — the zoom threshold is neighbourhood-scale (15), not the whole-metro view (12) it shipped at first", () => {
+    // The first ship set MIN_PIN_ZOOM = 12, which is STILL the default/whole-metro view — the
+    // rule never actually engaged at the zoom people look at Houston from. Measured against
+    // production: at z15 even downtown/midtown (the single densest cluster in the metro) stays
+    // under the RPC's 2,000-row cap (1,251); at z14 the same box already exceeds it (2,641).
+    // A regression back toward 12-13 would silently reopen the exact defect this guards.
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/const MIN_PIN_ZOOM = 15;/);
+    expect(map).not.toMatch(/const MIN_PIN_ZOOM = 1[0-4];/);
+  });
+
+  it("reference (unrated) pins render smaller and more transparent than his own places — not a flat blob at density", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/REFERENCE_PIN\s*=\s*\{\s*radius:\s*5,\s*fillOpacity:\s*0\.7\s*\}/);
+    // His own places call addPin with no opts (full radius 7 / opacity 0.95 defaults);
+    // the reference snapshot and live-search fallback both pass REFERENCE_PIN explicitly.
+    const drawEffect = map.slice(map.indexOf("Redraw markers"), map.indexOf("const showCappedNotice"));
+    const hisPlacesBlock = drawEffect.slice(
+      drawEffect.indexOf("for (const p of loggedPlaces"),
+      drawEffect.indexOf("const REFERENCE_PIN"),
+    );
+    expect(hisPlacesBlock).not.toContain("REFERENCE_PIN");
+    const gatedBlock = drawEffect.slice(drawEffect.indexOf("if (!tooSmall)"));
+    const refCalls = [...gatedBlock.matchAll(/REFERENCE_PIN/g)];
+    expect(refCalls.length).toBe(2); // the snapshot pass and the live-search pass
+  });
 });
 
 /* ════════════════════════════════════════════════════════════════════════════════════════
