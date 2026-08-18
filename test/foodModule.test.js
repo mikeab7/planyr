@@ -611,6 +611,43 @@ describe("NEW-5 (revised) — colourful basemap, no clustering, his places alway
   });
 });
 
+describe("satellite toggle — one control, two states, reused Esri source, legible pins on imagery", () => {
+  it("ONE toggle button, two states — never a basemap gallery, never a layers panel", () => {
+    const map = src("components/FoodMap.jsx");
+    expect([...map.matchAll(/data-testid="food-basemap-toggle"/g)]).toHaveLength(1);
+    expect(map).toMatch(/setBasemap\(\(b\) => \(b === "satellite" \? "street" : "satellite"\)\)/);
+    expect(map).not.toMatch(/BASEMAP_CHOICES|basemapGallery|LayerPanel/);
+  });
+
+  it("the satellite source is duplicated from the Site Planner's Esri World Imagery, not imported — BUNDLE ISOLATION", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toContain("server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile");
+    expect(map).toMatch(/Imagery &copy; Esri, Maxar/);
+    // No API key, no account, no billing — a bare tile URL, same shape as the street source.
+    expect(map).not.toMatch(/apikey|api_key|access_token/i);
+    // BUNDLE ISOLATION — this file may still import nothing from site-planner, even though it
+    // reuses that module's SOURCE VALUES (copied as literals, not through an import edge).
+    expect(map).not.toMatch(/from\s+["'][^"']*site-planner[^"']*["']/);
+  });
+
+  it("the two tile sources are swapped WHOLE on toggle (fresh layer + removal), never `setUrl` on a shared layer", () => {
+    const map = src("components/FoodMap.jsx");
+    const tileEffect = map.slice(map.indexOf("Basemap tile layer"), map.indexOf("}, [basemap]);"));
+    expect(tileEffect).toMatch(/L\.tileLayer\(source\.url/);
+    expect(tileEffect).toMatch(/map\.removeLayer\(layer\)/); // the cleanup that removes the PREVIOUS layer
+    expect(map).not.toMatch(/\.setUrl\(/);
+  });
+
+  it("satellite mode widens the pin's white keyline stroke so the rating ramp stays legible over photo imagery", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/const strokeWeight = basemap === "satellite" \? 3 : 2;/);
+    // Every addPin call must use the computed weight, not a value hardcoded back to a constant 2.
+    const drawEffect = map.slice(map.indexOf("Redraw markers"), map.indexOf("}, [places, loggedPlaces"));
+    expect(drawEffect).toMatch(/weight:\s*strokeWeight/);
+    expect(drawEffect).not.toMatch(/weight:\s*2\b/);
+  });
+});
+
 /* ════════════════════════════════════════════════════════════════════════════════════════
  * 4d. RATING SLIDER + NO-DEFAULT DATE (owner correction, 2026-08-18): half-point ratings via
  *     ONE control (never a row of 19-20 buttons), and the date field starts empty — rating a
@@ -709,6 +746,32 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     const selectPlace = box.slice(box.indexOf("const selectPlace ="), box.indexOf("const selectManual ="));
     expect(selectPlace).toMatch(/onSelectPlace\(place\)/);
     expect(selectPlace).toMatch(/onFlyTo\(/);
+  });
+
+  it("⛔ RECURRENCE GUARD — the results panel renders through AnchoredMenu's document.body portal, never a plain position:absolute div nested in the toolbar", () => {
+    // The FIRST ship nested the dropdown inside this component's own DOM tree at
+    // `position: absolute`. Live-measured by the owner's colleague: the results genuinely
+    // rendered and matched (five "Torchy's Tacos" rows in body.innerText) but were VISUALLY
+    // CLIPPED to nothing, because an ancestor toolbar row is `overflow: hidden` for its own
+    // layout — no z-index can fix an ancestor overflow clip. AnchoredMenu escapes every
+    // ancestor's overflow/stacking context via a portal to document.body; a regression back to
+    // a locally-nested absolute div would silently reintroduce the exact defect.
+    const box = src("components/SearchBox.jsx");
+    expect(box).toMatch(/import AnchoredMenu from ".*shared\/ui\/AnchoredMenu\.jsx"/);
+    expect(box).toMatch(/<AnchoredMenu\b/);
+    expect(box).toMatch(/anchorRef=\{inputRef\}/);
+    // The old shape this replaces: a `position: "absolute"` div anchored inside this
+    // component's own render tree instead of delegating to the portal.
+    expect(box).not.toMatch(/position:\s*"absolute"/);
+  });
+
+  it("the search input can be re-clicked without the dropdown swallowing the click (hoverSafe, not the default full-viewport backdrop)", () => {
+    // The default AnchoredMenu backdrop is a full-viewport click-away layer with NO exemption
+    // for the anchor — correct for a button-triggered menu (click the button again to close),
+    // wrong for a text input, where re-clicking it should reposition the cursor, not close the
+    // dropdown. hoverSafe mode exempts both the anchor and the panel from the click-away.
+    const box = src("components/SearchBox.jsx");
+    expect(box).toMatch(/<AnchoredMenu[\s\S]{0,300}?\bhoverSafe\b/);
   });
 
   it("FoodMap flies to a search result, keyed on a nonce (so re-selecting the same place still flies)", () => {

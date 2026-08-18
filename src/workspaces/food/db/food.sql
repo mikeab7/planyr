@@ -24,6 +24,7 @@ create table if not exists public.food_places (
   name           text not null,
   lat            double precision not null,
   lon            double precision not null,
+  metro          text not null,                -- which registered metro loaded this row (scripts/load-food-places.py's METROS) — 'Houston' / 'Dallas-Fort Worth' / 'Austin'
   category       text,                         -- Overture categories.primary, e.g. 'mexican_restaurant'
   cuisine        text,                         -- Overture taxonomy.hierarchy tail, e.g. 'taco_restaurant'
   address        text,
@@ -40,6 +41,7 @@ create table if not exists public.food_places (
 
 create index if not exists food_places_geom_idx     on public.food_places using gist (geom);
 create index if not exists food_places_category_idx on public.food_places (category);
+create index if not exists food_places_metro_idx    on public.food_places (metro);
 
 alter table public.food_places enable row level security;
 
@@ -131,6 +133,17 @@ alter table public.food_visits drop constraint if exists food_visits_rating_chec
 alter table public.food_visits add constraint food_visits_rating_check
   check (rating is null or (rating between 1 and 10 and rating * 2 = round(rating * 2)));
 
+-- ── food_places.metro (owner chat block, 2026-08-18: "add dallas and austin too" -- which
+-- metro registered by scripts/load-food-places.py's METROS loaded this row). The inline column
+-- above only governs a first-ever create; the already-existing production table needs an
+-- explicit ADD + backfill. Checked first: every existing row is Houston-only (lon range
+-- -95.998 to -94.602, confirmed against the table before this ran), so the backfill is exact,
+-- not a guess. Idempotent: safe to re-run (the UPDATE only ever touches still-null rows).
+alter table public.food_places add column if not exists metro text;
+update public.food_places set metro = 'Houston' where metro is null;
+alter table public.food_places alter column metro set not null;
+create index if not exists food_places_metro_idx on public.food_places (metro);
+
 -- ── food_places_in_bounds_sampled (NEW-4) — a VIEWPORT-WIDE, PROPORTIONALLY-DISTRIBUTED
 -- capped read. The plain "just add ORDER BY" fix is wrong here: an ORDER BY id/name/whatever
 -- still returns an arbitrary prefix that happens to sit wherever those ids/names cluster. So
@@ -148,6 +161,20 @@ alter table public.food_visits add constraint food_visits_rating_check
 -- client can say "showing 2,000 of 30,620" instead of silently truncating. SECURITY INVOKER
 -- (the default) — runs under the caller's own RLS, and food_places is already public-read, so
 -- this grants no new access.
+--
+-- ⛔ THE VIEWPORT PREDICATE (rewritten 2026-08-18, B632178 — verified before adding Dallas-Fort
+-- Worth and Austin, per the owner's instruction not to trust it silently: "confirm this does
+-- not slow the map... check the query plan uses the index"). The original `where lat >= ...
+-- and lat <= ... and lon >= ... and lon <= ...` never touched `geom` at all, so the table's own
+-- GIST spatial index (`food_places_geom_idx`, defined above, since the table's FIRST migration)
+-- sat there unused — every neighbourhood-zoom pan was a SEQUENTIAL SCAN. Measured directly
+-- against production on the 34k-row Houston-only table: 727ms for a plain range filter over a
+-- neighbourhood box. Rewriting to `geom && ST_MakeEnvelope(...)::geography` -- the bounding-box
+-- overlap operator PostGIS's GIST opclass actually indexes -- measured at 86ms for the
+-- IDENTICAL result set on the SAME query, confirmed via EXPLAIN ANALYZE to be a
+-- `Bitmap Index Scan on food_places_geom_idx`, not a table scan. This is the fix that lets the
+-- table roughly triple (Houston + Dallas-Fort Worth + Austin) without the map degrading --
+-- an index scan's cost tracks the RESULT size, not the TABLE size, unlike a sequential scan.
 create or replace function public.food_places_in_bounds_sampled(
   p_south double precision, p_west double precision,
   p_north double precision, p_east double precision,
@@ -164,7 +191,7 @@ language sql stable as $$
       width_bucket(lat, p_south, p_north, greatest(p_grid, 1)) as gy,
       width_bucket(lon, p_west, p_east, greatest(p_grid, 1)) as gx
     from public.food_places
-    where lat >= p_south and lat <= p_north and lon >= p_west and lon <= p_east
+    where geom && extensions.st_makeenvelope(p_west, p_south, p_east, p_north, 4326)::extensions.geography
   ),
   counted as (
     select *,
