@@ -164,7 +164,17 @@ This is the redirect RULE itself, live, on Cloudflare's actual routing engine �
 2. Rate it 9 or 10. **Expect:** a dark, deep-red pill reading "9/10" (or "10/10") with light text, in both the panel's past-visits row and the List view's Rating column.
 3. Rate a different visit 1 or 2. **Expect:** a pale cream/amber pill with dark text — clearly a different point on the same ramp, still legible.
 4. Sort the List view by Rating. **Expect:** correct ordering across the full 1-10 range.
-**Result:** ⏳ pending.
+**Result:** ⏳ pending. **⛔ SUPERSEDED by V317296 (B626576, below) — the ten-pill input this checklist describes no longer exists; a slider replaced it.**
+
+### V317296 — B626576: half-point rating slider + a visit date that never defaults, on his own signed-in account `Blocker: real-data`
+**What was verified here (sandbox):** production `food_visits` re-checked before the migration — no longer empty (16 real rows, all rated 7-9) — every value confirmed to be a whole number, so the widen to `numeric(3,1)` is lossless; re-checked AFTER the migration too, same 16 rows, same values, new type. Auditing the type change surfaced a real, previously-latent bug: PostgREST returns a Postgres `numeric` column as a JSON string, which silently broke `Number.isFinite()` in the colour-ramp functions (every rated pin would have fallen back to the flat "logged" colour, not just halves) and broke the Rating/Cost list sorts (string comparison misorders "10.0" before "9.5") — both fixed with `Number()` coercion at each read site, the same pattern this codebase already used for `cost`. `npx vitest run` — food suite 95/95 green, including new tests for: half-point values landing on a real ramp step (never null), a raw numeric-as-string input being coerced correctly by both the colour functions and `foodStore`'s two averaging functions, the date field's `useState` never calling `new Date()`, the rating control being a single `type="range"` input (not a button row, not `role="radiogroup"`), and the slider staying uncommitted/clearable rather than auto-filling a value. Full repo suite green, lint clean, build green, bundle audit clean.
+**Why this needs his machine:** a native range slider's actual drag behaviour, its live colour preview as it moves, and a save with a genuinely blank date field round-tripping through Supabase all need a real signed-in session — none of that renders in this sandbox (`onSubmitVisit` stays `undefined` until `accountActive`, confirmed directly: the form here still shows "Sign in to log a visit here.").
+**Steps, each with a named expected result:**
+1. On planyr.io, signed in, open the visit form. **Expect:** the date field is BLANK on open — never pre-filled with today.
+2. Save a visit with the date left blank. **Expect:** it saves without error; the visits list and the past-visits row show "date unknown"/"—" for it — never "Invalid Date", never a crash.
+3. Rate a visit by dragging the slider. **Expect:** ONE draggable bar, not a row of buttons; a number next to it updates live as you drag, including landing on half-point stops like 7.5; the slider's own fill colour changes as you move it, previewing the ramp.
+4. Save that half-point rating. **Expect:** the pin on the map, the past-visits row, and the List view's Rating column all show the SAME colour, rounded to the nearest whole step — never a flat/uncoloured pill (this is the exact case the string-coercion bug above would have broken).
+5. Sort the List view by Rating with at least one visit rated 10. **Expect:** 10 sorts as the highest value, not lexically before 9.5.
 **Result:** ⏳ pending.
 
 ### V306832 — B575952: /food is genuinely unlisted, on his own signed-in account

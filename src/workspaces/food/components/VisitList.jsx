@@ -6,9 +6,17 @@ import { useMemo, useState } from "react";
 import { colorForRating, textColorForRating } from "../lib/ratingColor.js";
 
 const SORTS = {
+  // A dateless visit's key is "" — the empty string, which string-compares BELOW every real
+  // "YYYY-MM-DD" value, so with dir:-1 (most-recent-first) it sorts to the end rather than
+  // landing at some arbitrary point or throwing on `new Date(null)` (owner, 2026-08-18: a
+  // dateless visit "must render and sort sensibly ... rather than falling to [an unsorted mess]
+  // or showing 'Invalid Date'" — this file never parses visited_on as a Date at all).
   date: { label: "Date", get: (v) => v.visited_on || "", dir: -1 },
-  rating: { label: "Rating", get: (v) => v.rating ?? -1, dir: -1 },
-  cost: { label: "Cost", get: (v) => v.cost ?? -1, dir: -1 },
+  // rating/cost are Postgres `numeric` columns, which PostgREST returns as JSON STRINGS
+  // ("7.5") — comparing those as strings breaks as soon as a two-digit value like "10.0"
+  // exists ("10.0" < "9.5" lexically), so both are coerced through Number() here.
+  rating: { label: "Rating", get: (v) => (v.rating == null ? -1 : Number(v.rating)), dir: -1 },
+  cost: { label: "Cost", get: (v) => (v.cost == null ? -1 : Number(v.cost)), dir: -1 },
   name: { label: "Name", get: (v) => (v.placeName || "").toLowerCase(), dir: 1 },
 };
 

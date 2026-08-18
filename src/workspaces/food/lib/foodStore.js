@@ -107,7 +107,10 @@ export function manualPinsFromVisits(visits) {
     }
     const g = groups.get(key);
     g.visitIds.push(v.id);
-    if (v.rating != null) g.ratings.push(v.rating);
+    // Number(): rating is a Postgres `numeric` column, which PostgREST returns as a JSON
+    // STRING ("7.5") to avoid float-precision loss over the wire — same reason `cost` reads
+    // are already coerced this way at their render sites.
+    if (v.rating != null) g.ratings.push(Number(v.rating));
   }
   return [...groups.values()].map(({ ratings, ...pin }) => ({
     ...pin,
@@ -129,7 +132,7 @@ export function avgRatingByPlaceId(visits) {
   for (const v of visits) {
     if (!v.place_id || v.rating == null) continue;
     const cur = sums.get(v.place_id) || { sum: 0, n: 0 };
-    cur.sum += v.rating; cur.n += 1;
+    cur.sum += Number(v.rating); cur.n += 1; // Number(): see manualPinsFromVisits above
     sums.set(v.place_id, cur);
   }
   const out = new Map();
