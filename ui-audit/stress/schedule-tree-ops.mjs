@@ -1,0 +1,99 @@
+// Faithful extraction of the Scheduler's multi-row indent/outdent + delete-with-children tree
+// mutations from public/sequence/index.html (flatOrderWithLevel/indentSelection/outdentSelection/
+// promoteChildrenAndDelete, defined just after sortByVisualOrder). Copied VERBATIM so
+// test/scheduleIndentOutdentDelete.test.js exercises the real code paths without a browser.
+// Keep in sync if the source changes — test/scheduleIndentOutdentDelete.test.js's drift guard
+// checks the source lines still exist verbatim in index.html.
+
+export const flatOrderWithLevel = (tasks) => {
+  const kidsBy = new Map();
+  tasks.forEach(t => { const p = t.parentId ?? null; if (!kidsBy.has(p)) kidsBy.set(p, []); kidsBy.get(p).push(t); });
+  const out = [];
+  const walk = (parentId, level) => {
+    (kidsBy.get(parentId) || []).forEach(t => {
+      out.push({ ...t, level });
+      if (t.isExpanded) walk(t.id, level + 1);
+    });
+  };
+  walk(null, 0);
+  return out;
+};
+
+export const indentSelection = (tasks, selectedIds) => {
+  const flatOrder = flatOrderWithLevel(tasks);
+  const posById = new Map(flatOrder.map((t, i) => [t.id, i]));
+  const idSet = new Set(selectedIds.filter(id => posById.has(id)));
+  if (!idSet.size) return null;
+  let topPos = Infinity;
+  idSet.forEach(id => { const p = posById.get(id); if (p < topPos) topPos = p; });
+  if (topPos <= 0) return null; // nothing above the topmost row at all
+  const top = flatOrder[topPos];
+  const L = top.level;
+  let newParent = null;
+  for (let i = topPos - 1; i >= 0; i--) {
+    if (flatOrder[i].level === L) { newParent = flatOrder[i]; break; }
+    if (flatOrder[i].level < L) break; // hit the topmost row's own parent first — no eligible sibling above it
+  }
+  if (!newParent) return null;
+  const rootIds = [...idSet].filter(id => !idSet.has(flatOrder[posById.get(id)].parentId));
+  if (rootIds.every(id => flatOrder[posById.get(id)].parentId === newParent.id)) return null; // already there
+  const rootSet = new Set(rootIds);
+  return tasks.map(t => {
+    if (rootSet.has(t.id)) return { ...t, parentId: newParent.id };
+    if (t.id === newParent.id) return { ...t, isExpanded: true, focused: false };
+    return t;
+  });
+};
+
+export const outdentSelection = (tasks, selectedIds) => {
+  const byId = new Map(tasks.map(t => [t.id, t]));
+  const idSet = new Set(selectedIds.filter(id => byId.has(id)));
+  if (!idSet.size) return null;
+  const rootIds = selectedIds.filter(id => idSet.has(id) && !idSet.has(byId.get(id).parentId));
+  // Group ADJACENT (in the given top-to-bottom order) root ids that share the same CURRENT parent
+  // into one batch, so a whole run of siblings is promoted and re-sequenced together in a single
+  // splice — moving them one row at a time would recompute "the end of the old parent's remaining
+  // subtree" against an array that's already lost the earlier movers, placing later movers ahead
+  // of earlier ones and reversing the block's visual order.
+  const groups = [];
+  rootIds.forEach(id => {
+    const t = byId.get(id);
+    const last = groups[groups.length - 1];
+    if (last && last.parentId === t.parentId) last.ids.push(id);
+    else groups.push({ parentId: t.parentId, ids: [id] });
+  });
+  let working = [...tasks];
+  let changed = false;
+  groups.forEach(g => {
+    if (g.parentId === null || g.parentId === undefined) return; // already depth 0 — clean no-op for this run
+    const parent = working.find(t => t.id === g.parentId);
+    if (!parent) return; // orphaned parentId — nothing sane to promote to
+    const grandParentId = parent.parentId ?? null;
+    const moveSet = new Set(g.ids);
+    const subtreeIds = new Set([g.parentId]);
+    const collect = pid => { working.filter(t => t.parentId === pid && !moveSet.has(t.id)).forEach(c => { subtreeIds.add(c.id); collect(c.id); }); };
+    collect(g.parentId);
+    const moved = g.ids.map(id => working.find(t => t.id === id)).filter(Boolean).map(t => ({ ...t, parentId: grandParentId }));
+    const remaining = working.filter(t => !moveSet.has(t.id));
+    let insertAfter = -1;
+    remaining.forEach((t, i) => { if (subtreeIds.has(t.id)) insertAfter = i; });
+    const reordered = [...remaining];
+    reordered.splice(insertAfter + 1, 0, ...moved);
+    working = grandParentId !== null ? reordered.map(t => t.id === grandParentId ? { ...t, focused: false } : t) : reordered;
+    changed = true;
+  });
+  return changed ? working : null;
+};
+
+export const promoteChildrenAndDelete = (tasks, deleteIds) => {
+  const delSet = new Set(deleteIds);
+  const byId = new Map(tasks.map(t => [t.id, t]));
+  const survivingAncestor = (parentId) => {
+    let cur = parentId;
+    while (cur !== null && cur !== undefined && delSet.has(cur)) cur = byId.get(cur)?.parentId ?? null;
+    return cur ?? null;
+  };
+  return tasks.filter(t => !delSet.has(t.id)).map(t => (
+    t.parentId != null && delSet.has(t.parentId) ? { ...t, parentId: survivingAncestor(t.parentId) } : t
+  ));
+};
