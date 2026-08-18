@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { indentSelection, outdentSelection, promoteChildrenAndDelete, flatOrderWithLevel } from "../ui-audit/stress/schedule-tree-ops.mjs";
+import { recomputeSchedule } from "../ui-audit/stress/scheduler-engine.mjs";
 
 // Fast, CI-runnable half of the multi-row indent/outdent + delete-with-children fix. The full
 // real-browser proof (both entry points, both undo, health rollup, mutation-proven) lives in
@@ -203,27 +204,123 @@ describe("flatOrderWithLevel — the shared visual-order walk indent/outdent bot
   });
 });
 
+// ── Combined with the REAL recompute engine (scheduler-engine.mjs, the pre-existing mirror of
+// cascadeDates/rollupParentDates) — the B463072-shaped landmine and live predecessor survival.
+// The live-browser harness measured both of these against the actual app; these are the fast,
+// CI-runnable pins for the same two properties, run through the real date-cascade math rather
+// than asserted from parentId alone.
+describe("indent/outdent through the real recompute engine — B463072 landmine + predecessor survival", () => {
+  const dtask = (id, over = {}) => ({
+    id, name: "t" + id, start: "2026-06-01", end: "2026-06-01", duration: 1,
+    durValue: 1, durUnit: "d", predecessors: [], parentId: null, health: "gray",
+    percentComplete: 0, isExpanded: true, ...over,
+  });
+
+  it("B463072 round-trip: a leaf's typed duration survives gaining then losing a child, recomputed for real", () => {
+    // "6" is a leaf with a typed 3d duration. "7" is a dated 1-day child. Indent 7 under 6 (6
+    // becomes a parent for the first time) and recompute for real: 6's duration must reflect the
+    // ROLLED span (not the stale 3), because it now has a child with real dates. Then outdent 7
+    // back out (6 is childless again) and recompute again: 6 must cleanly restore ITS OWN typed
+    // 3d span, not some frozen leftover from while it had children.
+    let tasks = [
+      dtask(6, { durValue: 3, durUnit: "d", duration: 3, end: "2026-06-03" }),
+      dtask(7, { start: "2026-06-01", end: "2026-06-01", duration: 1 }),
+    ];
+    tasks = recomputeSchedule(tasks);
+    expect(tasks.find(t => t.id === 6).duration).toBe(3); // leaf, still its own typed value
+
+    tasks = recomputeSchedule(indentSelection(tasks, [7])); // 6 gains child 7
+    const asParent = tasks.find(t => t.id === 6);
+    expect(asParent.duration).not.toBe(3); // ROLLED now, not the stale leaf value
+    expect(asParent.duration).toBe(1); // rolled from 7's single dated day
+
+    tasks = recomputeSchedule(outdentSelection(tasks, [7])); // 6 loses its only child
+    const backToLeaf = tasks.find(t => t.id === 6);
+    expect(backToLeaf.duration).toBe(3); // restored — no B463072-shaped stale leftover
+    expect(backToLeaf.durValue).toBe(3);
+  });
+
+  it("predecessor links survive INDENT and stay LIVE — the moved row's date still derives from its predecessor after recompute", () => {
+    // 8 -> 1 -> 9 in visual order, all top-level. 9 is FS-driven by 8 but its new parent (1) is a
+    // DIFFERENT task from its predecessor, so reparenting introduces no circularity — isolating
+    // exactly "does the link still drive the date after the move," not an unrelated interaction
+    // from picking the predecessor itself as the new parent.
+    let tasks = [dtask(8, { duration: 2, end: "2026-06-02" }), dtask(1), dtask(9, { predecessors: [{ id: 8, type: "FS", lag: 0 }] })];
+    tasks = recomputeSchedule(tasks);
+    const baselineStart = tasks.find(t => t.id === 9).start; // 9's FS-derived date BEFORE any move
+
+    const moved = indentSelection(tasks, [9]); // 9 becomes 1's child; 1 is directly above it
+    expect(moved.find(t => t.id === 9).parentId).toBe(1);
+    expect(moved.find(t => t.id === 9).predecessors).toEqual([{ id: 8, type: "FS", lag: 0 }]);
+
+    const after = recomputeSchedule(moved).find(t => t.id === 9);
+    expect(after.predecessors).toEqual([{ id: 8, type: "FS", lag: 0 }]);
+    expect(after.start).toBe(baselineStart); // still genuinely FS-driven by 8, unchanged by the move
+  });
+
+  it("predecessor links survive OUTDENT and stay LIVE the same way", () => {
+    // 8 (unrelated) -> 1 -> 2 (1's child) -> 9 (2's child, FS-driven by 8, predecessor OUTSIDE
+    // the 1/2 subtree entirely).
+    let tasks = [
+      dtask(8, { duration: 2, end: "2026-06-02" }),
+      dtask(1),
+      dtask(2, { parentId: 1 }),
+      dtask(9, { parentId: 2, predecessors: [{ id: 8, type: "FS", lag: 0 }] }),
+    ];
+    tasks = recomputeSchedule(tasks);
+    const baselineStart = tasks.find(t => t.id === 9).start;
+
+    const moved = outdentSelection(tasks, [9]); // 9 promotes from 2 to 2's parent (1)
+    expect(moved.find(t => t.id === 9).parentId).toBe(1);
+    expect(moved.find(t => t.id === 9).predecessors).toEqual([{ id: 8, type: "FS", lag: 0 }]);
+
+    const after = recomputeSchedule(moved).find(t => t.id === 9);
+    expect(after.predecessors).toEqual([{ id: 8, type: "FS", lag: 0 }]);
+    expect(after.start).toBe(baselineStart);
+  });
+});
+
 // ── Source-pin: the fast anchors a CI push can check without a browser ──────────────────────────
 describe("wiring in public/sequence/index.html", () => {
   const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
   const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/schedule-tree-ops.mjs", import.meta.url)), "utf8");
 
-  it("the pure tree-mutation functions in the mirror match the real source verbatim (drift guard)", () => {
-    for (const fnBody of [
-      "const flatOrderWithLevel = (tasks) => {",
-      "const indentSelection = (tasks, selectedIds) => {",
-      "const outdentSelection = (tasks, selectedIds) => {",
-      "const promoteChildrenAndDelete = (tasks, deleteIds) => {",
-    ]) {
-      const exported = fnBody.replace("const ", "export const ");
-      expect(src.includes(fnBody), `"${fnBody}" missing from index.html`).toBe(true);
-      expect(mjs.includes(exported), `"${exported}" missing from schedule-tree-ops.mjs`).toBe(true);
+  // Extract a top-level `const <name> = (...) => { ... };` function body from a source string by
+  // brace-matching from the signature line to its closing `};`. A regex pin on a few "load-bearing"
+  // lines (the previous version of this guard) is BLIND to a change anywhere else in the body —
+  // proved empirically: pointing this test at index.html with `parentId: newParent.id` mutated to
+  // `parentId: top.id` inside `indentSelection` (a real behavioral bug — every root row would
+  // reparent onto itself/the topmost row instead of the row above it) left all 34 tests in this
+  // file GREEN, because that line wasn't one of the ones pinned. This extraction makes the WHOLE
+  // body the comparison, not a hand-picked subset of it.
+  const extractFn = (source, signature) => {
+    const start = source.indexOf(signature);
+    if (start === -1) return null;
+    let depth = 0, i = start, seenFirstBrace = false;
+    for (; i < source.length; i++) {
+      if (source[i] === "{") { depth++; seenFirstBrace = true; }
+      else if (source[i] === "}") { depth--; if (seenFirstBrace && depth === 0) { i++; break; } }
     }
-    // Pin the load-bearing lines that are easy to "simplify" away by accident.
-    expect(src).toMatch(/if \(flatOrder\[i\]\.level < L\) break; \/\/ hit the topmost row's own parent first/);
-    expect(src).toMatch(/if \(rootIds\.every\(id => flatOrder\[posById\.get\(id\)\]\.parentId === newParent\.id\)\) return null;/);
-    expect(src).toMatch(/if \(last && last\.parentId === t\.parentId\) last\.ids\.push\(id\);/);
-    expect(src).toMatch(/while \(cur !== null && cur !== undefined && delSet\.has\(cur\)\) cur = byId\.get\(cur\)\?\.parentId \?\? null;/);
+    return source.slice(start, i).replace(/;\s*$/, "");
+  };
+
+  it("the pure tree-mutation functions in the mirror are BYTE-IDENTICAL to index.html's, not just similar (drift guard)", () => {
+    const pairs = [
+      ["const flatOrderWithLevel = (tasks) => {", "export const flatOrderWithLevel = (tasks) => {"],
+      ["const indentSelection = (tasks, selectedIds) => {", "export const indentSelection = (tasks, selectedIds) => {"],
+      ["const outdentSelection = (tasks, selectedIds) => {", "export const outdentSelection = (tasks, selectedIds) => {"],
+      ["const promoteChildrenAndDelete = (tasks, deleteIds) => {", "export const promoteChildrenAndDelete = (tasks, deleteIds) => {"],
+    ];
+    for (const [srcSig, mjsSig] of pairs) {
+      const srcBody = extractFn(src, srcSig);
+      const mjsBody = extractFn(mjs, mjsSig);
+      expect(srcBody, `"${srcSig}" not found (or unbalanced braces) in index.html`).not.toBeNull();
+      expect(mjsBody, `"${mjsSig}" not found (or unbalanced braces) in schedule-tree-ops.mjs`).not.toBeNull();
+      // Normalize only the signature's own "export " prefix — the BODY (everything after the
+      // opening brace) must match character-for-character, not just structurally.
+      const srcNormalized = srcBody.replace(srcSig, mjsSig);
+      expect(srcNormalized, `index.html's ${srcSig.split(" ")[1]} body diverged from the schedule-tree-ops.mjs mirror`).toBe(mjsBody);
+    }
   });
 
   it("BOTH keyboard entry points resolve the whole selection via structuralTargets, not a bare selectedId", () => {
@@ -273,5 +370,20 @@ describe("wiring in public/sequence/index.html", () => {
   it("the dead indentTaskById/outdentTaskById props are fully gone from GridView's signature and the shared object (no ReferenceError)", () => {
     expect(src).not.toMatch(/\bindentTaskById\b/);
     expect(src).not.toMatch(/\boutdentTaskById\b/);
+  });
+
+  it("each of the three batch operations calls setData and recomputeAfterStructureChange EXACTLY ONCE — one recompute per operation, never one per row", () => {
+    const bodies = {
+      indentSelectionByIds: extractFn(src, "const indentSelectionByIds = useCallback((taskIds) => {"),
+      outdentSelectionByIds: extractFn(src, "const outdentSelectionByIds = useCallback((taskIds) => {"),
+      promoteAndDeleteTasks: extractFn(src, "const promoteAndDeleteTasks = useCallback((taskIds) => {"),
+    };
+    for (const [name, body] of Object.entries(bodies)) {
+      expect(body, `${name} not found in index.html`).not.toBeNull();
+      const setDataCalls = (body.match(/\bsetData\(/g) || []).length;
+      const recomputeCalls = (body.match(/\brecomputeAfterStructureChange\(/g) || []).length;
+      expect(setDataCalls, `${name} calls setData ${setDataCalls} times, expected exactly 1`).toBe(1);
+      expect(recomputeCalls, `${name} calls recomputeAfterStructureChange ${recomputeCalls} times, expected exactly 1`).toBe(1);
+    }
   });
 });
