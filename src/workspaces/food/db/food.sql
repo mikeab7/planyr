@@ -103,7 +103,52 @@ drop trigger if exists food_visits_touch on public.food_visits;
 create trigger food_visits_touch before update on public.food_visits
   for each row execute function public.food_visits_touch_updated_at();
 
+-- ── food_places_in_bounds_sampled (NEW-4) — a VIEWPORT-WIDE, SPATIALLY-DISTRIBUTED capped
+-- read. The plain "just add ORDER BY" fix is wrong here: an ORDER BY id/name/whatever still
+-- returns an arbitrary prefix that happens to sit wherever those ids/names cluster. What the
+-- owner actually needs is "spread across the box I'm looking at, not bunched in one corner" —
+-- so this partitions the bbox into a p_grid × p_grid lattice (default 8×8 = 64 cells) and takes
+-- an even share from EVERY cell that has anything in it, via one window-function pass (no N+1
+-- queries, no client-side looping). `total_matched` rides along (a `count(*) over ()` on the
+-- SAME scan, so it costs nothing extra) so the client can tell the user "showing 2,000 of
+-- 30,620" instead of silently truncating. SECURITY INVOKER (the default) — it runs under the
+-- caller's own RLS, and food_places is already public-read, so this grants no new access.
+create or replace function public.food_places_in_bounds_sampled(
+  p_south double precision, p_west double precision,
+  p_north double precision, p_east double precision,
+  p_cap integer default 2000, p_grid integer default 8
+)
+returns table (
+  id text, name text, lat double precision, lon double precision,
+  category text, cuisine text, address text, brand text,
+  source text, source_licence text, total_matched bigint
+)
+language sql stable as $$
+  with matched as (
+    select id, name, lat, lon, category, cuisine, address, brand, source, source_licence,
+      width_bucket(lat, p_south, p_north, greatest(p_grid, 1)) as gy,
+      width_bucket(lon, p_west, p_east, greatest(p_grid, 1)) as gx,
+      count(*) over () as total_matched
+    from public.food_places
+    where lat >= p_south and lat <= p_north and lon >= p_west and lon <= p_east
+  ),
+  ranked as (
+    select *, row_number() over (partition by gy, gx order by id) as rn
+    from matched
+  )
+  select id, name, lat, lon, category, cuisine, address, brand, source, source_licence, total_matched
+  from ranked
+  where rn <= greatest(1, p_cap / (greatest(p_grid, 1) * greatest(p_grid, 1)))
+  order by gy, gx, rn
+  limit p_cap;
+$$;
+
+grant execute on function public.food_places_in_bounds_sampled(
+  double precision, double precision, double precision, double precision, integer, integer
+) to anon, authenticated;
+
 -- 3) Verify (read-only; safe to run any time) ---------------------------------
 --   select relrowsecurity from pg_class where oid = 'public.food_visits'::regclass;   -- expect true
 --   select polname from pg_policy where polrelid = 'public.food_visits'::regclass;    -- 4 owner-only rows, no anon
 --   select count(*) from public.food_places;                                         -- expect ~34,000 after the load script runs
+--   select food_places_in_bounds_sampled(29.4, -95.9, 30.2, -94.9, 2000, 8);          -- spread across the bbox, total_matched on every row

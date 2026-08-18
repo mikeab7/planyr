@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-17 @ `4d31b551` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-18 @ `39223d6` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_537 source files mapped._
+_538 source files mapped._
 
 ## infra
 
@@ -51,6 +51,8 @@ _537 source files mapped._
   - _exports_: `default (FoodApp)`
 - **`src/workspaces/food/lib/foodStore.js`** — The one seam to Supabase: place/visit queries, visit CRUD, manual-pin grouping, the logged-place-id set
   - _exports_: `deleteVisit`, `fetchAllVisits`, `fetchPlaceById`, `fetchPlacesByIds`, `fetchPlacesInBounds`, `insertVisit`, `loggedPlaceIds`, `manualPinsFromVisits`, `supabaseConfigured`, `updateVisit`
+- **`src/workspaces/food/lib/markerCluster.js`** — pure grid clustering for the food map (groups nearby pins on screen, no Leaflet/DOM dependency)
+  - _exports_: `clusterPoints`, `dominantKind`
 - **`src/workspaces/food/lib/overpass.js`** — OpenStreetMap Overpass fallback: cached per-bbox live query, called only on explicit user request
   - _exports_: `fromElement`, `queryFor`, `roundKey`, `searchOverpass`
 - **`src/workspaces/food/lib/supabaseClient.js`** — This module's own Supabase client (deliberately not a site-planner import — see BUNDLE ISOLATION)

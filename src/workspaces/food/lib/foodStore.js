@@ -13,19 +13,30 @@ import { supabase, supabaseConfigured } from "./supabaseClient.js";
 export { supabaseConfigured };
 
 /** Places from the loaded snapshot inside a lat/lon box. Capped so an accidental
- *  whole-country zoom can't ask for the whole table. */
+ *  whole-country zoom can't ask for the whole table.
+ *
+ *  NEW-4 (owner report, 2026-08-17): a plain `.limit(PLACES_QUERY_CAP)` with no ORDER BY
+ *  returns Postgres's unspecified scan order, which correlates with the Overture load's
+ *  insertion order — so a metro-wide viewport with more than the cap's worth of places always
+ *  returned the SAME arbitrary prefix, clustered wherever those rows happen to live in storage,
+ *  no matter where the map was actually looking. `food_places_in_bounds_sampled` (db/food.sql)
+ *  fixes this at the query, not by raising the number: it partitions the viewport into a grid
+ *  and takes an even share from every cell, so the result is spread across the CURRENT VIEW
+ *  instead of bunched in one corner — and it reports `total_matched` so the UI can say "capped"
+ *  instead of silently showing a subset. */
 const PLACES_QUERY_CAP = 2000;
+const PLACES_QUERY_GRID = 8;
 
 export async function fetchPlacesInBounds(bounds) {
-  if (!supabase || !bounds) return { data: [], error: null };
+  if (!supabase || !bounds) return { data: [], totalMatched: 0, capped: false, error: null };
   const { south, north, west, east } = bounds;
-  const { data, error } = await supabase
-    .from("food_places")
-    .select("id,name,lat,lon,category,cuisine,address,brand,source,source_licence")
-    .gte("lat", south).lte("lat", north)
-    .gte("lon", west).lte("lon", east)
-    .limit(PLACES_QUERY_CAP);
-  return { data: data || [], error };
+  const { data, error } = await supabase.rpc("food_places_in_bounds_sampled", {
+    p_south: south, p_west: west, p_north: north, p_east: east,
+    p_cap: PLACES_QUERY_CAP, p_grid: PLACES_QUERY_GRID,
+  });
+  const rows = data || [];
+  const totalMatched = rows.length ? Number(rows[0].total_matched) : 0;
+  return { data: rows, totalMatched, capped: totalMatched > rows.length, error };
 }
 
 export async function fetchPlaceById(id) {
