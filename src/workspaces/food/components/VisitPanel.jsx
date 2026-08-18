@@ -1,22 +1,32 @@
 /* VisitPanel — click a pin (or drop a new one), log what you had, rate it, note the cost.
  * A right-side panel, never a dialog box. Shows every past visit at this place first (the
  * "click an existing restaurant" convenience the brief asks for), then a form to add another.
+ *
+ * Rating is 1-10, not 1-5 (owner redesign, 2026-08-18) — a row of ten numbered pills rather
+ * than ten star glyphs (ten stars reads as clutter at this width); the SELECTED pill is
+ * coloured with the same 1-10 ramp the map pins use (lib/ratingColor.js), so picking a number
+ * here previews the exact colour that number paints on the map.
  */
 import { useState } from "react";
+import { colorForRating, textColorForRating } from "../lib/ratingColor.js";
 
-const STAR = "★";
-const STAR_EMPTY = "☆";
+const RATING_MAX = 10;
 
-function Stars({ value, onChange }) {
+function RatingPicker({ value, onChange }) {
   return (
-    <div style={{ display: "flex", gap: 2 }} role="radiogroup" aria-label="Rating">
-      {[1, 2, 3, 4, 5].map((n) => (
+    <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }} role="radiogroup" aria-label="Rating">
+      {Array.from({ length: RATING_MAX }, (_, i) => i + 1).map((n) => (
         <button
           key={n} type="button" onClick={() => onChange(n === value ? null : n)}
-          aria-pressed={n <= (value || 0)} title={`${n} star${n > 1 ? "s" : ""}`}
-          style={{ border: "none", background: "none", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: 2, color: "var(--warn-text)" }}
+          aria-pressed={n === value} title={`${n} out of ${RATING_MAX}`}
+          style={{
+            border: "1px solid var(--border-default)", borderRadius: 6, minWidth: 24, padding: "4px 0",
+            cursor: "pointer", font: "inherit", fontSize: 12, fontWeight: 700, lineHeight: 1,
+            background: n === value ? colorForRating(n) : "transparent",
+            color: n === value ? textColorForRating(n) : "var(--text-primary)",
+          }}
         >
-          {n <= (value || 0) ? STAR : STAR_EMPTY}
+          {n}
         </button>
       ))}
     </div>
@@ -55,7 +65,7 @@ function VisitForm({ onSubmit, onCancel, pending }) {
     <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 10, padding: "12px 0" }}>
       <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-secondary)" }}>
         Rating
-        <Stars value={rating} onChange={setRating} />
+        <RatingPicker value={rating} onChange={setRating} />
       </label>
       <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-secondary)" }}>
         Date
@@ -111,9 +121,16 @@ function VisitRow({ visit, onDelete }) {
   return (
     <div style={{ padding: "8px 0", borderBottom: "1px solid var(--border-default)", fontSize: 12.5 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <span style={{ color: "var(--warn-text)" }}>
-          {visit.rating ? STAR.repeat(visit.rating) + STAR_EMPTY.repeat(5 - visit.rating) : "—"}
-        </span>
+        {visit.rating ? (
+          <span style={{
+            display: "inline-block", borderRadius: 5, padding: "1px 6px", fontWeight: 700, fontSize: 11.5,
+            background: colorForRating(visit.rating), color: textColorForRating(visit.rating),
+          }}>
+            {visit.rating}/{RATING_MAX}
+          </span>
+        ) : (
+          <span style={{ color: "var(--text-tertiary)" }}>—</span>
+        )}
         <span style={{ color: "var(--text-tertiary)" }}>{visit.visited_on || ""}</span>
       </div>
       {visit.what_i_had && <div style={{ marginTop: 2 }}>{visit.what_i_had}</div>}

@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-18 @ `39223d6` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-18 @ `2d3f01a` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -50,11 +50,11 @@ _538 source files mapped._
 - **`src/workspaces/food/FoodApp.jsx`** — `/food` workspace root (lazy chunk): map/list view state, visit CRUD wiring, manual-pin drop flow
   - _exports_: `default (FoodApp)`
 - **`src/workspaces/food/lib/foodStore.js`** — The one seam to Supabase: place/visit queries, visit CRUD, manual-pin grouping, the logged-place-id set
-  - _exports_: `deleteVisit`, `fetchAllVisits`, `fetchPlaceById`, `fetchPlacesByIds`, `fetchPlacesInBounds`, `insertVisit`, `loggedPlaceIds`, `manualPinsFromVisits`, `supabaseConfigured`, `updateVisit`
-- **`src/workspaces/food/lib/markerCluster.js`** — pure grid clustering for the food map (groups nearby pins on screen, no Leaflet/DOM dependency)
-  - _exports_: `clusterPoints`, `dominantKind`
+  - _exports_: `avgRatingByPlaceId`, `deleteVisit`, `fetchAllVisits`, `fetchPlaceById`, `fetchPlacesByIds`, `fetchPlacesInBounds`, `insertVisit`, `loggedPlaceIds`, `manualPinsFromVisits`, `supabaseConfigured`, `updateVisit`
 - **`src/workspaces/food/lib/overpass.js`** — OpenStreetMap Overpass fallback: cached per-bbox live query, called only on explicit user request
   - _exports_: `fromElement`, `queryFor`, `roundKey`, `searchOverpass`
+- **`src/workspaces/food/lib/ratingColor.js`** — the 1-10 rating colour ramp for map pins/list/panel (warm cream to deep red-brown, WCAG-measured contrast, no green)
+  - _exports_: `colorForRating`, `RATING_COLORS`, `RATING_TEXT`, `textColorForRating`
 - **`src/workspaces/food/lib/supabaseClient.js`** — This module's own Supabase client (deliberately not a site-planner import — see BUNDLE ISOLATION)
   - _exports_: `supabase`, `supabaseConfigured`
 - **`src/workspaces/notes/components/IntegrityBanner.jsx`** — the bar for the two findings nothing could previously mention: one note living in two projects, and a note that had lost its place (already recovered by the time it renders, and named / openable / re-filable inline). Its own lazy chunk — it renders only when something is wrong.

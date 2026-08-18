@@ -3,6 +3,7 @@
  * snapshot, from a manual pin, or "Unknown place") before handing rows in here.
  */
 import { useMemo, useState } from "react";
+import { colorForRating, textColorForRating } from "../lib/ratingColor.js";
 
 const SORTS = {
   date: { label: "Date", get: (v) => v.visited_on || "", dir: -1 },
@@ -77,7 +78,18 @@ export default function VisitList({ visits, onSelect }) {
                   style={{ cursor: onSelect ? "pointer" : "default", borderTop: "1px solid var(--border-default)" }}
                 >
                   <td style={{ padding: "7px 8px", color: "var(--text-primary)", fontWeight: 600 }}>{v.placeName}</td>
-                  <td style={{ padding: "7px 8px", color: "var(--warn-text)" }}>{v.rating ? "★".repeat(v.rating) : "—"}</td>
+                  <td style={{ padding: "7px 8px" }}>
+                    {v.rating ? (
+                      <span style={{
+                        display: "inline-block", borderRadius: 5, padding: "1px 6px", fontWeight: 700,
+                        background: colorForRating(v.rating), color: textColorForRating(v.rating),
+                      }}>
+                        {v.rating}/10
+                      </span>
+                    ) : (
+                      <span style={{ color: "var(--text-tertiary)" }}>—</span>
+                    )}
+                  </td>
                   <td style={{ padding: "7px 8px" }}>{v.cost != null ? `$${Number(v.cost).toFixed(2)}` : "—"}</td>
                   <td style={{ padding: "7px 8px", color: "var(--text-secondary)" }}>{v.visited_on || "—"}</td>
                   <td style={{ padding: "7px 8px", color: "var(--text-secondary)" }}>{v.what_i_had || "—"}</td>

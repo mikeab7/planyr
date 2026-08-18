@@ -15,9 +15,9 @@ import { MODULE_BY_SLUG, SLUG_BY_MODULE, parseRoute, buildHash } from "../src/ap
 import { MODULE_ACCENT } from "../src/shared/ui/moduleAccent.js";
 import { LOADER_SKINS, resolveLoaderTheme } from "../src/shared/ui/moduleLoaderTheme.js";
 import { ROUTE_KEYS } from "../ui-audit/lib/bundleMetrics.mjs";
-import { manualPinsFromVisits, loggedPlaceIds } from "../src/workspaces/food/lib/foodStore.js";
+import { manualPinsFromVisits, loggedPlaceIds, avgRatingByPlaceId } from "../src/workspaces/food/lib/foodStore.js";
 import { roundKey, queryFor, fromElement } from "../src/workspaces/food/lib/overpass.js";
-import { clusterPoints, dominantKind } from "../src/workspaces/food/lib/markerCluster.js";
+import { RATING_COLORS, RATING_TEXT, colorForRating, textColorForRating } from "../src/workspaces/food/lib/ratingColor.js";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FOOD = join(REPO, "src", "workspaces", "food");
@@ -312,6 +312,83 @@ describe("foodStore — manualPinsFromVisits / loggedPlaceIds", () => {
     const ids = loggedPlaceIds(visits);
     expect([...ids].sort()).toEqual(["a", "b"]);
   });
+
+  it("manualPinsFromVisits carries the mean of that pin's rated visits as avgRating", () => {
+    const visits = [
+      { id: "v1", place_id: null, custom_name: "Taco Truck", custom_lat: 29.76, custom_lon: -95.37, rating: 6 },
+      { id: "v2", place_id: null, custom_name: "Taco Truck", custom_lat: 29.76, custom_lon: -95.37, rating: 8 },
+      { id: "v3", place_id: null, custom_name: "Unrated Spot", custom_lat: 30, custom_lon: -96, rating: null },
+    ];
+    const pins = manualPinsFromVisits(visits);
+    expect(pins.find((p) => p.name === "Taco Truck").avgRating).toBe(7);
+    expect(pins.find((p) => p.name === "Unrated Spot").avgRating).toBeUndefined();
+  });
+
+  it("avgRatingByPlaceId means only the rated visits for a place, ignoring nulls, keyed by place_id", () => {
+    const visits = [
+      { id: "v1", place_id: "a", rating: 4 }, { id: "v2", place_id: "a", rating: 10 },
+      { id: "v3", place_id: "b", rating: null }, { id: "v4", place_id: null, rating: 9 },
+    ];
+    const avgs = avgRatingByPlaceId(visits);
+    expect(avgs.get("a")).toBe(7);
+    expect(avgs.has("b")).toBe(false); // visited, never rated -> no entry, not a 0
+    expect(avgs.has(null)).toBe(false); // manual pins are never keyed here
+  });
+});
+
+describe("ratingColor — the 1-10 pin colour ramp (no clustering, no red/green, measured contrast)", () => {
+  function relLum(hex) {
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+    const lin = (c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  }
+  function contrast(hexA, hexB) {
+    const [a, b] = [relLum(hexA), relLum(hexB)].sort((x, y) => y - x);
+    return (a + 0.05) / (b + 0.05);
+  }
+
+  it("has exactly 10 steps, one per rating value", () => {
+    expect(RATING_COLORS).toHaveLength(10);
+    expect(RATING_TEXT).toHaveLength(10);
+  });
+
+  it("contains no green — a red/green ramp is exactly what was ruled out", () => {
+    for (const hex of RATING_COLORS) {
+      const g = parseInt(hex.slice(3, 5), 16);
+      const r = parseInt(hex.slice(1, 3), 16);
+      // "no green" as a colour-identity claim: green channel never dominant over red.
+      expect(g, `${hex} reads green-dominant`).toBeLessThanOrEqual(r);
+    }
+  });
+
+  it("relative luminance falls STRICTLY from step 1 to step 10 (measured, not eyeballed)", () => {
+    const lums = RATING_COLORS.map(relLum);
+    for (let i = 1; i < lums.length; i++) expect(lums[i], `step ${i + 1} did not darken`).toBeLessThan(lums[i - 1]);
+  });
+
+  it("every step's paired text colour clears WCAG AA (>=4.5:1, the small-bold-text bar)", () => {
+    RATING_COLORS.forEach((hex, i) => {
+      const ratio = contrast(hex, RATING_TEXT[i]);
+      expect(ratio, `step ${i + 1} (${hex} on ${RATING_TEXT[i]}) = ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
+    });
+  });
+
+  it("step 8 matches the module's own --accent-food token — the ramp ties to the module's brand colour", () => {
+    const css = read(REPO, "src/index.css");
+    expect(css).toMatch(/--accent-food:\s*#BE3B22/i);
+    expect(RATING_COLORS[7]).toBe("#BE3B22");
+  });
+
+  it("colorForRating/textColorForRating round, clamp to [1,10], and return null for no rating", () => {
+    expect(colorForRating(null)).toBeNull();
+    expect(colorForRating(undefined)).toBeNull();
+    expect(colorForRating(NaN)).toBeNull();
+    expect(colorForRating(7.4)).toBe(RATING_COLORS[6]); // rounds to 7
+    expect(colorForRating(0)).toBe(RATING_COLORS[0]); // clamped up to 1
+    expect(colorForRating(15)).toBe(RATING_COLORS[9]); // clamped down to 10
+    expect(textColorForRating(null)).toBeNull();
+    expect(textColorForRating(3)).toBe(RATING_TEXT[2]);
+  });
 });
 
 describe("overpass — pure query/response shaping (no network)", () => {
@@ -356,8 +433,12 @@ describe("overpass — pure query/response shaping (no network)", () => {
 });
 
 /* ════════════════════════════════════════════════════════════════════════════════════════
- * 4b. NEW-4 — the viewport-aware, spatially-distributed capped query (the LIMIT-with-no-
- *     ORDER-BY bug the owner reported as "clearly all grouped in a specific section").
+ * 4b. NEW-4 — the viewport-aware, PROPORTIONALLY-distributed capped query. Superseded once
+ *     already: the first RPC gave every grid cell the SAME fixed cap, which was ITSELF a
+ *     biased slice (measured on production: a dense cell returned ~6% of its true content, a
+ *     sparse cell ~88% — a >13x disparity) — exactly the "focusing on the middle of the
+ *     screen... distribution is uneven" the owner reported even after the first fix shipped.
+ *     Each cell's share of the cap is now weighted by its OWN true count.
  * ═══════════════════════════════════════════════════════════════════════════════════════ */
 describe("NEW-4 — food_places_in_bounds_sampled wiring", () => {
   it("foodStore calls the grid-sampled RPC, not a plain capped .limit() query", () => {
@@ -377,24 +458,42 @@ describe("NEW-4 — food_places_in_bounds_sampled wiring", () => {
     expect(sql).toMatch(/grant execute on function public\.food_places_in_bounds_sampled\([\s\S]{0,120}?\) to anon, authenticated/);
   });
 
-  it("the RPC partitions the bbox into a grid and takes an even share per cell (never a bare LIMIT)", () => {
+  it("the RPC partitions the bbox into a grid AND weights each cell's cap by its own true count — never a flat 1/N share", () => {
     const sql = src("db/food.sql");
     expect(sql).toContain("width_bucket(lat, p_south, p_north, greatest(p_grid, 1)) as gy");
     expect(sql).toContain("width_bucket(lon, p_west, p_east, greatest(p_grid, 1)) as gx");
     expect(sql).toContain("partition by gy, gx");
     expect(sql).toContain("count(*) over () as total_matched");
+    // The proportional weighting — this is the line that fixed the >13x disparity. A flat
+    // `p_cap / (grid*grid)` cap (the superseded version) must never come back.
+    expect(sql).toContain("count(*) over (partition by gy, gx) as cell_count");
+    expect(sql).toMatch(/ceil\(p_cap::numeric \* cell_count \/ greatest\(total_matched,\s*1\)\)/);
+    expect(sql).not.toMatch(/p_cap\s*\/\s*\(greatest\(p_grid,\s*1\)\s*\*\s*greatest\(p_grid,\s*1\)\)/);
+  });
+
+  it("the rating scale is 1-10 in the schema, not 1-5", () => {
+    const sql = src("db/food.sql");
+    expect(sql).toMatch(/rating\s+smallint\s+check\s*\(rating between 1 and 10\)/);
+    expect(sql).not.toMatch(/rating between 1 and 5/);
+    // The inline check only governs a first-ever `create table` — an already-existing
+    // production table needs an explicit ALTER, which must also be present and idempotent.
+    expect(sql).toMatch(/alter table public\.food_visits drop constraint if exists food_visits_rating_check/);
+    expect(sql).toMatch(/alter table public\.food_visits add constraint food_visits_rating_check check \(rating between 1 and 10\)/);
   });
 });
 
 /* ════════════════════════════════════════════════════════════════════════════════════════
- * 4c. NEW-5 — the basemap swap (reused what already exists first, chose the free/no-key/
- *     no-account/no-billing option) + the hand-rolled grid clusterer (pure, so it's unit-
- *     tested directly rather than only through a browser).
+ * 4c. NEW-5 (revised) — a colourful key-less basemap (CARTO Voyager, not the flat-grey
+ *     Positron this module shipped first) + NO CLUSTERING (the owner rejected the whole
+ *     clustering model, not the tuning: "i dont want to lump things together"). Below the
+ *     zoom threshold, ONLY his own logged/rated places draw — the 34,000-place reference
+ *     snapshot is a lookup he reaches into once zoomed in, never metro-wide content.
  * ═══════════════════════════════════════════════════════════════════════════════════════ */
-describe("NEW-5 — basemap + clustering", () => {
-  it("FoodMap uses the free, key-less CARTO Positron tiles, not the busy default OSM raster", () => {
+describe("NEW-5 (revised) — colourful basemap, no clustering, his places always visible", () => {
+  it("FoodMap uses CARTO's free, key-less Voyager tiles — colourful, not the flat-grey Positron", () => {
     const map = src("components/FoodMap.jsx");
-    expect(map).toContain("basemaps.cartocdn.com/light_all");
+    expect(map).toContain("basemaps.cartocdn.com/rastertiles/voyager");
+    expect(map).not.toContain("basemaps.cartocdn.com/light_all");
     expect(map).not.toContain("tile.openstreetmap.org");
   });
 
@@ -404,68 +503,38 @@ describe("NEW-5 — basemap + clustering", () => {
     expect(map).toMatch(/carto\.com\/attributions/);
   });
 
-  it("no marker-clustering package was added — package.json still names no clustering dependency", () => {
+  it("clustering is gone — no clusterer module, no import of one, no clustering package added", () => {
+    expect(existsSync(join(FOOD, "lib", "markerCluster.js"))).toBe(false);
+    const map = src("components/FoodMap.jsx");
+    expect(map).not.toMatch(/clusterPoints|markerCluster/);
     const pkg = JSON.parse(read(REPO, "package.json"));
     const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
     expect(Object.keys(allDeps).some((k) => /cluster/i.test(k))).toBe(false);
   });
 
-  it("FoodMap draws through the pure clusterer rather than one marker per point unconditionally", () => {
+  it("below the zoom threshold, only loggedPlaces + manualPins draw — the reference snapshot is gated on !tooSmall", () => {
     const map = src("components/FoodMap.jsx");
-    expect(map).toContain("clusterPoints(combined, project, CLUSTER_CELL_PX)");
-  });
-});
-
-describe("markerCluster — pure grid clustering (no Leaflet, no DOM)", () => {
-  it("dominantKind prefers manual > logged > unlogged, so a cluster never hides a visited place", () => {
-    expect(dominantKind(["unlogged", "unlogged"])).toBe("unlogged");
-    expect(dominantKind(["unlogged", "logged"])).toBe("logged");
-    expect(dominantKind(["logged", "manual"])).toBe("manual");
-    expect(dominantKind(["manual", "logged", "unlogged"])).toBe("manual");
-  });
-
-  it("two points that land in the same screen cell merge into one cluster", () => {
-    const items = [
-      { lat: 29.76, lon: -95.37, kind: "unlogged" },
-      { lat: 29.7601, lon: -95.3701, kind: "unlogged" },
-    ];
-    const project = () => [100, 100]; // both land at the identical screen point
-    const clusters = clusterPoints(items, project, 60);
-    expect(clusters).toHaveLength(1);
-    expect(clusters[0].count).toBe(2);
+    const drawEffect = map.slice(map.indexOf("Redraw markers"), map.indexOf("const showCappedNotice"));
+    // His own places are drawn OUTSIDE any tooSmall gate.
+    const hisPlacesBlock = drawEffect.slice(0, drawEffect.indexOf("if (!tooSmall)"));
+    expect(hisPlacesBlock).toMatch(/for \(const p of loggedPlaces \|\| \[\]\)/);
+    expect(hisPlacesBlock).toMatch(/for \(const pin of manualPins \|\| \[\]\)/);
+    // The reference snapshot (`places`) and the live-search fallback are BOTH inside the gate.
+    const gatedBlock = drawEffect.slice(drawEffect.indexOf("if (!tooSmall)"));
+    expect(gatedBlock).toMatch(/for \(const p of places \|\| \[\]\)/);
+    expect(gatedBlock).toMatch(/for \(const p of overpassPlaces \|\| \[\]\)/);
   });
 
-  it("two points far apart on screen stay as two singleton clusters", () => {
-    const items = [
-      { lat: 29.76, lon: -95.37, kind: "unlogged" },
-      { lat: 29.9, lon: -95.1, kind: "logged" },
-    ];
-    const project = (lat) => (lat === 29.76 ? [10, 10] : [900, 900]);
-    const clusters = clusterPoints(items, project, 60);
-    expect(clusters).toHaveLength(2);
-    expect(clusters.every((c) => c.count === 1)).toBe(true);
+  it("his places are coloured by the 1-10 rating ramp when rated, falling back to the flat logged/manual colour otherwise", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/colorForRating\(p\.avgRating\)\s*\|\|\s*COLORS\.logged/);
+    expect(map).toMatch(/colorForRating\(pin\.avgRating\)\s*\|\|\s*COLORS\.manual/);
   });
 
-  it("a singleton cluster carries its original item back out, so a caller needs no second lookup", () => {
-    const item = { lat: 29.76, lon: -95.37, kind: "manual", name: "Taco Truck" };
-    const clusters = clusterPoints([item], () => [50, 50], 60);
-    expect(clusters[0].items[0]).toMatchObject({ name: "Taco Truck" });
-  });
-
-  it("a mixed-kind cluster reports the dominant kind, not the first or last point's kind", () => {
-    const items = [
-      { lat: 1, lon: 1, kind: "unlogged" },
-      { lat: 1, lon: 1, kind: "logged" },
-      { lat: 1, lon: 1, kind: "unlogged" },
-    ];
-    const clusters = clusterPoints(items, () => [0, 0], 60);
-    expect(clusters[0].kind).toBe("logged");
-  });
-
-  it("empty input returns no clusters, and a non-finite projection is skipped rather than thrown", () => {
-    expect(clusterPoints([], () => [0, 0], 60)).toEqual([]);
-    const items = [{ lat: 999, lon: 999, kind: "unlogged" }];
-    expect(clusterPoints(items, () => [NaN, NaN], 60)).toEqual([]);
+  it("the zoomed-out empty state reads as intentional, not broken — no 'zoom in to see food places' copy left over", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/Zoom in to browse restaurants near you/);
+    expect(map).toMatch(/Showing only places you've been/);
   });
 });
 
