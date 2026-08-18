@@ -36,17 +36,28 @@ export const RATING_TEXT = [
   "#ffffff", "#ffffff", "#ffffff", "#ffffff", // 7-10: light text
 ];
 
-/** null/undefined/non-finite -> null (no rating yet, caller falls back to its own default). */
+/** null/undefined/non-finite -> null (no rating yet, caller falls back to its own default).
+ *  Coerces through Number() first: `rating` is a Postgres `numeric` column, which PostgREST
+ *  round-trips as a JSON STRING (e.g. "7.5") to avoid float-precision loss over the wire —
+ *  the same reason every `cost` read site already wraps it in Number(). Without this, a
+ *  string rating would silently fail Number.isFinite and every rated pin would fall back to
+ *  the flat "logged" colour instead of the ramp. Half-point values (7.5) round to the nearest
+ *  of the ramp's 10 whole-number steps -- the ramp has 10 colours, not 19; a half rating still
+ *  lands on a real, considered step, never null and never a flat blob. */
 export function colorForRating(rating) {
-  if (rating == null || !Number.isFinite(rating)) return null;
-  const n = Math.min(10, Math.max(1, Math.round(rating)));
+  if (rating == null) return null;
+  const num = Number(rating);
+  if (!Number.isFinite(num)) return null;
+  const n = Math.min(10, Math.max(1, Math.round(num)));
   return RATING_COLORS[n - 1];
 }
 
 /** The label colour to pair with colorForRating's fill, so a caller never has to reason about
- *  contrast itself. Same null-handling as colorForRating. */
+ *  contrast itself. Same null-handling and string-coercion as colorForRating. */
 export function textColorForRating(rating) {
-  if (rating == null || !Number.isFinite(rating)) return null;
-  const n = Math.min(10, Math.max(1, Math.round(rating)));
+  if (rating == null) return null;
+  const num = Number(rating);
+  if (!Number.isFinite(num)) return null;
+  const n = Math.min(10, Math.max(1, Math.round(num)));
   return RATING_TEXT[n - 1];
 }

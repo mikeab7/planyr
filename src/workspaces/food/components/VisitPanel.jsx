@@ -2,33 +2,62 @@
  * A right-side panel, never a dialog box. Shows every past visit at this place first (the
  * "click an existing restaurant" convenience the brief asks for), then a form to add another.
  *
- * Rating is 1-10, not 1-5 (owner redesign, 2026-08-18) — a row of ten numbered pills rather
- * than ten star glyphs (ten stars reads as clutter at this width); the SELECTED pill is
- * coloured with the same 1-10 ramp the map pins use (lib/ratingColor.js), so picking a number
- * here previews the exact colour that number paints on the map.
+ * ⛔ RATING CONTROL (owner correction, 2026-08-18: "obviously there shouldn't be individual
+ * buttons for 20 options" — after asking for half-point steps, which a 1-10 button row can't
+ * hold without becoming 19-20 tap targets). ONE control: a native range slider, min 1 max 10
+ * step 0.5 — the obvious one-thumbed-usable fit on a phone, and `accent-color` lets it preview
+ * the exact ramp colour the chosen number will paint on the map (lib/ratingColor.js) without
+ * hand-rolling a custom widget. The current value is always shown as a number next to the
+ * slider, never only as a thumb position. Stays OPTIONAL, same as before: the slider only
+ * commits a value once the user actually moves it (tracked by `rating` staying `null` in form
+ * state until `onChange` fires), and a "Clear" link reverts to unrated — nothing is silently
+ * defaulted onto an unrated visit, same principle as the date field below.
+ *
+ * ⛔ DATE FIELD (owner correction, 2026-08-18: "don't default to have a date, i want to rate
+ * restaurants i've been to before and don't remember the date i visited"). Starts EMPTY —
+ * never pre-filled with today — and stays optional; see VisitForm's `visitedOn` state below.
  */
 import { useState } from "react";
 import { colorForRating, textColorForRating } from "../lib/ratingColor.js";
 
 const RATING_MAX = 10;
+const RATING_MIN = 1;
+const RATING_STEP = 0.5;
+const RATING_SLIDER_REST = 5.5; // purely the thumb's visual resting spot before any touch — never committed as a value
 
-function RatingPicker({ value, onChange }) {
+function RatingSlider({ value, onChange }) {
+  const active = value != null;
+  const shown = active ? value : RATING_SLIDER_REST;
+  const color = colorForRating(shown) || "var(--accent-food)";
   return (
-    <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }} role="radiogroup" aria-label="Rating">
-      {Array.from({ length: RATING_MAX }, (_, i) => i + 1).map((n) => (
-        <button
-          key={n} type="button" onClick={() => onChange(n === value ? null : n)}
-          aria-pressed={n === value} title={`${n} out of ${RATING_MAX}`}
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+        <span
+          aria-live="polite"
           style={{
-            border: "1px solid var(--border-default)", borderRadius: 6, minWidth: 24, padding: "4px 0",
-            cursor: "pointer", font: "inherit", fontSize: 12, fontWeight: 700, lineHeight: 1,
-            background: n === value ? colorForRating(n) : "transparent",
-            color: n === value ? textColorForRating(n) : "var(--text-primary)",
+            fontSize: 18, fontWeight: 700, lineHeight: 1,
+            color: active ? textColorForRating(shown) : "var(--text-tertiary)",
+            background: active ? color : "transparent", borderRadius: 6,
+            padding: active ? "2px 8px" : 0,
           }}
         >
-          {n}
-        </button>
-      ))}
+          {active ? `${shown.toFixed(1)} / ${RATING_MAX}` : "Not rated"}
+        </span>
+        {active && (
+          <button type="button" onClick={() => onChange(null)} style={{
+            border: "none", background: "none", color: "var(--text-tertiary)", cursor: "pointer",
+            font: "inherit", fontSize: 11.5, padding: 0, textDecoration: "underline",
+          }}>
+            Clear
+          </button>
+        )}
+      </div>
+      <input
+        type="range" min={RATING_MIN} max={RATING_MAX} step={RATING_STEP}
+        value={shown} onChange={(e) => onChange(Number(e.target.value))}
+        aria-label="Rating" aria-valuetext={active ? `${shown.toFixed(1)} out of ${RATING_MAX}` : "not rated"}
+        style={{ width: "100%", accentColor: color, cursor: "pointer" }}
+      />
     </div>
   );
 }
@@ -44,7 +73,7 @@ function fieldStyle() {
 function VisitForm({ onSubmit, onCancel, pending }) {
   const [rating, setRating] = useState(null);
   const [cost, setCost] = useState("");
-  const [visitedOn, setVisitedOn] = useState(() => new Date().toISOString().slice(0, 10));
+  const [visitedOn, setVisitedOn] = useState(""); // never pre-filled — see header comment
   const [whatIHad, setWhatIHad] = useState("");
   const [notes, setNotes] = useState("");
   const [wouldReturn, setWouldReturn] = useState(null);
@@ -65,7 +94,7 @@ function VisitForm({ onSubmit, onCancel, pending }) {
     <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 10, padding: "12px 0" }}>
       <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-secondary)" }}>
         Rating
-        <RatingPicker value={rating} onChange={setRating} />
+        <RatingSlider value={rating} onChange={setRating} />
       </label>
       <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-secondary)" }}>
         Date
@@ -131,7 +160,7 @@ function VisitRow({ visit, onDelete }) {
         ) : (
           <span style={{ color: "var(--text-tertiary)" }}>—</span>
         )}
-        <span style={{ color: "var(--text-tertiary)" }}>{visit.visited_on || ""}</span>
+        <span style={{ color: "var(--text-tertiary)" }}>{visit.visited_on || "date unknown"}</span>
       </div>
       {visit.what_i_had && <div style={{ marginTop: 2 }}>{visit.what_i_had}</div>}
       <div style={{ display: "flex", gap: 10, marginTop: 2, color: "var(--text-secondary)" }}>

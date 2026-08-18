@@ -60,8 +60,11 @@ create table if not exists public.food_visits (
   custom_name  text,             -- manual-pin name (only set when place_id is null)
   custom_lat   double precision,
   custom_lon   double precision,
-  visited_on   date,
-  rating       smallint check (rating between 1 and 10),  -- NEW-4 redesign: 1-10, not 1-5 (table was empty when this changed, checked first)
+  visited_on   date,  -- nullable, no default: NEVER pre-fill today's date (owner, 2026-08-18: "i want
+                       -- to rate restaurants i've been to before and don't remember the date i visited")
+  rating       numeric(3,1) check (rating is null or (rating between 1 and 10 and rating * 2 = round(rating * 2))),
+                       -- half-point steps (owner, 2026-08-18: "let me pick intervals of .5 too");
+                       -- numeric not smallint, matching this table's own `cost numeric(8,2)` precedent
   cost         numeric(8,2),
   what_i_had   text,
   notes        text,
@@ -111,6 +114,22 @@ create trigger food_visits_touch before update on public.food_visits
 -- same fixed name every time, so a second run just recreates the identical constraint).
 alter table public.food_visits drop constraint if exists food_visits_rating_check;
 alter table public.food_visits add constraint food_visits_rating_check check (rating between 1 and 10);
+
+-- ── rating scale, HALF-POINT steps (owner request, 2026-08-18: "let me pick intervals of .5
+-- too"). numeric(3,1) rather than an integer half-point count -- the column stays self-
+-- explanatory (the value IS the rating, 7.5, never "15 half-points" a caller has to remember to
+-- halve), matching this table's own existing `cost numeric(8,2)` precedent for decimal values --
+-- including the SAME PostgREST behaviour (a `numeric` column round-trips as a JSON STRING over
+-- the API to preserve precision, exactly like `cost` already does; every app-side read site that
+-- computes with `rating` wraps it in Number(), the same pattern already used for `cost`).
+-- Checked production first (not empty this time -- 16 real rows, ratings 7-9 only): every
+-- existing value is a whole number, so `rating::numeric(3,1)` is a lossless, non-rescaling
+-- widen -- an integer N trivially satisfies the new halves-only check (N*2 = round(N*2)).
+-- Idempotent: safe to re-run.
+alter table public.food_visits alter column rating type numeric(3,1) using rating::numeric(3,1);
+alter table public.food_visits drop constraint if exists food_visits_rating_check;
+alter table public.food_visits add constraint food_visits_rating_check
+  check (rating is null or (rating between 1 and 10 and rating * 2 = round(rating * 2)));
 
 -- ── food_places_in_bounds_sampled (NEW-4) — a VIEWPORT-WIDE, PROPORTIONALLY-DISTRIBUTED
 -- capped read. The plain "just add ORDER BY" fix is wrong here: an ORDER BY id/name/whatever

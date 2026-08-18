@@ -334,6 +334,22 @@ describe("foodStore — manualPinsFromVisits / loggedPlaceIds", () => {
     expect(avgs.has("b")).toBe(false); // visited, never rated -> no entry, not a 0
     expect(avgs.has(null)).toBe(false); // manual pins are never keyed here
   });
+
+  it("⛔ avgRatingByPlaceId/manualPinsFromVisits coerce a STRING rating (Postgres numeric over PostgREST) and handle halves", () => {
+    // rating is numeric(3,1); PostgREST returns numeric columns as JSON strings ("7.5") to
+    // avoid float-precision loss over the wire. A raw string summed with `+=` would concatenate
+    // ("7"+"8" -> "78") instead of adding -- this proves the Number() coercion actually runs.
+    const byPlace = avgRatingByPlaceId([
+      { id: "v1", place_id: "a", rating: "7" }, { id: "v2", place_id: "a", rating: "8" },
+    ]);
+    expect(byPlace.get("a")).toBe(7.5);
+
+    const pins = manualPinsFromVisits([
+      { id: "v1", place_id: null, custom_name: "Truck", custom_lat: 29.76, custom_lon: -95.37, rating: "7.5" },
+      { id: "v2", place_id: null, custom_name: "Truck", custom_lat: 29.76, custom_lon: -95.37, rating: "8.5" },
+    ]);
+    expect(pins[0].avgRating).toBe(8);
+  });
 });
 
 describe("ratingColor — the 1-10 pin colour ramp (no clustering, no red/green, measured contrast)", () => {
@@ -388,6 +404,24 @@ describe("ratingColor — the 1-10 pin colour ramp (no clustering, no red/green,
     expect(colorForRating(15)).toBe(RATING_COLORS[9]); // clamped down to 10
     expect(textColorForRating(null)).toBeNull();
     expect(textColorForRating(3)).toBe(RATING_TEXT[2]);
+  });
+
+  it("⛔ handles half-point ratings (the slider control) — a .5 value lands on a real ramp step, never null", () => {
+    expect(colorForRating(7.5)).toBe(RATING_COLORS[7]); // rounds up to 8
+    expect(colorForRating(1.5)).toBe(RATING_COLORS[1]); // rounds up to 2
+    expect(colorForRating(9.5)).toBe(RATING_COLORS[9]); // rounds up to 10
+    expect(textColorForRating(7.5)).toBe(RATING_TEXT[7]);
+  });
+
+  it("⛔ coerces a STRING rating — Postgres numeric round-trips as a JSON string over PostgREST", () => {
+    // rating is now numeric(3,1) (was smallint); PostgREST returns numeric columns as strings
+    // ("7.5") to avoid float-precision loss over the wire, exactly like `cost` already does.
+    // Without Number() coercion, Number.isFinite("7.5") is false and every rated pin would
+    // silently fall back to the flat "logged" colour instead of the ramp.
+    expect(colorForRating("7.5")).toBe(RATING_COLORS[7]);
+    expect(colorForRating("7")).toBe(RATING_COLORS[6]);
+    expect(textColorForRating("9.0")).toBe(RATING_TEXT[8]);
+    expect(colorForRating("not-a-number")).toBeNull();
   });
 });
 
@@ -473,12 +507,24 @@ describe("NEW-4 — food_places_in_bounds_sampled wiring", () => {
 
   it("the rating scale is 1-10 in the schema, not 1-5", () => {
     const sql = src("db/food.sql");
-    expect(sql).toMatch(/rating\s+smallint\s+check\s*\(rating between 1 and 10\)/);
     expect(sql).not.toMatch(/rating between 1 and 5/);
     // The inline check only governs a first-ever `create table` — an already-existing
     // production table needs an explicit ALTER, which must also be present and idempotent.
     expect(sql).toMatch(/alter table public\.food_visits drop constraint if exists food_visits_rating_check/);
-    expect(sql).toMatch(/alter table public\.food_visits add constraint food_visits_rating_check check \(rating between 1 and 10\)/);
+  });
+
+  it("the rating column allows half-point steps — numeric(3,1), not smallint", () => {
+    // Owner request, 2026-08-18: "let me pick intervals of .5 too". numeric(3,1) matches this
+    // table's own `cost numeric(8,2)` precedent for decimal values (never re-invent a second
+    // decimal representation like an integer half-point count).
+    const sql = src("db/food.sql");
+    expect(sql).toMatch(/rating\s+numeric\(3,1\)\s+check/);
+    expect(sql).not.toMatch(/rating\s+smallint/);
+    expect(sql).toMatch(/alter table public\.food_visits alter column rating type numeric\(3,1\)/);
+    // Both the inline (fresh-install) and the ALTER (already-existing table) checks must
+    // reject anything that isn't a whole or half point, e.g. 7.3 — never just clamp 1-10.
+    const halvesCheckHits = [...sql.matchAll(/rating \* 2 = round\(rating \* 2\)/g)];
+    expect(halvesCheckHits.length).toBeGreaterThanOrEqual(2);
   });
 });
 
@@ -562,6 +608,49 @@ describe("NEW-5 (revised) — colourful basemap, no clustering, his places alway
     const gatedBlock = drawEffect.slice(drawEffect.indexOf("if (!tooSmall)"));
     const refCalls = [...gatedBlock.matchAll(/REFERENCE_PIN/g)];
     expect(refCalls.length).toBe(2); // the snapshot pass and the live-search pass
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════════════════════════
+ * 4d. RATING SLIDER + NO-DEFAULT DATE (owner correction, 2026-08-18): half-point ratings via
+ *     ONE control (never a row of 19-20 buttons), and the date field starts empty — rating a
+ *     place he can't remember the date for must not quietly record today's date instead.
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("VisitPanel — rating slider (not a button row) and a date field that never defaults", () => {
+  it("the date field starts empty — never pre-filled with today", () => {
+    const panel = src("components/VisitPanel.jsx");
+    expect(panel).toMatch(/const \[visitedOn, setVisitedOn\] = useState\(""\)/);
+    expect(panel).not.toMatch(/new Date\(\)\.toISOString\(\)\.slice\(0,\s*10\)/);
+  });
+
+  it("rating is ONE range-slider control, step 0.5 across 1-10 — never a row of per-value buttons", () => {
+    const panel = src("components/VisitPanel.jsx");
+    expect(panel).toMatch(/type="range"/);
+    expect(panel).toMatch(/min=\{RATING_MIN\}\s*max=\{RATING_MAX\}\s*step=\{RATING_STEP\}/);
+    expect(panel).toMatch(/const RATING_STEP = 0\.5;/);
+    // The old design this replaces: ten separate <button> elements, one per whole number.
+    expect(panel).not.toMatch(/role="radiogroup"/);
+    expect(panel).not.toContain("RatingPicker");
+    // Exactly one range input in the whole file (the slider) — confirms it's a single
+    // control, not a slider ADDED alongside the old per-value buttons.
+    const rangeInputs = [...panel.matchAll(/type="range"/g)];
+    expect(rangeInputs.length).toBe(1);
+  });
+
+  it("the slider's current value is always shown as a number, not only implied by thumb position", () => {
+    const panel = src("components/VisitPanel.jsx");
+    const slider = panel.slice(panel.indexOf("function RatingSlider"), panel.indexOf("function fieldStyle"));
+    expect(slider).toMatch(/shown\.toFixed\(1\)/);
+  });
+
+  it("the rating stays optional — no value is committed until the slider is actually touched, and it can be cleared", () => {
+    const panel = src("components/VisitPanel.jsx");
+    const slider = panel.slice(panel.indexOf("function RatingSlider"), panel.indexOf("function fieldStyle"));
+    // The rest position is a purely visual thumb placement, distinct from a committed value —
+    // onChange(null) (Clear) is reachable, and the rest constant is never passed to onChange
+    // directly from a mount-time effect (no useEffect in this component at all).
+    expect(slider).toMatch(/onChange\(null\)/);
+    expect(panel).not.toMatch(/useEffect/);
   });
 });
 
