@@ -32,11 +32,41 @@
  * still the wrong content type: aerial PHOTOGRAPHY has no "muted" setting, it's real-world photo
  * detail, and would reintroduce the "too busy" problem in a different shape. A tile URL, not a
  * package — no new dependency.
+ *
+ * ⛔ SATELLITE TOGGLE (B632177, owner, 2026-08-19: "also add an option for a satellite view"). ONE toggle,
+ * two states — never a basemap gallery. Reuses the Site Planner's Esri World Imagery source
+ * (`site-planner/lib/basemaps.js`'s `esri` entry — free, key-less, no account, no billing,
+ * already vetted and already paid for at zero) — the URL/maxZoom/attribution are DUPLICATED
+ * here rather than imported, the same reasoning as this module's own `lib/supabaseClient.js`:
+ * BUNDLE ISOLATION forbids importing anything under `src/workspaces/site-planner/`, and a
+ * shared edge would hoist this module's bytes onto the Site route. Esri over USGS: native to
+ * z19 vs USGS's z16, so it stays sharp at the neighbourhood zoom this map already favours.
+ * The two tile sources are swapped WHOLE (a fresh `L.tileLayer`, old one removed) rather than
+ * `setUrl` on a shared layer — `setUrl` alone doesn't carry a new `maxZoom`/`attribution`,
+ * and this way the two can never end up with one's URL and the other's ceiling.
+ *
+ * PIN LEGIBILITY ON IMAGERY. Satellite backdrops are dark and visually busy — rooftops, shadows,
+ * pavement, tree canopy all compete with a small filled circle — where Voyager's pale, quiet
+ * palette left plenty of contrast on its own. Every pin already carries a white keyline stroke
+ * (the halo that makes the fill colour read against ANY backdrop); satellite mode widens it
+ * (2px -> 3px) so the same 1-10 rating ramp stays legible over photo detail instead of just over
+ * a street map's calm tones.
  */
 import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { colorForRating } from "../lib/ratingColor.js";
+
+const STREET_TILES = {
+  url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+  maxZoom: 19, subdomains: "abcd",
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+};
+const SATELLITE_TILES = {
+  url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+  maxZoom: 19, // no {s} subdomains — this is a single ArcGIS host, unlike the Voyager tiles
+  attribution: "Imagery &copy; Esri, Maxar",
+};
 
 // Houston, so a first-ever visit opens somewhere useful rather than on the world map.
 const DEFAULT_CENTER = [29.76, -95.37];
@@ -97,16 +127,15 @@ export default function FoodMap({
   const hostRef = useRef(null);
   const mapRef = useRef(null);
   const layerRef = useRef(null);
+  const tileLayerRef = useRef(null);
   const [tooSmall, setTooSmall] = useState(false);
+  const [basemap, setBasemap] = useState("street"); // "street" | "satellite"
 
-  // Mount once.
+  // Mount once. The tile layer itself is NOT created here — see the basemap effect below —
+  // so toggling satellite never tears down/recreates the map, the marker layer or its handlers.
   useEffect(() => {
     if (!hostRef.current || mapRef.current) return undefined;
     const map = L.map(hostRef.current, { center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM, zoomControl: true });
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
-      maxZoom: 19, subdomains: "abcd",
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    }).addTo(map);
     layerRef.current = L.layerGroup([], { renderer: L.canvas() }).addTo(map);
     mapRef.current = map;
 
@@ -120,6 +149,21 @@ export default function FoodMap({
     return () => { map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Basemap tile layer — swapped whole on toggle (see header comment for why not `setUrl`).
+  // React runs this effect's cleanup (removing the PREVIOUS tile layer) before re-running the
+  // body on a `basemap` change, so there is never a moment with two tile layers stacked.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return undefined;
+    const source = basemap === "satellite" ? SATELLITE_TILES : STREET_TILES;
+    const layer = L.tileLayer(source.url, {
+      maxZoom: source.maxZoom, subdomains: source.subdomains, attribution: source.attribution,
+    }).addTo(map);
+    layer.bringToBack(); // stays under the marker layer regardless of add order
+    tileLayerRef.current = layer;
+    return () => map.removeLayer(layer);
+  }, [basemap]);
 
   // Search result selected — fly to it (owner, 2026-08-18: "selecting a result flies the map
   // to it"). Keyed on flyToTarget.nonce (not just lat/lon) so re-selecting the SAME result
@@ -151,9 +195,11 @@ export default function FoodMap({
     if (!map || !layer) return;
     layer.clearLayers();
 
+    // Wider white keyline on satellite — see the header comment on PIN LEGIBILITY ON IMAGERY.
+    const strokeWeight = basemap === "satellite" ? 3 : 2;
     const addPin = (lat, lon, color, title, onClick, opts = {}) => {
       const m = L.circleMarker([lat, lon], {
-        renderer: layer.options.renderer, radius: opts.radius ?? 7, weight: 2, color: "#fff",
+        renderer: layer.options.renderer, radius: opts.radius ?? 7, weight: strokeWeight, color: "#fff",
         fillColor: color, fillOpacity: opts.fillOpacity ?? 0.95,
       });
       m.bindTooltip(title, { direction: "top", offset: [0, -6] });
@@ -189,7 +235,7 @@ export default function FoodMap({
         addPin(p.lat, p.lon, COLORS.unlogged, `${p.name} (live search)`, () => onSelectPlace?.(p), REFERENCE_PIN);
       }
     }
-  }, [places, loggedPlaces, loggedIds, manualPins, overpassPlaces, tooSmall, onSelectPlace, onSelectManualPin]);
+  }, [places, loggedPlaces, loggedIds, manualPins, overpassPlaces, tooSmall, basemap, onSelectPlace, onSelectManualPin]);
 
   const showCappedNotice = !tooSmall && placesCapped;
   const hasOwnPlaces = (loggedPlaces?.length || 0) + (manualPins?.length || 0) > 0;
@@ -231,6 +277,19 @@ export default function FoodMap({
           🔍 Search live for more here
         </button>
       )}
+      <button
+        type="button" onClick={() => setBasemap((b) => (b === "satellite" ? "street" : "satellite"))}
+        aria-pressed={basemap === "satellite"} data-testid="food-basemap-toggle"
+        title={basemap === "satellite" ? "Switch to street map" : "Switch to satellite view"}
+        style={{
+          position: "absolute", top: 12, right: 12, zIndex: 500,
+          border: "1px solid var(--border-default)", borderRadius: 999, background: "var(--surface-raised)",
+          color: "var(--text-primary)", font: "inherit", fontSize: 12.5, fontWeight: 700, padding: "7px 14px",
+          cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
+        }}
+      >
+        {basemap === "satellite" ? "🗺 Street" : "🛰 Satellite"}
+      </button>
     </div>
   );
 }

@@ -45,18 +45,28 @@ export async function fetchPlaceById(id) {
   return { data, error };
 }
 
-/** Search the WHOLE 34,000+-place snapshot by name — deliberately NOT scoped to the current
- *  viewport (owner, 2026-08-18: "the entire point of search is finding a place you cannot
- *  see"). Backed by `food_places_search_by_name` (db/food.sql): a trigram word-similarity
+/** Search the WHOLE 100,000+-place, three-metro snapshot by name — deliberately NOT scoped to
+ *  the current viewport (owner, 2026-08-18: "the entire point of search is finding a place you
+ *  cannot see"). Backed by `food_places_search_by_name` (db/food.sql): a trigram word-similarity
  *  match on a GIN index, so "taco" finds "Bandito's Taco Grill" and "mcdon" fuzzy-matches
  *  "McDonald's" — a plain ILIKE prefix search would miss both. Returns [] for a query with no
- *  reasonable match (never throws, mirrors fetchPlacesInBounds' error-shape). */
+ *  reasonable match (never throws, mirrors fetchPlacesInBounds' error-shape).
+ *
+ *  `center` (optional {lat, lon}, the current map view's midpoint) breaks similarity TIES by
+ *  distance — owner, 2026-08-18, once the snapshot spanned three metros: "Searching Torchy's
+ *  must not return fifteen indistinguishable rows... results in or near the current map view
+ *  should rank above far-away ones." Every location of a searched chain scores an identical
+ *  trigram similarity (the name text is the same), so without a centre they'd fall back to
+ *  alphabetical — passing the map's centre reorders those ties by real distance instead. Name
+ *  relevance still comes first: a worse name match never outranks a better one just for being
+ *  closer (see the RPC's `order by sim desc, distance_km asc` — distance is the TIEBREAK). */
 const SEARCH_RESULT_CAP = 15; // more than the ~10 shown, so client-side "his places first" reordering never runs dry
 
-export async function searchPlacesByName(query) {
+export async function searchPlacesByName(query, center) {
   if (!supabase || !query || !query.trim()) return { data: [], error: null };
   const { data, error } = await supabase.rpc("food_places_search_by_name", {
     p_query: query.trim(), p_cap: SEARCH_RESULT_CAP,
+    p_center_lat: center?.lat ?? null, p_center_lon: center?.lon ?? null,
   });
   return { data: data || [], error };
 }

@@ -187,6 +187,37 @@ This is the redirect RULE itself, live, on Cloudflare's actual routing engine �
 4. Search for something not in the snapshot. **Expect:** a "Search live for '…' nearby" option appears; selecting it runs a real Overpass lookup and folds in any name matches.
 5. Search for something in no dataset at all. **Expect:** a "Drop a pin for '…'" option appears; selecting it switches to Map view, arms pin-drop mode, and the name is already filled in — clicking the map completes it without retyping.
 6. Switch to List view and type in the same box. **Expect:** your visit list filters live — no map movement, no dropdown, and it's visibly the same search box, not a second one.
+**Result:** ⏳ pending. Its dropdown was reported CLIPPED live — see V322896, below.
+
+### V322896 — B632176: search results dropdown renders fully visible (AnchoredMenu portal), on his own signed-in account `Blocker: real-data`
+**What was verified here (sandbox):** structural guards proving the fix shape, not just that it compiles — `SearchBox.jsx` imports and renders `<AnchoredMenu anchorRef={inputRef} ...>` around the results content, contains no `position: "absolute"` anywhere (the exact pattern that caused the clip), and carries `hoverSafe` (so the dropdown doesn't swallow a click back into the input). `npx vitest run` — food suite 113/113 green. Full repo suite green, lint clean, build green, bundle audit clean.
+**Why this needs his machine:** a colleague's live DOM measurement is what caught the original bug — a real ancestor's computed layout (the toolbar's actual ambient width/height at his window size) can't be reproduced structurally; the portal's own positioning math needs to be watched against his real header, not just asserted to exist.
+**Steps, each with a named expected result:**
+1. On planyr.io, signed in, Map view, type a 2+ character query. **Expect:** the full results panel is visible — nothing clipped at the top, bottom, or sides, at any window size.
+2. Resize the browser window narrower (or check on a phone-width viewport). **Expect:** the dropdown stays fully visible and readable — it may reposition, but never clips.
+3. With the dropdown open, click back into the search input to edit the query. **Expect:** the click lands normally (cursor moves, dropdown stays open) — it is not swallowed by an invisible backdrop.
+4. Click a result. **Expect:** the map flies to it and its panel opens (unchanged from V320096's original behaviour) — this item only changes where the dropdown renders.
+**Result:** ⏳ pending.
+
+### V322897 — B632177: satellite view toggle — imagery loads, pins stay legible, on his own signed-in account `Blocker: real-data`
+**What was verified here (sandbox):** structural guards — exactly one `data-testid="food-basemap-toggle"` button exists (never a gallery/picker), the satellite source string is `server.arcgisonline.com/.../World_Imagery/MapServer/tile` with no API key/token anywhere in the file, the two tile layers are swapped via a fresh `L.tileLayer(...)` + `map.removeLayer(layer)` (never `.setUrl()`), and the pin-redraw effect uses a `strokeWeight` that widens to 3 on satellite (never a hardcoded `weight: 2`) and lists `basemap` in its own dependency array so toggling actually redraws. `npx vitest run` — food suite 113/113 green. Full repo suite green, lint clean, build green, bundle audit clean.
+**Why this needs his machine:** the actual Esri tile fetch (`arcgisonline.com`) is a live GIS endpoint this sandbox's egress blocks, and pin legibility against real photographic imagery — rooftops, shadows, pavement — is a judgment call that needs eyes on the real picture, not a structural read of the stroke-width number.
+**Steps, each with a named expected result:**
+1. On planyr.io/#/food, Map view. **Expect:** a "🛰 Satellite" button sits in the map's top-right corner.
+2. Click it. **Expect:** the basemap swaps to aerial photography within a tile load or two, no blank flash, pins and view unchanged; the button now reads "🗺 Street".
+3. Look at a cluster of rated pins over the imagery. **Expect:** every pin's fill colour is still clearly readable against the photo — the white keyline visibly separates it from the backdrop, even over a light-colored rooftop or pavement.
+4. Click the button again. **Expect:** it swaps cleanly back to the street map.
+**Result:** ⏳ pending.
+
+### V322898 — B632178: Dallas-Fort Worth + Austin pins render, Texas-wide zoom still shows only his places, chain search shows city, on his own signed-in account `Blocker: real-data`
+**What was verified here (against real production data via `execute_sql`, not a browser):** per-metro row counts measured directly — Houston 34,103 · Dallas-Fort Worth 35,318 · Austin 11,576 · total 80,997 rows, 46 MB table size. The viewport query's spatial-index fix re-measured AFTER the full load at a real downtown-Dallas neighbourhood box: `EXPLAIN ANALYZE` confirms a `Bitmap Index Scan on food_places_geom_idx`, 21.7ms execution time (vs. 727ms on the old unindexed predicate, Houston-only) — the map's pin query is not degraded by the added data, it's using the index exactly as intended. The distance-tiebreak search re-measured for a real three-metro chain ("chick-fil-a"): centred on downtown Houston, all 15 results are Houston locations sorted nearest-first (0.2–7.3 km); the identical search centred on downtown Dallas instead returns Dallas locations sorted nearest-first (0.2–8.7 km) — confirming the reorder is real, not just a column that exists unused. `npx vitest run` — food suite 113/113 green; lint clean; build green; bundle audit clean.
+**Why this needs his machine:** row counts and query plans prove the DATA and the QUERY are correct and fast, but nobody has watched actual pins render on the map over Dallas/Austin, watched the zoomed-out Texas-wide view actually suppress the reference snapshot with three metros loaded instead of one, or watched the search dropdown's city labels in a real browser.
+**Steps, each with a named expected result:**
+1. On planyr.io/#/food, pan to downtown Dallas, zoom to a neighbourhood. **Expect:** individual restaurant pins render, same as Houston.
+2. Pan to downtown Austin, same zoom. **Expect:** pins render there too.
+3. Zoom out until Houston, Dallas, and Austin are all visible on screen at once. **Expect:** ONLY your own logged/manual places show — the reference snapshot (now 80,997 places across three metros) stays completely hidden at this zoom, exactly as it already does for Houston alone.
+4. Search for a chain with locations in more than one metro (e.g. "chick-fil-a" or "starbucks"). **Expect:** results show the city (via the address line under the name) so branches read as distinct places, not identical repeated rows; whichever metro the map is currently centred on ranks first.
+5. Confirm there is still no city picker, region switcher, or per-metro toggle anywhere in the UI. **Expect:** none — which metro's data shows is purely a function of where the map is pointed.
 **Result:** ⏳ pending.
 
 ### V306832 — B575952: /food is genuinely unlisted, on his own signed-in account

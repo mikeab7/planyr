@@ -1,12 +1,24 @@
 /* SearchBox — ONE control (owner, 2026-08-18: "do NOT build a filter panel... if you think one
  * is needed, say so and stop" — no facets, no sort controls, no distance slider here).
  *
- * Searches the WHOLE 34,000+-place snapshot by name, never scoped to the current viewport
- * ("the entire point of search is finding a place you cannot see") — backed by
+ * Searches the WHOLE 100,000+-place, three-metro snapshot by name, never scoped to the current
+ * viewport ("the entire point of search is finding a place you cannot see") — backed by
  * `food_places_search_by_name` (db/food.sql), a debounced trigram lookup over a GIN index.
  * His own places (manual pins + anywhere he's logged) rank first and carry a small "You've
  * been here" mark, ahead of the snapshot's relevance order — he is far more often looking for
  * somewhere he's been than somewhere he hasn't.
+ *
+ * ⛔ THE RESULTS PANEL IS AN AnchoredMenu (fixed 2026-08-18, B632176 — read before ever going back
+ * to a plain `position: absolute` div here). Shipped absolutely-positioned inside this
+ * component's own DOM tree first; the owner's colleague measured it live and found the results
+ * genuinely rendered, styled, and populated (five "Torchy's Tacos" matches in body.innerText)
+ * but VISUALLY CLIPPED TO NOTHING — the header toolbar row is `overflow: hidden` (load-bearing
+ * for its OWN layout), and a dropdown nested inside it is clipped the instant it grows past that
+ * row's height, no matter how high its z-index goes (raising z-index cannot fix an ancestor
+ * OVERFLOW clip — that's a completely different CSS mechanism). This repo already solved exactly
+ * this class of bug once (`shared/ui/AnchoredMenu.jsx`, built for the Layers panel's RowInfo) —
+ * a portal to `document.body`, positioned via `getBoundingClientRect` off the input, escapes
+ * every ancestor's overflow/stacking context at once. Reused verbatim here, not reinvented.
  *
  * The dropdown (fly-to-and-open results, the live-Overpass fallback, the drop-a-pin escape
  * hatch) only matters in MAP view — there's a map to fly. In LIST view, this same input just
@@ -15,6 +27,7 @@
  * box, no separate RPC call; `view === "list"` skips the snapshot lookup entirely.
  */
 import { useEffect, useRef, useState } from "react";
+import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 
 const DEBOUNCE_MS = 220;
 const MIN_QUERY_LEN = 2;
@@ -41,9 +54,13 @@ export default function SearchBox({
   const [liveState, setLiveState] = useState("idle"); // idle | pending | done
   const debounceRef = useRef(null);
   const requestRef = useRef(0);
+  const inputRef = useRef(null); // AnchoredMenu's anchor — the portal positions off this
 
   const trimmed = query.trim();
   const q = trimmed.toLowerCase();
+  // The current map view's midpoint — breaks a chain search's identical-similarity ties by
+  // distance instead of alphabetically (see foodStore.searchPlacesByName's header).
+  const center = bounds ? { lat: (bounds.south + bounds.north) / 2, lon: (bounds.west + bounds.east) / 2 } : null;
 
   // Debounced whole-snapshot search — MAP view only; LIST view never fires this RPC at all.
   useEffect(() => {
@@ -57,13 +74,14 @@ export default function SearchBox({
     setLiveState("idle");
     const myRequest = ++requestRef.current;
     debounceRef.current = setTimeout(async () => {
-      const { data } = await searchSnapshot(trimmed);
+      const { data } = await searchSnapshot(trimmed, center);
       if (myRequest !== requestRef.current) return; // a newer keystroke already superseded this
       setSnapshotResults(data || []);
       setLoading(false);
     }, DEBOUNCE_MS);
     return () => clearTimeout(debounceRef.current);
-  }, [trimmed, view, searchSnapshot]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trimmed, view, searchSnapshot, bounds?.south, bounds?.north, bounds?.west, bounds?.east]);
 
   // A live-search press already fired (FoodApp's existing Overpass wiring, reused as-is) —
   // once its results land, filter them by the CURRENT query and fold matches in.
@@ -104,22 +122,30 @@ export default function SearchBox({
   };
 
   return (
-    <div style={{ position: "relative" }}>
+    <div>
       <input
+        ref={inputRef}
         type="search" value={query} data-testid="food-search-box"
         onChange={(e) => { onQueryChange(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
-        onBlur={() => setTimeout(() => setOpen(false), 150)} // let a click on a result land first
         placeholder={view === "map" ? "Search restaurants…" : "Filter your visits…"}
         style={{ ...fieldStyle(), width: 220 }}
         aria-label="Search restaurants"
       />
-      {showDropdown && (
-        <div data-testid="food-search-results" style={{
-          position: "absolute", top: "calc(100% + 4px)", left: 0, width: 280, maxHeight: 360, overflowY: "auto",
+      <AnchoredMenu
+        open={showDropdown} onClose={() => setOpen(false)} anchorRef={inputRef}
+        placement="below-left" width={280} gap={4}
+        // hoverSafe: not a hover trigger, but its click-away semantics are exactly what a text
+        // input needs — no full-viewport interactive backdrop covering the input itself, so
+        // clicking back into the box to keep typing/reposition the cursor works normally
+        // instead of being swallowed by the backdrop and closing the dropdown first.
+        hoverSafe
+        panelStyle={{
           background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: 10,
-          boxShadow: "0 10px 28px rgba(0,0,0,0.22)", zIndex: 700, padding: 6,
-        }}>
+          boxShadow: "0 10px 28px rgba(0,0,0,0.22)", padding: 6,
+        }}
+      >
+        <div data-testid="food-search-results">
           {loading && <div style={{ padding: "8px 10px", fontSize: 12.5, color: "var(--text-tertiary)" }}>Searching…</div>}
 
           {!loading && results.map((p) => (
@@ -127,13 +153,26 @@ export default function SearchBox({
               key={`${p.kind}:${p.id || p.key || p.name}`} type="button"
               onClick={() => (p.kind === "manual" ? selectManual(p) : selectPlace(p))}
               style={{
-                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, width: "100%",
+                display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, width: "100%",
                 textAlign: "left", border: "none", background: "transparent", borderRadius: 6, padding: "7px 8px",
-                cursor: "pointer", font: "inherit", fontSize: 13, color: "var(--text-primary)",
+                cursor: "pointer", font: "inherit", color: "var(--text-primary)",
               }}
             >
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {p.name}{p.kind === "live" && <span style={{ color: "var(--text-tertiary)" }}> (live search)</span>}
+              <span style={{ overflow: "hidden", minWidth: 0 }}>
+                <span style={{ display: "block", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {p.name}{p.kind === "live" && <span style={{ color: "var(--text-tertiary)" }}> (live search)</span>}
+                </span>
+                {/* THE CITY, so a chain search ("Torchy's") reads as distinct branches, not fifteen
+                    identical rows (owner, 2026-08-18) — the full address already carries the city
+                    and enough street to disambiguate within it; no separate city field needed. */}
+                {p.address && (
+                  <span style={{
+                    display: "block", fontSize: 11, color: "var(--text-tertiary)",
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>
+                    {p.address}
+                  </span>
+                )}
               </span>
               {p.mine && (
                 <span style={{
@@ -180,7 +219,7 @@ export default function SearchBox({
             </div>
           )}
         </div>
-      )}
+      </AnchoredMenu>
     </div>
   );
 }
