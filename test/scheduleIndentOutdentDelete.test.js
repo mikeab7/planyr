@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { indentSelection, outdentSelection, promoteChildrenAndDelete, flatOrderWithLevel } from "../ui-audit/stress/schedule-tree-ops.mjs";
+import { indentSelection, outdentSelection, promoteChildrenAndDelete, flatOrderWithLevel, moveSelectionToDestination } from "../ui-audit/stress/schedule-tree-ops.mjs";
 import { recomputeSchedule } from "../ui-audit/stress/scheduler-engine.mjs";
 
 // Fast, CI-runnable half of the multi-row indent/outdent + delete-with-children fix. The full
@@ -191,6 +191,149 @@ describe("promoteChildrenAndDelete — 'keep subtasks' delete path", () => {
   });
 });
 
+// NEW-ROWMOVE — the shared move primitive behind BOTH drag-and-drop row reorder and the
+// "Move to…" command. Owner report, decoded: he created Phase 1/Phase 2 sections and has no way to
+// move already-existing tasks (scattered permitting/entitlement work) into them by dragging or
+// otherwise. Reuses the indentSelection block rule ("reparent only the block's ROOT rows") extended
+// to an arbitrary destination + sibling position instead of "the row above, at the topmost level."
+describe("moveSelectionToDestination — reparent + reposition to an ARBITRARY destination", () => {
+  it("same-level reorder: moving a row after a later sibling changes only array order, not parentId", () => {
+    const tasks = [T(1), T(2), T(3), T(4)]; // four top-level siblings, in order
+    const out = moveSelectionToDestination(tasks, [1], null, 3);
+    expect(out.map(t => t.id)).toEqual([2, 3, 1, 4]); // 1 now sits right after 3
+    expect(out.find(t => t.id === 1).parentId).toBe(null);
+  });
+
+  it("reparent: moving a row under a new parent updates parentId and auto-expands the destination", () => {
+    const tasks = [T(1), T(2, { isExpanded: false }), T(3)]; // 2 is a COLLAPSED destination
+    const out = moveSelectionToDestination(tasks, [3], 2, "end");
+    expect(out.find(t => t.id === 3).parentId).toBe(2);
+    expect(out.find(t => t.id === 2).isExpanded).toBe(true); // auto-expanded so the drop is visible
+  });
+
+  it('insertAfterId "start" lands the block as the FIRST child, before every existing child', () => {
+    const tasks = [T(1), T(2, { parentId: 1 }), T(3, { parentId: 1 }), T(4)];
+    const out = moveSelectionToDestination(tasks, [4], 1, "start");
+    const order = out.filter(t => t.parentId === 1).map(t => t.id);
+    expect(order).toEqual([4, 2, 3]);
+  });
+
+  it('insertAfterId "end" (the default) lands the block as the LAST child', () => {
+    const tasks = [T(1), T(2, { parentId: 1 }), T(3, { parentId: 1 }), T(4)];
+    const out = moveSelectionToDestination(tasks, [4], 1);
+    const order = out.filter(t => t.parentId === 1).map(t => t.id);
+    expect(order).toEqual([2, 3, 4]);
+  });
+
+  it("a NON-NEGOTIABLE: a moved PARENT takes its whole subtree — children keep parentId unchanged, just travel with it", () => {
+    // 1 -> 2 -> 3,4 (children of 2). Move 2 to be a child of 5 (an unrelated top-level task).
+    const tasks = [T(1), T(2, { parentId: 1 }), T(3, { parentId: 2 }), T(4, { parentId: 2 }), T(5)];
+    const out = moveSelectionToDestination(tasks, [2], 5, "end");
+    expect(out.find(t => t.id === 2).parentId).toBe(5);
+    expect(out.find(t => t.id === 3).parentId).toBe(2); // untouched — still under 2, wherever 2 now is
+    expect(out.find(t => t.id === 4).parentId).toBe(2);
+  });
+
+  it("a NON-NEGOTIABLE: a multi-row block moves as ONE unit — every root row reparents, non-root rows follow automatically", () => {
+    // 1 -> 2,3,4 (siblings). Select all three and move them under 5 together.
+    const tasks = [T(1), T(2, { parentId: 1 }), T(3, { parentId: 1 }), T(4, { parentId: 1 }), T(5)];
+    const out = moveSelectionToDestination(tasks, [2, 3, 4], 5, "end");
+    expect(out.find(t => t.id === 2).parentId).toBe(5);
+    expect(out.find(t => t.id === 3).parentId).toBe(5);
+    expect(out.find(t => t.id === 4).parentId).toBe(5);
+    const order = out.filter(t => t.parentId === 5).map(t => t.id);
+    expect(order).toEqual([2, 3, 4]); // relative order preserved
+  });
+
+  it("a selection spanning a parent + its own child moves as one block — only the parent (the root) reparents", () => {
+    const tasks = [T(1), T(2, { parentId: 1 }), T(3, { parentId: 2 }), T(9)];
+    const out = moveSelectionToDestination(tasks, [2, 3], 9, "end");
+    expect(out.find(t => t.id === 2).parentId).toBe(9); // the root of the selection
+    expect(out.find(t => t.id === 3).parentId).toBe(2); // untouched — not a root, still under 2
+  });
+
+  it("refuses to drop a row into ITSELF", () => {
+    const tasks = [T(1), T(2, { parentId: 1 })];
+    expect(moveSelectionToDestination(tasks, [2], 2, "end")).toBeNull();
+  });
+
+  it("refuses to drop a row into its OWN DESCENDANT (would create a cycle)", () => {
+    const tasks = [T(1), T(2, { parentId: 1 }), T(3, { parentId: 2 })];
+    expect(moveSelectionToDestination(tasks, [1], 3, "end")).toBeNull(); // 3 is 1's grandchild
+    expect(moveSelectionToDestination(tasks, [1], 2, "end")).toBeNull(); // 2 is 1's direct child
+  });
+
+  it("a genuine no-op (dropped back exactly where it already was) returns null rather than manufacturing an undo entry", () => {
+    const tasks = [T(1), T(2, { parentId: 1 }), T(3, { parentId: 1 })];
+    expect(moveSelectionToDestination(tasks, [3], 1, 2)).toBeNull(); // 3 already sits right after 2, under 1
+  });
+
+  it("an empty or all-invalid selection returns null rather than throwing", () => {
+    const tasks = [T(1), T(2)];
+    expect(() => moveSelectionToDestination(tasks, [], null)).not.toThrow();
+    expect(moveSelectionToDestination(tasks, [], null)).toBeNull();
+    expect(moveSelectionToDestination(tasks, [999], null)).toBeNull();
+  });
+
+  it("a stale/foreign insertAfterId falls back to appending at the end rather than corrupting the tree", () => {
+    const tasks = [T(1), T(2, { parentId: 1 }), T(3, { parentId: 1 }), T(9)];
+    const out = moveSelectionToDestination(tasks, [9], 1, 12345); // 12345 doesn't exist
+    const order = out.filter(t => t.parentId === 1).map(t => t.id);
+    expect(order).toEqual([2, 3, 9]); // appended at the end, same as "end"
+  });
+
+  it("moving to the SAME parent it already has, at a new position, still works (pure reorder, no reparent)", () => {
+    const tasks = [T(1), T(2, { parentId: 1 }), T(3, { parentId: 1 }), T(4, { parentId: 1 })];
+    const out = moveSelectionToDestination(tasks, [2], 1, 4); // 2 moves to after 4, still under 1
+    const order = out.filter(t => t.parentId === 1).map(t => t.id);
+    expect(order).toEqual([3, 4, 2]);
+  });
+});
+
+describe("moveSelectionToDestination through the real recompute engine — links + rollup survive a move", () => {
+  const dtask = (id, over = {}) => ({
+    id, name: "t" + id, start: "2026-06-01", end: "2026-06-01", duration: 1,
+    durValue: 1, durUnit: "d", predecessors: [], parentId: null, health: "gray",
+    percentComplete: 0, isExpanded: true, ...over,
+  });
+
+  it("a predecessor link survives a cross-parent MOVE and stays LIVE after recompute", () => {
+    let tasks = [dtask(8, { duration: 2, end: "2026-06-02" }), dtask(1), dtask(9, { predecessors: [{ id: 8, type: "FS", lag: 0 }] })];
+    tasks = recomputeSchedule(tasks);
+    const baselineStart = tasks.find(t => t.id === 9).start;
+
+    const moved = moveSelectionToDestination(tasks, [9], 1, "end"); // 9 becomes a child of 1
+    expect(moved.find(t => t.id === 9).parentId).toBe(1);
+    expect(moved.find(t => t.id === 9).predecessors).toEqual([{ id: 8, type: "FS", lag: 0 }]);
+
+    const after = recomputeSchedule(moved).find(t => t.id === 9);
+    expect(after.predecessors).toEqual([{ id: 8, type: "FS", lag: 0 }]);
+    expect(after.start).toBe(baselineStart); // still genuinely FS-driven by 8, unchanged by the move
+  });
+
+  it("B463072-shaped landmine, for MOVE specifically (not just indent): a leaf's typed duration survives gaining then losing a child via a cross-parent move", () => {
+    let tasks = [
+      dtask(6, { durValue: 3, durUnit: "d", duration: 3, end: "2026-06-03" }), // leaf, typed 3d
+      dtask(7, { start: "2026-06-01", end: "2026-06-01", duration: 1 }),
+      dtask(20), // an unrelated top-level task 6 will move to, then move back out of
+    ];
+    tasks = recomputeSchedule(tasks);
+    expect(tasks.find(t => t.id === 6).duration).toBe(3);
+
+    // Move 7 under 6 (6 becomes a parent for the first time)
+    tasks = recomputeSchedule(moveSelectionToDestination(tasks, [7], 6, "end"));
+    const asParent = tasks.find(t => t.id === 6);
+    expect(asParent.duration).not.toBe(3); // rolled from the child now, not the stale typed value
+    expect(asParent.duration).toBe(1);
+
+    // Move 7 back out to top level (6 loses its only child)
+    tasks = recomputeSchedule(moveSelectionToDestination(tasks, [7], null, "end"));
+    const backToLeaf = tasks.find(t => t.id === 6);
+    expect(backToLeaf.duration).toBe(3); // restored — no stale leftover
+    expect(backToLeaf.durValue).toBe(3);
+  });
+});
+
 describe("flatOrderWithLevel — the shared visual-order walk indent/outdent both read", () => {
   it("respects isExpanded — a collapsed subtree's descendants get no level assigned via this walk's visible path", () => {
     const tasks = [T(1, { isExpanded: false }), T(2, { parentId: 1 })];
@@ -310,6 +453,7 @@ describe("wiring in public/sequence/index.html", () => {
       ["const indentSelection = (tasks, selectedIds) => {", "export const indentSelection = (tasks, selectedIds) => {"],
       ["const outdentSelection = (tasks, selectedIds) => {", "export const outdentSelection = (tasks, selectedIds) => {"],
       ["const promoteChildrenAndDelete = (tasks, deleteIds) => {", "export const promoteChildrenAndDelete = (tasks, deleteIds) => {"],
+      ['const moveSelectionToDestination = (tasks, selectedIds, destParentId, insertAfterId = "end") => {', 'export const moveSelectionToDestination = (tasks, selectedIds, destParentId, insertAfterId = "end") => {'],
     ];
     for (const [srcSig, mjsSig] of pairs) {
       const srcBody = extractFn(src, srcSig);
@@ -372,11 +516,12 @@ describe("wiring in public/sequence/index.html", () => {
     expect(src).not.toMatch(/\boutdentTaskById\b/);
   });
 
-  it("each of the three batch operations calls setData and recomputeAfterStructureChange EXACTLY ONCE — one recompute per operation, never one per row", () => {
+  it("each of the FOUR batch operations calls setData and recomputeAfterStructureChange EXACTLY ONCE — one recompute per operation, never one per row", () => {
     const bodies = {
       indentSelectionByIds: extractFn(src, "const indentSelectionByIds = useCallback((taskIds) => {"),
       outdentSelectionByIds: extractFn(src, "const outdentSelectionByIds = useCallback((taskIds) => {"),
       promoteAndDeleteTasks: extractFn(src, "const promoteAndDeleteTasks = useCallback((taskIds) => {"),
+      moveSelectionByIds: extractFn(src, "const moveSelectionByIds = useCallback((taskIds, destParentId, insertAfterId) => {"),
     };
     for (const [name, body] of Object.entries(bodies)) {
       expect(body, `${name} not found in index.html`).not.toBeNull();
@@ -385,5 +530,53 @@ describe("wiring in public/sequence/index.html", () => {
       expect(setDataCalls, `${name} calls setData ${setDataCalls} times, expected exactly 1`).toBe(1);
       expect(recomputeCalls, `${name} calls recomputeAfterStructureChange ${recomputeCalls} times, expected exactly 1`).toBe(1);
     }
+  });
+
+  // ── NEW-ROWMOVE wiring pins ────────────────────────────────────────────────────────────────
+  it('the "Move to…" context-menu entry resolves the whole selection via structuralTargets, same as indent/outdent', () => {
+    expect(src).toMatch(/onMoveTo=\{\(\) => \{ setMoveToCtx\(\{ ids: structuralTargets\(taskCtx\.task\.id\), projId: taskCtx\.projId \}\); setTaskCtx\(null\); \}\}/);
+  });
+
+  it("MoveToModal commits through moveSelectionByIds with the ids FROZEN at menu-open time, not a re-resolved live selection", () => {
+    expect(src).toMatch(/onCommit=\{\(destParentId, insertAfterId\) => \{ moveSelectionByIds\(moveToCtx\.ids, destParentId, insertAfterId\); setMoveToCtx\(null\); \}\}/);
+  });
+
+  it("the drag handle's own mousedown resolves the whole selection the SAME way structuralTargets does (dragTargetIds), not just the grabbed row", () => {
+    expect(src).toMatch(/const dragTargetIds = \(anchorId\) => \{[\s\S]{0,400}return ids\.includes\(anchorId\) \? ids : \[anchorId\];/);
+  });
+
+  it("the drag gesture pushes NO undo state mid-drag — moveRows (the only setData-triggering call) fires ONLY from onUp, never from computeAndPaint/tick/onMove", () => {
+    const startRowDragBody = extractFn(src, "const startRowDrag = (e, anchorTaskId) => {");
+    expect(startRowDragBody, "startRowDrag not found in index.html").not.toBeNull();
+    // computeAndPaint is the per-frame function; onUp is the drop handler. Isolate computeAndPaint's
+    // OWN body (up to onUp's declaration) and assert it never calls moveRows/setData itself.
+    const computeAndPaintOnly = startRowDragBody.slice(0, startRowDragBody.indexOf("const onMove = "));
+    expect(computeAndPaintOnly).not.toMatch(/\bmoveRows\(/);
+    expect(computeAndPaintOnly).not.toMatch(/\bsetData\(/);
+    // Every moveRows( call site in the whole gesture lives INSIDE onUp (one per before/after/into
+    // branch — only one branch runs per actual drop, but all three are legitimately in source) —
+    // and NONE come from computeAndPaint/tick/onMove, which run continuously during the drag.
+    const onUpBody = startRowDragBody.slice(startRowDragBody.indexOf("const onUp = "));
+    const totalCalls = (startRowDragBody.match(/\bmoveRows\(/g) || []).length;
+    const onUpCalls = (onUpBody.match(/\bmoveRows\(/g) || []).length;
+    expect(totalCalls, "moveRows must not be called anywhere in startRowDrag outside onUp").toBe(onUpCalls);
+    expect(onUpCalls).toBeGreaterThan(0);
+  });
+
+  it("copy/cut (both keyboard and context menu) resolve the whole selection via structuralTargets, not a bare selectedId/task.id — the measured pre-fix bug", () => {
+    expect(src).toMatch(/copyTaskById\(structuralTargets\(selectedId\)\);/);
+    expect(src).toMatch(/cutTaskById\(structuralTargets\(selectedId\)\);/);
+    expect(src).toMatch(/onCutTask=\{\(\) => \{ cutTaskById\(structuralTargets\(taskCtx\.task\.id\)\); setTaskCtx\(null\); \}\}/);
+    expect(src).toMatch(/onCopyTaskFull=\{\(\) => \{ copyTaskById\(structuralTargets\(taskCtx\.task\.id\)\); setTaskCtx\(null\); \}\}/);
+    // REVERT-proof: the old single-id calls (unwrapped by structuralTargets) must be gone.
+    expect(src).not.toMatch(/copyTaskById\(selectedId\);/);
+    expect(src).not.toMatch(/cutTaskById\(selectedId\);/);
+    expect(src).not.toMatch(/copyTaskById\(taskCtx\.task\.id\)/);
+    expect(src).not.toMatch(/cutTaskById\(taskCtx\.task\.id\)/);
+  });
+
+  it("pasteTaskAfter reparents EVERY pasted root (not just one) to the paste target's parent, keyed off sourceRootIds", () => {
+    expect(src).toMatch(/const rootOldIds = new Set\(cb\.sourceRootIds \|\| \[cb\.sourceRootId\]\);/);
+    expect(src).toMatch(/parentId: rootOldIds\.has\(t\.id\) \? target\.parentId : \(idMap\[t\.parentId\] \?\? null\),/);
   });
 });

@@ -316,6 +316,15 @@ select.ei { cursor: pointer; }
 .drow { display: flex; border-bottom: 1px solid var(--bd); border-left: 2px solid transparent;
   position: absolute; left: 0; right: 0; }
 .drow:hover { box-shadow: inset 0 1px 0 #94a3b8, inset 0 -1px 0 #94a3b8; }
+/* A full-cell hover-revealed overlay does NOT work here: :hover is true for the ENTIRE mousedown
+   (the cursor always enters the row before it can press), so gating pointer-events on :hover still
+   swallows every ordinary click on the ID cell — proved live: it silently broke the pre-existing
+   row-range-select drag (CHROME-NEVER-EATS-A-PRESS territory, discovered building this feature).
+   Fix: the grip is a narrow strip at the cell's edge, not the whole cell, so it never overlaps
+   where a click aiming at the row number naturally lands — always interactive, opacity is cosmetic. */
+.rowgrip { opacity: .55; transition: opacity .1s; }
+.drow:hover .rowgrip { opacity: 1; }
+.rowgrip:active { cursor: grabbing; }
 .rv-prow:hover { box-shadow:none; }
 .rv-prow .ei { height:22px; border-radius:4px; }
 .gbar { cursor: default; user-select: none; position: absolute; top: 50%; transform: translateY(-50%);
@@ -3040,6 +3049,63 @@ const outdentSelection = (tasks, selectedIds) => {
   return changed ? working : null;
 };
 
+// ── Move-to-destination — the shared primitive behind BOTH the drag-and-drop row reorder and the
+// "Move to…" command (NEW-ROWMOVE). A generalization of indentSelection's block rule above ("reparent
+// only the block's ROOT rows — a selected row whose parent is also selected is left untouched") to an
+// ARBITRARY destination parent + sibling position, instead of "the row above, at the topmost row's own
+// level." Reparenting only the root rows is what carries the rest of the block along for free — both
+// non-root selected rows AND any hidden/collapsed descendants outside the selection, since none of them
+// have their parentId touched, and sortByVisualOrder rebuilds the whole tree purely from parentId. So the
+// only rows that ever get their array position moved are the roots themselves.
+//
+// destParentId: the new parent (null = top level). insertAfterId: "start" = first child of destParentId,
+// "end" (default) = last child, or a sibling id already resolvable under destParentId = right after that
+// sibling. A stale/foreign/self-selected insertAfterId falls back to "end" rather than corrupting the tree.
+const moveSelectionToDestination = (tasks, selectedIds, destParentId, insertAfterId = "end") => {
+  const byId = new Map(tasks.map(t => [t.id, t]));
+  const idSet = new Set(selectedIds.filter(id => byId.has(id)));
+  if (!idSet.size) return null;
+  if (destParentId != null && !byId.has(destParentId)) return null; // destination vanished
+
+  // A row can never move into itself or its own descendant — walk every moved row's subtree (in the
+  // ORIGINAL tree, before any reparenting) and refuse if destParentId falls inside any of them. This
+  // also catches destParentId being one of the moved rows itself (rootId === targetId base case).
+  const isInSubtree = (rootId, targetId) => rootId === targetId || tasks.some(t => t.parentId === rootId && isInSubtree(t.id, targetId));
+  if (destParentId != null && [...idSet].some(id => isInSubtree(id, destParentId))) return null;
+
+  const rootIds = [...idSet].filter(id => !idSet.has(byId.get(id).parentId));
+  if (!rootIds.length) return null;
+  const rootSet = new Set(rootIds);
+
+  let working = tasks.map(t => rootSet.has(t.id) ? { ...t, parentId: destParentId } : t);
+  // Auto-expand the destination so the moved block is immediately visible where it landed — the
+  // only way to "see" a drop into a collapsed group without requiring it to be expanded first.
+  if (destParentId != null) working = working.map(t => t.id === destParentId ? { ...t, isExpanded: true, focused: false } : t);
+
+  const movedInOrder = rootIds.map(id => working.find(t => t.id === id));
+  const remaining = working.filter(t => !rootSet.has(t.id));
+
+  let insertAt = -1;
+  if (insertAfterId === "start") {
+    const firstChildIdx = remaining.findIndex(t => t.parentId === destParentId);
+    insertAt = firstChildIdx >= 0 ? firstChildIdx - 1 : (destParentId != null ? remaining.findIndex(t => t.id === destParentId) : -1);
+  } else if (insertAfterId !== "end" && insertAfterId != null && !rootSet.has(insertAfterId) && remaining.some(t => t.id === insertAfterId)) {
+    insertAt = remaining.findIndex(t => t.id === insertAfterId);
+  } else {
+    remaining.forEach((t, i) => { if (t.parentId === destParentId) insertAt = i; }); // after the last existing child
+    if (insertAt === -1 && destParentId != null) insertAt = remaining.findIndex(t => t.id === destParentId);
+    if (insertAt === -1) insertAt = remaining.length - 1; // top-level fallback: end of the array
+  }
+  const result = [...remaining];
+  result.splice(insertAt + 1, 0, ...movedInOrder);
+
+  // No-op guard: refuse (return null) when the move changes nothing about the tree's shape — same
+  // parents, same relative order for every row, not just the moved ones (a splice that lands a block
+  // back exactly where it started must not manufacture an undo entry).
+  const key = list => list.map(t => `${t.id}:${t.parentId ?? "null"}`).join(",");
+  return key(result) === key(tasks) ? null : result;
+};
+
 // ── Delete-with-children: "keep subtasks" path — promote survivors to the nearest ancestor NOT
 // being deleted. Handles a whole deleted CHAIN transitively (delete a parent and its own selected
 // child together, and the child's own children promote past both, straight to the grandparent) —
@@ -3650,6 +3716,85 @@ function DeleteChildrenModal({ rowCount, totalCount, onCascade, onPromote, onCan
           <button data-delete-children-choice="cascade" onClick={onCascade}
             style={{...FOOTER_BTN_STYLE, border:'1px solid #dc2626', background:'#dc2626', color:'#fff'}}>
             Delete all {totalCount}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// NEW-ROWMOVE — "Move to…": names the destination instead of aiming a drag at it, so it works
+// whether or not the target group is expanded or even on screen. Steel-manned against drag for the
+// owner's actual scenario (gathering scattered permitting/entitlement tasks into a Phase 2 group he
+// just created): drag needs the destination visible and needs a precise drop; this needs only its
+// name, typed once per task moved. Ships alongside drag rather than instead of it — drag is still
+// the better tool for a quick local reorder.
+function MoveToModal({ tasks, sourceIds, onCommit, onCancel }) {
+  const [query, setQuery] = React.useState("");
+  const [hi, setHi] = React.useState(0);
+  const inputRef = React.useRef(null);
+  React.useEffect(() => { inputRef.current?.focus(); }, []);
+
+  // Every task the moved block can legally land under: everything EXCEPT the moved rows themselves
+  // and any of their own descendants (moveSelectionToDestination refuses those anyway — filtering
+  // here just keeps the list from offering a destination that would be rejected on commit).
+  const blocked = React.useMemo(() => {
+    const b = new Set(sourceIds);
+    let grew = true;
+    while (grew) { grew = false; tasks.forEach(t => { if (t.parentId != null && b.has(t.parentId) && !b.has(t.id)) { b.add(t.id); grew = true; } }); }
+    return b;
+  }, [tasks, sourceIds]);
+
+  // Depth-labeled list for every candidate, walked WITHOUT the isExpanded gate (unlike
+  // flatOrderWithLevel) — a collapsed destination must still be searchable and pickable by name.
+  const options = React.useMemo(() => {
+    const kidsBy = new Map();
+    tasks.forEach(t => { const p = t.parentId ?? null; if (!kidsBy.has(p)) kidsBy.set(p, []); kidsBy.get(p).push(t); });
+    const out = [];
+    const walk = (parentId, level) => (kidsBy.get(parentId) || []).forEach(t => { if (!blocked.has(t.id)) out.push({ id: t.id, name: t.name || `Task ${t.id}`, level }); walk(t.id, level + 1); });
+    walk(null, 0);
+    const q = query.trim().toLowerCase();
+    const filtered = q ? out.filter(o => o.name.toLowerCase().includes(q)) : out;
+    return [{ id: null, name: "— Top level —", level: 0 }, ...filtered];
+  }, [tasks, blocked, query]);
+
+  const commit = (id) => { if (id !== undefined) onCommit(id, "end"); };
+  return (
+    <div data-move-to-modal onMouseDown={e=>{if(e.target===e.currentTarget)onCancel();}}
+      style={{position:'fixed',inset:0,zIndex:4000,display:'flex',alignItems:'center',
+        justifyContent:'center',background:'rgba(15,23,42,.35)'}}>
+      <div style={{background:'#fff',borderRadius:12,boxShadow:'0 16px 48px rgba(0,0,0,.18)',
+        width:420,maxWidth:'94vw',maxHeight:'70vh',display:'flex',flexDirection:'column',overflow:'hidden'}}
+        tabIndex={-1}
+        onKeyDown={e=>{
+          if (e.key === 'Escape') { onCancel(); return; }
+          if (e.key === 'ArrowDown') { e.preventDefault(); setHi(h => Math.min(options.length - 1, h + 1)); return; }
+          if (e.key === 'ArrowUp')   { e.preventDefault(); setHi(h => Math.max(0, h - 1)); return; }
+          if (e.key === 'Enter')    { e.preventDefault(); commit(options[hi]?.id); return; }
+        }}>
+        <div style={{padding:'14px 16px 10px',borderBottom:'1px solid #e5e7eb'}}>
+          <div style={{fontSize:14,fontWeight:600,color:'#1f2328',marginBottom:8}}>
+            Move {sourceIds.length > 1 ? `${sourceIds.length} tasks` : "task"} to…
+          </div>
+          <input {...NO_AUTOFILL} ref={inputRef} value={query} onChange={e=>{setQuery(e.target.value); setHi(0);}}
+            placeholder="Search tasks…" style={{width:'100%',boxSizing:'border-box',fontSize:13,padding:'7px 9px',
+            border:'1px solid #d1d5db',borderRadius:6,outline:'none',fontFamily:'inherit'}} />
+        </div>
+        <div style={{overflow:'auto',flex:1,padding:'4px 0'}}>
+          {options.length === 1 && <div style={{padding:'10px 16px',fontSize:12,color:'#9ca3af'}}>No matching tasks</div>}
+          {options.map((o, i) => (
+            <div key={o.id ?? '__top'} data-move-to-option={o.id ?? "top"} onMouseEnter={()=>setHi(i)} onClick={()=>commit(o.id)}
+              style={{padding:'6px 14px',paddingLeft:14 + o.level * 16,fontSize:13,cursor:'pointer',
+                background: i === hi ? '#eff6ff' : 'transparent', color: o.id === null ? '#4b5563' : '#1f2328',
+                fontStyle: o.id === null ? 'italic' : 'normal', whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+              {o.name}
+            </div>
+          ))}
+        </div>
+        <div style={{padding:'10px 16px',display:'flex',justifyContent:'flex-end',gap:8,background:'#f9fafb',borderTop:'1px solid #e5e7eb'}}>
+          <button onClick={onCancel} style={FOOTER_BTN_STYLE}
+            onMouseEnter={e=>e.currentTarget.style.borderColor='#6b7280'} onMouseLeave={e=>e.currentTarget.style.borderColor='#e5e7eb'}>
+            Cancel
           </button>
         </div>
       </div>
@@ -5306,12 +5451,14 @@ function App() {
   const [taskCtx,    setTaskCtx]    = useState(null);
   // Task-level clipboard for Ctrl+C / Ctrl+X / Ctrl+V. Held in a ref because the
   // global keydown handler runs in a stable effect and would otherwise capture a
-  // stale value. Shape: { mode: "copy"|"cut", tasks: [deep-copied subtree], sourceProjId, sourceRootId }
+  // stale value. Shape: { mode: "copy"|"cut", tasks: [deep-copied subtree(s), concatenated], sourceProjId, sourceRootIds }
   const clipboardRef = useRef(null);
   const pasteSelectRef = useRef(null); // new id of the just-pasted root → select + scroll to it after paste
   const [, setClipboardTick] = useState(0); // bump to force re-render when clipboard changes (for menu/visual cues)
   const [renameModal, setRenameModal] = useState(null);
   const [deleteChoice, setDeleteChoice] = useState(null); // {ids, rowCount, totalCount} | null — delete-with-children prompt
+  const [moveToCtx, setMoveToCtx] = useState(null); // {ids, projId} | null — "Move to…" destination-picker modal
+  const moveSelectRef = useRef(null); // new id of the moved block's first root row → select + scroll to it after a move
   const [edit,       setEdit]       = useState(null);
   const [editStartChar, setEditStartChar] = useState(null);
   const [selectedId,    setSelectedId]    = useState(null);
@@ -5939,18 +6086,20 @@ function App() {
           }
           return;
         }
-        // Ctrl/Cmd+C — copy selected task (and its whole subtree) to the task clipboard.
-        // Only fires when the row is selected at task level (no cell-text selection); the
-        // typing-guard above already prevents this from stealing copy from input fields.
+        // Ctrl/Cmd+C — copy the selected task (and its whole subtree) to the task clipboard, or the
+        // WHOLE active row selection when selectedId is part of one (structuralTargets — same rule
+        // indent/outdent/delete already use). Only fires when the row is selected at task level (no
+        // cell-text selection); the typing-guard above already prevents this from stealing copy from
+        // input fields.
         if (k === "c" && !e.shiftKey && selectedId !== null) {
           e.preventDefault();
-          copyTaskById(selectedId);
+          copyTaskById(structuralTargets(selectedId));
           return;
         }
         // Ctrl/Cmd+X — cut: same as copy, but the next paste removes the source.
         if (k === "x" && !e.shiftKey && selectedId !== null) {
           e.preventDefault();
-          cutTaskById(selectedId);
+          cutTaskById(structuralTargets(selectedId));
           return;
         }
         // Ctrl/Cmd+V — paste the clipboard's subtree below the currently-selected task,
@@ -6787,6 +6936,16 @@ function App() {
   // along with their parent. Copies preserve formatting (rowColor/bold/italic),
   // predecessors, dates, notes — everything. Stored in clipboardRef so the global
   // keydown handler reads fresh state without re-binding on every change.
+  //
+  // NEW-ROWMOVE — MEASURED (see the harness/backlog writeup for the full per-surface table): before
+  // this change, all three of copy/cut/paste operated on `selectedId` ALONE — the drag/shift-click
+  // ANCHOR row — and silently ignored every other row in an active multi-row `selRange`. A 6-row
+  // selection copied exactly 1 row's subtree, with no error and no indication anything was dropped;
+  // paste then inserted only that one subtree. Fixed the same way as indent/outdent/delete: every
+  // entry point now resolves the WHOLE selection via structuralTargets first (taskIds, plural) and
+  // collectSubtreeFor runs once per ROOT id in that selection (a selected parent + its own selected
+  // child collect once, as one subtree — not twice — via rootsOfSelection, the same "root = parent
+  // not itself selected" rule indentSelection uses).
   const collectSubtreeFor = (rootId, allTasks) => {
     const out = [];
     const walk = id => {
@@ -6798,27 +6957,38 @@ function App() {
     walk(rootId);
     return out;
   };
-  const copyTaskById = useCallback((taskId) => {
+  const rootsOfSelection = (taskIds, allTasks) => {
+    const idSet = new Set(taskIds);
+    const byId = new Map(allTasks.map(t => [t.id, t]));
+    return taskIds.filter(id => byId.has(id) && !idSet.has(byId.get(id).parentId));
+  };
+  const copyTaskById = useCallback((taskIds) => {
+    const ids = Array.isArray(taskIds) ? taskIds : [taskIds];
     const pid = dataRef.current?.aPid;
     const tasks = dataRef.current?.projects?.[pid]?.tasks;
     if (!tasks) return;
-    const subtree = collectSubtreeFor(taskId, tasks);
+    const rootIds = rootsOfSelection(ids, tasks);
+    const subtree = rootIds.flatMap(id => collectSubtreeFor(id, tasks));
     if (subtree.length === 0) return;
-    clipboardRef.current = { mode: "copy", tasks: subtree, sourceProjId: pid, sourceRootId: taskId };
+    clipboardRef.current = { mode: "copy", tasks: subtree, sourceProjId: pid, sourceRootIds: rootIds };
     setClipboardTick(t => t + 1);
-    const extra = subtree.length - 1;
-    showToast(`Copied “${subtree[0].name || "task"}”${extra > 0 ? ` + ${extra} subtask${extra > 1 ? "s" : ""}` : ""}`, { duration: 1800 });
+    const extra = subtree.length - rootIds.length;
+    const label = rootIds.length > 1 ? `${rootIds.length} tasks` : `“${subtree[0].name || "task"}”`;
+    showToast(`Copied ${label}${extra > 0 ? ` + ${extra} subtask${extra > 1 ? "s" : ""}` : ""}`, { duration: 1800 });
   }, []);
-  const cutTaskById = useCallback((taskId) => {
+  const cutTaskById = useCallback((taskIds) => {
+    const ids = Array.isArray(taskIds) ? taskIds : [taskIds];
     const pid = dataRef.current?.aPid;
     const tasks = dataRef.current?.projects?.[pid]?.tasks;
     if (!tasks) return;
-    const subtree = collectSubtreeFor(taskId, tasks);
+    const rootIds = rootsOfSelection(ids, tasks);
+    const subtree = rootIds.flatMap(id => collectSubtreeFor(id, tasks));
     if (subtree.length === 0) return;
-    clipboardRef.current = { mode: "cut", tasks: subtree, sourceProjId: pid, sourceRootId: taskId };
+    clipboardRef.current = { mode: "cut", tasks: subtree, sourceProjId: pid, sourceRootIds: rootIds };
     setClipboardTick(t => t + 1);
-    const extra = subtree.length - 1;
-    showToast(`Cut “${subtree[0].name || "task"}”${extra > 0 ? ` + ${extra} subtask${extra > 1 ? "s" : ""}` : ""} — paste to move`, { duration: 1800 });
+    const extra = subtree.length - rootIds.length;
+    const label = rootIds.length > 1 ? `${rootIds.length} tasks` : `“${subtree[0].name || "task"}”`;
+    showToast(`Cut ${label}${extra > 0 ? ` + ${extra} subtask${extra > 1 ? "s" : ""}` : ""} — paste to move`, { duration: 1800 });
   }, []);
   const pasteTaskAfter = useCallback((targetId) => {
     const cb = clipboardRef.current;
@@ -6835,13 +7005,14 @@ function App() {
       const idMap = {};
       cb.tasks.forEach((t, i) => { idMap[t.id] = baseTempId + i; });
 
-      const rootOldId = cb.sourceRootId;
+      const rootOldIds = new Set(cb.sourceRootIds || [cb.sourceRootId]); // sourceRootId: back-compat for a clipboard filled before this change
       const pasted = cb.tasks.map(t => ({
         ...t,
         id: idMap[t.id],
-        // The subtree's root becomes a sibling of the target (same parent); inner
-        // tasks keep their parent inside the subtree (remapped to the new IDs).
-        parentId: t.id === rootOldId ? target.parentId : (idMap[t.parentId] ?? null),
+        // Each subtree's own root becomes a sibling of the target (same parent), in the SAME
+        // relative order they were selected in; inner tasks keep their parent inside their own
+        // subtree (remapped to the new IDs).
+        parentId: rootOldIds.has(t.id) ? target.parentId : (idMap[t.parentId] ?? null),
         // Predecessor rewiring: internal (within the pasted subtree) → new ID; external
         // (points outside the subtree) → keep original ID, which still resolves in the
         // same project. renumberTasks below will drop any external ID that no longer
@@ -6873,9 +7044,10 @@ function App() {
       // recomputeAfterStructureChange refreshes parent roll-ups for the new placement (it
       // preserves array order + ids, so the rootIdx lookup below stays valid).
       const sorted = recomputeAfterStructureChange(sortByVisualOrder(final));
-      const rootTempId = idMap[cb.sourceRootId];
+      const firstRootOldId = (cb.sourceRootIds || [cb.sourceRootId])[0];
+      const rootTempId = idMap[firstRootOldId];
       const rootIdx = sorted.findIndex(t => t.id === rootTempId);
-      pasteSelectRef.current = rootIdx >= 0 ? rootIdx + 1 : null; // renumberTasks assigns id = index + 1
+      pasteSelectRef.current = rootIdx >= 0 ? rootIdx + 1 : null; // renumberTasks assigns id = index + 1 — selects the FIRST pasted root
 
       return {
         ...d,
@@ -6920,6 +7092,40 @@ function App() {
       return {...d, projects: {...d.projects, [pid]: {...d.projects[pid], tasks: renumberTasks(recomputeAfterStructureChange(sortByVisualOrder(newTasks)))}}};
     });
   }, []);
+
+  // NEW-ROWMOVE — the single commit point for BOTH the drag-and-drop row reorder (GridView's
+  // rowgrip drag) and the "Move to…" command: one setData call, one recompute, so ONE undo step
+  // covers the whole gesture regardless of how many rows moved or how far. taskIds is resolved by
+  // the CALLER via structuralTargets(anchorId) (see shared.moveRows below), exactly like
+  // indentSelectionByIds/outdentSelectionByIds already resolve their targets before calling in.
+  const moveSelectionByIds = useCallback((taskIds, destParentId, insertAfterId) => {
+    setData(d => {
+      const pid = d.aPid;
+      const proj = d.projects[pid];
+      if (!proj) return d;
+      const newTasks = moveSelectionToDestination(proj.tasks, taskIds, destParentId, insertAfterId);
+      if (!newTasks) return d;
+      const sorted = sortByVisualOrder(newTasks);
+      // Track where the block landed (pre-renumber) so the effect below can restore selection to
+      // it — renumberTasks assigns id = index + 1, the same trick pasteSelectRef already uses.
+      const byId = new Map(proj.tasks.map(t => [t.id, t]));
+      const rootIds = taskIds.filter(id => byId.has(id) && !taskIds.includes(byId.get(id).parentId));
+      const firstIdx = rootIds.length ? sorted.findIndex(t => t.id === rootIds[0]) : -1;
+      moveSelectRef.current = firstIdx >= 0 ? firstIdx + 1 : null;
+      return {...d, projects: {...d.projects, [pid]: {...proj, tasks: renumberTasks(recomputeAfterStructureChange(sorted))}}};
+    });
+  }, []);
+
+  // After a move commits, select the block's first root so it highlights and the grid scrolls to
+  // it — same pattern as the paste-select effect below (search pasteSelectRef).
+  useEffect(() => {
+    if (moveSelectRef.current == null) return;
+    const id = moveSelectRef.current;
+    moveSelectRef.current = null;
+    setSelectedId(id);
+    setSelRange(null);
+    setSelectedColIdx(1);
+  }, [data]);
 
   const addProject = useCallback((opts) => {
     // opts (optional) = { name, linkedSiteId, linkedSiteName } — used by the cross-module
@@ -7401,7 +7607,13 @@ function App() {
   );
 
   const setHoverZone = zone => { hoverZoneRef.current = zone; };
-  const shared = {tasks: flatTasks, succMap, updateTask, deleteTask, getTaskName, proj, setData, setNotesCtx, edit, setEdit, editStartChar, selectedId, setSelectedId, selRange, setSelRange, selectedColIdx, setSelectedColIdx, goToFocus, ganttPPD, setGanttPPD, gridZoom, setHoverZone, insertTask, insertTaskBelow, addTask, addSubtask, duplicateTask, setTaskCtx, rolledHealthMap, healthColStyle: data.healthColStyle || "stoplight", setHealthColStyle: v => setData(d => ({...d, healthColStyle: v})), data};
+  // moveRows: resolved fresh every render (NOT a useCallback) so it always closes over the CURRENT
+  // selRange/flatTasksRef — the same freshness structuralTargets itself already relies on for the
+  // keyboard indent/outdent entry points. anchorId is the row whose drag handle was grabbed (or the
+  // right-clicked/context row for "Move to…"); structuralTargets expands it to the whole active
+  // selection when the anchor is part of one, exactly like indent/outdent do.
+  const moveRows = (anchorId, destParentId, insertAfterId) => moveSelectionByIds(structuralTargets(anchorId), destParentId, insertAfterId);
+  const shared = {tasks: flatTasks, succMap, updateTask, deleteTask, getTaskName, proj, setData, setNotesCtx, edit, setEdit, editStartChar, selectedId, setSelectedId, selRange, setSelRange, selectedColIdx, setSelectedColIdx, goToFocus, ganttPPD, setGanttPPD, gridZoom, setHoverZone, insertTask, insertTaskBelow, addTask, addSubtask, duplicateTask, setTaskCtx, rolledHealthMap, healthColStyle: data.healthColStyle || "stoplight", setHealthColStyle: v => setData(d => ({...d, healthColStyle: v})), data, moveRows};
 
   let section = data.section ?? "projects";
   if (section === "suggestions") section = "projects";   // Suggestions tab removed — Review now lives inside Projects
@@ -7795,6 +8007,14 @@ function App() {
           onCancel={() => setDeleteChoice(null)}
         />
       )}
+      {moveToCtx && (
+        <MoveToModal
+          tasks={(data.projects[moveToCtx.projId] || {}).tasks || []}
+          sourceIds={moveToCtx.ids}
+          onCommit={(destParentId, insertAfterId) => { moveSelectionByIds(moveToCtx.ids, destParentId, insertAfterId); setMoveToCtx(null); }}
+          onCancel={() => setMoveToCtx(null)}
+        />
+      )}
 
       {/* BODY */}
       <div style={{flex:1,overflow:"hidden",display:"flex"}}>
@@ -7823,13 +8043,14 @@ function App() {
           onInsertBelow={() => { insertTaskBelow(taskCtx.task.id); setTaskCtx(null); }}
           onAddSubtask={() => { addSubtask(taskCtx.task.id); setTaskCtx(null); }}
           onDuplicate={() => { duplicateTask(taskCtx.task.id); setTaskCtx(null); }}
-          onCutTask={() => { cutTaskById(taskCtx.task.id); setTaskCtx(null); }}
-          onCopyTaskFull={() => { copyTaskById(taskCtx.task.id); setTaskCtx(null); }}
+          onCutTask={() => { cutTaskById(structuralTargets(taskCtx.task.id)); setTaskCtx(null); }}
+          onCopyTaskFull={() => { copyTaskById(structuralTargets(taskCtx.task.id)); setTaskCtx(null); }}
           onPasteTask={() => { pasteTaskAfter(taskCtx.task.id); setTaskCtx(null); }}
           hasClipboard={!!clipboardRef.current}
           onCopyName={() => { navigator.clipboard?.writeText(taskCtx.task.name).catch(()=>{}); setTaskCtx(null); }}
           onIndent={() => { indentSelectionByIds(structuralTargets(taskCtx.task.id)); setTaskCtx(null); }}
           onOutdent={() => { outdentSelectionByIds(structuralTargets(taskCtx.task.id)); setTaskCtx(null); }}
+          onMoveTo={() => { setMoveToCtx({ ids: structuralTargets(taskCtx.task.id), projId: taskCtx.projId }); setTaskCtx(null); }}
           canOutdent={(() => {
             const targets = structuralTargets(taskCtx.task.id);
             const ts = (data.projects[taskCtx.projId] || {}).tasks || [];
@@ -8115,7 +8336,7 @@ function ProjContextMenu({x, y, projId, canDelete, onRename, onDuplicate, onDele
 }
 
 // ── TaskContextMenu ───────────────────────────────────────
-function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAddSubtask, onDuplicate, onCopyName, onCutTask, onCopyTaskFull, onPasteTask, hasClipboard, onIndent, onOutdent, canOutdent, onAddNote, meetingBodies = [], bindCount = 1, boundTasks = [], deadlineAnchorName = null, onBindMeeting, onUnbindMeeting, onAddDeadlineRow, onLinkAsDeadline, onUnlinkDeadline, onAddMeetingCalendar, onDelete, deleteCount = 1, onSetHealth, onSetRowColor, onSetBold, onSetItalic, onClearFormat, fmt, onClose}) {
+function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAddSubtask, onDuplicate, onCopyName, onCutTask, onCopyTaskFull, onPasteTask, hasClipboard, onIndent, onOutdent, onMoveTo, canOutdent, onAddNote, meetingBodies = [], bindCount = 1, boundTasks = [], deadlineAnchorName = null, onBindMeeting, onUnbindMeeting, onAddDeadlineRow, onLinkAsDeadline, onUnlinkDeadline, onAddMeetingCalendar, onDelete, deleteCount = 1, onSetHealth, onSetRowColor, onSetBold, onSetItalic, onClearFormat, fmt, onClose}) {
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -8307,6 +8528,7 @@ function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAd
       <Sep />
       <Item icon="ti-indent-increase"   label="Indent →"          hint="Alt⇧→" onClick={onIndent} />
       <Item icon="ti-indent-decrease"   label="Outdent ←"         hint="Alt⇧←" onClick={onOutdent} disabled={!canOutdent} />
+      <Item icon="ti-folder-symlink"    label="Move to…"                      onClick={onMoveTo} />
       <Sep />
       <Item icon="ti-message-circle"    label="Add Note"                      onClick={onAddNote} />
       <Sep />
@@ -8939,7 +9161,7 @@ function measuredColWidth(headerLabel, cellValues, floor) {
   return Math.max(floor, Math.ceil(maxW));
 }
 
-function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, setData, setNotesCtx, edit, setEdit, editStartChar, selectedId, setSelectedId, selRange, setSelRange, selectedColIdx, setSelectedColIdx, goToFocus, scrollRef, onScroll, setTaskCtx, insertTask, insertTaskBelow, addTask, addSubtask, duplicateTask, rolledHealthMap, healthColStyle, setHealthColStyle, data, gridZoom=1, setHoverZone, onColWidths, review}) {
+function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, setData, setNotesCtx, edit, setEdit, editStartChar, selectedId, setSelectedId, selRange, setSelRange, selectedColIdx, setSelectedColIdx, goToFocus, scrollRef, onScroll, setTaskCtx, insertTask, insertTaskBelow, addTask, addSubtask, duplicateTask, rolledHealthMap, healthColStyle, setHealthColStyle, data, gridZoom=1, setHoverZone, onColWidths, review, moveRows}) {
   // Predecessor lookup for the "a predecessor is late" health condition — memoized on the
   // project's own task array so it's built once per data change, not once per row.
   const taskById = useMemo(() => { const m = {}; (proj?.tasks||[]).forEach(t => m[t.id] = t); return m; }, [proj?.tasks]);
@@ -8955,6 +9177,145 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
   const dragAnchor     = useRef(null); // {ri, ci}
   const isDraggingCells = useRef(false);
   const healthClickSel  = useRef(null); // captures selRange at health/status mousedown before collapse
+
+  // ── NEW-ROWMOVE — drag-and-drop row reorder ────────────────────────────────────────────────
+  // Deliberately NO React state at all during the move: everything the drag needs (which rows,
+  // where the cursor is, what's currently highlighted) lives on rowDragRef, and the live
+  // insertion-line/highlight paint is done by writing DOM styles directly through refs on an
+  // internal requestAnimationFrame loop. So a drag across the owner's 529-row schedule causes
+  // ZERO re-renders of the row list for however long the gesture lasts — moveRows (passed down
+  // from App, see `shared`) is called EXACTLY ONCE, on drop, which is the one setData/undo-step/
+  // recompute (and the one render) the whole gesture produces.
+  const rowDragRef  = useRef(null); // {ids, blocked, overIdx, overPos, overTaskId, lastClientY, rafId} while active
+  const dragLineRef = useRef(null);   // insertion-line indicator DOM node
+  const dragIntoIdRef = useRef(null); // id of the row currently highlighted as an "into" target
+
+  // Ids the drag should move: the WHOLE active row-selection range when the grabbed row is part of
+  // one, else just the grabbed row — the exact same rule App's structuralTargets applies to
+  // indent/outdent/cut/copy, reimplemented locally off the props GridView already has (selRange,
+  // tasks — the same flat array App's own rowRangeSelIds reads via flatTasksRef) so the drag can
+  // resolve its target set at mousedown without waiting on a round-trip through App.
+  const dragTargetIds = (anchorId) => {
+    if (!selRange) return [anchorId];
+    const r1 = Math.max(0, Math.min(selRange.r1, selRange.r2));
+    const r2 = Math.min(tasks.length - 1, Math.max(selRange.r1, selRange.r2));
+    if (r2 <= r1) return [anchorId];
+    const ids = tasks.slice(r1, r2 + 1).map(t => t.id);
+    return ids.includes(anchorId) ? ids : [anchorId];
+  };
+
+  const startRowDrag = (e, anchorTaskId) => {
+    if (review || e.button !== 0) return;
+    const ids = dragTargetIds(anchorTaskId);
+    // Full blocked set (dragged rows + every descendant, from the FULL project tree so a
+    // COLLAPSED descendant still blocks a drop into its own ancestor being dragged).
+    const allTasks = proj?.tasks || [];
+    const blocked = new Set(ids);
+    let grew = true;
+    while (grew) { grew = false; allTasks.forEach(t => { if (t.parentId != null && blocked.has(t.parentId) && !blocked.has(t.id)) { blocked.add(t.id); grew = true; } }); }
+
+    const state = { ids, blocked, lastClientY: e.clientY, rafId: null, overIdx: -1, overPos: null, overTaskId: null };
+    rowDragRef.current = state;
+    document.body.style.cursor = "grabbing";
+    document.body.style.userSelect = "none";
+    // Dim the dragged rows once, at drag start — not a per-frame cost, just marks what's moving
+    // (matters most for a multi-row block, so it's visibly the WHOLE selection, not just the
+    // grabbed row). Only currently-rendered (virtualized) rows are found; that's fine, this is a
+    // cosmetic cue, not the source of truth for what moves.
+    const el0 = ref.current;
+    if (el0) ids.forEach(id => { const r = el0.querySelector(`[data-task-row="${id}"]`); if (r) r.style.opacity = "0.45"; });
+
+    const computeAndPaint = () => {
+      const el = ref.current;
+      if (!el || !tasks.length) return;
+      const rect = el.getBoundingClientRect();
+      const docY = (state.lastClientY - rect.top) + el.scrollTop;
+      const rowFloat = (docY - TL_H) / ROW_H;
+      const idxRaw = Math.floor(rowFloat);
+      const idx = Math.max(0, Math.min(tasks.length - 1, idxRaw));
+      const hoverTask = tasks[idx];
+      let pos = null, paintTop = null, intoId = null;
+      if (hoverTask && !state.blocked.has(hoverTask.id)) {
+        if (idxRaw < 0)                 { pos = "before"; paintTop = 0; }
+        else if (idxRaw >= tasks.length){ pos = "after";  paintTop = tasks.length * ROW_H; }
+        else {
+          const frac = rowFloat - idxRaw;
+          if (frac < 0.3)      { pos = "before"; paintTop = idx * ROW_H; }
+          else if (frac > 0.7) { pos = "after";  paintTop = (idx + 1) * ROW_H; }
+          else                 { pos = "into";   intoId = hoverTask.id; }
+        }
+      }
+      state.overIdx = idx; state.overPos = pos; state.overTaskId = hoverTask ? hoverTask.id : null;
+
+      if (dragLineRef.current) {
+        dragLineRef.current.style.display = paintTop != null ? "block" : "none";
+        if (paintTop != null) dragLineRef.current.style.top = `${paintTop - 1}px`;
+      }
+      if (dragIntoIdRef.current && dragIntoIdRef.current !== intoId) {
+        const prevEl = el.querySelector(`[data-task-row="${dragIntoIdRef.current}"]`);
+        if (prevEl) prevEl.style.outline = "";
+      }
+      if (intoId) {
+        const curEl = el.querySelector(`[data-task-row="${intoId}"]`);
+        if (curEl) curEl.style.outline = "2px solid var(--blue)";
+      }
+      dragIntoIdRef.current = intoId;
+
+      // Auto-scroll near the top/bottom edge of the viewport — continuous while the cursor sits
+      // in the edge band, not just on mousemove, so holding still near the edge keeps scrolling.
+      const EDGE = 36, MAX_SPEED = 14;
+      const y = state.lastClientY - rect.top;
+      let dy = 0;
+      if (y < EDGE) dy = -MAX_SPEED * (1 - Math.max(0, y) / EDGE);
+      else if (y > rect.height - EDGE) dy = MAX_SPEED * (1 - Math.max(0, rect.height - y) / EDGE);
+      if (dy) el.scrollTop = Math.max(0, el.scrollTop + dy);
+    };
+
+    const tick = () => {
+      if (!rowDragRef.current) return; // drag ended
+      computeAndPaint();
+      state.rafId = requestAnimationFrame(tick);
+    };
+
+    const onMove = (ev) => { state.lastClientY = ev.clientY; };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      if (state.rafId != null) cancelAnimationFrame(state.rafId);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      if (dragLineRef.current) dragLineRef.current.style.display = "none";
+      if (dragIntoIdRef.current) {
+        const prevEl = ref.current?.querySelector(`[data-task-row="${dragIntoIdRef.current}"]`);
+        if (prevEl) prevEl.style.outline = "";
+        dragIntoIdRef.current = null;
+      }
+      // Clear the dim applied at drag start. A SUCCESSFUL move re-renders every row from scratch
+      // (fresh inline styles) anyway; this matters for the no-op/cancelled-drop case, where no
+      // setData fires and these exact DOM nodes would otherwise stay dimmed forever.
+      const elEnd = ref.current;
+      if (elEnd) state.ids.forEach(id => { const r = elEnd.querySelector(`[data-task-row="${id}"]`); if (r) r.style.opacity = ""; });
+      rowDragRef.current = null;
+      if (state.overPos && state.overTaskId != null && moveRows) {
+        const hoverTask = tasks.find(t => t.id === state.overTaskId);
+        if (hoverTask) {
+          if (state.overPos === "into") {
+            moveRows(anchorTaskId, hoverTask.id, "end");
+          } else if (state.overPos === "after") {
+            moveRows(anchorTaskId, hoverTask.parentId ?? null, hoverTask.id);
+          } else { // "before" — find the nearest PRECEDING sibling (same parent) in flat order
+            let insertAfterId = "start";
+            for (let i = state.overIdx - 1; i >= 0; i--) { if (tasks[i].parentId === hoverTask.parentId) { insertAfterId = tasks[i].id; break; } }
+            moveRows(anchorTaskId, hoverTask.parentId ?? null, insertAfterId);
+          }
+        }
+      }
+    };
+    computeAndPaint(); // paint immediately at the mousedown position, before any move
+    state.rafId = requestAnimationFrame(tick);
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
 
   useEffect(() => {
     const up = () => { isDraggingCells.current = false; };
@@ -9462,6 +9823,12 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
       </div>
 
       <div style={{position:"relative",height:totalRows*ROW_H,minWidth:totalW}}>
+        {/* NEW-ROWMOVE — insertion-line drop indicator: positioned imperatively via dragLineRef
+            during a row drag (see startRowDrag/computeAndPaint), never through React state, so
+            painting it never re-renders this row list. Hidden (display:none) when not dragging
+            or when hovering a blocked target (itself or its own descendant). */}
+        <div ref={dragLineRef} data-drag-insert-line
+          style={{position:"absolute", left:0, right:0, height:2, background:"var(--blue)", zIndex:50, pointerEvents:"none", display:"none"}} />
         {tasks.slice(startIdx, endIdx).map((task, i) => {
           const ri = startIdx + i;
           if (task.__rvProposed) {
@@ -9642,6 +10009,13 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                       const isPicker = c.k === "health" || c.k === "status";
                       if (c.e && c.t !== "notes" && !isPicker && !isParentDateLocked) setEdit({taskId: task.id, col: c.k});
                     }}>
+                    {c.k === "id" && !review && (
+                      <span className="rowgrip" data-row-drag-handle={task.id} title="Drag to move"
+                        onMouseDown={e => { e.stopPropagation(); e.preventDefault(); startRowDrag(e, task.id); }}
+                        style={{position:"absolute", left:0, top:0, bottom:0, width:8, display:"flex", alignItems:"center", justifyContent:"center", cursor:"grab", zIndex:3}}>
+                        <i className="ti ti-grip-vertical" style={{fontSize:10, color:"var(--mut)"}} />
+                      </span>
+                    )}
                     <Cell task={task} col={{...c, w:colWidths[c.k]}} colMasterIdxs={colMasterIdxs} edit={edit} setEdit={setEdit} commit={commit} commitAndAdvance={commitAndAdvance}
                       proj={proj} succMap={succMap} getTaskName={getTaskName}
                       setNotesCtx={setNotesCtx} projId={proj?.id} updateTask={updateTask}

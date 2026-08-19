@@ -85,6 +85,51 @@ export const outdentSelection = (tasks, selectedIds) => {
   return changed ? working : null;
 };
 
+export const moveSelectionToDestination = (tasks, selectedIds, destParentId, insertAfterId = "end") => {
+  const byId = new Map(tasks.map(t => [t.id, t]));
+  const idSet = new Set(selectedIds.filter(id => byId.has(id)));
+  if (!idSet.size) return null;
+  if (destParentId != null && !byId.has(destParentId)) return null; // destination vanished
+
+  // A row can never move into itself or its own descendant — walk every moved row's subtree (in the
+  // ORIGINAL tree, before any reparenting) and refuse if destParentId falls inside any of them. This
+  // also catches destParentId being one of the moved rows itself (rootId === targetId base case).
+  const isInSubtree = (rootId, targetId) => rootId === targetId || tasks.some(t => t.parentId === rootId && isInSubtree(t.id, targetId));
+  if (destParentId != null && [...idSet].some(id => isInSubtree(id, destParentId))) return null;
+
+  const rootIds = [...idSet].filter(id => !idSet.has(byId.get(id).parentId));
+  if (!rootIds.length) return null;
+  const rootSet = new Set(rootIds);
+
+  let working = tasks.map(t => rootSet.has(t.id) ? { ...t, parentId: destParentId } : t);
+  // Auto-expand the destination so the moved block is immediately visible where it landed — the
+  // only way to "see" a drop into a collapsed group without requiring it to be expanded first.
+  if (destParentId != null) working = working.map(t => t.id === destParentId ? { ...t, isExpanded: true, focused: false } : t);
+
+  const movedInOrder = rootIds.map(id => working.find(t => t.id === id));
+  const remaining = working.filter(t => !rootSet.has(t.id));
+
+  let insertAt = -1;
+  if (insertAfterId === "start") {
+    const firstChildIdx = remaining.findIndex(t => t.parentId === destParentId);
+    insertAt = firstChildIdx >= 0 ? firstChildIdx - 1 : (destParentId != null ? remaining.findIndex(t => t.id === destParentId) : -1);
+  } else if (insertAfterId !== "end" && insertAfterId != null && !rootSet.has(insertAfterId) && remaining.some(t => t.id === insertAfterId)) {
+    insertAt = remaining.findIndex(t => t.id === insertAfterId);
+  } else {
+    remaining.forEach((t, i) => { if (t.parentId === destParentId) insertAt = i; }); // after the last existing child
+    if (insertAt === -1 && destParentId != null) insertAt = remaining.findIndex(t => t.id === destParentId);
+    if (insertAt === -1) insertAt = remaining.length - 1; // top-level fallback: end of the array
+  }
+  const result = [...remaining];
+  result.splice(insertAt + 1, 0, ...movedInOrder);
+
+  // No-op guard: refuse (return null) when the move changes nothing about the tree's shape — same
+  // parents, same relative order for every row, not just the moved ones (a splice that lands a block
+  // back exactly where it started must not manufacture an undo entry).
+  const key = list => list.map(t => `${t.id}:${t.parentId ?? "null"}`).join(",");
+  return key(result) === key(tasks) ? null : result;
+};
+
 export const promoteChildrenAndDelete = (tasks, deleteIds) => {
   const delSet = new Set(deleteIds);
   const byId = new Map(tasks.map(t => [t.id, t]));
