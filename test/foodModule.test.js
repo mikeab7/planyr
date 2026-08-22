@@ -21,7 +21,11 @@ import {
 } from "../src/workspaces/food/lib/foodStore.js";
 import { roundKey, queryFor, fromElement } from "../src/workspaces/food/lib/overpass.js";
 import { RATING_COLORS, RATING_TEXT, colorForRating, textColorForRating } from "../src/workspaces/food/lib/ratingColor.js";
-import { formatCategory, formatAddress } from "../src/workspaces/food/lib/formatPlace.js";
+import { formatCategory, formatAddress, formatCityFromAddress } from "../src/workspaces/food/lib/formatPlace.js";
+import { computeVisitAggregates, orderAgainEntries } from "../src/workspaces/food/lib/visitAggregates.js";
+import { formatVisitDate, formatRelativeDate, formatMonthYear } from "../src/workspaces/food/lib/dateFormat.js";
+import { preferAppleMaps, directionsUrl } from "../src/workspaces/food/lib/directions.js";
+import { resolveSnap, heightForSnap } from "../src/workspaces/food/lib/bottomSheetSnap.js";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FOOD = join(REPO, "src", "workspaces", "food");
@@ -253,7 +257,7 @@ describe("no dialog boxes", () => {
 });
 
 describe("chrome is theme tokens only", () => {
-  const CHROME_SURFACES = ["FoodApp.jsx", "components/VisitPanel.jsx", "components/VisitList.jsx"];
+  const CHROME_SURFACES = ["FoodApp.jsx", "components/VisitPanel.jsx", "components/VisitList.jsx", "components/BottomSheet.jsx"];
   for (const f of CHROME_SURFACES) {
     it(`${f} contains no raw hex — a hardcoded colour is the B341 trap`, () => {
       const hits = [...stripComments(src(f)).matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map((m) => m[0]);
@@ -613,7 +617,10 @@ describe("NEW-5 (revised) — colourful basemap, no clustering, his places alway
     expect(hisPlacesBlock).not.toContain("REFERENCE_PIN");
     const gatedBlock = drawEffect.slice(drawEffect.indexOf("if (!tooSmall)"));
     const refCalls = [...gatedBlock.matchAll(/REFERENCE_PIN/g)];
-    expect(refCalls.length).toBe(2); // the snapshot pass and the live-search pass
+    // The snapshot pass, the live-search pass, and (B651872 ×3) the selected-place fallback —
+    // which reuses the SAME small/transparent treatment since it represents the same kind of
+    // place (unvisited, unflagged), just not yet present in the bounds-scoped snapshot.
+    expect(refCalls.length).toBe(3);
   });
 });
 
@@ -865,9 +872,28 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     const map = src("components/FoodMap.jsx");
     // Flies to a PANEL-OFFSET point derived from the target (see the panel-aware-centring
     // describe block below), not the raw [lat, lon] directly — map.project/unproject shift it.
-    expect(map).toMatch(/map\.flyTo\(shiftedLatLng, targetZoom\)/);
+    expect(map).toMatch(/map\.flyTo\(shiftedLatLng, targetZoom, \{ duration: FLY_DURATION_SEC \}\)/);
     expect(map).toMatch(/map\.project\(\[flyToTarget\.lat, flyToTarget\.lon\], targetZoom\)/);
     expect(map).toMatch(/\[flyToTarget\?\.nonce\]/);
+  });
+
+  it("B651872 (×3) — the flyTo duration is a fixed cap, not Leaflet's own distance-proportional default", () => {
+    // Root-caused live (see the header comment): Leaflet's own flyTo computes a duration from
+    // real-world distance with no cap — measured at ~7.8s for Houston->Maui, sweeping through
+    // every intermediate integer zoom level along the way and painting flat grey for the whole
+    // stretch. A fixed, short duration (measured to match what a local jump already takes
+    // naturally) removes the multi-second window entirely, for every jump, without a redraw or
+    // a timer.
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/const FLY_DURATION_SEC = 1\.5;/);
+    expect(map).toMatch(/duration: FLY_DURATION_SEC/);
+    // Not a bounds-fit — zoomSnap/zoomDelta stay Leaflet's untouched defaults, and the target
+    // zoom passed to flyTo is always a literal integer (Math.max of two integers), never
+    // computed from a fitBounds call anywhere in this file.
+    expect(map).not.toMatch(/zoomSnap:/);
+    expect(map).not.toMatch(/zoomDelta:/);
+    expect(map).not.toMatch(/\.fitBounds\(/); // no fitBounds CALL anywhere — the word appears only in this item's own explanatory comment
+    expect(map).toMatch(/const targetZoom = Math\.max\(map\.getZoom\(\), FLY_TO_ZOOM\);/);
   });
 
   it("B651872 — a search-select flyTo forces a hard view reset once it settles, so the tile grid can never stay stale", () => {
@@ -881,7 +907,8 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     // cached tile level fresh. So the flyTo effect forces that SAME reset itself, once, the
     // moment the flight's own moveend fires — no polling, no setInterval.
     const map = src("components/FoodMap.jsx");
-    const flyEffect = map.slice(map.indexOf("map.flyTo(shiftedLatLng, targetZoom)") - 400, map.indexOf("map.flyTo(shiftedLatLng, targetZoom)") + 40);
+    const flyCallIdx = map.indexOf("map.flyTo(shiftedLatLng, targetZoom,");
+    const flyEffect = map.slice(flyCallIdx - 400, flyCallIdx + 80);
     expect(flyEffect).toMatch(/map\.once\(\s*"moveend"/);
     expect(flyEffect).toMatch(/map\.invalidateSize\(/);
     expect(flyEffect).toMatch(/map\.setView\(map\.getCenter\(\), map\.getZoom\(\), \{ reset: true/);
@@ -890,7 +917,7 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     // house rule this item's own brief calls out explicitly ("do not fix it by adding a
     // blanket setInterval redraw").
     expect(flyEffect.indexOf("map.once(")).toBeGreaterThanOrEqual(0);
-    expect(flyEffect.indexOf("map.once(")).toBeLessThan(flyEffect.indexOf("map.flyTo(shiftedLatLng, targetZoom)"));
+    expect(flyEffect.indexOf("map.once(")).toBeLessThan(flyEffect.indexOf("map.flyTo(shiftedLatLng, targetZoom,"));
     // A CALL is what the house rule bans — not the word itself, which the B651872 (×2) recurrence's
     // own explanatory comment (of a DIFFERENT setInterval-shaped fix it deliberately avoided)
     // legitimately needs to name in prose.
@@ -1035,12 +1062,12 @@ describe("formatPlace — display-only category title-casing and address tidy (B
     expect(formatAddress(null)).toBe(null);
   });
 
-  it("is DISPLAY-ONLY — FoodApp's panel subtitle uses it, never the old naive underscore-swap, and the raw stored value is never mutated", () => {
-    const app = src("FoodApp.jsx");
-    expect(app).toContain('import { formatCategory, formatAddress } from "./lib/formatPlace.js";');
-    expect(app).toMatch(/formatCategory\(selected\.place\.category\)/);
-    expect(app).toMatch(/formatAddress\(selected\.place\.address\)/);
-    expect(app).not.toMatch(/\.category\?\.replace\(\/_\/g/); // the old lowercase-with-spaces version is gone
+  it("is DISPLAY-ONLY — the place panel header uses it (NEW-2 moved the formatting from FoodApp into VisitPanel's own PanelHeader), never the old naive underscore-swap, and the raw stored value is never mutated", () => {
+    const panel = src("components/VisitPanel.jsx");
+    expect(panel).toContain('import { formatCategory, formatAddress, formatCityFromAddress } from "../lib/formatPlace.js";');
+    expect(panel).toMatch(/formatCategory\(category\)/);
+    expect(panel).toMatch(/formatAddress\(address\)/);
+    expect(panel).not.toMatch(/\.category\?\.replace\(\/_\/g/); // the old lowercase-with-spaces version is gone
   });
 });
 
@@ -1073,13 +1100,36 @@ describe("selected-place highlight — unmistakable pin, tied panel, centred pan
     expect(refKeys.length).toBeGreaterThanOrEqual(3); // his logged places + reference snapshot + overpass
   });
 
+  it("B651872 (×3) — a selected place with no pin yet (search-selected, not in the bounds-scoped snapshot) still gets ONE fallback pin, from FoodApp's own coordinates", () => {
+    // Owner's explicit ask: confirm whether the selected marker renders at the landing zoom, and
+    // say so plainly if it does not, rather than filing it as fixed. It did not — a place found
+    // via search but never visited/flagged only ever draws from `places` (bounds-scoped,
+    // refetched on 'moveend'), so right after a jump, before that refetch lands, there was
+    // nothing to attach the selection highlight to.
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/selectedPlaceInfo/);
+    expect(map).toMatch(/let selectedDrawn = false;/);
+    // Every addPin/addHollowPin call marks selectedDrawn when it draws the selected key, so the
+    // fallback can tell whether it's still needed.
+    expect(map).toMatch(/if \(isSelected\) selectedDrawn = true;/);
+    const fallback = map.slice(map.indexOf("if (selectedKey && !selectedDrawn"));
+    expect(fallback).toMatch(/selectedPlaceInfo\?\.lat != null && selectedPlaceInfo\?\.lon != null/);
+    expect(fallback).toMatch(/key: selectedKey/); // reuses the SAME key scheme, never a special-cased one
+    // FoodApp actually threads selectedPlaceInfo through as a prop, sourced from the search
+    // result's own lat/lon — never re-derived or re-fetched.
+    const app = src("FoodApp.jsx");
+    expect(app).toMatch(/const selectedPlaceInfo = selected\?\.kind === "place"/);
+    expect(app).toMatch(/lat: selected\.place\.lat, lon: selected\.place\.lon, name: selected\.place\.name/);
+    expect(app).toMatch(/selectedPlaceInfo=\{selectedPlaceInfo\}/);
+  });
+
   it("the fly-to pan offsets the destination by half the panel's width — lands in the VISIBLE area, not the raw map centre", () => {
     const map = src("components/FoodMap.jsx");
     expect(map).toMatch(/const PANEL_WIDTH = 340;/); // matches VisitPanel's own literal width
     expect(map).toMatch(/const panelOffsetPx = Math\.min\(PANEL_WIDTH, containerWidth \* 0\.8\) \/ 2;/);
     expect(map).toMatch(/map\.project\(\[flyToTarget\.lat, flyToTarget\.lon\], targetZoom\)/);
     expect(map).toMatch(/targetPoint\.add\(\[panelOffsetPx, 0\]\)/);
-    expect(map).toMatch(/map\.flyTo\(shiftedLatLng, targetZoom\)/);
+    expect(map).toMatch(/map\.flyTo\(shiftedLatLng, targetZoom, \{ duration: FLY_DURATION_SEC \}\)/);
   });
 
   it("selecting from the LIST also sets flyToTarget with real lat/lon — not just from search", () => {
@@ -1144,13 +1194,13 @@ describe("ambiance rating — a second, independent 1-10 rating; the map pin sta
     expect(src("components/FoodMap.jsx")).not.toMatch(/rating_ambiance/);
   });
 
-  it("VisitRow shows Food and Ambiance pills independently — a visit with only one set still renders sensibly, same principle as a dateless visit", () => {
+  it("VisitCard shows Food and Ambiance chips independently — a visit with only one set still renders sensibly, same principle as a dateless visit (NEW-2 renamed VisitRow/RatingPill to VisitCard/Chip as part of the panel rebuild, same independent-rendering behavior)", () => {
     const panel = src("components/VisitPanel.jsx");
     expect(panel).toMatch(/const hasRating = visit\.rating != null;/);
     expect(panel).toMatch(/const hasAmbiance = visit\.rating_ambiance != null;/);
-    expect(panel).toMatch(/\{hasRating && <RatingPill label="Food" value=\{visit\.rating\} \/>\}/);
-    expect(panel).toMatch(/\{hasAmbiance && <RatingPill label="Ambiance" value=\{visit\.rating_ambiance\} \/>\}/);
-    expect(panel).toMatch(/\{!hasRating && !hasAmbiance && <span/); // both-absent fallback, only when BOTH missing
+    expect(panel).toMatch(/\{hasRating && <Chip label="Food" value=\{visit\.rating\} \/>\}/);
+    expect(panel).toMatch(/\{hasAmbiance && <Chip label="Ambiance" value=\{visit\.rating_ambiance\} \/>\}/);
+    expect(panel).toMatch(/\{!hasRating && !hasAmbiance && !hasWouldReturn && <span/); // all-absent fallback, only when NONE present
   });
 });
 
@@ -1173,13 +1223,22 @@ describe("'What was good' — a liked-dishes shortlist, separate from 'What I ha
     expect(panel).not.toMatch(/whatIHad \+ .*whatWasGood/);
   });
 
-  it("the PLACE PANEL aggregates liked dishes across ALL past visits, rendered ABOVE 'Past visits' — not buried one visit deep", () => {
+  it("⛔ RENAMED to 'Order again' (NEW-2, owner: 'the thing he opens the app for while standing at the door') — still every past visit's what_was_good, still rendered ABOVE Past visits, but now DEDUPED and explicitly newest-first, not a plain join", () => {
+    const lib = src("lib/visitAggregates.js");
+    expect(lib).toMatch(/export function orderAgainEntries\(pastVisits\) \{/);
+    // Deduped on identical text (a Set, not a plain .map().filter(Boolean)) — the old behavior
+    // this superseded joined every occurrence, even repeats.
+    expect(lib).toMatch(/const seen = new Set\(\);/);
+    expect(lib).toMatch(/if \(!text \|\| seen\.has\(text\)\) continue;/);
     const panel = src("components/VisitPanel.jsx");
-    expect(panel).toMatch(/function LikedDishes\(\{ pastVisits \}\) \{/);
-    expect(panel).toMatch(/const entries = \(pastVisits \|\| \[\]\)\.map\(\(v\) => v\.what_was_good\)\.filter\(Boolean\);/);
+    expect(panel).toMatch(/function OrderAgain\(\{ entries \}\) \{/);
     expect(panel).toMatch(/entries\.join\("; "\)/);
-    expect(panel.indexOf("<LikedDishes")).toBeGreaterThan(-1);
-    expect(panel.indexOf("<LikedDishes")).toBeLessThan(panel.indexOf("Past visits ("));
+    expect(panel.indexOf("<OrderAgain")).toBeGreaterThan(-1);
+    // Compared against <PastVisitsSection's USAGE (inside the same `body` JSX block <OrderAgain
+    // itself sits in), not the data-testid string inside PastVisitsSection's own definition —
+    // that definition sits EARLIER in the file (function declarations precede the component that
+    // uses them), which would make this comparison backwards regardless of actual render order.
+    expect(panel.indexOf("<OrderAgain")).toBeLessThan(panel.indexOf("<PastVisitsSection"));
   });
 
   it("renders NOTHING when no past visit has a liked entry — no empty heading, quiet by default", () => {
@@ -1187,10 +1246,13 @@ describe("'What was good' — a liked-dishes shortlist, separate from 'What I ha
     expect(panel).toMatch(/if \(!entries\.length\) return null;/);
   });
 
-  it("kept as plain unparsed text — never split into a dish taxonomy, tags, or a separate entity", () => {
+  it("kept as plain unparsed text — never split into a dish taxonomy, tags, or a separate entity (checked in visitAggregates.js, which now owns orderAgainEntries, AND VisitPanel.jsx)", () => {
+    const lib = src("lib/visitAggregates.js");
     const panel = src("components/VisitPanel.jsx");
-    expect(panel).not.toMatch(/\.split\(","\)/);
-    expect(panel).not.toMatch(/dishTag|DishEntity|dish_taxonomy|dishAutocomplete/i);
+    for (const file of [lib, panel]) {
+      expect(file).not.toMatch(/\.split\(","\)/);
+      expect(file).not.toMatch(/dishTag|DishEntity|dish_taxonomy|dishAutocomplete/i);
+    }
   });
 
   it("VisitList shows 'What was good' as its own per-row column — that visit's own value, never an aggregate (the panel owns aggregation)", () => {
@@ -1315,8 +1377,12 @@ describe("B668195 — no emoji glyphs in the food map view controls (plain text 
   it("the ✕ close glyph is explicitly out of scope and stays", () => {
     const panel = src("components/VisitPanel.jsx");
     expect(panel).toContain("✕");
-    // Still the Close button specifically, not the glyph having moved somewhere unrelated.
-    const closeBtn = panel.slice(panel.indexOf('aria-label="Close"'), panel.indexOf('aria-label="Close"') + 200);
+    // Still the Close button specifically, not the glyph having moved somewhere unrelated — the
+    // window is the close button's own JSX element (aria-label="Close" up to its closing tag),
+    // not a fixed character count (NEW-2 widened the button's own style block, which a fixed-200
+    // window doesn't account for).
+    const startIdx = panel.indexOf('aria-label="Close"');
+    const closeBtn = panel.slice(startIdx, panel.indexOf("</button>", startIdx));
     expect(closeBtn).toContain("✕");
   });
 
@@ -1499,13 +1565,20 @@ describe("SearchBox — 'Want to try' badge on a flagged (never-visited) snapsho
 describe("VisitPanel — the 'Want to try' toggle, reachable with zero visits", () => {
   const panel = src("components/VisitPanel.jsx");
 
-  it("renders the toggle ABOVE the past-visits list, so it's reachable even when pastVisits is empty", () => {
+  it("renders the toggle ABOVE the past-visits list, so it's reachable even when pastVisits is empty (NEW-2 moved it into the Actions row, block 4, still ahead of Past visits, block 5)", () => {
     expect(panel).toMatch(/data-testid="food-wishlist-toggle"/);
-    expect(panel.indexOf('data-testid="food-wishlist-toggle"')).toBeLessThan(panel.indexOf("<LikedDishes"));
+    // Compared via the two blocks' USAGE inside the shared `body` JSX (<ActionsRow / <PastVisitsSection),
+    // not their data-testid strings — those live inside each component's own DEFINITION, whose
+    // file order doesn't necessarily track render order (see the sibling Order-again test's comment).
+    expect(panel.indexOf("<ActionsRow")).toBeGreaterThan(-1);
+    expect(panel.indexOf("<ActionsRow")).toBeLessThan(panel.indexOf("<PastVisitsSection"));
   });
 
   it("only renders when onToggleWishlist is provided (signed out / not applicable), otherwise stays out of the DOM entirely", () => {
-    expect(panel).toMatch(/\{onToggleWishlist && \(/);
+    // Guarded independently of onSubmitVisit's own gating one level up (ActionsRow is built once
+    // and reused for both the everVisited/never-visited swap, so the guard lives on the wishBtn
+    // element itself, inside ActionsRow, rather than wrapping the whole row).
+    expect(panel).toMatch(/const wishBtn = onToggleWishlist && \(/);
   });
 
   it("aria-pressed reflects the wishlisted prop — a screen reader / test can read the flagged state directly", () => {
@@ -1529,5 +1602,485 @@ describe("VisitList — 'Want to try' shortlist filter chip, same visual pattern
 
   it("a flagged row carries its own small outlined badge next to the place name", () => {
     expect(list).toMatch(/\{v\.isWishlist && \(/);
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════════════════════════
+ * 7. PLACE DETAIL PANEL REBUILD (NEW-2, owner chat block, 2026-08-22, verbatim: "Make this a
+ *    world class interface for when you click on a restaurant. Right now, it's lacking" —
+ *    judged on his phone, in Safari). A bottom sheet on mobile (map stays visible/pannable
+ *    above it), the same right rail on desktop; aggregates, an "order again" block, a redesigned
+ *    actions row, and past-visit cards with delete behind a confirm — same content, same order,
+ *    on both breakpoints.
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("visitAggregates — pure aggregation over already-loaded pastVisits, no new round trip", () => {
+  it("computes averages, count, and first/last dates from a mixed set of visits", () => {
+    const visits = [
+      { id: "v1", rating: 8, rating_ambiance: 7, cost: 20, visited_on: "2026-01-10" },
+      { id: "v2", rating: 6, rating_ambiance: null, cost: 30, visited_on: "2026-06-01" },
+      { id: "v3", rating: null, rating_ambiance: 9, cost: null, visited_on: "2025-12-25" },
+    ];
+    const agg = computeVisitAggregates(visits);
+    expect(agg.visitCount).toBe(3);
+    expect(agg.avgFood).toBe(7); // (8+6)/2
+    expect(agg.avgAmbiance).toBe(8); // (7+9)/2
+    expect(agg.avgCost).toBe(25); // (20+30)/2
+    expect(agg.firstVisitDate).toBe("2025-12-25");
+    expect(agg.lastVisitDate).toBe("2026-06-01");
+  });
+
+  it("a dateless visit is EXCLUDED from first/last but still counted in visitCount", () => {
+    const visits = [
+      { id: "v1", rating: 5, visited_on: null },
+      { id: "v2", rating: 7, visited_on: "2026-03-01" },
+    ];
+    const agg = computeVisitAggregates(visits);
+    expect(agg.visitCount).toBe(2);
+    expect(agg.firstVisitDate).toBe("2026-03-01");
+    expect(agg.lastVisitDate).toBe("2026-03-01");
+  });
+
+  it("all-dateless visits: counted, but first/last are both null (not a crash, not a wrong date)", () => {
+    const agg = computeVisitAggregates([{ id: "v1", rating: 5, visited_on: null }]);
+    expect(agg.visitCount).toBe(1);
+    expect(agg.firstVisitDate).toBeNull();
+    expect(agg.lastVisitDate).toBeNull();
+  });
+
+  it("an average with NO rated visits at all is null, never 0 — the panel renders an em dash for null, never a misleading zero", () => {
+    const agg = computeVisitAggregates([{ id: "v1", rating: null, rating_ambiance: null, cost: null, visited_on: "2026-01-01" }]);
+    expect(agg.avgFood).toBeNull();
+    expect(agg.avgAmbiance).toBeNull();
+    expect(agg.avgCost).toBeNull();
+  });
+
+  it("empty pastVisits array: every field is a safe zero/null, never throws", () => {
+    const agg = computeVisitAggregates([]);
+    expect(agg).toEqual({ visitCount: 0, avgFood: null, avgAmbiance: null, avgCost: null, lastVisitDate: null, firstVisitDate: null });
+  });
+
+  it("⛔ coerces STRING numeric fields — Postgres numeric round-trips as a JSON string over PostgREST, same trap avgRatingByPlaceId already guards", () => {
+    const agg = computeVisitAggregates([
+      { id: "v1", rating: "7", cost: "10.50" },
+      { id: "v2", rating: "9", cost: "5.50" },
+    ]);
+    expect(agg.avgFood).toBe(8);
+    expect(agg.avgCost).toBe(8);
+  });
+
+  it("orderAgainEntries dedupes identical text, keeping the FIRST (newest, per fetchAllVisits' own ordering) occurrence's position", () => {
+    const visits = [
+      { id: "v1", what_was_good: "The hamachi" }, // newest
+      { id: "v2", what_was_good: "The agedashi" },
+      { id: "v3", what_was_good: "The hamachi" }, // repeat — dropped
+      { id: "v4", what_was_good: null },
+    ];
+    expect(orderAgainEntries(visits)).toEqual(["The hamachi", "The agedashi"]);
+  });
+
+  it("orderAgainEntries returns [] when no visit has what_was_good set", () => {
+    expect(orderAgainEntries([{ id: "v1", what_was_good: null }])).toEqual([]);
+  });
+});
+
+describe("dateFormat — display-only, never a raw ISO string, local-calendar-day parsing", () => {
+  const NOW = new Date(2026, 7, 22); // Aug 22, 2026 (local) — matches "today" for these fixtures
+
+  it("formatVisitDate omits the year for a date in the current year", () => {
+    expect(formatVisitDate("2026-08-18", NOW)).toBe("Aug 18");
+  });
+
+  it("formatVisitDate includes the year for a date NOT in the current year", () => {
+    expect(formatVisitDate("2025-08-18", NOW)).toBe("Aug 18, 2025");
+  });
+
+  it("formatVisitDate returns 'Date unknown' for null/malformed input — never 'Invalid Date', never a raw string", () => {
+    expect(formatVisitDate(null, NOW)).toBe("Date unknown");
+    expect(formatVisitDate("not-a-date", NOW)).toBe("Date unknown");
+  });
+
+  it("formatVisitDate parses as a LOCAL calendar date — Jan 1 stays Jan 1 regardless of timezone, never shifted a day by UTC parsing", () => {
+    // The classic `new Date("2026-01-01")` trap: that parses as UTC midnight, which prints as
+    // Dec 31 in any negative-UTC-offset zone. This file's own parser must not do that.
+    expect(formatVisitDate("2026-01-01", new Date(2026, 0, 1))).toBe("Jan 1");
+  });
+
+  it("formatMonthYear returns 'Mon YYYY', or null for missing/malformed input", () => {
+    expect(formatMonthYear("2024-03-15")).toBe("Mar 2024");
+    expect(formatMonthYear(null)).toBeNull();
+    expect(formatMonthYear("garbage")).toBeNull();
+  });
+
+  it("formatRelativeDate: today/yesterday/day-count/week-count/month-count/year-count, each singular-vs-plural correct", () => {
+    expect(formatRelativeDate("2026-08-22", NOW)).toBe("today");
+    expect(formatRelativeDate("2026-08-21", NOW)).toBe("yesterday");
+    expect(formatRelativeDate("2026-08-18", NOW)).toBe("4 days ago");
+    expect(formatRelativeDate("2026-08-15", NOW)).toBe("1 week ago");
+    expect(formatRelativeDate("2026-08-01", NOW)).toBe("3 weeks ago");
+    expect(formatRelativeDate("2026-07-22", NOW)).toBe("1 month ago");
+    expect(formatRelativeDate("2026-01-22", NOW)).toBe("7 months ago");
+    expect(formatRelativeDate("2025-08-22", NOW)).toBe("1 year ago");
+    expect(formatRelativeDate("2023-08-22", NOW)).toBe("3 years ago");
+  });
+
+  it("formatRelativeDate clamps a future date to 'today' rather than printing a negative/nonsense count", () => {
+    expect(formatRelativeDate("2026-08-25", NOW)).toBe("today");
+  });
+
+  it("formatRelativeDate returns null for missing/malformed input", () => {
+    expect(formatRelativeDate(null, NOW)).toBeNull();
+  });
+});
+
+describe("directions — a plain maps URL, no SDK/key, Apple Maps on iOS/Safari, Google Maps elsewhere (NEW-2)", () => {
+  const IPHONE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
+  const MAC_SAFARI_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15";
+  const MAC_CHROME_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+  const ANDROID_CHROME_UA = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
+  const IOS_CHROME_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/120.0.0.0 Mobile/15E148 Safari/604.1";
+
+  it("prefers Apple Maps on iPhone Safari and on desktop Safari", () => {
+    expect(preferAppleMaps(IPHONE_UA)).toBe(true);
+    expect(preferAppleMaps(MAC_SAFARI_UA)).toBe(true);
+  });
+
+  it("prefers Apple Maps for ANY browser on an iOS device, not just Safari — Apple Maps is the OS-level map app there regardless of which browser opened the link", () => {
+    expect(preferAppleMaps(IOS_CHROME_UA)).toBe(true);
+  });
+
+  it("prefers Google Maps on Chrome on a NON-iOS platform (desktop, Android)", () => {
+    expect(preferAppleMaps(MAC_CHROME_UA)).toBe(false);
+    expect(preferAppleMaps(ANDROID_CHROME_UA)).toBe(false);
+  });
+
+  it("directionsUrl builds the Apple Maps daddr form and the Google Maps directions form correctly", () => {
+    expect(directionsUrl(29.76, -95.37, IPHONE_UA)).toBe("https://maps.apple.com/?daddr=29.76,-95.37");
+    expect(directionsUrl(29.76, -95.37, MAC_CHROME_UA)).toBe("https://www.google.com/maps/dir/?api=1&destination=29.76,-95.37");
+  });
+
+  it("directionsUrl returns null with no coordinates — the caller renders no link at all rather than a broken one", () => {
+    expect(directionsUrl(null, null, MAC_CHROME_UA)).toBeNull();
+    expect(directionsUrl(29.76, undefined, MAC_CHROME_UA)).toBeNull();
+  });
+});
+
+describe("formatPlace — formatCityFromAddress (NEW-2, header line 2: 'French Restaurant · River Oaks')", () => {
+  it("extracts the second comma-separated segment as the city", () => {
+    expect(formatCityFromAddress("224 Westheimer Rd, Houston, TX 77006")).toBe("Houston");
+  });
+
+  it("returns null for an address with fewer than two segments, or none at all", () => {
+    expect(formatCityFromAddress("Houston")).toBeNull();
+    expect(formatCityFromAddress(null)).toBeNull();
+  });
+
+  it("never mutates the stored value — display-only, same principle as formatCategory/formatAddress", () => {
+    const raw = "224 Westheimer Rd, Houston, TX 77006";
+    formatCityFromAddress(raw);
+    expect(raw).toBe("224 Westheimer Rd, Houston, TX 77006");
+  });
+});
+
+describe("bottomSheetSnap — the pure drag-release decision (BottomSheet.jsx wires this to real pointer coordinates)", () => {
+  const bands = { peekHeight: 150, halfHeight: 400, fullHeight: 700 };
+
+  it("resolves to the NEAREST of peek/half/full", () => {
+    expect(resolveSnap({ heightPx: 160, ...bands, dismissBelow: 75 })).toBe("peek");
+    expect(resolveSnap({ heightPx: 380, ...bands, dismissBelow: 75 })).toBe("half");
+    expect(resolveSnap({ heightPx: 690, ...bands, dismissBelow: 75 })).toBe("full");
+  });
+
+  it("a tie between two bands resolves to whichever is found first (peek before half before full) — deterministic, not random", () => {
+    // 275 is exactly equidistant between peek (150) and half (400).
+    expect(resolveSnap({ heightPx: 275, ...bands, dismissBelow: 75 })).toBe("peek");
+  });
+
+  it("dragged below dismissBelow resolves to 'dismiss' EVEN IF peek would otherwise be the nearest candidate", () => {
+    expect(resolveSnap({ heightPx: 50, ...bands, dismissBelow: 75 })).toBe("dismiss");
+    expect(resolveSnap({ heightPx: 74, ...bands, dismissBelow: 75 })).toBe("dismiss");
+  });
+
+  it("right at dismissBelow, dismiss does not fire (the check is strictly less-than)", () => {
+    expect(resolveSnap({ heightPx: 75, ...bands, dismissBelow: 75 })).toBe("peek");
+  });
+
+  it("heightForSnap caps EVERY band at the real content height — 'no empty white below the content, ever'", () => {
+    const short = { contentHeight: 90, peekHeight: 150, viewportHeight: 800, topInset: 64 };
+    expect(heightForSnap("peek", short)).toBe(90); // shorter than the peek cap itself
+    expect(heightForSnap("half", short)).toBe(90); // shorter than 60vh
+    expect(heightForSnap("full", short)).toBe(90); // shorter than the full cap
+  });
+
+  it("heightForSnap caps half at 60% of the viewport and full at (viewport - topInset), for TALL content", () => {
+    const tall = { contentHeight: 5000, peekHeight: 150, viewportHeight: 800, topInset: 64 };
+    expect(heightForSnap("half", tall)).toBe(480); // 800 * 0.6
+    expect(heightForSnap("full", tall)).toBe(736); // 800 - 64
+  });
+
+  it("heightForSnap's peek never exceeds the caller-measured peekHeight even if content is taller", () => {
+    expect(heightForSnap("peek", { contentHeight: 5000, peekHeight: 150, viewportHeight: 800, topInset: 64 })).toBe(150);
+  });
+});
+
+describe("BottomSheet.jsx — a generic drag-to-resize primitive, content-agnostic, no new dependency", () => {
+  const sheet = src("components/BottomSheet.jsx");
+
+  it("no new npm dependency was added for gesture handling — Pointer Events only", () => {
+    const pkg = JSON.parse(read(REPO, "package.json"));
+    const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+    // No gesture/drag/swipe library of any kind.
+    expect(Object.keys(allDeps).some((k) => /gesture|swipe|drag|hammer|use-gesture|framer-motion/i.test(k))).toBe(false);
+  });
+
+  it("uses Pointer Events with capture, not mouse-only or touch-only handlers", () => {
+    expect(sheet).toMatch(/onPointerDown=\{onHandlePointerDown\}/);
+    expect(sheet).toMatch(/onPointerMove=\{onHandlePointerMove\}/);
+    expect(sheet).toMatch(/setPointerCapture/);
+  });
+
+  it("respects the iOS safe-area inset at the bottom", () => {
+    expect(sheet).toMatch(/paddingBottom:\s*"env\(safe-area-inset-bottom\)"/);
+  });
+
+  it("the drag handle's own hit area is at least 44 CSS px tall", () => {
+    const handleBlock = sheet.slice(sheet.indexOf('data-testid="food-sheet-drag-handle"'), sheet.indexOf('data-testid="food-sheet-drag-handle"') + 400);
+    expect(handleBlock).toMatch(/minHeight:\s*44/);
+  });
+
+  it("never renders a full-viewport backdrop — the map above the sheet must stay directly interactive (no scrim to swallow its pan gesture)", () => {
+    // Only ONE `position: "fixed"` element in the whole file (the sheet root itself) — a second
+    // one would be exactly what a full-viewport backdrop/scrim div looks like. This checks the
+    // real structural signal (element count), not the WORD "backdrop" — that word legitimately
+    // appears in this file's own explanatory comments, which a plain string ban would trip on.
+    expect([...sheet.matchAll(/position:\s*"fixed"/g)]).toHaveLength(1);
+  });
+
+  it("the sheet is positioned fixed to the viewport bottom, above the map's own z-index", () => {
+    expect(sheet).toMatch(/position:\s*"fixed",\s*left:\s*0,\s*right:\s*0,\s*bottom:\s*0,\s*zIndex:\s*700/);
+  });
+
+  it("uses resolveSnap/heightForSnap from the pure lib file, not inline duplicate math", () => {
+    expect(sheet).toMatch(/import \{ resolveSnap, heightForSnap \} from "\.\.\/lib\/bottomSheetSnap\.js";/);
+  });
+
+  it("returns null (unmounted) when not open — no stray fixed-position element left in the DOM behind a closed sheet", () => {
+    expect(sheet).toMatch(/if \(!open\) return null;/);
+  });
+});
+
+describe("VisitPanel — responsive container: BottomSheet on mobile, the same right rail on desktop, IDENTICAL content either way", () => {
+  const panel = src("components/VisitPanel.jsx");
+
+  it("switches container via the same breakpoint AppHeader.jsx already uses for its own narrow layout — not a second, invented number", () => {
+    const header = read(REPO, "src/shared/ui/AppHeader.jsx");
+    const headerBreakpoint = header.match(/matchMedia\("(\(max-width: \d+px\))"\)/)?.[1];
+    expect(headerBreakpoint).toBeTruthy();
+    expect(panel).toContain(`const MOBILE_BREAKPOINT = "${headerBreakpoint}";`);
+  });
+
+  it("both containers render the exact SAME `body` JSX — the switch only changes what wraps it, never a divergent second copy of the content", () => {
+    expect(panel).toMatch(/const body = \(/);
+    const mobileBranch = panel.slice(panel.indexOf("if (isMobile)"), panel.indexOf("return (\n    <div data-testid=\"food-visit-panel\""));
+    expect(mobileBranch).toContain("{body}");
+    expect(panel.slice(panel.indexOf("food-visit-panel\""))).toContain("{body}");
+  });
+
+  it("the mobile path wraps `body` in BottomSheet, dismissing calls the same onClose the desktop close button uses", () => {
+    expect(panel).toMatch(/<BottomSheet open onDismiss=\{onClose\} initialSnap="half" peekHeight=\{peekHeight\}>/);
+  });
+
+  it("the desktop path is the same right-rail shape as before — position:absolute, right:0, PANEL_WIDTH-matching 340", () => {
+    const desktopBlock = panel.slice(panel.indexOf('data-testid="food-visit-panel"'), panel.indexOf('data-testid="food-visit-panel"') + 300);
+    expect(desktopBlock).toMatch(/position:\s*"absolute",\s*top:\s*0,\s*right:\s*0,\s*bottom:\s*0,\s*width:\s*340/);
+  });
+
+  it("measures its own peek-zone height (header + score strip / empty-state note) and hands it to BottomSheet — BottomSheet itself stays content-agnostic", () => {
+    expect(panel).toMatch(/const peekRef = useRef\(null\);/);
+    expect(panel).toMatch(/if \(peekRef\.current\) setPeekHeight\(peekRef\.current\.offsetHeight\);/);
+  });
+});
+
+describe("VisitPanel — score strip (block 2), only when the place has at least one visit (NEW-2)", () => {
+  const panel = src("components/VisitPanel.jsx");
+
+  it("renders Food (hero), Ambiance, Visits, Cost — one decimal on ratings, tabular-nums so digits don't jitter", () => {
+    const strip = panel.slice(panel.indexOf("function ScoreStrip"), panel.indexOf("/* Order again"));
+    expect(strip).toMatch(/avgFood == null \? "—" : avgFood\.toFixed\(1\)/);
+    expect(strip).toMatch(/avgAmbiance == null \? "—" : avgAmbiance\.toFixed\(1\)/);
+    expect(strip).toMatch(/avgCost == null \? "—" : `\$\$\{avgCost\.toFixed\(2\)\}`/);
+    expect(strip).toMatch(/fontVariantNumeric:\s*"tabular-nums"/);
+  });
+
+  it("is gated on everVisited — never renders for a zero-visit place", () => {
+    expect(panel).toMatch(/\{everVisited && <ScoreStrip aggregates=\{aggregates\} \/>\}/);
+  });
+
+  it("shows a last-visit (formatted + relative) and a first-visit (month/year) facts line, omitted entirely when neither date exists", () => {
+    const strip = panel.slice(panel.indexOf("function ScoreStrip"), panel.indexOf("/* Order again"));
+    expect(strip).toMatch(/formatVisitDate\(lastVisitDate\)/);
+    expect(strip).toMatch(/formatRelativeDate\(lastVisitDate\)/);
+    expect(strip).toMatch(/formatMonthYear\(firstVisitDate\)/);
+    expect(strip).toMatch(/\{\(lastLine \|\| firstLine\) && \(/);
+  });
+});
+
+describe("VisitPanel — Actions row (block 4): primary/secondary swap on a never-visited place, sticky footer", () => {
+  const panel = src("components/VisitPanel.jsx");
+  const actionsBlock = panel.slice(panel.indexOf("function ActionsRow"), panel.indexOf("/* Past visits"));
+
+  it("everVisited: Log a visit is primary (full-width, solid); Want to try is secondary, beside it", () => {
+    expect(actionsBlock).toMatch(/const logIsPrimary = everVisited \|\| !onToggleWishlist;/);
+    expect(actionsBlock).toMatch(/\{\(everVisited \? \[logBtn, wishBtn\] : \[wishBtn, logBtn\]\)\.filter\(Boolean\)\}/);
+  });
+
+  it("never-visited: the roles SWAP — Want to try becomes primary, Log a visit drops to secondary", () => {
+    // logIsPrimary is false only when NOT everVisited AND onToggleWishlist is present — the
+    // wishBtn's own style picks `primary` in that same branch (everVisited ? secondary : primary).
+    expect(actionsBlock).toMatch(/\.\.\.\(everVisited \? secondary : primary\),/);
+  });
+
+  it("the flagged state shows a check and a filled background; unflagged is outline-only", () => {
+    expect(actionsBlock).toMatch(/\{wishlisted \? "✓ Want to try" : "Want to try"\}/);
+    expect(actionsBlock).toMatch(/const wishActive = \{ background: "var\(--accent-food\)", color: "var\(--on-accent-food\)", border: "none" \};/);
+  });
+
+  it("is pinned (sticky) to the bottom of whichever scroll container holds it, so it stays reachable once Past visits grows past the fold", () => {
+    expect(actionsBlock).toMatch(/position:\s*"sticky",\s*bottom:\s*0/);
+  });
+
+  it("every button in the row is at least 44 CSS px tall", () => {
+    expect(actionsBlock).toMatch(/minHeight:\s*44/);
+  });
+
+  it("clicking 'Log a visit' opens the form in place — never auto-opens on mount, even for a never-visited place (NEW-2 changed this default from the old always-open-when-zero-visits behavior)", () => {
+    expect(panel).toMatch(/const \[adding, setAdding\] = useState\(false\); \/\/ NEW-2: never auto-opens, even on a never-visited place/);
+    expect(panel).toMatch(/const handleOpenForm = \(\) => setAdding\(true\);/);
+  });
+});
+
+describe("VisitPanel — Empty state (block 6, never visited): no score strip, no 'Past visits · 0', no empty tiles, one explanatory line", () => {
+  const panel = src("components/VisitPanel.jsx");
+
+  it("EmptyStateNote renders only when NOT everVisited and NOT already adding a visit", () => {
+    expect(panel).toMatch(/\{!everVisited && !adding && <EmptyStateNote \/>\}/);
+  });
+
+  it("names the exact hollow-pin behavior from the wishlist feature, so the copy stays honest about what the map actually shows", () => {
+    const note = panel.slice(panel.indexOf("function EmptyStateNote"), panel.indexOf("export default function VisitPanel"));
+    expect(note).toMatch(/hollow pin/);
+  });
+
+  it("PastVisitsSection itself renders nothing at zero visits — no 'Past visits · 0' heading", () => {
+    expect(panel).toMatch(/function PastVisitsSection\(\{ pastVisits, onDelete \}\) \{\s*if \(!pastVisits\.length\) return null;/);
+  });
+});
+
+describe("VisitPanel — Past visit cards (block 5): chips, Would-return, overflow delete-behind-confirm via AnchoredMenu", () => {
+  const panel = src("components/VisitPanel.jsx");
+  const cardBlock = panel.slice(panel.indexOf("function VisitCard"), panel.indexOf("function PastVisitsSection"));
+
+  it("shows a Would-return chip only when would_return is exactly true (never for false or null)", () => {
+    expect(cardBlock).toMatch(/const hasWouldReturn = visit\.would_return === true;/);
+    expect(cardBlock).toMatch(/\{hasWouldReturn && <WouldReturnChip \/>\}/);
+  });
+
+  it("would_return WAS already wired end-to-end before this rebuild (VisitForm's Yes/No, and the old VisitRow already displayed it as plain text) — this only redesigns the DISPLAY as a chip, it doesn't newly wire the column", () => {
+    expect(panel).toMatch(/would_return: wouldReturn,/); // VisitForm's submit payload, unchanged
+  });
+
+  it("only non-empty visit fields render — 'Had X' / 'Good X' / cost — never an empty labelled row", () => {
+    expect(cardBlock).toMatch(/\{visit\.what_i_had && <div[^>]*>Had \{visit\.what_i_had\}<\/div>\}/);
+    expect(cardBlock).toMatch(/\{visit\.what_was_good && <div[^>]*>Good \{visit\.what_was_good\}<\/div>\}/);
+    expect(cardBlock).toMatch(/\{visit\.cost != null && <div/);
+  });
+
+  it("an undated visit renders at reduced emphasis (opacity), matching that fetchAllVisits already sorts it last", () => {
+    expect(cardBlock).toMatch(/const dateless = !visit\.visited_on;/);
+    expect(cardBlock).toMatch(/opacity:\s*dateless \? 0\.65 : 1/);
+  });
+
+  it("delete lives behind the '···' overflow menu, through AnchoredMenu — the SAME portal-based menu SearchBox already uses, not a plain absolutely-positioned dropdown that would clip inside the scrolling list (B632176's class of bug)", () => {
+    expect(panel).toMatch(/import AnchoredMenu from "\.\.\/\.\.\/\.\.\/shared\/ui\/AnchoredMenu\.jsx";/);
+    expect(cardBlock).toMatch(/<AnchoredMenu\b/);
+    expect(cardBlock).not.toMatch(/position:\s*"absolute"/); // no locally-nested dropdown reintroduced
+  });
+
+  it("Delete requires a confirm step INSIDE the menu — never window.confirm, never a bare standalone red link", () => {
+    expect(cardBlock).toMatch(/const \[confirming, setConfirming\] = useState\(false\);/);
+    expect(cardBlock).toMatch(/data-testid="food-visit-delete-menu-item"/);
+    expect(cardBlock).toMatch(/data-testid="food-visit-delete-confirm"/);
+    expect(cardBlock).toMatch(/Delete this visit\?/);
+    expect(cardBlock).not.toMatch(/window\.(confirm|prompt|alert)/);
+  });
+
+  it("the confirm step's Delete button reuses the EXISTING --danger token, not a second/new red", () => {
+    expect(cardBlock).toMatch(/var\(--danger-text, var\(--danger\)\)/);
+    expect(cardBlock).not.toMatch(/#[0-9a-fA-F]{3,8}\b/); // no raw hex anywhere in this component
+  });
+
+  it("the overflow button itself is at least 44 CSS px", () => {
+    expect(cardBlock).toMatch(/minWidth:\s*44,\s*minHeight:\s*44/);
+  });
+
+  it("Past visits section label reads 'Past visits · N'", () => {
+    expect(panel).toMatch(/Past visits · \{pastVisits\.length\}/);
+  });
+});
+
+describe("VisitPanel — Header (block 1): wrapping name, category · city, a tappable directions link, a circular close button", () => {
+  const panel = src("components/VisitPanel.jsx");
+  const headerBlock = panel.slice(panel.indexOf("function PanelHeader"), panel.indexOf("/* Score strip"));
+
+  it("the name wraps rather than truncates — no text-overflow:ellipsis / white-space:nowrap on it", () => {
+    expect(headerBlock).not.toMatch(/textOverflow:\s*"ellipsis"/);
+    expect(headerBlock).not.toMatch(/whiteSpace:\s*"nowrap"/);
+    expect(headerBlock).toMatch(/overflowWrap:\s*"anywhere"/);
+  });
+
+  it("line 2 joins category and city/neighbourhood with ' · ', omitted entirely when both are absent (a manual pin has neither)", () => {
+    expect(headerBlock).toMatch(/const categoryLine = \[formatCategory\(category\), city\]\.filter\(Boolean\)\.join\(" · "\);/);
+    expect(headerBlock).toMatch(/\{categoryLine && </);
+  });
+
+  it("the address is a tappable link that opens directions, only rendered when both an address AND coordinates exist", () => {
+    expect(headerBlock).toMatch(/const mapsUrl = directionsUrl\(lat, lon\);/);
+    expect(headerBlock).toMatch(/\{formattedAddress && mapsUrl && \(/);
+    expect(headerBlock).toMatch(/target="_blank" rel="noopener noreferrer"/);
+  });
+
+  it("close is a circular icon button (border-radius 50%, >=44px), not a bare glyph floating in the corner", () => {
+    expect(headerBlock).toMatch(/borderRadius:\s*"50%"/);
+    expect(headerBlock).toMatch(/width:\s*44,\s*height:\s*44,\s*minWidth:\s*44,\s*minHeight:\s*44/);
+  });
+
+  it("the selection-tie accent dot (B634976) survives the rebuild", () => {
+    expect(headerBlock).toMatch(/data-testid="food-panel-accent-dot"/);
+  });
+});
+
+describe("FoodApp — panelPlace: the normalized {name, category, address, lat, lon} handed to VisitPanel (NEW-2 replaced the old pre-joined title/subtitle strings)", () => {
+  const app = src("FoodApp.jsx");
+
+  it("a snapshot place carries its real category/address; a manual or new pin carries neither (never did)", () => {
+    const block = app.slice(app.indexOf("const panelPlace ="), app.indexOf("return (\n    <div style={{ height"));
+    expect(block).toMatch(/category:\s*selected\.place\.category,\s*address:\s*selected\.place\.address/);
+    expect(block).toMatch(/kind === "manualPin"[\s\S]{0,40}category:\s*null,\s*address:\s*null/);
+    expect(block).toMatch(/kind === "newPin"[\s\S]{0,60}category:\s*null,\s*address:\s*null/);
+  });
+
+  it("VisitPanel is wired to place={panelPlace}, not the old title/subtitle strings", () => {
+    expect(app).toMatch(/<VisitPanel[\s\S]{0,300}place=\{panelPlace\}/); // the long conditional `key=` line sits between them
+    expect(app).not.toMatch(/title=\{panelTitle\}/);
+    expect(app).not.toMatch(/subtitle=\{panelSubtitle\}/);
+  });
+});
+
+describe("VisitPanel — no emoji anywhere in this panel (NEW-2, consistent with the map controls)", () => {
+  it("no emoji glyph in VisitPanel.jsx or BottomSheet.jsx — only the plain ✕/···/✓ symbols this app already uses elsewhere", () => {
+    const TARGET_EMOJI = ["📍", "🔍", "🗺", "🛰", "⭐", "❤️", "👍"];
+    for (const file of ["components/VisitPanel.jsx", "components/BottomSheet.jsx"]) {
+      const text = src(file);
+      for (const glyph of TARGET_EMOJI) expect(text, `${file} contains ${glyph}`).not.toContain(glyph);
+    }
   });
 });

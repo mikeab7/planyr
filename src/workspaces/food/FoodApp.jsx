@@ -24,7 +24,6 @@ import {
   manualWishlistFromRows, manualGroupKey,
 } from "./lib/foodStore.js";
 import { searchOverpass } from "./lib/overpass.js";
-import { formatCategory, formatAddress } from "./lib/formatPlace.js";
 
 export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, authControl, accountActive, userId }) {
   const [view, setView] = useState("map"); // "map" | "list"
@@ -252,11 +251,17 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     setOverpassPlaces(data);
   }, [bounds]);
 
-  const panelTitle = selected?.kind === "place" ? selected.place.name
-    : selected?.kind === "manualPin" ? selected.pin.name : null;
-  const panelSubtitle = selected?.kind === "place"
-    ? [formatCategory(selected.place.category), formatAddress(selected.place.address)].filter(Boolean).join(" · ")
-    : null;
+  // NEW-2 — VisitPanel now builds its own header (name/category-city/directions) from the raw
+  // place fields, rather than FoodApp pre-joining a subtitle string; a manual/new pin has no
+  // category or address (never did), so those come through null and VisitPanel's own guards
+  // simply don't render those lines.
+  const panelPlace = selected?.kind === "place"
+    ? { name: selected.place.name, category: selected.place.category, address: selected.place.address, lat: selected.place.lat, lon: selected.place.lon }
+    : selected?.kind === "manualPin"
+      ? { name: selected.pin.name, category: null, address: null, lat: selected.pin.lat, lon: selected.pin.lon }
+      : selected?.kind === "newPin"
+        ? { name: null, category: null, address: null, lat: selected.lat, lon: selected.lon }
+        : null;
 
   // Identifies the currently-selected PLACE or MANUAL PIN the exact same way across the map's
   // pin-highlight, the list's row-highlight, and the panel's own key (B634976) — owner, 2026-08-19: "it's
@@ -267,6 +272,16 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   // name alone (see the List `onSelect` handler below, unchanged by this item).
   const selectedKey = selected?.kind === "place" ? `place:${selected.place.id}`
     : selected?.kind === "manualPin" ? `pin:${selected.pin.name}`
+    : null;
+
+  // B651872 (×3) — a place selected from search (never visited, never flagged) draws ONLY from
+  // the bounds-scoped reference snapshot (`places`, refetched on 'moveend' once the flight
+  // lands) — everything else the map always draws (his own logged/manual/wishlist places) is
+  // NOT bounds-gated. So right after a search jump, before that refetch lands, the selected
+  // place has no pin at all to attach its highlight to. Passed through so FoodMap can draw ONE
+  // fallback pin for it — see FoodMap.jsx's marker-redraw effect.
+  const selectedPlaceInfo = selected?.kind === "place"
+    ? { lat: selected.place.lat, lon: selected.place.lon, name: selected.place.name }
     : null;
 
   // Whether the CURRENTLY SELECTED place/pin is flagged (B669312) — drives the panel's toggle
@@ -369,6 +384,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
             onRequestSearchHere={searchHere}
             flyToTarget={flyToTarget}
             selectedKey={selectedKey}
+            selectedPlaceInfo={selectedPlaceInfo}
           />
         ) : (
           <VisitList
@@ -395,8 +411,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
         {selected && (
           <VisitPanel
             key={selected.kind === "place" ? `place:${selected.place.id}` : selected.kind === "manualPin" ? `pin:${selected.pin.key || selected.pin.name}` : "new-pin"}
-            title={panelTitle}
-            subtitle={panelSubtitle}
+            place={panelPlace}
             pastVisits={visitsForSelected}
             onClose={closePanel}
             onSubmitVisit={accountActive ? submitVisit : undefined}

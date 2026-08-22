@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-22 @ `ff0c4d5` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-22 @ `7fbe151` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_540 source files mapped._
+_545 source files mapped._
 
 ## infra
 
@@ -41,6 +41,8 @@ _540 source files mapped._
   - _exports_: `default (Shell)`
 - **`src/main.jsx`** — Entry point: installs client-error telemetry + chunk-reload guard, retires old GIS service worker, renders Shell inside ThemeProvider/StrictMode
   - _exports_: _(none)_
+- **`src/workspaces/food/components/BottomSheet.jsx`** — Generic drag-to-resize mobile bottom sheet (peek/half/full snap points, content-driven height, dismiss-on-drag), content-agnostic
+  - _exports_: `default (BottomSheet)`
 - **`src/workspaces/food/components/FoodMap.jsx`** — Leaflet map: canvas-rendered pins (snapshot places, live Overpass results, manual pins), drop-a-pin mode, "search live for more here"
   - _exports_: `default (FoodMap)`
 - **`src/workspaces/food/components/SearchBox.jsx`** — one search box: whole-snapshot name search (Map view, flies to + opens a result) or a plain list filter (List view); his own places rank first, with an inline live-Overpass fallback and a drop-a-pin escape hatch.
@@ -51,16 +53,24 @@ _540 source files mapped._
   - _exports_: `default (VisitPanel)`
 - **`src/workspaces/food/FoodApp.jsx`** — `/food` workspace root (lazy chunk): map/list view state, visit CRUD wiring, manual-pin drop flow
   - _exports_: `default (FoodApp)`
+- **`src/workspaces/food/lib/bottomSheetSnap.js`** — Pure drag-release snap resolution and content-driven snap-height math for BottomSheet.jsx
+  - _exports_: `heightForSnap`, `resolveSnap`
+- **`src/workspaces/food/lib/dateFormat.js`** — Display-only visit date formatting (local-calendar parsing, relative "N days ago", month/year)
+  - _exports_: `formatMonthYear`, `formatRelativeDate`, `formatVisitDate`
+- **`src/workspaces/food/lib/directions.js`** — Place-panel directions link URL builder (Apple Maps on iOS/Safari, Google Maps elsewhere)
+  - _exports_: `directionsUrl`, `preferAppleMaps`
 - **`src/workspaces/food/lib/foodStore.js`** — The one seam to Supabase: place/visit queries, visit CRUD, manual-pin grouping, the logged-place-id set
   - _exports_: `addWishlist`, `avgRatingByPlaceId`, `deleteVisit`, `fetchAllVisits`, `fetchAllWishlist`, `fetchPlaceById`, `fetchPlacesByIds`, `fetchPlacesInBounds`, `insertVisit`, `loggedPlaceIds`, `manualGroupKey`, `manualPinsFromVisits`, `manualWishlistFromRows`, `removeWishlist`, `searchPlacesByName`, `supabaseConfigured`, `updateVisit`, `wishlistedPlaceIds`
 - **`src/workspaces/food/lib/formatPlace.js`** — Display-only category title-casing (with an acronym exception list) and address ZIP+4 tidy — never mutates the stored value
-  - _exports_: `formatAddress`, `formatCategory`
+  - _exports_: `formatAddress`, `formatCategory`, `formatCityFromAddress`
 - **`src/workspaces/food/lib/overpass.js`** — OpenStreetMap Overpass fallback: cached per-bbox live query, called only on explicit user request
   - _exports_: `fromElement`, `queryFor`, `roundKey`, `searchOverpass`
 - **`src/workspaces/food/lib/ratingColor.js`** — the 1-10 rating colour ramp for map pins/list/panel (warm cream to deep red-brown, WCAG-measured contrast, no green)
   - _exports_: `colorForRating`, `RATING_COLORS`, `RATING_TEXT`, `textColorForRating`
 - **`src/workspaces/food/lib/supabaseClient.js`** — This module's own Supabase client (deliberately not a site-planner import — see BUNDLE ISOLATION)
   - _exports_: `supabase`, `supabaseConfigured`
+- **`src/workspaces/food/lib/visitAggregates.js`** — Pure aggregation over a place's loaded visits: averages, visit count, first/last date, deduped "order again" entries
+  - _exports_: `computeVisitAggregates`, `orderAgainEntries`
 - **`src/workspaces/notes/components/IntegrityBanner.jsx`** — the bar for the two findings nothing could previously mention: one note living in two projects, and a note that had lost its place (already recovered by the time it renders, and named / openable / re-filable inline). Its own lazy chunk — it renders only when something is wrong.
   - _exports_: `default (IntegrityBanner)`
 - **`src/workspaces/notes/components/NoteEditor.jsx`** — One note page (title · toolbar · document) and the module's ONLY editor-engine import — the lazy boundary. Snapshots the document as plain JSON at edit time so the flush never queries a torn-down instance.
