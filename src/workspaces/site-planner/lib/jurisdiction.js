@@ -1021,6 +1021,31 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
       out.city = uniq([...out.city, ...(out.cityAll || []), ...out.citySome]);
       // NEW-2 — say which instrument answered. "points" may never state a share (see the badge).
       out.cityShareMethod = "points";
+    } else if ((role === "county" || role === "etj") && shareRings.length) {
+      /* ⛔ B689904 — A TINY EDGE CLIP IS NOT A GOVERNING PEER, and county/ETJ never had the AREA-SHARE
+       * screen B793 already gives city limits. The name-union query above (line 880) treats ANY
+       * intersection as full membership, so a hand-drawn boundary that pokes a sliver into a
+       * neighboring county gets joined with " + " as a co-equal peer — the owner's Woods Road site
+       * (a locked, hand-traced 89.47-ac boundary) measures 99.56% Fort Bend / 0.44% Waller, and the
+       * old union query reported both as if each governed the whole tract. Reuse the SAME area-share
+       * engine and the SAME CITY_SHARE_MIN floor (0.5%) B793 already proved for the identical shape.
+       * A source that cannot be measured (no geometry returned, an outage) leaves the union-query
+       * `names` from above untouched — exactly the city fallback's own contract. */
+      const areaParts = await Promise.all(srcs.map((s) =>
+        identifyCityShares(s, shareRings, [lng, lat], { ...opts, parcelIds: opts.parcelIds })));
+      const merged = mergeCityAreas(areaParts);
+      if (merged && areaParts.some(Boolean)) {
+        const stated = merged.rows.filter((r) => r.share != null);
+        const governing = uniq(stated.filter((r) => r.share >= CITY_SHARE_MIN).map((r) => r.name));
+        // A clip below the floor is real (it touched) but never a governing peer — named on its own
+        // field so a consumer (the badge's non-governing tail) can say so rather than drop it silent.
+        const edge = uniq(stated.filter((r) => r.share < CITY_SHARE_MIN && r.rawShare > 0).map((r) => r.name));
+        if (governing.length || edge.length) {
+          out[role] = governing;
+          out[role + "Edge"] = edge;
+          out[role + "ShareMethod"] = "area";
+        }
+      }
     }
   }));
   /* ⛔ B209506 — ONE DEFINITION OF "WHAT CITY IS THIS IN", AND IT IS CONTAINMENT.

@@ -14254,7 +14254,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       .filter((p) => p.active !== false && (p.points?.length || 0) >= 3)
       .map((p) => p.points.map((pt) => { const [lat, lng] = feetToLatLng(pt, origin.lat, origin.lon); return [lng, lat]; }));
   }, [parcels, origin]);
-  const jurBadgeSig = jurActiveRings.length ? ringsSignature(jurActiveRings) : "";
+  /* ⛔ B689905 — A SITE WITH NO PARCEL/BOUNDARY DRAWN STILL RESOLVES, AT THE ORIGIN POINT.
+   * The badge used to stay null (no lookup at all) whenever `jurActiveRings` was empty, which
+   * silently drops the one thing a developer opens a brand-new site to find out. A bare POINT
+   * identify (below) structurally cannot straddle a boundary — no ring is ever sent, so a county or
+   * ETJ genuinely touching the exact coordinate is the only way more than one could appear, and
+   * real administrative boundaries don't overlap at a point. */
+  const jurBadgeSig = jurActiveRings.length ? ringsSignature(jurActiveRings)
+    : origin ? `origin_${origin.lat.toFixed(5)}_${origin.lon.toFixed(5)}` : "";
   /* B209508 — `buildDrainFacts` (defined ABOVE) reads `jurBadge` for the floodplain administrator's
    * unresolved-role signal. That is a CLOSURE, not a hoist: this stays a component-level hook here
    * beside its own effect, and `drainFacts()` is not called until well after this line has run, so
@@ -14269,17 +14276,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const cached = jurBadgeCache.current.get(jurBadgeSig);
     if (cached) { setJurBadge(cached); return; }
     let cancelled = false;
-    const rep = representativeRing(jurActiveRings);
-    if (!rep) { setJurBadge(null); return; }
-    const c = ringCentroid(rep);
+    // B689905 — a parcel/boundary present resolves against that whole geometry (a real straddle is
+    // a true statement about the tract); with NONE drawn, fall back to the site's own origin point.
+    const hasParcel = jurActiveRings.length > 0;
+    const rep = hasParcel ? representativeRing(jurActiveRings) : null;
+    if (hasParcel && !rep) { setJurBadge(null); return; }
+    if (!hasParcel && !origin) { setJurBadge(null); return; }
+    const c = hasParcel ? ringCentroid(rep) : { lng: origin.lon, lat: origin.lat };
     // Owner decision (2026-07-17): the passive header badge drops the school district (ISD) —
     // it's an industrial-development screen and the ISD (a taxing/attendance boundary) just
     // clutters the one-line summary. So the badge identify skips the `isd` role entirely (one
     // fewer GIS query, and formatJurisdictionBadge then has no ISD to append). The opt-in
     // "⚖︎ Jurisdiction & road authority" detail panel (checkJurisdiction) still shows it.
     /* NEW-1 — hand the identify EVERY active parcel ring, not just the biggest one. Containment is
-     * a whole-site question and `rep` is one lot; see `parcelProbePoints` in `jurisdiction.js`. */
-    identifyJurisdiction(c.lng, c.lat, { ring: rep, rings: jurActiveRings, roles: ["county", "city", "etj"] })
+     * a whole-site question and `rep` is one lot; see `parcelProbePoints` in `jurisdiction.js`.
+     * B689905 — with no parcel, no ring is sent at all: a bare point identify. */
+    const identifyOpts = hasParcel
+      ? { ring: rep, rings: jurActiveRings, roles: ["county", "city", "etj"] }
+      : { roles: ["county", "city", "etj"] };
+    identifyJurisdiction(c.lng, c.lat, identifyOpts)
       .then((j) => {
         const b = formatJurisdictionBadge(j);
         if (!b) return; // failed / empty identify → no badge (display-only screening info)
@@ -14289,7 +14304,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const etjNote = (j.etj || []).length
           ? `ETJ boundaries: ${layerVintage("jur_etj") || "vintage unknown"}. ETJs shrink as landowners opt out (SB 2038) — screening only, verify before relying on an ETJ answer.`
           : null;
-        const badge = { ...b, ageMs: j.ages?.county ?? j.ages?.city ?? j.ages?.etj ?? null, sourceName: "TxDOT / TxGIO / H-GAC", etjNote };
+        // B689905 — carried through so the tooltip never claims a parcel that isn't there.
+        const badge = { ...b, ageMs: j.ages?.county ?? j.ages?.city ?? j.ages?.etj ?? null, sourceName: "TxDOT / TxGIO / H-GAC", etjNote, parcelBased: hasParcel };
         /* NEW-2 — CACHE ONLY A RESOLVED ANSWER. This cache is keyed on parcel geometry and lives for
          * the session, so caching a badge whose ETJ lookup failed pinned that site to "couldn't
          * check" until a reload, on a source measured flaky at exactly this. An unresolved badge is
@@ -14321,7 +14337,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return () => { cancelled = true; };
   }, [jurBadgeSig]);
   /* NEW-2 — the LOADING window is a first-class state too. `jurBadge` is null both before the first
-   * lookup returns and when there is no parcel to ask about; only the first is "pending". */
+   * lookup returns and when there's no origin to ask about at all (an unplaced site); B689905 made
+   * the "no parcel drawn" case a real lookup (at the origin point) rather than silence, so it too is
+   * "pending" while in flight — `jurBadgeSig` is only ever falsy when there is truly nothing to ask. */
   const jurPending = !!jurBadgeSig && !jurBadge;
   // A click in identify mode ADDS the lot under the cursor straight to the plan (no
   // preview-then-confirm) — click more lots to add more; re-click a lot you just added

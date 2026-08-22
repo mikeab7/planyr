@@ -118,7 +118,11 @@ export default function JurisdictionBadge({ badge }) {
   const title = [
     // NEW-2 — the FULL line leads the tooltip, so a shortened pill is one hover from complete.
     text,
-    "Jurisdiction of the active parcel: screening only; verify with the jurisdiction.",
+    // ⛔ B689905 — never claim a parcel that isn't drawn. `parcelBased` is set by SitePlanner's
+    // badge effect; a legacy/fixture badge with no such field renders the original sentence.
+    badge.parcelBased === false
+      ? "Jurisdiction at the site location: no parcel or boundary is drawn, so this is the point only — screening only; verify with the jurisdiction."
+      : "Jurisdiction of the active parcel: screening only; verify with the jurisdiction.",
     badge.sourceName ? `Source: ${badge.sourceName}` : "",
     age ? `As of ${age}` : "",
     /* ⛔ NEW-1 — WHY "UNINCORPORATED" IS NOT PRINTED BESIDE AN ETJ, said once, where the reader is.
@@ -138,6 +142,13 @@ export default function JurisdictionBadge({ badge }) {
     badge.touchesCities?.length ? `"Containment unchecked": ${badge.touchesCities.map((c) => `City of ${c}`).join(", ")} borders the site, but the containment check did not complete — we cannot yet say whether the site is inside it.` : "",
     badge.failureNote || "",
     badge.etjNote || "",
+    /* ⛔ B689904 — two ETJs named together are an APPORTIONMENT, never a place both fully govern.
+     * Local Gov't Code ch. 42 apportions an ETJ overlap between the two cities along a line; a point
+     * on this tract is in at most one of them. Said once, here, rather than left to the "crosses"
+     * wording to carry on its own. */
+    (badge.etjLabels?.length || 0) > 1
+      ? `"Crosses": this boundary touches more than one city's ETJ. Texas apportions an ETJ overlap between the cities along a line — each governs only its own side, never both at once. Confirm which side with each city.`
+      : "",
     badge.straddle ? "⚑ Straddles a boundary: touches multiple jurisdictions." : "",
   ].filter(Boolean).join("\n");
   return (
