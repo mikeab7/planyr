@@ -44,7 +44,7 @@ function fieldStyle() {
 const nameMatches = (name, q) => (name || "").toLowerCase().includes(q);
 
 export default function SearchBox({
-  query, onQueryChange, view, manualPins, loggedIds, bounds,
+  query, onQueryChange, view, manualPins, loggedIds, wishlistIds, bounds,
   searchSnapshot, onSelectPlace, onSelectManualPin, onFlyTo,
   onRequestLiveSearch, overpassPlaces, onStartDropPinFor,
 }) {
@@ -93,7 +93,7 @@ export default function SearchBox({
   const manualMatches = view === "map" && trimmed.length >= MIN_QUERY_LEN
     ? (manualPins || []).filter((p) => nameMatches(p.name, q)).map((p) => ({ ...p, kind: "manual", mine: true }))
     : [];
-  const snapshotRanked = snapshotResults.map((p) => ({ ...p, kind: "place", mine: loggedIds?.has(p.id) }));
+  const snapshotRanked = snapshotResults.map((p) => ({ ...p, kind: "place", mine: loggedIds?.has(p.id), wishlisted: wishlistIds?.has(p.id) }));
   const results = [
     ...manualMatches,
     ...snapshotRanked.filter((p) => p.mine),
@@ -180,6 +180,18 @@ export default function SearchBox({
                   color: "var(--on-accent-food)", background: "var(--accent-food)", borderRadius: 999, padding: "2px 6px",
                 }}>
                   Been here
+                </span>
+              )}
+              {/* Want to try (B669312) — a place that's flagged AND visited reads as visited
+                  (p.mine wins, same rule the map pins follow), so this only ever shows on its own.
+                  Outlined, not filled, echoing the hollow map-pin treatment for the same flag. */}
+              {!p.mine && p.wishlisted && (
+                <span style={{
+                  flex: "0 0 auto", fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em",
+                  color: "var(--accent-food)", background: "transparent", border: "1px solid var(--accent-food)",
+                  borderRadius: 999, padding: "1px 6px",
+                }}>
+                  Want to try
                 </span>
               )}
             </button>
