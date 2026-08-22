@@ -886,7 +886,10 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     // blanket setInterval redraw").
     expect(flyEffect.indexOf("map.once(")).toBeGreaterThanOrEqual(0);
     expect(flyEffect.indexOf("map.once(")).toBeLessThan(flyEffect.indexOf("map.flyTo(shiftedLatLng, targetZoom)"));
-    expect(map).not.toMatch(/setInterval/);
+    // A CALL is what the house rule bans — not the word itself, which the B651872 (×2) recurrence's
+    // own explanatory comment (of a DIFFERENT setInterval-shaped fix it deliberately avoided)
+    // legitimately needs to name in prose.
+    expect(map).not.toMatch(/\bsetInterval\(/);
   });
 
   it("the live-Overpass path is REUSED, not duplicated — offered inline only when the snapshot has few/no good matches", () => {
@@ -1050,7 +1053,8 @@ describe("selected-place highlight — unmistakable pin, tied panel, centred pan
     expect(map).toMatch(/const SELECTED_ACCENT = "#BE3B22";/); // literal — canvas context, see COLORS' own comment
     expect(map).toMatch(/radius: baseRadius \+ 12, weight: 0,/); // the halo, non-interactive
     expect(map).toMatch(/fillColor: SELECTED_ACCENT, fillOpacity: 0\.22, interactive: false,/);
-    expect(map).toMatch(/radius: isSelected \? baseRadius \+ 5 : baseRadius,/); // noticeably larger
+    expect(map).toMatch(/const drawnRadius = isSelected \? baseRadius \+ 5 : baseRadius;/); // noticeably larger
+    expect(map).toMatch(/radius: drawnRadius,/);
     expect(map).toMatch(/color: isSelected \? SELECTED_ACCENT : "#fff",/); // accent ring, not the usual white
   });
 
@@ -1188,5 +1192,134 @@ describe("'What was good' — a liked-dishes shortlist, separate from 'What I ha
     const list = src("components/VisitList.jsx");
     expect(list).toContain('<th style={{ padding: "4px 8px", fontWeight: 700 }}>What was good</th>');
     expect(list).toMatch(/\{v\.what_was_good \|\| "—"\}/);
+  });
+});
+
+describe("B651872 (×2) — RECURRENCE: tile fade-in disabled, not patched around", () => {
+  it("the map is constructed with fadeAnimation:false — never a setTimeout/setInterval forcing opacity", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/L\.map\(hostRef\.current, \{ center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM, zoomControl: true, fadeAnimation: false \}\)/);
+    expect(map).not.toMatch(/\bsetTimeout\(/);
+    expect(map).not.toMatch(/\bsetInterval\(/);
+    expect(map).not.toMatch(/\.style\.opacity\s*=/); // never hand-forcing a tile's opacity
+  });
+});
+
+describe("B668193 — canvas pins get a wider, nearest-centre tap target on a coarse (touch) pointer only", () => {
+  it("desktop (fine pointer) is byte-identical: still a plain per-marker click listener, no touch-only branch taken", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/if \(coarsePointer\) pinIndexRef\.current\.push\(\{ lat, lon, radius: drawnRadius, onClick \}\);/);
+    expect(map).toMatch(/else m\.on\("click", onClick\);/);
+  });
+
+  it("pointer type is read reactively via matchMedia('(pointer: coarse)') — not a one-shot check, not a viewport-width guess", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/function useCoarsePointer\(\) \{/);
+    expect(map).toMatch(/window\.matchMedia\("\(pointer: coarse\)"\)/);
+    expect(map).toMatch(/mq\.addEventListener\("change", on\)/);
+  });
+
+  it("the resolver picks the NEAREST candidate within tolerance, not the topmost/last-drawn one Leaflet's own canvas hit-test would pick", () => {
+    const map = src("components/FoodMap.jsx");
+    const resolver = map.slice(map.indexOf("coarse-pointer nearest-centre tap resolver"), map.indexOf("const showCappedNotice"));
+    expect(resolver).toMatch(/let best = null, bestDist = Infinity;/);
+    expect(resolver).toMatch(/if \(dist <= limit && dist < bestDist\) \{ bestDist = dist; best = cand; \}/);
+    // Never picks the last match unconditionally (that would be the draw-order-wins bug this
+    // item exists to avoid) — the comparison against bestDist is what makes it "nearest."
+    expect(resolver).not.toMatch(/best = cand;\s*\n\s*\}\s*\n\s*best\?\.onClick/);
+  });
+
+  it("the tap-target floor only widens the HIT AREA, never the drawn radius — visual density is untouched", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/const TOUCH_MIN_TAP_RADIUS = 22;/);
+    expect(map).toMatch(/const limit = Math\.max\(cand\.radius, TOUCH_MIN_TAP_RADIUS\);/);
+    // The drawn circleMarker's own `radius:` option is computed identically to before this item
+    // (still just `drawnRadius`) — TOUCH_MIN_TAP_RADIUS never feeds into what's actually painted.
+    expect(map).not.toMatch(/radius: .*TOUCH_MIN_TAP_RADIUS/);
+  });
+
+  it("the resolver stands down while pinMode is active, so tapping an existing pin can't also drop a new manual pin at that spot", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/if \(!map \|\| !coarsePointer \|\| pinMode\) return undefined;/);
+  });
+});
+
+describe("B668194 — a successful visit save clears the form; a failed one keeps what was typed", () => {
+  it("FoodApp's submitVisit returns a boolean — true only after a confirmed write + reload, false on every early-return/failure path", () => {
+    const app = src("FoodApp.jsx");
+    const submitVisitFn = app.slice(app.indexOf("const submitVisit = useCallback"), app.indexOf("const removeVisit = useCallback"));
+    expect(submitVisitFn).toMatch(/if \(!selected\) return false;/);
+    expect(submitVisitFn).toMatch(/setError\("Give this place a name first\."\);\s*\n\s*return false;/);
+    expect(submitVisitFn).toMatch(/if \(err\) \{ setError\(err\.message \|\| "Couldn't save that visit\."\); return false; \}/);
+    expect(submitVisitFn).toMatch(/await reloadVisits\(\);[\s\S]{0,220}return true;/);
+  });
+
+  it("VisitForm awaits the result and resets every field ONLY on success — a failed save leaves everything typed", () => {
+    const panel = src("components/VisitPanel.jsx");
+    expect(panel).toMatch(/const submit = async \(e\) => \{/);
+    expect(panel).toMatch(/const saved = await onSubmit\(\{/);
+    expect(panel).toMatch(/if \(saved\) \{/);
+    const resetBlock = panel.slice(panel.indexOf("if (saved) {"), panel.indexOf("if (saved) {") + 400);
+    expect(resetBlock).toMatch(/setRating\(null\);/);
+    expect(resetBlock).toMatch(/setRatingAmbiance\(null\);/);
+    expect(resetBlock).toMatch(/setCost\(""\);/);
+    expect(resetBlock).toMatch(/setVisitedOn\(""\);/);
+    expect(resetBlock).toMatch(/setWhatIHad\(""\);/);
+    expect(resetBlock).toMatch(/setWhatWasGood\(""\);/);
+    expect(resetBlock).toMatch(/setNotes\(""\);/);
+    expect(resetBlock).toMatch(/setWouldReturn\(null\);/);
+  });
+
+  it("nothing resets outside the success branch — a failed save's reset block is not reachable unconditionally", () => {
+    const panel = src("components/VisitPanel.jsx");
+    // The reset calls appear exactly once each, all inside the `if (saved)` block (checked above)
+    // — not duplicated at the top of submit() where they'd run before the save even resolves.
+    for (const setter of ["setRating(null)", "setCost(\"\")", "setWhatIHad(\"\")"]) {
+      const count = panel.split(setter).length - 1;
+      expect(count).toBe(1);
+    }
+  });
+});
+
+describe("B668195 — no emoji glyphs in the food map view controls (plain text labels)", () => {
+  // The exact four glyphs this item names — not a broad unicode-block sweep, which would also
+  // flag this repo's own "⛔" comment-convention marker (Miscellaneous Symbols, the same block
+  // range a naive emoji regex would need to sweep) as a false positive.
+  const TARGET_EMOJI = ["📍", "🔍", "🗺", "🛰"];
+
+  it("FoodMap.jsx: no emoji in the search-here button, or the street/satellite basemap toggle", () => {
+    const map = src("components/FoodMap.jsx");
+    for (const glyph of TARGET_EMOJI) expect(map).not.toContain(glyph);
+    expect(map).toContain("Search live for more here");
+    expect(map).toMatch(/\{basemap === "satellite" \? "Street" : "Satellite"\}/);
+  });
+
+  it("FoodApp.jsx: no emoji on the Drop a pin toolbar button", () => {
+    const app = src("FoodApp.jsx");
+    for (const glyph of TARGET_EMOJI) expect(app).not.toContain(glyph);
+    expect(app).toMatch(/\{pinMode \? "Click the map…" : "Drop a pin"\}/);
+  });
+
+  it("SearchBox.jsx: no emoji on the live-search or drop-a-pin fallback rows in the dropdown", () => {
+    const box = src("components/SearchBox.jsx");
+    for (const glyph of TARGET_EMOJI) expect(box).not.toContain(glyph);
+    expect(box).toContain('Search live for "{trimmed}" nearby');
+    expect(box).toContain('Drop a pin for "{trimmed}" — not in any dataset');
+  });
+
+  it("the ✕ close glyph is explicitly out of scope and stays", () => {
+    const panel = src("components/VisitPanel.jsx");
+    expect(panel).toContain("✕");
+    // Still the Close button specifically, not the glyph having moved somewhere unrelated.
+    const closeBtn = panel.slice(panel.indexOf('aria-label="Close"'), panel.indexOf('aria-label="Close"') + 200);
+    expect(closeBtn).toContain("✕");
+  });
+
+  it("button padding was widened where an emoji was removed, so tap targets don't shrink", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/padding: "7px 20px"/); // search-here (was 7px 16px)
+    expect(map).toMatch(/padding: "7px 18px"/); // basemap toggle (was 7px 14px)
+    const app = src("FoodApp.jsx");
+    expect(app).toMatch(/padding: "6px 14px"/); // drop-a-pin toolbar button (was 6px 12px)
   });
 });

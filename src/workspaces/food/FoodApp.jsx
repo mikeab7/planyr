@@ -129,8 +129,11 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     setFlyToTarget({ lat, lon, nonce: flyNonceRef.current });
   }, []);
 
+  // B668194 — returns whether the save actually succeeded, so VisitForm can clear its own
+  // fields ONLY on a confirmed write (see VisitPanel.jsx's header comment) rather than leaving
+  // stale text sitting in the boxes, or clearing it before a failed save is even known about.
   const submitVisit = useCallback(async (fields) => {
-    if (!selected) return;
+    if (!selected) return false;
     setPending(true); setError(null);
     const payload = selected.kind === "place"
       ? { place_id: selected.place.id, ...fields }
@@ -140,13 +143,14 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     if (selected.kind === "newPin" && !manualDraftName.trim()) {
       setPending(false);
       setError("Give this place a name first.");
-      return;
+      return false;
     }
     const { error: err } = await insertVisit(payload);
     setPending(false);
-    if (err) { setError(err.message || "Couldn't save that visit."); return; }
+    if (err) { setError(err.message || "Couldn't save that visit."); return false; }
     await reloadVisits();
     if (selected.kind === "newPin") setSelected(null); // the pin now exists as a manual pin; close and let it re-render from data
+    return true;
   }, [selected, manualDraftName, reloadVisits]);
 
   const removeVisit = useCallback(async (id) => {
@@ -216,13 +220,13 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
                 type="button" onClick={togglePinMode} aria-pressed={pinMode}
                 title="Drop a pin for a place not on the map"
                 style={{
-                  border: "1px solid var(--border-default)", borderRadius: 8, padding: "6px 12px", cursor: "pointer",
+                  border: "1px solid var(--border-default)", borderRadius: 8, padding: "6px 14px", cursor: "pointer",
                   font: "inherit", fontSize: 12.5, fontWeight: 700,
                   background: pinMode ? "var(--accent-food)" : "transparent",
                   color: pinMode ? "var(--on-accent-food)" : "var(--text-primary)",
                 }}
               >
-                📍 {pinMode ? "Click the map…" : "Drop a pin"}
+                {pinMode ? "Click the map…" : "Drop a pin"}
               </button>
             )}
             <SearchBox

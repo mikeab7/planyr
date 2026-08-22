@@ -194,7 +194,7 @@ export default function SearchBox({
                 fontWeight: 700, color: "var(--accent-food)",
               }}
             >
-              🔍 Search live for "{trimmed}" nearby
+              Search live for "{trimmed}" nearby
             </button>
           )}
           {!loading && liveState === "pending" && (
@@ -214,7 +214,7 @@ export default function SearchBox({
                   fontWeight: 700, color: "var(--text-primary)", background: "transparent",
                 }}
               >
-                📍 Drop a pin for "{trimmed}" — not in any dataset
+                Drop a pin for "{trimmed}" — not in any dataset
               </button>
             </div>
           )}

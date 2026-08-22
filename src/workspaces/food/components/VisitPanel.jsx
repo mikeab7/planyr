@@ -31,6 +31,17 @@
  * below is the second half — it calls the same `onClose` the ✕ button does, so both routes clear
  * `selected` in FoodApp identically (no separate "escape state" to keep in sync).
  *
+ * ⛔ B668194 — CLEAR THE FORM ON A CONFIRMED SAVE, NEVER BEFORE (owner report: after logging a
+ * visit, the fields still held what was just submitted, reading as though the save hadn't taken
+ * — and the NEXT visit started pre-filled with the previous one's text, a live trap for logging
+ * two visits back to back). `onSubmit` (FoodApp's `submitVisit`) now RETURNS a boolean — `true`
+ * only once the write actually succeeded and the visit list has been reloaded, `false` on any
+ * early-return or a failed write. `VisitForm.submit` awaits that result and resets every field
+ * (both rating sliders back to "Not rated", the date back to empty, every text field back to
+ * blank) ONLY on `true` — a failed save leaves exactly what was typed so nothing is lost, and the
+ * existing error banner above already surfaces the failure. The form stays OPEN (not collapsed
+ * back to "+ Log another visit") after a successful save, ready for the next entry in the row.
+ *
  * ⛔ "WHAT WAS GOOD" — liked dishes, ACCUMULATED across every visit (B634979, owner chat block, 2026-08-19:
  * "add a place where I can log the food that I liked... deliberately SEPARATE from 'What I had'
  * — 'What I had' is the record of the meal; this is the shortlist of what was actually GOOD").
@@ -113,9 +124,9 @@ function VisitForm({ onSubmit, onCancel, pending }) {
   const [notes, setNotes] = useState("");
   const [wouldReturn, setWouldReturn] = useState(null);
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
-    onSubmit({
+    const saved = await onSubmit({
       rating,
       rating_ambiance: ratingAmbiance,
       cost: cost === "" ? null : Number(cost),
@@ -125,6 +136,18 @@ function VisitForm({ onSubmit, onCancel, pending }) {
       notes: notes || null,
       would_return: wouldReturn,
     });
+    // Only on a CONFIRMED save (see header comment) — a failed write leaves everything typed
+    // so nothing is lost, and the panel's own error banner already says why.
+    if (saved) {
+      setRating(null);
+      setRatingAmbiance(null);
+      setCost("");
+      setVisitedOn("");
+      setWhatIHad("");
+      setWhatWasGood("");
+      setNotes("");
+      setWouldReturn(null);
+    }
   };
 
   return (
