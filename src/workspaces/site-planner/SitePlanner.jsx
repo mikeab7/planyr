@@ -271,6 +271,7 @@ import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand } from "./lib/overlayOrder.js";
+import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerialVisibility.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, dockAxisOf, healDockAxes, withDockAxis, rotateDockAxisPatch } from "./lib/dockZones.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/buildingGrid.js";
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent, clipSegmentToRing } from "./lib/footprintEdit.js";
@@ -2352,7 +2353,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   // aerial underlay + scale calibration
   const [underlay, setUnderlay] = useState(() => restored?.underlay || null);    // {src,imgW,imgH,x,y,ftPerPx,opacity,locked}
-  const [showAerial, setShowAerial] = useState(true);   // aerial underlay shows whenever one exists
+  // B688864 — persisted via `settings.aerialHidden` (sparse; absent = shown), NOT a plain
+  // component state, so Hide/Remove survive a reload instead of resetting to shown every mount.
+  // See lib/aerialVisibility.js for why this also has to gate the LIVE basemap tile layer, not
+  // just this static image: on a georeferenced plan the live tiles are what's actually on screen.
+  const showAerial = isAerialVisible(settings);
+  const setShowAerial = useCallback((next) => {
+    setSettings((s) => withAerialVisible(s, typeof next === "function" ? next(isAerialVisible(s)) : next));
+  }, []);
   const [underlayErr, setUnderlayErr] = useState(false);
   const [underlayLost, setUnderlayLost] = useState(false); // B474 review (#16) — saved aerial couldn't be recovered from idb OR cloud → honest re-drop prompt (not a silent blank)
   const [underlayLoading, setUnderlayLoading] = useState(() => {
@@ -2894,7 +2902,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useEffect(() => {
     const map = geoMapRef.current;
     if (!map) return;
-    const want = basemapOn ? basemapSrc : null;
+    // B688864 — must also stand down when the References panel has hidden the aerial
+    // (`showAerial`), or Hide/Remove there do nothing on every georeferenced plan: the live
+    // tiles are what's actually on screen and used to ignore this entirely.
+    const want = wantBasemapSrc(basemapOn, showAerial, basemapSrc);
     // Tear down when turned off OR when the source changed (a switch rebuilds below).
     // Checking BOTH refs fixes the old leak: a fast off-toggle inside the ~600ms
     // backfill→detail window used to key on the detail ref alone and strand the
@@ -3001,7 +3012,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Deliberately NOT dependent on the view or the tile-budget values it reads: those are
     // BUILD-TIME choices (see the retina note above). Re-running this effect on every zoom
     // would rebuild the tile layer and refetch the whole aerial mid-gesture.
-  }, [basemapSrc, basemapOn, origin]);
+  }, [basemapSrc, basemapOn, origin, showAerial]);
 
   /* Re-sync the basemap size when the planner is (re-)shown (keep-alive show/hide) or the origin
      first lands. A resize WHILE the planner is shown (a docked panel opening/closing shrinks the
@@ -8514,6 +8525,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // so a failed/slow stash can never delete the underlay's only on-device copy.
       const idbKey = siteId ? `raster:${siteId}:underlay` : undefined;
       setUnderlay({ src, imgW: w, imgH: h, x: 0, y: 0, ftPerPx: 600 / w, opacity: 1, locked: true });
+      setShowAerial(true); // B688864 — a newly loaded aerial must not stay suppressed by an earlier Hide/Remove
       setUnderlayErr(false);
       setUnderlayLost(false);
       setUnderlayLoading(true);
@@ -18221,6 +18233,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               ) : (
                 <div style={{ border: `1px solid ${aerialSel ? PAL.accent : "var(--border-default)"}`, borderRadius: 9, padding: 9, background: SURF_RAISED }}>
                   <button style={{ ...chip, width: "100%", textAlign: "left", borderColor: aerialSel ? PAL.accent : "var(--border-default)", color: aerialSel ? PAL.accent : PAL.ink }} title="Aerial backdrop — image-only, always beneath everything" onClick={() => setAerialSel((v) => !v)}>Aerial backdrop</button>
+                  {/* B688864 — Hide and Remove now stand down the LIVE basemap tiles too (via
+                      `showAerial`/`wantBasemapSrc`), not just this static image: on a georeferenced
+                      plan the live tiles are what's actually on screen, so either control used to
+                      leave the identical-looking aerial in place. Both are persisted, so they stick
+                      across a reload. */}
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
                     <button style={{ ...iconBtn, color: showAerial ? PAL.ink : PAL.muted }} title={showAerial ? "Hide aerial" : "Show aerial"} onClick={() => setShowAerial((v) => !v)}>{showAerial ? <EyeIcon /> : <EyeOffIcon />}</button>
                     <button style={iconBtn} title={underlay.locked ? "Unlock (drag to reposition)" : "Lock (click-through)"} onClick={() => { pushHistory(); setUnderlay((u) => (u ? { ...u, locked: !u.locked } : u)); }}>{underlay.locked ? <LockIcon /> : <UnlockIcon />}</button>
@@ -18239,7 +18256,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <button style={{ ...chip, flex: 1 }} title="Zoom the canvas to fit everything" onClick={requestFit}>Fit view</button>
                       </div>
                       <div style={{ fontSize: 11, color: PAL.muted }}>Scale: <b style={{ color: PAL.ink }}>{f2(1 / underlay.ftPerPx)}</b> px/ft · image ≈ {f0(underlay.imgW * underlay.ftPerPx)}′ wide{underlay.fromMap ? " · georeferenced from the map" : ""}</div>
-                      {origin && basemapOn && <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45 }}>Hidden while the live map basemap is on — the basemap IS the aerial there.</div>}
+                      {origin && basemapOn && showAerial && <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45 }}>Hidden while the live map basemap is on — the basemap IS the aerial there.</div>}
                     </div>
                   )}
                   {underlayErr && <div style={{ fontSize: 11, color: PAL.accent, marginTop: 6, lineHeight: 1.45 }}>Aerial image didn't load from the source. Your boundary and tools still work — go back to the map and re-pick the site, or drop a screenshot here instead.</div>}
@@ -20382,8 +20399,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               reveal shows real imagery, and anything beyond it shows the static
               dark backdrop — never the cream page behind the canvas. */}
           {origin && (
-            <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, overflow: "hidden", pointerEvents: "none", background: basemapOn ? "#3f3f3f" : PAL.paper }}>
-              <div ref={geoWrapRef} style={{ position: "absolute", inset: -geoOverscan, background: basemapOn ? "#3f3f3f" : PAL.paper }} />
+            <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, overflow: "hidden", pointerEvents: "none", background: (basemapOn && showAerial) ? "#3f3f3f" : PAL.paper }}>
+              <div ref={geoWrapRef} style={{ position: "absolute", inset: -geoOverscan, background: (basemapOn && showAerial) ? "#3f3f3f" : PAL.paper }} />
             </div>
           )}
           {/* NEW-1 — the MAP-TOP HOST: the stacking band that sits ABOVE the plan. It holds the
@@ -20563,7 +20580,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               ))}
             </defs>
 
-            {!(origin && basemapOn) && <g data-export="skip">{gridLines()}</g>}
+            {!(origin && basemapOn && showAerial) && <g data-export="skip">{gridLines()}</g>}
 
             {/* Scaled feet space. NEW-2 — `transform` here is the LIVE PAN DELTA: while a pan is
                 armed the geometry below is emitted at the anchor and the gesture writes this ONE
@@ -21633,7 +21650,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     siteState={siteStateId}
                     basemap={{
                       value: origin ? basemapSrc : "off",
-                      onChange: setBasemapSrc,
+                      // B688864 — a direct pick here is an explicit, authoritative choice about
+                      // what's visible, so it stands down any earlier "Hide aerial" from the
+                      // References panel rather than leaving a picked source silently suppressed.
+                      onChange: (v) => { setBasemapSrc(v); setShowAerial(true); },
                       status: basemapStatus,
                       // Disabled with the reason while unlocated; the control re-enables
                       // the moment a placement lands (a placement reloads the plan with
