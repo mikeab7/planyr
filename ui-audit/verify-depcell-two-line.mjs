@@ -20,14 +20,19 @@
  *   4. Whenever items are hidden (2-link cell below threshold, or a 3rd link at any height), a
  *      "+N" indicator is visible — nothing is ever silently dropped.
  *
- * Each assertion is mutation-proven against the REAL source (string-patching the served HTML,
- * never a hand-written paraphrase): reverting the vertical padding back to "2px 8px" reproduces
- * defect A's clip, and forcing DEPCELL_TWO_LINE_MIN_H to Infinity reproduces defect B's stuck
- * single line — confirming this check would have failed on the pre-fix code.
+ * ALL FOUR assertion classes are mutation-proven against the REAL source (string-patching the
+ * served HTML, never a hand-written paraphrase) — Pass 2/3 were built with the original fix;
+ * Pass 4/5 were added during the B655552 close-out audit, when it was pointed out that assertion 4
+ * (the "+N" indicator) and half of assertion 3 (the below-threshold slot count) had only ever been
+ * run against the real source — nothing had proven they could catch a regression:
+ *   Pass 2 — revert the vertical padding to "2px 8px"            → catches defect A's clip
+ *   Pass 3 — force DEPCELL_TWO_LINE_MIN_H to Infinity             → catches defect B's stuck line
+ *   Pass 4 — hardcode the "+N" badge to slot index 1 (never 0)    → catches a silent drop below threshold
+ *   Pass 5 — hardcode visibleCount to always 2                    → catches a 2-slot cell re-clipping below threshold
  *
  * Run: node ui-audit/verify-depcell-two-line.mjs      [PW_CHROME=<chrome>]
- * Exit 0 = every assertion holds on the real source AND both mutations are caught. Exit 1 = a real
- * regression, or a mutation that slipped through undetected (a check nobody has seen fail).
+ * Exit 0 = every assertion holds on the real source AND all four mutations are caught. Exit 1 = a
+ * real regression, or a mutation that slipped through undetected (a check nobody has seen fail).
  *
  * NOT wired into CI (same standing gap as every other `ui-audit/verify-*.mjs` harness — B613760 —
  * this file exists and is runnable, but nothing invokes it automatically). `test/depcellTwoLine.test.js`
@@ -270,6 +275,48 @@ if (thresholdCaught) {
 } else {
   exitCode = 1;
   line(`FAIL — the threshold mutation did not reproduce the expected stuck single line (oneLink@34 = ${JSON.stringify(oneLinkAt34)}). This check would not have caught defect B.`);
+}
+
+/* Passes 4 and 5 below were added during the B655552 close-out audit: Pass 1's `hasPlusIndicator`
+ * and `slotCount` assertions had never been mutation-tested — they were run only against the real
+ * source, so nothing had ever proven they could catch a regression (the AUDIT-FIRST distinction
+ * between "asserts a property" and "proven to catch that property breaking"). Both are proven here. */
+line("");
+line('── Pass 4: mutation — the "+N" badge only ever renders on slot index 1 (never index 0) ──');
+const badgeMutated = await runPass("badge-mutation", html =>
+  html.replace(
+    "i === visibleCount - 1 && extra > 0",
+    "i === 1 && extra > 0"
+  ));
+// Below the threshold visibleCount is 1, so slot index 1 never exists — the badge should vanish
+// exactly where it is needed most (an item is hidden but nothing on screen says so).
+const badgeCaught = ["twoLink", "threeLink"].some(label => {
+  const m = badgeMutated["20"]?.[label];
+  return m && !m.error && !m.hasPlusIndicator;
+});
+if (badgeCaught) {
+  line("PASS — hardcoding the badge to slot index 1 reproduces a silent drop below the threshold and this check catches it.");
+} else {
+  exitCode = 1;
+  line("FAIL — the badge-position mutation did not reproduce a caught silent drop. This check would not have caught it.");
+}
+
+line("");
+line("── Pass 5: mutation — visibleCount hardcoded to 2 (ignores canTwoLine, defect A returns via a different path) ──");
+const visibleCountMutated = await runPass("visiblecount-mutation", html =>
+  html.replace(
+    "const visibleCount = canTwoLine ? 2 : 1;",
+    "const visibleCount = 2;"
+  ));
+const showedTwoSlotsBelowThreshold = ["twoLink", "oneLink", "threeLink"].some(label => {
+  const m = visibleCountMutated["20"]?.[label];
+  return m && !m.error && m.slotCount > 1;
+});
+if (showedTwoSlotsBelowThreshold) {
+  line("PASS — forcing visibleCount to always 2 reproduces a 2-slot cell below the threshold (re-clipped, per the same geometry as defect A) and this check catches it.");
+} else {
+  exitCode = 1;
+  line("FAIL — the visibleCount mutation did not reproduce a caught below-threshold 2-slot cell. This check would not have caught it.");
 }
 
 line("");
