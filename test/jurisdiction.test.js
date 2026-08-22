@@ -832,3 +832,108 @@ describe("B209509 — place names compare case-insensitively", () => {
     expect(samePlace("", "")).toBe(false); // an empty name is not "the same place" as another empty
   });
 });
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+ * B689904/B689905 — WOODS ROAD: a hand-drawn, LOCKED boundary (`e1454614maruai`, real production
+ * geometry, group smsrpaiqu5sv) measures 99.56% Fort Bend County / 0.44% Waller — a sliver, not a
+ * straddle — and 5.2%/5.8% Fulshear/Simonton ETJ, which ARE real corners (Ch. 42 apportionment).
+ * The site has NO county-sourced parcel record (`gisKey: null`); it is a locked shape the owner
+ * traced, and the badge used to join the sliver county as a co-equal "+" peer exactly as it would a
+ * genuine 50/50 straddle. Reproduced live against the real TxDOT/H-GAC services before this fix
+ * (see the session's scratch notes) — these fixtures are the same shape, at synthetic coordinates,
+ * so the suite never depends on the network. ═══════════════════════════════════════════════════ */
+describe("B689904 — a ring-based county/ETJ identify demotes a tiny edge clip, never joins it as a peer", () => {
+  const REF = [-95.9248, 29.7484];
+  const sq = (dx, dy, w, h) => [
+    [REF[0] + dx, REF[1] + dy], [REF[0] + dx + w, REF[1] + dy],
+    [REF[0] + dx + w, REF[1] + dy + h], [REF[0] + dx, REF[1] + dy + h],
+  ];
+  // signedArea > 0 for this winding (CCW) — flip to ESRI's clockwise-outer convention, exactly the
+  // helper jurisdictionShare.test.js already uses for the same purpose.
+  const esriOuter = (ring) => ring.slice().reverse();
+  const site = sq(0, 0, 0.01, 0.01); // the owner's drawn boundary, in this fixture's local frame
+  const bigCounty = esriOuter(sq(-0.05, -0.05, 0.2, 0.2));       // fully covers the site → Fort Bend
+  const sliverCounty = esriOuter(sq(0.00997, -0.01, 0.02, 0.03)); // clips ~0.3% of the right edge → Waller
+
+  const routeCounty = () => [
+    { attributes: { CNTY_NM: "Fort Bend" }, geometry: { rings: [bigCounty] } },
+    { attributes: { CNTY_NM: "Waller" }, geometry: { rings: [sliverCounty] } },
+  ];
+
+  it("keeps the county the boundary genuinely sits in and reports the clip separately, never joined", async () => {
+    const fetchJson = fakeFetch({ [COUNTY]: routeCounty });
+    const out = await identifyJurisdiction(REF[0] + 0.005, REF[1] + 0.005, {
+      ring: site, rings: [site], roles: ["county"],
+      cache: freshCache(), fetchJson,
+    });
+    expect(out.county).toEqual(["Fort Bend"]);
+    expect(out.countyEdge).toEqual(["Waller"]);
+    expect(out.countyShareMethod).toBe("area");
+  });
+
+  it("the badge no longer straddles on a sliver, and county reads the one true governing name", async () => {
+    const fetchJson = fakeFetch({ [COUNTY]: routeCounty, [CITY]: () => [], [ETJ]: () => [] });
+    const j = await identifyJurisdiction(REF[0] + 0.005, REF[1] + 0.005, {
+      ring: site, rings: [site], roles: ["county", "city", "etj"],
+      cache: freshCache(), fetchJson,
+    });
+    const b = formatJurisdictionBadge(j);
+    expect(b.straddle).toBe(false);
+    expect(b.county).toBe("Fort Bend County");
+    expect(b.text).not.toContain("Waller");
+  });
+
+  it("a source that answers with no geometry falls back to the honest union, never a fabricated share", async () => {
+    const fetchJson = fakeFetch({ [COUNTY]: () => [{ attributes: { CNTY_NM: "Fort Bend" } }, { attributes: { CNTY_NM: "Waller" } }] });
+    const out = await identifyJurisdiction(REF[0] + 0.005, REF[1] + 0.005, {
+      ring: site, rings: [site], roles: ["county"],
+      cache: freshCache(), fetchJson,
+    });
+    // No geometry on either feature ⇒ the share pass can't measure anything ⇒ falls back untouched.
+    expect(out.county.sort()).toEqual(["Fort Bend", "Waller"]);
+    expect(out.countyShareMethod).toBeUndefined();
+  });
+
+  it("a genuine straddle (both counties hold a real share) is left alone, both governing", async () => {
+    const half = esriOuter(sq(0.005, -0.02, 0.02, 0.05)); // ~half the site, not a sliver
+    const fetchJson = fakeFetch({
+      [COUNTY]: () => [
+        { attributes: { CNTY_NM: "Fort Bend" }, geometry: { rings: [bigCounty] } },
+        { attributes: { CNTY_NM: "Waller" }, geometry: { rings: [half] } },
+      ],
+    });
+    const out = await identifyJurisdiction(REF[0] + 0.005, REF[1] + 0.005, {
+      ring: site, rings: [site], roles: ["county"],
+      cache: freshCache(), fetchJson,
+    });
+    expect(out.county.sort()).toEqual(["Fort Bend", "Waller"]);
+    expect(out.countyEdge || []).toEqual([]);
+  });
+
+  it("the same sliver screen applies to ETJ", async () => {
+    const fetchJson = fakeFetch({
+      [ETJ]: () => [
+        { attributes: { CITY: "FULSHEAR" }, geometry: { rings: [bigCounty] } },
+        { attributes: { CITY: "SIMONTON" }, geometry: { rings: [sliverCounty] } },
+      ],
+    });
+    const out = await identifyJurisdiction(REF[0] + 0.005, REF[1] + 0.005, {
+      ring: site, rings: [site], roles: ["etj"],
+      cache: freshCache(), fetchJson,
+    });
+    expect(out.etj).toEqual(["Fulshear"]);
+    expect(out.etjEdge).toEqual(["Simonton"]);
+  });
+});
+
+describe("B689904 — two real ETJ corners are an apportionment, and the label says so", () => {
+  it("formatJurisdictionBadge's ETJ lead says the tract CROSSES, never '+' as co-equal governance", () => {
+    const b = formatJurisdictionBadge({
+      city: [], cityCentroid: [], etj: ["Fulshear", "Simonton"], county: ["Fort Bend"],
+      sources: [{ id: "city", state: "empty" }, { id: "etj", state: "loaded" }, { id: "county", state: "loaded" }],
+    });
+    expect(b.jur).toContain("crosses");
+    expect(b.jur).not.toContain("ETJ + City of Simonton ETJ");
+    expect(b.text).toBe("ETJ crosses City of Fulshear + City of Simonton · Fort Bend County");
+  });
+});

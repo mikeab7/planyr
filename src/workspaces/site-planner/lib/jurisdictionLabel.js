@@ -46,6 +46,13 @@
  *   a site straddling a city limit has TWO governing answers (both joined with `·`, because both
  *   really govern), and a failed containment lookup has none and may never let a city lead.
  *
+ * ⛔ B689904 — A SECOND ETJ IS NEVER A CO-EQUAL PEER, so it does NOT use `+`'s "and, both apply"
+ * reading. Local Gov't Code ch. 42 APPORTIONS an ETJ overlap between the two cities along a line —
+ * a point on the tract is in at most one of them, never both. So `etjLeadText`/`etjSlotFor` say the
+ * tract CROSSES the two names ("ETJ crosses City of Fulshear + City of Simonton") instead of naming
+ * each "City of X ETJ" and joining with `+` as if either applied everywhere on the drawing. Caught on
+ * the owner's Woods Road boundary, which genuinely has real (measured, not sliver) corners in both.
+ *
  * Pure — no DOM, no network, no React. Unit-tested in test/jurisdictionLabel.test.js; the full
  * badge strings are pinned per shape against real recorded agency answers in
  * test/jurisdictionShapes.test.js. */
@@ -124,8 +131,20 @@ function leadFor(model, shape) {
   if (gov.length) return gov.map((c) => `City of ${c}`).join(PEER_SEP);
   // ⛔ THE ITEM ITSELF: an ETJ leads, and "Unincorporated" is NOT printed beside it. An ETJ is
   // unincorporated land by definition, so the word adds nothing and reads as a contradiction.
-  if (etj.length) return etj.map((c) => `City of ${c} ETJ`).join(PEER_SEP);
+  if (etj.length) return etjLeadText(etj);
   return "Unincorporated";
+}
+
+/* ⛔ B689904 — TWO ETJs NAMED TOGETHER ARE NEVER CO-EQUAL PEERS. A point can be in at most one
+ * city's ETJ (Local Gov't Code ch. 42 APPORTIONS an overlap between the two cities — it does not
+ * let both apply); only a drawn TRACT can genuinely touch two, one on each side of the
+ * apportionment line. `PEER_SEP` ("+") reads as "and, both apply" everywhere else it is used
+ * (two cities that both hold the whole site, two counties) — using it here said exactly that about
+ * an ETJ pair, which is the one thing that is never true. So a second name changes the VERB, not
+ * just the join: "crosses X + Y", never "X ETJ + Y ETJ". */
+function etjLeadText(etj) {
+  if (etj.length > 1) return `ETJ crosses ${etj.map((c) => `City of ${c}`).join(PEER_SEP)}`;
+  return `City of ${etj[0]} ETJ`;
 }
 
 /* The ETJ slot, which exists only when something ELSE already took the lead. When the ETJ IS the
@@ -135,7 +154,9 @@ function etjSlotFor(model, shape) {
   const etj = list(model.etjCities);
   if (shape === "etj") return null;                 // already the lead
   if (shape === "split") return null;               // the remainder label already names it
-  if (etj.length) return etj.map((c) => `${c} ETJ`).join(PEER_SEP);
+  // ⛔ B689904 — same apportionment rule as the lead form above, just without the "City of" repeat.
+  if (etj.length > 1) return `ETJ crosses ${etj.join(PEER_SEP)}`;
+  if (etj.length) return `${etj[0]} ETJ`;
   // "We could not check" and "there is no ETJ here" are OPPOSITE facts that imply different
   // floodplain rules (B209507). Silence is only ever the second one.
   if (model.etjUnresolved) return "Couldn't check ETJ";
