@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 import {
-  layerMinZoom, levelsToGate, layerVisibility, combineVisibility, dormantZoomLine,
+  layerMinZoom, levelsToGate, layerVisibility, combineVisibility, dormantZoomLine, DORMANT_BLANK_LINE,
   TERRAIN_MIN_ZOOM, OSM_MIN_ZOOM, MAPILLARY_MIN_ZOOM, ESRI_FEATURE_DEFAULT_MIN_ZOOM, GATE_CLEARANCE,
 } from "../src/workspaces/site-planner/lib/layerZoomGate.js";
 import { ALL_LAYERS } from "../src/workspaces/site-planner/lib/layers.js";
@@ -166,6 +166,33 @@ describe("layerVisibility — the four states, which are the four the owner must
     const v = layerVisibility({ cfg: ALL_LAYERS.osm_power, on: true, zoom: 17, status: { state: "failed", msg: "boom" } });
     expect(v.state).toBe("drawing"); // the row's own red dot + message own this state
   });
+
+  /* B685200 (NEW-1, owner chat block 2026-08-22) — a checked layer with NO REGISTERED SOURCE
+   * (layers.js's `fail(k, cfg, msg, "unregistered")` — the "no vector/pipeline source
+   * registered" registry-drift path) used to fall into this function's default branch and
+   * report "drawing", exactly like a genuinely healthy layer. Live evidence: "Water & sewer"
+   * on a Texas site, switched on, read `data-layer-state="drawing"` while its own sub-text
+   * said "Water & sanitation districts (Colorado) — no vector source registered". A row that
+   * admits it has no source cannot be drawing anything. Distinct from "failed" (a live source
+   * that errored — genuinely may recover, stays a loud red "drawing" alert, untouched above):
+   * "unregistered" can NEVER succeed on any retry, in any environment, for any user, which is
+   * exactly the "checked, gate cleared, permanently nothing to draw" shape dormant-blank
+   * already models for an honest empty query. */
+  it("⛔ B685200 — checked, past the gate, but NO SOURCE IS REGISTERED at all → dormant-blank, never drawing", () => {
+    const v = layerVisibility({ cfg: ALL_LAYERS.osm_power, on: true, zoom: 17, status: { state: "unregistered", msg: "Water & sanitation districts (Colorado): no vector source registered" } });
+    expect(v.state).toBe("dormant-blank");
+    expect(v.why).toBe("no-source");
+  });
+
+  it("B685200 — the zoom gate still outranks a registered-source failure, same as every other reason", () => {
+    const v = layerVisibility({ cfg: ALL_LAYERS.contours, on: true, zoom: 11, status: { state: "unregistered" } });
+    expect(v.state).toBe("dormant-zoom"); // below the gate, nothing was ever asked
+  });
+
+  it("B685200 — DORMANT_BLANK_LINE carries a plain, user-facing reason — never the internal registry-drift wording", () => {
+    expect(DORMANT_BLANK_LINE["no-source"]).toMatch(/not showing here/i);
+    expect(DORMANT_BLANK_LINE["no-source"]).not.toMatch(/vector source registered/i);
+  });
 });
 
 describe("combineVisibility — a merged row drives several layers with DIFFERENT gates", () => {
@@ -191,5 +218,18 @@ describe("combineVisibility — a merged row drives several layers with DIFFEREN
   it("a gated member beside a blank one reports blank — no single zoom fixes the row", () => {
     const blank = { cfg: { kind: "esriDynamic" }, zoom: 9, on: true, coverage: "out" };
     expect(combineVisibility([a, blank]).state).toBe("dormant-blank");
+  });
+
+  /* B685200/B685201 — the exact live shape: a "Water & sewer" style merge group where every
+   * member reports genuinely empty except one out-of-region member with no source registered
+   * at all. Pre-fix, that one "unregistered" member's `layerVisibility` fell through to
+   * "drawing" and `combineVisibility`'s `some(state === "drawing")` took the WHOLE row down
+   * that path — a row that admits (in its own sub-text) it has no source for one member still
+   * read as confidently drawing. */
+  it("⛔ B685200 — a source-less member no longer drags an otherwise-blank merged row into \"drawing\"", () => {
+    const emptyTx = { cfg: { kind: "vector" }, zoom: 17, on: true, status: { state: "empty" } };
+    const noSourceCo = { cfg: { kind: "vector" }, zoom: 17, on: true, status: { state: "unregistered" } };
+    const v = combineVisibility([emptyTx, noSourceCo]);
+    expect(v.state).toBe("dormant-blank");
   });
 });

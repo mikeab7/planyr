@@ -38,7 +38,11 @@ export function combineLayerStatus(...list) {
   const pick = (s) => states.find((x) => x.state === s);
   // "slow" (NEW-3/B790) ranks just under "failed": a stalled sublayer is more actionable than a
   // loaded one, but a genuinely-failed sublayer still wins the combined dot.
-  return pick("loading") || pick("failed") || pick("slow") || pick("loaded") || pick("empty") || states[0] || null;
+  // B685200 — "unregistered" (a registry-drift member, e.g. a mergeGroup's out-of-region
+  // sub-source with no VECTOR_SOURCES row) ranks BELOW every real answer: a sibling member
+  // that actually loaded or came back honestly empty is more informative than "no source",
+  // so it must never mask a loaded/empty member the way the bare `states[0]` fallback could.
+  return pick("loading") || pick("failed") || pick("slow") || pick("loaded") || pick("empty") || pick("unregistered") || states[0] || null;
 }
 
 /* ---------------------------------------------------------------------------
