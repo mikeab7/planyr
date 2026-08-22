@@ -15,7 +15,10 @@ import { MODULE_BY_SLUG, SLUG_BY_MODULE, parseRoute, buildHash } from "../src/ap
 import { MODULE_ACCENT } from "../src/shared/ui/moduleAccent.js";
 import { LOADER_SKINS, resolveLoaderTheme } from "../src/shared/ui/moduleLoaderTheme.js";
 import { ROUTE_KEYS } from "../ui-audit/lib/bundleMetrics.mjs";
-import { manualPinsFromVisits, loggedPlaceIds, avgRatingByPlaceId } from "../src/workspaces/food/lib/foodStore.js";
+import {
+  manualPinsFromVisits, loggedPlaceIds, avgRatingByPlaceId,
+  manualGroupKey, wishlistedPlaceIds, manualWishlistFromRows,
+} from "../src/workspaces/food/lib/foodStore.js";
 import { roundKey, queryFor, fromElement } from "../src/workspaces/food/lib/overpass.js";
 import { RATING_COLORS, RATING_TEXT, colorForRating, textColorForRating } from "../src/workspaces/food/lib/ratingColor.js";
 import { formatCategory, formatAddress } from "../src/workspaces/food/lib/formatPlace.js";
@@ -581,7 +584,9 @@ describe("NEW-5 (revised) — colourful basemap, no clustering, his places alway
   it("the zoomed-out empty state reads as intentional, not broken — no 'zoom in to see food places' copy left over", () => {
     const map = src("components/FoodMap.jsx");
     expect(map).toMatch(/Zoom in to browse restaurants near you/);
-    expect(map).toMatch(/Showing only places you've been/);
+    // B669312 — "want to try" places must survive this gate too, so the copy says so (the old
+    // "only places you've been" wording would be actively wrong once a shortlist also shows here).
+    expect(map).toMatch(/Showing places you've been or want to try/);
   });
 
   it("⛔ RECURRENCE GUARD — the zoom threshold is neighbourhood-scale (15), not the whole-metro view (12) it shipped at first", () => {
@@ -1188,5 +1193,208 @@ describe("'What was good' — a liked-dishes shortlist, separate from 'What I ha
     const list = src("components/VisitList.jsx");
     expect(list).toContain('<th style={{ padding: "4px 8px", fontWeight: 700 }}>What was good</th>');
     expect(list).toMatch(/\{v\.what_was_good \|\| "—"\}/);
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════════════════════════
+ * 6. "WANT TO TRY" — flag a place before you've ever been (B669312, owner chat block, 2026-08-22).
+ *    A THIRD table (food_wishlist), never a food_places column (no user_id there) and never a
+ *    food_visits row (a want-to-try place has zero visits by definition). One toggle, works with
+ *    zero visits; a distinct hollow map pin that survives the zoomed-out gate; a search badge; a
+ *    list shortlist filter; auto-clears the moment a real visit is logged.
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("foodStore — manualGroupKey / wishlistedPlaceIds / manualWishlistFromRows (B669312)", () => {
+  it("manualGroupKey is shared: manualPinsFromVisits and manualWishlistFromRows resolve the SAME manual pin to the SAME key", () => {
+    const visitPin = manualPinsFromVisits([
+      { id: "v1", place_id: null, custom_name: "Taco Truck", custom_lat: 29.76011, custom_lon: -95.37009 },
+    ])[0];
+    const wishPin = manualWishlistFromRows([
+      { id: "w1", place_id: null, custom_name: "Taco Truck", custom_lat: 29.7601, custom_lon: -95.3701 },
+    ])[0];
+    expect(wishPin.key).toBe(visitPin.key);
+    expect(wishPin.key).toBe(manualGroupKey("Taco Truck", 29.7601, -95.3701));
+  });
+
+  it("wishlistedPlaceIds collects only place_id-bearing wishlist rows, deduped — same shape as loggedPlaceIds", () => {
+    const wishlist = [
+      { id: "w1", place_id: "a" }, { id: "w2", place_id: "b" }, { id: "w3", place_id: null, custom_name: "Truck" },
+    ];
+    expect([...wishlistedPlaceIds(wishlist)].sort()).toEqual(["a", "b"]);
+  });
+
+  it("manualWishlistFromRows returns ONE pin per row (no grouping needed — the unique index already guarantees at most one row per manual key) with empty visitIds", () => {
+    const pins = manualWishlistFromRows([
+      { id: "w1", place_id: null, custom_name: "Truck", custom_lat: 29.76, custom_lon: -95.37 },
+      { id: "w2", place_id: "a" }, // not a manual row, excluded
+    ]);
+    expect(pins).toHaveLength(1);
+    expect(pins[0]).toMatchObject({ id: "w1", name: "Truck", lat: 29.76, lon: -95.37, visitIds: [] });
+  });
+});
+
+describe("db/food.sql — food_wishlist: a third table, owner-only RLS, unique per (user, place)", () => {
+  const sql = src("db/food.sql");
+
+  it("food_wishlist is neither a food_places column nor a food_visits row — its own table with place_id OR custom_name/lat/lon", () => {
+    expect(sql).toMatch(/create table if not exists public\.food_wishlist \(/);
+    expect(sql).toMatch(/constraint food_wishlist_place_or_manual check \(place_id is not null or custom_name is not null\)/);
+    // Carries no visit facts — never rating/cost/visited_on, which would make it look like a visit.
+    const tableBlock = sql.slice(sql.indexOf("create table if not exists public.food_wishlist ("), sql.indexOf("food_wishlist_place_or_manual") + 80);
+    expect(tableBlock).not.toMatch(/\brating\b/);
+    expect(tableBlock).not.toMatch(/\bcost\b/);
+    expect(tableBlock).not.toMatch(/visited_on/);
+  });
+
+  it("one flag per (user, place) and per (user, manual pin) is enforced by a unique index, not just the UI", () => {
+    expect(sql).toMatch(/create unique index if not exists food_wishlist_user_place_uidx\s*\n\s*on public\.food_wishlist \(user_id, place_id\) where place_id is not null;/);
+    expect(sql).toMatch(/create unique index if not exists food_wishlist_user_manual_uidx/);
+    expect(sql).toMatch(/round\(custom_lat::numeric, 4\), round\(custom_lon::numeric, 4\)/);
+  });
+
+  it("owner-only RLS: select/insert/delete keyed on auth.uid(), no update policy, no anon policy at all", () => {
+    for (const op of ["select", "insert", "delete"]) {
+      const clause = op === "insert" ? "with check" : "using";
+      const re = new RegExp(`create policy "Users ${op} own food_wishlist"[\\s\\S]{0,200}?for ${op} to authenticated ${clause} \\(\\(select auth\\.uid\\(\\)\\) = user_id\\)`, "i");
+      expect(sql, `missing/mismatched ${op} policy`).toMatch(re);
+    }
+    expect(sql).not.toMatch(/create policy "Users update own food_wishlist"/);
+    expect(sql).not.toMatch(/food_wishlist[\s\S]{0,300}?to anon/);
+  });
+
+  it("RLS is enabled on food_wishlist", () => {
+    expect(sql).toMatch(/alter table public\.food_wishlist enable row level security/);
+  });
+
+  it("the RLS proof script extends to food_wishlist with the same isolation + duplicate-refusal proof", () => {
+    const proof = src("db/test/food_rls.test.sql");
+    expect(proof).toContain("PASS 8"); // owner can flag
+    expect(proof).toContain("PASS 9"); // anon sees zero
+    expect(proof).toContain("PASS 10"); // a different user sees zero
+    expect(proof).toContain("PASS 11"); // duplicate flag refused by the unique index
+    expect(proof).toMatch(/unique_violation/);
+  });
+});
+
+describe("FoodMap — hollow ring pin for a flagged-but-unvisited place, never a filled dot", () => {
+  const map = src("components/FoodMap.jsx");
+
+  it("defines a dedicated wishlist colour, distinct from the rating ramp / manual / unlogged colours", () => {
+    expect(map).toMatch(/wishlist:\s*"#3B7DDE"/);
+  });
+
+  it("addHollowPin draws with zero fill opacity — a ring, never a filled marker", () => {
+    const fn = map.slice(map.indexOf("const addHollowPin"), map.indexOf("// HIS places"));
+    expect(fn).toMatch(/fillColor:\s*COLORS\.wishlist,\s*fillOpacity:\s*0,/);
+    expect(fn).toMatch(/color:\s*isSelected \? SELECTED_ACCENT : COLORS\.wishlist,/);
+  });
+
+  it("wishlist pins are drawn in the same unconditional section as loggedPlaces/manualPins — OUTSIDE the tooSmall-gated block, so they survive the zoomed-out gate", () => {
+    const drawEffect = map.slice(map.indexOf("Redraw markers"), map.indexOf("}, [places, loggedPlaces"));
+    const gateIdx = drawEffect.indexOf("const REFERENCE_PIN");
+    const hisPlacesBlock = drawEffect.slice(0, gateIdx);
+    expect(hisPlacesBlock).toMatch(/for \(const p of wishlistPlaces \|\| \[\]\)/);
+    expect(hisPlacesBlock).toMatch(/for \(const pin of wishlistManualPins \|\| \[\]\)/);
+    expect(hisPlacesBlock).toMatch(/addHollowPin\(/);
+  });
+
+  it("hasOwnPlaces counts wishlist places/pins too, so the zoomed-out notice reads correctly when ONLY a shortlist (no visits) exists", () => {
+    expect(map).toMatch(/const hasOwnPlaces = \(loggedPlaces\?\.length \|\| 0\) \+ \(manualPins\?\.length \|\| 0\) \+ \(wishlistPlaces\?\.length \|\| 0\) \+ \(wishlistManualPins\?\.length \|\| 0\) > 0;/);
+  });
+
+  it("the zoomed-out copy reflects that want-to-try places are shown too", () => {
+    expect(map).toMatch(/Showing places you've been or want to try/);
+  });
+});
+
+describe("FoodApp — wishlist state, exclusion of already-visited, and auto-clear on first visit", () => {
+  const app = src("FoodApp.jsx");
+
+  it("fetches the wishlist the same way visits are fetched — a bulk reload, gated on accountActive", () => {
+    expect(app).toMatch(/const reloadWishlist = useCallback\(async \(\) => \{/);
+    expect(app).toMatch(/if \(!accountActive\) \{ setWishlist\(\[\]\); return; \}/);
+    expect(app).toMatch(/const \{ data \} = await fetchAllWishlist\(\);/);
+  });
+
+  it("wishlistPlaces/wishlistManualPins EXCLUDE anything already logged — a flagged-and-visited place reads as visited, never want-to-try", () => {
+    expect(app).toMatch(/const wishlistPlaces = useMemo\(\s*\(\) => \[\.\.\.wishlistIds\]\.filter\(\(id\) => !loggedIds\.has\(id\)\)/);
+    expect(app).toMatch(/const wishlistManualPins = useMemo\(\s*\(\) => manualWishlistAll\.filter\(\(p\) => !manualPinKeys\.has\(p\.key\)\)/);
+  });
+
+  it("submitVisit clears a matching wishlist flag on the FIRST visit — never prompts, just removes it", () => {
+    const submitVisit = app.slice(app.indexOf("const submitVisit = useCallback"), app.indexOf("const toggleWishlist"));
+    expect(submitVisit).toMatch(/const clearedWish = payload\.place_id/);
+    expect(submitVisit).toMatch(/if \(clearedWish\) await removeWishlist\(clearedWish\.id\);/);
+    expect(submitVisit).not.toMatch(/window\.(confirm|prompt|alert)/);
+  });
+
+  it("toggleWishlist is one click on, one click off — inserts when absent, removes when present, for a place, an existing manual pin, or a not-yet-saved new pin", () => {
+    const toggle = app.slice(app.indexOf("const toggleWishlist = useCallback"), app.indexOf("const removeVisit = useCallback"));
+    expect(toggle).toMatch(/existing \? await removeWishlist\(existing\.id\) : await addWishlist\(/);
+    // Requires a name before flagging a brand-new dropped pin — same validation submitVisit uses.
+    expect(toggle).toMatch(/if \(!name \|\| !name\.trim\(\)\) \{ setError\("Give this place a name first\."\); return; \}/);
+  });
+
+  it("wires the wishlist toggle and state into VisitPanel, wishlistIds into SearchBox, and both wishlist pin lists into FoodMap", () => {
+    expect(app).toMatch(/wishlisted=\{wishlistedForSelected\}/);
+    expect(app).toMatch(/onToggleWishlist=\{accountActive \? toggleWishlist : undefined\}/);
+    expect(app).toMatch(/wishlistIds=\{wishlistIds\}/);
+    expect(app).toMatch(/wishlistPlaces=\{wishlistPlaces\}/);
+    expect(app).toMatch(/wishlistManualPins=\{wishlistManualPins\}/);
+  });
+
+  it("listRows folds in flagged-but-unvisited places as isWishlist rows, excluding anything already visited", () => {
+    const listRows = app.slice(app.indexOf("const listRows = useMemo"), app.indexOf("const openPlace ="));
+    expect(listRows).toMatch(/isWishlist:\s*true/);
+    expect(listRows).toMatch(/isWishlist:\s*false/);
+    expect(listRows).toMatch(/!loggedIds\.has\(w\.place_id\)/);
+  });
+});
+
+describe("SearchBox — 'Want to try' badge on a flagged (never-visited) snapshot result", () => {
+  const box = src("components/SearchBox.jsx");
+
+  it("marks a snapshot result wishlisted from the wishlistIds prop, alongside the existing mine/loggedIds check", () => {
+    expect(box).toMatch(/wishlisted:\s*wishlistIds\?\.has\(p\.id\)/);
+  });
+
+  it("the badge shows only when NOT already visited — a visited-and-flagged place shows 'Been here', never both", () => {
+    expect(box).toMatch(/\{!p\.mine && p\.wishlisted && \(/);
+    expect(box).toMatch(/Want to try/);
+  });
+});
+
+describe("VisitPanel — the 'Want to try' toggle, reachable with zero visits", () => {
+  const panel = src("components/VisitPanel.jsx");
+
+  it("renders the toggle ABOVE the past-visits list, so it's reachable even when pastVisits is empty", () => {
+    expect(panel).toMatch(/data-testid="food-wishlist-toggle"/);
+    expect(panel.indexOf('data-testid="food-wishlist-toggle"')).toBeLessThan(panel.indexOf("<LikedDishes"));
+  });
+
+  it("only renders when onToggleWishlist is provided (signed out / not applicable), otherwise stays out of the DOM entirely", () => {
+    expect(panel).toMatch(/\{onToggleWishlist && \(/);
+  });
+
+  it("aria-pressed reflects the wishlisted prop — a screen reader / test can read the flagged state directly", () => {
+    expect(panel).toMatch(/aria-pressed=\{wishlisted\}/);
+  });
+});
+
+describe("VisitList — 'Want to try' shortlist filter chip, same visual pattern as the sort row", () => {
+  const list = src("components/VisitList.jsx");
+
+  it("is a FILTER toggle (local state, not a sort), reusing fieldStyle() — never a new control style", () => {
+    expect(list).toMatch(/const \[shortlistOnly, setShortlistOnly\] = useState\(false\);/);
+    expect(list).toMatch(/if \(shortlistOnly\) filtered = filtered\.filter\(\(v\) => v\.isWishlist\);/);
+    const button = list.slice(list.indexOf('data-testid="food-list-shortlist-filter"') - 200, list.indexOf('data-testid="food-list-shortlist-filter"') + 300);
+    expect(button).toMatch(/\.\.\.fieldStyle\(\),/);
+  });
+
+  it("shows a distinct empty-state message when the shortlist filter is on and empty", () => {
+    expect(list).toMatch(/Nothing on your want-to-try list yet\./);
+  });
+
+  it("a flagged row carries its own small outlined badge next to the place name", () => {
+    expect(list).toMatch(/\{v\.isWishlist && \(/);
   });
 });

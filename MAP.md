@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-19 @ `2a1b4bd` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-22 @ `ff0c4d5` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -52,7 +52,7 @@ _540 source files mapped._
 - **`src/workspaces/food/FoodApp.jsx`** — `/food` workspace root (lazy chunk): map/list view state, visit CRUD wiring, manual-pin drop flow
   - _exports_: `default (FoodApp)`
 - **`src/workspaces/food/lib/foodStore.js`** — The one seam to Supabase: place/visit queries, visit CRUD, manual-pin grouping, the logged-place-id set
-  - _exports_: `avgRatingByPlaceId`, `deleteVisit`, `fetchAllVisits`, `fetchPlaceById`, `fetchPlacesByIds`, `fetchPlacesInBounds`, `insertVisit`, `loggedPlaceIds`, `manualPinsFromVisits`, `searchPlacesByName`, `supabaseConfigured`, `updateVisit`
+  - _exports_: `addWishlist`, `avgRatingByPlaceId`, `deleteVisit`, `fetchAllVisits`, `fetchAllWishlist`, `fetchPlaceById`, `fetchPlacesByIds`, `fetchPlacesInBounds`, `insertVisit`, `loggedPlaceIds`, `manualGroupKey`, `manualPinsFromVisits`, `manualWishlistFromRows`, `removeWishlist`, `searchPlacesByName`, `supabaseConfigured`, `updateVisit`, `wishlistedPlaceIds`
 - **`src/workspaces/food/lib/formatPlace.js`** — Display-only category title-casing (with an acronym exception list) and address ZIP+4 tidy — never mutates the stored value
   - _exports_: `formatAddress`, `formatCategory`
 - **`src/workspaces/food/lib/overpass.js`** — OpenStreetMap Overpass fallback: cached per-bbox live query, called only on explicit user request

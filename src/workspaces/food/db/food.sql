@@ -319,8 +319,60 @@ $$;
 
 grant execute on function public.food_places_search_by_name(text, integer, double precision, double precision) to anon, authenticated;
 
+-- ── food_wishlist: "want to try" flags (B669312, owner chat block 2026-08-22: "flag places he
+-- has not been to yet, so the map doubles as a shortlist and not just a log"). A THIRD table,
+-- deliberately -- not a food_places column (that table has no user_id and is service-role-write-
+-- only, so a personal flag can't live there) and not a food_visits row (a want-to-try place has
+-- ZERO visits by definition and must never appear in a visit count, rating, or average that reads
+-- that table). Mirrors food_visits' identity shape (place_id OR custom_name/custom_lat/custom_lon,
+-- for a flagged manual/dropped pin) but carries no visit facts -- a flag, not a log entry. Owner-
+-- only RLS, own-row, the identical shape to food_visits (see db/test/food_rls.test.sql, extended
+-- alongside this table with the same proof pattern).
+create table if not exists public.food_wishlist (
+  id           uuid primary key default gen_random_uuid(),
+  user_id      uuid not null references auth.users(id) on delete cascade,
+  place_id     text references public.food_places(id) on delete cascade,
+  custom_name  text,
+  custom_lat   double precision,
+  custom_lon   double precision,
+  note         text,
+  created_at   timestamptz not null default now(),
+  constraint food_wishlist_place_or_manual check (place_id is not null or custom_name is not null)
+);
+
+-- One flag per (user, place) -- enforced at the database, not just the UI (the brief: "enforce it
+-- with a unique constraint, do not rely on the UI to prevent duplicates"). Two partial unique
+-- indexes because place_id is nullable: a snapshot-place wish is deduped by (user, place_id); a
+-- manual/dropped-pin wish has place_id null and is deduped the same way foodStore.js's
+-- manualPinsFromVisits already groups manual VISITS -- by (user, name, rounded lat/lon), rounded
+-- to 4dp (~11m) so a second flag press a few feet off still resolves to the same pin.
+create unique index if not exists food_wishlist_user_place_uidx
+  on public.food_wishlist (user_id, place_id) where place_id is not null;
+create unique index if not exists food_wishlist_user_manual_uidx
+  on public.food_wishlist (user_id, custom_name, round(custom_lat::numeric, 4), round(custom_lon::numeric, 4))
+  where place_id is null;
+
+create index if not exists food_wishlist_user_idx on public.food_wishlist (user_id);
+
+alter table public.food_wishlist enable row level security;
+
+drop policy if exists "Users select own food_wishlist" on public.food_wishlist;
+drop policy if exists "Users insert own food_wishlist" on public.food_wishlist;
+drop policy if exists "Users delete own food_wishlist" on public.food_wishlist;
+
+create policy "Users select own food_wishlist" on public.food_wishlist
+  for select to authenticated using ((select auth.uid()) = user_id);
+create policy "Users insert own food_wishlist" on public.food_wishlist
+  for insert to authenticated with check ((select auth.uid()) = user_id);
+create policy "Users delete own food_wishlist" on public.food_wishlist
+  for delete to authenticated using ((select auth.uid()) = user_id);
+-- No update policy -- a flag is toggled on/off (insert/delete) rather than edited in place, and
+-- no anon policy at all -> a signed-out request sees zero rows, exactly like food_visits.
+
 -- 3) Verify (read-only; safe to run any time) ---------------------------------
 --   select relrowsecurity from pg_class where oid = 'public.food_visits'::regclass;   -- expect true
 --   select polname from pg_policy where polrelid = 'public.food_visits'::regclass;    -- 4 owner-only rows, no anon
 --   select count(*) from public.food_places;                                         -- expect ~34,000 after the load script runs
 --   select food_places_in_bounds_sampled(29.4, -95.9, 30.2, -94.9, 2000, 8);          -- spread across the bbox, total_matched on every row
+--   select relrowsecurity from pg_class where oid = 'public.food_wishlist'::regclass; -- expect true
+--   select polname from pg_policy where polrelid = 'public.food_wishlist'::regclass;  -- 3 owner-only rows (select/insert/delete), no anon

@@ -20,7 +20,8 @@ import SearchBox from "./components/SearchBox.jsx";
 import {
   supabaseConfigured, fetchPlacesInBounds, fetchAllVisits, fetchPlacesByIds,
   insertVisit, updateVisit, deleteVisit, manualPinsFromVisits, loggedPlaceIds, avgRatingByPlaceId,
-  searchPlacesByName,
+  searchPlacesByName, fetchAllWishlist, addWishlist, removeWishlist, wishlistedPlaceIds,
+  manualWishlistFromRows, manualGroupKey,
 } from "./lib/foodStore.js";
 import { searchOverpass } from "./lib/overpass.js";
 import { formatCategory, formatAddress } from "./lib/formatPlace.js";
@@ -32,6 +33,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   const [placesCap, setPlacesCap] = useState({ capped: false, totalMatched: 0 });
   const [overpassPlaces, setOverpassPlaces] = useState([]);
   const [visits, setVisits] = useState([]);
+  const [wishlist, setWishlist] = useState([]); // "want to try" flags (B669312) — food_wishlist rows
   const [placeNames, setPlaceNames] = useState({}); // id -> {name, lat, lon}
   const [selected, setSelected] = useState(null); // {kind:'place'|'manualPin'|'newPin', ...}
   const [pinMode, setPinMode] = useState(false);
@@ -54,21 +56,40 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     return () => { cancelled = true; };
   }, [bounds]);
 
-  // The signed-in user's own visit log, plus a name lookup for every place they've logged
-  // (which can be well outside whatever the map currently shows).
+  // The signed-in user's own visit log.
   const reloadVisits = useCallback(async () => {
-    if (!accountActive) { setVisits([]); setPlaceNames({}); return; }
+    if (!accountActive) { setVisits([]); return; }
     const { data } = await fetchAllVisits();
     setVisits(data);
-    const ids = [...new Set(data.filter((v) => v.place_id).map((v) => v.place_id))];
-    if (ids.length) {
-      const { data: rows } = await fetchPlacesByIds(ids);
-      setPlaceNames(Object.fromEntries(rows.map((r) => [r.id, r])));
-    } else {
-      setPlaceNames({});
-    }
   }, [accountActive]);
   useEffect(() => { reloadVisits(); }, [reloadVisits]);
+
+  // The signed-in user's "want to try" flags (B669312) — a separate table from visits (see
+  // foodStore.js's header comment on food_wishlist for why a flag can't live on either
+  // food_places or food_visits).
+  const reloadWishlist = useCallback(async () => {
+    if (!accountActive) { setWishlist([]); return; }
+    const { data } = await fetchAllWishlist();
+    setWishlist(data);
+  }, [accountActive]);
+  useEffect(() => { reloadWishlist(); }, [reloadWishlist]);
+
+  // A name/lat/lon lookup for every place he's logged OR flagged (which can be well outside
+  // whatever the map currently shows) — the union of both tables' place_ids, one batch fetch.
+  useEffect(() => {
+    if (!accountActive) { setPlaceNames({}); return; }
+    const ids = [...new Set([
+      ...visits.filter((v) => v.place_id).map((v) => v.place_id),
+      ...wishlist.filter((w) => w.place_id).map((w) => w.place_id),
+    ])];
+    if (!ids.length) { setPlaceNames({}); return; }
+    let cancelled = false;
+    fetchPlacesByIds(ids).then(({ data }) => {
+      if (cancelled) return;
+      setPlaceNames(Object.fromEntries(data.map((r) => [r.id, r])));
+    });
+    return () => { cancelled = true; };
+  }, [accountActive, visits, wishlist]);
 
   const loggedIds = useMemo(() => loggedPlaceIds(visits), [visits]);
   const manualPins = useMemo(() => manualPinsFromVisits(visits), [visits]);
@@ -81,6 +102,23 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     [placeNames, avgRatings]
   );
 
+  // "Want to try" (B669312) — flagged places/pins, EXCLUDING anything already visited (a place
+  // that's flagged and also visited must read as visited, never as want-to-try; the auto-clear
+  // in submitVisit below keeps this true in steady state, this filter keeps it true even if a
+  // clear hasn't landed yet). Manual pins matched by the same rounded (name, lat, lon) key
+  // manualPinsFromVisits already groups visited manual pins by.
+  const wishlistIds = useMemo(() => wishlistedPlaceIds(wishlist), [wishlist]);
+  const manualWishlistAll = useMemo(() => manualWishlistFromRows(wishlist), [wishlist]);
+  const manualPinKeys = useMemo(() => new Set(manualPins.map((p) => p.key)), [manualPins]);
+  const wishlistPlaces = useMemo(
+    () => [...wishlistIds].filter((id) => !loggedIds.has(id)).map((id) => placeNames[id]).filter(Boolean),
+    [wishlistIds, loggedIds, placeNames]
+  );
+  const wishlistManualPins = useMemo(
+    () => manualWishlistAll.filter((p) => !manualPinKeys.has(p.key)),
+    [manualWishlistAll, manualPinKeys]
+  );
+
   const visitsForSelected = useMemo(() => {
     if (!selected) return [];
     if (selected.kind === "place") return visits.filter((v) => v.place_id === selected.place.id);
@@ -88,10 +126,27 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     return [];
   }, [selected, visits]);
 
-  const listRows = useMemo(() => visits.map((v) => ({
-    ...v,
-    placeName: v.place_id ? (placeNames[v.place_id]?.name || "…") : v.custom_name,
-  })), [visits, placeNames]);
+  // List view rows: every logged visit, PLUS every flagged-but-unvisited place (B669312 — "flagged
+  // places appear there [in the list]"). A wishlist-only row carries no visit facts (rating/cost/
+  // date all null, matching how the table already renders a visit that never set them) and
+  // `isWishlist: true`, which VisitList's own shortlist filter chip reads.
+  const listRows = useMemo(() => {
+    const visitRows = visits.map((v) => ({
+      ...v,
+      placeName: v.place_id ? (placeNames[v.place_id]?.name || "…") : v.custom_name,
+      isWishlist: false,
+    }));
+    const wishlistOnlyRows = wishlist
+      .filter((w) => (w.place_id ? !loggedIds.has(w.place_id) : !manualPinKeys.has(manualGroupKey(w.custom_name, w.custom_lat, w.custom_lon))))
+      .map((w) => ({
+        id: `wish:${w.id}`, place_id: w.place_id,
+        custom_name: w.custom_name, custom_lat: w.custom_lat, custom_lon: w.custom_lon,
+        placeName: w.place_id ? (placeNames[w.place_id]?.name || "…") : w.custom_name,
+        rating: null, rating_ambiance: null, cost: null, visited_on: null, what_i_had: null, what_was_good: null,
+        isWishlist: true,
+      }));
+    return [...visitRows, ...wishlistOnlyRows];
+  }, [visits, wishlist, placeNames, loggedIds, manualPinKeys]);
 
   const openPlace = useCallback((place) => { setSelected({ kind: "place", place }); setError(null); }, []);
   const openManualPin = useCallback((pin) => { setSelected({ kind: "manualPin", pin }); setError(null); }, []);
@@ -145,9 +200,40 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     const { error: err } = await insertVisit(payload);
     setPending(false);
     if (err) { setError(err.message || "Couldn't save that visit."); return; }
+    // First visit at a flagged place clears the flag automatically (B669312, owner: "do not
+    // prompt") — it's no longer a want-to-try once he's actually been. Matched by place_id, or
+    // by the manual pin's own (name, lat, lon) key for a dropped/manual pin.
+    const clearedWish = payload.place_id
+      ? wishlist.find((w) => w.place_id === payload.place_id)
+      : wishlist.find((w) => !w.place_id && manualGroupKey(w.custom_name, w.custom_lat, w.custom_lon) === manualGroupKey(payload.custom_name, payload.custom_lat, payload.custom_lon));
+    if (clearedWish) await removeWishlist(clearedWish.id);
     await reloadVisits();
+    await reloadWishlist();
     if (selected.kind === "newPin") setSelected(null); // the pin now exists as a manual pin; close and let it re-render from data
-  }, [selected, manualDraftName, reloadVisits]);
+  }, [selected, manualDraftName, reloadVisits, reloadWishlist, wishlist]);
+
+  // "Want to try" toggle (B669312) — one click on, one click off, working for a snapshot place,
+  // an existing manual pin, or a brand-new dropped pin not yet saved anywhere (which needs a
+  // name first, same validation submitVisit already applies to a newPin).
+  const toggleWishlist = useCallback(async () => {
+    if (!selected || !accountActive) return;
+    setError(null);
+    if (selected.kind === "place") {
+      const existing = wishlist.find((w) => w.place_id === selected.place.id);
+      const { error: err } = existing ? await removeWishlist(existing.id) : await addWishlist({ place_id: selected.place.id });
+      if (err) { setError(err.message || "Couldn't update that flag."); return; }
+    } else {
+      const name = selected.kind === "manualPin" ? selected.pin.name : manualDraftName;
+      const lat = selected.kind === "manualPin" ? selected.pin.lat : selected.lat;
+      const lon = selected.kind === "manualPin" ? selected.pin.lon : selected.lon;
+      if (!name || !name.trim()) { setError("Give this place a name first."); return; }
+      const key = manualGroupKey(name, lat, lon);
+      const existing = wishlist.find((w) => !w.place_id && manualGroupKey(w.custom_name, w.custom_lat, w.custom_lon) === key);
+      const { error: err } = existing ? await removeWishlist(existing.id) : await addWishlist({ custom_name: name, custom_lat: lat, custom_lon: lon });
+      if (err) { setError(err.message || "Couldn't update that flag."); return; }
+    }
+    await reloadWishlist();
+  }, [selected, accountActive, wishlist, manualDraftName, reloadWishlist]);
 
   const removeVisit = useCallback(async (id) => {
     const { error: err } = await deleteVisit(id);
@@ -178,6 +264,18 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   const selectedKey = selected?.kind === "place" ? `place:${selected.place.id}`
     : selected?.kind === "manualPin" ? `pin:${selected.pin.name}`
     : null;
+
+  // Whether the CURRENTLY SELECTED place/pin is flagged (B669312) — drives the panel's toggle
+  // button state, the one thing that has to be "obvious at a glance" per the brief.
+  const wishlistedForSelected = useMemo(() => {
+    if (!selected) return false;
+    if (selected.kind === "place") return wishlistIds.has(selected.place.id);
+    const name = selected.kind === "manualPin" ? selected.pin.name : manualDraftName;
+    const lat = selected.kind === "manualPin" ? selected.pin.lat : selected.lat;
+    const lon = selected.kind === "manualPin" ? selected.pin.lon : selected.lon;
+    if (!name) return false;
+    return manualWishlistAll.some((p) => p.key === manualGroupKey(name, lat, lon));
+  }, [selected, wishlistIds, manualWishlistAll, manualDraftName]);
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0, background: "var(--surface-page)", position: "relative" }}>
@@ -227,7 +325,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
             )}
             <SearchBox
               query={searchQuery} onQueryChange={setSearchQuery} view={view}
-              manualPins={manualPins} loggedIds={loggedIds} bounds={bounds}
+              manualPins={manualPins} loggedIds={loggedIds} wishlistIds={wishlistIds} bounds={bounds}
               searchSnapshot={searchPlacesByName} onSelectPlace={openPlace} onSelectManualPin={openManualPin}
               onFlyTo={flyTo} onRequestLiveSearch={searchHere} overpassPlaces={overpassPlaces}
               onStartDropPinFor={startDropPinFor}
@@ -256,6 +354,8 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
             loggedPlaces={loggedPlaces}
             loggedIds={loggedIds}
             manualPins={manualPins}
+            wishlistPlaces={wishlistPlaces}
+            wishlistManualPins={wishlistManualPins}
             overpassPlaces={overpassPlaces}
             onSelectPlace={openPlace}
             onSelectManualPin={openManualPin}
@@ -302,6 +402,8 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
             manualNameEditable={selected.kind === "newPin"}
             manualName={manualDraftName}
             onManualNameChange={setManualDraftName}
+            wishlisted={wishlistedForSelected}
+            onToggleWishlist={accountActive ? toggleWishlist : undefined}
           />
         )}
       </div>

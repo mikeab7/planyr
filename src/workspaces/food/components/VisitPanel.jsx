@@ -43,6 +43,13 @@
  * de-duplicated — that starts to be a dish taxonomy, which the brief explicitly says not to
  * build. Renders nothing at all when no past visit has one set (owner: "handle the empty case
  * quietly — shows nothing rather than an empty heading").
+ *
+ * ⛔ "WANT TO TRY" TOGGLE (B669312, owner chat block, 2026-08-22: "flag places he has not been to
+ * yet... a single toggle in the place detail panel, working with zero visits. One click on, one
+ * click off"). Rendered right under the title/subtitle, ABOVE the past-visits list and the visit
+ * form, so it's reachable and visibly stateful whether or not `pastVisits` is empty — the whole
+ * point is that it works for a place with none. FoodApp owns the actual flag state (which table,
+ * which key) — this file only renders `wishlisted` and calls `onToggleWishlist`.
  */
 import { useEffect, useState } from "react";
 import { colorForRating, textColorForRating } from "../lib/ratingColor.js";
@@ -256,6 +263,7 @@ function LikedDishes({ pastVisits }) {
 export default function VisitPanel({
   title, subtitle, pastVisits, onClose, onSubmitVisit, onDeleteVisit, pending, error,
   manualNameEditable, manualName, onManualNameChange,
+  wishlisted, onToggleWishlist,
 }) {
   const [adding, setAdding] = useState((pastVisits || []).length === 0);
 
@@ -295,6 +303,20 @@ export default function VisitPanel({
         </button>
       </div>
       {subtitle && <div style={{ marginTop: 2, fontSize: 12, color: "var(--text-secondary)" }}>{subtitle}</div>}
+
+      {onToggleWishlist && (
+        <button
+          type="button" onClick={onToggleWishlist} aria-pressed={wishlisted} data-testid="food-wishlist-toggle"
+          style={{
+            marginTop: 8, alignSelf: "flex-start", border: "1px solid var(--border-default)", borderRadius: 999,
+            padding: "4px 11px", cursor: "pointer", font: "inherit", fontSize: 11.5, fontWeight: 700,
+            background: wishlisted ? "var(--accent-food)" : "transparent",
+            color: wishlisted ? "var(--on-accent-food)" : "var(--text-secondary)",
+          }}
+        >
+          {wishlisted ? "Flagged — want to try" : "Want to try"}
+        </button>
+      )}
 
       {error && (
         <div role="alert" style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8, background: "var(--danger-bg, rgba(220,38,38,0.1))", color: "var(--danger-text, var(--danger))", fontSize: 12 }}>
