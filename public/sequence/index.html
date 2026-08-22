@@ -10333,15 +10333,32 @@ function StatusPicker({value, onChange, overridden=false}) {
 // `flagged` (B443249) marks an entry that contributes NOTHING to the derived date — a predecessor with no
 // dates of its own, or an id with no row left in this project. Such an entry used to render identically to
 // a satisfied one, so a date computed from a SUBSET of its inputs looked exactly like a real one.
+//
+// B655552 — the owner reported two distinct defects in this cell: (A) the second line
+// renders but gets sliced off mid-glyph at the row boundary, and (B) a single link ellipsizes on
+// line 1 while line 2 sits empty instead of wrapping into it. Both trace to the same root cause —
+// two lines only render cleanly once the row is tall enough to hold them — but are separate fixes
+// below (measured: each 10px/1.2 line-height line naturally needs 12px, so 2 lines need 24px — with
+// the 0px vertical padding below, that's exactly ROW_H's default of 24. ROW_H can be set as low as
+// 20 via the Format panel's row-height slider, which is 4px short — the OLD flexbox layout shrank
+// each line to a 10px box via `minHeight`, clipping ~2px off the BOTTOM of every line's glyphs at
+// the default setting, ~4px at the 20px floor — that was defect A). DEPCELL_TWO_LINE_MIN_H is that
+// measured threshold: at/above it, two full, unclipped lines fit; below it, DepCell shows a single
+// clean line instead of a partial second one — never a half-clipped line. Defect B's fix is the
+// items.length===1 branch just below: at/above the threshold, a lone link's name WRAPS into the
+// second line via line-clamp instead of ellipsizing on line 1 while line 2 goes unused.
+const DEPCELL_LINE_H = 12;                      // 10px font-size * 1.2 line-height, measured
+const DEPCELL_TWO_LINE_MIN_H = DEPCELL_LINE_H * 2; // = 24px — matches ROW_H's default exactly
 function DepCell({items, renderLabel, renderName, s, title, flagged}) {
   const [hovered, setHovered] = useState(false);
   const [pos, setPos] = useState({top:0, left:0, width:0});
   const ref = useRef(null);
-  const visible = items.slice(0, 2);
-  const extra = items.length - 2;
+  const canTwoLine = (s.height || 0) >= DEPCELL_TWO_LINE_MIN_H;
+  const visibleCount = canTwoLine ? 2 : 1;
+  const extra = items.length - visibleCount;
 
   const onEnter = () => {
-    if (!ref.current || items.length <= 2) return;
+    if (!ref.current || items.length <= visibleCount) return;
     const r = ref.current.getBoundingClientRect();
     setPos({top: r.bottom + 4, left: r.left, width: Math.max(r.width, 220)});
     setHovered(true);
@@ -10349,19 +10366,35 @@ function DepCell({items, renderLabel, renderName, s, title, flagged}) {
 
   if (!items.length) return <span style={{...s}} />;
 
-  const slots = [items[0] ?? null, items[1] ?? null];
+  // Exactly one link, with room for a second line: let the name WRAP into the otherwise-unused
+  // second line instead of ellipsizing on line 1 while line 2 sits empty.
+  if (items.length === 1 && canTwoLine) {
+    const item = items[0];
+    return (
+      <div ref={ref} title={title || undefined} style={{...s, alignItems:"flex-start", padding:"0 8px", whiteSpace:"normal"}}>
+        <span style={{display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical",
+          overflow:"hidden", lineHeight:`${DEPCELL_LINE_H}px`, fontSize:10, fontFamily:"'Inter',system-ui,sans-serif",
+          whiteSpace:"normal", width:"100%", minWidth:0, wordBreak:"break-word"}}>
+          <span style={{color: flagged && flagged(item) ? "var(--warn-text,#a16207)" : "#1d4ed8", fontWeight:500}}>{flagged && flagged(item) ? "⚠ " : ""}{renderLabel(item)}</span>
+          <span style={{color:"var(--mut)"}}> · {renderName(item)}</span>
+        </span>
+      </div>
+    );
+  }
+
+  const slots = Array.from({length: visibleCount}, (_, i) => items[i] ?? null);
 
   return (
     <>
       <div ref={ref} title={title || undefined}
-        style={{...s, flexDirection:"column", alignItems:"flex-start", justifyContent:"flex-start", gap:0, padding:"2px 8px"}}
+        style={{...s, flexDirection:"column", alignItems:"flex-start", justifyContent:"flex-start", gap:0, padding:"0 8px"}}
         onMouseEnter={onEnter} onMouseLeave={() => setHovered(false)}>
         {slots.map((item, i) => (
-          <div key={i} style={{display:"flex", alignItems:"baseline", gap:3, overflow:"hidden", width:"100%", lineHeight:1.2, minHeight:10}}>
+          <div key={i} style={{display:"flex", alignItems:"baseline", gap:3, overflow:"hidden", width:"100%", lineHeight:`${DEPCELL_LINE_H}px`, minHeight:DEPCELL_LINE_H}}>
             {item != null && <>
               <span style={{fontSize:10, color: flagged && flagged(item) ? "var(--warn-text,#a16207)" : "#1d4ed8", fontFamily:"'Inter',system-ui,sans-serif", fontWeight:500, flexShrink:0}}>{flagged && flagged(item) ? "⚠ " : ""}{renderLabel(item)}</span>
               <span style={{fontSize:10, color:"var(--mut)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1}}>· {renderName(item)}</span>
-              {i === 1 && extra > 0 &&
+              {i === visibleCount - 1 && extra > 0 &&
                 <span style={{fontSize:9, color:"#94a3b8", flexShrink:0, marginLeft:3, fontFamily:"'Inter',system-ui,sans-serif"}}>+{extra}</span>}
             </>}
           </div>
