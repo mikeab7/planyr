@@ -221,7 +221,7 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
-| B651872 (×2) | Selecting a search result leaves the food map blank until you zoom or pan | [Food] | #food #gis #ui #testing | ⏳ live — awaiting |
+| B651872 (×3) | Selecting a search result leaves the food map blank until you zoom or pan | [Food] | #food #gis #ui #testing | ⏳ live — awaiting |
 | B669312 | "Want to try" wishlist: flag a place before you've ever been | [Food] | #food #ui #testing | ⏳ live — awaiting |
 | B668193 | Restaurant pins are too small to tap on mobile | [Food] | #food #ui #testing | ⏳ live — awaiting |
 | B668194 | Logging a visit leaves what I just typed sitting in the boxes | [Food] | #food #ui #testing | ⏳ live — awaiting |
