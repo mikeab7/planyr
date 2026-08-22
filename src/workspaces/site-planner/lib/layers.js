@@ -1363,7 +1363,13 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
    * (NEW-1). `panes` absent → every layer keeps the caller's single legacy pane (no behaviour
    * change for a surface not yet migrated). */
   const paneOf = (role, above) => (panes ? panesForLayer(role, panes, above) : { pane, labelPane: null });
-  const fail = (k, cfg, msg) => { refs[k] = null; onStatus && onStatus(k, "failed", msg); onError && onError(cfg, msg); };
+  /* B685200 (NEW-1) — `state` defaults to "failed" (a live source that genuinely errored —
+   * stays a loud red alert, unchanged) but a REGISTRY-DRIFT call site (the cfg declares a
+   * vector/vectorLine/pipelineCorridor kind with no matching VECTOR_SOURCES row) passes
+   * "unregistered" instead: this can never succeed on any retry, in any environment, for any
+   * user, which is exactly what `layerVisibility` (layerZoomGate.js) now folds into the
+   * dormant-blank treatment rather than the misleading default "drawing". */
+  const fail = (k, cfg, msg, state = "failed") => { refs[k] = null; onStatus && onStatus(k, state, msg); onError && onError(cfg, msg); };
   /* NEW-1 — WHICH BAND each live layer was BUILT into. Leaflet fixes a layer's pane at
    * construction, so a "Show above plan" flip is a tear-down-and-re-add, not a property write,
    * and this is how the pass notices. Keyed on the caller's `refs` object in a WeakMap rather
@@ -1494,7 +1500,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           },
         });
         if (lyr) { lyr.addTo(map); refs[k] = lyr; }
-        else fail(k, cfg, `${cfg.label}: no vector source registered`); // registry drift — loud, never a silent no-op
+        else fail(k, cfg, `${cfg.label}: no vector source registered`, "unregistered"); // registry drift — loud, never a silent no-op
       } else if (cfg.kind === "vectorLine") {
         // Cached pipeline vector layer (B751): crisp commodity-colored polylines when zoomed in,
         // the agency /export raster (imageFallback) when zoomed far out — switch re-evaluated per
@@ -1512,13 +1518,13 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           },
         });
         if (lyr) { lyr.addTo(map); refs[k] = lyr; }
-        else fail(k, cfg, `${cfg.label}: no vector source registered`);
+        else fail(k, cfg, `${cfg.label}: no vector source registered`, "unregistered");
       } else if (cfg.kind === "pipelineCorridor") {
         // Cached easement-corridor bands (B752): buffer the SAME pipeline geometry (shared cache),
         // drawn beneath the centerlines. Vector-only; carries an editable corridor width.
         const lyr = cachedCorridorLayer(k, cfg, st.opacity, lyrPane, onStatus, { widthFt: st.widthFt });
         if (lyr) { lyr.addTo(map); refs[k] = lyr; }
-        else fail(k, cfg, `${cfg.label}: no pipeline source registered`);
+        else fail(k, cfg, `${cfg.label}: no pipeline source registered`, "unregistered");
       } else {
         // image / feature service — probe health first
         probeService(cfg.url, cfg).then(({ ok, error, unreachable }) => {

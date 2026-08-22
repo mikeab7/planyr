@@ -202,6 +202,114 @@ test.describe("NEW-2 — the zoom gate resolves BEFORE first paint", () => {
   });
 });
 
+/* B685200/B685201 (owner chat block, 2026-08-22) — the SAME live report, two defects.
+ *
+ * Live evidence: on a Waller County, Texas site the "Water & sewer" merge row (mergeGroup
+ * water_sewer — CCN service territory / MUD boundaries / City-of-Houston mains, all TX-only,
+ * consolidated with "Water & sanitation districts (Colorado)", CO-only) read
+ * `data-layer-state="drawing"` while its own message named the Colorado sub-source as having
+ * "no vector source registered". Two bugs, deliberately fixed together because the second
+ * CAUSES the first to be observable: (NEW-2) a merge group never dropped an out-of-state
+ * member from an otherwise in-state row, so a Texas site offered a Colorado-only provider it
+ * could never serve; (NEW-1) once offered, that provider's genuine registry gap (it has never
+ * been wired into VECTOR_SOURCES) fell into the visibility model's default "drawing" branch
+ * instead of the dormant-blank treatment B323424 built for exactly this shape.
+ *
+ * Both are HERMETIC — no live GIS host involved. NEW-2 is a synchronous `siteState`/`states`
+ * comparison; the vector kind's "no source registered" failure (`cachedVectorLayer` returning
+ * null because `VECTOR_SOURCES` has no matching row) is a synchronous local lookup, not a
+ * network round-trip — so both resolve on the same tick as the checkbox click.
+ */
+const CO_SITE = {
+  schemaVersion: 12, id: "rs1", groupId: "rs1", site: "Region Scope", name: "Concept A",
+  updatedAt: 1786000000000, teamId: null, ownerId: null,
+  scheduleProjectId: null, scheduleProjectName: null,
+  // Commerce City, CO — the owner's own Colorado market (sourceFixtures.js / B369).
+  origin: { lat: 39.8683, lon: -104.9209 }, county: "co_adams", status: "active",
+  parcels: [{ id: "p1", points: [{ x: 0, y: 0 }, { x: W, y: 0 }, { x: W, y: H }, { x: 0, y: H }], active: true, z: 0 }],
+  els: [], measures: [], callouts: [], markups: [], sheetOverlays: [], parcelDrawings: [],
+  underlay: null, settings: {}, layerOverrides: {},
+};
+
+async function openPlannerFor(page, siteFixture) {
+  await page.route(/\.(jpg|jpeg|png|webp)(\?|$)/, (route) => route.abort());
+  await page.addInitScript((s) => {
+    try {
+      localStorage.setItem("planarfit:sites:v1", s);
+      localStorage.setItem("planarfit:relevance:v1", JSON.stringify({ mode: "all", radius: 2.5 }));
+    } catch (_) {}
+  }, JSON.stringify({ [siteFixture.id]: siteFixture }));
+  await page.goto("/#/site-planner", { waitUntil: "load" });
+  await page.getByText(siteFixture.site, { exact: false }).first().click();
+  await expect(page.getByTestId("planner-canvas")).toBeVisible({ timeout: 25000 });
+  await page.waitForTimeout(1500);
+  await page.getByRole("button", { name: /^\s*❖?\s*Layers/ }).filter({ visible: true }).first().click();
+  await expect(page.locator(PANEL)).toBeVisible({ timeout: 20000 });
+  await page.waitForTimeout(400);
+}
+
+test.describe("NEW-2 — a merge group never offers a sub-source the site's own state can't have", () => {
+  const WATER_SEWER = `${PANEL} [data-testid="layer-row-water_sewer"]`;
+
+  test("a Texas site's \"Water & sewer\" row never mentions the Colorado sub-source", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await openPlanner(page); // the Waller County, TX fixture already declared above
+
+    const row = page.locator(WATER_SEWER);
+    await expect(row).toBeVisible();
+    await row.locator('input[type="checkbox"]').first().check();
+    await page.waitForTimeout(300);
+
+    // The ⓘ lists every contributing provider by name (layerPanelInfo.js
+    // mergeGroupInfoSections) — a Texas site must never see the Colorado-only one.
+    await page.getByRole("button", { name: "About Water & sewer" }).hover();
+    const popover = page.getByRole("note");
+    await expect(popover).toBeVisible();
+    await expect(popover).not.toContainText("Colorado");
+
+    // ⛔ THE OTHER HALF OF THE SAME DEFECT: the raw registry-drift diagnostic text must never
+    // leak into this panel at all — it is developer-facing, and B685200's fix keeps it out of
+    // both the specific-message line and (for a merge row) the generic fallback line.
+    await expect(row).not.toContainText("no vector source registered");
+  });
+
+  test("a Colorado site's \"Water & sewer\" row never offers the Texas-only providers, and honestly reports it has nothing wired up here", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await openPlannerFor(page, CO_SITE);
+
+    const row = page.locator(WATER_SEWER);
+    await expect(row).toBeVisible();
+    await row.locator('input[type="checkbox"]').first().check();
+
+    // ⛔ B685200 — the ONLY in-state member (co_water_districts) has never been wired into
+    // VECTOR_SOURCES, so this resolves SYNCHRONOUSLY (no network) to dormant-blank. Pre-fix,
+    // it fell into the default "drawing" branch instead — a checked row with nothing behind it
+    // reading as though it were working.
+    await expect(row).toHaveAttribute("data-layer-state", "dormant-blank", { timeout: 5000 });
+    await expect(row.locator("[data-layer-dot]")).toHaveAttribute("data-layer-dot", "dormant");
+
+    // The row still says something honest — never silent (LOUD-FAILURE) — and it is the plain,
+    // user-facing wording, never the internal "no vector source registered" diagnostic.
+    await expect(row).toContainText("Planyr doesn't have a data source wired up");
+    await expect(row).not.toContainText("no vector source registered");
+
+    // The ⓘ lists only the in-state PROVIDER LINE (layerPanelInfo.js mergeGroupInfoSections:
+    // one `"${label} — Source: ${source}"` line per member) — none of the Texas-only ones this
+    // site could never be served by. ⛔ NOT a bare substring check for "CCN"/"MUD"/"Houston":
+    // the merge group's own GENERIC explanatory note (MERGE_GROUPS.water_sewer.note, always
+    // rendered first, unrelated to which members are in scope) legitimately mentions "CCN/MUD"
+    // in prose — asserting on the exact per-provider SOURCE lines is what actually distinguishes
+    // "the concept is explained" from "the Texas provider is offered here".
+    await page.getByRole("button", { name: "About Water & sewer" }).hover();
+    const popover = page.getByRole("note");
+    await expect(popover).toBeVisible();
+    await expect(popover).toContainText("Water & sanitation districts (Colorado) — Source: Colorado DOLA");
+    await expect(popover).not.toContainText("Source: PUC CCN"); // ccn_service
+    await expect(popover).not.toContainText("Source: TCEQ, via HARC"); // jur_mud
+    await expect(popover).not.toContainText("Source: City of Houston"); // coh_water / coh_ww
+  });
+});
+
 test.describe("NEW-1 — the map finder gets the same treatment (one mechanism, both surfaces)", () => {
   test("a layer gated above the finder's zoom reads dormant, and the line zooms the map", async ({ page }) => {
     /* The finder mounts the SAME panel with its own map, so a fix that only reached the planner

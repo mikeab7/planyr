@@ -415,14 +415,19 @@ export default function LayerPanel({
         {/* SIGNAL kept inline: status reason (failed / empty / needs-setup).
             NEW-1 — suppressed under a closed zoom gate: the live line above says the same thing
             about the same fact, and better. A failure or a needs-setup is NOT dormant and still
-            speaks (LOUD-FAILURE). */}
+            speaks (LOUD-FAILURE).
+            B685200 — "unregistered" is deliberately NOT in this list (and has no `STATUS` entry,
+            so `meta` is undefined for it): its own message is developer-facing ("no vector
+            source registered"), never meant for this panel — the plain DORMANT_BLANK_LINE
+            fallback below is what a user sees instead. */}
         {meta && vis.state !== "dormant-zoom" && (ls.state === "failed" || ls.state === "slow" || ls.state === "empty" || ls.state === "unconfigured") && (
           <div style={{ fontSize: 10, color: meta.color, lineHeight: 1.35, marginTop: 1 }}>
             {ls.msg || meta.label}
           </div>
         )}
         {/* NEW-1 — a blank row with nothing else to say still says WHY it is blank; without this
-            an on-but-empty row is the "is it broken?" case all over again, one state along. */}
+            an on-but-empty row is the "is it broken?" case all over again, one state along.
+            B685200 — this is also the ONLY line a source-less ("unregistered") row shows. */}
         {vis.state === "dormant-blank" && !outHere && !(meta && ls.state === "empty" && ls.msg) && (
           <div style={{ fontSize: 10, color: MUTED, lineHeight: 1.4, marginTop: 1 }}>
             {DORMANT_BLANK_LINE[vis.why] || DORMANT_BLANK_LINE["nothing-here"]}
@@ -527,16 +532,39 @@ export default function LayerPanel({
   // AHJ-exclusive: every member toggles together and renders whatever its own source
   // returns for the current view — nothing here re-filters by the parcel's jurisdiction
   // (see the MERGE_GROUPS comment in layers.js).
+  //
+  // ⛔ B685201 (NEW-2, 2026-08-22) — "INCLUSIVE, never AHJ-exclusive" is about NEIGHBORING
+  // jurisdictions inside the SAME state (a CCN extension, a wholesale supplier just across a
+  // city line) — it was never meant to mean cross-STATE. Measured live: a Waller County,
+  // Texas site's "Water & sewer" row offered "Water & sanitation districts (Colorado)" as a
+  // sub-source. Every member already declares its own `states` (co_water_districts:
+  // `states: ["CO"]`; ccn_service/jur_mud/coh_water/coh_ww: `states: ["TX"]`) — the data was
+  // always correctly tagged. The bug was that NOTHING here ever read it: `outOfState` (above)
+  // demotes a SOLO row and `slotOutOfState` demotes a merge SLOT only when EVERY member is out
+  // of state, but no code path ever dropped ONE out-of-state member from an otherwise in-state
+  // group. `inState` below is that missing filter, applied once so the checkbox, the opacity,
+  // the combined status dot, the ⓘ provider list and the toggle-all handler can never
+  // disagree about which members this site's row actually speaks for.
   const mergeGroupRow = (mergeGroupKey, members, { dim = false } = {}) => {
     const meta = MERGE_GROUPS[mergeGroupKey] || {};
     const label = meta.label || mergeGroupKey;
-    const anyOn = mergeSlotAnyOn(members, overlays);
-    const opacity = mergeSlotOpacity(members, overlays);
-    const combined = anyOn ? combineLayerStatus(...members.map(([id]) => (overlays[id]?.on ? layerStatus[id] : null))) : null;
+    const inState = members.filter(([, cfg]) => !outOfState(cfg));
+    const anyOn = mergeSlotAnyOn(inState, overlays);
+    const opacity = mergeSlotOpacity(inState, overlays);
+    const combined = anyOn ? combineLayerStatus(...inState.map(([id]) => (overlays[id]?.on ? layerStatus[id] : null))) : null;
     const statusMeta = combined && STATUS[combined.state];
-    const setAll = (patch) => members.forEach(([id]) => set(id, patch));
-    const sections = mergeGroupInfoSections(members, { groupNote: meta.note });
-    const vis = visForMembers(members); // NEW-1 — dormant only if every on member is
+    const setAll = (patch) => inState.forEach(([id]) => set(id, patch));
+    const sections = mergeGroupInfoSections(inState, { groupNote: meta.note });
+    const vis = visForMembers(inState); // NEW-1 — dormant only if every on member is
+    // B685200 — mirrors the solo row's own suppression exactly (`ls.state === "empty" &&
+    // ls.msg`, line ~426 below). A "failed"/"slow" member can never coexist with
+    // vis.state === "dormant-blank" here — `layerVisibility` still resolves either to
+    // "drawing" (unchanged; see layerZoomGate.js), which would already have taken the whole
+    // row to "drawing" via combineVisibility's `some(state === "drawing")`. So the only
+    // specific message a dormant-blank merge row can show is a genuine "empty" answer; an
+    // "unregistered" member (no STATUS entry, so `statusMeta` is undefined) always falls
+    // through to the plain DORMANT_BLANK_LINE fallback below, same as the solo row.
+    const hasSpecificMsg = statusMeta && combined.state === "empty" && combined.msg;
     return (
       <div key={mergeGroupKey} data-testid={`layer-row-${mergeGroupKey}`} data-layer-state={vis.state}
         style={{ marginBottom: 5, opacity: dim ? 0.55 : (isDormant(vis) ? 0.78 : 1) }}>
@@ -551,10 +579,15 @@ export default function LayerPanel({
           {statusDot(statusMeta, combined && combined.state === "loading", vis)}
         </div>
         {anyOn && opacityControl(label, opacity, (v) => setAll({ opacity: v }))}
-        {anyOn && showAbove && aboveRow(label, members, setAll)}
+        {anyOn && showAbove && aboveRow(label, inState, setAll)}
         {vis.state === "dormant-zoom" && zoomFixLine(vis, label)}
         {statusMeta && vis.state !== "dormant-zoom" && (combined.state === "failed" || combined.state === "slow" || combined.state === "empty") && (
           <div style={{ fontSize: 10, color: statusMeta.color, lineHeight: 1.35, marginTop: 1 }}>{combined.msg || statusMeta.label}</div>
+        )}
+        {vis.state === "dormant-blank" && !hasSpecificMsg && (
+          <div style={{ fontSize: 10, color: MUTED, lineHeight: 1.4, marginTop: 1 }}>
+            {DORMANT_BLANK_LINE[vis.why] || DORMANT_BLANK_LINE["nothing-here"]}
+          </div>
         )}
         {dim && (
           <div style={{ fontSize: 10, color: MUTED, fontStyle: "italic", marginTop: 1 }}>No data in this area from any source.</div>
@@ -567,11 +600,17 @@ export default function LayerPanel({
   // pairwise mergeWith pair, handled inside renderEntry) or an N-ary `mergeGroup` bundle
   // (B898). slotAnyOn/slotLowRel/renderSlot are the slot-level equivalents of the old
   // per-entry lowRel/renderEntry, so groupRows works unchanged for either shape.
+  //
+  // B685201 — both read only the IN-STATE members, same filter `mergeGroupRow` applies, so
+  // the group header's "N on" count and the low-relevance fold can never disagree with what
+  // the row itself renders. `groupRows` already guarantees a slot reaching here has at least
+  // one in-state member (a fully out-of-state slot is routed to `oos` by `slotOutOfState`
+  // first), so this filter is never vacuous here.
   const slotAnyOn = (slot) => (slot.kind === "merge"
-    ? mergeSlotAnyOn(slot.members, overlays)
+    ? mergeSlotAnyOn(slot.members.filter(([, cfg]) => !outOfState(cfg)), overlays)
     : (() => { const [id, cfg] = slot.entry; return cfg.mergeWith ? !!(overlays[id]?.on || overlays[cfg.mergeWith]?.on) : !!overlays[id]?.on; })());
   const slotLowRel = (slot) => (slot.kind === "merge"
-    ? slot.members.every(([id, cfg]) => lowRel(id, cfg))
+    ? slot.members.filter(([, cfg]) => !outOfState(cfg)).every(([id, cfg]) => lowRel(id, cfg))
     : lowRel(slot.entry[0], slot.entry[1]));
   const renderSlot = (slot, opts) => (slot.kind === "merge" ? mergeGroupRow(slot.mergeGroup, slot.members, opts) : renderEntry(slot.entry, opts));
 

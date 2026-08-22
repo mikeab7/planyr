@@ -107,13 +107,37 @@ export const GATE_CLEARANCE = 0.05;
  *   "dormant-zoom"   — checked, but the current zoom suppresses it. FIXABLE, and the row
  *                      carries the fix.
  *   "dormant-blank"  — checked and past the gate, but there is nothing here to draw: the
- *                      source's data does not reach this area, or it answered with nothing.
+ *                      source's data does not reach this area, it answered with nothing, or
+ *                      there is no source wired up for this kind/location at all.
  *                      Not fixable by zooming, and the row must not pretend otherwise.
  *
  * The zoom gate is asked FIRST and outranks the blank test on purpose: below the gate the
  * layer never asked the source anything, so "no data here" would be a fabrication. (It is
  * also how the terrain pipeline's own `empty` status — which carries the old static
  * sentence — is kept from being read as an answer about coverage.)
+ *
+ * ⛔ B685200 (NEW-1, 2026-08-22) — "unregistered" WAS FALLING INTO THE DEFAULT "drawing"
+ * BRANCH, and that is the whole defect this fixes. Measured live: "Water & sanitation
+ * districts (Colorado)" is a mergeGroup member of "Water & sewer" with a `kind: "vector"`
+ * registry row but no matching `VECTOR_SOURCES` entry (layers.js's `cachedVectorLayer`
+ * returns null, so `fail()` reports it), and the row still read `data-layer-state="drawing"`
+ * — a checked layer that admits (in its own status message) it has no registered source
+ * cannot possibly be drawing anything.
+ *
+ * THE DISCRIMINATOR is not "did the fetch fail" — it is "can this EVER succeed." A registry
+ * gap (`state: "unregistered"`, set only at the two `layers.js` call sites that report "no
+ * vector/pipeline source registered") will never resolve on retry, in any environment, for
+ * any user — the exact shape `dormant-blank` already exists for: checked, past the gate,
+ * permanently nothing to draw. So it gets the SAME hollow-dot/muted-row treatment as an
+ * honest empty query, via its own `why: "no-source"`.
+ *
+ * A genuinely FAILED live source (`state: "failed"` — a network error, a stalled agency, a
+ * timeout) is DELIBERATELY left exactly as it was: still "drawing" with its own loud red dot
+ * and message. That is not an oversight — it is the opposite fact from "unregistered": a real
+ * outage is often transient and worth an active RED alert (the KEY DECISIONS rule: red is
+ * reserved for a genuine, actionable alert), where folding it into the same quiet dormant
+ * treatment as "nothing here" would bury a live problem. See
+ * `test/layerZoomGate.test.js` — "a failure stays a failure" pins that this is unchanged.
  */
 export function layerVisibility({ cfg, on, zoom, status = null, coverage = null } = {}) {
   const minZoom = layerMinZoom(cfg);
@@ -127,6 +151,9 @@ export function layerVisibility({ cfg, on, zoom, status = null, coverage = null 
   // pulsing dot already says so, and calling an in-flight layer blank is the LOUD-FAILURE
   // inversion (reporting an answer nobody has yet).
   if (st === "loading") return { state: "drawing", minZoom, levels: null };
+  // B685200 — a registry-drift failure can never succeed; fold it into dormant-blank before
+  // the coverage/empty checks (which answer a different question: a source that DOES exist).
+  if (st === "unregistered") return { state: "dormant-blank", minZoom, levels: null, why: "no-source" };
   if (coverage === "out") return { state: "dormant-blank", minZoom, levels: null, why: "out-of-area" };
   if (st === "empty") return { state: "dormant-blank", minZoom, levels: null, why: "nothing-here" };
   return { state: "drawing", minZoom, levels: null };
@@ -164,4 +191,8 @@ export function combineVisibility(members = []) {
 export const DORMANT_BLANK_LINE = {
   "out-of-area": "Not showing here — this layer's data stops short of this area.",
   "nothing-here": "Nothing to show here — this layer covers the area and found none.",
+  // B685200 — a registry-drift failure (no source wired up for this kind/location at all).
+  // Deliberately plain — never the internal "no vector source registered" wording, which is
+  // a developer-facing diagnostic, not something to hand a user as if it were their problem.
+  "no-source": "Not showing here — Planyr doesn't have a data source wired up for this one yet.",
 };
