@@ -7,6 +7,9 @@
 --   2. food_visits (the owner's private log) is invisible to anon entirely, and
 --      invisible to any OTHER authenticated user — never covered by a project-
 --      sharing path, because it has none.
+--   3. food_wishlist ("want to try" flags, B669312) has the identical owner-only
+--      shape as food_visits: invisible to anon, invisible to any other user, and
+--      the (user, place) uniqueness is enforced at the database.
 --
 -- Self-rolling-back: runs inside a DO block and raises an exception at the end
 -- carrying the report, so every fixture (fake users + rows) is discarded. Paste
@@ -17,7 +20,10 @@ do $$
 declare
   ua uuid := '00000000-0000-4000-8000-00000000f001';  -- A: the owner
   ub uuid := '00000000-0000-4000-8000-00000000f002';  -- B: a different signed-in user
-  place_id text := 'rlstest:food:place1';
+  -- Named test_place_id rather than place_id: food_wishlist (added B669312) has a REAL COLUMN
+  -- named place_id, and a PL/pgSQL variable sharing a column's name makes any query against
+  -- that table ambiguous the moment both are referenced together.
+  test_place_id text := 'rlstest:food:place1';
   visit_id uuid;
   n int;
   rep text := '';
@@ -29,15 +35,18 @@ begin
   values (ua, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'rls-food-a@test.invalid', now(), now()),
          (ub, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'rls-food-b@test.invalid', now(), now());
 
-  insert into public.food_places (id, name, lat, lon, category)
-  values (place_id, 'RLS Test Diner', 29.76, -95.37, 'restaurant');
+  -- metro is not-null (added by a later migration, backfilled 'Houston' for pre-existing rows —
+  -- see db/food.sql's metro section); this fixture predates that column, so it's supplied here
+  -- explicitly rather than left to a default that no longer exists.
+  insert into public.food_places (id, name, lat, lon, category, metro)
+  values (test_place_id, 'RLS Test Diner', 29.76, -95.37, 'restaurant', 'Houston');
 
   insert into public.food_visits (user_id, place_id, rating, cost, notes)
-  values (ua, place_id, 5, 12.50, 'test visit') returning id into visit_id;
+  values (ua, test_place_id, 5, 12.50, 'test visit') returning id into visit_id;
 
   -- ---------- Test 1: anon reads food_places (expect 1 row) ----------------
   execute 'set local role anon'; execute 'set local request.jwt.claims = default';
-  select count(*) into n from public.food_places where id = place_id;
+  select count(*) into n from public.food_places where id = test_place_id;
   execute 'reset role';
   if n = 1 then passed := passed + 1; rep := rep || 'PASS 1: anon reads food_places (public reference data). ' || E'\n';
   else failed := failed + 1; rep := rep || format('FAIL 1: anon food_places read returned %s rows, expected 1.', n) || E'\n'; end if;
@@ -97,6 +106,43 @@ begin
   select count(*) into n from public.food_visits where user_id = ua and custom_name = 'Taco Truck (manual pin)';
   if n = 1 then passed := passed + 1; rep := rep || 'PASS 7: owner can log a manual-pin visit (place_id null, custom_name set). ' || E'\n';
   else failed := failed + 1; rep := rep || format('FAIL 7: manual pin visit not found, count=%s.', n) || E'\n'; end if;
+
+  -- ---------- Test 8: owner (A) can flag a place as want-to-try -------------
+  execute 'set local role authenticated';
+  execute format('set local request.jwt.claims = %L', json_build_object('sub', ua, 'role', 'authenticated')::text);
+  insert into public.food_wishlist (user_id, place_id) values (ua, test_place_id);
+  execute 'reset role'; execute 'set local request.jwt.claims = default';
+  select count(*) into n from public.food_wishlist where user_id = ua and place_id = test_place_id;
+  if n = 1 then passed := passed + 1; rep := rep || 'PASS 8: owner can flag a snapshot place as want-to-try. ' || E'\n';
+  else failed := failed + 1; rep := rep || format('FAIL 8: wishlist flag not found, count=%s.', n) || E'\n'; end if;
+
+  -- ---------- Test 9: anon reads food_wishlist (expect 0 rows) -------------
+  execute 'set local role anon'; execute 'set local request.jwt.claims = default';
+  select count(*) into n from public.food_wishlist where place_id = test_place_id;
+  execute 'reset role';
+  if n = 0 then passed := passed + 1; rep := rep || 'PASS 9: anon (signed out) sees ZERO food_wishlist rows. ' || E'\n';
+  else failed := failed + 1; rep := rep || format('FAIL 9: anon food_wishlist read returned %s rows, expected 0.', n) || E'\n'; end if;
+
+  -- ---------- Test 10: a DIFFERENT signed-in user (B) reads A's food_wishlist
+  execute 'set local role authenticated';
+  execute format('set local request.jwt.claims = %L', json_build_object('sub', ub, 'role', 'authenticated')::text);
+  select count(*) into n from public.food_wishlist where user_id = ua;
+  execute 'reset role'; execute 'set local request.jwt.claims = default';
+  if n = 0 then passed := passed + 1; rep := rep || 'PASS 10: a DIFFERENT signed-in user (B) sees ZERO of A''s food_wishlist rows. ' || E'\n';
+  else failed := failed + 1; rep := rep || format('FAIL 10: user B saw %s of user A''s food_wishlist rows, expected 0.', n) || E'\n'; end if;
+
+  -- ---------- Test 11: a second flag on the SAME (user, place) is refused ---
+  -- (the unique index, not just the UI, is what prevents a duplicate)
+  begin
+    execute 'set local role authenticated';
+    execute format('set local request.jwt.claims = %L', json_build_object('sub', ua, 'role', 'authenticated')::text);
+    insert into public.food_wishlist (user_id, place_id) values (ua, test_place_id);
+    execute 'reset role'; execute 'set local request.jwt.claims = default';
+    failed := failed + 1; rep := rep || 'FAIL 11: a duplicate (user, place) wishlist row was accepted (should violate the unique index). ' || E'\n';
+  exception when unique_violation then
+    execute 'reset role'; execute 'set local request.jwt.claims = default';
+    passed := passed + 1; rep := rep || 'PASS 11: a duplicate (user, place) wishlist flag is refused by the unique index. ' || E'\n';
+  end;
 
   -- ---------- cleanup + report (rollback via exception) ---------------------
   raise exception E'\n==== FOOD RLS TEST REPORT: % passed, % failed ====\n%', passed, failed, rep;

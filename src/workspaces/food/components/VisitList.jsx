@@ -19,6 +19,14 @@
  * "What was good" (B634979) gets its own column here too — each row shows THAT visit's own
  * value (never an aggregate; the panel's own accumulated summary is a separate concern, see
  * VisitPanel.jsx's LikedDishes) — same shape as the existing "What I had" column beside it.
+ *
+ * ⛔ "WANT TO TRY" SHORTLIST (B669312, owner chat block, 2026-08-22). Flagged-but-unvisited places
+ * appear as rows here too (FoodApp's `listRows` folds them in, `isWishlist: true`, every visit
+ * field null) — a "Want to try" chip, same visual language as the sort row above, FILTERS to just
+ * those rather than sorting (owner: "follow the existing chip pattern... do not invent a new
+ * control style"). A per-row outlined pill next to the place name marks which rows are flagged,
+ * same visual as the SearchBox badge for the identical reason (an outline reads as "not yet
+ * visited," never competing with the rating pills' own fill colours).
  */
 import { useMemo, useState } from "react";
 import { colorForRating, textColorForRating } from "../lib/ratingColor.js";
@@ -55,13 +63,18 @@ function fieldStyle() {
 
 export default function VisitList({ visits, query, onSelect, selectedKey }) {
   const [sortKey, setSortKey] = useState("date");
+  // "Want to try" shortlist filter (B669312) — same chip visual as the sort row, but a FILTER
+  // toggle, not a sort: narrows the rows down to flagged-but-unvisited places rather than
+  // reordering them. Rows carry `isWishlist` (set by FoodApp's listRows).
+  const [shortlistOnly, setShortlistOnly] = useState(false);
 
   const rows = useMemo(() => {
     const q = (query || "").trim().toLowerCase();
-    const filtered = q ? visits.filter((v) => (v.placeName || "").toLowerCase().includes(q)) : visits;
+    let filtered = q ? visits.filter((v) => (v.placeName || "").toLowerCase().includes(q)) : visits;
+    if (shortlistOnly) filtered = filtered.filter((v) => v.isWishlist);
     const { get, dir } = SORTS[sortKey];
     return [...filtered].sort((a, b) => (get(a) < get(b) ? -1 : get(a) > get(b) ? 1 : 0) * dir);
-  }, [visits, query, sortKey]);
+  }, [visits, query, sortKey, shortlistOnly]);
 
   return (
     <div data-testid="food-visit-list" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", padding: "12px 16px", overflow: "hidden" }}>
@@ -81,11 +94,24 @@ export default function VisitList({ visits, query, onSelect, selectedKey }) {
             </button>
           ))}
         </div>
+        <button
+          type="button" onClick={() => setShortlistOnly((s) => !s)} aria-pressed={shortlistOnly}
+          data-testid="food-list-shortlist-filter"
+          style={{
+            ...fieldStyle(), cursor: "pointer",
+            background: shortlistOnly ? "var(--accent-food)" : "var(--surface-page)",
+            color: shortlistOnly ? "var(--on-accent-food)" : "var(--text-primary)", fontWeight: shortlistOnly ? 700 : 500,
+          }}
+        >
+          Want to try
+        </button>
       </div>
 
       {rows.length === 0 ? (
         <div style={{ color: "var(--text-tertiary)", fontSize: 13, padding: "24px 4px" }}>
-          {visits.length === 0 ? "Nothing logged yet — click a pin on the map to get started." : "No visits match that search."}
+          {shortlistOnly ? "Nothing on your want-to-try list yet."
+            : visits.length === 0 ? "Nothing logged yet — click a pin on the map to get started."
+            : "No visits match that search."}
         </div>
       ) : (
         <div style={{ overflowY: "auto", flex: 1, minHeight: 0 }}>
@@ -117,7 +143,18 @@ export default function VisitList({ visits, query, onSelect, selectedKey }) {
                       boxShadow: isSelected ? "inset 3px 0 0 var(--accent-food)" : "none",
                     }}
                   >
-                    <td style={{ padding: "7px 8px", color: "var(--text-primary)", fontWeight: 600 }}>{v.placeName}</td>
+                    <td style={{ padding: "7px 8px", color: "var(--text-primary)", fontWeight: 600 }}>
+                      {v.placeName}
+                      {v.isWishlist && (
+                        <span style={{
+                          marginLeft: 6, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em",
+                          color: "var(--accent-food)", background: "transparent", border: "1px solid var(--accent-food)",
+                          borderRadius: 999, padding: "0 5px",
+                        }}>
+                          Want to try
+                        </span>
+                      )}
+                    </td>
                     <td style={{ padding: "7px 8px" }}>
                       {v.rating ? (
                         <span style={{

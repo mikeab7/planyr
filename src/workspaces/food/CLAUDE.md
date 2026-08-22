@@ -31,6 +31,15 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
   which stays service-role-write-only. `lib/foodStore.js`'s `manualPinsFromVisits` groups a
   user's manual visits by (name, rounded lat/lon) so a second visit at the same spot is a
   click on the same pin, not a new one.
+- `food_wishlist` (B669312) — a THIRD table: "want to try" flags. Owner-only RLS, own-row, same
+  shape as `food_visits`. A flag can't live on `food_places` (no `user_id`) and can't be a
+  `food_visits` row (a want-to-try place has zero visits by definition — a row there would
+  corrupt every visit count/average). One row per (user, place) or (user, manual pin), enforced
+  by a unique index, not just the UI. The flag clears automatically the moment a real visit is
+  logged (`FoodApp.jsx`'s `submitVisit`). The "flagged" state is a plain client-side Set built
+  from one small bulk fetch (`fetchAllWishlist`), exactly like `loggedPlaceIds` already is for
+  visits — no RPC join, so `food_places_in_bounds_sampled`/`food_places_search_by_name` are
+  untouched.
 - **Fallback for what the snapshot misses:** `lib/overpass.js` queries OpenStreetMap's
   Overpass API — free, no key. Cached per bbox for the session and **never called from a
   pan/zoom handler**, only from an explicit "search live for more here" press (`FoodMap.jsx`)

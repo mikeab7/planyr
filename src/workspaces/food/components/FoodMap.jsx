@@ -95,6 +95,14 @@
  * exactly that much — i.e. the middle of the VISIBLE (unobstructed) region. This one flyTo path
  * is shared by search AND by list-driven selection (FoodApp's List `onSelect` now sets
  * `flyToTarget` too), so both get the same corrected centring for free.
+ *
+ * ⛔ "WANT TO TRY" (B669312, owner chat block, 2026-08-22: "flag places he has not been to yet, so
+ * the map doubles as a shortlist"). A flagged-but-unvisited place/pin draws HOLLOW (a coloured
+ * ring, no fill — see `addHollowPin` and `COLORS.wishlist`) rather than the filled dot every
+ * visited/rated state uses, so it never competes with the 1-10 rating ramp for meaning. Drawn in
+ * the SAME "his own places" section as `loggedPlaces`/`manualPins` — outside the `tooSmall` gate —
+ * so a shortlist stays visible at the zoom it's actually useful for; FoodApp excludes anything
+ * already visited before it ever reaches this file, so "flagged and visited" never renders twice.
  */
 import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
@@ -163,6 +171,13 @@ const COLORS = {
   unlogged: "#8a8f98",
   logged: "#1D9E75",
   manual: "#E2572B",
+  // "Want to try" (B669312) — a cool blue, deliberately outside the warm cream->deep-red-brown
+  // 1-10 rating ramp (lib/ratingColor.js) and distinct from manual's warm orange, so a hollow
+  // wishlist ring can never be mistaken for a rated step. Drawn HOLLOW (see addHollowPin below),
+  // never filled — visited places keep the rating ramp untouched (owner: "do not touch that
+  // scale"); a flagged-and-visited place never gets this treatment at all (FoodApp already
+  // excludes it from wishlistPlaces/wishlistManualPins).
+  wishlist: "#3B7DDE",
 };
 
 // Matches VisitPanel's own literal width (`position: absolute`, `width: 340`) — the pixel
@@ -184,7 +199,8 @@ function boundsOf(map) {
 const FLY_TO_ZOOM = 16;
 
 export default function FoodMap({
-  places, placesCapped, placesTotalMatched, loggedPlaces, loggedIds, manualPins, overpassPlaces,
+  places, placesCapped, placesTotalMatched, loggedPlaces, loggedIds, manualPins,
+  wishlistPlaces, wishlistManualPins, overpassPlaces,
   onSelectPlace, onSelectManualPin, pinMode, onDropPin, onViewChanged, onRequestSearchHere,
   flyToTarget, selectedKey,
 }) {
@@ -356,6 +372,36 @@ export default function FoodMap({
       m.addTo(layer);
     };
 
+    // "Want to try" (B669312) — an outline/hollow ring, never a filled dot, so it can never be
+    // confused with a rated (or flat logged/manual) place: the visited rating ramp stays
+    // completely untouched. A soft white backing disc keeps the ring legible over dark satellite
+    // imagery without becoming a fill itself — the RING colour is what says "want to try," same
+    // principle as the selected-state halo above.
+    const addHollowPin = (lat, lon, title, onClick, opts = {}) => {
+      const isSelected = opts.key != null && opts.key === selectedKey;
+      const baseRadius = opts.radius ?? 7;
+      if (isSelected) {
+        L.circleMarker([lat, lon], {
+          renderer: layer.options.renderer, radius: baseRadius + 12, weight: 0,
+          fillColor: SELECTED_ACCENT, fillOpacity: 0.22, interactive: false,
+        }).addTo(layer);
+      }
+      L.circleMarker([lat, lon], {
+        renderer: layer.options.renderer, radius: baseRadius, weight: 0,
+        fillColor: "#fff", fillOpacity: 0.35, interactive: false,
+      }).addTo(layer);
+      const m = L.circleMarker([lat, lon], {
+        renderer: layer.options.renderer,
+        radius: isSelected ? baseRadius + 5 : baseRadius,
+        weight: isSelected ? 4 : strokeWeight + 1,
+        color: isSelected ? SELECTED_ACCENT : COLORS.wishlist,
+        fillColor: COLORS.wishlist, fillOpacity: 0,
+      });
+      m.bindTooltip(`${title} · want to try`, { direction: "top", offset: [0, -6] });
+      if (onClick) m.on("click", onClick);
+      m.addTo(layer);
+    };
+
     // HIS places — always drawn, at every zoom, never hidden by the threshold below, always at
     // full size/opacity: they are the point of the map. A RATED place is coloured along the
     // 1-10 ramp so a glance shows where the good ones are; a visited-but-not-yet-rated place
@@ -365,6 +411,15 @@ export default function FoodMap({
     }
     for (const pin of manualPins || []) {
       addPin(pin.lat, pin.lon, colorForRating(pin.avgRating) || COLORS.manual, pin.name, () => onSelectManualPin?.(pin), { key: `pin:${pin.name}` });
+    }
+    // Flagged-but-unvisited places/pins — FoodApp already excludes anything also visited, so
+    // there's never a double-draw here. Survives the zoomed-out gate below (drawn here, outside
+    // the tooSmall-gated block further down) — a shortlist has to be visible at the zoom it's useful.
+    for (const p of wishlistPlaces || []) {
+      addHollowPin(p.lat, p.lon, p.name, () => onSelectPlace?.(p), { key: `place:${p.id}` });
+    }
+    for (const pin of wishlistManualPins || []) {
+      addHollowPin(pin.lat, pin.lon, pin.name, () => onSelectManualPin?.(pin), { key: `pin:${pin.name}` });
     }
 
     // The reference snapshot — a lookup table he reaches into once zoomed to a neighbourhood,
@@ -384,10 +439,10 @@ export default function FoodMap({
         addPin(p.lat, p.lon, COLORS.unlogged, `${p.name} (live search)`, () => onSelectPlace?.(p), { ...REFERENCE_PIN, key: `place:${p.id}` });
       }
     }
-  }, [places, loggedPlaces, loggedIds, manualPins, overpassPlaces, tooSmall, basemap, selectedKey, onSelectPlace, onSelectManualPin]);
+  }, [places, loggedPlaces, loggedIds, manualPins, wishlistPlaces, wishlistManualPins, overpassPlaces, tooSmall, basemap, selectedKey, onSelectPlace, onSelectManualPin]);
 
   const showCappedNotice = !tooSmall && placesCapped;
-  const hasOwnPlaces = (loggedPlaces?.length || 0) + (manualPins?.length || 0) > 0;
+  const hasOwnPlaces = (loggedPlaces?.length || 0) + (manualPins?.length || 0) + (wishlistPlaces?.length || 0) + (wishlistManualPins?.length || 0) > 0;
 
   return (
     <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
@@ -400,7 +455,7 @@ export default function FoodMap({
           textAlign: "center",
         }}>
           {hasOwnPlaces
-            ? "Showing only places you've been — zoom in to browse everywhere else"
+            ? "Showing places you've been or want to try — zoom in to browse everywhere else"
             : "Zoom in to browse restaurants near you"}
         </div>
       )}
