@@ -113,6 +113,24 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V330864 — B651872: a search-select flyTo paints the food map instantly, no zoom/pan needed `Blocker: live-GIS`
+**What was verified here — the mechanism, not the live symptom.** The sandbox's egress proxy blocks the real CARTO/Esri tile hosts this bug needs outright (`curl` to `a.basemaps.cartocdn.com:443` → `403`, gateway policy denial), so the exact reported symptom (real tiles, real network timing, real production build) cannot be reproduced or re-confirmed here. What WAS done instead: root-caused into Leaflet's own source after an isolated repro harness (real `L.tileLayer`, a local Node HTTP tile server with realistic async latency, long/short hops, concurrent marker redraws, simulated `requestAnimationFrame` stalls) failed to reproduce the bug in a vacuum — which is itself evidence the trigger is a genuine Leaflet-internal race (two are named and traced in the code comment and the backlog item) rather than anything reproducible from a blank page. The fix (a forced hard view-reset once the flyTo settles) was validated in that same harness to never error, never loop, and not meaningfully change tile request volume. Full suite green, lint clean, build green.
+**What is NOT proven:** that this actually eliminates the grey-map symptom on the real site, against real tile servers, in a real browser.
+**Steps, each with a named expected result:**
+1. On `planyr.io/#/food`, type a restaurant name in the search bar and click a result far from the current view (cross-metro). **Expect:** the map shows imagery/pins the instant the camera lands — no zoom or pan needed — in both street and satellite basemap.
+2. With the detail panel already open (from step 1), search and select a second, nearby result. **Expect:** the same — painted instantly, panel-already-open included (the specific case flagged as still broken by a size-only fix).
+3. Click a pin directly on the map (no search). **Expect:** unchanged — was never broken, since this path doesn't use `flyTo`.
+4. Report the served bundle hash so this item can confirm the fix is actually live, not merely merged. ⏳ **LIVE APP (planyr.io)** `Blocker: live-GIS`
+
+### V330865 — B651873: /food renders standalone, no planner workspace tabs, on a signed-in session too
+**What was verified here — a real headless Chromium against a `vite preview` build of this branch, signed out (ATTEMPT-BEFORE-YOU-PARK: a logged-out, no-external-GIS UI check is Claude-doable and was driven, not parked).** On `/#/food`: zero `[data-testid^="module-tab-"]` elements render, and none of "Site"/"Schedule"/"Review"/"Library"/"Notes" appear as header button text; a `<header>` and a brand-mark SVG still render (Row 1 — wordmark + account control — kept); the food toolbar's Map/List toggle still renders; as a control, `/#/` (Site) still shows exactly 5 module tabs, unaffected; zero console/page errors across both routes. Bundle audit confirms `FoodApp` still ships as its own lazy chunk (not merged into Site's or the shared entry chunk) and the food route's own byte growth from this specific change is +0.2 KB, well inside its existing headroom. Full suite green (12,005), lint clean, build green.
+**What is NOT proven:** how this looks on the owner's own signed-in production session (nothing in the removed code reads auth state, so a signed-in render isn't expected to differ — but that's a claim about the code, not a live observation).
+**Steps, each with a named expected result:**
+1. On `planyr.io/#/food`, signed in or out. **Expect:** the header shows the Planyr wordmark and the account control, and nothing reading "Site", "Schedule", "Review", "Library", or "Notes" anywhere in the header row.
+2. Confirm there is no way to click into another workspace from `/food` — no tab, no button, no link; the only way out is the browser's back button or typing a different URL.
+3. Navigate to `planyr.io/#/` (or any other workspace) directly. **Expect:** unchanged — the normal five-tab strip still renders exactly as before.
+4. Confirm the food toolbar (Map/List toggle, Drop a pin, search) still works normally. ⏳ **LIVE APP (planyr.io), SIGNED IN**
+
 ### V306880 — B576000: planyr.io/food (no hash) resolves cleanly, on the real deployed edge `Blocker: live-deploy`
 **What was verified here — upgraded mid-session from "sandbox can't reach the edge at all" to a real response FROM the edge.** PR #1079's Cloudflare Pages preview deploy (branch preview `claude-food-place-tracker-rg.planyr.pages.dev`, commit `72a8a2b` — the exact `public/_redirects` this item ships) came back reachable via `curl` (a headless browser hit this sandbox's usual TLS-tunnel wall — the same documented limitation as `*.supabase.co`/`hazards.fema.gov` elsewhere in this file — but a raw HTTP request got through). Direct response headers, straight from Cloudflare's edge, not inferred from the file:
 ```

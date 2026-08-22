@@ -430,6 +430,14 @@ export default function AppHeader({
   // saved cloud work, not anonymous local browsing (which was falsely nagging on
   // mobile). Defaults off so any unwired caller stays silent.
   accountActive = false,
+  // B651873 — /food is a standalone, unlisted route (B575952) that must never look like a page
+  // inside the Site/Schedule/Review/Library/Notes product: it renders its OWN AppHeader instance
+  // (same shared component — the wordmark + account controls in Row 1 are exactly what a
+  // "minimal header" should keep), but Row 2's module-tab strip is the planner's own navigation
+  // and has no business appearing on an easter-egg route nobody is meant to switch INTO or OUT OF
+  // via tabs. Every other caller omits this and is unaffected (defaults true, byte-identical
+  // layout — the toolbar zone was already flex:1 and simply reclaims the tabs' width when absent).
+  showModuleTabs = true,
 }) {
   /* B1173(×2) — `fullscreen` now means exactly one thing: THE BROWSER IS IN FULLSCREEN AND THIS
      HEADER IS THE ONE ON SCREEN. It no longer means "the chrome is collapsed", because the chrome
@@ -850,10 +858,14 @@ export default function AppHeader({
         // explicit ask. Above the breakpoint the original wrap layout is untouched.
         <div className={narrow ? "no-hscrollbar" : undefined} style={{ minHeight: 44, display: "flex", alignItems: "center", flexWrap: narrow ? "nowrap" : "wrap", rowGap: 2, borderTop: `1px solid ${LINE}`, ...rowScroll }}>
           {/* Left zone — module tabs (flex:1, basis 0 — mirrors Row 1 so the center is
-              TRULY centered regardless of how wide the tabs vs the toolbar are) */}
-          <div style={{ display: "flex", alignItems: "stretch", alignSelf: "stretch", paddingLeft: 4, flex: narrow ? "0 0 auto" : 1, minWidth: 0 }}>
-            {moduleTabButtons}
-          </div>
+              TRULY centered regardless of how wide the tabs vs the toolbar are). Omitted
+              entirely when showModuleTabs is false (B651873) — no unrendered spacer, since
+              nothing currently pairs toolbarCenter with a hidden-tabs caller. */}
+          {showModuleTabs && (
+            <div style={{ display: "flex", alignItems: "stretch", alignSelf: "stretch", paddingLeft: 4, flex: narrow ? "0 0 auto" : 1, minWidth: 0 }}>
+              {moduleTabButtons}
+            </div>
+          )}
           {/* Center zone — workspace-supplied center group (shrink-to-content). Narrow: don't
               shrink (ride the row scroll); desktop keeps its original shrinkable `0 1 auto`. */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: narrow ? "0 0 auto" : "0 1 auto", minWidth: 0, gap: 4, padding: "0 8px" }}>
@@ -868,10 +880,15 @@ export default function AppHeader({
       ) : (
         <div className={narrow ? "no-hscrollbar" : undefined} style={{ height: 44, display: "flex", alignItems: "center", borderTop: `1px solid ${LINE}`, ...rowScroll }}>
 
-          {/* Module tabs */}
-          <div style={{ display: "flex", alignItems: "stretch", height: "100%", paddingLeft: 4, flex: "none" }}>
-            {moduleTabButtons}
-          </div>
+          {/* Module tabs — the planner's own workspace navigation. Omitted entirely on a
+              standalone route (B651873, e.g. /food): the toolbar zone below is already
+              flex:1/flex:"1 0 auto" and simply reclaims the width, so the layout is
+              byte-identical for every existing caller (all of which leave this true). */}
+          {showModuleTabs && (
+            <div style={{ display: "flex", alignItems: "stretch", height: "100%", paddingLeft: 4, flex: "none" }}>
+              {moduleTabButtons}
+            </div>
+          )}
 
           {/* Toolbar slot. On a phone the workspace toolbar (undo/redo/snap/select/File…) is
               wider than the screen; desktop clips it with overflow:hidden + flex-shrink, which

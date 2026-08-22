@@ -865,6 +865,30 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     expect(map).toMatch(/\[flyToTarget\?\.nonce\]/);
   });
 
+  it("B651872 — a search-select flyTo forces a hard view reset once it settles, so the tile grid can never stay stale", () => {
+    // A programmatic flyTo can leave Leaflet's own tile-grid positioning stale (traced into
+    // Leaflet's source: GridLayer only computes a zoom level's pixel origin once, at creation,
+    // and can create it mid-flight from a not-yet-settled camera position; separately,
+    // GridLayer._onMoveEnd no-ops entirely while map._animatingZoom is true, a flag flyTo()
+    // never waits for) — reported live as the map painting flat grey until a manual zoom/pan.
+    // A manual zoom/pan "fixes" it because it forces Leaflet's own hard view-reset path
+    // (setView -> _resetView -> 'viewprereset'/'viewreset'), which wipes and rebuilds every
+    // cached tile level fresh. So the flyTo effect forces that SAME reset itself, once, the
+    // moment the flight's own moveend fires — no polling, no setInterval.
+    const map = src("components/FoodMap.jsx");
+    const flyEffect = map.slice(map.indexOf("map.flyTo(shiftedLatLng, targetZoom)") - 400, map.indexOf("map.flyTo(shiftedLatLng, targetZoom)") + 40);
+    expect(flyEffect).toMatch(/map\.once\(\s*"moveend"/);
+    expect(flyEffect).toMatch(/map\.invalidateSize\(/);
+    expect(flyEffect).toMatch(/map\.setView\(map\.getCenter\(\), map\.getZoom\(\), \{ reset: true/);
+    // The reset must be scheduled BEFORE flyTo is called (map.once must be registered ahead of
+    // the call whose moveend it's listening for), and it must never be a poll/interval — the
+    // house rule this item's own brief calls out explicitly ("do not fix it by adding a
+    // blanket setInterval redraw").
+    expect(flyEffect.indexOf("map.once(")).toBeGreaterThanOrEqual(0);
+    expect(flyEffect.indexOf("map.once(")).toBeLessThan(flyEffect.indexOf("map.flyTo(shiftedLatLng, targetZoom)"));
+    expect(map).not.toMatch(/setInterval/);
+  });
+
   it("the live-Overpass path is REUSED, not duplicated — offered inline only when the snapshot has few/no good matches", () => {
     const box = src("components/SearchBox.jsx");
     expect(box).toMatch(/onRequestLiveSearch\(\)/); // the same searchHere already wired to the existing button
