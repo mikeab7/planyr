@@ -617,7 +617,10 @@ describe("NEW-5 (revised) — colourful basemap, no clustering, his places alway
     expect(hisPlacesBlock).not.toContain("REFERENCE_PIN");
     const gatedBlock = drawEffect.slice(drawEffect.indexOf("if (!tooSmall)"));
     const refCalls = [...gatedBlock.matchAll(/REFERENCE_PIN/g)];
-    expect(refCalls.length).toBe(2); // the snapshot pass and the live-search pass
+    // The snapshot pass, the live-search pass, and (B651872 ×3) the selected-place fallback —
+    // which reuses the SAME small/transparent treatment since it represents the same kind of
+    // place (unvisited, unflagged), just not yet present in the bounds-scoped snapshot.
+    expect(refCalls.length).toBe(3);
   });
 });
 
@@ -869,9 +872,28 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     const map = src("components/FoodMap.jsx");
     // Flies to a PANEL-OFFSET point derived from the target (see the panel-aware-centring
     // describe block below), not the raw [lat, lon] directly — map.project/unproject shift it.
-    expect(map).toMatch(/map\.flyTo\(shiftedLatLng, targetZoom\)/);
+    expect(map).toMatch(/map\.flyTo\(shiftedLatLng, targetZoom, \{ duration: FLY_DURATION_SEC \}\)/);
     expect(map).toMatch(/map\.project\(\[flyToTarget\.lat, flyToTarget\.lon\], targetZoom\)/);
     expect(map).toMatch(/\[flyToTarget\?\.nonce\]/);
+  });
+
+  it("B651872 (×3) — the flyTo duration is a fixed cap, not Leaflet's own distance-proportional default", () => {
+    // Root-caused live (see the header comment): Leaflet's own flyTo computes a duration from
+    // real-world distance with no cap — measured at ~7.8s for Houston->Maui, sweeping through
+    // every intermediate integer zoom level along the way and painting flat grey for the whole
+    // stretch. A fixed, short duration (measured to match what a local jump already takes
+    // naturally) removes the multi-second window entirely, for every jump, without a redraw or
+    // a timer.
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/const FLY_DURATION_SEC = 1\.5;/);
+    expect(map).toMatch(/duration: FLY_DURATION_SEC/);
+    // Not a bounds-fit — zoomSnap/zoomDelta stay Leaflet's untouched defaults, and the target
+    // zoom passed to flyTo is always a literal integer (Math.max of two integers), never
+    // computed from a fitBounds call anywhere in this file.
+    expect(map).not.toMatch(/zoomSnap:/);
+    expect(map).not.toMatch(/zoomDelta:/);
+    expect(map).not.toMatch(/\.fitBounds\(/); // no fitBounds CALL anywhere — the word appears only in this item's own explanatory comment
+    expect(map).toMatch(/const targetZoom = Math\.max\(map\.getZoom\(\), FLY_TO_ZOOM\);/);
   });
 
   it("B651872 — a search-select flyTo forces a hard view reset once it settles, so the tile grid can never stay stale", () => {
@@ -885,7 +907,8 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     // cached tile level fresh. So the flyTo effect forces that SAME reset itself, once, the
     // moment the flight's own moveend fires — no polling, no setInterval.
     const map = src("components/FoodMap.jsx");
-    const flyEffect = map.slice(map.indexOf("map.flyTo(shiftedLatLng, targetZoom)") - 400, map.indexOf("map.flyTo(shiftedLatLng, targetZoom)") + 40);
+    const flyCallIdx = map.indexOf("map.flyTo(shiftedLatLng, targetZoom,");
+    const flyEffect = map.slice(flyCallIdx - 400, flyCallIdx + 80);
     expect(flyEffect).toMatch(/map\.once\(\s*"moveend"/);
     expect(flyEffect).toMatch(/map\.invalidateSize\(/);
     expect(flyEffect).toMatch(/map\.setView\(map\.getCenter\(\), map\.getZoom\(\), \{ reset: true/);
@@ -894,7 +917,7 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     // house rule this item's own brief calls out explicitly ("do not fix it by adding a
     // blanket setInterval redraw").
     expect(flyEffect.indexOf("map.once(")).toBeGreaterThanOrEqual(0);
-    expect(flyEffect.indexOf("map.once(")).toBeLessThan(flyEffect.indexOf("map.flyTo(shiftedLatLng, targetZoom)"));
+    expect(flyEffect.indexOf("map.once(")).toBeLessThan(flyEffect.indexOf("map.flyTo(shiftedLatLng, targetZoom,"));
     // A CALL is what the house rule bans — not the word itself, which the B651872 (×2) recurrence's
     // own explanatory comment (of a DIFFERENT setInterval-shaped fix it deliberately avoided)
     // legitimately needs to name in prose.
@@ -1077,13 +1100,36 @@ describe("selected-place highlight — unmistakable pin, tied panel, centred pan
     expect(refKeys.length).toBeGreaterThanOrEqual(3); // his logged places + reference snapshot + overpass
   });
 
+  it("B651872 (×3) — a selected place with no pin yet (search-selected, not in the bounds-scoped snapshot) still gets ONE fallback pin, from FoodApp's own coordinates", () => {
+    // Owner's explicit ask: confirm whether the selected marker renders at the landing zoom, and
+    // say so plainly if it does not, rather than filing it as fixed. It did not — a place found
+    // via search but never visited/flagged only ever draws from `places` (bounds-scoped,
+    // refetched on 'moveend'), so right after a jump, before that refetch lands, there was
+    // nothing to attach the selection highlight to.
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/selectedPlaceInfo/);
+    expect(map).toMatch(/let selectedDrawn = false;/);
+    // Every addPin/addHollowPin call marks selectedDrawn when it draws the selected key, so the
+    // fallback can tell whether it's still needed.
+    expect(map).toMatch(/if \(isSelected\) selectedDrawn = true;/);
+    const fallback = map.slice(map.indexOf("if (selectedKey && !selectedDrawn"));
+    expect(fallback).toMatch(/selectedPlaceInfo\?\.lat != null && selectedPlaceInfo\?\.lon != null/);
+    expect(fallback).toMatch(/key: selectedKey/); // reuses the SAME key scheme, never a special-cased one
+    // FoodApp actually threads selectedPlaceInfo through as a prop, sourced from the search
+    // result's own lat/lon — never re-derived or re-fetched.
+    const app = src("FoodApp.jsx");
+    expect(app).toMatch(/const selectedPlaceInfo = selected\?\.kind === "place"/);
+    expect(app).toMatch(/lat: selected\.place\.lat, lon: selected\.place\.lon, name: selected\.place\.name/);
+    expect(app).toMatch(/selectedPlaceInfo=\{selectedPlaceInfo\}/);
+  });
+
   it("the fly-to pan offsets the destination by half the panel's width — lands in the VISIBLE area, not the raw map centre", () => {
     const map = src("components/FoodMap.jsx");
     expect(map).toMatch(/const PANEL_WIDTH = 340;/); // matches VisitPanel's own literal width
     expect(map).toMatch(/const panelOffsetPx = Math\.min\(PANEL_WIDTH, containerWidth \* 0\.8\) \/ 2;/);
     expect(map).toMatch(/map\.project\(\[flyToTarget\.lat, flyToTarget\.lon\], targetZoom\)/);
     expect(map).toMatch(/targetPoint\.add\(\[panelOffsetPx, 0\]\)/);
-    expect(map).toMatch(/map\.flyTo\(shiftedLatLng, targetZoom\)/);
+    expect(map).toMatch(/map\.flyTo\(shiftedLatLng, targetZoom, \{ duration: FLY_DURATION_SEC \}\)/);
   });
 
   it("selecting from the LIST also sets flyToTarget with real lat/lon — not just from search", () => {

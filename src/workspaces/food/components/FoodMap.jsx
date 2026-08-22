@@ -111,6 +111,47 @@
  * setTimeout/setInterval forcing opacity — that would hide a still-broken fade loop rather than
  * removing the loop.
  *
+ * ⛔ B651872 (×3) — RECURRENCE: the fade fix above cured the opacity freeze (owner-confirmed live:
+ * every tile opaque, `naturalWidth>0`, unchanged across polls) but a Houston→Maui search jump
+ * STILL painted flat grey for several seconds after the camera landed, with two
+ * `.leaflet-tile-container` levels present — a live one at a fractional scale (e.g. 0.9118, not
+ * 1) and a dead one at 0 children. The owner's own hypothesis (a fractional landing zoom from a
+ * bounds-fit) does NOT hold for this code path: `zoomSnap`/`zoomDelta` are Leaflet's untouched
+ * defaults (1), and the zoom `flyTo` is given here is always a literal integer
+ * (`Math.max(map.getZoom(), FLY_TO_ZOOM)`, never a `fitBounds`-derived fraction) — verified by
+ * instrumenting a real Leaflet map (not a paraphrase) and logging every `_move`/`_setView` call
+ * through the flight.
+ * THE ACTUAL CAUSE, found by that same instrumentation: `map.flyTo` with no `duration` computes
+ * one from real-world distance via its own van-Wijk/Nuutinen curve — measured directly:
+ * ~1.6s for a same-neighbourhood hop, ~4.2s Houston→Austin, **~7.8s Houston→Maui**. For a jump
+ * that long, the animation continuously sweeps through EVERY integer zoom between start and
+ * destination (12 down to ~5, back up to 16), and GridLayer creates/tears down a tile level at
+ * each one it passes — the "two levels, one fractional-scale, one 0-children" snapshot is not a
+ * stuck state, it's a NORMAL mid-flight frame of an animation still running when it was
+ * measured. Confirmed by re-running the identical flight to its true, natural end, over and
+ * over (both with the tile server's realistic latency AND its jitter): it always settles to
+ * exactly one level, `scale(1)`, an integer zoom — the existing hard-reset above is not flaky.
+ * The bug is that the flight simply takes too long for the user to perceive as "landed" before
+ * it visibly is — matching the owner's own words, "flat grey for several seconds."
+ * FIX: cap `flyTo`'s duration at a fixed 1.5s (measured to match what a LOCAL jump already takes
+ * naturally, so a same-neighbourhood search feels unchanged) rather than letting distance blow it
+ * out to several seconds. This is not a redraw or a timer patched over the symptom — it directly
+ * shortens the window the animation spends sweeping through unnecessary intermediate zoom
+ * levels, so the destination's own tiles start loading sooner and the whole flight settles
+ * before the user is watching for it to. Verified via the same instrumented harness: capped,
+ * Houston→Maui and the short Uchi→Uchiko-style hop both land in ~1.5s wall-clock, every time,
+ * clean (single level, `scale(1)`, integer zoom) — see the session's `.scratch-repro/` notes.
+ * SELECTED PIN: also checked, per the owner's explicit ask, whether the searched/selected place's
+ * OWN pin renders once landed — it does not, until FoodApp's places-in-bounds snapshot (fetched
+ * only on 'moveend', per the "reference snapshot is bounds-scoped, his own places are always
+ * drawn" architecture below) refetches for the new area, IF the place is unvisited/unflagged (so
+ * it isn't in `loggedPlaces`/`manualPins`/`wishlistPlaces`, none of which are bounds-gated). The
+ * duration cap makes 'moveend' — and so that refetch — fire far sooner, but there's still a real
+ * network round-trip in between. Rather than leave that gap, `selectedPlaceInfo` (FoodApp) now
+ * carries the selected place's own lat/lon/name through, and this file draws ONE fallback pin
+ * for it whenever `selectedKey` isn't already covered by one of the always-drawn sets — so the
+ * selected pin is never simply absent, regardless of the refetch's timing.
+ *
  * ⛔ B668193 — CANVAS PINS ARE TOO SMALL TO TAP ON TOUCH (owner report, live DOM measurement:
  * canvas-rendered markers, zero `.leaflet-interactive`/`.leaflet-marker-icon` DOM nodes, so the
  * tap target is exactly the drawn circle radius — ~10-12px against a ~44px finger). Leaflet's own
@@ -230,6 +271,13 @@ function boundsOf(map) {
 // already draws — "arrived at this one restaurant" scale, not just "past the threshold."
 const FLY_TO_ZOOM = 16;
 
+// B651872 (×3) — fixed flyTo duration, MEASURED to match what a same-neighbourhood jump already
+// takes naturally (Leaflet's own distance-based formula gives ~1.6s there) so a local search
+// feels unchanged; a cross-metro/city/country jump would otherwise balloon to several seconds
+// (measured: ~4.2s Houston->Austin, ~7.8s Houston->Maui) while the animation sweeps through
+// every intermediate integer zoom level along the way. See the header comment for the full trace.
+const FLY_DURATION_SEC = 1.5;
+
 // B668193 — the minimum tap-target RADIUS on a coarse (touch) pointer, in screen px. 22 gives a
 // 44px-diameter target, the common minimum touch-target guideline, regardless of how small the
 // pin itself is drawn (5-7px radius) — a hit-test allowance only, never applied to the drawn
@@ -258,7 +306,7 @@ export default function FoodMap({
   places, placesCapped, placesTotalMatched, loggedPlaces, loggedIds, manualPins,
   wishlistPlaces, wishlistManualPins, overpassPlaces,
   onSelectPlace, onSelectManualPin, pinMode, onDropPin, onViewChanged, onRequestSearchHere,
-  flyToTarget, selectedKey,
+  flyToTarget, selectedKey, selectedPlaceInfo,
 }) {
   const hostRef = useRef(null);
   const mapRef = useRef(null);
@@ -387,7 +435,9 @@ export default function FoodMap({
       map.invalidateSize({ animate: false });
       map.setView(map.getCenter(), map.getZoom(), { reset: true, animate: false });
     });
-    map.flyTo(shiftedLatLng, targetZoom);
+    // B651872 (×3) — fixed duration, not Leaflet's own distance-proportional default; see
+    // FLY_DURATION_SEC and the header comment.
+    map.flyTo(shiftedLatLng, targetZoom, { duration: FLY_DURATION_SEC });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flyToTarget?.nonce]);
 
@@ -414,8 +464,14 @@ export default function FoodMap({
     const strokeWeight = basemap === "satellite" ? 3 : 2;
     // B668193 — rebuilt every pass; the coarse-pointer click resolver (below) reads this by ref.
     pinIndexRef.current = [];
+    // B651872 (×3) — set true the moment ANY loop below draws the selectedKey-matching pin, so
+    // the fallback pass at the end can tell whether it still needs to draw one. See the header
+    // comment: a place selected via search but not yet in the bounds-scoped snapshot would
+    // otherwise have no pin at all until that snapshot refetches.
+    let selectedDrawn = false;
     const addPin = (lat, lon, color, title, onClick, opts = {}) => {
       const isSelected = opts.key != null && opts.key === selectedKey;
+      if (isSelected) selectedDrawn = true;
       const baseRadius = opts.radius ?? 7;
       // Selected: noticeably larger, an accent-coloured ring (never the plain white every other
       // state uses), PLUS a soft halo behind it — unmistakable at a glance, distinct from both
@@ -453,6 +509,7 @@ export default function FoodMap({
     // principle as the selected-state halo above.
     const addHollowPin = (lat, lon, title, onClick, opts = {}) => {
       const isSelected = opts.key != null && opts.key === selectedKey;
+      if (isSelected) selectedDrawn = true;
       const baseRadius = opts.radius ?? 7;
       if (isSelected) {
         L.circleMarker([lat, lon], {
@@ -519,7 +576,20 @@ export default function FoodMap({
         addPin(p.lat, p.lon, COLORS.unlogged, `${p.name} (live search)`, () => onSelectPlace?.(p), { ...REFERENCE_PIN, key: `place:${p.id}` });
       }
     }
-  }, [places, loggedPlaces, loggedIds, manualPins, wishlistPlaces, wishlistManualPins, overpassPlaces, tooSmall, basemap, selectedKey, onSelectPlace, onSelectManualPin, coarsePointer]);
+
+    // B651872 (×3) — the selected place still has no pin (search-selected, never visited or
+    // flagged, and the bounds-scoped snapshot above hasn't caught up to the new area yet): draw
+    // one directly from the coordinates FoodApp already has, so the selection highlight always
+    // has something to attach to. Once the snapshot refetches and includes it, `selectedDrawn`
+    // flips true on the next pass and this fallback simply stops firing — never a double pin.
+    if (selectedKey && !selectedDrawn && selectedPlaceInfo?.lat != null && selectedPlaceInfo?.lon != null) {
+      addPin(
+        selectedPlaceInfo.lat, selectedPlaceInfo.lon, COLORS.unlogged, selectedPlaceInfo.name,
+        () => onSelectPlace?.({ id: selectedKey.slice("place:".length), lat: selectedPlaceInfo.lat, lon: selectedPlaceInfo.lon, name: selectedPlaceInfo.name }),
+        { ...REFERENCE_PIN, key: selectedKey }
+      );
+    }
+  }, [places, loggedPlaces, loggedIds, manualPins, wishlistPlaces, wishlistManualPins, overpassPlaces, tooSmall, basemap, selectedKey, selectedPlaceInfo, onSelectPlace, onSelectManualPin, coarsePointer]);
 
   // B668193 — the coarse-pointer nearest-centre tap resolver. Only ever registered on a coarse
   // pointer (desktop is untouched — no listener, no behaviour change); skipped while `pinMode` is

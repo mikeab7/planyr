@@ -274,6 +274,16 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     : selected?.kind === "manualPin" ? `pin:${selected.pin.name}`
     : null;
 
+  // B651872 (×3) — a place selected from search (never visited, never flagged) draws ONLY from
+  // the bounds-scoped reference snapshot (`places`, refetched on 'moveend' once the flight
+  // lands) — everything else the map always draws (his own logged/manual/wishlist places) is
+  // NOT bounds-gated. So right after a search jump, before that refetch lands, the selected
+  // place has no pin at all to attach its highlight to. Passed through so FoodMap can draw ONE
+  // fallback pin for it — see FoodMap.jsx's marker-redraw effect.
+  const selectedPlaceInfo = selected?.kind === "place"
+    ? { lat: selected.place.lat, lon: selected.place.lon, name: selected.place.name }
+    : null;
+
   // Whether the CURRENTLY SELECTED place/pin is flagged (B669312) — drives the panel's toggle
   // button state, the one thing that has to be "obvious at a glance" per the brief.
   const wishlistedForSelected = useMemo(() => {
@@ -374,6 +384,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
             onRequestSearchHere={searchHere}
             flyToTarget={flyToTarget}
             selectedKey={selectedKey}
+            selectedPlaceInfo={selectedPlaceInfo}
           />
         ) : (
           <VisitList
