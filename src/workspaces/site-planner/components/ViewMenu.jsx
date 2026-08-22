@@ -98,7 +98,7 @@ function GridNumInput({ value, min = 1, max = 1000, style, onCommit }) {
   );
 }
 
-export default function ViewMenu({ open, onToggle, settings, setSnap, patchSettings, pal, counts }) {
+export default function ViewMenu({ open, onToggle, settings, setSnap, patchSettings, pal, counts, elementsReady = true }) {
   const row = { display: "flex", gap: 7, alignItems: "center", cursor: "pointer", fontSize: 12.5, color: pal.ink, padding: "3px 0" };
   const numInput = { width: 52, padding: "4px 6px", fontSize: 12, fontFamily: "inherit", color: pal.ink, background: "var(--surface-raised)", border: `1px solid ${pal.panelLine}`, borderRadius: RADIUS.sm };
   const sectionHead = { fontSize: 9.5, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: pal.muted, margin: "9px 0 3px" };
@@ -166,7 +166,21 @@ export default function ViewMenu({ open, onToggle, settings, setSnap, patchSetti
             </div>
           )}
 
-          {(groups.elRows.length > 0 || groups.otherRows.length > 0) && (
+          {/* ⛔ B558064 — WHILE THE PLAN'S ELEMENTS ARE STILL LOADING, SAY SO — NEVER READ A
+              MID-LOAD `counts` AS "THIS PLAN HAS NOTHING TO HIDE". A signed-in plan's cloud
+              header carries no elements at all (they live in `site_elements` rows — B672), so
+              `counts.els`/`parcels`/… are genuinely empty for the second or two between opening
+              a plan and its rows landing. Reading that as "empty plan" used to make this whole
+              section vanish, leaving only the Detail/Labels ornament toggles below — which is
+              structurally the OLD pre-B653 menu minus dock doors, and reads as a stuck build.
+              Once `elementsReady` flips true this placeholder is replaced by the real rows (or
+              by nothing at all, correctly, for a plan that truly has no content). */}
+          {!elementsReady ? (
+            <>
+              <div style={sectionHead}>Content</div>
+              <div style={{ fontSize: 11.5, color: pal.muted, padding: "3px 0" }}>Loading what's on this plan…</div>
+            </>
+          ) : (groups.elRows.length > 0 || groups.otherRows.length > 0) && (
             <>
               <div style={sectionHead}>Content</div>
               {groups.elRows.length > 0 && (

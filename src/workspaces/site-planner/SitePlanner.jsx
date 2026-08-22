@@ -3961,6 +3961,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // remounts this component (loadEpoch), so keying the engine on [siteId] is sufficient.
   const elSyncRef = useRef(null);
   const [elemSync, setElemSync] = useState({ state: "idle", pending: 0 });
+  /* NEW-1 (B558064) — WHETHER THIS PLAN'S ELEMENTS HAVE FINISHED LOADING FROM THEIR
+   * AUTHORITATIVE SOURCE. Signed-out / local-only plans need no rows fetch — `els` above is
+   * already the whole story the moment `restored` was read, so this starts `true` for them.
+   * A cloud-active plan is different: the cloud header (`slimForCloud`) deliberately carries
+   * NO elements (they live in `site_elements` rows — B672), so on every open of a signed-in
+   * plan `els`/`parcels`/etc. read as EMPTY until the rows engine's first `refetchReplace`
+   * lands. That window is real and can be seconds on a heavy plan or a slow connection — see
+   * the ViewMenu `elementsReady` prop for what it was silently doing to the View card. */
+  const [elementsReady, setElementsReady] = useState(() => !isCloudActive());
   // Reflect an engine-assigned z back onto the canvas element so render/hit-test (byZ) and the
   // committed row's z_index + data.z all agree. One of the five collection setters by kind.
   const applyZPatch = (kind, id, patch) => {
@@ -4126,6 +4135,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // and feed the SAME reconciled rows to seed + rowsToModel so shadow and canvas stay in lockstep.
     const rows = reconcileSeedRows(r.rows, eng.shadowSnapshot(), eng.tombstonedSnapshot());
     eng.seed(rows);
+    // B558064 — the plan's elements are now genuinely known, not just "empty until proven
+    // otherwise". A no-op on every reconnect/tab-wake refetch after the first (setState bails
+    // out on an unchanged value), so this costs nothing beyond the first successful seed.
+    setElementsReady(true);
     // NEW-4 — the rows read path now runs the bonded-child heal too, so an assembly torn apart on
     // disk (a building committed away from its own truck court) is re-fitted to its host the moment
     // the plan is read, not left broken across every reload. Report what was healed — a silent
@@ -4236,8 +4249,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!isCloudActive() || !siteId || !supabase) {
       if (elSyncRef.current) { elSyncRef.current.stop(); elSyncRef.current = null; }
       setElemSync({ state: "idle", pending: 0 });
+      // No rows engine applies — `els`/`parcels`/etc. are already whatever `loadSite` read
+      // synchronously, which is the whole story for a signed-out/local plan.
+      setElementsReady(true);
       return;
     }
+    // A cloud-active plan starts NOT ready on every site switch (incl. this effect's own
+    // remount) until its own first successful rows seed lands in `refetchReplace` below.
+    setElementsReady(false);
     const eng = createElementSync({
       siteId,
       // B1120 — MUST forward `opts`. This adapter took only `(ops)` and called commitElements with
@@ -21481,7 +21500,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 of the canvas and can no longer say what to turn back on. */}
             <ViewMenu open={viewMenuOpen} onToggle={() => setViewMenuOpen((o) => !o)} settings={settings}
               setSnap={setSnap} patchSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} pal={PAL}
-              counts={{ els, parcels: parcels.length, markups: markups.length, measures: measures.length, callouts: callouts.length }} />
+              counts={{ els, parcels: parcels.length, markups: markups.length, measures: measures.length, callouts: callouts.length }}
+              elementsReady={elementsReady} />
           </div>
           {/* Layers control — same shared layers as the map finder. ALWAYS rendered
               (B693): an unlocated plan gets the control DISABLED with the plain reason
