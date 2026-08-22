@@ -265,6 +265,30 @@ export default function FoodMap({
   // Keyed on flyToTarget.nonce (not just lat/lon) so re-selecting the SAME result twice in a row
   // still flies — two identical lat/lon values wouldn't otherwise re-trigger a dependency-array
   // effect.
+  //
+  // ⛔ B651872 — WHY A HARD RESET FOLLOWS EVERY flyTo (owner report: the map painted flat grey
+  // the instant a search result landed, until one manual zoom/pan click). Traced into Leaflet's
+  // own source (GridLayer + Map.flyTo), not guessed:
+  //   1. `GridLayer._updateLevels()` only computes a zoom level's pixel `origin` the FIRST time
+  //      that level is created — never again while the level object survives. `flyTo`'s own
+  //      animation frame loop can create the destination zoom's level mid-flight (or reuse one
+  //      created long before this flight even started, for a same-zoom hop), baking `origin`
+  //      from a not-yet-settled camera position.
+  //   2. `GridLayer._onMoveEnd` no-ops entirely while `map._animatingZoom` is true — a flag
+  //      `flyTo()` never checks or waits for, unlike `setView`, which calls `_stop()` first.
+  //      A zoom gesture (wheel/+−/double-click) still finishing when a search result is picked
+  //      can leave that flag set into the flyTo, silently dropping the tile-grid update.
+  // Both are races only `flyTo` can hit (a direct pin click never moves the camera; a manual
+  // zoom/pan is exactly what "fixes" it live, because `setView`'s non-animated path forces a
+  // full `_resetView`). Rather than chase each race individually, force the SAME hard reset a
+  // manual interaction gets, once, when the flight settles: `setView(sameCenter, sameZoom,
+  // {reset:true})` fires Leaflet's own 'viewprereset' → 'viewreset' pair, which wipes every
+  // cached tile level and rebuilds it fresh from the truly-final view — no polling, no interval,
+  // one call per selection. `invalidateSize()` alongside it is belt-and-braces for the case the
+  // container itself was resized while off-screen (Leaflet never learns of a resize on a hidden
+  // element). Verified in an isolated Leaflet harness (real img tileLayer, real async tile
+  // loads, long + short hops, concurrent marker redraws) that this never errors, never loops,
+  // and doesn't meaningfully change tile request volume — see the session's repro notes.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !flyToTarget) return;
@@ -279,6 +303,10 @@ export default function FoodMap({
     const panelOffsetPx = Math.min(PANEL_WIDTH, containerWidth * 0.8) / 2;
     const targetPoint = map.project([flyToTarget.lat, flyToTarget.lon], targetZoom);
     const shiftedLatLng = map.unproject(targetPoint.add([panelOffsetPx, 0]), targetZoom);
+    map.once("moveend", () => {
+      map.invalidateSize({ animate: false });
+      map.setView(map.getCenter(), map.getZoom(), { reset: true, animate: false });
+    });
     map.flyTo(shiftedLatLng, targetZoom);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flyToTarget?.nonce]);

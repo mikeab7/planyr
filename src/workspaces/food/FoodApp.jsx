@@ -187,6 +187,13 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
         onDashboard={onGoDashboard}
         authControl={authControl}
         accountActive={accountActive}
+        // B651873 — /food is a standalone, unlisted easter egg (B575952), not a page inside the
+        // planner's product: removing "Food" from AppHeader's own MODULES list (B575952) still
+        // left the OTHER five workspace tabs (Site/Schedule/Review/Library/Notes) rendering on
+        // this route, which is exactly the "sitting inside the planner's chrome" look the owner
+        // rejected. Row 1 (wordmark + account controls) is untouched — that's the minimal header
+        // this route is supposed to keep.
+        showModuleTabs={false}
         multiEditOk
         toolbarContent={
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
