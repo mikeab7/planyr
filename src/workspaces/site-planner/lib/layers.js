@@ -1138,6 +1138,21 @@ export async function probeService(url, opts) {
   return result;
 }
 
+/* NEW-2 (B323424 ×2, owner report 2026-08-22 — Goose Creek, Baytown) — how many features an
+ * `esriFeature` FeatureLayer currently holds, so its "load" event can report an honest "empty"
+ * instead of an unconditional "loaded". esri-leaflet exposes no public count accessor; its
+ * FeatureManager mixin tracks the current viewport's feature ids in `_currentSnapshot`
+ * (node_modules/esri-leaflet/src/Layers/FeatureLayer/FeatureManager.js), which this file already
+ * reaches into private esri-leaflet fields elsewhere (`lyr._currentImage`, `lyr._map`) — same
+ * pattern, guarded the same way. `null` means "couldn't tell" (a shape the private field didn't
+ * have), which the caller treats as "loaded" rather than guessing empty. */
+function featureLayerCount(lyr) {
+  try {
+    const snap = lyr && lyr._currentSnapshot;
+    return Array.isArray(snap) ? snap.length : null;
+  } catch (_) { return null; }
+}
+
 /* esri-leaflet FeatureLayer retry/backoff (NEW-5/B287). Wires the pure retry policy
  * (featureRetryDecision in layerRequest.js) onto a live FeatureLayer: esri-leaflet
  * issues its own GeoJSON queries with no retry of its own, so a single transient
@@ -1145,7 +1160,17 @@ export async function probeService(url, opts) {
  * (H-GAC), County boundaries (TxDOT) — would otherwise drop the whole layer to "failed"
  * (both threw transient 503s live 2026-06-20). Re-issue via refresh() with exponential
  * backoff; hold the dot at "loading" while retrying; report "failed" only once we give
- * up; a successful 'load' resets the counter. */
+ * up; a successful 'load' resets the counter.
+ *
+ * ⛔ NEW-2 (B323424 ×2) — a "load" used to report "loaded" unconditionally, whether or not the
+ * query actually returned any features. Every `esriFeature` layer (EPA Superfund/RCRA, Rail
+ * lines, faults, AADT, airports, transmission lines, substations, road authority — the whole
+ * kind) therefore showed a solid "loaded" dot over an empty map with no signal at all: the exact
+ * "checked box, filled dot, empty map" failure B323424 exists to prevent, just from a missing
+ * feature-count check rather than a missing zoom gate. `layerZoomGate.layerVisibility` already
+ * knows how to turn a `status.state === "empty"` into the dormant-blank row — it just never
+ * received one from this kind. `featureLayerCount` returning `null` (a private-field shape we
+ * didn't expect) falls back to "loaded" rather than guessing "empty". */
 export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
   let tries = 0, timer = null;
   // B557: clear a pending retry timer when the layer is removed (toggled off), so a backoff
@@ -1153,7 +1178,11 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
   // map.removeLayer) and chain the original. Matches the evidenceLayers.js onRemove cleanup pattern.
   const origOnRemove = lyr.onRemove;
   lyr.onRemove = function (map) { clearTimeout(timer); if (origOnRemove) return origOnRemove.call(this, map); };
-  lyr.on("load", () => { tries = 0; onStatus && onStatus(k, "loaded"); });
+  lyr.on("load", () => {
+    tries = 0;
+    const n = featureLayerCount(lyr);
+    onStatus && onStatus(k, n === 0 ? "empty" : "loaded", n === 0 ? "No features in this view." : null);
+  });
   lyr.on("requesterror", (e) => {
     const code = e && e.error && (e.error.code ?? e.error.httpStatus);
     const { retry, delayMs } = featureRetryDecision(code, tries, max);
@@ -1520,7 +1549,15 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
             // boundaries would otherwise drop the layer on a single hiccup.
             attachFeatureRetry(lyr, k, cfg, onStatus);
             if (lyr.setOpacity) lyr.setOpacity(st.opacity);
-            lyr.addTo(map); refs[k] = lyr; onStatus && onStatus(k, "loaded");
+            lyr.addTo(map); refs[k] = lyr;
+            // NEW-2 (B323424 ×2) — "loading", not "loaded": the query esri-leaflet just kicked
+            // off hasn't answered yet, so reporting "loaded" here is a claim about data we don't
+            // have. `attachFeatureRetry`'s own "load"/"requesterror" listeners (registered above,
+            // before this addTo) settle the dot honestly once the fetch actually completes —
+            // "loaded" with real features, "empty" with a genuine zero-feature answer, or
+            // "failed" if it never comes back. Same principle already applied to the raster
+            // fallback branch a few lines below this one.
+            onStatus && onStatus(k, "loading");
           } else {
             // Raster export-image layer (FEMA/wetlands/utilities). Route it through the B445
             // cache proxy by default; build a direct-to-agency layer as the fallback.

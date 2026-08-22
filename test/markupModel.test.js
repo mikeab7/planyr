@@ -183,6 +183,46 @@ describe("Site Planner { tip|tips, box } callout shape (usesTipBox, B919)", () =
     expect(moved.box).toEqual({ x: 110, y: -40 });
     expect(moved.tips).toEqual([{ x: 100, y: -50 }, { x: 105, y: -45 }]);
   });
+
+  // NEW-1 (two-segment leader, owner report 2026-08-22) — a pinned elbow is a real world point
+  // like a tip, so translate must carry it along or a copy/paste/multi-select drag strands it.
+  describe("two-segment leader: a pinned elbow (NEW-1)", () => {
+    it("a callout with no elbow field is untouched by translate — nothing on an existing plan moves", () => {
+      const c = { id: "c1", tip: { x: 0, y: 0 }, box: { x: 10, y: 10 }, text: "hi" };
+      const moved = translate(c, 100, -50);
+      expect(moved.elbow).toBeUndefined();
+      expect(moved.elbows).toBeUndefined();
+    });
+    it("translate moves a singular pinned elbow with the box and tip", () => {
+      const c = { id: "c1", tip: { x: 0, y: 0 }, elbow: { x: -5, y: 0 }, box: { x: 10, y: 10 }, text: "hi" };
+      const moved = translate(c, 100, -50);
+      expect(moved.elbow).toEqual({ x: 95, y: -50 });
+      expect(moved.tip).toEqual({ x: 100, y: -50 });
+    });
+    it("translate moves a per-leader elbows[] array, leaving an unset leader's slot alone", () => {
+      const c = { id: "c3", tips: [{ x: 0, y: 0 }, { x: 5, y: 5 }], elbows: [{ x: -5, y: 0 }, null], box: { x: 10, y: 10 }, text: "hi" };
+      const moved = translate(c, 100, -50);
+      expect(moved.elbows).toEqual([{ x: 95, y: -50 }, null]);
+    });
+    it("removeCalloutLeader shifts a later leader's elbow down to the removed index, never mixing them up", () => {
+      const c = {
+        id: "c3", tips: [{ x: 0, y: 0 }, { x: 5, y: 5 }, { x: 8, y: 2 }],
+        elbows: [{ x: -1, y: 0 }, { x: -2, y: 0 }, { x: -3, y: 0 }], // one distinct elbow per leader
+        box: { x: 10, y: 10 }, text: "hi",
+      };
+      const c2 = removeCalloutLeader(c, 1); // remove the MIDDLE leader
+      expect(c2.tips).toEqual([{ x: 0, y: 0 }, { x: 8, y: 2 }]);
+      // leader 0's elbow stays put; the old leader 2's elbow slides into slot 1 with it — never
+      // the removed leader's elbow bleeding onto its neighbour.
+      expect(c2.elbows).toEqual([{ x: -1, y: 0 }, { x: -3, y: 0 }]);
+    });
+    it("removing the only leader drops its stale pinned elbow so a later add can't inherit it", () => {
+      const c = { id: "c1", tip: { x: 0, y: 0 }, elbow: { x: -5, y: 0 }, box: { x: 10, y: 10 }, text: "hi" };
+      const c2 = removeCalloutLeader(c, 0);
+      expect(c2.noLeader).toBe(true);
+      expect(c2.elbow).toBeUndefined();
+    });
+  });
   it("bboxOfMarkup covers every tip and the box", () => {
     const c = { id: "c3", tips: [{ x: -5, y: 0 }, { x: 5, y: 20 }], box: { x: 10, y: 10 }, text: "hi" };
     const bb = bboxOfMarkup(c);

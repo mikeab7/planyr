@@ -180,17 +180,18 @@ import { bestMeasurer } from "../../shared/markup/textWrap.js"; // B548818 — m
 import { CROSS_BAND_BEHIND, CROSS_BAND_FRONT } from "./lib/paintOrder.js"; // B548819 — ONE name for the cross-band command
 import { nearestRectPerimeterPoint, calloutCornerRadius } from "../../shared/markup/geometry.js";
 import { calloutDblZone } from "../../shared/markup/hitTest.js";
-import { COUNTIES, COUNTIES_MAP, countyKeyForName, resolveTaxRates } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, countyKeyForName, resolveTaxRates, candidateCountiesForPoint, STATEWIDE_KEYS, countyIdentity, noParcelSourceNote } from "./lib/counties.js";
 import { lookupParcels } from "./lib/parcelQuery.js";
 import {
   resolveLayerUrl,
-  queryAtPoint,
+  identifyParcelEager,
   largestRingLngLat,
   outerRingsLngLat,
   lngLatRingToFeet,
   feetToLatLng,
   humanizeError,
 } from "./lib/arcgis.js";
+import { filterHealthyCandidates, recordSourceResult } from "./lib/sourceHealth.js";
 import { apprRows, apprAll, apprVal, findAttr, situsAddress, ownerName, parcelPanelRows } from "./lib/appraisal.js";
 import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { geocodeAddress } from "./lib/geocode.js";
@@ -3801,14 +3802,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Skip only the initial mount (whatever the state) — must run BEFORE the blank
     // check, or a fresh blank site keeps the flag and swallows its first real edit.
     if (firstSave.current) { firstSave.current = false; return; }
-    if (isBlankSite({ parcels, els, measures, callouts, markups, underlay, sheetOverlays }) && !deletedIds.length) return; // don't save a still-blank site (but DO persist a tombstone so a delete sticks even on an otherwise-empty site)
+    // NEW-4 (interaction sweep, owner chat block 2026-08-22) — the "don't save a still-blank
+    // site" guard below is right for a plan that has NEVER been saved (drawing nothing on a
+    // fresh "Start blank" must not clutter storage with an empty record). It is WRONG for a plan
+    // that already HAS a saved record: undoing your way back to blank (e.g. undo the only
+    // object you'd drawn) is a real, deliberate state change on an EXISTING record, and skipping
+    // its save left the stale pre-undo data in storage — resurrected on the next reload, even
+    // though the canvas correctly showed it gone. `fresh` (no existing record yet) is the right
+    // discriminator, so it's computed BEFORE the blank check rather than after.
+    const fresh = !loadSite(siteId); // first save of a brand-new site → tell App to list it
+    if (fresh && isBlankSite({ parcels, els, measures, callouts, markups, underlay, sheetOverlays }) && !deletedIds.length) return; // don't save a still-blank NEW site (but DO persist a tombstone so a delete sticks even on an otherwise-empty site)
     setSaveStatus("saving");
     // B671 — per-element sync (signed-in): diff the vector collections and enqueue per-element
     // commits. Deferred while a geometry gesture is in flight (flushElems() at gesture end commits
     // the settled result); property-panel edits + text land on the engine's own debounce. Runs
     // ALONGSIDE the whole-doc save below (dual-write; the blob is still the read source until B672).
     reconcileElems(!!drag.current);
-    const fresh = !loadSite(siteId); // first save of a brand-new site → tell App to list it
     const payload = { id: siteId, ...metaRef.current, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds, layerOverrides, layerAbove };
     // B458 — write the on-device mirror IMMEDIATELY, decoupled from the debounced cloud push: a reload
     // within the 400ms debounce must still find this edit on the device so boot's union-merge can
@@ -6916,6 +6925,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // is in (old saved sites still have plain `tip`; nothing migrates). B913's boxW/width-handle
   // sizing is untouched — it rides through setPts's spread as an opaque extra field.
   const calloutTips = (c) => (Array.isArray(c.tips) ? c.tips : (c.tip ? [c.tip] : []));
+  // NEW-1 (two-segment leader, owner report 2026-08-22 — "I like on Bluebeam how the callouts
+  // have two lines in the arm") — the ELBOW between the box-edge stub and the angled run to the
+  // target, one per leader, same {elbow}/{elbows} singular/plural shape as {tip}/{tips} above (and
+  // the same additive-field, no-migration contract: `undefined` on every callout ever saved).
+  // ABSENT (the default for every existing plan, and for a leader nobody has bent yet) means "no
+  // pinned elbow" — the render computes the stub as the box's own nearest-edge point, so the leader
+  // renders BYTE-IDENTICAL to the old single origin→tip line until the user drags the elbow grip.
+  const calloutElbows = (c) => (Array.isArray(c.elbows) ? c.elbows : (c.elbow ? [c.elbow] : []));
   // Add/remove a leader by reusing the SHARED markup engine's pure functions (not forked) — they
   // operate through markupModel's ptsOf/setPts, which recognizes this {tip|tips, box, noLeader?}
   // shape and preserves every other field (boxW, style, noLeader) across the edit. Removing the
@@ -7208,7 +7225,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const fp = p2f(e.clientX, e.clientY);
     // Multi-leader — re-aiming a leader (part === "tip") drags ONE tip by index; the other leaders
     // and the box stay put. tips0 is a full snapshot so onMove only ever moves tipIndex.
-    drag.current = { mode: "callout", id, part, tipIndex, fx: fp.x, fy: fp.y, box0: { ...c.box }, tips0: calloutTips(c).map((p) => ({ ...p })), ...startGate(e) };
+    // NEW-1 (two-segment leader) — an "elbow" drag is the SAME shape: snapshot every leader's
+    // CURRENT elbow (its pinned point, or — if never bent — the box's own nearest-edge point, in
+    // world feet, mirroring startCalloutResize's w/ppf conversion below) so onMove only ever moves
+    // tipIndex's elbow and the grab tracks the cursor exactly (the handle is drawn at this same point).
+    const st0 = calloutStyle(c);
+    const { w: w0, h: h0 } = calloutLayout(c, st0, view.ppf);
+    const boxRectFt = { x: c.box.x - (w0 / view.ppf) / 2, y: c.box.y - (h0 / view.ppf) / 2, w: w0 / view.ppf, h: h0 / view.ppf };
+    const tips0 = calloutTips(c).map((p) => ({ ...p }));
+    const elbows0raw = calloutElbows(c);
+    const elbows0 = tips0.map((tp, i) => (elbows0raw[i] ? { ...elbows0raw[i] } : nearestRectPerimeterPoint(boxRectFt, tp)));
+    drag.current = { mode: "callout", id, part, tipIndex, fx: fp.x, fy: fp.y, box0: { ...c.box }, tips0, elbows0, ...startGate(e) };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   // B913 — drag a text-box / callout width handle. `hx` (∈ {-1,+1}) is which vertical edge moves; the
@@ -7795,6 +7822,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // single-leader callouts keep persisting in their original shape.
         const tips = d.tips0.map((p, i) => (i === d.tipIndex ? { x: p.x + dx, y: p.y + dy } : p));
         setCallout(d.id, tips.length === 1 ? { tip: tips[0], tips: undefined } : { tips, tip: undefined });
+      } else if (d.part === "elbow") {
+        // NEW-1 (two-segment leader) — pin only the dragged leader's elbow; same singular/plural
+        // collapse as tip/tips above.
+        const elbows = (d.elbows0 || []).map((p, i) => (i === d.tipIndex ? { x: p.x + dx, y: p.y + dy } : p));
+        setCallout(d.id, elbows.length === 1 ? { elbow: elbows[0], elbows: undefined } : { elbows, elbow: undefined });
       } else setCallout(d.id, { box: { x: d.box0.x + dx, y: d.box0.y + dy } });
       return;
     }
@@ -14129,17 +14161,45 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [identAdded, setIdentAdded] = useState(0); // lots added this identify session (for the status row)
   const [addrQuery, setAddrQuery] = useState(""); // B384: the "Add by address" text field in the ＋ Add parcel menu
   const [addrBusy, setAddrBusy] = useState(false); // geocode in flight
-  const idLayerRef = useRef(null);
   const identifyTok = useRef(0);
-  const parcelOutlineRef = useRef(null);       // the lit county parcel-outline layer (esri-leaflet) while identify mode is on
+  const outlineLayersRef = useRef({});          // county key -> the lit outline layer for that county, while identify mode is on
   const identifyAddedRef = useRef(new Map());   // gisKey -> [parcel ids] added THIS session, so a re-click toggles it off
-  // Resolve (once) the site county's parcel layer URL — shared by the lit outlines AND
-  // the click query, so what you SEE is what you can ADD (the B137 rule).
-  const resolveCountyLayer = async () => {
-    if (idLayerRef.current) return idLayerRef.current;
-    const cm = COUNTIES_MAP[siteCounty] || COUNTIES_MAP.harris;
-    idLayerRef.current = cm.layerUrl || await resolveLayerUrl(cm.mapServer || COUNTIES[siteCounty]?.layerUrl || COUNTIES.harris.layerUrl);
-    return idLayerRef.current;
+  // NEW-1 (parcel routing, owner report 2026-08-22 — Jordan/Colorado) — `resolveCountyLayer` used to
+  // resolve ONCE against `siteCounty`, the county recorded when the site was CREATED, and cache that
+  // single URL for the life of the planner session, falling back to Harris County TX when the key
+  // didn't resolve. Panning across a county line (or opening a Colorado site whose key ever missed)
+  // meant every outline + click kept querying the wrong — sometimes a THOUSAND-MILE-wrong — service.
+  // The Map view never had this bug: it routes each point through `candidateCountiesForPoint`, re-asked
+  // fresh every time. This does the same: a per-county URL cache (shared by the outlines AND the click
+  // query, so what you SEE is what you can ADD — the B137 rule), resolved on demand and never pinned to
+  // one frozen county, and with NO Harris/any-county fallback — an unconfigured area returns no
+  // candidates rather than a wrong-but-plausible one.
+  const countyLayerUrlsRef = useRef({});         // county key -> resolved queryable layer URL (session cache)
+  const countyLayerUrlsInflightRef = useRef({}); // county key -> in-flight resolve Promise (de-dupe concurrent callers)
+  const resolveOneCountyLayer = (key) => {
+    if (countyLayerUrlsRef.current[key]) return Promise.resolve(countyLayerUrlsRef.current[key]);
+    if (countyLayerUrlsInflightRef.current[key]) return countyLayerUrlsInflightRef.current[key];
+    const cm = COUNTIES_MAP[key];
+    if (!cm) return Promise.resolve(null);
+    const p = resolveLayerUrl(cm.layerUrl || cm.mapServer)
+      .then((url) => { countyLayerUrlsRef.current[key] = url; return url; })
+      .catch(() => null)
+      .finally(() => { delete countyLayerUrlsInflightRef.current[key]; });
+    countyLayerUrlsInflightRef.current[key] = p;
+    return p;
+  };
+  // The queryable candidates for a real point, routed exactly like the Map view
+  // (`candidateCountiesForPoint`) instead of the site's frozen county — re-resolved on every call.
+  // Breaker-open sources are dropped (the always-kept statewide fallback excepted), so a click never
+  // re-hammers a host we just saw fail.
+  const candidatesAtPoint = async (lat, lng) => {
+    const keys = candidateCountiesForPoint(lat, lng);
+    const urls = await Promise.all(keys.map((k) => resolveOneCountyLayer(k)));
+    const all = keys
+      .map((county, i) => ({ county, url: urls[i], statewide: STATEWIDE_KEYS.includes(county) }))
+      .filter((c) => c.url);
+    const realPrimaries = all.filter((c) => !c.statewide);
+    return { candidates: filterHealthyCandidates(all, STATEWIDE_KEYS), realPrimaries };
   };
   // Stable per-lot key: the CAD OBJECTID when present, else the first vertex — so a
   // re-click on the same lot toggles it, and we never add the same lot twice.
@@ -14273,10 +14333,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setJurInfo(null); setIdentifyRes({ busy: true });
     try {
       const [lat, lng] = feetToLatLng(fp, origin.lat, origin.lon);
-      const url = await resolveCountyLayer();
-      const feat = await queryAtPoint(url, lng, lat);
+      // NEW-1 (parcel routing) — candidates for THIS point, not the site's frozen county.
+      const { candidates } = await candidatesAtPoint(lat, lng);
+      if (tok !== identifyTok.current) return;
+      if (!candidates.length) {
+        const gap = noParcelSourceNote(countyIdentity(lat, lng));
+        setIdentifyRes({ error: gap ? `${gap} You can still trace the lot from the Aerial underlay.` : "Parcel services are still loading — give it a second and click again." });
+        return;
+      }
+      const res = await identifyParcelEager(candidates, lng, lat, {
+        onSettled: (sources) => sources.forEach((s) => recordSourceResult(s.county, s.ok)),
+      });
       if (tok !== identifyTok.current) return; // superseded by a newer click
-      if (!feat) { setIdentifyRes({ error: "No parcel right there — click directly on a lot (zoom in if the outlines aren't showing)." }); return; }
+      if (!res.hits.length) {
+        // NEW-2 — say the TRUE reason instead of blaming the user's aim: a healthy source
+        // genuinely found no lot here, this county has no parcel source wired at all, or every
+        // source that could have answered this point was unreachable this click.
+        if (res.responded === 0) { setIdentifyRes({ error: "The parcel server for this area isn't responding right now — try again in a moment." }); return; }
+        const gap = noParcelSourceNote(countyIdentity(lat, lng));
+        setIdentifyRes({ error: gap ? `${gap} You can still trace the lot from the Aerial underlay.` : "No parcel right there — click directly on a lot (zoom in if the outlines aren't showing)." });
+        return;
+      }
+      const hit = res.hits[0]; // first county whose service answered owns the lot
+      const feat = hit.feature;
       const rings = outerRingsLngLat(feat); // every part of a multipart parcel
       if (!rings.length) { setIdentifyRes({ error: "That record has no polygon shape — try an adjacent lot." }); return; }
       const attrs = feat.attributes || {};
@@ -14331,23 +14410,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     } finally { setAddrBusy(false); }
   };
   // Light up the county parcel outlines on the basemap while identify mode is armed
-  // (B383) — the SAME parcel-outline layer the map's Select-parcels tool uses
+  // (B383) — the SAME parcel-outline layers the map's Select-parcels tool uses
   // (makeParcelDisplayLayer: magenta vector lines for a queryable CAD, a server /export
   // image for the query-disabled statewide source). Turn the aerial on so there's
-  // context to see them over; pull the layer + reset the session toggle-set when
+  // context to see them over; pull the layers + reset the session toggle-set when
   // identify mode ends.
+  // NEW-1 (parcel routing) — every configured county lights up, not only the site's frozen
+  // `siteCounty`: this is the same set `candidatesAtPoint` will ever route a click to, so
+  // panning out of the site's original county still shows lots there (and a click there still
+  // selects them) instead of going dark, exactly like the Map view already does.
   useEffect(() => {
     if (!origin) return;
-    const dropOutline = () => { if (parcelOutlineRef.current) { try { geoMapRef.current?.removeLayer(parcelOutlineRef.current); } catch (_) {} parcelOutlineRef.current = null; } };
-    if (!identifyMode) { identifyAddedRef.current = new Map(); setIdentAdded(0); dropOutline(); return; }
+    const dropOutlines = () => {
+      const map = geoMapRef.current;
+      Object.keys(outlineLayersRef.current).forEach((k) => { try { map?.removeLayer(outlineLayersRef.current[k]); } catch (_) {} });
+      outlineLayersRef.current = {};
+    };
+    if (!identifyMode) { identifyAddedRef.current = new Map(); setIdentAdded(0); dropOutlines(); return; }
     ensureBasemapOn(); // make sure the aerial is on so the lit outlines have context
     let cancelled = false;
-    resolveCountyLayer().then((url) => {
+    const addOutline = (key, url) => {
       const map = geoMapRef.current;
-      if (cancelled || !url || !map || parcelOutlineRef.current) return;
-      try { const fl = makeParcelDisplayLayer(url); fl.addTo(map); parcelOutlineRef.current = fl; } catch (_) {}
-    }).catch(() => {});
-    return () => { cancelled = true; dropOutline(); };
+      if (cancelled || !url || !map || outlineLayersRef.current[key]) return;
+      try { const fl = makeParcelDisplayLayer(url); fl.addTo(map); outlineLayersRef.current[key] = fl; } catch (_) {}
+    };
+    Object.keys(COUNTIES_MAP).forEach((key) => {
+      resolveOneCountyLayer(key).then((url) => addOutline(key, url)).catch(() => {});
+    });
+    return () => { cancelled = true; dropOutlines(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identifyMode, origin]);
   const [siteLabel, setSiteLabel] = useState(() => restored?.site || restored?.name || "Untitled site");
@@ -16233,6 +16323,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <circle key={`ct${i}`} data-handle="callout-tip" cx={tp.x} cy={tp.y} r={5} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={2}
             style={{ cursor: "move" }} onPointerDown={(e) => startMoveCallout(e, c.id, "tip", i)} />
         ); })}
+        {/* NEW-1 (two-segment leader) — per-leader elbow grip, between the stub and the run.
+            Defaults to the box's own nearest-edge point (same as the render's default) until
+            dragged, so it starts exactly where the (currently zero-length) stub already is —
+            grabbable from the very first selection, not only after a bend has been created. A
+            square (not a circle) so it reads as a distinct control from the round tip grip. */}
+        {calloutTips(c).map((tp0, i) => {
+          const tp = f2p(tp0);
+          const boxRectPx = { x: gx, y: gy, w, h };
+          const elbowW = calloutElbows(c)[i] || null;
+          const ep = elbowW ? f2p(elbowW) : nearestRectPerimeterPoint(boxRectPx, tp);
+          return (
+            <rect key={`ce${i}`} data-handle="callout-elbow" data-testid={`callout-handle-elbow-${c.id}-${i}`}
+              x={ep.x - 4} y={ep.y - 4} width={8} height={8} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.6}
+              style={{ cursor: "move" }} onPointerDown={(e) => startMoveCallout(e, c.id, "elbow", i)} />
+          );
+        })}
       </g>
     );
   })();
@@ -19505,7 +19611,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         box-centre anchor) via the shared nearestRectPerimeterPoint geometry helper. */}
                     {tips.map((tp, i) => {
                       const origin = nearestRectPerimeterPoint(boxRect, tp);
-                      const ang = Math.atan2(tp.y - origin.y, tp.x - origin.x);
+                      // NEW-1 (two-segment leader, Bluebeam-style) — a stub off the box to the
+                      // elbow, then the angled run from the elbow to the target. `elbowW` is the
+                      // PINNED point (world feet) if the user has dragged this leader's elbow;
+                      // otherwise the elbow defaults to `origin` itself, so the stub is zero-length
+                      // and the run IS the old origin→tip line — byte-identical to every callout
+                      // ever saved, until its elbow is actually bent.
+                      const elbowW = calloutElbows(c)[i] || null;
+                      const elbow = elbowW ? f2p(elbowW) : origin;
+                      const ang = Math.atan2(tp.y - elbow.y, tp.x - elbow.x);
                       return (
                         <g key={i} data-testid={`callout-leader-${c.id}-${i}`} onContextMenu={(e) => onCalloutContext(e, c.id, i)}
                           onPointerDown={(e) => {
@@ -19521,10 +19635,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               openInspector();   // a leader has no text interior — always Properties (B948)
                             }
                           }}>
-                          <line x1={origin.x} y1={origin.y} x2={tp.x} y2={tp.y} stroke={border} strokeWidth={1.6} />
+                          <line data-testid={`callout-leader-stub-${c.id}-${i}`} x1={origin.x} y1={origin.y} x2={elbow.x} y2={elbow.y} stroke={border} strokeWidth={1.6} />
+                          <line data-testid={`callout-leader-run-${c.id}-${i}`} x1={elbow.x} y1={elbow.y} x2={tp.x} y2={tp.y} stroke={border} strokeWidth={1.6} />
                           <polygon points={`${tp.x},${tp.y} ${tp.x - ah * Math.cos(ang - 0.4)},${tp.y - ah * Math.sin(ang - 0.4)} ${tp.x - ah * Math.cos(ang + 0.4)},${tp.y - ah * Math.sin(ang + 0.4)}`} fill={border} />
-                          {/* a transparent, wider hit-stroke so a thin leader is still easy to right-click */}
-                          <line x1={origin.x} y1={origin.y} x2={tp.x} y2={tp.y} stroke="transparent" strokeWidth={10} data-export="skip" />
+                          {/* a transparent, wider hit-stroke on EACH segment so a thin leader (or its stub) is still easy to right-click */}
+                          <line x1={origin.x} y1={origin.y} x2={elbow.x} y2={elbow.y} stroke="transparent" strokeWidth={10} data-export="skip" />
+                          <line x1={elbow.x} y1={elbow.y} x2={tp.x} y2={tp.y} stroke="transparent" strokeWidth={10} data-export="skip" />
                         </g>
                       );
                     })}
