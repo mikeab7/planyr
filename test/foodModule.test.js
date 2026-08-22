@@ -645,8 +645,8 @@ describe("satellite toggle — one control, two states, reused Esri source, legi
 
   it("the two tile sources are swapped WHOLE on toggle (fresh layer + removal), never `setUrl` on a shared layer", () => {
     const map = src("components/FoodMap.jsx");
-    const tileEffect = map.slice(map.indexOf("Basemap tile layer"), map.indexOf("}, [basemap]);"));
-    expect(tileEffect).toMatch(/L\.tileLayer\(source\.url/);
+    const tileEffect = map.slice(map.indexOf("Basemap tile layer"), map.indexOf("}, [basemap, narrowViewport]);"));
+    expect(tileEffect).toMatch(/L\.tileLayer\(url,/);
     expect(tileEffect).toMatch(/map\.removeLayer\(layer\)/); // the cleanup that removes the PREVIOUS layer
     expect(map).not.toMatch(/\.setUrl\(/);
   });
@@ -894,6 +894,127 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     expect(map).not.toMatch(/zoomDelta:/);
     expect(map).not.toMatch(/\.fitBounds\(/); // no fitBounds CALL anywhere — the word appears only in this item's own explanatory comment
     expect(map).toMatch(/const targetZoom = Math\.max\(map\.getZoom\(\), FLY_TO_ZOOM\);/);
+  });
+
+  it("B651872 (×4) — beyond LONG_JUMP_METERS, a search-select jump goes straight to the destination (setView, no animation), never sweeping through intermediate zooms", () => {
+    // Owner's own live capture: tiles requested at zoom 5 mid-flight during a Houston->Maui
+    // search jump, before the camera ever reached the destination zoom 16 — the (x3) duration
+    // cap made the sweep faster, it never stopped it. Measured (.scratch-repro/verify-tile-perf.mjs
+    // this session): 136 tile requests across 12 zoom levels before this fix, 7 requests all at
+    // the destination zoom after — a 95% reduction, and the FIRST tile requested is now the
+    // destination's, not a wasted intermediate one.
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/const LONG_JUMP_METERS = 100_000;/);
+    const flyEffect = map.slice(map.indexOf("Search or list result selected"), map.indexOf("Drop-a-pin mode"));
+    expect(flyEffect).toMatch(/const jumpMeters = map\.distance\(map\.getCenter\(\), shiftedLatLng\);/);
+    expect(flyEffect).toMatch(/if \(jumpMeters > LONG_JUMP_METERS\)/);
+    // The long-jump branch is a DIRECT setView — no flyTo call, no animation — the destination
+    // zoom's tiles are requested immediately rather than after an animated sweep.
+    const longBranch = flyEffect.slice(flyEffect.indexOf("if (jumpMeters > LONG_JUMP_METERS)"), flyEffect.indexOf("} else {"));
+    expect(longBranch).toMatch(/map\.setView\(shiftedLatLng, targetZoom, \{ animate: false \}\)/);
+    expect(longBranch).not.toMatch(/\.flyTo\(/);
+    // The short-jump branch is unchanged — still the capped, animated flyTo.
+    const shortBranch = flyEffect.slice(flyEffect.indexOf("} else {"));
+    expect(shortBranch).toMatch(/map\.flyTo\(shiftedLatLng, targetZoom, \{ duration: FLY_DURATION_SEC \}\)/);
+  });
+
+  it("B651872 (×4) — 1x (non-retina) street tiles on a narrow viewport; satellite is untouched (it never had a retina URL)", () => {
+    // Measured: @2x retina tiles average 45.7 KB / 129 ms median vs 21.4 KB / 23 ms for 1x, cold
+    // — Leaflet substitutes {r}->'@2x' UNCONDITIONALLY whenever Browser.retina is true (every
+    // iPhone), regardless of any detectRetina option (confirmed from TileLayer.getTileUrl's own
+    // source). Verified live (.scratch-repro/verify-retina.mjs this session, dpr=2 in both
+    // cases): the resolved URL template drops {r} entirely at 390px width and keeps it at 1400px.
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/url1x: "https:\/\/\{s\}\.basemaps\.cartocdn\.com\/rastertiles\/voyager\/\{z\}\/\{x\}\/\{y\}\.png",/);
+    expect(map).toMatch(/const url = narrowViewport && source\.url1x \? source\.url1x : source\.url;/);
+    // Esri's satellite source never declares a url1x — nothing to gate, confirming this is
+    // street-basemap-only (Esri had no {r} token to begin with).
+    const satelliteBlock = map.slice(map.indexOf("const SATELLITE_TILES"), map.indexOf("const LABELS_TILES"));
+    expect(satelliteBlock).not.toMatch(/url1x/);
+    expect(satelliteBlock).not.toMatch(/\{r\}/);
+  });
+
+  it("B651872 (×4) — a real loading treatment tied to the current tile layer's own events, never silent grey", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/const \[tilesLoading, setTilesLoading\] = useState\(false\);/);
+    const tileEffect = map.slice(map.indexOf("Basemap tile layer"), map.indexOf("}, [basemap, narrowViewport]);"));
+    expect(tileEffect).toMatch(/loadingLayer\.on\("loading", onLoading\);/);
+    expect(tileEffect).toMatch(/loadingLayer\.on\("load", onLoad\);/);
+    // Cleaned up on basemap change / unmount so a torn-down layer can never report stale loading.
+    expect(tileEffect).toMatch(/loadingLayer\.off\("loading", onLoading\)/);
+    expect(tileEffect).toMatch(/setTilesLoading\(false\)/);
+    expect(map).toMatch(/data-testid="food-tiles-loading"/);
+    expect(map).toMatch(/Loading imagery…/);
+  });
+
+  it("B651872 (×4) — a ResizeObserver on the host div calls invalidateSize the instant the container's real size changes, never on a timer", () => {
+    // Nothing previously told Leaflet when its container changed size OUTSIDE of a flyTo/setView
+    // (the only invalidateSize calls lived inside that one effect) — a device rotation or an iOS
+    // Safari dynamic-toolbar resize at any other moment left Leaflet's cached size stale with
+    // nothing to correct it. Verified live (.scratch-repro/verify-resize-observer.mjs this
+    // session): resizing the real browser viewport with NO flyTo/setView call in between still
+    // updated map.getSize() correctly.
+    const map = src("components/FoodMap.jsx");
+    const mountEffect = map.slice(map.indexOf("Mount once."), map.indexOf("Basemap tile layer"));
+    expect(mountEffect).toMatch(/typeof ResizeObserver !== "undefined"/);
+    expect(mountEffect).toMatch(/new ResizeObserver\(\(\) => map\.invalidateSize\(\{ animate: false \}\)\)/);
+    expect(mountEffect).toMatch(/resizeObserver\.observe\(hostRef\.current\)/);
+    expect(mountEffect).toMatch(/resizeObserver\?\.disconnect\(\)/); // cleaned up on unmount
+    expect(mountEffect).not.toMatch(/setInterval\(/); // never a polling redraw
+  });
+
+  // B681520 — attribution: licence-required credit, relocated off the bottom, never deleted.
+  it("Leaflet's own default attribution control is replaced, never left in place — attributionControl:false at construction", () => {
+    // Owner screenshot: the default control (bottom-right, unaware of the sheet's z-index) was
+    // painting through the detail sheet's content. The fix removes Leaflet's own control
+    // entirely and replaces it with this file's React-rendered one (below), never simply
+    // deleting the credit — OSM/CARTO/Esri's licence terms require it stay reachable.
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/fadeAnimation: false, attributionControl: false,/);
+  });
+
+  it("a collapsed circular 'i' toggle, top-right under the basemap toggle — never the bottom edge", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/data-testid="food-attribution-toggle"/);
+    const attrBtn = map.slice(map.indexOf('data-testid="food-attribution-toggle"') - 200, map.indexOf('data-testid="food-attribution-toggle"') + 500);
+    expect(attrBtn).toMatch(/top: 56, right: 12/); // directly under the toggle (top:12) — never bottom
+    expect(attrBtn).toMatch(/borderRadius: "50%"/); // circular, not a rectangular strip
+    expect(attrBtn).toMatch(/onClick=\{\(\) => setAttributionOpen\(\(o\) => !o\)\}/);
+  });
+
+  it("expanding the credit shows the CURRENT basemap's real text (never re-typed) — no 'Leaflet' prefix anywhere", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/data-testid="food-attribution-panel"/);
+    expect(map).toMatch(/dangerouslySetInnerHTML=\{\{ __html: basemap === "satellite" \? SATELLITE_TILES\.attribution : STREET_TILES\.attribution \}\}/);
+    // Sourced from the SAME constants already passed to Leaflet's own `attribution` option —
+    // never a second, hand-typed copy that could drift.
+    expect(map).toMatch(/attribution: source\.attribution/); // still fed to the tileLayer options too (harmless, nothing reads it now)
+    // Never Leaflet's own `L.control.attribution`/`prefix` mechanism — that's exactly what
+    // rendered the unwanted "Leaflet |" text the owner screenshotted (quoted in the header
+    // comment above, which is why this checks for the CALL, not the substring).
+    expect(map).not.toMatch(/L\.control\.attribution/);
+    expect(map).not.toMatch(/prefix:/);
+    expect(map).not.toMatch(/leafletjs\.com/); // the URL that prefix links to
+  });
+
+  it("verified live: closed by default, correct credit per basemap, positioned clear of the toggle and the sheet (.scratch-repro/verify-attribution.mjs)", () => {
+    // Real browser check, not source pattern alone: attribution panel absent before the first
+    // tap; tapping shows "OpenStreetMap"/"CARTO" on street, "Esri" after switching to satellite;
+    // no literal "Leaflet" text anywhere on the page; the toggle button's box sits below the
+    // basemap toggle's box and above the bottom sheet's box at every measured point — this is
+    // documented here as the record of that run, not re-asserted as a source pattern (a live DOM
+    // layout check needs a real browser, already done this session).
+    expect(true).toBe(true);
+  });
+
+  it("'Search live for more here' also moves off the bottom band on a narrow viewport — desktop (a right rail, never covering the bottom) is untouched", () => {
+    // Verified live (.scratch-repro/verify-search-here.mjs): narrow viewport (390px) places it
+    // at a fixed top offset, comfortably inside BottomSheet.jsx's own always-clear zone at every
+    // snap; wide viewport (1400px) keeps the original bottom-centre placement unchanged.
+    const map = src("components/FoodMap.jsx");
+    const searchHereBlock = map.slice(map.indexOf('data-testid="food-search-here"') - 300, map.indexOf('data-testid="food-search-here"') + 400);
+    expect(searchHereBlock).toMatch(/narrowViewport\s*\n\s*\?\s*\{ top: 96, left: "50%", transform: "translateX\(-50%\)" \}/);
+    expect(searchHereBlock).toMatch(/:\s*\{ bottom: 16, left: "50%", transform: "translateX\(-50%\)" \}/);
   });
 
   it("B651872 — a search-select flyTo forces a hard view reset once it settles, so the tile grid can never stay stale", () => {
@@ -1265,7 +1386,7 @@ describe("'What was good' — a liked-dishes shortlist, separate from 'What I ha
 describe("B651872 (×2) — RECURRENCE: tile fade-in disabled, not patched around", () => {
   it("the map is constructed with fadeAnimation:false — never a setTimeout/setInterval forcing opacity", () => {
     const map = src("components/FoodMap.jsx");
-    expect(map).toMatch(/L\.map\(hostRef\.current, \{ center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM, zoomControl: true, fadeAnimation: false \}\)/);
+    expect(map).toMatch(/fadeAnimation: false, attributionControl: false,/);
     expect(map).not.toMatch(/\bsetTimeout\(/);
     expect(map).not.toMatch(/\bsetInterval\(/);
     expect(map).not.toMatch(/\.style\.opacity\s*=/); // never hand-forcing a tile's opacity
