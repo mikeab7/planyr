@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-22 @ `7fbe151` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-22 @ `45cba29` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_545 source files mapped._
+_546 source files mapped._
 
 ## infra
 
@@ -483,6 +483,8 @@ _545 source files mapped._
   - _exports_: `ADMIN_BOUNDARY_MAX_ZOOM`, `adminBoundariesVisible`, `attachAdminBoundaries`
 - **`src/workspaces/site-planner/lib/adminBoundaryLayer.js`** — Lazily-loaded Leaflet glue that paints state/country outlines at wide zoom: own pane below site geometry, canvas renderer, non-interactive. Never static-import this.
   - _exports_: `attachAdminBoundaries`
+- **`src/workspaces/site-planner/lib/aerialVisibility.js`** — persisted aerial-backdrop visibility (`settings.aerialHidden`) and whether the live basemap tile layer should render, gating both the static underlay image and the Leaflet aerial on one fact so Hide/Remove actually take effect and persist.
+  - _exports_: `isAerialTileActive`, `isAerialVisible`, `wantBasemapSrc`, `withAerialVisible`
 - **`src/workspaces/site-planner/lib/appraisal.js`** — Pure CAD-attribute curation: regex-maps raw county/TxGIO parcel columns to labelled owner/value/acreage/use rows for both panels
   - _exports_: `ADDR_LINE_RE`, `APPR_FIELDS`, `apprAll`, `apprRows`, `apprVal`, `findAttr`, `MAILING_KEY_RE`, `mailingAddressValues`, `ownerName`, `PARCEL_CARD_PRIMARY_LABELS`, `PARCEL_PANEL_PRIMARY_LABELS`, `parcelCardRows`, `parcelPanelRows`, `prettyKey`, `siteNameFromParcel`, `SITUS_FIELD`, `SITUS_LADDER`, `situsAddress`, `situsKey`, `splitCuratedRows`
 - **`src/workspaces/site-planner/lib/apronElevation.js`** — NEW-9 dock apron / truck court elevation checked separately from the building pad: apron elevation from FFE + dock drop, exposure banding against the governing flood elevation (exposure language, never code language), and the pavement/court fill set the mitigation demand must include
