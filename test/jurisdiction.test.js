@@ -6,6 +6,7 @@ import {
   formatHighway, roadDisplayName, roadAuthorityStyle, ROAD_AUTHORITY_COLORS, ROAD_AUTHORITY_LEGEND,
   formatJurisdictionBadge, placeKey, samePlace,
   fitIdentifyParams, MAX_QUERY_URL, parcelProbePoints,
+  cityAreasFromFeatures, CITY_SHARE_MIN,
 } from "../src/workspaces/site-planner/lib/jurisdiction.js";
 
 const HGAC = ETJ_SOURCES.find((s) => s.id === "etj_hgac"); // the regional Houston ETJ source
@@ -923,6 +924,45 @@ describe("B689904 — a ring-based county/ETJ identify demotes a tiny edge clip,
     });
     expect(out.etj).toEqual(["Fulshear"]);
     expect(out.etjEdge).toEqual(["Simonton"]);
+  });
+
+  /* B697201 (NEW-2, follow-up to B689904–B689906) — the floor code-reads as ALREADY shared between
+   * county and ETJ (both roles hit the identical `(role === "county" || role === "etj") &&
+   * shareRings.length` branch in jurisdiction.js), and the test above already proves an ETJ sliver
+   * gets demoted. This test PINS THE EXACT NUMBER the owner's dispatch named — a 0.44% ETJ share,
+   * the same figure #1126 measured for Waller County on the real Woods Road tract — so a future
+   * regression that raises/lowers the floor, or that re-splits county and ETJ onto different code
+   * paths, is caught by an assertion on the actual percentage, not just on set membership. */
+  it("B697201 — cityAreasFromFeatures computes an ETJ share of exactly 0.44%, below CITY_SHARE_MIN", () => {
+    // width chosen so overlap-area / site-area = 0.44% exactly: (0.01 - x)*0.01 / 0.0001 = 0.0044
+    const sliverEtj044 = esriOuter(sq(0.009956, -0.01, 0.02, 0.03));
+    const features = [
+      { attrs: { CITY: "FULSHEAR" }, geometry: { rings: [bigCounty] } },
+      { attrs: { CITY: "SIMONTON" }, geometry: { rings: [sliverEtj044] } },
+    ];
+    const res = cityAreasFromFeatures(HGAC, features, [site], REF);
+    const simonton = res.rows.find((r) => r.name === "Simonton");
+    expect(simonton.rawShare * 100).toBeCloseTo(0.44, 1);
+    expect(simonton.rawShare).toBeLessThan(CITY_SHARE_MIN);
+    const fulshear = res.rows.find((r) => r.name === "Fulshear");
+    expect(fulshear.rawShare).toBeGreaterThan(CITY_SHARE_MIN);
+  });
+
+  it("B697201 — that same 0.44% ETJ share lands in etjEdge through the full identify, never in etj, never silently dropped", async () => {
+    const sliverEtj044 = esriOuter(sq(0.009956, -0.01, 0.02, 0.03));
+    const fetchJson = fakeFetch({
+      [ETJ]: () => [
+        { attributes: { CITY: "FULSHEAR" }, geometry: { rings: [bigCounty] } },
+        { attributes: { CITY: "SIMONTON" }, geometry: { rings: [sliverEtj044] } },
+      ],
+    });
+    const out = await identifyJurisdiction(REF[0] + 0.005, REF[1] + 0.005, {
+      ring: site, rings: [site], roles: ["etj"],
+      cache: freshCache(), fetchJson,
+    });
+    expect(out.etj).toEqual(["Fulshear"]);
+    expect(out.etjEdge).toEqual(["Simonton"]); // demoted (LOUD-FAILURE: named, never dropped), never joined as a peer
+    expect(out.etjShareMethod).toBe("area");
   });
 });
 
