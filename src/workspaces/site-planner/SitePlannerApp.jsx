@@ -425,24 +425,45 @@ export default function App({
    * complete the switch, and `routeProjectAvailability` replaces the silent return with a real
    * three-state answer. `bootResolved` is in the deps for the same reason: it is what turns a
    * "waiting" verdict into a "missing" one. */
+  /* NEW-3 (owner report 2026-08-22 — a deep link to the owner's OWN Commerce City, Colorado
+   * project showed the "this account doesn't have it open here" banner) — `routeProjectAvailability`
+   * only ever asks the LOCAL cache, and the only thing that ever fills the local cache is the ONE
+   * bulk `pullCloud` sign-in runs. A project that is genuinely owned but was created on another
+   * device (or whose local cache is simply cold) is honestly, and permanently, "missing" by that
+   * contract — there was no second chance. So before the banner fires for a signed-in user, try
+   * ONE fresh cloud pull for exactly this project id (the same bulk fetch sign-in already runs,
+   * not a new query) and let the effect's own `sites` dependency re-evaluate. Guarded per id
+   * (`routeMissingRetryRef`) so a genuinely-gone id retries exactly once, never on every render. */
+  const routeMissingRetryRef = useRef(new Set());
   useEffect(() => {
     const prev = prevPidRef.current; prevPidRef.current = projectId;
     if (projectId) {
       const curGroup = groupForPlan(activeSiteId, mode);
       if (projectId !== curGroup) {
         const avail = routeProjectAvailability({ plansOfGroup: loadPlansOfGroup, groupId: projectId, bootResolved });
-        if (avail === "open") { setRouteMissing(null); openProjectGroup(projectId); }
+        if (avail === "open") { setRouteMissing(null); routeMissingRetryRef.current.delete(projectId); openProjectGroup(projectId); }
         // "waiting": hold the current view; the pull may still land it and this effect re-runs.
-        // "missing": say so out loud and drop to the map — never leave the OLD project on
-        // screen under a URL naming a different one (that is what made repro B invisible).
-        else if (avail === "missing") { setRouteMissing(projectId); setActiveSiteId(null); setMode("map"); }
-      } else { setRouteMissing(null); if (mode !== "plan") setMode("plan"); }
+        else if (avail === "missing") {
+          if (signedInUid && !routeMissingRetryRef.current.has(projectId)) {
+            // Not yet retried this id — fetch fresh from the cloud before believing it's gone.
+            // Hold the current view exactly like "waiting" does; `refreshSites()` bumps `sites`,
+            // which re-runs this effect and re-asks `routeProjectAvailability` with the fresh data.
+            routeMissingRetryRef.current.add(projectId);
+            pullCloud(signedInUid).catch(() => {}).then(() => refreshSites());
+          } else {
+            // Either not signed in (no cloud to check), or already retried once and it's still
+            // absent — say so out loud and drop to the map. Never leave the OLD project on screen
+            // under a URL naming a different one (that is what made repro B invisible).
+            setRouteMissing(projectId); setActiveSiteId(null); setMode("map");
+          }
+        }
+      } else { setRouteMissing(null); routeMissingRetryRef.current.delete(projectId); if (mode !== "plan") setMode("plan"); }
     } else if (prev !== undefined && prev !== null) {
       setRouteMissing(null);
       setMode("map");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, sites, bootResolved]);
+  }, [projectId, sites, bootResolved, signedInUid]);
 
   // 2) Active project → URL. When the open project changes (open another, back to map,
   //    sign-in resume, new blank), reflect it in the hash so the URL stays shareable and
