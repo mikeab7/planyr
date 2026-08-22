@@ -70,12 +70,22 @@ describe("B655552 — DepCell two-line threshold, never a partial second line", 
   });
 
   it("a single link WRAPS into the unused second line instead of ellipsizing on line 1 (defect B's fix)", () => {
-    expect(depCellSrc, "the single-item branch must exist, gated on items.length === 1 && canTwoLine")
-      .toMatch(/items\.length === 1 && canTwoLine/);
+    /* Anchored to the exact `if (...) {` form, not a bare substring match — a loose
+     * `/items\.length === 1 && canTwoLine/` regex still matches a semantically-DISABLED gate like
+     * `if (false && items.length === 1 && canTwoLine) {`, since that string still CONTAINS the
+     * matched substring. Mutation-caught during the B655552 close-out audit: the loose form let
+     * exactly that mutation through undetected. */
+    expect(depCellSrc, "the single-item branch must exist, gated on EXACTLY `if (items.length === 1 && canTwoLine) {` — not merely contain that text as a substring of a disabled condition")
+      .toMatch(/if \(items\.length === 1 && canTwoLine\) \{/);
     expect(depCellSrc, "it must use line-clamp to allow up to 2 lines")
       .toMatch(/WebkitLineClamp:2/);
-    expect(depCellSrc, "it must allow wrapping — the shared cell style's inherited nowrap must be overridden")
-      .toMatch(/whiteSpace:"normal"/);
+    /* Scoped to the line-clamp SPAN's own occurrence specifically (`whiteSpace:"normal"` also
+     * appears on the outer wrap div, two lines above) — a bare `/whiteSpace:"normal"/` regex
+     * stays green even if it's removed from the SPAN alone, as long as the div's copy survives.
+     * Mutation-caught during the B655552 close-out audit: removing just the span's copy (the one
+     * that actually fixed the wrap-not-happening bug) left the loose regex passing. */
+    expect(depCellSrc, "the line-clamp SPAN itself (not just its ancestor div) must override nowrap — this is the exact fix for the bug where the span inherited nowrap and silently failed to wrap")
+      .toMatch(/whiteSpace:"normal", width:"100%"/);
   });
 
   it("hidden items are never silently dropped — the +N indicator logic covers whatever is off-screen", () => {
