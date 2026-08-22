@@ -91,7 +91,18 @@ export function addCalloutLeader(m, pt) {
 export function removeCalloutLeader(m, tipIndex) {
   const pts = ptsOf(m);
   if (tipIndex < 0 || tipIndex >= pts.length - 1) return m;
-  return setPts(m, [...pts.slice(0, tipIndex), ...pts.slice(tipIndex + 1)]);
+  const out = setPts(m, [...pts.slice(0, tipIndex), ...pts.slice(tipIndex + 1)]);
+  // NEW-1 (two-segment leader) — a pinned elbow is indexed in lockstep with its leader. `setPts`
+  // only knows about tips/box and never touches elbow/elbows, so without this a removed MIDDLE
+  // leader would leave every later leader's elbows[i] shifted onto the wrong leader, and removing
+  // the LAST leader would leave a stale `elbow` ready to misapply itself the next time one is added.
+  if (Array.isArray(m.elbows)) {
+    const elbows = [...m.elbows.slice(0, tipIndex), ...m.elbows.slice(tipIndex + 1)];
+    if (elbows.some(Boolean)) return { ...out, elbows };
+    const { elbows: _drop, ...rest } = out; return rest;
+  }
+  if (m.elbow) { const { elbow: _drop, ...rest } = out; return rest; }
+  return out;
 }
 
 /* Minimum vertices a kind needs to be a valid shape. Closed rings need 3; everything
@@ -121,6 +132,12 @@ export function translate(m, dx, dy) {
     out.box = { x: m.box.x + dx, y: m.box.y + dy };
     if (m.tip) out.tip = { x: m.tip.x + dx, y: m.tip.y + dy };
     if (Array.isArray(m.tips)) out.tips = m.tips.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+    // NEW-1 (two-segment leader) — a pinned elbow is a real world point like `tip`/`tips`, so a
+    // whole-callout translate (Ctrl-drag duplicate, multi-select drag, cross-plan paste) has to
+    // carry it along or it strands at its old ground position while box+tip move to the new one.
+    // Absent on every callout that has never had its elbow dragged — this is a no-op there.
+    if (m.elbow) out.elbow = { x: m.elbow.x + dx, y: m.elbow.y + dy };
+    if (Array.isArray(m.elbows)) out.elbows = m.elbows.map((p) => (p ? { x: p.x + dx, y: p.y + dy } : p));
     return out;
   }
   return out;

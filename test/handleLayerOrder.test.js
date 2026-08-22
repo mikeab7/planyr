@@ -64,7 +64,7 @@ describe("NEW-1: every handle set is rendered from the handle layer, not from a 
 
   /* The three drag-starters that USED to be bound inline. If any of these reappears in a content
    * pass, its handle is back under the map content and back to being ungrabbable. */
-  const hoisted = ["startScaleOverlay", "startRotateOverlay", "startCalloutResize", "startMeasureVertex", "startMoveCallout(e, c.id, \"tip\""];
+  const hoisted = ["startScaleOverlay", "startRotateOverlay", "startCalloutResize", "startMeasureVertex", "startMoveCallout(e, c.id, \"tip\"", "startMoveCallout(e, c.id, \"elbow\""];
   it.each(hoisted)("%s is bound ONLY from the handle layer, never from a content pass", (fn) => {
     const inContent = contentBefore.includes(`onPointerDown={(e) => ${fn}`) || contentBefore.includes(`onPointerDown={canResize ? (e) => ${fn}`);
     expect(inContent, `${fn} is wired inside a content pass again — that handle can be buried`).toBe(false);
