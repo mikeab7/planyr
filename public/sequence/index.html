@@ -14925,7 +14925,8 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
         return { key: k, value: val };
       } catch { window.__planarCloudError = true; return null; }
     },
-    set: async (k, v, opts = {}) => {
+    // The unserialized write — see the `set` wrapper below, which is what callers actually use.
+    _rawSet: async (k, v, opts = {}) => {
       try {
         let parsed;
         try { parsed = JSON.parse(v); } catch { parsed = v; }
@@ -15074,6 +15075,58 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
       } catch { return { ok: false }; }
     },
   };
+
+  // B851 recurrence (route↔grid divergence + false "newer version" banner) — the real cause, per
+  // a forced-ordering simulation of this exact read-then-write guard: `_rawSet` above has NO
+  // serialization. Every `data` change (a task edit, AND every carry-in re-drive — Scheduler.jsx's
+  // carry-in effect posts on every app-wide project switch, even while the Schedule tab isn't
+  // visible, B1342/NEW-2) fires its own unconditional `attemptCloudSave`. Browsing a few Site
+  // Planner projects in a row before landing on Schedule can therefore have two or more real saves
+  // to "hs-v1" in flight at once. `_rawSet`'s `cloudRev > knownRev[k]` guard is a plain client-side
+  // read-then-write check with no server-side compare-and-swap: when two overlapping saves from
+  // THIS tab complete OUT OF ORDER, whichever one's upsert lands LAST simply overwrites the cloud —
+  // even if it was the FIRST one issued and its content is now stale, and even though the rev
+  // sequence still looks monotonic to the guard, so NO conflict is ever detected (a silent clobber:
+  // the reported wrong-project grid). In other interleavings the same gap makes this tab's OWN
+  // in-flight write look like a foreign "newer version" to a LATER save from the same tab, tripping
+  // the merge/block path and firing the false "a newer version was saved on another device" banner —
+  // exactly B851's own prior diagnosis of that symptom, which its fix (killing REDUNDANT reposts of
+  // an already-active schedule) never covered, because these are DIFFERENT, legitimately distinct
+  // saves, not duplicates of the same one.
+  //
+  // The fix: serialize every write to a given key. At most one `_rawSet` call is ever in flight per
+  // key. Two adjacent, still-unstarted AUTO saves (the fungible "here is the current `data`" saves
+  // attemptCloudSave issues) coalesce into one — only the latest payload is worth writing, nothing
+  // an even-newer `data` doesn't already contain is lost. An EXPLICIT save (skipSanity: true — the
+  // pre-delete/pre-import/pre-restore/pre-recascade checkpoints, an intentional "persist THIS exact
+  // version" call) is never coalesced away and never has a later auto-save coalesce past it — it
+  // keeps its own place in line, so those checkpoints still land as their own distinct cloud
+  // version. This closes the race at its root for every caller without touching the carry-in/nav
+  // logic at all — that logic was never wrong; the storage layer underneath it never guaranteed
+  // saves wouldn't overlap. Proven via ui-audit/stress/scheduler-engine.mjs's mergeCloudDoc mirror +
+  // a forced-ordering harness: 2 of 3 realistic network-timing interleavings silently clobber the
+  // correct value before this fix, 0 of 3 after it (see test/schedulerSaveQueue.test.js).
+  const _saveQueue = {};   // key -> array of not-yet-started jobs, FIFO
+  const _saveRunning = {}; // key -> true while a _rawSet call is in flight for that key
+  const _drainSaveQueue = (k) => {
+    if (_saveRunning[k]) return;
+    const q = _saveQueue[k];
+    if (!q || !q.length) return;
+    _saveRunning[k] = true;
+    const job = q.shift();
+    window.storage._rawSet(k, job.v, job.opts)
+      .then((res) => job.waiters.forEach((w) => w.resolve(res)))
+      .catch((err) => job.waiters.forEach((w) => w.reject(err)))
+      .finally(() => { _saveRunning[k] = false; _drainSaveQueue(k); });
+  };
+  window.storage.set = (k, v, opts = {}) => new Promise((resolve, reject) => {
+    const isAuto = (opts.label || "auto") === "auto" && !opts.skipSanity;
+    const q = _saveQueue[k] || (_saveQueue[k] = []);
+    const tail = q[q.length - 1];
+    if (isAuto && tail && tail.auto) { tail.v = v; tail.opts = opts; tail.waiters.push({ resolve, reject }); }
+    else q.push({ v, opts, auto: isAuto, waiters: [{ resolve, reject }] });
+    _drainSaveQueue(k);
+  });
 })();
 
 ReactDOM.createRoot(document.getElementById("root")).render(
