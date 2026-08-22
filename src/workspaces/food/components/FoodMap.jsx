@@ -152,6 +152,60 @@
  * for it whenever `selectedKey` isn't already covered by one of the always-drawn sets — so the
  * selected pin is never simply absent, regardless of the refetch's timing.
  *
+ * ⛔ B651872 (×4) — THE OWNER MEASURED WHY: THE FLIGHT ITSELF FETCHES TILES AT EVERY ZOOM LEVEL
+ * IT PASSES THROUGH, AND RETINA TILES COST 2-5x MORE THAN THEY'RE WORTH HERE. His own live
+ * capture during a Houston→Maui jump showed tile REQUESTS at zoom 5 mid-flight
+ * (`World_Imagery/MapServer/tile/5/12/6`) before the camera ever reached zoom 16 — the (×3)
+ * duration cap made that sweep FASTER, it never stopped it, so a long jump was still fetching a
+ * full screen of tiles at a dozen zoom levels it was only going to look at for a few hundred ms,
+ * all competing with the DESTINATION tiles for the same ~6 connections. Separately measured:
+ * `@2x` retina tiles average 45.7 KB / 129 ms median vs 21.4 KB / 23 ms for `1x`, cold — 2.1x the
+ * bytes and ~5.6x the latency for a screen that, at a fractional landing zoom, gets resampled by
+ * the compositor anyway (upgraded to always land on an integer zoom below, so that waste is gone
+ * too). FIX, three parts:
+ *   1. **Stop sweeping through intermediate zooms on a long jump.** `LONG_JUMP_METERS` gates a
+ *      DIRECT `map.setView(dest, zoom, {animate:false})` instead of `flyTo` once the real-world
+ *      distance crosses the threshold — no animation at all, so the destination's own tiles are
+ *      the FIRST thing requested, not the last. Threshold measured, not guessed: reimplementing
+ *      flyTo's own van-Wijk/Nuutinen curve and finding the MINIMUM zoom each jump sweeps down to
+ *      (`.scratch-repro/measure-zoom-depth.html` this session) — Katy (~48km, same metro) only
+ *      dips to z11.7 from z12, negligible; Austin (~235km) dips to z9.6; Maui (~6128km) dips to
+ *      z5, matching the owner's own live capture exactly. 100km sits cleanly between "same-metro,
+ *      basically a plain pan" and "genuinely sweeps multiple zoom levels." A short jump keeps the
+ *      existing capped `flyTo` (still worth having — it looks better and the sweep is negligible
+ *      there).
+ *   2. **1x tiles on a narrow viewport, for the street basemap only.** Retina URL substitution
+ *      (`{r}` → `@2x`) is unconditional in Leaflet whenever `Browser.retina` is true — every
+ *      iPhone — regardless of any `detectRetina` option, confirmed from `TileLayer.getTileUrl`'s
+ *      own source. `STREET_TILES.url1x` drops the `{r}` token entirely on
+ *      `useNarrowViewport()`(same breakpoint `VisitPanel.jsx` already uses). Esri's satellite
+ *      layer never had a `{r}` token to begin with — this waste was street-basemap-only.
+ *      **Not independently visually verified against real CARTO tiles here** — this sandbox's
+ *      egress proxy blocks the real tile hosts outright, so there's no way to fetch-and-diff a
+ *      real @2x vs 1x tile; flagged honestly rather than claimed proven, per the owner's own
+ *      "measure before deciding" instruction.
+ *   3. **A real loading treatment instead of silent grey.** "Keep the previous tiles" doesn't
+ *      apply to a jump to a genuinely different place — there's nothing relevant to keep. Instead:
+ *      a small "Loading imagery…" pill tied to the CURRENT tile layer's own `loading`/`load`
+ *      events, so grey reads as "in progress," not "broken."
+ * ALSO: nothing in this file previously told Leaflet when its CONTAINER's own size changed
+ * outside of a flyTo/setView (the only `invalidateSize()` calls lived inside that one effect) —
+ * a device rotation or an iOS Safari dynamic-toolbar resize between those moments would leave
+ * Leaflet's cached size stale with nothing to correct it. A `ResizeObserver` on the host div now
+ * calls `invalidateSize()` the INSTANT the container's real size changes, never on a timer —
+ * closes that whole class regardless of what triggers it. **Investigated but could NOT reproduce
+ * the reported "clean horizontal grey band, tiles below" specifically from the bottom sheet
+ * mounting**: `BottomSheet.jsx` renders `position:fixed`, which Flexbox does not allocate space
+ * for, so it cannot resize `FoodMap`'s own container by CSS mechanics alone — confirmed by
+ * instrumenting the real `FoodMap/VisitPanel` pair at iPhone width through the exact sequence
+ * (map mounts alone → sheet mounts later → snap settles): Leaflet's own `_size` and the
+ * container's real `getBoundingClientRect()` stayed IDENTICAL throughout, every sample. Saying so
+ * plainly rather than claiming a fix for a mechanism that didn't reproduce — the tile-loading
+ * fixes above are the better-evidenced explanation for a partially-painted screen (an iPhone on
+ * cellular is exactly where the retina + intermediate-zoom cost bites hardest), and the
+ * ResizeObserver hardening is shipped anyway because it is correct regardless of which mechanism
+ * is real, and because the owner's own checklist named it an acceptable tool.
+ *
  * ⛔ B668193 — CANVAS PINS ARE TOO SMALL TO TAP ON TOUCH (owner report, live DOM measurement:
  * canvas-rendered markers, zero `.leaflet-interactive`/`.leaflet-marker-icon` DOM nodes, so the
  * tap target is exactly the drawn circle radius — ~10-12px against a ~44px finger). Leaflet's own
@@ -169,6 +223,31 @@
  * only WIDENS the invisible hit area; it never touches a pin's drawn radius, so density on screen
  * is untouched (satisfies "must not turn to mush").
  *
+ * ⛔ B681520 — ATTRIBUTION WAS PAINTING THROUGH THE SHEET (owner screenshot: the "Leaflet | ©
+ * OpenStreetMap contributors © CARTO" strip sat on top of the detail sheet's score tiles).
+ * Leaflet auto-creates a bottom-right attribution control unless `attributionControl:false` is
+ * passed — that control's own z-index was never coordinated with `BottomSheet.jsx`'s (`zIndex:
+ * 700`), so it painted over the sheet content. THE LICENCE REQUIREMENT IS NOT NEGOTIABLE — OSM
+ * data is ODbL-licensed and CARTO's/Esri's tile terms both require visible attribution, so this
+ * is never simply deleted. Fix: `attributionControl:false` at construction, replaced with this
+ * file's OWN React-rendered control — a collapsed circular "i" affordance (the standard pattern
+ * every commercial map uses) that expands the CURRENT basemap's real credit text (still sourced
+ * from `STREET_TILES.attribution`/`SATELLITE_TILES.attribution`, never re-typed) into the map
+ * area on tap. Owner amendment, verbatim, after seeing the first pass just shrink it in place at
+ * the bottom-right corner: "we can relocate it then because it's kinda getting in the way of the
+ * stuff that's at the bottom" — the bottom is the sheet's territory now, permanently, so the
+ * control moved to the TOP-right, tucked directly under the Satellite/Street toggle, where
+ * nothing else on this screen competes. Dropping Leaflet's own "Leaflet |" prefix falls out for
+ * free — that text was Leaflet's own control's default `prefix` option, never anything this file
+ * wrote; building a plain React element instead never had a prefix to drop.
+ * SAME SWEEP, THE "SEARCH LIVE FOR MORE HERE" PILL: bottom-centre, same collision risk with the
+ * sheet at every snap point on a phone. Rather than track the sheet's own live height (a moving
+ * target, and the exact kind of continuous-position-syncing this repo's VIEWPORT-STABLE rule
+ * warns against reaching for when a static placement solves it just as well), it moves to a
+ * fixed TOP position on `useNarrowViewport()`, comfortably inside the space `BottomSheet.jsx`'s
+ * own `TOP_INSET` already guarantees stays clear of the sheet at every snap including "full" —
+ * desktop (a right-rail panel, never covering the bottom) is untouched.
+ *
  * ⛔ "WANT TO TRY" (B669312, owner chat block, 2026-08-22: "flag places he has not been to yet, so
  * the map doubles as a shortlist"). A flagged-but-unvisited place/pin draws HOLLOW (a coloured
  * ring, no fill — see `addHollowPin` and `COLORS.wishlist`) rather than the filled dot every
@@ -184,6 +263,10 @@ import { colorForRating } from "../lib/ratingColor.js";
 
 const STREET_TILES = {
   url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+  // B651872 (×4) — 1x fallback for narrow (mobile) viewports: dropping the `{r}` token stops
+  // Leaflet's unconditional retina URL substitution (see the header comment). Esri's satellite
+  // layer below never had a `{r}` token to begin with, so it needs no 1x counterpart.
+  url1x: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
   maxZoom: 19, subdomains: "abcd",
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
 };
@@ -278,6 +361,13 @@ const FLY_TO_ZOOM = 16;
 // every intermediate integer zoom level along the way. See the header comment for the full trace.
 const FLY_DURATION_SEC = 1.5;
 
+// B651872 (×4) — real-world distance (metres) beyond which a search-select jump goes straight to
+// the destination (map.setView, no animation) instead of flyTo. MEASURED, not guessed: reimplementing
+// flyTo's own zoom curve and finding the minimum zoom each jump sweeps down to
+// (.scratch-repro/measure-zoom-depth.html) — same-metro (~48km) only dips ~0.3 zoom levels,
+// negligible; 235km+ dips 2+ levels and keeps growing. 100km sits cleanly between the two.
+const LONG_JUMP_METERS = 100_000;
+
 // B668193 — the minimum tap-target RADIUS on a coarse (touch) pointer, in screen px. 22 gives a
 // 44px-diameter target, the common minimum touch-target guideline, regardless of how small the
 // pin itself is drawn (5-7px radius) — a hit-test allowance only, never applied to the drawn
@@ -302,6 +392,25 @@ function useCoarsePointer() {
   return coarse;
 }
 
+// The same breakpoint VisitPanel.jsx already uses for its own bottom-sheet-vs-right-rail switch
+// — reused verbatim rather than picking a second number, so the whole module agrees on what
+// "mobile" means (VisitPanel.jsx's own comment on this exact reasoning).
+const NARROW_BREAKPOINT = "(max-width: 760px)";
+
+function useNarrowViewport() {
+  const [narrow, setNarrow] = useState(() => {
+    try { return window.matchMedia(NARROW_BREAKPOINT).matches; } catch (_) { return false; }
+  });
+  useEffect(() => {
+    let mq; try { mq = window.matchMedia(NARROW_BREAKPOINT); } catch (_) { return undefined; }
+    const on = () => setNarrow(mq.matches);
+    on();
+    mq.addEventListener ? mq.addEventListener("change", on) : mq.addListener(on);
+    return () => { mq.removeEventListener ? mq.removeEventListener("change", on) : mq.removeListener(on); };
+  }, []);
+  return narrow;
+}
+
 export default function FoodMap({
   places, placesCapped, placesTotalMatched, loggedPlaces, loggedIds, manualPins,
   wishlistPlaces, wishlistManualPins, overpassPlaces,
@@ -320,7 +429,16 @@ export default function FoodMap({
   const [tooSmall, setTooSmall] = useState(false);
   const [basemap, setBasemap] = useState("street"); // "street" | "satellite"
   const [basemapError, setBasemapError] = useState(false);
+  // B651872 (×4) — tied to the CURRENT tile layer's own 'loading'/'load' events (basemap effect
+  // below); drives the "Loading imagery…" pill so a genuinely-in-progress screen never reads as
+  // simply broken.
+  const [tilesLoading, setTilesLoading] = useState(false);
+  // B681520 — the attribution credit panel's open/closed state; the CONTENT it shows is computed
+  // fresh from `basemap` on every render, so leaving it open across a basemap toggle just shows
+  // the newly-current credit, never a stale one.
+  const [attributionOpen, setAttributionOpen] = useState(false);
   const coarsePointer = useCoarsePointer();
+  const narrowViewport = useNarrowViewport();
 
   // Mount once. The tile layer itself is NOT created here — see the basemap effect below —
   // so toggling satellite never tears down/recreates the map, the marker layer or its handlers.
@@ -329,7 +447,11 @@ export default function FoodMap({
     // B651872 (×2) — fadeAnimation:false, see the header comment: Leaflet's own tile fade-in was
     // freezing partway after a search-select flyTo, and the owner's explicit direction was to
     // remove the animation rather than patch around a still-broken fade loop.
-    const map = L.map(hostRef.current, { center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM, zoomControl: true, fadeAnimation: false });
+    // B681520 — attributionControl:false: Leaflet's own default control is replaced below (this
+    // file's React-rendered credit affordance), see the header comment.
+    const map = L.map(hostRef.current, {
+      center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM, zoomControl: true, fadeAnimation: false, attributionControl: false,
+    });
     layerRef.current = L.layerGroup([], { renderer: L.canvas() }).addTo(map);
     mapRef.current = map;
 
@@ -340,7 +462,19 @@ export default function FoodMap({
     map.on("moveend", report);
     report();
 
-    return () => { map.remove(); mapRef.current = null; };
+    // B651872 (×4) — nothing else in this file ever tells Leaflet the CONTAINER's own size
+    // changed outside of the flyTo/setView effect below (a search-select). A device rotation or
+    // an iOS Safari dynamic-toolbar resize at any OTHER moment would leave Leaflet's cached size
+    // stale with nothing to correct it. Call invalidateSize the INSTANT the container's real size
+    // changes, not on a timer — see the header comment for why this is shipped even though it
+    // could not be tied to a reproduced bug.
+    let resizeObserver;
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(() => map.invalidateSize({ animate: false }));
+      resizeObserver.observe(hostRef.current);
+    }
+
+    return () => { resizeObserver?.disconnect(); map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -356,7 +490,11 @@ export default function FoodMap({
     const map = mapRef.current;
     if (!map) return undefined;
     const source = basemap === "satellite" ? SATELLITE_TILES : STREET_TILES;
+    // B651872 (×4) — 1x on a narrow viewport, street basemap only (Esri satellite never had a
+    // retina URL to begin with). See the header comment for the measured byte/latency cost.
+    const url = narrowViewport && source.url1x ? source.url1x : source.url;
     const layers = [];
+    let onLoading, onLoad, loadingLayer;
     try {
       // `subdomains` is only added to the options object when the source actually declares one —
       // never pass an explicit `subdomains: undefined`, which clobbers Leaflet's own internal
@@ -364,10 +502,19 @@ export default function FoodMap({
       const opts = { maxZoom: source.maxZoom, attribution: source.attribution };
       if (source.subdomains) opts.subdomains = source.subdomains;
       if (source.maxNativeZoom) opts.maxNativeZoom = source.maxNativeZoom;
-      const layer = L.tileLayer(source.url, opts).addTo(map);
+      const layer = L.tileLayer(url, opts).addTo(map);
       layer.bringToBack(); // stays under the marker layer regardless of add order
       tileLayerRef.current = layer;
       layers.push(layer);
+
+      // B651872 (×4) — the loading-treatment pill (below in the render), tied to THIS layer's
+      // own lifecycle so it never reports stale state from a previous (torn-down) basemap.
+      loadingLayer = layer;
+      onLoading = () => setTilesLoading(true);
+      onLoad = () => setTilesLoading(false);
+      loadingLayer.on("loading", onLoading);
+      loadingLayer.on("load", onLoad);
+      setTilesLoading(loadingLayer.isLoading());
 
       if (basemap === "satellite") {
         const labelsLayer = L.tileLayer(LABELS_TILES.url, {
@@ -384,9 +531,11 @@ export default function FoodMap({
       setBasemapError(true);
     }
     return () => {
+      if (loadingLayer) { loadingLayer.off("loading", onLoading); loadingLayer.off("load", onLoad); }
+      setTilesLoading(false);
       for (const layer of layers) { try { map.removeLayer(layer); } catch (_) { /* already gone */ } }
     };
-  }, [basemap]);
+  }, [basemap, narrowViewport]);
 
   // Search or list result selected — fly to it, offset so it lands centred in the area the user
   // can actually SEE (see header comment: the detail panel covers roughly the right third).
@@ -431,13 +580,26 @@ export default function FoodMap({
     const panelOffsetPx = Math.min(PANEL_WIDTH, containerWidth * 0.8) / 2;
     const targetPoint = map.project([flyToTarget.lat, flyToTarget.lon], targetZoom);
     const shiftedLatLng = map.unproject(targetPoint.add([panelOffsetPx, 0]), targetZoom);
-    map.once("moveend", () => {
+
+    // B651872 (×4) — beyond LONG_JUMP_METERS, skip the animation entirely: setView with
+    // animate:false goes straight through Leaflet's own hard-reset path (_resetView, the SAME
+    // one the short-jump branch below forces manually), so the destination's own tiles are the
+    // FIRST thing requested, not the last — no intermediate-zoom sweep, no wasted fetches
+    // competing with them for the connection pool. See the header comment for the measured cost
+    // this removes and how the threshold was chosen.
+    const jumpMeters = map.distance(map.getCenter(), shiftedLatLng);
+    if (jumpMeters > LONG_JUMP_METERS) {
       map.invalidateSize({ animate: false });
-      map.setView(map.getCenter(), map.getZoom(), { reset: true, animate: false });
-    });
-    // B651872 (×3) — fixed duration, not Leaflet's own distance-proportional default; see
-    // FLY_DURATION_SEC and the header comment.
-    map.flyTo(shiftedLatLng, targetZoom, { duration: FLY_DURATION_SEC });
+      map.setView(shiftedLatLng, targetZoom, { animate: false });
+    } else {
+      map.once("moveend", () => {
+        map.invalidateSize({ animate: false });
+        map.setView(map.getCenter(), map.getZoom(), { reset: true, animate: false });
+      });
+      // B651872 (×3) — fixed duration, not Leaflet's own distance-proportional default; see
+      // FLY_DURATION_SEC and the header comment.
+      map.flyTo(shiftedLatLng, targetZoom, { duration: FLY_DURATION_SEC });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flyToTarget?.nonce]);
 
@@ -642,11 +804,17 @@ export default function FoodMap({
           Showing {places.length.toLocaleString()} of {placesTotalMatched.toLocaleString()} here — zoom in for more
         </div>
       )}
+      {/* B681520 — moved OFF the bottom band on a narrow viewport, same reasoning as the
+          attribution control below: the bottom is the sheet's territory now, permanently.
+          Desktop (a right-rail panel, never covering the bottom) keeps the original placement. */}
       {!tooSmall && onRequestSearchHere && (
         <button
           type="button" onClick={onRequestSearchHere} data-testid="food-search-here"
           style={{
-            position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)", zIndex: 500,
+            position: "absolute", zIndex: 500,
+            ...(narrowViewport
+              ? { top: 96, left: "50%", transform: "translateX(-50%)" }
+              : { bottom: 16, left: "50%", transform: "translateX(-50%)" }),
             border: "1px solid var(--border-default)", borderRadius: 999, background: "var(--surface-raised)",
             color: "var(--text-primary)", font: "inherit", fontSize: 12.5, fontWeight: 700, padding: "7px 20px",
             cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
@@ -655,9 +823,21 @@ export default function FoodMap({
           Search live for more here
         </button>
       )}
+      {/* B651872 (×4) — a real loading treatment instead of leaving grey unexplained; tied to the
+          CURRENT tile layer's own loading state (basemap effect above), so it clears itself the
+          moment tiles finish, no timer. */}
+      {tilesLoading && (
+        <div data-testid="food-tiles-loading" role="status" style={{
+          position: "absolute", top: 12, left: 12, zIndex: 500,
+          background: "var(--surface-raised)", color: "var(--text-secondary)", border: "1px solid var(--border-default)",
+          borderRadius: 999, padding: "6px 14px", fontSize: 12.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
+        }}>
+          Loading imagery…
+        </div>
+      )}
       {basemapError && (
         <div data-testid="food-basemap-error" role="status" style={{
-          position: "absolute", top: 56, right: 12, zIndex: 500,
+          position: "absolute", top: 96, right: 12, zIndex: 500,
           background: "var(--surface-raised)", color: "var(--text-secondary)", border: "1px solid var(--border-default)",
           borderRadius: 8, padding: "6px 10px", fontSize: 12, boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
         }}>
@@ -677,6 +857,36 @@ export default function FoodMap({
       >
         {basemap === "satellite" ? "Street" : "Satellite"}
       </button>
+      {/* B681520 — the licence-required credit, collapsed to a small circular affordance tucked
+          under the basemap toggle (top-right, never the bottom — see header comment) rather than
+          Leaflet's own default control. Expands the CURRENT basemap's real credit text into the
+          map area on tap; the text itself is the same trusted, hardcoded HTML this file already
+          passed to Leaflet's `attribution` option (never user input, safe to render as HTML). */}
+      <button
+        type="button" onClick={() => setAttributionOpen((o) => !o)}
+        aria-expanded={attributionOpen} aria-label="Map data credit" title="Map data credit"
+        data-testid="food-attribution-toggle"
+        style={{
+          position: "absolute", top: 56, right: 12, zIndex: 500,
+          width: 28, height: 28, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
+          border: "1px solid var(--border-default)", background: "var(--surface-raised)",
+          color: "var(--text-secondary)", font: "inherit", fontSize: 13, fontWeight: 700, fontStyle: "italic",
+          cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
+        }}
+      >
+        i
+      </button>
+      {attributionOpen && (
+        <div
+          data-testid="food-attribution-panel" role="note"
+          style={{
+            position: "absolute", top: 90, right: 12, zIndex: 500, maxWidth: "calc(100% - 24px)",
+            background: "var(--surface-raised)", color: "var(--text-secondary)", border: "1px solid var(--border-default)",
+            borderRadius: 8, padding: "8px 10px", fontSize: 11.5, lineHeight: 1.5, boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
+          }}
+          dangerouslySetInnerHTML={{ __html: basemap === "satellite" ? SATELLITE_TILES.attribution : STREET_TILES.attribution }}
+        />
+      )}
     </div>
   );
 }
