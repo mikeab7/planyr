@@ -46,3 +46,16 @@ export function formatAddress(address) {
   if (!address) return null;
   return address.replace(/,\s*(\d{5})(-\d{4})?\s*$/, " $1");
 }
+
+/* ⛔ CITY EXTRACTION (NEW-2, owner: header line 2 should read "French Restaurant · River Oaks" —
+ * category then "the neighbourhood or city if the address gives you one"). Overture has no
+ * separate neighbourhood field on food_places, so this reads the CITY out of the address's own
+ * comma-separated shape instead: "<street>, <city>, <state> <zip>" -> the second segment. Costs
+ * nothing extra to compute (the address is already loaded with the place) and never mutates the
+ * stored value, same DISPLAY-ONLY principle as formatCategory/formatAddress above. Returns null
+ * for anything that doesn't have at least two comma-separated segments, rather than guessing. */
+export function formatCityFromAddress(address) {
+  if (!address) return null;
+  const parts = address.split(",").map((s) => s.trim()).filter(Boolean);
+  return parts.length >= 2 ? parts[1] : null;
+}
