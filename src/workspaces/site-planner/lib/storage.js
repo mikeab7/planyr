@@ -1122,6 +1122,30 @@ export async function purgeExpiredDeletedProjects({ days = DELETED_RETENTION_DAY
 // since I last synced" (fold my change in — so a stale tab can't thin it, B127). Each browser
 // tab is its own JS module instance, so this map is naturally per-tab.
 const lastSeenAt = {};
+// ⛔ B662048 — `updatedAt` MUST be MONOTONIC WITHIN A TAB, or "newest plan" resolution silently
+// picks the OLDER one. `Date.now()` is millisecond-resolution, and `duplicatePlan`'s real call
+// order (`handleDuplicate`: `flushSite()` on the SOURCE plan, immediately followed by
+// `saveSite()` on the fresh COPY, both synchronous, no `await` between them) lands in the SAME
+// millisecond far more often than not — measured deterministically with the real storage
+// functions, not assumed. `loadPlansOfGroup`'s "newest first" sort is `(b.updatedAt||0) -
+// (a.updatedAt||0)`, which returns 0 on that tie, and `Array.prototype.sort` is STABLE (ES2019),
+// so a tie preserves INSERTION order — the SOURCE plan, already present in the store, sorts
+// BEFORE the just-created copy. Every "which plan do I open" fallback that reads `plans[0]` when
+// it has no more specific pointer to trust (`pickResumeTarget`'s boot/sign-in resume,
+// `openProjectGroup`'s route reconciliation) then resolves to the ORIGINAL plan instead of the
+// copy — on a reload, a fresh tab/device, or a sign-in resume shortly after duplicating, silently
+// switching the user back onto the plan they meant to leave. This is the mechanism behind B662048
+// (a teammate's 57 elements deleted from the owner's original plan after he had already made his
+// own copy). `nextUpdatedAt()` guarantees each successive LOCAL write in this tab strictly
+// advances past the one before it, so two saves a fraction of a millisecond apart can never tie —
+// the real wall clock is still the basis (it only nudges forward when a genuine collision would
+// occur), so cross-device comparisons elsewhere in this file are unaffected.
+let lastStamp = 0;
+function nextUpdatedAt() {
+  const now = Date.now();
+  lastStamp = now > lastStamp ? now : lastStamp + 1;
+  return lastStamp;
+}
 /* ---- The LOAD seam of the bonded-assembly invariant, made LOUD (NEW-2) ---------------------
  * `createSiteModel` has re-derived torn bonded children on EVERY read since B1097, and it has done
  * it in SILENCE. That silence is a named cause of this bug family shipping as fixed eight times:
@@ -1248,7 +1272,7 @@ export function saveSite(partial, { skipHistory = false } = {}) {
     merged = mergeSiteContent(createSiteModel(merged), existing); // our scalars + union of content
   }
   if (existing && !skipHistory) snapshotVersion(existing); // back up the prior version before overwriting (rollback safety net, B126); the immediate per-edit write skips this (B458)
-  let model = { ...createSiteModel(merged), updatedAt: Date.now() };
+  let model = { ...createSiteModel(merged), updatedAt: nextUpdatedAt() };
   /* ⛔ NEW-1 — THE WRITE CHOKE POINT. A plan may never be written carrying a name that contradicts
    * its own project. Every local write lands here, so enforcing the group's authority at this one
    * spot is what makes "a stale plan hydrating later READS the project name, never re-publishes its

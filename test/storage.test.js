@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mergePulledSites, groupCountDivergence, saveSite, loadSite, loadSitesList, renameSiteGroup, repairSplitProjectNames, snapshotVersion, listVersions, getVersion, summarizeVersion, backupNow, pruneMigratedLegacy } from "../src/workspaces/site-planner/lib/storage.js";
+import { mergePulledSites, groupCountDivergence, saveSite, loadSite, loadSitesList, loadPlansOfGroup, renameSiteGroup, repairSplitProjectNames, snapshotVersion, listVersions, getVersion, summarizeVersion, backupNow, pruneMigratedLegacy } from "../src/workspaces/site-planner/lib/storage.js";
 import { mergeSiteContent, contentCount, createSiteModel } from "../src/workspaces/site-planner/lib/siteModel.js";
 import { idbAvailable } from "../src/workspaces/site-planner/lib/localDb.js";
 
@@ -726,6 +726,57 @@ describe("saveSite — cross-tab stale-write guard (B127)", () => {
     saveSite({ id: "s", els: [bld("a"), bld("b"), bld("c")] });
     saveSite({ id: "s", els: [bld("a"), bld("b")] }); // deleted c in the SAME tab
     expect(loadSite("s").els.map((e) => e.id).sort()).toEqual(["a", "b"]);
+  });
+});
+
+// B662048 — the root cause behind the incident that item restores: a teammate's 57 elements
+// deleted from the owner's original plan after he had already made his own copy. `duplicatePlan`'s
+// real call order
+// (SitePlanner's handleDuplicate: flushSite() on the SOURCE, immediately followed by
+// duplicatePlan's saveSite() on the fresh COPY — synchronous, no `await` between them) lands the
+// two writes in the same `Date.now()` millisecond far more often than not. `loadPlansOfGroup`'s
+// "newest first" sort ties on equal `updatedAt`, and a stable sort then keeps the SOURCE (already
+// in the store) ahead of the just-created COPY — so any "which plan do I open" fallback that
+// trusts `plans[0]` (pickResumeTarget's boot/sign-in resume, openProjectGroup's route
+// reconciliation) silently resolves back to the ORIGINAL plan on a reload, a fresh tab/device, or
+// a sign-in resume shortly after duplicating.
+describe("saveSite — updatedAt is monotonic per tab, so 'newest plan' never ties back to the source (B662048)", () => {
+  beforeEach(() => {
+    const store = {};
+    globalThis.localStorage = {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = String(v); },
+      removeItem: (k) => { delete store[k]; },
+      clear: () => { for (const k of Object.keys(store)) delete store[k]; },
+      key: (i) => Object.keys(store)[i] ?? null,
+      get length() { return Object.keys(store).length; },
+    };
+  });
+
+  it("duplicatePlan's real call order (flushSite, then the copy's saveSite) never ties updatedAt, even under a frozen clock", () => {
+    const now = Date.now;
+    try {
+      Date.now = () => 1700000000000; // freeze the clock — the exact condition that used to tie
+      saveSite({ id: "orig", groupId: "orig", site: "Woods Road", name: "Concept A", els: [bld("a")] });
+      saveSite({ id: "orig", groupId: "orig", site: "Woods Road", name: "Concept A", els: [bld("a")] }); // flushSite()
+      const src = loadSite("orig");
+      saveSite({ ...src, id: "copy", groupId: "orig", name: `${src.name} (copy)` }); // duplicatePlan()
+    } finally { Date.now = now; }
+
+    expect(loadSite("copy").updatedAt).toBeGreaterThan(loadSite("orig").updatedAt);
+    // The property this bug actually breaks: any "resume the newest plan of this group" fallback
+    // must land on the copy, never the source it was duplicated from.
+    expect(loadPlansOfGroup("orig")[0].id).toBe("copy");
+  });
+
+  it("two ordinary back-to-back saves of DIFFERENT sites never tie either (general monotonicity, not a duplicate-only patch)", () => {
+    const now = Date.now;
+    try {
+      Date.now = () => 1700000000000;
+      saveSite({ id: "x", groupId: "x", els: [] });
+      saveSite({ id: "y", groupId: "y", els: [] });
+    } finally { Date.now = now; }
+    expect(loadSite("y").updatedAt).toBeGreaterThan(loadSite("x").updatedAt);
   });
 });
 
