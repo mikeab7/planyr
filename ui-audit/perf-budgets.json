@@ -111,8 +111,8 @@
       "note": "Seeded at 0 so the FIRST measurement of a brand-new route lands through `npm run perf:ratchet` with a stated reason, exactly like any other baseline move \u2014 a hand-typed seed is the thing that step exists to prevent. WHAT THIS NUMBER DOES AND DOES NOT INCLUDE, because it is the whole reason the split is load-bearing: it counts the notebook TREE and its chrome, and deliberately NOT the rich-text engine. Notes.jsx pulls components/NoteEditor.jsx (and through it the only @tiptap imports in the module) via a lazy() import inside a Suspense, so the engine is a separate on-demand chunk of ~464 KB that a user pays for only when a page is actually opened, and the rail paints first. A future rise in THIS metric therefore means something moved onto the static path that belongs behind that boundary \u2014 most likely a new static import of the editor, or a shared module that got hoisted. test/notesModule.test.js source-scans for the first case; this budget is the backstop for the second."
     },
     "foodRouteJsBytes": {
-      "baseline": 925460,
-      "target": 925460,
+      "baseline": 958610,
+      "target": 958610,
       "unit": "bytes",
       "what": "Total JS a plain Food route must download: the entry chunk plus FoodApp and its static-import closure.",
       "note": "Seeded at 0 (B568400, the same precedent as notesRouteJsBytes) so the FIRST measurement of this brand-new route lands through `npm run perf:ratchet` with a stated reason, exactly like any other baseline move -- a hand-typed seed is the thing that step exists to prevent. This route is measured SEPARATELY from siteRouteJsBytes/notesRouteJsBytes/largestChunkBytes by design: the owner's explicit ask was that a personal restaurant tracker never share a metric with, or draw headroom from, the routes the actual product depends on. leaflet (the map vendor chunk) is reused from the existing shared map-vendor split -- that's what it's for -- but nothing from site-planner may come with it (this module has zero imports from src/workspaces/site-planner, source-guarded by test/foodModule.test.js)."
@@ -428,6 +428,17 @@
           "commit": "f6d6d2417a0c7e575d06371e3ffe9e1f25edb737",
           "sourceHash": "010b381800c5f0c0",
           "reason": "Ambient SitePlannerApp growth across several merges fully consumed the 32KB headroom band; CI's exact build tipped 0.0-0.8KB over the hard ceiling and silently blocked the Cloudflare deploy on FOUR consecutive main pushes (a569e6b8, 1613ca02, c2d3553f, f6d6d24) for ~18h. Real fix stays B1064 (extract SitePlanner panels into lazy children, blocked on the measured floor); this restores headroom so deploys resume."
+        },
+        {
+          "metric": "bundle.foodRouteJsBytes",
+          "from": 925460,
+          "to": 958610,
+          "direction": "raise",
+          "item": "B677040",
+          "date": "2026-08-22",
+          "commit": "87617c2d6c7897f02143f662d6b6d40ff7f44fb9",
+          "sourceHash": "6e0071bad7c54a18",
+          "reason": "NEW-2 place detail panel rebuild: BottomSheet gesture primitive + visitAggregates/dateFormat/directions libs + a redesigned VisitPanel (score strip, order-again, actions row, visit cards, empty state). Substantial legitimate feature growth, checked for low-hanging trims first; exceeds ceiling by only 0.4 KB."
         }
       ]
     }
