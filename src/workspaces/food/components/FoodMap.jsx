@@ -96,6 +96,38 @@
  * is shared by search AND by list-driven selection (FoodApp's List `onSelect` now sets
  * `flyToTarget` too), so both get the same corrected centring for free.
  *
+ * ⛔ B651872 (×2) — RECURRENCE: the flyTo fix above cured the STALE ORIGIN (owner-confirmed
+ * live: `.leaflet-tile-container` is now `translate3d(0,0,0) scale(1)`, not the old ~-2.73e6px
+ * offset) but exposed a SECOND, independent staleness underneath it — GridLayer's tile FADE-IN
+ * (`_tileReady`/`_updateOpacity`, driven by ONE shared `requestAnimFrame` handle per layer,
+ * `this._fadeFrame`) freezing partway, leaving tiles stuck around 30% opacity indefinitely.
+ * Measured live: forcing every `.leaflet-tile`'s opacity to 1 in the console repainted the map
+ * PERFECTLY — nothing else was wrong, so this is purely the fade animation's own rAF chain never
+ * completing. Fix, per the owner's explicit instruction (turn the fade off rather than keep
+ * patching around it): `fadeAnimation: false` on the map at construction — Leaflet's own
+ * `GridLayer._tileReady` branches on `this._map._fadeAnimated`; with it false, a loaded tile is
+ * marked active immediately with NO opacity dance and nothing to ever get stuck (see
+ * `node_modules/leaflet/dist/leaflet-src.js`'s `_tileReady`). Deliberately NOT a
+ * setTimeout/setInterval forcing opacity — that would hide a still-broken fade loop rather than
+ * removing the loop.
+ *
+ * ⛔ B668193 — CANVAS PINS ARE TOO SMALL TO TAP ON TOUCH (owner report, live DOM measurement:
+ * canvas-rendered markers, zero `.leaflet-interactive`/`.leaflet-marker-icon` DOM nodes, so the
+ * tap target is exactly the drawn circle radius — ~10-12px against a ~44px finger). Leaflet's own
+ * canvas hit-test (`Canvas._onClick`) resolves overlaps by DRAW ORDER (last-added/topmost wins),
+ * never by proximity — measured directly against a local repro (`_fireDOMEvent`'s `canvasTargets`
+ * filtering) — so simply raising the renderer's `tolerance` option would make the WRONG pin win
+ * in a dense cluster more often, not less. Fix: on a coarse pointer (`pointer: coarse`, i.e.
+ * touch/no-hover — desktop mice are untouched, so PRECISION THERE IS BYTE-IDENTICAL), skip
+ * attaching a `click` listener to each circleMarker (confirmed via the same repro: an
+ * `interactive:true` canvas layer with NO listener does not consume the click — `map`'s own
+ * `click` event still fires normally) and resolve the tap centrally instead: every pin drawn this
+ * pass is recorded in `pinIndexRef` with its real screen radius, and ONE `map.on('click', …)`
+ * handler picks whichever candidate's centre is CLOSEST to the tap point, among those within
+ * `TOUCH_MIN_TAP_RADIUS` — genuine nearest-centre resolution, not draw-order. `TOUCH_MIN_TAP_RADIUS`
+ * only WIDENS the invisible hit area; it never touches a pin's drawn radius, so density on screen
+ * is untouched (satisfies "must not turn to mush").
+ *
  * ⛔ "WANT TO TRY" (B669312, owner chat block, 2026-08-22: "flag places he has not been to yet, so
  * the map doubles as a shortlist"). A flagged-but-unvisited place/pin draws HOLLOW (a coloured
  * ring, no fill — see `addHollowPin` and `COLORS.wishlist`) rather than the filled dot every
@@ -198,6 +230,30 @@ function boundsOf(map) {
 // already draws — "arrived at this one restaurant" scale, not just "past the threshold."
 const FLY_TO_ZOOM = 16;
 
+// B668193 — the minimum tap-target RADIUS on a coarse (touch) pointer, in screen px. 22 gives a
+// 44px-diameter target, the common minimum touch-target guideline, regardless of how small the
+// pin itself is drawn (5-7px radius) — a hit-test allowance only, never applied to the drawn
+// circle, so the map's visual density is unaffected.
+const TOUCH_MIN_TAP_RADIUS = 22;
+
+// Mirrors AppHeader.jsx's `useNarrow` pattern: a reactive `matchMedia` read, no touch/mouse
+// event guessing. `pointer: coarse` is true for a touch-primary device (no hover) and false for
+// a mouse/trackpad, which is the actual distinction that matters here — screen WIDTH is not (a
+// touch-capable laptop is still precise; a narrow desktop window is still a mouse).
+function useCoarsePointer() {
+  const [coarse, setCoarse] = useState(() => {
+    try { return window.matchMedia("(pointer: coarse)").matches; } catch (_) { return false; }
+  });
+  useEffect(() => {
+    let mq; try { mq = window.matchMedia("(pointer: coarse)"); } catch (_) { return undefined; }
+    const on = () => setCoarse(mq.matches);
+    on();
+    mq.addEventListener ? mq.addEventListener("change", on) : mq.addListener(on);
+    return () => { mq.removeEventListener ? mq.removeEventListener("change", on) : mq.removeListener(on); };
+  }, []);
+  return coarse;
+}
+
 export default function FoodMap({
   places, placesCapped, placesTotalMatched, loggedPlaces, loggedIds, manualPins,
   wishlistPlaces, wishlistManualPins, overpassPlaces,
@@ -209,15 +265,23 @@ export default function FoodMap({
   const layerRef = useRef(null);
   const tileLayerRef = useRef(null);
   const labelsLayerRef = useRef(null);
+  // B668193 — every currently-drawn pin's {lat, lon, radius, onClick}, rebuilt on every marker
+  // redraw pass; consumed only by the coarse-pointer click resolver below (a plain ref because a
+  // click is read at event time, not something the resolver effect needs to re-subscribe over).
+  const pinIndexRef = useRef([]);
   const [tooSmall, setTooSmall] = useState(false);
   const [basemap, setBasemap] = useState("street"); // "street" | "satellite"
   const [basemapError, setBasemapError] = useState(false);
+  const coarsePointer = useCoarsePointer();
 
   // Mount once. The tile layer itself is NOT created here — see the basemap effect below —
   // so toggling satellite never tears down/recreates the map, the marker layer or its handlers.
   useEffect(() => {
     if (!hostRef.current || mapRef.current) return undefined;
-    const map = L.map(hostRef.current, { center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM, zoomControl: true });
+    // B651872 (×2) — fadeAnimation:false, see the header comment: Leaflet's own tile fade-in was
+    // freezing partway after a search-select flyTo, and the owner's explicit direction was to
+    // remove the animation rather than patch around a still-broken fade loop.
+    const map = L.map(hostRef.current, { center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM, zoomControl: true, fadeAnimation: false });
     layerRef.current = L.layerGroup([], { renderer: L.canvas() }).addTo(map);
     mapRef.current = map;
 
@@ -348,6 +412,8 @@ export default function FoodMap({
 
     // Wider white keyline on satellite — see the header comment on PIN LEGIBILITY ON IMAGERY.
     const strokeWeight = basemap === "satellite" ? 3 : 2;
+    // B668193 — rebuilt every pass; the coarse-pointer click resolver (below) reads this by ref.
+    pinIndexRef.current = [];
     const addPin = (lat, lon, color, title, onClick, opts = {}) => {
       const isSelected = opts.key != null && opts.key === selectedKey;
       const baseRadius = opts.radius ?? 7;
@@ -360,15 +426,23 @@ export default function FoodMap({
           fillColor: SELECTED_ACCENT, fillOpacity: 0.22, interactive: false,
         }).addTo(layer);
       }
+      const drawnRadius = isSelected ? baseRadius + 5 : baseRadius;
       const m = L.circleMarker([lat, lon], {
         renderer: layer.options.renderer,
-        radius: isSelected ? baseRadius + 5 : baseRadius,
+        radius: drawnRadius,
         weight: isSelected ? 4 : strokeWeight,
         color: isSelected ? SELECTED_ACCENT : "#fff",
         fillColor: color, fillOpacity: opts.fillOpacity ?? 0.95,
       });
       m.bindTooltip(title, { direction: "top", offset: [0, -6] });
-      if (onClick) m.on("click", onClick);
+      if (onClick) {
+        // B668193 — on a coarse (touch) pointer, resolution happens centrally instead (the
+        // resolver effect below), where a wider, nearest-centre-aware hit test replaces Leaflet's
+        // own draw-order-wins canvas dispatch. A mouse/desktop pointer is completely untouched:
+        // same per-marker listener, same zero tolerance, as before this item.
+        if (coarsePointer) pinIndexRef.current.push({ lat, lon, radius: drawnRadius, onClick });
+        else m.on("click", onClick);
+      }
       m.addTo(layer);
     };
 
@@ -398,7 +472,13 @@ export default function FoodMap({
         fillColor: COLORS.wishlist, fillOpacity: 0,
       });
       m.bindTooltip(`${title} · want to try`, { direction: "top", offset: [0, -6] });
-      if (onClick) m.on("click", onClick);
+      // B668193 — the same coarse-pointer nearest-centre resolution as addPin's own pins; a
+      // wishlist ring is exactly as small and exactly as easy to tap-miss on a phone.
+      if (onClick) {
+        const drawnRadius = isSelected ? baseRadius + 5 : baseRadius;
+        if (coarsePointer) pinIndexRef.current.push({ lat, lon, radius: drawnRadius, onClick });
+        else m.on("click", onClick);
+      }
       m.addTo(layer);
     };
 
@@ -439,7 +519,31 @@ export default function FoodMap({
         addPin(p.lat, p.lon, COLORS.unlogged, `${p.name} (live search)`, () => onSelectPlace?.(p), { ...REFERENCE_PIN, key: `place:${p.id}` });
       }
     }
-  }, [places, loggedPlaces, loggedIds, manualPins, wishlistPlaces, wishlistManualPins, overpassPlaces, tooSmall, basemap, selectedKey, onSelectPlace, onSelectManualPin]);
+  }, [places, loggedPlaces, loggedIds, manualPins, wishlistPlaces, wishlistManualPins, overpassPlaces, tooSmall, basemap, selectedKey, onSelectPlace, onSelectManualPin, coarsePointer]);
+
+  // B668193 — the coarse-pointer nearest-centre tap resolver. Only ever registered on a coarse
+  // pointer (desktop is untouched — no listener, no behaviour change); skipped while `pinMode` is
+  // active so a tap on an existing pin can't also drop a new manual pin at the same spot (the
+  // drop-a-pin effect above owns the click while that mode is on). Reads `pinIndexRef` fresh on
+  // every tap, so it never goes stale even though this effect doesn't re-subscribe on every
+  // marker redraw.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !coarsePointer || pinMode) return undefined;
+    const onClick = (e) => {
+      const tapPoint = map.latLngToContainerPoint(e.latlng);
+      let best = null, bestDist = Infinity;
+      for (const cand of pinIndexRef.current) {
+        const p = map.latLngToContainerPoint([cand.lat, cand.lon]);
+        const dist = tapPoint.distanceTo(p);
+        const limit = Math.max(cand.radius, TOUCH_MIN_TAP_RADIUS);
+        if (dist <= limit && dist < bestDist) { bestDist = dist; best = cand; }
+      }
+      best?.onClick();
+    };
+    map.on("click", onClick);
+    return () => map.off("click", onClick);
+  }, [coarsePointer, pinMode]);
 
   const showCappedNotice = !tooSmall && placesCapped;
   const hasOwnPlaces = (loggedPlaces?.length || 0) + (manualPins?.length || 0) + (wishlistPlaces?.length || 0) + (wishlistManualPins?.length || 0) > 0;
@@ -474,11 +578,11 @@ export default function FoodMap({
           style={{
             position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)", zIndex: 500,
             border: "1px solid var(--border-default)", borderRadius: 999, background: "var(--surface-raised)",
-            color: "var(--text-primary)", font: "inherit", fontSize: 12.5, fontWeight: 700, padding: "7px 16px",
+            color: "var(--text-primary)", font: "inherit", fontSize: 12.5, fontWeight: 700, padding: "7px 20px",
             cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
           }}
         >
-          🔍 Search live for more here
+          Search live for more here
         </button>
       )}
       {basemapError && (
@@ -497,11 +601,11 @@ export default function FoodMap({
         style={{
           position: "absolute", top: 12, right: 12, zIndex: 500,
           border: "1px solid var(--border-default)", borderRadius: 999, background: "var(--surface-raised)",
-          color: "var(--text-primary)", font: "inherit", fontSize: 12.5, fontWeight: 700, padding: "7px 14px",
+          color: "var(--text-primary)", font: "inherit", fontSize: 12.5, fontWeight: 700, padding: "7px 18px",
           cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
         }}
       >
-        {basemap === "satellite" ? "🗺 Street" : "🛰 Satellite"}
+        {basemap === "satellite" ? "Street" : "Satellite"}
       </button>
     </div>
   );

@@ -2014,3 +2014,9 @@ The three defects behind *"the layers / order feature doesn't work at all"* are 
 - **PASS** = no green `+` / red `−` anywhere on the buildings at that zoom. Zoom in and they FADE in — softly, not popping — at a zoom where a bump-out is clearly a shape rather than a dot, and they are clickable the instant they are visible (a press must not be swallowed by a faint control).
 - **FAIL** = still visible at whole-site zoom · or they now wait so long that placing a dock zone or bump-out at a normal working zoom has become awkward. **The second failure is the one to report back with a number**: say roughly how far in you had to go, and the threshold moves as a product decision on the item — never nudged quietly.
 - Also worth a glance on a SMALL site, so the absolute rule is confirmed to read the same at both ends: a 30-acre plan should behave identically at the same scale-bar reading.
+
+### V330865 — B651873: /food renders standalone, no planner workspace tabs
+
+**✅ PASS — 2026-08-22, run by the OWNER on the shipped bundle `index-C28qSpY8.js` (planyr.io), verbatim: "/food no longer shows Site/Schedule/Review/Library/Notes. Confirmed with a cache-busted load."**
+Confirms the sandbox's own headless finding (zero module tabs on `/food`, the food toolbar intact, Site's five tabs unaffected) held on the real deployed site, signed-in-or-out.
+**Worth carrying forward:** the owner's own note that a PLAIN hash navigation (`planyr.io/#/food`) can serve a STALE cached `index.html` and the OLD bundle — he had to use a cache-busted load (`planyr.io/?cb=<timestamp>#/food`) to see the real fix. Any future live-verify pass on this route should do the same rather than trust a bare hash reload.
