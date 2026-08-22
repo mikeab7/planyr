@@ -35,11 +35,14 @@ function sliceBetween(startMarker, endMarker, { fromLast = false } = {}) {
   return SRC.slice(start, end);
 }
 
-// Extract the queue wrapper (the fix under test).
-const queueSrc = sliceBetween(
-  "const _saveQueue = {};",
-  "window.storage.set = (k, v, opts = {}) => new Promise((resolve, reject) => {\n    const isAuto = (opts.label || \"auto\") === \"auto\" && !opts.skipSanity;\n    const q = _saveQueue[k] || (_saveQueue[k] = []);\n    const tail = q[q.length - 1];\n    if (isAuto && tail && tail.auto) { tail.v = v; tail.opts = opts; tail.waiters.push({ resolve, reject }); }\n    else q.push({ v, opts, auto: isAuto, waiters: [{ resolve, reject }] });\n    _drainSaveQueue(k);\n  });",
-) + "window.storage.set = (k, v, opts = {}) => new Promise((resolve, reject) => {\n    const isAuto = (opts.label || \"auto\") === \"auto\" && !opts.skipSanity;\n    const q = _saveQueue[k] || (_saveQueue[k] = []);\n    const tail = q[q.length - 1];\n    if (isAuto && tail && tail.auto) { tail.v = v; tail.opts = opts; tail.waiters.push({ resolve, reject }); }\n    else q.push({ v, opts, auto: isAuto, waiters: [{ resolve, reject }] });\n    _drainSaveQueue(k);\n  });";
+// Extract the queue wrapper (the fix under test). Boundaries are STRUCTURAL landmarks that
+// coalescing/ordering logic changes can't touch (the block's opening declaration and the IIFE's
+// own closing `})();`) — NOT a copy of the logic itself, so a mutation inside the block changes
+// what gets extracted and evaluated, never breaks the extraction step. (An earlier version of this
+// test used the exact expected body text as its own end-marker, which meant a logic mutation broke
+// STRING EXTRACTION before the logic ever ran — a false "not found" failure that would have read as
+// a broken test, not a caught bug. Fixed after mutation-testing turned that up.)
+const queueSrc = sliceBetween("const _saveQueue = {};", "\n})();");
 
 // Build a fresh sandbox: a fake `window.storage` whose `_rawSet` is swappable per test, with the
 // REAL extracted queue wrapper installed as `window.storage.set`.
@@ -69,26 +72,63 @@ describe("window.storage.set queue wrapper — extracted from public/sequence/in
     expect(calls).toEqual(["v1", "v3"]);
   });
 
-  it("an EXPLICIT (skipSanity) save is never coalesced away by a later auto save", async () => {
+  // The three coalescing sub-cases below all need the FIRST save to still be genuinely IN FLIGHT
+  // (not yet started-and-shifted-out) when the LATER ones arrive — a synchronous back-to-back call
+  // with an instantly-resolving mock never exercises the "something is queued behind an unstarted
+  // job" branch at all (the first job is already shifted into "running" before the second call is
+  // even reached), so it would pass identically whether coalescing-exemption existed or not. Caught
+  // by mutation-testing this session: an earlier version of these two tests used an instant mock and
+  // stayed GREEN even when the source was mutated to coalesce EVERY tail regardless of type — a
+  // vacuous check. Fixed by giving the mock a real delay, same shape as the "at most one in flight"
+  // test below.
+  it("an incoming AUTO save does not coalesce onto a QUEUED EXPLICIT tail — it gets its own slot", async () => {
     const calls = [];
-    const sandbox = makeSandbox(async (k, v, opts) => { calls.push([v, opts.label]); return { ok: true }; });
-    const p1 = sandbox.storage.set("hs-v1", "pre-delete-state", { label: "pre-delete-project", skipSanity: true });
-    const p2 = sandbox.storage.set("hs-v1", "post-delete-state", { label: "auto" });
-    await Promise.all([p1, p2]);
+    const sandbox = makeSandbox(async (k, v, opts) => {
+      calls.push([v, opts.label]);
+      await new Promise((r) => setTimeout(r, 20));
+      return { ok: true };
+    });
+    const p1 = sandbox.storage.set("hs-v1", "running", { label: "auto" }); // occupies the in-flight slot
+    const p2 = sandbox.storage.set("hs-v1", "pre-delete-state", { label: "pre-delete-project", skipSanity: true }); // queues as tail
+    const p3 = sandbox.storage.set("hs-v1", "post-delete-state", { label: "auto" }); // must NOT coalesce onto p2's explicit tail
+    await Promise.all([p1, p2, p3]);
     expect(calls).toEqual([
+      ["running", "auto"],
       ["pre-delete-state", "pre-delete-project"],
       ["post-delete-state", "auto"],
     ]);
   });
 
-  it("a later explicit save is also never coalesced onto by a subsequent one — every explicit save keeps its own slot", async () => {
+  it("an incoming EXPLICIT save is never coalesced away by a later auto save — both reach _rawSet", async () => {
     const calls = [];
-    const sandbox = makeSandbox(async (k, v, opts) => { calls.push([v, opts.label]); return { ok: true }; });
-    await Promise.all([
-      sandbox.storage.set("hs-v1", "a", { label: "pre-import", skipSanity: true }),
-      sandbox.storage.set("hs-v1", "b", { label: "pre-recascade", skipSanity: true }),
+    const sandbox = makeSandbox(async (k, v, opts) => {
+      calls.push([v, opts.label]);
+      await new Promise((r) => setTimeout(r, 20));
+      return { ok: true };
+    });
+    const p0 = sandbox.storage.set("hs-v1", "running", { label: "auto" }); // occupies the in-flight slot
+    const p1 = sandbox.storage.set("hs-v1", "pre-delete-state", { label: "pre-delete-project", skipSanity: true });
+    const p2 = sandbox.storage.set("hs-v1", "post-delete-state", { label: "auto" });
+    await Promise.all([p0, p1, p2]);
+    expect(calls).toEqual([
+      ["running", "auto"],
+      ["pre-delete-state", "pre-delete-project"],
+      ["post-delete-state", "auto"],
     ]);
-    expect(calls).toEqual([["a", "pre-import"], ["b", "pre-recascade"]]);
+  });
+
+  it("a later explicit save is also never coalesced onto an earlier QUEUED explicit one — every explicit save keeps its own slot", async () => {
+    const calls = [];
+    const sandbox = makeSandbox(async (k, v, opts) => {
+      calls.push([v, opts.label]);
+      await new Promise((r) => setTimeout(r, 20));
+      return { ok: true };
+    });
+    const p0 = sandbox.storage.set("hs-v1", "running", { label: "auto" }); // occupies the in-flight slot
+    const pA = sandbox.storage.set("hs-v1", "a", { label: "pre-import", skipSanity: true });
+    const pB = sandbox.storage.set("hs-v1", "b", { label: "pre-recascade", skipSanity: true });
+    await Promise.all([p0, pA, pB]);
+    expect(calls).toEqual([["running", "auto"], ["a", "pre-import"], ["b", "pre-recascade"]]);
   });
 
   it("at most one _rawSet call is ever in flight for a given key (no overlap)", async () => {
