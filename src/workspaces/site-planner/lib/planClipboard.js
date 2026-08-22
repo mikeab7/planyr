@@ -213,20 +213,28 @@ export function clipboardBBox(items, bboxOf) {
 // A callout persists as { box, tip } (legacy single leader), { box, tips:[…] }, or box-only
 // (noLeader) — mirror `calloutTips`'s read rule rather than branching on shape everywhere.
 export const clipCalloutTips = (c) => (Array.isArray(c.tips) ? c.tips : (c.tip ? [c.tip] : []));
+// NEW-1 (two-segment leader) — mirrors `clipCalloutTips` for any PINNED elbows, so a leader bent
+// far outside the box-tip line is still counted when placing a cross-plan paste.
+const clipCalloutElbows = (c) => (Array.isArray(c.elbows) ? c.elbows : (c.elbow ? [c.elbow] : []));
 
 function calloutBBox(c) {
-  const pts = [c.box, ...clipCalloutTips(c)].filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y));
+  const pts = [c.box, ...clipCalloutTips(c), ...clipCalloutElbows(c)].filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y));
   if (!pts.length) return null;
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   pts.forEach((p) => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
   return { x0, y0, x1, y1 };
 }
 
-// Translate a callout (text box + every leader tip) by (dx,dy), preserving whichever shape it's in.
+// Translate a callout (text box + every leader tip + any pinned elbow) by (dx,dy), preserving
+// whichever shape it's in. NEW-1 (two-segment leader) — a pinned elbow is a real world point like
+// a tip, so a copy/paste or drag-duplicate has to carry it along or it strands at its old ground
+// position while the box and tip move to the new one; absent on every untouched callout.
 export function translateCalloutBy(c, dx, dy) {
   const out = { ...c, box: { x: c.box.x + dx, y: c.box.y + dy } };
   if (Array.isArray(c.tips)) out.tips = c.tips.map((p) => ({ x: p.x + dx, y: p.y + dy }));
   else if (c.tip) out.tip = { x: c.tip.x + dx, y: c.tip.y + dy };
+  if (Array.isArray(c.elbows)) out.elbows = c.elbows.map((p) => (p ? { x: p.x + dx, y: p.y + dy } : p));
+  else if (c.elbow) out.elbow = { x: c.elbow.x + dx, y: c.elbow.y + dy };
   return out;
 }
 

@@ -113,6 +113,34 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V345760 — B672115: a parcel click routes by WHERE IT IS, not the site's frozen county `Blocker: live-GIS`
+**What was verified here:** the frozen-`siteCounty`/Harris-fallback code is fully removed (`test/parcelClickRouting.test.js`, 4 source-guard cases) and both the click query and the lit outlines now route through the exact `candidateCountiesForPoint` function the Map view already uses successfully in production — the SAME routing, not a re-derivation. Full suite 12,086/12,088 green, lint/build green.
+**What is NOT proven:** every county parcel service (HCAD, TxGIO, the Colorado composites, every county CAD) is unreachable from Chromium in this sandbox, so the actual live "pan across a county line, click, select a lot" cannot be produced here.
+**Steps, each with a named expected result:**
+1. On `planyr.io`, signed in, open any Texas plan (e.g. a Goose Creek/Baytown plan). Arm identify mode (＋ Add parcel → the identify tool) and pan the map well outside Harris County — into Fort Bend or Brazoria. **Expect:** parcel outlines light up on the far side, not a blank map.
+2. Click a lot there. **Expect:** it selects and adds to the plan — the same result clicking that exact point from the **Map view** (Select-parcels tool) gives.
+3. Open a Colorado plan (or start one and set its location in Colorado). Pan the planner's identify view across a Colorado county line (e.g. Denver into Arapahoe). **Expect:** outlines and click-select both work on the far side, exactly as step 1/2.
+4. While doing (3), watch the Network tab. **Expect:** no request goes to a Harris County, Texas parcel service from a Colorado plan.
+⏳ **LIVE APP (planyr.io), SIGNED IN, REAL COUNTY GIS** `Blocker: live-GIS`
+
+### V345761 — B672114: a parcel-identify miss names the real reason, never "click more accurately" `Blocker: live-GIS`
+**What was verified here:** the three-way honest-cause branch (`noParcelSourceNote` for an unconfigured county, `responded === 0` for an unreachable server, the plain "no parcel here" only when a healthy source genuinely answered empty) is wired and source-guarded (`test/parcelClickRouting.test.js`'s 4th case). Ships in the same commit as V345760 — the message correction only makes sense once the routing (B672115) is honest.
+**What is NOT proven:** distinguishing the three cases live needs a real point with genuinely no configured parcel source, a real service outage, and a real empty-but-healthy answer — all three need live network access to the real services.
+**Steps, each with a named expected result:**
+1. On `planyr.io`, signed in, in identify mode on a plan, click a point in a state/county Planyr has no parcel source wired for. **Expect:** the message names the county and says no parcel data is wired there yet — never "click directly on a lot."
+2. Click a genuinely blank point inside a county that DOES have a source (open water, a right-of-way with no parcel). **Expect:** "No parcel right there — click directly on a lot…" — this is the one case that message is still correct for.
+3. If a county's parcel service can be forced offline/blocked, click within its area. **Expect:** "The parcel server for this area isn't responding right now — try again in a moment," never the aim-blaming message.
+⏳ **LIVE APP (planyr.io), SIGNED IN, REAL COUNTY GIS** `Blocker: live-GIS`
+
+### V345762 — B672113: a deep link to a project the signed-in account OWNS opens it, even from a browser that never pulled it `Blocker: auth`
+**What was verified here:** the retry-before-banner wiring (`test/routeMissingCloudRetry.test.js`, 4 cases) — a signed-in user gets one fresh `pullCloud` retry, guarded per project id, before the "not found" banner shows. `bootResume.test.js`/`route.test.js` (the pure functions this composes with) unaffected. Full suite 12,086/12,088 green, lint/build green.
+**What is NOT proven:** constructing "owned but never locally pulled" needs a real second device (or a genuinely cold local cache) plus a real signed-in Supabase session — auth is CORS-blocked in this sandbox, so nothing here exercises the actual cloud fetch landing the owner's real Commerce City project.
+**Steps, each with a named expected result:**
+1. Sign in on a browser/profile that has never opened a specific cloud project of yours before (a fresh browser profile, or one where you've cleared site data since that project was created). Navigate directly to that project's deep link (`#/project/<id>/site`).
+2. **Expect:** the project opens — no "this account doesn't have it open here" banner, even on the very first load.
+3. If a project genuinely doesn't belong to the signed-in account (or the id is bad), confirm the banner still shows correctly — the retry must not paper over a genuinely wrong link.
+⏳ **LIVE APP (planyr.io), SIGNED IN, A PROJECT NOT YET LOCALLY CACHED ON THAT BROWSER** `Blocker: auth`
+
 ### V342960 — B669312: "Want to try" wishlist — flag, pin, badge, list filter, auto-clear-on-visit, on a real account `Blocker: auth`
 **What was verified here — the mechanism, the schema, everything reachable signed out, AND the deploy itself.** The `food_wishlist` migration is **applied to production** (`lyeqzkuiwngunutlkkmi`) and its RLS proof (`db/test/food_rls.test.sql`) passes 11/11 against the real database, including a duplicate-flag-refused-by-the-unique-index case. `npx vitest run` is 12,047 green (181/181 in `foodModule.test.js`, 27 of them new for this item), lint is clean, the build is green, and `node ui-audit/perf-bundle-audit.mjs` reports the food route's growth from this item (+5.4 KB, 918.7→924.1 KB) comfortably inside its headroom band. A headless, signed-out Playwright pass against a local `vite preview` build of this branch confirmed `/#/food` loads with zero page errors, the map and basemap toggle render (proving the new hollow-pin draw code doesn't throw even with an empty wishlist), and dropping a pin opens the detail panel with the wishlist toggle correctly ABSENT (gated on `accountActive`) while the rest of the panel renders normally. **PR #1115 merged 2026-08-22T04:25:29Z; confirmed LIVE the same session** — `curl -sSI "https://planyr.io/?cb=<ts>"` immediately after the merge returned `cache-control: no-cache` / `cf-cache-status: DYNAMIC` (a genuinely fresh, non-cached response, not a stale edge copy) serving `index-C28qSpY8.js` — a bundle hash that did not exist before this PR (produced by this PR's own build).
 **What is NOT proven:** the sandbox's egress proxy CORS-blocks the Supabase auth handshake, so nothing here exercises an actual signed-in insert/delete against `food_wishlist`, the hollow map pin rendering with a REAL flagged place, the search badge against a real result, the list shortlist filter against real rows, or the auto-clear-on-first-visit path. All of that needs a real account.
@@ -1871,7 +1899,7 @@ production row counts unchanged by the migration (65 sites / 1 shared / 0 locked
    they are per-user by construction (no team column), so this is a confirmation, not a behaviour to build.
 6. Sign in as a user on NO team → create a project → nothing about the experience differs from today.
 
-### V121984 — B323424: a layer that is ON, past its zoom gate, and covers NOTHING here reads as dormant `Blocker: live-GIS`
+### V121984 — B323424 (×2): a layer that is ON, past its zoom gate, and covers NOTHING here reads as dormant `Blocker: live-GIS`
 
 **Three of the four row states are proven here already**, in a real browser, by `e2e/layer-zoom-dormant.spec.js` (6 cases, red on the pre-fix build): checked-below-gate, checked-above-gate, unchecked, the click-to-fix actually moving the map, a second layer KIND with a second gate source, and the map finder. **The fourth state cannot be reached in this sandbox**: it needs the coverage engine's published-extent probes (`prefetchExtents` → `probeService`), and every GIS host is egress-blocked from Chromium here, so coverage resolves to `unknown` rather than `out` and the row correctly reports `drawing`. The pure model is pinned by `test/layerZoomGate.test.js`; what is unproven is the RENDER of that state.
 
@@ -1879,6 +1907,10 @@ production row counts unchanged by the migration (65 sites / 1 shared / 0 locked
 - **PASS** = the row renders in the dormant treatment — **hollow (outlined) status dot, muted label, dimmed row**, checkbox still checked — and carries an honest line saying the data does not reach this area, with **no** "zoom in N levels" affordance offered (no zoom fixes it, and offering one would be a lie). The row's `data-layer-state` attribute reads `dormant-blank`.
 - **ALSO CHECK, in the same pass:** a layer that is ON, in coverage, and simply came back with nothing gets the same dormant treatment and keeps its own specific message rather than a generic one.
 - **FAIL** = the row is indistinguishable from a drawing one (filled dot, full-contrast label), or it offers a zoom-to-fix line it cannot honour, or it claims "no data in this area" while actually being below its zoom gate.
+
+**Recurrence (2026-08-22) — the NEW steps this update owes, on top of the ones above.** On the owner's real Goose Creek plan (Baytown, Harris County), turn on Pipelines, EPA Superfund/RCRA, Rail lines, County boundaries, and City limits & ETJ, past their zoom gates:
+- **County boundaries / City limits & ETJ / Pipelines** — AUDIT-FIRST found these already correctly wired (`vectorOverlay.js` counts real features). **PASS** = they either paint (Harris County genuinely has county/city/ETJ/pipeline data) or show the same dormant-blank hollow-dot row as above with "Nothing to show here…". **FAIL** = a filled "loaded" dot with nothing painted and no dormant-blank row.
+- **EPA Superfund/RCRA / Rail lines — the confirmed fix, unproven live.** These are `esriFeature`-kind and used to report a filled "loaded" dot unconditionally, painted or not. **PASS** = an empty query now shows the same hollow dormant-blank row ("No features in this view."); a genuine hit still paints and shows a filled "loaded" dot. **FAIL** = a filled dot with nothing painted (the original report, reproduced).
 
 ### V121985 — B323425: contours no longer paint-then-vanish on opening a real plan `Blocker: live-GIS`
 
