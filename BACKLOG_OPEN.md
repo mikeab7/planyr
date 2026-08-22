@@ -684,7 +684,7 @@
 | B1195 | A building's truck court and side parking carried a DIFFERENT building's length, overhanging it by ~195 ft | [Site Planner / dockZones] | #site-planner #ui #persistence | ⏳ live — awaiting |
 | B1196 | Address search showed the OWNER'S MAILING address instead of the situs — and that wrong address became the site NAME | [Site Planner / MapFinder] | #site-planner #gis #ui | ⏳ live — awaiting |
 | B603840 | Remove the manual-override badge from the schedule status pickers | [Scheduler] | #scheduler #ui #testing | ⏳ live — awaiting |
-| B662048 | Woods Road "Concept A 1M SF": 57 elements a teammate deleted from the wrong plan, restored | [Site Planner / persistence] | #site-planner #persistence #sync | ⏳ live — awaiting |
+| B662048 | Woods Road "Concept A 1M SF": 57 elements a teammate deleted from the wrong plan, restored + ROOT-CAUSED & FIXED | [Site Planner / persistence] | #site-planner #persistence #sync | ⏳ live — awaiting |
 
 ## By tag
 
