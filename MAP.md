@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-23 @ `0531fe7` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-23 @ `416a2e9d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -540,7 +540,7 @@ _548 source files mapped._
 - **`src/workspaces/site-planner/lib/conceptName.js`** — Default plan naming: bijective base-26 Concept A/B/.../AA sequence continuing past the highest existing concept per site
   - _exports_: `conceptLettersToNumber`, `nextConceptName`, `numberToConcept`, `parseConceptIndex`
 - **`src/workspaces/site-planner/lib/conflictToasts.js`** — the B673 conflict policy matrix as a pure mapping: elementSync event → toast spec (who gets told what, which action rides along)
-  - _exports_: `toastForSyncEvent`
+  - _exports_: `describeCoalescedLabel`, `toastForSyncEvent`
 - **`src/workspaces/site-planner/lib/contentVisibility.js`** — the View menu's content model: which GROUPS (elements by type, parcels, markups, measurements, callouts, the acreage-label master) are temporarily hidden. Pure predicates over a sparse hidden-map; never touches geometry, so no number moves
   - _exports_: `anyHidden`, `EL_GROUPS`, `EL_KEY_PREFIX`, `EL_KEYS`, `elHidden`, `elKey`, `groupsFor`, `groupState`, `hiddenKeys`, `hiddenSummary`, `isHidden`, `KNOWN_KEYS`, `normalizeRetiredToggles`, `OTHER_GROUPS`, `parcelAcreageHidden`, `setManyVisible`, `setVisible`, `showAll`, `visibleEls`, `visibleMeasures`, `visibleParcels`
 - **`src/workspaces/site-planner/lib/contours.js`** — Pure contour-line math (B704): 1-ft interval auto-pick, sentinel-embedded voids, d3-contour marching squares, grid-border + dilated-void strip passes, pixel-space simplify, index flags + sparse labels
