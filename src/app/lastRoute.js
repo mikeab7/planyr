@@ -9,6 +9,11 @@
  *
  * The pointer stores only ids — whether the project still exists is delegated to the modules
  * (a dead id resolves to the map/dashboard and the URL self-heals), so this file stays pure.
+ *
+ * ⛔ B710736 (2026-08-23) — a pointer is only restored when it names somewhere SPECIFIC: a
+ * real project, or a deliberate cross-project view. See `isWorthRestoring` / `shouldPersistRoute`
+ * below — a generic "no project selected" placeholder is never seeded, and Food (which has no
+ * project model at all) never even overwrites the pointer. Root cause + full reasoning: BACKLOG.md.
  */
 import { parseRoute, buildHash, DEFAULT_MODULE, INITIAL_HASH_EMPTY } from "./route.js";
 
@@ -37,8 +42,25 @@ export function readLastRoute() {
   }
 }
 
+/* B710736 — modules with no project model at all, which must never drive "open where I
+ * left off". Food is a private, personal side product, deliberately outside the Site
+ * Planner's project model (see src/workspaces/food/CLAUDE.md — "no projects, no
+ * cross-workspace navigation"). The owner sends planyr.io to brokers, lenders and his own
+ * team; landing a bare-domain visit in a restaurant tracker instead of the professional
+ * tool is a credibility problem, not a mere inconvenience. Food stays reachable by direct
+ * URL (#/food still parses and mounts it) — it is only excluded from EVER being the
+ * pointer "open where I left off" restores to, or even overwriting that pointer. */
+const PROJECTLESS_MODULES = new Set(["food"]);
+
+/* Whether a route change is worth persisting as "where I left off" at all. A visit to a
+ * projectless module must not clobber the pointer to wherever the professional tool was
+ * actually left — otherwise the very next bare-domain boot lands right back in it. */
+export function shouldPersistRoute(route) {
+  return !!route && !PROJECTLESS_MODULES.has(route.module);
+}
+
 export function writeLastRoute(route) {
-  if (!route) return;
+  if (!route || !shouldPersistRoute(route)) return;
   try {
     localStorage.setItem(KEY, JSON.stringify({
       module: route.module || DEFAULT_MODULE,
@@ -48,17 +70,35 @@ export function writeLastRoute(route) {
   } catch (_) { /* quota/unavailable — resume is a convenience, never blocks navigation */ }
 }
 
+/* Whether a stored pointer names somewhere SPECIFIC enough to be worth seeding into a
+ * fresh boot: a real project, or a deliberate cross-project view the user explicitly
+ * toggled on (Notes' "All Notes" dashboard, a cross-project Library tree, …). A
+ * non-default module sitting on no project and not in cross mode is a generic
+ * placeholder — a project picker, an empty canvas, "nothing selected" — indistinguishable
+ * from just landing on the default workspace, so restoring it is never restoring a place
+ * the user was actually working; it only reproduces the food-tab bug in miniature
+ * (B710736). Food is refused outright regardless of project/cross, matching
+ * PROJECTLESS_MODULES above, in case a stale pointer written before this fix (or by a
+ * future regression) still carries one. */
+function isWorthRestoring(route) {
+  if (PROJECTLESS_MODULES.has(route.module)) return false;
+  if (route.module === DEFAULT_MODULE) return true; // already a no-op — buildHash gives "#/"
+  return !!route.projectId || !!route.cross;
+}
+
 /* Pure boot decision: which route (if any) to seed into an empty-hash boot.
  * Returns null when the current URL must be honoured verbatim, when nothing is stored,
- * or when the stored pointer resolves to the plain default dashboard (seeding "#/" would
- * be a visible no-op). The parse(build(x)) round-trip normalizes junk — an unknown module
- * falls back to the default, malformed ids stay strings — so a stale pointer can never
- * produce an invalid hash. */
+ * when the stored pointer names no specific place worth restoring (isWorthRestoring), or
+ * when it resolves to the plain default dashboard (seeding "#/" would be a visible
+ * no-op). The parse(build(x)) round-trip normalizes junk — an unknown module falls back
+ * to the default, malformed ids stay strings — so a stale pointer can never produce an
+ * invalid hash. */
 export function pickBootRoute({ initialHashEmpty, stored, restoreLastModule = RESTORE_LAST_MODULE }) {
   if (!initialHashEmpty || !stored) return null;
   const wanted = restoreLastModule
     ? stored
     : { module: DEFAULT_MODULE, projectId: stored.projectId, cross: false };
+  if (!isWorthRestoring(wanted)) return null;
   const route = parseRoute(buildHash(wanted));
   return buildHash(route) === "#/" ? null : route;
 }
