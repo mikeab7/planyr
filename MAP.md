@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-23 @ `c5ed7c1b` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-23 @ `b3fd833` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_546 source files mapped._
+_547 source files mapped._
 
 ## infra
 
@@ -60,7 +60,7 @@ _546 source files mapped._
 - **`src/workspaces/food/lib/directions.js`** — Place-panel directions link URL builder (Apple Maps on iOS/Safari, Google Maps elsewhere)
   - _exports_: `directionsUrl`, `preferAppleMaps`
 - **`src/workspaces/food/lib/foodStore.js`** — The one seam to Supabase: place/visit queries, visit CRUD, manual-pin grouping, the logged-place-id set
-  - _exports_: `addWishlist`, `avgRatingByPlaceId`, `deleteVisit`, `fetchAllVisits`, `fetchAllWishlist`, `fetchPlaceById`, `fetchPlacesByIds`, `fetchPlacesInBounds`, `insertVisit`, `loggedPlaceIds`, `manualGroupKey`, `manualPinsFromVisits`, `manualWishlistFromRows`, `removeWishlist`, `searchPlacesByName`, `supabaseConfigured`, `updateVisit`, `wishlistedPlaceIds`
+  - _exports_: `addDishWishlist`, `addWishlist`, `avgRatingByPlaceId`, `deleteVisit`, `dishWishlistByManualKey`, `dishWishlistByPlaceId`, `fetchAllDishWishlist`, `fetchAllVisits`, `fetchAllWishlist`, `fetchPlaceById`, `fetchPlacesByIds`, `fetchPlacesInBounds`, `insertVisit`, `loggedPlaceIds`, `manualGroupKey`, `manualPinsFromVisits`, `manualWishlistFromRows`, `markDishDone`, `removeDishWishlist`, `removeWishlist`, `searchPlacesByName`, `supabaseConfigured`, `updateVisit`, `wishlistedPlaceIds`
 - **`src/workspaces/food/lib/formatPlace.js`** — Display-only category title-casing (with an acronym exception list) and address ZIP+4 tidy — never mutates the stored value
   - _exports_: `formatAddress`, `formatCategory`, `formatCityFromAddress`
 - **`src/workspaces/food/lib/overpass.js`** — OpenStreetMap Overpass fallback: cached per-bbox live query, called only on explicit user request
@@ -71,6 +71,8 @@ _546 source files mapped._
   - _exports_: `supabase`, `supabaseConfigured`
 - **`src/workspaces/food/lib/visitAggregates.js`** — Pure aggregation over a place's loaded visits: averages, visit count, first/last date, deduped "order again" entries
   - _exports_: `computeVisitAggregates`, `orderAgainEntries`
+- **`src/workspaces/food/lib/zoomAnimTier.js`** — Pure two-tier perf-degrade decision for continuous marker scaling during a Leaflet zoom animation, extracted from FoodMap.jsx so it's unit-testable
+  - _exports_: `nextZoomAnimTier`, `ZOOM_ANIM_DEGRADE_STREAK`, `ZOOM_ANIM_FRAME_BUDGET_MS`
 - **`src/workspaces/notes/components/IntegrityBanner.jsx`** — the bar for the two findings nothing could previously mention: one note living in two projects, and a note that had lost its place (already recovered by the time it renders, and named / openable / re-filable inline). Its own lazy chunk — it renders only when something is wrong.
   - _exports_: `default (IntegrityBanner)`
 - **`src/workspaces/notes/components/NoteEditor.jsx`** — One note page (title · toolbar · document) and the module's ONLY editor-engine import — the lazy boundary. Snapshots the document as plain JSON at edit time so the flush never queries a torn-down instance.

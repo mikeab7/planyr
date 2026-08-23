@@ -18,6 +18,7 @@ import { ROUTE_KEYS } from "../ui-audit/lib/bundleMetrics.mjs";
 import {
   manualPinsFromVisits, loggedPlaceIds, avgRatingByPlaceId,
   manualGroupKey, wishlistedPlaceIds, manualWishlistFromRows,
+  dishWishlistByPlaceId, dishWishlistByManualKey,
 } from "../src/workspaces/food/lib/foodStore.js";
 import { roundKey, queryFor, fromElement } from "../src/workspaces/food/lib/overpass.js";
 import { RATING_COLORS, RATING_TEXT, colorForRating, textColorForRating } from "../src/workspaces/food/lib/ratingColor.js";
@@ -26,6 +27,7 @@ import { computeVisitAggregates, orderAgainEntries } from "../src/workspaces/foo
 import { formatVisitDate, formatRelativeDate, formatMonthYear } from "../src/workspaces/food/lib/dateFormat.js";
 import { preferAppleMaps, directionsUrl } from "../src/workspaces/food/lib/directions.js";
 import { resolveSnap, heightForSnap } from "../src/workspaces/food/lib/bottomSheetSnap.js";
+import { nextZoomAnimTier, ZOOM_ANIM_FRAME_BUDGET_MS, ZOOM_ANIM_DEGRADE_STREAK } from "../src/workspaces/food/lib/zoomAnimTier.js";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FOOD = join(REPO, "src", "workspaces", "food");
@@ -957,10 +959,27 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     const map = src("components/FoodMap.jsx");
     const mountEffect = map.slice(map.indexOf("Mount once."), map.indexOf("Basemap tile layer"));
     expect(mountEffect).toMatch(/typeof ResizeObserver !== "undefined"/);
-    expect(mountEffect).toMatch(/new ResizeObserver\(\(\) => map\.invalidateSize\(\{ animate: false \}\)\)/);
+    expect(mountEffect).toMatch(/new ResizeObserver\(\(\) => map\.invalidateSize\(\{ animate: false, pan: false \}\)\)/);
     expect(mountEffect).toMatch(/resizeObserver\.observe\(hostRef\.current\)/);
     expect(mountEffect).toMatch(/resizeObserver\?\.disconnect\(\)/); // cleaned up on unmount
     expect(mountEffect).not.toMatch(/setInterval\(/); // never a polling redraw
+  });
+
+  it("B651872 (×5) — RECURRENCE: the ResizeObserver's own invalidateSize is pan:false, and Leaflet's own window-resize tracking is disabled — both are needed", () => {
+    // REPRODUCED live (real Playwright devices['iPhone 14 Pro'] context, real dev build, real
+    // 100dvh CSS, .scratch-repro/verify-grey-band-real.mjs): growing the real viewport height
+    // (simulating Safari's chrome collapsing, or a rotation) left `.leaflet-map-pane` translated
+    // by HALF the size delta even with the ResizeObserver's own call fixed to pan:false, because
+    // Leaflet's own `trackResize:true` default independently binds `window`'s 'resize' event to
+    // `invalidateSize({debounceMoveend:true})` with the default pan:true — no way to pass that
+    // call pan:false. Both had to change: this host is ALWAYS top-anchored (a fixed-height
+    // AppHeader above, flex:1 below), so a symmetric half-delta pan is never correct here, and the
+    // ResizeObserver (which watches the real container, not just window) fully supersedes what
+    // trackResize was for.
+    const map = src("components/FoodMap.jsx");
+    const mountEffect = map.slice(map.indexOf("Mount once."), map.indexOf("Basemap tile layer"));
+    expect(mountEffect).toMatch(/trackResize:\s*false/);
+    expect(mountEffect).toMatch(/new ResizeObserver\(\(\) => map\.invalidateSize\(\{ animate: false, pan: false \}\)\)/);
   });
 
   // B681520 — attribution: licence-required credit, relocated off the bottom, never deleted.
@@ -973,13 +992,47 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     expect(map).toMatch(/fadeAnimation: false, attributionControl: false,/);
   });
 
-  it("a collapsed circular 'i' toggle, top-right under the basemap toggle — never the bottom edge", () => {
+  it("B681520 (×2) — desktop gets a plain always-visible muted text credit, never a collapsed toggle", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/data-testid="food-attribution-text"/);
+    const textBlock = map.slice(map.indexOf('data-testid="food-attribution-text"') - 100, map.indexOf('data-testid="food-attribution-text"') + 900);
+    expect(textBlock).toMatch(/!narrowViewport/); // desktop only — never gated on anything else
+    expect(textBlock).toMatch(/bottom: 6, right: 10/);
+    expect(textBlock).not.toMatch(/onClick/); // not a button — always visible, nothing to expand
+    expect(textBlock).toMatch(/dangerouslySetInnerHTML/); // same trusted attribution HTML, not a collapsed affordance
+  });
+
+  it("B681520 (×2) — mobile keeps a collapsed circular toggle, top-right under the basemap toggle — never the bottom edge — with a real 44x44 touch target and a centred SVG glyph, not an italic text 'i'", () => {
     const map = src("components/FoodMap.jsx");
     expect(map).toMatch(/data-testid="food-attribution-toggle"/);
-    const attrBtn = map.slice(map.indexOf('data-testid="food-attribution-toggle"') - 200, map.indexOf('data-testid="food-attribution-toggle"') + 500);
-    expect(attrBtn).toMatch(/top: 56, right: 12/); // directly under the toggle (top:12) — never bottom
+    const attrBtn = map.slice(map.indexOf('data-testid="food-attribution-toggle"') - 1400, map.indexOf('data-testid="food-attribution-toggle"') + 900);
+    expect(attrBtn).toMatch(/narrowViewport/); // gated to mobile, never rendered on desktop too
+    expect(attrBtn).toMatch(/top: ATTRIBUTION_TOGGLE_TOP, right: 12/); // directly under the basemap toggle — never the bottom
+    expect(attrBtn).toMatch(/width: ATTRIBUTION_TOGGLE_SIZE, height: ATTRIBUTION_TOGGLE_SIZE/);
     expect(attrBtn).toMatch(/borderRadius: "50%"/); // circular, not a rectangular strip
     expect(attrBtn).toMatch(/onClick=\{\(\) => setAttributionOpen\(\(o\) => !o\)\}/);
+    expect(attrBtn).toMatch(/<InfoGlyph/); // a centred SVG glyph, never a text character
+    expect(attrBtn).not.toMatch(/fontStyle:\s*"italic"/);
+    expect(attrBtn).not.toMatch(/>\s*i\s*</); // the old literal text "i" glyph is gone
+    // The size/position constants themselves: 44x44 (the module's own touch-target minimum,
+    // TOUCH_MIN_TAP_RADIUS=22 diameter-equivalent), not the old sub-minimum 28.
+    expect(map).toMatch(/const ATTRIBUTION_TOGGLE_SIZE = 44;/);
+  });
+
+  it("B681520 (×2) — InfoGlyph is a plain SVG whose ink is centred in its own viewBox on both axes, not a font character", () => {
+    const map = src("components/FoodMap.jsx");
+    const glyphIdx = map.indexOf("function InfoGlyph(");
+    expect(glyphIdx).toBeGreaterThanOrEqual(0);
+    const glyph = map.slice(glyphIdx, map.indexOf("export default function FoodMap"));
+    expect(glyph).toMatch(/viewBox="0 0 24 24"/);
+    expect(glyph).toMatch(/<circle cx="12" cy="7\.6" r="1\.6"/); // the dot
+    expect(glyph).toMatch(/<rect x="10\.4" y="10\.4" width="3\.2" height="7\.6" rx="1\.6"/); // the stem
+    // Ink extent: dot top = cy-r = 6.0, stem bottom = y+height = 18.0 -> centred exactly on 12.
+    expect(7.6 - 1.6).toBe(6.0);
+    expect(10.4 + 7.6).toBe(18.0);
+    expect((6.0 + 18.0) / 2).toBe(12);
+    // Horizontal: dot cx=12 (centre), stem x=10.4 width=3.2 -> spans 10.4 to 13.6, centred on 12.
+    expect(10.4 + 3.2 / 2).toBe(12);
   });
 
   it("expanding the credit shows the CURRENT basemap's real text (never re-typed) — no 'Leaflet' prefix anywhere", () => {
@@ -1007,14 +1060,39 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     expect(true).toBe(true);
   });
 
-  it("'Search live for more here' also moves off the bottom band on a narrow viewport — desktop (a right rail, never covering the bottom) is untouched", () => {
-    // Verified live (.scratch-repro/verify-search-here.mjs): narrow viewport (390px) places it
-    // at a fixed top offset, comfortably inside BottomSheet.jsx's own always-clear zone at every
-    // snap; wide viewport (1400px) keeps the original bottom-centre placement unchanged.
+  it("NEW-1 (2nd owner block) — the zoom-gate notice, capped notice, and 'Search live for more here' share ONE bottom-centre stack, never scattered between top and bottom", () => {
     const map = src("components/FoodMap.jsx");
-    const searchHereBlock = map.slice(map.indexOf('data-testid="food-search-here"') - 300, map.indexOf('data-testid="food-search-here"') + 400);
-    expect(searchHereBlock).toMatch(/narrowViewport\s*\n\s*\?\s*\{ top: 96, left: "50%", transform: "translateX\(-50%\)" \}/);
-    expect(searchHereBlock).toMatch(/:\s*\{ bottom: 16, left: "50%", transform: "translateX\(-50%\)" \}/);
+    // All three now live inside the SAME wrapper, between the map host and the loading pill —
+    // no more top:12 notices or a narrowViewport-conditional top/bottom split for the button.
+    const stackStart = map.indexOf("NEW-1 (2nd owner block, 2026-08-23) — the zoom-gate notice");
+    const stackEnd = map.indexOf("food-tiles-loading");
+    expect(stackStart).toBeGreaterThanOrEqual(0);
+    const stack = map.slice(stackStart, stackEnd);
+    expect(stack).toMatch(/data-testid="food-zoomed-out-notice"/);
+    expect(stack).toMatch(/data-testid="food-capped-notice"/);
+    expect(stack).toMatch(/data-testid="food-search-here"/);
+    // One shared bottom-anchored wrapper, not three independently-positioned elements.
+    expect(stack).toMatch(/bottom:\s*\(narrowViewport \? sheetHeightPx : 0\) \+ BOTTOM_STACK_GAP/);
+    expect(stack).not.toMatch(/top: 12, left: "50%"/); // no longer top-anchored
+    expect(stack).not.toMatch(/top: 96, left: "50%"/); // no longer a separate mobile top position
+  });
+
+  it("NEW-1 (2nd owner block) — the bottom stack tracks the mobile sheet's REAL live height, not a static guess, and ignores it on desktop", () => {
+    const app = src("FoodApp.jsx");
+    expect(app).toMatch(/const \[sheetHeightPx, setSheetHeightPx\] = useState\(0\)/);
+    expect(app).toMatch(/onSheetHeightChange=\{setSheetHeightPx\}/);
+    expect(app).toMatch(/sheetHeightPx=\{sheetHeightPx\}/);
+    // Reset to 0 on close so a stale height never lingers once the sheet is gone.
+    const closePanel = app.slice(app.indexOf("const closePanel ="), app.indexOf("const closePanel =") + 120);
+    expect(closePanel).toMatch(/setSheetHeightPx\(0\)/);
+
+    const panel = src("components/VisitPanel.jsx");
+    expect(panel).toMatch(/wishlisted, onToggleWishlist, onSheetHeightChange,/); // destructured prop
+    expect(panel).toMatch(/onHeightChange=\{onSheetHeightChange\}/); // threaded into BottomSheet, mobile branch only
+
+    const sheet = src("components/BottomSheet.jsx");
+    expect(sheet).toMatch(/onHeightChange\?\.\(heightPx\)/); // fires on every real height change, not a poll
+    expect(sheet).not.toMatch(/setInterval\(/);
   });
 
   it("B651872 — a search-select flyTo forces a hard view reset once it settles, so the tile grid can never stay stale", () => {
@@ -1595,6 +1673,87 @@ describe("db/food.sql — food_wishlist: a third table, owner-only RLS, unique p
   });
 });
 
+describe("NEW-3 (2026-08-23) — dish-level want-to-try: its own table, distinct lifecycle from place-level food_wishlist", () => {
+  describe("foodStore — dishWishlistByPlaceId / dishWishlistByManualKey", () => {
+    it("dishWishlistByPlaceId groups by place_id, excludes manual rows and DONE dishes", () => {
+      const rows = [
+        { id: "d1", place_id: "p1", dish_name: "Pad Thai", done: false },
+        { id: "d2", place_id: "p1", dish_name: "Green Curry", done: false },
+        { id: "d3", place_id: "p1", dish_name: "Tom Yum", done: true }, // done — excluded
+        { id: "d4", place_id: "p2", dish_name: "Ramen", done: false },
+        { id: "d5", place_id: null, custom_name: "Truck", custom_lat: 29.76, custom_lon: -95.37, dish_name: "Al pastor", done: false }, // manual — excluded
+      ];
+      const groups = dishWishlistByPlaceId(rows);
+      expect([...groups.get("p1").map((r) => r.dish_name)]).toEqual(["Pad Thai", "Green Curry"]);
+      expect(groups.get("p2").map((r) => r.dish_name)).toEqual(["Ramen"]);
+      expect(groups.has("p3")).toBe(false);
+    });
+
+    it("dishWishlistByManualKey groups manual-pin dishes by the SAME manualGroupKey every other manual table uses", () => {
+      const rows = [
+        { id: "d1", place_id: null, custom_name: "Truck", custom_lat: 29.76011, custom_lon: -95.37009, dish_name: "Al pastor", done: false },
+        { id: "d2", place_id: null, custom_name: "Truck", custom_lat: 29.7601, custom_lon: -95.3701, dish_name: "Barbacoa", done: false },
+        { id: "d3", place_id: null, custom_name: "Truck", custom_lat: 29.76, custom_lon: -95.37, dish_name: "Done one", done: true }, // done — excluded
+        { id: "d4", place_id: "p1", dish_name: "not manual" }, // has a place_id — excluded
+      ];
+      const key = manualGroupKey("Truck", 29.7601, -95.3701);
+      const groups = dishWishlistByManualKey(rows);
+      expect(groups.get(key).map((r) => r.dish_name)).toEqual(["Al pastor", "Barbacoa"]);
+    });
+
+    it("addDishWishlist / removeDishWishlist / markDishDone mirror the existing wishlist CRUD shape (own foodStore.js functions, not ad hoc supabase calls elsewhere)", () => {
+      const store = src("lib/foodStore.js");
+      expect(store).toMatch(/export async function fetchAllDishWishlist\(\)/);
+      expect(store).toMatch(/export async function addDishWishlist\(entry\)/);
+      expect(store).toMatch(/export async function removeDishWishlist\(id\)/);
+      expect(store).toMatch(/export async function markDishDone\(id, done\)/);
+      const removeFn = store.slice(store.indexOf("export async function removeDishWishlist"), store.indexOf("export async function markDishDone"));
+      expect(removeFn).toMatch(/\.delete\(\)\.eq\("id", id\)/); // a hard delete — "single tap, no confirmation"
+      const doneFn = store.slice(store.indexOf("export async function markDishDone"), store.indexOf("export function dishWishlistByPlaceId"));
+      expect(doneFn).toMatch(/\.update\(\{ done \}\)\.eq\("id", id\)/); // an UPDATE in place, never delete+reinsert
+    });
+  });
+
+  describe("db/food.sql — food_dish_wishlist: many rows per place, an update policy (unlike food_wishlist), unique per (user, place, dish)", () => {
+    const sql = src("db/food.sql");
+
+    it("food_dish_wishlist is its own table, not a food_wishlist row and not a food_visits column", () => {
+      expect(sql).toMatch(/create table if not exists public\.food_dish_wishlist \(/);
+      expect(sql).toMatch(/constraint food_dish_wishlist_place_or_manual check \(place_id is not null or custom_name is not null\)/);
+      expect(sql).toMatch(/dish_name\s+text not null/);
+      expect(sql).toMatch(/done\s+boolean not null default false/);
+    });
+
+    it("one row per (user, place, dish) — case/whitespace-insensitive — enforced by a unique index, not just the UI", () => {
+      expect(sql).toMatch(/create unique index if not exists food_dish_wishlist_place_dish_uidx\s*\n\s*on public\.food_dish_wishlist \(user_id, place_id, lower\(btrim\(dish_name\)\)\) where place_id is not null;/);
+      expect(sql).toMatch(/create unique index if not exists food_dish_wishlist_manual_dish_uidx/);
+      expect(sql).toMatch(/round\(custom_lat::numeric, 4\), round\(custom_lon::numeric, 4\), lower\(btrim\(dish_name\)\)/);
+    });
+
+    it("owner-only RLS: select/insert/UPDATE/delete keyed on auth.uid() — an update policy exists here, unlike food_wishlist, because marking a dish done is an in-place update", () => {
+      for (const op of ["select", "insert", "update", "delete"]) {
+        const clause = op === "insert" ? "with check" : "using";
+        const re = new RegExp(`create policy "Users ${op} own food_dish_wishlist"[\\s\\S]{0,220}?for ${op} to authenticated ${clause} \\(\\(select auth\\.uid\\(\\)\\) = user_id\\)`, "i");
+        expect(sql, `missing/mismatched ${op} policy`).toMatch(re);
+      }
+      expect(sql).not.toMatch(/food_dish_wishlist[\s\S]{0,300}?to anon/);
+    });
+
+    it("RLS is enabled on food_dish_wishlist", () => {
+      expect(sql).toMatch(/alter table public\.food_dish_wishlist enable row level security/);
+    });
+
+    it("the RLS proof script extends to food_dish_wishlist with the same isolation + update + duplicate-refusal proof", () => {
+      const proof = src("db/test/food_rls.test.sql");
+      expect(proof).toContain("PASS 12"); // owner can add a dish
+      expect(proof).toContain("PASS 13"); // anon sees zero
+      expect(proof).toContain("PASS 14"); // a different user sees zero
+      expect(proof).toContain("PASS 15"); // owner can mark a dish done via UPDATE
+      expect(proof).toContain("PASS 16"); // duplicate dish refused by the unique index
+    });
+  });
+});
+
 describe("FoodMap — hollow ring pin for a flagged-but-unvisited place, never a filled dot", () => {
   const map = src("components/FoodMap.jsx");
 
@@ -2007,7 +2166,7 @@ describe("VisitPanel — responsive container: BottomSheet on mobile, the same r
   });
 
   it("the mobile path wraps `body` in BottomSheet, dismissing calls the same onClose the desktop close button uses", () => {
-    expect(panel).toMatch(/<BottomSheet open onDismiss=\{onClose\} initialSnap="half" peekHeight=\{peekHeight\}>/);
+    expect(panel).toMatch(/<BottomSheet open onDismiss=\{onClose\} initialSnap="half" peekHeight=\{peekHeight\} onHeightChange=\{onSheetHeightChange\}>/);
   });
 
   it("the desktop path is the same right-rail shape as before — position:absolute, right:0, PANEL_WIDTH-matching 340", () => {
@@ -2203,5 +2362,88 @@ describe("VisitPanel — no emoji anywhere in this panel (NEW-2, consistent with
       const text = src(file);
       for (const glyph of TARGET_EMOJI) expect(text, `${file} contains ${glyph}`).not.toContain(glyph);
     }
+  });
+});
+
+describe("NEW-2 (2nd owner block) — continuous marker scaling during a zoom animation, not just at zoomend", () => {
+  it("nextZoomAnimTier: stays at 'full' while frames are within budget, resetting the streak on any in-budget frame", () => {
+    let state = { tier: "full", overBudgetStreak: 0, frameParity: 0 };
+    state = nextZoomAnimTier(state, 2);
+    expect(state.tier).toBe("full");
+    expect(state.overBudgetStreak).toBe(0);
+    // Two over-budget frames, then one back in budget — must NOT degrade (streak resets).
+    state = nextZoomAnimTier(state, ZOOM_ANIM_FRAME_BUDGET_MS + 1);
+    state = nextZoomAnimTier(state, ZOOM_ANIM_FRAME_BUDGET_MS + 1);
+    expect(state.tier).toBe("full");
+    state = nextZoomAnimTier(state, 1);
+    expect(state.overBudgetStreak).toBe(0);
+    expect(state.tier).toBe("full");
+  });
+
+  it("nextZoomAnimTier: full -> everyOther after exactly ZOOM_ANIM_DEGRADE_STREAK consecutive over-budget frames, not before", () => {
+    let state = { tier: "full", overBudgetStreak: 0, frameParity: 0 };
+    for (let i = 0; i < ZOOM_ANIM_DEGRADE_STREAK - 1; i++) {
+      state = nextZoomAnimTier(state, ZOOM_ANIM_FRAME_BUDGET_MS + 1);
+      expect(state.tier).toBe("full"); // not yet — needs the FULL streak
+    }
+    state = nextZoomAnimTier(state, ZOOM_ANIM_FRAME_BUDGET_MS + 1);
+    expect(state.tier).toBe("everyOther");
+    expect(state.overBudgetStreak).toBe(0); // streak resets on entering the new tier
+    expect(state.frameParity).toBe(0);
+  });
+
+  it("nextZoomAnimTier: everyOther -> bailed after another full streak of over-budget frames", () => {
+    let state = { tier: "everyOther", overBudgetStreak: 0, frameParity: 0 };
+    for (let i = 0; i < ZOOM_ANIM_DEGRADE_STREAK - 1; i++) {
+      state = nextZoomAnimTier(state, ZOOM_ANIM_FRAME_BUDGET_MS + 50);
+      expect(state.tier).toBe("everyOther");
+    }
+    state = nextZoomAnimTier(state, ZOOM_ANIM_FRAME_BUDGET_MS + 50);
+    expect(state.tier).toBe("bailed");
+  });
+
+  it("nextZoomAnimTier: 'bailed' is a hard floor for the rest of the gesture — never recovers to a faster tier on its own", () => {
+    let state = { tier: "bailed", overBudgetStreak: 0, frameParity: 0 };
+    state = nextZoomAnimTier(state, 0.1); // even a very fast frame
+    expect(state).toEqual({ tier: "bailed", overBudgetStreak: 0, frameParity: 0 });
+  });
+
+  it("nextZoomAnimTier: an in-budget frame at 'everyOther' resets its streak too (doesn't creep toward 'bailed' on noise)", () => {
+    let state = { tier: "everyOther", overBudgetStreak: ZOOM_ANIM_DEGRADE_STREAK - 1, frameParity: 0 };
+    state = nextZoomAnimTier(state, 1);
+    expect(state.tier).toBe("everyOther");
+    expect(state.overBudgetStreak).toBe(0);
+  });
+
+  it("FoodMap.jsx wires the zoom-scaling effect to real Leaflet events (zoomanim/zoomend), restoring true radii on every exit path", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/import \{ nextZoomAnimTier \} from "\.\.\/lib\/zoomAnimTier\.js";/);
+    expect(map).toMatch(/map\.on\("zoomanim", onZoomAnimStart\)/);
+    expect(map).toMatch(/map\.on\("zoomend", onZoomEnd\)/);
+    // Every exit path (natural loop exit, zoomend, unmount cleanup) restores true radii — never
+    // leaves a marker's radius mutated once the gesture is over.
+    const effectStart = map.indexOf("// ⛔ NEW-2 (2nd owner block, 2026-08-23) — CONTINUOUS marker scaling");
+    const effectEnd = map.indexOf("Search or list result selected");
+    const effect = map.slice(effectStart, effectEnd);
+    const restoreCalls = effect.match(/restoreTrueRadii\(\)/g) || [];
+    expect(restoreCalls.length).toBeGreaterThanOrEqual(4); // natural exit, bail, onZoomEnd, unmount cleanup
+    // Radius is compensated via Leaflet's OWN setRadius (batched/coalesced internally), never a
+    // hand-rolled canvas redraw that would duplicate Leaflet's own stroke/fill/halo logic.
+    expect(effect).toMatch(/m\.setRadius\(trueR \/ scale\)/);
+    expect(effect).not.toMatch(/getContext\(/); // never a raw canvas 2D context reach-around
+  });
+
+  it("readContainerScale reads the LIVE computed transform rather than reimplementing Leaflet's own easing curve", () => {
+    const map = src("components/FoodMap.jsx");
+    const fnIdx = map.indexOf("function readContainerScale(");
+    expect(fnIdx).toBeGreaterThanOrEqual(0);
+    const fn = map.slice(fnIdx, map.indexOf("}", map.indexOf("}", fnIdx) + 1) + 1);
+    expect(fn).toMatch(/getComputedStyle\(el\)\.transform/);
+    expect(fn).not.toMatch(/cubic-bezier/i); // no hand-rolled easing — reads the browser's real value
+  });
+
+  it("the perf budget and degrade-streak constants are the ones documented and measured this session", () => {
+    expect(ZOOM_ANIM_FRAME_BUDGET_MS).toBe(8);
+    expect(ZOOM_ANIM_DEGRADE_STREAK).toBe(3);
   });
 });
