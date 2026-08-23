@@ -1572,22 +1572,32 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   declutter/LOD/collision, label sizes and stroke-zoom are a function of the plan and the paper,
   never of the live zoom. It IS on the boot path (SitePlanner imports it statically, ~1 KB pure). PDF-PARITY: `printMetricPairs`/`printStormwaterBars` deliberately stay in
   `SitePlanner.jsx` so screen and sheet read one derivation.
-  **⛔ NEW-2 — A MODEL-BUILT EXPORT DECIDES ITS OWN CONTENTS; A CANVAS DISPLAY TOGGLE NEVER DOES.**
+  **⛔ A MODEL-BUILT EXPORT DECIDES ITS OWN CONTENTS; A CANVAS DISPLAY TOGGLE NEVER DOES.**
   `kmzExport.js` gated its dock doors on `settings.showDocks`, the View ▾ checkbox — so a
   drawing-legibility preference decided what went into a file for a different audience, and turning
-  dock doors on to check a layout silently changed an exported KMZ (on the owner's Bain plan, five
-  buildings and several hundred doors, Google Earth opened under a blanket of pins). Every content
-  decision in that module is now an `opts` flag with a stated default, all OFF, on the
-  `includeDimensions` precedent; `settings` is read there only for MODEL facts (door o.c./width,
-  building rules) that determine where a thing physically is. **`includeDockDoors` also changed the
-  REPRESENTATION** — one LINE per dock side carrying the door count and the o.c., never a point per
-  door — so even opting in costs a handful of placemarks per building rather than hundreds. There is
-  no UI for it, exactly as `includeDimensions` has none. **The deliberate exception, which is not
-  the same defect:** `exportSheet.js`'s PDF/PNG path CLONES the live `<svg>` and so inherits every
-  display toggle by construction — that artifact is the drawing on paper for the same audience, set
-  by the user while looking at the drawing they are printing. Guard: the repo-root `test/` suite
-  **kmzExport**, which sweeps every model-built export module for the whole class of toggle rather
-  than for the dock doors alone.
+  dock doors on to check a layout silently changed an exported KMZ; the map viewer's multi-site
+  export read each SAVED site's remembered toggle, so one file varied with what someone had on
+  screen when they last saved plan #3. `settings` is read there only for MODEL facts (door
+  o.c./width, building rules) that determine where a thing physically is.
+  **⛔ AND DOCK DOORS ARE NOT AN OPTION — THEY ALWAYS EXPORT, as ONE RUN PER DOCK SIDE (a line
+  carrying the door count and the o.c.), never a point per door.** Two owner decisions, and they are
+  different from each other: the reported defect was the PIN PER DOOR (on his Bain plan, 209 of 261
+  placemarks — Google Earth opened under a blanket of pins), and the fix for that is the RUN; once
+  the runs existed he chose the DEFAULT — *"Dock doors should just show by default in the export —
+  that's the behaviour I want, not an option to turn on… no toggle."* So there is deliberately **no
+  `includeDockDoors` flag and no checkbox**: a flag nothing sets is a decision left half-made, and it
+  is exactly what a later session would wire a control to. The **dimension lines are a different
+  question** and stay off (`includeDimensions`, default OFF since B684 — *"they clutter a 3D
+  walkthrough"*); the owner declined a control for those too. On the CANVAS the same rule already
+  holds — "Show dock doors" left the View menu, and `contentVisibility.normalizeRetiredToggles`
+  restores a plan saved with `showDocks: false` so retiring the control cannot strand one.
+  **The deliberate exception, which is not the same defect:** `exportSheet.js`'s PDF/PNG path CLONES
+  the live `<svg>` and so inherits every display toggle by construction — that artifact is the
+  drawing on paper for the same audience, set by the user while looking at the drawing they are
+  printing. Guards: the repo-root `test/` suites **kmzExport** (which sweeps every model-built export
+  module for the whole class of toggle rather than for the dock doors alone, and pins that no
+  dock-door flag exists) and **contentVisibility** (which sweeps the workspace for anything that
+  WRITES the retired toggle, so the control cannot return by the side door).
 
 - **`lib/numEditBox.js` + `components/NumEditField.jsx` (NEW-1) — the canvas's ONE inline numeric
   editor, and the rule that it may never be bigger than the control it edits.** Clicking a setback
