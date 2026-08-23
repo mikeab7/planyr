@@ -5381,11 +5381,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (wantOn) { ensureBasemapOn(); frameToActiveParcels(); }
   }, [setOverlays, frameToActiveParcels, ensureBasemapOn]);
 
-  // Auto-select the single restored parcel so its handles are ready to use.
-  useEffect(() => {
-    if (restored?.parcels?.length === 1 && !(restored?.els?.length)) setSel({ kind: "parcel", id: restored.parcels[0].id });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  /* ⛔ REMOVED (B-VTX-SEL) — this used to auto-select "the single restored parcel so its handles
+   * are ready to use". It ran on every MOUNT, not just the moment a parcel was first drawn, so
+   * reopening ANY plan that currently has exactly one parcel and no elements yet (an ordinary
+   * early-stage state) silently selected the boundary and painted its vertex handles with no user
+   * action — the owner's report: a shape's control points visible on the canvas while "I don't
+   * even have it selected." Every real parcel-creation path (hand-draw's closePoly, GIS-record
+   * lookup, deed promotion, split, merge) already calls setSel itself as part of that same user
+   * gesture, so this was pure redundancy for the "just created" case and pure harm on every later
+   * reopen. Guard: e2e/parcel-handles-no-autoselect.spec.js.
+   */
 
   /* NEW-1 — the ONE explicit inspector OPEN. Every "open Properties for this thing" path routes
    * here: a double-click on any element / markup / callout / measurement, the pond reveal, the
@@ -16103,7 +16108,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const parcelHandles = (() => {
     if (sel?.kind !== "parcel" || tool !== "select") return null;
     const pc = parcels.find((p) => p.id === sel.id);
-    if (!pc) return null;
+    // B-VTX-SEL — locked parity with elPolyHandles/markupHandles/measureHandles (a false
+    // affordance otherwise: startVertex no-ops on a locked parcel anyway).
+    if (!pc || pc.locked) return null;
     const on = (i) => isSelVtx("parcel", pc.id, i);
     return <g>{decimatedHandles(pc.points, on).map((h) => vtxRect(`pv${h.i}`, { x: h.x, y: h.y }, on(h.i), "move", (e) => startVertex(e, pc.id, h.i)))}</g>;
   })();
