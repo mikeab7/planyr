@@ -16,7 +16,14 @@
 import { useRef, useState, useEffect, useCallback } from "react";
 
 export const TOAST_TTL_MS = 8000;
-export const TOAST_CAP = 4;
+// NEW-1 (B673 round 2, 2026-08-23) — lowered from 4. A single delete cascading across a bonded
+// assembly used to be able to push FOUR banners on screen at once (plus a "+n more" pill) — a wall
+// of notices reaching well up the canvas from a single gesture. Two upstream fixes now make that
+// wall itself rare (elementSync.js's NEW-0 gate silences same-account echoes at the source, and
+// SitePlanner.jsx's per-gesture coalescing folds every sync event from ONE commit batch into ONE
+// toast), so this cap is a backstop for whatever is left, not the primary defense — kept low so a
+// stack that DOES form still reads as a short strip pinned to the bottom edge, not an obstruction.
+export const TOAST_CAP = 2;
 
 let toastSeq = 0;
 

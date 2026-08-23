@@ -19,7 +19,7 @@ import { rowsToModel, KIND_TO_FIELD, foldNeverSyncedLocal, foldJournal, reconcil
 import { writeJournal, readJournal, clearJournal, sweepJournals, journalSessionId } from "./lib/elementJournal.js";
 import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
 import { createNameResolver, describeElement, SELF_ACTOR } from "./lib/editorNames.js";
-import { toastForSyncEvent } from "./lib/conflictToasts.js";
+import { toastForSyncEvent, describeCoalescedLabel } from "./lib/conflictToasts.js";
 import { listMembers } from "./lib/teams.js";
 import { multiwriterEnabled } from "./lib/multiwriter.js";
 import { presenceSummary } from "./lib/presencePill.js";
@@ -4034,11 +4034,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B674 — who else is on this plan right now (Supabase Realtime Presence on the element channel).
   const [peers, setPeers] = useState(null); // presenceSummary() result, or null when alone
   // B673 — the loud-but-non-blocking conflict surface: toast stack + name resolver + the
-  // late-bound sync-event handler (assigned each render further down, once zoomToElement and
+  // late-bound sync-event handler (assigned each render further down, once zoomToElements and
   // featBBox exist in scope).
   const { toasts, pushToast, dismissToast } = useToasts();
   const nameResolverRef = useRef(null);
   const syncEventRef = useRef(() => {});
+  // NEW-1 (round 2) — one entry per in-flight commit BATCH (see the comment beside syncEventRef.current
+  // below): batchKey -> { items: [{kind,id,ev,label,localCopy,uid}], timer }.
+  const toastBatchesRef = useRef(new Map());
   // B672 — instructions from remote rows that arrived MID-GESTURE (busyRef): buffered here and
   // drained at the next reconcile/flush so a remote apply never yanks the canvas mid-drag.
   const pendingRemoteRef = useRef([]);
@@ -7994,14 +7997,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pts.forEach((p) => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
     return { x0, y0, x1, y1 };
   };
-  // B673 — zoom the canvas to one element (the conflict toast's "Show" action) and select it so
-  // the highlight makes "which element are they talking about" unmistakable. Same framing math as
-  // frameToActiveParcels, over the element's bbox with generous margin for context.
-  const zoomToElement = (kind, id) => {
-    const field = KIND_TO_FIELD[kind];
-    const el = ((stateRef.current && stateRef.current[field]) || []).find((x) => x && x.id === id);
-    if (!el) return;
-    const b = featBBox(el);
+  // B673 — zoom the canvas to a set of elements (the conflict toast's "Show" action) and select
+  // them all, so the highlight makes "which elements are they talking about" unmistakable for a
+  // coalesced notice as much as a single one. Same framing math as frameToActiveParcels, over the
+  // UNION bbox with generous margin for context. `members` is a list of { kind, id }.
+  const zoomToElements = (members) => {
+    const list = Array.isArray(members) ? members : [];
+    let b = null;
+    for (const m of list) {
+      const field = KIND_TO_FIELD[m.kind];
+      const el = ((stateRef.current && stateRef.current[field]) || []).find((x) => x && x.id === m.id);
+      if (!el) continue;
+      const eb = featBBox(el);
+      if (!eb) continue;
+      b = b ? { x0: Math.min(b.x0, eb.x0), y0: Math.min(b.y0, eb.y0), x1: Math.max(b.x1, eb.x1), y1: Math.max(b.y1, eb.y1) } : eb;
+    }
     if (!b) return;
     const marginFrac = 1.2;
     const bw = Math.max(b.x1 - b.x0, 10), bh = Math.max(b.y1 - b.y0, 10);
@@ -8010,11 +8020,71 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const ebw = maxX - minX, ebh = maxY - minY, pad = 40;
     const ppf = Math.max(0.02, Math.min(8, Math.min((size.w - pad * 2) / ebw, (size.h - pad * 2) / ebh)));
     setView({ ppf, offX: pad - minX * ppf + (size.w - pad * 2 - ebw * ppf) / 2, offY: pad - minY * ppf + (size.h - pad * 2 - ebh * ppf) / 2 });
-    if (kind === "el" || kind === "markup" || kind === "callout" || kind === "parcel") setSel({ kind, id });
+    const selectable = list.filter((m) => m.kind === "el" || m.kind === "markup" || m.kind === "callout" || m.kind === "parcel");
+    if (selectable.length === 1) setSel(selectable[0]);
+    else if (selectable.length > 1) setMulti(selectable);
+  };
+  // NEW-1 (round 2) — resolve the actor ONCE for a group of items sharing one commit batch, then
+  // either push a single normal toast (unchanged shape) or ONE COALESCED toast naming every member
+  // that survived its own individual gate. Coalescing never widens who gets told anything — each
+  // item still runs through toastForSyncEvent on its own first; this only changes how many banners
+  // a gesture that clears multiple gates produces.
+  const resolveAndPushToast = (items) => {
+    if (!items || !items.length) return;
+    const uid = items[0].uid;
+    const resolve = nameResolverRef.current ? nameResolverRef.current(uid) : Promise.resolve(SELF_ACTOR);
+    Promise.resolve(resolve).then((actor) => {
+      const { name, self } = actor || SELF_ACTOR;
+      const resolved = [];
+      for (const it of items) {
+        const finalSpec = toastForSyncEvent(it.ev, { name, label: it.label, self });
+        if (finalSpec) resolved.push({ ...it, finalSpec });
+      }
+      if (!resolved.length) return;
+      const members = resolved.map((it) => ({ kind: it.kind, id: it.id }));
+      // A survivor group of 1 keeps today's exact wording (the per-element spec, unchanged); more
+      // than 1 re-asks the SAME matrix row (they share ev.type by construction of the batch key)
+      // with ONE combined label naming every member that earned a mention.
+      const text = resolved.length === 1
+        ? resolved[0].finalSpec.text
+        : toastForSyncEvent(resolved[0].ev, { name, label: describeCoalescedLabel(resolved.map((it) => it.label)), self }).text;
+      const repSpec = resolved[0].finalSpec; // action shape is the same for the whole group (shared ev.type)
+      const action =
+        repSpec.action === "zoom" ? { label: "Show", onClick: () => zoomToElements(members) } :
+        repSpec.action === "restore" ? (() => {
+          const restorable = resolved.filter((it) => it.localCopy);
+          if (!restorable.length) return null;
+          return {
+            label: "Restore",
+            onClick: () => {
+              const e = elSyncRef.current;
+              for (const it of restorable) {
+                applyRemoteInstr({ action: "upsert", kind: it.kind, id: it.id, el: it.localCopy }); // back on canvas now
+                if (e) { try { e.restore(it.kind, it.id, it.localCopy); } catch (_) {} }
+              }
+            },
+          };
+        })() : null;
+      pushToast({ text, action });
+    }).catch(() => {});
+  };
+  // NEW-1 (round 2) — how long to hold a batch open waiting for sibling rows from the SAME commit.
+  // elementSync/Postgres realtime deliver one row per message even when they were written in one
+  // transaction, so sibling rows of a bonded-assembly delete/edit/paste arrive as a fast burst, not
+  // one JS tick. Short enough that a genuinely solitary notice never feels delayed; long enough that
+  // realtime's per-row delivery of one commit reliably lands inside it (measured against the existing
+  // ~15s authored-recently window, which is the budget this borrows a sliver of).
+  const TOAST_BATCH_WINDOW_MS = 250;
+  const flushToastBatch = (batchKey) => {
+    const batch = toastBatchesRef.current.get(batchKey);
+    if (!batch) return;
+    toastBatchesRef.current.delete(batchKey);
+    resolveAndPushToast(batch.items);
   };
   // B673 — the conflict policy matrix, wired: elementSync event → (maybe) a toast. The mapping
   // itself is the pure toastForSyncEvent (unit-tested); this glue resolves the editor's display
-  // name (async, cached roster), labels the element, applies any canvas side-effect, and pushes.
+  // name (async, cached roster), labels the element, applies any canvas side-effect, and pushes —
+  // coalescing every event from ONE commit batch into at most one notice (NEW-1 round 2, above).
   syncEventRef.current = (ev) => {
     const kind = ev && ev.kind, id = ev && ev.id;
     /* ⛔ NEW-1 — A PLAN-WIDE EVENT HAS NO ELEMENT, AND THIS GUARD WAS EATING THE ONE WARNING THAT
@@ -8030,7 +8100,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      * and assuming, which is the whole lesson: a mechanism that looks right and never fires. The
      * companion half — a `stale` engine still painting a green "synced" badge — is fixed at the
      * save-badge switch below. Guarded by `test/staleVisible.test.js` and the e2e spec
-     * `stale-tab-is-loud`. */
+     * `stale-tab-is-loud`. This wide event never batches — it isn't about an element, so there is
+     * nothing for it to share a commit-batch key with. */
     if (!kind || !id) {
       const wide = toastForSyncEvent(ev, { name: "", label: "", self: true });
       if (wide) pushToast({ text: wide.text, action: null });
@@ -8049,26 +8120,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       else if (ev.remote.data) applyRemoteInstr({ action: "upsert", kind, id, el: ev.remote.data });
     }
     const uid = (ev.remote && (ev.remote.deleted_by || ev.remote.updated_by)) || null;
-    // NEW-4 — `actor` is `{ name, self }`; `self` means "this account, another tab" (or an actor we
-    // could not prove is a different account). With no resolver at all we cannot prove anything, so
-    // the unattributed wording is the honest default — never "a teammate".
-    const resolve = nameResolverRef.current ? nameResolverRef.current(uid) : Promise.resolve(SELF_ACTOR);
-    Promise.resolve(resolve).then((actor) => {
-      const { name, self } = actor || SELF_ACTOR;
-      const finalSpec = toastForSyncEvent(ev, { name, label, self });
-      if (!finalSpec) return;
-      const localCopy = ev.local || localEl || null;
-      const action =
-        finalSpec.action === "zoom" ? { label: "Show", onClick: () => zoomToElement(kind, id) } :
-        finalSpec.action === "restore" && localCopy ? {
-          label: "Restore",
-          onClick: () => {
-            applyRemoteInstr({ action: "upsert", kind, id, el: localCopy }); // back on canvas now
-            const e = elSyncRef.current; if (e) { try { e.restore(kind, id, localCopy); } catch (_) {} }
-          },
-        } : null;
-      pushToast({ text: finalSpec.text, action });
-    }).catch(() => {});
+    const localCopy = ev.local || localEl || null;
+    const item = { kind, id, ev, label, localCopy, uid };
+    /* NEW-1 (round 2) — the correlation key. `elementSync` commits a bonded assembly (or any other
+     * multi-element gesture — a group delete, a parcel's bonded content, an undo of a multi-element
+     * edit, a paste) ATOMICALLY, so every row in one commit batch shares a single
+     * `updated_at`/`deleted_at` to the microsecond — a fact the DB already guarantees, not a new id
+     * to mint or thread through. Key on (event type, that timestamp, the writer), so unrelated
+     * batches that happen to land in the same short window can never merge, and events lacking a
+     * timestamp to correlate on — the rarer commit-RESULT-driven types (edit-vs-edit-lost-race,
+     * edit-vs-deleted, restore-conflict, delete-vs-create-dropped), whose `remote` is the RPC's
+     * returned row rather than a full realtime table row — fall back to flushing alone, immediately,
+     * exactly as before this change (never delayed, never coalesced). */
+    const ts = (ev.remote && (ev.remote.updated_at || ev.remote.deleted_at)) || null;
+    if (!ts) { resolveAndPushToast([item]); return; }
+    const batchKey = ev.type + "|" + ts + "|" + (uid || "");
+    let batch = toastBatchesRef.current.get(batchKey);
+    if (!batch) { batch = { items: [] }; toastBatchesRef.current.set(batchKey, batch); }
+    batch.items.push(item);
+    if (batch.timer) clearTimeout(batch.timer);
+    batch.timer = setTimeout(() => flushToastBatch(batchKey), TOAST_BATCH_WINDOW_MS);
   };
   const onUp = (e) => {
     if (e.pointerType === "touch" && touchCountRef.current >= 2) return; // pinch owns a 2-finger gesture (B555)

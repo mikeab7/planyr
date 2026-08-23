@@ -36,6 +36,18 @@
  * different-account answer, which is what `self: false` means (see lib/editorNames.js, which is
  * the only thing allowed to decide it). Defaulting `self` to true here is deliberate: a caller
  * that forgets to pass it gets the unattributed wording, which is wrong in a harmless direction.
+ *
+ * ⛔ NEW-0 — A SAME-ACCOUNT ECHO IS NOT A CONFLICT, AND MOST OF THIS MATRIX NEVER REACHES `self: true`
+ * ANY MORE. The owner, after deleting one building alone (two of HIS OWN tabs open, no collaborator):
+ * "I deleted a building... NO ONE ELSE IS DOING ANYTHING ON THIS SITE RIGHT NOW." This function still
+ * ACCEPTS `self: true` and still HAS wording for it, because one case genuinely earns a same-account
+ * notice: this tab has an ACTIVE, DIRECT, uncommitted edit on the exact element in question, and the
+ * account's OTHER tab just overwrote it with something different — "something the user did is being
+ * overwritten," not routine propagation. Every OTHER same-account case (this tab's other tab merely
+ * catching up with its own cascade — a delete, a derived relayout, an assembly heal) is now filtered
+ * BEFORE it reaches this function at all: `elementSync.js`'s `foreignAuthor(row)` gates the emit
+ * itself (see the `NEW-0` comments beside `onEvent(...)` there), so the event with `self: true` simply
+ * never arrives for those. This module is unchanged; the callers got stricter about when they call it.
  */
 export function toastForSyncEvent(ev, { name, label, self = true } = {}) {
   if (!ev) return null;
@@ -89,4 +101,28 @@ export function toastForSyncEvent(ev, { name, label, self = true } = {}) {
     default:
       return null; // silent: telemetry-only classes
   }
+}
+
+/* NEW-1 (round 2) — ONE NOTICE PER GESTURE. `elementSync` commits a bonded assembly (or any other
+ * multi-element gesture — a group delete, a multi-element undo, a paste) ATOMICALLY: every row in
+ * one commit batch shares a single `updated_at`/`deleted_at` to the microsecond. `SitePlanner.jsx`
+ * uses that as the correlation key to buffer sync events belonging to one batch and, once every
+ * event in the window has resolved to a spec (or been silenced), calls this to name the group in
+ * ONE sentence instead of reciting each member — "a building and a paving area", not four banners.
+ *
+ * Pure and dependency-free (no React, no DOM) so the combining rule is unit-testable on its own:
+ * dedupes by TEXT (two elements the app describes identically — "a building" twice — collapse to
+ * one mention) while preserving first-seen order, then joins in the shape a sentence reads naturally
+ * in: "X" · "X and Y" · "X, Y, and Z" · "X, Y, and N more" beyond three. */
+export function describeCoalescedLabel(labels) {
+  const seen = [];
+  for (const l of labels || []) {
+    if (typeof l !== "string" || !l) continue;
+    if (!seen.includes(l)) seen.push(l);
+  }
+  if (seen.length === 0) return "an item";
+  if (seen.length === 1) return seen[0];
+  if (seen.length === 2) return `${seen[0]} and ${seen[1]}`;
+  if (seen.length === 3) return `${seen[0]}, ${seen[1]}, and ${seen[2]}`;
+  return `${seen[0]}, ${seen[1]}, and ${seen.length - 2} more`;
 }
