@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-23 @ `b3fd833` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-23 @ `1edf385` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_547 source files mapped._
+_548 source files mapped._
 
 ## infra
 
@@ -67,6 +67,8 @@ _547 source files mapped._
   - _exports_: `fromElement`, `queryFor`, `roundKey`, `searchOverpass`
 - **`src/workspaces/food/lib/ratingColor.js`** — the 1-10 rating colour ramp for map pins/list/panel (warm cream to deep red-brown, WCAG-measured contrast, no green)
   - _exports_: `colorForRating`, `RATING_COLORS`, `RATING_TEXT`, `textColorForRating`
+- **`src/workspaces/food/lib/searchQuality.js`** — Filters/ranks search-snapshot candidates: word-coverage "strong match" gate, registry-name and confidence de-rank, corrupted-address exclusion, near-duplicate collapse
+  - _exports_: `CONCAT_ADDRESS_PATTERN`, `DEDUPE_RADIUS_METERS`, `GENERIC_NAME_WORDS`, `hasConcatenatedAddress`, `isRegistryName`, `isStrongMatch`, `rankSearchCandidates`, `REGISTRY_NAME_PATTERN`, `SIGNIFICANT_WORD_MIN_LEN`
 - **`src/workspaces/food/lib/supabaseClient.js`** — This module's own Supabase client (deliberately not a site-planner import — see BUNDLE ISOLATION)
   - _exports_: `supabase`, `supabaseConfigured`
 - **`src/workspaces/food/lib/visitAggregates.js`** — Pure aggregation over a place's loaded visits: averages, visit count, first/last date, deduped "order again" entries

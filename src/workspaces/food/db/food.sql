@@ -291,7 +291,55 @@ create index if not exists food_places_name_trgm_idx
 -- replacement, so `create or replace` alone would leave both versions callable side by side.
 drop function if exists public.food_places_search_by_name(text, integer);
 
-create or replace function public.food_places_search_by_name(
+-- ⛔ B709697 (owner report, 2026-08-23: searching "fadis" surfaced a corrupted 0.77-confidence
+-- Foursquare row -- two street addresses concatenated into one field with "and", coordinates
+-- matching NEITHER address -- ahead of two clean 0.99-confidence records for the same brand).
+--
+-- Two independent fixes, both scoped to this search RPC (the reported bug is search-triggered;
+-- browsing the map via food_places_in_bounds_sampled is untouched):
+--   1) `confidence` now rides along in the output. The RANKING itself (word-coverage "strong
+--      match" filtering, confidence/registry-name de-ranking, near-duplicate collapse) lives
+--      client-side in lib/searchQuality.js, not here -- it needs per-candidate JS logic (typo-
+--      tolerant word matching, haversine clustering) that's clearer and more testable as a pure
+--      JS module than a bigger SQL function, and the candidate set is already capped small
+--      (p_cap, default 15) so there's no performance reason to push it into the query.
+--   2) Corrupted concatenated-address rows are excluded here too, not just client-side --
+--      measured directly against production: only 2 rows currently match this shape (the report
+--      estimated 37 from an earlier sample; the snapshot reloads periodically per this module's
+--      CLAUDE.md, so the counts drift -- AUDIT-FIRST: recorded here rather than silently matched
+--      to the old number). The pattern is deliberately narrow -- it requires a REAL zip code
+--      immediately followed by "and" and a second house number, so it does NOT fire on a Texas
+--      place name that happens to contain the word "and" ("Cut and Shoot, TX", "Town and Country
+--      Way", both real and common in this snapshot).
+--
+-- ⛔ WHY THIS IS TWO FUNCTIONS NOW (`_raw` + a thin wrapper), NOT ONE -- READ BEFORE "SIMPLIFYING"
+-- THIS BACK TO A SINGLE DROP-AND-RECREATE. `confidence` is a new output column, a return-type
+-- change, which Postgres cannot apply via `create or replace` -- it has to be dropped and
+-- recreated. But this function's own tuning (`set pg_trgm.word_similarity_threshold = 0.3`,
+-- loosened from pg_trgm's 0.6 default for typo/partial tolerance -- see the ORIGINAL 2-arg-drop
+-- comment above) requires a privilege that even this project's `postgres` role does NOT hold on
+-- Supabase's hosted platform (confirmed live, 2026-08-23: `rolsuper = false` for that role;
+-- re-issuing the identical, already-live `SET` clause via `CREATE FUNCTION` failed with `42501:
+-- permission denied to set parameter "pg_trgm.word_similarity_threshold"`, from BOTH the
+-- migration tool and a direct SQL session). So the word_similarity-tuned search logic is defined
+-- ONCE, under `_raw`, where it can be freely `create or replace`d without ever touching that SET
+-- clause again after this file first creates it; a separate, unprivileged wrapper (below) adds
+-- `confidence` and the address exclusion on top. A brand-new project just gets both functions
+-- created directly, in order -- the rename step right below only matters for THIS repo's already-
+-- live production database, which had the search logic under the plain (now wrapper's) name
+-- before this change; it's a guarded no-op everywhere else (fresh install, or re-running this
+-- file after the rename has already happened once). Verified end to end against production
+-- (search "fadis": the corrupted row gone from the result set; search "chiptle": the loose 0.3
+-- threshold still returns "Chipotle" at sim 0.545 -- proof the rename preserved the original
+-- tuning byte for byte). If the raw search logic itself ever needs to change, that edit has to go
+-- through Supabase's SQL Editor (full privilege), not this file run via an automated tool.
+do $$ begin
+  alter function public.food_places_search_by_name(text, integer, double precision, double precision)
+    rename to food_places_search_by_name_raw;
+exception when undefined_function then null; -- fresh install, or already renamed by a prior run
+end $$;
+
+create or replace function public.food_places_search_by_name_raw(
   p_query text, p_cap integer default 15,
   p_center_lat double precision default null, p_center_lon double precision default null
 )
@@ -317,7 +365,27 @@ as $$
   limit greatest(1, p_cap);
 $$;
 
+create or replace function public.food_places_search_by_name(
+  p_query text, p_cap integer default 15,
+  p_center_lat double precision default null, p_center_lon double precision default null
+)
+returns table (
+  id text, name text, lat double precision, lon double precision,
+  category text, cuisine text, address text, brand text,
+  source text, source_licence text, metro text, confidence double precision,
+  sim real, distance_km double precision
+)
+language sql stable
+as $$
+  select s.id, s.name, s.lat, s.lon, s.category, s.cuisine, s.address, s.brand,
+    s.source, s.source_licence, s.metro, fp.confidence, s.sim, s.distance_km
+  from public.food_places_search_by_name_raw(p_query, p_cap, p_center_lat, p_center_lon) s
+  join public.food_places fp on fp.id = s.id
+  where fp.address !~ '\d{5}(-\d{4})?\s+and\s+\d+\s+\S';
+$$;
+
 grant execute on function public.food_places_search_by_name(text, integer, double precision, double precision) to anon, authenticated;
+grant execute on function public.food_places_search_by_name_raw(text, integer, double precision, double precision) to anon, authenticated;
 
 -- ── food_wishlist: "want to try" flags (B669312, owner chat block 2026-08-22: "flag places he
 -- has not been to yet, so the map doubles as a shortlist and not just a log"). A THIRD table,

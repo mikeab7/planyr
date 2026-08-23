@@ -28,6 +28,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
+import { rankSearchCandidates } from "../lib/searchQuality.js";
 
 const DEBOUNCE_MS = 220;
 const MIN_QUERY_LEN = 2;
@@ -76,7 +77,12 @@ export default function SearchBox({
     debounceRef.current = setTimeout(async () => {
       const { data } = await searchSnapshot(trimmed, center);
       if (myRequest !== requestRef.current) return; // a newer keystroke already superseded this
-      setSnapshotResults(data || []);
+      // B709697 — exclude the RPC's own weak/corrupted candidates and rank the rest (see
+      // lib/searchQuality.js for why this is word-coverage + de-rank, not a similarity cutoff).
+      // A place he's already logged or flagged never gets filtered out by this — the search box
+      // must always resolve back to the exact place his own visit/flag history points at.
+      const protectedIds = new Set([...(loggedIds || []), ...(wishlistIds || [])]);
+      setSnapshotResults(rankSearchCandidates(trimmed, data || [], protectedIds));
       setLoading(false);
     }, DEBOUNCE_MS);
     return () => clearTimeout(debounceRef.current);
