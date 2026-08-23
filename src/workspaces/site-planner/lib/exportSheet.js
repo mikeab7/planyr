@@ -95,9 +95,9 @@ export function createExportSheet(ctx) {
     if (!origin) { flashWarn("Place this plan on the map first (open it from a map location), then export to Google Earth.", 6000); return; }
     try {
       const project = (pt) => { const [la, ln] = feetToLatLng(pt, origin.lat, origin.lon); return [ln, la]; };
-      // NEW-2: dimensions AND dock doors are off — clutter in a 3D walkthrough — and both are the
-      // EXPORT's call, stated here rather than inherited from a canvas display toggle.
-      const features = siteToFeatures({ parcels, els, measures, settings }, project, { extrudeBuildings: extrude, includeDimensions: false, includeDockDoors: false });
+      // Dimension lines off — clutter in a 3D walkthrough. Dock doors ALWAYS export (owner
+      // decision) as one run per dock side, so there is no flag for them here to get wrong.
+      const features = siteToFeatures({ parcels, els, measures, settings }, project, { extrudeBuildings: extrude, includeDimensions: false });
       if (!features.length) { flashWarn("Nothing to export yet — draw a boundary or a building first.", 5000); return; }
       const blob = new Blob([buildKmz(siteName || "Site plan", features)], { type: KMZ_MIME });
       const a = document.createElement("a");

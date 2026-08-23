@@ -139,47 +139,57 @@ describe("siteToFeatures — layer mapping + reprojection", () => {
     const b = f.find((x) => x.folder[0] === "Boundary");
     expect(b.rings[0][0]).toEqual([1000, -2000]); // (0,0) → (+1000,-2000)
   });
-  /* NEW-2 — dock doors: OFF by default, a RUN per side when asked for, and never decided by a
-   * canvas display toggle. On the owner's Bain plan (five buildings, several hundred doors) the old
-   * behaviour opened Google Earth under a blanket of pins. */
-  it("emits NO dock-door features by default — the includeDimensions precedent", () => {
+  /* DOCK DOORS — ALWAYS EXPORTED, as ONE RUN PER DOCK SIDE, and never decided by a canvas display
+   * toggle. Two owner decisions live in this block and they are different from each other:
+   *   • the ORIGINAL complaint was a pin per door — on his Bain plan, 209 of 261 placemarks — and
+   *     the fix for that is the RUN, not absence;
+   *   • with the runs in place he then chose the DEFAULT: "Dock doors should just show by default
+   *     in the export — that's the behaviour I want, not an option to turn on… no toggle."
+   * So there is no flag, and a test asking for one would fail to compile the intent. */
+  it("ALWAYS emits dock-door features — no flag, nothing to turn on", () => {
+    const runs = siteToFeatures(model, ident, {}).filter((x) => x.folder.includes("Dock doors"));
+    expect(runs.length).toBeGreaterThan(0);
+    // ⛔ MUTATION CHECK against the superseded default: an opts flag would have made THIS empty.
+    // Passing the retired flag as false must change nothing — there is no gate left to close.
+    const withRetiredFlag = siteToFeatures(model, ident, { includeDockDoors: false })
+      .filter((x) => x.folder.includes("Dock doors"));
+    expect(withRetiredFlag.length).toBe(runs.length);
+  });
+  it("emits ONE LINE per dock side — named with the count and the o.c., never a pin per door", () => {
     const f = siteToFeatures(model, ident, {});
-    expect(f.filter((x) => x.folder.includes("Dock doors")).length).toBe(0);
-    expect(f.some((x) => x.geom === "point")).toBe(false);
-  });
-  it("MUTATION CHECK: the pre-fix rule would have emitted them here, and a pin per door", () => {
-    // Verbatim pre-fix gate + geometry: `settings.showDocks !== false` (absent ⇒ on) and a POINT
-    // per door. If this ever agrees with the shipped behaviour above, the guard is guarding nothing.
-    const preFixOn = model.settings.showDocks !== false;
-    expect(preFixOn).toBe(true);
-    const runs = siteToFeatures(model, ident, { includeDockDoors: true }).filter((x) => x.folder.includes("Dock doors"));
-    const doorsThatWouldHaveBeenPins = runs.reduce((n, r) => n + Number(/— (\d+) @/.exec(r.name)[1]), 0);
-    expect(doorsThatWouldHaveBeenPins).toBeGreaterThan(runs.length); // many doors, few runs
-  });
-  it("when asked for, emits ONE LINE per dock side — named with the count and the o.c.", () => {
-    const f = siteToFeatures(model, ident, { includeDockDoors: true });
     const runs = f.filter((x) => x.folder.includes("Dock doors"));
     expect(runs.length).toBeGreaterThan(0);
     expect(runs.length).toBeLessThanOrEqual(4);          // at most one per wall of a box building
+    expect(f.some((x) => x.geom === "point")).toBe(false); // ⛔ the original defect: zero pins
+    let doors = 0;
     for (const r of runs) {
       expect(r.geom).toBe("line");
       expect(r.coords.length).toBe(2);
       expect(r.coords[0]).not.toEqual(r.coords[1]);      // a real run, never a degenerate point
       expect(r.name).toMatch(/^Dock doors — \d+ @ \d+(\.\d+)?′ o\.c\.$/);
+      doors += Number(/— (\d+) @/.exec(r.name)[1]);
     }
+    // MUTATION CHECK on the REPRESENTATION: the pre-fix geometry was one placemark per door, so a
+    // build that regressed to points would emit this many instead of `runs.length`.
+    expect(doors).toBeGreaterThan(runs.length);
   });
-  it("⛔ THE CLASS: the canvas display toggle no longer decides — showDocks is inert either way", () => {
-    const on = (s) => ({ ...model, settings: { ...model.settings, ...s } });
-    const count = (m, o) => siteToFeatures(m, ident, o).filter((x) => x.folder.includes("Dock doors")).length;
-    expect(count(on({ showDocks: true }), {})).toBe(0);              // shown on canvas → still out
-    expect(count(on({ showDocks: false }), { includeDockDoors: true }))
-      .toBe(count(on({ showDocks: true }), { includeDockDoors: true })); // hidden on canvas → still in
-    expect(count(on({ showDocks: false }), { includeDockDoors: true })).toBeGreaterThan(0);
+  it("⛔ THE CLASS: the canvas display toggle does not decide — showDocks is inert either way", () => {
+    const withShowDocks = (v) => ({ ...model, settings: { ...model.settings, showDocks: v } });
+    const count = (m) => siteToFeatures(m, ident, {}).filter((x) => x.folder.includes("Dock doors")).length;
+    // Verbatim pre-fix gate, replayed: `settings.showDocks !== false` said "off" for one of these
+    // and "on" for the other. The export must not be able to tell them apart.
+    expect(withShowDocks(false).settings.showDocks !== false).toBe(false);
+    expect(count(withShowDocks(false))).toBe(count(withShowDocks(true)));
+    expect(count(withShowDocks(false))).toBeGreaterThan(0);
   });
   it("includes dimension lines only when asked", () => {
+    // ⛔ Scoped to the Dimensions FOLDER, not to `geom === "line"`: the dock-door runs are lines
+    // too now, so a bare geometry check would report them as dimensions and pass on a broken build.
     const m2 = { ...model, measures: [{ mode: "line", pts: [{ x: 0, y: 0 }, { x: 50, y: 0 }] }] };
-    expect(siteToFeatures(m2, ident, {}).some((x) => x.geom === "line")).toBe(false);
-    expect(siteToFeatures(m2, ident, { includeDimensions: true }).some((x) => x.geom === "line")).toBe(true);
+    const dims = (o) => siteToFeatures(m2, ident, o).filter((x) => x.folder.includes("Dimensions"));
+    expect(dims({}).length).toBe(0);
+    expect(dims({ includeDimensions: true }).length).toBeGreaterThan(0);
+    expect(dims({ includeDimensions: true }).every((x) => x.geom === "line")).toBe(true);
   });
   it("extrudes buildings only when extrudeBuildings is set", () => {
     expect(siteToFeatures(model, ident, {}).some((x) => x.extrude)).toBe(false);
@@ -225,10 +235,11 @@ describe("buildKmz + kmzFilename", () => {
   });
 });
 
-/* ⛔ NEW-2 (b) — THE COUPLING IS THE CLASS, THE DOCK DOORS WERE THE INSTANCE.
+/* ⛔ THE COUPLING IS THE CLASS, THE DOCK DOORS WERE THE INSTANCE.
  *
- * The defect was not "dock doors are on"; it was that a CANVAS DISPLAY PREFERENCE decided what went
- * into a file built for a different audience. So the guard is the class, not the instance: no module
+ * The defect was never "dock doors are on" — the owner has since asked for them ON, always, and they
+ * are. It was that a CANVAS DISPLAY PREFERENCE decided what went into a file built for a different
+ * audience. So the guard is the class, not the instance: no module
  * that builds an export FROM THE MODEL may read one of the View ▾ toggles.
  *
  * The audit that produced this list (2026-08-11, every export path in the workspace):
@@ -243,7 +254,7 @@ describe("buildKmz + kmzFilename", () => {
  *     screenshot, so ZOOM gates are lifted on the sheet while display toggles are honoured.)
  *   • `exportJSON` writes `settings` wholesale — a save file that round-trips, not a decision.
  */
-describe("NEW-2 — no model-built export reads a canvas display toggle", () => {
+describe("no model-built export reads a canvas display toggle", () => {
   const DISPLAY_ONLY = ["showDocks", "showGrid", "showDims", "showAreas", "showSetback", "parcelSelect"];
   const MODEL_BUILT_EXPORTS = [
     "kmzExport.js", "printSheet.js", "imagePdf.js", "overlayVectorSvg.js",
@@ -263,16 +274,22 @@ describe("NEW-2 — no model-built export reads a canvas display toggle", () => 
     });
   }
 
-  it("the KMZ's content flags are all opts with a stated default, and all default OFF", () => {
+  it("the KMZ's remaining content flags are opts with a stated default — and dock doors is NOT one", () => {
     const src = readFileSync(join(LIB, "kmzExport.js"), "utf8");
-    expect(src).toMatch(/extrudeBuildings = false, includeDimensions = false, includeDockDoors = false/);
+    expect(src).toMatch(/extrudeBuildings = false, includeDimensions = false, prefix = \[\]/);
+    // ⛔ THE OWNER'S DECISION, PINNED: there is no dock-door flag to find and none to wire a
+    // checkbox to. A flag nothing sets is a decision left half-made — this is what stops one
+    // reappearing as "harmless" configurability.
+    const body = strip(src);
+    expect(body).not.toContain("includeDockDoors");
   });
 
-  it("both KMZ call sites state the decision rather than defaulting into it", () => {
+  it("the one KMZ call site that still names a flag states it, and neither names a dock-door one", () => {
     const planner = readFileSync(join(ROOT, "src/workspaces/site-planner/lib/exportSheet.js"), "utf8");
     const finder = readFileSync(join(ROOT, "src/workspaces/site-planner/MapFinder.jsx"), "utf8");
     for (const [name, src] of [["exportSheet.js", planner], ["MapFinder.jsx", finder]]) {
-      expect(src, name).toContain("includeDimensions: false, includeDockDoors: false");
+      expect(src, name).toContain("includeDimensions: false");
+      expect(src, name).not.toContain("includeDockDoors");
     }
   });
 });

@@ -6,7 +6,7 @@
  * model, and its storage shape is additive-free on an untouched plan.
  */
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -17,6 +17,12 @@ import {
 } from "../src/workspaces/site-planner/lib/contentVisibility.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
+// Recursive source walk (js/jsx only) — used by the "nothing writes the retired toggle" guard.
+const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((d) => {
+  const p = resolve(dir, d.name);
+  if (d.isDirectory()) return walk(p);
+  return /\.(js|jsx)$/.test(d.name) ? [p] : [];
+});
 
 describe("the sparse map only ever names what is HIDDEN", () => {
   it("an absent key is visible, and an untouched plan has no map at all", () => {
@@ -214,6 +220,30 @@ describe("the retired dock-door toggle cannot strand a plan", () => {
 
   it("⛔ leaves the column grid alone — the toggle the owner did NOT complain about", () => {
     expect(normalizeRetiredToggles({ showDocks: false, showGrid: false })).toEqual({ showDocks: true });
+  });
+
+  /* ⛔ NO TOGGLE MEANS NO TOGGLE — the owner's decision, stated as an invariant rather than left to
+   * whoever next reads the View menu and notices dock doors are missing from it: "Dock doors should
+   * just show by default… not an option to turn on. Same for the drawing… no toggle." Retiring the
+   * checkbox is only half of that; nothing may WRITE the key either, or the control is back in
+   * everything but name. */
+  it("no surface writes `showDocks` any more — the control cannot come back by the side door", () => {
+    const roots = ["../src/workspaces/site-planner", "../src/shared"];
+    const files = roots.flatMap((r) => walk(resolve(here, r)));
+    const writers = [];
+    for (const f of files) {
+      const src = readFileSync(f, "utf8");
+      // A write looks like `patchSettings({ showDocks: … })` or `showDocks: e.target.checked`.
+      if (/patchSettings\(\{[^}]*showDocks/.test(src) || /showDocks:\s*(e\.target|!|checked)/.test(src)) writers.push(f);
+    }
+    expect(writers, `these write the retired toggle: ${writers.join(", ")}`).toEqual([]);
+  });
+
+  it("the model still DEFAULTS it on, so a plan that never had the key shows its doors", () => {
+    const planner = readFileSync(resolve(here, "../src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+    expect(planner).toMatch(/showDocks:\s*true/);
+    // …and the migration is actually wired into the settings initializer, not merely exported.
+    expect(planner).toContain("normalizeRetiredToggles(stored)");
   });
 });
 

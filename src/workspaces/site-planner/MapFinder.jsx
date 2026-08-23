@@ -496,10 +496,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         const status = statusOf(site);
         if (statusFilter.size && !statusFilter.has(status)) return;   // honor the chip filter (matches the map)
         if (status === "dead" && !statusFilter.has("dead")) return;   // dead recedes unless filtered to (B365)
-        // NEW-2: dimensions + dock doors off, stated by the export rather than read off each saved
-        // site's own View ▾ toggles — a multi-site file must not vary with what someone happened to
-        // have shown on screen when they last saved plan #3.
-        features.push(...siteToFeatures(site, projectFor(site.origin), { extrudeBuildings: extrude, includeDimensions: false, includeDockDoors: false, prefix: [site.site || site.name || "Site"] }));
+        // Dimension lines off. Dock doors always export, as one run per dock side — and neither
+        // is read off each saved site's own settings, so a multi-site file cannot vary with what
+        // someone happened to have shown on screen when they last saved plan #3.
+        features.push(...siteToFeatures(site, projectFor(site.origin), { extrudeBuildings: extrude, includeDimensions: false, prefix: [site.site || site.name || "Site"] }));
       });
       selected.forEach((sp, i) => {
         (sp.rings || []).forEach((ring) => {
