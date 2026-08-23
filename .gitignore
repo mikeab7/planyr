@@ -188,3 +188,10 @@ ui-audit/.raster-cache/
 .planyr-ledger-merges.log
 ui-audit/.vendor/
 ui-audit/.perfshots/
+
+# Session scratch-repro harnesses/measurement scripts/screenshots — referenced by path from
+# BACKLOG.md entries as evidence, but per this repo's own established convention they are
+# per-session throwaway tooling, never committed (many BACKLOG entries cite a past session's
+# .scratch-repro/ script that no longer exists in the tree — this makes that convention explicit
+# instead of relying on every session to know it unprompted).
+.scratch-repro/
