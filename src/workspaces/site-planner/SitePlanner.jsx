@@ -12,6 +12,7 @@ import { reportClientEvent, SUPPRESSED_AUTOMATED } from "../../shared/telemetry/
 import { notePerfEdit } from "../../shared/telemetry/perfSampling.js";
 import { notePlanContext, noteViewScale, requestPerfCapture, perfCaptureDelivery } from "../../shared/telemetry/perfRecorderHandle.js";
 import { createElementSync, stableStringify } from "./lib/elementSync.js";
+import { createOperationTracker } from "./lib/operationEnvelope.js";
 import { planDelete, TYPING_GUARD_HINT } from "./lib/deletePlan.js";
 import { focusScope, resolveKeyEntry, keyScopeVerdict, shouldHintRefusal, SCOPE_GUARD_HINT } from "./lib/keyContract.js";
 import { touchLatch, touchFactsOf, TOUCH } from "../../shared/keyboard/keyScope.js";
@@ -4096,6 +4097,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       { id: siteId, seam, ...tearPayload(res.repairs) });
     return res.els;
   };
+  // NEW-1 (B712224) — the pure half of applying one instruction to a collection, shared by the REAL
+  // setState below and by reconcileElems' LOCAL post-drain patch (see the comment there for why the
+  // second consumer has to exist: stateRef.current lags a setEls call by a render, and reconcile()
+  // must never diff against pre-drain data). One rule, two consumers — never let them diverge.
+  const applyInstrToList = (list, instr) => {
+    if (!instr || instr.action === "ignore") return list;
+    if (instr.action === "remove") return list.filter((x) => x.id !== instr.id);
+    if (instr.action === "upsert") {
+      if (isHuskParcel(instr.kind, instr.el)) return list;
+      return list.some((x) => x.id === instr.id) ? list.map((x) => (x.id === instr.id ? instr.el : x)) : [...list, instr.el];
+    }
+    return list;
+  };
   // Put one applyRemoteRow instruction onto the canvas. The engine already updated its shadow, so
   // the autosave-effect diff that this setState triggers sees the element as unchanged (no echo
   // commit). Insertion respects the collection's z (byZ reads z, not array position).
@@ -4103,16 +4117,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!instr || instr.action === "ignore") return;
     const setter = { el: setEls, markup: setMarkups, measure: setMeasures, callout: setCallouts, parcel: setParcels }[instr.kind];
     if (!setter) return;
-    if (instr.action === "remove") setter((a) => a.filter((x) => x.id !== instr.id));
-    else if (instr.action === "upsert") {
-      if (isHuskParcel(instr.kind, instr.el)) return;
-      setter((a) => (a.some((x) => x.id === instr.id) ? a.map((x) => (x.id === instr.id ? instr.el : x)) : [...a, instr.el]));
-    }
+    setter((a) => applyInstrToList(a, instr));
   };
+  // Returns the instructions actually applied, so a synchronous caller (reconcileElems) can fold
+  // them into a LOCAL snapshot instead of trusting stateRef.current to already reflect them —
+  // setState above is async, stateRef.current is only re-assigned on the NEXT render (B712224).
   const drainRemote = () => {
-    if (!pendingRemoteRef.current.length) return;
+    if (!pendingRemoteRef.current.length) return [];
     const q = pendingRemoteRef.current; pendingRemoteRef.current = [];
     for (const instr of q) applyRemoteInstr(instr);
+    return q;
   };
   /* The ECHO / ADOPTION seam, as ONE choke point. Every path that changes `els` lands here after
    * React commits — a realtime upsert, a rows-canonical adoption, the buffered mid-gesture drain, a
@@ -4318,6 +4332,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       selfUid: () => activeUid(),   // NEW-4 — a getter, not a snapshot (see editorNames.js)
       // B1341 stage 2 — asked at CALL time, so the kill switch can be thrown without a reload.
       groupCas: groupCasEnabled,
+      // NEW-2 (B712225) — read at ENQUEUE time (the same moment isDirectEdit is asked), so every
+      // row diffed while an operation is open carries its op_id/op_kind/actor_session_id/client_ts.
+      envelopeNow: () => opTrackerRef.current.current(),
       // NEW-1 — bonded (attachedTo) elements are cascade-DERIVED unless the current gesture /
       // selection targets them; everything else (incl. deletes, el = null) stays direct.
       isDirectEdit: (kind, id, el) => kind !== "el" || !el || el.attachedTo == null || isDirectTouched(kind, id),
@@ -4430,7 +4447,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!e || !isCloudActive()) return;
     // A snapshot flush already knows exactly what the canvas holds; draining remote rows into it
     // would re-apply rows the snapshot just superseded.
-    if (!busy && !override) drainRemote(); // apply remote rows that arrived mid-gesture before diffing
+    let drained = [];
+    if (!busy && !override) drained = drainRemote(); // apply remote rows that arrived mid-gesture before diffing
     stampDirectTargets(); // NEW-1 — refresh direct-touch stamps in the SAME tick the ops are enqueued
     const s = override || stateRef.current;
     /* NEW-1 — the WRITE seam, and the one that makes the invariant structural rather than cosmetic.
@@ -4439,12 +4457,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      * engine's `freshen` re-reads this same live canvas at flush time), not by the ~40 s backoff
      * retry that carried pre-undo child coordinates in the reported case. A tear becomes a state
      * the client is incapable of persisting, whatever race produced it locally. */
-    let els = s.els;
+    let els = s.els, markups = s.markups, measures = s.measures, callouts = s.callouts, parcels = s.parcels;
+    /* ⛔ B712224 — the two-tab bonded-assembly resurrection. `drainRemote()` just above calls
+     * setEls/setMarkups/etc for anything that arrived while a gesture (even an incidental pan) was
+     * in flight; those are ASYNC React state updates, and `stateRef` is only re-assigned during the
+     * NEXT render (see its own comment). Reading `stateRef.current` synchronously right after
+     * drainRemote() — as this did before — is therefore STALE: it still holds elements the drain
+     * just queued for removal. Meanwhile the tombstone's arrival already cleared the engine's
+     * `shadow` entry for those elements SYNCHRONOUSLY, the moment the realtime row was received
+     * (elementSync.js's applyRemoteRow), whether or not the canvas instruction was buffered. So the
+     * diff below saw: shadow lacks the key, the (stale) collections still have it → a fresh CREATE,
+     * which a same-kind tombstoned row on the server auto-restores as a "resurrected" row at the
+     * next rev. Measured live: a same-account second tab, mid-pan when another tab's assembly
+     * delete cascade arrived, re-committed exactly the members whose remove instruction was still
+     * sitting in `pendingRemoteRef` at the moment its own gesture ended. Folding the SAME drained
+     * instructions into LOCAL copies here — through the identical `applyInstrToList` the real
+     * setState calls use, so the two can never disagree — makes this diff see the post-drain
+     * reality in the SAME synchronous call, regardless of whether React has re-rendered yet. */
+    for (const instr of drained) {
+      if (instr.kind === "el") els = applyInstrToList(els, instr);
+      else if (instr.kind === "markup") markups = applyInstrToList(markups, instr);
+      else if (instr.kind === "measure") measures = applyInstrToList(measures, instr);
+      else if (instr.kind === "callout") callouts = applyInstrToList(callouts, instr);
+      else if (instr.kind === "parcel") parcels = applyInstrToList(parcels, instr);
+    }
     if (!busy) {
       const guarded = assemblyGuard(els, override ? "flush-override" : "commit");
       if (guarded !== els) { els = guarded; setEls(guarded); }
     }
-    try { e.reconcile({ els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels }, { busy }); } catch (_) {}
+    try { e.reconcile({ els, markups, measures, callouts, parcels }, { busy }); } catch (_) {}
   };
   const flushElems = (override) => {
     const e = elSyncRef.current;
@@ -4570,11 +4611,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   if (!histRef.current) histRef.current = createHistoryStack({ keyOf: histKey });
   const [histTick, bumpHist] = useState(0);
   const touchHist = () => bumpHist((n) => n + 1); // re-render so undo/redo enabled state updates
+  /* NEW-2 (B712225) — the operation-envelope tracker (operationEnvelope.js). ONE instance per tab,
+   * kept across renders like histRef beside it — `beginOperation` at the `pushHistory()` seam is
+   * "the same seam pushHistory() uses, which is already exactly one call per undoable action"
+   * (the module's own header). `sessionId` is PROMOTED from `journalSid` (elementJournal's
+   * sessionStorage-backed per-tab id, module-scoped above), never minted — a third id would put
+   * three answers to "which tab is this" in the codebase (see the module header). */
+  const opTrackerRef = useRef(null);
+  if (!opTrackerRef.current) opTrackerRef.current = createOperationTracker({ sessionId: journalSid, userId: () => activeUid() });
   /* NEW-4 — `notePerfEdit()` is one integer increment, and it is the ONE axis of the
    * amplification hypothesis the DOM cannot report: how much this session has been WORKED. Every
    * undoable action funnels through here already, so this is the cheapest complete count there
    * is. It is a no-op unless the perf instrument is installed (a quarter of page loads). */
-  const pushHistory = () => { histRef.current.push(stateRef.current); notePerfEdit(); touchHist(); };
+  // NEW-2 (B712225) — `kind` is optional and defaults to the generic "edit": classifying every one
+  // of pushHistory()'s ~190 call sites into the OP_KINDS vocabulary is future work (the module's
+  // vocabulary exists for merge/split/replace specifically, none of which are wired this pass);
+  // what THIS wiring needs is that every write carries an op_id + actor_session_id it can be
+  // correlated by, which "edit" (a real OP_KINDS member, not the "no operation open" unknown
+  // fallback) already gives it. `deleteSel` passes "delete" explicitly — see below.
+  const pushHistory = (kind = "edit") => { opTrackerRef.current.beginOperation(kind); histRef.current.push(stateRef.current); notePerfEdit(); touchHist(); };
   /* ⛔ NEW-5 — "CAN I UNDO?" IS ASKED OF THE DOCUMENT, ONCE PER REAL CHANGE.
    *
    * `history.canUndo(current, {exact:true})` is the honest predicate (see that module: a plain
@@ -5998,7 +6053,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       reportClientEvent("delete-outcome", `${entry} → no-op (${plan.outcome})`, { entry, result: "no-op", reason: plan.outcome, stale: plan.stale.slice(0, 20) });
       return plan;
     }
-    pushHistory();
+    pushHistory("delete");
     const { els: elIds, markups: mkIds, measures: measIds, measureIdx, callouts: coIds, parcels: pcIds } = plan.remove;
     // B556/TOMBSTONE-DELETES — tombstone exactly what the filters remove, bonded children included,
     // so a cloud / cross-tab union merge can't resurrect half an assembly.
