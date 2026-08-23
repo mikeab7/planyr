@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseRoute, buildHash, sameRoute, unknownModuleSlug, DEFAULT_MODULE } from "../src/app/route.js";
+import { parseRoute, buildHash, sameRoute, unknownModuleSlug, isAdminRoute, DEFAULT_MODULE } from "../src/app/route.js";
 
 describe("parseRoute", () => {
   it("empty / root hash is the dashboard (default module, no project)", () => {
@@ -49,6 +49,34 @@ describe("unknownModuleSlug", () => {
       "#/project/abc/notes", "#/all/markup", "#/project/abc"]) {
       expect(unknownModuleSlug(h)).toBe(null);
     }
+  });
+
+  // B711904 (NEW-1) — "admin" is a real, resolvable destination (see isAdminRoute below)
+  // even though it's deliberately absent from MODULE_BY_SLUG. It must never trip the
+  // "newer build available" banner — that banner is the one behavioral tell that would
+  // distinguish "admin" from a random typo for a visitor who isn't on the allowlist.
+  it("never flags 'admin' as an unresolved slug", () => {
+    expect(unknownModuleSlug("#/admin")).toBe(null);
+  });
+});
+
+// B711904 (NEW-1) — the admin page is intentionally NOT a module: Shell.jsx checks the raw
+// hash directly (isAdminRoute) rather than routing "admin" through MODULE_BY_SLUG, so an
+// unauthorized visit is indistinguishable from any other route this build doesn't know.
+describe("isAdminRoute", () => {
+  it("recognizes #/admin in every shape parseRoute would otherwise accept", () => {
+    expect(isAdminRoute("#/admin")).toBe(true);
+    expect(isAdminRoute("admin")).toBe(true); // tolerant of a missing leading '#'
+  });
+
+  it("is false for everything else, including near-misses", () => {
+    for (const h of ["", "#", "#/", "#/site", "#/administrator", "#/project/admin/site", "#/all/admin"]) {
+      expect(isAdminRoute(h)).toBe(false);
+    }
+  });
+
+  it("parseRoute treats #/admin exactly like any other unresolved slug — DEFAULT_MODULE, no project", () => {
+    expect(parseRoute("#/admin")).toEqual({ module: DEFAULT_MODULE, projectId: null, cross: false });
   });
 });
 
