@@ -202,7 +202,17 @@ export function createElementSync(opts = {}) {
     // B1341 stage 2 — () => bool, asked at CALL time. Omitted → group CAS is OFF and every call is
     // byte-for-byte its pre-stage-2 self, which is what makes this stage inert until switched on.
     groupCas = null,
+    // NEW-2 (B712225) — () => envelope|null, the operation-envelope tracker's `current()` (see
+    // operationEnvelope.js). Read at ENQUEUE time (reconcile()/restore()/closeAssemblies()), the
+    // SAME moment `isDirectEdit` is asked — never at flush time, because a batch can bundle ops
+    // enqueued under different open operations and each row must carry the envelope that was live
+    // when IT was diffed, not whichever gesture happens to be open when the debounce fires. A row
+    // enqueued with no tracker wired (omitted, or the getter throws) carries no envelope fields —
+    // byte-for-byte the pre-NEW-2 wire shape, so an unwired caller (tests, any site without the
+    // tracker) is unaffected.
+    envelopeNow = null,
   } = opts;
+  const envelopeForEnqueue = () => { try { return envelopeNow ? envelopeNow() : null; } catch (_) { return null; } };
 
   // key -> { kind, id, json, rev, z }  (last COMMITTED state)
   const shadow = new Map();
@@ -515,7 +525,7 @@ export function createElementSync(opts = {}) {
           if (inf && inf.el && stableStringify(inf.el) === stableStringify(elc)) continue; // being created right now
           if (!pend || (pend.cls !== "create" && pend.cls !== "restore") || stableStringify(pend.el) !== stableStringify(elc)) {
             if (!(pend && pend.cls === "restore" && stableStringify(pend.el) === stableStringify(elc)))
-              enqueue(key, { kind, id: el.id, cls: pend && pend.cls === "restore" ? "restore" : "create", el: elc, z: elc.z, direct: directTag(kind, el.id, elc) });
+              enqueue(key, { kind, id: el.id, cls: pend && pend.cls === "restore" ? "restore" : "create", el: elc, z: elc.z, direct: directTag(kind, el.id, elc), envelope: envelopeForEnqueue() });
             sawCreateOrDelete = true;
           }
           continue;
@@ -534,7 +544,7 @@ export function createElementSync(opts = {}) {
           if (inf && inf.el && stableStringify(inf.el) === json) continue; // this exact data is already in flight
           // changed since last commit → update (unless an identical update is already queued)
           if (!pend || pend.cls === "delete" || stableStringify(pend.el) !== json) {
-            enqueue(key, { kind, id: el.id, cls: "update", el, z: el.z, direct: directTag(kind, el.id, el) });
+            enqueue(key, { kind, id: el.id, cls: "update", el, z: el.z, direct: directTag(kind, el.id, el), envelope: envelopeForEnqueue() });
           }
         }
       }
@@ -582,7 +592,7 @@ export function createElementSync(opts = {}) {
         let shadEl = null;
         if (shad.json && !shad.stale) { try { shadEl = JSON.parse(shad.json); } catch (_) { shadEl = null; } }
         enqueue(key, { kind: shad.kind, id: shad.id, cls: "delete", el: null, z: shad.z,
-          direct: directTag(shad.kind, shad.id, shadEl), baseRev: shad.rev, baseAt: now() });
+          direct: directTag(shad.kind, shad.id, shadEl), baseRev: shad.rev, baseAt: now(), envelope: envelopeForEnqueue() });
         sawCreateOrDelete = true;
       }
     }
@@ -620,7 +630,7 @@ export function createElementSync(opts = {}) {
   // OUR data at a new rev. Immediate (like create/delete — a deliberate act, never debounced).
   function restore(kind, id, el) {
     if (stopped || !ready || !el) return;
-    enqueue(skey(kind, id), { kind, id, cls: "restore", el, z: el.z, direct: true }); // an explicit user action is always direct
+    enqueue(skey(kind, id), { kind, id, cls: "restore", el, z: el.z, direct: true, envelope: envelopeForEnqueue() }); // an explicit user action is always direct
     schedule(true);
   }
 
@@ -684,7 +694,7 @@ export function createElementSync(opts = {}) {
       if (!shad) continue;                        // never seen by the server → the normal diff mints its create
       const json = stableStringify(m);
       if (shad.json === json) continue;           // the server already agrees — nothing to send
-      enqueue(key, { kind: "el", id: m.id, cls: "update", el: m, z: m.z, direct: false });
+      enqueue(key, { kind: "el", id: m.id, cls: "update", el: m, z: m.z, direct: false, envelope: envelopeForEnqueue() });
       report("element-assembly-joined", "assembly member folded into the same commit", { siteId, id: m.id, root: rootIdOf(m, m.id) });
     }
   }
@@ -1087,11 +1097,21 @@ export function createElementSync(opts = {}) {
     return typeof e.baseAt === "number" && born.at > e.baseAt;
   }
 
+  // NEW-2 (B712225) — the envelope rides on the wire op as four plain top-level keys, read by the
+  // `commit_elements` RPC and written onto the row alongside data/rev (db/commit_elements_op_envelope.sql).
+  // An entry enqueued with no tracker wired carries `envelope: null`, so `env` is `{}` and the op is
+  // byte-for-byte its pre-NEW-2 shape — no behavior change for a caller that never opts in.
+  const envelopeStamp = (e) => {
+    const v = e && e.envelope;
+    if (!v || typeof v !== "object") return {};
+    return { op_id: v.op_id ?? null, op_kind: v.op_kind ?? null, actor_session_id: v.actor_session_id ?? null, client_ts: v.client_ts ?? null };
+  };
   function opFor(e) {
-    if (e.cls === "create") return { op: "create", id: e.id, kind: e.kind, z: e.z, data: e.el };
-    if (e.cls === "delete") return { op: "delete", id: e.id, kind: e.kind, expected: revOf(e) };
-    if (e.cls === "restore") return { op: "restore", id: e.id, kind: e.kind, z: e.z, data: e.el };
-    return { op: "update", id: e.id, kind: e.kind, z: e.z, expected: revOf(e), data: e.el };
+    const env = envelopeStamp(e);
+    if (e.cls === "create") return { op: "create", id: e.id, kind: e.kind, z: e.z, data: e.el, ...env };
+    if (e.cls === "delete") return { op: "delete", id: e.id, kind: e.kind, expected: revOf(e), ...env };
+    if (e.cls === "restore") return { op: "restore", id: e.id, kind: e.kind, z: e.z, data: e.el, ...env };
+    return { op: "update", id: e.id, kind: e.kind, z: e.z, expected: revOf(e), data: e.el, ...env };
   }
   const revOf = (e) => { const s = shadow.get(skey(e.kind, e.id)); return s ? s.rev : 1; };
 

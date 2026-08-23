@@ -1205,3 +1205,49 @@ describe("NEW-0 round 7 — a DELETE is classified the same as an EDIT (the isDi
     expect(events.filter((e) => e.type === "remote-upsert")).toHaveLength(1); // still surfaced
   });
 });
+
+describe("NEW-2 (B712225) — the operation envelope rides on the wire op", () => {
+  it("a create/update/delete op carries op_id/op_kind/actor_session_id/client_ts when envelopeNow is wired", async () => {
+    const ops = [];
+    let envelope = { op_id: "op_1", op_kind: "move", actor_session_id: "sess-a", client_ts: "2026-08-23T23:03:09.000Z" };
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: () => {}, envelopeNow: () => envelope,
+      commit: async (batch) => { ops.push(...batch); return { ok: true, results: batch.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }; },
+    });
+    s.seed([]);
+    s.reconcile({ els: [el("e1")] }, {}); await tick(); // create
+    envelope = { op_id: "op_2", op_kind: "delete", actor_session_id: "sess-a", client_ts: "2026-08-23T23:03:11.000Z" };
+    s.reconcile({ els: [] }, {}); await tick(); // delete
+    const created = ops.find((o) => o.op === "create");
+    const deleted = ops.find((o) => o.op === "delete");
+    expect(created).toMatchObject({ op_id: "op_1", op_kind: "move", actor_session_id: "sess-a", client_ts: "2026-08-23T23:03:09.000Z" });
+    expect(deleted).toMatchObject({ op_id: "op_2", op_kind: "delete", actor_session_id: "sess-a", client_ts: "2026-08-23T23:03:11.000Z" });
+  });
+
+  it("with no envelopeNow wired, the op carries none of the four fields — byte-for-byte the pre-NEW-2 shape", async () => {
+    const ops = [];
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: () => {},
+      commit: async (batch) => { ops.push(...batch); return { ok: true, results: batch.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }; },
+    });
+    s.seed([]);
+    s.reconcile({ els: [el("e1")] }, {}); await tick();
+    expect(ops[0]).toEqual({ op: "create", id: "e1", kind: "el", z: expect.any(Number), data: expect.any(Object) });
+    expect(ops[0]).not.toHaveProperty("op_id");
+  });
+
+  it("a getter that throws is swallowed — the op still commits, with no envelope", async () => {
+    const ops = [];
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: () => {}, envelopeNow: () => { throw new Error("no session yet"); },
+      commit: async (batch) => { ops.push(...batch); return { ok: true, results: batch.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }; },
+    });
+    s.seed([]);
+    s.reconcile({ els: [el("e1")] }, {}); await tick();
+    expect(ops[0].op).toBe("create");
+    expect(ops[0]).not.toHaveProperty("op_id");
+  });
+});
