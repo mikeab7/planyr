@@ -198,23 +198,31 @@ function buildingDockDoorRuns(el, els, settings) {
 
 // Map a site model's drawn geometry to KML features, reprojecting every foot vertex through
 // `project(ptFeet) -> [lon, lat]`. Throws (LOUD-FAILURE) if any vertex reprojects to NaN.
-// opts: { extrudeBuildings, includeDimensions, includeDockDoors, prefix:[…outer folder…] }.
+// opts: { extrudeBuildings, includeDimensions, prefix:[…outer folder…] }.
 //
-// ⛔ NEW-2 — WHAT GOES IN THE FILE IS THE EXPORT'S DECISION, NEVER A CANVAS DISPLAY TOGGLE. The dock
-// doors used to be gated on `settings.showDocks`, the View ▾ checkbox: a drawing-legibility
-// preference was deciding the contents of a file built for a different audience, so turning dock
-// doors on to check a layout silently changed what an exported KMZ contained — and a saved plan's
-// remembered toggle did the same to the map viewer's multi-site export, with nobody looking. Every
-// content decision here is an `opts` flag with its own default, on the `includeDimensions`
-// precedent, and `settings` is read ONLY for model facts (door o.c. / width, building rules) that
-// determine where a thing physically IS. Do not reach for a display toggle in this file again;
-// `test/kmzExport.test.js` sweeps the source for the whole class.
+// ⛔ WHAT GOES IN THE FILE IS THE EXPORT'S DECISION, NEVER A CANVAS DISPLAY TOGGLE. The dock doors
+// were once gated on `settings.showDocks`, the View ▾ checkbox: a drawing-legibility preference was
+// deciding the contents of a file built for a different audience, so turning dock doors on to check
+// a layout silently changed what an exported KMZ contained — and a saved plan's remembered toggle
+// did the same to the map viewer's multi-site export, with nobody looking. `settings` is read here
+// ONLY for model facts (door o.c. / width, building rules) that determine where a thing physically
+// IS. Do not reach for a display toggle in this file again; `test/kmzExport.test.js` sweeps the
+// source for the whole class.
+//
+// ⛔ AND DOCK DOORS ARE NOT AN OPTION — THEY ALWAYS EXPORT. Owner decision, after the run-per-side
+// representation below made the original complaint moot (his words: "Dock doors should just show by
+// default in the export — that's the behaviour I want, not an option to turn on… no toggle"). The
+// defect he reported was never that dock doors were PRESENT; it was that there were hundreds of
+// them, one pin per door. There is deliberately no `includeDockDoors` flag to find and no checkbox
+// to add: a flag nothing sets is a decision left half-made, and it is what a later session would
+// wire a control to. The dimension lines are a DIFFERENT question — they stay off (see below), and
+// the owner declined a control for them too.
 export function siteToFeatures(model, project, opts = {}) {
   const parcels = arr(model && model.parcels);
   const els = arr(model && model.els);
   const measures = arr(model && model.measures);
   const settings = (model && model.settings) || {};
-  const { extrudeBuildings = false, includeDimensions = false, includeDockDoors = false, prefix = [] } = opts;
+  const { extrudeBuildings = false, includeDimensions = false, prefix = [] } = opts;
   const rules = normalizeRules(settings.buildingRules);
   const features = [];
   const F = (...names) => [...prefix, ...names];
@@ -258,9 +266,9 @@ export function siteToFeatures(model, project, opts = {}) {
     }
     features.push({ geom: "polygon", name, folder: F(layer), rings: [projClosed(ring)], style, height, extrude });
 
-    // Dock doors — optional, default OFF (a pin or a line per dock side is clutter in a 3D
-    // walkthrough), and decided by the EXPORT, never by `settings.showDocks`. See the opts note.
-    if (includeDockDoors && isBuilding(el)) {
+    // Dock doors — ALWAYS, as one run per dock side (never a pin per door), and decided by the
+    // EXPORT rather than by `settings.showDocks`. See the opts note above for why there is no flag.
+    if (isBuilding(el)) {
       for (const run of buildingDockDoorRuns(el, els, settings)) {
         features.push({
           geom: "line",
