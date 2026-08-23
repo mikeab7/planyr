@@ -13,10 +13,12 @@ import ModuleLoader from "../shared/ui/ModuleLoader.jsx";
 import AccountControl from "./AccountControl.jsx";
 import { useProfile } from "../shared/profile/useProfile.js";
 import { setTelemetryModule } from "../shared/telemetry/clientErrors.js";
-import { useHashRoute, unknownModuleSlug, INITIAL_HASH_EMPTY } from "./route.js";
+import { useHashRoute, unknownModuleSlug, isAdminRoute, INITIAL_HASH_EMPTY } from "./route.js";
 import { writeLastRoute, seedBootRoute } from "./lastRoute.js";
 import { installBuildSkewWatch, shouldOfferReload, LOADED_BUILD } from "./buildSkew.js";
 import { reloadFresh } from "./chunkReload.js";
+
+const AdminGate = lazy(() => import("../workspaces/admin/AdminGate.jsx"));
 
 // "Open where I left off": on an empty-hash boot, seed the URL from the stored last-route
 // pointer BEFORE the first render (so useHashRoute's initial read sees it). Runs at module
@@ -94,6 +96,16 @@ export default function Shell() {
   const active    = route.module;     // workspace id
   const projectId = route.projectId;  // active Site-group id | null
   const cross     = route.cross;      // cross-project mode
+  // B711904 (NEW-1) — "admin" is deliberately NOT a module slug (see route.js), so it never
+  // shows up in `route.module`; it's read straight off the live hash instead, the same way
+  // `routeMiss` below already has to be. Recomputed on every hashchange (the `route` state
+  // object is fresh each time, so this effect always fires even when the parsed route didn't
+  // change) so leaving/entering #/admin is always caught.
+  const [isAdminHash, setIsAdminHash] = useState(() => (typeof window !== "undefined" ? isAdminRoute(window.location.hash) : false));
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setIsAdminHash(isAdminRoute(window.location.hash));
+  }, [route]);
   const [user,      setUser]      = useState(null);
   const [authOpen,  setAuthOpen]  = useState(false);
   const [recovery,  setRecovery]  = useState(false);
@@ -164,15 +176,21 @@ export default function Shell() {
   // instant-switch feel without taxing a session that never leaves the Site route.
 
   // B279 — tag telemetry rows with the workspace the user is in, so a reported error
-  // says WHERE it happened (site-planner / doc-review / scheduler).
-  useEffect(() => { setTelemetryModule(active); }, [active]);
+  // says WHERE it happened (site-planner / doc-review / scheduler). "admin" resolves as its
+  // own module here even though it's not in `route.module` (see isAdminHash above), so a
+  // crash inside the admin page is never mislabeled as a Site Planner error.
+  useEffect(() => { setTelemetryModule(isAdminHash ? "admin" : active); }, [active, isAdminHash]);
 
   // "Open where I left off" — persist every route change as the last-route pointer.
   // Single choke point: catches tab clicks, breadcrumb picks, and programmatic navigates.
   // writeLastRoute() itself declines a few cases (B710736 — Food, and any other module
   // sitting on no project/cross view) so a visit there can't clobber the pointer to
-  // wherever the professional tool was actually left; see lastRoute.js.
-  useEffect(() => { writeLastRoute(route); }, [route]);
+  // wherever the professional tool was actually left; see lastRoute.js. #/admin resolves
+  // (via parseRoute's tolerant fallback) to the default module with no project — a real
+  // pointer, indistinguishable from "on the plain dashboard" — so it's excluded the same way
+  // Food is: a visit to /admin must never clobber the pointer to whatever project was
+  // actually open before it (B711904).
+  useEffect(() => { if (!isAdminHash) writeLastRoute(route); }, [route, isAdminHash]);
 
   // Keep-alive (owner request, 2026-07-05: "cleaner/faster switch between modules"): every
   // workspace the user has VISITED stays mounted, hidden with display:none, instead of being
@@ -272,6 +290,19 @@ export default function Shell() {
             </div>
           );
         })}
+        {/* B711904 (NEW-1) — the admin page. Only mounted (lazy chunk + the allowlist RPC
+            call) while the hash actually reads #/admin, so a normal session never pays for
+            either. AdminGate itself renders null for anyone not on the allowlist, which lets
+            the ordinary workspace underneath show through unblocked — the "404, not a
+            permission page" requirement — rather than this overlay needing its own denied
+            state. */}
+        {isAdminHash && (
+          <div style={{ position: "absolute", inset: 0, zIndex: 1 }}>
+            <Suspense fallback={null}>
+              <AdminGate user={user} onExit={goDashboard} />
+            </Suspense>
+          </div>
+        )}
       </main>
       {authOpen && (
         <AuthPanel
