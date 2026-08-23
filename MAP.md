@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-23 @ `1edf385` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-23 @ `0531fe7` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -30,7 +30,7 @@ _548 source files mapped._
 - **`src/app/flushRegistry.js`** — Cross-workspace flush-before-navigate registry: registerFlush/flushAll give each live workspace one synchronous local-save + keepalive cloud push before a forced reload
   - _exports_: `_flushers`, `flushAll`, `registerFlush`
 - **`src/app/lastRoute.js`** — "Open where I left off": last {module,projectId,cross} pointer written on every navigate; pickBootRoute/seedBootRoute seed an empty-hash boot pre-render (deep links win)
-  - _exports_: `pickBootRoute`, `readLastRoute`, `RESTORE_LAST_MODULE`, `seedBootRoute`, `writeLastRoute`
+  - _exports_: `pickBootRoute`, `readLastRoute`, `RESTORE_LAST_MODULE`, `seedBootRoute`, `shouldPersistRoute`, `writeLastRoute`
 - **`src/app/modulePrefetch.js`** — Warm a non-active workspace chunk (and the heavy /sequence/ Gantt iframe doc) on NAVIGATION INTENT only — tab hover/pointerdown, never at boot (NEW-9) — so tab switches feel instant without taxing a Site-only session
   - _exports_: `prefetchModule`
 - **`src/app/recoverableError.js`** — Which render crashes the error boundary may clear by remounting instead of showing a dead end (B1189): classifies React's nested-update circuit breaker (dev text + minified #185) and decides recover-vs-show under a bounded, time-windowed retry budget. — `UPDATE_DEPTH_CODE`, `isUpdateDepthError`, `isRecoverableRenderError`, `MAX_AUTO_RECOVERIES`, `RECOVERY_WINDOW_MS`, `planRecovery`

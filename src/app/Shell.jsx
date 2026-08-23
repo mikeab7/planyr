@@ -169,6 +169,9 @@ export default function Shell() {
 
   // "Open where I left off" — persist every route change as the last-route pointer.
   // Single choke point: catches tab clicks, breadcrumb picks, and programmatic navigates.
+  // writeLastRoute() itself declines a few cases (B710736 — Food, and any other module
+  // sitting on no project/cross view) so a visit there can't clobber the pointer to
+  // wherever the professional tool was actually left; see lastRoute.js.
   useEffect(() => { writeLastRoute(route); }, [route]);
 
   // Keep-alive (owner request, 2026-07-05: "cleaner/faster switch between modules"): every
