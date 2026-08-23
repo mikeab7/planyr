@@ -1,3 +1,39 @@
+### B286001 — Mid-gesture, line weights and text do NOT counter-scale: deliberate, deferred, and filed so closing B1449 cannot bury it `[Site Planner / UI]` (task) #site-planner #perf #ui  *(filed 2026-08-09 from the owner chat block that CLOSED B1449, whose instruction was explicit: "One thing stays OPEN: line weights and text do not counter-scale mid-gesture. If that is not already filed, file it as its own B# marked deliberate-and-deferred, so closing B1449 does not bury it." Minted **B286001** from this branch's reserved block B286000–B286015, against origin/main cf4f77b. DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `counter-scale`, `vector-effect`, `non-scaling-stroke`, `ANCHOR_MAX_K`, `stroke weight`, `mid-gesture`, `B1449`, `B1360`, `B1440`, `B1345`: the trade is DESCRIBED in three places — B1449's own "COUNTER-SCALING STROKES AND TEXT MID-GESTURE: NOT DONE" bullet, B1360's increment-2 risk column, and V56000's watch-item 2 — but **it has never had an item of its own**, which is exactly the burial the owner named. **B1360** stays Open and owns increments 3–5; it is not re-opened or superseded by this. Net-new.)*
+`[x]` **✅ DONE 2026-08-23 — CLOSED ON BRANCH (b) OF ITS OWN STOPPING RULE: the owner confirmed the mid-gesture picture is a non-issue in real use. Recorded as a design decision, NOT as work that was completed.**
+- Verify: live (any change here is zoom-dependent rendering by definition — LIVE-VERIFY)
+- Origin: filed 2026-08-09 from chat
+- **WHAT IT IS.** While the wheel is turning, the drawing is emitted once at the anchor view and carried by one group transform `translate(tx ty) scale(k)`. A group `scale` scales EVERYTHING inside it, so line weights, text and the level-of-detail tier the frame started at grow and shrink with the picture until the gesture settles and the frame re-bakes (~180 ms after the last notch). The owner was told this and accepted it; V56000's watch-item 2 asked him to look at exactly this and he answered *"I think we're good."*
+- **WHY IT WAS NOT DONE, with the cost, unchanged from B1449's report.** **Text** has no mechanism short of re-emitting every `font-size` — which IS the cost B1449 removes, so it is self-defeating. **Strokes** could ride `vector-effect="non-scaling-stroke"`, but that is an attribute on every stroked node in the tree; applying it per-gesture is the same re-emit, so it would have to be unconditional — and unconditional changes the EXPORT path's authored weights, which is a PDF-PARITY problem on a surface where a line weight is a drafting convention rather than a preference.
+- **WHAT ALREADY BOUNDS IT, so this is not unbounded drift.** `ANCHOR_MAX_K = 2` — about six detents — past which the anchor is dropped and the frame re-bakes at the live view. So the worst the picture can be off is one doubling, for the length of one gesture.
+- **⛔ WHAT MUST NOT BE TOUCHED IF THIS IS EVER PICKED UP** (owner instruction, verbatim scope on the B1449 closure): do NOT re-open the anchored-zoom transform, do NOT change `k = view.ppf / anchor.ppf`, and do NOT touch the byte-identical-at-`k === 1` property that makes B1440's pan path unchanged by construction. Any work here is ADDITIVE to the render body, and `test/viewAnchor.test.js` is the arbiter.
+- **STOPPING RULE.** This closes one of two ways, both of them results: (a) the owner reports that the mid-gesture picture bothers him in real use, at which point it becomes a real defect with a real repro and a named cost; or (b) it is confirmed a non-issue at his next substantive zoom-behaviour review, and it moves to Done as a recorded design decision. It is NOT a to-do waiting for capacity, and it must not be picked up speculatively — the trade was accepted on the record.
+- **⛔ HOW IT CLOSED, and which branch of the stopping rule fired — named, because the rule requires it.**
+  **Branch (b): *confirmed a non-issue at his next substantive zoom-behaviour review.*** Not branch (a),
+  and nothing was implemented. The owner, unprompted, 2026-08-23: ***"Zoom feels fine to me as it is
+  right now - no changes needed. I will flag it if that changes."*** That is a direct answer to
+  V56000's watch-item 2, which is the question this item was carved out of — and it is his SECOND
+  answer to it (2026-08-09: *"I think we're good."*), given after a fortnight of real use rather than
+  on the day it shipped, which is the difference between an impression and a verdict.
+- **THE DISPOSITION, BY NAME (STANDING RULE #2 enforcement).** **(3) — asked him whether it was a
+  problem and took his answer as the verdict.** Legitimate here for a reason worth stating rather than
+  assuming: this was never a reproducible-or-not question. The behaviour is DETERMINISTIC, fully
+  characterised, deliberately introduced and machine-guarded — nothing was unknown about *what* the
+  drawing does mid-gesture. The only open question was whether it bothered him, and the only
+  instrument for that is him. **No null was involved and none was relied on**, which is precisely the
+  situation clause 2 exists to keep apart from a failed reproduction.
+- **VERIFY: LIVE — DISCHARGED BY THE OWNER'S OWN LIVE USE.** It never carried a `V###` and did not
+  need one: the check was *"does this bother you on your own plans"*, run for a fortnight on the
+  production build on his own machine. No sandbox pass could have substituted, and no `Blocker:` was
+  ever in the way of him answering.
+- **⛔ WHAT THIS CLOSURE DOES NOT SAY.** It does not say counter-scaling was attempted, and it does not
+  retire the cost analysis above — that stands, and is the reason to re-read this item rather than
+  re-derive it if the subject ever returns. **His "I will flag it if that changes" is now the standing
+  condition**, so a future session must not reopen this speculatively; a fresh report from him would be
+  a new item with a real repro, exactly as branch (a) says. `ANCHOR_MAX_K = 2` and the byte-identical-
+  at-`k === 1` property remain the invariants `test/viewAnchor.test.js` arbitrates.
+- **Tests.** None changed — no code was touched. This is a record, not a release.
+
+
 ### B697200 — Prove or disprove the City of Simonton ETJ membership at Woods Road `[Site Planner]` (bug or non-repro) #site-planner #gis #parcel  *(owner dispatch 2026-08-22, NEW-1, follow-up to B689904–B689906/PR #1126 — the county floor is correct and not reopened; this item is the owed independent check of the ETJ side, which the dispatch's own retraction notes was never actually verified beyond a weak, wrong-question radius scan. Minted **B697200 / V370848** from this branch's reserved block B697200–B697215 / V370848–V370863 against `origin/main` 7263765. DEDUPE-FIRST — searched Open/⏳ Verify/Done for `Simonton`, `Fulshear ETJ`, `H-GAC ETJ`, `smsrpaiqu5sv`, `etjEdge`: B689904/B689905/B689906 are the prior fix and its own live-verify (V363552) — both already MEASURED the Simonton/Fulshear shares as part of that session's root-cause work, but this item is the owner's explicit, separate ask to independently re-derive and confirm those numbers rather than take the prior session's word for it. Net-new.)*
 `✅` **Done — non-repro. Independently re-measured live, this session, against the real production geometry and the real live H-GAC service: Simonton's ETJ membership at Woods Road is real, not a sliver, not a stale cache artifact, and not a name/source mismatch. Verify: live → V370848 PASSED.**
 - Verify: live → **V370848 PASSED** (GIS endpoint behavior — mandatory live-verify class). See the dated result on V370848 in `VERIFICATION-DONE.md`.
@@ -997,6 +1033,17 @@
 - **COUNTER-SCALING STROKES AND TEXT MID-GESTURE: NOT DONE, AND THE COST IS REPORTED AS ASKED.** Text has no mechanism short of re-emitting every `font-size` — which IS the cost being removed, so it is self-defeating. Strokes could ride `vector-effect="non-scaling-stroke"`, but that is an attribute on every stroked node in the tree, it would have to be applied unconditionally (applying it per-gesture is the same re-emit), and it changes the EXPORT path's authored weights. So the drawing scales as one piece, which is exactly what the owner was told and accepted. **The drift cap bounds it**: `ANCHOR_MAX_K = 2`, about six detents, past which the frame re-bakes.
 - **THE SETTING.** `Plan ▾ → Smooth zoom`, persisted per device. **It gates the ZOOM anchor only — the PAN anchor is never gated on it**, so turning it off cannot take B1440's increment away.
 - **THE OWNER-FACING A/B (step 5 of the plan).** `ui-audit/zoom-smoothness-ab.mjs` (`npm run perf:zoomab`) records THE SAME scripted 8-notch sweep, in and back out, one build, with the anchor on and off, and hands over two videos. Numbers alongside them: **wheel→DOM 51 → 21 ms · 25,149 → 6,528 DOM mutation records across the sweep (3.9×) · re-bakes 180 ms after the last notch.** The sweep deliberately exceeds the drift cap, so the "after" arm includes its two mid-sweep re-bakes — a shorter, ordinary gesture pays none.
+- **⛔ THE DISPOSITION, BY NAME (STANDING RULE #2 enforcement, added 2026-08-23 — the archived record
+  was missing it, and the rule that requires it was written in this same dispatch).** **(1) —
+  REPRODUCED IT AND FIXED IT.** The owner's report was not a null and was never treated as one: both
+  halves he named were reproduced on the bench as separate measurements (the re-emit behind "there's
+  a delay"; the sign-only wheel factor behind "doesn't feel smooth"), both were fixed, and the fix was
+  put under an instrument built FIRST and proven to go red. Disposition (3) then ran on top of it as
+  the live check — V56000 PASSED on his own words, twice: *"I think we're good."* (2026-08-09) and,
+  unprompted after a fortnight of real use, *"Zoom feels fine to me as it is right now - no changes
+  needed. I will flag it if that changes."* (2026-08-23). **B286001**, the one trade deliberately left
+  un-taken, closed on the second of those under branch (b) of its own stopping rule — so nothing from
+  this item was buried by its closure, which was the whole point of carving it out.
 - **Tests.** `test/viewAnchor.test.js` (20 — the exactness proof over a hostile view/point spread, the k = 1 byte-identity, the drift cap, the wheel factor incl. the OLD rule as an explicit mutation, plus source guards) · `test/midGestureZoom.test.js` (20 — the harness's own verdict layer, incl. "a run that observed nothing is a FAILURE") · `test/panAnchor.test.js` retargeted and two of its guards now strictly stronger. **9,047 tests green (479 files) · lint 0 errors · build green · doc-pointer audit green · MAP.md regenerated.** Bundle: `perf-bundle-audit` PASSES inside the band and the growth is stated rather than left to be noticed — largest chunk **+12.6 KB** (1,486.0 vs a 1,473.4 KB baseline, 19.4 KB of band left), total JS **+3.3 KB**. It buys the anchored render, its proportional wheel factor and the off switch; it is charged to **B1064**, which already owns the SitePlanner chunk, and no ceiling was raised and no baseline re-recorded (**B1178** stays open).
 - **B1360 AMENDED:** its increment 2 is now SHIPPED. Its own note that increment 2 "is a multi-session project with a design decision at the front of it" was right about the decision and wrong about the size once the decision existed — the work was one session because the mechanical rule above replaced the 85 judgement calls it feared. It stays Open for increments 3–5.
 
