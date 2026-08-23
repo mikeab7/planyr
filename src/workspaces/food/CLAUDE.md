@@ -67,6 +67,12 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
 - `lib/foodStore.js` — the one seam to Supabase: place/visit queries, visit CRUD, the manual-
   pin grouping and the logged-id set the map colors pins by.
 - `lib/overpass.js` — the Overpass fallback (see above).
+- `lib/searchQuality.js` (B709696/B709697, 2026-08-23) — filters/ranks the whole-snapshot search
+  RPC's candidates before they reach the dropdown: a word-coverage "strong match" gate (so a
+  query with no real match shows the no-match state instead of ten fuzzy-similarity results),
+  registry-name and confidence de-ranking, corrupted-concatenated-address exclusion, and
+  near-duplicate (same real-world spot, multiple sources) collapse. Pure JS, no Supabase import —
+  see its own header for the production-measured reasoning behind every threshold.
 - `lib/supabaseClient.js` — this module's own client. See BUNDLE ISOLATION above for why it
   isn't the site-planner's.
 - `db/food.sql` — the applied migration (production, `lyeqzkuiwngunutlkkmi`). `db/test/food_rls.test.sql` — the RLS proof.

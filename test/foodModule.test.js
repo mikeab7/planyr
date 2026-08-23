@@ -28,6 +28,11 @@ import { formatVisitDate, formatRelativeDate, formatMonthYear } from "../src/wor
 import { preferAppleMaps, directionsUrl } from "../src/workspaces/food/lib/directions.js";
 import { resolveSnap, heightForSnap } from "../src/workspaces/food/lib/bottomSheetSnap.js";
 import { nextZoomAnimTier, ZOOM_ANIM_FRAME_BUDGET_MS, ZOOM_ANIM_DEGRADE_STREAK } from "../src/workspaces/food/lib/zoomAnimTier.js";
+import {
+  isStrongMatch, isRegistryName, hasConcatenatedAddress, rankSearchCandidates,
+  SIGNIFICANT_WORD_MIN_LEN, GENERIC_NAME_WORDS, REGISTRY_NAME_PATTERN, CONCAT_ADDRESS_PATTERN,
+  DEDUPE_RADIUS_METERS,
+} from "../src/workspaces/food/lib/searchQuality.js";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FOOD = join(REPO, "src", "workspaces", "food");
@@ -2445,5 +2450,212 @@ describe("NEW-2 (2nd owner block) — continuous marker scaling during a zoom an
   it("the perf budget and degrade-streak constants are the ones documented and measured this session", () => {
     expect(ZOOM_ANIM_FRAME_BUDGET_MS).toBe(8);
     expect(ZOOM_ANIM_DEGRADE_STREAK).toBe(3);
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════════════════════════
+ * B709696/B709697 (2026-08-23) — search data quality: a real "no strong match" state, and
+ * confidence/registry-name/concatenated-address/near-duplicate cleanup for the search RESULT
+ * LIST. See lib/searchQuality.js's own header for the production-measured reasoning behind
+ * every threshold/pattern asserted below.
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("searchQuality — isStrongMatch (word-coverage, not a raw similarity cutoff)", () => {
+  // B709696 repro, verbatim: none of the RPC's own top candidates for this query contain
+  // "cowboy" anywhere — a raw word_similarity() score (measured up to 0.615 for this exact
+  // query in production) cannot tell that apart from a genuine match, but word coverage can.
+  it("the Cowboy repro — zero strong matches among the garbage candidates the RPC actually returned", () => {
+    const garbage = [
+      { name: "Kansha Japanese Sushi Bistro", address: "1899 N Plano Rd, Richardson, TX, 75081" },
+      { name: "Thai Tapas (Thai Japanese Sushi Bar)", address: "460 W 19th St, Houston, TX, 77008" },
+      { name: "Masami Japanese Sushi & Cuisine", address: "501 W Belt Line Rd, Richardson, TX, 75080" },
+      { name: "Hoshi Ranch Japanese BBQ CoffeeHouse & Roastery", address: "" },
+    ];
+    for (const g of garbage) {
+      expect(isStrongMatch("Cowboy Japanese BBQ&Sushi", g.name, g.address)).toBe(false);
+    }
+  });
+
+  it("a raw similarity score alone would get this backwards — measured production cases", () => {
+    // "chilis restaurant" -> a real restaurant carrying only the generic word "restaurant" scores
+    // HIGHER (0.777) than a genuine typo'd match scores for an unrelated query ("chiptle" ->
+    // "Chipotle", 0.545) — coverage correctly rejects the former and (see below) accepts a
+    // structurally identical case to the latter.
+    expect(isStrongMatch("chilis restaurant", "El Viejo Solis Restaurant Corporation", "")).toBe(false);
+    expect(isStrongMatch("wendys drive thru", "Willowbend - Drive Thru", "")).toBe(false);
+    expect(isStrongMatch("taco bell mexican", "Daiquiri Xpress Mexican Taco Bar", "")).toBe(false);
+  });
+
+  it("genuine typo'd/partial matches still pass, including ones a raw 0.65 cutoff would have rejected", () => {
+    expect(isStrongMatch("chiptle", "Chipotle", "")).toBe(true); // real production sim: 0.545
+    expect(isStrongMatch("mcdon", "Mcdonald's", "")).toBe(true); // prefix match
+    expect(isStrongMatch("olive gardn", "Olive Garden", "")).toBe(true);
+    expect(isStrongMatch("whataburgr", "Whataburger", "")).toBe(true);
+    expect(isStrongMatch("bandito taco", "Bandito's Taco Grill", "")).toBe(true);
+    expect(isStrongMatch("panda expres", "Panda Express", "")).toBe(true);
+  });
+
+  it("a location qualifier is checked against the ADDRESS too, not just the name", () => {
+    expect(isStrongMatch("fadis westheimer", "Fadi's Mediterranean Grill", "12360 Westheimer Rd, Houston, TX, 77077")).toBe(true);
+    // A different, unrelated place that merely also sits on Westheimer must NOT pass just
+    // because the street name matches — "fadis" itself has to be covered somewhere.
+    expect(isStrongMatch("fadis westheimer", "Aria Suya Kitchen - Westheimer", "")).toBe(false);
+  });
+
+  it("an all-generic query (nothing distinguishing typed) falls back to the unstripped words rather than matching everything", () => {
+    // "the"/"restaurant" are both generic — stripping them would leave zero words to check,
+    // which would wrongly let ANY candidate through. The fallback still requires the raw
+    // (unstripped) words to actually appear somewhere.
+    expect(isStrongMatch("the restaurant", "Anything At All", "")).toBe(false);
+    expect(isStrongMatch("the restaurant", "The Restaurant at the Ballpark", "")).toBe(true);
+  });
+
+  it("GENERIC_NAME_WORDS is the measured, named list this rule reads — not a magic inline check", () => {
+    expect(SIGNIFICANT_WORD_MIN_LEN).toBe(3);
+    for (const w of ["restaurant", "grill", "bar", "kitchen", "cafe", "house", "drive", "thru"]) {
+      expect(GENERIC_NAME_WORDS.has(w)).toBe(true);
+    }
+    // A real brand word must never be treated as generic.
+    for (const w of ["fadis", "cowboy", "chipotle", "wendys"]) {
+      expect(GENERIC_NAME_WORDS.has(w)).toBe(false);
+    }
+  });
+});
+
+describe("searchQuality — isRegistryName / REGISTRY_NAME_PATTERN", () => {
+  it("flags corporate-filing-style names, never a real consumer-facing brand name", () => {
+    expect(isRegistryName("Fadis Express Binz Llc")).toBe(true);
+    expect(isRegistryName("Fadis Signature Katy Inc")).toBe(true);
+    expect(isRegistryName("Fadi Management Inc")).toBe(true);
+    expect(isRegistryName("Fadi's")).toBe(false);
+    expect(isRegistryName("Fadi's Mediterranean Grill")).toBe(false);
+  });
+
+  it("REGISTRY_NAME_PATTERN is a real JS regex (not the Postgres \\y syntax it was translated from)", () => {
+    expect(REGISTRY_NAME_PATTERN).toBeInstanceOf(RegExp);
+    expect(REGISTRY_NAME_PATTERN.test("Some Corp")).toBe(true);
+    expect(() => new RegExp(REGISTRY_NAME_PATTERN.source)).not.toThrow();
+  });
+});
+
+describe("searchQuality — hasConcatenatedAddress / CONCAT_ADDRESS_PATTERN", () => {
+  it("catches the exact B709697 repro — two full addresses joined by \"and\"", () => {
+    expect(hasConcatenatedAddress(
+      "12360 Westheimer Rd, Houston, TX 77077 and 6365 Westheimer Rd, Houston, TX 77057, Houston, TX, 77077"
+    )).toBe(true);
+  });
+
+  it("never fires on a real Texas place name that happens to contain the word \"and\"", () => {
+    expect(hasConcatenatedAddress("17560 TX-105, Cut and Shoot, TX, 77306")).toBe(false);
+    expect(hasConcatenatedAddress("10500 Town and Country Way, Houston, TX, 77024")).toBe(false);
+    expect(hasConcatenatedAddress("24900 Hill and Dale Ave, Splendora, TX, 77372")).toBe(false);
+  });
+
+  it("handles a missing/empty address without throwing", () => {
+    expect(hasConcatenatedAddress(null)).toBe(false);
+    expect(hasConcatenatedAddress(undefined)).toBe(false);
+    expect(hasConcatenatedAddress("")).toBe(false);
+  });
+});
+
+describe("searchQuality — rankSearchCandidates (the full pipeline, against real production shapes)", () => {
+  // The exact "fadis" repro row set, trimmed to the fields the function reads (lat/lon taken
+  // from the real production rows so the dedupe-radius math below is against real distances).
+  const FADIS_JUNK = { id: "94086b60-0a16-490a-8f48-a5cd3cbefdc9", name: "Fadis Mediterranean Grill",
+    address: "12360 Westheimer Rd, Houston, TX 77077 and 6365 Westheimer Rd, Houston, TX 77057, Houston, TX, 77077",
+    sim: 1, distance_km: 5.14, confidence: 0.77, lat: 29.7028713, lon: -95.4281082 };
+  const BINZ_LLC = { id: "5d89a58a-fca3-4e8c-b0a9-5fd38b9a8dfc", name: "Fadis Express Binz Llc",
+    address: "1801 Binz St Ste 130, Houston, TX, 77004-8107", sim: 1, distance_km: 7.77, confidence: 0.95,
+    lat: 29.735251, lon: -95.379377 };
+  const BINZ_EATERY = { id: "f8cc2482-8b2d-4474-aee5-255477d5ca02", name: "Fadi's Eatery",
+    address: "1801 Binz St, Houston, TX, 77004-7296", sim: 0.667, distance_km: 7.80, confidence: 0.960,
+    lat: 29.735217, lon: -95.379018 }; // ~39m from BINZ_LLC — a real measured production duplicate pair
+  const KATY_INC = { id: "65d11a8a-0a98-4590-a86c-eba3316d218c", name: "Fadis Signature Katy Inc",
+    address: "21792 Katy Fwy, Katy, TX, 77449-7779", sim: 1, distance_km: 28.14, confidence: 0.95,
+    lat: 29.79, lon: -95.82 };
+  const CLEAN_WESTHEIMER = { id: "786f806b-3480-4126-bb72-c753f35c9c6e", name: "Fadi's Mediterranean Grill",
+    address: "12360 Westheimer Rd, Houston, TX, 77077-6069", sim: 0.667, distance_km: 13.59, confidence: 0.991,
+    lat: 29.7366, lon: -95.6004 };
+
+  it("excludes the corrupted concatenated-address row even though it's an exact-name/top-sim match", () => {
+    const out = rankSearchCandidates("fadis", [FADIS_JUNK, CLEAN_WESTHEIMER], new Set());
+    expect(out.map((r) => r.id)).not.toContain(FADIS_JUNK.id);
+    expect(out.map((r) => r.id)).toContain(CLEAN_WESTHEIMER.id);
+  });
+
+  it("collapses a real measured near-duplicate (same storefront, two sources, ~39m apart) to one record", () => {
+    const out = rankSearchCandidates("fadis", [BINZ_LLC, BINZ_EATERY], new Set());
+    expect(out).toHaveLength(1);
+    // Non-registry name wins the tie over the registry-style one for the same spot.
+    expect(out[0].id).toBe(BINZ_EATERY.id);
+  });
+
+  it("does NOT collapse genuinely distinct locations of the same chain (km apart, not metres)", () => {
+    const out = rankSearchCandidates("fadis", [BINZ_EATERY, CLEAN_WESTHEIMER, KATY_INC], new Set());
+    expect(out.map((r) => r.id).sort()).toEqual([BINZ_EATERY.id, CLEAN_WESTHEIMER.id, KATY_INC.id].sort());
+  });
+
+  it("non-registry names always outrank registry-style ones, even at a higher raw sim score", () => {
+    // KATY_INC scores sim=1 (exact "fadis" match, no apostrophe); CLEAN_WESTHEIMER scores only
+    // 0.667 (the apostrophe in "Fadi's" costs it trigram overlap) — registry-name de-rank must
+    // still put the real brand name first despite the lower raw score.
+    const out = rankSearchCandidates("fadis", [KATY_INC, CLEAN_WESTHEIMER], new Set());
+    expect(out[0].id).toBe(CLEAN_WESTHEIMER.id);
+    expect(out[1].id).toBe(KATY_INC.id);
+  });
+
+  it("a place he's already logged or flagged is exempt from the strong-match filter and is never dropped by dedupe", () => {
+    const weakButLogged = { id: "weak-logged", name: "Somewhere Odd", address: "", sim: 0.2, distance_km: 1,
+      confidence: 0.6, lat: BINZ_LLC.lat, lon: BINZ_LLC.lon }; // co-located with BINZ_LLC — would normally collapse away
+    const out = rankSearchCandidates("fadis", [BINZ_LLC, weakButLogged], new Set(["weak-logged"]));
+    expect(out.map((r) => r.id)).toContain("weak-logged");
+  });
+
+  it("DEDUPE_RADIUS_METERS sits between the measured real-duplicate gap and the measured real-distinct gap", () => {
+    // Measured production pairs (see lib/searchQuality.js header): known duplicates 25.8m/38.9m
+    // apart; the closest known genuinely-distinct same-brand locations ~3,540m apart.
+    expect(DEDUPE_RADIUS_METERS).toBeGreaterThan(39);
+    expect(DEDUPE_RADIUS_METERS).toBeLessThan(3500);
+  });
+
+  it("an empty/absent candidate list never throws", () => {
+    expect(rankSearchCandidates("fadis", [], new Set())).toEqual([]);
+    expect(rankSearchCandidates("fadis", undefined, new Set())).toEqual([]);
+  });
+});
+
+describe("SearchBox — wired to rankSearchCandidates, not the raw RPC rows (B709696/B709697)", () => {
+  it("imports and calls rankSearchCandidates on the snapshot RPC's results before they ever reach state", () => {
+    const box = src("components/SearchBox.jsx");
+    expect(box).toMatch(/import \{ rankSearchCandidates \} from "\.\.\/lib\/searchQuality\.js";/);
+    expect(box).toMatch(/setSnapshotResults\(rankSearchCandidates\(trimmed, data \|\| \[\], protectedIds\)\)/);
+    // Protected against filtering out a place his own visit/wishlist history already points at.
+    expect(box).toMatch(/const protectedIds = new Set\(\[\.\.\.\(loggedIds \|\| \[\]\), \.\.\.\(wishlistIds \|\| \[\]\)\]\);/);
+  });
+});
+
+describe("db/food.sql — food_places_search_by_name gains `confidence` + excludes concatenated-address rows (B709697)", () => {
+  it("defines food_places_search_by_name_raw (the original word_similarity search, untouched) and a thin wrapper", () => {
+    const sql = src("db/food.sql");
+    expect(sql).toContain("create or replace function public.food_places_search_by_name_raw(");
+    expect(sql).toMatch(/set pg_trgm\.word_similarity_threshold = 0\.3/);
+    // The rename step is a guarded no-op on a fresh install or a re-run — never a hard failure.
+    expect(sql).toMatch(/rename to food_places_search_by_name_raw;/);
+    expect(sql).toMatch(/exception when undefined_function then null;/);
+  });
+
+  it("the outer function returns confidence and excludes the concatenated-address shape, without its own SET clause", () => {
+    const sql = src("db/food.sql");
+    const wrapperAt = sql.indexOf("create or replace function public.food_places_search_by_name(\n  p_query text, p_cap integer default 15,\n  p_center_lat double precision default null, p_center_lon double precision default null\n)\nreturns table (\n  id text, name text, lat double precision, lon double precision,\n  category text, cuisine text, address text, brand text,\n  source text, source_licence text, metro text, confidence double precision,");
+    expect(wrapperAt).toBeGreaterThanOrEqual(0);
+    const wrapperBody = sql.slice(wrapperAt, sql.indexOf("$$;", wrapperAt));
+    expect(wrapperBody).toContain("food_places_search_by_name_raw(p_query, p_cap, p_center_lat, p_center_lon)");
+    expect(wrapperBody).toMatch(/fp\.address !~ '\\d\{5\}\(-\\d\{4\}\)\?\\s\+and\\s\+\\d\+\\s\+\\S'/);
+    expect(wrapperBody).not.toMatch(/set pg_trgm/); // no privileged SET clause on the wrapper
+  });
+
+  it("both functions grant EXECUTE to anon and authenticated — the wrapper calls _raw under SECURITY INVOKER, so both are required", () => {
+    const sql = src("db/food.sql");
+    expect(sql).toMatch(/grant execute on function public\.food_places_search_by_name\(text, integer, double precision, double precision\) to anon, authenticated;/);
+    expect(sql).toMatch(/grant execute on function public\.food_places_search_by_name_raw\(text, integer, double precision, double precision\) to anon, authenticated;/);
   });
 });
