@@ -523,7 +523,7 @@ function EmptyStateNote() {
 export default function VisitPanel({
   place, pastVisits, onClose, onSubmitVisit, onDeleteVisit, pending, error,
   manualNameEditable, manualName, onManualNameChange,
-  wishlisted, onToggleWishlist,
+  wishlisted, onToggleWishlist, onSheetHeightChange,
 }) {
   const isMobile = useIsMobile();
   const [adding, setAdding] = useState(false); // NEW-2: never auto-opens, even on a never-visited place
@@ -592,7 +592,7 @@ export default function VisitPanel({
 
   if (isMobile) {
     return (
-      <BottomSheet open onDismiss={onClose} initialSnap="half" peekHeight={peekHeight}>
+      <BottomSheet open onDismiss={onClose} initialSnap="half" peekHeight={peekHeight} onHeightChange={onSheetHeightChange}>
         {body}
       </BottomSheet>
     );

@@ -227,3 +227,73 @@ export function manualWishlistFromRows(wishlist) {
       id: w.id, name: w.custom_name, lat: w.custom_lat, lon: w.custom_lon, visitIds: [],
     }));
 }
+
+/** ── DISH-level "want to try" (NEW-3, 2026-08-23) ─────────────────────────────────────────────
+ *  Deliberately its OWN table (food_dish_wishlist), not a food_wishlist row: food_wishlist is
+ *  PLACE-level (one flag per place, cleared the moment a visit lands) and this is the opposite
+ *  shape — it only starts mattering ONCE a place has a visit, is MANY rows per place, and
+ *  survives across every future visit rather than belonging to any one of them. Fetched in full
+ *  (a small personal table, same as food_wishlist — no pagination). db/food.sql for the schema
+ *  and RLS proof. */
+
+export async function fetchAllDishWishlist() {
+  if (!supabase) return { data: [], error: null };
+  const { data, error } = await supabase.from("food_dish_wishlist").select("*").order("created_at", { ascending: false });
+  return { data: data || [], error };
+}
+
+export async function addDishWishlist(entry) {
+  if (!supabase) return { data: null, error: new Error("Supabase not configured") };
+  const { data: auth } = await supabase.auth.getUser();
+  const uid = auth?.user?.id;
+  if (!uid) return { data: null, error: new Error("Sign in to add a dish") };
+  const { data, error } = await supabase
+    .from("food_dish_wishlist")
+    .insert({ ...entry, user_id: uid })
+    .select()
+    .single();
+  return { data, error };
+}
+
+/** A single tap, no confirmation (the brief: "removing one should be a single tap. No
+ *  confirmation dialog for removing a dish") — a hard delete, distinct from markDishDone below. */
+export async function removeDishWishlist(id) {
+  if (!supabase) return { error: new Error("Supabase not configured") };
+  const { error } = await supabase.from("food_dish_wishlist").delete().eq("id", id);
+  return { error };
+}
+
+/** Struck off once he's had it — an UPDATE in place (the row, and its created_at history,
+ *  survives), never a delete+reinsert. `done` toggles both ways so a mis-tap is reversible. */
+export async function markDishDone(id, done) {
+  if (!supabase) return { error: new Error("Supabase not configured") };
+  const { error } = await supabase.from("food_dish_wishlist").update({ done }).eq("id", id);
+  return { error };
+}
+
+/** food_places-id -> its NOT-YET-HAD dish rows (VisitPanel's "Order again" neighbour, and the
+ *  visit-log form's suggestion list — done dishes are excluded from both by construction, so
+ *  nothing extra has to filter them out at the call site). */
+export function dishWishlistByPlaceId(rows) {
+  const groups = new Map();
+  for (const r of rows) {
+    if (!r.place_id || r.done) continue;
+    if (!groups.has(r.place_id)) groups.set(r.place_id, []);
+    groups.get(r.place_id).push(r);
+  }
+  return groups;
+}
+
+/** The manual-pin equivalent of dishWishlistByPlaceId, keyed by the SAME manualGroupKey every
+ *  other manual-pin table already groups by, so a dish list resolves to the same pin regardless
+ *  of which table it's read from. */
+export function dishWishlistByManualKey(rows) {
+  const groups = new Map();
+  for (const r of rows) {
+    if (r.place_id || r.done) continue;
+    const key = manualGroupKey(r.custom_name, r.custom_lat, r.custom_lon);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  }
+  return groups;
+}

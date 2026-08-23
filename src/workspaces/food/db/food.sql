@@ -369,6 +369,64 @@ create policy "Users delete own food_wishlist" on public.food_wishlist
 -- No update policy -- a flag is toggled on/off (insert/delete) rather than edited in place, and
 -- no anon policy at all -> a signed-out request sees zero rows, exactly like food_visits.
 
+-- ── food_dish_wishlist: "want to try" AT THE DISH LEVEL, on a place he has ALREADY visited
+-- (NEW-3, owner chat block, 2026-08-23, verbatim: "remove the want to try option from a
+-- restaurant I've already visited. Well, I guess unless there's a dish that I want to try... let's
+-- do something good there"). Deliberately its OWN table, not a food_wishlist row and not a
+-- food_visits column: food_wishlist is PLACE-level (one flag per place, dropped the instant a
+-- visit is logged) and a dish list needs the OPPOSITE lifecycle -- it only starts mattering ONCE
+-- a place has a visit, is MANY rows per place (one per dish), and survives across every future
+-- visit to that same place rather than belonging to any single one. Same owner-only RLS shape as
+-- food_wishlist/food_visits (own-row, `to authenticated`, no anon policy).
+create table if not exists public.food_dish_wishlist (
+  id           uuid primary key default gen_random_uuid(),
+  user_id      uuid not null references auth.users(id) on delete cascade,
+  place_id     text references public.food_places(id) on delete cascade,
+  custom_name  text,
+  custom_lat   double precision,
+  custom_lon   double precision,
+  dish_name    text not null,
+  -- Struck off once he's had it (VisitPanel's visit-log form surfaces outstanding dishes next to
+  -- "What I had" so he can strike one off in the same motion -- suggested, never auto-matched).
+  -- Distinct from actually REMOVING a dish (a plain delete, one tap, no confirmation): "done" keeps
+  -- the row (and its history) rather than erasing that he once wanted it.
+  done         boolean not null default false,
+  created_at   timestamptz not null default now(),
+  constraint food_dish_wishlist_place_or_manual check (place_id is not null or custom_name is not null),
+  constraint food_dish_wishlist_dish_name_len check (char_length(btrim(dish_name)) > 0)
+);
+
+-- Unlike food_wishlist (one flag per PLACE), a place can have many wanted dishes -- so the unique
+-- constraint is per (user, place, dish), not per (user, place). Case/whitespace-insensitive so
+-- "Pad Thai" and "pad thai " dedupe to the same row rather than silently doubling up.
+create unique index if not exists food_dish_wishlist_place_dish_uidx
+  on public.food_dish_wishlist (user_id, place_id, lower(btrim(dish_name))) where place_id is not null;
+create unique index if not exists food_dish_wishlist_manual_dish_uidx
+  on public.food_dish_wishlist (user_id, custom_name, round(custom_lat::numeric, 4), round(custom_lon::numeric, 4), lower(btrim(dish_name)))
+  where place_id is null;
+
+create index if not exists food_dish_wishlist_user_idx on public.food_dish_wishlist (user_id);
+create index if not exists food_dish_wishlist_user_place_idx on public.food_dish_wishlist (user_id, place_id) where place_id is not null;
+
+alter table public.food_dish_wishlist enable row level security;
+
+drop policy if exists "Users select own food_dish_wishlist" on public.food_dish_wishlist;
+drop policy if exists "Users insert own food_dish_wishlist" on public.food_dish_wishlist;
+drop policy if exists "Users update own food_dish_wishlist" on public.food_dish_wishlist;
+drop policy if exists "Users delete own food_dish_wishlist" on public.food_dish_wishlist;
+
+create policy "Users select own food_dish_wishlist" on public.food_dish_wishlist
+  for select to authenticated using ((select auth.uid()) = user_id);
+create policy "Users insert own food_dish_wishlist" on public.food_dish_wishlist
+  for insert to authenticated with check ((select auth.uid()) = user_id);
+-- Update is needed here (unlike food_wishlist) -- striking a dish "done" is an UPDATE in place,
+-- not a delete-and-reinsert, so its created_at/history stays intact.
+create policy "Users update own food_dish_wishlist" on public.food_dish_wishlist
+  for update to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+create policy "Users delete own food_dish_wishlist" on public.food_dish_wishlist
+  for delete to authenticated using ((select auth.uid()) = user_id);
+-- No anon policy at all -> a signed-out request sees zero rows, exactly like food_visits/food_wishlist.
+
 -- 3) Verify (read-only; safe to run any time) ---------------------------------
 --   select relrowsecurity from pg_class where oid = 'public.food_visits'::regclass;   -- expect true
 --   select polname from pg_policy where polrelid = 'public.food_visits'::regclass;    -- 4 owner-only rows, no anon
@@ -376,3 +434,5 @@ create policy "Users delete own food_wishlist" on public.food_wishlist
 --   select food_places_in_bounds_sampled(29.4, -95.9, 30.2, -94.9, 2000, 8);          -- spread across the bbox, total_matched on every row
 --   select relrowsecurity from pg_class where oid = 'public.food_wishlist'::regclass; -- expect true
 --   select polname from pg_policy where polrelid = 'public.food_wishlist'::regclass;  -- 3 owner-only rows (select/insert/delete), no anon
+--   select relrowsecurity from pg_class where oid = 'public.food_dish_wishlist'::regclass; -- expect true
+--   select polname from pg_policy where polrelid = 'public.food_dish_wishlist'::regclass;  -- 4 owner-only rows (select/insert/update/delete), no anon

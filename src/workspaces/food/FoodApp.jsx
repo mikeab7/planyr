@@ -42,6 +42,12 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   const [searchQuery, setSearchQuery] = useState("");
   const [flyToTarget, setFlyToTarget] = useState(null);
   const flyNonceRef = useRef(0);
+  // NEW-1 (2nd owner block, 2026-08-23) — the map's own bottom-anchored notices (zoom-gate,
+  // capped, "search live for more here") need to sit above the mobile bottom sheet's REAL current
+  // top edge, not a static guess — BottomSheet already tracks its own height precisely (peek/half/
+  // full, mid-drag); VisitPanel forwards it up via onSheetHeightChange. 0 whenever no panel is
+  // open (desktop never opens a sheet at all — VisitPanel's right-rail branch never calls this).
+  const [sheetHeightPx, setSheetHeightPx] = useState(0);
 
   // Places in the current map viewport — public read, works signed out too.
   useEffect(() => {
@@ -157,7 +163,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     setPinMode(false);
     setError(null);
   }, []);
-  const closePanel = useCallback(() => setSelected(null), []);
+  const closePanel = useCallback(() => { setSelected(null); setSheetHeightPx(0); }, []);
 
   // Toolbar's plain "Drop a pin" button: blank name, exactly as before.
   const togglePinMode = useCallback(() => {
@@ -385,6 +391,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
             flyToTarget={flyToTarget}
             selectedKey={selectedKey}
             selectedPlaceInfo={selectedPlaceInfo}
+            sheetHeightPx={sheetHeightPx}
           />
         ) : (
           <VisitList
@@ -423,6 +430,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
             onManualNameChange={setManualDraftName}
             wishlisted={wishlistedForSelected}
             onToggleWishlist={accountActive ? toggleWishlist : undefined}
+            onSheetHeightChange={setSheetHeightPx}
           />
         )}
       </div>

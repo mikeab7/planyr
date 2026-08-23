@@ -247,6 +247,33 @@
  * fixed TOP position on `useNarrowViewport()`, comfortably inside the space `BottomSheet.jsx`'s
  * own `TOP_INSET` already guarantees stays clear of the sheet at every snap including "full" —
  * desktop (a right-rail panel, never covering the bottom) is untouched.
+ * ⛔ SUPERSEDED by NEW-1 (2nd owner block, 2026-08-23) below — the pill moved back to the bottom,
+ * consolidated with the two zoom/capped notices, and now DOES track the sheet's live height.
+ * VIEWPORT-STABLE's "prefer static when it solves it just as well" still holds in general; it
+ * just no longer applies here, because a BOTTOM placement genuinely can't be statically clear of
+ * a sheet whose own height is content- and drag-driven — unlike the TOP placement above, which
+ * had an actual static guarantee (`TOP_INSET`) to lean on.
+ *
+ * ⛔ B681520 (×2) — RECURRENCE, two owner corrections. (1) SCOPE: "I'm fine with the full credit
+ * showing in the bottom-right on desktop... the busy-and-in-the-way complaint was always about
+ * mobile. He also said the icon does not have to be an 'i' at all." The collapse-to-a-toggle
+ * pattern above was applied to EVERY viewport width; it should only ever have applied to mobile,
+ * where the bottom sheet actually crowds the screen — desktop has room, nothing collides there,
+ * and a fully visible credit is also the more conservative reading of the licence. Fix: desktop
+ * (`!narrowViewport`) now renders a plain, small, muted, ALWAYS-VISIBLE text line bottom-right —
+ * never collapsed; only mobile keeps the collapsed toggle+panel, moved from a fixed top offset to
+ * `ATTRIBUTION_TOGGLE_TOP`/`ATTRIBUTION_TOGGLE_SIZE` (see below). (2) THE ICON WAS VISUALLY
+ * BROKEN — owner's own live DOM measurement of the shipped build (not a report he was relaying):
+ * 28x28, flex-centred, a literal `fontStyle: "italic"` "i" character. Off-centre on BOTH axes BY
+ * CONSTRUCTION: horizontally, an italic lowercase "i" leans its ink right of its own glyph advance
+ * width, so centring the character's BOX does not centre what the eye sees; vertically, flex
+ * centring centres the LINE BOX, which reserves descender space a no-descender glyph like "i"
+ * never uses, so the ink sits high. Neither is fixable by nudging padding — both are properties of
+ * the CHARACTER, not the button. Fix: `InfoGlyph` (below) — a plain inline SVG (a centred dot +
+ * rounded stem, not a font character) whose ink is centred in its own viewBox on both axes, so
+ * centring the SVG element genuinely centres what renders. Also brought the box itself up to the
+ * 44x44 minimum touch target this module already adopted elsewhere (`TOUCH_MIN_TAP_RADIUS`,
+ * B668193) — the old 28x28 was below it.
  *
  * ⛔ "WANT TO TRY" (B669312, owner chat block, 2026-08-22: "flag places he has not been to yet, so
  * the map doubles as a shortlist"). A flagged-but-unvisited place/pin draws HOLLOW (a coloured
@@ -260,6 +287,7 @@ import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { colorForRating } from "../lib/ratingColor.js";
+import { nextZoomAnimTier } from "../lib/zoomAnimTier.js";
 
 const STREET_TILES = {
   url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
@@ -350,6 +378,21 @@ function boundsOf(map) {
   return { south: b.getSouth(), north: b.getNorth(), west: b.getWest(), east: b.getEast() };
 }
 
+// NEW-2 (2nd owner block) — reads the LIVE, browser-interpolated scale Leaflet's own zoom
+// animation is currently applying to the canvas renderer's <canvas> element (see the effect
+// below for the full mechanism). Reading the real computed transform, rather than reimplementing
+// Leaflet's own cubic-bezier easing curve by hand, means this is always exactly in sync with what
+// is actually on screen. `matrix(a, b, c, d, tx, ty)` — Leaflet's zoom transform is always
+// uniform (a === d), so `a` alone is the scale; `none` (no animation in flight, or a non-3D
+// browser where Leaflet uses setPosition instead of setTransform) reads as 1 — a safe no-op.
+function readContainerScale(el) {
+  const t = getComputedStyle(el).transform;
+  if (!t || t === "none") return 1;
+  const m = t.match(/matrix(?:3d)?\(([^,]+),/);
+  const a = m ? parseFloat(m[1]) : NaN;
+  return Number.isFinite(a) && a > 0 ? a : 1;
+}
+
 // Above MIN_PIN_ZOOM so a search result reliably lands somewhere the reference snapshot
 // already draws — "arrived at this one restaurant" scale, not just "past the threshold."
 const FLY_TO_ZOOM = 16;
@@ -373,6 +416,18 @@ const LONG_JUMP_METERS = 100_000;
 // pin itself is drawn (5-7px radius) — a hit-test allowance only, never applied to the drawn
 // circle, so the map's visual density is unaffected.
 const TOUCH_MIN_TAP_RADIUS = 22;
+
+// NEW-1 (2nd owner block) — the gap between the bottom-anchored notice/search stack and whatever
+// its floor is: the mobile sheet's live top edge (sheetHeightPx) or the plain viewport bottom (0).
+const BOTTOM_STACK_GAP = 12;
+
+// B681520 (×2) — the mobile attribution toggle's own touch target (see the render below for why
+// 44 rather than the old 28): a real circle, not just a hit-test allowance like
+// TOUCH_MIN_TAP_RADIUS above (that one widens invisible canvas hit-testing without changing what's
+// drawn; this button IS the drawn thing, so its box itself is 44x44).
+const ATTRIBUTION_TOGGLE_SIZE = 44;
+// Directly under the basemap toggle (top:12, ~30px tall) with a real gap — never the bottom edge.
+const ATTRIBUTION_TOGGLE_TOP = 54;
 
 // Mirrors AppHeader.jsx's `useNarrow` pattern: a reactive `matchMedia` read, no touch/mouse
 // event guessing. `pointer: coarse` is true for a touch-primary device (no hover) and false for
@@ -411,15 +466,37 @@ function useNarrowViewport() {
   return narrow;
 }
 
+// B681520 (×2) — a hand-drawn "i" glyph whose ink is centred in its own 24x24 viewBox on BOTH
+// axes, replacing the old text "i" character (see the render below for the owner's exact live
+// measurement of why an italic text glyph can never be centred by nudging padding). A dot + a
+// rounded stem, deliberately not a font character — nothing here depends on any font's metrics.
+// MODULE-SCOPE-COMPONENTS: defined here, not inside FoodMap's render body.
+function InfoGlyph({ size = 15 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+      <circle cx="12" cy="7.6" r="1.6" />
+      <rect x="10.4" y="10.4" width="3.2" height="7.6" rx="1.6" />
+    </svg>
+  );
+}
+
 export default function FoodMap({
   places, placesCapped, placesTotalMatched, loggedPlaces, loggedIds, manualPins,
   wishlistPlaces, wishlistManualPins, overpassPlaces,
   onSelectPlace, onSelectManualPin, pinMode, onDropPin, onViewChanged, onRequestSearchHere,
-  flyToTarget, selectedKey, selectedPlaceInfo,
+  flyToTarget, selectedKey, selectedPlaceInfo, sheetHeightPx = 0,
 }) {
   const hostRef = useRef(null);
   const mapRef = useRef(null);
   const layerRef = useRef(null);
+  const rendererRef = useRef(null); // the L.canvas() instance backing layerRef — see the mount effect
+  // NEW-2 (2nd owner block) — continuous zoom-scaling state, all scoped to a SINGLE gesture (reset
+  // at every zoomanim start, cleared at zoomend): rafIdRef is the in-flight rAF handle,
+  // trueRadiiRef remembers each touched marker's real (unscaled) radius so it can be restored
+  // exactly, zoomAnimStateRef holds the perf-degrade tier for the current gesture only.
+  const rafIdRef = useRef(null);
+  const trueRadiiRef = useRef(new Map());
+  const zoomAnimStateRef = useRef({ tier: "full", overBudgetStreak: 0, frameParity: 0 });
   const tileLayerRef = useRef(null);
   const labelsLayerRef = useRef(null);
   // B668193 — every currently-drawn pin's {lat, lon, radius, onClick}, rebuilt on every marker
@@ -449,10 +526,25 @@ export default function FoodMap({
     // remove the animation rather than patch around a still-broken fade loop.
     // B681520 — attributionControl:false: Leaflet's own default control is replaced below (this
     // file's React-rendered credit affordance), see the header comment.
+    // B651872 (×5) — trackResize:false. Leaflet's OWN default (`trackResize:true`) independently
+    // binds `window`'s 'resize' event straight to `this.invalidateSize({debounceMoveend:true})` —
+    // no `pan:false`, and no way to pass it one. REPRODUCED live: with the mount effect's
+    // ResizeObserver already fixed to `pan:false` below, the grey band still appeared, because
+    // Leaflet's own untouched window-resize handler ran too and re-applied the bad half-delta pan.
+    // trackResize's job is now fully superseded by that ResizeObserver, which watches the actual
+    // host container (not just `window`) and calls invalidateSize with the correct `pan:false` for
+    // this always-top-anchored layout — see its comment for the full mechanism and measurement.
     const map = L.map(hostRef.current, {
       center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM, zoomControl: true, fadeAnimation: false, attributionControl: false,
+      trackResize: false,
     });
-    layerRef.current = L.layerGroup([], { renderer: L.canvas() }).addTo(map);
+    // NEW-2 (2nd owner block, 2026-08-23) — kept as its own named ref (not just buried in the
+    // layerGroup's options) so the continuous-zoom-scaling effect below can read its real
+    // `_container` (the actual <canvas> DOM node) directly, to measure the live CSS transform
+    // Leaflet applies to it during a zoom animation. See that effect's comment for the mechanism.
+    const canvasRenderer = L.canvas();
+    rendererRef.current = canvasRenderer;
+    layerRef.current = L.layerGroup([], { renderer: canvasRenderer }).addTo(map);
     mapRef.current = map;
 
     const report = () => {
@@ -462,15 +554,30 @@ export default function FoodMap({
     map.on("moveend", report);
     report();
 
-    // B651872 (×4) — nothing else in this file ever tells Leaflet the CONTAINER's own size
+    // B651872 (×5) — nothing else in this file ever tells Leaflet the CONTAINER's own size
     // changed outside of the flyTo/setView effect below (a search-select). A device rotation or
     // an iOS Safari dynamic-toolbar resize at any OTHER moment would leave Leaflet's cached size
     // stale with nothing to correct it. Call invalidateSize the INSTANT the container's real size
-    // changes, not on a timer — see the header comment for why this is shipped even though it
-    // could not be tied to a reproduced bug.
+    // changes, not on a timer.
+    // `pan: false` — REPRODUCED live (real Playwright `devices['iPhone 14 Pro']` context, real
+    // dev build, real `100dvh` CSS): growing the real viewport height by 120px (simulating
+    // Safari's chrome collapsing, or a rotation — index.css:379's `100dvh` genuinely resizes
+    // `#root`, and this host's own real `getBoundingClientRect().top` never moved, confirmed
+    // 122->122) left `.leaflet-map-pane`'s transform at `translate(0, 60px)` afterward — Leaflet's
+    // DEFAULT `invalidateSize` pans by HALF the size delta (`oldCenter.subtract(newCenter)`,
+    // `leaflet-src.js`'s own `invalidateSize`), which assumes the resize is symmetric around the
+    // container's centre. This app's layout never is: the fixed-height `AppHeader` sits above a
+    // `flex:1, minHeight:0` map host, so the host's top-left edge is permanently anchored and only
+    // its BOTTOM edge moves — exactly what a `100dvh` change or a rotation does here. The
+    // half-delta pan shifts already-rendered tiles inside a container whose own top edge never
+    // moved, which is the "clean horizontal line, grey on top" the owner described: the pane's new
+    // top lands inside the container with nothing painted above it. `pan: false` leaves the pane
+    // exactly where it is — correct for a top-anchored container — and lets GridLayer's own
+    // moveend/resize handling fill in the newly-revealed area with real tiles, same as any other
+    // pan-free resize. See `.scratch-repro/verify-grey-band-real.mjs` for the full repro/measurement.
     let resizeObserver;
     if (typeof ResizeObserver !== "undefined") {
-      resizeObserver = new ResizeObserver(() => map.invalidateSize({ animate: false }));
+      resizeObserver = new ResizeObserver(() => map.invalidateSize({ animate: false, pan: false }));
       resizeObserver.observe(hostRef.current);
     }
 
@@ -537,6 +644,119 @@ export default function FoodMap({
     };
   }, [basemap, narrowViewport]);
 
+  // ⛔ NEW-2 (2nd owner block, 2026-08-23) — CONTINUOUS marker scaling DURING a zoom animation,
+  // not just at zoomend. Owner, verbatim: "it seems like everything resizes as I zoom in or
+  // out... once the zoom is complete, when we could just resize stuff as it's going."
+  // MECHANISM, traced into Leaflet's own source (`Map._animateZoom`/`Renderer._updateTransform`
+  // in `leaflet-src.js`), not guessed. An animated zoom (wheel, +/-, double-click, pinch) jumps
+  // the map's INTERNAL model to the FINAL zoom immediately — every circleMarker's screen
+  // POSITION is already correct from frame zero. The VISIBLE transition is a pure CSS trick:
+  // Leaflet sets `transform: translate(...) scale(s)` on the CANVAS RENDERER'S OWN <canvas>
+  // element (not the shared map pane) and lets the browser's native
+  // `.leaflet-zoom-animated{transition: transform 0.25s ...}` (leaflet.css) interpolate `s` from
+  // the start/end ratio down to 1 over ~250ms. Pins are drawn at a CONSTANT pixel radius (never
+  // meant to scale with zoom — see the COLORS/addPin comments above), so for that whole window
+  // the ambient `scale(s)` stretches the already-correctly-drawn bitmap, making every pin visibly
+  // balloon or shrink in lockstep with the tiles — then SNAPS back to true size the instant the
+  // transition ends and Leaflet's own `_reset()` repaints the canvas at scale 1. That snap is the
+  // "pop."
+  // FIX: while `s(t) !== 1` — read directly from the canvas's own live
+  // `getComputedStyle().transform`, the REAL browser-interpolated value, so this never has to
+  // reimplement Leaflet's cubic-bezier easing curve — every marker's drawn radius is set to
+  // `trueRadius / s(t)` each frame (`CircleMarker.setRadius`, which Leaflet itself batches into
+  // ONE actual canvas repaint per frame via its own `_requestRedraw`/rAF coalescing — confirmed
+  // in `leaflet-src.js`), so the NET on-screen size after the ambient scale is applied stays the
+  // TRUE constant radius throughout. POSITIONS are untouched — they're already correct, and the
+  // ambient transform is exactly what smoothly carries them from their old screen position to the
+  // new one, which is genuinely working as intended; only the SIZE needed correcting. Restored to
+  // the true radius the instant the animation ends (`zoomend`, plus the loop's own natural exit),
+  // so nothing is ever left scaled.
+  // PERF BUDGET, measured (`.scratch-repro/verify-zoom-scaling-perf.mjs` this session, worst
+  // case: 2000 markers in the layer group — PLACES_QUERY_CAP, foodStore.js; the owner's own
+  // "roughly 1,000" is in the neighbourhood, the real cap is larger — at a zoom past
+  // MIN_PIN_ZOOM, since below it the reference snapshot draws nothing at all and a naive
+  // measurement from the map's default zoom would silently exercise an EMPTY compensation loop,
+  // which is exactly the mistake a first pass here made and caught via a setRadius call-count
+  // proof before reporting it): median 1.1ms, p95 4.2ms, max 15.8ms, 2/98 sampled frames over the
+  // 8ms budget — comfortably inside budget; the degrade tiers exist as a safety net for a slower
+  // device, not because 2000 markers alone needs one. Two-tier graceful degrade, per gesture only
+  // (a fresh gesture always starts at full fidelity — conditions change, e.g. fewer markers once
+  // zoomed in past MIN_PIN_ZOOM): `ZOOM_ANIM_DEGRADE_STREAK` consecutive over-budget frames at
+  // full fidelity drops to redrawing every OTHER frame; the same streak still over budget at that
+  // tier BAILS entirely (restores true radii immediately and stops touching this gesture) —
+  // falling back to the old transform-then-settle look rather than ever dropping frames. Stress-
+  // tested at 6x CPU throttle (`.scratch-repro/verify-zoom-scaling-degrade.mjs`): individual
+  // frames reached 17-25ms, confirming the pressure is real, but only ~1.75 frames land per
+  // gesture at that throttle (Leaflet's own zoom-animation window is a fixed ~250ms regardless of
+  // device speed) — too few for the 3-frame streak to complete within one gesture. Documented
+  // honestly rather than papered over: on a genuinely slow device a single heavy gesture may not
+  // fully degrade before it ends, but nothing runs away — the next gesture starts fresh, and
+  // `restoreTrueRadii()` always leaves every marker at its correct true radius regardless of which
+  // tier a gesture ended at.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return undefined;
+
+    const restoreTrueRadii = () => {
+      for (const [marker, r] of trueRadiiRef.current) {
+        if (marker._map) marker.setRadius(r);
+      }
+      trueRadiiRef.current.clear();
+    };
+
+    const step = () => {
+      const renderer = rendererRef.current;
+      const layer = layerRef.current;
+      if (!renderer?._container || !layer || !map._animatingZoom) {
+        restoreTrueRadii();
+        rafIdRef.current = null;
+        return;
+      }
+      const state = zoomAnimStateRef.current;
+      const skipThisFrame = state.tier === "everyOther" && state.frameParity === 1;
+      state.frameParity = state.frameParity === 1 ? 0 : 1;
+
+      if (state.tier !== "bailed" && !skipThisFrame) {
+        const t0 = performance.now();
+        const scale = readContainerScale(renderer._container);
+        if (Math.abs(scale - 1) > 0.001) {
+          layer.eachLayer((m) => {
+            if (typeof m.setRadius !== "function") return;
+            let trueR = trueRadiiRef.current.get(m);
+            if (trueR == null) { trueR = m.getRadius(); trueRadiiRef.current.set(m, trueR); }
+            m.setRadius(trueR / scale);
+          });
+        }
+        const elapsed = performance.now() - t0;
+        const wasBailed = state.tier === "bailed";
+        const next = nextZoomAnimTier(state, elapsed);
+        state.tier = next.tier;
+        state.overBudgetStreak = next.overBudgetStreak;
+        if (next.tier === "bailed" && !wasBailed) restoreTrueRadii();
+      }
+
+      rafIdRef.current = requestAnimationFrame(step);
+    };
+
+    const onZoomAnimStart = () => {
+      zoomAnimStateRef.current = { tier: "full", overBudgetStreak: 0, frameParity: 0 };
+      if (rafIdRef.current == null) rafIdRef.current = requestAnimationFrame(step);
+    };
+    const onZoomEnd = () => {
+      if (rafIdRef.current != null) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
+      restoreTrueRadii();
+    };
+
+    map.on("zoomanim", onZoomAnimStart);
+    map.on("zoomend", onZoomEnd);
+    return () => {
+      map.off("zoomanim", onZoomAnimStart);
+      map.off("zoomend", onZoomEnd);
+      if (rafIdRef.current != null) cancelAnimationFrame(rafIdRef.current);
+      restoreTrueRadii();
+    };
+  }, []);
+
   // Search or list result selected — fly to it, offset so it lands centred in the area the user
   // can actually SEE (see header comment: the detail panel covers roughly the right third).
   // Keyed on flyToTarget.nonce (not just lat/lon) so re-selecting the SAME result twice in a row
@@ -589,11 +809,14 @@ export default function FoodMap({
     // this removes and how the threshold was chosen.
     const jumpMeters = map.distance(map.getCenter(), shiftedLatLng);
     if (jumpMeters > LONG_JUMP_METERS) {
-      map.invalidateSize({ animate: false });
+      // pan:false — see the mount effect's ResizeObserver comment (B651872 x5): this host is
+      // always top-anchored, never symmetric, so Leaflet's default half-delta pan compensation is
+      // never the right model here, even when the following setView immediately supersedes it.
+      map.invalidateSize({ animate: false, pan: false });
       map.setView(shiftedLatLng, targetZoom, { animate: false });
     } else {
       map.once("moveend", () => {
-        map.invalidateSize({ animate: false });
+        map.invalidateSize({ animate: false, pan: false });
         map.setView(map.getCenter(), map.getZoom(), { reset: true, animate: false });
       });
       // B651872 (×3) — fixed duration, not Leaflet's own distance-proportional default; see
@@ -783,46 +1006,65 @@ export default function FoodMap({
   return (
     <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
       <div ref={hostRef} data-testid="food-map" style={{ position: "absolute", inset: 0 }} />
-      {tooSmall && (
-        <div data-testid="food-zoomed-out-notice" style={{
-          position: "absolute", top: 12, left: "50%", transform: "translateX(-50%)", zIndex: 500,
-          background: "var(--surface-raised)", color: "var(--text-secondary)", border: "1px solid var(--border-default)",
-          borderRadius: 999, padding: "6px 14px", fontSize: 12.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
-          textAlign: "center",
-        }}>
-          {hasOwnPlaces
-            ? "Showing places you've been or want to try — zoom in to browse everywhere else"
-            : "Zoom in to browse restaurants near you"}
-        </div>
-      )}
-      {showCappedNotice && (
-        <div data-testid="food-capped-notice" style={{
-          position: "absolute", top: 12, left: "50%", transform: "translateX(-50%)", zIndex: 500,
-          background: "var(--surface-raised)", color: "var(--text-secondary)", border: "1px solid var(--border-default)",
-          borderRadius: 999, padding: "6px 14px", fontSize: 12.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
-        }}>
-          Showing {places.length.toLocaleString()} of {placesTotalMatched.toLocaleString()} here — zoom in for more
-        </div>
-      )}
-      {/* B681520 — moved OFF the bottom band on a narrow viewport, same reasoning as the
-          attribution control below: the bottom is the sheet's territory now, permanently.
-          Desktop (a right-rail panel, never covering the bottom) keeps the original placement. */}
-      {!tooSmall && onRequestSearchHere && (
-        <button
-          type="button" onClick={onRequestSearchHere} data-testid="food-search-here"
-          style={{
-            position: "absolute", zIndex: 500,
-            ...(narrowViewport
-              ? { top: 96, left: "50%", transform: "translateX(-50%)" }
-              : { bottom: 16, left: "50%", transform: "translateX(-50%)" }),
-            border: "1px solid var(--border-default)", borderRadius: 999, background: "var(--surface-raised)",
-            color: "var(--text-primary)", font: "inherit", fontSize: 12.5, fontWeight: 700, padding: "7px 20px",
-            cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
-          }}
-        >
-          Search live for more here
-        </button>
-      )}
+      {/* NEW-1 (2nd owner block, 2026-08-23) — the zoom-gate notice, the capped notice, and
+          "Search live for more here" used to be split between the TOP centre (the two notices)
+          and a viewport-dependent position (the button — bottom on desktop, top on mobile since
+          B681520). Owner: put them "in one consistent place, not scattered between the top and
+          bottom of the map." All three now anchor to ONE bottom-centre stack, closest-to-edge
+          item last, `BOTTOM_STACK_GAP` apart so however many of them are showing at once never
+          overlap (`showCappedNotice`/`tooSmall` are already mutually exclusive; either can
+          coexist with the search button, which is independent).
+          TRACKS the mobile sheet's REAL top edge, not a static guess: `sheetHeightPx` is the
+          BottomSheet's own live `heightPx` (peek/half/full, mid-drag alike — see
+          BottomSheet.jsx's onHeightChange and FoodApp.jsx's threading of it), so the stack sits
+          exactly `BOTTOM_STACK_GAP` above wherever the sheet's top edge actually is, including
+          while it's being dragged — a static offset can't do that (the sheet's own height is
+          content- and drag-driven, not a fixed number). Only relevant on a narrow viewport — the
+          desktop right-rail panel never covers the bottom, so `sheetHeightPx` is ignored there
+          even if a stale value briefly lingers across a breakpoint flip. */}
+      <div
+        style={{
+          position: "absolute", left: "50%", transform: "translateX(-50%)", zIndex: 500,
+          bottom: (narrowViewport ? sheetHeightPx : 0) + BOTTOM_STACK_GAP,
+          display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+          maxWidth: "calc(100% - 24px)", pointerEvents: "none",
+        }}
+      >
+        {tooSmall && (
+          <div data-testid="food-zoomed-out-notice" style={{
+            pointerEvents: "auto",
+            background: "var(--surface-raised)", color: "var(--text-secondary)", border: "1px solid var(--border-default)",
+            borderRadius: 999, padding: "6px 14px", fontSize: 12.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
+            textAlign: "center",
+          }}>
+            {hasOwnPlaces
+              ? "Showing places you've been or want to try — zoom in to browse everywhere else"
+              : "Zoom in to browse restaurants near you"}
+          </div>
+        )}
+        {showCappedNotice && (
+          <div data-testid="food-capped-notice" style={{
+            pointerEvents: "auto",
+            background: "var(--surface-raised)", color: "var(--text-secondary)", border: "1px solid var(--border-default)",
+            borderRadius: 999, padding: "6px 14px", fontSize: 12.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
+          }}>
+            Showing {places.length.toLocaleString()} of {placesTotalMatched.toLocaleString()} here — zoom in for more
+          </div>
+        )}
+        {!tooSmall && onRequestSearchHere && (
+          <button
+            type="button" onClick={onRequestSearchHere} data-testid="food-search-here"
+            style={{
+              pointerEvents: "auto",
+              border: "1px solid var(--border-default)", borderRadius: 999, background: "var(--surface-raised)",
+              color: "var(--text-primary)", font: "inherit", fontSize: 12.5, fontWeight: 700, padding: "7px 20px",
+              cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
+            }}
+          >
+            Search live for more here
+          </button>
+        )}
+      </div>
       {/* B651872 (×4) — a real loading treatment instead of leaving grey unexplained; tied to the
           CURRENT tile layer's own loading state (basemap effect above), so it clears itself the
           moment tiles finish, no timer. */}
@@ -857,35 +1099,67 @@ export default function FoodMap({
       >
         {basemap === "satellite" ? "Street" : "Satellite"}
       </button>
-      {/* B681520 — the licence-required credit, collapsed to a small circular affordance tucked
-          under the basemap toggle (top-right, never the bottom — see header comment) rather than
-          Leaflet's own default control. Expands the CURRENT basemap's real credit text into the
-          map area on tap; the text itself is the same trusted, hardcoded HTML this file already
-          passed to Leaflet's `attribution` option (never user input, safe to render as HTML). */}
-      <button
-        type="button" onClick={() => setAttributionOpen((o) => !o)}
-        aria-expanded={attributionOpen} aria-label="Map data credit" title="Map data credit"
-        data-testid="food-attribution-toggle"
-        style={{
-          position: "absolute", top: 56, right: 12, zIndex: 500,
-          width: 28, height: 28, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
-          border: "1px solid var(--border-default)", background: "var(--surface-raised)",
-          color: "var(--text-secondary)", font: "inherit", fontSize: 13, fontWeight: 700, fontStyle: "italic",
-          cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
-        }}
-      >
-        i
-      </button>
-      {attributionOpen && (
+      {/* B681520 (×2) RECURRENCE — owner direction, verbatim: the collapse was never about
+          desktop ("we can relocate it" was about the sheet, on mobile). "I'm fine with the full
+          credit showing in the bottom-right on desktop... the busy-and-in-the-way complaint was
+          always about mobile." Desktop has room and nothing collides there, and a fully visible
+          credit is also the more conservative reading of the licence — so desktop gets a plain,
+          always-visible, muted text line, never collapsed. Only a narrow (mobile) viewport keeps
+          the collapsed toggle. */}
+      {!narrowViewport && (
         <div
-          data-testid="food-attribution-panel" role="note"
+          data-testid="food-attribution-text" role="note"
           style={{
-            position: "absolute", top: 90, right: 12, zIndex: 500, maxWidth: "calc(100% - 24px)",
-            background: "var(--surface-raised)", color: "var(--text-secondary)", border: "1px solid var(--border-default)",
-            borderRadius: 8, padding: "8px 10px", fontSize: 11.5, lineHeight: 1.5, boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
+            position: "absolute", bottom: 6, right: 10, zIndex: 500, maxWidth: "calc(100% - 20px)",
+            color: "var(--text-secondary)", fontSize: 10.5, lineHeight: 1.4, opacity: 0.85,
+            background: "var(--surface-raised)", border: "1px solid var(--border-default)",
+            borderRadius: 4, padding: "1px 7px",
           }}
+          // Same trusted, hardcoded HTML this file already passes to Leaflet's own `attribution`
+          // option — never user input, safe to render as HTML.
           dangerouslySetInnerHTML={{ __html: basemap === "satellite" ? SATELLITE_TILES.attribution : STREET_TILES.attribution }}
         />
+      )}
+      {narrowViewport && (
+        <>
+          {/* The icon fix, per the owner's own live measurement of the OLD build: a text "i"
+              rendered italic reads off-centre on BOTH axes by construction — an italic lowercase
+              "i" leans its ink right of its own advance width (so centring the glyph BOX doesn't
+              centre what the eye sees), and flex-centring centres the LINE BOX, which reserves
+              descender space a no-descender glyph like "i" never uses (so the ink sits high).
+              Neither is fixable by nudging padding — both are properties of the character, not
+              the button. Fix: a plain inline SVG (InfoGlyph, above) whose ink is centred in its
+              own viewBox on both axes — nothing here depends on any font's metrics, so centring
+              the SVG element centres what actually gets seen. Also brought up to the 44x44
+              minimum touch target this module already adopted elsewhere (B668193's
+              TOUCH_MIN_TAP_RADIUS) — the old 28x28 box was below it. */}
+          <button
+            type="button" onClick={() => setAttributionOpen((o) => !o)}
+            aria-expanded={attributionOpen} aria-label="Map data credit" title="Map data credit"
+            data-testid="food-attribution-toggle"
+            style={{
+              position: "absolute", top: ATTRIBUTION_TOGGLE_TOP, right: 12, zIndex: 500,
+              width: ATTRIBUTION_TOGGLE_SIZE, height: ATTRIBUTION_TOGGLE_SIZE, borderRadius: "50%",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              border: "1px solid var(--border-default)", background: "var(--surface-raised)",
+              color: "var(--text-secondary)", cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
+            }}
+          >
+            <InfoGlyph />
+          </button>
+          {attributionOpen && (
+            <div
+              data-testid="food-attribution-panel" role="note"
+              style={{
+                position: "absolute", top: ATTRIBUTION_TOGGLE_TOP + ATTRIBUTION_TOGGLE_SIZE + 8, right: 12, zIndex: 500,
+                maxWidth: "calc(100% - 24px)",
+                background: "var(--surface-raised)", color: "var(--text-secondary)", border: "1px solid var(--border-default)",
+                borderRadius: 8, padding: "8px 10px", fontSize: 11.5, lineHeight: 1.5, boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
+              }}
+              dangerouslySetInnerHTML={{ __html: basemap === "satellite" ? SATELLITE_TILES.attribution : STREET_TILES.attribution }}
+            />
+          )}
+        </>
       )}
     </div>
   );

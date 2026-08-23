@@ -10,6 +10,10 @@
 --   3. food_wishlist ("want to try" flags, B669312) has the identical owner-only
 --      shape as food_visits: invisible to anon, invisible to any other user, and
 --      the (user, place) uniqueness is enforced at the database.
+--   4. food_dish_wishlist (dish-level "want to try" on a visited place, NEW-3
+--      2026-08-23) has the identical owner-only shape, PLUS an update policy
+--      (striking a dish done is an in-place update, not delete+reinsert), and
+--      the (user, place, dish) uniqueness is enforced at the database.
 --
 -- Self-rolling-back: runs inside a DO block and raises an exception at the end
 -- carrying the report, so every fixture (fake users + rows) is discarded. Paste
@@ -142,6 +146,54 @@ begin
   exception when unique_violation then
     execute 'reset role'; execute 'set local request.jwt.claims = default';
     passed := passed + 1; rep := rep || 'PASS 11: a duplicate (user, place) wishlist flag is refused by the unique index. ' || E'\n';
+  end;
+
+  -- ---------- Test 12: owner (A) can add a wanted dish at a place he's visited
+  -- (NEW-3, 2026-08-23 — food_dish_wishlist, same owner-only shape proved above)
+  execute 'set local role authenticated';
+  execute format('set local request.jwt.claims = %L', json_build_object('sub', ua, 'role', 'authenticated')::text);
+  insert into public.food_dish_wishlist (user_id, place_id, dish_name) values (ua, test_place_id, 'Pad Thai');
+  execute 'reset role'; execute 'set local request.jwt.claims = default';
+  select count(*) into n from public.food_dish_wishlist where user_id = ua and place_id = test_place_id and dish_name = 'Pad Thai';
+  if n = 1 then passed := passed + 1; rep := rep || 'PASS 12: owner can add a wanted dish at a visited place. ' || E'\n';
+  else failed := failed + 1; rep := rep || format('FAIL 12: dish wishlist row not found, count=%s.', n) || E'\n'; end if;
+
+  -- ---------- Test 13: anon reads food_dish_wishlist (expect 0 rows) --------
+  execute 'set local role anon'; execute 'set local request.jwt.claims = default';
+  select count(*) into n from public.food_dish_wishlist where place_id = test_place_id;
+  execute 'reset role';
+  if n = 0 then passed := passed + 1; rep := rep || 'PASS 13: anon (signed out) sees ZERO food_dish_wishlist rows. ' || E'\n';
+  else failed := failed + 1; rep := rep || format('FAIL 13: anon food_dish_wishlist read returned %s rows, expected 0.', n) || E'\n'; end if;
+
+  -- ---------- Test 14: a DIFFERENT signed-in user (B) reads A's dish wishlist
+  execute 'set local role authenticated';
+  execute format('set local request.jwt.claims = %L', json_build_object('sub', ub, 'role', 'authenticated')::text);
+  select count(*) into n from public.food_dish_wishlist where user_id = ua;
+  execute 'reset role'; execute 'set local request.jwt.claims = default';
+  if n = 0 then passed := passed + 1; rep := rep || 'PASS 14: a DIFFERENT signed-in user (B) sees ZERO of A''s dish-wishlist rows. ' || E'\n';
+  else failed := failed + 1; rep := rep || format('FAIL 14: user B saw %s of A''s dish-wishlist rows, expected 0.', n) || E'\n'; end if;
+
+  -- ---------- Test 15: owner (A) can mark a dish done IN PLACE (an UPDATE,
+  -- not a delete+reinsert — history/created_at survives) ---------------------
+  execute 'set local role authenticated';
+  execute format('set local request.jwt.claims = %L', json_build_object('sub', ua, 'role', 'authenticated')::text);
+  update public.food_dish_wishlist set done = true where user_id = ua and place_id = test_place_id and dish_name = 'Pad Thai';
+  get diagnostics n = row_count;
+  execute 'reset role'; execute 'set local request.jwt.claims = default';
+  if n = 1 then passed := passed + 1; rep := rep || 'PASS 15: owner can strike a dish done via UPDATE (not delete+reinsert). ' || E'\n';
+  else failed := failed + 1; rep := rep || format('FAIL 15: marking a dish done touched %s rows, expected 1.', n) || E'\n'; end if;
+
+  -- ---------- Test 16: a second identical dish on the SAME place is refused
+  -- (the unique index, not just the UI, is what prevents a duplicate; case/whitespace-insensitive)
+  begin
+    execute 'set local role authenticated';
+    execute format('set local request.jwt.claims = %L', json_build_object('sub', ua, 'role', 'authenticated')::text);
+    insert into public.food_dish_wishlist (user_id, place_id, dish_name) values (ua, test_place_id, '  pad thai  ');
+    execute 'reset role'; execute 'set local request.jwt.claims = default';
+    failed := failed + 1; rep := rep || 'FAIL 16: a duplicate (user, place, dish) row was accepted (should violate the unique index). ' || E'\n';
+  exception when unique_violation then
+    execute 'reset role'; execute 'set local request.jwt.claims = default';
+    passed := passed + 1; rep := rep || 'PASS 16: a duplicate dish (case/whitespace-insensitive) is refused by the unique index. ' || E'\n';
   end;
 
   -- ---------- cleanup + report (rollback via exception) ---------------------

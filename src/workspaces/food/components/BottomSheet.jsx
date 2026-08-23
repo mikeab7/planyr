@@ -47,7 +47,7 @@ import { resolveSnap, heightForSnap } from "../lib/bottomSheetSnap.js";
 const TOP_INSET = 64; // px of the map always left visible above the sheet, even at "full"
 const TRANSITION_MS = 220;
 
-export default function BottomSheet({ open, onDismiss, initialSnap = "half", peekHeight, children }) {
+export default function BottomSheet({ open, onDismiss, initialSnap = "half", peekHeight, onHeightChange, children }) {
   const contentRef = useRef(null);
   const [snap, setSnap] = useState(initialSnap);
   const [heightPx, setHeightPx] = useState(0);
@@ -93,6 +93,15 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
     ro.observe(contentRef.current);
     return () => ro.disconnect();
   }, [snap, targetFor]);
+
+  // NEW-1 (2nd owner block, 2026-08-23) — the map's own bottom-anchored notices (zoom-gate,
+  // capped, "search live for more here") need to track ABOVE this sheet's real top edge rather
+  // than a static guess, so a caller that cares (FoodMap, via FoodApp) can position itself
+  // exactly `heightPx` above the viewport bottom — this sheet is `position:fixed; bottom:0`, so
+  // its own top edge sits exactly `heightPx` above the viewport bottom at all times, snap or
+  // drag alike. Fires on every heightPx change (mount settle, snap change, drag, content
+  // resize) — never a separate poll. Optional: only called when a parent asked for it.
+  useEffect(() => { onHeightChange?.(heightPx); }, [heightPx, onHeightChange]);
 
   const onHandlePointerDown = useCallback((e) => {
     if (e.button != null && e.button !== 0) return;

@@ -40,6 +40,15 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
   from one small bulk fetch (`fetchAllWishlist`), exactly like `loggedPlaceIds` already is for
   visits — no RPC join, so `food_places_in_bounds_sampled`/`food_places_search_by_name` are
   untouched.
+- `food_dish_wishlist` (NEW-3, 2026-08-23) — a FOURTH table: DISH-level "want to try" on a place
+  he's already visited (place-level `food_wishlist` above is meaningless once visited — the
+  panel hides that toggle then; a dish list replaces it). Owner-only RLS, own-row, PLUS an update
+  policy (unlike `food_wishlist`) since striking a dish "done" is an in-place update. Many rows
+  per place (one per dish), unique per (user, place, dish) case/whitespace-insensitive.
+  `lib/foodStore.js`'s `fetchAllDishWishlist`/`addDishWishlist`/`removeDishWishlist`/
+  `markDishDone`/`dishWishlistByPlaceId`/`dishWishlistByManualKey` — data layer + RLS shipped and
+  proven (`db/test/food_rls.test.sql` tests 12-16); the VisitPanel UI wiring (under "Order again")
+  is the one piece deliberately held back this session — see `BACKLOG.md` for why.
 - **Fallback for what the snapshot misses:** `lib/overpass.js` queries OpenStreetMap's
   Overpass API — free, no key. Cached per bbox for the session and **never called from a
   pan/zoom handler**, only from an explicit "search live for more here" press (`FoodMap.jsx`)
