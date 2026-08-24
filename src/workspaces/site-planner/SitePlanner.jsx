@@ -4360,17 +4360,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // the delta instead of waiting for the owner to notice his parking sitting in a field.
       // Detection only — the repair itself is owned by the `els` seam effect, so a detector bug can
       // never move geometry.
-      // NEW-2 (B712224 recurrence) — a batch that fully landed ("settled": accepted, no rollback, no
-      // transport failure) means the gesture pushHistory() opened is genuinely OVER. Close it here,
-      // so a LATER reconcile() cycle with nothing to do with this gesture — a remote row folding in,
-      // an unrelated debounce tick, a channel reconnect — gets the honest "unknown" envelope instead
-      // of silently inheriting a stale op_id that misattributes whatever it writes to a finished
-      // operation. Deliberately NOT closed on "rolled-back"/"transport-failed": those retry through
-      // this SAME operation window (onAtomicRollback/onGroupConflict re-enqueue the original entries
-      // verbatim, envelope included), and closing early would split one retried gesture across two
-      // envelopes.
       afterCommit: (summary) => {
-        if (summary && summary.outcome === "settled") opTrackerRef.current.endOperation();
         try {
           const res = assemblyIntegrity(stateRef.current.els);
           if (res.unhealable && res.unhealable.length)
