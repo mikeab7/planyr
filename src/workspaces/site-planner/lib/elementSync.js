@@ -927,15 +927,45 @@ export function createElementSync(opts = {}) {
     return out;
   }
 
+  /* ⛔ B712224 (recurrence) — WHICH ASSEMBLY AN OP BELONGS TO, WHEN THE OP IS A DELETE.
+   *
+   * `rootIdOf(cur, e.id)` needs `cur` — the element's OWN data — to read its `attachedTo` bond.
+   * For a create/update op `cur` comes from the live canvas (`live.byKey`) or the op's own `e.el`.
+   * A DELETE op carries `e.el: null` by construction, and by the time `flush()` runs the element
+   * is ALREADY gone from the canvas too (the local `setEls` filter that removed it ran well before
+   * this), so `live.byKey.get(...)` is ALSO empty. `cur` was therefore null for every delete, and
+   * `rootIdOf(null, e.id)` falls back to `e.id` — EVERY delete in a cascade resolved to its OWN id
+   * as its "root", so no two members of one bonded-assembly delete ever shared a root.
+   *
+   * Two consumers read that root, and both silently degraded: `batchSpansAssembly` (below) never
+   * detected a delete cascade as spanning an assembly, so a 14-member bonded-assembly delete was
+   * NEVER sent atomic — it went out as 14 independently rev-guarded ops, exactly the per-row
+   * interleaving B1116/B1117 exist to close, but only for the DELETE case, which nothing had
+   * exercised. `processResults`' "ASSEMBLY SPLIT" torn-detector (below) has the identical shape and
+   * so could never detect a partially-refused delete batch either — `torn.length` could never be
+   * non-zero, because no refused id's self-id root can ever equal an accepted id's self-id root.
+   *
+   * `groupsFor` (B1341 stage 2, above) already carries the fix: it computes the same live-canvas
+   * root AND separately asks `shadowRootOf` — the shadow's last-committed bond — and takes the
+   * union. `opRoot` below is that same fallback, reused (never re-derived) here. */
+  const opRoot = (e, live) => {
+    if (e.kind !== "el") return null;
+    const key = skey("el", e.id);
+    const cur = (live && live.byKey.get(key)) || e.el;
+    if (cur) return rootIdOf(cur, e.id);
+    const shad = shadow.get(key);
+    if (!shad) return e.id;
+    const r = shadowRootOf(key, shad);
+    return r === UNKNOWN_ROOT || r == null ? e.id : r;
+  };
+
   // Does this batch carry more than one member of the same assembly? (B1117 — the atomic gate.)
   function batchSpansAssembly(batch) {
     if (batch.length < 2) return false;
     const live = liveIndex();
     const seen = new Set();
     for (const e of batch) {
-      if (e.kind !== "el") continue;
-      const cur = (live && live.byKey.get(skey("el", e.id))) || e.el;
-      const root = rootIdOf(cur, e.id);
+      const root = opRoot(e, live);
       if (root == null) continue;
       if (seen.has(root)) return true;
       seen.add(root);
@@ -1194,7 +1224,7 @@ export function createElementSync(opts = {}) {
           // `stale`: the kept json predates the adopted rev — reconcileSeedRows must not
           // substitute this mixed json↔rev pairing into a refetch re-seed (NEW-1 hardening).
           shadow.set(key, { kind: e.kind, id: e.id, json: shadow.get(key)?.json || "", rev: row.rev, z: e.z, stale: true });
-          enqueue(key, { kind: e.kind, id: e.id, cls: "delete", el: null, z: e.z, direct: e.direct, baseRev: row.rev, baseAt: e.baseAt });
+          enqueue(key, { kind: e.kind, id: e.id, cls: "delete", el: null, z: e.z, direct: e.direct, baseRev: row.rev, baseAt: e.baseAt, envelope: e.envelope });
           report("element-delete-reapplied", "delete re-applied at fresh rev", { siteId, id: e.id, kind: e.kind });
           onEvent({ type: "delete-reapplied", id: e.id, kind: e.kind, remote: row });
         } else if (row.data && stableStringify(row.data) === stableStringify(e.el)) {
@@ -1244,7 +1274,7 @@ export function createElementSync(opts = {}) {
           // edit-vs-edit: second writer wins — adopt the remote rev and re-commit local on top (LWW).
           // `stale`: json "" at the adopted rev is a mixed pairing — never a re-seed substitution source.
           shadow.set(key, { kind: e.kind, id: e.id, json: "", rev: row.rev, z: e.z, stale: true });
-          enqueue(key, { kind: e.kind, id: e.id, cls: "update", el: e.el, z: e.z, direct: e.direct });
+          enqueue(key, { kind: e.kind, id: e.id, cls: "update", el: e.el, z: e.z, direct: e.direct, envelope: e.envelope });
           report("element-conflict", "edit-vs-edit LWW re-commit", { siteId, id: e.id, kind: e.kind, remoteRev: row.rev });
           // NEW-0 — a DERIVED op (e.direct === false) racing a row this SAME account wrote is not
           // news: it is this account's own cascade catching up with itself (an undo racing its own
@@ -1269,12 +1299,12 @@ export function createElementSync(opts = {}) {
         // create-vs-create — impossible with per-tab salted ids (B591). Assert + adopt as an update.
         const row = r.row || {};
         shadow.set(key, { kind: e.kind, id: e.id, json: "", rev: row.rev, z: e.z, stale: true });
-        enqueue(key, { kind: e.kind, id: e.id, cls: "update", el: e.el, z: e.z, direct: e.direct });
+        enqueue(key, { kind: e.kind, id: e.id, cls: "update", el: e.el, z: e.z, direct: e.direct, envelope: e.envelope });
         report("element-create-collision", "create hit a live row (should be impossible)", { siteId, id: e.id, kind: e.kind });
       } else if (r.status === "missing") {
         // server has no such row. An update/delete on a purged row → re-create (update) or drop (delete).
         if (e.cls === "delete") { shadow.delete(key); }
-        else { shadow.delete(key); enqueue(key, { kind: e.kind, id: e.id, cls: "create", el: e.el, z: e.z, direct: e.direct }); }
+        else { shadow.delete(key); enqueue(key, { kind: e.kind, id: e.id, cls: "create", el: e.el, z: e.z, direct: e.direct, envelope: e.envelope }); }
         report("element-missing", "op targeted an absent row", { siteId, id: e.id, kind: e.kind, cls: e.cls });
       } else {
         // no result for this op (malformed response) — requeue to try again
@@ -1295,18 +1325,17 @@ export function createElementSync(opts = {}) {
      * adopted the fresh revs, so the retry targets the current rows) and say so out loud. */
     if (acceptedKeys.size && refusedKeys.size) {
       const live = liveIndex();
-      const rootOf = (e) => {
-        if (e.kind !== "el") return e.kind + ":" + e.id;                 // only elements form assemblies
-        const cur = (live && live.byKey.get(skey("el", e.id))) || e.el;
-        return "el:" + rootIdOf(cur, e.id);
-      };
+      // B712224 (recurrence) — `opRoot` (not a bare `rootIdOf(cur, e.id)`) so a refused DELETE's
+      // root is read from the shadow's last-committed bond once the canvas no longer has it; see
+      // opRoot's own header for why the old inline version never matched anything for a delete.
+      const rootOf = (e) => (e.kind !== "el" ? e.kind + ":" + e.id : "el:" + opRoot(e, live));
       const acceptedRoots = new Set();
       for (const e of batch) if (acceptedKeys.has(skey(e.kind, e.id))) acceptedRoots.add(rootOf(e));
       const torn = [];
       for (const [key, e] of refusedKeys) {
         if (!acceptedRoots.has(rootOf(e))) continue;                    // wholly-refused group: the normal paths own it
         torn.push(e.id);
-        if (!dirty.has(key)) enqueue(key, { kind: e.kind, id: e.id, cls: "update", el: e.el, z: e.z, direct: e.direct });
+        if (!dirty.has(key)) enqueue(key, { kind: e.kind, id: e.id, cls: "update", el: e.el, z: e.z, direct: e.direct, envelope: e.envelope });
       }
       if (torn.length) {
         splitStreak += 1;
