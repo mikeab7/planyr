@@ -24,6 +24,19 @@
  * B655552 (round 2) also adds the owner's new, explicit ask: hovering a cell must show the FULL name of
  * every predecessor/successor, not just what fits on screen.
  *
+ * B655552 (round 3) (2026-08-25) — a follow-up owner report, with screenshot: a wrapped single link's
+ * continuation line started flush left, directly under the ID/lag label, so it read as a NEW second
+ * entry rather than the tail of the one above it — the exact ambiguity this whole cell exists to
+ * avoid (one link wrapped to 2 lines must read as ONE item; two links, one per line, must read as
+ * TWO). Fix: a HANGING INDENT (the classic `padding-left` + equal-and-opposite `text-indent` pair) on
+ * the single-item wrap branch ONLY, so the continuation line lands under where the NAME starts, not
+ * under the label. The indent is MEASURED per item via `_cpMeasure` (the shared canvas
+ * text-measurement helper already used elsewhere in this file), never a fixed guess — a bare 1-digit
+ * id and a lag-suffixed label several times wider both need correctly different indents. The
+ * multi-slot (2+ link) branch is a structurally separate code path and gets NO indent at all — this
+ * harness proves both halves: the wrap branch's line 2 lands within ~1px of line 1's name-start, and
+ * every multi-slot row's own indent reads exactly zero.
+ *
  * This harness drives the REAL Format-panel row-height slider (not a data-injection shortcut —
  * ROW_H is a plain module variable updated inside a useEffect, so seeding settings.rowHeight in
  * the boot payload only takes effect on a LATER render; the slider's onChange goes through the
@@ -100,8 +113,16 @@ function buildTestData(baseJson) {
   const succBase = { id: 9020, name: "AAA Succ Base Test Task", start: "2026-12-27", end: "2026-12-27", duration: 1, predecessors: [], health: "gray", percentComplete: 0, parentId: null, responsibleParty: "", notes: [], isExpanded: true };
   const succA = { id: 9021, name: "Successor Child Alpha With A Fairly Long Name For Wrap Testing", start: "2027-03-02", end: "2027-03-02", duration: 1, predecessors: [{id:9020,type:"FS",lag:0}], health:"gray", percentComplete:0, parentId:null, responsibleParty:"", notes:[], isExpanded:true };
   const succB = { id: 9022, name: "Successor Child Beta", start: "2027-03-02", end: "2027-03-02", duration: 1, predecessors: [{id:9020,type:"FS",lag:0}], health:"gray", percentComplete:0, parentId:null, responsibleParty:"", notes:[], isExpanded:true };
+  // B655552 (round 3) additions: a predecessor with a SHORT bare-id label ("shortId") vs. the existing
+  // `lagLink` (a much wider lag-suffixed label) — the pair the owner explicitly asked be checked against
+  // each other for the hanging-indent width — and a name long enough to overflow past 2 lines (so
+  // line-clamp's own ellipsis and the hanging indent must coexist correctly).
+  const shortIdSrc = { id: 9040, name: "Short Id Source With A Name Long Enough To Wrap Around", start: "2026-12-27", end: "2026-12-27", duration: 1, predecessors: [], health: "gray", percentComplete: 0, parentId: null, responsibleParty: "", notes: [], isExpanded: true };
+  const shortIdLink = { id: 9041, name: "AAA Short Id Link Test Task", start: "2027-03-01", end: "2027-03-01", duration: 1, predecessors: [{id:9040,type:"FS",lag:0}], health:"gray", percentComplete:0, parentId:null, responsibleParty:"", notes:[], isExpanded:true };
+  const veryLongSrc = { id: 9043, name: "Coordinate With The County Engineer On The Detention Pond Outfall Structure Relocation And The Associated Utility Easement Amendment Package", start: "2026-12-27", end: "2026-12-27", duration: 1, predecessors: [], health: "gray", percentComplete: 0, parentId: null, responsibleParty: "", notes: [], isExpanded: true };
+  const veryLongLink = { id: 9042, name: "AAA Very Long Link Test Task", start: "2027-03-01", end: "2027-03-01", duration: 1, predecessors: [{id:9043,type:"FS",lag:0}], health:"gray", percentComplete:0, parentId:null, responsibleParty:"", notes:[], isExpanded:true };
   const insertAt = tasks.findIndex(t => t.id === 2) + 1;
-  tasks.splice(insertAt, 0, longA, longB, longC, twoLink, oneLink, threeA, threeLink, lagLink, emptyLink, succBase, succA, succB);
+  tasks.splice(insertAt, 0, longA, longB, longC, twoLink, oneLink, threeA, threeLink, lagLink, emptyLink, succBase, succA, succB, shortIdSrc, shortIdLink, veryLongSrc, veryLongLink);
   return JSON.stringify(data);
 }
 
@@ -174,7 +195,20 @@ const TARGETS = [
   { nameMatch: "AAA Empty Link Test Task", colKey: "predecessors", label: "emptyLink", expectNames: [] },
   { nameMatch: "AAA Succ Base Test Task", colKey: "successors", label: "twoSucc",
     expectNames: ["Successor Child Alpha With A Fairly Long Name For Wrap Testing", "Successor Child Beta"] },
+  // B655552 (round 3) — the hanging-indent pair: a bare short id label vs. `lagLink`'s much wider
+  // lag-suffixed label, both single-item wraps, so the indent width must differ between them.
+  { nameMatch: "AAA Short Id Link Test Task", colKey: "predecessors", label: "shortIdLink",
+    expectNames: ["Short Id Source With A Name Long Enough To Wrap Around"] },
+  // A name long enough to overflow past 2 lines even at RH=34 — line-clamp's own ellipsis and the
+  // hanging indent must coexist (the indent must not defeat the 2-line clamp or vice versa).
+  { nameMatch: "AAA Very Long Link Test Task", colKey: "predecessors", label: "veryLongLink",
+    expectNames: ["Coordinate With The County Engineer On The Detention Pond Outfall Structure Relocation And The Associated Utility Easement Amendment Package"] },
 ];
+
+// Which TARGET labels render through the single-item WRAP branch (line-clamp + hanging indent) at
+// the two-line threshold, vs. the multi-slot branch (flex rows, ellipsis-per-item, NO indent ever).
+const WRAP_BRANCH_LABELS = new Set(["oneLink", "lagLink", "shortIdLink", "veryLongLink"]);
+const MULTI_SLOT_LABELS = new Set(["twoLink", "threeLink", "twoSucc"]);
 
 async function measureAt(page, rowHeight) {
   await setRowHeight(page, rowHeight);
@@ -231,6 +265,58 @@ async function measureAt(page, rowHeight) {
         r.selectNodeContents(s);
         return r.getBoundingClientRect().height;
       }) : [];
+      // B655552 (round 3) — the hanging-indent check. Per-slot paddingLeft/textIndent are read for
+      // EVERY branch (multi-slot rows must read exactly 0 — no indent may leak into a genuine second
+      // entry). For the single-item wrap branch specifically (slots.length === 1), also measure where
+      // line 1's NAME text starts vs. where line 2's first character actually renders, by walking
+      // every text node under the name span (its JSX splits " · " and the interpolated name into TWO
+      // text nodes, so `firstChild` alone is not enough — this cost a debugging round during
+      // development and is written down here so the next reader does not repeat it).
+      const slotIndents = slots.map(s => {
+        const cs = getComputedStyle(s);
+        return { paddingLeft: parseFloat(cs.paddingLeft) || 0, textIndent: parseFloat(cs.textIndent) || 0 };
+      });
+      let hangIndent = null;
+      if (slots.length === 1) {
+        const lineClampSpan = slots[0];
+        const nameSpan = lineClampSpan.children[1];
+        if (nameSpan) {
+          // nameSpan's JSX (`<span> · {renderName(item)}</span>`) is TWO text nodes: the literal
+          // " · " (always exactly 3 characters), then the interpolated name. The hanging indent is
+          // measured to land line 2 under where the NAME starts — i.e. AFTER the separator — so the
+          // reference point on line 1 must be the second text node's first character, never the
+          // first text node's first character (the separator's own leading space). Comparing against
+          // the separator's start instead of the name's start produced a spurious ~7px "misalignment"
+          // during development that was actually the separator's own rendered width, not a real bug —
+          // caught by cross-checking against an independent full character dump before trusting it.
+          const charRects = [];
+          const range = document.createRange();
+          const walker = document.createTreeWalker(nameSpan, NodeFilter.SHOW_TEXT);
+          let node, nodeIndex = -1, nameNodeIndex = null;
+          while ((node = walker.nextNode())) {
+            nodeIndex++;
+            if (nameNodeIndex == null && node.textContent !== " · ") nameNodeIndex = nodeIndex;
+            for (let i = 0; i < node.textContent.length; i++) {
+              range.setStart(node, i);
+              range.setEnd(node, i + 1);
+              const r = range.getBoundingClientRect();
+              if (r.width > 0 || r.height > 0) charRects.push({ top: Math.round(r.top), left: r.left, nodeIndex });
+            }
+          }
+          const nameStartChar = charRects.find(c => c.nodeIndex === nameNodeIndex);
+          if (charRects.length && nameStartChar) {
+            const line1Top = nameStartChar.top;
+            const line2Char = charRects.find(c => c.top > line1Top + 1);
+            hangIndent = {
+              paddingLeft: slotIndents[0].paddingLeft,
+              textIndent: slotIndents[0].textIndent,
+              line1NameStart: nameStartChar.left,
+              line2Start: line2Char ? line2Char.left : null,
+              wrapsToTwoLines: !!line2Char,
+            };
+          }
+        }
+      }
       return {
         wrapClips: wrap.scrollHeight > wrap.clientHeight,
         innerClips: inner ? inner.scrollHeight > inner.clientHeight : false,
@@ -241,6 +327,8 @@ async function measureAt(page, rowHeight) {
         slotCount: slots.length,
         text: slots.map(s => s.textContent).join(" | "),
         hasPlusIndicator: /\+\d/.test(inner ? inner.textContent : ""),
+        slotIndents,
+        hangIndent,
         // B655552 (round 2) — the hover requirement: the native `title` attribute is what the browser's own
         // tooltip renders on hover, so reading it directly is the stable proxy for "what would the
         // owner see if he hovered this cell" (a real OS tooltip bubble can't be reliably screenshotted
@@ -285,8 +373,15 @@ const TWO_LINE_MIN = 20;
 // line height is now 10px (was 12px pre-B655552 (round 2)); the 1px rounding tolerance carries over unchanged.
 const isClipped = m => m.wrapClips || m.innerClips || (m.minSlotHeight != null && m.minSlotHeight < 9) || m.inkExceedsBox;
 
-const ITEM_COUNT = { twoLink: 2, oneLink: 1, threeLink: 3, lagLink: 1, emptyLink: 0, twoSucc: 2 };
-const SINGLE_ITEM_LONG_NAME = new Set(["oneLink", "lagLink"]); // 1 item, name long enough that wrapping is observable
+const ITEM_COUNT = { twoLink: 2, oneLink: 1, threeLink: 3, lagLink: 1, emptyLink: 0, twoSucc: 2, shortIdLink: 1, veryLongLink: 1 };
+const SINGLE_ITEM_LONG_NAME = new Set(["oneLink", "lagLink", "shortIdLink", "veryLongLink"]); // 1 item, name long enough that wrapping is observable
+// B655552 (round 3) — hanging-indent tolerance. `_cpMeasure` (canvas) and the DOM's own text layout
+// can differ by a fraction of a pixel (different rounding/hinting paths for the same font) — this is
+// the same order of slack `_cpMeasure`'s existing caller (ContactPicker's ghost-text) already lives
+// with. 1.5px is generous relative to an 8px font's own character width (~4-5px) while still catching
+// a REAL misalignment (a wrong measurement, a dropped icon-width term, a stale indent left over from
+// a different item) rather than sub-pixel rendering noise.
+const HANG_INDENT_TOLERANCE_PX = 1.5;
 
 function evaluateUnmutated(results) {
   const failures = [];
@@ -319,6 +414,36 @@ function evaluateUnmutated(results) {
       }
       if (target && target.expectLabelPattern && !target.expectLabelPattern.test(m.title)) {
         failures.push(`${label}@${rh}: tooltip did not contain the expected lag label (pattern ${target.expectLabelPattern}) — got title="${m.title}"`);
+      }
+      // B655552 (round 3) — the hanging indent. Two invariants, checked on opposite branches:
+      // (a) the WRAP branch (a single link) must indent its continuation line so it lands under
+      //     where the NAME starts on line 1, not under the ID/lag label; (b) the MULTI-SLOT branch
+      //     (two or more links, each its own row) must carry ZERO indent — this is the inversion the
+      //     owner explicitly warned against ("do not let the fix for the wrap case indent a genuine
+      //     second entry").
+      if (WRAP_BRANCH_LABELS.has(label) && rowH >= TWO_LINE_MIN) {
+        if (!m.hangIndent) {
+          failures.push(`${label}@${rh}: expected the wrap branch's hang-indent measurement, got none — "${m.text}"`);
+        } else if (!m.hangIndent.wrapsToTwoLines) {
+          failures.push(`${label}@${rh}: expected this long single link to wrap to 2 lines so the indent is observable, but it stayed on 1 line — "${m.text}"`);
+        } else {
+          const { paddingLeft, textIndent, line1NameStart, line2Start } = m.hangIndent;
+          if (!(paddingLeft > 0)) failures.push(`${label}@${rh}: hang indent's paddingLeft must be > 0 for a wrapped single link, got ${paddingLeft}`);
+          if (Math.abs(paddingLeft + textIndent) > 0.1) failures.push(`${label}@${rh}: paddingLeft (${paddingLeft}) and textIndent (${textIndent}) must be equal and opposite (line 1 must land back at its un-indented position)`);
+          const misalign = Math.abs(line2Start - line1NameStart);
+          if (misalign > HANG_INDENT_TOLERANCE_PX) failures.push(`${label}@${rh}: line 2 starts ${misalign.toFixed(2)}px away from where the name text starts on line 1 (tolerance ${HANG_INDENT_TOLERANCE_PX}px) — line1NameStart=${line1NameStart}, line2Start=${line2Start}`);
+        }
+      }
+      if (MULTI_SLOT_LABELS.has(label) && m.slotIndents) {
+        m.slotIndents.forEach((si, i) => {
+          if (si.paddingLeft !== 0 || si.textIndent !== 0) failures.push(`${label}@${rh}: slot ${i} carries a nonzero indent (paddingLeft=${si.paddingLeft}, textIndent=${si.textIndent}) — the wrap-branch fix must never leak into a genuine second entry`);
+        });
+      }
+      // The very-long name must still clamp to exactly 2 lines (line-clamp's own ellipsis), not grow
+      // taller to fit more text — the indent must not defeat the clamp. TWO_LINE_MIN IS the 2-line
+      // total (it's defined as DEPCELL_LINE_H * 2 in the app), so it doubles as the max height here.
+      if (label === "veryLongLink" && rowH >= TWO_LINE_MIN && m.maxSlotHeight > TWO_LINE_MIN + 1) {
+        failures.push(`${label}@${rh}: expected the 2-line clamp to hold even for a very long name, got height ${m.maxSlotHeight}px`);
       }
     }
   }
@@ -464,6 +589,36 @@ if (fontCaught) {
 } else {
   exitCode = 1;
   line("FAIL — the font-size mutation did not reproduce a caught clip at RH=20. This check would not have caught a regression back to the reported bug.");
+}
+
+line("");
+line("── Pass 8: mutation — remove the hanging indent entirely (reproduces the owner's reported bug: a wrapped continuation line starts flush left under the ID, reading as a second entry) ──");
+const noIndentMutated = await runPass("no-indent-mutation", html =>
+  html.replace(
+    'whiteSpace:"normal", width:"100%", minWidth:0, wordBreak:"break-word",\n          paddingLeft:indent, textIndent:-indent}}>',
+    'whiteSpace:"normal", width:"100%", minWidth:0, wordBreak:"break-word"}}>'
+  ));
+const noIndentFailures = evaluateUnmutated(noIndentMutated).filter(f => WRAP_BRANCH_LABELS.has(f.split("@")[0]) && /line 2 starts|paddingLeft must be > 0/.test(f));
+if (noIndentFailures.length) {
+  line("PASS — removing the hanging indent reproduces the flush-left continuation line and this check catches it.");
+} else {
+  exitCode = 1;
+  line("FAIL — removing the hanging indent was not caught. This check would not have caught the original bug returning.");
+}
+
+line("");
+line('── Pass 9: mutation — the indent leaks into the MULTI-SLOT branch too (simulates the exact inversion the owner warned against: "do not let the fix for the wrap case indent a genuine second entry") ──');
+const leakMutated = await runPass("indent-leak-mutation", html =>
+  html.replace(
+    'style={{display:"flex", alignItems:"baseline", gap:3, overflow:"hidden", width:"100%", lineHeight:`${DEPCELL_LINE_H}px`, minHeight:DEPCELL_LINE_H}}',
+    'style={{display:"flex", alignItems:"baseline", gap:3, overflow:"hidden", width:"100%", lineHeight:`${DEPCELL_LINE_H}px`, minHeight:DEPCELL_LINE_H, paddingLeft:8, textIndent:-8}}'
+  ));
+const leakFailures = evaluateUnmutated(leakMutated).filter(f => MULTI_SLOT_LABELS.has(f.split("@")[0]) && /carries a nonzero indent/.test(f));
+if (leakFailures.length) {
+  line("PASS — a leaked indent on genuine multi-item rows (twoLink/threeLink/twoSucc) is caught.");
+} else {
+  exitCode = 1;
+  line("FAIL — a leaked indent into the multi-slot branch was not caught. This check would not have caught the inversion the owner explicitly warned against.");
 }
 
 line("");

@@ -10,7 +10,10 @@
  * getOrInsertComputed polyfill) but is self-contained in shared/ so it doesn't reach across into
  * a workspace. Text-extraction only — no rendering, no OCR — so it needs none of the font/CMap
  * render assets. A scanned / image-only PDF (no text layer) yields ~nothing and we throw a
- * friendly error rather than return an empty string (LOUD-FAILURE). A survey EXHIBIT drawing (a
+ * friendly error rather than return an empty string (LOUD-FAILURE) — that error carries a
+ * `.scanned = true` marker so `readDeeds` (SitePlanner.jsx) can offer `deedOcr.js`'s OCR fallback
+ * instead of just showing the refusal (a county-recorded deed is almost always a scanned image, so
+ * this is the common case for that document class, not an edge case). A survey EXHIBIT drawing (a
  * plat sheet with only a title block, no written description) extracts fine but yields no courses
  * — the deed intake then honestly reports "no bearing/distance calls", which is correct. */
 import * as pdfjsLib from "pdfjs-dist";
@@ -53,24 +56,13 @@ async function pageLines(pdf, pageNum) {
   return lines;
 }
 
-/* A visual line that STARTS a new course/tract, so it must not be merged into the previous
- * (wrapped) line. Everything else is treated as a soft word-wrap and joined with a space, so each
- * course lands on ONE logical line — the shape the metes-and-bounds parser expects (it parses one
- * course per line). Without this, PDF word-wrap splits a course like "…23 SEC. / EAST, 403.47
- * FEET" across two lines and the bearing loses its quadrant + distance. Word/.txt already give one
- * paragraph per course, so this reflow is PDF-only. */
-const COURSE_START = /^\s*(?:\d{1,2}\s*[.)]\s|THENCE\b|COMMENC\w*\b|SAVE\s+AND\s+EXCEPT\b|BEGINNING\s+AT\b)/i;
-
-export function reflowLines(lines) {
-  const out = [];
-  for (const raw of lines) {
-    const line = raw.replace(/[ \t]+/g, " ").trim();
-    if (!line) continue;
-    if (out.length && !COURSE_START.test(line)) out[out.length - 1] += " " + line;
-    else out.push(line);
-  }
-  return out.join("\n");
-}
+// Split out to deedTextReflow.js (B747, then generalized for OCR) so deedOcr.js can reuse the same
+// wrapped-line rejoin without pulling in this module's pdf.js text-extraction setup. Imported (not
+// a bare `export … from`, which would leave no LOCAL binding for the call below to reach — the
+// `screeningBfe.js` trap) then re-exported, so nothing that already imports `reflowLines` from this
+// module needs to change.
+import { reflowLines } from "./deedTextReflow.js";
+export { reflowLines };
 
 /* Read a PDF (File / Blob / ArrayBuffer) into deed text. Throws a friendly error for a scanned
  * (no-text-layer) PDF. Async; used by readDeedFile via a lazy import. */
@@ -88,7 +80,9 @@ export async function pdfToDeedText(fileOrBuffer) {
     for (let p = 1; p <= (pdf.numPages || 1); p++) lines = lines.concat(await pageLines(pdf, p));
     const text = reflowLines(lines).replace(/\n{3,}/g, "\n\n").trim();
     if (text.replace(/\s+/g, "").length < 20) {
-      throw new Error("This PDF looks scanned (no selectable text) — paste the description, or drop the Word (.doc/.docx) file.");
+      const err = new Error("This PDF looks scanned (no selectable text) — paste the description, or drop the Word (.doc/.docx) file.");
+      err.scanned = true; // lets a caller offer OCR instead of just showing the refusal (deedOcr.js)
+      throw err;
     }
     return text;
   } finally {
