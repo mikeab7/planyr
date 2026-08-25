@@ -11,6 +11,7 @@ import { createEditorLock } from "../../shared/presence/editorLock.js";
 import { reportClientEvent, SUPPRESSED_AUTOMATED } from "../../shared/telemetry/clientErrors.js";
 import { notePerfEdit } from "../../shared/telemetry/perfSampling.js";
 import { notePlanContext, noteViewScale, requestPerfCapture, perfCaptureDelivery } from "../../shared/telemetry/perfRecorderHandle.js";
+import { recordPinchGesture } from "../../shared/telemetry/gestureTelemetry.js";
 import { createElementSync, stableStringify } from "./lib/elementSync.js";
 import { createOperationTracker } from "./lib/operationEnvelope.js";
 import { planDelete, TYPING_GUARD_HINT } from "./lib/deletePlan.js";
@@ -3653,6 +3654,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const pinch2Ref = useRef(null);        // active baseline { mid, dist } (svg-relative) | null
   const pinchRafRef = useRef(0);         // pending rAF id (0 = none)
   const pinchNextRef = useRef(null);     // latest { mid, dist } awaiting the next frame
+  const pinchTelemetryRef = useRef(null); // { t, fingers } captured at pinch start — feeds the event:pinch row on end/cancel/anomaly
   const touchPt = (t) => { const r = svgRef.current.getBoundingClientRect(); return { x: t.clientX - r.left, y: t.clientY - r.top }; };
   const flushPinch = () => {
     pinchRafRef.current = 0;
@@ -3706,9 +3708,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
            canceler does not own (the coalesced 'cursor' job; a 'geom' job from a canceler-less
            drag), which is a real behaviour change with nothing asking for it. */
     flushFrameJobs();
+    const isNewPinch = !pinch2Ref.current;
     const a = touchPt(e.touches[0]), b = touchPt(e.touches[1]);
     pinch2Ref.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
     pinchNextRef.current = null;
+    if (isNewPinch) pinchTelemetryRef.current = { t: performance.now(), fingers: e.touches.length };
+    else if (pinchTelemetryRef.current) pinchTelemetryRef.current.fingers = Math.max(pinchTelemetryRef.current.fingers, e.touches.length);
     // The 1st finger landed a beat earlier and may have begun a one-finger pan; tear it down so
     // the pinch starts clean, and restore the view if that pan had already nudged it (no jump-in).
     const d = drag.current;
@@ -3723,17 +3728,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pinchNextRef.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
     if (!pinchRafRef.current) pinchRafRef.current = requestAnimationFrame(flushPinch);
   };
-  const onTouchEndPinch = (e) => {
+  // `cancelled` distinguishes a native touchcancel (an interruption — scroll-chaining, an OS
+  // gesture takeover) from an ordinary touchend (the user just lifted their fingers); both wind
+  // the pinch state down identically, they only differ in what gets recorded.
+  const onTouchEndPinch = (e, cancelled = false) => {
     touchCountRef.current = e.touches.length;
     if (e.touches.length >= 2) { // a 3rd finger lifted — re-baseline to the remaining pair, no jump
+      if (pinchTelemetryRef.current) pinchTelemetryRef.current.fingers = Math.max(pinchTelemetryRef.current.fingers, e.touches.length);
       const a = touchPt(e.touches[0]), b = touchPt(e.touches[1]);
       pinch2Ref.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
       return;
     }
+    if (pinch2Ref.current) {
+      const started = pinchTelemetryRef.current;
+      recordPinchGesture({
+        surface: "site-planner", eventSource: "touch",
+        fingerCount: started ? started.fingers : touchCountRef.current,
+        outcome: cancelled ? "cancelled" : "completed",
+        cancelReason: cancelled ? "touchcancel" : undefined,
+        durationMs: started ? performance.now() - started.t : undefined,
+      });
+    }
+    pinchTelemetryRef.current = null;
     pinch2Ref.current = null; pinchNextRef.current = null;
     if (pinchRafRef.current) { cancelAnimationFrame(pinchRafRef.current); pinchRafRef.current = 0; }
     disarmViewAnchor(); // B1449 — the gesture is over; re-bake at the settled zoom in one commit
   };
+  // A pinch mid-gesture at unmount (a plan switch remounts this component, per planClipboardStore's
+  // header) must not leave a pending rAF whose callback fires `setView` against a torn-down instance
+  // — harmless in practice (React no-ops a dead setState) but an unaccounted-for leak all the same,
+  // unlike frameRaf just above, which already gets this same cleanup.
+  useEffect(() => () => { if (pinchRafRef.current) cancelAnimationFrame(pinchRafRef.current); }, []);
   const altSnapOffRef = useRef(false); // Alt held during a drag/placement → bypass snap for this one move (re-armed every pointer event)
   // The clipboard payload itself is in planClipboardStore (module scope) — see the import.
   const lastPtrFt = useRef(null); // live pointer in WORLD feet (updated every canvas move) → paste-at-cursor (B417)
@@ -5895,7 +5920,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // gesture takeover, or the window losing focus mid-drag. With no cancel handler that cleanup
   // never ran, so `panning` stayed true (stuck grab cursor) with pointer-capture held and the
   // canvas swallowed every click. This tears the whole gesture down so it can self-recover.
-  const abortGesture = (pid = capturePidRef.current) => {
+  // `reason` names WHY the gesture is being torn down — "pointercancel" | "blur" | "hidden" — and
+  // feeds the event:pinch telemetry row when a native-touch pinch was in progress at the time. A
+  // pointercancel arriving while touchCountRef already reads ≥2 is the EXACT iOS Safari quirk B555
+  // was built around (a spurious pointercancel the instant a 2nd finger lands): it is harmless here
+  // because the pointer handlers already bail while touch owns the gesture, but its CONTINUED
+  // occurrence is exactly the diagnostic signal this telemetry exists to capture — recorded as an
+  // "anomaly", not a "cancelled", so the two are never conflated in a query.
+  const abortGesture = (pid = capturePidRef.current, reason) => {
+    if (pinch2Ref.current) {
+      const started = pinchTelemetryRef.current;
+      recordPinchGesture({
+        surface: "site-planner", eventSource: "touch",
+        fingerCount: started ? started.fingers : touchCountRef.current,
+        outcome: reason === "pointercancel" ? "anomaly" : "cancelled",
+        cancelReason: reason === "pointercancel" ? "pointercancel-during-pinch" : (reason || "interrupted"),
+        durationMs: started ? performance.now() - started.t : undefined,
+      });
+      pinchTelemetryRef.current = null;
+    }
     // NEW-2 — settle any frame-coalesced move BEFORE the teardown, so the ordering is exactly the
     // old one (the move committed, then the abort reverted it) — never a pending job landing back
     // on the canvas after cancelActiveMove has already put it back.
@@ -5920,11 +5963,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // waiting on). Mirrors the Shift-reset effect below; also drops the Space hand-pan so the
   // grab cursor can't stick on.
   useEffect(() => {
-    const recover = () => { spaceRef.current = false; setSpacePan(false); abortGesture(); };
-    const onVis = () => { if (document.hidden) recover(); };
-    window.addEventListener("blur", recover);
+    const recover = (reason) => { spaceRef.current = false; setSpacePan(false); abortGesture(undefined, reason); };
+    const onBlur = () => recover("blur");
+    const onVis = () => { if (document.hidden) recover("hidden"); };
+    window.addEventListener("blur", onBlur);
     document.addEventListener("visibilitychange", onVis);
-    return () => { window.removeEventListener("blur", recover); document.removeEventListener("visibilitychange", onVis); };
+    return () => { window.removeEventListener("blur", onBlur); document.removeEventListener("visibilitychange", onVis); };
   }, []);
 
   /* NEW-1 — drive the keyboard latch. ONE rule, two listeners, both in the CAPTURE phase so a
@@ -20826,7 +20870,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // Two-finger pinch runs on native touch events (B555) — see onTouchStartPinch. While a
             // 2-finger gesture is live (touchCountRef ≥ 2) the pointer-driven vertex edit / pan / draw
             // handlers all bail, so the pinch owns the gesture and nothing fights it.
-            onTouchStart={onTouchStartPinch} onTouchMove={onTouchMovePinch} onTouchEnd={onTouchEndPinch} onTouchCancel={onTouchEndPinch}
+            onTouchStart={onTouchStartPinch} onTouchMove={onTouchMovePinch} onTouchEnd={onTouchEndPinch} onTouchCancel={(e) => onTouchEndPinch(e, true)}
             /* NEW-1 — `notePress` stamps the gesture anchor's WHERE/WHEN here, in the CAPTURE phase,
                so it records the press whatever node ends up winning it (chrome that stops
                propagation included — that press is exactly the one being reasoned about). It is
@@ -20835,7 +20879,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             onPointerDownCapture={(e) => { notePress(e); if (handleStackPick(e)) return; if (touchCountRef.current < 2) onCanvasVtxDownCapture(e); }}
             onContextMenuCapture={onCanvasVtxContextCapture}
             onPointerMoveCapture={(e) => { if (touchCountRef.current < 2) onCanvasVtxMoveCapture(e); }}
-            onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={(e) => abortGesture(e.pointerId)} onDoubleClick={onBgDouble}
+            onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={(e) => abortGesture(e.pointerId, "pointercancel")} onDoubleClick={onBgDouble}
             onContextMenu={(e) => {
               e.preventDefault(); // a right-click on the map ALWAYS opens our menu, never the browser's (B627)
               if (draftRoadPts) { setDraftRoadPts(null); branchSeedRef.current = null; return; } // cancel an in-progress road draw
