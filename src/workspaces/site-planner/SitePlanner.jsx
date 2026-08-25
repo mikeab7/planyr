@@ -14566,34 +14566,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Set/clear a per-building override (B199). `val == null` reverts that property to auto.
   const setBuildingProp = (id, field, val) => { pushHistory(); setEls((a) => a.map((e) => (e.id === id ? { ...e, [field]: val } : e))); };
 
-  const importRef = useRef(null);
-  const importJSONFile = (file) => {
-    if (!file) return;
-    const fr = new FileReader();
-    fr.onload = () => {
-      try {
-        const d = JSON.parse(fr.result);
-        if (!d || (!Array.isArray(d.parcels) && !Array.isArray(d.els))) throw new Error();
-        // Normalize the import through the model funnel: junk entries (nulls / points-less husk
-        // parcels — the B690 crash class) are dropped, ids/z are ensured, migrations applied —
-        // a hand-edited or stale export can't poison the canvas or the next save.
-        const im = createSiteModel(d);
-        ensureIdAbove([
-          ...im.parcels.map((p) => p.id), ...im.els.map((e) => e.id),
-          ...im.markups.map((m) => m.id), ...im.measures.map((m) => m.id),
-          ...im.callouts.map((c) => c.id), ...im.deletedIds,
-        ]); // B591 — seed past all imported ids + tombstones (not just parcels+els)
-        pushHistory();
-        setParcels(im.parcels); setEls(im.els); setMeasures(im.measures);
-        setCallouts(im.callouts); setMarkups(im.markups); // symmetric with exportJSON (was dropped → data loss / bleed-through)
-        setSettings((s) => ({ ...s, ...(d.settings || {}), snap: s.snap })); // snap is a global pref, not imported
-        setUnderlay(d.underlay || null);
-        setSel(null);
-        requestFit();
-      } catch (_) { alert("That file doesn't look like a Site Planyr export."); }
-    };
-    fr.readAsText(file);
-  };
   // Site (location) vs Plan (layout) labels — editable from the header.
   const groupId = restored?.groupId || siteId;
   const siteCounty = restored?.county || null;
@@ -15205,7 +15177,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const { createExportSheet } = await loadExportSheet();
     return fn(createExportSheet(exportCtx()));
   };
-  const exportJSON = () => withExportSheet((x) => x.exportJSON());
   const exportKmz = (extrude = false) => withExportSheet((x) => x.exportKmz(extrude));
   const exportPNG = () => withExportSheet((x) => x.exportPNG());
   const exportPDF = (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true) =>
@@ -18626,19 +18597,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               and several ui-audit harnesses match this button by that exact visible name). The
               caret stays plain text, not aria-hidden, for the same reason. */}
           <button className="dbtn" aria-haspopup="menu" aria-expanded={exportMenu}
-            title="File — export, import a project file, or print a PDF"
+            title="File — export a PNG or print a PDF"
             style={{ ...dGhost, fontWeight: 600, display: "flex", alignItems: "center", gap: 6, height: TB_H, borderRadius: TB_R,
               border: `1px solid ${exportMenu ? PAL.accent : PAL.chromeLine}`,
               background: exportMenu ? "var(--hover-chrome)" : "transparent" }}
             onClick={() => setExportMenu((o) => { if (!o) warmExportSheet(); return !o; })}>
             File <span style={{ fontSize: 10.5, lineHeight: 1, fontWeight: 500, color: PAL.chromeMuted }}>▾</span>
           </button>
+          {/* B765984 — the .json project-file export/import pair was removed (owner: "no one should
+              really be using that"). The import's own tooltip admitted it REPLACES THE CURRENT
+              CANVAS with no confirmation, one row below a harmless PNG download — a destructive
+              whole-plan overwrite sitting where a misclick could reach it. Cloud save/load is the
+              real persistence path; this was a redundant, riskier side door. */}
           <AnchoredMenu open={exportMenu} onClose={() => setExportMenu(false)} anchorRef={exportAnchor} placement="below-right" gap={8} width={220} panelStyle={menuPanel}>
-            <button style={menuItem(false)} title="Download this plan as a project file (.json) you can re-import later" onClick={() => { setExportMenu(false); exportJSON(); }}>Export project file</button>
-            <button style={menuItem(false)} title="Load a plan from a project file (.json) — replaces the current canvas" onClick={() => { setExportMenu(false); importRef.current?.click(); }}>Import project file…</button>
-            <input ref={importRef} type="file" accept="application/json,.json" style={{ display: "none" }}
-              onChange={(e) => { importJSONFile(e.target.files?.[0]); e.target.value = ""; }} />
-            <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
             <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
             <button style={menuItem(false)} title="Pick a print frame, then download a finished PDF (no browser print dialog)" onClick={() => { setExportMenu(false); enterPrintMode(); }}>Download PDF / pick frame…</button>
           </AnchoredMenu>

@@ -63,7 +63,7 @@ export function sheetPlanAspect({ paper, orient, buildingCount, metricsPairs, st
 export function createExportSheet(ctx) {
   const {
     // --- drawn model + geometry -------------------------------------------------
-    parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays,
+    parcels, els, measures, settings, underlay, sheetOverlays,
     DEV_TYPES, devExtent, elCorners, f2p, view, size, origin, hidden,
     // --- live DOM / Leaflet handles ---------------------------------------------
     svgRef, stateRef, overlayRefs, geoMapRef,
@@ -78,14 +78,6 @@ export function createExportSheet(ctx) {
     cullActive, setExportPass, setExportingPDF, flashWarn,
   } = ctx;
   const fileSlug = () => (siteName || "site-plan").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "site-plan";
-  const exportJSON = () => {
-    const blob = new Blob([JSON.stringify({ parcels, els, measures, callouts, markups, settings, underlay }, null, 2)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${fileSlug()}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  };
   // Export the drawn site to a Google Earth .kmz (B684). Reprojects every foot vertex to WGS84
   // lat/long via the SAME feetToLatLng the map render uses (KML must be lon,lat — so we flip the
   // [lat,lng] pair). `extrude` lifts building massing to its clear height for Earth's 3D view.
@@ -1088,7 +1080,7 @@ export function createExportSheet(ctx) {
     } finally { setExportingPDF(false); }
   };
   return {
-    exportJSON, exportKmz, exportPNG, exportPDF,
+    exportKmz, exportPNG, exportPDF,
     buildExportSvg, exportAerialForFrame, exportOverlaysForFrame, exportVectorOverlaysForFrame,
     inlineImages, restyleExportClone, exportFeetExtent,
   };
