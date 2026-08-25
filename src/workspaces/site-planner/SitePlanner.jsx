@@ -278,6 +278,7 @@ import YieldFooterDisclaimer from "./components/YieldFooterDisclaimer.jsx";
 import Collapse from "./components/Collapse.jsx";
 import Chip from "./components/Chip.jsx";
 import RowInfo from "./components/RowInfo.jsx";
+import OcrDeedTextarea from "./components/OcrDeedTextarea.jsx";
 import { pondInspectorChips, POND_CHIP_DEFS, pondGroupSummary, POND_FLOOD_NOTES, POND_PURPOSE_TOOLTIP, POND_PURPOSE_DESCRIPTOR } from "./lib/pondInspectorCopy.js";
 import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
@@ -2630,6 +2631,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const deedReqRef = useRef(0);
   const [deedQueue, setDeedQueue] = useState([]); // dropped deeds waiting to be placed (multi-file)
   const [deedActiveId, setDeedActiveId] = useState(null); // the queue row currently loaded in the textarea                       // in-flight read token (ignore a stale read)
+  // B768160 — OCR fallback for a scanned deed PDF (readDeedFile's pdfText.js throws a `.scanned`-
+  // flagged error for one with no text layer; readDeeds catches it and routes here instead of just
+  // showing the refusal). `ocrRun` is null when no OCR is in flight/loaded for the CURRENT queue row;
+  // once it loads, it holds { pages:[{pageNum,text,rawText,changes,meanConfidence}], wordSpans,
+  // pageCount, activePage } — `activePage` is null (the default full concatenation) or a pageNum (the
+  // page-picker narrowed the box to just that page's text).
+  const [ocrRun, setOcrRun] = useState(null);
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState(null); // { page, index, of, status, pct }
+  const [ocrErr, setOcrErr] = useState("");
+  const ocrAbortRef = useRef(null);
+  // The OCR review helpers (lowConfidenceSpans/culpritCalls/flagSuspectDistances) ride the SAME
+  // dynamic import as the OCR engine itself (deedOcr.js re-exports them) rather than a static
+  // import here — a static import would duplicate `ocrConfidence.js`/`deedOcrRepair.js` into the
+  // always-loaded Site route chunk for functions only ever called once OCR data exists. `ocrRun`
+  // is only ever set AFTER this ref is populated (both happen inside the same OCR call), so any
+  // render that reads `ocrRun` truthy can rely on this being populated too.
+  const ocrHelpersRef = useRef(null);
   const [overlapWarn, setOverlapWarn] = useState(""); // transient warning after a plot
   // NEW-1/B754752 — the bottom-center canvas toast's horizontal anchor, in VIEWPORT px. Defaults to
   // null (renders at the true viewport center, byte-identical to before) until the canvas-edge
@@ -17168,22 +17187,69 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // can "just drop in the files" instead of pasting. Each file is read + parsed on the way in for an
   // immediate honest read-out (calls found, or why not); the first readable one loads into the
   // plotter textarea. A single-file drop behaves exactly as before.
+  // OCR a scanned PDF (pdfText.js threw a `.scanned`-flagged error for it) into deed text, updating
+  // the shared progress/cancel state as it goes. Returns the text, or throws if OCR itself fails or
+  // is cancelled before any usable text came out — the caller's existing per-file catch handles that
+  // exactly like any other unreadable file. `row.ocr` carries the per-page + confidence data the
+  // textarea highlighter / page picker / closure-culprit pointer read.
+  const ocrScannedPdfInto = async (file, row, myReq) => {
+    setOcrErr(""); setOcrBusy(true); setOcrProgress(null);
+    const ac = new AbortController();
+    ocrAbortRef.current = ac;
+    try {
+      const ocrMod = await import("../../shared/files/deedOcr.js");
+      ocrHelpersRef.current = { lowConfidenceSpans: ocrMod.lowConfidenceSpans, culpritCalls: ocrMod.culpritCalls, flagSuspectDistances: ocrMod.flagSuspectDistances };
+      const result = await ocrMod.ocrScannedDeedPdf(file, {
+        signal: ac.signal,
+        onProgress: (p) => { if (deedReqRef.current === myReq) setOcrProgress(p); },
+      });
+      if (!result.text.trim()) {
+        throw new Error(result.cancelled
+          ? "OCR was cancelled before any page finished."
+          : "OCR ran but found no readable text on this scan.");
+      }
+      row.ocr = { pages: result.pages, wordSpans: result.wordSpans, pageCount: result.pageCount, cancelled: result.cancelled, activePage: null };
+      if (result.cancelled && deedReqRef.current === myReq) {
+        flashWarn(`OCR cancelled after page ${result.pagesRead.length} of ${result.pageCount} — showing what was read so far.`, 6000);
+      }
+      return result.text;
+    } finally {
+      if (ocrAbortRef.current === ac) ocrAbortRef.current = null;
+      if (deedReqRef.current === myReq) { setOcrBusy(false); setOcrProgress(null); }
+    }
+  };
+
+  // Read one or several dropped/selected deed files (.doc/.docx/.pdf/.txt) into a queue so the user
+  // can "just drop in the files" instead of pasting. Each file is read + parsed on the way in for an
+  // immediate honest read-out (calls found, or why not); the first readable one loads into the
+  // plotter textarea. A single-file drop behaves exactly as before.
+  //
+  // B768160 — a scanned PDF (no text layer — readDeedFile throws a `.scanned`-flagged error for it)
+  // routes through OCR automatically instead of just showing the refusal: a county-recorded deed is
+  // almost always a scanned image, so refusing THAT class of file was refusing the document the
+  // plotter exists to read. OCR pre-fills this same editable box — it never plots by itself.
   const readDeeds = async (files) => {
     const list = Array.from(files || []);
     if (!list.length) return;
     const myReq = ++deedReqRef.current; // a newer drop supersedes a slow in-flight batch
-    setDeedErr(""); setDeedBusy(true);
+    setDeedErr(""); setOcrErr(""); setDeedBusy(true);
     try {
       const rows = [];
       for (const file of list) {
-        const row = { id: uid(), name: file.name || "deed", text: "", boundaryCalls: 0, exCount: 0, closes: false, gap: 0, error: "" };
+        const row = { id: uid(), name: file.name || "deed", text: "", boundaryCalls: 0, exCount: 0, closes: false, gap: 0, error: "", ocr: null };
         try {
           const [{ readDeedFile }, dp] = await Promise.all([
             import("../../shared/files/docxText.js"),
             loadDeed(),        // the parser rides the same on-demand trip as the file reader
           ]);
           const { parseTracts, callsToPath, pathCloses, misclosure } = dp;
-          const text = await readDeedFile(file);
+          let text;
+          try {
+            text = await readDeedFile(file);
+          } catch (e) {
+            if (e && e.scanned) text = await ocrScannedPdfInto(file, row, myReq);
+            else throw e;
+          }
           row.text = text;
           const tracts = parseTracts(text);
           const b = tracts[0];
@@ -17206,7 +17272,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // Auto-load the first readable deed into the textarea (single-file parity).
       const firstOk = rows.find((r) => !r.error && r.boundaryCalls > 0) || rows.find((r) => !r.error) || rows[0];
       if (firstOk) {
-        setDeedActiveId(firstOk.id); setDeedName(firstOk.name);
+        setDeedActiveId(firstOk.id); setDeedName(firstOk.name); setOcrRun(firstOk.ocr || null);
         if (firstOk.text) setMbText(firstOk.text);
         if (firstOk.error) setDeedErr(firstOk.error);
         else if (!firstOk.boundaryCalls) setDeedErr("Read the file, but found no bearing/distance calls — is this a metes-and-bounds legal description?");
@@ -26035,6 +26101,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const closes = dp ? dp.pathCloses(path) : false;
         const gap = dp ? dp.misclosure(path) : 0;
         const exCount = Math.max(0, tracts.length - 1);
+        // B768160 — OCR review data for whichever text is currently loaded: low-confidence word spans
+        // (highlighted in the box) and suspect (likely-lost-decimal-point) distances feed the closure
+        // safety net below when the traverse doesn't close.
+        const ocrActivePageData = ocrRun && ocrRun.activePage != null ? ocrRun.pages.find((p) => p.pageNum === ocrRun.activePage) : null;
+        const ocrSpansForBox = ocrRun ? (ocrActivePageData ? ocrActivePageData.wordSpans : ocrRun.wordSpans) : [];
+        const ocrHelpers = ocrRun ? ocrHelpersRef.current : null; // populated by the same call that set ocrRun
+        const ocrLcSpans = ocrHelpers ? ocrHelpers.lowConfidenceSpans(ocrSpansForBox) : [];
+        const ocrSuspects = ocrHelpers && mbText ? ocrHelpers.flagSuspectDistances(mbText) : [];
+        const ocrCulprits = (ocrHelpers && calls.length && !closes) ? ocrHelpers.culpritCalls(mbText, calls, ocrLcSpans, ocrSuspects) : [];
         return (
         <div onClick={() => setTitleOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: SURF_RAISED, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 720, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
@@ -26111,12 +26186,63 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {deedName && !deedBusy && <div style={{ fontSize: 11, color: PAL.purple, marginTop: 4, fontFamily: MONO_FONT, wordBreak: "break-all" }}>📄 {deedName}</div>}
               </div>
               {deedErr && <div style={{ fontSize: 12, color: PAL.danger, marginBottom: 8, lineHeight: 1.45 }}>{deedErr}</div>}
+              {/* B768160 — a scanned PDF (no text layer) routes here automatically instead of the plain
+                  refusal. OCR runs client-side (Tesseract.js, WASM, in the browser — the deed image
+                  never leaves the machine); a multi-page scan takes real seconds, so this shows
+                  per-page progress and can be cancelled outright. */}
+              {ocrBusy && (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", marginBottom: 10, border: `1px solid ${PAL.panelLine}`, borderRadius: 10, background: "rgba(124,58,237,0.05)" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: PAL.ink }}>
+                      Reading scanned PDF with OCR{ocrProgress ? ` — page ${ocrProgress.index} of ${ocrProgress.of}` : "…"}
+                    </div>
+                    <div style={{ fontSize: 11, color: PAL.muted, marginTop: 2 }}>
+                      {ocrProgress && ocrProgress.status === "recognizing text"
+                        ? `Recognizing text… ${Math.round((ocrProgress.pct || 0) * 100)}%`
+                        : ocrProgress && ocrProgress.status === "rendering" ? "Rendering page…" : "Starting…"}
+                    </div>
+                  </div>
+                  <button className="gbtn" style={chip} onClick={() => ocrAbortRef.current?.abort()}>Cancel</button>
+                </div>
+              )}
+              {ocrErr && <div style={{ fontSize: 12, color: PAL.danger, marginBottom: 8, lineHeight: 1.45 }}>{ocrErr}</div>}
+              {/* Page picker — a deed can run twenty pages of boilerplate before/after the actual
+                  legal description; OCR reads and concatenates every page by default (below), and
+                  this lets the user point at one specific page instead. */}
+              {ocrRun && ocrRun.pages.length > 1 && (
+                <div style={{ marginBottom: 10, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, overflow: "hidden" }}>
+                  <div data-testid="ocr-page-row" onClick={() => {
+                    const full = deedQueue.find((r) => r.id === deedActiveId);
+                    if (!full) return;
+                    setMbText(full.text); setOcrRun((run) => (run ? { ...run, activePage: null } : run));
+                    setDeedQueue((q) => q.map((r) => (r.id === deedActiveId ? { ...r, text: full.text } : r)));
+                  }} style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "7px 10px", cursor: "pointer", background: ocrRun.activePage == null ? "rgba(124,58,237,0.08)" : "transparent" }}>
+                    <span style={{ fontSize: 11.5, fontWeight: 600, color: PAL.ink }}>All {ocrRun.pageCount} page{ocrRun.pageCount > 1 ? "s" : ""}</span>
+                    <span style={{ fontSize: 11, color: PAL.muted, flex: 1 }}>concatenated (default)</span>
+                    {ocrRun.activePage == null && <span style={{ fontSize: 10.5, color: PAL.accent, fontWeight: 700 }}>LOADED</span>}
+                  </div>
+                  {ocrRun.pages.map((p) => {
+                    const active = ocrRun.activePage === p.pageNum;
+                    const conf = p.meanConfidence == null ? "" : ` · ${Math.round(p.meanConfidence)}% avg confidence`;
+                    return (
+                      <div key={p.pageNum} data-testid="ocr-page-row" onClick={() => {
+                        setMbText(p.text); setOcrRun((run) => (run ? { ...run, activePage: p.pageNum } : run));
+                        setDeedQueue((q) => q.map((r) => (r.id === deedActiveId ? { ...r, text: p.text } : r)));
+                      }} style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "7px 10px", cursor: "pointer", borderTop: `1px solid ${PAL.panelLine}`, background: active ? "rgba(124,58,237,0.08)" : "transparent" }}>
+                        <span style={{ fontSize: 11.5, fontWeight: 600, color: PAL.ink }}>Page {p.pageNum}</span>
+                        <span style={{ fontSize: 11, color: PAL.muted, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(p.text || "").replace(/\s+/g, " ").trim().slice(0, 60) || "(no text read)"}{conf}</span>
+                        {active && <span style={{ fontSize: 10.5, color: PAL.accent, fontWeight: 700, whiteSpace: "nowrap" }}>LOADED</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               {deedQueue.length > 1 && (
                 <div style={{ marginBottom: 10, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, overflow: "hidden" }}>
                   {deedQueue.map((r, i) => {
                     const active = r.id === deedActiveId, ok = !r.error && r.boundaryCalls > 0;
                     return (
-                      <div key={r.id} data-testid="deed-queue-row" onClick={() => { if (r.error) return; setDeedActiveId(r.id); setDeedName(r.name); if (r.text) setMbText(r.text); setDeedErr(""); }}
+                      <div key={r.id} data-testid="deed-queue-row" onClick={() => { if (r.error) return; setDeedActiveId(r.id); setDeedName(r.name); setOcrRun(r.ocr || null); if (r.text) setMbText(r.text); setDeedErr(""); }}
                         style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "7px 10px", cursor: r.error ? "default" : "pointer", borderTop: i ? `1px solid ${PAL.panelLine}` : "none", background: active ? "rgba(124,58,237,0.08)" : "transparent" }}>
                         <span style={{ fontSize: 11.5, fontWeight: 600, color: r.error ? PAL.danger : PAL.ink, fontFamily: MONO_FONT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "50%" }}>📄 {r.name}</span>
                         <span style={{ fontSize: 11, color: r.error ? PAL.danger : PAL.muted, flex: 1, lineHeight: 1.4 }}>{r.error ? r.error : `${r.boundaryCalls} call${r.boundaryCalls > 1 ? "s" : ""}${r.exCount ? ` · +${r.exCount} save-and-except` : ""} · ${r.closes ? "closes" : `gap ${r.gap.toFixed(1)}′`}`}</span>
@@ -26126,7 +26252,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   })}
                 </div>
               )}
-              <textarea value={mbText} onChange={(e) => { const v = e.target.value; setMbText(v); setDeedQueue((q) => q.map((r) => (r.id === deedActiveId ? { ...r, text: v } : r))); }} rows={5}
+              {/* B768160 — when the box holds OCR'd text, low-confidence tokens are highlighted so the
+                  user's eye goes straight to the characters most likely wrong, rather than
+                  proofreading a whole page (an empty lowConfidenceSpans renders a plain textarea,
+                  byte-identical to every non-OCR path). */}
+              <OcrDeedTextarea value={mbText} lowConfidenceSpans={ocrLcSpans}
+                onChange={(e) => { const v = e.target.value; setMbText(v); setDeedQueue((q) => q.map((r) => (r.id === deedActiveId ? { ...r, text: v } : r))); }} rows={5}
                 placeholder={'Paste a legal description, e.g.\nBEGINNING at a point… THENCE N 45°30′00″ E, 150.00 feet;\nTHENCE S 44°30′00″ E, 300.00 feet; …'}
                 style={{ width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: 12, fontFamily: MONO_FONT, border: BORDER_1, borderRadius: 8, color: PAL.ink, resize: "vertical", lineHeight: 1.5 }} />
               <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
@@ -26138,6 +26269,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {calls.length > 0 && !closes && (
                   <div style={{ flexBasis: "100%", fontSize: 11, color: PAL.warn, lineHeight: 1.45 }}>
                     ⚠ These calls don't close back to the start — the boundary is plotted exactly as written, with the gap on the last edge. Check the description against the survey.
+                    {/* B768160 — CLAUDE.md item (f): use closure as the OCR safety net. When the OCR'd
+                        text produced a bad closure, point at the specific calls with the lowest OCR
+                        confidence (or a likely-lost-decimal-point distance) as the probable culprits,
+                        instead of just drawing a wrong polygon and saying nothing. */}
+                    {ocrCulprits.length > 0 && (
+                      <div style={{ marginTop: 6 }}>
+                        Likely OCR culprit{ocrCulprits.length > 1 ? "s" : ""} — check {ocrCulprits.map((c, i) => (
+                          <span key={c.index}>{i > 0 ? ", " : ""}<b>call {c.index + 1}</b> ({c.call.bearing}, {c.call.distFt.toFixed(2)}′{c.suspect ? " — distance may be missing a decimal point" : c.minConfidence != null ? ` — ${Math.round(c.minConfidence)}% OCR confidence` : ""})</span>
+                        ))} first.
+                      </div>
+                    )}
                   </div>
                 )}
                 {calls.some((c) => c.curve) && (() => {
