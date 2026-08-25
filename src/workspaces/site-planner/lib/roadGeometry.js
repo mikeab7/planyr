@@ -379,22 +379,27 @@ export function insertRoadVertex(pts, vtx, edgeIndex, pt, opts = {}) {
   return { pts: nextPts, vtx: nextVtx, index: at };
 }
 
-/* Remove control point `index` from the alignment. Returns fresh `{ pts, vtx }`, or `null`
- * (a no-op) when the removal is disallowed: an ENDPOINT (index 0 or last) or a road already
- * at the 2-point minimum. Guards exactly the two conditions in the brief — "never remove an
- * endpoint, never drop below 2 points." */
+/* Remove control point `index` from the alignment — an ENDPOINT included: on a road with 3+
+ * points, removing endpoint 0 or the last simply SHORTENS the line, and the adjacent vertex
+ * becomes the new endpoint (the same thing every CAD/GIS polyline editor does, and the same
+ * treatment every other vertex-edited path in this app already gives its own endpoints — a
+ * road was the one outlier). Returns fresh `{ pts, vtx }`, or `null` (a no-op) only when the
+ * road is already AT the 2-point minimum — one more removal would leave a degenerate 1-point
+ * line, so the caller falls through to deleting the whole road instead (NEW-1/B649504). */
 export function removeRoadVertex(pts, vtx, index) {
   if (!Array.isArray(pts) || pts.length <= 2) return null;
-  if (!(index > 0 && index < pts.length - 1)) return null; // interior only (blocks endpoints)
+  if (!(index >= 0 && index < pts.length)) return null; // stale/out-of-range index
   const nextPts = pts.filter((_, j) => j !== index);
   const nextVtx = normVtx(pts, vtx).filter((_, j) => j !== index);
   return { pts: nextPts, vtx: nextVtx };
 }
 
 /* Whether control point `index` of a road may be removed (drives the context menu's
- * enabled/"min reached" state). Interior-only + above the 2-point minimum. */
+ * enabled/"min reached" state). Any point — endpoint or interior — above the 2-point
+ * minimum; matches the rule every other vertex-edited element type already uses
+ * (`pts.length > min`), so a road's endpoints are no longer a special case (NEW-1/B649504). */
 export function canRemoveRoadVertex(pts, index) {
-  return Array.isArray(pts) && pts.length > 2 && index > 0 && index < pts.length - 1;
+  return Array.isArray(pts) && pts.length > 2 && index >= 0 && index < pts.length;
 }
 
 /* ---- One-shot near-duplicate vertex cleanup (NEW-3) ----------------------------------

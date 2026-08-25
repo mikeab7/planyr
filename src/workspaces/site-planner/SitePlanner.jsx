@@ -7564,17 +7564,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (!el || el.locked) return null;
       // B718: a centerline road is vertex-editable too — its editable "path" is its centerline
       // (`pts`, open). A wide `edgeTolFt` (≈ strip half-width) lets a Shift-/right-click land
-      // ANYWHERE on the pavement strip and project onto the centerline; endpoints are protected.
+      // ANYWHERE on the pavement strip and project onto the centerline.
       // NEW-1 — a road's editable "path" is its centerline (`pts`, open), but the EDGE hit test runs
       // against the CURVED centerline the renderer actually draws, not the chords between control
       // points: on a bend the chord cuts the corner, so the pavement on the outside of the curve sits
       // further from the chord than the tolerance and a right-click there found no edge at all (no
       // "Add control point" — the element menu opened instead). `projectEdge` returns the hit ON the
       // drawn centerline plus the control-point segment that owns it, which is exactly what
-      // insertRoadVertex takes. Endpoints are protected; the wide `edgeTolFt` (≈ strip half-width)
-      // still lets a click land ANYWHERE on the pavement.
+      // insertRoadVertex takes. The wide `edgeTolFt` (≈ strip half-width) lets a click land ANYWHERE
+      // on the pavement.
+      // NEW-1/B649504 — endpoints are DELETABLE like any other control point (removing one shortens
+      // the road; canRemoveRoadVertex only blocks the true 2-point floor) — a road used to be the one
+      // element type that categorically excluded its endpoints from deletion, which is what made the
+      // context menu's "min reached" disabled row a LIE on a 3+ point road. See roadGeometry.js.
       if (isCenterlineRoad(el)) return {
-        layer: "road", id: el.id, pts: el.pts, closed: false, min: 2, noEndpointDelete: true,
+        layer: "road", id: el.id, pts: el.pts, closed: false, min: 2,
         edgeTolFt: (+el.travelW || 0) / 2 + roadCurbWidth(el) + 11 / view.ppf,
         projectEdge: (fp) => projectToRoadCenterline(el.pts, el.vtx, fp, { defaultRadius: roadDefaultRadius(el, settings), sharpAt: sharpFor(el) }),
       };
@@ -7670,9 +7674,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // element delete instead of silently swallowing the keypress — a stale/at-min armed vertex must never
   // wedge the Delete key (NEW-1/NEW-2).
   const deleteVtx = (layer, id, index) => {
-    if (layer === "road") { // B718: interior-only + never below 2 points (removeRoadVertex guards both); keep vtx in sync.
+    if (layer === "road") { // B718/NEW-1(B649504): any control point incl. an endpoint, never below 2 points (removeRoadVertex guards the floor); keep vtx in sync.
       const el = els.find((x) => x.id === id);
-      if (!el || !isCenterlineRoad(el) || !canRemoveRoadVertex(el.pts, index)) { setSelVtx(null); setRoadVtxSel(null); return false; } // endpoint / min-2 / stale index → clear the armed point so Delete can't wedge, then fall through to whole-road delete
+      if (!el || !isCenterlineRoad(el) || !canRemoveRoadVertex(el.pts, index)) { setSelVtx(null); setRoadVtxSel(null); return false; } // at the 2-pt floor / stale index → clear the armed point so Delete can't wedge, then fall through to whole-road delete
       pushHistory();
       setEls((a) => a.map((x) => {
         if (x.id !== id || !isCenterlineRoad(x)) return x;
@@ -7742,13 +7746,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
     }
     if (e.button === 0 && !e.shiftKey) {
-      // B718: for a road, only arm an INTERIOR vertex for the Delete key. A road ENDPOINT (or the
-      // body) leaves selVtx null so pressing Delete still removes the WHOLE road (today's behavior)
-      // instead of silently no-op-ing on a protected endpoint. Endpoint DRAG still runs via
-      // startRoadVtx (bubble phase — capture doesn't stopPropagation here).
-      const roadEndpoint = path.layer === "road" && v && (v.index === 0 || v.index === path.pts.length - 1);
-      setSelVtx(v && !roadEndpoint ? { layer: path.layer, id: path.id, index: v.index } : null);
+      // NEW-1/B649504 — every vertex arms for the Delete key the same way, road endpoints included:
+      // deleting one is now a valid shorten (see roadGeometry.js), and `deleteVtx` itself already
+      // falls through to a whole-element delete when a vertex turns out not to be removable (the
+      // true 2-point floor) — so there is no special case left to carve out here. A road used to be
+      // the one layer that refused to arm its own endpoints; that was the false "min reached" bug.
+      setSelVtx(v ? { layer: path.layer, id: path.id, index: v.index } : null);
     }
+  };
+  // NEW-1/B649504 — when a right-clicked control point is genuinely at its path's minimum (removing
+  // it would leave a degenerate line), an OPEN path offers "Delete <type>" instead of a dead greyed
+  // row: the user's actual intent at a 2-point road/easement/measurement/markup is to remove the
+  // whole feature, not to fight a control point that was never going to move. Closed rings (parcels,
+  // building-shaped elements, polygon markups/easements) keep the plain disabled row — 3 points is a
+  // genuine floor for a ring and the "min reached" message is already true there.
+  const WHOLE_DELETE_LABEL = { road: "Delete road", ease: "Delete easement", measure: "Delete measurement", markup: "Delete markup" };
+  const deleteWholeFromVtxMenu = (layer, id) => {
+    const target = layer === "road" ? { kind: "el", id } : layer === "measure" ? { kind: "measure", i: id } : { kind: "markup", id };
+    deleteSel(target, { entry: "vtxMenu:wholeDelete" });
   };
   const onCanvasVtxContextCapture = (e) => {
     const path = editablePath();
@@ -7757,14 +7772,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const { v, e: edge } = hitEditPath(path, fp);
     if (v) { // near a vertex (corner) → Delete control point — a corner ALWAYS wins over its edges
       e.preventDefault(); e.stopPropagation();
-      // B718: roads protect endpoints — canDelete is interior-only + above the 2-point minimum, and
-      // a protected endpoint is NOT armed for the Delete key (leave selVtx null → whole-road delete).
-      const canDel = path.noEndpointDelete ? canRemoveRoadVertex(path.pts, v.index) : path.pts.length > path.min;
-      setSelVtx(path.noEndpointDelete && !canDel ? null : { layer: path.layer, id: path.id, index: v.index });
+      // NEW-1/B649504 — ONE rule for every layer, roads included: deletable above the path's stated
+      // minimum, full stop. Roads no longer single out their endpoints (see roadGeometry.js).
+      const canDel = path.pts.length > path.min;
+      setSelVtx({ layer: path.layer, id: path.id, index: v.index });
+      const wholeDeleteLabel = !canDel && !path.closed ? (WHOLE_DELETE_LABEL[path.layer] || null) : null;
       // NEW-5 — a road TERMINUS is where a roundabout can go, so the menu that already hosts
       // "Add / Delete control point" is where the owner already right-clicks for it.
       const roadEnd = path.layer === "road" ? (v.index === 0 ? "start" : v.index === path.pts.length - 1 ? "end" : null) : null;
-      setVtxMenu({ mode: "vertex", layer: path.layer, id: path.id, index: v.index, canDelete: canDel, roadEnd, x: e.clientX, y: e.clientY });
+      setVtxMenu({ mode: "vertex", layer: path.layer, id: path.id, index: v.index, canDelete: canDel, wholeDeleteLabel, roadEnd, x: e.clientX, y: e.clientY });
     } else if (edge) { // on an edge (away from any corner) → Add control point here
       e.preventDefault(); e.stopPropagation();
       setVtxMenu({ mode: "edge", layer: path.layer, id: path.id, index: edge.index, ptFeet: edge.pt, x: e.clientX, y: e.clientY });
@@ -23231,7 +23247,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {inlineLabelControls(e, "easement", coalesceLabelWrite(selMarkup.id, (p) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, ...p } : m)))))}
                 <Field label="Notes"><textarea value={e.notes || ""} onChange={(ev) => setSelEasement({ notes: ev.target.value })} rows={2} style={{ width: 150, boxSizing: "border-box", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: BORDER_1, borderRadius: 8, color: PAL.ink, resize: "vertical" }} /></Field>
                 <div style={{ fontSize: 11.5, color: PAL.muted, marginTop: 6 }}>Area: <b style={{ color: PAL.ink }}>{Math.round(area).toLocaleString()} SF</b> · {(area / SQFT_PER_ACRE).toFixed(2)} AC</div>
-                <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 6 }}>{isStrip ? "Drag a centerline dot to reshape (the strip re-offsets); ＋ adds a point, Shift-click removes one." : "Drag a boundary dot to reshape; ＋ adds a point, Shift-click removes one."}</div>
+                {/* NEW-1/B649504 — this used to claim "Shift-click removes one", which no gesture in the
+                    app actually does (Shift-click on an edge only ADDS a point — see onCanvasVtxDownCapture);
+                    removal has only ever been right-click a dot, or select it and press Delete. Say the true
+                    thing (WRONG-CASE / LOUD-FAILURE: a hint that describes a feature that doesn't exist is
+                    the same class of lie as a false disabled-reason string). */}
+                <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 6 }}>{isStrip ? "Drag a centerline dot to reshape (the strip re-offsets); Shift-click an edge to add a point, right-click a dot to remove one." : "Drag a boundary dot to reshape; Shift-click an edge to add a point, right-click a dot to remove one."}</div>
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                   <button style={chip} onClick={() => toggleMarkupLock(e.id)}>{e.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
                   <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:easement" })}>Delete</button>
@@ -23347,7 +23368,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       ? "Move the deed as one piece; use Align to parcel (or Rotate) above to line it up."
                       : selMarkup.kind === "line"
                         ? "Drag either end dot to move it."
-                        : "Drag a dot to reshape; ＋ adds a point; Shift-click a dot removes it."}
+                        // NEW-1/B649504 — see the easement hint above: Shift-click never removed a point
+                        // (only adds, on an edge); removal is right-click a dot, or select + Delete.
+                        : "Drag a dot to reshape; Shift-click an edge to add a point, right-click a dot to remove one."}
                 </div>
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                   <button style={chip} onClick={() => toggleMarkupLock(selMarkup.id)}>{selMarkup.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
@@ -24433,7 +24456,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 10 }}>
                       <span style={{ fontSize: 11.5, color: PAL.muted, whiteSpace: "nowrap" }} title="The open-water surface at the design water level (shrinks as the berm rises); distinct from the drawn footprint at the outer toe.">{f2(g_waterSf / SQFT_PER_ACRE)} AC water surface</span>
                       <span style={{ display: "flex", alignItems: "center", gap: 8, flex: "none" }}>
-                        <RowInfo label={pondDisplayName(g_roleInfo.role)} sections={[{ text: "Drag the body to move. Drag a corner dot to reshape; click + on an edge to add a point; Shift-click to delete one." }]} />
+                        {/* NEW-1/B649504 — "click + on an edge" / "Shift-click to delete" described gestures
+                            this app doesn't have: adding is Shift-click an edge, removing is right-click a
+                            dot (or select it and press Delete). */}
+                        <RowInfo label={pondDisplayName(g_roleInfo.role)} sections={[{ text: "Drag the body to move. Drag a corner dot to reshape; Shift-click an edge to add a point; right-click a dot to remove one." }]} />
                         <button style={{ ...chip, padding: "3px 8px" }} onClick={() => toggleLock(selEl.id)} title="Pin in place: prevents accidental moves/edits">{selEl.locked ? "📌 Unpin" : "📌 Pin"}</button>
                         <button type="button" style={{ ...chip, padding: "3px 10px", color: PAL.danger, fontWeight: 700 }} onClick={() => deleteSel(null, { entry: "panel:pond" })}>Delete</button>
                       </span>
@@ -26020,6 +26046,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         <ContextMenu x={vtxMenu.x} y={vtxMenu.y} onClose={() => setVtxMenu(null)} minWidth={190} zIndex={6000} className="menu" panelStyle={menuPanel}>
           {vtxMenu.mode === "edge"
             ? <button style={menuItem(false)} onClick={() => { insertVtx(vtxMenu.layer, vtxMenu.id, vtxMenu.index, vtxMenu.ptFeet); setVtxMenu(null); }}>＋&nbsp; Add control point</button>
+            // NEW-1/B649504 — at the path's true minimum (a 2-point road/easement/measurement/
+            // markup), removing this point would leave a degenerate line, so a disabled "min
+            // reached" row is a dead end with nothing left to click. Offer the delete the user
+            // actually wants — the whole feature — instead of a row that can never be true AND
+            // useful at the same time. A closed ring (parcel/element/polygon) at its own minimum
+            // keeps the plain disabled row: "min reached" is an honest, correct statement there.
+            : vtxMenu.wholeDeleteLabel
+            ? <button style={{ ...menuItem(false), color: "#b3361b" }} onClick={() => { deleteWholeFromVtxMenu(vtxMenu.layer, vtxMenu.id); setVtxMenu(null); }}>✕&nbsp; {vtxMenu.wholeDeleteLabel}</button>
             : <button disabled={!vtxMenu.canDelete} style={{ ...menuItem(false), color: vtxMenu.canDelete ? "#b3361b" : "#b9b3a6", cursor: vtxMenu.canDelete ? "pointer" : "default" }} onClick={() => { if (vtxMenu.canDelete) { deleteVtx(vtxMenu.layer, vtxMenu.id, vtxMenu.index); setVtxMenu(null); } }}>✕&nbsp; Delete control point{vtxMenu.canDelete ? "" : " (min reached)"}</button>}
           {/* NEW-5 — ROUNDABOUT, on the road-terminus branch of the menu the owner already uses.
               The size shown is the class's own derived diameter (a WB-67 truck route and an auto
