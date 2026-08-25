@@ -83,7 +83,8 @@ export function markupHitModel(m) {
     case "polyline":
     case "traced":
     case "infwater": return { path: m.pts || [], closed: false, filled: false, area: 0 };
-    case "polygon": return { ring: m.pts || [], closed: true, filled: (m.fillOpacity || 0) > 0, area: ringArea(m.pts || []) };
+    case "polygon":
+    case "cloud": return { ring: m.pts || [], closed: true, filled: (m.fillOpacity || 0) > 0, area: ringArea(m.pts || []) };
     case "rect": return { ring: boxCorners(m), closed: true, filled: (m.fillOpacity || 0) > 0, area: Math.abs((m.w || 0) * (m.h || 0)) };
     case "ellipse": return { ring: ellipseRing(m), closed: true, filled: (m.fillOpacity || 0) > 0, area: Math.abs(Math.PI * (m.w || 0) * (m.h || 0) / 4) };
     case "encumbrance":

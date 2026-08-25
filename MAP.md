@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-25 @ `77fa919f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-25 @ `540ef8fd` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_560 source files mapped._
+_561 source files mapped._
 
 ## infra
 
@@ -551,6 +551,8 @@ _560 source files mapped._
   - _exports_: `channelCell`, `channelSlope`, `cutSection`, `flowBearing`, `gridCellFt`, `sampleAtPixel`, `siteMaskFromLatLngRings`, `upstreamEdgeFlags`
 - **`src/workspaces/site-planner/lib/cityLimitClass.js`** — What KIND of city limit a polygon is, kept as a named class and never collapsed to a boolean: full purpose · limited purpose · strip annexation · unknown, each carrying whether it governs fully and a plain-English gloss. Baytown's one layer mixes all three, and a limited-purpose area does not carry a city's ordinances the way full-purpose limits do. `declaredLimitClassing` is the registry contract — a city-limits source must declare its class field + value map OR declare `fullPurposeOnly`, and one that declares neither fails its own fixture rather than answering; `classifyCityLimit` never upgrades an unknown to full.
   - _exports_: `CITY_LIMIT_CLASS_ORDER`, `CITY_LIMIT_CLASSES`, `cityLimitGloss`, `cityLimitLabel`, `classifyCityLimit`, `declaredLimitClassing`, `dominantClass`
+- **`src/workspaces/site-planner/lib/cloudGeometry.js`** — Revision-cloud markup geometry: `cloudScallopPath` turns a closed vertex ring + an arc radius into the scalloped SVG outline (arcs evenly distributed per edge, remainder absorbed rather than left as a stunted last arc), `edgeScallopCount`/`clampCloudArcFt` the supporting math, `simplifyPath` a Ramer–Douglas–Peucker reducer for a freehand-drawn outline, `cloudMetaDefaults` the Bluebeam-parity metadata (Subject/Comment/Author/Created/Modified/Status/Label/Layer) stamped on a new cloud.
+  - _exports_: `clampCloudArcFt`, `CLOUD_ARC_DEFAULT_FT`, `CLOUD_ARC_MAX_FT`, `CLOUD_ARC_MIN_FT`, `CLOUD_ARC_PRESETS`, `CLOUD_STATUS_OPTIONS`, `cloudMetaDefaults`, `cloudScallopPath`, `edgeScallopCount`, `simplifyPath`
 - **`src/workspaces/site-planner/lib/cloudRename.js`** — the project-rename CLOUD write, LOADED ON DEMAND: one atomic `rename_site_group` RPC over the whole site group (so a rename reaches plans this browser has never loaded and cannot half-land), plus the server-side read-then-write degrade for a DB without the migration. Reached only by a dynamic import from `storage.renameSiteGroup` — never static-import it from the boot path.
   - _exports_: `cloudRenameGroup`
 - **`src/workspaces/site-planner/lib/cloudSync.js`** — RLS-scoped Supabase site read/write: per-tab version CAS + thin-clobber guard, keepalive push, delete-tombstone reconcile
