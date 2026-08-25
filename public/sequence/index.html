@@ -10334,21 +10334,44 @@ function StatusPicker({value, onChange, overridden=false}) {
 // dates of its own, or an id with no row left in this project. Such an entry used to render identically to
 // a satisfied one, so a date computed from a SUBSET of its inputs looked exactly like a real one.
 //
-// B655552 — the owner reported two distinct defects in this cell: (A) the second line
-// renders but gets sliced off mid-glyph at the row boundary, and (B) a single link ellipsizes on
-// line 1 while line 2 sits empty instead of wrapping into it. Both trace to the same root cause —
-// two lines only render cleanly once the row is tall enough to hold them — but are separate fixes
-// below (measured: each 10px/1.2 line-height line naturally needs 12px, so 2 lines need 24px — with
-// the 0px vertical padding below, that's exactly ROW_H's default of 24. ROW_H can be set as low as
-// 20 via the Format panel's row-height slider, which is 4px short — the OLD flexbox layout shrank
-// each line to a 10px box via `minHeight`, clipping ~2px off the BOTTOM of every line's glyphs at
-// the default setting, ~4px at the 20px floor — that was defect A). DEPCELL_TWO_LINE_MIN_H is that
-// measured threshold: at/above it, two full, unclipped lines fit; below it, DepCell shows a single
-// clean line instead of a partial second one — never a half-clipped line. Defect B's fix is the
-// items.length===1 branch just below: at/above the threshold, a lone link's name WRAPS into the
-// second line via line-clamp instead of ellipsizing on line 1 while line 2 goes unused.
-const DEPCELL_LINE_H = 12;                      // 10px font-size * 1.2 line-height, measured
-const DEPCELL_TWO_LINE_MIN_H = DEPCELL_LINE_H * 2; // = 24px — matches ROW_H's default exactly
+// B655552 shipped two lines gated on a 24px threshold (10px font / 12px line-height, "measured" —
+// which is what 1.2x line-height naturally renders for a 10px font). The owner's row-height slider
+// floor is 20px, and his OWN saved setting (confirmed via Supabase: settings.rowHeight === 20) sits
+// AT that floor — 4px short of the threshold — so every predecessor/successor cell on his real
+// schedule fell back to the "one line + '+N'" degradation. That fallback was never something he
+// asked for; his spec, restated three times, is two lines, unconditionally. B655552 (round 2) (2026-08-25) —
+// re-measured with the REAL Inter font (not a fallback sans-serif) via a live headless render of
+// this page: for THIS font, the natural non-clipping line-height is exactly font-size + 2px at every
+// size tested (10→12, 9→11, 8→10, 7→9 — anything tighter clips, confirmed both ways). So the fix
+// is not a bigger row — the owner explicitly chose to shrink the cell's OWN text instead, after
+// being shown the alternative (a taller row, changing the whole grid) and picking this trade-off
+// knowingly. DEPCELL_FONT_SIZE 8 / DEPCELL_LINE_H 10 is the largest size in that safe series whose
+// two-line total (20px) still fits his floor with zero clipping — same box-equals-ink relationship
+// the original 10/12 pair already shipped safely at, just smaller. This makes `canTwoLine` true
+// across the ENTIRE 20–34 row-height slider range in the grid/split view (s.height is ROW_H there,
+// clamped to that range) — the one-line "+N" fallback below is now reachable ONLY from MasterView's
+// own DepCell call site, whose `s` carries no `height` at all (a separate, pre-existing, narrower
+// list view outside this report's scope — left untouched). The font size is intentionally FIXED
+// across the whole slider range rather than scaling up with extra room: the original design never
+// scaled with ROW_H either (10px/12px was constant from 24 all the way to 34), and a size that
+// changes with an unrelated setting would be a new, untested variant — the exact thing this rule
+// exists to prevent (see the B655552 defect-B history above).
+//
+// B655552 (round 2) also adds the hover requirement: `title` on the cell now always lists every item's FULL
+// label + name (untruncated, one per line via the native tooltip), not just the flagged/lag-hint
+// text the caller may also supply (which is appended below the list, not replaced). A native
+// `title` was chosen over a positioned overlay specifically because this grid has a history of
+// overlays swallowing presses meant for the cell underneath (CHROME-NEVER-EATS-A-PRESS) — the
+// browser's own tooltip never participates in hit-testing, so it cannot intercept the double-click
+// that opens the predecessor editor, cannot conflict with the existing "+N" hover popup below, and
+// needs no new interaction-safety proof.
+const DEPCELL_FONT_SIZE = 8;                    // largest size whose natural line-height fits the 20px floor
+const DEPCELL_LINE_H = 10;                      // 8px font-size's own natural (non-clipping) line-height, measured
+const DEPCELL_TWO_LINE_MIN_H = DEPCELL_LINE_H * 2; // = 20px — matches the row-height slider's floor exactly
+function depCellFullTitle(items, renderLabel, renderName, extraNote) {
+  const list = items.map(item => `${renderLabel(item)} · ${renderName(item)}`).join("\n");
+  return extraNote ? `${list}\n\n${extraNote}` : list;
+}
 function DepCell({items, renderLabel, renderName, s, title, flagged}) {
   const [hovered, setHovered] = useState(false);
   const [pos, setPos] = useState({top:0, left:0, width:0});
@@ -10366,14 +10389,16 @@ function DepCell({items, renderLabel, renderName, s, title, flagged}) {
 
   if (!items.length) return <span style={{...s}} />;
 
+  const fullTitle = depCellFullTitle(items, renderLabel, renderName, title);
+
   // Exactly one link, with room for a second line: let the name WRAP into the otherwise-unused
   // second line instead of ellipsizing on line 1 while line 2 sits empty.
   if (items.length === 1 && canTwoLine) {
     const item = items[0];
     return (
-      <div ref={ref} title={title || undefined} style={{...s, alignItems:"flex-start", padding:"0 8px", whiteSpace:"normal"}}>
+      <div ref={ref} title={fullTitle} style={{...s, alignItems:"flex-start", padding:"0 8px", whiteSpace:"normal"}}>
         <span style={{display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical",
-          overflow:"hidden", lineHeight:`${DEPCELL_LINE_H}px`, fontSize:10, fontFamily:"'Inter',system-ui,sans-serif",
+          overflow:"hidden", lineHeight:`${DEPCELL_LINE_H}px`, fontSize:DEPCELL_FONT_SIZE, fontFamily:"'Inter',system-ui,sans-serif",
           whiteSpace:"normal", width:"100%", minWidth:0, wordBreak:"break-word"}}>
           <span style={{color: flagged && flagged(item) ? "var(--warn-text,#a16207)" : "#1d4ed8", fontWeight:500}}>{flagged && flagged(item) ? "⚠ " : ""}{renderLabel(item)}</span>
           <span style={{color:"var(--mut)"}}> · {renderName(item)}</span>
@@ -10386,16 +10411,16 @@ function DepCell({items, renderLabel, renderName, s, title, flagged}) {
 
   return (
     <>
-      <div ref={ref} title={title || undefined}
+      <div ref={ref} title={fullTitle}
         style={{...s, flexDirection:"column", alignItems:"flex-start", justifyContent:"flex-start", gap:0, padding:"0 8px"}}
         onMouseEnter={onEnter} onMouseLeave={() => setHovered(false)}>
         {slots.map((item, i) => (
           <div key={i} style={{display:"flex", alignItems:"baseline", gap:3, overflow:"hidden", width:"100%", lineHeight:`${DEPCELL_LINE_H}px`, minHeight:DEPCELL_LINE_H}}>
             {item != null && <>
-              <span style={{fontSize:10, color: flagged && flagged(item) ? "var(--warn-text,#a16207)" : "#1d4ed8", fontFamily:"'Inter',system-ui,sans-serif", fontWeight:500, flexShrink:0}}>{flagged && flagged(item) ? "⚠ " : ""}{renderLabel(item)}</span>
-              <span style={{fontSize:10, color:"var(--mut)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1}}>· {renderName(item)}</span>
+              <span style={{fontSize:DEPCELL_FONT_SIZE, color: flagged && flagged(item) ? "var(--warn-text,#a16207)" : "#1d4ed8", fontFamily:"'Inter',system-ui,sans-serif", fontWeight:500, flexShrink:0}}>{flagged && flagged(item) ? "⚠ " : ""}{renderLabel(item)}</span>
+              <span style={{fontSize:DEPCELL_FONT_SIZE, color:"var(--mut)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1}}>· {renderName(item)}</span>
               {i === visibleCount - 1 && extra > 0 &&
-                <span style={{fontSize:9, color:"#94a3b8", flexShrink:0, marginLeft:3, fontFamily:"'Inter',system-ui,sans-serif"}}>+{extra}</span>}
+                <span style={{fontSize:DEPCELL_FONT_SIZE, color:"#94a3b8", flexShrink:0, marginLeft:3, fontFamily:"'Inter',system-ui,sans-serif"}}>+{extra}</span>}
             </>}
           </div>
         ))}
