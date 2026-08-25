@@ -16,7 +16,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { sanitizeProjects, parseNavState, deriveCurrentProject, findBySiteId, needsScheduleCarryIn, dashboardNavActions } from "../src/workspaces/scheduler/lib/navState.js";
+import { sanitizeProjects, parseNavState, deriveCurrentProject, findBySiteId, needsScheduleCarryIn, dashboardNavActions, isPickShowing } from "../src/workspaces/scheduler/lib/navState.js";
 
 const WELL_FORMED = [{ id: 1, name: "Goose Creek" }, { id: 3, name: "Grand Port Logistics" }];
 const navMsg = (over = {}) => ({ source: "planar-seq", type: "planar:nav-state", section: "projects", activeId: 3, projects: WELL_FORMED, ...over });
@@ -183,6 +183,35 @@ describe("needsScheduleCarryIn — re-drive the grid onto the routed site's sche
       expect(needsScheduleCarryIn(LINKED, "gp", 2, s)).toBe(false);
       expect(needsScheduleCarryIn(LINKED, "gc", 2, s)).toBe(true);
     }
+  });
+});
+
+/* B748064 — the owner's report: on a project with no linked schedule (the empty-state screen),
+ * clicking a switcher row does nothing. A LINKED target works today because picking it also moves
+ * the route (onProjectChange). A CROSS-CUTTING unlinked target (Operations/Pursuits) never moves
+ * the route — it can't, it isn't tied to any site — so the fix has to let the pick win on its own
+ * merits once it is genuinely showing in the embed. */
+describe("isPickShowing — a deliberate switcher pick overrides the route-derived project", () => {
+  it("false with no pick recorded (initial mount — must never match by coincidence)", () => {
+    expect(isPickShowing(null, null, "projects")).toBe(false);
+    expect(isPickShowing(undefined, null, "projects")).toBe(false);
+  });
+
+  it("false while the embed hasn't caught up to the pick yet (activeId still the old project)", () => {
+    expect(isPickShowing(7, 1, "projects")).toBe(false);
+  });
+
+  it("true once the embed reports the picked id as active, on the projects section", () => {
+    expect(isPickShowing(7, 7, "projects")).toBe(true);
+  });
+
+  it("false on the embed's own Dashboard (reports) even if the id happens to match", () => {
+    expect(isPickShowing(7, 7, "reports")).toBe(false);
+    expect(isPickShowing(7, 7, undefined)).toBe(false);
+  });
+
+  it("false once a later pick or the carry-in moves activeId on — self-clearing, no reset needed", () => {
+    expect(isPickShowing(7, 2, "projects")).toBe(false);
   });
 });
 
