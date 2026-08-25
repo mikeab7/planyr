@@ -155,6 +155,33 @@ export function shouldShowLinkPanel({
   return true;
 }
 
+/* ---- B748064 — a deliberate switcher pick of a CROSS-CUTTING schedule must be visible ----------
+ *
+ * Owner report: on a project with no linked schedule (the empty-state "no schedule for this
+ * project" screen), clicking ANY of the six rows in the switcher does nothing — including
+ * Operations and Pursuits, the two schedules that aren't tied to any site at all.
+ *
+ * Root cause: `currentProject`/`showEmptyState` in Scheduler.jsx are derived purely from the
+ * ROUTE (does the routed site have a linked schedule?), which is right for keeping the grid
+ * pinned to the routed project during ordinary navigation — but it has no way to represent "the
+ * user just explicitly chose a schedule that isn't reachable through the route at all." selectSchedule()
+ * DOES post planar:nav-select and the embedded app DOES switch its own active project — the pick
+ * genuinely lands — but the shell keeps showing the routed project's own empty state over it, so
+ * the switch is invisible. A linked target (Goose Creek, Grand Port, 8 South, Pappadoupolos) works
+ * today because picking one also calls onProjectChange(), which moves the route and makes the
+ * route-derived state resolve to the newly routed project.
+ *
+ * isPickShowing answers "is the schedule the user just picked the one actually active in the
+ * embed right now" — true only once the embed's own reported activeId catches up to the pick, and
+ * only on its projects section. That is what lets a cross-cutting pick override the route-derived
+ * empty state without needing a second, parallel copy of the route logic. Self-clearing: once
+ * activeId moves on (a later pick, or the carry-in effect re-asserting the routed site's own
+ * schedule after a genuine navigation), this answers false again on its own.
+ */
+export function isPickShowing(pickId, activeId, section) {
+  return pickId != null && activeId === pickId && section === "projects";
+}
+
 // Whether the carry-OUT effect may adopt the iframe's active schedule's linked site into an empty
 // route. `dashboardIntent` is the anti-ping-pong guard: clearing the route on Dashboard leaves a
 // window where the route is empty but the iframe hasn't yet reported section "reports" — without

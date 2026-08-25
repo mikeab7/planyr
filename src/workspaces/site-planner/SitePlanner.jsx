@@ -426,7 +426,7 @@ import {
 import { siteState as resolveSiteState } from "./lib/siteRegion.js";
 import { splitPolygonByCut, remapEdgeVector } from "./lib/polygonSplit.js";
 import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea } from "./lib/polyClip.js";
-import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom } from "./lib/sheetFurniture.js";
+import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom, FAB_RESERVE_PX } from "./lib/sheetFurniture.js";
 import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab } from "./lib/buildingProps.js";
 import { createHistoryStack } from "./lib/history.js";
 /* NEW-1 — putting an unlocated plan on the earth, and adjusting where it sits (the "GIS is down"
@@ -16918,6 +16918,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // ghost buttons on the DARK top bar
   const dGhost = { padding: "6px 11px", fontSize: 12.5, borderRadius: 8, border: "1px solid transparent", background: "transparent", color: PAL.chromeInk, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, whiteSpace: "nowrap" };
   const dIcon = { ...dGhost, width: 30, height: 30, padding: 0, display: "grid", placeItems: "center", fontSize: 15 };
+  /* ⛔ B755808 — THE ONE CHROME SYSTEM for the top-right planner toolbar (File / History / View).
+     Every control on this bar — text-labelled or icon-only — shares ONE height (`TB_H`, = dIcon's
+     existing 30px) and ONE corner radius (`TB_R`, = dGhost's existing 8px, already the app-wide
+     ghost-button default). Before this, File carried its own hand-tuned 3px radius and a ~29px
+     implicit height while Undo/Redo/Zoom-to-fit carried dGhost's inherited 8px/30px — three controls,
+     two silently different systems (owner: "this is horrendous UI"). A NEW control on this bar must
+     reuse `TB_H`/`TB_R` (or, for an icon button, `dIcon` outright) rather than inventing a fourth.
+     Related rules enforced the same way here: a container may NEVER carry the disabled treatment —
+     only the glyph dims (`.tb-icon-btn:disabled`, fill="currentColor" + opacity) — so a related group
+     of icon buttons is never wrapped in a filled tray; group them with `vSep`, a plain 1px divider,
+     exactly like every other pair of groups on this bar. See `test/toolbarChromeSystem.test.js`. */
+  const TB_H = dIcon.height; // 30 — shared height for every top-right toolbar control
+  const TB_R = dGhost.borderRadius; // 8 — shared corner radius for every top-right toolbar control
   // NEW-1 — the bottom-center canvas toast chrome, defined ONCE. The pill geometry and its two
   // button treatments were copied inline at every toast site (the pob/route/warn/deed-align pill,
   // the overlay-calibration pill, and now the parcel-select hint), so each new message re-shipped
@@ -18559,9 +18572,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           B1042 — opening the File menu warms the lazy export chunk, so by the time a download is
           clicked the code is already in hand (no perceptible fetch).
           ⛔ TOOLBAR PASS (B727504) — a bare word with no boundary and no caret reads as a heading,
-          not a control (owner report: "I can't tell what's going on with it"). It now carries a
-          real 1px border, a 3px corner radius, and a 9px disclosure caret, and stays visibly
-          "pressed" (accent border + tinted fill) for as long as its menu is open. */}
+          not a control (owner report: "I can't tell what's going on with it"). It carries a real
+          1px border and a disclosure caret, and stays visibly "pressed" (accent border + tinted
+          fill) for as long as its menu is open.
+          ⛔ B755808 — the border-radius and height now come from the shared `TB_R`/`TB_H` (see
+          above) instead of a one-off 3px/29px, so File sits on the same grid as the icon buttons
+          beside it; the caret is de-emphasized with the same muted chrome token + lighter weight
+          every other disclosure caret in this app uses (`railHint`, the plan-caret at the
+          breadcrumb) instead of full-ink text jammed against the word. */}
       <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
         <div ref={exportAnchor} style={{ position: "relative" }}>
           {/* No aria-label here on purpose — the visible "File ▾" text is already a complete
@@ -18570,11 +18588,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               caret stays plain text, not aria-hidden, for the same reason. */}
           <button className="dbtn" aria-haspopup="menu" aria-expanded={exportMenu}
             title="File — export, import a project file, or print a PDF"
-            style={{ ...dGhost, fontWeight: 600, display: "flex", alignItems: "center", gap: 5, borderRadius: 3,
+            style={{ ...dGhost, fontWeight: 600, display: "flex", alignItems: "center", gap: 6, height: TB_H, borderRadius: TB_R,
               border: `1px solid ${exportMenu ? PAL.accent : PAL.chromeLine}`,
               background: exportMenu ? "var(--hover-chrome)" : "transparent" }}
             onClick={() => setExportMenu((o) => { if (!o) warmExportSheet(); return !o; })}>
-            File <span style={{ fontSize: 9, lineHeight: 1 }}>▾</span>
+            File <span style={{ fontSize: 10.5, lineHeight: 1, fontWeight: 500, color: PAL.chromeMuted }}>▾</span>
           </button>
           <AnchoredMenu open={exportMenu} onClose={() => setExportMenu(false)} anchorRef={exportAnchor} placement="below-right" gap={8} width={220} panelStyle={menuPanel}>
             <button style={menuItem(false)} title="Download this plan as a project file (.json) you can re-import later" onClick={() => { setExportMenu(false); exportJSON(); }}>Export project file</button>
@@ -18592,8 +18610,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           Office / Google / Adobe all share, not proprietary artwork — see components/icons.jsx)
           instead of the old ↶ / ↷ text glyphs, which render at inconsistent weights across
           platform fonts. Undo and Redo are the SAME MDI path pair, mirrored point-for-point, so
-          they can never drift out of visual sync with each other. */}
-      <div style={{ display: "flex", alignItems: "center", gap: 2, background: "var(--hover-chrome)", borderRadius: 10, padding: 2 }}>
+          they can never drift out of visual sync with each other.
+          ⛔ B755808 — NO FILLED TRAY. This group used to sit inside its own filled
+          `background: var(--hover-chrome)` pill, which is the exact token a disabled icon fades
+          toward — so a disabled Undo/Redo read as one indistinct grey smear instead of two clearly
+          off controls. The container never carries the disabled treatment; only the glyph does
+          (`.tb-icon-btn:disabled`, fill="currentColor" + opacity). The pair now sits bare, exactly
+          like the Zoom-to-fit button beside it, grouped only by the `vSep` dividers on either side —
+          one chrome language for the whole bar, not a fourth invented for this one pair. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
         {/* ⛔ NEW-5 — UNDO IS ASKED ABOUT THE LIVE STATE, not merely about the stack's depth: a
             plain selection click pushed a frame and armed this button while the plan was
             byte-identical, which killed the only "this plan has been modified" signal the owner
@@ -20846,11 +20871,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     () => screenFurniturePlates({ ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: PAL }),
     [view.ppf, PAL],
   );
-  // Would the calibration badge (anchored at left:56, bottom:40) run into the right-anchored
-  // scale bar on the same row? Pure decision in sheetFurniture.js: when they'd meet the badge
-  // is lifted to its own row above the bar (and its width capped). `calibBadgeW` is measured
-  // below; 0 until then → never raised.
-  const calibPlace = calibBadgePlacement({ paneW, badgeW: calibBadgeW, scaleBarW: furnPlates.scaleBar.plateW, scaleBarH: furnPlates.scaleBar.plateH });
+  // NEW-MAPCTRL-3 — on a narrow (phone/tablet) screen, the "✎ Properties" / "✎ Tools" FABs
+  // replace the side rails and claim their own band at the very bottom of the pane
+  // (`bottom:16` + a 38px pill) — a PRESSABLE control that must win the space over passive
+  // furniture. `FURNITURE_ROW` is the one row every bottom-anchored item below (north arrow,
+  // scale bar, the calibration badge) is drawn from; it shifts up by `FAB_RESERVE_PX` whenever
+  // narrow, so none of them can render underneath a FAB. Confirmed collisions this closes:
+  // the badge under "✎ Properties" and the scale bar's right end under "✎ Tools", both
+  // measured live at width 750 before this fix (`ui-audit/verify-canvas-furniture.mjs`).
+  const FURNITURE_ROW = narrow ? 40 + FAB_RESERVE_PX : 40;
+  // Would the calibration badge (anchored at left:56, bottom:FURNITURE_ROW) run into the
+  // right-anchored scale bar on the same row? Pure decision in sheetFurniture.js: when they'd
+  // meet the badge is lifted to its own row above the bar (and its width capped). `calibBadgeW`
+  // is measured below; 0 until then → never raised.
+  const calibPlace = calibBadgePlacement({ paneW, badgeW: calibBadgeW, scaleBarW: furnPlates.scaleBar.plateW, scaleBarH: furnPlates.scaleBar.plateH, row: FURNITURE_ROW });
   // Measure the badge's natural width. The ref sits on the LABEL span, whose `scrollWidth`
   // reports the FULL text width even after the pill caps + ellipsis-truncates it — so raising
   // the badge (which applies the cap) can never feed back and shrink this measurement into an
@@ -22166,8 +22200,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             );
             return (
               <div data-export="skip" style={{ position: "absolute", left: 0, right: 0, bottom: 0, top: 0, pointerEvents: "none", zIndex: MAP_CHROME_Z.furniture }}>
-                <div style={{ position: "absolute", left: 14, bottom: 40 }}>{plate(furn.north)}</div>
-                <div style={{ position: "absolute", right: 14, bottom: 40 }}>{plate(furn.scaleBar)}</div>
+                <div style={{ position: "absolute", left: 14, bottom: FURNITURE_ROW }}>{plate(furn.north)}</div>
+                <div style={{ position: "absolute", right: 14, bottom: FURNITURE_ROW }}>{plate(furn.scaleBar)}</div>
               </div>
             );
           })()}
@@ -22183,7 +22217,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {stdToast && (
             <div data-testid="standards-apply-toast" style={{
               position: "absolute", left: 14, zIndex: 8, maxWidth: "min(340px, calc(100% - 28px))",
-              bottom: canvasPillBottom({ northH: furnPlates.north.plateH, scaleBarH: furnPlates.scaleBar.plateH, calibBottom: calibrationState ? calibPlace.bottom : null }),
+              bottom: canvasPillBottom({ northH: furnPlates.north.plateH, scaleBarH: furnPlates.scaleBar.plateH, calibBottom: calibrationState ? calibPlace.bottom : null, row: FURNITURE_ROW }),
               background: PAL.accent, color: "var(--on-accent)", padding: "8px 14px", borderRadius: 99,
               fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)",
               display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -22699,9 +22733,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* GPS coordinate HUD — floating chip bottom-left (B683). Shows the cursor's WGS84
               lat/long (the coordinate Google Earth / a phone GPS uses), reprojected from the
               planner's feet frame via the SAME feetToLatLng the map render + KMZ export use.
-              EPSG:2278 stays the internal frame for all geometry — this is display-only. */}
-          <CursorChip ll={cursorLL} el={cursorEl} prop={cursorProp}
-            style={{ bottom: 8, left: 10, maxWidth: "calc(100% - 20px)" }} />
+              EPSG:2278 stays the internal frame for all geometry — this is display-only.
+              NEW-MAPCTRL-3 — DROPPED on narrow screens, deliberately, per the priority order a
+              collision-aware layout needs: on a phone/tablet this row (bottom:8) sits directly
+              under the "✎ Properties" FAB's own band, and it is the least essential of the five
+              — passive, decorative telemetry, not a control and not a safety-relevant state
+              (unlike the calibration badge). Hiding it here is strictly better than letting it
+              render invisibly behind a FAB, which is what it did before this fix. */}
+          {!narrow && (
+            <CursorChip ll={cursorLL} el={cursorEl} prop={cursorProp}
+              style={{ bottom: 8, left: 10, maxWidth: "calc(100% - 20px)" }} />
+          )}
         </div>
 
         {/* phone-only floating button to summon the tool rail (B113) */}
