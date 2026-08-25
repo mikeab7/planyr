@@ -125,7 +125,7 @@
       "note": "Larger than the 3016 KB the owner's 2026-07-28 pass reported, and correctly so: that figure counted the 11 chunks a browser actually FETCHED, while this counts all 20 emitted \u2014 the extra 5 are Web Worker bundles (terrainWorker, dxfWorker) and small helper chunks that only a dynamic import ever pulls. Two different questions; the per-route budgets above answer the owner's. CEILING RAISED 3960000 -> 3985000 by B1130/B1131 (2026-07-30), stated in full because raising a ceiling is a product decision. THE KEY POINT: this metric counts EVERY emitted chunk, lazy ones included, BY DESIGN \u2014 that is exactly what makes it the honest catch-all. So the four deferrals that paid the two per-route budgets (see siteRouteJsBytes.note) move bytes OFF the critical path without reducing this number at all, and no amount of further code-splitting can. The residual is ~19 KB of genuine minified code implementing two owner-reported defects on the Electric layer: substations painting as broken-image glyphs labelled \"Mark\", and no way to hover a line or substation to learn what it is. WHAT WAS PAID ELSEWHERE FIRST, so this is not a shortcut: largestChunkBytes was brought back UNDER its existing ceiling with no raise at all (1719.5 -> 1706.8 KB), and siteRouteJsBytes was cut from +20.2 KB to +7.4 KB before its ceiling moved. HEADROOM CONTEXT: main was at 3861.4 KB against the 3867.2 KB ceiling \u2014 5.8 KB \u2014 so like the other two, this metric now trips on essentially any feature; that is a headroom problem to be closed by B1064, not a regression in this PR. Ceiling and target are kept EQUAL here, as they were before, so this metric continues to assert no known gap rather than quietly acquiring one. NEW-1 (2026-07-30): baseline and target are still kept EQUAL for exactly that reason, and the derived headroom band now applies to this metric too \u2014 it was 4.3 KB (0.11%) under its old hand-pinned ceiling and would have been the next surprise."
     },
     "largestChunkBytes": {
-      "baseline": 1609939,
+      "baseline": 1644581,
       "target": 900000,
       "unit": "bytes",
       "what": "The single biggest chunk (today SitePlannerApp).",
@@ -450,6 +450,17 @@
           "commit": "65dfd69120448d8161dbc416d677e633353f78e8",
           "sourceHash": "a33e043d9075bdde",
           "reason": "Easement/encumbrance colour+fill+hatch editing: new shared hatch-pattern module + resolvers + Properties panel controls"
+        },
+        {
+          "metric": "bundle.largestChunkBytes",
+          "from": 1609939,
+          "to": 1644581,
+          "direction": "raise",
+          "item": "B1064",
+          "date": "2026-08-25",
+          "commit": "d69f81703b0e39fd01a38e80a02b7be5c6a25217",
+          "sourceHash": "87176966eb961c7c",
+          "reason": "CI's exact build on main tipped over the derived ceiling after several concurrent PRs landed back-to-back (base ref already +30.9 KB above baseline before this ratchet, from many small legitimate feature merges, none individually ratcheted). B719776-B719779 (the overlay reference/crop fixes that just merged as #1150) contributed +3.7 KB of that within its own PR's headroom band -- correctly, since it passed its own PR-relative check -- but the sum across concurrently-merging branches pushed main itself past the absolute ceiling and blocked the required build check on main. Same recurring shape as this metric's 2026-08-18 entry above (four consecutive blocked pushes, ~18h). Real fix stays B1064 (extract SitePlanner's panels into lazily-loaded children, blocked on the measured indivisible floor documented in this metric's own note); this restores headroom so main and its deploy resume."
         }
       ]
     }
