@@ -426,7 +426,7 @@ import {
 import { siteState as resolveSiteState } from "./lib/siteRegion.js";
 import { splitPolygonByCut, remapEdgeVector } from "./lib/polygonSplit.js";
 import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea } from "./lib/polyClip.js";
-import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom } from "./lib/sheetFurniture.js";
+import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom, FAB_RESERVE_PX } from "./lib/sheetFurniture.js";
 import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab } from "./lib/buildingProps.js";
 import { createHistoryStack } from "./lib/history.js";
 /* NEW-1 — putting an unlocated plan on the earth, and adjusting where it sits (the "GIS is down"
@@ -20871,11 +20871,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     () => screenFurniturePlates({ ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: PAL }),
     [view.ppf, PAL],
   );
-  // Would the calibration badge (anchored at left:56, bottom:40) run into the right-anchored
-  // scale bar on the same row? Pure decision in sheetFurniture.js: when they'd meet the badge
-  // is lifted to its own row above the bar (and its width capped). `calibBadgeW` is measured
-  // below; 0 until then → never raised.
-  const calibPlace = calibBadgePlacement({ paneW, badgeW: calibBadgeW, scaleBarW: furnPlates.scaleBar.plateW, scaleBarH: furnPlates.scaleBar.plateH });
+  // NEW-MAPCTRL-3 — on a narrow (phone/tablet) screen, the "✎ Properties" / "✎ Tools" FABs
+  // replace the side rails and claim their own band at the very bottom of the pane
+  // (`bottom:16` + a 38px pill) — a PRESSABLE control that must win the space over passive
+  // furniture. `FURNITURE_ROW` is the one row every bottom-anchored item below (north arrow,
+  // scale bar, the calibration badge) is drawn from; it shifts up by `FAB_RESERVE_PX` whenever
+  // narrow, so none of them can render underneath a FAB. Confirmed collisions this closes:
+  // the badge under "✎ Properties" and the scale bar's right end under "✎ Tools", both
+  // measured live at width 750 before this fix (`ui-audit/verify-canvas-furniture.mjs`).
+  const FURNITURE_ROW = narrow ? 40 + FAB_RESERVE_PX : 40;
+  // Would the calibration badge (anchored at left:56, bottom:FURNITURE_ROW) run into the
+  // right-anchored scale bar on the same row? Pure decision in sheetFurniture.js: when they'd
+  // meet the badge is lifted to its own row above the bar (and its width capped). `calibBadgeW`
+  // is measured below; 0 until then → never raised.
+  const calibPlace = calibBadgePlacement({ paneW, badgeW: calibBadgeW, scaleBarW: furnPlates.scaleBar.plateW, scaleBarH: furnPlates.scaleBar.plateH, row: FURNITURE_ROW });
   // Measure the badge's natural width. The ref sits on the LABEL span, whose `scrollWidth`
   // reports the FULL text width even after the pill caps + ellipsis-truncates it — so raising
   // the badge (which applies the cap) can never feed back and shrink this measurement into an
@@ -22191,8 +22200,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             );
             return (
               <div data-export="skip" style={{ position: "absolute", left: 0, right: 0, bottom: 0, top: 0, pointerEvents: "none", zIndex: MAP_CHROME_Z.furniture }}>
-                <div style={{ position: "absolute", left: 14, bottom: 40 }}>{plate(furn.north)}</div>
-                <div style={{ position: "absolute", right: 14, bottom: 40 }}>{plate(furn.scaleBar)}</div>
+                <div style={{ position: "absolute", left: 14, bottom: FURNITURE_ROW }}>{plate(furn.north)}</div>
+                <div style={{ position: "absolute", right: 14, bottom: FURNITURE_ROW }}>{plate(furn.scaleBar)}</div>
               </div>
             );
           })()}
@@ -22208,7 +22217,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {stdToast && (
             <div data-testid="standards-apply-toast" style={{
               position: "absolute", left: 14, zIndex: 8, maxWidth: "min(340px, calc(100% - 28px))",
-              bottom: canvasPillBottom({ northH: furnPlates.north.plateH, scaleBarH: furnPlates.scaleBar.plateH, calibBottom: calibrationState ? calibPlace.bottom : null }),
+              bottom: canvasPillBottom({ northH: furnPlates.north.plateH, scaleBarH: furnPlates.scaleBar.plateH, calibBottom: calibrationState ? calibPlace.bottom : null, row: FURNITURE_ROW }),
               background: PAL.accent, color: "var(--on-accent)", padding: "8px 14px", borderRadius: 99,
               fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)",
               display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -22724,9 +22733,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* GPS coordinate HUD — floating chip bottom-left (B683). Shows the cursor's WGS84
               lat/long (the coordinate Google Earth / a phone GPS uses), reprojected from the
               planner's feet frame via the SAME feetToLatLng the map render + KMZ export use.
-              EPSG:2278 stays the internal frame for all geometry — this is display-only. */}
-          <CursorChip ll={cursorLL} el={cursorEl} prop={cursorProp}
-            style={{ bottom: 8, left: 10, maxWidth: "calc(100% - 20px)" }} />
+              EPSG:2278 stays the internal frame for all geometry — this is display-only.
+              NEW-MAPCTRL-3 — DROPPED on narrow screens, deliberately, per the priority order a
+              collision-aware layout needs: on a phone/tablet this row (bottom:8) sits directly
+              under the "✎ Properties" FAB's own band, and it is the least essential of the five
+              — passive, decorative telemetry, not a control and not a safety-relevant state
+              (unlike the calibration badge). Hiding it here is strictly better than letting it
+              render invisibly behind a FAB, which is what it did before this fix. */}
+          {!narrow && (
+            <CursorChip ll={cursorLL} el={cursorEl} prop={cursorProp}
+              style={{ bottom: 8, left: 10, maxWidth: "calc(100% - 20px)" }} />
+          )}
         </div>
 
         {/* phone-only floating button to summon the tool rail (B113) */}

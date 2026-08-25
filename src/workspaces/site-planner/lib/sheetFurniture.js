@@ -176,6 +176,16 @@ export function northArrowPlate({ m, pal = {}, bearingDeg = 0 }) {
 // truncates with an ellipsis instead of overflowing the pane / colliding with the zoom column.
 // Pure → unit-testable. `badgeW` is the badge's natural (untruncated) width in CSS px; pass 0
 // before it's measured (→ never raised). Returns { raise, left, bottom, maxWidth }.
+/* NEW-MAPCTRL-3 — THE ONE reserve every piece of bottom-left/bottom-right canvas furniture
+ * (north arrow, scale bar, this calibration badge) adds to its `row` on a narrow (phone/tablet)
+ * screen, so none of them can render under the "✎ Properties" / "✎ Tools" FABs that replace the
+ * side rails there. Measured against the real rendered FABs: `bottom:16` + a 38px pill, rounded
+ * up with an 8px gap. Confirmed collisions this closes (measured live, headless, at width 750):
+ * the calibration badge (and the coordinate readout it shares a row with) under "✎ Properties",
+ * and the scale bar's own right portion under "✎ Tools" (`ui-audit/verify-canvas-furniture.mjs`).
+ * A control the user can PRESS always wins the band; passive furniture reflows above it. */
+export const FAB_RESERVE_PX = 62;
+
 export function calibBadgePlacement({
   paneW, badgeW, scaleBarW, scaleBarH,
   left = 56, gap = 10, sbRight = 14, zoomRight = 14, zoomW = 30, row = 40,

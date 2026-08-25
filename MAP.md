@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-25 @ `77fa919f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-25 @ `540ef8fd` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -976,7 +976,7 @@ _560 source files mapped._
 - **`src/workspaces/site-planner/lib/sharing.js`** — Project team sharing: stamp/clear team_id on a group's sites, doc_reviews, and file_facts then re-pull the local cache
   - _exports_: `makeProjectPrivate`, `setPlanLock`, `shareProject`
 - **`src/workspaces/site-planner/lib/sheetFurniture.js`** — Map sheet furniture: graphic scale bar and two-tone north arrow, output-unit sized with no-occlude corner placement, screen + export
-  - _exports_: `calibBadgePlacement`, `canvasPillBottom`, `furnitureMetrics`, `northArrowPlate`, `pickScaleBar`, `r2`, `scaleBarPlate`, `screenFurniturePlates`
+  - _exports_: `calibBadgePlacement`, `canvasPillBottom`, `FAB_RESERVE_PX`, `furnitureMetrics`, `northArrowPlate`, `pickScaleBar`, `r2`, `scaleBarPlate`, `screenFurniturePlates`
 - **`src/workspaces/site-planner/lib/sheetFurnitureLayout.js`** — Export-only sheet-furniture tier split out of `sheetFurniture.js` (no-occlude corner placement + the SVG-string builders) so it rides the lazy export chunk instead of the Site route's boot chunk
   - _exports_: `buildScreenFurnitureSvg`, `buildSheetFurnitureSvg`, `chooseFurnitureCorners`, `furnitureLayout`
 - **`src/workspaces/site-planner/lib/siteAnalysis.js`** — Registry-driven environmental/regulatory screen of active-parcel rings (flood, wetlands, wells, pipelines, jurisdiction, road, zoning) with silent-error present/absent/unknown/unavailable states over the SWR cache
