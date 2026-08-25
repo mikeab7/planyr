@@ -1,12 +1,35 @@
 /* B655552 — the Schedule grid's predecessor/successor cell (`DepCell`) had two owner-reported
  * defects: (A) the second line renders but gets sliced off mid-glyph at the row boundary, and
  * (B) a single link ellipsizes on line 1 while line 2 sits empty instead of wrapping into it.
+ * B655552 fixed both, but gated two-line rendering on a 24px row-height threshold — below it,
+ * DepCell fell back to one line + a "+N" badge. The owner's OWN saved row height is 20 (the
+ * slider's floor), so every cell on his real schedule hit that fallback — which he never asked
+ * for and explicitly rejected by name ("all you gave me was a '+1'").
+ *
+ * B655552 (round 2) (2026-08-25) — shown the honest tradeoff (a taller row vs. smaller cell text), the
+ * owner chose to shrink the cell's own text rather than change row height globally. Re-measured
+ * against the REAL Inter font: the natural (non-clipping) line-height for this font is exactly
+ * font-size+2px at every size tested, so DEPCELL_FONT_SIZE 8 / DEPCELL_LINE_H 10 is the largest
+ * size whose two-line total (20px) still fits the slider's floor with zero clipping — the same
+ * box-equals-ink relationship the original 10px/12px pair already shipped safely at. This makes
+ * canTwoLine true across the ENTIRE 20-34 slider range in the grid/split view, so the "+N"
+ * fallback below is now reachable only from MasterView's own DepCell call site (a separate,
+ * pre-existing, narrower list view outside this report's scope). B655552 (round 2) also adds a native
+ * `title` tooltip listing every item's FULL, untruncated name — the owner's new, explicit ask.
  *
  * The real behaviour is pixel geometry across a range of row-height settings, so the actual proof
  * is `ui-audit/verify-depcell-two-line.mjs` — a real headless-Chromium harness, mutation-proven both
  * ways (reverting the vertical padding reproduces defect A's clip; forcing the threshold unreachable
  * reproduces defect B's stuck single line). It is NOT wired into CI (same standing gap as every
  * other `ui-audit/verify-*.mjs` harness — B613760).
+ *
+ * B655552 (round 3) (2026-08-25) — a follow-up owner report, with screenshot: a wrapped single link's
+ * continuation line started flush left, under the ID/lag label, reading as a NEW second entry rather
+ * than the tail of the one above it. Fix: a HANGING INDENT (padding-left + equal-and-opposite
+ * text-indent) on the single-item wrap branch, sized per item via `_cpMeasure` (the shared canvas
+ * text-measurement helper already used elsewhere in this file) so a bare id and a much wider
+ * lag-suffixed label both get a correctly different indent. The multi-slot (2+ link) branch gets NO
+ * indent — the owner explicitly warned against inverting the bug onto genuine multi-item cells.
  *
  * This is the CI-RUNNABLE HALF: it pins the structural facts the fix rests on, so a future edit
  * that quietly removes the threshold check, restores the old vertical padding, or drops the
@@ -48,11 +71,36 @@ describe("B655552 — DepCell two-line threshold, never a partial second line", 
   });
 
   it("the two-line threshold is a measured constant, not a magic number inline", () => {
-    expect(seq, "DEPCELL_LINE_H must be defined").toMatch(/const DEPCELL_LINE_H = 12;/);
+    expect(seq, "DEPCELL_FONT_SIZE must be defined (B655552 (round 2) shrink)").toMatch(/const DEPCELL_FONT_SIZE = 8;/);
+    expect(seq, "DEPCELL_LINE_H must be defined").toMatch(/const DEPCELL_LINE_H = 10;/);
     expect(seq, "DEPCELL_TWO_LINE_MIN_H must be derived from it, never hardcoded separately")
       .toMatch(/const DEPCELL_TWO_LINE_MIN_H = DEPCELL_LINE_H \* 2;/);
     expect(depCellSrc, "DepCell must gate its layout on the row's actual height, not assume it")
       .toMatch(/const canTwoLine = \(s\.height \|\| 0\) >= DEPCELL_TWO_LINE_MIN_H;/);
+  });
+
+  it("the threshold is <= the row-height slider's REAL floor, computed from source (not asserted separately)", () => {
+    // Extract both numbers from source rather than hardcoding two numbers that could silently drift
+    // apart — the actual bug being guarded against is "the floor moved (or the threshold crept up)
+    // and nobody noticed the two no longer agree," which a pair of independent hardcoded checks
+    // would not catch if both were edited to still (wrongly) agree with each other.
+    const floorMatch = seq.match(/ROW_H = Math\.min\(34, Math\.max\((\d+),/);
+    const lineHMatch = seq.match(/const DEPCELL_LINE_H = (\d+);/);
+    expect(floorMatch, "ROW_H's floor clamp must be findable in source").toBeTruthy();
+    expect(lineHMatch, "DEPCELL_LINE_H must be findable in source").toBeTruthy();
+    const floor = Number(floorMatch[1]);
+    const twoLineTotal = Number(lineHMatch[1]) * 2;
+    expect(twoLineTotal, `two lines at ${twoLineTotal}px must fit inside the row-height floor of ${floor}px — otherwise the floor can select a height where canTwoLine is false again`)
+      .toBeLessThanOrEqual(floor);
+  });
+
+  it("every DepCell text span uses the shared font-size constant, never a re-hardcoded 10", () => {
+    // The three content spans (label, name, +N badge) must all reference DEPCELL_FONT_SIZE — a
+    // future edit re-hardcoding fontSize:10 on any of them would silently reintroduce clipping at
+    // the 20px floor (10px font needs a 12px line, not the 10px DEPCELL_LINE_H this fix relies on).
+    const fontSizeRefs = depCellSrc.match(/fontSize:DEPCELL_FONT_SIZE/g) || [];
+    expect(fontSizeRefs.length, "1 wrap-branch span + label/name/badge in the slot branch = 4 references").toBe(4);
+    expect(depCellSrc, "no span inside DepCell may hardcode fontSize:10 again").not.toMatch(/fontSize:10\b/);
   });
 
   it("below the threshold, exactly ONE line renders — never a doomed partial second line", () => {
@@ -60,7 +108,7 @@ describe("B655552 — DepCell two-line threshold, never a partial second line", 
       .toMatch(/const visibleCount = canTwoLine \? 2 : 1;/);
   });
 
-  it("the 2-slot layout has NO vertical padding (defect A's fix: 2×12px lines must fit inside 24px exactly)", () => {
+  it("the 2-slot layout has NO vertical padding (defect A's fix: 2 natural-height lines must fit the row's height exactly, whatever that height now is)", () => {
     expect(depCellSrc, "the multi-item slots container must use 0 vertical padding")
       .toMatch(/padding:"0 8px"/);
     expect(depCellSrc, "the OLD 2px vertical padding (which caused the 4px shortfall at ROW_H=24) must not return")
@@ -99,6 +147,97 @@ describe("B655552 — DepCell two-line threshold, never a partial second line", 
     const onEnter = depCellSrc.slice(depCellSrc.indexOf("const onEnter ="), depCellSrc.indexOf("const onEnter =") + 300);
     expect(onEnter, "onEnter must bail based on the real visible count").toMatch(/items\.length <= visibleCount/);
   });
+});
+
+describe("B655552 (round 2) — hovering a predecessor/successor cell reveals every item's FULL name", () => {
+  const helperSrc = (() => {
+    const i = seq.indexOf("function depCellFullTitle(");
+    if (i < 0) return null;
+    let depth = 0, started = false, bodyStart = seq.indexOf("{", i);
+    for (let j = bodyStart; j < seq.length; j++) {
+      if (seq[j] === "{") { depth++; started = true; }
+      else if (seq[j] === "}") { depth--; if (started && depth === 0) return seq.slice(i, j + 1); }
+    }
+    return null;
+  })();
+
+  it("a dedicated helper builds the tooltip text — not an inline one-off", () => {
+    expect(helperSrc, "depCellFullTitle must exist").toBeTruthy();
+  });
+
+  it("the tooltip lists every item's label + FULL name, one per line — not just the visible/truncated ones", () => {
+    expect(helperSrc, "must map every item to 'label · name', joined with newlines for the native tooltip")
+      .toMatch(/renderLabel\(item\)\}[^`]*·[^`]*\$\{renderName\(item\)\}/);
+    expect(helperSrc, "must join on items, not on a pre-sliced visible subset")
+      .toMatch(/items\.map\(/);
+  });
+
+  it("an existing caller-supplied note (the flagged-predecessor explanation, or the lag plain-English hint) is APPENDED, never replaced", () => {
+    expect(helperSrc, "extraNote must still be threaded through, appended after the name list")
+      .toMatch(/extraNote \? `\$\{list\}\\n\\n\$\{extraNote\}` : list/);
+  });
+
+  it("both DepCell render branches use the computed full title, not the caller's raw (often name-less) title prop", () => {
+    expect(depCellSrc, "the wrap branch (single item) must use fullTitle")
+      .toMatch(/<div ref=\{ref\} title=\{fullTitle\}/);
+    // The multi-slot branch's own <div ref={ref} title={fullTitle} ...> — same literal text, so a
+    // single occurrence count below confirms BOTH branches (wrap + multi-slot) were updated, since
+    // the old `title={title || undefined}` form must be gone entirely from DepCell.
+    const fullTitleRefs = depCellSrc.match(/title=\{fullTitle\}/g) || [];
+    expect(fullTitleRefs.length, "both the single-item wrap div and the multi-slot div must use fullTitle").toBe(2);
+    expect(depCellSrc, "the old raw-title form must not survive anywhere in DepCell")
+      .not.toMatch(/title=\{title \|\| undefined\}/);
+  });
+
+  it("a native title attribute was chosen deliberately — not a new positioned overlay that could eat a press", () => {
+    // CHROME-NEVER-EATS-A-PRESS: this grid has a documented history of overlays intercepting clicks
+    // meant for the cell beneath them. A native `title` never participates in hit-testing, so this
+    // pins that the fix stayed with the browser's own tooltip mechanism for the FULL-NAME feature,
+    // distinct from the pre-existing "+N" popup (which IS a positioned overlay, gated on hover+extra>0
+    // and already scoped away from the cell's own click targets — unchanged by this fix).
+    expect(depCellSrc, "DepCell must not grow a second createPortal call for the new full-name feature")
+      .toMatch(/ReactDOM\.createPortal\(/g);
+    const portalCount = (depCellSrc.match(/ReactDOM\.createPortal\(/g) || []).length;
+    expect(portalCount, "exactly one portal — the pre-existing +N popup — no new overlay added").toBe(1);
+  });
+});
+
+describe("B655552 (round 3) — hanging indent so a wrapped single link reads as ONE item, never a second entry", () => {
+  const wrapBranchSrc = depCellSrc.slice(
+    depCellSrc.indexOf("if (items.length === 1 && canTwoLine) {"),
+    depCellSrc.indexOf("const slots = Array.from(")
+  );
+
+  it("the indent is MEASURED per item via the shared canvas helper, never a fixed constant", () => {
+    // _cpMeasure is the SAME shared canvas text-measurement helper ContactPicker's ghost-text
+    // alignment already uses elsewhere in this file — reused rather than inventing a second one.
+    expect(seq, "_cpMeasure must exist as the shared measurement helper").toMatch(/function _cpMeasure\(text, font\)/);
+    expect(wrapBranchSrc, "the wrap branch must call _cpMeasure to compute its indent, not hardcode a pixel value")
+      .toMatch(/const indent = _cpMeasure\(prefixText, `500 \$\{DEPCELL_FONT_SIZE\}px 'Inter', system-ui, sans-serif`\)/);
+    // The indent must include BOTH the label/flag prefix AND the " · " separator — omitting the
+    // separator's width would land line 2 one separator-width short of the name's real start.
+    expect(wrapBranchSrc, "the indent must add the separator's own measured width, not just the label's")
+      .toMatch(/\+ _cpMeasure\(" · ", `\$\{DEPCELL_FONT_SIZE\}px 'Inter', system-ui, sans-serif`\)/);
+    expect(wrapBranchSrc, "the flagged icon must be part of the measured prefix — an unresolved-predecessor warning icon shifts the prefix width too")
+      .toMatch(/const prefixText = \(flagged && flagged\(item\) \? "⚠ " : ""\) \+ renderLabel\(item\);/);
+  });
+
+  it("padding-left and text-indent are equal and opposite — the classic hanging-indent pair", () => {
+    expect(wrapBranchSrc, "line 1 must land back at its un-indented position via an equal-and-opposite text-indent")
+      .toMatch(/paddingLeft:indent, textIndent:-indent}}>/);
+  });
+
+  it("the multi-slot (2+ link) branch never carries an indent — inverting the fix onto a genuine second entry would be worse than the original bug", () => {
+    const multiSlotSrc = depCellSrc.slice(depCellSrc.indexOf("const slots = Array.from("));
+    expect(multiSlotSrc, "no slot row in the multi-item branch may set paddingLeft or textIndent")
+      .not.toMatch(/paddingLeft|textIndent/);
+  });
+
+  // The real pixel alignment claim — line 2 lands under where the NAME starts on line 1, for both a
+  // bare id and a wide lag label — needs an actual rendered layout, so it is proven live rather than
+  // asserted here: ui-audit/verify-depcell-two-line.mjs's Pass 1 (hangIndent measurements across all
+  // wrap-branch targets), Pass 8 (removing the indent is caught), and Pass 9 (a leaked indent on a
+  // genuine multi-item row is caught).
 });
 
 describe("B655552 — export parity (buildPDFHtml)", () => {

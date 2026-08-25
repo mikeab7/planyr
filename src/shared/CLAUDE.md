@@ -48,7 +48,34 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   (vector match-line edge fit), `legendUnion.js` (union sheet legends into the composite key).
   The **deed-import readers** that feed the Site Planner metes-and-bounds plotter: `docxText.js`
   (.docx + the `readDeedFile` dispatcher), `docText.js` (legacy binary .doc, OLE/CFB), and
-  `pdfText.js` (PDF embedded text layer, lazily loaded).
+  `pdfText.js` (PDF embedded text layer, lazily loaded). `deedTextReflow.js` is the shared
+  wrapped-line-rejoin pdfText.js and `deedOcr.js` both use.
+  **⛔ B768160 — a SCANNED deed PDF (no text layer) is now handled too, via OCR, not just refused.**
+  `pdfText.js`'s "looks scanned" error carries a `.scanned` marker; the Site Planner workspace's
+  `readDeeds` routes that case to `deedOcr.js` (a lazy-loaded Tesseract engine — never a static
+  import, so it and its canvas-render sibling `pdfRaster.js` (a SEPARATE setup from `pdfText.js`'s
+  text-only one) never ride the boot bundle). `deedOcr.js` never plots from OCR output directly —
+  it PRE-FILLS the same editable paste box, with low-confidence tokens highlighted
+  (`ocrConfidence.js` + the workspace's own paste-box component) and a targeted repair pass
+  (`deedOcrRepair.js`, pure/Node-tested — THENCE/COMMENCING/BEGINNING fuzzy correction, DMS
+  punctuation, quadrant-glyph and doubled-degree-sign fixes, a lost-decimal-point distance flag).
+  The closure error every deed path already computes is the SAFETY NET: when a plotted OCR'd
+  traverse doesn't close, `ocrConfidence.culpritCalls` names the specific course(s) most likely at
+  fault instead of just drawing a wrong polygon. **AUDIT-FIRST finding, worth knowing before
+  touching the site-planner workspace's metes-and-bounds parser:** the real construct set a
+  recorded deed exercises (curves with a chord bearing + radius/central-angle/arc, "passing at …
+  for a total distance of", a parenthetical offset note, a monument "bears" tie call, SAVE AND
+  EXCEPT, a numbered "following N courses" sub-list) was already handled correctly by the SAME
+  parser every non-OCR path uses — proven against a construct-coverage fixture in the repo-root
+  `test/` suite. What was genuinely missing was a wrapped-line REFLOW step for OCR text (a course
+  that word-wraps across several printed lines splits into unparseable fragments unless rejoined
+  first — `pdfText.js` already solved this for a text-layer PDF; `deedOcr.js` needed the same fix,
+  now shared via `deedTextReflow.js`). Measured recognition (a synthetic degraded-scan fixture
+  driven end to end in headless Chromium via the repo-root `ui-audit/` harness): 100% bearing
+  recovery / 0.6 ft misclosure at a realistic photocopy-scan degradation level; a harsher stress
+  level drops per-character accuracy sharply but the CLOSURE CHECK catches it loudly (900+ ft
+  misclosure) rather than silently plotting a wrong boundary — which is the whole point of never
+  auto-plotting OCR output.
 - **⛔ `ui/AppHeader.jsx` + `ui/ProjectBreadcrumb.jsx` — NAVIGATION WINS, and it is the ROW-1 ZONE
   FLEXES that decide it (NEW-2). Read this before changing any of the three.** The owner could not
   switch plans on a laptop: *"the unincorporated / city of Houston / ETJ / Harris County chip is too

@@ -30,8 +30,9 @@
  *     work, not an `op_kind: "unknown"` bug).
  *   · Deed promotion → parcel (`promoteDeedToParcel`, `plannerPlacementCmds.js`) — calls
  *     `ctx.pushHistory()` before `ctx.addParcel()`. Covered.
- *   · JSON site import (`importJSONFile`) — calls `pushHistory()` before the bulk collection
- *     replace. Covered.
+ *   · JSON site import (`importJSONFile`) — REMOVED (B765984, owner: "no one should really be
+ *     using that" — the .json export/import pair was a redundant, riskier side door next to cloud
+ *     save/load, and the import silently replaced the whole canvas with no confirmation).
  *   · Version-history restore (`restoreVersion`) — calls `pushHistory()` before restoring. Covered.
  *   · Clipboard paste, same-plan and cross-plan (`duplicateRef`, the cross-plan paste handler) —
  *     both call `pushHistory()`. Covered.

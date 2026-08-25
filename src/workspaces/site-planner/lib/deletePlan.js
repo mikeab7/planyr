@@ -49,6 +49,7 @@ export const DELETE_ENTRIES = [
   "menu:callout",      // canvas right-click on a callout → "Delete callout"
   "menu:markup",       // canvas right-click on a markup → "Delete markup/easement/deed"
   "menu:parcel",       // parcel right-click menu → "Delete parcel"
+  "vtxMenu:wholeDelete", // control-point right-click menu, at the true 2-point minimum of an open path (road/easement/measurement/markup) → "Delete road/easement/measurement/markup" (NEW-1/B649504)
 ];
 
 /* Ref kind ↔ site-model collection. An unknown kind resolves to NOTHING — the old code's
@@ -210,24 +211,3 @@ export function planDelete({ sel, multi, explicit, state, entry } = {}) {
 
   return { ...base, outcome: "removed", refs: resolved, stale, remove, tombstones, count, lockedCount, label, message: "" };
 }
-
-/* Should the "your keystroke went into the box you're typing in" hint fire?
- *
- * The keyboard handler deliberately ignores shortcuts while a text/number field has focus — you
- * must be able to type. But that guard made Delete a dead key with no explanation while an element
- * sat visibly selected behind the panel (edit a building's width, then press Delete → nothing).
- * So: explain it, but only where it can't become noise —
- *   • the Delete key only. Backspace is the natural editing key inside a field; hinting on it would
- *     fire on every corrected digit.
- *   • only when something is actually selected (otherwise Delete wasn't going to do anything anyway).
- *   • once per focused field, not once per keypress.
- */
-export function shouldHintTypingGuard({ key, hasSelection, fieldKey, lastHintedField } = {}) {
-  if (key !== "Delete") return false;
-  if (!hasSelection) return false;
-  if (!fieldKey) return false;
-  return fieldKey !== lastHintedField;
-}
-
-export const TYPING_GUARD_HINT =
-  "Delete went to the box you're typing in. Click the plan, then press Delete.";

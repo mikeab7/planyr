@@ -14,7 +14,7 @@ import { elStyle, elRingFeet, toHex6 } from "./planStyle.js";
 import { ptsOf } from "../../../shared/markup/markupModel.js";
 
 // Closed markup kinds carry a fill; open ones (line / polyline / easement) don't.
-const CLOSED_MARKUP = new Set(["rect", "ellipse", "polygon"]);
+const CLOSED_MARKUP = new Set(["rect", "ellipse", "polygon", "cloud"]);
 
 // A stable display order for the shared controls (opacity first — it's the driver).
 const CAP_ORDER = ["fillOpacity", "fill", "stroke", "weight", "dash"];

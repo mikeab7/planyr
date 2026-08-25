@@ -14,7 +14,7 @@ import { notePlanContext, noteViewScale, requestPerfCapture, perfCaptureDelivery
 import { recordPinchGesture } from "../../shared/telemetry/gestureTelemetry.js";
 import { createElementSync, stableStringify } from "./lib/elementSync.js";
 import { createOperationTracker } from "./lib/operationEnvelope.js";
-import { planDelete, TYPING_GUARD_HINT } from "./lib/deletePlan.js";
+import { planDelete } from "./lib/deletePlan.js";
 import { focusScope, resolveKeyEntry, keyScopeVerdict, shouldHintRefusal, SCOPE_GUARD_HINT } from "./lib/keyContract.js";
 import { touchLatch, touchFactsOf, TOUCH } from "../../shared/keyboard/keyScope.js";
 import { rowsToModel, KIND_TO_FIELD, foldNeverSyncedLocal, foldJournal, reconcileSeedRows } from "./lib/elementRows.js";
@@ -37,6 +37,10 @@ import { parcelSelectHintDecision, PARCEL_HINT_COOLDOWN_MS } from "./lib/parcelS
 import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
 import { nearestBoundaryEdge, constrainToEdgeAngle, edgeLockTolFt } from "./lib/edgeConstrain.js";
 import { markupsUnderPoint, nextMarkupSelection, boxCorners } from "./lib/markupPick.js";
+import {
+  CLOUD_ARC_PRESETS, CLOUD_ARC_MIN_FT, CLOUD_ARC_MAX_FT, CLOUD_ARC_DEFAULT_FT, CLOUD_STATUS_OPTIONS,
+  clampCloudArcFt, cloudScallopPath, simplifyPath, cloudMetaDefaults,
+} from "./lib/cloudGeometry.js";
 import { EMPTY_TAP, tapTime, stepDoubleTap } from "./lib/doubleTap.js";
 import { DRAG_SLOP_PX, makeDragGate, stepDragGate, dragArmed } from "./lib/dragGate.js";
 import { isDiagArmed, latchDiagArm } from "./lib/diagArm.js";
@@ -274,6 +278,7 @@ import YieldFooterDisclaimer from "./components/YieldFooterDisclaimer.jsx";
 import Collapse from "./components/Collapse.jsx";
 import Chip from "./components/Chip.jsx";
 import RowInfo from "./components/RowInfo.jsx";
+import OcrDeedTextarea from "./components/OcrDeedTextarea.jsx";
 import { pondInspectorChips, POND_CHIP_DEFS, pondGroupSummary, POND_FLOOD_NOTES, POND_PURPOSE_TOOLTIP, POND_PURPOSE_DESCRIPTOR } from "./lib/pondInspectorCopy.js";
 import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
@@ -570,6 +575,10 @@ const ICON_PATHS = {
   mellipse: <ellipse cx="8" cy="8" rx="6" ry="4.4" />,
   mpolygon: <path d="M8 2.4 L13.4 6.2 L11.3 12.6 L4.7 12.6 L2.6 6.2 Z" />,
   mpolyline: <path d="M2.5 11 L6 5.5 L9 9 L13.5 3.5" />,
+  // Revision cloud — the real scalloped outline (8 equal arcs), not a generic weather-cloud glyph,
+  // so it reads as the Bluebeam markup rather than "cloud sync". Traced with cloudGeometry.js's own
+  // cloudScallopPath so the tool button matches what it actually draws.
+  mcloud: <path d="M8 4.4 A 1.55 1.55 0 0 1 12 5.7 A 1.55 1.55 0 0 1 13.6 8.7 A 1.55 1.55 0 0 1 12 11.7 A 1.55 1.55 0 0 1 8 13 A 1.55 1.55 0 0 1 4 11.7 A 1.55 1.55 0 0 1 2.4 8.7 A 1.55 1.55 0 0 1 4 5.7 A 1.55 1.55 0 0 1 8 4.4 Z" />,
   // B543 — deed/title launcher glyph: a document page (folded corner) over a few
   // text lines, signalling "read a deed / title commitment". Same currentColor
   // stroke style (no fill) as the other tool glyphs.
@@ -631,9 +640,10 @@ const TOOLS = [
   { id: "mellipse", label: "Ellipse", hint: "Markup ellipse (E): drag a box. Hold Shift for a circle" },
   { id: "mpolygon", label: "Polygon", hint: "Markup polygon (Shift+P): click points, click the first dot or double-click to close. Shift for 45° segments" },
   { id: "mpolyline", label: "Polyline", hint: "Markup polyline (Shift+N): click points, double-click / Enter to finish. Shift for 45° segments" },
+  { id: "mcloud", label: "Cloud", hint: "Revision cloud (C): pick a mode from Cloud ▾ — Polygon (click points, click the first dot / double-click / Enter to close), Rectangle (drag a box), or Freehand (drag the outline). Always a closed scalloped loop; arc size is set in Cloud ▾" },
 ];
 const DRAW_TYPES = ["building", "paving", "road", "parking", "trailer", "pond"];
-const MARKUP_TOOLS = ["mpolyline", "mline", "mrect", "mellipse", "mpolygon"];
+const MARKUP_TOOLS = ["mpolyline", "mline", "mrect", "mellipse", "mpolygon", "mcloud"];
 // Measure-mode display names — Bluebeam's terms (Length / Polylength / Area). The
 // internal mode value stays line/polyline/area (persisted in localStorage), so this is
 // label-only; "Polylength" also disambiguates the measurement from the markup "Polyline".
@@ -660,6 +670,12 @@ const MOD_LABEL = (typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.te
 // place, distinct across tabs — two live writers never share a journal key; see elementJournal.js).
 const journalSid = journalSessionId();
 const MK_DEFAULT = { stroke: "#c2410c", weight: 2, dash: "solid", fill: "#c2410c", fillOpacity: 0 };
+// Cloud's OWN sticky style, kept separate from MK_DEFAULT/mkStyle — every other markup tool shares
+// one "last used" style, so if Cloud read from that shared state it would inherit whatever colour
+// was last drawn (starting from MK_DEFAULT's #c2410c, the exact collision the tool's spec forbids).
+// #2563EB is `familyInk.js` FAMILY_DEFAULT_INK.cloud — measured ≥12 ΔE00 from every other drawn
+// family's default ink (test/familyInk.test.js).
+const MK_CLOUD_DEFAULT = { stroke: "#2563EB", weight: 2, dash: "solid", fill: "#2563EB", fillOpacity: 0 };
 // NEW-4 — what the recently-used swatch row shows on a fresh browser: the plan's own default
 // palette (every element type's fill + line, plus the markup accent), so the row is never blank.
 // Derived from TYPE, never a second hardcoded list that could drift from it.
@@ -789,10 +805,13 @@ const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const measPts = (m) => (m.pts ? m.pts : (m.a && m.b ? [m.a, m.b] : []));
 const measMode = (m) => m.mode || "line";
 // Neutral markup shapes that support Bluebeam-style geometry editing: vertex shapes
-// (line/polyline/polygon) expose draggable control points; box shapes (rect/ellipse)
+// (line/polyline/polygon/cloud) expose draggable control points; box shapes (rect/ellipse)
 // resize + rotate via grips. Semantic markups (utilRoute/traced/encumbrance/…) stay
 // move-only — they carry derived geometry that hand-editing would desync.
-const MK_VERTEX_KINDS = ["line", "polyline", "polygon"];
+// A cloud is ALWAYS stored as a vertex ring (`pts`), whichever of its three draw modes made it
+// (polygon click-path, rectangle drag, or freehand) — never a centre-box — so it reshapes via the
+// SAME vertex idiom as a building footprint / polygon markup, per spec.
+const MK_VERTEX_KINDS = ["line", "polyline", "polygon", "cloud"];
 const MK_BOX_KINDS = ["rect", "ellipse"];
 // Width (screen px) of the transparent fat hit-stroke under open-path markups (line/polyline),
 // so they grab within ~6px on either side at any zoom — matching a polyline's forgiving feel (B155).
@@ -807,7 +826,7 @@ const CALLOUT_BORDER_BAND_PX = 6;
 // magnet they bound (NEW-2(d)), so the cap is unit-tested rather than buried in this file.
 const mkPts = (m) => (m.kind === "line" ? [m.a, m.b] : (m.pts || []));
 const setMkPts = (m, pts) => (m.kind === "line" ? { ...m, a: pts[0], b: pts[1] } : { ...m, pts });
-const mkMinPts = (m) => (m.kind === "polygon" ? 3 : 2);
+const mkMinPts = (m) => (m.kind === "polygon" || m.kind === "cloud" ? 3 : 2);
 // B230 — nearest point on segment a→b to p (all {x,y}); lets a Shift-click / right-click
 // drop a control point EXACTLY where the user touched the edge (Bluebeam-style), not at the
 // old fixed midpoint. Returns the point + its distance for hit-testing.
@@ -1978,7 +1997,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [numEdit, setNumEdit] = useState(null);           // {fx,fy (feet), value, onCommit, chipKey?} — inline numeric edit, NEVER a dialog box. NEW-1: `chipKey` names the setback chip that spawned it, which then renders the editor IN PLACE of itself (and the floating fallback below stands down)
   const [mkRect, setMkRect] = useState(null);   // {kind, a:{x,y}, b:{x,y}} drag-draw a markup rect/ellipse/line
   const [mkPoly, setMkPoly] = useState(null);   // {kind, pts:[{x,y}]} click-draw a markup polygon/polyline
+  const [mkFreehand, setMkFreehand] = useState(null); // {pts:[{x,y}]} in-progress freehand cloud drag
   const [mkStyle, setMkStyle] = useState(MK_DEFAULT); // current markup style (sticky)
+  const [mkCloudStyle, setMkCloudStyle] = useState(MK_CLOUD_DEFAULT); // Cloud's OWN sticky style — see MK_CLOUD_DEFAULT
+  const [cloudMenu, setCloudMenu] = useState(false); // Cloud ▾ rail menu open
   const [tool, setTool] = useState("select");
   const [toolMenu, setToolMenu] = useState(false); // Parcel ▾ dropdown open
   const [addParcelMenu, setAddParcelMenu] = useState(false); // B383: ＋ Add parcel flyout in the Parcel panel
@@ -2002,7 +2024,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // trigger so AnchoredMenu can position the flyout against it (see AnchoredMenu.jsx).
   const boundaryAnchor = useRef(null), buildingAnchor = useRef(null), parkingAnchor = useRef(null),
     roadAnchor = useRef(null), measureAnchor = useRef(null), easeAnchor = useRef(null), easeTypeAnchor = useRef(null),
-    planAnchor = useRef(null), exportAnchor = useRef(null), addParcelAnchor = useRef(null);
+    planAnchor = useRef(null), exportAnchor = useRef(null), addParcelAnchor = useRef(null), cloudAnchor = useRef(null);
   const [versionsOpen, setVersionsOpen] = useState(false); // version-history (automatic backups) dialog
   const [versionList, setVersionList] = useState([]);    // [{at, buildings, sig}] snapshots for this plan
   const [leftPanel, setLeftPanel] = useState(null);      // which left-rail menu is DOCKED: parcel|yield|analysis|references|standards|null (B656: props is a companion, not a tab)
@@ -2074,6 +2096,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [roadCustom, setRoadCustom] = useState(false); // NEW-3: the Custom width… entry field is showing
   // Easement tool (NEW-1/2/3): a first-class easement object on the editable layer.
   // `easeMode` is the input mode; easeType/easeWidth are sticky tool defaults.
+  // Cloud tool (NEW-1): which of the three draw gestures is armed (Cloud ▾), and the arc size
+  // (feet — real drawing units, never pixels, so a cloud scales correctly against the plan and
+  // looks identical at every canvas zoom). Sticky across sessions like easeMode/easeWidth below —
+  // MUST be declared after `lsGet` (a few lines up), not before: cloudMode/cloudArcFt used to live
+  // near mkPoly/mkStyle, ABOVE lsGet's own declaration, which is a real TDZ crash in production
+  // (function-body `const`s don't hoist their value) — invisible in dev but fatal on load once built.
+  const [cloudMode, setCloudMode] = useState(() => lsGet("cloudMode", "polygon")); // polygon | rect | freehand
+  const [cloudArcFt, setCloudArcFt] = useState(() => clampCloudArcFt(+lsGet("cloudArcFt", String(CLOUD_ARC_DEFAULT_FT))));
   const [easeMode, setEaseMode] = useState(() => lsGet("easeMode", "centerline")); // centerline | boundary | parceledge
   const [easeType, setEaseType] = useState(() => lsGet("easeType", "utility"));
   const [easeWidth, setEaseWidth] = useState(() => Math.max(1, +lsGet("easeWidth", "10") || 10));
@@ -2601,7 +2631,32 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const deedReqRef = useRef(0);
   const [deedQueue, setDeedQueue] = useState([]); // dropped deeds waiting to be placed (multi-file)
   const [deedActiveId, setDeedActiveId] = useState(null); // the queue row currently loaded in the textarea                       // in-flight read token (ignore a stale read)
+  // B768160 — OCR fallback for a scanned deed PDF (readDeedFile's pdfText.js throws a `.scanned`-
+  // flagged error for one with no text layer; readDeeds catches it and routes here instead of just
+  // showing the refusal). `ocrRun` is null when no OCR is in flight/loaded for the CURRENT queue row;
+  // once it loads, it holds { pages:[{pageNum,text,rawText,changes,meanConfidence}], wordSpans,
+  // pageCount, activePage } — `activePage` is null (the default full concatenation) or a pageNum (the
+  // page-picker narrowed the box to just that page's text).
+  const [ocrRun, setOcrRun] = useState(null);
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState(null); // { page, index, of, status, pct }
+  const [ocrErr, setOcrErr] = useState("");
+  const ocrAbortRef = useRef(null);
+  // The OCR review helpers (lowConfidenceSpans/culpritCalls/flagSuspectDistances) ride the SAME
+  // dynamic import as the OCR engine itself (deedOcr.js re-exports them) rather than a static
+  // import here — a static import would duplicate `ocrConfidence.js`/`deedOcrRepair.js` into the
+  // always-loaded Site route chunk for functions only ever called once OCR data exists. `ocrRun`
+  // is only ever set AFTER this ref is populated (both happen inside the same OCR call), so any
+  // render that reads `ocrRun` truthy can rely on this being populated too.
+  const ocrHelpersRef = useRef(null);
   const [overlapWarn, setOverlapWarn] = useState(""); // transient warning after a plot
+  // NEW-1/B754752 — the bottom-center canvas toast's horizontal anchor, in VIEWPORT px. Defaults to
+  // null (renders at the true viewport center, byte-identical to before) until the canvas-edge
+  // layout effect below measures the real drawing area. See that effect for why this must be the
+  // CANVAS's center and not the viewport's: a docked left-rail panel (Properties included) narrows
+  // the canvas but the toast used to stay centered on the whole window, which on a laptop-width
+  // browser landed it directly on top of the panel it was explaining a refusal from.
+  const [toastCenterX, setToastCenterX] = useState(null);
   // B909 round 4 — the PERSISTENT "what changed" card after ⚡ Design pond (owner spec:
   // not a toast, stays until dismissed). null = no card. Cleared on dismiss, on Undo, or
   // implicitly replaced by the next Design pond run on any pond.
@@ -5755,6 +5810,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // measure the real edge, fold the delta in the same frame — the panel-open twin of the B837 pan).
     const w = Math.max(320, r.width), h = Math.max(360, r.height);
     setSize((s) => (s.w === w && s.h === h ? s : { w, h, rawW: r.width }));
+    // NEW-1/B754752 — the bottom-center canvas toast (flashWarn) centers on the DRAWING, not the
+    // window. `r.left + r.width/2` is the canvas's real horizontal center in viewport px — a docked
+    // left-rail panel narrows `r` and this follows it, so the toast can never land on a docked
+    // panel; a portaled/floating/phone-overlay panel steals no layout width (same self-gating
+    // measurement VIEWPORT-STABLE already relies on), so it correctly leaves this untouched and the
+    // toast falls back to true viewport-center in that case. Identity-cheap: only writes on change.
+    const cx = Math.round(r.left + r.width / 2);
+    setToastCenterX((prev) => (prev === cx ? prev : cx));
     const left = Math.round(el.offsetLeft);
     if (panelShiftRef.current == null) { panelShiftRef.current = left; return; } // seed baseline — no shift on first mount
     const delta = left - panelShiftRef.current;
@@ -5784,7 +5847,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [leftPanel, narrow, companionSel, narrowProps, leftWidth, size.w]);
   // Remember the left menu width between sessions.
   useEffect(() => { try { localStorage.setItem("planarfit:leftWidth", String(leftWidth)); } catch (_) {} }, [leftWidth]);
-  useEffect(() => { try { localStorage.setItem("planarfit:parkingRows", parkingRows); localStorage.setItem("planarfit:roadWidth", roadWidth); localStorage.setItem("planarfit:measureMode", measureMode); localStorage.setItem("planarfit:easeMode", easeMode); localStorage.setItem("planarfit:easeType", easeType); localStorage.setItem("planarfit:easeWidth", String(easeWidth)); } catch (_) {} }, [parkingRows, roadWidth, measureMode, easeMode, easeType, easeWidth]);
+  useEffect(() => { try { localStorage.setItem("planarfit:parkingRows", parkingRows); localStorage.setItem("planarfit:roadWidth", roadWidth); localStorage.setItem("planarfit:measureMode", measureMode); localStorage.setItem("planarfit:easeMode", easeMode); localStorage.setItem("planarfit:easeType", easeType); localStorage.setItem("planarfit:easeWidth", String(easeWidth)); localStorage.setItem("planarfit:cloudMode", cloudMode); localStorage.setItem("planarfit:cloudArcFt", String(cloudArcFt)); } catch (_) {} }, [parkingRows, roadWidth, measureMode, easeMode, easeType, easeWidth, cloudMode, cloudArcFt]);
   // Drag the panel's right edge to resize it.
   const startLeftResize = (e) => {
     e.preventDefault();
@@ -6056,7 +6119,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const hasSelection = !!(selRef.current || multiRef.current.length);
         if (shouldHintRefusal({ entry: verdict.entry, reason: verdict.reason, hasSelection, episode: keyEpisodeRef.current, lastHintedEpisode: typingHintRef.current })) {
           typingHintRef.current = keyEpisodeRef.current;
-          flashWarn(SCOPE_GUARD_HINT[verdict.reason] || TYPING_GUARD_HINT, 4500);
+          flashWarn(SCOPE_GUARD_HINT[verdict.reason], 4500);
           if (verdict.entry.destructive) {
             reportClientEvent("delete-attempt", `key:delete → refused (${verdict.reason})`, {
               entry: "key:delete", result: "no-op", reason: verdict.reason,
@@ -6122,6 +6185,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if ((e.key === "e" || e.key === "E") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); selectTool("mellipse"); return; }
       if ((e.key === "p" || e.key === "P") && e.shiftKey && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("mpolygon"); return; }
       if ((e.key === "n" || e.key === "N") && e.shiftKey && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("mpolyline"); return; }
+      if ((e.key === "c" || e.key === "C") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); selectTool("mcloud"); return; }
       if (e.key === "Enter" && tool === "select" && combineSel.length >= 2) { e.preventDefault(); mergeParcels(); return; }
       // Enter finishes / auto-closes ANY in-progress multi-point drawing (one shared path with double-click).
       if (e.key === "Enter" && finishActiveDrawing()) { e.preventDefault(); return; }
@@ -6132,7 +6196,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // the ✕ does). It runs BEFORE the catch-all below and consumes the key, so the panel can never
       // be a place you get stuck; a second Escape then falls through and deselects as always.
       if (e.key === "Escape" && inspectorShowingRef.current) { e.preventDefault(); closeInspector(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); branchSeedRef.current = null; setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAddLeaderFor(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setBoundaryEdit(false); setMergePick(false); setGisHit(null); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { ...EMPTY_TAP }; }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); branchSeedRef.current = null; setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAddLeaderFor(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setMkFreehand(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setCloudMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setBoundaryEdit(false); setMergePick(false); setGisHit(null); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { ...EMPTY_TAP }; }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current && deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index)) { e.preventDefault(); return; } // B230: an armed control point → delete just that vertex. NEW-1: deleteVtx returns false on a no-op (endpoint/min/stale) → we DON'T consume the key; it falls through to the whole-element delete below so Delete can never silently wedge.
@@ -6146,7 +6210,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKeyUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
-  }, [active, sel, tool, splitPath, els, markups, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout, draftPoly, draftElPoly, draftRoadPts, easeDraft, easeEdges, easeMode, easeWidth, xsecMode, xsecPts, parcels, selOverlay, sheetOverlays]); // eslint-disable-line
+  }, [active, sel, tool, splitPath, els, markups, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout, draftPoly, draftElPoly, draftRoadPts, easeDraft, easeEdges, easeMode, easeWidth, xsecMode, xsecPts, parcels, selOverlay, sheetOverlays, cloudMode]); // eslint-disable-line
 
   // B230 — track the Shift modifier (for the candidate-insertion dot) independent of the big
   // keyboard handler, so one of its early-return branches can't drop it; window blur resets it.
@@ -6799,6 +6863,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setMkPoly((d) => (d ? { ...d, pts: [...d.pts, pt] } : { kind: tool, pts: [pt] }));
       return;
     }
+    // NEW-1 — Cloud: three draw gestures behind ONE tool, picked via Cloud ▾ (cloudMode). Always
+    // produces a closed vertex ring (see newCloudMarkup) whichever gesture is used.
+    if (tool === "mcloud") {
+      if (cloudMode === "freehand") { // press-drag a continuous outline; simplified + closed on release
+        drag.current = { mode: "mkFreehand", pts: [fp] };
+        setMkFreehand({ pts: [fp] });
+        svgRef.current.setPointerCapture(e.pointerId);
+        return;
+      }
+      if (cloudMode === "rect") { // drag a box OR click-to-start → click-to-finish (mirrors mrect/mellipse)
+        const a = snapPt(fp);
+        if (mkRect && mkRect.pending && mkRect.kind === "mcloud") { commitMkRect("mcloud", mkRect.a, a); setMkRect(null); return; }
+        drag.current = { mode: "mkDraw", kind: "mcloud", a };
+        setMkRect({ kind: "mcloud", a, b: a, shift: e.shiftKey, pending: false });
+        svgRef.current.setPointerCapture(e.pointerId);
+        return;
+      }
+      // "polygon" (default) — click each vertex; close on the first dot / double-click / Enter / Esc.
+      const sp = snapPt(fp);
+      const last = mkPoly?.pts?.[mkPoly.pts.length - 1];
+      if (mkPoly && mkPoly.kind === "mcloud" && mkPoly.pts.length >= 3 && dist(f2p(sp), f2p(mkPoly.pts[0])) < 12) { finishMkPoly(); return; }
+      const pt = (e.shiftKey && last) ? snapPt(snap45(last, fp)) : sp;
+      setMkPoly((d) => (d ? { ...d, pts: [...d.pts, pt] } : { kind: "mcloud", pts: [pt] }));
+      return;
+    }
     if (tool === "easement") {
       if (easeMode === "parceledge") return; // edges are picked via the parcel-edge hit targets, not the canvas
       const sp = snapPt(fp);
@@ -7243,12 +7332,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setEditCallout({ id: c.id, text: "", isNew: true });
   };
   /* ------------ markup shapes ------------ */
+  // NEW-1 — the ONE place a cloud markup object gets built, whichever of the three draw gestures
+  // produced its vertex ring (polygon click-path, rectangle drag, freehand). Always a `pts` ring
+  // (kind "cloud" joins MK_VERTEX_KINDS, never MK_BOX_KINDS — see that constant's comment): a cloud
+  // reshapes via the same vertex idiom as a building footprint/polygon markup regardless of how it
+  // was drawn. Carries the current arc size (feet) + Bluebeam-parity metadata (Subject/Comment/
+  // Author/Created/Modified/Status/Label/Layer) + the cloud's OWN sticky style (mkCloudStyle, never
+  // mkStyle — see MK_CLOUD_DEFAULT).
+  const newCloudMarkup = (pts) => ({
+    id: uid(), kind: "cloud", pts, arcFt: cloudArcFt,
+    ...mkCloudStyle, ...cloudMetaDefaults(new Date().toISOString()),
+  });
   const finishMkPoly = () => {
     if (mkPoly) {
       const pts = mkPoly.pts.filter((p, i) => i === 0 || dist(p, mkPoly.pts[i - 1]) > 0.01);
-      const min = mkPoly.kind === "mpolygon" ? 3 : 2;
+      const isCloud = mkPoly.kind === "mcloud";
+      const min = (mkPoly.kind === "mpolygon" || isCloud) ? 3 : 2;
       if (pts.length >= min) {
-        const mk = { id: uid(), kind: mkPoly.kind === "mpolygon" ? "polygon" : "polyline", pts, ...mkStyle };
+        const mk = isCloud ? newCloudMarkup(pts)
+          : { id: uid(), kind: mkPoly.kind === "mpolygon" ? "polygon" : "polyline", pts, ...mkStyle };
         pushHistory(); setMarkups((a) => [...a, ...withStackZ(a, [mk])]); setSel({ kind: "markup", id: mk.id });
       }
     }
@@ -7261,12 +7363,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let mk = null;
     const minFt = 3 / view.ppf; // a deliberate ~3px span, zoom-independent (B30)
     if (kind === "mline") { if (dist(a, b) >= minFt) mk = { id: uid(), kind: "line", a, b, ...mkStyle }; }
-    else {
+    else if (kind === "mcloud") {
+      // A "rectangular cloud" is still stored as a 4-vertex ring, never a centre-box (see
+      // newCloudMarkup) — so it reshapes with the same vertex grips as every other cloud.
+      if (Math.abs(b.x - a.x) >= minFt && Math.abs(b.y - a.y) >= minFt) {
+        const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x), y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
+        mk = newCloudMarkup([{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }]);
+      }
+    } else {
       const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2, w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
       if (w >= minFt && h >= minFt) mk = { id: uid(), kind: kind === "mrect" ? "rect" : "ellipse", cx, cy, w, h, rot: 0, ...mkStyle };
     }
     if (mk) { pushHistory(); setMarkups((arr) => [...arr, ...withStackZ(arr, [mk])]); setSel({ kind: "markup", id: mk.id }); setTool("select"); }
     return !!mk;
+  };
+  // Commit a freehand-dragged cloud: the raw pointer trail is simplified (Ramer–Douglas–Peucker, a
+  // screen-px tolerance so it feels the same at any zoom) down to a small, hand-reshapable vertex
+  // set before it becomes the cloud's `pts` ring. Returns true if a shape was actually committed.
+  const commitMkCloudFreehand = (rawPts) => {
+    const tolFt = 4 / view.ppf;
+    const pts = simplifyPath(rawPts, tolFt);
+    if (pts.length < 3) return false;
+    const mk = newCloudMarkup(pts);
+    pushHistory(); setMarkups((arr) => [...arr, ...withStackZ(arr, [mk])]); setSel({ kind: "markup", id: mk.id }); setTool("select");
+    return true;
   };
   // Move a measurement by (dx,dy) — pts form (line/polyline/area/count) or the legacy {a,b}. (B569)
   const translateMeasure = (m, dx, dy) => {
@@ -7372,6 +7492,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const setSelMarkup = (patch) => { pushHistory(); setMarkups((a) => a.map((m) => m.id === selMarkup.id ? { ...m, ...patch } : m)); setMkStyle((s) => ({ ...s, ...patch })); };
   // Geometry patch (w/h/rot) — kept out of mkStyle so new shapes don't inherit a past size/angle.
   const setSelMarkupGeom = (patch) => { pushHistory(); setMarkups((a) => a.map((m) => m.id === selMarkup.id ? { ...m, ...patch } : m)); };
+  // NEW-1 — the Cloud twins of setSelMarkup/liveMarkup: same shape, but write mkCloudStyle (never
+  // mkStyle, which every OTHER markup tool shares) and stamp Modified (Bluebeam parity: a cloud's
+  // Modified timestamp auto-updates on a property edit).
+  const setSelMarkupCloud = (patch) => {
+    pushHistory();
+    const modifiedAt = new Date().toISOString();
+    setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, ...patch, modifiedAt } : m)));
+    setMkCloudStyle((s) => ({ ...s, ...patch }));
+  };
 
   /* ------------ easements (first-class objects on the editable layer) ------------ */
   // The hand-editable path of an easement: the boundary ring for mode B, else the
@@ -7564,17 +7693,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (!el || el.locked) return null;
       // B718: a centerline road is vertex-editable too — its editable "path" is its centerline
       // (`pts`, open). A wide `edgeTolFt` (≈ strip half-width) lets a Shift-/right-click land
-      // ANYWHERE on the pavement strip and project onto the centerline; endpoints are protected.
+      // ANYWHERE on the pavement strip and project onto the centerline.
       // NEW-1 — a road's editable "path" is its centerline (`pts`, open), but the EDGE hit test runs
       // against the CURVED centerline the renderer actually draws, not the chords between control
       // points: on a bend the chord cuts the corner, so the pavement on the outside of the curve sits
       // further from the chord than the tolerance and a right-click there found no edge at all (no
       // "Add control point" — the element menu opened instead). `projectEdge` returns the hit ON the
       // drawn centerline plus the control-point segment that owns it, which is exactly what
-      // insertRoadVertex takes. Endpoints are protected; the wide `edgeTolFt` (≈ strip half-width)
-      // still lets a click land ANYWHERE on the pavement.
+      // insertRoadVertex takes. The wide `edgeTolFt` (≈ strip half-width) lets a click land ANYWHERE
+      // on the pavement.
+      // NEW-1/B649504 — endpoints are DELETABLE like any other control point (removing one shortens
+      // the road; canRemoveRoadVertex only blocks the true 2-point floor) — a road used to be the one
+      // element type that categorically excluded its endpoints from deletion, which is what made the
+      // context menu's "min reached" disabled row a LIE on a 3+ point road. See roadGeometry.js.
       if (isCenterlineRoad(el)) return {
-        layer: "road", id: el.id, pts: el.pts, closed: false, min: 2, noEndpointDelete: true,
+        layer: "road", id: el.id, pts: el.pts, closed: false, min: 2,
         edgeTolFt: (+el.travelW || 0) / 2 + roadCurbWidth(el) + 11 / view.ppf,
         projectEdge: (fp) => projectToRoadCenterline(el.pts, el.vtx, fp, { defaultRadius: roadDefaultRadius(el, settings), sharpAt: sharpFor(el) }),
       };
@@ -7584,7 +7717,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (sel.kind === "markup") {
       const m = markups.find((x) => x.id === sel.id); if (!m || m.locked) return null;
       if (m.kind === "easement") { const closed = m.mode === "boundary"; return { layer: "ease", id: m.id, pts: easeEditPath(m), closed, min: closed ? 3 : 2 }; }
-      if (m.kind === "polyline" || m.kind === "polygon") return { layer: "markup", id: m.id, pts: mkPts(m), closed: m.kind === "polygon", min: mkMinPts(m) };
+      if (m.kind === "polyline" || m.kind === "polygon" || m.kind === "cloud") return { layer: "markup", id: m.id, pts: mkPts(m), closed: m.kind !== "polyline", min: mkMinPts(m) };
     }
     return null;
   };
@@ -7670,9 +7803,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // element delete instead of silently swallowing the keypress — a stale/at-min armed vertex must never
   // wedge the Delete key (NEW-1/NEW-2).
   const deleteVtx = (layer, id, index) => {
-    if (layer === "road") { // B718: interior-only + never below 2 points (removeRoadVertex guards both); keep vtx in sync.
+    if (layer === "road") { // B718/NEW-1(B649504): any control point incl. an endpoint, never below 2 points (removeRoadVertex guards the floor); keep vtx in sync.
       const el = els.find((x) => x.id === id);
-      if (!el || !isCenterlineRoad(el) || !canRemoveRoadVertex(el.pts, index)) { setSelVtx(null); setRoadVtxSel(null); return false; } // endpoint / min-2 / stale index → clear the armed point so Delete can't wedge, then fall through to whole-road delete
+      if (!el || !isCenterlineRoad(el) || !canRemoveRoadVertex(el.pts, index)) { setSelVtx(null); setRoadVtxSel(null); return false; } // at the 2-pt floor / stale index → clear the armed point so Delete can't wedge, then fall through to whole-road delete
       pushHistory();
       setEls((a) => a.map((x) => {
         if (x.id !== id || !isCenterlineRoad(x)) return x;
@@ -7742,13 +7875,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
     }
     if (e.button === 0 && !e.shiftKey) {
-      // B718: for a road, only arm an INTERIOR vertex for the Delete key. A road ENDPOINT (or the
-      // body) leaves selVtx null so pressing Delete still removes the WHOLE road (today's behavior)
-      // instead of silently no-op-ing on a protected endpoint. Endpoint DRAG still runs via
-      // startRoadVtx (bubble phase — capture doesn't stopPropagation here).
-      const roadEndpoint = path.layer === "road" && v && (v.index === 0 || v.index === path.pts.length - 1);
-      setSelVtx(v && !roadEndpoint ? { layer: path.layer, id: path.id, index: v.index } : null);
+      // NEW-1/B649504 — every vertex arms for the Delete key the same way, road endpoints included:
+      // deleting one is now a valid shorten (see roadGeometry.js), and `deleteVtx` itself already
+      // falls through to a whole-element delete when a vertex turns out not to be removable (the
+      // true 2-point floor) — so there is no special case left to carve out here. A road used to be
+      // the one layer that refused to arm its own endpoints; that was the false "min reached" bug.
+      setSelVtx(v ? { layer: path.layer, id: path.id, index: v.index } : null);
     }
+  };
+  // NEW-1/B649504 — when a right-clicked control point is genuinely at its path's minimum (removing
+  // it would leave a degenerate line), an OPEN path offers "Delete <type>" instead of a dead greyed
+  // row: the user's actual intent at a 2-point road/easement/measurement/markup is to remove the
+  // whole feature, not to fight a control point that was never going to move. Closed rings (parcels,
+  // building-shaped elements, polygon markups/easements) keep the plain disabled row — 3 points is a
+  // genuine floor for a ring and the "min reached" message is already true there.
+  const WHOLE_DELETE_LABEL = { road: "Delete road", ease: "Delete easement", measure: "Delete measurement", markup: "Delete markup" };
+  const deleteWholeFromVtxMenu = (layer, id) => {
+    const target = layer === "road" ? { kind: "el", id } : layer === "measure" ? { kind: "measure", i: id } : { kind: "markup", id };
+    deleteSel(target, { entry: "vtxMenu:wholeDelete" });
   };
   const onCanvasVtxContextCapture = (e) => {
     const path = editablePath();
@@ -7757,14 +7901,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const { v, e: edge } = hitEditPath(path, fp);
     if (v) { // near a vertex (corner) → Delete control point — a corner ALWAYS wins over its edges
       e.preventDefault(); e.stopPropagation();
-      // B718: roads protect endpoints — canDelete is interior-only + above the 2-point minimum, and
-      // a protected endpoint is NOT armed for the Delete key (leave selVtx null → whole-road delete).
-      const canDel = path.noEndpointDelete ? canRemoveRoadVertex(path.pts, v.index) : path.pts.length > path.min;
-      setSelVtx(path.noEndpointDelete && !canDel ? null : { layer: path.layer, id: path.id, index: v.index });
+      // NEW-1/B649504 — ONE rule for every layer, roads included: deletable above the path's stated
+      // minimum, full stop. Roads no longer single out their endpoints (see roadGeometry.js).
+      const canDel = path.pts.length > path.min;
+      setSelVtx({ layer: path.layer, id: path.id, index: v.index });
+      const wholeDeleteLabel = !canDel && !path.closed ? (WHOLE_DELETE_LABEL[path.layer] || null) : null;
       // NEW-5 — a road TERMINUS is where a roundabout can go, so the menu that already hosts
       // "Add / Delete control point" is where the owner already right-clicks for it.
       const roadEnd = path.layer === "road" ? (v.index === 0 ? "start" : v.index === path.pts.length - 1 ? "end" : null) : null;
-      setVtxMenu({ mode: "vertex", layer: path.layer, id: path.id, index: v.index, canDelete: canDel, roadEnd, x: e.clientX, y: e.clientY });
+      setVtxMenu({ mode: "vertex", layer: path.layer, id: path.id, index: v.index, canDelete: canDel, wholeDeleteLabel, roadEnd, x: e.clientX, y: e.clientY });
     } else if (edge) { // on an edge (away from any corner) → Add control point here
       e.preventDefault(); e.stopPropagation();
       setVtxMenu({ mode: "edge", layer: path.layer, id: path.id, index: edge.index, ptFeet: edge.pt, x: e.clientX, y: e.clientY });
@@ -7989,6 +8134,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         else { const s = Math.max(Math.abs(b.x - d.a.x), Math.abs(b.y - d.a.y)); b = { x: d.a.x + Math.sign(b.x - d.a.x || 1) * s, y: d.a.y + Math.sign(b.y - d.a.y || 1) * s }; } // square/circle
       }
       setMkRect({ kind: d.kind, a: d.a, b });
+      return;
+    }
+    // NEW-1 — freehand cloud: accumulate the raw trail, distance-gated (a screen-px floor, zoom-
+    // independent) so a slow drag doesn't pile up thousands of near-duplicate points before the
+    // commit-time simplify (commitMkCloudFreehand) even runs.
+    if (d.mode === "mkFreehand") {
+      const minStepFt = 2 / view.ppf;
+      setMkFreehand((cur) => {
+        if (!cur || !cur.pts.length) return cur;
+        const last = cur.pts[cur.pts.length - 1];
+        return dist(last, fp) >= minStepFt ? { pts: [...cur.pts, fp] } : cur;
+      });
       return;
     }
     if (d.mode === "mkMove") {
@@ -8448,6 +8605,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
       return;
     }
+    if (d && d.mode === "mkFreehand" && mkFreehand) {
+      commitMkCloudFreehand(mkFreehand.pts);
+      setMkFreehand(null);
+      drag.current = null; setPanning(false);
+      flushElems();
+      try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
+      return;
+    }
     if (d && d.mode === "draw" && draftRect) {
       if (d.depth) {
         // fixed-width preset (parking rows / road width): a length×depth strip,
@@ -8697,6 +8862,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tool === "measure" && measDraft.length >= (measureMode === "area" ? 3 : measureMode === "count" ? 1 : 2)) { finishMeasure(); return true; }
     if (tool === "mpolyline" && mkPoly?.pts?.length >= 2) { finishMkPoly(); return true; }
     if (tool === "mpolygon" && mkPoly?.pts?.length >= 3) { finishMkPoly(); return true; }
+    if (tool === "mcloud" && cloudMode === "polygon" && mkPoly?.kind === "mcloud" && mkPoly?.pts?.length >= 3) { finishMkPoly(); return true; }
     if (tool === "parcel" && draftPoly?.length >= 3) { closePoly(); return true; }
     if (draftElPoly?.pts?.length >= 3) { closeElPoly(); return true; } // any area element drawn as a polygon
     if (tool === "road" && draftRoadPts?.length >= 2) { finishRoad(); return true; } // centerline road (B596)
@@ -11199,7 +11365,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setTool("road");
     setRoadWidth(String(+parent.travelW || 24));
     setDraftRoadPts([{ x: node.x, y: node.y }]);
-    flashWarn(`Branching a ${roadClassOf(settings, parent.roadClass).label.toLowerCase()} off ${parent.label || "this road"} — click where it should go, then ✓ Done. Esc cancels.`, 6000);
+    // B750096 — trimmed: the trailing "then ✓ Done. Esc cancels" is now the road-draft-status
+    // strip's job (it appears the moment there's something to finish), and duplicating it here
+    // meant this transient toast — same bottom-center spot, same 6s window — could sit ON TOP of
+    // the real Done control right when the user needed to click it.
+    flashWarn(`Branching a ${roadClassOf(settings, parent.roadClass).label.toLowerCase()} off ${parent.label || "this road"} — click where it should go.`, 4000);
   };
   // B875 — reveal a pond's inspector card (open the Properties companion) and scroll-flash it.
   // `target` optionally focuses a sub-card ("assistant" | "purpose").
@@ -14531,34 +14701,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Set/clear a per-building override (B199). `val == null` reverts that property to auto.
   const setBuildingProp = (id, field, val) => { pushHistory(); setEls((a) => a.map((e) => (e.id === id ? { ...e, [field]: val } : e))); };
 
-  const importRef = useRef(null);
-  const importJSONFile = (file) => {
-    if (!file) return;
-    const fr = new FileReader();
-    fr.onload = () => {
-      try {
-        const d = JSON.parse(fr.result);
-        if (!d || (!Array.isArray(d.parcels) && !Array.isArray(d.els))) throw new Error();
-        // Normalize the import through the model funnel: junk entries (nulls / points-less husk
-        // parcels — the B690 crash class) are dropped, ids/z are ensured, migrations applied —
-        // a hand-edited or stale export can't poison the canvas or the next save.
-        const im = createSiteModel(d);
-        ensureIdAbove([
-          ...im.parcels.map((p) => p.id), ...im.els.map((e) => e.id),
-          ...im.markups.map((m) => m.id), ...im.measures.map((m) => m.id),
-          ...im.callouts.map((c) => c.id), ...im.deletedIds,
-        ]); // B591 — seed past all imported ids + tombstones (not just parcels+els)
-        pushHistory();
-        setParcels(im.parcels); setEls(im.els); setMeasures(im.measures);
-        setCallouts(im.callouts); setMarkups(im.markups); // symmetric with exportJSON (was dropped → data loss / bleed-through)
-        setSettings((s) => ({ ...s, ...(d.settings || {}), snap: s.snap })); // snap is a global pref, not imported
-        setUnderlay(d.underlay || null);
-        setSel(null);
-        requestFit();
-      } catch (_) { alert("That file doesn't look like a Site Planyr export."); }
-    };
-    fr.readAsText(file);
-  };
   // Site (location) vs Plan (layout) labels — editable from the header.
   const groupId = restored?.groupId || siteId;
   const siteCounty = restored?.county || null;
@@ -15170,7 +15312,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const { createExportSheet } = await loadExportSheet();
     return fn(createExportSheet(exportCtx()));
   };
-  const exportJSON = () => withExportSheet((x) => x.exportJSON());
   const exportKmz = (extrude = false) => withExportSheet((x) => x.exportKmz(extrude));
   const exportPNG = () => withExportSheet((x) => x.exportPNG());
   const exportPDF = (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true) =>
@@ -16931,12 +17072,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      exactly like every other pair of groups on this bar. See `test/toolbarChromeSystem.test.js`. */
   const TB_H = dIcon.height; // 30 — shared height for every top-right toolbar control
   const TB_R = dGhost.borderRadius; // 8 — shared corner radius for every top-right toolbar control
-  // NEW-1 — the bottom-center canvas toast chrome, defined ONCE. The pill geometry and its two
-  // button treatments were copied inline at every toast site (the pob/route/warn/deed-align pill,
-  // the overlay-calibration pill, and now the parcel-select hint), so each new message re-shipped
-  // the same style objects. One definition each: callers override only what genuinely differs
-  // (the background, and the hint's stacked `bottom`). Pixel-identical to what shipped before.
-  const toastPill = { position: "fixed", left: "50%", bottom: 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw", color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" };
+  // NEW-1 — the bottom-center canvas toast chrome. The pill geometry and its two button
+  // treatments were copied inline at every toast site (the pob/route/warn/deed-align pill, the
+  // overlay-calibration pill, and now the parcel-select hint), so each new message re-shipped the
+  // same style objects. One definition each: callers override only what genuinely differs (the
+  // background, and the hint's stacked `bottom`).
+  // ⛔ NEW-1/B754752 — `toastPill` ITSELF now lives further down, inside the IIFE that renders
+  // the toasts (search "const toastPill ="), AFTER `furnPlates`/`FURNITURE_ROW`/`calibPlace` are
+  // computed, because its `bottom` is now DERIVED from the same `canvasPillBottom` the Standards
+  // "Applied · Undo" toast already uses — see that IIFE's own comment for why it is nested rather
+  // than a top-level const. `toastActionBtn`/`toastGhostBtn` have no such dependency and stay here.
   const toastActionBtn = { border: "none", background: SURF_RAISED, color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" };
   const toastGhostBtn = { border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap" };
   // NEW-1 — same treatment for the top-center save/status banner family (read-only · cloud-save
@@ -17020,6 +17165,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setParcelMode("add"); // B598 — always (re)enter the Parcel tool in Draw mode, never a stale Remove
     setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setMarquee(null);
     if (id !== "easement") { setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); }
+    if (id !== "mcloud") setCloudMenu(false);
+    setMkFreehand(null);
     if (id !== "select") setMulti([]);
     setMergePick(false); // B720: switching tools exits merge pick mode (startMergePick re-arms it after selecting Select)
     if (id !== "select") setBoundaryEdit(false); // NEW-1: boundary editing lives in Select; any draw tool leaves it
@@ -17040,22 +17187,69 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // can "just drop in the files" instead of pasting. Each file is read + parsed on the way in for an
   // immediate honest read-out (calls found, or why not); the first readable one loads into the
   // plotter textarea. A single-file drop behaves exactly as before.
+  // OCR a scanned PDF (pdfText.js threw a `.scanned`-flagged error for it) into deed text, updating
+  // the shared progress/cancel state as it goes. Returns the text, or throws if OCR itself fails or
+  // is cancelled before any usable text came out — the caller's existing per-file catch handles that
+  // exactly like any other unreadable file. `row.ocr` carries the per-page + confidence data the
+  // textarea highlighter / page picker / closure-culprit pointer read.
+  const ocrScannedPdfInto = async (file, row, myReq) => {
+    setOcrErr(""); setOcrBusy(true); setOcrProgress(null);
+    const ac = new AbortController();
+    ocrAbortRef.current = ac;
+    try {
+      const ocrMod = await import("../../shared/files/deedOcr.js");
+      ocrHelpersRef.current = { lowConfidenceSpans: ocrMod.lowConfidenceSpans, culpritCalls: ocrMod.culpritCalls, flagSuspectDistances: ocrMod.flagSuspectDistances };
+      const result = await ocrMod.ocrScannedDeedPdf(file, {
+        signal: ac.signal,
+        onProgress: (p) => { if (deedReqRef.current === myReq) setOcrProgress(p); },
+      });
+      if (!result.text.trim()) {
+        throw new Error(result.cancelled
+          ? "OCR was cancelled before any page finished."
+          : "OCR ran but found no readable text on this scan.");
+      }
+      row.ocr = { pages: result.pages, wordSpans: result.wordSpans, pageCount: result.pageCount, cancelled: result.cancelled, activePage: null };
+      if (result.cancelled && deedReqRef.current === myReq) {
+        flashWarn(`OCR cancelled after page ${result.pagesRead.length} of ${result.pageCount} — showing what was read so far.`, 6000);
+      }
+      return result.text;
+    } finally {
+      if (ocrAbortRef.current === ac) ocrAbortRef.current = null;
+      if (deedReqRef.current === myReq) { setOcrBusy(false); setOcrProgress(null); }
+    }
+  };
+
+  // Read one or several dropped/selected deed files (.doc/.docx/.pdf/.txt) into a queue so the user
+  // can "just drop in the files" instead of pasting. Each file is read + parsed on the way in for an
+  // immediate honest read-out (calls found, or why not); the first readable one loads into the
+  // plotter textarea. A single-file drop behaves exactly as before.
+  //
+  // B768160 — a scanned PDF (no text layer — readDeedFile throws a `.scanned`-flagged error for it)
+  // routes through OCR automatically instead of just showing the refusal: a county-recorded deed is
+  // almost always a scanned image, so refusing THAT class of file was refusing the document the
+  // plotter exists to read. OCR pre-fills this same editable box — it never plots by itself.
   const readDeeds = async (files) => {
     const list = Array.from(files || []);
     if (!list.length) return;
     const myReq = ++deedReqRef.current; // a newer drop supersedes a slow in-flight batch
-    setDeedErr(""); setDeedBusy(true);
+    setDeedErr(""); setOcrErr(""); setDeedBusy(true);
     try {
       const rows = [];
       for (const file of list) {
-        const row = { id: uid(), name: file.name || "deed", text: "", boundaryCalls: 0, exCount: 0, closes: false, gap: 0, error: "" };
+        const row = { id: uid(), name: file.name || "deed", text: "", boundaryCalls: 0, exCount: 0, closes: false, gap: 0, error: "", ocr: null };
         try {
           const [{ readDeedFile }, dp] = await Promise.all([
             import("../../shared/files/docxText.js"),
             loadDeed(),        // the parser rides the same on-demand trip as the file reader
           ]);
           const { parseTracts, callsToPath, pathCloses, misclosure } = dp;
-          const text = await readDeedFile(file);
+          let text;
+          try {
+            text = await readDeedFile(file);
+          } catch (e) {
+            if (e && e.scanned) text = await ocrScannedPdfInto(file, row, myReq);
+            else throw e;
+          }
           row.text = text;
           const tracts = parseTracts(text);
           const b = tracts[0];
@@ -17078,7 +17272,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // Auto-load the first readable deed into the textarea (single-file parity).
       const firstOk = rows.find((r) => !r.error && r.boundaryCalls > 0) || rows.find((r) => !r.error) || rows[0];
       if (firstOk) {
-        setDeedActiveId(firstOk.id); setDeedName(firstOk.name);
+        setDeedActiveId(firstOk.id); setDeedName(firstOk.name); setOcrRun(firstOk.ocr || null);
         if (firstOk.text) setMbText(firstOk.text);
         if (firstOk.error) setDeedErr(firstOk.error);
         else if (!firstOk.boundaryCalls) setDeedErr("Read the file, but found no bearing/distance calls — is this a metes-and-bounds legal description?");
@@ -18337,6 +18531,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     onSwatch: (v) => { if (hist) pushHistory(); apply(v); pushRecent(v); if (commit) commit(v); },
   });
   const liveMarkup    = (patch) => { setMarkups((a) => a.map((m) => (selMarkup && m.id === selMarkup.id ? { ...m, ...patch } : m))); setMkStyle((s) => ({ ...s, ...patch })); };
+  const liveMarkupCloud = (patch) => { setMarkups((a) => a.map((m) => (selMarkup && m.id === selMarkup.id ? { ...m, ...patch, modifiedAt: new Date().toISOString() } : m))); setMkCloudStyle((s) => ({ ...s, ...patch })); };
   // NEW-1 — the SAME two writers for a measurement (a live no-history one for a colour drag /
   // opacity slide, and a one-undo-frame one for a discrete commit), so the measurement inspector
   // reuses the markup panel's controls rather than standing up a parallel editing surface.
@@ -18587,19 +18782,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               and several ui-audit harnesses match this button by that exact visible name). The
               caret stays plain text, not aria-hidden, for the same reason. */}
           <button className="dbtn" aria-haspopup="menu" aria-expanded={exportMenu}
-            title="File — export, import a project file, or print a PDF"
+            title="File — export a PNG or print a PDF"
             style={{ ...dGhost, fontWeight: 600, display: "flex", alignItems: "center", gap: 6, height: TB_H, borderRadius: TB_R,
               border: `1px solid ${exportMenu ? PAL.accent : PAL.chromeLine}`,
               background: exportMenu ? "var(--hover-chrome)" : "transparent" }}
             onClick={() => setExportMenu((o) => { if (!o) warmExportSheet(); return !o; })}>
             File <span style={{ fontSize: 10.5, lineHeight: 1, fontWeight: 500, color: PAL.chromeMuted }}>▾</span>
           </button>
+          {/* B765984 — the .json project-file export/import pair was removed (owner: "no one should
+              really be using that"). The import's own tooltip admitted it REPLACES THE CURRENT
+              CANVAS with no confirmation, one row below a harmless PNG download — a destructive
+              whole-plan overwrite sitting where a misclick could reach it. Cloud save/load is the
+              real persistence path; this was a redundant, riskier side door. */}
           <AnchoredMenu open={exportMenu} onClose={() => setExportMenu(false)} anchorRef={exportAnchor} placement="below-right" gap={8} width={220} panelStyle={menuPanel}>
-            <button style={menuItem(false)} title="Download this plan as a project file (.json) you can re-import later" onClick={() => { setExportMenu(false); exportJSON(); }}>Export project file</button>
-            <button style={menuItem(false)} title="Load a plan from a project file (.json) — replaces the current canvas" onClick={() => { setExportMenu(false); importRef.current?.click(); }}>Import project file…</button>
-            <input ref={importRef} type="file" accept="application/json,.json" style={{ display: "none" }}
-              onChange={(e) => { importJSONFile(e.target.files?.[0]); e.target.value = ""; }} />
-            <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
             <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
             <button style={menuItem(false)} title="Pick a print frame, then download a finished PDF (no browser print dialog)" onClick={() => { setExportMenu(false); enterPrintMode(); }}>Download PDF / pick frame…</button>
           </AnchoredMenu>
@@ -20826,6 +21021,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </g>
                   );
                 }
+                // NEW-1 — revision cloud: the SAME fat-transparent-hit-companion / pointer-inert-
+                // visible-shape pattern as every other closed markup (a plain polygon hit test — the
+                // scallops are cosmetic, not a hit-test shape), but the visible layer is the scalloped
+                // outline. Arc size is stored in FEET (m.arcFt) and scaled by `rppf` here — the SAME
+                // render-body scale every other markup's geometry already goes through via f2p — so a
+                // cloud looks identical at every zoom and PDF export (which clones this exact SVG,
+                // never a second render path — see exportSheet.js) prints it at true scale.
+                if (m.kind === "cloud") {
+                  const screenPts = m.pts.map(f2p);
+                  const s = screenPts.map((q) => `${q.x},${q.y}`).join(" ");
+                  const scallopD = cloudScallopPath(screenPts, clampCloudArcFt(m.arcFt) * rppf);
+                  return (
+                    <g key={m.id} data-markup={m.id} style={mkCursor} opacity={m.opacity ?? 1} onPointerDown={common.onPointerDown} onContextMenu={common.onContextMenu}>
+                      <polygon points={s} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinejoin="round" pointerEvents={closedHitPE} />
+                      <path d={scallopD} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} strokeLinejoin="round" {...visFill} pointerEvents="none" />
+                    </g>
+                  );
+                }
                 const c = f2p({ x: m.cx, y: m.cy }), w = m.w * rppf, h = m.h * rppf;
                 const rotTf = `rotate(${m.rot || 0} ${c.x} ${c.y})`;
                 if (m.kind === "ellipse") return (
@@ -21661,11 +21874,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // In click-to-finish mode show the anchored start point so it's clear a click landed.
                 const anchor = mkRect.pending ? <circle cx={a.x} cy={a.y} r={3.5} fill={PAL.accent} pointerEvents="none" /> : null;
                 if (mkRect.kind === "mline") return <>{anchor}<line x1={a.x} y1={a.y} x2={b.x} y2={b.y} {...dp} /></>;
+                if (mkRect.kind === "mcloud") {
+                  // Live scalloped preview (real arc size, so the drag genuinely previews the commit).
+                  const x0 = Math.min(a.x, b.x), y0 = Math.min(a.y, b.y), x1 = Math.max(a.x, b.x), y1 = Math.max(a.y, b.y);
+                  const ring = [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }];
+                  const d = cloudScallopPath(ring, clampCloudArcFt(cloudArcFt) * rppf);
+                  return <>{anchor}<path d={d} stroke={mkCloudStyle.stroke} strokeWidth={mkCloudStyle.weight} fill="none" pointerEvents="none" /></>;
+                }
                 const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y), w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
                 const shape = mkRect.kind === "mellipse" ? <ellipse cx={x + w / 2} cy={y + h / 2} rx={w / 2} ry={h / 2} {...dp} /> : <rect x={x} y={y} width={w} height={h} {...dp} />;
                 return <>{anchor}{shape}</>;
               })()}
+              {mkFreehand && mkFreehand.pts.length >= 2 && (() => {
+                const s = mkFreehand.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
+                return <polyline points={s} fill="none" stroke={mkCloudStyle.stroke} strokeWidth={mkCloudStyle.weight} strokeDasharray="5 4" strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />;
+              })()}
               {mkPoly && (() => {
+                const isCloud = mkPoly.kind === "mcloud";
+                const ink = isCloud ? mkCloudStyle.stroke : PAL.accent;
                 // The rubber-band segment must match how the NEXT click commits (line ~2016): free
                 // angle by default, 45°-constrained ONLY while Shift is held. Snapping the preview to
                 // 45° unconditionally made the polyline look like it "only goes at specific angles"
@@ -21675,9 +21901,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const s = all.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
                 const lp = live ? f2p(live) : null, total = pathLen(all);
                 return <>
-                  <polyline points={s} fill="none" stroke={PAL.accent} strokeWidth={mkStyle.weight} strokeDasharray="5 4" pointerEvents="none" />
-                  {lp && all.length >= 2 && <text x={lp.x + 8} y={lp.y - 6} fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{f0(total)}′</text>}
-                  {mkPoly.pts.map((p, i) => { const q = f2p(p); return <circle key={i} cx={q.x} cy={q.y} r={3.5} fill={PAL.accent} pointerEvents="none" />; })}
+                  <polyline points={s} fill="none" stroke={ink} strokeWidth={isCloud ? mkCloudStyle.weight : mkStyle.weight} strokeDasharray="5 4" pointerEvents="none" />
+                  {lp && all.length >= 2 && <text x={lp.x + 8} y={lp.y - 6} fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={ink} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{f0(total)}′</text>}
+                  {mkPoly.pts.map((p, i) => { const q = f2p(p); return <circle key={i} cx={q.x} cy={q.y} r={3.5} fill={ink} pointerEvents="none" />; })}
                 </>;
               })()}
               {/* easement draft (centerline / boundary click-draw) — live ghost strip */}
@@ -22016,27 +22242,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {ring && ring.length >= 3 && <polygon points={ring.map((p) => { const c = f2p(p); return `${c.x},${c.y}`; }).join(" ")} fill={typeStyle("road", settings).fill} fillOpacity={0.4} stroke={PAL.accent} strokeWidth={1.25} strokeDasharray="5 4" />}
                     <polyline points={centerStr} fill="none" stroke={PAL.accent} strokeWidth={1} strokeDasharray="4 4" />
                     {draftRoadPts.map((p, i) => { const c = f2p(p); return <circle key={i} cx={c.x} cy={c.y} r={i === 0 ? 5 : 3.5} fill={i === 0 ? PAL.paper : PAL.accent} stroke={PAL.accent} strokeWidth={1.5} />; })}
-                    {total > 1 && <text x={lp.x} y={lp.y - 8} textAnchor="middle" fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(travelW)}′ wide · {f0(total)}′ long</text>}
+                    {/* B750096 — the live dims readout is genuinely useful mid-draw (CAD/Bluebeam both
+                        do this), so it stays near the cursor — but offset up-and-right of the point,
+                        never centered ON it, and pointerEvents:none (inherited from the wrapping <g>
+                        above) so it can never be a click target. */}
+                    {total > 1 && <text x={lp.x + 14} y={lp.y - 12} textAnchor="start" fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(travelW)}′ wide · {f0(total)}′ long</text>}
                     {magnet && (() => { const c = f2p(magnet); return <g><circle cx={c.x} cy={c.y} r={9} fill="none" stroke={SEL_BLUE} strokeWidth={2.5} /><circle cx={c.x} cy={c.y} r={3.5} fill={SEL_BLUE} /></g>; })()}
-                    {/* NEW-1, owner report 2026-07-25: "I should be able to just press three points…
-                        but it doesn't seem like I can do that." He could — three clicks stores three
-                        points — but NOTHING on the canvas said how to END the road, and the instinctive
-                        Esc THREW IT AWAY. So the last placed point now carries a real Done button
-                        (and the hint names the two keyboard ways out). Takes pointer events; sits on
-                        the last point so the mouse is already there. */}
-                    {draftRoadPts.length >= 2 && (() => {
-                      const c = f2p(draftRoadPts[draftRoadPts.length - 1]);
-                      return (
-                        <g data-testid="road-draft-finish" pointerEvents="all" style={{ cursor: "pointer" }}
-                           onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); }}
-                           onClick={(e) => { e.stopPropagation(); finishRoad(); }}>
-                          <title>Finish this road (or press Enter). Esc throws the draft away; Backspace removes the last point.</title>
-                          <rect x={c.x + 12} y={c.y - 11} width={58} height={22} rx={11} fill={PAL.accent} stroke={PAL.paper} strokeWidth={1.5} />
-                          <text x={c.x + 41} y={c.y + 4} textAnchor="middle" fontSize="11" fontWeight="800" fill={PAL.paper}>✓ Done</text>
-                          <text x={c.x + 41} y={c.y + 26} textAnchor="middle" fontSize="10" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="600">or press Enter</text>
-                        </g>
-                      );
-                    })()}
+                    {/* B750096 — the ✓ Done control used to live HERE, glued to the last placed vertex
+                        with pointerEvents:all, which put a real click target exactly where the next
+                        road point gets placed (owner: "it kinda gets in the way of placing the road").
+                        It now renders as a quiet bottom-center status strip OUTSIDE the canvas — see
+                        the `road-draft-status` block below the <svg>. Nothing in this draft preview
+                        takes pointer events any more. */}
                   </g>
                 );
               })()}
@@ -22228,6 +22445,46 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {stdToast.onUndo && (
               <button data-testid="standards-apply-undo" onClick={stdToast.onUndo} style={{ border: "none", background: SURF_RAISED, color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}>Undo</button>
               )}
+            </div>
+          )}
+
+          {/* B750096 — the road-draft "finish" affordance, moved OUT of the canvas.
+              Owner: "there's a banner for when I am placing a road, but it kinda gets in the way of
+              placing the road... if we're gonna do a banner, I feel like it should be at the bottom,
+              like, bottom center, and not super in your face." Measured live: the old in-canvas chip
+              sat pointerEvents:all glued to the last placed vertex, so a road point placed near the
+              last one could land on Done and end the road instead of extending it — and the pill
+              overlapped its own dimension text. Audited every other multi-point draw tool (paving/
+              parking/sidewalk/building all use draftElPoly or draftRect — close on click-near-first-
+              point or Enter/double-click, no in-canvas click target; the parcel tool, the parcel-edge
+              easement mode and multi-select-merge already use this exact quiet bottom/top banner
+              pattern; Measure has no chip at all) — the road tool was the ONLY offender.
+              PLACEMENT: bottom-CENTER, fixed to the canvas pane, stacked clear of the scale bar /
+              north arrow / calibration badge by the SAME canvasPillBottom the Standards toast above
+              uses — so it joins the B748960 collision-aware furniture set instead of floating free.
+              Quiet on purpose: muted dark chip, single line, small type — not the loud accent pill it
+              was. Enter/Esc/Backspace are unchanged; Esc/Backspace stay in the title tooltip since
+              Done/Enter is the only thing that was ever undiscoverable (B1014). */}
+          {tool === "road" && draftRoadPts && draftRoadPts.length >= 2 && (
+            <div data-testid="road-draft-status" title="Esc throws the draft away; Backspace removes the last point."
+              onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}
+              style={{
+                // zIndex above the generic transient-toast tier (toastPill, 2500) — e.g. the
+                // "Branching a road…" hint that can still be showing at this exact bottom-center
+                // spot when a branch draft reaches 2 points. Discovered live: elementFromPoint at
+                // the Done button's center resolved to that toast, not the button, so the click
+                // never reached finishRoad. This is the one real click target in the draw surface
+                // and must never lose a hit-test to a passive message.
+                position: "absolute", left: "50%", transform: "translateX(-50%)", zIndex: 2600,
+                bottom: canvasPillBottom({ northH: furnPlates.north.plateH, scaleBarH: furnPlates.scaleBar.plateH, calibBottom: calibrationState ? calibPlace.bottom : null, row: FURNITURE_ROW }),
+                background: "rgba(25,22,19,0.85)", color: "rgba(255,255,255,0.92)",
+                padding: "5px 7px 5px 13px", borderRadius: 99, fontSize: 11.5, fontWeight: 500,
+                boxShadow: "0 4px 14px rgba(0,0,0,0.22)", display: "flex", gap: 9, alignItems: "center",
+                whiteSpace: "nowrap",
+              }}>
+              <button data-testid="road-draft-finish" onClick={(e) => { e.stopPropagation(); finishRoad(); }}
+                style={{ border: "none", background: "rgba(255,255,255,0.16)", color: "#fff", borderRadius: 7, padding: "4px 11px", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 700 }}>✓ Done</button>
+              <span>or press Enter</span>
             </div>
           )}
 
@@ -22976,11 +23233,40 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
           {/* Draw section — Shapes + Annotate merged; Polyline before Line (B605/B607) */}
           {railHdr("Draw")}
-          {MARKUP_TOOLS.map((id) => {
+          {MARKUP_TOOLS.filter((id) => id !== "mcloud").map((id) => {
             const t = TOOLS.find((x) => x.id === id);
             const sc = { mline: "L", mrect: "R", mellipse: "E", mpolygon: "⇧P", mpolyline: "⇧N" }[id];
             return <button key={id} className={`rbtn${tool === id ? " on" : ""}`} style={rbtn(tool === id)} onClick={() => selectTool(id)} aria-pressed={tool === id}><ToolIcon id={id} /> {t.label} <span style={railHint(tool === id)}>{sc}</span></button>;
           })}
+          {/* Cloud (NEW-1) — a split button like Easement: the main button draws with whatever
+              mode/arc size is already armed, ▾ opens the mode + arc-size picker. */}
+          <div ref={cloudAnchor} style={{ position: "relative" }}>
+            <div style={{ display: "flex", gap: 2 }}>
+              <button className={`rbtn${tool === "mcloud" ? " on" : ""}`} style={{ ...rbtn(tool === "mcloud"), flex: 1 }} onClick={() => selectTool("mcloud")} aria-pressed={tool === "mcloud"}>
+                <ToolIcon id="mcloud" /> Cloud <span style={railHint(tool === "mcloud")}>C</span>
+              </button>
+              <button className={`rbtn${tool === "mcloud" ? " on" : ""}`} style={{ ...rbtn(tool === "mcloud"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setCloudMenu((o) => !o)} aria-haspopup="menu" aria-expanded={cloudMenu} aria-label="Cloud options">▾</button>
+            </div>
+            <AnchoredMenu open={cloudMenu} onClose={() => setCloudMenu(false)} anchorRef={cloudAnchor} placement="left" width={248} panelStyle={menuPanel}>
+              <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Draw mode</div>
+              {[["polygon", "Click points"], ["rect", "Drag a box"], ["freehand", "Freehand"]].map(([k, label]) => (
+                <button key={k} style={menuItem(cloudMode === k)} onClick={() => { setCloudMode(k); selectTool("mcloud"); }}>{label}</button>
+              ))}
+              <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "8px 8px 6px", borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>Arc size</div>
+              <div style={{ display: "flex", gap: 4, padding: "0 8px 6px" }}>
+                {Object.entries(CLOUD_ARC_PRESETS).map(([k, ft]) => (
+                  <button key={k} style={{ ...menuItem(cloudArcFt === ft), flex: 1, textAlign: "center", textTransform: "capitalize" }} onClick={() => setCloudArcFt(ft)}>{k}</button>
+                ))}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 8px 8px" }}>
+                <span style={{ fontSize: 12, color: PAL.muted }}>Custom</span>
+                <NumInput style={{ ...numInput, width: 64 }} value={cloudArcFt} min={CLOUD_ARC_MIN_FT} max={CLOUD_ARC_MAX_FT} step={0.5} onCommit={(n) => setCloudArcFt(clampCloudArcFt(n))} /> <span style={{ fontSize: 12, color: PAL.muted }}>ft</span>
+              </div>
+              <div style={{ fontSize: 11, color: PAL.muted, padding: "6px 8px 2px", lineHeight: 1.5, borderTop: `1px solid ${PAL.panelLine}` }}>
+                {cloudMode === "rect" ? "Drag a box; the scalloped outline traces it." : cloudMode === "freehand" ? "Press and drag the outline; release to close it." : "Click points; click the first dot / double-click / Enter to close."}
+              </div>
+            </AnchoredMenu>
+          </div>
           <button className={`rbtn${tool === "callout" ? " on" : ""}`} style={rbtn(tool === "callout")} onClick={() => selectTool("callout")} aria-pressed={tool === "callout"}><ToolIcon id="callout" /> Callout <span style={railHint(tool === "callout")}>Q</span></button>
           <button className={`rbtn${tool === "text" ? " on" : ""}`} style={rbtn(tool === "text")} onClick={() => selectTool("text")} aria-pressed={tool === "text"}><ToolIcon id="text" /> Text <span style={railHint(tool === "text")}>T</span></button>
 
@@ -23196,7 +23482,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {inlineLabelControls(e, "easement", coalesceLabelWrite(selMarkup.id, (p) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, ...p } : m)))))}
                 <Field label="Notes"><textarea value={e.notes || ""} onChange={(ev) => setSelEasement({ notes: ev.target.value })} rows={2} style={{ width: 150, boxSizing: "border-box", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: BORDER_1, borderRadius: 8, color: PAL.ink, resize: "vertical" }} /></Field>
                 <div style={{ fontSize: 11.5, color: PAL.muted, marginTop: 6 }}>Area: <b style={{ color: PAL.ink }}>{Math.round(area).toLocaleString()} SF</b> · {(area / SQFT_PER_ACRE).toFixed(2)} AC</div>
-                <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 6 }}>{isStrip ? "Drag a centerline dot to reshape (the strip re-offsets); ＋ adds a point, Shift-click removes one." : "Drag a boundary dot to reshape; ＋ adds a point, Shift-click removes one."}</div>
+                {/* NEW-1/B649504 — this used to claim "Shift-click removes one", which no gesture in the
+                    app actually does (Shift-click on an edge only ADDS a point — see onCanvasVtxDownCapture);
+                    removal has only ever been right-click a dot, or select it and press Delete. Say the true
+                    thing (WRONG-CASE / LOUD-FAILURE: a hint that describes a feature that doesn't exist is
+                    the same class of lie as a false disabled-reason string). */}
+                <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 6 }}>{isStrip ? "Drag a centerline dot to reshape (the strip re-offsets); Shift-click an edge to add a point, right-click a dot to remove one." : "Drag a boundary dot to reshape; Shift-click an edge to add a point, right-click a dot to remove one."}</div>
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                   <button style={chip} onClick={() => toggleMarkupLock(e.id)}>{e.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
                   <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:easement" })}>Delete</button>
@@ -23211,18 +23502,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // top, so a hardcoded surface colour blanked every colour chip in these panels: the
             // control you click to change a colour showed no colour. Leave it to ColorField.
             const swatch = { width: 34, height: 26, padding: 0, border: BORDER_1, borderRadius: 6, cursor: "pointer" };
-            const closed = selMarkup.kind === "rect" || selMarkup.kind === "ellipse" || selMarkup.kind === "polygon";
+            const isCloud = selMarkup.kind === "cloud";
+            const closed = selMarkup.kind === "rect" || selMarkup.kind === "ellipse" || selMarkup.kind === "polygon" || isCloud;
+            // Cloud writes its OWN sticky style (mkCloudStyle), never the shared mkStyle every other
+            // markup tool draws from next — see MK_CLOUD_DEFAULT.
+            const setStyle = isCloud ? setSelMarkupCloud : setSelMarkup;
+            const liveStyle = isCloud ? liveMarkupCloud : liveMarkup;
             return (
               // NEW-1 — plain wrapper (see the multi-select branch above for why the duplicate testid was removed).
               <div>
-              <Section title={`Markup · ${selMarkup.kind[0].toUpperCase()}${selMarkup.kind.slice(1)}`}>
-                <Field label="Outline"><ColorField value={toHex6(selMarkup.stroke)} {...colorCtl((v) => liveMarkup({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} /></Field>
-                <Field label="Line weight"><NumInput style={numInput} value={selMarkup.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setSelMarkup({ weight: n })} /></Field>
+              <Section title={isCloud ? "Markup · Cloud" : `Markup · ${selMarkup.kind[0].toUpperCase()}${selMarkup.kind.slice(1)}`}>
+                <Field label="Outline"><ColorField value={toHex6(selMarkup.stroke)} {...colorCtl((v) => liveStyle({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} /></Field>
+                <Field label="Line weight"><NumInput style={numInput} value={selMarkup.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setStyle({ weight: n })} /></Field>
                 <Field label="Dash">
-                  <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={selMarkup.dash || "solid"} onChange={(e) => setSelMarkup({ dash: e.target.value })}>
+                  <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={selMarkup.dash || "solid"} onChange={(e) => setStyle({ dash: e.target.value })}>
                     {DASH_OPTIONS}
                   </select>
                 </Field>
+                {isCloud && (
+                  <Field label="Opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.opacity ?? 1} {...sliderHistory((e) => liveStyle({ opacity: +e.target.value }))} /></Field>
+                )}
                 {/* B620 — inline label riding the line (open paths only; double-click the line also opens this in
                     place). NON-sticky (direct setMarkups, never setMkStyle) so the text can't bleed into the next
                     drawn shape; onFocus pushes ONE undo frame per edit (not one per keystroke). */}
@@ -23235,9 +23534,43 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {inlineLabelControls(selMarkup, selMarkup.kind, coalesceLabelWrite(selMarkup.id, (p) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, ...p } : m)))))}
                 </>)}
                 {closed && <>
-                  <Field label="Fill"><ColorField value={toHex6(selMarkup.fill)} {...colorCtl((v) => liveMarkup({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} /></Field>
-                  <Field label="Fill opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.fillOpacity ?? 0} {...sliderHistory((e) => liveMarkup({ fillOpacity: +e.target.value }))} /></Field>
+                  <Field label="Fill"><ColorField value={toHex6(selMarkup.fill)} {...colorCtl((v) => liveStyle({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} /></Field>
+                  <Field label="Fill opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.fillOpacity ?? 0} {...sliderHistory((e) => liveStyle({ fillOpacity: +e.target.value }))} /></Field>
                 </>}
+                {isCloud && (() => {
+                  const cs = { display: "flex", gap: 5, width: 150 };
+                  const fmtWhen = (iso) => { try { return iso ? new Date(iso).toLocaleString() : "—"; } catch (_) { return "—"; } };
+                  return (
+                    <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "8px 0", paddingTop: 8 }}>
+                      <Field label="Arc size">
+                        <span style={{ display: "flex", gap: 5, alignItems: "center" }}>
+                          <NumInput style={{ ...numInput, width: 56 }} value={selMarkup.arcFt ?? CLOUD_ARC_DEFAULT_FT} min={CLOUD_ARC_MIN_FT} max={CLOUD_ARC_MAX_FT} step={0.5} onCommit={(n) => setSelMarkupCloud({ arcFt: clampCloudArcFt(n) })} />
+                          <span style={{ fontSize: 11, color: PAL.muted }}>ft</span>
+                        </span>
+                      </Field>
+                      <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
+                        {Object.entries(CLOUD_ARC_PRESETS).map(([k, ft]) => (
+                          <button key={k} style={{ ...chip, flex: 1, fontSize: 10.5, textTransform: "capitalize", background: (selMarkup.arcFt ?? CLOUD_ARC_DEFAULT_FT) === ft ? PAL.accent : SURF_RAISED, color: (selMarkup.arcFt ?? CLOUD_ARC_DEFAULT_FT) === ft ? "#fff" : PAL.ink }} onClick={() => setSelMarkupCloud({ arcFt: ft })}>{k}</button>
+                        ))}
+                      </div>
+                      <Field label="Subject"><input value={selMarkup.subject ?? ""} maxLength={80} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, subject: e.target.value, modifiedAt: new Date().toISOString() } : m)))} placeholder="Cloud" style={textInput} /></Field>
+                      <Field label="Comment" title="Reviewer notes on this markup"><textarea value={selMarkup.comment ?? ""} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, comment: e.target.value, modifiedAt: new Date().toISOString() } : m)))} rows={2} style={{ width: 150, boxSizing: "border-box", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: BORDER_1, borderRadius: 8, color: PAL.ink, resize: "vertical" }} /></Field>
+                      <Field label="Status">
+                        <span style={cs}>
+                          <select style={{ ...numInput, width: 150, fontFamily: "inherit" }} value={selMarkup.status ?? "None"} onChange={(e) => setSelMarkupCloud({ status: e.target.value })}>
+                            {CLOUD_STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        </span>
+                      </Field>
+                      <Field label="Label"><input value={selMarkup.label ?? ""} maxLength={40} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, label: e.target.value, modifiedAt: new Date().toISOString() } : m)))} placeholder="e.g. 1" style={textInput} /></Field>
+                      <Field label="Layer"><input value={selMarkup.layer ?? ""} maxLength={40} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, layer: e.target.value, modifiedAt: new Date().toISOString() } : m)))} placeholder="e.g. Reviewer 1" style={textInput} /></Field>
+                      <Field label="Author"><input value={selMarkup.author ?? ""} maxLength={60} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, author: e.target.value, modifiedAt: new Date().toISOString() } : m)))} style={textInput} /></Field>
+                      <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.6, marginTop: 4 }}>
+                        Created {fmtWhen(selMarkup.createdAt)}<br />Modified {fmtWhen(selMarkup.modifiedAt)}
+                      </div>
+                    </div>
+                  );
+                })()}
                 {/* NEW-EASE-STYLE — an encumbrance (deed/title tract) shares the easement appearance
                     model: fill / fill opacity / hatch, type default + per-element override. Not
                     "closed" above (it's its own render branch, not a rect/ellipse/polygon), so it
@@ -23312,7 +23645,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       ? "Move the deed as one piece; use Align to parcel (or Rotate) above to line it up."
                       : selMarkup.kind === "line"
                         ? "Drag either end dot to move it."
-                        : "Drag a dot to reshape; ＋ adds a point; Shift-click a dot removes it."}
+                        // NEW-1/B649504 — see the easement hint above: Shift-click never removed a point
+                        // (only adds, on an edge); removal is right-click a dot, or select + Delete.
+                        : "Drag a dot to reshape; Shift-click an edge to add a point, right-click a dot to remove one."}
                 </div>
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                   <button style={chip} onClick={() => toggleMarkupLock(selMarkup.id)}>{selMarkup.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
@@ -24398,7 +24733,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 10 }}>
                       <span style={{ fontSize: 11.5, color: PAL.muted, whiteSpace: "nowrap" }} title="The open-water surface at the design water level (shrinks as the berm rises); distinct from the drawn footprint at the outer toe.">{f2(g_waterSf / SQFT_PER_ACRE)} AC water surface</span>
                       <span style={{ display: "flex", alignItems: "center", gap: 8, flex: "none" }}>
-                        <RowInfo label={pondDisplayName(g_roleInfo.role)} sections={[{ text: "Drag the body to move. Drag a corner dot to reshape; click + on an edge to add a point; Shift-click to delete one." }]} />
+                        {/* NEW-1/B649504 — "click + on an edge" / "Shift-click to delete" described gestures
+                            this app doesn't have: adding is Shift-click an edge, removing is right-click a
+                            dot (or select it and press Delete). */}
+                        <RowInfo label={pondDisplayName(g_roleInfo.role)} sections={[{ text: "Drag the body to move. Drag a corner dot to reshape; Shift-click an edge to add a point; right-click a dot to remove one." }]} />
                         <button style={{ ...chip, padding: "3px 8px" }} onClick={() => toggleLock(selEl.id)} title="Pin in place: prevents accidental moves/edits">{selEl.locked ? "📌 Unpin" : "📌 Pin"}</button>
                         <button type="button" style={{ ...chip, padding: "3px 10px", color: PAL.danger, fontWeight: 700 }} onClick={() => deleteSel(null, { entry: "panel:pond" })}>Delete</button>
                       </span>
@@ -25763,6 +26101,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const closes = dp ? dp.pathCloses(path) : false;
         const gap = dp ? dp.misclosure(path) : 0;
         const exCount = Math.max(0, tracts.length - 1);
+        // B768160 — OCR review data for whichever text is currently loaded: low-confidence word spans
+        // (highlighted in the box) and suspect (likely-lost-decimal-point) distances feed the closure
+        // safety net below when the traverse doesn't close.
+        const ocrActivePageData = ocrRun && ocrRun.activePage != null ? ocrRun.pages.find((p) => p.pageNum === ocrRun.activePage) : null;
+        const ocrSpansForBox = ocrRun ? (ocrActivePageData ? ocrActivePageData.wordSpans : ocrRun.wordSpans) : [];
+        const ocrHelpers = ocrRun ? ocrHelpersRef.current : null; // populated by the same call that set ocrRun
+        const ocrLcSpans = ocrHelpers ? ocrHelpers.lowConfidenceSpans(ocrSpansForBox) : [];
+        const ocrSuspects = ocrHelpers && mbText ? ocrHelpers.flagSuspectDistances(mbText) : [];
+        const ocrCulprits = (ocrHelpers && calls.length && !closes) ? ocrHelpers.culpritCalls(mbText, calls, ocrLcSpans, ocrSuspects) : [];
         return (
         <div onClick={() => setTitleOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: SURF_RAISED, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 720, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
@@ -25839,12 +26186,63 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {deedName && !deedBusy && <div style={{ fontSize: 11, color: PAL.purple, marginTop: 4, fontFamily: MONO_FONT, wordBreak: "break-all" }}>📄 {deedName}</div>}
               </div>
               {deedErr && <div style={{ fontSize: 12, color: PAL.danger, marginBottom: 8, lineHeight: 1.45 }}>{deedErr}</div>}
+              {/* B768160 — a scanned PDF (no text layer) routes here automatically instead of the plain
+                  refusal. OCR runs client-side (Tesseract.js, WASM, in the browser — the deed image
+                  never leaves the machine); a multi-page scan takes real seconds, so this shows
+                  per-page progress and can be cancelled outright. */}
+              {ocrBusy && (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", marginBottom: 10, border: `1px solid ${PAL.panelLine}`, borderRadius: 10, background: "rgba(124,58,237,0.05)" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: PAL.ink }}>
+                      Reading scanned PDF with OCR{ocrProgress ? ` — page ${ocrProgress.index} of ${ocrProgress.of}` : "…"}
+                    </div>
+                    <div style={{ fontSize: 11, color: PAL.muted, marginTop: 2 }}>
+                      {ocrProgress && ocrProgress.status === "recognizing text"
+                        ? `Recognizing text… ${Math.round((ocrProgress.pct || 0) * 100)}%`
+                        : ocrProgress && ocrProgress.status === "rendering" ? "Rendering page…" : "Starting…"}
+                    </div>
+                  </div>
+                  <button className="gbtn" style={chip} onClick={() => ocrAbortRef.current?.abort()}>Cancel</button>
+                </div>
+              )}
+              {ocrErr && <div style={{ fontSize: 12, color: PAL.danger, marginBottom: 8, lineHeight: 1.45 }}>{ocrErr}</div>}
+              {/* Page picker — a deed can run twenty pages of boilerplate before/after the actual
+                  legal description; OCR reads and concatenates every page by default (below), and
+                  this lets the user point at one specific page instead. */}
+              {ocrRun && ocrRun.pages.length > 1 && (
+                <div style={{ marginBottom: 10, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, overflow: "hidden" }}>
+                  <div data-testid="ocr-page-row" onClick={() => {
+                    const full = deedQueue.find((r) => r.id === deedActiveId);
+                    if (!full) return;
+                    setMbText(full.text); setOcrRun((run) => (run ? { ...run, activePage: null } : run));
+                    setDeedQueue((q) => q.map((r) => (r.id === deedActiveId ? { ...r, text: full.text } : r)));
+                  }} style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "7px 10px", cursor: "pointer", background: ocrRun.activePage == null ? "rgba(124,58,237,0.08)" : "transparent" }}>
+                    <span style={{ fontSize: 11.5, fontWeight: 600, color: PAL.ink }}>All {ocrRun.pageCount} page{ocrRun.pageCount > 1 ? "s" : ""}</span>
+                    <span style={{ fontSize: 11, color: PAL.muted, flex: 1 }}>concatenated (default)</span>
+                    {ocrRun.activePage == null && <span style={{ fontSize: 10.5, color: PAL.accent, fontWeight: 700 }}>LOADED</span>}
+                  </div>
+                  {ocrRun.pages.map((p) => {
+                    const active = ocrRun.activePage === p.pageNum;
+                    const conf = p.meanConfidence == null ? "" : ` · ${Math.round(p.meanConfidence)}% avg confidence`;
+                    return (
+                      <div key={p.pageNum} data-testid="ocr-page-row" onClick={() => {
+                        setMbText(p.text); setOcrRun((run) => (run ? { ...run, activePage: p.pageNum } : run));
+                        setDeedQueue((q) => q.map((r) => (r.id === deedActiveId ? { ...r, text: p.text } : r)));
+                      }} style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "7px 10px", cursor: "pointer", borderTop: `1px solid ${PAL.panelLine}`, background: active ? "rgba(124,58,237,0.08)" : "transparent" }}>
+                        <span style={{ fontSize: 11.5, fontWeight: 600, color: PAL.ink }}>Page {p.pageNum}</span>
+                        <span style={{ fontSize: 11, color: PAL.muted, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(p.text || "").replace(/\s+/g, " ").trim().slice(0, 60) || "(no text read)"}{conf}</span>
+                        {active && <span style={{ fontSize: 10.5, color: PAL.accent, fontWeight: 700, whiteSpace: "nowrap" }}>LOADED</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               {deedQueue.length > 1 && (
                 <div style={{ marginBottom: 10, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, overflow: "hidden" }}>
                   {deedQueue.map((r, i) => {
                     const active = r.id === deedActiveId, ok = !r.error && r.boundaryCalls > 0;
                     return (
-                      <div key={r.id} data-testid="deed-queue-row" onClick={() => { if (r.error) return; setDeedActiveId(r.id); setDeedName(r.name); if (r.text) setMbText(r.text); setDeedErr(""); }}
+                      <div key={r.id} data-testid="deed-queue-row" onClick={() => { if (r.error) return; setDeedActiveId(r.id); setDeedName(r.name); setOcrRun(r.ocr || null); if (r.text) setMbText(r.text); setDeedErr(""); }}
                         style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "7px 10px", cursor: r.error ? "default" : "pointer", borderTop: i ? `1px solid ${PAL.panelLine}` : "none", background: active ? "rgba(124,58,237,0.08)" : "transparent" }}>
                         <span style={{ fontSize: 11.5, fontWeight: 600, color: r.error ? PAL.danger : PAL.ink, fontFamily: MONO_FONT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "50%" }}>📄 {r.name}</span>
                         <span style={{ fontSize: 11, color: r.error ? PAL.danger : PAL.muted, flex: 1, lineHeight: 1.4 }}>{r.error ? r.error : `${r.boundaryCalls} call${r.boundaryCalls > 1 ? "s" : ""}${r.exCount ? ` · +${r.exCount} save-and-except` : ""} · ${r.closes ? "closes" : `gap ${r.gap.toFixed(1)}′`}`}</span>
@@ -25854,7 +26252,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   })}
                 </div>
               )}
-              <textarea value={mbText} onChange={(e) => { const v = e.target.value; setMbText(v); setDeedQueue((q) => q.map((r) => (r.id === deedActiveId ? { ...r, text: v } : r))); }} rows={5}
+              {/* B768160 — when the box holds OCR'd text, low-confidence tokens are highlighted so the
+                  user's eye goes straight to the characters most likely wrong, rather than
+                  proofreading a whole page (an empty lowConfidenceSpans renders a plain textarea,
+                  byte-identical to every non-OCR path). */}
+              <OcrDeedTextarea value={mbText} lowConfidenceSpans={ocrLcSpans}
+                onChange={(e) => { const v = e.target.value; setMbText(v); setDeedQueue((q) => q.map((r) => (r.id === deedActiveId ? { ...r, text: v } : r))); }} rows={5}
                 placeholder={'Paste a legal description, e.g.\nBEGINNING at a point… THENCE N 45°30′00″ E, 150.00 feet;\nTHENCE S 44°30′00″ E, 300.00 feet; …'}
                 style={{ width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: 12, fontFamily: MONO_FONT, border: BORDER_1, borderRadius: 8, color: PAL.ink, resize: "vertical", lineHeight: 1.5 }} />
               <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
@@ -25866,6 +26269,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {calls.length > 0 && !closes && (
                   <div style={{ flexBasis: "100%", fontSize: 11, color: PAL.warn, lineHeight: 1.45 }}>
                     ⚠ These calls don't close back to the start — the boundary is plotted exactly as written, with the gap on the last edge. Check the description against the survey.
+                    {/* B768160 — CLAUDE.md item (f): use closure as the OCR safety net. When the OCR'd
+                        text produced a bad closure, point at the specific calls with the lowest OCR
+                        confidence (or a likely-lost-decimal-point distance) as the probable culprits,
+                        instead of just drawing a wrong polygon and saying nothing. */}
+                    {ocrCulprits.length > 0 && (
+                      <div style={{ marginTop: 6 }}>
+                        Likely OCR culprit{ocrCulprits.length > 1 ? "s" : ""} — check {ocrCulprits.map((c, i) => (
+                          <span key={c.index}>{i > 0 ? ", " : ""}<b>call {c.index + 1}</b> ({c.call.bearing}, {c.call.distFt.toFixed(2)}′{c.suspect ? " — distance may be missing a decimal point" : c.minConfidence != null ? ` — ${Math.round(c.minConfidence)}% OCR confidence` : ""})</span>
+                        ))} first.
+                      </div>
+                    )}
                   </div>
                 )}
                 {calls.some((c) => c.curve) && (() => {
@@ -25940,43 +26354,68 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         </div>
       )}
 
-      {(pobMode || routeMode || overlapWarn || deedAlignHint) && (
-        /* NEW-4/B872 — was `.startsWith("⚠")`: a message that EMBEDS a warning mid-string (e.g. "All
-           3 deeds placed. ⚠ Verify: …") never starts with it, so it rendered in the default
-           success-green with its own warning invisible to the color. `.includes` catches both. */
-        <div style={{ ...toastPill, background: (deedAlignHint && !pobMode) ? PAL.accent : overlapWarn.includes("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d") }}>
-          <span>{pobMode ? (pobMode.queueTotal ? `Deed ${(pobMode.placed || 0) + 1} of ${pobMode.queueTotal}${pobMode.name ? ` — ${pobMode.name}` : ""}: click its point of beginning (Esc cancels all).` : "Click the point of beginning on the plan to anchor the description (Esc to cancel).") : (deedAlignHint ? deedAlignHint.msg : overlapWarn)}</span>
-          {(pobMode || routeMode) && <button onClick={() => { setPobMode(null); setRouteMode(null); setOverlapWarn(""); }} style={toastGhostBtn}>Cancel</button>}
-          {deedAlignHint && !pobMode && !routeMode && <>
-            <button onClick={() => alignDeedToParcel(deedAlignHint.id)} style={toastActionBtn}>Align to parcel</button>
-            <button onClick={() => setDeedAlignHint(null)} style={toastGhostBtn}>Dismiss</button>
-          </>}
-        </div>
-      )}
-
-      {/* NEW-1 — "you clicked a parcel and nothing happened, here's why" — the same bottom-center
-          toast surface as the pill above (same geometry, same type, same shadow), riding one notch
-          higher when that one is already occupied so neither message can swallow the other. The
-          inline action turns selection back ON right where the click failed, so the user never has
-          to go find the header control. Only ever raised by a press that actually hit a parcel. */}
-      {parcelHint && (
-        <div data-testid="parcel-select-hint" role="status"
-          style={{ ...toastPill, background: PAL.accent, bottom: (pobMode || routeMode || overlapWarn || deedAlignHint) ? 132 : 84 }}>
-          <span>Parcel selection is off — that click panned the map.</span>
-          <button data-testid="parcel-select-hint-on" onClick={() => setParcelSelect(true)} style={toastActionBtn}>Turn it on</button>
-          <button aria-label="Dismiss" onClick={dismissParcelHint} style={toastGhostBtn}>Dismiss</button>
-        </div>
-      )}
-
-      {ovCalib && (
-        <div style={{ ...toastPill, background: PAL.accent }}>
-          <span>{ovCalibMsg()} {ovCalib.kind === "align" && Math.floor(ovCalib.pts.length / 2) >= 2 ? <span style={{ opacity: 0.75 }}>· or add more pairs for a better fit</span> : null} <span style={{ opacity: 0.75 }}>(Esc to cancel)</span></span>
-          {ovCalib.kind === "align" && Math.floor(ovCalib.pts.length / 2) >= 2 && (
-            <button onClick={applyOvAlign} style={{ ...toastActionBtn, border: "1px solid #fff", padding: "3px 11px" }}>Apply {Math.floor(ovCalib.pts.length / 2)} pts</button>
+      {(() => {
+        /* ⛔ NEW-1/B754752 — `toastPill` is built HERE, inside this IIFE, not as a top-level
+         * `const` above. `hiddenContentReads.js`'s sweep treats "the last top-level `const`
+         * before the JSX `return`" as owning the ENTIRE render body underneath it (a line-span
+         * heuristic, not a real AST) — that binding is `calibPlace` today, which is why its
+         * DECLARATIONS entry says it "reads the model" despite never touching one directly. A
+         * new top-level const inserted after it steals that attribution and reports `calibPlace`
+         * stale / the new name undeclared — both false alarms, but the sweep can't tell the
+         * difference, so the fix is to never add one there. Nesting these three consts inside a
+         * function body (indent > 2) keeps them invisible to that sweep entirely.
+         *
+         * `bottom` now clears the SAME furniture (north arrow, scale bar, the calibration badge's
+         * raised row, the narrow-mode FAB reserve) the Standards "Applied · Undo" toast already
+         * does, via the same `canvasPillBottom` — a bare `bottom: 84` ignored all of it, so on a
+         * narrow canvas (measured live at 750/600/420px) this toast landed squarely on the scale
+         * bar and the badge. `left` already followed the measured canvas center (see `toastCenterX`
+         * above); this is the matching vertical half. Both are proven by
+         * `ui-audit/verify-canvas-furniture.mjs`, which treats this toast as one more piece of the
+         * same furniture set rather than trusting its position in isolation. */
+        const TOAST_BOTTOM = canvasPillBottom({ northH: furnPlates.north.plateH, scaleBarH: furnPlates.scaleBar.plateH, calibBottom: calibrationState ? calibPlace.bottom : null, row: FURNITURE_ROW });
+        const TOAST_STACK_GAP_PX = 48; // the parcel-select hint's own stacked offset above another toast, unchanged from its prior 84→132 hardcode
+        const toastPill = { position: "fixed", left: toastCenterX == null ? "50%" : toastCenterX, bottom: TOAST_BOTTOM, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw", color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" };
+        return (<>
+          {(pobMode || routeMode || overlapWarn || deedAlignHint) && (
+            /* NEW-4/B872 — was `.startsWith("⚠")`: a message that EMBEDS a warning mid-string (e.g. "All
+               3 deeds placed. ⚠ Verify: …") never starts with it, so it rendered in the default
+               success-green with its own warning invisible to the color. `.includes` catches both. */
+            <div style={{ ...toastPill, background: (deedAlignHint && !pobMode) ? PAL.accent : overlapWarn.includes("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d") }}>
+              <span>{pobMode ? (pobMode.queueTotal ? `Deed ${(pobMode.placed || 0) + 1} of ${pobMode.queueTotal}${pobMode.name ? ` — ${pobMode.name}` : ""}: click its point of beginning (Esc cancels all).` : "Click the point of beginning on the plan to anchor the description (Esc to cancel).") : (deedAlignHint ? deedAlignHint.msg : overlapWarn)}</span>
+              {(pobMode || routeMode) && <button onClick={() => { setPobMode(null); setRouteMode(null); setOverlapWarn(""); }} style={toastGhostBtn}>Cancel</button>}
+              {deedAlignHint && !pobMode && !routeMode && <>
+                <button onClick={() => alignDeedToParcel(deedAlignHint.id)} style={toastActionBtn}>Align to parcel</button>
+                <button onClick={() => setDeedAlignHint(null)} style={toastGhostBtn}>Dismiss</button>
+              </>}
+            </div>
           )}
-          <button onClick={() => setOvCalib(null)} style={toastGhostBtn}>Cancel</button>
-        </div>
-      )}
+
+          {/* NEW-1 — "you clicked a parcel and nothing happened, here's why" — the same bottom-center
+              toast surface as the pill above (same geometry, same type, same shadow), riding one notch
+              higher when that one is already occupied so neither message can swallow the other. The
+              inline action turns selection back ON right where the click failed, so the user never has
+              to go find the header control. Only ever raised by a press that actually hit a parcel. */}
+          {parcelHint && (
+            <div data-testid="parcel-select-hint" role="status"
+              style={{ ...toastPill, background: PAL.accent, bottom: TOAST_BOTTOM + ((pobMode || routeMode || overlapWarn || deedAlignHint) ? TOAST_STACK_GAP_PX : 0) }}>
+              <span>Parcel selection is off — that click panned the map.</span>
+              <button data-testid="parcel-select-hint-on" onClick={() => setParcelSelect(true)} style={toastActionBtn}>Turn it on</button>
+              <button aria-label="Dismiss" onClick={dismissParcelHint} style={toastGhostBtn}>Dismiss</button>
+            </div>
+          )}
+
+          {ovCalib && (
+            <div style={{ ...toastPill, background: PAL.accent }}>
+              <span>{ovCalibMsg()} {ovCalib.kind === "align" && Math.floor(ovCalib.pts.length / 2) >= 2 ? <span style={{ opacity: 0.75 }}>· or add more pairs for a better fit</span> : null} <span style={{ opacity: 0.75 }}>(Esc to cancel)</span></span>
+              {ovCalib.kind === "align" && Math.floor(ovCalib.pts.length / 2) >= 2 && (
+                <button onClick={applyOvAlign} style={{ ...toastActionBtn, border: "1px solid #fff", padding: "3px 11px" }}>Apply {Math.floor(ovCalib.pts.length / 2)} pts</button>
+              )}
+              <button onClick={() => setOvCalib(null)} style={toastGhostBtn}>Cancel</button>
+            </div>
+          )}
+        </>);
+      })()}
 
       {/* B230 — Add / Delete control-point menu, portal-mounted at the document root so it can
           never be clipped or trapped behind the canvas / tool-rail stacking contexts. Shared
@@ -25985,6 +26424,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         <ContextMenu x={vtxMenu.x} y={vtxMenu.y} onClose={() => setVtxMenu(null)} minWidth={190} zIndex={6000} className="menu" panelStyle={menuPanel}>
           {vtxMenu.mode === "edge"
             ? <button style={menuItem(false)} onClick={() => { insertVtx(vtxMenu.layer, vtxMenu.id, vtxMenu.index, vtxMenu.ptFeet); setVtxMenu(null); }}>＋&nbsp; Add control point</button>
+            // NEW-1/B649504 — at the path's true minimum (a 2-point road/easement/measurement/
+            // markup), removing this point would leave a degenerate line, so a disabled "min
+            // reached" row is a dead end with nothing left to click. Offer the delete the user
+            // actually wants — the whole feature — instead of a row that can never be true AND
+            // useful at the same time. A closed ring (parcel/element/polygon) at its own minimum
+            // keeps the plain disabled row: "min reached" is an honest, correct statement there.
+            : vtxMenu.wholeDeleteLabel
+            ? <button style={{ ...menuItem(false), color: "#b3361b" }} onClick={() => { deleteWholeFromVtxMenu(vtxMenu.layer, vtxMenu.id); setVtxMenu(null); }}>✕&nbsp; {vtxMenu.wholeDeleteLabel}</button>
             : <button disabled={!vtxMenu.canDelete} style={{ ...menuItem(false), color: vtxMenu.canDelete ? "#b3361b" : "#b9b3a6", cursor: vtxMenu.canDelete ? "pointer" : "default" }} onClick={() => { if (vtxMenu.canDelete) { deleteVtx(vtxMenu.layer, vtxMenu.id, vtxMenu.index); setVtxMenu(null); } }}>✕&nbsp; Delete control point{vtxMenu.canDelete ? "" : " (min reached)"}</button>}
           {/* NEW-5 — ROUNDABOUT, on the road-terminus branch of the menu the owner already uses.
               The size shown is the class's own derived diameter (a WB-67 truck route and an auto

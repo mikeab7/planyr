@@ -205,10 +205,14 @@ export function keyScopeVerdict({ entry, scope, fieldEdit = false }) {
  * keypress is noise.
  */
 export const SCOPE_GUARD_HINT = Object.freeze({
-  [REFUSAL.FIELD]: "Delete went to the box you're typing in. Click the plan, then press Delete.",
-  [REFUSAL.SLIDER]: "That key belongs to the slider you're holding. Click the plan first.",
-  [REFUSAL.PICKER]: "That key belongs to the dropdown. Click the plan first.",
-  [REFUSAL.CHROME]: "The keyboard is still on the panel. Click the plan, then press Delete.",
+  /* ⛔ NEW-1/B754752 — UNREACHABLE BY CONSTRUCTION, and left that way deliberately (see
+   * shouldHintRefusal below). Kept truthy only because SCOPE_GUARD_HINT is asserted complete over
+   * every REFUSAL reason; if this ever DOES fire again it must not prescribe pressing Delete on the
+   * plan as the remedy — that is a recipe for deleting the selection the user never meant to touch. */
+  [REFUSAL.FIELD]: "⚠ Delete went to the box you're typing in — that's normal text editing.",
+  [REFUSAL.SLIDER]: "⚠ That key belongs to the slider you're holding. Click the plan first.",
+  [REFUSAL.PICKER]: "⚠ That key belongs to the dropdown. Click the plan first.",
+  [REFUSAL.CHROME]: "⚠ The keyboard is still on the panel. Click the plan, then press Delete.",
 });
 
 /**
@@ -217,9 +221,20 @@ export const SCOPE_GUARD_HINT = Object.freeze({
  * Only for a key that would have CHANGED the plan, only when there is something selected for it to
  * have changed, and only once per episode — the three conditions that keep this a explanation and
  * not a nag. A refused tool letter stays silent: nothing was lost and nothing looks broken.
+ *
+ * ⛔ NEW-1/B754752 — A FIELD REFUSAL IS NEVER HINTED, FULL STOP. A focused text field consuming
+ * Delete/Backspace is CORRECT behaviour — the user is typing, the keystroke did exactly what it
+ * should, and there is nothing to explain. Before this guard, `entry.destructive` (below) forced a
+ * hint on EVERY press while typing in a number field, because clearing a value with Ctrl+A+Delete
+ * (or Backspace) reads as "a selected element + a destructive key + a refusal" to the rest of this
+ * function — which is true of every digit anyone clears before typing a new one. Reproduced live:
+ * select a building, open Properties, click into a dimension field, press Delete or Backspace to
+ * clear it — a toast fired on every keystroke, telling the user to "click the plan, then press
+ * Delete", which is a recipe for deleting the very building they were editing.
  */
 export function shouldHintRefusal({ entry, reason, hasSelection, episode, lastHintedEpisode } = {}) {
   if (!entry || !reason) return false;
+  if (reason === REFUSAL.FIELD) return false;
   if (!entry.mutates) return false;
   if (!hasSelection) return false;
   /* ⛔ NEW-1 — A DESTRUCTIVE KEY EXPLAINS ITSELF ON *EVERY* PRESS, AND THE ONCE-PER-EPISODE RULE IS

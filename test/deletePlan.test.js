@@ -14,8 +14,8 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import {
-  planDelete, resolveRef, bondedSubtree, shouldHintTypingGuard,
-  DELETE_ENTRIES, REF_FIELD, TYPING_GUARD_HINT,
+  planDelete, resolveRef, bondedSubtree,
+  DELETE_ENTRIES, REF_FIELD,
 } from "../src/workspaces/site-planner/lib/deletePlan.js";
 
 // A plan shaped like the owner's Colorado site: three buildings, one carrying a bonded assembly.
@@ -296,21 +296,8 @@ describe("every delete entry point in SitePlanner.jsx is wired to the contract",
   });
 });
 
-describe("the typing-guard hint", () => {
-  const base = { key: "Delete", hasSelection: true, fieldKey: "width", lastHintedField: null };
-  it("fires once per focused field when Delete is swallowed with something selected", () => {
-    expect(shouldHintTypingGuard(base)).toBe(true);
-    expect(shouldHintTypingGuard({ ...base, lastHintedField: "width" })).toBe(false);
-    expect(shouldHintTypingGuard({ ...base, fieldKey: "depth", lastHintedField: "width" })).toBe(true);
-  });
-  it("never fires on Backspace — the natural editing key inside a field", () => {
-    expect(shouldHintTypingGuard({ ...base, key: "Backspace" })).toBe(false);
-  });
-  it("never fires with nothing selected (Delete wasn't going to do anything anyway)", () => {
-    expect(shouldHintTypingGuard({ ...base, hasSelection: false })).toBe(false);
-  });
-  it("tells the user where the keystroke went and what to do", () => {
-    expect(TYPING_GUARD_HINT).toMatch(/typing/i);
-    expect(TYPING_GUARD_HINT).toMatch(/click the plan/i);
-  });
-});
+/* NEW-1/B754752 — the old field-focus typing-guard hint (`shouldHintTypingGuard`/`TYPING_GUARD_HINT`)
+ * lived here before keyContract.js's scope model existed. It is gone: the scope model's own
+ * `shouldHintRefusal` (test/keyContract.test.js) now decides this, covers all eight focus states
+ * instead of the one this module knew about, and never hints a FIELD refusal at all — see
+ * keyContract.js's header for why hinting a text field consuming Delete was itself the bug. */

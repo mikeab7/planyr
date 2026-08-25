@@ -35,6 +35,8 @@ export const CLICK_CONTRACT = [
   { type: "mellipse", label: "Ellipse markup", family: "markup", opens: "inspector", draw: "drag", tool: "Ellipse" },
   { type: "mpolygon", label: "Polygon markup", family: "markup", opens: "inspector", draw: "poly", tool: "Polygon" },
   { type: "mpolyline", label: "Polyline markup", family: "markup", opens: "inspector", draw: "poly", tool: "Polyline" },
+  { type: "mcloud", label: "Revision cloud", family: "markup", opens: "inspector", draw: "poly", tool: "Cloud",
+    note: "Cloud ▾ picks the draw gesture (click-path/drag-box/freehand); the click contract is the same either way" },
 
   // Annotations (`kind: "callout"`) — B948 splits the double-click by LOCATION: the text interior
   // edits in place, the border band opens the inspector. Either way a SINGLE click only selects.
