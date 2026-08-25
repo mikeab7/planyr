@@ -84,6 +84,13 @@ const PAL = {
 // Subtle road/place labels overlay (drawn faint over the imagery).
 const LABELS_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}";
 
+/* NEW-MAPCTRL-3 — the narrow-mode full-width search bar's own footprint (`top:8, height:42`
+ * where it's rendered below) plus an 8px gap. The bottom-left banner slot (error toast, share
+ * confirmation, the "+ Select parcels" coach tip, …) uses this as its TOP ceiling on a narrow
+ * screen, so a genuinely short pane (a landscape phone/tablet) can never render one of those
+ * banners UNDER the search bar — see that render site for the measured collision this closes. */
+const SEARCH_BAR_CLEARANCE_PX = 58;
+
 /* NEW-6 — the ring count Leaflet actually uses on this map's two tile layers. Neither passes
  * `keepBuffer`, so both run on Leaflet's default of 2; the cache CEILING is sized from that same
  * number so the cap is computed for the layers as they really are. Deliberately NOT tuned: this
@@ -2079,6 +2086,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             onKeyDown={(e) => { if (e.key === "Enter" && !busy) goAddress(); }}
           />
           <button
+            title="Search for this address or place"
             style={{
               flex: "none", height: 30, padding: "0 11px", borderRadius: nestedIn(RADIUS.pill),
               border: "none", background: PAL.accent, color: "#fff",
@@ -2099,6 +2107,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           {!selectMode && !placingCompPin && selected.length === 0 && (
             <button
               onClick={() => setSelectMode(true)}
+              // NEW-MAPCTRL-3 — this is the primary path to starting a plan from real county
+              // parcels, not a leftover control; every other button on this bar (Layers, Imagery
+              // & layers, Start blank, Full screen…) carries a title, and this one silently
+              // didn't, which is exactly what made it read as pointless with nothing to explain it.
+              title="Click parcels on the map to select them, then start a plan from the selection"
               style={{
                 flex: "none", display: "flex", alignItems: "center", gap: 5,
                 height: 30, padding: "0 11px", borderRadius: nestedIn(RADIUS.pill),
@@ -2116,6 +2129,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           {!selectMode && !placingCompPin && selected.length === 0 && onPlaceComp && (
             <button
               onClick={() => setPlacingCompPin(true)}
+              title="Click the map to drop a leasing-comp pin at that spot"
               style={{
                 flex: "none", display: "flex", alignItems: "center", gap: 5,
                 height: 30, padding: "0 11px", borderRadius: nestedIn(RADIUS.pill),
@@ -2404,10 +2418,33 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           </>)}
         </div>
 
-        {/* error toast (bottom-left) — surfaced on an error, OR on the NEW-MAPCTRL-2 "you're far
+        {/* NEW-MAPCTRL-3 — THE BOTTOM-LEFT BANNER SLOT, and why it is now ONE wrapper instead of five
+            identically-positioned `position:absolute` divs. Every one of these used a bare
+            `bottom: ZOOM_CONTROL_CLEARANCE_PX`, which only clears the BOTTOM (the zoom/locate
+            stack) — it says nothing about the TOP, and in narrow mode the full-width search bar
+            sits at a fixed `top:8` regardless of how tall the map pane is. On a genuinely short
+            pane (a landscape phone/tablet — narrow width, short height, the reported case: bar
+            at y121-163, tip at y103-157, a real 36-42px overlap measured live) a bottom-anchored
+            box can render ABOVE the search bar's bottom edge, burying the ONLY instruction this
+            app offers for how "+ Select parcels" mode works.
+            THE FIX is a `top`+`bottom` pair (never `bottom` alone): the outer wrapper spans from
+            a real ceiling (the search bar's own bottom edge + a gap, narrow only — 0 on desktop,
+            where the search bar is a small centered pill nowhere near this corner) down to the
+            existing zoom-stack floor, and a flex column with `justifyContent:"flex-end"` hugs
+            the box to the BOTTOM of that span — so it reads exactly as before on every taller
+            screen, and on a short one it is squeezed against its ceiling rather than climbing
+            past it. No JS measurement needed: both edges are already-known constants.
+            ⛔ `overflow:"hidden"` on the wrapper is doing real work, not tidying: a flex child
+            TALLER than its own span (the banner's natural height vs. an EXTREMELY short pane —
+            measured under 200px of usable pane height, past any realistic device) still overflows
+            the `flex-end` anchor in the direction opposite the anchor, i.e. back past the ceiling.
+            Clipping there means the search bar can NEVER be covered even in that pathological
+            case — a message truncated at the top is the honest failure, a hidden search box is not. */}
+        <div style={{ position: "absolute", left: 12, top: narrow ? SEARCH_BAR_CLEARANCE_PX : 0, bottom: ZOOM_CONTROL_CLEARANCE_PX, maxWidth: 380, zIndex: 1000, display: "flex", flexDirection: "column", justifyContent: "flex-end", gap: 8, pointerEvents: "none", overflow: "hidden" }}>
+        {/* error toast — surfaced on an error, OR on the NEW-MAPCTRL-2 "you're far
             from your sites" offer alone (STEEL-MAN ix), which can stand with no error text at all. */}
         {(err || locateFar) && (
-          <div style={{ position: "absolute", left: 12, bottom: ZOOM_CONTROL_CLEARANCE_PX, zIndex: 1000, maxWidth: 380, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45, pointerEvents: (fallbackOffer || locateFar) ? "auto" : "none" }}>
+          <div style={{ background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45, pointerEvents: (fallbackOffer || locateFar) ? "auto" : "none" }}>
             {err}
             {/* NEW-4 — the way forward rides WITH the bad news. Only on a genuine source outage:
                 "no parcel right there" is an answer, not an outage, and gets no button. */}
@@ -2427,38 +2464,41 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             )}
           </div>
         )}
-        {/* NEW-2 — share/unshare confirmation (bottom-left, same slot as the error toast, mutually
+        {/* NEW-2 — share/unshare confirmation (same slot as the error toast, mutually
             exclusive with it): the visible after-state the owner asked for. */}
         {!err && shareNotice && (
-          <div role="status" style={{ position: "absolute", left: 12, bottom: ZOOM_CONTROL_CLEARANCE_PX, zIndex: 1000, maxWidth: 380, background: "var(--success-bg)", border: "1px solid var(--success-border)", borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12.5, color: "var(--success-text)", lineHeight: 1.45 }}>
+          <div role="status" style={{ background: "var(--success-bg)", border: "1px solid var(--success-border)", borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12.5, color: "var(--success-text)", lineHeight: 1.45 }}>
             {shareNotice}
           </div>
         )}
-        {/* statewide-backup notice (bottom-left) — the clicked lot was answered by the
+        {/* statewide-backup notice — the clicked lot was answered by the
             all-Texas TxGIO layer because the county's own server was down; be honest
             about provenance so a possibly-staler source is never mistaken for the
             county's own record (B244). */}
         {backupNotice && !err && (
-          <div style={{ position: "absolute", left: 12, bottom: ZOOM_CONTROL_CLEARANCE_PX, zIndex: 1000, maxWidth: 380, background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45 }}>
+          <div style={{ background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45 }}>
             <b>Statewide backup source.</b> {backupNotice.county} county’s own parcel server is unavailable, so this lot came from the all-Texas TxGIO layer — accurate for selection, but it may lag recent county updates.
           </div>
         )}
-        {/* cached-snapshot notice (bottom-left) — the clicked lot came from Planyr's saved Drive
+        {/* cached-snapshot notice — the clicked lot came from Planyr's saved Drive
             snapshot because the live county server was unreachable (B629). Same honesty as the
             statewide-backup notice: a possibly-staler local copy is never mistaken for a live record. */}
         {cachedNotice && !err && !backupNotice && (
-          <div style={{ position: "absolute", left: 12, bottom: ZOOM_CONTROL_CLEARANCE_PX, zIndex: 1000, maxWidth: 380, background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45 }}>
+          <div style={{ background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45 }}>
             <b>Cached copy{fmtAsOf(cachedNotice.asOf)}.</b> {cachedNotice.county} county’s live parcel server is unavailable, so this lot came from Planyr’s saved snapshot — accurate for selection, but it may lag recent county updates.
           </div>
         )}
-        {/* contextual selection guidance — only while actively selecting (not a persistent fixture) */}
+        {/* contextual selection guidance — only while actively selecting (not a persistent
+            fixture). This is the ONE explanation anywhere in the app for how "+ Select parcels"
+            mode works, which is exactly why it must never be the box that ends up covered. */}
         {!err && selectMode && (
-          <div style={{ position: "absolute", left: 12, bottom: ZOOM_CONTROL_CLEARANCE_PX, zIndex: 1000, maxWidth: 380, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12.5, color: PAL.ink, lineHeight: 1.45, pointerEvents: "none" }}>
+          <div data-testid="select-parcels-tip" style={{ background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12.5, color: PAL.ink, lineHeight: 1.45, pointerEvents: "none" }}>
             {zoom != null && zoom < PARCEL_MINZOOM
               ? "Click any lot to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines."
               : "Click a lot to add it (＋). Hover an added lot and click to remove it (−). Add several, then Plan."}
           </div>
         )}
+        </div>
         {/* (B167) The idle "Drag to move the map" first-run bubble was removed entirely. */}
 
       </div>
