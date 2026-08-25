@@ -683,20 +683,36 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
 
       /* NEW-MAPCTRL-2 — HONEST STATES, checked BEFORE ever calling getCurrentPosition.
        *
-       * The owner's company blocks Location Services in Chrome by policy, so this control can
-       * never succeed for him — and spinning for 12s before saying so, on every single click, is
-       * wrong for an environment where the answer is already known. `locateAvailability` answers
-       * from three signals: is this an HTTPS page (STEEL-MAN v), does this browser even expose
-       * `navigator.geolocation` (STEEL-MAN vi, partial — a Permissions-Policy header can also
-       * remove the API entirely), and — the one that matters here — what does
-       * `navigator.permissions.query({name:'geolocation'})` already know (STEEL-MAN i). A browser
-       * or enterprise policy that has already denied the permission reports 'denied' with NO
-       * prompt ever shown, which is exactly the owner's case.
+       * ⛔ CORRECTED (owner measurement, same day): the first cut of this comment claimed the
+       * `permissions.query` precheck below was what would catch the owner's company-blocked
+       * Chrome. It is NOT — he measured `navigator.permissions.query({name:'geolocation'})` on
+       * his real machine, on the real deployed app, and it reports **'prompt'**, not 'denied'.
+       * An enterprise policy of this shape (Chrome's `DefaultGeolocationSetting`) blocks the
+       * REQUEST silently — it does not pre-announce itself through the Permissions API. So
+       * `locateAvailability` reads his environment as "ready" and the click proceeds exactly
+       * like any other — this precheck is a DEMOTED, best-effort convenience for the states it
+       * actually can see (STEEL-MAN v/vi, and a genuine 'denied' from a real per-site browser
+       * block or an already-answered "no" — a different case from his), never the defence for
+       * his case.
+       *
+       * THE ACTUAL DEFENCE against his case is below, in the click handler and the two async
+       * handlers: an EXPLICIT, FINITE `timeout` on the `map.locate()` call itself (never the
+       * PositionOptions default of Infinity — an infinite timeout on a request that never
+       * resolves is a permanent spinner, which is exactly his report), PLUS an independent
+       * wall-clock `locateWatchdogRef` timer that fires on its own regardless of whether
+       * `navigator.geolocation` ever invokes either callback — which a policy-blocked provider
+       * is free to never do (STEEL-MAN ii). Both are demonstrated with a mocked
+       * `getCurrentPosition` that calls back NEITHER way (`ui-audit/verify-locate-me.mjs`), the
+       * closest reproduction of his environment this sandbox can build without a real blocked
+       * browser, since a genuine permission prompt cannot be driven by automation (STEEL-MAN's
+       * own testability requirement).
        *
        * `applyAvailability` is the ONE place the control's visual "blocked" state is set —
        * opacity only, never a hardcoded grey, so it reads correctly in both themes — and it is
-       * also what a live permission CHANGE (an admin lifts the policy, a user flips a site
-       * setting) re-runs, via the `change` subscription below. */
+       * also what a live permission CHANGE (an admin lifts a real per-site block) re-runs, via
+       * the `change` subscription below. It still earns its place: a 'denied' state IS real for
+       * other users/browsers, and skipping a call already known to fail is a plain improvement
+       * over always asking — it is simply not what fixes THIS report. */
       const applyAvailability = (availability) => {
         geoAvailabilityRef.current = availability;
         const blocked = availability !== "ready";
@@ -760,11 +776,16 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         btn.setAttribute("data-locate-state", "locating");
         btn.style.animation = "spin 1s linear infinite"; btn.style.opacity = "0.6";
         try {
+          // ⛔ THE REAL DEFENCE (owner-corrected) — an EXPLICIT, FINITE `timeout`. The
+          // PositionOptions default is Infinity, which is the literal cause of a spinner that
+          // never stops: a policy-blocked or hung geolocation provider is free to invoke NEITHER
+          // callback, and with no timeout set nothing ever ends the request. 10s here, comfortably
+          // inside the "short, 8-10s" the owner asked for.
           // maximumAge:0 — STEEL-MAN viii: never accept a cached fix, possibly hours old and in
           // another city, over a fresh one. setView is deliberately NOT passed here; the
           // locationfound handler below decides for itself whether this fix is even usable
           // (STEEL-MAN vii) before ever moving the camera.
-          map.locate({ enableHighAccuracy: true, maxZoom: 17, timeout: 12000, maximumAge: 0 });
+          map.locate({ enableHighAccuracy: true, maxZoom: 17, timeout: 10000, maximumAge: 0 });
         } catch (_) {
           // STEEL-MAN vi — a Permissions-Policy violation or a blocked iframe can throw
           // synchronously instead of going through the normal error callback.
@@ -772,15 +793,20 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           setErr(locateErrorMessage());
           return;
         }
-        // STEEL-MAN ii — if the user never answers the permission prompt, neither locationfound
-        // nor locationerror is guaranteed to fire. This backstop fires regardless, a couple of
-        // seconds past Leaflet's own 12s timeout, so the spinner can never run forever.
+        // ⛔ STEEL-MAN ii, THE SECOND HALF OF THE REAL DEFENCE — an INDEPENDENT wall-clock timer,
+        // never trusting the browser's own timeout alone. `map.locate`'s `timeout` option only
+        // bounds the underlying `getCurrentPosition` call; it does nothing if the provider (or a
+        // policy) prevents that call from ever being answered in a way the browser itself detects.
+        // This plain `setTimeout` fires regardless of whether `navigator.geolocation` EVER invokes
+        // either callback — proven with a mocked `getCurrentPosition` that calls back neither way
+        // (`ui-audit/verify-locate-me.mjs`'s "unanswered prompt" arm) — a couple of seconds past
+        // the explicit timeout above, so the spinner can never run forever.
         locateWatchdogRef.current = setTimeout(() => {
           if (!locatingRef.current) return; // already resolved or cancelled
           try { map.stopLocate(); } catch (_) {}
           stopLocating();
           setErr(locateErrorMessage(3));
-        }, 14000);
+        }, 12000);
       });
       const ctrl = L.control({ position: "bottomleft" });
       ctrl.onAdd = () => container;

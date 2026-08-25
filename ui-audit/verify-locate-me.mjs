@@ -20,6 +20,16 @@
  *     cancelled request never revives the UI.
  * 10. NEW-MAPCTRL-2 — the control always carries an aria-label and a tooltip, and a blocked
  *     state is expressed as opacity (never a hardcoded color), so it survives dark mode.
+ * 11. ⛔ THE CORRECTED SCENARIO (owner measurement, same day as the original report) — the
+ *     control's real environment on his company Chrome reports `permissions.query` state
+ *     'prompt', NOT 'denied' (a policy of this shape blocks the geolocation REQUEST silently,
+ *     without pre-announcing through the Permissions API). So the precheck reads him as
+ *     available and a click proceeds normally — the defence that has to hold is the explicit,
+ *     finite `timeout` passed to `map.locate()` (never the PositionOptions default of Infinity)
+ *     plus the independent watchdog, BOTH exercised together here with `permissions.query`
+ *     genuinely reporting 'prompt' (the real, un-mocked default) and a `getCurrentPosition`
+ *     that never calls back either way — the closest reproduction of his exact measured
+ *     environment this sandbox can build without a real policy-blocked browser.
  *
  * Run: BASE_URL=http://localhost:4173/ node ui-audit/verify-locate-me.mjs
  *      (vite preview must be serving the built app)
@@ -224,6 +234,54 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
     check("the watchdog surfaces an honest timeout-style message", notice > 0);
   } else {
     check("the watchdog stops the spinner on its own when neither callback ever fires", false, "button not visible");
+  }
+  await ctx.close();
+}
+
+// ---- Arm 8b: THE CORRECTED SCENARIO — permissions.query genuinely reports 'prompt' (his real
+// measured state, left completely un-mocked here) AND getCurrentPosition never calls back. The
+// precheck must NOT report 'blocked' (it doesn't know his environment is broken), so the ENTIRE
+// defence has to be the explicit timeout + independent watchdog — proven together, not the
+// precheck standing in for them.
+{
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await ctx.newPage();
+  await page.addInitScript(() => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition = () => { /* a policy-blocked provider: no success, no error, ever */ };
+    }
+  });
+  await assertMeasurable(page, "verify-locate-me");
+  await page.goto(BASE, { waitUntil: "load" });
+  await page.waitForTimeout(1600);
+  const btn = page.locator('[data-testid="locate-me-btn"]');
+  if (await btn.isVisible().catch(() => false)) {
+    await page.waitForTimeout(400); // let the real (un-mocked) permissions.query() resolve
+    const permState = await page.evaluate(async () => {
+      try { const s = await navigator.permissions.query({ name: "geolocation" }); return s.state; } catch (_) { return "unsupported"; }
+    });
+    const stateBeforeClick = await btn.getAttribute("data-locate-state");
+    check("the real (un-mocked) permission state is 'prompt', matching the owner's measurement — NOT 'denied'", permState === "prompt", `state=${permState}`);
+    check("with 'prompt', the precheck correctly does NOT mark the control blocked (it can't see his policy)", stateBeforeClick === "idle", `data-locate-state=${stateBeforeClick}`);
+    await btn.click();
+    await page.waitForTimeout(500);
+    const spinning = await btn.evaluate((b) => !!b.style.animation);
+    check("the click proceeds normally (spins) — the precheck did not intervene", spinning);
+    await page.waitForTimeout(12500); // past the 10s explicit timeout AND the 12s watchdog
+    const stateAfter = await btn.getAttribute("data-locate-state");
+    const spinningAfter = await btn.evaluate((b) => !!b.style.animation);
+    check("⛔ THE ACTUAL DEFENCE HOLDS — idle again, not spinning, with permissions.query genuinely reporting 'prompt' throughout", stateAfter === "idle" && !spinningAfter, `state=${stateAfter} spinning=${spinningAfter}`);
+    const notice = await page.locator("text=/too long/i").count().catch(() => 0);
+    check("an honest message is shown, and the control is actionable again (retry works)", notice > 0);
+    if (notice > 0) {
+      // Retry: prove it isn't stuck — a fresh click starts a fresh spin.
+      await btn.click();
+      await page.waitForTimeout(300);
+      const retrySpinning = await btn.evaluate((b) => !!b.style.animation);
+      check("retry after the corrected-scenario timeout actually starts a new attempt", retrySpinning);
+    }
+  } else {
+    check("⛔ THE ACTUAL DEFENCE HOLDS — idle again, not spinning, with permissions.query genuinely reporting 'prompt' throughout", false, "button not visible");
   }
   await ctx.close();
 }

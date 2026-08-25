@@ -47,9 +47,18 @@ export function locateErrorMessage(code) {
 }
 
 /* NEW-MAPCTRL-2 — "spinning then timing out on every click is wrong for a permanently-denied
- * environment" (a company Chrome policy that blocks Location Services outright). Everything below
- * is what lets the control know that BEFORE it ever calls getCurrentPosition, instead of only
- * finding out ~12s later from a rejected promise. */
+ * environment" (a company Chrome policy that blocks Location Services outright).
+ *
+ * ⛔ CORRECTED (owner measurement, same day as the original report): `locateAvailability`'s
+ * 'blocked' state was first written assuming an enterprise policy would show up as
+ * `navigator.permissions.query({name:'geolocation'})` resolving 'denied'. Measured on the
+ * owner's real machine against the real deployed app: it resolves **'prompt'**. A policy of
+ * this shape blocks the geolocation REQUEST itself, silently, without pre-announcing through
+ * the Permissions API — so this function's 'blocked' branch does NOT catch his case, and never
+ * claimed to be a dependency for the reactive path (see `MapFinder.jsx`'s own corrected note).
+ * It stays useful for what it CAN see — an explicit HTTPS/API/permission absence — but the
+ * actual fix for a request that silently never resolves is the caller's own bounded timeout
+ * plus an independent watchdog, not a prediction made ahead of time. */
 
 // How far a reported fix may be off before it stops being a USABLE location at all — distinct
 // from ACCURACY_CIRCLE_THRESHOLD_M above, which only decides whether to draw a TIGHT ring.
