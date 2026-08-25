@@ -1,3 +1,15 @@
+### V421632 — B755808: Site Planner toolbar (File / Undo / Redo / Zoom-to-fit) now shares one chrome system, self-verified live headless — ✅ **PASSED 2026-08-25**
+
+**✅ PASS — pixel-level chrome-consistency check, self-verified this session in headless Chromium against the real running app (`vite dev`), logged out — no auth/GIS needed. Harness (kept in the repo as a reusable regression check): `ui-audit/verify-toolbar-chrome-system.mjs`.**
+- **Setup:** fresh "Start blank" plan, no sign-in, no GIS. Read `getComputedStyle` on the real rendered File / Undo / Redo / Zoom-to-fit buttons rather than assuming from source.
+- **Shared grid, PASS (2/2):** all four controls render at the identical height (30px each) and identical border-radius (8px each) — `heights=[30,30,30,30]`, `radii=["8px","8px","8px","8px"]`.
+- **No filled tray, PASS (2/2):** the Undo/Redo group wrapper's background reads `rgba(0, 0, 0, 0)` (fully transparent) and matches the Zoom-to-fit group wrapper's background exactly — the pre-fix `background: var(--hover-chrome)` filled pill is gone, and the two icon-button groups now render the identical bare way.
+- **Disabled state never leans on a container fill, PASS (2/2):** on the blank canvas Undo correctly reports `disabled === true` (nothing to undo yet), and the group wrapper's background stays the same transparent value whether Undo is enabled or disabled — a disabled control now dims only via its own glyph opacity, never a container color.
+- **Baseline alignment, PASS:** File's, Undo's and Zoom-to-fit's vertical midpoints all land at the same y (within 2px) — `mids=[57.5,57.5,57.5]`.
+- **Caret de-emphasis, PASS:** the File button's "▾" caret renders in a distinct, muted color (`rgb(53, 59, 73)`) from the button's own ink color (`rgb(27, 30, 38)`), confirming it no longer reads as full-weight text jammed against the word.
+- **Overall: 9/9 checks passed, zero uncaught page errors.** Screenshot captured: `ui-audit/screens/toolbar-chrome-system/header-row.png`.
+- **What this run does NOT cover:** a signed-in pass on `planyr.io` itself — not needed here, since nothing about this fix is auth-dependent (it is pure client-side chrome styling, identical whether signed in or not) and the headless check already drives the real rendered DOM of the real component.
+
 ### V380768 (round 3) — B712224: deleting a bonded assembly with a second same-account tab open, live two-tab test on the deployed build — ✅ **PASSED 2026-08-25**
 
 **✅ PASS — timing/race + concurrency (both mandatory live-verify classes), run by the OWNER himself against the deployed production build (planyr.io, signed in, two tabs, same account) — the first genuinely clean run across all three rounds of this bug family.**
@@ -7,6 +19,33 @@
 - **The full progression, measured live on the deployed build at each stage:** pre-#1141 → host deletes, 3 permanent orphans. #1141 (round 1) → host deletes, 12–13 orphans. #1142 (round 2) → **host does not delete at all** — one bump-out dies, everything else stays alive, permanently; a production regression, reverted same-session as #1143. Post-revert (round-1-fix-alone re-test) → host deletes, 13 permanent orphans, every one `op_kind: "unknown"`. #1146 (round 3, this pass) → host deletes, **0 orphans, no "unknown", undo intact, no toasts.**
 - **Method note (owner-instructed, recorded here as the standing lesson of this bug family):** round 3 is the one that held, and it held because the diagnosis went to the real write history in the production database — a `client_errors` telemetry capture of the actual resurrection events — instead of reasoning from the code alone. Rounds 1 and 2 were both green-suite-only at ship time and both failed on the owner's very next live re-test.
 - **What this run does NOT cover:** no new gap. One pre-existing, unrelated gap was noted in passing and filed separately (not fixed here, and explicitly out of scope for this verification): every row a plan DUPLICATE creates carries `op_kind: "unknown"`, because that flow never opens an operation tracker window. See `B727936`.
+### V393760 — B725216/B725217: on-device pinch-zoom + gesture-telemetry confirm across every surface (Site Planner, Doc Review, Stitcher, the Site map) — ✅ **PASSED 2026-08-25 (owner, on-device)**
+
+**✅ PASS — mobile Safari, real iOS device (the mandatory live-verify class this whole item existed to satisfy — headless Chromium structurally cannot exhibit the multitouch quirk being guarded against, per B554/B555/B556's own notes).** Owner ran the 5-step checklist below on a real iPhone and reported "it works fine right now." This closes the loop three prior rounds (B554/B555/B331) left open with nothing to show for it, and — since steps 1 and 5 are the exact same behavior V169 and V168 were separately waiting on — it also closes those two, rather than leaving a stale duplicate open on identical evidence.
+- **What was verified here before the live pass (headless, mocked, unit).** The shared math engine (`pinchZoom`/`midpoint`/`distance`) unchanged, full suite incl. NaN/Infinity fuzz; the CDP-multitouch harness for the Site Planner canvas (`ui-audit/verify-planner-pinch.mjs`) unaffected by the B725216 hardening; the gesture-telemetry module unit-tested (`test/gestureTelemetry.test.js`, 9/9) riding the already-verified `client_errors` sink; full-repo suite, lint, build all green.
+- **Steps run, each confirmed by the owner on a real iPhone/iPad on Safari:**
+  1. Site Planner canvas: two-finger pinch out/in repeatedly — smooth, never jumps, never sticks in a pan; one-finger pan + drawing work right after. *(Re-confirms V169.)*
+  2. Doc Review Markup canvas: two-finger pinch — smooth, same feel as the Site Planner canvas (this surface was still on the old unreliable pointer-events path before this lap).
+  3. Doc Review Stitcher: two-finger pinch — zooms at all (brand-new; previously wheel/trackpad only).
+  4. Site map (MapFinder): two-finger pinch — unchanged, already-smooth (Leaflet's own touch handling, untouched by this lap).
+  5. Anywhere off-canvas: two-finger pinch does NOT zoom the page or pop Safari's tab overview. *(Re-confirms V168.)*
+- **Result:** ✅ all 5 steps pass. No regressions, no lingering B555-class flakiness reported.
+
+### V393761 — B725218: "locate me" is genuinely GPS-accurate on a real phone, and never shows a precise-looking circle on a vague fix — ✅ **PASSED 2026-08-25 (owner, on-device)**
+
+**✅ PASS — real-device GPS accuracy (the one dimension a mocked `accuracy: 15` coordinate could never prove).** Owner confirmed "it works fine right now" as part of the same on-device pass as V393760.
+- **What was verified here before the live pass (headless, mocked).** `test/locateMe.test.js` (12) pins the pure `shouldShowAccuracyCircle` threshold decision at the exact 500 m boundary; `ui-audit/verify-locate-me.mjs` (6/6, mocked geolocation) proved a tight fix draws the marker+circle with no "approximate" wording, a vague fix shows the honest approximate toast, and a denied permission shows an error toast, never silence.
+- **What the live pass adds:** confirmation that a real phone's GPS chip lands inside the "tight enough to draw a confident circle" band this app promised, and that the button/marker/circle read correctly on real hardware, not just in a headless mock.
+- **Result:** ✅ pass, no adjustment needed to the 500 m honesty threshold.
+
+### V169 — B555: planner two-finger pinch rewritten on native touch events — ✅ **PASSED 2026-08-25 (owner, on-device, via V393760 step 1)**
+
+**✅ PASS — real iOS Safari pinch, the live-verify dimension left open since 2026-06-28.** Superseded by, and closed alongside, V393760 (its step 1 is this exact check — Site Planner canvas two-finger pinch, repeated fast, no jump/stick, one-finger pan + drawing unaffected). Headless evidence (`ui-audit/verify-planner-pinch.mjs` 3/3) unchanged; see V393760 for the full owner-confirmed record.
+
+### V168 — B554: mobile Safari pinch no longer pops the tab overview; map-finder reflow — ✅ **PASSED 2026-08-25 (owner, on-device, via V393760 step 5)**
+
+**✅ PASS — real iOS Safari `gesture*`-event suppression, the live-verify dimension left open since 2026-06-28.** Superseded by, and closed alongside, V393760 (its step 5 is this exact check — an off-canvas two-finger pinch does not zoom the page or pop Safari's tab overview). Headless evidence (`ui-audit/verify-mobile-mapfinder.mjs` 6/6) unchanged; see V393760 for the full owner-confirmed record.
+
 
 ### V387952 — B719408: easement/encumbrance colour, fill, hatch — pattern rendering, zoom-constant hatch scaling, and PDF-export parity, live-driven on the owner's real Bain "Concept A - Quiddity DIA" plan — ✅ **PASSED same session**
 

@@ -283,6 +283,39 @@ describe("the refusal is LOUD, and once per episode", () => {
   it("every refusal reason has words", () => {
     for (const r of Object.values(REFUSAL)) expect(String(SCOPE_GUARD_HINT[r] || "").length).toBeGreaterThan(10);
   });
+  /* ⛔ NEW-1/B754752 — every hint is a REFUSAL and must render as one. B742371 fixed the toast's
+   * color rule (a leading/embedded "⚠" is the only thing that turns it error-red instead of
+   * success-green) and audited ~24 call sites, but this table's own messages still had none —
+   * so a refused Delete/Backspace flashed the SAME green as a completed action. */
+  it("every hint reads as a refusal, not a success", () => {
+    for (const r of Object.values(REFUSAL)) expect(SCOPE_GUARD_HINT[r], r).toMatch(/⚠/);
+  });
+});
+
+describe("⛔ NEW-1/B754752 — a FIELD refusal is never hinted, at any selection/episode", () => {
+  /* Reproduced live: select a building, open Properties, click into a dimension field, press
+   * Ctrl+A then Delete (or Backspace) to clear it before typing a new number. The field correctly
+   * swallows the key (verdict.allow === false, reason FIELD) — that part was always right — but
+   * `entry.destructive` used to force a hint on EVERY press, because "delete" is destructive and
+   * a building was selected. That fires on essentially every keystroke anyone uses to clear a
+   * number field, and the hint's own remedy ("click the plan, then press Delete") is a recipe for
+   * deleting the very object being edited. */
+  const deleteEntry = KEY_CONTRACT.find((k) => k.id === "delete");
+  const nudgeEntry = KEY_CONTRACT.find((k) => k.id === "nudge");
+  it("never hints on the destructive Delete entry, however the episode/selection line up", () => {
+    expect(shouldHintRefusal({ entry: deleteEntry, reason: REFUSAL.FIELD, hasSelection: true, episode: 1, lastHintedEpisode: null })).toBe(false);
+    expect(shouldHintRefusal({ entry: deleteEntry, reason: REFUSAL.FIELD, hasSelection: true, episode: 5, lastHintedEpisode: 4 })).toBe(false);
+    expect(shouldHintRefusal({ entry: deleteEntry, reason: REFUSAL.FIELD, hasSelection: true, episode: 5, lastHintedEpisode: null })).toBe(false);
+  });
+  it("never hints on Backspace (same entry, same field) either", () => {
+    expect(shouldHintRefusal({ entry: deleteEntry, reason: REFUSAL.FIELD, hasSelection: true, episode: 2, lastHintedEpisode: null })).toBe(false);
+  });
+  it("never hints on a non-destructive mutating entry while typing", () => {
+    expect(shouldHintRefusal({ entry: nudgeEntry, reason: REFUSAL.FIELD, hasSelection: true, episode: 1, lastHintedEpisode: null })).toBe(false);
+  });
+  it("CHROME (the panel, not a text box) is unaffected and still hints", () => {
+    expect(shouldHintRefusal({ entry: deleteEntry, reason: REFUSAL.CHROME, hasSelection: true, episode: 1, lastHintedEpisode: null })).toBe(true);
+  });
 });
 
 describe("SOURCE SWEEP — the real handler may not branch on an undeclared key", () => {

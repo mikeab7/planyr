@@ -255,9 +255,13 @@ describe("removeRoadVertex / canRemoveRoadVertex — control-point delete (B718)
     expect(r.vtx).toHaveLength(r.pts.length);
   });
 
-  it("blocks removing an endpoint (index 0 or last) → null", () => {
-    expect(removeRoadVertex(pts, vtx, 0)).toBeNull();
-    expect(removeRoadVertex(pts, vtx, pts.length - 1)).toBeNull();
+  it("removes an ENDPOINT (index 0 or last) on a 3+ point road — it SHORTENS the line (NEW-1/B649504)", () => {
+    const r0 = removeRoadVertex(pts, vtx, 0);
+    expect(r0.pts).toEqual([{ x: 50, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }]);
+    expect(r0.vtx).toHaveLength(r0.pts.length);
+    const rLast = removeRoadVertex(pts, vtx, pts.length - 1);
+    expect(rLast.pts).toEqual([{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 100, y: 0 }]);
+    expect(rLast.vtx).toHaveLength(rLast.pts.length);
   });
 
   it("blocks dropping below 2 points → null", () => {
@@ -274,11 +278,11 @@ describe("removeRoadVertex / canRemoveRoadVertex — control-point delete (B718)
     expect(roadCenterline(r.pts, r.vtx)).toHaveLength(2); // renders as a straight road
   });
 
-  it("canRemoveRoadVertex mirrors the guard (interior-only, above 2)", () => {
+  it("canRemoveRoadVertex mirrors the guard (any point, above the 2-point minimum)", () => {
     expect(canRemoveRoadVertex(pts, 1)).toBe(true);
-    expect(canRemoveRoadVertex(pts, 0)).toBe(false);
-    expect(canRemoveRoadVertex(pts, pts.length - 1)).toBe(false);
-    expect(canRemoveRoadVertex([{ x: 0, y: 0 }, { x: 1, y: 1 }], 0)).toBe(false);
+    expect(canRemoveRoadVertex(pts, 0)).toBe(true); // NEW-1/B649504 — an endpoint is no longer excluded
+    expect(canRemoveRoadVertex(pts, pts.length - 1)).toBe(true);
+    expect(canRemoveRoadVertex([{ x: 0, y: 0 }, { x: 1, y: 1 }], 0)).toBe(false); // at the true 2-point floor
   });
 });
 
