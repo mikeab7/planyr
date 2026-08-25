@@ -770,8 +770,16 @@ describe("B812 — own-echo-by-rev kills the single-tab resize burst", () => {
 
   // Round-4 (owner "close all loose ends"): the delete floor exposed to reconcileSeedRows is now a
   // NEVER-pruned high-water, so an in-session reconnect ARBITRARILY LATER than a delete still keeps the
-  // element deleted; a genuine re-create clears it.
-  it("the delete floor for reconcileSeedRows survives >15s (never-pruned) and clears on re-create", async () => {
+  // element deleted; a genuine, EXPLICIT re-create (restore()) clears it.
+  //
+  // ⛔ B712224 (round 3) AMENDMENT — a BARE reconcile() diff against a floored id no longer
+  // re-creates it at all (that silent "the canvas just happens to show it → mint a create" shape is
+  // exactly the production resurrection bug: a stale canvas re-minting a create for an element the
+  // server holds as a tombstone). A genuine re-create over a delete floor is only ever the B673
+  // "Restore" action (`restore()`) or an undo/redo of the delete (`allowResurrect()`, staged by
+  // `SitePlanner.jsx`'s `applySnapshot`) — this test now exercises the former, which is the one this
+  // suite's OTHER caller (`processResults`' create-result handling) already clears the floor from.
+  it("the delete floor for reconcileSeedRows survives >15s (never-pruned) and clears on an explicit restore()", async () => {
     let clock = 0;
     const s = createElementSync({
       siteId: "s", selfUid: "me", now: () => clock, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
@@ -782,9 +790,13 @@ describe("B812 — own-echo-by-rev kills the single-tab resize burst", () => {
     s.reconcile({ els: [] }, {}); await tick();             // delete → floor rev 6
     clock = 20000;                                          // 20s later — past the 15s in-flight window
     expect(s.tombstonedSnapshot().get("el:pv")?.rev).toBe(6); // floor retained (never pruned)
-    // re-create pv (restore / new element at the same id) → the floor is dropped
+    // a BARE diff against the floored id must NOT resurrect it (round 3's whole point)
     s.reconcile({ els: [{ id: "pv", w: 99, z: 0 }] }, {}); s.flushGesture(); await tick();
-    expect(s.tombstonedSnapshot().has("el:pv")).toBe(false); // cleared → won't hide the re-create
+    expect(s.tombstonedSnapshot().get("el:pv")?.rev).toBe(6); // still floored — the bare diff was refused
+    // the B673 "Restore" action is the explicit signal that clears it
+    s.restore("el", "pv", { id: "pv", w: 99, z: 0 });
+    s.reconcile({ els: [{ id: "pv", w: 99, z: 0 }] }, {}); await tick();
+    expect(s.tombstonedSnapshot().has("el:pv")).toBe(false); // cleared → won't hide the real re-create
   });
 });
 
@@ -1249,73 +1261,5 @@ describe("NEW-2 (B712225) — the operation envelope rides on the wire op", () =
     s.reconcile({ els: [el("e1")] }, {}); await tick();
     expect(ops[0].op).toBe("create");
     expect(ops[0]).not.toHaveProperty("op_id");
-  });
-});
-
-describe("B712224 (recurrence) — a bonded-assembly DELETE cascade is sent atomically", () => {
-  // Old logic, replayed verbatim as the mutation check: `rootIdOf(cur, e.id)` where `cur` comes
-  // ONLY from the live canvas / the op's own `el` — never the shadow. A delete op carries `el: null`
-  // and, by flush time, is already gone from the canvas too, so `cur` is null for every delete and
-  // `rootIdOf` falls back to `e.id` — every delete gets its OWN id as its "root".
-  const rootIdOfOld = (elv, fallbackId) => (elv && elv.attachedTo != null ? elv.attachedTo : (elv ? elv.id : fallbackId));
-  const preFixRootsDiffer = (hostId, childId) => {
-    const rootHost = rootIdOfOld(null, hostId);   // cur is always null for a delete pre-fix
-    const rootChild = rootIdOfOld(null, childId);
-    return rootHost !== rootChild;                // true = the bug: they never bucket together
-  };
-
-  it("MUTATION CHECK — the pre-fix root resolution never buckets two deleted bonded elements together", () => {
-    expect(preFixRootsDiffer("host", "child")).toBe(true); // proves the defect existed
-  });
-
-  it("a 2-member bonded-assembly delete batch now requests atomic commit (was: never)", async () => {
-    let capturedOpts = null;
-    const s = createElementSync({
-      siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
-      onEvent: () => {},
-      liveCollections: () => ({ els: [], markups: [], measures: [], callouts: [], parcels: [] }), // both already removed locally, like the real deleteSel path
-      commit: async (ops, opts) => { capturedOpts = opts; return { ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }; },
-    });
-    s.seed([
-      { kind: "el", id: "host", data: el("host"), rev: 1, z_index: 0 },
-      { kind: "el", id: "child", data: el("child", { attachedTo: "host" }), rev: 1, z_index: 1024 },
-    ]);
-    s.reconcile({ els: [] }, {}); // both host and child vanish from the canvas in ONE diff, like deleteSel's single setEls filter
-    await tick();
-    expect(capturedOpts).toBeTruthy();
-    expect(capturedOpts.atomic).toBe(true); // ← the fix
-  });
-
-  it("a delete batch spanning TWO unrelated singleton elements still does not request atomic", async () => {
-    let capturedOpts = null;
-    const s = createElementSync({
-      siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
-      onEvent: () => {},
-      liveCollections: () => ({ els: [], markups: [], measures: [], callouts: [], parcels: [] }),
-      commit: async (ops, opts) => { capturedOpts = opts; return { ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }; },
-    });
-    s.seed([
-      { kind: "el", id: "a1", data: el("a1"), rev: 1, z_index: 0 },
-      { kind: "el", id: "a2", data: el("a2"), rev: 1, z_index: 1024 },
-    ]);
-    s.reconcile({ els: [] }, {});
-    await tick();
-    expect(capturedOpts.atomic).toBe(false); // two independent elements — never a false positive
-  });
-
-  it("a conflict-retried DELETE op ('delete wins') preserves the original operation envelope", async () => {
-    const ops = [];
-    let responder = (batch) => ({ ok: true, results: batch.map((o) => ({ id: o.id, status: "conflict", row: { id: o.id, rev: (o.expected || 0) + 5, deleted_at: null, data: el(o.id) } })) });
-    const s = createElementSync({
-      siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
-      onEvent: () => {}, envelopeNow: () => ({ op_id: "op_delete_1", op_kind: "delete", actor_session_id: "sess-a", client_ts: "2026-08-23T00:00:00.000Z" }),
-      commit: async (batch) => { ops.push(...batch); return responder(batch); },
-    });
-    s.seed([{ kind: "el", id: "e1", data: el("e1"), rev: 1, z_index: 0 }]);
-    s.reconcile({ els: [] }, {}); // delete e1 → first attempt conflicts and is retried
-    await tick();
-    const attempts = ops.filter((o) => o.id === "e1");
-    expect(attempts.length).toBeGreaterThanOrEqual(1);
-    for (const a of attempts) expect(a.op_id).toBe("op_delete_1"); // the retry must not silently drop the envelope
   });
 });

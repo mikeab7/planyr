@@ -3,7 +3,10 @@ import { offsetPolyline, bufferPolyline } from "../src/workspaces/site-planner/l
 import {
   EASEMENT_TYPES, easementType, easementColor, easementLabel, DEFAULT_EASEMENT_ATTRS,
   ringArea, deriveEasementRing, easementArea, buildParcelEdgeStrip,
+  easementStyle, encumbranceStyle, easementPatternId, encumbrancePatternId,
+  DEFAULT_EASE_FILL_OPACITY, DEFAULT_EASE_HATCH, ENCUMBRANCE_DEFAULT,
 } from "../src/workspaces/site-planner/lib/easements.js";
+import { HATCH_OPTIONS, isHatchKey, hatchSpec } from "../src/shared/style/hatchPatterns.js";
 import {
   createSiteModel, EASEMENT_KINDS, easementsOf, exclusionZonesOf,
   constraintsOf, developableArea,
@@ -144,5 +147,91 @@ describe("siteModel easement selectors + NEW-4 exclusion hook", () => {
   it("an easement with too-few points is dropped from exclusion zones (no garbage geometry)", () => {
     const bad = createSiteModel({ markups: [{ id: "z", kind: "easement", mode: "boundary", pts: [{ x: 0, y: 0 }] }] });
     expect(exclusionZonesOf(bad)).toEqual([]);
+  });
+});
+
+// NEW — easement/encumbrance visual styling (colour / fill / hatch). Both kinds previously
+// carried ZERO appearance properties; a plain easement (no fill/stroke/fillOpacity/hatch
+// keys at all — the shape every one of the 26 production easements is in today) must
+// resolve to EXACTLY today's hardcoded render (type colour, 0.10 wash, diagonal hatch),
+// and an explicit per-element override must win over the type default — the same
+// precedence `planStyle.elStyle` already uses for elements (`el.fill ?? base.fill`).
+describe("hatch pattern catalog (shared/style/hatchPatterns.js) — extensible appearance primitive", () => {
+  it("every option has a key/label and a spec (or 'none', which is deliberately flat)", () => {
+    expect(HATCH_OPTIONS.length).toBeGreaterThan (3);
+    for (const h of HATCH_OPTIONS) {
+      expect(h.key && h.label).toBeTruthy();
+      expect(isHatchKey(h.key)).toBe(true);
+    }
+    expect(hatchSpec("none")).toBeNull();
+    expect(hatchSpec("diagonal").rotate).toBe(45);
+    expect(hatchSpec("cross").lines.length).toBe(2); // cross = two line directions
+  });
+
+  it("isHatchKey rejects garbage (a corrupt/legacy value must not crash the renderer)", () => {
+    expect(isHatchKey("not-a-real-pattern")).toBe(false);
+    expect(isHatchKey(undefined)).toBe(false);
+  });
+
+  it("an unknown key falls back to the diagonal spec rather than throwing", () => {
+    expect(hatchSpec("bogus")).toEqual(hatchSpec("diagonal"));
+  });
+});
+
+describe("easementStyle — type default + per-element override (NEW appearance model)", () => {
+  it("a plain easement (no style keys — every production easement today) resolves to the historic look", () => {
+    const e = { id: "e1", easeType: "pipeline" };
+    const st = easementStyle(e);
+    expect(st.fill).toBe(easementType("pipeline").color);
+    expect(st.stroke).toBe(easementType("pipeline").color);
+    expect(st.fillOpacity).toBe(DEFAULT_EASE_FILL_OPACITY);
+    expect(st.hatch).toBe(DEFAULT_EASE_HATCH);
+    expect(st.hasOverride).toBe(false);
+  });
+
+  it("a per-element fill override wins over the type colour, and flips hasOverride", () => {
+    const e = { id: "e2", easeType: "utility", fill: "#123456" };
+    const st = easementStyle(e);
+    expect(st.fill).toBe("#123456");
+    expect(st.stroke).toBe(easementType("utility").color); // untouched field stays at type default
+    expect(st.hasOverride).toBe(true);
+  });
+
+  it("an explicit fillOpacity of 0 is honoured (not treated as falsy/missing)", () => {
+    const e = { id: "e3", easeType: "storm", fillOpacity: 0 };
+    expect(easementStyle(e).fillOpacity).toBe(0);
+    expect(easementStyle(e).hasOverride).toBe(true);
+  });
+
+  it("a corrupt hatch key falls back to the type default rather than breaking the render", () => {
+    const e = { id: "e4", easeType: "water", hatch: "not-a-pattern" };
+    expect(easementStyle(e).hatch).toBe(DEFAULT_EASE_HATCH);
+  });
+
+  it("easementPatternId shares the TYPE's pattern id when unedited, and a PER-ELEMENT id once overridden", () => {
+    const plain = { id: "e5", easeType: "aerial" };
+    expect(easementPatternId(plain)).toBe(`pat-ease-${easementType("aerial").key}`);
+    const styled = { id: "e6", easeType: "aerial", hatch: "cross" };
+    expect(easementPatternId(styled)).toBe("pat-ease-el-e6");
+  });
+});
+
+describe("encumbranceStyle — shares the SAME appearance primitives as easements (NEW)", () => {
+  it("a plain encumbrance resolves to the historic pat-encumber look (purple hatch line, no wash)", () => {
+    const enc = { id: "x1", kind: "encumbrance" };
+    const st = encumbranceStyle(enc);
+    expect(st.fill).toBe(ENCUMBRANCE_DEFAULT.stroke);
+    expect(st.fillOpacity).toBe(0); // no background wash today — must not silently appear
+    expect(st.hasOverride).toBe(false);
+    expect(encumbrancePatternId(enc)).toBe("pat-encumber");
+  });
+
+  it("an overridden encumbrance gets its own per-element pattern id", () => {
+    const enc = { id: "x2", kind: "encumbrance", fill: "#00ff00", fillOpacity: 0.2 };
+    const st = encumbranceStyle(enc);
+    expect(st.fill).toBe("#00ff00");
+    expect(st.fillOpacity).toBe(0.2);
+    expect(st.hasOverride).toBe(true);
+    expect(encumbrancePatternId(enc)).toBe("pat-encumber-el-x2");
   });
 });
