@@ -2,8 +2,11 @@ import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "re
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote } from "./lib/counties.js";
-import { landingView } from "./lib/landingView.js";
-import { shouldShowAccuracyCircle, formatAccuracyFt, locateErrorMessage } from "./lib/locateMe.js";
+import { landingView, milesBetween, CLUSTER_RADIUS_MI } from "./lib/landingView.js";
+import {
+  shouldShowAccuracyCircle, formatAccuracyFt, locateErrorMessage,
+  isAccuracyUsable, garbageAccuracyMessage, locateAvailability, locateUnavailableTooltip,
+} from "./lib/locateMe.js";
 import { ensureSnapshot, getSnapshot, snapshotVintage, onSnapshotChange, featureAtPoint, preferSnapshotForDisplay } from "./lib/parcelSnapshot.js";
 import { recordSourceResult, filterHealthyCandidates, isSourceOpen, isStatewideBackup } from "./lib/sourceHealth.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
@@ -20,7 +23,7 @@ import { siteState } from "./lib/siteRegion.js";
 // NEW-3 — the ONE map-overlay stacking model. Leaflet fixes its own control containers at
 // z-index 1000; these panels sat at 1000 too, so whether the zoom buttons and the scale bar
 // covered them came down to document order. An open panel now outranks map chrome outright.
-import { MAP_CHROME_Z, panelMaxHeight, ZOOM_CONTROL_CLEARANCE_PX } from "./lib/mapChromeStack.js";
+import { MAP_CHROME_Z, panelMaxHeight, ZOOM_CONTROL_CLEARANCE_PX, COMPS_TOGGLE_CLEARANCE_PX } from "./lib/mapChromeStack.js";
 import { useGroundElevation } from "./components/useGroundElevation.js";
 import CursorChip from "./components/CursorChip.jsx";
 import { contourHover } from "./lib/terrainLazy.js";
@@ -286,7 +289,7 @@ const ShareGlyph = ({ size = 13 }) => (
   </svg>
 );
 
-export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip, onViewCenter, comps = [], onPlaceComp, onCompClick }) {
+export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip, onViewCenter, comps = [], onPlaceComp, onCompClick, compsPanelOpen = false, onOpenComps }) {
   const elRef = useRef(null);
   const mapRef = useRef(null);
   const addrTokRef = useRef(0); // B545: address-search generation — a newer search invalidates an older in-flight one
@@ -326,6 +329,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const locateLayerRef = useRef(null); // "locate me" — the L.layerGroup holding the position dot + accuracy circle
   const locateBtnRef = useRef(null);   // the control's DOM button, so we can toggle a "locating" pressed/spinner state
   const locatingRef = useRef(false);   // in-flight guard — ignore a 2nd press while a fix is pending
+  // NEW-MAPCTRL-2 — permission-aware "locate me": read before touching the click handler.
+  const geoAvailabilityRef = useRef("ready"); // locateAvailability()'s live answer: 'ready' | 'blocked' | 'insecure' | 'unsupported'
+  const geoPermissionRef = useRef(null);      // the live PermissionStatus (if the browser supports the query), so its 'change' listener can be removed on unmount
+  const locateWatchdogRef = useRef(null);     // backstop timer — stops the spinner even if neither locationfound nor locationerror ever fires (an unanswered permission prompt)
   const layerUrlsRef = useRef({});   // county -> resolved queryable layer URL (auto-routing)
   const imageryRef = useRef(null);
   const labelsRef = useRef(null);
@@ -348,6 +355,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
    * way forward is offered in the same breath — start the plan at this point and draw the boundary
    * by hand, with the location captured so the plan is never stranded. */
   const [fallbackOffer, setFallbackOffer] = useState(null); // {at:{lat,lon}} | null
+  // NEW-MAPCTRL-2 — STEEL-MAN ix: a locate fix genuinely far from every saved site is flown to
+  // (that's correct — it's where the user is), but this leaves a way back rather than stranding
+  // the camera. "Far" reuses the SAME 50-mile market radius `landingView` already uses to decide
+  // whether two sites are the same market (CLUSTER_RADIUS_MI) — no new distance policy to keep in sync.
+  const [locateFar, setLocateFar] = useState(false);
   const onViewCenterRef = useRef(onViewCenter);
   onViewCenterRef.current = onViewCenter;
   const failUnavailable = (msg, at) => {
@@ -659,45 +671,192 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // ⛔ Added to the map BEFORE the zoom control on purpose — Leaflet's bottom-corner containers
     // stack a LATER-added control ABOVE an earlier one (measured: reversing this order put the
     // locate button above zoom's +/−, not below it), so "below" requires adding it first.
+    let detachPermWatch = () => {};
     (() => {
       const container = L.DomUtil.create("div", "leaflet-bar leaflet-control");
       const btn = L.DomUtil.create("a", "", container);
-      btn.href = "#"; btn.title = "Find my location"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn");
+      btn.href = "#"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn"); btn.setAttribute("data-locate-state", "idle");
       btn.style.display = "flex"; btn.style.alignItems = "center"; btn.style.justifyContent = "center"; btn.style.color = "var(--chrome-text)";
       btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>';
       locateBtnRef.current = btn;
       L.DomEvent.disableClickPropagation(container);
+
+      /* NEW-MAPCTRL-2 — HONEST STATES, checked BEFORE ever calling getCurrentPosition.
+       *
+       * ⛔ CORRECTED (owner measurement, same day): the first cut of this comment claimed the
+       * `permissions.query` precheck below was what would catch the owner's company-blocked
+       * Chrome. It is NOT — he measured `navigator.permissions.query({name:'geolocation'})` on
+       * his real machine, on the real deployed app, and it reports **'prompt'**, not 'denied'.
+       * An enterprise policy of this shape (Chrome's `DefaultGeolocationSetting`) blocks the
+       * REQUEST silently — it does not pre-announce itself through the Permissions API. So
+       * `locateAvailability` reads his environment as "ready" and the click proceeds exactly
+       * like any other — this precheck is a DEMOTED, best-effort convenience for the states it
+       * actually can see (STEEL-MAN v/vi, and a genuine 'denied' from a real per-site browser
+       * block or an already-answered "no" — a different case from his), never the defence for
+       * his case.
+       *
+       * THE ACTUAL DEFENCE against his case is below, in the click handler and the two async
+       * handlers: an EXPLICIT, FINITE `timeout` on the `map.locate()` call itself (never the
+       * PositionOptions default of Infinity — an infinite timeout on a request that never
+       * resolves is a permanent spinner, which is exactly his report), PLUS an independent
+       * wall-clock `locateWatchdogRef` timer that fires on its own regardless of whether
+       * `navigator.geolocation` ever invokes either callback — which a policy-blocked provider
+       * is free to never do (STEEL-MAN ii). Both are demonstrated with a mocked
+       * `getCurrentPosition` that calls back NEITHER way (`ui-audit/verify-locate-me.mjs`), the
+       * closest reproduction of his environment this sandbox can build without a real blocked
+       * browser, since a genuine permission prompt cannot be driven by automation (STEEL-MAN's
+       * own testability requirement).
+       *
+       * `applyAvailability` is the ONE place the control's visual "blocked" state is set —
+       * opacity only, never a hardcoded grey, so it reads correctly in both themes — and it is
+       * also what a live permission CHANGE (an admin lifts a real per-site block) re-runs, via
+       * the `change` subscription below. It still earns its place: a 'denied' state IS real for
+       * other users/browsers, and skipping a call already known to fail is a plain improvement
+       * over always asking — it is simply not what fixes THIS report. */
+      const applyAvailability = (availability) => {
+        geoAvailabilityRef.current = availability;
+        const blocked = availability !== "ready";
+        const tip = locateUnavailableTooltip(availability);
+        btn.title = tip;
+        btn.setAttribute("aria-label", blocked ? `Find my location — ${tip}` : "Find my location");
+        btn.setAttribute("data-locate-state", locatingRef.current ? "locating" : (blocked ? "blocked" : "idle"));
+        btn.style.opacity = blocked ? "0.4" : "";
+        btn.style.cursor = blocked ? "default" : "pointer";
+      };
+      const readEnv = (permissionState) => ({
+        isSecureContext: typeof window === "undefined" || window.isSecureContext !== false,
+        hasGeolocation: typeof navigator !== "undefined" && !!navigator.geolocation,
+        permissionState,
+      });
+      applyAvailability(locateAvailability(readEnv(undefined)));
+      // STEEL-MAN i/vi — ask what the browser already knows. Not every engine implements
+      // permissions.query for "geolocation" (older Safari among them); where it's missing we
+      // simply can't know ahead of time, and the reactive locationerror handler below still
+      // gives an honest answer either way, so this is a pure enhancement, never a dependency.
+      if (typeof navigator !== "undefined" && navigator.permissions && navigator.permissions.query) {
+        navigator.permissions.query({ name: "geolocation" }).then((status) => {
+          if (!mapRef.current) return; // unmounted before this resolved
+          geoPermissionRef.current = status;
+          applyAvailability(locateAvailability(readEnv(status.state)));
+          const onChange = () => applyAvailability(locateAvailability(readEnv(status.state)));
+          if (status.addEventListener) status.addEventListener("change", onChange); else status.onchange = onChange;
+          detachPermWatch = () => { try { status.removeEventListener ? status.removeEventListener("change", onChange) : (status.onchange = null); } catch (_) {} };
+        }).catch(() => { /* STEEL-MAN vi — a Permissions-Policy header can make the query itself reject; fall back to the reactive path */ });
+      }
+
+      const clearWatchdog = () => { if (locateWatchdogRef.current) { clearTimeout(locateWatchdogRef.current); locateWatchdogRef.current = null; } };
+      // STEEL-MAN xii — every exit from "locating" (found, error, cancel, watchdog) funnels
+      // through here, so the control can never stick in a spinner or an error look.
+      const stopLocating = () => {
+        locatingRef.current = false;
+        clearWatchdog();
+        btn.style.animation = "";
+        applyAvailability(geoAvailabilityRef.current);
+      };
       L.DomEvent.on(btn, "click", (e) => {
         L.DomEvent.stop(e);
-        if (locatingRef.current) return; // a fix is already in flight — a 2nd press is a no-op, not a 2nd request
+        if (locatingRef.current) {
+          // STEEL-MAN xi — a 2nd press while a fix is in flight CANCELS it rather than being a
+          // no-op or starting a concurrent 2nd request (STEEL-MAN x). The browser's
+          // getCurrentPosition itself cannot be aborted, but `stopLocating` flips locatingRef
+          // back to idle immediately, and both async handlers below check it first — so a late
+          // result that arrives after this click is silently ignored rather than reviving the UI.
+          try { map.stopLocate(); } catch (_) {}
+          stopLocating();
+          return;
+        }
+        if (geoAvailabilityRef.current !== "ready") {
+          // STEEL-MAN i/v/vi — a control already known to be blocked never spins; LOUD-FAILURE
+          // says why, once, in the app's standard bottom banner, rather than staying silent.
+          setErr(locateUnavailableTooltip(geoAvailabilityRef.current));
+          return;
+        }
+        setLocateFar(false);
         locatingRef.current = true;
+        btn.setAttribute("data-locate-state", "locating");
         btn.style.animation = "spin 1s linear infinite"; btn.style.opacity = "0.6";
-        map.locate({ setView: true, enableHighAccuracy: true, maxZoom: 17, timeout: 12000 });
+        try {
+          // ⛔ THE REAL DEFENCE (owner-corrected) — an EXPLICIT, FINITE `timeout`. The
+          // PositionOptions default is Infinity, which is the literal cause of a spinner that
+          // never stops: a policy-blocked or hung geolocation provider is free to invoke NEITHER
+          // callback, and with no timeout set nothing ever ends the request. 10s here, comfortably
+          // inside the "short, 8-10s" the owner asked for.
+          // maximumAge:0 — STEEL-MAN viii: never accept a cached fix, possibly hours old and in
+          // another city, over a fresh one. setView is deliberately NOT passed here; the
+          // locationfound handler below decides for itself whether this fix is even usable
+          // (STEEL-MAN vii) before ever moving the camera.
+          map.locate({ enableHighAccuracy: true, maxZoom: 17, timeout: 10000, maximumAge: 0 });
+        } catch (_) {
+          // STEEL-MAN vi — a Permissions-Policy violation or a blocked iframe can throw
+          // synchronously instead of going through the normal error callback.
+          stopLocating();
+          setErr(locateErrorMessage());
+          return;
+        }
+        // ⛔ STEEL-MAN ii, THE SECOND HALF OF THE REAL DEFENCE — an INDEPENDENT wall-clock timer,
+        // never trusting the browser's own timeout alone. `map.locate`'s `timeout` option only
+        // bounds the underlying `getCurrentPosition` call; it does nothing if the provider (or a
+        // policy) prevents that call from ever being answered in a way the browser itself detects.
+        // This plain `setTimeout` fires regardless of whether `navigator.geolocation` EVER invokes
+        // either callback — proven with a mocked `getCurrentPosition` that calls back neither way
+        // (`ui-audit/verify-locate-me.mjs`'s "unanswered prompt" arm) — a couple of seconds past
+        // the explicit timeout above, so the spinner can never run forever.
+        locateWatchdogRef.current = setTimeout(() => {
+          if (!locatingRef.current) return; // already resolved or cancelled
+          try { map.stopLocate(); } catch (_) {}
+          stopLocating();
+          setErr(locateErrorMessage(3));
+        }, 12000);
       });
       const ctrl = L.control({ position: "bottomleft" });
       ctrl.onAdd = () => container;
       ctrl.addTo(map);
+
+      map.on("locationfound", (e) => {
+        if (!locatingRef.current) return; // stale result after a cancel/watchdog — already idle, ignore
+        stopLocating();
+        // STEEL-MAN vii — a bad-enough fix (classically desktop IP positioning, 20-50 km) is not
+        // a location at all: never fly the map to it and never draw an accuracy circle over half
+        // a county. Treat it exactly as a failure, with an honest reason.
+        if (!isAccuracyUsable(e.accuracy)) {
+          setErr(garbageAccuracyMessage(e.accuracy));
+          return;
+        }
+        // isAccuracyUsable already proved e.accuracy is finite and > 0 — matches Leaflet's own
+        // internal setView-on-locate fit (`latlng.toBounds(accuracy * 2)`), replicated here
+        // rather than relying on Leaflet's `setView:true` because that option can't be told
+        // "only when the fix is usable" (STEEL-MAN vii).
+        const zoom = Math.min(map.getBoundsZoom(e.latlng.toBounds(e.accuracy * 2)), 17);
+        map.setView(e.latlng, zoom);
+        if (!locateLayerRef.current) locateLayerRef.current = L.layerGroup().addTo(map);
+        locateLayerRef.current.clearLayers();
+        L.circleMarker(e.latlng, { radius: 7, color: "#fff", weight: 2, fillColor: PAL.accent, fillOpacity: 1, interactive: false }).addTo(locateLayerRef.current);
+        if (shouldShowAccuracyCircle(e.accuracy)) {
+          L.circle(e.latlng, { radius: e.accuracy, color: PAL.accent, weight: 1, fillColor: PAL.accent, fillOpacity: 0.12, interactive: false }).addTo(locateLayerRef.current);
+        } else {
+          // Wi-Fi/cellular fallback (no GPS chip, or GPS unavailable) — the map still centers on
+          // the best guess it has, but a multi-hundred-metre-or-worse radius is not honestly
+          // drawn as a precise "you are here" ring (KEY DECISIONS: never present a vague guess as
+          // a precise location).
+          const acc = formatAccuracyFt(e.accuracy);
+          setErr(acc ? `Location is approximate (accuracy ${acc}) — this looks like a network-based guess, not a GPS fix.` : "Location found, but its accuracy couldn't be read — treat it as approximate.");
+        }
+        // STEEL-MAN ix — genuinely far from every saved site is the RIGHT place to fly to (it's
+        // where the user is), but it must leave a way back rather than stranding the camera.
+        if (sitesRef.current.length) {
+          const lv = landingView(sitesRef.current, viewportOf(elRef.current));
+          setLocateFar(lv.source === "sites" && milesBetween({ lat: e.latlng.lat, lon: e.latlng.lng }, { lat: lv.center[0], lon: lv.center[1] }) > CLUSTER_RADIUS_MI);
+        }
+      });
+      map.on("locationerror", (e) => {
+        if (!locatingRef.current) return; // stale result after a cancel/watchdog — already idle, ignore
+        stopLocating();
+        setErr(locateErrorMessage(e && e.code));
+      });
     })();
     L.control.zoom({ position: "bottomleft" }).addTo(map);
     mapRef.current = map;
     L.control.scale({ imperial: true, metric: false, position: "bottomright", maxWidth: 130 }).addTo(map); // graphic scale (B96b)
-    const stopLocating = () => { locatingRef.current = false; const b = locateBtnRef.current; if (b) { b.style.animation = ""; b.style.opacity = ""; } };
-    map.on("locationfound", (e) => {
-      stopLocating();
-      if (!locateLayerRef.current) locateLayerRef.current = L.layerGroup().addTo(map);
-      locateLayerRef.current.clearLayers();
-      L.circleMarker(e.latlng, { radius: 7, color: "#fff", weight: 2, fillColor: PAL.accent, fillOpacity: 1, interactive: false }).addTo(locateLayerRef.current);
-      if (shouldShowAccuracyCircle(e.accuracy)) {
-        L.circle(e.latlng, { radius: e.accuracy, color: PAL.accent, weight: 1, fillColor: PAL.accent, fillOpacity: 0.12, interactive: false }).addTo(locateLayerRef.current);
-      } else {
-        // Wi-Fi/IP-based fallback (no GPS chip, or GPS unavailable) — the map still centers on the
-        // best guess it has, but a multi-hundred-metre-or-worse radius is not honestly drawn as a
-        // precise "you are here" ring (KEY DECISIONS: never present a vague IP guess as a location).
-        const acc = formatAccuracyFt(e.accuracy);
-        setErr(acc ? `Location is approximate (accuracy ${acc}) — this looks like a network-based guess, not a GPS fix.` : "Location found, but its accuracy couldn't be read — treat it as approximate.");
-      }
-    });
-    map.on("locationerror", (e) => { stopLocating(); setErr(locateErrorMessage(e && e.code)); });
     setZoom(map.getZoom());
     const onClick = (e) => {
       if (placingCompPinRef.current) { placeCompPinAtRef.current(e.latlng); return; }
@@ -814,7 +973,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       // vector boundary identify reads. Panning is gated inside attachRasterIdentify.
       identifyOk: () => !selectModeRef.current,
     });
-    return () => { cancelled = true; detachRasterIdentify(); map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("mousemove", onCoordMove); map.off("mouseout", onCoordOut); map.off("contextmenu", onMapCtx); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); map.off("dragstart", markUserMoved); map.off("locationfound"); map.off("locationerror"); containerEl.removeEventListener("pointerdown", onPress); containerEl.removeEventListener("pointerup", onRelease); containerEl.removeEventListener("pointercancel", onRelease); containerEl.removeEventListener("wheel", markUserMoved); map.remove(); mapRef.current = null; };
+    return () => { cancelled = true; detachRasterIdentify(); detachPermWatch(); if (locateWatchdogRef.current) { clearTimeout(locateWatchdogRef.current); locateWatchdogRef.current = null; } map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("mousemove", onCoordMove); map.off("mouseout", onCoordOut); map.off("contextmenu", onMapCtx); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); map.off("dragstart", markUserMoved); map.off("locationfound"); map.off("locationerror"); containerEl.removeEventListener("pointerdown", onPress); containerEl.removeEventListener("pointerup", onRelease); containerEl.removeEventListener("pointercancel", onRelease); containerEl.removeEventListener("wheel", markUserMoved); map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1510,7 +1669,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // down), or a primary whose breaker is open, are skipped this click.
     const { candidates, realPrimaries } = resolveCandidates(latlng);
     if (!candidates.length) { setErr("Parcel services are still loading — give it a second and click again."); return; }
-    setErr(""); setFallbackOffer(null); setBackupNotice(null); setCachedNotice(null);
+    setErr(""); setFallbackOffer(null); setBackupNotice(null); setCachedNotice(null); setLocateFar(false);
 
     // Instant local toggle-off: a click inside an already-highlighted parcel deselects
     // it with zero network round-trip — we already have its geometry (B441).
@@ -1667,7 +1826,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     const q = addr.trim();
     if (!q) return;
     const tok = ++addrTokRef.current; // B545: claim this search's generation; guard every async setState below
-    setBusy(true); setErr(""); setFallbackOffer(null); setParcelInfo(null);
+    setBusy(true); setErr(""); setFallbackOffer(null); setParcelInfo(null); setLocateFar(false);
     try {
       const center = mapRef.current ? mapRef.current.getCenter() : null;
       const hit = await geocodeAddress(q, center);
@@ -1843,6 +2002,16 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   };
   // Sites matching the active chip + name filters (for the panel header count).
   const shownCount = sites.filter((s) => passStatus(s) && passName(s)).length;
+
+  // NEW-MAPCTRL-2 — STEEL-MAN ix's way back: re-run the SAME derived landing view a fresh open
+  // would use, so "back to your sites" always means the same thing "open the Map view" does.
+  const backToSites = () => {
+    const map = mapRef.current;
+    if (!map) return;
+    const view = landingView(sitesRef.current, viewportOf(elRef.current));
+    if (view.source === "sites") map.setView(view.center, view.zoom, { animate: true });
+    setLocateFar(false);
+  };
 
   // (The parcel card's own label/value row moved to components/ParcelInfoCard.jsx — NEW-1.)
 
@@ -2142,20 +2311,40 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           </div>
         )}
 
+        {/* NEW-MAPCTRL-1 — the leasing-comps panel toggle. Same `topright` corner the Layers
+            panel already owns (mapChromeStack.js), so it STACKS above it rather than competing
+            for the same 10px slot — see COMPS_TOGGLE_CLEARANCE_PX, which the Layers panel's own
+            `top` below adds in whenever this button can render, so the two can never overlap at
+            any width, open or collapsed. */}
+        {onOpenComps && !compsPanelOpen && (
+          <button onClick={onOpenComps} title="Leasing comps" data-testid="map-comps-toggle"
+            style={{
+              position: "absolute", zIndex: MAP_CHROME_Z.panel,
+              ...(narrow ? { top: 60, right: 8 } : { top: 10, right: 10 }),
+              height: 30, padding: "0 12px", borderRadius: RADIUS.pill,
+              border: `1px solid ${PAL.panelLine}`, background: "var(--surface-raised)",
+              color: PAL.ink, fontSize: 12.5, fontWeight: 600,
+              cursor: "pointer", fontFamily: "inherit",
+              boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+            }}>
+            Comps{comps.length ? ` (${comps.length})` : ""}
+          </button>
+        )}
+
         {/* imagery + labels + overlay layers control — on a phone this collapses to a tap
             (default closed) so it stops covering the search bar / Select-parcels button. */}
         <div style={{ position: "absolute", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: layersPanelOpen ? "6px 9px 8px" : 0, fontSize: 12, color: PAL.ink, boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
           ...(narrow
-            ? { top: 60, right: 8, zIndex: MAP_CHROME_Z.panel, width: layersPanelOpen ? "min(300px, calc(100vw - 16px))" : "auto" }
+            ? { top: 60 + (onOpenComps ? COMPS_TOGGLE_CLEARANCE_PX : 0), right: 8, zIndex: MAP_CHROME_Z.panel, width: layersPanelOpen ? "min(300px, calc(100vw - 16px))" : "auto" }
             /* B427409 — DESKTOP COLLAPSES TOO, and collapsing FREES THE MAP. The width and the
                height bound are now conditional on the same `layersPanelOpen` the phone uses:
                closed, the card shrinks to its header bar (`width: "auto"`, no max-height, no flex
                column) instead of staying a 268-wide block pinned over the imagery. A collapsed
                panel that still covers the map would answer the letter of the report and not the
                point of it. */
-            : { top: 10, right: 10, zIndex: MAP_CHROME_Z.panel,
+            : { top: 10 + (onOpenComps ? COMPS_TOGGLE_CLEARANCE_PX : 0), right: 10, zIndex: MAP_CHROME_Z.panel,
                 ...(layersPanelOpen
-                  ? { width: 268, maxHeight: panelMaxHeight({ topPx: 10, bottomPx: 76 }), display: "flex", flexDirection: "column" }
+                  ? { width: 268, maxHeight: panelMaxHeight({ topPx: 10 + (onOpenComps ? COMPS_TOGGLE_CLEARANCE_PX : 0), bottomPx: 76 }), display: "flex", flexDirection: "column" }
                   : { width: "auto" }) }) }}>
           {/* B427409 — ONE control, at EVERY breakpoint. This button used to be wrapped in
               `{narrow && (...)}`, so on desktop the panel had no way to close and the owner's only
@@ -2215,9 +2404,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           </>)}
         </div>
 
-        {/* error toast (bottom-left) — surfaced only when there's an error */}
-        {err && (
-          <div style={{ position: "absolute", left: 12, bottom: ZOOM_CONTROL_CLEARANCE_PX, zIndex: 1000, maxWidth: 380, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45, pointerEvents: fallbackOffer ? "auto" : "none" }}>
+        {/* error toast (bottom-left) — surfaced on an error, OR on the NEW-MAPCTRL-2 "you're far
+            from your sites" offer alone (STEEL-MAN ix), which can stand with no error text at all. */}
+        {(err || locateFar) && (
+          <div style={{ position: "absolute", left: 12, bottom: ZOOM_CONTROL_CLEARANCE_PX, zIndex: 1000, maxWidth: 380, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45, pointerEvents: (fallbackOffer || locateFar) ? "auto" : "none" }}>
             {err}
             {/* NEW-4 — the way forward rides WITH the bad news. Only on a genuine source outage:
                 "no parcel right there" is an answer, not an outage, and gets no button. */}
@@ -2225,6 +2415,14 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               <button onClick={() => startBlankHere(fallbackOffer.at)} data-testid="map-start-blank-here"
                 style={{ display: "block", width: "100%", marginTop: 8, height: 30, borderRadius: RADIUS.sm, border: "none", background: PAL.accent, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
                 Start the plan here &amp; draw the boundary →
+              </button>
+            )}
+            {/* NEW-MAPCTRL-2 — STEEL-MAN ix: flying to a location far from every saved site is
+                the right call (it's where the user is), but it must leave a way back. */}
+            {locateFar && (
+              <button onClick={backToSites} data-testid="map-back-to-sites"
+                style={{ display: "block", width: "100%", marginTop: err ? 8 : 0, height: 30, borderRadius: RADIUS.sm, border: `1px solid ${PAL.panelLine}`, background: "var(--surface-raised)", color: PAL.ink, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                ◂ Back to your sites
               </button>
             )}
           </div>

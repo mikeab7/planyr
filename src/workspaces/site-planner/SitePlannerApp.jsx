@@ -762,22 +762,14 @@ export default function App({
             comps={comps}
             onPlaceComp={onPlaceComp}
             onCompClick={onCompClick}
+            // NEW-MAPCTRL-1 — the Comps toggle button used to be a sibling here, absolutely
+            // positioned at the SAME top-right corner the Layers panel already owns, which is
+            // what buried "Imagery & layers" under it. MapFinder now renders the toggle itself
+            // (see mapChromeStack.js's COMPS_TOGGLE_CLEARANCE_PX) so it can stack correctly
+            // against the Layers panel it shares a corner with, at every breakpoint.
+            compsPanelOpen={compsPanelOpen}
+            onOpenComps={() => setCompsPanelOpen(true)}
           />
-          {!compsPanelOpen && (
-            <button
-              onClick={() => setCompsPanelOpen(true)}
-              style={{
-                position: "absolute", top: 12, right: 12, zIndex: 1150,
-                height: 30, padding: "0 12px", borderRadius: 999,
-                border: "1px solid var(--border-default)", background: "var(--surface-raised)",
-                color: "var(--text-primary)", fontSize: 12.5, fontWeight: 600,
-                cursor: "pointer", fontFamily: "inherit",
-                boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-              }}
-            >
-              Comps{comps.length ? ` (${comps.length})` : ""}
-            </button>
-          )}
           <Suspense fallback={null}>
             <CompsPanel
               open={compsPanelOpen}

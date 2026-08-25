@@ -259,7 +259,10 @@ describe("MapFinder no longer hardcodes a landing view (source guard)", () => {
   const src = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
 
   it("creates its map from landingView(), not from a county config", () => {
-    expect(src).toMatch(/import \{ landingView \} from "\.\/lib\/landingView\.js"/);
+    // NEW-MAPCTRL-2 — the "back to your sites" affordance pulls milesBetween/CLUSTER_RADIUS_MI
+    // in alongside landingView from the SAME module, so this now allows (but doesn't require)
+    // extra named imports rather than requiring landingView to be the ONLY one.
+    expect(src).toMatch(/import \{ landingView[^}]*\} from "\.\/lib\/landingView\.js"/);
     expect(src).toMatch(/const cfg = landingView\(/);
     // (the string still appears in the comment explaining what it replaced — this is the
     // ASSIGNMENT, i.e. a fixed county actually being used as a view again.)
