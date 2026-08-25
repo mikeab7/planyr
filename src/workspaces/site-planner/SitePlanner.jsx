@@ -20159,8 +20159,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         they are sized in constant screen px with no zoom gate of any kind. On the
                         owner's whole-site sheet that combination printed each length measurement as
                         two fat discs joined by a stub. They are `data-export="skip"` now — they never
-                        reach paper — and an open run gets real drafting ticks instead (below). */}
-                    {pts.map((p, k) => <circle key={k} data-export="skip" data-measure-vertex="1" cx={p.x} cy={p.y} r={3} fill={mcolor} pointerEvents="none" />)}
+                        reach paper — and an open run gets real drafting ticks instead (below).
+                        ⛔ B705200 (×2) — AND BEING AN EDITING AFFORDANCE MEANS THEY MUST GATE ON
+                        SELECTION LIKE EVERY OTHER ONE. They shipped with no gate at all — painted
+                        for every measurement on the plan, selected or not, because `pointerEvents=
+                        "none"` made them inert and nobody noticed a non-interactive decoration was
+                        ungated. `isSel` is the same selection test `measureHandles` already uses. */}
+                    {isSel && pts.map((p, k) => <circle key={k} data-export="skip" data-measure-vertex="1" cx={p.x} cy={p.y} r={3} fill={mcolor} pointerEvents="none" />)}
                     {termTicks.map((t, k) => (
                       <line key={`tk${k}`} data-measure-term="1" x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2}
                         stroke={mcolor} strokeWidth={TERMINATOR_WEIGHT_PX * labelK} strokeLinecap="butt" pointerEvents="none" />
