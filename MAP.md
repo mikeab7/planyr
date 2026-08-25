@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-24 @ `0aaec25` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-25 @ `f17c481c` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_553 source files mapped._
+_557 source files mapped._
 
 ## infra
 
@@ -202,6 +202,14 @@ _553 source files mapped._
   - _exports_: `casUpsert`, `interpretCas`, `interpretInsert`, `isMissingColumn`, `isMissingVersionColumn`, `keepaliveCasPush`
 - **`src/shared/cloud/serializeWrites.js`** — Per-key write serializer: makeWriteSerializer chains same-key cloud writes in order so a tab can't race itself into a false version conflict
   - _exports_: `makeWriteSerializer`
+- **`src/shared/comps/components/CompsPanel.jsx`** — Leasing Comps right-side panel (B711328): list/detail/create-edit for land, building-sale and lease comps; owner-only Edit/Delete, empty fields never render
+  - _exports_: `default (CompsPanel)`
+- **`src/shared/comps/lib/compMarkerIcon.js`** — Pure map-marker spec for a comp: a small colored tag (hue per comp type), deliberately a different silhouette from sitePinIcon
+  - _exports_: `compMarkerColor`, `compMarkerSize`, `compMarkerSvg`
+- **`src/shared/comps/lib/comps.js`** — Leasing Comps pure model: $/SF derivation for land/building sale, lease basis normalization (annual NNN default, NNN/gross never blended), compFieldRows (the one empty-field-hides choke point), anchor validation, row<->model mapping
+  - _exports_: `ANCHOR_KINDS`, `annualLeaseRate`, `buildingPricePerSf`, `COMP_TYPES`, `compFieldRows`, `compHeadline`, `compToRow`, `isCompType`, `landPricePerSf`, `landSizeSf`, `LEASE_EXPENSE_BASES`, `LEASE_PERIODS`, `rowToComp`, `summarizeLeaseComps`, `summarizeSaleComps`, `validAnchor`, `validateComp`
+- **`src/shared/comps/lib/compsStore.js`** — Supabase CRUD for public.comps (team-visible read, owner-only write); every call returns {data,error}, never swallows a failure
+  - _exports_: `deleteComp`, `fetchAllComps`, `insertComp`, `supabase`, `updateComp`
 - **`src/shared/coordinates/index.js`** — Shared EPSG:2278 Texas South Central project grid: unit helpers plus Lambert Conformal Conic projectToGrid/gridToProject validated against pyproj
   - _exports_: `FT_PER_M`, `ftToAcres`, `gridToProject`, `makePoint`, `metersToFeet`, `PROJECT_CRS`, `projectToGrid`, `SQFT_PER_ACRE`
 - **`src/shared/coordinates/scaleFactor.js`** — NEW-4 grid-vs-ground: per-zone grid scale factor × elevation factor = the site's combined factor (with what it is worth per mile), plus `detectSurveyFrame` — grid / ground / other-scale from corresponding survey↔grid distances. Reports the factor; deliberately never applies it
