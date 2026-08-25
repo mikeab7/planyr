@@ -135,3 +135,53 @@ export const CloseXIcon = ({ size = 12 }) => (
     <path d="M6 6l12 12M18 6L6 18" />
   </svg>
 );
+
+/* ── TOOLBAR PASS (B727504) — Undo / Redo / Zoom-to-fit / Layers, rebuilt to standard toolbar
+ * conventions instead of ad-hoc text glyphs (↶ ↷ ⤢ ❖). Owner-approved spec:
+ *   - shapes are the shared Office/Google/Adobe convention, not anyone's proprietary artwork —
+ *     these four paths are the actual Material Design Icons (Pictogrammers MDI) vectors, which
+ *     are Apache-2.0 (free for commercial use, no attribution required); Microsoft's Fluent
+ *     artwork files are never lifted.
+ *   - fill="currentColor" on a single path (not the stroke idiom above) so the same path serves
+ *     both themes with no per-theme variant.
+ *   - Undo/Redo are drawn from ONE shared path pair that MDI itself ships as an exact mirror
+ *     (verified point-for-point against the real MDI source: reflecting Undo's path across the
+ *     viewBox's vertical centerline reproduces Redo's path exactly) — "if one is filled, both are
+ *     filled" holds by construction, not by convention.
+ */
+
+// Undo — a counter-clockwise curved arrow. MDI "undo".
+export const UndoIcon = ({ size = 20 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
+    style={{ flex: "none", display: "block" }}>
+    <path d="M12.5,8C9.85,8 7.45,9 5.6,10.6L2,7V16H11L7.38,12.38C8.77,11.22 10.54,10.5 12.5,10.5C16.04,10.5 19.05,12.81 20.1,16L22.47,15.22C21.08,11.03 17.15,8 12.5,8Z" />
+  </svg>
+);
+
+// Redo — the exact horizontal mirror of UndoIcon's path. MDI "redo".
+export const RedoIcon = ({ size = 20 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
+    style={{ flex: "none", display: "block" }}>
+    <path d="M18.4,10.6C16.55,9 14.15,8 11.5,8C6.85,8 2.92,11.03 1.54,15.22L3.9,16C4.95,12.81 7.95,10.5 11.5,10.5C13.45,10.5 15.23,11.22 16.62,12.38L13,16H22V7L18.4,10.6Z" />
+  </svg>
+);
+
+// Zoom to fit — four arrows pointing OUTWARD to the corners. Deliberately not a magnifier glass
+// (which reads as "zoom", not "fit", and would be confused with the separate zoom in/out
+// controls). MDI "arrow-expand-all".
+export const ZoomFitIcon = ({ size = 20 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
+    style={{ flex: "none", display: "block" }}>
+    <path d="M9.5,13.09L10.91,14.5L6.41,19H10V21H3V14H5V17.59L9.5,13.09M10.91,9.5L9.5,10.91L5,6.41V10H3V3H10V5H6.41L10.91,9.5M14.5,13.09L19,17.59V14H21V21H14V19H17.59L13.09,14.5L14.5,13.09M13.09,9.5L17.59,5H14V3H21V10H19V6.41L14.5,10.91L13.09,9.5Z" />
+  </svg>
+);
+
+// Layers — two offset sheets seen in perspective, the mark Google Maps / Photoshop / Figma all
+// use, so it needs no learning. Replaces the "❖" glyph, which some fonts render as a blank tofu
+// box — indistinguishable from a shape tool, a stop button, or a crop. MDI "layers".
+export const LayersIcon = ({ size = 20 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
+    style={{ flex: "none", display: "block" }}>
+    <path d="M12,16L19.36,10.27L21,9L12,2L3,9L4.63,10.27M12,18.54L4.62,12.81L3,14.07L12,21.07L21,14.07L19.37,12.8L12,18.54Z" />
+  </svg>
+);
