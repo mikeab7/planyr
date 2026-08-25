@@ -69,6 +69,14 @@ export const FAMILY_DEFAULT_INK = {
   markup:  "#c2410c",     // tools.matrix.js PROPERTY_COLUMNS.stroke/.fill default (burnt orange)
   callout: "#1f2937",     // SitePlanner calloutStyle default border/ink (slate) on its cream plate
   parcel:  "#34E802",     // PAL.canvasParcel — the owner's property-line green
+  /* The revision-cloud tool's own default (`lib/cloudGeometry.js` CLOUD_DEFAULT_INK). Picked
+   * explicitly distinct from `markup` — a cloud drawn with no colour change must never read as an
+   * ordinary rectangle/polygon markup, which is exactly the class of camouflage this file exists to
+   * prevent, and the same #c2410c a cloud would otherwise inherit is the collision the tool's own
+   * spec calls out by name. Measured 12.2–19.6 ΔE00 clear of every other entry here (worst case is
+   * the detention-pond fill) — see `test/familyInk.test.js`.
+   */
+  cloud:   "#2563EB",
 };
 
 /* Every colour a site element paints by default, fill and stroke, flattened — the surfaces an

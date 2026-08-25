@@ -231,9 +231,15 @@ export function parseTracts(text) {
     const calls = coursesOf(body);
     if (!calls.length) continue;
     // Label from a real heading ("Tract 1 – 94.91 Acres") or the stated acreage —
-    // never a stray "tract 6 & 7" from body prose.
+    // never a stray "tract 6 & 7" from body prose. A SAVE-AND-EXCEPT tract's own header commonly
+    // restates the ORIGINAL tract's acreage first ("out of the above described 94.53 acre tract a
+    // 12.584 acre tract…") before its own — so take the LAST acreage mention in the piece, not the
+    // first: the tract's own closing "containing X acres of land" line is reliably present and is
+    // reliably its own true figure, whereas the first mention in an except tract's header prose is
+    // reliably the ORIGINAL (larger) tract's, not this one's.
     const hdr = piece.match(/(?:^|\n)[ \t]*(Tract\s+\d[^\n]*?(?:[–-]|Acre)[^\n]{0,30})/i);
-    const acre = piece.match(/([0-9]+(?:\.[0-9]+)?)\s*acre/i);
+    const acreMatches = [...piece.matchAll(/([0-9]+(?:\.[0-9]+)?)\s*acres?\b/gi)];
+    const acre = acreMatches.length ? acreMatches[acreMatches.length - 1] : null;
     const label = (hdr ? hdr[1].trim() : null) || (acre ? `${acre[1]} acres` : (i === 0 ? "Boundary" : `Exception ${i}`));
     tracts.push({ role: i === 0 ? "boundary" : "except", label, calls, tie });
   }

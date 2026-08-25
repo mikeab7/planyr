@@ -186,6 +186,15 @@ export const ELEMENT_CAPABILITIES = [
     actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: XB_ANNOT, delete: YES },
   },
   {
+    type: "mcloud", label: "Revision cloud", family: "markup",
+    props: {
+      stroke: YES, fill: YES, lineWeight: YES, dash: YES, label: YES, lock: YES,
+      size: { na: "sized by its vertices, like the polygon it closes (plus its own Arc size control, outside this shared vocabulary)" },
+      rotation: { na: "a free vertex ring has no single rotation axis" },
+    },
+    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: XB_ANNOT, delete: YES },
+  },
+  {
     type: "easement", label: "Easement", family: "markup",
     props: {
       stroke: YES, fill: YES, lineWeight: YES, dash: YES, size: YES, label: YES, lock: YES,
