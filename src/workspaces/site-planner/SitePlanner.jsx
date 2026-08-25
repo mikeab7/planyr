@@ -12,6 +12,7 @@ import { reportClientEvent, SUPPRESSED_AUTOMATED } from "../../shared/telemetry/
 import { notePerfEdit } from "../../shared/telemetry/perfSampling.js";
 import { notePlanContext, noteViewScale, requestPerfCapture, perfCaptureDelivery } from "../../shared/telemetry/perfRecorderHandle.js";
 import { createElementSync, stableStringify } from "./lib/elementSync.js";
+import { createOperationTracker } from "./lib/operationEnvelope.js";
 import { planDelete, TYPING_GUARD_HINT } from "./lib/deletePlan.js";
 import { focusScope, resolveKeyEntry, keyScopeVerdict, shouldHintRefusal, SCOPE_GUARD_HINT } from "./lib/keyContract.js";
 import { touchLatch, touchFactsOf, TOUCH } from "../../shared/keyboard/keyScope.js";
@@ -19,7 +20,7 @@ import { rowsToModel, KIND_TO_FIELD, foldNeverSyncedLocal, foldJournal, reconcil
 import { writeJournal, readJournal, clearJournal, sweepJournals, journalSessionId } from "./lib/elementJournal.js";
 import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
 import { createNameResolver, describeElement, SELF_ACTOR } from "./lib/editorNames.js";
-import { toastForSyncEvent } from "./lib/conflictToasts.js";
+import { toastForSyncEvent, describeCoalescedLabel } from "./lib/conflictToasts.js";
 import { listMembers } from "./lib/teams.js";
 import { multiwriterEnabled } from "./lib/multiwriter.js";
 import { presenceSummary } from "./lib/presencePill.js";
@@ -207,7 +208,29 @@ import { loadDeed, deedNow } from "./lib/deedLazy.js";
  * call site in the deed-drop handler). It is a self-contained .docx/ZIP reader that only runs
  * once someone drops a deed or survey file, so it has no business on the boot path; the same
  * treatment B1123 gave the title reader and B1042 gave the export path. */
-import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip } from "./lib/easements.js";
+import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip, easementStyle, easementPatternId, encumbranceStyle, encumbrancePatternId, DEFAULT_EASE_FILL_OPACITY, DEFAULT_EASE_HATCH, ENCUMBRANCE_DEFAULT } from "./lib/easements.js";
+import { HATCH_OPTIONS, hatchSpec } from "../../shared/style/hatchPatterns.js";
+// NEW-EASE-STYLE — the ONE renderer that turns a hatch catalog spec (shared/style/hatchPatterns.js)
+// into an SVG <pattern>. MODULE-SCOPE (never defined inside SitePlanner's render body — a component
+// authored per-render is a fresh type every render, which remounts and thrashes). Used for the
+// easement/encumbrance type-default patterns AND any per-element override pattern, so a hatch looks
+// identical whichever level (type default or per-object override) produced it. `wash` is the
+// background rect's opacity (0 = no rect at all, matching the historic line-only pat-encumber);
+// `lineOpacity` is the hatch stroke/dot opacity. Tile is constant SCREEN-PIXEL space (no scale
+// ancestor reaches it), so it never turns to mush zoomed out or a solid block zoomed in.
+function HatchPatternDef({ id, hatchKey, color, wash = 0, lineOpacity = 0.5 }) {
+  const spec = hatchSpec(hatchKey);
+  const size = spec ? spec.size : 7;
+  return (
+    <pattern id={id} width={size} height={size} patternUnits="userSpaceOnUse" patternTransform={spec ? `rotate(${spec.rotate})` : undefined}>
+      {wash > 0 && <rect width={size} height={size} fill={color} opacity={wash} />}
+      {spec && spec.lines && spec.lines.map(([x1, y1, x2, y2], i) => (
+        <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke={color} strokeWidth="1.1" opacity={lineOpacity} />
+      ))}
+      {spec && spec.dot && <circle cx={spec.dot[0]} cy={spec.dot[1]} r={spec.dot[2]} fill={color} opacity={lineOpacity} />}
+    </pattern>
+  );
+}
 import { edgeRuns, runSetbackValue, resizeRunLength } from "./lib/edgeRuns.js";
 // NEW-1 / NEW-2 / NEW-3 — the parcel-chrome declutter trio. `setbackChipRuns` groups the boundary
 // into one LABELLED run per side (value + direction, not per digitized segment); `spaceOut` /
@@ -4034,11 +4057,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B674 — who else is on this plan right now (Supabase Realtime Presence on the element channel).
   const [peers, setPeers] = useState(null); // presenceSummary() result, or null when alone
   // B673 — the loud-but-non-blocking conflict surface: toast stack + name resolver + the
-  // late-bound sync-event handler (assigned each render further down, once zoomToElement and
+  // late-bound sync-event handler (assigned each render further down, once zoomToElements and
   // featBBox exist in scope).
   const { toasts, pushToast, dismissToast } = useToasts();
   const nameResolverRef = useRef(null);
   const syncEventRef = useRef(() => {});
+  // NEW-1 (round 2) — one entry per in-flight commit BATCH (see the comment beside syncEventRef.current
+  // below): batchKey -> { items: [{kind,id,ev,label,localCopy,uid}], timer }.
+  const toastBatchesRef = useRef(new Map());
   // B672 — instructions from remote rows that arrived MID-GESTURE (busyRef): buffered here and
   // drained at the next reconcile/flush so a remote apply never yanks the canvas mid-drag.
   const pendingRemoteRef = useRef([]);
@@ -4093,6 +4119,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       { id: siteId, seam, ...tearPayload(res.repairs) });
     return res.els;
   };
+  // NEW-1 (B712224) — the pure half of applying one instruction to a collection, shared by the REAL
+  // setState below and by reconcileElems' LOCAL post-drain patch (see the comment there for why the
+  // second consumer has to exist: stateRef.current lags a setEls call by a render, and reconcile()
+  // must never diff against pre-drain data). One rule, two consumers — never let them diverge.
+  const applyInstrToList = (list, instr) => {
+    if (!instr || instr.action === "ignore") return list;
+    if (instr.action === "remove") return list.filter((x) => x.id !== instr.id);
+    if (instr.action === "upsert") {
+      if (isHuskParcel(instr.kind, instr.el)) return list;
+      return list.some((x) => x.id === instr.id) ? list.map((x) => (x.id === instr.id ? instr.el : x)) : [...list, instr.el];
+    }
+    return list;
+  };
   // Put one applyRemoteRow instruction onto the canvas. The engine already updated its shadow, so
   // the autosave-effect diff that this setState triggers sees the element as unchanged (no echo
   // commit). Insertion respects the collection's z (byZ reads z, not array position).
@@ -4100,16 +4139,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!instr || instr.action === "ignore") return;
     const setter = { el: setEls, markup: setMarkups, measure: setMeasures, callout: setCallouts, parcel: setParcels }[instr.kind];
     if (!setter) return;
-    if (instr.action === "remove") setter((a) => a.filter((x) => x.id !== instr.id));
-    else if (instr.action === "upsert") {
-      if (isHuskParcel(instr.kind, instr.el)) return;
-      setter((a) => (a.some((x) => x.id === instr.id) ? a.map((x) => (x.id === instr.id ? instr.el : x)) : [...a, instr.el]));
-    }
+    setter((a) => applyInstrToList(a, instr));
   };
+  // Returns the instructions actually applied, so a synchronous caller (reconcileElems) can fold
+  // them into a LOCAL snapshot instead of trusting stateRef.current to already reflect them —
+  // setState above is async, stateRef.current is only re-assigned on the NEXT render (B712224).
   const drainRemote = () => {
-    if (!pendingRemoteRef.current.length) return;
+    if (!pendingRemoteRef.current.length) return [];
     const q = pendingRemoteRef.current; pendingRemoteRef.current = [];
     for (const instr of q) applyRemoteInstr(instr);
+    return q;
   };
   /* The ECHO / ADOPTION seam, as ONE choke point. Every path that changes `els` lands here after
    * React commits — a realtime upsert, a rows-canonical adoption, the buffered mid-gesture drain, a
@@ -4315,6 +4354,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       selfUid: () => activeUid(),   // NEW-4 — a getter, not a snapshot (see editorNames.js)
       // B1341 stage 2 — asked at CALL time, so the kill switch can be thrown without a reload.
       groupCas: groupCasEnabled,
+      // NEW-2 (B712225) — read at ENQUEUE time (the same moment isDirectEdit is asked), so every
+      // row diffed while an operation is open carries its op_id/op_kind/actor_session_id/client_ts.
+      envelopeNow: () => opTrackerRef.current.current(),
       // NEW-1 — bonded (attachedTo) elements are cascade-DERIVED unless the current gesture /
       // selection targets them; everything else (incl. deletes, el = null) stays direct.
       isDirectEdit: (kind, id, el) => kind !== "el" || !el || el.attachedTo == null || isDirectTouched(kind, id),
@@ -4427,7 +4469,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!e || !isCloudActive()) return;
     // A snapshot flush already knows exactly what the canvas holds; draining remote rows into it
     // would re-apply rows the snapshot just superseded.
-    if (!busy && !override) drainRemote(); // apply remote rows that arrived mid-gesture before diffing
+    let drained = [];
+    if (!busy && !override) drained = drainRemote(); // apply remote rows that arrived mid-gesture before diffing
     stampDirectTargets(); // NEW-1 — refresh direct-touch stamps in the SAME tick the ops are enqueued
     const s = override || stateRef.current;
     /* NEW-1 — the WRITE seam, and the one that makes the invariant structural rather than cosmetic.
@@ -4436,12 +4479,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      * engine's `freshen` re-reads this same live canvas at flush time), not by the ~40 s backoff
      * retry that carried pre-undo child coordinates in the reported case. A tear becomes a state
      * the client is incapable of persisting, whatever race produced it locally. */
-    let els = s.els;
+    let els = s.els, markups = s.markups, measures = s.measures, callouts = s.callouts, parcels = s.parcels;
+    /* ⛔ B712224 — the two-tab bonded-assembly resurrection. `drainRemote()` just above calls
+     * setEls/setMarkups/etc for anything that arrived while a gesture (even an incidental pan) was
+     * in flight; those are ASYNC React state updates, and `stateRef` is only re-assigned during the
+     * NEXT render (see its own comment). Reading `stateRef.current` synchronously right after
+     * drainRemote() — as this did before — is therefore STALE: it still holds elements the drain
+     * just queued for removal. Meanwhile the tombstone's arrival already cleared the engine's
+     * `shadow` entry for those elements SYNCHRONOUSLY, the moment the realtime row was received
+     * (elementSync.js's applyRemoteRow), whether or not the canvas instruction was buffered. So the
+     * diff below saw: shadow lacks the key, the (stale) collections still have it → a fresh CREATE,
+     * which a same-kind tombstoned row on the server auto-restores as a "resurrected" row at the
+     * next rev. Measured live: a same-account second tab, mid-pan when another tab's assembly
+     * delete cascade arrived, re-committed exactly the members whose remove instruction was still
+     * sitting in `pendingRemoteRef` at the moment its own gesture ended. Folding the SAME drained
+     * instructions into LOCAL copies here — through the identical `applyInstrToList` the real
+     * setState calls use, so the two can never disagree — makes this diff see the post-drain
+     * reality in the SAME synchronous call, regardless of whether React has re-rendered yet. */
+    for (const instr of drained) {
+      if (instr.kind === "el") els = applyInstrToList(els, instr);
+      else if (instr.kind === "markup") markups = applyInstrToList(markups, instr);
+      else if (instr.kind === "measure") measures = applyInstrToList(measures, instr);
+      else if (instr.kind === "callout") callouts = applyInstrToList(callouts, instr);
+      else if (instr.kind === "parcel") parcels = applyInstrToList(parcels, instr);
+    }
     if (!busy) {
       const guarded = assemblyGuard(els, override ? "flush-override" : "commit");
       if (guarded !== els) { els = guarded; setEls(guarded); }
     }
-    try { e.reconcile({ els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels }, { busy }); } catch (_) {}
+    try { e.reconcile({ els, markups, measures, callouts, parcels }, { busy }); } catch (_) {}
   };
   const flushElems = (override) => {
     const e = elSyncRef.current;
@@ -4567,11 +4633,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   if (!histRef.current) histRef.current = createHistoryStack({ keyOf: histKey });
   const [histTick, bumpHist] = useState(0);
   const touchHist = () => bumpHist((n) => n + 1); // re-render so undo/redo enabled state updates
+  /* NEW-2 (B712225) — the operation-envelope tracker (operationEnvelope.js). ONE instance per tab,
+   * kept across renders like histRef beside it — `beginOperation` at the `pushHistory()` seam is
+   * "the same seam pushHistory() uses, which is already exactly one call per undoable action"
+   * (the module's own header). `sessionId` is PROMOTED from `journalSid` (elementJournal's
+   * sessionStorage-backed per-tab id, module-scoped above), never minted — a third id would put
+   * three answers to "which tab is this" in the codebase (see the module header). */
+  const opTrackerRef = useRef(null);
+  if (!opTrackerRef.current) opTrackerRef.current = createOperationTracker({ sessionId: journalSid, userId: () => activeUid() });
   /* NEW-4 — `notePerfEdit()` is one integer increment, and it is the ONE axis of the
    * amplification hypothesis the DOM cannot report: how much this session has been WORKED. Every
    * undoable action funnels through here already, so this is the cheapest complete count there
    * is. It is a no-op unless the perf instrument is installed (a quarter of page loads). */
-  const pushHistory = () => { histRef.current.push(stateRef.current); notePerfEdit(); touchHist(); };
+  // NEW-2 (B712225) — `kind` is optional and defaults to the generic "edit": classifying every one
+  // of pushHistory()'s ~190 call sites into the OP_KINDS vocabulary is future work (the module's
+  // vocabulary exists for merge/split/replace specifically, none of which are wired this pass);
+  // what THIS wiring needs is that every write carries an op_id + actor_session_id it can be
+  // correlated by, which "edit" (a real OP_KINDS member, not the "no operation open" unknown
+  // fallback) already gives it. `deleteSel` passes "delete" explicitly — see below.
+  const pushHistory = (kind = "edit") => { opTrackerRef.current.beginOperation(kind); histRef.current.push(stateRef.current); notePerfEdit(); touchHist(); };
   /* ⛔ NEW-5 — "CAN I UNDO?" IS ASKED OF THE DOCUMENT, ONCE PER REAL CHANGE.
    *
    * `history.canUndo(current, {exact:true})` is the honest predicate (see that module: a plain
@@ -5995,7 +6075,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       reportClientEvent("delete-outcome", `${entry} → no-op (${plan.outcome})`, { entry, result: "no-op", reason: plan.outcome, stale: plan.stale.slice(0, 20) });
       return plan;
     }
-    pushHistory();
+    pushHistory("delete");
     const { els: elIds, markups: mkIds, measures: measIds, measureIdx, callouts: coIds, parcels: pcIds } = plan.remove;
     // B556/TOMBSTONE-DELETES — tombstone exactly what the filters remove, bonded children included,
     // so a cloud / cross-tab union merge can't resurrect half an assembly.
@@ -7994,14 +8074,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pts.forEach((p) => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
     return { x0, y0, x1, y1 };
   };
-  // B673 — zoom the canvas to one element (the conflict toast's "Show" action) and select it so
-  // the highlight makes "which element are they talking about" unmistakable. Same framing math as
-  // frameToActiveParcels, over the element's bbox with generous margin for context.
-  const zoomToElement = (kind, id) => {
-    const field = KIND_TO_FIELD[kind];
-    const el = ((stateRef.current && stateRef.current[field]) || []).find((x) => x && x.id === id);
-    if (!el) return;
-    const b = featBBox(el);
+  // B673 — zoom the canvas to a set of elements (the conflict toast's "Show" action) and select
+  // them all, so the highlight makes "which elements are they talking about" unmistakable for a
+  // coalesced notice as much as a single one. Same framing math as frameToActiveParcels, over the
+  // UNION bbox with generous margin for context. `members` is a list of { kind, id }.
+  const zoomToElements = (members) => {
+    const list = Array.isArray(members) ? members : [];
+    let b = null;
+    for (const m of list) {
+      const field = KIND_TO_FIELD[m.kind];
+      const el = ((stateRef.current && stateRef.current[field]) || []).find((x) => x && x.id === m.id);
+      if (!el) continue;
+      const eb = featBBox(el);
+      if (!eb) continue;
+      b = b ? { x0: Math.min(b.x0, eb.x0), y0: Math.min(b.y0, eb.y0), x1: Math.max(b.x1, eb.x1), y1: Math.max(b.y1, eb.y1) } : eb;
+    }
     if (!b) return;
     const marginFrac = 1.2;
     const bw = Math.max(b.x1 - b.x0, 10), bh = Math.max(b.y1 - b.y0, 10);
@@ -8010,11 +8097,71 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const ebw = maxX - minX, ebh = maxY - minY, pad = 40;
     const ppf = Math.max(0.02, Math.min(8, Math.min((size.w - pad * 2) / ebw, (size.h - pad * 2) / ebh)));
     setView({ ppf, offX: pad - minX * ppf + (size.w - pad * 2 - ebw * ppf) / 2, offY: pad - minY * ppf + (size.h - pad * 2 - ebh * ppf) / 2 });
-    if (kind === "el" || kind === "markup" || kind === "callout" || kind === "parcel") setSel({ kind, id });
+    const selectable = list.filter((m) => m.kind === "el" || m.kind === "markup" || m.kind === "callout" || m.kind === "parcel");
+    if (selectable.length === 1) setSel(selectable[0]);
+    else if (selectable.length > 1) setMulti(selectable);
+  };
+  // NEW-1 (round 2) — resolve the actor ONCE for a group of items sharing one commit batch, then
+  // either push a single normal toast (unchanged shape) or ONE COALESCED toast naming every member
+  // that survived its own individual gate. Coalescing never widens who gets told anything — each
+  // item still runs through toastForSyncEvent on its own first; this only changes how many banners
+  // a gesture that clears multiple gates produces.
+  const resolveAndPushToast = (items) => {
+    if (!items || !items.length) return;
+    const uid = items[0].uid;
+    const resolve = nameResolverRef.current ? nameResolverRef.current(uid) : Promise.resolve(SELF_ACTOR);
+    Promise.resolve(resolve).then((actor) => {
+      const { name, self } = actor || SELF_ACTOR;
+      const resolved = [];
+      for (const it of items) {
+        const finalSpec = toastForSyncEvent(it.ev, { name, label: it.label, self });
+        if (finalSpec) resolved.push({ ...it, finalSpec });
+      }
+      if (!resolved.length) return;
+      const members = resolved.map((it) => ({ kind: it.kind, id: it.id }));
+      // A survivor group of 1 keeps today's exact wording (the per-element spec, unchanged); more
+      // than 1 re-asks the SAME matrix row (they share ev.type by construction of the batch key)
+      // with ONE combined label naming every member that earned a mention.
+      const text = resolved.length === 1
+        ? resolved[0].finalSpec.text
+        : toastForSyncEvent(resolved[0].ev, { name, label: describeCoalescedLabel(resolved.map((it) => it.label)), self }).text;
+      const repSpec = resolved[0].finalSpec; // action shape is the same for the whole group (shared ev.type)
+      const action =
+        repSpec.action === "zoom" ? { label: "Show", onClick: () => zoomToElements(members) } :
+        repSpec.action === "restore" ? (() => {
+          const restorable = resolved.filter((it) => it.localCopy);
+          if (!restorable.length) return null;
+          return {
+            label: "Restore",
+            onClick: () => {
+              const e = elSyncRef.current;
+              for (const it of restorable) {
+                applyRemoteInstr({ action: "upsert", kind: it.kind, id: it.id, el: it.localCopy }); // back on canvas now
+                if (e) { try { e.restore(it.kind, it.id, it.localCopy); } catch (_) {} }
+              }
+            },
+          };
+        })() : null;
+      pushToast({ text, action });
+    }).catch(() => {});
+  };
+  // NEW-1 (round 2) — how long to hold a batch open waiting for sibling rows from the SAME commit.
+  // elementSync/Postgres realtime deliver one row per message even when they were written in one
+  // transaction, so sibling rows of a bonded-assembly delete/edit/paste arrive as a fast burst, not
+  // one JS tick. Short enough that a genuinely solitary notice never feels delayed; long enough that
+  // realtime's per-row delivery of one commit reliably lands inside it (measured against the existing
+  // ~15s authored-recently window, which is the budget this borrows a sliver of).
+  const TOAST_BATCH_WINDOW_MS = 250;
+  const flushToastBatch = (batchKey) => {
+    const batch = toastBatchesRef.current.get(batchKey);
+    if (!batch) return;
+    toastBatchesRef.current.delete(batchKey);
+    resolveAndPushToast(batch.items);
   };
   // B673 — the conflict policy matrix, wired: elementSync event → (maybe) a toast. The mapping
   // itself is the pure toastForSyncEvent (unit-tested); this glue resolves the editor's display
-  // name (async, cached roster), labels the element, applies any canvas side-effect, and pushes.
+  // name (async, cached roster), labels the element, applies any canvas side-effect, and pushes —
+  // coalescing every event from ONE commit batch into at most one notice (NEW-1 round 2, above).
   syncEventRef.current = (ev) => {
     const kind = ev && ev.kind, id = ev && ev.id;
     /* ⛔ NEW-1 — A PLAN-WIDE EVENT HAS NO ELEMENT, AND THIS GUARD WAS EATING THE ONE WARNING THAT
@@ -8030,7 +8177,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      * and assuming, which is the whole lesson: a mechanism that looks right and never fires. The
      * companion half — a `stale` engine still painting a green "synced" badge — is fixed at the
      * save-badge switch below. Guarded by `test/staleVisible.test.js` and the e2e spec
-     * `stale-tab-is-loud`. */
+     * `stale-tab-is-loud`. This wide event never batches — it isn't about an element, so there is
+     * nothing for it to share a commit-batch key with. */
     if (!kind || !id) {
       const wide = toastForSyncEvent(ev, { name: "", label: "", self: true });
       if (wide) pushToast({ text: wide.text, action: null });
@@ -8049,26 +8197,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       else if (ev.remote.data) applyRemoteInstr({ action: "upsert", kind, id, el: ev.remote.data });
     }
     const uid = (ev.remote && (ev.remote.deleted_by || ev.remote.updated_by)) || null;
-    // NEW-4 — `actor` is `{ name, self }`; `self` means "this account, another tab" (or an actor we
-    // could not prove is a different account). With no resolver at all we cannot prove anything, so
-    // the unattributed wording is the honest default — never "a teammate".
-    const resolve = nameResolverRef.current ? nameResolverRef.current(uid) : Promise.resolve(SELF_ACTOR);
-    Promise.resolve(resolve).then((actor) => {
-      const { name, self } = actor || SELF_ACTOR;
-      const finalSpec = toastForSyncEvent(ev, { name, label, self });
-      if (!finalSpec) return;
-      const localCopy = ev.local || localEl || null;
-      const action =
-        finalSpec.action === "zoom" ? { label: "Show", onClick: () => zoomToElement(kind, id) } :
-        finalSpec.action === "restore" && localCopy ? {
-          label: "Restore",
-          onClick: () => {
-            applyRemoteInstr({ action: "upsert", kind, id, el: localCopy }); // back on canvas now
-            const e = elSyncRef.current; if (e) { try { e.restore(kind, id, localCopy); } catch (_) {} }
-          },
-        } : null;
-      pushToast({ text: finalSpec.text, action });
-    }).catch(() => {});
+    const localCopy = ev.local || localEl || null;
+    const item = { kind, id, ev, label, localCopy, uid };
+    /* NEW-1 (round 2) — the correlation key. `elementSync` commits a bonded assembly (or any other
+     * multi-element gesture — a group delete, a parcel's bonded content, an undo of a multi-element
+     * edit, a paste) ATOMICALLY, so every row in one commit batch shares a single
+     * `updated_at`/`deleted_at` to the microsecond — a fact the DB already guarantees, not a new id
+     * to mint or thread through. Key on (event type, that timestamp, the writer), so unrelated
+     * batches that happen to land in the same short window can never merge, and events lacking a
+     * timestamp to correlate on — the rarer commit-RESULT-driven types (edit-vs-edit-lost-race,
+     * edit-vs-deleted, restore-conflict, delete-vs-create-dropped), whose `remote` is the RPC's
+     * returned row rather than a full realtime table row — fall back to flushing alone, immediately,
+     * exactly as before this change (never delayed, never coalesced). */
+    const ts = (ev.remote && (ev.remote.updated_at || ev.remote.deleted_at)) || null;
+    if (!ts) { resolveAndPushToast([item]); return; }
+    const batchKey = ev.type + "|" + ts + "|" + (uid || "");
+    let batch = toastBatchesRef.current.get(batchKey);
+    if (!batch) { batch = { items: [] }; toastBatchesRef.current.set(batchKey, batch); }
+    batch.items.push(item);
+    if (batch.timer) clearTimeout(batch.timer);
+    batch.timer = setTimeout(() => flushToastBatch(batchKey), TOAST_BATCH_WINDOW_MS);
   };
   const onUp = (e) => {
     if (e.pointerType === "touch" && touchCountRef.current >= 2) return; // pinch owns a 2-finger gesture (B555)
@@ -20164,7 +20312,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   return (
                     <g key={m.id} data-markup={m.id} style={mkCursor} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
                       {isSel && <polygon points={ring} fill="none" stroke={SEL_BLUE} strokeWidth={2} data-export="skip" pointerEvents="none" />}
-                      <polygon data-testid={m.except ? "deed-except" : "deed-boundary"} points={ring} fill="url(#pat-encumber)" stroke={stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} pointerEvents="all" />
+                      {/* NEW-EASE-STYLE — encumbrance shares the easement appearance model
+                          (fill/stroke/fillOpacity/hatch, editable in Properties); see
+                          easements.js's encumbranceStyle/ENCUMBRANCE_DEFAULT header. */}
+                      <polygon data-testid={m.except ? "deed-except" : "deed-boundary"} points={ring} fill={`url(#${encumbrancePatternId(m)})`} stroke={stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} pointerEvents="all" />
                       {/* centerline + per-call bearing/distance labels */}
                       {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={stroke} strokeWidth={strokeZoom(0.8, zk)} strokeDasharray={dashZoom("4 3", zk)} opacity={0.7} pointerEvents="none" />}
                       {labelPpf > 0.12 && (m.calls || []).map((c, i) => {
@@ -20180,8 +20331,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 }
                 if (m.kind === "easement") {
                   if (m.parcelId && inactiveParcelIds.has(m.parcelId)) return null; // B213: anchored easement hides with its parcel
-                  const tcol = easementColor(m);
-                  const ecol = tcol; // B619: keep the easement's own type color when selected (blue vertex handles cue the selection)
+                  // NEW-EASE-STYLE — resolved appearance (type default, or this easement's own
+                  // override): fill/stroke/fillOpacity/hatch. `ecol` used to be the fixed type
+                  // colour; it is now the RESOLVED stroke, so an outline-colour override still
+                  // cues selection (B619's rule — no recolor-on-select — is unchanged).
+                  const est = easementStyle(m);
+                  const ecol = est.stroke;
                   const proposed = m.status === "proposed";
                   const ring = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
                   const cen = (m.centerline && m.mode !== "boundary") ? m.centerline.map(f2p) : [];
@@ -20194,7 +20349,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     : (m.pts && m.pts.length >= 3 ? [...m.pts, m.pts[0]] : m.pts);
                   return (
                     <g key={m.id} data-markup={m.id} style={mkCursor} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)} onDoubleClick={(e) => onMarkupDouble(e, m.id)}>
-                      <polygon points={ring} fill={`url(#pat-ease-${easementType(m.easeType).key})`} stroke={ecol} strokeWidth={strokeZoom(isSel ? 2.4 : 1.8, zk)} strokeDasharray={proposed ? dashZoom("7 5", zk) : undefined} />
+                      <polygon points={ring} fill={`url(#${easementPatternId(m)})`} stroke={ecol} strokeWidth={strokeZoom(isSel ? 2.4 : 1.8, zk)} strokeDasharray={proposed ? dashZoom("7 5", zk) : undefined} />
                       {/* centerline shown for strip easements; flat-capped strip is the polygon above */}
                       {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={ecol} strokeWidth={strokeZoom(0.9, zk)} strokeDasharray={dashZoom("4 3", zk)} opacity={0.7} pointerEvents="none" />}
                       {/* ⛔ NEW-6 — the easement's centroid label is a FEATURE NAME and rides the shared
@@ -20596,9 +20751,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <stop offset="0%" stopColor="#2F6675" />
                 <stop offset="100%" stopColor="#5B97A5" />
               </radialGradient>
-              <pattern id="pat-encumber" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-                <line x1="0" y1="0" x2="0" y2="8" stroke="#7c3aed" strokeWidth="1" opacity="0.55" />
-              </pattern>
+              {/* NEW-EASE-STYLE — encumbrance/easement fills now go through ONE generic hatch
+                  renderer (HatchPatternDef, shared/style/hatchPatterns.js's catalog), so the
+                  type-default pattern below and any per-element override pattern (rendered
+                  further down, only for an easement/encumbrance a user has actually styled)
+                  are the exact same recipe. `pat-encumber` unchanged in every visible respect
+                  (purple line, no wash) — see easements.js's ENCUMBRANCE_DEFAULT header. */}
+              <HatchPatternDef id="pat-encumber" hatchKey={ENCUMBRANCE_DEFAULT.hatch} color={ENCUMBRANCE_DEFAULT.stroke} wash={ENCUMBRANCE_DEFAULT.fillOpacity} lineOpacity={0.55} />
               {/* v3 C4 — the pond's earthen berm ring: a warm-earth body at ~45% opacity + a 45°
                   hatch in a darker tone, so the embankment around a bermed pond reads as raised
                   ground distinct from the water it holds. */}
@@ -20615,13 +20774,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <pattern id="pat-sidewalk" width="7" height="7" patternUnits="userSpaceOnUse">
                 <circle cx="1.4" cy="1.4" r="0.7" fill="#9c998d" opacity="0.5" />
               </pattern>
-              {/* easement fills: a semi-transparent body + diagonal hatch, color-coded per type (NEW-1) */}
+              {/* easement fills: a semi-transparent body + hatch, color-coded per type (NEW-1),
+                  now DEFAULT-only — the per-type pattern is exactly today's historic look and is
+                  shared by every unedited easement of that type. */}
               {EASEMENT_TYPES.map((t) => (
-                <pattern key={t.key} id={`pat-ease-${t.key}`} width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-                  <rect width="7" height="7" fill={t.color} opacity="0.10" />
-                  <line x1="0" y1="0" x2="0" y2="7" stroke={t.color} strokeWidth="1.1" opacity="0.5" />
-                </pattern>
+                <HatchPatternDef key={t.key} id={`pat-ease-${t.key}`} hatchKey={DEFAULT_EASE_HATCH} color={t.color} wash={DEFAULT_EASE_FILL_OPACITY} lineOpacity={0.5} />
               ))}
+              {/* NEW-EASE-STYLE — one <pattern> per easement/encumbrance a user has actually
+                  styled (colour/opacity/hatch edited in Properties). The common case — an
+                  untouched easement — adds NOTHING here and keeps sharing its type's pattern
+                  above, so this stays cheap even on a plan with many easements. */}
+              {markups.filter((m) => m.kind === "easement" && easementStyle(m).hasOverride).map((m) => {
+                const st = easementStyle(m);
+                return <HatchPatternDef key={`pat-ep-${m.id}`} id={`pat-ease-el-${m.id}`} hatchKey={st.hatch} color={st.fill} wash={st.fillOpacity} lineOpacity={0.5} />;
+              })}
+              {markups.filter((m) => m.kind === "encumbrance" && encumbranceStyle(m).hasOverride).map((m) => {
+                const st = encumbranceStyle(m);
+                return <HatchPatternDef key={`pat-ec-${m.id}`} id={`pat-encumber-el-${m.id}`} hatchKey={st.hatch} color={st.fill} wash={st.fillOpacity} lineOpacity={0.55} />;
+              })}
             </defs>
 
             {!(origin && basemapOn && showAerial) && <g data-export="skip">{gridLines()}</g>}
@@ -22508,6 +22678,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const isStrip = e.mode !== "boundary";
             const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : SURF_RAISED, color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "var(--border-default)" });
             const txt = { ...numInput, width: 150, fontFamily: "inherit" };
+            // NEW-EASE-STYLE — resolved appearance (type default, or this easement's own override).
+            const est = easementStyle(e);
+            const swatch = { width: 34, height: 26, padding: 0, border: BORDER_1, borderRadius: 6, cursor: "pointer" };
             const check = (label, val, key) => (
               <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: PAL.ink, marginBottom: 7, cursor: "pointer" }}>
                 <input type="checkbox" checked={!!val} onChange={(ev) => setSelEasement({ [key]: ev.target.checked })} /> {label}
@@ -22541,6 +22714,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {check("Exclusive use", e.exclusive, "exclusive")}
                   {check("Restricts buildings", e.restrictsBuildings !== false, "restrictsBuildings")}
                   {check("Restricts paving", e.restrictsPaving === true, "restrictsPaving")}
+                </div>
+                {/* NEW-EASE-STYLE — colour / fill / hatch, editable per easement. Defaults to this
+                    easement's TYPE colour (above) until touched; "Reset" clears back to the type
+                    default rather than leaving a stale override behind. */}
+                <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "8px 0", paddingTop: 8 }}>
+                  <Field label="Fill color"><ColorField value={toHex6(est.fill)} {...colorCtl((v) => setSelEasement({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} /></Field>
+                  <Field label="Fill opacity">
+                    <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <input type="range" min={0} max={0.6} step={0.02} value={est.fillOpacity} onChange={(ev) => setSelEasement({ fillOpacity: +ev.target.value })} />
+                      <span style={{ fontSize: 10.5, color: PAL.muted, minWidth: 28 }}>{Math.round(est.fillOpacity * 100)}%</span>
+                    </span>
+                  </Field>
+                  <Field label="Hatch">
+                    <select style={{ ...numInput, width: 150, fontFamily: "inherit" }} value={est.hatch} onChange={(ev) => setSelEasement({ hatch: ev.target.value })}>
+                      {HATCH_OPTIONS.map((h) => <option key={h.key} value={h.key}>{h.label}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Outline color"><ColorField value={toHex6(est.stroke)} {...colorCtl((v) => setSelEasement({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} /></Field>
+                  {est.hasOverride && <button style={{ ...chip, marginTop: 4 }} onClick={() => setSelEasement({ fill: null, stroke: null, fillOpacity: null, hatch: null })} title={`Revert to the ${t.label} type's default appearance`}>↺ Reset to type default</button>}
                 </div>
                 <Field label="Label"><input value={e.labelOverride || ""} onChange={(ev) => setSelEasement({ labelOverride: ev.target.value })} placeholder={easementLabel({ ...e, labelOverride: "" })} style={txt} /></Field>
                 {/* B620 — inline label riding the easement (distinct from the centroid caption above; double-click the
@@ -22596,6 +22788,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <Field label="Fill"><ColorField value={toHex6(selMarkup.fill)} {...colorCtl((v) => liveMarkup({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} /></Field>
                   <Field label="Fill opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.fillOpacity ?? 0} {...sliderHistory((e) => liveMarkup({ fillOpacity: +e.target.value }))} /></Field>
                 </>}
+                {/* NEW-EASE-STYLE — an encumbrance (deed/title tract) shares the easement appearance
+                    model: fill / fill opacity / hatch, type default + per-element override. Not
+                    "closed" above (it's its own render branch, not a rect/ellipse/polygon), so it
+                    gets its own Fill block here rather than falling through the generic one. */}
+                {selMarkup.kind === "encumbrance" && (() => {
+                  const est = encumbranceStyle(selMarkup);
+                  return <>
+                    <Field label="Fill"><ColorField value={toHex6(est.fill)} {...colorCtl((v) => liveMarkup({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} /></Field>
+                    <Field label="Fill opacity">
+                      <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <input type="range" min={0} max={0.6} step={0.02} value={est.fillOpacity} {...sliderHistory((ev) => liveMarkup({ fillOpacity: +ev.target.value }))} />
+                        <span style={{ fontSize: 10.5, color: PAL.muted, minWidth: 28 }}>{Math.round(est.fillOpacity * 100)}%</span>
+                      </span>
+                    </Field>
+                    <Field label="Hatch">
+                      <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={est.hatch} onChange={(ev) => setSelMarkup({ hatch: ev.target.value })}>
+                        {HATCH_OPTIONS.map((h) => <option key={h.key} value={h.key}>{h.label}</option>)}
+                      </select>
+                    </Field>
+                    {est.hasOverride && <button style={{ ...chip, marginTop: 4 }} onClick={() => setSelMarkup({ fill: null, fillOpacity: null, hatch: null })} title="Revert to the default encumbrance appearance">↺ Reset to default</button>}
+                  </>;
+                })()}
                 {MK_BOX_KINDS.includes(selMarkup.kind) && <>
                   <Field label="Width / Height"><span style={{ display: "flex", gap: 5 }}>
                     <NumInput style={{ ...numInput, width: 56 }} value={Math.round(selMarkup.w)} min={1} step={1} coarse={10} onCommit={(n) => setSelMarkupGeom({ w: n })} />

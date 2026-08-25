@@ -7,7 +7,11 @@
 // miss). The engine (elementSync.js) owns batching/conflict policy; this file just moves bytes.
 
 // The columns the client reads for a site's element rows (load + realtime refetch).
-export const ELEMENT_SELECT = "id,kind,data,z_index,rev,updated_by,updated_at,deleted_at,deleted_by";
+// NEW-2 (B712225) — op_id/op_kind/actor_session_id/client_ts ride along so a freshly loaded or
+// refetched row carries its operation envelope (operationEnvelope.js's groupRowsIntoOperations
+// reads them straight off the row); realtime postgres_changes payloads already include every
+// column regardless of this list (CDC ships the whole row), so this only affects the REST fetch.
+export const ELEMENT_SELECT = "id,kind,data,z_index,rev,updated_by,updated_at,deleted_at,deleted_by,op_id,op_kind,actor_session_id,client_ts";
 
 // A hung request (a sleeping socket, a proxy stall) would otherwise never settle — leaving the sync
 // engine's single in-flight slot stuck TRUE forever, so no create/edit/delete ever reaches the cloud

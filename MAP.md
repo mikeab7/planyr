@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-23 @ `416a2e9` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-24 @ `0aaec25` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_552 source files mapped._
+_553 source files mapped._
 
 ## infra
 
@@ -36,11 +36,19 @@ _552 source files mapped._
 - **`src/app/recoverableError.js`** — Which render crashes the error boundary may clear by remounting instead of showing a dead end (B1189): classifies React's nested-update circuit breaker (dev text + minified #185) and decides recover-vs-show under a bounded, time-windowed retry budget. — `UPDATE_DEPTH_CODE`, `isUpdateDepthError`, `isRecoverableRenderError`, `MAX_AUTO_RECOVERIES`, `RECOVERY_WINDOW_MS`, `planRecovery`
   - _exports_: `isRecoverableRenderError`, `isUpdateDepthError`, `MAX_AUTO_RECOVERIES`, `planRecovery`, `RECOVERY_WINDOW_MS`, `UPDATE_DEPTH_CODE`
 - **`src/app/route.js`** — Hash-route model: parseRoute/buildHash for {module,projectId,cross}, slug maps, useHashRoute hook with merge-navigate, INITIAL_HASH_EMPTY resume flag
-  - _exports_: `buildHash`, `DEFAULT_MODULE`, `INITIAL_HASH_EMPTY`, `MODULE_BY_SLUG`, `parseRoute`, `readRoute`, `sameRoute`, `SLUG_BY_MODULE`, `unknownModuleSlug`, `useHashRoute`
+  - _exports_: `buildHash`, `DEFAULT_MODULE`, `INITIAL_HASH_EMPTY`, `isAdminRoute`, `MODULE_BY_SLUG`, `parseRoute`, `readRoute`, `sameRoute`, `SLUG_BY_MODULE`, `unknownModuleSlug`, `useHashRoute`
 - **`src/app/Shell.jsx`** — App shell: auth state, hash-driven module switching, lazy workspace registry with per-id ErrorBoundary+Suspense, builds the AccountControl auth slot, cross-workspace intents
   - _exports_: `default (Shell)`
 - **`src/main.jsx`** — Entry point: installs client-error telemetry + chunk-reload guard, retires old GIS service worker, renders Shell inside ThemeProvider/StrictMode
   - _exports_: _(none)_
+- **`src/workspaces/admin/AdminApp.jsx`** — The admin page shell: header + Back-to-Planyr, and the four section placeholders (Usage/Issues/Support/Ops) NEW-2..NEW-5 fill in
+  - _exports_: `default (AdminApp)`
+- **`src/workspaces/admin/AdminGate.jsx`** — The one place that decides whether AdminApp mounts: calls checkIsAdmin only while signed in, renders null on anything but a confirmed true
+  - _exports_: `default (AdminGate)`
+- **`src/workspaces/admin/lib/adminAccess.js`** — checkIsAdmin(client): the is_admin() RPC wrapper, fails closed (false) on no client/no session/RPC error/thrown exception
+  - _exports_: `checkIsAdmin`
+- **`src/workspaces/admin/lib/adminSections.js`** — The four admin page sections (id/title/blurb) AdminApp renders as placeholders
+  - _exports_: `SECTIONS`
 - **`src/workspaces/food/components/BottomSheet.jsx`** — Generic drag-to-resize mobile bottom sheet (peek/half/full snap points, content-driven height, dismiss-on-drag), content-agnostic
   - _exports_: `default (BottomSheet)`
 - **`src/workspaces/food/components/FoodMap.jsx`** — Leaflet map: canvas-rendered pins (snapshot places, live Overpass results, manual pins), drop-a-pin mode, "search live for more here"
@@ -194,14 +202,6 @@ _552 source files mapped._
   - _exports_: `casUpsert`, `interpretCas`, `interpretInsert`, `isMissingColumn`, `isMissingVersionColumn`, `keepaliveCasPush`
 - **`src/shared/cloud/serializeWrites.js`** — Per-key write serializer: makeWriteSerializer chains same-key cloud writes in order so a tab can't race itself into a false version conflict
   - _exports_: `makeWriteSerializer`
-- **`src/shared/comps/components/CompsPanel.jsx`** — Leasing Comps side panel: self-contained data owner (fetch/create/edit/delete), list + basis-normalized summary + create/edit form
-  - _exports_: `default (CompsPanel)`
-- **`src/shared/comps/lib/compMarkerIcon.js`** — Pure map-marker spec for a leasing comp (colored diamond tag, per comp type) — no Leaflet import, wrapped in L.divIcon by the caller
-  - _exports_: `compMarkerColor`, `compMarkerSize`, `compMarkerSvg`
-- **`src/shared/comps/lib/comps.js`** — Leasing Comps pure data model: $/SF derivation, lease annual/basis normalization, the empty-field-hide render rule, anchor/create validation, row<->model mapping
-  - _exports_: `ANCHOR_KINDS`, `annualLeaseRate`, `buildingPricePerSf`, `COMP_TYPES`, `compFieldRows`, `compHeadline`, `compToRow`, `isCompType`, `landPricePerSf`, `landSizeSf`, `LEASE_EXPENSE_BASES`, `LEASE_PERIODS`, `rowToComp`, `summarizeLeaseComps`, `summarizeSaleComps`, `validAnchor`, `validateComp`
-- **`src/shared/comps/lib/compsStore.js`** — Supabase CRUD for public.comps (team-read/owner-write RLS), mirrors foodStore.js's {data,error} shape
-  - _exports_: `deleteComp`, `fetchAllComps`, `insertComp`, `supabase`, `updateComp`
 - **`src/shared/coordinates/index.js`** — Shared EPSG:2278 Texas South Central project grid: unit helpers plus Lambert Conformal Conic projectToGrid/gridToProject validated against pyproj
   - _exports_: `FT_PER_M`, `ftToAcres`, `gridToProject`, `makePoint`, `metersToFeet`, `PROJECT_CRS`, `projectToGrid`, `SQFT_PER_ACRE`
 - **`src/shared/coordinates/scaleFactor.js`** — NEW-4 grid-vs-ground: per-zone grid scale factor × elevation factor = the site's combined factor (with what it is worth per mile), plus `detectSurveyFrame` — grid / ground / other-scale from corresponding survey↔grid distances. Reports the factor; deliberately never applies it
@@ -338,6 +338,8 @@ _552 source files mapped._
   - _exports_: `default (StoragePanel)`
 - **`src/shared/storage/storageReclaim.js`** — Free space by dropping ONLY data that declares a rehydration source (never a raster with no cloud copy); oldest-first localStorage eviction plus the reclaim-then-retry decision behind the device-save retry button
   - _exports_: `CACHE_CLEARED_EVENT`, `CACHE_IDB_PREFIX`, `reclaimableClasses`, `reclaimLocalStorage`, `reclaimMessage`, `reclaimRefetchable`, `reclaimThenRetry`, `unprovenReclaimables`
+- **`src/shared/style/hatchPatterns.js`** — pure hatch-pattern catalog (key → tile spec); shared appearance primitive, first wired to easement/encumbrance fills
+  - _exports_: `HATCH_OPTIONS`, `hatchSpec`, `isHatchKey`
 - **`src/shared/telemetry/clientErrors.js`** — Client error+event telemetry: window/rejection/preload sources insert into anon INSERT-only Supabase client_errors with dedup, rate/session caps, tab-id stamping, fail-safe
   - _exports_: `buildErrorRow`, `decideReport`, `DUP_MS`, `errorSignature`, `extractMessage`, `extractStack`, `installClientErrorTelemetry`, `lastTelemetrySend`, `networkReportSuppression`, `RATE_MAX`, `RATE_WINDOW_MS`, `reportClientError`, `reportClientEvent`, `SESSION_MAX`, `setTelemetryModule`, `SUPPRESSED_AUTOMATED`, `TAB_ID`, `telemetryDelivery`
 - **`src/shared/telemetry/perfCapture.js`** — Builds and encodes a performance capture — the privacy ALLOWLIST (counters/timings/view state only, proved before every send), plan-id sanitisation, frame statistics, and the compact encoder that trims oldest-first to fit one telemetry row.
@@ -548,7 +550,7 @@ _552 source files mapped._
 - **`src/workspaces/site-planner/lib/conceptName.js`** — Default plan naming: bijective base-26 Concept A/B/.../AA sequence continuing past the highest existing concept per site
   - _exports_: `conceptLettersToNumber`, `nextConceptName`, `numberToConcept`, `parseConceptIndex`
 - **`src/workspaces/site-planner/lib/conflictToasts.js`** — the B673 conflict policy matrix as a pure mapping: elementSync event → toast spec (who gets told what, which action rides along)
-  - _exports_: `toastForSyncEvent`
+  - _exports_: `describeCoalescedLabel`, `toastForSyncEvent`
 - **`src/workspaces/site-planner/lib/contentVisibility.js`** — the View menu's content model: which GROUPS (elements by type, parcels, markups, measurements, callouts, the acreage-label master) are temporarily hidden. Pure predicates over a sparse hidden-map; never touches geometry, so no number moves
   - _exports_: `anyHidden`, `EL_GROUPS`, `EL_KEY_PREFIX`, `EL_KEYS`, `elHidden`, `elKey`, `groupsFor`, `groupState`, `hiddenKeys`, `hiddenSummary`, `isHidden`, `KNOWN_KEYS`, `normalizeRetiredToggles`, `OTHER_GROUPS`, `parcelAcreageHidden`, `setManyVisible`, `setVisible`, `showAll`, `visibleEls`, `visibleMeasures`, `visibleParcels`
 - **`src/workspaces/site-planner/lib/contours.js`** — Pure contour-line math (B704): 1-ft interval auto-pick, sentinel-embedded voids, d3-contour marching squares, grid-border + dilated-void strip passes, pixel-space simplify, index flags + sparse labels
@@ -624,7 +626,7 @@ _552 source files mapped._
 - **`src/workspaces/site-planner/lib/easementRules.js`** — Editable per-jurisdiction utility-easement width rules (placeholder, verify-flagged) persisted in localStorage with county default mapping
   - _exports_: `DEFAULT_EASEMENT_RULES`, `defaultJurForCounty`, `loadEasementRules`, `saveEasementRules`
 - **`src/workspaces/site-planner/lib/easements.js`** — Easement domain logic: type catalog, label, and derive drawn ring from centerline/boundary/parcel-edge input modes with area
-  - _exports_: `buildParcelEdgeStrip`, `DEFAULT_EASEMENT_ATTRS`, `deriveEasementRing`, `EASEMENT_TYPES`, `easementArea`, `easementColor`, `easementLabel`, `easementType`, `ringArea`
+  - _exports_: `buildParcelEdgeStrip`, `DEFAULT_EASE_FILL_OPACITY`, `DEFAULT_EASE_HATCH`, `DEFAULT_EASEMENT_ATTRS`, `deriveEasementRing`, `EASEMENT_TYPES`, `easementArea`, `easementColor`, `easementLabel`, `easementPatternId`, `easementStyle`, `easementType`, `ENCUMBRANCE_DEFAULT`, `encumbrancePatternId`, `encumbranceStyle`, `ringArea`
 - **`src/workspaces/site-planner/lib/ebfe.js`** — FEMA/USGS InFRM Estimated BFE (EBFE) point sampler (B882): reads the estimated 1% BFE (layer 17) + 0.2% WSE (layer 21) via ArcGIS MapServer /identify, per-location cache, bounded fetch. `sampleEbfePoint`/`foldIdentify`/`pixelValueOf`/`ebfeIdentifyUrl`.
   - _exports_: `clearEbfeCache`, `EBFE_LAYERS`, `EBFE_PIXEL_ATTRS`, `EBFE_URL`, `ebfeEndpoint`, `ebfeIdentifyUrl`, `foldIdentify`, `pixelValueOf`, `sampleEbfePoint`
 - **`src/workspaces/site-planner/lib/edgeConstrain.js`** — pure "start a measurement/line on a parcel boundary, then hold Shift to keep it perpendicular/parallel/45° to that boundary" helpers (the setback lock): project a click onto the nearest parcel edge and snap a drawn direction relative to that edge's angle

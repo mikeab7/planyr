@@ -202,7 +202,17 @@ export function createElementSync(opts = {}) {
     // B1341 stage 2 — () => bool, asked at CALL time. Omitted → group CAS is OFF and every call is
     // byte-for-byte its pre-stage-2 self, which is what makes this stage inert until switched on.
     groupCas = null,
+    // NEW-2 (B712225) — () => envelope|null, the operation-envelope tracker's `current()` (see
+    // operationEnvelope.js). Read at ENQUEUE time (reconcile()/restore()/closeAssemblies()), the
+    // SAME moment `isDirectEdit` is asked — never at flush time, because a batch can bundle ops
+    // enqueued under different open operations and each row must carry the envelope that was live
+    // when IT was diffed, not whichever gesture happens to be open when the debounce fires. A row
+    // enqueued with no tracker wired (omitted, or the getter throws) carries no envelope fields —
+    // byte-for-byte the pre-NEW-2 wire shape, so an unwired caller (tests, any site without the
+    // tracker) is unaffected.
+    envelopeNow = null,
   } = opts;
+  const envelopeForEnqueue = () => { try { return envelopeNow ? envelopeNow() : null; } catch (_) { return null; } };
 
   // key -> { kind, id, json, rev, z }  (last COMMITTED state)
   const shadow = new Map();
@@ -392,7 +402,11 @@ export function createElementSync(opts = {}) {
   // for the whole session, silently disabling B1116's and B1099's foreign-author gates. Fails open
   // exactly as before when there is genuinely no id to compare.
   const selfUidNow = () => { try { return typeof selfUid === "function" ? selfUid() : selfUid; } catch (_) { return null; } };
-  const foreignAuthor = (row) => { const me = selfUidNow(); return !!(me && row && row.updated_by && row.updated_by !== me); };
+  // NEW-0 — a tombstone's actor is `deleted_by`, never `updated_by` (site_elements sets ONE of the
+  // two per statement); a `foreignAuthor` that only reads `updated_by` answers "unknown" for every
+  // delete row and fails open toward "possibly ours", which is the right default but must at least
+  // be ASKED. Falls back to `updated_by` when the row is not a tombstone, exactly as before.
+  const foreignAuthor = (row) => { const me = selfUidNow(); const author = row && (row.deleted_by || row.updated_by); return !!(me && author && author !== me); };
 
   let debounceHandle = null;
   let backoffHandle = null;
@@ -511,7 +525,7 @@ export function createElementSync(opts = {}) {
           if (inf && inf.el && stableStringify(inf.el) === stableStringify(elc)) continue; // being created right now
           if (!pend || (pend.cls !== "create" && pend.cls !== "restore") || stableStringify(pend.el) !== stableStringify(elc)) {
             if (!(pend && pend.cls === "restore" && stableStringify(pend.el) === stableStringify(elc)))
-              enqueue(key, { kind, id: el.id, cls: pend && pend.cls === "restore" ? "restore" : "create", el: elc, z: elc.z, direct: directTag(kind, el.id, elc) });
+              enqueue(key, { kind, id: el.id, cls: pend && pend.cls === "restore" ? "restore" : "create", el: elc, z: elc.z, direct: directTag(kind, el.id, elc), envelope: envelopeForEnqueue() });
             sawCreateOrDelete = true;
           }
           continue;
@@ -530,7 +544,7 @@ export function createElementSync(opts = {}) {
           if (inf && inf.el && stableStringify(inf.el) === json) continue; // this exact data is already in flight
           // changed since last commit → update (unless an identical update is already queued)
           if (!pend || pend.cls === "delete" || stableStringify(pend.el) !== json) {
-            enqueue(key, { kind, id: el.id, cls: "update", el, z: el.z, direct: directTag(kind, el.id, el) });
+            enqueue(key, { kind, id: el.id, cls: "update", el, z: el.z, direct: directTag(kind, el.id, el), envelope: envelopeForEnqueue() });
           }
         }
       }
@@ -558,8 +572,27 @@ export function createElementSync(opts = {}) {
         continue;
       }
       if (!pend || pend.cls !== "delete") {
+        /* NEW-0 (round 7, B673 recurrence) — a delete carries no `el`, so `directTag(..., null)`
+         * always fell through `isDirectEdit`'s `!el` branch to TRUE — EVERY delete, including every
+         * cascaded child of a bonded assembly, was classified direct no matter what the caller's
+         * predicate would have said. `recent.set(...)` is gated on `direct !== false` (below), so
+         * every tombstoned child stamped its own authorship and answered `authoredRecently: true`
+         * for ~15s — the exact shape of the owner's report (one delete, six banners, each reading
+         * "…you just edited…" for a bonded child the user never directly touched). B846/B847 built
+         * this SAME direct-vs-derived distinction for EDITS ("derived churn never claims
+         * authorship") and it was never extended to deletes, because a delete has nothing for the
+         * predicate to inspect. Reconstruct the pre-delete element from the shadow's last-known json
+         * — the SAME bytes the predicate would see had this been an edit instead — so a delete is
+         * judged by the identical rule: the caller's `isDirectEdit` (SitePlanner.jsx) already reads
+         * `el.attachedTo` and the live selection/gesture stamp, so a directly-selected-and-deleted
+         * building is still direct and a cascaded child swept along with it is derived, exactly as
+         * its cascaded relayout WRITES already are. A `stale` shadow entry (a mixed json↔rev
+         * pairing) has no trustworthy bytes to reconstruct from — fails open to `null` → direct,
+         * the pre-existing behavior, never silently misjudged as derived. */
+        let shadEl = null;
+        if (shad.json && !shad.stale) { try { shadEl = JSON.parse(shad.json); } catch (_) { shadEl = null; } }
         enqueue(key, { kind: shad.kind, id: shad.id, cls: "delete", el: null, z: shad.z,
-          direct: directTag(shad.kind, shad.id, null), baseRev: shad.rev, baseAt: now() });
+          direct: directTag(shad.kind, shad.id, shadEl), baseRev: shad.rev, baseAt: now(), envelope: envelopeForEnqueue() });
         sawCreateOrDelete = true;
       }
     }
@@ -597,7 +630,7 @@ export function createElementSync(opts = {}) {
   // OUR data at a new rev. Immediate (like create/delete — a deliberate act, never debounced).
   function restore(kind, id, el) {
     if (stopped || !ready || !el) return;
-    enqueue(skey(kind, id), { kind, id, cls: "restore", el, z: el.z, direct: true }); // an explicit user action is always direct
+    enqueue(skey(kind, id), { kind, id, cls: "restore", el, z: el.z, direct: true, envelope: envelopeForEnqueue() }); // an explicit user action is always direct
     schedule(true);
   }
 
@@ -661,7 +694,7 @@ export function createElementSync(opts = {}) {
       if (!shad) continue;                        // never seen by the server → the normal diff mints its create
       const json = stableStringify(m);
       if (shad.json === json) continue;           // the server already agrees — nothing to send
-      enqueue(key, { kind: "el", id: m.id, cls: "update", el: m, z: m.z, direct: false });
+      enqueue(key, { kind: "el", id: m.id, cls: "update", el: m, z: m.z, direct: false, envelope: envelopeForEnqueue() });
       report("element-assembly-joined", "assembly member folded into the same commit", { siteId, id: m.id, root: rootIdOf(m, m.id) });
     }
   }
@@ -1064,11 +1097,21 @@ export function createElementSync(opts = {}) {
     return typeof e.baseAt === "number" && born.at > e.baseAt;
   }
 
+  // NEW-2 (B712225) — the envelope rides on the wire op as four plain top-level keys, read by the
+  // `commit_elements` RPC and written onto the row alongside data/rev (db/commit_elements_op_envelope.sql).
+  // An entry enqueued with no tracker wired carries `envelope: null`, so `env` is `{}` and the op is
+  // byte-for-byte its pre-NEW-2 shape — no behavior change for a caller that never opts in.
+  const envelopeStamp = (e) => {
+    const v = e && e.envelope;
+    if (!v || typeof v !== "object") return {};
+    return { op_id: v.op_id ?? null, op_kind: v.op_kind ?? null, actor_session_id: v.actor_session_id ?? null, client_ts: v.client_ts ?? null };
+  };
   function opFor(e) {
-    if (e.cls === "create") return { op: "create", id: e.id, kind: e.kind, z: e.z, data: e.el };
-    if (e.cls === "delete") return { op: "delete", id: e.id, kind: e.kind, expected: revOf(e) };
-    if (e.cls === "restore") return { op: "restore", id: e.id, kind: e.kind, z: e.z, data: e.el };
-    return { op: "update", id: e.id, kind: e.kind, z: e.z, expected: revOf(e), data: e.el };
+    const env = envelopeStamp(e);
+    if (e.cls === "create") return { op: "create", id: e.id, kind: e.kind, z: e.z, data: e.el, ...env };
+    if (e.cls === "delete") return { op: "delete", id: e.id, kind: e.kind, expected: revOf(e), ...env };
+    if (e.cls === "restore") return { op: "restore", id: e.id, kind: e.kind, z: e.z, data: e.el, ...env };
+    return { op: "update", id: e.id, kind: e.kind, z: e.z, expected: revOf(e), data: e.el, ...env };
   }
   const revOf = (e) => { const s = shadow.get(skey(e.kind, e.id)); return s ? s.rev : 1; };
 
@@ -1203,14 +1246,25 @@ export function createElementSync(opts = {}) {
           shadow.set(key, { kind: e.kind, id: e.id, json: "", rev: row.rev, z: e.z, stale: true });
           enqueue(key, { kind: e.kind, id: e.id, cls: "update", el: e.el, z: e.z, direct: e.direct });
           report("element-conflict", "edit-vs-edit LWW re-commit", { siteId, id: e.id, kind: e.kind, remoteRev: row.rev });
-          onEvent({ type: "edit-vs-edit-lost-race", id: e.id, kind: e.kind, remote: row, authoredRecently: isRecent(e.kind, e.id) });
+          // NEW-0 — a DERIVED op (e.direct === false) racing a row this SAME account wrote is not
+          // news: it is this account's own cascade catching up with itself (an undo racing its own
+          // bonded children is the canonical case — see the `foreignAuthor` branch just above). Only
+          // a DIRECT edit (something the user actually did) or a genuinely foreign writer earns a
+          // toast; the LWW re-commit above still happens either way — this only silences the notice.
+          if (e.direct !== false || foreignAuthor(row))
+            onEvent({ type: "edit-vs-edit-lost-race", id: e.id, kind: e.kind, remote: row, authoredRecently: isRecent(e.kind, e.id) });
         }
       } else if (r.status === "deleted") {
         // edit-vs-deleted: someone tombstoned it. Do NOT auto-restore — B673 offers a Restore action.
         shadow.delete(key);
         recordTombstone(e.kind, e.id, (r.row && r.row.rev) || 0); // ceiling so a stale echo can't resurrect (B757)
         report("element-edit-vs-deleted", "edit hit a tombstone", { siteId, id: e.id, kind: e.kind });
-        onEvent({ type: "edit-vs-deleted", id: e.id, kind: e.kind, local: e.el, remote: r.row || {} });
+        // NEW-0 — same carve-out as edit-vs-edit-lost-race above: a DERIVED write (this account's own
+        // cascade re-fit) hitting a tombstone this SAME account just wrote is routine propagation, not
+        // a conflict — most often this account's own delete, landing on a bonded child whose relayout
+        // was already in flight. A DIRECT edit, or a tombstone genuinely authored elsewhere, still tells.
+        if (e.direct !== false || foreignAuthor(r.row || {}))
+          onEvent({ type: "edit-vs-deleted", id: e.id, kind: e.kind, local: e.el, remote: r.row || {} });
       } else if (r.status === "exists") {
         // create-vs-create — impossible with per-tab salted ids (B591). Assert + adopt as an update.
         const row = r.row || {};
@@ -1431,7 +1485,14 @@ export function createElementSync(opts = {}) {
         const q = dirty.get(key);
         if (q && q.el && stableStringify(q.el) === rowJson) dirty.delete(key); // server already has it
       } else if (!semEq) {
-        onEvent({ type: "remote-while-dirty", id: row.id, kind: row.kind, remote: row, authoredRecently: isRecent(row.kind, row.id) });
+        // NEW-0 — the yield branch above already absorbed "derived pending, foreign row" in silence.
+        // What lands here is either (a) a DIRECT edit is pending on THIS tab right now — a genuine
+        // "something you're doing just got overwritten", worth telling regardless of who wrote the
+        // other side — or (b) a derived pending op raced a row this SAME account wrote (routine
+        // propagation: this account's other tab catching up with itself). Toast only for (a) or a
+        // positively foreign writer; (b) is silent.
+        if (pendDirect || foreignAuthor(row))
+          onEvent({ type: "remote-while-dirty", id: row.id, kind: row.kind, remote: row, authoredRecently: isRecent(row.kind, row.id) });
       }
       return { action: "ignore" };
     }
@@ -1445,7 +1506,12 @@ export function createElementSync(opts = {}) {
       // the delete variant of the no-pending read path below).
       const ownDeleteEcho = tomb != null && now() - tomb.at <= recentWindowMs && rev <= tomb.rev;
       shadow.delete(key);
-      if (!ownDeleteEcho)
+      // NEW-0 — this tab has no pending op on this element, so there is no "your current work" to
+      // protect; the only question left is who deleted it. A tombstone this SAME account wrote (this
+      // account's other tab, or this tab's own delete arriving from a source `applyRemoteRow` didn't
+      // already recognize as its own echo) is routine propagation and must be silent — reserve the
+      // notice for a genuinely different account.
+      if (!ownDeleteEcho && foreignAuthor(row))
         onEvent({ type: "remote-delete", id: row.id, kind: row.kind, remote: row, authoredRecently: isRecent(row.kind, row.id) });
       return { action: "remove", kind: row.kind, id: row.id, row };
     }
@@ -1489,7 +1555,16 @@ export function createElementSync(opts = {}) {
       report("element-stale-own-echo", "own echo predating an applied snapshot kept off the canvas", { siteId, id: row.id, kind: row.kind, rev });
       return { action: "ignore" };
     }
-    if (!sent && !semEqShadow)
+    // NEW-0 — the missing gate. This tab has no pending op on this element (the `pend` branch above
+    // already returned), so `authoredRecently` here means only "I touched this within the last 15s",
+    // never "I am doing something right now." A fresh row for it from THIS SAME ACCOUNT — this
+    // account's other tab, most commonly this account's own cascade delete propagating and landing
+    // back as an update on a bonded sibling — is exactly the reported false alarm ("a building you
+    // just edited changed in another tab of yours" ×6, for a delete nobody but this account made) and
+    // must be silent. Its sibling emit above (the `pend`/yield branch, ~1418) was already gated on
+    // `foreignAuthor(row)`; this one was not, which is the whole bug. `sent`/`semEqShadow` above only
+    // catch THIS TAB'S own echo — `foreignAuthor` is what extends that to the whole account.
+    if (!sent && !semEqShadow && foreignAuthor(row))
       onEvent({ type: "remote-upsert", id: row.id, kind: row.kind, remote: row, existed: !!shad, authoredRecently: isRecent(row.kind, row.id) });
     // NEW-1 — the shadow has adopted this row; whether the CANVAS does is out of our hands from
     // here. Until a diff proves it did, a delete minted from the difference is fabricated.

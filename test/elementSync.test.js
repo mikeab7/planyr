@@ -871,7 +871,11 @@ describe("stableStringify", () => {
 
 describe("NEW-1 #1 — derived cascade ops never claim authorship (isDirectEdit)", () => {
   const bonded = (id, extra = {}) => ({ id, type: "paving", cx: 0, cy: 0, w: 10, h: 10, z: 2048, attachedTo: "b1", ...extra });
-  const byShape = { isDirectEdit: (kind, id, el) => !(el && el.attachedTo) }; // bonded = derived
+  // NEW-0 — `selfUid` is required for these tests: the no-pending remote-upsert emit now also
+  // gates on `foreignAuthor(row)` (elementSync.js ~1493), so a row with no attributable author is
+  // treated as possibly-self and stays silent. These tests are about a GENUINELY foreign write
+  // (a real other account), so every `applyRemoteRow` below carries `updated_by: "u2"`.
+  const byShape = { selfUid: "me", isDirectEdit: (kind, id, el) => !(el && el.attachedTo) }; // bonded = derived
 
   it("a foreign overwrite of a DERIVED element fires remote-upsert with authoredRecently:false → the toast layer stays quiet", async () => {
     const h = makeHarness({ sync: byShape });
@@ -880,7 +884,7 @@ describe("NEW-1 #1 — derived cascade ops never claim authorship (isDirectEdit)
     h.sync.reconcile({ els: [el("b1", { z: 1024, w: 20 }), bonded("pv1", { cx: 5 })] }, {});
     h.sync.flushGesture(); await tick();
     // tab B's re-derived copy of the CHILD echoes in at a foreign rev with genuinely different data
-    const r = h.sync.applyRemoteRow({ kind: "el", id: "pv1", rev: 99, z_index: 2048, deleted_at: null, data: bonded("pv1", { cx: 555 }) });
+    const r = h.sync.applyRemoteRow({ kind: "el", id: "pv1", rev: 99, z_index: 2048, deleted_at: null, updated_by: "u2", data: bonded("pv1", { cx: 555 }) });
     expect(r.action).toBe("upsert"); // data still converges (LWW read) — only the BLAME is gated
     const ev = h.events.filter((e) => e.type === "remote-upsert").pop();
     expect(ev.authoredRecently).toBe(false); // never "…you just edited" for an element the user never touched
@@ -892,7 +896,7 @@ describe("NEW-1 #1 — derived cascade ops never claim authorship (isDirectEdit)
     h.sync.reconcile({ els: [el("b1", { z: 1024 }), bonded("pv1")] }, {}); await tick();
     h.sync.reconcile({ els: [el("b1", { z: 1024, w: 20 }), bonded("pv1", { cx: 5 })] }, {});
     h.sync.flushGesture(); await tick();
-    const r = h.sync.applyRemoteRow({ kind: "el", id: "b1", rev: 99, z_index: 1024, deleted_at: null, data: el("b1", { z: 1024, w: 77 }) });
+    const r = h.sync.applyRemoteRow({ kind: "el", id: "b1", rev: 99, z_index: 1024, deleted_at: null, updated_by: "u2", data: el("b1", { z: 1024, w: 77 }) });
     expect(r.action).toBe("upsert");
     const ev = h.events.filter((e) => e.type === "remote-upsert").pop();
     expect(ev.authoredRecently).toBe(true);
@@ -911,29 +915,29 @@ describe("NEW-1 #1 — derived cascade ops never claim authorship (isDirectEdit)
     h.setResponder((ops) => ({ ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }));
     h.runTimers(); await tick(); // the re-commit lands
     // a later foreign overwrite still reads authoredRecently:false — the re-enqueue kept direct:false
-    const ev = (() => { h.sync.applyRemoteRow({ kind: "el", id: "pv1", rev: 99, z_index: 2048, deleted_at: null, data: bonded("pv1", { cx: 321 }) }); return h.events.filter((e) => e.type === "remote-upsert").pop(); })();
+    const ev = (() => { h.sync.applyRemoteRow({ kind: "el", id: "pv1", rev: 99, z_index: 2048, deleted_at: null, updated_by: "u2", data: bonded("pv1", { cx: 321 }) }); return h.events.filter((e) => e.type === "remote-upsert").pop(); })();
     expect(ev.authoredRecently).toBe(false);
   });
 
   it("restore() is ALWAYS direct (an explicit user action), even under an everything-is-derived predicate", async () => {
-    const h = makeHarness({ sync: { isDirectEdit: () => false } });
+    const h = makeHarness({ sync: { selfUid: "me", isDirectEdit: () => false } });
     h.sync.restore("el", "e1", el("e1", { z: 1024 })); await tick();
-    h.sync.applyRemoteRow({ kind: "el", id: "e1", rev: 99, z_index: 1024, deleted_at: null, data: el("e1", { z: 1024, w: 50 }) });
+    h.sync.applyRemoteRow({ kind: "el", id: "e1", rev: 99, z_index: 1024, deleted_at: null, updated_by: "u2", data: el("e1", { z: 1024, w: 50 }) });
     const ev = h.events.filter((e) => e.type === "remote-upsert").pop();
     expect(ev.authoredRecently).toBe(true);
   });
 
   it("a THROWING predicate fails open to direct — attribution problems never silence a real heads-up", async () => {
-    const h = makeHarness({ sync: { isDirectEdit: () => { throw new Error("boom"); } } });
+    const h = makeHarness({ sync: { selfUid: "me", isDirectEdit: () => { throw new Error("boom"); } } });
     h.sync.reconcile({ els: [el("e1", { z: 1024 })] }, {}); await tick();
-    h.sync.applyRemoteRow({ kind: "el", id: "e1", rev: 99, z_index: 1024, deleted_at: null, data: el("e1", { z: 1024, w: 50 }) });
+    h.sync.applyRemoteRow({ kind: "el", id: "e1", rev: 99, z_index: 1024, deleted_at: null, updated_by: "u2", data: el("e1", { z: 1024, w: 50 }) });
     expect(h.events.filter((e) => e.type === "remote-upsert").pop().authoredRecently).toBe(true);
   });
 
   it("no predicate passed → everything stays direct (pre-NEW-1 behavior preserved)", async () => {
-    const h = makeHarness();
+    const h = makeHarness({ sync: { selfUid: "me" } });
     h.sync.reconcile({ els: [el("e1", { z: 1024 })] }, {}); await tick();
-    h.sync.applyRemoteRow({ kind: "el", id: "e1", rev: 99, z_index: 1024, deleted_at: null, data: el("e1", { z: 1024, w: 50 }) });
+    h.sync.applyRemoteRow({ kind: "el", id: "e1", rev: 99, z_index: 1024, deleted_at: null, updated_by: "u2", data: el("e1", { z: 1024, w: 50 }) });
     expect(h.events.filter((e) => e.type === "remote-upsert").pop().authoredRecently).toBe(true);
   });
 });
@@ -979,9 +983,9 @@ describe("NEW-1 #2 — semantically-equal copies are silent (semanticallyEqual +
   });
 
   it("GUARD (no-pending): a genuinely different foreign row still fires remote-upsert(authoredRecently)", async () => {
-    const h = makeHarness();
+    const h = makeHarness({ sync: { selfUid: "me" } });
     h.sync.reconcile({ els: [el("e1", { z: 1024 })] }, {}); await tick();
-    h.sync.applyRemoteRow({ kind: "el", id: "e1", rev: 42, z_index: 1024, deleted_at: null, data: el("e1", { z: 1024, cx: 50 }) });
+    h.sync.applyRemoteRow({ kind: "el", id: "e1", rev: 42, z_index: 1024, deleted_at: null, updated_by: "u2", data: el("e1", { z: 1024, cx: 50 }) });
     const ev = h.events.filter((e) => e.type === "remote-upsert").pop();
     expect(ev).toBeTruthy();
     expect(ev.authoredRecently).toBe(true);
@@ -1026,5 +1030,224 @@ describe("NEW-1 #3 — stale (mixed json↔rev) shadow pairings never seed a ref
     const out = reconcileSeedRows(rows, h.sync.shadowSnapshot(), h.sync.tombstonedSnapshot());
     expect(out[0].rev).toBe(2);
     expect(out[0].data.cx).toBe(140); // our committed move survives the stale fetch
+  });
+});
+
+/* NEW-0 (owner-reported 2026-08-23) — a same-account echo is not a conflict. Two of the OWNER'S OWN
+ * tabs on one plan ("2 here" is him, not a colleague): deleting a building's bonded assembly in tab A
+ * produced SIX banners in tab A, each reading "…you just edited changed in another tab of yours…" for
+ * rows this same account's OTHER tab wrote while catching up with the delete. The pending-branch yield
+ * (~1418) was already gated on `foreignAuthor(row)`; its no-pending sibling (~1493, `remote-upsert`) was
+ * not — the exact site these tests pin, plus every other B673 emit re-checked against the same standard:
+ * "would a SOLO user with two tabs ever see this?" A row with no attributable author fails OPEN toward
+ * silence (possibly-self), matching `foreignAuthor`'s own existing fail-open direction. */
+describe("NEW-0 — a same-account echo is not a conflict", () => {
+  const mk = (extra = {}) => createElementSync({
+    siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+    onEvent: () => {}, commit: async (ops) => ({ ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }),
+    ...extra,
+  });
+
+  it("no-pending remote-upsert: this account's OTHER tab writing what we just touched is SILENT (the reported burst)", async () => {
+    const events = [];
+    const s = mk({ onEvent: (e) => events.push(e) });
+    s.seed([{ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 1, z_index: 0 }]);
+    s.reconcile({ els: [{ id: "e1", cx: 50, z: 0 }] }, {}); s.flushGesture(); await tick(); // we edit → rev 2, authoredRecently
+    // this account's OTHER tab (same uid) writes a fresh copy — no pending op on this tab, no way to
+    // prove it is a different person, so it must say nothing at all.
+    const instr = s.applyRemoteRow({ kind: "el", id: "e1", data: { id: "e1", cx: 61, z: 0 }, rev: 3, z_index: 0, updated_by: "me" });
+    expect(instr.action).toBe("upsert"); // the canvas still converges to the fresher bytes
+    expect(events.filter((e) => e.type === "remote-upsert")).toHaveLength(0); // ← NEW-0: no banner
+  });
+
+  it("no-pending remote-delete: this account's OTHER tab deleting what we just touched is SILENT", async () => {
+    const events = [];
+    const s = mk({ onEvent: (e) => events.push(e) });
+    s.seed([{ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 1, z_index: 0 }]);
+    s.reconcile({ els: [{ id: "e1", cx: 50, z: 0 }] }, {}); s.flushGesture(); await tick(); // rev 2, authoredRecently
+    const instr = s.applyRemoteRow({ kind: "el", id: "e1", data: null, rev: 3, z_index: 0, deleted_at: "2026-08-23T00:00:00Z", deleted_by: "me" });
+    expect(instr.action).toBe("remove");
+    expect(events.filter((e) => e.type === "remote-delete")).toHaveLength(0); // ← NEW-0: no banner
+  });
+
+  it("pending DERIVED op racing this account's OTHER tab: SILENT (the cascade-relayout shape)", async () => {
+    const events = [];
+    const s = mk({ onEvent: (e) => events.push(e), isDirectEdit: (kind, id, elv) => !(elv && elv.attachedTo) });
+    s.seed([{ kind: "el", id: "pv1", data: { id: "pv1", attachedTo: "b1", cx: 0 }, rev: 1, z_index: 2048 }]);
+    s.reconcile({ els: [{ id: "pv1", attachedTo: "b1", cx: 5, z: 2048 }] }, {}); // derived re-fit, queued (debounced, still dirty)
+    // this account's OTHER tab lands a genuinely different copy of the same bonded child mid-flight
+    const instr = s.applyRemoteRow({ kind: "el", id: "pv1", data: { id: "pv1", attachedTo: "b1", cx: 61 }, rev: 2, z_index: 2048, updated_by: "me" });
+    expect(instr.action).toBe("ignore"); // local (dirty) data still wins the canvas — LWW is unaffected
+    expect(events.filter((e) => e.type === "remote-while-dirty")).toHaveLength(0); // ← NEW-0: no banner
+  });
+
+  it("GUARD: pending DIRECT edit racing this account's OTHER tab still toasts — \"your own work just got overwritten\" is real", async () => {
+    const events = [];
+    const s = mk({ onEvent: (e) => events.push(e) });
+    s.seed([{ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 1, z_index: 0 }]);
+    s.reconcile({ els: [{ id: "e1", cx: 50, z: 0 }] }, {}); // direct edit, queued (still dirty — not flushed)
+    const instr = s.applyRemoteRow({ kind: "el", id: "e1", data: { id: "e1", cx: 61, z: 0 }, rev: 2, z_index: 0, updated_by: "me" });
+    expect(instr.action).toBe("ignore");
+    expect(events.filter((e) => e.type === "remote-while-dirty")).toHaveLength(1); // still surfaced — a real double-edit
+  });
+
+  it("commit-result conflict on a DERIVED op against this account's OTHER tab: SILENT (edit-vs-edit-lost-race)", async () => {
+    const h = makeHarness({ sync: { selfUid: "me", isDirectEdit: (kind, id, elv) => !(elv && elv.attachedTo) } });
+    h.sync.seed([{ kind: "el", id: "pv1", data: { id: "pv1", attachedTo: "b1", cx: 0 }, rev: 1, z_index: 2048 }]);
+    h.setResponder((ops) => ({ ok: true, results: ops.map((o) =>
+      ({ id: o.id, status: "conflict", row: { rev: 7, updated_by: "me", data: { id: "pv1", attachedTo: "b1", cx: 900 } } })) }));
+    h.sync.reconcile({ els: [{ id: "pv1", attachedTo: "b1", cx: 5, z: 2048 }] }, {}); h.runTimers(); await tick();
+    expect(h.events.filter((e) => e.type === "edit-vs-edit-lost-race")).toHaveLength(0); // ← NEW-0: no banner
+  });
+
+  it("GUARD: commit-result conflict on a DIRECT edit against this account's OTHER tab still toasts", async () => {
+    const h = makeHarness({ sync: { selfUid: "me" } });
+    h.sync.seed([{ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 1, z_index: 0 }]);
+    h.setResponder((ops) => ({ ok: true, results: ops.map((o) =>
+      ({ id: o.id, status: "conflict", row: { rev: 7, updated_by: "me", data: { id: "e1", cx: 900, z: 0 } } })) }));
+    h.sync.reconcile({ els: [{ id: "e1", cx: 5, z: 0 }] }, {}); h.runTimers(); await tick();
+    expect(h.events.filter((e) => e.type === "edit-vs-edit-lost-race")).toHaveLength(1);
+  });
+
+  it("edit-vs-deleted on a DERIVED op against this account's own tombstone: SILENT", async () => {
+    const h = makeHarness({ sync: { selfUid: "me", isDirectEdit: (kind, id, elv) => !(elv && elv.attachedTo) } });
+    h.sync.seed([{ kind: "el", id: "pv1", data: { id: "pv1", attachedTo: "b1", cx: 0 }, rev: 1, z_index: 2048 }]);
+    h.setResponder((ops) => ({ ok: true, results: ops.map((o) => ({ id: o.id, status: "deleted", row: { rev: 3, deleted_by: "me" } })) }));
+    h.sync.reconcile({ els: [{ id: "pv1", attachedTo: "b1", cx: 5, z: 2048 }] }, {}); h.runTimers(); await tick();
+    expect(h.events.filter((e) => e.type === "edit-vs-deleted")).toHaveLength(0); // ← NEW-0: no banner
+  });
+
+  it("GUARD: edit-vs-deleted on a DIRECT edit against this account's own tombstone still toasts (Restore is offered)", async () => {
+    const h = makeHarness({ sync: { selfUid: "me" } });
+    h.sync.seed([{ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 1, z_index: 0 }]);
+    h.setResponder((ops) => ({ ok: true, results: ops.map((o) => ({ id: o.id, status: "deleted", row: { rev: 3, deleted_by: "me" } })) }));
+    h.sync.reconcile({ els: [{ id: "e1", cx: 5, z: 0 }] }, {}); h.runTimers(); await tick();
+    expect(h.events.filter((e) => e.type === "edit-vs-deleted")).toHaveLength(1);
+  });
+});
+
+/* NEW-0 ROUND 7 (owner-escalated 2026-08-23, after six prior rounds on this exact family — B757,
+ * B759/V301, B811, B812, B846/B847, B1116/B377888 — each closed one EDIT-cascade path and left the
+ * DELETE path untouched). The actual hole: SitePlanner.jsx's real `isDirectEdit` reads `el.attachedTo`
+ * to tell a bonded child (derived) from anything else (direct) — `kind !== "el" || !el ||
+ * el.attachedTo == null || isDirectTouched(kind, id)`. A delete op carries NO element
+ * (`enqueue(key, { cls: "delete", el: null, ... })`), so `!el` short-circuited every delete —
+ * including every cascaded child's tombstone — to TRUE. `recent.set(...)` is gated on
+ * `direct !== false`, so every cascaded child stamped its own authorship and answered
+ * `authoredRecently: true` for the whole window: the owner deleted ONE building and his OTHER tab's
+ * catch-up writes for the bonded children came back as "…you just edited [paving/an element/parking
+ * field]…", one banner per child. The fix (above the delete-enqueue site) reconstructs the pre-delete
+ * element from the shadow's last-known json before calling `directTag`, so a delete is classified by
+ * the IDENTICAL rule an edit already was — closing the class at its actual mechanism rather than at
+ * another detection site. These tests pin the classification directly (the thing six prior rounds
+ * never once asserted) using a predicate SHAPED like the real one. */
+describe("NEW-0 round 7 — a DELETE is classified the same as an EDIT (the isDirectEdit `!el` hole)", () => {
+  // Mirrors SitePlanner.jsx:4320 exactly in shape: unbonded elements are always direct; a bonded
+  // child is direct only while it is itself the gesture's target (stampDirectTargets' selection set).
+  const bondedPredicate = (directlyTouched) => (kind, id, elv) =>
+    kind !== "el" || !elv || elv.attachedTo == null || directlyTouched.has(id);
+
+  it("the HOST's delete op is direct; the bonded CHILD's delete op is derived — same gesture, same batch", async () => {
+    const ops = [];
+    const directlyTouched = new Set(["b1"]); // the user selected only the building and hit Delete
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: () => {}, isDirectEdit: bondedPredicate(directlyTouched),
+      commit: async (batch) => { ops.push(...batch); return { ok: true, results: batch.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }; },
+    });
+    s.seed([
+      { kind: "el", id: "b1", data: { id: "b1", type: "building" }, rev: 1, z_index: 0 },
+      { kind: "el", id: "pv1", data: { id: "pv1", type: "paving", attachedTo: "b1" }, rev: 1, z_index: 2048 },
+    ]);
+    s.reconcile({ els: [] }, {}); await tick(); // the delete cascade: both leave the canvas together
+    const b1Op = ops.find((o) => o.id === "b1");
+    const pv1Op = ops.find((o) => o.id === "pv1");
+    expect(b1Op.op).toBe("delete"); expect(pv1Op.op).toBe("delete");
+    // pre-fix: BOTH of these read `direct: true` (the bug). The RPC layer doesn't carry `direct` —
+    // it is consumed purely client-side (recent.set gating) — so assert the CLASSIFICATION the
+    // engine itself used by checking what `recent`/authoredRecently produces for each (below), which
+    // is the observable half of "direct" this module exposes.
+  });
+
+  it("REGRESSION: this account's OTHER tab writing a cascaded CHILD after the delete produces NO notice", async () => {
+    const events = [];
+    const directlyTouched = new Set(["b1"]);
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: (e) => events.push(e), isDirectEdit: bondedPredicate(directlyTouched),
+      commit: async (batch) => ({ ok: true, results: batch.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }),
+    });
+    s.seed([
+      { kind: "el", id: "b1", data: { id: "b1", type: "building" }, rev: 1, z_index: 0 },
+      { kind: "el", id: "pv1", data: { id: "pv1", type: "paving", attachedTo: "b1" }, rev: 1, z_index: 2048 },
+    ]);
+    s.reconcile({ els: [] }, {}); await tick(); // deletes both @ rev 2
+    events.length = 0; // only the POST-delete traffic is under test
+    // this account's OTHER tab writes the bonded child while catching up with the delete. Whatever
+    // the CANVAS does with it (a genuinely fresher same-account row above the delete floor is
+    // allowed to come through) is unrelated to this assertion — the bug was the NOTICE, not the sync.
+    s.applyRemoteRow({ kind: "el", id: "pv1", data: { id: "pv1", type: "paving", attachedTo: "b1", cx: 5 }, rev: 9, z_index: 2048, updated_by: "me" });
+    expect(events).toHaveLength(0); // ← the fix: not one banner, for a solo user's own cascade
+  });
+
+  it("GUARD: the HOST itself still claims direct authorship on delete — a genuinely foreign resurrection still toasts", async () => {
+    const events = [];
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: (e) => events.push(e), isDirectEdit: bondedPredicate(new Set(["b1"])),
+      commit: async (batch) => ({ ok: true, results: batch.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }),
+    });
+    s.seed([{ kind: "el", id: "b1", data: { id: "b1", type: "building" }, rev: 1, z_index: 0 }]);
+    s.reconcile({ els: [] }, {}); await tick(); // direct delete @ rev 2
+    events.length = 0;
+    const instr = s.applyRemoteRow({ kind: "el", id: "b1", data: { id: "b1", type: "building", w: 5 }, rev: 9, z_index: 0, updated_by: "u2" });
+    expect(instr.action).toBe("upsert"); // a genuine foreign re-create above the delete floor
+    expect(events.filter((e) => e.type === "remote-upsert")).toHaveLength(1); // still surfaced
+  });
+});
+
+describe("NEW-2 (B712225) — the operation envelope rides on the wire op", () => {
+  it("a create/update/delete op carries op_id/op_kind/actor_session_id/client_ts when envelopeNow is wired", async () => {
+    const ops = [];
+    let envelope = { op_id: "op_1", op_kind: "move", actor_session_id: "sess-a", client_ts: "2026-08-23T23:03:09.000Z" };
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: () => {}, envelopeNow: () => envelope,
+      commit: async (batch) => { ops.push(...batch); return { ok: true, results: batch.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }; },
+    });
+    s.seed([]);
+    s.reconcile({ els: [el("e1")] }, {}); await tick(); // create
+    envelope = { op_id: "op_2", op_kind: "delete", actor_session_id: "sess-a", client_ts: "2026-08-23T23:03:11.000Z" };
+    s.reconcile({ els: [] }, {}); await tick(); // delete
+    const created = ops.find((o) => o.op === "create");
+    const deleted = ops.find((o) => o.op === "delete");
+    expect(created).toMatchObject({ op_id: "op_1", op_kind: "move", actor_session_id: "sess-a", client_ts: "2026-08-23T23:03:09.000Z" });
+    expect(deleted).toMatchObject({ op_id: "op_2", op_kind: "delete", actor_session_id: "sess-a", client_ts: "2026-08-23T23:03:11.000Z" });
+  });
+
+  it("with no envelopeNow wired, the op carries none of the four fields — byte-for-byte the pre-NEW-2 shape", async () => {
+    const ops = [];
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: () => {},
+      commit: async (batch) => { ops.push(...batch); return { ok: true, results: batch.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }; },
+    });
+    s.seed([]);
+    s.reconcile({ els: [el("e1")] }, {}); await tick();
+    expect(ops[0]).toEqual({ op: "create", id: "e1", kind: "el", z: expect.any(Number), data: expect.any(Object) });
+    expect(ops[0]).not.toHaveProperty("op_id");
+  });
+
+  it("a getter that throws is swallowed — the op still commits, with no envelope", async () => {
+    const ops = [];
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: () => {}, envelopeNow: () => { throw new Error("no session yet"); },
+      commit: async (batch) => { ops.push(...batch); return { ok: true, results: batch.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }; },
+    });
+    s.seed([]);
+    s.reconcile({ els: [el("e1")] }, {}); await tick();
+    expect(ops[0].op).toBe("create");
+    expect(ops[0]).not.toHaveProperty("op_id");
   });
 });

@@ -68,7 +68,23 @@ export function unknownModuleSlug(hash) {
   const slug = segs[0] === "project" ? segs[2] : segs[0] === "all" ? segs[1] : segs[0];
   // "#/project/<id>" with no module segment is a legitimate shorthand, not a miss.
   if (!slug) return null;
+  // "admin" is a real, resolvable destination (see isAdminRoute) that just isn't one of
+  // the tabbed workspaces — it must never trip the "newer build" banner, which would be
+  // the one signal telling a random visitor that typing this slug does something.
+  if (slug === ADMIN_SLUG) return null;
   return MODULE_BY_SLUG[slug] ? null : slug;
+}
+
+/* B711904 (NEW-1) — the internal admin page. Deliberately NOT a workspace: it carries no
+ * header tab, no entry in MODULE_BY_SLUG, and is never offered by the module switcher —
+ * Shell.jsx checks this directly off the raw hash instead. Keeping it out of the normal
+ * module-slug table is what makes an unauthorized visit indistinguishable from any other
+ * unrecognized route (parseRoute falls back to DEFAULT_MODULE exactly as it would for a
+ * typo), rather than needing its own "access denied" branch anywhere in the route grammar. */
+const ADMIN_SLUG = "admin";
+export function isAdminRoute(hash) {
+  const segs = String(hash || "").replace(/^#/, "").split("/").filter(Boolean);
+  return segs[0] === ADMIN_SLUG;
 }
 
 /* Pure: { module, projectId, cross } -> a "#/..." hash string. */
