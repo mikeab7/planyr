@@ -11199,7 +11199,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setTool("road");
     setRoadWidth(String(+parent.travelW || 24));
     setDraftRoadPts([{ x: node.x, y: node.y }]);
-    flashWarn(`Branching a ${roadClassOf(settings, parent.roadClass).label.toLowerCase()} off ${parent.label || "this road"} — click where it should go, then ✓ Done. Esc cancels.`, 6000);
+    // B750096 — trimmed: the trailing "then ✓ Done. Esc cancels" is now the road-draft-status
+    // strip's job (it appears the moment there's something to finish), and duplicating it here
+    // meant this transient toast — same bottom-center spot, same 6s window — could sit ON TOP of
+    // the real Done control right when the user needed to click it.
+    flashWarn(`Branching a ${roadClassOf(settings, parent.roadClass).label.toLowerCase()} off ${parent.label || "this road"} — click where it should go.`, 4000);
   };
   // B875 — reveal a pond's inspector card (open the Properties companion) and scroll-flash it.
   // `target` optionally focuses a sub-card ("assistant" | "purpose").
@@ -22016,27 +22020,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {ring && ring.length >= 3 && <polygon points={ring.map((p) => { const c = f2p(p); return `${c.x},${c.y}`; }).join(" ")} fill={typeStyle("road", settings).fill} fillOpacity={0.4} stroke={PAL.accent} strokeWidth={1.25} strokeDasharray="5 4" />}
                     <polyline points={centerStr} fill="none" stroke={PAL.accent} strokeWidth={1} strokeDasharray="4 4" />
                     {draftRoadPts.map((p, i) => { const c = f2p(p); return <circle key={i} cx={c.x} cy={c.y} r={i === 0 ? 5 : 3.5} fill={i === 0 ? PAL.paper : PAL.accent} stroke={PAL.accent} strokeWidth={1.5} />; })}
-                    {total > 1 && <text x={lp.x} y={lp.y - 8} textAnchor="middle" fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(travelW)}′ wide · {f0(total)}′ long</text>}
+                    {/* B750096 — the live dims readout is genuinely useful mid-draw (CAD/Bluebeam both
+                        do this), so it stays near the cursor — but offset up-and-right of the point,
+                        never centered ON it, and pointerEvents:none (inherited from the wrapping <g>
+                        above) so it can never be a click target. */}
+                    {total > 1 && <text x={lp.x + 14} y={lp.y - 12} textAnchor="start" fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(travelW)}′ wide · {f0(total)}′ long</text>}
                     {magnet && (() => { const c = f2p(magnet); return <g><circle cx={c.x} cy={c.y} r={9} fill="none" stroke={SEL_BLUE} strokeWidth={2.5} /><circle cx={c.x} cy={c.y} r={3.5} fill={SEL_BLUE} /></g>; })()}
-                    {/* NEW-1, owner report 2026-07-25: "I should be able to just press three points…
-                        but it doesn't seem like I can do that." He could — three clicks stores three
-                        points — but NOTHING on the canvas said how to END the road, and the instinctive
-                        Esc THREW IT AWAY. So the last placed point now carries a real Done button
-                        (and the hint names the two keyboard ways out). Takes pointer events; sits on
-                        the last point so the mouse is already there. */}
-                    {draftRoadPts.length >= 2 && (() => {
-                      const c = f2p(draftRoadPts[draftRoadPts.length - 1]);
-                      return (
-                        <g data-testid="road-draft-finish" pointerEvents="all" style={{ cursor: "pointer" }}
-                           onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); }}
-                           onClick={(e) => { e.stopPropagation(); finishRoad(); }}>
-                          <title>Finish this road (or press Enter). Esc throws the draft away; Backspace removes the last point.</title>
-                          <rect x={c.x + 12} y={c.y - 11} width={58} height={22} rx={11} fill={PAL.accent} stroke={PAL.paper} strokeWidth={1.5} />
-                          <text x={c.x + 41} y={c.y + 4} textAnchor="middle" fontSize="11" fontWeight="800" fill={PAL.paper}>✓ Done</text>
-                          <text x={c.x + 41} y={c.y + 26} textAnchor="middle" fontSize="10" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="600">or press Enter</text>
-                        </g>
-                      );
-                    })()}
+                    {/* B750096 — the ✓ Done control used to live HERE, glued to the last placed vertex
+                        with pointerEvents:all, which put a real click target exactly where the next
+                        road point gets placed (owner: "it kinda gets in the way of placing the road").
+                        It now renders as a quiet bottom-center status strip OUTSIDE the canvas — see
+                        the `road-draft-status` block below the <svg>. Nothing in this draft preview
+                        takes pointer events any more. */}
                   </g>
                 );
               })()}
@@ -22228,6 +22223,46 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {stdToast.onUndo && (
               <button data-testid="standards-apply-undo" onClick={stdToast.onUndo} style={{ border: "none", background: SURF_RAISED, color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}>Undo</button>
               )}
+            </div>
+          )}
+
+          {/* B750096 — the road-draft "finish" affordance, moved OUT of the canvas.
+              Owner: "there's a banner for when I am placing a road, but it kinda gets in the way of
+              placing the road... if we're gonna do a banner, I feel like it should be at the bottom,
+              like, bottom center, and not super in your face." Measured live: the old in-canvas chip
+              sat pointerEvents:all glued to the last placed vertex, so a road point placed near the
+              last one could land on Done and end the road instead of extending it — and the pill
+              overlapped its own dimension text. Audited every other multi-point draw tool (paving/
+              parking/sidewalk/building all use draftElPoly or draftRect — close on click-near-first-
+              point or Enter/double-click, no in-canvas click target; the parcel tool, the parcel-edge
+              easement mode and multi-select-merge already use this exact quiet bottom/top banner
+              pattern; Measure has no chip at all) — the road tool was the ONLY offender.
+              PLACEMENT: bottom-CENTER, fixed to the canvas pane, stacked clear of the scale bar /
+              north arrow / calibration badge by the SAME canvasPillBottom the Standards toast above
+              uses — so it joins the B748960 collision-aware furniture set instead of floating free.
+              Quiet on purpose: muted dark chip, single line, small type — not the loud accent pill it
+              was. Enter/Esc/Backspace are unchanged; Esc/Backspace stay in the title tooltip since
+              Done/Enter is the only thing that was ever undiscoverable (B1014). */}
+          {tool === "road" && draftRoadPts && draftRoadPts.length >= 2 && (
+            <div data-testid="road-draft-status" title="Esc throws the draft away; Backspace removes the last point."
+              onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}
+              style={{
+                // zIndex above the generic transient-toast tier (toastPill, 2500) — e.g. the
+                // "Branching a road…" hint that can still be showing at this exact bottom-center
+                // spot when a branch draft reaches 2 points. Discovered live: elementFromPoint at
+                // the Done button's center resolved to that toast, not the button, so the click
+                // never reached finishRoad. This is the one real click target in the draw surface
+                // and must never lose a hit-test to a passive message.
+                position: "absolute", left: "50%", transform: "translateX(-50%)", zIndex: 2600,
+                bottom: canvasPillBottom({ northH: furnPlates.north.plateH, scaleBarH: furnPlates.scaleBar.plateH, calibBottom: calibrationState ? calibPlace.bottom : null, row: FURNITURE_ROW }),
+                background: "rgba(25,22,19,0.85)", color: "rgba(255,255,255,0.92)",
+                padding: "5px 7px 5px 13px", borderRadius: 99, fontSize: 11.5, fontWeight: 500,
+                boxShadow: "0 4px 14px rgba(0,0,0,0.22)", display: "flex", gap: 9, alignItems: "center",
+                whiteSpace: "nowrap",
+              }}>
+              <button data-testid="road-draft-finish" onClick={(e) => { e.stopPropagation(); finishRoad(); }}
+                style={{ border: "none", background: "rgba(255,255,255,0.16)", color: "#fff", borderRadius: 7, padding: "4px 11px", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 700 }}>✓ Done</button>
+              <span>or press Enter</span>
             </div>
           )}
 

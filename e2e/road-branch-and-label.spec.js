@@ -62,7 +62,7 @@ test.describe("NEW-8 — branch a road off another with a right-click", () => {
     await page.mouse.click(to.x, to.y);
     const done = page.getByTestId("road-draft-finish");
     await expect(done).toBeVisible();
-    await done.locator("rect").click({ force: true });
+    await done.click({ force: true });
 
     await expect.poll(async () => (await roads(page)).length, { timeout: 10_000 }).toBe(before.length + 1);
     const fresh = (await roads(page)).find((r) => !before.some((b) => b.id === r.id));

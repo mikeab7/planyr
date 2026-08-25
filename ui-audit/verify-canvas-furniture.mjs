@@ -23,6 +23,13 @@
  *  PART C — "Go", "+ Select parcels" and "+ Comp" now carry a `title`, matching every other
  *  control on that bar.
  *
+ *  PART A also covers B750096 — the road tool's "Done"/finish control used to live INSIDE the
+ *  canvas SVG, glued to the last placed vertex with pointer-events:all (a real click target
+ *  sitting where the next point gets placed). It now renders as `[data-testid="road-draft-
+ *  status"]`, a quiet bottom-center strip fixed to the pane, stacked clear of the furniture by
+ *  the SAME canvasPillBottom the Standards toast uses — so it must join this collision-aware set
+ *  rather than float free, at every width, narrow FAB row included.
+ *
  * Real hit tests (`elementFromPoint`), not bounding-box math alone — a clipped/overflow-hidden
  * box can still report an overlapping LAYOUT rect while painting/hit-testing nothing there.
  *
@@ -61,7 +68,7 @@ try {
   const WIDTHS = [1440, 1024, 900, 750, 600, 420];
 
   // ─────────────────────────────────────────── PART A — Site Planner canvas furniture
-  console.log("\nPART A — Site Planner canvas furniture (north arrow · scale bar · calibration badge · coordinate chip · Properties/Tools FABs)");
+  console.log("\nPART A — Site Planner canvas furniture (north arrow · scale bar · calibration badge · coordinate chip · Properties/Tools FABs · road-draft status strip)");
   const PARCEL = [{ x: 0, y: 0 }, { x: 800, y: 0 }, { x: 800, y: 600 }, { x: 0, y: 600 }];
   const site = { s_furn: { id: "s_furn", groupId: "s_furn", site: "Furniture Verify", name: "Plan 1", status: "active", origin: { lat: 29.80, lon: -95.83 }, county: "harris", parcels: [{ id: "pA", points: PARCEL, locked: true }], els: [], measures: [], callouts: [], markups: [], deletedIds: [], settings: {}, underlay: null, updatedAt: 1755000000000 } };
   const seedSite = `(() => { try { localStorage.setItem('planarfit:sites:v1', JSON.stringify(${JSON.stringify(site)})); localStorage.setItem('planarfit:currentSite:v1', 's_furn'); } catch (e) {} })();`;
@@ -117,6 +124,51 @@ try {
     // pairwise: badge never overlaps the scale bar or the north arrow, at any width
     check(`${width}px · badge does not overlap the scale bar`, overlapArea(data.badge, data.scaleBar) === 0, `overlap=${overlapArea(data.badge, data.scaleBar).toFixed(0)}px²`);
     check(`${width}px · badge does not overlap the north arrow`, overlapArea(data.badge, data.north) === 0, `overlap=${overlapArea(data.badge, data.north).toFixed(0)}px²`);
+
+    // B750096 — the road-draft "finish" status strip (bottom-center, replaces the old in-canvas
+    // click-swallowing chip) must join this SAME collision-aware furniture set: assert it never
+    // overlaps the north arrow / scale bar / calibration badge / Tools FAB, at every width, and
+    // that its Done button is actually hit-testable (not painted-over by anything).
+    if (data.narrow && data.toolsFab) {
+      await page.getByRole("button", { name: "✎ Tools" }).click().catch(() => {});
+      await pacedWait(page, 300);
+    }
+    const roadBtn = page.getByRole("button", { name: "Road", exact: true });
+    if (await roadBtn.count().catch(() => 0)) {
+      await roadBtn.click().catch(() => {});
+      await pacedWait(page, 200);
+      if (svgBox) {
+        await page.mouse.click(svgBox.x + svgBox.width * 0.35, svgBox.y + svgBox.height * 0.4);
+        await pacedWait(page, 150);
+        await page.mouse.click(svgBox.x + svgBox.width * 0.55, svgBox.y + svgBox.height * 0.55);
+        await pacedWait(page, 300);
+      }
+      const strip = page.locator('[data-testid="road-draft-status"]');
+      const stripVisible = await strip.isVisible().catch(() => false);
+      check(`${width}px · road-draft status strip renders while drawing a road`, stripVisible);
+      if (stripVisible) {
+        const stripBox = await strip.boundingBox().catch(() => null);
+        const sr = stripBox ? { l: stripBox.x, t: stripBox.y, r: stripBox.x + stripBox.width, b: stripBox.y + stripBox.height } : null;
+        check(`${width}px · status strip does not overlap the north arrow`, overlapArea(sr, data.north) === 0, `overlap=${overlapArea(sr, data.north).toFixed(0)}px²`);
+        check(`${width}px · status strip does not overlap the scale bar`, overlapArea(sr, data.scaleBar) === 0, `overlap=${overlapArea(sr, data.scaleBar).toFixed(0)}px²`);
+        check(`${width}px · status strip does not overlap the calibration badge`, overlapArea(sr, data.badge) === 0, `overlap=${overlapArea(sr, data.badge).toFixed(0)}px²`);
+        if (data.narrow && data.toolsFab) {
+          check(`${width}px · status strip does not overlap the Tools FAB`, overlapArea(sr, data.toolsFab) === 0, `overlap=${overlapArea(sr, data.toolsFab).toFixed(0)}px²`);
+        }
+        // real hit test — the Done button must actually be reachable, not covered by anything
+        // (the SAME class of check the FOREGROUND-OR-VOID / chrome-swallows-press family use —
+        // a layout rect proves nothing about what actually paints/hit-tests at that point).
+        const doneBox = await page.locator('[data-testid="road-draft-finish"]').boundingBox().catch(() => null);
+        if (doneBox) {
+          const dcx = doneBox.x + doneBox.width / 2, dcy = doneBox.y + doneBox.height / 2;
+          const reaches = await hitReaches(page, dcx, dcy, '[data-testid="road-draft-finish"]');
+          check(`${width}px · the Done button is actually clickable (not covered)`, reaches);
+        }
+      }
+      await page.keyboard.press("Escape").catch(() => {});
+    } else {
+      check(`${width}px · Road tool reachable to verify the draft status strip`, false, "Road tool button not found");
+    }
 
     if (SHOTS) await page.screenshot({ path: `${OUT}/planner-w${width}.png` });
     await ctx.close();
