@@ -212,19 +212,34 @@ const Z_LAYER = { road: 0, paving: 1, sidewalk: 1, landscape: 1, pond: 2, parkin
  *   (b) FORCING WORKS. `bandForce: "front"` lifts THAT ONE element out of its type band into a band
  *       above every type band, where it draws over everything — including a building.
  *
+ * ⛔ NEW-1 (B548822) — AND THE MISSING MIRROR: `bandForce: "back"`, a band BELOW every type band
+ * (including "road", the lowest). The owner's stack-picker report (Richfield, `smsdrvzr9gzx`) is the
+ * case this closes: road `e1454053brxkkr` (z=65,536) sits geometrically inside pond `e1454052brxkkr`
+ * (z=-1024) and could not be grabbed, because the TYPE-BAND rule — not the raw z — decides who wins
+ * the hit test, and `road → paving → pond → parking → building` puts the pond over the road no
+ * matter what either element's `z` says. Sending the pond to back did nothing, because ordinary
+ * Arrange only reorders within a band and both were already as low in their OWN bands as they could
+ * go. Before this there was a way to lift a buried element UP ("Force on top of everything") but no
+ * way to push the element COVERING it back DOWN — the owner's exact words: *"a 'force on top'
+ * affordance exists; there is no 'force underneath'."* `back` is that mirror, resolved by the same
+ * `zOrder` function and reversible the same way.
+ *
  * ⛔ THE MECHANISM IS DELIBERATELY BORROWED, NOT INVENTED. It is `overlayOrder.js`'s reference-band
  * model (`aboveParcel`) and the markup / callout / measurement `behindEls` flag, in the one shape
- * all three already share: a DEFAULT band, ONE explicitly-chosen band on the far side of the plan,
- * and ordinary front/back ordering INSIDE whichever band the object is in. Because the override is
- * resolved HERE — inside `zOrder`, the single function every band question in the planner already
- * asks (the `byZ` render sort, the `drawElsZ` split, `arrangeSel`'s peer set, `arrangePeers`, the
- * element right-click menu) — there is no second stacking mechanism to keep in sync, and a forced
- * element automatically gets its own Arrange peer group for free.
+ * all three already share: a DEFAULT band, ONE (now two, symmetric) explicitly-chosen band on the
+ * far side of the plan, and ordinary front/back ordering INSIDE whichever band the object is in.
+ * Because the override is resolved HERE — inside `zOrder`, the single function every band question
+ * in the planner already asks (the `byZ` render sort, the `drawElsZ` split, `arrangeSel`'s peer set,
+ * `arrangePeers`, the element right-click menu) — there is no second stacking mechanism to keep in
+ * sync, and a forced element automatically gets its own Arrange peer group for free. `drawElsZ`
+ * needs no change either: it splits on a plain `zOrder(el) < BUILDING_Z` threshold and sorts
+ * ascending, so `back`'s −100 falls into the "below" half and sorts first there — bottom of the
+ * whole drawing — for free, exactly as `front`'s 100 already falls into "above" and sorts last.
  *
  * A `bandForce` value that is not a known band is IGNORED (the element keeps its type layer) rather
  * than defaulting to some other band: an unreadable override must never silently move a building.
  */
-export const EL_BANDS = { front: 100 };
+export const EL_BANDS = { front: 100, back: -100 };
 export const bandForceOf = (el) => {
   const v = el && el.bandForce;
   return typeof v === "string" && Object.prototype.hasOwnProperty.call(EL_BANDS, v) ? v : null;

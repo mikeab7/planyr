@@ -24,6 +24,7 @@ import { fileURLToPath } from "node:url";
 import {
   FEATURE_KINDS, parseFeatureKey, resolveDoubleClickTarget, pressIsOverElementBody,
   stackEntries, gestureAnchorTarget, FEATURE_ATTR, HANDLE_ATTR, EL_DIM_ATTR, CHROME_ATTR,
+  stackAtPoint, nextPickIndex, PICK_SAME_POINT_PX,
 } from "../src/workspaces/site-planner/lib/featureTarget.js";
 import { DBLTAP_MS, DBLTAP_PX } from "../src/workspaces/site-planner/lib/doubleTap.js";
 
@@ -394,9 +395,10 @@ describe("source guard — the render must keep stamping what the resolver reads
     expect(SP).toMatch(/onPointerDownCapture=\{\(e\) => \{ notePress\(e\);/);
     expect(SP).toMatch(/lastPressRef\.current = \{ t: tapTime\(e\), x: e\.clientX, y: e\.clientY \}/);
     /* …and UNCONDITIONALLY. It shares the capture handler with the vertex-drag hook, which bails
-     * during a 2-finger pinch; a press swallowed mid-pinch is still a press, and gating the stamp
-     * behind that guard would leave the anchor holding stale coordinates. */
-    expect(SP).toMatch(/onPointerDownCapture=\{\(e\) => \{ notePress\(e\); if \(touchCountRef\.current < 2\)/);
+     * during a 2-finger pinch, and (B548822) the stack picker, which bails on anything but a plain
+     * Alt+click; a press swallowed by either is still a press, and gating the stamp behind them
+     * would leave the anchor holding stale coordinates. `notePress(e)` must be the FIRST statement. */
+    expect(SP).toMatch(/onPointerDownCapture=\{\(e\) => \{ notePress\(e\); if \(handleStackPick\(e\)\) return; if \(touchCountRef\.current < 2\)/);
   });
 
   /* ⛔ NEW-1 — CHROME-NEVER-EATS-A-PRESS, instance five, and the reason it is TWO guards: the
@@ -508,5 +510,93 @@ describe("NEW-3 — a right-click resolves the same way a double-click does", ()
       .toMatch(/setParcelMenu\(\{ x: e\.clientX, y: e\.clientY, id, fromChip: true \}\)/);
     expect(block, "…and the forward must exclude the badge's own parcel, or it recurses into itself")
       .toMatch(/under\.kind === "parcel" && under\.id === id/);
+  });
+});
+
+/* B548822 — THE STACK PICKER. A fake DOM node exposing only `.closest()` (the one method
+ * `stackEntries` calls) is enough to drive `stackAtPoint` without a browser — real traversal is the
+ * browser's job, not this module's. */
+const node = (feature, { handle = false } = {}) => ({
+  closest: (sel) => {
+    if (sel === `[${FEATURE_ATTR}]`) return feature ? { getAttribute: () => feature } : null;
+    if (sel === `[${HANDLE_ATTR}], [${CHROME_ATTR}]`) return handle ? {} : null;
+    return null;
+  },
+});
+
+describe("stackAtPoint — every feature under a point, top-most first, deduped", () => {
+  it("a dense stack resolves in paint order with duplicates (multi-node features) collapsed", () => {
+    // A road painted as two nodes (body + dimension chrome) sits on a pond, which sits on a parcel.
+    const nodes = [node("el:road1"), node("el:road1"), node("el:pond1"), node("parcel:p1")];
+    expect(stackAtPoint(nodes).map((f) => f.key)).toEqual(["el:road1", "el:pond1", "parcel:p1"]);
+  });
+
+  it("a handle on top is transparent — the same rule resolveDoubleClickTarget uses", () => {
+    const nodes = [node(null, { handle: true }), node("el:pond1")];
+    expect(stackAtPoint(nodes).map((f) => f.key)).toEqual(["el:pond1"]);
+  });
+
+  it("no feature under the point is an empty stack, not a crash", () => {
+    expect(stackAtPoint([node(null), node(null)])).toEqual([]);
+    expect(stackAtPoint([])).toEqual([]);
+  });
+
+  it("targets resolve to the exact shape `sel` already uses (id-keyed and index-keyed alike)", () => {
+    const [el, measure] = stackAtPoint([node("el:e9"), node("measure:2")]);
+    expect(el.target).toEqual({ kind: "el", id: "e9" });
+    expect(measure.target).toEqual({ kind: "measure", i: 2 });
+  });
+});
+
+describe("nextPickIndex — Alt+click cycles deeper only at the SAME point", () => {
+  it("the first Alt+click at a point always starts at the top", () => {
+    expect(nextPickIndex(null, { x: 100, y: 100 }, 3)).toBe(0);
+  });
+
+  it("Alt+click again at the same point steps one deeper", () => {
+    expect(nextPickIndex({ x: 100, y: 100, index: 0 }, { x: 100, y: 100 }, 3)).toBe(1);
+    expect(nextPickIndex({ x: 100, y: 100, index: 1 }, { x: 100, y: 100 }, 3)).toBe(2);
+  });
+
+  it("cycling past the bottom wraps back to the top — the picker never dead-ends", () => {
+    expect(nextPickIndex({ x: 100, y: 100, index: 2 }, { x: 100, y: 100 }, 3)).toBe(0);
+  });
+
+  it("a click at a DIFFERENT point resets to the top, even mid-cycle", () => {
+    expect(nextPickIndex({ x: 100, y: 100, index: 1 }, { x: 400, y: 400 }, 3)).toBe(0);
+  });
+
+  it("small pointer wobble within the tolerance still counts as the same point", () => {
+    expect(nextPickIndex({ x: 100, y: 100, index: 0 }, { x: 100 + PICK_SAME_POINT_PX, y: 100 }, 2)).toBe(1);
+  });
+
+  it("just past the tolerance is a different point", () => {
+    expect(nextPickIndex({ x: 100, y: 100, index: 0 }, { x: 100 + PICK_SAME_POINT_PX + 1, y: 100 }, 2)).toBe(0);
+  });
+
+  it("an empty stack always answers 0 rather than dividing by zero", () => {
+    expect(nextPickIndex({ x: 100, y: 100, index: 5 }, { x: 100, y: 100 }, 0)).toBe(0);
+  });
+
+  it("a stack that shrank under the cursor since the last pick still resolves in range", () => {
+    // Cycling had reached index 3 on a 5-deep stack; the stack is now only 2 deep (something moved).
+    expect(nextPickIndex({ x: 100, y: 100, index: 3 }, { x: 100, y: 100 }, 2)).toBeLessThan(2);
+  });
+});
+
+describe("the picker is wired into the canvas's own capture-phase press handler", () => {
+  const SP = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+
+  it("handleStackPick runs before the vertex-edit capture logic, and can short-circuit it", () => {
+    expect(SP, "the picker must be wired into the SAME capture handler as the double-click anchor's notePress")
+      .toMatch(/onPointerDownCapture=\{\(e\) => \{ notePress\(e\); if \(handleStackPick\(e\)\) return; if \(touchCountRef\.current < 2\) onCanvasVtxDownCapture\(e\); \}\}/);
+  });
+
+  it("the picker only engages on plain Alt+click in the select tool, never stealing another modifier's gesture", () => {
+    const at = SP.indexOf("const handleStackPick = ");
+    expect(at).toBeGreaterThan(-1);
+    const body = SP.slice(at, at + 1400);
+    expect(body).toMatch(/if \(!e\.altKey \|\| e\.shiftKey \|\| e\.ctrlKey \|\| e\.metaKey\) return false;/);
+    expect(body).toMatch(/if \(tool !== "select" \|\| e\.button !== 0\) return false;/);
   });
 });

@@ -43,7 +43,18 @@ export function ParcelRecord({ parcel, PAL, border, surface, onField, chip, onSe
         defaultValue={parcel[f.key] || ""} placeholder={f.placeholder}
         key={`${parcel.id}:${f.key}:${parcel[f.key] || ""}`}
         data-testid={`parcel-field-${f.key}`}
-        onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") { e.currentTarget.value = parcel[f.key] || ""; e.currentTarget.blur(); } }}
+        onKeyDown={(e) => {
+          /* B548821 — stop only the two keys this field actually consumes. A blanket
+             stopPropagation kept every OTHER key (Ctrl+Z above all) from ever reaching the
+             planner's window listener while this field had focus, which is a SECOND, undocumented
+             keyboard router living outside shared/keyboard/keyScope.js — the one place this app
+             decides who owns the keyboard. keyScope's FIELD scope already refuses every
+             plan-mutating shortcut while this input is genuinely focused, so nothing here needs
+             its own copy of that rule; it only needs to keep Enter/Escape from also being read as
+             a canvas shortcut. */
+          if (e.key === "Enter") { e.stopPropagation(); e.currentTarget.blur(); }
+          else if (e.key === "Escape") { e.stopPropagation(); e.currentTarget.value = parcel[f.key] || ""; e.currentTarget.blur(); }
+        }}
         onBlur={(e) => onField(parcel.id, f.key, e.target.value)}
         style={input} />
     </label>
@@ -71,7 +82,11 @@ export function ParcelRecord({ parcel, PAL, border, surface, onField, chip, onSe
           key={`${parcel.id}:statedAcres:${parcel.statedAcres ?? ""}`}
           placeholder="e.g. 12.50 — what the deed or county calls it"
           data-testid="parcel-field-statedAcres"
-          onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") { e.currentTarget.value = parcel.statedAcres != null ? String(parcel.statedAcres) : ""; e.currentTarget.blur(); } }}
+          onKeyDown={(e) => {
+            // B548821 — scoped stop, see the field() helper above for why.
+            if (e.key === "Enter") { e.stopPropagation(); e.currentTarget.blur(); }
+            else if (e.key === "Escape") { e.stopPropagation(); e.currentTarget.value = parcel.statedAcres != null ? String(parcel.statedAcres) : ""; e.currentTarget.blur(); }
+          }}
           onBlur={(e) => onField(parcel.id, "statedAcres", e.target.value)}
           style={input} />
       </label>
