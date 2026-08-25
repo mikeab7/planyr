@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-23 @ `5824972d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-25 @ `0aaec258` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_552 source files mapped._
+_553 source files mapped._
 
 ## infra
 
@@ -809,6 +809,8 @@ _552 source files mapped._
   - _exports_: `DEFAULT_ORIFICE_C`, `DEFAULT_WEIR_C`, `defaultOutletForPond`, `orificeAreaSf`, `OUTLET_KINDS`, `outletDischarge`, `outletLowestElev`, `outletProblems`, `sizeOrificeForRelease`, `sizeWeirForRelease`, `stageDischarge`
 - **`src/workspaces/site-planner/lib/overlayAlign.js`** — Pure overlay alignment math: image-point-to-world, scale-about-a-point, 2-point and least-squares Procrustes similarity transforms (scale+rotate+translate) with RMS residual
   - _exports_: `alignOverlaySimilarity`, `applySimilarityToOverlay`, `calibrateUnderlayScale`, `imagePointToWorld`, `scaleOverlayAbout`, `similarityTransform`, `solveSimilarityLSQ`
+- **`src/workspaces/site-planner/lib/overlayCrop.js`** — Pure non-destructive crop geometry for a placed site-plan overlay (B712595): clamp/normalize a crop rect to the sparse "no key = full image" convention, the SVG clipPath screen rect, and the panel's feet-based edge-trim fields
+  - _exports_: `clampCropRect`, `cropClipRectScreen`, `cropFromTrimFeet`, `cropTrimFeet`, `effectiveCropRect`, `hasCrop`, `isFullCrop`, `MIN_CROP_PX`, `normalizeCrop`
 - **`src/workspaces/site-planner/lib/overlayOrder.js`** — Pure draw-order model for placed map references (NEW-2): the two-band below/above-the-plan split, the band-grouped array that IS the draw order, the panel's front-first listing, and the identity-on-no-op reorder / promote mutators
   - _exports_: `OVERLAY_BAND_ABOVE`, `OVERLAY_BAND_BELOW`, `overlayBand`, `overlayBandsGrouped`, `overlayDrawOrder`, `overlayOrderFlags`, `overlayPanelOrder`, `reorderOverlays`, `setOverlayBand`, `splitOverlayBands`
 - **`src/workspaces/site-planner/lib/overlayPdf.js`** — Site-plan overlay rasterizer: lazily reuses Doc Review PDF.js to render a dropped PDF/image page to a white-knockout PNG data URL, reads its scale note, classifies sheet size, rebuilds from stored bytes
