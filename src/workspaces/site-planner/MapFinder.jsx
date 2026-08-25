@@ -63,6 +63,8 @@ import { statusToken, darken } from "../../shared/ui/statusTokens.js";
 const sharingLib = () => import("./lib/sharing.js");
 import { listMyTeams, currentIdentity } from "./lib/teams.js";
 import { adminBoundariesVisible, attachAdminBoundaries } from "./lib/adminBoundaryGate.js";
+import { compHeadline } from "../../shared/comps/lib/comps.js";
+import { compMarkerSvg, compMarkerSize } from "../../shared/comps/lib/compMarkerIcon.js";
 
 // Theme tokens (var(--…)) — MapFinder is DOM/inline-style only, so CSS vars resolve
 // and the panel themes live with no re-render. (B318)
@@ -284,7 +286,7 @@ const ShareGlyph = ({ size = 13 }) => (
   </svg>
 );
 
-export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip, onViewCenter }) {
+export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip, onViewCenter, comps = [], onPlaceComp, onCompClick }) {
   const elRef = useRef(null);
   const mapRef = useRef(null);
   const addrTokRef = useRef(0); // B545: address-search generation — a newer search invalidates an older in-flight one
@@ -297,8 +299,14 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
      ones over the same ground; the non-owner keys are aliases and must never remove the layer. */
   const displaySrcRef = useRef({});
   const sitesLayerRef = useRef(null); // saved-site footprints
+  const compsLayerRef = useRef(null); // leasing-comp markers (NEW-COMPS)
+  const onCompClickRef = useRef(onCompClick);
+  useEffect(() => { onCompClickRef.current = onCompClick; }, [onCompClick]);
   const pressedRef = useRef(false);        // a pointer is currently down on the map (B64)
   const pendingRebuildRef = useRef(null);  // a saved-site rebuild deferred until pointer-up (B64)
+  const pendingCompsRebuildRef = useRef(null); // ditto, but its OWN slot — sharing pendingRebuildRef
+  // would let a comps rebuild deferred in the same press silently clobber a pending sites one (or
+  // the reverse), since that ref only ever holds one function.
   /* NEW-1 — the derived landing view is where the map OPENS, never a leash on the user.
    * `landedRef` latches once a view derived from real sites has been applied; `userMovedRef`
    * latches the instant the user touches the map. Either one ends the landing behaviour for
@@ -322,6 +330,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const imageryRef = useRef(null);
   const labelsRef = useRef(null);
   const selectModeRef = useRef(false); // read by the once-bound map handlers
+  const placingCompPinRef = useRef(false); // NEW-COMPS: armed by "+ Comp", read by the once-bound click handler
   const selectedRef = useRef([]);
   const draggingRef = useRef(false);
   // NEW-2 — read live by the once-bound raster hover-identify handlers, so toggling a layer
@@ -349,6 +358,21 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const [basemap, setBasemap] = useState("esri");
   const [labels, setLabels] = useState(true);
   const [selectMode, setSelectMode] = useState(false); // off = pan only; on = add/remove parcels
+  // NEW-COMPS: armed by "+ Comp" — the next map click drops a leasing comp anchor there. A
+  // second, independent one-shot mode alongside `selectMode` (mutually exclusive in the UI,
+  // never both true at once) rather than folded into it, because it needs none of selectMode's
+  // parcel-identify machinery — just a raw point.
+  const [placingCompPin, setPlacingCompPin] = useState(false);
+  useEffect(() => { placingCompPinRef.current = placingCompPin; }, [placingCompPin]);
+  useEffect(() => {
+    if (!mapRef.current) return;
+    if (placingCompPin) mapRef.current.getContainer().style.cursor = ADD_CURSOR;
+    else if (!selectMode) mapRef.current.getContainer().style.cursor = "";
+    // selectMode's OWN cursor is owned by its own effect elsewhere in this file; this effect only
+    // needs to react to placingCompPin toggling, reading selectMode's current value to avoid
+    // stomping on that other effect's cursor when comp-placing mode turns off.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placingCompPin]);
   const [zoom, setZoom] = useState(null);
   // (B167) The idle "Drag to move the map" first-run bubble was removed entirely per owner
   // request — the map loads with no instructional overlay. Only the contextual selection
@@ -675,7 +699,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     });
     map.on("locationerror", (e) => { stopLocating(); setErr(locateErrorMessage(e && e.code)); });
     setZoom(map.getZoom());
-    const onClick = (e) => { if (selectModeRef.current) handleClick(e.latlng); };
+    const onClick = (e) => {
+      if (placingCompPinRef.current) { placeCompPinAtRef.current(e.latlng); return; }
+      if (selectModeRef.current) handleClick(e.latlng);
+    };
     const onZoom = () => setZoom(map.getZoom());
     // Resolve the Layers-panel jurisdiction from the map's current area (B13): pick the
     // county whose extent covers the view centre, so utility overlays are right outside
@@ -769,6 +796,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     const onRelease = () => {
       pressedRef.current = false;
       if (pendingRebuildRef.current) { const fn = pendingRebuildRef.current; pendingRebuildRef.current = null; setTimeout(fn, 0); }
+      if (pendingCompsRebuildRef.current) { const fn = pendingCompsRebuildRef.current; pendingCompsRebuildRef.current = null; setTimeout(fn, 0); }
     };
     containerEl.addEventListener("pointerdown", onPress);
     containerEl.addEventListener("pointerup", onRelease);
@@ -1014,7 +1042,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
      Deliberately keyed on `visible` (the map↔plan MODE flip) only — NOT `isActive` —
      so peeking at another module tab and coming back never wipes a parcel selection. */
   useEffect(() => {
-    if (visible) { clearHilites(); setSelected([]); setSelectMode(false); setParcelInfo(null); }
+    if (visible) { clearHilites(); setSelected([]); setSelectMode(false); setParcelInfo(null); setPlacingCompPin(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
@@ -1099,6 +1127,38 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     build();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sites, activeSiteId, selectMode, showPlans, statusFilter]);
+
+  // NEW-COMPS — leasing-comp markers: a sibling layer to the site-pin one above, deliberately
+  // simpler (always a flat point marker, no zoom-dependent footprint rendering — a comp has no
+  // drawn plan). Every comp the viewer can see (own + team's, regardless of project) is a
+  // candidate here; the layer doesn't filter by activeSiteId or the status chips, since a comp
+  // has neither. Same "skip while a press is in flight" deferral as the sites layer, so a
+  // rebuild landing mid-gesture can't swallow a click the same way.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const build = () => {
+      if (!mapRef.current) return;
+      if (compsLayerRef.current) { map.removeLayer(compsLayerRef.current); compsLayerRef.current = null; }
+      const group = L.layerGroup();
+      comps.forEach((c) => {
+        if (!c?.anchor || typeof c.anchor.lat !== "number" || typeof c.anchor.lon !== "number") return;
+        const { size, anchor } = compMarkerSize(false);
+        const icon = L.divIcon({ className: "", html: compMarkerSvg(c.compType), iconSize: size, iconAnchor: anchor });
+        const marker = L.marker([c.anchor.lat, c.anchor.lon], { icon, interactive: !selectMode && !placingCompPin, keyboard: false, riseOnHover: true });
+        const tip = `${c.title || compHeadline(c)} · ${c.compDate || ""}`;
+        if (!selectMode && !placingCompPin) {
+          marker.on("click", () => onCompClickRef.current && onCompClickRef.current(c.id)).bindTooltip(tip, { direction: "top" });
+        }
+        marker.addTo(group);
+      });
+      group.addTo(map);
+      compsLayerRef.current = group;
+    };
+    if (pressedRef.current) { pendingCompsRebuildRef.current = build; return; }
+    build();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [comps, selectMode, placingCompPin]);
 
   const flyToSite = (site) => {
     if (site.origin && mapRef.current) mapRef.current.flyTo([site.origin.lat, site.origin.lon], 17, { duration: 0.7 });
@@ -1633,6 +1693,39 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
    *
    * The county is resolved best-effort on the same 3s race `planSelected` uses — it is a nicety
    * (the planner re-resolves it from the origin on load), so an outage never blocks the fallback. */
+  // NEW-COMPS: drop a leasing comp pin at a raw clicked point — no parcel resolution needed,
+  // mirroring startBlankHere's best-effort county lookup below (same 3s race, same "don't block
+  // on an outage" shape) but handing off to `onPlaceComp` instead of creating a site.
+  const placeCompPinAt = async (latlng) => {
+    setPlacingCompPin(false);
+    let county = null;
+    try {
+      const ans = await Promise.race([
+        countyAtPoint(latlng.lng, latlng.lat),
+        new Promise((res) => setTimeout(() => res(null), 3000)),
+      ]);
+      county = ans?.name ? countyKeyForName(ans.name) : null;
+    } catch (_) { /* the comp still gets created without a county; non-critical metadata */ }
+    onPlaceComp && onPlaceComp({ kind: "pin", lat: latlng.lat, lon: latlng.lng, county });
+  };
+  const placeCompPinAtRef = useRef(placeCompPinAt);
+  useEffect(() => { placeCompPinAtRef.current = placeCompPinAt; });
+
+  // NEW-COMPS: anchor a comp to the currently-selected real parcel (selectMode's own selection),
+  // instead of planning a new site with it. `selected` items already carry lon/lat `rings`
+  // (MapFinder.jsx:424) — reused as-is for the map snapshot geometry, no re-derivation.
+  const placeCompOnSelectedParcel = () => {
+    if (!asm || !selected.length) return;
+    const last = selected[selected.length - 1];
+    onPlaceComp && onPlaceComp({
+      kind: "parcel", lat: asm.origin.lat, lon: asm.origin.lon,
+      county: last?.county || null,
+      parcelApn: last?.acct || null,
+      parcelGeom: last?.rings?.length ? { type: "Polygon", coordinates: last.rings } : null,
+    });
+    clearSel();
+  };
+
   const startBlankHere = async (at) => {
     const c = at || (mapRef.current ? mapRef.current.getCenter() : null);
     if (!c) { onSkip && onSkip(); return; }
@@ -1834,7 +1927,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           <span style={{ width: 1, height: 22, background: PAL.chromeLine, flex: "none", margin: "0 8px" }} />
 
           {/* Right section — state-dependent */}
-          {!selectMode && selected.length === 0 && (
+          {!selectMode && !placingCompPin && selected.length === 0 && (
             <button
               onClick={() => setSelectMode(true)}
               style={{
@@ -1847,6 +1940,41 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             >
               ＋ Select parcels
             </button>
+          )}
+          {/* NEW-COMPS — a comp anchors by pin OR a real parcel (the "+ Select parcels" flow
+              above gains a "Comp here" action once something is selected); this button is the
+              PIN half. Only offered when the host wired a place-comp callback. */}
+          {!selectMode && !placingCompPin && selected.length === 0 && onPlaceComp && (
+            <button
+              onClick={() => setPlacingCompPin(true)}
+              style={{
+                flex: "none", display: "flex", alignItems: "center", gap: 5,
+                height: 30, padding: "0 11px", borderRadius: nestedIn(RADIUS.pill),
+                border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
+                color: PAL.chromeInk, fontSize: 12.5, fontWeight: 600,
+                cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
+              }}
+            >
+              ＋ Comp
+            </button>
+          )}
+          {placingCompPin && (
+            <>
+              <span style={{ flex: "none", color: PAL.chromeMuted, fontSize: 12.5, padding: "0 6px", whiteSpace: "nowrap" }}>
+                Click the map to place a comp…
+              </span>
+              <button
+                onClick={() => setPlacingCompPin(false)}
+                style={{
+                  flex: "none", height: 30, padding: "0 10px", borderRadius: nestedIn(RADIUS.pill),
+                  border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
+                  color: PAL.chromeInk, fontSize: 12, fontWeight: 600,
+                  cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                Cancel
+              </button>
+            </>
           )}
           {selectMode && selected.length === 0 && (
             <>
@@ -1901,6 +2029,21 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               >
                 Plan {selected.length > 1 ? `${selected.length} parcels` : "site"} →
               </button>
+              {/* NEW-COMPS — the PARCEL half of comp anchoring: reuses the exact same parcel
+                  selection above rather than a second identify flow. */}
+              {onPlaceComp && selected.length === 1 && (
+                <button
+                  onClick={placeCompOnSelectedParcel}
+                  style={{
+                    flex: "none", height: 30, padding: "0 11px", borderRadius: nestedIn(RADIUS.pill),
+                    border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
+                    color: PAL.chromeInk, fontSize: 12, fontWeight: 600, cursor: "pointer",
+                    fontFamily: "inherit", whiteSpace: "nowrap",
+                  }}
+                >
+                  Comp here
+                </button>
+              )}
             </>
           )}
           <span style={{ width: 4 }} />

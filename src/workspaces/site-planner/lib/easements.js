@@ -22,6 +22,7 @@
 import { offsetPolyline, bufferPolyline } from "./metesAndBounds.js";
 // Ray-cast point-in-ring (even-odd) — used to choose which side of a parcel edge is "interior".
 import { pointInRing, ringArea } from "./ringMath.js";
+import { isHatchKey } from "../../../shared/style/hatchPatterns.js";
 
 /* The type catalog drives the attributes dropdown, the color-coding, and the label.
  * `short` is the human label suffix ("16′ Sanitary Sewer Esmt"); `color` is the
@@ -69,6 +70,94 @@ export function easementLabel(e) {
 
 // Shoelace area (absolute) of a ring of {x,y} — feet² when fed planner feet.
 export { ringArea };
+
+/* ---------------------------------------------------------------- appearance (NEW-EASE-STYLE)
+ *
+ * Before this, an easement carried NO appearance properties at all — its colour came
+ * entirely from `easementColor()` (the type catalog above) and its fill was a single
+ * hardcoded diagonal-hatch <pattern> per type, baked into SitePlanner.jsx. Owner request
+ * (verbatim): "I should really be able to modify easements, like the colors, fill, hatch."
+ *
+ * DESIGN DECISION 1 — per-type default, with a per-element override (not one or the
+ * other). This mirrors the precedent `planStyle.elStyle` already sets for elements
+ * (`el.fill ?? base.fill` — a built-in/type default an individual object can override):
+ * a plan set wants every pipeline easement to look alike by default (consistency across
+ * the drawing), and this gives that for free — but a specific easement can still be
+ * called out (a conflicting one, a particularly sensitive one) without breaking every
+ * other pipeline easement's look. `hasOverride` tells the caller whether an easement
+ * needs its OWN <pattern> (SitePlanner.jsx) or can share its type's.
+ *
+ * DESIGN DECISION 2 — status ("existing"/"proposed") already drives ONE visual today:
+ * SitePlanner.jsx dashes the outline when `status === "proposed"` (solid = existing).
+ * That is UNCHANGED by this work — it predates it and isn't part of the new fill/hatch
+ * model. Note for the record: several drafting offices use the OPPOSITE convention
+ * (existing = dashed/hidden-line, proposed = solid/definite), so this is a judgement
+ * call, not a universal standard. Left as-is here because flipping it would silently
+ * re-style all 26 production easements (today all `status:"existing"`, i.e. all solid)
+ * with no user action — a one-line change (`SitePlanner.jsx`, the `proposed` ternary on
+ * the easement polygon's `strokeDasharray`) if the owner wants it flipped.
+ *
+ * A future per-status-driven FILL change (independent of the dash) was considered and
+ * deliberately NOT added — status stays purely a dash cue, appearance stays purely
+ * type/override-driven, so the two questions ("what kind of easement" and "is it
+ * built yet") don't fight over the same visual channel.
+ */
+export const DEFAULT_EASE_FILL_OPACITY = 0.10; // matches the pre-existing hardcoded pattern wash
+export const DEFAULT_EASE_HATCH = "diagonal";  // matches the pre-existing hardcoded pattern
+
+/** Resolved appearance for one easement: type default (from `easeType`), with any
+ * per-element override winning. A plain easement — no fill/stroke/fillOpacity/hatch
+ * keys at all, the shape every easement in production is in today — resolves to
+ * exactly the historic hardcoded look, so shipping this changes nothing on screen
+ * until a user actually edits an easement's appearance. */
+export function easementStyle(e) {
+  const t = easementType(e && e.easeType);
+  const fill = (e && e.fill) || t.color;
+  const stroke = (e && e.stroke) || t.color;
+  const fillOpacity = (e && e.fillOpacity != null) ? e.fillOpacity : DEFAULT_EASE_FILL_OPACITY;
+  const hatch = (e && e.hatch != null && isHatchKey(e.hatch)) ? e.hatch : DEFAULT_EASE_HATCH;
+  const hasOverride = !!(e && (e.fill || e.stroke || e.fillOpacity != null || (e.hatch != null && e.hatch !== DEFAULT_EASE_HATCH)));
+  return { fill, stroke, fillOpacity, hatch, hasOverride };
+}
+
+/** The <pattern> id an easement's fill should reference: the shared per-TYPE pattern
+ * when unedited (so most easements draw from one shared <pattern>, not one each), or a
+ * per-element id once it carries any override. */
+export function easementPatternId(e) {
+  return easementStyle(e).hasOverride ? `pat-ease-el-${e.id}` : `pat-ease-${easementType(e && e.easeType).key}`;
+}
+
+/* DESIGN DECISION 3 — encumbrances (kind:"encumbrance", the metes-and-bounds deed/title
+ * tract objects — e.g. Grand Port's e1454610zupcbv/e1454611zupcbv) share this SAME
+ * appearance model. They already carry `fill`/`stroke`/`fillOpacity` fields (stamped at
+ * creation in SitePlanner.jsx's `buildEncumbranceMarkup`) but the renderer never read
+ * `fill`/`fillOpacity` — only `stroke`/`weight`/`dash` were live, so those two fields
+ * were dead data on every encumbrance ever drawn. There is no `easeType` catalog to key
+ * a per-type default off (a title encumbrance isn't a categorized utility easement), so
+ * `ENCUMBRANCE_DEFAULT` is the one fixed recipe every encumbrance falls back to — chosen
+ * to match the historic hand-authored `pat-encumber` pattern exactly (a purple hatch
+ * LINE with no background wash), so an untouched encumbrance still renders byte-for-byte
+ * as before. Wiring up the (previously inert) `fill`/`fillOpacity` fields does mean the
+ * two Grand Port encumbrances — which already carry non-default `fillOpacity` (0.14 /
+ * 0.10 for the except-hole) from creation — will now show a faint colour wash matching
+ * their own outline colour once this ships; that reads as the feature the stored data
+ * always implied and never got wired to, not a regression, but it IS a visible change on
+ * two live records and is called out here + in the backlog item for the owner to weigh. */
+export const ENCUMBRANCE_DEFAULT = { fill: "#7c3aed", stroke: "#7c3aed", fillOpacity: 0, hatch: "diagonal" };
+
+export function encumbranceStyle(e) {
+  const d = ENCUMBRANCE_DEFAULT;
+  const fill = (e && e.fill) || d.fill;
+  const stroke = (e && e.stroke) || d.stroke;
+  const fillOpacity = (e && e.fillOpacity != null) ? e.fillOpacity : d.fillOpacity;
+  const hatch = (e && e.hatch != null && isHatchKey(e.hatch)) ? e.hatch : d.hatch;
+  const hasOverride = !!(e && (e.fill || e.fillOpacity != null || (e.hatch != null && e.hatch !== d.hatch)));
+  return { fill, stroke, fillOpacity, hatch, hasOverride };
+}
+
+export function encumbrancePatternId(e) {
+  return encumbranceStyle(e).hasOverride ? `pat-encumber-el-${e.id}` : "pat-encumber";
+}
 
 /* Turn an easement's stored INPUT (mode + centerline/pts + width) into the closed
  * strip/boundary ring that gets drawn and area-counted. This is the single place

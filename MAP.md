@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-25 @ `0aaec25` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-25 @ `3c7f1fcf` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_554 source files mapped._
+_559 source files mapped._
 
 ## infra
 
@@ -202,6 +202,14 @@ _554 source files mapped._
   - _exports_: `casUpsert`, `interpretCas`, `interpretInsert`, `isMissingColumn`, `isMissingVersionColumn`, `keepaliveCasPush`
 - **`src/shared/cloud/serializeWrites.js`** — Per-key write serializer: makeWriteSerializer chains same-key cloud writes in order so a tab can't race itself into a false version conflict
   - _exports_: `makeWriteSerializer`
+- **`src/shared/comps/components/CompsPanel.jsx`** — Leasing Comps right-side panel (B711328): list/detail/create-edit for land, building-sale and lease comps; owner-only Edit/Delete, empty fields never render
+  - _exports_: `default (CompsPanel)`
+- **`src/shared/comps/lib/compMarkerIcon.js`** — Pure map-marker spec for a comp: a small colored tag (hue per comp type), deliberately a different silhouette from sitePinIcon
+  - _exports_: `compMarkerColor`, `compMarkerSize`, `compMarkerSvg`
+- **`src/shared/comps/lib/comps.js`** — Leasing Comps pure model: $/SF derivation for land/building sale, lease basis normalization (annual NNN default, NNN/gross never blended), compFieldRows (the one empty-field-hides choke point), anchor validation, row<->model mapping
+  - _exports_: `ANCHOR_KINDS`, `annualLeaseRate`, `buildingPricePerSf`, `COMP_TYPES`, `compFieldRows`, `compHeadline`, `compToRow`, `isCompType`, `landPricePerSf`, `landSizeSf`, `LEASE_EXPENSE_BASES`, `LEASE_PERIODS`, `rowToComp`, `summarizeLeaseComps`, `summarizeSaleComps`, `validAnchor`, `validateComp`
+- **`src/shared/comps/lib/compsStore.js`** — Supabase CRUD for public.comps (team-visible read, owner-only write); every call returns {data,error}, never swallows a failure
+  - _exports_: `deleteComp`, `fetchAllComps`, `insertComp`, `supabase`, `updateComp`
 - **`src/shared/coordinates/index.js`** — Shared EPSG:2278 Texas South Central project grid: unit helpers plus Lambert Conformal Conic projectToGrid/gridToProject validated against pyproj
   - _exports_: `FT_PER_M`, `ftToAcres`, `gridToProject`, `makePoint`, `metersToFeet`, `PROJECT_CRS`, `projectToGrid`, `SQFT_PER_ACRE`
 - **`src/shared/coordinates/scaleFactor.js`** — NEW-4 grid-vs-ground: per-zone grid scale factor × elevation factor = the site's combined factor (with what it is worth per mile), plus `detectSurveyFrame` — grid / ground / other-scale from corresponding survey↔grid distances. Reports the factor; deliberately never applies it
@@ -338,6 +346,8 @@ _554 source files mapped._
   - _exports_: `default (StoragePanel)`
 - **`src/shared/storage/storageReclaim.js`** — Free space by dropping ONLY data that declares a rehydration source (never a raster with no cloud copy); oldest-first localStorage eviction plus the reclaim-then-retry decision behind the device-save retry button
   - _exports_: `CACHE_CLEARED_EVENT`, `CACHE_IDB_PREFIX`, `reclaimableClasses`, `reclaimLocalStorage`, `reclaimMessage`, `reclaimRefetchable`, `reclaimThenRetry`, `unprovenReclaimables`
+- **`src/shared/style/hatchPatterns.js`** — pure hatch-pattern catalog (key → tile spec); shared appearance primitive, first wired to easement/encumbrance fills
+  - _exports_: `HATCH_OPTIONS`, `hatchSpec`, `isHatchKey`
 - **`src/shared/telemetry/clientErrors.js`** — Client error+event telemetry: window/rejection/preload sources insert into anon INSERT-only Supabase client_errors with dedup, rate/session caps, tab-id stamping, fail-safe
   - _exports_: `buildErrorRow`, `decideReport`, `DUP_MS`, `errorSignature`, `extractMessage`, `extractStack`, `installClientErrorTelemetry`, `lastTelemetrySend`, `networkReportSuppression`, `RATE_MAX`, `RATE_WINDOW_MS`, `reportClientError`, `reportClientEvent`, `SESSION_MAX`, `setTelemetryModule`, `SUPPRESSED_AUTOMATED`, `TAB_ID`, `telemetryDelivery`
 - **`src/shared/telemetry/gestureTelemetry.js`** — Pinch-gesture telemetry: sampled event:pinch rows (surface, touch/pointer source, finger count, completed/cancelled/anomaly, cancel reason) via reportClientEvent
@@ -626,7 +636,7 @@ _554 source files mapped._
 - **`src/workspaces/site-planner/lib/easementRules.js`** — Editable per-jurisdiction utility-easement width rules (placeholder, verify-flagged) persisted in localStorage with county default mapping
   - _exports_: `DEFAULT_EASEMENT_RULES`, `defaultJurForCounty`, `loadEasementRules`, `saveEasementRules`
 - **`src/workspaces/site-planner/lib/easements.js`** — Easement domain logic: type catalog, label, and derive drawn ring from centerline/boundary/parcel-edge input modes with area
-  - _exports_: `buildParcelEdgeStrip`, `DEFAULT_EASEMENT_ATTRS`, `deriveEasementRing`, `EASEMENT_TYPES`, `easementArea`, `easementColor`, `easementLabel`, `easementType`, `ringArea`
+  - _exports_: `buildParcelEdgeStrip`, `DEFAULT_EASE_FILL_OPACITY`, `DEFAULT_EASE_HATCH`, `DEFAULT_EASEMENT_ATTRS`, `deriveEasementRing`, `EASEMENT_TYPES`, `easementArea`, `easementColor`, `easementLabel`, `easementPatternId`, `easementStyle`, `easementType`, `ENCUMBRANCE_DEFAULT`, `encumbrancePatternId`, `encumbranceStyle`, `ringArea`
 - **`src/workspaces/site-planner/lib/ebfe.js`** — FEMA/USGS InFRM Estimated BFE (EBFE) point sampler (B882): reads the estimated 1% BFE (layer 17) + 0.2% WSE (layer 21) via ArcGIS MapServer /identify, per-location cache, bounded fetch. `sampleEbfePoint`/`foldIdentify`/`pixelValueOf`/`ebfeIdentifyUrl`.
   - _exports_: `clearEbfeCache`, `EBFE_LAYERS`, `EBFE_PIXEL_ATTRS`, `EBFE_URL`, `ebfeEndpoint`, `ebfeIdentifyUrl`, `foldIdentify`, `pixelValueOf`, `sampleEbfePoint`
 - **`src/workspaces/site-planner/lib/edgeConstrain.js`** — pure "start a measurement/line on a parcel boundary, then hold Shift to keep it perpendicular/parallel/45° to that boundary" helpers (the setback lock): project a click onto the nearest parcel edge and snap a drawn direction relative to that edge's angle

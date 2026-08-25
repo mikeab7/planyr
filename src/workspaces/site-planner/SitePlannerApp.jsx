@@ -8,6 +8,9 @@ import { onAuthChange } from "./lib/auth.js";
 import { claimInvites, listMyTeams } from "./lib/teams.js";
 import { primeShareContext, defaultShareTeam, resetShareContext, resolveNewPlanTeam } from "./lib/newProjectSharing.js";
 import { loadUserPrefs } from "./lib/userPrefs.js";
+// LOADED ON DEMAND, same reasoning as SiteReviewModal below: opens from a map-only button press,
+// so it has no business riding the planner's critical-path chunk.
+const CompsPanel = lazy(() => import("../../shared/comps/components/CompsPanel.jsx"));
 
 /* B326416 — the loaders the default-sharing resolution needs. Both modules are already on the
  * Site route's own tier (`SitePlanner.jsx` imports userPrefs statically), so these are plain
@@ -398,6 +401,17 @@ export default function App({
   const mapCenterRef = useRef(null);
   const newBlankSiteHere = () => newBlankSite(mapCenterRef.current ? { origin: mapCenterRef.current } : null);
 
+  // NEW-COMPS — Leasing Comps: a comp is its own entity (never a project type), so its state
+  // lives here rather than inside a site record. `comps` mirrors what CompsPanel has loaded, fed
+  // back up purely so MapFinder can render the same list as markers — CompsPanel remains the one
+  // data owner (fetch/insert/update/delete all live in its own module).
+  const [comps, setComps] = useState([]);
+  const [compsPanelOpen, setCompsPanelOpen] = useState(false);
+  const [pendingCompAnchor, setPendingCompAnchor] = useState(null);
+  const [focusCompId, setFocusCompId] = useState(null);
+  const onPlaceComp = (anchor) => { setPendingCompAnchor(anchor); setCompsPanelOpen(true); };
+  const onCompClick = (id) => { setFocusCompId(id); setCompsPanelOpen(true); };
+
   // Open a whole project (site group) from the header breadcrumb switcher (B191):
   // resume its active plan if one's open, else its newest. Switching plans changes
   // `activeSiteId`, which remounts/flushes the previous planner (B193 persist-on-switch).
@@ -725,7 +739,7 @@ export default function App({
             </button>
           </div>
         )}
-        <div style={{ flex: 1, minHeight: 0 }}>
+        <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
           <MapFinder
             visible={mode === "map"}
             isActive={isActive}
@@ -745,7 +759,37 @@ export default function App({
             // county) so the fallback plan is located from the start.
             onSkip={newBlankSite}
             onViewCenter={(c) => { mapCenterRef.current = c; }}
+            comps={comps}
+            onPlaceComp={onPlaceComp}
+            onCompClick={onCompClick}
           />
+          {!compsPanelOpen && (
+            <button
+              onClick={() => setCompsPanelOpen(true)}
+              style={{
+                position: "absolute", top: 12, right: 12, zIndex: 1150,
+                height: 30, padding: "0 12px", borderRadius: 999,
+                border: "1px solid var(--border-default)", background: "var(--surface-raised)",
+                color: "var(--text-primary)", fontSize: 12.5, fontWeight: 600,
+                cursor: "pointer", fontFamily: "inherit",
+                boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+              }}
+            >
+              Comps{comps.length ? ` (${comps.length})` : ""}
+            </button>
+          )}
+          <Suspense fallback={null}>
+            <CompsPanel
+              open={compsPanelOpen}
+              onClose={() => setCompsPanelOpen(false)}
+              pendingAnchor={pendingCompAnchor}
+              onAnchorConsumed={() => setPendingCompAnchor(null)}
+              focusCompId={focusCompId}
+              onFocusHandled={() => setFocusCompId(null)}
+              projects={siteGroups}
+              onCompsChange={setComps}
+            />
+          </Suspense>
         </div>
       </div>
       {/* Plan mode — SitePlanner renders its own AppHeader (same inert/aria-hidden rule). */}

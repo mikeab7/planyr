@@ -312,17 +312,19 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     // session commit hook (Standards uses it to promote to the account scope once, not per shade).
     expect(src).toMatch(/const livePick = \(apply, hist = true, commit = null\) =>/);
     expect(src).toMatch(/onInput:\s+\(e\) => \{ if \(hist && !pickSnapRef\.current\) \{ pushHistory\(\); pickSnapRef\.current = true; \}/);
-    // Every colour control goes through `colorCtl` = livePick plus the discrete swatch path. 23 are
-    // the full <ColorField>; the 24th is the multi-selection "Mixed" picker, which spreads livePick
+    // Every colour control goes through `colorCtl` = livePick plus the discrete swatch path. 26 are
+    // the full <ColorField>; the 27th is the multi-selection "Mixed" picker, which spreads livePick
     // into the same <ColorField> so the chip can carry its hatched no-single-colour state.
     // (NEW-1 added two: the setback line's colour as a Standards default and as a per-parcel override.
     //  The measurement-styling item added four more — a measurement's line + fill colour in its
     //  Properties panel, and the same two as Standards defaults — routed through the SAME shared
-    //  control so measurements inherit the recently-used-colours list like everything else.)
+    //  control so measurements inherit the recently-used-colours list like everything else.
+    //  NEW-EASE-STYLE added three: an easement's fill + outline colour, and an encumbrance's fill
+    //  colour, in the appearance-editing work that gave both kinds a user-editable colour/fill/hatch.)
     expect(src).toMatch(/const colorCtl = \(apply, hist = true, commit = null\) => \(\{\s*\n\s*pick: livePick\(apply, hist, commit\),/);
-    expect((src.match(/\{\.\.\.colorCtl\(\(v\) =>/g) || []).length).toBe(23);
+    expect((src.match(/\{\.\.\.colorCtl\(\(v\) =>/g) || []).length).toBe(26);
     expect((src.match(/pick=\{livePick\(\(v\) =>/g) || []).length).toBe(1);
-    expect((src.match(/<ColorField /g) || []).length).toBe(24);
+    expect((src.match(/<ColorField /g) || []).length).toBe(27);
     // A swatch click is a DISCRETE commit: exactly one undo frame, then the color is recorded.
     expect(src).toMatch(/onSwatch: \(v\) => \{ if \(hist\) pushHistory\(\); apply\(v\); pushRecent\(v\);/);
     // NEW-4 (bug) — the wheel picks LIVE, so `change` fires for EVERY shade the cursor crosses.
