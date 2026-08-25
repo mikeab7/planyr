@@ -243,6 +243,17 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   disagree; ⛔ there must be exactly one smooth-zoom switch in the app, counted in both directions
   by the repo-root `test/` suite **smoothZoomHome**. Dependency-free and small by construction —
   this lands in the entry chunk every route downloads.
+- `comps/` — Leasing Comps (B711328): a comp (land sale / building sale / lease) is its own entity,
+  never a project type — optionally references a project, never requires one, and is visible on the
+  map regardless. `lib/comps.js` is the pure model (the $/SF derivations, the lease NNN/gross
+  basis-normalization rule — never blended into one number — and the empty-field-hide render rule);
+  `lib/compsStore.js` is the Supabase CRUD (`public.comps`, team-read/owner-write RLS — narrower than
+  a shared site plan on purpose); `lib/compMarkerIcon.js` is the pure map-marker spec;
+  `components/CompsPanel.jsx` is the lazy-loaded side panel, self-contained (fetches its own data,
+  current user and team list). Anchored by a pin drop OR a real parcel selection — wired into the
+  Site Planner's map finder by REUSING its existing parcel-select flow, not a second identify
+  pipeline. `db/comps.sql` — applied to production; `db/test/comps_rls.test.sql` is a self-rolling-
+  back RLS proof, run live via the Supabase MCP.
 - `projects/`, `profile/`, `cloud/`, `presence/`, `gis/`, `geometry/`, `placement/`.
 
 **Convention:** shared logic is pure and unit-tested; per-host state/wiring stays in the workspace.

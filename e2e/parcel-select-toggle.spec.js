@@ -11,8 +11,14 @@
  *   • a press on empty canvas stays silent;
  *   • repeat presses inside the cooldown don't stack hints;
  *   • the hint's inline "Turn it on" restores selection, and the SAME boundary then selects;
- *   • the header pill is a real toggle (aria-pressed, keyboard-operable) that flips + persists.
+ *   • the toggle (aria-pressed, keyboard-operable) flips + persists.
  * Run at desktop and narrow width, in both light and dark theme.
+ *
+ * ⛔ TOOLBAR PASS (B727504) — the toggle moved OFF the permanent top toolbar and into the Parcels
+ * panel (the site-setup context where choosing ground actually happens); `drawParcel()` leaves
+ * that panel open, so the toggle stays reachable right where this spec already needed it. The
+ * hint's own inline "Turn it on" action is a SEPARATE, always-available overlay anchored at the
+ * point of failure and is untouched by the relocation — that's the fix this spec exists to guard.
  */
 import { test, expect } from "@playwright/test";
 
@@ -140,25 +146,28 @@ test.describe('"Select parcels: off" gives feedback at the point of failure (log
       page.on("pageerror", (e) => errors.push(String(e)));
       await startBlank(page, c);
       await drawParcel(page);
+
+      // The toggle now lives in the Parcels panel, which drawParcel() leaves open at the default
+      // 1440×900 desktop size — exercise it here, BEFORE the panel is collapsed for the canvas
+      // hit-testing below. It's a real, reachable control that reports its state (default ON).
+      await toggle(page).scrollIntoViewIfNeeded();
+      await expect(toggle(page)).toBeVisible();
+      await expect(toggle(page)).toHaveAttribute("aria-pressed", "true");
+      await expect(toggle(page)).toContainText("Select parcels: on");
+
+      // Turn selection OFF from the panel toggle — and it persists into the saved plan (the trap:
+      // this is what silently followed the owner across sessions and devices).
+      await toggle(page).click();
+      await expect(toggle(page)).toHaveAttribute("aria-pressed", "false");
+      await expect(toggle(page)).toContainText("Select parcels: off");
+      await expect.poll(() => savedParcelSelect(page)).toBe(false);
+
       await closeLeftPanel(page);
       await page.setViewportSize({ width: c.width, height: c.height });
       await expect(page.getByTestId("parcel-outline")).toBeVisible();
       await page.getByRole("button", { name: "Zoom to fit" }).last().click(); // the lot is fully on screen at this width
       await page.waitForTimeout(250);
       const { onBoundary, emptyCanvas } = await pressPoints(page);
-
-      // The toggle is a real, reachable control that reports its state (default ON).
-      await toggle(page).scrollIntoViewIfNeeded();
-      await expect(toggle(page)).toBeVisible();
-      await expect(toggle(page)).toHaveAttribute("aria-pressed", "true");
-      await expect(toggle(page)).toContainText("Select parcels: on");
-
-      // Turn selection OFF from the header pill — and it persists into the saved plan (the trap:
-      // this is what silently followed the owner across sessions and devices).
-      await toggle(page).click();
-      await expect(toggle(page)).toHaveAttribute("aria-pressed", "false");
-      await expect(toggle(page)).toContainText("Select parcels: off");
-      await expect.poll(() => savedParcelSelect(page)).toBe(false);
 
       await page.keyboard.press("Escape"); // drop any selection left over from drawing
       await expect(selectedParcelMarks(page)).toHaveCount(0);
@@ -183,10 +192,11 @@ test.describe('"Select parcels: off" gives feedback at the point of failure (log
       await expect(hint(page)).toHaveCount(1);
 
       // (d) The inline action fixes it right where the click failed: selection comes back on, the
-      // hint clears, and the SAME boundary point now selects the lot.
+      // hint clears, and the SAME boundary point now selects the lot. The toggle itself lives in
+      // the (now-closed) Parcels panel, so the persisted-settings poll is the source-of-truth
+      // check here; the real click right below is the functional proof.
       await page.getByTestId("parcel-select-hint-on").click();
       await expect(hint(page)).toHaveCount(0);
-      await expect(toggle(page)).toHaveAttribute("aria-pressed", "true");
       await expect.poll(() => savedParcelSelect(page)).toBe(true);
 
       await page.mouse.click(onBoundary.x, onBoundary.y);
@@ -197,7 +207,7 @@ test.describe('"Select parcels: off" gives feedback at the point of failure (log
     });
   }
 
-  test("the header toggle is keyboard-operable — focus it and press Enter", async ({ page }) => {
+  test("the toggle is keyboard-operable — focus it and press Enter", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await startBlank(page, { theme: "light" });

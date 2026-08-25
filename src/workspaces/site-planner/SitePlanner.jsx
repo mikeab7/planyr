@@ -103,7 +103,7 @@ import { useGroundElevation } from "./components/useGroundElevation.js";
 import CursorChip from "./components/CursorChip.jsx";
 import ViewMenu from "./components/ViewMenu.jsx";
 // NEW-4 (B366389 ×2) — the plan menu's icons, in the route-local stroke idiom. See components/icons.jsx.
-import { SaveIcon, HistoryIcon, StorageIcon, PadlockIcon, PlusIcon, DuplicateIcon, CloseXIcon } from "./components/icons.jsx";
+import { SaveIcon, HistoryIcon, StorageIcon, PadlockIcon, PlusIcon, DuplicateIcon, CloseXIcon, UndoIcon, RedoIcon, ZoomFitIcon, LayersIcon } from "./components/icons.jsx";
 /* LAZY (B1064 tranche a). Site Analysis mounts ONLY when the Analysis panel is the open one
  * (`_pid === "analysis"`, and `leftPanel` starts at null), so it is never on the first-paint
  * path — and it drags lib/siteAnalysis.js with it, which is the larger half of what moves.
@@ -208,7 +208,29 @@ import { loadDeed, deedNow } from "./lib/deedLazy.js";
  * call site in the deed-drop handler). It is a self-contained .docx/ZIP reader that only runs
  * once someone drops a deed or survey file, so it has no business on the boot path; the same
  * treatment B1123 gave the title reader and B1042 gave the export path. */
-import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip } from "./lib/easements.js";
+import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip, easementStyle, easementPatternId, encumbranceStyle, encumbrancePatternId, DEFAULT_EASE_FILL_OPACITY, DEFAULT_EASE_HATCH, ENCUMBRANCE_DEFAULT } from "./lib/easements.js";
+import { HATCH_OPTIONS, hatchSpec } from "../../shared/style/hatchPatterns.js";
+// NEW-EASE-STYLE — the ONE renderer that turns a hatch catalog spec (shared/style/hatchPatterns.js)
+// into an SVG <pattern>. MODULE-SCOPE (never defined inside SitePlanner's render body — a component
+// authored per-render is a fresh type every render, which remounts and thrashes). Used for the
+// easement/encumbrance type-default patterns AND any per-element override pattern, so a hatch looks
+// identical whichever level (type default or per-object override) produced it. `wash` is the
+// background rect's opacity (0 = no rect at all, matching the historic line-only pat-encumber);
+// `lineOpacity` is the hatch stroke/dot opacity. Tile is constant SCREEN-PIXEL space (no scale
+// ancestor reaches it), so it never turns to mush zoomed out or a solid block zoomed in.
+function HatchPatternDef({ id, hatchKey, color, wash = 0, lineOpacity = 0.5 }) {
+  const spec = hatchSpec(hatchKey);
+  const size = spec ? spec.size : 7;
+  return (
+    <pattern id={id} width={size} height={size} patternUnits="userSpaceOnUse" patternTransform={spec ? `rotate(${spec.rotate})` : undefined}>
+      {wash > 0 && <rect width={size} height={size} fill={color} opacity={wash} />}
+      {spec && spec.lines && spec.lines.map(([x1, y1, x2, y2], i) => (
+        <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke={color} strokeWidth="1.1" opacity={lineOpacity} />
+      ))}
+      {spec && spec.dot && <circle cx={spec.dot[0]} cy={spec.dot[1]} r={spec.dot[2]} fill={color} opacity={lineOpacity} />}
+    </pattern>
+  );
+}
 import { edgeRuns, runSetbackValue, resizeRunLength } from "./lib/edgeRuns.js";
 // NEW-1 / NEW-2 / NEW-3 — the parcel-chrome declutter trio. `setbackChipRuns` groups the boundary
 // into one LABELLED run per side (value + direction, not per digitized segment); `spaceOut` /
@@ -4141,7 +4163,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useEffect(() => {
     if (busyRef.current) return;
     const guarded = assemblyGuard(els, "canvas");
-    if (guarded !== els) setEls(guarded);
+    // ⛔ B712224 (round 3) — a PLAIN-VALUE setEls REPLACES whatever the state is at apply time; a
+    // realtime tombstone applied moments earlier via `applyRemoteInstr`'s functional `setEls(fn)`
+    // queues in the SAME React batch, and a plain-value write queued after it discards that removal
+    // outright (React's basicStateReducer treats a non-function action as a replacement, not a
+    // merge). Re-deriving from whatever `els` actually is when this dispatches — instead of trusting
+    // the `guarded` snapshot computed from the closure's `els` — makes this immune to that race.
+    if (guarded !== els) setEls((cur) => (cur === els ? guarded : assemblyIntegrity(cur).els));
   }, [els]); // eslint-disable-line react-hooks/exhaustive-deps
   // B672 — the READ cutover: full refetch of the site's live rows + REPLACE local canonical state.
   // Runs on every channel join/rejoin and tab wake — never trust event gaps. Elements with a
@@ -4347,9 +4375,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // data on the canvas, replacing the cached copy outright (a merge would keep stale keys the
       // row doesn't carry). Same channel a remote upsert uses, so z ordering and husk-parcel
       // filtering behave identically.
+      // NEW-3 (B712224 round 3) — an adoption's `el` is null when the engine is REFUSING a phantom
+      // create for an element the server holds as a tombstone (the "el:null means remove" shape) —
+      // route those through the SAME `applyRemoteInstr` a realtime tombstone uses, rather than the
+      // upsert path the rest of this callback was built for.
       onRowsCanonical: (adoptions) => {
-        for (const a of adoptions) applyRemoteInstr({ action: "upsert", kind: a.kind, id: a.id, el: a.el });
-        reportClientEvent("stale-cache-overruled", "server rows replaced stale cached elements on load", { id: siteId, count: adoptions.length, ids: adoptions.slice(0, 20).map((x) => x.id) });
+        const adopted = [], removed = [];
+        for (const a of adoptions) {
+          if (a.el) { applyRemoteInstr({ action: "upsert", kind: a.kind, id: a.id, el: a.el }); adopted.push(a.id); }
+          else { applyRemoteInstr({ action: "remove", kind: a.kind, id: a.id }); removed.push(a.id); }
+        }
+        if (adopted.length) reportClientEvent("stale-cache-overruled", "server rows replaced stale cached elements on load", { id: siteId, count: adopted.length, ids: adopted.slice(0, 20) });
+        if (removed.length) reportClientEvent("stale-canvas-removed", "a phantom element the server holds as deleted was removed from the canvas", { id: siteId, count: removed.length, ids: removed.slice(0, 20) });
       },
       liveCollections: () => {
         const s = syncStateOverride.current || stateRef.current;
@@ -4361,17 +4398,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // the delta instead of waiting for the owner to notice his parking sitting in a field.
       // Detection only — the repair itself is owned by the `els` seam effect, so a detector bug can
       // never move geometry.
-      // NEW-2 (B712224 recurrence) — a batch that fully landed ("settled": accepted, no rollback, no
-      // transport failure) means the gesture pushHistory() opened is genuinely OVER. Close it here,
-      // so a LATER reconcile() cycle with nothing to do with this gesture — a remote row folding in,
-      // an unrelated debounce tick, a channel reconnect — gets the honest "unknown" envelope instead
-      // of silently inheriting a stale op_id that misattributes whatever it writes to a finished
-      // operation. Deliberately NOT closed on "rolled-back"/"transport-failed": those retry through
-      // this SAME operation window (onAtomicRollback/onGroupConflict re-enqueue the original entries
-      // verbatim, envelope included), and closing early would split one retried gesture across two
-      // envelopes.
       afterCommit: (summary) => {
-        if (summary && summary.outcome === "settled") opTrackerRef.current.endOperation();
         try {
           const res = assemblyIntegrity(stateRef.current.els);
           if (res.unhealable && res.unhealable.length)
@@ -4493,8 +4520,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       else if (instr.kind === "parcel") parcels = applyInstrToList(parcels, instr);
     }
     if (!busy) {
-      const guarded = assemblyGuard(els, override ? "flush-override" : "commit");
-      if (guarded !== els) { els = guarded; setEls(guarded); }
+      const preGuard = els;
+      const guarded = assemblyGuard(preGuard, override ? "flush-override" : "commit");
+      // ⛔ B712224 (round 3) — the same plain-value-replaces-a-functional-update race as the canvas
+      // seam above: a functional `setEls(fn)` from `applyRemoteInstr` (a realtime tombstone, an
+      // adoption) can queue in the SAME React batch as this write, and a bare `setEls(guarded)`
+      // would discard it. Re-derive against whatever `els` actually is at apply time instead of
+      // trusting the `guarded` snapshot computed from `preGuard`.
+      if (guarded !== preGuard) { els = guarded; setEls((cur) => (cur === preGuard ? guarded : assemblyIntegrity(cur).els)); }
     }
     try { e.reconcile({ els, markups, measures, callouts, parcels }, { busy }); } catch (_) {}
   };
@@ -5009,6 +5042,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // points floating over the reverted geometry. Mirrors DocReview/Stitcher applySnapshot (RC-2).
     setDraftPoly(null); setDraftElPoly(null); setDraftRoadPts(null); setMkPoly(null); setMeasDraft([]);
     setEaseDraft(null); setEaseEdges(null); setTracePts([]); setXsecPts([]); setCalloutDraft(null); setDraftRect(null); setMkRect(null);
+    // ⛔ B712224 (round 3) — an undo/redo that brings a DELETED element back is a deliberate,
+    // whole-snapshot restore, not a stale canvas the tombstone-floor guard is built to catch (see
+    // elementSync.js's `pendingResurrect`). `applySnapshot` has no notion of "which of these ids
+    // used to be deleted" — it is generic over every kind of undo — so it stages EVERY id the
+    // restored snapshot holds, immediately before the synchronous flush below consumes it. Harmless
+    // for the (overwhelming) majority of ids that were never deleted: the exemption is a no-op
+    // unless `reconcile()`'s `!shad` branch actually needs it, and it is cleared at the end of that
+    // one diff pass regardless.
+    try {
+      const e = elSyncRef.current;
+      if (e && e.allowResurrect) {
+        const items = [];
+        for (const x of s.els || []) if (x && typeof x.id === "string") items.push({ kind: "el", id: x.id });
+        if (items.length) e.allowResurrect(items);
+      }
+    } catch (_) {}
     // NEW-2 — an undo/redo is a GESTURE BOUNDARY, exactly like pointer-up, and must commit NOW.
     // It used to be the only edit path with no flush: the restore landed locally, then trailed on
     // the engine's ~750 ms debounce while the move it was undoing was still being committed — so
@@ -18262,6 +18311,44 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   const plannerToolbar = (
     <>
+      {/* File group — first, matching the File → Edit(history) → View convention.
+          B1042 — opening the File menu warms the lazy export chunk, so by the time a download is
+          clicked the code is already in hand (no perceptible fetch).
+          ⛔ TOOLBAR PASS (B727504) — a bare word with no boundary and no caret reads as a heading,
+          not a control (owner report: "I can't tell what's going on with it"). It now carries a
+          real 1px border, a 3px corner radius, and a 9px disclosure caret, and stays visibly
+          "pressed" (accent border + tinted fill) for as long as its menu is open. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+        <div ref={exportAnchor} style={{ position: "relative" }}>
+          {/* No aria-label here on purpose — the visible "File ▾" text is already a complete
+              accessible name (an aria-label would SILENTLY OVERRIDE it instead of adding to it,
+              and several ui-audit harnesses match this button by that exact visible name). The
+              caret stays plain text, not aria-hidden, for the same reason. */}
+          <button className="dbtn" aria-haspopup="menu" aria-expanded={exportMenu}
+            title="File — export, import a project file, or print a PDF"
+            style={{ ...dGhost, fontWeight: 600, display: "flex", alignItems: "center", gap: 5, borderRadius: 3,
+              border: `1px solid ${exportMenu ? PAL.accent : PAL.chromeLine}`,
+              background: exportMenu ? "var(--hover-chrome)" : "transparent" }}
+            onClick={() => setExportMenu((o) => { if (!o) warmExportSheet(); return !o; })}>
+            File <span style={{ fontSize: 9, lineHeight: 1 }}>▾</span>
+          </button>
+          <AnchoredMenu open={exportMenu} onClose={() => setExportMenu(false)} anchorRef={exportAnchor} placement="below-right" gap={8} width={220} panelStyle={menuPanel}>
+            <button style={menuItem(false)} title="Download this plan as a project file (.json) you can re-import later" onClick={() => { setExportMenu(false); exportJSON(); }}>Export project file</button>
+            <button style={menuItem(false)} title="Load a plan from a project file (.json) — replaces the current canvas" onClick={() => { setExportMenu(false); importRef.current?.click(); }}>Import project file…</button>
+            <input ref={importRef} type="file" accept="application/json,.json" style={{ display: "none" }}
+              onChange={(e) => { importJSONFile(e.target.files?.[0]); e.target.value = ""; }} />
+            <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
+            <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
+            <button style={menuItem(false)} title="Pick a print frame, then download a finished PDF (no browser print dialog)" onClick={() => { setExportMenu(false); enterPrintMode(); }}>Download PDF / pick frame…</button>
+          </AnchoredMenu>
+        </div>
+      </div>
+      {vSep}
+      {/* History group — Undo / Redo, rebuilt to the conventional curved-arrow pair (the shape
+          Office / Google / Adobe all share, not proprietary artwork — see components/icons.jsx)
+          instead of the old ↶ / ↷ text glyphs, which render at inconsistent weights across
+          platform fonts. Undo and Redo are the SAME MDI path pair, mirrored point-for-point, so
+          they can never drift out of visual sync with each other. */}
       <div style={{ display: "flex", alignItems: "center", gap: 2, background: "var(--hover-chrome)", borderRadius: 10, padding: 2 }}>
         {/* ⛔ NEW-5 — UNDO IS ASKED ABOUT THE LIVE STATE, not merely about the stack's depth: a
             plain selection click pushed a frame and armed this button while the plan was
@@ -18272,31 +18359,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             aria-disabled attribute at all, so a checker reading that attribute got null and
             reported the empty Redo control as ENABLED — a mislabelled control, not a state bug,
             and it cost a real investigation. */}
-        <button className="dbtn" style={dIcon} onClick={undo} disabled={!canUndoNow} aria-disabled={!canUndoNow} aria-label="Undo" title="Undo (Ctrl+Z)">↶</button>
-        <button className="dbtn" style={dIcon} onClick={redo} disabled={!histRef.current.canRedo()} aria-disabled={!histRef.current.canRedo()} aria-label="Redo" title="Redo (Ctrl+Shift+Z)">↷</button>
-        <button className="dbtn" style={dIcon} onClick={fit} disabled={!parcels.length && !els.length && !markups.length && !callouts.length && !underlay} aria-label="Zoom to fit" title="Zoom to fit">⤢</button>
+        <button className="dbtn tb-icon-btn" style={dIcon} onClick={undo} disabled={!canUndoNow} aria-disabled={!canUndoNow} aria-label="Undo" title="Undo (Ctrl+Z)"><UndoIcon size={20} /></button>
+        <button className="dbtn tb-icon-btn" style={dIcon} onClick={redo} disabled={!histRef.current.canRedo()} aria-disabled={!histRef.current.canRedo()} aria-label="Redo" title="Redo (Ctrl+Shift+Z)"><RedoIcon size={20} /></button>
+      </div>
+      {vSep}
+      {/* View group — Zoom to fit: four arrows pointing OUTWARD to the corners. Deliberately not a
+          magnifier — a magnifier says "zoom", not "fit", and would be confused with the separate
+          zoom in/out controls. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+        <button className="dbtn tb-icon-btn" style={dIcon} onClick={fit} disabled={!parcels.length && !els.length && !markups.length && !callouts.length && !underlay} aria-label="Zoom to fit" title="Zoom to fit"><ZoomFitIcon size={20} /></button>
       </div>
       {/* Snap's interactive toggle moved to the on-canvas View (eye) menu with the other
           view/drawing aids (B653) — the top-bar duplicate is gone. S still toggles it. */}
-      {/* NEW-1 — the readout IS the control. This pill was already a <button>, but styled as a
-          borderless ghost with muted text in its OFF state it read as a passive status label, so
-          the one thing that told you selection was off looked like the one thing you couldn't
-          change. It now carries a real pill border + full-contrast chrome text in BOTH states,
-          spells the state out either way, and keeps aria-pressed + the native focus ring (index.css
-          gives every button a :focus-visible outline) so it's reachable by keyboard. */}
-      {parcels.length > 0 && (
-        <button type="button" className="dbtn" data-testid="parcel-select-toggle"
-          aria-pressed={settings.parcelSelect}
-          aria-label={`Select parcels — currently ${settings.parcelSelect ? "on" : "off"}`}
-          style={{ ...dGhost, display: "flex", alignItems: "center", gap: 7, fontWeight: 600, color: PAL.chromeInk,
-            border: `1px solid ${settings.parcelSelect ? PAL.accent : PAL.chromeLine}`,
-            background: settings.parcelSelect ? "var(--hover-chrome)" : "transparent" }}
-          onClick={() => setParcelSelect(!settings.parcelSelect)}
-          title="Select parcels — click to turn it on or off. ON: click a lot's edge or setback line to select it; its interior stays free for building work (dragging always pans the map, never selects). OFF: pure browse/measure, so a click never selects a parcel. Saved per project.">
-          <span aria-hidden style={{ width: 7, height: 7, borderRadius: 99, background: settings.parcelSelect ? "#22c55e" : "var(--chrome-tab-inactive)", display: "inline-block", boxShadow: settings.parcelSelect ? "0 0 7px rgba(34,197,94,0.7)" : "none" }} />
-          {settings.parcelSelect ? "Select parcels: on" : "Select parcels: off"}
-        </button>
-      )}
+      {/* ⛔ TOOLBAR PASS (B727504) — "Select parcels" moved OFF this permanent bar. It's how a site
+          gets its parcel basis (identify / draw / split / merge) and the only way to add a lot
+          that was missed or swap the one you started from — genuinely not pointless — but it's
+          touched once per site, so it doesn't earn a permanent seat beside Undo/Redo/Fit. It now
+          lives in the Parcels panel (the site-setup context where choosing ground actually
+          happens; see `_pid === "parcel"` below), with a route back from the canvas via
+          right-click on any parcel (`onParcelContext` → the parcelMenu). */}
       {tool === "select" && (() => {
         const canG = multi.length > 1, canU = !!selectedGroupId();
         if (!canG && !canU) return null;
@@ -18310,23 +18391,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </>
         );
       })()}
-      {vSep}
-      <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-        <div ref={exportAnchor} style={{ position: "relative" }}>
-          {/* B1042 — opening the File menu warms the lazy export chunk, so by the time a
-              download is clicked the code is already in hand (no perceptible fetch). */}
-          <button className="dbtn" style={{ ...dGhost, fontWeight: 600 }} onClick={() => setExportMenu((o) => { if (!o) warmExportSheet(); return !o; })}>File ▾</button>
-          <AnchoredMenu open={exportMenu} onClose={() => setExportMenu(false)} anchorRef={exportAnchor} placement="below-right" gap={8} width={220} panelStyle={menuPanel}>
-            <button style={menuItem(false)} title="Download this plan as a project file (.json) you can re-import later" onClick={() => { setExportMenu(false); exportJSON(); }}>Export project file</button>
-            <button style={menuItem(false)} title="Load a plan from a project file (.json) — replaces the current canvas" onClick={() => { setExportMenu(false); importRef.current?.click(); }}>Import project file…</button>
-            <input ref={importRef} type="file" accept="application/json,.json" style={{ display: "none" }}
-              onChange={(e) => { importJSONFile(e.target.files?.[0]); e.target.value = ""; }} />
-            <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
-            <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
-            <button style={menuItem(false)} title="Pick a print frame, then download a finished PDF (no browser print dialog)" onClick={() => { setExportMenu(false); enterPrintMode(); }}>Download PDF / pick frame…</button>
-          </AnchoredMenu>
-        </div>
-      </div>
     </>
   );
 
@@ -18795,6 +18859,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   onClick={mergePick ? exitMergePick : startMergePick}>⧉ Merge{combineSel.length >= 2 ? ` (${combineSel.length})` : ""}</button>
               )}
               </div>
+              {/* ⛔ TOOLBAR PASS (B727504) — relocated here from the permanent top toolbar. This is
+                  the parcel/site-setup context where choosing ground actually happens, and the
+                  control is touched once per site — it doesn't earn a permanent seat beside
+                  Undo/Redo/Fit. Same control, same behavior (setParcelSelect), new home; a route
+                  back from the canvas is a right-click on the parcel itself (onParcelContext →
+                  the parcelMenu, below). */}
+              {parcels.length > 0 && (
+                <button type="button" className="dbtn" data-testid="parcel-select-toggle"
+                  aria-pressed={settings.parcelSelect}
+                  aria-label={`Select parcels — currently ${settings.parcelSelect ? "on" : "off"}`}
+                  style={{ ...chip, width: "100%", marginBottom: 9, display: "flex", alignItems: "center", gap: 7, fontWeight: 600,
+                    borderColor: settings.parcelSelect ? PAL.accent : "var(--border-default)",
+                    color: settings.parcelSelect ? PAL.accent : PAL.ink }}
+                  onClick={() => setParcelSelect(!settings.parcelSelect)}
+                  title="Select parcels — click to turn it on or off. ON: click a lot's edge or setback line to select it; its interior stays free for building work (dragging always pans the map, never selects). OFF: pure browse/measure, so a click never selects a parcel. Saved per project.">
+                  <span aria-hidden style={{ width: 7, height: 7, borderRadius: 99, flex: "none", background: settings.parcelSelect ? "#22c55e" : "var(--chrome-tab-inactive)", display: "inline-block", boxShadow: settings.parcelSelect ? "0 0 7px rgba(34,197,94,0.7)" : "none" }} />
+                  {settings.parcelSelect ? "Select parcels: on" : "Select parcels: off"}
+                </button>
+              )}
               {/* NEW-1 — the return half of the cross-link. This panel owns what a parcel HAS;
                   everything you DO to one lives in the right rail's Parcel tools menu, and landing
                   on the wrong side should never be a dead end. Opens that menu directly (and slides
@@ -20191,8 +20274,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         they are sized in constant screen px with no zoom gate of any kind. On the
                         owner's whole-site sheet that combination printed each length measurement as
                         two fat discs joined by a stub. They are `data-export="skip"` now — they never
-                        reach paper — and an open run gets real drafting ticks instead (below). */}
-                    {pts.map((p, k) => <circle key={k} data-export="skip" data-measure-vertex="1" cx={p.x} cy={p.y} r={3} fill={mcolor} pointerEvents="none" />)}
+                        reach paper — and an open run gets real drafting ticks instead (below).
+                        ⛔ B705200 (×2) — AND BEING AN EDITING AFFORDANCE MEANS THEY MUST GATE ON
+                        SELECTION LIKE EVERY OTHER ONE. They shipped with no gate at all — painted
+                        for every measurement on the plan, selected or not, because `pointerEvents=
+                        "none"` made them inert and nobody noticed a non-interactive decoration was
+                        ungated. `isSel` is the same selection test `measureHandles` already uses. */}
+                    {isSel && pts.map((p, k) => <circle key={k} data-export="skip" data-measure-vertex="1" cx={p.x} cy={p.y} r={3} fill={mcolor} pointerEvents="none" />)}
                     {termTicks.map((t, k) => (
                       <line key={`tk${k}`} data-measure-term="1" x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2}
                         stroke={mcolor} strokeWidth={TERMINATOR_WEIGHT_PX * labelK} strokeLinecap="butt" pointerEvents="none" />
@@ -20332,7 +20420,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   return (
                     <g key={m.id} data-markup={m.id} style={mkCursor} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
                       {isSel && <polygon points={ring} fill="none" stroke={SEL_BLUE} strokeWidth={2} data-export="skip" pointerEvents="none" />}
-                      <polygon data-testid={m.except ? "deed-except" : "deed-boundary"} points={ring} fill="url(#pat-encumber)" stroke={stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} pointerEvents="all" />
+                      {/* NEW-EASE-STYLE — encumbrance shares the easement appearance model
+                          (fill/stroke/fillOpacity/hatch, editable in Properties); see
+                          easements.js's encumbranceStyle/ENCUMBRANCE_DEFAULT header. */}
+                      <polygon data-testid={m.except ? "deed-except" : "deed-boundary"} points={ring} fill={`url(#${encumbrancePatternId(m)})`} stroke={stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} pointerEvents="all" />
                       {/* centerline + per-call bearing/distance labels */}
                       {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={stroke} strokeWidth={strokeZoom(0.8, zk)} strokeDasharray={dashZoom("4 3", zk)} opacity={0.7} pointerEvents="none" />}
                       {labelPpf > 0.12 && (m.calls || []).map((c, i) => {
@@ -20348,8 +20439,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 }
                 if (m.kind === "easement") {
                   if (m.parcelId && inactiveParcelIds.has(m.parcelId)) return null; // B213: anchored easement hides with its parcel
-                  const tcol = easementColor(m);
-                  const ecol = tcol; // B619: keep the easement's own type color when selected (blue vertex handles cue the selection)
+                  // NEW-EASE-STYLE — resolved appearance (type default, or this easement's own
+                  // override): fill/stroke/fillOpacity/hatch. `ecol` used to be the fixed type
+                  // colour; it is now the RESOLVED stroke, so an outline-colour override still
+                  // cues selection (B619's rule — no recolor-on-select — is unchanged).
+                  const est = easementStyle(m);
+                  const ecol = est.stroke;
                   const proposed = m.status === "proposed";
                   const ring = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
                   const cen = (m.centerline && m.mode !== "boundary") ? m.centerline.map(f2p) : [];
@@ -20362,7 +20457,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     : (m.pts && m.pts.length >= 3 ? [...m.pts, m.pts[0]] : m.pts);
                   return (
                     <g key={m.id} data-markup={m.id} style={mkCursor} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)} onDoubleClick={(e) => onMarkupDouble(e, m.id)}>
-                      <polygon points={ring} fill={`url(#pat-ease-${easementType(m.easeType).key})`} stroke={ecol} strokeWidth={strokeZoom(isSel ? 2.4 : 1.8, zk)} strokeDasharray={proposed ? dashZoom("7 5", zk) : undefined} />
+                      <polygon points={ring} fill={`url(#${easementPatternId(m)})`} stroke={ecol} strokeWidth={strokeZoom(isSel ? 2.4 : 1.8, zk)} strokeDasharray={proposed ? dashZoom("7 5", zk) : undefined} />
                       {/* centerline shown for strip easements; flat-capped strip is the polygon above */}
                       {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={ecol} strokeWidth={strokeZoom(0.9, zk)} strokeDasharray={dashZoom("4 3", zk)} opacity={0.7} pointerEvents="none" />}
                       {/* ⛔ NEW-6 — the easement's centroid label is a FEATURE NAME and rides the shared
@@ -20764,9 +20859,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <stop offset="0%" stopColor="#2F6675" />
                 <stop offset="100%" stopColor="#5B97A5" />
               </radialGradient>
-              <pattern id="pat-encumber" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-                <line x1="0" y1="0" x2="0" y2="8" stroke="#7c3aed" strokeWidth="1" opacity="0.55" />
-              </pattern>
+              {/* NEW-EASE-STYLE — encumbrance/easement fills now go through ONE generic hatch
+                  renderer (HatchPatternDef, shared/style/hatchPatterns.js's catalog), so the
+                  type-default pattern below and any per-element override pattern (rendered
+                  further down, only for an easement/encumbrance a user has actually styled)
+                  are the exact same recipe. `pat-encumber` unchanged in every visible respect
+                  (purple line, no wash) — see easements.js's ENCUMBRANCE_DEFAULT header. */}
+              <HatchPatternDef id="pat-encumber" hatchKey={ENCUMBRANCE_DEFAULT.hatch} color={ENCUMBRANCE_DEFAULT.stroke} wash={ENCUMBRANCE_DEFAULT.fillOpacity} lineOpacity={0.55} />
               {/* v3 C4 — the pond's earthen berm ring: a warm-earth body at ~45% opacity + a 45°
                   hatch in a darker tone, so the embankment around a bermed pond reads as raised
                   ground distinct from the water it holds. */}
@@ -20783,13 +20882,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <pattern id="pat-sidewalk" width="7" height="7" patternUnits="userSpaceOnUse">
                 <circle cx="1.4" cy="1.4" r="0.7" fill="#9c998d" opacity="0.5" />
               </pattern>
-              {/* easement fills: a semi-transparent body + diagonal hatch, color-coded per type (NEW-1) */}
+              {/* easement fills: a semi-transparent body + hatch, color-coded per type (NEW-1),
+                  now DEFAULT-only — the per-type pattern is exactly today's historic look and is
+                  shared by every unedited easement of that type. */}
               {EASEMENT_TYPES.map((t) => (
-                <pattern key={t.key} id={`pat-ease-${t.key}`} width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-                  <rect width="7" height="7" fill={t.color} opacity="0.10" />
-                  <line x1="0" y1="0" x2="0" y2="7" stroke={t.color} strokeWidth="1.1" opacity="0.5" />
-                </pattern>
+                <HatchPatternDef key={t.key} id={`pat-ease-${t.key}`} hatchKey={DEFAULT_EASE_HATCH} color={t.color} wash={DEFAULT_EASE_FILL_OPACITY} lineOpacity={0.5} />
               ))}
+              {/* NEW-EASE-STYLE — one <pattern> per easement/encumbrance a user has actually
+                  styled (colour/opacity/hatch edited in Properties). The common case — an
+                  untouched easement — adds NOTHING here and keeps sharing its type's pattern
+                  above, so this stays cheap even on a plan with many easements. */}
+              {markups.filter((m) => m.kind === "easement" && easementStyle(m).hasOverride).map((m) => {
+                const st = easementStyle(m);
+                return <HatchPatternDef key={`pat-ep-${m.id}`} id={`pat-ease-el-${m.id}`} hatchKey={st.hatch} color={st.fill} wash={st.fillOpacity} lineOpacity={0.5} />;
+              })}
+              {markups.filter((m) => m.kind === "encumbrance" && encumbranceStyle(m).hasOverride).map((m) => {
+                const st = encumbranceStyle(m);
+                return <HatchPatternDef key={`pat-ec-${m.id}`} id={`pat-encumber-el-${m.id}`} hatchKey={st.hatch} color={st.fill} wash={st.fillOpacity} lineOpacity={0.55} />;
+              })}
             </defs>
 
             {!(origin && basemapOn && showAerial) && <g data-export="skip">{gridLines()}</g>}
@@ -21852,8 +21962,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               take the overflow. */}
           {(
             <div data-wheelscroll="1" style={{ pointerEvents: "auto", width: layersOpen ? 268 : "auto", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 2px 10px rgba(28,25,20,0.16)", overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: "100%", minHeight: 0 }}>
-              <button onClick={() => setLayersOpen((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "8px 11px", border: "none", background: "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700 }}>
-                <span style={{ color: PAL.accent }}>❖</span> Layers <span style={{ flex: 1 }} /> <span style={{ color: PAL.muted, fontWeight: 500 }}>{layersOpen ? "▾" : "▸"}</span>
+              {/* ⛔ TOOLBAR PASS (B727504) — the old "❖" glyph is a tofu box on fonts that lack it,
+                  indistinguishable from a shape tool, a stop button, or a crop. Replaced with the
+                  two-offset-sheets mark Google Maps / Photoshop / Figma all use for "layers", so it
+                  needs no learning; plus the aria-label + tooltip an icon alone can't provide. */}
+              <button onClick={() => setLayersOpen((o) => !o)} aria-expanded={layersOpen} aria-label="Layers — map data layers (flood, utilities, parcels, aerial…)"
+                title="Layers — map data layers (flood, utilities, parcels, aerial…)"
+                style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "8px 11px", border: "none", background: "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700 }}>
+                <span aria-hidden style={{ color: PAL.accent, display: "flex" }}><LayersIcon size={16} /></span> Layers <span style={{ flex: 1 }} /> <span style={{ color: PAL.muted, fontWeight: 500 }}>{layersOpen ? "▾" : "▸"}</span>
               </button>
               {layersOpen && (
                 <div style={{ padding: "2px 11px 10px", overflowY: "auto", flex: 1, minHeight: 0 }}>
@@ -22688,6 +22804,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const isStrip = e.mode !== "boundary";
             const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : SURF_RAISED, color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "var(--border-default)" });
             const txt = { ...numInput, width: 150, fontFamily: "inherit" };
+            // NEW-EASE-STYLE — resolved appearance (type default, or this easement's own override).
+            const est = easementStyle(e);
+            const swatch = { width: 34, height: 26, padding: 0, border: BORDER_1, borderRadius: 6, cursor: "pointer" };
             const check = (label, val, key) => (
               <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: PAL.ink, marginBottom: 7, cursor: "pointer" }}>
                 <input type="checkbox" checked={!!val} onChange={(ev) => setSelEasement({ [key]: ev.target.checked })} /> {label}
@@ -22721,6 +22840,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {check("Exclusive use", e.exclusive, "exclusive")}
                   {check("Restricts buildings", e.restrictsBuildings !== false, "restrictsBuildings")}
                   {check("Restricts paving", e.restrictsPaving === true, "restrictsPaving")}
+                </div>
+                {/* NEW-EASE-STYLE — colour / fill / hatch, editable per easement. Defaults to this
+                    easement's TYPE colour (above) until touched; "Reset" clears back to the type
+                    default rather than leaving a stale override behind. */}
+                <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "8px 0", paddingTop: 8 }}>
+                  <Field label="Fill color"><ColorField value={toHex6(est.fill)} {...colorCtl((v) => setSelEasement({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} /></Field>
+                  <Field label="Fill opacity">
+                    <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <input type="range" min={0} max={0.6} step={0.02} value={est.fillOpacity} onChange={(ev) => setSelEasement({ fillOpacity: +ev.target.value })} />
+                      <span style={{ fontSize: 10.5, color: PAL.muted, minWidth: 28 }}>{Math.round(est.fillOpacity * 100)}%</span>
+                    </span>
+                  </Field>
+                  <Field label="Hatch">
+                    <select style={{ ...numInput, width: 150, fontFamily: "inherit" }} value={est.hatch} onChange={(ev) => setSelEasement({ hatch: ev.target.value })}>
+                      {HATCH_OPTIONS.map((h) => <option key={h.key} value={h.key}>{h.label}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Outline color"><ColorField value={toHex6(est.stroke)} {...colorCtl((v) => setSelEasement({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} /></Field>
+                  {est.hasOverride && <button style={{ ...chip, marginTop: 4 }} onClick={() => setSelEasement({ fill: null, stroke: null, fillOpacity: null, hatch: null })} title={`Revert to the ${t.label} type's default appearance`}>↺ Reset to type default</button>}
                 </div>
                 <Field label="Label"><input value={e.labelOverride || ""} onChange={(ev) => setSelEasement({ labelOverride: ev.target.value })} placeholder={easementLabel({ ...e, labelOverride: "" })} style={txt} /></Field>
                 {/* B620 — inline label riding the easement (distinct from the centroid caption above; double-click the
@@ -22776,6 +22914,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <Field label="Fill"><ColorField value={toHex6(selMarkup.fill)} {...colorCtl((v) => liveMarkup({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} /></Field>
                   <Field label="Fill opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.fillOpacity ?? 0} {...sliderHistory((e) => liveMarkup({ fillOpacity: +e.target.value }))} /></Field>
                 </>}
+                {/* NEW-EASE-STYLE — an encumbrance (deed/title tract) shares the easement appearance
+                    model: fill / fill opacity / hatch, type default + per-element override. Not
+                    "closed" above (it's its own render branch, not a rect/ellipse/polygon), so it
+                    gets its own Fill block here rather than falling through the generic one. */}
+                {selMarkup.kind === "encumbrance" && (() => {
+                  const est = encumbranceStyle(selMarkup);
+                  return <>
+                    <Field label="Fill"><ColorField value={toHex6(est.fill)} {...colorCtl((v) => liveMarkup({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} /></Field>
+                    <Field label="Fill opacity">
+                      <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <input type="range" min={0} max={0.6} step={0.02} value={est.fillOpacity} {...sliderHistory((ev) => liveMarkup({ fillOpacity: +ev.target.value }))} />
+                        <span style={{ fontSize: 10.5, color: PAL.muted, minWidth: 28 }}>{Math.round(est.fillOpacity * 100)}%</span>
+                      </span>
+                    </Field>
+                    <Field label="Hatch">
+                      <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={est.hatch} onChange={(ev) => setSelMarkup({ hatch: ev.target.value })}>
+                        {HATCH_OPTIONS.map((h) => <option key={h.key} value={h.key}>{h.label}</option>)}
+                      </select>
+                    </Field>
+                    {est.hasOverride && <button style={{ ...chip, marginTop: 4 }} onClick={() => setSelMarkup({ fill: null, fillOpacity: null, hatch: null })} title="Revert to the default encumbrance appearance">↺ Reset to default</button>}
+                  </>;
+                })()}
                 {MK_BOX_KINDS.includes(selMarkup.kind) && <>
                   <Field label="Width / Height"><span style={{ display: "flex", gap: 5 }}>
                     <NumInput style={{ ...numInput, width: 56 }} value={Math.round(selMarkup.w)} min={1} step={1} coarse={10} onCommit={(n) => setSelMarkupGeom({ w: n })} />
@@ -25527,6 +25687,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
       {parcelMenu && (
         <ContextMenu x={parcelMenu.x} y={parcelMenu.y} onClose={() => setParcelMenu(null)} width={196} zIndex={1998} className="menu" panelStyle={menuPanel}>
+          {/* ⛔ TOOLBAR PASS (B727504) — the route back to "Select parcels" now that it's off the
+              permanent toolbar (moved into the Parcels panel). A right-click on a parcel is
+              exactly where you'd land to add one that was missed or swap the one you started
+              from, so the toggle rides along here too. */}
+          <button style={menuItem(false)} onClick={() => { setParcelSelect(!settings.parcelSelect); setParcelMenu(null); }}>
+            {settings.parcelSelect ? "Select parcels: on" : "Select parcels: off"}
+          </button>
+          <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
           <button style={{ ...menuItem(false), opacity: combineSel.length >= 2 ? 1 : 0.5, cursor: combineSel.length >= 2 ? "pointer" : "default" }} disabled={combineSel.length < 2} onClick={() => { mergeParcels(); setParcelMenu(null); }}>Merge parcels ({combineSel.length})</button>
           <button style={menuItem(false)} onClick={() => { setCombineSel([]); setParcelMenu(null); }}>Clear selection</button>
           <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />

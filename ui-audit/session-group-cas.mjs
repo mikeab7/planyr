@@ -409,8 +409,19 @@ async function run() {
   const end = clock + MINUTES * 60_000;
   while (clock < end) {
     const [label, fn] = pick(ACTIONS);
-    if (label === "undo" || label === "redo") { const prev = label === "undo" ? undoStack.pop() : redoStack.pop(); if (prev) { (label === "undo" ? redoStack : undoStack).push(snapshot()); els = prev; } log.push({ at: clock, label }); }
-    else editStep(label, fn);
+    let restored = false;
+    if (label === "undo" || label === "redo") {
+      const prev = label === "undo" ? undoStack.pop() : redoStack.pop();
+      if (prev) { (label === "undo" ? redoStack : undoStack).push(snapshot()); els = prev; restored = true; }
+      log.push({ at: clock, label });
+    } else editStep(label, fn);
+
+    /* ⛔ B712224 (round 3) — mirrors SitePlanner.jsx's applySnapshot: an undo/redo that brings a
+     * deleted element back is a deliberate, whole-snapshot restore, not the stale-canvas shape the
+     * round-3 delete floor exists to refuse. Without this, `sync.reconcile` below silently drops
+     * the "delete, then undo" case this driver's own comment (line ~181) already documented as
+     * ORDINARY — the real client stages the same exemption before its own post-undo flush. */
+    if (restored && sync.allowResurrect) sync.allowResurrect(els.filter((e) => e && typeof e.id === "string").map((e) => ({ kind: "el", id: e.id })));
 
     sync.reconcile({ els }, {});
     if (chance(0.45)) sync.flushGesture();          // a save the user asked for (mouse-up / Ctrl+S)
