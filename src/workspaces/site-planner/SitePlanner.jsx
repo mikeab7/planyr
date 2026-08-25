@@ -14,7 +14,7 @@ import { notePlanContext, noteViewScale, requestPerfCapture, perfCaptureDelivery
 import { recordPinchGesture } from "../../shared/telemetry/gestureTelemetry.js";
 import { createElementSync, stableStringify } from "./lib/elementSync.js";
 import { createOperationTracker } from "./lib/operationEnvelope.js";
-import { planDelete, TYPING_GUARD_HINT } from "./lib/deletePlan.js";
+import { planDelete } from "./lib/deletePlan.js";
 import { focusScope, resolveKeyEntry, keyScopeVerdict, shouldHintRefusal, SCOPE_GUARD_HINT } from "./lib/keyContract.js";
 import { touchLatch, touchFactsOf, TOUCH } from "../../shared/keyboard/keyScope.js";
 import { rowsToModel, KIND_TO_FIELD, foldNeverSyncedLocal, foldJournal, reconcileSeedRows } from "./lib/elementRows.js";
@@ -2602,6 +2602,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [deedQueue, setDeedQueue] = useState([]); // dropped deeds waiting to be placed (multi-file)
   const [deedActiveId, setDeedActiveId] = useState(null); // the queue row currently loaded in the textarea                       // in-flight read token (ignore a stale read)
   const [overlapWarn, setOverlapWarn] = useState(""); // transient warning after a plot
+  // NEW-1/B754752 — the bottom-center canvas toast's horizontal anchor, in VIEWPORT px. Defaults to
+  // null (renders at the true viewport center, byte-identical to before) until the canvas-edge
+  // layout effect below measures the real drawing area. See that effect for why this must be the
+  // CANVAS's center and not the viewport's: a docked left-rail panel (Properties included) narrows
+  // the canvas but the toast used to stay centered on the whole window, which on a laptop-width
+  // browser landed it directly on top of the panel it was explaining a refusal from.
+  const [toastCenterX, setToastCenterX] = useState(null);
   // B909 round 4 — the PERSISTENT "what changed" card after ⚡ Design pond (owner spec:
   // not a toast, stays until dismissed). null = no card. Cleared on dismiss, on Undo, or
   // implicitly replaced by the next Design pond run on any pond.
@@ -5755,6 +5762,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // measure the real edge, fold the delta in the same frame — the panel-open twin of the B837 pan).
     const w = Math.max(320, r.width), h = Math.max(360, r.height);
     setSize((s) => (s.w === w && s.h === h ? s : { w, h, rawW: r.width }));
+    // NEW-1/B754752 — the bottom-center canvas toast (flashWarn) centers on the DRAWING, not the
+    // window. `r.left + r.width/2` is the canvas's real horizontal center in viewport px — a docked
+    // left-rail panel narrows `r` and this follows it, so the toast can never land on a docked
+    // panel; a portaled/floating/phone-overlay panel steals no layout width (same self-gating
+    // measurement VIEWPORT-STABLE already relies on), so it correctly leaves this untouched and the
+    // toast falls back to true viewport-center in that case. Identity-cheap: only writes on change.
+    const cx = Math.round(r.left + r.width / 2);
+    setToastCenterX((prev) => (prev === cx ? prev : cx));
     const left = Math.round(el.offsetLeft);
     if (panelShiftRef.current == null) { panelShiftRef.current = left; return; } // seed baseline — no shift on first mount
     const delta = left - panelShiftRef.current;
@@ -6056,7 +6071,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const hasSelection = !!(selRef.current || multiRef.current.length);
         if (shouldHintRefusal({ entry: verdict.entry, reason: verdict.reason, hasSelection, episode: keyEpisodeRef.current, lastHintedEpisode: typingHintRef.current })) {
           typingHintRef.current = keyEpisodeRef.current;
-          flashWarn(SCOPE_GUARD_HINT[verdict.reason] || TYPING_GUARD_HINT, 4500);
+          flashWarn(SCOPE_GUARD_HINT[verdict.reason], 4500);
           if (verdict.entry.destructive) {
             reportClientEvent("delete-attempt", `key:delete → refused (${verdict.reason})`, {
               entry: "key:delete", result: "no-op", reason: verdict.reason,
@@ -16922,8 +16937,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // button treatments were copied inline at every toast site (the pob/route/warn/deed-align pill,
   // the overlay-calibration pill, and now the parcel-select hint), so each new message re-shipped
   // the same style objects. One definition each: callers override only what genuinely differs
-  // (the background, and the hint's stacked `bottom`). Pixel-identical to what shipped before.
-  const toastPill = { position: "fixed", left: "50%", bottom: 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw", color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" };
+  // (the background, and the hint's stacked `bottom`).
+  // ⛔ NEW-1/B754752 — `left` follows `toastCenterX` (the measured CANVAS center), not a bare "50%"
+  // of the viewport. With a docked left-rail panel open, viewport-center can sit inside that panel —
+  // measured live: the keyboard scope-guard toast painted directly over the Properties panel's own
+  // Length (ft) field, covering the very control the toast was explaining a refusal from. Centering
+  // on the canvas instead means the toast now sits a little left of dead-center even with no panel
+  // docked (the 54px tool rail is always in flow), never over the rail or a docked panel; a portaled/
+  // floating/phone-overlay panel steals no layout width, so it correctly leaves this untouched.
+  const toastPill = { position: "fixed", left: toastCenterX == null ? "50%" : toastCenterX, bottom: 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw", color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" };
   const toastActionBtn = { border: "none", background: SURF_RAISED, color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" };
   const toastGhostBtn = { border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap" };
   // NEW-1 — same treatment for the top-center save/status banner family (read-only · cloud-save

@@ -17,6 +17,16 @@
  * SYNTHETIC-KEYS-DONT-EDIT: every keystroke here is a real one (`page.keyboard.press`), and every
  * outcome is re-read until it settles rather than sampled once.
  *
+ * ⛔ AMENDED (B754752) — A FIELD REFUSAL (a real text box holds focus) IS NOW SILENT, NEVER LOUD.
+ * The two "value row's text box" arms below used to require a toast — that was right for the
+ * original B464048 bug (a slider/dropdown swallowing Delete with nothing to explain it), but a
+ * genuine `<input>` field consuming Delete/Backspace IS the field correctly editing its own text,
+ * and the owner ruled it out explicitly: "there is nothing to explain and nothing to warn about."
+ * The old expectation fired the hint on every keystroke used to clear a number before typing a new
+ * one, with a remedy ("click the plan, then press Delete") that is a recipe for deleting the very
+ * object being edited. The object-safety half (Delete/Backspace never deletes the selection while
+ * a field holds focus) is UNCHANGED and still asserted — only the toast is now required silent.
+ *
  *   npm run verify:deletescope        (node ui-audit/verify-delete-key-scope.mjs [--url …])
  */
 import { chromium } from "playwright";
@@ -110,11 +120,11 @@ try {
      * ▲▼ steppers (the UA chevrons are bigger than the digits on a pill this size) — and they carry NO
      * `type` attribute at all, so `input[type=text]` matches nothing either. An attribute selector that
      * matches nothing makes the arm silently measure the arm above it, so it is asserted, not assumed. */
-    { name: "Delete while a VALUE ROW's text box holds focus (must be refused, and SAID)", expect: "refused-loudly", what: async (page) => {
+    { name: "Delete while a VALUE ROW's text box holds focus (refused, and SILENT — typing is not a refusal to explain)", expect: "refused-silently", what: async (page) => {
       const f = page.locator('[data-field-group] input:not([type=range]):visible').first();
       if (await f.count() === 0) throw new Error("no value row on the measurement inspector — the arm would be vacuous");
       await f.click(); await pacedWait(page, 350); } },
-    { name: "Delete pressed TWICE while refused — the second press must be explained too", expect: "refused-loudly", twice: true, what: async (page) => {
+    { name: "Delete pressed TWICE while typing — refused, and SILENT both times", expect: "refused-silently", twice: true, what: async (page) => {
       const f = page.locator('[data-field-group] input:not([type=range]):visible').first();
       await f.click(); await pacedWait(page, 350); } },
   ];
@@ -160,10 +170,14 @@ try {
       if (cleared) toast = `⚠ toast never cleared (${cleared})`;
     }
 
-    /* Three expectations, not two. "refused-loudly" is a PASS only when the refusal was also
-     * EXPLAINED — a silent refusal is the LOUD-FAILURE violation the owner named, and scoring it as
-     * a pass because the object survived is how that violation stays invisible. */
-    const ok = arm.expect === "deleted" ? gone : (!gone && !!toast);
+    /* Three expectations. "refused-loudly" is a PASS only when the refusal was also EXPLAINED — a
+     * silent refusal there is the LOUD-FAILURE violation the owner named, and scoring it as a pass
+     * because the object survived is how that violation stays invisible. "refused-silently" is the
+     * mirror image (B754752): a real text field swallowing the key is CORRECT and unremarkable, so a
+     * toast here is the bug — scoring a fired toast as a pass is how THAT violation stays invisible. */
+    const ok = arm.expect === "deleted" ? gone
+      : arm.expect === "refused-silently" ? (!gone && !toast)
+      : (!gone && !!toast);
     check(arm.name, ok,
       `focus=${focus.tag}${focus.type ? `[${focus.type}]` : ""}${focus.inFieldGroup ? " in-field-group" : ""} · ` +
       `${gone ? "DELETED" : "still there"}${toast ? ` · toast: "${toast}"` : " · NO MESSAGE"}`);
