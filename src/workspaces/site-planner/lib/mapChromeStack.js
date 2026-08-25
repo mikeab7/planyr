@@ -90,7 +90,9 @@ export function panelMaxHeight({ topPx = 10, bottomPx = 96, minPx = 220 } = {}) 
  * for it. Give the newcomer a corner, or stack it clear using the clearance below.
  *
  * ZOOM_CONTROL_CLEARANCE_PX is the room a bottom-LEFT floating element must leave beneath itself
- * so it never covers the control: Leaflet's two ~30px buttons, their border, and the container's
- * own 10px margin, rounded up. The transient map banners (the offline/fallback offers and the
- * "drop a file" hint) sit on this rather than on a hand-picked number each. */
-export const ZOOM_CONTROL_CLEARANCE_PX = 84;
+ * so it never covers the control stack: Leaflet's zoom in/out buttons PLUS the "locate me" button
+ * (NEW — the mobile pinch/locate/telemetry lap; a separate `leaflet-bar` stacked directly below
+ * zoom's, Leaflet's own default 10px margin between them) — three ~30px buttons, their borders,
+ * and the container's own 10px margin, rounded up. The transient map banners (the offline/fallback
+ * offers and the "drop a file" hint) sit on this rather than on a hand-picked number each. */
+export const ZOOM_CONTROL_CLEARANCE_PX = 128;
