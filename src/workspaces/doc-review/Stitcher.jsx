@@ -27,7 +27,8 @@ import { aggregateNotes } from "../../shared/files/sheetNotes.js";
 import { legendFromPlaced } from "../../shared/files/legendUnion.js";
 import { createOcrRunner } from "./lib/ocr.js";
 import { ftToAcres } from "../../shared/coordinates/index.js";
-import { worldToScreen, screenToWorld, zoomAround } from "../../shared/viewport/viewportTransform.js";
+import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
+import { recordPinchGesture } from "../../shared/telemetry/gestureTelemetry.js";
 import ReviewsBar from "./components/ReviewsBar.jsx";
 import CloudSyncBadge from "../../shared/ui/CloudSyncBadge.jsx";
 import { useReviewPersistence, docSaveState } from "./lib/usePersistence.js";
@@ -86,6 +87,17 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const [metaScanning, setMetaScanning] = useState(false); // B631: a post-load not-to-scale re-scan is in flight — hold the align nag until we've read the sheets
   const drag = useRef(null);
   const dedupeResaveRef = useRef(false); // B633/NEW-4: a load collapsed duplicate sheets → re-persist the cleaned array once
+  // Two-finger pinch runs on NATIVE touch events (mirrors the Site Planner's B555 fix and the
+  // Markup canvas's own pinch — iOS Safari's multi-touch POINTER events are unreliable, firing a
+  // spurious pointercancel on the first finger the instant a second lands; native touch events
+  // always carry every active finger in e.touches). onDown/onMove/onUp bail while touchCountRef.current
+  // >= 2 so nothing fights the pinch. The Stitcher never had a pinch path before this — it only ever
+  // zoomed via the wheel/trackpad — so this is new capability, not a migration.
+  const touchCountRef = useRef(0);       // # of fingers currently down — gates the pointer handlers
+  const pinchRef = useRef(null);         // active two-finger pinch baseline { mid, dist } | null
+  const pinchRafRef = useRef(0);         // pending rAF id for the throttled pinch update (0 = none)
+  const pinchNextRef = useRef(null);     // latest { mid, dist } awaiting the next frame
+  const pinchTelemetryRef = useRef(null); // { t, fingers } captured at pinch start — feeds the event:pinch row on end/cancel/anomaly
 
   /* ---- undo / redo (B303) — measures + the composite calibration ---- */
   const editRef = useRef({ measures: [], ftPerUnit: 0 });
@@ -449,6 +461,62 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
 
   // Screen<->world via the shared viewport engine (B329); { zoom, panX, panY } == { scale, tx, ty }.
   const toWorld = (e) => { const r = svgRef.current.getBoundingClientRect(); return screenToWorld({ scale: view.zoom, tx: view.panX, ty: view.panY }, { x: e.clientX - r.left, y: e.clientY - r.top }); };
+  // Viewport-relative screen point for pinch midpoint math — works on a Touch object too (same
+  // clientX/clientY shape as a pointer event).
+  const vpPoint = (t) => { const r = svgRef.current.getBoundingClientRect(); return { x: t.clientX - r.left, y: t.clientY - r.top }; };
+  const flushPinch = () => {
+    pinchRafRef.current = 0;
+    const nx = pinchNextRef.current, base = pinchRef.current;
+    if (!nx || !base) return;
+    const factor = nx.dist / base.dist;
+    setView((v) => { const nv = pinchZoom({ scale: v.zoom, tx: v.panX, ty: v.panY }, base.mid, nx.mid, factor, 0.05, 8); return { zoom: nv.scale, panX: nv.tx, panY: nv.ty }; });
+    pinchRef.current = nx;
+  };
+  const onTouchStartPinch = (e) => {
+    touchCountRef.current = e.touches.length;
+    if (e.touches.length < 2) return; // a 3rd+ finger is absorbed (never pans/draws) — only ≥2 starts/rebaselines a pinch below
+    const isNewPinch = !pinchRef.current;
+    const a = vpPoint(e.touches[0]), b = vpPoint(e.touches[1]);
+    pinchRef.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
+    pinchNextRef.current = null;
+    if (isNewPinch) pinchTelemetryRef.current = { t: performance.now(), fingers: e.touches.length };
+    else if (pinchTelemetryRef.current) pinchTelemetryRef.current.fingers = Math.max(pinchTelemetryRef.current.fingers, e.touches.length);
+    // Tear down any single-finger gesture the 1st finger had already started, so the pinch begins clean.
+    if (drag.current) { try { svgRef.current.releasePointerCapture(drag.current.pointerId); } catch (_) {} drag.current = null; }
+    setDraft(null);
+  };
+  const onTouchMovePinch = (e) => {
+    if (!pinchRef.current || e.touches.length < 2) return;
+    const a = vpPoint(e.touches[0]), b = vpPoint(e.touches[1]);
+    pinchNextRef.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
+    if (!pinchRafRef.current) pinchRafRef.current = requestAnimationFrame(flushPinch);
+  };
+  // `cancelled` distinguishes a native touchcancel (an interruption) from an ordinary touchend.
+  const onTouchEndPinch = (e, cancelled = false) => {
+    touchCountRef.current = e.touches.length;
+    if (e.touches.length >= 2) { // a 3rd+ finger lifted — re-baseline to the remaining pair, no jump
+      if (pinchTelemetryRef.current) pinchTelemetryRef.current.fingers = Math.max(pinchTelemetryRef.current.fingers, e.touches.length);
+      const a = vpPoint(e.touches[0]), b = vpPoint(e.touches[1]);
+      pinchRef.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
+      return;
+    }
+    if (pinchRef.current) {
+      const started = pinchTelemetryRef.current;
+      recordPinchGesture({
+        surface: "stitcher", eventSource: "touch",
+        fingerCount: started ? started.fingers : touchCountRef.current,
+        outcome: cancelled ? "cancelled" : "completed",
+        cancelReason: cancelled ? "touchcancel" : undefined,
+        durationMs: started ? performance.now() - started.t : undefined,
+      });
+    }
+    pinchTelemetryRef.current = null;
+    pinchRef.current = null; pinchNextRef.current = null;
+    if (pinchRafRef.current) { cancelAnimationFrame(pinchRafRef.current); pinchRafRef.current = 0; }
+  };
+  // A pinch mid-gesture at unmount must not leave a pending rAF whose callback fires against a
+  // torn-down instance's refs after the fact.
+  useEffect(() => () => { if (pinchRafRef.current) cancelAnimationFrame(pinchRafRef.current); }, []);
 
   // Start a manual Align. When the sheet's own match-line seam was detected (B336) but it
   // couldn't be auto-placed, PRE-SEED the moving sheet's two seam endpoints so the user only
@@ -480,6 +548,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   };
 
   const onDown = (e) => {
+    if (e.pointerType === "touch" && touchCountRef.current >= 2) return; // a two-finger pinch owns the gesture (native touch — see onTouchStartPinch)
     if (calInput) return; // finish the inline Calibrate entry first
     const w = toWorld(e);
     if (align) {
@@ -531,6 +600,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     if (tool === "area") setDraft((d) => (d && d.kind === "area" ? { ...d, pts: [...d.pts, w] } : { kind: "area", pts: [w] }));
   };
   const onMove = (e) => {
+    if (e.pointerType === "touch" && touchCountRef.current >= 2) return; // pinch owns a 2-finger gesture (native touch — see onTouchMovePinch)
     setCursor(toWorld(e));
     // Capture the drag origin into a local NOW, then close over it (panTo). This setView updater
     // runs in React's render phase, which for a continuous event (pointermove) can be deferred a
@@ -541,20 +611,46 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     const d = drag.current;
     if (d) setView((v) => panTo(v, d, e.clientX, e.clientY));
   };
-  const onUp = (e) => { if (drag.current) { drag.current = null; try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {} } };
+  const onUp = (e) => { if (e.pointerType === "touch" && touchCountRef.current >= 2) return; if (drag.current) { drag.current = null; try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {} } };
   // NEW-1 — recover from a pan whose gesture was interrupted (browser pointercancel, window
   // blur, tab hidden, or a devtools/remote-debugger attaching) rather than ending with a
   // normal pointer-up, so the stitcher canvas can never be left stuck mid-pan with pointer-
   // capture held and a frozen grab cursor that swallows clicks.
-  const abortGesture = (pid) => { if (pid != null && svgRef.current) { try { svgRef.current.releasePointerCapture(pid); } catch (_) {} } drag.current = null; };
+  // `reason` names WHY the gesture is being torn down — "pointercancel" | "blur" | "hidden" — and
+  // feeds the event:pinch telemetry row when a pinch was in progress. A pointercancel arriving
+  // while a pinch already owns the gesture is the exact iOS Safari quirk B555 was built around —
+  // harmless here, but its continued occurrence is the diagnostic signal this telemetry exists to
+  // catch, so it's recorded as an "anomaly", never a plain "cancelled".
+  const abortGesture = (pid, reason) => {
+    if (pinchRef.current) {
+      const started = pinchTelemetryRef.current;
+      recordPinchGesture({
+        surface: "stitcher", eventSource: "touch",
+        fingerCount: started ? started.fingers : touchCountRef.current,
+        outcome: reason === "pointercancel" ? "anomaly" : "cancelled",
+        cancelReason: reason === "pointercancel" ? "pointercancel-during-pinch" : (reason || "interrupted"),
+        durationMs: started ? performance.now() - started.t : undefined,
+      });
+      pinchTelemetryRef.current = null;
+    }
+    if (pid != null && svgRef.current) { try { svgRef.current.releasePointerCapture(pid); } catch (_) {} }
+    drag.current = null;
+    // Also drop any in-flight native-touch pinch so a blur/visibility loss or a real pointercancel
+    // mid-gesture can't strand it (same class as B555 on the Site Planner canvas).
+    touchCountRef.current = 0; pinchRef.current = null; pinchNextRef.current = null;
+    if (pinchRafRef.current) { cancelAnimationFrame(pinchRafRef.current); pinchRafRef.current = 0; }
+  };
   useEffect(() => {
     // B551: pass the in-flight pointerId so abortGesture actually RELEASES the capture (without it,
     // `pid != null` was false → capture held → frozen grab cursor + swallowed clicks after alt-tab).
-    const recover = () => { if (drag.current) abortGesture(drag.current.pointerId); };
-    const onVis = () => { if (document.hidden) recover(); };
-    window.addEventListener("blur", recover);
+    // Also fires on an in-flight pinch (drag.current is null there by design) so a blur/tab-hide
+    // mid-pinch can't strand touchCountRef/pinchRef either.
+    const recover = (reason) => { if (drag.current || touchCountRef.current > 0) abortGesture(drag.current?.pointerId, reason); };
+    const onBlur = () => recover("blur");
+    const onVis = () => { if (document.hidden) recover("hidden"); };
+    window.addEventListener("blur", onBlur);
     document.addEventListener("visibilitychange", onVis);
-    return () => { window.removeEventListener("blur", recover); document.removeEventListener("visibilitychange", onVis); };
+    return () => { window.removeEventListener("blur", onBlur); document.removeEventListener("visibilitychange", onVis); };
   }, []);
   const onWheel = (e) => { e.preventDefault(); const r = svgRef.current.getBoundingClientRect(); const mx = e.clientX - r.left, my = e.clientY - r.top; setView((v) => { const nv = zoomAround({ scale: v.zoom, tx: v.panX, ty: v.panY }, e.deltaY < 0 ? 1.15 : 1 / 1.15, mx, my, 0.05, 8); return { zoom: nv.scale, panX: nv.tx, panY: nv.ty }; }); };
   // ± zoom buttons anchor on the viewport CENTRE (not the world origin), matching the cursor-
@@ -1015,7 +1111,8 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         {/* world canvas */}
         <div style={{ flex: 1, minWidth: 0, position: "relative", background: "var(--canvas-mat)" }}>
           <svg ref={svgRef} width="100%" height="100%" style={{ display: "block", cursor: align ? "crosshair" : tool === "pan" ? "grab" : "crosshair", touchAction: "none" }}
-            onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={(e) => abortGesture(e.pointerId)} onDoubleClick={finishArea}
+            onTouchStart={onTouchStartPinch} onTouchMove={onTouchMovePinch} onTouchEnd={onTouchEndPinch} onTouchCancel={(e) => onTouchEndPinch(e, true)}
+            onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={(e) => abortGesture(e.pointerId, "pointercancel")} onDoubleClick={finishArea}
             onWheel={onWheel} onMouseDown={(e) => e.preventDefault()}>
             <g transform={G}>
               {placed.map((s) => {
