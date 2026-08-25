@@ -397,17 +397,18 @@ export const evalHealthRules = (task, settings, NOWv, taskById) => {
   return null;
 };
 
-// Compute display health (faithful copy from index.html ~L2559). ⛔ RULES-ALWAYS-WIN (2026-08-25) — RULES
-// ALWAYS WIN: the rule list runs FIRST and a match returns outright, even over a hand-set
-// `health`/`healthOverride`. `healthOverride` only gets a say when NO rule matches (a fallback for
-// the silence case, never a way to block a firing rule). Otherwise: THEN the meeting-bound /
-// deadline-row blocks (unrelated, always-on feature, unchanged), THEN the raw stored health as the
-// final fallback.
+// Compute display health (faithful copy from index.html ~L2563). ⛔ RULES-DECIDE (2026-08-25, owner
+// correction — supersedes the earlier "RULES-ALWAYS-WIN" pass, which kept `healthOverride` as a
+// fallback for when no rule matched). The override flag and its early return are RETIRED outright:
+// nothing a user clicks can ever pin a task's color against a firing rule. The rule list runs first
+// (first match wins); when no rule matches, the meeting-bound / deadline-row risk blocks below get
+// their say (unrelated, always-on feature, unchanged), and the raw stored health is the final
+// fallback either way. A task may still carry a `healthOverride` field in old stored data — dead,
+// unread data; nothing here consults it anymore.
 export const computeDisplayHealth = (task, settings, taskById) => {
   if (!task) return task?.health;
   const ruleResult = evalHealthRules(task, settings, NOW, taskById);
   if (ruleResult) return ruleResult;
-  if (task.healthOverride) return task.health;
   // B817 — a meeting-bound task surfaces its schedule risk BEFORE it slips: infeasible = red (a genuine
   // alert), ≤2 working days of float to the agenda deadline = at-risk yellow. Reads the cascade-derived
   // fields (no body lookup). Opt-in (only fires on bound rows); complete/paused rows are exempt.
@@ -714,6 +715,23 @@ export const mergeCloudDoc = (base, ours, theirs) => {
 export const SCHEDULE_INPUT_KEYS = ['start','end','duration','durValue','durUnit','predecessors','pinnedStart','pinnedEnd','meetingBound','meetingBodyId','pinnedMeetingDate','minMeetingsAfter','deadlineForTaskId'];
 export const touchesSchedule = updates => !!updates && SCHEDULE_INPUT_KEYS.some(k => k in updates);
 
+// B752848 (2026-08-25) — updateTask's "when health changes on a parent, cascade to all descendants"
+// block, VERBATIM mirror of public/sequence/index.html's updateTask closure (~L6350-6365). This
+// fragment previously had NO unit test at all — it lives inside a React useCallback closure that
+// can't be imported, so per #1085 it was only ever exercised live in the browser. Extracted here
+// (byte-identical logic, just lifted to module scope) so the "no healthOverride stamp" claim in
+// RULES-DECIDE is proven by a real unit test, not only by the source-regex anti-drift checks below.
+export const getDescIds = (id, all) => {
+  const kids = all.filter(t => t.parentId === id);
+  return [...kids.map(k => k.id), ...kids.flatMap(k => getDescIds(k.id, all))];
+};
+export const recolorBranch = (tasks, taskId, health) => {
+  const descIds = new Set(getDescIds(taskId, tasks));
+  if (descIds.size === 0) return tasks;
+  const extra = health === 'green' ? { percentComplete: 100 } : {};
+  return tasks.map(t => descIds.has(t.id) ? { ...t, health, ...extra } : t);
+};
+
 // Export filename — matches the Site Planner's PDF/PNG naming ("YYYY.MM.DD {Project} - {Plan}");
 // here the trailing slot is "Schedule". Faithful copy from index.html (date injectable for tests).
 export const scheduleExportName = (projects, date = new Date()) => {
@@ -822,29 +840,8 @@ export const normalizeToV7 = d => {
   });
   return {...d, projects, _v7: true};
 };
-// v9 — faithful copy of normalizeToV9 in index.html. One-time seed of the per-task
-// `healthOverride` flag: green/red/paused was necessarily hand-set (nothing else ever wrote
-// those), so it becomes an override, reproducing the old overdueRed/meetingBound exclusion of
-// green/paused/red exactly. Idempotent via _v9 — only ever touches a task that has never seen
-// this migration (healthOverride === undefined), so a value the user later clears to `false` is
-// never re-locked on a later load.
-export const normalizeToV9 = d => {
-  if (!d || typeof d !== "object") d = {};
-  if (d._v9) return d;
-  const projects = {};
-  const srcProjects = (d.projects && typeof d.projects === "object") ? d.projects : {};
-  Object.entries(srcProjects).forEach(([id, proj]) => {
-    if (!proj || typeof proj !== "object") return;
-    const srcTasks = Array.isArray(proj.tasks) ? proj.tasks : [];
-    const tasks = srcTasks.filter(t => t && typeof t === "object").map(t =>
-      t.healthOverride === undefined
-        ? {...t, healthOverride: t.health === "green" || t.health === "red" || t.health === "paused"}
-        : t
-    );
-    projects[id] = {...proj, tasks};
-  });
-  return {...d, projects, _v9: true};
-};
+// ⛔ RETIRED (2026-08-25, B752848 owner correction): normalizeToV9 seeded the now-deleted
+// `healthOverride` flag on load. Removed along with the flag itself.
 export const ensureHolidays = d => {
   if (!d?.settings) return d;
   const merged = {...DEFAULT_HOLIDAYS, ...(d.settings.holidays||{})};
