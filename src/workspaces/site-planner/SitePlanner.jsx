@@ -302,7 +302,7 @@ import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent, clipSegmentToRing } from "./lib/footprintEdit.js";
 import { pondAreaLabelLine, pondAreaDeltaLine } from "./lib/pondLabelText.js";
 import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNumberBox } from "./lib/dimSlide.js";
-import { pointInRing } from "./lib/ringMath.js";
+import { pointInRing, projectOntoSegment } from "./lib/ringMath.js";
 import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval, detentionStorage, usablePondVolume, incrementalExcavationCf, detentionLandTakeEstimate, estimateFootprintSf, pondPlacementCandidates, drawdownWarning, bermAsFillHeight, bermFillVolume, bermFillCells } from "./lib/pondGeom.js";
 import { accumulatePondLedger, effectivePondRole, POND_ROLE_LABEL, pondDisplayName, pondDisplayNameFor } from "./lib/pondLedger.js";
 import { pondLedgerSignature, createIdentityToken } from "./lib/pondLedgerKey.js";
@@ -2610,6 +2610,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // which cancels any pending auto-clear first — so a stale timer from an earlier message
   // can never blank a newer one. ms<=0 = sticky (no auto-clear; still cancels a prior timer).
   // Bare setOverlapWarn("") clears can stay: a later flashWarn cancels any lingering timer.
+  // NEW-4/B872 — the pill this drives (below, near `toastPill`) colors itself from the message
+  // TEXT: a leading/embedded "⚠" is the ONLY thing that turns it red instead of the default
+  // success-green (#15803d) — the exact green also used for the affirmative "● Scaled · county
+  // GIS" status chip, which is how a blocking refusal (e.g. the old bump-out reshape refusal)
+  // could render pixel-for-pixel as a success. A call site that REFUSES a requested action —
+  // "Couldn't…", "Can't…", "…first", a guard reverting a gesture — must prepend "⚠ " so the pill
+  // renders as an error; a call site reporting a COMPLETED action (even with a caveat) stays plain.
   const warnTimerRef = useRef(null);
   const flashWarn = useCallback((msg, ms = 6000) => {
     if (warnTimerRef.current) { clearTimeout(warnTimerRef.current); warnTimerRef.current = null; }
@@ -6318,7 +6325,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         })
       : null;
     const place = clipPlacement({ crossPlan, frame, bbox: bb, cursor: anchor ? snapPt(anchor) : null, nudge: (settings.gridSize || 10) * 2 });
-    if (place.mode === "refuse") { flashWarn(place.message, 7000); return; } // LOUD-FAILURE
+    if (place.mode === "refuse") { flashWarn(`⚠ ${place.message}`, 7000); return; } // LOUD-FAILURE; NEW-4/B872 — a refusal, not a success, needs the error-pill prefix
     const { dx, dy } = place;
     const note = pasteNote(place, frame);
     const made = pasteClipboard(payload.items, { mint: uid, translate: clipTranslate(), dx, dy });
@@ -6703,7 +6710,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
       let b = els.find((e) => e.type === "building" && pointInRing(fp, ringOf(e)));
       if (!b) { const builds = els.filter((e) => e.type === "building"); if (builds.length) b = builds.reduce((best, e) => _hyp(fp, centroid(ringOf(e))) < _hyp(fp, centroid(ringOf(best))) ? e : best); }
-      if (!b) { flashWarn("No building to serve — draw a building first.", 0); return; }
+      if (!b) { flashWarn("⚠ No building to serve — draw a building first.", 0); return; }
       commitUtilRoute(routeMode, b);
       return;
     }
@@ -7016,7 +7023,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     // Nothing took the cut. Report what was wrong with THIS cut against the parcel it was aimed
     // at, never generic advice to draw something simpler.
-    if (firstRefusal) flashWarn(firstRefusal.message, 7000);
+    if (firstRefusal) flashWarn(`⚠ ${firstRefusal.message}`, 7000); // NEW-4/B872 — a refusal, error-pill prefix
   };
 
   /* ------------ merge parcels (Shift-click multi-select) ------------ */
@@ -7077,7 +7084,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (merged) { result = merged; remaining.splice(i, 1); progress = true; break; }
       }
     }
-    if (remaining.length) { flashWarn("Those parcels don't all share a boundary — pick parcels that touch edge-to-edge.", 6000); return; } // B735: non-blocking notice, not a jarring alert()
+    if (remaining.length) { flashWarn("⚠ Those parcels don't all share a boundary — pick parcels that touch edge-to-edge.", 6000); return; } // B735: non-blocking notice, not a jarring alert()
     pushHistory();
     const np = { id: uid(), points: result, locked: true };
     // The merged-away parcels are genuinely removed (replaced by `np`), so TOMBSTONE them — the same
@@ -7393,7 +7400,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Commit a built easement: history + add + select + a screening overlap warning.
   const commitEasement = (mk) => {
-    if (!mk) { flashWarn("Couldn't build that easement — check the points / width.", 5000); return; }
+    if (!mk) { flashWarn("⚠ Couldn't build that easement — check the points / width.", 5000); return; }
     pushHistory();
     setMarkups((a) => [...a, ...withStackZ(a, [mk])]);
     setSel({ kind: "markup", id: mk.id }); setTool("select"); // B656: selection alone surfaces the companion
@@ -7417,7 +7424,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const pc = parcels.find((p) => p.id === easeEdges.parcelId);
     if (!pc) { setEaseEdges(null); return; }
     const strip = buildParcelEdgeStrip(pc.points, easeEdges.idx, easeWidth);
-    if (!strip) { flashWarn("Pick ONE contiguous run of edges along a single parcel, then press Enter.", 6000); return; }
+    if (!strip) { flashWarn("⚠ Pick ONE contiguous run of edges along a single parcel, then press Enter.", 6000); return; }
     commitEasement(makeEasement({ mode: "parceledge", centerline: strip.run, width: easeWidth, offsetSide: strip.offsetSide, parcelId: pc.id }));
     setEaseEdges(null);
   };
@@ -7631,7 +7638,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
     }
     const np = snapPt(ptFeet);
-    const ins = (arr) => { const a = [...arr]; a.splice(edgeIndex + 1, 0, np); return a; };
+    // NEW-5/B872 — inserting a control point on an existing straight edge is geometrically a
+    // no-op (same two flanking vertices, same line), but snap() rounds x and y INDEPENDENTLY —
+    // invisible on an axis-aligned wall, a small kink on an angled one, since the snap grid isn't
+    // aligned to the wall's bearing. That kink is what moved the reported footprint from
+    // 417,600 SF to 417,601 SF on a shift-click with no drag: the inserted point landed a hair off
+    // the line between its two neighbors. Re-project the snapped point back onto the REAL edge (its
+    // actual current neighbors in `arr`, via the shared lib/ringMath.js `projectOntoSegment`) so it
+    // always lands exactly on the line — snap still moves the point along the edge, it just can no
+    // longer nudge it off the edge.
+    const ins = (arr) => {
+      const a = [...arr];
+      const n = arr.length, p0 = arr[edgeIndex], p1 = arr[(edgeIndex + 1) % n];
+      a.splice(edgeIndex + 1, 0, p0 && p1 ? projectOntoSegment(p0, p1, np) : np);
+      return a;
+    };
     pushHistory();
     // NEW-6 — a role override is per EDGE, so inserting a control point has to carry it across the
     // split (both halves are still the same side). Without this the vector stops matching the ring
@@ -8134,6 +8155,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // A dock-wall corner projects onto its stored wall line (slides along it, no grid snap so it
       // never kinks off the wall); every other vertex grid-snaps as usual. (NEW-1/B872)
       const sp = d.dockLine ? projectOntoLine(d.dockLine, fp) : snapPt(fp);
+      // NEW-2/B872 round 2 — reject a self-crossing / degenerate candidate on the FRAME that would
+      // create it, not only at pointer-up (the guard at onUp below, kept as a backstop). The owner
+      // measured a corner drag whose overshoot (~5× the cursor's own on-screen travel; the cause is
+      // UNPROVEN — p2f/screenToWorld were audited and carry no devicePixelRatio or browser-zoom term,
+      // since clientX/Y and getBoundingClientRect() are both reported in the same CSS-pixel space at
+      // any zoom level, so page zoom cannot by itself explain a scale mismatch here) wrote a
+      // bow-tie polygon to site_elements that sat in the database for ~80s before a silent corrective
+      // write restored it — the canvas never even showed the bad shape, because the corrupted write
+      // reached the sync engine before the old release-only guard ran. Checking every frame means an
+      // invalid polygon is never CONSTRUCTED in local state in the first place, so there is nothing
+      // invalid left to race a flush against: the vertex simply holds at its last valid position
+      // instead of crossing the outline, regardless of how large a jump produced the candidate.
+      if (d.footEdit) {
+        const hostEl = els.find((x) => x.id === d.id);
+        if (hostEl && hostEl.points) {
+          const cand = hostEl.points.map((p, i) => (i === d.index ? sp : p));
+          if (cand.length < 3 || polyArea(cand) < 1 || polySelfIntersects(cand)) {
+            if (!d.crossWarned) { d.crossWarned = true; flashWarn("⚠ Reshape held — that move would cross the outline over itself.", 3000); }
+            return; // write nothing this frame — hold at the last valid position
+          }
+          d.crossWarned = false; // back in valid territory — a later cross gets a fresh warning
+        }
+      }
       scheduleFrameJob("geom", () => setEls((a) => a.map((x) => x.id === d.id && x.points
         ? { ...x, points: x.points.map((p, i) => (i === d.index ? sp : p)) } : x)));
       return;
@@ -8533,8 +8577,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const b = elsNow.find((x) => x.id === d.id);
       if (b && b.points) {
         if (b.points.length < 3 || polyArea(b.points) < 1 || polySelfIntersects(b.points)) {
+          // Backstop only — the per-frame guard above (NEW-2/B872 round 2) should make this
+          // unreachable via a normal drag, but a typed coordinate or another write path could still
+          // land here, so it stays as the last line of defense. NEW-4/B872 — this is a REFUSAL, not
+          // a completed action, so it carries the ⚠ the toast pill keys its error styling on
+          // (was rendering in the same green as a success message — see the toast-pill audit note
+          // near `flashWarn`'s definition).
           setEls((a) => a.map((x) => x.id === d.id ? { ...x, points: d.origPoints } : x));
-          flashWarn("That reshape crosses the outline over itself — reverted. Keep the walls from crossing.", 7000);
+          flashWarn("⚠ That reshape crosses the outline over itself — reverted. Keep the walls from crossing.", 7000);
         } else {
           const bb = frameBBox(b.points, b.rot || 0);
           const nbCalc = { ...b, cx: bb.cx, cy: bb.cy, w: bb.w, h: bb.h };
@@ -9016,7 +9066,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const removeOverlay = (id) => {
     const o = sheetOverlays.find((x) => x.id === id);
-    if (!o) { flashWarn("Couldn't delete that drawing — it's no longer in the list.", 5000); return; } // count-check: never a phantom no-op delete (B461)
+    if (!o) { flashWarn("⚠ Couldn't delete that drawing — it's no longer in the list.", 5000); return; } // count-check: never a phantom no-op delete (B461)
     pushHistory();
     const doc = overlayDocs.current.get(id);
     if (doc) { try { doc.destroy(); } catch (_) {} overlayDocs.current.delete(id); }
@@ -9056,7 +9106,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const overlayCenter = (o) => ({ x: o.x + (o.imgW * o.ftPerPx) / 2, y: o.y + (o.imgH * o.ftPerPx) / 2 });
   const copyOverlay = (id) => {
     const o = sheetOverlays.find((x) => x.id === id);
-    if (!o) { flashWarn("Couldn't copy — that drawing is no longer in the list.", 4000); return; }
+    if (!o) { flashWarn("⚠ Couldn't copy — that drawing is no longer in the list.", 4000); return; }
     // Snapshot shares src + storageKey (the source ref), not a re-import — so a cross-plan paste
     // references the SAME stored file, exactly as `⧉ Duplicate plan` already does.
     setOverlayClip({ overlay: { ...o }, ...clipProvenance() });
@@ -9072,14 +9122,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const duplicateOverlay = (id) => {
     const o = sheetOverlays.find((x) => x.id === id);
-    if (!o) { flashWarn("Couldn't duplicate — that drawing is no longer in the list.", 4000); return; }
+    if (!o) { flashWarn("⚠ Couldn't duplicate — that drawing is no longer in the list.", 4000); return; }
     const off = OV_OFFSET();
     placeOverlayCopy(o, o.x + off, o.y + off);
     flashWarn(`Duplicated “${o.name}”.`, 3000);
   };
   const pasteOverlay = () => {
     const payload = getOverlayClip();
-    if (!payload) { flashWarn("Nothing to paste — copy a drawing first.", 3500); return; } // B461 edge case: empty clipboard
+    if (!payload) { flashWarn("⚠ Nothing to paste — copy a drawing first.", 3500); return; } // B461 edge case: empty clipboard
     const o = payload.overlay;
     const c = lastPtrFt.current; // live cursor in feet → paste lands centered there (B417 pattern)
     const w = o.imgW * o.ftPerPx, h = o.imgH * o.ftPerPx;
@@ -9092,7 +9142,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       ? resolveClipFrame(payload.origin, origin, { ref: { x: o.x + w / 2, y: o.y + h / 2 }, extentFt: Math.max(w, h) })
       : null;
     const place = clipPlacement({ crossPlan, frame, bbox: bb, cursor: c, nudge: OV_OFFSET() });
-    if (place.mode === "refuse") { flashWarn(place.message, 7000); return; } // LOUD-FAILURE
+    if (place.mode === "refuse") { flashWarn(`⚠ ${place.message}`, 7000); return; } // LOUD-FAILURE; NEW-4/B872 — a refusal, not a success, needs the error-pill prefix
     const x = o.x + place.dx, y = o.y + place.dy;
     placeOverlayCopy(o, x, y);
     revealPasted({ x0: x, y0: y, x1: x + w, y1: y + h });
@@ -9126,7 +9176,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setOvAlignBase(null);
     const o = sheetOverlays.find((x) => x.id === id);
     if (!o) return;
-    if (o.locked) { flashWarn("That drawing is locked — unlock it to align.", 4000); return; } // refuse a locked overlay, with a reason
+    if (o.locked) { flashWarn("⚠ That drawing is locked — unlock it to align.", 4000); return; } // refuse a locked overlay, with a reason
     const list = onlyParcel ? [onlyParcel] : parcels;
     let best = null;
     list.forEach((pc) => (pc.points || []).forEach((a, i) => {
@@ -9134,7 +9184,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const d = segDist(fp, a, b);
       if (!best || d < best.d) best = { d, a, b };
     }));
-    if (!best) { flashWarn("No parcel boundary to align to — draw or load a parcel first.", 5000); return; }
+    if (!best) { flashWarn("⚠ No parcel boundary to align to — draw or load a parcel first.", 5000); return; }
     const dx = best.b.x - best.a.x, dy = best.b.y - best.a.y;
     if (Math.hypot(dx, dy) < 1e-6) { flashWarn("That edge is too short to read a direction — pick another.", 4000); return; } // degenerate guard — never apply a NaN rotation
     const ang = (Math.atan2(dy, dx) * 180) / Math.PI;
@@ -9183,7 +9233,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setSheetOverlays((arr) => arr.map((x) => (x.id === id ? { ...x, src: r.src, knockout: on } : x)));
       if (o.idbKey && idbAvailable()) idbPut(o.idbKey, r.src); // keep the offline raster cache in step
     } catch (_) {
-      flashWarn("Couldn't re-render this sheet — re-add the PDF to change its white knockout.", 6000);
+      flashWarn("⚠ Couldn't re-render this sheet — re-add the PDF to change its white knockout.", 6000);
     }
   };
   // B73 — apply a drawing scale (feet per inch) to an overlay: ftPerPx = S/72 (points),
@@ -10456,13 +10506,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return relayoutSide(next, b, de.dogEar.side);
     });
   };
-  // Dog-ears at both corners of every dock side (skipping any already present).
+  // Dog-ears at both corners of every dock side (skipping any already present). Bulk placer —
+  // the right-click menu's "Add bump-outs (…)" action, which deliberately places every missing
+  // corner in one click.
   const addDogEars = (b) => {
     const { dockSides } = dockSidesOf(b);
     const have = new Set(els.filter((x) => x.attachedTo === b.id && x.dogEar).map((x) => `${x.dogEar.side}${x.dogEar.sign}`));
     const corners = [];
     dockSides.forEach((s) => [1, -1].forEach((sign) => { if (!have.has(`${s}${sign}`)) corners.push([s, sign]); }));
     placeDogEars(b, corners);
+  };
+  // NEW-3/B872 — the Properties panel's Bump-outs [−]/[＋] stepper used to wrap the ALL-OR-NOTHING
+  // add/remove above, so one press of [−] (titled "Remove all bump-outs") took the count straight
+  // to 0 while its sibling rows (Dock zones, Car parking) step one unit per click — an affordance
+  // lie the owner caught by reading the button's own title. These two make Bump-outs a REAL stepper:
+  // one corner per press, same as every other row in this list.
+  const addOneDogEar = (b) => {
+    const { dockSides } = dockSidesOf(b);
+    const have = new Set(els.filter((x) => x.attachedTo === b.id && x.dogEar).map((x) => `${x.dogEar.side}${x.dogEar.sign}`));
+    for (const s of dockSides) for (const sign of [1, -1]) if (!have.has(`${s}${sign}`)) return placeDogEars(b, [[s, sign]]);
+  };
+  const removeOneDogEar = (b) => {
+    const de = els.find((x) => x.attachedTo === b.id && x.dogEar);
+    if (de) removeDogEar(b, de);
   };
   // Which building side a bonded kid hugs. Trust an explicit tag; else infer it
   // from the kid's position (so legacy / untagged strips are still recognised).
@@ -10684,7 +10750,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // return having removed nothing, tombstoned nothing, and said nothing.
     if (!parcels.some((p) => p.id === id)) {
       setParcelMenu(null);
-      flashWarn("That's already gone — nothing left to delete.", 5000);
+      flashWarn("⚠ That's already gone — nothing left to delete.", 5000);
       reportClientEvent("delete-outcome", "menu:parcel → no-op (stale)", { entry: "menu:parcel", result: "no-op", reason: "stale", id });
       return;
     }
@@ -10725,7 +10791,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // used to close the menu and do nothing at all; now it says so and is traceable.
     if (!m) {
       setMapMenu(null);
-      flashWarn("That's already gone — nothing left to delete.", 5000);
+      flashWarn("⚠ That's already gone — nothing left to delete.", 5000);
       reportClientEvent("delete-outcome", "menu:markup → no-op (stale)", { entry: "menu:markup", result: "no-op", reason: "stale", id });
       return;
     }
@@ -13550,7 +13616,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const rightSizePond = (pondId = null) => {
     const id = pondId || (sel?.kind === "el" ? sel.id : null);
     const el = els.find((e) => e.id === id && e.type === "pond");
-    if (!el) { flashWarn("Select a pond on the plan first — Optimize works on one basin at a time.", 6000); return; }
+    if (!el) { flashWarn("⚠ Select a pond on the plan first — Optimize works on one basin at a time.", 6000); return; }
     const alt = materialAlternative(rightSizeResultFor(el));
     revealPondInspector(el.id);
     flashWarn(alt
@@ -13650,17 +13716,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (needsMit && !floodAffected) {
       // Mitigation was required but no floodplain ground was reachable to place/select against.
       if (isNew) { place({ ...baseEl, det: { ...baseEl.det, role: roleForJob } }); revealPondInspector(baseEl.id); }
-      flashWarn("This site's mapped floodplain wasn't found under open ground, so a pond couldn't be placed inside it automatically. Drag the pond onto the flood zone shown on the map, then reopen the Sizing assistant to size it.", 8500);
+      flashWarn("⚠ This site's mapped floodplain wasn't found under open ground, so a pond couldn't be placed inside it automatically. Drag the pond onto the flood zone shown on the map, then reopen the Sizing assistant to size it.", 8500);
       return;
     }
 
     if (effDetProbe.tobElev == null) {
       if (isNew) { place({ ...baseEl, det: { ...baseEl.det, role: roleForJob } }); revealPondInspector(baseEl.id); }
-      flashWarn(`${isNew ? "Placed a pond, but it" : "This pond"} needs a top-of-bank elevation before it can be sized: set it in the pond's Properties, then reopen ⚡ Optimize pond.`, 8500);
+      flashWarn(`⚠ ${isNew ? "Placed a pond, but it" : "This pond"} needs a top-of-bank elevation before it can be sized: set it in the pond's Properties, then reopen ⚡ Optimize pond.`, 8500);
       return;
     }
     if ((needsDet && otherLedger.usableCf == null) || (needsMit && otherLedger.creditedMitCf == null)) {
-      flashWarn("This site's usable/dead pond split isn't fully known: ↻ Re-check first, then Optimize pond can size against real numbers.", 7000);
+      flashWarn("⚠ This site's usable/dead pond split isn't fully known: ↻ Re-check first, then Optimize pond can size against real numbers.", 7000);
       return;
     }
 
@@ -15032,7 +15098,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const restoreVersion = (at) => {
     // B467/NEW-4 — Restore is a WRITE. A read-only tab (another tab is the active editor) must not be
     // able to overwrite the canvas; block it loudly with the way out.
-    if (readOnly) { flashWarn("This tab is read-only — the plan is open in another tab. Take over editing here first, then restore.", 9000); return; }
+    if (readOnly) { flashWarn("⚠ This tab is read-only — the plan is open in another tab. Take over editing here first, then restore.", 9000); return; }
     const v = getVersion(siteId, at);
     if (!v) return;
     // B467/NEW-4 — VERIFY the dialog's "your current version is backed up too, so a restore can be
@@ -17219,7 +17285,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const alignDeedToParcel = async (id) => {
     const { describeRotation, ringCentroid: deedCentroid, gridConvergenceDeg } = await loadDeed();
     const m = markups.find((x) => x.id === id && x.kind === "encumbrance");
-    if (!m || !(m.pts && m.pts.length >= 3)) { flashWarn("Select a plotted deed boundary first.", 5000); return; }
+    if (!m || !(m.pts && m.pts.length >= 3)) { flashWarn("⚠ Select a plotted deed boundary first.", 5000); return; }
     const members = deedGroupMembers(m);
     const main = deedMainOf(members, m);
     const memberIds = new Set(members.map((x) => x.id));
@@ -17238,7 +17304,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return;
     }
     // No parcel to fit → grid-convergence correction about the deed centroid.
-    if (!origin) { flashWarn("No county parcel to align to. Add the parcel (＋ Add → Click a lot on the map), or rotate the deed by hand to match the aerial.", 8000); return; }
+    if (!origin) { flashWarn("⚠ No county parcel to align to. Add the parcel (＋ Add → Click a lot on the map), or rotate the deed by hand to match the aerial.", 8000); return; }
     const c = deedCentroid(main.pts);
     const [lat, lon] = feetToLatLng(c, origin.lat, origin.lon);
     /* NEW-2 — the convergence is resolved in the SITE'S OWN state-plane zone (the plan's saved
@@ -17354,7 +17420,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // --- utility service routing (electric / water) ---
   const startRoute = (util, extra = {}) => {
     if (util === "elec" && !markups.some((m) => m.kind === "traced")) {
-      flashWarn("Trace an overhead pole line first (✏ Trace overhead electric), then route from it.", 6000); return;
+      flashWarn("⚠ Trace an overhead pole line first (✏ Trace overhead electric), then route from it.", 6000); return;
     }
     setSel(null); setTool("select"); setTraceMode(false);
     setRouteMode({ util, snapTo: util === "elec" ? "traced" : "free", stage: "source", ...extra });
@@ -17485,21 +17551,38 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // NEW-1 / B872 — reshape a placed rectangular building. PROMOTE it to an editable polygon
   // (`el.points`), pinning the loaded (dock) walls as fixed world-feet lines so the shared B230
   // vertex engine can angle an end wall / clip a corner while the dock frame is preserved: a dock
-  // corner slides ALONG its wall, an end-wall vertex moves freely (see lib/footprintEdit.js). Blocks
-  // while corner bump-outs are attached — dog-ears anchor to rect corners and would misplace on an
-  // angled wall (they must be removed first, never silently dropped).
+  // corner slides ALONG its wall, an end-wall vertex moves freely (see lib/footprintEdit.js).
+  // ⛔ NEW-1/B872 round 2 — dog-ears anchor to rect corners and would misplace on an angled wall,
+  // so a building carrying any used to REFUSE outright with a toast pointing nowhere actionable
+  // (its only remove control is several scrolls down in Properties, never named). Measured in
+  // production: 157 of 215 live building assemblies (73%) carry bump-outs, so for most buildings
+  // this was the FIRST thing reshape did. Preferred fix per the owner's report: clearing the
+  // bump-outs is the only thing the user can do anyway, so do it FOR them, in the same undo step,
+  // and proceed straight into reshape mode. The standalone "Remove bump-outs" context-menu item
+  // (added alongside "Add bump-outs") still exists for a user who wants them gone without reshaping.
   const editBuildingFootprint = (id) => {
     const el = els.find((x) => x.id === id);
     if (!el || el.type !== "building" || el.dogEar || el.points) return; // already irregular / not a plain building
-    if (els.some((x) => x.attachedTo === id && x.dogEar)) {
-      flashWarn("Remove the corner bump-outs before editing the footprint (they anchor to square corners).", 7000);
-      return;
-    }
+    const bumps = els.filter((x) => x.attachedTo === id && x.dogEar);
     pushHistory();
-    setEls((a) => a.map((x) => x.id === id ? { ...x, ...convertBuildingToPolygon(x) } : x));
+    const ids = new Set(bumps.map((de) => de.id));
+    const killed = bumps.length ? els.filter((x) => ids.has(x.id) || ids.has(x.forCourt)).map((x) => x.id) : [];
+    setEls((a) => {
+      let next = a;
+      if (bumps.length) {
+        next = relayoutBumpSidewalks(a.filter((x) => !ids.has(x.id) && !ids.has(x.forCourt)), el);
+        new Set(bumps.map((de) => de.dogEar.side)).forEach((side) => { next = relayoutSide(next, el, side); });
+      }
+      return next.map((x) => (x.id === id ? { ...x, ...convertBuildingToPolygon(x) } : x));
+    });
+    if (killed.length) tombstone(killed);
     setSel({ kind: "el", id });
     setSelVtx(null);
-    flashWarn("Reshape mode: drag a corner to move it. Loaded (dock) walls stay straight — their corners slide along the wall; Shift-click an end/rear wall to add a control point.", 9000);
+    flashWarn(
+      (bumps.length ? `Cleared ${bumps.length} corner bump-out${bumps.length > 1 ? "s" : ""} (they anchor to square corners) and entered r` : "R") +
+        "eshape mode: drag a corner to move it. Loaded (dock) walls stay straight — their corners slide along the wall; Shift-click an end/rear wall to add a control point.",
+      9000
+    );
   };
   // Undo the reshape: drop back to the rectangle that bounds the current outline (keeps cx/cy/w/h/rot,
   // which are the live dock-frame box). Relays out the dock zones onto the restored square walls.
@@ -23648,8 +23731,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           onRem: () => shrinkEmployeeParking(b), remOn: employeeSideHasAny(b), remTitle: "Pull the non-dock-side parking in by one row (then the sidewalk)",
                         })}
                         {featRow("Bump-outs", bumpN, {
-                          onAdd: () => addDogEars(b), addOn: !noDock && !b.footEdit, addTitle: b.footEdit ? "Reset the footprint to a rectangle first — bump-outs anchor to square corners" : `Add dock-corner bump-outs · ${DOGEAR_W}′×${DOGEAR_D}′ corners`,
-                          onRem: () => removeAllDogEars(b), remOn: bumpN > 0, remTitle: "Remove all bump-outs",
+                          // NEW-3/B872 — one corner per press now, matching Dock zones / Car parking above
+                          // (was all-4-at-once on both ends; the − button's own title said "Remove all
+                          // bump-outs" while looking exactly like the other rows' one-unit steppers).
+                          onAdd: () => addOneDogEar(b), addOn: !noDock && !b.footEdit && bumpN < dockSidesOf(b).dockSides.length * 2, addTitle: b.footEdit ? "Reset the footprint to a rectangle first — bump-outs anchor to square corners" : `Add one dock-corner bump-out · ${DOGEAR_W}′×${DOGEAR_D}′`,
+                          onRem: () => removeOneDogEar(b), remOn: bumpN > 0, remTitle: "Remove one bump-out",
                         })}
                         {layerChooserRow("Behind the dock stack", "dock", dockSides)}
                         {layerChooserRow("Rear / non-dock sides", "nondock", carEndsSides(b))}
@@ -24912,7 +24998,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           const sizeForRequired = () => {
                             // An ANCHORED pond needs no estimated pool — its split is real.
                             if (!anchoredThis && regimeB && poolDepthFt == null) {
-                              flashWarn("In this floodplain the permanent-pool depth can't be established (missing BFE or ground elevation) — refusing to size against an unknown usable volume.", 7500);
+                              flashWarn("⚠ In this floodplain the permanent-pool depth can't be established (missing BFE or ground elevation) — refusing to size against an unknown usable volume.", 7500);
                               return;
                             }
                             // volumeAt returns USABLE volume (gross − permanent pool) at the candidate footprint.
@@ -25804,7 +25890,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <div style={{ fontSize: 9.5, color: PAL.warn, lineHeight: 1.4, margin: "6px 0 8px" }}>Screening only — LiDAR bare-earth, verify with survey.</div>
                 <button onClick={() => {
                   if (selEl?.type === "pond") { pushHistory(); setSelEl({ det: { ...(selEl.det || {}), availDepth: s.depthFt } }); flashWarn("Available depth applied to the selected pond.", 4000); }
-                  else { flashWarn("Select a pond first, then apply the available depth.", 5000); }
+                  else { flashWarn("⚠ Select a pond first, then apply the available depth.", 5000); }
                 }} style={{ ...chip, width: "100%", fontWeight: 600 }}>→ Use as detention available depth{selEl?.type === "pond" ? "" : " (select a pond)"}</button>
               </div>
             );
@@ -25813,7 +25899,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       )}
 
       {(pobMode || routeMode || overlapWarn || deedAlignHint) && (
-        <div style={{ ...toastPill, background: (deedAlignHint && !pobMode) ? PAL.accent : overlapWarn.startsWith("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d") }}>
+        /* NEW-4/B872 — was `.startsWith("⚠")`: a message that EMBEDS a warning mid-string (e.g. "All
+           3 deeds placed. ⚠ Verify: …") never starts with it, so it rendered in the default
+           success-green with its own warning invisible to the color. `.includes` catches both. */
+        <div style={{ ...toastPill, background: (deedAlignHint && !pobMode) ? PAL.accent : overlapWarn.includes("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d") }}>
           <span>{pobMode ? (pobMode.queueTotal ? `Deed ${(pobMode.placed || 0) + 1} of ${pobMode.queueTotal}${pobMode.name ? ` — ${pobMode.name}` : ""}: click its point of beginning (Esc cancels all).` : "Click the point of beginning on the plan to anchor the description (Esc to cancel).") : (deedAlignHint ? deedAlignHint.msg : overlapWarn)}</span>
           {(pobMode || routeMode) && <button onClick={() => { setPobMode(null); setRouteMode(null); setOverlapWarn(""); }} style={toastGhostBtn}>Cancel</button>}
           {deedAlignHint && !pobMode && !routeMode && <>
@@ -26132,6 +26221,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         {nextL && <button style={menuItem(false)} onClick={() => { addDockZone(t); setTypeMenu(null); }}>＋ Add {nextL.toLowerCase()} (outward)</button>}
                         {outerL && <button style={menuItem(false)} onClick={() => { removeOuterDockZone(t); setTypeMenu(null); }}>－ Remove {outerL.toLowerCase()} (outermost)</button>}
                         <button style={menuItem(false)} onClick={() => { addDogEars(t); setTypeMenu(null); }}>Add bump-outs ({DOGEAR_W}′×{DOGEAR_D}′)</button>
+                        {/* NEW-1/B872 round 2 — the only remove control used to be several scrolls down
+                            in Properties, unnamed by the reshape refusal that pointed nowhere. Mirrors
+                            "Add bump-outs" so the corner-menu offers both halves of the same feature. */}
+                        {els.some((x) => x.attachedTo === t.id && x.dogEar) &&
+                          <button style={menuItem(false)} onClick={() => { removeAllDogEars(t); setTypeMenu(null); }}>Remove bump-outs</button>}
                         <button style={menuItem(false)} onClick={() => { editBuildingFootprint(t.id); setTypeMenu(null); }} title="Convert to an editable outline — angle an end wall or clip a corner (loaded walls stay straight)">✎ Edit footprint (reshape)</button>
                       </>
                     );

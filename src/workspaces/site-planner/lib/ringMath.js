@@ -51,3 +51,23 @@ export function ringArea(ring) {
   }
   return Math.abs(a) / 2;
 }
+
+/* Closest point on the FINITE segment a→b to `p` (feet space), clamped to the segment (never
+ * extrapolated past either endpoint). Distinct from footprintEdit.js's `projectOntoLine`, which
+ * projects onto an INFINITE line — a dock-wall corner is meant to slide arbitrarily far along its
+ * wall, but a control point inserted between two existing ring vertices must never land outside
+ * them.
+ *
+ * B872/NEW-5 — inserting a control point on an existing straight edge is geometrically a no-op
+ * (same two flanking vertices, same line), but a caller that snaps the click point by rounding x
+ * and y INDEPENDENTLY can nudge it a hair off that line: invisible on an axis-aligned edge, a small
+ * kink — and a measurable polygon-area change — on an angled one (the snap grid isn't aligned to
+ * the edge's bearing). Re-projecting the (already snapped) point through this puts it exactly back
+ * on the edge, so the insert is a true no-op regardless of what the snap did to it.
+ */
+export function projectOntoSegment(a, b, p) {
+  const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy;
+  if (L2 < 1e-9) return { x: a.x, y: a.y };
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2));
+  return { x: a.x + dx * t, y: a.y + dy * t };
+}
