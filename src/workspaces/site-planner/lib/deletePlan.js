@@ -49,6 +49,7 @@ export const DELETE_ENTRIES = [
   "menu:callout",      // canvas right-click on a callout → "Delete callout"
   "menu:markup",       // canvas right-click on a markup → "Delete markup/easement/deed"
   "menu:parcel",       // parcel right-click menu → "Delete parcel"
+  "vtxMenu:wholeDelete", // control-point right-click menu, at the true 2-point minimum of an open path (road/easement/measurement/markup) → "Delete road/easement/measurement/markup" (NEW-1/B649504)
 ];
 
 /* Ref kind ↔ site-model collection. An unknown kind resolves to NOTHING — the old code's
