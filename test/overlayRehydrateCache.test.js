@@ -1,5 +1,5 @@
-/* B712592 — RICHFIELD/QUIDDITY OVERLAY DOESN'T RENDER: the client fetch-and-rasterise path, not the
- * data or permissions (confirmed against production — see BACKLOG.md B712592).
+/* B719776 — RICHFIELD/QUIDDITY OVERLAY DOESN'T RENDER: the client fetch-and-rasterise path, not the
+ * data or permissions (confirmed against production — see BACKLOG.md B719776).
  *
  * AUDIT-FIRST found two real defects in the rehydrate-from-Storage effect in `SitePlanner.jsx`
  * (the one that reruns whenever a plan opens on a device whose local IndexedDB cache doesn't already
@@ -34,7 +34,7 @@ const effectEnd = src.indexOf("}, [sheetOverlays, overlayLoadErr]);", effectStar
 if (effectStart === -1 || effectEnd === -1) throw new Error("rehydrate effect anchor text not found — SitePlanner.jsx moved; update this test's anchors");
 const effectBody = src.slice(effectStart, effectEnd);
 
-describe("(1) the rehydrate effect backfills IndexedDB on every recovered raster (B712592)", () => {
+describe("(1) the rehydrate effect backfills IndexedDB on every recovered raster (B719776)", () => {
   it("the PDF branch idbPuts the re-rasterized src", () => {
     const pdfBranch = effectBody.slice(effectBody.indexOf('endsWith(".pdf")'), effectBody.indexOf('endsWith(".dxf")'));
     expect(pdfBranch).toMatch(/idbPut\(o\.idbKey,\s*r\.src\)/);
@@ -64,7 +64,7 @@ describe("(1) the rehydrate effect backfills IndexedDB on every recovered raster
   });
 });
 
-describe("(2) a raster-step failure is LOUD and distinct from a network failure (B712592)", () => {
+describe("(2) a raster-step failure is LOUD and distinct from a network failure (B719776)", () => {
   it("tracks rasterFailed separately from a download failure", () => {
     expect(effectBody).toMatch(/let loaded = false,\s*rasterFailed = false;/);
     expect(effectBody).toMatch(/\}\s*else rasterFailed = true;/);

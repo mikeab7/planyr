@@ -9193,7 +9193,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           const key = o.storageKey || "";
           let res = { data: null, missing: false }; // B785 — discriminated: { data, missing } so we know WHY a fetch failed
           let loaded = false, rasterFailed = false;
-          // B712592 — every branch that recovers a raster from Storage now BACKFILLS IndexedDB
+          // B719776 — every branch that recovers a raster from Storage now BACKFILLS IndexedDB
           // (`idbPut`) the same way the create-time and page-change paths already do (lines ~8772 /
           // ~9034). Before this fix, a device whose local cache never held this overlay (a fresh
           // browser, "clear site data", private mode, or an idb write that failed the first time)
@@ -9201,7 +9201,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           // nothing recorded when the raster failed to decode. That is the class the Richfield/
           // Quiddity overlay hit in production: healthy bytes, healthy permissions, but the raster
           // never lands, silently, because it is misclassified as an ordinary "network" hiccup and
-          // never retried with any better luck. See AUDIT-FIRST note on B712592 in BACKLOG.md.
+          // never retried with any better luck. See AUDIT-FIRST note on B719776 in BACKLOG.md.
           if (key.toLowerCase().endsWith(".pdf")) { // PDF: re-rasterize the stored page
             res = await fetchOverlayBytes(key);
             if (res.data) {
@@ -9231,7 +9231,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             }
           }
           if (loaded) continue;
-          // B712592 — LOUD-FAILURE: bytes downloaded fine but the raster step itself failed (a bad
+          // B719776 — LOUD-FAILURE: bytes downloaded fine but the raster step itself failed (a bad
           // PDF/DXF, or PDF.js/canvas throwing on this page). That is NOT a network problem — retrying
           // the same bytes will fail the same way — so it gets its own terminal reason (never silently
           // folded into "network", which invited an endless, pointless "click to retry") and a
@@ -9251,7 +9251,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           // NEW-2 (B785) — a CONFIRMED-missing cloud object with no local copy: drop the dead pointer so
           // persistence + UI stop implying "it's in the cloud." Gated on isCloudActive() so a logged-out /
           // RLS-masked 400 can't nuke a still-valid pointer that would recover on sign-in.
-          // B712593 — dropped the `!o.idbKey` requirement: by the time `reason` is computed we've
+          // B719777 — dropped the `!o.idbKey` requirement: by the time `reason` is computed we've
           // ALREADY tried `idbGet` above (if `o.idbKey` was set) and it came back empty — that's what
           // put this overlay on the storageKey path in the first place — so an idbKey on the record
           // is no longer evidence a local copy exists on THIS device. Keeping the old, narrower guard
@@ -16479,7 +16479,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         onContextMenu={(e) => onOverlayContext(e, o.id)}>
         {o.src ? (
           <>
-            {/* B712595 — a non-destructive crop: the persisted raster (`o.src`) is always the FULL
+            {/* B719779 — a non-destructive crop: the persisted raster (`o.src`) is always the FULL
                 image, so a widened or cleared crop needs no re-import. The clip lives on the DISPLAY
                 only, and — because `buildExportSvg` clones this live SVG wholesale (the same
                 "an export is a document, not a screenshot" mechanism every other overlay feature here
@@ -16508,7 +16508,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           // retry. Only a genuinely-in-flight fetch shows the (now brief) "Loading drawing…".
           const ovErr = overlayLoadErr[o.id];
           const ovLoading = !ovErr && !o.storageMissing && (o.idbKey || o.storageKey);
-          // B712592 — "render" (bytes downloaded fine, the raster step itself failed) is DISTINCT from
+          // B719776 — "render" (bytes downloaded fine, the raster step itself failed) is DISTINCT from
           // "missing" (bytes are gone) and "network" (couldn't reach storage): re-adding the same file
           // is unlikely to help since the file is fine, but retrying the same bytes forever is a dead
           // end, so this asks the user to try again with a fresh export from their CAD/PDF tool.
@@ -16520,7 +16520,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               ? "Couldn't reach storage — click to retry"
               : ovLoading ? "Loading drawing…"
               : `Re-add “${o.name}” — image not on this device`;
-          // B712593 — every terminal (non-loading) state ALSO offers a direct, one-click way to drop
+          // B719777 — every terminal (non-loading) state ALSO offers a direct, one-click way to drop
           // the reference entirely, right where the owner is looking at it. Before this, the only
           // visible escape from a reference whose source bytes are confirmed gone forever (see
           // docs/INCIDENT-2026-08-13-shared-asset-delete.md) was the References panel's own ✕ —
@@ -18552,7 +18552,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
                     <button style={{ ...iconBtn, color: showAerial ? PAL.ink : PAL.muted }} title={showAerial ? "Hide aerial" : "Show aerial"} onClick={() => setShowAerial((v) => !v)}>{showAerial ? <EyeIcon /> : <EyeOffIcon />}</button>
                     <button style={iconBtn} title={underlay.locked ? "Unlock (drag to reposition)" : "Lock (click-through)"} onClick={() => { pushHistory(); setUnderlay((u) => (u ? { ...u, locked: !u.locked } : u)); }}>{underlay.locked ? <LockIcon /> : <UnlockIcon />}</button>
-                    {/* B712594 — Remove must CLEAR `aerialHidden`, not set it. `setShowAerial(false)`
+                    {/* B719778 — Remove must CLEAR `aerialHidden`, not set it. `setShowAerial(false)`
                         persists `settings.aerialHidden = true` (withAerialVisible's `want:false`
                         branch) — so with no aerial left to be hidden, the record kept a stale "hide"
                         preference that silently applied to the NEXT aerial dropped onto this plan,
@@ -18694,7 +18694,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               <span>Knock out white paper</span>
                             </label>
                           )}
-                          {/* B712595 — non-destructive crop: four edge trims in feet, held as `o.crop` (image
+                          {/* B719779 — non-destructive crop: four edge trims in feet, held as `o.crop` (image
                               px) and applied as an SVG clipPath — the persisted raster is never touched, so
                               widening a trim or Reset recovers exactly what was cropped away, no re-import. */}
                           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>

@@ -1,4 +1,4 @@
-/* B712594 — STALE settings.aerialHidden AFTER DELETING THE AERIAL.
+/* B719778 — STALE settings.aerialHidden AFTER DELETING THE AERIAL.
  *
  * `aerialVisibility.js`'s pure functions (test/aerialVisibility.test.js) were correct and round-trip
  * cleanly; the defect was one wrong argument at the References panel's Remove (✕) button in

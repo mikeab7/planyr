@@ -1,4 +1,4 @@
-/* B712595 — CROP A PLACED OVERLAY. Pure geometry: clamping, the sparse "no crop" convention, the
+/* B719779 — CROP A PLACED OVERLAY. Pure geometry: clamping, the sparse "no crop" convention, the
  * screen clip rect, the PDF.js hi-res render-viewport offset math, and the panel's feet-based trim
  * fields. See src/workspaces/site-planner/lib/overlayCrop.js for the derivation of the viewport
  * offset formula (worked from PageViewport's own transform construction in pdfjs-dist).

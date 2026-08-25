@@ -1,4 +1,4 @@
-/* B712595 — CROP A PLACED OVERLAY, the wiring half. `test/overlayCrop.test.js` proves the pure
+/* B719779 — CROP A PLACED OVERLAY, the wiring half. `test/overlayCrop.test.js` proves the pure
  * geometry (overlayCrop.js); this suite is a SOURCE GUARD proving `SitePlanner.jsx` actually uses
  * it — the clip-path applied to the drawn image (and carried into the export by the SAME clone the
  * rest of this SVG's PDF-PARITY relies on), and the panel's four-field trim editor.
