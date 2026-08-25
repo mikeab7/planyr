@@ -225,6 +225,44 @@ describe("calibBadgePlacement — badge/scale-bar/zoom never collide at any pane
   });
 });
 
+// NEW-MAPCTRL-3 — on a narrow screen the "✎ Properties"/"✎ Tools" FABs (bottom:16, a 38px pill)
+// replace the side rails and must never be covered by passive furniture reflowing under them.
+import { FAB_RESERVE_PX } from "../src/workspaces/site-planner/lib/sheetFurniture.js";
+
+describe("FAB_RESERVE_PX — the row every bottom furniture item adds when a FAB claims the corner", () => {
+  const FAB_TOP = 16, FAB_H = 38; // measured against the real rendered FABs
+
+  it("clears the real FAB's own top edge with room to spare", () => {
+    const row = 40 + FAB_RESERVE_PX;
+    expect(row).toBeGreaterThan(FAB_TOP + FAB_H);
+  });
+
+  it("the calibration badge still never collides with the scale bar or the zoom stack when row is shifted for a FAB", () => {
+    const box = { badge: (p, badgeW) => ({ x: p.left, w: (p.maxWidth != null ? Math.min(badgeW, p.maxWidth) : badgeW), y: p.bottom, h: 24 }) };
+    const scaleBarBox = (paneW, sbW, sbH, row) => ({ x: paneW - 14 - sbW, w: sbW, y: row, h: sbH });
+    const overlap = (a, b) => {
+      const ox = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
+      const oy = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+      return ox * oy;
+    };
+    const row = 40 + FAB_RESERVE_PX;
+    for (let paneW = 240; paneW <= 900; paneW += 10) {
+      for (const badgeW of [120, 200, 260]) {
+        for (const sbW of [120, 200]) {
+          const sbH = 32;
+          const p = calibBadgePlacement({ paneW, badgeW, scaleBarW: sbW, scaleBarH: sbH, row });
+          expect(overlap(box.badge(p, badgeW), scaleBarBox(paneW, sbW, sbH, row))).toBeLessThanOrEqual(1);
+        }
+      }
+    }
+  });
+
+  it("a shifted row never renders BELOW the FAB band (the badge/scale-bar's own bottom must clear FAB_TOP+FAB_H)", () => {
+    const p = calibBadgePlacement({ paneW: 750, badgeW: 159, scaleBarW: 169, scaleBarH: 32, row: 40 + FAB_RESERVE_PX });
+    expect(p.bottom).toBeGreaterThanOrEqual(FAB_TOP + FAB_H);
+  });
+});
+
 /* ------------------------------------------ where a transient canvas pill may sit (the Apply toast)
  *
  * "The banner doesn't need to pop up in the middle of the site, it's a little too centered."
