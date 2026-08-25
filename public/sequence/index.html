@@ -325,6 +325,15 @@ select.ei { cursor: pointer; }
 .rowgrip { opacity: .55; transition: opacity .1s; }
 .drow:hover .rowgrip { opacity: 1; }
 .rowgrip:active { cursor: grabbing; }
+/* NEW-ROWMOVE-2BAND — the drag insertion line's leading dot. A plain 2-3px line reads fine at a
+   34px row but is easy to lose against 20px-tall grid lines/borders at his actual row height; the
+   dot gives the eye one unmistakable anchor at the depth the line starts from, independent of row
+   height. Purely decorative (no hit-testing, no pointer-events) — position tracks the line's own
+   left edge automatically since the line itself is the positioned ancestor. */
+[data-drag-insert-line]::before {
+  content: ""; position: absolute; left: -3px; top: 50%; transform: translateY(-50%);
+  width: 7px; height: 7px; border-radius: 50%; background: var(--blue);
+}
 .rv-prow:hover { box-shadow:none; }
 .rv-prow .ei { height:22px; border-radius:4px; }
 .gbar { cursor: default; user-select: none; position: absolute; top: 50%; transform: translateY(-50%);
@@ -9188,7 +9197,6 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
   // recompute (and the one render) the whole gesture produces.
   const rowDragRef  = useRef(null); // {ids, blocked, overIdx, overPos, overTaskId, lastClientY, rafId} while active
   const dragLineRef = useRef(null);   // insertion-line indicator DOM node
-  const dragIntoIdRef = useRef(null); // id of the row currently highlighted as an "into" target
 
   // Ids the drag should move: the WHOLE active row-selection range when the grabbed row is part of
   // one, else just the grabbed row — the exact same rule App's structuralTargets applies to
@@ -9214,7 +9222,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     let grew = true;
     while (grew) { grew = false; allTasks.forEach(t => { if (t.parentId != null && blocked.has(t.parentId) && !blocked.has(t.id)) { blocked.add(t.id); grew = true; } }); }
 
-    const state = { ids, blocked, lastClientY: e.clientY, rafId: null, overIdx: -1, overPos: null, overTaskId: null };
+    const state = { ids, blocked, lastClientY: e.clientY, rafId: null, overGapIndex: null };
     rowDragRef.current = state;
     document.body.style.cursor = "grabbing";
     document.body.style.userSelect = "none";
@@ -9223,7 +9231,61 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     // grabbed row). Only currently-rendered (virtualized) rows are found; that's fine, this is a
     // cosmetic cue, not the source of truth for what moves.
     const el0 = ref.current;
-    if (el0) ids.forEach(id => { const r = el0.querySelector(`[data-task-row="${id}"]`); if (r) r.style.opacity = "0.45"; });
+    // Mark the dragged row(s) as IN-FLIGHT, once, at drag start — a dashed outline (reads as
+    // "lifted out") layered on the existing dim, not per-frame cost. The row's slot can't
+    // actually vacate (removing it would reflow every row below it — the exact per-mousemove
+    // re-render check I below exists to forbid), so a faded, dashed ghost in place is the
+    // stand-in, the same convention a lot of drag-and-drop tree UIs (Trello, Notion) use for the
+    // same reason. Grip visibility-before-press (`.rowgrip` opacity, index.css) and the grabbing
+    // cursor (below) are both pre-existing — this only adds the missing "row is airborne" cue.
+    if (el0) ids.forEach(id => { const r = el0.querySelector(`[data-task-row="${id}"]`); if (r) { r.style.opacity = "0.45"; r.style.outline = "1.5px dashed var(--blue)"; r.style.outlineOffset = "-1.5px"; } });
+    // Cached ONCE (not per animation frame) — the x-offset where the Task Name column's own text
+    // starts, so the insertion-line indicator can be drawn at that same x. Uniform across every
+    // row (fixed column widths), so any currently-rendered row's cell answers for all of them.
+    const nameCellEl = el0 ? el0.querySelector('[data-col-key="name"]') : null;
+    const nameIndentBase = nameCellEl ? nameCellEl.offsetLeft : 0;
+
+    // Resolve the new PARENT + insertion anchor (+ the resulting INDENT LEVEL, for the drop
+    // indicator below) for a drop landing at gapIndex — "insert immediately before
+    // tasks[gapIndex]" in the CURRENT visible order, 0 <= gapIndex <= tasks.length.
+    // NEW-ROWMOVE-2BAND (owner rule, 2026-08-25): a drag has exactly two outcomes, above or
+    // below — there is no third "make it a subtask" band, so depth is never chosen by which half
+    // of a row the cursor released in. A release in the top half of row N and a release in the
+    // bottom half of row N-1 land on the SAME gap and must resolve identically — the old code
+    // disagreed with itself here (it derived depth from whichever row happened to be under the
+    // cursor), which is exactly how "drop above X" could reparent INTO X.
+    //   Depth rule, verbatim: "match the row above the insertion point, but never shallower than
+    //   the row below." The floor is forced by the tree, not a preference — the ONLY way the row
+    //   below can be deeper than the row above is when it's the row above's own first child (a
+    //   flattened depth-first walk can only ever step one level deeper, never more), so landing
+    //   any shallower than that would silently adopt that child (and everything under it) into
+    //   the dropped row's new subtree. No row above at all (dropping above the first row) is a
+    //   hard top-level case, not a clamp — there is nothing to match. Because that's also true of
+    //   the CHILD case (rowBelow's own level already reflects "one deeper than rowAbove"), the
+    //   resulting level is always just rowBelow's level (clamp) or rowAbove's level (sibling) —
+    //   no separate +1/-1 arithmetic needed, which is also why it can't drift out of sync with
+    //   moveSelectionToDestination's own reparenting.
+    //   The dragged row(s) themselves are STILL PHYSICALLY PRESENT in `tasks` at their old
+    //   position during the drag (only dimmed, never removed — see the zero-DOM-churn note at
+    //   the top of startRowDrag), so a gap immediately beside where the drag started can have a
+    //   dragged/blocked row sitting right at gapIndex-1 or gapIndex. That row is being REMOVED
+    //   from there, so it can't answer for "the row above/below" — skip past the whole blocked
+    //   set to the nearest row that will actually still be there. (Measured regression: without
+    //   this, dropping a row back next to its own immediately-adjacent neighbor — the smallest
+    //   possible move, and the one the owner described doing — resolved insertAfterId to the
+    //   dragged row's OWN id, which moveSelectionToDestination can't find in `remaining` and
+    //   silently fell back to "end of the list", moving the row to the very bottom instead.)
+    const resolveDropParent = (gapIndex) => {
+      let ai = gapIndex - 1;
+      while (ai >= 0 && state.blocked.has(tasks[ai].id)) ai--;
+      const rowAbove = ai >= 0 ? tasks[ai] : null;
+      let bi = gapIndex;
+      while (bi < tasks.length && state.blocked.has(tasks[bi].id)) bi++;
+      const rowBelow = bi < tasks.length ? tasks[bi] : null;
+      if (!rowAbove) return { destParentId: null, insertAfterId: "start", level: 0 };
+      if (rowBelow && rowBelow.parentId === rowAbove.id) return { destParentId: rowAbove.id, insertAfterId: "start", level: rowBelow.level };
+      return { destParentId: rowAbove.parentId ?? null, insertAfterId: rowAbove.id, level: rowAbove.level };
+    };
 
     const computeAndPaint = () => {
       const el = ref.current;
@@ -9234,32 +9296,33 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
       const idxRaw = Math.floor(rowFloat);
       const idx = Math.max(0, Math.min(tasks.length - 1, idxRaw));
       const hoverTask = tasks[idx];
-      let pos = null, paintTop = null, intoId = null;
+      let gapIndex = null, paintTop = null, level = 0;
       if (hoverTask && !state.blocked.has(hoverTask.id)) {
-        if (idxRaw < 0)                 { pos = "before"; paintTop = 0; }
-        else if (idxRaw >= tasks.length){ pos = "after";  paintTop = tasks.length * ROW_H; }
+        if (idxRaw < 0)                  gapIndex = 0;
+        else if (idxRaw >= tasks.length) gapIndex = tasks.length;
         else {
-          const frac = rowFloat - idxRaw;
-          if (frac < 0.3)      { pos = "before"; paintTop = idx * ROW_H; }
-          else if (frac > 0.7) { pos = "after";  paintTop = (idx + 1) * ROW_H; }
-          else                 { pos = "into";   intoId = hoverTask.id; }
+          // The row's own midpoint is the one boundary — top half lands ABOVE this row (the same
+          // gap as the bottom half of the row before it), bottom half lands BELOW it.
+          const frac = rowFloat - idx;
+          gapIndex = frac < 0.5 ? idx : idx + 1;
         }
+        paintTop = gapIndex * ROW_H;
+        level = resolveDropParent(gapIndex).level;
       }
-      state.overIdx = idx; state.overPos = pos; state.overTaskId = hoverTask ? hoverTask.id : null;
+      state.overGapIndex = gapIndex;
 
       if (dragLineRef.current) {
         dragLineRef.current.style.display = paintTop != null ? "block" : "none";
-        if (paintTop != null) dragLineRef.current.style.top = `${paintTop - 1}px`;
+        if (paintTop != null) {
+          dragLineRef.current.style.top = `${paintTop - 1.5}px`;
+          // The line starts at the SAME x the dropped row's own name text would start at — so
+          // the picture and the depth rule always agree: flush with a sibling's indent reads as
+          // "beside", indented one step further reads as "inside". Matches Cell's own
+          // `paddingLeft:4+task.level*14` for the name column exactly (name cell's real DOM
+          // offset + that formula), so it's pixel-true, not an approximation.
+          dragLineRef.current.style.left = `${nameIndentBase + 4 + level * 14}px`;
+        }
       }
-      if (dragIntoIdRef.current && dragIntoIdRef.current !== intoId) {
-        const prevEl = el.querySelector(`[data-task-row="${dragIntoIdRef.current}"]`);
-        if (prevEl) prevEl.style.outline = "";
-      }
-      if (intoId) {
-        const curEl = el.querySelector(`[data-task-row="${intoId}"]`);
-        if (curEl) curEl.style.outline = "2px solid var(--blue)";
-      }
-      dragIntoIdRef.current = intoId;
 
       // Auto-scroll near the top/bottom edge of the viewport — continuous while the cursor sits
       // in the edge band, not just on mousemove, so holding still near the edge keeps scrolling.
@@ -9285,30 +9348,16 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
       if (dragLineRef.current) dragLineRef.current.style.display = "none";
-      if (dragIntoIdRef.current) {
-        const prevEl = ref.current?.querySelector(`[data-task-row="${dragIntoIdRef.current}"]`);
-        if (prevEl) prevEl.style.outline = "";
-        dragIntoIdRef.current = null;
-      }
-      // Clear the dim applied at drag start. A SUCCESSFUL move re-renders every row from scratch
-      // (fresh inline styles) anyway; this matters for the no-op/cancelled-drop case, where no
-      // setData fires and these exact DOM nodes would otherwise stay dimmed forever.
+      // Clear the dim + in-flight outline applied at drag start. A SUCCESSFUL move re-renders
+      // every row from scratch (fresh inline styles) anyway; this matters for the no-op/
+      // cancelled-drop case, where no setData fires and these exact DOM nodes would otherwise
+      // stay dimmed/outlined forever.
       const elEnd = ref.current;
-      if (elEnd) state.ids.forEach(id => { const r = elEnd.querySelector(`[data-task-row="${id}"]`); if (r) r.style.opacity = ""; });
+      if (elEnd) state.ids.forEach(id => { const r = elEnd.querySelector(`[data-task-row="${id}"]`); if (r) { r.style.opacity = ""; r.style.outline = ""; r.style.outlineOffset = ""; } });
       rowDragRef.current = null;
-      if (state.overPos && state.overTaskId != null && moveRows) {
-        const hoverTask = tasks.find(t => t.id === state.overTaskId);
-        if (hoverTask) {
-          if (state.overPos === "into") {
-            moveRows(anchorTaskId, hoverTask.id, "end");
-          } else if (state.overPos === "after") {
-            moveRows(anchorTaskId, hoverTask.parentId ?? null, hoverTask.id);
-          } else { // "before" — find the nearest PRECEDING sibling (same parent) in flat order
-            let insertAfterId = "start";
-            for (let i = state.overIdx - 1; i >= 0; i--) { if (tasks[i].parentId === hoverTask.parentId) { insertAfterId = tasks[i].id; break; } }
-            moveRows(anchorTaskId, hoverTask.parentId ?? null, insertAfterId);
-          }
-        }
+      if (state.overGapIndex != null && moveRows) {
+        const { destParentId, insertAfterId } = resolveDropParent(state.overGapIndex);
+        moveRows(anchorTaskId, destParentId, insertAfterId);
       }
     };
     computeAndPaint(); // paint immediately at the mousedown position, before any move
@@ -9828,7 +9877,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
             painting it never re-renders this row list. Hidden (display:none) when not dragging
             or when hovering a blocked target (itself or its own descendant). */}
         <div ref={dragLineRef} data-drag-insert-line
-          style={{position:"absolute", left:0, right:0, height:2, background:"var(--blue)", zIndex:50, pointerEvents:"none", display:"none"}} />
+          style={{position:"absolute", left:0, right:0, height:3, background:"var(--blue)", zIndex:50, pointerEvents:"none", display:"none"}} />
         {tasks.slice(startIdx, endIdx).map((task, i) => {
           const ri = startIdx + i;
           if (task.__rvProposed) {
@@ -10578,7 +10627,14 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
         ? `Formatted: ${[task.rowColor && "fill color", task.bold && "bold", task.italic && "italic", hasCellFmt && "cell formats"].filter(Boolean).join(", ")}`
         : "Click to select row";
       return (
-        <span title={fmtSummary} style={{...s,...mono,color:"var(--mut)",fontSize:11,cursor:"pointer",userSelect:"none",display:"flex",alignItems:"center",gap:3,paddingLeft:s.paddingLeft||4}}>
+        // B<NEW> — paddingLeft was 4 while the drag grip (a separate absolutely-positioned
+        // overlay, left:0 width:8) sits on top of it, so the number's own left edge landed
+        // UNDER the grip icon with no visible gap ("crab icon" — voice transcription for
+        // GRAB icon — "butted right up against the number", owner report 2026-08-25). 12
+        // clears the grip's 8px strip plus a small breathing gap, without touching the
+        // grip's hit area (still exactly 8px, pointer-events always on — CHROME-NEVER-
+        // EATS-A-PRESS: widening the grip itself previously broke row-range select).
+        <span title={fmtSummary} style={{...s,...mono,color:"var(--mut)",fontSize:11,cursor:"pointer",userSelect:"none",display:"flex",alignItems:"center",gap:3,paddingLeft:12}}>
           {task.rowColor && <span style={{width:7,height:7,borderRadius:1.5,background:task.rowColor,border:"1px solid rgba(0,0,0,0.2)",flexShrink:0}} />}
           <span>{task.id}</span>
           {task.bold && <span style={{fontSize:8.5,fontWeight:800,color:"#4f46e5",lineHeight:1,fontFamily:"'Inter',system-ui,sans-serif"}}>B</span>}
