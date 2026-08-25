@@ -484,6 +484,12 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }
 .dbtn:hover:not(:disabled) { background: var(--hover-chrome) !important; filter: none; }
 .dbtn-danger:hover:not(:disabled) { background: var(--hover-chrome-danger) !important; filter: none; }
 
+/* TOOLBAR PASS (B727504) — the fill="currentColor" icon buttons (Undo / Redo / Zoom to fit / Layers)
+   use the Material-style disabled convention (dim the icon itself, refuse the pointer) instead of
+   the app-wide `button:disabled` fade above — which is tuned for TEXT buttons. A hardcoded grey
+   would break in dark mode; opacity against `currentColor` doesn't. */
+.tb-icon-btn:disabled { opacity: .38; pointer-events: none; }
+
 /* tool-rail buttons — idle hover; active state styled inline */
 .rbtn:hover:not(:disabled):not(.on) { background: var(--hover-chrome) !important; color: var(--chrome-text) !important; filter: none; }
 .rbtn.on:hover:not(:disabled) { filter: brightness(1.06); }
