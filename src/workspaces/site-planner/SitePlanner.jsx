@@ -4342,6 +4342,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // NEW-2 (round 4) — `exempt`: the elements the heal just repaired must diff and COMMIT, not be
     // overwritten by the very rows that were torn. Without this the two guarantees fight and the
     // broken copy wins, which is why a real tear survived a full reload on the previous build.
+    // ⛔ B727936 (widened) — THIS is the seam that stamped a plan-duplicate's (and a new-site's,
+    // and a new-plan-same-parcel's) first-ever rows `op_kind: "unknown"`. Nothing upstream of a
+    // fresh mount ever calls `pushHistory()`/`beginOperation()` — `duplicatePlan`/`newSiteFromMap`/
+    // `newPlanSameParcel` (SitePlannerApp.jsx) only write the local `sites` record; the content
+    // they carry forward reaches `site_elements` for the first time HERE, when this reconcile
+    // diffs it against zero (or partial) server rows and enqueues creates. `envelopeNow()` reads
+    // whatever operation is open at that instant, and with none open every one of those rows fell
+    // back to the honest-but-wrong "unknown". Measured live on two plans that were never
+    // duplicated at all (a parcel split's stored pieces + a road, all rev 1, one microsecond) —
+    // the SAME gap, reached by `newPlanSameParcel`/the initial multi-parcel site seed rather than
+    // `duplicatePlan`. Opening one HERE, at the one funnel every never-synced-local-content path
+    // shares, closes all of them at once rather than patching each caller. "create" is honest for
+    // the dominant case (content the server has never seen); it costs nothing on an ordinary
+    // reconnect/tab-wake with nothing new to seed — the fresh op id is simply never attached to a
+    // row. Guard: test/opEnvelopeSeedCoverage.test.js.
+    opTrackerRef.current.beginOperation("create");
     try { eng.reconcile(merged, { busy: false, afterSeed: true, exempt: new Set(healed.map((h) => "el:" + h.id)) }); } catch (_) {}
   };
   useEffect(() => {
@@ -5099,8 +5115,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // the state we just applied. Safe when there is nothing to sync — flushElems no-ops.
     try { flushElems(s); } catch (_) {}
   };
-  const undo = () => { const prev = histRef.current.undo(stateRef.current); if (prev) { applySnapshot(prev); touchHist(); } };
-  const redo = () => { const next = histRef.current.redo(stateRef.current); if (next) { applySnapshot(next); touchHist(); } };
+  // ⛔ B727936 (widened) — an undo/redo never called `beginOperation()`, so `endOperation()` is
+  // never called anywhere either (operationEnvelope.js), an undo's commit rode whichever operation
+  // happened to still be "open" from the edit it is reverting (or from something else entirely) —
+  // never `unknown` (some operation is always open by the time anything is undoable), but a real
+  // MISATTRIBUTION: an undo's rows reported as part of the very operation they undo, rather than
+  // as their own act. Minting a fresh one here — "edit" is honest; there is no dedicated undo/redo
+  // member in the closed OP_KINDS vocabulary — gives every undo/redo its own op id. Guard:
+  // test/opEnvelopeSeedCoverage.test.js.
+  const undo = () => { const prev = histRef.current.undo(stateRef.current); if (prev) { opTrackerRef.current.beginOperation("edit"); applySnapshot(prev); touchHist(); } };
+  const redo = () => { const next = histRef.current.redo(stateRef.current); if (next) { opTrackerRef.current.beginOperation("edit"); applySnapshot(next); touchHist(); } };
 
   /* ── NEW-1 / NEW-2 — PLACEMENT + DEED PROMOTION, loaded on demand ────────────────────────────
    *
@@ -14937,6 +14961,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const merged = mergeSiteContent(liveModel, createSiteModel(cloudData)); // our (newest) scalars + union of both sides' content
       // Re-hydrate the canvas (mirror the cross-tab `storage` handler — the live underlay stays as-is). This
       // state change triggers the autosave, which — gate cleared + version now fresh — pushes the union ONCE.
+      // ⛔ B727936 (widened) — this state change feeds the SAME autosave-diff effect `refetchReplace`'s
+      // seed does, with no gesture (and so no `pushHistory()`) ever having opened an operation for it:
+      // any content this union commits (this tab's own work made while read-only, never yet synced)
+      // would otherwise land with `op_kind: "unknown"`. Guard: test/opEnvelopeSeedCoverage.test.js.
+      opTrackerRef.current.beginOperation("create");
       setParcels(merged.parcels); setEls(merged.els); setMeasures(merged.measures);
       setCallouts(merged.callouts); setMarkups(merged.markups); setSheetOverlays(merged.sheetOverlays); setDeletedIds(merged.deletedIds);
       saveSite(merged);                     // write the union to the device mirror immediately
@@ -18245,6 +18274,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setEls(res.els);
     setMeasures(res.measures);           // NEW-1 — measurements restyle retroactively too
     flashStdToast(appliedObjectsLabel(res.count), () => {
+      // ⛔ B727936 (widened) — this toast's own "Undo" is a direct state revert, not `undo()`/Ctrl+Z,
+      // so nothing here opened a fresh operation: without `pushHistory()` this click would ride the
+      // "Apply" operation begun above (mislabeled, same op id) rather than reading as its own act, and
+      // it was never on the undo stack at all (Ctrl+Z after clicking this "Undo" undid the ORIGINAL
+      // apply a second time). Guard: test/opEnvelopeSeedCoverage.test.js.
+      pushHistory();
       setParcels(beforeParcels); setEls(beforeEls); setMeasures(beforeMeasures);
       // Undo the whole action, not half of it: the stored defaults and the pending edits come back too.
       setSettings((s) => ({ ...s, parcelStyle: beforeSettings.parcelStyle, typeStyles: beforeSettings.typeStyles, measureStyle: beforeSettings.measureStyle }));
