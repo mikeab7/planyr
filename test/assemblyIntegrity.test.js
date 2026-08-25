@@ -526,7 +526,30 @@ describe("every seam that can put a child on the canvas or on the wire runs the 
   it("the ECHO / ADOPTION seam — one effect over `els`, covering every canvas mutation", () => {
     const idx = src.indexOf('const guarded = assemblyGuard(els, "canvas")');
     expect(idx, "the els-seam effect is gone").toBeGreaterThan(-1);
-    expect(src.slice(idx, idx + 160)).toMatch(/setEls\(guarded\)/);
+    // ⛔ B712224 (round 3) — MUST be a FUNCTIONAL setEls, never a bare `setEls(guarded)`: a plain
+    // value dispatched after a functional `setEls(fn)` queued in the same React batch (e.g. a
+    // realtime tombstone's removal via applyRemoteInstr) REPLACES it outright, discarding the
+    // removal. The mutation check below replays the old bare-value shape and proves it is wrong.
+    const block = src.slice(idx, idx + 700);
+    expect(block).toMatch(/setEls\(\(cur\) => /);
+    expect(block).not.toMatch(/setEls\(guarded\);/);
+  });
+
+  it("MUTATION CHECK — a bare `setEls(guarded)` at the canvas seam would discard a same-batch functional update", () => {
+    // The exact pre-round-3 shape, replayed against React's own reducer semantics (not the app):
+    // a plain-value dispatch queued after a functional one wins outright, dropping the functional
+    // update's effect. This is what a regression back to `setEls(guarded)` would reintroduce.
+    const basicStateReducer = (state, action) => (typeof action === "function" ? action(state) : action);
+    let state = ["a", "b", "c"];
+    state = basicStateReducer(state, (cur) => cur.filter((x) => x !== "a"));   // a realtime removal, queued
+    const guarded = ["a", "b", "c"];                                          // computed from the STALE pre-removal snapshot
+    state = basicStateReducer(state, guarded);                                // the OLD bare-value seam
+    expect(state).toContain("a");                                             // ← the removal was discarded (the bug)
+    // The FIX: a functional updater re-derives against whatever `cur` actually is.
+    let fixedState = ["a", "b", "c"];
+    fixedState = basicStateReducer(fixedState, (cur) => cur.filter((x) => x !== "a"));
+    fixedState = basicStateReducer(fixedState, (cur) => (cur.length === 3 ? guarded : cur));
+    expect(fixedState).not.toContain("a");                                    // ← the removal survives
   });
 
   it("the REVERT seam — undo/redo re-derives the snapshot before restoring it", () => {

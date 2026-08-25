@@ -4162,7 +4162,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useEffect(() => {
     if (busyRef.current) return;
     const guarded = assemblyGuard(els, "canvas");
-    if (guarded !== els) setEls(guarded);
+    // ⛔ B712224 (round 3) — a PLAIN-VALUE setEls REPLACES whatever the state is at apply time; a
+    // realtime tombstone applied moments earlier via `applyRemoteInstr`'s functional `setEls(fn)`
+    // queues in the SAME React batch, and a plain-value write queued after it discards that removal
+    // outright (React's basicStateReducer treats a non-function action as a replacement, not a
+    // merge). Re-deriving from whatever `els` actually is when this dispatches — instead of trusting
+    // the `guarded` snapshot computed from the closure's `els` — makes this immune to that race.
+    if (guarded !== els) setEls((cur) => (cur === els ? guarded : assemblyIntegrity(cur).els));
   }, [els]); // eslint-disable-line react-hooks/exhaustive-deps
   // B672 — the READ cutover: full refetch of the site's live rows + REPLACE local canonical state.
   // Runs on every channel join/rejoin and tab wake — never trust event gaps. Elements with a
@@ -4368,9 +4374,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // data on the canvas, replacing the cached copy outright (a merge would keep stale keys the
       // row doesn't carry). Same channel a remote upsert uses, so z ordering and husk-parcel
       // filtering behave identically.
+      // NEW-3 (B712224 round 3) — an adoption's `el` is null when the engine is REFUSING a phantom
+      // create for an element the server holds as a tombstone (the "el:null means remove" shape) —
+      // route those through the SAME `applyRemoteInstr` a realtime tombstone uses, rather than the
+      // upsert path the rest of this callback was built for.
       onRowsCanonical: (adoptions) => {
-        for (const a of adoptions) applyRemoteInstr({ action: "upsert", kind: a.kind, id: a.id, el: a.el });
-        reportClientEvent("stale-cache-overruled", "server rows replaced stale cached elements on load", { id: siteId, count: adoptions.length, ids: adoptions.slice(0, 20).map((x) => x.id) });
+        const adopted = [], removed = [];
+        for (const a of adoptions) {
+          if (a.el) { applyRemoteInstr({ action: "upsert", kind: a.kind, id: a.id, el: a.el }); adopted.push(a.id); }
+          else { applyRemoteInstr({ action: "remove", kind: a.kind, id: a.id }); removed.push(a.id); }
+        }
+        if (adopted.length) reportClientEvent("stale-cache-overruled", "server rows replaced stale cached elements on load", { id: siteId, count: adopted.length, ids: adopted.slice(0, 20) });
+        if (removed.length) reportClientEvent("stale-canvas-removed", "a phantom element the server holds as deleted was removed from the canvas", { id: siteId, count: removed.length, ids: removed.slice(0, 20) });
       },
       liveCollections: () => {
         const s = syncStateOverride.current || stateRef.current;
@@ -4504,8 +4519,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       else if (instr.kind === "parcel") parcels = applyInstrToList(parcels, instr);
     }
     if (!busy) {
-      const guarded = assemblyGuard(els, override ? "flush-override" : "commit");
-      if (guarded !== els) { els = guarded; setEls(guarded); }
+      const preGuard = els;
+      const guarded = assemblyGuard(preGuard, override ? "flush-override" : "commit");
+      // ⛔ B712224 (round 3) — the same plain-value-replaces-a-functional-update race as the canvas
+      // seam above: a functional `setEls(fn)` from `applyRemoteInstr` (a realtime tombstone, an
+      // adoption) can queue in the SAME React batch as this write, and a bare `setEls(guarded)`
+      // would discard it. Re-derive against whatever `els` actually is at apply time instead of
+      // trusting the `guarded` snapshot computed from `preGuard`.
+      if (guarded !== preGuard) { els = guarded; setEls((cur) => (cur === preGuard ? guarded : assemblyIntegrity(cur).els)); }
     }
     try { e.reconcile({ els, markups, measures, callouts, parcels }, { busy }); } catch (_) {}
   };
@@ -5018,6 +5039,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // points floating over the reverted geometry. Mirrors DocReview/Stitcher applySnapshot (RC-2).
     setDraftPoly(null); setDraftElPoly(null); setDraftRoadPts(null); setMkPoly(null); setMeasDraft([]);
     setEaseDraft(null); setEaseEdges(null); setTracePts([]); setXsecPts([]); setCalloutDraft(null); setDraftRect(null); setMkRect(null);
+    // ⛔ B712224 (round 3) — an undo/redo that brings a DELETED element back is a deliberate,
+    // whole-snapshot restore, not a stale canvas the tombstone-floor guard is built to catch (see
+    // elementSync.js's `pendingResurrect`). `applySnapshot` has no notion of "which of these ids
+    // used to be deleted" — it is generic over every kind of undo — so it stages EVERY id the
+    // restored snapshot holds, immediately before the synchronous flush below consumes it. Harmless
+    // for the (overwhelming) majority of ids that were never deleted: the exemption is a no-op
+    // unless `reconcile()`'s `!shad` branch actually needs it, and it is cleared at the end of that
+    // one diff pass regardless.
+    try {
+      const e = elSyncRef.current;
+      if (e && e.allowResurrect) {
+        const items = [];
+        for (const x of s.els || []) if (x && typeof x.id === "string") items.push({ kind: "el", id: x.id });
+        if (items.length) e.allowResurrect(items);
+      }
+    } catch (_) {}
     // NEW-2 — an undo/redo is a GESTURE BOUNDARY, exactly like pointer-up, and must commit NOW.
     // It used to be the only edit path with no flush: the restore landed locally, then trailed on
     // the engine's ~750 ms debounce while the move it was undoing was still being committed — so

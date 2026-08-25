@@ -251,6 +251,18 @@ export function createElementSync(opts = {}) {
     for (const [kk, v] of tombstoned) if (t - v.at > recentWindowMs) tombstoned.delete(kk); // bound the 15s map
   }
   const clearDeleteFloor = (key) => { tombstoned.delete(key); maxDeleteRev.delete(key); }; // element is live again
+  /* ⛔ B712224 (round 3) — ONE-SHOT EXEMPTION for a DELIBERATE re-create over the delete floor.
+   * `restore()` (the B673 "deleted by ⟨name⟩" toast) is one such signal and is checked directly
+   * (`pend.cls === "restore"`); undo/redo of a delete is the other — `applySnapshot` restores a
+   * WHOLE prior canvas snapshot generically (it has no notion of "this specific element used to be
+   * deleted"), so it stages every id the snapshot holds here, immediately before its own synchronous
+   * `flushElems` call, and `reconcile()`'s `!shad` branch consults it. Cleared at the end of EVERY
+   * `reconcile()` call — this is meant to cover exactly the ONE diff pass that follows staging, never
+   * to linger and mask an unrelated stale-canvas read on some later, unrelated diff. */
+  const pendingResurrect = new Set();
+  function allowResurrect(items) {
+    for (const it of items || []) { if (it && it.id != null) pendingResurrect.add(skey(it.kind || "el", it.id)); }
+  }
   /* NEW-1 — BIRTHS, and the reason this map has to exist.
    *
    * "Delete wins" is the right rule for delete-vs-EDIT and it is the wrong rule for
@@ -450,7 +462,14 @@ export function createElementSync(opts = {}) {
   function seed(rows) {
     shadow.clear();
     for (const r of rows || []) {
-      if (!r || r.deleted_at) continue;               // only LIVE rows are canonical state
+      if (!r) continue;
+      // ⛔ B712224 (round 3) — a tombstoned row is still a STATEMENT: the server holds this element
+      // as deleted. Recording it into the never-pruned delete floor (`recordTombstone`) is what lets
+      // `reconcile()`'s `!shad` branch below tell "the server has never seen this" from "the server
+      // deleted this" — without it, a fresh seed (page load, reconnect, tab wake) forgets every
+      // tombstone the instant it was fetched, and a canvas still holding the pre-delete element (an
+      // in-flight React update, an un-clobbered heal write, a refetch fold) mints a fresh `create`.
+      if (r.deleted_at) { recordTombstone(r.kind, r.id, r.rev); continue; }
       shadow.set(skey(r.kind, r.id), {
         kind: r.kind, id: r.id, json: stableStringify(r.data), rev: r.rev, z: r.z_index,
       });
@@ -492,6 +511,7 @@ export function createElementSync(opts = {}) {
     if (busy) return;               // mid-drag: the flushGesture() hook re-runs this at gesture end
     const seen = new Set();
     let sawCreateOrDelete = false;
+    const phantomCreates = [];   // ⛔ B712224 (round 3) — a `create` refused because the server holds this id as a tombstone
     // NEW-1 — `afterSeed` marks the ONE diff the seeder itself runs against the canvas it just
     // rebuilt (refetchReplace: rows ∪ pending local edits ∪ the never-synced fold). At that instant
     // any divergence on a server-known element with nothing pending is a stale cache replay, not an
@@ -523,9 +543,26 @@ export function createElementSync(opts = {}) {
           // a queued RESTORE also occupies the no-shadow state — don't downgrade it to a create
           // (though the RPC would auto-restore a create over a same-kind tombstone anyway)
           if (inf && inf.el && stableStringify(inf.el) === stableStringify(elc)) continue; // being created right now
+          const isExplicitRestore = pend && pend.cls === "restore";
+          /* ⛔ B712224 (round 3) — `!shad` means one of TWO different things: the server has NEVER
+           * seen this element, or the server holds it as a TOMBSTONE and this canvas copy is stale (a
+           * foreign delete's canvas removal hasn't landed — a direct-apply React lag, an un-clobbered
+           * heal write, a refetch fold, or a flush-override snapshot). Round 1 fixed one staleness
+           * WINDOW (a buffered mid-gesture drain); this closes the actual gap underneath all of them:
+           * unless the user is EXPLICITLY restoring (a queued `restore` op), consult the never-pruned
+           * delete floor before minting. `commit_elements` deliberately AUTO-RESTORES a `create` over
+           * a same-kind tombstone (site_elements.sql), so ANY stale-canvas window that mints one turns
+           * a completed delete into a resurrection under a brand-new, envelope-less operation — the
+           * exact shape measured live (op_kind:"unknown", ~1s after the tombstone). Refuse it and hand
+           * the removal back through the SAME `onRowsCanonical` channel the delete-side's `fabricated`
+           * refusal already uses (an `el: null` adoption means "remove", not "replace"). */
+          if (!isExplicitRestore && !pendingResurrect.has(key) && maxDeleteRev.has(key)) {
+            phantomCreates.push({ kind, id: el.id });
+            continue;
+          }
           if (!pend || (pend.cls !== "create" && pend.cls !== "restore") || stableStringify(pend.el) !== stableStringify(elc)) {
-            if (!(pend && pend.cls === "restore" && stableStringify(pend.el) === stableStringify(elc)))
-              enqueue(key, { kind, id: el.id, cls: pend && pend.cls === "restore" ? "restore" : "create", el: elc, z: elc.z, direct: directTag(kind, el.id, elc), envelope: envelopeForEnqueue() });
+            if (!(isExplicitRestore && stableStringify(pend.el) === stableStringify(elc)))
+              enqueue(key, { kind, id: el.id, cls: isExplicitRestore ? "restore" : "create", el: elc, z: elc.z, direct: directTag(kind, el.id, elc), envelope: envelopeForEnqueue() });
             sawCreateOrDelete = true;
           }
           continue;
@@ -609,6 +646,14 @@ export function createElementSync(opts = {}) {
       report("element-rows-canonical", "stale cached copies overruled by the server's rows on seed", { siteId, count: rowsWin.length, ids: rowsWin.slice(0, 20).map((r) => r.id) });
       if (onRowsCanonical) { try { onRowsCanonical(rowsWin); } catch (_) { /* adoption is best-effort — never break the diff */ } }
     }
+    if (phantomCreates.length) {
+      report("element-create-fabricated", "a create for an element the server holds as a tombstone was REFUSED", { siteId, count: phantomCreates.length, ids: phantomCreates.slice(0, 20).map((f) => f.id) });
+      // `el: null` is the removal shape `onRowsCanonical`'s caller (SitePlanner.jsx) handles as a
+      // canvas REMOVE, mirroring `fabricated`'s upsert-shaped adoption above — one channel, two
+      // directions, so a caller that only wires the upsert case cannot silently drop a removal.
+      if (onRowsCanonical) { try { onRowsCanonical(phantomCreates.map((f) => ({ kind: f.kind, id: f.id, el: null }))); } catch (_) { /* adoption is best-effort */ } }
+    }
+    pendingResurrect.clear(); // one-shot — consumed by (at most) this single diff pass
     schedule(sawCreateOrDelete);
   }
 
@@ -1505,6 +1550,12 @@ export function createElementSync(opts = {}) {
       // newer than ours is our own echo: drop it from the canvas but never toast (B757 recurrence,
       // the delete variant of the no-pending read path below).
       const ownDeleteEcho = tomb != null && now() - tomb.at <= recentWindowMs && rev <= tomb.rev;
+      // ⛔ B712224 (round 3) — a FOREIGN tombstone must leave the SAME durable floor a local delete
+      // does. `shadow.delete(key)` below removes the key's rev CEILING but records nothing, so
+      // `reconcile()`'s `!shad` branch could not tell "the server never saw this" from "the server
+      // just deleted this" for anything deleted by another tab/session — the exact gap that let a
+      // stale canvas re-mint a `create` over a row this account's OTHER tab had just tombstoned.
+      recordTombstone(row.kind, row.id, rev);
       shadow.delete(key);
       // NEW-0 — this tab has no pending op on this element, so there is no "your current work" to
       // protect; the only question left is who deleted it. A tombstone this SAME account wrote (this
@@ -1579,7 +1630,7 @@ export function createElementSync(opts = {}) {
   }
 
   return {
-    reconcile, flushGesture, retryNow, seed, stop, restore, noteLocalAuthority,
+    reconcile, flushGesture, retryNow, seed, stop, restore, noteLocalAuthority, allowResurrect,
     pendingOps, pendingCount, dirtyEntries, applyRemoteRow,
     isSeeded: () => ready,
     // introspection for tests / B672-B673
