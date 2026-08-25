@@ -78,6 +78,24 @@ const SEED = {
         start:isoOffset(5), end:isoOffset(10), duration:3, percentComplete:0 }),
     T({ id:307, name:"Custom status Blocked OVERDUE, rule wins anyway", health:"blocked", healthOverride:true, parentId:200,
         start:isoOffset(-5), end:isoOffset(-1), duration:3, percentComplete:0 }),
+    // ⛔ TRIED AND ABANDONED, recorded so it isn't tried again: a "meeting-infeasible pin, not
+    // overdue, override still beats the meeting-risk block" row was seeded here to discriminate
+    // against MUTATION-2 (deleting the healthOverride fallback branch entirely, not just reordering
+    // it) — the ONE case where deleting that branch produces a DIFFERENT color than keeping it
+    // (every other silence-case row's raw `task.health` happens to equal what the override branch
+    // would have returned anyway, so removing the branch is invisible to them). It does not work as
+    // a hand-seeded browser fixture: `meetingInfeasible`/`meetingDeadline` are DERIVED-for-display
+    // fields, "recomputed every cascade" (index.html:2114 comment; the reset logic is
+    // index.html:2124-2158/2270-2272) from a REAL `meetingBodies` recurrence definition — this boot
+    // seed has none, so `recomputeSchedule` on load silently overwrites a hand-seeded
+    // `meetingInfeasible:true` back to `false` before first paint, and the row painted its plain
+    // override color regardless of whether the override branch existed. Confirmed empirically:
+    // deleting the override branch and rerunning left this row unchanged. Building a real recurring
+    // meeting body just to reach this one field was judged not worth it — the exact same claim is
+    // already covered, correctly, and MUTATION-2-proven, at the pure-function level in
+    // test/schedulerEngine.test.js ("a rule beats the meeting-bound risk block too" / "when no rule
+    // matches, override still wins over the meeting-bound / deadline risk blocks"), which calls
+    // computeDisplayHealth directly and isn't subject to the cascade's derivation at all.
   ]}},
 };
 const SEED_TAG = `<script id="planar-data">window.__PLANAR_DATA__=${JSON.stringify(SEED)};<\/script>`;
@@ -163,24 +181,66 @@ const groupHeaderRolled = await dotColorForName("Group"); // parent — rolled w
 
 await browser.close(); server.close();
 
+// ── MUTATION TRANSPARENCY (owner requirement, 2026-08-25) ───────────────────────────────────────
+// "A check that cannot fail is not a check, it is defensive code, and it must be labelled that."
+// Every check below carries an honest `discriminates` verdict, measured, not asserted, against
+// THREE separate mutations (exact commands + full before/after output in BACKLOG.md B752848 and the
+// PR body — not wired into this file, since MUTATION-2/3 edit index.html in place and are one-off,
+// not something CI should run every time):
+//   MUTATION-1 — revert public/sequence/index.html to the pre-fix ordering (`git checkout HEAD~1 --
+//     public/sequence/index.html`, i.e. the actual parent commit, then rerun this file unchanged).
+//     Flips 5 of 8 scenario checks to FAIL: item119, notStartedOverdue, milestoneOverdue,
+//     customBlockedOverdue, groupHeaderRolled. That is the fix's own discriminating proof.
+//   MUTATION-2 — delete `if (task.healthOverride) return task.health;` OUTRIGHT (not reorder it,
+//     REMOVE it) from the fixed file. Flips NOTHING in this harness — tried, measured, and the
+//     result is explained below (not glossed over as 0 discriminating checks for free).
+//   MUTATION-3 — drop the `pct >= 100` guard from the `finishPastDays` case in
+//     evalHealthCondition (`if (!task.end || pct >= 100) return false;` → `if (!task.end) return
+//     false;`). Flips completeOverdue from GREEN to RED. Confirms that check IS discriminating —
+//     just for a different, real defect class (an unrelated regression in the pre-existing
+//     completion guard) than the one this PR fixes.
+// THE THREE THAT NEVER FLIP UNDER ANY OF THE THREE (completeOverdue only survives MUTATION-1/2,
+// NOT MUTATION-3 — see above): dueToday and pinnedGreenNotOverdue stay green under all three,
+// and here is the honest reason, stated plainly rather than left as a ratio: both tasks are
+// genuinely NOT overdue, so no rule ever matches in ANY version of the code, which makes
+// MUTATION-1 (reordering rule-check vs override-check) provably a no-op for them. Under MUTATION-2
+// (deleting the override branch), computeDisplayHealth falls through to the FINAL fallback,
+// `return task.health;` — which returns the EXACT SAME LITERAL VALUE the deleted override branch
+// would have returned, because neither task has `meetingBound` or `deadlineForTaskId` set, so no
+// intervening block can produce a different answer. The override branch and the final fallback are
+// mathematically identical whenever no rule matches and no meeting/deadline block applies — that is
+// not a weakness of these two checks, it is a real structural fact about computeDisplayHealth, and
+// the ONLY way to make the distinction observable is to engage a meeting/deadline risk block. That
+// was ATTEMPTED (see the abandoned seed comment above) and failed for an unrelated, itself-honest
+// reason: `meetingInfeasible`/`meetingDeadline` are fields DERIVED by the schedule cascade from a
+// real `meetingBodies` recurrence definition, not literal fields that survive a hand-seeded boot —
+// this harness has no meeting body, so the cascade silently resets them before first paint. The
+// exact same "override beats the meeting/deadline block when no rule matches" claim IS proven,
+// correctly and MUTATION-2-provably, at the pure-function level (`test/schedulerEngine.test.js` —
+// "a rule beats the meeting-bound risk block too" / "when no rule matches, override still wins over
+// the meeting-bound / deadline risk blocks"), which calls computeDisplayHealth directly and is not
+// subject to the cascade's derivation at all.
+// "board booted" and "no real console/page errors" are infrastructure/sanity gates, not behavior
+// assertions — they check the harness itself works and the page didn't crash, and are categorically
+// unable to discriminate a computeDisplayHealth color defect under any of the three mutations.
 const checks = [
-  ["board booted with seeded project", booted],
-  ["item 119 (overdue + In Progress + healthOverride:true) is RED — the reported bug, fixed", item119 === RED],
-  ["overdue + Not Started + override:true is also RED (rules win regardless of prior status label)", notStartedOverdue === RED],
-  ["overdue + Complete (100%) stays GREEN — must NOT go red", completeOverdue === GREEN],
-  ["0d milestone (start===end) past due, overridden, still turns RED", milestoneOverdue === RED],
-  ["due TODAY (not yet past) stays its overridden YELLOW — rule is silent, override survives", dueToday === YELLOW],
-  ["an OVERDUE custom 'Blocked' status is repainted RED by the firing rule, just like a named color", customBlockedOverdue === RED],
-  ["a pin that ISN'T overdue keeps its overridden GREEN — override survives when no rule fires", pinnedGreenNotOverdue === GREEN],
-  ["GROUP HEADER rolls up to RED because its child (119) is now correctly red", groupHeaderRolled === RED],
-  ["no real console/page errors", real.length === 0],
+  { label: "board booted with seeded project", ok: booted, discriminates: "no — infra/sanity gate, not a behavior assertion" },
+  { label: "item 119 (overdue + In Progress + healthOverride:true) is RED — the reported bug, fixed", ok: item119 === RED, discriminates: "yes — MUTATION-1 flips this to amber (#c47b00)" },
+  { label: "overdue + Not Started + override:true is also RED (rules win regardless of prior status label)", ok: notStartedOverdue === RED, discriminates: "yes — MUTATION-1 flips this to white (#ffffff)" },
+  { label: "overdue + Complete (100%) stays GREEN — must NOT go red", ok: completeOverdue === GREEN, discriminates: "no for MUTATION-1/2 (pct>=100 guard is untouched by this fix, so no rule matches in either version) — YES for MUTATION-3, measured: flips to red (#dc2626) when that guard is removed" },
+  { label: "0d milestone (start===end) past due, overridden, still turns RED", ok: milestoneOverdue === RED, discriminates: "yes — MUTATION-1 flips this to green (#16a34a)" },
+  { label: "due TODAY (not yet past) stays its overridden YELLOW — rule is silent, override survives", ok: dueToday === YELLOW, discriminates: "NO, under any of the three mutations tried — genuinely not overdue in either version (no rule ever matches) AND its raw task.health equals what the deleted override branch would return, so MUTATION-2 is also invisible to it. See the note above." },
+  { label: "an OVERDUE custom 'Blocked' status is repainted RED by the firing rule, just like a named color", ok: customBlockedOverdue === RED, discriminates: "yes — MUTATION-1 flips this to white (#ffffff, the unregistered-custom-status fallback)" },
+  { label: "a pin that ISN'T overdue keeps its overridden GREEN — override survives when no rule fires", ok: pinnedGreenNotOverdue === GREEN, discriminates: "NO, under any of the three mutations tried — same reasoning as dueToday. The equivalent claim (override beats a meeting/deadline block, which WOULD make this distinction observable) is proven instead at the pure-function level — see the note above." },
+  { label: "GROUP HEADER rolls up to RED because its child (119) is now correctly red", ok: groupHeaderRolled === RED, discriminates: "yes — MUTATION-1 flips this to amber (#c47b00)" },
+  { label: "no real console/page errors", ok: real.length === 0, discriminates: "no — infra/sanity gate, detects a crash, not a color defect" },
 ];
 
 console.log(`seed url: ${url}`);
 console.log(`item119=${item119} notStartedOverdue=${notStartedOverdue} completeOverdue=${completeOverdue} milestoneOverdue=${milestoneOverdue} dueToday=${dueToday} customBlockedOverdue=${customBlockedOverdue} pinnedGreenNotOverdue=${pinnedGreenNotOverdue} groupHeaderRolled=${groupHeaderRolled}`);
 console.log("");
 let pass = true;
-for (const [label, ok] of checks) { console.log(`${ok ? "PASS" : "FAIL"}  ${label}`); if (!ok) pass = false; }
+for (const { label, ok, discriminates } of checks) { console.log(`${ok ? "PASS" : "FAIL"}  ${label}\n        discriminates (MUTATION-1)? ${discriminates}`); if (!ok) pass = false; }
 if (real.length) console.log("\nunexpected errors:\n" + real.join("\n"));
 console.log(`\n${pass ? "RULES-ALWAYS-WIN PASS" : "RULES-ALWAYS-WIN FAIL"}`);
 process.exit(pass ? 0 : 1);
