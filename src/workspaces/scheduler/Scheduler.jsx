@@ -12,7 +12,7 @@ import AppHeader from "../../shared/ui/AppHeader.jsx";
 import ModuleLoader from "../../shared/ui/ModuleLoader.jsx";
 import {
   parseNavState, deriveCurrentProject, findBySiteId, needsScheduleCarryIn,
-  dashboardNavActions, shouldShowLinkPanel, shouldAdoptLinkedSiteIntoRoute,
+  dashboardNavActions, shouldShowLinkPanel, shouldAdoptLinkedSiteIntoRoute, isPickShowing,
 } from "./lib/navState.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { scheduleSaveState } from "./lib/saveState.js";
@@ -67,6 +67,10 @@ export default function Scheduler({
   // re-adopt the site we just cleared and put the trapping panel straight back up. Cleared by the
   // very next nav-state (see the message handler), so it can never wedge the route permanently.
   const dashboardIntentRef = useRef(false);
+  // The switcher id the user last EXPLICITLY picked (or null). Read by isPickShowing() below to
+  // let a deliberate pick of a cross-cutting unlinked schedule (Operations/Pursuits) show its grid
+  // even on a routed project with no schedule of its own — see navState.js for the full story.
+  const explicitPickRef = useRef(null);
 
   // Receive the embedded scheduler's nav state (its own projects — not the Site
   // Planner's). It re-emits on load and on every project add/rename/delete/switch.
@@ -238,6 +242,7 @@ export default function Scheduler({
   // effect), so it can't loop with the carry-in.
   const selectSchedule = (id) => {
     dashboardIntentRef.current = false; // a deliberate pick supersedes a pending Dashboard press
+    explicitPickRef.current = id; // isPickShowing() lets this override the route-derived empty state
     post({ type: "planar:nav-select", id });
     const sch = projects.find((p) => p && p.id === id);
     const linked = sch && sch.linkedSiteId != null ? sch.linkedSiteId : null;
@@ -251,6 +256,7 @@ export default function Scheduler({
   const goDashboard = () => {
     const { post: msg, clearRoute } = dashboardNavActions({ projectId });
     if (clearRoute) dashboardIntentRef.current = true; // arm before the route write (see the carry-out effect)
+    explicitPickRef.current = null; // leaving the projects section retires any standing pick
     post(msg);
     if (clearRoute) { try { onProjectChange?.(null); } catch (_) {} }
   };
@@ -272,8 +278,17 @@ export default function Scheduler({
   // though the URL named one — the app knowing which project you are in and saying nothing. The
   // Dashboard's genuine no-current-project state is the `projectId == null` case (pressing Dashboard
   // clears the route), which the last branch still handles.
+  // ⛔ B748064 — a deliberate switcher pick WINS over the route-derived project, because it is the
+  // one case the route can never represent: Operations/Pursuits aren't tied to any site, so picking
+  // one can never move `projectId`. Gated on the embed actually having caught up to the pick
+  // (isPickShowing), so this can't flash the OLD project's name for the one round-trip before the
+  // embed reports back. See navState.js for the full story and Scheduler.jsx's own history below.
+  const pickShowing = isPickShowing(explicitPickRef.current, activeId, section);
+
   let currentProject;
-  if (projectId != null) {
+  if (pickShowing) {
+    currentProject = deriveCurrentProject(projects, activeId, section);
+  } else if (projectId != null) {
     currentProject = linkedSchedule || (routedSiteName ? { id: projectId, name: routedSiteName } : null);
   } else if (section === "reports") {
     currentProject = null; // Dashboard with no routed project: none is current
@@ -287,7 +302,11 @@ export default function Scheduler({
   // flashes before the iframe reports in and never shows — or creates a schedule named — the raw
   // group_id (B560). Deliberately NOT gated on a dismissal or on the iframe's section: either one
   // could suppress the ONLY create/link entry point and strand the project (NEW-1).
-  const showEmptyState = shouldShowLinkPanel({ ready, projectId, linkedSchedule, routedSiteName });
+  //
+  // `pickShowing` overrides it (B748064): once the user's pick is genuinely active in the embed,
+  // there IS something to show — a cross-cutting schedule the route can't name — so the empty
+  // state must step aside instead of covering it.
+  const showEmptyState = !pickShowing && shouldShowLinkPanel({ ready, projectId, linkedSchedule, routedSiteName });
   const suggestedMatch = showEmptyState ? suggestNameMatch(routedSiteName, projects) : null;
 
   // B566 — the Schedule workspace now shows the SAME unified top-right cloud sync badge as the
