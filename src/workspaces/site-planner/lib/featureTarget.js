@@ -283,6 +283,47 @@ export function stackHoldsFeature(entries, key) {
  * inline editor. `entries` are as above, plus `dim: true` for a node inside that element's
  * `data-el-dim` chrome group.
  */
+/* ⛔ B548822 — THE STACK PICKER: reach a feature buried under others without moving anything.
+ *
+ * A plain click always resolves to the TOP-most feature at a point (paint order is hit order in
+ * SVG), so an object drawn under something else can only be grabbed on a sliver nothing covers —
+ * and on one drawn entirely inside another (the owner's Richfield case: road `e1454053brxkkr`
+ * geometrically inside pond `e1454052brxkkr`, both already at the bottom of their own bands so
+ * Send-to-Back has nowhere left to send either of them), there is no sliver at all. B548065 already
+ * solved this for the three ANNOTATION families sent behind an element (a "Behind this" menu group);
+ * this is the general answer, for every family, without requiring anything be selected first.
+ *
+ * THE GESTURE (Bluebeam/Illustrator/Photoshop parity): Alt+click resolves to the TOP of the stack,
+ * exactly like a plain click. Alt+click AGAIN at the SAME point steps one deeper. A click anywhere
+ * else resets to the top — this is a way to REACH something, not a mode you can leave engaged by
+ * accident. `nextPickIndex` is the whole rule, pure: same point (within `PICK_SAME_POINT_PX`,
+ * matching this canvas's own click-tolerance idiom rather than inventing a second one) advances the
+ * index (wrapping, so the last Alt+click cycles back to the top); anything else — no prior pick, a
+ * different point, or a stack that shrank under the cursor — starts over at 0.
+ *
+ * `stackAtPoint` is a thin composition of the primitives above (`stackEntries` + `featureStack`) so
+ * the picker reads the exact same hit stack `resolveDoubleClickTarget` does — one hit-test, several
+ * questions asked of it, never a second geometric answer that could disagree with the first.
+ */
+export const PICK_SAME_POINT_PX = 4; // a deliberate re-click, not the same physical press wobbling
+
+export function stackAtPoint(nodes) {
+  return featureStack(stackEntries(nodes));
+}
+
+/**
+ * @param {{x:number,y:number,index:number}|null} prev — the last Alt+click's point + chosen index
+ * @param {{x:number,y:number}} at — this Alt+click's point
+ * @param {number} stackLen — how many features are under `at` right now
+ * @returns {number} the index into the stack to select — always `< stackLen` when `stackLen > 0`
+ */
+export function nextPickIndex(prev, at, stackLen) {
+  if (!stackLen) return 0;
+  const samePoint = !!prev && Math.hypot(prev.x - at.x, prev.y - at.y) <= PICK_SAME_POINT_PX;
+  if (!samePoint) return 0;
+  return (prev.index + 1) % stackLen;
+}
+
 export function pressIsOverElementBody(entries, id) {
   if (!Array.isArray(entries) || id == null) return false;
   for (const en of entries) {

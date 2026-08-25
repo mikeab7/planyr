@@ -80,7 +80,7 @@ describe("THE DEFAULT DOES NOT MOVE — an untouched plan sorts exactly as it di
   });
 
   it("an element with NO bandForce reports no override, and neither do the odd values", () => {
-    for (const v of [undefined, null, "", "back", "FRONT", 0, 1, true, {}, ["front"]]) {
+    for (const v of [undefined, null, "", "FRONT", "Back", 0, 1, true, {}, ["front"]]) {
       expect(bandForceOf({ type: "paving", bandForce: v }), `bandForce ${JSON.stringify(v)} must be ignored`).toBe(null);
       expect(zOrder({ type: "paving", bandForce: v })).toBe(PRE_FIX_Z_ORDER({ type: "paving" }));
     }
@@ -166,13 +166,77 @@ describe("FORCING WORKS — an explicit override crosses the band, and only it c
   });
 });
 
+/* ── B548822 — THE MIRROR: "Force underneath everything" (`bandForce: "back"`), the escape hatch
+ * the stack-picker report exposed as missing. Same shape as "front" throughout, on purpose — a
+ * second mechanism here is the next bug. */
+describe("THE MIRROR — 'back' crosses the band the other way, below every type including road", () => {
+  it("forced pond draws UNDER a road; the same pond untouched draws over it", () => {
+    const road = el("r1", "road", 0);
+    const pond = el("d1", "pond", 0);
+    const before = [road, pond].sort(byZ).map((e) => e.id);
+    expect(before).toEqual(["r1", "d1"]);                                   // pond over road, normally
+    const forced = { ...pond, bandForce: "back" };
+    const after = [road, forced].sort(byZ).map((e) => e.id);
+    expect(after).toEqual(["d1", "r1"]);                                    // …and under it once forced back
+  });
+
+  it("the back band sits below EVERY type band, including road", () => {
+    for (const type of ["road", "paving", "sidewalk", "landscape", "pond", "parking", "trailer", "building", "gizmo"]) {
+      expect(zOrder({ type, bandForce: "back" })).toBeLessThan(PRE_FIX_Z_ORDER({ type }));
+    }
+    expect(zOrder({ type: "pond", bandForce: "back" })).toBe(EL_BANDS.back);
+  });
+
+  it("the Richfield case: a pond forced back stops covering a road it geometrically contains", () => {
+    // e1454052brxkkr (pond, z=-1024) sat over e1454053brxkkr (road, z=65536) — raw z never mattered,
+    // the type band did. Forcing the POND back (rather than lifting the road) is the other fix.
+    const pond = { id: "e1454052brxkkr", type: "pond", z: -1024 };
+    const road = { id: "e1454053brxkkr", type: "road", z: 65536 };
+    const order = [pond, road].sort(byZ).map((e) => e.id);
+    expect(order).toEqual(["e1454053brxkkr", "e1454052brxkkr"]);            // pond paints last (on top) today, despite its far lower z
+    const forcedPond = { ...pond, bandForce: "back" };
+    const orderFixed = [forcedPond, road].sort(byZ).map((e) => e.id);
+    expect(orderFixed).toEqual(["e1454052brxkkr", "e1454053brxkkr"]);       // road now paints last (on top)
+  });
+
+  it("forcing ONE element back leaves every other element exactly where it was", () => {
+    const before = [...UNTOUCHED_PLAN].sort(byZ).map((e) => e.id);
+    const plan = UNTOUCHED_PLAN.map((e) => (e.id === "e5" ? { ...e, bandForce: "back" } : e)); // e5 is a pond
+    const after = [...plan].sort(byZ).map((e) => e.id);
+    expect(after.filter((id) => id !== "e5")).toEqual(before.filter((id) => id !== "e5"));
+    expect(after[0]).toBe("e5");                                            // …and the forced one is on bottom
+  });
+
+  it("the override is REVERSIBLE the other direction too", () => {
+    const plan = UNTOUCHED_PLAN.map((e) => (e.id === "e5" ? { ...e, bandForce: "back" } : e));
+    const restored = plan.map((e) => (e.id === "e5" ? { ...e, bandForce: undefined } : e));
+    expect([...restored].sort(byZ).map((e) => e.id)).toEqual([...UNTOUCHED_PLAN].sort(PRE_FIX_BY_Z).map((e) => e.id));
+  });
+
+  it("front and back never collide, and each forms its own peer group", () => {
+    const plan = [
+      el("b1", "building", 0),
+      { ...el("p1", "paving", 0), bandForce: "front" },
+      { ...el("d1", "pond", 0), bandForce: "back" },
+    ];
+    const order = [...plan].sort(byZ).map((e) => e.id);
+    expect(order).toEqual(["d1", "b1", "p1"]);
+    expect(plan.filter((e) => zOrder(e) === EL_BANDS.back).map((e) => e.id)).toEqual(["d1"]);
+    expect(plan.filter((e) => zOrder(e) === EL_BANDS.front).map((e) => e.id)).toEqual(["p1"]);
+  });
+});
+
 /* ── SOURCE GUARDS — the wiring, which no pure test can see. Each of these was RED pre-fix. ────── */
 describe("the escape hatch is wired, and it is the ONE mechanism", () => {
-  it("the element right-click menu carries the cross-band row", () => {
+  it("the element right-click menu carries BOTH cross-band rows — front and its mirror, back", () => {
     expect(SP_CODE, 'the element menu must offer the "Force on top of everything" escape hatch')
       .toContain("Force on top of everything");
-    expect(SP_CODE, "…and the way back out of it").toContain("Use the normal layer order");
-    expect(SP_CODE, "the row must call the one mutator").toMatch(/setElBand\(t\.id,\s*forcedBand \? null : "front"\)/);
+    expect(SP_CODE, 'and its mirror — the missing "force underneath" the stack-picker report named')
+      .toContain("Force underneath everything");
+    expect(SP_CODE, "…and the way back out of either").toContain("Use the normal layer order");
+    expect(SP_CODE, "the front row must call the one mutator").toMatch(/setElBand\(t\.id,\s*"front"\)/);
+    expect(SP_CODE, "the back row must call the same mutator, the other direction").toMatch(/setElBand\(t\.id,\s*"back"\)/);
+    expect(SP_CODE, "the restore row must clear the override").toMatch(/setElBand\(t\.id,\s*null\)/);
   });
 
   it("the inspector shows a forced element as forced, with a restore control", () => {
