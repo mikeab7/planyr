@@ -295,6 +295,7 @@ import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand } from "./lib/overlayOrder.js";
+import { hasCrop, cropClipRectScreen, cropTrimFeet, cropFromTrimFeet } from "./lib/overlayCrop.js";
 import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerialVisibility.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, dockAxisOf, healDockAxes, withDockAxis, rotateDockAxisPatch } from "./lib/dockZones.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/buildingGrid.js";
@@ -9267,20 +9268,57 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           if (cached) { setSheetOverlays((arr) => arr.map((x) => (x.id === o.id && !x.src ? { ...x, src: cached } : x))); continue; }
           const key = o.storageKey || "";
           let res = { data: null, missing: false }; // B785 — discriminated: { data, missing } so we know WHY a fetch failed
-          let loaded = false;
+          let loaded = false, rasterFailed = false;
+          // B719776 — every branch that recovers a raster from Storage now BACKFILLS IndexedDB
+          // (`idbPut`) the same way the create-time and page-change paths already do (lines ~8772 /
+          // ~9034). Before this fix, a device whose local cache never held this overlay (a fresh
+          // browser, "clear site data", private mode, or an idb write that failed the first time)
+          // re-paid the full Storage-download + PDF.js re-rasterize on EVERY load forever — with
+          // nothing recorded when the raster failed to decode. That is the class the Richfield/
+          // Quiddity overlay hit in production: healthy bytes, healthy permissions, but the raster
+          // never lands, silently, because it is misclassified as an ordinary "network" hiccup and
+          // never retried with any better luck. See AUDIT-FIRST note on B719776 in BACKLOG.md.
           if (key.toLowerCase().endsWith(".pdf")) { // PDF: re-rasterize the stored page
             res = await fetchOverlayBytes(key);
-            if (res.data) { const r = await rasterizeStoredPdf(res.data, o.page || 1, { knockout: o.knockout !== false }); // honour the per-reference knockout (B654)
-              if (r) { setSheetOverlays((arr) => arr.map((x) => (x.id === o.id && !x.src ? { ...x, src: r.src, imgW: r.imgW, imgH: r.imgH, pageCount: r.pageCount } : x))); loaded = true; } }
+            if (res.data) {
+              const r = await rasterizeStoredPdf(res.data, o.page || 1, { knockout: o.knockout !== false }); // honour the per-reference knockout (B654)
+              if (r) {
+                setSheetOverlays((arr) => arr.map((x) => (x.id === o.id && !x.src ? { ...x, src: r.src, imgW: r.imgW, imgH: r.imgH, pageCount: r.pageCount } : x)));
+                loaded = true;
+                if (o.idbKey && idbAvailable()) idbPut(o.idbKey, r.src);
+              } else rasterFailed = true;
+            }
           } else if (key.toLowerCase().endsWith(".dxf")) { // B747 — DXF: re-render at the SAME dims so the on-map size is exact
             res = await fetchOverlayBytes(key);
-            if (res.data) { const r = await rasterizeStoredDxf(res.data, { width: o.imgW, height: o.imgH });
-              if (r) { setSheetOverlays((arr) => arr.map((x) => (x.id === o.id && !x.src ? { ...x, src: r.src } : x))); loaded = true; } }
+            if (res.data) {
+              const r = await rasterizeStoredDxf(res.data, { width: o.imgW, height: o.imgH });
+              if (r) {
+                setSheetOverlays((arr) => arr.map((x) => (x.id === o.id && !x.src ? { ...x, src: r.src } : x)));
+                loaded = true;
+                if (o.idbKey && idbAvailable()) idbPut(o.idbKey, r.src);
+              } else rasterFailed = true;
+            }
           } else if (key) { // image: its raster IS the source — restore the src directly (dims already known)
             res = await fetchOverlayDataUrl(key);
-            if (res.data) { setSheetOverlays((arr) => arr.map((x) => (x.id === o.id && !x.src ? { ...x, src: res.data } : x))); loaded = true; }
+            if (res.data) {
+              setSheetOverlays((arr) => arr.map((x) => (x.id === o.id && !x.src ? { ...x, src: res.data } : x)));
+              loaded = true;
+              if (o.idbKey && idbAvailable()) idbPut(o.idbKey, res.data);
+            }
           }
           if (loaded) continue;
+          // B719776 — LOUD-FAILURE: bytes downloaded fine but the raster step itself failed (a bad
+          // PDF/DXF, or PDF.js/canvas throwing on this page). That is NOT a network problem — retrying
+          // the same bytes will fail the same way — so it gets its own terminal reason (never silently
+          // folded into "network", which invited an endless, pointless "click to retry") and a
+          // telemetry row naming exactly which overlay/site so a production report is diagnosable
+          // instead of a dead end.
+          if (rasterFailed) {
+            setOverlayLoadErr((m) => ({ ...m, [o.id]: "render" }));
+            reportClientEvent("overlay-rasterize-failed", `couldn't render "${o.name || o.id}" — bytes downloaded fine, raster step failed`,
+              { id: siteId, overlay: o.id, key, bytes: (res.data && (res.data.byteLength ?? res.data.length)) || 0 });
+            continue;
+          }
           // B784/B785 — nothing loaded → record a TERMINAL reason (was: silent infinite "Loading…"). A cloud
           // object confirmed gone (400/404) is "missing" (re-add); a transient failure is "network" (retryable).
           // With no cloud key at all (idb-only, local copy evicted) the bytes are simply gone → "missing" too.
@@ -9289,7 +9327,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           // NEW-2 (B785) — a CONFIRMED-missing cloud object with no local copy: drop the dead pointer so
           // persistence + UI stop implying "it's in the cloud." Gated on isCloudActive() so a logged-out /
           // RLS-masked 400 can't nuke a still-valid pointer that would recover on sign-in.
-          if (reason === "missing" && o.storageKey && !o.idbKey && isCloudActive())
+          // B719777 — dropped the `!o.idbKey` requirement: by the time `reason` is computed we've
+          // ALREADY tried `idbGet` above (if `o.idbKey` was set) and it came back empty — that's what
+          // put this overlay on the storageKey path in the first place — so an idbKey on the record
+          // is no longer evidence a local copy exists on THIS device. Keeping the old, narrower guard
+          // left a confirmed-dead cloud object (verified against production storage.objects — see
+          // docs/INCIDENT-2026-08-13-shared-asset-delete.md) re-attempting the same doomed download
+          // on every single load, forever, instead of healing to the honest "re-add or remove" state.
+          if (reason === "missing" && o.storageKey && isCloudActive())
             setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, storageKey: null, storageMissing: true } : x)));
         } catch (_) {
           setOverlayLoadErr((m) => ({ ...m, [o.id]: "network" }));
@@ -16509,10 +16554,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         onPointerDown={(e) => startMoveSheetOverlay(e, o.id)}
         onContextMenu={(e) => onOverlayContext(e, o.id)}>
         {o.src ? (
-          // data-overlay-image marks the printable raster so buildExportSvg can include/exclude it per the "Print overlay" toggle (B131).
-          // B749 — a live hi-res object URL overrides the base raster while zoomed in (transient; the record's src is unchanged).
-          // data-overlay-id lets the export swap a transient blob: hi-res back to the persisted base raster before inlining.
-          <image data-overlay-image="1" data-overlay-id={o.id} href={hiresById[o.id] || o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none" />
+          <>
+            {/* B719779 — a non-destructive crop: the persisted raster (`o.src`) is always the FULL
+                image, so a widened or cleared crop needs no re-import. The clip lives on the DISPLAY
+                only, and — because `buildExportSvg` clones this live SVG wholesale (the same
+                "an export is a document, not a screenshot" mechanism every other overlay feature here
+                relies on for PDF-PARITY) — the printed/exported sheet crops identically with no
+                separate compositing code. A clipped-out region is never painted to the framebuffer,
+                so this is also a real (if modest — see overlayCrop.js's header) rasterisation-cost
+                reduction on every pan and zoom, not just a visual trim. */}
+            {hasCrop(o) && (() => {
+              const clip = cropClipRectScreen(o, tl, o.ftPerPx, rppf);
+              return (
+                <clipPath id={`ov-crop-${o.id}`}>
+                  <rect x={clip.x} y={clip.y} width={clip.width} height={clip.height} />
+                </clipPath>
+              );
+            })()}
+            {/* data-overlay-image marks the printable raster so buildExportSvg can include/exclude it per the "Print overlay" toggle (B131).
+                B749 — a live hi-res object URL overrides the base raster while zoomed in (transient; the record's src is unchanged).
+                data-overlay-id lets the export swap a transient blob: hi-res back to the persisted base raster before inlining. */}
+            <image data-overlay-image="1" data-overlay-id={o.id} href={hiresById[o.id] || o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none"
+              clipPath={hasCrop(o) ? `url(#ov-crop-${o.id})` : undefined} />
+          </>
         ) : (() => {
           // B784 — an honest, TERMINAL placeholder for an overlay with no raster. "missing" (or a
           // healed dead pointer) and the never-uploaded "no copy on this device" case are clickable
@@ -16520,18 +16584,36 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           // retry. Only a genuinely-in-flight fetch shows the (now brief) "Loading drawing…".
           const ovErr = overlayLoadErr[o.id];
           const ovLoading = !ovErr && !o.storageMissing && (o.idbKey || o.storageKey);
+          // B719776 — "render" (bytes downloaded fine, the raster step itself failed) is DISTINCT from
+          // "missing" (bytes are gone) and "network" (couldn't reach storage): re-adding the same file
+          // is unlikely to help since the file is fine, but retrying the same bytes forever is a dead
+          // end, so this asks the user to try again with a fresh export from their CAD/PDF tool.
           const label = (ovErr === "missing" || o.storageMissing)
             ? `Couldn't load “${o.name}” — click to re-add the file`
-            : ovErr === "network"
+            : ovErr === "render"
+              ? `Couldn't render “${o.name}” — click to re-add the file`
+              : ovErr === "network"
               ? "Couldn't reach storage — click to retry"
               : ovLoading ? "Loading drawing…"
               : `Re-add “${o.name}” — image not on this device`;
+          // B719777 — every terminal (non-loading) state ALSO offers a direct, one-click way to drop
+          // the reference entirely, right where the owner is looking at it. Before this, the only
+          // visible escape from a reference whose source bytes are confirmed gone forever (see
+          // docs/INCIDENT-2026-08-13-shared-asset-delete.md) was the References panel's own ✕ —
+          // the canvas placeholder gave no hint that existed, so an unrecoverable reference read as a
+          // permanently-stuck error with no way out except re-adding a file the owner may not have.
           return (<g data-export="skip"
             style={{ cursor: ovLoading ? "default" : "pointer" }}
             onPointerDown={(e) => e.stopPropagation()}
             onClick={ovLoading ? undefined : (e) => { e.stopPropagation(); if (ovErr === "network") retryOverlay(o.id); else reAddOverlay(o.id); }}>
             <rect x={tl.x} y={tl.y} width={w} height={h} fill="#fbf3ee" fillOpacity={0.55} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="8 5" />
-            <text x={cx} y={cy} textAnchor="middle" fontSize={13} fill={PAL.accent}>{label}</text>
+            <text x={cx} y={ovLoading ? cy : cy - 8} textAnchor="middle" fontSize={13} fill={PAL.accent}>{label}</text>
+            {!ovLoading && (
+              <text x={cx} y={cy + 12} textAnchor="middle" fontSize={11.5} fill={PAL.muted} textDecoration="underline"
+                onClick={(e) => { e.stopPropagation(); removeOverlay(o.id); }}>
+                ✕ remove this reference
+              </text>
+            )}
           </g>);
         })()}
       </g>
@@ -18561,7 +18643,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
                     <button style={{ ...iconBtn, color: showAerial ? PAL.ink : PAL.muted }} title={showAerial ? "Hide aerial" : "Show aerial"} onClick={() => setShowAerial((v) => !v)}>{showAerial ? <EyeIcon /> : <EyeOffIcon />}</button>
                     <button style={iconBtn} title={underlay.locked ? "Unlock (drag to reposition)" : "Lock (click-through)"} onClick={() => { pushHistory(); setUnderlay((u) => (u ? { ...u, locked: !u.locked } : u)); }}>{underlay.locked ? <LockIcon /> : <UnlockIcon />}</button>
-                    <button style={{ ...iconBtn, color: PAL.accent }} title="Remove" onClick={() => { pushHistory(); releaseUnderlayAssets(underlay); setUnderlay(null); setShowAerial(false); setUnderlayLost(false); }}><XIcon /></button>
+                    {/* B719778 — Remove must CLEAR `aerialHidden`, not set it. `setShowAerial(false)`
+                        persists `settings.aerialHidden = true` (withAerialVisible's `want:false`
+                        branch) — so with no aerial left to be hidden, the record kept a stale "hide"
+                        preference that silently applied to the NEXT aerial dropped onto this plan,
+                        rendering it invisible with no on-screen explanation (confirmed on production
+                        plan smsz866fuql0: underlay null, aerialHidden still "true"). Removing the
+                        aerial removes the whole question, so it resets to the sparse default
+                        (`setShowAerial(true)` clears the key via withAerialVisible's `want:true`
+                        branch) rather than answering it "hidden". */}
+                    <button style={{ ...iconBtn, color: PAL.accent }} title="Remove" onClick={() => { pushHistory(); releaseUnderlayAssets(underlay); setUnderlay(null); setShowAerial(true); setUnderlayLost(false); }}><XIcon /></button>
                   </div>
                   {aerialSel && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 8 }}>
@@ -18694,6 +18785,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               <span>Knock out white paper</span>
                             </label>
                           )}
+                          {/* B719779 — non-destructive crop: four edge trims in feet, held as `o.crop` (image
+                              px) and applied as an SVG clipPath — the persisted raster is never touched, so
+                              widening a trim or Reset recovers exactly what was cropped away, no re-import. */}
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                            <div style={{ display: "flex", alignItems: "center" }}>
+                              <span style={{ width: 48, fontSize: 11.5, color: PAL.muted }} title="Trim white space off any edge — reversible, the full image is kept">Crop</span>
+                              {hasCrop(o) && <button style={{ ...chip, marginLeft: "auto" }} title="Show the whole image again" onClick={() => patchOverlay(o.id, { crop: null })}>Reset crop</button>}
+                            </div>
+                            {(() => {
+                              const trim = cropTrimFeet(o);
+                              const editTrim = (edge, val) => {
+                                const next = { ...trim, [edge]: Math.max(0, +val || 0) };
+                                patchOverlay(o.id, { crop: cropFromTrimFeet(next, o) }, false);
+                              };
+                              const field = (label, edge, title) => (
+                                <label key={edge} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: PAL.muted }} title={title}>
+                                  <span style={{ width: 12 }}>{label}</span>
+                                  <input type="number" min={0} aria-label={`Crop ${title}`} style={{ ...numInput, width: 50 }}
+                                    value={f0(trim[edge])} onFocus={() => pushHistory()} onChange={(e) => editTrim(edge, e.target.value)} />
+                                </label>
+                              );
+                              return (
+                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, marginLeft: 54 }}>
+                                  {field("L", "left", "Left edge")}{field("T", "top", "Top edge")}
+                                  {field("R", "right", "Right edge")}{field("B", "bottom", "Bottom edge")}
+                                </div>
+                              );
+                            })()}
+                          </div>
                           {o.sheet && (() => {
                             // Bluebeam-style scale entry (B576): the page→real ratio is the single source of
                             // truth. A preset just fills page=1 + real=preset; "Custom…" reveals the editable
