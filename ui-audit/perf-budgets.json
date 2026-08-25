@@ -47,7 +47,7 @@
       "minBytes": 32768
     },
     "siteRouteJsBytes": {
-      "baseline": 2516732,
+      "baseline": 2571259,
       "target": 1600000,
       "unit": "bytes",
       "what": "Total JS a plain Site route must download: the entry chunk plus SitePlannerApp and its static-import closure.",
@@ -439,6 +439,17 @@
           "commit": "87617c2d6c7897f02143f662d6b6d40ff7f44fb9",
           "sourceHash": "6e0071bad7c54a18",
           "reason": "NEW-2 place detail panel rebuild: BottomSheet gesture primitive + visitAggregates/dateFormat/directions libs + a redesigned VisitPanel (score strip, order-again, actions row, visit cards, empty state). Substantial legitimate feature growth, checked for low-hanging trims first; exceeds ceiling by only 0.4 KB."
+        },
+        {
+          "metric": "bundle.siteRouteJsBytes",
+          "from": 2516732,
+          "to": 2571259,
+          "direction": "raise",
+          "item": "B719408",
+          "date": "2026-08-24",
+          "commit": "65dfd69120448d8161dbc416d677e633353f78e8",
+          "sourceHash": "a33e043d9075bdde",
+          "reason": "Easement/encumbrance colour+fill+hatch editing: new shared hatch-pattern module + resolvers + Properties panel controls"
         }
       ]
     }
