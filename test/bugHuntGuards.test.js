@@ -195,7 +195,10 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
   it("B551: Stitcher releases pointer capture on a blur/visibility abort (passes the pointerId)", () => {
     const src = read("../src/workspaces/doc-review/Stitcher.jsx");
     expect(src).toMatch(/panY: view\.panY, pointerId: e\.pointerId/);          // pan stores the pointerId
-    expect(src).toMatch(/if \(drag\.current\) abortGesture\(drag\.current\.pointerId\)/); // recover passes it
+    // recover() also fires on an in-flight pinch (drag.current is null there by design — the mobile
+    // pinch/locate/telemetry lap), so the pointerId is now read with optional chaining; it is still
+    // passed through to abortGesture, which is the property this guard exists to protect.
+    expect(src).toMatch(/abortGesture\(drag\.current\?\.pointerId, reason\)/); // recover passes it
   });
 
   it("B552: pendingLegacyCount delegates to pendingLegacySites (count == list == import)", () => {

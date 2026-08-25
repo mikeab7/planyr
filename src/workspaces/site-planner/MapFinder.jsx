@@ -3,6 +3,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote } from "./lib/counties.js";
 import { landingView } from "./lib/landingView.js";
+import { shouldShowAccuracyCircle, formatAccuracyFt, locateErrorMessage } from "./lib/locateMe.js";
 import { ensureSnapshot, getSnapshot, snapshotVintage, onSnapshotChange, featureAtPoint, preferSnapshotForDisplay } from "./lib/parcelSnapshot.js";
 import { recordSourceResult, filterHealthyCandidates, isSourceOpen, isStatewideBackup } from "./lib/sourceHealth.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
@@ -314,6 +315,9 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const onRenameSiteRef = useRef(onRenameSite);
   useEffect(() => { onRenameSiteRef.current = onRenameSite; }, [onRenameSite]);
   const hilitesRef = useRef({});     // key -> L.polygon for each selected parcel
+  const locateLayerRef = useRef(null); // "locate me" — the L.layerGroup holding the position dot + accuracy circle
+  const locateBtnRef = useRef(null);   // the control's DOM button, so we can toggle a "locating" pressed/spinner state
+  const locatingRef = useRef(false);   // in-flight guard — ignore a 2nd press while a fix is pending
   const layerUrlsRef = useRef({});   // county -> resolved queryable layer URL (auto-routing)
   const imageryRef = useRef(null);
   const labelsRef = useRef(null);
@@ -623,9 +627,53 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // pull back and see another state at all — you could only jump by picking a site.
     // z3 puts the continent on screen, which is what a two-state product needs.
     const map = L.map(elRef.current, { zoomControl: false, minZoom: 3, maxZoom: 21 }).setView(cfg.center, cfg.zoom);
+    // "Locate me" (NEW — mobile pinch/locate/telemetry lap): a 3rd button stacked directly below
+    // the zoom control (same `bottomleft` corner — every OTHER corner is already claimed, per
+    // mapChromeStack.js's rule; a control belongs beside the map's other controls, not fighting a
+    // panel for a corner). Plain L.DomUtil/L.DomEvent rather than an L.Control subclass — this is
+    // the file's first custom control and a bespoke class buys nothing a closure doesn't already.
+    // ⛔ Added to the map BEFORE the zoom control on purpose — Leaflet's bottom-corner containers
+    // stack a LATER-added control ABOVE an earlier one (measured: reversing this order put the
+    // locate button above zoom's +/−, not below it), so "below" requires adding it first.
+    (() => {
+      const container = L.DomUtil.create("div", "leaflet-bar leaflet-control");
+      const btn = L.DomUtil.create("a", "", container);
+      btn.href = "#"; btn.title = "Find my location"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn");
+      btn.style.display = "flex"; btn.style.alignItems = "center"; btn.style.justifyContent = "center"; btn.style.color = "var(--chrome-text)";
+      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>';
+      locateBtnRef.current = btn;
+      L.DomEvent.disableClickPropagation(container);
+      L.DomEvent.on(btn, "click", (e) => {
+        L.DomEvent.stop(e);
+        if (locatingRef.current) return; // a fix is already in flight — a 2nd press is a no-op, not a 2nd request
+        locatingRef.current = true;
+        btn.style.animation = "spin 1s linear infinite"; btn.style.opacity = "0.6";
+        map.locate({ setView: true, enableHighAccuracy: true, maxZoom: 17, timeout: 12000 });
+      });
+      const ctrl = L.control({ position: "bottomleft" });
+      ctrl.onAdd = () => container;
+      ctrl.addTo(map);
+    })();
     L.control.zoom({ position: "bottomleft" }).addTo(map);
     mapRef.current = map;
     L.control.scale({ imperial: true, metric: false, position: "bottomright", maxWidth: 130 }).addTo(map); // graphic scale (B96b)
+    const stopLocating = () => { locatingRef.current = false; const b = locateBtnRef.current; if (b) { b.style.animation = ""; b.style.opacity = ""; } };
+    map.on("locationfound", (e) => {
+      stopLocating();
+      if (!locateLayerRef.current) locateLayerRef.current = L.layerGroup().addTo(map);
+      locateLayerRef.current.clearLayers();
+      L.circleMarker(e.latlng, { radius: 7, color: "#fff", weight: 2, fillColor: PAL.accent, fillOpacity: 1, interactive: false }).addTo(locateLayerRef.current);
+      if (shouldShowAccuracyCircle(e.accuracy)) {
+        L.circle(e.latlng, { radius: e.accuracy, color: PAL.accent, weight: 1, fillColor: PAL.accent, fillOpacity: 0.12, interactive: false }).addTo(locateLayerRef.current);
+      } else {
+        // Wi-Fi/IP-based fallback (no GPS chip, or GPS unavailable) — the map still centers on the
+        // best guess it has, but a multi-hundred-metre-or-worse radius is not honestly drawn as a
+        // precise "you are here" ring (KEY DECISIONS: never present a vague IP guess as a location).
+        const acc = formatAccuracyFt(e.accuracy);
+        setErr(acc ? `Location is approximate (accuracy ${acc}) — this looks like a network-based guess, not a GPS fix.` : "Location found, but its accuracy couldn't be read — treat it as approximate.");
+      }
+    });
+    map.on("locationerror", (e) => { stopLocating(); setErr(locateErrorMessage(e && e.code)); });
     setZoom(map.getZoom());
     const onClick = (e) => { if (selectModeRef.current) handleClick(e.latlng); };
     const onZoom = () => setZoom(map.getZoom());
@@ -738,7 +786,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       // vector boundary identify reads. Panning is gated inside attachRasterIdentify.
       identifyOk: () => !selectModeRef.current,
     });
-    return () => { cancelled = true; detachRasterIdentify(); map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("mousemove", onCoordMove); map.off("mouseout", onCoordOut); map.off("contextmenu", onMapCtx); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); map.off("dragstart", markUserMoved); containerEl.removeEventListener("pointerdown", onPress); containerEl.removeEventListener("pointerup", onRelease); containerEl.removeEventListener("pointercancel", onRelease); containerEl.removeEventListener("wheel", markUserMoved); map.remove(); mapRef.current = null; };
+    return () => { cancelled = true; detachRasterIdentify(); map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("mousemove", onCoordMove); map.off("mouseout", onCoordOut); map.off("contextmenu", onMapCtx); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); map.off("dragstart", markUserMoved); map.off("locationfound"); map.off("locationerror"); containerEl.removeEventListener("pointerdown", onPress); containerEl.removeEventListener("pointerup", onRelease); containerEl.removeEventListener("pointercancel", onRelease); containerEl.removeEventListener("wheel", markUserMoved); map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

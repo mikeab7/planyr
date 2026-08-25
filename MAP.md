@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-23 @ `5824972d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-25 @ `0aaec25` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_552 source files mapped._
+_554 source files mapped._
 
 ## infra
 
@@ -340,6 +340,8 @@ _552 source files mapped._
   - _exports_: `CACHE_CLEARED_EVENT`, `CACHE_IDB_PREFIX`, `reclaimableClasses`, `reclaimLocalStorage`, `reclaimMessage`, `reclaimRefetchable`, `reclaimThenRetry`, `unprovenReclaimables`
 - **`src/shared/telemetry/clientErrors.js`** — Client error+event telemetry: window/rejection/preload sources insert into anon INSERT-only Supabase client_errors with dedup, rate/session caps, tab-id stamping, fail-safe
   - _exports_: `buildErrorRow`, `decideReport`, `DUP_MS`, `errorSignature`, `extractMessage`, `extractStack`, `installClientErrorTelemetry`, `lastTelemetrySend`, `networkReportSuppression`, `RATE_MAX`, `RATE_WINDOW_MS`, `reportClientError`, `reportClientEvent`, `SESSION_MAX`, `setTelemetryModule`, `SUPPRESSED_AUTOMATED`, `TAB_ID`, `telemetryDelivery`
+- **`src/shared/telemetry/gestureTelemetry.js`** — Pinch-gesture telemetry: sampled event:pinch rows (surface, touch/pointer source, finger count, completed/cancelled/anomaly, cancel reason) via reportClientEvent
+  - _exports_: `PINCH_COMPLETE_SAMPLE_RATE`, `PINCH_OUTCOMES`, `pinchEventDetail`, `recordPinchGesture`, `shouldLogPinch`
 - **`src/shared/telemetry/perfCapture.js`** — Builds and encodes a performance capture — the privacy ALLOWLIST (counters/timings/view state only, proved before every send), plan-id sanitisation, frame statistics, and the compact encoder that trims oldest-first to fit one telemetry row.
   - _exports_: `assertCaptureClean`, `buildCapture`, `CAPTURE_ENUM_KEYS`, `CAPTURE_MAX_CHARS`, `CAPTURE_NUMERIC_KEYS`, `CAPTURE_VERSION`, `decodeFrames`, `encodeCapture`, `encodeFrames`, `frameStats`, `hash32`, `NOTE_VOCAB`, `safePlanId`, `sanitizeAttribution`
 - **`src/shared/telemetry/perfCaptureStore.js`** — The bounded on-device copy of a performance capture — IndexedDB (the LARGE tier, per TIER-BY-REBUILDABILITY), pruned to three on every write, summarised for the storage panel.
@@ -765,6 +767,8 @@ _552 source files mapped._
   - _exports_: `DASH_ZOOM_CEIL`, `DASH_ZOOM_FLOOR_PX`, `dashZoom`, `INSET_MIN_VISIBLE_PX`, `insetRingVisible`
 - **`src/workspaces/site-planner/lib/localDb.js`** — IndexedDB async key/value store (get/put/delete/deleteByPrefix/forEachByPrefix + durable persist), self-healing open, no-op fallback where IDB is unavailable; large-but-finite durable home for the version-history ring, cached rasters and the GIS cache
   - _exports_: `idbAvailable`, `idbDelete`, `idbDeleteByPrefix`, `idbForEachByPrefix`, `idbGet`, `idbPersist`, `idbPut`
+- **`src/workspaces/site-planner/lib/locateMe.js`** — "Locate me" pure decisions: accuracy-circle honesty threshold, feet/mile accuracy formatting, GeolocationPositionError → owner-facing message
+  - _exports_: `ACCURACY_CIRCLE_THRESHOLD_M`, `formatAccuracyFt`, `locateErrorMessage`, `shouldShowAccuracyCircle`
 - **`src/workspaces/site-planner/lib/mapChromeStack.js`** — the ONE map-overlay stacking model (an open panel outranks map chrome — Leaflet controls, scale bar) plus the available-room panel height
   - _exports_: `LEAFLET_CONTROL_Z`, `MAP_CHROME_Z`, `panelMaxHeight`, `ZOOM_CONTROL_CLEARANCE_PX`
 - **`src/workspaces/site-planner/lib/mapillaryClient.js`** — Leaflet-free Mapillary request shaping: builds bbox map_features URL (same-origin token-injecting proxy, or direct Graph API with a user token) and filters to pole/hydrant detections

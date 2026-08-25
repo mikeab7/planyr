@@ -36,6 +36,7 @@ import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import { MODULE_ACCENT } from "../../shared/ui/moduleAccent.js";
 import { screenToWorld, zoomAround, fitView, shouldPan, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
+import { recordPinchGesture } from "../../shared/telemetry/gestureTelemetry.js";
 import { centerOn } from "../../shared/geometry/pasteGeom.js";
 import MarkupRenderer from "../../shared/markup/MarkupRenderer.jsx";
 import PropertyPanel from "../../shared/markup/PropertyPanel.jsx";
@@ -364,9 +365,14 @@ export default function DocReview({
   const [renderedPage, setRenderedPage] = useState(0);  // the page whose BACKDROP is actually on the canvas — a sheet switch dims + labels the stale frame until the new one lands (B660)
   const pageBaseRef = useRef(pageBase); pageBaseRef.current = pageBase;
   const panRef = useRef(null);        // active pan drag { sx, sy, tx0, ty0 } (B329)
-  const pointersRef = useRef(new Map()); // live touch pointers → viewport-relative {x,y} (B331)
-  const pinchRef = useRef(null);         // active two-finger pinch { mid, dist } (B331)
-  const touchPinchedRef = useRef(false); // a pinch occurred this touch sequence → suppress the tap on lift (B331)
+  // Two-finger pinch runs on NATIVE touch events (mirrors the Site Planner's B555 fix — iOS Safari's
+  // multi-touch POINTER events are unreliable, firing a spurious pointercancel on the first finger
+  // the instant a second lands; native touch events always carry every active finger in e.touches and
+  // don't suffer that). See onTouchStartPinch below; the pointer handlers (onDown/onMove/onUp) bail
+  // while touchCountRef.current >= 2 so nothing fights the pinch.
+  const touchCountRef = useRef(0);       // # of fingers currently down — gates the pointer handlers
+  const pinchRef = useRef(null);         // active two-finger pinch baseline { mid, dist } | null
+  const touchPinchedRef = useRef(false); // a pinch occurred this touch sequence → suppress the tap on lift
   const dragRef = useRef(null);       // active markup move { id, start, orig, moved } (B293)
   const vtxDragRef = useRef(null);    // active vertex drag { id, idx, start, origPts } (B431)
   const editDoneRef = useRef(false);  // guard so a commit + the unmount blur don't double-fire (B293)
@@ -1209,28 +1215,71 @@ export default function DocReview({
     const r = wrap.getBoundingClientRect();
     return screenToWorld(v, { x: e.clientX - r.left, y: e.clientY - r.top });
   };
-  // Viewport-relative screen point (for two-finger pinch midpoint math). (B331)
+  // Viewport-relative screen point (for two-finger pinch midpoint math; also works on a Touch object,
+  // which carries the same clientX/clientY shape as a pointer event). (B331)
   const vpPoint = (e) => { const r = wrapRef.current.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
-  // One frame of a two-finger pinch: zoom by the finger-distance ratio about the moving midpoint. (B331)
-  const applyPinch = () => {
-    // Snapshot the pinch baseline locally: a finger can lift (reseedPinch → pinchRef.current=null)
-    // between scheduling this update and React running the updater, so reading pinchRef.current
-    // inside setView could hit null ("null is not an object … .mid" crash on mobile). (B331 fix)
-    const p = pinchRef.current;
-    if (!p || pointersRef.current.size < 2) return;
-    const [a, b] = [...pointersRef.current.values()];
-    const mid = midpoint(a, b), dist = Math.max(1, distance(a, b));
-    const factor = dist / p.dist;
-    setView((v) => (v ? pinchZoom(v, p.mid, mid, factor, VIEW_MIN, VIEW_MAX) : v));
-    pinchRef.current = { mid, dist };
+  const pinchRafRef = useRef(0);     // pending rAF id for the throttled pinch update (0 = none)
+  const pinchNextRef = useRef(null); // latest { mid, dist } awaiting the next frame
+  const pinchTelemetryRef = useRef(null); // { t, fingers } captured at pinch start — feeds the event:pinch row on end/cancel/anomaly
+  // Flush one throttled frame of the pinch: zoom by the finger-distance ratio about the baseline
+  // midpoint, then re-baseline to the new pair so the next frame is incremental.
+  const flushPinch = () => {
+    pinchRafRef.current = 0;
+    const nx = pinchNextRef.current, base = pinchRef.current;
+    if (!nx || !base) return;
+    const factor = nx.dist / base.dist;
+    setView((v) => (v ? pinchZoom(v, base.mid, nx.mid, factor, VIEW_MIN, VIEW_MAX) : v));
+    pinchRef.current = nx;
   };
-  // (Re)baseline the pinch to whatever touch pointers remain: ≥2 → seed from the current pair (the
-  // first two), else end it. Called on every finger add/remove so a 3rd finger or a partial lift
-  // re-anchors the gesture instead of zoom-jumping off a stale pair. (B331)
-  const reseedPinch = () => {
-    const pts = [...pointersRef.current.values()];
-    pinchRef.current = pts.length >= 2 ? { mid: midpoint(pts[0], pts[1]), dist: Math.max(1, distance(pts[0], pts[1])) } : null;
+  const onTouchStartPinch = (e) => {
+    touchCountRef.current = e.touches.length;
+    if (e.touches.length < 2) return; // a 3rd+ finger is absorbed (never draws/pans) — only ≥2 starts/rebaselines a pinch below
+    const isNewPinch = !pinchRef.current;
+    const a = vpPoint(e.touches[0]), b = vpPoint(e.touches[1]);
+    pinchRef.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
+    pinchNextRef.current = null;
+    if (isNewPinch) pinchTelemetryRef.current = { t: performance.now(), fingers: e.touches.length };
+    else if (pinchTelemetryRef.current) pinchTelemetryRef.current.fingers = Math.max(pinchTelemetryRef.current.fingers, e.touches.length);
+    touchPinchedRef.current = true;
+    // Tear down any single-finger gesture the 1st finger had already started, so the pinch begins clean.
+    panRef.current = null; dragRef.current = null; setDraft(null); setDragPreview(null); setPanning(false);
   };
+  const onTouchMovePinch = (e) => {
+    if (!pinchRef.current || e.touches.length < 2) return;
+    const a = vpPoint(e.touches[0]), b = vpPoint(e.touches[1]);
+    pinchNextRef.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
+    if (!pinchRafRef.current) pinchRafRef.current = requestAnimationFrame(flushPinch);
+  };
+  // Shared by onTouchEnd and onTouchCancel: re-baseline to whatever fingers remain (≥2 → the current
+  // pair, so a 3rd finger or a partial lift re-anchors instead of zoom-jumping off a stale pair; <2 →
+  // the pinch ends). touchPinchedRef is deliberately left set here — onUp consumes + clears it once
+  // touchCountRef reaches 0, so a stray tap on the final lift is suppressed even across a multi-lift.
+  // `cancelled` distinguishes a native touchcancel (an interruption) from an ordinary touchend.
+  const onTouchEndPinch = (e, cancelled = false) => {
+    touchCountRef.current = e.touches.length;
+    if (e.touches.length >= 2) {
+      if (pinchTelemetryRef.current) pinchTelemetryRef.current.fingers = Math.max(pinchTelemetryRef.current.fingers, e.touches.length);
+      const a = vpPoint(e.touches[0]), b = vpPoint(e.touches[1]);
+      pinchRef.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
+      return;
+    }
+    if (pinchRef.current) {
+      const started = pinchTelemetryRef.current;
+      recordPinchGesture({
+        surface: "doc-review", eventSource: "touch",
+        fingerCount: started ? started.fingers : touchCountRef.current,
+        outcome: cancelled ? "cancelled" : "completed",
+        cancelReason: cancelled ? "touchcancel" : undefined,
+        durationMs: started ? performance.now() - started.t : undefined,
+      });
+    }
+    pinchTelemetryRef.current = null;
+    pinchRef.current = null; pinchNextRef.current = null;
+    if (pinchRafRef.current) { cancelAnimationFrame(pinchRafRef.current); pinchRafRef.current = 0; }
+  };
+  // A pinch mid-gesture at unmount (e.g. switching sheets) must not leave a pending rAF whose
+  // callback fires against a torn-down instance's refs after the fact.
+  useEffect(() => () => { if (pinchRafRef.current) cancelAnimationFrame(pinchRafRef.current); }, []);
 
   // Per-tool style defaults that override the kind + column defaults but yield to the user's
   // last-set sticky style (propStyle). Highlight is yellow + wide + translucent by default.
@@ -1326,18 +1375,7 @@ export default function DocReview({
 
   const onDown = (e) => {
     if (!pageBase || !view) return;
-    // Two-finger touch pinch (B331): track touch pointers; a 2nd touch starts a pinch and takes
-    // over from any pan/draw in progress. Gated on pointerType==='touch' → mouse/trackpad untouched.
-    if (e.pointerType === "touch") {
-      pointersRef.current.set(e.pointerId, vpPoint(e));
-      if (pointersRef.current.size >= 2) { // 2nd finger starts a pinch; a 3rd+ finger is absorbed (never draws/pans)
-        reseedPinch();
-        touchPinchedRef.current = true;
-        panRef.current = null; dragRef.current = null; setDraft(null); setDragPreview(null); setPanning(false);
-        e.preventDefault();
-        return;
-      }
-    }
+    if (e.pointerType === "touch" && touchCountRef.current >= 2) return; // a two-finger pinch owns the gesture (native touch — see onTouchStartPinch)
     if (calInput) return; // an inline Calibrate entry is open — finish it (Enter/Esc) before drawing again (B304)
     // "Add Leader" armed (B909/NEW-2): the NEXT click anywhere drops the new leader's tip there,
     // regardless of the current tool — takes priority over every other pointer-down branch below.
@@ -1465,11 +1503,7 @@ export default function DocReview({
   };
 
   const onMove = (e) => {
-    if (pinchRef.current && e.pointerType === "touch") { // two-finger pinch in progress (B331)
-      if (pointersRef.current.has(e.pointerId)) pointersRef.current.set(e.pointerId, vpPoint(e));
-      applyPinch();
-      return;
-    }
+    if (e.pointerType === "touch" && touchCountRef.current >= 2) return; // pinch owns a 2-finger gesture (native touch — see onTouchMovePinch)
     if (panRef.current) { // panning: move the sheet with the drag, free in any direction (B329)
       const d = panRef.current;
       setView((v) => (v ? { scale: v.scale, tx: d.tx0 + (e.clientX - d.sx), ty: d.ty0 + (e.clientY - d.sy) } : v));
@@ -1528,11 +1562,9 @@ export default function DocReview({
   };
 
   const onUp = (e) => {
-    if (e.pointerType === "touch") { // wind down a touch pointer / pinch (B331)
-      pointersRef.current.delete(e.pointerId);
+    if (e.pointerType === "touch") { // wind down a touch pointer / pinch (native touch — see onTouchEndPinch)
       try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {}
-      reseedPinch(); // re-baseline (or end) the pinch to whatever fingers remain — a lift never jumps
-      if (pointersRef.current.size > 0) return;            // fingers remain — wait for full lift
+      if (touchCountRef.current > 0) return;                // fingers remain — wait for full lift
       if (touchPinchedRef.current) { touchPinchedRef.current = false; panRef.current = null; dragRef.current = null; setPanning(false); return; } // pinch ended — no stray tap
     }
     if (panRef.current) { panRef.current = null; setPanning(false); try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {} return; }
@@ -1632,9 +1664,22 @@ export default function DocReview({
   // Always clear pan/move state on an interrupted gesture so the canvas can't get stuck
   // behind a frozen grab cursor (cf. B271, the origin/main frozen-cursor lockout).
   const onCancel = (e) => {
-    if (e && e.pointerType === "touch" && e.pointerId != null) pointersRef.current.delete(e.pointerId);
-    reseedPinch();
-    if (pointersRef.current.size === 0) touchPinchedRef.current = false;
+    if (e && e.pointerType === "touch") {
+      // A pointercancel arriving while a native-touch pinch still owns the gesture (pinchRef set) is
+      // the exact iOS Safari quirk B555 was built around — harmless here (the pointer handlers
+      // already bail on touchCountRef ≥ 2), but its continued occurrence is the diagnostic signal
+      // this telemetry exists to catch, so it's recorded as an "anomaly", never a plain "cancelled".
+      if (pinchRef.current) {
+        const started = pinchTelemetryRef.current;
+        recordPinchGesture({
+          surface: "doc-review", eventSource: "touch",
+          fingerCount: started ? started.fingers : touchCountRef.current,
+          outcome: "anomaly", cancelReason: "pointercancel-during-pinch",
+          durationMs: started ? performance.now() - started.t : undefined,
+        });
+      }
+      if (touchCountRef.current === 0) touchPinchedRef.current = false;
+    }
     panRef.current = null; setPanning(false); dragRef.current = null; setDragPreview(null); vtxDragRef.current = null; setVtxPreview(null);
     marqueeRef.current = null; setMarquee(null); groupDragRef.current = null; setGroupPreview(null); // B569/B570 — abandon an in-flight box-select / group-move
   };
@@ -2417,6 +2462,7 @@ export default function DocReview({
               direction and zooms toward the cursor (no scroll box). The wheel + pointer handlers
               live on the viewport itself, so a pan can begin anywhere — even off the sheet. */}
           <div ref={attachWrap}
+            onTouchStart={onTouchStartPinch} onTouchMove={onTouchMovePinch} onTouchEnd={onTouchEndPinch} onTouchCancel={(e) => onTouchEndPinch(e, true)}
             onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel} onDoubleClick={onDbl} onPointerLeave={() => { setCursor(null); setHoverId(null); }}
             onContextMenu={onContextMenu}
             onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) openFile(f); }}
