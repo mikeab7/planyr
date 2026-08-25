@@ -6,7 +6,7 @@
  *   2. Selecting it shows its vertex handles; deselecting hides them (B705200 house rule).
  *   3. Drawing a NEW cloud with a click-path (click 4 points, close on the first dot) commits a
  *      `kind:"cloud"` markup with a real scalloped outline.
- *   3c/3d (B758547 — no mode picker any more; a click vs. a drag is inferred per-gesture, and
+ *   3c/3d (B770896 — no mode picker any more; a click vs. a drag is inferred per-gesture, and
  *      the owner's own framing, "the answer is nothing," is asserted directly): a single
  *      continuous drag alone traces and closes a whole cloud on release (no menu, no mode to
  *      arm first) · a click and a drag MIX into the same ring (click two vertices, drag a
@@ -210,7 +210,7 @@ if (armedBefore.found) {
   const afterRedo = await page.evaluate(() => document.querySelectorAll('g[data-mk-kind="cloud"]').length);
   ok(`redo brings it back (${afterRedo}, expected 2)`, afterRedo === 2);
 
-  /* ---- 3c (B758547): a single continuous drag alone closes a whole cloud, with NO mode picker —
+  /* ---- 3c (B770896): a single continuous drag alone closes a whole cloud, with NO mode picker —
      there is no "Cloud ▾" menu any more (owner: "what even is the difference between freehand and
      click point, the answer is nothing" — a click vs. a drag is now inferred per-gesture). ---- */
   console.log("\n== 3c: a single drag alone traces and closes a whole cloud (no mode picker) ==");
@@ -242,7 +242,7 @@ if (armedBefore.found) {
   });
   ok("the tool disarms back to Select after the drag closes on its own", toolAfterDragLoop === "false");
 
-  /* ---- 3d (B758547): click and drag MIX in one path — a click places a vertex and continues the
+  /* ---- 3d (B770896): click and drag MIX in one path — a click places a vertex and continues the
      path, a drag traces a freehand run onto the SAME ring, exactly what the owner asked for. ---- */
   console.log("\n== 3d: a click and a drag mix into ONE cloud ring ==");
   ok("re-armed the Cloud tool for the mixed-gesture test", await armCloud());

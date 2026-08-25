@@ -674,7 +674,7 @@ const MK_DEFAULT = { stroke: "#c2410c", weight: 2, dash: "solid", fill: "#c2410c
 // was last drawn (starting from MK_DEFAULT's #c2410c, the exact collision the tool's spec forbids).
 // #2563EB is `familyInk.js` FAMILY_DEFAULT_INK.cloud — measured ≥12 ΔE00 from every other drawn
 // family's default ink (test/familyInk.test.js). arcFt rides the same sticky-default mechanism as
-// every other style field here (NEW-1, B758547) — a cloud's arc size is a per-object property with
+// every other style field here (NEW-1, B770896) — a cloud's arc size is a per-object property with
 // a remembered default, exactly like its stroke weight, not a separate piece of pre-draw config.
 const MK_CLOUD_DEFAULT = { stroke: "#2563EB", weight: 2, dash: "solid", fill: "#2563EB", fillOpacity: 0, arcFt: CLOUD_ARC_DEFAULT_FT };
 // NEW-4 — what the recently-used swatch row shows on a fresh browser: the plan's own default
@@ -2096,7 +2096,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [roadCustom, setRoadCustom] = useState(false); // NEW-3: the Custom width… entry field is showing
   // Easement tool (NEW-1/2/3): a first-class easement object on the editable layer.
   // `easeMode` is the input mode; easeType/easeWidth are sticky tool defaults.
-  // Cloud tool (B758547): NO mode state here any more — a click vs. a drag is inferred per-gesture
+  // Cloud tool (B770896): NO mode state here any more — a click vs. a drag is inferred per-gesture
   // (see the `mkCloudGesture` handling in onDown/onMove/onUp), and arc size is just one more field
   // of `mkCloudStyle`'s sticky default (MK_CLOUD_DEFAULT above), the same mechanism every other
   // markup style property already uses. (History: this used to be two `lsGet`-backed states here,
@@ -6844,7 +6844,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setMkPoly((d) => (d ? { ...d, pts: [...d.pts, pt] } : { kind: tool, pts: [pt] }));
       return;
     }
-    // NEW-1 (B758547) — Cloud: ONE gesture, inferred from what the pointer does rather than a mode
+    // NEW-1 (B770896) — Cloud: ONE gesture, inferred from what the pointer does rather than a mode
     // picked in advance. Whether this press turns out to be a click (adds one vertex) or a drag
     // (traces freehand) is decided on release/movement (see onMove/onUp's "mkCloudGesture" — the
     // owner's own framing: "the answer is nothing," so there is nothing to arm here). Both write
@@ -8093,7 +8093,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setMkRect({ kind: d.kind, a: d.a, b });
       return;
     }
-    // NEW-1 (B758547) — a cloud gesture becomes a DRAG once travel clears DRAG_SLOP_PX (the app's
+    // NEW-1 (B770896) — a cloud gesture becomes a DRAG once travel clears DRAG_SLOP_PX (the app's
     // one shared click-vs-drag threshold, dragGate.js); below it, it might still turn out to be a
     // click on release, so nothing is written yet. Past it, accumulate the raw trail, distance-
     // gated (a screen-px floor, zoom-independent) so a slow drag doesn't pile up thousands of
@@ -8565,7 +8565,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
       return;
     }
-    // NEW-1 (B758547) — release decides what this gesture was: a real drag (mkFreehand got seeded
+    // NEW-1 (B770896) — release decides what this gesture was: a real drag (mkFreehand got seeded
     // in onMove) is RDP-simplified and its points appended; a gesture that never cleared the slop
     // was a plain click and contributes its single down-point instead. Either way the points land
     // in the SAME `mkPoly` ring, and a ring that already loops back near its own first point closes
@@ -23145,7 +23145,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </AnchoredMenu>
           </div>
 
-          {/* Draw section — Shapes + Annotate merged; Polyline before Line (B605/B607). Cloud (B758547)
+          {/* Draw section — Shapes + Annotate merged; Polyline before Line (B605/B607). Cloud (B770896)
               is a plain button like every other draw tool — NO pre-draw popover: there is no mode to
               pick (a click vs. a drag is inferred per-gesture) and arc size lives in Properties, on
               the selected object, like every other style field. */}
