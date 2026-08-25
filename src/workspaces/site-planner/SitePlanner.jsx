@@ -14,7 +14,7 @@ import { notePlanContext, noteViewScale, requestPerfCapture, perfCaptureDelivery
 import { recordPinchGesture } from "../../shared/telemetry/gestureTelemetry.js";
 import { createElementSync, stableStringify } from "./lib/elementSync.js";
 import { createOperationTracker } from "./lib/operationEnvelope.js";
-import { planDelete, TYPING_GUARD_HINT } from "./lib/deletePlan.js";
+import { planDelete } from "./lib/deletePlan.js";
 import { focusScope, resolveKeyEntry, keyScopeVerdict, shouldHintRefusal, SCOPE_GUARD_HINT } from "./lib/keyContract.js";
 import { touchLatch, touchFactsOf, TOUCH } from "../../shared/keyboard/keyScope.js";
 import { rowsToModel, KIND_TO_FIELD, foldNeverSyncedLocal, foldJournal, reconcileSeedRows } from "./lib/elementRows.js";
@@ -2631,6 +2631,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [deedQueue, setDeedQueue] = useState([]); // dropped deeds waiting to be placed (multi-file)
   const [deedActiveId, setDeedActiveId] = useState(null); // the queue row currently loaded in the textarea                       // in-flight read token (ignore a stale read)
   const [overlapWarn, setOverlapWarn] = useState(""); // transient warning after a plot
+  // NEW-1/B754752 — the bottom-center canvas toast's horizontal anchor, in VIEWPORT px. Defaults to
+  // null (renders at the true viewport center, byte-identical to before) until the canvas-edge
+  // layout effect below measures the real drawing area. See that effect for why this must be the
+  // CANVAS's center and not the viewport's: a docked left-rail panel (Properties included) narrows
+  // the canvas but the toast used to stay centered on the whole window, which on a laptop-width
+  // browser landed it directly on top of the panel it was explaining a refusal from.
+  const [toastCenterX, setToastCenterX] = useState(null);
   // B909 round 4 — the PERSISTENT "what changed" card after ⚡ Design pond (owner spec:
   // not a toast, stays until dismissed). null = no card. Cleared on dismiss, on Undo, or
   // implicitly replaced by the next Design pond run on any pond.
@@ -5784,6 +5791,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // measure the real edge, fold the delta in the same frame — the panel-open twin of the B837 pan).
     const w = Math.max(320, r.width), h = Math.max(360, r.height);
     setSize((s) => (s.w === w && s.h === h ? s : { w, h, rawW: r.width }));
+    // NEW-1/B754752 — the bottom-center canvas toast (flashWarn) centers on the DRAWING, not the
+    // window. `r.left + r.width/2` is the canvas's real horizontal center in viewport px — a docked
+    // left-rail panel narrows `r` and this follows it, so the toast can never land on a docked
+    // panel; a portaled/floating/phone-overlay panel steals no layout width (same self-gating
+    // measurement VIEWPORT-STABLE already relies on), so it correctly leaves this untouched and the
+    // toast falls back to true viewport-center in that case. Identity-cheap: only writes on change.
+    const cx = Math.round(r.left + r.width / 2);
+    setToastCenterX((prev) => (prev === cx ? prev : cx));
     const left = Math.round(el.offsetLeft);
     if (panelShiftRef.current == null) { panelShiftRef.current = left; return; } // seed baseline — no shift on first mount
     const delta = left - panelShiftRef.current;
@@ -6085,7 +6100,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const hasSelection = !!(selRef.current || multiRef.current.length);
         if (shouldHintRefusal({ entry: verdict.entry, reason: verdict.reason, hasSelection, episode: keyEpisodeRef.current, lastHintedEpisode: typingHintRef.current })) {
           typingHintRef.current = keyEpisodeRef.current;
-          flashWarn(SCOPE_GUARD_HINT[verdict.reason] || TYPING_GUARD_HINT, 4500);
+          flashWarn(SCOPE_GUARD_HINT[verdict.reason], 4500);
           if (verdict.entry.destructive) {
             reportClientEvent("delete-attempt", `key:delete → refused (${verdict.reason})`, {
               entry: "key:delete", result: "no-op", reason: verdict.reason,
@@ -7659,17 +7674,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (!el || el.locked) return null;
       // B718: a centerline road is vertex-editable too — its editable "path" is its centerline
       // (`pts`, open). A wide `edgeTolFt` (≈ strip half-width) lets a Shift-/right-click land
-      // ANYWHERE on the pavement strip and project onto the centerline; endpoints are protected.
+      // ANYWHERE on the pavement strip and project onto the centerline.
       // NEW-1 — a road's editable "path" is its centerline (`pts`, open), but the EDGE hit test runs
       // against the CURVED centerline the renderer actually draws, not the chords between control
       // points: on a bend the chord cuts the corner, so the pavement on the outside of the curve sits
       // further from the chord than the tolerance and a right-click there found no edge at all (no
       // "Add control point" — the element menu opened instead). `projectEdge` returns the hit ON the
       // drawn centerline plus the control-point segment that owns it, which is exactly what
-      // insertRoadVertex takes. Endpoints are protected; the wide `edgeTolFt` (≈ strip half-width)
-      // still lets a click land ANYWHERE on the pavement.
+      // insertRoadVertex takes. The wide `edgeTolFt` (≈ strip half-width) lets a click land ANYWHERE
+      // on the pavement.
+      // NEW-1/B649504 — endpoints are DELETABLE like any other control point (removing one shortens
+      // the road; canRemoveRoadVertex only blocks the true 2-point floor) — a road used to be the one
+      // element type that categorically excluded its endpoints from deletion, which is what made the
+      // context menu's "min reached" disabled row a LIE on a 3+ point road. See roadGeometry.js.
       if (isCenterlineRoad(el)) return {
-        layer: "road", id: el.id, pts: el.pts, closed: false, min: 2, noEndpointDelete: true,
+        layer: "road", id: el.id, pts: el.pts, closed: false, min: 2,
         edgeTolFt: (+el.travelW || 0) / 2 + roadCurbWidth(el) + 11 / view.ppf,
         projectEdge: (fp) => projectToRoadCenterline(el.pts, el.vtx, fp, { defaultRadius: roadDefaultRadius(el, settings), sharpAt: sharpFor(el) }),
       };
@@ -7765,9 +7784,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // element delete instead of silently swallowing the keypress — a stale/at-min armed vertex must never
   // wedge the Delete key (NEW-1/NEW-2).
   const deleteVtx = (layer, id, index) => {
-    if (layer === "road") { // B718: interior-only + never below 2 points (removeRoadVertex guards both); keep vtx in sync.
+    if (layer === "road") { // B718/NEW-1(B649504): any control point incl. an endpoint, never below 2 points (removeRoadVertex guards the floor); keep vtx in sync.
       const el = els.find((x) => x.id === id);
-      if (!el || !isCenterlineRoad(el) || !canRemoveRoadVertex(el.pts, index)) { setSelVtx(null); setRoadVtxSel(null); return false; } // endpoint / min-2 / stale index → clear the armed point so Delete can't wedge, then fall through to whole-road delete
+      if (!el || !isCenterlineRoad(el) || !canRemoveRoadVertex(el.pts, index)) { setSelVtx(null); setRoadVtxSel(null); return false; } // at the 2-pt floor / stale index → clear the armed point so Delete can't wedge, then fall through to whole-road delete
       pushHistory();
       setEls((a) => a.map((x) => {
         if (x.id !== id || !isCenterlineRoad(x)) return x;
@@ -7837,13 +7856,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
     }
     if (e.button === 0 && !e.shiftKey) {
-      // B718: for a road, only arm an INTERIOR vertex for the Delete key. A road ENDPOINT (or the
-      // body) leaves selVtx null so pressing Delete still removes the WHOLE road (today's behavior)
-      // instead of silently no-op-ing on a protected endpoint. Endpoint DRAG still runs via
-      // startRoadVtx (bubble phase — capture doesn't stopPropagation here).
-      const roadEndpoint = path.layer === "road" && v && (v.index === 0 || v.index === path.pts.length - 1);
-      setSelVtx(v && !roadEndpoint ? { layer: path.layer, id: path.id, index: v.index } : null);
+      // NEW-1/B649504 — every vertex arms for the Delete key the same way, road endpoints included:
+      // deleting one is now a valid shorten (see roadGeometry.js), and `deleteVtx` itself already
+      // falls through to a whole-element delete when a vertex turns out not to be removable (the
+      // true 2-point floor) — so there is no special case left to carve out here. A road used to be
+      // the one layer that refused to arm its own endpoints; that was the false "min reached" bug.
+      setSelVtx(v ? { layer: path.layer, id: path.id, index: v.index } : null);
     }
+  };
+  // NEW-1/B649504 — when a right-clicked control point is genuinely at its path's minimum (removing
+  // it would leave a degenerate line), an OPEN path offers "Delete <type>" instead of a dead greyed
+  // row: the user's actual intent at a 2-point road/easement/measurement/markup is to remove the
+  // whole feature, not to fight a control point that was never going to move. Closed rings (parcels,
+  // building-shaped elements, polygon markups/easements) keep the plain disabled row — 3 points is a
+  // genuine floor for a ring and the "min reached" message is already true there.
+  const WHOLE_DELETE_LABEL = { road: "Delete road", ease: "Delete easement", measure: "Delete measurement", markup: "Delete markup" };
+  const deleteWholeFromVtxMenu = (layer, id) => {
+    const target = layer === "road" ? { kind: "el", id } : layer === "measure" ? { kind: "measure", i: id } : { kind: "markup", id };
+    deleteSel(target, { entry: "vtxMenu:wholeDelete" });
   };
   const onCanvasVtxContextCapture = (e) => {
     const path = editablePath();
@@ -7852,14 +7882,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const { v, e: edge } = hitEditPath(path, fp);
     if (v) { // near a vertex (corner) → Delete control point — a corner ALWAYS wins over its edges
       e.preventDefault(); e.stopPropagation();
-      // B718: roads protect endpoints — canDelete is interior-only + above the 2-point minimum, and
-      // a protected endpoint is NOT armed for the Delete key (leave selVtx null → whole-road delete).
-      const canDel = path.noEndpointDelete ? canRemoveRoadVertex(path.pts, v.index) : path.pts.length > path.min;
-      setSelVtx(path.noEndpointDelete && !canDel ? null : { layer: path.layer, id: path.id, index: v.index });
+      // NEW-1/B649504 — ONE rule for every layer, roads included: deletable above the path's stated
+      // minimum, full stop. Roads no longer single out their endpoints (see roadGeometry.js).
+      const canDel = path.pts.length > path.min;
+      setSelVtx({ layer: path.layer, id: path.id, index: v.index });
+      const wholeDeleteLabel = !canDel && !path.closed ? (WHOLE_DELETE_LABEL[path.layer] || null) : null;
       // NEW-5 — a road TERMINUS is where a roundabout can go, so the menu that already hosts
       // "Add / Delete control point" is where the owner already right-clicks for it.
       const roadEnd = path.layer === "road" ? (v.index === 0 ? "start" : v.index === path.pts.length - 1 ? "end" : null) : null;
-      setVtxMenu({ mode: "vertex", layer: path.layer, id: path.id, index: v.index, canDelete: canDel, roadEnd, x: e.clientX, y: e.clientY });
+      setVtxMenu({ mode: "vertex", layer: path.layer, id: path.id, index: v.index, canDelete: canDel, wholeDeleteLabel, roadEnd, x: e.clientX, y: e.clientY });
     } else if (edge) { // on an edge (away from any corner) → Add control point here
       e.preventDefault(); e.stopPropagation();
       setVtxMenu({ mode: "edge", layer: path.layer, id: path.id, index: edge.index, ptFeet: edge.pt, x: e.clientX, y: e.clientY });
@@ -17051,12 +17082,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      exactly like every other pair of groups on this bar. See `test/toolbarChromeSystem.test.js`. */
   const TB_H = dIcon.height; // 30 — shared height for every top-right toolbar control
   const TB_R = dGhost.borderRadius; // 8 — shared corner radius for every top-right toolbar control
-  // NEW-1 — the bottom-center canvas toast chrome, defined ONCE. The pill geometry and its two
-  // button treatments were copied inline at every toast site (the pob/route/warn/deed-align pill,
-  // the overlay-calibration pill, and now the parcel-select hint), so each new message re-shipped
-  // the same style objects. One definition each: callers override only what genuinely differs
-  // (the background, and the hint's stacked `bottom`). Pixel-identical to what shipped before.
-  const toastPill = { position: "fixed", left: "50%", bottom: 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw", color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" };
+  // NEW-1 — the bottom-center canvas toast chrome. The pill geometry and its two button
+  // treatments were copied inline at every toast site (the pob/route/warn/deed-align pill, the
+  // overlay-calibration pill, and now the parcel-select hint), so each new message re-shipped the
+  // same style objects. One definition each: callers override only what genuinely differs (the
+  // background, and the hint's stacked `bottom`).
+  // ⛔ NEW-1/B754752 — `toastPill` ITSELF now lives further down, inside the IIFE that renders
+  // the toasts (search "const toastPill ="), AFTER `furnPlates`/`FURNITURE_ROW`/`calibPlace` are
+  // computed, because its `bottom` is now DERIVED from the same `canvasPillBottom` the Standards
+  // "Applied · Undo" toast already uses — see that IIFE's own comment for why it is nested rather
+  // than a top-level const. `toastActionBtn`/`toastGhostBtn` have no such dependency and stay here.
   const toastActionBtn = { border: "none", background: SURF_RAISED, color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" };
   const toastGhostBtn = { border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap" };
   // NEW-1 — same treatment for the top-center save/status banner family (read-only · cloud-save
@@ -23410,7 +23445,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {inlineLabelControls(e, "easement", coalesceLabelWrite(selMarkup.id, (p) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, ...p } : m)))))}
                 <Field label="Notes"><textarea value={e.notes || ""} onChange={(ev) => setSelEasement({ notes: ev.target.value })} rows={2} style={{ width: 150, boxSizing: "border-box", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: BORDER_1, borderRadius: 8, color: PAL.ink, resize: "vertical" }} /></Field>
                 <div style={{ fontSize: 11.5, color: PAL.muted, marginTop: 6 }}>Area: <b style={{ color: PAL.ink }}>{Math.round(area).toLocaleString()} SF</b> · {(area / SQFT_PER_ACRE).toFixed(2)} AC</div>
-                <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 6 }}>{isStrip ? "Drag a centerline dot to reshape (the strip re-offsets); ＋ adds a point, Shift-click removes one." : "Drag a boundary dot to reshape; ＋ adds a point, Shift-click removes one."}</div>
+                {/* NEW-1/B649504 — this used to claim "Shift-click removes one", which no gesture in the
+                    app actually does (Shift-click on an edge only ADDS a point — see onCanvasVtxDownCapture);
+                    removal has only ever been right-click a dot, or select it and press Delete. Say the true
+                    thing (WRONG-CASE / LOUD-FAILURE: a hint that describes a feature that doesn't exist is
+                    the same class of lie as a false disabled-reason string). */}
+                <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 6 }}>{isStrip ? "Drag a centerline dot to reshape (the strip re-offsets); Shift-click an edge to add a point, right-click a dot to remove one." : "Drag a boundary dot to reshape; Shift-click an edge to add a point, right-click a dot to remove one."}</div>
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                   <button style={chip} onClick={() => toggleMarkupLock(e.id)}>{e.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
                   <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:easement" })}>Delete</button>
@@ -23568,7 +23608,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       ? "Move the deed as one piece; use Align to parcel (or Rotate) above to line it up."
                       : selMarkup.kind === "line"
                         ? "Drag either end dot to move it."
-                        : "Drag a dot to reshape; ＋ adds a point; Shift-click a dot removes it."}
+                        // NEW-1/B649504 — see the easement hint above: Shift-click never removed a point
+                        // (only adds, on an edge); removal is right-click a dot, or select + Delete.
+                        : "Drag a dot to reshape; Shift-click an edge to add a point, right-click a dot to remove one."}
                 </div>
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                   <button style={chip} onClick={() => toggleMarkupLock(selMarkup.id)}>{selMarkup.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
@@ -24654,7 +24696,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 10 }}>
                       <span style={{ fontSize: 11.5, color: PAL.muted, whiteSpace: "nowrap" }} title="The open-water surface at the design water level (shrinks as the berm rises); distinct from the drawn footprint at the outer toe.">{f2(g_waterSf / SQFT_PER_ACRE)} AC water surface</span>
                       <span style={{ display: "flex", alignItems: "center", gap: 8, flex: "none" }}>
-                        <RowInfo label={pondDisplayName(g_roleInfo.role)} sections={[{ text: "Drag the body to move. Drag a corner dot to reshape; click + on an edge to add a point; Shift-click to delete one." }]} />
+                        {/* NEW-1/B649504 — "click + on an edge" / "Shift-click to delete" described gestures
+                            this app doesn't have: adding is Shift-click an edge, removing is right-click a
+                            dot (or select it and press Delete). */}
+                        <RowInfo label={pondDisplayName(g_roleInfo.role)} sections={[{ text: "Drag the body to move. Drag a corner dot to reshape; Shift-click an edge to add a point; right-click a dot to remove one." }]} />
                         <button style={{ ...chip, padding: "3px 8px" }} onClick={() => toggleLock(selEl.id)} title="Pin in place: prevents accidental moves/edits">{selEl.locked ? "📌 Unpin" : "📌 Pin"}</button>
                         <button type="button" style={{ ...chip, padding: "3px 10px", color: PAL.danger, fontWeight: 700 }} onClick={() => deleteSel(null, { entry: "panel:pond" })}>Delete</button>
                       </span>
@@ -26196,43 +26241,68 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         </div>
       )}
 
-      {(pobMode || routeMode || overlapWarn || deedAlignHint) && (
-        /* NEW-4/B872 — was `.startsWith("⚠")`: a message that EMBEDS a warning mid-string (e.g. "All
-           3 deeds placed. ⚠ Verify: …") never starts with it, so it rendered in the default
-           success-green with its own warning invisible to the color. `.includes` catches both. */
-        <div style={{ ...toastPill, background: (deedAlignHint && !pobMode) ? PAL.accent : overlapWarn.includes("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d") }}>
-          <span>{pobMode ? (pobMode.queueTotal ? `Deed ${(pobMode.placed || 0) + 1} of ${pobMode.queueTotal}${pobMode.name ? ` — ${pobMode.name}` : ""}: click its point of beginning (Esc cancels all).` : "Click the point of beginning on the plan to anchor the description (Esc to cancel).") : (deedAlignHint ? deedAlignHint.msg : overlapWarn)}</span>
-          {(pobMode || routeMode) && <button onClick={() => { setPobMode(null); setRouteMode(null); setOverlapWarn(""); }} style={toastGhostBtn}>Cancel</button>}
-          {deedAlignHint && !pobMode && !routeMode && <>
-            <button onClick={() => alignDeedToParcel(deedAlignHint.id)} style={toastActionBtn}>Align to parcel</button>
-            <button onClick={() => setDeedAlignHint(null)} style={toastGhostBtn}>Dismiss</button>
-          </>}
-        </div>
-      )}
-
-      {/* NEW-1 — "you clicked a parcel and nothing happened, here's why" — the same bottom-center
-          toast surface as the pill above (same geometry, same type, same shadow), riding one notch
-          higher when that one is already occupied so neither message can swallow the other. The
-          inline action turns selection back ON right where the click failed, so the user never has
-          to go find the header control. Only ever raised by a press that actually hit a parcel. */}
-      {parcelHint && (
-        <div data-testid="parcel-select-hint" role="status"
-          style={{ ...toastPill, background: PAL.accent, bottom: (pobMode || routeMode || overlapWarn || deedAlignHint) ? 132 : 84 }}>
-          <span>Parcel selection is off — that click panned the map.</span>
-          <button data-testid="parcel-select-hint-on" onClick={() => setParcelSelect(true)} style={toastActionBtn}>Turn it on</button>
-          <button aria-label="Dismiss" onClick={dismissParcelHint} style={toastGhostBtn}>Dismiss</button>
-        </div>
-      )}
-
-      {ovCalib && (
-        <div style={{ ...toastPill, background: PAL.accent }}>
-          <span>{ovCalibMsg()} {ovCalib.kind === "align" && Math.floor(ovCalib.pts.length / 2) >= 2 ? <span style={{ opacity: 0.75 }}>· or add more pairs for a better fit</span> : null} <span style={{ opacity: 0.75 }}>(Esc to cancel)</span></span>
-          {ovCalib.kind === "align" && Math.floor(ovCalib.pts.length / 2) >= 2 && (
-            <button onClick={applyOvAlign} style={{ ...toastActionBtn, border: "1px solid #fff", padding: "3px 11px" }}>Apply {Math.floor(ovCalib.pts.length / 2)} pts</button>
+      {(() => {
+        /* ⛔ NEW-1/B754752 — `toastPill` is built HERE, inside this IIFE, not as a top-level
+         * `const` above. `hiddenContentReads.js`'s sweep treats "the last top-level `const`
+         * before the JSX `return`" as owning the ENTIRE render body underneath it (a line-span
+         * heuristic, not a real AST) — that binding is `calibPlace` today, which is why its
+         * DECLARATIONS entry says it "reads the model" despite never touching one directly. A
+         * new top-level const inserted after it steals that attribution and reports `calibPlace`
+         * stale / the new name undeclared — both false alarms, but the sweep can't tell the
+         * difference, so the fix is to never add one there. Nesting these three consts inside a
+         * function body (indent > 2) keeps them invisible to that sweep entirely.
+         *
+         * `bottom` now clears the SAME furniture (north arrow, scale bar, the calibration badge's
+         * raised row, the narrow-mode FAB reserve) the Standards "Applied · Undo" toast already
+         * does, via the same `canvasPillBottom` — a bare `bottom: 84` ignored all of it, so on a
+         * narrow canvas (measured live at 750/600/420px) this toast landed squarely on the scale
+         * bar and the badge. `left` already followed the measured canvas center (see `toastCenterX`
+         * above); this is the matching vertical half. Both are proven by
+         * `ui-audit/verify-canvas-furniture.mjs`, which treats this toast as one more piece of the
+         * same furniture set rather than trusting its position in isolation. */
+        const TOAST_BOTTOM = canvasPillBottom({ northH: furnPlates.north.plateH, scaleBarH: furnPlates.scaleBar.plateH, calibBottom: calibrationState ? calibPlace.bottom : null, row: FURNITURE_ROW });
+        const TOAST_STACK_GAP_PX = 48; // the parcel-select hint's own stacked offset above another toast, unchanged from its prior 84→132 hardcode
+        const toastPill = { position: "fixed", left: toastCenterX == null ? "50%" : toastCenterX, bottom: TOAST_BOTTOM, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw", color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" };
+        return (<>
+          {(pobMode || routeMode || overlapWarn || deedAlignHint) && (
+            /* NEW-4/B872 — was `.startsWith("⚠")`: a message that EMBEDS a warning mid-string (e.g. "All
+               3 deeds placed. ⚠ Verify: …") never starts with it, so it rendered in the default
+               success-green with its own warning invisible to the color. `.includes` catches both. */
+            <div style={{ ...toastPill, background: (deedAlignHint && !pobMode) ? PAL.accent : overlapWarn.includes("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d") }}>
+              <span>{pobMode ? (pobMode.queueTotal ? `Deed ${(pobMode.placed || 0) + 1} of ${pobMode.queueTotal}${pobMode.name ? ` — ${pobMode.name}` : ""}: click its point of beginning (Esc cancels all).` : "Click the point of beginning on the plan to anchor the description (Esc to cancel).") : (deedAlignHint ? deedAlignHint.msg : overlapWarn)}</span>
+              {(pobMode || routeMode) && <button onClick={() => { setPobMode(null); setRouteMode(null); setOverlapWarn(""); }} style={toastGhostBtn}>Cancel</button>}
+              {deedAlignHint && !pobMode && !routeMode && <>
+                <button onClick={() => alignDeedToParcel(deedAlignHint.id)} style={toastActionBtn}>Align to parcel</button>
+                <button onClick={() => setDeedAlignHint(null)} style={toastGhostBtn}>Dismiss</button>
+              </>}
+            </div>
           )}
-          <button onClick={() => setOvCalib(null)} style={toastGhostBtn}>Cancel</button>
-        </div>
-      )}
+
+          {/* NEW-1 — "you clicked a parcel and nothing happened, here's why" — the same bottom-center
+              toast surface as the pill above (same geometry, same type, same shadow), riding one notch
+              higher when that one is already occupied so neither message can swallow the other. The
+              inline action turns selection back ON right where the click failed, so the user never has
+              to go find the header control. Only ever raised by a press that actually hit a parcel. */}
+          {parcelHint && (
+            <div data-testid="parcel-select-hint" role="status"
+              style={{ ...toastPill, background: PAL.accent, bottom: TOAST_BOTTOM + ((pobMode || routeMode || overlapWarn || deedAlignHint) ? TOAST_STACK_GAP_PX : 0) }}>
+              <span>Parcel selection is off — that click panned the map.</span>
+              <button data-testid="parcel-select-hint-on" onClick={() => setParcelSelect(true)} style={toastActionBtn}>Turn it on</button>
+              <button aria-label="Dismiss" onClick={dismissParcelHint} style={toastGhostBtn}>Dismiss</button>
+            </div>
+          )}
+
+          {ovCalib && (
+            <div style={{ ...toastPill, background: PAL.accent }}>
+              <span>{ovCalibMsg()} {ovCalib.kind === "align" && Math.floor(ovCalib.pts.length / 2) >= 2 ? <span style={{ opacity: 0.75 }}>· or add more pairs for a better fit</span> : null} <span style={{ opacity: 0.75 }}>(Esc to cancel)</span></span>
+              {ovCalib.kind === "align" && Math.floor(ovCalib.pts.length / 2) >= 2 && (
+                <button onClick={applyOvAlign} style={{ ...toastActionBtn, border: "1px solid #fff", padding: "3px 11px" }}>Apply {Math.floor(ovCalib.pts.length / 2)} pts</button>
+              )}
+              <button onClick={() => setOvCalib(null)} style={toastGhostBtn}>Cancel</button>
+            </div>
+          )}
+        </>);
+      })()}
 
       {/* B230 — Add / Delete control-point menu, portal-mounted at the document root so it can
           never be clipped or trapped behind the canvas / tool-rail stacking contexts. Shared
@@ -26241,6 +26311,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         <ContextMenu x={vtxMenu.x} y={vtxMenu.y} onClose={() => setVtxMenu(null)} minWidth={190} zIndex={6000} className="menu" panelStyle={menuPanel}>
           {vtxMenu.mode === "edge"
             ? <button style={menuItem(false)} onClick={() => { insertVtx(vtxMenu.layer, vtxMenu.id, vtxMenu.index, vtxMenu.ptFeet); setVtxMenu(null); }}>＋&nbsp; Add control point</button>
+            // NEW-1/B649504 — at the path's true minimum (a 2-point road/easement/measurement/
+            // markup), removing this point would leave a degenerate line, so a disabled "min
+            // reached" row is a dead end with nothing left to click. Offer the delete the user
+            // actually wants — the whole feature — instead of a row that can never be true AND
+            // useful at the same time. A closed ring (parcel/element/polygon) at its own minimum
+            // keeps the plain disabled row: "min reached" is an honest, correct statement there.
+            : vtxMenu.wholeDeleteLabel
+            ? <button style={{ ...menuItem(false), color: "#b3361b" }} onClick={() => { deleteWholeFromVtxMenu(vtxMenu.layer, vtxMenu.id); setVtxMenu(null); }}>✕&nbsp; {vtxMenu.wholeDeleteLabel}</button>
             : <button disabled={!vtxMenu.canDelete} style={{ ...menuItem(false), color: vtxMenu.canDelete ? "#b3361b" : "#b9b3a6", cursor: vtxMenu.canDelete ? "pointer" : "default" }} onClick={() => { if (vtxMenu.canDelete) { deleteVtx(vtxMenu.layer, vtxMenu.id, vtxMenu.index); setVtxMenu(null); } }}>✕&nbsp; Delete control point{vtxMenu.canDelete ? "" : " (min reached)"}</button>}
           {/* NEW-5 — ROUNDABOUT, on the road-terminus branch of the menu the owner already uses.
               The size shown is the class's own derived diameter (a WB-67 truck route and an auto

@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-25 @ `8fe2cf7f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-25 @ `600492f1` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -596,7 +596,7 @@ _561 source files mapped._
 - **`src/workspaces/site-planner/lib/deedParse.js`** — Deed / metes-and-bounds parser (split out of metesAndBounds.js so it could be deferred): bearing+distance calls, curve courses, SAVE-AND-EXCEPT tracts, dead-reckoned path, closure and misclosure
   - _exports_: `arcChordPoints`, `callsToPath`, `misclosure`, `parseCalls`, `parseTracts`, `pathCloses`, `VARA_FT`
 - **`src/workspaces/site-planner/lib/deletePlan.js`** — The ONE pure decision behind every planner delete entry point: resolves what a delete targets (union of `multi` and `sel`, any count, each ref checked against the live model), expands a building to its bonded assembly, and returns a reason + owner-facing message whenever nothing is removed — so a delete can never fail in silence.
-  - _exports_: `bondedSubtree`, `DELETE_ENTRIES`, `planDelete`, `REF_FIELD`, `resolveRef`, `shouldHintTypingGuard`, `TYPING_GUARD_HINT`
+  - _exports_: `bondedSubtree`, `DELETE_ENTRIES`, `planDelete`, `REF_FIELD`, `resolveRef`
 - **`src/workspaces/site-planner/lib/demGrid.js`** — Pure DEM grid plumbing (B704/B706): deterministic snapped-tile exportImage requests, LERC sniff/decode to survey-feet with validity mask, masked gaussian smooth, cell-center pixel/mercator/WGS84 transforms, mask-aware bilinear sampling
   - _exports_: `bandCellMeters`, `CELL_PX`, `exportUrl`, `gridRequest`, `groundScale`, `LATTICE_MAX_BAND`, `LATTICE_MAX_TILES`, `LATTICE_MIN_BAND`, `latticeCover`, `latticeTile`, `latticeTileAt`, `latToMercY`, `lngToMercX`, `looksLikeLerc`, `MARGIN_CELLS`, `maskedSmooth`, `MAX_GRID`, `mercPerPx`, `mercToPixel`, `mercXToLng`, `mercYToLat`, `pixelToLatLng`, `pixelToMerc`, `sampleAtLatLng`, `TILE_CELLS`, `WEB_MERC_R`
 - **`src/workspaces/site-planner/lib/detentionCriteria.js`** — Versioned jurisdiction detention-criteria registry (NEW-A1): cited per-district outlet-hydraulics + pond-geometry criteria (release, storms, freeboard, slope, berm, orifice/weir C, drawdown), referencing DETENTION_RULES for the verified release/storm/freeboard facts; audit guard + user overrides.

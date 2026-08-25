@@ -23,6 +23,16 @@
  *  PART C — "Go", "+ Select parcels" and "+ Comp" now carry a `title`, matching every other
  *  control on that bar.
  *
+ *  ⛔ B754752 (added to PART A) — the bottom-centre canvas TOAST (`flashWarn`/`toastPill` in
+ *  SitePlanner.jsx) joined this furniture set. It used to be a bare `left: 50%` of the viewport,
+ *  so a docked left-rail panel could sit directly under it (measured live: it painted over the
+ *  Properties panel's own Length (ft) field at a laptop-width window) — the fix re-centres it on
+ *  the measured CANVAS instead, and this harness is what proves that holds against every OTHER
+ *  occupant of the same corner, at every requested width, rather than trusting the centring rule
+ *  in isolation. Every bottom-centre toast on this surface (pob/route/deed-align, overlay
+ *  calibration, the parcel-select hint, B754752's keyboard scope-guard hint) shares ONE `toastPill`
+ *  object, so proving the parcel-select hint never collides proves it for all of them.
+ *
  *  PART A also covers B750096 — the road tool's "Done"/finish control used to live INSIDE the
  *  canvas SVG, glued to the last placed vertex with pointer-events:all (a real click target
  *  sitting where the next point gets placed). It now renders as `[data-testid="road-draft-
@@ -68,9 +78,17 @@ try {
   const WIDTHS = [1440, 1024, 900, 750, 600, 420];
 
   // ─────────────────────────────────────────── PART A — Site Planner canvas furniture
-  console.log("\nPART A — Site Planner canvas furniture (north arrow · scale bar · calibration badge · coordinate chip · Properties/Tools FABs · road-draft status strip)");
+  console.log("\nPART A — Site Planner canvas furniture (north arrow · scale bar · calibration badge · coordinate chip · Properties/Tools FABs · the bottom-centre canvas toast · road-draft status strip)");
   const PARCEL = [{ x: 0, y: 0 }, { x: 800, y: 0 }, { x: 800, y: 600 }, { x: 0, y: 600 }];
-  const site = { s_furn: { id: "s_furn", groupId: "s_furn", site: "Furniture Verify", name: "Plan 1", status: "active", origin: { lat: 29.80, lon: -95.83 }, county: "harris", parcels: [{ id: "pA", points: PARCEL, locked: true }], els: [], measures: [], callouts: [], markups: [], deletedIds: [], settings: {}, underlay: null, updatedAt: 1755000000000 } };
+  /* parcelSelect: false — so a press on the seeded parcel's boundary fires the SAME
+   * `parcel-select-hint` toast B311/NEW-1 already ships, which renders through the identical
+   * shared `toastPill` object (position, background, everything) as every other bottom-centre
+   * canvas toast on this surface — the pob/route/deed-align pill, the overlay-calibration pill,
+   * and the B754752 keyboard scope-guard hint ("Delete went to the box you're typing in" /
+   * "the keyboard is still on the panel"). Proving ONE toast never collides with this furniture
+   * proves it for all of them, because they share one positioning rule (`toastCenterX`,
+   * SitePlanner.jsx) rather than each computing their own. */
+  const site = { s_furn: { id: "s_furn", groupId: "s_furn", site: "Furniture Verify", name: "Plan 1", status: "active", origin: { lat: 29.80, lon: -95.83 }, county: "harris", parcels: [{ id: "pA", points: PARCEL, locked: true }], els: [], measures: [], callouts: [], markups: [], deletedIds: [], settings: { parcelSelect: false }, underlay: null, updatedAt: 1755000000000 } };
   const seedSite = `(() => { try { localStorage.setItem('planarfit:sites:v1', JSON.stringify(${JSON.stringify(site)})); localStorage.setItem('planarfit:currentSite:v1', 's_furn'); } catch (e) {} })();`;
 
   for (const width of WIDTHS) {
@@ -84,6 +102,21 @@ try {
     const svgBox = await page.locator('svg[aria-label="Site plan canvas"]').boundingBox().catch(() => null);
     if (svgBox) { await page.mouse.move(svgBox.x + svgBox.width / 2, svgBox.y + svgBox.height / 2, { steps: 3 }); await pacedWait(page, 500); }
 
+    // Press the rendered parcel's own boundary (its `data-feature="parcel:pA"` group, an
+    // axis-aligned rect on screen since the view is north-up) with parcelSelect off — this is
+    // B311's real click-through repro and fires the parcel-select-hint toast honestly, not a
+    // synthetic state poke (SYNTHETIC-KEYS-DONT-EDIT's sibling caution for a click).
+    const parcelBox = await page.evaluate(() => {
+      const g = document.querySelector('[data-feature="parcel:pA"]');
+      if (!g) return null;
+      const r = g.getBoundingClientRect();
+      return { left: r.left, top: r.top, height: r.height };
+    });
+    if (parcelBox) {
+      await page.mouse.click(parcelBox.left + 2, parcelBox.top + parcelBox.height / 2);
+      await pacedWait(page, 500);
+    }
+
     const data = await page.evaluate(() => {
       const rectOf = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom, w: r.width, h: r.height }; };
       const toolsFab = [...document.querySelectorAll("button")].find((b) => (b.textContent || "").trim() === "✎ Tools");
@@ -95,10 +128,11 @@ try {
       const plates = furnContainer ? [...furnContainer.children] : [];
       const scaleBarWrap = plates.find((p) => p.style.right);
       const northWrap = plates.find((p) => p.style.left);
+      const toast = document.querySelector('[data-testid="parcel-select-hint"]');
       return {
         narrow: window.matchMedia("(max-width: 760px)").matches,
         toolsFab: rectOf(toolsFab), badge: rectOf(badge), cursorChip: rectOf(cursorChip),
-        scaleBar: rectOf(scaleBarWrap), north: rectOf(northWrap),
+        scaleBar: rectOf(scaleBarWrap), north: rectOf(northWrap), toast: rectOf(toast),
       };
     });
 
@@ -124,6 +158,21 @@ try {
     // pairwise: badge never overlaps the scale bar or the north arrow, at any width
     check(`${width}px · badge does not overlap the scale bar`, overlapArea(data.badge, data.scaleBar) === 0, `overlap=${overlapArea(data.badge, data.scaleBar).toFixed(0)}px²`);
     check(`${width}px · badge does not overlap the north arrow`, overlapArea(data.badge, data.north) === 0, `overlap=${overlapArea(data.badge, data.north).toFixed(0)}px²`);
+
+    // B754752 — the bottom-centre canvas toast joins the furniture set. It must clear every
+    // OTHER piece the same way the badge already has to; a fixed viewport-centred toast could
+    // land under it at some width nobody had tested, which is exactly the class this item exists
+    // to close (the toast previously covered the Properties panel's own Length field, a fixed
+    // "50%" that ignored every other occupant of the corner it shares).
+    check(`${width}px · parcel-select-hint toast renders`, !!data.toast);
+    if (data.toast) {
+      check(`${width}px · toast does not overlap the north arrow`, overlapArea(data.toast, data.north) === 0, `overlap=${overlapArea(data.toast, data.north).toFixed(0)}px²`);
+      check(`${width}px · toast does not overlap the scale bar`, overlapArea(data.toast, data.scaleBar) === 0, `overlap=${overlapArea(data.toast, data.scaleBar).toFixed(0)}px²`);
+      check(`${width}px · toast does not overlap the calibration badge`, overlapArea(data.toast, data.badge) === 0, `overlap=${overlapArea(data.toast, data.badge).toFixed(0)}px²`);
+      if (data.narrow && data.toolsFab) {
+        check(`${width}px · toast does not overlap the Tools FAB`, overlapArea(data.toast, data.toolsFab) === 0, `overlap=${overlapArea(data.toast, data.toolsFab).toFixed(0)}px²`);
+      }
+    }
 
     // B750096 — the road-draft "finish" status strip (bottom-center, replaces the old in-canvas
     // click-swallowing chip) must join this SAME collision-aware furniture set: assert it never
