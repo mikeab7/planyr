@@ -23,7 +23,8 @@
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
 const { chromium } = pw;
 import { mkdirSync } from "node:fs";
-import { assertMeasurable, pacedWait } from "./lib/tabTiming.mjs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { pacedWait } from "./lib/tabTiming.mjs";
 
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
 const OUT = new URL("./screens/endpoint-delete/", import.meta.url).pathname;
