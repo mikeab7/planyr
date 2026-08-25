@@ -21,8 +21,9 @@
  *   5. Switching orientation Landscape→Portrait re-fits the frame — the async aspect-refit path.
  *   6. "Download PDF" from print mode produces a real PDF — the deepest ctx consumer
  *      (sheet layout, restyle pass, image inlining, rasterize, jpegToPdf) end to end.
- *   7. Export project file (.json) still downloads — the smallest ctx consumer, so a broken
- *      ctx wiring shows up here too.
+ *
+ * (B765984: the .json project-file export/import pair was removed from the File menu, so the
+ * former step 7 — "Export project file (.json) still downloads" — no longer applies.)
  *
  * NOT covered here (needs the live edge / real GIS hosts, so it stays a live check): the
  * aerial Stitcher actually stitching real tiles, and GIS raster/vector layers compositing
@@ -140,21 +141,6 @@ try {
   else ok.push(`Download PDF produced a real PDF (${(pdfBytes / 1024).toFixed(0)} KB) through the full lazy pipeline`);
 } catch (e) {
   fail.push(`print-frame / PDF path failed — ${String(e).split("\n")[0]}`);
-}
-
-/* ---- 7. Export project file (.json) --------------------------------------------------- */
-try {
-  await fileBtn.click();
-  const [dl] = await Promise.all([
-    page.waitForEvent("download", { timeout: 30_000 }),
-    page.getByRole("button", { name: /^Export project file$/ }).first().click(),
-  ]);
-  const path = await dl.path();
-  const bytes = path ? (await import("node:fs")).statSync(path).size : 0;
-  if (bytes < 200) fail.push(`Export project file produced only ${bytes} bytes — expected a real project .json`);
-  else ok.push(`Export project file downloaded ${(bytes / 1024).toFixed(1)} KB of JSON`);
-} catch (e) {
-  fail.push(`Export project file never produced a download — ${String(e).split("\n")[0]}`);
 }
 
 /* An uncaught exception anywhere in the run means the ctx wiring dropped something. */

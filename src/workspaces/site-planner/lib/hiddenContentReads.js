@@ -110,7 +110,6 @@ export const DECLARATIONS = Object.freeze([
   { name: "calibPlace", verdict: U, why: "Aerial calibration placement — it reads the model to georeference, not to draw." },
   { name: "createExportSheet", verdict: U,
     why: "The export module's ctx destructure. The PDF/PNG sheet CLONES the live `<svg>`, so hidden content is absent by construction; the model is there for the DATA exports, which decide their own contents." },
-  { name: "exportJSON", verdict: U, why: "A dump of the saved record. It is the model, and must be complete." },
   { name: "exportKmz", verdict: U,
     why: "A MODEL-BUILT export: it decides its own contents and never inherits a canvas display toggle (kmzExport.js's own rule, guarded by test/kmzExport.test.js)." },
   { name: "exportFeetExtent", verdict: F,
