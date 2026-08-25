@@ -188,6 +188,7 @@ ui-audit/.raster-cache/
 .planyr-ledger-merges.log
 ui-audit/.vendor/
 ui-audit/.perfshots/
+ui-audit/_shots/
 
 # Session scratch-repro harnesses/measurement scripts/screenshots — referenced by path from
 # BACKLOG.md entries as evidence, but per this repo's own established convention they are
