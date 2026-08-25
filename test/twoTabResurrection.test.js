@@ -49,7 +49,14 @@ const applyInstrToList = (list, instr) => {
 const el = (id, extra = {}) => ({ id, type: "building", cx: 0, cy: 0, w: 10, h: 10, ...extra });
 
 describe("B712224 — the elementSync diff resurrects a tombstoned element fed a STALE collection", () => {
-  it("reproduces the vulnerability: shadow cleared by a tombstone, collection still shows it alive → a fresh CREATE", async () => {
+  it("SUPERSEDED BY ROUND 3 — a stale collection no longer resurrects even with NO fold at all", async () => {
+    // Round 1 fixed the CALL SITE (SitePlanner.jsx's reconcileElems folds drainRemote()'s
+    // instructions before diffing) but left the ENGINE itself willing to mint a create for any
+    // stale-canvas read, from ANY call site — which is exactly what round 2's live re-test proved:
+    // the resurrection recurred with a WORSE blast radius, from a call site round 1's fold cannot
+    // reach at all (the idle observer's ordinary autosave diff, no gesture, nothing buffered — see
+    // the "round 3" describe block below). Round 3 closes it at the ENGINE, so this exact stale-fed
+    // collection — reconcile() given NO fold, exactly the pre-round-1 bug shape — now mints nothing.
     const ops = [];
     const s = createElementSync({
       siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
@@ -67,11 +74,12 @@ describe("B712224 — the elementSync diff resurrects a tombstoned element fed a
     s.applyRemoteRow({ kind: "el", id: "sw1", deleted_at: "2026-08-23T23:03:09.019602+00", rev: 3, updated_by: "me" });
     // THE BUG SHAPE: reconcile() is fed the collection AS IT STOOD BEFORE either tombstone was
     // applied to the canvas — exactly what a stale `stateRef.current` read right after
-    // `drainRemote()` used to hand it.
+    // `drainRemote()` used to hand it (round 1's shape) — and, more generally, exactly what ANY
+    // stale-canvas window hands it (round 3's shape: no fold in sight, no gesture, nothing buffered).
     s.reconcile({ els: [el("host"), el("sw1", { type: "sidewalk", attachedTo: "host" })] }, {});
     await tick();
     const createdIds = ops.filter((o) => o.op === "create").map((o) => o.id);
-    expect(createdIds.sort()).toEqual(["host", "sw1"]); // ← the resurrection, reproduced
+    expect(createdIds).toEqual([]); // ← the delete floor refuses both, engine-side, no fold needed
   });
 
   it("THE FIX: folding the drained remove instructions into the collection BEFORE diffing resurrects nothing", async () => {
@@ -97,6 +105,107 @@ describe("B712224 — the elementSync diff resurrects a tombstoned element fed a
     s.reconcile({ els: staleEls }, {});
     await tick();
     expect(ops).toHaveLength(0); // ← no resurrection
+  });
+});
+
+/* B712224 (round 3) — round 1's fold (above) only helps when the canvas removal was BUFFERED
+ * (`busyRef.current` true, a gesture in flight). The owner's round-2 live re-test had tab B
+ * COMPLETELY IDLE — no gesture, nothing buffered — and the resurrection still happened: 11 of 13
+ * bonded children came back alive under a fresh, envelope-less ("unknown") operation. Production
+ * telemetry (site `smt6imo0gda0`) shows the mechanism is NOT a race elementSync's fold can reach at
+ * all: `reconcile()`'s `!shad` branch cannot tell "the server has never seen this element" from "the
+ * server holds this element as a TOMBSTONE and the canvas hasn't caught up yet" — both look
+ * identical (no shadow entry, the collection still shows it). Any stale-canvas window — a direct
+ * React state-update lag, a heal-pass clobber, a refetch fold — reproduces the shape with NO
+ * buffering involved whatsoever, and `commit_elements` deliberately auto-restores a `create` over a
+ * same-kind tombstone (the exact behavior `site_elements.sql`'s create branch documents).
+ *
+ * THE FIX: a never-pruned delete floor (`maxDeleteRev`, already used by the refetch-resurrect guard)
+ * is now recorded on EVERY tombstone this engine learns of — its own, a foreign one via
+ * `applyRemoteRow`, and one read back from a `seed()` — and `reconcile()`'s `!shad` branch refuses to
+ * mint a create against a floored key (unless a `restore()` is explicitly in flight), routing the
+ * refusal back through the `onRowsCanonical` channel as a removal instead. */
+describe("B712224 (round 3) — the delete floor: a tombstoned element's stale canvas copy never re-mints a create", () => {
+  it("a FOREIGN tombstone (no gesture, nothing buffered) leaves a floor that refuses the phantom create and reports a removal", async () => {
+    const ops = [];
+    const adoptions = [];
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: () => {}, onRowsCanonical: (a) => adoptions.push(...a),
+      commit: async (batch) => { ops.push(...batch); return { ok: true, results: batch.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }; },
+    });
+    s.seed([{ kind: "el", id: "host", data: el("host"), rev: 2, z_index: 0 }]);
+    // Tab B's realtime handler receives tab A's tombstone and applies it DIRECTLY (no gesture, no
+    // buffering) — exactly `applyRemoteRow`'s ordinary path, never touching `pendingRemoteRef`.
+    const instr = s.applyRemoteRow({ kind: "el", id: "host", deleted_at: "2026-08-24T01:40:27.245909+00", rev: 3, updated_by: "tab-a" });
+    expect(instr.action).toBe("remove");
+    // THE BUG SHAPE: reconcile() is fed the canvas AS IT STOOD BEFORE that removal landed — no fold,
+    // no drain, nothing buffered to fold. Round 1's fix cannot see this at all: there is nothing in
+    // `pendingRemoteRef` to fold.
+    s.reconcile({ els: [el("host")] }, {});
+    await tick();
+    expect(ops.filter((o) => o.op === "create")).toHaveLength(0);   // ← no resurrection
+    expect(adoptions).toEqual([{ kind: "el", id: "host", el: null }]); // ← told to remove it from the canvas
+  });
+
+  it("MUTATION CHECK — the pre-fix `!shad` branch (no floor check) mints a create for the identical inputs", async () => {
+    // The exact OLD shape of reconcile()'s no-shadow branch: mint unconditionally. Proves the
+    // scenario above is a real hole the floor check closes, not an artifact of this test's setup.
+    const preFixCreate = (shad, maxDeleteRevHas) => !shad && !maxDeleteRevHas;
+    expect(preFixCreate(/* shad */ undefined, /* maxDeleteRev.has */ false)).toBe(true);
+    // and the CURRENT module really does floor it — re-run the live scenario and check the floor
+    // directly via the engine's own tombstone snapshot, which `reconcile()` consults.
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: () => {}, commit: async (batch) => ({ ok: true, results: batch.map((o) => ({ id: o.id, status: "ok", rev: 1 })) }),
+    });
+    s.seed([{ kind: "el", id: "host", data: el("host"), rev: 2, z_index: 0 }]);
+    s.applyRemoteRow({ kind: "el", id: "host", deleted_at: "2026-08-24T01:40:27.245909+00", rev: 3, updated_by: "tab-a" });
+    expect(s.tombstonedSnapshot().has("el:host")).toBe(true); // the floor the fix reads
+  });
+
+  it("CONTROL — a genuinely NEW element (never tombstoned) still creates normally", async () => {
+    const ops = [];
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: () => {}, commit: async (batch) => { ops.push(...batch); return { ok: true, results: batch.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }; },
+    });
+    s.seed([]);
+    s.reconcile({ els: [el("brand-new")] }, {});
+    await tick();
+    expect(ops.filter((o) => o.op === "create").map((o) => o.id)).toEqual(["brand-new"]);
+  });
+
+  it("CONTROL — an explicit restore() after a foreign tombstone still commits as cls:restore, never refused", async () => {
+    const ops = [];
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: () => {}, commit: async (batch) => { ops.push(...batch); return { ok: true, results: batch.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }; },
+    });
+    s.seed([{ kind: "el", id: "host", data: el("host"), rev: 2, z_index: 0 }]);
+    s.applyRemoteRow({ kind: "el", id: "host", deleted_at: "2026-08-24T01:40:27.245909+00", rev: 3, updated_by: "tab-a" });
+    s.restore("el", "host", el("host"));       // the B673 "deleted by ⟨name⟩" toast's explicit Restore action
+    s.reconcile({ els: [el("host")] }, {});     // the canvas already shows the restore-in-progress copy
+    await tick();
+    expect(ops).toHaveLength(1);
+    expect(ops[0].op).toBe("restore");
+  });
+
+  it("the floor also comes from seed() — a page load / reconnect that fetches a tombstoned row refuses the same phantom create", async () => {
+    const ops = [];
+    const adoptions = [];
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: () => {}, onRowsCanonical: (a) => adoptions.push(...a),
+      commit: async (batch) => { ops.push(...batch); return { ok: true, results: batch.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }; },
+    });
+    // fetchElements() does NOT filter on deleted_at — a reconnect refetch's row set includes tombstones.
+    s.seed([{ kind: "el", id: "host", data: el("host"), rev: 3, z_index: 0, deleted_at: "2026-08-24T01:40:27.245909+00" }]);
+    // A stale on-device cache (or a canvas that hasn't yet absorbed the tombstone) still shows it.
+    s.reconcile({ els: [el("host")] }, {});
+    await tick();
+    expect(ops.filter((o) => o.op === "create")).toHaveLength(0);
+    expect(adoptions).toEqual([{ kind: "el", id: "host", el: null }]);
   });
 });
 

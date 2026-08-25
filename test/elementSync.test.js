@@ -770,8 +770,16 @@ describe("B812 — own-echo-by-rev kills the single-tab resize burst", () => {
 
   // Round-4 (owner "close all loose ends"): the delete floor exposed to reconcileSeedRows is now a
   // NEVER-pruned high-water, so an in-session reconnect ARBITRARILY LATER than a delete still keeps the
-  // element deleted; a genuine re-create clears it.
-  it("the delete floor for reconcileSeedRows survives >15s (never-pruned) and clears on re-create", async () => {
+  // element deleted; a genuine, EXPLICIT re-create (restore()) clears it.
+  //
+  // ⛔ B712224 (round 3) AMENDMENT — a BARE reconcile() diff against a floored id no longer
+  // re-creates it at all (that silent "the canvas just happens to show it → mint a create" shape is
+  // exactly the production resurrection bug: a stale canvas re-minting a create for an element the
+  // server holds as a tombstone). A genuine re-create over a delete floor is only ever the B673
+  // "Restore" action (`restore()`) or an undo/redo of the delete (`allowResurrect()`, staged by
+  // `SitePlanner.jsx`'s `applySnapshot`) — this test now exercises the former, which is the one this
+  // suite's OTHER caller (`processResults`' create-result handling) already clears the floor from.
+  it("the delete floor for reconcileSeedRows survives >15s (never-pruned) and clears on an explicit restore()", async () => {
     let clock = 0;
     const s = createElementSync({
       siteId: "s", selfUid: "me", now: () => clock, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
@@ -782,9 +790,13 @@ describe("B812 — own-echo-by-rev kills the single-tab resize burst", () => {
     s.reconcile({ els: [] }, {}); await tick();             // delete → floor rev 6
     clock = 20000;                                          // 20s later — past the 15s in-flight window
     expect(s.tombstonedSnapshot().get("el:pv")?.rev).toBe(6); // floor retained (never pruned)
-    // re-create pv (restore / new element at the same id) → the floor is dropped
+    // a BARE diff against the floored id must NOT resurrect it (round 3's whole point)
     s.reconcile({ els: [{ id: "pv", w: 99, z: 0 }] }, {}); s.flushGesture(); await tick();
-    expect(s.tombstonedSnapshot().has("el:pv")).toBe(false); // cleared → won't hide the re-create
+    expect(s.tombstonedSnapshot().get("el:pv")?.rev).toBe(6); // still floored — the bare diff was refused
+    // the B673 "Restore" action is the explicit signal that clears it
+    s.restore("el", "pv", { id: "pv", w: 99, z: 0 });
+    s.reconcile({ els: [{ id: "pv", w: 99, z: 0 }] }, {}); await tick();
+    expect(s.tombstonedSnapshot().has("el:pv")).toBe(false); // cleared → won't hide the real re-create
   });
 });
 
