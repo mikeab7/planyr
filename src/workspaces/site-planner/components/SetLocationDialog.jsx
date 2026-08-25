@@ -113,7 +113,7 @@ export default function SetLocationDialog({ origin, PAL, onCancel, onConfirm }) 
         <div style={{ display: "flex", gap: 6, margin: "12px 0 8px" }}>
           <input
             autoFocus value={q} onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") find(); }}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); find(); } }}
             placeholder="Address, or a latitude and longitude"
             aria-label="Address, or a latitude and longitude"
             data-testid="set-location-search"

@@ -350,3 +350,53 @@ describe("SOURCE SWEEP — the real handler may not branch on an undeclared key"
     expect(body).toMatch(/e\.key === "Enter" \|\| e\.key === "Escape"/);
   });
 });
+
+/* B548821 — A SECOND KEYBOARD ROUTER LIVING OUTSIDE THIS FILE, and the reason it matters: a
+ * component that calls `e.stopPropagation()` unconditionally on `onKeyDown` never lets the event
+ * reach the planner's window listener AT ALL, for ANY key — so `keyScope`/`keyContract` never get
+ * asked, and the once-per-episode LOUD-FAILURE hint above can never fire for it either. That is a
+ * silent, undocumented, per-component keyboard-routing decision, and this repo has exactly one
+ * router: shared/keyboard/keyScope.js.
+ *
+ * Found live in the site-planner workspace: the Parcel Record fields, the "Add by address" and
+ * "Set location" search boxes, and — the one that matters most, because it is the single most-used
+ * free-text control on the canvas — the callout/text-box editor. Each called stopPropagation() as
+ * the FIRST statement in its handler, before checking which key was pressed, so Ctrl+Z/Ctrl+Y (and
+ * anything else the component doesn't itself use) could never reach the app's undo while any of
+ * them merely HELD focus — including a stretch after the user believed they had moved on. The fix
+ * in every case is the same shape: stop only the key(s) the component actually answers itself
+ * (Enter to commit, Escape to cancel, Alt+Z to autosize), and let everything else bubble — which is
+ * safe precisely because keyScope's FIELD scope already refuses every plan-mutating shortcut while
+ * a text control is genuinely focused; nothing here needs a second copy of that rule.
+ *
+ * This sweep is proven RED against the exact banned shape (a mutation check, not a hope): running it
+ * against the pre-fix source (stopPropagation unconditional, before the `if`) must fail. */
+describe("no component keydown handler routes around keyScope", () => {
+  const BANNED = /onKeyDown=\{[^}]*?=>\s*\{\s*e\.stopPropagation\(\);/;
+  const filesToSweep = [
+    "../src/workspaces/site-planner/SitePlanner.jsx",
+    "../src/workspaces/site-planner/components/ParcelRecordPanel.jsx",
+    "../src/workspaces/site-planner/components/SetLocationDialog.jsx",
+  ];
+
+  it("no onKeyDown handler stops propagation before looking at the key", () => {
+    for (const f of filesToSweep) {
+      const s = src(f);
+      expect(s, `${f} has an unconditional stopPropagation() ahead of its key check — scope it to the key(s) the handler actually answers, per keyScope's FIELD-scope rule`).not.toMatch(BANNED);
+    }
+  });
+
+  it("the banned shape is real — the sweep goes red on the pre-fix source it was written against", () => {
+    const preFix = 'onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") e.currentTarget.blur(); }}';
+    expect(preFix).toMatch(BANNED);
+  });
+
+  it("the callout editor still answers Escape and Alt+Z, just scoped to those keys", () => {
+    const s = src("../src/workspaces/site-planner/SitePlanner.jsx");
+    const editorStart = s.indexOf("<textarea autoFocus");
+    expect(editorStart).toBeGreaterThan(0);
+    const body = s.slice(editorStart, editorStart + 2600);
+    expect(body).toMatch(/if \(e\.key === "Escape"\) \{ e\.stopPropagation\(\); e\.preventDefault\(\); commitEditCallout\(\); \}/);
+    expect(body).toMatch(/e\.altKey && e\.code === "KeyZ"/);
+  });
+});

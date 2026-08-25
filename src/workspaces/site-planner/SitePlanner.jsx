@@ -40,7 +40,7 @@ import { markupsUnderPoint, nextMarkupSelection, boxCorners } from "./lib/markup
 import { EMPTY_TAP, tapTime, stepDoubleTap } from "./lib/doubleTap.js";
 import { DRAG_SLOP_PX, makeDragGate, stepDragGate, dragArmed } from "./lib/dragGate.js";
 import { isDiagArmed, latchDiagArm } from "./lib/diagArm.js";
-import { resolveDoubleClickTarget, gestureAnchorTarget, stackEntries, pressIsOverElementBody, featuresBeneath, stackHoldsFeature, parseFeatureKey } from "./lib/featureTarget.js";
+import { resolveDoubleClickTarget, gestureAnchorTarget, stackEntries, pressIsOverElementBody, featuresBeneath, stackHoldsFeature, parseFeatureKey, stackAtPoint, nextPickIndex } from "./lib/featureTarget.js";
 import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving } from "./lib/parking.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFile, rasterizeStoredPdf, rasterizeStoredDxf, baseRasterScale, chooseOverlayRasterScale, overlayRasterKey, HIRES_CACHE_PER_OVERLAY } from "./lib/overlayPdf.js";
@@ -2092,6 +2092,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const spaceRef = useRef(false);                  // Space held → temporary hand-pan over any tool (D4)
   const [spacePan, setSpacePan] = useState(false); // reflects spaceRef for the grab cursor
   const capturePidRef = useRef(null);              // last pointerId the canvas captured — lets a gesture interrupted without a pointer-up still release capture (NEW-1)
+  const stackPickRef = useRef(null);               // B548822 — {x,y,index} of the last Alt+click, for the stack picker's cycle-deeper-at-the-same-point rule (lib/featureTarget.js nextPickIndex)
   const [sel, setSel] = useState(null);         // {kind:'el'|'parcel', id}
   const [selEdgeRun, setSelEdgeRun] = useState(null); // B912: index (into selRuns) of the selected parcel side whose length dim is highlighted/being edited
   const [multi, setMulti] = useState([]);
@@ -4832,7 +4833,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       /* NEW-1 — the parenthetical is now conditional: an element the user has FORCED in front of the
          plan is deliberately NOT in its own type's layer, and telling it that it is would contradict
          the state it is visibly in (and the row that put it there). */
-      else if (af) flashWarn(`Nothing to reorder — this is the only one on its layer${s.kind === "el" && !bandForceOf(els.find((e) => e.id === s.id)) ? " (a site element always draws in its own type's layer, unless you force it in front)" : ""}.`, 3500);
+      else if (af) flashWarn(`Nothing to reorder — this is the only one on its layer${s.kind === "el" && !bandForceOf(els.find((e) => e.id === s.id)) ? " (a site element always draws in its own type's layer, unless you force it in front or underneath)" : ""}.`, 3500);
       return;
     }
     pushHistory();
@@ -4854,7 +4855,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const peers = els.filter((e) => zOrder(e) === b);
       const f = arrangeFlags(peers, s.id);
       if (!f) return null;
-      return { flags: f, alone: f.count < 2, band: bandForceOf(t) ? "elements forced in front of the plan" : `${TYPE[t.type]?.label || t.type} layer` };
+      const forced = bandForceOf(t);
+      const bandName = forced === "front" ? "elements forced in front of the plan" : forced === "back" ? "elements forced underneath the plan" : `${TYPE[t.type]?.label || t.type} layer`;
+      return { flags: f, alone: f.count < 2, band: bandName };
     }
     /* ⛔ NEW-1 — AND THIS IS WHERE THE GREYING STOPPED LYING. The three annotation families read
        band-aware flags, so a row is disabled only at a TRUE end of the whole stack. Two consequences
@@ -6598,6 +6601,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // NEW-4(c) — same ref guard as gisHit above, same reason: this fired on every zoom step and
   // almost always wrote null over null.
   useEffect(() => { if (gisHoverRef.current) setGisHover(null); }, [view.ppf]);
+
+  /* ⛔ B548822 — THE STACK PICKER. See lib/featureTarget.js (stackAtPoint / nextPickIndex) for the
+   * full design: Alt+click resolves to the top of the hit stack at this point, exactly like a plain
+   * click; Alt+click AGAIN at the same point steps one deeper, wrapping back to the top. It is the
+   * general answer to a feature buried under another — the owner's Richfield case, a road
+   * geometrically inside a pond, with both already at the bottom of their own type-layer band so
+   * Send-to-Back has nowhere left to send either one (see planStyle.js's EL_BANDS.back, the mirror
+   * escape hatch this same report named missing).
+   *
+   * Runs in the CAPTURE phase — the SAME `onPointerDownCapture` the double-click anchor already uses
+   * — because it has to win over whichever feature's own BUBBLE-phase pointerdown paint order would
+   * otherwise hand the press to (the topmost one, which is exactly what the picker exists to get
+   * past). Returns true when it consumed the press, so the caller skips the vertex-edit capture
+   * logic that would otherwise also run. */
+  const handleStackPick = (e) => {
+    if (!e.altKey || e.shiftKey || e.ctrlKey || e.metaKey) return false; // Alt alone — Shift/Ctrl/Alt combos are already claimed (vertex-insert, snap-bypass)
+    if (tool !== "select" || e.button !== 0) return false;
+    const stack = stackAtPoint(document.elementsFromPoint(e.clientX, e.clientY));
+    if (!stack.length) { stackPickRef.current = null; return false; } // nothing here — fall through to the ordinary background press
+    e.preventDefault();
+    e.stopPropagation();
+    const idx = nextPickIndex(stackPickRef.current, { x: e.clientX, y: e.clientY }, stack.length);
+    stackPickRef.current = { x: e.clientX, y: e.clientY, index: idx };
+    setMulti([]);
+    setDrillId(null);
+    setSel(stack[idx].target);
+    flashWarn(stack.length > 1 ? `${idx + 1} of ${stack.length} here — Alt+click again to go deeper` : "Only one thing here.", 1800);
+    return true;
+  };
 
   const onBgDown = (e) => {
     if (e.button !== 0) return;
@@ -18954,7 +18986,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <input
                           value={addrQuery}
                           onChange={(e) => setAddrQuery(e.target.value)}
-                          onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") addByAddress(); }}
+                          onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); addByAddress(); } }}
                           placeholder="123 Main St, Katy TX"
                           style={{ flex: 1, minWidth: 0, padding: "6px 8px", fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.panelLine || "var(--border-default)"}`, borderRadius: 6, outline: "none", color: PAL.ink, background: SURF_RAISED }} />
                         <button
@@ -20964,7 +20996,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                propagation included — that press is exactly the one being reasoned about). It is
                read-only and unconditional: it never touches the event, and it must NOT sit behind
                the touch-count guard below, because a press swallowed mid-pinch is still a press. */
-            onPointerDownCapture={(e) => { notePress(e); if (touchCountRef.current < 2) onCanvasVtxDownCapture(e); }}
+            onPointerDownCapture={(e) => { notePress(e); if (handleStackPick(e)) return; if (touchCountRef.current < 2) onCanvasVtxDownCapture(e); }}
             onContextMenuCapture={onCanvasVtxContextCapture}
             onPointerMoveCapture={(e) => { if (touchCountRef.current < 2) onCanvasVtxMoveCapture(e); }}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={(e) => abortGesture(e.pointerId, "pointercancel")} onDoubleClick={onBgDouble}
@@ -21684,12 +21716,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       onPointerDown={(e) => e.stopPropagation()}
                       onDoubleClick={(e) => e.stopPropagation()}
                       onKeyDown={(e) => {
-                        e.stopPropagation();
-                        // Bluebeam text box: Enter makes a new line; finish by clicking away or Esc.
-                        if (e.key === "Escape") { e.preventDefault(); commitEditCallout(); }
+                        /* B548821 — stop only Escape and Alt+Z, the two keys this editor actually
+                         * answers itself. It used to stopPropagation() on EVERY key, which is a
+                         * second, undocumented keyboard router living outside
+                         * shared/keyboard/keyScope.js — the one place this app decides who owns the
+                         * keyboard (see that module's header). That mattered here specifically: this
+                         * textarea is the most-used free-text control on the canvas (every plan with
+                         * a callout or text box hits it), and the blanket stop meant Ctrl+Z/Ctrl+Y
+                         * — and anything else this editor does not itself use — could never reach the
+                         * planner's window listener while it held focus, with no way for the shared
+                         * FIELD-scope guard (which already refuses every plan-mutating shortcut while a
+                         * text control is genuinely focused) to ever see the key and explain the
+                         * refusal. Bluebeam text box: Enter makes a new line; finish by clicking away
+                         * or Esc — Enter is deliberately left to bubble/default, same as every other
+                         * untouched key. */
+                        if (e.key === "Escape") { e.stopPropagation(); e.preventDefault(); commitEditCallout(); }
                         // B932 — Alt+Z autosizes to fit even while still typing (Bluebeam parity): drop
                         // the fixed width so the box hugs the text; the editor re-flows to auto on the spot.
-                        else if (e.altKey && e.code === "KeyZ") { e.preventDefault(); setCallout(editCallout.id, { boxW: null }); }
+                        else if (e.altKey && e.code === "KeyZ") { e.stopPropagation(); e.preventDefault(); setCallout(editCallout.id, { boxW: null }); }
                       }}
                       placeholder="Type…"
                       maxLength={2000}
@@ -23842,7 +23886,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   Rendered ABOVE the pond guard because a pond can be forced too. */}
               {bandForceOf(selEl) && (
                 <div data-testid="el-band-forced-note" style={{ marginTop: 9, padding: "6px 8px", borderRadius: 6, background: PAL.surfacePage, border: `1px solid ${PAL.panelLine}` }}>
-                  <div style={{ fontSize: 11, color: PAL.ink, fontWeight: 600 }}>Forced on top of everything</div>
+                  <div style={{ fontSize: 11, color: PAL.ink, fontWeight: 600 }}>{bandForceOf(selEl) === "back" ? "Forced underneath everything" : "Forced on top of everything"}</div>
                   <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 2 }}>
                     This {TYPE[selEl.type]?.label?.toLowerCase() || selEl.type} is drawing outside its type layer because you put it there.
                   </div>
@@ -26100,15 +26144,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           and callouts already use for "Send behind the plan", so there is one idea
                           in the product rather than two. PANEL-BREVITY: one row, no second sentence
                           in the menu body — the why lives in the hover. */}
-                      <button style={{ ...menuItem(false), display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
-                        data-testid="el-band-force"
-                        title={forcedBand
-                          ? "Put this back in its own type layer, where it draws in the usual order (buildings over parking over pond over paving over roads)."
-                          : "Cross the type-layer rule for this one element: draw it on top of everything, buildings included. Everything else keeps the normal order."}
-                        onClick={() => { setElBand(t.id, forcedBand ? null : "front"); setTypeMenu(null); }}>
-                        <span>{forcedBand ? "Use the normal layer order" : "Force on top of everything"}</span>
-                        {forcedBand ? <span style={{ color: PAL.accent, fontWeight: 700 }}>✓</span> : null}
-                      </button>
+                      {forcedBand ? (
+                        <button style={{ ...menuItem(false), display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
+                          data-testid="el-band-force"
+                          title="Put this back in its own type layer, where it draws in the usual order (buildings over parking over pond over paving over roads)."
+                          onClick={() => { setElBand(t.id, null); setTypeMenu(null); }}>
+                          <span>Use the normal layer order</span>
+                          <span style={{ color: PAL.accent, fontWeight: 700 }}>✓ {forcedBand === "front" ? "in front of" : "underneath"} the plan</span>
+                        </button>
+                      ) : (
+                        <>
+                          {/* ⛔ NEW-1 (B548822) — THE MIRROR OF "Force on top of everything". A geometrically
+                              buried element (a road inside a pond, say) can't be reached by sending the
+                              covering element to back — both are already as low in their OWN band as
+                              Arrange can put them, because the band rule outranks raw z. This row moves the
+                              COVERING element out of the way instead of lifting the buried one up, which is
+                              sometimes the more honest fix (the buried element keeps drawing in its own
+                              type's normal order; only the thing covering it moves). */}
+                          <button style={{ ...menuItem(false), display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
+                            data-testid="el-band-force"
+                            title="Cross the type-layer rule for this one element: draw it on top of everything, buildings included. Everything else keeps the normal order."
+                            onClick={() => { setElBand(t.id, "front"); setTypeMenu(null); }}>
+                            <span>Force on top of everything</span>
+                          </button>
+                          <button style={{ ...menuItem(false), display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
+                            data-testid="el-band-force-back"
+                            title="Cross the type-layer rule the other way: draw this element underneath everything, even roads. Use this to get a covering element out from over something buried beneath it."
+                            onClick={() => { setElBand(t.id, "back"); setTypeMenu(null); }}>
+                            <span>Force underneath everything</span>
+                          </button>
+                        </>
+                      )}
                     </>
                   )}
                   {/* ⛔ NEW-2 — WHAT IS UNDERNEATH THIS, AND HOW TO GET IT BACK. An annotation sent
