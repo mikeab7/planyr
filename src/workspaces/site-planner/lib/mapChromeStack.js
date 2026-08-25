@@ -96,3 +96,19 @@ export function panelMaxHeight({ topPx = 10, bottomPx = 96, minPx = 220 } = {}) 
  * and the container's own 10px margin, rounded up. The transient map banners (the offline/fallback
  * offers and the "drop a file" hint) sit on this rather than on a hand-picked number each. */
 export const ZOOM_CONTROL_CLEARANCE_PX = 128;
+
+/* ⛔ NEW-MAPCTRL-1 — THE COMPS TOGGLE, and the collision it re-created.
+ *
+ * The leasing-comps work added a "Comps" pill at `top:12, right:12, zIndex:1150` — the SAME
+ * `topright` corner this file already documents as belonging to the Layers panel, at a z-index
+ * that outranked even MAP_CHROME_Z.alert (1120). It was authored without reading this file, and
+ * it reproduced the exact B554 defect class this file exists to prevent: the pill sat almost
+ * exactly on top of the "Imagery & layers" button and buried the word IMAGERY.
+ *
+ * The fix is the rule this file already states: a newcomer to a claimed corner STACKS clear of
+ * the thing that already owns it, it does not out-z-index it. COMPS_TOGGLE_CLEARANCE_PX is the
+ * room the Comps pill (a 30px pill + an 8px gap, rounded up) needs above the Layers panel — the
+ * Layers panel's own `top` grows by this amount wherever the Comps toggle can render, at BOTH
+ * breakpoints, so the two can never overlap regardless of whether the Layers panel is collapsed
+ * or open (the pill sits ABOVE it, so the panel's own height growing downward never reaches it). */
+export const COMPS_TOGGLE_CLEARANCE_PX = 38;

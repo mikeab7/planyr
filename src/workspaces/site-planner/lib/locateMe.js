@@ -45,3 +45,55 @@ export function locateErrorMessage(code) {
   if (code === 3) return "Finding your location took too long — try again, or move somewhere with a clearer signal.";
   return "Couldn't determine your location right now.";
 }
+
+/* NEW-MAPCTRL-2 — "spinning then timing out on every click is wrong for a permanently-denied
+ * environment" (a company Chrome policy that blocks Location Services outright). Everything below
+ * is what lets the control know that BEFORE it ever calls getCurrentPosition, instead of only
+ * finding out ~12s later from a rejected promise. */
+
+// How far a reported fix may be off before it stops being a USABLE location at all — distinct
+// from ACCURACY_CIRCLE_THRESHOLD_M above, which only decides whether to draw a TIGHT ring.
+// Desktop IP-based geolocation (no GPS chip, no Wi-Fi positioning database hit) commonly reports
+// 20-50 km of accuracy. Flying the map there — or drawing a multi-mile "you are here" circle over
+// half a county — presents a guess as an answer. 15 km sits above ordinary Wi-Fi/cellular
+// positioning (typically hundreds of metres to a few km) and below the range a bare IP lookup
+// actually returns, so it separates "a real, if loose, fix" from "not really a location".
+export const ACCURACY_USABLE_THRESHOLD_M = 15000;
+
+// Pure: is this accuracy good enough to act on AT ALL — move the map, drop a marker — as opposed
+// to merely not warranting the tight ring (shouldShowAccuracyCircle, above).
+export function isAccuracyUsable(accuracyMeters) {
+  return Number.isFinite(accuracyMeters) && accuracyMeters > 0 && accuracyMeters <= ACCURACY_USABLE_THRESHOLD_M;
+}
+
+// Pure: the honest sentence for a fix too vague to use — never silently kept, never flown to.
+export function garbageAccuracyMessage(accuracyMeters) {
+  const acc = formatAccuracyFt(accuracyMeters);
+  return acc
+    ? `That fix isn't accurate enough to use (accuracy ${acc}) — it looks like a rough network guess rather than a real location. Try a device with GPS, or move somewhere with a clearer signal.`
+    : "That fix isn't accurate enough to use — it looks like a rough network guess rather than a real location.";
+}
+
+/* Pure: why the control cannot be used right now, given what the environment reports — asked
+ * BEFORE ever calling getCurrentPosition, so a permanently-blocked control never spins.
+ *   'ready'       — normal: a click may prompt, succeed, or fail; that's the click handler's job.
+ *   'insecure'    — geolocation requires HTTPS, and this page isn't served over one.
+ *   'unsupported' — this browser/environment exposes no Geolocation API at all.
+ *   'blocked'     — the browser, an enterprise/network policy, or a Permissions-Policy header has
+ *                   already denied the permission — no prompt will ever appear. */
+export function locateAvailability({ isSecureContext, hasGeolocation, permissionState } = {}) {
+  if (isSecureContext === false) return "insecure";
+  if (hasGeolocation === false) return "unsupported";
+  if (permissionState === "denied") return "blocked";
+  return "ready";
+}
+
+// Pure: the tooltip/aria text for a control `locateAvailability` says cannot be used right now —
+// rendered on the control itself (an anchored tooltip), never as a page-covering banner, because
+// a permanently-blocked state is not a failed ATTEMPT, it's a standing fact about the environment.
+export function locateUnavailableTooltip(availability) {
+  if (availability === "insecure") return "Finding your location needs a secure (https) connection — unavailable on this preview.";
+  if (availability === "unsupported") return "This browser doesn't support finding your location.";
+  if (availability === "blocked") return "Location is blocked by your browser or a company network policy.";
+  return "Find my location";
+}
