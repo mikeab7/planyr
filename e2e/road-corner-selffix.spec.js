@@ -65,7 +65,7 @@ test.describe("NEW-1 — three clicks make a road", () => {
 
     const done = page.getByTestId("road-draft-finish");
     await expect(done, "the draft must offer a way to finish — its absence IS the reported bug").toBeVisible();
-    await done.locator("rect").click({ force: true });
+    await done.click({ force: true });
 
     await expect.poll(async () => (await roads(page)).length, { timeout: 10_000 }).toBe(1);
     const [r] = await roads(page);
