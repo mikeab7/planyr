@@ -37,6 +37,10 @@ import { parcelSelectHintDecision, PARCEL_HINT_COOLDOWN_MS } from "./lib/parcelS
 import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
 import { nearestBoundaryEdge, constrainToEdgeAngle, edgeLockTolFt } from "./lib/edgeConstrain.js";
 import { markupsUnderPoint, nextMarkupSelection, boxCorners } from "./lib/markupPick.js";
+import {
+  CLOUD_ARC_PRESETS, CLOUD_ARC_MIN_FT, CLOUD_ARC_MAX_FT, CLOUD_ARC_DEFAULT_FT, CLOUD_STATUS_OPTIONS,
+  clampCloudArcFt, cloudScallopPath, simplifyPath, cloudMetaDefaults,
+} from "./lib/cloudGeometry.js";
 import { EMPTY_TAP, tapTime, stepDoubleTap } from "./lib/doubleTap.js";
 import { DRAG_SLOP_PX, makeDragGate, stepDragGate, dragArmed } from "./lib/dragGate.js";
 import { isDiagArmed, latchDiagArm } from "./lib/diagArm.js";
@@ -570,6 +574,10 @@ const ICON_PATHS = {
   mellipse: <ellipse cx="8" cy="8" rx="6" ry="4.4" />,
   mpolygon: <path d="M8 2.4 L13.4 6.2 L11.3 12.6 L4.7 12.6 L2.6 6.2 Z" />,
   mpolyline: <path d="M2.5 11 L6 5.5 L9 9 L13.5 3.5" />,
+  // Revision cloud — the real scalloped outline (8 equal arcs), not a generic weather-cloud glyph,
+  // so it reads as the Bluebeam markup rather than "cloud sync". Traced with cloudGeometry.js's own
+  // cloudScallopPath so the tool button matches what it actually draws.
+  mcloud: <path d="M8 4.4 A 1.55 1.55 0 0 1 12 5.7 A 1.55 1.55 0 0 1 13.6 8.7 A 1.55 1.55 0 0 1 12 11.7 A 1.55 1.55 0 0 1 8 13 A 1.55 1.55 0 0 1 4 11.7 A 1.55 1.55 0 0 1 2.4 8.7 A 1.55 1.55 0 0 1 4 5.7 A 1.55 1.55 0 0 1 8 4.4 Z" />,
   // B543 — deed/title launcher glyph: a document page (folded corner) over a few
   // text lines, signalling "read a deed / title commitment". Same currentColor
   // stroke style (no fill) as the other tool glyphs.
@@ -631,9 +639,10 @@ const TOOLS = [
   { id: "mellipse", label: "Ellipse", hint: "Markup ellipse (E): drag a box. Hold Shift for a circle" },
   { id: "mpolygon", label: "Polygon", hint: "Markup polygon (Shift+P): click points, click the first dot or double-click to close. Shift for 45° segments" },
   { id: "mpolyline", label: "Polyline", hint: "Markup polyline (Shift+N): click points, double-click / Enter to finish. Shift for 45° segments" },
+  { id: "mcloud", label: "Cloud", hint: "Revision cloud (C): pick a mode from Cloud ▾ — Polygon (click points, click the first dot / double-click / Enter to close), Rectangle (drag a box), or Freehand (drag the outline). Always a closed scalloped loop; arc size is set in Cloud ▾" },
 ];
 const DRAW_TYPES = ["building", "paving", "road", "parking", "trailer", "pond"];
-const MARKUP_TOOLS = ["mpolyline", "mline", "mrect", "mellipse", "mpolygon"];
+const MARKUP_TOOLS = ["mpolyline", "mline", "mrect", "mellipse", "mpolygon", "mcloud"];
 // Measure-mode display names — Bluebeam's terms (Length / Polylength / Area). The
 // internal mode value stays line/polyline/area (persisted in localStorage), so this is
 // label-only; "Polylength" also disambiguates the measurement from the markup "Polyline".
@@ -660,6 +669,12 @@ const MOD_LABEL = (typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.te
 // place, distinct across tabs — two live writers never share a journal key; see elementJournal.js).
 const journalSid = journalSessionId();
 const MK_DEFAULT = { stroke: "#c2410c", weight: 2, dash: "solid", fill: "#c2410c", fillOpacity: 0 };
+// Cloud's OWN sticky style, kept separate from MK_DEFAULT/mkStyle — every other markup tool shares
+// one "last used" style, so if Cloud read from that shared state it would inherit whatever colour
+// was last drawn (starting from MK_DEFAULT's #c2410c, the exact collision the tool's spec forbids).
+// #2563EB is `familyInk.js` FAMILY_DEFAULT_INK.cloud — measured ≥12 ΔE00 from every other drawn
+// family's default ink (test/familyInk.test.js).
+const MK_CLOUD_DEFAULT = { stroke: "#2563EB", weight: 2, dash: "solid", fill: "#2563EB", fillOpacity: 0 };
 // NEW-4 — what the recently-used swatch row shows on a fresh browser: the plan's own default
 // palette (every element type's fill + line, plus the markup accent), so the row is never blank.
 // Derived from TYPE, never a second hardcoded list that could drift from it.
@@ -789,10 +804,13 @@ const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const measPts = (m) => (m.pts ? m.pts : (m.a && m.b ? [m.a, m.b] : []));
 const measMode = (m) => m.mode || "line";
 // Neutral markup shapes that support Bluebeam-style geometry editing: vertex shapes
-// (line/polyline/polygon) expose draggable control points; box shapes (rect/ellipse)
+// (line/polyline/polygon/cloud) expose draggable control points; box shapes (rect/ellipse)
 // resize + rotate via grips. Semantic markups (utilRoute/traced/encumbrance/…) stay
 // move-only — they carry derived geometry that hand-editing would desync.
-const MK_VERTEX_KINDS = ["line", "polyline", "polygon"];
+// A cloud is ALWAYS stored as a vertex ring (`pts`), whichever of its three draw modes made it
+// (polygon click-path, rectangle drag, or freehand) — never a centre-box — so it reshapes via the
+// SAME vertex idiom as a building footprint / polygon markup, per spec.
+const MK_VERTEX_KINDS = ["line", "polyline", "polygon", "cloud"];
 const MK_BOX_KINDS = ["rect", "ellipse"];
 // Width (screen px) of the transparent fat hit-stroke under open-path markups (line/polyline),
 // so they grab within ~6px on either side at any zoom — matching a polyline's forgiving feel (B155).
@@ -807,7 +825,7 @@ const CALLOUT_BORDER_BAND_PX = 6;
 // magnet they bound (NEW-2(d)), so the cap is unit-tested rather than buried in this file.
 const mkPts = (m) => (m.kind === "line" ? [m.a, m.b] : (m.pts || []));
 const setMkPts = (m, pts) => (m.kind === "line" ? { ...m, a: pts[0], b: pts[1] } : { ...m, pts });
-const mkMinPts = (m) => (m.kind === "polygon" ? 3 : 2);
+const mkMinPts = (m) => (m.kind === "polygon" || m.kind === "cloud" ? 3 : 2);
 // B230 — nearest point on segment a→b to p (all {x,y}); lets a Shift-click / right-click
 // drop a control point EXACTLY where the user touched the edge (Bluebeam-style), not at the
 // old fixed midpoint. Returns the point + its distance for hit-testing.
@@ -1978,7 +1996,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [numEdit, setNumEdit] = useState(null);           // {fx,fy (feet), value, onCommit, chipKey?} — inline numeric edit, NEVER a dialog box. NEW-1: `chipKey` names the setback chip that spawned it, which then renders the editor IN PLACE of itself (and the floating fallback below stands down)
   const [mkRect, setMkRect] = useState(null);   // {kind, a:{x,y}, b:{x,y}} drag-draw a markup rect/ellipse/line
   const [mkPoly, setMkPoly] = useState(null);   // {kind, pts:[{x,y}]} click-draw a markup polygon/polyline
+  const [mkFreehand, setMkFreehand] = useState(null); // {pts:[{x,y}]} in-progress freehand cloud drag
   const [mkStyle, setMkStyle] = useState(MK_DEFAULT); // current markup style (sticky)
+  const [mkCloudStyle, setMkCloudStyle] = useState(MK_CLOUD_DEFAULT); // Cloud's OWN sticky style — see MK_CLOUD_DEFAULT
+  const [cloudMenu, setCloudMenu] = useState(false); // Cloud ▾ rail menu open
   const [tool, setTool] = useState("select");
   const [toolMenu, setToolMenu] = useState(false); // Parcel ▾ dropdown open
   const [addParcelMenu, setAddParcelMenu] = useState(false); // B383: ＋ Add parcel flyout in the Parcel panel
@@ -2002,7 +2023,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // trigger so AnchoredMenu can position the flyout against it (see AnchoredMenu.jsx).
   const boundaryAnchor = useRef(null), buildingAnchor = useRef(null), parkingAnchor = useRef(null),
     roadAnchor = useRef(null), measureAnchor = useRef(null), easeAnchor = useRef(null), easeTypeAnchor = useRef(null),
-    planAnchor = useRef(null), exportAnchor = useRef(null), addParcelAnchor = useRef(null);
+    planAnchor = useRef(null), exportAnchor = useRef(null), addParcelAnchor = useRef(null), cloudAnchor = useRef(null);
   const [versionsOpen, setVersionsOpen] = useState(false); // version-history (automatic backups) dialog
   const [versionList, setVersionList] = useState([]);    // [{at, buildings, sig}] snapshots for this plan
   const [leftPanel, setLeftPanel] = useState(null);      // which left-rail menu is DOCKED: parcel|yield|analysis|references|standards|null (B656: props is a companion, not a tab)
@@ -2074,6 +2095,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [roadCustom, setRoadCustom] = useState(false); // NEW-3: the Custom width… entry field is showing
   // Easement tool (NEW-1/2/3): a first-class easement object on the editable layer.
   // `easeMode` is the input mode; easeType/easeWidth are sticky tool defaults.
+  // Cloud tool (NEW-1): which of the three draw gestures is armed (Cloud ▾), and the arc size
+  // (feet — real drawing units, never pixels, so a cloud scales correctly against the plan and
+  // looks identical at every canvas zoom). Sticky across sessions like easeMode/easeWidth below —
+  // MUST be declared after `lsGet` (a few lines up), not before: cloudMode/cloudArcFt used to live
+  // near mkPoly/mkStyle, ABOVE lsGet's own declaration, which is a real TDZ crash in production
+  // (function-body `const`s don't hoist their value) — invisible in dev but fatal on load once built.
+  const [cloudMode, setCloudMode] = useState(() => lsGet("cloudMode", "polygon")); // polygon | rect | freehand
+  const [cloudArcFt, setCloudArcFt] = useState(() => clampCloudArcFt(+lsGet("cloudArcFt", String(CLOUD_ARC_DEFAULT_FT))));
   const [easeMode, setEaseMode] = useState(() => lsGet("easeMode", "centerline")); // centerline | boundary | parceledge
   const [easeType, setEaseType] = useState(() => lsGet("easeType", "utility"));
   const [easeWidth, setEaseWidth] = useState(() => Math.max(1, +lsGet("easeWidth", "10") || 10));
@@ -5799,7 +5828,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [leftPanel, narrow, companionSel, narrowProps, leftWidth, size.w]);
   // Remember the left menu width between sessions.
   useEffect(() => { try { localStorage.setItem("planarfit:leftWidth", String(leftWidth)); } catch (_) {} }, [leftWidth]);
-  useEffect(() => { try { localStorage.setItem("planarfit:parkingRows", parkingRows); localStorage.setItem("planarfit:roadWidth", roadWidth); localStorage.setItem("planarfit:measureMode", measureMode); localStorage.setItem("planarfit:easeMode", easeMode); localStorage.setItem("planarfit:easeType", easeType); localStorage.setItem("planarfit:easeWidth", String(easeWidth)); } catch (_) {} }, [parkingRows, roadWidth, measureMode, easeMode, easeType, easeWidth]);
+  useEffect(() => { try { localStorage.setItem("planarfit:parkingRows", parkingRows); localStorage.setItem("planarfit:roadWidth", roadWidth); localStorage.setItem("planarfit:measureMode", measureMode); localStorage.setItem("planarfit:easeMode", easeMode); localStorage.setItem("planarfit:easeType", easeType); localStorage.setItem("planarfit:easeWidth", String(easeWidth)); localStorage.setItem("planarfit:cloudMode", cloudMode); localStorage.setItem("planarfit:cloudArcFt", String(cloudArcFt)); } catch (_) {} }, [parkingRows, roadWidth, measureMode, easeMode, easeType, easeWidth, cloudMode, cloudArcFt]);
   // Drag the panel's right edge to resize it.
   const startLeftResize = (e) => {
     e.preventDefault();
@@ -6137,6 +6166,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if ((e.key === "e" || e.key === "E") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); selectTool("mellipse"); return; }
       if ((e.key === "p" || e.key === "P") && e.shiftKey && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("mpolygon"); return; }
       if ((e.key === "n" || e.key === "N") && e.shiftKey && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("mpolyline"); return; }
+      if ((e.key === "c" || e.key === "C") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); selectTool("mcloud"); return; }
       if (e.key === "Enter" && tool === "select" && combineSel.length >= 2) { e.preventDefault(); mergeParcels(); return; }
       // Enter finishes / auto-closes ANY in-progress multi-point drawing (one shared path with double-click).
       if (e.key === "Enter" && finishActiveDrawing()) { e.preventDefault(); return; }
@@ -6147,7 +6177,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // the ✕ does). It runs BEFORE the catch-all below and consumes the key, so the panel can never
       // be a place you get stuck; a second Escape then falls through and deselects as always.
       if (e.key === "Escape" && inspectorShowingRef.current) { e.preventDefault(); closeInspector(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); branchSeedRef.current = null; setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAddLeaderFor(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setBoundaryEdit(false); setMergePick(false); setGisHit(null); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { ...EMPTY_TAP }; }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); branchSeedRef.current = null; setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAddLeaderFor(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setMkFreehand(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setCloudMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setBoundaryEdit(false); setMergePick(false); setGisHit(null); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { ...EMPTY_TAP }; }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current && deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index)) { e.preventDefault(); return; } // B230: an armed control point → delete just that vertex. NEW-1: deleteVtx returns false on a no-op (endpoint/min/stale) → we DON'T consume the key; it falls through to the whole-element delete below so Delete can never silently wedge.
@@ -6161,7 +6191,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKeyUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
-  }, [active, sel, tool, splitPath, els, markups, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout, draftPoly, draftElPoly, draftRoadPts, easeDraft, easeEdges, easeMode, easeWidth, xsecMode, xsecPts, parcels, selOverlay, sheetOverlays]); // eslint-disable-line
+  }, [active, sel, tool, splitPath, els, markups, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout, draftPoly, draftElPoly, draftRoadPts, easeDraft, easeEdges, easeMode, easeWidth, xsecMode, xsecPts, parcels, selOverlay, sheetOverlays, cloudMode]); // eslint-disable-line
 
   // B230 — track the Shift modifier (for the candidate-insertion dot) independent of the big
   // keyboard handler, so one of its early-return branches can't drop it; window blur resets it.
@@ -6814,6 +6844,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setMkPoly((d) => (d ? { ...d, pts: [...d.pts, pt] } : { kind: tool, pts: [pt] }));
       return;
     }
+    // NEW-1 — Cloud: three draw gestures behind ONE tool, picked via Cloud ▾ (cloudMode). Always
+    // produces a closed vertex ring (see newCloudMarkup) whichever gesture is used.
+    if (tool === "mcloud") {
+      if (cloudMode === "freehand") { // press-drag a continuous outline; simplified + closed on release
+        drag.current = { mode: "mkFreehand", pts: [fp] };
+        setMkFreehand({ pts: [fp] });
+        svgRef.current.setPointerCapture(e.pointerId);
+        return;
+      }
+      if (cloudMode === "rect") { // drag a box OR click-to-start → click-to-finish (mirrors mrect/mellipse)
+        const a = snapPt(fp);
+        if (mkRect && mkRect.pending && mkRect.kind === "mcloud") { commitMkRect("mcloud", mkRect.a, a); setMkRect(null); return; }
+        drag.current = { mode: "mkDraw", kind: "mcloud", a };
+        setMkRect({ kind: "mcloud", a, b: a, shift: e.shiftKey, pending: false });
+        svgRef.current.setPointerCapture(e.pointerId);
+        return;
+      }
+      // "polygon" (default) — click each vertex; close on the first dot / double-click / Enter / Esc.
+      const sp = snapPt(fp);
+      const last = mkPoly?.pts?.[mkPoly.pts.length - 1];
+      if (mkPoly && mkPoly.kind === "mcloud" && mkPoly.pts.length >= 3 && dist(f2p(sp), f2p(mkPoly.pts[0])) < 12) { finishMkPoly(); return; }
+      const pt = (e.shiftKey && last) ? snapPt(snap45(last, fp)) : sp;
+      setMkPoly((d) => (d ? { ...d, pts: [...d.pts, pt] } : { kind: "mcloud", pts: [pt] }));
+      return;
+    }
     if (tool === "easement") {
       if (easeMode === "parceledge") return; // edges are picked via the parcel-edge hit targets, not the canvas
       const sp = snapPt(fp);
@@ -7258,12 +7313,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setEditCallout({ id: c.id, text: "", isNew: true });
   };
   /* ------------ markup shapes ------------ */
+  // NEW-1 — the ONE place a cloud markup object gets built, whichever of the three draw gestures
+  // produced its vertex ring (polygon click-path, rectangle drag, freehand). Always a `pts` ring
+  // (kind "cloud" joins MK_VERTEX_KINDS, never MK_BOX_KINDS — see that constant's comment): a cloud
+  // reshapes via the same vertex idiom as a building footprint/polygon markup regardless of how it
+  // was drawn. Carries the current arc size (feet) + Bluebeam-parity metadata (Subject/Comment/
+  // Author/Created/Modified/Status/Label/Layer) + the cloud's OWN sticky style (mkCloudStyle, never
+  // mkStyle — see MK_CLOUD_DEFAULT).
+  const newCloudMarkup = (pts) => ({
+    id: uid(), kind: "cloud", pts, arcFt: cloudArcFt,
+    ...mkCloudStyle, ...cloudMetaDefaults(new Date().toISOString()),
+  });
   const finishMkPoly = () => {
     if (mkPoly) {
       const pts = mkPoly.pts.filter((p, i) => i === 0 || dist(p, mkPoly.pts[i - 1]) > 0.01);
-      const min = mkPoly.kind === "mpolygon" ? 3 : 2;
+      const isCloud = mkPoly.kind === "mcloud";
+      const min = (mkPoly.kind === "mpolygon" || isCloud) ? 3 : 2;
       if (pts.length >= min) {
-        const mk = { id: uid(), kind: mkPoly.kind === "mpolygon" ? "polygon" : "polyline", pts, ...mkStyle };
+        const mk = isCloud ? newCloudMarkup(pts)
+          : { id: uid(), kind: mkPoly.kind === "mpolygon" ? "polygon" : "polyline", pts, ...mkStyle };
         pushHistory(); setMarkups((a) => [...a, ...withStackZ(a, [mk])]); setSel({ kind: "markup", id: mk.id });
       }
     }
@@ -7276,12 +7344,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let mk = null;
     const minFt = 3 / view.ppf; // a deliberate ~3px span, zoom-independent (B30)
     if (kind === "mline") { if (dist(a, b) >= minFt) mk = { id: uid(), kind: "line", a, b, ...mkStyle }; }
-    else {
+    else if (kind === "mcloud") {
+      // A "rectangular cloud" is still stored as a 4-vertex ring, never a centre-box (see
+      // newCloudMarkup) — so it reshapes with the same vertex grips as every other cloud.
+      if (Math.abs(b.x - a.x) >= minFt && Math.abs(b.y - a.y) >= minFt) {
+        const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x), y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
+        mk = newCloudMarkup([{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }]);
+      }
+    } else {
       const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2, w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
       if (w >= minFt && h >= minFt) mk = { id: uid(), kind: kind === "mrect" ? "rect" : "ellipse", cx, cy, w, h, rot: 0, ...mkStyle };
     }
     if (mk) { pushHistory(); setMarkups((arr) => [...arr, ...withStackZ(arr, [mk])]); setSel({ kind: "markup", id: mk.id }); setTool("select"); }
     return !!mk;
+  };
+  // Commit a freehand-dragged cloud: the raw pointer trail is simplified (Ramer–Douglas–Peucker, a
+  // screen-px tolerance so it feels the same at any zoom) down to a small, hand-reshapable vertex
+  // set before it becomes the cloud's `pts` ring. Returns true if a shape was actually committed.
+  const commitMkCloudFreehand = (rawPts) => {
+    const tolFt = 4 / view.ppf;
+    const pts = simplifyPath(rawPts, tolFt);
+    if (pts.length < 3) return false;
+    const mk = newCloudMarkup(pts);
+    pushHistory(); setMarkups((arr) => [...arr, ...withStackZ(arr, [mk])]); setSel({ kind: "markup", id: mk.id }); setTool("select");
+    return true;
   };
   // Move a measurement by (dx,dy) — pts form (line/polyline/area/count) or the legacy {a,b}. (B569)
   const translateMeasure = (m, dx, dy) => {
@@ -7387,6 +7473,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const setSelMarkup = (patch) => { pushHistory(); setMarkups((a) => a.map((m) => m.id === selMarkup.id ? { ...m, ...patch } : m)); setMkStyle((s) => ({ ...s, ...patch })); };
   // Geometry patch (w/h/rot) — kept out of mkStyle so new shapes don't inherit a past size/angle.
   const setSelMarkupGeom = (patch) => { pushHistory(); setMarkups((a) => a.map((m) => m.id === selMarkup.id ? { ...m, ...patch } : m)); };
+  // NEW-1 — the Cloud twins of setSelMarkup/liveMarkup: same shape, but write mkCloudStyle (never
+  // mkStyle, which every OTHER markup tool shares) and stamp Modified (Bluebeam parity: a cloud's
+  // Modified timestamp auto-updates on a property edit).
+  const setSelMarkupCloud = (patch) => {
+    pushHistory();
+    const modifiedAt = new Date().toISOString();
+    setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, ...patch, modifiedAt } : m)));
+    setMkCloudStyle((s) => ({ ...s, ...patch }));
+  };
 
   /* ------------ easements (first-class objects on the editable layer) ------------ */
   // The hand-editable path of an easement: the boundary ring for mode B, else the
@@ -7603,7 +7698,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (sel.kind === "markup") {
       const m = markups.find((x) => x.id === sel.id); if (!m || m.locked) return null;
       if (m.kind === "easement") { const closed = m.mode === "boundary"; return { layer: "ease", id: m.id, pts: easeEditPath(m), closed, min: closed ? 3 : 2 }; }
-      if (m.kind === "polyline" || m.kind === "polygon") return { layer: "markup", id: m.id, pts: mkPts(m), closed: m.kind === "polygon", min: mkMinPts(m) };
+      if (m.kind === "polyline" || m.kind === "polygon" || m.kind === "cloud") return { layer: "markup", id: m.id, pts: mkPts(m), closed: m.kind !== "polyline", min: mkMinPts(m) };
     }
     return null;
   };
@@ -8020,6 +8115,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         else { const s = Math.max(Math.abs(b.x - d.a.x), Math.abs(b.y - d.a.y)); b = { x: d.a.x + Math.sign(b.x - d.a.x || 1) * s, y: d.a.y + Math.sign(b.y - d.a.y || 1) * s }; } // square/circle
       }
       setMkRect({ kind: d.kind, a: d.a, b });
+      return;
+    }
+    // NEW-1 — freehand cloud: accumulate the raw trail, distance-gated (a screen-px floor, zoom-
+    // independent) so a slow drag doesn't pile up thousands of near-duplicate points before the
+    // commit-time simplify (commitMkCloudFreehand) even runs.
+    if (d.mode === "mkFreehand") {
+      const minStepFt = 2 / view.ppf;
+      setMkFreehand((cur) => {
+        if (!cur || !cur.pts.length) return cur;
+        const last = cur.pts[cur.pts.length - 1];
+        return dist(last, fp) >= minStepFt ? { pts: [...cur.pts, fp] } : cur;
+      });
       return;
     }
     if (d.mode === "mkMove") {
@@ -8479,6 +8586,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
       return;
     }
+    if (d && d.mode === "mkFreehand" && mkFreehand) {
+      commitMkCloudFreehand(mkFreehand.pts);
+      setMkFreehand(null);
+      drag.current = null; setPanning(false);
+      flushElems();
+      try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
+      return;
+    }
     if (d && d.mode === "draw" && draftRect) {
       if (d.depth) {
         // fixed-width preset (parking rows / road width): a length×depth strip,
@@ -8728,6 +8843,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tool === "measure" && measDraft.length >= (measureMode === "area" ? 3 : measureMode === "count" ? 1 : 2)) { finishMeasure(); return true; }
     if (tool === "mpolyline" && mkPoly?.pts?.length >= 2) { finishMkPoly(); return true; }
     if (tool === "mpolygon" && mkPoly?.pts?.length >= 3) { finishMkPoly(); return true; }
+    if (tool === "mcloud" && cloudMode === "polygon" && mkPoly?.kind === "mcloud" && mkPoly?.pts?.length >= 3) { finishMkPoly(); return true; }
     if (tool === "parcel" && draftPoly?.length >= 3) { closePoly(); return true; }
     if (draftElPoly?.pts?.length >= 3) { closeElPoly(); return true; } // any area element drawn as a polygon
     if (tool === "road" && draftRoadPts?.length >= 2) { finishRoad(); return true; } // centerline road (B596)
@@ -17030,6 +17146,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setParcelMode("add"); // B598 — always (re)enter the Parcel tool in Draw mode, never a stale Remove
     setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setMarquee(null);
     if (id !== "easement") { setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); }
+    if (id !== "mcloud") setCloudMenu(false);
+    setMkFreehand(null);
     if (id !== "select") setMulti([]);
     setMergePick(false); // B720: switching tools exits merge pick mode (startMergePick re-arms it after selecting Select)
     if (id !== "select") setBoundaryEdit(false); // NEW-1: boundary editing lives in Select; any draw tool leaves it
@@ -18347,6 +18465,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     onSwatch: (v) => { if (hist) pushHistory(); apply(v); pushRecent(v); if (commit) commit(v); },
   });
   const liveMarkup    = (patch) => { setMarkups((a) => a.map((m) => (selMarkup && m.id === selMarkup.id ? { ...m, ...patch } : m))); setMkStyle((s) => ({ ...s, ...patch })); };
+  const liveMarkupCloud = (patch) => { setMarkups((a) => a.map((m) => (selMarkup && m.id === selMarkup.id ? { ...m, ...patch, modifiedAt: new Date().toISOString() } : m))); setMkCloudStyle((s) => ({ ...s, ...patch })); };
   // NEW-1 — the SAME two writers for a measurement (a live no-history one for a colour drag /
   // opacity slide, and a one-undo-frame one for a discrete commit), so the measurement inspector
   // reuses the markup panel's controls rather than standing up a parallel editing surface.
@@ -20836,6 +20955,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </g>
                   );
                 }
+                // NEW-1 — revision cloud: the SAME fat-transparent-hit-companion / pointer-inert-
+                // visible-shape pattern as every other closed markup (a plain polygon hit test — the
+                // scallops are cosmetic, not a hit-test shape), but the visible layer is the scalloped
+                // outline. Arc size is stored in FEET (m.arcFt) and scaled by `rppf` here — the SAME
+                // render-body scale every other markup's geometry already goes through via f2p — so a
+                // cloud looks identical at every zoom and PDF export (which clones this exact SVG,
+                // never a second render path — see exportSheet.js) prints it at true scale.
+                if (m.kind === "cloud") {
+                  const screenPts = m.pts.map(f2p);
+                  const s = screenPts.map((q) => `${q.x},${q.y}`).join(" ");
+                  const scallopD = cloudScallopPath(screenPts, clampCloudArcFt(m.arcFt) * rppf);
+                  return (
+                    <g key={m.id} data-markup={m.id} style={mkCursor} opacity={m.opacity ?? 1} onPointerDown={common.onPointerDown} onContextMenu={common.onContextMenu}>
+                      <polygon points={s} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinejoin="round" pointerEvents={closedHitPE} />
+                      <path d={scallopD} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} strokeLinejoin="round" {...visFill} pointerEvents="none" />
+                    </g>
+                  );
+                }
                 const c = f2p({ x: m.cx, y: m.cy }), w = m.w * rppf, h = m.h * rppf;
                 const rotTf = `rotate(${m.rot || 0} ${c.x} ${c.y})`;
                 if (m.kind === "ellipse") return (
@@ -21671,11 +21808,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // In click-to-finish mode show the anchored start point so it's clear a click landed.
                 const anchor = mkRect.pending ? <circle cx={a.x} cy={a.y} r={3.5} fill={PAL.accent} pointerEvents="none" /> : null;
                 if (mkRect.kind === "mline") return <>{anchor}<line x1={a.x} y1={a.y} x2={b.x} y2={b.y} {...dp} /></>;
+                if (mkRect.kind === "mcloud") {
+                  // Live scalloped preview (real arc size, so the drag genuinely previews the commit).
+                  const x0 = Math.min(a.x, b.x), y0 = Math.min(a.y, b.y), x1 = Math.max(a.x, b.x), y1 = Math.max(a.y, b.y);
+                  const ring = [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }];
+                  const d = cloudScallopPath(ring, clampCloudArcFt(cloudArcFt) * rppf);
+                  return <>{anchor}<path d={d} stroke={mkCloudStyle.stroke} strokeWidth={mkCloudStyle.weight} fill="none" pointerEvents="none" /></>;
+                }
                 const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y), w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
                 const shape = mkRect.kind === "mellipse" ? <ellipse cx={x + w / 2} cy={y + h / 2} rx={w / 2} ry={h / 2} {...dp} /> : <rect x={x} y={y} width={w} height={h} {...dp} />;
                 return <>{anchor}{shape}</>;
               })()}
+              {mkFreehand && mkFreehand.pts.length >= 2 && (() => {
+                const s = mkFreehand.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
+                return <polyline points={s} fill="none" stroke={mkCloudStyle.stroke} strokeWidth={mkCloudStyle.weight} strokeDasharray="5 4" strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />;
+              })()}
               {mkPoly && (() => {
+                const isCloud = mkPoly.kind === "mcloud";
+                const ink = isCloud ? mkCloudStyle.stroke : PAL.accent;
                 // The rubber-band segment must match how the NEXT click commits (line ~2016): free
                 // angle by default, 45°-constrained ONLY while Shift is held. Snapping the preview to
                 // 45° unconditionally made the polyline look like it "only goes at specific angles"
@@ -21685,9 +21835,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const s = all.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
                 const lp = live ? f2p(live) : null, total = pathLen(all);
                 return <>
-                  <polyline points={s} fill="none" stroke={PAL.accent} strokeWidth={mkStyle.weight} strokeDasharray="5 4" pointerEvents="none" />
-                  {lp && all.length >= 2 && <text x={lp.x + 8} y={lp.y - 6} fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{f0(total)}′</text>}
-                  {mkPoly.pts.map((p, i) => { const q = f2p(p); return <circle key={i} cx={q.x} cy={q.y} r={3.5} fill={PAL.accent} pointerEvents="none" />; })}
+                  <polyline points={s} fill="none" stroke={ink} strokeWidth={isCloud ? mkCloudStyle.weight : mkStyle.weight} strokeDasharray="5 4" pointerEvents="none" />
+                  {lp && all.length >= 2 && <text x={lp.x + 8} y={lp.y - 6} fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={ink} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{f0(total)}′</text>}
+                  {mkPoly.pts.map((p, i) => { const q = f2p(p); return <circle key={i} cx={q.x} cy={q.y} r={3.5} fill={ink} pointerEvents="none" />; })}
                 </>;
               })()}
               {/* easement draft (centerline / boundary click-draw) — live ghost strip */}
@@ -23017,11 +23167,40 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
           {/* Draw section — Shapes + Annotate merged; Polyline before Line (B605/B607) */}
           {railHdr("Draw")}
-          {MARKUP_TOOLS.map((id) => {
+          {MARKUP_TOOLS.filter((id) => id !== "mcloud").map((id) => {
             const t = TOOLS.find((x) => x.id === id);
             const sc = { mline: "L", mrect: "R", mellipse: "E", mpolygon: "⇧P", mpolyline: "⇧N" }[id];
             return <button key={id} className={`rbtn${tool === id ? " on" : ""}`} style={rbtn(tool === id)} onClick={() => selectTool(id)} aria-pressed={tool === id}><ToolIcon id={id} /> {t.label} <span style={railHint(tool === id)}>{sc}</span></button>;
           })}
+          {/* Cloud (NEW-1) — a split button like Easement: the main button draws with whatever
+              mode/arc size is already armed, ▾ opens the mode + arc-size picker. */}
+          <div ref={cloudAnchor} style={{ position: "relative" }}>
+            <div style={{ display: "flex", gap: 2 }}>
+              <button className={`rbtn${tool === "mcloud" ? " on" : ""}`} style={{ ...rbtn(tool === "mcloud"), flex: 1 }} onClick={() => selectTool("mcloud")} aria-pressed={tool === "mcloud"}>
+                <ToolIcon id="mcloud" /> Cloud <span style={railHint(tool === "mcloud")}>C</span>
+              </button>
+              <button className={`rbtn${tool === "mcloud" ? " on" : ""}`} style={{ ...rbtn(tool === "mcloud"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setCloudMenu((o) => !o)} aria-haspopup="menu" aria-expanded={cloudMenu} aria-label="Cloud options">▾</button>
+            </div>
+            <AnchoredMenu open={cloudMenu} onClose={() => setCloudMenu(false)} anchorRef={cloudAnchor} placement="left" width={248} panelStyle={menuPanel}>
+              <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Draw mode</div>
+              {[["polygon", "Click points"], ["rect", "Drag a box"], ["freehand", "Freehand"]].map(([k, label]) => (
+                <button key={k} style={menuItem(cloudMode === k)} onClick={() => { setCloudMode(k); selectTool("mcloud"); }}>{label}</button>
+              ))}
+              <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "8px 8px 6px", borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>Arc size</div>
+              <div style={{ display: "flex", gap: 4, padding: "0 8px 6px" }}>
+                {Object.entries(CLOUD_ARC_PRESETS).map(([k, ft]) => (
+                  <button key={k} style={{ ...menuItem(cloudArcFt === ft), flex: 1, textAlign: "center", textTransform: "capitalize" }} onClick={() => setCloudArcFt(ft)}>{k}</button>
+                ))}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 8px 8px" }}>
+                <span style={{ fontSize: 12, color: PAL.muted }}>Custom</span>
+                <NumInput style={{ ...numInput, width: 64 }} value={cloudArcFt} min={CLOUD_ARC_MIN_FT} max={CLOUD_ARC_MAX_FT} step={0.5} onCommit={(n) => setCloudArcFt(clampCloudArcFt(n))} /> <span style={{ fontSize: 12, color: PAL.muted }}>ft</span>
+              </div>
+              <div style={{ fontSize: 11, color: PAL.muted, padding: "6px 8px 2px", lineHeight: 1.5, borderTop: `1px solid ${PAL.panelLine}` }}>
+                {cloudMode === "rect" ? "Drag a box; the scalloped outline traces it." : cloudMode === "freehand" ? "Press and drag the outline; release to close it." : "Click points; click the first dot / double-click / Enter to close."}
+              </div>
+            </AnchoredMenu>
+          </div>
           <button className={`rbtn${tool === "callout" ? " on" : ""}`} style={rbtn(tool === "callout")} onClick={() => selectTool("callout")} aria-pressed={tool === "callout"}><ToolIcon id="callout" /> Callout <span style={railHint(tool === "callout")}>Q</span></button>
           <button className={`rbtn${tool === "text" ? " on" : ""}`} style={rbtn(tool === "text")} onClick={() => selectTool("text")} aria-pressed={tool === "text"}><ToolIcon id="text" /> Text <span style={railHint(tool === "text")}>T</span></button>
 
@@ -23257,18 +23436,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // top, so a hardcoded surface colour blanked every colour chip in these panels: the
             // control you click to change a colour showed no colour. Leave it to ColorField.
             const swatch = { width: 34, height: 26, padding: 0, border: BORDER_1, borderRadius: 6, cursor: "pointer" };
-            const closed = selMarkup.kind === "rect" || selMarkup.kind === "ellipse" || selMarkup.kind === "polygon";
+            const isCloud = selMarkup.kind === "cloud";
+            const closed = selMarkup.kind === "rect" || selMarkup.kind === "ellipse" || selMarkup.kind === "polygon" || isCloud;
+            // Cloud writes its OWN sticky style (mkCloudStyle), never the shared mkStyle every other
+            // markup tool draws from next — see MK_CLOUD_DEFAULT.
+            const setStyle = isCloud ? setSelMarkupCloud : setSelMarkup;
+            const liveStyle = isCloud ? liveMarkupCloud : liveMarkup;
             return (
               // NEW-1 — plain wrapper (see the multi-select branch above for why the duplicate testid was removed).
               <div>
-              <Section title={`Markup · ${selMarkup.kind[0].toUpperCase()}${selMarkup.kind.slice(1)}`}>
-                <Field label="Outline"><ColorField value={toHex6(selMarkup.stroke)} {...colorCtl((v) => liveMarkup({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} /></Field>
-                <Field label="Line weight"><NumInput style={numInput} value={selMarkup.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setSelMarkup({ weight: n })} /></Field>
+              <Section title={isCloud ? "Markup · Cloud" : `Markup · ${selMarkup.kind[0].toUpperCase()}${selMarkup.kind.slice(1)}`}>
+                <Field label="Outline"><ColorField value={toHex6(selMarkup.stroke)} {...colorCtl((v) => liveStyle({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} /></Field>
+                <Field label="Line weight"><NumInput style={numInput} value={selMarkup.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setStyle({ weight: n })} /></Field>
                 <Field label="Dash">
-                  <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={selMarkup.dash || "solid"} onChange={(e) => setSelMarkup({ dash: e.target.value })}>
+                  <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={selMarkup.dash || "solid"} onChange={(e) => setStyle({ dash: e.target.value })}>
                     {DASH_OPTIONS}
                   </select>
                 </Field>
+                {isCloud && (
+                  <Field label="Opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.opacity ?? 1} {...sliderHistory((e) => liveStyle({ opacity: +e.target.value }))} /></Field>
+                )}
                 {/* B620 — inline label riding the line (open paths only; double-click the line also opens this in
                     place). NON-sticky (direct setMarkups, never setMkStyle) so the text can't bleed into the next
                     drawn shape; onFocus pushes ONE undo frame per edit (not one per keystroke). */}
@@ -23281,9 +23468,43 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {inlineLabelControls(selMarkup, selMarkup.kind, coalesceLabelWrite(selMarkup.id, (p) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, ...p } : m)))))}
                 </>)}
                 {closed && <>
-                  <Field label="Fill"><ColorField value={toHex6(selMarkup.fill)} {...colorCtl((v) => liveMarkup({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} /></Field>
-                  <Field label="Fill opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.fillOpacity ?? 0} {...sliderHistory((e) => liveMarkup({ fillOpacity: +e.target.value }))} /></Field>
+                  <Field label="Fill"><ColorField value={toHex6(selMarkup.fill)} {...colorCtl((v) => liveStyle({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} /></Field>
+                  <Field label="Fill opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.fillOpacity ?? 0} {...sliderHistory((e) => liveStyle({ fillOpacity: +e.target.value }))} /></Field>
                 </>}
+                {isCloud && (() => {
+                  const cs = { display: "flex", gap: 5, width: 150 };
+                  const fmtWhen = (iso) => { try { return iso ? new Date(iso).toLocaleString() : "—"; } catch (_) { return "—"; } };
+                  return (
+                    <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "8px 0", paddingTop: 8 }}>
+                      <Field label="Arc size">
+                        <span style={{ display: "flex", gap: 5, alignItems: "center" }}>
+                          <NumInput style={{ ...numInput, width: 56 }} value={selMarkup.arcFt ?? CLOUD_ARC_DEFAULT_FT} min={CLOUD_ARC_MIN_FT} max={CLOUD_ARC_MAX_FT} step={0.5} onCommit={(n) => setSelMarkupCloud({ arcFt: clampCloudArcFt(n) })} />
+                          <span style={{ fontSize: 11, color: PAL.muted }}>ft</span>
+                        </span>
+                      </Field>
+                      <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
+                        {Object.entries(CLOUD_ARC_PRESETS).map(([k, ft]) => (
+                          <button key={k} style={{ ...chip, flex: 1, fontSize: 10.5, textTransform: "capitalize", background: (selMarkup.arcFt ?? CLOUD_ARC_DEFAULT_FT) === ft ? PAL.accent : SURF_RAISED, color: (selMarkup.arcFt ?? CLOUD_ARC_DEFAULT_FT) === ft ? "#fff" : PAL.ink }} onClick={() => setSelMarkupCloud({ arcFt: ft })}>{k}</button>
+                        ))}
+                      </div>
+                      <Field label="Subject"><input value={selMarkup.subject ?? ""} maxLength={80} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, subject: e.target.value, modifiedAt: new Date().toISOString() } : m)))} placeholder="Cloud" style={textInput} /></Field>
+                      <Field label="Comment" title="Reviewer notes on this markup"><textarea value={selMarkup.comment ?? ""} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, comment: e.target.value, modifiedAt: new Date().toISOString() } : m)))} rows={2} style={{ width: 150, boxSizing: "border-box", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: BORDER_1, borderRadius: 8, color: PAL.ink, resize: "vertical" }} /></Field>
+                      <Field label="Status">
+                        <span style={cs}>
+                          <select style={{ ...numInput, width: 150, fontFamily: "inherit" }} value={selMarkup.status ?? "None"} onChange={(e) => setSelMarkupCloud({ status: e.target.value })}>
+                            {CLOUD_STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        </span>
+                      </Field>
+                      <Field label="Label"><input value={selMarkup.label ?? ""} maxLength={40} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, label: e.target.value, modifiedAt: new Date().toISOString() } : m)))} placeholder="e.g. 1" style={textInput} /></Field>
+                      <Field label="Layer"><input value={selMarkup.layer ?? ""} maxLength={40} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, layer: e.target.value, modifiedAt: new Date().toISOString() } : m)))} placeholder="e.g. Reviewer 1" style={textInput} /></Field>
+                      <Field label="Author"><input value={selMarkup.author ?? ""} maxLength={60} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, author: e.target.value, modifiedAt: new Date().toISOString() } : m)))} style={textInput} /></Field>
+                      <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.6, marginTop: 4 }}>
+                        Created {fmtWhen(selMarkup.createdAt)}<br />Modified {fmtWhen(selMarkup.modifiedAt)}
+                      </div>
+                    </div>
+                  );
+                })()}
                 {/* NEW-EASE-STYLE — an encumbrance (deed/title tract) shares the easement appearance
                     model: fill / fill opacity / hatch, type default + per-element override. Not
                     "closed" above (it's its own render branch, not a rect/ellipse/polygon), so it
