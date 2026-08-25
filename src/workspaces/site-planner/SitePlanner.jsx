@@ -103,7 +103,7 @@ import { useGroundElevation } from "./components/useGroundElevation.js";
 import CursorChip from "./components/CursorChip.jsx";
 import ViewMenu from "./components/ViewMenu.jsx";
 // NEW-4 (B366389 ×2) — the plan menu's icons, in the route-local stroke idiom. See components/icons.jsx.
-import { SaveIcon, HistoryIcon, StorageIcon, PadlockIcon, PlusIcon, DuplicateIcon, CloseXIcon } from "./components/icons.jsx";
+import { SaveIcon, HistoryIcon, StorageIcon, PadlockIcon, PlusIcon, DuplicateIcon, CloseXIcon, UndoIcon, RedoIcon, ZoomFitIcon, LayersIcon } from "./components/icons.jsx";
 /* LAZY (B1064 tranche a). Site Analysis mounts ONLY when the Analysis panel is the open one
  * (`_pid === "analysis"`, and `leftPanel` starts at null), so it is never on the first-paint
  * path — and it drags lib/siteAnalysis.js with it, which is the larger half of what moves.
@@ -18361,6 +18361,44 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   const plannerToolbar = (
     <>
+      {/* File group — first, matching the File → Edit(history) → View convention.
+          B1042 — opening the File menu warms the lazy export chunk, so by the time a download is
+          clicked the code is already in hand (no perceptible fetch).
+          ⛔ TOOLBAR PASS (B727504) — a bare word with no boundary and no caret reads as a heading,
+          not a control (owner report: "I can't tell what's going on with it"). It now carries a
+          real 1px border, a 3px corner radius, and a 9px disclosure caret, and stays visibly
+          "pressed" (accent border + tinted fill) for as long as its menu is open. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+        <div ref={exportAnchor} style={{ position: "relative" }}>
+          {/* No aria-label here on purpose — the visible "File ▾" text is already a complete
+              accessible name (an aria-label would SILENTLY OVERRIDE it instead of adding to it,
+              and several ui-audit harnesses match this button by that exact visible name). The
+              caret stays plain text, not aria-hidden, for the same reason. */}
+          <button className="dbtn" aria-haspopup="menu" aria-expanded={exportMenu}
+            title="File — export, import a project file, or print a PDF"
+            style={{ ...dGhost, fontWeight: 600, display: "flex", alignItems: "center", gap: 5, borderRadius: 3,
+              border: `1px solid ${exportMenu ? PAL.accent : PAL.chromeLine}`,
+              background: exportMenu ? "var(--hover-chrome)" : "transparent" }}
+            onClick={() => setExportMenu((o) => { if (!o) warmExportSheet(); return !o; })}>
+            File <span style={{ fontSize: 9, lineHeight: 1 }}>▾</span>
+          </button>
+          <AnchoredMenu open={exportMenu} onClose={() => setExportMenu(false)} anchorRef={exportAnchor} placement="below-right" gap={8} width={220} panelStyle={menuPanel}>
+            <button style={menuItem(false)} title="Download this plan as a project file (.json) you can re-import later" onClick={() => { setExportMenu(false); exportJSON(); }}>Export project file</button>
+            <button style={menuItem(false)} title="Load a plan from a project file (.json) — replaces the current canvas" onClick={() => { setExportMenu(false); importRef.current?.click(); }}>Import project file…</button>
+            <input ref={importRef} type="file" accept="application/json,.json" style={{ display: "none" }}
+              onChange={(e) => { importJSONFile(e.target.files?.[0]); e.target.value = ""; }} />
+            <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
+            <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
+            <button style={menuItem(false)} title="Pick a print frame, then download a finished PDF (no browser print dialog)" onClick={() => { setExportMenu(false); enterPrintMode(); }}>Download PDF / pick frame…</button>
+          </AnchoredMenu>
+        </div>
+      </div>
+      {vSep}
+      {/* History group — Undo / Redo, rebuilt to the conventional curved-arrow pair (the shape
+          Office / Google / Adobe all share, not proprietary artwork — see components/icons.jsx)
+          instead of the old ↶ / ↷ text glyphs, which render at inconsistent weights across
+          platform fonts. Undo and Redo are the SAME MDI path pair, mirrored point-for-point, so
+          they can never drift out of visual sync with each other. */}
       <div style={{ display: "flex", alignItems: "center", gap: 2, background: "var(--hover-chrome)", borderRadius: 10, padding: 2 }}>
         {/* ⛔ NEW-5 — UNDO IS ASKED ABOUT THE LIVE STATE, not merely about the stack's depth: a
             plain selection click pushed a frame and armed this button while the plan was
@@ -18371,31 +18409,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             aria-disabled attribute at all, so a checker reading that attribute got null and
             reported the empty Redo control as ENABLED — a mislabelled control, not a state bug,
             and it cost a real investigation. */}
-        <button className="dbtn" style={dIcon} onClick={undo} disabled={!canUndoNow} aria-disabled={!canUndoNow} aria-label="Undo" title="Undo (Ctrl+Z)">↶</button>
-        <button className="dbtn" style={dIcon} onClick={redo} disabled={!histRef.current.canRedo()} aria-disabled={!histRef.current.canRedo()} aria-label="Redo" title="Redo (Ctrl+Shift+Z)">↷</button>
-        <button className="dbtn" style={dIcon} onClick={fit} disabled={!parcels.length && !els.length && !markups.length && !callouts.length && !underlay} aria-label="Zoom to fit" title="Zoom to fit">⤢</button>
+        <button className="dbtn tb-icon-btn" style={dIcon} onClick={undo} disabled={!canUndoNow} aria-disabled={!canUndoNow} aria-label="Undo" title="Undo (Ctrl+Z)"><UndoIcon size={20} /></button>
+        <button className="dbtn tb-icon-btn" style={dIcon} onClick={redo} disabled={!histRef.current.canRedo()} aria-disabled={!histRef.current.canRedo()} aria-label="Redo" title="Redo (Ctrl+Shift+Z)"><RedoIcon size={20} /></button>
+      </div>
+      {vSep}
+      {/* View group — Zoom to fit: four arrows pointing OUTWARD to the corners. Deliberately not a
+          magnifier — a magnifier says "zoom", not "fit", and would be confused with the separate
+          zoom in/out controls. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+        <button className="dbtn tb-icon-btn" style={dIcon} onClick={fit} disabled={!parcels.length && !els.length && !markups.length && !callouts.length && !underlay} aria-label="Zoom to fit" title="Zoom to fit"><ZoomFitIcon size={20} /></button>
       </div>
       {/* Snap's interactive toggle moved to the on-canvas View (eye) menu with the other
           view/drawing aids (B653) — the top-bar duplicate is gone. S still toggles it. */}
-      {/* NEW-1 — the readout IS the control. This pill was already a <button>, but styled as a
-          borderless ghost with muted text in its OFF state it read as a passive status label, so
-          the one thing that told you selection was off looked like the one thing you couldn't
-          change. It now carries a real pill border + full-contrast chrome text in BOTH states,
-          spells the state out either way, and keeps aria-pressed + the native focus ring (index.css
-          gives every button a :focus-visible outline) so it's reachable by keyboard. */}
-      {parcels.length > 0 && (
-        <button type="button" className="dbtn" data-testid="parcel-select-toggle"
-          aria-pressed={settings.parcelSelect}
-          aria-label={`Select parcels — currently ${settings.parcelSelect ? "on" : "off"}`}
-          style={{ ...dGhost, display: "flex", alignItems: "center", gap: 7, fontWeight: 600, color: PAL.chromeInk,
-            border: `1px solid ${settings.parcelSelect ? PAL.accent : PAL.chromeLine}`,
-            background: settings.parcelSelect ? "var(--hover-chrome)" : "transparent" }}
-          onClick={() => setParcelSelect(!settings.parcelSelect)}
-          title="Select parcels — click to turn it on or off. ON: click a lot's edge or setback line to select it; its interior stays free for building work (dragging always pans the map, never selects). OFF: pure browse/measure, so a click never selects a parcel. Saved per project.">
-          <span aria-hidden style={{ width: 7, height: 7, borderRadius: 99, background: settings.parcelSelect ? "#22c55e" : "var(--chrome-tab-inactive)", display: "inline-block", boxShadow: settings.parcelSelect ? "0 0 7px rgba(34,197,94,0.7)" : "none" }} />
-          {settings.parcelSelect ? "Select parcels: on" : "Select parcels: off"}
-        </button>
-      )}
+      {/* ⛔ TOOLBAR PASS (B727504) — "Select parcels" moved OFF this permanent bar. It's how a site
+          gets its parcel basis (identify / draw / split / merge) and the only way to add a lot
+          that was missed or swap the one you started from — genuinely not pointless — but it's
+          touched once per site, so it doesn't earn a permanent seat beside Undo/Redo/Fit. It now
+          lives in the Parcels panel (the site-setup context where choosing ground actually
+          happens; see `_pid === "parcel"` below), with a route back from the canvas via
+          right-click on any parcel (`onParcelContext` → the parcelMenu). */}
       {tool === "select" && (() => {
         const canG = multi.length > 1, canU = !!selectedGroupId();
         if (!canG && !canU) return null;
@@ -18409,23 +18441,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </>
         );
       })()}
-      {vSep}
-      <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-        <div ref={exportAnchor} style={{ position: "relative" }}>
-          {/* B1042 — opening the File menu warms the lazy export chunk, so by the time a
-              download is clicked the code is already in hand (no perceptible fetch). */}
-          <button className="dbtn" style={{ ...dGhost, fontWeight: 600 }} onClick={() => setExportMenu((o) => { if (!o) warmExportSheet(); return !o; })}>File ▾</button>
-          <AnchoredMenu open={exportMenu} onClose={() => setExportMenu(false)} anchorRef={exportAnchor} placement="below-right" gap={8} width={220} panelStyle={menuPanel}>
-            <button style={menuItem(false)} title="Download this plan as a project file (.json) you can re-import later" onClick={() => { setExportMenu(false); exportJSON(); }}>Export project file</button>
-            <button style={menuItem(false)} title="Load a plan from a project file (.json) — replaces the current canvas" onClick={() => { setExportMenu(false); importRef.current?.click(); }}>Import project file…</button>
-            <input ref={importRef} type="file" accept="application/json,.json" style={{ display: "none" }}
-              onChange={(e) => { importJSONFile(e.target.files?.[0]); e.target.value = ""; }} />
-            <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
-            <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
-            <button style={menuItem(false)} title="Pick a print frame, then download a finished PDF (no browser print dialog)" onClick={() => { setExportMenu(false); enterPrintMode(); }}>Download PDF / pick frame…</button>
-          </AnchoredMenu>
-        </div>
-      </div>
     </>
   );
 
@@ -18932,6 +18947,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   onClick={mergePick ? exitMergePick : startMergePick}>⧉ Merge{combineSel.length >= 2 ? ` (${combineSel.length})` : ""}</button>
               )}
               </div>
+              {/* ⛔ TOOLBAR PASS (B727504) — relocated here from the permanent top toolbar. This is
+                  the parcel/site-setup context where choosing ground actually happens, and the
+                  control is touched once per site — it doesn't earn a permanent seat beside
+                  Undo/Redo/Fit. Same control, same behavior (setParcelSelect), new home; a route
+                  back from the canvas is a right-click on the parcel itself (onParcelContext →
+                  the parcelMenu, below). */}
+              {parcels.length > 0 && (
+                <button type="button" className="dbtn" data-testid="parcel-select-toggle"
+                  aria-pressed={settings.parcelSelect}
+                  aria-label={`Select parcels — currently ${settings.parcelSelect ? "on" : "off"}`}
+                  style={{ ...chip, width: "100%", marginBottom: 9, display: "flex", alignItems: "center", gap: 7, fontWeight: 600,
+                    borderColor: settings.parcelSelect ? PAL.accent : "var(--border-default)",
+                    color: settings.parcelSelect ? PAL.accent : PAL.ink }}
+                  onClick={() => setParcelSelect(!settings.parcelSelect)}
+                  title="Select parcels — click to turn it on or off. ON: click a lot's edge or setback line to select it; its interior stays free for building work (dragging always pans the map, never selects). OFF: pure browse/measure, so a click never selects a parcel. Saved per project.">
+                  <span aria-hidden style={{ width: 7, height: 7, borderRadius: 99, flex: "none", background: settings.parcelSelect ? "#22c55e" : "var(--chrome-tab-inactive)", display: "inline-block", boxShadow: settings.parcelSelect ? "0 0 7px rgba(34,197,94,0.7)" : "none" }} />
+                  {settings.parcelSelect ? "Select parcels: on" : "Select parcels: off"}
+                </button>
+              )}
               {/* NEW-1 — the return half of the cross-link. This panel owns what a parcel HAS;
                   everything you DO to one lives in the right rail's Parcel tools menu, and landing
                   on the wrong side should never be a dead end. Opens that menu directly (and slides
@@ -22004,8 +22038,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               take the overflow. */}
           {(
             <div data-wheelscroll="1" style={{ pointerEvents: "auto", width: layersOpen ? 268 : "auto", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 2px 10px rgba(28,25,20,0.16)", overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: "100%", minHeight: 0 }}>
-              <button onClick={() => setLayersOpen((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "8px 11px", border: "none", background: "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700 }}>
-                <span style={{ color: PAL.accent }}>❖</span> Layers <span style={{ flex: 1 }} /> <span style={{ color: PAL.muted, fontWeight: 500 }}>{layersOpen ? "▾" : "▸"}</span>
+              {/* ⛔ TOOLBAR PASS (B727504) — the old "❖" glyph is a tofu box on fonts that lack it,
+                  indistinguishable from a shape tool, a stop button, or a crop. Replaced with the
+                  two-offset-sheets mark Google Maps / Photoshop / Figma all use for "layers", so it
+                  needs no learning; plus the aria-label + tooltip an icon alone can't provide. */}
+              <button onClick={() => setLayersOpen((o) => !o)} aria-expanded={layersOpen} aria-label="Layers — map data layers (flood, utilities, parcels, aerial…)"
+                title="Layers — map data layers (flood, utilities, parcels, aerial…)"
+                style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "8px 11px", border: "none", background: "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700 }}>
+                <span aria-hidden style={{ color: PAL.accent, display: "flex" }}><LayersIcon size={16} /></span> Layers <span style={{ flex: 1 }} /> <span style={{ color: PAL.muted, fontWeight: 500 }}>{layersOpen ? "▾" : "▸"}</span>
               </button>
               {layersOpen && (
                 <div style={{ padding: "2px 11px 10px", overflowY: "auto", flex: 1, minHeight: 0 }}>
@@ -25723,6 +25763,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
       {parcelMenu && (
         <ContextMenu x={parcelMenu.x} y={parcelMenu.y} onClose={() => setParcelMenu(null)} width={196} zIndex={1998} className="menu" panelStyle={menuPanel}>
+          {/* ⛔ TOOLBAR PASS (B727504) — the route back to "Select parcels" now that it's off the
+              permanent toolbar (moved into the Parcels panel). A right-click on a parcel is
+              exactly where you'd land to add one that was missed or swap the one you started
+              from, so the toggle rides along here too. */}
+          <button style={menuItem(false)} onClick={() => { setParcelSelect(!settings.parcelSelect); setParcelMenu(null); }}>
+            {settings.parcelSelect ? "Select parcels: on" : "Select parcels: off"}
+          </button>
+          <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
           <button style={{ ...menuItem(false), opacity: combineSel.length >= 2 ? 1 : 0.5, cursor: combineSel.length >= 2 ? "pointer" : "default" }} disabled={combineSel.length < 2} onClick={() => { mergeParcels(); setParcelMenu(null); }}>Merge parcels ({combineSel.length})</button>
           <button style={menuItem(false)} onClick={() => { setCombineSel([]); setParcelMenu(null); }}>Clear selection</button>
           <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />

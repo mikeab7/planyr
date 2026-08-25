@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-25 @ `c68068fa` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-25 @ `f24ee9c8` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -456,7 +456,7 @@ _558 source files mapped._
 - **`src/workspaces/site-planner/components/CursorChip.jsx`** — the ONE cursor chip both map surfaces paint: coordinate pair + the always-present elevation readout (coords give way first so no elevation field is ever truncated)
   - _exports_: `default (CursorChip)`
 - **`src/workspaces/site-planner/components/icons.jsx`** — Small stroke icons (pin / empty-circle / warn-triangle) shared by the planner's panel components, replacing the 📍 emoji that ignored its row's theme colour; route-local on purpose so the bytes stay off every other route's chunk. — `PinIcon`, `EmptyCircleIcon`, `WarnTriangleIcon`
-  - _exports_: `CloseXIcon`, `DuplicateIcon`, `EmptyCircleIcon`, `HistoryIcon`, `PadlockIcon`, `PinIcon`, `PlusIcon`, `SaveIcon`, `StorageIcon`, `WarnTriangleIcon`
+  - _exports_: `CloseXIcon`, `DuplicateIcon`, `EmptyCircleIcon`, `HistoryIcon`, `LayersIcon`, `PadlockIcon`, `PinIcon`, `PlusIcon`, `RedoIcon`, `SaveIcon`, `StorageIcon`, `UndoIcon`, `WarnTriangleIcon`, `ZoomFitIcon`
 - **`src/workspaces/site-planner/components/JurisdictionBadge.jsx`** — Passive site-header chip showing the active parcel's jurisdiction (city/ETJ/county) from the auto-run B93 identify; display-only, ⚑ on straddle (B763)
   - _exports_: `default (JurisdictionBadge)`
 - **`src/workspaces/site-planner/components/LayerPanel.jsx`** — Shared map-layer toggle UI (both finder + planner): checkbox/opacity/status/vintage per layer + coverage relevance picker

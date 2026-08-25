@@ -76,9 +76,20 @@ describe("B366389 (×2) — the plan menu ends up on ONE icon system", () => {
     expect(src).toMatch(/import \{[^}]*SaveIcon[^}]*\} from "\.\/components\/icons\.jsx"/);
   });
 
+  // ⛔ TOOLBAR PASS (B727504) — `icons.jsx` now hosts a SECOND, deliberately different icon family
+  // (Undo/Redo/ZoomFit/Layers): fill="currentColor" single-path Material Design Icons shapes, not
+  // this file's route-local stroke idiom. That's an owner-approved, intentional split — a filled
+  // MDI glyph has no stroke to check — so these two assertions scope to the icons the PLAN MENU
+  // actually uses (the `used` list above) rather than sweeping every export in the file.
+  const planMenuIconBlocks = () => {
+    const names = ["SaveIcon", "HistoryIcon", "StorageIcon", "PadlockIcon", "PlusIcon", "DuplicateIcon", "CloseXIcon"];
+    const all = icons.match(/export const \w+Icon = [\s\S]*?\n\);/g) || [];
+    return all.filter((b) => names.some((n) => b.startsWith(`export const ${n} = `)));
+  };
+
   it("every icon inherits its ROW's colour — currentColor, never a pinned hex", () => {
-    const blocks = icons.match(/export const \w+Icon = [\s\S]*?\n\);/g) || [];
-    expect(blocks.length).toBeGreaterThanOrEqual(10);
+    const blocks = planMenuIconBlocks();
+    expect(blocks.length).toBeGreaterThanOrEqual(7); // the 7 names in `used` above, one block each
     for (const b of blocks) {
       expect(b, b.slice(0, 40)).toContain('stroke="currentColor"');
       expect(b, b.slice(0, 40)).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
@@ -87,6 +98,10 @@ describe("B366389 (×2) — the plan menu ends up on ONE icon system", () => {
   });
 
   it("scales with its row — every icon takes a `size` prop rather than a fixed px literal", () => {
-    for (const b of icons.match(/export const \w+Icon = \(\{[^}]*\}\)/g) || []) expect(b).toContain("size =");
+    const names = ["SaveIcon", "HistoryIcon", "StorageIcon", "PadlockIcon", "PlusIcon", "DuplicateIcon", "CloseXIcon"];
+    for (const b of icons.match(/export const \w+Icon = \(\{[^}]*\}\)/g) || []) {
+      if (!names.some((n) => b.startsWith(`export const ${n} = `))) continue;
+      expect(b).toContain("size =");
+    }
   });
 });
