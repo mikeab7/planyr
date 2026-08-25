@@ -75,7 +75,7 @@ await page.mouse.click(to.x, to.y);
 await page.waitForTimeout(300);
 const done = page.locator('[data-testid="road-draft-finish"]');
 if (await done.count() === 0) { console.log("FAIL — no finish control while drawing the branch"); process.exit(1); }
-await done.locator("rect").click({ force: true });
+await done.click({ force: true });
 await page.waitForTimeout(700);
 
 const after = await roads(), teesAfter = await tees();
