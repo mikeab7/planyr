@@ -252,7 +252,8 @@ describe("buildKmz + kmzFilename", () => {
  *     the very drawing they are printing — inheriting them there is the intent, not an accident.
  *     (`measureSheet.js` is where that path's own rule lives: an export is a document, not a
  *     screenshot, so ZOOM gates are lifted on the sheet while display toggles are honoured.)
- *   • `exportJSON` writes `settings` wholesale — a save file that round-trips, not a decision.
+ *   • `exportJSON` — REMOVED (B765984): the .json project-file export/import pair was retired,
+ *     so this bullet is historical only.
  */
 describe("no model-built export reads a canvas display toggle", () => {
   const DISPLAY_ONLY = ["showDocks", "showGrid", "showDims", "showAreas", "showSetback", "parcelSelect"];
