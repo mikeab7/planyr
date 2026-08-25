@@ -16946,19 +16946,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      exactly like every other pair of groups on this bar. See `test/toolbarChromeSystem.test.js`. */
   const TB_H = dIcon.height; // 30 — shared height for every top-right toolbar control
   const TB_R = dGhost.borderRadius; // 8 — shared corner radius for every top-right toolbar control
-  // NEW-1 — the bottom-center canvas toast chrome, defined ONCE. The pill geometry and its two
-  // button treatments were copied inline at every toast site (the pob/route/warn/deed-align pill,
-  // the overlay-calibration pill, and now the parcel-select hint), so each new message re-shipped
-  // the same style objects. One definition each: callers override only what genuinely differs
-  // (the background, and the hint's stacked `bottom`).
-  // ⛔ NEW-1/B754752 — `left` follows `toastCenterX` (the measured CANVAS center), not a bare "50%"
-  // of the viewport. With a docked left-rail panel open, viewport-center can sit inside that panel —
-  // measured live: the keyboard scope-guard toast painted directly over the Properties panel's own
-  // Length (ft) field, covering the very control the toast was explaining a refusal from. Centering
-  // on the canvas instead means the toast now sits a little left of dead-center even with no panel
-  // docked (the 54px tool rail is always in flow), never over the rail or a docked panel; a portaled/
-  // floating/phone-overlay panel steals no layout width, so it correctly leaves this untouched.
-  const toastPill = { position: "fixed", left: toastCenterX == null ? "50%" : toastCenterX, bottom: 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw", color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" };
+  // NEW-1 — the bottom-center canvas toast chrome. The pill geometry and its two button
+  // treatments were copied inline at every toast site (the pob/route/warn/deed-align pill, the
+  // overlay-calibration pill, and now the parcel-select hint), so each new message re-shipped the
+  // same style objects. One definition each: callers override only what genuinely differs (the
+  // background, and the hint's stacked `bottom`).
+  // ⛔ NEW-1/B754752 — `toastPill` ITSELF now lives further down, inside the IIFE that renders
+  // the toasts (search "const toastPill ="), AFTER `furnPlates`/`FURNITURE_ROW`/`calibPlace` are
+  // computed, because its `bottom` is now DERIVED from the same `canvasPillBottom` the Standards
+  // "Applied · Undo" toast already uses — see that IIFE's own comment for why it is nested rather
+  // than a top-level const. `toastActionBtn`/`toastGhostBtn` have no such dependency and stay here.
   const toastActionBtn = { border: "none", background: SURF_RAISED, color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" };
   const toastGhostBtn = { border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap" };
   // NEW-1 — same treatment for the top-center save/status banner family (read-only · cloud-save
@@ -25962,43 +25959,68 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         </div>
       )}
 
-      {(pobMode || routeMode || overlapWarn || deedAlignHint) && (
-        /* NEW-4/B872 — was `.startsWith("⚠")`: a message that EMBEDS a warning mid-string (e.g. "All
-           3 deeds placed. ⚠ Verify: …") never starts with it, so it rendered in the default
-           success-green with its own warning invisible to the color. `.includes` catches both. */
-        <div style={{ ...toastPill, background: (deedAlignHint && !pobMode) ? PAL.accent : overlapWarn.includes("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d") }}>
-          <span>{pobMode ? (pobMode.queueTotal ? `Deed ${(pobMode.placed || 0) + 1} of ${pobMode.queueTotal}${pobMode.name ? ` — ${pobMode.name}` : ""}: click its point of beginning (Esc cancels all).` : "Click the point of beginning on the plan to anchor the description (Esc to cancel).") : (deedAlignHint ? deedAlignHint.msg : overlapWarn)}</span>
-          {(pobMode || routeMode) && <button onClick={() => { setPobMode(null); setRouteMode(null); setOverlapWarn(""); }} style={toastGhostBtn}>Cancel</button>}
-          {deedAlignHint && !pobMode && !routeMode && <>
-            <button onClick={() => alignDeedToParcel(deedAlignHint.id)} style={toastActionBtn}>Align to parcel</button>
-            <button onClick={() => setDeedAlignHint(null)} style={toastGhostBtn}>Dismiss</button>
-          </>}
-        </div>
-      )}
-
-      {/* NEW-1 — "you clicked a parcel and nothing happened, here's why" — the same bottom-center
-          toast surface as the pill above (same geometry, same type, same shadow), riding one notch
-          higher when that one is already occupied so neither message can swallow the other. The
-          inline action turns selection back ON right where the click failed, so the user never has
-          to go find the header control. Only ever raised by a press that actually hit a parcel. */}
-      {parcelHint && (
-        <div data-testid="parcel-select-hint" role="status"
-          style={{ ...toastPill, background: PAL.accent, bottom: (pobMode || routeMode || overlapWarn || deedAlignHint) ? 132 : 84 }}>
-          <span>Parcel selection is off — that click panned the map.</span>
-          <button data-testid="parcel-select-hint-on" onClick={() => setParcelSelect(true)} style={toastActionBtn}>Turn it on</button>
-          <button aria-label="Dismiss" onClick={dismissParcelHint} style={toastGhostBtn}>Dismiss</button>
-        </div>
-      )}
-
-      {ovCalib && (
-        <div style={{ ...toastPill, background: PAL.accent }}>
-          <span>{ovCalibMsg()} {ovCalib.kind === "align" && Math.floor(ovCalib.pts.length / 2) >= 2 ? <span style={{ opacity: 0.75 }}>· or add more pairs for a better fit</span> : null} <span style={{ opacity: 0.75 }}>(Esc to cancel)</span></span>
-          {ovCalib.kind === "align" && Math.floor(ovCalib.pts.length / 2) >= 2 && (
-            <button onClick={applyOvAlign} style={{ ...toastActionBtn, border: "1px solid #fff", padding: "3px 11px" }}>Apply {Math.floor(ovCalib.pts.length / 2)} pts</button>
+      {(() => {
+        /* ⛔ NEW-1/B754752 — `toastPill` is built HERE, inside this IIFE, not as a top-level
+         * `const` above. `hiddenContentReads.js`'s sweep treats "the last top-level `const`
+         * before the JSX `return`" as owning the ENTIRE render body underneath it (a line-span
+         * heuristic, not a real AST) — that binding is `calibPlace` today, which is why its
+         * DECLARATIONS entry says it "reads the model" despite never touching one directly. A
+         * new top-level const inserted after it steals that attribution and reports `calibPlace`
+         * stale / the new name undeclared — both false alarms, but the sweep can't tell the
+         * difference, so the fix is to never add one there. Nesting these three consts inside a
+         * function body (indent > 2) keeps them invisible to that sweep entirely.
+         *
+         * `bottom` now clears the SAME furniture (north arrow, scale bar, the calibration badge's
+         * raised row, the narrow-mode FAB reserve) the Standards "Applied · Undo" toast already
+         * does, via the same `canvasPillBottom` — a bare `bottom: 84` ignored all of it, so on a
+         * narrow canvas (measured live at 750/600/420px) this toast landed squarely on the scale
+         * bar and the badge. `left` already followed the measured canvas center (see `toastCenterX`
+         * above); this is the matching vertical half. Both are proven by
+         * `ui-audit/verify-canvas-furniture.mjs`, which treats this toast as one more piece of the
+         * same furniture set rather than trusting its position in isolation. */
+        const TOAST_BOTTOM = canvasPillBottom({ northH: furnPlates.north.plateH, scaleBarH: furnPlates.scaleBar.plateH, calibBottom: calibrationState ? calibPlace.bottom : null, row: FURNITURE_ROW });
+        const TOAST_STACK_GAP_PX = 48; // the parcel-select hint's own stacked offset above another toast, unchanged from its prior 84→132 hardcode
+        const toastPill = { position: "fixed", left: toastCenterX == null ? "50%" : toastCenterX, bottom: TOAST_BOTTOM, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw", color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" };
+        return (<>
+          {(pobMode || routeMode || overlapWarn || deedAlignHint) && (
+            /* NEW-4/B872 — was `.startsWith("⚠")`: a message that EMBEDS a warning mid-string (e.g. "All
+               3 deeds placed. ⚠ Verify: …") never starts with it, so it rendered in the default
+               success-green with its own warning invisible to the color. `.includes` catches both. */
+            <div style={{ ...toastPill, background: (deedAlignHint && !pobMode) ? PAL.accent : overlapWarn.includes("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d") }}>
+              <span>{pobMode ? (pobMode.queueTotal ? `Deed ${(pobMode.placed || 0) + 1} of ${pobMode.queueTotal}${pobMode.name ? ` — ${pobMode.name}` : ""}: click its point of beginning (Esc cancels all).` : "Click the point of beginning on the plan to anchor the description (Esc to cancel).") : (deedAlignHint ? deedAlignHint.msg : overlapWarn)}</span>
+              {(pobMode || routeMode) && <button onClick={() => { setPobMode(null); setRouteMode(null); setOverlapWarn(""); }} style={toastGhostBtn}>Cancel</button>}
+              {deedAlignHint && !pobMode && !routeMode && <>
+                <button onClick={() => alignDeedToParcel(deedAlignHint.id)} style={toastActionBtn}>Align to parcel</button>
+                <button onClick={() => setDeedAlignHint(null)} style={toastGhostBtn}>Dismiss</button>
+              </>}
+            </div>
           )}
-          <button onClick={() => setOvCalib(null)} style={toastGhostBtn}>Cancel</button>
-        </div>
-      )}
+
+          {/* NEW-1 — "you clicked a parcel and nothing happened, here's why" — the same bottom-center
+              toast surface as the pill above (same geometry, same type, same shadow), riding one notch
+              higher when that one is already occupied so neither message can swallow the other. The
+              inline action turns selection back ON right where the click failed, so the user never has
+              to go find the header control. Only ever raised by a press that actually hit a parcel. */}
+          {parcelHint && (
+            <div data-testid="parcel-select-hint" role="status"
+              style={{ ...toastPill, background: PAL.accent, bottom: TOAST_BOTTOM + ((pobMode || routeMode || overlapWarn || deedAlignHint) ? TOAST_STACK_GAP_PX : 0) }}>
+              <span>Parcel selection is off — that click panned the map.</span>
+              <button data-testid="parcel-select-hint-on" onClick={() => setParcelSelect(true)} style={toastActionBtn}>Turn it on</button>
+              <button aria-label="Dismiss" onClick={dismissParcelHint} style={toastGhostBtn}>Dismiss</button>
+            </div>
+          )}
+
+          {ovCalib && (
+            <div style={{ ...toastPill, background: PAL.accent }}>
+              <span>{ovCalibMsg()} {ovCalib.kind === "align" && Math.floor(ovCalib.pts.length / 2) >= 2 ? <span style={{ opacity: 0.75 }}>· or add more pairs for a better fit</span> : null} <span style={{ opacity: 0.75 }}>(Esc to cancel)</span></span>
+              {ovCalib.kind === "align" && Math.floor(ovCalib.pts.length / 2) >= 2 && (
+                <button onClick={applyOvAlign} style={{ ...toastActionBtn, border: "1px solid #fff", padding: "3px 11px" }}>Apply {Math.floor(ovCalib.pts.length / 2)} pts</button>
+              )}
+              <button onClick={() => setOvCalib(null)} style={toastGhostBtn}>Cancel</button>
+            </div>
+          )}
+        </>);
+      })()}
 
       {/* B230 — Add / Delete control-point menu, portal-mounted at the document root so it can
           never be clipped or trapped behind the canvas / tool-rail stacking contexts. Shared
