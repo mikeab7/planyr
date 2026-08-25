@@ -2547,20 +2547,24 @@ const evalHealthRules = (task, settings, NOW, taskById) => {
   return null;
 };
 
-// Compute display health. A manual override (healthOverride) wins outright and skips everything
-// below, including the meeting/deadline blocks — that IS the override (a hand-set color must not
-// be stomped by automation of any kind until the user clears it back to Automatic). Otherwise: the
-// configurable rule list runs first (first match wins), THEN the meeting-bound / deadline-row
-// blocks (an unrelated, always-on feature, byte-identical to before), THEN the raw stored health
-// as the final fallback. Only ever called with a LEAF task — a parent/summary row always shows
-// the worst-of-children ROLLED health (computeRolledHealth) instead, which itself calls this
-// function once per LEAF descendant (never on a parent — a parent's own stale rollup fields can
-// never leak into a health rule; see computeRolledHealth's own comment for why that's safe).
+// Compute display health. ⛔ RULES-ALWAYS-WIN (2026-08-25) — RULES ALWAYS WIN: the configurable rule list
+// runs FIRST and a match is returned outright, even over a hand-set `health`/`healthOverride`.
+// This INVERTS the pre-NEW-1 behavior (healthOverride used to short-circuit everything, including
+// the rule engine) — owner-specced: "so far, I've been okay with not being able to overrule it by
+// hand. So I'm actually good with that." Only when NO rule matches does `healthOverride` get a say
+// (it then shows the hand-picked color instead of falling straight to the meeting/deadline blocks
+// below) — the override survives ONLY as a fallback for the silence case, never as a way to block
+// a firing rule. Otherwise: THEN the meeting-bound / deadline-row blocks (an unrelated, always-on
+// feature, byte-identical to before), THEN the raw stored health as the final fallback. Only ever
+// called with a LEAF task — a parent/summary row always shows the worst-of-children ROLLED health
+// (computeRolledHealth) instead, which itself calls this function once per LEAF descendant (never
+// on a parent — a parent's own stale rollup fields can never leak into a health rule; see
+// computeRolledHealth's own comment for why that's safe).
 const computeDisplayHealth = (task, settings, taskById) => {
   if (!task) return task?.health;
-  if (task.healthOverride) return task.health;
   const ruleResult = evalHealthRules(task, settings, NOW, taskById);
   if (ruleResult) return ruleResult;
+  if (task.healthOverride) return task.health;
   // B817 — a meeting-bound task surfaces its schedule risk BEFORE it slips: infeasible = red (a genuine
   // alert), ≤2 working days of float to the agenda deadline = at-risk yellow. Reads the cascade-derived
   // fields (no body lookup). Opt-in (only fires on bound rows); complete/paused rows are exempt.
@@ -6328,12 +6332,16 @@ function App() {
       let tasks = d.projects[pid].tasks.map(t => {
         if (t.id !== taskId) return t;
         const u = {...t, ...updates};
-        // A directly-picked status (StatusPicker / context menu / grid cell / master-view cell) is
-        // a deliberate manual override — it must win over the automation engine and STAY won until
-        // the user explicitly clears it back to Automatic (updateTask(id,{healthOverride:false})).
-        // A caller that means to clear it passes `healthOverride` itself, so this only fires on a
-        // plain color pick.
-        if ('health' in updates && !('healthOverride' in updates)) u.healthOverride = true;
+        // ⛔ RULES-ALWAYS-WIN (2026-08-25) — RETIRED: a directly-picked status (StatusPicker / context menu /
+        // grid cell / master-view cell) used to auto-stamp healthOverride:true on every plain color
+        // pick, silently opting the task out of automation forever (it can never re-run a rule the
+        // task doesn't already show, even after the rule set changes) — that's the exact defect
+        // behind "why is an overdue task not turning red" (a single ordinary status click on a task
+        // set healthOverride, and rules could never touch it again). Rules now always win over a
+        // hand-set health regardless of this flag (see computeDisplayHealth), so an ordinary pick no
+        // longer needs to — or may — set it: it just writes `health` and leaves healthOverride alone.
+        // The bulk "recolor this whole branch" cascade below is a separate, deliberate action and
+        // still stamps healthOverride on its targets (unaffected by this change).
         // Sanitize rowColor — only allow known hex colors or null
         if ('rowColor' in updates) u.rowColor = isValidColor(updates.rowColor) ? updates.rowColor : null;
         // Sanitize per-task text-format overrides to strict booleans (so junk data can't render)

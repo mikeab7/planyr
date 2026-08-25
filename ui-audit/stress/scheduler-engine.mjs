@@ -397,16 +397,17 @@ export const evalHealthRules = (task, settings, NOWv, taskById) => {
   return null;
 };
 
-// Compute display health (faithful copy from index.html ~L2461). A manual override
-// (healthOverride) wins outright and skips everything below, including the meeting/deadline
-// blocks. Otherwise: the configurable rule list runs first (first match wins), THEN the
-// meeting-bound / deadline-row blocks (unrelated, always-on feature, unchanged), THEN the raw
-// stored health as the final fallback.
+// Compute display health (faithful copy from index.html ~L2559). ⛔ RULES-ALWAYS-WIN (2026-08-25) — RULES
+// ALWAYS WIN: the rule list runs FIRST and a match returns outright, even over a hand-set
+// `health`/`healthOverride`. `healthOverride` only gets a say when NO rule matches (a fallback for
+// the silence case, never a way to block a firing rule). Otherwise: THEN the meeting-bound /
+// deadline-row blocks (unrelated, always-on feature, unchanged), THEN the raw stored health as the
+// final fallback.
 export const computeDisplayHealth = (task, settings, taskById) => {
   if (!task) return task?.health;
-  if (task.healthOverride) return task.health;
   const ruleResult = evalHealthRules(task, settings, NOW, taskById);
   if (ruleResult) return ruleResult;
+  if (task.healthOverride) return task.health;
   // B817 — a meeting-bound task surfaces its schedule risk BEFORE it slips: infeasible = red (a genuine
   // alert), ≤2 working days of float to the agenda deadline = at-risk yellow. Reads the cascade-derived
   // fields (no body lookup). Opt-in (only fires on bound rows); complete/paused rows are exempt.
