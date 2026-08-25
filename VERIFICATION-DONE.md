@@ -1,3 +1,15 @@
+### V421632 — B755808: Site Planner toolbar (File / Undo / Redo / Zoom-to-fit) now shares one chrome system, self-verified live headless — ✅ **PASSED 2026-08-25**
+
+**✅ PASS — pixel-level chrome-consistency check, self-verified this session in headless Chromium against the real running app (`vite dev`), logged out — no auth/GIS needed. Harness (kept in the repo as a reusable regression check): `ui-audit/verify-toolbar-chrome-system.mjs`.**
+- **Setup:** fresh "Start blank" plan, no sign-in, no GIS. Read `getComputedStyle` on the real rendered File / Undo / Redo / Zoom-to-fit buttons rather than assuming from source.
+- **Shared grid, PASS (2/2):** all four controls render at the identical height (30px each) and identical border-radius (8px each) — `heights=[30,30,30,30]`, `radii=["8px","8px","8px","8px"]`.
+- **No filled tray, PASS (2/2):** the Undo/Redo group wrapper's background reads `rgba(0, 0, 0, 0)` (fully transparent) and matches the Zoom-to-fit group wrapper's background exactly — the pre-fix `background: var(--hover-chrome)` filled pill is gone, and the two icon-button groups now render the identical bare way.
+- **Disabled state never leans on a container fill, PASS (2/2):** on the blank canvas Undo correctly reports `disabled === true` (nothing to undo yet), and the group wrapper's background stays the same transparent value whether Undo is enabled or disabled — a disabled control now dims only via its own glyph opacity, never a container color.
+- **Baseline alignment, PASS:** File's, Undo's and Zoom-to-fit's vertical midpoints all land at the same y (within 2px) — `mids=[57.5,57.5,57.5]`.
+- **Caret de-emphasis, PASS:** the File button's "▾" caret renders in a distinct, muted color (`rgb(53, 59, 73)`) from the button's own ink color (`rgb(27, 30, 38)`), confirming it no longer reads as full-weight text jammed against the word.
+- **Overall: 9/9 checks passed, zero uncaught page errors.** Screenshot captured: `ui-audit/screens/toolbar-chrome-system/header-row.png`.
+- **What this run does NOT cover:** a signed-in pass on `planyr.io` itself — not needed here, since nothing about this fix is auth-dependent (it is pure client-side chrome styling, identical whether signed in or not) and the headless check already drives the real rendered DOM of the real component.
+
 ### V380768 (round 3) — B712224: deleting a bonded assembly with a second same-account tab open, live two-tab test on the deployed build — ✅ **PASSED 2026-08-25**
 
 **✅ PASS — timing/race + concurrency (both mandatory live-verify classes), run by the OWNER himself against the deployed production build (planyr.io, signed in, two tabs, same account) — the first genuinely clean run across all three rounds of this bug family.**
