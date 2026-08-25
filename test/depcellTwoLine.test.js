@@ -23,6 +23,14 @@
  * reproduces defect B's stuck single line). It is NOT wired into CI (same standing gap as every
  * other `ui-audit/verify-*.mjs` harness — B613760).
  *
+ * B655552 (round 3) (2026-08-25) — a follow-up owner report, with screenshot: a wrapped single link's
+ * continuation line started flush left, under the ID/lag label, reading as a NEW second entry rather
+ * than the tail of the one above it. Fix: a HANGING INDENT (padding-left + equal-and-opposite
+ * text-indent) on the single-item wrap branch, sized per item via `_cpMeasure` (the shared canvas
+ * text-measurement helper already used elsewhere in this file) so a bare id and a much wider
+ * lag-suffixed label both get a correctly different indent. The multi-slot (2+ link) branch gets NO
+ * indent — the owner explicitly warned against inverting the bug onto genuine multi-item cells.
+ *
  * This is the CI-RUNNABLE HALF: it pins the structural facts the fix rests on, so a future edit
  * that quietly removes the threshold check, restores the old vertical padding, or drops the
  * line-clamp wrap branch fails the build instead of only failing a script nobody remembered to run.
@@ -192,6 +200,44 @@ describe("B655552 (round 2) — hovering a predecessor/successor cell reveals ev
     const portalCount = (depCellSrc.match(/ReactDOM\.createPortal\(/g) || []).length;
     expect(portalCount, "exactly one portal — the pre-existing +N popup — no new overlay added").toBe(1);
   });
+});
+
+describe("B655552 (round 3) — hanging indent so a wrapped single link reads as ONE item, never a second entry", () => {
+  const wrapBranchSrc = depCellSrc.slice(
+    depCellSrc.indexOf("if (items.length === 1 && canTwoLine) {"),
+    depCellSrc.indexOf("const slots = Array.from(")
+  );
+
+  it("the indent is MEASURED per item via the shared canvas helper, never a fixed constant", () => {
+    // _cpMeasure is the SAME shared canvas text-measurement helper ContactPicker's ghost-text
+    // alignment already uses elsewhere in this file — reused rather than inventing a second one.
+    expect(seq, "_cpMeasure must exist as the shared measurement helper").toMatch(/function _cpMeasure\(text, font\)/);
+    expect(wrapBranchSrc, "the wrap branch must call _cpMeasure to compute its indent, not hardcode a pixel value")
+      .toMatch(/const indent = _cpMeasure\(prefixText, `500 \$\{DEPCELL_FONT_SIZE\}px 'Inter', system-ui, sans-serif`\)/);
+    // The indent must include BOTH the label/flag prefix AND the " · " separator — omitting the
+    // separator's width would land line 2 one separator-width short of the name's real start.
+    expect(wrapBranchSrc, "the indent must add the separator's own measured width, not just the label's")
+      .toMatch(/\+ _cpMeasure\(" · ", `\$\{DEPCELL_FONT_SIZE\}px 'Inter', system-ui, sans-serif`\)/);
+    expect(wrapBranchSrc, "the flagged icon must be part of the measured prefix — an unresolved-predecessor warning icon shifts the prefix width too")
+      .toMatch(/const prefixText = \(flagged && flagged\(item\) \? "⚠ " : ""\) \+ renderLabel\(item\);/);
+  });
+
+  it("padding-left and text-indent are equal and opposite — the classic hanging-indent pair", () => {
+    expect(wrapBranchSrc, "line 1 must land back at its un-indented position via an equal-and-opposite text-indent")
+      .toMatch(/paddingLeft:indent, textIndent:-indent}}>/);
+  });
+
+  it("the multi-slot (2+ link) branch never carries an indent — inverting the fix onto a genuine second entry would be worse than the original bug", () => {
+    const multiSlotSrc = depCellSrc.slice(depCellSrc.indexOf("const slots = Array.from("));
+    expect(multiSlotSrc, "no slot row in the multi-item branch may set paddingLeft or textIndent")
+      .not.toMatch(/paddingLeft|textIndent/);
+  });
+
+  // The real pixel alignment claim — line 2 lands under where the NAME starts on line 1, for both a
+  // bare id and a wide lag label — needs an actual rendered layout, so it is proven live rather than
+  // asserted here: ui-audit/verify-depcell-two-line.mjs's Pass 1 (hangIndent measurements across all
+  // wrap-branch targets), Pass 8 (removing the indent is caught), and Pass 9 (a leaked indent on a
+  // genuine multi-item row is caught).
 });
 
 describe("B655552 — export parity (buildPDFHtml)", () => {

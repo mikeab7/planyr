@@ -10444,11 +10444,27 @@ function DepCell({items, renderLabel, renderName, s, title, flagged}) {
   // second line instead of ellipsizing on line 1 while line 2 sits empty.
   if (items.length === 1 && canTwoLine) {
     const item = items[0];
+    // B655552 (round 3) — a HANGING INDENT: without it, a wrapped continuation line starts flush
+    // left under the ID/lag label, so it visually reads as a second entry rather than the tail of
+    // the one above it — exactly the ambiguity this whole cell exists to avoid (one link wrapped to
+    // two lines vs. two separate links, one per line, must never be confusable at a glance). The
+    // indent must be MEASURED per item, not a fixed guess: `renderLabel(item)` ranges from a bare
+    // 2-digit id ("24") to a lag-suffixed label several times wider ("20FS+360d"), so a constant
+    // tuned for one is wrong for the other by construction. `_cpMeasure` is the same shared canvas
+    // text-measurement helper already used elsewhere in this file (ContactPicker's ghost-text
+    // alignment) for exact pixel alignment — reused here rather than inventing a second mechanism.
+    // The classic CSS hanging-indent pair (`padding-left` + equal-and-opposite `text-indent`) shifts
+    // every line right by `indent`, then pulls line 1 back to its original position — so line 1 is
+    // pixel-identical to before, and only the WRAPPED line 2 sits indented under the name text.
+    const prefixText = (flagged && flagged(item) ? "⚠ " : "") + renderLabel(item);
+    const indent = _cpMeasure(prefixText, `500 ${DEPCELL_FONT_SIZE}px 'Inter', system-ui, sans-serif`)
+      + _cpMeasure(" · ", `${DEPCELL_FONT_SIZE}px 'Inter', system-ui, sans-serif`);
     return (
       <div ref={ref} title={fullTitle} style={{...s, alignItems:"flex-start", padding:"0 8px", whiteSpace:"normal"}}>
         <span style={{display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical",
           overflow:"hidden", lineHeight:`${DEPCELL_LINE_H}px`, fontSize:DEPCELL_FONT_SIZE, fontFamily:"'Inter',system-ui,sans-serif",
-          whiteSpace:"normal", width:"100%", minWidth:0, wordBreak:"break-word"}}>
+          whiteSpace:"normal", width:"100%", minWidth:0, wordBreak:"break-word",
+          paddingLeft:indent, textIndent:-indent}}>
           <span style={{color: flagged && flagged(item) ? "var(--warn-text,#a16207)" : "#1d4ed8", fontWeight:500}}>{flagged && flagged(item) ? "⚠ " : ""}{renderLabel(item)}</span>
           <span style={{color:"var(--mut)"}}> · {renderName(item)}</span>
         </span>
