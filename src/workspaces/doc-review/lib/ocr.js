@@ -19,8 +19,17 @@
 import { releaseCanvas } from "./releaseCanvas.js";
 
 // Pinned model/engine assets (jsDelivr). Overridable via createOcrRunner({ cdnBase, version }).
+// MUST track the installed "tesseract.js" package version (package.json) — this is the CDN
+// worker/core build the main-thread wrapper below talks to over its own internal message
+// protocol, not just an output-shape concern. B768160 bumped the npm package 5.1.1 -> 6.0.1 for
+// the deed-OCR feature (a second, independent tesseract.js consumer); this constant was left
+// pointing at the old 5.1.1 worker/core build, so this pre-existing feature would have loaded a
+// v6 wrapper against v5.1.1 CDN assets. Confirmed compatible on the output-shape side (v6.0.1's
+// own index.d.ts: Word/Block/Line/Paragraph all still carry text/confidence/bbox{x0,y0,x1,y1}, and
+// B768160's own worker uses the identical blocks->paragraphs->lines->words traversal, proven live
+// against real v6.0.1 output) — but wrapper/worker MUST still be the same release.
 const CDN = "https://cdn.jsdelivr.net/npm";
-const TJS_VERSION = "5.1.1";
+const TJS_VERSION = "6.0.1";
 const ENG_DATA = "@tesseract.js-data/eng@1.0.0/4.0.0"; // dir holding eng.traineddata.gz
 
 // Render-density budget: keep the OCR canvas ≤ ~24 MP (so a big E-size sheet can't blow up
