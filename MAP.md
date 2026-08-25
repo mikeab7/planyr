@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-25 @ `da82d5e2` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-25 @ `b1dc9abe` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_560 source files mapped._
+_567 source files mapped._
 
 ## infra
 
@@ -218,6 +218,12 @@ _560 source files mapped._
   - _exports_: `COUNTY_ZONE`, `gridScaleFactor`, `projectToZone`, `resolveZone`, `SP_ZONES`, `ZONE_IDS`, `zoneById`, `zoneForCounty`, `zoneForPoint`, `zoneToProject`
 - **`src/shared/files/chunkedUpload.js`** — Chunked any-size file upload to Google Drive through the same-origin /api/uploads/* proxy: pure 16 MiB chunk math plus the sequential upload loop with retry/backoff, resume-from-offset, and byte progress (B409 rework)
   - _exports_: `backoffMs`, `CHUNK_SIZE`, `chunkPlan`, `contentRangeFor`, `DRIVE_CHUNK_GRANULE`, `QUOTA_MESSAGE`, `uploadFileInChunks`
+- **`src/shared/files/deedOcr.js`** — Lazy Tesseract.js orchestration: OCRs a scanned deed PDF page by page (render → preprocess → recognize → repair/reflow), with progress/cancel and per-word confidence, for the metes-and-bounds plotter's OCR fallback
+  - _exports_: `culpritCalls`, `flagSuspectDistances`, `lowConfidenceSpans`, `ocrScannedDeedPdf`
+- **`src/shared/files/deedOcrRepair.js`** — Pure OCR text repair for scanned deeds: fuzzy THENCE/COMMENCING/BEGINNING correction, DMS punctuation normalization, quadrant-glyph and doubled-degree-sign fixes, word-merge fixes, and a lost-decimal-point distance flag
+  - _exports_: `canonicalizeOcrWord`, `fixDoubledDegreeSign`, `fixQuadrantGlyphs`, `fixSurveyKeywords`, `fixWordMerges`, `flagSuspectDistances`, `normalizeOcrPunctuation`, `repairOcrDeedText`
+- **`src/shared/files/deedTextReflow.js`** — Pure word-wrapped-line rejoin (one logical line per course) shared by pdfText.js's text-layer extraction and deedOcr.js's OCR output
+  - _exports_: `reflowLines`
 - **`src/shared/files/detailRefs.js`** — Parses CAD detail/section callout bubbles ("5/A-3") and detail definition anchors from positioned PDF page text so the Stitcher can drop clickable detail hotspots
   - _exports_: `normSheet`, `parseDetailAnchors`, `parseDetailRefs`
 - **`src/shared/files/disciplineSplit.js`** — Splits a multi-discipline combined PDF into contiguous discipline segments and filing sets (prefix-first, sticky-smoothed) and builds a page-partition filing plan
@@ -230,6 +236,8 @@ _560 source files mapped._
   - _exports_: `fitEdgeLine`, `matchSeamEdges`, `orderEndpoints`
 - **`src/shared/files/fileFacts.js`** — Pure file-fact view-model: normalizes review rows, classifies spatial vs reference doc class, and drives the Library category tree, saved views, facets and needs-filing holding area
   - _exports_: `browseFiles`, `buildFileFacts`, `CATEGORIES`, `categoryFor`, `categoryOf`, `classifyDocClass`, `createIndexProvider`, `deriveTree`, `DOC_CLASS`, `docRecency`, `FACETS`, `FILE_STATE`, `FILE_STATES`, `fileState`, `getSavedView`, `groupByDiscipline`, `holdingArea`, `isReference`, `isSpatial`, `needsFiling`, `nodeMatch`, `onMap`, `runView`, `SAVED_VIEWS`, `searchFiles`, `sortFiles`, `SORTS`, `stateOf`, `stubIndexProvider`, `subcategoryOf`, `toFileFact`
+- **`src/shared/files/imagePreprocess.js`** — Pure scanned-page pixel preprocessing (grayscale, local-mean adaptive threshold with a skip for an already-bitonal source, skew estimation + deskew) for OCR
+  - _exports_: `adaptiveThreshold`, `estimateSkewAngle`, `isEffectivelyBitonal`, `preprocessPage`, `rotateImage`, `toGrayscale`
 - **`src/shared/files/legendUnion.js`** — Unions per-sheet legend symbol entries into one deduped composite key (dedupe by normalized meaning, keep first symbol, track source sheets)
   - _exports_: `legendFromPlaced`, `unionLegendEntries`
 - **`src/shared/files/matchLineFit.js`** — Pixel-accurate raster match-line fitter for scanned sheets: 1-D morphology to isolate dashed line then RANSAC near-horizontal fit plus cross-correlation slide-refine, fail-safe
@@ -238,8 +246,12 @@ _560 source files mapped._
   - _exports_: `decide`, `matchProjectInText`, `scoreProjectInText`
 - **`src/shared/files/middleTruncate.js`** — split a label into head + pinned tail so middle-ellipsis keeps the distinguishing end (NEW-4).
   - _exports_: `middleEllipsis`, `splitLabel`
+- **`src/shared/files/ocrConfidence.js`** — Pure: locates Tesseract per-word confidence inside OCR'd deed text and correlates a bad closure with the specific likely-culprit courses (the OCR closure safety net)
+  - _exports_: `culpritCalls`, `locateWordSpans`, `lowConfidenceSpans`
 - **`src/shared/files/ocrMatchLines.js`** — Recovers "MATCH LINE ... SHEET N" labels from raster scans by OCRing the page at 0/90/270 orientations and mapping found labels back to page space for autoStitch
   - _exports_: `framePointToPage`, `OCR_ORIENTATIONS`, `recoverMatchLines`
+- **`src/shared/files/pdfRaster.js`** — Browser-only PDF page → canvas ImageData render at a target DPI, for OCR only (a separate pdf.js setup from pdfText.js's text-extraction path)
+  - _exports_: `pdfPageCount`, `renderPdfPageToImageData`
 - **`src/shared/files/pdfText.js`** — Lazy pdf.js PDF-to-deed-text reader: pulls the embedded text layer and reflows word-wrapped survey courses onto one logical line each so the metes-and-bounds parser can segment them
   - _exports_: `pdfToDeedText`, `reflowLines`
 - **`src/shared/files/rasterCompare.js`** — Pure revision-compare pipeline core: registers rev B onto rev A, nearest-neighbor resamples B into A's grid, then diffs two binaries into change codes and regions
@@ -467,6 +479,8 @@ _560 source files mapped._
   - _exports_: `default (LazyPanel)`, `PanelErrorBoundary`, `PanelFallback`
 - **`src/workspaces/site-planner/components/NumEditField.jsx`** — the ONE canvas inline numeric editor: chip-scale field, no native spinners, Enter/Escape/blur commit, Arrow nudge
   - _exports_: `default (NumEditField)`
+- **`src/workspaces/site-planner/components/OcrDeedTextarea.jsx`** — The metes-and-bounds paste box with an optional low-OCR-confidence highlight overlay; a plain textarea when there's nothing to highlight
+  - _exports_: `default (OcrDeedTextarea)`
 - **`src/workspaces/site-planner/components/ParcelDataPanel.jsx`** — The selected lot's county record + taxing units, lazily loaded: an Owner headline that never repeats as a row, three short rows, and the rest (incl. the height-capped Legal description) behind one closed fold — the row split shared with the map-search card
   - _exports_: `default`, `ParcelAppraisal`, `ParcelTaxes`
 - **`src/workspaces/site-planner/components/ParcelInfoCard.jsx`** — The address-search parcel card: three rows by default (owner / account / acreage), everything else behind a height-capped fold
