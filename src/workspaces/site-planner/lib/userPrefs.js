@@ -17,6 +17,7 @@ import { supabase } from "./supabase.js";
 import { setAccountStyleDefaults } from "./planStyle.js";
 import { setAccountMeasureDefaults } from "./measureStyle.js";
 import { DEFAULT_SHARE_PREF, normalizeSharePref } from "./newProjectSharing.js";
+import { normalizeBands as normalizeXSectionBands } from "./roadCrossSection.js";
 
 const MIRROR_KEY = "planyr:userPrefs:v1";
 
@@ -27,12 +28,22 @@ export const EMPTY_PREFS = {
   // default-ON (see newProjectSharing.js), so an account that has never opened the switch behaves
   // as the owner asked. It only ever affects projects created from here on.
   newProjectSharing: DEFAULT_SHARE_PREF,
+  // NEW-1 — named road cross-section templates ("4-lane divided boulevard", "private drive"), saved
+  // here so a section designed once is reusable on ANY road in ANY project (see
+  // lib/roadCrossSection.js). Each entry is { id, name, bands }. Additive: absent = no saved presets,
+  // the dialog still ships its own built-ins from roadCrossSection.js regardless.
+  roadCrossSectionPresets: [],
 };
+
+const normalizeXSectionPresets = (list) => (Array.isArray(list) ? list : [])
+  .filter((p) => p && typeof p.name === "string" && p.name.trim() && Array.isArray(p.bands) && p.bands.length)
+  .map((p) => ({ id: p.id || `xsec-${Math.random().toString(36).slice(2, 10)}`, name: p.name, bands: normalizeXSectionBands(p.bands) }));
 
 const normalize = (p) => ({
   ...EMPTY_PREFS,
   ...(p && typeof p === "object" ? p : {}),
   newProjectSharing: normalizeSharePref(p && p.newProjectSharing),
+  roadCrossSectionPresets: normalizeXSectionPresets(p && p.roadCrossSectionPresets),
   planStandards: {
     parcelStyle: { ...((p && p.planStandards && p.planStandards.parcelStyle) || {}) },
     typeStyles: { ...((p && p.planStandards && p.planStandards.typeStyles) || {}) },
