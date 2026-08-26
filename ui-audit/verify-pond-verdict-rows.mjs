@@ -172,6 +172,9 @@ const D = await (async () => {
   await page.waitForTimeout(300);
   await page.locator('button:has-text("Download PDF / pick frame")').first().click({ timeout: 3000 }).catch(() => {});
   await page.waitForTimeout(800);
+  // B765985: Continue hands off to the full-screen compose surface before Download PDF.
+  await page.getByRole("button", { name: /^Continue ➜$/ }).first().click({ timeout: 3000 }).catch(() => {});
+  await page.waitForSelector('[data-testid="print-compose"]', { timeout: 20_000 }).catch(() => {});
   await page.locator('button:has-text("Download PDF")').last().click({ timeout: 3000 }).catch(() => {});
   // The aerial capture has to TIME OUT first in this sandbox (no outbound imagery host), and the
   // sheet is only composed after that — poll rather than guess a fixed wait.

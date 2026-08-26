@@ -65,6 +65,9 @@ await page.locator('button:has-text("File ▾")').first().click();
 await page.waitForTimeout(250);
 await page.locator('button:has-text("Download PDF / pick frame")').first().click();
 await page.waitForTimeout(600);
+// B765985: Continue hands off to the full-screen compose surface before Download PDF.
+await page.locator('button:has-text("Continue ➜")').first().click();
+await page.waitForSelector('[data-testid="print-compose"]', { timeout: 20_000 });
 await page.locator('button:has-text("Download PDF")').last().click();
 await page.waitForTimeout(2500);
 

@@ -155,6 +155,9 @@ async function captureSheet(page) {
   await page.waitForTimeout(300);
   await page.locator('button:has-text("Download PDF / pick frame")').first().click({ timeout: 8000 });
   await page.waitForTimeout(900);
+  // B765985: Continue hands off to the full-screen compose surface before Download PDF.
+  await page.getByRole("button", { name: /^Continue ➜$/ }).first().click({ timeout: 8000 });
+  await page.waitForSelector('[data-testid="print-compose"]', { timeout: 20_000 });
   await page.getByRole("button", { name: "Download PDF", exact: true }).click({ timeout: 8000 });
   // Poll rather than a fixed wait — exportPDF's aerial/raster capture time varies by
   // sandbox; the blob usually lands in ~1s but a slow container needs headroom.

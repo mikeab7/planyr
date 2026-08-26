@@ -54,6 +54,10 @@ await page.waitForTimeout(500);
 const toolbar = await page.locator("text=Print frame").count();
 await page.screenshot({ path: "ui-audit/screens/pdf-download-frame.png" });
 
+// B765985: Continue hands off to the full-screen compose surface before Download PDF.
+await page.locator('button:has-text("Continue ➜")').first().click({ timeout: 8000 }).catch((e) => errors.push("Continue btn: " + e.message));
+await page.waitForSelector('[data-testid="print-compose"]', { timeout: 20_000 }).catch((e) => errors.push("print-compose: " + e.message));
+
 // Click "Download PDF" and capture the actual file.
 const downloadPromise = page.waitForEvent("download", { timeout: 15000 });
 await page.locator('button:has-text("Download PDF")').last().click({ timeout: 8000 }).catch((e) => errors.push("download btn: " + e.message));

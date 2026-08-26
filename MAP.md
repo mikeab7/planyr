@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-25 @ `da82d5e2` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-25 @ `f9f8a3f8` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_560 source files mapped._
+_562 source files mapped._
 
 ## infra
 
@@ -475,6 +475,8 @@ _560 source files mapped._
   - _exports_: `ParcelRecord`, `PlacementControls`
 - **`src/workspaces/site-planner/components/PondSection.jsx`** — PR-L the one developer-readable pond cross-section component (used by the ⚡ Optimize what-changed card AND the pond inspector): maps pondSectionModel marks to a responsive, theme-tokened SVG (grade, berm hatch, storage bands, flood/groundwater/receiving lines, outlet, depth dimension, collision-free labels)
   - _exports_: `default (PondSection)`
+- **`src/workspaces/site-planner/components/PrintCompose.jsx`** — the dedicated full-screen "compose exhibit" step (B765985): sheet size/orientation/scale, title block, content toggles, and the live sheet preview, all outside the drawing canvas
+  - _exports_: `default (PrintCompose)`
 - **`src/workspaces/site-planner/components/RowInfo.jsx`** — Per-row ⓘ info popover for the Layers panel (source · vintage/age · notes); hover/click, portal via AnchoredMenu (B760)
   - _exports_: `default (RowInfo)`
 - **`src/workspaces/site-planner/components/SetLocationDialog.jsx`** — "Set this plan's location": address, typed coordinate, or a pick on a small aerial. The way back for a plan drawn while the county GIS was down. Lazily loaded.
@@ -662,7 +664,7 @@ _560 source files mapped._
 - **`src/workspaces/site-planner/lib/exportLabelScale.js`** — The scale the LABEL tier reasons at on an export pass: the sheet's own px-per-foot (framed extent vs plan box), so declutter/LOD/collision, label sizes and stroke-zoom are a function of the plan and the paper, never of the live zoom.
   - _exports_: `makeLabelFrame`, `MAX_LABEL_PPF`, `MIN_LABEL_PPF`, `SHEET_PX_PER_CENTI_INCH`, `sheetLabelPpf`, `STROKE_ZOOM_REF`
 - **`src/workspaces/site-planner/lib/exportSheet.js`** — the on-demand export path: PDF/PNG/KMZ sheet composition, the B839 aerial tile Stitcher, and GIS raster/vector layer capture. Loaded via dynamic import() from SitePlanner (B1042) so it never rides the boot bundle; reads planner state through a per-call `ctx` object
-  - _exports_: `createExportSheet`, `sheetPlanAspect`
+  - _exports_: `createExportSheet`, `sheetLayoutBoxesIn`, `sheetPlanAspect`
 - **`src/workspaces/site-planner/lib/exportStyle.js`** — Pure print stroke-weight retargeting: convert authored screen-pixel line widths to zoom-independent physical drafting points for PDF/PNG export
   - _exports_: `PRINT_WEIGHTS`, `printStrokeWidth`, `PT_PER_CENTI_INCH`, `sheetFitScale`
 - **`src/workspaces/site-planner/lib/factRevalidation.js`** — Drainage facts auto-revalidation decision layer (B832): load-kind (missing/stale/incomplete snapshot) vs edit-kind (fetch-envelope exit, point-anchor drift >100 ft) triggers with stable retry keys. Exports `revalidationNeed`, `envelopeOf`, `envelopeContains`, `anchorDriftFt`.
@@ -921,8 +923,10 @@ _560 source files mapped._
   - _exports_: `ownerLabel`, `subName`, `summarizeSubstations`, `summarizeTransmission`, `voltLabel`
 - **`src/workspaces/site-planner/lib/presencePill.js`** — pure "N here" presence summary (B674): distinct people from the channel roster, quiet when alone, You-first hover names
   - _exports_: `presenceSummary`
+- **`src/workspaces/site-planner/lib/printScale.js`** — the explicit engineering-scale math (B765985): the standard scale list, a scale's implied frame footprint, and the "does the picked area fit" check
+  - _exports_: `checkScaleFits`, `frameFootprintForScale`, `scaleLabel`, `STANDARD_SCALES`
 - **`src/workspaces/site-planner/lib/printSheet.js`** — Pure single-SVG print sheet composer: page geometry, buildings table, metrics band, title block, export filename builder
-  - _exports_: `buildBuildingTableSvg`, `buildPrintSheetSvg`, `buildStormwaterSvg`, `formatDateStamp`, `metricsRowsFor`, `pageSize`, `printSheetLayout`, `sanitizeFilename`, `sheetFileName`, `stormwaterBandH`
+  - _exports_: `buildBuildingTableSvg`, `buildPrintSheetSvg`, `buildStormwaterSvg`, `formatDateStamp`, `metricsRowsFor`, `pageSize`, `PAPER_SIZES`, `printSheetLayout`, `sanitizeFilename`, `sheetFileName`, `stormwaterBandH`
 - **`src/workspaces/site-planner/lib/profile.js`** — Signed-in user profile I/O against Supabase public.profiles (load/upsert first/last/org, mirrors names to auth metadata)
   - _exports_: `loadProfile`, `saveProfile`
 - **`src/workspaces/site-planner/lib/projectName.js`** — THE authority for what a project (site group) is called: resolves the one authoritative name across a group's plans (rename-stamp first, legacy majority second, ambiguous never guessed), reconciles a split group, and supplies the write-path correction that stops a stale plan re-publishing an old name.

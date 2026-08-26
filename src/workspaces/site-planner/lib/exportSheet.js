@@ -60,6 +60,16 @@ export function sheetPlanAspect({ paper, orient, buildingCount, metricsPairs, st
   return layout.plan.w / layout.plan.h;
 }
 
+/* B765985 — the plan box AND the full page, both in real inches, for the compose screen's
+ * explicit-scale math (frame footprint = plan box inches × feet-per-inch) and its sheet
+ * preview (which shows the WHOLE page, not just the plan box). Same lazy-chunk reasoning as
+ * `sheetPlanAspect` above — SitePlanner awaits this through the export chunk, never a static
+ * import of printSheetLayout. */
+export function sheetLayoutBoxesIn({ paper, orient, buildingCount, metricsPairs, stormwaterBars, titleBlockExtra }) {
+  const layout = printSheetLayout({ paper, orient, buildingCount, metricsPairs, stormwaterBars, titleBlockExtra });
+  return { planW: layout.plan.w / 100, planH: layout.plan.h / 100, pageW: layout.page.wIn, pageH: layout.page.hIn };
+}
+
 export function createExportSheet(ctx) {
   const {
     // --- drawn model + geometry -------------------------------------------------
@@ -995,53 +1005,67 @@ export function createExportSheet(ctx) {
   // the drainage screen has run — and an unpriceable mitigation prints UNKNOWN,
   // never a silent omission.
 
-  const exportPDF = async (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true) => {
-    const now = () => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());
-    const t0 = now();
-    const mark = (label) => { try { console.debug(`[pdf] ${label}: ${Math.round(now() - t0)}ms`); } catch (_) {} };
+  /* B765985 — THE ONE PLACE THE FULL SHEET IS ASSEMBLED, shared by the compose screen's live
+   * preview and the final PDF. PDF-PARITY here is not an assertion, it's a construction: both
+   * callers get the SAME `sheetSvg` string back — the preview renders it as an <img>, exportPDF
+   * rasterizes it — so there is no second code path that could quietly draw something different.
+   * Returns null when there's nothing to export (mirrors the old exportPDF's early return).
+   * `scaleLabel`/`preparedBy` are plain strings for the title block (empty → that row omits
+   * whichever half is blank); the caller (SitePlanner) computes the scale text via printScale.js. */
+  const buildComposedSheet = async (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "") => {
     const exportAerial = await exportAerialForFrame(printFrame); // B735/B839 — capture the live basemap (a Leaflet <div> the SVG can't clone) as a frame-exact image: stitched cached tiles, or the dynamic /export fallback
     const exportOverlays = exportOverlaysForFrame(printFrame); // B739 — capture the live GIS raster layers (floodplain, pipelines, …) for the print frame
     await warmTerrainForFrame(); // NEW-1 — the persistent cache tier is async now; make sure the frame's terrain tiles are resident before the SYNC capture below
     const exportVectorOverlays = exportVectorOverlaysForFrame(); // B745 — capture the live GIS vector layers (boundaries, transmission, contours, …)
     const built = buildExportSvg(printFrame, includeOverlay, "#ffffff", exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, paper, orient); // force WHITE paper for print/PDF; paper/orient size the label tier (NEW-1)
-    if (!built) { alert("Nothing to export yet — add a parcel or some elements first."); return; }
+    if (!built) return null;
+    // Embed the aerial + GIS overlays (and any placed overlay) as data URLs; DROP any we can't
+    // fetch so a cross-origin image can't taint the canvas and abort the whole export (B202). A
+    // dropped AERIAL or GIS layer is surfaced loudly by the caller (B735/B739) — never a silent
+    // omission.
+    const { aerialDropped, overlaysDropped } = await inlineImages(built.clone, true);
+    // Compose the WHOLE sheet as ONE SVG (B200): nest the plan as an inner <svg> sized to
+    // the layout's plan box (it keeps its own viewBox); the title block, buildings table
+    // (B197) and metrics live in the SAME outer SVG coordinate system.
+    const rows = buildingRows();
+    const metricPairs = printMetricPairs();
+    const swBars = printStormwaterBars();
+    const layout = printSheetLayout({ paper, orient, buildingCount: rows.length, metricsPairs: metricPairs, stormwaterBars: swBars.length, titleBlockExtra: !!(scaleLabelText || preparedBy) });
+    // NEW-2 / NEW-3: thin line work + restyle labels to physical print weights, using
+    // the real sheet-fit factor (centi-inches of paper per viewBox unit) so the result
+    // is identical regardless of the zoom the user was at when they hit print.
+    restyleExportClone(built.clone, sheetFitScale(built.w, built.h, layout.plan.w, layout.plan.h));
+    const plan = built.clone; // a full <svg viewBox=…> — nest it, keeping its viewBox
+    plan.setAttribute("x", layout.plan.x); plan.setAttribute("y", layout.plan.y);
+    plan.setAttribute("width", layout.plan.w); plan.setAttribute("height", layout.plan.h);
+    plan.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    const planSvg = new XMLSerializer().serializeToString(plan);
+    const sheetSvg = buildPrintSheetSvg({
+      layout, planSvg,
+      title: siteLabel, sub: planLabel,
+      date: formatDateStamp(),
+      scale: scaleLabelText, preparedBy,
+      metrics: metricPairs,
+      stormwater: swBars,
+      note: drainage && drainage.mitigation && drainage.mitigation.intersectAcres > 0
+        ? "Concept site plan — planning-level estimates, not a survey. Detention & floodplain-mitigation volumes are screening figures — confirm with your engineer and the reviewing authority."
+        : "Concept site plan — planning-level estimates, not a survey.",
+      buildings: rows.map((r) => ({ name: r.name, sf: r.sf, clearHeight: r.clearHeight.value, slab: r.slab.value })),
+      pal: { ...PAL, paper: "#ffffff" }, // white sheet — the cream PAL.paper is a screen-only page colour
+    });
+    return { sheetSvg, layout, aerialDropped, overlaysDropped };
+  };
+
+  const exportPDF = async (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "") => {
+    const now = () => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());
+    const t0 = now();
+    const mark = (label) => { try { console.debug(`[pdf] ${label}: ${Math.round(now() - t0)}ms`); } catch (_) {} };
     setExportingPDF(true);
     try {
-      // Embed the aerial + GIS overlays (and any placed overlay) as data URLs; DROP any we can't
-      // fetch so a cross-origin image can't taint the canvas and abort the whole export (B202). A
-      // dropped AERIAL or GIS layer is surfaced loudly on the success path below (B735/B739) — never
-      // a silent omission. The warning waits until the file actually downloads, so a later
-      // render/encode failure (which throws to the outer catch) can't leave a contradictory toast.
-      const { aerialDropped, overlaysDropped } = await inlineImages(built.clone, true);
-      mark("inline images");
-      // Compose the WHOLE sheet as ONE SVG (B200): nest the plan as an inner <svg> sized to
-      // the layout's plan box (it keeps its own viewBox); the title block, buildings table
-      // (B197) and metrics live in the SAME outer SVG coordinate system.
-      const rows = buildingRows();
-      const metricPairs = printMetricPairs();
-      const swBars = printStormwaterBars();
-      const layout = printSheetLayout({ paper, orient, buildingCount: rows.length, metricsPairs: metricPairs, stormwaterBars: swBars.length });
-      // NEW-2 / NEW-3: thin line work + restyle labels to physical print weights, using
-      // the real sheet-fit factor (centi-inches of paper per viewBox unit) so the result
-      // is identical regardless of the zoom the user was at when they hit print.
-      restyleExportClone(built.clone, sheetFitScale(built.w, built.h, layout.plan.w, layout.plan.h));
-      const plan = built.clone; // a full <svg viewBox=…> — nest it, keeping its viewBox
-      plan.setAttribute("x", layout.plan.x); plan.setAttribute("y", layout.plan.y);
-      plan.setAttribute("width", layout.plan.w); plan.setAttribute("height", layout.plan.h);
-      plan.setAttribute("preserveAspectRatio", "xMidYMid meet");
-      const planSvg = new XMLSerializer().serializeToString(plan);
-      const sheetSvg = buildPrintSheetSvg({
-        layout, planSvg,
-        title: siteLabel, sub: planLabel,
-        date: formatDateStamp(),
-        metrics: metricPairs,
-        stormwater: swBars,
-        note: drainage && drainage.mitigation && drainage.mitigation.intersectAcres > 0
-          ? "Concept site plan — planning-level estimates, not a survey. Detention & floodplain-mitigation volumes are screening figures — confirm with your engineer and the reviewing authority."
-          : "Concept site plan — planning-level estimates, not a survey.",
-        buildings: rows.map((r) => ({ name: r.name, sf: r.sf, clearHeight: r.clearHeight.value, slab: r.slab.value })),
-        pal: { ...PAL, paper: "#ffffff" }, // white sheet — the cream PAL.paper is a screen-only page colour
-      });
+      const composed = await buildComposedSheet(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy);
+      if (!composed) { alert("Nothing to export yet — add a parcel or some elements first."); return; }
+      const { sheetSvg, layout, aerialDropped, overlaysDropped } = composed;
+      mark("composed sheet");
       // Rasterize the composed sheet at high DPI. The browser renders the SVG exactly as it
       // appears on screen (fills, filters, the inlined aerial), so the PDF is pixel-faithful.
       const { page } = layout;
@@ -1080,7 +1104,7 @@ export function createExportSheet(ctx) {
     } finally { setExportingPDF(false); }
   };
   return {
-    exportKmz, exportPNG, exportPDF,
+    exportKmz, exportPNG, exportPDF, buildComposedSheet,
     buildExportSvg, exportAerialForFrame, exportOverlaysForFrame, exportVectorOverlaysForFrame,
     inlineImages, restyleExportClone, exportFeetExtent,
   };

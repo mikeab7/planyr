@@ -47,16 +47,18 @@ await page.waitForTimeout(300);
 await page.locator('button:has-text("Download PDF / pick frame")').first().click({ timeout: 8000 }).catch((e) => errors.push("Print item: " + e.message));
 await page.waitForTimeout(500);
 log.printToolbar = await page.locator('text=Print frame').count();
-// Open the Options flyout (B199)
-await page.locator('button:has-text("Options ▾")').first().click({ timeout: 8000 }).catch((e) => errors.push("Options btn: " + e.message));
+// B765985: Continue hands off to the full-screen compose surface — the old "Options ▾" flyout
+// (B199) is gone; its clear-height/slab tiers now live inside compose's collapsed "Buildings
+// table" section, which has to be expanded before its fields are interactable.
+await page.getByRole("button", { name: /^Continue ➜$/ }).first().click({ timeout: 8000 }).catch((e) => errors.push("Continue btn: " + e.message));
+await page.waitForSelector('[data-testid="print-compose"]', { timeout: 20_000 }).catch((e) => errors.push("print-compose: " + e.message));
+await page.locator('[aria-label="Buildings table"]').first().click({ timeout: 8000 }).catch((e) => errors.push("Buildings table btn: " + e.message));
 await page.waitForTimeout(400);
 log.optionsFlyout = await page.locator('text=Defaults by building size').count();
 log.perBuilding = await page.locator('text=Per-building overrides').count();
 log.clearHeightLabel = await page.locator('text=Clear height').count();
 await page.screenshot({ path: "ui-audit/screens/print-live-options.png" });
-// Close flyout + cancel print mode, then select a building to check the inspector fields.
-await page.keyboard.press("Escape").catch(() => {});
-await page.waitForTimeout(150);
+// Close the compose screen (cancels print mode), then select a building to check the inspector fields.
 await page.locator('button:has-text("Cancel")').first().click({ timeout: 4000 }).catch(() => {});
 await page.waitForTimeout(200);
 // Click near the larger building (left of centre) to select it.
