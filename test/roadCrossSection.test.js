@@ -3,6 +3,7 @@ import {
   BAND_TYPES, BAND_TYPE_BY_KEY, DEFAULT_BAND_TYPE, bandTypeOf, normalizeBands, makeXSection,
   xsectionFromRoad, hasXSection, curbToCurbWidth, pavedWidth, rowWidth, pavementArea, bandLayout,
   bandStripeMarks, BUILT_IN_XSECTION_PRESETS, parseWidthDraft, MIN_BAND_WIDTH_FT,
+  designatedRowFt, rowMarginFt,
 } from "../src/workspaces/site-planner/lib/roadCrossSection.js";
 
 const OWNER_EXAMPLE = [
@@ -256,5 +257,125 @@ describe("parseWidthDraft — the band-width field's commit-time-only parser", (
     // below-minimum still parses — "being below it while typing is not an error either"; the
     // dialog's own commit handler does `Math.max(MIN_BAND_WIDTH_FT, parseWidthDraft(draft))`
     expect(parseWidthDraft("0.02")).toBe(0.02);
+  });
+});
+
+/* B783280 (NEW-1) — a designated right-of-way, distinct from the DERIVED band total `rowWidth`
+ * already tested above. PRESENCE IS THE SIGNAL: `designatedRowFt` returns a real, positive number
+ * only when one is genuinely stored, `null` for every other case — never a numeric comparison
+ * against the modeled bands. */
+describe("designatedRowFt — presence is the signal, never a numeric comparison", () => {
+  it("null when nothing is stored at all", () => {
+    expect(designatedRowFt(null)).toBeNull();
+    expect(designatedRowFt(undefined)).toBeNull();
+    expect(designatedRowFt({})).toBeNull();
+    expect(designatedRowFt({ bands: OWNER_EXAMPLE })).toBeNull();
+  });
+  it("null for a non-positive or non-finite rowDesignFt — never a negative or zero ROW", () => {
+    expect(designatedRowFt({ rowDesignFt: 0 })).toBeNull();
+    expect(designatedRowFt({ rowDesignFt: -10 })).toBeNull();
+    expect(designatedRowFt({ rowDesignFt: NaN })).toBeNull();
+    expect(designatedRowFt({ rowDesignFt: Infinity })).toBeNull();
+  });
+  it("null for an unparseable rowDesignFt", () => {
+    expect(designatedRowFt({ rowDesignFt: "not a number" })).toBeNull();
+  });
+  it("returns the number for a real, positive rowDesignFt — including one that exactly equals the modeled band total", () => {
+    expect(designatedRowFt({ bands: OWNER_EXAMPLE, rowDesignFt: 100 })).toBe(100);
+    expect(designatedRowFt({ bands: OWNER_EXAMPLE, rowDesignFt: 68 })).toBe(68); // == curbToCurbWidth(OWNER_EXAMPLE) — still designated
+  });
+  it("coerces a numeric string, matching every other width field in this module", () => {
+    expect(designatedRowFt({ rowDesignFt: "100" })).toBe(100);
+  });
+});
+
+describe("rowMarginFt — the undesignated margin each side", () => {
+  it("null when nothing is designated", () => {
+    expect(rowMarginFt({ bands: OWNER_EXAMPLE })).toBeNull();
+  });
+  it("null (never negative) when the modeled bands already EXCEED the designated ROW — the loud-warning case, never silently clamped", () => {
+    expect(rowMarginFt({ bands: OWNER_EXAMPLE, rowDesignFt: 60 })).toBeNull(); // bands total 68, ROW only 60
+  });
+  it("splits the leftover evenly, (designated - modeled) / 2", () => {
+    // OWNER_EXAMPLE totals 68' (no outside-curb bands); a 100' designated ROW leaves 32' undesignated, 16' each side
+    expect(rowMarginFt({ bands: OWNER_EXAMPLE, rowDesignFt: 100 })).toBe(16);
+  });
+  it("the exact-equality edge case: a ROW designated at PRECISELY the modeled band total is a valid zero-margin designation, not null — this is the case the owner's own live repro exercises (a 68' boulevard + two 16' parkways = 100' modeled, ROW designated at 100')", () => {
+    const bandsWithParkways = [{ type: "parkway", w: 16 }, ...OWNER_EXAMPLE, { type: "parkway", w: 16 }];
+    expect(rowWidth({ bands: bandsWithParkways })).toBe(100); // 68 + 16 + 16
+    expect(rowMarginFt({ bands: bandsWithParkways, rowDesignFt: 100 })).toBe(0);
+  });
+  it("margin accounts for the FULL modeled band total (including any explicit outside-curb band), never curb-to-curb alone — an explicit parkway is already accounted-for ROW, not margin on top of it", () => {
+    const bandsWithOneParkway = [...OWNER_EXAMPLE, { type: "parkway", w: 10 }]; // 68 curb-to-curb + 10 parkway = 78 modeled
+    expect(curbToCurbWidth({ bands: bandsWithOneParkway })).toBe(68);
+    expect(rowWidth({ bands: bandsWithOneParkway })).toBe(78);
+    // a 90' designated ROW over this: leftover is 90 - 78 = 12, split 6' each side — NOT computed against the 68' curb-to-curb figure
+    expect(rowMarginFt({ bands: bandsWithOneParkway, rowDesignFt: 90 })).toBe(6);
+  });
+});
+
+describe("makeXSection(bands, rowDesignFt) — presence-is-the-signal at construction too", () => {
+  it("omits rowDesignFt entirely (no key at all) when not given", () => {
+    const x = makeXSection(OWNER_EXAMPLE);
+    expect(x).not.toHaveProperty("rowDesignFt");
+    expect(designatedRowFt(x)).toBeNull();
+  });
+  it("omits rowDesignFt entirely when given an invalid value — never stores null/0/negative/NaN as the key", () => {
+    for (const bad of [0, -5, NaN, undefined, null, "bogus"]) {
+      const x = makeXSection(OWNER_EXAMPLE, bad);
+      expect(x).not.toHaveProperty("rowDesignFt");
+    }
+  });
+  it("stores a real, positive rowDesignFt", () => {
+    const x = makeXSection(OWNER_EXAMPLE, 100);
+    expect(x.rowDesignFt).toBe(100);
+    expect(designatedRowFt(x)).toBe(100);
+  });
+});
+
+describe("xsectionFromRoad — carries an already-designated ROW through unchanged", () => {
+  it("re-opening the dialog on a road that already has a designated ROW keeps it (never silently dropped)", () => {
+    const el = { type: "road", xsection: { bands: OWNER_EXAMPLE, rowDesignFt: 100 } };
+    const x = xsectionFromRoad(el);
+    expect(x.bands).toEqual(OWNER_EXAMPLE);
+    expect(designatedRowFt(x)).toBe(100);
+  });
+  it("a road with no designated ROW still opens with none (not invented)", () => {
+    const el = { type: "road", xsection: { bands: OWNER_EXAMPLE } };
+    expect(designatedRowFt(xsectionFromRoad(el))).toBeNull();
+  });
+});
+
+/* B773730 (NEW-2) — outside-curb bands (sidewalk / parkway / ditch) are geometrically well-formed in
+ * `bandLayout` already (this was never a model bug — the dispatch's own fact #1 confirms the band
+ * table already carries the correct `withinCurb` flags); the defect this dispatch fixes is purely
+ * in the CANVAS PAINT PATH (SitePlanner.jsx), which is covered live in
+ * ui-audit/verify-road-row-designation.mjs. These two tests pin the model-layer contract that fix
+ * depends on: an outside-curb band's edges sit ENTIRELY beyond the within-curb block, on the correct
+ * side, so a renderer that draws every edge (not just the within-curb ones) places them correctly. */
+describe("outside-curb band placement — the geometry the NEW-2 canvas fix relies on", () => {
+  it("a parkway flanking BOTH sides of the boulevard sits entirely outside the 68' curb-to-curb block", () => {
+    const x = makeXSection([{ type: "parkway", w: 16 }, ...OWNER_EXAMPLE, { type: "parkway", w: 16 }]);
+    const { edges } = bandLayout(x);
+    const leftParkway = edges[0], rightParkway = edges[edges.length - 1];
+    expect(bandTypeOf(leftParkway.band.type).withinCurb).toBe(false);
+    expect(bandTypeOf(rightParkway.band.type).withinCurb).toBe(false);
+    // curb-to-curb block spans exactly [-34, +34] (68' / 2); both parkways sit entirely beyond it
+    expect(leftParkway.to).toBe(34);
+    expect(leftParkway.from).toBe(50); // 34 + 16
+    expect(rightParkway.from).toBe(-34);
+    expect(rightParkway.to).toBe(-50); // -34 - 16
+    // and the full modeled span is exactly what the ROW math above assumes
+    expect(rowWidth(x)).toBe(100);
+  });
+  it("every within-curb band's edges stay inside ±curbToCurb/2 regardless of flanking outside-curb bands", () => {
+    const x = makeXSection([{ type: "sidewalk", w: 5 }, ...OWNER_EXAMPLE, { type: "ditch", w: 10 }]);
+    const { edges, curbToCurb } = bandLayout(x);
+    const within = edges.filter((e) => bandTypeOf(e.band.type).withinCurb);
+    const half = curbToCurb / 2;
+    for (const e of within) {
+      expect(Math.max(e.from, e.to)).toBeLessThanOrEqual(half + 1e-9);
+      expect(Math.min(e.from, e.to)).toBeGreaterThanOrEqual(-half - 1e-9);
+    }
   });
 });

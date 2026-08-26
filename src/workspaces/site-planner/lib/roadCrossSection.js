@@ -110,14 +110,24 @@ export function normalizeBands(bands) {
   return out;
 }
 
-export function makeXSection(bands) { return { bands: normalizeBands(bands) }; }
+/* NEW-1 — `rowDesignFt` is optional and deliberately OMITTED (never written as null/undefined) when
+ * not a real, positive number: presence of the key is the "has this road's ROW been designated"
+ * signal every caller (the dialog, the canvas, the Properties panel) reads via `designatedRowFt`. */
+export function makeXSection(bands, rowDesignFt) {
+  const x = { bands: normalizeBands(bands) };
+  const r = designatedRowFt({ rowDesignFt });
+  if (r != null) x.rowDesignFt = r;
+  return x;
+}
 
-/* A road's cross-section for the dialog to open with: its OWN stored xsection if it has one,
- * otherwise a single travel-lane band matching its current travelW (or 24' if it has none yet) —
- * never a stored migration, since (per the header above) there is nothing to migrate FROM. */
+/* A road's cross-section for the dialog to open with: its OWN stored xsection if it has one
+ * (rowDesignFt carried through unchanged, so re-opening the dialog on an already-designated road
+ * doesn't silently drop it), otherwise a single travel-lane band matching its current travelW (or
+ * 24' if it has none yet) — never a stored migration, since (per the header above) there is nothing
+ * to migrate FROM. */
 export function xsectionFromRoad(el) {
   if (el && el.xsection && Array.isArray(el.xsection.bands) && el.xsection.bands.length) {
-    return makeXSection(el.xsection.bands);
+    return makeXSection(el.xsection.bands, el.xsection.rowDesignFt);
   }
   const w = Number.isFinite(+(el && el.travelW)) && +el.travelW > 0 ? +el.travelW : 24;
   return makeXSection([{ type: "travel", w }]);
@@ -141,6 +151,45 @@ export function pavedWidth(xsection) {
 }
 export function rowWidth(xsection) {
   return normalizeBands(xsection && xsection.bands).reduce((s, b) => s + b.w, 0);
+}
+
+/* NEW-1 (owner report, 2026-08-26 — "id like to designate the ROW to like a 100' row should be
+ * shown") — a DESIGNATED right-of-way, distinct from `rowWidth` above, which only ever DERIVES the
+ * modeled-band total. A real ROW is a legal dedication, normally WIDER than every band the section
+ * models, with the remainder an undesignated margin either side (a legal setback strip beyond the
+ * last modeled band — outside even an explicit parkway/sidewalk/ditch). Stored as
+ * `xsection.rowDesignFt`, deliberately not named `rowW`/`rowWidth`/anything close: `rowW` already
+ * names an unrelated TABLE ROW WIDTH in AppHeader, and `rowWidth()` above is the DERIVED band-total
+ * function — a name near either would read as the same concept and isn't.
+ *
+ * PRESENCE IS THE SIGNAL, not a numeric comparison against the band total: a road with no
+ * `rowDesignFt` at all has never had a ROW designated, and callers (the dialog, the canvas, the
+ * Properties panel) all gate on `designatedRowFt(...) != null` — never on "does it differ from the
+ * band total" — so a designated ROW that happens to exactly match the modeled bands (a real, valid
+ * case: every foot of the legal ROW is accounted for by drawn bands) still reads as designated. */
+export function designatedRowFt(xsection) {
+  const v = xsection && +xsection.rowDesignFt;
+  return Number.isFinite(v) && v > 0 ? v : null;
+}
+
+/* The undesignated margin PER SIDE, beyond every modeled band — split evenly, per the brief's own
+ * "(Y-X)/2 each side". X here is the FULL modeled band total (`rowWidth`, which already includes any
+ * explicit outside-curb sidewalk/parkway/ditch band), not the curb-to-curb width alone: an explicit
+ * parkway band is already accounted-for ROW, not "margin", so double-counting it as margin ON TOP of
+ * its own modeled width would overstate the true undesignated strip. This is also why the dialog's
+ * ROW field defaults to the band total — an untouched default then reads as zero margin, not some
+ * mystery leftover.
+ *
+ * Returns `null` (never a negative number) when the section is not designated, OR when the modeled
+ * band total already EXCEEDS the designated ROW — that invalid state is surfaced as a loud warning
+ * by the caller (never silently clamped), and `null` here is what keeps the canvas from drawing a
+ * ROW boundary that would sit INSIDE the paved section. */
+export function rowMarginFt(xsection) {
+  const designated = designatedRowFt(xsection);
+  if (designated == null) return null;
+  const modeled = rowWidth(xsection);
+  if (modeled > designated) return null;
+  return (designated - modeled) / 2;
 }
 
 /* Pavement area from a paved width + a centerline length — mirrors costTakeoff's SF_PER_SY. */

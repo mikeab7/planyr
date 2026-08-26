@@ -219,6 +219,9 @@ export default function ViewMenu({ open, onToggle, settings, setSnap, patchSetti
           <label style={row} title="The red footprint dimension callouts (building depth, road width, strip width)">
             <input type="checkbox" checked={settings.showDims !== false} onChange={(e) => patchSettings({ showDims: e.target.checked })} /> Dimensions
           </label>
+          <label style={row} title="The dashed right-of-way boundary lines and R.O.W. label on a banded road that has a designated right-of-way width">
+            <input type="checkbox" checked={settings.showRowLines !== false} onChange={(e) => patchSettings({ showRowLines: e.target.checked })} /> ROW lines
+          </label>
 
           <div style={{ borderTop: `1px solid ${pal.panelLine}`, margin: "9px 0 7px" }} />
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 6 }}>
