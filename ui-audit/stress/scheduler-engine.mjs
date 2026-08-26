@@ -331,9 +331,150 @@ export const setNOW = v => { NOW = v; };
 // HOLIDAY_SET from settings.holidays on load; mirror that here so business-day math matches).
 export const setHOLIDAY_SET = s => { HOLIDAY_SET = s; };
 
-// ── Configurable health automation (faithful copy from index.html; NEW-schedule-health) ──────
-// Replaces the old fixed 3-toggle cfRules with an ORDERED list of {id, type, days?, color} rules,
-// first match wins. See index.html's own comment block for the full rationale; kept verbatim here.
+// ── Configurable health automation, v2 (faithful copy from index.html; B785744) ──────────────
+// See index.html's own comment block for the full rationale; kept verbatim here.
+export const RULE_FIELDS = [
+  {k:"finish",          label:"Finish date",   type:"date"},
+  {k:"start",           label:"Start date",    type:"date"},
+  {k:"status",          label:"Status",        type:"status"},
+  {k:"owner",           label:"Owner",         type:"text"},
+  {k:"percentComplete", label:"% Complete",    type:"number"},
+  {k:"cost",            label:"Cost",          type:"number"},
+  {k:"budget",          label:"Budget",        type:"number"},
+  {k:"actualCost",      label:"Actual Cost",   type:"number"},
+  {k:"predecessor",     label:"Predecessor",   type:"flag"},
+];
+export const RULE_FIELD_BY_K = Object.fromEntries(RULE_FIELDS.map(f => [f.k, f]));
+export const RULE_OPS = {
+  date: [
+    {k:"pastDueAtLeast",    label:"is N+ days past due",       needsValue:true,  defaultValue:1},
+    {k:"withinDays",        label:"is within N days",           needsValue:true,  defaultValue:7},
+    {k:"moreThanDaysAway",  label:"is more than N days away",   needsValue:true,  defaultValue:14},
+    {k:"isToday",           label:"is today",                   needsValue:false},
+    {k:"isBlank",           label:"is blank",                   needsValue:false},
+    {k:"isNotBlank",        label:"is not blank",               needsValue:false},
+  ],
+  status: [
+    {k:"is",    label:"is",     needsValue:true, valueKind:"status"},
+    {k:"isNot", label:"is not", needsValue:true, valueKind:"status"},
+  ],
+  text: [
+    {k:"isBlank",    label:"is blank",     needsValue:false},
+    {k:"isNotBlank", label:"is not blank", needsValue:false},
+    {k:"is",         label:"is",           needsValue:true, valueKind:"text"},
+    {k:"contains",   label:"contains",     needsValue:true, valueKind:"text"},
+  ],
+  number: [
+    {k:"eq",         label:"is",          needsValue:true, valueKind:"number"},
+    {k:"gt",         label:"is more than",needsValue:true, valueKind:"number"},
+    {k:"lt",         label:"is less than",needsValue:true, valueKind:"number"},
+    {k:"gte",        label:"is at least", needsValue:true, valueKind:"number"},
+    {k:"lte",        label:"is at most",  needsValue:true, valueKind:"number"},
+    {k:"isBlank",    label:"is blank",     needsValue:false},
+    {k:"isNotBlank", label:"is not blank", needsValue:false},
+  ],
+  flag: [
+    {k:"isLate", label:"is late", needsValue:false},
+  ],
+};
+export const opsForField = fieldK => RULE_OPS[RULE_FIELD_BY_K[fieldK]?.type] || [];
+
+export const evalFieldCondition = (cond, task, NOWv, taskById) => {
+  const field = cond?.field, op = cond?.op, value = cond?.value;
+  if (field === "predecessor") {
+    if (op !== "isLate") return false;
+    const preds = Array.isArray(task.predecessors) ? task.predecessors : [];
+    if (!preds.length || !taskById) return false;
+    return preds.some(p => {
+      const pt = taskById[p?.id];
+      return !!pt && !!pt.end && (pt.percentComplete||0) < 100 && dif(pt.end, NOWv) >= 1;
+    });
+  }
+  const ftype = RULE_FIELD_BY_K[field]?.type;
+  if (!ftype) return false;
+  if (ftype === "date") {
+    const raw = field === "finish" ? task.end : task.start;
+    const has = !!raw;
+    switch (op) {
+      case "isBlank":          return !has;
+      case "isNotBlank":       return has;
+      case "isToday":          return has && raw === NOWv;
+      case "pastDueAtLeast":   return has && dif(raw, NOWv) >= (value ?? 1);
+      case "withinDays":       { if (!has) return false; const d = dif(NOWv, raw); return d >= 0 && d <= (value ?? 7); }
+      case "moreThanDaysAway": return has && dif(NOWv, raw) > (value ?? 0);
+      default: return false;
+    }
+  }
+  if (ftype === "status") {
+    const raw = task.health;
+    switch (op) {
+      case "is":    return raw === value;
+      case "isNot": return raw !== value;
+      default: return false;
+    }
+  }
+  if (ftype === "text") {
+    const s = String(task.responsibleParty || "").trim();
+    const v = String(value || "").trim().toLowerCase();
+    switch (op) {
+      case "isBlank":    return !s;
+      case "isNotBlank": return !!s;
+      case "is":         return s.toLowerCase() === v;
+      case "contains":   return s.toLowerCase().includes(v);
+      default: return false;
+    }
+  }
+  const raw = task[field];
+  const isBlank = raw === "" || raw == null;
+  const num = isBlank || isNaN(raw) ? 0 : Number(raw);
+  switch (op) {
+    case "isBlank":    return isBlank;
+    case "isNotBlank": return !isBlank;
+    case "eq":  return num === Number(value);
+    case "gt":  return num > Number(value);
+    case "lt":  return num < Number(value);
+    case "gte": return num >= Number(value);
+    case "lte": return num <= Number(value);
+    default: return false;
+  }
+};
+export const evalConditionGroup = (conds, combinator, task, NOWv, taskById) => {
+  if (!Array.isArray(conds) || !conds.length) return false;
+  return combinator === "OR"
+    ? conds.some(c => evalFieldCondition(c, task, NOWv, taskById))
+    : conds.every(c => evalFieldCondition(c, task, NOWv, taskById));
+};
+export const evalRule = (rule, task, NOWv, taskById) => {
+  if (!rule || !evalConditionGroup(rule.when, rule.whenCombinator, task, NOWv, taskById)) return null;
+  if (evalConditionGroup(rule.unless, rule.unlessCombinator, task, NOWv, taskById)) return null;
+  return rule.color;
+};
+
+export const LEGACY_RULE_FIELD_MAP = {
+  finishPastDays:   days => [{field:"finish", op:"pastDueAtLeast", value: days ?? 1}],
+  finishWithinDays: days => [{field:"finish", op:"withinDays",     value: days ?? 7}],
+  finishToday:      ()   => [{field:"finish", op:"isToday"}],
+  notStarted:       ()   => [{field:"start", op:"pastDueAtLeast", value:1}, {field:"percentComplete", op:"lte", value:0}],
+  predecessorLate:  ()   => [{field:"predecessor", op:"isLate"}],
+  noOwner:          ()   => [{field:"owner", op:"isBlank"}],
+  complete:         ()   => [{field:"percentComplete", op:"gte", value:100}],
+};
+export const RULE_COMPLETE_PAUSED_GUARD = [{field:"status", op:"is", value:"green"}, {field:"status", op:"is", value:"paused"}];
+export const migrateRule = r => {
+  if (r && Array.isArray(r.when)) return r;
+  const build = LEGACY_RULE_FIELD_MAP[r?.type];
+  const when = build ? build(r.days) : [];
+  const unless = (r && r.color && r.color !== "green") ? RULE_COMPLETE_PAUSED_GUARD : [];
+  return {
+    id: r?.id ?? `r${Math.random().toString(36).slice(2,10)}`,
+    when, whenCombinator: "AND",
+    color: r?.color,
+    unless, unlessCombinator: "OR",
+  };
+};
+
+// ⛔ RETAINED, UNUSED BY THE LIVE ENGINE — kept only as migrateRule's frozen behavioral reference
+// and because the existing test suite pins its exact semantics.
 export const HEALTH_CONDITIONS = [
   {k:"finishPastDays",   label:"Finish date is N+ days past due",     needsDays:true,  defaultDays:1},
   {k:"finishWithinDays", label:"Finish date is within N days",         needsDays:true,  defaultDays:7},
@@ -386,14 +527,18 @@ export const migrateCfRulesToHealthRules = cfRules => {
   return out;
 };
 export const DEFAULT_HEALTH_RULES = [
-  {id:"default-complete", type:"complete", color:"green"},
-  {id:"default-overdue",  type:"finishPastDays", days:1, color:"red"},
-  {id:"default-duesoon",  type:"finishWithinDays", days:3, color:"yellow"},
+  {id:"default-overdue", when:[{field:"finish", op:"pastDueAtLeast", value:1}], whenCombinator:"AND",
+    color:"red", unless:[...RULE_COMPLETE_PAUSED_GUARD], unlessCombinator:"OR"},
+  {id:"default-duesoon", when:[{field:"finish", op:"withinDays", value:3}], whenCombinator:"AND",
+    color:"yellow", unless:[...RULE_COMPLETE_PAUSED_GUARD], unlessCombinator:"OR"},
 ];
-export const getHealthRules = settings => Array.isArray(settings?.healthRules) ? settings.healthRules : migrateCfRulesToHealthRules(settings?.cfRules);
+export const getHealthRules = settings => {
+  const raw = Array.isArray(settings?.healthRules) ? settings.healthRules : migrateCfRulesToHealthRules(settings?.cfRules);
+  return raw.map(migrateRule);
+};
 export const evalHealthRules = (task, settings, NOWv, taskById) => {
   const rules = getHealthRules(settings);
-  for (const r of rules) { if (evalHealthCondition(r.type, r.days, task, NOWv, taskById)) return r.color; }
+  for (const r of rules) { const c = evalRule(r, task, NOWv, taskById); if (c) return c; }
   return null;
 };
 
