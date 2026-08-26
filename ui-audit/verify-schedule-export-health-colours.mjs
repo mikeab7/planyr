@@ -238,9 +238,8 @@ const INJECT = `<script>(function(){try{
         health:"green",healthOverride:true}),
   ];
   // MasterView's own default is "active only" (masterHealthFilter ?? true — red/yellow rows only),
-  // which would hide "Master View Locked Leaf"'s BEFORE state (green "Complete"), "Group Header
-  // Child Green", and "No Rule Match Leaf" (gray) — none of them a defect, just a filter this
-  // diagnostic needs off to see every row it seeds.
+  // which would hide "Group Header Child Green" and "No Rule Match Leaf" (gray) — none of them a
+  // defect, just a filter this diagnostic needs off to see every row it seeds.
   d.masterHealthFilter = false;
   // Pin the column set + order explicitly (DEFAULT_MASTER_COLS) rather than trust whatever this
   // seed's own d.masterCols happens to hold — measured live: the baked-in seed's masterCols omits

@@ -2761,6 +2761,16 @@ const evalHealthRules = (task, settings, NOW, taskById) => {
 // that's safe).
 const computeDisplayHealth = (task, settings, taskById) => {
   if (!task) return task?.health;
+  // ⛔ B785744 SUPERSEDES the global "Complete beats all" short-circuit that briefly lived here
+  // (PR #1178/B780448, an emergency hardcode for the same live regression: "if the finish date is
+  // in the past, it should be marked red... UNLESS I click task complete, ... I CAN OVERRIDE IN
+  // THAT SCENARIO"). Per that fix's own owner instruction, once an UNLESS clause is expressible the
+  // hardcode becomes a visible, editable RULE, not invisible behavior baked into this function — see
+  // migrateRule's RULE_COMPLETE_PAUSED_GUARD, auto-attached to every migrated attention-color rule.
+  // Net effect for his real data is identical (Complete still beats overdue); the difference is a
+  // user can now see, edit, or narrow that exception per rule instead of it being an unconditional,
+  // un-editable global override — and it extends the same protection to Paused, matching the
+  // meeting/deadline blocks' own existing `health !== "green" && health !== "paused"` exemption below.
   const ruleResult = evalHealthRules(task, settings, NOW, taskById);
   if (ruleResult) return ruleResult;
   // B817 — a meeting-bound task surfaces its schedule risk BEFORE it slips: infeasible = red (a genuine

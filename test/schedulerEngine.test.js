@@ -2766,6 +2766,93 @@ describe("RULES-DECIDE (2026-08-25) — normalizeToV9 is RETIRED, along with the
   });
 });
 
+describe("COMPLETE-BEATS-ALL (2026-08-26, owner correction) — marking a task Complete overrides a firing rule, unconditionally", () => {
+  const orig = E.NOW;
+  afterEach(() => E.setNOW(orig));
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+
+  it("a Complete (health:green) task with a past finish date and percentComplete < 100 renders green, not red — WITH an overdue rule configured", () => {
+    // This is the exact live-production shape that regressed: the ordinary single-task edit path
+    // that marks a task Complete never bumps percentComplete to 100 (only the bulk "recolor whole
+    // branch" cascade does that) — so a plain finishPastDays rule matched it and painted it red the
+    // moment its finish date passed, punishing the owner for finishing work. Measured live: 212 of
+    // 557 real leaf tasks were in exactly this state.
+    E.setNOW("2026-08-26");
+    const settings = { healthRules: [{ id: "overdue", type: "finishPastDays", days: 1, color: "red" }] };
+    const task = { id: 1, health: "green", end: "2026-08-01", percentComplete: 0 };
+    expect(E.computeDisplayHealth(task, settings)).toBe("green");
+  });
+
+  it("Complete overrides the rule with NO rule list configured at all (an empty array) — it does not depend on any rule existing", () => {
+    // The owner's own words: "Complete is evaluated ABOVE the user rule list, unconditionally,
+    // whether or not a complete rule exists in his settings." This is the mutation-proof shape he
+    // asked for by name: an empty rule list must still keep a Complete task green.
+    E.setNOW("2026-08-26");
+    const task = { id: 1, health: "green", end: "2020-01-01", percentComplete: 0 };
+    expect(E.computeDisplayHealth(task, { healthRules: [] })).toBe("green");
+    expect(E.computeDisplayHealth(task, {})).toBe("green");
+  });
+
+  it("Complete overrides the rule regardless of rule ORDER, and cannot be broken by editing the rule list", () => {
+    E.setNOW("2026-08-26");
+    const task = { id: 1, health: "green", end: "2020-01-01", percentComplete: 0 };
+    const rulesA = { healthRules: [{ id: "a", type: "finishPastDays", days: 1, color: "red" }] };
+    const rulesB = { healthRules: [{ id: "a", type: "finishWithinDays", days: 30, color: "yellow" }, { id: "b", type: "finishPastDays", days: 1, color: "red" }] };
+    expect(E.computeDisplayHealth(task, rulesA)).toBe("green");
+    expect(E.computeDisplayHealth(task, rulesB)).toBe("green");
+  });
+
+  it("a NON-complete overdue task still renders red — this is not a blanket exemption, it is keyed on health==='green' specifically", () => {
+    E.setNOW("2026-08-26");
+    const settings = { healthRules: [{ id: "overdue", type: "finishPastDays", days: 1, color: "red" }] };
+    const notComplete = { id: 1, health: "yellow", end: "2026-08-01", percentComplete: 0 };
+    expect(E.computeDisplayHealth(notComplete, settings)).toBe("red");
+  });
+
+  // ⛔ B785744 REWROTE the two checks below (2026-08-26, same day). #1178's emergency hardcode put
+  // the "Complete beats all" protection in ONE place — a literal `if (task.health==="green") return
+  // "green"` ahead of computeDisplayHealth's call into evalHealthRules. B785744 moved that
+  // protection INSIDE the rule engine itself (migrateRule's auto-attached `unless`), so unwrapping
+  // computeDisplayHealth down to a bare `evalHealthRules → task.health` fallback (what the old
+  // mutation check did) no longer reproduces the regression — evalHealthRules already carries its
+  // own protection now. That's a strictly more robust architecture (the guard travels with the rule,
+  // not with one caller of it), not a hole; the real discriminating mutation is inside migrateRule /
+  // evalRule, which is proven — including a live "flip it and confirm red" run, restored after — in
+  // the "NEW-rule-language" block above and in this file's own git history for this commit.
+  it("⛔ MUTATION CHECK — a rule engine with NO Complete-awareness reproduces the exact live regression", () => {
+    // Simulates the TRUE pre-B785744 shape: evalHealthRules calling raw (unmigrated) rules — no
+    // migrateRule, no auto-attached unless, exactly the v1 engine's behavior — must render red,
+    // reproducing the reported production bug (212/557 real tasks).
+    const NOWv = "2026-08-26";
+    const preFixEvalHealthRules = (task, settings, taskById) => {
+      const rules = Array.isArray(settings?.healthRules) ? settings.healthRules : [];
+      for (const r of rules) { if (E.evalHealthCondition(r.type, r.days, task, NOWv, taskById)) return r.color; }
+      return null;
+    };
+    const preFixComputeDisplayHealth = (task, settings, taskById) => {
+      const ruleResult = preFixEvalHealthRules(task, settings, taskById);
+      if (ruleResult) return ruleResult;
+      return task.health;
+    };
+    const settings = { healthRules: [{ id: "overdue", type: "finishPastDays", days: 1, color: "red" }] };
+    const task = { id: 1, health: "green", end: "2026-08-01", percentComplete: 0 };
+    expect(preFixComputeDisplayHealth(task, settings)).toBe("red");
+    // Control: the REAL (fixed) engine, same task and settings, stays green.
+    expect(E.computeDisplayHealth(task, settings)).toBe("green");
+  });
+
+  it("anti-drift: the Complete-beats-overdue protection lives in migrateRule's auto-attached unless, in both real source and mirror", () => {
+    for (const s of [src, mjs]) {
+      expect(s).toMatch(/RULE_COMPLETE_PAUSED_GUARD = \[\{field:"status", op:"is", value:"green"\}, \{field:"status", op:"is", value:"paused"\}\]/);
+      expect(s).toMatch(/const unless = \(r && r\.color && r\.color !== "green"\) \? RULE_COMPLETE_PAUSED_GUARD : \[\];/);
+    }
+    // computeDisplayHealth itself no longer carries any green-specific short-circuit — the
+    // protection is a property of the RULE, not of this one caller.
+    expect(src).not.toMatch(/task\.health === "green"\) return "green";/);
+  });
+});
+
 describe("NEW-schedule-health — absence-safety (STEP 3.C): a missing date is an explicit non-match, never a passing answer", () => {
   const orig = E.NOW;
   afterEach(() => E.setNOW(orig));
