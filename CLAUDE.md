@@ -432,6 +432,23 @@ Runtime deps are kept few and deliberate. New client dependency added 2026-07-10
   part of what "commit" already authorized. The only acceptable stop short of live is a
   hard blocker (merge conflict, red required check, protection that rejects the merge) —
   report _that_, not a request for permission.
+- **⛔ THE CLAUDE CODE WEB SESSION HARNESS DEFAULTS EVERY NEW PR TO DRAFT — THAT DEFAULT DOES
+  NOT APPLY HERE, AND IT IS ENFORCED MECHANICALLY, NOT BY REMEMBERING TO OVERRIDE IT (B781760,
+  2026-08-26, after #1157/#1162/#1166/#1180 each sat as a green, conflict-free PR parked in
+  draft waiting for a button the owner was never going to press).** The harness instruction
+  to open PRs as draft lives outside this repo — not in `CLAUDE.md`, not in any file here, not
+  editable from a session — so a session that both reads "commit means ship it live" above
+  AND that harness default resolves the conflict inconsistently. `.github/workflows/pr-
+  auto-ready.yml` closes it in the repo instead of in a sentence: on every
+  opened/reopened/synchronize event for a `claude/*` head branch, it marks the PR ready for
+  review and arms squash auto-merge automatically, whatever draft state the harness opened it
+  in. **A session opening a PR here should not treat draft-vs-ready as a meaningful signal —
+  don't stop because a PR reads "Draft," and don't hand-run `gh pr ready` as a workaround; the
+  automation already does it.** The one supported way to genuinely ask a human to look before
+  it merges is the **`hold` label** (or a `<!-- keep-draft -->` marker in the PR body) — apply
+  either and the workflow leaves that PR alone on every future run too, not just the next one.
+  It only ever *enables* auto-merge; the required `build` check (below, and the nudge-commit
+  note that follows it) still has to go green before anything actually merges.
 - **⛔ AFTER ANY CHANGE TO A PR TITLE — which every renumber causes — DISABLE AND RE-ENABLE
   AUTO-MERGE. GitHub snapshots the squash commit message when auto-merge is ARMED, not when it
   fires, and a later title edit does NOT update that frozen copy (B225984, 2026-08-07).** PR #931
