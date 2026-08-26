@@ -5168,11 +5168,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // for the (overwhelming) majority of ids that were never deleted: the exemption is a no-op
     // unless `reconcile()`'s `!shad` branch actually needs it, and it is cleared at the end of that
     // one diff pass regardless.
+    // ⛔ B784832 — MUST cover every KIND_TO_FIELD collection, not just `els`. This used to stage
+    // only `s.els`, so undoing (or redoing) the deletion of a callout, markup, measure or parcel
+    // restored it on the canvas for exactly one render: `reconcile()`'s `!shad` branch found no
+    // `pendingResurrect` entry for the non-"el" key, read the still-live server tombstone, refused
+    // the create as a phantom, and handed the removal straight back — a Ctrl+Z that visibly did
+    // nothing. Iterate the SAME kind↔field map the sync engine itself uses so a new kind can never
+    // fall through this loop again.
     try {
       const e = elSyncRef.current;
       if (e && e.allowResurrect) {
         const items = [];
-        for (const x of s.els || []) if (x && typeof x.id === "string") items.push({ kind: "el", id: x.id });
+        for (const [kind, field] of Object.entries(KIND_TO_FIELD)) {
+          for (const x of s[field] || []) if (x && typeof x.id === "string") items.push({ kind, id: x.id });
+        }
         if (items.length) e.allowResurrect(items);
       }
     } catch (_) {}
