@@ -452,7 +452,15 @@ export default function RoadCrossSectionDialog({ mode = "edit", initialXSection,
 
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 10, fontSize: 12.5, color: "var(--text-secondary)" }}>
           <span>Section width (curb to curb) <b style={{ color: "var(--text-primary)" }}>{f1(c2c)}′</b></span>
-          <span>Total ROW width <b style={{ color: "var(--text-primary)" }}>{f1(row)}′</b></span>
+          {/* B783296 — this was "Total ROW width" until it sat six inches above "Designated ROW" and
+           * disagreed with it: a modeled 68′ section next to a 100′ designation, BOTH labelled ROW,
+           * one commit apart. This figure is the modeled BAND TOTAL — it predates the designated-ROW
+           * field entirely and was the only "ROW" concept in the dialog before that field existed,
+           * which is why it kept the name. Renamed to what it actually is, per the owner's own
+           * instruction: "the word ROW must appear against exactly one number at a time." Applies
+           * whether or not a ROW is designated, so the wording never has to change state — a road
+           * with nothing designated shows one honestly-labelled number, not a placeholder ROW. */}
+          <span>Modeled band total <b style={{ color: "var(--text-primary)" }}>{f1(row)}′</b></span>
           {/* NEW-1 follow-up (owner review, item 4) — "(per 100′)" sat BEFORE the number, where it
            * reads as a passing qualifier easily skimmed past; a reader could mistake the number for
            * the road's real total pavement area. Moved after the number, spelled out as a rate
