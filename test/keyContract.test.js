@@ -318,6 +318,63 @@ describe("⛔ NEW-1/B754752 — a FIELD refusal is never hinted, at any selectio
   });
 });
 
+describe("⛔ NEW-1 — the Cloud tool ('c') bypassed the field guard; every OTHER bare letter did not", () => {
+  /* Michael's report, reproduced live on the deployed build: a callout textarea focused, typing
+   * "abc" left the field holding "ab" and armed the Cloud tool in the Draw rail. The discriminating
+   * test he ran FIRST — typing l r e t q v m h n p x y z into the same focused field — landed as
+   * plain text with no tool changes, which is why the fix belongs in the declaration table rather
+   * than in a bespoke "is this an input" check bolted beside the Cloud branch: nine siblings with
+   * the identical `!ctrlKey && !metaKey && !shiftKey` guard shape already worked, because each one
+   * has a KEY_CONTRACT entry `resolveKeyEntry` can find. "c" had none, so `resolveKeyEntry` returned
+   * null and `keyScopeVerdict`'s "an undeclared key is always allowed through" rule (by design, for
+   * genuinely unbound keys) let it slip past the guard even in FIELD scope — where every declared
+   * entry, mutating or not, is refused outright. */
+  it("resolveKeyEntry finds a declared entry for a bare 'c' — it used to return null", () => {
+    const entry = resolveKeyEntry(ev({ key: "c" }));
+    expect(entry, "the Cloud tool shortcut has no KEY_CONTRACT entry — this is the B-report defect").not.toBeNull();
+    expect(entry.id).toBe("tool-mcloud");
+    expect(entry.mod).toBe("none");
+  });
+
+  it("bare 'c' and 'C' are refused out of a focused field, exactly like every sibling tool letter", () => {
+    for (const key of ["c", "C"]) {
+      const v = keyScopeVerdict({ entry: resolveKeyEntry(ev({ key })), scope: SCOPE.FIELD });
+      expect(v.allow, `${key} must not reach the canvas out of a text field`).toBe(false);
+      expect(v.reason).toBe(REFUSAL.FIELD);
+    }
+  });
+
+  it("the nine siblings from the owner's own discriminating test still resolve and still refuse", () => {
+    for (const key of ["l", "r", "e", "t", "q", "v", "m", "h", "s"]) {
+      const entry = resolveKeyEntry(ev({ key }));
+      expect(entry, key).not.toBeNull();
+      expect(keyScopeVerdict({ entry, scope: SCOPE.FIELD }).allow, key).toBe(false);
+    }
+  });
+
+  it("bare 'c' still arms the Cloud tool normally when the drawing owns the keyboard", () => {
+    const entry = resolveKeyEntry(ev({ key: "c" }));
+    expect(keyScopeVerdict({ entry, scope: SCOPE.CANVAS }).allow).toBe(true);
+  });
+
+  it("⌘/Ctrl+C is still Copy, never Cloud — the modified and bare forms must not collide", () => {
+    expect(resolveKeyEntry(ev({ key: "c", metaKey: true })).id).toBe("copy");
+    expect(resolveKeyEntry(ev({ key: "c" })).id).toBe("tool-mcloud");
+  });
+
+  /* Every bare-letter tool shortcut the handler declares, asserted as a GROUP: this is the
+   * "regression test required" the report asked for — a focused field must swallow every one of
+   * them, "c" included, and none may reach the canvas. Written as a sweep over KEY_CONTRACT rather
+   * than a hand-picked list so a FUTURE bare-letter tool with the same gap fails here too. */
+  it("every declared bare-letter (mod:none, single-char) shortcut is refused out of a field", () => {
+    const bareLetters = KEY_CONTRACT.filter((k) => k.mod === "none" && (k.keys || []).some((c) => c.length === 1 && /[a-zA-Z]/.test(c)));
+    expect(bareLetters.length).toBeGreaterThanOrEqual(10); // v h m s q t l r e c, at minimum
+    for (const k of bareLetters) {
+      expect(keyScopeVerdict({ entry: k, scope: SCOPE.FIELD }).allow, k.id).toBe(false);
+    }
+  });
+});
+
 describe("SOURCE SWEEP — the real handler may not branch on an undeclared key", () => {
   const declaredKeys = new Set(KEY_CONTRACT.flatMap((k) => k.keys || []));
   const declaredCodes = new Set(KEY_CONTRACT.flatMap((k) => k.codes || []));
