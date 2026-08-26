@@ -1,9 +1,15 @@
 /* Road cross-section designer (NEW-1) — "design road": a row per band (type + width, add / remove /
- * reorder) with a LIVE TO-SCALE PLAN-VIEW PREVIEW that redraws as you type, dimension strings on each
- * band, a running total, and the derived section/ROW/pavement numbers. Presets are named + saved at
- * the ACCOUNT level (lib/userPrefs.js, the same store "Save for all projects" already uses) so a
- * section designed once is reusable on any road in any project, signed in or not (a signed-out mirror
- * lives in localStorage the same way Standards' account layer already does).
+ * reorder) with a LIVE TO-SCALE TYPICAL-SECTION PREVIEW that updates on commit (never mid-keystroke —
+ * see BandWidthInput), a horizontal dimension string beneath each band, a running total, and the
+ * derived section/ROW/pavement numbers. Presets are named + saved at the ACCOUNT level
+ * (lib/userPrefs.js, the same store "Save for all projects" already uses) so a section designed once
+ * is reusable on any road in any project, signed in or not (a signed-out mirror lives in localStorage
+ * the same way Standards' account layer already does).
+ *
+ * NEW-2 (owner report, 2026-08-26) — the preview is drawn the way a roadway typical section is
+ * actually drafted: LOOKING DOWN THE ROAD, bands running left to right (matching the road as it's
+ * drawn on the canvas), a centerline mark, and a real horizontal dimension string — see
+ * XSectionPreview's own header for the detail.
  *
  * Two ways in, both reaching this same dialog (never a popover that gates drawing — a deliberate
  * dialog opened from Properties or from the road tool's own preset menu is fine; a panel blocking the
@@ -16,7 +22,7 @@
  * Lazily loaded (a modal a session opens rarely) — same pattern as SetLocationDialog.jsx. Module
  * scope throughout (MODULE-SCOPE-COMPONENTS): XSectionPreview is a sibling function component, never
  * defined inside the dialog's render body. */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   BAND_TYPES, bandTypeOf, normalizeBands, makeXSection, curbToCurbWidth, pavedWidth, rowWidth,
   pavementArea, bandLayout, bandStripeMarks, BAND_FILL_TOKEN, BAND_FILL_OPACITY, BUILT_IN_XSECTION_PRESETS,
@@ -27,10 +33,44 @@ const f1 = (n) => (Number.isFinite(n) ? (Math.round(n * 10) / 10).toString() : "
 const f0 = (n) => (Number.isFinite(n) ? Math.round(n).toString() : "—");
 const uid = () => `xsec-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-const PREVIEW_LEN = 90; // the "along the road" swatch length in px — no dimension, just texture
-const PREVIEW_H = 180; // FIXED px height, matched 1:1 by the SVG's viewBox — see XSectionPreview
-const PREVIEW_LADDER_W = 110; // room reserved right of the swatch for the tick ladder + the horizontal total-width label
-const MAX_PX_PER_FT = 6.5; // legibility ceiling — a narrow section's bands don't get absurdly tall
+/* NEW-2 (owner report, 2026-08-26 — "and lets make it horizontal? that makes sense to me based on the
+ * details I usually see") — a roadway typical section is drawn looking down the road: pavement runs
+ * left-to-right, the dimension string runs horizontally beneath it. These constants govern that
+ * layout (see XSectionPreview below); nothing here is a real-world dimension, they're all screen px. */
+const PREVIEW_MIN_W = 320; // fallback content width for the very first render, before the container is measured
+const SWATCH_D = 64; // the swatch's own depth — pure texture (a road drawn in plan view has no "front"), no dimension
+const MAX_PX_PER_FT = 6.5; // legibility ceiling — a narrow section's bands don't get absurdly wide, and a section
+  // that would otherwise overflow the dialog gets scaled DOWN below this, never clipped or made to scroll
+const LADDER_MARGIN = 24; // total horizontal margin reserved so the outermost ticks/labels never touch the SVG edge
+const CL_LABEL_H = 24; // room for the "C"/"L" centerline glyphs at the very top of the preview
+const CL_EXT = 8; // how far the centerline's dash-dot line extends below the swatch (it starts above it, at the top)
+const LEADER_ROW_H = 13; // vertical space per stacked leader-label row, above the swatch
+const LEADER_GAP = 6; // gap between the last leader row (or the centerline label, if there are none) and the swatch
+const DIM_GAP = 10; // gap between the swatch and the dimension ladder line below it
+const DIM_TICK = 5; // dimension-ladder tick half-length
+const DIM_ROW_H = 13; // vertical space per stacked row when a band's own width figure doesn't fit under its ticks
+const TOTAL_GAP = 14; // gap between the dimension numbers and the running-total line
+
+// A deliberately conservative (slightly OVER-) estimate of a label's rendered width, used only to
+// decide whether it fits its own column — erring wide means a borderline label gets moved out with a
+// leader rather than risking the clip/squeeze this whole feature exists to prevent.
+const CHAR_W = 0.56;
+const estTextW = (text, fontSize) => text.length * fontSize * CHAR_W;
+
+/* Greedy row-packing: given items carrying {mid, halfW} (a horizontal center + half its rendered
+ * width), assign each a `.row` (mutated in place; 0 = nearest the anchor line) so nothing sharing a
+ * row overlaps. Used for both the above-swatch leader labels and the below-ladder tight-width
+ * numbers — two independent stacks, same packing rule. Returns the row count. */
+function packRows(items, gap) {
+  const rowRight = [];
+  for (const it of [...items].sort((a, b) => a.mid - b.mid)) {
+    let row = rowRight.findIndex((right) => it.mid - it.halfW > right + gap);
+    if (row === -1) { row = rowRight.length; rowRight.push(-Infinity); }
+    it.row = row;
+    rowRight[row] = it.mid + it.halfW;
+  }
+  return rowRight.length;
+}
 
 /* NEW-1 follow-up — the width field that used to be a raw, always-controlled `<input type="number">`
  * bound straight to committed band state, so every keystroke was a commit: typing "2" on the way to
@@ -81,85 +121,184 @@ const STRIPE_STYLE = {
   "white-solid": { stroke: "#f2f2f2", dash: undefined, w: 1.4 },
 };
 
-/* The live plan-view schematic: the road runs left-right (the swatch length carries no dimension —
- * it's just enough asphalt texture to read as a road), bands stack top-to-bottom (across the road,
- * which is how a cross-section is actually measured). Pure presentation over bandLayout/
- * bandStripeMarks.
+/* NEW-2 (owner report, 2026-08-26) — a real typical-section drawing: bands run LEFT TO RIGHT (matching
+ * the road as it's actually drawn on the plan, and the only orientation a horizontal dimension string
+ * can work in at all — see the note on the old rotated total label this replaces, below), a centerline
+ * mark at bandLayout's true offset-0, and a proper dimension string beneath (a tick at every band
+ * boundary, each band's own width underneath, the running total below that). A band too narrow to hold
+ * its own label — inside the swatch, or under its own dimension ticks — is never clipped, squeezed, or
+ * left to overflow into its neighbor: the label moves OUT onto a leader line instead (`packRows`,
+ * above). Hovering or focusing a row in the band list below highlights the matching band here
+ * (`activeIndex`), which is the one genuine advantage a top-to-bottom preview had — kept, not lost, in
+ * the rotation.
  *
- * NEW-1 follow-up (owner report) — the box used to compute its OWN viewBox height from content
- * (`h = rowW * scale`) while separately clamping the CSS display height into [60, 280], so a narrow
- * section's tiny viewBox got stretched by the browser to fill a much taller box — every fixed-unit
- * font size stretched right along with it, which is what turned a 2 ft section's "2′" label into an
- * enormous numeral floating in an empty rectangle.
- *
- * Fixed at the root, and deliberately NOT with an `aspectRatio` CSS trick tried first: that kept
- * `width: 100%`, and this dialog's body is wide enough that "100%" alone reproduced the same class of
- * blow-up (a live measurement here found font glyphs rendering 3-4x their authored size — the same
- * failure, just driven by the CONTAINER's width instead of by rowW). So the SVG is rendered at its
- * OWN fixed pixel size — `width={CONTENT_W} height={PREVIEW_H}`, exactly matching the viewBox — and
- * ONLY shrinks (never grows) on a viewport narrower than that, via `maxWidth: "100%"` +
- * `height: "auto"`. 1 viewBox unit is therefore 1 real CSS px whenever there is room for it, which is
- * every case this dialog (`min(720px, 100%)` wide) is ever opened in — so the browser has no reason
- * to rescale anything, ever, regardless of rowW OR of the dialog's own width. The per-foot `scale` is
- * capped at MAX_PX_PER_FT and otherwise sized to exactly fill PREVIEW_H, so content height is always
- * <= PREVIEW_H by construction — a narrow section just renders a shorter, vertically-centered band
- * stack rather than an oversized one. */
-function XSectionPreview({ xsection }) {
+ * WIDTH IS MEASURED, NOT ASSUMED (`wrapRef`/`ResizeObserver`) — this dialog's own width used to be
+ * "assumed ≈ the fixed pixel value used to compute px/ft" in the vertical layout (a mismatch which is
+ * what produced the B776560 giant-numeral bug in the first place, further down this file's own git
+ * history). Now that the WIDE axis is the one that has to fit the dialog, guessing is not an option: a
+ * 68′ boulevard and a 100+′ arterial both need the real container width to decide their scale, so the
+ * preview measures its own wrapping div (synchronously, in a layout effect — before the first paint,
+ * so there is no flash of the wrong size) and re-measures on every resize. The per-foot scale is
+ * capped at MAX_PX_PER_FT for legibility and otherwise sized to exactly fill the measured width, so
+ * content width is always <= what's available — it SCALES TO FIT, per the owner's own instruction,
+ * never clips and never needs a scrollbar. */
+function XSectionPreview({ xsection, activeIndex }) {
+  const wrapRef = useRef(null);
+  const [containerW, setContainerW] = useState(PREVIEW_MIN_W);
+  useLayoutEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const measure = () => { const w = el.clientWidth; if (w > 0) setContainerW(w); };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const { edges, rowW } = bandLayout(xsection);
-  if (!edges.length || !(rowW > 0)) return null;
-  const scale = Math.min(MAX_PX_PER_FT, PREVIEW_H / rowW); // px per foot — content height never exceeds PREVIEW_H
-  const contentH = rowW * scale;
-  const padTop = Math.max(0, (PREVIEW_H - contentH) / 2); // center a narrow section's band stack vertically
-  const W = PREVIEW_LEN;
-  const CONTENT_W = W + PREVIEW_LADDER_W;
-  const yOf = (offsetFt) => padTop + (rowW / 2 - offsetFt) * scale; // offset 0 (centerline) → mid-height
+  if (!edges.length || !(rowW > 0)) return <div ref={wrapRef} style={{ width: "100%" }} />;
+
+  const usableW = Math.max(60, containerW - LADDER_MARGIN);
+  const scale = Math.min(MAX_PX_PER_FT, usableW / rowW); // px per foot — content width never exceeds usableW
+  const contentW = rowW * scale;
+  const padLeft = (containerW - contentW) / 2; // centers the section — the same margin lands on both sides regardless of scale
+  const xOf = (offsetFt) => padLeft + (rowW / 2 - offsetFt) * scale; // offset 0 → the section's TRUE drawn centerline
   const marks = bandStripeMarks(xsection);
+
+  // Per-band label: "Type · width" if the band's own column holds it, just "width" if it holds that,
+  // or — never clipped, squeezed, or left to overflow — moved OUT above the swatch on a leader line.
+  const labels = edges.map((e) => {
+    const bandPxW = Math.max(0, (e.from - e.to) * scale);
+    const full = `${bandTypeOf(e.band.type).label} · ${f1(e.band.w)}′`;
+    const short = `${f1(e.band.w)}′`;
+    const mid = (xOf(e.from) + xOf(e.to)) / 2;
+    if (bandPxW - 6 >= estTextW(full, 10.5)) return { edge: e, mode: "inside", text: full, fontSize: 10.5, mid };
+    if (bandPxW - 6 >= estTextW(short, 9)) return { edge: e, mode: "inside", text: short, fontSize: 9, mid };
+    return { edge: e, mode: "leader", text: full, fontSize: 9, mid, halfW: estTextW(full, 9) / 2 };
+  });
+  const leaders = labels.filter((l) => l.mode === "leader");
+  const leaderRows = leaders.length ? packRows(leaders, 6) : 0;
+
+  // The dimension string below the swatch — every band's width, always, tick-marked in the real civil
+  // convention. A band too narrow to hold its own number under its own ticks gets the same leader
+  // treatment, one row further down, rather than overlapping its neighbor's number.
+  const dimNums = edges.map((e) => {
+    const bandPxW = Math.max(0, (e.from - e.to) * scale);
+    const text = `${f1(e.band.w)}′`;
+    const mid = (xOf(e.from) + xOf(e.to)) / 2;
+    const fits = bandPxW - 4 >= estTextW(text, 9.5);
+    return { edge: e, text, mid, fits, halfW: estTextW(text, 9.5) / 2 };
+  });
+  const tightDims = dimNums.filter((d) => !d.fits);
+  const dimRows = tightDims.length ? packRows(tightDims, 6) : 0;
+
+  // Vertical layout, top to bottom — see the constants block above for what each gap is for.
+  let y = CL_LABEL_H;
+  const leaderTop = y;
+  if (leaderRows > 0) y += leaderRows * LEADER_ROW_H;
+  y += LEADER_GAP;
+  const swatchTop = y;
+  y += SWATCH_D;
+  const swatchBottom = y;
+  y = swatchBottom + DIM_GAP;
+  const ladderY = y;
+  y += DIM_TICK + 12;
+  const dimNumBaseY = y;
+  if (dimRows > 0) y += dimRows * DIM_ROW_H;
+  y += TOTAL_GAP;
+  const totalY = y;
+  const svgH = y + 6;
+
+  const clX = xOf(0);
+
   return (
-    <svg viewBox={`0 0 ${CONTENT_W} ${PREVIEW_H}`} width={CONTENT_W} height={PREVIEW_H} style={{ display: "block", maxWidth: "100%", height: "auto", background: "var(--surface-base)", borderRadius: 8 }} role="img" aria-label="Cross-section preview, plan view">
-      {edges.map((e) => {
-        const y0 = yOf(e.from), y1 = yOf(e.to);
-        const bandH = Math.max(0.5, y1 - y0);
-        const tok = BAND_FILL_TOKEN[e.band.type];
-        const legible = bandH >= 12;
-        return (
-          <g key={e.index}>
-            <rect x={0} y={y0} width={W} height={bandH} fill={tok || "var(--planner-raised)"} fillOpacity={tok ? BAND_FILL_OPACITY[e.band.type] : 0.5} stroke="var(--planner-border)" strokeWidth={0.5} />
-            {legible && (
-              <text x={W / 2} y={y0 + bandH / 2} textAnchor="middle" dominantBaseline="middle" style={{ fontSize: bandH > 22 ? 10.5 : 9, fill: "var(--text-secondary)", fontWeight: 600 }}>
-                {bandH > 26 ? `${bandTypeOf(e.band.type).label} · ${f1(e.band.w)}′` : `${f1(e.band.w)}′`}
-              </text>
-            )}
-          </g>
-        );
-      })}
-      {/* lane markings at within-curb seams */}
-      {marks.map((m, i) => {
-        const y = yOf(m.atOffset);
-        const st = STRIPE_STYLE[m.style];
-        if (!st) return null;
-        if (st.double) {
+    <div ref={wrapRef} style={{ width: "100%" }}>
+      <svg viewBox={`0 0 ${containerW} ${svgH}`} width={containerW} height={svgH}
+        style={{ display: "block", background: "var(--surface-base)", borderRadius: 8 }}
+        role="img" aria-label="Cross-section preview, looking down the road">
+        {/* the centerline — a dash-dot line through the section's true drawn offset 0, with the
+            traditional "C" over "L" mark (drawn as plain ASCII text, never a Unicode glyph a font
+            might not carry) rather than a symbol that could silently render as a tofu box */}
+        <text x={clX} y={9} textAnchor="middle" style={{ fontSize: 7, fontWeight: 700, fill: "var(--text-tertiary)" }}>C</text>
+        <text x={clX} y={19} textAnchor="middle" style={{ fontSize: 7, fontWeight: 700, fill: "var(--text-tertiary)" }}>L</text>
+        <line x1={clX} y1={CL_LABEL_H} x2={clX} y2={swatchBottom + CL_EXT} stroke="var(--text-tertiary)" strokeWidth={0.9} strokeDasharray="8 3 1.5 3" />
+
+        {/* the swatch — bands run LEFT TO RIGHT, matching the road as drawn on the plan */}
+        {edges.map((e) => {
+          const x0 = xOf(e.from), x1 = xOf(e.to);
+          const bandW = Math.max(0.5, x1 - x0);
+          const tok = BAND_FILL_TOKEN[e.band.type];
+          return (
+            <rect key={e.index} x={Math.min(x0, x1)} y={swatchTop} width={bandW} height={SWATCH_D}
+              fill={tok || "var(--planner-raised)"} fillOpacity={tok ? BAND_FILL_OPACITY[e.band.type] : 0.5}
+              stroke="var(--planner-border)" strokeWidth={0.5} />
+          );
+        })}
+        {activeIndex != null && edges[activeIndex] && (() => {
+          const e = edges[activeIndex];
+          const x0 = Math.min(xOf(e.from), xOf(e.to)), x1 = Math.max(xOf(e.from), xOf(e.to));
+          return <rect x={x0 + 0.75} y={swatchTop + 0.75} width={Math.max(0.5, x1 - x0 - 1.5)} height={SWATCH_D - 1.5}
+            fill="none" stroke="var(--accent)" strokeWidth={2} rx={2} />;
+        })()}
+
+        {/* lane markings — vertical now, at the same within-curb seams */}
+        {marks.map((m, i) => {
+          const x = xOf(m.atOffset);
+          const st = STRIPE_STYLE[m.style];
+          if (!st) return null;
+          if (st.double) {
+            return (
+              <g key={i}>
+                <line x1={x - 1.1} y1={swatchTop} x2={x - 1.1} y2={swatchBottom} stroke={st.stroke} strokeWidth={st.w} />
+                <line x1={x + 1.1} y1={swatchTop} x2={x + 1.1} y2={swatchBottom} stroke={st.stroke} strokeWidth={st.w} />
+              </g>
+            );
+          }
+          return <line key={i} x1={x} y1={swatchTop} x2={x} y2={swatchBottom} stroke={st.stroke} strokeWidth={st.w} strokeDasharray={st.dash} />;
+        })}
+
+        {/* in-band type/width labels, or — for a band too narrow to hold one — a leader line out above the swatch */}
+        {labels.map((l, i) => l.mode === "inside" ? (
+          <text key={i} x={l.mid} y={swatchTop + SWATCH_D / 2} textAnchor="middle" dominantBaseline="middle"
+            style={{ fontSize: l.fontSize, fill: "var(--text-secondary)", fontWeight: 600 }}>{l.text}</text>
+        ) : null)}
+        {leaders.map((l, i) => {
+          const rowFromTop = leaderRows - 1 - l.row; // row 0 (nearest the swatch) sits at the BOTTOM of the stack
+          const labelY = leaderTop + rowFromTop * LEADER_ROW_H + LEADER_ROW_H - 4;
+          const stubTop = labelY + 2;
           return (
             <g key={i}>
-              <line x1={0} y1={y - 1.1} x2={W} y2={y - 1.1} stroke={st.stroke} strokeWidth={st.w} />
-              <line x1={0} y1={y + 1.1} x2={W} y2={y + 1.1} stroke={st.stroke} strokeWidth={st.w} />
+              <line x1={l.mid} y1={stubTop} x2={l.mid} y2={swatchTop} stroke="var(--text-tertiary)" strokeWidth={0.75} />
+              <text x={l.mid} y={labelY} textAnchor="middle" style={{ fontSize: l.fontSize, fill: "var(--text-secondary)", fontWeight: 600 }}>{l.text}</text>
             </g>
           );
-        }
-        return <line key={i} x1={0} y1={y} x2={W} y2={y} stroke={st.stroke} strokeWidth={st.w} strokeDasharray={st.dash} />;
-      })}
-      {/* dimension ladder on the right: a tick at every band boundary. NEW-1 follow-up — the running
-       * total used to be a text label ROTATED 90° right beside this ladder, which needed the box's
-       * HEIGHT to hold the whole string's length; at any modest box height that clipped it to a
-       * fragment ("tot") and its glyphs overlapped the ladder. It's now a plain horizontal label
-       * clear of the ladder, so it only ever needs the WIDTH this component already reserves
-       * (PREVIEW_LADDER_W) — never clipped or colliding, at any section width. */}
-      <g stroke="var(--text-tertiary)" strokeWidth={0.75} fill="none">
-        <line x1={W + 14} y1={padTop} x2={W + 14} y2={padTop + contentH} />
-        {edges.map((e) => <line key={`t${e.index}`} x1={W + 10} y1={yOf(e.to)} x2={W + 18} y2={yOf(e.to)} />)}
-        <line x1={W + 10} y1={padTop} x2={W + 18} y2={padTop} />
-      </g>
-      <text x={W + 24} y={PREVIEW_H / 2} textAnchor="start" dominantBaseline="middle" style={{ fontSize: 10, fill: "var(--text-tertiary)", fontWeight: 600 }}>{f1(rowW)}′ total</text>
-    </svg>
+        })}
+
+        {/* the dimension string — a tick at every band boundary, this band's own width underneath (or
+            one row further down, on a short leader stub, when the column is too tight to hold it
+            without overlapping its neighbor), and the running total beneath all of it. This is what
+            replaces the old preview's ROTATED total label (see B776560): a rotated label needed the
+            box's HEIGHT to hold its whole rendered length, which clipped it to "tot" at any modest
+            height. A horizontal dimension string never has that problem at any section width. */}
+        <g stroke="var(--text-tertiary)" strokeWidth={0.75} fill="none">
+          <line x1={xOf(rowW / 2)} y1={ladderY} x2={xOf(-rowW / 2)} y2={ladderY} />
+          {edges.map((e) => <line key={`t${e.index}`} x1={xOf(e.to)} y1={ladderY - DIM_TICK} x2={xOf(e.to)} y2={ladderY + DIM_TICK} />)}
+          <line x1={xOf(rowW / 2)} y1={ladderY - DIM_TICK} x2={xOf(rowW / 2)} y2={ladderY + DIM_TICK} />
+        </g>
+        {dimNums.map((d, i) => {
+          const row = d.fits ? 0 : d.row + 1;
+          const y0 = dimNumBaseY + (row > 0 ? row * DIM_ROW_H : 0);
+          return (
+            <g key={i}>
+              {row > 0 && <line x1={d.mid} y1={ladderY} x2={d.mid} y2={y0 - 8} stroke="var(--text-tertiary)" strokeWidth={0.75} />}
+              <text x={d.mid} y={y0} textAnchor="middle" style={{ fontSize: 9.5, fill: "var(--text-secondary)", fontWeight: 600 }}>{d.text}</text>
+            </g>
+          );
+        })}
+
+        <text x={clX} y={totalY} textAnchor="middle" style={{ fontSize: 10, fill: "var(--text-tertiary)", fontWeight: 700 }}>{f1(rowW)}′ total</text>
+      </svg>
+    </div>
   );
 }
 
@@ -169,6 +308,10 @@ const smallBtn = { width: 24, height: 24, display: "inline-flex", alignItems: "c
 export default function RoadCrossSectionDialog({ mode = "edit", initialXSection, lengthFt, presets, onSavePreset, onApply, onCancel }) {
   const [bands, setBands] = useState(() => normalizeBands(initialXSection && initialXSection.bands));
   const [presetName, setPresetName] = useState("");
+  // NEW-2 — which band row is being hovered or focused, so the preview can highlight the matching
+  // band: the one genuine advantage the old top-to-bottom preview had over a rotated one, preserved
+  // deliberately rather than lost in the rotation.
+  const [activeIdx, setActiveIdx] = useState(null);
   const x = makeXSection(bands);
   const c2c = curbToCurbWidth(x), row = rowWidth(x);
   const areaLenFt = mode === "edit" && lengthFt > 0 ? lengthFt : 100;
@@ -210,7 +353,7 @@ export default function RoadCrossSectionDialog({ mode = "edit", initialXSection,
         </div>
 
         <div style={{ marginTop: 12 }}>
-          <XSectionPreview xsection={x} />
+          <XSectionPreview xsection={x} activeIndex={activeIdx} />
         </div>
 
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 10, fontSize: 12.5, color: "var(--text-secondary)" }}>
@@ -226,7 +369,12 @@ export default function RoadCrossSectionDialog({ mode = "edit", initialXSection,
         <div style={{ marginTop: 14 }}>
           <div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, color: "var(--text-tertiary)", marginBottom: 4 }}>Bands</div>
           {bands.map((b, i) => (
-            <div key={i} style={rowStyle}>
+            <div key={i} style={{ ...rowStyle, ...(activeIdx === i ? { background: "var(--planner-raised)", borderRadius: 6 } : null) }}
+              data-testid="road-xsection-band-row"
+              onMouseEnter={() => setActiveIdx(i)}
+              onMouseLeave={() => setActiveIdx((cur) => (cur === i ? null : cur))}
+              onFocus={() => setActiveIdx(i)}
+              onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setActiveIdx((cur) => (cur === i ? null : cur)); }}>
               <span style={{ display: "flex", flexDirection: "column", gap: 1 }}>
                 <button type="button" style={smallBtn} disabled={i === 0} onClick={() => move(i, -1)} aria-label="Move up" title="Move up">▲</button>
                 <button type="button" style={smallBtn} disabled={i === bands.length - 1} onClick={() => move(i, 1)} aria-label="Move down" title="Move down">▼</button>
