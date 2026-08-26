@@ -124,6 +124,9 @@ const ParcelTaxes = lazy(() => import("./components/ParcelDataPanel.jsx").then((
  * Lazy for the same reason as the panels above: a modal opened at most once per session, carrying
  * its own interactive Leaflet map, has no business on the planner's boot chunk. */
 const SetLocationDialog = lazy(() => import("./components/SetLocationDialog.jsx"));
+/* NEW-1 — the road cross-section designer. Lazy for the same reason: a modal a session opens rarely,
+ * with its own live-preview SVG, has no business on the planner's boot chunk. */
+const RoadCrossSectionDialog = lazy(() => import("./components/RoadCrossSectionDialog.jsx"));
 /* NEW-1 / NEW-3 — the Parcel panel's record + placement bodies, lazily loaded for exactly the reason
  * the appraisal panels above are: both render only inside the Parcel panel (one only for a selected
  * lot, one only once the plan has a location), and the Site route's largest chunk has no headroom to
@@ -296,6 +299,10 @@ import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDog
   wallStripBox, wallKidBox, wallKidPerp, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost, sideParkAlongRun,
   sideParkStack } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
+import {
+  bandTypeOf, normalizeBands, makeXSection, xsectionFromRoad, hasXSection, curbToCurbWidth, pavedWidth,
+  bandLayout, bandStripeMarks, BAND_FILL_TOKEN, BAND_FILL_OPACITY,
+} from "./lib/roadCrossSection.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF, stallStripesExplicit, segmentsPath, featureNameLabelVisible, featureNameFontPx, featureExtentFt } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
@@ -2095,6 +2102,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // an existing browser can't land in a mode the menu no longer offers.
   const [roadWidth, setRoadWidth] = useState(() => { const v = lsGet("roadWidth", ""); return +v > 0 ? v : DEFAULT_ROAD_WIDTH; });
   const [roadCustom, setRoadCustom] = useState(false); // NEW-3: the Custom width… entry field is showing
+  // NEW-1 — the ACTIVE cross-section for the next-drawn road, set via "Design cross-section..." in
+  // the Road tool's own width flyout (never a popover that gates drawing — this is a sticky tool
+  // default exactly like roadWidth beside it; drawing itself is unchanged). null = the plain
+  // single-width road every road has always been. Sticky across sessions, same key family as
+  // roadWidth (persisted in the effect below).
+  const [roadXSection, setRoadXSectionTool] = useState(() => { try { const v = JSON.parse(lsGet("roadXSection", "null")); return v && Array.isArray(v.bands) && v.bands.length ? makeXSection(v.bands) : null; } catch (_) { return null; } });
+  const [xsDialog, setXsDialog] = useState(null); // { mode:"new"|"edit", elId? } — the cross-section designer
   // Easement tool (NEW-1/2/3): a first-class easement object on the editable layer.
   // `easeMode` is the input mode; easeType/easeWidth are sticky tool defaults.
   // Cloud tool (B770896): NO mode state here any more — a click vs. a drag is inferred per-gesture
@@ -5847,7 +5861,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [leftPanel, narrow, companionSel, narrowProps, leftWidth, size.w]);
   // Remember the left menu width between sessions.
   useEffect(() => { try { localStorage.setItem("planarfit:leftWidth", String(leftWidth)); } catch (_) {} }, [leftWidth]);
-  useEffect(() => { try { localStorage.setItem("planarfit:parkingRows", parkingRows); localStorage.setItem("planarfit:roadWidth", roadWidth); localStorage.setItem("planarfit:measureMode", measureMode); localStorage.setItem("planarfit:easeMode", easeMode); localStorage.setItem("planarfit:easeType", easeType); localStorage.setItem("planarfit:easeWidth", String(easeWidth)); } catch (_) {} }, [parkingRows, roadWidth, measureMode, easeMode, easeType, easeWidth]);
+  useEffect(() => { try { localStorage.setItem("planarfit:parkingRows", parkingRows); localStorage.setItem("planarfit:roadWidth", roadWidth); localStorage.setItem("planarfit:roadXSection", JSON.stringify(roadXSection)); localStorage.setItem("planarfit:measureMode", measureMode); localStorage.setItem("planarfit:easeMode", easeMode); localStorage.setItem("planarfit:easeType", easeType); localStorage.setItem("planarfit:easeWidth", String(easeWidth)); } catch (_) {} }, [parkingRows, roadWidth, roadXSection, measureMode, easeMode, easeType, easeWidth]);
   // Drag the panel's right edge to resize it.
   const startLeftResize = (e) => {
     e.preventDefault();
@@ -8793,12 +8807,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const seed = branchSeedRef.current;                       // NEW-8 — set by "Branch a road from here"
     branchSeedRef.current = null;
     const curb = seed && Number.isFinite(+seed.curb) ? +seed.curb : (+settings.roadCurb || CURB);
-    const travelW = seed && +seed.travelW > 0 ? +seed.travelW : (roadWidth !== "free" && +roadWidth > 0 ? +roadWidth : 24);
+    // NEW-1 — a branched road carries its parent's designed section forward; otherwise the tool's own
+    // ACTIVE section (set via "Design cross-section..." in the width flyout) applies to every road
+    // drawn until cleared. Neither present → the plain single-width road exactly as before.
+    const xsection = (seed && seed.xsection) || roadXSection || null;
+    const travelW = xsection ? Math.max(1, curbToCurbWidth(xsection))
+      : seed && +seed.travelW > 0 ? +seed.travelW : (roadWidth !== "free" && +roadWidth > 0 ? +roadWidth : 24);
     const roadClass = seed && seed.roadClass ? seed.roadClass : DEFAULT_ROAD_CLASS;
     const defR = classDefaultRadius(roadClassOf(settings, roadClass));
     const vtx = raw.map((_, i) => (i === 0 || i === raw.length - 1) ? {} : { treatment: "arc", radius: defR });
     const bbox = roadStripBBox(raw, vtx, travelW, curb, { defaultRadius: defR });
-    let el = { id: uid(), type: "road", pts: raw, vtx, travelW, curb, roadClass, ...bbox };
+    let el = { id: uid(), type: "road", pts: raw, vtx, travelW, curb, roadClass, ...(xsection ? { xsection } : {}), ...bbox };
     pushHistory();
     // B945/NEW-1 — connect the final endpoint if it landed on another road (merge / weld / tee) or,
     // B955, a parking-drive / truck-court edge (weld + store the drive junction). NOT Snap-gated (B949);
@@ -11347,8 +11366,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     });
     const node = ins ? ins.pts[ins.index] : bestPt;
     if (ins) setEls((a) => a.map((x) => (x.id === parent.id && isCenterlineRoad(x) ? reRoad({ ...x, pts: ins.pts, vtx: ins.vtx }) : x)));
-    // The branch inherits the parent's cross-section — the least surprising default, and editable after.
-    branchSeedRef.current = { roadClass: parent.roadClass || DEFAULT_ROAD_CLASS, travelW: +parent.travelW || 24, curb: parent.curb };
+    // The branch inherits the parent's cross-section — the least surprising default, and editable
+    // after. NEW-1: a parent carrying a real designed band list hands the branch that same list
+    // (travelW then derives from it in finishRoad, same as the parent's own).
+    branchSeedRef.current = { roadClass: parent.roadClass || DEFAULT_ROAD_CLASS, travelW: +parent.travelW || 24, curb: parent.curb, xsection: hasXSection(parent) ? parent.xsection : null };
     setSel(null);
     setTool("road");
     setRoadWidth(String(+parent.travelW || 24));
@@ -17938,6 +17959,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const curb = roadCurbOf(el), cross = t + 2 * curb, crossIsH = el.h <= el.w;
     setEls((a) => a.map((x) => x.id === el.id ? { ...x, ...(crossIsH ? { h: cross } : { w: cross }), travelW: t, curb } : x));
   };
+  // NEW-1 — a road's cross-section IS its typed band list; `travelW` is kept, literally, as the
+  // sum of the section's within-curb band widths, so every existing consumer (roadStripRing,
+  // roadCurbLines, the dissolved-network junction math, the impervious rollup) keeps reading
+  // `el.travelW` unchanged. hasXSection (lib/roadCrossSection.js) = "a REAL multi-band design", not
+  // the single-band wrapper xsectionFromRoad hands the dialog for a plain road — a plain road's
+  // Properties panel keeps its ordinary editable width field (see the "Road width (ft)" Field
+  // below). It lives in the pure lib, not as a component-local helper, because renderElPx (the
+  // canvas paint function) is MODULE-LEVEL, outside this closure, and needs the same predicate.
+  const roadPavedWidth = (el) => hasXSection(el) ? pavedWidth(el.xsection) : roadTravel(el);
+  const setRoadXSection = (el, xsection) => {
+    pushHistory();
+    const t = Math.max(1, curbToCurbWidth(xsection));
+    setEls((a) => a.map((x) => x.id === el.id ? reRoad({ ...x, xsection, travelW: t }) : x));
+  };
   const setRoadLength = (el, len) => {
     pushHistory();
     const L = Math.max(1, len);
@@ -19778,7 +19813,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               "not priced yet" until unit prices are entered; once priced it shows the totals. */}
           {(() => {
           const costP = settings.prices || {};
-          const costRoad = costRollup(els, roadTravel, roadLengthOf, costP).total;
+          const costRoad = costRollup(els, roadPavedWidth, roadLengthOf, costP).total;
           const costEarthPriced = Number.isFinite(costP.earthworkCy) && +costP.earthworkCy > 0;
           const costSummary = (costRoad == null && !costEarthPriced) ? "not priced yet"
             : (costRoad != null ? `$${Math.round(costRoad).toLocaleString()} road${costEarthPriced ? " + earthwork" : ""}` : "earthwork priced");
@@ -19967,7 +20002,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // (LF, both sides), split by curb type so each rides its own unit price.
             // Unit prices are user-supplied (anchor to your own bids) — never defaulted.
             const prices = settings.prices || {};
-            const cost = costRollup(els, roadTravel, roadLengthOf, prices);
+            const cost = costRollup(els, roadPavedWidth, roadLengthOf, prices);
             if (!cost.segments) return null;
             const usd = (n) => `$${Math.round(n).toLocaleString()}`;
             const setPrice = (k, v) => setSettings((s) => ({ ...s, prices: { ...(s.prices || {}), [k]: v } }));
@@ -23162,6 +23197,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <span style={{ fontSize: 12, color: PAL.muted }}>ft</span>
                       </div>
                     )}
+                    {/* NEW-1 — "design road": a typed cross-section (four lanes with a median, a section
+                        with a centre turn lane…) instead of one plain width. A deliberate menu item, not
+                        a popover that gates drawing — picking it opens the SAME dialog Properties uses,
+                        then you draw the centerline exactly as before. */}
+                    <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }}>
+                      <button style={menuItem(!!roadXSection)} onClick={() => { setXsDialog({ mode: "new" }); setRoadMenu(false); }}>
+                        {roadXSection ? `Cross-section — ${Math.round(curbToCurbWidth(roadXSection))}′` : "Design cross-section…"}
+                      </button>
+                      {roadXSection && (
+                        <button style={{ ...menuItem(false), color: PAL.muted, fontSize: 11 }} onClick={() => setRoadXSectionTool(null)}>✕ Back to a plain width</button>
+                      )}
+                    </div>
                     <div style={{ fontSize: 11, color: PAL.muted, padding: "6px 8px 2px", lineHeight: 1.5, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>
                       Width is curb face to curb face. Click centerline points; double-click / Enter to finish.
                     </div>
@@ -23794,8 +23841,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <>
                       <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(roadLengthOf(selEl))} min={1} onCommit={(n) => setRoadLength(selEl, n)} /></Field>
                       {/* NEW-2/NEW-4 — "Road width", never "travel width", and the hover states the
-                          dimension explicitly: it is the pavement between the curb faces (B180). */}
-                      <Field label="Road width (ft)" title="Curb face to curb face — the pavement between the curbs. The curb is added outside this width."><NumInput style={numInput} value={Math.round(roadTravel(selEl))} min={1} onCommit={(n) => setRoadTravel(selEl, n)} /></Field>
+                          dimension explicitly: it is the pavement between the curb faces (B180).
+                          NEW-1 — once a road carries a REAL designed cross-section, one number can no
+                          longer describe it (which of the five bands would a typed width resize?), so
+                          the field becomes a read-only summary and "Edit cross-section..." is the only
+                          way to change it. A plain road (no section, or the dialog's own single-band
+                          wrapper) keeps the ordinary editable field, byte-identical to before. */}
+                      {hasXSection(selEl) ? (
+                        <Field label="Road width (ft)" title="Set by this road's cross-section — a designed section can't be resized by one number.">
+                          <span style={{ fontSize: 13, fontWeight: 600, color: PAL.ink }}>{Math.round(roadTravel(selEl))}′ <span style={{ fontWeight: 400, color: PAL.muted, fontSize: 11 }}>curb to curb</span></span>
+                        </Field>
+                      ) : (
+                        <Field label="Road width (ft)" title="Curb face to curb face — the pavement between the curbs. The curb is added outside this width."><NumInput style={numInput} value={Math.round(roadTravel(selEl))} min={1} onCommit={(n) => setRoadTravel(selEl, n)} /></Field>
+                      )}
+                      {cl && (
+                        <button style={{ ...chip, width: "100%", marginTop: 2 }} data-testid="edit-road-xsection"
+                          onClick={() => setXsDialog({ mode: "edit", elId: selEl.id })}>
+                          {hasXSection(selEl) ? "Edit cross-section…" : "Design cross-section…"}
+                        </button>
+                      )}
                       {/* B620 — inline label riding the road centerline (double-click the road also opens this in place).
                           setSelEl is non-sticky (patches the selected el only); onFocus pushes one undo frame per edit. */}
                       {cl && (<>
@@ -24199,7 +24263,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {selEl.type === "road" && !selEl.points && (() => {
                     const ct = roadCurbType(selEl), sides = roadCurbedSides(selEl);
                     const hasPan = CURB_TYPE_META[ct].hasPan;
-                    const q = roadQuantities(selEl, roadTravel(selEl), roadLengthOf(selEl));
+                    const q = roadQuantities(selEl, roadPavedWidth(selEl), roadLengthOf(selEl));
                     return (
                       <div style={{ marginTop: 8 }}>
                         <div style={subHead}>Curb &amp; paving (cost)</div>
@@ -24221,8 +24285,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <Field label="Gutter pan (ft)"><NumInput style={numInput} value={roadPanWidth(selEl)} min={0} onCommit={(n) => setRoadCost(selEl, { panWidth: n })} /></Field>
                         )}
                         <div style={{ fontSize: 11.5, color: PAL.muted, marginTop: 6, lineHeight: 1.55 }}>
-                          Paving <b style={{ color: PAL.ink }}>{f0(q.pavingSy)} SY</b> ({f0(q.pavingWidth)}′ FC-FC{hasPan ? ` − pan` : ""}) · Curb <b style={{ color: PAL.ink }}>{f0(q.curbLf)} LF</b>
-                          <br /><span style={{ fontSize: 10.5 }}>Paving is face-of-curb to face-of-curb — curb is priced separately per LF. Set unit prices in the Yield panel.</span>
+                          Paving <b style={{ color: PAL.ink }}>{f0(q.pavingSy)} SY</b> ({f0(q.pavingWidth)}′{hasXSection(selEl) ? " asphalt" : " FC-FC"}{hasPan ? ` − pan` : ""}) · Curb <b style={{ color: PAL.ink }}>{f0(q.curbLf)} LF</b>
+                          <br /><span style={{ fontSize: 10.5 }}>{hasXSection(selEl) ? "Paving is the section's asphalt bands only — a median or curb-and-gutter band is excluded, priced separately per LF." : "Paving is face-of-curb to face-of-curb — curb is priced separately per LF."} Set unit prices in the Yield panel.</span>
                         </div>
                       </div>
                     );
@@ -25967,6 +26031,32 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         </Suspense>
       )}
 
+      {/* NEW-1 — the road cross-section designer. Two entry points share one dialog instance:
+          Properties' "Edit cross-section..." (mode "edit", bound to a live road) and the Road tool's
+          own "Design cross-section..." (mode "new", sets the ACTIVE section for the next road drawn).
+          Lazy for the same reason as Set-location: opened rarely, carries its own preview SVG. */}
+      {xsDialog && (() => {
+        const editEl = xsDialog.mode === "edit" ? els.find((x) => x.id === xsDialog.elId) : null;
+        if (xsDialog.mode === "edit" && !editEl) return null; // the road vanished under the dialog (deleted/undo) — nothing to bind to
+        const initial = editEl ? xsectionFromRoad(editEl) : (roadXSection || xsectionFromRoad({ travelW: +roadWidth || 24 }));
+        const lengthFt = editEl ? roadLengthOf(editEl) : undefined;
+        return (
+          <Suspense fallback={null}>
+            <RoadCrossSectionDialog
+              mode={xsDialog.mode} initialXSection={initial} lengthFt={lengthFt}
+              presets={userPrefs.roadCrossSectionPresets}
+              onSavePreset={(next) => commitUserPrefs({ ...userPrefs, roadCrossSectionPresets: next })}
+              onCancel={() => setXsDialog(null)}
+              onApply={(xsection) => {
+                if (xsDialog.mode === "edit" && editEl) setRoadXSection(editEl, xsection);
+                else { setRoadXSectionTool(xsection); selectTool("road"); }
+                setXsDialog(null);
+              }}
+            />
+          </Suspense>
+        );
+      })()}
+
       {showShortcuts && (
         <div onClick={() => setShowShortcuts(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: SURF_RAISED, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 560, maxWidth: "92vw", maxHeight: "86vh", overflowY: "auto" }}>
@@ -27247,6 +27337,51 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
         rparts.push(<path key="edge" d={dPath} fill="none" stroke={stroke} strokeWidth={curbStrokePx(roadCurbWidth(el), ppf, CURB_STROKE_MIN_PX * lfK)} />);
       }
       if (texFill) rparts.push(<path key="tex" d={dPath} fill={texFill} stroke="none" pointerEvents="none" />);
+      // NEW-1 — a road carrying a REAL designed cross-section (2+ bands) paints its within-curb
+      // bands as distinct fills + lane markings, INSIDE the same pavement ring computed above: the
+      // outer pavement outline, curb lines and junction dissolve are UNCHANGED (still driven by
+      // el.travelW, which setRoadXSection keeps in sync as the sum of within-curb band widths — see
+      // lib/roadCrossSection.js's header). Clipped to THIS road's own strip ring via an SVG clipPath
+      // (the same idiom the overlay crop above already uses), so the decoration can never paint past
+      // the pavement even at a junction — a lighter-weight substitute for the precise per-neighbor
+      // trim the outer curb lines get (roadNet.stripes); stated as a known approximation for interior
+      // decoration, not hidden — median-openings-at-junctions is its own filed follow-on (B768163).
+      // Collapses to nothing extra (the plain strip already drawn above) when the narrowest band
+      // would be sub-pixel — "collapse to the simple strip rather than drawing mud".
+      if (hasXSection(el)) {
+        const xsLayout = bandLayout(el.xsection);
+        const minBandFt = xsLayout.edges.length ? Math.min(...xsLayout.edges.map((e) => e.band.w)) : 0;
+        if (minBandFt * ppf >= 3) {
+          const xsDense = roadDenseCenterline(el, settings, sharpFor(el), roadNet && roadNet.trims ? roadNet.trims.get(el.id) : undefined);
+          const clipId = `xsclip-${el.id}`;
+          const toPts = (line) => line.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
+          const bandFills = xsLayout.edges
+            .filter((e) => bandTypeOf(e.band.type).withinCurb && BAND_FILL_TOKEN[e.band.type])
+            .map((e) => {
+              const left = offsetPolyline(xsDense, e.from), right = offsetPolyline(xsDense, e.to);
+              if (!left || !right) return null;
+              return <polygon key={`xb${e.index}`} points={toPts([...left, ...right.slice().reverse()])} fill={BAND_FILL_TOKEN[e.band.type]} fillOpacity={BAND_FILL_OPACITY[e.band.type]} stroke="none" pointerEvents="none" />;
+            }).filter(Boolean);
+          const markW = Math.max(0.8, lfK);
+          const drawSeam = (offFt, key, style) => {
+            const line = offsetPolyline(xsDense, offFt);
+            if (!line || line.length < 2) return null;
+            return <polyline key={key} points={toPts(line)} fill="none" stroke={style.startsWith("yellow") ? "#e6b800" : "#f2f2f2"} strokeWidth={markW} strokeDasharray={style === "white-dash" ? `${8 * lfK} ${6 * lfK}` : undefined} pointerEvents="none" />;
+          };
+          const laneMarks = bandStripeMarks(el.xsection).flatMap((m, i) => m.style === "yellow-double"
+            ? [drawSeam(m.atOffset + 0.25, `xm${i}a`, m.style), drawSeam(m.atOffset - 0.25, `xm${i}b`, m.style)]
+            : [drawSeam(m.atOffset, `xm${i}`, m.style)]).filter(Boolean);
+          if (bandFills.length || laneMarks.length) {
+            rparts.push(
+              <g key="xsec" clipPath={`url(#${clipId})`}>
+                <clipPath id={clipId}><path d={dPath} /></clipPath>
+                {bandFills}
+                {laneMarks}
+              </g>,
+            );
+          }
+        }
+      }
     }
     // Curb stripe lines = the centerline offset by ±travelW/2 (the inner face-of-curb edges), TRIMMED
     // against the rest of the cluster's pavement (roadNet.stripes) so a stripe stops at the junction
