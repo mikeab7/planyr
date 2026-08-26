@@ -40,16 +40,19 @@ name: PR auto-ready
 # never needs to run with base-branch privileges over untrusted fork content (this is a
 # private repo with no forks).
 #
-# ⛔ PERMISSIONS (B793696, fixing B781760's first shipped version). The workflow-level
-# `permissions:` block below was already present in the version that shipped and STILL FAILED
-# live, on real PR #1188, with `GraphqlResponseError: Resource not accessible by integration`
-# from `enablePullRequestAutoMerge` (and, on the same permission scope, almost certainly
-# `markPullRequestReadyForReview` too, though that call wasn't reached that run since the PR
-# was already non-draft). Each job now ALSO carries its own explicit `permissions:` block,
-# scoped to exactly what that job calls. See B793696/V438336 in BACKLOG.md / VERIFICATION.md
-# for the live re-test result and whether that was sufficient, or whether it also needed a
-# repository Actions setting changed — the backlog item is the source of truth, not this
-# comment; do not treat the presence of job-level blocks alone as proof anything was fixed.
+# ⛔ PERMISSIONS (B793696, fixing B781760's first shipped version). The workflow/job-level
+# `permissions:` blocks below CANNOT fix a FORBIDDEN response on their own — they were
+# already present when this failed live on PR #1188 (`enablePullRequestAutoMerge`) and #1190
+# (`markPullRequestReadyForReview`, confirmed FORBIDDEN too), with GITHUB_TOKEN Permissions
+# already printing the requested scope as granted. THE ACTUAL CAUSE, measured by the repo
+# owner directly from github.com/mikeab7/planyr/settings/actions (not this file): the repo's
+# "Workflow permissions" default was set to read-only, which is a CEILING no workflow
+# `permissions:` key — at any level — can exceed. The printed `GITHUB_TOKEN Permissions` log
+# block reflects what a workflow's own key REQUESTED, not what the ceiling actually let
+# through; the two can disagree. THE FIX IS A SETTINGS CHANGE, not a YAML change — see
+# B793696/V438336 in BACKLOG.md / VERIFICATION.md for the exact setting, the live re-test
+# once it's flipped, and why a PAT is documented there only as a subordinate fallback, not
+# the recommendation. These job-level blocks stay for clarity but were never the fix.
 
 on:
   pull_request:
