@@ -301,7 +301,7 @@ import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDog
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
 import {
   bandTypeOf, normalizeBands, makeXSection, xsectionFromRoad, hasXSection, curbToCurbWidth, pavedWidth,
-  bandLayout, bandStripeMarks, BAND_FILL_TOKEN, BAND_FILL_OPACITY,
+  bandLayout, bandStripeMarks, BAND_FILL_TOKEN, BAND_FILL_OPACITY, designatedRowFt, rowMarginFt, rowWidth,
 } from "./lib/roadCrossSection.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF, stallStripesExplicit, segmentsPath, featureNameLabelVisible, featureNameFontPx, featureExtentFt } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
@@ -1887,6 +1887,9 @@ const DEFAULT_SETTINGS = {
   // line on centred element labels — let a crowded layout shed either tier. Read via `!== false` so a
   // project saved before these keys existed still shows both.
   showDims: true, showAreas: true,
+  // B783280 — the designated ROW boundary lines + label on a banded road. Read via `!== false` so a
+  // project saved before this key existed still shows them.
+  showRowLines: true,
   speedBay: 60, bayLengthTarget: 56, bayDepthTarget: 50, bayMin: 50, bayMax: 58,
   doorWidth: 9, doorOC: 12,
   typeStyles: {}, // user-set default colors per element type (Bluebeam-style defaults)
@@ -17973,6 +17976,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const t = Math.max(1, curbToCurbWidth(xsection));
     setEls((a) => a.map((x) => x.id === el.id ? reRoad({ ...x, xsection, travelW: t }) : x));
   };
+  // NEW-1 (owner: "id like to designate the ROW to like a 100' row should be shown") — the
+  // Properties-panel counterpart to the dialog's own "Right-of-way width (ft)" field, since that's
+  // where he'll look for it after the road is already drawn. Same field, same storage
+  // (`xsection.rowDesignFt`), same "presence is the signal" contract as `designatedRowFt` — clearing
+  // the field (NumInput's `allowClear`) removes the key entirely rather than writing a falsy value.
+  const setRoadRowFt = (el, ft) => {
+    pushHistory();
+    setEls((a) => a.map((x) => {
+      if (x.id !== el.id || !x.xsection) return x;
+      const next = { ...x.xsection };
+      if (Number.isFinite(+ft) && +ft > 0) next.rowDesignFt = +ft; else delete next.rowDesignFt;
+      return { ...x, xsection: next };
+    }));
+  };
   const setRoadLength = (el, len) => {
     pushHistory();
     const L = Math.max(1, len);
@@ -23854,6 +23871,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       ) : (
                         <Field label="Road width (ft)" title="Curb face to curb face — the pavement between the curbs. The curb is added outside this width."><NumInput style={numInput} value={Math.round(roadTravel(selEl))} min={1} onCommit={(n) => setRoadTravel(selEl, n)} /></Field>
                       )}
+                      {/* NEW-1 (owner: "id like to designate the ROW to like a 100' row should be
+                          shown") — read/write here too, since this is where he'll look for it once
+                          the road is already on the plan, not only in the design dialog. Any road
+                          that has been through the dialog at least once carries `xsection` (even the
+                          single-band wrapper), so this doesn't require a REAL multi-band design —
+                          gated separately from the read-only-vs-editable width split above. Blank the
+                          field (NumInput's allowClear) to un-designate; it reverts to the modeled
+                          section's own total and the ROW boundary stops drawing on the canvas. */}
+                      {selEl.xsection && (
+                        <Field label="Right-of-way (ft)" title="A designated legal ROW, drawn as a boundary line on the plan — wider than the modeled section, with the remainder an undesignated margin each side. Blank = not designated.">
+                          <NumInput style={numInput} value={designatedRowFt(selEl.xsection) ?? Math.round(rowWidth(selEl.xsection))} min={1} allowClear forceCommit onCommit={(n) => setRoadRowFt(selEl, n)} />
+                        </Field>
+                      )}
                       {cl && (
                         <button style={{ ...chip, width: "100%", marginTop: 2 }} data-testid="edit-road-xsection"
                           onClick={() => setXsDialog({ mode: "edit", elId: selEl.id })}>
@@ -27351,17 +27381,28 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
       if (hasXSection(el)) {
         const xsLayout = bandLayout(el.xsection);
         const minBandFt = xsLayout.edges.length ? Math.min(...xsLayout.edges.map((e) => e.band.w)) : 0;
+        // NEW-1/NEW-2 — hoisted out of the legibility gate below: the trimmed dense centerline and the
+        // point-string helper are needed by BOTH the band fills (gated on minBandFt) and the designated
+        // ROW lines further down (never gated on band width — a thin ROW line reads fine at any zoom a
+        // section is legible at all, and a road can carry a designated ROW with no narrow band on it).
+        const xsDense = roadDenseCenterline(el, settings, sharpFor(el), roadNet && roadNet.trims ? roadNet.trims.get(el.id) : undefined);
+        const toPts = (line) => line.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
         if (minBandFt * ppf >= 3) {
-          const xsDense = roadDenseCenterline(el, settings, sharpFor(el), roadNet && roadNet.trims ? roadNet.trims.get(el.id) : undefined);
           const clipId = `xsclip-${el.id}`;
-          const toPts = (line) => line.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
-          const bandFills = xsLayout.edges
-            .filter((e) => bandTypeOf(e.band.type).withinCurb && BAND_FILL_TOKEN[e.band.type])
-            .map((e) => {
-              const left = offsetPolyline(xsDense, e.from), right = offsetPolyline(xsDense, e.to);
-              if (!left || !right) return null;
-              return <polygon key={`xb${e.index}`} points={toPts([...left, ...right.slice().reverse()])} fill={BAND_FILL_TOKEN[e.band.type]} fillOpacity={BAND_FILL_OPACITY[e.band.type]} stroke="none" pointerEvents="none" />;
-            }).filter(Boolean);
+          // NEW-2 (owner report, 2026-08-26 — "the 30ft parkway renders on the plan as... nothing at
+          // all. Actual: it renders nothing at all") — every typed band paints now, not only the
+          // within-curb ones. WITHIN-curb fills stay clipped to the pavement ring (dPath), unchanged —
+          // an OUTSIDE-curb band (sidewalk/parkway/ditch) sits entirely past that ring by construction,
+          // so clipping it to dPath would clip it away entirely, which is the exact bug this fixes. Its
+          // polygon is built the identical way, from the SAME trimmed xsDense, so it is already correctly
+          // bounded lengthwise and needs no clip of its own.
+          const bandFillFor = (e) => {
+            const left = offsetPolyline(xsDense, e.from), right = offsetPolyline(xsDense, e.to);
+            if (!left || !right) return null;
+            return <polygon key={`xb${e.index}`} points={toPts([...left, ...right.slice().reverse()])} fill={BAND_FILL_TOKEN[e.band.type]} fillOpacity={BAND_FILL_OPACITY[e.band.type]} stroke="none" pointerEvents="none" />;
+          };
+          const bandFillsIn = xsLayout.edges.filter((e) => bandTypeOf(e.band.type).withinCurb && BAND_FILL_TOKEN[e.band.type]).map(bandFillFor).filter(Boolean);
+          const bandFillsOut = xsLayout.edges.filter((e) => !bandTypeOf(e.band.type).withinCurb && BAND_FILL_TOKEN[e.band.type]).map(bandFillFor).filter(Boolean);
           const markW = Math.max(0.8, lfK);
           const drawSeam = (offFt, key, style) => {
             const line = offsetPolyline(xsDense, offFt);
@@ -27371,13 +27412,52 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
           const laneMarks = bandStripeMarks(el.xsection).flatMap((m, i) => m.style === "yellow-double"
             ? [drawSeam(m.atOffset + 0.25, `xm${i}a`, m.style), drawSeam(m.atOffset - 0.25, `xm${i}b`, m.style)]
             : [drawSeam(m.atOffset, `xm${i}`, m.style)]).filter(Boolean);
-          if (bandFills.length || laneMarks.length) {
+          if (bandFillsIn.length || laneMarks.length) {
             rparts.push(
               <g key="xsec" clipPath={`url(#${clipId})`}>
                 <clipPath id={clipId}><path d={dPath} /></clipPath>
-                {bandFills}
+                {bandFillsIn}
                 {laneMarks}
               </g>,
+            );
+          }
+          if (bandFillsOut.length) rparts.push(<g key="xsecOut">{bandFillsOut}</g>);
+        }
+
+        // NEW-1 (owner report, 2026-08-26 — "id like to designate the ROW to like a 100' row should be
+        // shown") — a designated right-of-way draws as a thin dashed boundary line each side, offset
+        // from the centerline by half the designated width and following the SAME trimmed centerline
+        // (xsDense) the pavement ring itself is built from — so it curves, arcs and trims exactly like
+        // the ribbon, per the brief's own instruction. Plus an inline "N′ R.O.W." label styled like the
+        // existing width-dimension callout (same font/scale/halo idiom, a neutral tone rather than the
+        // dimension's red so the two are never mistaken for one control). Gated on the section actually
+        // being valid — `rowMarginFt` returns null both when nothing is designated and when the modeled
+        // bands already exceed the designated ROW (that invalid state is a loud warning in the dialog,
+        // never a silently-clamped line here) — and on the View ▾ "ROW lines" toggle
+        // (settings.showRowLines, default on: the same settings.show* shape as showGrid/showDims).
+        const rowFt = designatedRowFt(el.xsection);
+        const rowMargin = rowFt != null ? rowMarginFt(el.xsection) : null;
+        if (rowMargin != null && settings.showRowLines !== false) {
+          const rowHw = rowFt / 2;
+          const rowLineL = offsetPolyline(xsDense, rowHw), rowLineR = offsetPolyline(xsDense, -rowHw);
+          const rowDash = `${9 * lfK} ${5 * lfK}`;
+          [rowLineL, rowLineR].forEach((line, i) => {
+            if (!line || line.length < 2) return;
+            rparts.push(<polyline key={`rowln${i}`} points={toPts(line)} fill="none" stroke="var(--text-tertiary)" strokeWidth={Math.max(0.75, lfK)} strokeDasharray={rowDash} pointerEvents="none" />);
+          });
+          if (settings.showDims !== false && xsDense.length >= 2) {
+            const mi = Math.max(1, Math.min(xsDense.length - 1, Math.floor(xsDense.length / 2)));
+            const p0 = xsDense[mi - 1], p1 = xsDense[mi];
+            const ddl = Math.hypot(p1.x - p0.x, p1.y - p0.y) || 1;
+            const rdir = { x: (p1.x - p0.x) / ddl, y: (p1.y - p0.y) / ddl };
+            const rnrm = { x: -rdir.y, y: rdir.x };
+            const midPt = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
+            const labelPt = f2p({ x: midPt.x + rnrm.x * rowHw, y: midPt.y + rnrm.y * rowHw });
+            const rk = dimFontScale(lfPpf || ppf) * lfK, rfz = 10 * rk;
+            rparts.push(
+              <text key="rowlbl" x={labelPt.x} y={labelPt.y} textAnchor="middle" dominantBaseline="middle" fontSize={rfz} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill="var(--text-tertiary)" stroke="#fff" strokeWidth={2.5} paintOrder="stroke" fontWeight="700" pointerEvents="none">
+                {f0(rowFt)}′ R.O.W.
+              </text>,
             );
           }
         }
@@ -27865,7 +27945,7 @@ function AlignIcon({ dir }) {
 // commits (parse + clamp) on Enter or blur, never live on each keystroke.
 // `ariaLabel` names the input for a screen reader (and for a headless check) when it does NOT sit
 // behind a visible <Field> label — e.g. the Custom width… entry inside the Road flyout.
-function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse, ariaLabel, allowClear = false }) {
+function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse, ariaLabel, allowClear = false, forceCommit = false }) {
   const [draft, setDraft] = useState(value == null ? "" : String(value));
   /* The one-line note shown when a commit did not take the number as typed (rounded / clamped).
    * Cleared by the next keystroke — it reports THIS commit, never a stale one. */
@@ -27875,8 +27955,17 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse,
   /* What we last handed to `onCommit`, so the effect below can notice the caller handing back
    * something different. Cleared once compared — it is about ONE commit, never a standing state. */
   const committedRef = useRef(null);
+  /* B783280 — `forceCommit` is for a caller whose `value` prop is not true committed model state but
+   * a computed DEFAULT shown when nothing has been set yet (the road Properties panel's "Right-of-way
+   * (ft)" field defaults to the section's own band total). Without it, typing the exact digits already
+   * shown — the realistic case whenever the ROW is meant to equal the modeled section — hits `v !==
+   * value` below as false and `onCommit` never fires: a LOUD-FAILURE violation, since the field reads
+   * identically either way. `dirtyRef` tracks a real keystroke so an untouched blur still costs
+   * nothing; every other caller (whose `value` IS the persisted model value) keeps the old
+   * equality-suppression, matching `BandWidthInput`'s identical fix in RoadCrossSectionDialog.jsx. */
+  const dirtyRef = useRef(false);
   const fmtNum = (n) => String(Math.round(n * 1000) / 1000);
-  useEffect(() => { if (!editing.current) setDraft(value == null ? "" : String(value)); }, [value]);
+  useEffect(() => { if (!editing.current) { setDraft(value == null ? "" : String(value)); dirtyRef.current = false; } }, [value]);
   // Clamp a candidate value the same way for a typed commit AND a stepper nudge: floor at min,
   // ceil at max (default 1e7 bounds the absurd). Reject NaN AND ±Infinity here — parseFloat("1e999")
   // is NOT NaN and Math.max(min, Infinity) stays Infinity, so a min-clamp alone can't catch it; a
@@ -27900,11 +27989,14 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse,
     // silently go null.
     if (allowClear && draft.trim() === "") {
       setDraft("");
+      dirtyRef.current = false;
       if (value != null) onCommit(null);
       return;
     }
     const v = clampNum(parseFloat(draft));
     if (v == null) { setDraft(value == null ? "" : String(value)); return; }
+    const wasDirty = dirtyRef.current;
+    dirtyRef.current = false;
     /* ⛔ B464051 / LOUD-FAILURE — IF WE CHANGED HIS NUMBER, SAY SO, IN THE MOMENT. Measured on
      * the real inspector before this line existed: type `613.7` into Depth and the field commits
      * 613.7, then re-renders showing **614** — because every dimension call site passes
@@ -27920,7 +28012,7 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse,
     setAltered(shown != null ? `Using ${fmtNum(v)}` : null);
     setDraft(String(v));
     committedRef.current = v;
-    if (v !== value) onCommit(v);
+    if (v !== value || (forceCommit && wasDirty)) onCommit(v);
   };
   /* ⛔ B464051, THE OTHER HALF — AND THE FIRST GUESS ABOUT IT WAS WRONG, which is why it is worth
    * writing down. It looked like these fields silently ROUND: every dimension call site passes
@@ -27987,7 +28079,7 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse,
        * carries the non-error "Using 614" note, which is not an error message at all. */
       aria-describedby={note ? msgId : undefined}
       onFocus={() => { editing.current = true; }}
-      onChange={(e) => { setAltered(null); setDraft(e.target.value); }}
+      onChange={(e) => { setAltered(null); setDraft(e.target.value); dirtyRef.current = true; }}
       onBlur={commit}
       onKeyDown={(e) => {
         /* NEW-1 — ENTER COMMITS IN PLACE AND KEEPS THE CARET. It used to `blur()`, which is the
