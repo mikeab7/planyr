@@ -81,11 +81,17 @@ const turnedOn = await page.evaluate((labels) => {
 console.log("raster layers turned on:", turnedOn);
 await page.waitForTimeout(3500);
 
-// Enter print mode + Download PDF.
+// Enter print mode → Continue → compose screen → Download PDF.
 await page.locator('button:has-text("File ▾")').first().click({ timeout: 8000 });
 await page.locator('button:has-text("Download PDF / pick frame")').first().click({ timeout: 8000 });
 await page.waitForTimeout(700);
-const cbVisible = await page.locator('label:has-text("Print map layers")').first().isVisible().catch(() => false);
+// B765985: the frame-picking bar now only has Continue/Cancel — paper/orientation/content
+// toggles moved to the full-screen compose surface.
+await page.getByRole("button", { name: /^Continue ➜$/ }).first().click({ timeout: 8000 });
+await page.waitForSelector('[data-testid="print-compose"]', { timeout: 20_000 });
+// NOTE: the compose "Map / GIS layers" toggle is the renamed B765985 successor of the old
+// floating-bar "Print map layers" checkbox this harness originally looked for.
+const cbVisible = await page.locator('[data-testid="print-compose"] label:has-text("Map / GIS layers")').first().isVisible().catch(() => false);
 await page.getByRole("button", { name: "Download PDF", exact: true }).click({ timeout: 8000 });
 
 // Poll for the composed sheet SVG (blocks on the ~22s sandbox aerial timeout first).

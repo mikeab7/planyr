@@ -157,6 +157,9 @@ async function captureSheet(page) {
   await page.waitForTimeout(300);
   await page.locator('button:has-text("Download PDF / pick frame")').first().click({ timeout: 8000 });
   await page.waitForTimeout(900);
+  // B765985: Continue hands off to the full-screen compose surface before Download PDF.
+  await page.getByRole("button", { name: /^Continue ➜$/ }).first().click({ timeout: 8000 });
+  await page.waitForSelector('[data-testid="print-compose"]', { timeout: 20_000 });
   await page.getByRole("button", { name: "Download PDF", exact: true }).click({ timeout: 8000 });
   for (let i = 0; i < 15; i++) {
     await page.waitForTimeout(1000);

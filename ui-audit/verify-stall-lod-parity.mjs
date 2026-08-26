@@ -105,13 +105,18 @@ async function shoot(base) {
     await page.waitForTimeout(400);
     await page.getByText("Download PDF / pick frame", { exact: false }).first().click({ timeout: 6000 });
     await page.waitForTimeout(700);
+    // B765985: Continue hands off to the full-screen compose surface before Download PDF.
+    await page.getByRole("button", { name: /^Continue ➜$/ }).first().click({ timeout: 6000 });
+    await page.waitForSelector('[data-testid="print-compose"]', { timeout: 20_000 });
     const dl = page.waitForEvent("download", { timeout: 180000 }).catch(() => null);
     await page.getByRole("button", { name: "Download PDF" }).first().click({ timeout: 6000 });
     await dl;
     for (let i = 0; i < 60 && !sheet; i++) {
       await page.waitForTimeout(300);
       const arr = await page.evaluate(() => window.__capturedSvgs || []);
-      if (arr.length) sheet = arr[0];
+      // B765985: the compose screen's live preview builds an earlier image/svg+xml blob (same
+      // buildComposedSheet pipeline) before "Download PDF" is even clicked — take the LAST one.
+      if (arr.length) sheet = arr[arr.length - 1];
     }
   } catch (e) { sheet = `EXPORT FAILED: ${e.message}`; }
   await browser.close();

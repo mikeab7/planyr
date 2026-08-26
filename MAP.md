@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-26 @ `6e2a5765` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-26 @ `c34af29a` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_570 source files mapped._
+_572 source files mapped._
 
 ## infra
 
@@ -218,11 +218,11 @@ _570 source files mapped._
   - _exports_: `COUNTY_ZONE`, `gridScaleFactor`, `projectToZone`, `resolveZone`, `SP_ZONES`, `ZONE_IDS`, `zoneById`, `zoneForCounty`, `zoneForPoint`, `zoneToProject`
 - **`src/shared/files/chunkedUpload.js`** — Chunked any-size file upload to Google Drive through the same-origin /api/uploads/* proxy: pure 16 MiB chunk math plus the sequential upload loop with retry/backoff, resume-from-offset, and byte progress (B409 rework)
   - _exports_: `backoffMs`, `CHUNK_SIZE`, `chunkPlan`, `contentRangeFor`, `DRIVE_CHUNK_GRANULE`, `QUOTA_MESSAGE`, `uploadFileInChunks`
-- **`src/shared/files/deedOcr.js`** — Lazy Tesseract.js orchestration: OCRs a scanned deed PDF page by page (render → preprocess → recognize → repair/reflow), with progress/cancel and per-word confidence, for the metes-and-bounds plotter's OCR fallback
+- **`src/shared/files/deedOcr.js`** — OCR a scanned deed PDF (Tesseract.js, dynamic-imported) into editable legal-description text with per-word confidence spans.
   - _exports_: `culpritCalls`, `flagSuspectDistances`, `lowConfidenceSpans`, `ocrScannedDeedPdf`
-- **`src/shared/files/deedOcrRepair.js`** — Pure OCR text repair for scanned deeds: fuzzy THENCE/COMMENCING/BEGINNING correction, DMS punctuation normalization, quadrant-glyph and doubled-degree-sign fixes, word-merge fixes, and a lost-decimal-point distance flag
+- **`src/shared/files/deedOcrRepair.js`** — Pure repair rules for OCR'd deed text (survey-keyword fixes, degree/minute-sign glyph corrections) before parsing.
   - _exports_: `canonicalizeOcrWord`, `fixDoubledDegreeSign`, `fixQuadrantGlyphs`, `fixSurveyKeywords`, `fixWordMerges`, `flagSuspectDistances`, `normalizeOcrPunctuation`, `repairOcrDeedText`
-- **`src/shared/files/deedTextReflow.js`** — Pure word-wrapped-line rejoin (one logical line per course) shared by pdfText.js's text-layer extraction and deedOcr.js's OCR output
+- **`src/shared/files/deedTextReflow.js`** — Pure: rejoin visually-wrapped deed lines into one logical line per course, shared by the text-layer PDF and OCR paths.
   - _exports_: `reflowLines`
 - **`src/shared/files/detailRefs.js`** — Parses CAD detail/section callout bubbles ("5/A-3") and detail definition anchors from positioned PDF page text so the Stitcher can drop clickable detail hotspots
   - _exports_: `normSheet`, `parseDetailAnchors`, `parseDetailRefs`
@@ -236,7 +236,7 @@ _570 source files mapped._
   - _exports_: `fitEdgeLine`, `matchSeamEdges`, `orderEndpoints`
 - **`src/shared/files/fileFacts.js`** — Pure file-fact view-model: normalizes review rows, classifies spatial vs reference doc class, and drives the Library category tree, saved views, facets and needs-filing holding area
   - _exports_: `browseFiles`, `buildFileFacts`, `CATEGORIES`, `categoryFor`, `categoryOf`, `classifyDocClass`, `createIndexProvider`, `deriveTree`, `DOC_CLASS`, `docRecency`, `FACETS`, `FILE_STATE`, `FILE_STATES`, `fileState`, `getSavedView`, `groupByDiscipline`, `holdingArea`, `isReference`, `isSpatial`, `needsFiling`, `nodeMatch`, `onMap`, `runView`, `SAVED_VIEWS`, `searchFiles`, `sortFiles`, `SORTS`, `stateOf`, `stubIndexProvider`, `subcategoryOf`, `toFileFact`
-- **`src/shared/files/imagePreprocess.js`** — Pure scanned-page pixel preprocessing (grayscale, local-mean adaptive threshold with a skip for an already-bitonal source, skew estimation + deskew) for OCR
+- **`src/shared/files/imagePreprocess.js`** — Pure pixel-array preprocessing (deskew, contrast, denoise) for a scanned deed page before OCR.
   - _exports_: `adaptiveThreshold`, `estimateSkewAngle`, `isEffectivelyBitonal`, `preprocessPage`, `rotateImage`, `toGrayscale`
 - **`src/shared/files/legendUnion.js`** — Unions per-sheet legend symbol entries into one deduped composite key (dedupe by normalized meaning, keep first symbol, track source sheets)
   - _exports_: `legendFromPlaced`, `unionLegendEntries`
@@ -246,11 +246,11 @@ _570 source files mapped._
   - _exports_: `decide`, `matchProjectInText`, `scoreProjectInText`
 - **`src/shared/files/middleTruncate.js`** — split a label into head + pinned tail so middle-ellipsis keeps the distinguishing end (NEW-4).
   - _exports_: `middleEllipsis`, `splitLabel`
-- **`src/shared/files/ocrConfidence.js`** — Pure: locates Tesseract per-word confidence inside OCR'd deed text and correlates a bad closure with the specific likely-culprit courses (the OCR closure safety net)
+- **`src/shared/files/ocrConfidence.js`** — Pure: map Tesseract per-word confidence onto character offsets in the joined OCR text, for low-confidence highlighting.
   - _exports_: `culpritCalls`, `locateWordSpans`, `lowConfidenceSpans`
 - **`src/shared/files/ocrMatchLines.js`** — Recovers "MATCH LINE ... SHEET N" labels from raster scans by OCRing the page at 0/90/270 orientations and mapping found labels back to page space for autoStitch
   - _exports_: `framePointToPage`, `OCR_ORIENTATIONS`, `recoverMatchLines`
-- **`src/shared/files/pdfRaster.js`** — Browser-only PDF page → canvas ImageData render at a target DPI, for OCR only (a separate pdf.js setup from pdfText.js's text-extraction path)
+- **`src/shared/files/pdfRaster.js`** — Browser-only: render a scanned PDF page to a raster image for OCR (pdf.js canvas path, separate from the text-extraction module).
   - _exports_: `pdfPageCount`, `renderPdfPageToImageData`
 - **`src/shared/files/pdfText.js`** — Lazy pdf.js PDF-to-deed-text reader: pulls the embedded text layer and reflows word-wrapped survey courses onto one logical line each so the metes-and-bounds parser can segment them
   - _exports_: `pdfToDeedText`, `reflowLines`
@@ -479,7 +479,7 @@ _570 source files mapped._
   - _exports_: `default (LazyPanel)`, `PanelErrorBoundary`, `PanelFallback`
 - **`src/workspaces/site-planner/components/NumEditField.jsx`** — the ONE canvas inline numeric editor: chip-scale field, no native spinners, Enter/Escape/blur commit, Arrow nudge
   - _exports_: `default (NumEditField)`
-- **`src/workspaces/site-planner/components/OcrDeedTextarea.jsx`** — The metes-and-bounds paste box with an optional low-OCR-confidence highlight overlay; a plain textarea when there's nothing to highlight
+- **`src/workspaces/site-planner/components/OcrDeedTextarea.jsx`** — The metes-and-bounds paste box, with an optional low-OCR-confidence character highlight overlay.
   - _exports_: `default (OcrDeedTextarea)`
 - **`src/workspaces/site-planner/components/ParcelDataPanel.jsx`** — The selected lot's county record + taxing units, lazily loaded: an Owner headline that never repeats as a row, three short rows, and the rest (incl. the height-capped Legal description) behind one closed fold — the row split shared with the map-search card
   - _exports_: `default`, `ParcelAppraisal`, `ParcelTaxes`
@@ -489,7 +489,9 @@ _570 source files mapped._
   - _exports_: `ParcelRecord`, `PlacementControls`
 - **`src/workspaces/site-planner/components/PondSection.jsx`** — PR-L the one developer-readable pond cross-section component (used by the ⚡ Optimize what-changed card AND the pond inspector): maps pondSectionModel marks to a responsive, theme-tokened SVG (grade, berm hatch, storage bands, flood/groundwater/receiving lines, outlet, depth dimension, collision-free labels)
   - _exports_: `default (PondSection)`
-- **`src/workspaces/site-planner/components/RoadCrossSectionDialog.jsx`** — The "Design road cross-section" dialog: a row-per-band editor with a live to-scale plan-view preview, dimension strings, running totals, and named presets
+- **`src/workspaces/site-planner/components/PrintCompose.jsx`** — the dedicated full-screen "compose exhibit" step (B765985): sheet size/orientation/scale, title block, content toggles, and the live sheet preview, all outside the drawing canvas
+  - _exports_: `default (PrintCompose)`
+- **`src/workspaces/site-planner/components/RoadCrossSectionDialog.jsx`** — Road cross-section designer dialog: per-band rows (type/width) with a live to-scale typical-section preview + presets.
   - _exports_: `default (RoadCrossSectionDialog)`
 - **`src/workspaces/site-planner/components/RowInfo.jsx`** — Per-row ⓘ info popover for the Layers panel (source · vintage/age · notes); hover/click, portal via AnchoredMenu (B760)
   - _exports_: `default (RowInfo)`
@@ -567,7 +569,7 @@ _570 source files mapped._
   - _exports_: `channelCell`, `channelSlope`, `cutSection`, `flowBearing`, `gridCellFt`, `sampleAtPixel`, `siteMaskFromLatLngRings`, `upstreamEdgeFlags`
 - **`src/workspaces/site-planner/lib/cityLimitClass.js`** — What KIND of city limit a polygon is, kept as a named class and never collapsed to a boolean: full purpose · limited purpose · strip annexation · unknown, each carrying whether it governs fully and a plain-English gloss. Baytown's one layer mixes all three, and a limited-purpose area does not carry a city's ordinances the way full-purpose limits do. `declaredLimitClassing` is the registry contract — a city-limits source must declare its class field + value map OR declare `fullPurposeOnly`, and one that declares neither fails its own fixture rather than answering; `classifyCityLimit` never upgrades an unknown to full.
   - _exports_: `CITY_LIMIT_CLASS_ORDER`, `CITY_LIMIT_CLASSES`, `cityLimitGloss`, `cityLimitLabel`, `classifyCityLimit`, `declaredLimitClassing`, `dominantClass`
-- **`src/workspaces/site-planner/lib/cloudGeometry.js`** — Revision-cloud markup geometry: `cloudScallopPath` turns a closed vertex ring + an arc radius into the scalloped SVG outline (arcs evenly distributed per edge, remainder absorbed rather than left as a stunted last arc), `edgeScallopCount`/`clampCloudArcFt` the supporting math, `simplifyPath` a Ramer–Douglas–Peucker reducer for a freehand-drawn outline, `cloudMetaDefaults` the Bluebeam-parity metadata (Subject/Comment/Author/Created/Modified/Status/Label/Layer) stamped on a new cloud.
+- **`src/workspaces/site-planner/lib/cloudGeometry.js`** — Pure scallop-arc geometry for the revision-cloud markup tool (vertex ring + arc size -> Bluebeam-style outline).
   - _exports_: `clampCloudArcFt`, `CLOUD_ARC_DEFAULT_FT`, `CLOUD_ARC_MAX_FT`, `CLOUD_ARC_MIN_FT`, `CLOUD_ARC_PRESETS`, `CLOUD_STATUS_OPTIONS`, `cloudMetaDefaults`, `cloudScallopPath`, `edgeScallopCount`, `simplifyPath`
 - **`src/workspaces/site-planner/lib/cloudRename.js`** — the project-rename CLOUD write, LOADED ON DEMAND: one atomic `rename_site_group` RPC over the whole site group (so a rename reaches plans this browser has never loaded and cannot half-land), plus the server-side read-then-write degrade for a DB without the migration. Reached only by a dynamic import from `storage.renameSiteGroup` — never static-import it from the boot path.
   - _exports_: `cloudRenameGroup`
@@ -680,7 +682,7 @@ _570 source files mapped._
 - **`src/workspaces/site-planner/lib/exportLabelScale.js`** — The scale the LABEL tier reasons at on an export pass: the sheet's own px-per-foot (framed extent vs plan box), so declutter/LOD/collision, label sizes and stroke-zoom are a function of the plan and the paper, never of the live zoom.
   - _exports_: `makeLabelFrame`, `MAX_LABEL_PPF`, `MIN_LABEL_PPF`, `SHEET_PX_PER_CENTI_INCH`, `sheetLabelPpf`, `STROKE_ZOOM_REF`
 - **`src/workspaces/site-planner/lib/exportSheet.js`** — the on-demand export path: PDF/PNG/KMZ sheet composition, the B839 aerial tile Stitcher, and GIS raster/vector layer capture. Loaded via dynamic import() from SitePlanner (B1042) so it never rides the boot bundle; reads planner state through a per-call `ctx` object
-  - _exports_: `createExportSheet`, `sheetPlanAspect`
+  - _exports_: `createExportSheet`, `sheetLayoutBoxesIn`, `sheetPlanAspect`
 - **`src/workspaces/site-planner/lib/exportStyle.js`** — Pure print stroke-weight retargeting: convert authored screen-pixel line widths to zoom-independent physical drafting points for PDF/PNG export
   - _exports_: `PRINT_WEIGHTS`, `printStrokeWidth`, `PT_PER_CENTI_INCH`, `sheetFitScale`
 - **`src/workspaces/site-planner/lib/factRevalidation.js`** — Drainage facts auto-revalidation decision layer (B832): load-kind (missing/stale/incomplete snapshot) vs edit-kind (fetch-envelope exit, point-anchor drift >100 ft) triggers with stable retry keys. Exports `revalidationNeed`, `envelopeOf`, `envelopeContains`, `anchorDriftFt`.
@@ -939,8 +941,10 @@ _570 source files mapped._
   - _exports_: `ownerLabel`, `subName`, `summarizeSubstations`, `summarizeTransmission`, `voltLabel`
 - **`src/workspaces/site-planner/lib/presencePill.js`** — pure "N here" presence summary (B674): distinct people from the channel roster, quiet when alone, You-first hover names
   - _exports_: `presenceSummary`
+- **`src/workspaces/site-planner/lib/printScale.js`** — the explicit engineering-scale math (B765985): the standard scale list, a scale's implied frame footprint, and the "does the picked area fit" check
+  - _exports_: `checkScaleFits`, `frameFootprintForScale`, `scaleLabel`, `STANDARD_SCALES`
 - **`src/workspaces/site-planner/lib/printSheet.js`** — Pure single-SVG print sheet composer: page geometry, buildings table, metrics band, title block, export filename builder
-  - _exports_: `buildBuildingTableSvg`, `buildPrintSheetSvg`, `buildStormwaterSvg`, `formatDateStamp`, `metricsRowsFor`, `pageSize`, `printSheetLayout`, `sanitizeFilename`, `sheetFileName`, `stormwaterBandH`
+  - _exports_: `buildBuildingTableSvg`, `buildPrintSheetSvg`, `buildStormwaterSvg`, `formatDateStamp`, `metricsRowsFor`, `pageSize`, `PAPER_SIZES`, `printSheetLayout`, `sanitizeFilename`, `sheetFileName`, `stormwaterBandH`
 - **`src/workspaces/site-planner/lib/profile.js`** — Signed-in user profile I/O against Supabase public.profiles (load/upsert first/last/org, mirrors names to auth metadata)
   - _exports_: `loadProfile`, `saveProfile`
 - **`src/workspaces/site-planner/lib/projectName.js`** — THE authority for what a project (site group) is called: resolves the one authoritative name across a group's plans (rename-stamp first, legacy majority second, ambiguous never guessed), reconciles a split group, and supplies the write-path correction that stops a stale plan re-publishing an old name.
@@ -971,7 +975,7 @@ _570 source files mapped._
   - _exports_: `pointInRing`, `projectOntoSegment`, `ringArea`
 - **`src/workspaces/site-planner/lib/roadClasses.js`** — Road design classes and civil min-radius thresholds (AASHTO speed formula, default arc radius per class, per-plan overrides)
   - _exports_: `classDefaultRadius`, `classMinRadius`, `classReturnRadius`, `DEFAULT_ROAD_CLASS`, `ROAD_CLASS_SEEDS`, `roadClassesOf`, `roadClassOf`, `speedMinRadius`
-- **`src/workspaces/site-planner/lib/roadCrossSection.js`** — A road's cross-section as an ordered list of typed bands (travel lane, median, turn lane, shoulder, parking, bike, sidewalk, etc.), curb-to-curb/paved/ROW width derivations, lane-striping seams, and built-in presets
+- **`src/workspaces/site-planner/lib/roadCrossSection.js`** — Pure: a road's cross-section as an ordered list of typed bands (travel/median/turn-lane/etc.) measured across the centerline.
   - _exports_: `BAND_FILL_OPACITY`, `BAND_FILL_TOKEN`, `BAND_TYPE_BY_KEY`, `BAND_TYPES`, `bandLayout`, `bandStripeMarks`, `bandTypeOf`, `BUILT_IN_XSECTION_PRESETS`, `curbToCurbWidth`, `DEFAULT_BAND_TYPE`, `designatedRowFt`, `hasXSection`, `makeXSection`, `MIN_BAND_WIDTH_FT`, `normalizeBands`, `parseWidthDraft`, `pavedWidth`, `pavementArea`, `rowMarginFt`, `rowWidth`, `XSEC_SF_PER_SY`, `xsectionFromRoad`
 - **`src/workspaces/site-planner/lib/roadGeometry.js`** — Pure centerline road geometry: tessellate clicked alignment into arc fillets/smooth splines/sharp corners, min radius of curvature
   - _exports_: `canRemoveRoadVertex`, `cardinalTeePoint`, `concatRoads`, `cornerApproachShortfall`, `cornerShares`, `curbStrokePx`, `dedupeRoadVertices`, `DEFAULT_ARC_RADIUS`, `DEFAULT_TESS_DEG`, `findRoadConnect`, `fitRoadCorners`, `fixRoadRadii`, `insertRoadVertex`, `minRadiusOfCurvature`, `nearestRectEdge`, `nodeJunction`, `planRoadConnect`, `polylineLength`, `projectToPolyline`, `projectToRoadCenterline`, `rectEdges`, `removeRoadVertex`, `repairBakedRadii`, `ROAD_SIMPLIFY_TOL_FT`, `ROAD_VERTEX_COLLAPSE_FT`, `roadBearingDeg`, `roadCenterline`, `roadCenterlineTagged`, `roadCornerRadii`, `roadMinRadius`, `roadRadiusConflicts`, `roadsMergeCompatible`, `simplifyRoadVertices`, `slideTeeNode`, `TEE_CARDINAL_STEP_DEG`, `teeGeometry`, `teeNodeIndex`, `weldCoverPolygon`

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   pageSize,
+  PAPER_SIZES,
   printSheetLayout,
   buildBuildingTableSvg,
   buildPrintSheetSvg,
@@ -56,6 +57,32 @@ describe("printSheetLayout — regions for the single-SVG sheet (B200)", () => {
     expect(pageSize("letter", "landscape")).toMatchObject({ w: 1100, h: 850 });
     expect(pageSize("letter", "portrait")).toMatchObject({ w: 850, h: 1100 });
     expect(pageSize("tabloid", "landscape")).toMatchObject({ w: 1700, h: 1100 });
+  });
+  it("B765985 — exhibit sizes (ARCH C/D, ANSI C/D) are real, correctly-oriented sheets", () => {
+    expect(pageSize("archc", "landscape")).toMatchObject({ wIn: 24, hIn: 18 });
+    expect(pageSize("archc", "portrait")).toMatchObject({ wIn: 18, hIn: 24 });
+    expect(pageSize("archd", "landscape")).toMatchObject({ wIn: 36, hIn: 24 });
+    expect(pageSize("archd", "portrait")).toMatchObject({ wIn: 24, hIn: 36 });
+    expect(pageSize("ansic", "landscape")).toMatchObject({ wIn: 22, hIn: 17 });
+    expect(pageSize("ansic", "portrait")).toMatchObject({ wIn: 17, hIn: 22 });
+    expect(pageSize("ansid", "landscape")).toMatchObject({ wIn: 34, hIn: 22 });
+    expect(pageSize("ansid", "portrait")).toMatchObject({ wIn: 22, hIn: 34 });
+    // the centi-inch numbers agree with the real inches (w === wIn*100)
+    for (const paper of ["archc", "archd", "ansic", "ansid"]) {
+      for (const orient of ["landscape", "portrait"]) {
+        const p = pageSize(paper, orient);
+        expect(p.w).toBe(p.wIn * 100);
+        expect(p.h).toBe(p.hIn * 100);
+      }
+    }
+  });
+  it("PAPER_SIZES names exactly the six sheets pageSize knows, each resolving to its own real size", () => {
+    expect(PAPER_SIZES.map((p) => p.key).sort()).toEqual(["ansic", "ansid", "archc", "archd", "letter", "tabloid"]);
+    const fallback = pageSize("__unknown_paper__", "landscape"); // pageSize's documented fallback: letter-landscape
+    for (const p of PAPER_SIZES) {
+      if (p.key === "letter") continue;
+      expect(pageSize(p.key, "landscape").wIn).not.toBe(fallback.wIn); // resolves to its OWN size, not the unknown-paper fallback
+    }
   });
   it("reserves a right-hand table column only when buildings exist", () => {
     const withT = printSheetLayout({ buildingCount: 3 });
@@ -136,6 +163,34 @@ describe("buildPrintSheetSvg — ONE svg, ONE viewBox, all layers share it (B200
   it("omits the table region when there are no buildings", () => {
     const noB = buildPrintSheetSvg({ layout: printSheetLayout({ buildingCount: 0 }), planSvg: "", buildings: [], pal: PAL });
     expect(noB).not.toContain(">BUILDINGS<");
+  });
+});
+
+describe("B765985 — the compose screen's title-block row: scale + prepared-by", () => {
+  it("titleBlockExtra grows the title band by one line and shrinks the plan area to match — omitted entirely by default (byte-identical to the pre-existing shape)", () => {
+    const plain = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: 0 });
+    const extra = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: 0, titleBlockExtra: true });
+    expect(plain.title.h).toBe(56); // unchanged historical height
+    expect(extra.title.h).toBeGreaterThan(plain.title.h);
+    expect(extra.plan.h).toBeLessThan(plain.plan.h);
+    expect(plain.plan.h - extra.plan.h).toBe(extra.title.h - plain.title.h); // the plan gives up exactly what the title band gains
+  });
+  it("renders the scale text and 'Prepared by' only when given — neither leaks into a sheet that has neither", () => {
+    const L = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: 0 });
+    const bare = buildPrintSheetSvg({ layout: L, planSvg: "", title: "T", buildings: [], pal: PAL });
+    expect(bare).not.toContain("Prepared by");
+    expect(bare).not.toMatch(/1&quot; = \d/);
+    const withBoth = buildPrintSheetSvg({ layout: L, planSvg: "", title: "T", buildings: [], pal: PAL, scale: "1\" = 40'", preparedBy: "J. Smith, PE" });
+    expect(withBoth).toContain("Prepared by J. Smith, PE");
+    expect(withBoth).toMatch(/1&quot; = 40'/); // XML-escaped inch mark
+  });
+  it("a scale with no prepared-by (or vice versa) renders only the half that was given", () => {
+    const L = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: 0 });
+    const scaleOnly = buildPrintSheetSvg({ layout: L, planSvg: "", title: "T", buildings: [], pal: PAL, scale: "Fit to frame" });
+    expect(scaleOnly).toContain("Fit to frame");
+    expect(scaleOnly).not.toContain("Prepared by");
+    const preparedOnly = buildPrintSheetSvg({ layout: L, planSvg: "", title: "T", buildings: [], pal: PAL, preparedBy: "M. Owner" });
+    expect(preparedOnly).toContain("Prepared by M. Owner");
   });
 });
 
