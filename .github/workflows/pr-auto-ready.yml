@@ -39,6 +39,17 @@ name: PR auto-ready
 # secret and update this note — do not reach for pull_request_target, since this workflow
 # never needs to run with base-branch privileges over untrusted fork content (this is a
 # private repo with no forks).
+#
+# ⛔ PERMISSIONS (B793696, fixing B781760's first shipped version). The workflow-level
+# `permissions:` block below was already present in the version that shipped and STILL FAILED
+# live, on real PR #1188, with `GraphqlResponseError: Resource not accessible by integration`
+# from `enablePullRequestAutoMerge` (and, on the same permission scope, almost certainly
+# `markPullRequestReadyForReview` too, though that call wasn't reached that run since the PR
+# was already non-draft). Each job now ALSO carries its own explicit `permissions:` block,
+# scoped to exactly what that job calls. See B793696/V438336 in BACKLOG.md / VERIFICATION.md
+# for the live re-test result and whether that was sufficient, or whether it also needed a
+# repository Actions setting changed — the backlog item is the source of truth, not this
+# comment; do not treat the presence of job-level blocks alone as proof anything was fixed.
 
 on:
   pull_request:
@@ -57,6 +68,9 @@ jobs:
   # label immediately rather than waiting on the next claude/* PR.
   ensure-hold-label:
     runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
     steps:
       - name: Ensure the "hold" label exists
         uses: actions/github-script@v7
@@ -83,6 +97,9 @@ jobs:
   auto-ready:
     if: github.event_name == 'pull_request' && startsWith(github.event.pull_request.head.ref, 'claude/')
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
     steps:
       - name: Mark ready for review + arm squash auto-merge (unless held)
         uses: actions/github-script@v7
@@ -97,16 +114,39 @@ jobs:
               );
               return;
             }
+            // B793696: enablePullRequestAutoMerge failed FORBIDDEN on PR #1188 even though the
+            // job's OWN GITHUB_TOKEN Permissions log block printed "PullRequests: write" already
+            // granted — proven on the real run, not assumed. That is GitHub restricting this
+            // specific mutation for the default Actions token regardless of scope (the same class
+            // of restriction as "GITHUB_TOKEN cannot approve pull request reviews"), not a missing
+            // permissions grant. markPullRequestReadyForReview is a plain metadata mutation (not an
+            // approval-adjacent one) and is expected to behave differently — this run is what
+            // determines that empirically rather than by assuming it shares the same restriction.
+            const isForbidden = (err) =>
+              /resource not accessible by integration/i.test(err && err.message || "");
             if (pr.draft) {
-              await github.graphql(
-                `mutation($id: ID!) {
-                  markPullRequestReadyForReview(input: { pullRequestId: $id }) {
-                    pullRequest { id isDraft }
-                  }
-                }`,
-                { id: pr.node_id }
-              );
-              core.info(`Marked #${pr.number} ready for review.`);
+              try {
+                await github.graphql(
+                  `mutation($id: ID!) {
+                    markPullRequestReadyForReview(input: { pullRequestId: $id }) {
+                      pullRequest { id isDraft }
+                    }
+                  }`,
+                  { id: pr.node_id }
+                );
+                core.info(`Marked #${pr.number} ready for review.`);
+              } catch (err) {
+                if (isForbidden(err)) {
+                  core.setFailed(
+                    `markPullRequestReadyForReview FORBIDDEN on #${pr.number} despite granted ` +
+                      `pull-requests: write — GITHUB_TOKEN cannot perform this mutation here. ` +
+                      `See B793696 in BACKLOG.md: this needs a PAT/App token, a repo owner decision, ` +
+                      `not a workflow-only fix. #${pr.number} was NOT marked ready — mark it by hand.`
+                  );
+                  return;
+                }
+                throw err;
+              }
             }
             if (pr.auto_merge) {
               core.info(`#${pr.number} already has auto-merge armed — nothing to do.`);
@@ -125,6 +165,19 @@ jobs:
             } catch (err) {
               if (/already enabled/i.test(err.message || "")) {
                 core.info(`#${pr.number} already has auto-merge armed — nothing to do.`);
+              } else if (isForbidden(err)) {
+                // Confirmed on PR #1188 (2026-08-26): FORBIDDEN here despite granted
+                // pull-requests: write. core.warning (not setFailed) so this doesn't paint every
+                // future claude/* PR's check red for a known, human-decision-pending limitation —
+                // but it is NOT silent: it's a visible annotation on the job, and the PR is left
+                // with auto-merge un-armed for a session/owner to arm by hand until B793696 lands
+                // a fix (a PAT/App token) or this comment is proven wrong by a later run.
+                core.warning(
+                  `enablePullRequestAutoMerge FORBIDDEN on #${pr.number} despite granted ` +
+                    `pull-requests: write — this is the known B793696 GITHUB_TOKEN restriction, ` +
+                    `not a config bug in this workflow. Auto-merge was NOT armed; arm it by hand ` +
+                    `(or wait for B793696's fix) until this warning stops appearing.`
+                );
               } else {
                 throw err;
               }
