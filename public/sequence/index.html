@@ -2569,6 +2569,18 @@ const evalHealthRules = (task, settings, NOW, taskById) => {
 // that's safe).
 const computeDisplayHealth = (task, settings, taskById) => {
   if (!task) return task?.health;
+  // ⛔ COMPLETE-BEATS-ALL (2026-08-26, owner correction, verbatim: "if the finish date is in the
+  // past, it should be marked red and as Needs Attn., UNLESS I click task complete, it is THEN
+  // COMPLETE, I CAN OVERRIDE IN THAT SCENARIO"). Marking a task Complete is a first-class act, not
+  // an optional rule he has to remember to configure — it is evaluated ABOVE the rule list,
+  // unconditionally, whether or not a "complete" rule exists in settings.healthRules, and cannot be
+  // broken by editing/removing rules. "Complete" IS `task.health === "green"` (the same field the
+  // Complete status pill writes — there is no separate flag). This closes a live regression from the
+  // B752848 healthOverride retirement: a task marked Complete without its `percentComplete` also
+  // being bumped to 100 (the ordinary single-task edit path never did that — only the bulk cascade
+  // did) fell through to the plain `finishPastDays` rule and rendered red once its finish date
+  // passed, punishing the owner for finishing work. Measured live: 212 of 557 real leaf tasks.
+  if (task.health === "green") return "green";
   const ruleResult = evalHealthRules(task, settings, NOW, taskById);
   if (ruleResult) return ruleResult;
   // B817 — a meeting-bound task surfaces its schedule risk BEFORE it slips: infeasible = red (a genuine
