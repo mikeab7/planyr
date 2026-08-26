@@ -37,6 +37,10 @@ import { parcelSelectHintDecision, PARCEL_HINT_COOLDOWN_MS } from "./lib/parcelS
 import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
 import { nearestBoundaryEdge, constrainToEdgeAngle, edgeLockTolFt } from "./lib/edgeConstrain.js";
 import { markupsUnderPoint, nextMarkupSelection, boxCorners } from "./lib/markupPick.js";
+import {
+  CLOUD_ARC_PRESETS, CLOUD_ARC_MIN_FT, CLOUD_ARC_MAX_FT, CLOUD_ARC_DEFAULT_FT, CLOUD_STATUS_OPTIONS,
+  clampCloudArcFt, cloudScallopPath, simplifyPath, cloudMetaDefaults,
+} from "./lib/cloudGeometry.js";
 import { EMPTY_TAP, tapTime, stepDoubleTap } from "./lib/doubleTap.js";
 import { DRAG_SLOP_PX, makeDragGate, stepDragGate, dragArmed } from "./lib/dragGate.js";
 import { isDiagArmed, latchDiagArm } from "./lib/diagArm.js";
@@ -120,6 +124,9 @@ const ParcelTaxes = lazy(() => import("./components/ParcelDataPanel.jsx").then((
  * Lazy for the same reason as the panels above: a modal opened at most once per session, carrying
  * its own interactive Leaflet map, has no business on the planner's boot chunk. */
 const SetLocationDialog = lazy(() => import("./components/SetLocationDialog.jsx"));
+/* NEW-1 — the road cross-section designer. Lazy for the same reason: a modal a session opens rarely,
+ * with its own live-preview SVG, has no business on the planner's boot chunk. */
+const RoadCrossSectionDialog = lazy(() => import("./components/RoadCrossSectionDialog.jsx"));
 /* NEW-1 / NEW-3 — the Parcel panel's record + placement bodies, lazily loaded for exactly the reason
  * the appraisal panels above are: both render only inside the Parcel panel (one only for a selected
  * lot, one only once the plan has a location), and the Site route's largest chunk has no headroom to
@@ -278,6 +285,7 @@ import YieldFooterDisclaimer from "./components/YieldFooterDisclaimer.jsx";
 import Collapse from "./components/Collapse.jsx";
 import Chip from "./components/Chip.jsx";
 import RowInfo from "./components/RowInfo.jsx";
+import OcrDeedTextarea from "./components/OcrDeedTextarea.jsx";
 import { pondInspectorChips, POND_CHIP_DEFS, pondGroupSummary, POND_FLOOD_NOTES, POND_PURPOSE_TOOLTIP, POND_PURPOSE_DESCRIPTOR } from "./lib/pondInspectorCopy.js";
 import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
@@ -295,6 +303,10 @@ import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDog
   wallStripBox, wallKidBox, wallKidPerp, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost, sideParkAlongRun,
   sideParkStack } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
+import {
+  bandTypeOf, normalizeBands, makeXSection, xsectionFromRoad, hasXSection, curbToCurbWidth, pavedWidth,
+  bandLayout, bandStripeMarks, BAND_FILL_TOKEN, BAND_FILL_OPACITY,
+} from "./lib/roadCrossSection.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF, stallStripesExplicit, segmentsPath, featureNameLabelVisible, featureNameFontPx, featureExtentFt } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
@@ -577,6 +589,10 @@ const ICON_PATHS = {
   mellipse: <ellipse cx="8" cy="8" rx="6" ry="4.4" />,
   mpolygon: <path d="M8 2.4 L13.4 6.2 L11.3 12.6 L4.7 12.6 L2.6 6.2 Z" />,
   mpolyline: <path d="M2.5 11 L6 5.5 L9 9 L13.5 3.5" />,
+  // Revision cloud — the real scalloped outline (8 equal arcs), not a generic weather-cloud glyph,
+  // so it reads as the Bluebeam markup rather than "cloud sync". Traced with cloudGeometry.js's own
+  // cloudScallopPath so the tool button matches what it actually draws.
+  mcloud: <path d="M8 4.4 A 1.55 1.55 0 0 1 12 5.7 A 1.55 1.55 0 0 1 13.6 8.7 A 1.55 1.55 0 0 1 12 11.7 A 1.55 1.55 0 0 1 8 13 A 1.55 1.55 0 0 1 4 11.7 A 1.55 1.55 0 0 1 2.4 8.7 A 1.55 1.55 0 0 1 4 5.7 A 1.55 1.55 0 0 1 8 4.4 Z" />,
   // B543 — deed/title launcher glyph: a document page (folded corner) over a few
   // text lines, signalling "read a deed / title commitment". Same currentColor
   // stroke style (no fill) as the other tool glyphs.
@@ -638,9 +654,10 @@ const TOOLS = [
   { id: "mellipse", label: "Ellipse", hint: "Markup ellipse (E): drag a box. Hold Shift for a circle" },
   { id: "mpolygon", label: "Polygon", hint: "Markup polygon (Shift+P): click points, click the first dot or double-click to close. Shift for 45° segments" },
   { id: "mpolyline", label: "Polyline", hint: "Markup polyline (Shift+N): click points, double-click / Enter to finish. Shift for 45° segments" },
+  { id: "mcloud", label: "Cloud", hint: "Revision cloud (C): click to place a point and continue the path, or drag to trace freehand — mix freely, close on the first dot / double-click / Enter. Arc size, colour and the rest are on the Properties panel once it's selected" },
 ];
 const DRAW_TYPES = ["building", "paving", "road", "parking", "trailer", "pond"];
-const MARKUP_TOOLS = ["mpolyline", "mline", "mrect", "mellipse", "mpolygon"];
+const MARKUP_TOOLS = ["mpolyline", "mline", "mrect", "mellipse", "mpolygon", "mcloud"];
 // Measure-mode display names — Bluebeam's terms (Length / Polylength / Area). The
 // internal mode value stays line/polyline/area (persisted in localStorage), so this is
 // label-only; "Polylength" also disambiguates the measurement from the markup "Polyline".
@@ -667,6 +684,14 @@ const MOD_LABEL = (typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.te
 // place, distinct across tabs — two live writers never share a journal key; see elementJournal.js).
 const journalSid = journalSessionId();
 const MK_DEFAULT = { stroke: "#c2410c", weight: 2, dash: "solid", fill: "#c2410c", fillOpacity: 0 };
+// Cloud's OWN sticky style, kept separate from MK_DEFAULT/mkStyle — every other markup tool shares
+// one "last used" style, so if Cloud read from that shared state it would inherit whatever colour
+// was last drawn (starting from MK_DEFAULT's #c2410c, the exact collision the tool's spec forbids).
+// #2563EB is `familyInk.js` FAMILY_DEFAULT_INK.cloud — measured ≥12 ΔE00 from every other drawn
+// family's default ink (test/familyInk.test.js). arcFt rides the same sticky-default mechanism as
+// every other style field here (NEW-1, B770896) — a cloud's arc size is a per-object property with
+// a remembered default, exactly like its stroke weight, not a separate piece of pre-draw config.
+const MK_CLOUD_DEFAULT = { stroke: "#2563EB", weight: 2, dash: "solid", fill: "#2563EB", fillOpacity: 0, arcFt: CLOUD_ARC_DEFAULT_FT };
 // NEW-4 — what the recently-used swatch row shows on a fresh browser: the plan's own default
 // palette (every element type's fill + line, plus the markup accent), so the row is never blank.
 // Derived from TYPE, never a second hardcoded list that could drift from it.
@@ -796,10 +821,13 @@ const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const measPts = (m) => (m.pts ? m.pts : (m.a && m.b ? [m.a, m.b] : []));
 const measMode = (m) => m.mode || "line";
 // Neutral markup shapes that support Bluebeam-style geometry editing: vertex shapes
-// (line/polyline/polygon) expose draggable control points; box shapes (rect/ellipse)
+// (line/polyline/polygon/cloud) expose draggable control points; box shapes (rect/ellipse)
 // resize + rotate via grips. Semantic markups (utilRoute/traced/encumbrance/…) stay
 // move-only — they carry derived geometry that hand-editing would desync.
-const MK_VERTEX_KINDS = ["line", "polyline", "polygon"];
+// A cloud is ALWAYS stored as a vertex ring (`pts`), whichever of its three draw modes made it
+// (polygon click-path, rectangle drag, or freehand) — never a centre-box — so it reshapes via the
+// SAME vertex idiom as a building footprint / polygon markup, per spec.
+const MK_VERTEX_KINDS = ["line", "polyline", "polygon", "cloud"];
 const MK_BOX_KINDS = ["rect", "ellipse"];
 // Width (screen px) of the transparent fat hit-stroke under open-path markups (line/polyline),
 // so they grab within ~6px on either side at any zoom — matching a polyline's forgiving feel (B155).
@@ -814,7 +842,7 @@ const CALLOUT_BORDER_BAND_PX = 6;
 // magnet they bound (NEW-2(d)), so the cap is unit-tested rather than buried in this file.
 const mkPts = (m) => (m.kind === "line" ? [m.a, m.b] : (m.pts || []));
 const setMkPts = (m, pts) => (m.kind === "line" ? { ...m, a: pts[0], b: pts[1] } : { ...m, pts });
-const mkMinPts = (m) => (m.kind === "polygon" ? 3 : 2);
+const mkMinPts = (m) => (m.kind === "polygon" || m.kind === "cloud" ? 3 : 2);
 // B230 — nearest point on segment a→b to p (all {x,y}); lets a Shift-click / right-click
 // drop a control point EXACTLY where the user touched the edge (Bluebeam-style), not at the
 // old fixed midpoint. Returns the point + its distance for hit-testing.
@@ -1985,7 +2013,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [numEdit, setNumEdit] = useState(null);           // {fx,fy (feet), value, onCommit, chipKey?} — inline numeric edit, NEVER a dialog box. NEW-1: `chipKey` names the setback chip that spawned it, which then renders the editor IN PLACE of itself (and the floating fallback below stands down)
   const [mkRect, setMkRect] = useState(null);   // {kind, a:{x,y}, b:{x,y}} drag-draw a markup rect/ellipse/line
   const [mkPoly, setMkPoly] = useState(null);   // {kind, pts:[{x,y}]} click-draw a markup polygon/polyline
+  const [mkFreehand, setMkFreehand] = useState(null); // {pts:[{x,y}]} in-progress freehand cloud drag
   const [mkStyle, setMkStyle] = useState(MK_DEFAULT); // current markup style (sticky)
+  const [mkCloudStyle, setMkCloudStyle] = useState(MK_CLOUD_DEFAULT); // Cloud's OWN sticky style — see MK_CLOUD_DEFAULT (now incl. arcFt)
   const [tool, setTool] = useState("select");
   const [toolMenu, setToolMenu] = useState(false); // Parcel ▾ dropdown open
   const [addParcelMenu, setAddParcelMenu] = useState(false); // B383: ＋ Add parcel flyout in the Parcel panel
@@ -2088,8 +2118,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // an existing browser can't land in a mode the menu no longer offers.
   const [roadWidth, setRoadWidth] = useState(() => { const v = lsGet("roadWidth", ""); return +v > 0 ? v : DEFAULT_ROAD_WIDTH; });
   const [roadCustom, setRoadCustom] = useState(false); // NEW-3: the Custom width… entry field is showing
+  // NEW-1 — the ACTIVE cross-section for the next-drawn road, set via "Design cross-section..." in
+  // the Road tool's own width flyout (never a popover that gates drawing — this is a sticky tool
+  // default exactly like roadWidth beside it; drawing itself is unchanged). null = the plain
+  // single-width road every road has always been. Sticky across sessions, same key family as
+  // roadWidth (persisted in the effect below).
+  const [roadXSection, setRoadXSectionTool] = useState(() => { try { const v = JSON.parse(lsGet("roadXSection", "null")); return v && Array.isArray(v.bands) && v.bands.length ? makeXSection(v.bands) : null; } catch (_) { return null; } });
+  const [xsDialog, setXsDialog] = useState(null); // { mode:"new"|"edit", elId? } — the cross-section designer
   // Easement tool (NEW-1/2/3): a first-class easement object on the editable layer.
   // `easeMode` is the input mode; easeType/easeWidth are sticky tool defaults.
+  // Cloud tool (B770896): NO mode state here any more — a click vs. a drag is inferred per-gesture
+  // (see the `mkCloudGesture` handling in onDown/onMove/onUp), and arc size is just one more field
+  // of `mkCloudStyle`'s sticky default (MK_CLOUD_DEFAULT above), the same mechanism every other
+  // markup style property already uses. (History: this used to be two `lsGet`-backed states here,
+  // deliberately placed below `lsGet`'s own declaration after a real TDZ crash when they lived
+  // above it near mkPoly/mkStyle — moot now that both states are gone, kept as a warning for
+  // whatever cloud-specific state comes next.)
   const [easeMode, setEaseMode] = useState(() => lsGet("easeMode", "centerline")); // centerline | boundary | parceledge
   const [easeType, setEaseType] = useState(() => lsGet("easeType", "utility"));
   const [easeWidth, setEaseWidth] = useState(() => Math.max(1, +lsGet("easeWidth", "10") || 10));
@@ -2617,6 +2661,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const deedReqRef = useRef(0);
   const [deedQueue, setDeedQueue] = useState([]); // dropped deeds waiting to be placed (multi-file)
   const [deedActiveId, setDeedActiveId] = useState(null); // the queue row currently loaded in the textarea                       // in-flight read token (ignore a stale read)
+  // B768160 — OCR fallback for a scanned deed PDF (readDeedFile's pdfText.js throws a `.scanned`-
+  // flagged error for one with no text layer; readDeeds catches it and routes here instead of just
+  // showing the refusal). `ocrRun` is null when no OCR is in flight/loaded for the CURRENT queue row;
+  // once it loads, it holds { pages:[{pageNum,text,rawText,changes,meanConfidence}], wordSpans,
+  // pageCount, activePage } — `activePage` is null (the default full concatenation) or a pageNum (the
+  // page-picker narrowed the box to just that page's text).
+  const [ocrRun, setOcrRun] = useState(null);
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState(null); // { page, index, of, status, pct }
+  const [ocrErr, setOcrErr] = useState("");
+  const ocrAbortRef = useRef(null);
+  // The OCR review helpers (lowConfidenceSpans/culpritCalls/flagSuspectDistances) ride the SAME
+  // dynamic import as the OCR engine itself (deedOcr.js re-exports them) rather than a static
+  // import here — a static import would duplicate `ocrConfidence.js`/`deedOcrRepair.js` into the
+  // always-loaded Site route chunk for functions only ever called once OCR data exists. `ocrRun`
+  // is only ever set AFTER this ref is populated (both happen inside the same OCR call), so any
+  // render that reads `ocrRun` truthy can rely on this being populated too.
+  const ocrHelpersRef = useRef(null);
   const [overlapWarn, setOverlapWarn] = useState(""); // transient warning after a plot
   // NEW-1/B754752 — the bottom-center canvas toast's horizontal anchor, in VIEWPORT px. Defaults to
   // null (renders at the true viewport center, byte-identical to before) until the canvas-edge
@@ -5815,7 +5877,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [leftPanel, narrow, companionSel, narrowProps, leftWidth, size.w]);
   // Remember the left menu width between sessions.
   useEffect(() => { try { localStorage.setItem("planarfit:leftWidth", String(leftWidth)); } catch (_) {} }, [leftWidth]);
-  useEffect(() => { try { localStorage.setItem("planarfit:parkingRows", parkingRows); localStorage.setItem("planarfit:roadWidth", roadWidth); localStorage.setItem("planarfit:measureMode", measureMode); localStorage.setItem("planarfit:easeMode", easeMode); localStorage.setItem("planarfit:easeType", easeType); localStorage.setItem("planarfit:easeWidth", String(easeWidth)); } catch (_) {} }, [parkingRows, roadWidth, measureMode, easeMode, easeType, easeWidth]);
+  useEffect(() => { try { localStorage.setItem("planarfit:parkingRows", parkingRows); localStorage.setItem("planarfit:roadWidth", roadWidth); localStorage.setItem("planarfit:roadXSection", JSON.stringify(roadXSection)); localStorage.setItem("planarfit:measureMode", measureMode); localStorage.setItem("planarfit:easeMode", easeMode); localStorage.setItem("planarfit:easeType", easeType); localStorage.setItem("planarfit:easeWidth", String(easeWidth)); } catch (_) {} }, [parkingRows, roadWidth, roadXSection, measureMode, easeMode, easeType, easeWidth]);
   // Drag the panel's right edge to resize it.
   const startLeftResize = (e) => {
     e.preventDefault();
@@ -6153,6 +6215,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if ((e.key === "e" || e.key === "E") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); selectTool("mellipse"); return; }
       if ((e.key === "p" || e.key === "P") && e.shiftKey && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("mpolygon"); return; }
       if ((e.key === "n" || e.key === "N") && e.shiftKey && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("mpolyline"); return; }
+      if ((e.key === "c" || e.key === "C") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); selectTool("mcloud"); return; }
       if (e.key === "Enter" && tool === "select" && combineSel.length >= 2) { e.preventDefault(); mergeParcels(); return; }
       // Enter finishes / auto-closes ANY in-progress multi-point drawing (one shared path with double-click).
       if (e.key === "Enter" && finishActiveDrawing()) { e.preventDefault(); return; }
@@ -6163,7 +6226,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // the ✕ does). It runs BEFORE the catch-all below and consumes the key, so the panel can never
       // be a place you get stuck; a second Escape then falls through and deselects as always.
       if (e.key === "Escape" && inspectorShowingRef.current) { e.preventDefault(); closeInspector(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); branchSeedRef.current = null; setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAddLeaderFor(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setBoundaryEdit(false); setMergePick(false); setGisHit(null); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { ...EMPTY_TAP }; }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); branchSeedRef.current = null; setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAddLeaderFor(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setMkFreehand(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setBoundaryEdit(false); setMergePick(false); setGisHit(null); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { ...EMPTY_TAP }; }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current && deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index)) { e.preventDefault(); return; } // B230: an armed control point → delete just that vertex. NEW-1: deleteVtx returns false on a no-op (endpoint/min/stale) → we DON'T consume the key; it falls through to the whole-element delete below so Delete can never silently wedge.
@@ -6830,6 +6893,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setMkPoly((d) => (d ? { ...d, pts: [...d.pts, pt] } : { kind: tool, pts: [pt] }));
       return;
     }
+    // NEW-1 (B770896) — Cloud: ONE gesture, inferred from what the pointer does rather than a mode
+    // picked in advance. Whether this press turns out to be a click (adds one vertex) or a drag
+    // (traces freehand) is decided on release/movement (see onMove/onUp's "mkCloudGesture" — the
+    // owner's own framing: "the answer is nothing," so there is nothing to arm here). Both write
+    // into the SAME `mkPoly` ring, so a click and a drag can freely mix within one cloud, closed the
+    // same way either way — click the first dot, double-click, Enter, or Esc to cancel.
+    if (tool === "mcloud") {
+      const sp = snapPt(fp);
+      const last = mkPoly?.kind === "mcloud" ? mkPoly.pts[mkPoly.pts.length - 1] : null;
+      if (mkPoly && mkPoly.kind === "mcloud" && mkPoly.pts.length >= 3 && dist(f2p(sp), f2p(mkPoly.pts[0])) < 12) { finishMkPoly(); return; }
+      const pt = (e.shiftKey && last) ? snapPt(snap45(last, fp)) : sp;
+      drag.current = { mode: "mkCloudGesture", sx: e.clientX, sy: e.clientY, pt };
+      svgRef.current.setPointerCapture(e.pointerId);
+      return;
+    }
     if (tool === "easement") {
       if (easeMode === "parceledge") return; // edges are picked via the parcel-edge hit targets, not the canvas
       const sp = snapPt(fp);
@@ -7274,12 +7352,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setEditCallout({ id: c.id, text: "", isNew: true });
   };
   /* ------------ markup shapes ------------ */
-  const finishMkPoly = () => {
-    if (mkPoly) {
-      const pts = mkPoly.pts.filter((p, i) => i === 0 || dist(p, mkPoly.pts[i - 1]) > 0.01);
-      const min = mkPoly.kind === "mpolygon" ? 3 : 2;
+  // NEW-1 — the ONE place a cloud markup object gets built, whichever mix of click/drag produced
+  // its vertex ring (see the "mkCloudGesture" handling in onDown/onMove/onUp). Always a `pts` ring
+  // (kind "cloud" joins MK_VERTEX_KINDS, never MK_BOX_KINDS — see that constant's comment): a cloud
+  // reshapes via the same vertex idiom as a building footprint/polygon markup regardless of how it
+  // was drawn. Carries Bluebeam-parity metadata (Subject/Comment/Author/Created/Modified/Status/
+  // Label/Layer) + the cloud's OWN sticky style (mkCloudStyle, never mkStyle — see MK_CLOUD_DEFAULT,
+  // which now carries arcFt too — a cloud's arc size is a per-object property with a remembered
+  // default exactly like its stroke weight, not a separate piece of pre-draw config).
+  const newCloudMarkup = (pts) => ({
+    id: uid(), kind: "cloud", pts, ...mkCloudStyle, ...cloudMetaDefaults(new Date().toISOString()),
+  });
+  // `ptsOverride` lets a caller finish a ring it has ALREADY computed (the cloud gesture's onUp,
+  // which must not round-trip through setMkPoly's async state before it can close) without
+  // duplicating the commit logic below.
+  const finishMkPoly = (ptsOverride) => {
+    const src = ptsOverride ? { kind: mkPoly?.kind || "mcloud", pts: ptsOverride } : mkPoly;
+    if (src) {
+      const pts = src.pts.filter((p, i) => i === 0 || dist(p, src.pts[i - 1]) > 0.01);
+      const isCloud = src.kind === "mcloud";
+      const min = (src.kind === "mpolygon" || isCloud) ? 3 : 2;
       if (pts.length >= min) {
-        const mk = { id: uid(), kind: mkPoly.kind === "mpolygon" ? "polygon" : "polyline", pts, ...mkStyle };
+        const mk = isCloud ? newCloudMarkup(pts)
+          : { id: uid(), kind: src.kind === "mpolygon" ? "polygon" : "polyline", pts, ...mkStyle };
         pushHistory(); setMarkups((a) => [...a, ...withStackZ(a, [mk])]); setSel({ kind: "markup", id: mk.id });
       }
     }
@@ -7403,6 +7498,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const setSelMarkup = (patch) => { pushHistory(); setMarkups((a) => a.map((m) => m.id === selMarkup.id ? { ...m, ...patch } : m)); setMkStyle((s) => ({ ...s, ...patch })); };
   // Geometry patch (w/h/rot) — kept out of mkStyle so new shapes don't inherit a past size/angle.
   const setSelMarkupGeom = (patch) => { pushHistory(); setMarkups((a) => a.map((m) => m.id === selMarkup.id ? { ...m, ...patch } : m)); };
+  // NEW-1 — the Cloud twins of setSelMarkup/liveMarkup: same shape, but write mkCloudStyle (never
+  // mkStyle, which every OTHER markup tool shares) and stamp Modified (Bluebeam parity: a cloud's
+  // Modified timestamp auto-updates on a property edit).
+  const setSelMarkupCloud = (patch) => {
+    pushHistory();
+    const modifiedAt = new Date().toISOString();
+    setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, ...patch, modifiedAt } : m)));
+    setMkCloudStyle((s) => ({ ...s, ...patch }));
+  };
 
   /* ------------ easements (first-class objects on the editable layer) ------------ */
   // The hand-editable path of an easement: the boundary ring for mode B, else the
@@ -7619,7 +7723,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (sel.kind === "markup") {
       const m = markups.find((x) => x.id === sel.id); if (!m || m.locked) return null;
       if (m.kind === "easement") { const closed = m.mode === "boundary"; return { layer: "ease", id: m.id, pts: easeEditPath(m), closed, min: closed ? 3 : 2 }; }
-      if (m.kind === "polyline" || m.kind === "polygon") return { layer: "markup", id: m.id, pts: mkPts(m), closed: m.kind === "polygon", min: mkMinPts(m) };
+      if (m.kind === "polyline" || m.kind === "polygon" || m.kind === "cloud") return { layer: "markup", id: m.id, pts: mkPts(m), closed: m.kind !== "polyline", min: mkMinPts(m) };
     }
     return null;
   };
@@ -8036,6 +8140,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         else { const s = Math.max(Math.abs(b.x - d.a.x), Math.abs(b.y - d.a.y)); b = { x: d.a.x + Math.sign(b.x - d.a.x || 1) * s, y: d.a.y + Math.sign(b.y - d.a.y || 1) * s }; } // square/circle
       }
       setMkRect({ kind: d.kind, a: d.a, b });
+      return;
+    }
+    // NEW-1 (B770896) — a cloud gesture becomes a DRAG once travel clears DRAG_SLOP_PX (the app's
+    // one shared click-vs-drag threshold, dragGate.js); below it, it might still turn out to be a
+    // click on release, so nothing is written yet. Past it, accumulate the raw trail, distance-
+    // gated (a screen-px floor, zoom-independent) so a slow drag doesn't pile up thousands of
+    // near-duplicate points before the release-time RDP simplify runs.
+    if (d.mode === "mkCloudGesture") {
+      if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) <= DRAG_SLOP_PX) return;
+      const minStepFt = 2 / view.ppf;
+      setMkFreehand((cur) => {
+        if (!cur) return { pts: [d.pt, fp] };
+        const last = cur.pts[cur.pts.length - 1];
+        return dist(last, fp) >= minStepFt ? { pts: [...cur.pts, fp] } : cur;
+      });
       return;
     }
     if (d.mode === "mkMove") {
@@ -8495,6 +8614,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
       return;
     }
+    // NEW-1 (B770896) — release decides what this gesture was: a real drag (mkFreehand got seeded
+    // in onMove) is RDP-simplified and its points appended; a gesture that never cleared the slop
+    // was a plain click and contributes its single down-point instead. Either way the points land
+    // in the SAME `mkPoly` ring, and a ring that already loops back near its own first point closes
+    // immediately here — exactly like clicking the first dot, so a single drag still finishes a
+    // whole cloud in one motion, same as it always could.
+    if (d && d.mode === "mkCloudGesture") {
+      const added = (mkFreehand && mkFreehand.pts.length >= 2) ? simplifyPath(mkFreehand.pts, 4 / view.ppf) : [d.pt];
+      const merged = [...(mkPoly?.kind === "mcloud" ? mkPoly.pts : []), ...added];
+      const closes = merged.length >= 3 && dist(f2p(merged[0]), f2p(merged[merged.length - 1])) < 12;
+      if (closes) finishMkPoly(merged.slice(0, -1));
+      else setMkPoly({ kind: "mcloud", pts: merged });
+      setMkFreehand(null);
+      drag.current = null; setPanning(false);
+      try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
+      return;
+    }
     if (d && d.mode === "draw" && draftRect) {
       if (d.depth) {
         // fixed-width preset (parking rows / road width): a length×depth strip,
@@ -8687,12 +8823,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const seed = branchSeedRef.current;                       // NEW-8 — set by "Branch a road from here"
     branchSeedRef.current = null;
     const curb = seed && Number.isFinite(+seed.curb) ? +seed.curb : (+settings.roadCurb || CURB);
-    const travelW = seed && +seed.travelW > 0 ? +seed.travelW : (roadWidth !== "free" && +roadWidth > 0 ? +roadWidth : 24);
+    // NEW-1 — a branched road carries its parent's designed section forward; otherwise the tool's own
+    // ACTIVE section (set via "Design cross-section..." in the width flyout) applies to every road
+    // drawn until cleared. Neither present → the plain single-width road exactly as before.
+    const xsection = (seed && seed.xsection) || roadXSection || null;
+    const travelW = xsection ? Math.max(1, curbToCurbWidth(xsection))
+      : seed && +seed.travelW > 0 ? +seed.travelW : (roadWidth !== "free" && +roadWidth > 0 ? +roadWidth : 24);
     const roadClass = seed && seed.roadClass ? seed.roadClass : DEFAULT_ROAD_CLASS;
     const defR = classDefaultRadius(roadClassOf(settings, roadClass));
     const vtx = raw.map((_, i) => (i === 0 || i === raw.length - 1) ? {} : { treatment: "arc", radius: defR });
     const bbox = roadStripBBox(raw, vtx, travelW, curb, { defaultRadius: defR });
-    let el = { id: uid(), type: "road", pts: raw, vtx, travelW, curb, roadClass, ...bbox };
+    let el = { id: uid(), type: "road", pts: raw, vtx, travelW, curb, roadClass, ...(xsection ? { xsection } : {}), ...bbox };
     pushHistory();
     // B945/NEW-1 — connect the final endpoint if it landed on another road (merge / weld / tee) or,
     // B955, a parking-drive / truck-court edge (weld + store the drive junction). NOT Snap-gated (B949);
@@ -8744,6 +8885,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tool === "measure" && measDraft.length >= (measureMode === "area" ? 3 : measureMode === "count" ? 1 : 2)) { finishMeasure(); return true; }
     if (tool === "mpolyline" && mkPoly?.pts?.length >= 2) { finishMkPoly(); return true; }
     if (tool === "mpolygon" && mkPoly?.pts?.length >= 3) { finishMkPoly(); return true; }
+    if (tool === "mcloud" && mkPoly?.kind === "mcloud" && mkPoly?.pts?.length >= 3) { finishMkPoly(); return true; }
     if (tool === "parcel" && draftPoly?.length >= 3) { closePoly(); return true; }
     if (draftElPoly?.pts?.length >= 3) { closeElPoly(); return true; } // any area element drawn as a polygon
     if (tool === "road" && draftRoadPts?.length >= 2) { finishRoad(); return true; } // centerline road (B596)
@@ -11240,8 +11382,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     });
     const node = ins ? ins.pts[ins.index] : bestPt;
     if (ins) setEls((a) => a.map((x) => (x.id === parent.id && isCenterlineRoad(x) ? reRoad({ ...x, pts: ins.pts, vtx: ins.vtx }) : x)));
-    // The branch inherits the parent's cross-section — the least surprising default, and editable after.
-    branchSeedRef.current = { roadClass: parent.roadClass || DEFAULT_ROAD_CLASS, travelW: +parent.travelW || 24, curb: parent.curb };
+    // The branch inherits the parent's cross-section — the least surprising default, and editable
+    // after. NEW-1: a parent carrying a real designed band list hands the branch that same list
+    // (travelW then derives from it in finishRoad, same as the parent's own).
+    branchSeedRef.current = { roadClass: parent.roadClass || DEFAULT_ROAD_CLASS, travelW: +parent.travelW || 24, curb: parent.curb, xsection: hasXSection(parent) ? parent.xsection : null };
     setSel(null);
     setTool("road");
     setRoadWidth(String(+parent.travelW || 24));
@@ -17129,6 +17273,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setParcelMode("add"); // B598 — always (re)enter the Parcel tool in Draw mode, never a stale Remove
     setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setMarquee(null);
     if (id !== "easement") { setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); }
+    setMkFreehand(null);
     if (id !== "select") setMulti([]);
     setMergePick(false); // B720: switching tools exits merge pick mode (startMergePick re-arms it after selecting Select)
     if (id !== "select") setBoundaryEdit(false); // NEW-1: boundary editing lives in Select; any draw tool leaves it
@@ -17149,22 +17294,69 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // can "just drop in the files" instead of pasting. Each file is read + parsed on the way in for an
   // immediate honest read-out (calls found, or why not); the first readable one loads into the
   // plotter textarea. A single-file drop behaves exactly as before.
+  // OCR a scanned PDF (pdfText.js threw a `.scanned`-flagged error for it) into deed text, updating
+  // the shared progress/cancel state as it goes. Returns the text, or throws if OCR itself fails or
+  // is cancelled before any usable text came out — the caller's existing per-file catch handles that
+  // exactly like any other unreadable file. `row.ocr` carries the per-page + confidence data the
+  // textarea highlighter / page picker / closure-culprit pointer read.
+  const ocrScannedPdfInto = async (file, row, myReq) => {
+    setOcrErr(""); setOcrBusy(true); setOcrProgress(null);
+    const ac = new AbortController();
+    ocrAbortRef.current = ac;
+    try {
+      const ocrMod = await import("../../shared/files/deedOcr.js");
+      ocrHelpersRef.current = { lowConfidenceSpans: ocrMod.lowConfidenceSpans, culpritCalls: ocrMod.culpritCalls, flagSuspectDistances: ocrMod.flagSuspectDistances };
+      const result = await ocrMod.ocrScannedDeedPdf(file, {
+        signal: ac.signal,
+        onProgress: (p) => { if (deedReqRef.current === myReq) setOcrProgress(p); },
+      });
+      if (!result.text.trim()) {
+        throw new Error(result.cancelled
+          ? "OCR was cancelled before any page finished."
+          : "OCR ran but found no readable text on this scan.");
+      }
+      row.ocr = { pages: result.pages, wordSpans: result.wordSpans, pageCount: result.pageCount, cancelled: result.cancelled, activePage: null };
+      if (result.cancelled && deedReqRef.current === myReq) {
+        flashWarn(`OCR cancelled after page ${result.pagesRead.length} of ${result.pageCount} — showing what was read so far.`, 6000);
+      }
+      return result.text;
+    } finally {
+      if (ocrAbortRef.current === ac) ocrAbortRef.current = null;
+      if (deedReqRef.current === myReq) { setOcrBusy(false); setOcrProgress(null); }
+    }
+  };
+
+  // Read one or several dropped/selected deed files (.doc/.docx/.pdf/.txt) into a queue so the user
+  // can "just drop in the files" instead of pasting. Each file is read + parsed on the way in for an
+  // immediate honest read-out (calls found, or why not); the first readable one loads into the
+  // plotter textarea. A single-file drop behaves exactly as before.
+  //
+  // B768160 — a scanned PDF (no text layer — readDeedFile throws a `.scanned`-flagged error for it)
+  // routes through OCR automatically instead of just showing the refusal: a county-recorded deed is
+  // almost always a scanned image, so refusing THAT class of file was refusing the document the
+  // plotter exists to read. OCR pre-fills this same editable box — it never plots by itself.
   const readDeeds = async (files) => {
     const list = Array.from(files || []);
     if (!list.length) return;
     const myReq = ++deedReqRef.current; // a newer drop supersedes a slow in-flight batch
-    setDeedErr(""); setDeedBusy(true);
+    setDeedErr(""); setOcrErr(""); setDeedBusy(true);
     try {
       const rows = [];
       for (const file of list) {
-        const row = { id: uid(), name: file.name || "deed", text: "", boundaryCalls: 0, exCount: 0, closes: false, gap: 0, error: "" };
+        const row = { id: uid(), name: file.name || "deed", text: "", boundaryCalls: 0, exCount: 0, closes: false, gap: 0, error: "", ocr: null };
         try {
           const [{ readDeedFile }, dp] = await Promise.all([
             import("../../shared/files/docxText.js"),
             loadDeed(),        // the parser rides the same on-demand trip as the file reader
           ]);
           const { parseTracts, callsToPath, pathCloses, misclosure } = dp;
-          const text = await readDeedFile(file);
+          let text;
+          try {
+            text = await readDeedFile(file);
+          } catch (e) {
+            if (e && e.scanned) text = await ocrScannedPdfInto(file, row, myReq);
+            else throw e;
+          }
           row.text = text;
           const tracts = parseTracts(text);
           const b = tracts[0];
@@ -17187,7 +17379,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // Auto-load the first readable deed into the textarea (single-file parity).
       const firstOk = rows.find((r) => !r.error && r.boundaryCalls > 0) || rows.find((r) => !r.error) || rows[0];
       if (firstOk) {
-        setDeedActiveId(firstOk.id); setDeedName(firstOk.name);
+        setDeedActiveId(firstOk.id); setDeedName(firstOk.name); setOcrRun(firstOk.ocr || null);
         if (firstOk.text) setMbText(firstOk.text);
         if (firstOk.error) setDeedErr(firstOk.error);
         else if (!firstOk.boundaryCalls) setDeedErr("Read the file, but found no bearing/distance calls — is this a metes-and-bounds legal description?");
@@ -17866,6 +18058,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const curb = roadCurbOf(el), cross = t + 2 * curb, crossIsH = el.h <= el.w;
     setEls((a) => a.map((x) => x.id === el.id ? { ...x, ...(crossIsH ? { h: cross } : { w: cross }), travelW: t, curb } : x));
   };
+  // NEW-1 — a road's cross-section IS its typed band list; `travelW` is kept, literally, as the
+  // sum of the section's within-curb band widths, so every existing consumer (roadStripRing,
+  // roadCurbLines, the dissolved-network junction math, the impervious rollup) keeps reading
+  // `el.travelW` unchanged. hasXSection (lib/roadCrossSection.js) = "a REAL multi-band design", not
+  // the single-band wrapper xsectionFromRoad hands the dialog for a plain road — a plain road's
+  // Properties panel keeps its ordinary editable width field (see the "Road width (ft)" Field
+  // below). It lives in the pure lib, not as a component-local helper, because renderElPx (the
+  // canvas paint function) is MODULE-LEVEL, outside this closure, and needs the same predicate.
+  const roadPavedWidth = (el) => hasXSection(el) ? pavedWidth(el.xsection) : roadTravel(el);
+  const setRoadXSection = (el, xsection) => {
+    pushHistory();
+    const t = Math.max(1, curbToCurbWidth(xsection));
+    setEls((a) => a.map((x) => x.id === el.id ? reRoad({ ...x, xsection, travelW: t }) : x));
+  };
   const setRoadLength = (el, len) => {
     pushHistory();
     const L = Math.max(1, len);
@@ -18446,6 +18652,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     onSwatch: (v) => { if (hist) pushHistory(); apply(v); pushRecent(v); if (commit) commit(v); },
   });
   const liveMarkup    = (patch) => { setMarkups((a) => a.map((m) => (selMarkup && m.id === selMarkup.id ? { ...m, ...patch } : m))); setMkStyle((s) => ({ ...s, ...patch })); };
+  const liveMarkupCloud = (patch) => { setMarkups((a) => a.map((m) => (selMarkup && m.id === selMarkup.id ? { ...m, ...patch, modifiedAt: new Date().toISOString() } : m))); setMkCloudStyle((s) => ({ ...s, ...patch })); };
   // NEW-1 — the SAME two writers for a measurement (a live no-history one for a colour drag /
   // opacity slide, and a one-undo-frame one for a discrete commit), so the measurement inspector
   // reuses the markup panel's controls rather than standing up a parallel editing surface.
@@ -19705,7 +19912,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               "not priced yet" until unit prices are entered; once priced it shows the totals. */}
           {(() => {
           const costP = settings.prices || {};
-          const costRoad = costRollup(els, roadTravel, roadLengthOf, costP).total;
+          const costRoad = costRollup(els, roadPavedWidth, roadLengthOf, costP).total;
           const costEarthPriced = Number.isFinite(costP.earthworkCy) && +costP.earthworkCy > 0;
           const costSummary = (costRoad == null && !costEarthPriced) ? "not priced yet"
             : (costRoad != null ? `$${Math.round(costRoad).toLocaleString()} road${costEarthPriced ? " + earthwork" : ""}` : "earthwork priced");
@@ -19894,7 +20101,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // (LF, both sides), split by curb type so each rides its own unit price.
             // Unit prices are user-supplied (anchor to your own bids) — never defaulted.
             const prices = settings.prices || {};
-            const cost = costRollup(els, roadTravel, roadLengthOf, prices);
+            const cost = costRollup(els, roadPavedWidth, roadLengthOf, prices);
             if (!cost.segments) return null;
             const usd = (n) => `$${Math.round(n).toLocaleString()}`;
             const setPrice = (k, v) => setSettings((s) => ({ ...s, prices: { ...(s.prices || {}), [k]: v } }));
@@ -20935,6 +21142,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </g>
                   );
                 }
+                // NEW-1 — revision cloud: the SAME fat-transparent-hit-companion / pointer-inert-
+                // visible-shape pattern as every other closed markup (a plain polygon hit test — the
+                // scallops are cosmetic, not a hit-test shape), but the visible layer is the scalloped
+                // outline. Arc size is stored in FEET (m.arcFt) and scaled by `rppf` here — the SAME
+                // render-body scale every other markup's geometry already goes through via f2p — so a
+                // cloud looks identical at every zoom and PDF export (which clones this exact SVG,
+                // never a second render path — see exportSheet.js) prints it at true scale.
+                if (m.kind === "cloud") {
+                  const screenPts = m.pts.map(f2p);
+                  const s = screenPts.map((q) => `${q.x},${q.y}`).join(" ");
+                  const scallopD = cloudScallopPath(screenPts, clampCloudArcFt(m.arcFt) * rppf);
+                  return (
+                    <g key={m.id} data-markup={m.id} style={mkCursor} opacity={m.opacity ?? 1} onPointerDown={common.onPointerDown} onContextMenu={common.onContextMenu}>
+                      <polygon points={s} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinejoin="round" pointerEvents={closedHitPE} />
+                      <path d={scallopD} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} strokeLinejoin="round" {...visFill} pointerEvents="none" />
+                    </g>
+                  );
+                }
                 const c = f2p({ x: m.cx, y: m.cy }), w = m.w * rppf, h = m.h * rppf;
                 const rotTf = `rotate(${m.rot || 0} ${c.x} ${c.y})`;
                 if (m.kind === "ellipse") return (
@@ -21774,7 +21999,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const shape = mkRect.kind === "mellipse" ? <ellipse cx={x + w / 2} cy={y + h / 2} rx={w / 2} ry={h / 2} {...dp} /> : <rect x={x} y={y} width={w} height={h} {...dp} />;
                 return <>{anchor}{shape}</>;
               })()}
+              {mkFreehand && mkFreehand.pts.length >= 2 && (() => {
+                const s = mkFreehand.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
+                return <polyline points={s} fill="none" stroke={mkCloudStyle.stroke} strokeWidth={mkCloudStyle.weight} strokeDasharray="5 4" strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />;
+              })()}
               {mkPoly && (() => {
+                const isCloud = mkPoly.kind === "mcloud";
+                const ink = isCloud ? mkCloudStyle.stroke : PAL.accent;
                 // The rubber-band segment must match how the NEXT click commits (line ~2016): free
                 // angle by default, 45°-constrained ONLY while Shift is held. Snapping the preview to
                 // 45° unconditionally made the polyline look like it "only goes at specific angles"
@@ -21784,9 +22015,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const s = all.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
                 const lp = live ? f2p(live) : null, total = pathLen(all);
                 return <>
-                  <polyline points={s} fill="none" stroke={PAL.accent} strokeWidth={mkStyle.weight} strokeDasharray="5 4" pointerEvents="none" />
-                  {lp && all.length >= 2 && <text x={lp.x + 8} y={lp.y - 6} fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{f0(total)}′</text>}
-                  {mkPoly.pts.map((p, i) => { const q = f2p(p); return <circle key={i} cx={q.x} cy={q.y} r={3.5} fill={PAL.accent} pointerEvents="none" />; })}
+                  <polyline points={s} fill="none" stroke={ink} strokeWidth={isCloud ? mkCloudStyle.weight : mkStyle.weight} strokeDasharray="5 4" pointerEvents="none" />
+                  {lp && all.length >= 2 && <text x={lp.x + 8} y={lp.y - 6} fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={ink} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{f0(total)}′</text>}
+                  {mkPoly.pts.map((p, i) => { const q = f2p(p); return <circle key={i} cx={q.x} cy={q.y} r={3.5} fill={ink} pointerEvents="none" />; })}
                 </>;
               })()}
               {/* easement draft (centerline / boundary click-draw) — live ghost strip */}
@@ -23073,6 +23304,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <span style={{ fontSize: 12, color: PAL.muted }}>ft</span>
                       </div>
                     )}
+                    {/* NEW-1 — "design road": a typed cross-section (four lanes with a median, a section
+                        with a centre turn lane…) instead of one plain width. A deliberate menu item, not
+                        a popover that gates drawing — picking it opens the SAME dialog Properties uses,
+                        then you draw the centerline exactly as before. */}
+                    <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }}>
+                      <button style={menuItem(!!roadXSection)} onClick={() => { setXsDialog({ mode: "new" }); setRoadMenu(false); }}>
+                        {roadXSection ? `Cross-section — ${Math.round(curbToCurbWidth(roadXSection))}′` : "Design cross-section…"}
+                      </button>
+                      {roadXSection && (
+                        <button style={{ ...menuItem(false), color: PAL.muted, fontSize: 11 }} onClick={() => setRoadXSectionTool(null)}>✕ Back to a plain width</button>
+                      )}
+                    </div>
                     <div style={{ fontSize: 11, color: PAL.muted, padding: "6px 8px 2px", lineHeight: 1.5, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>
                       Width is curb face to curb face. Click centerline points; double-click / Enter to finish.
                     </div>
@@ -23122,11 +23365,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </AnchoredMenu>
           </div>
 
-          {/* Draw section — Shapes + Annotate merged; Polyline before Line (B605/B607) */}
+          {/* Draw section — Shapes + Annotate merged; Polyline before Line (B605/B607). Cloud (B770896)
+              is a plain button like every other draw tool — NO pre-draw popover: there is no mode to
+              pick (a click vs. a drag is inferred per-gesture) and arc size lives in Properties, on
+              the selected object, like every other style field. */}
           {railHdr("Draw")}
           {MARKUP_TOOLS.map((id) => {
             const t = TOOLS.find((x) => x.id === id);
-            const sc = { mline: "L", mrect: "R", mellipse: "E", mpolygon: "⇧P", mpolyline: "⇧N" }[id];
+            const sc = { mline: "L", mrect: "R", mellipse: "E", mpolygon: "⇧P", mpolyline: "⇧N", mcloud: "C" }[id];
             return <button key={id} className={`rbtn${tool === id ? " on" : ""}`} style={rbtn(tool === id)} onClick={() => selectTool(id)} aria-pressed={tool === id}><ToolIcon id={id} /> {t.label} <span style={railHint(tool === id)}>{sc}</span></button>;
           })}
           <button className={`rbtn${tool === "callout" ? " on" : ""}`} style={rbtn(tool === "callout")} onClick={() => selectTool("callout")} aria-pressed={tool === "callout"}><ToolIcon id="callout" /> Callout <span style={railHint(tool === "callout")}>Q</span></button>
@@ -23364,18 +23610,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // top, so a hardcoded surface colour blanked every colour chip in these panels: the
             // control you click to change a colour showed no colour. Leave it to ColorField.
             const swatch = { width: 34, height: 26, padding: 0, border: BORDER_1, borderRadius: 6, cursor: "pointer" };
-            const closed = selMarkup.kind === "rect" || selMarkup.kind === "ellipse" || selMarkup.kind === "polygon";
+            const isCloud = selMarkup.kind === "cloud";
+            const closed = selMarkup.kind === "rect" || selMarkup.kind === "ellipse" || selMarkup.kind === "polygon" || isCloud;
+            // Cloud writes its OWN sticky style (mkCloudStyle), never the shared mkStyle every other
+            // markup tool draws from next — see MK_CLOUD_DEFAULT.
+            const setStyle = isCloud ? setSelMarkupCloud : setSelMarkup;
+            const liveStyle = isCloud ? liveMarkupCloud : liveMarkup;
             return (
               // NEW-1 — plain wrapper (see the multi-select branch above for why the duplicate testid was removed).
               <div>
-              <Section title={`Markup · ${selMarkup.kind[0].toUpperCase()}${selMarkup.kind.slice(1)}`}>
-                <Field label="Outline"><ColorField value={toHex6(selMarkup.stroke)} {...colorCtl((v) => liveMarkup({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} /></Field>
-                <Field label="Line weight"><NumInput style={numInput} value={selMarkup.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setSelMarkup({ weight: n })} /></Field>
+              <Section title={isCloud ? "Markup · Cloud" : `Markup · ${selMarkup.kind[0].toUpperCase()}${selMarkup.kind.slice(1)}`}>
+                <Field label="Outline"><ColorField value={toHex6(selMarkup.stroke)} {...colorCtl((v) => liveStyle({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} /></Field>
+                <Field label="Line weight"><NumInput style={numInput} value={selMarkup.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setStyle({ weight: n })} /></Field>
                 <Field label="Dash">
-                  <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={selMarkup.dash || "solid"} onChange={(e) => setSelMarkup({ dash: e.target.value })}>
+                  <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={selMarkup.dash || "solid"} onChange={(e) => setStyle({ dash: e.target.value })}>
                     {DASH_OPTIONS}
                   </select>
                 </Field>
+                {isCloud && (
+                  <Field label="Opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.opacity ?? 1} {...sliderHistory((e) => liveStyle({ opacity: +e.target.value }))} /></Field>
+                )}
                 {/* B620 — inline label riding the line (open paths only; double-click the line also opens this in
                     place). NON-sticky (direct setMarkups, never setMkStyle) so the text can't bleed into the next
                     drawn shape; onFocus pushes ONE undo frame per edit (not one per keystroke). */}
@@ -23388,9 +23642,43 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {inlineLabelControls(selMarkup, selMarkup.kind, coalesceLabelWrite(selMarkup.id, (p) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, ...p } : m)))))}
                 </>)}
                 {closed && <>
-                  <Field label="Fill"><ColorField value={toHex6(selMarkup.fill)} {...colorCtl((v) => liveMarkup({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} /></Field>
-                  <Field label="Fill opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.fillOpacity ?? 0} {...sliderHistory((e) => liveMarkup({ fillOpacity: +e.target.value }))} /></Field>
+                  <Field label="Fill"><ColorField value={toHex6(selMarkup.fill)} {...colorCtl((v) => liveStyle({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} /></Field>
+                  <Field label="Fill opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.fillOpacity ?? 0} {...sliderHistory((e) => liveStyle({ fillOpacity: +e.target.value }))} /></Field>
                 </>}
+                {isCloud && (() => {
+                  const cs = { display: "flex", gap: 5, width: 150 };
+                  const fmtWhen = (iso) => { try { return iso ? new Date(iso).toLocaleString() : "—"; } catch (_) { return "—"; } };
+                  return (
+                    <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "8px 0", paddingTop: 8 }}>
+                      <Field label="Arc size">
+                        <span style={{ display: "flex", gap: 5, alignItems: "center" }}>
+                          <NumInput style={{ ...numInput, width: 56 }} value={selMarkup.arcFt ?? CLOUD_ARC_DEFAULT_FT} min={CLOUD_ARC_MIN_FT} max={CLOUD_ARC_MAX_FT} step={0.5} onCommit={(n) => setSelMarkupCloud({ arcFt: clampCloudArcFt(n) })} />
+                          <span style={{ fontSize: 11, color: PAL.muted }}>ft</span>
+                        </span>
+                      </Field>
+                      <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
+                        {Object.entries(CLOUD_ARC_PRESETS).map(([k, ft]) => (
+                          <button key={k} style={{ ...chip, flex: 1, fontSize: 10.5, textTransform: "capitalize", background: (selMarkup.arcFt ?? CLOUD_ARC_DEFAULT_FT) === ft ? PAL.accent : SURF_RAISED, color: (selMarkup.arcFt ?? CLOUD_ARC_DEFAULT_FT) === ft ? "#fff" : PAL.ink }} onClick={() => setSelMarkupCloud({ arcFt: ft })}>{k}</button>
+                        ))}
+                      </div>
+                      <Field label="Subject"><input value={selMarkup.subject ?? ""} maxLength={80} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, subject: e.target.value, modifiedAt: new Date().toISOString() } : m)))} placeholder="Cloud" style={textInput} /></Field>
+                      <Field label="Comment" title="Reviewer notes on this markup"><textarea value={selMarkup.comment ?? ""} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, comment: e.target.value, modifiedAt: new Date().toISOString() } : m)))} rows={2} style={{ width: 150, boxSizing: "border-box", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: BORDER_1, borderRadius: 8, color: PAL.ink, resize: "vertical" }} /></Field>
+                      <Field label="Status">
+                        <span style={cs}>
+                          <select style={{ ...numInput, width: 150, fontFamily: "inherit" }} value={selMarkup.status ?? "None"} onChange={(e) => setSelMarkupCloud({ status: e.target.value })}>
+                            {CLOUD_STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        </span>
+                      </Field>
+                      <Field label="Label"><input value={selMarkup.label ?? ""} maxLength={40} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, label: e.target.value, modifiedAt: new Date().toISOString() } : m)))} placeholder="e.g. 1" style={textInput} /></Field>
+                      <Field label="Layer"><input value={selMarkup.layer ?? ""} maxLength={40} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, layer: e.target.value, modifiedAt: new Date().toISOString() } : m)))} placeholder="e.g. Reviewer 1" style={textInput} /></Field>
+                      <Field label="Author"><input value={selMarkup.author ?? ""} maxLength={60} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, author: e.target.value, modifiedAt: new Date().toISOString() } : m)))} style={textInput} /></Field>
+                      <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.6, marginTop: 4 }}>
+                        Created {fmtWhen(selMarkup.createdAt)}<br />Modified {fmtWhen(selMarkup.modifiedAt)}
+                      </div>
+                    </div>
+                  );
+                })()}
                 {/* NEW-EASE-STYLE — an encumbrance (deed/title tract) shares the easement appearance
                     model: fill / fill opacity / hatch, type default + per-element override. Not
                     "closed" above (it's its own render branch, not a rect/ellipse/polygon), so it
@@ -23660,8 +23948,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <>
                       <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(roadLengthOf(selEl))} min={1} onCommit={(n) => setRoadLength(selEl, n)} /></Field>
                       {/* NEW-2/NEW-4 — "Road width", never "travel width", and the hover states the
-                          dimension explicitly: it is the pavement between the curb faces (B180). */}
-                      <Field label="Road width (ft)" title="Curb face to curb face — the pavement between the curbs. The curb is added outside this width."><NumInput style={numInput} value={Math.round(roadTravel(selEl))} min={1} onCommit={(n) => setRoadTravel(selEl, n)} /></Field>
+                          dimension explicitly: it is the pavement between the curb faces (B180).
+                          NEW-1 — once a road carries a REAL designed cross-section, one number can no
+                          longer describe it (which of the five bands would a typed width resize?), so
+                          the field becomes a read-only summary and "Edit cross-section..." is the only
+                          way to change it. A plain road (no section, or the dialog's own single-band
+                          wrapper) keeps the ordinary editable field, byte-identical to before. */}
+                      {hasXSection(selEl) ? (
+                        <Field label="Road width (ft)" title="Set by this road's cross-section — a designed section can't be resized by one number.">
+                          <span style={{ fontSize: 13, fontWeight: 600, color: PAL.ink }}>{Math.round(roadTravel(selEl))}′ <span style={{ fontWeight: 400, color: PAL.muted, fontSize: 11 }}>curb to curb</span></span>
+                        </Field>
+                      ) : (
+                        <Field label="Road width (ft)" title="Curb face to curb face — the pavement between the curbs. The curb is added outside this width."><NumInput style={numInput} value={Math.round(roadTravel(selEl))} min={1} onCommit={(n) => setRoadTravel(selEl, n)} /></Field>
+                      )}
+                      {cl && (
+                        <button style={{ ...chip, width: "100%", marginTop: 2 }} data-testid="edit-road-xsection"
+                          onClick={() => setXsDialog({ mode: "edit", elId: selEl.id })}>
+                          {hasXSection(selEl) ? "Edit cross-section…" : "Design cross-section…"}
+                        </button>
+                      )}
                       {/* B620 — inline label riding the road centerline (double-click the road also opens this in place).
                           setSelEl is non-sticky (patches the selected el only); onFocus pushes one undo frame per edit. */}
                       {cl && (<>
@@ -24065,7 +24370,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {selEl.type === "road" && !selEl.points && (() => {
                     const ct = roadCurbType(selEl), sides = roadCurbedSides(selEl);
                     const hasPan = CURB_TYPE_META[ct].hasPan;
-                    const q = roadQuantities(selEl, roadTravel(selEl), roadLengthOf(selEl));
+                    const q = roadQuantities(selEl, roadPavedWidth(selEl), roadLengthOf(selEl));
                     return (
                       <div style={{ marginTop: 8 }}>
                         <div style={subHead}>Curb &amp; paving (cost)</div>
@@ -24087,8 +24392,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <Field label="Gutter pan (ft)"><NumInput style={numInput} value={roadPanWidth(selEl)} min={0} onCommit={(n) => setRoadCost(selEl, { panWidth: n })} /></Field>
                         )}
                         <div style={{ fontSize: 11.5, color: PAL.muted, marginTop: 6, lineHeight: 1.55 }}>
-                          Paving <b style={{ color: PAL.ink }}>{f0(q.pavingSy)} SY</b> ({f0(q.pavingWidth)}′ FC-FC{hasPan ? ` − pan` : ""}) · Curb <b style={{ color: PAL.ink }}>{f0(q.curbLf)} LF</b>
-                          <br /><span style={{ fontSize: 10.5 }}>Paving is face-of-curb to face-of-curb — curb is priced separately per LF. Set unit prices in the Yield panel.</span>
+                          Paving <b style={{ color: PAL.ink }}>{f0(q.pavingSy)} SY</b> ({f0(q.pavingWidth)}′{hasXSection(selEl) ? " asphalt" : " FC-FC"}{hasPan ? ` − pan` : ""}) · Curb <b style={{ color: PAL.ink }}>{f0(q.curbLf)} LF</b>
+                          <br /><span style={{ fontSize: 10.5 }}>{hasXSection(selEl) ? "Paving is the section's asphalt bands only — a median or curb-and-gutter band is excluded, priced separately per LF." : "Paving is face-of-curb to face-of-curb — curb is priced separately per LF."} Set unit prices in the Yield panel.</span>
                         </div>
                       </div>
                     );
@@ -25833,6 +26138,32 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         </Suspense>
       )}
 
+      {/* NEW-1 — the road cross-section designer. Two entry points share one dialog instance:
+          Properties' "Edit cross-section..." (mode "edit", bound to a live road) and the Road tool's
+          own "Design cross-section..." (mode "new", sets the ACTIVE section for the next road drawn).
+          Lazy for the same reason as Set-location: opened rarely, carries its own preview SVG. */}
+      {xsDialog && (() => {
+        const editEl = xsDialog.mode === "edit" ? els.find((x) => x.id === xsDialog.elId) : null;
+        if (xsDialog.mode === "edit" && !editEl) return null; // the road vanished under the dialog (deleted/undo) — nothing to bind to
+        const initial = editEl ? xsectionFromRoad(editEl) : (roadXSection || xsectionFromRoad({ travelW: +roadWidth || 24 }));
+        const lengthFt = editEl ? roadLengthOf(editEl) : undefined;
+        return (
+          <Suspense fallback={null}>
+            <RoadCrossSectionDialog
+              mode={xsDialog.mode} initialXSection={initial} lengthFt={lengthFt}
+              presets={userPrefs.roadCrossSectionPresets}
+              onSavePreset={(next) => commitUserPrefs({ ...userPrefs, roadCrossSectionPresets: next })}
+              onCancel={() => setXsDialog(null)}
+              onApply={(xsection) => {
+                if (xsDialog.mode === "edit" && editEl) setRoadXSection(editEl, xsection);
+                else { setRoadXSectionTool(xsection); selectTool("road"); }
+                setXsDialog(null);
+              }}
+            />
+          </Suspense>
+        );
+      })()}
+
       {showShortcuts && (
         <div onClick={() => setShowShortcuts(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: SURF_RAISED, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 560, maxWidth: "92vw", maxHeight: "86vh", overflowY: "auto" }}>
@@ -25921,6 +26252,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const closes = dp ? dp.pathCloses(path) : false;
         const gap = dp ? dp.misclosure(path) : 0;
         const exCount = Math.max(0, tracts.length - 1);
+        // B768160 — OCR review data for whichever text is currently loaded: low-confidence word spans
+        // (highlighted in the box) and suspect (likely-lost-decimal-point) distances feed the closure
+        // safety net below when the traverse doesn't close.
+        const ocrActivePageData = ocrRun && ocrRun.activePage != null ? ocrRun.pages.find((p) => p.pageNum === ocrRun.activePage) : null;
+        const ocrSpansForBox = ocrRun ? (ocrActivePageData ? ocrActivePageData.wordSpans : ocrRun.wordSpans) : [];
+        const ocrHelpers = ocrRun ? ocrHelpersRef.current : null; // populated by the same call that set ocrRun
+        const ocrLcSpans = ocrHelpers ? ocrHelpers.lowConfidenceSpans(ocrSpansForBox) : [];
+        const ocrSuspects = ocrHelpers && mbText ? ocrHelpers.flagSuspectDistances(mbText) : [];
+        const ocrCulprits = (ocrHelpers && calls.length && !closes) ? ocrHelpers.culpritCalls(mbText, calls, ocrLcSpans, ocrSuspects) : [];
         return (
         <div onClick={() => setTitleOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: SURF_RAISED, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 720, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
@@ -25997,12 +26337,63 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {deedName && !deedBusy && <div style={{ fontSize: 11, color: PAL.purple, marginTop: 4, fontFamily: MONO_FONT, wordBreak: "break-all" }}>📄 {deedName}</div>}
               </div>
               {deedErr && <div style={{ fontSize: 12, color: PAL.danger, marginBottom: 8, lineHeight: 1.45 }}>{deedErr}</div>}
+              {/* B768160 — a scanned PDF (no text layer) routes here automatically instead of the plain
+                  refusal. OCR runs client-side (Tesseract.js, WASM, in the browser — the deed image
+                  never leaves the machine); a multi-page scan takes real seconds, so this shows
+                  per-page progress and can be cancelled outright. */}
+              {ocrBusy && (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", marginBottom: 10, border: `1px solid ${PAL.panelLine}`, borderRadius: 10, background: "rgba(124,58,237,0.05)" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: PAL.ink }}>
+                      Reading scanned PDF with OCR{ocrProgress ? ` — page ${ocrProgress.index} of ${ocrProgress.of}` : "…"}
+                    </div>
+                    <div style={{ fontSize: 11, color: PAL.muted, marginTop: 2 }}>
+                      {ocrProgress && ocrProgress.status === "recognizing text"
+                        ? `Recognizing text… ${Math.round((ocrProgress.pct || 0) * 100)}%`
+                        : ocrProgress && ocrProgress.status === "rendering" ? "Rendering page…" : "Starting…"}
+                    </div>
+                  </div>
+                  <button className="gbtn" style={chip} onClick={() => ocrAbortRef.current?.abort()}>Cancel</button>
+                </div>
+              )}
+              {ocrErr && <div style={{ fontSize: 12, color: PAL.danger, marginBottom: 8, lineHeight: 1.45 }}>{ocrErr}</div>}
+              {/* Page picker — a deed can run twenty pages of boilerplate before/after the actual
+                  legal description; OCR reads and concatenates every page by default (below), and
+                  this lets the user point at one specific page instead. */}
+              {ocrRun && ocrRun.pages.length > 1 && (
+                <div style={{ marginBottom: 10, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, overflow: "hidden" }}>
+                  <div data-testid="ocr-page-row" onClick={() => {
+                    const full = deedQueue.find((r) => r.id === deedActiveId);
+                    if (!full) return;
+                    setMbText(full.text); setOcrRun((run) => (run ? { ...run, activePage: null } : run));
+                    setDeedQueue((q) => q.map((r) => (r.id === deedActiveId ? { ...r, text: full.text } : r)));
+                  }} style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "7px 10px", cursor: "pointer", background: ocrRun.activePage == null ? "rgba(124,58,237,0.08)" : "transparent" }}>
+                    <span style={{ fontSize: 11.5, fontWeight: 600, color: PAL.ink }}>All {ocrRun.pageCount} page{ocrRun.pageCount > 1 ? "s" : ""}</span>
+                    <span style={{ fontSize: 11, color: PAL.muted, flex: 1 }}>concatenated (default)</span>
+                    {ocrRun.activePage == null && <span style={{ fontSize: 10.5, color: PAL.accent, fontWeight: 700 }}>LOADED</span>}
+                  </div>
+                  {ocrRun.pages.map((p) => {
+                    const active = ocrRun.activePage === p.pageNum;
+                    const conf = p.meanConfidence == null ? "" : ` · ${Math.round(p.meanConfidence)}% avg confidence`;
+                    return (
+                      <div key={p.pageNum} data-testid="ocr-page-row" onClick={() => {
+                        setMbText(p.text); setOcrRun((run) => (run ? { ...run, activePage: p.pageNum } : run));
+                        setDeedQueue((q) => q.map((r) => (r.id === deedActiveId ? { ...r, text: p.text } : r)));
+                      }} style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "7px 10px", cursor: "pointer", borderTop: `1px solid ${PAL.panelLine}`, background: active ? "rgba(124,58,237,0.08)" : "transparent" }}>
+                        <span style={{ fontSize: 11.5, fontWeight: 600, color: PAL.ink }}>Page {p.pageNum}</span>
+                        <span style={{ fontSize: 11, color: PAL.muted, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(p.text || "").replace(/\s+/g, " ").trim().slice(0, 60) || "(no text read)"}{conf}</span>
+                        {active && <span style={{ fontSize: 10.5, color: PAL.accent, fontWeight: 700, whiteSpace: "nowrap" }}>LOADED</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               {deedQueue.length > 1 && (
                 <div style={{ marginBottom: 10, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, overflow: "hidden" }}>
                   {deedQueue.map((r, i) => {
                     const active = r.id === deedActiveId, ok = !r.error && r.boundaryCalls > 0;
                     return (
-                      <div key={r.id} data-testid="deed-queue-row" onClick={() => { if (r.error) return; setDeedActiveId(r.id); setDeedName(r.name); if (r.text) setMbText(r.text); setDeedErr(""); }}
+                      <div key={r.id} data-testid="deed-queue-row" onClick={() => { if (r.error) return; setDeedActiveId(r.id); setDeedName(r.name); setOcrRun(r.ocr || null); if (r.text) setMbText(r.text); setDeedErr(""); }}
                         style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "7px 10px", cursor: r.error ? "default" : "pointer", borderTop: i ? `1px solid ${PAL.panelLine}` : "none", background: active ? "rgba(124,58,237,0.08)" : "transparent" }}>
                         <span style={{ fontSize: 11.5, fontWeight: 600, color: r.error ? PAL.danger : PAL.ink, fontFamily: MONO_FONT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "50%" }}>📄 {r.name}</span>
                         <span style={{ fontSize: 11, color: r.error ? PAL.danger : PAL.muted, flex: 1, lineHeight: 1.4 }}>{r.error ? r.error : `${r.boundaryCalls} call${r.boundaryCalls > 1 ? "s" : ""}${r.exCount ? ` · +${r.exCount} save-and-except` : ""} · ${r.closes ? "closes" : `gap ${r.gap.toFixed(1)}′`}`}</span>
@@ -26012,7 +26403,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   })}
                 </div>
               )}
-              <textarea value={mbText} onChange={(e) => { const v = e.target.value; setMbText(v); setDeedQueue((q) => q.map((r) => (r.id === deedActiveId ? { ...r, text: v } : r))); }} rows={5}
+              {/* B768160 — when the box holds OCR'd text, low-confidence tokens are highlighted so the
+                  user's eye goes straight to the characters most likely wrong, rather than
+                  proofreading a whole page (an empty lowConfidenceSpans renders a plain textarea,
+                  byte-identical to every non-OCR path). */}
+              <OcrDeedTextarea value={mbText} lowConfidenceSpans={ocrLcSpans}
+                onChange={(e) => { const v = e.target.value; setMbText(v); setDeedQueue((q) => q.map((r) => (r.id === deedActiveId ? { ...r, text: v } : r))); }} rows={5}
                 placeholder={'Paste a legal description, e.g.\nBEGINNING at a point… THENCE N 45°30′00″ E, 150.00 feet;\nTHENCE S 44°30′00″ E, 300.00 feet; …'}
                 style={{ width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: 12, fontFamily: MONO_FONT, border: BORDER_1, borderRadius: 8, color: PAL.ink, resize: "vertical", lineHeight: 1.5 }} />
               <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
@@ -26024,6 +26420,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {calls.length > 0 && !closes && (
                   <div style={{ flexBasis: "100%", fontSize: 11, color: PAL.warn, lineHeight: 1.45 }}>
                     ⚠ These calls don't close back to the start — the boundary is plotted exactly as written, with the gap on the last edge. Check the description against the survey.
+                    {/* B768160 — CLAUDE.md item (f): use closure as the OCR safety net. When the OCR'd
+                        text produced a bad closure, point at the specific calls with the lowest OCR
+                        confidence (or a likely-lost-decimal-point distance) as the probable culprits,
+                        instead of just drawing a wrong polygon and saying nothing. */}
+                    {ocrCulprits.length > 0 && (
+                      <div style={{ marginTop: 6 }}>
+                        Likely OCR culprit{ocrCulprits.length > 1 ? "s" : ""} — check {ocrCulprits.map((c, i) => (
+                          <span key={c.index}>{i > 0 ? ", " : ""}<b>call {c.index + 1}</b> ({c.call.bearing}, {c.call.distFt.toFixed(2)}′{c.suspect ? " — distance may be missing a decimal point" : c.minConfidence != null ? ` — ${Math.round(c.minConfidence)}% OCR confidence` : ""})</span>
+                        ))} first.
+                      </div>
+                    )}
                   </div>
                 )}
                 {calls.some((c) => c.curve) && (() => {
@@ -27037,6 +27444,51 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
         rparts.push(<path key="edge" d={dPath} fill="none" stroke={stroke} strokeWidth={curbStrokePx(roadCurbWidth(el), ppf, CURB_STROKE_MIN_PX * lfK)} />);
       }
       if (texFill) rparts.push(<path key="tex" d={dPath} fill={texFill} stroke="none" pointerEvents="none" />);
+      // NEW-1 — a road carrying a REAL designed cross-section (2+ bands) paints its within-curb
+      // bands as distinct fills + lane markings, INSIDE the same pavement ring computed above: the
+      // outer pavement outline, curb lines and junction dissolve are UNCHANGED (still driven by
+      // el.travelW, which setRoadXSection keeps in sync as the sum of within-curb band widths — see
+      // lib/roadCrossSection.js's header). Clipped to THIS road's own strip ring via an SVG clipPath
+      // (the same idiom the overlay crop above already uses), so the decoration can never paint past
+      // the pavement even at a junction — a lighter-weight substitute for the precise per-neighbor
+      // trim the outer curb lines get (roadNet.stripes); stated as a known approximation for interior
+      // decoration, not hidden — median-openings-at-junctions is its own filed follow-on (B768163).
+      // Collapses to nothing extra (the plain strip already drawn above) when the narrowest band
+      // would be sub-pixel — "collapse to the simple strip rather than drawing mud".
+      if (hasXSection(el)) {
+        const xsLayout = bandLayout(el.xsection);
+        const minBandFt = xsLayout.edges.length ? Math.min(...xsLayout.edges.map((e) => e.band.w)) : 0;
+        if (minBandFt * ppf >= 3) {
+          const xsDense = roadDenseCenterline(el, settings, sharpFor(el), roadNet && roadNet.trims ? roadNet.trims.get(el.id) : undefined);
+          const clipId = `xsclip-${el.id}`;
+          const toPts = (line) => line.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
+          const bandFills = xsLayout.edges
+            .filter((e) => bandTypeOf(e.band.type).withinCurb && BAND_FILL_TOKEN[e.band.type])
+            .map((e) => {
+              const left = offsetPolyline(xsDense, e.from), right = offsetPolyline(xsDense, e.to);
+              if (!left || !right) return null;
+              return <polygon key={`xb${e.index}`} points={toPts([...left, ...right.slice().reverse()])} fill={BAND_FILL_TOKEN[e.band.type]} fillOpacity={BAND_FILL_OPACITY[e.band.type]} stroke="none" pointerEvents="none" />;
+            }).filter(Boolean);
+          const markW = Math.max(0.8, lfK);
+          const drawSeam = (offFt, key, style) => {
+            const line = offsetPolyline(xsDense, offFt);
+            if (!line || line.length < 2) return null;
+            return <polyline key={key} points={toPts(line)} fill="none" stroke={style.startsWith("yellow") ? "#e6b800" : "#f2f2f2"} strokeWidth={markW} strokeDasharray={style === "white-dash" ? `${8 * lfK} ${6 * lfK}` : undefined} pointerEvents="none" />;
+          };
+          const laneMarks = bandStripeMarks(el.xsection).flatMap((m, i) => m.style === "yellow-double"
+            ? [drawSeam(m.atOffset + 0.25, `xm${i}a`, m.style), drawSeam(m.atOffset - 0.25, `xm${i}b`, m.style)]
+            : [drawSeam(m.atOffset, `xm${i}`, m.style)]).filter(Boolean);
+          if (bandFills.length || laneMarks.length) {
+            rparts.push(
+              <g key="xsec" clipPath={`url(#${clipId})`}>
+                <clipPath id={clipId}><path d={dPath} /></clipPath>
+                {bandFills}
+                {laneMarks}
+              </g>,
+            );
+          }
+        }
+      }
     }
     // Curb stripe lines = the centerline offset by ±travelW/2 (the inner face-of-curb edges), TRIMMED
     // against the rest of the cluster's pavement (roadNet.stripes) so a stripe stops at the junction

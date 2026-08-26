@@ -45,7 +45,7 @@ export const SITE_MODEL_VERSION = 13;
 // Markup `kind`s grouped by what they MEAN (used by the selectors).
 export const EASEMENT_KINDS = ["encumbrance", "easement"];        // title metes-and-bounds tracts/corridors + first-class easement objects (NEW-1)
 export const UTILITY_KINDS = ["utilRoute", "traced", "infwater"]; // service routes, traced overhead lines, inferred mains
-export const ANNOTATION_KINDS = ["line", "polyline", "rect", "ellipse", "polygon"]; // neutral drawing markups
+export const ANNOTATION_KINDS = ["line", "polyline", "rect", "ellipse", "polygon", "cloud"]; // neutral drawing markups
 
 /* Project lifecycle status — the deal stage of a site, shown on the map markers.
  * Ordered pursuit → active → onhold → complete → dead (deal funnel order). New

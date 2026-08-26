@@ -1540,9 +1540,6 @@ const BASE_HEALTH = {
   paused: { label: "Paused",       dot: "#9ca3af", border: "none",                bar: "#f3f4f6",  ganttBar: "#9ca3af", ganttStyle: "stripe"  },
 };
 const BASE_HK   = ["gray","yellow","red","green","paused"];
-// Sentinel value the status pickers pass to onChange when the user picks "Automatic" — clears a
-// manual override back to the rule engine, instead of setting a literal health color.
-const AUTO_HEALTH = "__auto__";
 const BASE_HDARK = {gray:"#6b7280",yellow:"#92400e",red:"#991b1b",green:"#166534",paused:"#4b5563"};
 let HEALTH = {...BASE_HEALTH};
 let HK     = [...BASE_HK];
@@ -2556,18 +2553,22 @@ const evalHealthRules = (task, settings, NOW, taskById) => {
   return null;
 };
 
-// Compute display health. A manual override (healthOverride) wins outright and skips everything
-// below, including the meeting/deadline blocks — that IS the override (a hand-set color must not
-// be stomped by automation of any kind until the user clears it back to Automatic). Otherwise: the
-// configurable rule list runs first (first match wins), THEN the meeting-bound / deadline-row
-// blocks (an unrelated, always-on feature, byte-identical to before), THEN the raw stored health
-// as the final fallback. Only ever called with a LEAF task — a parent/summary row always shows
-// the worst-of-children ROLLED health (computeRolledHealth) instead, which itself calls this
-// function once per LEAF descendant (never on a parent — a parent's own stale rollup fields can
-// never leak into a health rule; see computeRolledHealth's own comment for why that's safe).
+// Compute display health. ⛔ RULES-DECIDE (2026-08-25, owner correction — supersedes the earlier
+// "RULES-ALWAYS-WIN" pass on this same item, which kept `healthOverride` as a fallback for when no
+// rule matched). The override flag and its early return are RETIRED outright: nothing a user clicks
+// can ever pin a task's color against a firing rule — owner, verbatim: "pill and color and status are
+// all the same thing... red=needs attn. period. end of story." The rule list runs first (first match
+// wins); when no rule matches, the meeting-bound / deadline-row risk blocks below get their say (an
+// unrelated, always-on feature, unchanged), and the raw stored `health` is the final fallback either
+// way. A task may still carry a `healthOverride` field in old stored data — it is dead, unread data;
+// nothing in this function or anywhere else in the app consults it anymore (verified: see B752848's
+// audit of every read site before this was deleted). Only ever called with a LEAF task — a
+// parent/summary row always shows the worst-of-children ROLLED health (computeRolledHealth) instead,
+// which itself calls this function once per LEAF descendant (never on a parent — a parent's own stale
+// rollup fields can never leak into a health rule; see computeRolledHealth's own comment for why
+// that's safe).
 const computeDisplayHealth = (task, settings, taskById) => {
   if (!task) return task?.health;
-  if (task.healthOverride) return task.health;
   const ruleResult = evalHealthRules(task, settings, NOW, taskById);
   if (ruleResult) return ruleResult;
   // B817 — a meeting-bound task surfaces its schedule risk BEFORE it slips: infeasible = red (a genuine
@@ -2603,7 +2604,7 @@ const computeDisplayHealth = (task, settings, taskById) => {
 // own doc comment warns a health rule must never see).
 //
 // No self-reference risk: computeDisplayHealth only ever reads a LEAF's own start/end/percent-
-// Complete/predecessors/healthOverride/health/meetingBound/deadlineForTaskId — predecessorLate
+// Complete/predecessors/health/meetingBound/deadlineForTaskId — predecessorLate
 // reads a predecessor's raw `.end`/`.percentComplete`, never another task's rolled or computed
 // health — so nothing here ever asks a parent's rolled colour to explain itself.
 const HEALTH_PRIO = { red: 4, yellow: 3, paused: 2, green: 1, gray: 0, "": 0 };
@@ -5672,32 +5673,10 @@ function App() {
     return {...d, _v8: true};
   };
 
-  // v9 — the configurable health-automation engine replaces the old fixed 3-toggle cfRules with a
-  // per-task manual-override flag (`healthOverride`) + an ordered rule list. One-time seed: a task
-  // whose stored `health` is green/red/paused was necessarily SET there by a person — nothing else
-  // ever wrote those values (the old automation only ever computed a DISPLAY color; it never
-  // persisted back to `task.health`) — so it becomes an override, reproducing the old
-  // overdueRed/meetingBound exclusion of green/paused/red exactly, for every plan that already
-  // exists. A task whose health is gray or yellow starts un-overridden (automatic), same as before.
-  // Idempotent via _v9 — only tasks that have never seen this migration (healthOverride ===
-  // undefined) are touched, so a value the user later clears back to `false` is never re-locked.
-  const normalizeToV9 = d => {
-    if (!d || typeof d !== "object") d = {};
-    if (d._v9) return d;
-    const projects = {};
-    const srcProjects = (d.projects && typeof d.projects === "object") ? d.projects : {};
-    Object.entries(srcProjects).forEach(([id, proj]) => {
-      if (!proj || typeof proj !== "object") return;
-      const srcTasks = Array.isArray(proj.tasks) ? proj.tasks : [];
-      const tasks = srcTasks.filter(t => t && typeof t === "object").map(t =>
-        t.healthOverride === undefined
-          ? {...t, healthOverride: t.health === "green" || t.health === "red" || t.health === "paused"}
-          : t
-      );
-      projects[id] = {...proj, tasks};
-    });
-    return {...d, projects, _v9: true};
-  };
+  // ⛔ RETIRED (2026-08-25, B752848 owner correction): normalizeToV9 used to seed the now-deleted
+  // `healthOverride` flag on load (green/red/paused → override:true). The flag and everything that
+  // read it are gone, so this migration has nothing left to do; removed rather than left as a no-op,
+  // per "delete it completely." Every call site below now calls normalizeToV8 directly.
 
   // Ensure any new DEFAULT_HOLIDAYS keys (added in future versions) are merged in
   const ensureHolidays = d => {
@@ -5766,7 +5745,7 @@ function App() {
       // can't call normalizeIds/ensureContacts directly — those are scoped to this effect). Set
       // synchronously on mount, before the first await, so it's ready before any user import/restore.
       applyLoadedDataRef.current = (parsed) => {
-        let d = normalizeToV9(normalizeToV8(ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(parsed)))))));
+        let d = normalizeToV8(ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(parsed))))));
         d._pinnedClean = true;
         HOLIDAY_SET = buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS);
         const driftFound = [];   // B836 — same drift surfacing on import / version-restore
@@ -5783,7 +5762,7 @@ function App() {
         // __PLANAR_DATA__ is the seed used only when Supabase has no record yet.
         const r = await window.storage.get("hs-v1");
         if (r) {
-          const d = normalizeToV9(normalizeToV8(ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(JSON.parse(r.value))))))));
+          const d = normalizeToV8(ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(JSON.parse(r.value)))))));
           // NOTE: a narrow viewport forces the GRID layout at RENDER time (see the body switch),
           // never by mutating the persisted `view` — baking "grid" into saved data let one phone
           // session overwrite the desktop's saved split/gantt preference across every device.
@@ -5806,7 +5785,7 @@ function App() {
         }
         // First load (Supabase empty) — seed from inline data or SEED constant
         const seed = window.__PLANAR_DATA__ || SEED;
-        const d = normalizeToV9(normalizeToV8(ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(seed)))))));
+        const d = normalizeToV8(ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(seed))))));
           // Enforce predecessor relationships on load (seed data — no stale pins)
           HOLIDAY_SET = buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS);
           d._pinnedClean = true;
@@ -5818,7 +5797,7 @@ function App() {
         if (window.__planarCloudError) setOfflineFallback(true);
         setData(d);
       } catch {
-        const d = normalizeToV9(normalizeToV8(ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(window.__PLANAR_DATA__ || SEED)))))));
+        const d = normalizeToV8(ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(window.__PLANAR_DATA__ || SEED))))));
         setOfflineFallback(true);
         setData(d);
       }
@@ -6337,12 +6316,12 @@ function App() {
       let tasks = d.projects[pid].tasks.map(t => {
         if (t.id !== taskId) return t;
         const u = {...t, ...updates};
-        // A directly-picked status (StatusPicker / context menu / grid cell / master-view cell) is
-        // a deliberate manual override — it must win over the automation engine and STAY won until
-        // the user explicitly clears it back to Automatic (updateTask(id,{healthOverride:false})).
-        // A caller that means to clear it passes `healthOverride` itself, so this only fires on a
-        // plain color pick.
-        if ('health' in updates && !('healthOverride' in updates)) u.healthOverride = true;
+        // ⛔ RULES-DECIDE (2026-08-25, owner correction) — RETIRED: a directly-picked status (StatusPicker /
+        // context menu / grid cell / master-view cell) used to auto-stamp the override flag on every
+        // plain color pick, silently opting the task out of automation forever — that's the exact
+        // defect behind "why is an overdue task not turning red" (a single ordinary status click on a
+        // task set healthOverride, and rules could never touch it again). The flag itself is now gone
+        // (computeDisplayHealth never reads it), so an ordinary pick just writes `health`, full stop.
         // Sanitize rowColor — only allow known hex colors or null
         if ('rowColor' in updates) u.rowColor = isValidColor(updates.rowColor) ? updates.rowColor : null;
         // Sanitize per-task text-format overrides to strict booleans (so junk data can't render)
@@ -6386,10 +6365,11 @@ function App() {
         const descIds = new Set(getDescIds(taskId, tasks));
         if (descIds.size > 0) {
           const extra = updates.health === 'green' ? {percentComplete: 100} : {};
-          // Cascaded descendants are just as deliberately overridden as the parent that pushed
-          // this color onto them — otherwise the automation engine could immediately recolor a
-          // child the user just bulk-set from its parent.
-          tasks = tasks.map(t => descIds.has(t.id) ? {...t, health: updates.health, healthOverride: true, ...extra} : t);
+          // ⛔ RULES-DECIDE (2026-08-25, owner correction): this cascade used to also set the
+          // override flag on every descendant so it couldn't immediately be undone by a firing
+          // rule. That flag is gone — a rule now decides every
+          // cascaded descendant's displayed color exactly like any other task, same as the parent.
+          tasks = tasks.map(t => descIds.has(t.id) ? {...t, health: updates.health, ...extra} : t);
         }
       }
       if (touchesSchedule(updates)) {   // B835 (recurrence ×2) — fires for durValue/durUnit (typed duration) + pinnedStart/pinnedEnd (unpin/unlock) too, not just {duration}/{start}
@@ -9611,7 +9591,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
       else if (unknownIds.length) showToast(`No task ${unknownIds.join(", ")} in this project — ignored.`);
       updateTask(id, {predecessors: preds});
     }
-    else if (col==="health"||col==="status") { if (val === AUTO_HEALTH) updateTask(id,{healthOverride:false}); else updateTask(id,{health:val}); }
+    else if (col==="health"||col==="status") { updateTask(id,{health:val}); }
     else if (col==="cost"||col==="budget"||col==="actualCost") { const n=String(val).replace(/[^0-9.]/g,""); updateTask(id,{[col]: n==="" ? "" : (parseFloat(n)||0)}); }
     else updateTask(id,{[col]:val});
   };
@@ -10144,7 +10124,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
 // One picker open at a time — any picker dispatches this when opening; others listen and close
 const PICKER_EVENT = "planar-picker-open";
 
-function HealthPicker({value, onChange, overridden=false}) {
+function HealthPicker({value, onChange}) {
   const [open, setOpen]   = useState(false);
   const [pos, setPos]     = useState({top:0, left:0});
   const [hiIdx, setHiIdx] = useState(-1);
@@ -10217,8 +10197,7 @@ function HealthPicker({value, onChange, overridden=false}) {
     <>
       <span ref={dotRef} onClick={handleDotClick}
         data-health-dot="true"
-        data-health-override={overridden ? "true" : "false"}
-        title={overridden ? "Set status (manually overridden — pick Automatic to clear)" : "Set status"}
+        title="Set status"
         onMouseEnter={e=>{ if(!open) e.currentTarget.style.background="rgba(0,0,0,0.045)"; }}
         onMouseLeave={e=>{ if(!open) e.currentTarget.style.background="transparent"; }}
         style={{display:"flex",alignItems:"center",justifyContent:"center",position:"relative",
@@ -10241,16 +10220,9 @@ function HealthPicker({value, onChange, overridden=false}) {
             background:"#fff",border:"1px solid var(--bd2)",borderRadius:6,
             padding:"5px 4px",display:"flex",flexDirection:"column",gap:2,
             zIndex:9999,boxShadow:"0 4px 14px rgba(0,0,0,0.15)"}}>
-          <span title="Automatic — let the automation rules set this"
-            onClick={e => { e.stopPropagation(); onChange(AUTO_HEALTH); setOpen(false); }}
-            style={{display:"flex",alignItems:"center",justifyContent:"center",
-              width:28,height:20,borderRadius:4,cursor:"pointer",
-              background: !overridden ? "var(--surf)" : "transparent"}}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={!overridden ? "var(--amber)" : "var(--mut)"} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-            </svg>
-          </span>
-          <div style={{height:1,background:"var(--bd)",margin:"2px 0"}} />
+          {/* ⛔ RULES-DECIDE (2026-08-25, owner correction): the "Automatic" entry that used to sit
+              here is RETIRED along with healthOverride — there is no lock left to hand back, so a
+              control that only ever cleared one would do nothing. */}
           {HK.map((hk, i) => (
             <span key={hk} title={HEALTH[hk].label}
               onMouseEnter={()=>setHiIdx(i)}
@@ -10275,7 +10247,7 @@ function HealthPicker({value, onChange, overridden=false}) {
 }
 
 // ── StatusPicker ──────────────────────────────────────────
-function StatusPicker({value, onChange, overridden=false}) {
+function StatusPicker({value, onChange}) {
   const [open, setOpen]   = useState(false);
   const [pos, setPos]     = useState({top:0, left:0});
   const [hiIdx, setHiIdx] = useState(-1);
@@ -10343,7 +10315,7 @@ function StatusPicker({value, onChange, overridden=false}) {
 
   return (
     <>
-      <span ref={ref} onClick={handleClick} title={overridden ? "Manually overridden — pick Automatic to clear" : undefined}
+      <span ref={ref} onClick={handleClick}
         style={{cursor:"pointer",display:"inline-flex",alignItems:"center",gap:4,color:"var(--mut)",fontSize:11,fontFamily:"'Inter',system-ui,sans-serif"}}>
         {(HEALTH[value]||HEALTH.gray).label}
       </span>
@@ -10353,16 +10325,8 @@ function StatusPicker({value, onChange, overridden=false}) {
             border:"1px solid var(--bd2)",borderRadius:6,padding:"5px 6px",
             display:"flex",flexDirection:"column",gap:3,
             zIndex:9999,boxShadow:"0 4px 14px rgba(0,0,0,0.15)"}}>
-          <span onClick={e=>{e.stopPropagation();onChange(AUTO_HEALTH);setOpen(false);}}
-            title="Automatic — let the automation rules set this"
-            style={{cursor:"pointer",padding:"1px 0",borderRadius:3,display:"flex",alignItems:"center",gap:5,
-              background: !overridden ? "var(--surf)" : "transparent"}}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={!overridden ? "var(--amber)" : "var(--mut)"} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{marginLeft:2}}>
-              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-            </svg>
-            <span style={{fontSize:11,color:"var(--mut)",fontFamily:"'Inter',system-ui,sans-serif"}}>Automatic</span>
-          </span>
-          <div style={{height:1,background:"var(--bd)",margin:"2px 0"}} />
+          {/* ⛔ RULES-DECIDE (2026-08-25, owner correction): "Automatic" retired along with
+              healthOverride — see HealthPicker's own note above. */}
           {HK.map((hk, i) => (
             <span key={hk} onMouseEnter={()=>setHiIdx(i)} onMouseLeave={()=>setHiIdx(-1)}
               onClick={e=>{e.stopPropagation();onChange(hk);setOpen(false);}}
@@ -10444,11 +10408,27 @@ function DepCell({items, renderLabel, renderName, s, title, flagged}) {
   // second line instead of ellipsizing on line 1 while line 2 sits empty.
   if (items.length === 1 && canTwoLine) {
     const item = items[0];
+    // B655552 (round 3) — a HANGING INDENT: without it, a wrapped continuation line starts flush
+    // left under the ID/lag label, so it visually reads as a second entry rather than the tail of
+    // the one above it — exactly the ambiguity this whole cell exists to avoid (one link wrapped to
+    // two lines vs. two separate links, one per line, must never be confusable at a glance). The
+    // indent must be MEASURED per item, not a fixed guess: `renderLabel(item)` ranges from a bare
+    // 2-digit id ("24") to a lag-suffixed label several times wider ("20FS+360d"), so a constant
+    // tuned for one is wrong for the other by construction. `_cpMeasure` is the same shared canvas
+    // text-measurement helper already used elsewhere in this file (ContactPicker's ghost-text
+    // alignment) for exact pixel alignment — reused here rather than inventing a second mechanism.
+    // The classic CSS hanging-indent pair (`padding-left` + equal-and-opposite `text-indent`) shifts
+    // every line right by `indent`, then pulls line 1 back to its original position — so line 1 is
+    // pixel-identical to before, and only the WRAPPED line 2 sits indented under the name text.
+    const prefixText = (flagged && flagged(item) ? "⚠ " : "") + renderLabel(item);
+    const indent = _cpMeasure(prefixText, `500 ${DEPCELL_FONT_SIZE}px 'Inter', system-ui, sans-serif`)
+      + _cpMeasure(" · ", `${DEPCELL_FONT_SIZE}px 'Inter', system-ui, sans-serif`);
     return (
       <div ref={ref} title={fullTitle} style={{...s, alignItems:"flex-start", padding:"0 8px", whiteSpace:"normal"}}>
         <span style={{display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical",
           overflow:"hidden", lineHeight:`${DEPCELL_LINE_H}px`, fontSize:DEPCELL_FONT_SIZE, fontFamily:"'Inter',system-ui,sans-serif",
-          whiteSpace:"normal", width:"100%", minWidth:0, wordBreak:"break-word"}}>
+          whiteSpace:"normal", width:"100%", minWidth:0, wordBreak:"break-word",
+          paddingLeft:indent, textIndent:-indent}}>
           <span style={{color: flagged && flagged(item) ? "var(--warn-text,#a16207)" : "#1d4ed8", fontWeight:500}}>{flagged && flagged(item) ? "⚠ " : ""}{renderLabel(item)}</span>
           <span style={{color:"var(--mut)"}}> · {renderName(item)}</span>
         </span>
@@ -10930,7 +10910,7 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
       if (isExpandedParent) return <span style={{...s, justifyContent:"center", padding:0}} />;
       return (
         <span style={{...s, justifyContent:"center", padding:0}} data-picker-cell={`health-${task.id}`}>
-          <HealthPicker value={dispHealth || task.health} onChange={hk => commit(task.id, "health", hk)} overridden={!!task.healthOverride} />
+          <HealthPicker value={dispHealth || task.health} onChange={hk => commit(task.id, "health", hk)} />
         </span>
       );
     }
@@ -10938,7 +10918,7 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
       if (isExpandedParent) return <span style={{...s, padding:"0 4px"}} />;
       return (
         <span style={{...s,padding:"0 4px"}} data-picker-cell={`status-${task.id}`}>
-          <StatusPicker value={dispHealth || task.health} onChange={hk => commit(task.id, "status", hk)} overridden={!!task.healthOverride} />
+          <StatusPicker value={dispHealth || task.health} onChange={hk => commit(task.id, "status", hk)} />
         </span>
       );
     case "percentComplete":
@@ -12365,7 +12345,7 @@ function AutomationPanel({data, setData, onClose}) {
 
       {/* Description */}
       <div style={{fontSize:11,color:"var(--mut)",lineHeight:1.5,marginBottom:10,paddingBottom:10,borderBottom:"1px solid var(--bd)"}}>
-        First matching rule sets a task's color. A status you pick by hand always wins over these — pick "Automatic" from its status menu to hand it back.
+        First matching rule sets a task's color. Nothing you pick by hand can override it.
       </div>
 
       {/* Rules */}
@@ -12544,15 +12524,8 @@ function HealthDropMenu({value, onSelect, onClose}) {
     <div data-hmenu="1" style={{position:"absolute",top:"calc(100% + 2px)",left:0,width:"max-content",
       background:"#fff",border:"1px solid var(--bd2)",borderRadius:6,
       boxShadow:"0 4px 20px rgba(0,0,0,.15)",zIndex:9999,padding:"4px 0",userSelect:"none"}}>
-      <div data-hmenu="1" onMouseDown={e=>{e.preventDefault();onSelect(AUTO_HEALTH);onClose();}}
-        title="Automatic — let the automation rules set this"
-        style={{padding:"5px 10px",display:"flex",alignItems:"center",gap:6,cursor:"pointer",background:"transparent"}}>
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--amber)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-        </svg>
-        <span style={{fontSize:11,color:"var(--txt)",fontFamily:"'Inter',system-ui,sans-serif",whiteSpace:"nowrap"}}>Automatic</span>
-      </div>
-      <div style={{height:1,background:"var(--bd)",margin:"2px 0"}} />
+      {/* ⛔ RULES-DECIDE (2026-08-25, owner correction): "Automatic" retired along with
+          healthOverride — see HealthPicker's own note. */}
       {HK.map((hk,i) => { const hh=HEALTH[hk]; return (
         <div key={hk} data-hmenu="1" onMouseEnter={()=>setIdx(i)}
           onMouseDown={e=>{e.preventDefault();onSelect(hk);onClose();}}
@@ -12699,8 +12672,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
       if (parsed.error) { showToast(parsed.error); return; }
       if (parsed.value !== taskDurValue(t) || parsed.unit !== taskDurUnit(t)) updateTask(t.id, {durValue: parsed.value, durUnit: parsed.unit}, t.projId);
     } else if (col==="health") {
-      if (val === AUTO_HEALTH) { if (t.healthOverride) updateTask(t.id, {healthOverride:false}, t.projId); }
-      else if (val !== t.health) updateTask(t.id, {health: val}, t.projId);
+      if (val !== t.health) updateTask(t.id, {health: val}, t.projId);
     } else if (col==="percentComplete") {
       const nv = Math.max(0, Math.min(100, parseInt(val)||0));
       if (nv !== (t.percentComplete||0)) updateTask(t.id, {percentComplete: nv}, t.projId);
@@ -12935,8 +12907,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
             value={t.health}
             onSelect={val=>commit(t,"health",val)}
             onClose={()=>setLocalEdit(null)} />}
-          <span title={t.healthOverride ? "Manually overridden — double-click, then pick Automatic to clear" : undefined}
-            style={{background:h.bar,borderRadius:999,
+          <span style={{background:h.bar,borderRadius:999,
             padding:"3px 8px",fontSize:11,display:"inline-flex",alignItems:"center",gap:4,
             color:HDARK[dispHealth]||"#374151",fontWeight:500,whiteSpace:"nowrap",maxWidth:"100%"}}>
             <span style={{width:6,height:6,borderRadius:"50%",background:h.dot==="#ffffff"?"#d1d5db":h.dot,flexShrink:0}} />{h.label}

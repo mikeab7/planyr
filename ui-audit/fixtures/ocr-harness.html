@@ -1,0 +1,128 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8" /><title>OCR deed fixture harness</title></head>
+<body>
+<script type="module">
+import { ocrScannedDeedPdf } from "/src/shared/files/deedOcr.js";
+import { parseTracts, callsToPath, pathCloses, misclosure } from "/src/workspaces/site-planner/lib/deedParse.js";
+import { PDFDocument } from "pdf-lib";
+
+// Render `text` (a legal description) to a canvas the way a typed instrument would be laid out,
+// then degrade it the way a county photocopy-of-a-photocopy scan is degraded: skew a degree or
+// two, add noise, drop contrast, resample down and back up (blur). Returns a PDF Blob with NO text
+// layer (an <img> only) — exactly the shape that trips pdfText.js's "looks scanned" refusal.
+async function buildDegradedScanPdf({ text, widthPx = 1700, heightPx = 2200, skewDeg = 1.6, noise = 18, contrastDrop = 0.55, resampleFactor = 0.4, bitonal = false }) {
+  const canvas = document.createElement("canvas");
+  canvas.width = widthPx; canvas.height = heightPx;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, widthPx, heightPx);
+  ctx.fillStyle = "#000";
+  ctx.font = "28px 'Courier New', monospace";
+  ctx.textBaseline = "top";
+  const marginX = 90, marginY = 110, lineHeight = 38, maxWidth = widthPx - marginX * 2;
+  let y = marginY;
+  const words = text.split(/\s+/);
+  let line = "";
+  const flushLine = () => { ctx.fillText(line, marginX, y); y += lineHeight; line = ""; };
+  for (const w of words) {
+    const test = line ? `${line} ${w}` : w;
+    if (ctx.measureText(test).width > maxWidth && line) { flushLine(); line = w; }
+    else line = test;
+    if (/[.;]$/.test(w)) { flushLine(); y += lineHeight * 0.4; }
+  }
+  if (line) flushLine();
+
+  // Skew (rotate the whole page a degree or two, matching how a fed scanner sheet sits off square).
+  const rot = document.createElement("canvas");
+  rot.width = widthPx; rot.height = heightPx;
+  const rctx = rot.getContext("2d");
+  rctx.fillStyle = "#fff"; rctx.fillRect(0, 0, widthPx, heightPx);
+  rctx.translate(widthPx / 2, heightPx / 2);
+  rctx.rotate((skewDeg * Math.PI) / 180);
+  rctx.drawImage(canvas, -widthPx / 2, -heightPx / 2);
+  rctx.setTransform(1, 0, 0, 1, 0, 0);
+
+  // Drop contrast + add noise directly on the pixel buffer.
+  const img = rctx.getImageData(0, 0, widthPx, heightPx);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    let v = d[i]; // greyscale already (fillStyle black/white only)
+    v = 255 - (255 - v) * contrastDrop; // pull black toward grey, i.e. lower contrast
+    v += (Math.random() - 0.5) * 2 * noise;
+    v = Math.max(0, Math.min(255, v));
+    if (bitonal) v = v < 200 ? 0 : 255;
+    d[i] = d[i + 1] = d[i + 2] = v;
+  }
+  rctx.putImageData(img, 0, 0);
+
+  // Resample down then back up (loses fine detail / softens edges — a low-res scan upsampled, or
+  // a JPEG-generation photocopy artifact).
+  const small = document.createElement("canvas");
+  small.width = Math.round(widthPx * resampleFactor);
+  small.height = Math.round(heightPx * resampleFactor);
+  small.getContext("2d").drawImage(rot, 0, 0, small.width, small.height);
+  const final = document.createElement("canvas");
+  final.width = widthPx; final.height = heightPx;
+  const fctx = final.getContext("2d");
+  fctx.imageSmoothingEnabled = true;
+  fctx.drawImage(small, 0, 0, widthPx, heightPx);
+
+  const pngBlob = await new Promise((resolve) => final.toBlob(resolve, "image/png"));
+  const pngBytes = new Uint8Array(await pngBlob.arrayBuffer());
+
+  const pdf = await PDFDocument.create();
+  const png = await pdf.embedPng(pngBytes);
+  const page = pdf.addPage([widthPx, heightPx]);
+  page.drawImage(png, { x: 0, y: 0, width: widthPx, height: heightPx });
+  const pdfBytes = await pdf.save();
+  return new Blob([pdfBytes], { type: "application/pdf" });
+}
+
+window.__buildDegradedScanPdf = buildDegradedScanPdf;
+
+window.__runOcrFixture = async ({ text, groundTruth, degrade, ocrOpts }) => {
+  const t0 = performance.now();
+  const pdfBlob = await buildDegradedScanPdf({ text, ...degrade });
+  const t1 = performance.now();
+  const progressLog = [];
+  const result = await ocrScannedDeedPdf(pdfBlob, {
+    ...ocrOpts,
+    onProgress: (p) => progressLog.push(p),
+  });
+  const t2 = performance.now();
+
+  const tracts = parseTracts(result.text);
+  const calls = tracts[0] ? tracts[0].calls : [];
+  const path = calls.length ? callsToPath(calls, { x: 0, y: 0 }) : [];
+  const closes = calls.length ? pathCloses(path) : false;
+  const gap = calls.length ? misclosure(path) : null;
+
+  // Compare each recovered call against ground truth by ORDER (both are read top-to-bottom).
+  const recovered = calls.map((c, i) => {
+    const gt = groundTruth[i];
+    if (!gt) return { ok: false, reason: "extra/unmatched call" };
+    const azOk = Math.abs(c.az - gt.az) < 0.5;
+    const distOk = Math.abs(c.distFt - gt.distFt) < Math.max(0.5, gt.distFt * 0.01);
+    return { ok: azOk && distOk, bearing: c.bearing, distFt: c.distFt, gtBearing: gt.bearingLabel, gtDist: gt.distFt, azOk, distOk };
+  });
+  const okCount = recovered.filter((r) => r.ok).length;
+
+  return {
+    rawTextByPage: result.pages.map((p) => p.rawText),
+    repairedText: result.text,
+    changesByPage: result.pages.map((p) => p.changes),
+    meanConfidenceByPage: result.pages.map((p) => p.meanConfidence),
+    callsFound: calls.length,
+    groundTruthCount: groundTruth.length,
+    bearingsRecovered: okCount,
+    recovered,
+    closes, gap,
+    timings: { buildMs: t1 - t0, ocrMs: t2 - t1 },
+    progressLog,
+  };
+};
+
+window.__harnessReady = true;
+</script>
+</body>
+</html>
