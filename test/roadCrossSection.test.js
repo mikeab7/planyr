@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   BAND_TYPES, BAND_TYPE_BY_KEY, DEFAULT_BAND_TYPE, bandTypeOf, normalizeBands, makeXSection,
   xsectionFromRoad, hasXSection, curbToCurbWidth, pavedWidth, rowWidth, pavementArea, bandLayout,
-  bandStripeMarks, BUILT_IN_XSECTION_PRESETS,
+  bandStripeMarks, BUILT_IN_XSECTION_PRESETS, parseWidthDraft, MIN_BAND_WIDTH_FT,
 } from "../src/workspaces/site-planner/lib/roadCrossSection.js";
 
 const OWNER_EXAMPLE = [
@@ -202,5 +202,59 @@ describe("BUILT_IN_XSECTION_PRESETS", () => {
       expect(n.length).toBe(p.bands.length);
       for (const b of n) expect(BAND_TYPE_BY_KEY[b.type]).toBeTruthy();
     }
+  });
+});
+
+/* NEW-1 follow-up (owner report, 2026-08-26) — "when I type two it seems to bug out … I'm just
+ * typing 2 to get to 25". A PREFIX OF A VALID NUMBER IS NOT AN ERROR: every named adjacent
+ * mid-typing case must come back `null` (never a value, never treated as an error by the caller —
+ * see RoadCrossSectionDialog's BandWidthInput, which never shows error styling for a null result;
+ * it just leaves committed state untouched), and every case that IS a real, final number must
+ * parse to exactly that number, including a leading zero. */
+describe("parseWidthDraft — the band-width field's commit-time-only parser", () => {
+  it("parses a real, final number, including a leading zero", () => {
+    expect(parseWidthDraft("25")).toBe(25);
+    expect(parseWidthDraft("12.5")).toBe(12.5);
+    expect(parseWidthDraft("08")).toBe(8); // a leading zero — a legitimate way of having typed "8", never an error
+    expect(parseWidthDraft("0.5")).toBe(0.5);
+  });
+  it("is a prefix of a valid number — '2' on the way to '25' is a legitimate mid-typing state, not an error", () => {
+    expect(parseWidthDraft("2")).toBe(2); // "2" IS itself a complete, valid number — parses fine
+    expect(parseWidthDraft("2")).not.toBeNull();
+  });
+  it("returns null for an EMPTY field — clearing it to retype is not an error", () => {
+    expect(parseWidthDraft("")).toBeNull();
+    expect(parseWidthDraft("   ")).toBeNull();
+  });
+  it("returns null for a lone '.'", () => {
+    expect(parseWidthDraft(".")).toBeNull();
+  });
+  it("returns null for '0' on the way to '0.5' — not yet a positive width", () => {
+    expect(parseWidthDraft("0")).toBeNull();
+  });
+  it("never flags a trailing decimal point mid-type; if committed right there, '12.' resolves to 12", () => {
+    // "12." is a legitimate thing to have typed on the way to "12.5" — the caller never treats an
+    // in-progress draft as an error regardless of what this returns. Number("12.") is unambiguously
+    // 12, so committing right there (a blur mid-type) takes the plain reading rather than reverting.
+    expect(parseWidthDraft("12.")).toBe(12);
+  });
+  it("returns null for a moment of pasted-odd text, never throwing", () => {
+    expect(parseWidthDraft("12'6\"")).toBeNull();
+    expect(parseWidthDraft("1,200")).toBeNull();
+    expect(parseWidthDraft("abc")).toBeNull();
+    expect(parseWidthDraft("1.2.3")).toBeNull();
+    expect(parseWidthDraft("-5")).toBeNull();
+  });
+  it("returns null for non-string/nullish input rather than throwing", () => {
+    expect(parseWidthDraft(null)).toBeNull();
+    expect(parseWidthDraft(undefined)).toBeNull();
+    expect(parseWidthDraft(25)).toBeNull();
+  });
+  it("MIN_BAND_WIDTH_FT is a small positive floor the caller clamps to AT COMMIT — parseWidthDraft itself never clamps", () => {
+    expect(MIN_BAND_WIDTH_FT).toBeGreaterThan(0);
+    expect(MIN_BAND_WIDTH_FT).toBeLessThan(1);
+    // below-minimum still parses — "being below it while typing is not an error either"; the
+    // dialog's own commit handler does `Math.max(MIN_BAND_WIDTH_FT, parseWidthDraft(draft))`
+    expect(parseWidthDraft("0.02")).toBe(0.02);
   });
 });

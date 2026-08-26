@@ -16,17 +16,63 @@
  * Lazily loaded (a modal a session opens rarely) — same pattern as SetLocationDialog.jsx. Module
  * scope throughout (MODULE-SCOPE-COMPONENTS): XSectionPreview is a sibling function component, never
  * defined inside the dialog's render body. */
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   BAND_TYPES, bandTypeOf, normalizeBands, makeXSection, curbToCurbWidth, pavedWidth, rowWidth,
   pavementArea, bandLayout, bandStripeMarks, BAND_FILL_TOKEN, BAND_FILL_OPACITY, BUILT_IN_XSECTION_PRESETS,
+  MIN_BAND_WIDTH_FT, parseWidthDraft,
 } from "../lib/roadCrossSection.js";
 
 const f1 = (n) => (Number.isFinite(n) ? (Math.round(n * 10) / 10).toString() : "—");
 const f0 = (n) => (Number.isFinite(n) ? Math.round(n).toString() : "—");
 const uid = () => `xsec-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-const PREVIEW_W = 520, PREVIEW_LEN = 90; // px — the "along the road" swatch length (no dimension, just texture)
+const PREVIEW_LEN = 90; // the "along the road" swatch length in px — no dimension, just texture
+const PREVIEW_H = 180; // FIXED px height, matched 1:1 by the SVG's viewBox — see XSectionPreview
+const PREVIEW_LADDER_W = 110; // room reserved right of the swatch for the tick ladder + the horizontal total-width label
+const MAX_PX_PER_FT = 6.5; // legibility ceiling — a narrow section's bands don't get absurdly tall
+
+/* NEW-1 follow-up — the width field that used to be a raw, always-controlled `<input type="number">`
+ * bound straight to committed band state, so every keystroke was a commit: typing "2" on the way to
+ * "25" instantly set that band's width to 2, and the WHOLE dialog (preview + every derived total)
+ * recomputed off that transient value. This mirrors SitePlanner.jsx's NumInput contract — a local
+ * DRAFT the user types into, committed to the model only on blur or Enter — so a prefix of a valid
+ * number (or any of the other legitimate mid-typing states parseWidthDraft names) never touches
+ * `bands`, and the preview/totals therefore keep showing the LAST COMMITTED geometry the whole time
+ * someone is mid-edit. No error styling is shown at all here — an unparseable draft at commit time
+ * just silently reverts to the last committed value, and a below-minimum one is silently clamped up
+ * to MIN_BAND_WIDTH_FT — never a red border, never a blocked keystroke, per the owner's own rule. */
+function BandWidthInput({ value, onCommit }) {
+  const [draft, setDraft] = useState(() => String(value));
+  const committedRef = useRef(value);
+  useEffect(() => {
+    if (value !== committedRef.current) { committedRef.current = value; setDraft(String(value)); }
+  }, [value]);
+  const commit = () => {
+    const n = parseWidthDraft(draft);
+    const next = n == null ? committedRef.current : Math.max(MIN_BAND_WIDTH_FT, n);
+    committedRef.current = next;
+    setDraft(String(next));
+    if (next !== value) onCommit(next);
+  };
+  return (
+    <input type="text" inputMode="decimal" value={draft} aria-label="Band width, feet"
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          commit();
+          const el = e.currentTarget;
+          requestAnimationFrame(() => { try { el.select(); } catch (_) {} });
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          setDraft(String(committedRef.current));
+        }
+      }}
+      style={{ width: 60, padding: "6px 8px", fontSize: 12.5, fontFamily: "inherit", border: "1px solid var(--planner-border)", borderRadius: 7, background: "var(--surface-base)", color: "var(--text-primary)" }} />
+  );
+}
 
 const STRIPE_STYLE = {
   "yellow-solid": { stroke: "#e6b800", dash: undefined, w: 1.6 },
@@ -38,17 +84,38 @@ const STRIPE_STYLE = {
 /* The live plan-view schematic: the road runs left-right (the swatch length carries no dimension —
  * it's just enough asphalt texture to read as a road), bands stack top-to-bottom (across the road,
  * which is how a cross-section is actually measured). Pure presentation over bandLayout/
- * bandStripeMarks; not to scale for very narrow dialogs, only for the ft→px ratio itself. */
-function XSectionPreview({ xsection, width = PREVIEW_W }) {
+ * bandStripeMarks.
+ *
+ * NEW-1 follow-up (owner report) — the box used to compute its OWN viewBox height from content
+ * (`h = rowW * scale`) while separately clamping the CSS display height into [60, 280], so a narrow
+ * section's tiny viewBox got stretched by the browser to fill a much taller box — every fixed-unit
+ * font size stretched right along with it, which is what turned a 2 ft section's "2′" label into an
+ * enormous numeral floating in an empty rectangle.
+ *
+ * Fixed at the root, and deliberately NOT with an `aspectRatio` CSS trick tried first: that kept
+ * `width: 100%`, and this dialog's body is wide enough that "100%" alone reproduced the same class of
+ * blow-up (a live measurement here found font glyphs rendering 3-4x their authored size — the same
+ * failure, just driven by the CONTAINER's width instead of by rowW). So the SVG is rendered at its
+ * OWN fixed pixel size — `width={CONTENT_W} height={PREVIEW_H}`, exactly matching the viewBox — and
+ * ONLY shrinks (never grows) on a viewport narrower than that, via `maxWidth: "100%"` +
+ * `height: "auto"`. 1 viewBox unit is therefore 1 real CSS px whenever there is room for it, which is
+ * every case this dialog (`min(720px, 100%)` wide) is ever opened in — so the browser has no reason
+ * to rescale anything, ever, regardless of rowW OR of the dialog's own width. The per-foot `scale` is
+ * capped at MAX_PX_PER_FT and otherwise sized to exactly fill PREVIEW_H, so content height is always
+ * <= PREVIEW_H by construction — a narrow section just renders a shorter, vertically-centered band
+ * stack rather than an oversized one. */
+function XSectionPreview({ xsection }) {
   const { edges, rowW } = bandLayout(xsection);
   if (!edges.length || !(rowW > 0)) return null;
-  const scale = Math.min(6.5, (width - 40) / rowW); // px per foot, capped so a narrow section doesn't look absurdly fat
-  const h = rowW * scale;
+  const scale = Math.min(MAX_PX_PER_FT, PREVIEW_H / rowW); // px per foot — content height never exceeds PREVIEW_H
+  const contentH = rowW * scale;
+  const padTop = Math.max(0, (PREVIEW_H - contentH) / 2); // center a narrow section's band stack vertically
   const W = PREVIEW_LEN;
-  const yOf = (offsetFt) => (rowW / 2 - offsetFt) * scale; // offset 0 (centerline) → mid-height
+  const CONTENT_W = W + PREVIEW_LADDER_W;
+  const yOf = (offsetFt) => padTop + (rowW / 2 - offsetFt) * scale; // offset 0 (centerline) → mid-height
   const marks = bandStripeMarks(xsection);
   return (
-    <svg viewBox={`0 0 ${W + 90} ${h}`} width="100%" height={Math.max(60, Math.min(280, h))} style={{ display: "block", background: "var(--surface-base)", borderRadius: 8 }} role="img" aria-label="Cross-section preview, plan view">
+    <svg viewBox={`0 0 ${CONTENT_W} ${PREVIEW_H}`} width={CONTENT_W} height={PREVIEW_H} style={{ display: "block", maxWidth: "100%", height: "auto", background: "var(--surface-base)", borderRadius: 8 }} role="img" aria-label="Cross-section preview, plan view">
       {edges.map((e) => {
         const y0 = yOf(e.from), y1 = yOf(e.to);
         const bandH = Math.max(0.5, y1 - y0);
@@ -80,13 +147,18 @@ function XSectionPreview({ xsection, width = PREVIEW_W }) {
         }
         return <line key={i} x1={0} y1={y} x2={W} y2={y} stroke={st.stroke} strokeWidth={st.w} strokeDasharray={st.dash} />;
       })}
-      {/* dimension ladder on the right: a tick at every band boundary + the running total */}
+      {/* dimension ladder on the right: a tick at every band boundary. NEW-1 follow-up — the running
+       * total used to be a text label ROTATED 90° right beside this ladder, which needed the box's
+       * HEIGHT to hold the whole string's length; at any modest box height that clipped it to a
+       * fragment ("tot") and its glyphs overlapped the ladder. It's now a plain horizontal label
+       * clear of the ladder, so it only ever needs the WIDTH this component already reserves
+       * (PREVIEW_LADDER_W) — never clipped or colliding, at any section width. */}
       <g stroke="var(--text-tertiary)" strokeWidth={0.75} fill="none">
-        <line x1={W + 14} y1={0} x2={W + 14} y2={h} />
+        <line x1={W + 14} y1={padTop} x2={W + 14} y2={padTop + contentH} />
         {edges.map((e) => <line key={`t${e.index}`} x1={W + 10} y1={yOf(e.to)} x2={W + 18} y2={yOf(e.to)} />)}
-        <line x1={W + 10} y1={0} x2={W + 18} y2={0} />
+        <line x1={W + 10} y1={padTop} x2={W + 18} y2={padTop} />
       </g>
-      <text x={W + 24} y={h / 2} transform={`rotate(90 ${W + 24} ${h / 2})`} textAnchor="middle" style={{ fontSize: 10, fill: "var(--text-tertiary)", fontWeight: 600 }}>{f1(rowW)}′ total</text>
+      <text x={W + 24} y={PREVIEW_H / 2} textAnchor="start" dominantBaseline="middle" style={{ fontSize: 10, fill: "var(--text-tertiary)", fontWeight: 600 }}>{f1(rowW)}′ total</text>
     </svg>
   );
 }
@@ -144,7 +216,11 @@ export default function RoadCrossSectionDialog({ mode = "edit", initialXSection,
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 10, fontSize: 12.5, color: "var(--text-secondary)" }}>
           <span>Section width (curb to curb) <b style={{ color: "var(--text-primary)" }}>{f1(c2c)}′</b></span>
           <span>Total ROW width <b style={{ color: "var(--text-primary)" }}>{f1(row)}′</b></span>
-          <span>Pavement area {mode === "edit" && lengthFt > 0 ? "" : "(per 100′)"} <b style={{ color: "var(--text-primary)" }}>{f0(area.sf)} SF · {f1(area.sy)} SY</b></span>
+          {/* NEW-1 follow-up (owner review, item 4) — "(per 100′)" sat BEFORE the number, where it
+           * reads as a passing qualifier easily skimmed past; a reader could mistake the number for
+           * the road's real total pavement area. Moved after the number, spelled out as a rate
+           * ("...per 100 ft of road"), so it reads unambiguously as a unit on the figure itself. */}
+          <span>Pavement area <b style={{ color: "var(--text-primary)" }}>{f0(area.sf)} SF · {f1(area.sy)} SY</b>{mode === "edit" && lengthFt > 0 ? "" : " per 100 ft of road"}</span>
         </div>
 
         <div style={{ marginTop: 14 }}>
@@ -160,8 +236,7 @@ export default function RoadCrossSectionDialog({ mode = "edit", initialXSection,
                 {BAND_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
               </select>
               <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <input type="number" min={1} value={b.w} onChange={(e) => setBand(i, { w: Math.max(0.1, +e.target.value || 0) })}
-                  style={{ width: 60, padding: "6px 8px", fontSize: 12.5, fontFamily: "inherit", border: "1px solid var(--planner-border)", borderRadius: 7, background: "var(--surface-base)", color: "var(--text-primary)" }} />
+                <BandWidthInput value={b.w} onCommit={(w) => setBand(i, { w })} />
                 <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>ft</span>
               </span>
               <button type="button" style={{ ...smallBtn, width: 26, height: 26, color: "var(--danger)" }} onClick={() => removeBand(i)} aria-label="Remove band" title="Remove band">✕</button>
