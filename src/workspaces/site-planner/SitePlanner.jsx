@@ -133,6 +133,10 @@ const RoadCrossSectionDialog = lazy(() => import("./components/RoadCrossSectionD
  * spend on code most sessions never reach. One module, so they share one chunk and one load. */
 const ParcelRecord = lazy(() => import("./components/ParcelRecordPanel.jsx").then((m) => ({ default: m.ParcelRecord })));
 const PlacementControls = lazy(() => import("./components/ParcelRecordPanel.jsx").then((m) => ({ default: m.PlacementControls })));
+/* B765985 — the print compose screen. Reached only after File ▾ → Download PDF / pick frame…
+ * → Continue, so it has no business on the boot chunk; it also imports lib/printSheet.js
+ * (the paper-size list), which must never gain a static edge from the boot path (B1042). */
+const PrintCompose = lazy(() => import("./components/PrintCompose.jsx"));
 import LazyPanel from "./components/LazyPanel.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import PanelChrome from "../../shared/ui/PanelChrome.jsx";
@@ -439,6 +443,9 @@ import { siteState as resolveSiteState } from "./lib/siteRegion.js";
 import { splitPolygonByCut, remapEdgeVector } from "./lib/polygonSplit.js";
 import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea } from "./lib/polyClip.js";
 import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom, FAB_RESERVE_PX } from "./lib/sheetFurniture.js";
+// B765985 — pure, dependency-free (safe on the boot path): the explicit engineering-scale math
+// the compose screen's frame-locking and fit-check use.
+import { scaleLabel, frameFootprintForScale, checkScaleFits } from "./lib/printScale.js";
 import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab } from "./lib/buildingProps.js";
 import { createHistoryStack } from "./lib/history.js";
 import { describeHistoryStep, historyRunLabel } from "./lib/historyLabel.js";
@@ -2028,8 +2035,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [printOverlay, setPrintOverlay] = useState(true);   // include placed site-plan overlays in print/export (B131); re-defaulted to on-screen visibility on entering print mode
   const [printMapLayers, setPrintMapLayers] = useState(true); // include the live GIS map layers (floodplain, pipelines, …) in print/export (B739) — default on ("what I see prints")
   const [exportingPDF, setExportingPDF] = useState(false);  // NEW-1: PDF is being composed/rasterized (drives the "Preparing PDF…" indicator)
-  const [printOptsOpen, setPrintOptsOpen] = useState(false); // print options flyout (B199): global rules + per-building overrides
-  const printOptAnchor = useRef(null);
+  // B765985 — the dedicated compose screen: entered after the on-canvas frame is picked.
+  const [composeMode, setComposeMode] = useState(false);
+  const [printScale, setPrintScale] = useState(null);     // explicit feet-per-inch (e.g. 40), or null = "Fit to frame" (today's behavior)
+  const [fitWarning, setFitWarning] = useState(null);      // set when an explicit scale can't show the picked area on the chosen sheet — never silently rescaled
+  const [composeBoxIn, setComposeBoxIn] = useState(null);  // { planW, planH, pageW, pageH } inches, resolved through the lazy export chunk
+  const [composePreviewUrl, setComposePreviewUrl] = useState(null);
+  const [composePreviewLoading, setComposePreviewLoading] = useState(false);
+  const [composeDownloading, setComposeDownloading] = useState(false);
+  const pickedFrameRef = useRef(null); // the frame as last picked/repositioned on canvas — the fit-check compares against THIS, never the scale-locked effective frame
+  const composePreviewUrlRef = useRef(null);
+  const preCanvasDisplayRef = useRef(null); // showDims/showAreas/showAerial as they were before entering print mode — restored when the whole print flow ends, so toggling them FOR A PRINT never leaves a lasting change on the editing view (Cancel's non-destructive contract, extended to a completed Download too)
   const [planMenu, setPlanMenu] = useState(false);       // header Plan ▾ dropdown open
   const [planDelArm, setPlanDelArm] = useState(null);    // B264: plan id whose inline "Delete?" confirm is showing
   // anchor refs for the portal-rendered dropdowns (B127) — each points at the menu's
@@ -15378,8 +15394,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const exportKmz = (extrude = false) => withExportSheet((x) => x.exportKmz(extrude));
   const exportPNG = () => withExportSheet((x) => x.exportPNG());
-  const exportPDF = (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true) =>
-    withExportSheet((x) => x.exportPDF(paper, orient, includeOverlay, includeMapLayers));
+  const exportPDF = (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "") =>
+    withExportSheet((x) => x.exportPDF(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy));
 
   /* ------------ export frame geometry (stays here — the print-frame drag reads it) ----
      devExtent also seeds the initial print crop, so it can't live in the lazy chunk. */
@@ -15549,26 +15565,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     else { const a = p2fStatic(0, 0), b = p2fStatic(size.w, size.h); base = { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, w: Math.abs(b.x - a.x) * 0.8, h: Math.abs(b.y - a.y) * 0.8 }; }
     setPrintFrame(fitFrame(base.cx, base.cy, base.w, base.h, aspect));
     setPrintOverlay(hasPrintableOverlay(sheetOverlays)); // default "Print overlay" to match on-screen visibility (WYSIWYG)
-    setPrintMode(true); setExportMenu(false); setSel(null);
+    preCanvasDisplayRef.current = { showDims: settings.showDims !== false, showAreas: settings.showAreas !== false, showAerial };
+    setPrintMode(true); setComposeMode(false); setExportMenu(false); setSel(null);
+    import("./components/PrintCompose.jsx").catch(() => {}); // warm the compose chunk while the frame is being positioned — Continue shouldn't wait on a cold fetch
   };
-  // Re-fit the frame's aspect when paper/orientation changes (keep it around the
-  // same coverage). Skip the initial render.
-  const printAspectKey = `${printPaper}:${printOrient}:${nBuildings > 0}:${printMetricPairs().length}:${printStormwaterBars().length}`;
-  const prevAspectKey = useRef(printAspectKey);
-  useEffect(() => {
-    if (prevAspectKey.current === printAspectKey) return;
-    prevAspectKey.current = printAspectKey;
-    if (!printMode) return;
-    // The chunk is already resolved here (print mode was entered through enterPrintMode),
-    // so this settles within a microtask — no visible lag on a paper/orientation change.
-    refreshPrintAspect().then((aspect) => setPrintFrame((f) => f ? fitFrame(f.cx, f.cy, f.wFt, f.hFt, aspect) : f));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [printAspectKey]);
   const overlayPrintable = hasPrintableOverlay(sheetOverlays); // gates the "Print overlay" checkbox — no dead control when nothing's loaded
   // B739 — is any RASTER GIS layer (floodplain, pipelines, wetlands, utilities, relief) turned on?
   // Gates the "Print map layers" checkbox so there's no dead control when no such layer is live.
   const mapLayersPrintable = Object.keys(ALL_LAYERS).some((id) => overlays?.[id]?.on); // B739 raster + B745 vector — any live layer prints
-  const doPrint = () => { const p = printPaper, o = printOrient, ov = printOverlay, ml = printMapLayers; setPrintMode(false); setTimeout(() => exportPDF(p, o, ov, ml), 60); };
+  const aerialAvailable = !!(origin && basemapOn) || !!underlay; // B765985 — gates the compose screen's "Aerial imagery" toggle
   const startPrintMove = (e) => {
     e.stopPropagation();
     const fp = p2f(e.clientX, e.clientY);
@@ -15580,6 +15585,100 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const opp = { x: printFrame.cx - sx * printFrame.wFt / 2, y: printFrame.cy - sy * printFrame.hFt / 2 };
     drag.current = { mode: "printResize", sx, sy, opp, ...startGate(e, { hist: false }) };
     svgRef.current.setPointerCapture(e.pointerId);
+  };
+  /* B765985 — THE COMPOSE SCREEN. Picking the frame (above) is unchanged; everything else —
+   * paper, orientation, an explicit engineering scale, the title block, what's on the sheet —
+   * now lives on a dedicated full-screen surface entered via "Continue". `pickedFrameRef`
+   * holds the frame as last positioned on canvas; an explicit scale locks the EFFECTIVE frame
+   * to a stated ratio (plan-box inches × ft-per-inch) around that same center, and if the
+   * picked area doesn't fit at that ratio we say so — never silently rescale (`checkScaleFits`). */
+  const recomputeCompose = async () => {
+    const { sheetLayoutBoxesIn } = await loadExportSheet();
+    const box = sheetLayoutBoxesIn({
+      paper: printPaper, orient: printOrient, buildingCount: nBuildings,
+      metricsPairs: printMetricPairs(), stormwaterBars: printStormwaterBars().length,
+      titleBlockExtra: !!printScale,
+    });
+    setComposeBoxIn(box);
+    const pf = pickedFrameRef.current;
+    if (!pf) return;
+    if (printScale) {
+      const effective = frameFootprintForScale(printScale, { w: box.planW, h: box.planH });
+      setPrintFrame({ cx: pf.cx, cy: pf.cy, wFt: effective.wFt, hFt: effective.hFt });
+      setFitWarning(checkScaleFits(printScale, pf, effective).message || null);
+    } else {
+      setPrintFrame(fitFrame(pf.cx, pf.cy, pf.wFt, pf.hFt, box.planW / box.planH));
+      setFitWarning(null);
+    }
+  };
+  useEffect(() => {
+    if (!composeMode) return;
+    recomputeCompose();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composeMode, printPaper, printOrient, printScale]);
+  // The live sheet preview — debounced, and built through the SAME `buildComposedSheet` the
+  // final PDF rasterizes (PDF-PARITY by construction, not by inspection). Re-runs on every
+  // knob the sheet's CONTENTS depend on; paper/orient/scale changes reach here indirectly
+  // through the printFrame update the effect above already made.
+  const composeKey = composeMode && printFrame
+    ? [printPaper, printOrient, printFrame.cx, printFrame.cy, printFrame.wFt, printFrame.hFt,
+      settings.showDims !== false, settings.showAreas !== false, showAerial, printOverlay, printMapLayers, settings.printPreparedBy || ""].join("|")
+    : null;
+  useEffect(() => {
+    if (!composeKey) return;
+    let cancelled = false;
+    setComposePreviewLoading(true);
+    const t = setTimeout(async () => {
+      try {
+        const scaleText = printScale ? scaleLabel(printScale) : "";
+        const preparedBy = (settings.printPreparedBy || "").trim();
+        const composed = await withExportSheet((x) => x.buildComposedSheet(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy));
+        if (cancelled) return;
+        if (!composed) { setComposePreviewUrl(null); return; }
+        const url = URL.createObjectURL(new Blob([composed.sheetSvg], { type: "image/svg+xml" }));
+        if (composePreviewUrlRef.current) URL.revokeObjectURL(composePreviewUrlRef.current);
+        composePreviewUrlRef.current = url;
+        setComposePreviewUrl(url);
+      } catch (_) { /* a preview hiccup is non-fatal — Download PDF re-runs the same pipeline and surfaces a real error if it still fails */ }
+      finally { if (!cancelled) setComposePreviewLoading(false); }
+    }, 350);
+    return () => { cancelled = true; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composeKey]);
+  useEffect(() => () => { if (composePreviewUrlRef.current) URL.revokeObjectURL(composePreviewUrlRef.current); }, []);
+  // "Today" for the compose screen's title-block readout, in the same YYYY.MM.DD shape the
+  // printed sheet uses (`printSheet.js`'s `formatDateStamp`, which stays in the lazy chunk —
+  // this is a tiny standalone copy so the compose panel can show the date before that chunk loads).
+  const composeTodayStamp = () => {
+    const d = new Date();
+    return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const enterCompose = () => { pickedFrameRef.current = printFrame; setComposeMode(true); };
+  const exitToReposition = () => setComposeMode(false); // non-destructive: printFrame/paper/scale/toggles are all untouched
+  const cancelPrint = () => {
+    setComposeMode(false); setPrintMode(false); setPrintFrame(null); setFitWarning(null);
+    pickedFrameRef.current = null;
+    if (composePreviewUrlRef.current) { URL.revokeObjectURL(composePreviewUrlRef.current); composePreviewUrlRef.current = null; }
+    setComposePreviewUrl(null);
+    // Dimensions/area-label toggles are shared with the live View menu (WYSIWYG, no duplicate
+    // filtering path) — but a print session must still be non-destructive to the editing view,
+    // so whatever the compose screen changed is put back the moment the whole flow ends,
+    // whether that's a Cancel or a completed Download.
+    const pre = preCanvasDisplayRef.current;
+    if (pre) {
+      setSettings((s) => (s.showDims === pre.showDims && s.showAreas === pre.showAreas) ? s : { ...s, showDims: pre.showDims, showAreas: pre.showAreas });
+      if (showAerial !== pre.showAerial) setShowAerial(pre.showAerial);
+      preCanvasDisplayRef.current = null;
+    }
+  };
+  const doPrint = async () => {
+    setComposeDownloading(true);
+    try {
+      const scaleText = printScale ? scaleLabel(printScale) : "";
+      const preparedBy = (settings.printPreparedBy || "").trim();
+      await exportPDF(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy);
+      cancelPrint();
+    } finally { setComposeDownloading(false); }
   };
 
   const cullKeep = useMemo(() => {
@@ -22492,7 +22591,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {/* print-frame crop overlay (screen space). NEW-2 — `f2pLive`, not `f2p`: this group is
                 OUTSIDE the translated feet space and its dim mask hugs the canvas edges, so it is
                 positioned at the live view and never carries the pan delta. */}
-            {printMode && printFrame && (() => {
+            {printMode && !composeMode && printFrame && (() => {
               const a = f2pLive({ x: printFrame.cx - printFrame.wFt / 2, y: printFrame.cy - printFrame.hFt / 2 });
               const b = f2pLive({ x: printFrame.cx + printFrame.wFt / 2, y: printFrame.cy + printFrame.hFt / 2 });
               const fx = Math.min(a.x, b.x), fy = Math.min(a.y, b.y), fw = Math.abs(b.x - a.x), fh = Math.abs(b.y - a.y);
@@ -22507,7 +22606,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <rect x={fx + fw} y={fy} width={Math.max(0, size.w - fx - fw)} height={fh} fill="rgba(20,18,15,0.46)" pointerEvents="none" />
                   <rect data-testid="print-frame" x={fx} y={fy} width={fw} height={fh} fill="none" stroke={PAL.accent} strokeWidth={2}
                     pointerEvents="all" style={{ cursor: "move" }} onPointerDown={startPrintMove} />
-                  {corners.map(([sx, sy], i) => (
+                  {/* B765985 — an explicit engineering scale locks the frame's SIZE (plan-box inches
+                      × ft/inch); resize handles would let a drag silently break that ratio, so they
+                      render only in "Fit to frame" mode. The frame can still be REPOSITIONED (the
+                      body drag above stays live either way). */}
+                  {!printScale && corners.map(([sx, sy], i) => (
                     <rect key={i} x={(sx < 0 ? fx : fx + fw) - HS / 2} y={(sy < 0 ? fy : fy + fh) - HS / 2} width={HS} height={HS} rx={2}
                       fill="#fff" stroke={PAL.accent} strokeWidth={2} style={{ cursor: (sx * sy > 0 ? "nwse-resize" : "nesw-resize") }}
                       onPointerDown={(e) => startPrintResize(e, sx, sy)} />
@@ -22923,106 +23026,110 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </div>
           )}
 
-          {/* print-frame toolbar */}
-          {printMode && (() => {
-            const seg = (on) => ({ padding: "5px 11px", fontSize: 12, fontWeight: 600, borderRadius: 7, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, background: on ? PAL.accent : SURF_RAISED, color: on ? "#fff" : PAL.ink });
-            return (
-              <div style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 12, background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: 11, boxShadow: "0 8px 26px rgba(0,0,0,0.22)", padding: "8px 12px", zIndex: 9 }}>
-                <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: PAL.muted }}>Print frame</span>
-                <span style={{ display: "flex", gap: 4 }}>
-                  <button style={seg(printPaper === "letter")} onClick={() => setPrintPaper("letter")}>Letter</button>
-                  <button style={seg(printPaper === "tabloid")} onClick={() => setPrintPaper("tabloid")}>Tabloid</button>
-                </span>
-                <span style={{ display: "flex", gap: 4 }}>
-                  <button style={seg(printOrient === "landscape")} onClick={() => setPrintOrient("landscape")}>Landscape</button>
-                  <button style={seg(printOrient === "portrait")} onClick={() => setPrintOrient("portrait")}>Portrait</button>
-                </span>
-                {/* B131 — include the placed site-plan overlay in the printout; only shown when one's loaded (no dead control) */}
-                {overlayPrintable && (
-                  <label title="Include the placed site-plan overlay in the printout — exactly as shown (scale, position, rotation, opacity)" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: PAL.ink, cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}>
-                    <input type="checkbox" checked={printOverlay} onChange={(e) => setPrintOverlay(e.target.checked)} style={{ cursor: "pointer", margin: 0 }} />
-                    Print overlay
-                  </label>
+          {/* print-frame picking bar (B765985) — ONLY the frame lives here now; paper, orientation,
+              scale, overlay/layer toggles and the buildings-table options all moved to the compose
+              screen (below). Bottom-center via canvasPillBottom, the same collision-aware placement
+              B750096/B748960 use, so this can never repeat the measured defect where the old
+              top-center bar's Cancel sat partly under the View pill. */}
+          {printMode && !composeMode && (
+            <div style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 10,
+              bottom: canvasPillBottom({ northH: furnPlates.north.plateH, scaleBarH: furnPlates.scaleBar.plateH, calibBottom: calibrationState ? calibPlace.bottom : null, row: FURNITURE_ROW }),
+              background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: 11, boxShadow: "0 8px 26px rgba(0,0,0,0.22)", padding: "8px 12px", zIndex: 9 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: PAL.muted }}>Print frame</span>
+              {printScale ? (
+                <span style={{ fontSize: 11.5, color: PAL.muted }} title="Drag to reposition; an explicit scale locks the size — change it on the next screen">locked to {scaleLabel(printScale)} · drag to move</span>
+              ) : (
+                <span style={{ fontSize: 11.5, color: PAL.muted }}>drag to move, corners to resize</span>
+              )}
+              <button style={{ ...btn(true), padding: "6px 14px" }} onClick={enterCompose} title="Choose the sheet, scale and what's on it">Continue ➜</button>
+              <button style={{ ...chip }} onClick={cancelPrint}>Cancel</button>
+            </div>
+          )}
+
+          {/* The compose screen (B765985) — a full-screen surface, not an overlay: nothing of the
+              canvas is visible or reachable while this is up. See PrintCompose.jsx.
+              `buildingRulesPanelNode` is the SAME "Options ▾" body B199 shipped (clear-height/slab
+              default tiers + per-building overrides that drive the printed buildings table) —
+              carried forward verbatim, just relocated from the old floating flyout into this
+              screen's own panel. */}
+          {composeMode && (() => {
+            const rules = normalizeRules(settings.buildingRules);
+            const rows = buildingRows();
+            const lbl = { fontSize: 10.5, color: PAL.muted, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", margin: "8px 4px 4px" };
+            const tinyNum = { ...numInput, width: 70, padding: "4px 7px", fontSize: 11.5 };
+            const valNum = { ...numInput, width: 46, padding: "4px 7px", fontSize: 11.5 };
+            const tierRow = (key, t, i, unit) => (
+              <div key={`${key}${i}`} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 4px", fontSize: 11.5, color: PAL.ink }}>
+                {t.upTo != null ? (
+                  <><span style={{ color: PAL.muted }}>under</span><NumInput style={tinyNum} value={t.upTo} min={1} onCommit={(n) => setRuleTier(key, i, "upTo", n)} /><span style={{ color: PAL.muted }}>SF</span></>
+                ) : (
+                  <span style={{ color: PAL.muted, flex: "0 0 auto" }}>{rules[key][i - 1] ? `${(rules[key][i - 1].upTo || 0).toLocaleString()} SF & above` : "and above"}</span>
                 )}
-                {/* B739 — include the live GIS map layers (floodplain, pipelines, utilities…) in the printout; only shown when one's on (no dead control) */}
-                {mapLayersPrintable && (
-                  <label title="Include the live map layers (floodplain, pipelines, utilities…) in the printout, exactly as shown on the map" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: PAL.ink, cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}>
-                    <input type="checkbox" checked={printMapLayers} onChange={(e) => setPrintMapLayers(e.target.checked)} style={{ cursor: "pointer", margin: 0 }} />
-                    Print map layers
-                  </label>
-                )}
-                <span style={{ width: 1, height: 18, background: PAL.panelLine }} />
-                <div ref={printOptAnchor} style={{ position: "relative" }}>
-                  <button style={{ ...chip, fontWeight: 600, background: printOptsOpen ? PAL.accentSoft : "#fff" }} onClick={() => setPrintOptsOpen((o) => !o)}
-                    title="Clear-height & slab defaults and per-building overrides that drive the printed buildings table">Options ▾</button>
-                </div>
-                <button style={{ ...btn(true), padding: "6px 14px" }} onClick={doPrint} title="Build a finished PDF and download it — no browser print dialog, no headers, white background">Download PDF</button>
-                <button style={{ ...chip }} onClick={() => { setPrintMode(false); setPrintFrame(null); }}>Cancel</button>
-                {/* B199 — print options flyout: edit the global clear-height/slab rules (B198)
-                    and per-building overrides; portal-mounted (AnchoredMenu) so it escapes
-                    the toolbar's stacking context. */}
-                <AnchoredMenu open={printOptsOpen} onClose={() => setPrintOptsOpen(false)} anchorRef={printOptAnchor} placement="below-right" gap={8} width={344} panelStyle={menuPanel}>
-                  {(() => {
-                    const rules = normalizeRules(settings.buildingRules);
-                    const rows = buildingRows();
-                    const lbl = { fontSize: 10.5, color: PAL.muted, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", margin: "8px 4px 4px" };
-                    const tinyNum = { ...numInput, width: 70, padding: "4px 7px", fontSize: 11.5 };
-                    const valNum = { ...numInput, width: 46, padding: "4px 7px", fontSize: 11.5 };
-                    const tierRow = (key, t, i, unit) => (
-                      <div key={`${key}${i}`} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 4px", fontSize: 11.5, color: PAL.ink }}>
-                        {t.upTo != null ? (
-                          <><span style={{ color: PAL.muted }}>under</span><NumInput style={tinyNum} value={t.upTo} min={1} onCommit={(n) => setRuleTier(key, i, "upTo", n)} /><span style={{ color: PAL.muted }}>SF</span></>
-                        ) : (
-                          <span style={{ color: PAL.muted, flex: "0 0 auto" }}>{rules[key][i - 1] ? `${(rules[key][i - 1].upTo || 0).toLocaleString()} SF & above` : "and above"}</span>
-                        )}
-                        <span style={{ flex: 1 }} />
-                        <span style={{ color: PAL.muted }}>→</span>
-                        <NumInput style={valNum} value={t.value} min={1} onCommit={(n) => setRuleTier(key, i, "value", n)} /><span style={{ color: PAL.muted, width: 16 }}>{unit}</span>
-                      </div>
-                    );
-                    return (
-                      <div style={{ padding: "2px 2px 4px" }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 700, color: PAL.ink, padding: "2px 4px" }}>Defaults by building size</div>
-                        <div style={lbl}>Clear height</div>
-                        {rules.clearHeight.map((t, i) => tierRow("clearHeight", t, i, "ft"))}
-                        <div style={lbl}>Slab thickness</div>
-                        {rules.slab.map((t, i) => tierRow("slab", t, i, "in"))}
-                        <button style={{ ...chip, width: "100%", marginTop: 7, fontSize: 11.5, padding: "5px 8px" }} onClick={resetBuildingRules}>Reset to defaults</button>
-                        <div style={{ height: 1, background: PAL.panelLine, margin: "10px 2px 4px" }} />
-                        <div style={{ fontSize: 12.5, fontWeight: 700, color: PAL.ink, padding: "2px 4px" }}>Per-building overrides</div>
-                        {rows.length === 0 ? (
-                          <div style={{ fontSize: 11.5, color: PAL.muted, padding: "6px 4px" }}>No buildings yet — draw a building to set its clear height & slab.</div>
-                        ) : rows.map((r) => (
-                          <div key={r.id} style={{ borderTop: `1px solid ${PAL.panelLine}`, padding: "6px 4px" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
-                              <input value={r.el.name || ""} placeholder={`Building ${r.n}`} onChange={(e) => setBuildingProp(r.id, "name", e.target.value)}
-                                style={{ ...numInput, flex: 1, width: "auto", fontFamily: "inherit", fontSize: 12, padding: "4px 8px" }} />
-                              <span style={{ fontSize: 11, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap" }}>{f0(r.sf)} SF</span>
-                            </div>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                              <span style={ROW4}>
-                                <span style={{ fontSize: 11, color: PAL.muted }}>Clear</span>
-                                <NumInput style={valNum} value={r.clearHeight.value} min={1} onCommit={(n) => setBuildingProp(r.id, "clearHeightOverride", n)} /><span style={{ fontSize: 11, color: PAL.muted }}>ft</span>
-                                {r.clearHeight.overridden
-                                  ? <button title="Revert to auto" onClick={() => setBuildingProp(r.id, "clearHeightOverride", null)} style={{ ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent }}>set ↺</button>
-                                  : <span style={{ fontSize: 10, color: PAL.muted }}>auto</span>}
-                              </span>
-                              <span style={ROW4}>
-                                <span style={{ fontSize: 11, color: PAL.muted }}>Slab</span>
-                                <NumInput style={valNum} value={r.slab.value} min={1} onCommit={(n) => setBuildingProp(r.id, "slabThicknessOverride", n)} /><span style={{ fontSize: 11, color: PAL.muted }}>in</span>
-                                {r.slab.overridden
-                                  ? <button title="Revert to auto" onClick={() => setBuildingProp(r.id, "slabThicknessOverride", null)} style={{ ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent }}>set ↺</button>
-                                  : <span style={{ fontSize: 10, color: PAL.muted }}>auto</span>}
-                              </span>
-                            </div>
-                          </div>
-                        ))}
-                        <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 8, padding: "0 4px" }}>Auto values come from the size rules above; an override pins a value until you revert it. These print in the buildings table.</div>
-                      </div>
-                    );
-                  })()}
-                </AnchoredMenu>
+                <span style={{ flex: 1 }} />
+                <span style={{ color: PAL.muted }}>→</span>
+                <NumInput style={valNum} value={t.value} min={1} onCommit={(n) => setRuleTier(key, i, "value", n)} /><span style={{ color: PAL.muted, width: 16 }}>{unit}</span>
               </div>
+            );
+            const buildingRulesPanelNode = (
+              <div style={{ padding: "2px 2px 4px" }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: PAL.ink, padding: "2px 4px" }}>Defaults by building size</div>
+                <div style={lbl}>Clear height</div>
+                {rules.clearHeight.map((t, i) => tierRow("clearHeight", t, i, "ft"))}
+                <div style={lbl}>Slab thickness</div>
+                {rules.slab.map((t, i) => tierRow("slab", t, i, "in"))}
+                <button style={{ ...chip, width: "100%", marginTop: 7, fontSize: 11.5, padding: "5px 8px" }} onClick={resetBuildingRules}>Reset to defaults</button>
+                <div style={{ height: 1, background: PAL.panelLine, margin: "10px 2px 4px" }} />
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: PAL.ink, padding: "2px 4px" }}>Per-building overrides</div>
+                {rows.length === 0 ? (
+                  <div style={{ fontSize: 11.5, color: PAL.muted, padding: "6px 4px" }}>No buildings yet — draw a building to set its clear height & slab.</div>
+                ) : rows.map((r) => (
+                  <div key={r.id} style={{ borderTop: `1px solid ${PAL.panelLine}`, padding: "6px 4px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+                      <input value={r.el.name || ""} placeholder={`Building ${r.n}`} onChange={(e) => setBuildingProp(r.id, "name", e.target.value)}
+                        style={{ ...numInput, flex: 1, width: "auto", fontFamily: "inherit", fontSize: 12, padding: "4px 8px" }} />
+                      <span style={{ fontSize: 11, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap" }}>{f0(r.sf)} SF</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span style={ROW4}>
+                        <span style={{ fontSize: 11, color: PAL.muted }}>Clear</span>
+                        <NumInput style={valNum} value={r.clearHeight.value} min={1} onCommit={(n) => setBuildingProp(r.id, "clearHeightOverride", n)} /><span style={{ fontSize: 11, color: PAL.muted }}>ft</span>
+                        {r.clearHeight.overridden
+                          ? <button title="Revert to auto" onClick={() => setBuildingProp(r.id, "clearHeightOverride", null)} style={{ ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent }}>set ↺</button>
+                          : <span style={{ fontSize: 10, color: PAL.muted }}>auto</span>}
+                      </span>
+                      <span style={ROW4}>
+                        <span style={{ fontSize: 11, color: PAL.muted }}>Slab</span>
+                        <NumInput style={valNum} value={r.slab.value} min={1} onCommit={(n) => setBuildingProp(r.id, "slabThicknessOverride", n)} /><span style={{ fontSize: 11, color: PAL.muted }}>in</span>
+                        {r.slab.overridden
+                          ? <button title="Revert to auto" onClick={() => setBuildingProp(r.id, "slabThicknessOverride", null)} style={{ ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent }}>set ↺</button>
+                          : <span style={{ fontSize: 10, color: PAL.muted }}>auto</span>}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 8, padding: "0 4px" }}>Auto values come from the size rules above; an override pins a value until you revert it. These print in the buildings table.</div>
+              </div>
+            );
+            return (
+            <LazyPanel name="Compose exhibit" minHeight={400} label="Loading…">
+              <PrintCompose
+                paper={printPaper} onPaper={setPrintPaper}
+                orient={printOrient} onOrient={setPrintOrient}
+                scaleFtPerIn={printScale} onScale={setPrintScale} fitWarning={fitWarning}
+                previewSrc={composePreviewUrl} previewLoading={composePreviewLoading}
+                pageAspect={composeBoxIn ? composeBoxIn.pageW / composeBoxIn.pageH : (printOrient === "portrait" ? 8.5 / 11 : 11 / 8.5)}
+                siteLabel={siteLabel} planLabel={planLabel} dateStr={composeTodayStamp()}
+                preparedBy={settings.printPreparedBy || ""} onPreparedBy={(v) => setSettings((s) => ({ ...s, printPreparedBy: v }))}
+                showDims={settings.showDims !== false} onToggleDims={(v) => setSettings((s) => ({ ...s, showDims: v }))}
+                showAreas={settings.showAreas !== false} onToggleAreas={(v) => setSettings((s) => ({ ...s, showAreas: v }))}
+                aerialAvailable={aerialAvailable} showAerial={showAerial} onToggleAerial={setShowAerial}
+                overlayPrintable={overlayPrintable} printOverlay={printOverlay} onTogglePrintOverlay={setPrintOverlay}
+                mapLayersPrintable={mapLayersPrintable} printMapLayers={printMapLayers} onToggleMapLayers={setPrintMapLayers}
+                buildingRulesPanel={buildingRulesPanelNode}
+                onReposition={exitToReposition} onCancel={cancelPrint} onDownload={doPrint}
+                downloading={composeDownloading}
+              />
+            </LazyPanel>
             );
           })()}
 

@@ -107,13 +107,20 @@ await page.getByText("File ▾", { exact: false }).first().click({ timeout: 5000
 await page.waitForTimeout(300);
 await page.getByText("Download PDF / pick frame", { exact: false }).first().click({ timeout: 5000 });
 await page.waitForTimeout(500);
+// B765985: Continue hands off to the full-screen compose surface before Download PDF.
+await page.getByRole("button", { name: /^Continue ➜$/ }).first().click({ timeout: 5000 });
+await page.waitForSelector('[data-testid="print-compose"]', { timeout: 20_000 });
 await page.getByRole("button", { name: "Download PDF" }).first().click({ timeout: 5000 });
 
 let svgText = null;
 for (let i = 0; i < 60 && !svgText; i++) {
   await page.waitForTimeout(300);
   const arr = await page.evaluate(() => window.__capturedSvgs || []);
-  if (arr.length) svgText = arr[0];
+  // B765985: the compose screen's live preview now ALSO builds an image/svg+xml blob (the same
+  // buildComposedSheet pipeline the final PDF rasterizes) the moment compose mounts — earlier
+  // than the actual "Download PDF" click. So the captured array can hold that preview blob
+  // first; the LAST one is always the one Download PDF just rasterized.
+  if (arr.length) svgText = arr[arr.length - 1];
 }
 log(!!svgText, `composed print-sheet SVG captured (${svgText ? svgText.length : 0} bytes)`);
 
