@@ -133,7 +133,10 @@ describe("B464051 — a number the app changed says so, in the moment (LOUD-FAIL
 
   it("the note is cleared by the next keystroke and by a stepper — never stale", () => {
     const b = numInput();
-    expect(b).toMatch(/onChange=\{\(e\) => \{ setAltered\(null\); setDraft\(e\.target\.value\); \}\}/);
+    // B783280 — the handler also stamps dirtyRef for the `forceCommit` callers (the road ROW
+    // field, whose displayed value is a computed default rather than true committed state); the
+    // clear-on-keystroke contract this test pins is unchanged, so the match tolerates that addition.
+    expect(b).toMatch(/onChange=\{\(e\) => \{ setAltered\(null\); setDraft\(e\.target\.value\);[^}]*\}\}/);
     expect(b).toMatch(/setAltered\(null\); \/\/ a stepper's own clamp/);
   });
 });
