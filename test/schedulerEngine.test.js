@@ -2457,98 +2457,113 @@ describe("NEW-schedule-health — migrateCfRulesToHealthRules reproduces the old
   });
 });
 
-describe("NEW-schedule-health — STEP 3.A: manual override wins, and wins over EVERYTHING automated", () => {
+describe("RULES-DECIDE (2026-08-25, owner correction) — healthOverride is RETIRED, not merely outranked", () => {
+  // ⛔ SUPERSEDES the earlier "RULES-ALWAYS-WIN" block that used to live here (same session, same
+  // item, corrected same day). That pass kept healthOverride as a fallback for when no rule
+  // matched. The owner retracted that: the "Automatic" menu / override-wins documentation the
+  // first pass cited as a reason to keep a fallback was this app's OWN prior session's invention
+  // (#1073), never something he asked for, and he overruled it outright — verbatim: "pill and
+  // color and status are all the same thing... red=needs attn. period. end of story." So the flag
+  // and its early return are gone from computeDisplayHealth entirely — not reordered, DELETED.
+  // A task may still carry `healthOverride` in old stored data (dead, unread); every test below
+  // proves that value never changes the answer, in every scenario it used to matter.
   const orig = E.NOW;
   afterEach(() => E.setNOW(orig));
 
-  it("an overridden task keeps its hand-picked color even though a rule would otherwise recolor it", () => {
+  it("a firing rule beats a hand-picked color — healthOverride true, false, or absent all give the same answer", () => {
     E.setNOW("2026-08-15");
     const settings = { healthRules: [{ id: "a", type: "finishPastDays", days: 1, color: "red" }] };
-    const overridden = { id: 1, health: "green", healthOverride: true, end: "2020-01-01", percentComplete: 0 };
-    expect(E.computeDisplayHealth(overridden, settings)).toBe("green");
-    // Prove the rule really would have fired if it weren't overridden — otherwise this test is vacuous.
-    const notOverridden = { ...overridden, healthOverride: false };
-    expect(E.computeDisplayHealth(notOverridden, settings)).toBe("red");
+    const base = { id: 1, health: "green", end: "2020-01-01", percentComplete: 0 };
+    expect(E.computeDisplayHealth({ ...base, healthOverride: true }, settings)).toBe("red");
+    expect(E.computeDisplayHealth({ ...base, healthOverride: false }, settings)).toBe("red");
+    expect(E.computeDisplayHealth(base, settings)).toBe("red"); // flag absent entirely
   });
-  it("override wins over the meeting-bound risk block too — not just the configurable rule list", () => {
-    // health:"yellow" deliberately — NOT green/paused, so the meeting-bound block's own
-    // (pre-existing, untouched) exclusion can't be what's protecting it; only healthOverride can.
+  it("item 119's exact case: overdue + In Progress + a stored healthOverride, one calendar day past due", () => {
+    // Measured live on the owner's Goose Creek plan (task id 119, "Surveyor to revise plat &
+    // resubmit"): start 2026-08-20, end 2026-08-24, health "yellow" (In Progress), healthOverride
+    // true, percentComplete 0. Today 2026-08-25 → 1 day past due. Plan's real health rule: a single
+    // finishPastDays/days:1/red entry. Pre-fix this returned "yellow" (the amber dot the owner saw);
+    // the fix must return "red" regardless of the stored flag.
+    E.setNOW("2026-08-25");
+    const settings = { healthRules: [{ id: "legacy-overdue", type: "finishPastDays", days: 1, color: "red" }] };
+    const item119 = { id: 119, health: "yellow", healthOverride: true, start: "2026-08-20", end: "2026-08-24", percentComplete: 0 };
+    expect(E.computeDisplayHealth(item119, settings)).toBe("red");
+  });
+  it("a matching rule beats the meeting-bound risk block too", () => {
+    E.setNOW("2026-08-24");
+    const settings = { healthRules: [{ id: "a", type: "finishPastDays", days: 1, color: "red" }] };
+    const task = { id: 1, health: "yellow", healthOverride: true, meetingBound: true, meetingInfeasible: true,
+      meetingDeadline: "2026-08-25", end: "2020-01-01", percentComplete: 0 };
+    expect(E.computeDisplayHealth(task, settings)).toBe("red"); // the configured rule, not the meeting block's own "red"
+  });
+  it("when NO rule matches, the raw stored health shows through regardless of healthOverride — the flag is inert, not a fallback that 'gets a say'", () => {
+    E.setNOW("2026-08-15");
+    const settings = { healthRules: [{ id: "a", type: "finishPastDays", days: 1, color: "red" }] };
+    // Not overdue (future end date) — the rule is silent either way.
+    const base = { id: 1, health: "green", end: "2099-01-01", percentComplete: 0 };
+    expect(E.computeDisplayHealth({ ...base, healthOverride: true }, settings)).toBe("green");
+    expect(E.computeDisplayHealth({ ...base, healthOverride: false }, settings)).toBe("green");
+    expect(E.computeDisplayHealth(base, settings)).toBe("green");
+  });
+  it("when no rule matches, the meeting-bound risk block reaches through regardless of healthOverride — it can no longer be blocked", () => {
+    // ⛔ INVERTS the old claim here ("override still wins over the meeting-bound / deadline risk
+    // blocks") — that was true under RULES-ALWAYS-WIN's kept fallback and is FALSE now: with the
+    // flag retired, nothing stands between a silent rule list and the meeting/deadline blocks.
     E.setNOW("2026-08-24");
     const task = { id: 1, health: "yellow", healthOverride: true, meetingBound: true, meetingInfeasible: true,
       meetingDeadline: "2026-08-25", percentComplete: 0 };
-    expect(E.computeDisplayHealth(task, { healthRules: [] })).toBe("yellow");
-    // Same task, override cleared: the meeting-infeasible signal reaches through and wins.
+    expect(E.computeDisplayHealth(task, { healthRules: [] })).toBe("red");
     expect(E.computeDisplayHealth({ ...task, healthOverride: false }, { healthRules: [] })).toBe("red");
   });
-  it("override wins over the deadline-row risk block too", () => {
+  it("when no rule matches, the deadline-row risk block also reaches through regardless of healthOverride", () => {
     E.setNOW("2026-08-24");
     const task = { id: 1, health: "yellow", healthOverride: true, deadlineForTaskId: 2, deadlineInfeasible: true, percentComplete: 0 };
-    expect(E.computeDisplayHealth(task, { healthRules: [] })).toBe("yellow");
+    expect(E.computeDisplayHealth(task, { healthRules: [] })).toBe("red");
     expect(E.computeDisplayHealth({ ...task, healthOverride: false }, { healthRules: [] })).toBe("red");
   });
-  it("a non-overridden task with no matching rule still falls back to its raw stored health, unchanged", () => {
+  it("a task with no matching rule and no meeting/deadline block just shows its raw stored health, regardless of healthOverride", () => {
     E.setNOW("2026-08-15");
     expect(E.computeDisplayHealth({ id: 1, health: "yellow", healthOverride: false, percentComplete: 40 }, { healthRules: [] })).toBe("yellow");
+    expect(E.computeDisplayHealth({ id: 1, health: "yellow", healthOverride: true, percentComplete: 40 }, { healthRules: [] })).toBe("yellow");
+  });
+  it("adjacent case: overdue + Complete (100%) must NOT go red — the pct>=100 guard inside finishPastDays is untouched by this fix", () => {
+    E.setNOW("2026-08-25");
+    const settings = { healthRules: [{ id: "a", type: "finishPastDays", days: 1, color: "red" }] };
+    const done = { id: 1, health: "green", healthOverride: true, end: "2026-08-24", percentComplete: 100 };
+    expect(E.computeDisplayHealth(done, settings)).toBe("green");
+  });
+  it("adjacent case: overdue + Not Started — the rule doesn't care what the stored status label says, only percentComplete/end", () => {
+    E.setNOW("2026-08-25");
+    const settings = { healthRules: [{ id: "a", type: "finishPastDays", days: 1, color: "red" }] };
+    const notStarted = { id: 1, health: "gray", healthOverride: true, end: "2026-08-24", percentComplete: 0 };
+    expect(E.computeDisplayHealth(notStarted, settings)).toBe("red");
+  });
+  it("adjacent case: a 0-duration milestone (start===end) past due still fires the rule regardless of a stored healthOverride", () => {
+    E.setNOW("2026-08-25");
+    const settings = { healthRules: [{ id: "a", type: "finishPastDays", days: 1, color: "red" }] };
+    const milestone = { id: 1, health: "green", healthOverride: true, start: "2026-08-24", end: "2026-08-24", duration: 0, percentComplete: 0 };
+    expect(E.computeDisplayHealth(milestone, settings)).toBe("red");
+  });
+  it("adjacent case: due TODAY (not yet past) does not match finishPastDays — falls to raw stored health regardless of healthOverride", () => {
+    E.setNOW("2026-08-25");
+    const settings = { healthRules: [{ id: "a", type: "finishPastDays", days: 1, color: "red" }] };
+    const dueToday = { id: 1, health: "yellow", healthOverride: true, end: "2026-08-25", percentComplete: 0 };
+    expect(E.computeDisplayHealth(dueToday, settings)).toBe("yellow");
+  });
+  it("adjacent case: a task pinned to a CUSTOM status is still repainted by a firing rule, exactly like a named color", () => {
+    E.setNOW("2026-08-25");
+    const settings = { healthRules: [{ id: "a", type: "finishPastDays", days: 1, color: "red" }] };
+    const custom = { id: 1, health: "blocked", healthOverride: true, end: "2026-08-24", percentComplete: 0 };
+    expect(E.computeDisplayHealth(custom, settings)).toBe("red");
+    // Not overdue: the custom status survives untouched (the rule has nothing to say).
+    const notOverdue = { ...custom, end: "2099-01-01" };
+    expect(E.computeDisplayHealth(notOverdue, settings)).toBe("blocked");
   });
 });
 
-describe("NEW-schedule-health — normalizeToV9: override seeded once, survives a reload, a clear STAYS cleared", () => {
-  const doc = (tasks) => ({ projects: { p1: { id: "p1", name: "P", tasks } } });
-
-  it("seeds healthOverride=true for green/red/paused (the old overdueRed/meetingBound protected set) and false for gray/yellow", () => {
-    const before = doc([
-      { id: 1, health: "gray" }, { id: 2, health: "yellow" },
-      { id: 3, health: "green" }, { id: 4, health: "red" }, { id: 5, health: "paused" },
-    ]);
-    const after = E.normalizeToV9(before);
-    const byId = Object.fromEntries(after.projects.p1.tasks.map(t => [t.id, t]));
-    expect(byId[1].healthOverride).toBe(false);
-    expect(byId[2].healthOverride).toBe(false);
-    expect(byId[3].healthOverride).toBe(true);
-    expect(byId[4].healthOverride).toBe(true);
-    expect(byId[5].healthOverride).toBe(true);
-  });
-  it("is idempotent — a second pass changes nothing (the _v9 flag short-circuits it)", () => {
-    const once = E.normalizeToV9(doc([{ id: 1, health: "green" }]));
-    const twice = E.normalizeToV9(once);
-    expect(twice).toEqual(once);
-  });
-  it("STAYS WON across a reload — the whole-doc _v9 stamp alone guarantees it: once stamped, a later load never re-enters the migration at all", () => {
-    // Simulate: migration ran once (v9 stamped), the user then picked "Automatic" on a green
-    // task (updateTask(id,{healthOverride:false}) — health itself is untouched), and the doc
-    // reloads. The doc is already _v9-stamped, so a later normalizeToV9 call is a pure no-op —
-    // it must return the SAME object, never re-derive anything from `health`.
-    const migrated = E.normalizeToV9(doc([{ id: 1, health: "green" }]));
-    const userCleared = {
-      ...migrated,
-      projects: { p1: { ...migrated.projects.p1, tasks: migrated.projects.p1.tasks.map(t => t.id === 1 ? { ...t, healthOverride: false } : t) } },
-    };
-    const reloaded = E.normalizeToV9(userCleared);
-    expect(reloaded).toBe(userCleared);   // same reference — the _v9 guard returned immediately
-    expect(reloaded.projects.p1.tasks[0].healthOverride).toBe(false);
-  });
-  it("the PER-TASK guard: a task that already carries an explicit healthOverride (true OR false) is never re-derived from `health`, even on a doc that hasn't been _v9-stamped yet", () => {
-    // This is the scenario the whole-doc _v9 stamp above can't cover on its own — a doc that is
-    // NOT yet _v9 (so the migration genuinely runs) but already has SOME tasks with an explicit
-    // healthOverride (a multi-device sync landing an old, unstamped copy next to an already-
-    // cleared task; or simply hand-authored/imported data). The per-task `=== undefined` check,
-    // not the doc-level flag, is what protects THIS task.
-    const raw = doc([
-      { id: 1, health: "green", healthOverride: false },  // explicitly cleared already — must stay false
-      { id: 2, health: "red", healthOverride: true },      // explicitly set already — must stay true
-      { id: 3, health: "green" },                          // never touched — gets seeded true
-    ]);
-    expect(raw._v9).toBeUndefined();   // sanity: this doc genuinely has NOT been migrated yet
-    const out = E.normalizeToV9(raw);
-    const byId = Object.fromEntries(out.projects.p1.tasks.map(t => [t.id, t]));
-    expect(byId[1].healthOverride).toBe(false);
-    expect(byId[2].healthOverride).toBe(true);
-    expect(byId[3].healthOverride).toBe(true);
-  });
-  it("a corrupt/garbage project or task is skipped, not a crash (matches the sibling v6/v7/v8 migrations)", () => {
-    expect(() => E.normalizeToV9({ projects: { bad: null, p1: { tasks: [null, { id: 1, health: "gray" }] } } })).not.toThrow();
-    const out = E.normalizeToV9({ projects: { bad: null, p1: { tasks: [null, { id: 1, health: "gray" }] } } });
-    expect(out.projects.p1.tasks).toHaveLength(1);
+describe("RULES-DECIDE (2026-08-25) — normalizeToV9 is RETIRED, along with the flag it used to seed", () => {
+  it("the function no longer exists in the mirror at all", () => {
+    expect(E.normalizeToV9).toBeUndefined();
   });
 });
 
@@ -2682,15 +2697,17 @@ describe("NEW-schedule-health — group headers: the engine NEVER runs on a pare
     expect(rolled[1]).toBe("red");  // grandparent rolls up the middle parent's ROLLED value (still red), not the middle parent's raw "gray"
   });
 
-  it("a parent whose children are ALL hand-overridden: rollup is unaffected — override still wins per child before any rule runs", () => {
+  it("RULES-DECIDE: a parent whose children carry a stored healthOverride still rolls up the firing rule's color, never the stale flag", () => {
+    // This is the same defect as item 119, one level up: a group header full of
+    // overdue-but-hand-clicked children used to stay whatever color they were clicked to, forever.
     const tasks = [
       { id: 1, parentId: null, health: "gray" },
-      { id: 2, parentId: 1, health: "yellow", healthOverride: true, end: "2020-01-01", percentComplete: 0 },  // overdue by the rule, but overridden — override wins
-      { id: 3, parentId: 1, health: "green", healthOverride: true, end: "2099-01-01", percentComplete: 0 },
+      { id: 2, parentId: 1, health: "yellow", healthOverride: true, end: "2020-01-01", percentComplete: 0 },  // overdue by the rule — the rule wins, the flag is dead data
+      { id: 3, parentId: 1, health: "green", healthOverride: true, end: "2099-01-01", percentComplete: 0 },   // not overdue — the rule is silent, raw stored health shows through
     ];
     const rolled = E.computeRolledHealth(tasks, OVERDUE_SETTINGS);
-    // Same answer with or without settings — override short-circuits computeDisplayHealth before any rule is even evaluated.
-    expect(rolled[1]).toBe("yellow");
+    expect(rolled[1]).toBe("red"); // worst of {rule-computed red, raw green} is red
+    // With NO settings passed, no rule can ever match, so the raw stored health is all that's left — unchanged.
     expect(E.computeRolledHealth(tasks)[1]).toBe("yellow");
   });
 
@@ -2811,15 +2828,76 @@ describe("anti-drift: the NEW-schedule-health engine exists VERBATIM in src + mi
       expect(s).toMatch(/case "complete":/);
     }
   });
-  it("computeDisplayHealth checks healthOverride first, in both", () => {
+  it("RULES-DECIDE (2026-08-25 correction): computeDisplayHealth never reads healthOverride at all, in either source", () => {
+    // ⛔ SUPERSEDES the earlier RULES-ALWAYS-WIN check here, which only asserted rules ran BEFORE
+    // the override check — that check existed at all was itself the thing to remove. Now: the
+    // literal early-return line must be gone from computeDisplayHealth in both files.
     for (const s of [src, mjs]) {
-      expect(s).toMatch(/if \(task\.healthOverride\) return task\.health;/);
+      const fnBody = s.slice(s.indexOf("computeDisplayHealth = (task, settings, taskById) => {"), s.indexOf("computeDisplayHealth = (task, settings, taskById) => {") + 1500);
+      expect(fnBody).toContain("evalHealthRules(task, settings, NOW, taskById)");
+      expect(fnBody).not.toMatch(/task\.healthOverride/);
     }
   });
-  it("normalizeToV9's override-seed predicate is present in both", () => {
+  it("an ordinary status/health pick no longer auto-stamps healthOverride (the defect underneath item 119)", () => {
+    // The old line — `if ('health' in updates && !('healthOverride' in updates)) u.healthOverride = true;`
+    // — must be gone from updateTask. It set the flag on EVERY plain color pick (StatusPicker,
+    // HealthPicker, the grid cell, the context menu, the master-view cell all route through
+    // updateTask({health: val})), which is what let a single click permanently opt a task out of
+    // automation.
+    expect(src).not.toMatch(/if \('health' in updates && !\('healthOverride' in updates\)\) u\.healthOverride = true;/);
+  });
+  it("RULES-DECIDE (2026-08-25 correction): the bulk 'recolor this whole branch' cascade no longer stamps healthOverride either — nothing sets the flag anymore", () => {
+    // ⛔ SUPERSEDES the earlier claim that the cascade was a "separate, deliberate action" exempt
+    // from this retirement. The owner overruled keeping ANY producer of the flag: "stop writing the
+    // flag on any status interaction - dot, pill, right-click, updateTask cascade, all of it."
+    expect(src).not.toMatch(/healthOverride:\s*true/);
+    expect(src).toMatch(/tasks = tasks\.map\(t => descIds\.has\(t\.id\) \? \{\.\.\.t, health: updates\.health, \.\.\.extra\} : t\)/);
+  });
+  it("#1085 gap CLOSED: updateTask's cascade lived only in a React closure with no unit test — recolorBranch is now a real, directly-tested pure mirror of it", () => {
+    // The mirror (E.getDescIds / E.recolorBranch) is a byte-identical extraction of the closure
+    // fragment at index.html ~L6350-6365, lifted to module scope. This proves the CASCADE'S actual
+    // runtime behavior (not just that a regex pattern is absent from the source) never writes
+    // healthOverride and applies the same health + percentComplete-on-green rule to every descendant.
+    const tasks = [
+      { id: 1, parentId: null, health: "gray", healthOverride: true },
+      { id: 2, parentId: 1, health: "gray", healthOverride: true },
+      { id: 3, parentId: 1, health: "gray" },
+      { id: 4, parentId: 2, health: "gray" },  // grandchild — starts WITHOUT the flag
+      { id: 5, parentId: null, health: "gray" },                      // unrelated task — untouched
+    ];
+    const out = E.recolorBranch(tasks, 1, "red");
+    const byId = Object.fromEntries(out.map(t => [t.id, t]));
+    expect(byId[2].health).toBe("red");
+    expect(byId[3].health).toBe("red");
+    expect(byId[4].health).toBe("red");     // grandchild reached too
+    expect(byId[1].health).toBe("gray");    // the parent itself is untouched by this helper
+    expect(byId[5].health).toBe("gray");    // unrelated task untouched
+    // The exact defect this closes: no descendant ever GAINS healthOverride from the cascade (task 4
+    // started without the flag; tasks 1/2 keep their pre-existing dead data untouched — clearing
+    // stale old flags on unrelated fields isn't this cascade's job, only stamping a NEW one is).
+    expect(byId[4]).not.toHaveProperty("healthOverride");
+    // "recolor to green" is the one health value that also snaps percentComplete to 100.
+    const outGreen = E.recolorBranch(tasks, 1, "green");
+    const byIdGreen = Object.fromEntries(outGreen.map(t => [t.id, t]));
+    expect(byIdGreen[2].percentComplete).toBe(100);
+    expect(byIdGreen[4].percentComplete).toBe(100);
+  });
+  it("recolorBranch is a faithful mirror: getDescIds/recolorBranch logic matches the real updateTask cascade verbatim", () => {
+    expect(src).toMatch(/const getDescIds = \(id, all\) => \{\s*\n\s*const kids = all\.filter\(t => t\.parentId === id\);\s*\n\s*return \[\.\.\.kids\.map\(k => k\.id\), \.\.\.kids\.flatMap\(k => getDescIds\(k\.id, all\)\)\];/);
+  });
+  it("normalizeToV9 no longer exists in either source, and no load call site references it", () => {
+    // Both files still carry a one-line prose retirement comment that intentionally names the
+    // retired function ("normalizeToV9 used to seed..."), so a bare /normalizeToV9/ match is too
+    // broad — it must not flag the documentation. Check for an actual definition or call instead.
     for (const s of [src, mjs]) {
-      expect(s).toMatch(/healthOverride: t\.health === "green" \|\| t\.health === "red" \|\| t\.health === "paused"/);
+      expect(s).not.toMatch(/const normalizeToV9 = /);
+      expect(s).not.toMatch(/function normalizeToV9\(/);
+      expect(s).not.toMatch(/normalizeToV9\(/);
     }
+  });
+  it("AUTO_HEALTH and the 'Automatic' menu entry are gone from the real source (the escape hatch for a lock that no longer exists)", () => {
+    expect(src).not.toMatch(/AUTO_HEALTH/);
+    expect(src).not.toMatch(/>Automatic</);
   });
 });
 

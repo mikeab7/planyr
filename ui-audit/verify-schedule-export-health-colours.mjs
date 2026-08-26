@@ -109,27 +109,30 @@ import { ensureVendored, rewriteCdn, serveVendored } from "./lib/vendorCdn.mjs";
 const MUTATE_ROLLUP = process.argv.includes("--mutate-rollup");
 const MUTATE_DROPDOWN = process.argv.includes("--mutate-dropdown");
 // B603840 — owner decision, verbatim: "everything is always manually overridden... should this be
-// a feature? I'm not sure that it really makes sense." Measured on his real production data before
-// this session touched anything: 529 leaf tasks across 6 plans, 302 (57%) carry healthOverride while
-// only 29 (5.5%) are actually colored by a rule — a marker on 57% of the schedule while automation
-// decides 5.5% singles out nothing. The badge (OverrideBadge) is removed from all three surfaces it
-// rendered on (HealthPicker, StatusPicker, HealthDropMenu's MasterView cell). The "Automatic" menu
-// entry and the healthOverride-wins-over-rules behavior are UNCHANGED — only the visual marker is
-// gone. Three independent mutation flags below, each proving one NEW guard is discriminating:
-//   --mutate-badge        : reinstates OverrideBadge + its three render call-sites (the literal
-//                            pre-fix code) — must flip badgeAbsenceOk to FAIL while everything else
-//                            (controls, rollup, gantt, dropdown-dismiss, the two automatic-clear
-//                            checks below) stays green.
-//   --mutate-automatic-grid   : breaks GridView's AUTO_HEALTH branch (HealthPicker/StatusPicker's
-//                            shared commit path) — must flip automaticClearGridOk + the grid half of
-//                            persistPayloadOk to FAIL while badgeAbsenceOk and automaticClearMasterOk
-//                            stay green (proves the two clear-paths are independently tested).
-//   --mutate-automatic-master : same, for MasterView's own commit (the HealthDropMenu surface) —
-//                            must flip automaticClearMasterOk + the master half of persistPayloadOk
-//                            while automaticClearGridOk stays green.
-const MUTATE_BADGE = process.argv.includes("--mutate-badge");
-const MUTATE_AUTO_GRID = process.argv.includes("--mutate-automatic-grid");
-const MUTATE_AUTO_MASTER = process.argv.includes("--mutate-automatic-master");
+// a feature? I'm not sure that it really makes sense." Measured on his real production data at the
+// time: 529 leaf tasks across 6 plans, 302 (57%) carried healthOverride while only 29 (5.5%) were
+// actually colored by a rule. The badge (OverrideBadge) was removed from all three surfaces it
+// rendered on (HealthPicker, StatusPicker, HealthDropMenu's MasterView cell); B603840 kept the
+// "Automatic" menu entry and the healthOverride-wins-over-rules behavior UNCHANGED — only the visual
+// marker was gone.
+// ⛔ SUPERSEDED (2026-08-25, B752848 owner correction, arrived AFTER B603840): the owner retracted
+// "hand always wins" as a real spec — it was this app's own designer (a prior session, per #1073)
+// writing an automation panel he was never asked for and then citing its own copy back as a
+// documented capability. His actual instruction: "pill and color and status are all the same
+// thing... red=needs attn. period. end of story." The `healthOverride` flag, its early return in
+// computeDisplayHealth, its write sites (grid, master view, the descendant cascade), AND the
+// "Automatic" menu entry itself are ALL retired — there is no more lock to clear, so no more
+// "Automatic" to clear it with. The two mutation flags below that used to prove the Automatic-clear
+// path is real (--mutate-automatic-grid / --mutate-automatic-master) are REMOVED along with the
+// feature they tested. --mutate-badge is ALSO removed (2026-08-25), not merely left — reinstating
+// OverrideBadge's dead code no longer proves anything, because every render call-site that used to
+// pass it `overridden` was deleted along with the flag: the mutated component would exist but never
+// receive a truthy trigger, so badgeAbsenceOk would stay green whether or not the mutation applied —
+// a check that cannot fail is not a check. badgeAbsenceOk stays as a plain (non-mutation-proven)
+// assertion, since the badge's absence still needs
+// proving regardless of what removed the thing it used to flag. See the "Surface 1/2" scenarios
+// below, rewritten to prove the NEW behavior: a previously-locked, overdue task now reads its
+// rule-decided color from the moment the page loads, with no click of any kind required.
 
 const ROOT = new URL("../public/", import.meta.url).pathname;
 const MIME = { ".html":"text/html", ".js":"text/javascript", ".css":"text/css", ".svg":"image/svg+xml", ".json":"application/json" };
@@ -212,14 +215,12 @@ const INJECT = `<script>(function(){try{
         health:"gray",healthOverride:false,parentId:970}),
     // B603840 — two purpose-built leaves for the Automatic-clear functional tests below, each on
     // its own never-touched-elsewhere task (touching "Manual Override Leaf" would corrupt the
-    // pre-existing manualLeaf control's read, above). computeDisplayHealth falls back to the raw
-    // STORED .health field whenever no rule matches (its final line, after the override check and
-    // the rule-engine call, is simply: return task.health) — clearing healthOverride does NOT reset
-    // that field, only lets a rule outrank it if one now fires. So a task with NO matching rule
-    // shows the identical color before and after Automatic (proves nothing) — these two are
-    // hand-set to a color a rule DISAGREES with once un-locked (overdue, so r-overdue fires red),
-    // so the flip is real and visible: green "Complete" (hand-set, no rule can outrank it while
-    // locked) becomes red "Needs Attn." (the rule wins once Automatic hands the field back to it).
+    // pre-existing manualLeaf control's read, above). healthOverride:true here is now DEAD DATA —
+    // exactly the shape his real stored plans still carry — and computeDisplayHealth must not read
+    // it: the rule engine reads only the dates/percentComplete, so it fires red on these regardless
+    // of the flag. Hand-set to a color the rule DISAGREES with (overdue, so r-overdue would fire
+    // red): green "Complete" now shows red "Needs Attn." from the very first render, no click of
+    // any kind — proving the flag has zero effect, not merely that "Automatic" still works.
     mk({id:981,name:"Grid Locked Task For Automatic Clear",start:iso(-20),end:iso(-15),duration:5,durValue:5,percentComplete:40,
         health:"green",healthOverride:true}),
     mk({id:980,name:"Master View Locked Leaf",start:iso(-20),end:iso(-15),duration:5,durValue:5,percentComplete:40,
@@ -301,62 +302,6 @@ const FIXED_DROPDOWN_LISTENER = `    document.addEventListener("mousedown", onDo
 const MUTATED_DROPDOWN_LISTENER = `    document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);`;
 
-// --mutate-badge: exact string swap that puts the removed OverrideBadge component AND all three
-// of its render call-sites back — literally the pre-B603840 code. Proves badgeAbsenceOk actually
-// discriminates: the check must go red the instant the badge exists anywhere, not just report
-// "pass" vacuously because nothing was ever looked for.
-const FIXED_BADGE_DEF_ANCHOR = `// ── HealthPicker ──────────────────────────────────────────
-// One picker open at a time — any picker dispatches this when opening; others listen and close
-const PICKER_EVENT = "planar-picker-open";
-
-function HealthPicker({value, onChange, overridden=false}) {`;
-const MUTATED_BADGE_DEF_ANCHOR = `// ── HealthPicker ──────────────────────────────────────────
-// One picker open at a time — any picker dispatches this when opening; others listen and close
-const PICKER_EVENT = "planar-picker-open";
-
-function OverrideBadge({size=8}) {
-  return (
-    <span title="Manually set — not automatic"
-      style={{position:"absolute",right:-3,bottom:-3,width:size,height:size,borderRadius:"50%",
-        background:"var(--mut)",border:"1.5px solid #fff",boxShadow:"0 0 0 0.5px rgba(0,0,0,.15)",
-        pointerEvents:"none",display:"block"}} />
-  );
-}
-
-function HealthPicker({value, onChange, overridden=false}) {`;
-const FIXED_BADGE_HP = `          <DotSpan hk={value} active={open} noPointer />
-        </span>`;
-const MUTATED_BADGE_HP = `          <DotSpan hk={value} active={open} noPointer />
-          {overridden && <OverrideBadge />}
-        </span>`;
-const FIXED_BADGE_SP = `        {(HEALTH[value]||HEALTH.gray).label}
-      </span>`;
-const MUTATED_BADGE_SP = `        {(HEALTH[value]||HEALTH.gray).label}
-        {overridden && <span style={{position:"relative",width:7,height:7,display:"inline-block"}}><OverrideBadge size={7} /></span>}
-      </span>`;
-const FIXED_BADGE_MV = `            <span style={{width:6,height:6,borderRadius:"50%",background:h.dot==="#ffffff"?"#d1d5db":h.dot,flexShrink:0}} />{h.label}
-          </span>`;
-const MUTATED_BADGE_MV = `            <span style={{width:6,height:6,borderRadius:"50%",background:h.dot==="#ffffff"?"#d1d5db":h.dot,flexShrink:0}} />{h.label}
-            {t.healthOverride && <span style={{position:"relative",width:7,height:7,display:"inline-block"}}><OverrideBadge size={7} /></span>}
-          </span>`;
-
-// --mutate-automatic-grid: exact string swap of GridView's own commit() — the shared handler
-// behind BOTH HealthPicker's dot and StatusPicker's pill (col "health" or "status") — dropping the
-// AUTO_HEALTH branch so picking "Automatic" is a no-op (healthOverride never clears). Proves
-// automaticClearGridOk (and the grid half of persistPayloadOk) actually discriminates. A no-op,
-// not "write the literal sentinel into .health" (tried first) — that variant writes the string
-// "__auto__" into a real task's stored health, which MasterView's health-cell renderer reads via
-// `const h = HEALTH[dispHealth]` with NO `|| HEALTH.gray` fallback (unlike every other HEALTH
-// lookup in this file) and crashes on — a real latent gap, but a pre-existing, unrelated one this
-// item didn't touch and isn't the one being verified here, so the mutation is written to not
-// trip over it.
-const FIXED_AUTO_GRID = `    else if (col==="health"||col==="status") { if (val === AUTO_HEALTH) updateTask(id,{healthOverride:false}); else updateTask(id,{health:val}); }`;
-const MUTATED_AUTO_GRID = `    else if (col==="health"||col==="status") { if (val === AUTO_HEALTH) { /* mutated: no-op, healthOverride never clears */ } else updateTask(id,{health:val}); }`;
-
-// --mutate-automatic-master: same idea, MasterView's own commit() (the HealthDropMenu surface).
-const FIXED_AUTO_MASTER = `      if (val === AUTO_HEALTH) { if (t.healthOverride) updateTask(t.id, {healthOverride:false}, t.projId); }`;
-const MUTATED_AUTO_MASTER = `      if (val === AUTO_HEALTH) { /* mutated: no-op, healthOverride never clears */ }`;
-
 await ensureVendored();
 
 const server = createServer(async (req, res) => {
@@ -375,25 +320,6 @@ const server = createServer(async (req, res) => {
         if (!body.includes(FIXED_DROPDOWN_LISTENER)) throw new Error("--mutate-dropdown: FIXED_DROPDOWN_LISTENER text not found in served source — the harness's copy has drifted from index.html, fix the harness before trusting this run");
         body = body.replace(FIXED_DROPDOWN_LISTENER, MUTATED_DROPDOWN_LISTENER);
       }
-      if (MUTATE_BADGE) {
-        for (const [name, fixed, mutated] of [
-          ["FIXED_BADGE_DEF_ANCHOR", FIXED_BADGE_DEF_ANCHOR, MUTATED_BADGE_DEF_ANCHOR],
-          ["FIXED_BADGE_HP", FIXED_BADGE_HP, MUTATED_BADGE_HP],
-          ["FIXED_BADGE_SP", FIXED_BADGE_SP, MUTATED_BADGE_SP],
-          ["FIXED_BADGE_MV", FIXED_BADGE_MV, MUTATED_BADGE_MV],
-        ]) {
-          if (!body.includes(fixed)) throw new Error(`--mutate-badge: ${name} text not found in served source — the harness's copy has drifted from index.html, fix the harness before trusting this run`);
-          body = body.replace(fixed, mutated);
-        }
-      }
-      if (MUTATE_AUTO_GRID) {
-        if (!body.includes(FIXED_AUTO_GRID)) throw new Error("--mutate-automatic-grid: FIXED_AUTO_GRID text not found in served source — the harness's copy has drifted from index.html, fix the harness before trusting this run");
-        body = body.replace(FIXED_AUTO_GRID, MUTATED_AUTO_GRID);
-      }
-      if (MUTATE_AUTO_MASTER) {
-        if (!body.includes(FIXED_AUTO_MASTER)) throw new Error("--mutate-automatic-master: FIXED_AUTO_MASTER text not found in served source — the harness's copy has drifted from index.html, fix the harness before trusting this run");
-        body = body.replace(FIXED_AUTO_MASTER, MUTATED_AUTO_MASTER);
-      }
     }
     res.writeHead(200, { "Content-Type": MIME[extname(fp)] || "application/octet-stream" }); res.end(body);
   } catch (e) { console.error("SERVER ERROR:", e.message); res.writeHead(404); res.end("not found"); }
@@ -401,10 +327,7 @@ const server = createServer(async (req, res) => {
 await new Promise(r => server.listen(0, r));
 const url = `http://localhost:${server.address().port}/sequence/`;
 console.log("serving", url,
-  MUTATE_ROLLUP ? "(ROLLUP MUTATED — expect the rollup-fix scenarios to FAIL)" : "",
-  MUTATE_BADGE ? "(BADGE MUTATED BACK IN — expect badgeAbsenceOk to FAIL)" : "",
-  MUTATE_AUTO_GRID ? "(GRID AUTOMATIC-CLEAR MUTATED — expect automaticClearGridOk to FAIL)" : "",
-  MUTATE_AUTO_MASTER ? "(MASTER AUTOMATIC-CLEAR MUTATED — expect automaticClearMasterOk to FAIL)" : "");
+  MUTATE_ROLLUP ? "(ROLLUP MUTATED — expect the rollup-fix scenarios to FAIL)" : "");
 
 // B1449(schedule) — "Supabase set error" joins this list here: the new RuleColorPicker dismiss
 // checks below are the first scenarios in this file that mutate state through REAL clicks on the
@@ -850,33 +773,17 @@ for (const name of MASTER_UNLOCKED_NAMES) console.log(`${badgeReadMaster[name] =
 const badgeAbsenceMasterOk = [...MASTER_LOCKED_NAMES, ...MASTER_UNLOCKED_NAMES].every(n => badgeReadMaster[n] === 0);
 console.log("MasterView badge fully removed (the HealthDropMenu surface):", badgeAbsenceMasterOk);
 
-// ── B603840 — the constraint that matters most: removing the badge must NOT remove the route back
-// to Automatic, and a hand-picked colour must still always beat automation (unchanged). Two live
-// functional passes below, one per surface (Grid's StatusPicker, MasterView's HealthDropMenu), each
-// on its OWN never-before-touched locked task so a prior scenario's read can't be corrupted.
-//
-// "Survives a reload" can't be taken literally in this sandbox — there is no egress to Supabase
-// here (see the BENIGN filter above; every real save already fails silently and is filtered as
-// noise), so a genuine page reload would just re-run this same INJECT fixture, not read anything
-// back from the cloud. The honest proxy: monkey-patch window.storage.set (the ONE function every
-// save funnels through — attemptCloudSave calls it with JSON.stringify(currentData)) to capture the
-// EXACT bytes the app hands to the persistence layer. That's the same string that would reach
-// Supabase's planar_data row in production and be read back on a real reload — this proves the
-// commit reaches the save path with the field cleared, not merely that a screen re-rendered.
-// Genuinely untested here: the real Supabase round-trip landing and surviving an actual browser
-// reload — that needs live network egress this sandbox doesn't have. Filed as V311488 (Blocker:
-// auth — same network-egress restriction the existing auth blocker class names) for a live check.
-await page.evaluate(() => {
-  window.__capturedSaves = [];
-  const orig = window.storage.set;
-  window.storage.set = (k, v, opts) => { window.__capturedSaves.push(v); return orig(k, v, opts); };
-});
+// ⛔ REWRITTEN (2026-08-25, B752848 owner correction) — this used to prove "Automatic" clears
+// healthOverride and hands a locked task back to the rule engine (B603840: the lock and its escape
+// hatch were both UNCHANGED, only the visual badge was removed). Both are now retired. What matters
+// now, on the SAME two purpose-built locked-and-overdue tasks (never touched by any earlier
+// scenario): a task that USED to be permanently green now shows its rule-decided red the instant the
+// page loads — no click, no menu, no "Automatic" of any kind — because nothing can lock it anymore.
+// And separately: the "Automatic" option itself must be GONE from both pickers' menus, not merely
+// inert, so a user is never shown a control that does nothing (that would be worse than no control).
+const GRID_AUTO_TASK = "Grid Locked Task For Automatic Clear";
+const MASTER_AUTO_TASK = "Master View Locked Leaf";
 
-// ── Surface 1: Grid — StatusPicker's own "Automatic" menu entry, on "Grid Locked Task For
-// Automatic Clear" (a task purpose-built above, never touched by any earlier scenario — the
-// pre-existing `manualLeaf` control stays pristine). Overdue + hand-set green, so clearing to
-// Automatic must visibly flip the label (green "Complete" → red "Needs Attn.", the rule winning
-// once it's handed the field back), proving the change is real, not merely a re-render.
 // The badge check above left the app on Dashboard (section:"reports"), where .hdr-view isn't
 // rendered at all (it's gated on section==="projects") — switch back to Projects first, or the
 // Grid-view click below is a silent no-op and every read after it finds nothing.
@@ -884,102 +791,58 @@ await page.click('button:has-text("Projects")');
 await page.waitForTimeout(200);
 await page.click('.hdr-view button:has-text("Grid")').catch(()=>{});
 await page.waitForTimeout(200);
-const GRID_AUTO_TASK = "Grid Locked Task For Automatic Clear";
-const gridBefore = await page.evaluate((name) => {
+const gridNoClick = await page.evaluate((name) => {
   const rows = [...document.querySelectorAll("[data-task-row]")];
   const row = rows.find(r => (r.textContent || "").includes(name));
   if (!row) return null;
-  const dot = row.querySelector('[data-health-dot]');
   const statusCell = row.querySelector('[data-picker-cell^="status-"]');
   const r = statusCell.getBoundingClientRect();
-  return {
-    found: true,
-    overrideAttr: dot ? dot.getAttribute('data-health-override') : null,
-    label: statusCell.textContent.trim(),
-    clickX: r.left + r.width / 2, clickY: r.top + r.height / 2,
-  };
+  return { found: true, label: statusCell.textContent.trim(), clickX: r.left + r.width / 2, clickY: r.top + r.height / 2 };
 }, GRID_AUTO_TASK);
-let gridAfter = { found: false };
-if (gridBefore && gridBefore.found) {
-  await page.mouse.click(gridBefore.clickX, gridBefore.clickY); // open StatusPicker
-  await page.waitForTimeout(150);
-  const autoBox = await page.evaluate(() => {
-    const opt = [...document.querySelectorAll('span')].find(s => s.textContent.trim() === "Automatic" && s.getBoundingClientRect().width > 0);
-    if (!opt) return null;
-    const r = opt.getBoundingClientRect();
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-  });
-  if (autoBox) {
-    await page.mouse.click(autoBox.x, autoBox.y); // pick Automatic
-    await page.waitForTimeout(250);
-    gridAfter = await page.evaluate((name) => {
-      const rows = [...document.querySelectorAll("[data-task-row]")];
-      const row = rows.find(r => (r.textContent || "").includes(name));
-      if (!row) return { found: false };
-      const dot = row.querySelector('[data-health-dot]');
-      const statusCell = row.querySelector('[data-picker-cell^="status-"]');
-      return { found: true, overrideAttr: dot ? dot.getAttribute('data-health-override') : null, label: statusCell.textContent.trim() };
-    }, GRID_AUTO_TASK);
-  }
-}
-const automaticClearGridOk = !!(gridBefore?.found && gridBefore.overrideAttr === "true" && gridBefore.label === "Complete"
-  && gridAfter.found && gridAfter.overrideAttr === "false" && gridAfter.label === "Needs Attn.");
-console.log("\n=== Grid: 'Automatic' still clears healthOverride and hands the task back to the rule engine (B603840) ===");
-console.log(`  before: found=${gridBefore?.found} override=${gridBefore?.overrideAttr} label="${gridBefore?.label}"  (expect override=true label="Complete")`);
-console.log(`  after:  found=${gridAfter.found} override=${gridAfter.overrideAttr} label="${gridAfter.label}"  (expect override=false label="Needs Attn.")`);
-console.log(`${automaticClearGridOk ? "  pass  " : "❌ FAIL "}  automaticClearGridOk`);
+const gridNoClickOk = !!(gridNoClick?.found && gridNoClick.label === "Needs Attn.");
+console.log("\n=== Grid: a previously-locked, overdue task reads its rule-decided colour with NO click at all (RULES-DECIDE) ===");
+console.log(`  found=${gridNoClick?.found} label="${gridNoClick?.label}"  (expect "Needs Attn." — was permanently "Complete" under the retired lock)`);
+console.log(`${gridNoClickOk ? "  pass  " : "❌ FAIL "}  gridNoClickOk`);
 
-// ── Surface 2: MasterView — HealthDropMenu, on "Master View Locked Leaf" (same shape as the Grid
-// task above, never touched elsewhere). MasterView lists every task across every project, sorted —
-// this row can land far below the fold (measured: 7000+ CSS px down), so raw mouse coordinates miss
-// it entirely. MasterView is NOT virtualized (plain `sortedRows.map(...)`, no windowing — confirmed
-// by reading the source), so unlike a virtualized list (DRIVER-SCROLL-IS-NOT-APP-SCROLL), letting
-// the driver scroll it into view is safe: every row already exists in the DOM regardless of scroll
-// position, scrolling only changes what's on screen, not what's rendered.
+// Open the SAME picker and confirm "Automatic" no longer appears anywhere in it — the escape hatch
+// is gone along with the lock it used to escape, not just disconnected.
+let gridNoAutomaticOk = false;
+if (gridNoClick?.found) {
+  await page.mouse.click(gridNoClick.clickX, gridNoClick.clickY); // open StatusPicker
+  await page.waitForTimeout(150);
+  const hasAutomatic = await page.evaluate(() =>
+    [...document.querySelectorAll('span')].some(s => s.textContent.trim() === "Automatic" && s.getBoundingClientRect().width > 0));
+  gridNoAutomaticOk = !hasAutomatic;
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(100);
+}
+console.log(`${gridNoAutomaticOk ? "  pass  " : "❌ FAIL "}  gridNoAutomaticOk (the open StatusPicker menu contains no "Automatic" entry)`);
+
+// ── Surface 2: MasterView — same two proofs, on "Master View Locked Leaf". MasterView is NOT
+// virtualized (plain `sortedRows.map(...)`, no windowing — confirmed by reading the source), so
+// unlike a virtualized list (DRIVER-SCROLL-IS-NOT-APP-SCROLL), letting the driver scroll it into
+// view is safe: every row already exists in the DOM regardless of scroll position.
 await page.click('button:has-text("Dashboard")');
 await page.waitForTimeout(300);
-const MASTER_AUTO_TASK = "Master View Locked Leaf";
 const masterRow = page.locator("tbody tr", { hasText: MASTER_AUTO_TASK }).first();
 const masterHealthCell = masterRow.locator('td[data-hmenu="1"]'); // the health cell — the only <td> carrying this attribute
 const masterRowCount = await masterRow.count();
-let masterBefore = { found: false }, masterAfter = { found: false };
+let masterNoClick = { found: false }, masterNoAutomaticOk = false;
 if (masterRowCount > 0) {
   await masterHealthCell.scrollIntoViewIfNeeded();
-  masterBefore = { found: true, label: (await masterHealthCell.textContent()).trim() };
-  await masterHealthCell.dblclick(); // opens HealthDropMenu
+  masterNoClick = { found: true, label: (await masterHealthCell.textContent()).trim() };
+  await masterHealthCell.dblclick(); // opens HealthDropMenu — just to inspect its contents, nothing is selected
   await page.waitForTimeout(200);
   const autoOpt = page.locator('[data-hmenu="1"] span', { hasText: "Automatic" }).first();
-  if (await autoOpt.count() > 0) {
-    await autoOpt.click();
-    await page.waitForTimeout(250);
-    const afterCount = await masterRow.count();
-    masterAfter = afterCount > 0 ? { found: true, label: (await masterHealthCell.textContent()).trim() } : { found: false };
-  }
+  masterNoAutomaticOk = (await autoOpt.count()) === 0;
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(100);
 }
-const automaticClearMasterOk = !!(masterBefore.found && masterBefore.label === "Complete"
-  && masterAfter.found && masterAfter.label === "Needs Attn.");
-console.log("\n=== MasterView: 'Automatic' still clears healthOverride via HealthDropMenu (B603840) ===");
-console.log(`  before: found=${masterBefore.found} label="${masterBefore.label}"  (expect "Complete")`);
-console.log(`  after:  found=${masterAfter.found} label="${masterAfter.label}"  (expect "Needs Attn.")`);
-console.log(`${automaticClearMasterOk ? "  pass  " : "❌ FAIL "}  automaticClearMasterOk`);
-
-// ── Persistence proxy: the captured save payload(s) must carry healthOverride:false for BOTH
-// cleared tasks — the bytes that would reach Supabase and be read back on a real reload.
-const capturedSaves = await page.evaluate(() => window.__capturedSaves || []);
-const findClearedInSaves = (name) => capturedSaves.some(v => {
-  try {
-    const parsed = JSON.parse(v);
-    return Object.values(parsed.projects || {}).some(p => (p.tasks || []).some(t => t.name === name && t.healthOverride === false));
-  } catch { return false; }
-});
-const persistGridOk = findClearedInSaves(GRID_AUTO_TASK);
-const persistMasterOk = findClearedInSaves(MASTER_AUTO_TASK);
-const persistPayloadOk = capturedSaves.length > 0 && persistGridOk && persistMasterOk;
-console.log("\n=== Persistence proxy: the save-path payload carries healthOverride:false (proxy for 'survives a reload') ===");
-console.log(`  captured save attempts: ${capturedSaves.length}`);
-console.log(`${persistGridOk ? "  pass  " : "❌ FAIL "}  Grid-cleared task's payload has healthOverride:false`);
-console.log(`${persistMasterOk ? "  pass  " : "❌ FAIL "}  MasterView-cleared task's payload has healthOverride:false`);
-console.log("NOT verified here (needs live Supabase egress this sandbox lacks) — the real cloud round-trip surviving an actual page reload. Filed V311488, Blocker: auth.");
+const masterNoClickOk = !!(masterNoClick.found && masterNoClick.label === "Needs Attn.");
+console.log("\n=== MasterView: a previously-locked, overdue task reads its rule-decided colour with NO click at all (RULES-DECIDE) ===");
+console.log(`  found=${masterNoClick.found} label="${masterNoClick.label}"  (expect "Needs Attn." — was permanently "Complete" under the retired lock)`);
+console.log(`${masterNoClickOk ? "  pass  " : "❌ FAIL "}  masterNoClickOk`);
+console.log(`${masterNoAutomaticOk ? "  pass  " : "❌ FAIL "}  masterNoAutomaticOk (the open HealthDropMenu contains no "Automatic" entry)`);
 
 console.log("\nAll scenarios found on both sides (no vacuous miss):", allFound);
 console.log("Control arms correct + agree (harness sanity):", controlsOk);
@@ -987,20 +850,17 @@ console.log("Every ORIGINAL automatic-health case (leaf/milestone) matches scree
 console.log("Every group-header-rule-rollup scenario is CORRECT on both surfaces (not just self-consistent):", rollupOk);
 console.log("percentComplete matches computed health, not raw (B575904 defect 2):", percentOk);
 console.log("Manual-override badge fully removed, Grid + MasterView (B603840):", badgeAbsenceGridOk && badgeAbsenceMasterOk);
-console.log("'Automatic' still clears healthOverride, both surfaces (B603840):", automaticClearGridOk && automaticClearMasterOk);
-console.log("Cleared task's save payload carries healthOverride:false (reload-persistence proxy):", persistPayloadOk);
+console.log("A previously-locked, overdue task shows red with NO click, both surfaces (RULES-DECIDE):", gridNoClickOk && masterNoClickOk);
+console.log("'Automatic' is GONE from both menus, not just inert (RULES-DECIDE):", gridNoAutomaticOk && masterNoAutomaticOk);
 console.log("REAL ERRORS (" + real.length + "):"); real.slice(0,20).forEach(e=>console.log("  - "+e));
 console.log("\nScreenshots: " + OUT + "schedule-onscreen-grid.png, " + OUT + "schedule-onscreen-gantt.png, " + OUT + "schedule-export-popup.png");
 
 const pass = rendered && opened.ok && allFound && controlsOk && autoOk && rollupOk && collapsedSetOverrideOk && ganttOk && percentOk && dropdownDismissOk
-  && badgeAbsenceGridOk && badgeAbsenceMasterOk && automaticClearGridOk && automaticClearMasterOk && persistPayloadOk && real.length === 0;
-console.log(pass ? "\n✅ PASS — every scenario's health colour is correct and matches on screen, in the export, and in the Gantt; RuleColorPicker dismiss behavior matches the rest of the app; the manual-override badge is gone from Grid and MasterView and 'Automatic' still clears it on both surfaces"
+  && badgeAbsenceGridOk && badgeAbsenceMasterOk && gridNoClickOk && masterNoClickOk && gridNoAutomaticOk && masterNoAutomaticOk && real.length === 0;
+console.log(pass ? "\n✅ PASS — every scenario's health colour is correct and matches on screen, in the export, and in the Gantt; RuleColorPicker dismiss behavior matches the rest of the app; the manual-override badge is gone from Grid and MasterView, a previously-locked overdue task now shows red with no click at all, and 'Automatic' is gone from both menus"
                  : "\n❌ FAIL"
                    + (MUTATE_ROLLUP ? " (expected under --mutate-rollup if rollupOk/ganttOk flip and controls/autoOk stay green — that's the discriminating proof)" : "")
-                   + (MUTATE_DROPDOWN ? " (expected under --mutate-dropdown if dropdownDismissOk flips and every other check stays green — that's the discriminating proof)" : "")
-                   + (MUTATE_BADGE ? " (expected under --mutate-badge if badgeAbsenceGridOk/badgeAbsenceMasterOk flip and everything else stays green — that's the discriminating proof)" : "")
-                   + (MUTATE_AUTO_GRID ? " (expected under --mutate-automatic-grid if automaticClearGridOk/persistPayloadOk flip and automaticClearMasterOk stays green — that's the discriminating proof)" : "")
-                   + (MUTATE_AUTO_MASTER ? " (expected under --mutate-automatic-master if automaticClearMasterOk/persistPayloadOk flip and automaticClearGridOk stays green — that's the discriminating proof)" : ""));
+                   + (MUTATE_DROPDOWN ? " (expected under --mutate-dropdown if dropdownDismissOk flips and every other check stays green — that's the discriminating proof)" : ""));
 
 await browser.close(); server.close();
 process.exit(pass ? 0 : 1);
