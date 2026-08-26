@@ -8,6 +8,12 @@
 // percentComplete 0, one health rule: finishPastDays/days:1/red) plus a battery of adjacent cases
 // from the brief. Pattern copied from ui-audit/verify-focus-overdue.mjs (self-hosted React/Babel,
 // Supabase stub resolving "no rows" so boot falls back to the inline seed).
+//
+// ⛔ AMENDED (B785744, 2026-08-26) — the title claim "rules always win" was itself corrected one
+// day later: the owner's own next words were "UNLESS I click task complete, ... I CAN OVERRIDE IN
+// THAT SCENARIO." Complete (and Paused) is now the one deliberate, visible, editable exception —
+// see the milestone-303 check below, whose expected color changed from RED to GREEN for exactly
+// this reason. Every other case here (a task NOT marked Complete/Paused) is unaffected.
 import { chromium } from "playwright";
 import { createServer } from "node:http";
 import { readFile, access } from "node:fs/promises";
@@ -70,7 +76,12 @@ const SEED = {
         start:isoOffset(-5), end:isoOffset(-1), duration:3, percentComplete:0 }),
     T({ id:302, name:"Overdue + Complete — must stay green", health:"green", healthOverride:true, parentId:200,
         start:isoOffset(-5), end:isoOffset(-1), duration:3, percentComplete:100 }),
-    T({ id:303, name:"Milestone 0d overdue, overridden", health:"green", healthOverride:true, parentId:200,
+    // ⛔ B785744 (2026-08-26) reclassified this row's expected color. It's overdue, marked Complete
+    // (health:"green"), with percentComplete still 0 — that's the exact live-measured shape of the
+    // owner's real regression (212/557 real tasks), and the fix is that Complete now beats overdue
+    // (an explicit, editable "unless Status is Complete" clause on the rule) REGARDLESS of
+    // percentComplete. So this row now stays GREEN, not RED — see the check below.
+    T({ id:303, name:"Milestone 0d overdue, marked Complete", health:"green", healthOverride:true, parentId:200,
         start:isoOffset(-1), end:isoOffset(-1), duration:0, percentComplete:0 }),
     T({ id:304, name:"Due TODAY not yet past, overridden", health:"yellow", healthOverride:true, parentId:200,
         start:isoOffset(-2), end:todayIso, duration:3, percentComplete:0 }),
@@ -167,7 +178,7 @@ const RED = "#dc2626", YELLOW = "#c47b00", GREEN = "#16a34a";
 const item119 = await dotColorForName("Surveyor to revise plat");
 const notStartedOverdue = await dotColorForName("Overdue + Not Started");
 const completeOverdue = await dotColorForName("Overdue + Complete");
-const milestoneOverdue = await dotColorForName("Milestone 0d overdue");
+const milestoneOverdue = await dotColorForName("Milestone 0d overdue, marked Complete");
 const dueToday = await dotColorForName("Due TODAY not yet past");
 const customBlockedOverdue = await dotColorForName("Custom status Blocked OVERDUE");
 const pinnedGreenNotOverdue = await dotColorForName("Pinned green, not overdue");
@@ -228,7 +239,7 @@ const checks = [
   { label: "item 119 (overdue + In Progress + healthOverride:true) is RED — the reported bug, fixed", ok: item119 === RED, discriminates: "yes — MUTATION-1 flips this to amber (#c47b00)" },
   { label: "overdue + Not Started + override:true is also RED (rules win regardless of prior status label)", ok: notStartedOverdue === RED, discriminates: "yes — MUTATION-1 flips this to white (#ffffff)" },
   { label: "overdue + Complete (100%) stays GREEN — must NOT go red", ok: completeOverdue === GREEN, discriminates: "no for MUTATION-1/2 (pct>=100 guard is untouched by this fix, so no rule matches in either version) — YES for MUTATION-3, measured: flips to red (#dc2626) when that guard is removed" },
-  { label: "0d milestone (start===end) past due, overridden, still turns RED", ok: milestoneOverdue === RED, discriminates: "yes — MUTATION-1 flips this to green (#16a34a)" },
+  { label: "0d milestone (start===end) past due, marked Complete, stays GREEN (B785744 — Complete beats overdue regardless of percentComplete)", ok: milestoneOverdue === GREEN, discriminates: "yes for B785744's own fix (a pre-B785744 checkout paints this RED, since only percentComplete>=100 protected a task then); no for MUTATION-1 (reordering rule-check vs override-check is orthogonal to the Complete-status exception)" },
   { label: "due TODAY (not yet past) stays its overridden YELLOW — rule is silent, override survives", ok: dueToday === YELLOW, discriminates: "NO, under any of the three mutations tried — genuinely not overdue in either version (no rule ever matches) AND its raw task.health equals what the deleted override branch would return, so MUTATION-2 is also invisible to it. See the note above." },
   { label: "an OVERDUE custom 'Blocked' status is repainted RED by the firing rule, just like a named color", ok: customBlockedOverdue === RED, discriminates: "yes — MUTATION-1 flips this to white (#ffffff, the unregistered-custom-status fallback)" },
   { label: "a pin that ISN'T overdue keeps its overridden GREEN — override survives when no rule fires", ok: pinnedGreenNotOverdue === GREEN, discriminates: "NO, under any of the three mutations tried — same reasoning as dueToday. The equivalent claim (override beats a meeting/deadline block, which WOULD make this distinction observable) is proven instead at the pure-function level — see the note above." },
@@ -242,5 +253,5 @@ console.log("");
 let pass = true;
 for (const { label, ok, discriminates } of checks) { console.log(`${ok ? "PASS" : "FAIL"}  ${label}\n        discriminates (MUTATION-1)? ${discriminates}`); if (!ok) pass = false; }
 if (real.length) console.log("\nunexpected errors:\n" + real.join("\n"));
-console.log(`\n${pass ? "RULES-ALWAYS-WIN PASS" : "RULES-ALWAYS-WIN FAIL"}`);
+console.log(`\n${pass ? "RULES-WIN-EXCEPT-COMPLETE PASS" : "RULES-WIN-EXCEPT-COMPLETE FAIL"}`);
 process.exit(pass ? 0 : 1);

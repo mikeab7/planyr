@@ -2433,6 +2433,177 @@ describe("NEW-schedule-health — evalHealthRules: ordering IS the mechanism (fi
   });
 });
 
+// ── NEW-rule-language (B785744) — the IF/THEN/UNLESS rebuild ────────────────────────────────
+// Replaces the seven-canned-condition panel from #1073 (owner, verbatim, twice-rejected: "you've
+// got like two variables here" / "this is bullshit"). His actual spec, verbatim: "IF 'finish' is
+// in the past, THEN, status = Needs Attn, UNLESS, status is marked COMPLETE." RULE_FIELDS ×
+// RULE_OPS is that language; evalRule/evalConditionGroup/migrateRule are its engine.
+describe("NEW-rule-language — evalFieldCondition: one field, one comparison, absence-safe", () => {
+  const base = { id: 1, end: "", start: "", health: "gray", responsibleParty: "", percentComplete: 0 };
+
+  it("date field 'finish' / pastDueAtLeast — matches the old finishPastDays threshold semantics", () => {
+    expect(E.evalFieldCondition({field:"finish",op:"pastDueAtLeast",value:1}, {...base, end:"2026-08-14"}, "2026-08-15")).toBe(true);
+    expect(E.evalFieldCondition({field:"finish",op:"pastDueAtLeast",value:1}, {...base, end:"2026-08-15"}, "2026-08-15")).toBe(false); // due today isn't past
+    expect(E.evalFieldCondition({field:"finish",op:"pastDueAtLeast",value:2}, {...base, end:"2026-08-14"}, "2026-08-15")).toBe(false); // 1 day late, threshold 2
+    // Absence-safety: no finish date at all is never "past due" — unlike the old engine, this no
+    // longer depends on percentComplete at all (that's the whole point of the fix).
+    expect(E.evalFieldCondition({field:"finish",op:"pastDueAtLeast",value:1}, {...base, end:"", percentComplete:0}, "2026-08-15")).toBe(false);
+    expect(E.evalFieldCondition({field:"finish",op:"pastDueAtLeast",value:1}, {...base, end:"2026-08-01", percentComplete:100}, "2026-08-15")).toBe(true); // no pct guard anymore
+  });
+  it("date field 'finish' / withinDays and isToday", () => {
+    expect(E.evalFieldCondition({field:"finish",op:"withinDays",value:7}, {...base, end:"2026-08-20"}, "2026-08-15")).toBe(true);
+    expect(E.evalFieldCondition({field:"finish",op:"withinDays",value:7}, {...base, end:"2026-08-25"}, "2026-08-15")).toBe(false);
+    expect(E.evalFieldCondition({field:"finish",op:"withinDays",value:7}, {...base, end:"2026-08-10"}, "2026-08-15")).toBe(false); // already overdue
+    expect(E.evalFieldCondition({field:"finish",op:"isToday"}, {...base, end:"2026-08-15"}, "2026-08-15")).toBe(true);
+    expect(E.evalFieldCondition({field:"finish",op:"isToday"}, {...base, end:"2026-08-14"}, "2026-08-15")).toBe(false);
+  });
+  it("date field / isBlank + isNotBlank — the explicit absence tests", () => {
+    expect(E.evalFieldCondition({field:"finish",op:"isBlank"}, {...base, end:""}, "2026-08-15")).toBe(true);
+    expect(E.evalFieldCondition({field:"finish",op:"isNotBlank"}, {...base, end:""}, "2026-08-15")).toBe(false);
+    expect(E.evalFieldCondition({field:"start",op:"isBlank"}, {...base, start:"2026-08-01"}, "2026-08-15")).toBe(false);
+  });
+  it("status field / is + isNot", () => {
+    expect(E.evalFieldCondition({field:"status",op:"is",value:"green"}, {...base, health:"green"})).toBe(true);
+    expect(E.evalFieldCondition({field:"status",op:"is",value:"green"}, {...base, health:"yellow"})).toBe(false);
+    expect(E.evalFieldCondition({field:"status",op:"isNot",value:"green"}, {...base, health:"yellow"})).toBe(true);
+  });
+  it("text field 'owner' / isBlank, is, contains", () => {
+    expect(E.evalFieldCondition({field:"owner",op:"isBlank"}, {...base, responsibleParty:"  "})).toBe(true); // whitespace-only = blank
+    expect(E.evalFieldCondition({field:"owner",op:"isNotBlank"}, {...base, responsibleParty:"Bob"})).toBe(true);
+    expect(E.evalFieldCondition({field:"owner",op:"is",value:"bob"}, {...base, responsibleParty:"Bob"})).toBe(true); // case-insensitive
+    expect(E.evalFieldCondition({field:"owner",op:"contains",value:"utler"}, {...base, responsibleParty:"Michael Butler"})).toBe(true);
+    expect(E.evalFieldCondition({field:"owner",op:"contains",value:"zzz"}, {...base, responsibleParty:"Michael Butler"})).toBe(false);
+  });
+  it("number fields / eq, gt, lt, gte, lte — an absent value reads as 0 (matches the old pct||0 convention)", () => {
+    expect(E.evalFieldCondition({field:"percentComplete",op:"gte",value:100}, {...base, percentComplete:100})).toBe(true);
+    expect(E.evalFieldCondition({field:"percentComplete",op:"gte",value:100}, {...base, percentComplete:undefined})).toBe(false); // absent → 0, not >= 100
+    expect(E.evalFieldCondition({field:"percentComplete",op:"lte",value:0}, {...base, percentComplete:undefined})).toBe(true);   // absent → 0, <= 0
+    expect(E.evalFieldCondition({field:"cost",op:"gt",value:1000}, {...base, cost:5000})).toBe(true);
+    expect(E.evalFieldCondition({field:"cost",op:"lt",value:1000}, {...base, cost:5000})).toBe(false);
+  });
+  it("number fields / isBlank vs isNotBlank distinguish truly-unset from explicit 0", () => {
+    expect(E.evalFieldCondition({field:"budget",op:"isBlank"}, {...base, budget:""})).toBe(true);
+    expect(E.evalFieldCondition({field:"budget",op:"isBlank"}, {...base, budget:0})).toBe(false); // explicit 0 is not blank
+    expect(E.evalFieldCondition({field:"budget",op:"isNotBlank"}, {...base, budget:0})).toBe(true);
+  });
+  it("field 'predecessor' / isLate — same semantics as the old predecessorLate condition", () => {
+    const byId = { 9: { end: "2026-08-01", percentComplete: 0 } };
+    expect(E.evalFieldCondition({field:"predecessor",op:"isLate"}, {...base, predecessors:[{id:9}]}, "2026-08-15", byId)).toBe(true);
+    expect(E.evalFieldCondition({field:"predecessor",op:"isLate"}, {...base, predecessors:[]}, "2026-08-15", byId)).toBe(false);
+    expect(E.evalFieldCondition({field:"predecessor",op:"isLate"}, {...base, predecessors:[{id:9}]}, "2026-08-15", undefined)).toBe(false); // no taskById
+  });
+  it("an unknown field or op is a non-match, never a throw", () => {
+    expect(() => E.evalFieldCondition({field:"nope",op:"is",value:1}, base)).not.toThrow();
+    expect(E.evalFieldCondition({field:"nope",op:"is",value:1}, base)).toBe(false);
+    expect(E.evalFieldCondition({field:"status",op:"nope",value:1}, base)).toBe(false);
+  });
+});
+
+describe("NEW-rule-language — evalConditionGroup: AND/OR composition", () => {
+  const task = { id: 1, end: "2026-08-01", start: "2026-08-01", health: "yellow", responsibleParty: "", percentComplete: 0 };
+  const overdue = {field:"finish", op:"pastDueAtLeast", value:1};
+  const noOwner = {field:"owner", op:"isBlank"};
+  const isGreen = {field:"status", op:"is", value:"green"};
+  it("AND requires every condition true", () => {
+    expect(E.evalConditionGroup([overdue, noOwner], "AND", task, "2026-08-15")).toBe(true);
+    expect(E.evalConditionGroup([overdue, isGreen], "AND", task, "2026-08-15")).toBe(false); // not green
+  });
+  it("OR requires only one condition true", () => {
+    expect(E.evalConditionGroup([isGreen, noOwner], "OR", task, "2026-08-15")).toBe(true); // noOwner alone
+    expect(E.evalConditionGroup([isGreen], "OR", task, "2026-08-15")).toBe(false);
+  });
+  it("an empty group never matches — an empty `when` can't fire a rule, an empty `unless` never blocks one", () => {
+    expect(E.evalConditionGroup([], "AND", task, "2026-08-15")).toBe(false);
+    expect(E.evalConditionGroup([], "OR", task, "2026-08-15")).toBe(false);
+    expect(E.evalConditionGroup(undefined, "AND", task, "2026-08-15")).toBe(false);
+  });
+});
+
+describe("NEW-rule-language — evalRule: a rule fires on when-match AND NOT unless-match", () => {
+  const task = { id: 1, end: "2026-08-01", start: "2026-08-01", health: "green", responsibleParty: "", percentComplete: 0 };
+  it("his exact sentence, rendered in the language: IF finish past THEN red UNLESS status is Complete", () => {
+    const rule = {
+      when: [{field:"finish", op:"pastDueAtLeast", value:1}], whenCombinator:"AND",
+      color: "red",
+      unless: [{field:"status", op:"is", value:"green"}], unlessCombinator:"OR",
+    };
+    expect(E.evalRule(rule, task, "2026-08-15")).toBeNull(); // Complete blocks it
+    expect(E.evalRule(rule, {...task, health:"yellow"}, "2026-08-15")).toBe("red"); // not Complete → fires
+  });
+  it("a rule with no unless clause behaves like a plain IF/THEN", () => {
+    const rule = { when: [{field:"finish", op:"pastDueAtLeast", value:1}], whenCombinator:"AND", color:"red", unless: [] };
+    expect(E.evalRule(rule, {...task, health:"green"}, "2026-08-15")).toBe("red"); // nothing exempts it
+  });
+  it("multi-condition IF with AND/OR, matching example 2 from the Stage-1 proposal", () => {
+    // IF Finish within 3 days AND Owner is blank THEN yellow UNLESS Status is Complete OR Paused
+    const rule = {
+      when: [{field:"finish", op:"withinDays", value:3}, {field:"owner", op:"isBlank"}], whenCombinator:"AND",
+      color: "yellow",
+      unless: [{field:"status", op:"is", value:"green"}, {field:"status", op:"is", value:"paused"}], unlessCombinator:"OR",
+    };
+    const t = { id:1, end:"2026-08-17", start:"2026-08-01", health:"gray", responsibleParty:"", percentComplete:0 };
+    expect(E.evalRule(rule, t, "2026-08-15")).toBe("yellow"); // within 3 days AND no owner
+    expect(E.evalRule(rule, {...t, responsibleParty:"Bob"}, "2026-08-15")).toBeNull(); // has an owner → AND fails
+    expect(E.evalRule(rule, {...t, health:"paused"}, "2026-08-15")).toBeNull(); // paused → unless (OR) blocks it
+  });
+});
+
+describe("NEW-rule-language — migrateRule: v1 (ordered-list) rules translate to v2 without behavior loss", () => {
+  it("passes a v2-shape rule through untouched", () => {
+    const v2 = { id:"x", when:[{field:"finish",op:"pastDueAtLeast",value:1}], whenCombinator:"AND", color:"red", unless:[], unlessCombinator:"OR" };
+    expect(E.migrateRule(v2)).toBe(v2);
+  });
+  it("finishPastDays/finishWithinDays/finishToday map onto the 'finish' field", () => {
+    expect(E.migrateRule({id:"a", type:"finishPastDays", days:3, color:"red"}).when).toEqual([{field:"finish", op:"pastDueAtLeast", value:3}]);
+    expect(E.migrateRule({id:"a", type:"finishWithinDays", days:5, color:"yellow"}).when).toEqual([{field:"finish", op:"withinDays", value:5}]);
+    expect(E.migrateRule({id:"a", type:"finishToday", color:"yellow"}).when).toEqual([{field:"finish", op:"isToday"}]);
+  });
+  it("notStarted maps to a two-condition AND (start past due AND percentComplete <= 0) — same shape as the old pct<=0 check", () => {
+    expect(E.migrateRule({id:"a", type:"notStarted", color:"yellow"}).when).toEqual([
+      {field:"start", op:"pastDueAtLeast", value:1}, {field:"percentComplete", op:"lte", value:0},
+    ]);
+  });
+  it("predecessorLate/noOwner/complete map onto their own single-condition equivalents", () => {
+    expect(E.migrateRule({id:"a", type:"predecessorLate", color:"red"}).when).toEqual([{field:"predecessor", op:"isLate"}]);
+    expect(E.migrateRule({id:"a", type:"noOwner", color:"yellow"}).when).toEqual([{field:"owner", op:"isBlank"}]);
+    expect(E.migrateRule({id:"a", type:"complete", color:"green"}).when).toEqual([{field:"percentComplete", op:"gte", value:100}]);
+  });
+  it("⛔ B785744's real fix: every migrated non-green rule gets a VISIBLE 'unless Complete or Paused' exception", () => {
+    const r = E.migrateRule({id:"legacy-overdue", type:"finishPastDays", days:1, color:"red"});
+    expect(r.unless).toEqual([{field:"status",op:"is",value:"green"}, {field:"status",op:"is",value:"paused"}]);
+    expect(r.unlessCombinator).toBe("OR");
+  });
+  it("a migrated green rule gets NO exception (a 'Complete' rule exempting itself from Complete would be vacuous)", () => {
+    const r = E.migrateRule({id:"legacy-complete", type:"complete", color:"green"});
+    expect(r.unless).toEqual([]);
+  });
+  it("an id is always present, even on a bare/malformed input", () => {
+    expect(E.migrateRule({type:"finishPastDays", color:"red"}).id).toBeTruthy();
+  });
+});
+
+describe("NEW-rule-language — the live regression itself: 212/557 of the owner's real tasks, reproduced and fixed", () => {
+  // Measured live via read-only SELECT against planar_data (hs-v1), Stage-1 of B785744: 212 of 557
+  // real leaf tasks across the owner's 6 schedules are health:"green" (marked Complete via the
+  // status pill) with percentComplete still 0 (never bumped — the pill never touches that field)
+  // and a finish date in the past. His ACTUAL single configured rule is exactly this v1 shape.
+  const orig = E.NOW;
+  afterEach(() => E.setNOW(orig));
+
+  it("his exact production rule (finishPastDays/days:1/red, no other rules) no longer paints a Complete task red", () => {
+    E.setNOW("2026-08-26");
+    const settings = { healthRules: [{ id: "legacy-overdue", type: "finishPastDays", days: 1, color: "red" }] };
+    const realTask = { id: 119, health: "green", end: "2026-08-20", percentComplete: 0 }; // the measured shape
+    expect(E.computeDisplayHealth(realTask, settings)).toBe("green");
+  });
+  it("a genuinely unfinished, overdue task under that same single rule still goes red — the fix isn't a blanket suppression", () => {
+    E.setNOW("2026-08-26");
+    const settings = { healthRules: [{ id: "legacy-overdue", type: "finishPastDays", days: 1, color: "red" }] };
+    const stillOpen = { id: 42, health: "yellow", end: "2026-08-20", percentComplete: 40 };
+    expect(E.computeDisplayHealth(stillOpen, settings)).toBe("red");
+  });
+});
+
 describe("NEW-schedule-health — migrateCfRulesToHealthRules reproduces the old 3-toggle order exactly", () => {
   it("all three on → [complete, overdue(1d), duesoon(7d)], the SAME precedence computeDisplayHealth used", () => {
     expect(E.migrateCfRulesToHealthRules({ completeGreen: true, overdueRed: true, dueSoonYellow: true })).toEqual([
@@ -2451,8 +2622,13 @@ describe("NEW-schedule-health — migrateCfRulesToHealthRules reproduces the old
     expect(E.migrateCfRulesToHealthRules(undefined)).toEqual([]);
   });
   it("getHealthRules prefers a real healthRules array over the legacy fallback, even an empty one", () => {
+    // B785744 — getHealthRules now migrates EVERY source (v1 ordered-list, the very-old 3-toggle
+    // cfRules) into the v2 {when,unless} shape live (see the "NEW-rule-language" block below for
+    // the migration's own coverage), so its output is `migrateRule(...)`-shaped, not the raw v1
+    // rows this test used to compare against verbatim.
     expect(E.getHealthRules({ healthRules: [], cfRules: { overdueRed: true } })).toEqual([]);
-    expect(E.getHealthRules({ cfRules: { overdueRed: true } })).toEqual(E.migrateCfRulesToHealthRules({ overdueRed: true }));
+    expect(E.getHealthRules({ cfRules: { overdueRed: true } }))
+      .toEqual(E.migrateCfRulesToHealthRules({ overdueRed: true }).map(E.migrateRule));
     expect(E.getHealthRules({})).toEqual([]);
   });
 });
@@ -2467,13 +2643,22 @@ describe("RULES-DECIDE (2026-08-25, owner correction) — healthOverride is RETI
   // and its early return are gone from computeDisplayHealth entirely — not reordered, DELETED.
   // A task may still carry `healthOverride` in old stored data (dead, unread); every test below
   // proves that value never changes the answer, in every scenario it used to matter.
+  //
+  // ⛔ B785744 PARTIALLY SUPERSEDES the "beats a hand-picked color, no exceptions" reading below —
+  // the very next day the owner corrected himself, verbatim (B780448/#1178): "if the finish date
+  // is in the past, it should be marked red... UNLESS I click task complete, it is THEN COMPLETE,
+  // I CAN OVERRIDE IN THAT SCENARIO." A firing rule still beats any hand-picked color EXCEPT
+  // Complete (green) or Paused — that one exception is now a visible, editable `unless` clause on
+  // the rule (see "NEW-rule-language" below), not a hardcode and not the retired healthOverride
+  // flag. The test just below is updated to a non-green color to keep proving the flag is fully
+  // inert; the green/paused exception has its own dedicated coverage further down.
   const orig = E.NOW;
   afterEach(() => E.setNOW(orig));
 
   it("a firing rule beats a hand-picked color — healthOverride true, false, or absent all give the same answer", () => {
     E.setNOW("2026-08-15");
     const settings = { healthRules: [{ id: "a", type: "finishPastDays", days: 1, color: "red" }] };
-    const base = { id: 1, health: "green", end: "2020-01-01", percentComplete: 0 };
+    const base = { id: 1, health: "yellow", end: "2020-01-01", percentComplete: 0 }; // hand-picked "In Progress", not Complete
     expect(E.computeDisplayHealth({ ...base, healthOverride: true }, settings)).toBe("red");
     expect(E.computeDisplayHealth({ ...base, healthOverride: false }, settings)).toBe("red");
     expect(E.computeDisplayHealth(base, settings)).toBe("red"); // flag absent entirely
@@ -2526,11 +2711,22 @@ describe("RULES-DECIDE (2026-08-25, owner correction) — healthOverride is RETI
     expect(E.computeDisplayHealth({ id: 1, health: "yellow", healthOverride: false, percentComplete: 40 }, { healthRules: [] })).toBe("yellow");
     expect(E.computeDisplayHealth({ id: 1, health: "yellow", healthOverride: true, percentComplete: 40 }, { healthRules: [] })).toBe("yellow");
   });
-  it("adjacent case: overdue + Complete (100%) must NOT go red — the pct>=100 guard inside finishPastDays is untouched by this fix", () => {
+  it("adjacent case: overdue + Complete must NOT go red — B752848/B785744's real fix, in the STATUS field", () => {
+    // ⛔ Rewritten for B785744 — the OLD comment here credited a "pct>=100 guard inside
+    // finishPastDays"; that guard doesn't run anymore (migrateRule translates finishPastDays to a
+    // pure date test with no percentComplete check at all). What actually keeps this green now is
+    // the migrated rule's auto-attached `unless: status is green OR paused` — and critically that
+    // reads task.health, NOT percentComplete. This is the measured, live regression itself: marking
+    // a task Complete only ever writes health:"green" and never touches percentComplete (verified
+    // against the real HealthPicker → commit → applyUpdate path), so 212 of the owner's 557 real
+    // leaf tasks were exactly this shape — Complete, percentComplete still 0, overdue.
     E.setNOW("2026-08-25");
     const settings = { healthRules: [{ id: "a", type: "finishPastDays", days: 1, color: "red" }] };
     const done = { id: 1, health: "green", healthOverride: true, end: "2026-08-24", percentComplete: 100 };
     expect(E.computeDisplayHealth(done, settings)).toBe("green");
+    // The exact live-measured shape: Complete, percentComplete NEVER bumped, still overdue.
+    const realShape = { id: 2, health: "green", end: "2026-08-24", percentComplete: 0 };
+    expect(E.computeDisplayHealth(realShape, settings)).toBe("green");
   });
   it("adjacent case: overdue + Not Started — the rule doesn't care what the stored status label says, only percentComplete/end", () => {
     E.setNOW("2026-08-25");
@@ -2541,7 +2737,10 @@ describe("RULES-DECIDE (2026-08-25, owner correction) — healthOverride is RETI
   it("adjacent case: a 0-duration milestone (start===end) past due still fires the rule regardless of a stored healthOverride", () => {
     E.setNOW("2026-08-25");
     const settings = { healthRules: [{ id: "a", type: "finishPastDays", days: 1, color: "red" }] };
-    const milestone = { id: 1, health: "green", healthOverride: true, start: "2026-08-24", end: "2026-08-24", duration: 0, percentComplete: 0 };
+    // B785744: not "green" — a Complete milestone is the one deliberate exception (its own coverage
+    // lives beside the other Complete-beats-overdue tests). This proves the flag stays inert on a
+    // milestone that ISN'T marked Complete.
+    const milestone = { id: 1, health: "yellow", healthOverride: true, start: "2026-08-24", end: "2026-08-24", duration: 0, percentComplete: 0 };
     expect(E.computeDisplayHealth(milestone, settings)).toBe("red");
   });
   it("adjacent case: due TODAY (not yet past) does not match finishPastDays — falls to raw stored health regardless of healthOverride", () => {
@@ -2779,7 +2978,17 @@ describe("NEW-schedule-health — adjacent cases: milestones, completed tasks, u
     const milestone = { id: 1, health: "gray", healthOverride: false, start: "2026-08-15", end: "2026-08-15", duration: 0, percentComplete: 0 };
     expect(E.computeDisplayHealth(milestone, settings)).toBe("yellow");
   });
-  it("a completed task (100%) never lights up an overdue/due-soon/not-started rule, only \"complete\" can match it", () => {
+  it("B785744: percentComplete alone no longer exempts a task — only the STATUS field does (yellow + pct 100 still goes red)", () => {
+    // ⛔ REWRITTEN for B785744. Under the v1 engine, every legacy condition's own `pct>=100` guard
+    // meant a task with percentComplete:100 was silently exempt from ANY attention rule, however it
+    // was labeled. That guard is gone — it's exactly the mechanism that made "Task is 100% complete"
+    // structurally unable to fire off the owner's real workflow (marking Complete never sets
+    // percentComplete; see Stage-1 measurement, 12.6% of his 557 real tasks ever reach 100%, and
+    // percentComplete isn't a visible column on ANY of his 6 plans). The new auto-injected exception
+    // reads task.health (the field the Complete pill actually writes), not percentComplete. This
+    // fixture is deliberately the OPPOSITE combination — health "yellow" (never clicked Complete),
+    // percentComplete 100 (someone typed a number into an unrelated field) — and per the owner's own
+    // words ("UNLESS I click task complete") it correctly still goes red: he never marked it Complete.
     E.setNOW("2026-08-15");
     const settings = { healthRules: [
       { id: "a", type: "finishPastDays", days: 1, color: "red" },
@@ -2787,7 +2996,10 @@ describe("NEW-schedule-health — adjacent cases: milestones, completed tasks, u
       { id: "c", type: "complete", color: "green" },
     ] };
     const done = { id: 1, health: "yellow", healthOverride: false, start: "2020-01-01", end: "2020-01-01", percentComplete: 100 };
-    expect(E.computeDisplayHealth(done, settings)).toBe("green");
+    expect(E.computeDisplayHealth(done, settings)).toBe("red");
+    // The Status-marked-Complete equivalent DOES still exempt it, same overdue dates.
+    const actuallyComplete = { ...done, health: "green" };
+    expect(E.computeDisplayHealth(actuallyComplete, settings)).toBe("green");
   });
   it("a task with no dates at all and an empty rule list just shows its raw stored health", () => {
     const bare = { id: 1, health: "gray", healthOverride: false, percentComplete: 0 };

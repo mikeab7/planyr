@@ -217,10 +217,21 @@ const INJECT = `<script>(function(){try{
     // its own never-touched-elsewhere task (touching "Manual Override Leaf" would corrupt the
     // pre-existing manualLeaf control's read, above). healthOverride:true here is now DEAD DATA —
     // exactly the shape his real stored plans still carry — and computeDisplayHealth must not read
-    // it: the rule engine reads only the dates/percentComplete, so it fires red on these regardless
-    // of the flag. Hand-set to a color the rule DISAGREES with (overdue, so r-overdue would fire
-    // red): green "Complete" now shows red "Needs Attn." from the very first render, no click of
-    // any kind — proving the flag has zero effect, not merely that "Automatic" still works.
+    // it at all (the READ is what's proven — see the amended assertions below, not the color).
+    // AMENDED (B785744, 2026-08-26) — the ORIGINAL comment here claimed the rule engine "fires
+    // red on these regardless" of a green stored health, because on 2026-08-25 it did (RULES-DECIDE:
+    // "red=needs attn. period. end of story"). The owner corrected that the very next day, verbatim:
+    // "UNLESS I click task complete, ... I CAN OVERRIDE IN THAT SCENARIO" — Complete is now a
+    // deliberate, visible, editable exception (an UNLESS Status is Complete clause), not something
+    // a firing rule can ever beat. So this task — overdue, marked Complete, percentComplete 40 (the
+    // measured live shape: marking Complete never touches percentComplete) — now correctly STAYS
+    // green "Complete" with no click. What's still proven, unchanged: the retired healthOverride
+    // flag is never read (this stays green because health "green" is read directly by the new
+    // rule's UNLESS, not because the dead flag did anything), and "Automatic" is gone from both
+    // menus. See gridNoClickOk/masterNoClickOk below.
+    // NOTE: no backticks in this comment block — it lives inside INJECT, a JS template literal, so
+    // a raw backtick here would terminate that outer string and corrupt the file (learned the hard
+    // way while writing this very comment).
     mk({id:981,name:"Grid Locked Task For Automatic Clear",start:iso(-20),end:iso(-15),duration:5,durValue:5,percentComplete:40,
         health:"green",healthOverride:true}),
     mk({id:980,name:"Master View Locked Leaf",start:iso(-20),end:iso(-15),duration:5,durValue:5,percentComplete:40,
@@ -773,14 +784,16 @@ for (const name of MASTER_UNLOCKED_NAMES) console.log(`${badgeReadMaster[name] =
 const badgeAbsenceMasterOk = [...MASTER_LOCKED_NAMES, ...MASTER_UNLOCKED_NAMES].every(n => badgeReadMaster[n] === 0);
 console.log("MasterView badge fully removed (the HealthDropMenu surface):", badgeAbsenceMasterOk);
 
-// ⛔ REWRITTEN (2026-08-25, B752848 owner correction) — this used to prove "Automatic" clears
-// healthOverride and hands a locked task back to the rule engine (B603840: the lock and its escape
-// hatch were both UNCHANGED, only the visual badge was removed). Both are now retired. What matters
-// now, on the SAME two purpose-built locked-and-overdue tasks (never touched by any earlier
-// scenario): a task that USED to be permanently green now shows its rule-decided red the instant the
-// page loads — no click, no menu, no "Automatic" of any kind — because nothing can lock it anymore.
-// And separately: the "Automatic" option itself must be GONE from both pickers' menus, not merely
-// inert, so a user is never shown a control that does nothing (that would be worse than no control).
+// ⛔ REWRITTEN (2026-08-25, B752848 owner correction; AMENDED AGAIN 2026-08-26, B785744) — this
+// used to prove "Automatic" clears healthOverride and hands a locked task back to the rule engine
+// (B603840: the lock and its escape hatch were both UNCHANGED, only the visual badge was removed).
+// Both are retired. The 2026-08-25 pass then proved a locked-green-and-overdue task flips to
+// rule-decided RED with no click — because that day's rule was "rules always win, full stop." The
+// owner corrected that one day later (verbatim: "UNLESS I click task complete... I CAN OVERRIDE IN
+// THAT SCENARIO"), so what's proven now, on the SAME two purpose-built tasks: a task marked Complete
+// STAYS Complete with no click (the exception is visible/editable, not a hardcode and not the dead
+// `healthOverride` flag reasserting itself) — and separately, the "Automatic" option itself is GONE
+// from both pickers' menus, not merely inert, so a user is never shown a control that does nothing.
 const GRID_AUTO_TASK = "Grid Locked Task For Automatic Clear";
 const MASTER_AUTO_TASK = "Master View Locked Leaf";
 
@@ -799,9 +812,9 @@ const gridNoClick = await page.evaluate((name) => {
   const r = statusCell.getBoundingClientRect();
   return { found: true, label: statusCell.textContent.trim(), clickX: r.left + r.width / 2, clickY: r.top + r.height / 2 };
 }, GRID_AUTO_TASK);
-const gridNoClickOk = !!(gridNoClick?.found && gridNoClick.label === "Needs Attn.");
-console.log("\n=== Grid: a previously-locked, overdue task reads its rule-decided colour with NO click at all (RULES-DECIDE) ===");
-console.log(`  found=${gridNoClick?.found} label="${gridNoClick?.label}"  (expect "Needs Attn." — was permanently "Complete" under the retired lock)`);
+const gridNoClickOk = !!(gridNoClick?.found && gridNoClick.label === "Complete");
+console.log("\n=== Grid: a task marked Complete stays Complete with NO click, even overdue (B785744 — Complete beats overdue) ===");
+console.log(`  found=${gridNoClick?.found} label="${gridNoClick?.label}"  (expect "Complete" — a firing rule can no longer override the Complete status)`);
 console.log(`${gridNoClickOk ? "  pass  " : "❌ FAIL "}  gridNoClickOk`);
 
 // Open the SAME picker and confirm "Automatic" no longer appears anywhere in it — the escape hatch
@@ -838,9 +851,9 @@ if (masterRowCount > 0) {
   await page.keyboard.press("Escape");
   await page.waitForTimeout(100);
 }
-const masterNoClickOk = !!(masterNoClick.found && masterNoClick.label === "Needs Attn.");
-console.log("\n=== MasterView: a previously-locked, overdue task reads its rule-decided colour with NO click at all (RULES-DECIDE) ===");
-console.log(`  found=${masterNoClick.found} label="${masterNoClick.label}"  (expect "Needs Attn." — was permanently "Complete" under the retired lock)`);
+const masterNoClickOk = !!(masterNoClick.found && masterNoClick.label === "Complete");
+console.log("\n=== MasterView: a task marked Complete stays Complete with NO click, even overdue (B785744 — Complete beats overdue) ===");
+console.log(`  found=${masterNoClick.found} label="${masterNoClick.label}"  (expect "Complete" — a firing rule can no longer override the Complete status)`);
 console.log(`${masterNoClickOk ? "  pass  " : "❌ FAIL "}  masterNoClickOk`);
 console.log(`${masterNoAutomaticOk ? "  pass  " : "❌ FAIL "}  masterNoAutomaticOk (the open HealthDropMenu contains no "Automatic" entry)`);
 
@@ -850,14 +863,14 @@ console.log("Every ORIGINAL automatic-health case (leaf/milestone) matches scree
 console.log("Every group-header-rule-rollup scenario is CORRECT on both surfaces (not just self-consistent):", rollupOk);
 console.log("percentComplete matches computed health, not raw (B575904 defect 2):", percentOk);
 console.log("Manual-override badge fully removed, Grid + MasterView (B603840):", badgeAbsenceGridOk && badgeAbsenceMasterOk);
-console.log("A previously-locked, overdue task shows red with NO click, both surfaces (RULES-DECIDE):", gridNoClickOk && masterNoClickOk);
+console.log("A task marked Complete stays Complete with NO click even when overdue, both surfaces (B785744):", gridNoClickOk && masterNoClickOk);
 console.log("'Automatic' is GONE from both menus, not just inert (RULES-DECIDE):", gridNoAutomaticOk && masterNoAutomaticOk);
 console.log("REAL ERRORS (" + real.length + "):"); real.slice(0,20).forEach(e=>console.log("  - "+e));
 console.log("\nScreenshots: " + OUT + "schedule-onscreen-grid.png, " + OUT + "schedule-onscreen-gantt.png, " + OUT + "schedule-export-popup.png");
 
 const pass = rendered && opened.ok && allFound && controlsOk && autoOk && rollupOk && collapsedSetOverrideOk && ganttOk && percentOk && dropdownDismissOk
   && badgeAbsenceGridOk && badgeAbsenceMasterOk && gridNoClickOk && masterNoClickOk && gridNoAutomaticOk && masterNoAutomaticOk && real.length === 0;
-console.log(pass ? "\n✅ PASS — every scenario's health colour is correct and matches on screen, in the export, and in the Gantt; RuleColorPicker dismiss behavior matches the rest of the app; the manual-override badge is gone from Grid and MasterView, a previously-locked overdue task now shows red with no click at all, and 'Automatic' is gone from both menus"
+console.log(pass ? "\n✅ PASS — every scenario's health colour is correct and matches on screen, in the export, and in the Gantt; RuleColorPicker dismiss behavior matches the rest of the app; the manual-override badge is gone from Grid and MasterView, a task marked Complete stays Complete with no click even when overdue, and 'Automatic' is gone from both menus"
                  : "\n❌ FAIL"
                    + (MUTATE_ROLLUP ? " (expected under --mutate-rollup if rollupOk/ganttOk flip and controls/autoOk stay green — that's the discriminating proof)" : "")
                    + (MUTATE_DROPDOWN ? " (expected under --mutate-dropdown if dropdownDismissOk flips and every other check stays green — that's the discriminating proof)" : ""));
