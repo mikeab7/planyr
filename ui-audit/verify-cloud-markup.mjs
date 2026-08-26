@@ -1,11 +1,17 @@
-/* Self-verification for the Cloud (revision-cloud) markup tool, Phase 1 (site-planner/markup).
+/* Self-verification for the Cloud (revision-cloud) markup tool (site-planner/markup).
  *
  * Checks, all DOM/geometry-based, logged-out (no auth):
  *   1. A pre-existing cloud markup renders as a scalloped <path> (not a plain polygon), with the
  *      default ink #2563EB (never #c2410c — the forbidden collision the spec calls out by name).
  *   2. Selecting it shows its vertex handles; deselecting hides them (B705200 house rule).
- *   3. Drawing a NEW cloud with the Polygon click-path gesture (click 4 points, close on the first
- *      dot) actually commits a `kind:"cloud"` markup with a real scalloped outline.
+ *   3. Drawing a NEW cloud with a click-path (click 4 points, close on the first dot) commits a
+ *      `kind:"cloud"` markup with a real scalloped outline.
+ *   3c/3d (B770896 — no mode picker any more; a click vs. a drag is inferred per-gesture, and
+ *      the owner's own framing, "the answer is nothing," is asserted directly): a single
+ *      continuous drag alone traces and closes a whole cloud on release (no menu, no mode to
+ *      arm first) · a click and a drag MIX into the same ring (click two vertices, drag a
+ *      freehand run onward from the last one, close on the first dot again) — confirmed by no
+ *      "Cloud ▾" options menu existing anywhere in the DOM.
  *   4. The Properties panel shows Cloud-specific metadata (Subject/Status/Arc size) for the
  *      selected cloud, and editing Subject updates it live.
  *   5. PDF/print export (window.__plannerExportSvg, same clone-the-live-SVG path the printed sheet
@@ -204,78 +210,66 @@ if (armedBefore.found) {
   const afterRedo = await page.evaluate(() => document.querySelectorAll('g[data-mk-kind="cloud"]').length);
   ok(`redo brings it back (${afterRedo}, expected 2)`, afterRedo === 2);
 
-  /* ---- 3c: Rectangle-drag mode ---- */
-  console.log("\n== 3c: Rectangle-drag cloud mode ==");
-  const cloudMenuArrow = await page.evaluate(() => {
-    const btns = [...document.querySelectorAll("button")];
-    const main = btns.find((b) => b.hasAttribute("aria-pressed") && (b.textContent || "").trim().startsWith("Cloud"));
-    if (!main) return null;
-    const arrow = main.parentElement && [...main.parentElement.querySelectorAll("button")].find((b) => (b.textContent || "").trim() === "▾");
-    if (!arrow) return null;
-    const r = arrow.getBoundingClientRect();
-    arrow.click();
-    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-  });
-  ok("found and opened the Cloud ▾ options menu", !!cloudMenuArrow);
-  if (cloudMenuArrow) {
-    await page.waitForTimeout(200);
-    const clickedRect = await page.evaluate(() => {
-      const btn = [...document.querySelectorAll("button")].find((b) => (b.textContent || "").trim() === "Drag a box");
-      if (!btn) return false;
-      btn.click();
-      return true;
-    });
-    ok("selected 'Drag a box' (Rectangle) mode from Cloud ▾", clickedRect);
-    await page.keyboard.press("Escape"); // close the menu
-    await page.waitForTimeout(200);
-    // Re-arm the tool (opening the menu may have left Select armed) and drag a box.
-    await page.evaluate(() => {
-      const btn = [...document.querySelectorAll("button")].find((b) => b.hasAttribute("aria-pressed") && (b.textContent || "").trim().startsWith("Cloud"));
-      if (btn) btn.click();
-    });
-    await page.waitForTimeout(200);
-    await page.mouse.move(900, 500);
-    await page.mouse.down();
-    await page.mouse.move(1050, 620, { steps: 8 });
-    await page.mouse.up();
-    await page.waitForTimeout(400);
-    const afterRectDraw = await page.evaluate(() => document.querySelectorAll('g[data-mk-kind="cloud"]').length);
-    ok(`dragging a box commits a THIRD cloud (${afterRectDraw}, expected 3)`, afterRectDraw === 3);
-  }
-
-  /* ---- 3d: Freehand mode ---- */
-  console.log("\n== 3d: Freehand cloud mode ==");
-  const setFreehand = await page.evaluate(() => {
-    const btns = [...document.querySelectorAll("button")];
-    const main = btns.find((b) => b.hasAttribute("aria-pressed") && (b.textContent || "").trim().startsWith("Cloud"));
-    const arrowBtn = main && main.parentElement && [...main.parentElement.querySelectorAll("button")].find((b) => (b.textContent || "").trim() === "▾");
-    if (!arrowBtn) return false;
-    arrowBtn.click();
-    return true;
-  });
-  ok("opened Cloud ▾ again for Freehand", setFreehand);
-  await page.waitForTimeout(200);
-  await page.evaluate(() => {
-    const btn = [...document.querySelectorAll("button")].find((b) => (b.textContent || "").trim() === "Freehand");
-    if (btn) btn.click();
-  });
-  await page.keyboard.press("Escape");
-  await page.waitForTimeout(200);
-  await page.evaluate(() => {
+  /* ---- 3c (B770896): a single continuous drag alone closes a whole cloud, with NO mode picker —
+     there is no "Cloud ▾" menu any more (owner: "what even is the difference between freehand and
+     click point, the answer is nothing" — a click vs. a drag is now inferred per-gesture). ---- */
+  console.log("\n== 3c: a single drag alone traces and closes a whole cloud (no mode picker) ==");
+  const armCloud = () => page.evaluate(() => {
     const btn = [...document.querySelectorAll("button")].find((b) => b.hasAttribute("aria-pressed") && (b.textContent || "").trim().startsWith("Cloud"));
     if (btn) btn.click();
+    return !!btn;
   });
-  await page.waitForTimeout(200);
-  await page.mouse.move(300, 600);
+  ok("re-armed the Cloud tool for the drag test (no ▾ menu exists any more)", await armCloud());
+  ok("no leftover Cloud ▾ options menu exists in the DOM", !(await page.evaluate(() => [...document.querySelectorAll("button")].some((b) => (b.textContent || "").trim() === "▾" && b.getAttribute("aria-label") === "Cloud options"))));
+  await page.waitForTimeout(150);
+  // A loop that returns near its own start, in one press-drag-release — same one-gesture UX the old
+  // dedicated Freehand mode gave, now with no mode to pick first.
+  const loopCx = 900, loopCy = 500, loopR = 70;
+  await page.mouse.move(loopCx + loopR, loopCy);
   await page.mouse.down();
-  for (const [dx, dy] of [[40, -20], [80, 10], [110, 60], [70, 90], [10, 70], [-30, 20]]) {
-    await page.mouse.move(300 + dx, 600 + dy, { steps: 3 });
-    await page.waitForTimeout(20);
+  const steps = 24;
+  for (let i = 1; i <= steps; i++) {
+    const a = (i / steps) * 2 * Math.PI;
+    await page.mouse.move(loopCx + loopR * Math.cos(a), loopCy + loopR * Math.sin(a), { steps: 2 });
   }
   await page.mouse.up();
   await page.waitForTimeout(400);
-  const afterFreehand = await page.evaluate(() => document.querySelectorAll('g[data-mk-kind="cloud"]').length);
-  ok(`a freehand drag commits a FOURTH cloud (${afterFreehand}, expected 4)`, afterFreehand === 4);
+  const afterDragLoop = await page.evaluate(() => document.querySelectorAll('g[data-mk-kind="cloud"]').length);
+  ok(`a single drag loop commits a THIRD cloud on release (${afterDragLoop}, expected 3)`, afterDragLoop === 3);
+  const toolAfterDragLoop = await page.evaluate(() => {
+    const btn = [...document.querySelectorAll("button")].find((b) => b.hasAttribute("aria-pressed") && (b.textContent || "").trim().startsWith("Cloud"));
+    return btn ? btn.getAttribute("aria-pressed") : null;
+  });
+  ok("the tool disarms back to Select after the drag closes on its own", toolAfterDragLoop === "false");
+
+  /* ---- 3d (B770896): click and drag MIX in one path — a click places a vertex and continues the
+     path, a drag traces a freehand run onto the SAME ring, exactly what the owner asked for. ---- */
+  console.log("\n== 3d: a click and a drag mix into ONE cloud ring ==");
+  ok("re-armed the Cloud tool for the mixed-gesture test", await armCloud());
+  await page.waitForTimeout(150);
+  await page.mouse.click(300, 550);      // vertex 1 — a plain click
+  await page.waitForTimeout(120);
+  await page.mouse.click(420, 500);      // vertex 2 — a plain click, continuing the path
+  await page.waitForTimeout(120);
+  await page.mouse.move(420, 500);
+  await page.mouse.down();               // now DRAG a freehand run onward from the last click point
+  for (const [dx, dy] of [[40, 60], [20, 120], [-40, 150]]) {
+    await page.mouse.move(420 + dx, 500 + dy, { steps: 3 });
+    await page.waitForTimeout(15);
+  }
+  await page.mouse.up();
+  await page.waitForTimeout(250);
+  await page.mouse.click(300, 550);      // close by clicking back on the first dot
+  await page.waitForTimeout(400);
+  const afterMixed = await page.evaluate(() => document.querySelectorAll('g[data-mk-kind="cloud"]').length);
+  ok(`the click+drag mix commits a FOURTH cloud (${afterMixed}, expected 4)`, afterMixed === 4);
+  const mixedVtxCount = await page.evaluate(() => {
+    const gs = [...document.querySelectorAll('g[data-mk-kind="cloud"]')];
+    const g = gs[gs.length - 1];
+    const path = g.querySelector("path[stroke]");
+    return (path.getAttribute("d").match(/A /g) || []).length; // one scallop arc per ring edge
+  });
+  ok(`the mixed ring has more than the 2 click vertices alone would give (${mixedVtxCount} edges — the drag contributed real points)`, mixedVtxCount > 3);
   await page.screenshot({ path: OUT + "cloud-all-modes.png" });
 
   /* ---- 3e: delete a cloud ---- */

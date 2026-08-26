@@ -212,7 +212,7 @@ const DRAG_STARTS = [...SP.matchAll(/^[ \t]*drag\.current = \{ mode: "(\w+)"([^\
  * A slop gate on these would change what they mean (a click-to-place draw, a tap-to-clear pan),
  * so they are deliberately out of scope — and named here so the exemption is a decision on the
  * record rather than an oversight. */
-const UNGATED = new Set(["pan", "draw", "mkDraw", "mkFreehand", "marquee"]);
+const UNGATED = new Set(["pan", "draw", "mkDraw", "mkCloudGesture", "marquee"]);
 
 describe("NEW-1 (wiring): every drag that moves existing geometry carries the gate", () => {
   it("the planner has drag starts to check at all", () => {
