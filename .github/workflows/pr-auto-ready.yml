@@ -1,4 +1,5 @@
 name: PR auto-ready
+# Trivial no-op touch for V438336's throwaway-PR live re-test (B793696) — no behavior change.
 
 # STOP PRs PARKING AS DRAFTS (B781760, "NEW-1" in the filing brief). The Claude Code web
 # session harness that dispatches sessions into this repo defaults every new pull request
