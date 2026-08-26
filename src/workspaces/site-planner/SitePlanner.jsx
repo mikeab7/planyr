@@ -448,6 +448,7 @@ import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom, FAB_RESER
 import { scaleLabel, frameFootprintForScale, checkScaleFits } from "./lib/printScale.js";
 import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab } from "./lib/buildingProps.js";
 import { createHistoryStack } from "./lib/history.js";
+import { describeHistoryStep, historyRunLabel } from "./lib/historyLabel.js";
 /* NEW-1 — putting an unlocated plan on the earth, and adjusting where it sits (the "GIS is down"
  * tranche). Pure + unit-tested; `origin` is state below and this module owns the geometry rules. */
 import { normalizeOrigin, sameOrigin, originAtOffset, rotPt } from "./lib/sitePlacement.js";
@@ -2051,7 +2052,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // trigger so AnchoredMenu can position the flyout against it (see AnchoredMenu.jsx).
   const boundaryAnchor = useRef(null), buildingAnchor = useRef(null), parkingAnchor = useRef(null),
     roadAnchor = useRef(null), measureAnchor = useRef(null), easeAnchor = useRef(null), easeTypeAnchor = useRef(null),
-    planAnchor = useRef(null), exportAnchor = useRef(null), addParcelAnchor = useRef(null);
+    planAnchor = useRef(null), exportAnchor = useRef(null), addParcelAnchor = useRef(null),
+    undoAnchor = useRef(null), redoAnchor = useRef(null);
   const [versionsOpen, setVersionsOpen] = useState(false); // version-history (automatic backups) dialog
   const [versionList, setVersionList] = useState([]);    // [{at, buildings, sig}] snapshots for this plan
   const [leftPanel, setLeftPanel] = useState(null);      // which left-rail menu is DOCKED: parcel|yield|analysis|references|standards|null (B656: props is a companion, not a tab)
@@ -5222,6 +5224,47 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // test/opEnvelopeSeedCoverage.test.js.
   const undo = () => { const prev = histRef.current.undo(stateRef.current); if (prev) { opTrackerRef.current.beginOperation("edit"); applySnapshot(prev); touchHist(); } };
   const redo = () => { const next = histRef.current.redo(stateRef.current); if (next) { opTrackerRef.current.beginOperation("edit"); applySnapshot(next); touchHist(); } };
+
+  /* ⛔ NEW-2 (B648353) — THE HISTORY DROPDOWN: a caret beside Undo/Redo lists recent actions
+   * (newest first, real names via lib/historyLabel.js's snapshot diff — see that module's header
+   * for why this is not 190 hand-labeled call sites), hovering highlights a contiguous run from the
+   * top, and clicking undoes/redoes that whole run as ONE gesture. Rows are computed fresh at OPEN
+   * time (never a useMemo off `stateRef.current` — that's a ref, mutating it doesn't invalidate a
+   * memo, so a stale list would survive past the edit that should have changed it) into local
+   * component state, so what's shown can't drift from what's live once the menu is open.
+   * `undoN`/`redoN` (history.js) do the multi-step walk internally and return one target snapshot —
+   * exactly one `applySnapshot`/flush for the whole run, matching how a paste or a multi-object
+   * delete already push exactly one frame for the whole action. */
+  const [undoMenuOpen, setUndoMenuOpen] = useState(false);
+  const [undoRows, setUndoRows] = useState([]);     // labels, newest first
+  const [undoHover, setUndoHover] = useState(0);     // contiguous run highlighted: rows [0..undoHover]
+  const [redoMenuOpen, setRedoMenuOpen] = useState(false);
+  const [redoRows, setRedoRows] = useState([]);
+  const [redoHover, setRedoHover] = useState(0);
+  const openUndoMenu = () => {
+    if (!canUndoNow) return;
+    const steps = histRef.current.recentUndoSteps(stateRef.current, 20);
+    setUndoRows(steps.map((s) => describeHistoryStep(s.before, s.after)));
+    setUndoHover(0);
+    setUndoMenuOpen(true);
+  };
+  const openRedoMenu = () => {
+    if (!histRef.current.canRedo()) return;
+    const steps = histRef.current.recentRedoSteps(stateRef.current, 20);
+    setRedoRows(steps.map((s) => describeHistoryStep(s.before, s.after)));
+    setRedoHover(0);
+    setRedoMenuOpen(true);
+  };
+  const undoRun = (n) => {
+    const target = histRef.current.undoN(stateRef.current, n);
+    setUndoMenuOpen(false);
+    if (target) { opTrackerRef.current.beginOperation("edit"); applySnapshot(target); touchHist(); }
+  };
+  const redoRun = (n) => {
+    const target = histRef.current.redoN(stateRef.current, n);
+    setRedoMenuOpen(false);
+    if (target) { opTrackerRef.current.beginOperation("edit"); applySnapshot(target); touchHist(); }
+  };
 
   /* ── NEW-1 / NEW-2 — PLACEMENT + DEED PROMOTION, loaded on demand ────────────────────────────
    *
@@ -17192,6 +17235,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      exactly like every other pair of groups on this bar. See `test/toolbarChromeSystem.test.js`. */
   const TB_H = dIcon.height; // 30 — shared height for every top-right toolbar control
   const TB_R = dGhost.borderRadius; // 8 — shared corner radius for every top-right toolbar control
+  // NEW-2 (B648353) — the small history-dropdown caret riding beside Undo/Redo, split-button style:
+  // same height as its main button, half the width, flat inner corner where the two meet (so the
+  // pair reads as one control), a hairline divider, and the caret glyph muted exactly like every
+  // other disclosure caret on this bar (File's own "▾", `railHint`).
+  const dCaret = { ...dGhost, width: 15, height: TB_H, padding: 0, display: "grid", placeItems: "center",
+    borderRadius: `0 ${TB_R}px ${TB_R}px 0`, borderLeft: `1px solid ${PAL.chromeLine}` };
   // NEW-1 — the bottom-center canvas toast chrome. The pill geometry and its two button
   // treatments were copied inline at every toast site (the pob/route/warn/deed-align pill, the
   // overlay-calibration pill, and now the parcel-select hint), so each new message re-shipped the
@@ -18948,18 +18997,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         </div>
       </div>
       {vSep}
-      {/* History group — Undo / Redo, rebuilt to the conventional curved-arrow pair (the shape
-          Office / Google / Adobe all share, not proprietary artwork — see components/icons.jsx)
-          instead of the old ↶ / ↷ text glyphs, which render at inconsistent weights across
-          platform fonts. Undo and Redo are the SAME MDI path pair, mirrored point-for-point, so
-          they can never drift out of visual sync with each other.
+      {/* History group — Undo / Redo. B648352: both icons are drawn in the app's own stroke idiom
+          (fill:none, round cap/join — matching ToolIcon/RailIcon) rather than filled Material
+          glyphs; see components/icons.jsx's header for the measured reason and what's still
+          filled/reported (Zoom-to-fit, Layers — not fixed here, on purpose).
+          B648353 — a caret beside each opens a dropdown of recent actions (the Excel Quick Access
+          Toolbar shape Michael asked for): newest first, real names from lib/historyLabel.js's
+          snapshot diff, hover highlights a contiguous run from the top, click undoes/redoes that
+          whole run as one gesture. See openUndoMenu/openRedoMenu/undoRun/redoRun above.
           ⛔ B755808 — NO FILLED TRAY. This group used to sit inside its own filled
           `background: var(--hover-chrome)` pill, which is the exact token a disabled icon fades
           toward — so a disabled Undo/Redo read as one indistinct grey smear instead of two clearly
-          off controls. The container never carries the disabled treatment; only the glyph does
-          (`.tb-icon-btn:disabled`, fill="currentColor" + opacity). The pair now sits bare, exactly
-          like the Zoom-to-fit button beside it, grouped only by the `vSep` dividers on either side —
-          one chrome language for the whole bar, not a fourth invented for this one pair. */}
+          off controls. The container never carries the disabled treatment; only the glyph does.
+          The pair now sits bare, exactly like the Zoom-to-fit button beside it, grouped only by
+          the `vSep` dividers on either side — one chrome language for the whole bar, not a fourth
+          invented for this one pair. */}
       <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
         {/* ⛔ NEW-5 — UNDO IS ASKED ABOUT THE LIVE STATE, not merely about the stack's depth: a
             plain selection click pushed a frame and armed this button while the plan was
@@ -18969,9 +19021,40 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             And BOTH buttons carry `aria-disabled` beside `disabled`: a disabled <button> has no
             aria-disabled attribute at all, so a checker reading that attribute got null and
             reported the empty Redo control as ENABLED — a mislabelled control, not a state bug,
-            and it cost a real investigation. */}
-        <button className="dbtn tb-icon-btn" style={dIcon} onClick={undo} disabled={!canUndoNow} aria-disabled={!canUndoNow} aria-label="Undo" title="Undo (Ctrl+Z)"><UndoIcon size={20} /></button>
-        <button className="dbtn tb-icon-btn" style={dIcon} onClick={redo} disabled={!histRef.current.canRedo()} aria-disabled={!histRef.current.canRedo()} aria-label="Redo" title="Redo (Ctrl+Shift+Z)"><RedoIcon size={20} /></button>
+            and it cost a real investigation. The caret beside each mirrors the same `disabled` so
+            the button and its caret grey out together, never independently. */}
+        <div ref={undoAnchor} style={{ display: "flex" }}>
+          <button className="dbtn" style={{ ...dIcon, borderRadius: `${TB_R}px 0 0 ${TB_R}px` }} onClick={undo} disabled={!canUndoNow} aria-disabled={!canUndoNow} aria-label="Undo" title="Undo (Ctrl+Z)"><UndoIcon /></button>
+          <button className="dbtn" style={dCaret} onClick={() => (undoMenuOpen ? setUndoMenuOpen(false) : openUndoMenu())}
+            disabled={!canUndoNow} aria-disabled={!canUndoNow} aria-haspopup="menu" aria-expanded={undoMenuOpen}
+            aria-label="Recent actions to undo" title="Recent actions to undo">
+            <span aria-hidden="true" style={{ fontSize: 9, lineHeight: 1 }}>▾</span>
+          </button>
+        </div>
+        <AnchoredMenu open={undoMenuOpen} onClose={() => setUndoMenuOpen(false)} anchorRef={undoAnchor} placement="below-left" gap={4} width={230} panelStyle={menuPanel}>
+          {undoRows.map((label, i) => (
+            <button key={i} style={menuItem(i <= undoHover)} data-hist-hi={i <= undoHover ? "1" : undefined} onMouseEnter={() => setUndoHover(i)} onFocus={() => setUndoHover(i)} onClick={() => undoRun(i + 1)}>{label}</button>
+          ))}
+          <div style={{ borderTop: `1px solid ${PAL.chromeLine}`, marginTop: 4, padding: "7px 10px 3px", fontSize: 11, fontWeight: 650, color: PAL.chromeMuted, textTransform: "uppercase", letterSpacing: "0.02em" }}>
+            {historyRunLabel("Undo", undoHover + 1)}
+          </div>
+        </AnchoredMenu>
+        <div ref={redoAnchor} style={{ display: "flex" }}>
+          <button className="dbtn" style={{ ...dIcon, borderRadius: `${TB_R}px 0 0 ${TB_R}px` }} onClick={redo} disabled={!histRef.current.canRedo()} aria-disabled={!histRef.current.canRedo()} aria-label="Redo" title="Redo (Ctrl+Shift+Z)"><RedoIcon /></button>
+          <button className="dbtn" style={dCaret} onClick={() => (redoMenuOpen ? setRedoMenuOpen(false) : openRedoMenu())}
+            disabled={!histRef.current.canRedo()} aria-disabled={!histRef.current.canRedo()} aria-haspopup="menu" aria-expanded={redoMenuOpen}
+            aria-label="Recent actions to redo" title="Recent actions to redo">
+            <span aria-hidden="true" style={{ fontSize: 9, lineHeight: 1 }}>▾</span>
+          </button>
+        </div>
+        <AnchoredMenu open={redoMenuOpen} onClose={() => setRedoMenuOpen(false)} anchorRef={redoAnchor} placement="below-left" gap={4} width={230} panelStyle={menuPanel}>
+          {redoRows.map((label, i) => (
+            <button key={i} style={menuItem(i <= redoHover)} data-hist-hi={i <= redoHover ? "1" : undefined} onMouseEnter={() => setRedoHover(i)} onFocus={() => setRedoHover(i)} onClick={() => redoRun(i + 1)}>{label}</button>
+          ))}
+          <div style={{ borderTop: `1px solid ${PAL.chromeLine}`, marginTop: 4, padding: "7px 10px 3px", fontSize: 11, fontWeight: 650, color: PAL.chromeMuted, textTransform: "uppercase", letterSpacing: "0.02em" }}>
+            {historyRunLabel("Redo", redoHover + 1)}
+          </div>
+        </AnchoredMenu>
       </div>
       {vSep}
       {/* View group — Zoom to fit: four arrows pointing OUTWARD to the corners. Deliberately not a

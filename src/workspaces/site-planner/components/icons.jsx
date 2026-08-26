@@ -136,33 +136,48 @@ export const CloseXIcon = ({ size = 12 }) => (
   </svg>
 );
 
-/* ── TOOLBAR PASS (B727504) — Undo / Redo / Zoom-to-fit / Layers, rebuilt to standard toolbar
- * conventions instead of ad-hoc text glyphs (↶ ↷ ⤢ ❖). Owner-approved spec:
+/* ── TOOLBAR PASS (B727504) — Zoom-to-fit / Layers, rebuilt to standard toolbar conventions
+ * instead of ad-hoc text glyphs (⤢ ❖). Owner-approved spec:
  *   - shapes are the shared Office/Google/Adobe convention, not anyone's proprietary artwork —
- *     these four paths are the actual Material Design Icons (Pictogrammers MDI) vectors, which
+ *     these paths are the actual Material Design Icons (Pictogrammers MDI) vectors, which
  *     are Apache-2.0 (free for commercial use, no attribution required); Microsoft's Fluent
  *     artwork files are never lifted.
  *   - fill="currentColor" on a single path (not the stroke idiom above) so the same path serves
  *     both themes with no per-theme variant.
- *   - Undo/Redo are drawn from ONE shared path pair that MDI itself ships as an exact mirror
- *     (verified point-for-point against the real MDI source: reflecting Undo's path across the
- *     viewBox's vertical centerline reproduces Redo's path exactly) — "if one is filled, both are
- *     filled" holds by construction, not by convention.
+ *
+ * ⛔ B648352 — UNDO/REDO MOVED OUT OF THIS FILLED FAMILY AND BACK INTO THE APP'S OWN STROKE IDIOM
+ * (below), because they were the only FILLED glyphs in an otherwise all-stroked icon language —
+ * every other icon in this file and in SitePlanner.jsx's ToolIcon/RailIcon families is
+ * `fill="none" stroke="currentColor"`, and a filled MDI glyph reports `stroke-linecap: butt` /
+ * `stroke-linejoin: miter` (it has neither — Material's icons are filled shapes, not strokes),
+ * which read as visibly heavier/sharper than every neighbouring control (owner: "can we get the
+ * undo and redo buttons to look more professional"). Zoom-to-fit and Layers below are UNCHANGED —
+ * still filled MDI, same as they've always been — this is a known, reported inconsistency
+ * (B648352's own item), not fixed here: fixing all four at once was more than the owner asked for,
+ * and a toolbar-wide icon-family pass is real, separate work.
  */
 
-// Undo — a counter-clockwise curved arrow. MDI "undo".
-export const UndoIcon = ({ size = 20 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
+// Undo — a curved return arrow, drawn in the app's own stroke idiom (fill:none, round cap/join —
+// matching SitePlanner's ToolIcon/RailIcon families) rather than a filled Material glyph. Redo is
+// the EXACT horizontal mirror (viewBox is 0–24, so redo's coordinates are undo's reflected through
+// x=12) — kept manually in sync rather than computed, so "if one changes, mirror the other" stays
+// a two-line diff to review, not a runtime transform to trust.
+export const UndoIcon = ({ size = 15 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
     style={{ flex: "none", display: "block" }}>
-    <path d="M12.5,8C9.85,8 7.45,9 5.6,10.6L2,7V16H11L7.38,12.38C8.77,11.22 10.54,10.5 12.5,10.5C16.04,10.5 19.05,12.81 20.1,16L22.47,15.22C21.08,11.03 17.15,8 12.5,8Z" />
+    <path d="M9 8 5 12 9 16" />
+    <path d="M5 12h9a5.5 5.5 0 1 1 0 11" />
   </svg>
 );
 
-// Redo — the exact horizontal mirror of UndoIcon's path. MDI "redo".
-export const RedoIcon = ({ size = 20 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
+// Redo — the exact horizontal mirror of UndoIcon's path (x → 24 − x throughout).
+export const RedoIcon = ({ size = 15 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
     style={{ flex: "none", display: "block" }}>
-    <path d="M18.4,10.6C16.55,9 14.15,8 11.5,8C6.85,8 2.92,11.03 1.54,15.22L3.9,16C4.95,12.81 7.95,10.5 11.5,10.5C13.45,10.5 15.23,11.22 16.62,12.38L13,16H22V7L18.4,10.6Z" />
+    <path d="M15 8 19 12 15 16" />
+    <path d="M19 12h-9a5.5 5.5 0 1 0 0 11" />
   </svg>
 );
 
