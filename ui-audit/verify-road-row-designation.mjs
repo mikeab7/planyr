@@ -57,6 +57,46 @@ const readSite = () => page.evaluate(() => {
   return s;
 });
 
+// ---- 0. B786112 — the two-ROW-numbers wording bug, Michael's OWN literal repro: the base
+// boulevard preset ALONE (68′ band total, no parkways), Right-of-way width set to 100. Before the
+// fix this rendered "Total ROW width 68′" directly above "Designated ROW 100′" — the word ROW
+// against two different numbers six inches apart. Checked in its own dialog session (opened, then
+// cancelled) so it doesn't disturb the exact-equality forceCommit repro that follows. ------------
+await page.locator('[aria-label="Road presets"]').click();
+await page.waitForTimeout(200);
+await page.getByRole("button", { name: /Design cross-section…/ }).click();
+await page.waitForTimeout(400);
+await page.getByRole("button", { name: /^4-lane divided boulevard$/ }).click();
+await page.waitForTimeout(300);
+{
+  const preText = await page.locator("body").innerText();
+  check(/Modeled band total\s*68′/.test(preText), "before any ROW is designated, the band-total line reads \"Modeled band total 68′\" (not \"Total ROW width\")", preText.match(/Modeled band total[^\n]*/)?.[0] || "line not found");
+  check(!/Total ROW width/.test(preText), "the old contradictory \"Total ROW width\" label is gone from the dialog entirely");
+
+  const wordingRowInput = page.locator('[data-testid="road-xsection-row"]');
+  await wordingRowInput.click();
+  await page.keyboard.press("Control+A");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.type("100");
+  await wordingRowInput.blur();
+  await page.waitForTimeout(300);
+  const postText = await page.locator("body").innerText();
+  check(/Modeled band total\s*68′/.test(postText), "B786112 fix: with a 100′ ROW designated, the band-total line still correctly reads 68′ and is no longer labelled ROW", postText.match(/Modeled band total[^\n]*/)?.[0] || "line not found");
+  check(/Designated ROW\s*100′/.test(postText), "the designated figure reads 100′", postText.match(/Designated ROW[^\n]*/)?.[0]);
+  check(!/Total ROW width/.test(postText), "B786112 fix: \"Total ROW width\" never reappears once a ROW is designated — the exact reported contradiction (\"Total ROW width 68′\" beside \"Designated ROW 100′\") cannot occur, because the first label no longer exists");
+  // The word "ROW" must label exactly one NUMBER at a time. "ROW margin" is a distinct, clearly
+  // subordinate concept (the leftover strip), not a second competing total — so this asserts there
+  // is no OTHER line claiming to be a road/total figure under the bare word "ROW".
+  const rowLines = postText.split("\n").filter((l) => /\bROW\b/.test(l) && !/R\.O\.W\./.test(l));
+  const distinctRowNumbers = new Set(rowLines.map((l) => (l.match(/(\d+(?:\.\d+)?)′/) || [])[1]).filter(Boolean));
+  check(rowLines.every((l) => /Designated ROW|ROW margin/.test(l)), "every remaining line containing the word \"ROW\" is either \"Designated ROW\" or \"ROW margin\" — nothing else claims the word", JSON.stringify(rowLines));
+  console.log("  (ROW-labelled lines: " + JSON.stringify(rowLines) + ", numbers: " + JSON.stringify([...distinctRowNumbers]) + ")");
+
+  await page.screenshot({ path: OUT + "06-wording-fix-asymmetric.png" });
+  await page.getByRole("button", { name: /^Cancel$/ }).click();
+  await page.waitForTimeout(300);
+}
+
 // ---- 1. Design a boulevard + two 16′ parkway bands (one each side) in the Road tool flyout -------
 await page.locator('[aria-label="Road presets"]').click();
 await page.waitForTimeout(200);
@@ -95,7 +135,7 @@ check(bandRowCount === 7, "the boulevard + two 16′ parkway bands (one each sid
 // ---- 2. Designate the ROW at exactly the band total (68 + 16 + 16 = 100) — the exact-equality
 //         edge case that exposed the forceCommit bug in BOTH the dialog and Properties fields -------
 const preTotal = await page.locator("body").innerText();
-check(/Total ROW width\s*100/.test(preTotal), "the modeled band total is exactly 100′ before anything is designated", preTotal.match(/Total ROW width[^\n]*/)?.[0]);
+check(/Modeled band total\s*100/.test(preTotal), "the modeled band total is exactly 100′ before anything is designated", preTotal.match(/Modeled band total[^\n]*/)?.[0]);
 check(!/Designated ROW/.test(preTotal), "nothing is designated yet (no \"Designated ROW\" line)");
 
 const rowInput = page.locator('[data-testid="road-xsection-row"]');
