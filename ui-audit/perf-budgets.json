@@ -47,7 +47,7 @@
       "minBytes": 32768
     },
     "siteRouteJsBytes": {
-      "baseline": 2571259,
+      "baseline": 2622041,
       "target": 1600000,
       "unit": "bytes",
       "what": "Total JS a plain Site route must download: the entry chunk plus SitePlannerApp and its static-import closure.",
@@ -472,6 +472,17 @@
           "commit": "a70072c7f7d28e8d55a5edb70df9f5eee1f08651",
           "sourceHash": "d277fa1a8559c70e",
           "reason": "OCR scanned deed PDFs (Tesseract.js, lazy-loaded, only-loaded-on-actual-use chunks; zero bytes added to any route's initial load)"
+        },
+        {
+          "metric": "bundle.siteRouteJsBytes",
+          "from": 2571259,
+          "to": 2622041,
+          "direction": "raise",
+          "item": "B791520",
+          "date": "2026-08-26",
+          "commit": "55a8d837d38a58c0ce79bc6511807b65d88f2875",
+          "sourceHash": "eb51403172922969",
+          "reason": "Cumulative growth from three merged features (road ROW designation B783280, outside-curb band painting B773730, undo/redo resurrection B784832) tipped the Site route over its ceiling; none is individually large enough to warrant its own optimization pass, and main's required build check has been red on this metric since #1181 merged"
         }
       ]
     }

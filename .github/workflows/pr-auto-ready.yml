@@ -1,0 +1,131 @@
+name: PR auto-ready
+
+# STOP PRs PARKING AS DRAFTS (B781760, "NEW-1" in the filing brief). The Claude Code web
+# session harness that dispatches sessions into this repo defaults every new pull request
+# to draft — a harness-level default that lives outside this repo and that nobody here can
+# edit. This repo's own policy (see "'Commit' means take it LIVE" above) is the opposite:
+# a session that says "commit" is expected to drive the change all the way to merged. The
+# two defaults collide, and a text rule in CLAUDE.md cannot reliably win that collision
+# against a harness default a session never reads at exactly the right moment — #1157,
+# #1162, #1166 and #1180 all sat as green, conflict-free, forever-draft PRs waiting for a
+# button nobody was going to press. So the override is mechanical, not another sentence:
+# every pull request from a claude/* branch is marked ready for review and armed for
+# squash auto-merge automatically, the moment GitHub actually runs this workflow for it
+# (see the TOKEN / TRIGGER note below for the one thing that still has to happen first).
+#
+# THE ONE SANCTIONED WAY TO ASK FOR THE OWNER'S EYES FIRST: apply the "hold" label to the
+# PR (or put a `<!-- keep-draft -->` HTML comment anywhere in its body) before this
+# workflow's next run. Either one is a standing skip, not a one-time skip — this workflow
+# re-checks on every opened/reopened/synchronize event, so a "hold" PR stays parked exactly
+# as long as the label stays on it.
+#
+# THIS WORKFLOW ONLY *ENABLES* AUTO-MERGE. It never merges directly, and it never touches
+# branch protection — GitHub still refuses to merge until the required "build" check
+# (.github/required-checks.json) reports green on the head commit. A red or pending build
+# leaves the PR exactly where auto-merge already leaves every other armed PR: waiting.
+#
+# TOKEN / TRIGGER NOTE, so the next session doesn't have to re-derive this. The built-in
+# GITHUB_TOKEN is enough — markPullRequestReadyForReview and enablePullRequestAutoMerge are
+# PR-metadata mutations, not git pushes, so they don't need to (and don't) retrigger the
+# "build" check themselves; build.yml already runs on the same pull_request event
+# (opened/synchronize/reopened) this workflow reacts to, draft or not (build.yml carries no
+# draft filter). What this workflow does NOT fix is the pre-existing, already-documented gap
+# right above this file in CLAUDE.md: a PR *opened* via the Claude Code automation's own app
+# token often never fires that first pull_request "opened" trigger at all, for either
+# workflow. The routine nudge commit a shipping session already pushes (a real git push,
+# firing "synchronize") is what makes both this workflow AND the "build" check report — this
+# workflow rides the exact same fix, it does not need a second one. If GITHUB_TOKEN is ever
+# found not to fire reliably even on "synchronize", switch to a repository PAT stored as a
+# secret and update this note — do not reach for pull_request_target, since this workflow
+# never needs to run with base-branch privileges over untrusted fork content (this is a
+# private repo with no forks).
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+  workflow_dispatch:
+
+permissions:
+  pull-requests: write
+  issues: write
+  contents: read
+
+jobs:
+  # Idempotent and self-healing: runs on every trigger (cheap, no-op once the label exists),
+  # so the label can never go missing for long even if someone deletes it by hand. Also the
+  # one piece of this workflow worth invoking directly via workflow_dispatch, to create the
+  # label immediately rather than waiting on the next claude/* PR.
+  ensure-hold-label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure the "hold" label exists
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner, repo = context.repo.repo;
+            try {
+              await github.rest.issues.createLabel({
+                owner,
+                repo,
+                name: "hold",
+                color: "d93f0b",
+                description: "Leave this PR as a draft — the owner should look at it before it merges.",
+              });
+              core.info('Created the "hold" label.');
+            } catch (err) {
+              if (err.status === 422) {
+                core.info('"hold" label already exists — nothing to do.');
+              } else {
+                throw err;
+              }
+            }
+
+  auto-ready:
+    if: github.event_name == 'pull_request' && startsWith(github.event.pull_request.head.ref, 'claude/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark ready for review + arm squash auto-merge (unless held)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const held = (pr.labels || []).some((l) => (l.name || "").toLowerCase() === "hold");
+            const keepDraft = /<!--\s*keep-draft\s*-->/i.test(pr.body || "");
+            if (held || keepDraft) {
+              core.info(
+                `Leaving #${pr.number} as-is — ${held ? '"hold" label present' : "keep-draft marker in body"}.`
+              );
+              return;
+            }
+            if (pr.draft) {
+              await github.graphql(
+                `mutation($id: ID!) {
+                  markPullRequestReadyForReview(input: { pullRequestId: $id }) {
+                    pullRequest { id isDraft }
+                  }
+                }`,
+                { id: pr.node_id }
+              );
+              core.info(`Marked #${pr.number} ready for review.`);
+            }
+            if (pr.auto_merge) {
+              core.info(`#${pr.number} already has auto-merge armed — nothing to do.`);
+              return;
+            }
+            try {
+              await github.graphql(
+                `mutation($id: ID!) {
+                  enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH }) {
+                    pullRequest { id autoMergeRequest { enabledAt } }
+                  }
+                }`,
+                { id: pr.node_id }
+              );
+              core.info(`Armed squash auto-merge on #${pr.number}.`);
+            } catch (err) {
+              if (/already enabled/i.test(err.message || "")) {
+                core.info(`#${pr.number} already has auto-merge armed — nothing to do.`);
+              } else {
+                throw err;
+              }
+            }
