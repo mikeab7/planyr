@@ -180,6 +180,9 @@ try {
   await page.waitForTimeout(400);
   await page.getByText("Download PDF / pick frame", { exact: false }).first().click({ timeout: 6000 });
   await page.waitForTimeout(700);
+  // B765985: Continue hands off to the full-screen compose surface before Download PDF.
+  await page.getByRole("button", { name: /^Continue ➜$/ }).first().click({ timeout: 6000 });
+  await page.waitForSelector('[data-testid="print-compose"]', { timeout: 20_000 });
   // Wait for the real download to land — composing the sheet takes a while (the aerial stitch
   // retries against a host this sandbox blocks), and the SVG only reaches the blob hook at the end.
   const dl = page.waitForEvent("download", { timeout: 180000 }).catch(() => null);
@@ -190,7 +193,9 @@ try {
   for (let i = 0; i < 40 && !svg; i++) {
     await page.waitForTimeout(300);
     const arr = await page.evaluate(() => window.__capturedSvgs || []);
-    if (arr.length) svg = arr[0];
+    // B765985: the compose screen's live preview builds an earlier image/svg+xml blob (same
+    // buildComposedSheet pipeline) before "Download PDF" is even clicked — take the LAST one.
+    if (arr.length) svg = arr[arr.length - 1];
   }
   if (!svg) {
     await page.screenshot({ path: `${OUT}pond-label-pdf-stuck.png` });

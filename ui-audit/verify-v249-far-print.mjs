@@ -72,9 +72,13 @@ await page.waitForTimeout(400);
 await page.getByRole("button", { name: /Download PDF \/ pick frame/ }).first().click();
 await page.waitForTimeout(1200);
 
-// Print preview is up (auto-fitted frame around the building). Click its Download PDF.
+// B765985: the print frame is up (auto-fitted around the building); Continue hands off to the
+// full-screen compose surface, which now owns the Download PDF button.
+await page.getByRole("button", { name: /^Continue ➜$/ }).first().click();
+await page.waitForSelector('[data-testid="print-compose"]', { timeout: 20_000 });
+
 const dl = page.getByRole("button", { name: /^Download PDF$/ }).first();
-ok(await dl.isVisible().catch(() => false), "print preview shows a Download PDF button (print mode entered)");
+ok(await dl.isVisible().catch(() => false), "compose screen shows a Download PDF button (print mode entered)");
 await dl.click();
 
 // exportPDF is async (inline images + rasterize). Poll for the captured sheet SVG.

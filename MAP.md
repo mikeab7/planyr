@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-26 @ `f7d62d6` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-26 @ `5ef0df35` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_570 source files mapped._
+_573 source files mapped._
 
 ## infra
 
@@ -489,6 +489,8 @@ _570 source files mapped._
   - _exports_: `ParcelRecord`, `PlacementControls`
 - **`src/workspaces/site-planner/components/PondSection.jsx`** — PR-L the one developer-readable pond cross-section component (used by the ⚡ Optimize what-changed card AND the pond inspector): maps pondSectionModel marks to a responsive, theme-tokened SVG (grade, berm hatch, storage bands, flood/groundwater/receiving lines, outlet, depth dimension, collision-free labels)
   - _exports_: `default (PondSection)`
+- **`src/workspaces/site-planner/components/PrintCompose.jsx`** — the dedicated full-screen "compose exhibit" step (B765985): sheet size/orientation/scale, title block, content toggles, and the live sheet preview, all outside the drawing canvas
+  - _exports_: `default (PrintCompose)`
 - **`src/workspaces/site-planner/components/RoadCrossSectionDialog.jsx`** — The "Design road cross-section" dialog: a row-per-band editor with a live to-scale plan-view preview, dimension strings, running totals, and named presets
   - _exports_: `default (RoadCrossSectionDialog)`
 - **`src/workspaces/site-planner/components/RowInfo.jsx`** — Per-row ⓘ info popover for the Layers panel (source · vintage/age · notes); hover/click, portal via AnchoredMenu (B760)
@@ -680,7 +682,7 @@ _570 source files mapped._
 - **`src/workspaces/site-planner/lib/exportLabelScale.js`** — The scale the LABEL tier reasons at on an export pass: the sheet's own px-per-foot (framed extent vs plan box), so declutter/LOD/collision, label sizes and stroke-zoom are a function of the plan and the paper, never of the live zoom.
   - _exports_: `makeLabelFrame`, `MAX_LABEL_PPF`, `MIN_LABEL_PPF`, `SHEET_PX_PER_CENTI_INCH`, `sheetLabelPpf`, `STROKE_ZOOM_REF`
 - **`src/workspaces/site-planner/lib/exportSheet.js`** — the on-demand export path: PDF/PNG/KMZ sheet composition, the B839 aerial tile Stitcher, and GIS raster/vector layer capture. Loaded via dynamic import() from SitePlanner (B1042) so it never rides the boot bundle; reads planner state through a per-call `ctx` object
-  - _exports_: `createExportSheet`, `sheetPlanAspect`
+  - _exports_: `createExportSheet`, `sheetLayoutBoxesIn`, `sheetPlanAspect`
 - **`src/workspaces/site-planner/lib/exportStyle.js`** — Pure print stroke-weight retargeting: convert authored screen-pixel line widths to zoom-independent physical drafting points for PDF/PNG export
   - _exports_: `PRINT_WEIGHTS`, `printStrokeWidth`, `PT_PER_CENTI_INCH`, `sheetFitScale`
 - **`src/workspaces/site-planner/lib/factRevalidation.js`** — Drainage facts auto-revalidation decision layer (B832): load-kind (missing/stale/incomplete snapshot) vs edit-kind (fetch-envelope exit, point-anchor drift >100 ft) triggers with stable retry keys. Exports `revalidationNeed`, `envelopeOf`, `envelopeContains`, `anchorDriftFt`.
@@ -747,6 +749,8 @@ _570 source files mapped._
   - _exports_: `DECLARATIONS`, `RAW_COLLECTIONS`, `VERDICT`
 - **`src/workspaces/site-planner/lib/history.js`** — Pure undo/redo snapshot stack for the planner canvas: keyOf-based no-op dedup, explicit live-state compare, drop-on-abort drag transactions
   - _exports_: `createHistoryStack`
+- **`src/workspaces/site-planner/lib/historyLabel.js`** — Names an undo/redo step by diffing the whole-canvas snapshots either side of it (added/removed/changed per collection, Moved/Resized/Rotated for a single changed element) instead of trusting a hand-typed label at each of ~190 `pushHistory()` call sites; feeds the history dropdown's per-row labels and its "Undo N Actions" footer.
+  - _exports_: `describeHistoryStep`, `describeHistorySteps`, `historyRunLabel`
 - **`src/workspaces/site-planner/lib/hyetograph.js`** — NRCS Type III design-storm hyetograph (B904, CE roadmap #2 stage 1): dimensionless Gulf Coast 24-hr mass-curve lookup, scaled to a total design-storm depth + duration to produce a time-distributed rainfall series feeding the pond routing pass.
   - _exports_: `buildTypeIIIHyetograph`, `TYPE_III_MASS_CURVE`, `typeIIIFraction`
 - **`src/workspaces/site-planner/lib/image.js`** — Read an image File to a data URL with natural dimensions, downscaling large screenshots to JPEG to fit the localStorage scenario budget
@@ -939,8 +943,10 @@ _570 source files mapped._
   - _exports_: `ownerLabel`, `subName`, `summarizeSubstations`, `summarizeTransmission`, `voltLabel`
 - **`src/workspaces/site-planner/lib/presencePill.js`** — pure "N here" presence summary (B674): distinct people from the channel roster, quiet when alone, You-first hover names
   - _exports_: `presenceSummary`
+- **`src/workspaces/site-planner/lib/printScale.js`** — the explicit engineering-scale math (B765985): the standard scale list, a scale's implied frame footprint, and the "does the picked area fit" check
+  - _exports_: `checkScaleFits`, `frameFootprintForScale`, `scaleLabel`, `STANDARD_SCALES`
 - **`src/workspaces/site-planner/lib/printSheet.js`** — Pure single-SVG print sheet composer: page geometry, buildings table, metrics band, title block, export filename builder
-  - _exports_: `buildBuildingTableSvg`, `buildPrintSheetSvg`, `buildStormwaterSvg`, `formatDateStamp`, `metricsRowsFor`, `pageSize`, `printSheetLayout`, `sanitizeFilename`, `sheetFileName`, `stormwaterBandH`
+  - _exports_: `buildBuildingTableSvg`, `buildPrintSheetSvg`, `buildStormwaterSvg`, `formatDateStamp`, `metricsRowsFor`, `pageSize`, `PAPER_SIZES`, `printSheetLayout`, `sanitizeFilename`, `sheetFileName`, `stormwaterBandH`
 - **`src/workspaces/site-planner/lib/profile.js`** — Signed-in user profile I/O against Supabase public.profiles (load/upsert first/last/org, mirrors names to auth metadata)
   - _exports_: `loadProfile`, `saveProfile`
 - **`src/workspaces/site-planner/lib/projectName.js`** — THE authority for what a project (site group) is called: resolves the one authoritative name across a group's plans (rename-stamp first, legacy majority second, ambiguous never guessed), reconciles a split group, and supplies the write-path correction that stops a stale plan re-publishing an old name.

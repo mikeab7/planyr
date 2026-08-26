@@ -36,8 +36,28 @@ const PAGE = {
   "letter:portrait": { w: 850, h: 1100, wIn: 8.5, hIn: 11 },
   "tabloid:landscape": { w: 1700, h: 1100, wIn: 17, hIn: 11 },
   "tabloid:portrait": { w: 1100, h: 1700, wIn: 11, hIn: 17 },
+  // B765985 — exhibit-size sheets (ARCH C/D, ANSI C/D). Letter/Tabloid alone read as a
+  // screenshot tool, not something you'd hand a client or a reviewing authority a plan on.
+  "archc:landscape": { w: 2400, h: 1800, wIn: 24, hIn: 18 },
+  "archc:portrait": { w: 1800, h: 2400, wIn: 18, hIn: 24 },
+  "archd:landscape": { w: 3600, h: 2400, wIn: 36, hIn: 24 },
+  "archd:portrait": { w: 2400, h: 3600, wIn: 24, hIn: 36 },
+  "ansic:landscape": { w: 2200, h: 1700, wIn: 22, hIn: 17 },
+  "ansic:portrait": { w: 1700, h: 2200, wIn: 17, hIn: 22 },
+  "ansid:landscape": { w: 3400, h: 2200, wIn: 34, hIn: 22 },
+  "ansid:portrait": { w: 2200, h: 3400, wIn: 22, hIn: 34 },
 };
 export const pageSize = (paper, orient) => PAGE[`${paper}:${orient}`] || PAGE["letter:landscape"];
+// The paper picker's own list — one place naming every sheet the compose screen offers,
+// so a new size is added once (here) rather than at every call site that enumerates them.
+export const PAPER_SIZES = [
+  { key: "letter", label: "Letter", note: "8.5×11″" },
+  { key: "tabloid", label: "Tabloid", note: "11×17″" },
+  { key: "archc", label: "ARCH C", note: "18×24″" },
+  { key: "archd", label: "ARCH D", note: "24×36″" },
+  { key: "ansic", label: "ANSI C", note: "17×22″" },
+  { key: "ansid", label: "ANSI D", note: "22×34″" },
+];
 
 // Lay the sheet out for the given paper/orientation and whether a buildings table
 // is present. Returns boxes (in centi-inch units) for every region so the caller
@@ -63,11 +83,14 @@ export function metricsRowsFor(pairsOrCount, bandW) {
   return Math.max(2, rows);
 }
 
-export function printSheetLayout({ paper = "letter", orient = "landscape", buildingCount = 0, metricsCount = 9, metricsPairs = null, stormwaterBars = 0 } = {}) {
+export function printSheetLayout({ paper = "letter", orient = "landscape", buildingCount = 0, metricsCount = 9, metricsPairs = null, stormwaterBars = 0, titleBlockExtra = false } = {}) {
   const page = pageSize(paper, orient);
   const M = 28; // ≈0.28 in border inset
   const inner = { x: M, y: M, w: page.w - 2 * M, h: page.h - 2 * M };
-  const titleH = 56;
+  // B765985 — a third title-block row (scale + prepared-by) grows the band by one line;
+  // omitted entirely (titleH stays the historical 56) when neither is set, so a caller
+  // that never passes them keeps byte-identical geometry.
+  const titleH = titleBlockExtra ? 70 : 56;
   // The metrics band grows with its ACTUAL pairs (B712 added detention/mitigation
   // pairs — some very wide) instead of clipping a wrapped row into the note line.
   // Sized from the same flow estimate buildMetricsSvg draws with; a bare count
@@ -212,6 +235,8 @@ export function buildPrintSheetSvg({
   sub = "",
   date = "",
   brand = "Planyr · Site Planner",
+  scale = "",
+  preparedBy = "",
   metrics = [],
   stormwater = [],
   note = "",
@@ -236,6 +261,11 @@ export function buildPrintSheetSvg({
   if (sub) s += `<text x="${r2(t.x + 10)}" y="${r2(t.y + 45)}" font-size="13" fill="${muted}">${esc(sub)}</text>`;
   s += `<text x="${r2(t.x + t.w - 10)}" y="${r2(t.y + 24)}" text-anchor="end" font-size="14" font-weight="600" fill="${ink}">${esc(date)}</text>`;
   s += `<text x="${r2(t.x + t.w - 10)}" y="${r2(t.y + 43)}" text-anchor="end" font-size="11.5" fill="${muted}">${esc(brand)}</text>`;
+  // B765985 — the compose screen's title block: scale (left) + prepared-by (right), on their
+  // own row below the project/plan/date/brand row. Rendered only when the caller has one to
+  // show, so a sheet built without them (an old caller, or a test) is unchanged.
+  if (scale) s += `<text x="${r2(t.x + 10)}" y="${r2(t.y + 61)}" font-size="12" font-weight="600" fill="${ink}">${esc(scale)}</text>`;
+  if (preparedBy) s += `<text x="${r2(t.x + t.w - 10)}" y="${r2(t.y + 61)}" text-anchor="end" font-size="11.5" fill="${muted}">Prepared by ${esc(preparedBy)}</text>`;
   s += `<line x1="${r2(t.x)}" y1="${r2(t.y + t.h)}" x2="${r2(t.x + t.w)}" y2="${r2(t.y + t.h)}" stroke="${line}" stroke-width="1"/>`;
   // plan frame + the nested plan SVG (caller-positioned)
   s += `<rect x="${r2(L.plan.x)}" y="${r2(L.plan.y)}" width="${r2(L.plan.w)}" height="${r2(L.plan.h)}" fill="none" stroke="${line}" stroke-width="0.75"/>`;

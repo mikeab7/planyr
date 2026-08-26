@@ -1567,7 +1567,18 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   `sheetFurnitureLayout.js`. A module imported by BOTH the boot path and a lazy chunk is
   hoisted whole into their common ancestor — tree-shaking drops unused exports, never
   exports used by a sibling chunk — so a mixed-tier module silently charges the Site route
-  for export-only code. Split by tier, don't hope for shaking. `exportLabelScale.js` (B1085) is the ONE place that decides what scale the
+  for export-only code. Split by tier, don't hope for shaking.
+  **B765985 — the compose screen.** Picking a print frame no longer downloads straight off the
+  canvas: `components/PrintCompose.jsx` (also lazy, its own chunk, warmed alongside the export
+  chunk) is a dedicated full-screen surface for paper size (incl. ARCH C/D, ANSI C/D),
+  orientation, an explicit engineering scale, the title block and content toggles — the on-canvas
+  step now only positions the crop. `lib/printScale.js` (pure, boot-safe, no deps) is the
+  scale math: the standard scale ladder, a scale's implied frame footprint
+  (`frameFootprintForScale` = plan-box inches × ft/inch), and the never-silently-rescale fit
+  check (`checkScaleFits`). PDF-PARITY here is structural, not asserted: `exportSheet.js`'s
+  `buildComposedSheet()` returns the ONE `sheetSvg` string that both the compose screen's live
+  `<img>` preview and the final PDF's rasterizer consume — there is no second render path.
+  `exportLabelScale.js` (B1085) is the ONE place that decides what scale the
   LABEL tier reasons at: the view on screen, the SHEET's own px-per-foot on an export pass — so
   declutter/LOD/collision, label sizes and stroke-zoom are a function of the plan and the paper,
   never of the live zoom. It IS on the boot path (SitePlanner imports it statically, ~1 KB pure). PDF-PARITY: `printMetricPairs`/`printStormwaterBars` deliberately stay in
