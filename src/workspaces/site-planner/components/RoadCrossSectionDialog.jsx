@@ -26,7 +26,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   BAND_TYPES, bandTypeOf, normalizeBands, makeXSection, curbToCurbWidth, pavedWidth, rowWidth,
   pavementArea, bandLayout, bandStripeMarks, BAND_FILL_TOKEN, BAND_FILL_OPACITY, BUILT_IN_XSECTION_PRESETS,
-  MIN_BAND_WIDTH_FT, parseWidthDraft,
+  MIN_BAND_WIDTH_FT, parseWidthDraft, designatedRowFt, rowMarginFt,
 } from "../lib/roadCrossSection.js";
 
 const f1 = (n) => (Number.isFinite(n) ? (Math.round(n * 10) / 10).toString() : "—");
@@ -82,22 +82,35 @@ function packRows(items, gap) {
  * someone is mid-edit. No error styling is shown at all here — an unparseable draft at commit time
  * just silently reverts to the last committed value, and a below-minimum one is silently clamped up
  * to MIN_BAND_WIDTH_FT — never a red border, never a blocked keystroke, per the owner's own rule. */
-function BandWidthInput({ value, onCommit }) {
+/* B783280 — `forceCommit` is for the ONE caller (the ROW field below) whose `value` prop is not a
+ * true committed model value but a computed DEFAULT (the current band total, shown so the field is
+ * never blank). Without it, a user who types the exact digits already on screen — the realistic case
+ * whenever the ROW is meant to equal the modeled section, e.g. a 68′ boulevard plus 16′+16′ parkways
+ * showing "100" before anyone has designated anything — produces `next === value` and `onCommit` is
+ * silently skipped, so nothing is ever designated and no ROW line ever draws: a LOUD-FAILURE violation
+ * (the field visibly reads "100" either way, designated or not). `dirtyRef` tracks a real keystroke so
+ * an untouched blur (just tabbing through, no edit) still costs nothing; band-width fields keep the old
+ * equality-suppression, since their `value` IS the persisted model value and re-typing the same number
+ * is a genuine no-op there. */
+function BandWidthInput({ value, onCommit, ariaLabel = "Band width, feet", testId, forceCommit = false }) {
   const [draft, setDraft] = useState(() => String(value));
   const committedRef = useRef(value);
+  const dirtyRef = useRef(false);
   useEffect(() => {
-    if (value !== committedRef.current) { committedRef.current = value; setDraft(String(value)); }
+    if (value !== committedRef.current) { committedRef.current = value; setDraft(String(value)); dirtyRef.current = false; }
   }, [value]);
   const commit = () => {
     const n = parseWidthDraft(draft);
     const next = n == null ? committedRef.current : Math.max(MIN_BAND_WIDTH_FT, n);
+    const wasDirty = dirtyRef.current;
     committedRef.current = next;
     setDraft(String(next));
-    if (next !== value) onCommit(next);
+    dirtyRef.current = false;
+    if (next !== value || (forceCommit && wasDirty)) onCommit(next);
   };
   return (
-    <input type="text" inputMode="decimal" value={draft} aria-label="Band width, feet"
-      onChange={(e) => setDraft(e.target.value)}
+    <input type="text" inputMode="decimal" value={draft} aria-label={ariaLabel} data-testid={testId}
+      onChange={(e) => { setDraft(e.target.value); dirtyRef.current = true; }}
       onBlur={commit}
       onKeyDown={(e) => {
         if (e.key === "Enter") {
@@ -158,11 +171,20 @@ function XSectionPreview({ xsection, activeIndex }) {
   const { edges, rowW } = bandLayout(xsection);
   if (!edges.length || !(rowW > 0)) return <div ref={wrapRef} style={{ width: "100%" }} />;
 
+  // NEW-1 — a designated ROW is drawn as an outer boundary AROUND the modeled bands, so the preview's
+  // own extent has to grow to fit it (never fit only the bands and let the ROW boundary run off the
+  // edge). `margin` is null both when nothing is designated and when the modeled bands already exceed
+  // the designated ROW (see rowMarginFt's own header) — that invalid state gets no ROW drawing here,
+  // matching the canvas exactly; the loud warning below the field is what surfaces it.
+  const designatedRow = designatedRowFt(xsection);
+  const margin = designatedRow != null ? rowMarginFt(xsection) : null;
+  const totalExtent = margin != null ? designatedRow : rowW;
+
   const usableW = Math.max(60, containerW - LADDER_MARGIN);
-  const scale = Math.min(MAX_PX_PER_FT, usableW / rowW); // px per foot — content width never exceeds usableW
-  const contentW = rowW * scale;
-  const padLeft = (containerW - contentW) / 2; // centers the section — the same margin lands on both sides regardless of scale
-  const xOf = (offsetFt) => padLeft + (rowW / 2 - offsetFt) * scale; // offset 0 → the section's TRUE drawn centerline
+  const scale = Math.min(MAX_PX_PER_FT, usableW / totalExtent); // px per foot — content width never exceeds usableW
+  const contentW = totalExtent * scale;
+  const padLeft = (containerW - contentW) / 2; // centers on the TRUE centerline (offset 0), not on the band block's own (possibly asymmetric) span
+  const xOf = (offsetFt) => padLeft + (totalExtent / 2 - offsetFt) * scale; // offset 0 → the drawing's horizontal middle, always
   const marks = bandStripeMarks(xsection);
 
   // Per-band label: "Type · width" if the band's own column holds it, just "width" if it holds that,
@@ -207,9 +229,22 @@ function XSectionPreview({ xsection, activeIndex }) {
   if (dimRows > 0) y += dimRows * DIM_ROW_H;
   y += TOTAL_GAP;
   const totalY = y;
+  // NEW-1 — a second, OUTER dimension string for the designated ROW itself, stacked below the band
+  // total rather than merged into the same ladder: the two numbers answer different questions ("what
+  // did I draw" vs. "what did I designate") and conflating them into one ladder would blur exactly
+  // that distinction.
+  let rowLadderY = null, rowTotalY = null;
+  if (margin != null) {
+    y += DIM_GAP;
+    rowLadderY = y;
+    y += DIM_TICK + 12;
+    y += TOTAL_GAP;
+    rowTotalY = y;
+  }
   const svgH = y + 6;
 
   const clX = xOf(0);
+  const outerFrom = edges[0].from, outerTo = edges[edges.length - 1].to; // the band block's own true outer edges — NOT assumed symmetric (see xOf's own note)
 
   return (
     <div ref={wrapRef} style={{ width: "100%" }}>
@@ -222,6 +257,28 @@ function XSectionPreview({ xsection, activeIndex }) {
         <text x={clX} y={9} textAnchor="middle" style={{ fontSize: 7, fontWeight: 700, fill: "var(--text-tertiary)" }}>C</text>
         <text x={clX} y={19} textAnchor="middle" style={{ fontSize: 7, fontWeight: 700, fill: "var(--text-tertiary)" }}>L</text>
         <line x1={clX} y1={CL_LABEL_H} x2={clX} y2={swatchBottom + CL_EXT} stroke="var(--text-tertiary)" strokeWidth={0.9} strokeDasharray="8 3 1.5 3" />
+
+        {/* NEW-1 — the designated ROW: an outer boundary beyond the modeled bands (dashed, distinct
+            from both the centerline's dash-dot and the ROW's own margin fill below), plus the
+            undesignated margin shaded distinctly from every band's own fill — reads as "reserved,
+            not modeled" rather than as another band. The margin drawn here is the TRUE geometric gap
+            on each side (the band block's own outer edge out to the symmetric ROW boundary), which
+            can differ slightly from the single averaged "(Y-X)/2 each side" figure shown in the
+            dialog's text summary whenever the modeled bands themselves aren't symmetric about the
+            centerline — an honest picture of the actual geometry beats forcing two equal rects that
+            wouldn't line up with where the bands really end. */}
+        {margin != null && (() => {
+          const rowL = xOf(designatedRow / 2), rowR = xOf(-designatedRow / 2);
+          const bandL = xOf(outerFrom), bandR = xOf(outerTo);
+          return (
+            <>
+              {rowL < bandL && <rect x={rowL} y={swatchTop} width={bandL - rowL} height={SWATCH_D} fill="var(--text-tertiary)" fillOpacity={0.07} stroke="none" />}
+              {bandR < rowR && <rect x={bandR} y={swatchTop} width={rowR - bandR} height={SWATCH_D} fill="var(--text-tertiary)" fillOpacity={0.07} stroke="none" />}
+              <line x1={rowL} y1={swatchTop - 5} x2={rowL} y2={swatchBottom + 5} stroke="var(--text-tertiary)" strokeWidth={0.9} strokeDasharray="4 3" />
+              <line x1={rowR} y1={swatchTop - 5} x2={rowR} y2={swatchBottom + 5} stroke="var(--text-tertiary)" strokeWidth={0.9} strokeDasharray="4 3" />
+            </>
+          );
+        })()}
 
         {/* the swatch — bands run LEFT TO RIGHT, matching the road as drawn on the plan */}
         {edges.map((e) => {
@@ -281,9 +338,9 @@ function XSectionPreview({ xsection, activeIndex }) {
             box's HEIGHT to hold its whole rendered length, which clipped it to "tot" at any modest
             height. A horizontal dimension string never has that problem at any section width. */}
         <g stroke="var(--text-tertiary)" strokeWidth={0.75} fill="none">
-          <line x1={xOf(rowW / 2)} y1={ladderY} x2={xOf(-rowW / 2)} y2={ladderY} />
+          <line x1={xOf(outerFrom)} y1={ladderY} x2={xOf(outerTo)} y2={ladderY} />
           {edges.map((e) => <line key={`t${e.index}`} x1={xOf(e.to)} y1={ladderY - DIM_TICK} x2={xOf(e.to)} y2={ladderY + DIM_TICK} />)}
-          <line x1={xOf(rowW / 2)} y1={ladderY - DIM_TICK} x2={xOf(rowW / 2)} y2={ladderY + DIM_TICK} />
+          <line x1={xOf(outerFrom)} y1={ladderY - DIM_TICK} x2={xOf(outerFrom)} y2={ladderY + DIM_TICK} />
         </g>
         {dimNums.map((d, i) => {
           const row = d.fits ? 0 : d.row + 1;
@@ -297,6 +354,34 @@ function XSectionPreview({ xsection, activeIndex }) {
         })}
 
         <text x={clX} y={totalY} textAnchor="middle" style={{ fontSize: 10, fill: "var(--text-tertiary)", fontWeight: 700 }}>{f1(rowW)}′ total</text>
+
+        {/* NEW-1 — the ROW's OWN dimension string: a wider ladder spanning the full designated width,
+            ticked at the band block's outer edges and at the ROW boundary, with the ROW total below —
+            distinct from (never merged into) the band ladder above it. */}
+        {margin != null && (() => {
+          const rowL = xOf(designatedRow / 2), rowR = xOf(-designatedRow / 2);
+          const bandL = xOf(outerFrom), bandR = xOf(outerTo);
+          const leftMarginFt = (bandL - rowL) / scale, rightMarginFt = (rowR - bandR) / scale;
+          const leftText = `${f1(leftMarginFt)}′`, rightText = `${f1(rightMarginFt)}′`;
+          return (
+            <>
+              <g stroke="var(--text-tertiary)" strokeWidth={0.75} fill="none">
+                <line x1={rowL} y1={rowLadderY} x2={rowR} y2={rowLadderY} />
+                <line x1={rowL} y1={rowLadderY - DIM_TICK} x2={rowL} y2={rowLadderY + DIM_TICK} />
+                <line x1={bandL} y1={rowLadderY - DIM_TICK} x2={bandL} y2={rowLadderY + DIM_TICK} />
+                <line x1={bandR} y1={rowLadderY - DIM_TICK} x2={bandR} y2={rowLadderY + DIM_TICK} />
+                <line x1={rowR} y1={rowLadderY - DIM_TICK} x2={rowR} y2={rowLadderY + DIM_TICK} />
+              </g>
+              {rowL < bandL && (bandL - rowL) - 4 >= estTextW(leftText, 9) && (
+                <text x={(rowL + bandL) / 2} y={rowLadderY + 11} textAnchor="middle" style={{ fontSize: 9, fill: "var(--text-tertiary)", fontWeight: 600 }}>{leftText}</text>
+              )}
+              {bandR < rowR && (rowR - bandR) - 4 >= estTextW(rightText, 9) && (
+                <text x={(bandR + rowR) / 2} y={rowLadderY + 11} textAnchor="middle" style={{ fontSize: 9, fill: "var(--text-tertiary)", fontWeight: 600 }}>{rightText}</text>
+              )}
+              <text x={clX} y={rowTotalY} textAnchor="middle" style={{ fontSize: 10, fill: "var(--text-primary)", fontWeight: 700 }}>{f1(designatedRow)}′ R.O.W.</text>
+            </>
+          );
+        })()}
       </svg>
     </div>
   );
@@ -312,8 +397,17 @@ export default function RoadCrossSectionDialog({ mode = "edit", initialXSection,
   // band: the one genuine advantage the old top-to-bottom preview had over a rotated one, preserved
   // deliberately rather than lost in the rotation.
   const [activeIdx, setActiveIdx] = useState(null);
-  const x = makeXSection(bands);
+  // NEW-1 (owner: "id like to designate the ROW to like a 100' row should be shown") — a DESIGNATED
+  // right-of-way, independent of `bands`. `null` means "not designated" (the field still SHOWS the
+  // band total as its default — see the field below — but nothing is stored or drawn on the canvas
+  // until the user commits a real value). Deliberately not reset when a preset swaps `bands` — the
+  // designated ROW is a fact about this ROAD, not about which bands happen to be modeled right now.
+  const [rowDesignFt, setRowDesignFt] = useState(() => (initialXSection && initialXSection.rowDesignFt) || null);
+  const x = makeXSection(bands, rowDesignFt);
   const c2c = curbToCurbWidth(x), row = rowWidth(x);
+  const designatedRow = designatedRowFt(x);
+  const rowMargin = designatedRow != null ? rowMarginFt(x) : null;
+  const rowExceeded = designatedRow != null && row > designatedRow; // LOUD-FAILURE — never silently clamped
   const areaLenFt = mode === "edit" && lengthFt > 0 ? lengthFt : 100;
   const area = pavementArea(x, areaLenFt);
   const allPresets = [...BUILT_IN_XSECTION_PRESETS, ...(Array.isArray(presets) ? presets : [])];
@@ -358,13 +452,48 @@ export default function RoadCrossSectionDialog({ mode = "edit", initialXSection,
 
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 10, fontSize: 12.5, color: "var(--text-secondary)" }}>
           <span>Section width (curb to curb) <b style={{ color: "var(--text-primary)" }}>{f1(c2c)}′</b></span>
-          <span>Total ROW width <b style={{ color: "var(--text-primary)" }}>{f1(row)}′</b></span>
+          {/* B783296 — this was "Total ROW width" until it sat six inches above "Designated ROW" and
+           * disagreed with it: a modeled 68′ section next to a 100′ designation, BOTH labelled ROW,
+           * one commit apart. This figure is the modeled BAND TOTAL — it predates the designated-ROW
+           * field entirely and was the only "ROW" concept in the dialog before that field existed,
+           * which is why it kept the name. Renamed to what it actually is, per the owner's own
+           * instruction: "the word ROW must appear against exactly one number at a time." Applies
+           * whether or not a ROW is designated, so the wording never has to change state — a road
+           * with nothing designated shows one honestly-labelled number, not a placeholder ROW. */}
+          <span>Modeled band total <b style={{ color: "var(--text-primary)" }}>{f1(row)}′</b></span>
           {/* NEW-1 follow-up (owner review, item 4) — "(per 100′)" sat BEFORE the number, where it
            * reads as a passing qualifier easily skimmed past; a reader could mistake the number for
            * the road's real total pavement area. Moved after the number, spelled out as a rate
            * ("...per 100 ft of road"), so it reads unambiguously as a unit on the figure itself. */}
           <span>Pavement area <b style={{ color: "var(--text-primary)" }}>{f0(area.sf)} SF · {f1(area.sy)} SY</b>{mode === "edit" && lengthFt > 0 ? "" : " per 100 ft of road"}</span>
+          {/* NEW-1 — the two DESIGNATED figures, shown only once a real ROW has been committed
+           * (below the field it derives from a bare band total is nothing new to say). */}
+          {designatedRow != null && <span>Designated ROW <b style={{ color: "var(--text-primary)" }}>{f1(designatedRow)}′</b></span>}
+          {rowMargin != null && <span>ROW margin <b style={{ color: "var(--text-primary)" }}>{f1(rowMargin)}′</b> each side</span>}
         </div>
+
+        {/* NEW-1 (owner: "id like to designate the ROW to like a 100' row should be shown") — a real
+         * right-of-way is a legal dedication, normally WIDER than the modeled pavement section, with
+         * the remainder an undesignated margin either side. Defaults to showing the current band
+         * total (`row`) so an untouched field commits nothing (BandWidthInput's own onCommit only
+         * fires when the committed value differs from what's shown) — "editable upward" from there. */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 12.5, color: "var(--text-secondary)" }}>
+          <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>Right-of-way width (ft)</span>
+          <BandWidthInput value={designatedRow ?? row} onCommit={(w) => setRowDesignFt(w)} ariaLabel="Right-of-way width, feet" testId="road-xsection-row" forceCommit />
+          {designatedRow != null && (
+            <button type="button" onClick={() => setRowDesignFt(null)} style={{ ...smallBtn, width: "auto", padding: "0 8px", color: "var(--text-tertiary)" }} title="Clear the designated ROW — the modeled band total is used instead, and no ROW line is drawn">
+              Clear
+            </button>
+          )}
+        </div>
+        {/* NEW-1 (g) — LOUD-FAILURE: an over-modeled section is never silently clamped to fit the
+         * designated ROW. This is the one place that state is surfaced; the canvas simply skips
+         * drawing a ROW boundary it cannot honestly place (see SitePlanner.jsx's rowMarginFt gate). */}
+        {rowExceeded && (
+          <div role="alert" style={{ marginTop: 8, padding: "7px 10px", borderRadius: 8, background: "var(--danger-bg)", border: "1px solid var(--danger-border)", color: "var(--danger-text)", fontSize: 12, fontWeight: 600 }}>
+            ⚠ The modeled bands total {f1(row)}′ — wider than the designated {f1(designatedRow)}′ right-of-way. Widen the ROW or narrow the bands; it is not auto-clamped.
+          </div>
+        )}
 
         <div style={{ marginTop: 14 }}>
           <div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, color: "var(--text-tertiary)", marginBottom: 4 }}>Bands</div>
