@@ -100,7 +100,12 @@ import { sampleMaapnextWse } from "./lib/hcfcdWse.js";
 import { resolveEstimatedWse } from "./lib/wseProviders.js";
 import { sanityCheckEstimate, sensitivityBand } from "./lib/estimateChallenge.js";
 import { wseSensitivity } from "./lib/wseSensitivity.js";
-import LayerPanel from "./components/LayerPanel.jsx";
+/* LAZY (B1064 tranche c). The Layers card renders only while `layersOpen` is true (default
+ * false — see the state declaration), so it is never on the first-paint path here. It is also
+ * the last large component still statically imported anywhere in the boot chunk (46.5 KB of
+ * source), and MapFinder's own copy is converted in the same commit — see that file's header
+ * comment for why both hosts have to move together. */
+const LayerPanel = lazy(() => import("./components/LayerPanel.jsx"));
 // NEW-3 — the ONE map-overlay stacking model (an open panel outranks map chrome).
 import { MAP_CHROME_Z } from "./lib/mapChromeStack.js";
 import { districtDrainageNote } from "./lib/floodGroup.js";
@@ -22587,6 +22592,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </button>
               {layersOpen && (
                 <div style={{ padding: "2px 11px 10px", overflowY: "auto", flex: 1, minHeight: 0 }}>
+                  <LazyPanel name="Layers panel" minHeight={140}>
                   <LayerPanel overlays={overlays} setOverlays={setOverlays} county={restored?.county || county} layerStatus={layerStatus} coverage={coverage}
                     /* B1076/B1077 — the flood group scopes its district rows off the SAME
                        drainage context the Stormwater readout uses, so the panel and the
@@ -22633,6 +22639,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       const nv = zoomAround({ scale: v.ppf, tx: v.offX, ty: v.offY }, want / v.ppf, size.w / 2, size.h / 2, 0.02, 8);
                       return { ppf: nv.scale, offX: nv.tx, offY: nv.ty };
                     }) : null} />
+                  </LazyPanel>
                   {/* utility-evidence drawing tools (map-dependent — a located site only).
                       Active states ride the theme tokens (accent + on-accent), never raw
                       hexes — the B341/B508 chrome-region rule (B696 sweep). */}

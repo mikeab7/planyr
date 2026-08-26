@@ -18,7 +18,18 @@ import { BASEMAPS, FINDER_BASEMAP_CHOICES } from "./lib/basemaps.js";
 // disagreed visibly in this file alone before it existed.
 import { RADIUS, nestedIn } from "../../shared/ui/radius.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
-import LayerPanel from "./components/LayerPanel.jsx";
+/* LAZY (B1064 tranche c). Converted in the same commit as SitePlanner.jsx's copy — see that
+ * file's header comment. On THIS host the card defaults OPEN on desktop (`layersPanelOpen`'s
+ * initial state below), and `SitePlannerApp` keeps BOTH the map and the plan mode mounted at
+ * once (the hidden one stays alive so switching back doesn't rebuild its Leaflet map) — so an
+ * un-gated render here would fetch this chunk on EVERY boot, including a returning user who
+ * lands straight in the planner and never looks at the map. The render site below therefore
+ * gates on `visible` in addition to `layersPanelOpen`: the chunk loads once this mode is
+ * actually the one on screen, not merely mounted. The outer card (width/padding) is owned by
+ * the wrapping `<div>` at the render site, not by this component, so the box itself never
+ * resizes when the chunk arrives. */
+const LayerPanel = lazy(() => import("./components/LayerPanel.jsx"));
+import LazyPanel from "./components/LazyPanel.jsx";
 import { siteState } from "./lib/siteRegion.js";
 // NEW-3 — the ONE map-overlay stacking model. Leaflet fixes its own control containers at
 // z-index 1000; these panels sat at 1000 too, so whether the zoom buttons and the scale bar
@@ -2375,7 +2386,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               <span style={{ flex: 1, textAlign: "left" }}>Imagery &amp; layers</span>
             </button>
           )}
-          {layersPanelOpen && (<>
+          {/* B1064 tranche c — gated on `visible` too, not just `layersPanelOpen`: this component
+              stays mounted (hidden) while the planner is the active mode, and without this the
+              now-lazy LayerPanel below would fetch on every boot regardless of which mode is on
+              screen. See the import comment above for the full reasoning. */}
+          {layersPanelOpen && visible && (<>
           {/* B427410 — the Imagery <select> and the bare "Labels" checkbox that used to sit HERE,
               in their own strip above a "LAYERS" heading and divided off from it, are gone. The
               basemap IS a layer: it now renders inside the list's own Base & terrain group via
@@ -2396,6 +2411,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             {/* B1091(×2) — on the finder the view county IS the best county fact available (no
                 site, no drainage identify), so it feeds the flood scoping too. In the
                 planner the two are deliberately different signals. */}
+            <LazyPanel name="Layers panel (finder)" minHeight={140}>
             <LayerPanel overlays={overlays} setOverlays={setOverlays} county={viewCounty} siteCounty={viewCounty} layerStatus={layerStatus} coverage={coverage} surface="finder"
               /* B427410 — the basemap as a BASE LAYER inside the list, not a separate strip above
                  it. Choices are DERIVED from the shared BASEMAPS registry, so a source added there
@@ -2414,6 +2430,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                  surface the map is the interactive one, so `setZoom` IS the whole action. */
               mapZoom={zoom}
               onZoomTo={(z) => { try { mapRef.current && mapRef.current.setZoom(z); } catch (_) {} }} />
+            </LazyPanel>
           </div>
           </>)}
         </div>
