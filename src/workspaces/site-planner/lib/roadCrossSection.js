@@ -76,6 +76,27 @@ export const BAND_FILL_OPACITY = {
 
 export function bandTypeOf(key) { return BAND_TYPE_BY_KEY[key] || BAND_TYPE_BY_KEY[DEFAULT_BAND_TYPE]; }
 
+// The floor a band width is clamped to AT COMMIT (never while typing) — matches the dialog's
+// pre-existing `Math.max(0.1, …)` clamp; named here so the dialog and its tests share one number.
+export const MIN_BAND_WIDTH_FT = 0.1;
+
+/* NEW-1 follow-up (owner report, 2026-08-26 — "when I type two it seems to bug out … I'm just
+ * typing 2 to get to 25"): A PREFIX OF A VALID NUMBER IS NOT AN ERROR. RoadCrossSectionDialog's
+ * band-width field calls this at COMMIT time only (blur / Enter — never on keystroke) to decide
+ * whether a draft string is a real, final width. Returns the parsed number, or `null` for every
+ * legitimate mid-typing state — an empty field, a lone ".", "0" on its way to "0.5", a trailing
+ * "12." on its way to "12.5", a leading zero like "08" (which parses fine — that branch is real,
+ * not an example of returning null), or pasted text that isn't a plain decimal yet — so the caller
+ * leaves committed state, and therefore the live preview, untouched rather than ever treating one
+ * of these as an error. The caller clamps the MIN_BAND_WIDTH_FT floor only at commit, never here. */
+export function parseWidthDraft(text) {
+  if (typeof text !== "string") return null;
+  const t = text.trim();
+  if (t === "" || !/^\d*\.?\d*$/.test(t)) return null;
+  const n = Number(t);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 /* A band list from anything (a raw preset, a stored xsection, user input) → a clean array of
  * { type, w }. Unknown type → DEFAULT_BAND_TYPE; missing/invalid width → that type's default. */
 export function normalizeBands(bands) {
