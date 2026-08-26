@@ -70,7 +70,9 @@ const SEED = {
         start:isoOffset(-5), end:isoOffset(-1), duration:3, percentComplete:0 }),
     T({ id:302, name:"Overdue + Complete — must stay green", health:"green", healthOverride:true, parentId:200,
         start:isoOffset(-5), end:isoOffset(-1), duration:3, percentComplete:100 }),
-    T({ id:303, name:"Milestone 0d overdue, overridden", health:"green", healthOverride:true, parentId:200,
+    // health "yellow", not "green" — green now means Complete (COMPLETE-BEATS-ALL, 2026-08-26),
+    // which correctly overrides the rule; this row tests a NON-complete overdue milestone.
+    T({ id:303, name:"Milestone 0d overdue, overridden", health:"yellow", healthOverride:true, parentId:200,
         start:isoOffset(-1), end:isoOffset(-1), duration:0, percentComplete:0 }),
     T({ id:304, name:"Due TODAY not yet past, overridden", health:"yellow", healthOverride:true, parentId:200,
         start:isoOffset(-2), end:todayIso, duration:3, percentComplete:0 }),

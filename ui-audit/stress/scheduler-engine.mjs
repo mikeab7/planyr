@@ -407,6 +407,10 @@ export const evalHealthRules = (task, settings, NOWv, taskById) => {
 // unread data; nothing here consults it anymore.
 export const computeDisplayHealth = (task, settings, taskById) => {
   if (!task) return task?.health;
+  // ⛔ COMPLETE-BEATS-ALL (2026-08-26, owner correction) — see index.html's own comment for the
+  // full rationale. Marking a task Complete (task.health === "green") is evaluated ABOVE the rule
+  // list, unconditionally.
+  if (task.health === "green") return "green";
   const ruleResult = evalHealthRules(task, settings, NOW, taskById);
   if (ruleResult) return ruleResult;
   // B817 — a meeting-bound task surfaces its schedule risk BEFORE it slips: infeasible = red (a genuine

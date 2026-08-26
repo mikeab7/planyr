@@ -219,17 +219,18 @@ const INJECT = `<script>(function(){try{
     // exactly the shape his real stored plans still carry — and computeDisplayHealth must not read
     // it: the rule engine reads only the dates/percentComplete, so it fires red on these regardless
     // of the flag. Hand-set to a color the rule DISAGREES with (overdue, so r-overdue would fire
-    // red): green "Complete" now shows red "Needs Attn." from the very first render, no click of
-    // any kind — proving the flag has zero effect, not merely that "Automatic" still works.
+    // red): yellow "In Progress" now shows red "Needs Attn." from the very first render, no click of
+    // any kind — proving the flag has zero effect, not merely that "Automatic" still works. health
+    // is deliberately NOT "green" here — green now means Complete (COMPLETE-BEATS-ALL, 2026-08-26)
+    // and correctly overrides the rule instead, which is a different, separately-tested scenario.
     mk({id:981,name:"Grid Locked Task For Automatic Clear",start:iso(-20),end:iso(-15),duration:5,durValue:5,percentComplete:40,
-        health:"green",healthOverride:true}),
+        health:"yellow",healthOverride:true}),
     mk({id:980,name:"Master View Locked Leaf",start:iso(-20),end:iso(-15),duration:5,durValue:5,percentComplete:40,
-        health:"green",healthOverride:true}),
+        health:"yellow",healthOverride:true}),
   ];
   // MasterView's own default is "active only" (masterHealthFilter ?? true — red/yellow rows only),
-  // which would hide "Master View Locked Leaf"'s BEFORE state (green "Complete"), "Group Header
-  // Child Green", and "No Rule Match Leaf" (gray) — none of them a defect, just a filter this
-  // diagnostic needs off to see every row it seeds.
+  // which would hide "Group Header Child Green" and "No Rule Match Leaf" (gray) — none of them a
+  // defect, just a filter this diagnostic needs off to see every row it seeds.
   d.masterHealthFilter = false;
   // Pin the column set + order explicitly (DEFAULT_MASTER_COLS) rather than trust whatever this
   // seed's own d.masterCols happens to hold — measured live: the baked-in seed's masterCols omits
@@ -801,7 +802,7 @@ const gridNoClick = await page.evaluate((name) => {
 }, GRID_AUTO_TASK);
 const gridNoClickOk = !!(gridNoClick?.found && gridNoClick.label === "Needs Attn.");
 console.log("\n=== Grid: a previously-locked, overdue task reads its rule-decided colour with NO click at all (RULES-DECIDE) ===");
-console.log(`  found=${gridNoClick?.found} label="${gridNoClick?.label}"  (expect "Needs Attn." — was permanently "Complete" under the retired lock)`);
+console.log(`  found=${gridNoClick?.found} label="${gridNoClick?.label}"  (expect "Needs Attn." — was permanently "In Progress" under the retired lock)`);
 console.log(`${gridNoClickOk ? "  pass  " : "❌ FAIL "}  gridNoClickOk`);
 
 // Open the SAME picker and confirm "Automatic" no longer appears anywhere in it — the escape hatch
@@ -840,7 +841,7 @@ if (masterRowCount > 0) {
 }
 const masterNoClickOk = !!(masterNoClick.found && masterNoClick.label === "Needs Attn.");
 console.log("\n=== MasterView: a previously-locked, overdue task reads its rule-decided colour with NO click at all (RULES-DECIDE) ===");
-console.log(`  found=${masterNoClick.found} label="${masterNoClick.label}"  (expect "Needs Attn." — was permanently "Complete" under the retired lock)`);
+console.log(`  found=${masterNoClick.found} label="${masterNoClick.label}"  (expect "Needs Attn." — was permanently "In Progress" under the retired lock)`);
 console.log(`${masterNoClickOk ? "  pass  " : "❌ FAIL "}  masterNoClickOk`);
 console.log(`${masterNoAutomaticOk ? "  pass  " : "❌ FAIL "}  masterNoAutomaticOk (the open HealthDropMenu contains no "Automatic" entry)`);
 

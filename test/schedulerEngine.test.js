@@ -2473,7 +2473,9 @@ describe("RULES-DECIDE (2026-08-25, owner correction) — healthOverride is RETI
   it("a firing rule beats a hand-picked color — healthOverride true, false, or absent all give the same answer", () => {
     E.setNOW("2026-08-15");
     const settings = { healthRules: [{ id: "a", type: "finishPastDays", days: 1, color: "red" }] };
-    const base = { id: 1, health: "green", end: "2020-01-01", percentComplete: 0 };
+    // health "yellow", not "green" — green now means Complete (COMPLETE-BEATS-ALL, 2026-08-26),
+    // which correctly beats a firing rule; this test is about a NON-complete hand-picked color.
+    const base = { id: 1, health: "yellow", end: "2020-01-01", percentComplete: 0 };
     expect(E.computeDisplayHealth({ ...base, healthOverride: true }, settings)).toBe("red");
     expect(E.computeDisplayHealth({ ...base, healthOverride: false }, settings)).toBe("red");
     expect(E.computeDisplayHealth(base, settings)).toBe("red"); // flag absent entirely
@@ -2541,7 +2543,8 @@ describe("RULES-DECIDE (2026-08-25, owner correction) — healthOverride is RETI
   it("adjacent case: a 0-duration milestone (start===end) past due still fires the rule regardless of a stored healthOverride", () => {
     E.setNOW("2026-08-25");
     const settings = { healthRules: [{ id: "a", type: "finishPastDays", days: 1, color: "red" }] };
-    const milestone = { id: 1, health: "green", healthOverride: true, start: "2026-08-24", end: "2026-08-24", duration: 0, percentComplete: 0 };
+    // health "yellow", not "green" — see the note above; green would correctly beat the rule now.
+    const milestone = { id: 1, health: "yellow", healthOverride: true, start: "2026-08-24", end: "2026-08-24", duration: 0, percentComplete: 0 };
     expect(E.computeDisplayHealth(milestone, settings)).toBe("red");
   });
   it("adjacent case: due TODAY (not yet past) does not match finishPastDays — falls to raw stored health regardless of healthOverride", () => {
@@ -2564,6 +2567,80 @@ describe("RULES-DECIDE (2026-08-25, owner correction) — healthOverride is RETI
 describe("RULES-DECIDE (2026-08-25) — normalizeToV9 is RETIRED, along with the flag it used to seed", () => {
   it("the function no longer exists in the mirror at all", () => {
     expect(E.normalizeToV9).toBeUndefined();
+  });
+});
+
+describe("COMPLETE-BEATS-ALL (2026-08-26, owner correction) — marking a task Complete overrides a firing rule, unconditionally", () => {
+  const orig = E.NOW;
+  afterEach(() => E.setNOW(orig));
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+
+  it("a Complete (health:green) task with a past finish date and percentComplete < 100 renders green, not red — WITH an overdue rule configured", () => {
+    // This is the exact live-production shape that regressed: the ordinary single-task edit path
+    // that marks a task Complete never bumps percentComplete to 100 (only the bulk "recolor whole
+    // branch" cascade does that) — so a plain finishPastDays rule matched it and painted it red the
+    // moment its finish date passed, punishing the owner for finishing work. Measured live: 212 of
+    // 557 real leaf tasks were in exactly this state.
+    E.setNOW("2026-08-26");
+    const settings = { healthRules: [{ id: "overdue", type: "finishPastDays", days: 1, color: "red" }] };
+    const task = { id: 1, health: "green", end: "2026-08-01", percentComplete: 0 };
+    expect(E.computeDisplayHealth(task, settings)).toBe("green");
+  });
+
+  it("Complete overrides the rule with NO rule list configured at all (an empty array) — it does not depend on any rule existing", () => {
+    // The owner's own words: "Complete is evaluated ABOVE the user rule list, unconditionally,
+    // whether or not a complete rule exists in his settings." This is the mutation-proof shape he
+    // asked for by name: an empty rule list must still keep a Complete task green.
+    E.setNOW("2026-08-26");
+    const task = { id: 1, health: "green", end: "2020-01-01", percentComplete: 0 };
+    expect(E.computeDisplayHealth(task, { healthRules: [] })).toBe("green");
+    expect(E.computeDisplayHealth(task, {})).toBe("green");
+  });
+
+  it("Complete overrides the rule regardless of rule ORDER, and cannot be broken by editing the rule list", () => {
+    E.setNOW("2026-08-26");
+    const task = { id: 1, health: "green", end: "2020-01-01", percentComplete: 0 };
+    const rulesA = { healthRules: [{ id: "a", type: "finishPastDays", days: 1, color: "red" }] };
+    const rulesB = { healthRules: [{ id: "a", type: "finishWithinDays", days: 30, color: "yellow" }, { id: "b", type: "finishPastDays", days: 1, color: "red" }] };
+    expect(E.computeDisplayHealth(task, rulesA)).toBe("green");
+    expect(E.computeDisplayHealth(task, rulesB)).toBe("green");
+  });
+
+  it("a NON-complete overdue task still renders red — this is not a blanket exemption, it is keyed on health==='green' specifically", () => {
+    E.setNOW("2026-08-26");
+    const settings = { healthRules: [{ id: "overdue", type: "finishPastDays", days: 1, color: "red" }] };
+    const notComplete = { id: 1, health: "yellow", end: "2026-08-01", percentComplete: 0 };
+    expect(E.computeDisplayHealth(notComplete, settings)).toBe("red");
+  });
+
+  it("⛔ MUTATION CHECK — deleting the Complete-beats-all short-circuit reproduces the exact live regression", () => {
+    // Proves this test actually discriminates: re-run the SAME check the first test makes, but
+    // against the pre-fix computeDisplayHealth shape (rule list evaluated first, no Complete
+    // short-circuit) — must render red, reproducing the reported production bug.
+    const NOWv = "2026-08-26";
+    const preFixComputeDisplayHealth = (task, settings, taskById) => {
+      const ruleResult = E.evalHealthRules(task, settings, NOWv, taskById);
+      if (ruleResult) return ruleResult;
+      return task.health;
+    };
+    const settings = { healthRules: [{ id: "overdue", type: "finishPastDays", days: 1, color: "red" }] };
+    const task = { id: 1, health: "green", end: "2026-08-01", percentComplete: 0 };
+    expect(preFixComputeDisplayHealth(task, settings)).toBe("red");
+  });
+
+  it("anti-drift: computeDisplayHealth checks health==='green' BEFORE evalHealthRules, in both real source and mirror", () => {
+    const anchor = "computeDisplayHealth = (task, settings, taskById) => {";
+    for (const s of [src, mjs]) {
+      const start = s.indexOf(anchor);
+      expect(start).toBeGreaterThan(-1);
+      const body = s.slice(start, start + 1600);
+      const greenCheckIdx = body.indexOf('task.health === "green") return "green"');
+      const ruleCallIdx = body.indexOf("evalHealthRules(task, settings, NOW, taskById)");
+      expect(greenCheckIdx).toBeGreaterThan(-1);
+      expect(ruleCallIdx).toBeGreaterThan(-1);
+      expect(greenCheckIdx).toBeLessThan(ruleCallIdx);
+    }
   });
 });
 
