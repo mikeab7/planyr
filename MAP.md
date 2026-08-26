@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-26 @ `55024c82` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-26 @ `6fb1ae43` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_570 source files mapped._
+_571 source files mapped._
 
 ## infra
 
@@ -747,6 +747,8 @@ _570 source files mapped._
   - _exports_: `DECLARATIONS`, `RAW_COLLECTIONS`, `VERDICT`
 - **`src/workspaces/site-planner/lib/history.js`** — Pure undo/redo snapshot stack for the planner canvas: keyOf-based no-op dedup, explicit live-state compare, drop-on-abort drag transactions
   - _exports_: `createHistoryStack`
+- **`src/workspaces/site-planner/lib/historyLabel.js`** — Names an undo/redo step by diffing the whole-canvas snapshots either side of it (added/removed/changed per collection, Moved/Resized/Rotated for a single changed element) instead of trusting a hand-typed label at each of ~190 `pushHistory()` call sites; feeds the history dropdown's per-row labels and its "Undo N Actions" footer.
+  - _exports_: `describeHistoryStep`, `describeHistorySteps`, `historyRunLabel`
 - **`src/workspaces/site-planner/lib/hyetograph.js`** — NRCS Type III design-storm hyetograph (B904, CE roadmap #2 stage 1): dimensionless Gulf Coast 24-hr mass-curve lookup, scaled to a total design-storm depth + duration to produce a time-distributed rainfall series feeding the pond routing pass.
   - _exports_: `buildTypeIIIHyetograph`, `TYPE_III_MASS_CURVE`, `typeIIIFraction`
 - **`src/workspaces/site-planner/lib/image.js`** — Read an image File to a data URL with natural dimensions, downscaling large screenshots to JPEG to fit the localStorage scenario budget

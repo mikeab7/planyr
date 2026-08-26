@@ -133,6 +133,121 @@ describe("history stack (site-planner undo/redo)", () => {
   });
 });
 
+/* ⛔ NEW-2 (B648353) — MULTI-STEP UNDO/REDO FOR THE HISTORY DROPDOWN.
+ *
+ * `undoN`/`redoN` must produce the IDENTICAL end state as calling `undo()`/`redo()` N times in a
+ * row with an up-to-date `current` at each step (the thing a component CANNOT safely do itself —
+ * see history.js's own header comment on why). `recentUndoSteps`/`recentRedoSteps` must describe
+ * exactly the frames a run would consume, without mutating the stacks (a dropdown peek, not a pop). */
+describe("NEW-2 (B648353) — undoN/redoN batch a whole run into one target snapshot", () => {
+  it("undoN(3) lands on the same state three single undo() calls would, threading the true pivot each step", () => {
+    const h = stack();
+    const s0 = bld(0, 0), s1 = bld(10, 0), s2 = bld(10, 10), s3 = bld(20, 10);
+    h.push(s0); h.push(s1); h.push(s2); // → current is s3
+
+    const hRef = stack(); // reference: three single-step undos, each with the TRUE current
+    hRef.push(s0); hRef.push(s1); hRef.push(s2);
+    let cur = s3;
+    cur = hRef.undo(cur); // → s2
+    cur = hRef.undo(cur); // → s1
+    cur = hRef.undo(cur); // → s0
+
+    expect(h.undoN(s3, 3)).toBe(cur);
+    expect(posOf(cur)).toEqual({ x: 0, y: 0 });
+  });
+
+  it("undoN stops early (returns the deepest reachable frame) when n exceeds what's available", () => {
+    const h = stack();
+    const s0 = bld(0, 0), s1 = bld(10, 0);
+    h.push(s0); // → current is s1
+    expect(h.undoN(s1, 5)).toBe(s0);
+    expect(h.canUndo()).toBe(false);
+  });
+
+  it("undoN skips no-op frames exactly like undo() does (B32), so N counts real operations", () => {
+    const h = stack();
+    const a = bld(0, 0), b = bld(50, 0);
+    h.push(a);            // real move boundary → b
+    h.push(b);             // then a no-op (select click) at b — current stays b
+    // undoN(1) from `b` must reach `a` directly, the same as a single undo() would (B32 dedup).
+    expect(h.undoN(b, 1)).toBe(a);
+  });
+
+  it("undoN then redoN round-trips back to the original current", () => {
+    const h = stack();
+    const s0 = bld(0, 0), s1 = bld(10, 0), s2 = bld(10, 10);
+    h.push(s0); h.push(s1); // → current s2
+    const target = h.undoN(s2, 2); // → s0
+    expect(target).toBe(s0);
+    const redone = h.redoN(s0, 2);
+    expect(redone).toBe(s2);
+    expect(h.canRedo()).toBe(false);
+    expect(h.canUndo()).toBe(true);
+  });
+
+  it("redoN stops early when n exceeds the future stack", () => {
+    const h = stack();
+    const s0 = bld(0, 0), s1 = bld(10, 0);
+    h.push(s0);
+    const back = h.undo(s1); // → s0, future = [s1]
+    expect(h.redoN(back, 5)).toBe(s1);
+    expect(h.canRedo()).toBe(false);
+  });
+
+  it("undoN/redoN return null and touch nothing when there is nothing to move", () => {
+    const h = stack();
+    expect(h.undoN(bld(0, 0), 3)).toBeNull();
+    expect(h.redoN(bld(0, 0), 3)).toBeNull();
+  });
+});
+
+describe("NEW-2 (B648353) — recentUndoSteps/recentRedoSteps peek without mutating the stacks", () => {
+  it("recentUndoSteps lists steps newest-first as { before, after } pairs", () => {
+    const h = stack();
+    const s0 = bld(0, 0), s1 = bld(10, 0), s2 = bld(10, 10);
+    h.push(s0); h.push(s1); // → current s2
+    const steps = h.recentUndoSteps(s2, 10);
+    expect(steps).toEqual([
+      { before: s1, after: s2 },
+      { before: s0, after: s1 },
+    ]);
+    // Non-destructive — the real undo still sees the full stack afterward.
+    expect(h.snapshotStacks().past).toEqual([s0, s1]);
+    expect(h.undo(s2)).toBe(s1);
+  });
+
+  it("recentUndoSteps respects the limit and skips no-op frames (matches what undoN would consume)", () => {
+    const h = stack();
+    const a = bld(0, 0), b = bld(50, 0);
+    h.push(a);
+    h.push(b); // no-op frame stacked at b
+    const steps = h.recentUndoSteps(b, 10);
+    expect(steps).toEqual([{ before: a, after: b }]); // the no-op frame produces no separate step
+    expect(steps.length).toBe(1);
+  });
+
+  it("recentRedoSteps lists the future stack newest-first", () => {
+    const h = stack();
+    const s0 = bld(0, 0), s1 = bld(10, 0), s2 = bld(10, 10);
+    h.push(s0); h.push(s1);
+    let cur = s2;
+    cur = h.undo(cur); // → s1, future=[s2]
+    cur = h.undo(cur); // → s0, future=[s2,s1]
+    const steps = h.recentRedoSteps(cur, 10);
+    expect(steps).toEqual([
+      { before: s0, after: s1 },
+      { before: s1, after: s2 },
+    ]);
+    expect(h.snapshotStacks().future).toEqual([s2, s1]);
+  });
+
+  it("both peeks return an empty array on an empty stack", () => {
+    const h = stack();
+    expect(h.recentUndoSteps(bld(0, 0), 10)).toEqual([]);
+    expect(h.recentRedoSteps(bld(0, 0), 10)).toEqual([]);
+  });
+});
+
 /* ═══ NEW-5 — A SELECTION CLICK IS NOT A DOCUMENT CHANGE ═════════════════════════════════════════
  *
  * Reported live on production 2026-08-12 (site `smsqi16s9ej4`, Building 3): load fresh — Undo

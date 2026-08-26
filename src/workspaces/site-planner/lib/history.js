@@ -78,6 +78,75 @@ export function createHistoryStack({ keyOf, limit = 80 } = {}) {
       return past.length ? past.pop() : null;
     },
 
+    /* ⛔ NEW-2 (B648353) — MULTI-STEP UNDO/REDO FOR THE HISTORY DROPDOWN, and why it is NOT just
+     * `undo()` called in a loop from the caller. `undo(current)` dedupes against a `current` the
+     * CALLER supplies; calling it N times synchronously from a component would call it N times
+     * with the SAME stale `current` (React doesn't re-render — and so doesn't refresh the ref this
+     * planner reads `current` from — inside one synchronous handler), corrupting the redo chain
+     * (each call would push the same pre-undo `current` onto `future` again instead of the true
+     * intermediate state). `undoN`/`redoN` do the walk INTERNALLY, threading the correct evolving
+     * pivot at each step, and return only the FINAL target — so the caller applies ONE snapshot for
+     * the whole run (one gesture, one `applySnapshot`, one flush — matching how a paste or a
+     * multi-object delete already push exactly one frame for the whole action). */
+    undoN(current, n) {
+      let cur = current, last = null;
+      for (let i = 0; i < n && past.length; i++) {
+        const curKey = keyOf(cur);
+        let prev = null;
+        while (past.length) {
+          const cand = past.pop();
+          if (keyOf(cand) !== curKey) { prev = cand; break; }
+        }
+        if (!prev) break;
+        future.push(cur);
+        cur = prev;
+        last = prev;
+      }
+      return last;
+    },
+    redoN(current, n) {
+      let cur = current, last = null;
+      for (let i = 0; i < n && future.length; i++) {
+        const next = future.pop();
+        past.push(cur);
+        cur = next;
+        last = next;
+      }
+      return last;
+    },
+
+    /* Non-destructive PEEK, newest first, describing up to `limit` undoable/redoable steps for the
+     * history dropdown — same no-op dedup as `undo()` (a caller must see exactly what a click would
+     * consume, never more). Each entry is `{ before, after }`: `after` is what the step reverts you
+     * AWAY from, `before` is what it reverts you TO. Never mutates `past`/`future`. */
+    recentUndoSteps(current, limit = 20) {
+      const steps = [];
+      let after = current;
+      let idx = past.length - 1;
+      while (idx >= 0 && steps.length < limit) {
+        const afterKey = keyOf(after);
+        let before = null;
+        while (idx >= 0) {
+          const cand = past[idx--];
+          if (keyOf(cand) !== afterKey) { before = cand; break; }
+        }
+        if (!before) break;
+        steps.push({ before, after });
+        after = before;
+      }
+      return steps;
+    },
+    recentRedoSteps(current, limit = 20) {
+      const steps = [];
+      let before = current;
+      for (let i = future.length - 1; i >= 0 && steps.length < limit; i--) {
+        const after = future[i];
+        steps.push({ before, after });
+        before = after;
+      }
+      return steps;
+    },
+
     /* ⛔ NEW-5 — "UNDO IS ENABLED" IS THE ONLY SIGNAL A USER HAS THAT A PLAN WAS MODIFIED, AND A
      * PLAIN SELECTION CLICK WAS ARMING IT.
      *
