@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _221 open · 495 awaiting live verification._
+> _221 open · 496 awaiting live verification._
 
 ## 🔲 Open
 
@@ -239,6 +239,7 @@
 | B648353 | Undo/Redo have no history dropdown; Excel is the named reference | [Site Planner / toolbar] | #site-planner #ui #sync #testing | ⏳ live — awaiting |
 | B765985 | Picking a print frame should open a dedicated compose screen, not float a bar over the working canvas | [Site Planner / export] | #site-planner #export #ui | ⏳ live — awaiting |
 | B781760 | Stop PRs parking as drafts: enforce it in the repo, not in prompts | [Infra / CI] | #infra | ⏳ live — awaiting |
+| B793696 | PR auto-ready workflow's auto-merge call fails "Resource not accessible by integration" despite granted write scope | [Infra / CI] | #infra | ⏳ live — awaiting |
 | B784832 | Undo does not restore a deleted callout; only "el" elements resurrect | [Site Planner / undo] | #site-planner #sync #testing | ⏳ live — awaiting |
 | B770896 | Cloud tool: kill the draw-mode popover (click=vertex, drag=freehand, one ring), move arc size into Properties, and account for the 917 lines against a plain polygon | [Site Planner / markup] | #site-planner #markup #ui #testing | ⏳ live — awaiting |
 | B780448 | Complete-beats-all: a task marked Complete without percentComplete also reaching 100 rendered RED once its finish date passed | [Scheduler] | #scheduler #ui #testing | ⏳ live — awaiting |
@@ -752,7 +753,7 @@
 - **#geometry** — B520560, B494049, B455360
 - **#gis** — B724258, B519905, B290245, B290247, B242544, B242545, B1422, B1432, B1433, B1434, B1121, B1349, B1208, B1063, B810, B776, B777, B752, B753, B722, B723, B724, B726, B629, B370, B309, B178, B171, B147, B13, B95, B711328, B688864, B672115, B672114, B651872, B576001, B629376, B632177, B632178, B634982, B550512, B519907, B435537, B393168, B393169, B393170, B385040, B367296, B367297, B323424, B685200, B323425, B298560, B298562, B298401, B286308, B286304, B286305, B286306, B286307, B297904, B297905, B297907, B290240, B280704, B280705, B276752, B276753, B276754, B276755, B209506, B209507, B209508, B209502, B209503, B209504, B1427, B1421, B1423, B1424, B1401, B1402, B1403, B1254, B1253, B1235, B1236, B1237, B1241, B1205, B1206, B1161, B1162, B1141, B1142, B1131, B1132, B1122, B1111, B1095, B1096, B1091, B1092, B1087, B1088, B1057, B1075, B1076, B1079, B1080, B1043, B1045, B1048, B1049, B975, B972, B956, B885, B884, B882, B883, B879, B860, B861, B839, B840, B832, B691, B789, B787, B625, B751, B745, B738, B707, B712, B1166, B1196
 - **#grading** — B276450, B1096, B1031, B1028, B888, B871
-- **#infra** — B791520, B711906, B711908, B613760, B519904, B519906, B472048, B435538, B393171, B393173, B329408, B296224, B295168, B287058, B280403, B280401, B267536, B267537, B267538, B267539, B266081, B255200, B251136, B233152, B227888, B227476, B227477, B227478, B227479, B227472, B227473, B227474, B227475, B221760, B209568, B209569, B209570, B6864, B6865, B6866, B6867, B1448, B1441, B1443, B1435, B1436, B1438, B1432, B1433, B1431, B1349, B1341, B1163, B1064, B916, B917, B778, B735, B726, B406, B179, B63, B781760, B711904, B568400, B576000, B505664, B447472, B369536, B326416, B326419, B304177, B298563, B287056, B287057, B287060, B276576, B276448, B270912, B265536, B779, B36052, B1429, B1421, B1373, B1344, B1160, B1086, B1079, B1042, B1040, B864, B786, B812, B811, B759, B756, B748, B1215, B675, B669
+- **#infra** — B791520, B711906, B711908, B613760, B519904, B519906, B472048, B435538, B393171, B393173, B329408, B296224, B295168, B287058, B280403, B280401, B267536, B267537, B267538, B267539, B266081, B255200, B251136, B233152, B227888, B227476, B227477, B227478, B227479, B227472, B227473, B227474, B227475, B221760, B209568, B209569, B209570, B6864, B6865, B6866, B6867, B1448, B1441, B1443, B1435, B1436, B1438, B1432, B1433, B1431, B1349, B1341, B1163, B1064, B916, B917, B778, B735, B726, B406, B179, B63, B781760, B793696, B711904, B568400, B576000, B505664, B447472, B369536, B326416, B326419, B304177, B298563, B287056, B287057, B287060, B276576, B276448, B270912, B265536, B779, B36052, B1429, B1421, B1373, B1344, B1160, B1086, B1079, B1042, B1040, B864, B786, B812, B811, B759, B756, B748, B1215, B675, B669
 - **#keyboard** — B724259, B3297
 - **#library** — B1318, B663, B662, B952, B792, B699, B701, B676, B668, B664, B659
 - **#markup** — B770897, B758545, B758546, B724256, B820, B423, B422, B267, B268, B770896, B758544, B548064, B548065, B435536, B1355, B1328, B1190, B1152, B1153, B947, B948, B918, B919, B913, B746, B737
