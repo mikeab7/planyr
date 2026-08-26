@@ -2476,13 +2476,193 @@ const recascadeWithDrift = (tasks, projName, sink) => {
 
 let NOW = fdLocal(new Date()); // local "today"; refreshed live by App (focus / midnight rollover)
 
-// ── Configurable health automation (replaces the old fixed 3-toggle cfRules; NEW-schedule-health) ──
-// An ORDERED list of {id, type, days?, color} rules, first match wins — built in the Automation
-// panel. Every condition reads only facts the schedule engine already computes on a LEAF task
-// (start/end/percentComplete/predecessors/responsibleParty). A MISSING fact always fails its
-// condition — never a silent pass — so a task with no finish date can't read as "not overdue ⇒
-// safe"; see the absence-safety unit tests. Finite vocabulary by design: no formula parser, no
-// scripting, no boolean composer — each condition is one named, parameterized (by N days) fact.
+// ── Configurable health automation, v2 (B785744 — replaces the fixed 7-condition rule list from
+// #1073, which the owner rejected twice: "you've got like two variables here"). The real ask,
+// verbatim: "IF 'finish' is in the past, THEN status = Needs Attn, UNLESS status is marked
+// COMPLETE" — a Smartsheet/MS-Project-style IF/THEN/UNLESS builder, not a picklist of canned
+// sentences. RULE_FIELDS × RULE_OPS is the actual language: pick a FIELD (Finish, Start, Status,
+// Owner, %Complete, Cost, Budget, Actual Cost, Predecessor), pick a COMPARISON valid for that
+// field's type, give a VALUE. Multiple conditions in a `when`/`unless` group combine with AND/OR.
+// A rule is `{id, when:[cond,...], whenCombinator, color, unless:[cond,...], unlessCombinator}` —
+// it fires (sets `color`) when its `when` group matches AND its `unless` group does NOT. Rules stay
+// an ORDERED list, first FIRING rule wins (owner's explicit choice over "worst color always wins" —
+// he already knows and likes the ordered mental model).
+//
+// Absence-safety, preserved from v1: a MISSING date/text field always fails its condition (except
+// the explicit isBlank/isNotBlank tests, whose whole job IS to test absence) — never a silent pass.
+// A missing NUMBER field reads as 0 (matches how percentComplete has always been treated: `pct =
+// task.percentComplete || 0`), so "% Complete is at least 100" behaves identically whether the field
+// is absent or explicitly 0.
+const RULE_FIELDS = [
+  {k:"finish",          label:"Finish date",   type:"date"},
+  {k:"start",           label:"Start date",    type:"date"},
+  {k:"status",          label:"Status",        type:"status"},
+  {k:"owner",           label:"Owner",         type:"text"},
+  {k:"percentComplete", label:"% Complete",    type:"number"},
+  {k:"cost",            label:"Cost",          type:"number"},
+  {k:"budget",          label:"Budget",        type:"number"},
+  {k:"actualCost",      label:"Actual Cost",   type:"number"},
+  {k:"predecessor",     label:"Predecessor",   type:"flag"},
+];
+const RULE_FIELD_BY_K = Object.fromEntries(RULE_FIELDS.map(f => [f.k, f]));
+const RULE_OPS = {
+  date: [
+    {k:"pastDueAtLeast",    label:"is N+ days past due",       needsValue:true,  defaultValue:1},
+    {k:"withinDays",        label:"is within N days",           needsValue:true,  defaultValue:7},
+    {k:"moreThanDaysAway",  label:"is more than N days away",   needsValue:true,  defaultValue:14},
+    {k:"isToday",           label:"is today",                   needsValue:false},
+    {k:"isBlank",           label:"is blank",                   needsValue:false},
+    {k:"isNotBlank",        label:"is not blank",               needsValue:false},
+  ],
+  status: [
+    {k:"is",    label:"is",     needsValue:true, valueKind:"status"},
+    {k:"isNot", label:"is not", needsValue:true, valueKind:"status"},
+  ],
+  text: [
+    {k:"isBlank",    label:"is blank",     needsValue:false},
+    {k:"isNotBlank", label:"is not blank", needsValue:false},
+    {k:"is",         label:"is",           needsValue:true, valueKind:"text"},
+    {k:"contains",   label:"contains",     needsValue:true, valueKind:"text"},
+  ],
+  number: [
+    {k:"eq",         label:"is",          needsValue:true, valueKind:"number"},
+    {k:"gt",         label:"is more than",needsValue:true, valueKind:"number"},
+    {k:"lt",         label:"is less than",needsValue:true, valueKind:"number"},
+    {k:"gte",        label:"is at least", needsValue:true, valueKind:"number"},
+    {k:"lte",        label:"is at most",  needsValue:true, valueKind:"number"},
+    {k:"isBlank",    label:"is blank",     needsValue:false},
+    {k:"isNotBlank", label:"is not blank", needsValue:false},
+  ],
+  flag: [
+    {k:"isLate", label:"is late", needsValue:false},
+  ],
+};
+const opsForField = fieldK => RULE_OPS[RULE_FIELD_BY_K[fieldK]?.type] || [];
+
+// Pure, single condition. `taskById` is only read by the `predecessor` field.
+const evalFieldCondition = (cond, task, NOW, taskById) => {
+  const field = cond?.field, op = cond?.op, value = cond?.value;
+  if (field === "predecessor") {
+    if (op !== "isLate") return false;
+    const preds = Array.isArray(task.predecessors) ? task.predecessors : [];
+    if (!preds.length || !taskById) return false;
+    return preds.some(p => {
+      const pt = taskById[p?.id];
+      return !!pt && !!pt.end && (pt.percentComplete||0) < 100 && dif(pt.end, NOW) >= 1;
+    });
+  }
+  const ftype = RULE_FIELD_BY_K[field]?.type;
+  if (!ftype) return false;
+  if (ftype === "date") {
+    const raw = field === "finish" ? task.end : task.start;
+    const has = !!raw;
+    switch (op) {
+      case "isBlank":          return !has;
+      case "isNotBlank":       return has;
+      case "isToday":          return has && raw === NOW;
+      case "pastDueAtLeast":   return has && dif(raw, NOW) >= (value ?? 1);
+      case "withinDays":       { if (!has) return false; const d = dif(NOW, raw); return d >= 0 && d <= (value ?? 7); }
+      case "moreThanDaysAway": return has && dif(NOW, raw) > (value ?? 0);
+      default: return false;
+    }
+  }
+  if (ftype === "status") {
+    const raw = task.health;
+    switch (op) {
+      case "is":    return raw === value;
+      case "isNot": return raw !== value;
+      default: return false;
+    }
+  }
+  if (ftype === "text") {
+    const s = String(task.responsibleParty || "").trim();
+    const v = String(value || "").trim().toLowerCase();
+    switch (op) {
+      case "isBlank":    return !s;
+      case "isNotBlank": return !!s;
+      case "is":         return s.toLowerCase() === v;
+      case "contains":   return s.toLowerCase().includes(v);
+      default: return false;
+    }
+  }
+  // number: percentComplete/cost/budget/actualCost — a missing value reads as 0 (matches the
+  // long-standing `task.percentComplete || 0` convention), EXCEPT the two blank tests, whose job
+  // is to distinguish "truly unset" from "explicitly 0".
+  const raw = task[field];
+  const isBlank = raw === "" || raw == null;
+  const num = isBlank || isNaN(raw) ? 0 : Number(raw);
+  switch (op) {
+    case "isBlank":    return isBlank;
+    case "isNotBlank": return !isBlank;
+    case "eq":  return num === Number(value);
+    case "gt":  return num > Number(value);
+    case "lt":  return num < Number(value);
+    case "gte": return num >= Number(value);
+    case "lte": return num <= Number(value);
+    default: return false;
+  }
+};
+// A condition GROUP (a rule's `when` or `unless`) — empty groups never match (an empty `when`
+// can't fire a rule; an empty `unless` never blocks one — the common, "no exception" case).
+const evalConditionGroup = (conds, combinator, task, NOW, taskById) => {
+  if (!Array.isArray(conds) || !conds.length) return false;
+  return combinator === "OR"
+    ? conds.some(c => evalFieldCondition(c, task, NOW, taskById))
+    : conds.every(c => evalFieldCondition(c, task, NOW, taskById));
+};
+// Returns the rule's color if it fires (when-group matches AND unless-group does not), else null.
+const evalRule = (rule, task, NOW, taskById) => {
+  if (!rule || !evalConditionGroup(rule.when, rule.whenCombinator, task, NOW, taskById)) return null;
+  if (evalConditionGroup(rule.unless, rule.unlessCombinator, task, NOW, taskById)) return null;
+  return rule.color;
+};
+
+// ── v1 → v2 migration (pure, derived, never persisted — same philosophy as the old
+// migrateCfRulesToHealthRules: a plan that never touches the panel keeps behaving exactly as
+// before). HEALTH_CONDITIONS/evalHealthCondition below are RETAINED verbatim, unused by the live
+// engine now, kept only so old data/tests have a frozen behavioral reference for this mapping. ──
+const LEGACY_RULE_FIELD_MAP = {
+  finishPastDays:   days => [{field:"finish", op:"pastDueAtLeast", value: days ?? 1}],
+  finishWithinDays: days => [{field:"finish", op:"withinDays",     value: days ?? 7}],
+  finishToday:      ()   => [{field:"finish", op:"isToday"}],
+  notStarted:       ()   => [{field:"start", op:"pastDueAtLeast", value:1}, {field:"percentComplete", op:"lte", value:0}],
+  predecessorLate:  ()   => [{field:"predecessor", op:"isLate"}],
+  noOwner:          ()   => [{field:"owner", op:"isBlank"}],
+  complete:         ()   => [{field:"percentComplete", op:"gte", value:100}],
+};
+// ⛔ B785744 — an old-shape (v1) rule had no exception clause at all; its only protection against
+// painting a manually-completed task was ORDERING ("put a Complete rule first"), which silently
+// stops working the moment that rule is missing — exactly what happened live: the owner's one
+// configured rule (finish 1+ days overdue → red, no complete rule) mis-colored 212 of his 557 real
+// leaf tasks red, because marking a task Complete only ever writes `health:"green"` and never
+// touches `percentComplete` (verified: HealthPicker → commit → applyUpdate → `updateTask(id,
+// {health:val})`, no percentComplete write, anywhere). PR #1178 patched this as an emergency global
+// hardcode (`if (task.health==="green") return "green"` ahead of the whole rule engine). This
+// migration is the real fix: every migrated attention-color (non-green) rule gets the same
+// protection back as a VISIBLE, EDITABLE `unless` clause instead of invisible behavior — exactly
+// what the rebuilt language exists to make expressible. computeDisplayHealth below no longer
+// carries the global short-circuit; if PR #1178 lands first, its hardcode is redundant with this
+// and should be removed as part of reconciling this branch.
+const RULE_COMPLETE_PAUSED_GUARD = [{field:"status", op:"is", value:"green"}, {field:"status", op:"is", value:"paused"}];
+const migrateRule = r => {
+  if (r && Array.isArray(r.when)) return r; // already v2 shape
+  const build = LEGACY_RULE_FIELD_MAP[r?.type];
+  const when = build ? build(r.days) : [];
+  const unless = (r && r.color && r.color !== "green") ? RULE_COMPLETE_PAUSED_GUARD : [];
+  return {
+    id: r?.id ?? `r${Math.random().toString(36).slice(2,10)}`,
+    when, whenCombinator: "AND",
+    color: r?.color,
+    unless, unlessCombinator: "OR",
+  };
+};
+
+// ⛔ RETAINED, UNUSED BY THE LIVE ENGINE (superseded by RULE_FIELDS/evalFieldCondition above) —
+// kept only as the frozen behavioral reference migrateRule's LEGACY_RULE_FIELD_MAP translates
+// against, and because the existing test suite pins its exact semantics. Do not extend; extend
+// RULE_FIELDS/RULE_OPS instead.
+// Finite vocabulary by design: no formula parser, no scripting, no boolean composer — each
+// condition here is one named, parameterized (by N days) fact.
 const HEALTH_CONDITIONS = [
   {k:"finishPastDays",   label:"Finish date is N+ days past due",     needsDays:true,  defaultDays:1},
   {k:"finishWithinDays", label:"Finish date is within N days",         needsDays:true,  defaultDays:7},
@@ -2539,17 +2719,29 @@ const migrateCfRulesToHealthRules = cfRules => {
   if (cf.dueSoonYellow) out.push({id:"legacy-duesoon",  type:"finishWithinDays", days:7, color:"yellow"});
   return out;
 };
-// A brand-new plan's starting point, offered via the panel's "Reset to suggested defaults" — never
-// retrofitted onto an existing plan's settings (that would repaint tasks on upgrade).
+// A brand-new plan's starting point (v2 shape), offered via the panel's "Reset to suggested
+// defaults" — never retrofitted onto an existing plan's settings (that would repaint tasks on
+// upgrade). No separate "Complete → green" rule: marking a task Complete already sets
+// `health:"green"` directly (the status pill), and the fallback at the bottom of
+// computeDisplayHealth shows the raw stored health when no rule fires — a rule for it would be a
+// no-op. Both defaults carry the visible "unless already Complete/Paused" exception His sentence
+// asked for, in place of the old ordering trick.
 const DEFAULT_HEALTH_RULES = [
-  {id:"default-complete", type:"complete", color:"green"},
-  {id:"default-overdue",  type:"finishPastDays", days:1, color:"red"},
-  {id:"default-duesoon",  type:"finishWithinDays", days:3, color:"yellow"},
+  {id:"default-overdue", when:[{field:"finish", op:"pastDueAtLeast", value:1}], whenCombinator:"AND",
+    color:"red", unless:[...RULE_COMPLETE_PAUSED_GUARD], unlessCombinator:"OR"},
+  {id:"default-duesoon", when:[{field:"finish", op:"withinDays", value:3}], whenCombinator:"AND",
+    color:"yellow", unless:[...RULE_COMPLETE_PAUSED_GUARD], unlessCombinator:"OR"},
 ];
-const getHealthRules = settings => Array.isArray(settings?.healthRules) ? settings.healthRules : migrateCfRulesToHealthRules(settings?.cfRules);
+// getHealthRules is the ONE place old (v1 ordered-list) and very-old (3-toggle cfRules) stored
+// shapes become the v2 {when,unless} shape every caller (the panel, the evaluator) actually reads —
+// pure and derived, never persisted, so nothing repaints until the owner touches the panel.
+const getHealthRules = settings => {
+  const raw = Array.isArray(settings?.healthRules) ? settings.healthRules : migrateCfRulesToHealthRules(settings?.cfRules);
+  return raw.map(migrateRule);
+};
 const evalHealthRules = (task, settings, NOW, taskById) => {
   const rules = getHealthRules(settings);
-  for (const r of rules) { if (evalHealthCondition(r.type, r.days, task, NOW, taskById)) return r.color; }
+  for (const r of rules) { const c = evalRule(r, task, NOW, taskById); if (c) return c; }
   return null;
 };
 
@@ -2569,18 +2761,16 @@ const evalHealthRules = (task, settings, NOW, taskById) => {
 // that's safe).
 const computeDisplayHealth = (task, settings, taskById) => {
   if (!task) return task?.health;
-  // ⛔ COMPLETE-BEATS-ALL (2026-08-26, owner correction, verbatim: "if the finish date is in the
-  // past, it should be marked red and as Needs Attn., UNLESS I click task complete, it is THEN
-  // COMPLETE, I CAN OVERRIDE IN THAT SCENARIO"). Marking a task Complete is a first-class act, not
-  // an optional rule he has to remember to configure — it is evaluated ABOVE the rule list,
-  // unconditionally, whether or not a "complete" rule exists in settings.healthRules, and cannot be
-  // broken by editing/removing rules. "Complete" IS `task.health === "green"` (the same field the
-  // Complete status pill writes — there is no separate flag). This closes a live regression from the
-  // B752848 healthOverride retirement: a task marked Complete without its `percentComplete` also
-  // being bumped to 100 (the ordinary single-task edit path never did that — only the bulk cascade
-  // did) fell through to the plain `finishPastDays` rule and rendered red once its finish date
-  // passed, punishing the owner for finishing work. Measured live: 212 of 557 real leaf tasks.
-  if (task.health === "green") return "green";
+  // ⛔ B785744 SUPERSEDES the global "Complete beats all" short-circuit that briefly lived here
+  // (PR #1178/B780448, an emergency hardcode for the same live regression: "if the finish date is
+  // in the past, it should be marked red... UNLESS I click task complete, ... I CAN OVERRIDE IN
+  // THAT SCENARIO"). Per that fix's own owner instruction, once an UNLESS clause is expressible the
+  // hardcode becomes a visible, editable RULE, not invisible behavior baked into this function — see
+  // migrateRule's RULE_COMPLETE_PAUSED_GUARD, auto-attached to every migrated attention-color rule.
+  // Net effect for his real data is identical (Complete still beats overdue); the difference is a
+  // user can now see, edit, or narrow that exception per rule instead of it being an unconditional,
+  // un-editable global override — and it extends the same protection to Paused, matching the
+  // meeting/deadline blocks' own existing `health !== "green" && health !== "paused"` exemption below.
   const ruleResult = evalHealthRules(task, settings, NOW, taskById);
   if (ruleResult) return ruleResult;
   // B817 — a meeting-bound task surfaces its schedule risk BEFORE it slips: infeasible = red (a genuine
@@ -12315,10 +12505,94 @@ function RuleColorPicker({value, onChange}) {
   );
 }
 
-// ── AutomationPanel — an ORDERED list of {condition, color} rules, first match wins ─────────
-// Replaces the old fixed 3-toggle cfRules. `rules` resolves via getHealthRules: a plan that
-// already had one or more of the old toggles on sees them here as the equivalent rule(s), in
-// the same order, the first time it opens this panel — nothing repaints on upgrade.
+// ── ConditionRow / ConditionGroup — the field/comparison/value builder shared by a rule's IF and
+// UNLESS groups (B785744). One row = pick a FIELD, pick a COMPARISON valid for that field's type,
+// give a VALUE if the comparison needs one. Multiple rows in a group combine with AND/OR.
+function ConditionRow({cond, onChange, onRemove}) {
+  const field = RULE_FIELD_BY_K[cond.field] || RULE_FIELDS[0];
+  const ops = opsForField(field.k);
+  const op = ops.find(o => o.k === cond.op) || ops[0];
+  const setField = fk => {
+    const f = RULE_FIELD_BY_K[fk];
+    const newOp = opsForField(fk)[0];
+    onChange({field:fk, op:newOp.k, value: newOp.needsValue ? (newOp.defaultValue ?? (f.type==="status" ? "red" : "")) : undefined});
+  };
+  const setOp = ok => {
+    const newOp = ops.find(o => o.k === ok);
+    onChange({op:ok, value: newOp.needsValue ? (cond.value ?? newOp.defaultValue ?? (field.type==="status" ? "red" : "")) : undefined});
+  };
+  const selSt = {fontSize:11,color:"var(--txt)",border:"1px solid var(--bd2)",borderRadius:4,padding:"3px 4px",background:"#fff",minWidth:0};
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:5,flexWrap:"wrap"}}>
+      <select value={field.k} onChange={e=>setField(e.target.value)} style={{...selSt,flex:"1 1 120px"}}>
+        {RULE_FIELDS.map(f => <option key={f.k} value={f.k}>{f.label}</option>)}
+      </select>
+      <select value={op?.k} onChange={e=>setOp(e.target.value)} style={{...selSt,flex:"1 1 130px"}}>
+        {ops.map(o => <option key={o.k} value={o.k}>{o.label}</option>)}
+      </select>
+      {op?.needsValue && field.type==="date" && (
+        <input type="number" min={0} value={cond.value ?? op.defaultValue ?? 0}
+          onChange={e=>onChange({value: Math.max(0, parseInt(e.target.value,10)||0)})}
+          style={{width:36,fontSize:11,border:"1px solid var(--bd2)",borderRadius:4,padding:"3px 4px",flexShrink:0}} />
+      )}
+      {op?.needsValue && op.valueKind==="status" && (
+        <RuleColorPicker value={cond.value || "red"} onChange={hk=>onChange({value:hk})} />
+      )}
+      {op?.needsValue && op.valueKind==="text" && (
+        <input {...NO_AUTOFILL} type="text" value={cond.value || ""} placeholder="value"
+          onChange={e=>onChange({value:e.target.value})}
+          style={{width:80,fontSize:11,border:"1px solid var(--bd2)",borderRadius:4,padding:"3px 4px",flexShrink:1,minWidth:0}} />
+      )}
+      {op?.needsValue && op.valueKind==="number" && (
+        <input type="number" value={cond.value ?? 0}
+          onChange={e=>onChange({value: parseFloat(e.target.value)||0})}
+          style={{width:64,fontSize:11,border:"1px solid var(--bd2)",borderRadius:4,padding:"3px 4px",flexShrink:0}} />
+      )}
+      <span onClick={onRemove} title="Remove condition"
+        style={{cursor:"pointer",color:"var(--mut)",fontSize:12,lineHeight:1,flexShrink:0,padding:"0 2px",marginLeft:"auto"}}>&#x2715;</span>
+    </div>
+  );
+}
+function ConditionGroup({conds, combinator, onChange, addLabel}) {
+  const setConds = next => onChange({conds: next, combinator});
+  const updCond = (i, patch) => setConds(conds.map((c,ci) => ci===i ? {...c, ...patch} : c));
+  const removeCond = i => setConds(conds.filter((_,ci) => ci!==i));
+  const addCond = () => {
+    const op = opsForField(RULE_FIELDS[0].k)[0];
+    setConds([...conds, {field:RULE_FIELDS[0].k, op:op.k, value: op.needsValue ? op.defaultValue : undefined}]);
+  };
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:4}}>
+      {conds.map((c,i) => (
+        <React.Fragment key={i}>
+          {i>0 && (
+            <div style={{display:"flex",gap:4}}>
+              {["AND","OR"].map(op => (
+                <span key={op} onClick={()=>onChange({conds, combinator:op})}
+                  style={{fontSize:9,fontWeight:700,letterSpacing:".03em",cursor:"pointer",padding:"1px 6px",borderRadius:3,
+                    color: combinator===op ? "var(--on-accent)" : "var(--mut)",
+                    background: combinator===op ? "var(--blue)" : "var(--surf)"}}>{op}</span>
+              ))}
+            </div>
+          )}
+          <ConditionRow cond={c} onChange={patch=>updCond(i,patch)} onRemove={()=>removeCond(i)} />
+        </React.Fragment>
+      ))}
+      <span onClick={addCond} style={{fontSize:10.5,color:"var(--amber)",fontWeight:600,cursor:"pointer",alignSelf:"flex-start"}}>+ {addLabel}</span>
+    </div>
+  );
+}
+
+// ── AutomationPanel — IF/THEN/UNLESS rule builder (B785744, rebuild #2) ──────────────────────
+// Replaces the ordered-list-of-canned-conditions panel from #1073 (owner, verbatim: "you've got
+// like two variables here"). The real ask was Smartsheet/MS-Project-style conditional formatting:
+// pick a field, pick a comparison, give a value, combine with AND/OR, and — the piece the old
+// panel had no way to express — an UNLESS exception clause, so "Complete beats overdue" is a rule
+// you can read and edit instead of a hardcoded early-return. Rules stay an ORDERED list, first
+// FIRING rule wins (unchanged mental model — the owner kept this over "worst color always wins").
+// `rules` resolves via getHealthRules, which now also carries v1 (old ordered-list) and the very
+// old 3-toggle cfRules forward into this shape live — nothing repaints until this panel is opened
+// and something in it is touched (matches the migration precedent this panel has always used).
 function AutomationPanel({data, setData, onClose}) {
   const s = data.settings || DEFAULT_SETTINGS;
   const rules = getHealthRules(s);
@@ -12333,13 +12607,21 @@ function AutomationPanel({data, setData, onClose}) {
     setRules(next);
   };
   const addRule = () => {
-    const cond = HEALTH_CONDITIONS[0];
-    setRules([...rules, {id:`r${Date.now()}${Math.random().toString(36).slice(2,6)}`, type:cond.k, days:cond.defaultDays, color:"red"}]);
+    const op = opsForField(RULE_FIELDS[0].k)[0];
+    setRules([...rules, {
+      id:`r${Date.now()}${Math.random().toString(36).slice(2,6)}`,
+      when:[{field:RULE_FIELDS[0].k, op:op.k, value: op.needsValue ? op.defaultValue : undefined}], whenCombinator:"AND",
+      color:"red",
+      unless:[], unlessCombinator:"OR",
+    }]);
   };
-  const resetDefaults = () => setRules(DEFAULT_HEALTH_RULES.map(r => ({...r, id:`r${Date.now()}${Math.random().toString(36).slice(2,6)}`})));
+  const resetDefaults = () => setRules(DEFAULT_HEALTH_RULES.map(r => ({
+    ...r, id:`r${Date.now()}${Math.random().toString(36).slice(2,6)}`,
+    when: r.when.map(c=>({...c})), unless: r.unless.map(c=>({...c})),
+  })));
 
   return (
-    <div style={{position:"fixed",top:48,right:12,width:360,maxHeight:"calc(100vh - 64px)",overflowY:"auto",background:"#fff",border:"1px solid var(--bd2)",
+    <div style={{position:"fixed",top:48,right:12,width:440,maxHeight:"calc(100vh - 64px)",overflowY:"auto",background:"#fff",border:"1px solid var(--bd2)",
       borderRadius:8,boxShadow:"0 4px 20px rgba(0,0,0,0.14)",zIndex:9999,padding:"0 16px 14px"}}
       onMouseDown={e=>e.stopPropagation()}>
 
@@ -12357,43 +12639,55 @@ function AutomationPanel({data, setData, onClose}) {
 
       {/* Description */}
       <div style={{fontSize:11,color:"var(--mut)",lineHeight:1.5,marginBottom:10,paddingBottom:10,borderBottom:"1px solid var(--bd)"}}>
-        First matching rule sets a task's color. Nothing you pick by hand can override it.
+        First matching rule sets a task's color — IF its conditions are true, THEN it sets the status, UNLESS an exception applies.
       </div>
 
       {/* Rules */}
-      <div style={{display:"flex",flexDirection:"column",gap:6}}>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
         {rules.length === 0 && (
           <div style={{fontSize:11,color:"var(--mut)",padding:"6px 2px"}}>No rules yet — a task's status stays exactly what you set it to.</div>
         )}
-        {rules.map((r, i) => {
-          const cond = HEALTH_CONDITION_BY_KEY[r.type] || HEALTH_CONDITIONS[0];
-          return (
-            <div key={r.id} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 8px",borderRadius:6,background:"var(--surf)"}}>
-              <div style={{display:"flex",flexDirection:"column",flexShrink:0}}>
+        {rules.map((r, i) => (
+          <div key={r.id} style={{display:"flex",flexDirection:"column",gap:7,padding:"8px 9px",borderRadius:6,background:"var(--surf)",border:"1px solid var(--bd)"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <span style={{fontSize:9,fontWeight:700,letterSpacing:".05em",textTransform:"uppercase",color:"var(--mut)"}}>Rule {i+1}</span>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
                 <span onClick={()=>moveRule(i,-1)} title="Move up"
-                  style={{cursor:i===0?"default":"pointer",opacity:i===0?0.3:1,fontSize:9,lineHeight:1,color:"var(--mut)",padding:"1px 0"}}>▲</span>
+                  style={{cursor:i===0?"default":"pointer",opacity:i===0?0.3:1,fontSize:10,color:"var(--mut)"}}>▲</span>
                 <span onClick={()=>moveRule(i,1)} title="Move down"
-                  style={{cursor:i===rules.length-1?"default":"pointer",opacity:i===rules.length-1?0.3:1,fontSize:9,lineHeight:1,color:"var(--mut)",padding:"1px 0"}}>▼</span>
+                  style={{cursor:i===rules.length-1?"default":"pointer",opacity:i===rules.length-1?0.3:1,fontSize:10,color:"var(--mut)"}}>▼</span>
+                <span onClick={()=>removeRule(r.id)} title="Delete rule"
+                  style={{cursor:"pointer",color:"var(--mut)",fontSize:13,lineHeight:1}}>&#x2715;</span>
               </div>
-              <select value={r.type} onChange={e=>{
-                  const nc = HEALTH_CONDITION_BY_KEY[e.target.value];
-                  updRule(r.id, {type:e.target.value, days: nc.needsDays ? (r.days ?? nc.defaultDays) : undefined});
-                }}
-                style={{flex:1,minWidth:0,fontSize:11.5,color:"var(--txt)",border:"1px solid var(--bd2)",borderRadius:4,padding:"3px 4px",background:"#fff"}}>
-                {HEALTH_CONDITIONS.map(c => <option key={c.k} value={c.k}>{c.needsDays ? c.label.replace("N", r.type===c.k ? (r.days ?? c.defaultDays) : c.defaultDays) : c.label}</option>)}
-              </select>
-              {cond.needsDays && (
-                <input type="number" min={0} value={r.days ?? cond.defaultDays}
-                  onChange={e=>updRule(r.id, {days: Math.max(0, parseInt(e.target.value,10)||0)})}
-                  style={{width:38,fontSize:11.5,border:"1px solid var(--bd2)",borderRadius:4,padding:"3px 4px",flexShrink:0}} />
-              )}
-              <span style={{color:"var(--mut)",fontSize:12,flexShrink:0}}>→</span>
-              <RuleColorPicker value={r.color} onChange={hk=>updRule(r.id, {color:hk})} />
-              <span onClick={()=>removeRule(r.id)} title="Delete rule"
-                style={{cursor:"pointer",color:"var(--mut)",fontSize:13,lineHeight:1,flexShrink:0,padding:"0 2px"}}>&#x2715;</span>
             </div>
-          );
-        })}
+
+            <div>
+              <div style={{fontSize:9,fontWeight:700,letterSpacing:".05em",color:"var(--mut)",marginBottom:3}}>IF</div>
+              <ConditionGroup conds={r.when} combinator={r.whenCombinator}
+                onChange={({conds,combinator})=>updRule(r.id,{when:conds, whenCombinator:combinator})}
+                addLabel="Add condition" />
+            </div>
+
+            <div style={{display:"flex",alignItems:"center",gap:6}}>
+              <span style={{fontSize:9,fontWeight:700,letterSpacing:".05em",color:"var(--mut)"}}>THEN set status to</span>
+              <RuleColorPicker value={r.color} onChange={hk=>updRule(r.id,{color:hk})} />
+            </div>
+
+            <div>
+              <div style={{fontSize:9,fontWeight:700,letterSpacing:".05em",color:"var(--mut)",marginBottom:3}}>
+                UNLESS <span style={{fontWeight:400,textTransform:"none",letterSpacing:0}}>(optional)</span>
+              </div>
+              {r.unless && r.unless.length > 0 ? (
+                <ConditionGroup conds={r.unless} combinator={r.unlessCombinator}
+                  onChange={({conds,combinator})=>updRule(r.id,{unless:conds, unlessCombinator:combinator})}
+                  addLabel="Add exception" />
+              ) : (
+                <span onClick={()=>updRule(r.id,{unless:[{field:"status",op:"is",value:"green"}]})}
+                  style={{fontSize:10.5,color:"var(--amber)",fontWeight:600,cursor:"pointer"}}>+ Add exception</span>
+              )}
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Add / reset */}
