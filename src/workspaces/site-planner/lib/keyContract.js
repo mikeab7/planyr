@@ -71,6 +71,16 @@ export const KEY_CONTRACT = Object.freeze([
   { id: "tool-mellipse", label: "Markup ellipse", keys: ["e", "E"], mod: M.NONE, scope: "canvas", mutates: false },
   { id: "tool-mpolygon", label: "Markup polygon", keys: ["p", "P"], mod: M.SHIFT, scope: "canvas", mutates: false },
   { id: "tool-mpolyline", label: "Markup polyline", keys: ["n", "N"], mod: M.SHIFT, scope: "canvas", mutates: false },
+  /* ⛔ NEW-1 — THE ENTRY THIS BUG WAS ABOUT. Every other bare-letter tool shortcut (v/h/m/s/q/t/l/r/e,
+   * ⇧P, ⇧N) was declared here; this one was not, and `resolveKeyEntry` returns null for anything the
+   * table doesn't know about — which `keyScopeVerdict` then ALWAYS allows through (`if (!entry) return
+   * { allow: true, … }`), FIELD scope included. So typing a bare "c" into any text field (a callout,
+   * an inline number editor, a plan/project rename box, a search field) never reached the arbitration
+   * at all: it skipped straight past the typing guard and armed the Cloud tool mid-keystroke, eating
+   * the "c" out of whatever was being typed. Declaring it here is the whole fix — the SitePlanner
+   * branch that arms the tool is unchanged, only now `keyScopeVerdict` is asked first, exactly like
+   * every other letter. */
+  { id: "tool-mcloud", label: "Cloud tool", keys: ["c", "C"], mod: M.NONE, scope: "canvas", mutates: false },
   { id: "hand-pan", label: "Hold to pan", keys: [" "], codes: ["Space"], mod: M.NONE, scope: "canvas", mutates: false },
 
   // ── canvas: editing ───────────────────────────────────────────────────────────────────────────
