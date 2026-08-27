@@ -235,11 +235,21 @@ import { HATCH_OPTIONS, hatchSpec } from "../../shared/style/hatchPatterns.js";
 // background rect's opacity (0 = no rect at all, matching the historic line-only pat-encumber);
 // `lineOpacity` is the hatch stroke/dot opacity. Tile is constant SCREEN-PIXEL space (no scale
 // ancestor reaches it), so it never turns to mush zoomed out or a solid block zoomed in.
-function HatchPatternDef({ id, hatchKey, color, wash = 0, lineOpacity = 0.5 }) {
+// `labelK` (1 on screen, the export-frame correction — see the render body's `labelFrame`) keeps
+// the tile's PHYSICAL size on a printed sheet independent of whatever live zoom was active when
+// the export was captured — see B794960: this tile is a constant-canvas-px size with no scale
+// ancestor (deliberately, so it never turns to mush/solid on screen at any zoom — see
+// shared/style/hatchPatterns.js), but the export clone gets its OWN uniform rescale onto the page
+// (buildComposedSheet nests it as `<svg viewBox=…>` at a fixed physical plan-box size), and that
+// rescale is exactly as zoom-dependent for a pattern tile as it is for the callout arrowhead this
+// item also fixes. `patternTransform` composing a uniform `scale(labelK)` with any existing
+// rotation is safe because a uniform scale commutes with rotation.
+function HatchPatternDef({ id, hatchKey, color, wash = 0, lineOpacity = 0.5, labelK = 1 }) {
   const spec = hatchSpec(hatchKey);
   const size = spec ? spec.size : 7;
+  const tf = [spec ? `rotate(${spec.rotate})` : null, labelK !== 1 ? `scale(${labelK})` : null].filter(Boolean).join(" ") || undefined;
   return (
-    <pattern id={id} width={size} height={size} patternUnits="userSpaceOnUse" patternTransform={spec ? `rotate(${spec.rotate})` : undefined}>
+    <pattern id={id} width={size} height={size} patternUnits="userSpaceOnUse" patternTransform={tf}>
       {wash > 0 && <rect width={size} height={size} fill={color} opacity={wash} />}
       {spec && spec.lines && spec.lines.map(([x1, y1, x2, y2], i) => (
         <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke={color} strokeWidth="1.1" opacity={lineOpacity} />
@@ -2401,6 +2411,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const labelPpf = labelFrame.ppf;   // the px-per-foot label DECISIONS are made at
   const labelK = labelFrame.k;       // label-space px → canvas px (1 on screen)
   const strokeZk = labelFrame.strokeZk; // the zoom factor `strokeZoom` uses (1 on an export pass)
+  // B794960 — a hatch `<pattern>`'s tile is deliberately a constant-canvas-px size with no scale
+  // ancestor (see HatchPatternDef's header); `labelK` is what keeps that tile's PHYSICAL size on a
+  // printed sheet independent of the live zoom at capture. Undefined patternTransform on both
+  // (rot=0, labelK=1) reproduces every existing pattern byte-for-byte on screen.
+  const patHatchTf = (rotDeg) => {
+    const parts = [rotDeg ? `rotate(${rotDeg})` : null, labelK !== 1 ? `scale(${labelK})` : null].filter(Boolean);
+    return parts.length ? parts.join(" ") : undefined;
+  };
   const cullActive = !exportPass && shouldCull(drawableCount);
   /* VIEW-INDEPENDENT-ONCE (NEW-2). The cull rect is LATCHED: `cullRectFor` hands back the rect we
      already hold for as long as the true viewport is still comfortably inside it, and only builds
@@ -20634,7 +20652,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const tips = calloutTips(c).map((p) => f2p(p));
                 const boxRect = { x: bp.x - w / 2, y: bp.y - h / 2, w, h };
                 const cr = calloutCornerRadius(w, h); // NEW-1 — zoom-invariant, low → rectangle at every zoom
-                const ah = Math.max(7, fontPx * 0.7);
+                // NEW-1 (B794960) — the 7px floor is a SCREEN legibility minimum (fontPx is feet-
+                // proportional via rppf, so absent the floor the arrowhead already exports at the
+                // right relative size). The floor itself is an absolute px constant and, per
+                // exportLabelScale.js's own rule ("Only absolute px constants — a font size, a
+                // 30-px legibility floor — need the ppf/k treatment"), must ride `labelK` (1 on
+                // screen, unchanged) so it doesn't bake a huge world-feet arrowhead when captured
+                // at a zoomed-OUT live view (exactly what framing a large exhibit requires) — see
+                // BACKLOG.md B794960 for the measured before/after.
+                const ah = Math.max(7 * labelK, fontPx * 0.7);
                 return (
                   <g key={c.id} data-testid={`callout-${c.id}`} data-feature={`callout:${c.id}`} data-callout-leaders={tips.length}>
                     {/* N leaders — each anchored from its OWN nearest box edge/corner (not one shared
@@ -20667,7 +20693,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           }}>
                           <line data-testid={`callout-leader-stub-${c.id}-${i}`} x1={origin.x} y1={origin.y} x2={elbow.x} y2={elbow.y} stroke={border} strokeWidth={1.6} />
                           <line data-testid={`callout-leader-run-${c.id}-${i}`} x1={elbow.x} y1={elbow.y} x2={tp.x} y2={tp.y} stroke={border} strokeWidth={1.6} />
-                          <polygon points={`${tp.x},${tp.y} ${tp.x - ah * Math.cos(ang - 0.4)},${tp.y - ah * Math.sin(ang - 0.4)} ${tp.x - ah * Math.cos(ang + 0.4)},${tp.y - ah * Math.sin(ang + 0.4)}`} fill={border} />
+                          <polygon data-testid={`callout-leader-arrow-${c.id}-${i}`} points={`${tp.x},${tp.y} ${tp.x - ah * Math.cos(ang - 0.4)},${tp.y - ah * Math.sin(ang - 0.4)} ${tp.x - ah * Math.cos(ang + 0.4)},${tp.y - ah * Math.sin(ang + 0.4)}`} fill={border} />
                           {/* a transparent, wider hit-stroke on EACH segment so a thin leader (or its stub) is still easy to right-click */}
                           <line x1={origin.x} y1={origin.y} x2={elbow.x} y2={elbow.y} stroke="transparent" strokeWidth={10} data-export="skip" />
                           <line x1={elbow.x} y1={elbow.y} x2={tp.x} y2={tp.y} stroke="transparent" strokeWidth={10} data-export="skip" />
@@ -21613,7 +21639,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <filter id="bldgShadow" x="-20%" y="-20%" width="140%" height="140%">
                 <feDropShadow dx="0" dy="1.5" stdDeviation="2.5" floodColor="#2b2620" floodOpacity="0.28" />
               </filter>
-              <pattern id="pat-landscape" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+              {/* B794960 — `patHatchTf` composes the existing rotation with `labelK` (1 on
+                  screen), the same export-frame correction the callout arrowhead uses just below,
+                  so this tile's PHYSICAL size on a printed sheet stops depending on whatever live
+                  zoom was active when the export was captured (see HatchPatternDef's header). */}
+              <pattern id="pat-landscape" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform={patHatchTf(45)}>
                 <line x1="0" y1="0" x2="0" y2="9" stroke="#7f9a63" strokeWidth="0.8" opacity="0.5" />
               </pattern>
               {/* B231 — cartographic water body: a radial steel-teal gradient that deepens
@@ -21629,28 +21659,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   further down, only for an easement/encumbrance a user has actually styled)
                   are the exact same recipe. `pat-encumber` unchanged in every visible respect
                   (purple line, no wash) — see easements.js's ENCUMBRANCE_DEFAULT header. */}
-              <HatchPatternDef id="pat-encumber" hatchKey={ENCUMBRANCE_DEFAULT.hatch} color={ENCUMBRANCE_DEFAULT.stroke} wash={ENCUMBRANCE_DEFAULT.fillOpacity} lineOpacity={0.55} />
+              <HatchPatternDef id="pat-encumber" hatchKey={ENCUMBRANCE_DEFAULT.hatch} color={ENCUMBRANCE_DEFAULT.stroke} wash={ENCUMBRANCE_DEFAULT.fillOpacity} lineOpacity={0.55} labelK={labelK} />
               {/* v3 C4 — the pond's earthen berm ring: a warm-earth body at ~45% opacity + a 45°
                   hatch in a darker tone, so the embankment around a bermed pond reads as raised
                   ground distinct from the water it holds. */}
-              <pattern id="pat-berm" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+              <pattern id="pat-berm" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform={patHatchTf(45)}>
                 <rect width="7" height="7" fill="#b08d57" opacity="0.45" />
                 <line x1="0" y1="0" x2="0" y2="7" stroke="#7a5f36" strokeWidth="1.1" opacity="0.6" />
               </pattern>
               {/* colour-blind-safe secondary cues for the paved surfaces (H2): trailer
                   reads as a coarse diagonal (opposite lean to landscape), sidewalk as a
                   fine concrete-scoring dot grid. */}
-              <pattern id="pat-trailer" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
+              <pattern id="pat-trailer" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform={patHatchTf(-45)}>
                 <line x1="0" y1="0" x2="0" y2="8" stroke="#b09a6c" strokeWidth="0.9" opacity="0.5" />
               </pattern>
-              <pattern id="pat-sidewalk" width="7" height="7" patternUnits="userSpaceOnUse">
+              <pattern id="pat-sidewalk" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform={patHatchTf(0)}>
                 <circle cx="1.4" cy="1.4" r="0.7" fill="#9c998d" opacity="0.5" />
               </pattern>
               {/* easement fills: a semi-transparent body + hatch, color-coded per type (NEW-1),
                   now DEFAULT-only — the per-type pattern is exactly today's historic look and is
                   shared by every unedited easement of that type. */}
               {EASEMENT_TYPES.map((t) => (
-                <HatchPatternDef key={t.key} id={`pat-ease-${t.key}`} hatchKey={DEFAULT_EASE_HATCH} color={t.color} wash={DEFAULT_EASE_FILL_OPACITY} lineOpacity={0.5} />
+                <HatchPatternDef key={t.key} id={`pat-ease-${t.key}`} hatchKey={DEFAULT_EASE_HATCH} color={t.color} wash={DEFAULT_EASE_FILL_OPACITY} lineOpacity={0.5} labelK={labelK} />
               ))}
               {/* NEW-EASE-STYLE — one <pattern> per easement/encumbrance a user has actually
                   styled (colour/opacity/hatch edited in Properties). The common case — an
@@ -21658,11 +21688,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   above, so this stays cheap even on a plan with many easements. */}
               {markups.filter((m) => m.kind === "easement" && easementStyle(m).hasOverride).map((m) => {
                 const st = easementStyle(m);
-                return <HatchPatternDef key={`pat-ep-${m.id}`} id={`pat-ease-el-${m.id}`} hatchKey={st.hatch} color={st.fill} wash={st.fillOpacity} lineOpacity={0.5} />;
+                return <HatchPatternDef key={`pat-ep-${m.id}`} id={`pat-ease-el-${m.id}`} hatchKey={st.hatch} color={st.fill} wash={st.fillOpacity} lineOpacity={0.5} labelK={labelK} />;
               })}
               {markups.filter((m) => m.kind === "encumbrance" && encumbranceStyle(m).hasOverride).map((m) => {
                 const st = encumbranceStyle(m);
-                return <HatchPatternDef key={`pat-ec-${m.id}`} id={`pat-encumber-el-${m.id}`} hatchKey={st.hatch} color={st.fill} wash={st.fillOpacity} lineOpacity={0.55} />;
+                return <HatchPatternDef key={`pat-ec-${m.id}`} id={`pat-encumber-el-${m.id}`} hatchKey={st.hatch} color={st.fill} wash={st.fillOpacity} lineOpacity={0.55} labelK={labelK} />;
               })}
             </defs>
 
