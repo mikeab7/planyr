@@ -17,6 +17,7 @@ import { useHashRoute, unknownModuleSlug, isAdminRoute, INITIAL_HASH_EMPTY } fro
 import { writeLastRoute, seedBootRoute } from "./lastRoute.js";
 import { installBuildSkewWatch, shouldOfferReload, LOADED_BUILD } from "./buildSkew.js";
 import { reloadFresh } from "./chunkReload.js";
+import { RADIUS } from "../shared/ui/radius.js";
 
 const AdminGate = lazy(() => import("../workspaces/admin/AdminGate.jsx"));
 
@@ -70,7 +71,7 @@ function UpdateBanner({ reason, onReload, onDismiss }) {
       <button
         type="button" data-testid="app-update-reload" onClick={onReload}
         style={{
-          flex: "0 0 auto", border: "1px solid var(--warn-text)", borderRadius: 999,
+          flex: "0 0 auto", border: "1px solid var(--warn-text)", borderRadius: RADIUS.pill,
           background: "transparent", color: "var(--warn-text)", font: "inherit",
           fontSize: 11.5, fontWeight: 700, padding: "2px 12px", cursor: "pointer",
         }}
@@ -78,7 +79,7 @@ function UpdateBanner({ reason, onReload, onDismiss }) {
       <button
         type="button" data-testid="app-update-dismiss" onClick={onDismiss}
         style={{
-          flex: "0 0 auto", border: "1px solid var(--border-default)", borderRadius: 999,
+          flex: "0 0 auto", border: "1px solid var(--border-default)", borderRadius: RADIUS.pill,
           background: "transparent", color: "var(--text-tertiary)", font: "inherit",
           fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
         }}

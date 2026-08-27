@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-27 @ `aaace709` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-27 @ `b59dae8f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_574 source files mapped._
+_575 source files mapped._
 
 ## infra
 
@@ -416,6 +416,8 @@ _574 source files mapped._
   - _exports_: `placeContextMenu`
 - **`src/shared/ui/controls.jsx`** — shared control primitives (B657-5B): one radius/padding/typography scale + Button/ToggleChip/IconButton/Field/Section/MenuItem, token-driven, with a threaded `accent` prop so each module keeps its hue.
   - _exports_: `Button`, `Field`, `FONT`, `IconButton`, `MenuItem`, `menuPanelStyle`, `PAD`, `RADIUS`, `Section`, `ToggleChip`
+- **`src/shared/ui/designTokens.js`** — B809906 design tokens: spacing (`SPACE`), type scale (`FONT_SIZE`) and standard control heights (`CONTROL_H`) — the audited-value siblings of `radius.js`'s `RADIUS`.
+  - _exports_: `CONTROL_H`, `FONT_SIZE`, `SPACE`
 - **`src/shared/ui/floatingPanel.js`** — NEW-1 poppable panels: pure geometry + docked-only decision (clamp-to-map-viewport, first-open cascade, narrow reconcile) + the 760px breakpoint constant; unit-tested, shared by the live drag path and tests
   - _exports_: `clampToBounds`, `dockAfterRelinquish`, `FLOAT_MIN_WIDTH`, `FLOAT_SIZE`, `initialFloatPos`, `reconcileForNarrow`, `shouldInspectorTakeDock`
 - **`src/shared/ui/FloatingPanel.jsx`** — NEW-1 poppable panels: a left-rail panel detached into a portal-to-body draggable card over the map (drag-clamp, session-remembered position, map pan/zoom isolation); composes PanelChrome

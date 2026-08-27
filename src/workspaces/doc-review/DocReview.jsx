@@ -48,6 +48,7 @@ import { pickInMarquee, selMods, nextSelection, hasSelMod } from "../../shared/m
 import { pickMarkup, hitCalloutLeaderIndex, calloutBoxWH, calloutDblZone } from "../../shared/markup/hitTest.js";
 import SelectionChrome from "../../shared/markup/SelectionChrome.jsx";
 import { touchLatch, touchFactsOf, TOUCH } from "../../shared/keyboard/keyScope.js";
+import { RADIUS } from "../../shared/ui/radius.js";
 
 // Last cross-workspace "open this review" intent already acted on. Module-scoped (not a
 // ref) so it survives this lazy workspace unmounting/remounting — otherwise switching back
@@ -2022,7 +2023,7 @@ export default function DocReview({
         onNewProject={onNewProject}
         centerContent={
           <button onClick={() => onShellSwitch?.("library")} title="Open the Library to browse this project's files"
-            style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px",
+            style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.pill, padding: "3px 10px",
               border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: "var(--chrome-text)" }}>
             🗂 Library
           </button>
@@ -2195,7 +2196,7 @@ export default function DocReview({
           // Browsing files now lives in the Library workspace; this button switches there
           // (carrying the current project, since the URL project survives a module switch).
           <button onClick={() => onShellSwitch?.("library")} title="Open the Library to browse this project's files"
-            style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px",
+            style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.pill, padding: "3px 10px",
               border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: "var(--chrome-text)" }}>
             🗂 Library
           </button>
@@ -2248,15 +2249,15 @@ export default function DocReview({
       {redrop && (
         <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 12px", background: "var(--warn-bg)", color: "var(--warn-text)", fontSize: 12, fontFamily: "system-ui, sans-serif" }}>
           <span>⚠ {redrop}</span>
-          <button onClick={() => fileRef.current?.click()} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid var(--warn-border)", background: "var(--surface-raised)", color: "var(--warn-text)" }}>Re-open file…</button>
+          <button onClick={() => fileRef.current?.click()} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: RADIUS.sm, border: "1px solid var(--warn-border)", background: "var(--surface-raised)", color: "var(--warn-text)" }}>Re-open file…</button>
         </div>
       )}
 
       {openErr && (
         <div role="alert" style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 12px", background: "var(--danger-bg)", color: "var(--danger-text)", fontSize: 12, fontFamily: "system-ui, sans-serif" }}>
           <span>⚠ {openErr}</span>
-          <button onClick={() => { setOpenErr(""); onShellSwitch?.("library"); }} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid var(--danger-border)", background: "var(--surface-raised)", color: "var(--danger-text)" }}>Open Library…</button>
-          <button onClick={() => setOpenErr("")} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "transparent", color: "var(--danger-text)", border: "1px solid var(--danger-border)", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+          <button onClick={() => { setOpenErr(""); onShellSwitch?.("library"); }} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: RADIUS.sm, border: "1px solid var(--danger-border)", background: "var(--surface-raised)", color: "var(--danger-text)" }}>Open Library…</button>
+          <button onClick={() => setOpenErr("")} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "transparent", color: "var(--danger-text)", border: "1px solid var(--danger-border)", borderRadius: RADIUS.sm, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
         </div>
       )}
 
@@ -2271,15 +2272,15 @@ export default function DocReview({
             <div style={{ fontSize: 12, marginBottom: 14 }}>Calibrate to scale, measure distance/area/count, redline, and roll up a takeoff.</div>
             <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
               <button data-testid="empty-open-library" onClick={() => onShellSwitch?.("library")}
-                style={{ fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer", borderRadius: 8, padding: "7px 14px", border: "1px solid var(--accent-library)", background: "var(--accent-library)", color: "var(--on-accent-library)" }}>
+                style={{ fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer", borderRadius: RADIUS.md, padding: "7px 14px", border: "1px solid var(--accent-library)", background: "var(--accent-library)", color: "var(--on-accent-library)" }}>
                 🗂 Browse the Library
               </button>
               <button onClick={() => fileRef.current?.click()}
-                style={{ fontFamily: "inherit", fontSize: 12.5, fontWeight: 600, cursor: "pointer", borderRadius: 8, padding: "7px 14px", border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-secondary)" }}>
+                style={{ fontFamily: "inherit", fontSize: 12.5, fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, padding: "7px 14px", border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-secondary)" }}>
                 Open PDF…
               </button>
               <button data-testid="empty-compare" onClick={() => { setErr(""); compareInputRef.current?.click(); }}
-                style={{ fontFamily: "inherit", fontSize: 12.5, fontWeight: 600, cursor: "pointer", borderRadius: 8, padding: "7px 14px", border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-secondary)" }}>
+                style={{ fontFamily: "inherit", fontSize: 12.5, fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, padding: "7px 14px", border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-secondary)" }}>
                 ⇄ Compare revisions…
               </button>
             </div>
@@ -2366,7 +2367,7 @@ export default function DocReview({
                   const lb = sheetLabel(n);
                   return (
                     <button key={gid} ref={active ? activeSheetRef : null} onClick={() => goToPage(n)} title={sheetTip(n)} data-testid="sheet-entry"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 9px", marginBottom: 3, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 12,
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 9px", marginBottom: 3, borderRadius: RADIUS.sm, cursor: "pointer", fontFamily: "inherit", fontSize: 12,
                         border: `1px solid ${active ? PAL.accent : PAL.line}`, background: active ? "var(--hover-ghost)" : "var(--surface-raised)", color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       <SheetRowText code={lb.code} title={lb.title} />
                     </button>
@@ -2378,7 +2379,7 @@ export default function DocReview({
                 return (
                   <div key={gid} style={{ marginBottom: 4 }}>
                     <button onClick={() => { setOpenGroups((o) => ({ ...o, [gid]: !open })); goToPage(g.pages[0].pageNum); }} title={g.label} data-testid="sheet-group"
-                      style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", textAlign: "left", padding: "6px 8px", borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, fontWeight: 700,
+                      style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", textAlign: "left", padding: "6px 8px", borderRadius: RADIUS.sm, cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, fontWeight: 700,
                         border: `1px solid ${activeInGroup ? PAL.accent : PAL.line}`, background: activeInGroup ? "var(--hover-ghost)" : "var(--surface-page)", color: PAL.ink }}>
                       <span style={{ flex: "none", fontSize: 9, color: PAL.muted }}>{open ? "▾" : "▸"}</span>
                       <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -2390,7 +2391,7 @@ export default function DocReview({
                       const active = n === page;
                       return (
                         <button key={n} ref={active ? activeSheetRef : null} onClick={() => goToPage(n)} title={sheetTip(n)} data-testid="sheet-entry"
-                          style={{ display: "block", width: "calc(100% - 12px)", marginLeft: 12, textAlign: "left", padding: "5px 8px", marginBottom: 2, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, fontWeight: 600,
+                          style={{ display: "block", width: "calc(100% - 12px)", marginLeft: 12, textAlign: "left", padding: "5px 8px", marginBottom: 2, borderRadius: RADIUS.sm, cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, fontWeight: 600,
                             border: `1px solid ${active ? PAL.accent : PAL.line}`, background: active ? "var(--hover-ghost)" : "var(--surface-raised)", color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {sheetShort(n)}
                         </button>
@@ -2484,7 +2485,7 @@ export default function DocReview({
               <button type="button" data-testid="sheet-open-error" onClick={() => setBackdropFail(null)} title="Dismiss"
                 style={{ position: "absolute", top: 10, left: "50%", transform: "translateX(-50%)", zIndex: 6, cursor: "pointer",
                   fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", color: "var(--warn-text)", background: "var(--warn-bg)",
-                  border: "1px solid var(--warn-border)", borderRadius: 999, padding: "4px 12px", boxShadow: "0 2px 8px rgba(0,0,0,0.18)" }}>
+                  border: "1px solid var(--warn-border)", borderRadius: RADIUS.pill, padding: "4px 12px", boxShadow: "0 2px 8px rgba(0,0,0,0.18)" }}>
                 ⚠ {openState.error}
               </button>
             )}

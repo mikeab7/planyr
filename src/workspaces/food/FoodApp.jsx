@@ -24,6 +24,7 @@ import {
   manualWishlistFromRows, manualGroupKey,
 } from "./lib/foodStore.js";
 import { searchOverpass } from "./lib/overpass.js";
+import { RADIUS } from "../../shared/ui/radius.js";
 
 export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, authControl, accountActive, userId }) {
   const [view, setView] = useState("map"); // "map" | "list"
@@ -339,7 +340,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
                 type="button" onClick={togglePinMode} aria-pressed={pinMode}
                 title="Drop a pin for a place not on the map"
                 style={{
-                  border: "1px solid var(--border-default)", borderRadius: 8, padding: "6px 14px", cursor: "pointer",
+                  border: "1px solid var(--border-default)", borderRadius: RADIUS.md, padding: "6px 14px", cursor: "pointer",
                   font: "inherit", fontSize: 12.5, fontWeight: 700,
                   background: pinMode ? "var(--accent-food)" : "transparent",
                   color: pinMode ? "var(--on-accent-food)" : "var(--text-primary)",

@@ -34,6 +34,7 @@ import CloudSyncBadge from "../../shared/ui/CloudSyncBadge.jsx";
 import { useReviewPersistence, docSaveState } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
 import { writeLastDoc, readLegacyPointers } from "./lib/lastDoc.js";
+import { RADIUS } from "../../shared/ui/radius.js";
 
 const PAL = { paper: "var(--surface-page)", ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chrome: "var(--chrome-bg)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)", ember: "var(--accent)" };
 const uid = () => "s" + Math.random().toString(36).slice(2, 9);
@@ -1088,7 +1089,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
               name is on the hover tooltip. */}
           {trayItems.map((t) => t.group ? (
             <button key={t.key} data-testid="stitch-tray-row" onClick={() => addGroup(t.pdf, t.group, t.groupIndex)} title={`${t.group.label} — ${t.pdf.name}`}
-              style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 11, border: `1px solid ${t.group.kind === "group" ? "#c7b88f" : PAL.line}`, background: t.group.kind === "group" ? "#fbf7ec" : "#fff", color: PAL.ink }}>
+              style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: RADIUS.sm, cursor: "pointer", fontFamily: "inherit", fontSize: 11, border: `1px solid ${t.group.kind === "group" ? "#c7b88f" : PAL.line}`, background: t.group.kind === "group" ? "#fbf7ec" : "#fff", color: PAL.ink }}>
               {/* The sheet CODE is pinned and never truncated — on a real set the titles repeat
                   ("OVERALL ROOF PLAN" on four disciplines) and the code is the only thing that
                   tells two rows apart. Title middle-truncates beside it. */}
@@ -1101,7 +1102,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
             </button>
           ) : (
             <button key={t.key} data-testid="stitch-tray-row" onClick={() => addSheet(t.pdf, t.page)} title={`${t.pdf.name} · page ${t.page}`}
-              style={{ display: "flex", alignItems: "baseline", gap: 3, width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 3, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 11, border: `1px solid ${PAL.line}`, background: "#fff", color: PAL.ink, overflow: "hidden" }}>
+              style={{ display: "flex", alignItems: "baseline", gap: 3, width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 3, borderRadius: RADIUS.sm, cursor: "pointer", fontFamily: "inherit", fontSize: 11, border: `1px solid ${PAL.line}`, background: "#fff", color: PAL.ink, overflow: "hidden" }}>
               <span style={{ flex: "none", fontWeight: 700, color: PAL.muted }}>+</span>
               <MiddleTruncate text={`${t.pdf.name.replace(/\.pdf$/i, "")} · p${t.page}`} title={`${t.pdf.name} · page ${t.page}`} />
             </button>
@@ -1218,7 +1219,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
             </div>
           )}
           {(align || tool !== "pan") && !calInput && (
-            <div style={{ position: "absolute", left: "50%", bottom: 14, transform: "translateX(-50%)", background: align ? PAL.accent : "rgba(25,22,19,0.9)", color: "#fff", padding: "7px 14px", borderRadius: 99, fontSize: 12, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 6px 20px rgba(0,0,0,0.3)" }}>
+            <div style={{ position: "absolute", left: "50%", bottom: 14, transform: "translateX(-50%)", background: align ? PAL.accent : "rgba(25,22,19,0.9)", color: "#fff", padding: "7px 14px", borderRadius: RADIUS.pill, fontSize: 12, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 6px 20px rgba(0,0,0,0.3)" }}>
               {align ? alignMsg : tool === "calibrate" ? "Click two points a known distance apart" : tool === "distance" ? "Click two points" : "Click a region; double-click / Enter to close"}
               {align && " · Esc to cancel"}
             </div>
@@ -1284,7 +1285,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
           )}
           {/* Auto-stitch result line (B337) — what just happened, dismissable. */}
           {notice && (
-            <div style={{ position: "absolute", top: 10, right: 10, zIndex: 4, maxWidth: 320, background: "rgba(25,22,19,0.92)", color: "#fff", padding: "7px 12px", borderRadius: 8, fontSize: 11.5, fontFamily: "system-ui, sans-serif", boxShadow: "0 4px 14px rgba(0,0,0,0.25)", cursor: "pointer" }} onClick={() => setNotice("")} title="Dismiss">{notice}</div>
+            <div style={{ position: "absolute", top: 10, right: 10, zIndex: 4, maxWidth: 320, background: "rgba(25,22,19,0.92)", color: "#fff", padding: "7px 12px", borderRadius: RADIUS.md, fontSize: 11.5, fontFamily: "system-ui, sans-serif", boxShadow: "0 4px 14px rgba(0,0,0,0.25)", cursor: "pointer" }} onClick={() => setNotice("")} title="Dismiss">{notice}</div>
           )}
           {/* B630/NEW-1 — a reference set (schedules/legends, not to scale) has nothing to stitch or
               measure; steer to single-sheet Review instead of leaving a wall of impossible Align gates.

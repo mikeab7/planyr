@@ -33,6 +33,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import AnchoredMenu from "./AnchoredMenu.jsx";
 import { getRecents, subscribeRecents, uniqueHexes, normalizeHex, commitPick } from "./colorRecents.js";
+import { RADIUS } from "./radius.js";
 
 /** Live view of the shared recents list — only colours actually used, never padded. */
 export function useColorRecents(max) {
@@ -152,7 +153,7 @@ export default function ColorField({
         aria-haspopup="dialog" aria-expanded={open} disabled={disabled}
         onClick={disabled ? undefined : () => setOpen((o) => !o)}
         style={{
-          width: 34, height: 26, padding: 0, borderRadius: 6, flex: "0 0 auto",
+          width: 34, height: 26, padding: 0, borderRadius: RADIUS.sm, flex: "0 0 auto",
           border: "1px solid var(--border-default)", background: mixed ? MIXED_FILL : (cur || value),
           cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.55 : 1,
           ...(style || {}),

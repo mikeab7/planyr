@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { pendingLegacySites, importOneSiteToCloud, discardLegacySite, isEmptySite } from "../lib/storage.js";
+import { RADIUS } from "../../../shared/ui/radius.js";
 
 const F = "system-ui, -apple-system, sans-serif";
 
@@ -144,7 +145,7 @@ export function SiteReviewModal({ uid, onOpen, onClose }) {
             title="Close"
             style={{
               cursor: "pointer", background: "rgba(255,255,255,0.09)",
-              color: "#b0c4e8", border: "none", borderRadius: 6,
+              color: "#b0c4e8", border: "none", borderRadius: RADIUS.sm,
               padding: "3px 10px", fontFamily: F, fontSize: 13, fontWeight: 700,
             }}
           >✕</button>
@@ -332,7 +333,7 @@ export function SiteReviewModal({ uid, onOpen, onClose }) {
               background: decidedCount === sites.length ? "#4f7df0" : "rgba(255,255,255,0.07)",
               color: decidedCount === sites.length ? "#fff" : "#7a98c8",
               border: decidedCount === sites.length ? "none" : "1px solid #273560",
-              borderRadius: 8, padding: "8px 22px",
+              borderRadius: RADIUS.md, padding: "8px 22px",
               fontFamily: F, fontSize: 13, fontWeight: 700,
               transition: "background 0.15s",
             }}

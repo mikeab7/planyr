@@ -29,6 +29,7 @@
 import { useEffect, useRef, useState } from "react";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { rankSearchCandidates } from "../lib/searchQuality.js";
+import { RADIUS } from "../../../shared/ui/radius.js";
 
 const DEBOUNCE_MS = 220;
 const MIN_QUERY_LEN = 2;
@@ -160,7 +161,7 @@ export default function SearchBox({
               onClick={() => (p.kind === "manual" ? selectManual(p) : selectPlace(p))}
               style={{
                 display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, width: "100%",
-                textAlign: "left", border: "none", background: "transparent", borderRadius: 6, padding: "7px 8px",
+                textAlign: "left", border: "none", background: "transparent", borderRadius: RADIUS.sm, padding: "7px 8px",
                 cursor: "pointer", font: "inherit", color: "var(--text-primary)",
               }}
             >
@@ -208,7 +209,7 @@ export default function SearchBox({
               type="button" onClick={runLiveSearch} data-testid="food-search-live-fallback"
               style={{
                 display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent",
-                borderRadius: 6, padding: "7px 8px", cursor: "pointer", font: "inherit", fontSize: 12.5,
+                borderRadius: RADIUS.sm, padding: "7px 8px", cursor: "pointer", font: "inherit", fontSize: 12.5,
                 fontWeight: 700, color: "var(--accent-food)",
               }}
             >
@@ -228,7 +229,7 @@ export default function SearchBox({
                 type="button" onClick={() => onStartDropPinFor(trimmed)} data-testid="food-search-drop-pin"
                 style={{
                   display: "block", width: "100%", textAlign: "left", border: "1px dashed var(--border-default)",
-                  borderRadius: 6, padding: "7px 8px", cursor: "pointer", font: "inherit", fontSize: 12.5,
+                  borderRadius: RADIUS.sm, padding: "7px 8px", cursor: "pointer", font: "inherit", fontSize: 12.5,
                   fontWeight: 700, color: "var(--text-primary)", background: "transparent",
                 }}
               >

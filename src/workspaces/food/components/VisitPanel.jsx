@@ -37,6 +37,7 @@ import { computeVisitAggregates, orderAgainEntries } from "../lib/visitAggregate
 import { formatVisitDate, formatRelativeDate, formatMonthYear } from "../lib/dateFormat.js";
 import { directionsUrl } from "../lib/directions.js";
 import { formatCategory, formatAddress, formatCityFromAddress } from "../lib/formatPlace.js";
+import { RADIUS } from "../../../shared/ui/radius.js";
 
 // var(--accent-food) — a real DOM/CSS element (unlike FoodMap's canvas-drawn pin, which must use
 // the literal hex because a 2D canvas context has no cascade to resolve var() against), so this
@@ -181,13 +182,13 @@ function VisitForm({ onSubmit, onCancel, pending }) {
       <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12.5, color: "var(--text-secondary)" }}>
         Would return?
         <button type="button" onClick={() => setWouldReturn(wouldReturn === true ? null : true)}
-          style={{ border: "1px solid var(--border-default)", borderRadius: 999, padding: "6px 12px", minHeight: 32, cursor: "pointer",
+          style={{ border: "1px solid var(--border-default)", borderRadius: RADIUS.pill, padding: "6px 12px", minHeight: 32, cursor: "pointer",
             background: wouldReturn === true ? "var(--accent-food)" : "transparent",
             color: wouldReturn === true ? "var(--on-accent-food)" : "var(--text-primary)", font: "inherit", fontSize: 12, fontWeight: 700 }}>
           Yes
         </button>
         <button type="button" onClick={() => setWouldReturn(wouldReturn === false ? null : false)}
-          style={{ border: "1px solid var(--border-default)", borderRadius: 999, padding: "6px 12px", minHeight: 32, cursor: "pointer",
+          style={{ border: "1px solid var(--border-default)", borderRadius: RADIUS.pill, padding: "6px 12px", minHeight: 32, cursor: "pointer",
             background: wouldReturn === false ? "var(--chrome-muted)" : "transparent",
             color: "var(--text-primary)", font: "inherit", fontSize: 12, fontWeight: 700 }}>
           No
@@ -195,14 +196,14 @@ function VisitForm({ onSubmit, onCancel, pending }) {
       </div>
       <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
         <button type="submit" disabled={pending} style={{
-          flex: 1, border: "none", borderRadius: 8, padding: "10px 0", minHeight: 44, cursor: pending ? "default" : "pointer",
+          flex: 1, border: "none", borderRadius: RADIUS.md, padding: "10px 0", minHeight: 44, cursor: pending ? "default" : "pointer",
           background: "var(--accent-food)", color: "var(--on-accent-food)", font: "inherit", fontSize: 13.5, fontWeight: 700,
           opacity: pending ? 0.6 : 1,
         }}>
           {pending ? "Saving…" : "Log this visit"}
         </button>
         <button type="button" onClick={onCancel} style={{
-          border: "1px solid var(--border-default)", borderRadius: 8, padding: "10px 14px", minHeight: 44, cursor: "pointer",
+          border: "1px solid var(--border-default)", borderRadius: RADIUS.md, padding: "10px 14px", minHeight: 44, cursor: "pointer",
           background: "transparent", color: "var(--text-secondary)", font: "inherit", fontSize: 13,
         }}>
           Cancel
@@ -455,7 +456,7 @@ function VisitCard({ visit, onDelete }) {
                 type="button" onClick={() => setConfirming(true)} data-testid="food-visit-delete-menu-item"
                 style={{
                   display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent",
-                  borderRadius: 6, padding: "9px 10px", minHeight: 44, cursor: "pointer", font: "inherit", fontSize: 13,
+                  borderRadius: RADIUS.sm, padding: "9px 10px", minHeight: 44, cursor: "pointer", font: "inherit", fontSize: 13,
                   color: "var(--danger-text, var(--danger))",
                 }}
               >
@@ -468,7 +469,7 @@ function VisitCard({ visit, onDelete }) {
                   <button
                     type="button" onClick={closeMenu}
                     style={{
-                      flex: 1, border: "1px solid var(--border-default)", borderRadius: 6, padding: "7px 0", minHeight: 36,
+                      flex: 1, border: "1px solid var(--border-default)", borderRadius: RADIUS.sm, padding: "7px 0", minHeight: 36,
                       background: "transparent", color: "var(--text-primary)", cursor: "pointer", font: "inherit", fontSize: 12.5,
                     }}
                   >
@@ -477,7 +478,7 @@ function VisitCard({ visit, onDelete }) {
                   <button
                     type="button" onClick={() => { onDelete(visit.id); closeMenu(); }} data-testid="food-visit-delete-confirm"
                     style={{
-                      flex: 1, border: "1px solid var(--danger-border, var(--danger))", borderRadius: 6, padding: "7px 0", minHeight: 36,
+                      flex: 1, border: "1px solid var(--danger-border, var(--danger))", borderRadius: RADIUS.sm, padding: "7px 0", minHeight: 36,
                       background: "transparent", color: "var(--danger-text, var(--danger))", cursor: "pointer", font: "inherit", fontSize: 12.5, fontWeight: 700,
                     }}
                   >

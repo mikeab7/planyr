@@ -9,6 +9,16 @@
  * answer to "what actually receives a press here", which a rect-overlap check can miss (B427408's
  * own lesson: covered controls can still pass a naive geometry comparison).
  *
+ * NEW-2 (2026-08-27, owner: "the comps button shows weired if the screen size is different") — a
+ * DIFFERENT defect in the SAME pair, so it rides this rig rather than a new one. Reproduced live:
+ * whenever the Layers panel is COLLAPSED (its default at ≤760px, and reachable at any width once
+ * collapsed by hand — the choice persists), the Comps pill above it (~69px) and the collapsed
+ * "▶ Imagery & layers" pill below it (~150px) share a right edge but not a left one, and sit with
+ * a visible gap between them — two disconnected floating chips rather than one stack. It does NOT
+ * reproduce while the panel is open (a small toggle above a big content card is an expected size
+ * difference). Fixed via COMPS_LAYERS_COLLAPSED_W in MapFinder.jsx — the Comps button's minWidth
+ * while the panel is collapsed, so both pills share both edges again.
+ *
  *   node ui-audit/verify-map-comps-overlap.mjs [--url http://localhost:4173/] [--shots]
  */
 import { chromium } from "playwright";
@@ -50,7 +60,7 @@ const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromi
 try {
   if (SHOTS) mkdirSync(OUT, { recursive: true });
 
-  const WIDTHS = [1400, 1200, 1024, 760, 390];
+  const WIDTHS = [2000, 1600, 1400, 1200, 1024, 900, 760, 390];
   for (const width of WIDTHS) {
     console.log(`\n${width}×1000`);
     const ctx = await browser.newContext({ viewport: { width, height: 1000 }, deviceScaleFactor: 1 });
@@ -85,6 +95,32 @@ try {
       }, layersSel);
       check(`${width}px · the word "Imagery" itself is unobscured`, imageryWordVisible);
     }
+
+    // NEW-2 — with the Layers panel COLLAPSED (its default at ≤760px; forced there at wider
+    // widths since it defaults open), confirm Comps now matches its width/left edge instead of
+    // reading as a small orphaned chip above a wider one. Whatever state this width defaulted to
+    // is restored afterward so the drawer-open test below isn't affected by state left over here.
+    const layersToggle = page.locator(layersSel).first();
+    const startedOpen = (await layersToggle.getAttribute("title").catch(() => null)) === "Collapse layers";
+    if (startedOpen) { await layersToggle.click(); await pacedWait(page, 300); }
+    const compsC = await hitAt(page, '[data-testid="map-comps-toggle"]');
+    // The VISIBLE collapsed pill is the toggle button's own bordered parent (background + border +
+    // radius live there, padding:0 when collapsed) — not the plain inner button, which measures a
+    // few px narrower than what's actually painted on screen and would fail this on a rounding
+    // artifact rather than a real misalignment.
+    const layersWrapRect = await page.evaluate((sel) => {
+      const btn = document.querySelector(sel);
+      const wrap = btn && btn.parentElement;
+      if (!wrap) return null;
+      const r = wrap.getBoundingClientRect();
+      return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
+    }, layersSel);
+    if (compsC.painted && layersWrapRect) {
+      const EPS = 2; // px — antialiasing/border rounding slop, not a real misalignment
+      check(`${width}px · collapsed: Comps left-aligns with the collapsed Layers pill`, Math.abs(compsC.rect.x - layersWrapRect.x) <= EPS, `Comps x=${compsC.rect.x}, Layers x=${layersWrapRect.x}`);
+      check(`${width}px · collapsed: Comps right-aligns with the collapsed Layers pill`, Math.abs((compsC.rect.x + compsC.rect.w) - (layersWrapRect.x + layersWrapRect.w)) <= EPS, `Comps right=${compsC.rect.x + compsC.rect.w}, Layers right=${layersWrapRect.x + layersWrapRect.w}`);
+    }
+    if (startedOpen) { await layersToggle.click(); await pacedWait(page, 300); } // restore this width's default
 
     // Opening the full Comps drawer (a deliberately-opened FLOATING_PANEL, mapChromeStack.js's own
     // top tier — a right-side panel spanning nearly the map's full height) is EXPECTED to cover the

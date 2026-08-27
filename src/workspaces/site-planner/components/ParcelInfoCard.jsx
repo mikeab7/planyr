@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { parcelCardRows } from "../lib/appraisal.js";
 import { PinIcon, EmptyCircleIcon, WarnTriangleIcon } from "./icons.jsx";
+import { RADIUS } from "../../../shared/ui/radius.js";
 
 /* ParcelInfoCard (B233, reshaped by NEW-1) — the card that drops in under the map
  * finder's search pill after a "Go". Three distinct states: found (the parcel's key
@@ -128,7 +129,7 @@ export default function ParcelInfoCard({
 
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
             <button onClick={onPlan}
-              style={{ height: 30, padding: "0 12px", borderRadius: 6, border: "none", background: PAL.accent, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+              style={{ height: 30, padding: "0 12px", borderRadius: RADIUS.sm, border: "none", background: PAL.accent, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
               Plan this site →
             </button>
           </div>
@@ -145,7 +146,7 @@ export default function ParcelInfoCard({
           The map centered on the address, but the county parcel service couldn’t be reached for this area right now. Give it a moment, then click the lot or use <b>Select parcels</b>.
           {onStartBlank && (
             <button onClick={onStartBlank} data-testid="parcel-card-start-blank"
-              style={{ display: "block", width: "100%", marginTop: 8, height: 30, borderRadius: 6, border: "none", background: PAL.accent, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+              style={{ display: "block", width: "100%", marginTop: 8, height: 30, borderRadius: RADIUS.sm, border: "none", background: PAL.accent, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
               Start the plan here &amp; draw the boundary →
             </button>
           )}

@@ -479,6 +479,7 @@ import { parseAcres, parcelNetSqft, parcelGrossSqft, parcelExceptSqft, acreageCo
  * the one string helper the planner itself needs, and it is three lines, so it lives here. */
 const cleanText = (v) => { const s = (v == null ? "" : String(v)).trim(); return s || null; };
 import { resolveDraftStepBack } from "./lib/drafts.js";
+import { RADIUS } from "../../shared/ui/radius.js";
 
 /* Geographic basemap under the planner canvas. The planner stays a feet-based
  * SVG (so every metric, setback and stall count is computed from true feet and
@@ -18862,7 +18863,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         className="dbtn"
         style={{
           display: "flex", alignItems: "center", gap: 5, flex: "none",
-          height: 24, padding: "0 8px", borderRadius: 6, border: "none",
+          height: 24, padding: "0 8px", borderRadius: RADIUS.sm, border: "none",
           background: "transparent", cursor: "pointer", fontFamily: "inherit",
           fontSize: 12.5, fontWeight: 500, color: "var(--chrome-text)",
           maxWidth: 200, minWidth: CRUMB_MIN_W, whiteSpace: "nowrap",
@@ -18919,7 +18920,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 </button>
                 {plansHere.length > 1 && (
                   <button title="Delete this plan" aria-label={`Delete plan ${s.name || "Untitled plan"}`} onClick={(e) => { e.stopPropagation(); setPlanDelArm(s.id); }}
-                    style={{ flex: "none", width: 24, height: 24, lineHeight: 1, borderRadius: 6, border: "1px solid transparent", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13 }}
+                    style={{ flex: "none", width: 24, height: 24, lineHeight: 1, borderRadius: RADIUS.sm, border: "1px solid transparent", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13 }}
                     onMouseEnter={(e) => { e.currentTarget.style.color = "#b3361b"; e.currentTarget.style.background = "rgba(179,54,27,0.10)"; }}
                     onMouseLeave={(e) => { e.currentTarget.style.color = PAL.muted; e.currentTarget.style.background = "transparent"; }}><span style={{ display: "grid", placeItems: "center" }}><CloseXIcon /></span></button>
                 )}
@@ -19515,7 +19516,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         exactly this screening link row, not a duplicate ledger; the auto-refreshing
                         flood finding above stays SiteAnalysis's own. */}
                     <button type="button" onClick={() => setLeftPanel("yield")}
-                      style={{ marginTop: 8, width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "7px 10px", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, background: "transparent", color: PAL.ink, fontWeight: 700, fontSize: 11.5, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                      style={{ marginTop: 8, width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "7px 10px", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.md, background: "transparent", color: PAL.ink, fontWeight: 700, fontSize: 11.5, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
                       <span>Floodplain drainage &amp; mitigation</span>
                       <span style={{ color: PAL.muted, fontWeight: 600, fontSize: 10.5, whiteSpace: "nowrap" }}>in Yield · Stormwater →</span>
                     </button>
@@ -19583,7 +19584,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <button
                           onClick={addByAddress} disabled={addrBusy || !addrQuery.trim()}
                           title="Find this address and add its parcel"
-                          style={{ flex: "none", padding: "6px 11px", fontSize: 12, fontWeight: 600, borderRadius: 6, border: `1px solid ${PAL.accent}`, background: addrBusy || !addrQuery.trim() ? SURF_RAISED : PAL.accent, color: addrBusy || !addrQuery.trim() ? PAL.muted : SURF_RAISED, cursor: addrBusy || !addrQuery.trim() ? "default" : "pointer" }}>
+                          style={{ flex: "none", padding: "6px 11px", fontSize: 12, fontWeight: 600, borderRadius: RADIUS.sm, border: `1px solid ${PAL.accent}`, background: addrBusy || !addrQuery.trim() ? SURF_RAISED : PAL.accent, color: addrBusy || !addrQuery.trim() ? PAL.muted : SURF_RAISED, cursor: addrBusy || !addrQuery.trim() ? "default" : "pointer" }}>
                           {addrBusy ? "…" : "Find"}
                         </button>
                       </div>
@@ -19639,7 +19640,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   the rail in first on a phone, where it's hidden behind the ✎ Tools pill). */}
               <button type="button" data-testid="land-to-parcel-tools" onClick={openParcelToolsMenu}
                 title="Draw, plot from a deed, split, combine, reshape or remove a parcel"
-                style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "7px 10px", marginBottom: 9, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, background: "transparent", color: PAL.ink, fontWeight: 700, fontSize: 11.5, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "7px 10px", marginBottom: 9, border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.md, background: "transparent", color: PAL.ink, fontWeight: 700, fontSize: 11.5, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
                 <span>Draw, split, combine, reshape…</span>
                 <span style={{ color: PAL.muted, fontWeight: 600, fontSize: 10.5, whiteSpace: "nowrap" }}>{PARCEL_SURFACES.rail.name} →</span>
               </button>
@@ -19677,7 +19678,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             style={{ width: 15, height: 15, cursor: "pointer" }} />
                         </label>
                         <button onClick={(e) => { if (mergePick) { toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); } else if (e.shiftKey) { shiftPickParcel(pc.id); } else { setCombineSel([]); setSel({ kind: "parcel", id: pc.id }); } }}
-                          style={{ flex: 1, minWidth: 0, textAlign: "left", padding: "7px 9px", borderRadius: 8, borderLeft: depth ? `2px solid ${PAL.panelLine || "var(--border-default)"}` : undefined, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "var(--border-default)"}`, background: picked ? "rgba(37,99,235,0.14)" : on ? PAL.accentSoft : SURF_RAISED, cursor: "pointer", fontFamily: "inherit", opacity: superseded ? 0.5 : inactive ? 0.55 : 1 }}>
+                          style={{ flex: 1, minWidth: 0, textAlign: "left", padding: "7px 9px", borderRadius: RADIUS.md, borderLeft: depth ? `2px solid ${PAL.panelLine || "var(--border-default)"}` : undefined, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "var(--border-default)"}`, background: picked ? "rgba(37,99,235,0.14)" : on ? PAL.accentSoft : SURF_RAISED, cursor: "pointer", fontFamily: "inherit", opacity: superseded ? 0.5 : inactive ? 0.55 : 1 }}>
                           <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}{tag}{picked ? " ✓" : ""}</div>
                           <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{f2(parcelNetSqft(pc) / SQFT_PER_ACRE)} AC{pc.acct ? ` · ${pc.acct}` : ""}</div>
                         </button>
@@ -19686,7 +19687,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             to remove a parcel, alongside the Parcel tool's Remove mode. */}
                         <button title="Remove this parcel" aria-label={`Remove ${name}`}
                           onClick={(e) => { e.stopPropagation(); removeParcelById(pc.id); }}
-                          style={{ flex: "none", width: 30, alignSelf: "stretch", border: BORDER_1, borderRadius: 8, background: SURF_RAISED, color: PAL.danger, cursor: "pointer", fontFamily: "inherit", fontSize: 15, fontWeight: 700, lineHeight: 1 }}>✕</button>
+                          style={{ flex: "none", width: 30, alignSelf: "stretch", border: BORDER_1, borderRadius: RADIUS.md, background: SURF_RAISED, color: PAL.danger, cursor: "pointer", fontFamily: "inherit", fontSize: 15, fontWeight: 700, lineHeight: 1 }}>✕</button>
                       </div>
                     );
                   })}
@@ -21446,7 +21447,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* NEW-2/B1428 — this used to be wired to saveNow(), which re-ran the same write with nothing
               freed in between and so could never succeed. It now clears the re-fetchable map cache
               first, retries, and reports what it freed + whether the save landed. */}
-          <button onClick={retryDeviceSave} data-testid="retry-device-save" title="Clear re-downloadable map data and try saving on this device again" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>Free up space &amp; retry</button>
+          <button onClick={retryDeviceSave} data-testid="retry-device-save" title="Clear re-downloadable map data and try saving on this device again" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: RADIUS.sm, padding: "4px 10px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>Free up space &amp; retry</button>
         </div>
       ) : localSaveFailed && (
         <div role="alert" data-testid="local-save-failed" style={{ ...topBanner, zIndex: 6002, maxWidth: "min(720px, calc(100vw - 16px))", background: "#7c1d1d", border: "1px solid #f87171", fontWeight: 700, boxShadow: "0 8px 28px rgba(0,0,0,0.4)" }}>
@@ -22990,7 +22991,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               the explicit affordance: tap it to open the Properties companion as an overlay. */}
           {narrow && companionSel && !leftPanel && !narrowProps && (
             <button data-export="skip" onClick={() => { setNarrowProps(true); }}
-              style={{ position: "absolute", left: 12, bottom: 16, zIndex: 1190, display: "flex", alignItems: "center", gap: 6, background: PAL.ember, color: PAL.onAccent, border: "none", borderRadius: 99, padding: "9px 14px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", boxShadow: "0 4px 14px rgba(0,0,0,0.28)", cursor: "pointer" }}>
+              style={{ position: "absolute", left: 12, bottom: 16, zIndex: 1190, display: "flex", alignItems: "center", gap: 6, background: PAL.ember, color: PAL.onAccent, border: "none", borderRadius: RADIUS.pill, padding: "9px 14px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", boxShadow: "0 4px 14px rgba(0,0,0,0.28)", cursor: "pointer" }}>
               ✎ Properties
             </button>
           )}
@@ -23213,9 +23214,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* Draw / Remove mode pill */}
               <div style={{ display: "flex", gap: 2, background: "rgba(255,255,255,0.13)", borderRadius: 99, padding: 2 }}>
                 <button className="dbtn" onClick={() => setParcelMode("add")} aria-pressed={parcelMode === "add"}
-                  style={{ padding: "4px 12px", borderRadius: 99, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700, background: parcelMode === "add" ? "#fff" : "transparent", color: parcelMode === "add" ? "#19160f" : "#fff" }}>✏️ Draw</button>
+                  style={{ padding: "4px 12px", borderRadius: RADIUS.pill, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700, background: parcelMode === "add" ? "#fff" : "transparent", color: parcelMode === "add" ? "#19160f" : "#fff" }}>✏️ Draw</button>
                 <button className="dbtn" onClick={() => { setDraftPoly(null); setParcelMode("remove"); }} aria-pressed={parcelMode === "remove"}
-                  style={{ padding: "4px 12px", borderRadius: 99, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700, background: parcelMode === "remove" ? "#fff" : "transparent", color: parcelMode === "remove" ? "#19160f" : "#fff" }}>✕ Remove</button>
+                  style={{ padding: "4px 12px", borderRadius: RADIUS.pill, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700, background: parcelMode === "remove" ? "#fff" : "transparent", color: parcelMode === "remove" ? "#19160f" : "#fff" }}>✕ Remove</button>
               </div>
               <span style={{ color: "rgba(255,255,255,0.92)" }}>
                 {parcelMode === "remove"
@@ -23274,7 +23275,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         {/* phone-only floating button to summon the tool rail (B113) */}
         {narrow && !mobileTools && (
           <button onClick={() => setMobileTools(true)} title="Show the drawing tools"
-            style={{ position: "absolute", right: 12, bottom: 16, zIndex: 1190, display: "flex", alignItems: "center", gap: 6, padding: "11px 16px", borderRadius: 99, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 800, color: "#fff", background: PAL.ember, boxShadow: "0 6px 18px rgba(0,0,0,0.45)" }}>
+            style={{ position: "absolute", right: 12, bottom: 16, zIndex: 1190, display: "flex", alignItems: "center", gap: 6, padding: "11px 16px", borderRadius: RADIUS.pill, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 800, color: "#fff", background: PAL.ember, boxShadow: "0 6px 18px rgba(0,0,0,0.45)" }}>
             ✎ Tools
           </button>
         )}
@@ -24310,7 +24311,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <button disabled={!addOn} title={addTitle} onClick={addOn ? onAdd : undefined} style={stepBtn(addOn, false)}>＋</button>
                       </div>
                     );
-                    const layerChip = { fontSize: 11.5, padding: "4px 8px", borderRadius: 6, border: BORDER_1, background: SURF_RAISED, color: PAL.ink, cursor: "pointer", fontFamily: "inherit" };
+                    const layerChip = { fontSize: 11.5, padding: "4px 8px", borderRadius: RADIUS.sm, border: BORDER_1, background: SURF_RAISED, color: PAL.ink, cursor: "pointer", fontFamily: "inherit" };
                     const layerChooserRow = (label, groupKey, sides) => {
                       const opts = sides.length ? layersForSides(b, sides) : [];
                       if (!opts.length) return null;
@@ -25102,7 +25103,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             {alt.earthworkCost != null ? ` · ~$${alt.earthworkCost.toLocaleString()} dirt` : ""}
                           </span>
                           <button type="button" onClick={apply} title="Resize this pond to that basin. One Ctrl+Z reverts."
-                            style={{ flex: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "2px 9px", borderRadius: 999, border: "1px solid var(--accent)", background: "var(--accent)", color: "var(--on-accent)", whiteSpace: "nowrap" }}>Apply</button>
+                            style={{ flex: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "2px 9px", borderRadius: RADIUS.pill, border: "1px solid var(--accent)", background: "var(--accent)", color: "var(--on-accent)", whiteSpace: "nowrap" }}>Apply</button>
                         </div>
                       );
                     })()}
@@ -25257,7 +25258,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           : Number.isFinite(g_maxExcavEst.valueFt) && <span title={`Screening estimate: ${g_maxExcavEst.source === "depth-to-water" ? "the seasonal-high depth to water (don't dig below groundwater)" : "a conservative default"}. Refine with a geotech boring.`} style={estPillStyle}>EST</span>}
                       </span>
                     </Field>
-                    <div style={{ marginTop: 7, background: "var(--planner-raised)", borderRadius: 8, padding: "8px 10px" }}>
+                    <div style={{ marginTop: 7, background: "var(--planner-raised)", borderRadius: RADIUS.md, padding: "8px 10px" }}>
                       {pondRow("Top-of-bank area", `${f0(r.aTop)} SF`)}
                       {pondRow("Water-surface area", `${f0(r.aWater)} SF`)}
                       {pondRow("Bottom area", `${f0(r.aBottom)} SF`)}
@@ -25404,7 +25405,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {g_roleInfo.role === "dual" && !hybridHintSeen && (
                       <div style={{ fontSize: 10.5, color: PAL.ink, lineHeight: 1.45, background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "7px 9px", margin: "8px 0 0", display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
                         <span><strong>Hybrid</strong> = this pond serves BOTH ledgers: usable detention above the flood water surface, and compensating-storage mitigation for the cut below it. Set it to Detention or Mitigation to force one.</span>
-                        <button type="button" onClick={dismissHybridHint} style={{ flex: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "1px 8px", borderRadius: 999, border: `1px solid ${PAL.border}`, background: "transparent", color: PAL.muted, whiteSpace: "nowrap" }}>Got it</button>
+                        <button type="button" onClick={dismissHybridHint} style={{ flex: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "1px 8px", borderRadius: RADIUS.pill, border: `1px solid ${PAL.border}`, background: "transparent", color: PAL.muted, whiteSpace: "nowrap" }}>Got it</button>
                       </div>
                     )}
                     {/* NEW-13/B830 — the one-click berm: when the site is SHORT and this pond is
@@ -25502,7 +25503,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         const use0 = assist.detention.providedCf;
                         const applyChip = (onApply, title, disabled, disabledReason) => (
                           <button type="button" disabled={disabled} title={disabled ? disabledReason : title} onClick={disabled ? undefined : onApply}
-                            style={{ marginLeft: 8, flex: "none", cursor: disabled ? "not-allowed" : "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "2px 9px", borderRadius: 999, border: `1px solid ${disabled ? PAL.panelLine : "var(--accent)"}`, background: disabled ? "transparent" : "var(--accent)", color: disabled ? PAL.muted : "var(--on-accent)", whiteSpace: "nowrap", opacity: disabled ? 0.6 : 1 }}>Apply</button>
+                            style={{ marginLeft: 8, flex: "none", cursor: disabled ? "not-allowed" : "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "2px 9px", borderRadius: RADIUS.pill, border: `1px solid ${disabled ? PAL.panelLine : "var(--accent)"}`, background: disabled ? "transparent" : "var(--accent)", color: disabled ? PAL.muted : "var(--on-accent)", whiteSpace: "nowrap", opacity: disabled ? 0.6 : 1 }}>Apply</button>
                         );
                         const actApply = (txt, key, warn, chip) => (
                           <div key={key} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, fontSize: 10.5, color: warn ? "var(--warn-text)" : PAL.text, lineHeight: 1.5, marginTop: 3 }}>
@@ -25717,7 +25718,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           const shortfallUsableCf = targetUsableCf - thisUsableCf;
                           return (
                             <div style={{ marginTop: 8 }}>
-                              <button style={{ width: "100%", padding: "8px 10px", border: `1.5px solid ${PAL.accent}`, borderRadius: 8, background: "transparent", color: PAL.accent, fontWeight: 700, fontSize: 12, cursor: "pointer" }} onClick={sizeForRequired}>
+                              <button style={{ width: "100%", padding: "8px 10px", border: `1.5px solid ${PAL.accent}`, borderRadius: RADIUS.md, background: "transparent", color: PAL.accent, fontWeight: 700, fontSize: 12, cursor: "pointer" }} onClick={sizeForRequired}>
                                 ⇱ Size for required detention ({f2(shortfallUsableCf / 43560)} AC-FT short)
                               </button>
                               <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 4 }}>
@@ -26033,7 +26034,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           </div>
                           {oProbs.length > 0 && <div style={{ ...smallNote, color: PAL.warn }}>Outlet incomplete: {oProbs.join("; ")}.</div>}
                           {routed.kind === "routed" ? (
-                            <div style={{ marginTop: 8, background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 10px" }}>
+                            <div style={{ marginTop: 8, background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.md, padding: "8px 10px" }}>
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                                 <span style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Overall: Post ≤ Pre</span>
                                 <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.04em", padding: "2px 8px", borderRadius: 5, color: "var(--on-accent)", background: routed.allPass ? PAL.success : PAL.danger }}>{routed.allPass ? "PASS: every storm" : "FAIL"}</span>
@@ -26520,7 +26521,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   legal description; OCR reads and concatenates every page by default (below), and
                   this lets the user point at one specific page instead. */}
               {ocrRun && ocrRun.pages.length > 1 && (
-                <div style={{ marginBottom: 10, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, overflow: "hidden" }}>
+                <div style={{ marginBottom: 10, border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.md, overflow: "hidden" }}>
                   <div data-testid="ocr-page-row" onClick={() => {
                     const full = deedQueue.find((r) => r.id === deedActiveId);
                     if (!full) return;
@@ -26616,7 +26617,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <button style={{ ...btn(true), padding: "8px 15px", opacity: calls.length ? 1 : 0.5 }} disabled={!calls.length} onClick={() => startPlotMetes(false)}>Plot on canvas →</button>
               </div>
               {calls.length > 0 && (
-                <div style={{ marginTop: 10, maxHeight: 130, overflowY: "auto", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, fontSize: 11.5, fontFamily: MONO_FONT }}>
+                <div style={{ marginTop: 10, maxHeight: 130, overflowY: "auto", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.md, fontSize: 11.5, fontFamily: MONO_FONT }}>
                   {calls.map((c, i) => (
                     <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "4px 10px", borderBottom: i < calls.length - 1 ? "1px solid #f3efe5" : "none", color: PAL.ink }}>
                       <span>{i + 1}. {c.bearing}{c.curve ? (c.curveMeta && (c.curveMeta.radiusFt > 0 || c.curveMeta.centralAngleDeg > 0) ? " ⤾ (arc)" : " ⤿ (chord)") : ""}</span><span>{c.distFt.toFixed(2)}′</span>
@@ -26645,7 +26646,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const pts = s.profile.map((p) => `${(p.d / xsec.lenFt) * W},${H - ((p.el - s.minFt) / span) * (H - 6) - 3}`).join(" ");
             return (
               <div>
-                <svg width={W} height={H} style={{ display: "block", background: "var(--planner-raised)", borderRadius: 6 }}>
+                <svg width={W} height={H} style={{ display: "block", background: "var(--planner-raised)", borderRadius: RADIUS.sm }}>
                   <polyline points={pts} fill="none" stroke="#0e7490" strokeWidth={1.6} />
                 </svg>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: PAL.ink, marginTop: 7, fontFamily: MONO_FONT }}>
@@ -28773,7 +28774,7 @@ function YieldPanel({
             // B750 — one segmented button for the Auto/Yes/No channel control (mirrors the
             // per-pond Outfall toggle). Selected rides the global accent + --on-accent text.
             const seg = (label, selected, onClick, key, aria = "Drains to HCFCD channel") => (
-              <button key={key} onClick={onClick} aria-label={`${aria}: ${label}`} aria-pressed={selected} style={{ flex: 1, padding: "4px 6px", borderRadius: 6, border: `1px solid ${selected ? "var(--accent)" : Y.border}`, background: selected ? "var(--accent)" : Y.cardBg, color: selected ? "var(--on-accent)" : Y.text, fontWeight: 700, fontSize: 10.5, fontFamily: "inherit", cursor: "pointer" }}>{label}</button>
+              <button key={key} onClick={onClick} aria-label={`${aria}: ${label}`} aria-pressed={selected} style={{ flex: 1, padding: "4px 6px", borderRadius: RADIUS.sm, border: `1px solid ${selected ? "var(--accent)" : Y.border}`, background: selected ? "var(--accent)" : Y.cardBg, color: selected ? "var(--on-accent)" : Y.text, fontWeight: 700, fontSize: 10.5, fontFamily: "inherit", cursor: "pointer" }}>{label}</button>
             );
             // B750 — the two overridable assumptions, grouped so the user can correct either:
             // which agency reviews drainage, and whether the site drains to an HCFCD channel.
@@ -28869,7 +28870,7 @@ function YieldPanel({
                   <button
                     disabled={d.status === "busy"}
                     onClick={d.onCheck}
-                    style={{ width: "100%", padding: "7px 10px", border: `1px solid ${Y.border}`, borderRadius: 8, background: Y.cardBg, color: Y.text, fontWeight: 700, fontSize: 11.5, cursor: d.status === "busy" ? "default" : "pointer" }}
+                    style={{ width: "100%", padding: "7px 10px", border: `1px solid ${Y.border}`, borderRadius: RADIUS.md, background: Y.cardBg, color: Y.text, fontWeight: 700, fontSize: 11.5, cursor: d.status === "busy" ? "default" : "pointer" }}
                   >{d.status === "busy" ? "Checking drainage criteria…" : "⛆ Check drainage criteria"}</button>
                   {d.status === "error"
                     ? warnNote(`Couldn't resolve the drainage authority — ${d.error}. Try again.`)
@@ -29155,7 +29156,7 @@ function YieldPanel({
                 <div key="det-inundated" style={{ fontSize: 11, color: Y.dangerText, lineHeight: 1.45, margin: "5px 0 2px", fontWeight: 800, display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline", border: `1px solid ${Y.dangerText}`, borderRadius: 8, padding: "6px 9px" }}>
                   <span>⚠ Flood WSE ≥ top of bank: usable detention is ZERO. Raise the top of bank (berm) to lift storage above the flood.</span>
                   {d.onApplyInundatedBerm && d.inundatedBermPreview
-                    ? <button type="button" title={d.inundatedBermPreview.diff} onClick={() => d.onApplyInundatedBerm()} style={{ flex: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "2px 9px", borderRadius: 999, border: "1px solid var(--accent)", background: "var(--accent)", color: "var(--on-accent)", whiteSpace: "nowrap" }}>Raise TOB +{f1(d.inundatedBermPreview.hFt)}′ →</button>
+                    ? <button type="button" title={d.inundatedBermPreview.diff} onClick={() => d.onApplyInundatedBerm()} style={{ flex: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "2px 9px", borderRadius: RADIUS.pill, border: "1px solid var(--accent)", background: "var(--accent)", color: "var(--on-accent)", whiteSpace: "nowrap" }}>Raise TOB +{f1(d.inundatedBermPreview.hFt)}′ →</button>
                     : null}
                 </div>
               );
@@ -29638,7 +29639,7 @@ function YieldPanel({
                         type="button"
                         title="Clear — back to blank (auto / unknown)"
                         onClick={() => fm.onChange({ [key]: null })}
-                        style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, padding: "2px 7px", borderRadius: 999, border: `1px solid ${Y.border}`, background: "transparent", color: Y.muted }}
+                        style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, padding: "2px 7px", borderRadius: RADIUS.pill, border: `1px solid ${Y.border}`, background: "transparent", color: Y.muted }}
                       >×</button>
                     )}
                     <NumInput allowClear style={fmInputStyle} value={Number.isFinite(fm.settings[key]) ? fm.settings[key] : ""} placeholder={placeholder || "—"} onCommit={(n) => fm.onChange({ [key]: Number.isFinite(n) ? n : null })} />
@@ -29674,7 +29675,7 @@ function YieldPanel({
                         {/* NEW-3 — the one-click accept: writes the suggestion into the field
                             with provenance; distinct from "edit" (type your own value). */}
                         {opts.accept && (
-                          <button type="button" title={opts.accept.title || ""} onClick={() => { fm.onChange(opts.accept.patch); setDrainEditField(null); }} style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, border: `1px solid ${Y.border}`, background: "transparent", color: Y.rowLabel }}>{opts.accept.label || "✓ use"}</button>
+                          <button type="button" title={opts.accept.title || ""} onClick={() => { fm.onChange(opts.accept.patch); setDrainEditField(null); }} style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: RADIUS.pill, border: `1px solid ${Y.border}`, background: "transparent", color: Y.rowLabel }}>{opts.accept.label || "✓ use"}</button>
                         )}
                         <button type="button" onClick={() => setDrainEditField(key)} style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "baseline", gap: 5 }}>
                           <span style={{ fontSize: 11.5, fontFamily: NUM_FONT, color: Y.rowLabel }}>~{f1(autoVal)}′</span>
@@ -29691,10 +29692,10 @@ function YieldPanel({
                     <span style={{ fontSize: 11, color: Y.muted }}>{label}</span>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                       {manual != null && (
-                        <button type="button" title="Clear — back to blank (auto / unknown)" onClick={() => { fm.onChange({ [key]: null, ...srcPatch }); setDrainEditField(null); }} style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, padding: "2px 7px", borderRadius: 999, border: `1px solid ${Y.border}`, background: "transparent", color: Y.muted }}>×</button>
+                        <button type="button" title="Clear — back to blank (auto / unknown)" onClick={() => { fm.onChange({ [key]: null, ...srcPatch }); setDrainEditField(null); }} style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, padding: "2px 7px", borderRadius: RADIUS.pill, border: `1px solid ${Y.border}`, background: "transparent", color: Y.muted }}>×</button>
                       )}
                       {manual == null && hasAuto && (
-                        <button type="button" title={`Use the auto value (~${f1(autoVal)}′ · ${sourceLabel})`} onClick={() => setDrainEditField(null)} style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, padding: "2px 7px", borderRadius: 999, border: `1px solid ${Y.border}`, background: "transparent", color: Y.muted }}>auto</button>
+                        <button type="button" title={`Use the auto value (~${f1(autoVal)}′ · ${sourceLabel})`} onClick={() => setDrainEditField(null)} style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, padding: "2px 7px", borderRadius: RADIUS.pill, border: `1px solid ${Y.border}`, background: "transparent", color: Y.muted }}>auto</button>
                       )}
                       <NumInput allowClear style={fmInputStyle} value={manual != null ? manual : ""} placeholder={hasAuto ? `~${f1(autoVal)}` : "—"} onCommit={(n) => fm.onChange({ [key]: Number.isFinite(n) ? n : null, ...srcPatch })} />
                       {manual != null && fieldTag ? <SourceTag code={fieldTag.code} label={label} /> : null}
@@ -29846,7 +29847,7 @@ function YieldPanel({
                         <button type="button"
                           title={`Write the estimate (${f1(est.wseFt)}′) into the BFE field with source “${est.providerLabel || wseProvLabel(est.provider)}” — every consumer (mitigation, heat map, pond split, FFE) stamps it ESTIMATED. Screening only, never a published/regulatory BFE; × on the field restores unknown.`}
                           onClick={() => fm.onChange({ bfeFt: est.wseFt, bfeSrc: est.provider })}
-                          style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, border: `1px solid ${Y.border}`, background: "transparent", color: Y.rowLabel, whiteSpace: "nowrap" }}>✓ use</button>
+                          style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: RADIUS.pill, border: `1px solid ${Y.border}`, background: "transparent", color: Y.rowLabel, whiteSpace: "nowrap" }}>✓ use</button>
                       </div>
                     );
                   })()}
@@ -30157,7 +30158,7 @@ function YieldPanel({
                 title={hasPond
                   ? "One click: sets the pond's elevations and outlet so storage counts. Your drawn outline is never changed."
                   : "One click: draws a right-sized pond and solves its outlet."}
-                style={{ width: "100%", padding: "8px 10px", border: "none", borderRadius: 8, background: "var(--accent)", color: "var(--on-accent)", fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+                style={{ width: "100%", padding: "8px 10px", border: "none", borderRadius: RADIUS.md, background: "var(--accent)", color: "var(--on-accent)", fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
                 ⚡ Optimize pond
               </button>
             ) : null;
