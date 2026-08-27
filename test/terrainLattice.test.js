@@ -21,6 +21,7 @@ import {
 import {
   contourLabelText, pickLabels, joinSeams, composeContourPaint,
   contourLineKey, contourLabelKey, diffKeyedPaint,
+  LABEL_CAP, LABEL_MIN_SEP_CELLS,
 } from "../src/workspaces/site-planner/lib/contours.js";
 import { maskedSmooth, pixelToLatLng } from "../src/workspaces/site-planner/lib/demGrid.js";
 import { decodeGrid } from "../src/workspaces/site-planner/lib/lercGrid.js";
@@ -522,5 +523,205 @@ describe("real 3DEP tile, two lattice tiles, the paint the map would draw", () =
     // so their identity is unaffected by the far tile leaving — those must NOT be rebuilt
     expect(survivors.length).toBeGreaterThan(0);
     expect(survivors.length).toBeLessThan(keysNear.size); // and the seam-joined chains DO change, honestly
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B800849 (perf) — composeContourPaint's own per-level recomposition (byLevel grouping,
+// joinSeams' seam-stitch, pickLabels' dedupe/thinning) used to re-derive its SORT KEY on
+// every comparator call inside `.sort()` — an O(n log n) quantity of redundant string
+// builds for what only needed to happen O(n) times — profiled as the dominant remaining
+// cost of a real pan step once B800848 stopped rebuilding unchanged Leaflet objects.
+// joinSeams/pickLabels now build each item's sort key ONCE (a Schwartzian transform) and
+// joinSeams' seam-stitch search returns its first match directly instead of collecting a
+// `hits` array first — neither change touches WHICH order things sort into or WHICH
+// candidate a saddle resolves to, so the fix must produce byte-identical output to the
+// pre-optimization algorithm on every input. This is proven directly, not just implied:
+// `joinSeamsReference`/`pickLabelsReference` below are a LITERAL copy of the pre-B800849
+// algorithm (same rank/id functions, same re-derive-in-comparator pattern, same
+// collect-then-scan seam search), run against the real captured 3DEP tile spread over
+// EIGHT lattice tiles (more junctions/saddles than the 2-tile fixture above exercises)
+// and compared byte-for-byte to the shipped functions.
+describe("B800849 — composeContourPaint's join/pick optimization is byte-identical to the pre-fix algorithm", () => {
+  function joinSeamsReference(lines, eps = 2e-6) {
+    const out = [], open = [];
+    for (const ln of lines) {
+      if (!ln || ln.length < 2) continue;
+      const a = ln[0], b = ln[ln.length - 1];
+      if (a[0] === b[0] && a[1] === b[1]) out.push(ln);
+      else open.push(ln);
+    }
+    const rank = (ln) => `${ln[0][0]},${ln[0][1]}|${ln[ln.length - 1][0]},${ln[ln.length - 1][1]}|${ln.length}`;
+    const byRank = (x, y) => (rank(x) < rank(y) ? -1 : rank(x) > rank(y) ? 1 : 0);
+    open.sort(byRank);
+    out.sort(byRank);
+    const bucket = new Map();
+    const key = (p) => `${Math.round(p[0] / eps)}|${Math.round(p[1] / eps)}`;
+    open.forEach((ln, i) => {
+      for (const [p, end] of [[ln[0], 0], [ln[ln.length - 1], 1]]) {
+        const k = key(p);
+        let l = bucket.get(k);
+        if (!l) bucket.set(k, l = []);
+        l.push({ i, end });
+      }
+    });
+    const near = (p) => {
+      const bx = Math.round(p[0] / eps), by = Math.round(p[1] / eps);
+      const hits = [];
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          const l = bucket.get(`${bx + dx}|${by + dy}`);
+          if (l) for (const r of l) hits.push(r);
+        }
+      }
+      return hits;
+    };
+    const meets = (p, r) => Math.abs(p[0] - r[0]) <= eps && Math.abs(p[1] - r[1]) <= eps;
+    const used = new Array(open.length).fill(false);
+    for (let i = 0; i < open.length; i++) {
+      if (used[i]) continue;
+      used[i] = true;
+      let chain = open[i].slice();
+      for (const forward of [true, false]) {
+        for (let guard = 0; guard < 256; guard++) {
+          const tip = forward ? chain[chain.length - 1] : chain[0];
+          let hit = null;
+          for (const ref of near(tip)) {
+            if (used[ref.i]) continue;
+            const cand = open[ref.i];
+            if (meets(tip, ref.end === 0 ? cand[0] : cand[cand.length - 1])) { hit = ref; break; }
+          }
+          if (!hit) break;
+          used[hit.i] = true;
+          const seg = hit.end === 0 ? open[hit.i] : open[hit.i].slice().reverse();
+          chain = forward ? chain.concat(seg.slice(1)) : seg.slice(1).reverse().concat(chain);
+        }
+      }
+      out.push(chain);
+    }
+    return out;
+  }
+
+  function pickLabelsReference(labels, { minSepDeg = 0, cap = LABEL_CAP } = {}) {
+    const id = (l) => `${l.tileKey || ""}|${l.level}|${l.anchor || ""}`;
+    const sorted = labels.slice().sort((a, b) => (id(a) < id(b) ? -1 : id(a) > id(b) ? 1 : 0));
+    const seen = new Set(), out = [];
+    for (const lab of sorted) {
+      const k = id(lab);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      if (minSepDeg > 0) {
+        const kx = Math.cos((lab.ll[0] * Math.PI) / 180);
+        const crowded = out.some((o) => o.level === lab.level &&
+          Math.hypot((o.ll[1] - lab.ll[1]) * kx, o.ll[0] - lab.ll[0]) < minSepDeg);
+        if (crowded) continue;
+      }
+      out.push(lab);
+      if (out.length >= cap) break;
+    }
+    return out;
+  }
+
+  function composeContourPaintReference(parts, { cap = LABEL_CAP, minSepCells = LABEL_MIN_SEP_CELLS } = {}) {
+    const byLevel = new Map();
+    const labels = [];
+    let cellMeters = 0, lat = 0;
+    for (const { tile, data } of parts || []) {
+      const c = data && data.contours;
+      if (!tile || !c || !c.levels) continue;
+      if (tile.cellMeters > cellMeters) cellMeters = tile.cellMeters;
+      if (tile.bbox) lat = mercYToLat((tile.bbox.ymin + tile.bbox.ymax) / 2);
+      for (const lv of c.levels) {
+        let e = byLevel.get(lv.level);
+        if (!e) byLevel.set(lv.level, e = { level: lv.level, isIndex: lv.isIndex, lines: [] });
+        for (const line of lv.lines) e.lines.push(line);
+      }
+      for (const lab of c.labels || []) labels.push({ ...lab, tileKey: tile.key });
+    }
+    const lines = [];
+    for (const e of [...byLevel.values()].sort((a, b) => a.level - b.level)) {
+      for (const coords of joinSeamsReference(e.lines)) lines.push({ coords, level: e.level, isIndex: e.isIndex });
+    }
+    const minSepDeg = cellMeters
+      ? (minSepCells * cellMeters * groundScaleForTest(lat) * 180) / (Math.PI * WEB_MERC_R_FOR_TEST) : 0;
+    return {
+      lines,
+      labels: pickLabelsReference(labels, { minSepDeg, cap })
+        .map((l) => ({ ll: l.ll, level: l.level, text: contourLabelText(l.level) })),
+    };
+  }
+  const WEB_MERC_R_FOR_TEST = 6378137;
+  const groundScaleForTest = (lat) => Math.cos((lat * Math.PI) / 180);
+
+  // Spread the SAME real captured tile over an 8-tile grid (like a realistic wide-view
+  // lattice cover) — more interior seams than the 2-tile fixture above, so more chances
+  // for a multi-candidate saddle to expose an order difference if one existed.
+  const eightTileParts = () => {
+    const p = fileURLToPath(new URL("./fixtures/dep-katy-463x400.lerc", import.meta.url));
+    const bytes = readFileSync(p);
+    const g = decodeGrid(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+      { width: 463, height: 400 });
+    const smoothed = maskedSmooth(g.values, g.mask, g.width, g.height, 1.0);
+    const req = { bbox: { xmin: 0, ymin: 0, xmax: g.width, ymax: g.height }, cellMeters: 1, width: g.width, height: g.height };
+    const toLL = (px, py) => {
+      const [lat, lng] = pixelToLatLng(req, px, py);
+      return [Math.round(lat * 1e6) / 1e6, Math.round(lng * 1e6) / 1e6];
+    };
+    const cols = 4, rows = 2;
+    const wStep = (g.width - 16) / cols, hStep = (g.height - 16) / rows;
+    const out = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const interior = { x0: 8 + c * wStep, y0: 8 + r * hStep, x1: 8 + (c + 1) * wStep, y1: 8 + (r + 1) * hStep };
+        const cc = buildContours({ values: smoothed, mask: g.mask, width: g.width, height: g.height }, { clip: interior });
+        out.push({
+          tile: { key: `dem:L17:${100 + c},${50 + r}`, cellMeters: 2.4, bbox: { ymin: 3470000, ymax: 3471000 } },
+          data: {
+            contours: {
+              interval: cc.interval,
+              levels: cc.levels.map((l) => ({ level: l.level, isIndex: l.isIndex, lines: l.lines.map((line) => line.map((q) => toLL(q[0], q[1]))) })),
+              labels: cc.labels.map((lb) => ({ ll: toLL(lb.px, lb.py), level: lb.level, anchor: lb.anchor })),
+            },
+          },
+        });
+      }
+    }
+    return out;
+  };
+
+  it("composeContourPaint (shipped) equals composeContourPaintReference (pre-fix algorithm) — byte-identical, real 8-tile cover", () => {
+    const parts = eightTileParts();
+    const shipped = composeContourPaint(parts);
+    const reference = composeContourPaintReference(parts);
+    expect(shipped.lines).toEqual(reference.lines);
+    expect(shipped.labels).toEqual(reference.labels);
+    // Not a vacuous comparison — the fixture must actually exercise real joined lines.
+    expect(shipped.lines.length).toBeGreaterThan(20);
+  });
+
+  it("joinSeams (shipped) equals joinSeamsReference for every level in the real 8-tile cover", () => {
+    const parts = eightTileParts();
+    const byLevel = new Map();
+    for (const { data } of parts) {
+      for (const lv of data.contours.levels) {
+        let e = byLevel.get(lv.level);
+        if (!e) byLevel.set(lv.level, e = []);
+        for (const line of lv.lines) e.push(line);
+      }
+    }
+    expect(byLevel.size).toBeGreaterThan(5); // exercising more than a token single level
+    for (const lines of byLevel.values()) {
+      expect(joinSeams(lines)).toEqual(joinSeamsReference(lines));
+    }
+  });
+
+  it("pickLabels (shipped) equals pickLabelsReference over the real 8-tile cover's labels", () => {
+    const parts = eightTileParts();
+    const labels = [];
+    for (const { tile, data } of parts) for (const lab of data.contours.labels) labels.push({ ...lab, tileKey: tile.key });
+    expect(labels.length).toBeGreaterThan(10);
+    const shipped = pickLabels(labels, { minSepDeg: 0.0005, cap: 60 });
+    const reference = pickLabelsReference(labels, { minSepDeg: 0.0005, cap: 60 });
+    expect(shipped).toEqual(reference);
   });
 });

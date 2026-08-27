@@ -45,6 +45,7 @@ import { gisCache } from "./gisCache.js";
 import { TERRAIN_MIN_ZOOM } from "./terrainGate.js";
 import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
 import { DEP_URL, M_TO_FT } from "./elevation.js";
+import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import {
   gridRequest, exportUrl, looksLikeLerc, sampleAtLatLng, mercToPixel,
   lngToMercX, latToMercY, groundScale, mercPerPx, mercYToLat,
@@ -199,22 +200,58 @@ const releaseSlot = () => {
   else running--;
 };
 
+/* NEW-1 (B802400, filed while diagnosing B800849/B800850) — a live measurement on the owner's
+ * real signed-in tab found terrain tile fetches taking up to 7.8s, while a LATER measurement on
+ * the same session (warm cache) showed sub-300ms fetches and ZERO main-thread blocking during a
+ * pan — pointing at fetch/queue latency, not paint compute, as the actual felt-lag contributor.
+ * `computeTile` is the ONE place a cold tile's cost is paid, so it is the one place that needs to
+ * say what it cost: how long a tile sat queued behind `MAX_CONCURRENT_TILES` before its own fetch
+ * even started, versus how long the fetch (proxy → agency round trip) and the worker decode each
+ * took. Same shape as `drainageTiming.js`'s "the check measures itself now" — no site/geometry
+ * identifying data, just durations + the lattice band, through the existing telemetry sink so a
+ * future slow session is diagnosable from the first report rather than needing a live DevTools
+ * session to re-discover the same breakdown by hand. Never throws into the fetch it measures. */
+function reportTileTiming(band, legs, error) {
+  try {
+    const { queueMs, fetchMs, workerMs, totalMs } = legs;
+    const parts = [`queue=${queueMs}ms`, `fetch=${fetchMs}ms`];
+    if (workerMs != null) parts.push(`worker=${workerMs}ms`);
+    parts.push(`total=${totalMs}ms`, `band=${band}`);
+    if (error) parts.push(`error=${String((error && error.message) || error).slice(0, 120)}`);
+    reportClientEvent("terrain-tile-timing", parts.join(" "), { ...legs, band, failed: !!error });
+  } catch (_) { /* telemetry must never throw into the fetch it measures */ }
+}
+
 const inflight = new Map(); // req.key -> Promise<artifact>
 function computeTile(req, { fetchImpl } = {}) {
   const cur = inflight.get(req.key);
   if (cur) return cur;
+  const tStart = Date.now();
   const job = (async () => {
     await acquireSlot();
+    const tAfterQueue = Date.now();
     let buf;
     try { buf = await fetchGridBytes(req, fetchImpl); }
-    catch (e) { releaseSlot(); throw e; }
+    catch (e) {
+      releaseSlot();
+      reportTileTiming(req.band, {
+        queueMs: tAfterQueue - tStart, fetchMs: Date.now() - tAfterQueue,
+        workerMs: null, totalMs: Date.now() - tStart,
+      }, e);
+      throw e;
+    }
     releaseSlot();
+    const tAfterFetch = Date.now();
     const id = ++seq;
     const res = await new Promise((resolve, reject) => {
       pending.set(id, { resolve, reject });
       getWorker().postMessage({ id, req, buffer: buf }, [buf]);
     });
     rememberGrid(req.key, req, res.grid);
+    reportTileTiming(req.band, {
+      queueMs: tAfterQueue - tStart, fetchMs: tAfterFetch - tAfterQueue,
+      workerMs: Date.now() - tAfterFetch, totalMs: Date.now() - tStart,
+    }, null);
     return { contours: res.contours, arrows: res.arrows };
   })();
   const clean = () => { if (inflight.get(req.key) === job) inflight.delete(req.key); };
