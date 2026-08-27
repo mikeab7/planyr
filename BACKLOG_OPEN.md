@@ -236,7 +236,7 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
-| B802400 | Contour lines: cold DEM/county-contour tile fetches through `/api/gis-cache`, not paint compute, were the confirmed source of "the contours thing seems to make my computer lag" — ships an honest pending indicator this round | [Site Planner / Terrain] | #site-planner #gis #perf #ui | ⏳ live — awaiting |
+| B802400 | Contour lines: cold DEM/county-contour tile fetches through `/api/gis-cache`, not paint compute, were the confirmed source of "the contours thing seems to make my computer lag" — round 5 finds and fixes the ACTUAL multi-second block: a burst of tiles applied to Leaflet's canvas renderer inside one uninterrupted rAF-rooted call stack | [Site Planner / Terrain] | #site-planner #gis #perf #ui | ⏳ live — awaiting |
 | B800848 | Contour lines layer makes the app lag while panning/zooming: every moveend rebuilt EVERY contour polyline and label in view, not just the newly-exposed tile's | [Site Planner / Terrain] | #site-planner #gis #perf | ⏳ live — awaiting |
 | B800849 | Contour lines: `composeContourPaint`'s `joinSeams`/`pickLabels` re-derived their own sort key on every `.sort()` comparator call | [Site Planner / Terrain] | #site-planner #gis #perf | ⏳ live — awaiting |
 | B794960 | Print/PDF export: the callout leader's arrowhead (and easement/encumbrance hatch tiles) print far larger than they show on the canvas | [Site Planner / export] | #site-planner #export #markup | ⏳ live — awaiting |
