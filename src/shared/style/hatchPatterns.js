@@ -23,10 +23,21 @@
  * out. This module keeps that exact technique for every new/parameterised pattern,
  * rather than inventing a feet-scaled hatch that would have that problem.
  *
- * PDF/PNG export (exportSheet.js `buildExportSvgRaw`) clones the live <svg> verbatim
- * and only strips `data-export="skip"` nodes, so any <pattern> defined in the live
- * <defs> — including a per-element override pattern — survives export automatically.
- * No export-specific pattern handling is needed or should be added.
+ * ⛔ CORRECTED (B794960) — this module used to end by claiming "no export-specific
+ * pattern handling is needed or should be added." That was WRONG. PDF/PNG export (exportSheet.js
+ * `buildExportSvgRaw`) clones the live <svg> verbatim, so a <pattern> defined in the
+ * live <defs> DOES survive export automatically — but `buildComposedSheet` then nests
+ * that clone as its OWN `<svg viewBox=…>` inside the sheet, sized to a FIXED physical
+ * plan box (centi-inches). The browser's native SVG rasterizer (exportSheet.js's
+ * `exportPDF` loads the composed sheet into a real `<img>` and draws it to a canvas)
+ * applies that nested viewBox's fit scale to EVERYTHING inside it, patterns included —
+ * so a tile's declared constant-canvas-px size prints at a PHYSICAL size that varies
+ * with whatever live zoom (`rppf`) was active when the export was captured, exactly
+ * the defect class `exportStyle.js` already solved for stroke width ("independent of
+ * the zoom the user was at when they hit print"). The renderer (SitePlanner.jsx's
+ * `HatchPatternDef` + its sibling hand-authored patterns) now composes a `labelK`
+ * correction into `patternTransform` — 1 on screen (byte-identical), the sheet's own
+ * scale during export — so the tile's PRINTED size stops depending on capture zoom.
  */
 
 export const HATCH_OPTIONS = [
