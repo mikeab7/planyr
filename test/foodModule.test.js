@@ -551,17 +551,35 @@ describe("NEW-4 — food_places_in_bounds_sampled wiring", () => {
  *     snapshot is a lookup he reaches into once zoomed in, never metro-wide content.
  * ═══════════════════════════════════════════════════════════════════════════════════════ */
 describe("NEW-5 (revised) — colourful basemap, no clustering, his places always visible", () => {
-  it("FoodMap uses CARTO's free, key-less Voyager tiles — colourful, not the flat-grey Positron", () => {
+  it("B811520 — FoodMap uses Esri's free, key-less World_Topo_Map tiles — colourful, not the flat-grey Positron, and no CARTO anywhere (watermarked keyless usage, 2026-08-27)", () => {
     const map = src("components/FoodMap.jsx");
-    expect(map).toContain("basemaps.cartocdn.com/rastertiles/voyager");
+    expect(map).toContain("server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}");
     expect(map).not.toContain("basemaps.cartocdn.com/light_all");
-    expect(map).not.toContain("tile.openstreetmap.org");
+    expect(map).not.toMatch(/basemaps\.cartocdn\.com\/rastertiles\/voyager\/\{z\}\/\{x\}\/\{y\}/); // no LIVE cartocdn URL — history-only mentions in comments are fine
+    // Not World_Street_Map — checked live against dense Houston pins and picked against it (see
+    // the header comment); the constant's own url: line is what must not name it.
+    const streetUrlLine = map.slice(map.indexOf("const STREET_TILES = {"), map.indexOf("attribution:", map.indexOf("const STREET_TILES = {")));
+    expect(streetUrlLine).not.toContain("World_Street_Map");
   });
 
-  it("the tile attribution still credits OpenStreetMap (CARTO's own tiles are OSM data restyled)", () => {
+  it("B811520 — street tile axis order is {z}/{y}/{x}, same as satellite, never Leaflet's own default {z}/{x}/{y} (the exact mistake that crashed the satellite toggle the first time, B634981)", () => {
     const map = src("components/FoodMap.jsx");
-    expect(map).toMatch(/openstreetmap\.org\/copyright/);
-    expect(map).toMatch(/carto\.com\/attributions/);
+    const streetBlock = map.slice(map.indexOf("const STREET_TILES = {"), map.indexOf("const STREET_TILES = {") + 400);
+    expect(streetBlock).toMatch(/tile\/\{z\}\/\{y\}\/\{x\}/);
+    expect(streetBlock).not.toMatch(/tile\/\{z\}\/\{x\}\/\{y\}/);
+    expect(streetBlock).not.toMatch(/subdomains/); // no subdomains key — a single ArcGIS host has none (B634981's own lesson)
+    expect(streetBlock).not.toMatch(/url1x/); // Esri tiles have no {r} retina token to strip
+  });
+
+  it("B811520 — the tile attribution credits Esri for BOTH layers, never a standalone OpenStreetMap/CARTO credit (nothing on the page fetches OSM or CARTO tiles any more)", () => {
+    const map = src("components/FoodMap.jsx");
+    const streetBlock = map.slice(map.indexOf("const STREET_TILES = {"), map.indexOf("const STREET_TILES = {") + 900);
+    expect(streetBlock).toMatch(/attribution: "&copy; Esri,/);
+    expect(streetBlock).not.toMatch(/openstreetmap\.org\/copyright/);
+    expect(streetBlock).not.toMatch(/carto\.com\/attributions/);
+    // The live OSM fallback documented for the future is commented-out code, not an active constant.
+    expect(map).not.toMatch(/^const OSM_FALLBACK_TILES/m);
+    expect(map).toMatch(/\/\/\s*const OSM_FALLBACK_TILES = \{/); // present, but commented out
   });
 
   it("clustering is gone — no clusterer module, no import of one, no clustering package added", () => {
@@ -652,7 +670,7 @@ describe("satellite toggle — one control, two states, reused Esri source, legi
 
   it("the two tile sources are swapped WHOLE on toggle (fresh layer + removal), never `setUrl` on a shared layer", () => {
     const map = src("components/FoodMap.jsx");
-    const tileEffect = map.slice(map.indexOf("Basemap tile layer"), map.indexOf("}, [basemap, narrowViewport]);"));
+    const tileEffect = map.slice(map.indexOf("Basemap tile layer"), map.indexOf("}, [basemap]);"));
     expect(tileEffect).toMatch(/L\.tileLayer\(url,/);
     expect(tileEffect).toMatch(/map\.removeLayer\(layer\)/); // the cleanup that removes the PREVIOUS layer
     expect(map).not.toMatch(/\.setUrl\(/);
@@ -925,26 +943,23 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     expect(shortBranch).toMatch(/map\.flyTo\(shiftedLatLng, targetZoom, \{ duration: FLY_DURATION_SEC \}\)/);
   });
 
-  it("B651872 (×4) — 1x (non-retina) street tiles on a narrow viewport; satellite is untouched (it never had a retina URL)", () => {
-    // Measured: @2x retina tiles average 45.7 KB / 129 ms median vs 21.4 KB / 23 ms for 1x, cold
-    // — Leaflet substitutes {r}->'@2x' UNCONDITIONALLY whenever Browser.retina is true (every
-    // iPhone), regardless of any detectRetina option (confirmed from TileLayer.getTileUrl's own
-    // source). Verified live (.scratch-repro/verify-retina.mjs this session, dpr=2 in both
-    // cases): the resolved URL template drops {r} entirely at 390px width and keeps it at 1400px.
+  it("B811520 — the url1x/retina gate is GONE from the LIVE code, not just unused: Esri's tile URLs (street AND satellite) have no {r} token to strip, so there is nothing left to gate (history-only mentions in prose comments are fine)", () => {
     const map = src("components/FoodMap.jsx");
-    expect(map).toMatch(/url1x: "https:\/\/\{s\}\.basemaps\.cartocdn\.com\/rastertiles\/voyager\/\{z\}\/\{x\}\/\{y\}\.png",/);
-    expect(map).toMatch(/const url = narrowViewport && source\.url1x \? source\.url1x : source\.url;/);
-    // Esri's satellite source never declares a url1x — nothing to gate, confirming this is
-    // street-basemap-only (Esri had no {r} token to begin with).
-    const satelliteBlock = map.slice(map.indexOf("const SATELLITE_TILES"), map.indexOf("const LABELS_TILES"));
-    expect(satelliteBlock).not.toMatch(/url1x/);
-    expect(satelliteBlock).not.toMatch(/\{r\}/);
+    // Neither tile-source object declares a url1x field any more.
+    expect(map).not.toMatch(/url1x:\s*"/);
+    // No LIVE tile URL template contains the {r} retina placeholder (a literal `{r}` can still
+    // appear inside a prose comment explaining the OLD mechanism — that's history, not code).
+    expect(map).not.toMatch(/url:\s*"[^"]*\{r\}/);
+    // The gate expression itself is gone from the tile-layer effect — never dead code left behind.
+    expect(map).not.toMatch(/narrowViewport && source\.url1x/);
+    const tileEffectSrc = map.slice(map.indexOf("Basemap tile layer"), map.indexOf("}, [basemap]);"));
+    expect(tileEffectSrc).toMatch(/const url = source\.url;/);
   });
 
   it("B651872 (×4) — a real loading treatment tied to the current tile layer's own events, never silent grey", () => {
     const map = src("components/FoodMap.jsx");
     expect(map).toMatch(/const \[tilesLoading, setTilesLoading\] = useState\(false\);/);
-    const tileEffect = map.slice(map.indexOf("Basemap tile layer"), map.indexOf("}, [basemap, narrowViewport]);"));
+    const tileEffect = map.slice(map.indexOf("Basemap tile layer"), map.indexOf("}, [basemap]);"));
     expect(tileEffect).toMatch(/loadingLayer\.on\("loading", onLoading\);/);
     expect(tileEffect).toMatch(/loadingLayer\.on\("load", onLoad\);/);
     // Cleaned up on basemap change / unmount so a torn-down layer can never report stale loading.
@@ -1521,8 +1536,26 @@ describe("B668194 — a successful visit save clears the form; a failed one keep
     const submitVisitFn = app.slice(app.indexOf("const submitVisit = useCallback"), app.indexOf("const removeVisit = useCallback"));
     expect(submitVisitFn).toMatch(/if \(!selected\) return false;/);
     expect(submitVisitFn).toMatch(/setError\("Give this place a name first\."\);\s*\n\s*return false;/);
-    expect(submitVisitFn).toMatch(/if \(err\) \{ setError\(err\.message \|\| "Couldn't save that visit\."\); return false; \}/);
-    expect(submitVisitFn).toMatch(/await reloadVisits\(\);[\s\S]{0,220}return true;/);
+    expect(submitVisitFn).toMatch(/if \(err\) \{/);
+    expect(submitVisitFn).toMatch(/setError\(err\.message \|\| "Couldn't save that visit\."\);\s*\n\s*return false;/);
+    expect(submitVisitFn).toMatch(/await reloadVisits\(\);[\s\S]{0,320}return true;/);
+  });
+
+  it("NEW-1 (2026-08-27) — the visit is added OPTIMISTICALLY before the write resolves, and rolled back (never left as a phantom) if it fails", () => {
+    const app = src("FoodApp.jsx");
+    const submitVisitFn = app.slice(app.indexOf("const submitVisit = useCallback"), app.indexOf("const removeVisit = useCallback"));
+    // The optimistic push happens BEFORE the await — i.e. before the network round-trip, not after.
+    const optimisticIdx = submitVisitFn.indexOf("setVisits((v) => [optimisticVisit, ...v]);");
+    const awaitIdx = submitVisitFn.indexOf("const { error: err } = await insertVisit(payload);");
+    expect(optimisticIdx).toBeGreaterThanOrEqual(0);
+    expect(awaitIdx).toBeGreaterThan(optimisticIdx);
+    // The optimistic id has a shape that can NEVER collide with a real row's uuid, so the
+    // rollback filter can never accidentally drop a real, already-confirmed visit.
+    expect(submitVisitFn).toMatch(/const optimisticId = `optimistic-\$\{\+\+optimisticIdRef\.current\}`;/);
+    // Rollback removes EXACTLY the optimistic row, by id, inside the error branch — never a
+    // silent no-op that leaves a phantom visit on screen.
+    const errBlock = submitVisitFn.slice(submitVisitFn.indexOf("if (err) {"), submitVisitFn.indexOf("return false;", submitVisitFn.indexOf("if (err) {")) + 20);
+    expect(errBlock).toMatch(/setVisits\(\(v\) => v\.filter\(\(x\) => x\.id !== optimisticId\)\);/);
   });
 
   it("VisitForm awaits the result and resets every field ONLY on success — a failed save leaves everything typed", () => {
@@ -1859,11 +1892,11 @@ describe("VisitPanel — the 'Want to try' toggle, reachable with zero visits", 
     expect(panel.indexOf("<ActionsRow")).toBeLessThan(panel.indexOf("<PastVisitsSection"));
   });
 
-  it("only renders when onToggleWishlist is provided (signed out / not applicable), otherwise stays out of the DOM entirely", () => {
+  it("only renders when onToggleWishlist is provided (signed out / not applicable) AND the place has never been visited (NEW-1, 2026-08-27) — otherwise stays out of the DOM entirely", () => {
     // Guarded independently of onSubmitVisit's own gating one level up (ActionsRow is built once
-    // and reused for both the everVisited/never-visited swap, so the guard lives on the wishBtn
-    // element itself, inside ActionsRow, rather than wrapping the whole row).
-    expect(panel).toMatch(/const wishBtn = onToggleWishlist && \(/);
+    // and reused for both branches, so the guard lives on the wishBtn element itself, inside
+    // ActionsRow, rather than wrapping the whole row).
+    expect(panel).toMatch(/const wishBtn = onToggleWishlist && !everVisited && \(/);
   });
 
   it("aria-pressed reflects the wishlisted prop — a screen reader / test can read the flagged state directly", () => {
@@ -2209,19 +2242,26 @@ describe("VisitPanel — score strip (block 2), only when the place has at least
   });
 });
 
-describe("VisitPanel — Actions row (block 4): primary/secondary swap on a never-visited place, sticky footer", () => {
+describe("VisitPanel — Actions row (block 4): want-to-try disappears once visited (NEW-1, 2026-08-27), sticky footer", () => {
   const panel = src("components/VisitPanel.jsx");
   const actionsBlock = panel.slice(panel.indexOf("function ActionsRow"), panel.indexOf("/* Past visits"));
 
-  it("everVisited: Log a visit is primary (full-width, solid); Want to try is secondary, beside it", () => {
+  it("everVisited: Log a visit is the ONLY button, full-width primary — Want to try is gone entirely, not just demoted", () => {
     expect(actionsBlock).toMatch(/const logIsPrimary = everVisited \|\| !onToggleWishlist;/);
+    expect(actionsBlock).toMatch(/const wishBtn = onToggleWishlist && !everVisited && \(/);
     expect(actionsBlock).toMatch(/\{\(everVisited \? \[logBtn, wishBtn\] : \[wishBtn, logBtn\]\)\.filter\(Boolean\)\}/);
+    // A place-level want-to-try is meaningless once he's actually been (owner: "remove the want
+    // to try option from a restaurant I've already visited") — filter(Boolean) drops the false
+    // wishBtn cleanly, so the row renders Log a visit alone, full width.
   });
 
-  it("never-visited: the roles SWAP — Want to try becomes primary, Log a visit drops to secondary", () => {
-    // logIsPrimary is false only when NOT everVisited AND onToggleWishlist is present — the
-    // wishBtn's own style picks `primary` in that same branch (everVisited ? secondary : primary).
-    expect(actionsBlock).toMatch(/\.\.\.\(everVisited \? secondary : primary\),/);
+  it("never-visited: Want to try renders as the primary (full-width) button, Log a visit as secondary — unchanged from before this item", () => {
+    // wishBtn's own style is unconditionally `primary` now (it only ever renders in the
+    // !everVisited branch, so the old everVisited-ternary on its own style was dead code once
+    // the render guard moved to the wishBtn declaration itself).
+    const wishBtnBlock = actionsBlock.slice(actionsBlock.indexOf("const wishBtn"), actionsBlock.indexOf("return ("));
+    expect(wishBtnBlock).toMatch(/\.\.\.primary,/);
+    expect(wishBtnBlock).not.toMatch(/everVisited \? secondary : primary/);
   });
 
   it("the flagged state shows a check and a filled background; unflagged is outline-only", () => {
@@ -2657,5 +2697,42 @@ describe("db/food.sql — food_places_search_by_name gains `confidence` + exclud
     const sql = src("db/food.sql");
     expect(sql).toMatch(/grant execute on function public\.food_places_search_by_name\(text, integer, double precision, double precision\) to anon, authenticated;/);
     expect(sql).toMatch(/grant execute on function public\.food_places_search_by_name_raw\(text, integer, double precision, double precision\) to anon, authenticated;/);
+  });
+});
+
+describe("NEW-1 (2026-08-27 owner block) — saving a visit gives an unmistakable confirmation", () => {
+  const panel = src("components/VisitPanel.jsx");
+
+  it("the confirmation banner exists, is a role=\"status\" (not an alert/modal), and reads a plain success message", () => {
+    expect(panel).toMatch(/data-testid="food-save-confirmation"/);
+    const bannerBlock = panel.slice(panel.indexOf('data-testid="food-save-confirmation"') - 300, panel.indexOf('data-testid="food-save-confirmation"') + 400);
+    expect(bannerBlock).toMatch(/role="status"/);
+    expect(bannerBlock).toMatch(/Visit saved/);
+    expect(bannerBlock).toMatch(/var\(--success-bg\)/);
+    expect(bannerBlock).toMatch(/var\(--success-text\)/);
+  });
+
+  it("shown ONLY on savedNonce > 0 (never on mount) and auto-dismisses — no dismiss button, nothing for the owner to click away", () => {
+    expect(panel).toMatch(/const \[savedNonce, setSavedNonce\] = useState\(0\);/);
+    const effectBlock = panel.slice(panel.indexOf("if (savedNonce === 0) return undefined"), panel.indexOf("}, [savedNonce]);") + 20);
+    expect(effectBlock).toMatch(/setTimeout\(\(\) => setShowSaved\(false\), SAVE_CONFIRMATION_MS\)/);
+    expect(effectBlock).toMatch(/clearTimeout\(t\)/);
+    // No dismiss affordance anywhere near the banner — it is not a toast the owner has to close.
+    const bannerBlock = panel.slice(panel.indexOf('data-testid="food-save-confirmation"') - 50, panel.indexOf('data-testid="food-save-confirmation"') + 400);
+    expect(bannerBlock).not.toMatch(/onClick/);
+  });
+
+  it("fires ONLY on a confirmed save (the SAME B668194 gate VisitForm already uses to clear its fields) — never on a failed save, which the error banner already covers", () => {
+    expect(panel).toMatch(/onSaved\?\.\(\);/);
+    const submitFn = panel.slice(panel.indexOf("const submit = async (e) => {"), panel.indexOf("return (", panel.indexOf("const submit = async (e) => {")));
+    const savedBlock = submitFn.slice(submitFn.indexOf("if (saved) {"), submitFn.indexOf("};", submitFn.indexOf("if (saved) {")));
+    expect(savedBlock).toMatch(/setWouldReturn\(null\);\s*\n\s*\/\/[\s\S]{0,300}onSaved\?\.\(\);/); // field-clear AND onSaved share the same `if (saved)` gate
+    expect(panel).toMatch(/<VisitForm pending=\{pending\} onCancel=\{\(\) => setAdding\(false\)\} onSubmit=\{onSubmitVisit\} onSaved=\{handleSaved\} \/>/);
+  });
+
+  it("lives INSIDE peekRef's own measured block, not an absolute overlay over the header/close button — so it never covers the title or the close button, and the sheet's own existing peek-height re-measure (no deps, re-measures every render) picks it up for free", () => {
+    const peekBlock = panel.slice(panel.indexOf("<div ref={peekRef}>"), panel.indexOf("{everVisited && <OrderAgain"));
+    expect(peekBlock).toMatch(/data-testid="food-save-confirmation"/);
+    expect(peekBlock).not.toMatch(/position:\s*"absolute"/);
   });
 });

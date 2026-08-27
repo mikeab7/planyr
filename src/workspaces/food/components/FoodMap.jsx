@@ -32,6 +32,12 @@
  * still the wrong content type: aerial PHOTOGRAPHY has no "muted" setting, it's real-world photo
  * detail, and would reintroduce the "too busy" problem in a different shape. A tile URL, not a
  * package — no new dependency.
+ * ⛔ SUPERSEDED (B811520, 2026-08-27) — CARTO began watermarking these exact keyless Voyager
+ * tiles ("API KEY REQUIRED", stamped across the map). Moved to Esri's `World_Topo_Map` — see the
+ * `STREET_TILES` header comment below for the full reasoning, including why `World_Topo_Map` was
+ * picked over `World_Street_Map` (the "quiet roads, real colour" balance this note describes is
+ * what `World_Topo_Map` was chosen to preserve). The rest of this note is history — CARTO/Voyager
+ * are no longer used anywhere in this file.
  *
  * ⛔ SATELLITE TOGGLE (B632177, owner, 2026-08-19: "also add an option for a satellite view"). ONE toggle,
  * two states — never a basemap gallery. Reuses the Site Planner's Esri World Imagery source
@@ -184,6 +190,9 @@
  *      egress proxy blocks the real tile hosts outright, so there's no way to fetch-and-diff a
  *      real @2x vs 1x tile; flagged honestly rather than claimed proven, per the owner's own
  *      "measure before deciding" instruction.
+ *      ⛔ MOOT since B811520 (2026-08-27) — the street basemap moved to Esri, whose tile URLs
+ *      have no `{r}` retina token at all (same as satellite already had none), so there is no
+ *      retina-byte question left to solve here. History only.
  *   3. **A real loading treatment instead of silent grey.** "Keep the previous tiles" doesn't
  *      apply to a jump to a genuinely different place — there's nothing relevant to keep. Instead:
  *      a small "Loading imagery…" pill tied to the CURRENT tile layer's own `loading`/`load`
@@ -290,15 +299,50 @@ import { colorForRating } from "../lib/ratingColor.js";
 import { nextZoomAnimTier } from "../lib/zoomAnimTier.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
 
+// ⛔ B811520 — CARTO STARTED WATERMARKING KEYLESS VOYAGER TILES ("API KEY REQUIRED", stamped
+// diagonally across the map, owner screenshot 2026-08-27). The tiles still return HTTP 200 —
+// confirmed live, `image/png` — so this is CARTO changing its keyless-usage terms, not an outage
+// to wait out, and it will not clear on its own. The owner's constraint is unchanged and
+// non-negotiable: zero cost, no CARTO account of any kind, free tier included ("a free tier that
+// requires an account is a bill waiting to happen"). Fix: moved to Esri's `World_Topo_Map`, on
+// the SAME `server.arcgisonline.com` host `SATELLITE_TILES` below already uses — no new
+// dependency, no new attribution relationship, no new failure mode. Same axis-order trap as
+// satellite (`{z}/{y}/{x}`, y before x — opposite of Leaflet's own default, and exactly what
+// crashed the satellite toggle the first time it was built, see B634981 below) and the same
+// no-`subdomains`-key rule.
+// PICKED World_Topo_Map OVER World_Street_Map, checked against a real dense-Houston tile with
+// synthetic pins overlaid at every rating-ramp colour (not just eyeballing the bare basemap):
+// World_Street_Map's interstate shields and saturated orange/red arterial-road styling visually
+// competed with the SAME orange/red end of the pin colour ramp (`ratingColor.js`) and the manual-
+// pin orange (`COLORS.manual`) — a red pin and a red highway shield read as the same kind of mark
+// at a glance. World_Topo_Map keeps genuine colour (soft greens/tans, not the grey the owner
+// rejected in the B168/NEW-5 header note below) while roads render as plain, muted grey/white
+// lines with no shields — the SAME "quiet roads, real colour" balance Voyager was originally
+// chosen for. `maxZoom`/`maxNativeZoom` mirror `SATELLITE_TILES` below (confirmed live: Esri
+// serves genuine, non-extrapolated detail for Houston through z19). No `url1x` — Esri's tile URLs
+// have no `{r}` retina token to begin with, same as satellite already had no retina variant.
 const STREET_TILES = {
-  url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-  // B651872 (×4) — 1x fallback for narrow (mobile) viewports: dropping the `{r}` token stops
-  // Leaflet's unconditional retina URL substitution (see the header comment). Esri's satellite
-  // layer below never had a `{r}` token to begin with, so it needs no 1x counterpart.
-  url1x: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-  maxZoom: 19, subdomains: "abcd",
-  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+  url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+  maxZoom: 21, maxNativeZoom: 19,
+  // Esri's own published credit for World_Topo_Map (`?f=json`'s `copyrightText`) lists many
+  // upstream data sources, INCLUDING OpenStreetMap contributors as one of several inputs baked
+  // into Esri's own composite basemap — that is Esri's credit to make, not a standalone OSM
+  // relationship this app now has (it fetches no OSM tiles directly). Shortened to the same
+  // convention `SATELLITE_TILES.attribution` below already uses for Esri's own longer imagery
+  // credit list, not the full multi-line string.
+  attribution: "&copy; Esri, HERE, Garmin, and the GIS User Community",
 };
+// ⛔ FALLBACK, DOCUMENTED BUT NOT WIRED IN — if Esri ever does what CARTO just did (starts
+// watermarking or otherwise degrading keyless usage), the next keyless option is OpenStreetMap's
+// own standard tiles (`tile.openstreetmap.org`, confirmed live 2026-08-27: HTTP 200, ~38.9 KB/
+// tile at Houston, no key). Kept as a fallback, not a first choice, because OSM's own tile usage
+// policy (operations.osmfoundation.org/policies/tiles) discourages heavy automated/production use
+// of that specific server — it's a volunteer-funded service, not a CDN meant for this. Reach for
+// it only if BOTH CARTO and Esri stop working keyless:
+//   const OSM_FALLBACK_TILES = {
+//     url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png", maxZoom: 19,
+//     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+//   };
 // Esri World Imagery — mirrors the Site Planner's own layer verbatim (MapFinder.jsx), including
 // maxZoom 21 with maxNativeZoom 19 (upscale past Esri's native ceiling rather than hard-refuse),
 // and NO `subdomains` key at all — see the B634981 header comment for why an explicit
@@ -598,9 +642,10 @@ export default function FoodMap({
     const map = mapRef.current;
     if (!map) return undefined;
     const source = basemap === "satellite" ? SATELLITE_TILES : STREET_TILES;
-    // B651872 (×4) — 1x on a narrow viewport, street basemap only (Esri satellite never had a
-    // retina URL to begin with). See the header comment for the measured byte/latency cost.
-    const url = narrowViewport && source.url1x ? source.url1x : source.url;
+    // B811520 — both sources are Esri now, and Esri's tile URLs carry no {r} retina token, so
+    // there is no narrow-viewport 1x/2x gate left to apply (the old CARTO street layer's own
+    // url1x is gone — see STREET_TILES's header comment).
+    const url = source.url;
     const layers = [];
     let onLoading, onLoad, loadingLayer;
     try {
@@ -643,7 +688,10 @@ export default function FoodMap({
       setTilesLoading(false);
       for (const layer of layers) { try { map.removeLayer(layer); } catch (_) { /* already gone */ } }
     };
-  }, [basemap, narrowViewport]);
+  // B811520 — narrowViewport dropped from the deps: it was only ever read for the now-gone
+  // url1x gate above. Keeping it here would re-tear-down and rebuild the tile layer on every
+  // viewport-width crossing for no reason (Esri's tile URL never varies by viewport width).
+  }, [basemap]);
 
   // ⛔ NEW-2 (2nd owner block, 2026-08-23) — CONTINUOUS marker scaling DURING a zoom animation,
   // not just at zoomend. Owner, verbatim: "it seems like everything resizes as I zoom in or

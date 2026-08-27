@@ -29,7 +29,7 @@
  * ActionsRow below. FoodApp still owns the actual flag state; this file only renders `wishlisted`
  * and calls `onToggleWishlist`.
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import BottomSheet from "./BottomSheet.jsx";
 import { colorForRating, textColorForRating } from "../lib/ratingColor.js";
@@ -48,6 +48,9 @@ const SELECTED_ACCENT = "var(--accent-food)";
 // The same breakpoint AppHeader.jsx already uses for its own "narrow" layout switch — reused
 // verbatim rather than picking a second number, so the whole app agrees on what "mobile" means.
 const MOBILE_BREAKPOINT = "(max-width: 760px)";
+// NEW-1 (2026-08-27 owner block) — long enough to register as a real confirmation, short enough
+// to never feel like something that needs dismissing (it never does — no button, no modal).
+const SAVE_CONFIRMATION_MS = 2500;
 
 function useIsMobile() {
   const [mobile, setMobile] = useState(() => {
@@ -113,7 +116,7 @@ function fieldStyle() {
   };
 }
 
-function VisitForm({ onSubmit, onCancel, pending }) {
+function VisitForm({ onSubmit, onCancel, pending, onSaved }) {
   const [rating, setRating] = useState(null);
   const [ratingAmbiance, setRatingAmbiance] = useState(null);
   const [cost, setCost] = useState("");
@@ -146,6 +149,10 @@ function VisitForm({ onSubmit, onCancel, pending }) {
       setWhatWasGood("");
       setNotes("");
       setWouldReturn(null);
+      // NEW-1 (2026-08-27 owner block) — the SAME confirmed-save gate B668194 already uses for
+      // clearing the form; the "✓ Visit saved" banner (VisitPanel, above) must never fire on a
+      // failed save (the error banner already covers that case).
+      onSaved?.();
     }
   };
 
@@ -379,12 +386,21 @@ function ActionsRow({ everVisited, onOpenForm, wishlisted, onToggleWishlist, wis
       Log a visit
     </button>
   );
-  const wishBtn = onToggleWishlist && (
+  // NEW-1 (2026-08-27 owner block, part of the save-confirmation item) — a place-level "want to
+  // try" is meaningless once he's actually been (owner: "remove the want to try option from a
+  // restaurant I've already visited"). Gone entirely once visited, not just demoted to secondary
+  // — a stale control here is exactly the "did this actually do something" ambiguity this same
+  // item is fixing elsewhere. `logIsPrimary` already treats `everVisited` the same as "no wishlist
+  // handler at all", so `logBtn` correctly takes the full-width primary slot the instant this
+  // disappears — no extra branch needed there. (Dish-level want-to-try on a visited place is
+  // B707842's own, separately-tracked follow-up — this only removes the now-meaningless
+  // PLACE-level control; it doesn't replace it with anything.)
+  const wishBtn = onToggleWishlist && !everVisited && (
     <button
       key="wish" type="button" onClick={onToggleWishlist} disabled={wishlistDisabled} aria-pressed={wishlisted}
       data-testid="food-wishlist-toggle"
       style={{
-        ...(everVisited ? secondary : primary),
+        ...primary,
         ...(wishlisted ? wishActive : {}),
         opacity: wishlistDisabled ? 0.5 : 1,
         cursor: wishlistDisabled ? "default" : "pointer",
@@ -537,6 +553,24 @@ export default function VisitPanel({
   const orderAgain = useMemo(() => orderAgainEntries(visits), [visits]);
   const wishlistDisabled = manualNameEditable && !(manualName || "").trim();
 
+  // NEW-1 (2026-08-27 owner block) — "when I click log this visit, it should not make it seem
+  // like nothing happened." Saving already updates the list/aggregates/panel-state/map-pin (all
+  // derive from FoodApp's own `visits` state — see FoodApp.jsx's submitVisit for the optimistic
+  // add that makes those land in the SAME beat as the click), but nothing EXPLICITLY said "saved"
+  // — a cleared form reads as "did nothing" as easily as "it worked." `savedNonce` increments on
+  // every confirmed save (VisitForm calls `onSaved` only when `onSubmit` resolved true, mirroring
+  // the B668194 field-clear contract exactly), and the banner auto-dismisses — never a modal, never
+  // something to dismiss by hand.
+  const [savedNonce, setSavedNonce] = useState(0);
+  const [showSaved, setShowSaved] = useState(false);
+  useEffect(() => {
+    if (savedNonce === 0) return undefined; // never shown on mount, only on a REAL save
+    setShowSaved(true);
+    const t = setTimeout(() => setShowSaved(false), SAVE_CONFIRMATION_MS);
+    return () => clearTimeout(t);
+  }, [savedNonce]);
+  const handleSaved = useCallback(() => setSavedNonce((n) => n + 1), []);
+
   // Escape clears the selection exactly like the close button.
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
@@ -566,6 +600,20 @@ export default function VisitPanel({
           name={place?.name} category={place?.category} address={place?.address} lat={place?.lat} lon={place?.lon}
           onClose={onClose}
         />
+        {showSaved && (
+          // NEW-1 — deliberately INSIDE peekRef's own measured div, not an absolute overlay: it
+          // never covers the close button or the title, and BottomSheet's own "peek" height
+          // effect (see the header comment above) already re-measures on every render with no
+          // deps, so the sheet smoothly grows to reveal this and settles back when it clears —
+          // reusing the existing smooth-resettle machinery instead of fighting it with a new one.
+          <div role="status" data-testid="food-save-confirmation" style={{
+            margin: "0 16px 8px", padding: "7px 10px", borderRadius: 8,
+            background: "var(--success-bg)", color: "var(--success-text)", border: "1px solid var(--success-border)",
+            fontSize: 12.5, fontWeight: 700, display: "flex", alignItems: "center", gap: 6,
+          }}>
+            ✓ Visit saved
+          </div>
+        )}
         {everVisited && <ScoreStrip aggregates={aggregates} />}
         {!everVisited && !adding && <EmptyStateNote />}
       </div>
@@ -579,7 +627,7 @@ export default function VisitPanel({
       )}
 
       {onSubmitVisit && (adding ? (
-        <VisitForm pending={pending} onCancel={() => setAdding(false)} onSubmit={onSubmitVisit} />
+        <VisitForm pending={pending} onCancel={() => setAdding(false)} onSubmit={onSubmitVisit} onSaved={handleSaved} />
       ) : (
         <ActionsRow
           everVisited={everVisited} onOpenForm={handleOpenForm}
