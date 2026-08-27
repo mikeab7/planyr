@@ -53,6 +53,7 @@ import {
 import {
   composeContourPaint, contourLabelText, buildContourIndex, hitContour,
   hoverLabelPlacement, hoverLabelSize,
+  contourLineKey, contourLabelKey, diffKeyedPaint,
   HOVER_TOL_PX, DOUBLE_STAMP_PX,
 } from "./contours.js";
 
@@ -326,52 +327,68 @@ function visibleBox(map, { bottom = HOVER_BOTTOM_RESERVE_PX } = {}) {
 /* `parts` is [{ tile, data }] — one entry per lattice tile in the current cover.
  * Lines are merged by level across tiles and seam-joined (the tile clip cut each
  * contour at the shared lattice edge; this stitches the halves back into one polyline),
- * then labels are deduped and thinned by pickLabels. Both sublayers are built inside
- * this ONE call, into a group the caller just cleared — so a label can never outlive
- * the geometry it names (NEW-1). */
-function renderContours(parts, group, { opacity, canvas, onComposed, labelPane = null }) {
+ * then labels are deduped and thinned by pickLabels. Returns `{ items, n }` — keyed
+ * build recipes, NOT yet turned into Leaflet objects: `paint()` diffs `items` against
+ * what is already on screen (NEW-1 perf) and only builds the ones that are new, so a
+ * label can never outlive the geometry it names (still true — composeContourPaint keys
+ * both from the SAME atomic composition) without re-building the ones that haven't
+ * moved. */
+function renderContours(parts, { opacity, canvas, onComposed, labelPane = null }) {
   // composeContourPaint is the shared, PURE composition (contours.js) — the dedupe, the
   // seam-join, the label thinning and the ONE unit formatter all live there, so the
   // fixture-driven test exercises exactly what the map paints. This function only turns
-  // its output into Leaflet objects.
+  // its output into keyed Leaflet-build recipes.
   const { lines, labels } = composeContourPaint(parts);
   if (onComposed) onComposed({ lines, labels });
+  const items = [];
   for (const ln of lines) {
     // Line hierarchy by WEIGHT (index heavier), never by fading (salience rule).
-    L.polyline(ln.coords, {
-      renderer: canvas, color: ln.isIndex ? CONTOUR_INDEX_COL : CONTOUR_COL,
-      weight: ln.isIndex ? 2.2 : 1.1, opacity, interactive: false,
-    }).addTo(group);
+    items.push({
+      key: contourLineKey(ln),
+      build: () => L.polyline(ln.coords, {
+        renderer: canvas, color: ln.isIndex ? CONTOUR_INDEX_COL : CONTOUR_COL,
+        weight: ln.isIndex ? 2.2 : 1.1, opacity, interactive: false,
+      }),
+    });
   }
   for (const lab of labels) {
-    L.marker(lab.ll, { icon: labelIcon(lab.text), interactive: false, keyboard: false, ...(labelPane ? { pane: labelPane } : null) }).addTo(group);
+    items.push({
+      key: contourLabelKey(lab),
+      build: () => L.marker(lab.ll, { icon: labelIcon(lab.text), interactive: false, keyboard: false, ...(labelPane ? { pane: labelPane } : null) }),
+    });
   }
-  return lines.length;
+  return { items, n: lines.length };
 }
 
-function renderArrows(parts, group, { map, opacity, canvas }) {
-  if (!map) return 0;
+function renderArrows(parts, { map, opacity, canvas }) {
+  if (!map) return { items: [], n: 0 };
   const arrows = [];
   for (const { data } of parts) if (data && data.arrows) for (const a of data.arrows) arrows.push(a);
-  let n = 0;
+  const items = [];
   for (const a of arrows) {
     // Steeper = longer + bolder (salience tracks importance). Normalized 0 at the
     // no-arrow threshold, saturating at a 2% grade (steep for Houston sheet flow).
     const t = Math.max(0, Math.min(1, (a.slope - 0.0008) / (0.02 - 0.0008)));
     const len = 14 + 14 * t, w = 1.2 + 1.6 * t, head = Math.max(5, len * 0.38);
-    const p = map.latLngToLayerPoint(a.ll);
-    const dx = Math.cos(a.dir), dy = Math.sin(a.dir);
-    const tip = L.point(p.x + (dx * len) / 2, p.y + (dy * len) / 2);
-    const tail = L.point(p.x - (dx * len) / 2, p.y - (dy * len) / 2);
-    const back = a.dir + Math.PI;
-    const h1 = L.point(tip.x + Math.cos(back - 0.45) * head, tip.y + Math.sin(back - 0.45) * head);
-    const h2 = L.point(tip.x + Math.cos(back + 0.45) * head, tip.y + Math.sin(back + 0.45) * head);
-    const pts = [tail, tip, h1, tip, h2].map((pt) => map.layerPointToLatLng(pt));
-    L.polyline(pts, { renderer: canvas, color: ARROW_COL, weight: w, opacity, interactive: false, lineCap: "round" })
-      .addTo(group);
-    n++;
+    // Keyed on ground position + direction (both from the worker's round6'd output) —
+    // stable across a pan at constant zoom; a zoom change always changes the lattice
+    // band, so every key is "new" then and nothing stale is ever reused across zooms.
+    items.push({
+      key: `A|${a.ll[0]},${a.ll[1]}|${Math.round(a.dir * 1e3)}`,
+      build: () => {
+        const p = map.latLngToLayerPoint(a.ll);
+        const dx = Math.cos(a.dir), dy = Math.sin(a.dir);
+        const tip = L.point(p.x + (dx * len) / 2, p.y + (dy * len) / 2);
+        const tail = L.point(p.x - (dx * len) / 2, p.y - (dy * len) / 2);
+        const back = a.dir + Math.PI;
+        const h1 = L.point(tip.x + Math.cos(back - 0.45) * head, tip.y + Math.sin(back - 0.45) * head);
+        const h2 = L.point(tip.x + Math.cos(back + 0.45) * head, tip.y + Math.sin(back + 0.45) * head);
+        const pts = [tail, tip, h1, tip, h2].map((pt) => map.layerPointToLatLng(pt));
+        return L.polyline(pts, { renderer: canvas, color: ARROW_COL, weight: w, opacity, interactive: false, lineCap: "round" });
+      },
+    });
   }
-  return n;
+  return { items, n: items.length };
 }
 
 /* The honesty line for a view whose band had to step down (NEW-2 (3)). Says the ground
@@ -400,6 +417,16 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = n
   // never leave one stranded over lines it no longer names.
   const hoverGroup = L.layerGroup();
   let composed = null, hoverIndex = null, hoverKey = null;
+  // NEW-1 (perf) — key → Leaflet layer, for everything currently painted by `render`
+  // (contour lines/labels, or flow arrows). A moveend that shifts the lattice cover by
+  // one tile used to clearLayers() and rebuild EVERY line and label on screen, not just
+  // the newly-exposed tile's — at working (1-ft) zoom that is thousands of re-projected
+  // vertices and torn-down/recreated DOM label markers on nearly every pan step (the
+  // owner's "the contours thing seems to make my computer lag"). `paint()` now diffs the
+  // new keyed item list against this map and only builds/adds what's genuinely new,
+  // removing only what's genuinely gone — everything still in view is left untouched,
+  // still the same Leaflet object, never re-projected or re-created.
+  const painted = new Map();
   // NEW-1: the SUPERSESSION token vectorOverlay.js already uses. `!map` alone only
   // catches an unmounted group — a superseded compute on a STILL-MOUNTED layer sailed
   // past it and painted its lines and labels over the newer view's.
@@ -411,17 +438,23 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = n
       else if (l.getElement) { const el = l.getElement(); if (el) el.style.opacity = o; }
     });
   };
-  // Geometry and labels are cleared and rebuilt in ONE synchronous pass, so no label can
-  // outlive the lines it names (NEW-1 (2)).
+  // Geometry and labels are composed in ONE synchronous pass and diffed against what's
+  // already painted (NEW-1 perf) — so no label can ever outlive the lines it names
+  // (composeContourPaint still builds both from the same atomic composition; only
+  // unchanged keys are left alone) while unchanged geometry is never torn down and
+  // rebuilt just because a neighbouring tile came into view.
   const paint = (parts, ts, opts = {}) => {
-    group.clearLayers();
-    const n = render(parts, group, {
+    const { items, n } = render(parts, {
       map, opacity, canvas, labelPane,
       onComposed: (c) => { composed = c; hoverIndex = null; },
     });
-    // Re-parent the (now emptied) hover sublayer: the label named the geometry that was
-    // just replaced, so it goes with it — the same "no label outlives its lines" rule the
-    // permanent labels follow (B1087).
+    const { add, remove } = diffKeyedPaint(items, painted);
+    for (const key of remove) { const l = painted.get(key); if (l) group.removeLayer(l); painted.delete(key); }
+    for (const it of add) { const l = it.build(); l.addTo(group); if (it.key != null) painted.set(it.key, l); }
+    // Re-parent the hover sublayer: the label named geometry that may just have been
+    // replaced, so it goes with it — the same "no label outlives its lines" rule the
+    // permanent labels follow (B1087). Cheap: hoverGroup is a single child, not the
+    // whole painted set, and addLayer on an already-present layer is a no-op.
     if (hover) { hoverGroup.clearLayers(); hoverKey = null; group.addLayer(hoverGroup); }
     lastPainted = parts;
     const msg = opts.note || (n ? null : emptyMsg);
@@ -433,7 +466,7 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = n
     const z = map.getZoom();
     if (z < TERRAIN_MIN_ZOOM) {
       paintSeq++; // a slow in-flight compute from above the gate must not paint below it
-      group.clearLayers(); lastKey = "zoomed-out"; lastPainted = null;
+      group.clearLayers(); lastKey = "zoomed-out"; lastPainted = null; painted.clear();
       composed = null; hoverIndex = null; hoverKey = null;
       if (hover) group.addLayer(hoverGroup);
       onStatus && onStatus("empty", `Zoom in to ≥ ${TERRAIN_MIN_ZOOM} to load (1-ft detail needs close zoom)`);
@@ -559,6 +592,7 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = n
     m.off("moveend", refresh);
     hoverGroups.delete(group);
     hoverGroup.clearLayers(); hoverKey = null; composed = null; hoverIndex = null;
+    painted.clear(); // this instance is done; a later onAdd starts a fresh paint from scratch
     map = null; lastKey = null; lastPainted = null; pendingMove = false; busy = false;
     L.LayerGroup.prototype.onRemove.call(this, m);
   };
