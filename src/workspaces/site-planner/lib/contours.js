@@ -326,3 +326,53 @@ export function composeContourPaint(parts, { cap = LABEL_CAP, minSepCells = LABE
       .map((l) => ({ ll: l.ll, level: l.level, text: contourLabelText(l.level) })),
   };
 }
+
+// ---------------------------------------------------------------------------
+// NEW-1 (perf) — INCREMENTAL PAINT IDENTITY. A moveend that adds one new lattice tile
+// used to clearLayers() and rebuild EVERY polyline and label currently on screen, not
+// just the newly-exposed tile's — at working (1-ft) zoom that is thousands of
+// re-projected vertices and dozens of torn-down/recreated DOM label markers on nearly
+// every pan step (the owner's "the contours thing seems to make my computer lag").
+// composeContourPaint's output is already deterministic and ground-anchored (B1088: the
+// same ground always traces to the same lattice cells), so a chain or a label that
+// hasn't moved gets the exact SAME key on the next paint — the caller (terrainLayers.js)
+// reuses the existing Leaflet object instead of tearing it down and rebuilding it. Pure
+// (no Leaflet), so the identity rule is unit-tested directly rather than eyeballed.
+
+/* A joined chain's identity: level + vertex count + three sampled ground points (first,
+ * middle, last — all three already rounded to 1e-6° by the worker). Two genuinely
+ * different chains sharing all four would require identical length AND three sampled
+ * points — not reachable from real DEM tracing, and if it ever did collide the result is
+ * merely one extra frame of stale-but-visually-identical geometry, never a wrong picture. */
+export function contourLineKey(ln) {
+  const c = ln && ln.coords;
+  if (!c || c.length < 2) return null;
+  const a = c[0], b = c[c.length - 1], m = c[c.length >> 1];
+  return `L|${ln.level}|${c.length}|${a[0]},${a[1]}|${m[0]},${m[1]}|${b[0]},${b[1]}`;
+}
+
+/* A label's identity: its ground anchor + level (both already round6'd by the worker).
+ * pickLabels' thinning changes WHICH labels survive from one paint to the next; it never
+ * changes what a surviving label's key is, so a label that keeps surviving is reused. */
+export function contourLabelKey(lab) {
+  if (!lab || !lab.ll) return null;
+  return `T|${lab.level}|${lab.ll[0]},${lab.ll[1]}`;
+}
+
+/* Reconcile a keyed item list (`{key, ...}[]`) against what is already painted
+ * (`prevKeys`, anything with `.has(key)` — the caller's key→Leaflet-layer Map). Returns
+ * `add` (items with no prior layer) and `remove` (previously-painted keys absent now);
+ * every other key is left exactly as it was, which is the whole point. An item with no
+ * key (malformed input) is always added and never deduped against anything. Pure. */
+export function diffKeyedPaint(items, prevKeys) {
+  const seen = new Set();
+  const add = [];
+  for (const it of items || []) {
+    if (it.key == null) { add.push(it); continue; }
+    seen.add(it.key);
+    if (!prevKeys || !prevKeys.has(it.key)) add.push(it);
+  }
+  const remove = [];
+  if (prevKeys) for (const k of prevKeys.keys ? prevKeys.keys() : prevKeys) if (!seen.has(k)) remove.push(k);
+  return { add, remove };
+}

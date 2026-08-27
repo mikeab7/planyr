@@ -20,6 +20,7 @@ import {
 } from "../src/workspaces/site-planner/lib/contourTrace.js";
 import {
   contourLabelText, pickLabels, joinSeams, composeContourPaint,
+  contourLineKey, contourLabelKey, diffKeyedPaint,
 } from "../src/workspaces/site-planner/lib/contours.js";
 import { maskedSmooth, pixelToLatLng } from "../src/workspaces/site-planner/lib/demGrid.js";
 import { decodeGrid } from "../src/workspaces/site-planner/lib/lercGrid.js";
@@ -366,8 +367,9 @@ describe("terrainLayers — the supersession token and the lattice are wired (re
     expect(viewHalf).not.toMatch(/gridRequest\(/);
   });
 
-  it("clears geometry and labels in one pass, and never formats the unit itself", () => {
-    expect(src).toMatch(/group\.clearLayers\(\);\s*\n\s*const n = render\(/);
+  it("composes geometry and labels atomically and diffs them against what's painted, so a label can never outlive its lines", () => {
+    expect(src).toMatch(/const \{ items, n \} = render\(/);
+    expect(src).toMatch(/const \{ add, remove \} = diffKeyedPaint\(items, painted\);/);
     // the label's text arrives pre-formatted from composeContourPaint — the render path
     // has no way to concatenate a second unit onto it
     expect(src).toMatch(/composeContourPaint\(parts\)/);
@@ -471,5 +473,54 @@ describe("real 3DEP tile, two lattice tiles, the paint the map would draw", () =
     const raw = p.reduce((n, { data }) =>
       n + data.contours.levels.reduce((m, l) => m + l.lines.length, 0), 0);
     expect(joined).toBeLessThan(raw);
+  });
+
+  // -------------------------------------------------------------------------
+  // NEW-1 (perf) — the incremental-paint identity: a moveend used to clearLayers() and
+  // rebuild EVERY polyline and label in view even when only one tile at the fringe
+  // changed. contourLineKey/contourLabelKey/diffKeyedPaint are what let the caller
+  // (terrainLayers.js's paint()) reuse the Leaflet objects for anything whose key hasn't
+  // changed, over the SAME real captured tile these composeContourPaint tests already use.
+  const keysFor = (ps) => {
+    const { lines, labels } = composeContourPaint(ps);
+    return new Set([...lines.map(contourLineKey), ...labels.map(contourLabelKey)]);
+  };
+
+  it("contourLineKey/contourLabelKey are stable for identical geometry and distinguish real differences", () => {
+    const ln = { level: 150, coords: [[29.78, -95.79], [29.781, -95.791], [29.782, -95.792]] };
+    expect(contourLineKey(ln)).toBe(contourLineKey({ level: 150, coords: ln.coords.map((p) => [...p]) }));
+    expect(contourLineKey(ln)).not.toBe(contourLineKey({ ...ln, level: 155 }));
+    expect(contourLineKey(ln)).not.toBe(contourLineKey({ ...ln, coords: [...ln.coords, [29.783, -95.793]] }));
+    const lab = { level: 150, ll: [29.78, -95.79] };
+    expect(contourLabelKey(lab)).toBe(contourLabelKey({ level: 150, ll: [...lab.ll] }));
+    expect(contourLabelKey(lab)).not.toBe(contourLabelKey({ ...lab, level: 155 }));
+    expect(contourLabelKey(lab)).not.toBe(contourLabelKey({ ...lab, ll: [29.79, -95.79] }));
+  });
+
+  it("diffKeyedPaint only adds genuinely new keys and only removes genuinely vanished ones — a shared key is touched at all", () => {
+    const prev = new Map([["a", "layer-a"], ["b", "layer-b"]]);
+    const { add, remove } = diffKeyedPaint([{ key: "b" }, { key: "c" }], prev);
+    expect(add.map((i) => i.key)).toEqual(["c"]);
+    expect(remove).toEqual(["a"]);
+  });
+
+  it("repainting the identical view is a total no-op for the incremental diff — nothing to add, nothing to remove", () => {
+    const ps = parts();
+    const prevKeys = keysFor(ps);          // what a first paint would have left behind
+    const items = [...keysFor(ps)].map((key) => ({ key })); // a second, identical repaint
+    const { add, remove } = diffKeyedPaint(items, prevKeys);
+    expect(add).toEqual([]);
+    expect(remove).toEqual([]);
+  });
+
+  it("dropping the far tile only retires keys that actually touched it — untouched geometry keeps its identity", () => {
+    const both = parts();
+    const keysBoth = keysFor(both);
+    const keysNear = keysFor([both[0]]); // as if the far tile just panned out of the lattice cover
+    const survivors = [...keysNear].filter((k) => keysBoth.has(k));
+    // some of the near tile's own contours never touch the shared seam with the far tile,
+    // so their identity is unaffected by the far tile leaving — those must NOT be rebuilt
+    expect(survivors.length).toBeGreaterThan(0);
+    expect(survivors.length).toBeLessThan(keysNear.size); // and the seam-joined chains DO change, honestly
   });
 });

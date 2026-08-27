@@ -90,6 +90,8 @@ dist-probe
 dist-pipe
 dist-ratchet
 dist-baseline-verify
+# The pre-fix build diagnose-contour-pan-perf.mjs compares against (git stash && vite build --outDir dist-before).
+dist-before
 .output
 
 # Gatsby files
