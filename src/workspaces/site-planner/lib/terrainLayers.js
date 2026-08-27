@@ -43,6 +43,7 @@ import L from "leaflet";
 import TerrainWorker from "./terrainWorker.js?worker";
 import { gisCache } from "./gisCache.js";
 import { TERRAIN_MIN_ZOOM } from "./terrainGate.js";
+import { isPartialCover, paintStatus } from "./terrainTileStatus.js";
 import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
 import { DEP_URL, M_TO_FT } from "./elevation.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
@@ -495,7 +496,12 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = n
     if (hover) { hoverGroup.clearLayers(); hoverKey = null; group.addLayer(hoverGroup); }
     lastPainted = parts;
     const msg = opts.note || (n ? null : emptyMsg);
-    onStatus && onStatus(n ? "loaded" : "empty", msg, { ts, stale: !!opts.stale });
+    // B802400 round 4 — `opts.partial` marks a paint of only the ALREADY-CACHED tiles in the
+    // current cover while the rest are still fetching. Reporting "loaded" here is a LIE: the
+    // picture is real but incomplete, and it silently updates again once the rest arrive with
+    // no indicator ever having shown. paintStatus() reuses the existing pulsing-dot "loading"
+    // state — no new UI, just an honest use of the one that already exists.
+    onStatus && onStatus(paintStatus(!!opts.partial, n), msg, { ts, stale: !!opts.stale });
   };
   const refresh = async () => {
     if (!map) return;
@@ -527,7 +533,11 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = n
     const cachedParts = entries.filter((e) => e.cached).map((e) => ({ tile: e.tile, data: e.cached.data }));
     if (cachedParts.length) {
       const ts = Math.min(...entries.filter((e) => e.cached).map((e) => e.cached.ts));
-      paint(cachedParts, ts, { stale: entries.some((e) => e.stale), note: coarse });
+      // B802400 round 4 — the common pan: most of the view was already cached, but a new edge
+      // tile wasn't. Painting the cached parts is correct; reporting the result as DONE is not
+      // — `entries` still holds an uncached tile whose fetch hasn't settled yet.
+      const partial = isPartialCover(cachedParts.length, entries.length);
+      paint(cachedParts, ts, { stale: entries.some((e) => e.stale), note: coarse, partial });
     } else onStatus && onStatus("loading");
     busy = true;
     const settled = await Promise.all(entries.map((e) =>

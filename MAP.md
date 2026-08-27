@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-26 @ `4159cba` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-27 @ `aaace709` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_573 source files mapped._
+_574 source files mapped._
 
 ## infra
 
@@ -1043,6 +1043,8 @@ _573 source files mapped._
   - _exports_: `CONTOUR_HOVER_CLASS`, `contourLayer`, `fetchSiteGrid`, `flowLayer`, `sampleTerrainGrids`, `sampleTerrainGridsInfo`, `setContourHover`, `siteGridZoom`, `TERRAIN_MIN_ZOOM`, `warmCursorGrid`
 - **`src/workspaces/site-planner/lib/terrainLazy.js`** — the ONE on-demand loader for the terrain pipeline: `loadTerrain()` (cached import, retries after a failure) + the synchronous `terrainNow()` the per-move cursor sample reads + the `contourHover` router
   - _exports_: `__resetTerrainLazy`, `contourHover`, `loadTerrain`, `retryDelayMs`, `terrainNow`
+- **`src/workspaces/site-planner/lib/terrainTileStatus.js`** — pure `isPartialCover`/`paintStatus` helpers deciding when the terrain layer's onStatus must report "loading" instead of "loaded" for a partially-cached view (B802400)
+  - _exports_: `isPartialCover`, `paintStatus`
 - **`src/workspaces/site-planner/lib/terrainWorker.js`** — Terrain Web Worker (B704/B705): LERC decode -> masked smooth -> contours + flow arrows off the main thread; imports pure modules only (guarded by test/terrainWorker.test.js)
   - _exports_: _(none)_
 - **`src/workspaces/site-planner/lib/tileBudget.js`** — Pure tile/overscan budget: how much basemap is held off-screen, how many tiles are retained, and when the retina uplift is worth its cost
