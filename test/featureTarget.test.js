@@ -398,7 +398,10 @@ describe("source guard — the render must keep stamping what the resolver reads
      * during a 2-finger pinch, and (B548822) the stack picker, which bails on anything but a plain
      * Alt+click; a press swallowed by either is still a press, and gating the stamp behind them
      * would leave the anchor holding stale coordinates. `notePress(e)` must be the FIRST statement. */
-    expect(SP).toMatch(/onPointerDownCapture=\{\(e\) => \{ notePress\(e\); if \(handleStackPick\(e\)\) return; if \(touchCountRef\.current < 2\)/);
+    // NEW-2 (B806081) — Add Leader placement (handleAddLeaderCapture) shares this same capture
+    // handler and is checked ahead of the stack picker, for the identical reason: it has to win the
+    // press before any element/markup's own bubble-phase handler can steal it.
+    expect(SP).toMatch(/onPointerDownCapture=\{\(e\) => \{ notePress\(e\); if \(handleAddLeaderCapture\(e\)\) return; if \(handleStackPick\(e\)\) return; if \(touchCountRef\.current < 2\)/);
   });
 
   /* ⛔ NEW-1 — CHROME-NEVER-EATS-A-PRESS, instance five, and the reason it is TWO guards: the
@@ -588,8 +591,10 @@ describe("the picker is wired into the canvas's own capture-phase press handler"
   const SP = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
 
   it("handleStackPick runs before the vertex-edit capture logic, and can short-circuit it", () => {
+    // NEW-2 (B806081) — handleAddLeaderCapture was inserted ahead of the stack picker in this same
+    // chain (it must win over Alt+click too, since Add Leader is a modal placement, not a modifier).
     expect(SP, "the picker must be wired into the SAME capture handler as the double-click anchor's notePress")
-      .toMatch(/onPointerDownCapture=\{\(e\) => \{ notePress\(e\); if \(handleStackPick\(e\)\) return; if \(touchCountRef\.current < 2\) onCanvasVtxDownCapture\(e\); \}\}/);
+      .toMatch(/onPointerDownCapture=\{\(e\) => \{ notePress\(e\); if \(handleAddLeaderCapture\(e\)\) return; if \(handleStackPick\(e\)\) return; if \(touchCountRef\.current < 2\) onCanvasVtxDownCapture\(e\); \}\}/);
   });
 
   it("the picker only engages on plain Alt+click in the select tool, never stealing another modifier's gesture", () => {
