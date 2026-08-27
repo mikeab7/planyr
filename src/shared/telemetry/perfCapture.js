@@ -42,6 +42,11 @@ export const CAPTURE_NUMERIC_KEYS = [
   "v", "atMs", "atWall", "activeMs", "frames", "framesKept", "framesDropped",
   "baselineMs", "baselineFrames", "baselineSealedAtMs", "windowMeanMs", "slowFraction",
   "ratio", "multiplier", "sustainMs", "floorMs", "fires",
+  /* NEW-2 (this session) — the WORST window found anywhere in the retained frame history, not
+   * just the live sustain window above. See perfTrigger.js's worstWindow() header for why this
+   * exists: a manual capture pressed just after a lag ends must not report a clean "right now"
+   * reading as if that were the whole story. */
+  "worstWindowMeanMs", "worstWindowSlowFraction", "worstWindowRatio", "worstWindowFrames", "worstWindowAtMs",
   "p50Ms", "p95Ms", "p99Ms", "maxMs", "jankFrames",
   "longTasks", "longTaskMs", "longTaskMaxMs",
   "heapMB", "domNodes", "canvasNodes", "featuresDrawn", "elementsDrawn", "layersOn", "panelsOpen", "tiles",
@@ -145,6 +150,14 @@ export function buildCapture(parts) {
   num("sustainMs", p.sustainMs);
   num("floorMs", p.floorMs);
   num("fires", p.fires);
+  /* NEW-2 — the worst sub-window found anywhere in the retained frame history. Omitted (not just
+   * zero) when there wasn't enough retained history to find one — `num()` already does that for
+   * any non-finite value, so a capture with no worst window simply carries none of these keys. */
+  num("worstWindowMeanMs", p.worstWindowMeanMs, 1);
+  num("worstWindowSlowFraction", p.worstWindowSlowFraction, 2);
+  num("worstWindowRatio", p.worstWindowRatio, 2);
+  num("worstWindowFrames", p.worstWindowFrames);
+  num("worstWindowAtMs", p.worstWindowAtMs);
 
   /* Frame distribution over the retained window. */
   const fs = p.frameStats || {};

@@ -58,6 +58,9 @@ import {
   contourLineKey, contourLabelKey, diffKeyedPaint,
   HOVER_TOL_PX, DOUBLE_STAMP_PX,
 } from "./contours.js";
+import { runBudgeted, drainBudgeted, PAINT_FRAME_BUDGET_MS } from "./paintSchedule.js";
+
+const paintNowMs = () => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());
 
 // The gate lives in a leaf module so `layers.js` can read it without static-importing this
 // whole pipeline (B1095 — the pipeline is loaded on demand via terrainLazy.js).
@@ -469,6 +472,63 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = n
   // catches an unmounted group — a superseded compute on a STILL-MOUNTED layer sailed
   // past it and painted its lines and labels over the newer view's.
   let paintSeq = 0;
+  // B802400 round 5 — the diff computed by `paint()` is applied through paintSchedule.js's
+  // time-sliced runner instead of one synchronous loop, so a burst of newly-cached/newly-composed
+  // geometry can never block a single frame anywhere near the 1.5–3.1s "FrameRequestCallback"
+  // long tasks the owner's own perf captures measured.
+  //
+  // ⛔ MEASURED, not assumed: chunking alone — yielding between slices via requestAnimationFrame —
+  // only shaved the worst observed task from 265ms to 242ms in a real-browser burst reproduction
+  // (ui-audit/verify-contour-paint-budget.mjs). The reason is that Leaflet's OWN canvas redraw
+  // (`L.Canvas._draw`, scheduled internally via `Util.requestAnimFrame` the instant `.addTo()`
+  // runs) gets scheduled for the SAME upcoming animation frame my own continuation is, and the
+  // browser runs every rAF callback due for a frame back-to-back with no yield in between — so the
+  // Long Tasks API counts my chunk AND Leaflet's own redraw as ONE task regardless of how small my
+  // own slice is. Yielding via a MessageChannel-posted macrotask instead of `requestAnimationFrame`
+  // genuinely hands control back to the browser (letting it paint, and letting Leaflet's queued
+  // redraw run as ITS OWN task) between slices — see the item for the harness numbers this
+  // change was measured against.
+  //
+  // `paintEpoch` is the cancellation token for the in-flight macrotask chain (there is no
+  // "cancel a posted MessageChannel message" API, so a scheduled continuation checks its OWN
+  // captured epoch against the current one before doing anything). `paintFinalize` is the pending
+  // batch's OWN completion work (hover reparenting, status report) — it fires only when that batch
+  // finishes through the normal drive path, never when a newer paint() force-flushes it away.
+  let paintRunner = null, paintFinalize = null, paintEpoch = 0;
+  // Post `fn` as a genuine MACROTASK (not a microtask, not another rAF callback) — the same
+  // MessageChannel idiom `ui-audit/lib/tabTiming.mjs`'s `pacedWait` uses for an unthrottled yield.
+  const scheduleMacrotask = (fn) => {
+    const ch = new MessageChannel();
+    ch.port1.onmessage = () => { try { fn(); } finally { ch.port1.close(); ch.port2.close(); } };
+    ch.port2.postMessage(0);
+  };
+  // Drop whatever chunked batch is still trickling in WITHOUT applying its remaining ops — for a
+  // caller that is about to discard the whole painted set itself (`group.clearLayers()` below the
+  // zoom gate, or `onRemove` tearing the layer down), where finishing the batch first would be
+  // pure waste. Bumping the epoch is what makes any already-scheduled `drivePaint` continuation a
+  // silent no-op when it eventually runs.
+  const abandonPaintRunner = () => { paintEpoch++; paintRunner = null; paintFinalize = null; };
+  // Apply whatever chunked batch is still trickling in, right now, synchronously, discarding its
+  // finalize (a superseded paint's status/hover work is stale the instant a newer one starts — the
+  // newer paint's own finalize is what the UI should see). Required before a new paint() diffs
+  // against `painted` — it would otherwise diff against a half-applied map, which can double-add
+  // or miss a remove.
+  const flushPaintRunner = () => {
+    const r = paintRunner;
+    abandonPaintRunner();
+    if (r) drainBudgeted(r);
+  };
+  const drivePaint = (myEpoch) => {
+    if (myEpoch !== paintEpoch || !paintRunner) return; // abandoned or superseded mid-flight
+    const step = paintRunner.next();
+    if (step.done) {
+      const finalize = paintFinalize;
+      paintRunner = null; paintFinalize = null;
+      if (finalize) finalize();
+    } else {
+      scheduleMacrotask(() => drivePaint(myEpoch));
+    }
+  };
   group.setOpacity = (o) => {
     opacity = o;
     group.eachLayer((l) => {
@@ -482,26 +542,39 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = n
   // unchanged keys are left alone) while unchanged geometry is never torn down and
   // rebuilt just because a neighbouring tile came into view.
   const paint = (parts, ts, opts = {}) => {
+    flushPaintRunner(); // settle any still-trickling batch before diffing against `painted`
     const { items, n } = render(parts, {
       map, opacity, canvas, labelPane,
       onComposed: (c) => { composed = c; hoverIndex = null; },
     });
     const { add, remove } = diffKeyedPaint(items, painted);
-    for (const key of remove) { const l = painted.get(key); if (l) group.removeLayer(l); painted.delete(key); }
-    for (const it of add) { const l = it.build(); l.addTo(group); if (it.key != null) painted.set(it.key, l); }
-    // Re-parent the hover sublayer: the label named geometry that may just have been
-    // replaced, so it goes with it — the same "no label outlives its lines" rule the
-    // permanent labels follow (B1087). Cheap: hoverGroup is a single child, not the
-    // whole painted set, and addLayer on an already-present layer is a no-op.
-    if (hover) { hoverGroup.clearLayers(); hoverKey = null; group.addLayer(hoverGroup); }
-    lastPainted = parts;
-    const msg = opts.note || (n ? null : emptyMsg);
-    // B802400 round 4 — `opts.partial` marks a paint of only the ALREADY-CACHED tiles in the
-    // current cover while the rest are still fetching. Reporting "loaded" here is a LIE: the
-    // picture is real but incomplete, and it silently updates again once the rest arrive with
-    // no indicator ever having shown. paintStatus() reuses the existing pulsing-dot "loading"
-    // state — no new UI, just an honest use of the one that already exists.
-    onStatus && onStatus(paintStatus(!!opts.partial, n), msg, { ts, stale: !!opts.stale });
+    const ops = [];
+    for (const key of remove) ops.push(() => { const l = painted.get(key); if (l) group.removeLayer(l); painted.delete(key); });
+    for (const it of add) ops.push(() => { const l = it.build(); l.addTo(group); if (it.key != null) painted.set(it.key, l); });
+    const finalize = () => {
+      // Re-parent the hover sublayer: the label named geometry that may just have been
+      // replaced, so it goes with it — the same "no label outlives its lines" rule the
+      // permanent labels follow (B1087). Cheap: hoverGroup is a single child, not the
+      // whole painted set, and addLayer on an already-present layer is a no-op.
+      if (hover) { hoverGroup.clearLayers(); hoverKey = null; group.addLayer(hoverGroup); }
+      lastPainted = parts;
+      const msg = opts.note || (n ? null : emptyMsg);
+      // B802400 round 4 — `opts.partial` marks a paint of only the ALREADY-CACHED tiles in the
+      // current cover while the rest are still fetching. Reporting "loaded" here is a LIE: the
+      // picture is real but incomplete, and it silently updates again once the rest arrive with
+      // no indicator ever having shown. paintStatus() reuses the existing pulsing-dot "loading"
+      // state — no new UI, just an honest use of the one that already exists.
+      onStatus && onStatus(paintStatus(!!opts.partial, n), msg, { ts, stale: !!opts.stale });
+    };
+    if (!ops.length) { finalize(); return; }
+    // B802400 round 5 — apply the diff a bounded time-slice at a time instead of one synchronous
+    // loop. The FIRST slice runs synchronously right here, so the overwhelmingly common case (a
+    // diff small enough to finish inside one budget) is byte-identical in timing to the old
+    // unchunked code; only a genuinely large burst spills its remainder into later animation
+    // frames, which is exactly what keeps any one of them under budget.
+    paintRunner = runBudgeted(ops, paintNowMs, PAINT_FRAME_BUDGET_MS);
+    paintFinalize = finalize;
+    drivePaint(paintEpoch);
   };
   const refresh = async () => {
     if (!map) return;
@@ -509,6 +582,7 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = n
     const z = map.getZoom();
     if (z < TERRAIN_MIN_ZOOM) {
       paintSeq++; // a slow in-flight compute from above the gate must not paint below it
+      abandonPaintRunner(); // clearLayers() below is about to discard it anyway
       group.clearLayers(); lastKey = "zoomed-out"; lastPainted = null; painted.clear();
       composed = null; hoverIndex = null; hoverKey = null;
       if (hover) group.addLayer(hoverGroup);
@@ -636,6 +710,7 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = n
   };
   group.onRemove = function (m) {
     paintSeq++; // invalidate every in-flight compute — nothing may paint into a removed group
+    abandonPaintRunner(); // a torn-down layer must not keep chunking work into a detached group
     m.off("moveend", refresh);
     hoverGroups.delete(group);
     hoverGroup.clearLayers(); hoverKey = null; composed = null; hoverIndex = null;
