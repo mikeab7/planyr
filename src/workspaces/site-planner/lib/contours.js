@@ -36,13 +36,28 @@ export function joinSeams(lines, eps = 2e-6) {
   // Chain in a CANONICAL order, not arrival order. Where three or more endpoints meet (a
   // saddle), which pair chains would otherwise depend on which tile resolved first — and
   // "depends on network timing" is precisely the class of bug this whole change removes.
+  //
+  // B800849 (perf): `rank()` used to be re-evaluated on EVERY comparator call inside
+  // `.sort()` — O(n log n) STRING BUILDS for an O(n) quantity — which profiling against a
+  // real 8-tile pan (2642 composed lines) showed was the dominant share of
+  // `composeContourPaint`'s own cost, ahead of the actual seam-stitch search below it.
+  // Below is a plain Schwartzian transform: each line's rank is built ONCE, sorted by that
+  // cached string, and the ranks are dropped. This changes NOTHING about which order lines
+  // end up in — `arr.sort(cmp)` and "sort a [rank, item] pair array by rank, then drop the
+  // rank" order identically, because both compare the exact same rank values pairwise — so
+  // the result is byte-identical to the un-optimized form for every input (proven in
+  // test/terrainLattice.test.js against the real captured 3DEP tile, both as a standalone
+  // comparison and through the full composeContourPaint pipeline).
   const rank = (ln) => `${ln[0][0]},${ln[0][1]}|${ln[ln.length - 1][0]},${ln[ln.length - 1][1]}|${ln.length}`;
-  const byRank = (x, y) => (rank(x) < rank(y) ? -1 : rank(x) > rank(y) ? 1 : 0);
-  open.sort(byRank);
-  out.sort(byRank);
+  const sortByRank = (arr) => arr
+    .map((ln) => [rank(ln), ln])
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    .map((pair) => pair[1]);
+  const openS = sortByRank(open);
+  const outS = sortByRank(out);
   const bucket = new Map();
   const key = (p) => `${Math.round(p[0] / eps)}|${Math.round(p[1] / eps)}`;
-  open.forEach((ln, i) => {
+  openS.forEach((ln, i) => {
     for (const [p, end] of [[ln[0], 0], [ln[ln.length - 1], 1]]) {
       const k = key(p);
       let l = bucket.get(k);
@@ -50,41 +65,46 @@ export function joinSeams(lines, eps = 2e-6) {
       l.push({ i, end });
     }
   });
-  const near = (p) => {
+  const meets = (p, r) => Math.abs(p[0] - r[0]) <= eps && Math.abs(p[1] - r[1]) <= eps;
+  const used = new Array(openS.length).fill(false);
+  // Fused lookup-and-match: the un-optimized form built a `hits` array over all 9
+  // neighboring buckets, then scanned it — allocating and fully populating an array just
+  // to stop at the first usable match. This scans the same 9 buckets in the same dx/dy
+  // order, and each bucket's candidates in the same (rank-sorted) order they were inserted
+  // in, so it returns the exact same first-unused-matching candidate — just without ever
+  // allocating the intermediate array (measured as the other large share of the cost).
+  const findMatch = (p) => {
     const bx = Math.round(p[0] / eps), by = Math.round(p[1] / eps);
-    const hits = [];
     for (let dx = -1; dx <= 1; dx++) {
       for (let dy = -1; dy <= 1; dy++) {
         const l = bucket.get(`${bx + dx}|${by + dy}`);
-        if (l) for (const r of l) hits.push(r);
+        if (!l) continue;
+        for (const ref of l) {
+          if (used[ref.i]) continue;
+          const cand = openS[ref.i];
+          if (meets(p, ref.end === 0 ? cand[0] : cand[cand.length - 1])) return ref;
+        }
       }
     }
-    return hits;
+    return null;
   };
-  const meets = (p, r) => Math.abs(p[0] - r[0]) <= eps && Math.abs(p[1] - r[1]) <= eps;
-  const used = new Array(open.length).fill(false);
-  for (let i = 0; i < open.length; i++) {
+  for (let i = 0; i < openS.length; i++) {
     if (used[i]) continue;
     used[i] = true;
-    let chain = open[i].slice();
+    let chain = openS[i].slice();
     for (const forward of [true, false]) {
       for (let guard = 0; guard < 256; guard++) {
         const tip = forward ? chain[chain.length - 1] : chain[0];
-        let hit = null;
-        for (const ref of near(tip)) {
-          if (used[ref.i]) continue;
-          const cand = open[ref.i];
-          if (meets(tip, ref.end === 0 ? cand[0] : cand[cand.length - 1])) { hit = ref; break; }
-        }
+        const hit = findMatch(tip);
         if (!hit) break;
         used[hit.i] = true;
-        const seg = hit.end === 0 ? open[hit.i] : open[hit.i].slice().reverse(); // starts at the joint
+        const seg = hit.end === 0 ? openS[hit.i] : openS[hit.i].slice().reverse(); // starts at the joint
         chain = forward ? chain.concat(seg.slice(1)) : seg.slice(1).reverse().concat(chain);
       }
     }
-    out.push(chain);
+    outS.push(chain);
   }
-  return out;
+  return outS;
 }
 
 /* The DISPLAY filter over already-anchored labels (never the chooser).
@@ -100,10 +120,14 @@ export const LABEL_MIN_SEP_CELLS = 260;     // two tiles must not both label eit
 
 export function pickLabels(labels, { minSepDeg = 0, cap = LABEL_CAP } = {}) {
   const id = (l) => `${l.tileKey || ""}|${l.level}|${l.anchor || ""}`;
-  const sorted = labels.slice().sort((a, b) => (id(a) < id(b) ? -1 : id(a) > id(b) ? 1 : 0));
+  // Same Schwartzian-transform reasoning as joinSeams above (B800849): build each label's
+  // id ONCE rather than re-deriving it on every sort comparison, keeping it alongside the
+  // label so the loop below never re-derives it either. Same total order, same output.
+  const sorted = labels
+    .map((l) => [id(l), l])
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
   const seen = new Set(), out = [];
-  for (const lab of sorted) {
-    const k = id(lab);
+  for (const [k, lab] of sorted) {
     if (seen.has(k)) continue;
     seen.add(k);
     if (minSepDeg > 0) {

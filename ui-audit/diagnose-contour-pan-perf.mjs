@@ -32,11 +32,37 @@
  * REAL DATA, NOT SYNTHETIC. Every `elevation.nationalmap.gov` request from Chromium in this
  * sandbox is `ERR_CONNECTION_RESET` (confirmed again this session — Node `fetch` reaches the host,
  * Playwright's Chromium does not), so the exportImage requests are intercepted and answered with
- * the REAL captured LERC tile `test/fixtures/dep-katy-463x400.lerc` (the same bytes
- * `terrainLattice.test.js` and `verify-terrain-lattice*.mjs` already trust) — never a fabricated
- * grid. The same bytes answer every tile request; that is fine for a TIMING measurement (the
- * decode + trace + paint cost is what's under test, not geographic correctness), and it is loudly
- * stated so nobody mistakes this for a correctness check.
+ * a REAL captured LERC tile — never a fabricated grid.
+ *
+ * ⛔ B800849 (perf) — THE FIXTURE MUST BE THE REQUEST'S OWN SIZE, NOT MERELY "REAL BYTES", OR
+ * NOTHING EVER PAINTS. This harness originally served `test/fixtures/dep-katy-463x400.lerc`
+ * (463×400) for every request, but a lattice tile ALWAYS asks for `TILE_CELLS + 2*MARGIN_CELLS`
+ * = 528×528 px (`demGrid.js`'s `latticeTile`) — and `decodeGrid()` in `lercGrid.js` LOUDLY refuses
+ * a decoded grid whose dimensions don't match what was asked (`grid size mismatch: got 463x400,
+ * asked 528x528` — the correct LOUD-FAILURE behavior; a silently-resized export would georeference
+ * wrong everywhere). So the ORIGINAL fixture made EVERY tile fetch in this harness reject at
+ * decode time, on both the "before" and "after" build: `parts` stayed empty, `composeContourPaint`
+ * was never called with real geometry, and nothing was ever written to `gisCache` — the harness
+ * was silently measuring the cost of a layer that fails to paint, not the paint it exists to time.
+ * (This is also what the B800850 investigation chased as a suspected re-fetch bug — with every
+ * fetch rejecting, of course the next moveend "re-fetches"; there was never anything to cache.
+ * See BACKLOG.md B800850 for the full reproduction once this was found and fixed.)
+ * `test/fixtures/dep-katy-528x528.lerc` is the fix: the SAME real captured USGS 3DEP elevation
+ * values from `dep-katy-463x400.lerc`, edge-padded out to the true 528×528 tile size (`np.pad`,
+ * `mode="edge"` — the margin is real data extended flat, never fabricated noise) and re-encoded
+ * with Esri's `lerc` codec at `lerc_encodeForVersion(..., codecVersion=2)` (the oldest codec
+ * sub-version the C library supports encoding, chosen because the app's `lerc` npm dependency
+ * — an older LERC2 reader — throws "invalid mask" on the newer sub-versions the default encoder
+ * path produces; version 2 round-trips cleanly through the app's own `decodeGrid()`). Regenerate
+ * with `python3 scripts/gen-terrain-pan-fixture.py` (needs `pip3 install lerc numpy`) if the
+ * tile geometry constants ever change; that script verifies the round-trip itself before writing.
+ * Decoded values match the original fixture to within its own `maxZErrorUsed` (~1e-4 ft)
+ * everywhere the two overlap.
+ *
+ * The same bytes answer every tile request — real elevation values, but the same ground repeated
+ * under every ground tile's coordinates; that is fine for a TIMING measurement (the decode + trace
+ * + paint cost is what's under test, not geographic correctness), and it is loudly stated so
+ * nobody mistakes this for a correctness check.
  *
  * USAGE
  *   1. Build both trees first (see the PR / commit this ships with for the exact commands):
@@ -72,7 +98,7 @@ const ZOOM = numArg("--zoom", 18);
 const OVERLAP_FRAC = numArg("--overlap-frac", 0.22); // ground shift per step, as a fraction of one tile span
 const DPR = numArg("--dpr", 2);
 
-const LERC_FIXTURE = readFileSync(fileURLToPath(new URL("../test/fixtures/dep-katy-463x400.lerc", import.meta.url)));
+const LERC_FIXTURE = readFileSync(fileURLToPath(new URL("../test/fixtures/dep-katy-528x528.lerc", import.meta.url)));
 
 // The real ground span of ONE lattice tile at ZOOM, at the reference plan's own latitude —
 // the same derivation `coarseNote()` in terrainLayers.js uses for its honesty line.
@@ -297,7 +323,7 @@ async function main() {
     }
     L("");
     L("  ⚠ Both builds intercept every exportImage request with the SAME real captured tile"
-      + " (test/fixtures/dep-katy-463x400.lerc) — a timing measurement, not a geographic one.");
+      + " (test/fixtures/dep-katy-528x528.lerc) — a timing measurement, not a geographic one.");
   } finally {
     before.child.kill();
     after.child.kill();
