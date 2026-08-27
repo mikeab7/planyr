@@ -42,6 +42,7 @@ import {
   dropItemsToEntries, flattenEntries, partitionAccepted, isPdfName, fileRelDirs,
 } from "../../../shared/files/uploadQueue.js";
 import { loadIdSet, saveIdSet } from "../../../shared/ui/persistedSet.js";
+import { RADIUS } from "../../../shared/ui/radius.js";
 
 // Cross-project category tree: remembered set of OPEN categories (default: all collapsed).
 // Category names are stable canonical labels, so one shared key works across sessions.
@@ -685,7 +686,7 @@ export default function FileBrowser({
           <button onClick={() => folderInputRef.current?.click()} style={pickBtn} title="Pick a whole folder to upload — its subfolder layout routes files into matching folders">Upload a folder</button>
           {/* Needs filing — separate + loud (a to-do; a stuck one is a silent failure) */}
           <button onClick={() => { setSearchQ(""); setShowHolding((v) => !v); }} title="Files that couldn't be confidently classified — one click each to confirm"
-            style={{ fontSize: 11.5, fontFamily: "inherit", fontWeight: 800, cursor: "pointer", borderRadius: 999, padding: "4px 12px", whiteSpace: "nowrap",
+            style={{ fontSize: 11.5, fontFamily: "inherit", fontWeight: 800, cursor: "pointer", borderRadius: RADIUS.pill, padding: "4px 12px", whiteSpace: "nowrap",
               border: `1px solid ${holdingCount ? "var(--warn-border)" : "var(--border-default)"}`,
               background: showHolding ? "var(--warn-text)" : (holdingCount ? "var(--warn-bg)" : "var(--surface-raised)"),
               color: showHolding ? "var(--on-accent)" : (holdingCount ? "var(--warn-text)" : "var(--text-tertiary)") }}>
@@ -697,7 +698,7 @@ export default function FileBrowser({
           {(deadShown.length > 0 || showDeleted) && (
             <button onClick={() => { setShowDeleted((v) => !v); }}
               title="Deleted files wait here ~30 days — restore them or delete them forever"
-              style={{ fontSize: 11.5, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 999, padding: "4px 12px", whiteSpace: "nowrap",
+              style={{ fontSize: 11.5, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: RADIUS.pill, padding: "4px 12px", whiteSpace: "nowrap",
                 border: "1px solid var(--border-default)",
                 background: showDeleted ? "var(--hover-menu)" : "var(--surface-raised)",
                 color: "var(--text-secondary)" }}>
@@ -791,7 +792,7 @@ export default function FileBrowser({
                     </span>
                   </span>
                   <button onClick={() => restoreRow(d.id)} title="Put this file back in the Library"
-                    style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 8, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-primary)", padding: "3px 10px" }}>Restore</button>
+                    style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-primary)", padding: "3px 10px" }}>Restore</button>
                   {pendingPurge === d.id ? (
                     <span style={{ flex: "none", display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, color: "var(--danger-text)", fontWeight: 700 }}>
                       Delete forever — markups too?
@@ -800,7 +801,7 @@ export default function FileBrowser({
                     </span>
                   ) : (
                     <button onClick={() => setPendingPurge(d.id)} title="Permanently delete (cannot be undone)"
-                      style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 8, border: "1px solid var(--border-default)", background: "transparent", color: "var(--danger-text)", padding: "3px 8px" }}>Delete forever</button>
+                      style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--border-default)", background: "transparent", color: "var(--danger-text)", padding: "3px 8px" }}>Delete forever</button>
                   )}
                 </div>
               ))}
@@ -875,9 +876,9 @@ export default function FileBrowser({
                     </button>
                   )}
                   {pdfRow && spatial && !mapped && <button onClick={() => onOpenReview && open(f)} title="Open to place this drawing on the map"
-                    style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 8, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Place</button>}
+                    style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Place</button>}
                   <button onClick={() => (share[f.id] ? closeShare(f.id) : startShare(f.id))} title="Get a shareable link"
-                    style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 8, border: "1px solid var(--border-default)", background: share[f.id] ? "var(--hover-menu)" : "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Share</button>
+                    style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--border-default)", background: share[f.id] ? "var(--hover-menu)" : "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Share</button>
                   {pendingDel === f.id ? (
                     /* Wording, not a bare glyph pair (NEW-F3): say where the file goes. The
                        delete is soft (Recently deleted, ~30-day restore), so the stakes match
@@ -977,7 +978,7 @@ function RefileRow({ value = {}, discipline, onChange, onFile }) {
       <input list="dr-disciplines" value={value.discipline ?? discipline ?? ""} placeholder="Discipline…"
         onChange={(e) => onChange({ ...value, discipline: e.target.value })} style={{ ...ctl, flex: 1, minWidth: 90 }} title="Subcategory (type a new one if needed)" />
       <datalist id="dr-disciplines">{DISCIPLINES.map((d) => <option key={d} value={d} />)}</datalist>
-      <button onClick={onFile} title="File this document" style={{ flex: "none", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 8, border: "1px solid var(--accent-library)", background: "var(--accent-library)", color: "var(--on-accent-library)", padding: "3px 11px" }}>File</button>
+      <button onClick={onFile} title="File this document" style={{ flex: "none", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--accent-library)", background: "var(--accent-library)", color: "var(--on-accent-library)", padding: "3px 11px" }}>File</button>
     </div>
   );
 }

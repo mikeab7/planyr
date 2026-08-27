@@ -288,6 +288,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { colorForRating } from "../lib/ratingColor.js";
 import { nextZoomAnimTier } from "../lib/zoomAnimTier.js";
+import { RADIUS } from "../../../shared/ui/radius.js";
 
 const STREET_TILES = {
   url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
@@ -1056,7 +1057,7 @@ export default function FoodMap({
             type="button" onClick={onRequestSearchHere} data-testid="food-search-here"
             style={{
               pointerEvents: "auto",
-              border: "1px solid var(--border-default)", borderRadius: 999, background: "var(--surface-raised)",
+              border: "1px solid var(--border-default)", borderRadius: RADIUS.pill, background: "var(--surface-raised)",
               color: "var(--text-primary)", font: "inherit", fontSize: 12.5, fontWeight: 700, padding: "7px 20px",
               cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
             }}
@@ -1092,7 +1093,7 @@ export default function FoodMap({
         title={basemap === "satellite" ? "Switch to street map" : "Switch to satellite view"}
         style={{
           position: "absolute", top: 12, right: 12, zIndex: 500,
-          border: "1px solid var(--border-default)", borderRadius: 999, background: "var(--surface-raised)",
+          border: "1px solid var(--border-default)", borderRadius: RADIUS.pill, background: "var(--surface-raised)",
           color: "var(--text-primary)", font: "inherit", fontSize: 12.5, fontWeight: 700, padding: "7px 18px",
           cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
         }}

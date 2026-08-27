@@ -14,6 +14,7 @@
  * MODULE-SCOPE (never define components inside a render body — the remount/focus-loss class).
  */
 import { useRef, useState, useEffect, useCallback } from "react";
+import { RADIUS } from "./radius.js";
 
 export const TOAST_TTL_MS = 8000;
 // NEW-1 (B673 round 2, 2026-08-23) — lowered from 4. A single delete cascading across a bonded
@@ -82,7 +83,7 @@ function ToastItem({ toast, onDismiss }) {
         <button
           onClick={() => { toast.action.onClick?.(); onDismiss(toast.id); }}
           style={{ flex: "none", cursor: "pointer", background: "var(--accent)", color: "var(--on-accent)",
-            border: "none", borderRadius: 8, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}
+            border: "none", borderRadius: RADIUS.md, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}
         >{toast.action.label}</button>
       )}
       <button

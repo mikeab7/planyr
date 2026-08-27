@@ -75,6 +75,29 @@
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
+
+  /* B809906 — spacing / type / control-height scales. JS mirror: src/shared/ui/designTokens.js
+     (keep in step). Every value is the tree's own modal (most common) value on a <button>
+     element, not invented — see that file's header and /docs/DESIGN-TOKENS.md for the audit. */
+  --space-xxs: 2px;
+  --space-xs: 4px;
+  --space-sm: 6px;
+  --space-md: 8px;
+  --space-lg: 10px;
+  --space-xl: 12px;
+  --space-xxl: 16px;
+  --font-xs: 10px;
+  --font-sm: 10.5px;
+  --font-base: 11px;
+  --font-md: 11.5px;
+  --font-lg: 12px;
+  --font-xl: 12.5px;
+  --font-xxl: 13px;
+  --font-display: 14px;
+  --control-h-sm: 22px;
+  --control-h-md: 26px;
+  --control-h-lg: 30px;
+
   --border-default: #E1E5EB;
   --border-strong:  #CDD3DC;
   --text-primary:   #1B1E26;

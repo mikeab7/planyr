@@ -24,6 +24,7 @@
  */
 import { PARCEL_FIELDS, parcelProvenance, provenanceLabel } from "../lib/parcelRecord.js";
 import { PinIcon } from "./icons.jsx";
+import { RADIUS } from "../../../shared/ui/radius.js";
 
 const label = { display: "block", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 2 };
 
@@ -114,7 +115,7 @@ export function PlacementControls({
   PAL, chip, border, surface, numFont, tabularNums,
   rotApplied, stepDeg, onStepDeg, stepFt, onStepFt, onRotate, onNudge, onMove,
 }) {
-  const sel = { flex: "none", padding: "5px 6px", fontSize: 11.5, fontFamily: "inherit", border, borderRadius: 6, background: surface, color: PAL.ink };
+  const sel = { flex: "none", padding: "5px 6px", fontSize: 11.5, fontFamily: "inherit", border, borderRadius: RADIUS.sm, background: surface, color: PAL.ink };
   const btn = { ...chip, flex: "none", minWidth: 34 };
   return (
     <>

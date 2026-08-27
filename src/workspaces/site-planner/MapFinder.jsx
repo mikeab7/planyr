@@ -41,6 +41,7 @@ import { contourHover } from "./lib/terrainLazy.js";
 import { attachRasterIdentifyLazy } from "./lib/rasterIdentifyLazy.js";
 import { NUM_FONT, TABULAR_NUMS } from "../../shared/theme/typography.js";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
+import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import {
   resolveLayerUrl,
   identifyParcelEager,
@@ -101,6 +102,27 @@ const LABELS_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/Refer
  * screen, so a genuinely short pane (a landscape phone/tablet) can never render one of those
  * banners UNDER the search bar — see that render site for the measured collision this closes. */
 const SEARCH_BAR_CLEARANCE_PX = 58;
+
+// NEW-4 — how long the "location is blocked" notice stays up before it auto-dismisses. Still
+// dismissible by hand at any time. The message itself is one short sentence (reads as two lines
+// in the popover's width); 6s is long enough to read it twice with room to spare, shorter than
+// the app's general sync-conflict toast (TOAST_TTL_MS, 8s) because there's no action to weigh —
+// just a fact to notice and move past.
+const LOCATE_NOTICE_MS = 6000;
+
+/* NEW-2 — reproduced live (headless, both narrow and desktop widths, 700-2000 CSS px): whenever
+ * the Layers panel is COLLAPSED — its default at ≤760px, and reachable at ANY width by collapsing
+ * it by hand (the choice persists in localStorage) — the Comps toggle above it and the collapsed
+ * "▶ Imagery & layers" pill below it read as two unrelated floating chips: same right edge, but
+ * Comps is far narrower (~69px measured) than the collapsed panel (~150px measured), so their left
+ * edges don't line up and there's a visible gap between them ("detached and misaligned"). It does
+ * NOT reproduce while the panel is OPEN — a small toggle button sitting above a big content card is
+ * an ordinary, expected size difference; the defect is specifically the two SAME-KIND collapsed
+ * pills failing to match. COMPS_LAYERS_COLLAPSED_W is the collapsed panel's own measured width
+ * (150px + a little breathing room), reused as the Comps button's minWidth ONLY while the panel is
+ * collapsed, so the two share both edges and read as one stack again — no change to the open state,
+ * which was never the reported defect. */
+const COMPS_LAYERS_COLLAPSED_W = 152;
 
 /* NEW-6 — the ring count Leaflet actually uses on this map's two tile layers. Neither passes
  * `keepBuffer`, so both run on Leaflet's default of 2; the cache CEILING is sized from that same
@@ -351,6 +373,19 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const geoAvailabilityRef = useRef("ready"); // locateAvailability()'s live answer: 'ready' | 'blocked' | 'insecure' | 'unsupported'
   const geoPermissionRef = useRef(null);      // the live PermissionStatus (if the browser supports the query), so its 'change' listener can be removed on unmount
   const locateWatchdogRef = useRef(null);     // backstop timer — stops the spinner even if neither locationfound nor locationerror ever fires (an unanswered permission prompt)
+  // NEW-4 — the "location is blocked" (etc.) message, ANCHORED to the locate button itself
+  // (AnchoredMenu + locateBtnRef) rather than riding the generic page-corner `err` banner, which
+  // is what let it read as a page-level announcement with no visual tie to the control that
+  // produced it. Auto-dismisses after LOCATE_NOTICE_MS; still closeable by hand at any time.
+  const [locateNotice, setLocateNotice] = useState(null);
+  const locateNoticeTimerRef = useRef(null);
+  const dismissLocateNotice = () => { setLocateNotice(null); if (locateNoticeTimerRef.current) { clearTimeout(locateNoticeTimerRef.current); locateNoticeTimerRef.current = null; } };
+  const showLocateNotice = (msg) => {
+    setLocateNotice(msg);
+    if (locateNoticeTimerRef.current) clearTimeout(locateNoticeTimerRef.current);
+    locateNoticeTimerRef.current = setTimeout(() => { setLocateNotice(null); locateNoticeTimerRef.current = null; }, LOCATE_NOTICE_MS);
+  };
+  useEffect(() => () => { if (locateNoticeTimerRef.current) clearTimeout(locateNoticeTimerRef.current); }, []);
   const layerUrlsRef = useRef({});   // county -> resolved queryable layer URL (auto-routing)
   const imageryRef = useRef(null);
   const labelsRef = useRef(null);
@@ -553,7 +588,6 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         if (!site.origin) return;
         const status = statusOf(site);
         if (statusFilter.size && !statusFilter.has(status)) return;   // honor the chip filter (matches the map)
-        if (status === "dead" && !statusFilter.has("dead")) return;   // dead recedes unless filtered to (B365)
         // Dimension lines off. Dock doors always export, as one run per dock side — and neither
         // is read off each saved site's own settings, so a multi-site file cannot vary with what
         // someone happened to have shown on screen when they last saved plan #3.
@@ -785,8 +819,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         }
         if (geoAvailabilityRef.current !== "ready") {
           // STEEL-MAN i/v/vi — a control already known to be blocked never spins; LOUD-FAILURE
-          // says why, once, in the app's standard bottom banner, rather than staying silent.
-          setErr(locateUnavailableTooltip(geoAvailabilityRef.current));
+          // says why, once. NEW-4 — anchored to THIS button (AnchoredMenu, above), not the
+          // generic page-corner `err` banner: the old page-level placement is exactly what read
+          // as unrelated to the control that produced it.
+          showLocateNotice(locateUnavailableTooltip(geoAvailabilityRef.current));
           return;
         }
         setLocateFar(false);
@@ -1245,9 +1281,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       if (!site.origin) return; // blank-planner sites have no geo anchor
       const status = statusOf(site);
       if (statusFilter.size && !statusFilter.has(status)) return; // chip filter: show only selected statuses (B235)
-      // Lost/passed deals recede off the map unless the user explicitly filters to
-      // Dead — a settled stage shouldn't clutter the active picture (B365).
-      if (status === "dead" && !statusFilter.has("dead")) return;
+      // NEW-1 — a Dead site stays ON the map (small + dim, same treatment as Complete):
+      // hiding it outright was the B365 default and is exactly what made a site marked
+      // dead read as "disappeared entirely." It still recedes via STATUS_TOKENS' size/
+      // opacity/z-order, it just never vanishes.
       const { lat, lon } = site.origin;
       const active = site.id === activeSiteId;
       const tip = `${site.site || site.name || "Site"} · ${siteAcres(site).toFixed(1)} AC · ${STATUS_META[status]?.label || status} · click to open`;
@@ -2346,6 +2383,9 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             style={{
               position: "absolute", zIndex: MAP_CHROME_Z.panel,
               ...(narrow ? { top: 60, right: 8 } : { top: 10, right: 10 }),
+              // NEW-2 — while the Layers panel is collapsed, match its width so the two collapsed
+              // pills share both edges and read as one stack (see COMPS_LAYERS_COLLAPSED_W above).
+              ...(layersPanelOpen ? null : { minWidth: COMPS_LAYERS_COLLAPSED_W }),
               height: 30, padding: "0 12px", borderRadius: RADIUS.pill,
               border: `1px solid ${PAL.panelLine}`, background: "var(--surface-raised)",
               color: PAL.ink, fontSize: 12.5, fontWeight: 600,
@@ -2517,6 +2557,20 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         )}
         </div>
         {/* (B167) The idle "Drag to move the map" first-run bubble was removed entirely. */}
+
+        {/* NEW-4 — the locate button's own "blocked" message, anchored to the button itself
+            (never the page-corner err banner above) so it reads as feedback on THAT control —
+            same visual treatment as the err banner (no new style), just correctly placed and,
+            unlike err, dismissible by hand and self-clearing after LOCATE_NOTICE_MS. */}
+        <AnchoredMenu open={!!locateNotice} onClose={dismissLocateNotice} anchorRef={locateBtnRef} hoverSafe
+          placement="above-left" width={240} gap={8} zIndex={MAP_CHROME_Z.alert}
+          panelStyle={{ background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, boxShadow: "0 8px 24px rgba(0,0,0,0.22)" }}>
+          <div role="status" style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45 }}>
+            <span style={{ flex: 1 }}>{locateNotice}</span>
+            <button onClick={dismissLocateNotice} aria-label="Dismiss" title="Dismiss"
+              style={{ flex: "none", cursor: "pointer", background: "transparent", color: PAL.muted, border: "none", fontSize: 13, fontWeight: 800, padding: 0, lineHeight: 1 }}>✕</button>
+          </div>
+        </AnchoredMenu>
 
       </div>
       {/* Right-click context menu for a project — set its lifecycle stage (B7) or delete

@@ -22,6 +22,7 @@ import { loadSitesList } from "../lib/storage.js";
 import { normalizeSharePref, resetShareContext } from "../lib/newProjectSharing.js";
 import { loadUserPrefs, saveUserPrefs } from "../lib/userPrefs.js";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
+import { RADIUS } from "../../../shared/ui/radius.js";
 
 const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", paper: "var(--surface-raised)", danger: "var(--danger)" };
 const field = { width: "100%", boxSizing: "border-box", padding: "8px 10px", fontSize: 13, border: `1px solid ${PAL.line}`, borderRadius: 8, color: PAL.ink, fontFamily: "inherit", background: "var(--surface-default)" };
@@ -302,7 +303,7 @@ export default function TeamPanel({ user, setMsg }) {
               <div style={label}>Pending invites</div>
               <div style={{ display: "grid", gap: 6, marginBottom: 14 }}>
                 {invites.map((iv) => (
-                  <div key={iv.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", border: `1px dashed ${PAL.line}`, borderRadius: 8 }}>
+                  <div key={iv.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", border: `1px dashed ${PAL.line}`, borderRadius: RADIUS.md }}>
                     <div style={{ flex: 1, minWidth: 0, color: PAL.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{iv.email}</div>
                     <span style={pill(false)}>{iv.role}</span>
                     {isAdmin && <button style={tiny} disabled={busy} onClick={() => doCancel(iv.id)} title="Cancel invite">✕</button>}

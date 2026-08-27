@@ -23,7 +23,7 @@
  * @param {number} p.menuH   measured menu height (px)
  * @param {number} p.viewportW  window.innerWidth
  * @param {number} p.viewportH  window.innerHeight
- * @param {"left"|"below-left"|"below-right"} [p.placement="left"]
+ * @param {"left"|"below-left"|"below-right"|"above-left"} [p.placement="left"]
  * @param {number} [p.gap=10]     gap between anchor and menu
  * @param {number} [p.margin=8]   min gap kept from every viewport edge
  * @returns {{left:number,top:number}|null}
@@ -44,6 +44,9 @@ export function placeMenu({
   let left, top;
   if (placement === "below-left") { left = a.left; top = a.bottom + gap; }
   else if (placement === "below-right") { left = a.right - menuW; top = a.bottom + gap; }
+  // "above-left" — left-aligned, sits ABOVE the anchor (a bottom-corner control whose own
+  // corner has no room below it, e.g. a map's bottom-left zoom/locate stack — NEW-4).
+  else if (placement === "above-left") { left = a.left; top = a.top - gap - menuH; }
   else { left = a.left - gap - menuW; top = a.top; } // "left" — flyout to the left of the rail
 
   // Keep the whole menu on-screen.

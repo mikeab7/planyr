@@ -21,6 +21,7 @@
  *  - onDragStart : (PointerEvent) => void — pointerdown on the bar starts a drag (floating only).
  *  - data-testid : string
  */
+import { RADIUS } from "./radius.js";
 
 // Picture-in-picture "detach" glyph: an outer frame with a small filled inset window.
 const DetachIcon = () => (
@@ -49,7 +50,7 @@ function IconBtn({ title, onClick, children, "data-testid": testId, "aria-label"
       style={{
         border: "none", background: "transparent", color: "var(--text-secondary)",
         cursor: "pointer", fontSize: 13, fontFamily: "inherit", lineHeight: 1,
-        padding: "3px 5px", display: "grid", placeItems: "center", borderRadius: 6,
+        padding: "3px 5px", display: "grid", placeItems: "center", borderRadius: RADIUS.sm,
       }}>
       {children}
     </button>

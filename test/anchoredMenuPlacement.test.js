@@ -40,6 +40,15 @@ describe("placeMenu (AnchoredMenu placement, B734)", () => {
     expect(p).toEqual({ left: 500 - 10 - 230, top: 200 }); // { left: 260, top: 200 }
   });
 
+  it("above-left: left-aligns the menu to the anchor and sits above it (NEW-4)", () => {
+    // a bottom-left corner control (e.g. the map's locate button) at left 20, top 740
+    const p = placeMenu({
+      anchorRect: rect(20, 740, 34, 34),
+      menuW: 260, menuH: 60, ...VIEW, placement: "above-left", gap: 8, margin: 8,
+    });
+    expect(p).toEqual({ left: 20, top: 740 - 8 - 60 }); // { left: 20, top: 672 }
+  });
+
   it("clamps a menu that would spill off the right edge back inside the viewport", () => {
     // below-left off a far-right anchor would push left past the edge
     const p = placeMenu({

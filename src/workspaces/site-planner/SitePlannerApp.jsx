@@ -17,6 +17,8 @@ const CompsPanel = lazy(() => import("../../shared/comps/components/CompsPanel.j
  * static edges and add no chunk. */
 const SHARE_LOADERS = { loadPrefs: loadUserPrefs, listTeams: listMyTeams };
 import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, initHistoryStore, loadSitesList, loadPlansOfGroup, renameSiteGroup, repairSplitProjectNames, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount, stageLegacySite, discardLegacySite } from "./lib/storage.js";
+import { STATUS_META } from "./lib/siteModel.js";
+import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
 import { idbPersist } from "./lib/localDb.js";
 /* LOADED ON DEMAND (B1092). The legacy-import review modal is signed-in-only and opens
  * from a menu — it has no business riding the planner's critical-path chunk, which is the
@@ -28,6 +30,7 @@ import { nextConceptName } from "./lib/conceptName.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { noteLayerContext } from "../../shared/telemetry/perfRecorderHandle.js";
 import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability } from "./lib/bootResume.js";
+import { RADIUS } from "../../shared/ui/radius.js";
 
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
 migrateSiteGroups();  // give every legacy record a site (location) group
@@ -137,6 +140,11 @@ export default function App({
   const [cloudError, setCloudError] = useState(""); // "couldn't load from cloud" — shown instead of silently wiping to empty (B54)
   const [deleteError, setDeleteError] = useState(""); // a cloud DELETE that actually failed — loud, never a phantom success (B372)
   const [pushError, setPushError] = useState("");     // a background cloud-mirror push failed (NEW-F6) — device copy is safe; heals on next push/pull
+  // NEW-1 — a site-status change (incl. "Dead") is a header write outside the planner's
+  // element-level undo stack (Ctrl+Z can't reach it — different component, sometimes not even
+  // mounted). This toast is the "obvious, working undo" for it instead, reusing the shared B673
+  // toast host rather than inventing a second mechanism.
+  const { toasts: statusToasts, pushToast: pushStatusToast, dismissToast: dismissStatusToast } = useToasts();
   const prevUid = useRef(null);
   const applySeq = useRef(0); // monotonic token so overlapping auth events can't interleave (B43)
   // "Bring my on-device sites into my account": signed-in uid drives the prompt; the
@@ -641,12 +649,23 @@ export default function App({
   // the group is represented. Persists + mirrors to cloud, then refreshes.
   const setSiteStatus = (id, status) => {
     const rec = loadSite(id); if (!rec) return;
+    const prevStatus = rec.status; // NEW-1 — captured BEFORE the write, for the undo toast below
     // NEW-F6 — save every plan locally first, then aggregate the pushes to ONE banner.
     const plans = loadPlansOfGroup(groupOf(rec));
     plans.forEach((s) => saveSite({ id: s.id, status }));
     Promise.all(plans.map((s) => pushSiteToCloud(s.id).then((r) => !(r && r.ok === false)).catch(() => false)))
       .then((oks) => { if (oks.some((ok) => !ok)) { setPushError("The status change is saved on this device but couldn't sync to the cloud — it'll catch up on your next edit or reload."); reportClientEvent("cloud-push-failed", "background push failed (site status)", { id }); } });
     refreshSites();
+    // NEW-1 — a status change has no home on the planner's Ctrl+Z stack (it's a site-header
+    // write, not an element edit, and can fire from the map with no plan even open), so an
+    // undo toast is the reachable "make it reversible" affordance instead of a silent no-op.
+    if (prevStatus && prevStatus !== status) {
+      const label = rec.site || rec.name || "This site";
+      pushStatusToast({
+        text: `${label} marked ${STATUS_META[status]?.label || status}.`,
+        action: { label: "Undo", onClick: () => setSiteStatus(id, prevStatus) },
+      });
+    }
   };
 
   // The map lists SITES (locations), so collapse plans to one representative per
@@ -711,7 +730,7 @@ export default function App({
               onClick={newBlankSiteHere}
               title="Start a plan with no parcel — it takes its location from where the map is looking, so you can draw the boundary and still get the aerial, flood layer and county rules"
               style={{
-                padding: "4px 11px", fontSize: 12, fontWeight: 600, borderRadius: 6,
+                padding: "4px 11px", fontSize: 12, fontWeight: 600, borderRadius: RADIUS.sm,
                 border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
                 color: "var(--chrome-text)", cursor: "pointer", fontFamily: "inherit",
                 whiteSpace: "nowrap",
@@ -817,6 +836,9 @@ export default function App({
           />
         )}
       </div>
+      {/* NEW-1 — outside both mode divs so a status-change undo offered on the map survives
+          switching into a plan before the toast's own timer runs out. */}
+      <ToastHost toasts={statusToasts} onDismiss={dismissStatusToast} />
       {cloudLoading && (
         <div style={{ position: "fixed", inset: 0, zIndex: 4500, background: "rgba(20,18,15,0.35)", display: "grid", placeItems: "center", pointerEvents: "none" }}>
           <div style={{ background: "rgba(25,22,19,0.92)", color: "#ece7db", borderRadius: 10, padding: "10px 18px", fontSize: 13, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>Loading your sites…</div>
@@ -825,13 +847,13 @@ export default function App({
       {cloudError && (
         <div role="alert" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 560, display: "flex", alignItems: "center", gap: 10, background: "#7c2d12", color: "#fff", border: "1px solid #b91c1c", borderRadius: 10, padding: "8px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
           <span style={{ flex: 1 }}>{cloudError}</span>
-          <button onClick={() => setCloudError("")} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.15)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+          <button onClick={() => setCloudError("")} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.15)", color: "#fff", border: "none", borderRadius: RADIUS.sm, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
         </div>
       )}
       {deleteError && (
         <div role="alert" style={{ position: "fixed", top: cloudError ? 136 : 79, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 560, display: "flex", alignItems: "center", gap: 10, background: "#7c2d12", color: "#fff", border: "1px solid #b91c1c", borderRadius: 10, padding: "8px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
           <span style={{ flex: 1 }}>{deleteError}</span>
-          <button onClick={() => setDeleteError("")} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.15)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+          <button onClick={() => setDeleteError("")} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.15)", color: "#fff", border: "none", borderRadius: RADIUS.sm, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
         </div>
       )}
       {/* NEW-F6 — a background cloud-mirror push failed. Informational (the device copy is safe
@@ -839,7 +861,7 @@ export default function App({
       {pushError && (
         <div role="alert" style={{ position: "fixed", top: (cloudError ? 57 : 0) + (deleteError ? 57 : 0) + 79, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 560, display: "flex", alignItems: "center", gap: 10, background: "var(--warn-bg, #fef3c7)", color: "var(--warn-text)", border: "1px solid var(--warn-border, #d6a64a)", borderRadius: 10, padding: "8px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
           <span style={{ flex: 1 }}>{pushError}</span>
-          <button onClick={() => setPushError("")} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "transparent", color: "var(--warn-text)", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+          <button onClick={() => setPushError("")} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "transparent", color: "var(--warn-text)", border: "none", borderRadius: RADIUS.sm, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
         </div>
       )}
 
@@ -861,7 +883,7 @@ export default function App({
               Review each site
             </button>
           )}
-          <button onClick={() => { setHideMigrate(true); setMigrateMsg(""); }} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.15)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+          <button onClick={() => { setHideMigrate(true); setMigrateMsg(""); }} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.15)", color: "#fff", border: "none", borderRadius: RADIUS.sm, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
         </div>
       )}
 
@@ -895,7 +917,7 @@ export default function App({
           {migrationSaveMsg ? (
             <>
               <span style={{ flex: 1 }}>{migrationSaveMsg}</span>
-              <button onClick={() => setMigrationSaveMsg("")} style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.15)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+              <button onClick={() => setMigrationSaveMsg("")} style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.15)", color: "#fff", border: "none", borderRadius: RADIUS.sm, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
             </>
           ) : (
             <>

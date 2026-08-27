@@ -54,7 +54,6 @@
 //   mapOpacity — pin opacity (settled stages recede).
 //   z          — base Leaflet zIndexOffset so the important stages render ON TOP
 //                (a Complete pin must never occlude a Pursuit pin where they overlap).
-//   hideByDefault  — omit the pin from the map unless the user explicitly filters to it.
 export const STATUS_TOKENS = {
   pursuit:  { color: "#D85A30", darkColor: "#F08A5D", glyph: "",  shape: "",      hollow: false, dashed: false, struck: false, dim: false,
               halo: 3,   tier: 1.00, mapOpacity: 1,    z: 400 },
@@ -65,7 +64,7 @@ export const STATUS_TOKENS = {
   complete: { color: "#888780", darkColor: "#9DA3AD", glyph: "✓", shape: "check", hollow: false, dashed: false, struck: false, dim: true,
               halo: 2,   tier: 0.72, mapOpacity: 0.65, z: 100 },
   dead:     { color: "#888780", darkColor: "#9DA3AD", glyph: "✕", shape: "x",     hollow: false, dashed: false, struck: true,  dim: true,
-              halo: 1.6, tier: 0.64, mapOpacity: 0.5,  z: 50, hideByDefault: true },
+              halo: 1.6, tier: 0.64, mapOpacity: 0.5,  z: 50 },
 };
 
 // Token for a status key, defaulting to pursuit for any unknown/missing value.

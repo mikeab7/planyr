@@ -19,6 +19,7 @@ import { useCallback, useEffect, useState } from "react";
 import { storageSnapshot, formatBytes, LOCAL_CAP_BYTES } from "./storageCensus.js";
 import { reclaimRefetchable } from "./storageReclaim.js";
 import { perfCaptureSummary, clearPerfCaptures, MAX_CAPTURES } from "../telemetry/perfCaptureStore.js";
+import { RADIUS } from "../ui/radius.js";
 
 const PAL = {
   ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)",
@@ -163,7 +164,7 @@ export default function StoragePanel() {
         onClick={clearCache}
         disabled={busy || reclaimable <= 0}
         data-testid="clear-map-cache"
-        style={{ width: "100%", padding: "8px 12px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", borderRadius: 8, cursor: busy || reclaimable <= 0 ? "default" : "pointer", border: `1px solid ${PAL.line}`, background: PAL.raised, color: PAL.ink, opacity: reclaimable <= 0 ? 0.55 : 1 }}
+        style={{ width: "100%", padding: "8px 12px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", borderRadius: RADIUS.md, cursor: busy || reclaimable <= 0 ? "default" : "pointer", border: `1px solid ${PAL.line}`, background: PAL.raised, color: PAL.ink, opacity: reclaimable <= 0 ? 0.55 : 1 }}
       >
         {busy ? "Clearing…" : reclaimable > 0 ? `Clear map data (${formatBytes(reclaimable)})` : "Clear map data"}
       </button>

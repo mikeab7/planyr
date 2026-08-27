@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { runSiteAnalysis } from "../lib/siteAnalysis.js";
 import { formatAge } from "../lib/gisCache.js";
+import { RADIUS } from "../../../shared/ui/radius.js";
 
 /* Site Analysis panel (B147) — environmental / regulatory / infrastructure screening
  * of the active-parcel footprint, presented presence-first and grouped by category.
@@ -142,7 +143,7 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isL
                           type="button"
                           onClick={(e) => { e.stopPropagation(); run(); }}
                           title="Retry this source"
-                          style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, letterSpacing: "0.02em", padding: "2px 7px", borderRadius: 999, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 3, border: `1px solid ${st.dot}`, background: "transparent", color: st.dot }}>
+                          style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, letterSpacing: "0.02em", padding: "2px 7px", borderRadius: RADIUS.pill, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 3, border: `1px solid ${st.dot}`, background: "transparent", color: st.dot }}>
                           ↻ Retry
                         </button>
                       )}
@@ -151,7 +152,7 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isL
                           type="button"
                           onClick={(e) => { e.stopPropagation(); onToggleLayer(f.mapLayer, !layerOn); }}
                           title={layerOn ? "Hide this layer on the map" : "Show this layer on the map (frames to the site)"}
-                          style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, letterSpacing: "0.02em", padding: "2px 7px", borderRadius: 999, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 3, border: `1px solid ${layerOn ? "#1d4ed8" : line}`, background: layerOn ? "#1d4ed8" : "transparent", color: layerOn ? "#fff" : muted }}>
+                          style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, letterSpacing: "0.02em", padding: "2px 7px", borderRadius: RADIUS.pill, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 3, border: `1px solid ${layerOn ? "#1d4ed8" : line}`, background: layerOn ? "#1d4ed8" : "transparent", color: layerOn ? "#fff" : muted }}>
                           {layerOn ? "◉ On map" : "◍ Map"}
                         </button>
                       )}

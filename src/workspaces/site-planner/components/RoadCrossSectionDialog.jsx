@@ -28,6 +28,7 @@ import {
   pavementArea, bandLayout, bandStripeMarks, BAND_FILL_TOKEN, BAND_FILL_OPACITY, BUILT_IN_XSECTION_PRESETS,
   MIN_BAND_WIDTH_FT, parseWidthDraft, designatedRowFt, rowMarginFt,
 } from "../lib/roadCrossSection.js";
+import { RADIUS } from "../../../shared/ui/radius.js";
 
 const f1 = (n) => (Number.isFinite(n) ? (Math.round(n * 10) / 10).toString() : "—");
 const f0 = (n) => (Number.isFinite(n) ? Math.round(n).toString() : "—");
@@ -531,7 +532,7 @@ export default function RoadCrossSectionDialog({ mode = "edit", initialXSection,
             {allPresets.map((p) => (
               <span key={p.id} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                 <button type="button" onClick={() => loadPreset(p)}
-                  style={{ padding: "5px 10px", fontSize: 12, borderRadius: 999, border: "1px solid var(--planner-border)", background: "var(--surface-base)", color: "var(--text-primary)", cursor: "pointer" }}>
+                  style={{ padding: "5px 10px", fontSize: 12, borderRadius: RADIUS.pill, border: "1px solid var(--planner-border)", background: "var(--surface-base)", color: "var(--text-primary)", cursor: "pointer" }}>
                   {p.name}
                 </button>
                 {!p.builtin && <button type="button" onClick={() => deletePreset(p.id)} aria-label={`Delete preset ${p.name}`} title="Delete preset"
@@ -550,9 +551,9 @@ export default function RoadCrossSectionDialog({ mode = "edit", initialXSection,
         </div>
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-          <button type="button" onClick={onCancel} style={{ padding: "7px 14px", fontSize: 12.5, fontWeight: 600, borderRadius: 8, border: "1px solid var(--planner-border)", background: "var(--surface-raised)", color: "var(--text-primary)", cursor: "pointer" }}>Cancel</button>
+          <button type="button" onClick={onCancel} style={{ padding: "7px 14px", fontSize: 12.5, fontWeight: 600, borderRadius: RADIUS.md, border: "1px solid var(--planner-border)", background: "var(--surface-raised)", color: "var(--text-primary)", cursor: "pointer" }}>Cancel</button>
           <button type="button" data-testid="road-xsection-apply" disabled={!canApply} onClick={() => canApply && onApply(x)}
-            style={{ padding: "7px 14px", fontSize: 12.5, fontWeight: 600, borderRadius: 8, border: "1px solid var(--accent)", background: canApply ? "var(--accent)" : "var(--surface-raised)", color: canApply ? "var(--on-accent)" : "var(--text-tertiary)", cursor: canApply ? "pointer" : "default" }}>
+            style={{ padding: "7px 14px", fontSize: 12.5, fontWeight: 600, borderRadius: RADIUS.md, border: "1px solid var(--accent)", background: canApply ? "var(--accent)" : "var(--surface-raised)", color: canApply ? "var(--on-accent)" : "var(--text-tertiary)", cursor: canApply ? "pointer" : "default" }}>
             {mode === "edit" ? "Apply to this road" : "Use this section"}
           </button>
         </div>

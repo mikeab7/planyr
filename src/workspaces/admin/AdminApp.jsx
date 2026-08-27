@@ -9,6 +9,7 @@
  * gated to his own account, never a support-agent view over customer data.
  */
 import { SECTIONS } from "./lib/adminSections.js";
+import { RADIUS } from "../../shared/ui/radius.js";
 
 function Section({ title, blurb }) {
   return (
@@ -45,7 +46,7 @@ export default function AdminApp({ onExit }) {
           type="button"
           onClick={onExit}
           style={{
-            border: "1px solid var(--border-strong)", borderRadius: 8, background: "transparent",
+            border: "1px solid var(--border-strong)", borderRadius: RADIUS.md, background: "transparent",
             color: "var(--chrome-muted)", font: "inherit", fontSize: 12, fontWeight: 600,
             padding: "5px 12px", cursor: "pointer",
           }}
