@@ -231,6 +231,60 @@ function windowSpan(s) {
 
 const round1 = (v) => Math.round(v * 10) / 10;
 
+/* ── the worst retained window (NEW-2, this session) ────────────────────────────────────────
+ * ⛔ WHY THIS EXISTS. The owner pressed the manual capture button 0.6s AFTER an auto-fired capture
+ * had already reported windowMeanMs 288.6 / slowFraction 0.67 — same tab, same frame history
+ * (frames 1891 vs 1892). The manual capture reported windowMeanMs 16.1 / slowFraction 0 / ratio
+ * 0.96: a clean window, because `triggerState()`'s `windowMeanMs` is the LIVE sustain window
+ * (§ above, `sustainMs` wide), and `fire()` RESETS that window the moment it fires. Pressing the
+ * button just after things recover reads a freshly-reset, now-fast window and the evidence is
+ * lost — exactly backwards from what a "that felt slow just now" button is for.
+ *
+ * `worstWindow` is a POST-HOC scan over the recorder's FULL retained frame history (up to
+ * `captureWindowMs`, tens of seconds — far wider than the live `sustainMs` window `feedFrame`
+ * maintains): the maximum-mean `spanMs`-wide sub-window anywhere in that history, found with a
+ * two-pointer sweep over chronologically-ordered `(t, dt)` pairs. This is NOT the hot per-frame
+ * path — it runs once per capture, not once per frame — so unlike `feedFrame` it may allocate.
+ * `perfRecorder.js`'s `capture()` reports BOTH: the live "right now" reading (unchanged) and this
+ * "worst in the last N seconds" reading, so a capture taken after the lag has already passed still
+ * carries the evidence that it happened. */
+
+/** Slide a `spanMs`-wide window across chronologically-ordered `times`/`deltas` (same length,
+ *  `times[i]` is the frame's own timestamp, `deltas[i]` its frame-to-frame delta) and return the
+ *  window with the HIGHEST mean delta. `minFrames` mirrors the trigger's own `sustainMinFrames` —
+ *  a window with fewer frames than that is never considered, so a single spike can't win on a
+ *  near-empty window. `slowBar` (a delta at/above which a frame counts as "slow", the same
+ *  `baseline * multiplier` the live trigger uses) is optional; omit it to skip `slowFraction`.
+ *  Returns null if there's no window meeting `minFrames`. Pure. */
+export function worstWindow(times, deltas, { spanMs, minFrames = 1, slowBar = null } = {}) {
+  const n = deltas.length;
+  if (!n || !(spanMs > 0)) return null;
+  let start = 0, sum = 0, slow = 0;
+  let best = null;
+  for (let end = 0; end < n; end++) {
+    sum += deltas[end];
+    if (slowBar != null && deltas[end] >= slowBar) slow++;
+    while (start < end && times[end] - times[start] > spanMs) {
+      sum -= deltas[start];
+      if (slowBar != null && deltas[start] >= slowBar) slow--;
+      start++;
+    }
+    const count = end - start + 1;
+    if (count < minFrames) continue;
+    const mean = sum / count;
+    if (!best || mean > best.meanMs) {
+      best = {
+        meanMs: mean,
+        slowFraction: slowBar != null ? slow / count : null,
+        frames: count,
+        atMs: times[end],
+        spanMs: times[end] - times[start],
+      };
+    }
+  }
+  return best;
+}
+
 /* What the trigger currently knows — for the capture payload and for a live console read. Pure
  * read, no state change. */
 export function triggerState(s) {

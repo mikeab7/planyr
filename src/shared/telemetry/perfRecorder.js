@@ -47,7 +47,7 @@ import {
   createFrameRing, pushFrame, createTaskRing, pushTask, createCounterRing, pushCounters,
   createStringTable, internString, ringOrder, ringOrderSince, COUNTER_COLUMNS,
 } from "./perfRing.js";
-import { createTrigger, feedFrame, sealBaselineLate, triggerState } from "./perfTrigger.js";
+import { createTrigger, feedFrame, sealBaselineLate, triggerState, worstWindow } from "./perfTrigger.js";
 import { buildCapture, encodeCapture, assertCaptureClean, frameStats, CAPTURE_MAX_CHARS } from "./perfCapture.js";
 import { savePerfCapture } from "./perfCaptureStore.js";
 
@@ -241,6 +241,16 @@ export function capture(reason) {
     const deltas = order.map((i) => _frames.dt[i]);
     const slowBar = _trig.baseline == null ? 0 : _trig.baseline * _trig.cfg.multiplier;
 
+    /* NEW-2 (this session) — B802400's own round-4 evidence: an AUTO capture reported
+     * windowMeanMs 288.6/slowFraction 0.67, and the MANUAL capture 0.6s later — same tab, same
+     * frame history — reported windowMeanMs 16.1/slowFraction 0 because the live sustain window
+     * (`triggerState().windowMeanMs`) had already reset and refilled with fast frames. Scanning
+     * the SAME retained history this capture is already building (`order`/`deltas`, up to
+     * `captureWindowMs` — far wider than the live sustain window) for its worst sub-window means a
+     * capture taken after the lag has already passed still carries the evidence that it happened. */
+    const times = order.map((i) => _frames.t[i]);
+    const worst = worstWindow(times, deltas, { spanMs: _trig.cfg.sustainMs, minFrames: _trig.cfg.sustainMinFrames, slowBar });
+
     /* Where the frame track is DISCONTINUOUS — [index into the kept frames, gap ms] — so a
      * reader never mistakes the pause between two gestures for one enormous frame. */
     const gaps = [];
@@ -287,6 +297,11 @@ export function capture(reason) {
       sustainMs: ts.sustainMs,
       floorMs: ts.floorMs,
       fires: ts.fires,
+      worstWindowMeanMs: worst ? worst.meanMs : null,
+      worstWindowSlowFraction: worst ? worst.slowFraction : null,
+      worstWindowRatio: worst && ts.baselineMs ? worst.meanMs / ts.baselineMs : null,
+      worstWindowFrames: worst ? worst.frames : null,
+      worstWindowAtMs: worst ? Math.round(worst.atMs - since) : null,
       frameStats: frameStats(deltas, slowBar),
       longTasks: _taskCount,
       longTaskMs: _taskTotal,

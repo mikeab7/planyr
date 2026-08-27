@@ -627,7 +627,11 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
   pavement and a double-click aimed at the road cannot miss it; the general fix is that chrome sitting over
   its own object's BODY forwards the press to the body, asked once for every type rather than special-cased), and
   **B233153** (a detention pond's OWN vertex handle — the fourth instance, and the one that produced clauses 4 and 5
-  above; captured live on the owner's Bain plan after six realistic sandbox reproductions all came back green).
+  above; captured live on the owner's Bain plan after six realistic sandbox reproductions all came back green), and
+  **B806082** (a callout's own leader re-aim grips — the tip and elbow handles paint exactly where a right-click
+  naturally lands, and neither carried an `onContextMenu`, so the press fell through in total silence to the
+  empty-canvas map menu instead of the leader's own "Delete Leader" row; fixed by forwarding both grips' right-click
+  to the same handler their leader body already uses).
   **⛔ AND THE COROLLARY B50008/B50009 ADD: A GESTURE CAN DIE WITH NOTHING EATING IT.** This rule is about
   chrome swallowing a press, and reading every failure through it is how two other causes survived for
   months — the pair being measured on a WALL CLOCK read inside the handler (so a busy plan spends the whole

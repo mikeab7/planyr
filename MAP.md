@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-27 @ `b59dae8f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-27 @ `d4f5f047` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_575 source files mapped._
+_576 source files mapped._
 
 ## infra
 
@@ -381,7 +381,7 @@ _575 source files mapped._
 - **`src/shared/telemetry/perfScene.js`** — Reads the scene off the DOM (document/canvas nodes, elements drawn, layers, panels, tiles) — shared by the sampled perf instrument and the always-on recorder.
   - _exports_: `readScene`
 - **`src/shared/telemetry/perfTrigger.js`** — The self-calibrating trigger: a baseline median taken from the window right after a load, then a sustained-deviation test (level × slow-fraction × perceptibility floor) over a time-qualified window.
-  - _exports_: `createTrigger`, `feedFrame`, `sealBaselineLate`, `TRIGGER_DEFAULTS`, `triggerState`
+  - _exports_: `createTrigger`, `feedFrame`, `sealBaselineLate`, `TRIGGER_DEFAULTS`, `triggerState`, `worstWindow`
 - **`src/shared/theme/familyInk.js`** — the default ink of each drawn family + the rule that keeps them perceptually apart (a measurement and a markup shared #c2410c, so the number vanished into the shape)
   - _exports_: `ELEMENT_DEFAULT_PAINT`, `FAMILY_DEFAULT_INK`, `INK_DISTINCT_MIN_DE`, `MEASURE_INK`, `parseHex`
 - **`src/shared/theme/palette.js`** — JS mirror of index.css theme tokens as concrete light/dark hex for the SVG canvas and Markup viewer where var() cannot resolve; paletteFor(resolved) selector
@@ -863,6 +863,8 @@ _575 source files mapped._
   - _exports_: `arrowGlyphFeatures`, `buildOverlayVectorFragment`, `contourFeatures`, `esriLineFeatures`, `esriPolygonFeatures`, `featureToSvg`, `overlayVectorSvg`, `swapLatLng`
 - **`src/workspaces/site-planner/lib/paintOrder.js`** — the paint-order ladder + every ordered pair of drawn families, and the ONE name for the cross-band command
   - _exports_: `CROSS_BAND`, `CROSS_BAND_BEHIND`, `CROSS_BAND_FRONT`, `defaultRelation`, `defaultRung`, `FAMILIES`, `orderedPairs`, `PAINT_LADDER`, `reversal`, `rungsFor`
+- **`src/workspaces/site-planner/lib/paintSchedule.js`** — pure time-sliced batch runner (B802400 round 5): splits a big Leaflet paint diff into budget-bounded chunks so no single frame blocks for anywhere near the reported multi-second freeze
+  - _exports_: `drainBudgeted`, `PAINT_FRAME_BUDGET_MS`, `runBudgeted`
 - **`src/workspaces/site-planner/lib/parcelActions.js`** — THE inventory of every parcel action and the pure model behind the right rail's "Parcel tools" menu: grouped create → modify → remove, per-row enabled/active/why-not, plus the rail-owns-actions / Land-panel-owns-attributes naming split
   - _exports_: `boundaryEditHint`, `PARCEL_ACTIONS`, `PARCEL_GROUPS`, `PARCEL_SURFACES`, `parcelMenuModel`
 - **`src/workspaces/site-planner/lib/parcelArea.js`** — a parcel's MEASURED area, net of save-and-except holes (`parcelNetSqft`) — the one derivation every acreage consumer reads. A leaf module: polyClip.js is on the boot path.
