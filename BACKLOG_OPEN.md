@@ -10,7 +10,7 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
-| B802400 | Contour lines: a cold burst of DEM tile fetches (agency render time + a client-side concurrency cap with no measured rationale) is the more likely source of "the contours thing seems to make my computer lag" than paint compute | [Site Planner / Terrain] | #site-planner #gis #perf | live |
+| B802400 | Contour lines: cold DEM/county-contour tile fetches through `/api/gis-cache`, not paint compute, are the confirmed source of "the contours thing seems to make my computer lag" | [Site Planner / Terrain] | #site-planner #gis #perf | live |
 | B791520 | Fix red required `build` check on `main`: Site route bundle 0.4 KB over its performance-budget ceiling | [Infra / CI] | #infra #testing | sandbox |
 | B773729 | Road cross-section: median openings (driveway/intersection breaks) | [Site Planner / road] | #site-planner #road #ui | live |
 | B773731 | Legacy free-draw POLYGON road shows 8 edit handles instead of 4 | [Site Planner / road] | #site-planner #road #ui | sandbox |
