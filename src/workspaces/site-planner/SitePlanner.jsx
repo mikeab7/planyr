@@ -6805,6 +6805,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // almost always wrote null over null.
   useEffect(() => { if (gisHoverRef.current) setGisHover(null); }, [view.ppf]);
 
+  /* NEW-2 (B806081) — ADD LEADER must win the press wherever it lands. Every element/markup shape
+   * renders `pointerEvents="all"` with its own bubble-phase `onPointerDown` (`startMoveEl` /
+   * `startMoveMarkup`), which stops propagation before `onBgDown`'s `addLeaderFor` branch (bound on
+   * the root <svg>) ever sees the press — so a click meant to drop a leader on a building, on paving,
+   * or on a markup instead moved/selected that object, and the leader could only ever land on blank
+   * canvas. Same shape as `handleStackPick` below: run in the CAPTURE phase, which fires before any
+   * target's own bubble-phase handler, so the armed gesture consumes the press before an element or
+   * markup gets a chance to steal it. */
+  const handleAddLeaderCapture = (e) => {
+    if (!addLeaderFor || e.button !== 0) return false;
+    e.preventDefault();
+    e.stopPropagation();
+    const fp = p2f(e.clientX, e.clientY);
+    addLeaderToCallout(addLeaderFor, fp);
+    setAddLeaderFor(null);
+    flashWarn("");
+    return true;
+  };
+
   /* ⛔ B548822 — THE STACK PICKER. See lib/featureTarget.js (stackAtPoint / nextPickIndex) for the
    * full design: Alt+click resolves to the top of the hit stack at this point, exactly like a plain
    * click; Alt+click AGAIN at the same point steps one deeper, wrapping back to the top. It is the
@@ -6854,7 +6873,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       svgRef.current.setPointerCapture(e.pointerId);
       return;
     }
-    if (addLeaderFor) { addLeaderToCallout(addLeaderFor, fp); setAddLeaderFor(null); flashWarn(""); return; } // multi-leader: Add Leader armed — this click drops the new tip (feet)
+    // NEW-2 (B806081) — Add Leader is now handled exclusively by `handleAddLeaderCapture`, in the
+    // CAPTURE phase, so it wins the press over an element/markup's own bubble-phase handler. By the
+    // time onBgDown (bubble phase) would see a press, addLeaderFor has already been consumed.
     if (attachFor) { setAttachFor(null); return; }     // clicked empty space → cancel attach
     if (alignFor) { alignToParcelEdge(fp, null); return; } // align: pick the nearest parcel edge to the click
     if (ovAlignBase) { alignOverlayToParcelEdge(fp, null); return; } // B462: align the overlay to the nearest parcel edge
@@ -17117,19 +17138,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         {grips.map(([hx, hy, dir], i) => (
           <rect key={i} data-handle="callout-width" data-testid={`callout-handle-${dir > 0 ? "r" : "l"}`} x={hx - 4} y={hy - 4} width={8} height={8} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.25}
             pointerEvents={canResize ? "all" : "none"} style={canResize ? { cursor: "ew-resize" } : undefined}
-            onPointerDown={canResize ? (e) => startCalloutResize(e, c.id, dir) : undefined} />
+            onPointerDown={canResize ? (e) => startCalloutResize(e, c.id, dir) : undefined}
+            onContextMenu={(e) => onCalloutContext(e, c.id, -1)} />
         ))}
         {/* Per-leader re-aim grip. NEW-5 — no × delete badge (owner rule): a single leader is
-            removed by right-clicking it → "Delete Leader"; Delete removes the whole callout. */}
+            removed by right-clicking it → "Delete Leader"; Delete removes the whole callout.
+            NEW-3 (B806082) — the grip sits exactly at the arrowhead, the single most obvious place
+            to aim a right-click at a leader, and it is the topmost thing there once the callout is
+            selected (SVG paint order is hit-test order). Without its own onContextMenu the press
+            fell all the way through to the empty-canvas map menu in total silence — the grip is
+            chrome belonging to ITS leader and must forward the press, never swallow it
+            (CHROME-NEVER-EATS-A-PRESS). */}
         {calloutTips(c).map((tp0, i) => { const tp = f2p(tp0); return (
           <circle key={`ct${i}`} data-handle="callout-tip" cx={tp.x} cy={tp.y} r={5} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={2}
-            style={{ cursor: "move" }} onPointerDown={(e) => startMoveCallout(e, c.id, "tip", i)} />
+            style={{ cursor: "move" }} onPointerDown={(e) => startMoveCallout(e, c.id, "tip", i)}
+            onContextMenu={(e) => onCalloutContext(e, c.id, i)} />
         ); })}
         {/* NEW-1 (two-segment leader) — per-leader elbow grip, between the stub and the run.
             Defaults to the box's own nearest-edge point (same as the render's default) until
             dragged, so it starts exactly where the (currently zero-length) stub already is —
             grabbable from the very first selection, not only after a bend has been created. A
-            square (not a circle) so it reads as a distinct control from the round tip grip. */}
+            square (not a circle) so it reads as a distinct control from the round tip grip.
+            NEW-3 (B806082) — same chrome-forwards-the-press fix as the tip grip above. */}
         {calloutTips(c).map((tp0, i) => {
           const tp = f2p(tp0);
           const boxRectPx = { x: gx, y: gy, w, h };
@@ -17138,7 +17168,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           return (
             <rect key={`ce${i}`} data-handle="callout-elbow" data-testid={`callout-handle-elbow-${c.id}-${i}`}
               x={ep.x - 4} y={ep.y - 4} width={8} height={8} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.6}
-              style={{ cursor: "move" }} onPointerDown={(e) => startMoveCallout(e, c.id, "elbow", i)} />
+              style={{ cursor: "move" }} onPointerDown={(e) => startMoveCallout(e, c.id, "elbow", i)}
+              onContextMenu={(e) => onCalloutContext(e, c.id, i)} />
           );
         })}
       </g>
@@ -21622,7 +21653,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                propagation included — that press is exactly the one being reasoned about). It is
                read-only and unconditional: it never touches the event, and it must NOT sit behind
                the touch-count guard below, because a press swallowed mid-pinch is still a press. */
-            onPointerDownCapture={(e) => { notePress(e); if (handleStackPick(e)) return; if (touchCountRef.current < 2) onCanvasVtxDownCapture(e); }}
+            onPointerDownCapture={(e) => { notePress(e); if (handleAddLeaderCapture(e)) return; if (handleStackPick(e)) return; if (touchCountRef.current < 2) onCanvasVtxDownCapture(e); }}
             onContextMenuCapture={onCanvasVtxContextCapture}
             onPointerMoveCapture={(e) => { if (touchCountRef.current < 2) onCanvasVtxMoveCapture(e); }}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={(e) => abortGesture(e.pointerId, "pointercancel")} onDoubleClick={onBgDouble}
@@ -22017,6 +22048,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   band gets. It is excluded from the dissolve (see the roadNet memo), so `inNetwork`
                   is false and it paints its own strip here rather than twice. */}
               {drawElsZ.above.map((el) => <ElNode key={el.id} el={el} f2p={f2p} isSel={sel?.kind === "el" && sel.id === el.id} tool={tool} settings={settings} H={elHandlers} nb={elNeighbors.get(el.id)} dimHidden={dimSuppressed?.has(el.id) || false} roadNet={roadNet} lf={labelFrame} />)}
+              {/* NEW-1 (B806080) — element/dimension labels paint HERE, right after the element pass
+                  and before every annotation-above rung (markup/reference/callout/measure). They used
+                  to render dead last (after all four), which made "bring to front" on a callout inert
+                  whenever a label happened to cover it — no z value a callout can hold changes a fixed
+                  render-pass order. A label is the element's own decoration, so it now shares the
+                  element's rung: any annotation the user brings into its "above" band clears every
+                  label unconditionally, exactly as it already cleared element geometry. */}
+              {labelEls}
               {/* markup shapes (neutral line/polyline/rect/ellipse/polygon) on top of the elements */}
               {drawMarkupsZ.filter((m) => !m.behindEls).map(renderMarkupNode)}
               {/* NEW-2 — references the user has explicitly promoted (the cross-band command). Same
@@ -22549,7 +22588,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               })()}
 
               {parcelLabels}
-              {labelEls}
               {/* NEW-1 — THE HANDLE LAYER. Selection / editing chrome, stripped from exports, and the
                   LAST child of the feet-space transform: in SVG a later sibling both paints over and
                   hit-tests ahead of everything before it, so a handle here is always visible AND always
