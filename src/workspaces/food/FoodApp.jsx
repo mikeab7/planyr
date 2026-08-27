@@ -49,6 +49,10 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   // full, mid-drag); VisitPanel forwards it up via onSheetHeightChange. 0 whenever no panel is
   // open (desktop never opens a sheet at all — VisitPanel's right-rail branch never calls this).
   const [sheetHeightPx, setSheetHeightPx] = useState(0);
+  // NEW-1 (2026-08-27 owner block) — a monotonic id for optimistic visit rows, mirroring
+  // flyNonceRef's own pattern. Never collides with a real row's uuid (a distinct "optimistic-N"
+  // shape), so filtering it back out on rollback can never accidentally remove a real visit.
+  const optimisticIdRef = useRef(0);
 
   // Places in the current map viewport — public read, works signed out too.
   useEffect(() => {
@@ -206,9 +210,24 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
       setError("Give this place a name first.");
       return false;
     }
+    // NEW-1 (2026-08-27 owner block, verbatim: "when I click log this visit, it should not make
+    // it seem like nothing happened") — OPTIMISTIC add, so the Past-visits list, the aggregates,
+    // the panel's own visited/not-visited state, and the map pin (a hollow want-to-try pin
+    // becoming a filled rated one) all update in the SAME beat as the click, before the network
+    // round-trip resolves — `loggedPlaces`/`manualPins`/`avgRatings` above are all memoized off
+    // this `visits` state, so one push here drives every one of them at once. Rolled back below
+    // on a failed write — "never leave a phantom visit on screen" per the owner's own instruction.
+    const optimisticId = `optimistic-${++optimisticIdRef.current}`;
+    const optimisticVisit = { ...payload, id: optimisticId, created_at: new Date().toISOString() };
+    setVisits((v) => [optimisticVisit, ...v]);
+
     const { error: err } = await insertVisit(payload);
     setPending(false);
-    if (err) { setError(err.message || "Couldn't save that visit."); return false; }
+    if (err) {
+      setVisits((v) => v.filter((x) => x.id !== optimisticId)); // rollback — never a phantom visit
+      setError(err.message || "Couldn't save that visit.");
+      return false;
+    }
     // First visit at a flagged place clears the flag automatically (B669312, owner: "do not
     // prompt") — it's no longer a want-to-try once he's actually been. Matched by place_id, or
     // by the manual pin's own (name, lat, lon) key for a dropped/manual pin.
@@ -216,7 +235,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
       ? wishlist.find((w) => w.place_id === payload.place_id)
       : wishlist.find((w) => !w.place_id && manualGroupKey(w.custom_name, w.custom_lat, w.custom_lon) === manualGroupKey(payload.custom_name, payload.custom_lat, payload.custom_lon));
     if (clearedWish) await removeWishlist(clearedWish.id);
-    await reloadVisits();
+    await reloadVisits(); // replaces the optimistic row with the real, server-confirmed one — never a duplicate
     await reloadWishlist();
     if (selected.kind === "newPin") setSelected(null); // the pin now exists as a manual pin; close and let it re-render from data
     return true;
