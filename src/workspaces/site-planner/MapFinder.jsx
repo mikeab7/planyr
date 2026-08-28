@@ -58,7 +58,7 @@ import {
   aerialPlacement,
   humanizeError,
 } from "./lib/arcgis.js";
-import { elStyle, elRingFeet, byZ } from "./lib/planStyle.js";
+import { elStyle, elToRingFeet, byZ } from "./lib/planStyle.js";
 import { STATUSES, STATUS_META, statusOf } from "./lib/siteModel.js";
 import { countyAtPoint } from "./lib/jurisdiction.js";
 import { findAttr, situsAddress, siteNameFromParcel } from "./lib/appraisal.js";
@@ -86,6 +86,11 @@ import { listMyTeams, currentIdentity } from "./lib/teams.js";
 import { adminBoundariesVisible, attachAdminBoundaries } from "./lib/adminBoundaryGate.js";
 import { compHeadline } from "../../shared/comps/lib/comps.js";
 import { compMarkerSvg, compMarkerSize } from "../../shared/comps/lib/compMarkerIcon.js";
+// B834580 — the SAME time-sliced-paint primitive B802400 round 5 built for the contour layer
+// (terrainLayers.js). REUSED, not reimplemented: this module owns only the pure "where to split a
+// list of paint ops so no batch exceeds budget" decision; the scheduling policy (a MessageChannel
+// macrotask, see scheduleSaveSitesFrame below) is caller glue, same as terrainLayers.js's own.
+import { runBudgeted, PAINT_FRAME_BUDGET_MS } from "./lib/paintSchedule.js";
 
 // Theme tokens (var(--…)) — MapFinder is DOM/inline-style only, so CSS vars resolve
 // and the panel themes live with no re-render. (B318)
@@ -288,6 +293,27 @@ function sitePinIcon(status, active) {
   });
 }
 
+// NEW-3 (B834578) — HTML-escape: a site NAME is user-entered text going straight into a divIcon's
+// raw `html` string, so it must never be interpolated unescaped (an XSS opening, not just a bug).
+const escHtmlText = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// The site-plan name tag: styled like the planner's own dark acreage-badge chip (SitePlanner.jsx's
+// parcel badge — a `rgba(17,24,39,0.62)` plate, `#e9edf2` text, ~500 weight) rather than a new
+// treatment. `white-space:nowrap` + the `translate(-50%,-50%)` centers it on the marker's lat/lon
+// (the same anchor a status pin already uses) regardless of name length.
+const sitePlanLabelHtml = (name) =>
+  `<div style="display:inline-block;transform:translate(-50%,-50%);background:rgba(17,24,39,0.62);` +
+  `border:1px solid rgba(255,255,255,0.14);border-radius:7px;padding:2px 7px;color:#e9edf2;` +
+  `font:600 11px/1.4 ${NUM_FONT};white-space:nowrap;pointer-events:none;">${escHtmlText(name)}</div>`;
+
+// NEW-5 (B834580) — yield a genuine MACROTASK between budgeted paint slices (not another
+// requestAnimationFrame, which Leaflet's own queued redraw would just fold into the same frame —
+// see terrainLayers.js's identical idiom, which this mirrors rather than reimplements).
+function scheduleSaveSitesFrame(fn) {
+  const ch = new MessageChannel();
+  ch.port1.onmessage = () => { try { fn(); } finally { ch.port1.close(); ch.port2.close(); } };
+  ch.port2.postMessage(0);
+}
+
 // Ray-cast point-in-polygon on a [[lat,lng], ...] ring.
 function pointInPoly(lat, lng, ring) {
   let inside = false;
@@ -435,6 +461,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
      ones over the same ground; the non-owner keys are aliases and must never remove the layer. */
   const displaySrcRef = useRef({});
   const sitesLayerRef = useRef(null); // saved-site footprints
+  // NEW-5 (B834580) — cancellation token for the budgeted saved-site paint below: bumped at the
+  // start of every build() so a still-trickling PREVIOUS build's scheduled continuation becomes a
+  // silent no-op the moment a newer one starts, instead of two builds racing to populate/replace
+  // `sitesLayerRef.current`.
+  const sitesPaintEpochRef = useRef(0);
   const compsLayerRef = useRef(null); // leasing-comp markers (NEW-COMPS)
   const onCompClickRef = useRef(onCompClick);
   useEffect(() => { onCompClickRef.current = onCompClick; }, [onCompClick]);
@@ -1405,13 +1436,41 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   // received the press, so Leaflet emits no `click` and opening the site silently
   // fails; fewer rebuilds = fewer swallowed clicks (B64).
   const showPlans = (zoom ?? 0) >= PLAN_ZOOM;
+  // NEW-2 (B834577) — this map sits the plan directly OVER the aerial (unlike the planner canvas,
+  // which draws on a blank sheet), so a near-opaque element fill blots out the photo underneath.
+  // Matches the fill this file ALREADY uses for a translucent-over-aerial overlay — the parcel
+  // selection preview (0.08) and the marquee hilite (0.14) a few hundred lines below — rather than
+  // the planner's own per-type opacities (untouched; Map route only).
+  const MAP_ELEMENT_FILL_OPACITY_CAP = 0.4;
+  // NEW-4 (B834579) — a flat 1px stroke is proportionally heavier on a small, zoomed-out element
+  // than a large, zoomed-in one: with hundreds of small elements in view at PLAN_ZOOM, the constant
+  // stroke width reads as a mesh of hairlines over the imagery. Linear 0.5px (PLAN_ZOOM) → 1.5px
+  // six zoom levels up, clamped — thinner where elements are small on screen, fuller where they aren't.
+  const elementStrokeWeight = (z) => Math.max(0.5, Math.min(1.5, 0.5 + ((z ?? PLAN_ZOOM) - PLAN_ZOOM) / 6));
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     const build = () => {
     if (!mapRef.current) return; // unmounted while deferred
+    // NEW-5 (B834580) — bump the epoch FIRST so any still-running budgeted continuation from a
+    // previous build (see the bottom of this function) recognizes itself as superseded and stops.
+    const myEpoch = ++sitesPaintEpochRef.current;
     if (sitesLayerRef.current) { map.removeLayer(sitesLayerRef.current); sitesLayerRef.current = null; }
+    // NEW-4 — read once, at build time (this effect deliberately does NOT depend on `zoom` — see
+    // the B64 comment above `showPlans`: a rebuild on every zoom tick is exactly what drops a
+    // press-in-flight's target path). Elements built at PLAN_ZOOM's crossing get the thin end of
+    // the scale; a plan re-panned/re-filtered at a higher zoom (any of this effect's OTHER deps
+    // changing) picks up that zoom's weight for free, same as the boundary/pin styling above it.
+    const strokeW = elementStrokeWeight(map.getZoom());
     const group = L.layerGroup();
+    // NEW-5 — every polygon CONSTRUCT+ADD (the expensive part: Leaflet's `Path.onAdd` projects the
+    // ring synchronously the instant it's added to a layer already on the map) is queued as one op
+    // here instead of run immediately, so `runBudgeted` below can spread hundreds of them — up to
+    // ~156 elements per site, several sites in view at once — across multiple animation frames
+    // instead of one uninterrupted pass. Cheap, non-geometry work (creating a site's own group,
+    // wiring its click/tooltip, a zoomed-out pin) still happens immediately: there's nothing there
+    // for Leaflet to project.
+    const ops = [];
     // B831778 (NEW-3) — gated ONLY on the "Sites" checkbox in Imagery & layers, never on `mode`
     // or which rail tab is open. This is the entire decoupling: browsing Comps must never empty
     // this loop.
@@ -1425,7 +1484,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       // opacity/z-order, it just never vanishes.
       const { lat, lon } = site.origin;
       const active = site.id === activeSiteId;
-      const tip = `${site.site || site.name || "Site"} · ${siteAcres(site).toFixed(1)} AC · ${STATUS_META[status]?.label || status} · click to open`;
+      const name = site.site || site.name || "Site";
+      const tip = `${name} · ${siteAcres(site).toFixed(1)} AC · ${STATUS_META[status]?.label || status} · click to open`;
       const openSiteNow = () => onOpenSiteRef.current && onOpenSiteRef.current(site.id);
       // Right-click anywhere on a site → status picker at the cursor. (Suppress
       // the browser's native menu via the underlying DOM event.)
@@ -1438,31 +1498,52 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         // status stays visible — consistent with the status pin.
         const lineColor = t.color;
         const lineWeight = active ? 3.25 : 2.25;
+        // NEW-1 (B834576) — ONE tooltip/click/contextmenu for the WHOLE site, not one per polygon.
+        // L.FeatureGroup propagates every child layer's mouse events to itself (Leaflet's own
+        // documented mechanism for "bindTooltip/bindPopup binds to all member layers at once"), so
+        // binding here — before any polygon exists — still fires correctly once children are added:
+        // hovering ANY parcel or element polygon opens this one tooltip, without each of up to ~157
+        // polygons per site carrying (and independently opening/closing) its own copy.
+        const siteGroup = L.featureGroup();
+        if (!selectMode) siteGroup.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top", sticky: true });
+        siteGroup.addTo(group); // cheap: siteGroup is still empty here, so this projects nothing
         site.parcels.forEach((p) => {
           if (!p.points?.length) return;
-          const poly = L.polygon(p.points.map((pt) => feetToLatLng(pt, lat, lon)), {
-            color: lineColor, weight: lineWeight, dashArray: t.dashed ? "5 4" : "6 5",
-            fillColor: lineColor, fillOpacity: 0.05, interactive: !selectMode,
-            className: "map-site-feature", // NEW-3 — a stable hook for verifying the decoupling
+          ops.push(() => {
+            L.polygon(p.points.map((pt) => feetToLatLng(pt, lat, lon)), {
+              color: lineColor, weight: lineWeight, dashArray: t.dashed ? "5 4" : "6 5",
+              fillColor: lineColor, fillOpacity: 0.05, interactive: !selectMode,
+              className: "map-site-feature", // NEW-3 — a stable hook for verifying the decoupling
+            }).addTo(siteGroup);
           });
-          if (!selectMode) poly.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top", sticky: true });
-          poly.addTo(group);
         });
         // the plan itself: every element in its real fill/stroke (same resolver
         // as the planner canvas, including per-site default colors + overrides)
         [...(site.els || [])].sort(byZ).forEach((el) => {
-          const ring = elRingFeet(el);
+          // B834581 — `elToRingFeet` (not the bare `elRingFeet`) so a centreline road draws as its
+          // true pavement+curb strip; `elRingFeet` alone has no notion of a road and falls back to
+          // the w/h bounding box its vertices happen to span (see that function's header).
+          const ring = elToRingFeet(el);
           if (!ring || ring.length < 3) return;
-          const st = elStyle(el, site.settings);
-          const poly = L.polygon(ring.map((pt) => feetToLatLng(pt, lat, lon)), {
-            color: st.stroke, weight: 1, fillColor: st.fill,
-            fillOpacity: Math.min(0.92, st.fillOpacity ?? 1),
-            interactive: !selectMode,
-            className: "map-site-feature",
+          ops.push(() => {
+            const st = elStyle(el, site.settings);
+            L.polygon(ring.map((pt) => feetToLatLng(pt, lat, lon)), {
+              color: st.stroke, weight: strokeW, fillColor: st.fill,
+              fillOpacity: Math.min(MAP_ELEMENT_FILL_OPACITY_CAP, st.fillOpacity ?? 1),
+              interactive: !selectMode,
+              className: "map-site-feature",
+            }).addTo(siteGroup);
           });
-          if (!selectMode) poly.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top", sticky: true });
-          poly.addTo(group);
         });
+        // NEW-3 (B834578) — a visible name tag, styled like the planner's own dark acreage-badge
+        // chip (SitePlanner.jsx's parcel badge: a `rgba(17,24,39,0.62)` plate with `#e9edf2` text) —
+        // matching an existing treatment rather than inventing a new one. Non-interactive (a name
+        // tag, not a second click target — the same `interactive:false` pattern this file already
+        // uses for the geolocate dot below) and HTML-escaped: a site name is user-entered text.
+        L.marker([lat, lon], {
+          icon: L.divIcon({ className: "", html: sitePlanLabelHtml(name), iconSize: [0, 0], iconAnchor: [0, 0] }),
+          interactive: false, keyboard: false, zIndexOffset: active ? 1000 : 0,
+        }).addTo(siteGroup);
       } else {
         // zoomed out: a status-aware map pin at the site origin. Z-order by IMPORTANCE
         // (Pursuit on top → Complete at the bottom) so a settled pin never occludes a
@@ -1475,6 +1556,18 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     });
     group.addTo(map);
     sitesLayerRef.current = group;
+    // NEW-5 — drive the queued polygon ops a bounded time-slice at a time (B802400 round 5's
+    // `runBudgeted`), yielding via a genuine MessageChannel macrotask between slices — the same
+    // idiom terrainLayers.js uses and for the same reason: a `requestAnimationFrame` continuation
+    // gets folded into the SAME native frame as Leaflet's own queued canvas/SVG redraw, so it can't
+    // actually hand control back to the browser between slices the way a macrotask does.
+    const runner = runBudgeted(ops, () => performance.now(), PAINT_FRAME_BUDGET_MS);
+    const driveSitesPaint = () => {
+      if (!mapRef.current || myEpoch !== sitesPaintEpochRef.current) return; // unmounted or superseded
+      const step = runner.next();
+      if (!step.done) scheduleSaveSitesFrame(driveSitesPaint);
+    };
+    driveSitesPaint();
     };
     // Defer the rebuild if a press is in flight (B64); otherwise build now.
     if (pressedRef.current) { pendingRebuildRef.current = build; return; }

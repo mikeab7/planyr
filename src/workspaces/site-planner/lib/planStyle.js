@@ -1,6 +1,13 @@
 /* Shared element styling for the planner canvas AND the map overview, so a
  * site plan looks identical wherever it's drawn. */
 
+// B834581 — only for elToRingFeet's road special-case, below. The planner canvas itself never
+// imports this file for road geometry (it has its own `roadStripRing`/`roadDenseCenterline` in
+// SitePlanner.jsx, which this deliberately mirrors rather than replaces — see that function's
+// header) so these two imports create no cycle back into the canvas.
+import { roadCenterline } from "./roadGeometry.js";
+import { bufferPolyline } from "./metesAndBounds.js";
+
 // Architectural presentation palette — warm poché building, soft sage landscape,
 // muted desaturated water, and a DIFFERENTIATED set of surface colours so the
 // paved types never read as one undifferentiated grey (the old failure: paving,
@@ -270,4 +277,31 @@ export const elRingFeet = (el) => {
     x: el.cx + lx * c - ly * s,
     y: el.cy + lx * s + ly * c,
   }));
+};
+
+/* ⛔ B834581 — A CENTRELINE ROAD'S TRUE OUTLINE IS ITS PAVEMENT STRIP, NOT ITS w/h BOUNDING BOX.
+ * `elRingFeet` above has no notion of a road at all: a road stores its shape as `pts` (centreline
+ * vertices) + `travelW` (pavement width), never `points`, so it falls to the w/h/rot branch — and
+ * `w`/`h`/`cx`/`cy` on a road happen to be the BOUNDING BOX its vertices span, not a shape. Measured
+ * against production (257 real road elements, read-only SELECT): a ~40 ft-wide, ~2,000 ft road was
+ * being drawn as an 817x606 ft rectangle on average (worst case 4,974 ft long) — ~15x its true area.
+ * The planner canvas itself never hits this: it has its own `roadStripRing` (SitePlanner.jsx,
+ * `bufferPolyline(roadDenseCenterline(...), travelW + 2*curb)`), which is why roads look right
+ * there and wrong everywhere that resolves an element's outline through this file instead. This
+ * mirrors that exact formula (buffered centreline, curb defaulting to 0 when absent — matching the
+ * KMZ export path this consolidates, B596) rather than SitePlanner's own junction-aware version
+ * (`sharpAt`/`trim`), because every caller here (the map overview, KMZ) draws ONE element in
+ * isolation with no junction graph to hand it — a road with no `pts` (2 of 257 in production, all
+ * legacy straight roads) is untouched, since `elRingFeet`'s w/h/rot box IS its correct outline.
+ * Every OTHER element type is byte-identical to `elRingFeet` — this only ever changes a road. */
+export const elToRingFeet = (el) => {
+  if (el && el.type === "road" && Array.isArray(el.pts) && el.pts.length >= 2) {
+    const dense = roadCenterline(el.pts, el.vtx || [], {});
+    if (dense && dense.length >= 2) {
+      const width = Math.max(1, (+el.travelW || 0) + 2 * (+el.curb || 0));
+      const ring = bufferPolyline(dense, width);
+      if (ring && ring.length >= 3) return ring;
+    }
+  }
+  return elRingFeet(el);
 };
