@@ -52,6 +52,7 @@ import { enterInheritHandler } from "./notesEnterInherit.js";
 import NotePastePlain from "./notesPastePlain.js";
 import NoteBlockKeys from "./notesBlockKeys.js";
 import NoteSearchHighlight from "./notesSearchHighlight.js";
+import NoteTableToText from "./notesTableToText.js";
 
 /** Headings stop at 4. A note is a document, not a spec: levels 5–6 are indistinguishable
  *  from body text at reading size and only add choices to the block-style menu. */
@@ -126,6 +127,12 @@ export const NOTE_EXTENSIONS = [
 
   // Resizable columns — dragging a column edge is the first thing anyone tries.
   TableKit.configure({ table: { resizable: true, allowTableNodeSelection: true } }),
+
+  // "Convert table to text" (NEW-2) — a right-click command that pulls a table's rows out as
+  // plain lines, keeping every cell's marks. See lib/notesTableToText.js for the whole rule,
+  // including why the PASTE half of this ask lives elsewhere (notesPastePlain.js's
+  // isLayoutTable, already shipped).
+  NoteTableToText,
 
   // ⛔ HOW FAR APART THE LINES ARE (NEW-7). A BLOCK property, extending paragraph and heading
   // rather than riding textStyle — half a line cannot be one-and-a-half spaced. The value is
