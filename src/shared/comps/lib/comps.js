@@ -77,7 +77,35 @@ export function annualLeaseRate(comp) {
   return null;
 }
 
+/** Total annual rent for one lease comp — the whole reason a leased-SF figure matters: the
+ * rate alone is $/SF, so without a size there is no dollar total to derive. Null unless BOTH
+ * an annual-normalizable rate AND a positive size are present — never guessed. */
+export function leaseTotalAnnualRent(comp) {
+  const annual = annualLeaseRate(comp);
+  const sf = positiveNumber(comp?.leaseSizeSf);
+  return annual != null && sf ? annual * sf : null;
+}
+
 /* ---- basis normalization for any list / average / sort / comparison view ---------------- */
+
+/** One NNN or one gross group's average — SF-WEIGHTED when every comp being averaged carries a
+ * leaseSizeSf, otherwise a plain mean, explicitly flagged `weighted:false` with a
+ * `sizeMissingCount`. Deliberately all-or-nothing per group: averaging some comps by size and
+ * others not, then reporting one number, is exactly the "silently mixes weighted and
+ * unweighted values" the owner ruled out — so a group with even one comp missing its size
+ * falls back to the unweighted mean for ALL of it, rather than quietly dropping or
+ * part-weighting members. */
+function leaseGroupAverage(entries) {
+  if (!entries.length) return null;
+  const missing = entries.filter((e) => e.sf == null).length;
+  if (missing === 0) {
+    let weightedSum = 0, sizeSum = 0;
+    for (const e of entries) { weightedSum += e.annual * e.sf; sizeSum += e.sf; }
+    return { avg: weightedSum / sizeSum, count: entries.length, weighted: true, sizeMissingCount: 0 };
+  }
+  const sum = entries.reduce((a, e) => a + e.annual, 0);
+  return { avg: sum / entries.length, count: entries.length, weighted: false, sizeMissingCount: missing };
+}
 
 /** Groups LEASE comps by their EXPENSE basis (NNN vs gross) after normalizing period to
  * annual. NNN and gross are never blended into one number — there is no honest conversion
@@ -86,18 +114,20 @@ export function annualLeaseRate(comp) {
  * out, just for the other axis. The default DISPLAY basis is annual NNN: the headline reads
  * the NNN group when any exist, falling back to gross, and always names which one it is
  * showing. A comp missing its rate or basis counts toward `unknownCount`, never toward either
- * average. */
+ * average. Each group's average is SF-weighted per `leaseGroupAverage` above. */
 export function summarizeLeaseComps(comps) {
-  let nnnSum = 0, nnnCount = 0, grossSum = 0, grossCount = 0, unknownCount = 0;
+  const nnnEntries = [], grossEntries = [];
+  let unknownCount = 0;
   for (const c of comps || []) {
     if (c?.compType !== "lease") continue;
     const annual = annualLeaseRate(c);
     const basis = c?.leaseRateExpense;
     if (annual == null || (basis !== "nnn" && basis !== "gross")) { unknownCount++; continue; }
-    if (basis === "nnn") { nnnSum += annual; nnnCount++; } else { grossSum += annual; grossCount++; }
+    const entry = { annual, sf: positiveNumber(c?.leaseSizeSf) };
+    if (basis === "nnn") nnnEntries.push(entry); else grossEntries.push(entry);
   }
-  const nnn = nnnCount ? { avg: nnnSum / nnnCount, count: nnnCount } : null;
-  const gross = grossCount ? { avg: grossSum / grossCount, count: grossCount } : null;
+  const nnn = leaseGroupAverage(nnnEntries);
+  const gross = leaseGroupAverage(grossEntries);
   const headlineBasis = nnn ? "nnn" : gross ? "gross" : null;
   const headline = headlineBasis === "nnn" ? nnn : headlineBasis === "gross" ? gross : null;
   return { headlineBasis, headline, nnn, gross, unknownCount };
@@ -149,6 +179,9 @@ export function compFieldRows(comp) {
       const basis = comp.leaseRateExpense ? ` ${comp.leaseRateExpense.toUpperCase()}` : "";
       push("rate", "Rate", `$${Number(comp.leaseRate).toFixed(2)}/SF${period}${basis}`);
     }
+    if (comp?.leaseSizeSf != null) push("size", "Leased SF", `${Number(comp.leaseSizeSf).toLocaleString()} SF`);
+    const totalRent = leaseTotalAnnualRent(comp);
+    if (totalRent != null) push("totalRent", "Total annual rent", fmtMoney(totalRent));
     if (comp?.leaseTi != null) push("ti", "TI allowance", `${fmtMoney(comp.leaseTi)}/SF`);
     if (comp?.leaseTerm) push("term", "Term", comp.leaseTerm);
   }
@@ -221,6 +254,7 @@ export function rowToComp(r) {
     leaseRateExpense: r.lease_rate_expense || null,
     leaseTi: r.lease_ti != null ? Number(r.lease_ti) : null,
     leaseTerm: r.lease_term || null,
+    leaseSizeSf: r.lease_size_sf != null ? Number(r.lease_size_sf) : null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -252,6 +286,7 @@ export function compToRow(comp) {
     lease_rate_expense: comp.leaseRateExpense ?? null,
     lease_ti: comp.leaseTi ?? null,
     lease_term: comp.leaseTerm ?? null,
+    lease_size_sf: comp.leaseSizeSf ?? null,
     updated_at: new Date().toISOString(),
   };
 }
