@@ -14,6 +14,8 @@ Closed 2026-08-26 on Michael's signed-in Chrome, on a real cloud plan.
 - The **server row genuinely un-deleted**, read back from production `site_elements`: `rev 4`, `op_kind: "edit"`, `deleted_at: null`.
 - **Leg NOT separately performed:** "and it survives a reload." Durable server state was confirmed, which is the mechanism a reload would exercise, but the reload click itself was not done. Accept that reasoning explicitly on the record, or leave that leg open. Do not silently mark the item done without saying which.
 
+> **Drained → `VERIFICATION-DONE.md` by PR #1207 (2026-08-28).** Decision on the noted leg: **accepted** — the server-side row check (rev 4, `deleted_at: null`, read directly from production `site_elements`) is direct proof of durable persistence, which is exactly the state a reload would display; the separate reload click is judged redundant given the stronger check. Marked ✅ PASSED, not left open. See the full reasoning on the archived entry.
+
 ## V326656 — B648353 `Blocker: auth` — PASS
 
 Closed 2026-08-26 on Michael's signed-in Chrome. This is precisely the leg the existing entry could not reach: the headless run was logged-out against local canvas state, and the auth/cloud-sync half was open.
@@ -21,6 +23,8 @@ Closed 2026-08-26 on Michael's signed-in Chrome. This is precisely the leg the e
 - Three real deletions on a signed-in plan; opened the Undo caret; hovered the third row.
 - Footer read **UNDO 3 ACTIONS**; one click restored all three.
 - **Server confirmed:** the parcel row and the el rows came back un-deleted in production.
+
+> **Drained → `VERIFICATION-DONE.md` by PR #1207 (2026-08-28).** Marked ✅ PASSED.
 
 ## V453152 — B802400 round 5 `Blocker: live-GIS` — PASS, with a stated residual
 
@@ -35,6 +39,8 @@ Closed 2026-08-27/28 from Michael's own in-app perf captures — stronger than a
 The multi-second freeze this item was written about is **gone** — a 16× reduction in the worst block, which is the acceptance condition.
 
 **Residual, stated not buried:** still 2.3–6.3× baseline with `slowFraction` 0.5. Jank, not a freeze, and now many small tasks rather than a few enormous ones. PR #1200 was already honest that a few very long seam-joined polylines cannot be sub-divided by op-count chunking. That residual deserves its own item; it does **not** keep V453152 open.
+
+> **Drained → `VERIFICATION-DONE.md` by PR #1207 (2026-08-28).** Marked ✅ PASSED with the residual stated. On "deserves its own item": B802400 round 5's own BACKLOG.md text already names this identical residual and its cause (an atomic, non-subdividable seam-joined polyline) as a flagged follow-up — per **DEDUPE-FIRST**, no new B# is minted for it; it stays visible where the mechanism already lives, revisited only if the owner reports lag again.
 
 ---
 
