@@ -121,6 +121,7 @@ describe("the table matches what the canvas actually paints", () => {
     [8, /\{overlayBands\.above\.map\(/],
     [9, /\{calloutBands\.above\.map\(/],
     [10, /\{measureBands\.above\.map\(/],
+    [11, /\{calloutBands\.forced\.map\(/],
   ];
   it("each rung's render block is present exactly once", () => {
     for (const [rung, re] of MARKERS) {
@@ -133,6 +134,21 @@ describe("the table matches what the canvas actually paints", () => {
     expect(at.every((x) => x.i >= 0)).toBe(true);
     const sorted = [...at].sort((x, y) => x.i - y.i).map((x) => x.rung);
     expect(sorted).toEqual(PAINT_LADDER.map((r) => r.rung));
+  });
+
+  /* B806080 round 2 — rung 11 (the absolute-front-forced callout tier) must be the LAST content
+   * pass before the handle layer — after `parcelLabels` too, which is not itself a MARKER above
+   * (it has no cross-band toggle and is not in FAMILIES), but a callout the owner explicitly
+   * forced to the front must clear it as well: "nothing except transient UI paints over it." */
+  it("the forced-callout tier renders after parcelLabels and before the handle layer", () => {
+    const iParcelLabels = SRC.indexOf("{parcelLabels}");
+    const iForced = SRC.search(/\{calloutBands\.forced\.map\(/);
+    const iHandleLayer = SRC.indexOf('<g data-export="skip" data-handle-layer="1">');
+    expect(iParcelLabels).toBeGreaterThan(-1);
+    expect(iForced).toBeGreaterThan(-1);
+    expect(iHandleLayer).toBeGreaterThan(-1);
+    expect(iForced, "the forced tier must paint after the parcel acreage badge").toBeGreaterThan(iParcelLabels);
+    expect(iForced, "the forced tier must paint before the handle layer").toBeLessThan(iHandleLayer);
   });
 });
 

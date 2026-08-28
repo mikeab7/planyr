@@ -143,7 +143,10 @@ describe("wiring — the two ways back exist and are reachable from the element 
 describe("wiring — NEW-1's cross-band Arrange is what the annotation families actually run", () => {
   it("arrangeSel routes all three annotation families through arrangeAcrossBands", () => {
     const at = SRC.indexOf("const arrangeSel");
-    const body = SRC.slice(at, at + 5200);
+    // B806080 round 2 widened the annotation branch (the absolute-front escape hatch for
+    // callouts) — the window has to grow with it or this test starts reading a truncated slice
+    // rather than actually checking anything past the new code.
+    const body = SRC.slice(at, at + 6000);
     expect(body).toMatch(/s\?\.kind === "markup" \|\| s\?\.kind === "callout" \|\| s\?\.kind === "measure"/);
     expect(body).toContain("arrangeAcrossBands(");
   });
@@ -155,7 +158,10 @@ describe("wiring — NEW-1's cross-band Arrange is what the annotation families 
 
   it("ELEMENTS deliberately keep the band-bounded rule B316864 settled", () => {
     const at = SRC.indexOf("const arrangeSel");
-    const body = SRC.slice(at, at + 5200);
+    // B806080 round 2 widened the annotation branch (the absolute-front escape hatch for
+    // callouts) — the window has to grow with it or this test starts reading a truncated slice
+    // rather than actually checking anything past the new code.
+    const body = SRC.slice(at, at + 6000);
     // The element branch still resolves peers by zOrder band and still uses reorderByZ.
     expect(body).toMatch(/s\?\.kind === "el".*zOrder\(e\) === band/s);
     expect(body).toContain("reorderByZ(peers,");

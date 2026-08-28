@@ -215,7 +215,7 @@ import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcel
 import { geocodeAddress } from "./lib/geocode.js";
 import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, bandForceOf, setPreviewStyleDefaults, setbackLineStyle, setbackChipStyle, SETBACK_LINE } from "./lib/planStyle.js";
 import { byZAsc, nextZ, sortByZ, Z_GAP } from "./lib/zOrder.js";
-import { reorderByZ, arrangeFlags, arrangeAcrossBands, arrangeBandFlags } from "./lib/arrange.js";
+import { reorderByZ, arrangeFlags, arrangeAcrossBands, arrangeBandFlags, calloutAtAbsoluteFront, calloutFrontForceZ } from "./lib/arrange.js";
 import { commonStyleState, selectionRingFeet } from "./lib/multiStyle.js";
 import { bufferPolyline, offsetPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
 // The deed workflow (parser + parcel-alignment solver) is loaded on demand — nothing on the boot
@@ -4919,10 +4919,44 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        Elements deliberately keep the band-bounded behaviour B316864 settled; they fall through to
        the original path below. */
     if (s?.kind === "markup" || s?.kind === "callout" || s?.kind === "measure") {
+      /* ⛔ B806080 round 2 — "Bring to Front" on a callout is handled ENTIRELY here, never inside
+         `arrangeAcrossBands`, because that function can only ever compare a callout against OTHER
+         CALLOUTS (it reasons over one family's own `items`) — it has no way to reach above a markup
+         or a measurement, and rung 10's own "measurement outranks decoration" default (B548819)
+         sits above every within-family z a callout could ever hold. That is exactly why the owner's
+         WETLANDS callout (z=34816, already the highest z of any callout on the plan) still painted
+         under an area measurement at z=0: no amount of z ever crosses a FAMILY, only a band.
+         `frontForce: true` is the explicit, reversible escape hatch — the same shape B316864 gave
+         elements — rendered from its own dedicated pass above every other family
+         (`calloutBands.forced`, PAINT_LADDER rung 11). `calloutAtAbsoluteFront` is the ONLY fact the
+         "already in front" toast may be built from, because it is the one fact that is actually true
+         of the resulting paint order — never the old within-band `atTop`, which was true of the
+         WETLANDS callout the entire time it was still covered. */
+      if (s.kind === "callout" && mode === "front") {
+        const t = callouts.find((c) => c.id === s.id);
+        if (!t) return;
+        if (calloutAtAbsoluteFront(callouts, t.id)) {
+          flashWarn("Already in front of everything on the plan.", 2500);
+          return;
+        }
+        pushHistory();
+        const z = calloutFrontForceZ(callouts, t.id, t.z ?? 0);
+        setCallouts((a) => a.map((c) => (c.id === t.id ? { ...c, frontForce: true, behindEls: undefined, z } : c)));
+        return;
+      }
       const fam = annotationFamily(s);
       if (!fam) return;
+      // A callout asked to move any OTHER way exits the forced-to-absolute-front state first — it
+      // is no longer "in front of everything" the instant it is sent back into the ordinary bands —
+      // folded into the SAME commit as the ordinary move below, never a separate undo step.
+      const unforcing = s.kind === "callout" && callouts.find((c) => c.id === s.id)?.frontForce === true;
       const res = arrangeAcrossBands(fam.items, fam.id, mode);
       if (!res) {
+        if (unforcing) {
+          pushHistory();
+          setCallouts((a) => a.map((c) => (c.id === s.id ? { ...c, frontForce: undefined } : c)));
+          return;
+        }
         // A TRUE end of the whole stack now — not a band edge with something still underneath.
         flashWarn(`Already ${mode === "back" || mode === "backward" ? `behind everything on the plan` : `in front of everything on the plan`}.`, 2500);
         return;
@@ -4945,10 +4979,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           if (!o || o.id == null) return o;
           const crossed = crossZ.has(o.id);
           const nz = crossed ? crossZ.get(o.id) : res.patch[o.id];
-          if (nz == null && !crossed) return o;
+          const clearForce = unforcing && o.id === s.id;
+          if (nz == null && !crossed && !clearForce) return o;
           const next = { ...o };
           if (nz != null) next.z = nz;
           if (crossed) next.behindEls = res.cross.behind ? true : undefined;
+          if (clearForce) next.frontForce = undefined;
           return next;
         });
       });
@@ -20663,9 +20699,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      callout ever saved and only `=== true` sends one down, and byZAsc falls back to (0, id) so an
      un-migrated set keeps a stable order rather than shuffling on load. */
   const calloutBands = useMemo(() => {
-    if (isHidden(hiddenGroups, "callouts")) return { below: [], above: [] };   // NEW-1
+    if (isHidden(hiddenGroups, "callouts")) return { below: [], above: [], forced: [] };   // NEW-1
     const sorted = [...callouts].sort(byZAsc);
-    return { below: sorted.filter((c) => c.behindEls === true), above: sorted.filter((c) => c.behindEls !== true) };
+    // B806080 round 2 — a THIRD tier, `forced`: a callout the user explicitly brought to the
+    // absolute front (`frontForce: true`) renders from its own pass, ABOVE `above` — see
+    // PAINT_LADDER rung 11 (lib/paintOrder.js) and the render call site for why `behindEls` alone
+    // was never enough to get a callout above a markup or a measurement.
+    return {
+      below: sorted.filter((c) => c.behindEls === true && c.frontForce !== true),
+      above: sorted.filter((c) => c.behindEls !== true && c.frontForce !== true),
+      forced: sorted.filter((c) => c.frontForce === true),
+    };
   }, [callouts, hiddenGroups]);
   /* NEW-2 — one callout/text-box node, lifted out of the render body so annotations can be
      drawn in TWO passes like markups and measurements: `calloutBands.below` paints BEFORE the
@@ -22589,6 +22633,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               })()}
 
               {parcelLabels}
+              {/* B806080 round 2 — the ABSOLUTE-FRONT tier: a callout the user explicitly forced to
+                  the front of everything (rung 11, PAINT_LADDER). It is the LAST content pass before
+                  the handle layer, so it clears every other family unconditionally — element
+                  geometry, element/dimension labels, markups (either band), measurements (either
+                  band), and the parcel acreage badge. Only the handle layer's transient selection
+                  chrome may still paint over it. */}
+              {calloutBands.forced.map(renderCalloutNode)}
               {/* NEW-1 — THE HANDLE LAYER. Selection / editing chrome, stripped from exports, and the
                   LAST child of the feet-space transform: in SVG a later sibling both paints over and
                   hit-tests ahead of everything before it, so a handle here is always visible AND always
@@ -26890,9 +26941,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             text, hint, dis: dis || alone, title: dis && !alone ? endWord(mode) : why,
             on: () => { arrangeSel(mode, ref); close(); },
           });
+          // B806080 round 2 — "Bring to Front" on a CALLOUT is answered by the absolute-front
+          // escape hatch, never by `af.atTop` (the top of the callout family alone): `af.atTop`
+          // was true of the owner's WETLANDS callout the entire time it still painted under an
+          // area measurement, which is exactly the toast that was wrong. `calloutAtAbsoluteFront`
+          // is the one fact this row and `arrangeSel`'s own toast are both built from, so they
+          // cannot independently drift about what "already at the front" means.
+          const bringToFrontDis = ref.kind === "callout" ? calloutAtAbsoluteFront(callouts, ref.id) : af.atTop;
           return <>
             {hdr}
-            {r("Bring to Front", "front", af.atTop, `${MOD}⇧]`)}
+            {r("Bring to Front", "front", bringToFrontDis, `${MOD}⇧]`)}
             {r("Bring Forward", "forward", af.atTop, `${MOD}]`)}
             {r("Send Backward", "backward", af.atBottom, `${MOD}[`)}
             {r("Send to Back", "back", af.atBottom, `${MOD}⇧[`)}
