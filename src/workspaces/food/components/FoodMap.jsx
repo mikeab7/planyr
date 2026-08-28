@@ -296,7 +296,6 @@ import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { colorForRating } from "../lib/ratingColor.js";
-import { nextZoomAnimTier } from "../lib/zoomAnimTier.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
 
 // ⛔ B811520 — CARTO STARTED WATERMARKING KEYLESS VOYAGER TILES ("API KEY REQUIRED", stamped
@@ -423,21 +422,6 @@ function boundsOf(map) {
   return { south: b.getSouth(), north: b.getNorth(), west: b.getWest(), east: b.getEast() };
 }
 
-// NEW-2 (2nd owner block) — reads the LIVE, browser-interpolated scale Leaflet's own zoom
-// animation is currently applying to the canvas renderer's <canvas> element (see the effect
-// below for the full mechanism). Reading the real computed transform, rather than reimplementing
-// Leaflet's own cubic-bezier easing curve by hand, means this is always exactly in sync with what
-// is actually on screen. `matrix(a, b, c, d, tx, ty)` — Leaflet's zoom transform is always
-// uniform (a === d), so `a` alone is the scale; `none` (no animation in flight, or a non-3D
-// browser where Leaflet uses setPosition instead of setTransform) reads as 1 — a safe no-op.
-function readContainerScale(el) {
-  const t = getComputedStyle(el).transform;
-  if (!t || t === "none") return 1;
-  const m = t.match(/matrix(?:3d)?\(([^,]+),/);
-  const a = m ? parseFloat(m[1]) : NaN;
-  return Number.isFinite(a) && a > 0 ? a : 1;
-}
-
 // Above MIN_PIN_ZOOM so a search result reliably lands somewhere the reference snapshot
 // already draws — "arrived at this one restaurant" scale, not just "past the threshold."
 const FLY_TO_ZOOM = 16;
@@ -534,14 +518,6 @@ export default function FoodMap({
   const hostRef = useRef(null);
   const mapRef = useRef(null);
   const layerRef = useRef(null);
-  const rendererRef = useRef(null); // the L.canvas() instance backing layerRef — see the mount effect
-  // NEW-2 (2nd owner block) — continuous zoom-scaling state, all scoped to a SINGLE gesture (reset
-  // at every zoomanim start, cleared at zoomend): rafIdRef is the in-flight rAF handle,
-  // trueRadiiRef remembers each touched marker's real (unscaled) radius so it can be restored
-  // exactly, zoomAnimStateRef holds the perf-degrade tier for the current gesture only.
-  const rafIdRef = useRef(null);
-  const trueRadiiRef = useRef(new Map());
-  const zoomAnimStateRef = useRef({ tier: "full", overBudgetStreak: 0, frameParity: 0 });
   const tileLayerRef = useRef(null);
   const labelsLayerRef = useRef(null);
   // B668193 — every currently-drawn pin's {lat, lon, radius, onClick}, rebuilt on every marker
@@ -583,12 +559,7 @@ export default function FoodMap({
       center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM, zoomControl: true, fadeAnimation: false, attributionControl: false,
       trackResize: false,
     });
-    // NEW-2 (2nd owner block, 2026-08-23) — kept as its own named ref (not just buried in the
-    // layerGroup's options) so the continuous-zoom-scaling effect below can read its real
-    // `_container` (the actual <canvas> DOM node) directly, to measure the live CSS transform
-    // Leaflet applies to it during a zoom animation. See that effect's comment for the mechanism.
     const canvasRenderer = L.canvas();
-    rendererRef.current = canvasRenderer;
     layerRef.current = L.layerGroup([], { renderer: canvasRenderer }).addTo(map);
     mapRef.current = map;
 
@@ -693,118 +664,55 @@ export default function FoodMap({
   // viewport-width crossing for no reason (Esri's tile URL never varies by viewport width).
   }, [basemap]);
 
-  // ⛔ NEW-2 (2nd owner block, 2026-08-23) — CONTINUOUS marker scaling DURING a zoom animation,
-  // not just at zoomend. Owner, verbatim: "it seems like everything resizes as I zoom in or
-  // out... once the zoom is complete, when we could just resize stuff as it's going."
-  // MECHANISM, traced into Leaflet's own source (`Map._animateZoom`/`Renderer._updateTransform`
-  // in `leaflet-src.js`), not guessed. An animated zoom (wheel, +/-, double-click, pinch) jumps
-  // the map's INTERNAL model to the FINAL zoom immediately — every circleMarker's screen
-  // POSITION is already correct from frame zero. The VISIBLE transition is a pure CSS trick:
-  // Leaflet sets `transform: translate(...) scale(s)` on the CANVAS RENDERER'S OWN <canvas>
-  // element (not the shared map pane) and lets the browser's native
-  // `.leaflet-zoom-animated{transition: transform 0.25s ...}` (leaflet.css) interpolate `s` from
-  // the start/end ratio down to 1 over ~250ms. Pins are drawn at a CONSTANT pixel radius (never
-  // meant to scale with zoom — see the COLORS/addPin comments above), so for that whole window
-  // the ambient `scale(s)` stretches the already-correctly-drawn bitmap, making every pin visibly
-  // balloon or shrink in lockstep with the tiles — then SNAPS back to true size the instant the
-  // transition ends and Leaflet's own `_reset()` repaints the canvas at scale 1. That snap is the
-  // "pop."
-  // FIX: while `s(t) !== 1` — read directly from the canvas's own live
-  // `getComputedStyle().transform`, the REAL browser-interpolated value, so this never has to
-  // reimplement Leaflet's cubic-bezier easing curve — every marker's drawn radius is set to
-  // `trueRadius / s(t)` each frame (`CircleMarker.setRadius`, which Leaflet itself batches into
-  // ONE actual canvas repaint per frame via its own `_requestRedraw`/rAF coalescing — confirmed
-  // in `leaflet-src.js`), so the NET on-screen size after the ambient scale is applied stays the
-  // TRUE constant radius throughout. POSITIONS are untouched — they're already correct, and the
-  // ambient transform is exactly what smoothly carries them from their old screen position to the
-  // new one, which is genuinely working as intended; only the SIZE needed correcting. Restored to
-  // the true radius the instant the animation ends (`zoomend`, plus the loop's own natural exit),
-  // so nothing is ever left scaled.
-  // PERF BUDGET, measured (`.scratch-repro/verify-zoom-scaling-perf.mjs` this session, worst
-  // case: 2000 markers in the layer group — PLACES_QUERY_CAP, foodStore.js; the owner's own
-  // "roughly 1,000" is in the neighbourhood, the real cap is larger — at a zoom past
-  // MIN_PIN_ZOOM, since below it the reference snapshot draws nothing at all and a naive
-  // measurement from the map's default zoom would silently exercise an EMPTY compensation loop,
-  // which is exactly the mistake a first pass here made and caught via a setRadius call-count
-  // proof before reporting it): median 1.1ms, p95 4.2ms, max 15.8ms, 2/98 sampled frames over the
-  // 8ms budget — comfortably inside budget; the degrade tiers exist as a safety net for a slower
-  // device, not because 2000 markers alone needs one. Two-tier graceful degrade, per gesture only
-  // (a fresh gesture always starts at full fidelity — conditions change, e.g. fewer markers once
-  // zoomed in past MIN_PIN_ZOOM): `ZOOM_ANIM_DEGRADE_STREAK` consecutive over-budget frames at
-  // full fidelity drops to redrawing every OTHER frame; the same streak still over budget at that
-  // tier BAILS entirely (restores true radii immediately and stops touching this gesture) —
-  // falling back to the old transform-then-settle look rather than ever dropping frames. Stress-
-  // tested at 6x CPU throttle (`.scratch-repro/verify-zoom-scaling-degrade.mjs`): individual
-  // frames reached 17-25ms, confirming the pressure is real, but only ~1.75 frames land per
-  // gesture at that throttle (Leaflet's own zoom-animation window is a fixed ~250ms regardless of
-  // device speed) — too few for the 3-frame streak to complete within one gesture. Documented
-  // honestly rather than papered over: on a genuinely slow device a single heavy gesture may not
-  // fully degrade before it ends, but nothing runs away — the next gesture starts fresh, and
-  // `restoreTrueRadii()` always leaves every marker at its correct true radius regardless of which
-  // tier a gesture ended at.
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return undefined;
-
-    const restoreTrueRadii = () => {
-      for (const [marker, r] of trueRadiiRef.current) {
-        if (marker._map) marker.setRadius(r);
-      }
-      trueRadiiRef.current.clear();
-    };
-
-    const step = () => {
-      const renderer = rendererRef.current;
-      const layer = layerRef.current;
-      if (!renderer?._container || !layer || !map._animatingZoom) {
-        restoreTrueRadii();
-        rafIdRef.current = null;
-        return;
-      }
-      const state = zoomAnimStateRef.current;
-      const skipThisFrame = state.tier === "everyOther" && state.frameParity === 1;
-      state.frameParity = state.frameParity === 1 ? 0 : 1;
-
-      if (state.tier !== "bailed" && !skipThisFrame) {
-        const t0 = performance.now();
-        const scale = readContainerScale(renderer._container);
-        if (Math.abs(scale - 1) > 0.001) {
-          layer.eachLayer((m) => {
-            if (typeof m.setRadius !== "function") return;
-            let trueR = trueRadiiRef.current.get(m);
-            if (trueR == null) { trueR = m.getRadius(); trueRadiiRef.current.set(m, trueR); }
-            m.setRadius(trueR / scale);
-          });
-        }
-        const elapsed = performance.now() - t0;
-        const wasBailed = state.tier === "bailed";
-        const next = nextZoomAnimTier(state, elapsed);
-        state.tier = next.tier;
-        state.overBudgetStreak = next.overBudgetStreak;
-        if (next.tier === "bailed" && !wasBailed) restoreTrueRadii();
-      }
-
-      rafIdRef.current = requestAnimationFrame(step);
-    };
-
-    const onZoomAnimStart = () => {
-      zoomAnimStateRef.current = { tier: "full", overBudgetStreak: 0, frameParity: 0 };
-      if (rafIdRef.current == null) rafIdRef.current = requestAnimationFrame(step);
-    };
-    const onZoomEnd = () => {
-      if (rafIdRef.current != null) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
-      restoreTrueRadii();
-    };
-
-    map.on("zoomanim", onZoomAnimStart);
-    map.on("zoomend", onZoomEnd);
-    return () => {
-      map.off("zoomanim", onZoomAnimStart);
-      map.off("zoomend", onZoomEnd);
-      if (rafIdRef.current != null) cancelAnimationFrame(rafIdRef.current);
-      restoreTrueRadii();
-    };
-  }, []);
+  // ⛔ B842528 (2026-08-28) — REVERTED: continuous marker scaling during a zoom animation
+  // (B707841/NEW-2, 2026-08-23) is REMOVED. It drew markers at WRONG geographic positions during
+  // an active zoom, not just the wrong SIZE it was built to fix.
+  //
+  // OWNER REPORT: "when I zoom in or out on mobile or desktop the markers jump oddly" — a pin
+  // rendered well southeast of Austin, toward Houston, with no real place there; his eleven real
+  // Austin-area visits (queried live against production) span 0.033° of latitude and should
+  // collapse to a single dot at a whole-Texas zoom, not scatter. Later clarified: he captured this
+  // MID-PINCH, not at rest.
+  //
+  // ROOT CAUSE, traced into Leaflet's own source, then MEASURED — not stopped at the theory.
+  // `CircleMarker.setRadius()` (what the old per-frame compensation loop called every frame to
+  // counteract the ambient CSS scale) is NOT radius-only: it calls `redraw()` ->
+  // `Canvas.prototype._updatePath()`, which unconditionally calls `layer._project()` — RECOMPUTING
+  // the marker's screen position from the map's CURRENT (already-jumped-to-final) zoom — before
+  // repainting. That reprojected, ALREADY-CORRECT position then gets the renderer's own ambient
+  // CSS transform applied ON TOP of it (Leaflet's `Renderer._onAnimZoom` re-applies that transform
+  // on every 'zoomanim' frame too, computed from the RENDERER's last fully-settled zoom/centre) —
+  // a genuine double transform. Confirmed with real, ground-truth pixel measurement
+  // (`.scratch-repro/verify-marker-position.mjs`, a real headless build, real Leaflet, synthetic
+  // markers at the owner's real Austin cluster plus Dallas/San Antonio test points at different
+  // distances from Houston — his selected place and the map's default centre): drawn marker
+  // position vs `map.latLngToContainerPoint()` for the same lat/lon, sampled DURING real animated
+  // zooms (both the +/- control buttons and a real multi-touch pinch via CDP). Mid-animation
+  // deltas of 100-300px+ while the container's live `getComputedStyle().transform` was non-
+  // identity, and — the distance signature the owner's own hypothesis named — the farther test
+  // point (Dallas) consistently showed a LARGER error than the closer one (San Antonio) at
+  // matching sample times. After the gesture fully settles, the SAME markers measured within
+  // ~1px of correct — so this was a mid-animation-only artifact, not a resting-state one, but a
+  // real one: a tap during that window could open the wrong place's panel.
+  //
+  // THE FIX, per the owner's own explicit instruction ("Michael would rather have a pin that pops
+  // than a pin that lies"): revert to transform-then-settle. Markers are no longer touched at all
+  // during the animation — Leaflet's own ambient CSS transform alone carries them smoothly from
+  // frame to frame (visually correct, since the transform's whole job is to make an unmodified,
+  // still-correctly-positioned bitmap track the new view), and they settle to their true radius
+  // and position in ONE step the instant Leaflet's own `zoomend`/`_reset()` runs — exactly
+  // Leaflet's stock, unmodified CircleMarker behaviour. The "pop" B707841 set out to smooth away
+  // is back; a wrong resting *position* never existed and a wrong *size* mid-animation is a
+  // correctness-neutral cosmetic regression, not a new defect. `lib/zoomAnimTier.js` (the now-
+  // unused perf-degrade state machine) and `readContainerScale` are deleted along with this
+  // effect, rather than left disabled-but-present — dead, unreachable code that already caused
+  // one confirmed correctness bug is not something to leave for a future session to rediscover.
+  //
+  // A "reproject every frame AND neutralise the stale ambient transform on the frames that do"
+  // fix was considered — it would have kept the smooth sizing — but its correctness depends on
+  // getting the interaction with the existing skip-frame/bail perf-degrade tiers exactly right in
+  // every case, which could not be fully verified in the time available; the risk of a new, subtler
+  // position bug outweighed the polish this session, so the plain revert is what shipped.
 
   // Search or list result selected — fly to it, offset so it lands centred in the area the user
   // can actually SEE (see header comment: the detail panel covers roughly the right third).

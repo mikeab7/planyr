@@ -270,6 +270,34 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     await reloadVisits();
   }, [reloadVisits]);
 
+  // NEW (2026-08-28 owner block, verbatim: "I should be able to edit previous visits") — the
+  // SAME optimistic/rollback shape submitVisit above already uses: the edited fields land on the
+  // card/aggregates/pin in the SAME beat as pressing Save (everything downstream is memoized off
+  // this `visits` state), and a failed write reverts to the EXACT pre-edit row rather than leaving
+  // an unsaved value on screen. `updateVisit` (lib/foodStore.js) was already written and imported
+  // here but never wired to anything — a plain PostgREST `.update()`, which fires the
+  // `food_visits_touch_updated_at` trigger (db/food.sql) on every write. That trigger IS this
+  // table's "op-envelope" equivalent: a DB-enforced, client-unspoofable `updated_at` timestamp
+  // that makes an edit attributable/auditable exactly like the site-planner's `operationEnvelope.js`
+  // does for site_elements — just proportionate to a single-owner table with no multi-writer
+  // collision surface to correlate, and reached with zero new schema (this table already had it)
+  // rather than importing site-planner's own envelope module, which BUNDLE ISOLATION forbids
+  // (see this workspace's CLAUDE.md) and which solves a concurrency problem this table doesn't have.
+  const editVisit = useCallback(async (id, fields) => {
+    setPending(true); setError(null);
+    const original = visits.find((v) => v.id === id);
+    setVisits((v) => v.map((x) => (x.id === id ? { ...x, ...fields } : x)));
+    const { error: err } = await updateVisit(id, fields);
+    setPending(false);
+    if (err) {
+      setVisits((v) => v.map((x) => (x.id === id ? original : x))); // rollback to the exact pre-edit row
+      setError(err.message || "Couldn't save that edit.");
+      return false;
+    }
+    await reloadVisits(); // replaces the optimistic row with the server-confirmed one
+    return true;
+  }, [visits, reloadVisits]);
+
   const searchHere = useCallback(async () => {
     if (!bounds) return;
     const { data, error: err } = await searchOverpass(bounds);
@@ -443,6 +471,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
             onClose={closePanel}
             onSubmitVisit={accountActive ? submitVisit : undefined}
             onDeleteVisit={removeVisit}
+            onEditVisit={accountActive ? editVisit : undefined}
             pending={pending}
             error={error || (!accountActive ? "Sign in to log a visit here." : null)}
             manualNameEditable={selected.kind === "newPin"}
