@@ -96,6 +96,47 @@ describe("focusScope — who owns the keyboard", () => {
     expect(focusScope({ tag: "SELECT" })).not.toBe(SCOPE.FIELD);
   });
 
+  /* ⛔ NEW-1 — A CHECKBOX (OR RADIO) IS `<INPUT>` LIKE A REAL TEXT BOX AND WAS SCOPED IDENTICALLY,
+   * WHICH IS WHAT SWALLOWED ESCAPE (a B1125 recurrence). Reproduced live: the Parcels panel's
+   * per-row "Active" checkbox takes focus on an ordinary click; from there `keyScopeVerdict`'s FIELD
+   * branch refused EVERY key unconditionally, `escape` included, leaving a user stuck mid-Split or
+   * mid-Merge with no way out. A checkbox picks a boolean, exactly like a `<select>` picks from a
+   * list — it must not claim the whole keyboard the way a genuine text box does. */
+  it("a checkbox/radio/button-type input is NOT a text field — it falls through to the ordinary latch, like a <button>", () => {
+    for (const type of ["checkbox", "radio", "button", "submit", "reset", "color", "file", "hidden"]) {
+      expect(focusScope({ tag: "INPUT", type, lastTouchedCanvas: false }), type).toBe(SCOPE.CHROME);
+      expect(focusScope({ tag: "INPUT", type, lastTouchedCanvas: true }), type).toBe(SCOPE.CANVAS);
+    }
+  });
+
+  it("…while a genuine text-like input type still owns the keyboard, exactly as before", () => {
+    for (const type of ["text", "number", "email", "search", "tel", "url", "password", "date", undefined]) {
+      expect(focusScope({ tag: "INPUT", type, lastTouchedCanvas: true }), String(type)).toBe(SCOPE.FIELD);
+    }
+  });
+
+  it("the touch latch agrees — clicking a checkbox is a CHROME press, not a typing one", () => {
+    const stub = (tag, type) => ({ nodeType: 1, tagName: tag, type, isContentEditable: false, closest: () => null });
+    expect(touchFactsOf(stub("INPUT", "checkbox"), null).isTextEntry).toBe(false);
+    expect(touchFactsOf(stub("INPUT", "radio"), null).isTextEntry).toBe(false);
+    expect(touchFactsOf(stub("INPUT", "text"), null).isTextEntry).toBe(true);
+  });
+
+  it("a value row whose only control is a checkbox is not a typing row either", () => {
+    const group = (hasText) => ({ tagName: "DIV", querySelector: () => (hasText ? {} : null) });
+    const stub = (tag, g, type) => ({ nodeType: 1, tagName: tag, type, isContentEditable: false,
+      closest: (sel) => (sel === `[${FIELD_GROUP_ATTR}]` ? g : null) });
+    expect(touchFactsOf(stub("INPUT", group(false), "checkbox"), null).inFieldGroup).toBe(false);
+  });
+
+  it("Escape — and every app-scope key — reaches the sweep once the checkbox no longer claims FIELD (B1125)", () => {
+    const scope = focusScope({ tag: "INPUT", type: "checkbox", lastTouchedCanvas: false });
+    expect(scope).toBe(SCOPE.CHROME);
+    for (const id of ["escape", "undo", "redo", "shortcuts"]) {
+      expect(keyScopeVerdict({ entry: KEY_CONTRACT.find((k) => k.id === id), scope }).allow, id).toBe(true);
+    }
+  });
+
   it("no focus at all, nothing touched yet → chrome (refuse rather than guess)", () => {
     expect(focusScope({})).toBe(SCOPE.CHROME);
     expect(scopeOwnsCanvas(focusScope({}))).toBe(false);
@@ -197,10 +238,32 @@ describe("keyScopeVerdict — what each scope may fire", () => {
     expect(keyScopeVerdict({ entry: resolveKeyEntry(ev({ key: "ArrowUp" })), scope: SCOPE.CHROME, fieldEdit: true }).allow).toBe(false);
   });
 
-  it("a focused text field still swallows EVERYTHING — including the app-scope keys", () => {
+  it("a focused text field still swallows EVERYTHING — except the one GUARANTEED key", () => {
     for (const k of KEY_CONTRACT) {
-      expect(keyScopeVerdict({ entry: k, scope: SCOPE.FIELD }).allow, k.id).toBe(false);
+      expect(keyScopeVerdict({ entry: k, scope: SCOPE.FIELD }).allow, k.id).toBe(k.id === "escape");
     }
+  });
+
+  /* ⛔ NEW-1 — B1125's OWN WORDS, MADE LITERAL. The owner: "escape doesnt work on getting out of
+   * this parcel editing tool, and theres no clear way out." Reproduced live: the Parcels panel's
+   * checkbox/text controls latch `TOUCH.FIELD`, and that latch OUTLIVES the control's focus by
+   * design (B1188) — so a later Escape, with focus long since moved elsewhere, still judged
+   * against FIELD and was refused. Escape types no character, so FIELD swallowing it protects
+   * nothing. This is deliberately NARROW: undo/redo/shortcuts are also scope:"app" and are NOT
+   * exempted — a text box's own native Ctrl+Z must still win while it is genuinely focused. */
+  it("⛔ Escape survives FIELD scope — the guaranteed escape hatch, even with the field latch held", () => {
+    const escape = KEY_CONTRACT.find((k) => k.id === "escape");
+    expect(escape.guaranteed).toBe(true);
+    expect(keyScopeVerdict({ entry: escape, scope: SCOPE.FIELD }).allow).toBe(true);
+    expect(keyScopeVerdict({ entry: escape, scope: SCOPE.FIELD, fieldEdit: true }).allow).toBe(true);
+    for (const id of ["undo", "redo", "shortcuts"]) {
+      expect(keyScopeVerdict({ entry: KEY_CONTRACT.find((k) => k.id === id), scope: SCOPE.FIELD }).allow, id).toBe(false);
+    }
+  });
+
+  it("…and a dropdown's OWN Escape-closes-the-popup consumption is untouched — that case self-resolves, it is not 'stuck'", () => {
+    const escape = KEY_CONTRACT.find((k) => k.id === "escape");
+    expect(keyScopeVerdict({ entry: escape, scope: SCOPE.PICKER }).allow).toBe(false);
   });
 
   /* ⛔ NEW-1 — A CONTROL REFUSES ONLY WHAT IT CONSUMES, and B746/V258's undo/redo carve-out is no
