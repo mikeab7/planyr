@@ -760,11 +760,11 @@ describe("VisitPanel — rating slider (not a button row) and a date field that 
     expect(panel).not.toMatch(/new Date\(\)\.toISOString\(\)\.slice\(0,\s*10\)/);
   });
 
-  it("rating is a range-slider control, step 0.5 across 1-10 — never a row of per-value buttons", () => {
+  it("rating is a range-slider control, step 0.25 across 1-10 — never a row of per-value buttons", () => {
     const panel = src("components/VisitPanel.jsx");
     expect(panel).toMatch(/type="range"/);
     expect(panel).toMatch(/min=\{RATING_MIN\}\s*max=\{RATING_MAX\}\s*step=\{RATING_STEP\}/);
-    expect(panel).toMatch(/const RATING_STEP = 0\.5;/);
+    expect(panel).toMatch(/const RATING_STEP = 0\.25;/);
     // The old design this replaces: ten separate <button> elements, one per whole number.
     expect(panel).not.toMatch(/role="radiogroup"/);
     expect(panel).not.toContain("RatingPicker");
@@ -777,10 +777,15 @@ describe("VisitPanel — rating slider (not a button row) and a date field that 
     expect(sliderUsages.length).toBe(2);
   });
 
-  it("the slider's current value is always shown as a number, not only implied by thumb position", () => {
+  it("⛔ NEW (2026-08-27/28 owner block) — the slider's current value shows at NATURAL precision (9, 8.5, 8.25), never padded to a fixed decimal count", () => {
     const panel = src("components/VisitPanel.jsx");
     const slider = panel.slice(panel.indexOf("function RatingSlider"), panel.indexOf("function fieldStyle"));
-    expect(slider).toMatch(/shown\.toFixed\(1\)/);
+    // The old `.toFixed(1)` forced a constant one decimal ("9.0") — dropped entirely, both in the
+    // visible label and in the a11y valuetext. `shown` is used bare so JS's own number-to-string
+    // conversion (which never pads) does the formatting.
+    expect(slider).not.toMatch(/\.toFixed\(/);
+    expect(slider).toMatch(/\$\{shown\} \/ \$\{RATING_MAX\}/);
+    expect(slider).toMatch(/\$\{shown\} out of \$\{RATING_MAX\}/);
   });
 
   it("the rating stays optional — no value is committed until the slider is actually touched, and it can be cleared", () => {
@@ -1420,6 +1425,59 @@ describe("ambiance rating — a second, independent 1-10 rating; the map pin sta
     expect(panel).toMatch(/\{hasRating && <Chip label="Food" value=\{visit\.rating\} \/>\}/);
     expect(panel).toMatch(/\{hasAmbiance && <Chip label="Ambiance" value=\{visit\.rating_ambiance\} \/>\}/);
     expect(panel).toMatch(/\{!hasRating && !hasAmbiance && !hasWouldReturn && <span/); // all-absent fallback, only when NONE present
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════════════════════════
+ * 4e. QUARTER-POINT RATINGS (owner chat block, 2026-08-27/28: "quarter-point ratings, not just
+ *     half points"). The schema widen (numeric(3,1) -> numeric(4,2), NOT the brief's own
+ *     suggested numeric(3,2) — that overflows on a rating of exactly 10, proven live against
+ *     production before writing the migration), the loosened CHECK, the slider's step, and the
+ *     natural-precision display fix in VisitList (the one raw-string display site the schema
+ *     widen would otherwise silently start padding to "9.00").
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("quarter-point ratings — schema widened to numeric(4,2), CHECK loosened to quarters, NOT numeric(3,2)", () => {
+  it("db/food.sql widens rating AND rating_ambiance to numeric(4,2) with a quarters-only CHECK", () => {
+    const sql = src("db/food.sql");
+    expect(sql).toMatch(/alter table public\.food_visits alter column rating type numeric\(4,2\) using rating::numeric\(4,2\);/);
+    expect(sql).toMatch(/alter table public\.food_visits alter column rating_ambiance type numeric\(4,2\) using rating_ambiance::numeric\(4,2\);/);
+    const quartersCheckHits = [...sql.matchAll(/rating \* 4 = round\(rating \* 4\)/g)];
+    expect(quartersCheckHits.length).toBe(1); // the food-rating column's own constraint
+    expect(sql).toMatch(/rating_ambiance \* 4 = round\(rating_ambiance \* 4\)/);
+  });
+
+  it("⛔ NEVER numeric(3,2) in actual DDL — it overflows on a rating of exactly 10 (numeric(3,2)'s max representable value is 9.99), proven live against production before this migration shipped", () => {
+    const sql = src("db/food.sql");
+    // Strip full-line `--` comments before checking — the file deliberately mentions
+    // "numeric(3,2)" in PROSE (including a worked `::numeric(3,2)` example of the exact overflow),
+    // explaining why it was rejected, and that explanatory comment must not trip this guard. Only
+    // an occurrence in REAL DDL (a column type or a cast Postgres would actually execute) counts.
+    const ddlOnly = sql.split("\n").filter((line) => !line.trim().startsWith("--")).join("\n");
+    expect(ddlOnly).not.toMatch(/numeric\(3,2\)/);
+    // The reasoning has to survive in the file, not just in a commit message — the next session
+    // reading this migration should not have to rediscover the overflow the hard way.
+    expect(sql).toMatch(/overflow/i);
+    expect(sql).toContain("numeric(3,2)"); // the cautionary mention itself must stay in the file
+  });
+
+  it("the OLD half-point migration section is untouched (still present, still historically correct) — this is an ADDITIVE later migration, not a rewrite of it", () => {
+    const sql = src("db/food.sql");
+    expect(sql).toMatch(/alter table public\.food_visits alter column rating type numeric\(3,1\)/);
+    expect(sql).toMatch(/rating\s+numeric\(3,1\)\s+check/); // the original inline create, left alone
+  });
+
+  it("VisitPanel's RATING_STEP is 0.25 (37 stops across 1-10), still ONE native range-slider control", () => {
+    const panel = src("components/VisitPanel.jsx");
+    expect(panel).toMatch(/const RATING_STEP = 0\.25;/);
+  });
+
+  it("⛔ VisitList shows ratings at natural precision too — Number(v.rating)/Number(v.rating_ambiance), never the raw numeric(4,2) string (which would otherwise read '9.00' post-widen)", () => {
+    const list = src("components/VisitList.jsx");
+    expect(list).toMatch(/\{Number\(v\.rating\)\}\/10/);
+    expect(list).toMatch(/\{Number\(v\.rating_ambiance\)\}\/10/);
+    // The raw un-coerced form must not remain anywhere in these two display sites.
+    expect(list).not.toMatch(/\{v\.rating\}\/10/);
+    expect(list).not.toMatch(/\{v\.rating_ambiance\}\/10/);
   });
 });
 
