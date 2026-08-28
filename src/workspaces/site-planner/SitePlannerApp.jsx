@@ -8,9 +8,10 @@ import { onAuthChange } from "./lib/auth.js";
 import { claimInvites, listMyTeams } from "./lib/teams.js";
 import { primeShareContext, defaultShareTeam, resetShareContext, resolveNewPlanTeam } from "./lib/newProjectSharing.js";
 import { loadUserPrefs } from "./lib/userPrefs.js";
-// LOADED ON DEMAND, same reasoning as SiteReviewModal below: opens from a map-only button press,
-// so it has no business riding the planner's critical-path chunk.
-const CompsPanel = lazy(() => import("../../shared/comps/components/CompsPanel.jsx"));
+// B831777 (NEW-2) — CompsPanel is now rendered BY MapFinder itself, as the Comps tab in the
+// map's left rail (it used to be a floating panel this component rendered as a MapFinder
+// sibling). MapFinder owns the lazy import now; this component only owns the DATA the tab needs
+// (comps / pendingCompAnchor / focusCompId) since that data has to survive the tab unmounting.
 
 /* B326416 — the loaders the default-sharing resolution needs. Both modules are already on the
  * Site route's own tier (`SitePlanner.jsx` imports userPrefs statically), so these are plain
@@ -413,12 +414,14 @@ export default function App({
   // lives here rather than inside a site record. `comps` mirrors what CompsPanel has loaded, fed
   // back up purely so MapFinder can render the same list as markers — CompsPanel remains the one
   // data owner (fetch/insert/update/delete all live in its own module).
+  // B831777 (NEW-2) — no more `compsPanelOpen`: the Comps tab now lives inside MapFinder's own
+  // rail, and MapFinder decides for itself (from `pendingCompAnchor`/`focusCompId` arriving)
+  // whether to switch its Site/Comp mode to show the result. This component only owns the data.
   const [comps, setComps] = useState([]);
-  const [compsPanelOpen, setCompsPanelOpen] = useState(false);
   const [pendingCompAnchor, setPendingCompAnchor] = useState(null);
   const [focusCompId, setFocusCompId] = useState(null);
-  const onPlaceComp = (anchor) => { setPendingCompAnchor(anchor); setCompsPanelOpen(true); };
-  const onCompClick = (id) => { setFocusCompId(id); setCompsPanelOpen(true); };
+  const onPlaceComp = (anchor) => setPendingCompAnchor(anchor);
+  const onCompClick = (id) => setFocusCompId(id);
 
   // Open a whole project (site group) from the header breadcrumb switcher (B191):
   // resume its active plan if one's open, else its newest. Switching plans changes
@@ -781,26 +784,15 @@ export default function App({
             comps={comps}
             onPlaceComp={onPlaceComp}
             onCompClick={onCompClick}
-            // NEW-MAPCTRL-1 — the Comps toggle button used to be a sibling here, absolutely
-            // positioned at the SAME top-right corner the Layers panel already owns, which is
-            // what buried "Imagery & layers" under it. MapFinder now renders the toggle itself
-            // (see mapChromeStack.js's COMPS_TOGGLE_CLEARANCE_PX) so it can stack correctly
-            // against the Layers panel it shares a corner with, at every breakpoint.
-            compsPanelOpen={compsPanelOpen}
-            onOpenComps={() => setCompsPanelOpen(true)}
+            // B831777 (NEW-2) — the Comps tab now lives inside MapFinder's own left rail
+            // (beside Sites), not a separate floating panel this component renders. MapFinder
+            // owns the lazy CompsPanel import; this just hands down the data it needs.
+            pendingCompAnchor={pendingCompAnchor}
+            onCompAnchorConsumed={() => setPendingCompAnchor(null)}
+            focusCompId={focusCompId}
+            onCompFocusHandled={() => setFocusCompId(null)}
+            onCompsChange={setComps}
           />
-          <Suspense fallback={null}>
-            <CompsPanel
-              open={compsPanelOpen}
-              onClose={() => setCompsPanelOpen(false)}
-              pendingAnchor={pendingCompAnchor}
-              onAnchorConsumed={() => setPendingCompAnchor(null)}
-              focusCompId={focusCompId}
-              onFocusHandled={() => setFocusCompId(null)}
-              projects={siteGroups}
-              onCompsChange={setComps}
-            />
-          </Suspense>
         </div>
       </div>
       {/* Plan mode — SitePlanner renders its own AppHeader (same inert/aria-hidden rule). */}
