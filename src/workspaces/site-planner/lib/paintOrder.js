@@ -23,6 +23,17 @@
  *   2. A PARCEL DEFAULTS TO BEHIND. It is the ground the plan is drawn on, so everything except a
  *      reference the user has not promoted paints over it.
  *
+ * ⛔ RUNG 11 — B806080 ROUND 2, after the owner corrected his own brief: "Bring to front on a
+ * callout must actually place it above everything else drawn on the plan" — no either/or, no
+ * "the command tells the user what band it operates in." Measured on his live plan: a WETLANDS
+ * callout at z=34816 (already the highest z of any callout) still painted UNDER an area
+ * measurement at z=0, because rung 10's own default ("a measurement outranks decoration") is
+ * exactly the wall the old default-relationship ladder was never meant to let a single explicit
+ * command cross. `calloutFrontForceZ`/`calloutAtAbsoluteFront` (lib/arrange.js) are the ONLY
+ * mechanism that writes/reads it. It does not change `defaultRelation` for anything — every
+ * pairing above is still about UNTOUCHED objects — it adds ONE more rung an explicitly-forced
+ * callout can reach, same shape as rung 6's element `bandForce` (B316864).
+ *
  * Pure data + pure predicates. No React, no DOM.
  */
 
@@ -63,6 +74,7 @@ export const PAINT_LADDER = [
   { rung: 8, family: "reference", band: "above",  isDefault: false, note: null },
   { rung: 9, family: "callout",   band: "above",  isDefault: true,  note: null },
   { rung: 10, family: "measure",  band: "above",  isDefault: true,  note: "OWNER DEFAULT: a measurement outranks decoration" },
+  { rung: 11, family: "callout",  band: "forced", isDefault: false, note: "the explicit, reversible absolute-front escape hatch (B806080 round 2) — literally above every other family" },
 ];
 
 /** The five drawn families, in no particular order. */

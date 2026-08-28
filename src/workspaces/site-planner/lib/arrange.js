@@ -138,6 +138,45 @@ export function arrangeBandFlags(items, id) {
   };
 }
 
+/* ⛔ B806080 round 2 — A CALLOUT'S "Bring to Front" MUST REACH THE ABSOLUTE TOP OF THE WHOLE PLAN,
+ * NOT JUST THE TOP OF ITS OWN FAMILY'S BAND. `arrangeAcrossBands` above reorders a callout only
+ * against OTHER CALLOUTS — it has no way to know about markups or measurements, which live in
+ * separate collections and separate render passes, and B548819's own "measurement outranks
+ * decoration" default means no z value a callout holds can ever outrank a measurement's render
+ * pass. That is exactly why the owner's WETLANDS callout (z=34816, already the highest of any
+ * callout on the plan) stayed washed out under an area measurement (z=0): z was never the
+ * mechanism between FAMILIES, paint order banded by KIND was, and "Bring to Front" only ever
+ * touched the former.
+ *
+ * So a callout carries a THIRD state beyond `behindEls` true/false: `frontForce: true`, the same
+ * explicit, reversible escape-hatch shape B316864 gave elements, rendered from its own dedicated
+ * pass ABOVE every other family (SitePlanner.jsx's `calloutBands.forced`, PAINT_LADDER rung 11).
+ * These two pure functions are the ONLY place that state is read or computed, so the "Bring to
+ * Front" action and the menu row's disabled state (and its toast) can never independently drift
+ * about what "already at the front" means — which is the exact defect being corrected: the old
+ * toast was built from the within-band `atTop`, true of the WETLANDS callout the entire time it
+ * was still covered. */
+
+/** Is `id` genuinely at the absolute front of the plan — forced, AND at the top of the forced
+ *  peers among each other? The only fact "Already in front of everything" may be built from. */
+export function calloutAtAbsoluteFront(callouts, id) {
+  const list = (Array.isArray(callouts) ? callouts : []).filter((c) => c && c.id != null);
+  const t = list.find((c) => c.id === id);
+  if (!t || t.frontForce !== true) return false;
+  const forced = list.filter((c) => c.frontForce === true);
+  return zNum(t) >= Math.max(...forced.map(zNum));
+}
+
+/** The z `id` needs to land ABOVE every other forced callout (so "Bring to Front" stays meaningful
+ *  even with several forced callouts on one plan). Returns `currentZ` unchanged when there is no
+ *  other forced peer to clear. */
+export function calloutFrontForceZ(callouts, id, currentZ) {
+  const list = (Array.isArray(callouts) ? callouts : []).filter((c) => c && c.id != null && c.id !== id);
+  const forced = list.filter((c) => c.frontForce === true);
+  if (!forced.length) return currentZ;
+  return zNum(sortByZ(forced)[forced.length - 1]) + Z_GAP;
+}
+
 const zNum = (p) => (typeof p?.z === "number" && Number.isFinite(p.z) ? p.z : 0);
 
 // Where `id` sits within `peers` by z order, and whether an op is a no-op. Mirrors the Review
