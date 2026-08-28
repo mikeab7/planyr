@@ -58,6 +58,7 @@ import { createMultiTabPresence } from "../presence/multiTab.js";
 import BrandMark from "../brand/BrandMark.jsx";
 import { prefetchModule } from "../../app/modulePrefetch.js";
 import { MODULE_ACCENT } from "./moduleAccent.js";
+import { MODULE_TAB_LABEL } from "./moduleTabLabel.js";
 import { useTheme } from "../theme/ThemeProvider.jsx";
 import InterfaceSettings from "./InterfaceSettings.jsx";
 import { centerSlotPlan, CENTER_SLOT_GAP } from "./headerCenterFit.js";
@@ -186,11 +187,12 @@ function SettingsMenu() {
 // `import { MODULE_ACCENT } from "./AppHeader.jsx"` consumers keep working.
 export { MODULE_ACCENT };
 
-// Module tab definitions — label + inline SVG icon path group
-const MODULES = [
+// Module tab definitions — icon path group; label comes from the shared MODULE_TAB_LABEL
+// (moduleTabLabel.js) so this list and the browser tab title (app/pageTitle.js) read the
+// same name and can never drift apart.
+const MODULE_ICONS = [
   {
     id: "site-planner",
-    label: "Site",
     // simplified ti-map-2 outline (16×16 viewBox)
     icon: (
       <>
@@ -202,7 +204,6 @@ const MODULES = [
   },
   {
     id: "scheduler",
-    label: "Schedule",
     // simplified ti-calendar outline
     icon: (
       <>
@@ -215,7 +216,6 @@ const MODULES = [
   },
   {
     id: "doc-review",
-    label: "Review",
     // simplified ti-pencil outline
     icon: (
       <>
@@ -226,7 +226,6 @@ const MODULES = [
   },
   {
     id: "library",
-    label: "Library",
     // simplified ti-folders / stacked-files outline (16×16 viewBox)
     icon: (
       <>
@@ -237,7 +236,6 @@ const MODULES = [
   },
   {
     id: "notes",
-    label: "Notes",
     // simplified ti-notebook outline (16×16 viewBox) — a bound book with ruled lines
     icon: (
       <>
@@ -251,6 +249,7 @@ const MODULES = [
     ),
   },
 ];
+const MODULES = MODULE_ICONS.map((m) => ({ ...m, label: MODULE_TAB_LABEL[m.id] }));
 // ⛔ NO "food" ENTRY HERE, DELIBERATELY (NEW-2, owner correction to B568400). /food is an
 // UNLISTED route — reachable only by typing the URL — not a workspace tab. Do not re-add it:
 // the guard test in test/foodModule.test.js fails the build if this array ever names it again.
