@@ -161,7 +161,11 @@ export default function VisitList({ visits, query, onSelect, selectedKey }) {
                           display: "inline-block", borderRadius: 5, padding: "1px 6px", fontWeight: 700,
                           background: colorForRating(v.rating), color: textColorForRating(v.rating),
                         }}>
-                          {v.rating}/10
+                          {/* Number(): rating is a Postgres numeric(4,2) column, so PostgREST's raw
+                           * string is always 2-decimal-padded ("9.00", "8.50") — the numeric cast
+                           * strips that padding back to natural precision ("9", "8.5"), same as
+                           * VisitPanel.jsx's Chip does for this exact reason. */}
+                          {Number(v.rating)}/10
                         </span>
                       ) : (
                         <span style={{ color: "var(--text-tertiary)" }}>—</span>
@@ -173,7 +177,7 @@ export default function VisitList({ visits, query, onSelect, selectedKey }) {
                           display: "inline-block", borderRadius: 5, padding: "1px 6px", fontWeight: 700,
                           background: colorForRating(v.rating_ambiance), color: textColorForRating(v.rating_ambiance),
                         }}>
-                          {v.rating_ambiance}/10
+                          {Number(v.rating_ambiance)}/10
                         </span>
                       ) : (
                         <span style={{ color: "var(--text-tertiary)" }}>—</span>

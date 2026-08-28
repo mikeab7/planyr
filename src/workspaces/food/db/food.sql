@@ -495,6 +495,39 @@ create policy "Users delete own food_dish_wishlist" on public.food_dish_wishlist
   for delete to authenticated using ((select auth.uid()) = user_id);
 -- No anon policy at all -> a signed-out request sees zero rows, exactly like food_visits/food_wishlist.
 
+-- ── food_visits.rating / rating_ambiance: QUARTER-POINT steps (owner chat block, 2026-08-27/28:
+-- "quarter-point ratings, not just half points"). Widens both columns from numeric(3,1) (one
+-- decimal, half-point-capable, added by the "rating scale, HALF-POINT steps" section above) to
+-- numeric(4,2) (two decimals, quarter-point-capable), and loosens the halves-only CHECK to a
+-- quarters-only one.
+--
+-- ⛔ NOT numeric(3,2), despite that being the brief's own suggested type — it is a genuine
+-- overflow bug, not a style choice. numeric(precision, scale): precision is the TOTAL count of
+-- significant digits, scale is how many of those sit after the decimal point. numeric(3,2) has
+-- only 1 digit of room before the decimal point, i.e. a max representable value of 9.99 — a
+-- rating of exactly 10 would raise "numeric field overflow" on insert, not silently truncate.
+-- Confirmed LIVE against this exact production database before writing this migration:
+-- `select '10.00'::numeric(3,2)` raises 22003 numeric field overflow, and production already
+-- held a real rating of exactly 10 (row 9830a4b5-d9b6-4305-a238-c8b93cbb1b00) that would have
+-- failed to migrate under numeric(3,2). numeric(4,2) allows 2 digits before the decimal point
+-- (up to 99.99), comfortably covering the 1-10 scale at quarter-point resolution.
+--
+-- Verified non-destructive on production before shipping: a scale-independent checksum
+-- (md5 over every row's id + trim_scale(rating) + trim_scale(rating_ambiance), so it isn't
+-- fooled by the display-padding difference between numeric(3,1) and numeric(4,2)) over all 174
+-- existing rows matched EXACTLY before and after this ALTER — nobody's recorded rating moved.
+-- Idempotent: safe to re-run (a column already at numeric(4,2) is a no-op `alter...type`; the
+-- constraint drop-then-add always recreates the identical definition).
+alter table public.food_visits alter column rating type numeric(4,2) using rating::numeric(4,2);
+alter table public.food_visits drop constraint if exists food_visits_rating_check;
+alter table public.food_visits add constraint food_visits_rating_check
+  check (rating is null or (rating between 1 and 10 and rating * 4 = round(rating * 4)));
+
+alter table public.food_visits alter column rating_ambiance type numeric(4,2) using rating_ambiance::numeric(4,2);
+alter table public.food_visits drop constraint if exists food_visits_rating_ambiance_check;
+alter table public.food_visits add constraint food_visits_rating_ambiance_check
+  check (rating_ambiance is null or (rating_ambiance between 1 and 10 and rating_ambiance * 4 = round(rating_ambiance * 4)));
+
 -- 3) Verify (read-only; safe to run any time) ---------------------------------
 --   select relrowsecurity from pg_class where oid = 'public.food_visits'::regclass;   -- expect true
 --   select polname from pg_policy where polrelid = 'public.food_visits'::regclass;    -- 4 owner-only rows, no anon
@@ -504,3 +537,5 @@ create policy "Users delete own food_dish_wishlist" on public.food_dish_wishlist
 --   select polname from pg_policy where polrelid = 'public.food_wishlist'::regclass;  -- 3 owner-only rows (select/insert/delete), no anon
 --   select relrowsecurity from pg_class where oid = 'public.food_dish_wishlist'::regclass; -- expect true
 --   select polname from pg_policy where polrelid = 'public.food_dish_wishlist'::regclass;  -- 4 owner-only rows (select/insert/update/delete), no anon
+--   select numeric_precision, numeric_scale from information_schema.columns
+--     where table_name = 'food_visits' and column_name = 'rating';                    -- expect 4, 2

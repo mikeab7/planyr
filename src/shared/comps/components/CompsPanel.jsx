@@ -1,7 +1,15 @@
-/* CompsPanel — Leasing Comps: a right-side panel (never a dialog — window.prompt/confirm are
- * banned app-wide), self-contained data owner for the comps list (mirrors pinStore.js's
- * "fetch on mount + refetch on tab focus" shape rather than cloudSync's heavier CAS machinery —
- * comps don't have Site Planner's multi-tab autosave race).
+/* CompsPanel — Leasing Comps: EMBEDDED content for the map's left rail (never a dialog —
+ * window.prompt/confirm are banned app-wide), self-contained data owner for the comps list
+ * (mirrors pinStore.js's "fetch on mount + refetch on tab focus" shape rather than cloudSync's
+ * heavier CAS machinery — comps don't have Site Planner's multi-tab autosave race).
+ *
+ * B831777 (NEW-2) — this used to be its own floating right-side panel with an "open/close" pair;
+ * it is now the Comps TAB's content inside MapFinder's left rail, one tab beside Your sites
+ * (never stacked — see BACKLOG.md). Two props carry that: `open` gates DATA (fetch as soon as the
+ * map route is visible, regardless of which tab is showing, so a comp anchored earlier still
+ * renders as a map pin the moment you land here — B831778/NEW-3's decoupling requirement) and
+ * `active` gates DISPLAY (only the currently-selected tab's content is shown). There is no
+ * `onClose` any more — switching to the Sites tab IS the close.
  *
  * Two views: 'list' (every comp the viewer can see, with the basis-normalized summary) and
  * 'form' (create — pre-filled from a just-picked map anchor — or edit an owned comp).
@@ -9,7 +17,7 @@
  * MODULE-SCOPE-COMPONENTS: every component here is defined at module scope.
  */
 import { useEffect, useRef, useState } from "react";
-import { Button, Field, IconButton } from "../../ui/controls.jsx";
+import { Button, Field } from "../../ui/controls.jsx";
 import {
   COMP_TYPES, LEASE_PERIODS, LEASE_EXPENSE_BASES, isCompType,
   landPricePerSf, buildingPricePerSf, leaseTotalAnnualRent, compFieldRows, compHeadline,
@@ -238,7 +246,11 @@ function CompForm({ draft, setDraft, teams, projects, errors, onSave, onCancel, 
 }
 
 /** props:
- *  - open, onClose
+ *  - open — fetch/keep-fresh gate. Pass the map route's own `visible`, NOT whether the Comps tab
+ *    is selected: a comp anchored while browsing Sites must still be a map pin (NEW-3).
+ *  - active — DISPLAY gate: is the Comps tab the one currently showing in the rail. Content stays
+ *    mounted (not torn down) while inactive so its scroll position / in-progress form survive a
+ *    tab flip; only `display` toggles.
  *  - pendingAnchor {kind,lat,lon,county,parcelApn,parcelGeom} | null, onAnchorConsumed()
  *  - focusCompId, onFocusHandled()
  *  - projects [{id,site|name}] — the host's already-loaded site list, for the optional
@@ -250,7 +262,7 @@ function CompForm({ draft, setDraft, teams, projects, errors, onSave, onCancel, 
  * otherwise held by SitePlannerApp today.
  */
 export default function CompsPanel({
-  open, onClose, pendingAnchor, onAnchorConsumed, focusCompId, onFocusHandled,
+  open, active = true, pendingAnchor, onAnchorConsumed, focusCompId, onFocusHandled,
   projects, onCompsChange,
 }) {
   const [comps, setComps] = useState([]);
@@ -340,17 +352,7 @@ export default function CompsPanel({
   };
 
   return (
-    <div style={{
-      position: "absolute", top: 12, right: 12, bottom: 12, width: 300, zIndex: 1200,
-      background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: 12,
-      boxShadow: "0 16px 44px rgba(0,0,0,0.22), 0 3px 10px rgba(0,0,0,0.1)",
-      display: "flex", flexDirection: "column", overflow: "hidden",
-    }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: "1px solid var(--border-default)" }}>
-        <span style={{ fontSize: 13, fontWeight: 700 }}>Leasing Comps</span>
-        <IconButton size={26} onClick={onClose}>&times;</IconButton>
-      </div>
-
+    <div style={{ display: active ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden" }}>
       <div style={{ flex: 1, overflowY: "auto" }}>
         {loading && <div style={{ padding: 14, fontSize: 12, color: "var(--text-secondary)" }}>Loading…</div>}
         {loadError && <div style={{ padding: 14, fontSize: 12, color: "var(--danger-text)" }}>{loadError}</div>}
@@ -358,7 +360,7 @@ export default function CompsPanel({
         {!loading && !loadError && view === "list" && (
           <>
             <SummaryStrip comps={comps} />
-            {comps.length === 0 && <div style={{ padding: 14, fontSize: 12, color: "var(--text-secondary)" }}>No comps yet. Use “+ Comp” on the map to add one.</div>}
+            {comps.length === 0 && <div style={{ padding: 14, fontSize: 12, color: "var(--text-secondary)" }}>No comps yet. Use “Drop a pin” or “Comp from parcel” on the map to add one.</div>}
             {comps.map((c) => <CompRow key={c.id} comp={c} onOpen={openDetail} />)}
           </>
         )}

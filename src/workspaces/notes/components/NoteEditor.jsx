@@ -840,7 +840,7 @@ export function placeMenu({ x, y, w, h, viewW, viewH, margin = MENU_MARGIN }) {
   return { left: Math.round(left), top: Math.round(top), flipped: !fitsBelow && fitsAbove };
 }
 
-function DocMenu({ at, editor, onPlainPaste, onClose, onDeleteBox, onClipboardNote }) {
+function DocMenu({ at, editor, onPlainPaste, onClose, onDeleteBox, onClipboardNote, onConvertTable }) {
   const ref = useRef(null);
   const [box, setBox] = useState(null);
   /* ⛔ GATED ON `at`. Registered unconditionally, this effect put a CAPTURE-phase Escape
@@ -908,6 +908,10 @@ function DocMenu({ at, editor, onPlainPaste, onClose, onDeleteBox, onClipboardNo
       run: () => (editor.isActive("link")
         ? editor.chain().focus().unsetLink().run()
         : editor.chain().focus().extendMarkRange("link").run()) },
+    /* NEW-2 — pulls a table's rows out as plain lines (a sibling list item apiece, when the
+       table is the only thing in its list item). Its own row, not lumped with `link`, because
+       it restructures the document rather than formatting a selection. */
+    ...(onConvertTable ? [SEP, { id: "convert-table-text", label: "Convert table to text", run: onConvertTable }] : []),
     ...(onDeleteBox ? [SEP, { id: "delete-box", label: "Delete this box", accel: "Del", danger: true, run: onDeleteBox }] : []),
   ];
 
@@ -1150,6 +1154,10 @@ export default function NoteEditor({
         });
       },
       selection: () => (editor.isDestroyed ? null : { from: editor.state.selection.from, to: editor.state.selection.to, empty: editor.state.selection.empty }),
+      /** Run a named editor command through the ordinary command system (so it obeys every
+       *  schema rule a click would) — for a harness that needs to state "run X" precisely
+       *  rather than reconstruct the exact click/keypress that reaches it. */
+      runCommand: (name, ...args) => (editor.isDestroyed ? false : !!editor.commands[name]?.(...args)),
     };
     window.__noteEditor = hook;
     return () => { if (window.__noteEditor === hook) window.__noteEditor = null; };
@@ -1823,8 +1831,57 @@ export default function NoteEditor({
    * can recover the live scale by measuring rather than by being told. */
   const [zoom, setZoom] = useState(() => normalizeZoom(readNotesZoom()));
   const scrollerRef = useRef(null);
+  const noteRootRef = useRef(null);
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
+
+  /* ⛔ VIEWPORT-STABLE — THE TABLE TOOLBAR GROUP MUST NOT JUMP THE SHEET UNDER THE POINTER
+   * (NEW-1 / B649376, owner report: *"when I click and highlight stuff, it just jumps and
+   * flashes"* on a table pasted from Outlook). Measured, real mouse: the toolbar is a SIBLING
+   * of the mat in the same flex column, and `NoteToolbar`'s Table button group only renders
+   * `{inTable && (...)}` — so the instant the caret enters a table the bar wraps to an extra
+   * row (39px → 75px here). Because the mat is `flex: 1` in that same column, its own top edge
+   * — and every pixel painted inside it, table included — slides down by exactly that delta.
+   * A drag that starts inside the table has its target crawl out from under a STATIONARY
+   * pointer on the very first frame: instrumented before this fix, the native selection never
+   * extended across cells at all — it stayed collapsed and hopped between wrong text nodes
+   * (some outside the table entirely) on every mousemove, because each move's screen
+   * coordinates now resolved against content that had silently slid 36px since mousedown.
+   * Leaving the table reverts the bar and the sheet snaps back, which is the "flash".
+   *
+   * ⛔ THE FIRST ATTEMPT COMPENSATED `scrollTop`, THE WAY THE ZOOM STEP BELOW DOES, AND IT WAS
+   * WRONG FOR THIS CASE. Zoom changes the CONTENT's height, so there is always slack to scroll
+   * into. This shift changes the MAT's own box height (it shrinks by the same delta the
+   * toolbar grew), not the content's — so on a short note, exactly Michael's Silvestri
+   * "Utility" page, `scrollHeight - clientHeight` was already 0 and stayed 0, and adding to
+   * `scrollTop` was clamped straight back to zero. Measured: the table still moved by the full
+   * 36px with that fix in place. A CSS transform has no such floor, so this folds the delta
+   * into the mat's own `transform` instead — literally "the view transform" the rule names —
+   * which cancels the container's own shift regardless of how much content it holds. */
+  const toolbarShiftRef = useRef(0);
+  useEffect(() => {
+    /* ⛔ `editor` IS A DEP, NOT `[]` — Tiptap's `useEditor` returns null on the first render
+     * (immediatelyRender: false is the default, to stay SSR-safe) and the toolbar renders
+     * nothing until it is truthy. An empty dep array would run this once, find no toolbar yet,
+     * bail, and never observe anything for the note's whole lifetime. */
+    const root = noteRootRef.current;
+    const scroller = scrollerRef.current;
+    if (!root || !scroller || typeof ResizeObserver === "undefined") return undefined;
+    const toolbarEl = root.querySelector('[data-testid="note-toolbar"]');
+    if (!toolbarEl) return undefined;
+    let prevHeight = toolbarEl.getBoundingClientRect().height;
+    const ro = new ResizeObserver(() => {
+      const nextHeight = toolbarEl.getBoundingClientRect().height;
+      const delta = nextHeight - prevHeight;
+      prevHeight = nextHeight;
+      if (!delta) return;
+      toolbarShiftRef.current += delta;
+      scroller.style.transform = toolbarShiftRef.current
+        ? `translateY(${-toolbarShiftRef.current}px)` : "";
+    });
+    ro.observe(toolbarEl);
+    return () => { ro.disconnect(); scroller.style.transform = ""; toolbarShiftRef.current = 0; };
+  }, [editor]);
 
   /* ⛔ THE SAME WRITING STAYS UNDER THE EYE ACROSS A STEP (VIEWPORT-STABLE). Left alone, a
    * zoom throws the reader somewhere else: the content above the viewport changes height, so
@@ -2082,7 +2139,7 @@ export default function NoteEditor({
        document attribute drives the line height and the gap between list items together — which
        is what makes Compact one action rather than two controls. The values come from
        lib/notesSpacing.js, the same record the print sheet reads. */
-    <div className="planyr-note" style={{
+    <div className="planyr-note" ref={noteRootRef} style={{
       display: "flex", flexDirection: "column", minHeight: 0, flex: 1, background: "var(--surface-page)",
       "--note-line": density.line,
       "--note-list-gap": `${density.listGap}px`,
@@ -2154,7 +2211,33 @@ export default function NoteEditor({
              is the document's plus the box's own action rather than a different menu. The id is
              what tells them apart, and it comes from the DOM the press actually landed on. */
           const box = e.target.closest(".planyr-anchor");
-          setDocMenu({ x: e.clientX, y: e.clientY, boxId: box?.getAttribute("data-anchor-id") || null });
+          /* ⛔ A RIGHT-CLICK MUST RESOLVE ITS OWN TARGET (found chasing NEW-2, B649377).
+             ProseMirror only learns where the browser's native right-click actually put the
+             caret through an async `selectionchange` event — measured arriving ~20ms AFTER
+             `contextmenu` has already fired and this handler has already run — so reading
+             `editor.state.selection` here, synchronously, sees wherever the caret was doing
+             BEFORE this click, not where the user just clicked. Confirmed on a plain paragraph
+             with no table involved at all: right-clicking the third line left PM's selection
+             sitting at the document's very first position while the native DOM selection had
+             already moved correctly. Left-click is unaffected (`focusFromMat` places it
+             directly), which is why this went unnoticed until a command — "is the caret inside
+             a table" — actually needed the answer to be right. Resolved and applied by hand
+             here, the way a real editor does; a right-click INSIDE the current selection (e.g.
+             Cut/Copy on a phrase you already selected) is left alone, matching every editor's
+             convention, and a box is untouched (its own selection is separate React state, not
+             PM's, so it was never exposed to this). */
+          if (!box && editor && !editor.isDestroyed) {
+            const hit = editor.view.posAtCoords({ left: e.clientX, top: e.clientY });
+            if (hit && Number.isFinite(hit.pos)) {
+              const { from, to } = editor.state.selection;
+              if (hit.pos < from || hit.pos > to) editor.commands.setTextSelection(hit.pos);
+            }
+          }
+          /* NEW-2 — "Convert table to text" only makes sense when the right-click actually
+             landed inside a table; reading it off the DOM the press hit (rather than off
+             `editor.isActive("table")`) keeps it consistent with how the box id above is read. */
+          const inTable = !!e.target.closest("table");
+          setDocMenu({ x: e.clientX, y: e.clientY, boxId: box?.getAttribute("data-anchor-id") || null, inTable });
         }}
         ref={scrollerRef}
         style={{ flex: 1, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column", position: "relative" }}
@@ -2357,6 +2440,16 @@ export default function NoteEditor({
           editor.commands.removeNoteAnchors([docMenu.boxId]);
           clearSelection();
           editor.commands.focus();          // …so Ctrl+Z can reach it (B421489)
+        } : null}
+        /* NEW-2 — "Convert table to text". Only offered when the right-click actually landed
+           inside a table; the command itself also declines on its own if the caret has since
+           moved out, so this can never silently act on the wrong table. Focus comes home after,
+           same as the box delete above and for the same reason (B421489) — a menu click leaves
+           focus on the button it clicked, and Ctrl+Z cannot reach a document that is not
+           focused. */
+        onConvertTable={docMenu?.inTable ? () => {
+          editor.commands.convertTableToText();
+          editor.commands.focus();
         } : null}
       />
     </div>

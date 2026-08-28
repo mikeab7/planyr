@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-28 @ `1180af40` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-28 @ `032874e8` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_578 source files mapped._
+_582 source files mapped._
 
 ## infra
 
@@ -181,6 +181,8 @@ _578 source files mapped._
   - _exports_: `clearNotesStorageError`, `collectBinFacts`, `collectOpenTasks`, `deleteNoteImages`, `deletePages`, `deletePageVersions`, `ignoreDuplicate`, `lastNotesStorageError`, `listStoredPageIds`, `LOCAL_SCOPE`, `markPagesBinned`, `markPagesRestored`, `MAX_FILE_BYTES`, `MAX_IMAGE_BYTES`, `MAX_NOTEBOOK_IMAGE_BYTES`, `noteImageUsage`, `notesConflictFor`, `notesConflictLine`, `notesConflicts`, `notesScope`, `notesScopeLabel`, `notesStorageLine`, `notesSyncState`, `onNotesConflict`, `onNotesPagesChanged`, `onNotesStorageError`, `onNotesSyncState`, `openTaskCount`, `PAGE_KEY_BASE`, `pageKey`, `purgePages`, `putNoteFile`, `putNoteImage`, `readIgnoredDuplicates`, `readNoteFile`, `readNoteFiles`, `readNoteImage`, `readNoteImages`, `readNotesZoom`, `readPage`, `readPageVersion`, `readPageVersions`, `readTreeRaw`, `refreshNotesSync`, `registerOpenNoteDoc`, `reportImageProblem`, `resolveNotesConflict`, `restorePageVersion`, `searchNotes`, `setNotesScope`, `snapshotPage`, `startNotesSync`, `stopNotesSync`, `sweepEmptyAnchors`, `sweepImagesOfMissingPages`, `sweepOrphans`, `SYNC_KEY_BASE`, `syncKey`, `toggleNoteTask`, `TREE_KEY_BASE`, `treeKey`, `writeNotesZoom`, `writePage`, `writeTree`
 - **`src/workspaces/notes/lib/notesTabKey.js`** — Tab belongs to the document: a low-priority fallback behind the table and list handlers, plus the Escape-then-Tab keyboard-trap escape
   - _exports_: `default`, `TAB_CHAR`, `TAB_PRIORITY`
+- **`src/workspaces/notes/lib/notesTableToText.js`** — "Convert table to text": pulls a table's rows out as plain lines (or sibling list items when the table sits in one), keeping every cell's marks.
+  - _exports_: `cellLineSpec`, `default`, `rowLineSpec`, `tableToBlockSpecs`
 - **`src/workspaces/notes/lib/notesTasks.js`** — PURE checklist reading and writing over a document — the task rollup's whole decision layer.
   - _exports_: `groupTasksByProject`, `openTasksInDoc`, `rollUpOpenTasks`, `setTaskCheckedInDoc`, `tasksInDoc`
 - **`src/workspaces/notes/lib/notesTime.js`** — How a note's age is written, in one place — relative ("5h"), absolute, edited-label and bin countdown. `null` means unknown and renders as nothing, so a migrated page never claims a time it does not have.
@@ -493,6 +495,8 @@ _578 source files mapped._
   - _exports_: `default (ParcelInfoCard)`, `DETAILS_MAX_HEIGHT`, `LEGAL_MAX_HEIGHT`
 - **`src/workspaces/site-planner/components/ParcelRecordPanel.jsx`** — the Parcel panel's typed RECORD (provenance chip · deed misclosure · owner/account/situs/stated acreage) and the plan PLACEMENT controls. Lazily loaded.
   - _exports_: `ParcelRecord`, `PlacementControls`
+- **`src/workspaces/site-planner/components/PlaceSearchField.jsx`** — B831779 (NEW-4) the map toolbar's address field: a live-suggestion combobox (role=combobox + listbox) replacing the old "Go" button — debounced/abortable, Enter always works, LOUD-FAILURE no-match row
+  - _exports_: `default (PlaceSearchField)`
 - **`src/workspaces/site-planner/components/PondSection.jsx`** — PR-L the one developer-readable pond cross-section component (used by the ⚡ Optimize what-changed card AND the pond inspector): maps pondSectionModel marks to a responsive, theme-tokened SVG (grade, berm hatch, storage bands, flood/groundwater/receiving lines, outlet, depth dimension, collision-free labels)
   - _exports_: `default (PondSection)`
 - **`src/workspaces/site-planner/components/PrintCompose.jsx`** — the dedicated full-screen "compose exhibit" step (B765985): sheet size/orientation/scale, title block, content toggles, and the live sheet preview, all outside the drawing canvas
@@ -899,6 +903,10 @@ _578 source files mapped._
   - _exports_: `COMMODITY_BUCKETS`, `commodityBucket`, `commodityBucketRecord`, `isHazardOutlier`, `PIPELINE_LEGEND`, `pipelineStyleFor`
 - **`src/workspaces/site-planner/lib/pipelineCorridor.js`** — Pure pipeline easement screening-corridor geometry (B752): buffers a WGS84 [lon,lat] centerline into an ASSUMED band via the shared bufferPolyline (local feet frame), plus the editable default/min/max width constants
   - _exports_: `corridorRingLngLat`, `corridorRings`, `DEFAULT_CORRIDOR_WIDTH_FT`, `MAX_CORRIDOR_WIDTH_FT`, `MIN_CORRIDOR_WIDTH_FT`
+- **`src/workspaces/site-planner/lib/placeSuggest.js`** — B831779 (NEW-4) pure I/O: Esri-first/Nominatim-fallback place suggestions (several candidates, not one), honest reachedAny vs empty-results distinction (LOUD-FAILURE)
+  - _exports_: `suggestPlaces`
+- **`src/workspaces/site-planner/lib/placeSuggestRows.js`** — B831779 (NEW-4) the pure combobox decision layer: which rows render + what Enter/a click on them does — the provable half of PlaceSearchField.jsx
+  - _exports_: `buildPlaceRows`, `resolvePlaceEnter`, `resolvePlaceRowCommit`
 - **`src/workspaces/site-planner/lib/planClipboard.js`** — The general canvas clipboard (NEW-2/NEW-6) — collect a selection (elements expanded to their `attachedTo` assembly), and paste it with fresh ids, remapped bonds and relative geometry preserved; plus `resolveClipFrame`, the coordinate decision for a paste that crosses into a plan anchored elsewhere.
   - _exports_: `CLIP_FRAME_MAX_SMEAR_FT`, `CLIP_KINDS`, `clipboardBBox`, `clipboardLabel`, `clipCalloutTips`, `clipPlacement`, `clipRefKey`, `collectClipboard`, `pasteClipboard`, `resolveClipFrame`, `translateCalloutBy`, `translateParcelBy`
 - **`src/workspaces/site-planner/lib/planClipboardStore.js`** — Module-scope holder for the canvas + overlay clipboards, above every React remount boundary, so a copy survives a plan switch (NEW-1).
