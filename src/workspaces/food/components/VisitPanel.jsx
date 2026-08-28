@@ -17,7 +17,32 @@
  * list, the toggle) was rebuilt.
  *
  * ⛔ RATING CONTROL (owner correction, 2026-08-18: "obviously there shouldn't be individual
- * buttons for 20 options"). ONE control: a native range slider, min 1 max 10 step 0.5.
+ * buttons for 20 options"). ONE control: a native range slider, min 1 max 10.
+ *
+ * ⛔ QUARTER-POINT STEPS (owner chat block, 2026-08-27/28: "quarter-point ratings, not just half
+ * points"). RATING_STEP is now 0.25 (37 stops across 1-10), not 0.5. The native HTML range input
+ * already does the two things the brief asked for at this stop count without any extra JS: it
+ * snaps to the nearest valid step as you drag (never a pixel-perfect requirement) and its arrow
+ * keys move by exactly `step` — both are documented browser behaviour, not something this file
+ * has to implement. So this stays the SAME single control (never a row of buttons, never a
+ * second widget) — only the step size and the display formatting below changed.
+ *
+ * ⛔ DISPLAY, NATURAL PRECISION (same owner block: "8.25, 8.5, 9... not padded to a fixed
+ * decimal count — '9.00' reads like a spreadsheet"). The old `shown.toFixed(1)` forced exactly
+ * one decimal always ("9.0"); dropped in favour of the bare JS number in the template string,
+ * which already prints its natural precision (no floating-point risk here — every reachable
+ * value is an exact multiple of 0.25, which is an exact binary fraction, so `9`, `8.5`, `8.25`
+ * are all exact, never `8.24999999999998`). The aggregate averages in ScoreStrip below
+ * deliberately keep their existing ONE-decimal display (`avgFood.toFixed(1)`) — an average of
+ * quarter points doesn't need quarter-point display precision, and a stray "8.4375 avg" would
+ * read worse, not better.
+ *
+ * ⛔ SCHEMA (same block): `food_visits.rating`/`rating_ambiance` were widened from numeric(3,1)
+ * (one decimal, half-point-capable) to numeric(4,2) (two decimals, quarter-point-capable) — see
+ * db/food.sql's own migration comment for why numeric(4,2) and not the brief's suggested
+ * numeric(3,2) (the latter overflows on a rating of exactly 10 — proven live against production,
+ * which already held one). Verified non-destructive: a scale-independent checksum over all 174
+ * existing rows matched exactly before and after the ALTER.
  *
  * ⛔ DATE FIELD (owner correction, 2026-08-18: never pre-filled with today, stays optional.
  *
@@ -68,7 +93,7 @@ function useIsMobile() {
 
 const RATING_MAX = 10;
 const RATING_MIN = 1;
-const RATING_STEP = 0.5;
+const RATING_STEP = 0.25;
 const RATING_SLIDER_REST = 5.5; // purely the thumb's visual resting spot before any touch — never committed as a value
 
 function RatingSlider({ value, onChange, label }) {
@@ -87,7 +112,7 @@ function RatingSlider({ value, onChange, label }) {
             padding: active ? "2px 8px" : 0,
           }}
         >
-          {active ? `${shown.toFixed(1)} / ${RATING_MAX}` : "Not rated"}
+          {active ? `${shown} / ${RATING_MAX}` : "Not rated"}
         </span>
         {active && (
           <button type="button" onClick={() => onChange(null)} style={{
@@ -101,7 +126,7 @@ function RatingSlider({ value, onChange, label }) {
       <input
         type="range" min={RATING_MIN} max={RATING_MAX} step={RATING_STEP}
         value={shown} onChange={(e) => onChange(Number(e.target.value))}
-        aria-label={label} aria-valuetext={active ? `${shown.toFixed(1)} out of ${RATING_MAX}` : "not rated"}
+        aria-label={label} aria-valuetext={active ? `${shown} out of ${RATING_MAX}` : "not rated"}
         style={{ width: "100%", accentColor: color, cursor: "pointer" }}
       />
     </div>
