@@ -1882,26 +1882,76 @@ export default function NoteEditor({
    * `ResizeObserver` stays, but only as the fallback for every OTHER cause of the toolbar
    * changing height (a window resize changing how many buttons fit per row, a webfont
    * finishing its load): both paths share one height baseline, so whichever fires second
-   * always measures a delta of zero against what the other just recorded. */
-  const toolbarShiftRef = useRef(0);
-  const toolbarHeightRef = useRef(null); // null = not yet measured; the first read only sets the baseline
-  const applyToolbarDelta = useCallback((nextHeight) => {
-    const prevHeight = toolbarHeightRef.current;
-    toolbarHeightRef.current = nextHeight;
-    if (prevHeight == null) return;
-    const delta = nextHeight - prevHeight;
+   * always measures a delta of zero against what the other just recorded.
+   *
+   * ⛔ REOPENED A THIRD TIME (NEW-1/B831600, owner measurement 2026-08-28): THE ABOVE FIX WORKS
+   * FOR A TOP-LEVEL TABLE AND NOT FOR ONE NESTED SEVERAL LEVELS DEEP INSIDE A LIST ITEM — his
+   * Silvestri/"Utility" case. Instrumented with real pointerdown/pointermove/pointerup/click
+   * listeners on production: a top-level table holds its rect at zero drift through the whole
+   * drag; the same drag on his nested table jumps by exactly the toolbar's growth (35.8 of
+   * 35.9px) on ONE sample and — unlike the one-frame race above — NEVER SELF-CORRECTS, not at
+   * pointerup, not at click. `editor.isActive("table")` itself is not the fault: it is
+   * `@tiptap/core`'s `isNodeActive`, which walks `doc.nodesBetween(from, to, …)` and matches by
+   * NODE TYPE at any depth, not by a fixed ancestor distance — proven by driving this exact
+   * shape (a 4-row/1-col table with no class on it, ten DOM levels deep inside nested
+   * `bulletList`/`listItem`s, real padding content above and below, scrolled to a position with
+   * slack on both sides) through a real drag in this repo's own Chromium and finding zero drift,
+   * every variation tried (deeper nesting, a scrolled note, a fast unthrottled drag). That rules
+   * out the node-path lookup as the mechanism and points at the OTHER half of the fix instead:
+   * the compensation the layout effect and the `ResizeObserver` both feed is an ACCUMULATOR
+   * (`toolbarShiftRef.current += delta`, gated by a `useLayoutEffect` keyed on the single
+   * boolean `inTable`). An accumulator only stays correct if every height change it is ever
+   * shown is applied exactly once, in order — and the one signal it is gated on is a boolean
+   * that says nothing about HOW MANY transactions produced the current state, only what the
+   * state nets out to. A structure with more ancestor levels gives ProseMirror strictly more
+   * opportunity to fold several selection-changing transactions (the table plugin's own cell-
+   * range tracking, `onSelectionUpdate`'s `dropEmptyAnchors`, list normalization) into fewer
+   * observable React commits than there were real height changes — and the moment ONE of those
+   * height changes is folded away instead of individually applied, `toolbarHeightRef.current`
+   * is left holding a value the accumulator never actually compensated for, and every later call
+   * computes `delta = nextHeight - thatValue`, which can read `0` even though the ACTUAL onscreen
+   * offset is still off by a full toolbar row — and once `delta` is `0` the code returns without
+   * touching the transform, forever, because there is no way back to the true baseline from an
+   * accumulator that has already diverged from it. That is exactly the shape of what was
+   * measured: one wrong jump, then permanently stuck, not a race that later corrects.
+   *
+   * THE FIX: STOP ACCUMULATING. `applyToolbarHeight` below is a pure function of the CURRENT
+   * measured height and the SMALLEST height this toolbar has ever been observed at (its
+   * "nothing conditional is showing" state) — never a running delta. Every call recomputes the
+   * FULL compensation from scratch, so a call that never happens costs nothing (the next one
+   * that does happen still lands on the correct absolute number) and there is no state left
+   * behind for a skipped call to poison. The baseline can only move DOWN (`Math.min`), so even a
+   * baseline captured too tall self-corrects the moment a genuinely shorter reading arrives —
+   * and every real note gives it one almost immediately: `EMPTY_DOC` (`notesExtensions.js`) is
+   * `{ paragraph }`, never a bare table, so a table can only ever be a LATER sibling of content
+   * that already existed, and the very first "no group" reading (from before that content ever
+   * became a table) is always in the ref's history. (Tried inferring the baseline by subtracting
+   * the Table group's own measured height instead of waiting for one: rejected, because the
+   * group's wrapped row picks up `gap`/border/padding the group's own border box does not fully
+   * account for, leaving a couple of px of residual — a residual VIEWPORT-STABLE does not
+   * accept.) A bounded `requestAnimationFrame` loop, armed for as long as a pointer is down
+   * inside the mat plus a short settle tail, calls the SAME function every frame during a
+   * gesture — belt to the layout effect's and the `ResizeObserver`'s braces, so even a commit
+   * this file has not found a way to reproduce still self-heals within one frame instead of
+   * needing its own boolean to fire correctly. */
+  const toolbarBaselineRef = useRef(null); // the smallest toolbar height ever observed — the
+  // "no conditional group is showing" state; only ever revised DOWNWARD, so a baseline taken
+  // too tall self-corrects the moment a genuinely shorter reading arrives.
+  const applyToolbarHeight = useCallback((toolbarEl) => {
     const scroller = scrollerRef.current;
-    if (!delta || !scroller) return;
-    toolbarShiftRef.current += delta;
-    scroller.style.transform = toolbarShiftRef.current
-      ? `translateY(${-toolbarShiftRef.current}px)` : "";
+    if (!scroller || !toolbarEl) return;
+    const height = toolbarEl.getBoundingClientRect().height;
+    toolbarBaselineRef.current = toolbarBaselineRef.current == null
+      ? height : Math.min(toolbarBaselineRef.current, height);
+    const delta = height - toolbarBaselineRef.current;
+    scroller.style.transform = delta ? `translateY(${-delta}px)` : "";
   }, []);
 
   const inTable = !!editor && !editor.isDestroyed && editor.isActive("table");
   useLayoutEffect(() => {
     const toolbarEl = noteRootRef.current?.querySelector('[data-testid="note-toolbar"]');
-    if (toolbarEl) applyToolbarDelta(toolbarEl.getBoundingClientRect().height);
-  }, [inTable, applyToolbarDelta]);
+    applyToolbarHeight(toolbarEl);
+  }, [inTable, applyToolbarHeight]);
 
   useEffect(() => {
     /* ⛔ `editor` IS A DEP, NOT `[]` — Tiptap's `useEditor` returns null on the first render
@@ -1913,15 +1963,46 @@ export default function NoteEditor({
     if (!root || !scroller || typeof ResizeObserver === "undefined") return undefined;
     const toolbarEl = root.querySelector('[data-testid="note-toolbar"]');
     if (!toolbarEl) return undefined;
-    const ro = new ResizeObserver(() => applyToolbarDelta(toolbarEl.getBoundingClientRect().height));
+    const ro = new ResizeObserver(() => applyToolbarHeight(toolbarEl));
     ro.observe(toolbarEl);
     return () => {
       ro.disconnect();
       scroller.style.transform = "";
-      toolbarShiftRef.current = 0;
-      toolbarHeightRef.current = null;
+      toolbarBaselineRef.current = null;
     };
-  }, [editor, applyToolbarDelta]);
+  }, [editor, applyToolbarHeight]);
+
+  /* ⛔ THE THIRD BRACE: a bounded rAF reconciliation loop, armed for the DURATION OF A GESTURE
+   * (pointerdown inside the mat through a short settle tail past pointerup), that re-measures
+   * and re-applies `applyToolbarHeight` every frame regardless of whether React ever ran an
+   * effect for it. This is what makes the fix independent of correctly diagnosing every way a
+   * commit can be folded away: whatever the mechanism, a frame is never more than one rAF tick
+   * from a correct compensation while the user's hand is actually on the mouse. Cheap by
+   * construction — one rect read and a style write, only while a gesture is plausibly live. */
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    const root = noteRootRef.current;
+    if (!scroller || !root) return undefined;
+    let rafId = null;
+    let settleUntil = 0;
+    const reconcile = () => {
+      const toolbarEl = root.querySelector('[data-testid="note-toolbar"]');
+      applyToolbarHeight(toolbarEl);
+      if (performance.now() < settleUntil) rafId = requestAnimationFrame(reconcile);
+      else rafId = null;
+    };
+    const arm = () => {
+      settleUntil = performance.now() + 500; // a slow drag plus its settle
+      if (rafId == null) rafId = requestAnimationFrame(reconcile);
+    };
+    scroller.addEventListener("pointerdown", arm);
+    window.addEventListener("pointerup", arm, true); // one more reconciled pass wherever release lands
+    return () => {
+      scroller.removeEventListener("pointerdown", arm);
+      window.removeEventListener("pointerup", arm, true);
+      if (rafId != null) cancelAnimationFrame(rafId);
+    };
+  }, [applyToolbarHeight]);
 
   /* ⛔ THE SAME WRITING STAYS UNDER THE EYE ACROSS A STEP (VIEWPORT-STABLE). Left alone, a
    * zoom throws the reader somewhere else: the content above the viewport changes height, so

@@ -341,9 +341,19 @@ console.log("    click from inside a table out to plain text, assert the PARAGRA
 console.log("    rect, not the table's — the compensation is one transform on the whole scroller,");
 console.log("    so proving it on the table already implies it here, but this asserts it directly");
 console.log("    rather than by inference.)");
+/* ⛔ A LEADING PARAGRAPH BEFORE THE TABLE IS NOT OPTIONAL HERE — every real note's blank
+ * document is `EMPTY_DOC` (`notesExtensions.js`): `{ paragraph }`, never a bare table, so a
+ * table can only ever be inserted as a LATER sibling of content that already existed. A doc
+ * whose content[0] IS the table (no leading paragraph at all) is unreachable through any real
+ * user action and, worse, is its own instrument trap: ProseMirror's default mount selection
+ * (`Selection.atStart(doc)`) then resolves INSIDE the table before any click ever happens, so
+ * the very first height reading this file's fix ever sees is already the tall "in table" one —
+ * a fixture artifact of stripping the table down to being the ENTIRE document, not a case this
+ * bug needs to survive. */
 const TABLE_THEN_PARAGRAPH = {
   type: "doc",
   content: [
+    { type: "paragraph", content: [{ type: "text", text: "Notes above the table." }] },
     TABLE_FIXTURE_ROOT_TABLE,
     { type: "paragraph", content: [{ type: "text", text: "Plain text after the table." }] },
   ],
@@ -363,7 +373,10 @@ await page.mouse.click(cellPoint.x, cellPoint.y);
 await pacedWait(page, 300);
 await page.evaluate(() => {
   window.__frames = [];
-  const p = document.querySelector(".ProseMirror > p");
+  // The paragraph AFTER the table (last of the two `.ProseMirror > p`s — the first is the
+  // leading paragraph BEFORE the table, added so the fixture is a real note shape rather than
+  // a bare table as the document's first block).
+  const p = document.querySelector(".ProseMirror > p:last-of-type");
   let n = 0;
   function tick() {
     const r = p.getBoundingClientRect();
@@ -374,13 +387,154 @@ await page.evaluate(() => {
   requestAnimationFrame(tick);
 });
 await pacedWait(page, 60);
-await page.locator(".ProseMirror > p").click(); // leave the table — the toolbar SHRINKS
+await page.locator(".ProseMirror > p", { hasText: "Plain text after the table." }).click(); // leave the table — the toolbar SHRINKS
 await pacedWait(page, 1100);
 const paraFrames = await page.evaluate(() => window.__frames);
 const settledParaTop = paraFrames[paraFrames.length - 1].top;
 const paraRace = paraFrames.filter((f) => Math.abs(f.top - settledParaTop) > 1).length;
 ok("⛔ the plain paragraph's client rect never moves while leaving the table (toolbar shrinking), even at max scroll",
   paraRace === 0, `${paraRace}/${paraFrames.length} frames raced, settled top=${settledParaTop}`);
+
+console.log("\n7 · ⛔ THE OWNER'S EXACT REPORTED SHAPE (NEW-1/B831600 ×3, reopened 2026-08-28): a");
+console.log("    4-row × 1-col table with NO CLASS on it, nested FOUR listItem/bulletList levels");
+console.log("    deep — matching docs/NOTES-CARRY-FORWARD.md §2's own worked fixture (MUD 377 ›");
+console.log("    Engineer › Dustin O'Neal › Utility › Quadvest MUD › table) — with real sibling");
+console.log("    content above and below, not a table stripped down to being the whole document.");
+console.log("    Honesty, stated once here rather than left implicit: this section is GREEN on");
+console.log("    both the pre-round-3 accumulator code and the round-3 fix — the owner's exact drag");
+console.log("    race could not be forced through this repo's headless Chromium (a documented");
+console.log("    instrument gap, see the B831600 ×3 writeup in BACKLOG-DONE.md). It stays as the");
+console.log("    STANDING regression fixture NEW-2 requires: built from the reported shape, kept");
+console.log("    alongside the top-level case rather than replacing it, so a FUTURE change cannot");
+console.log("    quietly re-introduce a nesting-sensitive assumption without this catching it.");
+const mkPara = (t) => ({ type: "paragraph", content: t ? [{ type: "text", text: t }] : [] });
+const DEEP_TABLE = { type: "table", content: [
+  { type: "tableRow", content: [{ type: "tableCell", content: [mkPara("Executive Assistant")] }] },
+  { type: "tableRow", content: [{ type: "tableCell", content: [mkPara("O: 281-305-1115")] }] },
+  { type: "tableRow", content: [{ type: "tableCell", content: [mkPara("M: (281) 705-2931")] }] },
+  { type: "tableRow", content: [{ type: "tableCell", content: [mkPara("E: Kandicec@quadvest.com")] }] },
+] };
+const DEEP_NESTED_DOC = {
+  type: "doc",
+  content: [
+    mkPara("MUD 377"),
+    { type: "bulletList", content: [
+      { type: "listItem", content: [mkPara("Active")] },
+      { type: "listItem", content: [
+        mkPara("Engineer - Pape Dawson"),
+        { type: "bulletList", content: [
+          { type: "listItem", content: [
+            mkPara("Dustin O'Neal"),
+            { type: "bulletList", content: [
+              { type: "listItem", content: [mkPara("P: 713-428-2400")] },
+              { type: "listItem", content: [
+                mkPara("Utility"),
+                { type: "bulletList", content: [
+                  { type: "listItem", content: [mkPara("Quadvest MUD"), DEEP_TABLE] },
+                ] },
+              ] },
+            ] },
+          ] },
+        ] },
+      ] },
+      { type: "listItem", content: [mkPara("MUD ATTORNEY: BRIAN YATES")] },
+    ] },
+    mkPara("Water Authority: Northwest Regional Water Authority"),
+    mkPara("Sanitary:"),
+    { type: "bulletList", content: [
+      { type: "listItem", content: [mkPara("Discharge Permit may be 18 months")] },
+    ] },
+  ],
+};
+await seed(DEEP_NESTED_DOC, "Utility");
+await page.waitForSelector(".ProseMirror table", { timeout: 20000 });
+const deepDepth = await page.evaluate(() => {
+  let d = 0; let el = document.querySelector(".ProseMirror table");
+  while (el && !el.classList.contains("ProseMirror")) { d += 1; el = el.parentElement; }
+  return d;
+});
+ok("fixture is genuinely nested several levels deep (not simplified)", deepDepth >= 8, `${deepDepth} DOM levels from table to .ProseMirror`);
+const deepTableClass = await page.evaluate(() => document.querySelector(".ProseMirror table").className);
+ok("no class on the <table> element (matches the reported shape exactly)", deepTableClass === "", `class="${deepTableClass}"`);
+// Scroll to a position with slack on BOTH sides, matching the owner's own measurement setup.
+await page.evaluate(() => {
+  const mat = document.querySelector('[data-testid="note-mat"]');
+  const table = document.querySelector(".ProseMirror table");
+  const tableOffsetTop = table.getBoundingClientRect().top - mat.getBoundingClientRect().top + mat.scrollTop;
+  mat.scrollTop = Math.max(0, tableOffsetTop - 150);
+});
+await page.locator(".ProseMirror > p", { hasText: "MUD 377" }).click(); // caret starts OUTSIDE the table
+await pacedWait(page, 200);
+const deepCellBoxes = await page.evaluate(() => [...document.querySelectorAll(".ProseMirror table td")].map((c) => {
+  const r = c.getBoundingClientRect();
+  return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+}));
+const deepFrames = [];
+const sampleDeep = async () => deepFrames.push(await page.evaluate(() => ({
+  top: Math.round(document.querySelector(".ProseMirror table").getBoundingClientRect().top * 10) / 10,
+  scrollTop: document.querySelector('[data-testid="note-mat"]').scrollTop,
+})));
+await page.mouse.move(deepCellBoxes[0].x, deepCellBoxes[0].y);
+await page.mouse.down();
+await sampleDeep();
+for (let i = 1; i <= 12; i += 1) {
+  const x = Math.round(deepCellBoxes[0].x + (deepCellBoxes[3].x - deepCellBoxes[0].x) * (i / 12));
+  const y = Math.round(deepCellBoxes[0].y + (deepCellBoxes[3].y - deepCellBoxes[0].y) * (i / 12));
+  await page.mouse.move(x, y);
+  await pacedWait(page, 30);
+  await sampleDeep();
+}
+await page.mouse.up();
+await pacedWait(page, 150);
+await sampleDeep();
+const deepScrollDrifted = deepFrames.some((f) => f.scrollTop !== deepFrames[0].scrollTop);
+let deepMaxJump = 0;
+for (let i = 1; i < deepFrames.length; i += 1) deepMaxJump = Math.max(deepMaxJump, Math.abs(deepFrames[i].top - deepFrames[i - 1].top));
+ok("⛔ the deeply-nested table does not jump under the pointer during the drag", deepMaxJump < 4,
+  `max frame delta ${deepMaxJump.toFixed(1)}px, scrollTop drifted=${deepScrollDrifted}`);
+const deepSel = await page.evaluate(() => window.__noteEditor?.selection());
+ok("the drag across the deeply-nested table builds a real selection", deepSel && !deepSel.empty, JSON.stringify(deepSel));
+
+console.log("\n8 · ⛔ THE ACCUMULATOR-DESYNC CLASS ITSELF (round 3's actual root fix): a note whose");
+console.log("    FIRST EVER block is a table mounts with the selection already inside it (ProseMirror's");
+console.log("    default Selection.atStart(doc)), so the very FIRST height reading is already the tall");
+console.log("    'in table' one. Round 2's accumulator had nothing shorter in its history to null the");
+console.log("    drift against and stayed uncompensated for the table's WHOLE lifetime; round 3's");
+console.log("    stateless baseline self-corrects the moment a genuinely shorter reading arrives.");
+console.log("    This is a DIFFERENT trigger than nesting depth, but the IDENTICAL failure mode the");
+console.log("    owner measured — one wrong jump, never self-correcting — through a path this sandbox");
+console.log("    CAN reliably reproduce (unlike section 7's exact drag race).");
+const TABLE_IS_FIRST_BLOCK = {
+  type: "doc",
+  content: [
+    TABLE_FIXTURE_ROOT_TABLE,
+    { type: "paragraph", content: [{ type: "text", text: "Plain text after the table." }] },
+  ],
+};
+await seed(TABLE_IS_FIRST_BLOCK, "TableFirstBlock");
+await page.waitForSelector(".ProseMirror table", { timeout: 20000 });
+const mountInTable = await page.evaluate(() =>
+  document.querySelector('[data-testid="note-toolbar"]').getBoundingClientRect().height > 50);
+ok("⛔ vacuity guard — this fixture genuinely mounts with the toolbar already grown (the case being tested)",
+  mountInTable, `toolbar height at mount reflects "in table" without any click`);
+/* ⛔ THE ACTUAL PROOF, and why it is NOT "does the paragraph move on leaving" — that check
+ * passes on round 2's own broken code too, which is exactly the trap worth naming rather than
+ * silently avoiding. Round 2's accumulator, poisoned at mount (baseline captured as the tall
+ * "in table" reading, nothing shorter in its history yet), computes an EQUAL-AND-OPPOSITE wrong
+ * delta on the first leave (`delta = 39 - 75 = -36` → `translateY(+36px)`) that happens to add
+ * the exact 36px BACK that mounting never subtracted — so the paragraph's absolute position
+ * reads IDENTICAL before and after leaving (a "nothing moved" false pass), while the actual
+ * value is wrong by 36px in BOTH states and the accumulator has entered a permanent two-state
+ * OSCILLATION (0 while in table, `translateY(+36px)` while out of it) that never reaches the
+ * true baseline. The property that is actually TRUE, structurally, regardless of any fixture's
+ * specific pixel geometry: being OUT of the table is the reference state by definition, so the
+ * compensating `transform` must be EMPTY once the caret has genuinely left — never a nonzero
+ * value "coincidentally" canceling an unrelated earlier mistake. */
+await page.locator(".ProseMirror > p", { hasText: "Plain text after the table." }).click(); // leave the table for the first time, straight from the poisoned mount state
+await pacedWait(page, 300);
+const afterLeaveTransform = await page.evaluate(() => document.querySelector('[data-testid="note-mat"]').style.transform);
+ok("⛔ the compensating transform is EMPTY once the caret has genuinely left the table — even coming straight from a poisoned mount reading (never a nonzero value masquerading as correct)",
+  !afterLeaveTransform || afterLeaveTransform === "translateY(0px)", `transform="${afterLeaveTransform}"`);
 
 console.log(`\n${pass}/${pass + fail} checks passed`);
 console.log(`page errors: ${errs.length ? errs.slice(0, 5).join(" | ") : "clean"}`);
