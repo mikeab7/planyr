@@ -284,7 +284,22 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   total rent and any cross-comp average can only be an unweighted mean — `summarizeLeaseComps`
   SF-weights each NNN/gross group when every comp in it has a size, falling back to the previous
   unweighted mean, explicitly flagged, when any comp in the group is missing it (never silently
-  blends the two). `db/test/comps_rls.test.sql` is a self-rolling-back RLS proof, run live via the
+  blends the two). `db/comps_lease_free_rent.sql` — adds `lease_free_rent_months` (B832385); once
+  free rent exists, a comp's derived total is FACE rent only — `compFieldRows` labels it
+  `"Total annual rent (face)"` rather than computing an effective/net-of-abatement figure, which
+  the owner hasn't asked for. `db/comps_party_fields.sql` — adds `comp_party_provider` /
+  `comp_party_acquirer` (B832390): ONE shared axis across all three comp types (never six
+  per-type columns), labeled per type by `lib/comps.js`'s `partyLabels(compType)` — lease =
+  Owner/Developer + Tenant, land = Seller + Buyer, building sale = Seller + Buyer/User.
+  **⛔ Both new migration files are NOT yet applied to production as of this writing** — handed to
+  the owner directly rather than applied by the shipping session (that session's production
+  access was read-only); until both run, every comp save of any type errors, loudly, not
+  silently. `lib/partySuggest.js` is the pure party-name suggestion logic
+  (`collectPartyNames`/`matchPartyNames` — loose substring match, suggests only, never forces or
+  merges near-spellings) behind `components/PartyNameField.jsx`'s accessible combobox (B832391) —
+  a DELIBERATE second, independent combobox implementation from the map toolbar's
+  `PlaceSearchField` (that one drives a debounced network geocode; this one filters an in-memory
+  array synchronously — reusing its plumbing would import complexity with no use here). `db/test/comps_rls.test.sql` is a self-rolling-back RLS proof, run live via the
   Supabase MCP.
 - `projects/`, `profile/`, `cloud/`, `presence/`, `gis/`, `geometry/`, `placement/`.
 

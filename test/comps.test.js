@@ -1,9 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
   landSizeSf, landPricePerSf, buildingPricePerSf, annualLeaseRate, leaseTotalAnnualRent,
-  summarizeLeaseComps, summarizeSaleComps, compFieldRows, compHeadline,
+  summarizeLeaseComps, summarizeSaleComps, compFieldRows, compHeadline, partyLabels,
   validAnchor, validateComp, rowToComp, compToRow,
 } from "../src/shared/comps/lib/comps.js";
+import { collectPartyNames, matchPartyNames } from "../src/shared/comps/lib/partySuggest.js";
 
 describe("comps: land $/SF derivation", () => {
   it("derives $/SF from price + acres", () => {
@@ -194,6 +195,124 @@ describe("comps: sale $/SF summary (land / building_sale)", () => {
   });
 });
 
+describe("comps: NEW-2 free rent + NEW-3 face label + NEW-5 currency formatting", () => {
+  it("free rent is independently optional and renders next to term", () => {
+    const withTerm = compFieldRows({
+      compType: "lease", compDate: "2026-08-01", leaseRate: 7, leaseRatePeriod: "annual",
+      leaseRateExpense: "nnn", leaseTerm: "126 mo",
+    });
+    expect(withTerm.map((r) => r.key)).not.toContain("freeRent");
+
+    const withFreeRent = compFieldRows({
+      compType: "lease", compDate: "2026-08-01", leaseRate: 7, leaseRatePeriod: "annual",
+      leaseRateExpense: "nnn", leaseTerm: "126 mo", leaseFreeRentMonths: 6,
+    });
+    const keys = withFreeRent.map((r) => r.key);
+    const termIdx = keys.indexOf("term");
+    const freeRentIdx = keys.indexOf("freeRent");
+    expect(freeRentIdx).toBeGreaterThan(-1);
+    expect(freeRentIdx).toBe(termIdx + 1); // immediately after term
+    expect(withFreeRent.find((r) => r.key === "freeRent").value).toBe("6 mo");
+  });
+
+  it("zero free rent still renders (a real value, not treated as empty)", () => {
+    const rows = compFieldRows({ compType: "lease", compDate: "2026-08-01", leaseFreeRentMonths: 0 });
+    expect(rows.map((r) => r.key)).toContain("freeRent");
+  });
+
+  it("total annual rent is labeled FACE and formatted as whole-dollar currency, never a raw float", () => {
+    const rows = compFieldRows({
+      compType: "lease", compDate: "2026-08-01", leaseRate: 0.65, leaseRatePeriod: "monthly",
+      leaseRateExpense: "nnn", leaseSizeSf: 613208,
+    });
+    const totalRow = rows.find((r) => r.key === "totalRent");
+    expect(totalRow.label).toMatch(/face/i);
+    expect(totalRow.value).toBe("$4,783,022"); // .65 * 613208 * 12 = 4,783,022.4 -> whole dollars, no trailing float
+    expect(totalRow.value).not.toMatch(/\.\d/);
+  });
+});
+
+describe("comps: NEW-7(amended) party fields — one shared axis, three label sets", () => {
+  it("partyLabels names the axis per type: lease=Owner/Developer+Tenant, land=Seller+Buyer, building_sale=Seller+Buyer/User", () => {
+    expect(partyLabels("lease")).toEqual({ provider: "Owner/Developer", acquirer: "Tenant" });
+    expect(partyLabels("land")).toEqual({ provider: "Seller", acquirer: "Buyer" });
+    expect(partyLabels("building_sale")).toEqual({ provider: "Seller", acquirer: "Buyer/User" });
+  });
+
+  it("render near the top (before the type-specific money block) on all three comp types, independently optional", () => {
+    for (const compType of ["lease", "land", "building_sale"]) {
+      const none = compFieldRows({ compType, compDate: "2026-08-01" });
+      expect(none.map((r) => r.key)).not.toContain("partyProvider");
+      expect(none.map((r) => r.key)).not.toContain("partyAcquirer");
+
+      const withParties = compFieldRows({ compType, compDate: "2026-08-01", partyProvider: "Core5", partyAcquirer: "Acme Logistics" });
+      const keys = withParties.map((r) => r.key);
+      expect(keys[0]).toBe("partyProvider");
+      expect(keys[1]).toBe("partyAcquirer");
+      expect(withParties.find((r) => r.key === "partyProvider").value).toBe("Core5");
+      expect(withParties.find((r) => r.key === "partyAcquirer").value).toBe("Acme Logistics");
+    }
+  });
+
+  it("the row label follows the comp's own type", () => {
+    const lease = compFieldRows({ compType: "lease", compDate: "2026-08-01", partyProvider: "Core5", partyAcquirer: "Acme" });
+    expect(lease.find((r) => r.key === "partyProvider").label).toBe("Owner/Developer");
+    expect(lease.find((r) => r.key === "partyAcquirer").label).toBe("Tenant");
+
+    const land = compFieldRows({ compType: "land", compDate: "2026-08-01", partyProvider: "Jane Doe", partyAcquirer: "Core5" });
+    expect(land.find((r) => r.key === "partyProvider").label).toBe("Seller");
+    expect(land.find((r) => r.key === "partyAcquirer").label).toBe("Buyer");
+
+    const bldg = compFieldRows({ compType: "building_sale", compDate: "2026-08-01", partyProvider: "Jane Doe", partyAcquirer: "Core5" });
+    expect(bldg.find((r) => r.key === "partyAcquirer").label).toBe("Buyer/User");
+  });
+
+  it("one party present without the other still renders — independently optional", () => {
+    const providerOnly = compFieldRows({ compType: "lease", compDate: "2026-08-01", partyProvider: "Core5" });
+    expect(providerOnly.map((r) => r.key)).toContain("partyProvider");
+    expect(providerOnly.map((r) => r.key)).not.toContain("partyAcquirer");
+  });
+});
+
+describe("comps: NEW-8 party name suggestions — loose match, never a forced/normalized value", () => {
+  it("collectPartyNames pools BOTH sides across every comp type, exact strings, first-seen order, no dupes", () => {
+    const comps = [
+      { compType: "lease", partyProvider: "Core5", partyAcquirer: "Acme Logistics" },
+      { compType: "building_sale", partyProvider: "Jane Doe", partyAcquirer: "Core5" }, // Core5 repeats -> not duplicated
+      { compType: "land", partyProvider: "Core5 Industrial Partners", partyAcquirer: null }, // distinct spelling, kept separate
+      { compType: "land", partyProvider: "", partyAcquirer: "  " }, // blank/whitespace-only -> excluded
+    ];
+    expect(collectPartyNames(comps)).toEqual(["Core5", "Acme Logistics", "Jane Doe", "Core5 Industrial Partners"]);
+  });
+
+  it("matchPartyNames is case- and whitespace-insensitive substring matching, never a forced/exact match", () => {
+    const candidates = ["Core5", "Core 5", "Core5 Industrial Partners", "Acme Logistics"];
+    expect(matchPartyNames("core5", candidates)).toEqual(["Core5", "Core5 Industrial Partners"]);
+    expect(matchPartyNames("  CORE 5  ", candidates)).toEqual(["Core 5"]);
+    expect(matchPartyNames("acme", candidates)).toEqual(["Acme Logistics"]);
+  });
+
+  it("never merges or rewrites — near-duplicate spellings stay distinct entries", () => {
+    const candidates = ["Core5", "Core 5", "Core5 Industrial Partners"];
+    const matches = matchPartyNames("core", candidates);
+    expect(matches).toHaveLength(3); // all three surface each other; none collapsed into one
+  });
+
+  it("an empty query suggests nothing (there is nothing to narrow yet)", () => {
+    expect(matchPartyNames("", ["Core5"])).toEqual([]);
+    expect(matchPartyNames("   ", ["Core5"])).toEqual([]);
+  });
+
+  it("a brand-new name that matches nothing returns no suggestions — never blocks free text", () => {
+    expect(matchPartyNames("Brand New Co", ["Core5", "Acme Logistics"])).toEqual([]);
+  });
+
+  it("respects the limit", () => {
+    const many = Array.from({ length: 20 }, (_, i) => `Party ${i}`);
+    expect(matchPartyNames("Party", many, 5)).toHaveLength(5);
+  });
+});
+
 describe("comps: empty fields never render", () => {
   it("land: shows only $/SF + size when price is present but size isn't recorded as sf/ac split", () => {
     const rows = compFieldRows({ compType: "land", compDate: "2026-08-01" });
@@ -244,7 +363,20 @@ describe("comps: empty fields never render", () => {
 
   it("no comp type at all still only shows the required date, not blank rows for anything else", () => {
     const rows = compFieldRows({ compDate: "2026-08-01" });
-    expect(rows).toEqual([{ key: "date", label: "Date", value: "2026-08-01" }]);
+    expect(rows).toEqual([{ key: "date", label: "Date", value: "Aug 1, 2026" }]);
+  });
+});
+
+describe("comps: NEW-6 date rendering — matches the app's read-view convention, never raw ISO", () => {
+  it("compFieldRows formats the date like the rest of the app's read views (FileBrowser/SiteReviewModal/MapFinder), not a raw ISO string", () => {
+    const rows = compFieldRows({ compType: "land", compDate: "2026-08-28" });
+    expect(rows.find((r) => r.key === "date").value).toBe("Aug 28, 2026");
+  });
+
+  it("parses the date-only string by its Y/M/D parts, never via a UTC Date() that could shift the day", () => {
+    // A date near a US-timezone UTC boundary is the case that breaks a naive `new Date(iso)`.
+    const rows = compFieldRows({ compType: "land", compDate: "2026-01-01" });
+    expect(rows.find((r) => r.key === "date").value).toBe("Jan 1, 2026");
   });
 });
 
@@ -332,5 +464,54 @@ describe("comps: row <-> model round-trip", () => {
   it("compToRow omits lease_size_sf as null when absent, never coerced to 0", () => {
     const row = compToRow({ compType: "lease", compDate: "2026-08-01", anchor: { kind: "pin", lat: 29.7, lon: -95.4 } });
     expect(row.lease_size_sf).toBeNull();
+  });
+
+  it("lease_free_rent_months round-trips like every other lease column", () => {
+    const row = compToRow({
+      compType: "lease", compDate: "2026-08-01", anchor: { kind: "pin", lat: 29.7, lon: -95.4 },
+      leaseFreeRentMonths: 6,
+    });
+    expect(row.lease_free_rent_months).toBe(6);
+
+    const comp = rowToComp({
+      id: "c1", user_id: "u1", team_id: null, project_id: null,
+      comp_type: "lease", comp_date: "2026-08-01", title: "", notes: "",
+      anchor_kind: "pin", lat: "29.7", lon: "-95.4", county: null, parcel_apn: null, parcel_geom: null,
+      land_price: null, land_size_value: null, land_size_unit: null,
+      bldg_price: null, bldg_size_sf: null,
+      lease_rate: "7", lease_rate_period: "annual", lease_rate_expense: "nnn", lease_ti: null, lease_term: null,
+      lease_size_sf: null, lease_free_rent_months: "6", comp_party_provider: null, comp_party_acquirer: null,
+      created_at: "2026-08-01T00:00:00Z", updated_at: "2026-08-01T00:00:00Z",
+    });
+    expect(comp.leaseFreeRentMonths).toBe(6);
+  });
+
+  it("comp_party_provider / comp_party_acquirer round-trip on any comp type — a shared axis, not a lease-only pair", () => {
+    const row = compToRow({
+      compType: "building_sale", compDate: "2026-08-01", anchor: { kind: "pin", lat: 29.7, lon: -95.4 },
+      partyProvider: "Jane Doe", partyAcquirer: "Core5",
+    });
+    expect(row.comp_party_provider).toBe("Jane Doe");
+    expect(row.comp_party_acquirer).toBe("Core5");
+
+    const comp = rowToComp({
+      id: "c1", user_id: "u1", team_id: null, project_id: null,
+      comp_type: "building_sale", comp_date: "2026-08-01", title: "", notes: "",
+      anchor_kind: "pin", lat: "29.7", lon: "-95.4", county: null, parcel_apn: null, parcel_geom: null,
+      land_price: null, land_size_value: null, land_size_unit: null,
+      bldg_price: null, bldg_size_sf: null,
+      lease_rate: null, lease_rate_period: null, lease_rate_expense: null, lease_ti: null, lease_term: null,
+      lease_size_sf: null, lease_free_rent_months: null, comp_party_provider: "Jane Doe", comp_party_acquirer: "Core5",
+      created_at: "2026-08-01T00:00:00Z", updated_at: "2026-08-01T00:00:00Z",
+    });
+    expect(comp.partyProvider).toBe("Jane Doe");
+    expect(comp.partyAcquirer).toBe("Core5");
+  });
+
+  it("compToRow sends null (never omits) for the new columns when absent, matching every other optional field", () => {
+    const row = compToRow({ compType: "lease", compDate: "2026-08-01", anchor: { kind: "pin", lat: 29.7, lon: -95.4 } });
+    expect(row.lease_free_rent_months).toBeNull();
+    expect(row.comp_party_provider).toBeNull();
+    expect(row.comp_party_acquirer).toBeNull();
   });
 });
