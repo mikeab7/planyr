@@ -46,8 +46,8 @@ export const KEY_CONTRACT = Object.freeze([
     why: "B746/V258 — a range slider has no native browser undo to consume, so this one chord is live there too. It is no longer a special case: CONTROL_CONSUMES below says a slider takes arrows and nothing else, so this falls out of the rule." },
   { id: "redo", label: "Redo", keys: ["y", "Y"], mod: M.MOD, scope: "app", mutates: true,
     why: "Same as undo." },
-  { id: "escape", label: "Cancel / close the inspector", keys: ["Escape"], mod: M.NONE, scope: "app", mutates: false,
-    why: "B1125 — Escape is the GUARANTEED escape hatch; a panel you can get stuck in is the bug it closes." },
+  { id: "escape", label: "Cancel / close the inspector", keys: ["Escape"], mod: M.NONE, scope: "app", mutates: false, guaranteed: true,
+    why: "B1125 — Escape is the GUARANTEED escape hatch; a panel you can get stuck in is the bug it closes. NEW-1 — `guaranteed` makes that literal: FIELD scope (and the TOUCH.FIELD latch, which the owner's Parcels-panel report showed OUTLIVES the control's focus) used to refuse Escape exactly like a typed character. Escape types no character, so refusing it to protect typing buys nothing, and it is the one key a stuck user reaches for — see keyScopeVerdict's `entry.guaranteed` check." },
   { id: "shortcuts", label: "Shortcuts overlay", keys: ["?", "/"], mod: M.NONE, scope: "app", mutates: false,
     why: "A help surface. Reaches nothing." },
 
@@ -177,7 +177,25 @@ export function keyScopeVerdict({ entry, scope, fieldEdit = false }) {
       ? { allow: false, reason: scope === SCOPE.SLIDER ? REFUSAL.SLIDER : REFUSAL.PICKER, entry }
       : { allow: true, reason: null, entry };
   }
-  if (scope === SCOPE.FIELD) return { allow: false, reason: REFUSAL.FIELD, entry };
+  /* ⛔ NEW-1 — A `guaranteed` ENTRY (escape, and ONLY escape) SURVIVES EVEN FIELD SCOPE.
+   *
+   * The owner: "escape doesnt work on getting out of this parcel editing tool, and theres no
+   * clear way out." Reproduced live: the Parcels panel's checkbox/text controls latch
+   * `TOUCH.FIELD` in `canvasTouchRef` (shared/keyboard/keyScope.js), and that latch OUTLIVES the
+   * control's own focus by design (B1188) — so once he had touched anything in the panel, every
+   * later key, Escape included, was judged against a field he may no longer even be looking at.
+   * `keyScopeVerdict`'s job here is exactly what it always was — "a text box owns the whole
+   * keyboard, you must be able to type" — but Escape types no character, so refusing it protects
+   * nothing, and it is the one key a stuck user reaches for. This is NOT a blanket exception:
+   * undo/redo/shortcuts stay refused out of FIELD (their scope:"app" alone is not enough, on
+   * purpose — Ctrl+Z inside a real text box is that box's own native undo, and it must stay that
+   * way), which is why the carve-out is its own declared property rather than `entry.scope ===
+   * "app"`. SLIDER/PICKER are unaffected — a PICKER's own Escape-closes-the-dropdown consumption
+   * (CONTROL_CONSUMES above) is a deliberate, different, self-resolving case, not a "stuck" one. */
+  if (scope === SCOPE.FIELD) {
+    if (entry.guaranteed) return { allow: true, reason: null, entry };
+    return { allow: false, reason: REFUSAL.FIELD, entry };
+  }
   /* CHROME — and the line here is MUTATION, not canvas-ness, which is a correction worth stating.
    *
    * The first cut refused every `scope: "canvas"` entry from chrome. That is over-broad and it

@@ -23260,6 +23260,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             );
           })()}
 
+          {/* Split cut banner (NEW-3) — Merge/easement/the Parcel tool all show a persistent banner
+              with an explicit Done exit while their gesture is in progress; Split alone had none, so
+              the in-progress cut (a red dashed line + handles on the map — the owner's screenshot)
+              advertised no way out short of a keyboard shortcut. Same pattern reused, not a new one:
+              same position/zIndex/stopPropagation guard as the Merge banner below, a live point
+              count, Finish once the cut is a real line, and Done always exits the tool cleanly —
+              the same clear-and-return-to-select Escape already does, reachable with the mouse. */}
+          {tool === "split" && (
+            <div onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}
+              style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", zIndex: 6, whiteSpace: "nowrap", background: "rgba(25,22,19,0.94)", color: "#fff", padding: "6px 8px 6px 15px", borderRadius: 99, fontSize: 12.5, fontWeight: 500, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 6px 22px rgba(0,0,0,0.28)" }}>
+              <span>{splitPath.length >= 2 ? `${splitPath.length} points on the cut — click to extend or Finish` : "Click a cut line across a parcel"}</span>
+              <button className="dbtn" style={{ ...btn(splitPath.length >= 2), padding: "5px 12px", opacity: splitPath.length >= 2 ? 1 : 0.5, cursor: splitPath.length >= 2 ? "pointer" : "default" }}
+                disabled={splitPath.length < 2} onClick={finishSplit}>Finish ⏎</button>
+              <button className="dbtn" style={{ ...chip, padding: "5px 10px" }} onClick={() => { setSplitPath([]); setTool("select"); }}>Done</button>
+            </div>
+          )}
+
           {/* Merge selection banner — Shift-click parcels to multi-select, then Merge.
               zIndex must clear the SVG canvas (zIndex:1) or the transparent canvas paints
               OVER the banner and swallows its button clicks (the grab-cursor / "Clear pans

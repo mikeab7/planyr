@@ -100,6 +100,30 @@ export const PICKER_TAGS = Object.freeze(["SELECT"]);
 /** Input types that are a CONTROL rather than a text box. */
 export const SLIDER_TYPES = Object.freeze(["range"]);
 
+/* ⛔ NEW-1 — AN `<input>` IS NOT TEXT ENTRY MERELY BY TAG NAME. A checkbox or radio (or a bare
+ * button/submit/reset/image/file/color/hidden input) is tag `INPUT` exactly like a real text box,
+ * so `TEXT_ENTRY_TAGS.includes("INPUT")` answered FIELD for all of them — and `keyScopeVerdict`'s
+ * FIELD branch refuses EVERY key unconditionally, `escape` (B1125's declared scope:"app") included.
+ *
+ * Reproduced live: the Parcels panel's per-row "Active" checkbox takes focus on an ordinary click
+ * (native browser behaviour), so a user who ticks it — or any other checkbox in the app — mid-Split
+ * or mid-Merge and then presses Escape gets FIELD scope and Escape is silently swallowed. The panel
+ * has genuine text fields too (the "Add by address" search box, the Parcel Record fields), and
+ * those are untouched: this excludes only the input types that consume no typed character at all.
+ *
+ * Same shape as the SLIDER/PICKER split above (a `<select>` or a range input is not a text box
+ * either) — a checkbox is the third control that "picks" rather than "types," and it gets the same
+ * treatment: fall through to the ordinary latch (CHROME/CANVAS), exactly like a focused `<button>`
+ * already does. */
+export const NON_TEXT_INPUT_TYPES = Object.freeze([
+  "checkbox", "radio", "button", "submit", "reset", "image", "file", "color", "hidden",
+]);
+
+const isTextInputType = (type) => {
+  const t = String(type || "").toLowerCase();
+  return !SLIDER_TYPES.includes(t) && !NON_TEXT_INPUT_TYPES.includes(t);
+};
+
 /**
  * Which surface owns the keyboard, from facts the caller reads off the DOM once.
  *
@@ -117,7 +141,8 @@ export function focusScope({ tag, type, isContentEditable, insideCanvas, lastTou
   if (isContentEditable) return SCOPE.FIELD;
   if (T === "INPUT" && SLIDER_TYPES.includes(String(type || "").toLowerCase())) return SCOPE.SLIDER;
   if (PICKER_TAGS.includes(T)) return SCOPE.PICKER;
-  if (TEXT_ENTRY_TAGS.includes(T)) return SCOPE.FIELD;
+  if (T === "TEXTAREA") return SCOPE.FIELD;
+  if (T === "INPUT" && isTextInputType(type)) return SCOPE.FIELD;
   /* A focused node inside the drawing IS the drawing — this is what keeps a future focusable
    * canvas (or a focusable handle inside it) from reading as chrome. */
   if (insideCanvas) return SCOPE.CANVAS;
@@ -173,12 +198,18 @@ export function touchLatch({ insideCanvas, isTextEntry, inFieldGroup } = {}) {
   return TOUCH.CHROME;
 }
 
-/** Does this node accept typed text (as opposed to picking or dragging a value)? */
+/** Does this node accept typed text (as opposed to picking, toggling or dragging a value)? */
 const isTextControl = (el) => !!el && (
   el.isContentEditable
   || (el.tagName === "TEXTAREA")
-  || (el.tagName === "INPUT" && !SLIDER_TYPES.includes(String(el.type || "").toLowerCase()))
+  || (el.tagName === "INPUT" && isTextInputType(el.type))
 );
+
+/* NEW-1 — the same NON_TEXT_INPUT_TYPES exclusion, as a CSS selector, for the field-group scan
+ * below (`group.querySelector`) — a checkbox/radio inside a value row must not make the row read
+ * as a typing row either. Built once from the one array so the JS check and the selector cannot
+ * drift apart. */
+const TEXT_INPUT_QUERY = `input:not([type=range])${NON_TEXT_INPUT_TYPES.map((t) => `:not([type=${t}])`).join("")}, textarea, [contenteditable=true]`;
 
 /**
  * Read the DOM facts `touchLatch` needs off a real event target.
@@ -201,6 +232,6 @@ export function touchFactsOf(node, canvasEl) {
   return {
     insideCanvas: !!(canvasEl && node && (canvasEl === node || (el && canvasEl.contains(el)))),
     isTextEntry: isTextControl(el),
-    inFieldGroup: !!(group && (isTextControl(group) || group.querySelector("input:not([type=range]), textarea, [contenteditable=true]"))),
+    inFieldGroup: !!(group && (isTextControl(group) || group.querySelector(TEXT_INPUT_QUERY))),
   };
 }
