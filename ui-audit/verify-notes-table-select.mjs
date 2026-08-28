@@ -43,6 +43,13 @@ const ok = (label, cond, detail = "") => {
   else { fail += 1; console.log(`  ✗ ${label}${detail ? ` — ${detail}` : ""}`); }
 };
 
+const TABLE_FIXTURE_ROOT_TABLE = { type: "table", content: [
+  { type: "tableRow", content: [{ type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "Executive Assistant" }] }] }] },
+  { type: "tableRow", content: [{ type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "O: 281-305-1115" }] }] }] },
+  { type: "tableRow", content: [{ type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "M: (281) 705-2931" }] }] }] },
+  { type: "tableRow", content: [{ type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "E: Kandicec@quadvest.com" }] }] }] },
+] };
+
 /* Michael's Silvestri fixture shape: a 4-row × 1-col Outlook signature table, no class on
  * <table>, nested several levels deep inside a list item. Simplifying this (a flat table,
  * fewer levels) is exactly the trap docs/NOTES-CARRY-FORWARD.md §2 warns against. */
@@ -189,7 +196,202 @@ const settled = await page.evaluate(() => {
 ok("mat transform clears back to none once the caret leaves the table", !settled.transform || settled.transform === "translateY(0px)" || settled.transform === "",
   JSON.stringify(settled));
 
+console.log("\n4 · ⛔ NO FRAME MAY EVER PAINT THE TOOLBAR GROWN WITHOUT THE COMPENSATION (NEW-1,");
+console.log("    reopened 2026-08-28 — the shipped ResizeObserver-only fix compensated ONE FRAME");
+console.log("    LATE, which every earlier check here sampled too coarsely (every ~45ms / 2-3");
+console.log("    frames) to ever catch. A requestAnimationFrame sampler is the only instrument fine");
+console.log("    enough to see it: on the pre-fix build, the frame where the toolbar first measures");
+console.log("    at its taller height still has the mat's transform empty and the table already");
+console.log("    down by the full delta — a real, visible one-frame jump, exactly the reported");
+console.log("    \"jump and flash\". This is why AGAINST current main this section is REQUIRED to");
+console.log("    reproduce the defect before trusting the fix: it failed here first, then passed");
+console.log("    once NoteEditor.jsx compensated synchronously in a useLayoutEffect instead of");
+console.log("    waiting on the ResizeObserver alone. See docs/NOTES-CARRY-FORWARD.md §5.4.");
+await page.locator(".ProseMirror").first().click({ position: { x: 20, y: 5 } });
+await pacedWait(page, 200);
+await page.evaluate(() => {
+  window.__frames = [];
+  const mat = document.querySelector('[data-testid="note-mat"]');
+  const toolbar = document.querySelector('[data-testid="note-toolbar"]');
+  const table = document.querySelector(".ProseMirror table");
+  let n = 0;
+  function tick() {
+    window.__frames.push({
+      n,
+      toolbarH: Math.round(toolbar.getBoundingClientRect().height * 10) / 10,
+      transform: mat.style.transform,
+      tableTop: Math.round(table.getBoundingClientRect().top * 10) / 10,
+    });
+    n += 1;
+    if (n < 60) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+});
+await pacedWait(page, 60);
+const firstCell = await page.evaluate(() => {
+  const r = document.querySelectorAll(".ProseMirror table td")[1].getBoundingClientRect();
+  return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+});
+await page.mouse.click(firstCell.x, firstCell.y);
+await pacedWait(page, 1100);
+const frames = await page.evaluate(() => window.__frames);
+const baseline = frames[0].toolbarH;
+/* ⛔ THE RACE CHECK MEASURES `tableTop` DIRECTLY, NEVER THE `transform` STRING'S SHAPE. An
+ * earlier version of this check called a frame "uncompensated" whenever `transform` read ""
+ * — correct for the GROWING case (an empty transform there really is no compensation), but
+ * that same test would have misjudged the SHRINKING case below, whose correct SETTLED state
+ * is net-zero, i.e. an EMPTY transform. Comparing the visible position against its own final,
+ * settled value is the mechanism-agnostic version of the same check (VIEWPORT-STABLE is about
+ * the picture staying put, not about which CSS property does it). */
+const settledTop = frames[frames.length - 1].tableTop;
+let raceFrames = 0;
+let sawGrowth = false;
+for (const f of frames) {
+  if (f.toolbarH > baseline + 1) sawGrowth = true;
+  if (Math.abs(f.tableTop - settledTop) > 1) raceFrames += 1;
+}
+ok("⛔ the table entry is actually exercised by this probe (vacuity guard)", sawGrowth,
+  `baseline ${baseline}px, ${frames.length} frames sampled`);
+ok("⛔ zero frames ever paint the table away from its settled position (no visible jump)", raceFrames === 0,
+  `${raceFrames}/${frames.length} frames were in the race window (was 1+ before the fix)`);
+
+console.log("\n5 · ⛔ THE SCROLLER PINNED AT MAXIMUM SCROLL, NO SLACK LEFT TO COMPENSATE WITH");
+console.log("    (owner correction, 2026-08-28): the ORIGINAL note-jump fix compensated");
+console.log("    `scrollTop`, and was replaced with a `transform` specifically because a short");
+console.log("    note has `scrollHeight - clientHeight === 0` — zero slack, so adding to");
+console.log("    scrollTop clamps straight back to zero and the table still moves the full");
+console.log("    delta. The owner's live report had `scrollTop` PINNED at a constant non-zero");
+console.log("    value the whole gesture, which is consistent with EITHER a working transform");
+console.log("    OR a silently-clamped scrollTop compensation — the number alone can't tell them");
+console.log("    apart. This section pins the scroller at its OWN maximum scroll (whatever that");
+console.log("    is, including zero on a short note) before the drag, and asserts (a) scrollTop");
+console.log("    genuinely never changes — ruling out scroll-based compensation entirely — and");
+console.log("    (b) the frame-by-frame race check from section 4 still holds at zero slack.");
+async function assertNoRaceAtMaxScroll(label, gesture) {
+  await page.evaluate(() => {
+    const mat = document.querySelector('[data-testid="note-mat"]');
+    mat.scrollTop = mat.scrollHeight; // pin to whatever "maximum" is, short note or not
+  });
+  const scrollBefore = await page.evaluate(() => document.querySelector('[data-testid="note-mat"]').scrollTop);
+  await page.evaluate(() => {
+    window.__frames = [];
+    const mat = document.querySelector('[data-testid="note-mat"]');
+    const toolbar = document.querySelector('[data-testid="note-toolbar"]');
+    const table = document.querySelector(".ProseMirror table");
+    let n = 0;
+    function tick() {
+      window.__frames.push({
+        n,
+        toolbarH: Math.round(toolbar.getBoundingClientRect().height * 10) / 10,
+        transform: mat.style.transform,
+        tableTop: Math.round(table.getBoundingClientRect().top * 10) / 10,
+        scrollTop: mat.scrollTop,
+      });
+      n += 1;
+      if (n < 60) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  });
+  await pacedWait(page, 60);
+  await gesture();
+  await pacedWait(page, 1100);
+  const frames = await page.evaluate(() => window.__frames);
+  const scrollAfter = await page.evaluate(() => document.querySelector('[data-testid="note-mat"]').scrollTop);
+  const scrollDrifted = frames.some((f) => f.scrollTop !== scrollBefore);
+  ok(`${label}: scrollTop never moves (compensation is NOT scroll-based) at max-scroll`,
+    !scrollDrifted && scrollAfter === scrollBefore, `before=${scrollBefore}, after=${scrollAfter}, drifted=${scrollDrifted}`);
+  const baseline = frames[0].toolbarH;
+  const settledTop = frames[frames.length - 1].tableTop;
+  let raceFrames = 0;
+  let sawChange = false;
+  for (const f of frames) {
+    if (Math.abs(f.toolbarH - baseline) > 1) sawChange = true;
+    // Measure the visible position against its own settled value, not the `transform`
+    // string's shape — the correct settled state for a SHRINKING toolbar is net-zero (an
+    // empty transform), which a check for "transform is non-empty" would misread as a race.
+    if (Math.abs(f.tableTop - settledTop) > 1) raceFrames += 1;
+  }
+  ok(`${label}: the toolbar transition is actually exercised (vacuity guard)`, sawChange, `baseline ${baseline}px`);
+  ok(`${label}: zero race frames at maximum scroll (no slack to fall back on)`, raceFrames === 0,
+    `${raceFrames}/${frames.length} frames raced`);
+  return frames;
+}
+
+await seed(FIXTURE_DOC, "MaxScroll");
+await page.waitForSelector(".ProseMirror table", { timeout: 20000 });
+
+// ENTERING the table — the toolbar GROWS.
+await assertNoRaceAtMaxScroll("entering the table (toolbar grows)", async () => {
+  const c = await page.evaluate(() => {
+    const r = document.querySelectorAll(".ProseMirror table td")[1].getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  });
+  await page.mouse.click(c.x, c.y);
+});
+
+// ⛔ THE MIRROR CASE, the owner named explicitly: leaving the table SHRINKS the toolbar, which
+// moves content the OTHER way (up, not down) — a compensation that only cancels growth and
+// happens to look right by coincidence would fail this arm.
+await assertNoRaceAtMaxScroll("leaving the table (toolbar shrinks)", async () => {
+  await page.locator(".ProseMirror").first().click({ position: { x: 20, y: 5 } });
+});
+
+console.log("\n6 · ⛔ A PLAIN PARAGRAPH AFTER THE TABLE MUST NOT MOVE EITHER (owner's exact repro shape:");
+console.log("    click from inside a table out to plain text, assert the PARAGRAPH's own client");
+console.log("    rect, not the table's — the compensation is one transform on the whole scroller,");
+console.log("    so proving it on the table already implies it here, but this asserts it directly");
+console.log("    rather than by inference.)");
+const TABLE_THEN_PARAGRAPH = {
+  type: "doc",
+  content: [
+    TABLE_FIXTURE_ROOT_TABLE,
+    { type: "paragraph", content: [{ type: "text", text: "Plain text after the table." }] },
+  ],
+};
+await seed(TABLE_THEN_PARAGRAPH, "ParagraphAfterTable");
+await page.waitForSelector(".ProseMirror table", { timeout: 20000 });
+await page.evaluate(() => {
+  const mat = document.querySelector('[data-testid="note-mat"]');
+  mat.scrollTop = mat.scrollHeight;
+});
+// Enter the table first (so the toolbar's second row is showing), THEN click the paragraph.
+const cellPoint = await page.evaluate(() => {
+  const r = document.querySelectorAll(".ProseMirror table td")[0].getBoundingClientRect();
+  return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+});
+await page.mouse.click(cellPoint.x, cellPoint.y);
+await pacedWait(page, 300);
+await page.evaluate(() => {
+  window.__frames = [];
+  const p = document.querySelector(".ProseMirror > p");
+  let n = 0;
+  function tick() {
+    const r = p.getBoundingClientRect();
+    window.__frames.push({ n, top: Math.round(r.top * 10) / 10, left: Math.round(r.left * 10) / 10 });
+    n += 1;
+    if (n < 60) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+});
+await pacedWait(page, 60);
+await page.locator(".ProseMirror > p").click(); // leave the table — the toolbar SHRINKS
+await pacedWait(page, 1100);
+const paraFrames = await page.evaluate(() => window.__frames);
+const settledParaTop = paraFrames[paraFrames.length - 1].top;
+const paraRace = paraFrames.filter((f) => Math.abs(f.top - settledParaTop) > 1).length;
+ok("⛔ the plain paragraph's client rect never moves while leaving the table (toolbar shrinking), even at max scroll",
+  paraRace === 0, `${paraRace}/${paraFrames.length} frames raced, settled top=${settledParaTop}`);
+
 console.log(`\n${pass}/${pass + fail} checks passed`);
 console.log(`page errors: ${errs.length ? errs.slice(0, 5).join(" | ") : "clean"}`);
+console.log("\nNOT COVERED by this file (named, not silently skipped):");
+console.log("  · a drag that starts OUTSIDE the table and ends INSIDE it while the scroller has");
+console.log("    to auto-scroll to keep the endpoint in view (a different mechanism — the browser's");
+console.log("    own edge-autoscroll — layered on top of this compensation; not exercised here)");
+console.log("  · two rapid successive enter/leave transitions inside one animation frame (the");
+console.log("    accumulator is additive by construction, but this file only ever exercises one");
+console.log("    transition per sampling window)");
+console.log("  · a table inside a positioned box (`noteAnchor`) triggering the SAME toolbar growth");
+console.log("    — covered by row-level tests in sweep-notes-table.mjs, not by a frame sampler here");
 await browser.close();
 process.exit(fail ? 1 : 0);

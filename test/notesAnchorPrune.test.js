@@ -21,7 +21,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   anchorIsEmpty, countEmptyAnchors, pruneEmptyAnchors,
 } from "../src/workspaces/notes/lib/notesAnchorPrune.js";
-import { addPage, deleteNode, emptyTree } from "../src/workspaces/notes/lib/notesModel.js";
+import { addPage, deleteNode, emptyTree, touchPage } from "../src/workspaces/notes/lib/notesModel.js";
 import { ANCHOR_EDGE_PAD, ANCHOR_MIN_WIDTH, fitAnchorBox } from "../src/workspaces/notes/lib/notesAnchorNode.js";
 
 const mem = new Map();
@@ -188,7 +188,15 @@ describe("⛔ THE BIN READER READS WHAT THE ROW PROMISED", () => {
     let t = emptyTree();
     t = addPage(t, { id: "sec", title: "Parent" }).tree;
     t = addPage(t, { id: "k1", title: "One", parentId: "sec" }).tree;
-    const binned = deleteNode(t, "sec").tree;        // no bodies were ever written
+    /* ⛔ A REAL PURGE LEAVES PROOF ON THE TREE, EVEN WHEN THE BODY IS GONE (NEW-2, reopened
+     * 2026-08-28): `touchPage` is what `Notes.jsx`'s `handleSaved` stamps once a write has
+     * actually landed, so `updatedAt !== createdAt` is what tells a real destroyed write apart
+     * from a page that was created and binned before its first autosave ever ran. Without this
+     * stamp, "no body on this device" was the ONLY signal `gone` had, and that is exactly what
+     * made the owner's brand-new empty page read as "permanently deleted" — nothing distinguishes
+     * a genuinely purged page from one that was simply never written. */
+    t = touchPage(t, "k1", 5_000);
+    const binned = deleteNode(t, "sec").tree;        // k1's body was written once and is now gone
     const [row] = store.collectBinFacts(binned, []);
     expect(row.reading).toEqual([]);
     expect(row.gone).toBe(true);                      // NOT "nothing was ever written in it"

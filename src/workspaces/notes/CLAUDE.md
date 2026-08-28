@@ -473,6 +473,14 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
     states, not two: a live project · "Not in a project" · one that no longer exists · and an
     entry binned before the bin recorded where a page came from, which says so rather than
     claiming the note belonged nowhere.
+    ⛔ **AND "GONE" MEANS DESTROYED, NEVER "NEVER WRITTEN" (NEW-2, reopened 2026-08-28).** `gone`
+    used to fire on `!anyStored` alone — no body on this device — which is also exactly true of a
+    page created and binned before its first autosave ever ran. That page showed *"Its writing
+    was permanently deleted and cannot be brought back"* about writing that never existed. The
+    fix reads the TREE, not the body: `updatedAt !== createdAt` for at least one page in the
+    cascade is proof a write actually landed at some point (`touchPage`, stamped only by
+    `Notes.jsx`'s `handleSaved`, never by a keystroke); without that proof, absence reads as
+    "empty", never "gone". Full mechanism: `docs/NOTES-CARRY-FORWARD.md` §5.7.
   - `lib/notesProjectFiling.js` + `lib/notesProjectLink.js` + `lib/notesKeys.js` — "what is this
     project holding?", answerable from a route where Notes is **not mounted**, because the thing
     that deletes a project is the shared header breadcrumb. The account is passed in EXPLICITLY
@@ -856,18 +864,34 @@ landed together. What each one is, and the ONE decision inside it that is not ob
   image-only MIME list and add `name` + `kind` to `notes_images`. Same "committed as a record"
   discipline as `notes_cloud_sync.sql`.
 - **⛔ SELECTING ACROSS TABLE CELLS "JUMPED AND FLASHED" — A CHROME REFLOW, NOT A SELECTION BUG
-  (B649376, owner report, Silvestri "Utility" table).** *"When I click and highlight stuff, it
-  just jumps and flashes."* Measured with a real drag: `NoteToolbar`'s Table button group only
-  renders once the caret is inside a table, so the toolbar grows an extra row the instant you
-  press down in a cell — and because the toolbar is a SIBLING of the scrollable mat in the same
-  flex column, the mat's own top edge (the table included) slides 36px under a pointer that has
-  not moved. The native selection never got the chance to extend across cells; it stayed
-  collapsed and hopped between wrong text nodes, some outside the table, on every mousemove.
-  Fixed in `NoteEditor.jsx` with a `ResizeObserver` on the toolbar that folds the measured delta
-  into the mat's own `transform`, before paint (VIEWPORT-STABLE) — **not `scrollTop`**, which
-  the first attempt used and which silently no-ops on a note too short to have scroll slack
-  (exactly this fixture: a signature-block table near the top of a short page). Guard, and the
-  known-good control arm (plain paragraphs, must already work): **verify-notes-table-select**.
+  (B649376, reopened 2026-08-28, owner report, Silvestri "Utility" table).** *"When I click and
+  highlight stuff, it just jumps and flashes."* Measured with a real drag: `NoteToolbar`'s Table
+  button group only renders once the caret is inside a table, so the toolbar grows an extra row
+  the instant you press down in a cell (38.9px → 74.8px) — and because the toolbar is a SIBLING
+  of the scrollable mat in the same flex column, the mat's own top edge (the table included)
+  slides by that exact delta under a pointer that has not moved. The native selection never got
+  the chance to extend across cells; it stayed collapsed and hopped between wrong text nodes,
+  some outside the table, on every mousemove.
+  ⛔ **THE FIRST FIX SHIPPED, PASSED ITS OWN GUARD, AND STILL REACHED PRODUCTION BROKEN.** It used
+  a `ResizeObserver` alone to fold the toolbar's measured delta into the mat's own `transform`
+  (VIEWPORT-STABLE) — **not `scrollTop`**, which the very first attempt used and which silently
+  no-ops on a note too short to have scroll slack (this fixture: a signature-block table near the
+  top of a short page). But a `ResizeObserver` callback is a PASSIVE, after-the-fact mechanism,
+  not the synchronous layout effect the rule actually calls for — a `requestAnimationFrame`
+  sampler (the shipped guard only sampled every ~45ms and never caught this) found a genuine
+  one-frame gap: the frame where the toolbar first measures taller still has the transform empty
+  and the content already down by the full delta, corrected only on the NEXT frame. **The fix
+  that held:** measure `inTable` inline (the same boolean the toolbar itself renders on) and
+  compensate in a `useLayoutEffect` keyed on it — guaranteed to run in the SAME commit as the
+  toolbar's extra row, before paint. The `ResizeObserver` stays only as a fallback for other
+  causes of the same resize (a window resize, a webfont load), sharing one height baseline so the
+  two paths never double-count. Proven to hold at MAXIMUM SCROLL too (an owner-named condition:
+  scrollTop pinned with zero slack left, the exact case the original `scrollTop` attempt failed
+  under) and in the MIRROR direction (leaving the table, the toolbar shrinking — content moves
+  the other way). Full numbers and the frame-race mechanics: `docs/NOTES-CARRY-FORWARD.md` §5.4.
+  Guard, and the known-good control arm (plain paragraphs, must already work):
+  **verify-notes-table-select** (now six sections: the drag itself, the frame-by-frame race
+  check, max-scroll in both directions, and a plain paragraph's own rect after the table).
 - **"CONVERT TABLE TO TEXT" (NEW-2 / B649377, `lib/notesTableToText.js`).** What he actually
   wanted: the four lines of contact detail an Outlook signature wraps in a table, OUT of the
   table. Right-click a table → each row becomes a paragraph, or a SIBLING LIST ITEM at the same
@@ -886,6 +910,16 @@ landed together. What each one is, and the ONE decision inside it that is not ob
   nested in a list vs. top-level, a table inside a positioned box — is
   **sweep-notes-table** (32 checks, all green; the app's own table plumbing was
   already solid — both bugs above were in the surrounding chrome/wiring, not prosemirror-tables).
+  ⛔ **AND ITS OWN "32 GREEN, NO GAPS" WAS WRONG (NEW-3, 2026-08-28) — four specific gaps the owner
+  named after re-testing: merge/split on a genuinely multi-column table (the sweep only ever
+  merged an edge-to-edge 2-column table, so a merge could never be checked against an untouched
+  neighbour column, and never covered a ROWSPAN/vertical merge); what actually lands on the
+  SYSTEM clipboard on copy (read back from the OS clipboard's `text/html` entry, not just what
+  this app's own paste path can reconstruct); a REAL Outlook-shaped clipboard paste (MSO wrapper
+  markup, a conditional-comment XML block, a NESTED single-column layout table, a live mailto
+  link — the shipped regression test used a hand-authored `<table><tr><td>` with none of that);
+  and a table inside a positioned box exercised beyond row-add (delete-row, and "Convert table to
+  text" from inside the box).** All 22 closed clean — guard: **verify-notes-table-gaps**.
 
 **Guards that will fail the build if you break them** (the `notesModule` suite under `test/`): the
 eight-place workspace registration checklist · theme-token-only chrome in the three JSX surfaces ·
