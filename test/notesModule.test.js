@@ -87,6 +87,8 @@ const ALL_NOTES_FILES = [
   "lib/notesEnterInherit.js",
   // NEW-MINI-TOOLBAR — the content palettes, shared by the toolbar and the right-click strip.
   "lib/notesFormatPalette.js",
+  // NEW-2 — "Convert table to text": pulls a table's rows out as plain lines / sibling list items.
+  "lib/notesTableToText.js",
 ];
 const SKETCH_FILES = ALL_NOTES_FILES.filter((f) => f.includes("Sketch"));
 

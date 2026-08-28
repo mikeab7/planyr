@@ -140,7 +140,7 @@ position**.
 
 ---
 
-## 5 · The three recurring bug families — suspect these first
+## 5 · The recurring bug families — suspect these first
 
 1. **A GLOBAL KEY BINDING LEAKING INTO TEXT.** Escape handled twice (B434418); the arrow-nudge
    swallowed arrows while typing (B519681). The guard is a **PROPERTY** — every globally-bound key
@@ -156,6 +156,37 @@ position**.
    brand-new empty block, decided its runs disagreed, and nulled the size — which is why Enter
    stopped carrying formatting (B583010). **Anything that "corrects" the document on every
    transaction is a suspect**, and an `appendTransaction` is the first place to look.
+4. **A SIBLING'S HEIGHT CHANGE SHIFTS CONTENT UNDER AN IN-PROGRESS GESTURE (B649376).** The
+   Table toolbar group only renders `{inTable && (...)}`, so the instant the caret enters a
+   table the toolbar wraps to an extra row and the sheet below it — the table included — is
+   pushed down by that exact delta, mid-drag, under a pointer that has not moved. Measured as
+   his *"it just jumps and flashes"*: the native selection never extended across cells at all,
+   it stayed collapsed and hopped between wrong text nodes as the content slid out from under
+   the drag. **Any conditionally-rendered CHROME sitting above a draggable/scrollable surface
+   is a suspect** — grep for `{inX && (` near a toolbar/rail before assuming a drag bug is in
+   the drag code itself. Fixed with a `ResizeObserver` folding the measured delta into the
+   surface's own `transform` (VIEWPORT-STABLE) — **not `scrollTop`**, which silently no-ops on
+   a note too short to have scroll slack (exactly this fixture).
+5. **A CUSTOM TIPTAP COMMAND THAT BUILDS ITS OWN `state.tr` INSTEAD OF USING THE ONE HANDED IN
+   REPORTS SUCCESS AND DOES NOTHING (B649377).** `editor.commands.x()` (a single, un-chained
+   call — what a menu row's `onClick` uses) always dispatches the ONE `tr` it built before
+   calling your function; the `dispatch` prop it hands you is a no-op. Destructure `tr` from
+   the command's own props and mutate THAT — `state.tr` is a getter that returns a **fresh**
+   Transaction every read, so mutating a locally-made one is invisible. Caught it by adding
+   `window.__noteEditor.runCommand(name, ...args)` (gated behind `__PLANYR_E2E`, same as every
+   other diagnostic hook) and comparing the command's own return value against the stored
+   document — a wrong-but-confident `true` is worse than a thrown error.
+6. **A RIGHT-CLICK'S CARET PLACEMENT IS ASYNC; READING SELECTION IN THE SAME EVENT SEES THE OLD
+   ONE (B649377).** Measured on a plain paragraph, no table involved: the native DOM selection
+   moved correctly on `mousedown`, but ProseMirror's own `state.selection` only catches up
+   through a `selectionchange` listener that fires **~20 ms after `contextmenu` has already
+   run** — so any right-click menu that reads `editor.state.selection`/`isActive(...)` to decide
+   what to show (is the caret in a table? in a link?) sees wherever the caret was BEFORE this
+   click. Left-click is unaffected (`focusFromMat` places it directly) — this is invisible until
+   something that needs to be RIGHT on a right-click actually ships. Fix: resolve the click with
+   `editor.view.posAtCoords` and call `setTextSelection` by hand in `onContextMenu`, before
+   building the menu — unless the click landed inside the CURRENT selection (Cut/Copy on an
+   already-selected phrase must not collapse it).
 
 ---
 

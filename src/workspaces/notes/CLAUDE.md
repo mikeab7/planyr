@@ -855,6 +855,37 @@ landed together. What each one is, and the ONE decision inside it that is not ob
 - `db/notes_attachments.sql` — the migration NEW-5 needs: relax the `notes-images` bucket's
   image-only MIME list and add `name` + `kind` to `notes_images`. Same "committed as a record"
   discipline as `notes_cloud_sync.sql`.
+- **⛔ SELECTING ACROSS TABLE CELLS "JUMPED AND FLASHED" — A CHROME REFLOW, NOT A SELECTION BUG
+  (B649376, owner report, Silvestri "Utility" table).** *"When I click and highlight stuff, it
+  just jumps and flashes."* Measured with a real drag: `NoteToolbar`'s Table button group only
+  renders once the caret is inside a table, so the toolbar grows an extra row the instant you
+  press down in a cell — and because the toolbar is a SIBLING of the scrollable mat in the same
+  flex column, the mat's own top edge (the table included) slides 36px under a pointer that has
+  not moved. The native selection never got the chance to extend across cells; it stayed
+  collapsed and hopped between wrong text nodes, some outside the table, on every mousemove.
+  Fixed in `NoteEditor.jsx` with a `ResizeObserver` on the toolbar that folds the measured delta
+  into the mat's own `transform`, before paint (VIEWPORT-STABLE) — **not `scrollTop`**, which
+  the first attempt used and which silently no-ops on a note too short to have scroll slack
+  (exactly this fixture: a signature-block table near the top of a short page). Guard, and the
+  known-good control arm (plain paragraphs, must already work): **verify-notes-table-select**.
+- **"CONVERT TABLE TO TEXT" (NEW-2 / B649377, `lib/notesTableToText.js`).** What he actually
+  wanted: the four lines of contact detail an Outlook signature wraps in a table, OUT of the
+  table. Right-click a table → each row becomes a paragraph, or a SIBLING LIST ITEM at the same
+  level when the table is the only content of a list item (his exact case) — one transaction,
+  one undo step, every cell's marks (bold, links) carried straight through. ⛔ **The paste HALF
+  of this ask was already shipped** — `notesPastePlain.js`'s `isLayoutTable` unwraps a
+  single-column table into plain lines on every paste already; this command is for a table that
+  predates that fix or arrived some other way. Two bugs found chasing this, both now guarded
+  (see `docs/NOTES-CARRY-FORWARD.md` §5 families 5–6 for the full mechanism): a custom command
+  that mutated its own `state.tr` instead of the one Tiptap hands a single (`editor.commands.x()`)
+  call, which reported `true` and changed nothing; and a right-click's caret placement being
+  ASYNC — `editor.state.selection` lags the real click by one `selectionchange` tick, so the
+  document menu was reading where the caret used to be. Fixed by resolving the click position by
+  hand in `onContextMenu`. Guard: **verify-notes-table-to-text**. The broader sweep —
+  copy/paste, row/column ops, merge/split, header toggle, Tab-out-of-the-last-cell, a table
+  nested in a list vs. top-level, a table inside a positioned box — is
+  **sweep-notes-table** (32 checks, all green; the app's own table plumbing was
+  already solid — both bugs above were in the surrounding chrome/wiring, not prosemirror-tables).
 
 **Guards that will fail the build if you break them** (the `notesModule` suite under `test/`): the
 eight-place workspace registration checklist · theme-token-only chrome in the three JSX surfaces ·

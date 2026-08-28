@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-28 @ `81e635da` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-28 @ `0906e90b` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_578 source files mapped._
+_579 source files mapped._
 
 ## infra
 
@@ -181,6 +181,8 @@ _578 source files mapped._
   - _exports_: `clearNotesStorageError`, `collectBinFacts`, `collectOpenTasks`, `deleteNoteImages`, `deletePages`, `deletePageVersions`, `ignoreDuplicate`, `lastNotesStorageError`, `listStoredPageIds`, `LOCAL_SCOPE`, `markPagesBinned`, `markPagesRestored`, `MAX_FILE_BYTES`, `MAX_IMAGE_BYTES`, `MAX_NOTEBOOK_IMAGE_BYTES`, `noteImageUsage`, `notesConflictFor`, `notesConflictLine`, `notesConflicts`, `notesScope`, `notesScopeLabel`, `notesStorageLine`, `notesSyncState`, `onNotesConflict`, `onNotesPagesChanged`, `onNotesStorageError`, `onNotesSyncState`, `openTaskCount`, `PAGE_KEY_BASE`, `pageKey`, `purgePages`, `putNoteFile`, `putNoteImage`, `readIgnoredDuplicates`, `readNoteFile`, `readNoteFiles`, `readNoteImage`, `readNoteImages`, `readNotesZoom`, `readPage`, `readPageVersion`, `readPageVersions`, `readTreeRaw`, `refreshNotesSync`, `registerOpenNoteDoc`, `reportImageProblem`, `resolveNotesConflict`, `restorePageVersion`, `searchNotes`, `setNotesScope`, `snapshotPage`, `startNotesSync`, `stopNotesSync`, `sweepEmptyAnchors`, `sweepImagesOfMissingPages`, `sweepOrphans`, `SYNC_KEY_BASE`, `syncKey`, `toggleNoteTask`, `TREE_KEY_BASE`, `treeKey`, `writeNotesZoom`, `writePage`, `writeTree`
 - **`src/workspaces/notes/lib/notesTabKey.js`** — Tab belongs to the document: a low-priority fallback behind the table and list handlers, plus the Escape-then-Tab keyboard-trap escape
   - _exports_: `default`, `TAB_CHAR`, `TAB_PRIORITY`
+- **`src/workspaces/notes/lib/notesTableToText.js`** — "Convert table to text": pulls a table's rows out as plain lines (or sibling list items when the table sits in one), keeping every cell's marks.
+  - _exports_: `cellLineSpec`, `default`, `rowLineSpec`, `tableToBlockSpecs`
 - **`src/workspaces/notes/lib/notesTasks.js`** — PURE checklist reading and writing over a document — the task rollup's whole decision layer.
   - _exports_: `groupTasksByProject`, `openTasksInDoc`, `rollUpOpenTasks`, `setTaskCheckedInDoc`, `tasksInDoc`
 - **`src/workspaces/notes/lib/notesTime.js`** — How a note's age is written, in one place — relative ("5h"), absolute, edited-label and bin countdown. `null` means unknown and renders as nothing, so a migrated page never claims a time it does not have.
