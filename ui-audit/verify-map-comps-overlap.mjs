@@ -19,6 +19,13 @@
  * difference). Fixed via COMPS_LAYERS_COLLAPSED_W in MapFinder.jsx — the Comps button's minWidth
  * while the panel is collapsed, so both pills share both edges again.
  *
+ * B649136 (2026-08-28, owner: "everything should kinda be the same. Like, everything should be
+ * uppercase or lowercase. Like, we shouldn't mix uppercase only with normal text") — a THIRD
+ * defect in the same pair: sharing edges is not sharing a SHAPE. Pre-fix the two collapsed chips
+ * disagreed on border-radius (a full pill vs a square corner), font-size, font-weight and casing
+ * (Title Case vs UPPERCASE+letterspacing). Added to this same rig rather than a new one — same
+ * pair, same collapsed state, same "read as one stack" question.
+ *
  *   node ui-audit/verify-map-comps-overlap.mjs [--url http://localhost:4173/] [--shots]
  */
 import { chromium } from "playwright";
@@ -119,6 +126,36 @@ try {
       const EPS = 2; // px — antialiasing/border rounding slop, not a real misalignment
       check(`${width}px · collapsed: Comps left-aligns with the collapsed Layers pill`, Math.abs(compsC.rect.x - layersWrapRect.x) <= EPS, `Comps x=${compsC.rect.x}, Layers x=${layersWrapRect.x}`);
       check(`${width}px · collapsed: Comps right-aligns with the collapsed Layers pill`, Math.abs((compsC.rect.x + compsC.rect.w) - (layersWrapRect.x + layersWrapRect.w)) <= EPS, `Comps right=${compsC.rect.x + compsC.rect.w}, Layers right=${layersWrapRect.x + layersWrapRect.w}`);
+    }
+
+    // B649136 — SHAPE parity, not just edges. Two controls can share both edges (the check above)
+    // and still read as "clearly two different shapes" (the owner's words): a full pill next to a
+    // square corner, a different type size/weight, uppercase-plus-letterspacing next to plain Title
+    // Case. The VISIBLE box for Comps is the button itself; for the collapsed Layers toggle it's the
+    // button's bordered PARENT (background/border/radius live there — see the comment above), while
+    // the type styling (font-size/weight/case/spacing) lives on the inner button/span.
+    if (compsC.painted && layersWrapRect) {
+      const shape = await page.evaluate((sel) => {
+        const btn = document.querySelector(sel);
+        const wrap = btn && btn.parentElement;
+        const comps = document.querySelector('[data-testid="map-comps-toggle"]');
+        if (!btn || !wrap || !comps) return null;
+        const cs = (el) => getComputedStyle(el);
+        return {
+          comps: { radius: cs(comps).borderRadius, fontSize: cs(comps).fontSize, fontWeight: cs(comps).fontWeight, textTransform: cs(comps).textTransform, letterSpacing: cs(comps).letterSpacing, height: Math.round(comps.getBoundingClientRect().height), bg: cs(comps).backgroundColor },
+          layers: { radius: cs(wrap).borderRadius, fontSize: cs(btn).fontSize, fontWeight: cs(btn).fontWeight, textTransform: cs(btn).textTransform, letterSpacing: cs(btn).letterSpacing, height: Math.round(wrap.getBoundingClientRect().height), bg: cs(wrap).backgroundColor },
+        };
+      }, layersSel);
+      if (shape) {
+        check(`${width}px · collapsed: border-radius matches (rounded rectangle, not a pill next to a square)`, shape.comps.radius === shape.layers.radius, `Comps=${shape.comps.radius}, Layers=${shape.layers.radius}`);
+        check(`${width}px · collapsed: font-size matches`, shape.comps.fontSize === shape.layers.fontSize, `Comps=${shape.comps.fontSize}, Layers=${shape.layers.fontSize}`);
+        check(`${width}px · collapsed: font-weight matches`, shape.comps.fontWeight === shape.layers.fontWeight, `Comps=${shape.comps.fontWeight}, Layers=${shape.layers.fontWeight}`);
+        check(`${width}px · collapsed: casing matches (not mixing sentence case with UPPERCASE)`, shape.comps.textTransform === shape.layers.textTransform, `Comps=${shape.comps.textTransform}, Layers=${shape.layers.textTransform}`);
+        check(`${width}px · collapsed: letter-spacing matches`, shape.comps.letterSpacing === shape.layers.letterSpacing, `Comps=${shape.comps.letterSpacing}, Layers=${shape.layers.letterSpacing}`);
+        check(`${width}px · collapsed: height matches`, shape.comps.height === shape.layers.height, `Comps=${shape.comps.height}, Layers=${shape.layers.height}`);
+        const isTransparent = (c) => c === "rgba(0, 0, 0, 0)" || c === "transparent";
+        check(`${width}px · collapsed: both read as a filled chip (neither is a transparent void)`, !isTransparent(shape.comps.bg) && !isTransparent(shape.layers.bg), `Comps=${shape.comps.bg}, Layers=${shape.layers.bg}`);
+      }
     }
     if (startedOpen) { await layersToggle.click(); await pacedWait(page, 300); } // restore this width's default
 

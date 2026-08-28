@@ -17,6 +17,8 @@ import { BASEMAPS, FINDER_BASEMAP_CHOICES } from "./lib/basemaps.js";
 // B427411 — the ONE corner-radius scale. Never a bare number at a call site: eight of them
 // disagreed visibly in this file alone before it existed.
 import { RADIUS, nestedIn } from "../../shared/ui/radius.js";
+// B649136 — the control-height / type-scale siblings of RADIUS (B809906), used by MAP_CORNER_CHIP_STYLE below.
+import { CONTROL_H, FONT_SIZE } from "../../shared/ui/designTokens.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 /* LAZY (B1064 tranche c). Converted in the same commit as SitePlanner.jsx's copy — see that
  * file's header comment. On THIS host the card defaults OPEN on desktop (`layersPanelOpen`'s
@@ -118,11 +120,48 @@ const LOCATE_NOTICE_MS = 6000;
  * edges don't line up and there's a visible gap between them ("detached and misaligned"). It does
  * NOT reproduce while the panel is OPEN — a small toggle button sitting above a big content card is
  * an ordinary, expected size difference; the defect is specifically the two SAME-KIND collapsed
- * pills failing to match. COMPS_LAYERS_COLLAPSED_W is the collapsed panel's own measured width
- * (150px + a little breathing room), reused as the Comps button's minWidth ONLY while the panel is
- * collapsed, so the two share both edges and read as one stack again — no change to the open state,
- * which was never the reported defect. */
+ * pills failing to match. COMPS_LAYERS_COLLAPSED_W is the shared collapsed width both chips read
+ * (150px + a little breathing room) — no change to the open state, which was never the reported
+ * defect. */
 const COMPS_LAYERS_COLLAPSED_W = 152;
+
+/* B649136 (2026-08-28) — same pair, a THIRD defect: sharing edges is not sharing a SHAPE. Owner,
+ * verbatim: "it's just, like, interesting how you have this right next to each other, and they're
+ * clearly two different shapes for the comps and imagery and layers... everything should, like,
+ * kinda be the same. Like, everything should be uppercase or lowercase. Like, we shouldn't mix
+ * uppercase only with normal text." Measured pre-fix: Comps was a full pill (radius 999) at
+ * 12.5px/600 with a filled white background; the collapsed Layers toggle was a square corner
+ * (radius 12 on its own bordered parent, not 0 — see the B649136 backlog item for the instrument
+ * note on why a text-node read reports 0) in ALL CAPS with 0.735px letter-spacing at 10.5px/700,
+ * transparent over a near-white parent.
+ *
+ * Direction is the owner's own words: "I like the squared off with the radii to where it's, like,
+ * really a rectangle just with radii cut" — a rounded RECTANGLE, never a full pill. RADIUS.md is
+ * the exact semantic fit, not a new number: radius.js's own scale defines `md` as "a standalone
+ * control — a button, a text field, a chip that sits on the map by itself", which is precisely
+ * what both of these are. No new radius token was needed, so this does NOT touch the open "raw 7"
+ * question DESIGN-TOKENS.md flags (that's a retrofit judgement call over 43 unrelated sites; see
+ * that doc for the explicit note this item leaves there).
+ *
+ * ⛔ CASING — SENTENCE CASE, not Title Case (owner correction, same session: his first instruction
+ * was Title Case and he retracted it before it shipped). "Comps" doesn't change; multi-word labels
+ * capitalise only the first word: "Imagery & layers" (already the source string — the uppercase
+ * CSS transform was hiding it), matching every other control already in this app — "Start blank",
+ * "+ Select parcels", "Turn all 1 layer off", "Zoom to fit", "Export to Google Earth (KMZ)" — none
+ * of which read "Start Blank" or "Zoom To Fit". UPPERCASE + letterspacing stays reserved for
+ * SECTION HEADERS (the open Layers panel's own list group headers, "Your sites" below) — a
+ * floating control reads as a control, in sentence case, like every other primary button on this
+ * bar (Go, + Select parcels, Start blank in the row-1 header).
+ *
+ * Applied to BOTH chips' COLLAPSED presentation only — the open Layers panel header stays exactly
+ * as it was (a small uppercase mini-header above a big content card was never the reported shape
+ * mismatch; only the two same-kind collapsed pills were). */
+const MAP_CORNER_CHIP_STYLE = {
+  height: CONTROL_H.lg, minWidth: COMPS_LAYERS_COLLAPSED_W, padding: "0 12px", borderRadius: RADIUS.md,
+  border: `1px solid ${PAL.panelLine}`, background: "var(--surface-raised)",
+  color: PAL.ink, fontSize: FONT_SIZE.xl, fontWeight: 600, textTransform: "none", letterSpacing: "normal",
+  cursor: "pointer", fontFamily: "inherit", boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+};
 
 /* NEW-6 — the ring count Leaflet actually uses on this map's two tile layers. Neither passes
  * `keepBuffer`, so both run on Leaflet's default of 2; the cache CEILING is sized from that same
@@ -2383,14 +2422,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             style={{
               position: "absolute", zIndex: MAP_CHROME_Z.panel,
               ...(narrow ? { top: 60, right: 8 } : { top: 10, right: 10 }),
-              // NEW-2 — while the Layers panel is collapsed, match its width so the two collapsed
-              // pills share both edges and read as one stack (see COMPS_LAYERS_COLLAPSED_W above).
-              ...(layersPanelOpen ? null : { minWidth: COMPS_LAYERS_COLLAPSED_W }),
-              height: 30, padding: "0 12px", borderRadius: RADIUS.pill,
-              border: `1px solid ${PAL.panelLine}`, background: "var(--surface-raised)",
-              color: PAL.ink, fontSize: 12.5, fontWeight: 600,
-              cursor: "pointer", fontFamily: "inherit",
-              boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+              // B649136 — the ONE shared shape both top-right corner chips read (see the constant's
+              // own header above). Only the width is conditional: matching the collapsed Layers
+              // pill was never a claim about the OPEN panel, which is a wide content card, not a chip.
+              ...MAP_CORNER_CHIP_STYLE,
+              ...(layersPanelOpen ? { minWidth: 0 } : null),
             }}>
             Comps{comps.length ? ` (${comps.length})` : ""}
           </button>
@@ -2398,7 +2434,20 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
 
         {/* imagery + labels + overlay layers control — on a phone this collapses to a tap
             (default closed) so it stops covering the search bar / Select-parcels button. */}
-        <div style={{ position: "absolute", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: layersPanelOpen ? "6px 9px 8px" : 0, fontSize: 12, color: PAL.ink, boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
+        <div style={{ position: "absolute",
+          // B649136 — the box that actually PAINTS the collapsed chip (background/border/radius
+          // live here, not on the inner button — see the constant's own header). RADIUS.lg (a
+          // "surface that CONTAINS other things") is right for the OPEN content card; collapsed,
+          // this reads as a standalone control like Comps, so it borrows RADIUS.md + the same
+          // solid surface-raised fill from MAP_CORNER_CHIP_STYLE instead of the panel's own
+          // slightly-translucent surface-overlay.
+          background: layersPanelOpen ? "var(--surface-overlay)" : MAP_CORNER_CHIP_STYLE.background,
+          border: `1px solid ${PAL.panelLine}`, borderRadius: layersPanelOpen ? RADIUS.lg : RADIUS.md,
+          padding: layersPanelOpen ? "6px 9px 8px" : 0, fontSize: 12, color: PAL.ink, boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
+          // Collapsed: the DIV (not the button) owns the box-sizing:border-box height, so its own
+          // 1px border is INCLUDED rather than added on top of the button's — the same total 30px
+          // Comps renders. The button below fills it at height:"100%" instead of repeating the number.
+          ...(layersPanelOpen ? null : { height: CONTROL_H.lg }),
           ...(narrow
             ? { top: 60 + (onOpenComps ? COMPS_TOGGLE_CLEARANCE_PX : 0), right: 8, zIndex: MAP_CHROME_Z.panel, width: layersPanelOpen ? "min(300px, calc(100vw - 16px))" : "auto" }
             /* B427409 — DESKTOP COLLAPSES TOO, and collapsing FREES THE MAP. The width and the
@@ -2410,7 +2459,12 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             : { top: 10 + (onOpenComps ? COMPS_TOGGLE_CLEARANCE_PX : 0), right: 10, zIndex: MAP_CHROME_Z.panel,
                 ...(layersPanelOpen
                   ? { width: 268, maxHeight: panelMaxHeight({ topPx: 10 + (onOpenComps ? COMPS_TOGGLE_CLEARANCE_PX : 0), bottomPx: 76 }), display: "flex", flexDirection: "column" }
-                  : { width: "auto" }) }) }}>
+                  : { width: "auto" }) }),
+          // Same shared width Comps reads (COMPS_LAYERS_COLLAPSED_W, inside MAP_CORNER_CHIP_STYLE)
+          // — an explicit constant both sides read, not one side's incidental natural width, so a
+          // future label or font change on either chip can't quietly pull the two edges apart again.
+          ...(layersPanelOpen ? null : { minWidth: MAP_CORNER_CHIP_STYLE.minWidth }),
+        }}>
           {/* B427409 — ONE control, at EVERY breakpoint. This button used to be wrapped in
               `{narrow && (...)}`, so on desktop the panel had no way to close and the owner's only
               recourse was collapsing each section by hand: "I can't hide that layers panel without
@@ -2420,8 +2474,18 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               removing the branch rather than adding a second control. */}
           {(
             <button onClick={toggleLayersPanel} title={layersPanelOpen ? "Collapse layers" : "Imagery & layers"}
-              style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit",
-                fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, padding: layersPanelOpen ? "0 0 6px" : "8px 11px" }}>
+              style={layersPanelOpen ? {
+                display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit",
+                fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, padding: "0 0 6px",
+              } : {
+                // B649136 — collapsed: the SAME type scale/weight/casing/height as Comps (the
+                // constant), just re-hosted as a flex row for the disclosure caret. Border/
+                // background/shadow stay on the wrapping div above — painting them again here,
+                // at the same edges (the div's padding is 0 while collapsed), would double the
+                // border pixel for no visible gain.
+                ...MAP_CORNER_CHIP_STYLE, border: "none", background: "transparent", boxShadow: "none", height: "100%",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%",
+              }}>
               <span style={{ fontSize: 8, lineHeight: 1, transform: layersPanelOpen ? "none" : "rotate(-90deg)", display: "inline-block" }}>▼</span>
               <span style={{ flex: 1, textAlign: "left" }}>Imagery &amp; layers</span>
             </button>
