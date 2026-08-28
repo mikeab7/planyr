@@ -295,6 +295,24 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > the verification log.) **Interrupt Michael only for a CRITICAL failure** — won't build, won't render,
 > or a shipped feature visibly crashing. (Recurring 🌐 endpoint-liveness checks still run from any session.)
 >
+> **📥 `verification-inbox/` is the write path FROM the Cowork thread INTO `VERIFICATION.md` (B825232,
+> 2026-08-28) — it names an actor split the rules above never named.** A Claude Code session can push to
+> this repo but cannot sign in (the sandbox proxy CORS-blocks the Supabase auth handshake, the same wall
+> behind every `Blocker: auth` item above). The **Cowork thread** can drive Michael's real signed-in
+> browser but cannot push here (its git proxy refuses to inject a credential for `mikeab7/planyr`). So:
+> **the Cowork thread is the only actor that can close a `Blocker: auth` / `real-data` / `live-GIS` item,
+> and a check it closes is not closed until it lands in `VERIFICATION.md` via this inbox.** Before this,
+> that split had no exit — it's the reason 79 `Blocker:`-walled items had piled up unclosable as of
+> 2026-08-28. Mechanically: the Cowork thread appends a dated `verification-inbox/<date>-<label>.md` file
+> recording each live pass/fail it ran on Michael's browser (**append-only — nothing is ever deleted from
+> an inbox file**, only added); a session then drains it into `VERIFICATION.md` (⏳ → passed or ❌, per
+> what was actually found), moves any now-fully-passed item on to `VERIFICATION-DONE.md`, and marks the
+> drained inbox entry with the PR number that did the draining, so the same entry is never drained twice.
+> An item the inbox itself records as **NOT** closed (a stated residual, a leg not separately performed)
+> stays exactly as open in `VERIFICATION.md` as it was before — draining is a transcription, never a
+> rubber stamp, and a session that drains a partial pass says explicitly which parts it is accepting and
+> why (STANDING RULE #2 — no closing an owner-reported symptom on a null still applies here).
+>
 > **📦 `BACKLOG-DONE.md` / `VERIFICATION-DONE.md` are write-only archives — do NOT read them** unless looking
 > up a specific past item; they are historical record only, and exist so the two live files above stay small.
 
