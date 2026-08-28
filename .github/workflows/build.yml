@@ -68,6 +68,14 @@ jobs:
         run: node scripts/build-map.mjs --check
       - name: BACKLOG_OPEN.md drift + tag-legend guard (regenerate with `node scripts/build-backlog-index.mjs` — B638)
         run: node scripts/build-backlog-index.mjs --check
+      # Verification-queue ceiling guard (B825233). CLAUDE.md already said a pending V# with no
+      # Blocker: wall is a mis-classification, not a to-do — nothing ever checked it. This is a
+      # ratchet, not a retroactive fail: it only reds out if the no-Blocker or stale-pending count
+      # GROWS past today's recorded ceiling (scripts/verification-queue-ceiling.json), so today's
+      # existing debt doesn't wedge every future PR. Regenerate the ceiling with
+      # `node scripts/verification-queue-audit.mjs --write-ceiling` once the counts genuinely improve.
+      - name: Verification-queue ceiling guard (no-Blocker / stale V# items — B825233)
+        run: node scripts/verification-queue-audit.mjs --check
       - name: e2e fixture drift guard (regenerate with `node scripts/build-fixtures.mjs` — B278/B280 harness)
         run: node scripts/build-fixtures.mjs --check
       - name: Landing coverage drift guard (regenerate with `node scripts/build-landing-coverage.mjs` — B1385)

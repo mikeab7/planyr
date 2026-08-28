@@ -14,6 +14,7 @@ import AccountControl from "./AccountControl.jsx";
 import { useProfile } from "../shared/profile/useProfile.js";
 import { setTelemetryModule } from "../shared/telemetry/clientErrors.js";
 import { useHashRoute, unknownModuleSlug, isAdminRoute, INITIAL_HASH_EMPTY } from "./route.js";
+import { pageTitle } from "./pageTitle.js";
 import { writeLastRoute, seedBootRoute } from "./lastRoute.js";
 import { installBuildSkewWatch, shouldOfferReload, LOADED_BUILD } from "./buildSkew.js";
 import { reloadFresh } from "./chunkReload.js";
@@ -181,6 +182,11 @@ export default function Shell() {
   // own module here even though it's not in `route.module` (see isAdminHash above), so a
   // crash inside the admin page is never mislabeled as a Site Planner error.
   useEffect(() => { setTelemetryModule(isAdminHash ? "admin" : active); }, [active, isAdminHash]);
+
+  // NEW-1 (2026-08-28) — the browser tab title names the module you're in, using the
+  // SAME label the nav tabs render (pageTitle.js reads moduleTabLabel.js, the nav's own
+  // source), so it updates on every client-side route change with no reload.
+  useEffect(() => { document.title = pageTitle({ module: active, isAdmin: isAdminHash }); }, [active, isAdminHash]);
 
   // "Open where I left off" — persist every route change as the last-route pointer.
   // Single choke point: catches tab clicks, breadcrumb picks, and programmatic navigates.

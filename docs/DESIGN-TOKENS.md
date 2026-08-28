@@ -83,6 +83,47 @@ item's own instruction to stop and ask rather than silently pick:
    this session ("do NOT redesign anything"). The scales exist now as the target for **new** work;
    retrofitting old call sites is a separate, larger, deliberately-scoped follow-up.
 
+## B649136 (2026-08-28) — the map's Comps / Imagery & layers cluster, and what it found about adoption
+
+Owner report: the "Comps" and "Imagery & layers" controls, stacked in the map's top-right corner,
+"are clearly two different shapes... everything should, like, kinda be the same." Fixed by
+converging both onto one shared style constant (`MAP_CORNER_CHIP_STYLE` in `MapFinder.jsx`) —
+`RADIUS.md`, `CONTROL_H.lg`, `FONT_SIZE.xl`, weight 600, sentence case, no letter-spacing. This
+did **not** need a new radius token: `RADIUS.md` is already documented above as "a standalone
+control... that sits on the map by itself", which is exactly what both of these are — so it does
+**not** decide the open "raw `7`" question above; that remains exactly as open as it was, a
+separate, larger judgement call over 43 unrelated sites.
+
+**Casing:** the direction is SENTENCE case, not Title Case — "Comps" is one word so it doesn't show
+the difference, but "Imagery & layers" does. This matches the app's own existing convention
+("Start blank", "+ Select parcels", "Turn all 1 layer off", "Zoom to fit", "Export to Google Earth
+(KMZ)" — none of these are Title Case) and IBM Carbon's stated rule for the same reason it's stated
+there: all-caps reads measurably slower, and Title Case "relies on a subjective viewpoint of what
+is considered important", which is exactly how a repo ends up with per-contributor drift.
+UPPERCASE + letter-spacing stays reserved for section headers (e.g. "Your sites", the open Layers
+panel's own group headers) — never a floating button.
+
+**Two honest findings from auditing this, not covered up:**
+
+1. **B814914's own claim about the 99-vs-999 pill inconsistency was accurate but narrower than it
+   reads.** That item's audit swept `<button>` elements only (738 of them) and the sentence "`999` /
+   `99` → `RADIUS.pill` (also closes the real 99-vs-999 pill inconsistency above)" is true for that
+   scope, but reads as though the app-wide inconsistency it names two paragraphs earlier was closed.
+   It was not: **18 raw `borderRadius: 99` literals still exist** — 17 in `SitePlanner.jsx`, 1 in
+   `ParcelRecordPanel.jsx` (verified by direct source read; every one is a `<span>` status dot/glyph
+   badge or a `<div>` toast/pill, none a `<button>`). All 18 are decorative chrome unrelated to the
+   controls this item touched — none are in scope here, and per this item's own instruction not to
+   restyle the rest of the app, they're left alone and reported rather than silently fixed or
+   silently ignored.
+2. **The adoption gap is concentrated, not diffuse.** Per a 610-file, whole-repo audit (owner-
+   supplied numbers): 118 `uppercase` text-transforms across 41 files, split 50 on interactive
+   controls / 64 on non-interactive labels — and `SitePlanner.jsx` alone holds 25 of the interactive
+   ones and 28 of the label ones. Only 31 files import `radius.js` at all. So the defect this item
+   and B427411 both respond to is not a missing token file — the tokens exist and are correct — it
+   is **adoption**, and it is disproportionately one 27,000-line file. Retrofitting those sites is
+   real, visible-change work (a casing or radius change on 50+ live controls) explicitly out of this
+   item's scope; it is not attempted here.
+
 ## Using the tokens in new code
 
 ```js

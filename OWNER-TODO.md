@@ -5,7 +5,27 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-08-14._
+_Last updated: 2026-08-28._
+
+## 🔐 Two small GitHub settings — both fix the same shape of problem: a robot that can't quite finish its own job (B825232–B825234)
+
+> **Neither is urgent, and nothing is broken while they wait — these just remove two spots where a
+> Claude session has to do by hand what a setting would let happen automatically.**
+
+- [ ] **Authorize `mikeab7/planyr` for the Cowork session type**, so the Cowork thread (the one that
+      drives your actual signed-in browser to check things a sandbox can't reach — sign-in-required
+      checks, live map data, and so on) can push its own results straight into the project instead of
+      relaying them through a chat message that a different session then has to type in by hand. Right
+      now its connection to GitHub refuses to let it save anything to this project directly, so every
+      one of those checks has to be handed off and re-entered — which is exactly how **79 of those
+      checks piled up waiting** before this was noticed. **Soon, not urgent.**
+- [ ] **Confirm/flip the repo's "Workflow permissions" setting** (`github.com/mikeab7/planyr/settings/actions`
+      → **Workflow permissions** → select **"Read and write permissions"** → Save). This is the one
+      thing standing between "a session opens a task list for review" and "it opens ready to merge on
+      its own once it's green" — right now that last automatic step fails silently every time, and a
+      session has to do it by hand instead. **Two-minute setting, no code, no downside** — full
+      background on `B793696`; the live re-check that closes this out once you've flipped it is
+      `V438336` in `VERIFICATION.md`, run by whichever Claude session is active when you confirm it's done.
 
 ## 👀 One thing only you can check: does the app actually TELL you when it has stopped saving? (V273520 / B484337)
 

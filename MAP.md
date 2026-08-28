@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-27 @ `d4f5f047` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-28 @ `81e635da` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_576 source files mapped._
+_578 source files mapped._
 
 ## infra
 
@@ -33,6 +33,8 @@ _576 source files mapped._
   - _exports_: `pickBootRoute`, `readLastRoute`, `RESTORE_LAST_MODULE`, `seedBootRoute`, `shouldPersistRoute`, `writeLastRoute`
 - **`src/app/modulePrefetch.js`** — Warm a non-active workspace chunk (and the heavy /sequence/ Gantt iframe doc) on NAVIGATION INTENT only — tab hover/pointerdown, never at boot (NEW-9) — so tab switches feel instant without taxing a Site-only session
   - _exports_: `prefetchModule`
+- **`src/app/pageTitle.js`** — Browser tab title "Planyr — <module>" from the SAME label table the nav tabs read (moduleTabLabel.js); bare "Planyr" for a module with no nav tab (Food) or the unlisted /admin surface
+  - _exports_: `pageTitle`
 - **`src/app/recoverableError.js`** — Which render crashes the error boundary may clear by remounting instead of showing a dead end (B1189): classifies React's nested-update circuit breaker (dev text + minified #185) and decides recover-vs-show under a bounded, time-windowed retry budget. — `UPDATE_DEPTH_CODE`, `isUpdateDepthError`, `isRecoverableRenderError`, `MAX_AUTO_RECOVERIES`, `RECOVERY_WINDOW_MS`, `planRecovery`
   - _exports_: `isRecoverableRenderError`, `isUpdateDepthError`, `MAX_AUTO_RECOVERIES`, `planRecovery`, `RECOVERY_WINDOW_MS`, `UPDATE_DEPTH_CODE`
 - **`src/app/route.js`** — Hash-route model: parseRoute/buildHash for {module,projectId,cross}, slug maps, useHashRoute hook with merge-navigate, INITIAL_HASH_EMPTY resume flag
@@ -207,7 +209,7 @@ _576 source files mapped._
 - **`src/shared/comps/lib/compMarkerIcon.js`** — Pure map-marker spec for a comp: a small colored tag (hue per comp type), deliberately a different silhouette from sitePinIcon
   - _exports_: `compMarkerColor`, `compMarkerSize`, `compMarkerSvg`
 - **`src/shared/comps/lib/comps.js`** — Leasing Comps pure model: $/SF derivation for land/building sale, lease basis normalization (annual NNN default, NNN/gross never blended), compFieldRows (the one empty-field-hides choke point), anchor validation, row<->model mapping
-  - _exports_: `ANCHOR_KINDS`, `annualLeaseRate`, `buildingPricePerSf`, `COMP_TYPES`, `compFieldRows`, `compHeadline`, `compToRow`, `isCompType`, `landPricePerSf`, `landSizeSf`, `LEASE_EXPENSE_BASES`, `LEASE_PERIODS`, `rowToComp`, `summarizeLeaseComps`, `summarizeSaleComps`, `validAnchor`, `validateComp`
+  - _exports_: `ANCHOR_KINDS`, `annualLeaseRate`, `buildingPricePerSf`, `COMP_TYPES`, `compFieldRows`, `compHeadline`, `compToRow`, `isCompType`, `landPricePerSf`, `landSizeSf`, `LEASE_EXPENSE_BASES`, `LEASE_PERIODS`, `leaseTotalAnnualRent`, `rowToComp`, `summarizeLeaseComps`, `summarizeSaleComps`, `validAnchor`, `validateComp`
 - **`src/shared/comps/lib/compsStore.js`** — Supabase CRUD for public.comps (team-visible read, owner-only write); every call returns {data,error}, never swallows a failure
   - _exports_: `deleteComp`, `fetchAllComps`, `insertComp`, `supabase`, `updateComp`
 - **`src/shared/coordinates/index.js`** — Shared EPSG:2278 Texas South Central project grid: unit helpers plus Lambert Conformal Conic projectToGrid/gridToProject validated against pyproj
@@ -434,6 +436,8 @@ _576 source files mapped._
   - _exports_: `default (ModuleLoader)`, `SHOW_DELAY_MS`
 - **`src/shared/ui/moduleLoaderTheme.js`** — Pure loader theming: resolves a module id to accent+skin-kind+caption (LOADER_SKINS), never-throw fallback, SHOW_DELAY_MS constant
   - _exports_: `LOADER_SKINS`, `resolveLoaderTheme`, `SHOW_DELAY_MS`
+- **`src/shared/ui/moduleTabLabel.js`** — Per-module nav TAB LABEL, single source shared by AppHeader's Row-2 tabs and the browser tab title (app/pageTitle.js); no "food" or "admin" key by design
+  - _exports_: `MODULE_TAB_LABEL`
 - **`src/shared/ui/noAutofill.js`** — Shared NO_AUTOFILL attribute bag spread onto inline cell / free-text editors so password managers (1Password/LastPass/Bitwarden/Dashlane) don't inject an autofill card over them; never on auth forms (B865)
   - _exports_: `default`, `NO_AUTOFILL`
 - **`src/shared/ui/PanelChrome.jsx`** — NEW-1/NEW-2 shared panel title bar for both docked + floating hosts: title + detach(PiP)/dock/close icons + double-click-to-toggle + optional drag handle
@@ -536,7 +540,7 @@ _576 source files mapped._
 - **`src/workspaces/site-planner/lib/arcgis.js`** — Esri ArcGIS REST client: bounded parcel identify (query+identify fallback, multi-county eager race) and lon/lat↔State-Plane-feet conversion
   - _exports_: `aerialPlacement`, `aerialTileGrid`, `BACKUP_GRACE_MS`, `deepenZoomFor`, `featureToParcel`, `feetExtentToBbox`, `feetToLatLng`, `geoJsonToEsriFeature`, `getLayerInfo`, `humanizeError`, `identifyAtPoint`, `identifyParcelAcross`, `identifyParcelDetailed`, `identifyParcelEager`, `isQueryCapabilityError`, `largestRingLngLat`, `listLayers`, `lngLatFeatureToParcel`, `lngLatRingToFeet`, `lngLatToGlobalPixel`, `outerRingsLngLat`, `overlayExportPlacement`, `PARCEL_FETCH_TIMEOUT_MS`, `ParcelFetchError`, `pickAerialTileZoom`, `queryAtPoint`, `queryFeatures`, `resolveLayerUrl`
 - **`src/workspaces/site-planner/lib/arrange.js`** — element/markup z-order "Arrange" (B820): `reorderByZ`/`arrangeFlags`/`ARRANGE_MODES` — pure z-based Bring-to-Front/Send-to-Back over a peer set (within a type-layer band for elements, the markup layer for markups)
-  - _exports_: `ARRANGE_MODES`, `arrangeAcrossBands`, `arrangeBandFlags`, `arrangeFlags`, `reorderByZ`
+  - _exports_: `ARRANGE_MODES`, `arrangeAcrossBands`, `arrangeBandFlags`, `arrangeFlags`, `calloutAtAbsoluteFront`, `calloutFrontForceZ`, `reorderByZ`
 - **`src/workspaces/site-planner/lib/assemblyDigest.js`** — B1341 stage 2: the GROUP REVISION of a bonded assembly, DERIVED from its live members' `id:rev` pairs (never stored, so it cannot drift). Twin of the `assembly_digest` SQL function.
   - _exports_: `assemblyDigest`, `compareIds`, `digestsByAssembly`, `memberToken`
 - **`src/workspaces/site-planner/lib/assemblyIntegrity.js`** — the bonded-assembly invariant + tear detector: re-derives every `attachedTo` child from its host (via `normalizeBondedChildren`) and reports what moved, so a partial apply can reach neither the canvas nor the wire

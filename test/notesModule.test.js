@@ -18,6 +18,7 @@ import { getSchema } from "@tiptap/core";
 
 import { MODULE_BY_SLUG, SLUG_BY_MODULE, parseRoute, buildHash } from "../src/app/route.js";
 import { MODULE_ACCENT } from "../src/shared/ui/moduleAccent.js";
+import { MODULE_TAB_LABEL } from "../src/shared/ui/moduleTabLabel.js";
 import { LOADER_SKINS, resolveLoaderTheme } from "../src/shared/ui/moduleLoaderTheme.js";
 import { ROUTE_KEYS } from "../ui-audit/lib/bundleMetrics.mjs";
 import { PALETTES } from "../src/shared/theme/palette.js";
@@ -143,7 +144,9 @@ describe("workspace registration — all EIGHT places", () => {
 
   it("(6) AppHeader has a module tab, with an icon and BOTH accent maps", () => {
     const hdr = read(REPO, "src/shared/ui/AppHeader.jsx");
-    expect(hdr).toMatch(/id:\s*"notes",\s*\n\s*label:\s*"Notes"/);
+    // The label itself lives in MODULE_TAB_LABEL (shared with the browser tab title —
+    // NEW-1/B821280), not inline in AppHeader's icon list — see moduleTabLabel.js.
+    expect(MODULE_TAB_LABEL.notes).toBe("Notes");
     expect(hdr, "the tab needs an inline SVG icon like its peers").toMatch(/id:\s*"notes"[\s\S]{0,600}?<path/);
     expect(hdr).toMatch(/"notes":\s*"var\(--accent-notes\)"/);
     expect(hdr).toMatch(/"notes":\s*"var\(--accent-notes-text\)"/);
