@@ -28,7 +28,6 @@ import { computeVisitAggregates, orderAgainEntries } from "../src/workspaces/foo
 import { formatVisitDate, formatRelativeDate, formatMonthYear } from "../src/workspaces/food/lib/dateFormat.js";
 import { preferAppleMaps, directionsUrl } from "../src/workspaces/food/lib/directions.js";
 import { resolveSnap, heightForSnap } from "../src/workspaces/food/lib/bottomSheetSnap.js";
-import { nextZoomAnimTier, ZOOM_ANIM_FRAME_BUDGET_MS, ZOOM_ANIM_DEGRADE_STREAK } from "../src/workspaces/food/lib/zoomAnimTier.js";
 import {
   isStrongMatch, isRegistryName, hasConcatenatedAddress, rankSearchCandidates,
   SIGNIFICANT_WORD_MIN_LEN, GENERIC_NAME_WORDS, REGISTRY_NAME_PATTERN, CONCAT_ADDRESS_PATTERN,
@@ -760,9 +759,9 @@ describe("satellite crash fix — no explicit undefined subdomains, mirrors the 
  *     place he can't remember the date for must not quietly record today's date instead.
  * ═══════════════════════════════════════════════════════════════════════════════════════ */
 describe("VisitPanel — rating slider (not a button row) and a date field that never defaults", () => {
-  it("the date field starts empty — never pre-filled with today", () => {
+  it("the date field starts empty for a FRESH log — never pre-filled with today (edit mode pre-fills from the visit being edited, see the edit-a-visit describe block below)", () => {
     const panel = src("components/VisitPanel.jsx");
-    expect(panel).toMatch(/const \[visitedOn, setVisitedOn\] = useState\(""\)/);
+    expect(panel).toMatch(/const \[visitedOn, setVisitedOn\] = useState\(\(\) => initial\?\.visited_on \|\| ""\)/);
     expect(panel).not.toMatch(/new Date\(\)\.toISOString\(\)\.slice\(0,\s*10\)/);
   });
 
@@ -2343,7 +2342,8 @@ describe("VisitPanel — Actions row (block 4): want-to-try disappears once visi
 
   it("clicking 'Log a visit' opens the form in place — never auto-opens on mount, even for a never-visited place (NEW-2 changed this default from the old always-open-when-zero-visits behavior)", () => {
     expect(panel).toMatch(/const \[adding, setAdding\] = useState\(false\); \/\/ NEW-2: never auto-opens, even on a never-visited place/);
-    expect(panel).toMatch(/const handleOpenForm = \(\) => setAdding\(true\);/);
+    // Also closes any in-progress edit (2026-08-28 owner block) — only one form open at a time.
+    expect(panel).toMatch(/const handleOpenForm = \(\) => \{ setEditingVisitId\(null\); setAdding\(true\); \};/);
   });
 });
 
@@ -2360,7 +2360,7 @@ describe("VisitPanel — Empty state (block 6, never visited): no score strip, n
   });
 
   it("PastVisitsSection itself renders nothing at zero visits — no 'Past visits · 0' heading", () => {
-    expect(panel).toMatch(/function PastVisitsSection\(\{ pastVisits, onDelete \}\) \{\s*if \(!pastVisits\.length\) return null;/);
+    expect(panel).toMatch(/function PastVisitsSection\(\{ pastVisits, onDelete, onEditVisit, editingVisitId, onOpenEdit, onCloseEdit, pending \}\) \{\s*if \(!pastVisits\.length\) return null;/);
   });
 });
 
@@ -2416,6 +2416,94 @@ describe("VisitPanel — Past visit cards (block 5): chips, Would-return, overfl
   });
 });
 
+/* ════════════════════════════════════════════════════════════════════════════════════════
+ * EDIT A PAST VISIT (owner block, 2026-08-28: "I should be able to edit previous visits" — the
+ * ··· menu offered only Delete). Reuses VisitForm itself (initial/submitLabel props), never a
+ * second form; opens via the card tap AND the new Edit menu item; renders inline in place of the
+ * card. Live-verified end to end against the real, unmodified components via
+ * .scratch-repro/verify-edit-visit.mjs: pre-fill (rating/date/what-I-had/cost all correct,
+ * including the numeric(4,2)->Number() coercion), Cancel writes nothing (0 onEditVisit calls),
+ * Save updates the card in place, a forced failure keeps the form open with the typed value
+ * intact and the real error shown, and Cancelling OUT of a failed edit shows the LAST REAL saved
+ * value — never the failed, never-written attempt.
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("VisitPanel — edit a past visit: reuses VisitForm, opens via card tap or menu, inline in place", () => {
+  const panel = src("components/VisitPanel.jsx");
+  const cardBlock = panel.slice(panel.indexOf("function VisitCard"), panel.indexOf("function PastVisitsSection"));
+
+  it("editing renders VisitForm itself — never a second/parallel form component", () => {
+    const formDefs = [...panel.matchAll(/function VisitForm\(/g)];
+    expect(formDefs.length).toBe(1); // exactly one VisitForm definition in the whole file
+    expect(cardBlock).toMatch(/<VisitForm\b/);
+    expect(cardBlock).toMatch(/initial=\{visit\}/);
+    expect(cardBlock).toMatch(/submitLabel="Save changes"/);
+  });
+
+  it("VisitForm pre-fills every field from `initial` when editing, and stays blank for a fresh log (initial undefined)", () => {
+    const formStart = panel.indexOf("function VisitForm(");
+    const formBody = panel.slice(formStart, panel.indexOf("\n}", panel.indexOf("return (", formStart)));
+    expect(formBody).toMatch(/useState\(\(\) => \(initial\?\.rating != null \? Number\(initial\.rating\) : null\)\)/);
+    expect(formBody).toMatch(/useState\(\(\) => \(initial\?\.rating_ambiance != null \? Number\(initial\.rating_ambiance\) : null\)\)/);
+    expect(formBody).toMatch(/useState\(\(\) => \(initial\?\.cost != null \? String\(initial\.cost\) : ""\)\)/);
+    expect(formBody).toMatch(/useState\(\(\) => initial\?\.what_i_had \|\| ""\)/);
+    expect(formBody).toMatch(/useState\(\(\) => initial\?\.what_was_good \|\| ""\)/);
+    expect(formBody).toMatch(/useState\(\(\) => initial\?\.notes \|\| ""\)/);
+    expect(formBody).toMatch(/useState\(\(\) => initial\?\.would_return \?\? null\)/);
+  });
+
+  it("the date field has an explicit Clear affordance (a native date input's own clear gesture isn't reliably reachable on every platform)", () => {
+    const formStart = panel.indexOf("function VisitForm(");
+    const formBody = panel.slice(formStart, panel.indexOf("function Chip("));
+    expect(formBody).toMatch(/\{visitedOn && \(/);
+    expect(formBody).toMatch(/onClick=\{\(\) => setVisitedOn\(""\)\}/);
+  });
+
+  it("tapping the card itself opens edit — not just the ··· menu", () => {
+    expect(cardBlock).toMatch(/data-testid="food-visit-card" onClick=\{onOpenEdit\}/);
+  });
+
+  it("the ··· menu's click handler stops propagation, so opening the menu never ALSO opens edit via the card's own onClick", () => {
+    expect(cardBlock).toMatch(/onClick=\{\(e\) => \{ e\.stopPropagation\(\); setMenuOpen/);
+  });
+
+  it("the menu offers Edit ABOVE Delete (a constructive action before a destructive one)", () => {
+    const editIdx = cardBlock.indexOf('data-testid="food-visit-edit-menu-item"');
+    const deleteIdx = cardBlock.indexOf('data-testid="food-visit-delete-menu-item"');
+    expect(editIdx).toBeGreaterThan(0);
+    expect(deleteIdx).toBeGreaterThan(editIdx);
+  });
+
+  it("Cancel is free — no write, no rollback state needed, because nothing was written until Save", () => {
+    expect(cardBlock).toMatch(/onCancel=\{onCloseEdit\}/);
+  });
+
+  it("editingVisitId is lifted to VisitPanel (not local to VisitCard) so only one form — the new-visit form or ONE card's edit — is ever open at once", () => {
+    expect(panel).toMatch(/const \[editingVisitId, setEditingVisitId\] = useState\(null\);/);
+    expect(panel).toMatch(/const handleOpenEdit = useCallback\(\(id\) => \{ setAdding\(false\); setEditingVisitId\(id\); \}, \[\]\);/);
+    expect(panel).toMatch(/const handleOpenForm = \(\) => \{ setEditingVisitId\(null\); setAdding\(true\); \};/);
+  });
+
+  it("FoodApp's editVisit uses the SAME optimistic-update/rollback shape submitVisit already uses", () => {
+    const app = src("FoodApp.jsx");
+    const fn = app.slice(app.indexOf("const editVisit = useCallback"), app.indexOf("}, [visits, reloadVisits]);") + 30);
+    expect(fn).toMatch(/const original = visits\.find\(\(v\) => v\.id === id\);/);
+    expect(fn).toMatch(/setVisits\(\(v\) => v\.map\(\(x\) => \(x\.id === id \? \{ \.\.\.x, \.\.\.fields \} : x\)\)\);/);
+    expect(fn).toMatch(/await updateVisit\(id, fields\);/);
+    expect(fn).toMatch(/setVisits\(\(v\) => v\.map\(\(x\) => \(x\.id === id \? original : x\)\)\);/); // rollback on failure
+    expect(fn).toMatch(/await reloadVisits\(\);/);
+  });
+
+  it("editVisit is wired through FoodApp -> VisitPanel as onEditVisit, gated on accountActive like submitVisit already is", () => {
+    const app = src("FoodApp.jsx");
+    expect(app).toMatch(/onEditVisit=\{accountActive \? editVisit : undefined\}/);
+  });
+
+  it("updateVisit (lib/foodStore.js) is a plain PostgREST update — no bypass of the food_visits_touch_updated_at DB trigger, which is this table's attribution/audit mechanism for an edit", () => {
+    const store = src("lib/foodStore.js");
+    expect(store).toMatch(/export async function updateVisit\(id, patch\) \{[\s\S]{0,200}\.update\(patch\)\.eq\("id", id\)/);
+  });
+});
+
 describe("VisitPanel — Header (block 1): wrapping name, category · city, a tappable directions link, a circular close button", () => {
   const panel = src("components/VisitPanel.jsx");
   const headerBlock = panel.slice(panel.indexOf("function PanelHeader"), panel.indexOf("/* Score strip"));
@@ -2447,6 +2535,72 @@ describe("VisitPanel — Header (block 1): wrapping name, category · city, a ta
   });
 });
 
+/* ════════════════════════════════════════════════════════════════════════════════════════
+ * STICKY HEADER (owner block, 2026-08-28 — flagged from a screenshot, checked before acting;
+ * the file header comment records the check: no comment anywhere claimed the scroll-away was
+ * deliberate, unlike ActionsRow's own documented sticky-bottom choice — a genuine gap, fixed).
+ * Live-verified: scrolling the sheet's content 300px leaves the header's accent dot at the exact
+ * same screen Y (.scratch-repro/verify-layout-and-sticky.mjs).
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("VisitPanel — the header stays visible while the panel's content scrolls (was a gap, not a deliberate choice)", () => {
+  const panel = src("components/VisitPanel.jsx");
+
+  it("PanelHeader is wrapped in its own position:sticky;top:0 div, inside peekRef so the peek-height measurement is unaffected", () => {
+    const bodyStart = panel.indexOf("const body = (");
+    const bodySlice = panel.slice(bodyStart, panel.indexOf("{showSaved &&"));
+    const peekRefIdx = bodySlice.indexOf("ref={peekRef}");
+    const stickyIdx = bodySlice.indexOf('position: "sticky", top: 0');
+    const headerIdx = bodySlice.indexOf("<PanelHeader");
+    expect(peekRefIdx).toBeGreaterThanOrEqual(0);
+    expect(stickyIdx).toBeGreaterThan(peekRefIdx); // the sticky wrapper is INSIDE peekRef, not a sibling —
+    expect(headerIdx).toBeGreaterThan(stickyIdx);   // still contributes to peekRef's offsetHeight measurement
+  });
+
+  it("only the header is sticky — NOT the whole peekRef block (score strip stays in normal scroll, so it doesn't permanently eat the mobile sheet's limited 'half' snap height)", () => {
+    const scoreStripIdx = panel.indexOf("everVisited && <ScoreStrip");
+    const stickyWrapperIdx = panel.indexOf('position: "sticky", top: 0');
+    expect(stickyWrapperIdx).toBeGreaterThan(0);
+    expect(scoreStripIdx).toBeGreaterThan(stickyWrapperIdx); // ScoreStrip renders AFTER (outside) the sticky wrapper closes
+    // The sticky div closes before ScoreStrip — i.e. ScoreStrip is a sibling, not nested inside it.
+    const wrapperCloseIdx = panel.indexOf("</div>", panel.indexOf("<PanelHeader", stickyWrapperIdx));
+    expect(wrapperCloseIdx).toBeLessThan(scoreStripIdx);
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════════════════════════
+ * VISIT CARD LAYOUT (owner block, 2026-08-28: "the three dots and date should be more in line
+ * with the rest of the info" — on his screenshot, date/··· sat flush against the far edge,
+ * ~600px from the rating chip on a 390pt screen). Live-verified: the ··· button sits at the
+ * IDENTICAL x position across three differently-shaped cards (one chip+date, three chips+would-
+ * return wrapping to two lines, no chips+a dateless card) — .scratch-repro/verify-card-
+ * alignment.mjs measured x=330 on all three, a genuine straight line, not an anecdote.
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("VisitPanel — visit card layout: date lives WITH the chips, ··· is a fixed-position column", () => {
+  const panel = src("components/VisitPanel.jsx");
+  const cardBlock = panel.slice(panel.indexOf("function VisitCard"), panel.indexOf("function PastVisitsSection"));
+
+  it("the date sits INSIDE the same flex-wrap row as the chips, not in a separate right-aligned group", () => {
+    const chipRowIdx = cardBlock.indexOf('flexWrap: "wrap"');
+    const dateIdx = cardBlock.indexOf("formatVisitDate(visit.visited_on)");
+    const menuButtonIdx = cardBlock.indexOf('data-testid="food-visit-menu-btn"');
+    expect(chipRowIdx).toBeGreaterThan(0);
+    expect(dateIdx).toBeGreaterThan(chipRowIdx);
+    expect(dateIdx).toBeLessThan(menuButtonIdx); // date renders BEFORE the menu button, inside the same row
+  });
+
+  it("the outer row centres its content vertically (not flex-start), so ··· centres against whatever height the chip+date row wraps to", () => {
+    const outerRowIdx = cardBlock.indexOf('justifyContent: "space-between"');
+    const rowSlice = cardBlock.slice(outerRowIdx, outerRowIdx + 120);
+    expect(rowSlice).toMatch(/alignItems:\s*"center"/);
+  });
+
+  it("··· is its own fixed-size flex item (flex: \"0 0 auto\"), never sharing a group with the variable-width date text", () => {
+    const testidIdx = cardBlock.indexOf('data-testid="food-visit-menu-btn"');
+    const menuBtnBlock = cardBlock.slice(testidIdx, testidIdx + 200);
+    expect(menuBtnBlock).toMatch(/flex:\s*"0 0 auto"/);
+  });
+});
+
 describe("FoodApp — panelPlace: the normalized {name, category, address, lat, lon} handed to VisitPanel (NEW-2 replaced the old pre-joined title/subtitle strings)", () => {
   const app = src("FoodApp.jsx");
 
@@ -2474,86 +2628,41 @@ describe("VisitPanel — no emoji anywhere in this panel (NEW-2, consistent with
   });
 });
 
-describe("NEW-2 (2nd owner block) — continuous marker scaling during a zoom animation, not just at zoomend", () => {
-  it("nextZoomAnimTier: stays at 'full' while frames are within budget, resetting the streak on any in-budget frame", () => {
-    let state = { tier: "full", overBudgetStreak: 0, frameParity: 0 };
-    state = nextZoomAnimTier(state, 2);
-    expect(state.tier).toBe("full");
-    expect(state.overBudgetStreak).toBe(0);
-    // Two over-budget frames, then one back in budget — must NOT degrade (streak resets).
-    state = nextZoomAnimTier(state, ZOOM_ANIM_FRAME_BUDGET_MS + 1);
-    state = nextZoomAnimTier(state, ZOOM_ANIM_FRAME_BUDGET_MS + 1);
-    expect(state.tier).toBe("full");
-    state = nextZoomAnimTier(state, 1);
-    expect(state.overBudgetStreak).toBe(0);
-    expect(state.tier).toBe("full");
-  });
-
-  it("nextZoomAnimTier: full -> everyOther after exactly ZOOM_ANIM_DEGRADE_STREAK consecutive over-budget frames, not before", () => {
-    let state = { tier: "full", overBudgetStreak: 0, frameParity: 0 };
-    for (let i = 0; i < ZOOM_ANIM_DEGRADE_STREAK - 1; i++) {
-      state = nextZoomAnimTier(state, ZOOM_ANIM_FRAME_BUDGET_MS + 1);
-      expect(state.tier).toBe("full"); // not yet — needs the FULL streak
-    }
-    state = nextZoomAnimTier(state, ZOOM_ANIM_FRAME_BUDGET_MS + 1);
-    expect(state.tier).toBe("everyOther");
-    expect(state.overBudgetStreak).toBe(0); // streak resets on entering the new tier
-    expect(state.frameParity).toBe(0);
-  });
-
-  it("nextZoomAnimTier: everyOther -> bailed after another full streak of over-budget frames", () => {
-    let state = { tier: "everyOther", overBudgetStreak: 0, frameParity: 0 };
-    for (let i = 0; i < ZOOM_ANIM_DEGRADE_STREAK - 1; i++) {
-      state = nextZoomAnimTier(state, ZOOM_ANIM_FRAME_BUDGET_MS + 50);
-      expect(state.tier).toBe("everyOther");
-    }
-    state = nextZoomAnimTier(state, ZOOM_ANIM_FRAME_BUDGET_MS + 50);
-    expect(state.tier).toBe("bailed");
-  });
-
-  it("nextZoomAnimTier: 'bailed' is a hard floor for the rest of the gesture — never recovers to a faster tier on its own", () => {
-    let state = { tier: "bailed", overBudgetStreak: 0, frameParity: 0 };
-    state = nextZoomAnimTier(state, 0.1); // even a very fast frame
-    expect(state).toEqual({ tier: "bailed", overBudgetStreak: 0, frameParity: 0 });
-  });
-
-  it("nextZoomAnimTier: an in-budget frame at 'everyOther' resets its streak too (doesn't creep toward 'bailed' on noise)", () => {
-    let state = { tier: "everyOther", overBudgetStreak: ZOOM_ANIM_DEGRADE_STREAK - 1, frameParity: 0 };
-    state = nextZoomAnimTier(state, 1);
-    expect(state.tier).toBe("everyOther");
-    expect(state.overBudgetStreak).toBe(0);
-  });
-
-  it("FoodMap.jsx wires the zoom-scaling effect to real Leaflet events (zoomanim/zoomend), restoring true radii on every exit path", () => {
+describe("B842528 (2026-08-28) — continuous marker scaling REVERTED: it drew markers at wrong positions mid-animation", () => {
+  it("the per-frame zoom-scaling compensation loop is gone — no zoomanim listener, no setRadius-during-animation, no perf-degrade tiers", () => {
     const map = src("components/FoodMap.jsx");
-    expect(map).toMatch(/import \{ nextZoomAnimTier \} from "\.\.\/lib\/zoomAnimTier\.js";/);
-    expect(map).toMatch(/map\.on\("zoomanim", onZoomAnimStart\)/);
-    expect(map).toMatch(/map\.on\("zoomend", onZoomEnd\)/);
-    // Every exit path (natural loop exit, zoomend, unmount cleanup) restores true radii — never
-    // leaves a marker's radius mutated once the gesture is over.
-    const effectStart = map.indexOf("// ⛔ NEW-2 (2nd owner block, 2026-08-23) — CONTINUOUS marker scaling");
-    const effectEnd = map.indexOf("Search or list result selected");
-    const effect = map.slice(effectStart, effectEnd);
-    const restoreCalls = effect.match(/restoreTrueRadii\(\)/g) || [];
-    expect(restoreCalls.length).toBeGreaterThanOrEqual(4); // natural exit, bail, onZoomEnd, unmount cleanup
-    // Radius is compensated via Leaflet's OWN setRadius (batched/coalesced internally), never a
-    // hand-rolled canvas redraw that would duplicate Leaflet's own stroke/fill/halo logic.
-    expect(effect).toMatch(/m\.setRadius\(trueR \/ scale\)/);
-    expect(effect).not.toMatch(/getContext\(/); // never a raw canvas 2D context reach-around
+    // Checks actual CODE patterns, not the bare identifier — the revert's own explanatory comment
+    // deliberately names the removed pieces so a future session understands what and why, and
+    // that prose mention must not trip this guard (the same shape as the numeric(3,2) cautionary
+    // mention in db/food.sql's own migration comment, elsewhere in this file).
+    const codeOnly = map.split("\n").filter((line) => !line.trim().startsWith("//")).join("\n");
+    expect(codeOnly).not.toMatch(/map\.on\("zoomanim"/);
+    expect(codeOnly).not.toMatch(/nextZoomAnimTier\(/);
+    expect(codeOnly).not.toMatch(/readContainerScale\(/);
+    expect(codeOnly).not.toMatch(/trueRadiiRef/);
+    expect(codeOnly).not.toMatch(/rafIdRef/);
+    expect(codeOnly).not.toMatch(/zoomAnimStateRef/);
+    expect(codeOnly).not.toContain('from "../lib/zoomAnimTier.js"');
   });
 
-  it("readContainerScale reads the LIVE computed transform rather than reimplementing Leaflet's own easing curve", () => {
+  it("lib/zoomAnimTier.js was deleted, not left disabled — a confirmed-buggy mechanism is not left for a future session to rediscover", () => {
+    expect(existsSync(join(REPO, "src/workspaces/food/lib/zoomAnimTier.js"))).toBe(false);
+  });
+
+  it("rendererRef was removed too — it existed only to serve the deleted effect, and a leftover write-only ref is exactly the dead-store class this repo's own guards forbid", () => {
     const map = src("components/FoodMap.jsx");
-    const fnIdx = map.indexOf("function readContainerScale(");
-    expect(fnIdx).toBeGreaterThanOrEqual(0);
-    const fn = map.slice(fnIdx, map.indexOf("}", map.indexOf("}", fnIdx) + 1) + 1);
-    expect(fn).toMatch(/getComputedStyle\(el\)\.transform/);
-    expect(fn).not.toMatch(/cubic-bezier/i); // no hand-rolled easing — reads the browser's real value
+    expect(map).not.toMatch(/rendererRef/);
   });
 
-  it("the perf budget and degrade-streak constants are the ones documented and measured this session", () => {
-    expect(ZOOM_ANIM_FRAME_BUDGET_MS).toBe(8);
-    expect(ZOOM_ANIM_DEGRADE_STREAK).toBe(3);
+  it("the revert is documented with its root cause and the measured evidence, so a future session does not re-add the same mechanism blind", () => {
+    const map = src("components/FoodMap.jsx");
+    expect(map).toMatch(/B842528/);
+    expect(map).toMatch(/double transform/i);
+    expect(map).toMatch(/verify-marker-position\.mjs/);
+  });
+
+  it("a real headless-browser guard exists proving the mechanism (ui-audit/verify-marker-position.mjs), not just the scratch-repro one", () => {
+    expect(existsSync(join(REPO, "ui-audit", "verify-marker-position.mjs"))).toBe(true);
   });
 });
 

@@ -53,6 +53,46 @@
  * ⛔ "WANT TO TRY" (B669312) — now block 4 (Actions), not a standalone pill under the title: see
  * ActionsRow below. FoodApp still owns the actual flag state; this file only renders `wishlisted`
  * and calls `onToggleWishlist`.
+ *
+ * ⛔ EDIT A PAST VISIT (owner block, 2026-08-28, verbatim: "I should be able to edit previous
+ * visits" — the ··· menu offered only Delete, so a mistyped rating or a date remembered later
+ * meant destroying the record and re-entering it). VisitForm now takes an `initial` prop (the
+ * visit being edited, or undefined for a fresh log) and a `submitLabel` — otherwise it is the
+ * EXACT SAME component/logic for both paths, never a second form, so the 0.25-step slider,
+ * natural-precision display, and every other VisitForm behavior apply identically to editing.
+ * `VisitCard` renders VisitForm INLINE in place of its own content while editing (never a modal),
+ * reachable via a new "Edit" menu item AND by tapping the card itself. Cancel is free: nothing is
+ * written until Save, so discarding the form's local state is the whole "restore" story. On
+ * Save, FoodApp's `editVisit` uses the identical optimistic-update/rollback shape `submitVisit`
+ * already uses for a new visit — see its own header comment for why that's also this table's
+ * "op-envelope" equivalent. On FAILURE, the edit form stays open with the typed values intact
+ * (VisitForm's own B668194 clear-only-on-confirmed-save gate already does this for free — the
+ * SAME mechanism, not a new one) — so nothing typed is lost and the card's own DISPLAY view never
+ * shows an edited value that isn't actually in the database yet.
+ *
+ * ⛔ VISIT CARD LAYOUT (owner block, 2026-08-28, verbatim: "I feel like the three dots and date
+ * should be more in line with the rest of the info" — on his screenshot, the date/··· sat flush
+ * against the far edge, ~600px from the rating chips on a 390pt screen). The date now lives
+ * INSIDE the same flex-wrap row as the chips, in the same muted secondary-text style, so it
+ * reads as one connected line of metadata rather than two disconnected halves of the card. The
+ * ··· button is its OWN fixed-size flex item in the row's rightmost column — no longer grouped
+ * with the date, so its x-position no longer shifts with the date text's length ("Date unknown"
+ * vs "Aug 15" are different widths) — and the row's `alignItems: "center"` keeps ··· vertically
+ * centred against however tall that card's own chip+date content happens to be, whether it wraps
+ * to one line or two.
+ *
+ * ⛔ STICKY HEADER (owner block, 2026-08-28 — flagged from a screenshot, NOT reported as a bug;
+ * checked before acting). Before this, PanelHeader was a plain first child of the panel's one
+ * scrolling container (BottomSheet's contentRef on mobile, this file's own overflowY:auto div on
+ * desktop) — nothing made it sticky, and no comment anywhere in this file or BottomSheet.jsx ever
+ * claimed that was deliberate (contrast ActionsRow just below, which IS deliberately sticky, WITH
+ * its own reasoning). That is a genuine, unflagged gap, not an intentional choice caught mid-
+ * scroll — so it's fixed: PanelHeader is now wrapped in its own `position: sticky; top: 0` div,
+ * INSIDE the same `peekRef` block whose height already drives the sheet's "peek" snap sizing (a
+ * sticky child still contributes its normal-flow height to `offsetHeight`, so that measurement is
+ * unaffected). Deliberately NOT the whole peekRef block (header + score strip) — pinning the score
+ * strip too would permanently eat a large share of the "half" snap's limited height for no benefit
+ * the screenshot asked for.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
@@ -141,15 +181,20 @@ function fieldStyle() {
   };
 }
 
-function VisitForm({ onSubmit, onCancel, pending, onSaved }) {
-  const [rating, setRating] = useState(null);
-  const [ratingAmbiance, setRatingAmbiance] = useState(null);
-  const [cost, setCost] = useState("");
-  const [visitedOn, setVisitedOn] = useState(""); // never pre-filled — see header comment
-  const [whatIHad, setWhatIHad] = useState("");
-  const [whatWasGood, setWhatWasGood] = useState("");
-  const [notes, setNotes] = useState("");
-  const [wouldReturn, setWouldReturn] = useState(null);
+function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, submitLabel = "Log this visit" }) {
+  // `initial` (the visit being edited) is a lazy-initializer READ ONCE at mount — VisitCard
+  // unmounts/remounts this form every time editing toggles off then on again, so re-opening edit
+  // always starts from the CURRENT saved row, never a stale in-progress edit from before a Cancel.
+  // rating/rating_ambiance are Postgres `numeric` -> PostgREST strings ("8.25"), same Number()
+  // coercion every other read site in this module already applies.
+  const [rating, setRating] = useState(() => (initial?.rating != null ? Number(initial.rating) : null));
+  const [ratingAmbiance, setRatingAmbiance] = useState(() => (initial?.rating_ambiance != null ? Number(initial.rating_ambiance) : null));
+  const [cost, setCost] = useState(() => (initial?.cost != null ? String(initial.cost) : ""));
+  const [visitedOn, setVisitedOn] = useState(() => initial?.visited_on || ""); // never pre-filled on a FRESH log — see header comment
+  const [whatIHad, setWhatIHad] = useState(() => initial?.what_i_had || "");
+  const [whatWasGood, setWhatWasGood] = useState(() => initial?.what_was_good || "");
+  const [notes, setNotes] = useState(() => initial?.notes || "");
+  const [wouldReturn, setWouldReturn] = useState(() => initial?.would_return ?? null);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -192,7 +237,20 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved }) {
         <RatingSlider value={ratingAmbiance} onChange={setRatingAmbiance} label="Ambiance rating" />
       </label>
       <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-secondary)" }}>
-        Date
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+          <span>Date</span>
+          {/* Explicit clear affordance, matching the rating slider's own "Clear" link — a native
+           * date input's built-in clear gesture isn't reliably reachable on every platform (a
+           * concern that matters for editing: "date (including clearing it back to unknown)"). */}
+          {visitedOn && (
+            <button type="button" onClick={() => setVisitedOn("")} style={{
+              border: "none", background: "none", color: "var(--text-tertiary)", cursor: "pointer",
+              font: "inherit", fontSize: 11.5, padding: 0, textDecoration: "underline",
+            }}>
+              Clear
+            </button>
+          )}
+        </div>
         <input type="date" value={visitedOn} onChange={(e) => setVisitedOn(e.target.value)} style={fieldStyle()} />
       </label>
       <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-secondary)" }}>
@@ -232,7 +290,7 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved }) {
           background: "var(--accent-food)", color: "var(--on-accent-food)", font: "inherit", fontSize: 13.5, fontWeight: 700,
           opacity: pending ? 0.6 : 1,
         }}>
-          {pending ? "Saving…" : "Log this visit"}
+          {pending ? "Saving…" : submitLabel}
         </button>
         <button type="button" onClick={onCancel} style={{
           border: "1px solid var(--border-default)", borderRadius: RADIUS.md, padding: "10px 14px", minHeight: 44, cursor: "pointer",
@@ -445,15 +503,22 @@ function ActionsRow({ everVisited, onOpenForm, wishlisted, onToggleWishlist, wis
   );
 }
 
-/* Past visits (block 5) — one card per visit. Chips (Food/Ambiance/Would return), date
- * right-aligned, a "···" overflow button. Only non-empty lines render ("Had X" / "Good X" /
- * cost) — never an empty labelled row. Delete lives behind the overflow menu with an INLINE
- * confirm (no window.confirm — this module's own house rule), through AnchoredMenu (the SAME
- * portal-based menu SearchBox already uses) because this button sits inside a scrolling list —
- * a plain absolutely-positioned dropdown here would hit the exact clipping bug AnchoredMenu was
- * built to fix (B632176). Undated visits render at reduced emphasis and sort last (already true
- * of the incoming pastVisits order — foodStore.fetchAllVisits orders nullsFirst:false). */
-function VisitCard({ visit, onDelete }) {
+/* Past visits (block 5) — one card per visit. Chips (Food/Ambiance/Would return) AND the date
+ * share one flex-wrap row (owner block, 2026-08-28 — see the file header comment on VISIT CARD
+ * LAYOUT for why), a "···" overflow button sits in its own fixed-position column. Only non-empty
+ * lines render ("Had X" / "Good X" / cost) — never an empty labelled row. Delete AND Edit live
+ * behind the overflow menu; Delete keeps its INLINE confirm (no window.confirm — this module's
+ * own house rule), through AnchoredMenu (the SAME portal-based menu SearchBox already uses)
+ * because this button sits inside a scrolling list — a plain absolutely-positioned dropdown here
+ * would hit the exact clipping bug AnchoredMenu was built to fix (B632176). Undated visits render
+ * at reduced emphasis and sort last (already true of the incoming pastVisits order —
+ * foodStore.fetchAllVisits orders nullsFirst:false).
+ *
+ * EDIT (owner block, 2026-08-28) — tapping the card itself OR the new "Edit" menu item opens
+ * `VisitForm` inline, replacing the card's own content in place (never a modal). `editing` is
+ * OWNED BY THE PARENT (PastVisitsSection/VisitPanel), not local state here, so VisitPanel can
+ * enforce "only one form open at a time" against the log-a-new-visit form. */
+function VisitCard({ visit, onDelete, editing, onOpenEdit, onCloseEdit, onSubmitEdit, pending }) {
   const menuBtnRef = useRef(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -464,35 +529,61 @@ function VisitCard({ visit, onDelete }) {
 
   const closeMenu = () => { setMenuOpen(false); setConfirming(false); };
 
+  if (editing) {
+    return (
+      <div data-testid="food-visit-card-editing" style={{ borderBottom: "1px solid var(--border-default)" }}>
+        <VisitForm
+          initial={visit} submitLabel="Save changes" pending={pending}
+          onCancel={onCloseEdit} onSubmit={onSubmitEdit} onSaved={onCloseEdit}
+        />
+      </div>
+    );
+  }
+
   return (
-    <div data-testid="food-visit-card" style={{ padding: "10px 16px", borderBottom: "1px solid var(--border-default)", opacity: dateless ? 0.65 : 1 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
+    <div
+      data-testid="food-visit-card" onClick={onOpenEdit} role="button" tabIndex={0}
+      onKeyDown={(e) => { if (e.key === "Enter") onOpenEdit(); }}
+      style={{ padding: "10px 16px", borderBottom: "1px solid var(--border-default)", opacity: dateless ? 0.65 : 1, cursor: "pointer" }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center", flex: 1, minWidth: 0 }}>
           {hasRating && <Chip label="Food" value={visit.rating} />}
           {hasAmbiance && <Chip label="Ambiance" value={visit.rating_ambiance} />}
           {hasWouldReturn && <WouldReturnChip />}
           {!hasRating && !hasAmbiance && !hasWouldReturn && <span style={{ color: "var(--text-tertiary)", fontSize: 12 }}>—</span>}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 0, flex: "0 0 auto" }}>
           <span style={{ fontSize: 12, color: "var(--text-tertiary)", whiteSpace: "nowrap" }}>{formatVisitDate(visit.visited_on)}</span>
-          <button
-            ref={menuBtnRef} type="button" onClick={() => setMenuOpen((o) => !o)} aria-label="Visit options"
-            data-testid="food-visit-menu-btn"
-            style={{
-              border: "none", background: "none", color: "var(--text-tertiary)", cursor: "pointer", fontSize: 17,
-              minWidth: 44, minHeight: 44, lineHeight: 1, padding: 0,
-            }}
-          >
-            ···
-          </button>
-          <AnchoredMenu
-            open={menuOpen} onClose={closeMenu} anchorRef={menuBtnRef} placement="below-right" width={190} gap={4}
-            panelStyle={{
-              background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: 10,
-              boxShadow: "0 10px 28px rgba(0,0,0,0.22)", padding: 6,
-            }}
-          >
-            {!confirming ? (
+        </div>
+        <button
+          ref={menuBtnRef} type="button"
+          onClick={(e) => { e.stopPropagation(); setMenuOpen((o) => !o); }} aria-label="Visit options"
+          data-testid="food-visit-menu-btn"
+          style={{
+            flex: "0 0 auto", border: "none", background: "none", color: "var(--text-tertiary)", cursor: "pointer", fontSize: 17,
+            minWidth: 44, minHeight: 44, lineHeight: 1, padding: 0,
+          }}
+        >
+          ···
+        </button>
+        <AnchoredMenu
+          open={menuOpen} onClose={closeMenu} anchorRef={menuBtnRef} placement="below-right" width={190} gap={4}
+          panelStyle={{
+            background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: 10,
+            boxShadow: "0 10px 28px rgba(0,0,0,0.22)", padding: 6,
+          }}
+        >
+          {!confirming ? (
+            <div onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button" onClick={() => { closeMenu(); onOpenEdit(); }} data-testid="food-visit-edit-menu-item"
+                style={{
+                  display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent",
+                  borderRadius: RADIUS.sm, padding: "9px 10px", minHeight: 44, cursor: "pointer", font: "inherit", fontSize: 13,
+                  color: "var(--text-primary)",
+                }}
+              >
+                Edit
+              </button>
               <button
                 type="button" onClick={() => setConfirming(true)} data-testid="food-visit-delete-menu-item"
                 style={{
@@ -503,33 +594,33 @@ function VisitCard({ visit, onDelete }) {
               >
                 Delete
               </button>
-            ) : (
-              <div style={{ padding: "6px 4px" }}>
-                <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 7 }}>Delete this visit?</div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <button
-                    type="button" onClick={closeMenu}
-                    style={{
-                      flex: 1, border: "1px solid var(--border-default)", borderRadius: RADIUS.sm, padding: "7px 0", minHeight: 36,
-                      background: "transparent", color: "var(--text-primary)", cursor: "pointer", font: "inherit", fontSize: 12.5,
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button" onClick={() => { onDelete(visit.id); closeMenu(); }} data-testid="food-visit-delete-confirm"
-                    style={{
-                      flex: 1, border: "1px solid var(--danger-border, var(--danger))", borderRadius: RADIUS.sm, padding: "7px 0", minHeight: 36,
-                      background: "transparent", color: "var(--danger-text, var(--danger))", cursor: "pointer", font: "inherit", fontSize: 12.5, fontWeight: 700,
-                    }}
-                  >
-                    Delete
-                  </button>
-                </div>
+            </div>
+          ) : (
+            <div style={{ padding: "6px 4px" }} onClick={(e) => e.stopPropagation()}>
+              <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 7 }}>Delete this visit?</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  type="button" onClick={closeMenu}
+                  style={{
+                    flex: 1, border: "1px solid var(--border-default)", borderRadius: RADIUS.sm, padding: "7px 0", minHeight: 36,
+                    background: "transparent", color: "var(--text-primary)", cursor: "pointer", font: "inherit", fontSize: 12.5,
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button" onClick={() => { onDelete(visit.id); closeMenu(); }} data-testid="food-visit-delete-confirm"
+                  style={{
+                    flex: 1, border: "1px solid var(--danger-border, var(--danger))", borderRadius: RADIUS.sm, padding: "7px 0", minHeight: 36,
+                    background: "transparent", color: "var(--danger-text, var(--danger))", cursor: "pointer", font: "inherit", fontSize: 12.5, fontWeight: 700,
+                  }}
+                >
+                  Delete
+                </button>
               </div>
-            )}
-          </AnchoredMenu>
-        </div>
+            </div>
+          )}
+        </AnchoredMenu>
       </div>
       {visit.what_i_had && <div style={{ marginTop: 4, fontSize: 13, color: "var(--text-primary)" }}>Had {visit.what_i_had}</div>}
       {visit.what_was_good && <div style={{ marginTop: 2, fontSize: 13, color: "var(--text-secondary)" }}>Good {visit.what_was_good}</div>}
@@ -539,14 +630,21 @@ function VisitCard({ visit, onDelete }) {
   );
 }
 
-function PastVisitsSection({ pastVisits, onDelete }) {
+function PastVisitsSection({ pastVisits, onDelete, onEditVisit, editingVisitId, onOpenEdit, onCloseEdit, pending }) {
   if (!pastVisits.length) return null;
   return (
     <div data-testid="food-past-visits">
       <div style={{ padding: "12px 16px 2px", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-tertiary)" }}>
         Past visits · {pastVisits.length}
       </div>
-      {pastVisits.map((v) => <VisitCard key={v.id} visit={v} onDelete={onDelete} />)}
+      {pastVisits.map((v) => (
+        <VisitCard
+          key={v.id} visit={v} onDelete={onDelete}
+          editing={editingVisitId === v.id} pending={pending}
+          onOpenEdit={() => onOpenEdit(v.id)} onCloseEdit={onCloseEdit}
+          onSubmitEdit={onEditVisit ? (fields) => onEditVisit(v.id, fields) : undefined}
+        />
+      ))}
     </div>
   );
 }
@@ -563,12 +661,20 @@ function EmptyStateNote() {
 }
 
 export default function VisitPanel({
-  place, pastVisits, onClose, onSubmitVisit, onDeleteVisit, pending, error,
+  place, pastVisits, onClose, onSubmitVisit, onDeleteVisit, onEditVisit, pending, error,
   manualNameEditable, manualName, onManualNameChange,
   wishlisted, onToggleWishlist, onSheetHeightChange,
 }) {
   const isMobile = useIsMobile();
   const [adding, setAdding] = useState(false); // NEW-2: never auto-opens, even on a never-visited place
+  // Edit-a-visit (owner block, 2026-08-28) — which existing visit's card (if any) is showing its
+  // edit form inline, in place of the card. Lifted here rather than local to VisitCard so this
+  // panel can enforce "only one form open at a time" against the log-a-new-visit form above —
+  // opening one closes the other, so `pending`/`error` (both FoodApp-global) always describe the
+  // ONE write actually in flight.
+  const [editingVisitId, setEditingVisitId] = useState(null);
+  const handleOpenEdit = useCallback((id) => { setAdding(false); setEditingVisitId(id); }, []);
+  const handleCloseEdit = useCallback(() => setEditingVisitId(null), []);
   const peekRef = useRef(null);
   const [peekHeight, setPeekHeight] = useState(140);
 
@@ -615,16 +721,24 @@ export default function VisitPanel({
     if (peekRef.current) setPeekHeight(peekRef.current.offsetHeight);
   });
 
-  const handleOpenForm = () => setAdding(true);
+  // Opening the log-a-new-visit form also closes any in-progress edit — see the state comment
+  // above on why only one form is ever open at once.
+  const handleOpenForm = () => { setEditingVisitId(null); setAdding(true); };
 
   const body = (
     <>
       <div ref={peekRef}>
-        <PanelHeader
-          manualNameEditable={manualNameEditable} manualName={manualName} onManualNameChange={onManualNameChange}
-          name={place?.name} category={place?.category} address={place?.address} lat={place?.lat} lon={place?.lon}
-          onClose={onClose}
-        />
+        {/* Sticky header (owner block, 2026-08-28 — see the file header comment on STICKY HEADER
+         * for why this was a genuine gap, not a deliberate choice). Wrapped here, INSIDE peekRef,
+         * so the sheet's peek-height measurement (unchanged, above) still sees this block's real
+         * height — position:sticky doesn't remove an element from normal flow. */}
+        <div style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--surface-raised)" }}>
+          <PanelHeader
+            manualNameEditable={manualNameEditable} manualName={manualName} onManualNameChange={onManualNameChange}
+            name={place?.name} category={place?.category} address={place?.address} lat={place?.lat} lon={place?.lon}
+            onClose={onClose}
+          />
+        </div>
         {showSaved && (
           // NEW-1 — deliberately INSIDE peekRef's own measured div, not an absolute overlay: it
           // never covers the close button or the title, and BottomSheet's own "peek" height
@@ -660,7 +774,10 @@ export default function VisitPanel({
         />
       ))}
 
-      <PastVisitsSection pastVisits={visits} onDelete={onDeleteVisit} />
+      <PastVisitsSection
+        pastVisits={visits} onDelete={onDeleteVisit} onEditVisit={onEditVisit} pending={pending}
+        editingVisitId={editingVisitId} onOpenEdit={handleOpenEdit} onCloseEdit={handleCloseEdit}
+      />
     </>
   );
 
