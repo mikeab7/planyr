@@ -1857,8 +1857,52 @@ export default function NoteEditor({
    * `scrollTop` was clamped straight back to zero. Measured: the table still moved by the full
    * 36px with that fix in place. A CSS transform has no such floor, so this folds the delta
    * into the mat's own `transform` instead — literally "the view transform" the rule names —
-   * which cancels the container's own shift regardless of how much content it holds. */
+   * which cancels the container's own shift regardless of how much content it holds.
+   *
+   * ⛔ REOPENED (NEW-1, 2026-08-28): THE FIRST SHIPPED VERSION OF THIS FIX COMPENSATED ONE
+   * FRAME TOO LATE, and that is a real, measured gap, not a guess. It relied on a
+   * `ResizeObserver` alone — which is exactly the "passive (after-paint) useEffect" VIEWPORT-
+   * STABLE warns against, because its callback is queued and is NOT guaranteed to land before
+   * the browser paints the frame that already grew the toolbar. A `requestAnimationFrame`
+   * sampler on this exact build (the guard's 45ms-apart samples never caught it) shows it
+   * directly: the frame the toolbar first measures at its taller height still has the mat's
+   * `transform` empty and the table already down by the full delta; only the NEXT frame
+   * corrects it. That is the "jump and flash" happening again, on camera, with the old fix
+   * installed — and on a slower machine, mid-drag, or under Chrome's own ResizeObserver
+   * notification-loop budget, that one frame can stretch far longer, which is what reached
+   * production (the owner's numbers show the shift landing at pointerup and NEVER correcting
+   * — `docs/NOTES-CARRY-FORWARD.md` §5.4 has the fixture and the harness that proves this red
+   * on the code above).
+   *
+   * The fix: measure and apply the compensation SYNCHRONOUSLY, in the SAME commit that grows
+   * the toolbar, via a `useLayoutEffect` keyed on the exact boolean `NoteToolbar` uses to
+   * decide whether to render the extra row. A layout effect runs after the DOM mutation is
+   * committed but before the browser paints, so there is no frame in which the toolbar can be
+   * tall and the compensation can be absent — the two are the same render. The
+   * `ResizeObserver` stays, but only as the fallback for every OTHER cause of the toolbar
+   * changing height (a window resize changing how many buttons fit per row, a webfont
+   * finishing its load): both paths share one height baseline, so whichever fires second
+   * always measures a delta of zero against what the other just recorded. */
   const toolbarShiftRef = useRef(0);
+  const toolbarHeightRef = useRef(null); // null = not yet measured; the first read only sets the baseline
+  const applyToolbarDelta = useCallback((nextHeight) => {
+    const prevHeight = toolbarHeightRef.current;
+    toolbarHeightRef.current = nextHeight;
+    if (prevHeight == null) return;
+    const delta = nextHeight - prevHeight;
+    const scroller = scrollerRef.current;
+    if (!delta || !scroller) return;
+    toolbarShiftRef.current += delta;
+    scroller.style.transform = toolbarShiftRef.current
+      ? `translateY(${-toolbarShiftRef.current}px)` : "";
+  }, []);
+
+  const inTable = !!editor && !editor.isDestroyed && editor.isActive("table");
+  useLayoutEffect(() => {
+    const toolbarEl = noteRootRef.current?.querySelector('[data-testid="note-toolbar"]');
+    if (toolbarEl) applyToolbarDelta(toolbarEl.getBoundingClientRect().height);
+  }, [inTable, applyToolbarDelta]);
+
   useEffect(() => {
     /* ⛔ `editor` IS A DEP, NOT `[]` — Tiptap's `useEditor` returns null on the first render
      * (immediatelyRender: false is the default, to stay SSR-safe) and the toolbar renders
@@ -1869,19 +1913,15 @@ export default function NoteEditor({
     if (!root || !scroller || typeof ResizeObserver === "undefined") return undefined;
     const toolbarEl = root.querySelector('[data-testid="note-toolbar"]');
     if (!toolbarEl) return undefined;
-    let prevHeight = toolbarEl.getBoundingClientRect().height;
-    const ro = new ResizeObserver(() => {
-      const nextHeight = toolbarEl.getBoundingClientRect().height;
-      const delta = nextHeight - prevHeight;
-      prevHeight = nextHeight;
-      if (!delta) return;
-      toolbarShiftRef.current += delta;
-      scroller.style.transform = toolbarShiftRef.current
-        ? `translateY(${-toolbarShiftRef.current}px)` : "";
-    });
+    const ro = new ResizeObserver(() => applyToolbarDelta(toolbarEl.getBoundingClientRect().height));
     ro.observe(toolbarEl);
-    return () => { ro.disconnect(); scroller.style.transform = ""; toolbarShiftRef.current = 0; };
-  }, [editor]);
+    return () => {
+      ro.disconnect();
+      scroller.style.transform = "";
+      toolbarShiftRef.current = 0;
+      toolbarHeightRef.current = null;
+    };
+  }, [editor, applyToolbarDelta]);
 
   /* ⛔ THE SAME WRITING STAYS UNDER THE EYE ACROSS A STEP (VIEWPORT-STABLE). Left alone, a
    * zoom throws the reader somewhere else: the content above the viewport changes height, so

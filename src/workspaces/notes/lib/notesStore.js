@@ -1634,9 +1634,18 @@ export function openTaskCount(pageId) {
 export function collectBinFacts(tree, projects = []) {
   const byId = new Map((projects || []).filter(Boolean).map((p) => [p.id, p.name]));
   const titles = new Map();
+  /* ⛔ WHETHER A WRITE EVER LANDED, KEPT ON THE TREE NODE, SEPARATELY FROM WHETHER A BODY
+   * EXISTS ON THIS DEVICE RIGHT NOW (NEW-2). `updatedAt` is moved only by `touchPage`, which
+   * fires only after `writePage` actually lands a save — never on a keystroke — so
+   * `updatedAt !== createdAt` is true precisely for a page that was, at some point, really
+   * written to. `readPage` returning null does NOT mean the same thing: it also means "this
+   * page was created and deleted before its first autosave ever ran," which is the ordinary
+   * shape of a scratch page nobody typed a word into. */
+  const touched = new Map();
   const titleWalk = (node) => {
     if (!node) return;
     titles.set(node.id, node.title);
+    touched.set(node.id, Number.isFinite(node.updatedAt) && Number.isFinite(node.createdAt) && node.updatedAt !== node.createdAt);
     for (const k of node.pages || []) titleWalk(k);
   };
   return trashEntries(tree).map((e) => {
@@ -1653,9 +1662,11 @@ export function collectBinFacts(tree, projects = []) {
     const reading = [];
     let text = "";
     let anyStored = false;
+    let everTouched = false;
     for (const id of e.pageIds || []) {
       const doc = readPage(id);
       if (doc) anyStored = true;
+      if (touched.get(id)) everTouched = true;
       const t = docToText(doc).replace(/\s+/g, " ").trim();
       if (!t) continue;
       reading.push({ pageId: id, title: titles.get(id) || "", chars: t.length });
@@ -1679,8 +1690,16 @@ export function collectBinFacts(tree, projects = []) {
        * destroyed, `purged_at` set — and then resurrected as bin entries by the union merge,
        * so the bin was offering to restore notes whose content no longer exists anywhere.
        * `gone` is the honest third state: there is no body on this device for ANY page in the
-       * cascade, so there is nothing to show and nothing a restore would bring back. */
-      gone: text.length === 0 && !anyStored && (e.pageIds || []).length > 0,
+       * cascade, so there is nothing to show and nothing a restore would bring back.
+       *
+       * ⛔ AND `!anyStored` ALONE WAS THE WRONG TEST (NEW-2, reopened 2026-08-28) — it also
+       * reads true for a page that was created and binned so quickly its first autosave never
+       * ran, which has NOTHING to be gone: it says "permanently deleted and cannot be brought
+       * back" about a page whose writing never existed in the first place. `everTouched`
+       * requires at least one page in the cascade to carry PROOF a write actually landed
+       * (`updatedAt` moved off `createdAt`) before this reads as a real loss rather than an
+       * ordinary untouched scratch page. */
+      gone: text.length === 0 && !anyStored && everTouched && (e.pageIds || []).length > 0,
       // The page the words came from — never blindly the first in the cascade, which for a
       // container is the container itself and has no body at all.
       pageId: reading[0]?.pageId || (e.pageIds || [])[0] || null,
