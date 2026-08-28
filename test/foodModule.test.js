@@ -13,6 +13,7 @@ import { dirname, join, resolve } from "node:path";
 
 import { MODULE_BY_SLUG, SLUG_BY_MODULE, parseRoute, buildHash } from "../src/app/route.js";
 import { MODULE_ACCENT } from "../src/shared/ui/moduleAccent.js";
+import { MODULE_TAB_LABEL } from "../src/shared/ui/moduleTabLabel.js";
 import { LOADER_SKINS, resolveLoaderTheme } from "../src/shared/ui/moduleLoaderTheme.js";
 import { ROUTE_KEYS } from "../ui-audit/lib/bundleMetrics.mjs";
 import {
@@ -123,10 +124,15 @@ describe("the route itself still works (NEW-2 changes discoverability, not the r
  * ═══════════════════════════════════════════════════════════════════════════════════════ */
 describe("/food is unlisted — no discoverability surface names it", () => {
   it("the workspace tab list must not contain a food entry (the guard NEW-2 asks for)", () => {
+    // The tab icon list (MODULE_ICONS) and the tab LABEL table (MODULE_TAB_LABEL, shared with
+    // the browser tab title — NEW-1/B821280) are the two places a tab could be named; food must
+    // be absent from both.
     const hdr = read(REPO, "src/shared/ui/AppHeader.jsx");
-    const modulesBlock = hdr.slice(hdr.indexOf("const MODULES = ["), hdr.indexOf("\n];", hdr.indexOf("const MODULES = [")));
-    expect(modulesBlock).not.toMatch(/id:\s*"food"/);
-    expect(modulesBlock, "and no peer went missing in the edit").toMatch(/id:\s*"notes"/);
+    const iconsBlock = hdr.slice(hdr.indexOf("const MODULE_ICONS = ["), hdr.indexOf("\n];", hdr.indexOf("const MODULE_ICONS = [")));
+    expect(iconsBlock).not.toMatch(/id:\s*"food"/);
+    expect(iconsBlock, "and no peer went missing in the edit").toMatch(/id:\s*"notes"/);
+    expect(MODULE_TAB_LABEL.food).toBeUndefined();
+    expect(MODULE_TAB_LABEL.notes, "and no peer went missing in the edit").toBe("Notes");
   });
 
   it("neither accent map in AppHeader names food (no tab underline/label color to wire up)", () => {
