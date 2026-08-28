@@ -31,12 +31,16 @@ import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMil
  * the wrapping `<div>` at the render site, not by this component, so the box itself never
  * resizes when the chunk arrives. */
 const LayerPanel = lazy(() => import("./components/LayerPanel.jsx"));
+// B831777 (NEW-2) — the Comps tab's content. Loaded on demand, same reasoning as LayerPanel
+// above: it renders inside the left rail, not on the map's own critical path.
+const CompsPanel = lazy(() => import("../../shared/comps/components/CompsPanel.jsx"));
 import LazyPanel from "./components/LazyPanel.jsx";
 import { siteState } from "./lib/siteRegion.js";
 // NEW-3 — the ONE map-overlay stacking model. Leaflet fixes its own control containers at
 // z-index 1000; these panels sat at 1000 too, so whether the zoom buttons and the scale bar
 // covered them came down to document order. An open panel now outranks map chrome outright.
-import { MAP_CHROME_Z, panelMaxHeight, ZOOM_CONTROL_CLEARANCE_PX, COMPS_TOGGLE_CLEARANCE_PX } from "./lib/mapChromeStack.js";
+import { MAP_CHROME_Z, panelMaxHeight, ZOOM_CONTROL_CLEARANCE_PX } from "./lib/mapChromeStack.js";
+import PlaceSearchField from "./components/PlaceSearchField.jsx";
 import { useGroundElevation } from "./components/useGroundElevation.js";
 import CursorChip from "./components/CursorChip.jsx";
 import { contourHover } from "./lib/terrainLazy.js";
@@ -90,6 +94,13 @@ const PAL = {
   accent: "var(--accent)", muted: "var(--text-secondary)",
   chrome: "var(--chrome-bg)", chromeLine: "var(--chrome-divider)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)", ember: "var(--accent)",
 };
+
+/* B831776 (NEW-1/NEW-6) — the Comp-mode accent. Deliberately a different hue from `PAL.accent`
+ * (the site/plan action color) so the toolbar switch and the armed-drop indicator can never read
+ * as "just another site action" — a raw click in Comp mode creates a standing record (a comp),
+ * which is a costlier mistake to walk back than a site click is. Matches the leasing-comp map
+ * marker's own "building sale" blue (compMarkerIcon.js) rather than inventing a fourth color. */
+const COMP_ACCENT = "#2f6fb0";
 
 // The aerial-source registry (BASEMAPS) lives in lib/basemaps.js (B693) — it's shared
 // with the planner's Basemap control so both surfaces always offer the same sources.
@@ -269,7 +280,7 @@ function sitePinIcon(status, active) {
     shapeSvg +
     `</svg></div>`;
   return L.divIcon({
-    className: "",
+    className: "map-site-feature", // NEW-3 — a stable hook for verifying the decoupling
     html,
     iconSize: [HIT_W, HIT_H],
     iconAnchor: [HIT_W / 2, HIT_H],
@@ -368,7 +379,50 @@ const ShareGlyph = ({ size = 13 }) => (
   </svg>
 );
 
-export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip, onViewCenter, comps = [], onPlaceComp, onCompClick, compsPanelOpen = false, onOpenComps }) {
+/* B831776 (NEW-1) — the far-left Site/Comp switch. MODULE-SCOPE-COMPONENTS: defined here, not
+ * inside MapFinder's render. Two segments, one piece of state (`mode`) — see the state's own
+ * comment for why there is deliberately no second "which tab" variable. */
+const SWITCH_SEG_H = 26;
+function SiteCompSwitch({ mode, onChange }) {
+  const seg = (key, label, accent) => {
+    const on = mode === key;
+    return (
+      <button key={key} type="button" role="tab" aria-selected={on} onClick={() => onChange(key)}
+        style={{
+          flex: "none", height: SWITCH_SEG_H, padding: "0 8px", borderRadius: RADIUS.sm, border: "none",
+          background: on ? accent : "transparent", color: on ? "#fff" : "var(--chrome-muted)",
+          fontSize: 12, fontWeight: on ? 700 : 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
+        }}
+      >{label}</button>
+    );
+  };
+  return (
+    <div role="tablist" aria-label="Site or comp" style={{
+      flex: "none", display: "flex", gap: 2, padding: 2, marginRight: 6,
+      height: SWITCH_SEG_H + 4, borderRadius: RADIUS.sm, background: "var(--chrome-bg-elev)",
+    }}>
+      {seg("site", "Site", PAL.accent)}
+      {seg("comp", "Comp", COMP_ACCENT)}
+    </div>
+  );
+}
+
+/* B831777 (NEW-2) — one rail tab, counts included on the tab itself (never a separate badge). */
+function RailTab({ label, count, active, onClick }) {
+  return (
+    <button type="button" role="tab" aria-selected={active} onClick={onClick} style={{
+      flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+      height: 26, padding: "0 8px", borderRadius: RADIUS.sm, border: "none",
+      background: active ? "var(--surface-raised)" : "transparent",
+      color: active ? "var(--text-primary)" : "var(--text-secondary)",
+      fontSize: 11.5, fontWeight: active ? 700 : 600, cursor: "pointer", fontFamily: "inherit",
+    }}>
+      {label}<span style={{ color: active ? "var(--text-primary)" : "var(--text-tertiary)" }}>{count}</span>
+    </button>
+  );
+}
+
+export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip, onViewCenter, comps = [], onPlaceComp, onCompClick, pendingCompAnchor = null, onCompAnchorConsumed, focusCompId = null, onCompFocusHandled, onCompsChange }) {
   const elRef = useRef(null);
   const mapRef = useRef(null);
   const addrTokRef = useRef(0); // B545: address-search generation — a newer search invalidates an older in-flight one
@@ -477,6 +531,25 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // stomping on that other effect's cursor when comp-placing mode turns off.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [placingCompPin]);
+  /* B831776 (NEW-1/NEW-2) — the Site/Comp switch and the left-rail tab are ONE piece of state,
+   * never two: flipping either flips the other, which is the whole point of this design (two
+   * independent modes is the failure it replaces). `mode` drives BOTH — the toolbar switch's
+   * highlighted segment (and therefore which pair of action buttons it offers) AND which rail
+   * tab is showing. It does NOT drive what's drawn on the map — see `showSitesLayer`/
+   * `showCompsLayer` below (NEW-3): those are independent, so switching modes here can never hide
+   * a pin. */
+  const [mode, setModeRaw] = useState(() => {
+    try { return localStorage.getItem("planarfit:mapMode:v1") === "comp" ? "comp" : "site"; } catch (_) { return "site"; }
+  });
+  const setMode = (m) => {
+    setModeRaw(m);
+    try { localStorage.setItem("planarfit:mapMode:v1", m); } catch (_) { /* private mode */ }
+    // Leaving a mode cancels whatever that mode had armed, so switching Site<->Comp never leaves
+    // a stale one-shot click-handler live under the other mode's toolbar (NEW-6's armed state is
+    // keyed on `mode`, so this keeps the visual and the actual armed handler from disagreeing).
+    if (m !== "comp") { setPlacingCompPin(false); }
+    setSelectMode(false);
+  };
   const [zoom, setZoom] = useState(null);
   // (B167) The idle "Drag to move the map" first-run bubble was removed entirely per owner
   // request — the map loads with no instructional overlay. Only the contextual selection
@@ -499,6 +572,15 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     try { return localStorage.getItem("planarfit:sitesPanelClosed:v1") !== "1"; } catch (_) { return true; }
   });
   const toggleSitesPanel = () => setSitesPanelOpen((v) => { const n = !v; try { localStorage.setItem("planarfit:sitesPanelClosed:v1", n ? "0" : "1"); } catch (_) {} return n; });
+  // NEW-COMPS/NEW-2 — a comp pin just dropped or an existing comp's marker just got clicked: the
+  // Comps tab is what should be showing to act on it, wherever the rail happened to be pointed.
+  useEffect(() => {
+    if (!pendingCompAnchor && !focusCompId) return;
+    setModeRaw("comp");
+    try { localStorage.setItem("planarfit:mapMode:v1", "comp"); } catch (_) { /* private mode */ }
+    setSitesPanelOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingCompAnchor, focusCompId]);
   // Layers/imagery panel: on a phone it collapses to a tap (default closed) so it stops
   // covering the search bar; desktop keeps it always-open as before.
   /* B427409 — the panel's open state now PERSISTS, on the `sitesPanelClosed` pattern one state
@@ -521,6 +603,20 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     if (n) { try { if (window.matchMedia("(max-width: 760px)").matches) setSitesPanelOpen(false); } catch (_) {} }
     return n;
   });
+  /* B831778 (NEW-3) — THE LOAD-BEARING REQUIREMENT: what's DRAWN on the map is independent of
+   * which rail tab (or toolbar switch position) is active. Two plain checkboxes, both ON by
+   * default, live in the Imagery & layers panel below; the site/comp map-layer effects filter on
+   * these — and ONLY these — never on `mode`. Switching tabs changes what you BROWSE and what an
+   * add-action is ABOUT; it must never change what's PAINTED. (Michael: "If selecting the Comps
+   * tab hides site pins, the design has failed.") */
+  const [showSitesLayer, setShowSitesLayer] = useState(() => {
+    try { return localStorage.getItem("planarfit:mapShowSites:v1") !== "0"; } catch (_) { return true; }
+  });
+  const [showCompsLayer, setShowCompsLayer] = useState(() => {
+    try { return localStorage.getItem("planarfit:mapShowComps:v1") !== "0"; } catch (_) { return true; }
+  });
+  const toggleShowSitesLayer = (v) => { setShowSitesLayer(v); try { localStorage.setItem("planarfit:mapShowSites:v1", v ? "1" : "0"); } catch (_) {} };
+  const toggleShowCompsLayer = (v) => { setShowCompsLayer(v); try { localStorage.setItem("planarfit:mapShowComps:v1", v ? "1" : "0"); } catch (_) {} };
   const [hoverRow, setHoverRow] = useState(null);
   // Jurisdiction for the Layers panel — follows the map's current area (B13). NEW-1: seeded
   // from where the map is about to OPEN rather than from a hardcoded "harris", so a
@@ -1316,7 +1412,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     if (!mapRef.current) return; // unmounted while deferred
     if (sitesLayerRef.current) { map.removeLayer(sitesLayerRef.current); sitesLayerRef.current = null; }
     const group = L.layerGroup();
-    sites.forEach((site) => {
+    // B831778 (NEW-3) — gated ONLY on the "Sites" checkbox in Imagery & layers, never on `mode`
+    // or which rail tab is open. This is the entire decoupling: browsing Comps must never empty
+    // this loop.
+    (showSitesLayer ? sites : []).forEach((site) => {
       if (!site.origin) return; // blank-planner sites have no geo anchor
       const status = statusOf(site);
       if (statusFilter.size && !statusFilter.has(status)) return; // chip filter: show only selected statuses (B235)
@@ -1344,6 +1443,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           const poly = L.polygon(p.points.map((pt) => feetToLatLng(pt, lat, lon)), {
             color: lineColor, weight: lineWeight, dashArray: t.dashed ? "5 4" : "6 5",
             fillColor: lineColor, fillOpacity: 0.05, interactive: !selectMode,
+            className: "map-site-feature", // NEW-3 — a stable hook for verifying the decoupling
           });
           if (!selectMode) poly.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top", sticky: true });
           poly.addTo(group);
@@ -1358,6 +1458,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             color: st.stroke, weight: 1, fillColor: st.fill,
             fillOpacity: Math.min(0.92, st.fillOpacity ?? 1),
             interactive: !selectMode,
+            className: "map-site-feature",
           });
           if (!selectMode) poly.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top", sticky: true });
           poly.addTo(group);
@@ -1379,7 +1480,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     if (pressedRef.current) { pendingRebuildRef.current = build; return; }
     build();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sites, activeSiteId, selectMode, showPlans, statusFilter]);
+  }, [sites, activeSiteId, selectMode, showPlans, statusFilter, showSitesLayer]);
 
   // NEW-COMPS — leasing-comp markers: a sibling layer to the site-pin one above, deliberately
   // simpler (always a flat point marker, no zoom-dependent footprint rendering — a comp has no
@@ -1394,10 +1495,12 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       if (!mapRef.current) return;
       if (compsLayerRef.current) { map.removeLayer(compsLayerRef.current); compsLayerRef.current = null; }
       const group = L.layerGroup();
-      comps.forEach((c) => {
+      // B831778 (NEW-3) — gated ONLY on the "Comps" checkbox, never on `mode` or the rail tab —
+      // the same decoupling rule as the sites layer above.
+      (showCompsLayer ? comps : []).forEach((c) => {
         if (!c?.anchor || typeof c.anchor.lat !== "number" || typeof c.anchor.lon !== "number") return;
         const { size, anchor } = compMarkerSize(false);
-        const icon = L.divIcon({ className: "", html: compMarkerSvg(c.compType), iconSize: size, iconAnchor: anchor });
+        const icon = L.divIcon({ className: "map-comp-feature", html: compMarkerSvg(c.compType), iconSize: size, iconAnchor: anchor });
         const marker = L.marker([c.anchor.lat, c.anchor.lon], { icon, interactive: !selectMode && !placingCompPin, keyboard: false, riseOnHover: true });
         const tip = `${c.title || compHeadline(c)} · ${c.compDate || ""}`;
         if (!selectMode && !placingCompPin) {
@@ -1411,7 +1514,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     if (pressedRef.current) { pendingCompsRebuildRef.current = build; return; }
     build();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comps, selectMode, placingCompPin]);
+  }, [comps, selectMode, placingCompPin, showCompsLayer]);
 
   const flyToSite = (site) => {
     if (site.origin && mapRef.current) mapRef.current.flyTo([site.origin.lat, site.origin.lon], 17, { duration: 0.7 });
@@ -1916,9 +2019,13 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   // NEW-1 (B232) + NEW-2 (B233): geocode → recenter at parcel zoom → select the
   // parcel there + show its info. (The old version only flew to a Nominatim hit and
   // often got none for a bare street address, so the map never moved.)
-  const goAddress = async () => {
-    const q = addr.trim();
+  // B831779 (NEW-4a) — takes an optional raw string so the suggestion field's "Press ⏎ to
+  // search…" / "Search anyway" rows can hand back exactly the text they showed, rather than
+  // relying on `addr` state having caught up to the same value through a debounced onChange.
+  const goAddress = async (text) => {
+    const q = (text != null ? text : addr).trim();
     if (!q) return;
+    if (text != null && text !== addr) setAddr(text);
     const tok = ++addrTokRef.current; // B545: claim this search's generation; guard every async setState below
     setBusy(true); setErr(""); setFallbackOffer(null); setParcelInfo(null); setLocateFar(false);
     try {
@@ -1934,6 +2041,29 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     } finally {
       if (tok === addrTokRef.current) setBusy(false);
     }
+  };
+
+  // B831779 (NEW-4) — a suggestion the user explicitly picked already carries its own lat/lon,
+  // so this skips straight to the same fly-to + identify tail `goAddress` uses instead of
+  // re-geocoding a string we already resolved.
+  const commitAddressHit = async (hit) => {
+    const tok = ++addrTokRef.current;
+    setAddr(hit.label);
+    setBusy(true); setErr(""); setFallbackOffer(null); setParcelInfo(null); setLocateFar(false);
+    if (mapRef.current) mapRef.current.flyTo([hit.lat, hit.lon], 18, { duration: 0.75 });
+    try {
+      await selectParcelAt({ lat: hit.lat, lng: hit.lon }, hit.label, tok);
+    } finally {
+      if (tok === addrTokRef.current) setBusy(false);
+    }
+  };
+
+  // B831779 (NEW-4d) — the no-match row's "drop a pin here": mode-dependent, since what a raw
+  // click on the map WOULD do differs by mode (a Site pin starts a blank plan; a Comp pin anchors
+  // a leasing comp) — the same branch the toolbar's own "Start blank"/"Drop a pin" buttons take.
+  const dropPinFromSearch = () => {
+    if (mode === "comp") { const c = mapRef.current && mapRef.current.getCenter(); if (c) placeCompPinAt(c); return; }
+    startBlankHere();
   };
 
   const clearSel = () => { clearHilites(); setSelected([]); setParcelInfo(null); setBackupNotice(null); setCachedNotice(null); };
@@ -2115,6 +2245,25 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
         <div ref={elRef} style={{ position: "absolute", inset: 0 }} />
 
+        {/* B831781 (NEW-6) — A PERSISTENT MODE NEEDS A VISIBLE ARMED STATE. With Comp mode active
+            and an add-action armed (a raw click is about to either drop a comp pin or pick a
+            parcel to anchor one — placingCompPin / selectMode), the map itself says so: a soft
+            blue ring around the whole viewport (map-edge tint). COMP_ACCENT is the same hue the
+            switch and every comp action already use, so "blue" reads as "comp" everywhere in
+            this cluster — the toolbar's own status text (below) is what NAMES the action; this
+            is what makes it impossible to miss.
+            Chosen over a cursor-only cue (invisible the instant the pointer leaves the map,
+            e.g. while reading the toolbar) or a corner badge (has to be looked away from to
+            read) because a full-viewport ring is PERIPHERAL — visible in the same glance as
+            wherever the pointer is about to click, wherever on the map that is.
+            `pointer-events: none`, so it never steals the click it's warning about. */}
+        {mode === "comp" && (placingCompPin || selectMode) && (
+          <div aria-hidden="true" data-testid="map-comp-armed" style={{
+            position: "absolute", inset: 0, zIndex: MAP_CHROME_Z.control, pointerEvents: "none",
+            boxShadow: `inset 0 0 0 3px ${COMP_ACCENT}, inset 0 0 26px -8px ${COMP_ACCENT}`,
+          }} />
+        )}
+
         {/* Live GPS readout (B683): the cursor's WGS84 lat/long, bottom-center so it clears the
             zoom control (corner) and the scale bar (bottom-right). Display-only; the app's frame
             stays EPSG:2278 feet. B706 appends the ground elevation when a reading exists (cached
@@ -2138,12 +2287,15 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           </ContextMenu>
         )}
 
-        {/* ── Combined site bar — floating pill at top-center (full-width bar on a phone) ── */}
+        {/* ── Combined site bar — floating pill at top-center (full-width bar on a phone) ──
+            B831776 (NEW-5): the bar is RADIUS.lg, and every child button below is
+            nestedIn(RADIUS.lg, 6) = RADIUS.sm — radius.js's own concentric-nesting rule applied
+            exactly as it documents, not a new value. */}
         <div style={{
           position: "absolute", zIndex: narrow ? 1100 : 1000,
           display: "flex", alignItems: "center",
           background: PAL.chrome,
-          borderRadius: RADIUS.pill,
+          borderRadius: RADIUS.lg,
           boxShadow: "0 4px 20px rgba(0,0,0,0.45), 0 1px 4px rgba(0,0,0,0.25)",
           padding: "0 6px",
           height: 42,
@@ -2153,90 +2305,112 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             ? { top: 8, left: 8, right: 8, transform: "none", maxWidth: "none", minWidth: 0 }
             : { top: 14, left: "50%", transform: "translateX(-50%)", maxWidth: "calc(100% - 540px)", minWidth: 300 }),
         }}>
-          {/* Address search */}
-          <input
-            style={{
-              flex: 1, minWidth: narrow ? 60 : 140, maxWidth: 300, height: "100%",
-              padding: "0 10px", background: "transparent", border: "none", outline: "none",
-              color: PAL.chromeInk, fontSize: 13, fontFamily: "inherit",
-            }}
-            // B427412 — say what to TYPE, not what the control is for. The old text was
-            // "Find a site — address or place…", and it had three problems in one line: the em dash
-            // the owner asked to lose, a restatement of the control's own purpose (the button beside
-            // it says Go and the field is plainly a search), and two different sentences for narrow
-            // and wide. Now one instruction naming the accepted input, with the narrow variant a
-            // strict shortening of the wide one rather than a different thought.
-            placeholder={narrow ? "Type an address…" : "Type an address, city or place…"}
-            aria-label="Search for an address or place"
+          {/* B831776 (NEW-1) — Site/Comp switch, far left, before the search field. Sets what
+              the action buttons to the right offer; the SAME state drives the rail tab below. */}
+          <SiteCompSwitch mode={mode} onChange={setMode} />
+
+          {/* B831779 (NEW-4) — the address field is now a live-suggestion combobox; the red "Go"
+              pill is gone (see PlaceSearchField.jsx for the full behaviour contract). */}
+          <PlaceSearchField
             value={addr}
-            onChange={(e) => setAddr(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && !busy) goAddress(); }}
+            onChange={setAddr}
+            narrow={narrow}
+            busy={busy && !selectMode}
+            center={() => (mapRef.current ? mapRef.current.getCenter() : null)}
+            placeholder={narrow ? "Type an address…" : "Type an address, city or place…"}
+            onCommit={commitAddressHit}
+            onCommitRaw={(text) => { if (!(busy && !selectMode)) goAddress(text); }}
+            onDropPinHere={dropPinFromSearch}
+            dropPinLabel={mode === "comp" ? "Drop a comp pin here" : "Start blank here"}
           />
-          <button
-            title="Search for this address or place"
-            style={{
-              flex: "none", height: 30, padding: "0 11px", borderRadius: nestedIn(RADIUS.pill),
-              border: "none", background: PAL.accent, color: "#fff",
-              fontSize: 12, fontWeight: 700, cursor: busy ? "default" : "pointer",
-              fontFamily: "inherit", opacity: busy && !selectMode ? 0.6 : 1,
-              whiteSpace: "nowrap",
-            }}
-            disabled={busy && !selectMode}
-            onClick={goAddress}
-          >
-            {busy && !selectMode ? "…" : "Go"}
-          </button>
 
           {/* Divider */}
           <span style={{ width: 1, height: 22, background: PAL.chromeLine, flex: "none", margin: "0 8px" }} />
 
-          {/* Right section — state-dependent */}
-          {!selectMode && !placingCompPin && selected.length === 0 && (
-            <button
-              onClick={() => setSelectMode(true)}
-              // NEW-MAPCTRL-3 — this is the primary path to starting a plan from real county
-              // parcels, not a leftover control; every other button on this bar (Layers, Imagery
-              // & layers, Start blank, Full screen…) carries a title, and this one silently
-              // didn't, which is exactly what made it read as pointless with nothing to explain it.
-              title="Click parcels on the map to select them, then start a plan from the selection"
-              style={{
-                flex: "none", display: "flex", alignItems: "center", gap: 5,
-                height: 30, padding: "0 11px", borderRadius: nestedIn(RADIUS.pill),
-                border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
-                color: PAL.chromeInk, fontSize: 12.5, fontWeight: 600,
-                cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
-              }}
-            >
-              ＋ Select parcels
-            </button>
+          {/* Right section — mode + state dependent. B831780 — every label button here is
+              SHRINKABLE (flex: 0 1 auto, a small minWidth, ellipsis) rather than `flex:"none"`:
+              the new switch takes real width away from this section, and at ~900px (one of the
+              widths this cluster is checked at) a fixed-width row here forced Cancel/the primary
+              action UNDER the Layers panel's corner instead of just shortening its own label.
+              Only Cancel and the small ✕ clear button stay fixed-width — short enough to never
+              need it, and always reachable is what matters most for those two. */}
+          {mode === "site" && !selectMode && !placingCompPin && selected.length === 0 && (
+            <>
+              <button
+                onClick={() => setSelectMode(true)}
+                // NEW-MAPCTRL-3 — this is the primary path to starting a plan from real county
+                // parcels, not a leftover control; every other button on this bar (Layers, Imagery
+                // & layers, Start blank, Full screen…) carries a title, and this one silently
+                // didn't, which is exactly what made it read as pointless with nothing to explain it.
+                title="Click parcels on the map to select them, then start a plan from the selection"
+                style={{
+                  flex: "0 1 auto", minWidth: 44, overflow: "hidden",
+                  height: 30, padding: "0 11px", borderRadius: nestedIn(RADIUS.lg, 6),
+                  border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
+                  color: PAL.chromeInk, fontSize: 12.5, fontWeight: 600,
+                  cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Select parcels</span>
+              </button>
+              {/* B831776 (NEW-1) — "Start blank" now also lives here, matching Comp mode's
+                  two-action shape; the row-1 header keeps its own copy for when the map isn't
+                  the surface on screen. Reuses the exact fallback `startBlankHere` already gives
+                  the "county service is down" banner — no second implementation. */}
+              <button
+                onClick={() => startBlankHere()}
+                title="Start a plan with no parcel, located where the map is looking — draw the boundary yourself"
+                style={{
+                  flex: "0 1 auto", minWidth: 40, overflow: "hidden",
+                  height: 30, padding: "0 11px", borderRadius: nestedIn(RADIUS.lg, 6),
+                  border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
+                  color: PAL.chromeInk, fontSize: 12.5, fontWeight: 600,
+                  cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Start blank</span>
+              </button>
+            </>
           )}
-          {/* NEW-COMPS — a comp anchors by pin OR a real parcel (the "+ Select parcels" flow
-              above gains a "Comp here" action once something is selected); this button is the
-              PIN half. Only offered when the host wired a place-comp callback. */}
-          {!selectMode && !placingCompPin && selected.length === 0 && onPlaceComp && (
-            <button
-              onClick={() => setPlacingCompPin(true)}
-              title="Click the map to drop a leasing-comp pin at that spot"
-              style={{
-                flex: "none", display: "flex", alignItems: "center", gap: 5,
-                height: 30, padding: "0 11px", borderRadius: nestedIn(RADIUS.pill),
-                border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
-                color: PAL.chromeInk, fontSize: 12.5, fontWeight: 600,
-                cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
-              }}
-            >
-              ＋ Comp
-            </button>
+          {mode === "comp" && !selectMode && !placingCompPin && selected.length === 0 && onPlaceComp && (
+            <>
+              <button
+                onClick={() => setPlacingCompPin(true)}
+                title="Click the map to drop a leasing-comp pin at that spot"
+                style={{
+                  flex: "0 1 auto", minWidth: 40, overflow: "hidden",
+                  height: 30, padding: "0 11px", borderRadius: nestedIn(RADIUS.lg, 6),
+                  border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
+                  color: PAL.chromeInk, fontSize: 12.5, fontWeight: 600,
+                  cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Drop a pin</span>
+              </button>
+              <button
+                onClick={() => setSelectMode(true)}
+                title="Click a parcel on the map to anchor a comp to it"
+                style={{
+                  flex: "0 1 auto", minWidth: 44, overflow: "hidden",
+                  height: 30, padding: "0 11px", borderRadius: nestedIn(RADIUS.lg, 6),
+                  border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
+                  color: PAL.chromeInk, fontSize: 12.5, fontWeight: 600,
+                  cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Comp from parcel</span>
+              </button>
+            </>
           )}
           {placingCompPin && (
             <>
-              <span style={{ flex: "none", color: PAL.chromeMuted, fontSize: 12.5, padding: "0 6px", whiteSpace: "nowrap" }}>
+              <span style={{ flex: "1 1 auto", minWidth: 0, color: PAL.chromeMuted, fontSize: 12.5, padding: "0 6px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 Click the map to place a comp…
               </span>
               <button
                 onClick={() => setPlacingCompPin(false)}
                 style={{
-                  flex: "none", height: 30, padding: "0 10px", borderRadius: nestedIn(RADIUS.pill),
+                  flex: "none", height: 30, padding: "0 10px", borderRadius: nestedIn(RADIUS.lg, 6),
                   border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
                   color: PAL.chromeInk, fontSize: 12, fontWeight: 600,
                   cursor: "pointer", fontFamily: "inherit",
@@ -2249,15 +2423,15 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           {selectMode && selected.length === 0 && (
             <>
               <span style={{
-                flex: "none", color: PAL.chromeMuted, fontSize: 12.5,
-                padding: "0 6px", whiteSpace: "nowrap",
+                flex: "1 1 auto", minWidth: 0, color: PAL.chromeMuted, fontSize: 12.5,
+                padding: "0 6px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
               }}>
-                {busy ? "Looking up lot…" : "Selecting…"}
+                {busy ? "Looking up lot…" : (mode === "comp" ? "Selecting a parcel for a comp…" : "Selecting…")}
               </span>
               <button
                 onClick={() => setSelectMode(false)}
                 style={{
-                  flex: "none", height: 30, padding: "0 10px", borderRadius: nestedIn(RADIUS.pill),
+                  flex: "none", height: 30, padding: "0 10px", borderRadius: nestedIn(RADIUS.lg, 6),
                   border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
                   color: PAL.chromeInk, fontSize: 12, fontWeight: 600,
                   cursor: "pointer", fontFamily: "inherit",
@@ -2269,10 +2443,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           )}
           {selected.length > 0 && (
             <>
-              <span style={{ width: 7, height: 7, borderRadius: RADIUS.pill, background: PAL.accent, flex: "none" }} />
+              <span style={{ width: 7, height: 7, borderRadius: RADIUS.pill, background: mode === "comp" ? COMP_ACCENT : PAL.accent, flex: "none" }} />
               <span style={{
-                flex: "none", color: PAL.chromeInk, fontSize: 12.5, fontWeight: 600,
-                padding: "0 8px", whiteSpace: "nowrap",
+                flex: "1 1 auto", minWidth: 0, color: PAL.chromeInk, fontSize: 12.5, fontWeight: 600,
+                padding: "0 8px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
               }}>
                 {selected.length} parcel{selected.length > 1 ? "s" : ""} · {asm ? `${asm.totalAc.toFixed(2)} AC` : "…"}
               </span>
@@ -2280,7 +2454,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                 onClick={clearSel}
                 title="Clear selection"
                 style={{
-                  flex: "none", width: 26, height: 26, borderRadius: nestedIn(RADIUS.pill),
+                  flex: "none", width: 26, height: 26, borderRadius: RADIUS.sm,
                   border: "none", background: "transparent",
                   color: PAL.chromeMuted, fontSize: 13, lineHeight: 1,
                   cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
@@ -2288,30 +2462,35 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               >
                 ✕
               </button>
-              <button
-                onClick={planSelected}
-                style={{
-                  flex: "none", height: 30, padding: "0 11px", borderRadius: nestedIn(RADIUS.pill),
-                  border: "none", background: PAL.accent, color: "#fff",
-                  fontSize: 12, fontWeight: 700, cursor: "pointer",
-                  fontFamily: "inherit", whiteSpace: "nowrap",
-                }}
-              >
-                Plan {selected.length > 1 ? `${selected.length} parcels` : "site"} →
-              </button>
-              {/* NEW-COMPS — the PARCEL half of comp anchoring: reuses the exact same parcel
-                  selection above rather than a second identify flow. */}
-              {onPlaceComp && selected.length === 1 && (
+              {/* B831776 (NEW-1) — one action, chosen by mode: Site mode plans the parcel(s);
+                  Comp mode anchors a comp to the one selected parcel. Never both at once — that
+                  was the old design's own confusion (two unrelated actions on one selection). */}
+              {mode === "site" && (
+                <button
+                  onClick={planSelected}
+                  style={{
+                    flex: "0 1 auto", minWidth: 44, overflow: "hidden",
+                    height: 30, padding: "0 11px", borderRadius: nestedIn(RADIUS.lg, 6),
+                    border: "none", background: PAL.accent, color: "#fff",
+                    fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                  }}
+                >
+                  <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    Plan {selected.length > 1 ? `${selected.length} parcels` : "site"} →
+                  </span>
+                </button>
+              )}
+              {mode === "comp" && onPlaceComp && selected.length === 1 && (
                 <button
                   onClick={placeCompOnSelectedParcel}
                   style={{
-                    flex: "none", height: 30, padding: "0 11px", borderRadius: nestedIn(RADIUS.pill),
-                    border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
-                    color: PAL.chromeInk, fontSize: 12, fontWeight: 600, cursor: "pointer",
-                    fontFamily: "inherit", whiteSpace: "nowrap",
+                    flex: "0 1 auto", minWidth: 44, overflow: "hidden",
+                    height: 30, padding: "0 11px", borderRadius: nestedIn(RADIUS.lg, 6),
+                    border: "none", background: COMP_ACCENT, color: "#fff",
+                    fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
                   }}
                 >
-                  Comp here
+                  <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Comp here</span>
                 </button>
               )}
             </>
@@ -2338,23 +2517,32 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           </Suspense></PanelErrorBoundary>
         )}
 
-        {/* saved sites */}
-        {sites.length > 0 && (
-          <div style={{ position: "absolute", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, boxShadow: "0 4px 18px rgba(28,25,20,0.14)", overflow: "hidden",
+        {/* B831777 (NEW-2) — the left rail: Sites and Comps as TABS, side by side, counts on the
+            tabs, one list showing at a time. This used to be gated on `sites.length > 0` (a
+            brand-new account saw no rail at all); it now always renders, since the Comps tab is
+            useful with zero sites and zero comps alike — this is the one persistent place to
+            browse or add either. */}
+        <div style={{ position: "absolute", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, boxShadow: "0 4px 18px rgba(28,25,20,0.14)", overflow: "hidden",
             // Phone: drop below the full-width search bar; a slim tap when closed, a wider
             // overlay (above the layers panel) when the user opens it.
             ...(narrow
               ? { top: 60, left: 8, zIndex: MAP_CHROME_Z.panel, width: sitesPanelOpen ? "min(320px, calc(100vw - 16px))" : 188 }
               : { top: 10, left: 10, zIndex: MAP_CHROME_Z.panel, width: 232 }) }}>
-            {/* collapsible header (B106): click to fold the panel to a slim bar; state persists per device */}
-            <button onClick={() => { if (narrow && !sitesPanelOpen) setLayersPanelOpen(false); toggleSitesPanel(); }} title={sitesPanelOpen ? "Collapse the sites panel" : "Expand the sites panel"}
-              style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit",
-                fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, padding: "9px 12px" }}>
-              <span style={{ fontSize: 8, lineHeight: 1, transform: sitesPanelOpen ? "none" : "rotate(-90deg)", display: "inline-block" }}>▼</span>
-              <span style={{ flex: 1, textAlign: "left" }}>Your sites</span>
-              <span style={{ color: PAL.ink, fontWeight: 700 }}>{(statusFilter.size || nf) ? `${shownCount}/${sites.length}` : sites.length}</span>
-            </button>
-            {sitesPanelOpen && (<>
+            {/* collapsible header (B106) + the two tabs — one row, always visible (never buried
+                behind the collapse), so both counts stay readable even with the list folded. */}
+            <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 6px 4px" }}>
+              <button onClick={() => { if (narrow && !sitesPanelOpen) setLayersPanelOpen(false); toggleSitesPanel(); }}
+                title={sitesPanelOpen ? "Collapse the sites panel" : "Expand the sites panel"}
+                style={{ flex: "none", width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center",
+                  background: "transparent", border: "none", cursor: "pointer", color: PAL.muted, borderRadius: RADIUS.sm }}>
+                <span style={{ fontSize: 8, lineHeight: 1, transform: sitesPanelOpen ? "none" : "rotate(-90deg)", display: "inline-block" }}>▼</span>
+              </button>
+              <RailTab label="Sites" count={(statusFilter.size || nf) ? `${shownCount}/${sites.length}` : sites.length}
+                active={mode === "site"} onClick={() => { setMode("site"); if (!sitesPanelOpen) toggleSitesPanel(); }} />
+              <RailTab label="Comps" count={comps.length} active={mode === "comp"}
+                onClick={() => { setMode("comp"); if (!sitesPanelOpen) toggleSitesPanel(); }} />
+            </div>
+            {sitesPanelOpen && mode === "site" && (<>
             {/* Type-to-filter the list by name (B235). */}
             <div style={{ padding: "0 8px 6px" }}>
               <input value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name"
@@ -2409,28 +2597,24 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               })()}
             </div>
             </>)}
+            {/* B831777 (NEW-2) — the Comps tab's content. Mounted whenever the map route is
+                visible (`open={visible}`) so a comp anchored while browsing Sites still loads and
+                renders as a map pin (NEW-3) — only DISPLAY is gated on the tab (`active`). */}
+            <PanelErrorBoundary name="Comps">
+              <Suspense fallback={sitesPanelOpen && mode === "comp" ? <div style={{ padding: 14, fontSize: 12, color: PAL.muted }}>Loading…</div> : null}>
+                <CompsPanel
+                  open={visible}
+                  active={sitesPanelOpen && mode === "comp"}
+                  pendingAnchor={pendingCompAnchor}
+                  onAnchorConsumed={onCompAnchorConsumed}
+                  focusCompId={focusCompId}
+                  onFocusHandled={onCompFocusHandled}
+                  projects={sites}
+                  onCompsChange={onCompsChange}
+                />
+              </Suspense>
+            </PanelErrorBoundary>
           </div>
-        )}
-
-        {/* NEW-MAPCTRL-1 — the leasing-comps panel toggle. Same `topright` corner the Layers
-            panel already owns (mapChromeStack.js), so it STACKS above it rather than competing
-            for the same 10px slot — see COMPS_TOGGLE_CLEARANCE_PX, which the Layers panel's own
-            `top` below adds in whenever this button can render, so the two can never overlap at
-            any width, open or collapsed. */}
-        {onOpenComps && !compsPanelOpen && (
-          <button onClick={onOpenComps} title="Leasing comps" data-testid="map-comps-toggle"
-            style={{
-              position: "absolute", zIndex: MAP_CHROME_Z.panel,
-              ...(narrow ? { top: 60, right: 8 } : { top: 10, right: 10 }),
-              // B649136 — the ONE shared shape both top-right corner chips read (see the constant's
-              // own header above). Only the width is conditional: matching the collapsed Layers
-              // pill was never a claim about the OPEN panel, which is a wide content card, not a chip.
-              ...MAP_CORNER_CHIP_STYLE,
-              ...(layersPanelOpen ? { minWidth: 0 } : null),
-            }}>
-            Comps{comps.length ? ` (${comps.length})` : ""}
-          </button>
-        )}
 
         {/* imagery + labels + overlay layers control — on a phone this collapses to a tap
             (default closed) so it stops covering the search bar / Select-parcels button. */}
@@ -2438,31 +2622,30 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           // B649136 — the box that actually PAINTS the collapsed chip (background/border/radius
           // live here, not on the inner button — see the constant's own header). RADIUS.lg (a
           // "surface that CONTAINS other things") is right for the OPEN content card; collapsed,
-          // this reads as a standalone control like Comps, so it borrows RADIUS.md + the same
-          // solid surface-raised fill from MAP_CORNER_CHIP_STYLE instead of the panel's own
+          // this reads as a standalone control, so it borrows RADIUS.md + the same solid
+          // surface-raised fill from MAP_CORNER_CHIP_STYLE instead of the panel's own
           // slightly-translucent surface-overlay.
           background: layersPanelOpen ? "var(--surface-overlay)" : MAP_CORNER_CHIP_STYLE.background,
           border: `1px solid ${PAL.panelLine}`, borderRadius: layersPanelOpen ? RADIUS.lg : RADIUS.md,
           padding: layersPanelOpen ? "6px 9px 8px" : 0, fontSize: 12, color: PAL.ink, boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
           // Collapsed: the DIV (not the button) owns the box-sizing:border-box height, so its own
-          // 1px border is INCLUDED rather than added on top of the button's — the same total 30px
-          // Comps renders. The button below fills it at height:"100%" instead of repeating the number.
+          // 1px border is INCLUDED rather than added on top of the button's.
           ...(layersPanelOpen ? null : { height: CONTROL_H.lg }),
+          // B831777 — this corner used to reserve extra `top` room for the floating "Comps" chip
+          // that stacked above it (COMPS_TOGGLE_CLEARANCE_PX); Comps moved to the left rail
+          // (NEW-2), so this is topright's sole occupant again and the plain 10/60px applies.
           ...(narrow
-            ? { top: 60 + (onOpenComps ? COMPS_TOGGLE_CLEARANCE_PX : 0), right: 8, zIndex: MAP_CHROME_Z.panel, width: layersPanelOpen ? "min(300px, calc(100vw - 16px))" : "auto" }
+            ? { top: 60, right: 8, zIndex: MAP_CHROME_Z.panel, width: layersPanelOpen ? "min(300px, calc(100vw - 16px))" : "auto" }
             /* B427409 — DESKTOP COLLAPSES TOO, and collapsing FREES THE MAP. The width and the
                height bound are now conditional on the same `layersPanelOpen` the phone uses:
                closed, the card shrinks to its header bar (`width: "auto"`, no max-height, no flex
                column) instead of staying a 268-wide block pinned over the imagery. A collapsed
                panel that still covers the map would answer the letter of the report and not the
                point of it. */
-            : { top: 10 + (onOpenComps ? COMPS_TOGGLE_CLEARANCE_PX : 0), right: 10, zIndex: MAP_CHROME_Z.panel,
+            : { top: 10, right: 10, zIndex: MAP_CHROME_Z.panel,
                 ...(layersPanelOpen
-                  ? { width: 268, maxHeight: panelMaxHeight({ topPx: 10 + (onOpenComps ? COMPS_TOGGLE_CLEARANCE_PX : 0), bottomPx: 76 }), display: "flex", flexDirection: "column" }
+                  ? { width: 268, maxHeight: panelMaxHeight({ topPx: 10, bottomPx: 76 }), display: "flex", flexDirection: "column" }
                   : { width: "auto" }) }),
-          // Same shared width Comps reads (COMPS_LAYERS_COLLAPSED_W, inside MAP_CORNER_CHIP_STYLE)
-          // — an explicit constant both sides read, not one side's incidental natural width, so a
-          // future label or font change on either chip can't quietly pull the two edges apart again.
           ...(layersPanelOpen ? null : { minWidth: MAP_CORNER_CHIP_STYLE.minWidth }),
         }}>
           {/* B427409 — ONE control, at EVERY breakpoint. This button used to be wrapped in
@@ -2473,10 +2656,14 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               was built and the desktop path was left behind — and it is fixed the same way, by
               removing the branch rather than adding a second control. */}
           {(
+            // B831776 (NEW-5) — sentence case, matching every neighbouring control in this
+            // cluster (the switch, the rail tabs, the checkboxes below); this OPEN-state header
+            // used to be the one holdout still in UPPERCASE + letterspacing, which is exactly
+            // what read as "a section header" rather than "a sibling control."
             <button onClick={toggleLayersPanel} title={layersPanelOpen ? "Collapse layers" : "Imagery & layers"}
               style={layersPanelOpen ? {
                 display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit",
-                fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, padding: "0 0 6px",
+                fontSize: 12, color: PAL.ink, fontWeight: 700, padding: "0 0 6px",
               } : {
                 // B649136 — collapsed: the SAME type scale/weight/casing/height as Comps (the
                 // constant), just re-hosted as a flex row for the disclosure caret. Border/
@@ -2503,6 +2690,20 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               machine. The divider and the "LAYERS" heading went with it: LayerPanel renders its
               own group headers, and Base & terrain is the first of them, so the heading was
               labelling a list that already labels itself. */}
+          {/* B831778 (NEW-3) — THE LOAD-BEARING DECOUPLING, made VISIBLE: what's drawn is decided
+              HERE, by these two checkboxes, and nowhere else. Both default ON. Switching the
+              Site/Comp mode or the rail tab never touches either — see the map-layer effects'
+              own comments for the enforcement half. */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 2, padding: "0 2px 8px", marginBottom: 6, borderBottom: `1px solid ${PAL.panelLine}` }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: PAL.ink, cursor: "pointer", padding: "2px 0" }}>
+              <input type="checkbox" checked={showSitesLayer} onChange={(e) => toggleShowSitesLayer(e.target.checked)} data-testid="map-show-sites" />
+              <span>Sites{sites.length ? ` (${sites.length})` : ""}</span>
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: PAL.ink, cursor: "pointer", padding: "2px 0" }}>
+              <input type="checkbox" checked={showCompsLayer} onChange={(e) => toggleShowCompsLayer(e.target.checked)} data-testid="map-show-comps" />
+              <span>Comps{comps.length ? ` (${comps.length})` : ""}</span>
+            </label>
+          </div>
           {/* NEW-3 — the list takes whatever height the card has left instead of a flat 260px
               (about four rows of a twenty-eight layer list). The card itself is bounded by
               panelMaxHeight above, so this can never run off the bottom of the map. */}
