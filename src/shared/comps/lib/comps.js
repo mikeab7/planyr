@@ -148,8 +148,38 @@ export function summarizeSaleComps(comps, compType) {
 function fmtMoney(n) {
   return n == null ? null : `$${Number(n).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 }
+// Whole-dollar currency — for a derived TOTAL (never a per-SF rate, which needs its cents).
+// `maximumFractionDigits` alone left a lone trailing decimal on a non-round total (B831603
+// NEW-5: ".65 x 613,208 x 12" rendered as "$4,783,022.4"); this floors it to whole dollars,
+// matching the live rent-total preview the create form already shows under Leased SF.
+function fmtMoneyWhole(n) {
+  return n == null ? null : Number(n).toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+}
 function fmtPsf(n) {
   return n == null ? null : `$${n.toFixed(2)}/SF`;
+}
+
+// A date-only ISO string ("2026-08-28") parsed as Y/M/D and re-rendered in the app's own
+// read-view date convention (FileBrowser.jsx / SiteReviewModal.jsx / MapFinder.jsx all format a
+// display date the same way) — NEW-6. Built from the parts, never `new Date(iso)` directly:
+// comp_date carries no time, so parsing the bare ISO string as UTC and displaying it in a
+// behind-UTC local zone would print the wrong day.
+function fmtCompDate(iso) {
+  if (!iso) return null;
+  const [y, m, d] = String(iso).split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+/** The party-field axis, labeled per comp type (NEW-7 amended): one shared pair of columns — the
+ * party disposing/providing space or the asset, and the party acquiring/occupying it — wearing
+ * three sets of clothes. Never six per-type columns: a name typed as a lease's Owner/Developer
+ * and a land sale's Seller has to be the SAME suggestion pool for NEW-8's autocomplete, and a
+ * fourth comp type later costs nothing this way. */
+export function partyLabels(compType) {
+  if (compType === "land") return { provider: "Seller", acquirer: "Buyer" };
+  if (compType === "building_sale") return { provider: "Seller", acquirer: "Buyer/User" };
+  return { provider: "Owner/Developer", acquirer: "Tenant" }; // lease, and the honest default
 }
 
 /** Ordered {key,label,value} rows for a comp — a field with no value is simply not in the
@@ -160,6 +190,12 @@ export function compFieldRows(comp) {
   const push = (key, label, value) => {
     if (value != null && value !== "") rows.push({ key, label, value });
   };
+
+  // Party fields lead — they're facts about who the deal is BETWEEN, not its economics, so they
+  // read right under the title rather than buried in the money block (NEW-7 amended).
+  const { provider, acquirer } = partyLabels(comp?.compType);
+  push("partyProvider", provider, comp?.partyProvider || null);
+  push("partyAcquirer", acquirer, comp?.partyAcquirer || null);
 
   if (comp?.compType === "land") {
     const psf = landPricePerSf(comp);
@@ -181,12 +217,16 @@ export function compFieldRows(comp) {
     }
     if (comp?.leaseSizeSf != null) push("size", "Leased SF", `${Number(comp.leaseSizeSf).toLocaleString()} SF`);
     const totalRent = leaseTotalAnnualRent(comp);
-    if (totalRent != null) push("totalRent", "Total annual rent", fmtMoney(totalRent));
+    // NEW-3: labeled FACE (never blended with an effective/net-of-abatement figure this app
+    // doesn't compute — see the item for why) + NEW-5: whole-dollar currency, never a raw float.
+    if (totalRent != null) push("totalRent", "Total annual rent (face)", fmtMoneyWhole(totalRent));
     if (comp?.leaseTi != null) push("ti", "TI allowance", `${fmtMoney(comp.leaseTi)}/SF`);
     if (comp?.leaseTerm) push("term", "Term", comp.leaseTerm);
+    // NEW-2: free rent sits right next to Term, the field it belongs with.
+    if (comp?.leaseFreeRentMonths != null) push("freeRent", "Free rent", `${Number(comp.leaseFreeRentMonths).toLocaleString()} mo`);
   }
 
-  push("date", "Date", comp?.compDate || null);
+  push("date", "Date", fmtCompDate(comp?.compDate));
   push("notes", "Notes", comp?.notes || null);
   return rows;
 }
@@ -255,6 +295,9 @@ export function rowToComp(r) {
     leaseTi: r.lease_ti != null ? Number(r.lease_ti) : null,
     leaseTerm: r.lease_term || null,
     leaseSizeSf: r.lease_size_sf != null ? Number(r.lease_size_sf) : null,
+    leaseFreeRentMonths: r.lease_free_rent_months != null ? Number(r.lease_free_rent_months) : null,
+    partyProvider: r.comp_party_provider || null,
+    partyAcquirer: r.comp_party_acquirer || null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -287,6 +330,9 @@ export function compToRow(comp) {
     lease_ti: comp.leaseTi ?? null,
     lease_term: comp.leaseTerm ?? null,
     lease_size_sf: comp.leaseSizeSf ?? null,
+    lease_free_rent_months: comp.leaseFreeRentMonths ?? null,
+    comp_party_provider: comp.partyProvider || null,
+    comp_party_acquirer: comp.partyAcquirer || null,
     updated_at: new Date().toISOString(),
   };
 }

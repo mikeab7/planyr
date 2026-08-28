@@ -57,3 +57,75 @@ test("the Comps toggle opens an honest empty list when signed out", async ({ pag
 
   await expect(page.getByText("No comps yet. Use “+ Comp” on the map to add one.")).toBeVisible({ timeout: 10_000 });
 });
+
+// NEW-1/NEW-2/NEW-7(amended)/NEW-8 — the create-form UI mechanics, driven headlessly per
+// ATTEMPT-BEFORE-YOU-PARK. The DETAIL view (NEW-3/NEW-4/NEW-5/NEW-6) needs a real saved comp,
+// which needs a signed-in session — that half is Blocker: auth, parked as a V### instead (see
+// BACKLOG.md/VERIFICATION.md). Everything reachable signed-out is proven here.
+async function openCompCreateForm(page) {
+  await page.goto("/");
+  await openModule(page, "site-planner");
+  await page.getByRole("button", { name: "＋ Comp" }).click();
+  const mapBox = await page.locator(".leaflet-container").first().boundingBox();
+  await page.mouse.click(mapBox.x + mapBox.width / 2, mapBox.y + mapBox.height / 2);
+  await expect(page.getByText("Leasing Comps")).toBeVisible({ timeout: 10_000 });
+}
+
+test("lease rate + period render inline on one row, as a compact labelled MO/YR control — no separate Period row", async ({ page }) => {
+  await openCompCreateForm(page);
+  // Type defaults to Land; switch to Lease to reach the rate/period row.
+  await page.locator("select").first().selectOption("lease");
+
+  const periodSelect = page.getByLabel("Rate period");
+  await expect(periodSelect).toBeVisible();
+  // Real labelled control, compact abbreviations.
+  await expect(periodSelect.locator("option")).toHaveText(["YR", "MO"]);
+  // No more standalone "Period" field label anywhere in the form.
+  await expect(page.getByText("Period", { exact: true })).toHaveCount(0);
+
+  // Inline: the rate input and the period select share one row (same Y position, roughly).
+  const rateInput = page.locator('input[type="number"]').first();
+  const rateBox = await rateInput.boundingBox();
+  const periodBox = await periodSelect.boundingBox();
+  expect(Math.abs(rateBox.y - periodBox.y)).toBeLessThan(4);
+  // Neither control overflows the panel's own narrow width.
+  const panelBox = await page.getByText("Leasing Comps").locator("..").boundingBox();
+  expect(periodBox.x + periodBox.width).toBeLessThanOrEqual(panelBox.x + panelBox.width + 1);
+});
+
+test("free rent (months) is a field on the lease form, positioned next to Term", async ({ page }) => {
+  await openCompCreateForm(page);
+  await page.locator("select").first().selectOption("lease");
+  await expect(page.getByText("Free rent (mo)")).toBeVisible();
+});
+
+test("party fields relabel per comp type: lease=Owner/Developer+Tenant, land=Seller+Buyer, building_sale=Seller+Buyer/User", async ({ page }) => {
+  await openCompCreateForm(page);
+  const typeSelect = page.locator("select").first();
+
+  await typeSelect.selectOption("land");
+  await expect(page.getByText("Seller", { exact: true })).toBeVisible();
+  await expect(page.getByText("Buyer", { exact: true })).toBeVisible();
+
+  await typeSelect.selectOption("building_sale");
+  await expect(page.getByText("Seller", { exact: true })).toBeVisible();
+  await expect(page.getByText("Buyer/User", { exact: true })).toBeVisible();
+
+  await typeSelect.selectOption("lease");
+  await expect(page.getByText("Owner/Developer", { exact: true })).toBeVisible();
+  await expect(page.getByText("Tenant", { exact: true })).toBeVisible();
+});
+
+test("party fields are accessible comboboxes and never force a value — a brand-new name types with zero friction", async ({ page }) => {
+  await openCompCreateForm(page);
+  await page.locator("select").first().selectOption("lease");
+  const providerField = page.getByRole("combobox", { name: "Owner/Developer" });
+  await expect(providerField).toBeVisible();
+  await expect(providerField).toHaveAttribute("aria-expanded", "false");
+
+  await providerField.fill("Brand New Development Co");
+  await expect(providerField).toHaveValue("Brand New Development Co");
+  // No candidates exist signed-out (an empty comps list), so no suggestion list opens — and
+  // nothing about typing a name with no match blocks or alters what was typed.
+  await expect(page.locator('[role="listbox"]')).toHaveCount(0);
+});

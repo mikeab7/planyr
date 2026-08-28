@@ -11,11 +11,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Field, IconButton } from "../../ui/controls.jsx";
 import {
-  COMP_TYPES, LEASE_PERIODS, LEASE_EXPENSE_BASES, isCompType,
+  COMP_TYPES, LEASE_PERIODS, LEASE_EXPENSE_BASES, isCompType, partyLabels,
   landPricePerSf, buildingPricePerSf, leaseTotalAnnualRent, compFieldRows, compHeadline,
   summarizeLeaseComps, summarizeSaleComps, validateComp,
 } from "../lib/comps.js";
 import { compMarkerColor } from "../lib/compMarkerIcon.js";
+import { collectPartyNames } from "../lib/partySuggest.js";
+import PartyNameField from "./PartyNameField.jsx";
 import { fetchAllComps, insertComp, updateComp, deleteComp } from "../lib/compsStore.js";
 import { listMyTeams, currentIdentity } from "../../../workspaces/site-planner/lib/teams.js";
 
@@ -25,9 +27,11 @@ function emptyDraft(anchor) {
   return {
     compType: "land", compDate: "", title: "", notes: "", teamId: null, projectId: null,
     anchor: anchor || null,
+    partyProvider: "", partyAcquirer: "",
     landPrice: "", landSizeValue: "", landSizeUnit: "ac",
     bldgPrice: "", bldgSizeSf: "",
     leaseRate: "", leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseTi: "", leaseTerm: "", leaseSizeSf: "",
+    leaseFreeRentMonths: "",
   };
 }
 
@@ -39,6 +43,7 @@ function draftToComp(d) {
     landPrice: num(d.landPrice), landSizeValue: num(d.landSizeValue),
     bldgPrice: num(d.bldgPrice), bldgSizeSf: num(d.bldgSizeSf),
     leaseRate: num(d.leaseRate), leaseTi: num(d.leaseTi), leaseSizeSf: num(d.leaseSizeSf),
+    leaseFreeRentMonths: num(d.leaseFreeRentMonths),
   };
 }
 
@@ -47,11 +52,12 @@ function compToDraft(c) {
   return {
     id: c.id, compType: c.compType, compDate: c.compDate || "", title: c.title || "", notes: c.notes || "",
     teamId: c.teamId, projectId: c.projectId, anchor: c.anchor,
+    partyProvider: c.partyProvider || "", partyAcquirer: c.partyAcquirer || "",
     landPrice: str(c.landPrice), landSizeValue: str(c.landSizeValue), landSizeUnit: c.landSizeUnit || "ac",
     bldgPrice: str(c.bldgPrice), bldgSizeSf: str(c.bldgSizeSf),
     leaseRate: str(c.leaseRate), leaseRatePeriod: c.leaseRatePeriod || "annual",
     leaseRateExpense: c.leaseRateExpense || "nnn", leaseTi: str(c.leaseTi), leaseTerm: c.leaseTerm || "",
-    leaseSizeSf: str(c.leaseSizeSf),
+    leaseSizeSf: str(c.leaseSizeSf), leaseFreeRentMonths: str(c.leaseFreeRentMonths),
   };
 }
 
@@ -117,8 +123,13 @@ function CompDetail({ comp, canEdit, onEdit, onDelete, onBack }) {
   const rows = compFieldRows(comp);
   return (
     <div style={{ padding: "10px 14px 14px" }}>
-      <button onClick={onBack} style={{ border: "none", background: "none", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer", padding: 0, marginBottom: 10 }}>&larr; All comps</button>
-      <TypeChip type={comp.compType} />
+      {/* Two distinct things, spaced as such (NEW-4) — a real flex gap, with wrap so a long
+          badge like "BUILDING SALE" never collides with the back link at the panel's narrow
+          width instead of overlapping it. */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+        <button onClick={onBack} style={{ border: "none", background: "none", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer", padding: 0 }}>&larr; All comps</button>
+        <TypeChip type={comp.compType} />
+      </div>
       {comp.title && <div style={{ fontSize: 15, fontWeight: 700, marginTop: 6 }}>{comp.title}</div>}
       <div style={{ marginTop: 10 }}>
         {rows.map((r) => (
@@ -136,8 +147,9 @@ function CompDetail({ comp, canEdit, onEdit, onDelete, onBack }) {
   );
 }
 
-function CompForm({ draft, setDraft, teams, projects, errors, onSave, onCancel, saving }) {
+function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave, onCancel, saving }) {
   const set = (k) => (e) => setDraft((d) => ({ ...d, [k]: e.target.value }));
+  const { provider: providerLabel, acquirer: acquirerLabel } = partyLabels(draft.compType);
   return (
     <div style={{ padding: "10px 14px 14px" }}>
       <button onClick={onCancel} style={{ border: "none", background: "none", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer", padding: 0, marginBottom: 10 }}>&larr; Cancel</button>
@@ -151,6 +163,28 @@ function CompForm({ draft, setDraft, teams, projects, errors, onSave, onCancel, 
         <input type="date" value={draft.compDate} onChange={set("compDate")} style={{ ...inputStyle, width: 160 }} />
       </Field>
       <Field label="Title"><input value={draft.title} onChange={set("title")} placeholder="Property / deal name" style={{ ...inputStyle, width: 220 }} /></Field>
+
+      {/* Facts about the deal's PARTIES, not its economics — kept with Title, ahead of the
+          money block, so the rate/price figures stay together and readable (NEW-7 amended).
+          Labels follow the comp's own type; the two stored columns are one shared axis. */}
+      <Field label={providerLabel}>
+        <PartyNameField
+          label={providerLabel}
+          value={draft.partyProvider}
+          onChange={(v) => setDraft((d) => ({ ...d, partyProvider: v }))}
+          candidates={partyNames}
+          listboxId="comp-party-provider-suggest"
+        />
+      </Field>
+      <Field label={acquirerLabel}>
+        <PartyNameField
+          label={acquirerLabel}
+          value={draft.partyAcquirer}
+          onChange={(v) => setDraft((d) => ({ ...d, partyAcquirer: v }))}
+          candidates={partyNames}
+          listboxId="comp-party-acquirer-suggest"
+        />
+      </Field>
 
       {draft.compType === "land" && (
         <>
@@ -185,11 +219,16 @@ function CompForm({ draft, setDraft, teams, projects, errors, onSave, onCancel, 
 
       {draft.compType === "lease" && (
         <>
-          <Field label="Rate ($/SF)"><input type="number" value={draft.leaseRate} onChange={set("leaseRate")} placeholder="optional" style={{ ...inputStyle, width: 120 }} /></Field>
-          <Field label="Period">
-            <select value={draft.leaseRatePeriod} onChange={set("leaseRatePeriod")} style={{ ...inputStyle, width: 120 }}>
-              {LEASE_PERIODS.map((p) => <option key={p} value={p}>{p === "annual" ? "Annual" : "Monthly"}</option>)}
-            </select>
+          {/* Rate + its period read as ONE quantity ("$.65 MO") — a compact MO/YR control right
+              after the rate input, not a separate full-width row (NEW-1). Still a real labelled
+              <select> (aria-label), just visually compact; stored values are untouched. */}
+          <Field label="Rate ($/SF)">
+            <span style={{ display: "flex", gap: 6 }}>
+              <input type="number" value={draft.leaseRate} onChange={set("leaseRate")} placeholder="optional" style={{ ...inputStyle, width: 90 }} />
+              <select value={draft.leaseRatePeriod} onChange={set("leaseRatePeriod")} aria-label="Rate period" style={{ ...inputStyle, width: 58 }}>
+                {LEASE_PERIODS.map((p) => <option key={p} value={p}>{p === "annual" ? "YR" : "MO"}</option>)}
+              </select>
+            </span>
           </Field>
           <Field label="Basis">
             <select value={draft.leaseRateExpense} onChange={set("leaseRateExpense")} style={{ ...inputStyle, width: 120 }}>
@@ -199,11 +238,12 @@ function CompForm({ draft, setDraft, teams, projects, errors, onSave, onCancel, 
           <Field label="Leased SF"><input type="number" value={draft.leaseSizeSf} onChange={set("leaseSizeSf")} placeholder="optional" style={{ ...inputStyle, width: 140 }} /></Field>
           {draft.leaseRate && draft.leaseSizeSf && (
             <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: -4, marginBottom: 8 }}>
-              {(() => { const rent = leaseTotalAnnualRent(draftToComp(draft)); return rent != null ? `${rent.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 })}/yr total` : null; })()}
+              {(() => { const rent = leaseTotalAnnualRent(draftToComp(draft)); return rent != null ? `${rent.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 })}/yr total (face)` : null; })()}
             </div>
           )}
           <Field label="TI $/SF"><input type="number" value={draft.leaseTi} onChange={set("leaseTi")} placeholder="optional" style={{ ...inputStyle, width: 120 }} /></Field>
           <Field label="Term"><input value={draft.leaseTerm} onChange={set("leaseTerm")} placeholder="e.g. 5 yrs" style={{ ...inputStyle, width: 140 }} /></Field>
+          <Field label="Free rent (mo)"><input type="number" value={draft.leaseFreeRentMonths} onChange={set("leaseFreeRentMonths")} placeholder="optional" style={{ ...inputStyle, width: 100 }} /></Field>
         </>
       )}
 
@@ -368,7 +408,7 @@ export default function CompsPanel({
         )}
 
         {!loading && view === "form" && draft && (
-          <CompForm draft={draft} setDraft={setDraft} teams={teams} projects={projects} errors={errors} onSave={save} onCancel={cancelForm} saving={saving} />
+          <CompForm draft={draft} setDraft={setDraft} teams={teams} projects={projects} partyNames={collectPartyNames(comps)} errors={errors} onSave={save} onCancel={cancelForm} saving={saving} />
         )}
       </div>
     </div>
