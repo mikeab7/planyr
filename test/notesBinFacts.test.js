@@ -18,7 +18,7 @@
  */
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { deleteNode, emptyTree, addPage } from "../src/workspaces/notes/lib/notesModel.js";
+import { deleteNode, emptyTree, addPage, touchPage } from "../src/workspaces/notes/lib/notesModel.js";
 
 const mem = new Map();
 globalThis.window = globalThis.window || {};
@@ -129,6 +129,35 @@ describe("collectBinFacts — what is actually in the bin (NEW-3)", () => {
 
   it("an empty bin is an empty list, not a row saying there is nothing", () => {
     expect(store.collectBinFacts(emptyTree(), [])).toEqual([]);
+  });
+
+  /* ⛔ NEW-2, reopened 2026-08-28 — owner report: created an empty page, binned it, and its bin
+   * card read "Its writing was permanently deleted and cannot be brought back". That copy is
+   * true only when content once existed and was actually destroyed; a page created and binned
+   * before its first autosave ever ran never had anything to lose. `updatedAt` moves off
+   * `createdAt` ONLY through `touchPage`, which (per Notes.jsx's `handleSaved`) fires only
+   * after a real write lands — so a page that was never touched, and never gets a stored body,
+   * must read as "empty", never as "gone". */
+  it("⛔ A NEVER-TOUCHED EMPTY PAGE IS 'EMPTY', NEVER 'GONE' — nothing was ever written to lose", () => {
+    let t = emptyTree();
+    t = addPage(t, { id: "fresh", title: "Untitled page" }).tree;
+    // No store.writePage call at all: this page's first autosave never ran before it was binned.
+    const { tree } = deleteNode(t, "fresh");
+    const [row] = store.collectBinFacts(tree, []);
+    expect(row.empty).toBe(true);
+    expect(row.gone).toBe(false);
+  });
+
+  it("⛔ A PAGE THAT WAS REALLY TOUCHED AND THEN LOST ITS BODY READS AS 'GONE'", () => {
+    let t = emptyTree();
+    t = addPage(t, { id: "real", title: "Untitled page" }).tree;
+    store.writePage("real", para("Bain coordination meeting: dock doors, trailer parking."));
+    t = touchPage(t, "real", 9_999);          // a real save landed, per Notes.jsx's handleSaved
+    store.deletePages(["real"]);              // the body is destroyed, e.g. a server-side purge
+    const { tree } = deleteNode(t, "real");
+    const [row] = store.collectBinFacts(tree, []);
+    expect(row.empty).toBe(true);
+    expect(row.gone).toBe(true);
   });
 });
 
