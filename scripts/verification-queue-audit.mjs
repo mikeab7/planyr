@@ -53,7 +53,12 @@ const CEILING = join(HERE, "verification-queue-ceiling.json");
 
 export const STALE_THRESHOLD_DAYS = 60;
 
-const BLOCKER_RE = /`Blocker:\s*([a-z-]+)`/g;
+// B831779 — was `[a-z-]+` (lowercase only), which never matched this file's own established
+// `live-GIS` casing (capital GIS) and so mis-classified every live-GIS-blocked item as having
+// no Blocker at all. Found when a new, correctly-tagged `Blocker: live-GIS` item still tripped
+// the noBlocker ratchet — the bug was already silently inflating the ceiling this ratchet is
+// built to hold flat.
+const BLOCKER_RE = /`Blocker:\s*([A-Za-z-]+)`/g;
 const DATE_RE = /\b(20\d\d)-(\d\d)-(\d\d)\b/g;
 const HEADING_RE = /^### (V\d+)(?:\s*\(×\d+\))?\s*—/;
 

@@ -1,7 +1,15 @@
-/* CompsPanel — Leasing Comps: a right-side panel (never a dialog — window.prompt/confirm are
- * banned app-wide), self-contained data owner for the comps list (mirrors pinStore.js's
- * "fetch on mount + refetch on tab focus" shape rather than cloudSync's heavier CAS machinery —
- * comps don't have Site Planner's multi-tab autosave race).
+/* CompsPanel — Leasing Comps: EMBEDDED content for the map's left rail (never a dialog —
+ * window.prompt/confirm are banned app-wide), self-contained data owner for the comps list
+ * (mirrors pinStore.js's "fetch on mount + refetch on tab focus" shape rather than cloudSync's
+ * heavier CAS machinery — comps don't have Site Planner's multi-tab autosave race).
+ *
+ * B831777 (NEW-2) — this used to be its own floating right-side panel with an "open/close" pair;
+ * it is now the Comps TAB's content inside MapFinder's left rail, one tab beside Your sites
+ * (never stacked — see BACKLOG.md). Two props carry that: `open` gates DATA (fetch as soon as the
+ * map route is visible, regardless of which tab is showing, so a comp anchored earlier still
+ * renders as a map pin the moment you land here — B831778/NEW-3's decoupling requirement) and
+ * `active` gates DISPLAY (only the currently-selected tab's content is shown). There is no
+ * `onClose` any more — switching to the Sites tab IS the close.
  *
  * Two views: 'list' (every comp the viewer can see, with the basis-normalized summary) and
  * 'form' (create — pre-filled from a just-picked map anchor — or edit an owned comp).
@@ -9,13 +17,15 @@
  * MODULE-SCOPE-COMPONENTS: every component here is defined at module scope.
  */
 import { useEffect, useRef, useState } from "react";
-import { Button, Field, IconButton } from "../../ui/controls.jsx";
+import { Button, Field } from "../../ui/controls.jsx";
 import {
-  COMP_TYPES, LEASE_PERIODS, LEASE_EXPENSE_BASES, isCompType,
+  COMP_TYPES, LEASE_PERIODS, LEASE_EXPENSE_BASES, isCompType, partyLabels,
   landPricePerSf, buildingPricePerSf, leaseTotalAnnualRent, compFieldRows, compHeadline,
   summarizeLeaseComps, summarizeSaleComps, validateComp,
 } from "../lib/comps.js";
 import { compMarkerColor } from "../lib/compMarkerIcon.js";
+import { collectPartyNames } from "../lib/partySuggest.js";
+import PartyNameField from "./PartyNameField.jsx";
 import { fetchAllComps, insertComp, updateComp, deleteComp } from "../lib/compsStore.js";
 import { listMyTeams, currentIdentity } from "../../../workspaces/site-planner/lib/teams.js";
 
@@ -25,9 +35,11 @@ function emptyDraft(anchor) {
   return {
     compType: "land", compDate: "", title: "", notes: "", teamId: null, projectId: null,
     anchor: anchor || null,
+    partyProvider: "", partyAcquirer: "",
     landPrice: "", landSizeValue: "", landSizeUnit: "ac",
     bldgPrice: "", bldgSizeSf: "",
     leaseRate: "", leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseTi: "", leaseTerm: "", leaseSizeSf: "",
+    leaseFreeRentMonths: "",
   };
 }
 
@@ -39,6 +51,7 @@ function draftToComp(d) {
     landPrice: num(d.landPrice), landSizeValue: num(d.landSizeValue),
     bldgPrice: num(d.bldgPrice), bldgSizeSf: num(d.bldgSizeSf),
     leaseRate: num(d.leaseRate), leaseTi: num(d.leaseTi), leaseSizeSf: num(d.leaseSizeSf),
+    leaseFreeRentMonths: num(d.leaseFreeRentMonths),
   };
 }
 
@@ -47,11 +60,12 @@ function compToDraft(c) {
   return {
     id: c.id, compType: c.compType, compDate: c.compDate || "", title: c.title || "", notes: c.notes || "",
     teamId: c.teamId, projectId: c.projectId, anchor: c.anchor,
+    partyProvider: c.partyProvider || "", partyAcquirer: c.partyAcquirer || "",
     landPrice: str(c.landPrice), landSizeValue: str(c.landSizeValue), landSizeUnit: c.landSizeUnit || "ac",
     bldgPrice: str(c.bldgPrice), bldgSizeSf: str(c.bldgSizeSf),
     leaseRate: str(c.leaseRate), leaseRatePeriod: c.leaseRatePeriod || "annual",
     leaseRateExpense: c.leaseRateExpense || "nnn", leaseTi: str(c.leaseTi), leaseTerm: c.leaseTerm || "",
-    leaseSizeSf: str(c.leaseSizeSf),
+    leaseSizeSf: str(c.leaseSizeSf), leaseFreeRentMonths: str(c.leaseFreeRentMonths),
   };
 }
 
@@ -117,8 +131,13 @@ function CompDetail({ comp, canEdit, onEdit, onDelete, onBack }) {
   const rows = compFieldRows(comp);
   return (
     <div style={{ padding: "10px 14px 14px" }}>
-      <button onClick={onBack} style={{ border: "none", background: "none", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer", padding: 0, marginBottom: 10 }}>&larr; All comps</button>
-      <TypeChip type={comp.compType} />
+      {/* Two distinct things, spaced as such (NEW-4) — a real flex gap, with wrap so a long
+          badge like "BUILDING SALE" never collides with the back link at the panel's narrow
+          width instead of overlapping it. */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+        <button onClick={onBack} style={{ border: "none", background: "none", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer", padding: 0 }}>&larr; All comps</button>
+        <TypeChip type={comp.compType} />
+      </div>
       {comp.title && <div style={{ fontSize: 15, fontWeight: 700, marginTop: 6 }}>{comp.title}</div>}
       <div style={{ marginTop: 10 }}>
         {rows.map((r) => (
@@ -136,8 +155,9 @@ function CompDetail({ comp, canEdit, onEdit, onDelete, onBack }) {
   );
 }
 
-function CompForm({ draft, setDraft, teams, projects, errors, onSave, onCancel, saving }) {
+function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave, onCancel, saving }) {
   const set = (k) => (e) => setDraft((d) => ({ ...d, [k]: e.target.value }));
+  const { provider: providerLabel, acquirer: acquirerLabel } = partyLabels(draft.compType);
   return (
     <div style={{ padding: "10px 14px 14px" }}>
       <button onClick={onCancel} style={{ border: "none", background: "none", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer", padding: 0, marginBottom: 10 }}>&larr; Cancel</button>
@@ -151,6 +171,28 @@ function CompForm({ draft, setDraft, teams, projects, errors, onSave, onCancel, 
         <input type="date" value={draft.compDate} onChange={set("compDate")} style={{ ...inputStyle, width: 160 }} />
       </Field>
       <Field label="Title"><input value={draft.title} onChange={set("title")} placeholder="Property / deal name" style={{ ...inputStyle, width: 220 }} /></Field>
+
+      {/* Facts about the deal's PARTIES, not its economics — kept with Title, ahead of the
+          money block, so the rate/price figures stay together and readable (NEW-7 amended).
+          Labels follow the comp's own type; the two stored columns are one shared axis. */}
+      <Field label={providerLabel}>
+        <PartyNameField
+          label={providerLabel}
+          value={draft.partyProvider}
+          onChange={(v) => setDraft((d) => ({ ...d, partyProvider: v }))}
+          candidates={partyNames}
+          listboxId="comp-party-provider-suggest"
+        />
+      </Field>
+      <Field label={acquirerLabel}>
+        <PartyNameField
+          label={acquirerLabel}
+          value={draft.partyAcquirer}
+          onChange={(v) => setDraft((d) => ({ ...d, partyAcquirer: v }))}
+          candidates={partyNames}
+          listboxId="comp-party-acquirer-suggest"
+        />
+      </Field>
 
       {draft.compType === "land" && (
         <>
@@ -185,11 +227,16 @@ function CompForm({ draft, setDraft, teams, projects, errors, onSave, onCancel, 
 
       {draft.compType === "lease" && (
         <>
-          <Field label="Rate ($/SF)"><input type="number" value={draft.leaseRate} onChange={set("leaseRate")} placeholder="optional" style={{ ...inputStyle, width: 120 }} /></Field>
-          <Field label="Period">
-            <select value={draft.leaseRatePeriod} onChange={set("leaseRatePeriod")} style={{ ...inputStyle, width: 120 }}>
-              {LEASE_PERIODS.map((p) => <option key={p} value={p}>{p === "annual" ? "Annual" : "Monthly"}</option>)}
-            </select>
+          {/* Rate + its period read as ONE quantity ("$.65 MO") — a compact MO/YR control right
+              after the rate input, not a separate full-width row (NEW-1). Still a real labelled
+              <select> (aria-label), just visually compact; stored values are untouched. */}
+          <Field label="Rate ($/SF)">
+            <span style={{ display: "flex", gap: 6 }}>
+              <input type="number" value={draft.leaseRate} onChange={set("leaseRate")} placeholder="optional" style={{ ...inputStyle, width: 90 }} />
+              <select value={draft.leaseRatePeriod} onChange={set("leaseRatePeriod")} aria-label="Rate period" style={{ ...inputStyle, width: 58 }}>
+                {LEASE_PERIODS.map((p) => <option key={p} value={p}>{p === "annual" ? "YR" : "MO"}</option>)}
+              </select>
+            </span>
           </Field>
           <Field label="Basis">
             <select value={draft.leaseRateExpense} onChange={set("leaseRateExpense")} style={{ ...inputStyle, width: 120 }}>
@@ -199,11 +246,12 @@ function CompForm({ draft, setDraft, teams, projects, errors, onSave, onCancel, 
           <Field label="Leased SF"><input type="number" value={draft.leaseSizeSf} onChange={set("leaseSizeSf")} placeholder="optional" style={{ ...inputStyle, width: 140 }} /></Field>
           {draft.leaseRate && draft.leaseSizeSf && (
             <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: -4, marginBottom: 8 }}>
-              {(() => { const rent = leaseTotalAnnualRent(draftToComp(draft)); return rent != null ? `${rent.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 })}/yr total` : null; })()}
+              {(() => { const rent = leaseTotalAnnualRent(draftToComp(draft)); return rent != null ? `${rent.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 })}/yr total (face)` : null; })()}
             </div>
           )}
           <Field label="TI $/SF"><input type="number" value={draft.leaseTi} onChange={set("leaseTi")} placeholder="optional" style={{ ...inputStyle, width: 120 }} /></Field>
           <Field label="Term"><input value={draft.leaseTerm} onChange={set("leaseTerm")} placeholder="e.g. 5 yrs" style={{ ...inputStyle, width: 140 }} /></Field>
+          <Field label="Free rent (mo)"><input type="number" value={draft.leaseFreeRentMonths} onChange={set("leaseFreeRentMonths")} placeholder="optional" style={{ ...inputStyle, width: 100 }} /></Field>
         </>
       )}
 
@@ -238,7 +286,11 @@ function CompForm({ draft, setDraft, teams, projects, errors, onSave, onCancel, 
 }
 
 /** props:
- *  - open, onClose
+ *  - open — fetch/keep-fresh gate. Pass the map route's own `visible`, NOT whether the Comps tab
+ *    is selected: a comp anchored while browsing Sites must still be a map pin (NEW-3).
+ *  - active — DISPLAY gate: is the Comps tab the one currently showing in the rail. Content stays
+ *    mounted (not torn down) while inactive so its scroll position / in-progress form survive a
+ *    tab flip; only `display` toggles.
  *  - pendingAnchor {kind,lat,lon,county,parcelApn,parcelGeom} | null, onAnchorConsumed()
  *  - focusCompId, onFocusHandled()
  *  - projects [{id,site|name}] — the host's already-loaded site list, for the optional
@@ -250,7 +302,7 @@ function CompForm({ draft, setDraft, teams, projects, errors, onSave, onCancel, 
  * otherwise held by SitePlannerApp today.
  */
 export default function CompsPanel({
-  open, onClose, pendingAnchor, onAnchorConsumed, focusCompId, onFocusHandled,
+  open, active = true, pendingAnchor, onAnchorConsumed, focusCompId, onFocusHandled,
   projects, onCompsChange,
 }) {
   const [comps, setComps] = useState([]);
@@ -340,17 +392,7 @@ export default function CompsPanel({
   };
 
   return (
-    <div style={{
-      position: "absolute", top: 12, right: 12, bottom: 12, width: 300, zIndex: 1200,
-      background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: 12,
-      boxShadow: "0 16px 44px rgba(0,0,0,0.22), 0 3px 10px rgba(0,0,0,0.1)",
-      display: "flex", flexDirection: "column", overflow: "hidden",
-    }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: "1px solid var(--border-default)" }}>
-        <span style={{ fontSize: 13, fontWeight: 700 }}>Leasing Comps</span>
-        <IconButton size={26} onClick={onClose}>&times;</IconButton>
-      </div>
-
+    <div style={{ display: active ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden" }}>
       <div style={{ flex: 1, overflowY: "auto" }}>
         {loading && <div style={{ padding: 14, fontSize: 12, color: "var(--text-secondary)" }}>Loading…</div>}
         {loadError && <div style={{ padding: 14, fontSize: 12, color: "var(--danger-text)" }}>{loadError}</div>}
@@ -358,7 +400,7 @@ export default function CompsPanel({
         {!loading && !loadError && view === "list" && (
           <>
             <SummaryStrip comps={comps} />
-            {comps.length === 0 && <div style={{ padding: 14, fontSize: 12, color: "var(--text-secondary)" }}>No comps yet. Use “+ Comp” on the map to add one.</div>}
+            {comps.length === 0 && <div style={{ padding: 14, fontSize: 12, color: "var(--text-secondary)" }}>No comps yet. Use “Drop a pin” or “Comp from parcel” on the map to add one.</div>}
             {comps.map((c) => <CompRow key={c.id} comp={c} onOpen={openDetail} />)}
           </>
         )}
@@ -368,7 +410,7 @@ export default function CompsPanel({
         )}
 
         {!loading && view === "form" && draft && (
-          <CompForm draft={draft} setDraft={setDraft} teams={teams} projects={projects} errors={errors} onSave={save} onCancel={cancelForm} saving={saving} />
+          <CompForm draft={draft} setDraft={setDraft} teams={teams} projects={projects} partyNames={collectPartyNames(comps)} errors={errors} onSave={save} onCancel={cancelForm} saving={saving} />
         )}
       </div>
     </div>

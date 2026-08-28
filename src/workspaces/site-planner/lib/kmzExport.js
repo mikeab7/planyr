@@ -21,11 +21,9 @@
  * or misregistered geometry.
  */
 
-import { elStyle, elRingFeet, byZ, TYPE, toHex6 } from "./planStyle.js";
+import { elStyle, elToRingFeet, byZ, TYPE, toHex6 } from "./planStyle.js";
 import { isBuilding, buildingNumbers } from "./siteModel.js";
 import { effectiveBuildingProps, normalizeRules } from "./buildingProps.js";
-import { roadCenterline } from "./roadGeometry.js";
-import { bufferPolyline } from "./metesAndBounds.js";
 import { dockSidesFor } from "./dockZones.js";
 import { placeDockDoors } from "./buildingGrid.js";
 
@@ -129,19 +127,11 @@ function polyAreaFeet(ring) {
   for (let i = 0; i < ring.length; i++) { const j = (i + 1) % ring.length; a += ring[i].x * ring[j].y - ring[j].x * ring[i].y; }
   return Math.abs(a) / 2;
 }
-// An element's outline in planner feet. A centreline road (B596) exports its true pavement+curb
-// STRIP (buffered centreline); every other element uses the shared box/points ring the map draws.
-export function elToRingFeet(el) {
-  if (el && el.type === "road" && Array.isArray(el.pts) && el.pts.length >= 2) {
-    const dense = roadCenterline(el.pts, el.vtx || [], {});
-    if (dense && dense.length >= 2) {
-      const width = Math.max(1, (+el.travelW || 0) + 2 * (+el.curb || 0));
-      const ring = bufferPolyline(dense, width);
-      if (ring && ring.length >= 3) return ring;
-    }
-  }
-  return elRingFeet(el);
-}
+// B834581 — `elToRingFeet` (the road-aware outline: true pavement+curb STRIP for a centreline
+// road, the shared box/points ring for everything else) moved to `planStyle.js` so the map
+// overview (`MapFinder.jsx`) draws the SAME road shape this export always has, instead of a third
+// copy of the formula. Re-exported here so nothing importing it from this module breaks.
+export { elToRingFeet };
 // Measure records are {mode, pts} (new) or {a,b} (legacy) — normalize to a feet point list.
 const measPtsFeet = (m) => (m && m.pts ? m.pts : m && m.a && m.b ? [m.a, m.b] : []);
 

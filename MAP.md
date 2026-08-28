@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-28 @ `c0214d10` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-28 @ `f7899d81` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_579 source files mapped._
+_584 source files mapped._
 
 ## infra
 
@@ -208,12 +208,16 @@ _579 source files mapped._
   - _exports_: `makeWriteSerializer`
 - **`src/shared/comps/components/CompsPanel.jsx`** — Leasing Comps right-side panel (B711328): list/detail/create-edit for land, building-sale and lease comps; owner-only Edit/Delete, empty fields never render
   - _exports_: `default (CompsPanel)`
+- **`src/shared/comps/components/PartyNameField.jsx`** — Comp form party-name field: plain text input + a loose-match suggestion listbox (accessible combobox, independent of the map toolbar's PlaceSearchField)
+  - _exports_: `default (PartyNameField)`
 - **`src/shared/comps/lib/compMarkerIcon.js`** — Pure map-marker spec for a comp: a small colored tag (hue per comp type), deliberately a different silhouette from sitePinIcon
   - _exports_: `compMarkerColor`, `compMarkerSize`, `compMarkerSvg`
 - **`src/shared/comps/lib/comps.js`** — Leasing Comps pure model: $/SF derivation for land/building sale, lease basis normalization (annual NNN default, NNN/gross never blended), compFieldRows (the one empty-field-hides choke point), anchor validation, row<->model mapping
-  - _exports_: `ANCHOR_KINDS`, `annualLeaseRate`, `buildingPricePerSf`, `COMP_TYPES`, `compFieldRows`, `compHeadline`, `compToRow`, `isCompType`, `landPricePerSf`, `landSizeSf`, `LEASE_EXPENSE_BASES`, `LEASE_PERIODS`, `leaseTotalAnnualRent`, `rowToComp`, `summarizeLeaseComps`, `summarizeSaleComps`, `validAnchor`, `validateComp`
+  - _exports_: `ANCHOR_KINDS`, `annualLeaseRate`, `buildingPricePerSf`, `COMP_TYPES`, `compFieldRows`, `compHeadline`, `compToRow`, `isCompType`, `landPricePerSf`, `landSizeSf`, `LEASE_EXPENSE_BASES`, `LEASE_PERIODS`, `leaseTotalAnnualRent`, `partyLabels`, `rowToComp`, `summarizeLeaseComps`, `summarizeSaleComps`, `validAnchor`, `validateComp`
 - **`src/shared/comps/lib/compsStore.js`** — Supabase CRUD for public.comps (team-visible read, owner-only write); every call returns {data,error}, never swallows a failure
   - _exports_: `deleteComp`, `fetchAllComps`, `insertComp`, `supabase`, `updateComp`
+- **`src/shared/comps/lib/partySuggest.js`** — Pure party-name suggestion logic: collectPartyNames pools both sides across every comp type, matchPartyNames is a loose case/whitespace-insensitive substring match — suggests only, never forces or merges
+  - _exports_: `collectPartyNames`, `matchPartyNames`
 - **`src/shared/coordinates/index.js`** — Shared EPSG:2278 Texas South Central project grid: unit helpers plus Lambert Conformal Conic projectToGrid/gridToProject validated against pyproj
   - _exports_: `FT_PER_M`, `ftToAcres`, `gridToProject`, `makePoint`, `metersToFeet`, `PROJECT_CRS`, `projectToGrid`, `SQFT_PER_ACRE`
 - **`src/shared/coordinates/scaleFactor.js`** — NEW-4 grid-vs-ground: per-zone grid scale factor × elevation factor = the site's combined factor (with what it is worth per mile), plus `detectSurveyFrame` — grid / ground / other-scale from corresponding survey↔grid distances. Reports the factor; deliberately never applies it
@@ -495,6 +499,8 @@ _579 source files mapped._
   - _exports_: `default (ParcelInfoCard)`, `DETAILS_MAX_HEIGHT`, `LEGAL_MAX_HEIGHT`
 - **`src/workspaces/site-planner/components/ParcelRecordPanel.jsx`** — the Parcel panel's typed RECORD (provenance chip · deed misclosure · owner/account/situs/stated acreage) and the plan PLACEMENT controls. Lazily loaded.
   - _exports_: `ParcelRecord`, `PlacementControls`
+- **`src/workspaces/site-planner/components/PlaceSearchField.jsx`** — B831779 (NEW-4) the map toolbar's address field: a live-suggestion combobox (role=combobox + listbox) replacing the old "Go" button — debounced/abortable, Enter always works, LOUD-FAILURE no-match row
+  - _exports_: `default (PlaceSearchField)`
 - **`src/workspaces/site-planner/components/PondSection.jsx`** — PR-L the one developer-readable pond cross-section component (used by the ⚡ Optimize what-changed card AND the pond inspector): maps pondSectionModel marks to a responsive, theme-tokened SVG (grade, berm hatch, storage bands, flood/groundwater/receiving lines, outlet, depth dimension, collision-free labels)
   - _exports_: `default (PondSection)`
 - **`src/workspaces/site-planner/components/PrintCompose.jsx`** — the dedicated full-screen "compose exhibit" step (B765985): sheet size/orientation/scale, title block, content toggles, and the live sheet preview, all outside the drawing canvas
@@ -901,6 +907,10 @@ _579 source files mapped._
   - _exports_: `COMMODITY_BUCKETS`, `commodityBucket`, `commodityBucketRecord`, `isHazardOutlier`, `PIPELINE_LEGEND`, `pipelineStyleFor`
 - **`src/workspaces/site-planner/lib/pipelineCorridor.js`** — Pure pipeline easement screening-corridor geometry (B752): buffers a WGS84 [lon,lat] centerline into an ASSUMED band via the shared bufferPolyline (local feet frame), plus the editable default/min/max width constants
   - _exports_: `corridorRingLngLat`, `corridorRings`, `DEFAULT_CORRIDOR_WIDTH_FT`, `MAX_CORRIDOR_WIDTH_FT`, `MIN_CORRIDOR_WIDTH_FT`
+- **`src/workspaces/site-planner/lib/placeSuggest.js`** — B831779 (NEW-4) pure I/O: Esri-first/Nominatim-fallback place suggestions (several candidates, not one), honest reachedAny vs empty-results distinction (LOUD-FAILURE)
+  - _exports_: `suggestPlaces`
+- **`src/workspaces/site-planner/lib/placeSuggestRows.js`** — B831779 (NEW-4) the pure combobox decision layer: which rows render + what Enter/a click on them does — the provable half of PlaceSearchField.jsx
+  - _exports_: `buildPlaceRows`, `resolvePlaceEnter`, `resolvePlaceRowCommit`
 - **`src/workspaces/site-planner/lib/planClipboard.js`** — The general canvas clipboard (NEW-2/NEW-6) — collect a selection (elements expanded to their `attachedTo` assembly), and paste it with fresh ids, remapped bonds and relative geometry preserved; plus `resolveClipFrame`, the coordinate decision for a paste that crosses into a plan anchored elsewhere.
   - _exports_: `CLIP_FRAME_MAX_SMEAR_FT`, `CLIP_KINDS`, `clipboardBBox`, `clipboardLabel`, `clipCalloutTips`, `clipPlacement`, `clipRefKey`, `collectClipboard`, `pasteClipboard`, `resolveClipFrame`, `translateCalloutBy`, `translateParcelBy`
 - **`src/workspaces/site-planner/lib/planClipboardStore.js`** — Module-scope holder for the canvas + overlay clipboards, above every React remount boundary, so a copy survives a plan switch (NEW-1).
@@ -908,7 +918,7 @@ _579 source files mapped._
 - **`src/workspaces/site-planner/lib/plannerPlacementCmds.js`** — the placement + deed-promotion COMMANDS, loaded on demand and driven through an `exportSheet`-style `ctx`.
   - _exports_: `applyOriginState`, `commitOrigin`, `nudgePlan`, `persistPlacement`, `promoteDeedToParcel`, `rotatePlan`
 - **`src/workspaces/site-planner/lib/planStyle.js`** — Shared element style tokens (fills/strokes/weight/pattern per surface type), style resolver, paint z-order, element feet ring outline
-  - _exports_: `bandForceOf`, `byZ`, `EL_BANDS`, `elRingFeet`, `elStyle`, `getAccountStyleDefaults`, `getPreviewStyleDefaults`, `parcelDefaultStyle`, `setAccountStyleDefaults`, `SETBACK_LINE`, `setbackChipStyle`, `setbackDashArray`, `setbackLineStyle`, `setPreviewStyleDefaults`, `standardScope`, `toHex6`, `TYPE`, `typeStyle`, `zOrder`
+  - _exports_: `bandForceOf`, `byZ`, `EL_BANDS`, `elRingFeet`, `elStyle`, `elToRingFeet`, `getAccountStyleDefaults`, `getPreviewStyleDefaults`, `parcelDefaultStyle`, `setAccountStyleDefaults`, `SETBACK_LINE`, `setbackChipStyle`, `setbackDashArray`, `setbackLineStyle`, `setPreviewStyleDefaults`, `standardScope`, `toHex6`, `TYPE`, `typeStyle`, `zOrder`
 - **`src/workspaces/site-planner/lib/polyClip.js`** — Pure polygon intersection-AREA via ear-clip triangulation + Sutherland–Hodgman; pairwise active-parcel overlap detection for the B652 double-count warning; clipper-lib UNION/dissolve of overlapping active parcels for correct site acreage (B715)
   - _exports_: `dissolvedParcelSqft`, `overlappingParcelPairs`, `PARCEL_OVERLAP_TOL`, `polyIntersectArea`, `triangulate`
 - **`src/workspaces/site-planner/lib/polygonSplit.js`** — Pure parcel-split geometry: straight-line cut pairing all crossings for concave lots, plus bent-polyline path cut
