@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-28 @ `a8108a33` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-28 @ `8d33db61` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -209,7 +209,7 @@ _578 source files mapped._
 - **`src/shared/comps/lib/compMarkerIcon.js`** — Pure map-marker spec for a comp: a small colored tag (hue per comp type), deliberately a different silhouette from sitePinIcon
   - _exports_: `compMarkerColor`, `compMarkerSize`, `compMarkerSvg`
 - **`src/shared/comps/lib/comps.js`** — Leasing Comps pure model: $/SF derivation for land/building sale, lease basis normalization (annual NNN default, NNN/gross never blended), compFieldRows (the one empty-field-hides choke point), anchor validation, row<->model mapping
-  - _exports_: `ANCHOR_KINDS`, `annualLeaseRate`, `buildingPricePerSf`, `COMP_TYPES`, `compFieldRows`, `compHeadline`, `compToRow`, `isCompType`, `landPricePerSf`, `landSizeSf`, `LEASE_EXPENSE_BASES`, `LEASE_PERIODS`, `rowToComp`, `summarizeLeaseComps`, `summarizeSaleComps`, `validAnchor`, `validateComp`
+  - _exports_: `ANCHOR_KINDS`, `annualLeaseRate`, `buildingPricePerSf`, `COMP_TYPES`, `compFieldRows`, `compHeadline`, `compToRow`, `isCompType`, `landPricePerSf`, `landSizeSf`, `LEASE_EXPENSE_BASES`, `LEASE_PERIODS`, `leaseTotalAnnualRent`, `rowToComp`, `summarizeLeaseComps`, `summarizeSaleComps`, `validAnchor`, `validateComp`
 - **`src/shared/comps/lib/compsStore.js`** — Supabase CRUD for public.comps (team-visible read, owner-only write); every call returns {data,error}, never swallows a failure
   - _exports_: `deleteComp`, `fetchAllComps`, `insertComp`, `supabase`, `updateComp`
 - **`src/shared/coordinates/index.js`** — Shared EPSG:2278 Texas South Central project grid: unit helpers plus Lambert Conformal Conic projectToGrid/gridToProject validated against pyproj

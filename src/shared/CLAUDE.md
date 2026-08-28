@@ -279,8 +279,13 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   `components/CompsPanel.jsx` is the lazy-loaded side panel, self-contained (fetches its own data,
   current user and team list). Anchored by a pin drop OR a real parcel selection — wired into the
   Site Planner's map finder by REUSING its existing parcel-select flow, not a second identify
-  pipeline. `db/comps.sql` — applied to production; `db/test/comps_rls.test.sql` is a self-rolling-
-  back RLS proof, run live via the Supabase MCP.
+  pipeline. `db/comps.sql` — applied to production; `db/comps_lease_size.sql` — adds `lease_size_sf`
+  (leased area, SF) to LEASE comps (B647824), applied; without it a lease comp's $/SF rate has no
+  total rent and any cross-comp average can only be an unweighted mean — `summarizeLeaseComps`
+  SF-weights each NNN/gross group when every comp in it has a size, falling back to the previous
+  unweighted mean, explicitly flagged, when any comp in the group is missing it (never silently
+  blends the two). `db/test/comps_rls.test.sql` is a self-rolling-back RLS proof, run live via the
+  Supabase MCP.
 - `projects/`, `profile/`, `cloud/`, `presence/`, `gis/`, `geometry/`, `placement/`.
 
 **Convention:** shared logic is pure and unit-tested; per-host state/wiring stays in the workspace.

@@ -12,7 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button, Field, IconButton } from "../../ui/controls.jsx";
 import {
   COMP_TYPES, LEASE_PERIODS, LEASE_EXPENSE_BASES, isCompType,
-  landPricePerSf, buildingPricePerSf, compFieldRows, compHeadline,
+  landPricePerSf, buildingPricePerSf, leaseTotalAnnualRent, compFieldRows, compHeadline,
   summarizeLeaseComps, summarizeSaleComps, validateComp,
 } from "../lib/comps.js";
 import { compMarkerColor } from "../lib/compMarkerIcon.js";
@@ -27,7 +27,7 @@ function emptyDraft(anchor) {
     anchor: anchor || null,
     landPrice: "", landSizeValue: "", landSizeUnit: "ac",
     bldgPrice: "", bldgSizeSf: "",
-    leaseRate: "", leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseTi: "", leaseTerm: "",
+    leaseRate: "", leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseTi: "", leaseTerm: "", leaseSizeSf: "",
   };
 }
 
@@ -38,7 +38,7 @@ function draftToComp(d) {
     ...d,
     landPrice: num(d.landPrice), landSizeValue: num(d.landSizeValue),
     bldgPrice: num(d.bldgPrice), bldgSizeSf: num(d.bldgSizeSf),
-    leaseRate: num(d.leaseRate), leaseTi: num(d.leaseTi),
+    leaseRate: num(d.leaseRate), leaseTi: num(d.leaseTi), leaseSizeSf: num(d.leaseSizeSf),
   };
 }
 
@@ -51,6 +51,7 @@ function compToDraft(c) {
     bldgPrice: str(c.bldgPrice), bldgSizeSf: str(c.bldgSizeSf),
     leaseRate: str(c.leaseRate), leaseRatePeriod: c.leaseRatePeriod || "annual",
     leaseRateExpense: c.leaseRateExpense || "nnn", leaseTi: str(c.leaseTi), leaseTerm: c.leaseTerm || "",
+    leaseSizeSf: str(c.leaseSizeSf),
   };
 }
 
@@ -79,13 +80,17 @@ function SummaryStrip({ comps }) {
   if (land.count) bits.push(`Land avg $${land.avg.toFixed(2)}/SF (${land.count})`);
   if (bldg.count) bits.push(`Bldg sale avg $${bldg.avg.toFixed(2)}/SF (${bldg.count})`);
   if (lease.headline) {
-    bits.push(`Lease avg $${lease.headline.avg.toFixed(2)}/SF/yr ${lease.headlineBasis.toUpperCase()} (${lease.headline.count})`);
+    const weightNote = lease.headline.weighted ? " (SF-weighted)" : "";
+    bits.push(`Lease avg $${lease.headline.avg.toFixed(2)}/SF/yr ${lease.headlineBasis.toUpperCase()}${weightNote} (${lease.headline.count})`);
   }
   if (!bits.length) return null;
   return (
     <div style={{ fontSize: 11, color: "var(--text-secondary)", padding: "0 14px 8px", lineHeight: 1.5 }}>
       {bits.join(" · ")}
       {lease.unknownCount > 0 && <> · {lease.unknownCount} lease comp{lease.unknownCount === 1 ? "" : "s"} missing rate/basis, excluded from the average</>}
+      {lease.headline && !lease.headline.weighted && lease.headline.sizeMissingCount > 0 && (
+        <> · not SF-weighted — {lease.headline.sizeMissingCount} missing leased SF</>
+      )}
     </div>
   );
 }
@@ -191,6 +196,12 @@ function CompForm({ draft, setDraft, teams, projects, errors, onSave, onCancel, 
               {LEASE_EXPENSE_BASES.map((b) => <option key={b} value={b}>{b.toUpperCase()}</option>)}
             </select>
           </Field>
+          <Field label="Leased SF"><input type="number" value={draft.leaseSizeSf} onChange={set("leaseSizeSf")} placeholder="optional" style={{ ...inputStyle, width: 140 }} /></Field>
+          {draft.leaseRate && draft.leaseSizeSf && (
+            <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: -4, marginBottom: 8 }}>
+              {(() => { const rent = leaseTotalAnnualRent(draftToComp(draft)); return rent != null ? `${rent.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 })}/yr total` : null; })()}
+            </div>
+          )}
           <Field label="TI $/SF"><input type="number" value={draft.leaseTi} onChange={set("leaseTi")} placeholder="optional" style={{ ...inputStyle, width: 120 }} /></Field>
           <Field label="Term"><input value={draft.leaseTerm} onChange={set("leaseTerm")} placeholder="e.g. 5 yrs" style={{ ...inputStyle, width: 140 }} /></Field>
         </>
