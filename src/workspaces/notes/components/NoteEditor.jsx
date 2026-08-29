@@ -60,6 +60,7 @@ import { absoluteStamp, editedLabel } from "../lib/notesTime.js";
 import { activeOutlineIndex, outlineFromDoc } from "../lib/notesOutline.js";
 import { setTaskCheckedInDoc } from "../lib/notesTasks.js";
 import { applySlashCommand } from "../lib/notesSlashMenu.js";
+import { isToolbarDiagArmed, latchToolbarDiag, recordToolbarDiag } from "../lib/notesToolbarDiag.js";
 import NoteToolbar from "./NoteToolbar.jsx";
 import NoteSlashMenu from "./NoteSlashMenu.jsx";
 import NoteOutline from "./NoteOutline.jsx";
@@ -1885,22 +1886,52 @@ export default function NoteEditor({
    * always measures a delta of zero against what the other just recorded. */
   const toolbarShiftRef = useRef(0);
   const toolbarHeightRef = useRef(null); // null = not yet measured; the first read only sets the baseline
-  const applyToolbarDelta = useCallback((nextHeight) => {
+  /* ⛔ READ-ONLY DIAGNOSTIC for B831600 ×3 (`lib/notesToolbarDiag.js`) — OFF by default, no
+   * behaviour change when unarmed. Records every call this function ever receives (which
+   * mechanism called it, the heights it saw, and what it actually applied), because the owner's
+   * production measurements and this sandbox's reproductions disagree about whether the FIRST
+   * grow ever gets compensated at all, and inference from outside the page has run out of road.
+   * See docs/NOTES-CARRY-FORWARD.md's B831600 ×3 entry for how to arm it and read the result. */
+  const applyToolbarDelta = useCallback((nextHeight, trigger) => {
+    const diagOn = isToolbarDiagArmed();
+    if (diagOn) latchToolbarDiag();
     const prevHeight = toolbarHeightRef.current;
     toolbarHeightRef.current = nextHeight;
-    if (prevHeight == null) return;
+    if (prevHeight == null) {
+      if (diagOn) {
+        recordToolbarDiag({
+          t: performance.now(), trigger, prevHeight, nextHeight,
+          delta: null, bailedAt: "first-reading-sets-baseline", appliedOffset: toolbarShiftRef.current,
+        });
+      }
+      return;
+    }
     const delta = nextHeight - prevHeight;
     const scroller = scrollerRef.current;
-    if (!delta || !scroller) return;
+    if (!delta || !scroller) {
+      if (diagOn) {
+        recordToolbarDiag({
+          t: performance.now(), trigger, prevHeight, nextHeight, delta,
+          bailedAt: !delta ? "zero-delta" : "no-scroller", appliedOffset: toolbarShiftRef.current,
+        });
+      }
+      return;
+    }
     toolbarShiftRef.current += delta;
     scroller.style.transform = toolbarShiftRef.current
       ? `translateY(${-toolbarShiftRef.current}px)` : "";
+    if (diagOn) {
+      recordToolbarDiag({
+        t: performance.now(), trigger, prevHeight, nextHeight, delta,
+        bailedAt: null, appliedOffset: toolbarShiftRef.current, transform: scroller.style.transform,
+      });
+    }
   }, []);
 
   const inTable = !!editor && !editor.isDestroyed && editor.isActive("table");
   useLayoutEffect(() => {
     const toolbarEl = noteRootRef.current?.querySelector('[data-testid="note-toolbar"]');
-    if (toolbarEl) applyToolbarDelta(toolbarEl.getBoundingClientRect().height);
+    if (toolbarEl) applyToolbarDelta(toolbarEl.getBoundingClientRect().height, "layout-effect");
   }, [inTable, applyToolbarDelta]);
 
   useEffect(() => {
@@ -1913,7 +1944,7 @@ export default function NoteEditor({
     if (!root || !scroller || typeof ResizeObserver === "undefined") return undefined;
     const toolbarEl = root.querySelector('[data-testid="note-toolbar"]');
     if (!toolbarEl) return undefined;
-    const ro = new ResizeObserver(() => applyToolbarDelta(toolbarEl.getBoundingClientRect().height));
+    const ro = new ResizeObserver(() => applyToolbarDelta(toolbarEl.getBoundingClientRect().height, "resize-observer"));
     ro.observe(toolbarEl);
     return () => {
       ro.disconnect();
