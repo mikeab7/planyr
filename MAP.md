@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-29 @ `44179cd1` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-29 @ `f2dc6af5` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_584 source files mapped._
+_586 source files mapped._
 
 ## infra
 
@@ -588,7 +588,7 @@ _584 source files mapped._
 - **`src/workspaces/site-planner/lib/cloudRename.js`** — the project-rename CLOUD write, LOADED ON DEMAND: one atomic `rename_site_group` RPC over the whole site group (so a rename reaches plans this browser has never loaded and cannot half-land), plus the server-side read-then-write degrade for a DB without the migration. Reached only by a dynamic import from `storage.renameSiteGroup` — never static-import it from the boot path.
   - _exports_: `cloudRenameGroup`
 - **`src/workspaces/site-planner/lib/cloudSync.js`** — RLS-scoped Supabase site read/write: per-tab version CAS + thin-clobber guard, keepalive push, delete-tombstone reconcile
-  - _exports_: `_lastHeaderSig`, `_siteVersions`, `clearSiteVersions`, `cloudDelete`, `cloudDeletedRows`, `cloudHardDelete`, `cloudList`, `cloudRestore`, `cloudUpsert`, `fetchSiteForReconcile`, `headerSig`, `interpretDelete`, `keepaliveCloudPush`, `siteRowFor`, `slimForCloud`
+  - _exports_: `_lastHeaderSig`, `_siteVersions`, `clearSiteVersions`, `cloudDelete`, `cloudDeletedRows`, `cloudHardDelete`, `cloudList`, `cloudParcelRows`, `cloudRestore`, `cloudUpsert`, `fetchSiteForReconcile`, `headerSig`, `interpretDelete`, `keepaliveCloudPush`, `siteRowFor`, `slimForCloud`
 - **`src/workspaces/site-planner/lib/coloradoRegions.js`** — NEW-8 Colorado region model + THE CAPABILITY GUARD: network-free site→state resolution, the four drainage regimes (MHFD · Larimer · Weld · El Paso) with detention deliberately unmodeled, the CWCB 2 CCR 408-1 statewide floodplain floor, and the capability matrix that makes an unwired capability render a named 'not available in Colorado yet' state instead of a number
   - _exports_: `CAPABILITIES`, `capabilityFor`, `CO_COUNTY_REGIME`, `CO_DRAINAGE_REGIMES`, `CO_STATE_FLOOD_STANDARD`, `COLORADO_DETENTION_DETAIL`, `coloradoGaps`, `coloradoRegimeFor`, `MHFD_DETENTION_DETAIL`
 - **`src/workspaces/site-planner/lib/conceptName.js`** — Default plan naming: bijective base-26 Concept A/B/.../AA sequence continuing past the highest existing concept per site
@@ -680,7 +680,7 @@ _584 source files mapped._
 - **`src/workspaces/site-planner/lib/editorNames.js`** — conflict-toast naming (B673): cached editor display names via the team roster RPC (self → "you (another window)") + describeElement labels
   - _exports_: `createNameResolver`, `describeElement`, `SELF_ACTOR`
 - **`src/workspaces/site-planner/lib/elementApi.js`** — network seam for per-element sync (B671): the commit_elements RPC wrapper, element-row fetch, and the pure unload keepalive commit
-  - _exports_: `COMMIT_TIMEOUT_MS`, `commitElements`, `ELEMENT_SELECT`, `fetchElements`, `keepaliveCommit`
+  - _exports_: `COMMIT_TIMEOUT_MS`, `commitElements`, `ELEMENT_SELECT`, `fetchElements`, `fetchParcelSummaries`, `keepaliveCommit`
 - **`src/workspaces/site-planner/lib/elementJournal.js`** — persisted pending-edit journal (NEW-F4): quota-safe per-site localStorage of un-committed element ops (+ baseRev) so a reload after a failed commit re-folds instead of reverting
   - _exports_: `clearJournal`, `journalSessionId`, `ORPHAN_ADOPT_MS`, `readJournal`, `sweepJournals`, `writeJournal`
 - **`src/workspaces/site-planner/lib/elementRows.js`** — pure JS mirror of the site_elements explode/rebuild (B670): model⇄rows for the 5 vector collections, tombstone-aware, keyed by (kind,id)
@@ -895,6 +895,8 @@ _584 source files mapped._
   - _exports_: `PARCEL_HINT_COOLDOWN_MS`, `parcelSelectHintDecision`
 - **`src/workspaces/site-planner/lib/parcelSnapshot.js`** — Client loader for nightly Drive county parcel-snapshot cache: IndexedDB-held SWR download, pure viewport-filter/point-in-lot hit-test so a flaky county server never blanks the map
   - _exports_: `_resetSnapshots`, `ensureSnapshot`, `featureAtPoint`, `featureBbox`, `featuresForView`, `getSnapshot`, `onSnapshotChange`, `preferSnapshotForDisplay`, `snapshotEnabled`, `snapshotFootprint`, `snapshotVintage`
+- **`src/workspaces/site-planner/lib/parcelSummary.js`** — B849344: groups flat `site_elements` parcel rows by site_id and dissolves each site's true acreage via `dissolvedParcelSqft`, feeding the Sites panel/map pin's canonical boundary read
+  - _exports_: `summarizeParcelRows`
 - **`src/workspaces/site-planner/lib/parcelTruncation.js`** — NEW-3: did a parcel query come back CUT SHORT (`exceededTransferLimit`, in every shape a real service returns it), how many features arrived, and the honest non-blocking notice that says so. Split out of `parcelDisplay.js` because that module imports Leaflet and cannot be unit-tested.
   - _exports_: `featureCountOf`, `parcelTruncationNotice`, `responseWasTruncated`
 - **`src/workspaces/site-planner/lib/parking.js`** — Pure parking-layout math: rows-to-depth, split into double-loaded modules, explode into stall-row/aisle bands, curb-adjacency test
@@ -1027,6 +1029,8 @@ _584 source files mapped._
   - _exports_: `buildScreenFurnitureSvg`, `buildSheetFurnitureSvg`, `chooseFurnitureCorners`, `furnitureLayout`
 - **`src/workspaces/site-planner/lib/siteAnalysis.js`** — Registry-driven environmental/regulatory screen of active-parcel rings (flood, wetlands, wells, pipelines, jurisdiction, road, zoning) with silent-error present/absent/unknown/unavailable states over the SWR cache
   - _exports_: `ANALYSIS_SOURCES`, `analyzeProximitySource`, `analyzeSource`, `buildAnalysisParams`, `buildJurisdictionFinding`, `buildProximityParams`, `buildQueryUrl`, `buildRoadFinding`, `classifyFlood`, `classifyStatus`, `deriveZoning`, `epaProgram`, `isSFHA`, `normalizeAttrs`, `pipelineSummary`, `representativeRing`, `ringCentroid`, `ringsBBox`, `ringsSignature`, `runSiteAnalysis`, `simplifyRing`, `wetlandSummary`, `zoneSummary`
+- **`src/workspaces/site-planner/lib/siteBoundary.js`** — B849344: MapFinder's ONE "does this site have a boundary, and how big is it" answer — canonical `parcelSummary` over the dead legacy `site.parcels` mirror, with an honest unknown until the summary has loaded
+  - _exports_: `siteAcres`, `siteBoundaryInfo`, `siteDrawParcels`
 - **`src/workspaces/site-planner/lib/siteModel.js`** — Canonical per-plan Site Model schema v10: createSiteModel/migrate, semantic selectors, cross-copy union merge with delete-tombstones, and bonded-child/dog-ear/road-centerline load-time repairs
   - _exports_: `activeParcelsOf`, `ANNOTATION_KINDS`, `annotationsOf`, `bondedChildRot`, `buildingNumbers`, `constraintsOf`, `contentCount`, `countJunkEntries`, `createSiteModel`, `crossSectionsOf`, `developableArea`, `EASEMENT_KINDS`, `easementsOf`, `elementsOf`, `exclusionZonesOf`, `ID_BOND_KEYS`, `impossibleStacks`, `isBuilding`, `lineageConflicts`, `mergeSiteContent`, `migrate`, `migrateRoads`, `missingBondSiblings`, `normalizeBondedChildren`, `normalizeCrossHostBonds`, `normalizeHostRuns`, `normalizeOrphanWallPads`, `normalizeZoneAlongLen`, `offAnchor`, `orphanWallPads`, `parcelAncestors`, `parcelChildrenMap`, `parcelDescendants`, `parcelDisplayInfo`, `parcelDrawingsOf`, `parcelOutline`, `parcelsOf`, `parcelSplitNames`, `quarterOffset`, `rectRoadEndpoints`, `RESTORED_STRIP_W_FT`, `roadStripBBox`, `roadTravelWidth`, `setbacksOf`, `SHARE_MIRROR_FIELDS`, `shareMirrorOf`, `sheetOverlaysOf`, `SITE_MODEL_VERSION`, `STATUS_META`, `STATUSES`, `statusOf`, `strandedFromHost`, `teamShareOf`, `toMs`, `utilitiesOf`, `UTILITY_KINDS`, `withShareMirror`
 - **`src/workspaces/site-planner/lib/sitePlacement.js`** — putting an UNLOCATED plan on the earth: origin validation, a typed lat/lon parser, and anchor nudging (no drawn coordinate moves).

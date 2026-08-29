@@ -74,7 +74,7 @@ const ParcelInfoCard = lazy(() => import("./components/ParcelInfoCard.jsx"));
 import { PanelErrorBoundary } from "./components/LazyPanel.jsx";
 import { makeParcelDisplayLayer, makeSnapshotLayer, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
 import { responseWasTruncated, featureCountOf, parcelTruncationNotice } from "./lib/parcelTruncation.js";
-import { dissolvedParcelSqft } from "./lib/polyClip.js";
+import { siteBoundaryInfo, siteDrawParcels } from "./lib/siteBoundary.js";
 import { geocodeAddress } from "./lib/geocode.js";
 import { statusToken, darken } from "../../shared/ui/statusTokens.js";
 /* lib/sharing.js is loaded ON DEMAND, and the reason is a budget one. This module is the
@@ -372,14 +372,6 @@ function computeAssembly(selected, exportBase) {
   return { parcels, underlay, totalAc: totalSqft / 43560, origin: { lat: lat0, lon: lon0 } };
 }
 
-// Acreage of a stored site from its planner-feet parcels. B715: dissolve the ACTIVE parcels so
-// overlapping ground counts once (matches the planner's siteSqft), instead of an additive sum over
-// EVERY parcel — the old version double-counted overlaps AND summed inactive/superseded parcels too.
-function siteAcres(site) {
-  if (!site.parcels?.length) return 0;
-  return dissolvedParcelSqft(site.parcels) / 43560;
-}
-
 // Total acreage across every outer ring of a lon/lat parcel feature (multipart-safe).
 function ringsAcres(rings) {
   if (!rings || !rings.length) return null;
@@ -455,7 +447,7 @@ function RailTab({ label, count, active, onClick }) {
   );
 }
 
-export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip, onViewCenter, comps = [], onPlaceComp, onCompClick, pendingCompAnchor = null, onCompAnchorConsumed, focusCompId = null, onCompFocusHandled, onCompsChange }) {
+export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], parcelSummary = null, activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip, onViewCenter, comps = [], onPlaceComp, onCompClick, pendingCompAnchor = null, onCompAnchorConsumed, focusCompId = null, onCompFocusHandled, onCompsChange }) {
   const elRef = useRef(null);
   const mapRef = useRef(null);
   const addrTokRef = useRef(0); // B545: address-search generation — a newer search invalidates an older in-flight one
@@ -1492,13 +1484,23 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       const { lat, lon } = site.origin;
       const active = site.id === activeSiteId;
       const name = site.site || site.name || "Site";
-      const tip = `${name} · ${siteAcres(site).toFixed(1)} AC · ${STATUS_META[status]?.label || status} · click to open`;
+      // B849344/NEW-1 — canonical boundary + acreage, never the dead `site.parcels` mirror; and
+      // an unresolved summary reads "checking…", never a confident wrong "no boundary" (LOUD-
+      // FAILURE). NEW-2 — the trailing "click to open" narrated an already-obvious interaction
+      // (owner: "it doesnt need to say click to open") and is dropped; the card states only facts.
+      const boundary = siteBoundaryInfo(site, parcelSummary);
+      const acreText = !boundary.known ? "checking boundary…" : boundary.hasBoundary ? `${boundary.acres.toFixed(1)} AC` : "no boundary";
+      const tip = `${name} · ${acreText} · ${STATUS_META[status]?.label || status}`;
       const openSiteNow = () => onOpenSiteRef.current && onOpenSiteRef.current(site.id);
       // Right-click anywhere on a site → status picker at the cursor. (Suppress
       // the browser's native menu via the underlying DOM event.)
       const onCtx = (e) => { if (selectModeRef.current) return; const oe = e.originalEvent; if (oe) { oe.preventDefault(); oe.stopPropagation(); } setStatusMenu({ site, x: (oe && oe.clientX) || 0, y: (oe && oe.clientY) || 0 }); };
 
-      if (showPlans && site.parcels?.length) {
+      // B849344 — the same canonical parcels the acreage number above was built from, not
+      // `site.parcels`: drawing the boundary from a different source than the number describes
+      // it is exactly the "picture and number disagree" failure this fix exists to close.
+      const drawParcels = siteDrawParcels(site, parcelSummary);
+      if (showPlans && drawParcels.length) {
         const t = statusToken(status);
         // Boundary ALWAYS carries the project status color; the open site is
         // emphasized with a heavier line (not by recoloring it to ember), so its
@@ -1514,7 +1516,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         const siteGroup = L.featureGroup();
         if (!selectMode) siteGroup.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top", sticky: true });
         siteGroup.addTo(group); // cheap: siteGroup is still empty here, so this projects nothing
-        site.parcels.forEach((p) => {
+        drawParcels.forEach((p) => {
           if (!p.points?.length) return;
           ops.push(() => {
             L.polygon(p.points.map((pt) => feetToLatLng(pt, lat, lon)), {
@@ -1580,7 +1582,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     if (pressedRef.current) { pendingRebuildRef.current = build; return; }
     build();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sites, activeSiteId, selectMode, showPlans, statusFilter, showSitesLayer]);
+  }, [sites, parcelSummary, activeSiteId, selectMode, showPlans, statusFilter, showSitesLayer]);
 
   // NEW-COMPS — leasing-comp markers: a sibling layer to the site-pin one above, deliberately
   // simpler (always a flat point marker, no zoom-dependent footprint rendering — a comp has no
@@ -2269,6 +2271,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const siteRow = (s) => {
     const isActive = s.id === activeSiteId;
     const st = statusOf(s); const t = statusToken(st);
+    // B849344 — canonical boundary/acreage (see siteBoundaryInfo); "checking boundary…" while
+    // the summary hasn't loaded yet, never a confident wrong "no boundary" (LOUD-FAILURE).
+    const boundary = siteBoundaryInfo(s, parcelSummary);
+    const acreText = !boundary.known ? "checking boundary…" : boundary.hasBoundary ? `${boundary.acres.toFixed(1)} AC` : "no boundary";
     const showActions = hoverRow === s.id || isActive;
     return (
       <div key={s.id} title={s.origin ? "Open site (double-click to fly here · right-click for status / rename / delete)" : "Open site (right-click for status / rename / delete)"}
@@ -2309,7 +2315,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               metadata line (so it costs no new row and truncates with it) and reads in the accent,
               because PAL.muted is for inert metadata and this is the answer to his question. */}
           <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {STATUS_META[st]?.label || st} · {siteAcres(s) > 0 ? `${siteAcres(s).toFixed(1)} AC` : "no boundary"}
+            {STATUS_META[st]?.label || st} · {acreText}
             {s.teamId && <> · <span style={{ color: PAL.accent, fontWeight: 700 }}>Shared with {teamName(s.teamId)}</span></>}
           </div>
         </div>

@@ -141,6 +141,29 @@ export async function fetchElements(client, siteId, opts = {}) {
   } finally { t.done(); }
 }
 
+// B849344 — canonical parcel geometry for the WHOLE portfolio in ONE round trip: the site LIST
+// and map PIN's "does this site have a boundary, and how big is it" must read `site_elements`
+// (the row-synced engine), never `sites.data->'parcels'` — a dead mirror the cloud row keeps
+// EMPTIED since the B672 element-sync cutover (see cloudSync.js's slimForCloud). RLS already
+// scopes `site_elements` to sites this user can see (own + shared), so no `site_id` filter is
+// needed; `kind`/`deleted_at` narrow it to LIVE parcel rows only. Returns { ok, rows, error }
+// where each row is { site_id, data } — `data` is the parcel object verbatim, same shape the
+// open planner canvas draws from.
+export async function fetchParcelSummaries(client, opts = {}) {
+  if (!client) return { ok: false, rows: [], error: "no client" };
+  const t = raceWithTimeout(
+    () => client.from("site_elements").select("site_id,data").eq("kind", "parcel").is("deleted_at", null),
+    "fetch-parcel-summary", opts
+  );
+  try {
+    const { data, error } = await t.race;
+    if (error) return { ok: false, rows: [], error: error.message || String(error) };
+    return { ok: true, rows: Array.isArray(data) ? data : [] };
+  } catch (e) {
+    return { ok: false, rows: [], error: (e && e.message) || "fetch threw" };
+  } finally { t.done(); }
+}
+
 // Last-ditch flush of pending ops during page unload — the supabase-js client can't issue a
 // fetch({keepalive:true}), so hit the PostgREST RPC endpoint directly. Guard-only over what it
 // needs; never throws. Returns true if a request was dispatched. Subject to the browser's ~64KB
