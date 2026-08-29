@@ -126,6 +126,18 @@ export default function Scheduler({
   // the "slow/buggy sometimes" the owner saw. This handshake makes the fast path reliable, and
   // a short fallback reveals the embed ~2.5 s after it loads even if it never answers (a slow/
   // broken embed shouldn't hold a full-screen spinner).
+  // B853268/NEW-5 — the empty state's OWN visibility gate (`ready`, below) used to be the only
+  // signal these two fallback timers drove. `toolbar.ready` and `projects` (the schedules list)
+  // have no such fallback, so on a load slow enough to hit either timer, `ready` flips true and
+  // the empty state mounts a full beat before the real `planar:toolbar-state`/`planar:nav-state`
+  // messages land — painting with the toolbar and the "Link an existing schedule" row missing
+  // until whatever next re-render happens to catch the deferred state up. `markToolbarReadyFallback`
+  // is toolbar.ready's twin of markReady: it only ever flips a still-default `{ready:false}` to
+  // true (a REAL planar:toolbar-state report always wins — this never clobbers real data), on the
+  // SAME two timers, so every signal the empty state depends on resolves on one schedule.
+  const markToolbarReadyFallback = useCallback(() => {
+    setToolbar((t) => (t.ready ? t : { ...t, ready: true }));
+  }, []);
   const onIframeLoad = useCallback(() => {
     let tries = 0;
     const ask = () => {
@@ -139,13 +151,15 @@ export default function Scheduler({
     };
     ask();
     setTimeout(markReady, 2500); // reveal even if the embed never reports interactive
-  }, [markReady]);
+    setTimeout(markToolbarReadyFallback, 2500);
+  }, [markReady, markToolbarReadyFallback]);
 
   // Absolute backstop in case `onLoad` itself never fires (e.g. the iframe doc hangs).
   useEffect(() => {
     const t = setTimeout(markReady, 6000);
-    return () => clearTimeout(t);
-  }, [markReady]);
+    const t2 = setTimeout(markToolbarReadyFallback, 6000);
+    return () => { clearTimeout(t); clearTimeout(t2); };
+  }, [markReady, markToolbarReadyFallback]);
 
   // Once ready, let the cross-fade finish, then drop the overlay entirely.
   useEffect(() => {
@@ -306,7 +320,16 @@ export default function Scheduler({
   // `pickShowing` overrides it (B748064): once the user's pick is genuinely active in the embed,
   // there IS something to show — a cross-cutting schedule the route can't name — so the empty
   // state must step aside instead of covering it.
-  const showEmptyState = !pickShowing && shouldShowLinkPanel({ ready, projectId, linkedSchedule, routedSiteName });
+  //
+  // B853268/NEW-5 — gated on `toolbar.ready` too, not just `ready`. `ready` only proves the FIRST
+  // nav-state (or a fallback timer) has landed; the right-hand toolbar renders from a SEPARATE
+  // `planar:toolbar-state` message that can still be outstanding at that exact moment, which is
+  // what painted the empty state with its toolbar and "Link an existing schedule" row missing on
+  // first paint (owner repro: both reappeared only once something else forced a re-render). Both
+  // signals now resolve on the same schedule (see markToolbarReadyFallback above), so this never
+  // waits any longer on a slow/broken embed than `ready` alone already did.
+  const iframeFullyReported = ready && toolbar.ready;
+  const showEmptyState = !pickShowing && shouldShowLinkPanel({ ready: iframeFullyReported, projectId, linkedSchedule, routedSiteName });
   const suggestedMatch = showEmptyState ? suggestNameMatch(routedSiteName, projects) : null;
 
   // B566 — the Schedule workspace now shows the SAME unified top-right cloud sync badge as the

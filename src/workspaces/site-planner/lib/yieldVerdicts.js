@@ -107,6 +107,13 @@ export function fmtMargin(margin) {
 
 const finish = (v) => ({ ...v, text: `${v.label}: ${v.sentence}` });
 const loadingRow = (key, label) => finish({ key, label, pill: "…", tone: "neutral", sentence: "checking flood data", loading: true, sortRank: 1 });
+/* B849713/NEW-3 — "checking flood data" is a claim that a fetch is IN FLIGHT. Under B1442 (manual-
+ * only checks) a plan that has simply never been checked sits in that state FOREVER — no fetch is
+ * running, nothing is coming, and the row contradicted the header's own honest "Flood data: not
+ * checked". Mirrors buildabilityVerdict's already-shipped "not checked yet" + `recheck` (the strip
+ * renderer swaps this text for "checking…" for the span of a REAL fetch via `v.recheck &&
+ * drainRefreshing`, so the genuinely-loading case still reads as loading). */
+const notCheckedRow = (key, label) => finish({ key, label, pill: "…", tone: "neutral", sentence: "not checked yet", recheck: true, sortRank: 3 });
 const okRow = (key, label, sentence) => finish({ key, label, pill: "OK", tone: "good", sentence, sortRank: 2 });
 const pairRow = (key, label, provided, required, short, opts = {}) => {
   // NEW-16 display invariant: a SHORT pair must NEVER show two identical numbers (the
@@ -189,8 +196,13 @@ function detentionVerdict(d) {
     : req && req.kind === "band" ? req.bandAcFt[1] : null;
   if (requiredAcFt == null) {
     if (req && req.kind === "point") return okRow("det", "Detention", "not required");
+    // B849713/NEW-3 — no requirement has EVER been resolved (not a fetch in progress): say so.
+    if (!d.floodChecked) return notCheckedRow("det", "Detention");
     return loadingRow("det", "Detention");
   }
+  // A resolved req (a real point/band requirement) means a check already ran, so a still-null
+  // usableAcFt here is the pond-volume leg genuinely catching up — a real loading state, not
+  // "never checked" (test: "detention LOADING → '…' pill, 'checking flood data', loading flag").
   if (usableAcFt == null) return loadingRow("det", "Detention");
   const short = usableAcFt < requiredAcFt - EPS || inundated;
   const v = pairRow("det", "Detention", usableAcFt, requiredAcFt, short, { thinOverrides: d.thinMarginPct, pctFloorAcFt: d.marginPctFloorAcFt });

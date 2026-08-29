@@ -105,6 +105,36 @@ export async function warmProjectsIfEmpty() {
   return !!(r.ok && r.warmed);
 }
 
+/* B853266/NEW-1 — warmProjects() above ONLY pulls when the on-device cache is EMPTY
+ * (`loadSitesList().length` — "already-warm" short-circuits otherwise), so a cache that already
+ * holds SOME projects but has quietly diverged from the cloud (a device that missed a sync, a
+ * `cloud-group-count-diverged` event with nothing to self-heal it) never gets a second chance —
+ * the switcher can be opened a hundred times and it will keep serving the same stale snapshot.
+ * That is exactly the owner-reported failure: a project he is standing in (a real, active site
+ * group in the cloud) simply isn't in this device's cached mirror.
+ *
+ * reconcileProjects() is the always-pull sibling, meant to be called on a deliberate user moment
+ * (the switcher dropdown opening) rather than on every mount — it's the identical pull
+ * warmProjects() already calls (safe + idempotent, "the exact pull the Site Planner runs on
+ * login"), just no longer gated on the cache being empty. */
+export async function reconcileProjects() {
+  try {
+    if (!isCloudActive()) return { ok: true, warmed: false, reason: "signed-out", error: "" };
+    const uid = activeUid();
+    if (!uid) return { ok: true, warmed: false, reason: "signed-out", error: "" };
+    const before = loadSitesList().length;
+    const res = await pullCloud(uid);
+    if (!res || res.ok === false) {
+      return { ok: false, warmed: false, reason: "pull-failed", error: (res && res.error) || "couldn't reach the cloud" };
+    }
+    const changed = loadSitesList().length !== before;
+    if (changed) notifyProjectsChanged();
+    return { ok: true, warmed: changed, reason: "pulled", error: "" };
+  } catch (e) {
+    return { ok: false, warmed: false, reason: "threw", error: (e && e.message) || "couldn't reach the cloud" };
+  }
+}
+
 // Rename a project (= a Site Planner site group) for the uncontrolled breadcrumb (B439).
 // A project's name IS its group's authoritative `site` value, so this is a thin wrapper over the
 // store's ONE rename write.

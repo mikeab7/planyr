@@ -68,6 +68,20 @@ export function resolveCurrentName(currentProject, projects = []) {
   return (hit && hit.name) || currentProject.name || "";
 }
 
+// B853266/NEW-1 — ensure the routed/currently-open project is present in the switcher's list
+// even when the on-device cache hasn't caught up with the cloud yet (a stale/diverged pull can
+// leave an actively-worked project missing from `listProjects()` while the user is standing in
+// it). A union, never a swap: every entry the caller already has passes through untouched, and a
+// synthetic entry is added ONLY when the current project isn't already present.
+export function withCurrentProject(projects = [], currentProject = null) {
+  if (!currentProject || !currentProject.id) return projects;
+  if ((projects || []).some((p) => p && p.id === currentProject.id)) return projects;
+  return [
+    { id: currentProject.id, name: currentProject.name || "Untitled site", updatedAt: Date.now(), status: null, scheduleProjectId: null },
+    ...(projects || []),
+  ];
+}
+
 // Case-insensitive name filter for the dropdown search field. Empty query → all.
 export function filterProjects(projects = [], query = "") {
   const q = String(query || "").trim().toLowerCase();
