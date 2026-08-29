@@ -44,6 +44,13 @@ import { TERRAIN_MIN_ZOOM } from "./terrainGate.js";
 export const OSM_MIN_ZOOM = 14;        // OSM power/hydrant data is dense — don't fetch zoomed out
 export const MAPILLARY_MIN_ZOOM = 16;  // Mapillary bbox must be < 0.01° — high zoom only
 
+/* B427410 (×2) — the map finder's "Road names" reference-overlay gate (MapFinder.jsx's
+ * faint World_Transportation layer, toggled from LayerPanel's `placeNames` row). Declared
+ * here rather than as a MapFinder-local literal so the row's dormant note and the map's own
+ * opacity switch read the SAME number — the B220/OSM_MIN_ZOOM discipline applied to a
+ * control that isn't in the `ALL_LAYERS` registry. */
+export const PLACE_NAMES_MIN_ZOOM = 14;
+
 /* `featureLayerOptions`'s own default. An `esriFeature` row with no declared `minZoom`
  * is STILL gated — at 10 — because that is the value handed to Leaflet. Naming it here is
  * what makes the invisible half of this bug family visible. */
