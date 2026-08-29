@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupProjects, filterProjects, relTime, suggestNameMatch, normalizeProjectName, resolveCurrentName } from "../src/shared/projects/projectModel.js";
+import { groupProjects, filterProjects, relTime, suggestNameMatch, normalizeProjectName, resolveCurrentName, withCurrentProject } from "../src/shared/projects/projectModel.js";
 
 describe("groupProjects", () => {
   it("collapses plans of one site into a single project entry", () => {
@@ -98,6 +98,41 @@ describe("filterProjects", () => {
   it("filters case-insensitively by name substring", () => {
     expect(filterProjects(projects, "ka").map((p) => p.id)).toEqual(["g3"]);
     expect(filterProjects(projects, "o").map((p) => p.id)).toEqual(["g1", "g2"]);
+  });
+});
+
+// B853266/NEW-1 — the project the user is standing in must never be missing from its own
+// switcher: a stale/diverged on-device cache can drop an actively-worked project from
+// listProjects() even though the route/currentProject prop proves it's real and open right now.
+describe("withCurrentProject — the routed project is never invisible to its own switcher (B853266/NEW-1)", () => {
+  const projects = [
+    { id: "g1", name: "Grand Port" },
+    { id: "g2", name: "Goose Creek" },
+  ];
+  it("passes an untouched list through when the current project is already present", () => {
+    expect(withCurrentProject(projects, { id: "g1", name: "Grand Port" })).toBe(projects);
+  });
+  it("backfills a missing current project at the front of the list (union, never a swap)", () => {
+    const out = withCurrentProject(projects, { id: "g9", name: "Richfield" });
+    expect(out.map((p) => p.id)).toEqual(["g9", "g1", "g2"]);
+    expect(out[0]).toMatchObject({ id: "g9", name: "Richfield" });
+    // Every original entry survives untouched — this is a union, never a narrowing.
+    expect(out[1]).toBe(projects[0]);
+    expect(out[2]).toBe(projects[1]);
+  });
+  it("falls back to 'Untitled site' for a nameless current project, matching groupProjects", () => {
+    expect(withCurrentProject([], { id: "g9" })[0].name).toBe("Untitled site");
+  });
+  it("no-ops with no current project (the Dashboard view) or no id", () => {
+    expect(withCurrentProject(projects, null)).toBe(projects);
+    expect(withCurrentProject(projects, {})).toBe(projects);
+  });
+  // NEW-2's own repro ("type its own name → 'No matching projects'") is this exact gap: once the
+  // current project is unconditionally in the base list, the existing filterProjects search finds
+  // it like any other project — no separate search-side fix is needed.
+  it("once backfilled, searching the current project's own name finds it (closes NEW-2's repro)", () => {
+    const withCurrent = withCurrentProject(projects, { id: "g9", name: "Richfield" });
+    expect(filterProjects(withCurrent, "richfield").map((p) => p.id)).toEqual(["g9"]);
   });
 });
 
