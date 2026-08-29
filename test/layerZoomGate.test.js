@@ -146,6 +146,41 @@ describe("PLACE_NAMES_MIN_ZOOM — the map-finder road-names overlay's own gate"
   });
 });
 
+/* B427410 (×3) — AMENDMENT. Owner, verbatim: "I kinda want road names to just be there… right
+ * now they're always kind of opaque [muddy]… or maybe let me adjust the opacity." Two guards:
+ * the DEFAULT changed from the old context-tier 0.4 to a measured-crisp 0.85 (see MapFinder.jsx's
+ * own header comment for the real-tile comparison this came from), and the SAME `opacityControl`
+ * every other row in this panel already uses is wired to it — never a second slider component.
+ * Both fail on the pre-fix (×2) source: it had no `opacityControl(` call for Road names and its
+ * only opacity value anywhere near this control was the hardcoded `0.4`. */
+describe("PLACE_NAMES_DEFAULT_OPACITY — the owner's crispness fix + his own opacity control", () => {
+  it("MapFinder no longer hardcodes the old muddy 0.4 for this layer", () => {
+    const m = readFileSync(join(HERE, "..", "src", "workspaces", "site-planner", "MapFinder.jsx"), "utf8");
+    expect(m).toMatch(/PLACE_NAMES_DEFAULT_OPACITY\s*=\s*0\.85/);
+    // Both places that used to read the literal `0.4` for this layer now read the shared default.
+    expect(m).toMatch(/PLACE_NAMES_MIN_ZOOM\s*\)\s*\?\s*labelsOpacity\s*:\s*0/);
+    expect(m).toMatch(/PLACE_NAMES_MIN_ZOOM\s*\?\s*labelsOpacity\s*:\s*0/);
+  });
+
+  it("the state feeding the map layer starts at the measured default, not a re-guessed number", () => {
+    const m = readFileSync(join(HERE, "..", "src", "workspaces", "site-planner", "MapFinder.jsx"), "utf8");
+    expect(m).toMatch(/useState\(PLACE_NAMES_DEFAULT_OPACITY\)/);
+  });
+
+  it("LayerPanel wires Road names through the SAME opacityControl every other row uses", () => {
+    const p = readFileSync(join(HERE, "..", "src", "workspaces", "site-planner", "components", "LayerPanel.jsx"), "utf8");
+    // Only one opacityControl DEFINITION may exist (the shared helper) — this asserts the Road
+    // names row is a CALLER of it, not a second widget.
+    expect((p.match(/const opacityControl = \(/g) || []).length).toBe(1);
+    expect(p).toMatch(/opacityControl\("Road names", placeNames\.opacity, placeNames\.onOpacityChange\)/);
+  });
+
+  it("MapFinder passes the opacity value and setter through the placeNames prop", () => {
+    const m = readFileSync(join(HERE, "..", "src", "workspaces", "site-planner", "MapFinder.jsx"), "utf8");
+    expect(m).toMatch(/placeNames=\{\{[^}]*opacity:\s*labelsOpacity[^}]*onOpacityChange:\s*setLabelsOpacity/);
+  });
+});
+
 describe("levelsToGate — the number the row says out loud", () => {
   it("counts whole levels and is never zero", () => {
     expect(levelsToGate(13, 16)).toBe(3);

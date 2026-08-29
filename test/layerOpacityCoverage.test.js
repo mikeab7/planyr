@@ -30,9 +30,12 @@ describe("NEW-2 — every toggleable GIS layer exposes opacity", () => {
 
   it("every layer reaches a panel row — solo, composite, or merge slot — and no row shape is opacity-less", () => {
     const panel = read("components/LayerPanel.jsx");
-    // Exactly ONE opacity control implementation, used by all three row shapes.
+    // Exactly ONE opacity control implementation, used by all three GIS row shapes plus the
+    // basemap's own Road names companion (B427410 ×3 — not a registered GIS layer, so it can't
+    // be reached through buildGroupSlots below, but it must still be the SAME slider, not a
+    // fourth one hand-rolled for one control).
     expect((panel.match(/const opacityControl = /g) || []).length).toBe(1);
-    expect((panel.match(/opacityControl\(/g) || []).length).toBe(3); // solo · City-limits composite · merge group
+    expect((panel.match(/opacityControl\(/g) || []).length).toBe(4); // solo · City-limits composite · merge group · Road names
     // …and no row shape may hand-roll a second slider.
     expect(panel).not.toMatch(/<input type="range"[\s\S]{0,200}opacity: \+e\.target\.value/);
 
