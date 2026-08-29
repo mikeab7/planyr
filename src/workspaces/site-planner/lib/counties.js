@@ -33,7 +33,7 @@ import { situsKey } from "./appraisal.js";
  * every query before that returns a `pending` verdict, so nothing here ever trades a rectangle's
  * guess for a real answer. See countyPolygons.js for why the geometry is bundled rather than
  * fetched on demand. */
-import { resolveCounty, loadCountyPolygons, countyPolygonsReady } from "./countyPolygons.js";
+import { resolveCounty, loadCountyPolygons, countyPolygonsReady, countyRoster } from "./countyPolygons.js";
 /* NEW-4 — county ROUTING KEYS are normalised at the map itself, not at each call site.
  * See shared/gis/countyKeys.js for why (a raw `MAP[county]` missed the two production rows
  * spelled "Harris", silently). */
@@ -427,7 +427,122 @@ export async function resolveTaxRates(county, attrs) {
  * agency's GIS site; county servers move occasionally, so a layer that 404s can
  * be re-pointed here. Several are flagged provisional where not live-verified.
  * ----------------------------------------------------------------------- */
-export const COUNTIES = byCountyKey(COUNTIES_RAW);
+
+/* ═══ B853712 — THE STATEWIDE-DERIVED TIER: ALL 254 TEXAS COUNTIES, WITHOUT 254 LITERALS ═══════
+ *
+ * A hand-written row above marks a county with its OWN probed appraisal-district service — the
+ * DIALED-IN tier (harris/fortbend/chambers/waller/montgomery/brazoria/galveston/liberty/austintx).
+ * Every OTHER Texas county rides the universal statewide fallback (`TXGIO_STATEWIDE_LAYER`) exactly
+ * the way Waller already does — so this DERIVES that same shape for the other ~245 counties from
+ * `public/geo/county-polygons.json`, the asset `resolveCounty` already fetches for point-in-polygon
+ * geometry (B209502). Nothing new is fetched and nothing is hand-typed: the derivation reuses the
+ * asset's own name/state/fips/bbox, which is why it costs the Site route's bundle nothing beyond
+ * this function — 254 literal rows at the measured ~162 bytes/row Colorado's compact form averages
+ * would have added ~40 KB to a route this repo has spent real effort keeping under its ceiling
+ * (`/CLAUDE.md` → the B414480/B1064 bundle-baseline history).
+ *
+ * WHY THIS IS SAFE TO SKIP A COUNTY THAT ALREADY HAS A DIALED-IN ROW: derivation runs AFTER
+ * `COUNTIES_RAW` is fully declared and checks it BY KEY before adding anything, so a promoted
+ * county's literal row always wins — asserted in `test/counties.test.js` ("the dialed-in tier is
+ * never shadowed").
+ *
+ * WHY THIS DOESN'T NEED A KEY→NAME REVERSE TABLE: every consumer that reaches a derived entry does
+ * so through `countyKeyForName(name, state)` or `geometryCountyKey`, both of which already HOLD the
+ * real county name (from `resolveCounty`'s answer or a boundary layer's own field) before asking —
+ * the derivation only has to turn a known-real name into a key and a record, never guess one.
+ *
+ * WHAT THIS DOES NOT CHANGE: `candidateCountiesForPoint`'s bbox pre-filter and its statewide-append
+ * still enumerate only the LITERAL entries (`Object.entries(COUNTIES_MAP)` — this proxy leaves that
+ * unaffected, since it adds no `ownKeys` override) — a click over a derived county already finds its parcel via
+ * the `txgio_statewide` candidate that's unconditionally appended for every Texas point (unscoped,
+ * so it needs no per-county wiring to answer a spatial click). Adding the derived key to that
+ * candidate list too would just double-query the identical TxGIO endpoint under two names. The
+ * derivation's job is narrower and load-bearing anyway: making a DIRECT lookup
+ * (`COUNTIES_MAP[key]` / `COUNTIES[key]`) answer correctly for any of the 254, which is exactly
+ * what `countyIdentity()` needs to stop reporting "no parcel data wired here yet" for a county that
+ * in fact has the same statewide coverage Waller does.
+ *
+ * VERIFICATION, stated honestly (owner instruction, 2026-08-29): this is ONE service (TxGIO) whose
+ * COVERAGE is what's under test, not 254 independent endpoints — so this ships on a live-probed
+ * SAMPLE, not a claim of 254 verified rows. Probed 2026-08-29 via `/identify` against the real
+ * production endpoint, reproduced by the shipped code in `ui-audit/verify-dallas-metro-parcels.mjs`:
+ * all nineteen counties within 50 miles of downtown Dallas (edge distance, per-county polygon, not
+ * centroid) PLUS a spread sample outside that radius — Hartley (Panhandle), Webb (border), Nacogdoches
+ * (Piney Woods), Calhoun (Gulf coast) — every one answered with a real parcel at a real point inside
+ * it. That is a sample, not exhaustive coverage of all 254; a county this sample didn't reach could
+ * still expose a TxGIO gap (a data hole, a name spelled differently than expected) that only a probe
+ * of that specific county would catch. */
+const TX_COUNTY_KEY_ALIAS = { austin: "austintx" }; // mirrors countyKeyForName's TX_ALIAS below — one
+// county (Austin, Bellville/Sealy) whose real name collides with the City of Austin's slug, so its
+// literal row is keyed `austintx`; the derivation must recognise that BEFORE the shadow-check below,
+// or it would derive a redundant "austin" entry duplicating a service already wired.
+
+let derivedTxCountiesCache = null; // Map<key, {name, mapEntry, cfgEntry}> | null (asset not yet resident)
+const round2 = (n) => Math.round(n * 100) / 100;
+
+function derivedTxCounties() {
+  if (derivedTxCountiesCache) return derivedTxCountiesCache;
+  const roster = countyRoster();
+  if (!roster) return null; // asset not resident yet — same "ask again later" contract as resolveCounty
+  const out = new Map();
+  const PAD = 0.02; // the same shared-border pad every bbox in this file already uses
+  for (const c of roster) {
+    if (c.state !== "TX") continue;
+    const rawKey = normCountyKey(c.name);
+    const key = rawKey && (TX_COUNTY_KEY_ALIAS[rawKey] || rawKey);
+    if (!key || COUNTIES_RAW[key]) continue; // a dialed-in row always wins — never shadowed
+    const [minLng, minLat, maxLng, maxLat] = c.bbox;
+    const NAME_UPPER = c.name.toUpperCase();
+    out.set(key, {
+      name: c.name,
+      mapEntry: {
+        state: "TX",
+        center: [round2((minLat + maxLat) / 2), round2((minLng + maxLng) / 2)],
+        zoom: 10,
+        bbox: [round2(minLat - PAD), round2(minLng - PAD), round2(maxLat + PAD), round2(maxLng + PAD)],
+        mapServer: null,
+        layerUrl: TXGIO_STATEWIDE_LAYER,
+        statewideDerived: true,
+      },
+      cfgEntry: {
+        state: "TX",
+        label: `${c.name} County`,
+        layerUrl: TXGIO_STATEWIDE_LAYER,
+        idField: "prop_id",
+        addrField: "situs_addr",
+        scopeWhere: `county='${NAME_UPPER}'`,
+        help: `Texas statewide parcels (TxGIO) — searches are limited to ${c.name} County.`,
+        statewideDerived: true,
+      },
+    });
+  }
+  derivedTxCountiesCache = out;
+  return out;
+}
+
+/* Wraps a literal (`byCountyKey`-normalised) county-config Proxy with the derived-tier fallback:
+ * an unrecognised key checks `derivedTxCounties()` before answering `undefined`. `pick` selects
+ * which shape a caller wants (`COUNTIES` reads `.cfgEntry`, `COUNTIES_MAP` reads `.mapEntry`) off
+ * the SAME cached derivation, so building it is never paid for twice. */
+function withStatewideDerivation(literalProxy, pick) {
+  return new Proxy(literalProxy, {
+    get(target, prop, recv) {
+      const v = Reflect.get(target, prop, recv);
+      if (v !== undefined || typeof prop !== "string") return v;
+      const derived = derivedTxCounties();
+      const rec = derived && derived.get(normCountyKey(prop));
+      return rec ? pick(rec) : undefined;
+    },
+    has(target, prop) {
+      if (Reflect.has(target, prop)) return true;
+      if (typeof prop !== "string") return false;
+      const derived = derivedTxCounties();
+      return !!(derived && derived.has(normCountyKey(prop)));
+    },
+  });
+}
+
+export const COUNTIES = withStatewideDerivation(byCountyKey(COUNTIES_RAW), (rec) => rec.cfgEntry);
 
 const JURISDICTION_LAYERS_RAW = {
   // B898: Harris's direct-agency layers (drainage channels, storm sewer, water/wastewater
@@ -842,7 +957,9 @@ export function noParcelSourceNote(identity) {
  * module-level consumer (`STATEWIDE_KEYS`, immediately below) — because a `const` is in its
  * temporal dead zone until its own line runs, so a wrapper placed at the end of the file would
  * throw on load. The `_RAW` literals stay private: nothing outside should hold the unwrapped map. */
-export const COUNTIES_MAP = byCountyKey(COUNTIES_MAP_RAW);
+/* B853712 — same statewide-derived fallback as `COUNTIES` above, reading the SAME cached
+ * derivation (`derivedTxCounties()`), just the `.mapEntry` shape instead of `.cfgEntry`. */
+export const COUNTIES_MAP = withStatewideDerivation(byCountyKey(COUNTIES_MAP_RAW), (rec) => rec.mapEntry);
 export const JURISDICTION_LAYERS = byCountyKey(JURISDICTION_LAYERS_RAW);
 
 export const STATEWIDE_KEYS = Object.entries(COUNTIES_MAP).filter(([, c]) => c.statewide).map(([k]) => k);
@@ -898,9 +1015,12 @@ if (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.DEV
 export const STATEWIDE_PARCEL_LAYER = TXGIO_STATEWIDE_LAYER;
 
 /* B792 — map a county DISPLAY NAME (e.g. the TxDOT boundary layer's "Fort Bend") onto the
- * app's routing key, but ONLY when that key is a real configured county (never a statewide
- * pseudo-key, never a guess). Returns null for anything unrecognized so a caller can never
- * make a stored county WORSE by writing an unknown key. Pure. */
+ * app's routing key. Returns null for anything unrecognized so a caller can never make a stored
+ * county WORSE by writing an unknown key — never a guess: a Texas answer is either a dialed-in
+ * literal or the SAME statewide-derived tier `COUNTIES_MAP` itself answers from (B853712, so this
+ * function and a direct `COUNTIES_MAP[key]` lookup can never disagree about which keys are real),
+ * both backed by a real parcel source; a Colorado answer stays literal-only (no CO derivation).
+ * Never a statewide PSEUDO-key (`txgio_statewide`/`co_statewide`) — those are excluded below. Pure. */
 /* NEW-5 — the optional `state` argument is what makes this safe across two states. Texas and
  * Colorado BOTH have an El Paso County and a Jefferson County, so an unqualified "El Paso" is
  * genuinely ambiguous. Called with no state (every existing caller — the TxDOT boundary layer only
@@ -913,9 +1033,9 @@ export function countyKeyForName(name, state = null) {
   /* B209503 — the one Texas county whose key is not its slug. Austin COUNTY (Bellville / Sealy)
    * keeps the key `austintx` so the far more common string "Austin" — the city, its ETJ, a TxDOT
    * district — can never resolve to it by accident. The alias is applied here, in the one place
-   * a display name becomes a key, rather than at each call site. */
-  const TX_ALIAS = { austin: "austintx" };
-  const txSlug = TX_ALIAS[slug] || slug;
+   * a display name becomes a key, rather than at each call site — the SAME alias the statewide
+   * derivation above uses, so the two can never disagree about what "Austin" means. */
+  const txSlug = TX_COUNTY_KEY_ALIAS[slug] || slug;
   const candidates = st === "CO" ? [`co_${slug}`] : [txSlug];
   for (const key of candidates) {
     const entry = COUNTIES_MAP[key];
