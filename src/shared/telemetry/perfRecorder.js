@@ -48,7 +48,7 @@ import {
   createStringTable, internString, ringOrder, ringOrderSince, COUNTER_COLUMNS,
 } from "./perfRing.js";
 import { createTrigger, feedFrame, sealBaselineLate, triggerState, worstWindow } from "./perfTrigger.js";
-import { buildCapture, encodeCapture, assertCaptureClean, frameStats, CAPTURE_MAX_CHARS } from "./perfCapture.js";
+import { buildCapture, encodeCapture, assertCaptureClean, frameStats, attributionLabel, CAPTURE_MAX_CHARS } from "./perfCapture.js";
 import { savePerfCapture } from "./perfCaptureStore.js";
 
 const BUILD_ID = typeof __BUILD_ID__ !== "undefined" ? __BUILD_ID__ : "dev";
@@ -208,7 +208,7 @@ function observeTasks() {
         let name = "";
         try {
           const top = (e.scripts || []).slice().sort((a, b) => b.duration - a.duration)[0];
-          if (top) name = top.sourceFunctionName || top.invoker || top.sourceURL || "";
+          if (top) name = attributionLabel(top);
         } catch (_) { /* attribution is optional; the timing is not */ }
         record(e.startTime, e.duration, e.blockingDuration || 0, name);
       }

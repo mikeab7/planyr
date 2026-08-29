@@ -121,6 +121,19 @@ const COMP_ACCENT = "#2f6fb0";
  * relabel it back to anything implying place/city names without switching the source too. */
 const LABELS_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}";
 
+/* B427410 (×3) — THE DEFAULT OPACITY, MEASURED, NOT COPIED FROM THE TIER MODEL. The old fixed
+ * 0.4 was never derived for this layer — it matches `layerWeight.js`'s "context" tier ceiling,
+ * the quietest of three, applied here as a borrowed number rather than a decision. Compared real
+ * Esri World_Transportation tiles over real World_Imagery aerial at three opacities: at 0.4 a
+ * label's black glyph and its own protective white halo fade by the SAME amount, so contrast
+ * against a busy aerial photo collapses into a grey smudge (this is the owner's "always kind of
+ * opaque [muddy]," not a perception issue); at 0.85 it reads pixel-for-pixel as crisp as 1.0. A
+ * label layer's readability and its "loudness" are not one knob the way an area fill's are, so
+ * the tier ceiling below does not transfer to this layer. Session-only default; the user's own
+ * slider (`opacityControl`, wired below) is the rest of the answer — "let me adjust the opacity"
+ * was the owner's own fallback ask. */
+const PLACE_NAMES_DEFAULT_OPACITY = 0.85;
+
 /* NEW-MAPCTRL-3 — the narrow-mode full-width search bar's own footprint (`top:8, height:42`
  * where it's rendered below) plus an 8px gap. The bottom-left banner slot (error toast, share
  * confirmation, the "+ Select parcels" coach tip, …) uses this as its TOP ceiling on a narrow
@@ -545,6 +558,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   };
   const [basemap, setBasemap] = useState("esri");
   const [labels, setLabels] = useState(true);
+  // B427410 (×3) — the owner's own opacity control over the road-names overlay (`opacityControl`,
+  // the same slider every other Layers-panel row uses). Session-only, matching every other row's
+  // opacity (layerPrefs.js keeps opacity out of the persisted per-site record on purpose). The
+  // DEFAULT is set for crispness, not for the old "context tier" quietness — see PLACE_NAMES_DEFAULT_OPACITY.
+  const [labelsOpacity, setLabelsOpacity] = useState(PLACE_NAMES_DEFAULT_OPACITY);
   const [selectMode, setSelectMode] = useState(false); // off = pan only; on = add/remove parcels
   // NEW-COMPS: armed by "+ Comp" — the next map click drops a leasing comp anchor there. A
   // second, independent one-shot mode alongside `selectMode` (mutually exclusive in the UI,
@@ -1266,7 +1284,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !labels) return;
-    const initOpacity = (map.getZoom() >= PLACE_NAMES_MIN_ZOOM) ? 0.4 : 0;
+    const initOpacity = (map.getZoom() >= PLACE_NAMES_MIN_ZOOM) ? labelsOpacity : 0;
     // Cap the reference/labels overlay at the imagery's native ceiling (z19) so the two
     // layers don't DIVERGE at deep zoom. World_Transportation serves tiles past z19, so
     // without this cap the labels kept rendering crisp while the imagery (clamped to its
@@ -1288,12 +1306,14 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [labels]);
 
-  /* zoom-driven label opacity (B162): hide road names below PLACE_NAMES_MIN_ZOOM */
+  /* zoom-driven label opacity (B162): hide road names below PLACE_NAMES_MIN_ZOOM, otherwise use
+   * the owner's own opacity (B427410 ×3) — one effect, so the zoom gate and the slider can never
+   * fight over which one last wrote `setOpacity`. */
   useEffect(() => {
     const layer = labelsRef.current;
     if (!layer) return;
-    layer.setOpacity(zoom != null && zoom >= PLACE_NAMES_MIN_ZOOM ? 0.4 : 0);
-  }, [zoom]);
+    layer.setOpacity(zoom != null && zoom >= PLACE_NAMES_MIN_ZOOM ? labelsOpacity : 0);
+  }, [zoom, labelsOpacity]);
 
   /* State + country outlines at wide zoom (NEW-1) — the same shape as the label-opacity
      gate above and the `showPlans` switch below: one boolean derived from the live zoom,
@@ -2828,10 +2848,12 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                  it. Choices are DERIVED from the shared BASEMAPS registry, so a source added there
                  shows up here with no second edit; there is no "off" on this surface because the
                  finder's map always has a base (see basemaps.js). `placeNames` is the same
-                 provider label overlay the bare "Labels" checkbox used to toggle, now named so it
-                 says what it draws and carrying the ⓘ every other row in this panel has. */
+                 provider ROAD-NAMES overlay the bare "Labels" checkbox used to toggle (renamed
+                 (×2) from the still-inaccurate "Place names"), carrying the ⓘ every other row in
+                 this panel has, plus (×3) its own `opacityControl` slider — `labelsOpacity` — so
+                 the owner can dial it from crisp default down to faint rather than only on/off. */
               basemap={{ value: basemap, onChange: setBasemap, choices: FINDER_BASEMAP_CHOICES }}
-              placeNames={{ value: labels, onChange: setLabels }}
+              placeNames={{ value: labels, onChange: setLabels, opacity: labelsOpacity, onOpacityChange: setLabelsOpacity }}
               /* NEW-2 — which STATE the map is looking at, so a Texas-only source is named as
                  "not available in Colorado" rather than offered as a toggle that produces an
                  empty map. The view centre is the best state fact the finder has (there is no
