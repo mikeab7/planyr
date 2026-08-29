@@ -76,10 +76,12 @@ const RELEVANCE_LABEL = { all: "Show all", dim: "Dim", hide: "Hide" };
 
 export default function LayerPanel({
   overlays, setOverlays, county, layerStatus = {}, coverage = {}, compact = false, basemap = null, gisNote = null,
-  /* B427410 (×2) — the basemap's ROAD-NAMES overlay, when the host has one: `{ value, onChange }`.
-   * Rendered under the source it belongs to (see `basemapControl`), never as its own row —
-   * it is drawn BY the basemap and means nothing without it. Absent (planner, which has no such
-   * overlay at all — see B427410's ×2 recurrence note) → not shown. */
+  /* B427410 (×2/×3) — the basemap's ROAD-NAMES overlay, when the host has one:
+   * `{ value, onChange, opacity, onOpacityChange }`. Rendered under the source it belongs to
+   * (see `basemapControl`), never as its own row — it is drawn BY the basemap and means nothing
+   * without it. Absent (planner, which has no such overlay at all — see B427410's ×2 recurrence
+   * note) → not shown. `opacity`/`onOpacityChange` are optional: a host that hasn't wired them
+   * gets the checkbox with no slider, same "absent → not shown" discipline as everywhere else. */
   placeNames = null,
   // B1091(×2) — the county this SITE is actually in (the saved site record's own county), kept
   // separate from `county` above, which is the layer-registry key / lookup selector. Only
@@ -980,9 +982,24 @@ export default function LayerPanel({
         <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", marginTop: 5, fontSize: 11.5 }}>
           <input type="checkbox" checked={!!placeNames.value} onChange={(e) => placeNames.onChange(e.target.checked)} />
           <span style={{ flex: 1 }}>Road names</span>
-          <RowInfo label="Road names" sections={[{ text: "Road, highway and rail names drawn OVER the aerial by the imagery provider's transportation reference layer — part of the base layer, not a separate overlay. It does not carry city, town or landmark names. Only visible once you're zoomed in past neighborhood scale; turn it off for a clean picture of the ground, or when it sits on top of something you are trying to read." }]} />
+          <RowInfo label="Road names" sections={[{ text: "Road, highway and rail names drawn OVER the aerial by the imagery provider's transportation reference layer — part of the base layer, not a separate overlay. It does not carry city, town or landmark names. Only visible once you're zoomed in past neighborhood scale. Use the see-through slider below to fade it, or turn it off for a clean picture of the ground." }]} />
         </label>
       )}
+      {/* B427410 (×3) — Owner, verbatim: "I kinda want road names to just be there… right now
+          they're always kind of opaque [muddy]." MEASURED why: this is a RASTER tile — reducing
+          its CSS opacity fades the label glyph AND its protective white halo by the same amount,
+          which drops the text's contrast against a busy aerial photo far faster than it reduces
+          how much "space" the layer takes up (proven with real Esri tiles over real imagery:
+          0.4 — the old fixed value, chosen to match the "context" tier ceiling in `layerWeight.js`
+          — reads as a grey smudge; 0.85 reads exactly as crisp as 1.0). A LABEL layer's legibility
+          and its loudness are not the same knob the way an area fill's are, so the tier-ceiling
+          model that governs the OTHER GIS rows in this panel does not transfer here uncritically —
+          default is set for crispness, and the SAME `opacityControl` every other row uses is
+          handed to the user for the rest: "or maybe let me adjust the opacity" (his own fallback).
+          Session-only, like every other row's opacity (`layerPrefs.js`: "per-layer opacity …
+          stay session-only for now") — not a new persistence mechanism. */}
+      {placeNames && placeNames.value && typeof placeNames.opacity === "number" && typeof placeNames.onOpacityChange === "function" &&
+        opacityControl("Road names", placeNames.opacity, placeNames.onOpacityChange)}
       {placeNamesDormant && (
         typeof onZoomTo !== "function" ? (
           <div data-testid="place-names-zoom-note" style={{ fontSize: 10, lineHeight: 1.4, marginTop: 1, color: "var(--warn-text)" }}>
