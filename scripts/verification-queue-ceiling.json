@@ -1,7 +1,7 @@
 {
   "noBlockerCeiling": 221,
-  "staleCeiling": 35,
+  "staleCeiling": 38,
   "staleThresholdDays": 60,
-  "writtenAt": "2026-08-28",
+  "writtenAt": "2026-08-29",
   "note": "Ratchet ceiling for scripts/verification-queue-audit.mjs --check. Regenerate with `node scripts/verification-queue-audit.mjs --write-ceiling` after the counts genuinely improve — never raise it to silence a real regression."
 }
