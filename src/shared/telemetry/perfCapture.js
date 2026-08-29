@@ -220,6 +220,32 @@ export function sanitizeAttribution(s) {
   return tail.replace(/[^A-Za-z0-9_.:-]/g, "").slice(0, 48);
 }
 
+/* ⛔ B844416 — `sourceFunctionName` is empty for every ANONYMOUS script, which covers every
+ * Leaflet-scheduled callback and every app-level requestAnimationFrame arrow. The naive fallback
+ * chain `sourceFunctionName || invoker || sourceURL` never reaches `sourceURL`, because `invoker`
+ * is a non-empty CATEGORY constant ("FrameRequestCallback", "EventListener.wheel", …) for every one
+ * of those — so a long-animation-frame entry attributed nothing more specific than "an animation
+ * frame ran", true of most of the app. Measured in the owner's 2026-08-29 production capture: the
+ * four worst blocks (515–606 ms each) all carried exactly that constant and nothing else.
+ *
+ * When there is no real function name, this folds the invoker CATEGORY together with a compact
+ * SOURCE LOCATION (the script's file basename + its character offset) so two different anonymous
+ * callbacks are distinguishable — `FrameRequestCallback:index-4f2a.js:81422` rather than a bare
+ * `FrameRequestCallback` repeated for every long frame in the app. The basename is extracted via
+ * `sanitizeAttribution` (never a raw URL) and the combined label carries no `/`, so the later
+ * ltNames sanitisation pass in `buildCapture` cannot mis-truncate it on a slash that belongs to the
+ * URL rather than to the label. */
+export function attributionLabel(script) {
+  const s = script || {};
+  const fn = s.sourceFunctionName ? String(s.sourceFunctionName) : "";
+  if (fn) return fn;
+  const invoker = s.invoker ? String(s.invoker) : "";
+  const basename = s.sourceURL ? sanitizeAttribution(s.sourceURL) : "";
+  const pos = Number.isFinite(s.sourceCharPosition) && s.sourceCharPosition >= 0 ? s.sourceCharPosition : null;
+  if (invoker && basename) return pos != null ? `${invoker}:${basename}:${pos}` : `${invoker}:${basename}`;
+  return invoker || basename;
+}
+
 /* ── The privacy proof ───────────────────────────────────────────────────────────────────────
  * Walk a built capture and return every violation found: an unknown key, a non-finite number, a
  * string where a number belongs, or a string anywhere in the series. Returns [] for a clean
