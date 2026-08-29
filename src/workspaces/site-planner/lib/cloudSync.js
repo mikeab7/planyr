@@ -10,6 +10,7 @@ import { makeWriteSerializer } from "../../../shared/cloud/serializeWrites.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { stableStringify } from "./elementSync.js";
 import { normCountyKey } from "../../../shared/gis/countyKeys.js";
+import { fetchParcelSummaries } from "./elementApi.js";
 
 // Per-tab memory of the `version` we last synced for each site, so a save can be a
 // compare-and-swap that REJECTS a stale write instead of silently clobbering (B314).
@@ -421,4 +422,22 @@ export async function cloudList(uid) {
     if (r.version != null && m.id != null) { try { lastHeaderSig[m.id] = headerSig(m); } catch (_) {} }
     return m;
   }).filter(Boolean);
+}
+
+// B849344 — the network half of "does this site have a boundary, and how big is it" (the Sites
+// panel + the map pin — see MapFinder.jsx's siteBoundaryInfo). `cloudList` above returns each
+// site's SLIM HEADER, whose `parcels` field has been empty since the B672 element-sync cutover;
+// the real geometry lives in `site_elements` rows, fetched here in one request. Returns
+// { ok, rows, error } — the caller (SitePlannerApp.jsx) dissolves per site via
+// parcelSummary.summarizeParcelRows. Deliberately NOT done here: this module is reachable from
+// the app SHELL's eager import graph (Shell.jsx/projects.js → storage.js → here, for every
+// route, not just Site Planner), and summarizeParcelRows pulls in polyClip.js's clipper-lib —
+// one of vite.config.js's MAP_VENDOR packages. Importing it from here once dragged the whole
+// map-vendor chunk into every route's shared bundle (measured: the Notes route's JS jumped
+// +323 KB, tripping its bundle budget) — exactly the merge trap vite.config.js's own header
+// comment warns about. Keep the geometry math on the Site Planner side of the lazy-chunk
+// boundary, where MapFinder.jsx already needs clipper-lib and pays for it once.
+export async function cloudParcelRows(uid) {
+  if (!supabase || !uid) return { ok: false, rows: [] };
+  return fetchParcelSummaries(supabase);
 }

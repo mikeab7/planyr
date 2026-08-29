@@ -18,6 +18,8 @@ import { loadUserPrefs } from "./lib/userPrefs.js";
  * static edges and add no chunk. */
 const SHARE_LOADERS = { loadPrefs: loadUserPrefs, listTeams: listMyTeams };
 import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, initHistoryStore, loadSitesList, loadPlansOfGroup, renameSiteGroup, repairSplitProjectNames, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount, stageLegacySite, discardLegacySite } from "./lib/storage.js";
+import { cloudParcelRows } from "./lib/cloudSync.js";
+import { summarizeParcelRows } from "./lib/parcelSummary.js";
 import { STATUS_META } from "./lib/siteModel.js";
 import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
 import { idbPersist } from "./lib/localDb.js";
@@ -222,6 +224,7 @@ export default function App({
       }
       else { setActiveSiteId(null); setMode("map"); }  // NEW-5: NOT a user exit — the URL writer keeps the route (mayWriteRouteProject)
       refreshSites();
+      refreshParcelSummary(uid);
     } else {
       // B326416 — the sharing context is one user's preference and one user's team list, so it
       // must not survive a sign-out into the next account. (Unlike the cloud cache below, this is
@@ -236,6 +239,7 @@ export default function App({
       setCloudError("");
       if (event === "SIGNED_OUT") { userLeftProjectRef.current = true; setActiveSiteId(null); setMode("map"); }
       refreshSites();
+      refreshParcelSummary(null);
     }
     // B471 — log the auth transition so a "saving stopped after my session changed" report is
     // diagnosable from telemetry (the cloud-save path is gated on being signed in; a silent token
@@ -264,6 +268,34 @@ export default function App({
   }, []);
 
   const refreshSites = () => setSites(loadSitesList());
+
+  // B849344 — the canonical parcel-boundary read behind the Sites panel + map pins (see
+  // MapFinder.jsx's siteBoundaryInfo). `parcelSummaryLoaded` starts false so the UI can tell
+  // "no boundary" (a real answer) apart from "haven't checked yet" (LOUD-FAILURE — an unknown
+  // acreage must read as unknown, never as a confident 0.0). Signed out there is nothing to
+  // fetch — a local-only site's `parcels` field IS its live store — so it flips true at once
+  // with an empty summary and every site falls back to its own record. The only place that
+  // flip normally happens is applyUser's signed-out branch, driven by onAuthChange — but that
+  // listener is never even ATTACHED when `!supabaseConfigured()` (no Supabase project baked into
+  // this build), so a fully offline/unconfigured app would otherwise get stuck on "checking
+  // boundary…" forever (caught live: a real headless run against an unconfigured dev build sat
+  // on the unknown state with no auth event ever coming to clear it). Seed the initial value
+  // from that same fact instead of waiting on an event that will never fire.
+  const [parcelSummary, setParcelSummary] = useState({});
+  const [parcelSummaryLoaded, setParcelSummaryLoaded] = useState(() => !supabaseConfigured());
+  const parcelSummaryFetching = useRef(false);
+  const refreshParcelSummary = async (uid) => {
+    if (!uid) { setParcelSummary({}); setParcelSummaryLoaded(true); return; }
+    if (parcelSummaryFetching.current) return;
+    parcelSummaryFetching.current = true;
+    try {
+      const r = await cloudParcelRows(uid).catch(() => ({ ok: false }));
+      // A failed fetch leaves the last-known summary in place (stale-while-revalidate, same
+      // discipline as cloudError above) rather than reporting every site boundary-less. The
+      // dissolve happens here, not in cloudSync.js — see cloudParcelRows's own header for why.
+      if (r && r.ok) { setParcelSummary(summarizeParcelRows(r.rows)); setParcelSummaryLoaded(true); }
+    } finally { parcelSummaryFetching.current = false; }
+  };
   // Bring the user's on-device (logged-out) sites into their cloud account — a one-time,
   // non-destructive copy-up. Originals are kept; any cloud copy that's already newer is left
   // alone. After it runs we re-pull + refresh so the list reflects the consolidated account.
@@ -274,6 +306,7 @@ export default function App({
       const r = await importLegacyIntoCloud(signedInUid);
       await pullCloud(signedInUid).catch(() => {});
       refreshSites();
+      refreshParcelSummary(signedInUid);
       const parts = [];
       if (r.copied) parts.push(`${r.copied} site${r.copied === 1 ? "" : "s"} brought into your account`);
       if (r.failed) parts.push(`${r.failed} couldn't reach the cloud (kept on this device — will retry on your next edit)`);
@@ -682,9 +715,14 @@ export default function App({
   }, [sites, activeSiteId]); // stable identity → doesn't force MapFinder to re-render every parent render
 
   // Refresh the map's site list when we land back on it (after the planner has
-  // autosaved the latest edits).
+  // autosaved the latest edits) — and, signed in, the canonical parcel summary too, so a
+  // boundary just drawn in the planner shows up on the map/list the moment you return to it.
   useEffect(() => {
-    if (mode === "map") { const t = setTimeout(refreshSites, 80); return () => clearTimeout(t); }
+    if (mode === "map") {
+      const t = setTimeout(() => { refreshSites(); if (signedInUid) refreshParcelSummary(signedInUid); }, 80);
+      return () => clearTimeout(t);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
   return (
@@ -770,6 +808,7 @@ export default function App({
             layerStatus={layerStatus}
             setLayerStatus={setLayerStatus}
             sites={siteGroups}
+            parcelSummary={parcelSummaryLoaded ? parcelSummary : null}
             activeSiteId={activeSiteId}
             onOpenSite={openSite}
             onDeleteSite={deleteSiteGroup}

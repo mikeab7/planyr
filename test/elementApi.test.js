@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { commitElements, fetchElements, keepaliveCommit, ELEMENT_SELECT } from "../src/workspaces/site-planner/lib/elementApi.js";
+import { commitElements, fetchElements, fetchParcelSummaries, keepaliveCommit, ELEMENT_SELECT } from "../src/workspaces/site-planner/lib/elementApi.js";
 
 // B671 — the network seam. The keepalive path is pure over an injected fetch; commit/fetch are
 // thin over a fake supabase-js client.
@@ -146,6 +146,45 @@ describe("fetchElements", () => {
     const r = await p;
     expect(r.ok).toBe(false);
     expect(r.error).toMatch(/timeout/);
+  });
+});
+
+describe("fetchParcelSummaries", () => {
+  // B849344 — the network seam behind the Sites panel / map pin's canonical boundary read.
+  it("selects site_id,data filtered to live parcel rows (kind='parcel', deleted_at is null)", async () => {
+    let sel, eqArgs, isArgs;
+    const client = {
+      from: (t) => {
+        expect(t).toBe("site_elements");
+        return {
+          select: (s) => {
+            sel = s;
+            return {
+              eq: (c, v) => {
+                eqArgs = [c, v];
+                return { is: (c2, v2) => { isArgs = [c2, v2]; return Promise.resolve({ data: [{ site_id: "s1", data: { id: "p1" } }], error: null }); } };
+              },
+            };
+          },
+        };
+      },
+    };
+    const r = await fetchParcelSummaries(client);
+    expect(sel).toBe("site_id,data");
+    expect(eqArgs).toEqual(["kind", "parcel"]);
+    expect(isArgs).toEqual(["deleted_at", null]);
+    expect(r).toEqual({ ok: true, rows: [{ site_id: "s1", data: { id: "p1" } }] });
+  });
+
+  it("returns ok:false on a fetch error (LOUD-FAILURE — never a silent empty portfolio)", async () => {
+    const client = { from: () => ({ select: () => ({ eq: () => ({ is: () => Promise.resolve({ data: null, error: { message: "down" } }) }) }) }) };
+    const r = await fetchParcelSummaries(client);
+    expect(r).toMatchObject({ ok: false, rows: [], error: "down" });
+  });
+
+  it("no client → ok:false without throwing", async () => {
+    const r = await fetchParcelSummaries(null);
+    expect(r).toEqual({ ok: false, rows: [], error: "no client" });
   });
 });
 
