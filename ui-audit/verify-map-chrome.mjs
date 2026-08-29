@@ -218,6 +218,28 @@ try {
     check("B427410×2 · clicking the note zooms in and clears it", !afterFix);
   }
 
+  // B427410 (×3) — the owner's own opacity control: "I kinda want road names to just be there…
+  // or maybe let me adjust the opacity." Reuses the SAME `opacityControl` slider every other row
+  // in this panel has (aria-label pattern `"<label> opacity"`), not a second widget. Default is
+  // 0.85, not the old 0.4 — measured against real Esri tiles to be crisp rather than muddy.
+  const roadSlider = page.locator('input[aria-label="Road names opacity"]');
+  const hasSlider = await roadSlider.count() > 0;
+  check("B427410×3 · a see-through slider exists for Road names (the shared opacityControl)", hasSlider);
+  if (hasSlider) {
+    const defaultValue = await roadSlider.getAttribute("value");
+    check("B427410×3 · it defaults to 0.85 (crisp), not the old muddy 0.4", defaultValue === "0.85", `value=${defaultValue}`);
+    await roadSlider.fill("0.3");
+    await pacedWait(page, 400);
+    const liveOpacity = await page.evaluate(() => {
+      const img = document.querySelector('img[src*="World_Transportation"]');
+      return img ? getComputedStyle(img.closest(".leaflet-layer")).opacity : null;
+    });
+    check("B427410×3 · dragging the slider actually changes the rendered layer's opacity", liveOpacity === "0.3", `rendered opacity=${liveOpacity}`);
+    // restore for any later arm of this harness that reasons about the default
+    await roadSlider.fill("0.85");
+    await pacedWait(page, 200);
+  }
+
   /* NEW-5 / B427412 — the placeholder. Pick the SEARCH input by what it is for: with sites seeded
    * the first `input[placeholder]` on the page is the sites panel's "Filter by name…" box, and the
    * match must resolve on the pre-fix build too or the check goes red for the wrong reason. */
