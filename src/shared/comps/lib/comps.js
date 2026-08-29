@@ -143,6 +143,21 @@ export function summarizeSaleComps(comps, compType) {
   return { avg: vals.reduce((a, b) => a + b, 0) / vals.length, count: vals.length };
 }
 
+/** Text bits for the Comps rail's list-view summary strip — sale-comp (land/building) averages
+ * only. LEASE deliberately contributes no line here (NEW-1, owner verbatim: "i dont think it
+ * needs to show the avg on the main page") — with as few as one lease comp on record, an
+ * average restates the single row directly beneath it, at the top of a narrow rail. This does
+ * NOT touch `summarizeLeaseComps`: its NNN/gross basis-normalization and SF-weighting are
+ * unchanged and still fully unit-tested above — they simply have no rail consumer today. */
+export function compsSummaryBits(comps) {
+  const land = summarizeSaleComps(comps, "land");
+  const bldg = summarizeSaleComps(comps, "building_sale");
+  const bits = [];
+  if (land.count) bits.push(`Land avg $${land.avg.toFixed(2)}/SF (${land.count})`);
+  if (bldg.count) bits.push(`Bldg sale avg $${bldg.avg.toFixed(2)}/SF (${bldg.count})`);
+  return bits;
+}
+
 /* ---- presentation: the ONE place that decides which fields render ----------------------- */
 
 function fmtMoney(n) {
