@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-29 @ `7a64249c` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-29 @ `68580d1f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -213,7 +213,7 @@ _584 source files mapped._
 - **`src/shared/comps/lib/compMarkerIcon.js`** — Pure map-marker spec for a comp: a small colored tag (hue per comp type), deliberately a different silhouette from sitePinIcon
   - _exports_: `compMarkerColor`, `compMarkerSize`, `compMarkerSvg`
 - **`src/shared/comps/lib/comps.js`** — Leasing Comps pure model: $/SF derivation for land/building sale, lease basis normalization (annual NNN default, NNN/gross never blended), compFieldRows (the one empty-field-hides choke point), anchor validation, row<->model mapping
-  - _exports_: `ANCHOR_KINDS`, `annualLeaseRate`, `buildingPricePerSf`, `COMP_TYPES`, `compFieldRows`, `compHeadline`, `compToRow`, `isCompType`, `landPricePerSf`, `landSizeSf`, `LEASE_EXPENSE_BASES`, `LEASE_PERIODS`, `leaseTotalAnnualRent`, `partyLabels`, `rowToComp`, `summarizeLeaseComps`, `summarizeSaleComps`, `validAnchor`, `validateComp`
+  - _exports_: `ANCHOR_KINDS`, `annualLeaseRate`, `buildingPricePerSf`, `COMP_TYPES`, `compFieldRows`, `compHeadline`, `compsSummaryBits`, `compToRow`, `isCompType`, `landPricePerSf`, `landSizeSf`, `LEASE_EXPENSE_BASES`, `LEASE_PERIODS`, `leaseTotalAnnualRent`, `partyLabels`, `rowToComp`, `summarizeLeaseComps`, `summarizeSaleComps`, `validAnchor`, `validateComp`
 - **`src/shared/comps/lib/compsStore.js`** — Supabase CRUD for public.comps (team-visible read, owner-only write); every call returns {data,error}, never swallows a failure
   - _exports_: `deleteComp`, `fetchAllComps`, `insertComp`, `supabase`, `updateComp`
 - **`src/shared/comps/lib/partySuggest.js`** — Pure party-name suggestion logic: collectPartyNames pools both sides across every comp type, matchPartyNames is a loose case/whitespace-insensitive substring match — suggests only, never forces or merges

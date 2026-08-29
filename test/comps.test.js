@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   landSizeSf, landPricePerSf, buildingPricePerSf, annualLeaseRate, leaseTotalAnnualRent,
-  summarizeLeaseComps, summarizeSaleComps, compFieldRows, compHeadline, partyLabels,
+  summarizeLeaseComps, summarizeSaleComps, compsSummaryBits, compFieldRows, compHeadline, partyLabels,
   validAnchor, validateComp, rowToComp, compToRow,
 } from "../src/shared/comps/lib/comps.js";
 import { collectPartyNames, matchPartyNames } from "../src/shared/comps/lib/partySuggest.js";
@@ -192,6 +192,30 @@ describe("comps: sale $/SF summary (land / building_sale)", () => {
     const bldg = summarizeSaleComps(comps, "building_sale");
     expect(bldg.count).toBe(1);
     expect(bldg.avg).toBeCloseTo(20, 5);
+  });
+});
+
+describe("comps: NEW-1 rail summary strip — lease dropped, sale averages kept", () => {
+  it("includes a land avg bit when land comps have a computable $/SF", () => {
+    const comps = [{ compType: "land", landPrice: 435600, landSizeValue: 1, landSizeUnit: "ac" }];
+    expect(compsSummaryBits(comps)).toEqual(["Land avg $10.00/SF (1)"]);
+  });
+
+  it("includes a building-sale avg bit when building-sale comps have a computable $/SF", () => {
+    const comps = [{ compType: "building_sale", bldgPrice: 1000000, bldgSizeSf: 50000 }];
+    expect(compsSummaryBits(comps)).toEqual(["Bldg sale avg $20.00/SF (1)"]);
+  });
+
+  it("never emits a lease-derived bit, even with lease comps present — the rail lists comps, it is not a summary surface", () => {
+    const comps = [
+      { compType: "lease", leaseRate: 0.65, leaseRatePeriod: "monthly", leaseRateExpense: "nnn", leaseSizeSf: 10000 },
+    ];
+    expect(compsSummaryBits(comps)).toEqual([]);
+  });
+
+  it("returns an empty array when there is nothing to summarize", () => {
+    expect(compsSummaryBits([])).toEqual([]);
+    expect(compsSummaryBits(undefined)).toEqual([]);
   });
 });
 
