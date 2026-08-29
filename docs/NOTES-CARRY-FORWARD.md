@@ -216,6 +216,105 @@ position**.
    ().top`) against its OWN settled value at the end of the sampling window, never against what a
    specific CSS property happens to read — VIEWPORT-STABLE is about the picture staying put, not
    about which mechanism does it.
+   ⛔ **REOPENED A THIRD TIME (B831600 ×3, 2026-08-28/29) — STILL OPEN. Read this before touching
+   this code again; the mechanism is measured on production, not reproduced anywhere this repo can
+   check it, and that gap is itself the finding.**
+   **THE MECHANISM, AS MEASURED ON PRODUCTION** (owner's own instrumented `pointerdown`/
+   `pointermove`/`pointerup`/`click` listeners plus a whole-ancestor-chain transform walk, same
+   build, same session, minutes apart): **the GROW is uncompensated and the SHRINK is compensated
+   — the opposite of what a sandbox rebuild of the same commit shows.** Fresh page load, table
+   never touched: `transform` chain reads `none` throughout. Click into a cell: toolbar 38.924 →
+   74.775px, content moves the full 35.851px down, chain STILL `none` — the compensation never
+   fires on entry at all. Click back out to a plain paragraph: toolbar returns to 38.924px, and
+   `translateY(35.8503px)` NOW appears on the mat, holding the content at its shifted position —
+   the shrink is fully (over-)compensated, and the note settles PERMANENTLY about one toolbar row
+   lower than where it opened. Repeated table entries after the first behave correctly (this
+   matches round 2's own fix working "from the second interaction onward"), so the defect is
+   specifically about the very first grow of a freshly mounted note.
+   **WHAT WAS RULED OUT, each with the evidence, so a future session does not re-walk the same
+   ground:**
+   - **Nesting depth** — the owner's own original theory, explicitly retracted after further
+     production instrumentation on a fresh top-level scratch table showed the SAME failure
+     (uncompensated grow) once the table had never been touched in that page session. His words:
+     *"I WAS WRONG ABOUT THE NESTING... It is not [the variable]."* A prior draft of this file said
+     otherwise; that framing is superseded by this entry.
+   - **His exact document structure** — rebuilt field-by-field from the real stored ProseMirror
+     JSON he pulled off his own page (node types, `attrs`, the `bulletList > listItem > bulletList
+     > listItem > table` chain, no `attrs` object on the table, 4 rows × 1 col) and driven with a
+     real drag: zero drift in this sandbox, every time.
+   - **Block `fontSize` attrs + `textStyle` marks** — his cells carry a block-level `fontSize` (10
+     for the header row, 9 for the rest) AND a per-run `textStyle` mark storing the size as a
+     STRING WITH A UNIT (`'10pt'`/`'9pt'`) — Outlook's own paste unit. Theorized to interact with
+     `deriveBlockSizes`'s `appendTransaction` (family 3 below) firing mid-gesture and staling the
+     compensation. Ruled out on two independent grounds: (a) `deriveBlockSizes`'s `appendTransaction`
+     is gated on `trs.some(t => t.docChanged)`, and a `MutationObserver` on the table's whole
+     subtree during a real drag recorded exactly 4 mutations, all `class="selectedCell"` — no
+     style, no attribute, no childList change anywhere; (b) `notesSpacing.js`'s `num()` is a bare
+     `parseFloat`, which strips the `pt` suffix WITHOUT unit conversion, so `num('10pt')` reduces to
+     the same `10` the block attr already stores — the two values agree numerically even though the
+     conversion itself is wrong (filed separately as **B839841**, a real but unrelated defect — a
+     point size renders as if it were a pixel size, everywhere, independent of this bug).
+   - **Fractional `devicePixelRatio`** — the owner's actual production numbers (38.924, 35.8503,
+     …) carry fractional residue; his panel measures `devicePixelRatio ≈ 2.15` under Windows
+     display scaling at ~215%. Setting Playwright's `deviceScaleFactor` to the exact same value
+     (2.1500000953674316) and matching his viewport (1600×465, later duplicated at other sizes)
+     reproduces the CORRECT `devicePixelRatio` reading but NOT fractional CSS layout metrics —
+     `getBoundingClientRect().height` still reads clean integers (39, 75, exactly) in this sandbox.
+     `deviceScaleFactor` changes rasterisation resolution, not the OS text/layout stack that
+     actually produces sub-pixel metrics; Linux Chromium's FreeType-based layout is a different
+     code path from Windows' DirectWrite/ClearType one, and no CDP setting bridges that gap. This
+     is a genuine CEILING ON THE INSTRUMENT, not a refutation of the theory — it could not be
+     properly tested here at all.
+   - **Mount timing** (a React-effect-deps theory raised and tested THIS session, not the owner's):
+     that the toolbar element doesn't exist on `NoteEditor`'s first render (`editor` is `null` until
+     Tiptap's async init completes), and if `inTable` doesn't change value across that transition,
+     the `useLayoutEffect` keyed on `[inTable]` never gets a first chance to measure a "short"
+     baseline before the user's first click. Directly instrumented (`applyToolbarDelta`'s own call
+     log, timestamped): in this sandbox the baseline is reliably established by the
+     `ResizeObserver`'s spec-guaranteed initial callback at ~280–330ms into page life — always
+     before a table cell can even exist to be clicked. Raced deliberately (poll every 5ms for the
+     cell, fire the drag on the next tick, zero settle) and still never beat it. Ruled out as THIS
+     sandbox's mechanism; not provably ruled out on production, where `ResizeObserver` callback
+     timing is a browser/OS scheduling detail this sandbox cannot control for.
+   - **Gesture type** — tested both a real multi-step drag and a single plain click-in/click-out
+     (the owner's own later methodology), full-content documents, scrolled and unscrolled: both
+     compensate correctly in this sandbox, both directions, every time.
+   - **Baseline/branch mismatch** — the owner's own hypothesis, checked and refuted: the "fully
+     symmetric" sandbox result was verified BYTE-IDENTICAL to `49729aa` (the actual PR #1214 merge
+     commit — note `c0214d1` is PR #1210/round 1, a DIFFERENT, superseded commit; that SHA got
+     conflated with #1214 in several messages this session and is corrected here so it is not
+     re-conflated), diffed directly against the round-3 working tree to confirm none of that
+     session's accumulator-hardening code was present. The symmetric result was genuinely
+     current-production code, not contamination from an in-progress fix.
+   **THE STANDING FACT, recorded rather than left implicit: a Linux Chromium sandbox on this exact
+   commit shows fully symmetric, fully compensated behaviour (grow AND shrink both correct, every
+   variation tried) — full stop. The differentiator is real and lives somewhere this sandbox
+   cannot reach: most plausibly the Windows text/layout stack (ClearType/DirectWrite vs FreeType)
+   under fractional OS display scaling, though that is inference, not proof — or something not yet
+   isolated at all.** Do not re-attempt reproduction here without a genuinely new variable; the list
+   above is not partial.
+   **INSTRUMENT NOTE: an outside-the-page `ResizeObserver` is NOT a usable diagnostic tool for this
+   class of bug.** The owner attached his own `ResizeObserver` to the toolbar from outside (devtools)
+   to test whether production's own RO ever fires on the grow, and got total silence — including its
+   spec-guaranteed initial callback. Before trusting that as a finding, he ran the identical probe on
+   an unrelated page in the same browser and got the same silence: `ResizeObserver` simply does not
+   deliver callbacks in whatever context that instrument runs in (devtools console, cross-origin
+   isolation, or similar) — an INSTRUMENT LIMITATION, not evidence that production's internal RO is
+   silent. Route this class of question through an IN-PAGE hook instead (see below), never an
+   attached-from-outside observer.
+   **THE ONE THING THAT CAN STILL ANSWER THIS: `lib/notesToolbarDiag.js`** (shipped as its own small,
+   flag-off-by-default, behaviour-unchanged PR, deliberately separate from any fix) — records every
+   `applyToolbarDelta` call (which of the two mechanisms fired, the heights it saw, whether it
+   bailed and why, what it actually applied) to `window.__PLANYR_TOOLBAR_DIAG` when armed via
+   `?toolbarDiag=1` on the URL (latches into `sessionStorage`, so the reload the repro itself needs
+   does not lose the arming) or `window.__PLANYR_TOOLBAR_DIAG_ARM = true` from the console for an
+   already-open tab. Arm it, reproduce the owner's exact Case A (fresh load, caret in a plain
+   paragraph, table never touched, one click or drag into it), and read the array back — that
+   answers "does the handler never run on grow, or does it run and compute zero" directly, which is
+   the one thing neither side's inference has been able to settle.
+   **B831600 stays Open, unresolved, nothing about the fix shipped** — see `BACKLOG.md`. Do not mark
+   it Done off a sandbox pass; every round so far has been reopened by the owner's own production
+   observation after passing every sandbox guard this repo had.
 5. **A CUSTOM TIPTAP COMMAND THAT BUILDS ITS OWN `state.tr` INSTEAD OF USING THE ONE HANDED IN
    REPORTS SUCCESS AND DOES NOTHING (B649377).** `editor.commands.x()` (a single, un-chained
    call — what a menu row's `onClick` uses) always dispatches the ONE `tr` it built before

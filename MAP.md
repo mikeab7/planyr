@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-28 @ `ed01fbf1` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-29 @ `7a64249c` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_583 source files mapped._
+_584 source files mapped._
 
 ## infra
 
@@ -187,6 +187,8 @@ _583 source files mapped._
   - _exports_: `absoluteStamp`, `daysLeft`, `editedLabel`, `relativeTime`, `stampLabel`
 - **`src/workspaces/notes/lib/notesToggleNode.js`** — The `noteToggle` / `noteToggleTitle` schema nodes — a foldable section built on the browser's own details element.
   - _exports_: `default`, `NoteToggle`, `NoteToggleTitle`, `TOGGLE_TITLE_PLACEHOLDER`, `toggleClickKey`
+- **`src/workspaces/notes/lib/notesToolbarDiag.js`** — Read-only, call-time-gated diagnostic for B831600 ×3 (the table-toolbar-jump bug): records every `applyToolbarDelta` call so the owner can capture the real production call sequence. Off by default, no telemetry leaves the browser.
+  - _exports_: `isToolbarDiagArmed`, `latchToolbarDiag`, `recordToolbarDiag`, `TOOLBAR_DIAG_LOG_KEY`, `TOOLBAR_DIAG_PARAM`, `TOOLBAR_DIAG_STORAGE_KEY`
 - **`src/workspaces/notes/lib/notesVersions.js`** — PURE version-history policy: when a snapshot is due, which are kept, and the restore plan that never destroys history.
   - _exports_: `MAX_VERSIONS_PER_PAGE`, `planRestore`, `planRetention`, `RETENTION_TIERS`, `shouldSnapshot`, `SNAPSHOT_MIN_GAP_MS`, `versionReasonLabel`
 - **`src/workspaces/notes/lib/notesZoom.js`** — PURE document-zoom rules: the step ladder, the clamp, what a Ctrl+wheel notch and each Ctrl key mean, the per-scope storage key, and the scroll arithmetic that keeps the same writing under the eye across a step (VIEWPORT-STABLE).
