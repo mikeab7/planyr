@@ -14,6 +14,9 @@ import { PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL } from "./lib/ma
 import { tileCacheLimit } from "./lib/tileBudget.js";
 import { boundTileCache, capTileCache, releaseLayer } from "./lib/tileLifecycle.js";
 import { BASEMAPS, FINDER_BASEMAP_CHOICES } from "./lib/basemaps.js";
+// B427410 (×2) — the ONE gate for the "Road names" overlay below, shared with LayerPanel's
+// dormant note so the map's opacity switch and the panel's explanation can't disagree.
+import { PLACE_NAMES_MIN_ZOOM } from "./lib/layerZoomGate.js";
 // B427411 — the ONE corner-radius scale. Never a bare number at a call site: eight of them
 // disagreed visibly in this file alone before it existed.
 import { RADIUS, nestedIn } from "../../shared/ui/radius.js";
@@ -111,7 +114,11 @@ const COMP_ACCENT = "#2f6fb0";
 // with the planner's Basemap control so both surfaces always offer the same sources.
 // Its B220 rule travels with it: every source carries `maxNative`, and the imagery
 // layer below clamps fetches to that ceiling (minus the retina offset).
-// Subtle road/place labels overlay (drawn faint over the imagery).
+/* B427410 (×2) — this is Esri's TRANSPORTATION reference layer: road, highway and rail
+ * names + shields, drawn faint over the imagery. It carries NO city/landmark names — those
+ * live in a different Esri service (Reference/World_Boundaries_and_Places) that this app does
+ * not use. The panel row this feeds is named "Road names" for exactly that reason — do not
+ * relabel it back to anything implying place/city names without switching the source too. */
 const LABELS_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}";
 
 /* NEW-MAPCTRL-3 — the narrow-mode full-width search bar's own footprint (`top:8, height:42`
@@ -1267,7 +1274,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !labels) return;
-    const initOpacity = (map.getZoom() >= 14) ? 0.4 : 0;
+    const initOpacity = (map.getZoom() >= PLACE_NAMES_MIN_ZOOM) ? 0.4 : 0;
     // Cap the reference/labels overlay at the imagery's native ceiling (z19) so the two
     // layers don't DIVERGE at deep zoom. World_Transportation serves tiles past z19, so
     // without this cap the labels kept rendering crisp while the imagery (clamped to its
@@ -1289,11 +1296,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [labels]);
 
-  /* zoom-driven label opacity (B162): hide street labels below zoom 14 */
+  /* zoom-driven label opacity (B162): hide road names below PLACE_NAMES_MIN_ZOOM */
   useEffect(() => {
     const layer = labelsRef.current;
     if (!layer) return;
-    layer.setOpacity(zoom != null && zoom >= 14 ? 0.4 : 0);
+    layer.setOpacity(zoom != null && zoom >= PLACE_NAMES_MIN_ZOOM ? 0.4 : 0);
   }, [zoom]);
 
   /* State + country outlines at wide zoom (NEW-1) — the same shape as the label-opacity

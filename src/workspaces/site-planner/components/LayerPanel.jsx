@@ -43,7 +43,10 @@ import {
 /* NEW-1 — IS THIS ROW ACTUALLY DRAWING? The pure model (lib/layerZoomGate.js) answers it from
  * the LIVE zoom, for every zoom-gated layer at once. See that module's header for why this is
  * shared rather than a contour-shaped patch. */
-import { layerVisibility, combineVisibility, dormantZoomLine, DORMANT_BLANK_LINE } from "../lib/layerZoomGate.js";
+import {
+  layerVisibility, combineVisibility, dormantZoomLine, DORMANT_BLANK_LINE,
+  levelsToGate, GATE_CLEARANCE, PLACE_NAMES_MIN_ZOOM,
+} from "../lib/layerZoomGate.js";
 import {
   governingDistrict, scopeFloodEntries, floodMasterState,
   floodFactsNote, emptyReason, FEMA_ZONES_NOT_CHANNELS,
@@ -73,9 +76,10 @@ const RELEVANCE_LABEL = { all: "Show all", dim: "Dim", hide: "Hide" };
 
 export default function LayerPanel({
   overlays, setOverlays, county, layerStatus = {}, coverage = {}, compact = false, basemap = null, gisNote = null,
-  /* B427410 — the basemap's PLACE-NAME overlay, when the host has one: `{ value, onChange }`.
+  /* B427410 (×2) — the basemap's ROAD-NAMES overlay, when the host has one: `{ value, onChange }`.
    * Rendered under the source it belongs to (see `basemapControl`), never as its own row —
-   * it is drawn BY the basemap and means nothing without it. Absent (planner) → not shown. */
+   * it is drawn BY the basemap and means nothing without it. Absent (planner, which has no such
+   * overlay at all — see B427410's ×2 recurrence note) → not shown. */
   placeNames = null,
   // B1091(×2) — the county this SITE is actually in (the saved site record's own county), kept
   // separate from `county` above, which is the layer-registry key / lookup selector. Only
@@ -930,6 +934,11 @@ export default function LayerPanel({
   // it re-enables the moment a placement lands. Rendered only when the host passes the
   // `basemap` prop (the finder keeps its own Imagery dropdown).
   const bmStatus = basemap && basemap.status ? STATUS[basemap.status] : null;
+  /* B427410 (×2) — is the road-names overlay actually drawing right now? It has its own
+   * gate (PLACE_NAMES_MIN_ZOOM) that lives outside the `ALL_LAYERS` registry `layerVisibility`
+   * reads, so it gets the same dormant-note treatment by hand rather than through that helper. */
+  const placeNamesDormant = !!placeNames && !!placeNames.value && typeof mapZoom === "number" && mapZoom < PLACE_NAMES_MIN_ZOOM;
+  const placeNamesLevels = placeNamesDormant ? levelsToGate(mapZoom, PLACE_NAMES_MIN_ZOOM) : null;
   const basemapControl = basemap && (
     <div style={{ marginBottom: 6 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -952,21 +961,42 @@ export default function LayerPanel({
       {basemap.disabledReason && (
         <div style={{ fontSize: 10, color: MUTED, lineHeight: 1.4, marginTop: 3 }}>{basemap.disabledReason}</div>
       )}
-      {/* B427410 — PLACE NAMES: a PROPERTY OF THE BASE LAYER, rendered directly under the source
-          it belongs to, with the same ⓘ every other row in this panel carries.
-          Owner: "the labels — I don't even know what labels it's talking about." It was a bare
-          word beside a checkbox, in a strip of its own, and it was the only control in the panel
-          with no info affordance — so there was nothing to hover and nothing to read. Two things
-          fix that and both are needed: the WORD ("Place names" says what it draws; "Labels" could
-          mean anything on a screen this dense), and the NOTE, which says whose labels they are
-          and why they can be turned off. Rendered here rather than as a layer ROW because it is
-          not an independent overlay — it is drawn by the basemap and means nothing without it. */}
+      {/* B427410 (×2) — RECURRENCE. The first fix (renaming a bare "Labels" checkbox to "Place
+          names" + adding the ⓘ) did not hold: the owner asked the identical question again —
+          "what even is place names, idk that that does anything" — and this time the reason is
+          measurable, not a wording gap. The layer behind this control is Esri's TRANSPORTATION
+          reference tile set (road/highway/rail names + shields), never Esri's separate
+          "Boundaries & Places" service — so "Place names" promised city and landmark names this
+          control has never drawn. Renamed to what it actually is, and the help text follows.
+          The SECOND half of the disagreement was silence, not wording: below PLACE_NAMES_MIN_ZOOM
+          the overlay's opacity is forced to 0 regardless of the checkbox, so ticking it while
+          zoomed out changed nothing on screen with no indication why (LOUD-FAILURE) — the
+          `placeNamesDormant` note below is the fix, same shape as every other zoom-gated row in
+          this panel (`zoomFixLine`), clickable when the host wires `onZoomTo`. Rendered here
+          rather than as a layer ROW because it is not an independent overlay — it is drawn by the
+          basemap and means nothing without it. Absent on the planner surface: SitePlanner.jsx has
+          no equivalent tile layer to toggle at all, so there is nothing dishonest to fix there. */}
       {placeNames && !basemap.disabledReason && basemap.value !== "off" && (
         <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", marginTop: 5, fontSize: 11.5 }}>
           <input type="checkbox" checked={!!placeNames.value} onChange={(e) => placeNames.onChange(e.target.checked)} />
-          <span style={{ flex: 1 }}>Place names</span>
-          <RowInfo label="Place names" sections={[{ text: "City, road and landmark names drawn OVER the aerial by the imagery provider — part of the base layer, not a separate overlay. Turn them off for a clean picture of the ground, or when they sit on top of something you are trying to read." }]} />
+          <span style={{ flex: 1 }}>Road names</span>
+          <RowInfo label="Road names" sections={[{ text: "Road, highway and rail names drawn OVER the aerial by the imagery provider's transportation reference layer — part of the base layer, not a separate overlay. It does not carry city, town or landmark names. Only visible once you're zoomed in past neighborhood scale; turn it off for a clean picture of the ground, or when it sits on top of something you are trying to read." }]} />
         </label>
+      )}
+      {placeNamesDormant && (
+        typeof onZoomTo !== "function" ? (
+          <div data-testid="place-names-zoom-note" style={{ fontSize: 10, lineHeight: 1.4, marginTop: 1, color: "var(--warn-text)" }}>
+            {dormantZoomLine(placeNamesLevels)}
+          </div>
+        ) : (
+          <button type="button" data-testid="place-names-zoom-fix" onClick={() => onZoomTo(PLACE_NAMES_MIN_ZOOM + GATE_CLEARANCE)}
+            aria-label={`Road names — ${dormantZoomLine(placeNamesLevels)}. Zoom in far enough for it to draw.`}
+            title="Zoom in far enough for road names to draw."
+            style={{ fontSize: 10, lineHeight: 1.4, marginTop: 1, display: "block", width: "100%", textAlign: "left", padding: 0,
+              border: "none", background: "transparent", color: "var(--accent)", fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>
+            {dormantZoomLine(placeNamesLevels)}
+          </button>
+        )
       )}
     </div>
   );

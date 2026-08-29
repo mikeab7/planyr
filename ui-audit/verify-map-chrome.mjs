@@ -60,7 +60,12 @@ async function openMap(browser, viewport) {
   await page.goto(URL, { waitUntil: "domcontentloaded" });
   await assertMeasurable(page, "verify-map-chrome");
   await page.waitForSelector(".leaflet-container", { timeout: 20000 });
-  await page.waitForSelector("text=Your sites", { timeout: 20000 });
+  // ⛔ PRE-EXISTING DRIFT (found while verifying B427410×2, fixed in the same commit): the visible
+  // "Your sites" heading this used to wait on is gone — the panel now renders collapsible group
+  // headers ("Sites 14", "Pursuit 5", …) instead. The toggle button's title survived the rename
+  // and is what the seeded-panel check below already keys on, so wait on that instead of a text
+  // string that no longer renders anywhere.
+  await page.waitForSelector('button[title*="sites panel" i]', { timeout: 20000 });
   await pacedWait(page, 1200);
   return page;
 }
@@ -151,7 +156,12 @@ try {
   });
   check("B427410 · no separate 'Imagery' strip above the list", !/^\s*Imagery\s*$/m.test(panelText));
   check("B427410 · no bare 'Labels' control", !/\bLabels\b/.test(panelText), panelText.match(/\bLabels\b/) ? "still present" : "");
-  check("B427410 · 'Place names' names what it draws", /Place names/.test(panelText));
+  // B427410 (×2) — RECURRENCE: "Place names" was itself the wrong word (the layer behind it is
+  // Esri's road/highway reference layer, not a place/city-name service), so the owner asked the
+  // identical "what does this do" question a second time. Renamed to "Road names"; these checks
+  // replace the retired ones above rather than joining them.
+  check("B427410×2 · 'Road names' names what it draws (was 'Place names')", /Road names/.test(panelText));
+  check("B427410×2 · the inaccurate 'Place names' label is gone", !/Place names/.test(panelText));
   /* ⛔ "the panel says Base & terrain" is NOT the check — that heading already existed for the
    * terrain rows and passes on the pre-fix build. The claim is that the IMAGERY CONTROL now lives
    * INSIDE the layer list, so ask where the control is: pre-fix it is a <select> in MapFinder,
@@ -166,6 +176,47 @@ try {
   check("B427410 · the imagery control is INSIDE the layer list", !!basemapInPanel.inside,
     basemapInPanel.found ? (basemapInPanel.inside ? "" : "rendered outside the panel") : "no basemap control found");
   check("B427410 · it sits under the Base & terrain heading", /Base & terrain/i.test(panelText));
+
+  // B427410 (×2) — the ⓘ must describe what's ACTUALLY drawn (road/highway names), and must not
+  // repeat the over-promise that cost this two owner reports (city/landmark names it never drew).
+  const roadNamesInfoBtn = page.locator('button[aria-label="About Road names"]').first();
+  const hasInfoBtn = await roadNamesInfoBtn.count() > 0;
+  check("B427410×2 · the Road names row still carries its ⓘ info affordance", hasInfoBtn);
+  if (hasInfoBtn) {
+    await roadNamesInfoBtn.hover();
+    await pacedWait(page, 250);
+    const infoText = await page.evaluate(() => {
+      const note = document.querySelector('[role="note"]');
+      return note ? note.innerText : "";
+    });
+    check("B427410×2 · the help text says what's drawn (road & highway)", /road/i.test(infoText) && /highway/i.test(infoText), infoText);
+    check("B427410×2 · the help text disclaims the city/landmark promise it used to make", /does not carry city/i.test(infoText), infoText);
+    await page.mouse.move(0, 0);
+    await pacedWait(page, 300); // let RowInfo's hover-close timer fire before the next step
+  }
+
+  // B427410 (×2) — THE MECHANISM, not just the words: below PLACE_NAMES_MIN_ZOOM the overlay's
+  // opacity is forced to 0 no matter what the checkbox says, and pre-fix that was a totally
+  // silent no-op (LOUD-FAILURE). Drive the REAL Leaflet zoom control (a genuine zoomend, not a
+  // driver-actionability scroll) well below the gate and confirm the panel says so — then that
+  // the one-click fix actually clears the note.
+  const zoomOutBtn = page.locator(".leaflet-control-zoom-out").first();
+  for (let i = 0; i < 10; i++) { await zoomOutBtn.click({ force: true }); await pacedWait(page, 120); }
+  await pacedWait(page, 400);
+  const dormantNote = await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="place-names-zoom-fix"], [data-testid="place-names-zoom-note"]');
+    return el ? el.innerText : null;
+  });
+  check("B427410×2 · zoomed out, a checked-but-invisible road-names layer SAYS SO", !!dormantNote && /not showing at this zoom/i.test(dormantNote || ""),
+    dormantNote || "no dormant note found — a checked control with a forced-0 opacity and no explanation");
+
+  const fixBtn = page.locator('[data-testid="place-names-zoom-fix"]').first();
+  if (await fixBtn.count() > 0) {
+    await fixBtn.click({ force: true });
+    await pacedWait(page, 500);
+    const afterFix = await page.evaluate(() => !!document.querySelector('[data-testid="place-names-zoom-fix"], [data-testid="place-names-zoom-note"]'));
+    check("B427410×2 · clicking the note zooms in and clears it", !afterFix);
+  }
 
   /* NEW-5 / B427412 — the placeholder. Pick the SEARCH input by what it is for: with sites seeded
    * the first `input[placeholder]` on the page is the sites panel's "Filter by name…" box, and the
