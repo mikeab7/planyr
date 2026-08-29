@@ -11,8 +11,9 @@
  * `active` gates DISPLAY (only the currently-selected tab's content is shown). There is no
  * `onClose` any more — switching to the Sites tab IS the close.
  *
- * Two views: 'list' (every comp the viewer can see, with the basis-normalized summary) and
- * 'form' (create — pre-filled from a just-picked map anchor — or edit an owned comp).
+ * Two views: 'list' (every comp the viewer can see, with a sale-comp averages strip — NEW-1
+ * dropped the lease average from here, see `SummaryStrip` below) and 'form' (create —
+ * pre-filled from a just-picked map anchor — or edit an owned comp).
  *
  * MODULE-SCOPE-COMPONENTS: every component here is defined at module scope.
  */
@@ -21,7 +22,7 @@ import { Button, Field } from "../../ui/controls.jsx";
 import {
   COMP_TYPES, LEASE_PERIODS, LEASE_EXPENSE_BASES, isCompType, partyLabels,
   landPricePerSf, buildingPricePerSf, leaseTotalAnnualRent, compFieldRows, compHeadline,
-  summarizeLeaseComps, summarizeSaleComps, validateComp,
+  compsSummaryBits, validateComp,
 } from "../lib/comps.js";
 import { compMarkerColor } from "../lib/compMarkerIcon.js";
 import { collectPartyNames } from "../lib/partySuggest.js";
@@ -86,25 +87,15 @@ function TypeChip({ type }) {
   );
 }
 
+// NEW-1: the rail lists comps, it is not a summary surface — LEASE deliberately contributes no
+// line here (see `compsSummaryBits` in lib/comps.js for why; the lease aggregation itself is
+// untouched and still fully unit-tested there).
 function SummaryStrip({ comps }) {
-  const lease = summarizeLeaseComps(comps);
-  const land = summarizeSaleComps(comps, "land");
-  const bldg = summarizeSaleComps(comps, "building_sale");
-  const bits = [];
-  if (land.count) bits.push(`Land avg $${land.avg.toFixed(2)}/SF (${land.count})`);
-  if (bldg.count) bits.push(`Bldg sale avg $${bldg.avg.toFixed(2)}/SF (${bldg.count})`);
-  if (lease.headline) {
-    const weightNote = lease.headline.weighted ? " (SF-weighted)" : "";
-    bits.push(`Lease avg $${lease.headline.avg.toFixed(2)}/SF/yr ${lease.headlineBasis.toUpperCase()}${weightNote} (${lease.headline.count})`);
-  }
+  const bits = compsSummaryBits(comps);
   if (!bits.length) return null;
   return (
     <div style={{ fontSize: 11, color: "var(--text-secondary)", padding: "0 14px 8px", lineHeight: 1.5 }}>
       {bits.join(" · ")}
-      {lease.unknownCount > 0 && <> · {lease.unknownCount} lease comp{lease.unknownCount === 1 ? "" : "s"} missing rate/basis, excluded from the average</>}
-      {lease.headline && !lease.headline.weighted && lease.headline.sizeMissingCount > 0 && (
-        <> · not SF-weighted — {lease.headline.sizeMissingCount} missing leased SF</>
-      )}
     </div>
   );
 }

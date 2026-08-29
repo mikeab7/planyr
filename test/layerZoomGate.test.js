@@ -23,6 +23,7 @@ import { dirname, join } from "node:path";
 import {
   layerMinZoom, levelsToGate, layerVisibility, combineVisibility, dormantZoomLine, DORMANT_BLANK_LINE,
   TERRAIN_MIN_ZOOM, OSM_MIN_ZOOM, MAPILLARY_MIN_ZOOM, ESRI_FEATURE_DEFAULT_MIN_ZOOM, GATE_CLEARANCE,
+  PLACE_NAMES_MIN_ZOOM,
 } from "../src/workspaces/site-planner/lib/layerZoomGate.js";
 import { ALL_LAYERS } from "../src/workspaces/site-planner/lib/layers.js";
 
@@ -99,6 +100,49 @@ describe("the declared gates and the runtime constants may never drift", () => {
       const z = layerMinZoom(cfg);
       expect(z === null || (typeof z === "number" && z >= 0 && z <= 22), `${id} → ${z}`).toBe(true);
     }
+  });
+});
+
+/* B427410 (×2) — RECURRENCE. The first fix renamed a bare "Labels" checkbox to "Place names";
+ * the owner asked the identical "what does this do" question again, because the layer behind it
+ * (Esri's road/highway transportation reference tiles) never carried city/landmark names, and
+ * because below its own zoom gate the checkbox stayed checked while drawing nothing — a silent
+ * no-op (LOUD-FAILURE). These guards pin the two halves of the actual fix: the panel and the map
+ * read ONE gate constant (never two literals that can drift, the same OSM_MIN_ZOOM discipline),
+ * and the wording says what is really drawn. Both assertions fail on the pre-fix source: it had
+ * no `PLACE_NAMES_MIN_ZOOM` import and its wording claimed "City, road and landmark names". */
+describe("PLACE_NAMES_MIN_ZOOM — the map-finder road-names overlay's own gate", () => {
+  it("is declared once, at the value the map has always actually used", () => {
+    expect(PLACE_NAMES_MIN_ZOOM).toBe(14);
+  });
+
+  it("MapFinder reads the shared constant rather than a private literal '14'", () => {
+    const m = readFileSync(join(HERE, "..", "src", "workspaces", "site-planner", "MapFinder.jsx"), "utf8");
+    expect(m).toMatch(/from\s+"\.\/lib\/layerZoomGate\.js"/);
+    expect(m).toMatch(/PLACE_NAMES_MIN_ZOOM/);
+    // The two places that used to hardcode the zoom threshold must both read the constant now.
+    expect(m).toMatch(/getZoom\(\)\s*>=\s*PLACE_NAMES_MIN_ZOOM/);
+    expect(m).toMatch(/zoom\s*>=\s*PLACE_NAMES_MIN_ZOOM/);
+  });
+
+  it("LayerPanel's dormant note is keyed off the same constant, not a re-guessed number", () => {
+    const p = readFileSync(join(HERE, "..", "src", "workspaces", "site-planner", "components", "LayerPanel.jsx"), "utf8");
+    expect(p).toMatch(/PLACE_NAMES_MIN_ZOOM/);
+    expect(p).toMatch(/mapZoom\s*<\s*PLACE_NAMES_MIN_ZOOM/);
+  });
+
+  it("the control is named 'Road names' — the honest label — and 'Place names' is gone", () => {
+    const p = readFileSync(join(HERE, "..", "src", "workspaces", "site-planner", "components", "LayerPanel.jsx"), "utf8");
+    expect(p).toMatch(/>Road names</);
+    expect(p).not.toMatch(/>Place names</);
+  });
+
+  it("the help text says what's drawn and disclaims the city/landmark promise it used to make", () => {
+    const p = readFileSync(join(HERE, "..", "src", "workspaces", "site-planner", "components", "LayerPanel.jsx"), "utf8");
+    const section = p.slice(p.indexOf('label="Road names"'), p.indexOf('label="Road names"') + 600);
+    expect(section).toMatch(/road/i);
+    expect(section).toMatch(/highway/i);
+    expect(section).toMatch(/does not carry city/i);
   });
 });
 
