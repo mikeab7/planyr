@@ -108,34 +108,36 @@ describe("wiring — the two ways back exist and are reachable from the element 
     expect(body.match(/behindEls/g).length).toBeGreaterThanOrEqual(3);
   });
 
-  it("the element menu captures what is underneath AT OPEN TIME, not at render", () => {
-    // Asking again at render would hit the menu itself, which is painted over the point.
-    expect(SRC).toMatch(/setTypeMenu\(\{ id, x: e\.clientX, y: e\.clientY, w, under: behindAnnotationsUnder\(/);
-    expect(SRC).toContain("const behindAnnotationsUnder");
+  /* ⛔ B845584/B845585 — THE "Behind this" MENU GROUP IS CUT, ON PURPOSE (the owner's own context-
+   * menu rebuild brief: "CUT 'Bring the markup back in front' and 'Select the markup underneath'.
+   * NEW-2 replaces the need."). The priority rule above (still tested) is untouched — a selected
+   * behind-band annotation still keeps the right-click wherever it paints; what is CUT is the
+   * discoverability rows on the COVERING element's menu, because NEW-2's Alt-hover picker is now the
+   * general way to reach any buried feature, selected or not. */
+  it("the element menu no longer captures or renders 'Behind this' — NEW-2 replaces it", () => {
+    expect(SRC, "the menu must not compute a per-open 'under' stack any more").not.toContain("behindAnnotationsUnder");
+    expect(SRC, "…nor the two rows it fed").not.toContain("liftUnderToFront");
+    expect(SRC, "…nor the plain-select row").not.toMatch(/const selectUnder = /);
+    expect(SRC).not.toContain("Behind this");
+    expect(SRC).not.toMatch(/data-testid=\{`under-lift-\$\{i\}`\}/);
+    expect(SRC).not.toMatch(/data-testid=\{`under-select-\$\{i\}`\}/);
   });
 
-  it("the 'Behind this' rows offer BOTH the reversal and a plain select", () => {
-    expect(SRC).toContain("Behind this");
-    expect(SRC).toMatch(/liftUnderToFront\(/);
-    expect(SRC).toMatch(/selectUnder\(/);
-    expect(SRC).toMatch(/data-testid=\{`under-lift-\$\{i\}`\}/);
-    expect(SRC).toMatch(/data-testid=\{`under-select-\$\{i\}`\}/);
-  });
-
-  it("the reversal reuses the three band setters rather than a fifth copy of the flag flip", () => {
-    const at = SRC.indexOf("const liftUnderToFront");
-    const body = SRC.slice(at, at + 500);
-    expect(body).toContain("setMarkupBand(");
-    expect(body).toContain("setCalloutBand(");
-    expect(body).toContain("setMeasureBand(");
-  });
-
-  it("the markup band toggle is a NAMED setter with more than one caller (it was inline in the menu)", () => {
+  it("NEW-2's Alt+hover picker exists, reads the real hit stack, and selects without a fifth copy of the flag flip", () => {
+    expect(SRC, "the picker must be built from the SAME ordered stack reader, never a re-derivation")
+      .toMatch(/stackAtPoint\(document\.elementsFromPoint\(/);
+    expect(SRC, "picking an entry must write the SAME sel shape stackAtPoint's targets already are")
+      .toMatch(/const altPickChoose = \(target\) => \{[^}]*setSel\(target\)/);
+    // The way BACK (once something is picked and reachable again) still reuses the three existing
+    // band setters — that reuse is unrelated to where discoverability lives and is unchanged.
     expect(SRC).toContain("const setMarkupBand");
-    // Both callers: the markup's own menu row, and the covering element's reversal row.
-    expect(SRC.match(/setMarkupBand\(/g).length).toBeGreaterThanOrEqual(2);
-    // ...and it re-stacks, which the inline version never did.
+    expect(SRC).toContain("const setCalloutBand");
+    expect(SRC).toContain("const setMeasureBand");
+  });
+
+  it("the markup band toggle re-stacks (it did not, before this was named)", () => {
     const at = SRC.indexOf("const setMarkupBand");
+    expect(at).toBeGreaterThan(0);
     expect(SRC.slice(at, at + 800)).toContain("nextZ(");
   });
 });

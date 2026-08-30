@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-30 @ `a3ef07bd` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-30 @ `c378b0e1` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_586 source files mapped._
+_587 source files mapped._
 
 ## infra
 
@@ -481,6 +481,8 @@ _586 source files mapped._
   - _exports_: `collapseStorageKey`, `default (Collapse)`, `readOpen`
 - **`src/workspaces/site-planner/components/CursorChip.jsx`** — the ONE cursor chip both map surfaces paint: coordinate pair + the always-present elevation readout (coords give way first so no elevation field is ever truncated)
   - _exports_: `default (CursorChip)`
+- **`src/workspaces/site-planner/components/elementMenuIcons.jsx`** — the B845584 element context-menu rebuild's own 14px/stroke-1.3 icon family (a finer, denser idiom than icons.jsx's 24px/stroke-2 set, matching the owner-approved mockup); every row in the rebuilt menu gets one in a 16px gutter
+  - _exports_: `AlignRotationIcon`, `AttachIcon`, `BringForwardIcon`, `BringToFrontIcon`, `BumpOutIcon`, `CopyIcon`, `DeleteIcon`, `DetachIcon`, `DockZonesIcon`, `DuplicateIcon`, `GroupIcon`, `LockIcon`, `PondSettingsIcon`, `PondSizingIcon`, `PropertiesIcon`, `ResetFootprintIcon`, `ReshapeIcon`, `RoadBranchIcon`, `SendBackwardIcon`, `SendToBackIcon`, `SplitRowsIcon`, `SwapIcon`, `UngroupIcon`
 - **`src/workspaces/site-planner/components/icons.jsx`** — Small stroke icons (pin / empty-circle / warn-triangle) shared by the planner's panel components, replacing the 📍 emoji that ignored its row's theme colour; route-local on purpose so the bytes stay off every other route's chunk. — `PinIcon`, `EmptyCircleIcon`, `WarnTriangleIcon`
   - _exports_: `CloseXIcon`, `DuplicateIcon`, `EmptyCircleIcon`, `HistoryIcon`, `LayersIcon`, `PadlockIcon`, `PinIcon`, `PlusIcon`, `RedoIcon`, `SaveIcon`, `StorageIcon`, `UndoIcon`, `WarnTriangleIcon`, `ZoomFitIcon`
 - **`src/workspaces/site-planner/components/JurisdictionBadge.jsx`** — Passive site-header chip showing the active parcel's jurisdiction (city/ETJ/county) from the auto-run B93 identify; display-only, ⚑ on straddle (B763)

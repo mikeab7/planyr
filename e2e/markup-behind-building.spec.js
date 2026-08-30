@@ -162,12 +162,24 @@ test.describe("Send to Back on a markup over a building", () => {
 });
 
 test.describe("NEW-2 — the way back does not depend on finding uncovered geometry", () => {
+  /* ⛔ B845584/B845585 — THE MECHANISM CHANGED, THE GUARANTEE DID NOT. The covering element's menu
+   * used to grow a "Behind this" group naming what was underneath, with one row to select it and one
+   * to lift it back in front. That group is CUT (per the owner's own instruction — the context-menu
+   * rebuild's brief says so explicitly) because Alt+hover now answers "what is under my cursor" for
+   * ANY buried feature, not just a behind-band annotation reached through the ONE element covering
+   * it — so it is the more general fix, not a smaller one. Once picked, the SAME priority rule these
+   * tests already proved (first describe block, and the two "while selected" cases below) still
+   * makes the object reachable by an ordinary right-click, which is where the actual reversal lives
+   * (the object's own cross-band toggle) — nothing about THAT half moved. */
   async function sendBehind(page, pt) {
     await page.mouse.move(pt.x, pt.y);
     await page.mouse.click(pt.x, pt.y, { button: "right" });
     await menuRow(page, /^Send to Back/).click();
     await expect.poll(() => markupCoversBuilding(page)).toBe(false);
   }
+
+  const altStackLabels = (page) => page.evaluate(() =>
+    [...document.querySelectorAll('[data-testid^="alt-stack-pick-row-"]')].map((n) => n.textContent.trim()));
 
   test("while it is selected, a right-click over the overlap still reaches the MARKUP", async ({ page }) => {
     await loadPlan(page);
@@ -177,10 +189,10 @@ test.describe("NEW-2 — the way back does not depend on finding uncovered geome
     await page.mouse.move(pt.x + 4, pt.y + 4);
     await page.mouse.click(pt.x + 4, pt.y + 4, { button: "right" });
     // Pre-fix this opened the BUILDING's menu, which mentions the markup nowhere.
-    await expect(menuRow(page, /Bring in front of buildings/)).toBeVisible();
+    await expect(menuRow(page, /Bring in front of the plan/)).toBeVisible();
   });
 
-  test("once DESELECTED, the covering element's menu names what is underneath and reverses it", async ({ page }) => {
+  test("once DESELECTED, Alt+hover names what is underneath and picking it reaches the way back", async ({ page }) => {
     await loadPlan(page);
     const pt = await overlapPoint(page);
     await sendBehind(page, pt);
@@ -191,34 +203,57 @@ test.describe("NEW-2 — the way back does not depend on finding uncovered geome
     await page.mouse.move(pt.x, pt.y);
     expect(await topFeatureAt(page, pt)).toBe(`el:${BLDG}`);
 
-    await page.mouse.click(pt.x, pt.y, { button: "right" });
-    await expect(page.getByTestId("under-lift-0")).toBeVisible();
-    await expect(page.getByTestId("under-select-0")).toBeVisible();
-    await page.getByTestId("under-lift-0").click();
+    // Alt+hover surfaces BOTH — the building (topmost) then the markup underneath it.
+    await page.keyboard.down("Alt");
+    await page.mouse.move(pt.x, pt.y);
+    await expect(page.getByTestId("alt-stack-pick")).toBeVisible();
+    const labels = await altStackLabels(page);
+    expect(labels.some((l) => /markup/i.test(l))).toBe(true);
+    const markupRow = page.locator('[data-testid^="alt-stack-pick-row-"]', { hasText: /Markup/i }).first();
+    await markupRow.click();
+    await page.keyboard.up("Alt");
+
+    // Picking it SELECTS it (does not move it) — still behind the plan.
+    expect(await markupCoversBuilding(page)).toBe(false);
+    // …and now that it is selected, the priority rule reaches its own menu over the overlap, where
+    // the actual reversal lives.
+    await page.mouse.move(pt.x + 5, pt.y + 5);
+    await page.mouse.click(pt.x + 5, pt.y + 5, { button: "right" });
+    const bringFront = menuRow(page, /Bring in front of the plan/);
+    await expect(bringFront).toBeVisible();
+    await bringFront.click();
 
     await expect.poll(() => markupCoversBuilding(page)).toBe(true);
     expect(await topFeatureAt(page, pt)).toBe(`markup:${MK}`);
   });
 
-  test("'Select the markup underneath' selects it without moving it", async ({ page }) => {
+  test("an Alt+hover pick never moves the feature it selects", async ({ page }) => {
     await loadPlan(page);
     const pt = await overlapPoint(page);
     await sendBehind(page, pt);
     await page.keyboard.press("Escape");
 
-    await page.mouse.move(pt.x, pt.y);
-    await page.mouse.click(pt.x, pt.y, { button: "right" });
-    await page.getByTestId("under-select-0").click();
+    const before = await page.evaluate((id) => {
+      const m = document.querySelector(`[data-feature="markup:${id}"]`);
+      const r = m.getBoundingClientRect();
+      return { x: r.x, y: r.y, w: r.width, h: r.height };
+    }, MK);
 
-    // Still behind the plan — this row is the softer option, and it must not silently reorder.
-    expect(await markupCoversBuilding(page)).toBe(false);
-    // ...and now that it is selected, its own menu is reachable over the overlap.
-    await page.mouse.move(pt.x + 5, pt.y + 5);
-    await page.mouse.click(pt.x + 5, pt.y + 5, { button: "right" });
-    await expect(menuRow(page, /Bring in front of buildings/)).toBeVisible();
+    await page.keyboard.down("Alt");
+    await page.mouse.move(pt.x, pt.y);
+    await page.locator('[data-testid^="alt-stack-pick-row-"]', { hasText: /Markup/i }).first().click();
+    await page.keyboard.up("Alt");
+
+    const after = await page.evaluate((id) => {
+      const m = document.querySelector(`[data-feature="markup:${id}"]`);
+      const r = m.getBoundingClientRect();
+      return { x: r.x, y: r.y, w: r.width, h: r.height };
+    }, MK);
+    expect(after).toEqual(before);
+    expect(await markupCoversBuilding(page)).toBe(false); // unmoved: still behind the plan
   });
 
-  test("an element with NOTHING behind it is unchanged — no stray rows", async ({ page }) => {
+  test("an element with NOTHING behind it shows only itself, and empty canvas shows nothing", async ({ page }) => {
     await loadPlan(page);
     // A different building, nowhere near the seeded markup.
     const other = FIXTURE.els.find((e) => e.type === "building" && e.id !== BLDG && e.w > 200);
@@ -229,8 +264,15 @@ test.describe("NEW-2 — the way back does not depend on finding uncovered geome
       return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
     }, other.id);
     test.skip(!pt, "control building not rendered at this zoom");
+
+    await page.keyboard.down("Alt");
     await page.mouse.move(pt.x, pt.y);
-    await page.mouse.click(pt.x, pt.y, { button: "right" });
-    await expect(page.getByTestId("under-lift-0")).toHaveCount(0);
+    await expect(page.getByTestId("alt-stack-pick")).toBeVisible();
+    expect(await altStackLabels(page)).toHaveLength(1); // just the building — nothing buried under it
+
+    // Empty canvas, well away from every drawn feature — no box at all, not an empty one.
+    await page.mouse.move(30, 30);
+    await expect(page.getByTestId("alt-stack-pick")).toHaveCount(0);
+    await page.keyboard.up("Alt");
   });
 });

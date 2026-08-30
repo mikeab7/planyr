@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, useId, memo, Fragment, lazy, Suspense } from "react";
-import { flushSync } from "react-dom";
+import { flushSync, createPortal } from "react-dom";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -44,7 +44,7 @@ import {
 import { EMPTY_TAP, tapTime, stepDoubleTap } from "./lib/doubleTap.js";
 import { DRAG_SLOP_PX, makeDragGate, stepDragGate, dragArmed } from "./lib/dragGate.js";
 import { isDiagArmed, latchDiagArm } from "./lib/diagArm.js";
-import { resolveDoubleClickTarget, gestureAnchorTarget, stackEntries, pressIsOverElementBody, featuresBeneath, stackHoldsFeature, parseFeatureKey, stackAtPoint, nextPickIndex } from "./lib/featureTarget.js";
+import { resolveDoubleClickTarget, gestureAnchorTarget, stackEntries, pressIsOverElementBody, stackHoldsFeature, parseFeatureKey, stackAtPoint, nextPickIndex } from "./lib/featureTarget.js";
 import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving } from "./lib/parking.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFile, rasterizeStoredPdf, rasterizeStoredDxf, baseRasterScale, chooseOverlayRasterScale, overlayRasterKey, HIRES_CACHE_PER_OVERLAY } from "./lib/overlayPdf.js";
@@ -480,6 +480,17 @@ import { parseAcres, parcelNetSqft, parcelGrossSqft, parcelExceptSqft, acreageCo
 const cleanText = (v) => { const s = (v == null ? "" : String(v)).trim(); return s || null; };
 import { resolveDraftStepBack } from "./lib/drafts.js";
 import { RADIUS } from "../../shared/ui/radius.js";
+import { FONT_SIZE, SPACE, CONTROL_H } from "../../shared/ui/designTokens.js";
+// B845584 — the element context-menu rebuild's own 14px/1.3-stroke icon family (see that file's
+// header for why it is separate from icons.jsx's 24px/stroke-2 idiom). Two names collide with
+// icons.jsx's existing exports (Duplicate, Delete/Lock-ish), so they are aliased at the import site.
+import {
+  ReshapeIcon, ResetFootprintIcon, BumpOutIcon, DockZonesIcon, GroupIcon, UngroupIcon, SplitRowsIcon,
+  PropertiesIcon, CopyIcon, DuplicateIcon as MenuDuplicateIcon, LockIcon as MenuLockIcon,
+  AlignRotationIcon, AttachIcon, DetachIcon, DeleteIcon as MenuDeleteIcon,
+  BringToFrontIcon, BringForwardIcon, SendBackwardIcon, SendToBackIcon,
+  PondSettingsIcon, PondSizingIcon, RoadBranchIcon, SwapIcon,
+} from "./components/elementMenuIcons.jsx";
 
 /* Geographic basemap under the planner canvas. The planner stays a feet-based
  * SVG (so every metric, setback and stall count is computed from true feet and
@@ -2441,6 +2452,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [cursor, setCursor] = useState(null);   // {x,y} feet
   const [hoverElId, setHoverElId] = useState(null); // B226: building under the cursor (select mode, nothing selected) → preview its feature-add buttons
   const [hoverMkId, setHoverMkId] = useState(null); // B156: markup under the cursor in Select mode → pre-click hover glow (set by the markup's own pointer enter/leave, so it matches what a click grabs)
+  // NEW-2 (B845585) — Alt+hover stack picker: {x, y, entries:[{key,target,label}], focusIndex}.
+  // null when not showing (Alt not held, or nothing under the point).
+  const [altPick, setAltPick] = useState(null);
+  const [altPickHiRect, setAltPickHiRect] = useState(null); // the highlighted entry's live screen rect
 
   // parcel drafting + draw drafting + measure
   const [draftPoly, setDraftPoly] = useState(null);  // array of feet pts
@@ -6891,6 +6906,126 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     flashWarn(stack.length > 1 ? `${idx + 1} of ${stack.length} here — Alt+click again to go deeper` : "Only one thing here.", 1800);
     return true;
   };
+
+  /* NEW-2 (B845585) — Alt+HOVER reveals the whole stack under the cursor and lets you pick any of
+   * it, replacing the two cut under-stack menu rows (bring back in front / select underneath) as
+   * the general discoverability path — it reaches an element regardless of what is currently
+   * selected, and regardless of how many layers deep it is buried, which a menu attached to the
+   * one thing that won the press never could. Checked before writing this: plain Alt+CLICK is
+   * already claimed by B548822's single-target cycling picker (handleStackPick, just above) — this
+   * is a different gesture (HOVER, no click) so it does not steal that binding; holding Alt still
+   * shows this list, and a click that lands on the canvas itself (not on the list) still cycles the
+   * old way, so the two coexist rather than replacing one another. Alt+Z (autosize a text box) and
+   * the drag/placement snap-bypass both read `e.altKey` on their own key/pointer events and are
+   * untouched by this — different key ("z"), different phase (a drag already in progress).
+   *
+   * The label a user would give each entry ("Building 1", "50′ Trailer Parking", "Detention Pond
+   * 42.41 AC") — built from the same conventions the on-canvas labels use (buildingNumbers, the
+   * trailer stall depth, the pond's own display name + bare acreage), not a re-derivation. */
+  const altPickLabel = (target) => {
+    if (!target) return "";
+    if (target.kind === "el") {
+      const el = els.find((e) => e.id === target.id);
+      if (!el) return "";
+      if (el.type === "building") {
+        const bn = buildingNumbers(els).get(el.id);
+        return bn ? `Building ${bn}` : (TYPE.building?.label || "Building");
+      }
+      if (el.type === "trailer") return `${f0(cfgOf(el).trailerL)}′ Trailer Parking`;
+      if (el.type === "pond") {
+        const areaSf = el.points ? polyArea(el.points) : Math.abs(el.w * el.h);
+        return `${pondDisplayNameFor(detWithAuto(el.det), pondSplitOf(el))} ${pondAreaLabelLine(areaSf)}`;
+      }
+      return TYPE[el.type]?.label || el.type;
+    }
+    if (target.kind === "parcel") return "Parcel";
+    if (target.kind === "markup") {
+      const m = markups.find((x) => x.id === target.id);
+      return m ? (m.kind === "encumbrance" ? "Deed" : m.kind === "easement" ? "Easement" : "Markup") : "Markup";
+    }
+    if (target.kind === "measure") return "Measurement";
+    if (target.kind === "callout") {
+      const c = callouts.find((x) => x.id === target.id);
+      return c?.noLeader ? "Text box" : "Callout";
+    }
+    return target.kind;
+  };
+  // A stable place for the window-level listeners (mounted once, below) to read the LATEST gating
+  // state and label logic — same idiom as `selRef`/`dblResolveRef` elsewhere in this file.
+  const altPickCtxRef = useRef(null);
+  useEffect(() => {
+    altPickCtxRef.current = {
+      tool,
+      menuOpen: !!(typeMenu || parcelMenu || mapMenu || vtxMenu || ovMenu),
+      compute: (x, y) => stackAtPoint(document.elementsFromPoint(x, y)).map((s) => ({ key: s.key, target: s.target, label: altPickLabel(s.target) })),
+    };
+  });
+  const altPickHeldRef = useRef(false);
+  const altPickLastPtRef = useRef(null);
+  const altPickStateRef = useRef(null);
+  useEffect(() => { altPickStateRef.current = altPick; });
+  // Clicking a picked entry selects it (same shape `handleStackPick` already writes to `sel`) and
+  // closes the picker; the keyboard path (Enter, with Up/Down moving `focusIndex`) does the same.
+  const altPickChoose = (target) => { setMulti([]); setDrillId(null); setSel(target); setAltPick(null); };
+  // Hovering an entry highlights it on the map — read straight off the ALREADY-PAINTED DOM node
+  // every feature stamps itself with (`data-feature="<kind>:<id>"`, the same key `featureStack`
+  // resolves), rather than re-deriving its screen geometry a second way.
+  useEffect(() => {
+    if (!altPick) { setAltPickHiRect(null); return; }
+    const en = altPick.entries[altPick.focusIndex];
+    let node = null;
+    try { node = en && document.querySelector(`[data-feature="${CSS.escape(en.key)}"]`); } catch (_) { node = null; }
+    setAltPickHiRect(node ? node.getBoundingClientRect() : null);
+  }, [altPick]);
+  useEffect(() => {
+    const isTypingField = () => {
+      const a = document.activeElement;
+      return !!a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable);
+    };
+    const showAt = (x, y) => {
+      const ctx = altPickCtxRef.current;
+      const entries = ctx.compute(x, y);
+      setAltPick(entries.length ? { x, y, entries, focusIndex: 0 } : null);
+    };
+    const dismiss = () => { altPickHeldRef.current = false; setAltPick(null); };
+    const onKeyDown = (e) => {
+      const cur = altPickStateRef.current;
+      // Keyboard-reachable while the list is up: Up/Down move the highlighted entry, Enter picks
+      // it, Escape dismisses — none of this needs Alt still held (a key repeat can drop it).
+      if (cur) {
+        if (e.key === "Escape") { e.stopPropagation(); dismiss(); return; }
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault();
+          const n = cur.entries.length;
+          const next = ((cur.focusIndex + (e.key === "ArrowDown" ? 1 : -1)) % n + n) % n;
+          setAltPick({ ...cur, focusIndex: next });
+          return;
+        }
+        if (e.key === "Enter") { e.preventDefault(); altPickChoose(cur.entries[cur.focusIndex].target); return; }
+      }
+      if (e.key !== "Alt" || e.repeat) return;
+      const ctx = altPickCtxRef.current;
+      if (!ctx || ctx.tool !== "select" || ctx.menuOpen || isTypingField()) return;
+      altPickHeldRef.current = true;
+      const p = altPickLastPtRef.current;
+      if (p) showAt(p.x, p.y);
+    };
+    const onKeyUp = (e) => { if (e.key === "Alt") dismiss(); };
+    const onMove = (e) => {
+      altPickLastPtRef.current = { x: e.clientX, y: e.clientY };
+      if (altPickHeldRef.current) showAt(e.clientX, e.clientY);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("pointermove", onMove, { passive: true });
+    window.addEventListener("blur", dismiss);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("blur", dismiss);
+    };
+  }, []);
 
   const onBgDown = (e) => {
     if (e.button !== 0) return;
@@ -11430,12 +11565,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // spot the user actually pointed at, not from the element's centre.
     let w = null;
     try { w = p2f(e.clientX, e.clientY); } catch (_) { w = null; }
-    /* NEW-2 — WHAT IS UNDERNEATH, captured NOW. The menu is about to paint over the very point the
-       user aimed at, so the stack has to be read at open time; asking again at render would hit the
-       menu instead. Only annotations sent BEHIND the plan are listed — an element under another
-       element has always been reachable through its own uncovered geometry, and listing everything
-       would turn a menu into a scene graph. */
-    setTypeMenu({ id, x: e.clientX, y: e.clientY, w, under: behindAnnotationsUnder(e.clientX, e.clientY) });
+    setTypeMenu({ id, x: e.clientX, y: e.clientY, w });
   };
   /* NEW-2 — the `data-feature` key of the CURRENTLY SELECTED annotation, but only while it is in
      the behind-the-plan band. Anything else returns null, so the priority rule above cannot fire
@@ -11451,45 +11581,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     return null;
   };
-  /* NEW-2 — the two actions the "Behind this" rows offer, both reusing the band setters that
-     already exist rather than a fifth copy of "flip the flag and re-stack".
-     `liftUnderToFront` is the direct reversal — it is the same operation the object's own menu
-     offers, made reachable from the element that is covering it.
-     `selectUnder` is the softer one: leave it where it is, but make it the SELECTION, which arms
-     the selected-annotation priority rule so the next right-click over the overlap reaches it. */
-  const liftUnderToFront = (t) => {
-    if (!t) return;
-    if (t.kind === "markup") setMarkupBand(t.id, false);
-    else if (t.kind === "callout") setCalloutBand(t.id, false);
-    else if (t.kind === "measure") { const m = measures[t.i]; if (m?.id) setMeasureBand(m.id, false); }
-  };
-  const selectUnder = (t) => {
-    if (!t) return;
-    setMulti([]);
-    if (t.kind === "measure") setSel({ kind: "measure", i: t.i });
-    else setSel({ kind: t.kind, id: t.id });
-  };
-  /* NEW-2 — the behind-the-plan annotations painted under a client point, top-most first, each with
-     a plain-English name for the menu row. `featuresBeneath` skips the element that won the press
-     and every piece of chrome, so what is left is exactly "what I put under here and can no longer
-     reach". */
-  const behindAnnotationsUnder = (x, y) => {
-    const out = [];
-    for (const f of featuresBeneath(hitStackAt(x, y))) {
-      const t = f.target;
-      if (t.kind === "markup") {
-        const m = markups.find((o) => o.id === t.id);
-        if (m?.behindEls) out.push({ target: t, label: m.kind === "encumbrance" ? "deed" : m.kind === "easement" ? "easement" : "markup" });
-      } else if (t.kind === "callout") {
-        const c = callouts.find((o) => o.id === t.id);
-        if (c?.behindEls) out.push({ target: t, label: c.noLeader ? "text box" : "callout" });
-      } else if (t.kind === "measure") {
-        const m = measures[t.i];
-        if (m?.behindEls) out.push({ target: t, label: "measurement" });
-      }
-    }
-    return out;
-  };
+  /* B845584/B845585 — the cut under-stack menu group's plumbing (its lift/select/under-stack helpers)
+     is REMOVED here, not just unrendered: that menu group is cut per the owner's own context-menu
+     rebuild brief ("NEW-2 replaces the need"), and NEW-2's Alt-hover picker (`altPickChoose`, near
+     `handleStackPick`) is the general replacement — it selects any feature in the stack, buried or
+     not, the same way `stackAtPoint`'s targets already write into `sel`. The selected-annotation
+     priority rule just above (`behindSelKey`) is untouched: it is what makes the picked object's own
+     menu reachable again once selected. */
   /* NEW-8 — start a NEW road branching off an existing one, tee'd at the point clicked.
    *
    * Owner: "add a feature where I can right click on a road and, basically, add a road coming out of
@@ -17418,8 +17516,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // header's hide / lock / remove controls, so they can never render at mismatched sizes again.
   const iconBtn = { width: 30, height: 30, padding: 0, flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 8, border: BORDER_1, background: SURF_RAISED, color: PAL.ink, cursor: "pointer", boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
   const spinBtn = { width: 20, height: 13, padding: 0, display: "grid", placeItems: "center", fontSize: 10.5, lineHeight: 1, border: BORDER_1, borderRadius: 4, background: SURF_RAISED, color: PAL.muted, cursor: "pointer", fontFamily: "inherit" };
-  const menuItem = (on) => ({ display: "block", width: "100%", textAlign: "left", padding: "7px 10px", fontSize: 12.5, borderRadius: 7, cursor: "pointer", border: "none", background: on ? PAL.accentSoft : "transparent", color: PAL.ink, fontFamily: "inherit", fontWeight: on ? 650 : 500 });
-  const menuPanel = { background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: 12, boxShadow: "0 16px 44px rgba(28,25,20,0.22), 0 3px 10px rgba(28,25,20,0.1)", padding: 6 };
+  // B845584 — brought down from ~15px/~44px rows to the system's own density tokens (measured off
+  // the live app, not guessed): --font-md 11.5px text, a ~22-23px row (padding + line-height), the
+  // panel-tier radius (RADIUS.lg — "a surface that CONTAINS other things"). Shared by every
+  // right-click menu in the file (parcel/map/vertex/overlay/element), so the fix is one place.
+  const menuItem = (on) => ({ display: "block", width: "100%", textAlign: "left", padding: "5px 10px", fontSize: FONT_SIZE.md, lineHeight: 1.15, borderRadius: RADIUS.sm, cursor: "pointer", border: "none", background: on ? PAL.accentSoft : "transparent", color: PAL.ink, fontFamily: "inherit", fontWeight: on ? 650 : 500 });
+  // A baseline font-size on the PANEL itself (not just each row) — without it, a bare div with no
+  // override (the divider before the common-actions block) computes the browser default (16px),
+  // which is exactly the kind of drift VERIFY's "no font size exceeds --font-display" check exists
+  // to catch. Every row still sets its own size; this is the floor a future row inherits.
+  const menuPanel = { background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, boxShadow: "0 16px 44px rgba(28,25,20,0.22), 0 3px 10px rgba(28,25,20,0.1)", padding: "4px 0", fontSize: FONT_SIZE.md };
   const vSep = <span style={{ width: 1, height: 18, background: "rgba(255,255,255,0.12)", margin: "0 6px" }} />;
   // Switch tools and reset any in-progress drafting; also closes the Parcel menu.
   const selectTool = (id) => {
@@ -24769,23 +24875,39 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </div>
                 );
               })()}
-              {/* ⛔ NEW-1 — A FORCED ELEMENT MUST BE VISIBLY FORCED, WITH THE WAY BACK RIGHT THERE.
-                  An override that only lives in a right-click menu is an element the owner can end
-                  up stuck out of band with no way to see why. This renders ONLY when the override is
-                  set, so the default inspector gains not one line (PANEL-BREVITY: 0 visible lines
-                  added by default, 2 when forced — and the 2 exist to make the state reversible).
-                  Rendered ABOVE the pond guard because a pond can be forced too. */}
-              {bandForceOf(selEl) && (
-                <div data-testid="el-band-forced-note" style={{ marginTop: 9, padding: "6px 8px", borderRadius: 6, background: PAL.surfacePage, border: `1px solid ${PAL.panelLine}` }}>
-                  <div style={{ fontSize: 11, color: PAL.ink, fontWeight: 600 }}>{bandForceOf(selEl) === "back" ? "Forced underneath everything" : "Forced on top of everything"}</div>
-                  <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 2 }}>
-                    This {TYPE[selEl.type]?.label?.toLowerCase() || selEl.type} is drawing outside its type layer because you put it there.
+              {/* ⛔ B845584 — RELOCATED FROM THE RIGHT-CLICK MENU. "Force on top/underneath" is a
+                  PERSISTENT PROPERTY of the element (like Length/Depth above it), not a step in the
+                  z-order sequence — an override reachable only from a submenu left the owner able to
+                  end up stuck out of band with no visible way to see why or undo it. Always
+                  reachable now, never a right-click-only action. PANEL-BREVITY: one Field row by
+                  default; the explanatory note is the only thing that costs an extra line, and only
+                  while forced. */}
+              {(() => {
+                const forced = bandForceOf(selEl);
+                const segBtn = (active) => ({ flex: 1, padding: "3px 0", fontSize: FONT_SIZE.xs, fontWeight: active ? 700 : 500, borderRadius: RADIUS.sm, border: `1px solid ${active ? PAL.accent : PAL.panelLine}`, background: active ? PAL.accentSoft : SURF_RAISED, color: active ? PAL.accentText : PAL.ink, cursor: "pointer", fontFamily: "inherit" });
+                return (
+                  <div style={{ marginTop: 9 }}>
+                    <Field label="Draw order">
+                      <span style={{ display: "flex", gap: 4, width: 148 }}>
+                        <button style={segBtn(!forced)} data-testid="el-band-restore"
+                          title="Use the normal layer order — buildings over parking over pond over paving over roads"
+                          onClick={() => setElBand(selEl.id, null)}>Normal</button>
+                        <button style={segBtn(forced === "front")} data-testid="el-band-force"
+                          title="Force on top of everything: draw this element over everything, buildings included"
+                          onClick={() => setElBand(selEl.id, "front")}>Front</button>
+                        <button style={segBtn(forced === "back")} data-testid="el-band-force-back"
+                          title="Force underneath everything: draw this element under everything, even roads"
+                          onClick={() => setElBand(selEl.id, "back")}>Back</button>
+                      </span>
+                    </Field>
+                    {forced && (
+                      <div data-testid="el-band-forced-note" style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: -4, marginBottom: 4 }}>
+                        This {TYPE[selEl.type]?.label?.toLowerCase() || selEl.type} is drawing outside its type layer because you put it there.
+                      </div>
+                    )}
                   </div>
-                  <button style={{ ...chipSm, marginTop: 5 }} data-testid="el-band-restore"
-                    title="Back to the normal order — buildings over parking over pond over paving over roads"
-                    onClick={() => setElBand(selEl.id, null)}>Use the normal layer order</button>
-                </div>
-              )}
+                );
+              })()}
               {selEl.type !== "pond" && (
               <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
                 <button style={chip} onClick={() => toggleLock(selEl.id)} title="Pin in place: prevents accidental moves/edits">{selEl.locked ? "📌 Unpin" : "📌 Pin"}</button>
@@ -27083,221 +27205,202 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         );
       })()}
 
+      {/* B845584 — the element context-menu rebuild. Skeleton is IDENTICAL for every element type:
+          1) element-specific content (varies), 2) Arrange — exactly four rows, always, 3) common
+          actions below one rule. Nothing here may rename itself with state (checked/disabled state
+          is fine — the LABEL never changes); "Force on top/underneath" moved to the Properties panel
+          (see the "Draw order" control below); the under-stack menu group was cut — NEW-2's Alt-hover stack
+          picker is the discoverability path now, and the selected-annotation priority rule in
+          onElContext (unchanged) still lets you reach a behind-band annotation once it is selected. */}
       {typeMenu && (
-        <ContextMenu x={typeMenu.x} y={typeMenu.y} onClose={() => setTypeMenu(null)} width={200} zIndex={1998} className="menu" panelStyle={menuPanel}>
+        <ContextMenu x={typeMenu.x} y={typeMenu.y} onClose={() => setTypeMenu(null)} width={236} zIndex={1998} className="menu" panelStyle={menuPanel}>
             {(() => {
               const t = els.find((el) => el.id === typeMenu.id);
               if (!t) return null;
               const isBuildingRect = t.type === "building" && !t.points;
-              const hdr = (top) => ({ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: top ? "8px 8px 6px" : "4px 8px 6px", ...(top ? { borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 } : {}) });
-              const dock = t.dock || "single";
+              // Matches the approved mockup's `.sec` label exactly — no divider before a section;
+              // the ONE rule in the whole menu is the single `<div>` ahead of the common actions.
+              const hdr = () => ({ fontSize: FONT_SIZE.xs, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", padding: "6px 10px 2px" });
               // B820 — Arrange (z-order) within the element's TYPE-LAYER band, so the guardrail holds
-              // (a building can never drop under a road/parking). Hidden when the element is alone in
-              // its band (nothing to reorder against).
+              // (a building can never drop under a road/parking).
               const band = zOrder(t);
               const af = arrangeFlags(els.filter((e) => zOrder(e) === band), t.id);
               const MOD = (typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "")) ? "⌘" : "Ctrl+";
-              // NEW-2 — a greyed row says WHY it is greyed. A disabled control with no explanation is
-              // indistinguishable from a broken one, which is how this feature was read.
-              const aloneInBand = !af || af.count < 2;
-              // NEW-1 — a forced element is alone for a different reason, and saying "the only
-              // <type> on the plan" about it would be false (there may be five more, all in their
-              // own type layer). Name the band it is actually in.
-              const forcedBand = bandForceOf(t);
-              const arrWhy = aloneInBand
-                ? (forcedBand
-                  ? `This is the only element forced in front of the plan, so there is nothing to reorder it against. Put it back in its own layer to order it with the other ${TYPE[t.type]?.label?.toLowerCase() || t.type}.`
-                  : `This is the only ${TYPE[t.type]?.label?.toLowerCase() || t.type} on the plan, so there is nothing to reorder it against. Site elements always draw in their own type's layer — a building over paving, paving over a road.`)
+              // A greyed row says WHY it is greyed — a disabled control with no explanation reads as broken.
+              const arrWhy = (!af || af.count < 2)
+                ? `This is the only ${TYPE[t.type]?.label?.toLowerCase() || t.type} on the plan, so there is nothing to reorder it against. Site elements always draw in their own type's layer — a building over paving, paving over a road.`
                 : "";
-              const arrRow = (text, mode, dis, hint) => (
-                <button disabled={dis} title={dis ? (arrWhy || `Already at the ${(mode === "back" || mode === "backward") ? "back" : "front"}.`) : ""}
-                  style={{ ...menuItem(false), ...(dis ? { color: PAL.disabled } : {}), cursor: dis ? "default" : "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
-                  onClick={dis ? undefined : () => { arrangeSel(mode, { kind: "el", id: t.id }); setTypeMenu(null); }}>
-                  <span>{text}</span><span style={{ fontSize: 11, color: dis ? PAL.disabled : PAL.muted, fontWeight: 400 }}>{hint}</span>
+              // The ONE row shape for a plain action: a 14px icon in a 16px gutter, the label, an
+              // optional right-aligned shortcut in tertiary colour. Matches the mockup's `.row`
+              // (23px, 11.5px text, 8px gaps, 10px side padding) — measured off the live app's own
+              // tokens, not guessed.
+              const rowBox = { display: "flex", alignItems: "center", gap: SPACE.md, width: "100%", boxSizing: "border-box", height: CONTROL_H.sm, padding: "0 10px", fontSize: FONT_SIZE.md, fontFamily: "inherit", color: PAL.ink };
+              const icoBox = { width: 16, flex: "0 0 16px", display: "flex", alignItems: "center", justifyContent: "center" };
+              const miRow = ({ icon, text, hint, dis, danger, title, onClick, testId }) => (
+                <button key={testId} data-testid={testId} disabled={!!dis} title={title || ""}
+                  style={{ ...rowBox, textAlign: "left", border: "none", borderRadius: RADIUS.sm, background: "transparent", fontFamily: "inherit", fontSize: FONT_SIZE.md, fontWeight: 500, color: dis ? PAL.disabled : danger ? PAL.danger : PAL.ink, cursor: dis ? "default" : "pointer" }}
+                  onClick={dis ? undefined : onClick}>
+                  <span style={icoBox}>{icon}</span>
+                  <span style={{ flex: 1, minWidth: 0 }}>{text}</span>
+                  {hint && <span style={{ fontSize: FONT_SIZE.sm, color: dis ? PAL.disabled : PAL.muted, fontWeight: 400, whiteSpace: "nowrap" }}>{hint}</span>}
                 </button>
               );
+              const arrRow = (icon, text, mode, dis, hint) => miRow({
+                icon, text, hint, dis,
+                title: dis ? (arrWhy || `Already at the ${(mode === "back" || mode === "backward") ? "back" : "front"}.`) : "",
+                onClick: () => { arrangeSel(mode, { kind: "el", id: t.id }); setTypeMenu(null); },
+              });
               return (
                 <>
+                  {/* ── 1. ELEMENT-SPECIFIC — the only section whose contents vary by type. ── */}
                   {(t.type === "sidewalk" || t.type === "landscape") && (
                     <>
-                      <div style={hdr(false)}>Type</div>
-                      <button style={menuItem(false)} onClick={() => { pushHistory(); setEls((a) => a.map((e) => e.id === typeMenu.id ? { ...e, type: t.type === "sidewalk" ? "landscape" : "sidewalk" } : e)); setTypeMenu(null); }}>
-                        {t.type === "sidewalk" ? "Turn into landscape buffer" : "Turn into sidewalk"}
-                      </button>
+                      <div style={hdr()}>Type</div>
+                      {miRow({
+                        icon: <SwapIcon />, text: t.type === "sidewalk" ? "Turn into landscape buffer" : "Turn into sidewalk",
+                        onClick: () => { pushHistory(); setEls((a) => a.map((e) => e.id === typeMenu.id ? { ...e, type: t.type === "sidewalk" ? "landscape" : "sidewalk" } : e)); setTypeMenu(null); },
+                      })}
                     </>
                   )}
-                  {isBuildingRect && (() => {
-                    const lvl = dockStackLevel(t), mx = dockStackMax(t);
-                    const nextL = DOCK_ZONES[lvl] ? DOCK_ZONES[lvl].label : null;
-                    const outerL = mx > 0 && DOCK_ZONES[mx - 1] ? DOCK_ZONES[mx - 1].label : null;
+                  {/* FOOTPRINT — Reshape / Reset, and Bump-outs. NOT a dock feature (B228/B229): its
+                      own group, separate from Dock zones below. */}
+                  {(isBuildingRect || (t.type === "building" && t.footEdit)) && (() => {
+                    const hasBumps = els.some((x) => x.attachedTo === t.id && x.dogEar);
                     return (
                       <>
-                        <div style={hdr(t.type === "sidewalk" || t.type === "landscape")}>Dock features</div>
-                        {nextL && <button style={menuItem(false)} onClick={() => { addDockZone(t); setTypeMenu(null); }}>＋ Add {nextL.toLowerCase()} (outward)</button>}
-                        {outerL && <button style={menuItem(false)} onClick={() => { removeOuterDockZone(t); setTypeMenu(null); }}>－ Remove {outerL.toLowerCase()} (outermost)</button>}
-                        <button style={menuItem(false)} onClick={() => { addDogEars(t); setTypeMenu(null); }}>Add bump-outs ({DOGEAR_W}′×{DOGEAR_D}′)</button>
-                        {/* NEW-1/B872 round 2 — the only remove control used to be several scrolls down
-                            in Properties, unnamed by the reshape refusal that pointed nowhere. Mirrors
-                            "Add bump-outs" so the corner-menu offers both halves of the same feature. */}
-                        {els.some((x) => x.attachedTo === t.id && x.dogEar) &&
-                          <button style={menuItem(false)} onClick={() => { removeAllDogEars(t); setTypeMenu(null); }}>Remove bump-outs</button>}
-                        <button style={menuItem(false)} onClick={() => { editBuildingFootprint(t.id); setTypeMenu(null); }} title="Convert to an editable outline — angle an end wall or clip a corner (loaded walls stay straight)">✎ Edit footprint (reshape)</button>
+                        <div style={hdr()}>Footprint</div>
+                        {isBuildingRect && miRow({
+                          icon: <ReshapeIcon />, text: "Reshape…",
+                          title: "Convert to an editable outline — angle an end wall or clip a corner (loaded walls stay straight)",
+                          onClick: () => { editBuildingFootprint(t.id); setTypeMenu(null); },
+                        })}
+                        {t.footEdit && miRow({
+                          icon: <ResetFootprintIcon />, text: "Reset to rectangle",
+                          title: "Discard the reshape — back to the bounding rectangle",
+                          onClick: () => { resetBuildingFootprint(t.id); setTypeMenu(null); },
+                        })}
+                        {/* THE QUANTITY PROBLEM — bump-outs are all-or-nothing here (a single toggle),
+                            never a count: "if I just put two, how does it know which two on a
+                            cross-dock building?" Per-corner placement already exists on the canvas's
+                            own on-building handles (placeDogEars/removeDogEar) for whoever needs that
+                            precision; this menu offers the blunt, unambiguous version. */}
+                        {isBuildingRect && (
+                          <label style={{ ...rowBox, cursor: t.footEdit ? "default" : "pointer", color: t.footEdit ? PAL.disabled : PAL.ink }}
+                            title={t.footEdit ? "Reset the footprint to a rectangle first — bump-outs anchor to square corners" : `${hasBumps ? "Remove" : "Add"} ${DOGEAR_W}′×${DOGEAR_D}′ corner bump-outs`}>
+                            <span style={icoBox}><BumpOutIcon /></span>
+                            <span style={{ flex: 1, minWidth: 0 }}>Bump-outs</span>
+                            <input type="checkbox" checked={hasBumps} disabled={!!t.footEdit} style={{ fontSize: "inherit" }}
+                              onChange={() => { if (hasBumps) removeAllDogEars(t); else addDogEars(t); setTypeMenu(null); }} />
+                          </label>
+                        )}
                       </>
                     );
                   })()}
-                  {t.type === "building" && !t.dogEar && t.footEdit && (
+                  {/* DOCK ZONES — WHICH zones exist on WHICH dock face, honestly: court / trailer /
+                      buffer, each present or not, per face. LIFO is enforced by DISABLING the chip
+                      that would skip a step, never by renaming a control (you cannot check Buffer
+                      before Trailer, or uncheck Court while Trailer is still there). Replaces the
+                      two self-renaming rows ("＋ Add buffer (outward)" / "－ Remove trailer parking
+                      (outermost)") — one stack's + and − rendered as two sentences that rewrote
+                      themselves on every state change. */}
+                  {isBuildingRect && dockSidesFor(t).dockSides.length > 0 && (
                     <>
-                      <div style={hdr(true)}>Footprint</div>
-                      <button style={menuItem(false)} onClick={() => { resetBuildingFootprint(t.id); setTypeMenu(null); }} title="Discard the reshape — back to the bounding rectangle">↺ Reset footprint to rectangle</button>
+                      <div style={hdr()}>Dock zones</div>
+                      {dockSidesFor(t).dockSides.map((side) => {
+                        const n = stackCountIn(els, t, side);
+                        return (
+                          <div key={side} style={rowBox}>
+                            <span style={icoBox}><DockZonesIcon /></span>
+                            <span style={{ flex: 1, minWidth: 0, color: PAL.ink }}>{side[0].toUpperCase() + side.slice(1)}</span>
+                            <span style={{ display: "flex", gap: 3 }}>
+                              {DOCK_ZONES.map((z, i) => {
+                                const checked = n > i;
+                                const canCheck = !checked && n === i;
+                                const canUncheck = checked && n === i + 1;
+                                const dis = !canCheck && !canUncheck;
+                                const title = checked
+                                  ? (canUncheck ? `Remove ${z.label.toLowerCase()}` : `Remove ${DOCK_ZONES[i + 1]?.label.toLowerCase()} first`)
+                                  : (canCheck ? `Add ${z.label.toLowerCase()}` : `Add ${DOCK_ZONES[n]?.label.toLowerCase() || "the prior zone"} first`);
+                                return (
+                                  <button key={z.key} disabled={dis} title={title}
+                                    onClick={dis ? undefined : () => { if (checked) removeOuterZoneOnSide(t, side); else addZoneOnSide(t, side); }}
+                                    style={{ width: 20, height: 20, padding: 0, display: "grid", placeItems: "center", fontSize: 10, fontWeight: 700, borderRadius: RADIUS.sm, border: `1px solid ${PAL.panelLine}`, background: checked ? PAL.accentSoft : "transparent", color: dis ? PAL.disabled : PAL.ink, cursor: dis ? "default" : "pointer" }}>
+                                    {z.key[0].toUpperCase()}
+                                  </button>
+                                );
+                              })}
+                            </span>
+                          </div>
+                        );
+                      })}
                     </>
                   )}
                   {t.type === "parking" && !t.points && explodePiecesOf(t).length >= 2 && (
                     <>
-                      <div style={hdr(true)}>Parking</div>
-                      <button style={menuItem(false)} onClick={() => { splitParkingRows(t); setTypeMenu(null); }}>Split rows/aisles</button>
+                      <div style={hdr()}>Parking</div>
+                      {miRow({ icon: <SplitRowsIcon />, text: "Split rows/aisles", onClick: () => { splitParkingRows(t); setTypeMenu(null); } })}
                     </>
                   )}
                   {(multi.length > 1 || t.groupId) && (
                     <>
-                      <div style={hdr(true)}>Group</div>
-                      {multi.length > 1 && <button style={menuItem(false)} onClick={() => { groupSel(); setTypeMenu(null); }}>⊞ Group selection ({multi.length})</button>}
-                      {t.groupId && <button style={menuItem(false)} onClick={() => { duplicateGroup(t.groupId); setTypeMenu(null); }}>Duplicate group</button>}
-                      {t.groupId && <button style={menuItem(false)} onClick={() => { ungroupGroup(t.groupId); setTypeMenu(null); }}>⊟ Ungroup</button>}
+                      <div style={hdr()}>Group</div>
+                      {multi.length > 1 && miRow({ icon: <GroupIcon />, text: `Group selection (${multi.length})`, onClick: () => { groupSel(); setTypeMenu(null); } })}
+                      {t.groupId && miRow({ icon: <MenuDuplicateIcon />, text: "Duplicate group", onClick: () => { duplicateGroup(t.groupId); setTypeMenu(null); } })}
+                      {t.groupId && miRow({ icon: <UngroupIcon />, text: "Ungroup", onClick: () => { ungroupGroup(t.groupId); setTypeMenu(null); } })}
                     </>
                   )}
-                  {/* NEW-2 — the Arrange group NEVER VANISHES. It used to be hidden outright when the
-                      element was alone in its type-layer band (`af.count > 1`), which on a real plan
-                      is most elements — one pond, one paving pad, one truck court — so right-clicking
-                      them offered no ordering rows at all and no reason why. That silence is what the
-                      owner's "the layers / order feature doesn't work at all" actually looked like.
-                      The rows are now always present, greyed with a plain-English reason when the op
-                      cannot move anything. (Whether an element should be allowed to cross its type
-                      layer at all — paving OVER a building — is a drawing-convention decision parked
-                      for the owner on the capability table, deliberately not decided here.) */}
-                  {af && (
-                    <>
-                      <div style={hdr(true)}>Arrange</div>
-                      {arrRow("Bring to Front", "front", af.atTop || af.count < 2, `${MOD}⇧]`)}
-                      {arrRow("Bring Forward", "forward", af.atTop || af.count < 2, `${MOD}]`)}
-                      {arrRow("Send Backward", "backward", af.atBottom || af.count < 2, `${MOD}[`)}
-                      {arrRow("Send to Back", "back", af.atBottom || af.count < 2, `${MOD}⇧[`)}
-                      {/* ⛔ NEW-1 — THE ESCAPE HATCH, and it is ONE row on purpose. The four rows
-                          above move an element inside its band and always did; this is the only way
-                          across the band edge, it is named for what it does, and it is nowhere near
-                          an ordinary Bring to Front. Same single-toggle shape markups, measurements
-                          and callouts already use for "Send behind the plan", so there is one idea
-                          in the product rather than two. PANEL-BREVITY: one row, no second sentence
-                          in the menu body — the why lives in the hover. */}
-                      {forcedBand ? (
-                        <button style={{ ...menuItem(false), display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
-                          data-testid="el-band-force"
-                          title="Put this back in its own type layer, where it draws in the usual order (buildings over parking over pond over paving over roads)."
-                          onClick={() => { setElBand(t.id, null); setTypeMenu(null); }}>
-                          <span>Use the normal layer order</span>
-                          <span style={{ color: PAL.accent, fontWeight: 700 }}>✓ {forcedBand === "front" ? "in front of" : "underneath"} the plan</span>
-                        </button>
-                      ) : (
-                        <>
-                          {/* ⛔ NEW-1 (B548822) — THE MIRROR OF "Force on top of everything". A geometrically
-                              buried element (a road inside a pond, say) can't be reached by sending the
-                              covering element to back — both are already as low in their OWN band as
-                              Arrange can put them, because the band rule outranks raw z. This row moves the
-                              COVERING element out of the way instead of lifting the buried one up, which is
-                              sometimes the more honest fix (the buried element keeps drawing in its own
-                              type's normal order; only the thing covering it moves). */}
-                          <button style={{ ...menuItem(false), display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
-                            data-testid="el-band-force"
-                            title="Cross the type-layer rule for this one element: draw it on top of everything, buildings included. Everything else keeps the normal order."
-                            onClick={() => { setElBand(t.id, "front"); setTypeMenu(null); }}>
-                            <span>Force on top of everything</span>
-                          </button>
-                          <button style={{ ...menuItem(false), display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
-                            data-testid="el-band-force-back"
-                            title="Cross the type-layer rule the other way: draw this element underneath everything, even roads. Use this to get a covering element out from over something buried beneath it."
-                            onClick={() => { setElBand(t.id, "back"); setTypeMenu(null); }}>
-                            <span>Force underneath everything</span>
-                          </button>
-                        </>
-                      )}
-                    </>
-                  )}
-                  {/* ⛔ NEW-2 — WHAT IS UNDERNEATH THIS, AND HOW TO GET IT BACK. An annotation sent
-                      behind the plan is unreachable across its whole overlap with an element: the
-                      element on top answers every press, so the markup you just sent under a
-                      building can only be grabbed on a sliver no element covers — and on one drawn
-                      to cover the building, on nothing at all. This is the way back that does not
-                      depend on finding uncovered geometry: right-click ANYWHERE over the overlap
-                      and the thing beneath is named, with one row to select it and one to lift it
-                      back in front. Rendered only when something really is under this point, so an
-                      ordinary element menu is unchanged. */}
-                  {(typeMenu.under || []).length > 0 && (
-                    <>
-                      <div style={hdr(true)}>Behind this</div>
-                      {typeMenu.under.map((u, i) => (
-                        <button key={`${u.target.kind}:${u.target.id ?? u.target.i}`} style={{ ...menuItem(false), display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
-                          data-testid={`under-lift-${i}`}
-                          title={`This ${u.label} is drawn under the plan here. Bring it back in front of the buildings.`}
-                          onClick={() => { liftUnderToFront(u.target); setTypeMenu(null); }}>
-                          <span>Bring the {u.label} back in front</span>
-                        </button>
-                      ))}
-                      {typeMenu.under.map((u, i) => (
-                        <button key={`sel-${u.target.kind}:${u.target.id ?? u.target.i}`} style={menuItem(false)}
-                          data-testid={`under-select-${i}`}
-                          title={`Select the ${u.label} underneath and open its own menu, leaving it where it is.`}
-                          onClick={() => { selectUnder(u.target); setTypeMenu(null); }}>
-                          Select the {u.label} underneath
-                        </button>
-                      ))}
-                    </>
-                  )}
-                  {/* B875 — pond discoverability: the right-click menu carries the pond-specific
-                      actions (was a generic Duplicate/Pin/Attach/Delete menu only). */}
+                  {/* B875 — pond discoverability. */}
                   {t.type === "pond" && (
                     <>
-                      <div style={hdr(true)}>{pondDisplayNameFor(detWithAuto(t.det), pondSplitOf(t))}</div>
-                      <button style={menuItem(false)} onClick={() => { revealPondInspector(t.id, null); setTypeMenu(null); }} title="Open this pond's inspector — anchor, depth, purpose, usable/dead split">⚙ Pond settings…</button>
-                      <button style={menuItem(false)} onClick={() => { revealPondInspector(t.id, "assistant"); setTypeMenu(null); }} title="Size this pond toward its detention + mitigation targets (one-click Apply)">📐 Sizing assistant…</button>
-                      <div style={hdr(false)}>Set purpose</div>
+                      <div style={hdr()}>{pondDisplayNameFor(detWithAuto(t.det), pondSplitOf(t))}</div>
+                      {miRow({ icon: <PondSettingsIcon />, text: "Pond settings…", title: "Open this pond's inspector — anchor, depth, purpose, usable/dead split", onClick: () => { revealPondInspector(t.id, null); setTypeMenu(null); } })}
+                      {miRow({ icon: <PondSizingIcon />, text: "Sizing assistant…", title: "Size this pond toward its detention + mitigation targets (one-click Apply)", onClick: () => { revealPondInspector(t.id, "assistant"); setTypeMenu(null); } })}
+                      <div style={hdr()}>Set purpose</div>
                       {[[null, "Auto"], ["detention", POND_ROLE_LABEL.detention], ["mitigation", POND_ROLE_LABEL.mitigation], ["dual", POND_ROLE_LABEL.dual]].map(([v, label]) => {
                         const active = v == null ? (t.det?.role == null) : t.det?.role === v;
                         return (
-                          <button key={String(v)} style={{ ...menuItem(false), display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
+                          <button key={String(v)} style={{ ...rowBox, textAlign: "left", border: "none", borderRadius: RADIUS.sm, background: "transparent", fontFamily: "inherit", fontSize: FONT_SIZE.md, color: PAL.ink, cursor: "pointer" }}
                             onClick={() => { setPondRole(t.id, v); setTypeMenu(null); }}>
-                            <span>{label}{v == null ? " (from elevation)" : ""}</span>{active ? <span style={{ color: PAL.accent, fontWeight: 700 }}>✓</span> : null}
+                            <span style={{ flex: 1, minWidth: 0 }}>{label}{v == null ? " (from elevation)" : ""}</span>{active ? <span style={{ color: PAL.accent, fontWeight: 700 }}>✓</span> : null}
                           </button>
                         );
                       })}
                     </>
                   )}
-                  {/* NEW-8 — branch a road off this one, tee'd at the point that was right-clicked.
-                      Beats drawing one in open ground and hoping its far end catches the connect. */}
+                  {/* NEW-8 — branch a road off this one, tee'd at the point that was right-clicked. */}
                   {isCenterlineRoad(t) && !t.locked && (
                     <>
-                      <div style={hdr(true)}>Road</div>
-                      <button style={menuItem(false)} data-testid="road-branch-here"
-                        title="Start a new road here, joined to this one as a T. It inherits this road's class and width; click where it should go, then ✓ Done."
-                        onClick={() => { const at = typeMenu.w; setTypeMenu(null); startRoadBranch(t, at); }}>
-                        ⌐ Branch a road from here
-                      </button>
+                      <div style={hdr()}>Road</div>
+                      {miRow({
+                        icon: <RoadBranchIcon />, text: "Branch a road from here", testId: "road-branch-here",
+                        title: "Start a new road here, joined to this one as a T. It inherits this road's class and width; click where it should go, then ✓ Done.",
+                        onClick: () => { const at = typeMenu.w; setTypeMenu(null); startRoadBranch(t, at); },
+                      })}
                     </>
                   )}
-                  <div style={hdr(true)}>Edit</div>
-                  {/* NEW-1 — an element could not reach its own inspector from its own menu, and could
-                      not be COPIED from it, while every other family offered both. Both were reachable
-                      by other means (double-click, Ctrl+C), which is exactly why the gap was invisible. */}
-                  <button style={menuItem(false)} onClick={() => { setSel({ kind: "el", id: typeMenu.id }); openInspector(); setTypeMenu(null); }}>Properties…</button>
-                  <button style={menuItem(false)} onClick={() => { copyRef({ kind: "el", id: typeMenu.id }); setTypeMenu(null); }}>Copy</button>
-                  <button style={menuItem(false)} onClick={() => { duplicateEl(typeMenu.id); setTypeMenu(null); }}>Duplicate</button>
-                  {/* NEW-1 — ONE NAME PER CONCEPT. This said "Pin"/"Unpin" while the markup, measurement,
-                      callout and reference menus all said "Lock"/"Unlock" for the identical `locked`
-                      field. A user cannot be expected to know those are one idea. */}
-                  <button style={menuItem(!!t.locked)} onClick={() => { toggleLock(typeMenu.id); setTypeMenu(null); }}>{t.locked ? "Unlock" : "Lock"}</button>
-                  {!t.points && <button style={menuItem(false)} onClick={() => { setSel({ kind: "el", id: typeMenu.id }); setAlignFor(typeMenu.id); setTypeMenu(null); }}>Align rotation…</button>}
+
+                  {/* ── 2. ARRANGE — exactly four rows, identical everywhere, shortcuts right-aligned. ── */}
+                  {af && (
+                    <>
+                      <div style={hdr()}>Arrange</div>
+                      {arrRow(<BringToFrontIcon />, "Bring to Front", "front", af.atTop || af.count < 2, `${MOD}⇧]`)}
+                      {arrRow(<BringForwardIcon />, "Bring Forward", "forward", af.atTop || af.count < 2, `${MOD}]`)}
+                      {arrRow(<SendBackwardIcon />, "Send Backward", "backward", af.atBottom || af.count < 2, `${MOD}[`)}
+                      {arrRow(<SendToBackIcon />, "Send to Back", "back", af.atBottom || af.count < 2, `${MOD}⇧[`)}
+                    </>
+                  )}
+
+                  {/* ── 3. Common actions — separated by ONE rule. ── */}
+                  <div style={{ height: 1, background: PAL.panelLine, margin: "4px 0" }} />
+                  {miRow({ icon: <PropertiesIcon />, text: "Properties…", onClick: () => { setSel({ kind: "el", id: typeMenu.id }); openInspector(); setTypeMenu(null); } })}
+                  {miRow({ icon: <CopyIcon />, text: "Copy", onClick: () => { copyRef({ kind: "el", id: typeMenu.id }); setTypeMenu(null); } })}
+                  {miRow({ icon: <MenuDuplicateIcon />, text: "Duplicate", hint: `${MOD}D`, onClick: () => { duplicateEl(typeMenu.id); setTypeMenu(null); } })}
+                  {miRow({ icon: <MenuLockIcon open={!t.locked} />, text: t.locked ? "Unlock" : "Lock", onClick: () => { toggleLock(typeMenu.id); setTypeMenu(null); } })}
+                  {!t.points && miRow({ icon: <AlignRotationIcon />, text: "Align rotation…", onClick: () => { setSel({ kind: "el", id: typeMenu.id }); setAlignFor(typeMenu.id); setTypeMenu(null); } })}
                   {t.attachedTo
-                    ? <button style={menuItem(false)} onClick={() => { detach(typeMenu.id); setTypeMenu(null); }}>Detach</button>
-                    : <button style={menuItem(false)} onClick={() => { setAttachFor(typeMenu.id); setTypeMenu(null); }}>Attach to…</button>}
-                  <button style={{ ...menuItem(false), color: PAL.danger }} onClick={() => { deleteSel({ kind: "el", id: typeMenu.id }, { entry: "menu:element" }); setTypeMenu(null); }}>Delete</button>
+                    ? miRow({ icon: <DetachIcon />, text: "Detach", onClick: () => { detach(typeMenu.id); setTypeMenu(null); } })
+                    : miRow({ icon: <AttachIcon />, text: "Attach to…", onClick: () => { setAttachFor(typeMenu.id); setTypeMenu(null); } })}
+                  {miRow({ icon: <MenuDeleteIcon />, text: "Delete", danger: true, onClick: () => { deleteSel({ kind: "el", id: typeMenu.id }, { entry: "menu:element" }); setTypeMenu(null); } })}
                 </>
               );
             })()}
@@ -27343,6 +27446,39 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </ContextMenu>
         );
       })()}
+
+      {/* NEW-2 (B845585) — Alt+hover stack picker. A portal (never clipped, same reasoning as
+          ContextMenu) but deliberately NOT that shared component: this is hover-driven, not
+          click-opened, so it carries no full-screen dismiss backdrop — the canvas underneath stays
+          live the whole time Alt is held. Empty canvas → altPick is null → nothing renders. */}
+      {altPick && createPortal(
+        <div role="listbox" aria-label="Everything under the cursor" data-testid="alt-stack-pick"
+          style={{
+            position: "fixed", left: altPick.x + 14, top: altPick.y + 14, zIndex: 6500,
+            minWidth: 170, maxWidth: 260, background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`,
+            borderRadius: RADIUS.lg, boxShadow: "0 16px 44px rgba(28,25,20,0.22), 0 3px 10px rgba(28,25,20,0.1)",
+            padding: "4px 0",
+          }}>
+          {altPick.entries.map((en, i) => (
+            <div key={en.key} role="option" aria-selected={i === altPick.focusIndex} data-testid={`alt-stack-pick-row-${i}`}
+              onMouseEnter={() => setAltPick((p) => p && { ...p, focusIndex: i })}
+              onClick={() => altPickChoose(en.target)}
+              style={{ display: "flex", alignItems: "center", gap: SPACE.sm, height: 23, padding: "0 10px", fontSize: FONT_SIZE.md, color: PAL.ink, background: i === altPick.focusIndex ? PAL.accentSoft : "transparent", cursor: "pointer" }}>
+              <span style={{ flex: "0 0 14px", color: PAL.muted, fontSize: FONT_SIZE.sm, fontVariantNumeric: "tabular-nums" }}>{i + 1}</span>
+              <span style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{en.label}</span>
+            </div>
+          ))}
+        </div>,
+        document.body,
+      )}
+      {altPick && altPickHiRect && createPortal(
+        <div aria-hidden style={{
+          position: "fixed", left: altPickHiRect.left - 3, top: altPickHiRect.top - 3,
+          width: altPickHiRect.width + 6, height: altPickHiRect.height + 6,
+          border: `2px solid ${PAL.accent}`, borderRadius: 4, pointerEvents: "none", zIndex: 6499,
+        }} />,
+        document.body,
+      )}
     </div>
   );
 }
