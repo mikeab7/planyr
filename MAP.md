@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-30 @ `e84c5827` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-30 @ `1b8ea99` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_591 source files mapped._
+_600 source files mapped._
 
 ## infra
 
@@ -83,6 +83,24 @@ _591 source files mapped._
   - _exports_: `supabase`, `supabaseConfigured`
 - **`src/workspaces/food/lib/visitAggregates.js`** — Pure aggregation over a place's loaded visits: averages, visit count, first/last date, deduped "order again" entries
   - _exports_: `computeVisitAggregates`, `orderAgainEntries`
+- **`src/workspaces/model/components/FormulaBar.jsx`** — The formula bar: shows the active cell's underlying formula/raw text (never the displayed value) and commits edits the same way as the in-cell editor.
+  - _exports_: `default (FormulaBar)`
+- **`src/workspaces/model/components/NumberFormatPicker.jsx`** — The number-format picker (General/Currency/Percent/Accounting/$-per-SF/…), applied to every column the current selection spans.
+  - _exports_: `default (NumberFormatPicker)`
+- **`src/workspaces/model/components/SheetView.jsx`** — The virtualised sheet grid: row virtualization, rectangular selection, keyboard nav and the inline cell editor, mechanism lifted from the Schedule module's GridView.
+  - _exports_: `default (SheetView)`, `HEADER_H`, `ROW_H`
+- **`src/workspaces/model/lib/modelStore.js`** — Sheet persistence: local-storage write-through save plus a guarded cloud save (serializeWrites + optimisticUpsert) against `model_sheets`.
+  - _exports_: `loadCloudSheet`, `readLocalSheet`, `saveCloudSheet`, `writeLocalSheet`
+- **`src/workspaces/model/lib/numberFormats.js`** — The number-format picker's preset list, each token handed straight to the shared engine's `formatValue`.
+  - _exports_: `formatLabelFor`, `NUMBER_FORMATS`
+- **`src/workspaces/model/lib/sheetEngine.js`** — Wires the sheet model to the shared formula engine: evaluates every formula column in dependency order, and renders each cell's display/formula-bar text.
+  - _exports_: `displayFor`, `evaluateSheet`, `formulaBarText`, `formulaSource`, `literalTypedValue`
+- **`src/workspaces/model/lib/sheetModel.js`** — The pure spreadsheet data model: columns/cells/formulas, cell addressing, and every mutator (all pure, undo-stack-ready).
+  - _exports_: `addColumn`, `blankRange`, `cellKey`, `clearColumnFormula`, `colAt`, `columnIndexByName`, `commitCellText`, `createSheet`, `deleteColumn`, `migrateSheet`, `padRowCount`, `rawAt`, `renameColumn`, `setColumnFormula`, `setNumberFormat`, `setRaw`, `SHEET_VERSION`
+- **`src/workspaces/model/lib/undoStack.js`** — General whole-state undo/redo: a snapshot stack keyed on committed edits, agnostic to what kind of edit each one was.
+  - _exports_: `useUndoableState`
+- **`src/workspaces/model/ModelApp.jsx`** — Model workspace root: the underwriting spreadsheet — loads/saves the active project's sheet and wires the toolbar, formula bar and grid together.
+  - _exports_: `default (ModelApp)`
 - **`src/workspaces/notes/components/IntegrityBanner.jsx`** — the bar for the two findings nothing could previously mention: one note living in two projects, and a note that had lost its place (already recovered by the time it renders, and named / openable / re-filable inline). Its own lazy chunk — it renders only when something is wrong.
   - _exports_: `default (IntegrityBanner)`
 - **`src/workspaces/notes/components/NoteEditor.jsx`** — One note page (title · toolbar · document) and the module's ONLY editor-engine import — the lazy boundary. Snapshots the document as plain JSON at edit time so the flush never queries a torn-down instance.

@@ -4,7 +4,6 @@
  * typing "=…" here and pressing Enter sets the column's formula exactly as it would in-cell.
  */
 import { useEffect, useState } from "react";
-import { colAt } from "../lib/sheetModel.js";
 import { formulaBarText } from "../lib/sheetEngine.js";
 
 function colLabel(colIndex) {
@@ -14,7 +13,6 @@ function colLabel(colIndex) {
 }
 
 export default function FormulaBar({ sheet, row, col, onCommit }) {
-  const column = colAt(sheet, col);
   const [value, setValue] = useState(() => formulaBarText(sheet, row, col));
 
   // Re-seed whenever the active cell (or its content, via any other commit path) changes.
