@@ -200,10 +200,21 @@ function detentionVerdict(d) {
     if (!d.floodChecked) return notCheckedRow("det", "Detention");
     return loadingRow("det", "Detention");
   }
-  // A resolved req (a real point/band requirement) means a check already ran, so a still-null
-  // usableAcFt here is the pond-volume leg genuinely catching up — a real loading state, not
-  // "never checked" (test: "detention LOADING → '…' pill, 'checking flood data', loading flag").
-  if (usableAcFt == null) return loadingRow("det", "Detention");
+  // B854xxx/NEW-1 — a resolved `req` does NOT imply a flood check ran: `req` hydrates from
+  // `drainCtxData` (a live OR a RESTORED context's `.ctx`), while `floodChecked` reads that same
+  // restored record's separate `.checkedAt` field (SitePlanner.jsx `drainRestoredCtx`) — two
+  // different fields of one restorable object, not implications of each other. A saved
+  // `settings.drainage.lastCheck` that carries enough for `hydrateDrainageContext` to rebuild a
+  // requirement but no valid `checkedAt` (a record from before that stamp was reliably written,
+  // or one that otherwise lost it) resolves `requiredAcFt` while `floodChecked` correctly stays
+  // false — reproducing the owner's Richfield report (header "not checked", Detention "checking
+  // flood data") even though nothing was fetching. So this branch gets the same guard as the one
+  // above: only a GENUINE loading state (a check has run; the pond-volume leg is still catching
+  // up — see the LOADING test) may say "checking flood data".
+  if (usableAcFt == null) {
+    if (!d.floodChecked) return notCheckedRow("det", "Detention");
+    return loadingRow("det", "Detention");
+  }
   const short = usableAcFt < requiredAcFt - EPS || inundated;
   const v = pairRow("det", "Detention", usableAcFt, requiredAcFt, short, { thinOverrides: d.thinMarginPct, pctFloorAcFt: d.marginPctFloorAcFt });
   // R1 — when the (ASSUMED) coincident-storm policy MATERIALLY drives this usable number, the
