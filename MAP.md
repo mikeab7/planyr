@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-29 @ `2e5ee4ff` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-30 @ `a3ef07bd` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -1086,7 +1086,7 @@ _586 source files mapped._
 - **`src/workspaces/site-planner/lib/upstreamArea.js`** — Upstream/offsite drainage delineation (NEW-C1): extends flowField D8 → flow-accumulation over the 3DEP DEM, contributing-area acreage at the site outfall, and the offsite-drainage "engineer's check" flag when upstream materially exceeds the site. Pure.
   - _exports_: `contributingAcres`, `delineateUpstream`, `downstreamIndex`, `flowAccumulation`, `lowestCell`, `OFFSITE_MATERIAL_RATIO`, `offsiteDrainageFlag`
 - **`src/workspaces/site-planner/lib/userPrefs.js`** — Account-level user preferences (NEW-3) — `public.profiles.prefs` jsonb with a localStorage mirror; backs the Standards "All projects" scope and publishes it into `planStyle`'s account layer.
-  - _exports_: `_normalizePrefs`, `applyPrefs`, `EMPTY_PREFS`, `getStandardPref`, `loadUserPrefs`, `readMirror`, `saveUserPrefs`, `setStandardPref`
+  - _exports_: `_normalizePrefs`, `applyPrefs`, `EMPTY_PREFS`, `getStandardPref`, `loadUserPrefs`, `readMirror`, `saveUserPrefs`, `setSitesPanelPref`, `setStandardPref`
 - **`src/workspaces/site-planner/lib/vectorLayers.js`** — Pure registry-driven vector GIS engine (FEMA/NWI + county/city/ETJ boundaries): paged ArcGIS pull, detail tiers with server-side generalization, grid-snapped SWR cache keys, Esri-to-GeoJSON, Douglas-Peucker, vector-vs-image decision
   - _exports_: `buildQueryUrl`, `buildVectorQuery`, `decideVectorOrImage`, `douglasPeucker`, `featuresToGeoJson`, `fetchCached`, `fetchVectorFeatures`, `hitFeature`, `identifyRows`, `pickTier`, `simplifyGeoJson`, `snapBbox`, `styleFor`, `VECTOR_SOURCES`, `vectorKey`
 - **`src/workspaces/site-planner/lib/vectorOverlay.js`** — Leaflet glue over the vector cache tier: cachedVectorLayer paints last-good boundaries instantly, background-refreshes, hover/click identify (identifyOk-gated), zoom-gated divIcon name labels, live esri-leaflet fallback
