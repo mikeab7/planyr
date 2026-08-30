@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import {
   evaluateFormula, formatValue, parseFormula, extractRefs, planFormulaColumns,
   makeDate, isoToSerial, serialToISO, BLANK, FORMULA_ERRORS, isDate,
-  errVal, isErrVal,
+  errVal, isErrVal, DEFAULT_CALENDAR,
 } from "../src/shared/formula/formula.js";
 
 // ── Test harness ────────────────────────────────────────────────────────────
@@ -729,5 +729,275 @@ describe("B597 — error cells propagate through aggregation & references (Excel
     const r = runTable("SUM([Cost])", [{ Cost: 1 }, { Cost: 2 }]);
     expect(r.ok).toBe(true);
     expect(isErrVal(r.value)).toBe(false);
+  });
+});
+
+// ── Row-invariant whole-column caching (the quadratic-aggregate fix) ───────────────────
+// The host (public/sequence/index.html's computeFormulaValues) evaluates one formula
+// column by calling evaluateFormula() once per row, reusing the SAME `rows` array object
+// across every one of those calls within a recalc pass. The engine now memoizes a
+// range-aware call's ENTIRE result per (AST node, rows array) pair whenever every
+// argument is row-invariant (see RANGE_ARG_POSITIONS/isRowInvariant in formula.js) — the
+// tests below drive that exact scenario directly (one shared rows array, many rowIndex
+// values) rather than through runTable(), which builds a fresh rows array per call and so
+// never exercises the cache the way the real host does.
+describe("row-invariant caching — correctness under the SAME shared rows array", () => {
+  const runAllRows = (src, rowsRaw, opts = {}) => {
+    const rows = rowsRaw.map(lower);
+    return rows.map((_, i) => evaluateFormula(src, {
+      columns: rows[i],
+      rows,
+      rowIndex: i,
+      calendar: opts.calendar || calendar(opts.holidays || []),
+      today: opts.today != null ? isoToSerial(opts.today) : isoToSerial("2026-06-29"),
+      formatDate: opts.formatDate || serialToISO,
+    }));
+  };
+
+  it("a row-dependent MATCH/XLOOKUP target is never frozen onto other rows (the exact trap named in the brief)", () => {
+    // Cost is unique per row; Target on row i asks to look up row i's OWN cost — so the
+    // correct answer for XLOOKUP/MATCH varies every row. A "hoist any bare [Column] arg"
+    // bug would freeze row 0's answer (Task "T0") onto every subsequent row.
+    const rows = [
+      { Cost: 10, Task: "T0", Target: 10 },
+      { Cost: 20, Task: "T1", Target: 20 },
+      { Cost: 30, Task: "T2", Target: 30 },
+      { Cost: 40, Task: "T3", Target: 40 },
+    ];
+    const xl = runAllRows("XLOOKUP([Target],[Cost],[Task])", rows);
+    expect(xl.map(r => r.value)).toEqual(["T0", "T1", "T2", "T3"]);
+    const mt = runAllRows("MATCH([Target],[Cost],0)", rows);
+    expect(mt.map(r => r.value)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("a row-dependent INDEX position is never frozen onto other rows", () => {
+    const rows = [
+      { Cost: 10, Pos: 1 }, { Cost: 20, Pos: 2 }, { Cost: 30, Pos: 3 }, { Cost: 40, Pos: 4 },
+    ];
+    const idx = runAllRows("INDEX([Cost],[@Pos])", rows);
+    expect(idx.map(r => r.value)).toEqual([10, 20, 30, 40]);
+  });
+
+  it("a row-dependent COUNTIF/SUMIF criterion is never frozen onto other rows", () => {
+    // UniqueCost is 0..N-1 (one row matches each Threshold exactly); Threshold=2*i means
+    // only rows 0 and 1 have a match at all (2*0=0 and 2*1=2 both exist among 0..3).
+    const rows = [
+      { UniqueCost: 0, Threshold: 0 }, { UniqueCost: 1, Threshold: 2 },
+      { UniqueCost: 2, Threshold: 4 }, { UniqueCost: 3, Threshold: 6 },
+    ];
+    const c = runAllRows("COUNTIF([UniqueCost],[Threshold])", rows);
+    expect(c.map(r => r.value)).toEqual([1, 1, 0, 0]);
+    const s = runAllRows('COUNTIF([UniqueCost], ">" & [Threshold])', rows);
+    expect(s.map(r => r.value)).toEqual([3, 1, 0, 0]); // >0,>2,>4,>6 against {0,1,2,3}
+  });
+
+  it("a genuinely row-INVARIANT aggregate gives the identical answer from every row", () => {
+    const rows = [{ Cost: 5 }, { Cost: 10 }, { Cost: 15 }];
+    const s = runAllRows("SUM([Cost])", rows);
+    expect(s.map(r => r.value)).toEqual([30, 30, 30]);
+    const c = runAllRows('COUNTIF([Cost],">7")', rows);
+    expect(c.map(r => r.value)).toEqual([2, 2, 2]);
+  });
+
+  it("mixing an invariant range with a row-variant scalar still varies correctly per row", () => {
+    const rows = [{ Cost: 5, Adj: 1 }, { Cost: 10, Adj: 2 }, { Cost: 15, Adj: 3 }];
+    const s = runAllRows("SUM([Cost], [@Adj])", rows); // SUM([Cost]) part is 30 every row; [@Adj] varies
+    expect(s.map(r => r.value)).toEqual([31, 32, 33]);
+  });
+
+  it("a cached #REF!/#N/A from a row-invariant call is faithfully re-thrown for every row", () => {
+    const rows = [{ Cost: 5 }, { Cost: 10 }];
+    const r1 = runAllRows("SUM([NoSuchColumn])", rows);
+    expect(r1.every(r => !r.ok && r.error === FORMULA_ERRORS.REF)).toBe(true);
+    const r2 = runAllRows('COUNTIF([Cost],">100")', rows); // invariant, legitimately 0 every row
+    expect(r2.map(r => r.value)).toEqual([0, 0]);
+  });
+
+  it("a lazy branch (IF) selecting between two invariant rng calls resolves independently per row", () => {
+    const rows = [
+      { Cost: 100, Flag: true }, { Cost: 5, Flag: false },
+      { Cost: 100, Flag: true }, { Cost: 5, Flag: false },
+    ];
+    const r = runAllRows('IF([@Flag], SUM([Cost]), COUNTIF([Cost],">50"))', rows);
+    // SUM([Cost]) = 210 every row (invariant); COUNTIF([Cost],">50") = 2 every row (invariant);
+    // IF's own condition [@Flag] is row-dependent, so the SELECTED branch must alternate.
+    expect(r.map(x => x.value)).toEqual([210, 2, 210, 2]);
+  });
+});
+
+// ── Perf regression guard: whole-column aggregates must not be quadratic in row count ──
+// Generous on purpose (matches the pattern in test/pondViewIndependence.test.js): this
+// exists to catch a CLASS CHANGE (an O(rows²) scan returning to this path), not to police
+// a few percent on a shared CI box. Sampled REPS times, keeping the MINIMUM of each arm
+// (a scheduler steal/GC can only ever ADD time, never subtract it), with the two arms
+// interleaved so a machine that drifts mid-run doesn't bias one arm against the other.
+describe("perf: whole-column aggregates scale linearly, not quadratically", () => {
+  it("COUNTIF over 8x the rows costs nowhere near 8x² (64x) the time", () => {
+    const makeRows = n => { const a = []; for (let i = 0; i < n; i++) a.push({ cost: (i % 97) + 1 }); return a; };
+    const small = makeRows(300).map(lower);
+    const large = makeRows(2400).map(lower); // 8x the rows
+    const sample = rows => {
+      const t0 = performance.now();
+      for (let i = 0; i < rows.length; i++) {
+        evaluateFormula('COUNTIF([Cost],">50")', { columns: rows[i], rows, rowIndex: i, calendar: DEFAULT_CALENDAR, today: isoToSerial("2026-06-29"), formatDate: serialToISO });
+      }
+      return performance.now() - t0;
+    };
+    const REPS = 5;
+    let bestSmall = Infinity, bestLarge = Infinity;
+    for (let i = 0; i < REPS; i++) {
+      bestSmall = Math.min(bestSmall, sample(small));
+      bestLarge = Math.min(bestLarge, sample(large));
+    }
+    // Linear (with fixed per-call overhead) lands well under 8x; true O(n²) would land near
+    // 64x. 20x is a generous midpoint that never flakes on healthy code but still fails
+    // hard the moment the quadratic path comes back.
+    expect(bestLarge).toBeLessThan(Math.max(bestSmall, 1) * 20);
+  });
+});
+
+// ── Financial functions (NPV, XNPV, IRR, XIRR, MIRR, PMT, IPMT, PPMT, RATE, NPER, FV,
+//    PV, CUMIPMT, CUMPRINC) ── Every assertion here checks a STRUCTURAL INVARIANT (an
+// identity that must hold by definition, and so cannot be misremembered) rather than a
+// recalled numeric constant — see the brief: a prototype's own remembered PMT constant
+// was WRONG and its computed value was right, caught only because it was cross-checked
+// against FV=0 and the closed-form annuity formula instead of trusted from memory.
+describe("financial functions", () => {
+  const approx = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
+
+  it("IPMT(n) + PPMT(n) == PMT for every period, both END and BEGIN conventions", () => {
+    for (const type of [0, 1]) {
+      const rate = 0.005, nper = 24, pv = 10000, fv = 0;
+      const pmt = num(`PMT(${rate},${nper},${pv},${fv},${type})`);
+      for (let n = 1; n <= nper; n++) {
+        const ipmt = num(`IPMT(${rate},${n},${nper},${pv},${fv},${type})`);
+        const ppmt = num(`PPMT(${rate},${n},${nper},${pv},${fv},${type})`);
+        expect(approx(ipmt + ppmt, pmt)).toBe(true);
+      }
+    }
+  });
+
+  it("IPMT(1) is exactly 0 under the BEGIN (type=1) convention — the classic off-by-one", () => {
+    // A type=1 payment happens at the START of period 1 (time 0), before any interest has
+    // had time to accrue — so period 1's payment is pure principal.
+    expect(num("IPMT(0.01,1,12,10000,0,1)")).toBe(0);
+    expect(num("PPMT(0.01,1,12,10000,0,1)")).toBe(num("PMT(0.01,12,10000,0,1)"));
+  });
+
+  it("sum of PPMT over the full term == -PV when the loan fully amortizes (FV=0)", () => {
+    for (const type of [0, 1]) {
+      const rate = 0.007, nper = 36, pv = 25000;
+      let sum = 0;
+      for (let n = 1; n <= nper; n++) sum += num(`PPMT(${rate},${n},${nper},${pv},0,${type})`);
+      expect(approx(sum, -pv, 1e-6)).toBe(true);
+    }
+  });
+
+  it("FV == 0 at the end of a fully amortizing schedule (PMT solved with FV=0)", () => {
+    const rate = 0.006, nper = 48, pv = 15000;
+    const pmt = num(`PMT(${rate},${nper},${pv},0,0)`);
+    expect(approx(num(`FV(${rate},${nper},${pmt},${pv},0)`), 0)).toBe(true);
+  });
+
+  it("NPER and RATE round-trip through PMT (both directions)", () => {
+    const rate = 0.008, nper = 30, pv = 20000, fv = 0, type = 0;
+    const pmt = num(`PMT(${rate},${nper},${pv},${fv},${type})`);
+    expect(approx(num(`NPER(${rate},${pmt},${pv},${fv},${type})`), nper, 1e-4)).toBe(true);
+    expect(approx(num(`RATE(${nper},${pmt},${pv},${fv},${type})`), rate, 1e-6)).toBe(true);
+  });
+
+  it("RATE converges from a supplied guess on a harder (longer-term, low-payment) case", () => {
+    const rate = 0.0125, nper = 360, pv = 300000, fv = 0, type = 0; // a 30yr mortgage-shaped case
+    const pmt = num(`PMT(${rate},${nper},${pv},${fv},${type})`);
+    expect(approx(num(`RATE(${nper},${pmt},${pv},${fv},${type},0.05)`), rate, 1e-6)).toBe(true);
+  });
+
+  it("CUMIPMT + CUMPRINC over the full term == nper * PMT", () => {
+    const rate = 0.009, nper = 60, pv = 40000, type = 0;
+    const pmt = num(`PMT(${rate},${nper},${pv},0,${type})`);
+    const cumI = num(`CUMIPMT(${rate},${nper},${pv},1,${nper},${type})`);
+    const cumP = num(`CUMPRINC(${rate},${nper},${pv},1,${nper},${type})`);
+    expect(approx(cumI + cumP, nper * pmt)).toBe(true);
+    expect(approx(cumP, -pv)).toBe(true); // full-term principal repaid == the amount borrowed
+  });
+
+  it("CUMIPMT/CUMPRINC reject an invalid period range or domain exactly like Excel (#NUM!)", () => {
+    expect(err("CUMIPMT(0.01,12,10000,0,6,0)")).toBe(FORMULA_ERRORS.NUM);   // start < 1
+    expect(err("CUMIPMT(0.01,12,10000,6,3,0)")).toBe(FORMULA_ERRORS.NUM);   // end < start
+    expect(err("CUMIPMT(0.01,12,10000,1,6,2)")).toBe(FORMULA_ERRORS.NUM);   // type not 0/1
+    expect(err("CUMIPMT(-0.01,12,10000,1,6,0)")).toBe(FORMULA_ERRORS.NUM); // rate <= 0
+    expect(err("CUMIPMT(0.01,12,-10000,1,6,0)")).toBe(FORMULA_ERRORS.NUM); // pv <= 0
+  });
+
+  it("NPV(IRR(cash flows)) == 0 (the classic Excel identity, holds despite NPV/IRR indexing from different periods)", () => {
+    const cfs = [-1000, 300, 400, 500, 200];
+    const r = num(`IRR(${cfs.join(",")})`);
+    expect(approx(num(`NPV(${r},${cfs.join(",")})`), 0, 1e-6)).toBe(true);
+  });
+
+  it("XNPV(XIRR(...)) == 0 with real calendar dates", () => {
+    const pairs = [
+      [-1000, "2026-01-01"], [300, "2026-04-01"], [400, "2026-08-01"],
+      [500, "2026-12-01"], [200, "2027-04-01"],
+    ];
+    const args = pairs.map(([v, d]) => `${v},DATE(${d.slice(0, 4)},${d.slice(5, 7)},${d.slice(8, 10)})`).join(",");
+    const r = num(`XIRR(${args})`);
+    expect(approx(num(`XNPV(${r},${args})`), 0, 1e-4)).toBe(true);
+  });
+
+  it("MIRR reduces to IRR for exactly two cash flows, for ANY finance/reinvest rate (sign-convention check)", () => {
+    const cf0 = -1000, cf1 = 1300;
+    const irr = num(`IRR(${cf0},${cf1})`);
+    for (const [fr, rr] of [[0.05, 0.05], [0.1, 0.02], [0.2, 0.2]]) {
+      expect(approx(num(`MIRR(${fr},${rr},${cf0},${cf1})`), irr, 1e-9)).toBe(true);
+    }
+  });
+
+  it("MIRR on a multi-period project (documented formula, not a remembered example)", () => {
+    // Cross-checked against the definition itself, computed independently here rather than
+    // trusted from a recalled number: FV of inflows at reinvestRate / -PV of outflows at
+    // financeRate, geometric-mean over (n-1) periods, minus 1.
+    const cfs = [-1000, -200, 300, 400, 500, 300];
+    const financeRate = 0.1, reinvestRate = 0.08;
+    const n = cfs.length - 1;
+    let pvNeg = 0, fvPos = 0;
+    cfs.forEach((cf, i) => { if (cf < 0) pvNeg += cf / Math.pow(1 + financeRate, i); else fvPos += cf * Math.pow(1 + reinvestRate, n - i); });
+    const expected = Math.pow(fvPos / -pvNeg, 1 / n) - 1;
+    expect(approx(num(`MIRR(${financeRate},${reinvestRate},${cfs.join(",")})`), expected, 1e-9)).toBe(true);
+  });
+
+  it("PV/FV/PMT round-trip the fundamental annuity identity", () => {
+    const rate = 0.01, nper = 20, pmt = -500, fv = 1000;
+    const pv = num(`PV(${rate},${nper},${pmt},${fv},0)`);
+    expect(approx(num(`FV(${rate},${nper},${pmt},${pv},0)`), fv, 1e-6)).toBe(true);
+    expect(approx(num(`PV(${rate},${nper},${pmt},${fv},0)`), pv)).toBe(true);
+  });
+
+  it("rate == 0 degenerates to plain division/multiplication (no NaN from the annuity formula)", () => {
+    expect(num("PMT(0,10,1000,0,0)")).toBe(-100);
+    expect(num("FV(0,10,-100,1000,0)")).toBeCloseTo(0, 9); // -0 vs 0: same value, JS Object.is distinguishes them
+    expect(num("NPER(0,-100,1000,0,0)")).toBe(10);
+    expect(num("IPMT(0,3,10,1000,0,0)")).toBe(0);
+  });
+
+  it("arity guards reject too few arguments", () => {
+    expect(err("NPV(0.1)")).toBe(FORMULA_ERRORS.VALUE);
+    expect(err("XNPV(0.1,100)")).toBe(FORMULA_ERRORS.VALUE);
+    expect(err("IRR(100)")).toBe(FORMULA_ERRORS.VALUE);
+    expect(err("XIRR(100,200)")).toBe(FORMULA_ERRORS.VALUE);
+    expect(err("MIRR(0.1,0.1,100)")).toBe(FORMULA_ERRORS.VALUE);
+    expect(err("PMT(0.1,10)")).toBe(FORMULA_ERRORS.VALUE);
+    expect(err("IPMT(0.1,1,10)")).toBe(FORMULA_ERRORS.VALUE);
+    expect(err("RATE(10,-100)")).toBe(FORMULA_ERRORS.VALUE);
+    expect(err("NPER(0.1,-100)")).toBe(FORMULA_ERRORS.VALUE);
+    expect(err("FV(0.1,10)")).toBe(FORMULA_ERRORS.VALUE);
+    expect(err("PV(0.1,10)")).toBe(FORMULA_ERRORS.VALUE);
+    expect(err("CUMIPMT(0.1,10,1000,1)")).toBe(FORMULA_ERRORS.VALUE);
+    expect(err("CUMPRINC(0.1,10,1000,1)")).toBe(FORMULA_ERRORS.VALUE);
+  });
+
+  it("XNPV/XIRR reject an unpaired values/dates argument list", () => {
+    expect(err("XNPV(0.1,100,DATE(2026,1,1),200)")).toBe(FORMULA_ERRORS.VALUE);
+    expect(err("XIRR(100,DATE(2026,1,1),200)")).toBe(FORMULA_ERRORS.VALUE);
   });
 });
