@@ -11,6 +11,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sweep, reconcile, bindingsIn, rawReadsOf, asksPredicate, artefactsOf } from "../ui-audit/audit-hidden-content-reads.mjs";
@@ -55,9 +56,13 @@ describe("every read of the raw element list is judged", () => {
 describe("⛔ MUTATION CHECK — the sweep really does catch the defect it was built from", () => {
   it("the pre-B3296 roadNet body is reported as an unfiltered must-filter read", () => {
     /* The real thing, from the real tree, rather than a hand-written imitation: a paraphrase would
-     * test the paraphrase. */
-    const src = execFileSync("git", ["show", "b4ddcc78^:src/workspaces/site-planner/SitePlanner.jsx"],
-      { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+     * test the paraphrase. This used to be read live via `git show b4ddcc78^:…`, but b4ddcc78 is not
+     * an ancestor of `origin/main` — it survives only on one long-unmerged branch — so pruning that
+     * branch made this fail forever with `fatal: invalid object name`, with no way to recover the
+     * blob (NEW-1, B876256). Reading the body from a checked-in fixture instead means this check no
+     * longer depends on any commit outside main's history, or on any branch continuing to exist. See
+     * test/fixtures/preB3296RoadNet.txt for the SHA provenance. */
+    const src = readFileSync(resolve(ROOT, "test/fixtures/preB3296RoadNet.txt"), "utf8");
     const roadNet = bindingsIn(src).find((b) => b.name === "roadNet");
     expect(roadNet, "no roadNet binding in the pre-fix tree").toBeTruthy();
     expect(rawReadsOf(roadNet.body)).toContain("els");
