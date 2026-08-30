@@ -180,13 +180,16 @@ describe("jurisdiction defaulting", () => {
     expect(defaultFloodJurForAuthority("hcfcd")).toBe("harris");
     expect(defaultFloodJurForAuthority("fortbend")).toBe("fortbend");
     expect(defaultFloodJurForAuthority("missouricity")).toBe("fortbend"); // overlay → its county
-    expect(defaultFloodJurForAuthority("nowhere")).toBe("generic");
-    expect(defaultFloodJurForAuthority(null)).toBe("generic");
+    // ⛔ B877440 — an unmatched authority is `null` ("no criteria on file"), never the silent
+    // "generic" placeholder; "generic" is reachable only by an explicit user pick.
+    expect(defaultFloodJurForAuthority("nowhere")).toBe(null);
+    expect(defaultFloodJurForAuthority(null)).toBe(null);
   });
   it("county fallback for plans that haven't run the drainage identify", () => {
     expect(defaultFloodJurForCounty("harris")).toBe("harris");
     expect(defaultFloodJurForCounty("Waller")).toBe("waller");
-    expect(defaultFloodJurForCounty("bexar")).toBe("generic");
+    // ⛔ B877440 — Bexar (outside the modeled Houston-MSA set) is `null`, not "generic".
+    expect(defaultFloodJurForCounty("bexar")).toBe(null);
   });
   it("triggerClasses expands the trigger band", () => {
     expect(triggerClasses(DEFAULT_FLOODPLAIN_RULES.montgomery)).toEqual(["1pct"]); // still a 1%-only placeholder

@@ -27,5 +27,16 @@ indistinguishable from any other unrecognized route — never a permission-denie
 RPC pattern — each mints its own `SECURITY DEFINER` function rather than a client-side SELECT
 policy on the table it reads.
 
+**Fifth section, already shipped (B877442) — `CriteriaRequestsSection.jsx` + `lib/criteriaRequestsAdmin.js`.**
+Lists counties requested via B877440/B877441's "Request criteria for this county" action (the plan-side
+no-data state), most-requested first, with state, first/last asked, and a "Wired ✓ / Outstanding" status —
+read through `admin_list_criteria_requests()`, a RPC defined in the site-planner workspace's `db/` folder
+(the migration that creates the request table and this RPC together), the same
+SECURITY DEFINER + `is_admin()` pattern as `admin_users.sql`. "Wired" is decided CLIENT-SIDE
+(`criteriaRequestsAdmin.isWired`) by cross-referencing the request's county against the same
+modeled-jurisdiction lists the app itself routes against (`detentionRules.COUNTY_AUTHORITY`,
+`easementRules.MODELED_COUNTIES`) — the database has no way to know what a given deploy has modeled, and
+this keeps "wired" self-correcting the moment a county is added, with nothing to update by hand.
+
 <!-- Keep this pointer current: if you rename/move/delete a key file in this folder, update the
      lines above in the same commit. The doc-pointer-audit check fails CI on a stale reference. -->

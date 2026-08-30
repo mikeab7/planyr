@@ -256,7 +256,11 @@ export function saveFloodplainRules(rules, store) {
 
 /* Best-guess rules key from the RESOLVED drainage authority (detentionRules.js ids) —
  * richer than a bare county guess because the drainage identify already separates COH
- * (city + ETJ) from unincorporated Harris. User can override in the UI (B74 pattern). */
+ * (city + ETJ) from unincorporated Harris. User can override in the UI (B74 pattern).
+ *
+ * ⛔ B877440 — an authority with no floodplain record on file returns `null`, never the silent
+ * "generic" placeholder. A county/authority outside the modeled Houston-MSA set (Tarrant, Dallas,
+ * Amarillo…) must read as "no criteria on file", not as a Houston-style number in disguise. */
 export const defaultFloodJurForAuthority = (authorityId) =>
   ({
     coh: "coh",
@@ -268,17 +272,19 @@ export const defaultFloodJurForAuthority = (authorityId) =>
     // Municipal adopt-by-reference overlays sit inside their county's floodplain regime.
     missouricity: "fortbend",
     magnolia: "montgomery",
-  }[authorityId] || "generic");
+  }[authorityId] || null);
 
 /* County fallback for plans that haven't run the drainage identify (county comes from
  * the plan header). Harris county alone can't distinguish COH from unincorporated —
- * default to the county rule and let the picker/identify refine it. */
+ * default to the county rule and let the picker/identify refine it.
+ *
+ * ⛔ B877440 — `null` for an unmodeled county, never "generic" (see defaultFloodJurForAuthority). */
 export const defaultFloodJurForCounty = (county) =>
   // NEW-4 — through the shared routing-key normaliser rather than a local `.toLowerCase()`, so
   // every county-keyed lookup in the app agrees on what a key IS (trim + case + underscores).
   ({ harris: "harris", fortbend: "fortbend", montgomery: "montgomery", chambers: "chambers", waller: "waller" }[
     normCountyKey(county)
-  ] || "generic");
+  ] || null);
 
 /* The zone classes a rule's trigger obligates (feeds computeMitigation). */
 export const triggerClasses = (rule) =>

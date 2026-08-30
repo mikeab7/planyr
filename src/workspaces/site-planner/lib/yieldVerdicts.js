@@ -185,6 +185,33 @@ function unavailableDetentionRow(req) {
   });
 }
 
+/* ⛔ B877440 — the sibling of unavailableDetentionRow, for a county the drainage identify
+ * actually resolved but that carries NO modeled detention authority (Tarrant, Dallas, Amarillo…
+ * — anything outside the Houston-MSA registry). Before this branch existed, `req` was left
+ * `null` for exactly this case (SitePlanner's detReq derivation skipped computeRequiredDetention
+ * entirely when drainAuthorityId was falsy), which — once a drainage check had run — fell through
+ * detentionVerdict's numeric branches into `loadingRow`: the same permanent "checking flood
+ * data" spinner B1127 fixed for Colorado, for a different root cause. `req.kind === "unknown"`
+ * with the `no-criteria-modeled` flag is computeRequiredDetention's OWN, already-correct refusal
+ * (proven: identical for authorityId null/"generic"/undefined) — this only NAMES it for the
+ * panel, with the county the identify resolved, and offers the one honest action: request it. */
+function noCriteriaDetentionRow(req) {
+  const county = req.governingCounty ? String(req.governingCounty) : null;
+  const countyLabel = county ? county.replace(/\b\w/g, (c) => c.toUpperCase()) + (/county$/i.test(county) ? "" : " County") : null;
+  // PANEL-BREVITY: ONE template literal (the unavailableDetentionRow precedent above), so the
+  // budget counts a single string rather than one per with/without-a-county-name branch.
+  const sentence = `no detention criteria on file for ${countyLabel || "this jurisdiction"}`;
+  return finish({
+    key: "det", label: "Detention", pill: "N/A", tone: "warn", sentence,
+    unavailable: true, loading: false, short: false, action: false,
+    // No hardcoded headline literal — unlike unavailableDetentionRow's MHFD case, nothing renders
+    // this row's headline today, and the sentence already carries the whole fact.
+    headline: null,
+    requestCriteria: county ? { countyKey: county, countyLabel, family: "detention" } : null,
+    sortRank: 2.5,
+  });
+}
+
 function detentionVerdict(d) {
   const req = d.req;
   const usableAcFt = d.providedUsableCf == null ? null : d.providedUsableCf / AC_FT;
@@ -192,6 +219,7 @@ function detentionVerdict(d) {
   // Checked BEFORE the numeric branches: an unavailable requirement has no number to compare, and
   // falling through to them is what produced the permanent "checking flood data".
   if (req && req.kind === "unavailable") return unavailableDetentionRow(req);
+  if (req && req.kind === "unknown" && Array.isArray(req.flags) && req.flags.includes("no-criteria-modeled")) return noCriteriaDetentionRow(req);
   const requiredAcFt = req && req.kind === "point" && req.requiredAcFt > EPS ? req.requiredAcFt
     : req && req.kind === "band" ? req.bandAcFt[1] : null;
   if (requiredAcFt == null) {
