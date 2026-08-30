@@ -12,4 +12,5 @@ export const MODULE_TAB_LABEL = {
   "doc-review":   "Review",
   "library":      "Library",
   "notes":        "Notes",
+  "model":        "Model",
 };
