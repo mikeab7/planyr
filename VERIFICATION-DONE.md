@@ -1,3 +1,44 @@
+### V483872 — B862560: the rebuilt element context menu renders correctly (skeleton, quantity controls, density) across every element type and both themes, self-verified headless — ✅ **PASSED 2026-08-30**
+
+**✅ PASS — self-verified this session in headless Chromium** (the sanctioned mechanism per this file's own testing policy — no cohort, no wait on Michael), against a real `npm run dev` server, the `bain` fixture, and the owner's actual saved "Bain / Concept - Original" plan (47 elements, 11 buildings, 1 pond, real cross-dock geometry).
+
+**Before/after height + row-count table** (measured via a throwaway Playwright script driving the real built app, `data-testid="planner-canvas"`, cross-dock building `e79380lfxyni` and peers):
+
+| element | before (old menu) | after (rebuilt) |
+|---|---|---|
+| building (cross-dock, 1 dock face on screen) | ~15px rows, ~44px each, no fixed width | **236 × 387px**, 22px rows, 16 buttons/controls, max font **11.5px** |
+| lone detention pond | same old density | **214 × 139px**, 4 controls |
+| parking (exploded, splittable) | same old density | **236 × 323px**, 12 controls |
+
+Width matches the mockup's spec exactly (236px). Max font 11.5px is well under `--font-display` (14px) — a real defect was found and fixed here (a raw `<label>`/divider/checkbox with no explicit font-size computed the browser default 16px; the shared `menuPanel` style now carries a baseline `FONT_SIZE.md`). Height for a real cross-dock building (Footprint + Dock zones w/ one dock face on screen + Arrange + 7 common rows) is **387px**, over the brief's own approximate 360px target by ~27px — reported honestly rather than silently accepted or silently shortened: the gap is the direct, necessary cost of replacing the old menu's ambiguous single dock-zone stepper with an honest per-face checkbox row, which is the core correctness fix this item shipped. A single-load building (one dock face, no reshape in progress) would render one row lighter.
+
+**Sections appear in the same order with Arrange identical, every run:** confirmed across building/pond/parking via `audit-element-parity.mjs`'s per-type menu dump (`ARRANGE` always present, four rows, greyed with a stated reason when alone in its band — 4/4 greyed + reasons on the lone pond, matching precedent V91632).
+
+**No string in the menu changes based on element state:** the two rows this item was explicitly filed to kill (`"＋ Add {next zone} (outward)"` / `"－ Remove {outer zone} (outermost)"`, which renamed themselves on every add/remove) are gone from the source (`grep` confirms). The Dock-zone chips and Bump-outs checkbox change **checked/disabled state**, never their **label text** (`C`/`T`/`B` and `Bump-outs` are constant strings) — verified by reading the JSX directly, not inferred.
+
+**Both themes:** screenshotted the same cross-dock building's menu in light and dark (`localStorage` theme override) — legible in both, icons and section headers render correctly, no low-contrast text (this item did not touch any theme token, only reused `PAL.*`).
+
+**Force on top/underneath, relocated to the Properties panel:** `ui-audit/audit-element-parity.mjs` (12/12) and `ui-audit/verify-v91632-real-plan.mjs` (8/8) drive the real control end to end on both a synthetic fixture and the owner's real Bain plan — force front, force back, the forced note + restore control, persistence through a `localStorage` write and a hard reload, and PDF-PARITY on the real exported sheet. All pass.
+
+**What was NOT separately re-driven, named rather than silently skipped:** a signed-in Supabase cloud round-trip for the relocated Force control (the underlying `setElBand`/`bandForce` persistence mechanism is unchanged from its prior menu-based entry point, which already syncs to the cloud — this item only moved WHERE the control lives, not how it persists, so no new cloud-sync risk is introduced). `Blocker: auth` does not apply — nothing new needs sign-in.
+
+- Cadence: once — moved here (nothing pending).
+
+### V483873 — B862561: Alt+hover stack picker reveals and selects any feature under the cursor, on a synthetic fixture and the owner's real Bain plan, self-verified headless — ✅ **PASSED 2026-08-30**
+
+**✅ PASS — self-verified this session in headless Chromium**, two ways:
+
+1. **`e2e/markup-behind-building.spec.js`** (synthetic fixture — a markup seeded to completely cover a real building on the owner's own Goose Creek geometry): holding Alt and hovering the covered point surfaces both the building and the markup, topmost-first; picking the markup selects it without moving it (still behind the plan, position byte-identical before/after); the covering element's own priority-rule right-click then reaches the markup's own menu, whose cross-band toggle brings it back in front; hovering a building with nothing behind it shows exactly one entry; hovering empty canvas shows no box at all (not an empty one). 4/4 pass.
+2. **`ui-audit/verify-markup-over-building.mjs`**, re-run against the owner's real, live "Bain / Concept - Original" plan with a markup drawn by the real Rectangle tool over a real building: the actual overlap point resolves a FIVE-deep stack (two road pieces, the markup, two parcels — richer than the synthetic case, because the largest on-screen `el:` feature on this real plan happens to be a road aisle, not a building). The picker named all five, correctly ordered, topmost-first; picking the markup selected it without moving it; the way back (its own menu → "Bring in front of the plan") worked identically to the synthetic case. 21/21 pass.
+
+**Alt was checked against every existing use before shipping** (recorded on the item): Alt+Z (different key, no conflict), Alt+click's existing single-target cycling picker (a CLICK gesture; this is HOVER, gated to `tool === "select"`, and the two coexist rather than collide), and the drag-placement snap-bypass (reads `e.altKey` on its own pointer events, untouched, and this feature never shows during a placement drag since it's select-tool-only).
+
+**Keyboard-reachable and dismissible, as required:** Up/Down moves the highlighted entry, Enter picks it, Escape or Alt-release dismisses — driven directly in both scripts above via `page.keyboard`.
+
+**What was NOT separately re-driven:** a second modifier-key layout (non-Mac `Ctrl+Alt` combos, etc.) and RTL/non-US keyboard layouts — out of scope for this item, no reason to expect divergence (the gate reads `e.key === "Alt"`, not a platform-specific code).
+
+- Cadence: once — moved here (nothing pending).
+
 ### V437024 — B784832: undoing (Ctrl+Z or the toolbar button) the deletion of a callout, markup, measurement or parcel on a real signed-in cloud plan actually brings it back, and it survives a reload — ✅ **PASSED, one leg accepted by reasoning — 2026-08-26**
 
 **✅ PASS — closed by the Cowork thread on Michael's real signed-in Chrome (`planyr.io`), 2026-08-26, the one actor that can reach a `Blocker: auth` item and the one this sandbox has never been able to reach itself.** Created a callout, deleted it, pressed Ctrl+Z. It reappeared on canvas. The **server row was read directly from production `site_elements`**, not inferred from what the screen showed: `rev 4`, `op_kind: "edit"`, `deleted_at: null` — the delete was genuinely reversed on the server, not just re-drawn client-side for one render (the exact pre-fix failure mode this item was filed to catch).

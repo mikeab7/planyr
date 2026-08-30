@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-30 @ `9ed48d72` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-30 @ `445da09a` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_586 source files mapped._
+_587 source files mapped._
 
 ## infra
 
@@ -481,6 +481,8 @@ _586 source files mapped._
   - _exports_: `collapseStorageKey`, `default (Collapse)`, `readOpen`
 - **`src/workspaces/site-planner/components/CursorChip.jsx`** — the ONE cursor chip both map surfaces paint: coordinate pair + the always-present elevation readout (coords give way first so no elevation field is ever truncated)
   - _exports_: `default (CursorChip)`
+- **`src/workspaces/site-planner/components/elementMenuIcons.jsx`** — the B845584 element context-menu rebuild's own 14px/stroke-1.3 icon family (a finer, denser idiom than icons.jsx's 24px/stroke-2 set, matching the owner-approved mockup); every row in the rebuilt menu gets one in a 16px gutter
+  - _exports_: `AlignRotationIcon`, `AttachIcon`, `BringForwardIcon`, `BringToFrontIcon`, `BumpOutIcon`, `CopyIcon`, `DeleteIcon`, `DetachIcon`, `DockZonesIcon`, `DuplicateIcon`, `GroupIcon`, `LockIcon`, `PondSettingsIcon`, `PondSizingIcon`, `PropertiesIcon`, `ResetFootprintIcon`, `ReshapeIcon`, `RoadBranchIcon`, `SendBackwardIcon`, `SendToBackIcon`, `SplitRowsIcon`, `SwapIcon`, `UngroupIcon`
 - **`src/workspaces/site-planner/components/icons.jsx`** — Small stroke icons (pin / empty-circle / warn-triangle) shared by the planner's panel components, replacing the 📍 emoji that ignored its row's theme colour; route-local on purpose so the bytes stay off every other route's chunk. — `PinIcon`, `EmptyCircleIcon`, `WarnTriangleIcon`
   - _exports_: `CloseXIcon`, `DuplicateIcon`, `EmptyCircleIcon`, `HistoryIcon`, `LayersIcon`, `PadlockIcon`, `PinIcon`, `PlusIcon`, `RedoIcon`, `SaveIcon`, `StorageIcon`, `UndoIcon`, `WarnTriangleIcon`, `ZoomFitIcon`
 - **`src/workspaces/site-planner/components/JurisdictionBadge.jsx`** — Passive site-header chip showing the active parcel's jurisdiction (city/ETJ/county) from the auto-run B93 identify; display-only, ⚑ on straddle (B763)
@@ -1074,7 +1076,7 @@ _586 source files mapped._
 - **`src/workspaces/site-planner/lib/tileBudget.js`** — Pure tile/overscan budget: how much basemap is held off-screen, how many tiles are retained, and when the retina uplift is worth its cost
   - _exports_: `keepBufferFor`, `OVERSCAN_FULL`, `OVERSCAN_MIN`, `OVERSCAN_REDUCED`, `overscanPx`, `RETINA_MIN_ZOOM`, `retinaForZoom`, `tileCacheLimit`, `tilesToEvict`, `tileWeight`
 - **`src/workspaces/site-planner/lib/tileLifecycle.js`** — Leaflet-bound tile + overlay lifecycle — keep tiles across a same-grid setView, bound the tile cache, and release a toggled-off overlay for real
-  - _exports_: `announceSetView`, `boundTileCache`, `capTileCache`, `preserveTilesAcrossSetView`, `releaseLayer`
+  - _exports_: `announceSetView`, `boundTileCache`, `capTileCache`, `preserveTilesAcrossSetView`, `releaseLayer`, `throttleTilePruning`
 - **`src/workspaces/site-planner/lib/timeOfConcentration.js`** — Computed time of concentration (B905, CE roadmap #3): Kirpich formula + a criteria-configurable urban adjustment/floor, with an area-based flow-path-length fallback and a default-slope fallback when real geometry/grade aren't resolved — replaces the flat 15-min screening assumption everywhere Tc feeds the routing chain.
   - _exports_: `computeTimeOfConcentration`, `DEFAULT_FLOW_PATH_K_FACTOR`, `DEFAULT_KIRPICH_URBAN_ADJUSTMENT`, `DEFAULT_TC_DEFAULT_SLOPE_PCT`, `DEFAULT_TC_FLOOR_MIN`, `estimateFlowPathLengthFt`, `kirpichTcMin`
 - **`src/workspaces/site-planner/lib/titleKey.js`** — The title reader's stored Anthropic key (`KEY_LS`/`getKey`/`setKey`), split out of `titleReader.js` so the planner can read it synchronously without pulling the reader's multi-KB schema + prompt onto the site route.
@@ -1086,7 +1088,7 @@ _586 source files mapped._
 - **`src/workspaces/site-planner/lib/upstreamArea.js`** — Upstream/offsite drainage delineation (NEW-C1): extends flowField D8 → flow-accumulation over the 3DEP DEM, contributing-area acreage at the site outfall, and the offsite-drainage "engineer's check" flag when upstream materially exceeds the site. Pure.
   - _exports_: `contributingAcres`, `delineateUpstream`, `downstreamIndex`, `flowAccumulation`, `lowestCell`, `OFFSITE_MATERIAL_RATIO`, `offsiteDrainageFlag`
 - **`src/workspaces/site-planner/lib/userPrefs.js`** — Account-level user preferences (NEW-3) — `public.profiles.prefs` jsonb with a localStorage mirror; backs the Standards "All projects" scope and publishes it into `planStyle`'s account layer.
-  - _exports_: `_normalizePrefs`, `applyPrefs`, `EMPTY_PREFS`, `getStandardPref`, `loadUserPrefs`, `readMirror`, `saveUserPrefs`, `setStandardPref`
+  - _exports_: `_normalizePrefs`, `applyPrefs`, `EMPTY_PREFS`, `getStandardPref`, `loadUserPrefs`, `readMirror`, `saveUserPrefs`, `setSitesPanelPref`, `setStandardPref`
 - **`src/workspaces/site-planner/lib/vectorLayers.js`** — Pure registry-driven vector GIS engine (FEMA/NWI + county/city/ETJ boundaries): paged ArcGIS pull, detail tiers with server-side generalization, grid-snapped SWR cache keys, Esri-to-GeoJSON, Douglas-Peucker, vector-vs-image decision
   - _exports_: `buildQueryUrl`, `buildVectorQuery`, `decideVectorOrImage`, `douglasPeucker`, `featuresToGeoJson`, `fetchCached`, `fetchVectorFeatures`, `hitFeature`, `identifyRows`, `pickTier`, `simplifyGeoJson`, `snapBbox`, `styleFor`, `VECTOR_SOURCES`, `vectorKey`
 - **`src/workspaces/site-planner/lib/vectorOverlay.js`** — Leaflet glue over the vector cache tier: cachedVectorLayer paints last-good boundaries instantly, background-refreshes, hover/click identify (identifyOk-gated), zoom-gated divIcon name labels, live esri-leaflet fallback

@@ -213,6 +213,13 @@ function checkMenu(type, rows) {
   console.log(rows.map((r) => `  ${r.disabled ? "[grey] " : ""}${r.text}`).join("\n"));
   for (const [cap, re] of Object.entries(ACTION_PATTERNS)) {
     if (verdict(row.actions[cap]) !== "yes") continue;
+    /* B845584 — the `el` family's crossBand escape hatch ("Force on top of everything" / "Use the
+     * normal layer order") moved OUT of this menu and into the Properties panel's persistent "Draw
+     * order" control — a right-click-only override left the owner able to end up stuck out of band
+     * with no visible way to see why. The `el` family's crossBand is verified exhaustively below,
+     * in "NEW-1 · the element band escape hatch" (which drives the panel, not this menu); the
+     * ANNOTATION families (markup/callout/measure) are unaffected and still checked here. */
+    if (cap === "crossBand" && row.family === "el") continue;
     ok(`${label}: the menu offers "${cap}", as declared`, rows.some((r) => re.test(r.text)));
   }
 }
@@ -365,9 +372,21 @@ try {
     afterArr.indexOf(`el:${PAV}`) < afterArr.indexOf(`el:${B1}`),
     `paving ${afterArr.indexOf(`el:${PAV}`)}, building ${afterArr.indexOf(`el:${B1}`)}`);
 
-  // (g) THE FORCE. The owner's own case, verbatim: paving over a building.
-  const forced = await clickMenuRow(pv.x, pv.y, "Force on top of everything");
-  ok("the element menu offers the explicit cross-band row", forced);
+  // (g) THE FORCE. The owner's own case, verbatim: paving over a building. B845584 relocated this
+  //     from the right-click menu into the Properties panel's persistent "Draw order" control (a
+  //     submenu-only override left the owner able to end up stuck out of band with no visible way
+  //     to see why) — open the panel via the menu's own Properties… row (selecting alone does not
+  //     open it), then use the control.
+  await clickMenuRow(pv.x, pv.y, "Properties…");
+  await page.waitForTimeout(400);
+  const forced = await page.evaluate(() => {
+    const btn = document.querySelector('[data-testid="el-band-force"]');
+    if (!btn) return false;
+    btn.click();
+    return true;
+  });
+  ok("the Properties panel offers the explicit cross-band Front control", forced);
+  await page.waitForTimeout(500);
   const afterForce = await paintOrder();
   ok("FORCED: paving now RENDERS above both buildings",
     afterForce.indexOf(`el:${PAV}`) > afterForce.indexOf(`el:${B1}`) && afterForce.indexOf(`el:${PAV}`) > afterForce.indexOf(`el:${B2}`),
@@ -375,10 +394,8 @@ try {
   ok("…and nothing else moved: the two buildings keep their relative order",
     (afterForce.indexOf(`el:${B1}`) < afterForce.indexOf(`el:${B2}`)) === (afterArr.indexOf(`el:${B1}`) < afterArr.indexOf(`el:${B2}`)));
 
-  // (h) VISIBLY FORCED. An override the user cannot see is one they can get stuck in. Reached
-  //     through the menu's own Properties… row, because selecting alone does not open the panel.
-  await clickMenuRow(pv.x, pv.y, "Properties…");
-  await page.waitForTimeout(400);
+  // (h) VISIBLY FORCED. An override the user cannot see is one they can get stuck in. The panel is
+  //     already open from (g).
   const noted = await page.evaluate(() => ({
     note: !!document.querySelector('[data-testid="el-band-forced-note"]'),
     restore: !!document.querySelector('[data-testid="el-band-restore"]'),
@@ -418,10 +435,18 @@ try {
     afterReload.indexOf(`el:${PAV}`) > afterReload.indexOf(`el:${B1}`),
     `paving ${afterReload.indexOf(`el:${PAV}`)}, building ${afterReload.indexOf(`el:${B1}`)}`);
 
-  // (k) REVERSIBLE. Back to default, from the menu, and the picture returns to the shipped order.
+  // (k) REVERSIBLE. Back to default, from the panel's persistent "Draw order" control (the menu no
+  //     longer carries this — B845584), and the picture returns to the shipped order.
   const pv2 = await pointOn(`[data-el-id="${PAV}"]`, 0.06, 0.94, `el:${PAV}`);
-  const restored = await clickMenuRow(pv2.x, pv2.y, "Use the normal layer order");
-  ok("the forced element's menu offers the way back", restored);
+  await clickMenuRow(pv2.x, pv2.y, "Properties…");
+  await page.waitForTimeout(400);
+  const restored = await page.evaluate(() => {
+    const btn = document.querySelector('[data-testid="el-band-restore"]');
+    if (!btn) return false;
+    btn.click();
+    return true;
+  });
+  ok("the forced element's panel offers the way back", restored);
   const afterRestore = await paintOrder();
   ok("REVERSIBLE: paving is back under the buildings",
     afterRestore.indexOf(`el:${PAV}`) < afterRestore.indexOf(`el:${B1}`) && afterRestore.indexOf(`el:${PAV}`) < afterRestore.indexOf(`el:${B2}`),
