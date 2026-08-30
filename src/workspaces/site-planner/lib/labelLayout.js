@@ -135,6 +135,10 @@ export const layoutLabelsSolve = (items, opts = {}) => {
     // shedding the lowest-priority line — one drop level at a time, re-walking the rungs at each.
     const forms = labelForms(it.lines);
     if (!forms.length) continue;
+    // Trailer parking is the one strip label whose identity is stable in the label itself. Keep
+    // this fallback at the shared-engine boundary because older/export callers may not yet carry
+    // the explicit flag through their candidate projection.
+    const hideOverflow = it.hideOverflow || forms.some((f) => f.lines.some((line) => /Trailer Parking/.test(line)));
     const capped = forms.map((f) => ({ rung: f.rung, lines: fitLines(f.lines, it.lh, halfH * 2) })); // LOD height cap
     const candidates = [];
     const seenForm = new Set();
@@ -159,12 +163,13 @@ export const layoutLabelsSolve = (items, opts = {}) => {
     for (const cand of candidates) {
       const { w, h } = screenSize(cand.lines);
       if (it.noLeader) {
-        // B195: a trailer strip sized to its own area never leaders out — a label too big for
-        // it overflows IN PLACE. Keep the first collision-free overflow as the fallback.
+        // Strip labels never leader out. Some legacy callers allow controlled overflow in place;
+        // `hideOverflow` callers (trailer parking) instead disappear at this zoom when even their
+        // shortest readable form no longer fits inside the strip.
         const box = boxOf(it.cx, it.cy, w, h);
         if (free(box)) {
           if (w <= halfW * 2 && h <= halfH * 2) { chosen = { box, lines: cand.lines, x: it.cx, y: it.cy, leader: null, rung: cand.rung }; break; }
-          if (!overflow) overflow = { box, lines: cand.lines, x: it.cx, y: it.cy, leader: null, rung: cand.rung };
+          if (!hideOverflow && !overflow) overflow = { box, lines: cand.lines, x: it.cx, y: it.cy, leader: null, rung: cand.rung };
         }
         continue;
       }
@@ -206,7 +211,7 @@ export const layoutLabelsSolve = (items, opts = {}) => {
       if (!chosen && it.mustLabel) chosen = last;
     }
 
-    if (!chosen) chosen = overflow;             // nothing fit inside → controlled overflow in place (noLeader)
+    if (!chosen) chosen = overflow;             // undefined for hideOverflow; otherwise controlled overflow in place
     // `box` (the committed screen rect) is returned too so the dimension-callout layer (B121 r3) can
     // test itself against the placed labels and hide any red dimension that would overprint one.
     if (chosen) { placed.push(chosen.box); out.set(it.id, { lines: chosen.lines, x: chosen.x, y: chosen.y, leader: chosen.leader, rot, box: chosen.box, rung: chosen.rung }); }
@@ -286,7 +291,7 @@ const itemSig = (it) => [
   /* B548818 — measured widths are an INPUT to placement, so they belong in the memo key: two
      frames with identical text but different measured widths must not be merged. */
   it.textW ? Object.entries(it.textW).map(([k, v]) => `${k}=${v}`).join("|") : "-",
-  it.rot || 0, it.noLeader ? 1 : 0, it.mustLabel ? 1 : 0, it.importance,
+  it.rot || 0, it.noLeader ? 1 : 0, it.hideOverflow ? 1 : 0, it.mustLabel ? 1 : 0, it.importance,
   ringToken(it.ring), it.ringPpf, it.ringOrigin ? `${it.ringOrigin.x},${it.ringOrigin.y}` : "-",
   (it.lines || []).map(lineSig).join(""),
 ].join("");
