@@ -109,6 +109,6 @@ it was read-only review of already-shipped code.
 4. A throwaway plan is buildable, saves, and survives a reload — **PASS**, driven live (D) on the Tarrant
    parcel: boundary, building, and jurisdiction header all intact after a hard reload.
 
-> **Drained → `VERIFICATION-DONE.md` by PR #1225 (2026-08-30).** Marked ✅ PASSED, all four steps directly
+> **Drained → `VERIFICATION-DONE.md` by PR #1231 (2026-08-30).** Marked ✅ PASSED, all four steps directly
 > confirmed live. B853712's whole block moved to `BACKLOG-DONE.md`. No source file changed as part of this
 > drain — records only, per the owner's explicit instruction on this drain.
