@@ -61,7 +61,10 @@ export default function App({
   shellModule, onShellSwitch, authControl, accountActive = false, onOpenReviewInDocReview,
   // Work Item A — the active project lives in the URL. `projectId` is the route's
   // Site-group id (or null = Dashboard/Map); `onProjectChange` writes our active group
-  // back to the URL; `resumeAllowed` lets a route-less first visit resume the last site;
+  // back to the URL; `resumeAllowed` (Shell's `mayResumeLastSite`, B881664) is true only
+  // while THIS mount is the one processing the app's actual boot route — never on a later,
+  // deliberate navigation to a project-less route (e.g. Dashboard), which must land on the
+  // dashboard rather than silently reviving a stale currentSite pointer;
   // `newProjectTick` increments when "New project" is clicked from any workspace.
   projectId = null, onProjectChange, resumeAllowed = true, newProjectTick = 0,
   // Keep-alive: false while this workspace is mounted but hidden behind another tab.

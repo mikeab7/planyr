@@ -257,6 +257,19 @@ export default function ProjectBreadcrumb({
   const canDelete = !!onDeleteProject || !controlled;
   const canManage = canRename || canDelete;
 
+  // B881666 — `refresh` (and everything that calls it — the storage-event listener registered
+  // once at mount, an in-flight warm/reconcile promise resolving later) must always reconcile
+  // against the LATEST `currentProject`, never the one closed over when that caller was created.
+  // The mount effect below registers its "storage" listener with deps `[controlled]` (a
+  // per-instance constant, since a kept-alive workspace's ProjectBreadcrumb never remounts on a
+  // later project switch) — so without this ref, that listener's `refresh()` call is permanently
+  // bound to whatever `currentProject` was at FIRST mount. A synthetic `notifyProjectsChanged()`
+  // storage event fired from ANYWHERE in the app (a rename, a warm, another tab) after the user
+  // has since switched projects then re-derives `internalProjects` from a stale project, silently
+  // clobbering whatever a later, correct `refresh()` (from opening the dropdown) had produced.
+  const currentProjectRef = useRef(currentProject);
+  useEffect(() => { currentProjectRef.current = currentProject; }, [currentProject]);
+
   // B853266/NEW-1 — the project the user is LITERALLY STANDING IN must never be missing from its
   // own switcher: the on-device site-list cache can lag the cloud (a device that missed a sync,
   // a diverged pull), and until reconcileProjects() below catches up this keeps the routed project
@@ -266,8 +279,23 @@ export default function ProjectBreadcrumb({
   // which a controlled caller unions into its own bridged list above. Scheduler was the one route
   // where this whole data layer never ran at all (an early `if (controlled) return`), which is why
   // it alone showed a static, un-reconciled six-project list with no current marker or timestamps.
+  //
+  // ⛔ B881666 — `currentProject.id` is NOT always the site-GROUP id this registry is keyed by.
+  // Scheduler's controlled `currentProject` is the routed site's LINKED SCHEDULE object once one
+  // exists (`{id, name, linkedSiteId, linkedSiteName}`) — its `.id` is the schedule's OWN id
+  // (a small integer-like string), a different namespace from the site-group ids `listProjects()`
+  // returns. Comparing the schedule id against the group-id registry always missed, so this added
+  // a SYNTHETIC entry keyed by the schedule id, marked "current" — sitting right next to the real
+  // group-id entry for the SAME project (which the row-render's OWN, unrelated `p.id ===
+  // currentProject.id` check does not mark current, since its id doesn't match either) — a
+  // genuine duplicate: the reported "pinned current" row plus an ordinary timestamped row below
+  // it. Resolving through `linkedSiteId` when present reconciles against the SAME identity space
+  // the registry actually uses; every other caller (Site Planner, Library, Notes, Review) never
+  // sets `linkedSiteId`, so this is a no-op for them.
   const refresh = () => {
-    setInternalProjects(withCurrentProject(listProjects(), currentProject));
+    const cp = currentProjectRef.current;
+    const registryTarget = cp && cp.linkedSiteId != null ? { id: cp.linkedSiteId, name: cp.linkedSiteName || cp.name } : cp;
+    setInternalProjects(withCurrentProject(listProjects(), registryTarget));
   };
   // B475 — warm the signed-in on-device project cache (empty on a cold tab that went straight to Markup,
   // since it only fills after a Site-Planner cloud pull), then re-read. `warming` drives a "Loading

@@ -168,6 +168,27 @@ describe("unionProjectLists — a controlled switcher (Scheduler) sees the real 
     expect(unionProjectLists([], [])).toEqual([]);
     expect(unionProjectLists(undefined, undefined)).toEqual([]);
   });
+
+  // B881666 — a controlled entry's OWN `id` is a DIFFERENT namespace from a registry id (a
+  // schedule id vs. a site-group id), so "a shared id" never actually happened for a linked
+  // project: every one fell straight into `extra` beside its own registry row, TWICE — the
+  // "current project listed twice in the project switcher" bug. A controlled entry names its
+  // real project via `linkedSiteId`, not `id`.
+  it("B881666 — a controlled entry LINKED to an already-present registry project is dropped, not duplicated", () => {
+    const controlled = [{ id: "sched-1", name: "Goose Creek", linkedSiteId: "g1", linkedSiteName: "Goose Creek" }];
+    const out = unionProjectLists(controlled, registry);
+    expect(out).toEqual(registry); // only the registry's Richfield/Grand Port rows — no third "Goose Creek" row
+  });
+  it("B881666 — a controlled entry linked to a project NOT (yet) in the registry still appears (nothing to prefer)", () => {
+    const controlled = [{ id: "sched-3", name: "Woods Road", linkedSiteId: "g3", linkedSiteName: "Woods Road" }];
+    const out = unionProjectLists(controlled, registry);
+    expect(out.map((p) => p.id)).toEqual(["g1", "g2", "sched-3"]);
+  });
+  it("B881666 — a genuinely unlinked pseudo-project (Operations/Pursuits) is unaffected by the linkedSiteId check", () => {
+    const controlled = [{ id: "sched-ops", name: "Operations", linkedSiteId: null, linkedSiteName: null }];
+    const out = unionProjectLists(controlled, registry);
+    expect(out.map((p) => p.id)).toEqual(["g1", "g2", "sched-ops"]);
+  });
 });
 
 describe("resolveCurrentName — header crumb tracks a live rename (auto-update-name)", () => {

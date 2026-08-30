@@ -25,6 +25,8 @@
  * The caller (SitePlanner) owns debounce, rate-limit, the one-attempt-per-key
  * failure guard, and the actual fetch; this module only decides and keys. Pure. */
 
+import { formatAge } from "./gisCache.js";
+
 export const ANCHOR_DRIFT_FT = 100;
 // B860 — a remembered fetch older than this auto-revalidates once on open (SWR "refresh
 // on open"). 24 h keeps flood/authority facts fresh-ish without refetching every reload;
@@ -207,4 +209,31 @@ export function factsFreshness({ hasSessionCtx = false, lastCheck = null, sigNow
     return { state: "stale", reason, note: FRESHNESS_REASONS[reason] };
   }
   return { state: "fresh", reason: null, note: null };
+}
+
+/* ⛔ B881668 — the Yield panel's ONE freshness LINE, extracted so "does the right state
+ * produce the right sentence" is provable without a browser. Byte-identical to the inline
+ * render ternary it replaces (SitePlanner.jsx's Yield-panel header). Four cases, checked in
+ * order: an in-flight re-check always wins ("checking…"); no check has ever run ("not
+ * checked" — never a bare "Flood data"); a STALE remembered check keeps its run date rather
+ * than dropping it ("stale — checked <age>"); a fresh one shows its age, or "checked" when
+ * the age is unknown. Owner ask (chat NEW-5): prove this selects correctly for all three
+ * states a user can see (not checked / checked with a date / stale after an edit). */
+export function floodStatusLine({ refreshing = false, floodChecked = false, freshnessState = null, floodAgeMs = null } = {}) {
+  if (refreshing) return "Flood data: checking…";
+  if (!floodChecked) return "Flood data: not checked";
+  if (freshnessState === "stale") {
+    return floodAgeMs != null ? `Flood data: stale — checked ${formatAge(floodAgeMs)}` : "Flood data: stale";
+  }
+  return floodAgeMs != null ? `Flood data ${formatAge(floodAgeMs)}` : "Flood data: checked";
+}
+
+/* ⛔ B881668 — the freshness DOT's color TOKEN — never a CSS value, which stays a theme
+ * concern the caller resolves (SitePlanner.jsx's `Y.warnText` / `var(--success-text)`). A
+ * stale check is a WARNING (something moved since the last run), never an ERROR — owner,
+ * B849713: "a yellow stale indicator when he has run the check and has since changed
+ * elements on the plan." This is the one place that decision is made; the caller only maps
+ * "warn" → its warning color and everything else → its success color. */
+export function floodDotColorToken(freshnessState) {
+  return freshnessState === "stale" ? "warn" : "success";
 }

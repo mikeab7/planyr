@@ -1579,7 +1579,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // B831778 (NEW-3) — gated ONLY on the "Sites" checkbox in Imagery & layers, never on `mode`
     // or which rail tab is open. This is the entire decoupling: browsing Comps must never empty
     // this loop.
-    (showSitesLayer ? sites : []).forEach((site) => {
+    // B881665 — ALSO gated on the name filter, same as the Sites-panel list rows (`passName`
+    // below): typing in "Filter by name…" narrowed the list to "1/28" while all 28 pins stayed
+    // on the map, including the 0-match case where the map should show nothing at all. The list
+    // and the map are two views of the same filtered set; only the list was ever filtered.
+    (showSitesLayer ? sites.filter(passName) : []).forEach((site) => {
       if (!site.origin) return; // blank-planner sites have no geo anchor
       const status = statusOf(site);
       // NEW-1 — a Dead site stays ON the map (small + dim, same treatment as Complete):
@@ -1687,7 +1691,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     if (pressedRef.current) { pendingRebuildRef.current = build; return; }
     build();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sites, parcelSummary, activeSiteId, selectMode, showPlans, showSitesLayer]);
+  }, [sites, parcelSummary, activeSiteId, selectMode, showPlans, showSitesLayer, nameFilter]);
 
   // NEW-COMPS — leasing-comp markers: a sibling layer to the site-pin one above, deliberately
   // simpler (always a flat point marker, no zoom-dependent footprint rendering — a comp has no
