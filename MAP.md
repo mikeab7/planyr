@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-30 @ `b3f0f67` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-30 @ `e84c5827` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_589 source files mapped._
+_591 source files mapped._
 
 ## infra
 
@@ -1035,6 +1035,10 @@ _589 source files mapped._
   - _exports_: `ANALYSIS_SOURCES`, `analyzeProximitySource`, `analyzeSource`, `buildAnalysisParams`, `buildJurisdictionFinding`, `buildProximityParams`, `buildQueryUrl`, `buildRoadFinding`, `classifyFlood`, `classifyStatus`, `deriveZoning`, `epaProgram`, `isSFHA`, `normalizeAttrs`, `pipelineSummary`, `representativeRing`, `ringCentroid`, `ringsBBox`, `ringsSignature`, `runSiteAnalysis`, `simplifyRing`, `wetlandSummary`, `zoneSummary`
 - **`src/workspaces/site-planner/lib/siteBoundary.js`** — B849344: MapFinder's ONE "does this site have a boundary, and how big is it" answer — canonical `parcelSummary` over the dead legacy `site.parcels` mirror, with an honest unknown until the summary has loaded
   - _exports_: `siteAcres`, `siteBoundaryInfo`, `siteDrawParcels`
+- **`src/workspaces/site-planner/lib/siteGeometry.js`** — Shared pure geometry primitives behind a site's drawn area math: element footprints, curb bands, road strip/pavement area, junction detection and the per-plan roundabout resolution
+  - _exports_: `carStalls`, `CURB`, `CURB_6`, `CURB_TYPES`, `curbAreaOf`, `curbEdgesOf`, `curbHost`, `curbWidthOf`, `elCorners`, `estStalls`, `estTrailers`, `isCenterlineRoad`, `outwardCurbEdge`, `polyArea`, `ringOf`, `roadCurbLines`, `roadCurbWidth`, `roadDefaultRadius`, `roadDenseCenterline`, `roadJunctionVerticesOf`, `roadStripArea`, `roadStripRing`, `rot2`, `roundaboutsForSite`, `sidewalkBetween`, `SQFT_PER_ACRE`, `TEE_COINCIDE_FT`, `TEE_COINCIDE_MAX_FT`, `teeCoincideFt`, `teeTargetOf`, `trailerStalls`
+- **`src/workspaces/site-planner/lib/siteMetrics.js`** — Pure site yield/coverage metrics (siteSqft, bldg, coverage %, FAR, ...) as ONE function, extracted from SitePlanner.jsx's render body so a future module (e.g. a financial model) can read them
+  - _exports_: `siteMetrics`
 - **`src/workspaces/site-planner/lib/siteModel.js`** — Canonical per-plan Site Model schema v10: createSiteModel/migrate, semantic selectors, cross-copy union merge with delete-tombstones, and bonded-child/dog-ear/road-centerline load-time repairs
   - _exports_: `activeParcelsOf`, `ANNOTATION_KINDS`, `annotationsOf`, `bondedChildRot`, `buildingNumbers`, `constraintsOf`, `contentCount`, `countJunkEntries`, `createSiteModel`, `crossSectionsOf`, `developableArea`, `EASEMENT_KINDS`, `easementsOf`, `elementsOf`, `exclusionZonesOf`, `ID_BOND_KEYS`, `impossibleStacks`, `isBuilding`, `lineageConflicts`, `mergeSiteContent`, `migrate`, `migrateRoads`, `missingBondSiblings`, `normalizeBondedChildren`, `normalizeCrossHostBonds`, `normalizeHostRuns`, `normalizeOrphanWallPads`, `normalizeZoneAlongLen`, `offAnchor`, `orphanWallPads`, `parcelAncestors`, `parcelChildrenMap`, `parcelDescendants`, `parcelDisplayInfo`, `parcelDrawingsOf`, `parcelOutline`, `parcelsOf`, `parcelSplitNames`, `quarterOffset`, `rectRoadEndpoints`, `RESTORED_STRIP_W_FT`, `roadStripBBox`, `roadTravelWidth`, `setbacksOf`, `SHARE_MIRROR_FIELDS`, `shareMirrorOf`, `sheetOverlaysOf`, `SITE_MODEL_VERSION`, `STATUS_META`, `STATUSES`, `statusOf`, `strandedFromHost`, `teamShareOf`, `toMs`, `utilitiesOf`, `UTILITY_KINDS`, `withShareMirror`
 - **`src/workspaces/site-planner/lib/sitePlacement.js`** — putting an UNLOCATED plan on the earth: origin validation, a typed lat/lon parser, and anchor nudging (no drawn coordinate moves).

@@ -48,8 +48,8 @@ export const REGISTRY = [
     why: "the markup layer's z order — a function of `markups` alone" },
   { file: SP, name: "measureBands",
     why: "the measurement z bands — a function of `measures` alone" },
-  { file: SP, name: "siteSqft",
-    why: "dissolved site area — parcels only" },
+  { file: SP, name: "metrics",
+    why: "site-metrics-extraction (lib/siteMetrics.js) — the yield/coverage numbers (dissolved site area, building/paving/parking/pond area, coverage %, FAR, ...) are model + settings only, no view term" },
   /* B217539 — the FIRST pure-library entry, and it is registered deliberately rather than being
    * memoised at its two call sites. `layoutLabels` is a leaf called from the render body, and a
    * third caller (an export pass, a future overlay) would reintroduce the defect with nothing to

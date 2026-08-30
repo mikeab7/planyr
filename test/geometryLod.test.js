@@ -20,6 +20,9 @@ import { STALL_PITCH_MIN_PX, stallStripesExplicit, segmentsPath } from "../src/w
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const planner = readFileSync(join(ROOT, "src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
 const labels = readFileSync(join(ROOT, "src/workspaces/site-planner/lib/labelLayout.js"), "utf8");
+// site-metrics-extraction — the yield-panel stall count moved into lib/siteMetrics.js alongside the
+// rest of the yield/coverage math; `carStalls(...).count` itself is untouched.
+const siteMetricsSrc = readFileSync(join(ROOT, "src/workspaces/site-planner/lib/siteMetrics.js"), "utf8");
 
 describe("the stall-striping gate", () => {
   it("keeps the explicit per-stall path wherever a stall is resolvable", () => {
@@ -75,7 +78,10 @@ describe("the wiring, guarded at the source", () => {
   });
 
   it("the stall COUNT still comes from carStalls().count, untouched by the render change", () => {
-    expect(planner).toMatch(/carStalls\(e\.w, e\.h, cfgOf\(e\)\)\.count/);
+    // site-metrics-extraction: this call now lives in lib/siteMetrics.js, not inline in
+    // SitePlanner.jsx's render body — the property (a real parking-layout count, never a
+    // count of collapsed/LOD-simplified render geometry) is what this guards, not the file.
+    expect(siteMetricsSrc).toMatch(/carStalls\(e\.w, e\.h, cfgOf\(e\)\)\.count/);
   });
 
   it("the dock-door leaves are NOT collapsed — measured and rejected THREE times, twice on the old bar and once on the new one", () => {

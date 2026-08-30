@@ -18,9 +18,13 @@ vi.mock("../src/workspaces/site-planner/lib/supabase.js", () => ({
     from: (t) => {
       if (t !== "site_elements") throw new Error(`unexpected table ${t}`);
       return {
+        // B868961 — fetchParcelSummaries now pages via .range(); this fixture's whole portfolio
+        // fits in one page, so a single call always comes back short and the walk stops there.
         select: () => ({
           eq: () => ({
-            is: async () => ({ data: h.rows, error: h.error }),
+            is: () => ({
+              range: async () => ({ data: h.rows, error: h.error }),
+            }),
           }),
         }),
       };
