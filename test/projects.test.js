@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupProjects, filterProjects, relTime, suggestNameMatch, normalizeProjectName, resolveCurrentName, withCurrentProject } from "../src/shared/projects/projectModel.js";
+import { groupProjects, filterProjects, relTime, suggestNameMatch, normalizeProjectName, resolveCurrentName, withCurrentProject, unionProjectLists } from "../src/shared/projects/projectModel.js";
 
 describe("groupProjects", () => {
   it("collapses plans of one site into a single project entry", () => {
@@ -133,6 +133,40 @@ describe("withCurrentProject — the routed project is never invisible to its ow
   it("once backfilled, searching the current project's own name finds it (closes NEW-2's repro)", () => {
     const withCurrent = withCurrentProject(projects, { id: "g9", name: "Richfield" });
     expect(filterProjects(withCurrent, "richfield").map((p) => p.id)).toEqual(["g9"]);
+  });
+});
+
+// B854xxx/NEW-2 — Scheduler's controlled switcher was a static, un-reconciled bridge list with no
+// timestamps, current marker or recently-deleted bin, because "controlled" skipped the whole
+// registry data layer. unionProjectLists is what lets a controlled caller show the SAME real
+// projects every other route shows, plus its own schedule-only pseudo-projects (Pursuits/
+// Operations — no site id, so a registry lookup can never produce them).
+describe("unionProjectLists — a controlled switcher (Scheduler) sees the real registry, not just its own bridge list (B854xxx/NEW-2)", () => {
+  const registry = [
+    { id: "g1", name: "Richfield", updatedAt: 900 },
+    { id: "g2", name: "Grand Port", updatedAt: 500 },
+  ];
+  it("registry entries lead, in the registry's own (newest-first) order", () => {
+    const out = unionProjectLists([], registry);
+    expect(out).toEqual(registry);
+  });
+  it("a controlled entry with no matching registry id (a schedule-only pseudo-project) is appended, not dropped", () => {
+    const controlled = [{ id: "sched-pursuits", name: "Pursuits" }, { id: "sched-ops", name: "Operations" }];
+    const out = unionProjectLists(controlled, registry);
+    expect(out.map((p) => p.id)).toEqual(["g1", "g2", "sched-pursuits", "sched-ops"]);
+  });
+  it("a shared id is resolved from the REGISTRY (richer: timestamp/status), never the bare controlled stub", () => {
+    const controlled = [{ id: "g1", name: "Richfield" }]; // no updatedAt — a bare bridge entry
+    const out = unionProjectLists(controlled, registry);
+    expect(out).toEqual(registry); // g1 keeps its registry timestamp; nothing duplicated
+  });
+  it("drops falsy / id-less entries from either side without throwing", () => {
+    expect(unionProjectLists([null, { name: "no id" }, { id: "x", name: "X" }], [])).toEqual([{ id: "x", name: "X" }]);
+    expect(unionProjectLists([], [null, { id: "g1", name: "Richfield" }])).toEqual([{ id: "g1", name: "Richfield" }]);
+  });
+  it("no-ops to an empty list with nothing on either side", () => {
+    expect(unionProjectLists([], [])).toEqual([]);
+    expect(unionProjectLists(undefined, undefined)).toEqual([]);
   });
 });
 
