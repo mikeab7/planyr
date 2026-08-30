@@ -14,7 +14,6 @@
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RENDER_PATHS, MARKUP_PAGE_SCOPING, VERDICT } from "../src/workspaces/doc-review/lib/layerVisibilityReads.js";
@@ -57,14 +56,18 @@ describe("B503184 — a layer toggle invalidates the cached detail tile", () => 
   });
 
   it("⛔ MUTATION CHECK — the pre-fix toggleLayer FAILS this guard, and the current one passes", () => {
-    /* Pinned to the SHA that shipped the defect, not to `origin/main` — once this fix merges, main
-     * carries the invalidation and a floating reference would quietly stop discriminating. The body
-     * is the real one from the tree, never a paraphrase: a paraphrase tests the paraphrase. */
-    const PRE_FIX = "09d9cf9d";
-    const before = execFileSync("git", ["show", `${PRE_FIX}:src/workspaces/doc-review/DocReview.jsx`],
-      { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+    /* The body is the real one from the tree, never a paraphrase: a paraphrase tests the
+     * paraphrase. This used to be read live via `git show 09d9cf9d:…` — that SHA IS an ancestor
+     * of `origin/main`, so it's safe from branch pruning (unlike B876256's b4ddcc78), but a
+     * shallow, single-branch clone (`git clone --depth 1 --single-branch --branch main`, what
+     * every fresh agent container starts with) cannot resolve ANY commit older than its one
+     * fetched tip, so `git show 09d9cf9d:…` failed with `fatal: invalid object name` there even
+     * though the SHA is perfectly real on main (B884304). Reading a checked-in fixture instead
+     * means this check no longer depends on the running clone's fetch depth. See
+     * test/fixtures/preB503184ToggleLayer.txt for the SHA provenance. */
+    const before = readFileSync(resolve(ROOT, "test/fixtures/preB503184ToggleLayer.txt"), "utf8");
     const hasInvalidation = (body) => /detailTileRef\.current\s*=\s*null/.test(body || "");
-    expect(toggleLayerBody(before), "no toggleLayer at the pinned pre-fix commit").toBeTruthy();
+    expect(toggleLayerBody(before), "no toggleLayer in the pre-fix fixture").toBeTruthy();
     expect(hasInvalidation(toggleLayerBody(before)), "the pre-fix toggle must NOT invalidate").toBe(false);
     expect(hasInvalidation(toggleLayerBody(src)), "the current toggle must invalidate").toBe(true);
   });

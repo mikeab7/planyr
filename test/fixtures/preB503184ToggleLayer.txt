@@ -1,0 +1,35 @@
+/* Checked-in fixture for test/docReviewLayerVisibility.test.js's mutation check (B884304).
+ *
+ * This is the REAL pre-fix `toggleLayer` body — sliced verbatim from
+ * `src/workspaces/doc-review/DocReview.jsx` at commit
+ * 09d9cf9da4159ae84c01bc8310ede7d344bee6df ("B500576 — three more ways a group bet refused every
+ * save on a building, and the flag is now ON", #1045) via
+ * `git show 09d9cf9d:src/workspaces/doc-review/DocReview.jsx`, never a paraphrase (a paraphrase
+ * would only ever test the paraphrase). That commit predates B503184's fix, which added the
+ * `detailTileRef.current = null` invalidation this guard exists to require.
+ *
+ * WHY THIS FILE EXISTS RATHER THAN A LIVE `git show 09d9cf9d:…`: 09d9cf9d IS an ancestor of
+ * `origin/main`, so it is not at risk of the branch-pruning failure that hit
+ * test/hiddenContentReads.test.js's own mutation check (B876256) — but it IS at risk of a
+ * different, more common failure: a fresh agent container clones this repo shallow
+ * (`git clone --depth 1 --single-branch --branch main`), and a shallow clone cannot resolve any
+ * commit older than its single fetched tip. `git show 09d9cf9d:…` then fails with
+ * `fatal: invalid object name '09d9cf9d'` even though the SHA is perfectly real on main — which
+ * is exactly what happened, reported as B884304 after a session saw this red in its own shallow
+ * container. Reading this checked-in copy instead means the mutation check no longer depends on
+ * the running clone's fetch depth.
+ *
+ * Do not "clean up" this file to look like real, currently-buildable source — it is deliberately
+ * the OLD, BUGGY body (never invalidates `detailTileRef`), which is the whole point: the guard
+ * must prove `toggleLayerBody()` still finds it and `hasInvalidation()` still reports it as
+ * NOT invalidating.
+ */
+  // B490: show/hide one PDF layer, re-read every row's visibility (a radio-button group flips its
+  // siblings), then re-raster BOTH layers against the mutated config. View filter only — never the markups.
+  const toggleLayer = (id, visible) => {
+    const cfg = ocgConfigRef.current;
+    if (!cfg) return;
+    cfg.setVisibility(id, visible);
+    setOcgLayers((rows) => deriveLayerVisibility(cfg, rows));
+    setBackdropReq((n) => n + 1); setDetailReq((n) => n + 1);
+  };
