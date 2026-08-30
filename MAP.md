@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-29 @ `396be340` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-30 @ `c378b0e1` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -353,9 +353,9 @@ _587 source files mapped._
 - **`src/shared/profile/useProfile.js`** — useProfile hook: load signed-in user's profiles row and expose a never-blank display name / first name / org / initial fallback chain plus save+reload
   - _exports_: `default`, `displayNameFor`, `firstNameFor`, `initialFor`, `orgFor`, `useProfile`
 - **`src/shared/projects/projectModel.js`** — Pure project-model helpers: collapse site records into one project per site-group, name-match suggest, dropdown filter, and relative-time formatting for the breadcrumb switcher
-  - _exports_: `filterProjects`, `groupProjects`, `normalizeProjectName`, `relTime`, `resolveCurrentName`, `suggestNameMatch`
+  - _exports_: `filterProjects`, `groupProjects`, `normalizeProjectName`, `relTime`, `resolveCurrentName`, `suggestNameMatch`, `withCurrentProject`
 - **`src/shared/projects/projects.js`** — Live project list for the breadcrumb switcher: groups the RLS-scoped site store, warms an empty on-device cache via cloud pull, and rename/delete a site-group project
-  - _exports_: `activeUid`, `DELETED_RETENTION_DAYS`, `deleteProject`, `filterProjects`, `groupProjects`, `listDeletedProjects`, `listProjects`, `normalizeProjectName`, `notifyProjectsChanged`, `onProjectsChanged`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `relTime`, `renameProject`, `restoreDeletedProject`, `suggestNameMatch`, `warmProjects`, `warmProjectsIfEmpty`
+  - _exports_: `activeUid`, `DELETED_RETENTION_DAYS`, `deleteProject`, `filterProjects`, `groupProjects`, `listDeletedProjects`, `listProjects`, `normalizeProjectName`, `notifyProjectsChanged`, `onProjectsChanged`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `reconcileProjects`, `relTime`, `renameProject`, `restoreDeletedProject`, `suggestNameMatch`, `warmProjects`, `warmProjectsIfEmpty`
 - **`src/shared/recents/recentDocs.js`** — Library-Home Recent list: local recently-OPENED drawings (not updated_at), per-uid, deduped by id, newest-first, capped at 15
   - _exports_: `listRecents`, `RECENTS_CAP`, `recordOpen`, `removeRecent`
 - **`src/shared/storage/originStore.js`** — Dependency-free read/delete-by-prefix access to the origin's IndexedDB kv store, so shared chrome can census and clear it without importing a workspace module (which hoists the cache into a route chunk)
@@ -373,7 +373,7 @@ _587 source files mapped._
 - **`src/shared/telemetry/gestureTelemetry.js`** — Pinch-gesture telemetry: sampled event:pinch rows (surface, touch/pointer source, finger count, completed/cancelled/anomaly, cancel reason) via reportClientEvent
   - _exports_: `PINCH_COMPLETE_SAMPLE_RATE`, `PINCH_OUTCOMES`, `pinchEventDetail`, `recordPinchGesture`, `shouldLogPinch`
 - **`src/shared/telemetry/perfCapture.js`** — Builds and encodes a performance capture — the privacy ALLOWLIST (counters/timings/view state only, proved before every send), plan-id sanitisation, frame statistics, and the compact encoder that trims oldest-first to fit one telemetry row.
-  - _exports_: `assertCaptureClean`, `buildCapture`, `CAPTURE_ENUM_KEYS`, `CAPTURE_MAX_CHARS`, `CAPTURE_NUMERIC_KEYS`, `CAPTURE_VERSION`, `decodeFrames`, `encodeCapture`, `encodeFrames`, `frameStats`, `hash32`, `NOTE_VOCAB`, `safePlanId`, `sanitizeAttribution`
+  - _exports_: `assertCaptureClean`, `attributionLabel`, `buildCapture`, `CAPTURE_ENUM_KEYS`, `CAPTURE_MAX_CHARS`, `CAPTURE_NUMERIC_KEYS`, `CAPTURE_VERSION`, `decodeFrames`, `encodeCapture`, `encodeFrames`, `frameStats`, `hash32`, `NOTE_VOCAB`, `safePlanId`, `sanitizeAttribution`
 - **`src/shared/telemetry/perfCaptureStore.js`** — The bounded on-device copy of a performance capture — IndexedDB (the LARGE tier, per TIER-BY-REBUILDABILITY), pruned to three on every write, summarised for the storage panel.
   - _exports_: `CAPTURE_PREFIX`, `clearPerfCaptures`, `listCaptureKeys`, `MAX_CAPTURES`, `perfCaptureSummary`, `readPerfCaptures`, `savePerfCapture`
 - **`src/shared/telemetry/perfInstrument.js`** — Always-on sampled client PERFORMANCE telemetry: longtask + Event Timing/INP observers plus a periodic scene sample (heap, canvas nodes, elements drawn, layers on, panels open, edits since load) through the existing reportClientEvent sink, with its own row ceiling so it can never spend the error budget
@@ -1088,7 +1088,7 @@ _587 source files mapped._
 - **`src/workspaces/site-planner/lib/upstreamArea.js`** — Upstream/offsite drainage delineation (NEW-C1): extends flowField D8 → flow-accumulation over the 3DEP DEM, contributing-area acreage at the site outfall, and the offsite-drainage "engineer's check" flag when upstream materially exceeds the site. Pure.
   - _exports_: `contributingAcres`, `delineateUpstream`, `downstreamIndex`, `flowAccumulation`, `lowestCell`, `OFFSITE_MATERIAL_RATIO`, `offsiteDrainageFlag`
 - **`src/workspaces/site-planner/lib/userPrefs.js`** — Account-level user preferences (NEW-3) — `public.profiles.prefs` jsonb with a localStorage mirror; backs the Standards "All projects" scope and publishes it into `planStyle`'s account layer.
-  - _exports_: `_normalizePrefs`, `applyPrefs`, `EMPTY_PREFS`, `getStandardPref`, `loadUserPrefs`, `readMirror`, `saveUserPrefs`, `setStandardPref`
+  - _exports_: `_normalizePrefs`, `applyPrefs`, `EMPTY_PREFS`, `getStandardPref`, `loadUserPrefs`, `readMirror`, `saveUserPrefs`, `setSitesPanelPref`, `setStandardPref`
 - **`src/workspaces/site-planner/lib/vectorLayers.js`** — Pure registry-driven vector GIS engine (FEMA/NWI + county/city/ETJ boundaries): paged ArcGIS pull, detail tiers with server-side generalization, grid-snapped SWR cache keys, Esri-to-GeoJSON, Douglas-Peucker, vector-vs-image decision
   - _exports_: `buildQueryUrl`, `buildVectorQuery`, `decideVectorOrImage`, `douglasPeucker`, `featuresToGeoJson`, `fetchCached`, `fetchVectorFeatures`, `hitFeature`, `identifyRows`, `pickTier`, `simplifyGeoJson`, `snapBbox`, `styleFor`, `VECTOR_SOURCES`, `vectorKey`
 - **`src/workspaces/site-planner/lib/vectorOverlay.js`** — Leaflet glue over the vector cache tier: cachedVectorLayer paints last-good boundaries instantly, background-refreshes, hover/click identify (identifyOk-gated), zoom-gated divIcon name labels, live esri-leaflet fallback

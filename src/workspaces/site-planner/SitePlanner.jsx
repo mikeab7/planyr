@@ -30729,11 +30729,14 @@ function YieldPanel({
                 (PANEL-BREVITY: a title is not visible copy), and `data-drain-freshness` lets a
                 headless check assert the state without reading colours. */}
             {drainage.freshness && (drainage.freshness.state === "fresh" || drainage.freshness.state === "stale") && (
+              // NEW-4 (B849713) — a stale check is a WARNING (something moved since he last ran it),
+              // never an ERROR, so the dot is amber, not red — owner: "a yellow stale indicator when
+              // he has run the check and has since changed elements on the plan."
               <span data-drain-freshness={drainage.freshness.state} aria-label={drainage.freshness.state === "stale" ? "Flood check is out of date" : "Flood check is up to date"}
                 title={[drainage.freshness.note || "The flood check still matches what's drawn.", drainage.groundElevNote].filter(Boolean).join("\n")}
                 data-ground-elev={drainage.groundElev?.status || undefined}
                 data-ground-cached={drainage.groundElev?.fromCache ? "1" : undefined}
-                style={{ color: drainage.freshness.state === "stale" ? Y.dangerText : "var(--success-text)", fontSize: 9, lineHeight: 1, flex: "none" }}>●</span>
+                style={{ color: drainage.freshness.state === "stale" ? Y.warnText : "var(--success-text)", fontSize: 9, lineHeight: 1, flex: "none" }}>●</span>
             )}
             {/* NEW-2(b) / NEW-3 — the elevation leg is the ONLY part of the check that can still be
                 outstanding once the panel has published, and a failed one must never be silent. One
@@ -30749,9 +30752,11 @@ function YieldPanel({
             )}
             {/* NEW-20(a) — while a fetch is in flight the line says so ("checking…") instead of an
                 unchanging "not checked", and the ↻ spins + disables so the click is never silent.
-                NEW-4 — a STALE check says so instead of quoting an age: "3d ago" is true and useless
-                when the answer no longer describes the drawing. It REPLACES the age, never joins it. */}
-            <span>{drainRefreshing ? "Flood data: checking…" : !drainage.floodChecked ? "Flood data: not checked" : drainage.freshness?.state === "stale" ? "Flood data: re-check" : floodAgeMs != null ? `Flood data ${formatAge(floodAgeMs)}` : "Flood data: checked"}</span>
+                NEW-4 (B849713, owner amendment) — a STALE check now KEEPS the last-run date instead
+                of replacing it: "re-check" alone didn't say when it last ran, and he wants that date
+                visible (the amber dot above already carries the "something moved" alarm, so the text
+                doesn't have to). */}
+            <span>{drainRefreshing ? "Flood data: checking…" : !drainage.floodChecked ? "Flood data: not checked" : drainage.freshness?.state === "stale" ? (floodAgeMs != null ? `Flood data: stale — checked ${formatAge(floodAgeMs)}` : "Flood data: stale") : floodAgeMs != null ? `Flood data ${formatAge(floodAgeMs)}` : "Flood data: checked"}</span>
             <span aria-hidden="true" style={{ color: Y.faint }}>·</span>
             <button type="button" onClick={drainRefreshing ? undefined : drainage.onCheck} disabled={drainRefreshing} aria-busy={drainRefreshing} title={drainRefreshing ? "Re-checking the flood data…" : "Re-pull the GIS flood data for the drawn area."} style={{ border: "none", background: "none", color: verdictLoading ? Y.warnText : "var(--accent)", cursor: drainRefreshing ? "default" : "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit", padding: 0, lineHeight: 1, display: "inline-block", animation: drainRefreshing ? "spin 0.9s linear infinite" : undefined }} aria-label="Re-check flood data">↻</button>
           </span>

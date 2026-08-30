@@ -189,6 +189,49 @@ test.describe("NEW-2 — it is the tab's empty state, not a modal over the grid"
   });
 });
 
+/* B853268/NEW-5 — the empty state used to gate ONLY on `ready` (the first planar:nav-state, or a
+ * ~2.5s/6s reveal fallback). The right-hand toolbar and "Link an existing schedule" are driven by
+ * a SEPARATE planar:toolbar-state message and the schedules list respectively, so a load where
+ * nav-state lands first left the empty state painting with the toolbar and the link row missing
+ * until something else forced a re-render (the owner's repro: opening/closing the project
+ * switcher happened to trigger one). Fixed by requiring toolbar.ready too before the empty state
+ * shows, with toolbar.ready given the SAME fallback timers `ready` already had. */
+test.describe("NEW-5 — the empty state never paints ahead of the toolbar (B853268)", () => {
+  test("nav-state (with schedules to link) arriving alone, with NO toolbar-state, does not paint a half-finished empty state", async ({ page }) => {
+    await seed(page);
+    await page.goto(`/#/project/${GID}/schedule`);
+    // Race the real signal in well before either fallback timer (2.5s / 6s) could fire.
+    await page.waitForTimeout(300);
+    await postSeq(page, navState([{ id: 1, name: "Goose Creek" }, { id: 2, name: "Grand Port" }], null));
+    // The empty state must not appear until the toolbar has ALSO reported (for real, or via its
+    // own matched fallback) — never on nav-state alone.
+    await expect(emptyState(page)).toBeVisible({ timeout: 25_000 });
+    // The instant it's visible, the toolbar and the link row must already be there too — not a
+    // half-painted screen waiting on an unrelated re-render to catch up.
+    await expect(page.locator('button[title="Settings"]')).toBeVisible();
+    await expect(emptyState(page).getByRole("button", { name: "Link an existing schedule", exact: true })).toBeVisible();
+  });
+
+  test("toolbar-state arriving first (before nav-state) still yields a complete first paint", async ({ page }) => {
+    await seed(page);
+    await page.goto(`/#/project/${GID}/schedule`);
+    await page.waitForTimeout(300);
+    await postSeq(page, { type: "planar:toolbar-state", section: "projects", view: "grid" });
+    await postSeq(page, navState([{ id: 1, name: "Goose Creek" }], null));
+    await expect(emptyState(page)).toBeVisible({ timeout: 25_000 });
+    await expect(page.locator('button[title="Settings"]')).toBeVisible();
+    await expect(emptyState(page).getByRole("button", { name: "Link an existing schedule", exact: true })).toBeVisible();
+  });
+
+  test("a fully unresponsive embed (fallback timers only) still reveals the toolbar together with the empty state", async ({ page }) => {
+    await seed(page);
+    await page.goto(`/#/project/${GID}/schedule`);
+    // No postSeq at all — only the 2.5s/6s reveal fallbacks can resolve this.
+    await expect(emptyState(page)).toBeVisible({ timeout: 25_000 });
+    await expect(page.locator('button[title="Settings"]')).toBeVisible();
+  });
+});
+
 test.describe("NEW-2 — copy + layout hold in both themes and widths", () => {
   for (const theme of ["light", "dark"]) {
     for (const [size, viewport] of [["desktop", { width: 1280, height: 820 }], ["narrow", { width: 420, height: 780 }]]) {

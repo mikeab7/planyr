@@ -83,11 +83,23 @@ describe("A2 — verdict-strip grammar: label + pill + sentence", () => {
     expect(short.sentence).toBe("30.0 of 33.8 AC-FT");
   });
 
-  it("detention LOADING → '…' pill, 'checking flood data', loading flag", () => {
-    const [det] = yieldVerdictStrip({ req: detReqPoint(33.8), providedUsableCf: null });
+  it("detention LOADING (a check already ran, pond volume still catching up) → '…' pill, 'checking flood data', loading flag", () => {
+    const [det] = yieldVerdictStrip({ req: detReqPoint(33.8), providedUsableCf: null, floodChecked: true });
     expect(det.pill).toBe("…");
     expect(det.loading).toBe(true);
     expect(det.sentence).toBe("checking flood data");
+  });
+
+  // B849713/NEW-3 — a plan that has NEVER been checked (no requirement resolved at all, under
+  // B1442's manual-only checks) must never claim a fetch is in progress: "not checked yet", never
+  // "checking flood data", matching the header's own honest "Flood data: not checked" and the
+  // already-shipped buildabilityVerdict wording for the identical state.
+  it("detention NEVER CHECKED → '…' pill, 'not checked yet', a recheck button, NOT the loading flag", () => {
+    const [det] = yieldVerdictStrip({ req: null, providedUsableCf: null, floodChecked: false });
+    expect(det.pill).toBe("…");
+    expect(det.loading).toBeFalsy();
+    expect(det.recheck).toBe(true);
+    expect(det.sentence).toBe("not checked yet");
   });
 
   it("mitigation NOT REQUIRED → OK pill, 'not required' (requirement rounds to zero / no fill)", () => {

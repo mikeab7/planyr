@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote } from "./lib/counties.js";
@@ -85,7 +85,12 @@ import { statusToken, darken } from "../../shared/ui/statusTokens.js";
    SitePlanner.jsx and SitePlannerApp.jsx import it too, so moving it here alone would
    save nothing.) */
 const sharingLib = () => import("./lib/sharing.js");
-import { listMyTeams, currentIdentity } from "./lib/teams.js";
+import { listMyTeams, listMembers, currentIdentity } from "./lib/teams.js";
+// B855952/B855953/B855954 (NEW-1/NEW-2/NEW-3) — the Sites panel's cross-device arrangement (group
+// order, collapse state, pinned sites, row sort) lives in the SAME account-scope store Standards'
+// "Save for all projects" uses (see lib/userPrefs.js's `sitesPanel` header) — never a new mechanism.
+import { loadUserPrefs, saveUserPrefs, readMirror, setSitesPanelPref } from "./lib/userPrefs.js";
+import { AC } from "../../shared/units/areaUnits.js";
 import { adminBoundariesVisible, attachAdminBoundaries } from "./lib/adminBoundaryGate.js";
 import { compHeadline } from "../../shared/comps/lib/comps.js";
 import { compMarkerSvg, compMarkerSize } from "../../shared/comps/lib/compMarkerIcon.js";
@@ -120,6 +125,19 @@ const COMP_ACCENT = "#2f6fb0";
  * not use. The panel row this feeds is named "Road names" for exactly that reason — do not
  * relabel it back to anything implying place/city names without switching the source too. */
 const LABELS_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}";
+
+/* B427410 (×3) — THE DEFAULT OPACITY, MEASURED, NOT COPIED FROM THE TIER MODEL. The old fixed
+ * 0.4 was never derived for this layer — it matches `layerWeight.js`'s "context" tier ceiling,
+ * the quietest of three, applied here as a borrowed number rather than a decision. Compared real
+ * Esri World_Transportation tiles over real World_Imagery aerial at three opacities: at 0.4 a
+ * label's black glyph and its own protective white halo fade by the SAME amount, so contrast
+ * against a busy aerial photo collapses into a grey smudge (this is the owner's "always kind of
+ * opaque [muddy]," not a perception issue); at 0.85 it reads pixel-for-pixel as crisp as 1.0. A
+ * label layer's readability and its "loudness" are not one knob the way an area fill's are, so
+ * the tier ceiling below does not transfer to this layer. Session-only default; the user's own
+ * slider (`opacityControl`, wired below) is the rest of the answer — "let me adjust the opacity"
+ * was the owner's own fallback ask. */
+const PLACE_NAMES_DEFAULT_OPACITY = 0.85;
 
 /* NEW-MAPCTRL-3 — the narrow-mode full-width search bar's own footprint (`top:8, height:42`
  * where it's rendered below) plus an 8px gap. The bottom-left banner slot (error toast, share
@@ -404,6 +422,30 @@ const ShareGlyph = ({ size = 13 }) => (
   </svg>
 );
 
+// B855953 (NEW-2) — the "pinned to top" glyph, at MODULE SCOPE (MODULE-SCOPE-COMPONENTS):
+// decorative only (the Pinned section header already names the state), drawn once here so the
+// context-menu row and the section header can't drift into two different pin shapes.
+const PinGlyph = ({ size = 12 }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+    <path d="M8 1.2a3.6 3.6 0 0 0-3.6 3.6c0 2.55 3.6 6.9 3.6 6.9s3.6-4.35 3.6-6.9A3.6 3.6 0 0 0 8 1.2zm0 5.1a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z" />
+    <rect x="7.25" y="11.5" width="1.5" height="3.3" rx="0.7" />
+  </svg>
+);
+
+// B855952 (NEW-1) — the shared-with monogram cluster's initials rule. First+last initial when
+// both a first and last name are on the team roster (`listMembers`'s shape); otherwise the first
+// two letters of whatever name IS on record, so a roster with only a display name or an email
+// still renders something legible rather than "?" for every teammate who hasn't set a last name.
+function initialsOf(member) {
+  const f = (member && member.firstName || "").trim();
+  const l = (member && member.lastName || "").trim();
+  if (f && l) return (f[0] + l[0]).toUpperCase();
+  const dn = ((member && (member.displayName || f || l || member.email)) || "").trim();
+  const parts = dn.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return dn.slice(0, 2).toUpperCase() || "?";
+}
+
 /* B831776 (NEW-1) — the far-left Site/Comp switch. MODULE-SCOPE-COMPONENTS: defined here, not
  * inside MapFinder's render. Two segments, one piece of state (`mode`) — see the state's own
  * comment for why there is deliberately no second "which tab" variable. */
@@ -545,6 +587,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   };
   const [basemap, setBasemap] = useState("esri");
   const [labels, setLabels] = useState(true);
+  // B427410 (×3) — the owner's own opacity control over the road-names overlay (`opacityControl`,
+  // the same slider every other Layers-panel row uses). Session-only, matching every other row's
+  // opacity (layerPrefs.js keeps opacity out of the persisted per-site record on purpose). The
+  // DEFAULT is set for crispness, not for the old "context tier" quietness — see PLACE_NAMES_DEFAULT_OPACITY.
+  const [labelsOpacity, setLabelsOpacity] = useState(PLACE_NAMES_DEFAULT_OPACITY);
   const [selectMode, setSelectMode] = useState(false); // off = pan only; on = add/remove parcels
   // NEW-COMPS: armed by "+ Comp" — the next map click drops a leasing comp anchor there. A
   // second, independent one-shot mode alongside `selectMode` (mutually exclusive in the UI,
@@ -654,17 +701,81 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const [viewCounty, setViewCounty] = useState(() => { const c = landingView(sites).center; return countyForView(c[0], c[1]); });
   const [viewState, setViewState] = useState(null); // NEW-2 — the state the map centre is in (see the LayerPanel prop below)
   const [confirmDel, setConfirmDel] = useState(null); // site pending delete confirmation
-  // (B235) The chips are now POSITIVE filters: a status in this set is SHOWN; an
-  // empty set shows everything. The filter drives BOTH the list and the map pins,
-  // so "show only Active" focuses both at once. (Replaces the old hide-on-map set.)
-  const [statusFilter, setStatusFilter] = useState(() => new Set());
-  const [nameFilter, setNameFilter] = useState(""); // type-to-filter the list by site name (B235)
-  // Per-status section collapse in the list (B235). Settled stages start collapsed so
-  // the handful that need a decision stay visible; persisted per device.
-  const [groupCollapsed, setGroupCollapsed] = useState(() => {
-    try { const v = JSON.parse(localStorage.getItem("planarfit:sitesGroups:v1") || "null"); if (v) return v; } catch (_) {}
-    return { complete: true, dead: true };
-  });
+  const [nameFilter, setNameFilter] = useState(""); // type-to-filter the list by name
+  // B855952/B855953/B855954 (NEW-1/NEW-2/NEW-3) — the Sites panel's own cross-device arrangement:
+  // which group order the user dragged into, which groups are collapsed, and which sites are
+  // pinned to the top. ONE account-scope bag (lib/userPrefs.js's `sitesPanel`), same
+  // load-then-commit shape SitePlanner.jsx's `userPrefs`/`commitUserPrefs` already uses for
+  // Standards — instant local paint from the mirror, replaced by the real cross-device value once
+  // the account row loads, LOUD (never silent) on a failed write.
+  const [acctPrefs, setAcctPrefs] = useState(() => readMirror());
+  const acctPrefsRef = useRef(acctPrefs);
+  acctPrefsRef.current = acctPrefs;
+  const sitesPanelPrefs = acctPrefs.sitesPanel;
+  const [prefsSaveWarn, setPrefsSaveWarn] = useState(null);
+  const prefsSaveWarnTimer = useRef(null);
+  useEffect(() => () => clearTimeout(prefsSaveWarnTimer.current), []);
+  const commitAcctPrefs = (next) => {
+    setAcctPrefs(next);
+    saveUserPrefs(myUid, next).then((res) => {
+      // "Not signed in" is the ordinary, expected state for arranging this panel signed out (the
+      // header's own "Cloud off" chip already says so) — never a failure to warn about on every
+      // single pin/collapse/drag. LOUD-FAILURE is for a SIGNED-IN write that genuinely couldn't
+      // reach the account.
+      if (res.ok || res.error === "not signed in") return;
+      clearTimeout(prefsSaveWarnTimer.current);
+      setPrefsSaveWarn(`⚠ Saved on this computer only — couldn't reach your account (${res.error}).`);
+      prefsSaveWarnTimer.current = setTimeout(() => setPrefsSaveWarn(null), 7000);
+    });
+  };
+  const patchSitesPanel = (patch) => commitAcctPrefs(setSitesPanelPref(acctPrefsRef.current, patch));
+  const groupCollapsedFor = (st) => !!sitesPanelPrefs.collapsed[st];
+  const toggleGroup = (st) => patchSitesPanel({ collapsed: { ...sitesPanelPrefs.collapsed, [st]: !groupCollapsedFor(st) } });
+  // NEW-2 — pinned site ids, most-recently-pinned first. A pinned site LEAVES its status group
+  // (rendered in the Pinned section instead) rather than appearing twice.
+  const pinnedIds = sitesPanelPrefs.pinned;
+  const pinnedSet = useMemo(() => new Set(pinnedIds), [pinnedIds]);
+  const togglePin = (id) => patchSitesPanel({ pinned: pinnedSet.has(id) ? pinnedIds.filter((x) => x !== id) : [id, ...pinnedIds] });
+  // NEW-3 — the user's drag order for the five status groups; empty = today's default order.
+  // Any status not named (a future status type) is appended at the end, never dropped.
+  const orderedStatuses = useMemo(() => {
+    const saved = sitesPanelPrefs.order.filter((s) => STATUSES.includes(s));
+    if (!saved.length) return STATUSES;
+    return [...saved, ...STATUSES.filter((s) => !saved.includes(s))];
+  }, [sitesPanelPrefs.order]);
+  const [hoverGroup, setHoverGroup] = useState(null); // status key whose drag handle should show
+  const [dragGroup, setDragGroup] = useState(null);   // status key currently being dragged
+  const moveGroup = (st, dir) => {
+    const cur = orderedStatuses;
+    const i = cur.indexOf(st), j = i + dir;
+    if (i < 0 || j < 0 || j >= cur.length) return;
+    const next = cur.slice();
+    [next[i], next[j]] = [next[j], next[i]];
+    patchSitesPanel({ order: next });
+  };
+  const dropGroup = (targetSt) => {
+    if (!dragGroup || dragGroup === targetSt) return;
+    const cur = orderedStatuses;
+    const from = cur.indexOf(dragGroup), to = cur.indexOf(targetSt);
+    if (from < 0 || to < 0) return;
+    const next = cur.slice();
+    next.splice(from, 1);
+    next.splice(to, 0, dragGroup);
+    patchSitesPanel({ order: next });
+    setDragGroup(null);
+  };
+  // NEW-1 — largest first / A–Z / recently touched, applied WITHIN each group (and within Pinned).
+  const acresOf = (s) => { const b = siteBoundaryInfo(s, parcelSummary); return b.known && b.hasBoundary ? b.acres : -1; };
+  const nameOf = (s) => (s.site || s.name || "Untitled site").toLowerCase();
+  const toMsAt = (v) => (typeof v === "number" ? v : v ? new Date(v).getTime() || 0 : 0);
+  const sortRows = (rows) => {
+    const arr = rows.slice();
+    if (sitesPanelPrefs.sort === "largest") arr.sort((a, b) => acresOf(b) - acresOf(a));
+    else if (sitesPanelPrefs.sort === "az") arr.sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
+    else arr.sort((a, b) => toMsAt(b.updatedAt) - toMsAt(a.updatedAt)); // "recent"
+    return arr;
+  };
+  const setSitesSort = (sort) => patchSitesPanel({ sort });
   const [statusMenu, setStatusMenu] = useState(null); // {site, x, y} — right-click status picker
   const [mapMenu, setMapMenu] = useState(null);       // {x, y} — right-click-on-empty-map menu (KMZ export) (B684)
   const [hoverLL, setHoverLL] = useState(null);       // {lat, lng} — live "you are here" GPS readout (B683)
@@ -682,8 +793,6 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const [selected, setSelected] = useState([]); // [{key, rings:[[ [lon,lat],…] ], latlngsList:[[ [lat,lng],…] ], addr, acct, attrs, county}] — rings = every outer part (multipart-safe)
   useEffect(() => { selectedRef.current = selected; }, [selected]);
 
-  const toggleStatusFilter = (st) => setStatusFilter((h) => { const n = new Set(h); n.has(st) ? n.delete(st) : n.add(st); return n; });
-  const toggleGroup = (st) => setGroupCollapsed((c) => { const n = { ...c, [st]: !c[st] }; try { localStorage.setItem("planarfit:sitesGroups:v1", JSON.stringify(n)); } catch (_) {} return n; });
   // Apply a status to a site (group), then refresh — closes the right-click menu.
   const setStatus = (siteId, st) => { onSetStatusRef.current && onSetStatusRef.current(siteId, st); setStatusMenu(null); };
   // Commit an inline site rename (B158): trim, ignore an empty/unchanged name, persist via the
@@ -719,6 +828,33 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     try { setMyTeams(await listMyTeams()); } catch (_) { /* keep prior list on transient error */ }
   };
   useEffect(() => { let live = true; (async () => { const { uid } = await currentIdentity(); if (!live) return; setMyUid(uid); if (uid) { try { const t = await listMyTeams(); if (live) setMyTeams(t); } catch (_) {} } })(); return () => { live = false; }; }, []);
+  // B855952/B855953/B855954 — replace the local mirror with the real cross-device Sites-panel
+  // arrangement once the account row loads (mirrors SitePlanner.jsx's identical `userPrefs` load).
+  // Re-runs once `myUid` resolves from null → a real id (or stays null, signed out — the local
+  // mirror / signed-out default is what `loadUserPrefs` already returns for that case).
+  useEffect(() => {
+    let live = true;
+    loadUserPrefs(myUid).then((res) => { if (live) setAcctPrefs(res.prefs); });
+    return () => { live = false; };
+  }, [myUid]);
+  // NEW-1 — the shared-with monogram cluster reads each team's ROSTER (not just its name), so a
+  // row can show initials rather than an anonymous glyph. Fetched lazily, once per team actually
+  // referenced by a visible site, and cached for the life of this mount — a roster changes rarely
+  // enough that re-fetching on every render would be pure waste.
+  const [teamMembersByTeam, setTeamMembersByTeam] = useState({}); // teamId -> [{firstName,lastName,displayName,email}]
+  const teamIdsInSites = useMemo(() => [...new Set(sites.filter((s) => s.teamId).map((s) => s.teamId))], [sites]);
+  useEffect(() => {
+    const need = teamIdsInSites.filter((id) => !(id in teamMembersByTeam));
+    if (!need.length) return;
+    let live = true;
+    (async () => {
+      const updates = {};
+      await Promise.all(need.map(async (id) => { try { updates[id] = await listMembers(id); } catch (_) { updates[id] = []; } }));
+      if (live) setTeamMembersByTeam((m) => ({ ...m, ...updates }));
+    })();
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teamIdsInSites]);
   // Open the per-project menu and refresh the team list so newly-created teams appear.
   const openSiteMenu = (s, x, y) => { setStatusMenu({ site: s, x, y }); refreshTeams(); };
   // Escape closes the open project menu, matching click-outside (B158 acceptance:
@@ -751,8 +887,6 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       const features = [];
       sites.forEach((site) => {
         if (!site.origin) return;
-        const status = statusOf(site);
-        if (statusFilter.size && !statusFilter.has(status)) return;   // honor the chip filter (matches the map)
         // Dimension lines off. Dock doors always export, as one run per dock side — and neither
         // is read off each saved site's own settings, so a multi-site file cannot vary with what
         // someone happened to have shown on screen when they last saved plan #3.
@@ -830,12 +964,9 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       : `“${label}” is private again — its site plans are no longer shared.`);
     onSharedChange && onSharedChange();
   };
-  // Pipeline counts by status across all sites (for the chips / counts strip).
-  const statusCounts = STATUSES.reduce((m, st) => { m[st] = 0; return m; }, {});
-  sites.forEach((s) => { statusCounts[statusOf(s)] = (statusCounts[statusOf(s)] || 0) + 1; });
-  // A site passes the chip filter if no chips are selected, or its status is selected.
-  const passStatus = (s) => statusFilter.size === 0 || statusFilter.has(statusOf(s));
-  // …and the name filter (case-insensitive substring on the site/plan name).
+  // The name filter (case-insensitive substring on the site/plan name) — B855952 (NEW-1) removed
+  // the status chip filter outright (collapsing a group is the filter now; see the Sites-panel
+  // render below), so this is the only list-narrowing predicate left.
   const nf = nameFilter.trim().toLowerCase();
   const passName = (s) => !nf || (s.site || s.name || "").toLowerCase().includes(nf);
 
@@ -1266,7 +1397,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !labels) return;
-    const initOpacity = (map.getZoom() >= PLACE_NAMES_MIN_ZOOM) ? 0.4 : 0;
+    const initOpacity = (map.getZoom() >= PLACE_NAMES_MIN_ZOOM) ? labelsOpacity : 0;
     // Cap the reference/labels overlay at the imagery's native ceiling (z19) so the two
     // layers don't DIVERGE at deep zoom. World_Transportation serves tiles past z19, so
     // without this cap the labels kept rendering crisp while the imagery (clamped to its
@@ -1288,12 +1419,14 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [labels]);
 
-  /* zoom-driven label opacity (B162): hide road names below PLACE_NAMES_MIN_ZOOM */
+  /* zoom-driven label opacity (B162): hide road names below PLACE_NAMES_MIN_ZOOM, otherwise use
+   * the owner's own opacity (B427410 ×3) — one effect, so the zoom gate and the slider can never
+   * fight over which one last wrote `setOpacity`. */
   useEffect(() => {
     const layer = labelsRef.current;
     if (!layer) return;
-    layer.setOpacity(zoom != null && zoom >= PLACE_NAMES_MIN_ZOOM ? 0.4 : 0);
-  }, [zoom]);
+    layer.setOpacity(zoom != null && zoom >= PLACE_NAMES_MIN_ZOOM ? labelsOpacity : 0);
+  }, [zoom, labelsOpacity]);
 
   /* State + country outlines at wide zoom (NEW-1) — the same shape as the label-opacity
      gate above and the `showPlans` switch below: one boolean derived from the live zoom,
@@ -1476,7 +1609,6 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     (showSitesLayer ? sites : []).forEach((site) => {
       if (!site.origin) return; // blank-planner sites have no geo anchor
       const status = statusOf(site);
-      if (statusFilter.size && !statusFilter.has(status)) return; // chip filter: show only selected statuses (B235)
       // NEW-1 — a Dead site stays ON the map (small + dim, same treatment as Complete):
       // hiding it outright was the B365 default and is exactly what made a site marked
       // dead read as "disappeared entirely." It still recedes via STATUS_TOKENS' size/
@@ -1582,7 +1714,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     if (pressedRef.current) { pendingRebuildRef.current = build; return; }
     build();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sites, parcelSummary, activeSiteId, selectMode, showPlans, statusFilter, showSitesLayer]);
+  }, [sites, parcelSummary, activeSiteId, selectMode, showPlans, showSitesLayer]);
 
   // NEW-COMPS — leasing-comp markers: a sibling layer to the site-pin one above, deliberately
   // simpler (always a flat point marker, no zoom-dependent footprint rendering — a comp has no
@@ -2266,72 +2398,95 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
    * <select> above the layer list. That control is now a row INSIDE the list (LayerPanel's basemap
    * control), styled by the panel, so the object had no reader left. */
 
-  // One left-rail site row — shared by every status section (B235). Status marker,
-  // name (struck through when Dead), status + acreage, and the hover "show on map" ⊕.
+  // B855952 (NEW-1) — one left-rail site row, ONE LINE: status dot · name · shared-with · acreage.
+  // Status is carried by the dot AND the group header it sits under, so the old subtitle repeating
+  // "Pursuit · 89.8 AC" a third time is gone — inside a status group the word is noise. Shared by
+  // every status section and the Pinned section (B855953) alike.
   const siteRow = (s) => {
     const isActive = s.id === activeSiteId;
     const st = statusOf(s); const t = statusToken(st);
-    // B849344 — canonical boundary/acreage (see siteBoundaryInfo); "checking boundary…" while
+    // B849344 — canonical boundary/acreage (see siteBoundaryInfo); an honest "…" (checking) while
     // the summary hasn't loaded yet, never a confident wrong "no boundary" (LOUD-FAILURE).
     const boundary = siteBoundaryInfo(s, parcelSummary);
-    const acreText = !boundary.known ? "checking boundary…" : boundary.hasBoundary ? `${boundary.acres.toFixed(1)} AC` : "no boundary";
     const showActions = hoverRow === s.id || isActive;
+    const members = s.teamId ? teamMembersByTeam[s.teamId] : null;
     return (
-      <div key={s.id} title={s.origin ? "Open site (double-click to fly here · right-click for status / rename / delete)" : "Open site (right-click for status / rename / delete)"}
+      <div key={s.id} title={s.origin ? "Open site (double-click to fly here · right-click for status / pin / rename / delete)" : "Open site (right-click for status / pin / rename / delete)"}
         onClick={() => onOpenSite && onOpenSite(s.id)}
         onDoubleClick={() => flyToSite(s)}
         onMouseEnter={() => setHoverRow(s.id)} onMouseLeave={() => setHoverRow((r) => (r === s.id ? null : r))}
         onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); openSiteMenu(s, e.clientX, e.clientY); }}
-        style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", cursor: "pointer", borderLeft: `3px solid ${isActive ? PAL.accent : "transparent"}`, background: isActive ? "#fbf3ee" : "transparent" }}>
+        style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 12px", cursor: "pointer", borderLeft: `3px solid ${isActive ? PAL.accent : "transparent"}`, background: isActive ? "#fbf3ee" : "transparent" }}>
         <button title={`Status: ${STATUS_META[st]?.label || st} — click to change`} aria-label="Set status"
           onClick={(e) => { e.stopPropagation(); openSiteMenu(s, e.clientX, e.clientY); }}
-          style={{ width: 16, height: 16, flex: "none", display: "grid", placeItems: "center", borderRadius: RADIUS.pill, cursor: "pointer", padding: 0,
+          style={{ width: 15, height: 15, flex: "none", display: "grid", placeItems: "center", borderRadius: RADIUS.pill, cursor: "pointer", padding: 0,
             border: `1.5px solid ${t.color}`, background: t.hollow ? "var(--surface-raised)" : t.color, color: t.hollow ? t.color : "#fff", fontSize: 9, lineHeight: 1, fontFamily: "inherit" }}>
           {t.glyph}
         </button>
-        {s.teamId && (
-          <span title={`Shared with ${teamName(s.teamId)}`} aria-label="Shared with team"
-            style={{ flex: "none", color: PAL.accent, display: "grid", placeItems: "center", lineHeight: 0 }}>
-            <ShareGlyph />
-          </span>
-        )}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          {renaming && renaming.id === s.id ? (
-            <input autoFocus defaultValue={renaming.name}
-              onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}
-              onKeyDown={(e) => {
-                e.stopPropagation();
-                if (e.key === "Enter") commitRename(s.id, e.target.value, renaming.name);
-                else if (e.key === "Escape") cancelRename();
-              }}
-              onBlur={(e) => { if (skipRenameBlurRef.current) { skipRenameBlurRef.current = false; return; } commitRename(s.id, e.target.value, renaming.name); }}
-              style={{ width: "100%", boxSizing: "border-box", fontSize: 12.5, fontWeight: 600, color: PAL.ink, fontFamily: "inherit", padding: "1px 4px", border: `1px solid ${PAL.accent}`, borderRadius: RADIUS.sm, outline: "none", background: "var(--surface-raised)" }} />
-          ) : (
-            <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textDecoration: t.struck ? "line-through" : "none" }}>{s.site || s.name || "Untitled site"}</div>
-          )}
-          {/* NEW-2 — the sharing state is NAMED here, not left to an icon's hover title. The owner
-              has 35 projects, exactly 2 are shared, and he could not tell which: an accent glyph on
-              its own says "something", never "shared, and with whom". This rides the existing
-              metadata line (so it costs no new row and truncates with it) and reads in the accent,
-              because PAL.muted is for inert metadata and this is the answer to his question. */}
-          <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {STATUS_META[st]?.label || st} · {acreText}
-            {s.teamId && <> · <span style={{ color: PAL.accent, fontWeight: 700 }}>Shared with {teamName(s.teamId)}</span></>}
+        {renaming && renaming.id === s.id ? (
+          <input autoFocus defaultValue={renaming.name}
+            onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter") commitRename(s.id, e.target.value, renaming.name);
+              else if (e.key === "Escape") cancelRename();
+            }}
+            onBlur={(e) => { if (skipRenameBlurRef.current) { skipRenameBlurRef.current = false; return; } commitRename(s.id, e.target.value, renaming.name); }}
+            style={{ flex: 1, minWidth: 0, boxSizing: "border-box", fontSize: 12.5, fontWeight: 600, color: PAL.ink, fontFamily: "inherit", padding: "1px 4px", border: `1px solid ${PAL.accent}`, borderRadius: RADIUS.sm, outline: "none", background: "var(--surface-raised)" }} />
+        ) : (
+          <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6, overflow: "hidden" }}>
+            <span style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textDecoration: t.struck ? "line-through" : "none" }}>
+              {s.site || s.name || "Untitled site"}
+            </span>
+            {/* B855952 — initials monogram(s), not an anonymous glyph. Owner: "a grey circle says
+                'someone', which the reader already knew." First teammate's initials + "+N" for the
+                rest, rather than stacking a third/fourth shape (illegible at this size); the full
+                roster names on hover/focus. Falls back to the plain share glyph only until the
+                roster fetch resolves (or for a legacy team this account can't roster). */}
+            {s.teamId && (() => {
+              const fullNames = members && members.length ? members.map((m) => m.displayName).join(", ") : `Shared with ${teamName(s.teamId)}`;
+              const tip = members && members.length ? `Shared with ${fullNames}` : fullNames;
+              return (
+                <span title={tip} aria-label={tip} style={{ flex: "none", display: "flex", alignItems: "center", gap: 2, color: PAL.accent }}>
+                  {members && members.length ? (
+                    <>
+                      <span style={{ width: 15, height: 15, borderRadius: "50%", background: PAL.accent, color: "#fff", fontSize: 8, fontWeight: 700, fontFamily: NUM_FONT, display: "grid", placeItems: "center", flex: "none" }}>
+                        {initialsOf(members[0])}
+                      </span>
+                      {members.length > 1 && <span style={{ fontSize: 9.5, fontWeight: 700 }}>+{members.length - 1}</span>}
+                    </>
+                  ) : <ShareGlyph size={12} />}
+                </span>
+              );
+            })()}
           </div>
+        )}
+        {/* B855952 — acreage is its OWN right-aligned column (tabular figures, so 89.8 and 573.3
+            can be compared by scanning down the list) instead of sitting mid-sentence. A site with
+            no drawn boundary gets a small flag chip here instead of a number — it used to sort to
+            the very top of the list looking like every other row; now it's marked, not privileged. */}
+        <div style={{ flex: "none", minWidth: 44, display: "flex", justifyContent: "flex-end" }}>
+          {!boundary.known ? (
+            <span title="Checking boundary…" style={{ fontSize: 11, color: PAL.muted, fontFamily: NUM_FONT }}>…</span>
+          ) : boundary.hasBoundary ? (
+            <span style={{ fontSize: 11, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{boundary.acres.toFixed(1)}</span>
+          ) : (
+            <span title="No boundary drawn yet" style={{ fontSize: 9.5, fontWeight: 700, color: PAL.muted, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.pill, padding: "1px 6px", whiteSpace: "nowrap" }}>no boundary</span>
+          )}
         </div>
         {/* (B168) single-click ✕ delete removed — delete lives in the right-click menu;
             only the non-destructive locate (⊕) stays here. */}
         <div style={{ display: "flex", gap: 2, flex: "none", alignItems: "center", opacity: showActions ? 1 : 0, transition: "opacity .12s", pointerEvents: showActions ? "auto" : "none" }}>
           {s.origin && <button title="Show on map (zoom to the plan)" aria-label="Show on map" onClick={(e) => { e.stopPropagation(); flyToSite(s); }}
-            className="gbtn" style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", lineHeight: 0, padding: 3, borderRadius: RADIUS.sm }}>
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="8" r="5.2" /><circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none" /><path d="M8 1.2v2M8 12.8v2M1.2 8h2M12.8 8h2" /></svg>
+            className="gbtn" style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", lineHeight: 0, padding: 2, borderRadius: RADIUS.sm }}>
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="8" r="5.2" /><circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none" /><path d="M8 1.2v2M8 12.8v2M1.2 8h2M12.8 8h2" /></svg>
           </button>}
         </div>
       </div>
     );
   };
-  // Sites matching the active chip + name filters (for the panel header count).
-  const shownCount = sites.filter((s) => passStatus(s) && passName(s)).length;
+  // Sites matching the name filter (for the panel header count).
+  const shownCount = sites.filter((s) => passName(s)).length;
 
   // NEW-MAPCTRL-2 — STEEL-MAN ix's way back: re-run the SAME derived landing view a fresh open
   // would use, so "back to your sites" always means the same thing "open the Map view" does.
@@ -2643,63 +2798,100 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                   background: "transparent", border: "none", cursor: "pointer", color: PAL.muted, borderRadius: RADIUS.sm }}>
                 <span style={{ fontSize: 8, lineHeight: 1, transform: sitesPanelOpen ? "none" : "rotate(-90deg)", display: "inline-block" }}>▼</span>
               </button>
-              <RailTab label="Sites" count={(statusFilter.size || nf) ? `${shownCount}/${sites.length}` : sites.length}
+              <RailTab label="Sites" count={nf ? `${shownCount}/${sites.length}` : sites.length}
                 active={mode === "site"} onClick={() => { setMode("site"); if (!sitesPanelOpen) toggleSitesPanel(); }} />
               <RailTab label="Comps" count={comps.length} active={mode === "comp"}
                 onClick={() => { setMode("comp"); if (!sitesPanelOpen) toggleSitesPanel(); }} />
             </div>
             {sitesPanelOpen && mode === "site" && (<>
-            {/* Type-to-filter the list by name (B235). */}
-            <div style={{ padding: "0 8px 6px" }}>
+            {/* B855952 (NEW-1) — the name filter and the sort control share ONE line (the status
+                chip row this replaced ate two). "Delete the status filter chip row" — owner,
+                verbatim: "that's not really a good way to filter it… there's literally just
+                nothing there." Collapsing a group IS the filter now (below). */}
+            <div style={{ display: "flex", gap: 6, padding: "0 8px 8px" }}>
               <input value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name"
-                style={{ width: "100%", boxSizing: "border-box", padding: "5px 8px", fontSize: 12, border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.sm, color: PAL.ink, background: "var(--surface-raised)", fontFamily: "inherit", outline: "none" }} />
+                style={{ flex: 1, minWidth: 0, boxSizing: "border-box", padding: "5px 8px", fontSize: 12, border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.sm, color: PAL.ink, background: "var(--surface-raised)", fontFamily: "inherit", outline: "none" }} />
+              <select value={sitesPanelPrefs.sort} onChange={(e) => setSitesSort(e.target.value)} aria-label="Sort sites within each group"
+                title="Sort — applies within each group, not across groups"
+                style={{ flex: "none", boxSizing: "border-box", padding: "5px 6px", fontSize: 11, border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.sm, color: PAL.ink, background: "var(--surface-raised)", fontFamily: "inherit", outline: "none" }}>
+                <option value="largest">Largest first</option>
+                <option value="az">A–Z</option>
+                <option value="recent">Recently touched</option>
+              </select>
             </div>
-            {/* Status chips = POSITIVE multi-select filters (B235): tap to show only those
-                statuses (list + map pins both). None selected = show everything. Colors +
-                glyphs come from the shared status tokens (B234). */}
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, padding: "0 8px 8px" }}>
-              {STATUSES.filter((st) => (statusCounts[st] || 0) > 0).map((st) => {
-                const t = statusToken(st); const on = statusFilter.has(st); const anySel = statusFilter.size > 0; const n = statusCounts[st] || 0;
-                return (
-                  <button key={st} onClick={() => toggleStatusFilter(st)}
-                    title={`${STATUS_META[st]?.label || st}: ${n} — ${on ? "click to remove from the filter" : "click to show only this status"}`}
-                    style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: RADIUS.pill, cursor: "pointer", fontFamily: "inherit",
-                      fontSize: 10.5, fontWeight: 600, lineHeight: 1.3, border: `1px solid ${on ? t.color : PAL.panelLine}`,
-                      background: on ? t.color : "var(--surface-raised)", color: on ? "#fff" : PAL.ink, opacity: anySel && !on ? 0.55 : 1, textDecoration: t.struck ? "line-through" : "none" }}>
-                    {/* Solid status disc (matches the map pin): filled dot off, inverted on.
-                        Pursuit/Active are glyphless discs; settled stages carry ‖/✓/✕ (B433). */}
-                    <span style={{ width: 12, height: 12, flex: "none", display: "grid", placeItems: "center", borderRadius: RADIUS.pill, background: on ? "rgba(255,255,255,0.92)" : t.color, color: on ? t.color : "#fff", fontSize: 7.5, lineHeight: 1 }}>{t.glyph}</span>
-                    {STATUS_META[st]?.label || st}<span style={{ color: on ? "rgba(255,255,255,0.85)" : PAL.muted, fontWeight: 700 }}>{n}</span>
-                  </button>
-                );
-              })}
-            </div>
-            {/* Collapsible status sections (B235). Active/Pursuit/On Hold expanded by
-                default; Complete/Dead collapsed so settled projects go quiet. Headers
-                use the shared status tokens (B234). */}
+            {/* B855953/B855954 (NEW-2/NEW-3) — the Pinned section (fixed, never reorderable) sits
+                above every status group; the groups themselves drag-reorder via each header's
+                hover/focus-revealed grip. Collapsing a group is the only "filter" left (NEW-1). */}
             <div style={{ maxHeight: 340, overflowY: "auto", paddingBottom: 4, borderTop: `1px solid ${PAL.panelLine}` }}>
               {(() => {
-                if (shownCount === 0) return <div style={{ fontSize: 11.5, color: PAL.muted, padding: "10px 12px" }}>No sites match{nf ? ` “${nameFilter.trim()}”` : ""}.</div>;
-                return STATUSES.filter((st) => statusFilter.size === 0 || statusFilter.has(st)).map((st) => {
-                  const rows = sites.filter((s) => statusOf(s) === st && passName(s));
+                const pinnedRows = sortRows(sites.filter((s) => pinnedSet.has(s.id) && passName(s)));
+                const groupBlocks = orderedStatuses.map((st) => {
+                  const rows = sites.filter((s) => statusOf(s) === st && passName(s)); // TRUE group total — pinned included
                   if (!rows.length) return null;
-                  // While a name filter is active, force matching sections open so a
-                  // match in a settled (collapsed) group isn't hidden (B235).
-                  const t = statusToken(st); const collapsed = !!groupCollapsed[st] && !nf;
+                  const visibleRows = sortRows(rows.filter((s) => !pinnedSet.has(s.id))); // pinned sites live in the Pinned section instead
+                  const acreTotal = rows.reduce((sum, s) => { const a = acresOf(s); return sum + (a >= 0 ? a : 0); }, 0);
+                  // While a name filter is active, force matching sections open so a match in a
+                  // settled (collapsed) group isn't hidden.
+                  const t = statusToken(st); const collapsed = groupCollapsedFor(st) && !nf;
                   return (
-                    <div key={st}>
-                      <button onClick={() => toggleGroup(st)} title={collapsed ? "Expand" : "Collapse"}
-                        style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "var(--surface-raised)", borderTop: `1px solid ${PAL.panelLine}`, borderLeft: "none", borderRight: "none", borderBottom: "none", cursor: "pointer", fontFamily: "inherit", padding: "5px 12px" }}>
-                        <span style={{ fontSize: 8, lineHeight: 1, transform: collapsed ? "rotate(-90deg)" : "none", display: "inline-block", color: PAL.muted }}>▼</span>
-                        {/* Solid status disc, matching the map pin (B433). */}
-                        <span style={{ width: 14, height: 14, flex: "none", display: "grid", placeItems: "center", borderRadius: RADIUS.pill, background: t.color, color: "#fff", fontSize: 8.5, lineHeight: 1 }}>{t.glyph}</span>
-                        <span style={{ flex: 1, textAlign: "left", fontSize: 11, fontWeight: 700, color: PAL.ink, textDecoration: t.struck ? "line-through" : "none" }}>{STATUS_META[st]?.label || st}</span>
-                        <span style={{ color: PAL.muted, fontWeight: 700, fontSize: 11 }}>{rows.length}</span>
-                      </button>
-                      {!collapsed && rows.map(siteRow)}
+                    <div key={st}
+                      onDragOver={(e) => { if (dragGroup && dragGroup !== st) e.preventDefault(); }}
+                      onDrop={(e) => { e.preventDefault(); dropGroup(st); }}>
+                      <div onMouseEnter={() => setHoverGroup(st)} onMouseLeave={() => setHoverGroup((g) => (g === st ? null : g))}
+                        style={{ display: "flex", alignItems: "center", background: "var(--surface-raised)", borderTop: `1px solid ${PAL.panelLine}` }}>
+                        <button onClick={() => toggleGroup(st)} title={collapsed ? "Expand" : "Collapse"}
+                          style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6, background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", padding: "4px 4px 4px 12px" }}>
+                          <span style={{ fontSize: 8, lineHeight: 1, transform: collapsed ? "rotate(-90deg)" : "none", display: "inline-block", color: PAL.muted }}>▼</span>
+                          {/* Solid status disc, matching the map pin (B433). */}
+                          <span style={{ width: 14, height: 14, flex: "none", display: "grid", placeItems: "center", borderRadius: RADIUS.pill, background: t.color, color: "#fff", fontSize: 8.5, lineHeight: 1 }}>{t.glyph}</span>
+                          <span style={{ flex: 1, textAlign: "left", fontSize: 11, fontWeight: 700, color: PAL.ink, textDecoration: t.struck ? "line-through" : "none" }}>{STATUS_META[st]?.label || st}</span>
+                          <span style={{ color: PAL.muted, fontWeight: 700, fontSize: 11 }}>{rows.length}</span>
+                          {acreTotal > 0 && <span style={{ color: PAL.muted, fontSize: 10.5, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{Math.round(acreTotal).toLocaleString()} {AC}</span>}
+                        </button>
+                        {/* NEW-3 — the drag handle: quiet at rest, shown on hover/focus, and a
+                            focusable control so arrow-key reorder doesn't need a visible drag to
+                            discover it. */}
+                        <button draggable tabIndex={0} aria-label={`Reorder the ${STATUS_META[st]?.label || st} group`}
+                          title="Drag to reorder, or focus + arrow keys"
+                          onDragStart={(e) => { setDragGroup(st); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", st); } catch (_) {} }}
+                          onDragEnd={() => setDragGroup(null)}
+                          onFocus={() => setHoverGroup(st)} onBlur={() => setHoverGroup((g) => (g === st ? null : g))}
+                          onKeyDown={(e) => {
+                            if (e.key === "ArrowUp") { e.preventDefault(); moveGroup(st, -1); }
+                            else if (e.key === "ArrowDown") { e.preventDefault(); moveGroup(st, 1); }
+                          }}
+                          style={{ flex: "none", width: 17, height: 17, marginRight: 4, display: "grid", placeItems: "center", background: "transparent", border: "none", borderRadius: RADIUS.sm, cursor: "grab", color: PAL.muted, opacity: hoverGroup === st ? 1 : 0, transition: "opacity .12s" }}>
+                          <svg width="9" height="13" viewBox="0 0 9 13" fill="currentColor" aria-hidden="true">
+                            <circle cx="2" cy="1.8" r="1.2" /><circle cx="7" cy="1.8" r="1.2" />
+                            <circle cx="2" cy="6.5" r="1.2" /><circle cx="7" cy="6.5" r="1.2" />
+                            <circle cx="2" cy="11.2" r="1.2" /><circle cx="7" cy="11.2" r="1.2" />
+                          </svg>
+                        </button>
+                      </div>
+                      {!collapsed && visibleRows.map(siteRow)}
                     </div>
                   );
-                });
+                }).filter(Boolean);
+                if (!pinnedRows.length && !groupBlocks.length) {
+                  return <div style={{ fontSize: 11.5, color: PAL.muted, padding: "10px 12px" }}>No sites match{nf ? ` “${nameFilter.trim()}”` : ""}.</div>;
+                }
+                return (
+                  <>
+                    {pinnedRows.length > 0 && (
+                      <div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 12px", background: "var(--surface-raised)" }}>
+                          <span style={{ flex: "none", color: PAL.muted, display: "grid", placeItems: "center", lineHeight: 0 }}><PinGlyph size={11} /></span>
+                          <span style={{ flex: 1, textAlign: "left", fontSize: 11, fontWeight: 700, color: PAL.ink }}>Pinned</span>
+                          <span style={{ color: PAL.muted, fontWeight: 700, fontSize: 11 }}>{pinnedRows.length}</span>
+                        </div>
+                        <div style={{ maxHeight: pinnedRows.length > 6 ? 192 : "none", overflowY: pinnedRows.length > 6 ? "auto" : "visible" }}>
+                          {pinnedRows.map(siteRow)}
+                        </div>
+                      </div>
+                    )}
+                    {groupBlocks}
+                  </>
+                );
               })()}
             </div>
             </>)}
@@ -2828,10 +3020,12 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                  it. Choices are DERIVED from the shared BASEMAPS registry, so a source added there
                  shows up here with no second edit; there is no "off" on this surface because the
                  finder's map always has a base (see basemaps.js). `placeNames` is the same
-                 provider label overlay the bare "Labels" checkbox used to toggle, now named so it
-                 says what it draws and carrying the ⓘ every other row in this panel has. */
+                 provider ROAD-NAMES overlay the bare "Labels" checkbox used to toggle (renamed
+                 (×2) from the still-inaccurate "Place names"), carrying the ⓘ every other row in
+                 this panel has, plus (×3) its own `opacityControl` slider — `labelsOpacity` — so
+                 the owner can dial it from crisp default down to faint rather than only on/off. */
               basemap={{ value: basemap, onChange: setBasemap, choices: FINDER_BASEMAP_CHOICES }}
-              placeNames={{ value: labels, onChange: setLabels }}
+              placeNames={{ value: labels, onChange: setLabels, opacity: labelsOpacity, onOpacityChange: setLabelsOpacity }}
               /* NEW-2 — which STATE the map is looking at, so a Texas-only source is named as
                  "not available in Colorado" rather than offered as a toggle that produces an
                  empty map. The view centre is the best state fact the finder has (there is no
@@ -2897,6 +3091,15 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         {!err && shareNotice && (
           <div role="status" style={{ background: "var(--success-bg)", border: "1px solid var(--success-border)", borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12.5, color: "var(--success-text)", lineHeight: 1.45 }}>
             {shareNotice}
+          </div>
+        )}
+        {/* B855952/B855953/B855954 — LOUD-FAILURE for a failed Sites-panel arrangement save (a
+            pin, a drag reorder, a collapse toggle, or a sort change that couldn't reach the
+            account row): the change still applies on this device, but it's said out loud rather
+            than silently staying local. */}
+        {!err && !shareNotice && prefsSaveWarn && (
+          <div role="status" style={{ background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45 }}>
+            {prefsSaveWarn}
           </div>
         )}
         {/* statewide-backup notice — the clicked lot was answered by the
@@ -3037,6 +3240,19 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               );
             })()}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "4px 0" }} />
+            {/* B855953 (NEW-2) — owner, verbatim: "let's add an option to pin a site to the top.
+                And, like, maybe we just right click and you can pin it." This IS that menu — no
+                separate affordance was built. Reachable on a phone too: the status dot's own tap
+                (above) opens this same menu, so no long-press is needed. */}
+            <button onClick={() => { const s = statusMenu.site; setStatusMenu(null); togglePin(s.id); }}
+              title={pinnedSet.has(statusMenu.site.id) ? "Remove this project from the top of the list" : "Pin this project to the top of the list"}
+              style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "7px 12px", border: "none",
+                background: "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 600 }}>
+              <span style={{ width: 15, height: 15, flex: "none", display: "grid", placeItems: "center", lineHeight: 0 }}>
+                <PinGlyph size={13} />
+              </span>
+              <span style={{ flex: 1 }}>{pinnedSet.has(statusMenu.site.id) ? "Unpin" : "Pin to top"}</span>
+            </button>
             <button onClick={() => { const s = statusMenu.site; setStatusMenu(null); setRenaming({ id: s.id, name: s.site || s.name || "" }); }}
               title="Rename this project"
               style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "7px 12px", border: "none",

@@ -11,7 +11,7 @@ import {
 } from "../src/shared/telemetry/perfTrigger.js";
 import {
   buildCapture, encodeCapture, decodeFrames, encodeFrames, assertCaptureClean, frameStats,
-  safePlanId, sanitizeAttribution, CAPTURE_MAX_CHARS, CAPTURE_NUMERIC_KEYS, CAPTURE_ENUM_KEYS,
+  safePlanId, sanitizeAttribution, attributionLabel, CAPTURE_MAX_CHARS, CAPTURE_NUMERIC_KEYS, CAPTURE_ENUM_KEYS,
 } from "../src/shared/telemetry/perfCapture.js";
 import {
   notePlanContext, noteViewScale, perfContext, requestPerfCapture, bindPerfRecorder,
@@ -346,6 +346,48 @@ describe("privacy — the payload is an allowlist and it is PROVED, not trusted"
     expect(sanitizeAttribution("weird name with spaces")).toBe("weirdnamewithspaces");
   });
 
+  /* B844416 — every Leaflet-scheduled callback and every app-level requestAnimationFrame arrow is
+   * an ANONYMOUS function, so `sourceFunctionName` is empty for the four worst blocks in the
+   * owner's 2026-08-29 production capture. The old fallback chain (sourceFunctionName || invoker ||
+   * sourceURL) never reached sourceURL, because `invoker` is a non-empty constant
+   * ("FrameRequestCallback") for every one of those — so the capture said only "an animation frame
+   * ran", true of most of the app. */
+  it("names an anonymous long-animation-frame script by its invoker AND a compact source location", () => {
+    const script = {
+      sourceFunctionName: "",
+      invoker: "FrameRequestCallback",
+      sourceURL: "https://planyr.io/assets/index-4f2a.js?site=Bain%20Tract",
+      sourceCharPosition: 81422,
+    };
+    expect(attributionLabel(script)).toBe("FrameRequestCallback:index-4f2a.js:81422");
+  });
+
+  it("still prefers a real function name when the platform provides one", () => {
+    expect(attributionLabel({
+      sourceFunctionName: "handleWheelZoom",
+      invoker: "EventListener.wheel",
+      sourceURL: "https://planyr.io/assets/index-4f2a.js",
+      sourceCharPosition: 12,
+    })).toBe("handleWheelZoom");
+  });
+
+  it("falls back gracefully when the location is unknown — invoker alone, never a bare colon", () => {
+    expect(attributionLabel({ sourceFunctionName: "", invoker: "FrameRequestCallback", sourceURL: "", sourceCharPosition: -1 }))
+      .toBe("FrameRequestCallback");
+    expect(attributionLabel({ sourceFunctionName: "", invoker: "", sourceURL: "", sourceCharPosition: -1 })).toBe("");
+  });
+
+  it("the combined label still passes the ltNames sanitiser unchanged — no slash to mis-truncate on", () => {
+    const label = attributionLabel({
+      sourceFunctionName: "",
+      invoker: "FrameRequestCallback",
+      sourceURL: "https://planyr.io/assets/index-4f2a.js?site=Bain%20Tract",
+      sourceCharPosition: 81422,
+    });
+    expect(sanitizeAttribution(label)).toBe(label);
+    expect(label).toMatch(/^[A-Za-z0-9_.:-]*$/);
+  });
+
   it("catches an injected key, a string in a number slot, and a note outside the vocabulary", () => {
     const bad = clean();
     bad.ownerName = "Michael";
@@ -505,6 +547,12 @@ describe("wiring guards — the parts that only exist as a call site", () => {
     const j = recorder.indexOf('reportClientEvent("perfcap"');
     expect(i).toBeGreaterThan(-1);
     expect(j).toBeGreaterThan(i);
+  });
+
+  it("a long-animation-frame's top script is named through attributionLabel — never the bare sourceFunctionName||invoker||sourceURL chain", () => {
+    expect(recorder).toMatch(/import\s*\{[^}]*attributionLabel[^}]*\}\s*from\s*["']\.\/perfCapture\.js["']/);
+    expect(recorder).toContain("name = attributionLabel(top)");
+    expect(recorder).not.toContain('top.sourceFunctionName || top.invoker || top.sourceURL || ""');
   });
 
   it("the planner wires both context axes, and the zoom one on the SCALAR", () => {
