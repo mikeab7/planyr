@@ -140,9 +140,13 @@ describe("NEW-4 — five memos, each with a provably complete input set", () => 
     expect(src.match(/\[\.\.\.drawEls\]\.sort\(byZ\)/g).length).toBe(1); // once, inside the memo
   });
 
-  it("(c) the O(n²) parcel overlap + dissolve memoise on `parcels` alone", () => {
+  it("(c) the O(n²) parcel overlap memoises on `parcels` alone; the dissolve rides the metrics memo", () => {
     expect(src).toContain("const parcelOverlapPairs = useMemo(() => overlappingParcelPairs(parcels), [parcels]);");
-    expect(src).toContain("const siteSqft = useMemo(() => dissolvedParcelSqft(parcels, parcelOverlapPairs), [parcels, parcelOverlapPairs]);");
+    // site-metrics-extraction (lib/siteMetrics.js) — `dissolvedParcelSqft` moved inside the pure
+    // siteMetrics() function, called once per (els, parcels, parcelOverlapPairs, settings) change
+    // via this memo, rather than in its own useMemo. The property is unchanged: parcels+overlapPairs
+    // still gate it, just alongside the rest of the yield bundle instead of alone.
+    expect(src).toContain("const metrics = useMemo(() => siteMetrics(els, parcels, parcelOverlapPairs, settings), [els, parcels, parcelOverlapPairs, settings]);");
   });
 
   it("(d) the criteria record resolves once per (jurisdiction, overrides) — no call site rebuilds it", () => {

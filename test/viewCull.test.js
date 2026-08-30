@@ -132,8 +132,14 @@ describe("the export renders the COMPLETE model, whatever the view (hard constra
     expect(SP).toMatch(/const drawEls = useMemo\(\(\) => \{[\s\S]{0,400}?cullToView\(vis, cullRect, \{ enabled: !!cullRect, keep: cullKeep \}\)/);
     // the visibility filter is applied to the MODEL LIST going into the cull, never to `els` itself
     expect(SP).toMatch(/const vis = hiddenGroups \? els\.filter\(\(el\) => !elHidden\(hiddenGroups, el\)\) : els;/);
-    // and the metrics pass still iterates the MODEL — the whole promise of "hide never deletes"
-    expect(SP).toMatch(/\n  els\.forEach\(\(e\) => \{\n    const a = isCenterlineRoad\(e\)/);
+    // and the metrics pass (site-metrics-extraction, lib/siteMetrics.js) is still fed the MODEL —
+    // the whole promise of "hide never deletes" — never `drawEls`/`vis` (the culled/hidden-filtered
+    // subsets). The `els.forEach` itself moved into siteMetrics(); asserted below that it iterates
+    // exactly what it is handed, never a subset of its own choosing.
+    expect(SP).toMatch(/const metrics = useMemo\(\(\) => siteMetrics\(els, parcels, parcelOverlapPairs, settings\)/);
+    const SM = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/lib/siteMetrics.js", import.meta.url)), "utf8");
+    expect(SM).toMatch(/const els = elements \|\| \[\];/);
+    expect(SM).toMatch(/\n  els\.forEach\(\(e\) => \{[\s\S]{0,120}?const a = isCenterlineRoad\(e\)/);
     expect(SP).toMatch(/cullActive = !exportPass/);
   });
 
