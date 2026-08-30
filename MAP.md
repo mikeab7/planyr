@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-30 @ `c378b0e1` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-30 @ `445da09a` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -614,7 +614,7 @@ _587 source files mapped._
 - **`src/workspaces/site-planner/lib/countiesProvenance.js`** — NEW-5 build-time endpoint verification record for every county parcel source (probe dates, parked candidate URLs, provenance) — read by the GIS source audit, NEVER by the browser, which is why it is split out of counties.js: its prose has no business on the Site route's bundle
   - _exports_: `candidateUrlFor`, `COUNTY_VERIFICATION`, `provenanceFor`, `verifiedOnFor`
 - **`src/workspaces/site-planner/lib/countyPolygons.js`** — B209502 point-in-polygon county resolution: decoder + ray-cast test over the committed `public/geo/county-polygons.json` asset, so a bounding box can narrow the candidates but never decide which county a point is in
-  - _exports_: `__resetCountyPolygons`, `countyPolygonsReady`, `loadCountyPolygons`, `resolveCounty`, `setCountyPolygons`
+  - _exports_: `__resetCountyPolygons`, `countyPolygonsReady`, `countyRoster`, `loadCountyPolygons`, `resolveCounty`, `setCountyPolygons`
 - **`src/workspaces/site-planner/lib/countyPolygonsCore.js`** — B209502 the county resolver's working half (delta decode, ray-cast containment, edge distance), split off the boot path and dynamic-imported by `countyPolygons.js` so the Site route's largest chunk isn't charged for it
   - _exports_: `buildIndex`, `decodeRing`, `distToRings`, `NEAR_EDGE_DEG`, `pointInRing`, `resolveIn`
 - **`src/workspaces/site-planner/lib/coverage.js`** — Picker-only layer coverage engine: reproject regional service extents vs viewport to flag in-view/empty/out-of-coverage plus relevance prefs
