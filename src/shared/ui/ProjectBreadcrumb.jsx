@@ -39,12 +39,12 @@ import AnchoredMenu from "./AnchoredMenu.jsx";
 import ContextMenu from "./ContextMenu.jsx";
 import { NO_AUTOFILL } from "./noAutofill.js";
 import {
-  listProjects, filterProjects, relTime, warmProjectsIfEmpty,
+  listProjects, filterProjects, relTime, warmProjectsIfEmpty, reconcileProjects,
   renameProject as storeRename, deleteProject as storeDelete,
   listDeletedProjects, restoreDeletedProject, purgeDeletedProject, purgeExpiredDeletedProjects,
   DELETED_RETENTION_DAYS, activeUid,
 } from "../projects/projects.js";
-import { resolveCurrentName } from "../projects/projectModel.js";
+import { resolveCurrentName, withCurrentProject } from "../projects/projectModel.js";
 
 // Crumbs sit on the chrome bar, which now themes WITH the app (B318) — so these are
 // chrome tokens, not the retired warm-dark hexes (white-on-light was the B341 bug).
@@ -255,7 +255,15 @@ export default function ProjectBreadcrumb({
   const canDelete = !!onDeleteProject || !controlled;
   const canManage = canRename || canDelete;
 
-  const refresh = () => { if (!controlled) setInternalProjects(listProjects()); };
+  // B853266/NEW-1 — the project the user is LITERALLY STANDING IN must never be missing from its
+  // own switcher: the on-device site-list cache can lag the cloud (a device that missed a sync,
+  // a diverged pull), and until reconcileProjects() below catches up this keeps the routed project
+  // visible instead of it silently reading as though it doesn't exist. Union, never a swap — every
+  // other cached project stays exactly as listProjects() reports it.
+  const refresh = () => {
+    if (controlled) return;
+    setInternalProjects(withCurrentProject(listProjects(), currentProject));
+  };
   // B475 — warm the signed-in on-device project cache (empty on a cold tab that went straight to Markup,
   // since it only fills after a Site-Planner cloud pull), then re-read. `warming` drives a "Loading
   // projects…" line so the dropdown never shows a misleading "No projects yet" mid-pull. No-ops fast when
@@ -266,6 +274,21 @@ export default function ProjectBreadcrumb({
     if (controlled) return;
     setWarming(true);
     warmProjectsIfEmpty().then((warmed) => { if (warmed) refresh(); }).finally(() => setWarming(false));
+  };
+  // B853266/NEW-1 — warmThenRefresh above only ever pulls a genuinely EMPTY cache, so a cache
+  // that already holds some projects but has silently diverged from the cloud never gets another
+  // chance (the reported bug: Richfield/Silvestri/Woods Road are real, actively-worked projects
+  // missing from a switcher that had plenty of OTHER entries, so the empty-only warm never fired
+  // for them). reconcileProjects() always re-pulls when signed in; only run it on the deliberate
+  // OPEN moment (never on mount, and throttled) so opening the switcher isn't a network hazard.
+  const lastReconcileRef = useRef(0);
+  const reconcileThenRefresh = () => {
+    if (controlled) return;
+    const now = Date.now();
+    if (now - lastReconcileRef.current < 30000) return;
+    lastReconcileRef.current = now;
+    setWarming(true);
+    reconcileProjects().then((r) => { if (r.warmed) refresh(); }).finally(() => setWarming(false));
   };
   // Keep the (uncontrolled) list fresh: on mount, whenever the dropdown opens, and when another tab
   // changes the site store. Controlled mode skips this entirely — the workspace pushes updates via the prop.
@@ -295,7 +318,7 @@ export default function ProjectBreadcrumb({
       .catch(() => {});
   };
   useEffect(() => {
-    if (open) { refresh(); warmThenRefresh(); refreshBin(); setQ(""); }
+    if (open) { refresh(); warmThenRefresh(); reconcileThenRefresh(); refreshBin(); setQ(""); }
     else { setMenuFor(null); setEditingId(null); setBinOpen(false); setPurgeFor(null); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
