@@ -1,0 +1,104 @@
+/* Checked-in fixture for test/hiddenContentReads.test.js's mutation check (NEW-1, B876256).
+ *
+ * This is the REAL pre-B3296 `roadNet` binding — the body `bindingsIn()` would have sliced out of
+ * `src/workspaces/site-planner/SitePlanner.jsx` at commit b4ddcc78f91a3b9c2689ee5ab170c307d9a8046c's
+ * PARENT, af2b093e43cf2d48e17b7333d3d21d113b337278 (i.e. `b4ddcc78^`) — extracted verbatim with
+ * `git show af2b093e...:src/workspaces/site-planner/SitePlanner.jsx | bindingsIn(...)`, never a
+ * paraphrase (a paraphrase would only ever test the paraphrase).
+ *
+ * WHY THIS FILE EXISTS RATHER THAN A LIVE `git show b4ddcc78^:…`: b4ddcc78 is not an ancestor of
+ * `origin/main` — it survives only on one long-unmerged branch
+ * (`origin/claude/site-planner-view-keyboard-bugs-6n4guj`). Deleting that branch (ordinary
+ * housekeeping) would make the old lookup fail forever with `fatal: invalid object name`, with no
+ * way to recover the blob. Reading this checked-in copy instead means the mutation check no longer
+ * depends on any commit outside main's history, or on any branch continuing to exist.
+ *
+ * Do not "clean up" this file to look like real, currently-buildable source — it is deliberately the
+ * OLD, BUGGY body (reads `els` directly, never asks the visibility predicate), which is the whole
+ * point: the guard must prove the sweep still reports IT as an unfiltered must-filter read.
+ */
+  const roadNet = useMemo(() => {
+    /* NEW-1 — a road the user has FORCED out of its type band leaves the dissolved network with it.
+       The network is one merged region painted in the road band; a forced road has to paint in the
+       forced band instead, so leaving it a member would draw it in BOTH places (the region below,
+       its own strip above). `bandForceOf` is null for every road on every untouched plan, so this
+       filter is an identity no-op there and the dissolve is byte-for-byte what it was. */
+    const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo && !bandForceOf(x));
+    if (!roads.length) return { regions: [], stripes: new Map(), outlineCuts: new Map(), memberIds: new Set(), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
+    const byId = new Map(roads.map((r) => [r.id, r]));
+    const strip = new Map(roads.map((r) => [r.id, roadStripRing(r, settings, sharpFor(r), roundabouts.trims.get(r.id))]));
+    // Extra pavement contributed by each junction, indexed by the road that owns the junction.
+    const extra = new Map(roads.map((r) => [r.id, []]));
+    // Stripe-only cutters: regions that must INTERRUPT a curb stripe without adding pavement. The one
+    // case is the through road's near face-of-curb stripe, which otherwise draws a curb line straight
+    // across the throat between the two returns — the strip of the side road only covers the middle of
+    // that span, so clipping against pavement alone leaves a stub under each return.
+    const stripeCut = [];
+    const pairs = [];
+    const addExtra = (id, polys) => { const a = extra.get(id); if (a) for (const p of polys || []) if (p && p.length >= 3) a.push(p); };
+    for (const tj of teeJunctions) {
+      addExtra(tj.sideId, tj.geom.wedges);
+      pairs.push([tj.sideId, tj.throughId]);
+      const G = byId.get(tj.throughId), n = tj.geom.nTee, [t1, t2] = tj.geom.throughTangents || [];
+      const depth = G ? roadOuterHalf(G) : 0;                 // back-of-curb → centerline: near stripe only
+      if (t1 && t2 && n && depth > 0) stripeCut.push([t1, t2, { x: t2.x - n.x * depth, y: t2.y - n.y * depth }, { x: t1.x - n.x * depth, y: t1.y - n.y * depth }]);
+    }
+    for (const dj of driveJunctions) addExtra(dj.sideId, dj.geom.wedges);   // target is a rect element, not a road
+    // NEW-5 — a roundabout's circulatory sectors + its curb returns are ADDITIVE pavement in exactly
+    // the same sense a tee's wedges are, so they go through the SAME union: one region, one
+    // continuous curb outline, and the central island falls out as a genuine PolyTree hole.
+    for (const [rid, polys] of roundabouts.extraById) addExtra(rid, polys);
+    for (const p of roundabouts.pairs) pairs.push(p);   // every leg clusters with its circle
+    for (const wj of weldJunctions) {
+      addExtra(wj.ids[0], [wj.cover]);
+      for (let i = 1; i < wj.ids.length; i++) pairs.push([wj.ids[0], wj.ids[i]]);
+    }
+    const cluster = clusterIds(roads.map((r) => r.id), pairs);
+    const groups = new Map();
+    for (const r of roads) {
+      const k = cluster.get(r.id);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(r.id);
+    }
+    const regions = [];
+    const stripes = new Map();
+    for (const ids of groups.values()) {
+      const parts = [];
+      for (const id of ids) { const s = strip.get(id); if (s && s.length >= 3) parts.push(s); parts.push(...extra.get(id)); }
+      // Style + paint order from the WIDEST member (its surface reads as the merged pavement) — the
+      // same rule the weld cover already used. `zKey` keeps the cluster in the element z-sequence.
+      const styleEl = ids.map((id) => byId.get(id)).filter(Boolean).sort((a, b) => roadOuterHalf(b) - roadOuterHalf(a))[0];
+      const zKey = Math.min(...ids.map((id) => byId.get(id)?.z ?? 0));
+      for (const region of dissolveRings(parts)) regions.push({ region, styleEl, zKey, ids });
+      // A road's inner curb stripes are trimmed against the OTHER pavement in its cluster, so a stripe
+      // ends where it runs into the junction instead of drawing a curb straight through the intersection.
+      for (const id of ids) {
+        const others = [];
+        for (const oid of ids) { if (oid === id) continue; const s = strip.get(oid); if (s && s.length >= 3) others.push(s); }
+        for (const oid of ids) others.push(...extra.get(oid));
+        others.push(...stripeCut);
+        stripes.set(id, roadCurbLines(byId.get(id), settings, sharpFor(byId.get(id)), roundabouts.trims.get(id)).flatMap((cl) => clipPolylineOutside(cl, others)));
+      }
+    }
+    regions.sort((a, b) => a.zKey - b.zKey);
+    // NEW-4 — a road that TEES INTO A RECT (a parking field, a truck court) leaves that rect's own
+    // outline drawn straight across the drive opening: the owner's screenshot, and the same defect the
+    // road↔road case already fixed, one layer out. A junction reads as one continuous curb around the
+    // entrance, never a line ruled across it. Road↔road dissolves because both sides are pavement; a
+    // court is a different element with its own fill, so instead of merging we INTERRUPT the target's
+    // outline where the drive's pavement crosses it. Map<targetId, cutter rings>.
+    const outlineCuts = new Map();
+    for (const dj of driveJunctions) {
+      const cutters = regions.filter((r) => r.ids.includes(dj.sideId)).map((r) => r.region.outer).filter(Boolean);
+      if (!cutters.length) continue;
+      outlineCuts.set(dj.targetId, [...(outlineCuts.get(dj.targetId) || []), ...cutters]);
+    }
+    return { regions, stripes, outlineCuts, memberIds: new Set(roads.map((r) => r.id)), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
+  }, [els, settings, teeJunctions, driveJunctions, weldJunctions, sharpFor, roadJunctionVerts, roundabouts]);
+  /* VIEW-INDEPENDENT-ONCE (NEW-2). The dissolved network's SVG path data and per-cluster style were
+     built inside the render's `roadNet.regions.map(…)`, so a 60-move pan rebuilt them 187 times —
+     561 `regionPathD` calls and 37 ms on the reference plan, the second-ranked violation the
+     detector found. `region` comes from the memo above (model + settings) and `f2p` is pinned at
+     the pan anchor (B1440), so the answer is already constant across a gesture; this just stops
+     re-deriving it. Keyed on `f2p` rather than `view`: the paths ARE in pixels, and `f2p`'s
+     identity is exactly "the view a coordinate is baked at", which is what they depend on. */
