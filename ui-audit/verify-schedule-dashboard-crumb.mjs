@@ -1,5 +1,6 @@
 /**
- * B866xxx — the shared header's Dashboard crumb was DEAD on Schedule.
+ * B866112 — the shared header's Dashboard crumb was DEAD on Schedule.
+ * B881664 — it was made to FIRE, but not to ARRIVE: it fired and then bounced back.
  *
  * Owner report (2026-08-30), live on planyr.io: "From SCHEDULE, both the global TASK REPORT
  * route and after navigating in from another module: NOTHING. No navigation, no menu, no
@@ -7,26 +8,51 @@
  * button navigates to the Site Planner map home ("#/"). He clicked it four times across two
  * page states with no effect.
  *
- * Root cause (confirmed by code reading, not guessed): every workspace's shared header wires
- * the Shell's `onGoDashboard` (leaves the workspace, `navigate({module:"site-planner",
- * projectId:null})` -> hash "#/") straight into `<AppHeader onDashboard=...>` — except
- * Scheduler.jsx, which never destructured `onGoDashboard` at all and wired its OWN local
- * `goDashboard` instead: a function that only clears the ROUTED PROJECT within Schedule and
- * tells the embedded Gantt iframe to show its internal reports view (B1050) — it never left
- * the module. On the global `/schedule` route (already showing that internal view with no
- * project routed) that made the button a genuine no-op.
+ * Root cause of B866112 (confirmed by code reading, not guessed): every workspace's shared
+ * header wires the Shell's `onGoDashboard` (leaves the workspace, `navigate({module:
+ * "site-planner", projectId:null})` -> hash "#/") straight into `<AppHeader onDashboard=...>`
+ * — except Scheduler.jsx, which never destructured `onGoDashboard` at all and wired its OWN
+ * local `goDashboard` instead: a function that only clears the ROUTED PROJECT within Schedule
+ * and tells the embedded Gantt iframe to show its internal reports view (B1050) — it never
+ * left the module. On the global `/schedule` route (already showing that internal view with
+ * no project routed) that made the button a genuine no-op.
  *
- * Fix: Scheduler.jsx now destructures `onGoDashboard` and composes it with the existing
- * B1050 behavior (kept intact — still needed so a no-project Schedule state shows the
- * iframe's reports view rather than a stale project if the user ends up back here).
+ * Fix for B866112: Scheduler.jsx now destructures `onGoDashboard` and composes it with the
+ * existing B1050 behavior (kept intact — still needed so a no-project Schedule state shows
+ * the iframe's reports view rather than a stale project if the user ends up back here).
+ *
+ * B881664 — the SAME owner report (verbatim: "the hash becomes #/ for a moment and then the
+ * app navigates to #/project/<id>/site. The dashboard never renders"), reproduced AFTER the
+ * B866112 fix had already merged: CASE A/B below only ever waited 800ms and asserted the hash
+ * had MOVED — never that it STAYED. Root cause (confirmed empirically, not guessed — see
+ * ui-audit/diagnose-crumb-bounce-scratch.mjs in that session's history): a tab that boots on a
+ * BARE hash gets "open where I left off" resumed onto a project's Schedule tab via
+ * `planyr:lastRoute:v1` (lastRoute.js). The Site Planner (SitePlannerApp.jsx) has never
+ * mounted yet in that boot (Schedule mounted first) — it mounts for the FIRST TIME later, the
+ * moment the user clicks Dashboard, with `projectId == null`. Its `bootActiveId()` treats a
+ * null `projectId` + `resumeAllowed` (route.js's `INITIAL_HASH_EMPTY`, a WHOLE-SESSION
+ * constant) as "an empty-hash boot, safe to resume the last-open plan" — reviving the stale
+ * `planarfit:currentSite:v1` pointer left over from an EARLIER visit and writing it straight
+ * back into the route the user just explicitly left, ~700ms after the click (the postMessage
+ * round-trip to the embedded Gantt app + a render settle).
+ *
+ * Fix for B881664: `resumeAllowed` is no longer a bare whole-session flag. Shell.jsx captures
+ * `INITIAL_ROUTE` (the route the boot ACTUALLY resolved to, after "open where I left off"
+ * seeding) once, and `bootResume.mayResumeLastSite({initialHashEmpty, projectId,
+ * initialProjectId})` compares a later mount's own `projectId` prop against
+ * `INITIAL_ROUTE.projectId` — a mismatch alone proves this mount is not the boot render, so a
+ * later, deliberate navigation to a project-less route (Dashboard) can never revive a stale
+ * plan pointer.
  *
  * This harness never touches Supabase: the /sequence/ iframe is replaced with a same-origin
  * stub (same pattern as verify-schedule-switcher-pick.mjs) that speaks the real postMessage
- * contract, so the real shell code (Shell.jsx route.js + Scheduler.jsx + ProjectBreadcrumb.jsx)
- * is exercised end to end in a real browser with no cloud write of any kind.
+ * contract, so the real shell code (Shell.jsx, route.js, lastRoute.js, bootResume.js,
+ * Scheduler.jsx, SitePlannerApp.jsx, ProjectBreadcrumb.jsx) is exercised end to end in a real
+ * browser with no cloud write of any kind.
  *
- * MUTATION PROOF: run once as-is (green), then `git stash` the Scheduler.jsx fix, rebuild,
- * re-run (must go RED — the hash stays on /schedule instead of moving to "#/"), then
+ * MUTATION PROOF: run once as-is (green), then `git stash` the fix, rebuild, re-run (CASE A
+ * must go RED — the hash stays on /schedule instead of moving to "#/" — and CASE C must go RED
+ * — the hash bounces to "#/project/<id>/site" a moment after landing on "#/"), then
  * `git stash pop` and rebuild again.
  *
  * Run:  npm run build && npx vite preview --port 4173   (then)   node ui-audit/verify-schedule-dashboard-crumb.mjs
@@ -66,6 +92,17 @@ const seedScript = `(() => { try {
   localStorage.removeItem('planarfit:currentSite:v1');
 } catch (e) {} })();`;
 
+// B881664 CASE C — a stale currentSite pointer PLUS a "resume onto Schedule" boot pointer,
+// on a bare hash: this is what actually revives the bounce. A currentSite pointer with no
+// boot-resume (Case A/B above) never exercises SitePlannerApp's `bootActiveId()` fallback at
+// all, which is why the pre-fix build passed Case A/B's 800ms check even though the owner's
+// real repro (a resumed tab) failed every time.
+const bootResumeSeedScript = `(() => { try {
+  localStorage.setItem('planarfit:sites:v1', JSON.stringify(${JSON.stringify({ [GID]: site(GID, "Goose Creek") })}));
+  localStorage.setItem('planarfit:currentSite:v1', ${JSON.stringify(GID)});
+  localStorage.setItem('planyr:lastRoute:v1', JSON.stringify({ module: "scheduler", projectId: ${JSON.stringify(GID)}, cross: false }));
+} catch (e) {} })();`;
+
 const stubHtml = (initialActiveId) => `<!doctype html><html><body style="margin:0;font:13px system-ui;padding:12px">
 <div id="s">embedded-gantt-stub</div><script>
   window.__cmds = [];
@@ -86,9 +123,9 @@ const stubHtml = (initialActiveId) => `<!doctype html><html><body style="margin:
   emit();
 </script></body></html>`;
 
-async function newCtx(browser, { initialActiveId = "1" } = {}) {
+async function newCtx(browser, { initialActiveId = "1", seed = seedScript } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
-  await ctx.addInitScript(seedScript);
+  await ctx.addInitScript(seed);
   await ctx.route(/supabase\.co/, (r) => r.abort());
   await ctx.route("**/sequence/**", (r) => r.fulfill({ status: 200, contentType: "text/html", body: stubHtml(initialActiveId) }));
   return ctx;
@@ -115,6 +152,11 @@ async function caseProjectScoped(browser) {
   await page.waitForTimeout(800);
   const after = await hashOf(page);
   ok(after === "#/", `Dashboard navigates to the Site Planner map home ("#/"), matching Site/Library/Review/Notes — got "${after}"`);
+  // B881664 — arriving is not enough; it must STAY. Wait well past the ~700ms this class of
+  // bounce measured at before asserting the hash never moved again.
+  await page.waitForTimeout(4000);
+  const stillAfter = await hashOf(page);
+  ok(stillAfter === "#/", `Dashboard STAYS on the map home 4.8s later, no bounce back — got "${stillAfter}"`);
   await page.screenshot({ path: new URL("./screens/schedule-dashboard-crumb-project-scoped.png", import.meta.url).pathname });
   await ctx.close();
 }
@@ -137,11 +179,38 @@ async function caseGlobal(browser) {
   await ctx.close();
 }
 
+async function caseBootResumeBounce(browser) {
+  console.log("\nCASE C — bare-hash boot resumes onto a project's Schedule tab, click Dashboard (B881664 repro)");
+  const ctx = await newCtx(browser, { initialActiveId: "1", seed: bootResumeSeedScript });
+  const page = await ctx.newPage();
+  await assertMeasurable(page, "verify-schedule-dashboard-crumb");
+  // Bare domain, no hash — "open where I left off" (lastRoute.js) must resume onto the
+  // project's Schedule tab before the first render, same as a reopened tab in production.
+  await page.goto(BASE, { waitUntil: "load" });
+  await page.waitForTimeout(2600);
+  const booted = await hashOf(page);
+  ok(booted.includes("/schedule") && booted.includes(GID), `boot resumed onto the routed Schedule project (${booted})`);
+
+  await clickDashboard(page);
+  await page.waitForTimeout(800);
+  const after = await hashOf(page);
+  ok(after === "#/", `Dashboard navigates to the Site Planner map home ("#/") — got "${after}"`);
+  // This is the assertion that actually catches B881664: SitePlannerApp's first-ever mount
+  // (triggered by this exact click) is where the stale currentSite pointer got revived,
+  // ~700ms later once the embedded Gantt app's postMessage round-trip settles.
+  await page.waitForTimeout(4000);
+  const stillAfter = await hashOf(page);
+  ok(stillAfter === "#/", `Dashboard STAYS on the map home 4.8s later — no bounce to a project route — got "${stillAfter}"`);
+  await page.screenshot({ path: new URL("./screens/schedule-dashboard-crumb-boot-resume-bounce.png", import.meta.url).pathname });
+  await ctx.close();
+}
+
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
 mkdirSync(new URL("./screens/", import.meta.url).pathname, { recursive: true });
 await caseProjectScoped(browser);
 await caseGlobal(browser);
+await caseBootResumeBounce(browser);
 await browser.close();
 
-console.log("\n" + (fails === 0 ? "✅ PASS — the Dashboard crumb now navigates home from Schedule, both routes" : `❌ FAIL — ${fails} assertion(s)`));
+console.log("\n" + (fails === 0 ? "✅ PASS — the Dashboard crumb navigates home from Schedule, and stays there, in all three cases" : `❌ FAIL — ${fails} assertion(s)`));
 process.exit(fails === 0 ? 0 : 1);

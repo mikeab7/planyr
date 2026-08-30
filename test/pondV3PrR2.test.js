@@ -11,10 +11,12 @@ describe("NEW-20(a) — the re-check affordances show a BUSY state", () => {
   it("derives a single drainRefreshing flag from a live-busy OR auto-revalidating fetch", () => {
     expect(src).toContain('const drainRefreshing = !!drainage && (drainage.status === "busy" || drainage.autoRefreshing);');
   });
+  // B881668 — the "checking…" wording itself moved into the pure `floodStatusLine`
+  // (lib/factRevalidation.js: refreshing always wins, checked FIRST in the branch order —
+  // directly unit-tested in test/factRevalidation.test.js). This only guards that
+  // `drainRefreshing` still reaches it, and that the ↻ button's spin/disable are untouched.
   it("the header line reads 'checking…' and its ↻ spins + disables while refreshing", () => {
-    // NEW-19 restructured the not-checked branch through floodChecked; the checking… branch + the
-    // spin/disable are what NEW-20(a) owns.
-    expect(src).toContain('{drainRefreshing ? "Flood data: checking…" :');
+    expect(src).toContain("floodStatusLine({ refreshing: drainRefreshing, floodChecked: drainage.floodChecked, freshnessState: drainage.freshness?.state, floodAgeMs })");
     expect(src).toContain('onClick={drainRefreshing ? undefined : drainage.onCheck} disabled={drainRefreshing} aria-busy={drainRefreshing}');
     expect(src).toContain('animation: drainRefreshing ? "spin 0.9s linear infinite" : undefined');
   });

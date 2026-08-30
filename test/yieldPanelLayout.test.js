@@ -190,10 +190,13 @@ describe("PR-B — Yield panel + shared copy fixes", () => {
     expect(src.includes("Overall — Post")).toBe(false);
     expect(src.includes("PASS — every storm")).toBe(false);
   });
-  it("B3 — freshness unknown-age reads 'Flood data: not checked'; with age '{age} ago'", () => {
-    expect(src).toContain('"Flood data: not checked"');
-    // NEW-22 — formatAge already returns "…ago" (e.g. "2d ago"); no duplicate suffix.
-    expect(src).toContain("`Flood data ${formatAge(floodAgeMs)}`");
+  // B881668 — the freshness line's actual wording ("Flood data: not checked", the "…ago" format
+  // with no duplicate suffix, the stale/checking cases) moved into the pure, directly unit-tested
+  // `floodStatusLine` (lib/factRevalidation.js, see test/factRevalidation.test.js's mutation-proof
+  // case). This now only guards the WIRING — that the Yield panel's header still calls it with the
+  // fields it needs, rather than re-deriving the sentence inline.
+  it("B3 — the freshness line is driven by floodStatusLine (wording verified directly in factRevalidation.test.js)", () => {
+    expect(src).toContain("floodStatusLine({ refreshing: drainRefreshing, floodChecked: drainage.floodChecked, freshnessState: drainage.freshness?.state, floodAgeMs })");
   });
   it("B4 — the requirement basis reads the appendix off source.section too (Waller Co. App. E)", () => {
     expect(src).toContain("req.rule.governingManual?.section || req.rule.source?.section");

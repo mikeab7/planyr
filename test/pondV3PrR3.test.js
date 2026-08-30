@@ -19,13 +19,14 @@ describe("NEW-19 — one flood-facts truth: header state == the facts the number
     expect(src).toContain("Number.isFinite(drainViewCtx?.checkedAt) ? Date.now() - drainViewCtx.checkedAt : null,");
   });
   it("the header reads 'not checked' ONLY when floodChecked is false (never over definite remembered numbers)", () => {
-    /* RETARGETED 2026-08-06 (NEW-4) then again 2026-08-29 (B849713/NEW-4 owner amendment), not
-     * relaxed either time: the invariant this test exists for is unchanged and is still asserted in
-     * full — "not checked" is reachable ONLY through !drainage.floodChecked, and it still comes
-     * BEFORE any age. What changed the second time: a stale check now KEEPS the last-run date
-     * instead of replacing it with a bare "re-check" — the owner asked to see when it last ran even
-     * while stale (the amber dot beside it carries the "something moved" alarm). */
-    expect(src).toContain('!drainage.floodChecked ? "Flood data: not checked" : drainage.freshness?.state === "stale" ? (floodAgeMs != null ? `Flood data: stale — checked ${formatAge(floodAgeMs)}` : "Flood data: stale") : floodAgeMs != null ? `Flood data ${formatAge(floodAgeMs)}` : "Flood data: checked"');
+    /* RETARGETED 2026-08-06 (NEW-4), 2026-08-29 (B849713/NEW-4 owner amendment), and again
+     * 2026-08-30 (B881668) — the invariant this test exists for is unchanged and still fully
+     * asserted, just one hop further: the SitePlanner wiring passes `drainage.floodChecked`
+     * straight through to the pure `floodStatusLine` (lib/factRevalidation.js), whose branch
+     * order — refreshing, then !floodChecked, then stale (which KEEPS the last-run date, per the
+     * B849713 amendment), then fresh — is directly unit- and mutation-tested in
+     * test/factRevalidation.test.js. Never re-inline that ternary here; assert the wiring instead. */
+    expect(src).toContain("floodStatusLine({ refreshing: drainRefreshing, floodChecked: drainage.floodChecked, freshnessState: drainage.freshness?.state, floodAgeMs })");
   });
   it("AUDIT — a restored view with no per-pond fact still returns UNKNOWN, never a fabricated definite split", () => {
     // The B804/NEW-9 guard: flood evidence but no persisted pond fact → factsKnown:false, not gross.

@@ -91,13 +91,26 @@ export function withCurrentProject(projects = [], currentProject = null) {
 // shows, while keeping the schedule-only entries a site lookup can never produce. Registry entries
 // win on a shared id (richer: name/timestamp/status); a controlled entry with no matching registry
 // id is appended after, so real projects still sort first.
+//
+// ⛔ B881666 — A CONTROLLED ENTRY'S OWN `id` IS NEVER THE SAME NAMESPACE AS A REGISTRY id, SO
+// "a shared id" NEVER ACTUALLY HAPPENED — a linked schedule and its site share a project through
+// `linkedSiteId`, not through `id === id`. Every linked schedule (not just the routed one)
+// therefore fell straight into `extra` beside its own registry row: two rows, same name, one
+// with a real timestamp (the registry copy) and one without (the bridged copy has none). A
+// controlled entry whose `linkedSiteId` names a project already covered by a registry row
+// describes the SAME real project and is dropped — the registry copy (richer data) is the one
+// shown; the caller resolves a click on it back to the right schedule id (see Scheduler.jsx's
+// `selectSchedule`). Only a controlled entry with no site at all (Operations, Pursuits) — or one
+// whose linked site genuinely isn't in the registry yet — still appears via `extra`.
 export function unionProjectLists(controlledList = [], registryList = []) {
   const byId = new Map();
   for (const p of registryList || []) if (p && p.id != null) byId.set(p.id, p);
   const extra = [];
   for (const p of controlledList || []) {
     if (!p || p.id == null) continue;
-    if (!byId.has(p.id)) extra.push(p);
+    if (byId.has(p.id)) continue;
+    if (p.linkedSiteId != null && byId.has(p.linkedSiteId)) continue;
+    extra.push(p);
   }
   return [...byId.values(), ...extra];
 }
