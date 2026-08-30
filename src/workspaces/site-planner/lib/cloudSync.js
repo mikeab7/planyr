@@ -10,7 +10,7 @@ import { makeWriteSerializer } from "../../../shared/cloud/serializeWrites.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { stableStringify } from "./elementSync.js";
 import { normCountyKey } from "../../../shared/gis/countyKeys.js";
-import { fetchParcelSummaries } from "./elementApi.js";
+import { fetchParcelSummaries, fetchElementRecency } from "./elementApi.js";
 
 // Per-tab memory of the `version` we last synced for each site, so a save can be a
 // compare-and-swap that REJECTS a stale write instead of silently clobbering (B314).
@@ -440,4 +440,14 @@ export async function cloudList(uid) {
 export async function cloudParcelRows(uid) {
   if (!supabase || !uid) return { ok: false, rows: [] };
   return fetchParcelSummaries(supabase);
+}
+
+// B845089 (NEW-2) — the network half of "when was this project last actually edited" (see
+// MapFinder.jsx's Sites-panel column + lib/siteRecency.js). Same reasoning as cloudParcelRows
+// above for staying a thin pass-through: this module is on the app shell's eager import graph, so
+// the aggregation (summarizeElementRecency/groupRecencyMs) stays on the Site Planner side of the
+// lazy-chunk boundary, where MapFinder.jsx already pays for it.
+export async function cloudElementRecency(uid) {
+  if (!supabase || !uid) return { ok: false, rows: [] };
+  return fetchElementRecency(supabase);
 }
