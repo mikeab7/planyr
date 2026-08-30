@@ -382,9 +382,9 @@ const parse = toks => {
   return ast;
 };
 
-// parseFormula: lenient wrapper used by the UI for live validation. Returns
+// parseFormulaUncached: lenient wrapper used by the UI for live validation. Returns
 // { ast } or { error }. Empty/whitespace formula parses to a blank node.
-const parseFormula = src => {
+const parseFormulaUncached = src => {
   const text = String(src == null ? "" : src).trim();
   if (text === "") return { ast: { type: "blankLiteral" } };
   try { return { ast: parse(tokenize(text)) }; }
@@ -392,6 +392,25 @@ const parseFormula = src => {
   // (e.g. a RangeError from pathological depth that slipped the guard) is reported as
   // a generic parse error rather than crashing the caller's render.
   catch (e) { if (isFormulaError(e)) return { error: e.code, detail: e.detail }; return { error: FORMULA_ERRORS.ERR, detail: (e && e.message) || "parse error" }; }
+};
+// evaluateFormula is called once per ROW (a grid with N rows re-parses the SAME column
+// formula N times per recalc), so re-tokenizing/re-parsing on every cell is pure waste —
+// parseFormula is a pure function of its source text, so a small bounded LRU-ish cache
+// (FIFO eviction via Map's insertion order) makes every row after the first a lookup.
+// Sharing the returned AST object across calls is safe: every consumer (evaluateFormula,
+// extractRefs) only ever reads it. It also means the SAME "col"/"call" node objects recur
+// across a whole recalc pass for one formula column, which is what lets the row-invariant
+// caches below (keyed on those node objects) actually hit.
+const PARSE_CACHE_MAX = 500;
+const parseCache = new Map();
+const parseFormula = src => {
+  const key = String(src == null ? "" : src);
+  const hit = parseCache.get(key);
+  if (hit) { parseCache.delete(key); parseCache.set(key, hit); return hit; } // refresh LRU order
+  const result = parseFormulaUncached(key);
+  parseCache.set(key, result);
+  if (parseCache.size > PARSE_CACHE_MAX) parseCache.delete(parseCache.keys().next().value);
+  return result;
 };
 
 // extractRefs: the set of column names a formula reads (case-preserving, deduped
@@ -567,16 +586,217 @@ const FUNCTIONS = {
   WEEKNUM: { fn: a => { need(a, 1, 2, "WEEKNUM"); const s = toDateSerial(a[0]); if (s === null) return BLANK; const type = a.length > 1 ? Math.trunc(num1(a[1])) : 1; return weekNum(s, type); } },
   ISOWEEKNUM: { fn: a => { need(a, 1, 1, "ISOWEEKNUM"); const s = toDateSerial(a[0]); if (s === null) return BLANK; return isoWeekNum(s); } },
   YEARFRAC: { fn: a => { need(a, 2, 3, "YEARFRAC"); const s = toDateSerial(a[0]), e = toDateSerial(a[1]); if (s === null || e === null) return BLANK; const basis = a.length > 2 ? Math.trunc(num1(a[2])) : 0; return yearFrac(s, e, basis); } },
+
+  // ── Financial ── (ordinary eager functions — explicit scalar arguments, exactly like
+  //    the 95 above; NONE of these are range-aware. A cost model feeds them per-period
+  //    columns/cells directly, e.g. NPV([Rate],[Y1],[Y2],[Y3]).) See the block of pure
+  //    helper functions right after this registry for the shared math (pmtOf/fvOf/pvOf/
+  //    nperOf/ipmtOf/ppmtOf/solveRoot) — every formula here is derived from the ONE
+  //    annuity identity documented there, never a remembered constant.
+  NPV:  { fn: a => { need(a, 2, null, "NPV"); const r = num1(a[0]); return a.slice(1).reduce((s, v, i) => s + num1(v) / Math.pow(1 + r, i + 1), 0); } },
+  XNPV: { fn: a => { need(a, 3, null, "XNPV"); const r = num1(a[0]); const pairs = xnpvPairs(a.slice(1), "XNPV"); const d0 = pairs[0].d; return pairs.reduce((s, { v, d }) => s + v / Math.pow(1 + r, (d - d0) / 365), 0); } },
+  IRR:  { fn: a => { need(a, 2, null, "IRR"); const cfs = a.map(num1); return irrOf(cfs); } },
+  XIRR: { fn: a => { need(a, 4, null, "XIRR"); const pairs = xnpvPairs(a, "XIRR"); return xirrOf(pairs); } },
+  MIRR: { fn: a => { need(a, 4, null, "MIRR"); const financeRate = num1(a[0]), reinvestRate = num1(a[1]); const cfs = a.slice(2).map(num1); return mirrOf(cfs, financeRate, reinvestRate); } },
+  PMT:  { fn: a => { need(a, 3, 5, "PMT"); const rate = num1(a[0]), nper = num1(a[1]), pv = num1(a[2]); const fv = a.length > 3 ? num1(a[3]) : 0; const type = a.length > 4 && toNumber(a[4]) ? 1 : 0; return pmtOf(rate, nper, pv, fv, type); } },
+  IPMT: { fn: a => { need(a, 4, 6, "IPMT"); const rate = num1(a[0]), per = num1(a[1]), nper = num1(a[2]), pv = num1(a[3]); const fv = a.length > 4 ? num1(a[4]) : 0; const type = a.length > 5 && toNumber(a[5]) ? 1 : 0; if (per < 1 || per > nper) throw ferr(FORMULA_ERRORS.NUM, "IPMT: per out of range"); return ipmtOf(rate, per, nper, pv, fv, type); } },
+  PPMT: { fn: a => { need(a, 4, 6, "PPMT"); const rate = num1(a[0]), per = num1(a[1]), nper = num1(a[2]), pv = num1(a[3]); const fv = a.length > 4 ? num1(a[4]) : 0; const type = a.length > 5 && toNumber(a[5]) ? 1 : 0; if (per < 1 || per > nper) throw ferr(FORMULA_ERRORS.NUM, "PPMT: per out of range"); return pmtOf(rate, nper, pv, fv, type) - ipmtOf(rate, per, nper, pv, fv, type); } },
+  RATE: { fn: a => { need(a, 3, 6, "RATE"); const nper = num1(a[0]), pmt = num1(a[1]), pv = num1(a[2]); const fv = a.length > 3 ? num1(a[3]) : 0; const type = a.length > 4 && toNumber(a[4]) ? 1 : 0; const guess = a.length > 5 ? num1(a[5]) : 0.1; return rateOf(nper, pmt, pv, fv, type, guess); } },
+  NPER: { fn: a => { need(a, 3, 5, "NPER"); const rate = num1(a[0]), pmt = num1(a[1]), pv = num1(a[2]); const fv = a.length > 3 ? num1(a[3]) : 0; const type = a.length > 4 && toNumber(a[4]) ? 1 : 0; return nperOf(rate, pmt, pv, fv, type); } },
+  FV:   { fn: a => { need(a, 3, 5, "FV"); const rate = num1(a[0]), nper = num1(a[1]), pmt = num1(a[2]); const pv = a.length > 3 ? num1(a[3]) : 0; const type = a.length > 4 && toNumber(a[4]) ? 1 : 0; return fvOf(rate, nper, pmt, pv, type); } },
+  PV:   { fn: a => { need(a, 3, 5, "PV"); const rate = num1(a[0]), nper = num1(a[1]), pmt = num1(a[2]); const fv = a.length > 3 ? num1(a[3]) : 0; const type = a.length > 4 && toNumber(a[4]) ? 1 : 0; return pvOf(rate, nper, pmt, fv, type); } },
+  CUMIPMT: { fn: a => { need(a, 6, 6, "CUMIPMT"); const [rate, nper, pv, start, end, type] = cumArgs(a, "CUMIPMT"); let s = 0; for (let per = start; per <= end; per++) s += ipmtOf(rate, per, nper, pv, 0, type); return s; } },
+  CUMPRINC: { fn: a => { need(a, 6, 6, "CUMPRINC"); const [rate, nper, pv, start, end, type] = cumArgs(a, "CUMPRINC"); const pmt = pmtOf(rate, nper, pv, 0, type); let s = 0; for (let per = start; per <= end; per++) s += pmt - ipmtOf(rate, per, nper, pv, 0, type); return s; } },
 };
 
+// ── Financial helpers ── (pure math; the FUNCTIONS entries above are thin arg-shaping
+// wrappers around these). Every PMT/PV/FV/NPER formula is ONE rearrangement of the SAME
+// identity — the textbook definition of an annuity, not a memorized numeric example:
+//   rate != 0:  PV*(1+rate)^nper + PMT*(1+rate*type)*((1+rate)^nper - 1)/rate + FV = 0
+//   rate == 0:  PV + PMT*nper + FV = 0
+// type: 0 = payments at the END of each period (ordinary annuity), 1 = at the START
+// (annuity due). Validated against structural invariants (IPMT+PPMT=PMT, sum of PPMT
+// over the full term = -PV, NPER/RATE round-trip, FV=0 at full amortization, NPV∘IRR=0,
+// XNPV∘XIRR=0) rather than recalled constants — see test/formula.test.js.
+function pmtOf(rate, nper, pv, fv, type) {
+  if (rate === 0) return -(pv + fv) / nper;
+  const g = Math.pow(1 + rate, nper);
+  return -(pv * g + fv) * rate / ((1 + rate * type) * (g - 1));
+}
+function fvOf(rate, nper, pmt, pv, type) {
+  if (rate === 0) return -(pv + pmt * nper);
+  const g = Math.pow(1 + rate, nper);
+  return -(pv * g + pmt * (1 + rate * type) * (g - 1) / rate);
+}
+function pvOf(rate, nper, pmt, fv, type) {
+  if (rate === 0) return -(fv + pmt * nper);
+  const g = Math.pow(1 + rate, nper);
+  return -(fv + pmt * (1 + rate * type) * (g - 1) / rate) / g;
+}
+function nperOf(rate, pmt, pv, fv, type) {
+  if (rate === 0) { if (pmt === 0) throw ferr(FORMULA_ERRORS.DIV0, "NPER: rate and pmt both zero"); return -(pv + fv) / pmt; }
+  const adj = pmt * (1 + rate * type) / rate;
+  const x = (adj - fv) / (pv + adj);
+  if (!(x > 0)) throw ferr(FORMULA_ERRORS.NUM, "NPER: no solution");
+  return Math.log(x) / Math.log(1 + rate);
+}
+// The account balance at time k — after k payments AND k periods of interest have
+// elapsed — i.e. the identity above evaluated at nper=k. balOf(rate,0,…)=pv;
+// balOf(rate,nper,…) always equals -fv by construction (that IS the defining identity).
+function balOf(rate, k, pmt, pv, type) {
+  if (k <= 0) return pv;
+  if (rate === 0) return pv + pmt * k;
+  const g = Math.pow(1 + rate, k);
+  return pv * g + pmt * (1 + rate * type) * (g - 1) / rate;
+}
+// Interest component of payment `per` (1-based) — derived from first principles, not
+// recalled, because this is exactly the trap named above: a type=0 payment lands at the
+// END of its period, so it settles interest that just accrued on the balance carried IN
+// — the balance GREW by balOf(per-1)*rate (a positive charge against what's owed), and
+// IPMT reports that as a CASH FLOW in the same sign convention as PMT/PPMT (an outflow is
+// negative), hence the negation. A type=1 payment lands at the START of its period
+// (before that period's own interest has happened), so it settles the PRIOR period's
+// interest instead: per=1 has no prior period (0 interest); per>=2 works out to
+// -balOf(per-1)*rate/(1+rate) by solving the recurrence bal(k)=(bal(k-1)+pmt)*(1+rate)
+// backwards, rather than reusing the type=0 formula against a shifted index. Caught by
+// the "sum of PPMT over the full term == -PV" and "CUMIPMT+CUMPRINC == nper*PMT"
+// invariants — NOT by "IPMT+PPMT==PMT" alone, which stays true under a sign flip since
+// PPMT is defined as PMT-IPMT (exactly the trap the brief warned this class of bug hides
+// behind: a self-consistent identity that a one-sided sign error cannot break).
+function ipmtOf(rate, per, nper, pv, fv, type) {
+  if (rate === 0) return 0;
+  const pmt = pmtOf(rate, nper, pv, fv, type);
+  if (type === 1) { if (per === 1) return 0; return -balOf(rate, per - 1, pmt, pv, type) * rate / (1 + rate); }
+  return -balOf(rate, per - 1, pmt, pv, type) * rate;
+}
+// Newton-Raphson with a bisection fallback: solves f(x)=0, starting from x0 and falling
+// back to a bracketed bisection search over (lo,hi) when Newton fails to converge or
+// wanders outside the domain — RATE's pathological-input case in particular. Shared by
+// IRR/XIRR/RATE: the same root-finding problem each time (no closed form exists).
+function solveRoot(f, x0, lo, hi) {
+  let x = x0;
+  for (let i = 0; i < 100; i++) {
+    let fx; try { fx = f(x); } catch { break; }
+    if (!Number.isFinite(fx)) break;
+    if (Math.abs(fx) < 1e-10) return x;
+    const h = Math.max(Math.abs(x) * 1e-6, 1e-8);
+    let fph, fmh; try { fph = f(x + h); fmh = f(x - h); } catch { break; }
+    const deriv = (fph - fmh) / (2 * h);
+    if (!Number.isFinite(deriv) || Math.abs(deriv) < 1e-13) break;
+    const next = x - fx / deriv;
+    if (!Number.isFinite(next) || next <= lo || next >= hi) break; // left the domain — hand off to bisection
+    if (Math.abs(next - x) < 1e-12) return next;
+    x = next;
+  }
+  const bracket = findSignChange(f, lo, hi);
+  if (!bracket) throw ferr(FORMULA_ERRORS.NUM, "no solution found");
+  let [a, b] = bracket, fa = f(a);
+  for (let i = 0; i < 200; i++) {
+    const mid = (a + b) / 2, fm = f(mid);
+    if (!Number.isFinite(fm)) throw ferr(FORMULA_ERRORS.NUM, "no solution found");
+    if (Math.abs(fm) < 1e-10 || (b - a) / 2 < 1e-10) return mid;
+    if ((fa < 0) === (fm < 0)) { a = mid; fa = fm; } else { b = mid; }
+  }
+  return (a + b) / 2;
+}
+// Scans (lo,hi) for a sub-interval where f changes sign, rather than assuming the outer
+// bracket itself straddles the root — RATE's root can sit anywhere in (-1, ∞) depending
+// on the inputs, so bisection needs a bracket search, not just an initial guess.
+function findSignChange(f, lo, hi) {
+  const STEPS = 200;
+  let prevX = lo, prevY; try { prevY = f(lo); } catch { prevY = NaN; }
+  for (let i = 1; i <= STEPS; i++) {
+    const x = lo + (hi - lo) * (i / STEPS);
+    let y; try { y = f(x); } catch { y = NaN; }
+    if (Number.isFinite(prevY) && Number.isFinite(y) && (prevY < 0) !== (y < 0)) return [prevX, x];
+    prevX = x; prevY = y;
+  }
+  return null;
+}
+function irrOf(cfs) {
+  const f = r => cfs.reduce((s, cf, i) => s + cf / Math.pow(1 + r, i), 0);
+  return solveRoot(f, 0.1, -0.999999, 100);
+}
+function xirrOf(pairs) {
+  const d0 = pairs[0].d;
+  const f = r => pairs.reduce((s, { v, d }) => s + v / Math.pow(1 + r, (d - d0) / 365), 0);
+  return solveRoot(f, 0.1, -0.999999, 100);
+}
+function rateOf(nper, pmt, pv, fv, type, guess) {
+  const f = r => (r === 0) ? (pv + pmt * nper + fv) : (pv * Math.pow(1 + r, nper) + pmt * (1 + r * type) * (Math.pow(1 + r, nper) - 1) / r + fv);
+  return solveRoot(f, guess, -0.999999, 100);
+}
+// Excel's MIRR: outflows are discounted back to time 0 at the finance rate (the cost of
+// borrowing them), inflows are compounded forward to the final period at the reinvest
+// rate (what they earn once received), and the single per-period rate that bridges those
+// two totals over the term is the answer. With exactly two flows there is nothing left
+// to reinvest, so MIRR reduces to plain IRR for ANY finance/reinvest rate — the
+// invariant this is checked against. Sign convention is the classic trap: outflows
+// negative, inflows positive, exactly like every other function in this section.
+function mirrOf(cfs, financeRate, reinvestRate) {
+  const n = cfs.length - 1;
+  if (n < 1) throw ferr(FORMULA_ERRORS.VALUE, "MIRR needs at least 2 cash flows");
+  let pvNeg = 0, fvPos = 0;
+  cfs.forEach((cf, i) => {
+    if (cf < 0) pvNeg += cf / Math.pow(1 + financeRate, i);
+    else if (cf > 0) fvPos += cf * Math.pow(1 + reinvestRate, n - i);
+  });
+  if (pvNeg === 0 || fvPos === 0) throw ferr(FORMULA_ERRORS.DIV0, "MIRR needs at least one negative and one positive cash flow");
+  return Math.pow(fvPos / -pvNeg, 1 / n) - 1;
+}
+// XNPV/XIRR take interleaved (value, date) scalar arguments — this engine has no array
+// type, so there is no parallel-arrays form to accept. Decodes + validates the pairing.
+function xnpvPairs(args, name) {
+  if (args.length % 2 !== 0) throw ferr(FORMULA_ERRORS.VALUE, `${name}: values and dates must pair up`);
+  const pairs = [];
+  for (let i = 0; i < args.length; i += 2) {
+    const v = toNumber(args[i]);
+    const d = toDateSerial(args[i + 1]);
+    if (d === null) throw ferr(FORMULA_ERRORS.VALUE, `${name}: blank date`);
+    pairs.push({ v, d });
+  }
+  return pairs;
+}
+// Matches Excel's own documented #NUM! domain for CUMIPMT/CUMPRINC exactly: rate, nper
+// and pv must all be positive; start_period ≥ 1; end_period ≥ start_period; type ∈
+// {0,1}. (Source: Microsoft's CUMIPMT function reference — support.microsoft.com.)
+// Excel's own doc does not list end_period > nper as an error condition, so this
+// deliberately does not add one either.
+function cumArgs(a, name) {
+  const rate = num1(a[0]), nper = Math.trunc(num1(a[1])), pv = num1(a[2]);
+  const start = Math.trunc(num1(a[3])), end = Math.trunc(num1(a[4]));
+  const type = Math.trunc(num1(a[5]));
+  if (rate <= 0 || nper <= 0 || pv <= 0) throw ferr(FORMULA_ERRORS.NUM, `${name}: rate, nper and pv must be positive`);
+  if (start < 1 || end < start) throw ferr(FORMULA_ERRORS.NUM, `${name}: invalid period range`);
+  if (type !== 0 && type !== 1) throw ferr(FORMULA_ERRORS.NUM, `${name}: type must be 0 or 1`);
+  return [rate, nper, pv, start, end, type];
+}
+
 // ── Range / criteria / lookup helpers (used by the range-aware functions above) ──
+// ⚠ PERF (was the quadratic-aggregate defect): a host evaluates one formula column by
+// calling evaluateFormula() once per ROW, always passing the SAME ctx.rows array
+// reference for every row of that pass (see e.g. public/sequence/index.html's
+// computeFormulaValues — aggRows is built ONCE, then reused across the whole
+// work.forEach(row => …) loop). So rebuilding "the whole column as an array" from
+// ctx.rows on every call — as this used to do unconditionally — redid identical
+// O(rows) work on every one of the N row-evaluations: O(rows) work × O(rows) calls =
+// O(rows²). Since ctx.rows for THIS pass never changes underneath us (raw columns are
+// immutable input; any formula column this one depends on has already finished its
+// OWN full pass over every row before this pass starts — planFormulaColumns' topo order
+// guarantees that), the resulting array is safe to memoize per (rows array, column key)
+// pair. Keying on the array's own identity via WeakMap means the cache needs no manual
+// invalidation: a fresh recalc pass builds a fresh rows array, so it can never collide
+// with an old one, and the old entry is simply garbage once nothing references it.
+const colArrayCache = new WeakMap(); // rows[] -> Map<lowerColKey, value[]>
 // A range argument must be a bare [Column] reference; it expands to that column's values
 // across every row in ctx.rows (the whole table, in display order).
 function colArray(node, ctx) {
   if (!node || node.type !== "col") throw ferr(FORMULA_ERRORS.VALUE, "expected a [Column] reference");
   const key = node.name.toLowerCase();
   // [@Column] forces THIS row even inside a range function (consistent with how
-  // SUM/AVERAGE treat a [@Column] arg), so it contributes a single cell.
+  // SUM/AVERAGE treat a [@Column] arg), so it contributes a single cell. It is cheap
+  // (one cell) by construction, so it is never cached — only the whole-column case below
+  // does the O(rows) work worth memoizing.
   if (node.atRow) {
     const cols = ctx.columns || {};
     if (!Object.prototype.hasOwnProperty.call(cols, key)) throw ferr(FORMULA_ERRORS.REF, `unknown column "${node.name}"`);
@@ -584,10 +804,15 @@ function colArray(node, ctx) {
     return [v === undefined ? BLANK : raiseIfErr(v)];   // [@ErrCol] this-row read propagates
   }
   const rows = (ctx.rows && ctx.rows.length) ? ctx.rows : [ctx.columns || {}];
+  let byCol = colArrayCache.get(rows);
+  if (byCol) { const hit = byCol.get(key); if (hit) return hit; }
   // Existence check across the union of rows (not just row 0) so a ragged table
   // doesn't make a genuine column read as #REF!.
   if (!rows.some(r => Object.prototype.hasOwnProperty.call(r, key))) throw ferr(FORMULA_ERRORS.REF, `unknown column "${node.name}"`);
-  return rows.map(r => { const v = r[key]; return v === undefined ? BLANK : v; });
+  const arr = rows.map(r => { const v = r[key]; return v === undefined ? BLANK : v; });
+  if (!byCol) { byCol = new Map(); colArrayCache.set(rows, byCol); }
+  byCol.set(key, arr);
+  return arr;
 }
 // Numbers for SUM/AVERAGE/MIN/MAX/PRODUCT: a bare [Column] arg contributes its numeric
 // (and date→serial) cells, skipping blank/text/bool (Excel range behavior); a scalar or
@@ -952,20 +1177,124 @@ const evalBinary = (node, ctx) => {
     default: throw ferr(FORMULA_ERRORS.ERR, `bad operator ${op}`);
   }
 };
+// ── PERF: whole-call memoization for ROW-INVARIANT range-aware calls ───────────────
+// colArray's cache (above) kills the O(rows) array-REBUILD cost. It does NOT by itself
+// help a call like COUNTIF([Cost],">50") or SUM([Cost]) finish in less than O(rows) work
+// PER ROW — COUNTIF still has to scan the (now-cached) array and re-match the criteria
+// against every element, once per row, which is still O(rows²) total. But a call like
+// that gives the IDENTICAL answer on every row of a pass whenever none of its arguments
+// read ctx.columns (i.e. "this row") — its only remaining input is ctx.rows, which is
+// exactly what the cache below keys on. So the fix has two tiers: colArray removes the
+// O(rows) rebuild for every range-aware call regardless of the args around it; this
+// tier removes the O(rows) PER-ROW re-evaluation entirely, but only when the call is
+// provably row-invariant.
+//
+// "Row-invariant" is decided PER ARGUMENT POSITION, PER FUNCTION — never by the shape of
+// an argument alone (the trap: treating every bare [Col] as hoistable breaks XLOOKUP,
+// whose first argument is a scalar this-row lookup value, not a range — hoisting it
+// would freeze row 0's answer onto every row). RANGE_ARG_POSITIONS is the declared table
+// of which argument slots each of the 13 range-aware functions actually reads as a
+// RANGE (i.e. feeds to colArray) rather than a per-row scalar (fed to evalNode) — lifted
+// directly from each function's own `rng` implementation above, not guessed from name:
+//   SUM/PRODUCT/MIN/MAX/AVERAGE/AVERAGEA/COUNT/COUNTA — collectNums &c. treat EVERY
+//     argument independently: whichever ones happen to be a bare, non-"@" [Column] are
+//     ranges (colArray), everything else (a literal, an expression, an [@Column]) is a
+//     per-row scalar — hence "ALL" (checked per-argument, not blanket-assumed).
+//   COUNTIF([0]) · SUMIF([0,2]) · AVERAGEIF([0,2]) · MATCH([1]) · INDEX([0]) ·
+//     XLOOKUP([1,2]) — colArray() itself enforces these are literal [Column] nodes; the
+//     remaining positions (COUNTIF/SUMIF/AVERAGEIF's criteria, MATCH's target/type,
+//     INDEX's index, XLOOKUP's target/fallback) are always scalar, this-row reads.
+const RANGE_ARG_POSITIONS = {
+  SUM: "ALL", PRODUCT: "ALL", MIN: "ALL", MAX: "ALL", AVERAGE: "ALL", AVERAGEA: "ALL",
+  COUNT: "ALL", COUNTA: "ALL",
+  COUNTIF: [0], SUMIF: [0, 2], AVERAGEIF: [0, 2],
+  MATCH: [1], INDEX: [0], XLOOKUP: [1, 2],
+};
+// TODAY/NOW read ctx.today and WORKDAY/NETWORKDAYS read ctx.calendar — both are fixed
+// for one evaluateFormula() CALL but are not part of the {node, ctx.rows} cache key
+// below, so (conservatively, to rule out any staleness) a call touching one of these is
+// never treated as row-invariant, even though in practice today/calendar don't vary
+// row-to-row within a single pass either.
+const CONTEXT_SENSITIVE_FUNCTIONS = new Set(["TODAY", "NOW", "WORKDAY", "NETWORKDAYS"]);
+// Memoized structural analysis (pure function of the AST — computed once per node, ever,
+// regardless of how many rows/passes reuse it — see the parseFormula cache above, which
+// is what makes the SAME node objects recur across a pass's per-row calls).
+const invariantCache = new WeakMap(); // AST node -> boolean
+function isRowInvariant(node) {
+  if (!node) return true;
+  const cached = invariantCache.get(node);
+  if (cached !== undefined) return cached;
+  let result;
+  switch (node.type) {
+    case "num": case "str": case "bool": case "blankLiteral": result = true; break;
+    case "col": result = false; break; // reached as a SCALAR here (see rangeArgInvariant below) — always THIS row
+    case "unary": case "percent": result = isRowInvariant(node.arg); break;
+    case "binary": result = isRowInvariant(node.left) && isRowInvariant(node.right); break;
+    case "call": result = isCallInvariant(node); break;
+    default: result = false;
+  }
+  invariantCache.set(node, result);
+  return result;
+}
+function isCallInvariant(node) {
+  const def = FUNCTIONS[node.name];
+  if (!def || CONTEXT_SENSITIVE_FUNCTIONS.has(node.name)) return false;
+  if (def.rng) {
+    const positions = RANGE_ARG_POSITIONS[node.name];
+    return node.args.every((a, i) => {
+      const isRangePos = positions === "ALL" || (Array.isArray(positions) && positions.includes(i));
+      // A bare, non-"@" [Column] in a declared range position reads ctx.rows (the whole
+      // table) — identical on every row of this pass, regardless of the current row.
+      // Anything else in that position (a scalar, an [@Column], an expression — colArray
+      // will reject anything but a plain "col" node here, an existing #VALUE! this
+      // analysis doesn't need to duplicate) falls through to the ordinary scalar check.
+      if (isRangePos && a.type === "col" && !a.atRow) return true;
+      return isRowInvariant(a);
+    });
+  }
+  // Eager `fn` / lazy special forms (IF, IFERROR, …): invariant iff every argument
+  // subtree is — conservative for short-circuiting forms (a branch that's never taken
+  // could in principle vary by row without changing the OUTCOME), but never unsound,
+  // since a call whose every input is identical every row can only ever compute the
+  // same result every row regardless of which internal branch runs.
+  return node.args.every(isRowInvariant);
+}
+// rows[] -> WeakMap<callNode, {ok:true,value} | {ok:false,err}>. Keyed on the AST node
+// object (unique per distinct formula text, shared across a pass via the parseFormula
+// cache) so two different formulas can never collide, and on ctx.rows so a fresh recalc
+// pass (a fresh rows array) can never read a stale answer from a prior one.
+const rngResultCache = new WeakMap();
 const evalCall = (node, ctx) => {
   const def = FUNCTIONS[node.name];
   if (!def) throw ferr(FORMULA_ERRORS.NAME, `unknown function ${node.name}`);
+  if (def.rng && isRowInvariant(node)) {
+    let byRows = rngResultCache.get(node);
+    if (!byRows) { byRows = new WeakMap(); rngResultCache.set(node, byRows); }
+    const cached = byRows.get(ctx.rows);
+    if (cached) { if (cached.ok) return cached.value; throw cached.err; }
+    try {
+      const value = finishCallResult(node, def.rng(node.args, ctx, evalNode));
+      byRows.set(ctx.rows, { ok: true, value });
+      return value;
+    } catch (e) {
+      byRows.set(ctx.rows, { ok: false, err: e });
+      throw e;
+    }
+  }
   let r;
   if (def.rng) r = def.rng(node.args, ctx, evalNode);          // range/lookup: needs the arg NODES (to read whole columns)
   else if (def.lazy) r = def.lazy(node.args, ctx, evalNode);   // short-circuit / error-trapping forms
   else r = def.fn(node.args.map(a => evalNode(a, ctx)), ctx);
-  // A function must never hand back a non-finite number (overflow → ±Infinity, or 0×Infinity →
-  // NaN from e.g. TRUNC(0, huge)) as a "value" — it would slip into a comparison or label.
-  // Surface it as #NUM!, mirroring the arithmetic-operator guard. (POWER/EXP/FACT/SQRT throw
-  // their own domain errors earlier, so they never reach here non-finite.)
+  return finishCallResult(node, r);
+};
+// A function must never hand back a non-finite number (overflow → ±Infinity, or 0×Infinity →
+// NaN from e.g. TRUNC(0, huge)) as a "value" — it would slip into a comparison or label.
+// Surface it as #NUM!, mirroring the arithmetic-operator guard. (POWER/EXP/FACT/SQRT throw
+// their own domain errors earlier, so they never reach here non-finite.)
+function finishCallResult(node, r) {
   if (typeof r === "number" && !Number.isFinite(r)) throw ferr(FORMULA_ERRORS.NUM, `${node.name} produced a non-finite number`);
   return r;
-};
+}
 
 // ── Public entry points ────────────────────────────────────────────────────────
 // evaluateFormula: parse + evaluate one formula against one row's context.
@@ -1103,6 +1432,20 @@ const FUNCTION_HELP = {
   ISEVEN: "ISEVEN(n)", ISODD: "ISODD(n)", N: "N(value) — coerce to number",
   NOW: "NOW() — today's date", DATEVALUE: "DATEVALUE(text)", WEEKNUM: "WEEKNUM(date, [type])",
   ISOWEEKNUM: "ISOWEEKNUM(date)", YEARFRAC: "YEARFRAC(start, end, [basis])",
+  NPV: "NPV(rate, cf1, cf2, …) — net present value of future cash flows (period 1, 2, …)",
+  XNPV: "XNPV(rate, cf1, date1, cf2, date2, …) — NPV with actual dates",
+  IRR: "IRR(cf0, cf1, …) — internal rate of return (cf0 is time 0)",
+  XIRR: "XIRR(cf1, date1, cf2, date2, …) — IRR with actual dates",
+  MIRR: "MIRR(financeRate, reinvestRate, cf0, cf1, …) — modified IRR",
+  PMT: "PMT(rate, nper, pv, [fv], [type]) — payment per period",
+  IPMT: "IPMT(rate, per, nper, pv, [fv], [type]) — interest portion of payment `per`",
+  PPMT: "PPMT(rate, per, nper, pv, [fv], [type]) — principal portion of payment `per`",
+  RATE: "RATE(nper, pmt, pv, [fv], [type], [guess]) — interest rate per period",
+  NPER: "NPER(rate, pmt, pv, [fv], [type]) — number of periods",
+  FV: "FV(rate, nper, pmt, [pv], [type]) — future value",
+  PV: "PV(rate, nper, pmt, [fv], [type]) — present value",
+  CUMIPMT: "CUMIPMT(rate, nper, pv, start, end, type) — cumulative interest between two periods",
+  CUMPRINC: "CUMPRINC(rate, nper, pv, start, end, type) — cumulative principal between two periods",
 };
 const FUNCTION_NAMES = Object.keys(FUNCTIONS).sort();
 /* FORMULA-ENGINE:END */
