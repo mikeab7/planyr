@@ -117,6 +117,13 @@
       "what": "Total JS a plain Food route must download: the entry chunk plus FoodApp and its static-import closure.",
       "note": "Seeded at 0 (B568400, the same precedent as notesRouteJsBytes) so the FIRST measurement of this brand-new route lands through `npm run perf:ratchet` with a stated reason, exactly like any other baseline move -- a hand-typed seed is the thing that step exists to prevent. This route is measured SEPARATELY from siteRouteJsBytes/notesRouteJsBytes/largestChunkBytes by design: the owner's explicit ask was that a personal restaurant tracker never share a metric with, or draw headroom from, the routes the actual product depends on. leaflet (the map vendor chunk) is reused from the existing shared map-vendor split -- that's what it's for -- but nothing from site-planner may come with it (this module has zero imports from src/workspaces/site-planner, source-guarded by test/foodModule.test.js)."
     },
+    "modelRouteJsBytes": {
+      "baseline": 0,
+      "target": 0,
+      "unit": "bytes",
+      "what": "Total JS a plain Model route must download: the entry chunk plus ModelApp and its static-import closure.",
+      "note": "Seeded at 0 (the notesRouteJsBytes/foodRouteJsBytes precedent) so the FIRST measurement of this brand-new route lands through `npm run perf:ratchet` with a stated reason, exactly like any other baseline move -- a hand-typed seed is the thing that step exists to prevent."
+    },
     "totalJsBytes": {
       "baseline": 5306226,
       "target": 5306226,
