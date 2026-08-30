@@ -27,6 +27,18 @@ export function saveEasementRules(rules) { try { localStorage.setItem(LS, JSON.s
 /* Best-guess jurisdiction key for a county (user can override in the UI).
  * NEW-4 — the key is NORMALISED first. This lookup was raw, so the two production rows storing
  * `"Harris"` resolved to `"generic"` instead of `"coh"` — silently, because a missing key returns
- * undefined and the `|| "generic"` fallback made it look like a deliberate answer. */
+ * undefined and the `|| "generic"` fallback made it look like a deliberate answer.
+ *
+ * ⛔ B877440 — returns `null` (never "generic") for a county with no easement record, instead of
+ * silently routing it to the same placeholder numbers "City of Houston" carries. "generic" is now
+ * reachable ONLY by an explicit pick from the jurisdiction selector — never as an auto-default. A
+ * `null` return means "no easement criteria on file for this county"; the caller shows that state
+ * plainly (with a "Request criteria" action) rather than rendering a fabricated width. */
 export const defaultJurForCounty = (county) =>
-  ({ harris: "coh", fortbend: "fortbend", chambers: "generic", waller: "generic" }[normCountyKey(county)] || "generic");
+  ({ harris: "coh", fortbend: "fortbend" }[normCountyKey(county)] || null);
+
+/* The counties this registry actually carries a record for — the admin "County criteria
+ * requests" page (B877442) cross-references a request's county against this (and the sibling
+ * lists in detentionRules.js's COUNTY_AUTHORITY / pondCriteriaRules.js / floodplainRules.js) to
+ * decide whether an outstanding request has since been wired. Keep in sync with the map above. */
+export const MODELED_COUNTIES = ["harris", "fortbend"];

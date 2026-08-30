@@ -90,6 +90,24 @@ describe("criteriaFor — composition + overrides", () => {
   it("unknown jurisdiction falls back to generic, never throws", () => {
     expect(criteriaFor("atlantis").jurKey).toBe("generic");
   });
+  // ⛔ B877440 — `noCriteriaOnFile` distinguishes "the auto-detect/routing path resolved
+  // nothing at all" (jurKey null — the SitePlanner default-routing fix now produces this
+  // instead of silently substituting "generic") from "a real, if unmatched, key was passed" —
+  // additive field only; every numeric field is unchanged either way (golden master).
+  it("noCriteriaOnFile is true only when jurKey is null — never for an explicit/unmatched key", () => {
+    expect(criteriaFor(null).noCriteriaOnFile).toBe(true);
+    expect(criteriaFor(undefined).noCriteriaOnFile).toBe(true);
+    expect(criteriaFor("generic").noCriteriaOnFile).toBe(false);
+    expect(criteriaFor("atlantis").noCriteriaOnFile).toBe(false);
+    expect(criteriaFor("harris").noCriteriaOnFile).toBe(false);
+  });
+  it("noCriteriaOnFile never changes a single numeric field vs. the same call without it", () => {
+    const withNull = criteriaFor(null);
+    const generic = criteriaFor("generic");
+    const { noCriteriaOnFile: _a, ...restNull } = withNull;
+    const { noCriteriaOnFile: _b, ...restGeneric } = generic;
+    expect(restNull).toEqual(restGeneric);
+  });
 });
 
 describe("overrides persistence (deep-merge, injected store)", () => {
@@ -110,6 +128,8 @@ describe("jurKeyForAuthority — jurisdiction detection auto-selects a row", () 
     expect(jurKeyForAuthority("hcfcd")).toBe("harris");
     expect(jurKeyForAuthority("fortbend")).toBe("fortbend");
     expect(jurKeyForAuthority("bkdd")).toBe("bkdd");
-    expect(jurKeyForAuthority("nope")).toBe("generic");
+    // ⛔ B877440 — an unrecognized authority is `null` ("no criteria on file"), never the silent
+    // "generic" placeholder; "generic" is reachable only by an explicit user pick.
+    expect(jurKeyForAuthority("nope")).toBe(null);
   });
 });

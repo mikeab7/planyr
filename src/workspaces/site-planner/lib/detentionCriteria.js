@@ -484,6 +484,12 @@ function evYr(ev) {
  * `requiredStorms` array. `overrides` is the shape loadCriteriaOverrides returns (a
  * partial { [jurKey]: { [field]: value } }). Pure. */
 export function criteriaFor(jurKey, { onDate = null, overrides = null } = {}) {
+  // ⛔ B877440 — captured BEFORE the generic fallback, so it distinguishes "the caller had no
+  // resolved jurisdiction at all" (auto-detect found nothing, no manual override) from "the user
+  // explicitly picked Generic / unknown from the selector" (jurKey === "generic" is a real key
+  // lookup below, not this fallback). Additive field only — every existing numeric field below is
+  // unchanged for every caller, modeled or not.
+  const noCriteriaOnFile = jurKey == null;
   const row = DETENTION_CRITERIA[jurKey] || DETENTION_CRITERIA.generic;
   const rule = row.authorityRuleId ? ruleFor(row.authorityRuleId, onDate) : null;
   const rp = (rule && rule.params) || {};
@@ -503,6 +509,7 @@ export function criteriaFor(jurKey, { onDate = null, overrides = null } = {}) {
   const cr = row.criteria;
   return {
     jurKey: row.key,
+    noCriteriaOnFile,
     label: row.label,
     authorityRuleId: row.authorityRuleId,
     governingManual: row.governingManual,
@@ -611,8 +618,12 @@ export const CRITERIA_JUR_KEYS = ["harris", "fortbend", "waller", "bkdd", "coh",
 /* Map a resolved detention AUTHORITY id (DETENTION_RULES key) back to a criteria
  * jurisdiction key, so the existing jurisdiction detection auto-selects a row. Pure. */
 const AUTHORITY_TO_JUR = { hcfcd: "harris", coh: "coh", fortbend: "fortbend", montgomery: "montgomery", chambers: "chambers", waller: "waller", bkdd: "bkdd" };
+/* ⛔ B877440 — `null` for an authority with no criteria row, never the silent "generic" fallback.
+ * In practice `authorityId` here is only ever set once a real DETENTION_RULES authority has
+ * already resolved (see detentionRules.resolveDrainageAuthority), so this branch is a safety net,
+ * not the main path — but it must not manufacture a fake jurisdiction key either. */
 export function jurKeyForAuthority(authorityId) {
-  return AUTHORITY_TO_JUR[authorityId] || (DETENTION_CRITERIA[authorityId] ? authorityId : "generic");
+  return AUTHORITY_TO_JUR[authorityId] || (DETENTION_CRITERIA[authorityId] ? authorityId : null);
 }
 
 /* Short label for a criteria row's authority (badge copy). Pure. */

@@ -10,6 +10,7 @@
  */
 import { SECTIONS } from "./lib/adminSections.js";
 import { RADIUS } from "../../shared/ui/radius.js";
+import CriteriaRequestsSection from "./CriteriaRequestsSection.jsx";
 
 function Section({ title, blurb }) {
   return (
@@ -58,6 +59,10 @@ export default function AdminApp({ onExit }) {
         {SECTIONS.map((s) => (
           <Section key={s.id} title={s.title} blurb={s.blurb} />
         ))}
+        {/* B877442 — a fifth, real (non-placeholder) section, added the same way NEW-2..NEW-5 are
+            meant to be: without touching this grid's layout. It carries a table, so it gets its
+            own component rather than being squeezed into the shared blurb-only Section shape. */}
+        <CriteriaRequestsSection />
       </div>
     </div>
   );

@@ -94,6 +94,9 @@ describe("authorityForJurisdiction — the pure mapping", () => {
     const a = j({ county: ["Galveston"] });
     expect(a.primary).toBeNull();
     expect(a.flags).toContain("no-criteria-modeled");
+    // ⛔ B877440 — names the county so the panel can say "no detention criteria on file for
+    // Galveston County" instead of a bare "this jurisdiction".
+    expect(a.unmodeledCounty).toBe("galveston");
   });
   it("an unmodeled CITY keeps the county screening floor, flagged city-criteria-unverified", () => {
     const a = j({ city: ["Katy"], county: ["Harris"] });
