@@ -33,7 +33,30 @@ export const EMPTY_PREFS = {
   // lib/roadCrossSection.js). Each entry is { id, name, bands }. Additive: absent = no saved presets,
   // the dialog still ships its own built-ins from roadCrossSection.js regardless.
   roadCrossSectionPresets: [],
+  // B855952/B855953/B855954 (NEW-1/NEW-2/NEW-3) — the Map view's left "Sites" panel arrangement:
+  // which status group is on top, which are collapsed, and which sites are pinned to the top. ONE
+  // bag for all three because they are one concept ("how this person has arranged their panel") —
+  // splitting it across three stores is how one of them ends up not persisting. Cross-device on
+  // purpose (this account row, not localStorage): "pin a site on my laptop, see it pinned on my
+  // phone" is the whole point, unlike `layerPrefs.js`'s per-SITE, device-agnostic-by-construction
+  // overrides. `order`/`pinned` are sparse — empty means "today's default" — and `collapsed` starts
+  // with Complete/Dead closed (SitesPanel's pre-existing device-local default) so shipping this
+  // doesn't reopen every settled project for someone who never touches the panel.
+  sitesPanel: { order: [], collapsed: { complete: true, dead: true }, pinned: [], sort: "recent" },
 };
+
+const SITES_PANEL_SORTS = new Set(["largest", "az", "recent"]);
+function normalizeSitesPanel(raw) {
+  const r = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const order = Array.isArray(r.order) ? r.order.filter((s) => typeof s === "string") : [];
+  const collapsedRaw = r.collapsed && typeof r.collapsed === "object" && !Array.isArray(r.collapsed) ? r.collapsed : null;
+  const collapsed = collapsedRaw
+    ? Object.fromEntries(Object.entries(collapsedRaw).filter(([, v]) => typeof v === "boolean"))
+    : { ...EMPTY_PREFS.sitesPanel.collapsed };
+  const pinned = Array.isArray(r.pinned) ? r.pinned.filter((id) => typeof id === "string") : [];
+  const sort = SITES_PANEL_SORTS.has(r.sort) ? r.sort : EMPTY_PREFS.sitesPanel.sort;
+  return { order, collapsed, pinned, sort };
+}
 
 const normalizeXSectionPresets = (list) => (Array.isArray(list) ? list : [])
   .filter((p) => p && typeof p.name === "string" && p.name.trim() && Array.isArray(p.bands) && p.bands.length)
@@ -44,6 +67,7 @@ const normalize = (p) => ({
   ...(p && typeof p === "object" ? p : {}),
   newProjectSharing: normalizeSharePref(p && p.newProjectSharing),
   roadCrossSectionPresets: normalizeXSectionPresets(p && p.roadCrossSectionPresets),
+  sitesPanel: normalizeSitesPanel(p && p.sitesPanel),
   planStandards: {
     parcelStyle: { ...((p && p.planStandards && p.planStandards.parcelStyle) || {}) },
     typeStyles: { ...((p && p.planStandards && p.planStandards.typeStyles) || {}) },
@@ -133,6 +157,14 @@ export function setStandardPref(prefs, group, key, value, type) {
 export function getStandardPref(prefs, group, key, type) {
   const p = normalize(prefs);
   return group === "typeStyles" ? (p.planStandards.typeStyles[type] || {})[key] : (p.planStandards[group] || {})[key];
+}
+
+/** Merge a patch into the Sites-panel arrangement bag (order/collapsed/pinned/sort). Any key not
+ * present in `patch` is left as-is. Used for a group drag reorder, a collapse toggle, a pin/unpin,
+ * or a sort-order change — all one store (see EMPTY_PREFS.sitesPanel's header). */
+export function setSitesPanelPref(prefs, patch) {
+  const p = normalize(prefs);
+  return { ...p, sitesPanel: normalizeSitesPanel({ ...p.sitesPanel, ...patch }) };
 }
 
 export const _normalizePrefs = normalize;
