@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { commitElements, fetchElements, fetchParcelSummaries, keepaliveCommit, ELEMENT_SELECT } from "../src/workspaces/site-planner/lib/elementApi.js";
+import { commitElements, fetchElements, fetchParcelSummaries, fetchElementRecency, keepaliveCommit, ELEMENT_SELECT } from "../src/workspaces/site-planner/lib/elementApi.js";
 
 // B671 — the network seam. The keepalive path is pure over an injected fetch; commit/fetch are
 // thin over a fake supabase-js client.
@@ -151,33 +151,32 @@ describe("fetchElements", () => {
 
 describe("fetchParcelSummaries", () => {
   // B849344 — the network seam behind the Sites panel / map pin's canonical boundary read.
-  it("selects site_id,data filtered to live parcel rows (kind='parcel', deleted_at is null)", async () => {
-    let sel, eqArgs, isArgs;
-    const client = {
-      from: (t) => {
-        expect(t).toBe("site_elements");
-        return {
-          select: (s) => {
-            sel = s;
-            return {
-              eq: (c, v) => {
-                eqArgs = [c, v];
-                return { is: (c2, v2) => { isArgs = [c2, v2]; return Promise.resolve({ data: [{ site_id: "s1", data: { id: "p1" } }], error: null }); } };
-              },
-            };
-          },
-        };
-      },
-    };
+  // B868960 (NEW-2) — now a paged walk (same helper as fetchElementRecency below); one short
+  // page is a complete portfolio, exercised here at ordinary (sub-page) size.
+  const chainTo = (result) => ({
+    from: (t) => {
+      expect(t).toBe("site_elements");
+      return {
+        select: (s) => ({
+          eq: (c, v) => ({
+            is: (c2, v2) => ({
+              range: (from, to) => { chainTo.seen = { s, c, v, c2, v2, from, to }; return Promise.resolve(result); },
+            }),
+          }),
+        }),
+      };
+    },
+  });
+
+  it("selects site_id,data filtered to live parcel rows (kind='parcel', deleted_at is null) and pages from 0", async () => {
+    const client = chainTo({ data: [{ site_id: "s1", data: { id: "p1" } }], error: null });
     const r = await fetchParcelSummaries(client);
-    expect(sel).toBe("site_id,data");
-    expect(eqArgs).toEqual(["kind", "parcel"]);
-    expect(isArgs).toEqual(["deleted_at", null]);
+    expect(chainTo.seen).toEqual({ s: "site_id,data", c: "kind", v: "parcel", c2: "deleted_at", v2: null, from: 0, to: 999 });
     expect(r).toEqual({ ok: true, rows: [{ site_id: "s1", data: { id: "p1" } }] });
   });
 
   it("returns ok:false on a fetch error (LOUD-FAILURE — never a silent empty portfolio)", async () => {
-    const client = { from: () => ({ select: () => ({ eq: () => ({ is: () => Promise.resolve({ data: null, error: { message: "down" } }) }) }) }) };
+    const client = { from: () => ({ select: () => ({ eq: () => ({ is: () => ({ range: () => Promise.resolve({ data: null, error: { message: "down" } }) }) }) }) }) };
     const r = await fetchParcelSummaries(client);
     expect(r).toMatchObject({ ok: false, rows: [], error: "down" });
   });
@@ -185,6 +184,90 @@ describe("fetchParcelSummaries", () => {
   it("no client → ok:false without throwing", async () => {
     const r = await fetchParcelSummaries(null);
     expect(r).toEqual({ ok: false, rows: [], error: "no client" });
+  });
+});
+
+describe("fetchElementRecency", () => {
+  // B845089 amendment (2026-08-30, NEW-1) — the truncation fix: PostgREST caps an unbounded select at
+  // 1,000 rows and answers ok:true on the partial window. These pin the paginated replacement's
+  // contract directly against a faked client that reproduces the exact failure shape measured
+  // live (page 1 full at 1,000, page 2 short).
+  const pagedClient = (pages) => {
+    const calls = [];
+    return {
+      calls,
+      from: (t) => {
+        expect(t).toBe("site_elements");
+        return {
+          select: (s) => ({
+            is: (c, v) => ({
+              range: (from, to) => {
+                calls.push({ s, c, v, from, to });
+                const page = pages[calls.length - 1];
+                if (!page) return Promise.resolve({ data: [], error: null });
+                return page.error
+                  ? Promise.resolve({ data: null, error: page.error })
+                  : Promise.resolve({ data: page.rows, error: null });
+              },
+            }),
+          }),
+        };
+      },
+    };
+  };
+
+  it("requests page 1 unbounded-shaped and stops on a page shorter than 1,000 — a single sub-page portfolio needs one page", async () => {
+    const client = pagedClient([{ rows: [{ site_id: "s1", updated_at: "2026-08-01" }] }]);
+    const r = await fetchElementRecency(client);
+    expect(client.calls).toEqual([{ s: "site_id,updated_at", c: "deleted_at", v: null, from: 0, to: 999 }]);
+    expect(r).toEqual({ ok: true, rows: [{ site_id: "s1", updated_at: "2026-08-01" }] });
+  });
+
+  it("a FULL 1,000-row page 1 is not treated as complete — page 2 is requested, and both pages' rows are merged", async () => {
+    const page1 = Array.from({ length: 1000 }, (_, i) => ({ site_id: `s${i}`, updated_at: "2026-08-01" }));
+    const page2 = [{ site_id: "s1000", updated_at: "2026-08-30" }, { site_id: "s1001", updated_at: "2026-08-29" }];
+    const client = pagedClient([{ rows: page1 }, { rows: page2 }]);
+    const r = await fetchElementRecency(client);
+    expect(client.calls).toEqual([
+      { s: "site_id,updated_at", c: "deleted_at", v: null, from: 0, to: 999 },
+      { s: "site_id,updated_at", c: "deleted_at", v: null, from: 1000, to: 1999 },
+    ]);
+    expect(r.ok).toBe(true);
+    expect(r.rows).toHaveLength(1002);
+    expect(r.rows.slice(0, 1000)).toEqual(page1);
+    expect(r.rows.slice(1000)).toEqual(page2);
+  });
+
+  it("a mid-loop error yields ok:false with rows:[] — never page 1's rows reported as complete (LOUD-FAILURE)", async () => {
+    const page1 = Array.from({ length: 1000 }, (_, i) => ({ site_id: `s${i}`, updated_at: "2026-08-01" }));
+    const client = pagedClient([{ rows: page1 }, { error: { message: "connection reset" } }]);
+    const r = await fetchElementRecency(client);
+    expect(client.calls).toHaveLength(2);
+    expect(r).toEqual({ ok: false, rows: [], error: "connection reset" });
+  });
+
+  it("no client → ok:false without throwing", async () => {
+    const r = await fetchElementRecency(null);
+    expect(r).toEqual({ ok: false, rows: [], error: "no client" });
+  });
+
+  it("a response that never comes back short trips the page ceiling rather than looping forever", async () => {
+    let calls = 0;
+    const fullPage = Array.from({ length: 1000 }, (_, i) => ({ site_id: `s${i}`, updated_at: "x" }));
+    const client = {
+      from: () => ({
+        select: () => ({
+          is: () => ({
+            range: () => { calls += 1; return Promise.resolve({ data: fullPage, error: null }); },
+          }),
+        }),
+      }),
+    };
+    const r = await fetchElementRecency(client);
+    expect(r.ok).toBe(false);
+    expect(r.rows).toEqual([]);
+    expect(r.error).toMatch(/page ceiling/);
+    expect(calls).toBe(200); // PAGE_CEILING — bounded, not infinite
   });
 });
 
