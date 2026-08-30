@@ -33,6 +33,46 @@ function raceWithTimeout(build, label, { timeoutMs = COMMIT_TIMEOUT_MS, setTimer
   return { race: Promise.race([q, timeout]), done: () => { if (timer != null) clearTimer(timer); } };
 }
 
+// B845089 amendment (2026-08-30, NEW-1) — PostgREST caps ANY unbounded `select` at 1,000 rows (its
+// `max-rows` default) and answers 206 Partial Content; supabase-js hands the caller only `data`,
+// with no signal a truncated page ever reads differently from a complete one — so an unbounded
+// portfolio-wide fetch silently returns a subset and reports `ok:true`. Measured live: a real
+// portfolio's `site_elements` table held 3,057 live rows and the plain select returned exactly
+// 1,000 of them, 31 of 77 distinct sites. Walk `.range(from, from+PAGE_SIZE-1)` pages until one
+// comes back SHORT (fewer than PAGE_SIZE rows) — the reliable "last page" signal for offset
+// pagination without needing the response's Content-Range header, which this client doesn't
+// expose. `PAGE_CEILING` bounds a pathological response that never comes back short (a server bug,
+// an infinite table) rather than looping forever; it is NOT a realistic portfolio ceiling — at
+// PAGE_SIZE=1000 it allows 200,000 rows, two orders of magnitude past this portfolio's current
+// size. Each page keeps its own `raceWithTimeout` bound, so one stalled page can't wedge the whole
+// walk. A page that ERRORS returns `ok:false` with `rows:[]` — never the partial set gathered so
+// far — because a partial result silently reported as complete is exactly the bug this fixes, and
+// reintroducing it via the error path would be the same defect wearing a new hat.
+const PAGE_SIZE = 1000;
+const PAGE_CEILING = 200;
+
+async function fetchAllPages(buildPage, label, opts = {}) {
+  let rows = [];
+  let from = 0;
+  for (let page = 0; page < PAGE_CEILING; page++) {
+    const to = from + PAGE_SIZE - 1;
+    const t = raceWithTimeout((ctrl) => buildPage(ctrl, from, to), label, opts);
+    try {
+      const { data, error } = await t.race;
+      if (error) return { ok: false, rows: [], error: error.message || String(error) };
+      const got = Array.isArray(data) ? data : [];
+      rows = rows.concat(got);
+      if (got.length < PAGE_SIZE) return { ok: true, rows };
+      from += PAGE_SIZE;
+    } catch (e) {
+      return { ok: false, rows: [], error: (e && e.message) || "fetch threw" };
+    } finally {
+      t.done();
+    }
+  }
+  return { ok: false, rows: [], error: `${label}: page ceiling exceeded (${PAGE_CEILING} pages)` };
+}
+
 // Commit a batch of ops in one round trip. Returns { ok, results, error }.
 // `results` is the RPC's per-op array (same order as `ops`); [] on failure.
 // B1117 — the 3-arg ATOMIC overload is not available everywhere. Production has the migration
@@ -148,41 +188,40 @@ export async function fetchElements(client, siteId, opts = {}) {
 // scopes `site_elements` to sites this user can see (own + shared), so no `site_id` filter is
 // needed; `kind`/`deleted_at` narrow it to LIVE parcel rows only. Returns { ok, rows, error }
 // where each row is { site_id, data } — `data` is the parcel object verbatim, same shape the
-// open planner canvas draws from.
+// open planner canvas draws from. "ONE round trip" above is now "one PAGED walk" (B868960, NEW-2
+// — same unbounded-select shape as fetchElementRecency below, latent at today's ~184 rows but
+// identically silent past 1,000; see that item's header for why pagination is the fix).
 export async function fetchParcelSummaries(client, opts = {}) {
   if (!client) return { ok: false, rows: [], error: "no client" };
-  const t = raceWithTimeout(
-    () => client.from("site_elements").select("site_id,data").eq("kind", "parcel").is("deleted_at", null),
+  return fetchAllPages(
+    (ctrl, from, to) => client.from("site_elements").select("site_id,data").eq("kind", "parcel").is("deleted_at", null).range(from, to),
     "fetch-parcel-summary", opts
   );
-  try {
-    const { data, error } = await t.race;
-    if (error) return { ok: false, rows: [], error: error.message || String(error) };
-    return { ok: true, rows: Array.isArray(data) ? data : [] };
-  } catch (e) {
-    return { ok: false, rows: [], error: (e && e.message) || "fetch threw" };
-  } finally { t.done(); }
 }
 
 // B845089 (NEW-2) — the network half of "when was this project last actually edited" (see
-// lib/siteRecency.js). Same shape as fetchParcelSummaries above (one request for the WHOLE
+// lib/siteRecency.js). Same shape as fetchParcelSummaries above (one PAGED walk over the WHOLE
 // portfolio, RLS already scopes it to sites this user can see — own + shared, never per-site),
 // but narrowed to two skinny columns instead of full geometry: this reads every live element
 // row's `site_id` + `updated_at`, not just parcels', because any drawn kind counts as an edit.
 // Returns { ok, rows, error } where each row is { site_id, updated_at }.
+// ⛔ B845089 amendment (2026-08-30, NEW-1) — THIS WAS A SINGLE UNBOUNDED SELECT, and PostgREST's
+// 1,000-row cap truncated it silently. Live-measured on the owner's real 3,057-row portfolio:
+// the plain select returned exactly 1,000 rows (31 of 77 sites) with `ok:true` — no signal the
+// caller got a partial answer. That produced two DIFFERENT wrong-answer shapes on the Sites
+// panel: a site present in the truncated window but missing its NEWEST rows read its per-site
+// max as stale (read far OLDER than it actually was — Silvestri showed 33d, really 4d); a site
+// absent from the window entirely fell through to `groupRecencyMs`'s header-`updated_at`
+// fallback — correct BY DESIGN for a genuinely blank plan, wrong here because truncation pushed
+// a real drawn plan into it (Richfield showed "60m", really 1d). See `fetchAllPages` above for
+// the fix; `siteRecency.js`'s fallback policy is untouched and correct — the bug was entirely in
+// this file never delivering it the rows it needed.
 export async function fetchElementRecency(client, opts = {}) {
   if (!client) return { ok: false, rows: [], error: "no client" };
-  const t = raceWithTimeout(
-    () => client.from("site_elements").select("site_id,updated_at").is("deleted_at", null),
+  return fetchAllPages(
+    (ctrl, from, to) => client.from("site_elements").select("site_id,updated_at").is("deleted_at", null).range(from, to),
     "fetch-element-recency", opts
   );
-  try {
-    const { data, error } = await t.race;
-    if (error) return { ok: false, rows: [], error: error.message || String(error) };
-    return { ok: true, rows: Array.isArray(data) ? data : [] };
-  } catch (e) {
-    return { ok: false, rows: [], error: (e && e.message) || "fetch threw" };
-  } finally { t.done(); }
 }
 
 // Last-ditch flush of pending ops during page unload — the supabase-js client can't issue a

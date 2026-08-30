@@ -3781,9 +3781,106 @@ indicator it replaced, so it amends this item rather than minting fresh.
 - **"Recently touched" as the default sort needed no change** — `lib/userPrefs.js`'s `EMPTY_PREFS.sitesPanel.sort` was already `"recent"` (confirmed by reading the file, not assumed); what changed is what "recent" MEANS — the sort comparator now reads the group's real edit recency (`lastEditedOf`, backed by `lastEditedByGroup`) instead of `s.updatedAt` directly, which is the actual defect this item fixes. The existing sort options (Largest first / A–Z / Recently touched) are unchanged; "largest" still reads `acresOf`, untouched.
 - **VERIFIED (sandbox, headless Chromium against a real dev build, logged out):** `test/siteRecency.test.js` (22 tests) drives `summarizeElementRecency`/`groupRecencyMs`/`lastEditedLabel`/`cloudElementRecency` directly — per-plan max, per-group max across siblings (a sibling plan's later edit outranks an older representative), the never-drawn-plan fallback, every label bucket including the year-boundary case, a real fetch error surfacing as `ok:false` (LOUD-FAILURE), plus two source guards (MapFinder.jsx sorts through `lastEditedOf`, no longer reads `b.updatedAt` in the comparator). `ui-audit/verify-b845088-b845089-site-panel.mjs` (shared with B845088, 17/17 passing) drives the real rendered panel: no acreage total in any group header; a 10-minute-old row reads minutes, a 2-hour-old row reads hours, a 3-day-old row reads days; "Recently touched" actually orders three rows by real recency (not left-to-right array order); a grouped site's collapsed representative shows its group's own most-recent edit; a boundary-less row still shows a real last-edited value; the default sort `<select>` reads `"recent"`; same results at a phone-narrow viewport. `npm run lint` 0 errors, `npm test` full suite green (13,111/13,111 — see B845088's note on the shallow-clone fix, shared run), `npm run build` green.
 - **Bundle budget — pre-existing, shared note with B845088 above** (same run): `bundle.largestChunkBytes` was already 2.3 KB over ceiling on `origin/main`'s own tip before this branch; both items together add +0.5 KB, not the cause. B1064's, out of scope here.
-- **⏳ V466401 (live) — the aggregate over real `site_elements` rows on the owner's real portfolio:** see VERIFICATION.md.
+- **⏳ V466401 (live) — the aggregate over real `site_elements` rows on the owner's real portfolio:** see VERIFICATION.md — **FAILED its first live pass, root-caused and fixed below; re-parked pending a fresh pass.**
 - Files: `src/workspaces/site-planner/lib/siteRecency.js` (new), `src/workspaces/site-planner/lib/elementApi.js`, `src/workspaces/site-planner/lib/cloudSync.js`, `src/workspaces/site-planner/SitePlannerApp.jsx`, `src/workspaces/site-planner/MapFinder.jsx`, `test/siteRecency.test.js` (new), `ui-audit/verify-b845088-b845089-site-panel.mjs` (shared with B845088), `MAP.md`.
 - Base: `origin/main` @ `b09cddbd`.
+
+**⛔ AMENDMENT (2026-08-30, live pass V466401 — FAILED) — the aggregate this item built was correct;
+the network fetch feeding it was silently truncated at PostgREST's 1,000-row cap.** No new B# per
+DEDUPE-FIRST: same reported symptom (a wrong last-edited date/sort on the Sites panel), same item,
+recurring one layer down from where the first fix looked. **Measured live on production, as the
+owner's own account:** `fetchElementRecency` (`elementApi.js`) issued one unbounded
+`select("site_id,updated_at").is("deleted_at", null)` with no `.range()` and no pagination.
+Replayed against production REST: `HTTP 206 Partial Content`, `content-range: 0-999/3057` — the
+portfolio holds 3,057 live element rows across 77 sites, the client received 1,000 of them across 31
+sites, and `fetchElementRecency` returned `{ ok: true }` on that partial window. **`ok:true` on a 206
+is the defect** — a partial response reported as a complete one.
+- **Two distinct wrong-answer shapes, both from the same truncation, not two bugs:** a site present
+  in the 1,000-row window but missing its NEWEST rows reads its per-site max as STALE (older than
+  reality — Silvestri showed 33d, actually 4d; Bain 21d vs 2d; Clay & Porter 18d vs 5d; 8 South 17d vs
+  6d; Goose Creek 13d vs 6d). A site absent from the window entirely falls through to
+  `groupRecencyMs`'s header-`updated_at` fallback — correct BY DESIGN for a genuinely blank plan,
+  wrong here because truncation, not a blank plan, put it there (Woods Road showed 1d vs 3d; Richfield
+  showed 60m vs 1d — NEWER than reality this time, the opposite direction).
+- **Second symptom, same cause: the SORT was wrong too, not just the label.** `MapFinder.jsx`'s
+  "Recently touched" sort reads `lastEditedOf()`, so Silvestri — edited 4 days ago — sorted as 33 days
+  old and buried near the bottom of its group. Roughly a quarter of the owner's real projects sorted
+  out of order, not merely mislabeled.
+- **RULED OUT before writing any code, so this is not re-litigated:** `siteRecency.js` — its
+  per-group-max logic and the header-fallback policy are both correct over the rows they are handed,
+  and the fallback is correct BY DESIGN for a blank plan; it was never touched. `MapFinder.jsx`'s sort
+  comparator — correct over the recency values it is given; not touched. Not RLS/permissions — the
+  same token paginated through all 3,057 rows successfully once asked to. Not staleness/caching — two
+  consecutive identical requests returned the identical 1,000-row window.
+- **THE FIX — paginate, not a server-side aggregate.** `elementApi.js` gained `fetchAllPages`, a
+  shared helper both `fetchElementRecency` and `fetchParcelSummaries` (B868960, below) now call: walk
+  `.range(from, from+999)` pages, concatenating rows, until one page comes back SHORTER than 1,000 —
+  the reliable "last page" signal for offset pagination that needs no Content-Range header (this
+  client doesn't expose one). A Postgres aggregate view/RPC (`select site_id, max(updated_at) … group
+  by site_id`) would be one round trip and permanently cap-immune, and is a fair long-term direction —
+  but this file already documents why a migration-dependent path is a shipping risk (the B1117
+  `atomicUnavailable` latch: a project without the migration answers a 3-arg RPC call with
+  PostgREST "function not found," which would fail every write if the fallback weren't there). A new
+  view/RPC carries the identical deployment risk; pagination needs no migration and works everywhere
+  today. (If a security-definer aggregate view is added later it must be `WITH
+  (security_invoker = true)` or it bypasses RLS and leaks other users' sites — flagged for that future
+  work, not built here.)
+- **The loop is guarded, not open-ended.** `PAGE_CEILING` (200 pages = 200,000 rows) stops a
+  pathological response from looping forever without being a realistic ceiling — two orders of
+  magnitude past this portfolio's current 3,057 rows. Each page keeps its own `raceWithTimeout` bound
+  (unchanged from the pre-fix single-request timeout), so one stalled page can't wedge the whole walk.
+  A page that ERRORS returns `ok:false, rows:[]` — never the rows gathered from earlier pages — because
+  reporting a partial set as complete is exactly the bug being fixed here, and the error path
+  reintroducing it would be the same defect wearing a new hat.
+- **VERIFIED (sandbox):** `test/elementApi.test.js` — new `fetchElementRecency` suite (5 tests): a
+  single sub-page portfolio requests exactly page 1 and stops on the short page; a FULL 1,000-row page
+  1 is NOT treated as complete — page 2 is requested and both pages' rows are merged (the exact
+  production shape: 1000 + 2 rows → 1002); a mid-loop error on page 2 yields `ok:false, rows:[]`
+  rather than page 1's 1,000 rows reported as a complete-but-wrong answer; no-client still short-
+  circuits; a response that never comes back short trips the page ceiling at exactly 200 calls rather
+  than looping forever. `fetchParcelSummaries`'s existing suite updated for the new `.range()` leg of
+  its chain (still selects `site_id,data` / `kind=parcel` / `deleted_at is null`, now also `range(0,
+  999)`). `test/siteRecency.test.js` and `test/parcelSummary.test.js`'s supabase-client fakes updated
+  to expose `.range()` (both fixtures fit in one page, so a single call still comes back short and the
+  walk stops there — no behavior change for either test file, just the new leg in the chain). Full
+  suite: `npm test` 13,122/13,124 (the 2 failures are the documented pre-existing shallow-clone
+  quirk — `docReviewLayerVisibility`/`hiddenContentReads`'s mutation checks `git show` a commit this
+  sandbox's shallow clone can't reach; reproduced identically on a clean `origin/main` checkout with
+  this branch's diff stashed out, so confirmed unrelated). `npm run lint` 0 errors (26 pre-existing
+  warnings, unchanged). `npm run build` green. `node ui-audit/perf-bundle-audit.mjs` — largest chunk
+  +0.5 KB (1641.1 KB), inside the already-tracked B1064 headroom band this item's own note above
+  already flagged; all budgets pass.
+- **⏳ V466401 (live) — re-parked, same aggregate, now behind the paginated fetch:** confirm Silvestri
+  reads ~4d (not 33d), Bain ~2d (not 21d), Richfield ~1d (not minutes), and that "Recently touched"
+  sorts Silvestri/Bain back up accordingly — a correct label with a stale sort would still be a
+  half-fix. See VERIFICATION.md.
+- Files: `src/workspaces/site-planner/lib/elementApi.js`, `test/elementApi.test.js`,
+  `test/siteRecency.test.js`, `test/parcelSummary.test.js`.
+- Base: `origin/main` @ `bbfee52`.
+
+### B868960 — `fetchParcelSummaries` has the identical unbounded-select shape as `fetchElementRecency` and will fail the same silent way past 1,000 parcel rows `[Site Planner / elementApi]` (task) #site-planner #persistence #gis  *(filed alongside B845089's amendment above, same session, same root cause — 2026-08-30. DEDUPE-FIRST — searched Open/⏳Verify/Done for `fetchParcelSummaries`, `site_elements`, `parcel summary`, `PostgREST`, `1000 row`, `truncat`, `B849344`: **B849344** built this function and its own header already says "canonical parcel geometry for the WHOLE portfolio in ONE round trip" — the unbounded-select shape it shipped with is exactly today's defect, just not yet triggered; **B845089**'s amendment (immediately above) fixes the sibling function this one shares its whole chain with. Net-new — no prior item ever flagged the 1,000-row cap on this call.)*
+`[x]` **IMPLEMENTED and unit/build-verified this session; parks in ⏳ Verify for the one thing this sandbox cannot check — real parcel rows on the owner's real portfolio crossing the boundary this fixes → V489088.**
+- Verify: live — a real-project-data GIS/persistence read is a mandatory LIVE-VERIFY class.
+- **LATENT, not live, at today's portfolio size — stated so this isn't misread as a current outage.**
+  Measured: 184 live parcel rows portfolio-wide (`content-range: 0-183/184`), so every site's boundary
+  and acreage on the Sites panel and map pins are CORRECT TODAY. This item exists because the failure
+  mode is silent and worse than B845089's: past 1,000 parcels, a site simply LOSES its boundary and
+  acreage with no error anywhere, on a function whose own header comment calls it the canonical
+  portfolio-wide read in one round trip.
+- **THE FIX is the shared helper B845089's amendment introduces, applied here too — not duplicated.**
+  `fetchParcelSummaries` now calls the same `fetchAllPages` in `elementApi.js`
+  (`.range(from, from+999)`, walked until a page comes back short of 1,000, `PAGE_CEILING`-bounded,
+  each page independently timeout-guarded). One helper, two call sites — see B845089's amendment for
+  the full reasoning on why pagination over a server-side aggregate view/RPC.
+- **VERIFIED (sandbox):** `test/elementApi.test.js`'s `fetchParcelSummaries` suite updated to assert
+  the `.range(0, 999)` leg is present on every call (still selecting `site_id,data` filtered to
+  `kind=parcel` / `deleted_at is null`), the LOUD-FAILURE error path, and the no-client short-circuit.
+  Full suite/lint/build/bundle-audit results shared with B845089's amendment (same commit, same run).
+- **⏳ V489088 (live) — real parcel rows on the owner's real portfolio, confirming boundaries/acreage
+  are unaffected today and the paginated path is wired correctly for when the portfolio crosses 1,000
+  parcel rows:** see VERIFICATION.md.
+- Files: `src/workspaces/site-planner/lib/elementApi.js`, `test/elementApi.test.js`.
+- Base: `origin/main` @ `bbfee52`.
 
 ### B859505 — Right-click a site → "Pin to top" `[Map view / site panel]` (feature) #site-planner #ui #persistence  *(owner chat block 2026-08-29/30, verbatim: "let's add an option to pin a site to the top. And, like, maybe we just right click and you can pin it." Minted **B859505** from the same reserved block, immediately following B859504 (shares its persistence store and its V480816 live-verify). DEDUPE-FIRST — searched Open/⏳Verify/Done for `pin to top`, `pinned site`, `pin project`: no prior item; net-new.)*
 `[x]` **IMPLEMENTED and sandbox-verified this session; parks in ⏳ Verify for the cross-device persistence half only → V480816 (shared with B859504/B859506).**
