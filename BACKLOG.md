@@ -3712,6 +3712,74 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 - Files: `src/workspaces/site-planner/MapFinder.jsx`, `src/workspaces/site-planner/lib/userPrefs.js`, `src/shared/units/areaUnits.js` (import only, no change), `scripts/verification-queue-ceiling.json`, `MAP.md`.
 - Base: `origin/main` @ `a3ef07b`.
 
+**⛔ AMENDMENT (2026-08-30, owner live pass) — the monogram this item shipped reproduces, in a new
+form, the exact defect it was built to fix.** Owner, live on production (chunk
+`SitePlannerApp-Br0mBNgI.js`, signed-in, 28 real sites): **every one of the 7 rendered monograms read
+"MB" — his own initials** ("Michael Butler," the signed-in viewer) — with the real collaborators
+collapsed behind a `+2`. The whole argument for initials over the old anonymous grey dot was that
+`JB` tells you it's Jordan where a dot only says "someone" (owner: *"You're not really explaining
+them"*); rendering the viewer's own initials tells him "you," which he already knew, and hides the
+person he'd actually want to see. This is not a new B# per DEDUPE-FIRST — it is the identical failure
+mode (a share indicator that fails to name who else is there) surfacing in the replacement for the
+indicator it replaced, so it amends this item rather than minting fresh.
+- **ROOT CAUSE.** `teams.listMembers(teamId)` returns a team's WHOLE roster — the viewer included,
+  there is no "everyone but me" query — and `siteRow` rendered `members[0]`'s initials unconditionally.
+  The owner is the creator/admin of every team he shares to, and the roster the RPC returns puts him
+  first, so on every shared row the first candidate was always him.
+- **DATA QUESTION ANSWERED, per the item's own instruction: is sharing here per-person or per-team?
+  Per-team, confirmed from the code, not assumed** — a site's own right-click menu reads *"Shared with
+  HIP Houston"* / *"Unshare"* (`teamName(s.teamId)`), and `lib/sharing.js`'s `shareProject`/
+  `makeProjectPrivate` stamp/clear one `team_id`, never a per-person grant list. That does NOT make
+  per-person initials the wrong primitive, though: the monogram's job is "who else can see this," which
+  is still a per-PERSON fact even though the team is the unit of the grant — the same "avatar stack
+  minus you" pattern collaborative tools already use (Slack/Notion/Docs all exclude the viewer from
+  their own sharing-avatar row). A team-level marker was considered and rejected: it would say WHICH
+  team (already stated in the row's tooltip and the context menu) but not WHO, which is exactly the
+  "doesn't explain them" complaint the monogram exists to answer.
+- **THE FIX — exclude the viewer, don't change the primitive.** `lib/sharedWithMonogram.js`
+  (`sharedWithDisplay(members, myUid)`, new, pure) filters the roster to everyone but the signed-in
+  viewer before picking who to show: `{kind:"monogram", first, extra, others}` for one-or-more real
+  collaborators (first other's initials + `+N` for the rest, exactly as before, just never the
+  viewer); `{kind:"none"}` when nobody but the viewer is on the roster — renders NOTHING (a site only
+  the viewer can see doesn't need a sharing indicator); `{kind:"unknown"}` when the roster hasn't
+  resolved yet or the fetch failed — falls back to the plain share glyph exactly as the pre-amendment
+  code did, so a genuinely-unresolved roster is never misread as "nobody but you."
+- **Adjacent cases, addressed rather than left to be found later, per the item's own list:**
+  a site shared with a team the viewer isn't a member of (the viewer's id matches nobody on the
+  roster, so the full roster passes through unfiltered — unit-tested); a collaborator with a missing
+  name (`listMembers` already guarantees a non-blank `displayName` — "Teammate" — and `initialsOf`
+  already guarantees a non-blank monogram — "?" — worst case, confirmed by reading both, not assumed,
+  so no empty box was ever possible; still unit-tested to pin it); the Comps tab — **confirmed, by
+  reading `src/shared/comps/components/CompsPanel.jsx`'s `CompRow`, that it renders no team/monogram
+  indicator at all** (title, type chip, date only) — this item's B859504 note above calling Comps
+  "unaffected" undersold it: there's nothing there to have inherited the bug in the first place, so no
+  fix is needed on that tab; the narrow/phone layout shares the exact same `siteRow` (confirmed again,
+  no second code path), so it's covered by the same fix with no separate treatment.
+- **VERIFIED (sandbox):** 10 new unit tests (`test/sharedWithMonogram.test.js`) drive the pure
+  `sharedWithDisplay` directly — the reported production case (viewer + 2 others → the first OTHER's
+  initials, +1, never the viewer's), exactly-one-other (no `+N`), nobody-but-viewer (no indicator),
+  roster unresolved/failed (falls back, never misread as empty), signed-out and
+  not-a-team-member (roster passes through unfiltered), and the blank-name fallback — plus two source
+  guards proving `MapFinder.jsx` actually calls `sharedWithDisplay(members, myUid)` and no longer reads
+  `members[0]` directly. `npm run lint` 0 errors (pre-existing warning count unchanged), `npm test`
+  full suite green (13,090/13,090 — this session's own unshallow-clone fix from B859504's original run
+  was still needed here since it's a fresh checkout; no code-level pre-existing failures this time),
+  `npm run build` green.
+- **Bundle budget — pre-existing failure, not this item's, confirmed rather than assumed:** the
+  required `build` check's "Performance budget" step is failing on `origin/main`'s OWN current tip
+  (`4916234`, run 33284416172) — `bundle.largestChunkBytes` (SitePlannerApp) is 1640.1 KB against a
+  1638.2 KB ceiling, 2.0 KB over, **before any change in this branch**. Reproduced locally with this
+  branch's diff stashed out: identical breach. This branch's own tiny addition (`lib/sharedWithMonogram.js`,
+  ~1 KB source) moves the same metric to 1640.4 KB — a further +0.3 KB, not the cause of the breach and
+  not enough to matter against it. Per this repo's own CI-red-on-base-branch-too rule, this is not fixed
+  here — the metric's owner is the already-tracked B1064 (extract SitePlanner's panels into
+  lazily-loaded child components), a large unrelated refactor out of scope for this fix.
+- **⏳ V486240 (live) — new, not shared with V480816** (that item's own text says the monogram was
+  driven in sandbox only, explicitly NOT part of its live-verify scope): see VERIFICATION.md.
+- Files: `src/workspaces/site-planner/lib/sharedWithMonogram.js` (new),
+  `src/workspaces/site-planner/MapFinder.jsx`, `test/sharedWithMonogram.test.js` (new), `MAP.md`.
+- Base: `origin/main` @ `4916234`.
+
 ### B859505 — Right-click a site → "Pin to top" `[Map view / site panel]` (feature) #site-planner #ui #persistence  *(owner chat block 2026-08-29/30, verbatim: "let's add an option to pin a site to the top. And, like, maybe we just right click and you can pin it." Minted **B859505** from the same reserved block, immediately following B859504 (shares its persistence store and its V480816 live-verify). DEDUPE-FIRST — searched Open/⏳Verify/Done for `pin to top`, `pinned site`, `pin project`: no prior item; net-new.)*
 `[x]` **IMPLEMENTED and sandbox-verified this session; parks in ⏳ Verify for the cross-device persistence half only → V480816 (shared with B859504/B859506).**
 - Verify: live — cross-device persistence is a mandatory LIVE-VERIFY class.

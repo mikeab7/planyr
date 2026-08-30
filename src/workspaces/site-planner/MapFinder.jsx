@@ -86,6 +86,7 @@ import { statusToken, darken } from "../../shared/ui/statusTokens.js";
    save nothing.) */
 const sharingLib = () => import("./lib/sharing.js");
 import { listMyTeams, listMembers, currentIdentity } from "./lib/teams.js";
+import { sharedWithDisplay } from "./lib/sharedWithMonogram.js";
 // B855952/B855953/B855954 (NEW-1/NEW-2/NEW-3) — the Sites panel's cross-device arrangement (group
 // order, collapse state, pinned sites, row sort) lives in the SAME account-scope store Standards'
 // "Save for all projects" uses (see lib/userPrefs.js's `sitesPanel` header) — never a new mechanism.
@@ -2442,18 +2443,23 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                 'someone', which the reader already knew." First teammate's initials + "+N" for the
                 rest, rather than stacking a third/fourth shape (illegible at this size); the full
                 roster names on hover/focus. Falls back to the plain share glyph only until the
-                roster fetch resolves (or for a legacy team this account can't roster). */}
+                roster fetch resolves (or for a legacy team this account can't roster).
+                B859504 (amendment, NEW-1) — excludes the VIEWER from the candidate list
+                via `sharedWithDisplay` (lib/sharedWithMonogram.js); see that module's header for
+                the measured production defect ("MB +2" on every one of the owner's own shared
+                rows) and why excluding the viewer is the fix rather than a team-level marker. */}
             {s.teamId && (() => {
-              const fullNames = members && members.length ? members.map((m) => m.displayName).join(", ") : `Shared with ${teamName(s.teamId)}`;
-              const tip = members && members.length ? `Shared with ${fullNames}` : fullNames;
+              const disp = sharedWithDisplay(members, myUid);
+              if (disp.kind === "none") return null; // nobody but you — no indicator needed
+              const tip = disp.kind === "monogram" ? `Shared with ${disp.others.map((m) => m.displayName).join(", ")}` : `Shared with ${teamName(s.teamId)}`;
               return (
                 <span title={tip} aria-label={tip} style={{ flex: "none", display: "flex", alignItems: "center", gap: 2, color: PAL.accent }}>
-                  {members && members.length ? (
+                  {disp.kind === "monogram" ? (
                     <>
                       <span style={{ width: 15, height: 15, borderRadius: "50%", background: PAL.accent, color: "#fff", fontSize: 8, fontWeight: 700, fontFamily: NUM_FONT, display: "grid", placeItems: "center", flex: "none" }}>
-                        {initialsOf(members[0])}
+                        {initialsOf(disp.first)}
                       </span>
-                      {members.length > 1 && <span style={{ fontSize: 9.5, fontWeight: 700 }}>+{members.length - 1}</span>}
+                      {disp.extra > 0 && <span style={{ fontSize: 9.5, fontWeight: 700 }}>+{disp.extra}</span>}
                     </>
                   ) : <ShareGlyph size={12} />}
                 </span>
