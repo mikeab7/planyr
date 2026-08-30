@@ -16,7 +16,13 @@ export default [
   // (gitignored; not all are *.min.js-named, so an explicit dir ignore is needed too).
   // `dist-probe/**` is the instrumented build the VIEW-INDEPENDENT-ONCE detector drives
   // (PLANYR_PROBE=1 — scripts/vite-plugin-recompute-probe.mjs). Build output, like `dist/`.
-  { ignores: ["dist/**", "dist-probe/**", "node_modules/**", "public/landing/vendor/**", "**/*.min.js", "ui-audit/.cache-vendor/**"] },
+  // NEW-1 (B866xxx) — the other four `dist-*` build-output dirs `.gitignore` already excludes
+  // (dist-pipe, dist-ratchet, dist-baseline-verify, dist-before — the capture-pipe/perf-ratchet/
+  // perf-baseline-verify tools' own scratch builds) were missing here, so a bundled minified
+  // build left on disk after running one of those tools got linted as source: hundreds of
+  // false `no-undef`/`no-unreachable` errors ('Deno', 'process', 'global', 'L', a minifier's
+  // renamed function reassigned) on a real gitignored artifact nobody meant to lint.
+  { ignores: ["dist/**", "dist-probe/**", "dist-pipe/**", "dist-ratchet/**", "dist-baseline-verify/**", "dist-before/**", "node_modules/**", "public/landing/vendor/**", "**/*.min.js", "ui-audit/.cache-vendor/**"] },
   {
     files: ["**/*.{js,jsx}"],
     plugins: { "react-hooks": reactHooks },
