@@ -228,20 +228,32 @@ describe("THE MIRROR — 'back' crosses the band the other way, below every type
 
 /* ── SOURCE GUARDS — the wiring, which no pure test can see. Each of these was RED pre-fix. ────── */
 describe("the escape hatch is wired, and it is the ONE mechanism", () => {
-  it("the element right-click menu carries BOTH cross-band rows — front and its mirror, back", () => {
-    expect(SP_CODE, 'the element menu must offer the "Force on top of everything" escape hatch')
+  /* B845584 — relocated OUT of the right-click menu into the Properties panel's persistent "Draw
+   * order" control (a submenu-only override left the owner able to end up stuck out of band with
+   * no visible way to see why); the mutator + the two phrases stay, the call site's variable
+   * changed from the menu's local `t` to the panel's `selEl`. */
+  it("the element inspector's Draw order control carries BOTH cross-band actions — front and its mirror, back", () => {
+    expect(SP_CODE, 'the panel must offer the "Force on top of everything" escape hatch')
       .toContain("Force on top of everything");
     expect(SP_CODE, 'and its mirror — the missing "force underneath" the stack-picker report named')
       .toContain("Force underneath everything");
     expect(SP_CODE, "…and the way back out of either").toContain("Use the normal layer order");
-    expect(SP_CODE, "the front row must call the one mutator").toMatch(/setElBand\(t\.id,\s*"front"\)/);
-    expect(SP_CODE, "the back row must call the same mutator, the other direction").toMatch(/setElBand\(t\.id,\s*"back"\)/);
-    expect(SP_CODE, "the restore row must clear the override").toMatch(/setElBand\(t\.id,\s*null\)/);
+    expect(SP_CODE, "the front control must call the one mutator").toMatch(/setElBand\(selEl\.id,\s*"front"\)/);
+    expect(SP_CODE, "the back control must call the same mutator, the other direction").toMatch(/setElBand\(selEl\.id,\s*"back"\)/);
+    expect(SP_CODE, "the restore control must clear the override").toMatch(/setElBand\(selEl\.id,\s*null\)/);
   });
 
   it("the inspector shows a forced element as forced, with a restore control", () => {
     expect(SP_CODE, "a forced element must be visibly forced in its inspector").toContain("el-band-forced-note");
     expect(SP_CODE, "…and carry an obvious way back to the default order").toContain("el-band-restore");
+  });
+
+  it("the control is NOT in the right-click menu any more — it is a persistent panel property", () => {
+    const at = SP_CODE.indexOf("const t = els.find((el) => el.id === typeMenu.id)");
+    expect(at, "the element menu's own IIFE must still exist to search within").toBeGreaterThan(0);
+    const menuBody = SP_CODE.slice(at, at + 9000);
+    expect(menuBody, "the menu must not call setElBand at all — Draw order lives in the panel now")
+      .not.toMatch(/setElBand\(/);
   });
 
   /* The whole point of resolving the override inside `zOrder` is that the four places that ask a

@@ -148,9 +148,11 @@ describe("the SHIPPED menus match the declaration", () => {
         .toMatch(new RegExp(`arrangeGroup\\(\\{\\s*kind:\\s*"${kind}"`));
     }
     /* The element menu keeps its own `arrRow` because it lives in a different menu component with
-     * its own header style — so assert it renders all four modes there. */
+     * its own header style — so assert it renders all four modes there. B845584 gave each row a
+     * 14px icon (the first argument, a JSX element) ahead of the label/mode pair the pre-fix rule
+     * checked; the mode is now the THIRD argument, not the second. */
     for (const mode of ["front", "forward", "backward", "back"]) {
-      expect(SP_CODE, `the element menu's Arrange group must render the "${mode}" mode`).toMatch(new RegExp(`arrRow\\("[^"]+",\\s*"${mode}"`));
+      expect(SP_CODE, `the element menu's Arrange group must render the "${mode}" mode`).toMatch(new RegExp(`arrRow\\(<[^,]+,\\s*"[^"]+",\\s*"${mode}"`));
     }
   });
 

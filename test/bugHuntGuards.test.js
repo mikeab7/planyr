@@ -569,12 +569,13 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).toMatch(/const onElDouble = \(e, id\) => \{[\s\S]{0,120}featureDoubleAction\(\{ kind: "el", id \}, e\);[\s\S]{0,20}\n\s*\};/);
     expect(src).toMatch(/const onMarkupDouble = \(e, id\) => \{[\s\S]{0,120}featureDoubleAction\(\{ kind: "markup", id \}, e\);\s*\n\s*\};/);
     // NEW-8 also records the WORLD point of the right-click (`w`) so "Branch a road from here" starts
-    // from the spot the user pointed at, not the element's centre — so the menu payload is now
+    // from the spot the user pointed at, not the element's centre — so the menu payload is
     // { id, x, y, w }. The guard still pins that the SCREEN position drives the menu placement.
-    // NEW-2 also records what is painted UNDERNEATH the click (`under`), so an annotation sent
-    // behind the plan can be named and reversed from the element that is covering it — the payload
-    // is now { id, x, y, w, under }. The guard still pins that the SCREEN position drives the menu.
-    expect(src).toMatch(/const onElContext = \(e, id\) => \{[\s\S]*?setTypeMenu\(\{ id, x: e\.clientX, y: e\.clientY, w, under: /);
+    // B845584/B845585 — the payload no longer carries an `under` stack: the covering element's menu
+    // no longer names what is painted underneath it (that "Behind this" group is cut, per the owner's
+    // own context-menu rebuild brief), because NEW-2's Alt+hover picker is the general replacement —
+    // see markupBehindReach.test.js for that guard.
+    expect(src).toMatch(/const onElContext = \(e, id\) => \{[\s\S]*?setTypeMenu\(\{ id, x: e\.clientX, y: e\.clientY, w \}\);/);
   });
 
   it("NEW-1: single-occupancy left dock — inspector TAKES OVER the dock when it opens, never stacks", () => {
