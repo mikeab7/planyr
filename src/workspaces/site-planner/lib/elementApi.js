@@ -164,6 +164,27 @@ export async function fetchParcelSummaries(client, opts = {}) {
   } finally { t.done(); }
 }
 
+// B845089 (NEW-2) — the network half of "when was this project last actually edited" (see
+// lib/siteRecency.js). Same shape as fetchParcelSummaries above (one request for the WHOLE
+// portfolio, RLS already scopes it to sites this user can see — own + shared, never per-site),
+// but narrowed to two skinny columns instead of full geometry: this reads every live element
+// row's `site_id` + `updated_at`, not just parcels', because any drawn kind counts as an edit.
+// Returns { ok, rows, error } where each row is { site_id, updated_at }.
+export async function fetchElementRecency(client, opts = {}) {
+  if (!client) return { ok: false, rows: [], error: "no client" };
+  const t = raceWithTimeout(
+    () => client.from("site_elements").select("site_id,updated_at").is("deleted_at", null),
+    "fetch-element-recency", opts
+  );
+  try {
+    const { data, error } = await t.race;
+    if (error) return { ok: false, rows: [], error: error.message || String(error) };
+    return { ok: true, rows: Array.isArray(data) ? data : [] };
+  } catch (e) {
+    return { ok: false, rows: [], error: (e && e.message) || "fetch threw" };
+  } finally { t.done(); }
+}
+
 // Last-ditch flush of pending ops during page unload — the supabase-js client can't issue a
 // fetch({keepalive:true}), so hit the PostgREST RPC endpoint directly. Guard-only over what it
 // needs; never throws. Returns true if a request was dispatched. Subject to the browser's ~64KB

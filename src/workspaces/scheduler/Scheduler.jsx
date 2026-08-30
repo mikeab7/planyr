@@ -32,6 +32,10 @@ export default function Scheduler({
   // (the whole point — no ~2 s Gantt re-boot per switch); hidden, we still FOLLOW the route
   // into the iframe, but never write the route from iframe state.
   isActive = true,
+  // NEW-1 (B866xxx) — the Shell passes this to every workspace so the shared header's Dashboard
+  // crumb always means the same thing (leave this workspace, go to the Site Planner map home).
+  // Scheduler used to receive it and never read it — see goDashboard's own header below.
+  onGoDashboard,
 } = {}) {
   const iframeRef = useRef(null);
   const [projects, setProjects] = useState([]);   // [{id, name}] from the embedded app
@@ -267,13 +271,26 @@ export default function Scheduler({
   // alone left the outer route pointing at the project, so the route-derived resolution panel stayed
   // up over the dashboard the user had just navigated to, with no way to close it. Mirror
   // selectSchedule: post AND carry the change up to the route. One-shot, not a reactive effect.
-  const goDashboard = () => {
+  //
+  // ⛔ NEW-1 (B866xxx) — this was ALSO, silently, the shared header crumb's ENTIRE `onDashboard`
+  // handler, which made "Dashboard" mean something different on Schedule than on every other
+  // workspace: Library/Notes/Review all wire the Shell's `onGoDashboard` (leave the workspace,
+  // go to the Site Planner map home) straight into the crumb; this function only ever clears the
+  // routed project WITHIN Schedule and tells the embedded iframe to show its own reports view —
+  // it never left the module. On the global `/schedule` route (already showing that internal
+  // view) that made the button a genuine no-op: no navigation, no error, four presses, nothing —
+  // exactly the reported repro. `goDashboardWithinModule` keeps every bit of the existing B1050
+  // behavior (still needed if the user ends up back on Schedule with no project routed — the
+  // iframe should already be showing its reports view, not a stale project); the crumb now ALSO
+  // calls the Shell's `onGoDashboard`, so pressing it behaves identically everywhere.
+  const goDashboardWithinModule = () => {
     const { post: msg, clearRoute } = dashboardNavActions({ projectId });
     if (clearRoute) dashboardIntentRef.current = true; // arm before the route write (see the carry-out effect)
     explicitPickRef.current = null; // leaving the projects section retires any standing pick
     post(msg);
     if (clearRoute) { try { onProjectChange?.(null); } catch (_) {} }
   };
+  const goDashboard = () => { goDashboardWithinModule(); onGoDashboard?.(); };
 
   // Resolve the routed project's display NAME from the site list — NEVER the raw group_id (which
   // reads as random letters/numbers). null when the list isn't warm yet; callers treat null as
