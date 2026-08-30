@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-30 @ `e84c5827` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-30 @ `9d573681` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_591 source files mapped._
+_594 source files mapped._
 
 ## infra
 
@@ -47,10 +47,14 @@ _591 source files mapped._
   - _exports_: `default (AdminApp)`
 - **`src/workspaces/admin/AdminGate.jsx`** — The one place that decides whether AdminApp mounts: calls checkIsAdmin only while signed in, renders null on anything but a confirmed true
   - _exports_: `default (AdminGate)`
+- **`src/workspaces/admin/CriteriaRequestsSection.jsx`** — (B877442) Admin table of "Request criteria for this county" filings — most-requested first, with a Wired ✓ / Outstanding status per row
+  - _exports_: `default (CriteriaRequestsSection)`
 - **`src/workspaces/admin/lib/adminAccess.js`** — checkIsAdmin(client): the is_admin() RPC wrapper, fails closed (false) on no client/no session/RPC error/thrown exception
   - _exports_: `checkIsAdmin`
 - **`src/workspaces/admin/lib/adminSections.js`** — The four admin page sections (id/title/blurb) AdminApp renders as placeholders
   - _exports_: `SECTIONS`
+- **`src/workspaces/admin/lib/criteriaRequestsAdmin.js`** — (B877442) Cross-references a criteria request's county against the app's own modeled-jurisdiction lists to decide "Wired ✓" vs "Outstanding"
+  - _exports_: `isWired`, `prepareCriteriaRequestRows`
 - **`src/workspaces/food/components/BottomSheet.jsx`** — Generic drag-to-resize mobile bottom sheet (peek/half/full snap points, content-driven height, dismiss-on-drag), content-agnostic
   - _exports_: `default (BottomSheet)`
 - **`src/workspaces/food/components/FoodMap.jsx`** — Leaflet map: canvas-rendered pins (snapshot places, live Overpass results, manual pins), drop-a-pin mode, "search live for more here"
@@ -619,6 +623,8 @@ _591 source files mapped._
   - _exports_: `buildIndex`, `decodeRing`, `distToRings`, `NEAR_EDGE_DEG`, `pointInRing`, `resolveIn`
 - **`src/workspaces/site-planner/lib/coverage.js`** — Picker-only layer coverage engine: reproject regional service extents vs viewport to flag in-view/empty/out-of-coverage plus relevance prefs
   - _exports_: `_resetCoverageCache`, `_resetRelevancePrefs`, `boundsFromLeaflet`, `boundsIntersect`, `bufferBounds`, `computeCoverage`, `COVERAGE_STATE`, `DEFAULT_RADIUS_MI`, `DEFAULT_RELEVANCE`, `displayCoverage`, `esriExtentToBounds`, `getCachedExtent`, `getNearbyRadiusMiles`, `getRelevanceMode`, `isRegional`, `LAYER_SCOPE`, `layerScope`, `normalizeMode`, `normalizeRadius`, `prefetchExtents`, `regionCoverage`, `RELEVANCE_MODES`, `setLayerExtent`, `setNearbyRadiusMiles`, `setRelevanceMode`, `srPointToLatLon`, `subscribeRelevance`
+- **`src/workspaces/site-planner/lib/criteriaRequests.js`** — "Request criteria for this county" (B877440/B877441): file a request when a jurisdiction has no detention/easement/pond criteria on file, with local dedupe + LOUD-FAILURE on a write that doesn't reach the server.
+  - _exports_: `requestCriteria`, `wasRequested`
 - **`src/workspaces/site-planner/lib/curveNumber.js`** — SCS/NRCS Curve-Number runoff method (NEW-B1): composite CN from hydrologic soil group + impervious %, runoff depth/volume from an Atlas-14 rainfall depth, post-minus-pre increase. Pure TR-55.
   - _exports_: `compositeCn`, `COVER_CN`, `excessRainfallSeries`, `HSG`, `IMPERVIOUS_CN`, `normalizeHsg`, `perviousCn`, `runoffDepthIn`, `screenRunoff`
 - **`src/workspaces/site-planner/lib/cutFillBalance.js`** — NEW-10 site cut-vs-fill balance with a configurable shrink factor, plus the borrow-driven-vs-hydraulic classification of a detention storage surplus (and the fill import a naive right-sizing would create)
@@ -670,7 +676,7 @@ _591 source files mapped._
 - **`src/workspaces/site-planner/lib/dxf/dxfWorker.js`** — B747 Web Worker running dxf-parser + dxfRender off the main thread (import-list test-guarded); posts back the SVG + metadata or a loud ok:false error.
   - _exports_: _(none)_
 - **`src/workspaces/site-planner/lib/easementRules.js`** — Editable per-jurisdiction utility-easement width rules (placeholder, verify-flagged) persisted in localStorage with county default mapping
-  - _exports_: `DEFAULT_EASEMENT_RULES`, `defaultJurForCounty`, `loadEasementRules`, `saveEasementRules`
+  - _exports_: `DEFAULT_EASEMENT_RULES`, `defaultJurForCounty`, `loadEasementRules`, `MODELED_COUNTIES`, `saveEasementRules`
 - **`src/workspaces/site-planner/lib/easements.js`** — Easement domain logic: type catalog, label, and derive drawn ring from centerline/boundary/parcel-edge input modes with area
   - _exports_: `buildParcelEdgeStrip`, `DEFAULT_EASE_FILL_OPACITY`, `DEFAULT_EASE_HATCH`, `DEFAULT_EASEMENT_ATTRS`, `deriveEasementRing`, `EASEMENT_TYPES`, `easementArea`, `easementColor`, `easementLabel`, `easementPatternId`, `easementStyle`, `easementType`, `ENCUMBRANCE_DEFAULT`, `encumbrancePatternId`, `encumbranceStyle`, `ringArea`
 - **`src/workspaces/site-planner/lib/ebfe.js`** — FEMA/USGS InFRM Estimated BFE (EBFE) point sampler (B882): reads the estimated 1% BFE (layer 17) + 0.2% WSE (layer 21) via ArcGIS MapServer /identify, per-location cache, bounded fetch. `sampleEbfePoint`/`foldIdentify`/`pixelValueOf`/`ebfeIdentifyUrl`.

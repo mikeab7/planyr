@@ -1646,7 +1646,11 @@ export function authorityForJurisdiction({ city = [], etj = [], county = [], uni
     return out;
   }
 
-  if (counties.length && !countyAuth) out.flags.push("no-criteria-modeled");
+  // ⛔ B877440 — names the county for the render layer's "no detention criteria on file for
+  // <County>" state (unavailableDetentionRow's sibling in yieldVerdicts.js). Only set on an
+  // UNAMBIGUOUS single-county miss (the straddle case above already returned); additive field,
+  // no existing behaviour changes.
+  if (counties.length && !countyAuth) { out.flags.push("no-criteria-modeled"); out.unmodeledCounty = counties[0]; }
 
   // City of Houston CITY LIMITS → the COH IDM detention criteria govern. (Its ETJ does NOT —
   // that's handled above as an informational overlay only; owner rule 2026-07-10.)
@@ -1710,6 +1714,10 @@ export async function resolveDrainageAuthority({ lng, lat, ring = null } = {}, o
     overlays: [...auth.overlays],
     ambiguous: [...auth.ambiguous],
     flags: [...auth.flags],
+    // ⛔ B877440 — the county name behind a "no-criteria-modeled" flag, so the panel can say
+    // plainly which county has nothing on file (never re-derived from `jurisdiction.county` at
+    // the render site, which is a list, not a resolved single answer).
+    unmodeledCounty: auth.unmodeledCounty || null,
     jurisdiction: jur,
     mud: { districts: [], state: shapeSourceState(mudRes, mudRes.error), ageMs: mudRes.ageMs, msg: mudRes.error ? String(mudRes.error.message || mudRes.error) : null },
     // B861 — the drainage-district tier's own source state (so a boundary-source outage

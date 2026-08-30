@@ -104,9 +104,28 @@
     "    budget-exempt, and reachable. The same sentence also rides the header freshness dot's title, so",
     "    it is stated ONCE and referenced (rule 5), never rendered in two places.",
     "  NET: −1 line, −101 chars, for a strictly more honest readout — which is the outcome the rule is",
-    "    trying to produce, and the reason the number moves down rather than staying where it was."
+    "    trying to produce, and the reason the number moves down rather than staying where it was.",
+    "",
+    "RAISE 2026-08-30 (B877440, NEW-1): lib-yield-verdicts 13->14 lines, 638->661 chars.",
+    "Justification, per the rule:",
+    "  ADDED: one template literal — 'no detention criteria on file for ${countyLabel ||",
+    "    \"this jurisdiction\"}' (the static text counted; ~35 chars) — a SIXTH honest Detention",
+    "    verdict state, alongside point/band/unavailable/not-checked/loading. It fires only for a",
+    "    county the drainage identify actually resolved but that carries no modeled detention",
+    "    authority (Tarrant, Dallas, Amarillo…) — previously this state produced NO carrier at all,",
+    "    so once a check had run the row silently fell into the numeric branches' loading fallback",
+    "    and read 'checking flood data' forever (B1127's Colorado bug, same shape, different cause).",
+    "    It MUST be visible by default: the whole point is stopping a Houston-derived placeholder",
+    "    number (or a stuck spinner) from standing in for an honest 'nothing is on file here'.",
+    "  REMOVED: the row's own hardcoded 'No detention criteria on file' headline literal — nothing",
+    "    reads `.headline` on this row today, so it was pure budget cost with zero visible benefit;",
+    "    dropping it (mirroring unavailableDetentionRow's `req.headline || null` passthrough) saved",
+    "    2 lines / 80 chars, most of what this one sentence costs.",
+    "  COLLAPSED: nothing further to fold — the sentence IS the fact, one line, no explanation",
+    "    trailing it; the county name is threaded through the same computed-subject shape rule 5",
+    "    already established (one template literal, not one per with/without-county branch)."
   ],
-  "measuredOn": "2026-07-28",
+  "measuredOn": "2026-08-30",
   "regions": {
     "pond-inspector-default": {
       "maxLines": 0,
@@ -125,8 +144,8 @@
       "maxChars": 258
     },
     "lib-yield-verdicts": {
-      "maxLines": 13,
-      "maxChars": 638
+      "maxLines": 14,
+      "maxChars": 661
     }
   }
 }
