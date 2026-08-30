@@ -44,12 +44,32 @@ describe("shouldOfferReload", () => {
     expect(shouldOfferReload({ loaded, served: "new333", dismissedFor: "new222" })).toBe(true);
   });
 
-  it("a route this build cannot resolve offers the reload on its own, with no version check", () => {
-    expect(shouldOfferReload({ loaded, served: null, dismissedFor: null, routeMissed: true })).toBe(true);
+  // ⛔ B881667 — CORRECTED. A route-miss used to offer the reload UNCONDITIONALLY, with no
+  // version check at all — "the definitive stale-build signal" the original comment called it.
+  // That assumption is false for a slug that never existed in ANY build (a stale bookmark, an
+  // old shared link, a renamed route) rather than one shipped after this tab loaded: on a
+  // freshly-reloaded, fully-current tab this fired the "reload to get it" banner for a link a
+  // reload can never fix. The route-miss signal alone is no longer sufficient — it must be
+  // CONFIRMED against an actual served-build mismatch, the same evidence every other reason
+  // here already requires, per the module's own "silent when it cannot know" contract.
+  it("a route this build cannot resolve is SILENT with no build-skew evidence at all (the stale-link case)", () => {
+    expect(shouldOfferReload({ loaded, served: null, dismissedFor: null, routeMissed: true })).toBe(false);
   });
 
-  it("and a dismissed route-miss stays dismissed", () => {
-    expect(shouldOfferReload({ loaded, served: null, dismissedFor: "route-miss", routeMissed: true })).toBe(false);
+  it("...even when the served build is KNOWN and matches this tab's — a route miss proves nothing on a genuinely current build", () => {
+    expect(shouldOfferReload({ loaded, served: loaded, dismissedFor: null, routeMissed: true })).toBe(false);
+  });
+
+  it("a route miss DOES offer the reload once the served build is CONFIRMED to differ", () => {
+    expect(shouldOfferReload({ loaded, served: "new222", dismissedFor: null, routeMissed: true })).toBe(true);
+  });
+
+  it("and a dismissed route-miss (confirmed skew) stays dismissed", () => {
+    expect(shouldOfferReload({ loaded, served: "new222", dismissedFor: "route-miss", routeMissed: true })).toBe(false);
+  });
+
+  it("...but dismissing the plain skew reason also silences an equally-stale route-miss reading (same underlying build)", () => {
+    expect(shouldOfferReload({ loaded, served: "new222", dismissedFor: "new222", routeMissed: true })).toBe(false);
   });
 
   it("says nothing at all when the server is unreachable and the route resolved fine", () => {

@@ -76,8 +76,8 @@ const FS_NOTICE_MS = 5000;
 const TAB_IDLE = "var(--chrome-tab-inactive)";
 // Per-module accent: the FILL (the 2px underline) is fixed in both themes; the active
 // tab TEXT uses the -text token, which swaps by theme (sits on chrome). (B318)
-const ACCENT_FILL = { "site-planner": "var(--accent-site)", "scheduler": "var(--accent-schedule)", "doc-review": "var(--accent-review)", "library": "var(--accent-library)", "notes": "var(--accent-notes)" };
-const ACCENT_TEXT = { "site-planner": "var(--accent-site-text)", "scheduler": "var(--accent-schedule-text)", "doc-review": "var(--accent-review-text)", "library": "var(--accent-library-text)", "notes": "var(--accent-notes-text)" };
+const ACCENT_FILL = { "site-planner": "var(--accent-site)", "scheduler": "var(--accent-schedule)", "doc-review": "var(--accent-review)", "library": "var(--accent-library)", "notes": "var(--accent-notes)", "model": "var(--accent-model)" };
+const ACCENT_TEXT = { "site-planner": "var(--accent-site-text)", "scheduler": "var(--accent-schedule-text)", "doc-review": "var(--accent-review-text)", "library": "var(--accent-library-text)", "notes": "var(--accent-notes-text)", "model": "var(--accent-model-text)" };
 
 // The Light/Dark/System picker now lives in the account → Settings panel (B389, AuthPanel)
 // for signed-in users. The row-1 gear below is kept ONLY when signed out, so a logged-out
@@ -245,6 +245,18 @@ const MODULE_ICONS = [
         <line x1="2.5" y1="11" x2="4.5" y2="11" />
         <line x1="7" y1="6" x2="11" y2="6" />
         <line x1="7" y1="9" x2="11" y2="9" />
+      </>
+    ),
+  },
+  {
+    id: "model",
+    // simplified ti-table outline (16×16 viewBox) — a spreadsheet grid
+    icon: (
+      <>
+        <rect x="2.5" y="3" width="11" height="10" rx="1" />
+        <line x1="2.5" y1="6.5" x2="13.5" y2="6.5" />
+        <line x1="6.5" y1="6.5" x2="6.5" y2="13" />
+        <line x1="10" y1="6.5" x2="10" y2="13" />
       </>
     ),
   },

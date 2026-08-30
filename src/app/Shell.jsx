@@ -13,12 +13,13 @@ import ModuleLoader from "../shared/ui/ModuleLoader.jsx";
 import AccountControl from "./AccountControl.jsx";
 import { useProfile } from "../shared/profile/useProfile.js";
 import { setTelemetryModule } from "../shared/telemetry/clientErrors.js";
-import { useHashRoute, unknownModuleSlug, isAdminRoute, INITIAL_HASH_EMPTY } from "./route.js";
+import { useHashRoute, unknownModuleSlug, isAdminRoute, readRoute, buildHash, INITIAL_HASH_EMPTY } from "./route.js";
 import { pageTitle } from "./pageTitle.js";
 import { writeLastRoute, seedBootRoute } from "./lastRoute.js";
-import { installBuildSkewWatch, shouldOfferReload, LOADED_BUILD } from "./buildSkew.js";
+import { installBuildSkewWatch, shouldOfferReload, fetchServedBuild, isBuildSkewed, LOADED_BUILD } from "./buildSkew.js";
 import { reloadFresh } from "./chunkReload.js";
 import { RADIUS } from "../shared/ui/radius.js";
+import { mayResumeLastSite } from "../workspaces/site-planner/lib/bootResume.js";
 
 const AdminGate = lazy(() => import("../workspaces/admin/AdminGate.jsx"));
 
@@ -28,6 +29,12 @@ const AdminGate = lazy(() => import("../workspaces/admin/AdminGate.jsx"));
 // and resumeAllowed stays true for the Site Planner's own plan-level resume.
 seedBootRoute();
 
+// B881664 — the route the app's BOOT actually resolved to (after the seed above), captured
+// once. `mayResumeLastSite` compares a later mount's own projectId against this to tell "the
+// Site Planner is mounting as part of processing the boot route" from "the Site Planner is
+// mounting because the user just navigated to a project-less route" — see bootResume.js.
+const INITIAL_ROUTE = readRoute();
+
 // Workspace registry — each Comp is lazy-loaded (separate bundle chunk).
 const WORKSPACES = [
   { id: "site-planner", label: "Site Planyr",     Comp: lazy(() => import("../workspaces/site-planner/SitePlannerApp.jsx")) },
@@ -35,6 +42,7 @@ const WORKSPACES = [
   { id: "library",      label: "Library", Comp: lazy(() => import("../workspaces/library/Library.jsx")) },
   { id: "scheduler",    label: "Sequence Planyr",  Comp: lazy(() => import("../workspaces/scheduler/Scheduler.jsx")) },
   { id: "notes",        label: "Notes", Comp: lazy(() => import("../workspaces/notes/Notes.jsx")) },
+  { id: "model",        label: "Model", Comp: lazy(() => import("../workspaces/model/ModelApp.jsx")) },
   { id: "food",         label: "Food", Comp: lazy(() => import("../workspaces/food/FoodApp.jsx")) },
 ];
 
@@ -223,6 +231,35 @@ export default function Shell() {
     if (typeof window === "undefined") return;
     setRouteMiss(!!unknownModuleSlug(window.location.hash));
   }, [route]);
+  // B881667 — `shouldOfferReload` now requires CONFIRMED skew before a route miss shows the
+  // reload banner (see its own header), so the routine watch's up-to-20s-after-boot first check
+  // is too slow a way to learn "no, this build is already current" — the whole reason a route
+  // miss is uninformative until then. Fire one extra, immediate check the moment a miss is seen;
+  // the routine watch's own poll/focus checks are untouched and keep running regardless.
+  useEffect(() => {
+    if (!routeMiss) return;
+    let live = true;
+    fetchServedBuild().then((served) => { if (live) setServedBuild(served); });
+    return () => { live = false; };
+  }, [routeMiss]);
+  // B881667 — a route miss silently left the URL bar naming the unresolved slug forever (the
+  // owner's exact complaint: "the URL keeps saying /review"), with the resolved fallback module
+  // rendered underneath. Correct the visible URL to what's actually rendered — but ONLY once the
+  // immediate check above has PROVEN this tab is already on the current build: while skew is
+  // still possible, rewriting the URL would silently throw away a deep link a reload could
+  // actually resolve (exactly the case this mechanism exists to protect, per buildSkew.js's own
+  // header). `replaceState`, never a real navigation — no wasted history entry, no re-render
+  // (parseRoute already resolved `route` to the same fallback the render already used).
+  useEffect(() => {
+    if (!routeMiss || typeof window === "undefined" || !window.history) return;
+    if (servedBuild == null || isBuildSkewed(LOADED_BUILD, servedBuild)) return;
+    try {
+      const url = window.location.pathname + window.location.search + buildHash(route);
+      window.history.replaceState(window.history.state, "", url);
+    } catch (_) { /* history API unavailable — leave the URL as-is */ }
+    setRouteMiss(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeMiss, servedBuild]);
   const updateReason = shouldOfferReload({ loaded: LOADED_BUILD, served: servedBuild, dismissedFor, routeMissed: routeMiss })
     ? (routeMiss && dismissedFor !== "route-miss" ? "route-miss" : "newer-build")
     : null;
@@ -284,7 +321,7 @@ export default function Shell() {
                     crossProject={cross}
                     onNavigate={navigate}
                     onProjectChange={(gid) => navigate({ projectId: gid || null, cross: false })}
-                    resumeAllowed={INITIAL_HASH_EMPTY}
+                    resumeAllowed={mayResumeLastSite({ initialHashEmpty: INITIAL_HASH_EMPTY, projectId, initialProjectId: INITIAL_ROUTE.projectId })}
                     newProjectTick={newProjectTick}
                     docIntent={docIntent}
                     onGoDashboard={goDashboard}

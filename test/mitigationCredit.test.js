@@ -146,8 +146,11 @@ describe("NEW-26 / 22 / 23 — SitePlanner wiring (source scan)", () => {
     expect(src).toContain("BKDD Rules 22-01");
   });
 
-  it("NEW-22 — the freshness line no longer duplicates 'ago' (formatAge already supplies it)", () => {
-    expect(src).toContain("`Flood data ${formatAge(floodAgeMs)}`");
+  // B881668 — the no-duplicate-"ago" guarantee (formatAge already returns "…ago") now lives in
+  // the pure `floodStatusLine` (lib/factRevalidation.js), directly unit- and mutation-tested in
+  // test/factRevalidation.test.js. This only guards that the Yield panel still calls it.
+  it("NEW-22 — the freshness line is driven by floodStatusLine, not a re-derived inline sentence", () => {
+    expect(src).toContain("floodStatusLine({ refreshing: drainRefreshing, floodChecked: drainage.floodChecked, freshnessState: drainage.freshness?.state, floodAgeMs })");
     expect(src.includes("`Flood data ${formatAge(floodAgeMs)} ago`")).toBe(false);
   });
 

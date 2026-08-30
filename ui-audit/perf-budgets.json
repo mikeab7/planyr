@@ -117,9 +117,16 @@
       "what": "Total JS a plain Food route must download: the entry chunk plus FoodApp and its static-import closure.",
       "note": "Seeded at 0 (B568400, the same precedent as notesRouteJsBytes) so the FIRST measurement of this brand-new route lands through `npm run perf:ratchet` with a stated reason, exactly like any other baseline move -- a hand-typed seed is the thing that step exists to prevent. This route is measured SEPARATELY from siteRouteJsBytes/notesRouteJsBytes/largestChunkBytes by design: the owner's explicit ask was that a personal restaurant tracker never share a metric with, or draw headroom from, the routes the actual product depends on. leaflet (the map vendor chunk) is reused from the existing shared map-vendor split -- that's what it's for -- but nothing from site-planner may come with it (this module has zero imports from src/workspaces/site-planner, source-guarded by test/foodModule.test.js)."
     },
+    "modelRouteJsBytes": {
+      "baseline": 653825,
+      "target": 653825,
+      "unit": "bytes",
+      "what": "Total JS a plain Model route must download: the entry chunk plus ModelApp and its static-import closure.",
+      "note": "Seeded at 0 (the notesRouteJsBytes/foodRouteJsBytes precedent) so the FIRST measurement of this brand-new route lands through `npm run perf:ratchet` with a stated reason, exactly like any other baseline move -- a hand-typed seed is the thing that step exists to prevent."
+    },
     "totalJsBytes": {
-      "baseline": 5414044,
-      "target": 5414044,
+      "baseline": 5472164,
+      "target": 5472164,
       "unit": "bytes",
       "what": "Every JS chunk EMITTED into dist/assets, summed. Catches overall bundle growth even when it lands off the Site route.",
       "note": "Larger than the 3016 KB the owner's 2026-07-28 pass reported, and correctly so: that figure counted the 11 chunks a browser actually FETCHED, while this counts all 20 emitted \u2014 the extra 5 are Web Worker bundles (terrainWorker, dxfWorker) and small helper chunks that only a dynamic import ever pulls. Two different questions; the per-route budgets above answer the owner's. CEILING RAISED 3960000 -> 3985000 by B1130/B1131 (2026-07-30), stated in full because raising a ceiling is a product decision. THE KEY POINT: this metric counts EVERY emitted chunk, lazy ones included, BY DESIGN \u2014 that is exactly what makes it the honest catch-all. So the four deferrals that paid the two per-route budgets (see siteRouteJsBytes.note) move bytes OFF the critical path without reducing this number at all, and no amount of further code-splitting can. The residual is ~19 KB of genuine minified code implementing two owner-reported defects on the Electric layer: substations painting as broken-image glyphs labelled \"Mark\", and no way to hover a line or substation to learn what it is. WHAT WAS PAID ELSEWHERE FIRST, so this is not a shortcut: largestChunkBytes was brought back UNDER its existing ceiling with no raise at all (1719.5 -> 1706.8 KB), and siteRouteJsBytes was cut from +20.2 KB to +7.4 KB before its ceiling moved. HEADROOM CONTEXT: main was at 3861.4 KB against the 3867.2 KB ceiling \u2014 5.8 KB \u2014 so like the other two, this metric now trips on essentially any feature; that is a headroom problem to be closed by B1064, not a regression in this PR. Ceiling and target are kept EQUAL here, as they were before, so this metric continues to assert no known gap rather than quietly acquiring one. NEW-1 (2026-07-30): baseline and target are still kept EQUAL for exactly that reason, and the derived headroom band now applies to this metric too \u2014 it was 4.3 KB (0.11%) under its old hand-pinned ceiling and would have been the next surprise."
@@ -496,6 +503,28 @@
           "reason": "Post-merge drift from ~8 PRs landed on main today (2026-08-30) pushed the SitePlannerApp chunk past its ceiling before this PR's own tiny addition (yieldVerdicts.js second-null-branch guard); confirmed via a clean build of the merge commit alone (no feature diff), already over ceiling at 1640.5 KB. Tracked by B1064's existing lazy-panel-extraction plan (already Open), not new debt from this PR — no optimization attempted here as this PR's own contribution is a few dozen bytes."
         },
         {
+          "metric": "bundle.modelRouteJsBytes",
+          "from": 0,
+          "to": 653825,
+          "direction": "raise",
+          "item": "B891184",
+          "date": "2026-08-30",
+          "commit": "dbff02c05b5e2e2758b284616babb1cdd9653811",
+          "sourceHash": "61e913ea11c3ecfa",
+          "reason": "First measurement of the new Model route (spreadsheet workspace): ModelApp chunk + AppHeader + cjs-interop + the entry chunk. No rich engine to defer behind a lazy boundary in v1 -- the whole module is the route's own weight, same shape as the notesRouteJsBytes/foodRouteJsBytes seed."
+        },
+        {
+          "metric": "bundle.totalJsBytes",
+          "from": 5306226,
+          "to": 5462656,
+          "direction": "raise",
+          "item": "B891184",
+          "date": "2026-08-30",
+          "commit": "dbff02c05b5e2e2758b284616babb1cdd9653811",
+          "sourceHash": "61e913ea11c3ecfa",
+          "reason": "The new Model workspace: its own ModelApp route chunk plus the four registration touch points (AppHeader tab, moduleAccent/moduleLoaderTheme/moduleTabLabel entries). This metric counts every emitted chunk by design, so a brand-new module's weight lands here in full -- same shape as B1290's Notes-workspace raise and B568400's Food-workspace raise. Site route is untouched: this module adds no Site-route bytes."
+        },
+        {
           "metric": "bundle.totalJsBytes",
           "from": 5306226,
           "to": 5414044,
@@ -504,7 +533,29 @@
           "date": "2026-08-30",
           "commit": "17c43a7894b2f6d8ae72814a623fc05215cc9a9c",
           "sourceHash": "387cb10b3b369fc2",
-          "reason": "Admin County criteria requests page (B877442): new admin-only table reading the B877440/B877441 request queue. The far larger siteRouteAllowlist breach the admin lib's imports first caused is fixed (duplicated a small modeled-county list instead of importing detentionRules.js/easementRules.js). Residual +1.7 KB is the admin page's own new, minimal content on an ungated #/admin route no ordinary user loads."
+          "reason": "Post-merge drift from the PRs that landed on main on 2026-08-30 accounts for most of this move, same shape as the largestChunkBytes entry just above: this PR's own contribution is the Admin County criteria requests page (B877442, a new admin-only table reading the B877440/B877441 request queue) on an ungated #/admin route no ordinary user loads -- plus fixing the far larger siteRouteAllowlist breach the admin lib's imports first caused (duplicated a small modeled-county list instead of importing detentionRules.js/easementRules.js). MEASURED head-to-head from clean worktrees (du -b over dist/assets/*.js): origin/main WITHOUT this PR = 5,405,719 bytes; this PR branch = 5,414,040 bytes; recorded old baseline = 5,306,226 bytes. So of the baseline's 107,818-byte (105.3 KB) move: 99,493 bytes (97.2 KB, ~92%) is pre-existing drift already on main before this PR existed, and only 8,321 bytes (8.13 KB, ~8%) is this PR's own contribution -- not the +1.7 KB the entry previously stated (off by ~4.8x). The ratchet itself is correct (main had genuinely drifted past the old baseline and the number had to move regardless); only the earlier wording, which attributed the whole move to this PR, was wrong."
+        },
+        {
+          "metric": "bundle.totalJsBytes",
+          "from": 5414044,
+          "to": 5471087,
+          "direction": "raise",
+          "item": "B891184",
+          "date": "2026-08-30",
+          "commit": "18c011f09502957e655df6842e83cb555ab4e8aa",
+          "sourceHash": "2314c2e64f7d3b27",
+          "reason": "Merge reconciliation: freshly measured combined total after merging origin/main's B877442 (county-criteria admin page) into this branch's B891184 (Model spreadsheet module) -- both had independently raised totalJsBytes from the same 5306226 base; this replaces the diamond conflict with the true measured value of the fully merged tree"
+        },
+        {
+          "metric": "bundle.totalJsBytes",
+          "from": 5471087,
+          "to": 5472164,
+          "direction": "raise",
+          "item": "B891184",
+          "date": "2026-08-30",
+          "commit": "64bfe36310c4da9b80c8d3a236bb76e4667dc6dc",
+          "sourceHash": "15c3a97bbc200417",
+          "reason": "Second merge reconciliation: re-measured after merging origin/main's B881664-B881668 (Dashboard nav bounce, pin filter, switcher dupe, flood freshness) into this branch on top of the prior B877442 reconciliation -- true measured total of the fully merged tree, not a hand-picked value"
         }
       ]
     }

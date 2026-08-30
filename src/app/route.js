@@ -26,8 +26,8 @@
 import { useCallback, useEffect, useState } from "react";
 
 export const DEFAULT_MODULE = "site-planner";
-export const MODULE_BY_SLUG = { site: "site-planner", schedule: "scheduler", markup: "doc-review", library: "library", notes: "notes", food: "food" };
-export const SLUG_BY_MODULE = { "site-planner": "site", scheduler: "schedule", "doc-review": "markup", library: "library", notes: "notes", food: "food" };
+export const MODULE_BY_SLUG = { site: "site-planner", schedule: "scheduler", markup: "doc-review", library: "library", notes: "notes", model: "model", food: "food" };
+export const SLUG_BY_MODULE = { "site-planner": "site", scheduler: "schedule", "doc-review": "markup", library: "library", notes: "notes", model: "model", food: "food" };
 
 const slugFor = (module) => SLUG_BY_MODULE[module] || SLUG_BY_MODULE[DEFAULT_MODULE];
 
