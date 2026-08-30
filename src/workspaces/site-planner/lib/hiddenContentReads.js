@@ -55,8 +55,8 @@ export const DECLARATIONS = Object.freeze([
     why: "B494050 — the EXPORT crop, and the print-frame seed. The sheet is framed to the development's extent; built from the whole model it prints blank paper around content the drawing is not showing. PDF-PARITY. (The ambient flush-snap's neighbour set lives inside `onMove`, declared below.)" },
 
   /* ── CORRECT-UNFILTERED: filtering any of these would be the worse bug ─────────────────────── */
-  { name: "siteSqft", verdict: U,
-    why: "Site AREA from the dissolved parcels. A number; hiding a parcel must not shrink the site." },
+  { name: "metrics", verdict: U,
+    why: "site-metrics-extraction (lib/siteMetrics.js) — site area plus every yield/coverage number (building, paving, parking, pond area, coverage %, FAR...) derived from the WHOLE model. Numbers; hiding an element must not shrink the site or its buildings for this math (was declared as `siteSqft` before the numbers moved into one pure function)." },
   { name: "parcelStreets", verdict: U,
     why: "REGULATORY inference — which parcel edge fronts a street, feeding the setback ROLE. A zoning answer may not change because a checkbox was unticked." },
   { name: "gsInputs", verdict: U,

@@ -308,12 +308,19 @@ import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStrip
 import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, nodeJunction, cardinalTeePoint, roadBearingDeg } from "./lib/roadGeometry.js";
 import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD, rectOutlineCutSegments } from "./lib/roadNetwork.js";
 import {
-  roundaboutNodes, roundaboutGeometry, roundaboutDiameterFor, roundaboutBandFor,
-  normalizeRoundaboutD, legTrimFor, trimPolylineEnds, roundaboutArea, roundaboutIslandArea,
+  roundaboutDiameterFor, roundaboutBandFor,
+  normalizeRoundaboutD, roundaboutIslandArea,
   ROUNDABOUT_MIN_D, ROUNDABOUT_MAX_D,
 } from "./lib/roundabout.js";
 import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classReturnRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
+import {
+  SQFT_PER_ACRE, rot2, elCorners, polyArea, ringOf, carStalls, trailerStalls, estStalls, estTrailers,
+  CURB, CURB_6, CURB_12, curbWidthOf, curbEdgesOf, isCenterlineRoad, roadCurbWidth,
+  roadDefaultRadius, roadDenseCenterline, roadStripRing, roadStripArea,
+  TEE_COINCIDE_FT, teeTargetOf, roadJunctionVerticesOf, roundaboutsForSite,
+} from "./lib/siteGeometry.js";
+import { siteMetrics } from "./lib/siteMetrics.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide,
   wallStripBox, wallKidBox, wallKidPerp, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost, sideParkAlongRun,
   sideParkStack } from "./lib/dogEar.js";
@@ -531,7 +538,6 @@ const SURF_RAISED = "var(--surface-raised)";
 const MONO_FONT = "ui-monospace, monospace";   // same reason — spelled out 21× before this
 const BORDER_1 = "1px solid var(--border-default)"; // …and this hairline 15× (4 quoted, 11 templated)
 
-const SQFT_PER_ACRE = 43560;
 const POND_ADD_MIN_SF = 50; // B157: below this, an expansion is too small to seat its own added-area label
 const POND_ADD_FILL_DEFAULT = "#A7D3DD"; // B157: default "added area" fill — a lighter tint of the cartographic teal pond, distinct from the existing basin
 // Corner bump-out (dog-ear) defaults + geometry live in lib/dogEar.js (pure, unit-tested — B362).
@@ -559,7 +565,6 @@ const FEAT_BTN_MIN_PX = 72;
 const GRID_LINE = "#6b7480";       // interior column line (solid 0.5px) — also the speed-bay line
 const GRID_FLEX = "#6b7480";       // end/rear/centre flex boundary (dashed)
 const GRID_WALL = "#4a525e";       // dock wall — the heaviest edge
-const CURB = 0.5;    // 6" curb on each side of a road (added to its true width)
 // B310 — parcel click-vs-drag: a press on a (locked) parcel pans the canvas; only a brief,
 // low-travel pointer-up counts as a real click that selects it. So panning across parcels no
 // longer constantly mis-fires as a selection. Travel is in SCREEN px (zoom-independent); the
@@ -753,10 +758,6 @@ const CURB_STROKE_MIN_PX = 0.75;
 const snap45 = (a, b) => { const dx = b.x - a.x, dy = b.y - a.y, r = Math.hypot(dx, dy), ang = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4); return { x: a.x + r * Math.cos(ang), y: a.y + r * Math.sin(ang) }; };
 
 /* ----------------------------- geometry ---------------------------- */
-const rot2 = (x, y, deg) => {
-  const r = (deg * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r);
-  return { x: x * c - y * s, y: x * s + y * c };
-};
 // Black or white label text depending on how light the element's fill is.
 const labelInk = (hex) => {
   const h = (hex || "#ffffff").replace("#", "");
@@ -802,25 +803,6 @@ const edgeSnapCenter = (moved, others, thr) => {
   if (bestX.cx !== undefined) { cx = bestX.cx; if (alignY.cy !== undefined) cy = alignY.cy; }
   if (bestY.cy !== undefined) { cy = bestY.cy; if (alignX.cx !== undefined) cx = alignX.cx; }
   return { cx, cy };
-};
-const elCorners = (el) => {
-  const hw = el.w / 2, hh = el.h / 2;
-  return [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([lx, ly]) => {
-    const p = rot2(lx, ly, el.rot);
-    return { x: el.cx + p.x, y: el.cy + p.y };
-  });
-};
-const polyArea = (pts) => {
-  // B690 — same guard as the finder's shoelace: a parcel/element without a usable ring
-  // contributes 0 area instead of crashing the canvas (points can be absent on a
-  // malformed/legacy record that round-tripped verbatim through storage or element rows).
-  if (!Array.isArray(pts) || !pts.length) return 0;
-  let a = 0;
-  for (let i = 0; i < pts.length; i++) {
-    const j = (i + 1) % pts.length;
-    a += pts[i].x * pts[j].y - pts[j].x * pts[i].y;
-  }
-  return Math.abs(a) / 2;
 };
 const centroid = (pts) => {
   let x = 0, y = 0;
@@ -1110,7 +1092,6 @@ function nearestOnPolylines(p, polys) {
   return best ? { pt: best, d: bd } : null;
 }
 const rectRing = (c, w, h) => { const hw = w / 2, hh = h / 2; return [{ x: c.x - hw, y: c.y - hh }, { x: c.x + hw, y: c.y - hh }, { x: c.x + hw, y: c.y + hh }, { x: c.x - hw, y: c.y + hh }]; };
-const ringOf = (e) => (e.points ? e.points : elCorners(e));
 
 /* B707/B712 — which drawn elements count as FILL for the mitigation screen: the
  * same set the yield math treats as impervious (buildings incl. bump-outs, paving,
@@ -1216,85 +1197,8 @@ function buildUtilRoute(source, b, opts, uid) {
 }
 
 /* --------------------------- parking math -------------------------- */
-// Double-loaded modules (two stall rows + a drive aisle) filling a rectangle.
-// Supports 90/60/45° stalls: angling narrows the row depth and the aisle the
-// user sets, and spaces stalls farther apart along the row.
-function carStalls(w, h, s) {
-  const ang = [45, 60, 90].includes(+s.parkAngle) ? +s.parkAngle : 90;
-  const rad = (ang * Math.PI) / 180, sinA = Math.sin(rad);
-  const rowDepth = s.stallDepth * sinA;        // perpendicular depth of a stall row
-  const pitch = s.stallW / sinA;               // spacing along the row
-  const ai = s.aisle;
-  const slantDx = ang === 90 ? 0 : rowDepth / Math.tan(rad); // lean across the depth
-  const mod = rowDepth * 2 + ai;
-  // Degenerate-config guard: a 0 stall-depth+aisle (mod) or 0 stall-width (pitch) makes
-  // mods/perRow Infinity → an unbounded band loop that hard-freezes the tab. Bail to empty.
-  if (!(mod > 0) || !(pitch > 0)) return { count: 0, bands: [], aisles: [], pitch: pitch > 0 ? pitch : 0, rowDepth, angle: ang };
-  const perRow = Math.max(0, Math.floor((w - slantDx) / pitch));
-  const mods = Math.max(0, Math.floor(h / mod));
-  let count = 0;
-  const bands = [], aisles = [];
-  for (let i = 0; i < mods; i++) {
-    const y = i * mod;
-    bands.push({ y, depth: rowDepth, n: perRow, pitch, slantDx, dir: 1 });
-    aisles.push({ y0: y + rowDepth, y1: y + rowDepth + ai });
-    bands.push({ y: y + rowDepth + ai, depth: rowDepth, n: perRow, pitch, slantDx, dir: -1 });
-    count += perRow * 2;
-  }
-  const used = mods * mod, left = h - used;
-  if (left >= rowDepth && perRow > 0) {
-    bands.push({ y: used, depth: rowDepth, n: perRow, pitch, slantDx, dir: 1 });
-    count += perRow;
-  }
-  // flipDepth: mirror the layout across the strip's depth so the drive aisle
-  // sits on the inner (y=0) edge — used for parking that hugs a building.
-  if (s.flipDepth) {
-    bands.forEach((b) => { b.y = h - b.y - b.depth; });
-    aisles.forEach((a) => { const y0 = h - a.y1, y1 = h - a.y0; a.y0 = y0; a.y1 = y1; });
-  }
-  return { count, bands, aisles, pitch, rowDepth, angle: ang };
-}
-// Trailer storage as double-loaded rows (53′ deep) separated by a maneuvering
-// drive lane (~60′) so tractors can back trailers in — not a solid pack.
-function trailerStalls(w, h, s) {
-  const tl = s.trailerL, tw = s.trailerW, ai = Math.max(0, s.trailerAisle || 0);
-  const perRow = tw > 0 ? Math.max(0, Math.floor(w / tw)) : 0;
-  // Single striped row (e.g. trailer parking flush against a wall): one band
-  // filling the strip depth, columns every tw.
-  if (s.single) {
-    const bands = perRow > 0 ? [{ y: 0, depth: h, n: perRow }] : [];
-    return { count: perRow, bands, aisles: [], cols: perRow, tw, tl };
-  }
-  const mod = tl * 2 + ai;
-  // Same freeze guard as carStalls: 0 trailer-length + 0 aisle would loop forever.
-  if (!(mod > 0)) return { count: 0, bands: [], aisles: [], cols: perRow, tw, tl };
-  const mods = Math.max(0, Math.floor(h / mod));
-  let count = 0;
-  const bands = [], aisles = [];
-  for (let i = 0; i < mods; i++) {
-    const y = i * mod;
-    bands.push({ y, depth: tl, n: perRow });
-    aisles.push({ y0: y + tl, y1: y + tl + ai });
-    bands.push({ y: y + tl + ai, depth: tl, n: perRow });
-    count += perRow * 2;
-  }
-  const used = mods * mod, left = h - used;
-  if (left >= tl && perRow > 0) {
-    bands.push({ y: used, depth: tl, n: perRow });
-    count += perRow;
-  }
-  return { count, bands, aisles, cols: perRow, tw, tl };
-}
-// Area-based stall estimates for irregular (polygon) fields — gross sf per stall
-// including its share of drive aisle, with an efficiency factor for edge loss.
-function estStalls(area, s) {
-  const per = s.stallW * (s.stallDepth + s.aisle / 2) || 1;
-  return Math.max(0, Math.floor((area * 0.8) / per));
-}
-function estTrailers(area, s) {
-  const per = s.trailerW * (s.trailerL + (s.trailerAisle || 0) / 2) || 1;
-  return Math.max(0, Math.floor((area * 0.8) / per));
-}
+// carStalls / trailerStalls / estStalls / estTrailers moved to ./lib/siteGeometry.js
+// (site-metrics-extraction) — pure, shared with lib/siteMetrics.js.
 
 /* --------------- parking row stepping (double-loading) ------------- */
 // parkDepthForRows / parkRowsForDepth / splitParkingPieces are pure (unit-tested
@@ -1303,77 +1207,20 @@ function estTrailers(area, s) {
 // ⌈n/2⌉·aisle (one aisle shared per pair of rows).
 
 /* ------------------------- curbs (derived) ------------------------- */
-// Curbs are auto-placed thin bands (not user geometry): a 6" mono curb is 0.5′ of
-// plan-view width; a heavier 12" curb (trailer option) is 1.0′. One rule, three
-// faces: ALWAYS drawn, ALWAYS in the area/yield math (width feeding it), NEVER in
-// the displayed dimension (the label reads to the face of curb). The element's
-// w/h stays the face-of-curb size, so the curb is derived on top — it floats to
-// the terminal edge as rows are added/removed, with no stored geometry.
-const CURB_6 = 0.5, CURB_12 = 1.0;
-const CURB_TYPES = ["parking", "paving", "trailer"]; // roads carry their own curbs; no curb on a building side
-const curbWidthOf = (el) => (el.curbW === CURB_12 ? CURB_12 : CURB_6);
-const curbHost = (el, allEls) => (el.attachedTo ? (allEls || []).find((x) => x.id === el.attachedTo && !x.points) : null);
-// Outward (terminal/back) edge in the element's LOCAL frame — the edge pointing
-// away from a host building (so a curb never lands on the building side).
-function outwardCurbEdge(el, allEls) {
-  const host = curbHost(el, allEls);
-  if (!host) return null;
-  const loc = rot2(el.cx - host.cx, el.cy - host.cy, -el.rot); // host→el delta in local frame
-  return Math.abs(loc.y) >= Math.abs(loc.x)
-    ? { axis: "y", sign: loc.y >= 0 ? 1 : -1, length: el.w }
-    : { axis: "x", sign: loc.x >= 0 ? 1 : -1, length: el.h };
-}
-// True when a sidewalk/landscape strip sits between this pad and its host, so the
-// pad's inner edge is a sidewalk transition (curb) rather than a building face.
-function sidewalkBetween(el, host, allEls) {
-  if (!host) return false;
-  const a = { x: el.cx - host.cx, y: el.cy - host.cy };
-  return (allEls || []).some((s) => {
-    if ((s.type !== "sidewalk" && s.type !== "landscape") || s.attachedTo !== host.id || s.id === el.id) return false;
-    const b = { x: s.cx - host.cx, y: s.cy - host.cy };
-    return (a.x * b.x + a.y * b.y) > 0 && (b.x * b.x + b.y * b.y) < (a.x * a.x + a.y * a.y); // same side, inboard
-  });
-}
-// Curbed edges (LOCAL frame) — the single source feeding both the drawn band and
-// the area math. B130 rule: a 6" curb wraps the WHOLE perimeter wherever pavement
-// meets non-paving (dirt, landscape, a dead-end aisle), and is skipped wherever
-// pavement meets pavement — a drive-aisle opening, continuous paving, or the
-// internal seam between two abutting pads (e.g. split modules). The bare building
-// face stays curb-free (B70) unless a sidewalk sits between (a transition curb).
-function curbEdgesOf(el, allEls) {
-  if (el.points || !CURB_TYPES.includes(el.type)) return [];
-  const w = curbWidthOf(el), host = curbHost(el, allEls);
-  const oe = host ? outwardCurbEdge(el, allEls) : null;             // edge AWAY from the host
-  const swalk = host ? sidewalkBetween(el, host, allEls) : false;
-  const edges = [];
-  for (const c of [
-    { axis: "y", sign: 1, length: el.w }, { axis: "y", sign: -1, length: el.w },
-    { axis: "x", sign: 1, length: el.h }, { axis: "x", sign: -1, length: el.h },
-  ]) {
-    const hostSide = oe && c.axis === oe.axis && c.sign === -oe.sign;
-    if (hostSide && !swalk) continue;                              // B70: bare building face → no curb
-    if (edgeAbutsPaving(el, c.axis, c.sign, allEls)) continue;     // meets pavement (opening / seam) → no curb
-    edges.push({ ...c, width: w });
-  }
-  return edges;
-}
-// Plan-view area of an element's curbs (counts in the SF / impervious math).
-const curbAreaOf = (el, allEls) => (el.points ? 0 : curbEdgesOf(el, allEls).reduce((s, e) => s + e.length * e.width, 0));
-/* B1352 — the same area, read off an ALREADY-RESOLVED neighbour record (resolveElNeighbors) rather
- * than re-running the O(n²) adjacency scan. This is the yield/impervious math's copy of the same
- * waste the renderer had: the scan is a function of the MODEL, and it was running once per element
- * per render — measured at 2.7% of all script self-time during a wheel gesture with the Yield panel
- * docked, on a gesture that cannot change a single curb. Falls back to the full scan if a record is
- * missing, so a caller that has no resolved set still gets the right number, never a silent zero. */
-const curbAreaFrom = (el, nb, allEls) => (nb ? nb.curbEdges.reduce((s, e) => s + e.length * e.width, 0) : curbAreaOf(el, allEls));
+// curbWidthOf / curbEdgesOf / curbAreaOf (+ their curbHost/outwardCurbEdge/sidewalkBetween
+// internals) moved to ./lib/siteGeometry.js (site-metrics-extraction) — pure, shared with
+// lib/siteMetrics.js. `curbAreaFrom`'s resolved-neighbour fast path (B1352) is retired: nothing
+// outside the render's own `resolveElNeighbors` record needs it any more, and `curbAreaOf(el,
+// allEls)` — called directly by lib/siteMetrics.js — computes the identical number.
 
 /* ---- Centerline road geometry (B596–B598 / NEW-1..3) ----
  * A centerline road carries pts + per-vertex treatment (vtx) + travelW + curb + roadClass.
  * Its surface, curbs and dimension all DERIVE from these via roadCenterline (B597) fed
  * through the shared bufferPolyline / offsetPolyline offset primitives (B598) — no new
- * geometry dependency. The legacy rotated-rect road (no `pts`) keeps the old render. */
-const isCenterlineRoad = (el) => !!el && el.type === "road" && Array.isArray(el.pts) && el.pts.length >= 2;
-const roadCurbWidth = (el) => (Number.isFinite(el && el.curb) ? el.curb : CURB);
+ * geometry dependency. The legacy rotated-rect road (no `pts`) keeps the old render.
+ * isCenterlineRoad / roadCurbWidth / roadDefaultRadius / roadDenseCenterline / roadStripRing /
+ * roadStripArea moved to ./lib/siteGeometry.js (site-metrics-extraction) — pure, shared with
+ * lib/siteMetrics.js. */
 // The paint-layer of a building — the highest ground/structure band. The clean-intersection overlay
 // (road tee / drive / weld covers) renders BELOW this so a building ALWAYS paints over it: connection
 // pavement can never overlap a building (B959/NEW-1 hard rule, "building always wins").
@@ -1390,43 +1237,11 @@ const ROAD_FIX_MAX_EXTEND_FT = 25;
 // NEW-5 — below this zoom a radius flag folds to just its corner dot. A fixed-pixel label on a
 // whole-site view sprawls across the plan and reads as attached to nothing (owner, 2026-07-25).
 const ROAD_FLAG_LABEL_PPF = 0.5;
-// Default Arc radius for a road's new vertices = its class default (settings-resolved).
-const roadDefaultRadius = (el, settings) => classDefaultRadius(roadClassOf(settings, el && el.roadClass));
-// The dense, tessellated centerline (the rendered alignment) for a centerline road.
-//
-// NEW-2 — `sharpAt` is the set of this road's vertices that ANOTHER road tees onto. Those corners
-// are rendered as hard corners (see roadCenterlineTagged's `sharpAt`): a junction is where two
-// centerlines MEET, so the through road has to pass through the node, and a centerline fillet cuts
-// the corner clean off it. Every caller that draws, measures or dissolves a road passes it, so the
-// pavement, the curb stripes, the paved-area figure and the length all describe the same road.
-/* NEW-5 — `trim` is {start,end} in feet: how far this road's centerline is SHORTENED at each
- * terminus because a roundabout sits there. Every consumer of a road's geometry takes it, so the
- * drawn pavement, the curb stripes, the paved-area figure and the dissolve all describe the SAME
- * road — the "the pavement math knows about it" half of the owner's condition. An undefined trim is
- * the byte-identical old behaviour, so a plan with no roundabout is untouched. */
-const roadDenseCenterline = (el, settings, sharpAt, trim) => {
-  const dense = roadCenterline(el.pts, el.vtx, { defaultRadius: roadDefaultRadius(el, settings), sharpAt });
-  return trim && (trim.start > 0 || trim.end > 0) ? trimPolylineEnds(dense, trim.start || 0, trim.end || 0) : dense;
-};
-// The pavement+curb OUTER ring (closed polygon) — total width = travelW + a curb each side.
-const roadStripRing = (el, settings, sharpAt, trim) => {
-  const dense = roadDenseCenterline(el, settings, sharpAt, trim);
-  return bufferPolyline(dense, Math.max(0, (+el.travelW || 0) + 2 * roadCurbWidth(el))) || [];
-};
 // The two inner curb lines = the centerline offset by ±travelW/2 (face-of-curb edges).
 const roadCurbLines = (el, settings, sharpAt, trim) => {
   const dense = roadDenseCenterline(el, settings, sharpAt, trim);
   const hw = Math.max(0, (+el.travelW || 0) / 2);
   return [offsetPolyline(dense, hw), offsetPolyline(dense, -hw)].filter(Boolean);
-};
-// Plan-view paved area (sf) of a centerline road = its generated strip polygon area
-// (replaces the old w×h — the curbs are included, matching the B70 three-way contract).
-// NEW-5 — plus the CIRCULATORY ROADWAY of any roundabout this road owns (`extraSf`), which is the
-// annulus and never the disc: the central island is landscaped, so counting it would overstate
-// impervious cover, and impervious cover is what a detention volume is priced off.
-const roadStripArea = (el, settings, sharpAt, trim, extraSf = 0) => {
-  const ring = roadStripRing(el, settings, sharpAt, trim);
-  return (ring.length >= 3 ? Math.abs(polyArea(ring)) : 0) + (+extraSf || 0);
 };
 // B953/NEW-1 — detect road tees for the clean-intersection render. A tee = a centerline road's
 // ENDPOINT coincident with an INTERIOR vertex of another centerline road (the B945/B949 tee
@@ -1434,19 +1249,8 @@ const roadStripArea = (el, settings, sharpAt, trim, extraSf = 0) => {
 // [{ sideId, throughId, T, geom }] with geom = teeGeometry(...) in world feet (or skips a non-tee).
 // The return radius seeds from the side road's class (classReturnRadius) unless the side road stores
 // an explicit el.tee override for this through road. Pure over (els, settings); memoized at the call site.
-const TEE_COINCIDE_FT = 0.75;
-// B1011 round 2 — a FLAT 0.75 ft is too tight to recognise a junction the owner actually drew. On his
-// plan the 36' aisle's endpoint sits 0.86 ft from the 40' aisle's vertex — a tenth of a foot over the
-// line — so the app saw no tee there at all, added no curb returns, and the two strips simply butted:
-// the squared-off notch at that junction. Sub-foot slack is normal in hand-drawn geometry (grid snap,
-// migration rounding, a nudged vertex), and it is NOT a meaningful separation on a 40 ft road. So the
-// tolerance scales with the narrower road's own width, exactly like the B1010 debris rule, and stays
-// bounded so two genuinely distinct vertices can never be welded by accident.
-const TEE_COINCIDE_MAX_FT = 4;
-const teeCoincideFt = (a, b) => {
-  const w = Math.min(+a?.travelW || 0, +b?.travelW || 0);
-  return Math.max(TEE_COINCIDE_FT, Math.min(w > 0 ? w / 8 : 0, TEE_COINCIDE_MAX_FT));
-};
+// TEE_COINCIDE_FT / TEE_COINCIDE_MAX_FT / teeCoincideFt moved to ./lib/siteGeometry.js
+// (site-metrics-extraction) — pure, shared with lib/siteMetrics.js.
 // How far a road RUNS from vertex `i` in direction `step` (+1/-1) along its own polyline, and the
 // first point far enough away to give an honest tangent.
 //
@@ -1478,40 +1282,8 @@ function roadRunFrom(pts, i, step, noiseFt = VERTEX_NOISE_FT) {
 }
 // The tangent-read scale for a road: half its travel width, floored at the bare noise tolerance.
 const roadTangentNoise = (el) => Math.max(VERTEX_NOISE_FT, (+(el && el.travelW) || 0) / 2);
-// The road (and which of its interior vertices) that `P` — one endpoint of side road `S` — tees onto.
-// ONE definition of "this is a tee", shared by the junction builder and the junction-vertex map, so
-// the corners we FLATTEN can never drift from the junctions we BUILD.
-const teeTargetOf = (roads, S, P) => {
-  for (const H of roads) {
-    if (H.id === S.id) continue;
-    for (let i = 1; i < H.pts.length - 1; i++) {
-      if (Math.hypot(H.pts[i].x - P.x, H.pts[i].y - P.y) <= teeCoincideFt(S, H)) return { G: H, gvi: i };
-    }
-  }
-  return null;
-};
-/* NEW-2 — every vertex a road junction lands on, per road: Map<roadId, Set<vertexIndex>>.
- *
- * These corners render SHARP (see roadDenseCenterline). The owner's Goose Creek split is why: his
- * 36' aisle turns ~88° through an arc-treated vertex, and the branch is welded to that vertex — but
- * a 25 ft fillet carries the drawn pavement ~10 ft clear of it, so the branch's edges sat 10 ft
- * inboard of the through road's and the outline stepped. A junction is where two centerlines MEET;
- * the rounding there belongs to the curb returns, not to a centerline fillet that moves the road
- * away from the node. No-op on a collinear junction vertex (the common case), so an ordinary
- * straight tee renders byte-identically to before. Pure over (els); memoized at the call site. */
-function roadJunctionVerticesOf(els) {
-  const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo);
-  const out = new Map();
-  for (const S of roads) {
-    for (const ei of [0, S.pts.length - 1]) {
-      const t = teeTargetOf(roads, S, S.pts[ei]);
-      if (!t) continue;
-      if (!out.has(t.G.id)) out.set(t.G.id, new Set());
-      out.get(t.G.id).add(t.gvi);
-    }
-  }
-  return out;
-}
+// teeTargetOf / roadJunctionVerticesOf moved to ./lib/siteGeometry.js (site-metrics-extraction) —
+// pure, shared with lib/siteMetrics.js.
 function teeJunctionsOf(els, settings) {
   const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo);
   const out = [];
@@ -11720,12 +11492,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const elNeighbors = useMemo(() => resolveElNeighbors(els, settings), [els, settings]);
 
   /* ------------ metrics ------------ */
-  // Per-element striping/count config: a strip may override the global standards
-  /* ⚠ DECLARED HERE, ABOVE THE AREA LEDGER, ON PURPOSE (NEW-5). The paved-area loop a few lines
-     down reads `roundabouts` DURING RENDER, and a `const` declared later in the component body is
-     in its temporal dead zone at that moment — which throws the whole planner to its error boundary
-     ("Cannot access … before initialization"), not a wrong number. Keep this above its first
-     reader; `roadNet` further down reads it too and is unaffected by the position. */
+  // `roadNet` further down reads `roundabouts` too, so keep this declared above that reader.
   /* NEW-5 — ROUNDABOUTS. Derived entirely from what each road stores at its terminus
      (`el.roundabout = {end, d}`), so the circle is BONDED by construction: move or re-align the
      road and the centre, the leg bearings and the curb returns all re-derive from the current
@@ -11735,38 +11502,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      `roadDenseCenterline`); `areaById` is the annulus each owning road contributes to the paved
      figure. Both are handed to the render through `roadNet` so `renderElPx` can't drift from the
      dissolve. */
-  const roundabouts = useMemo(() => {
-    const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo);
-    const declared = roads.filter((r) => r.roundabout && r.roundabout.end);
-    if (!declared.length) return { nodes: [], geoms: [], trims: new Map(), areaById: new Map(), pairs: [], extraById: new Map() };
-    const byId = new Map(roads.map((r) => [r.id, r]));
-    const derivedD = (r) => roundaboutDiameterFor(roadClassOf(settings, r.roadClass), +r.travelW || 0);
-    const nodes = roundaboutNodes(
-      roads.map((r) => ({ id: r.id, pts: r.pts, travelW: r.travelW, curbW: roadCurbWidth(r), roundabout: r.roundabout })),
-      { nodeTolFt: Math.max(2, TEE_COINCIDE_FT), diameterFor: (r) => derivedD(byId.get(r.id) || r) },
-    );
-    const geoms = [], trims = new Map(), areaById = new Map(), pairs = [], extraById = new Map();
-    for (const node of nodes) {
-      // The circulatory width follows the WIDEST leg — a truck approach must not be circled by an
-      // aisle-width ring.
-      const travelW = Math.max(...node.legs.map((l) => +((byId.get(l.roadId) || {}).travelW) || 0), 0);
-      const owner = node.legs[0];
-      const cls = roadClassOf(settings, (byId.get(owner.roadId) || {}).roadClass);
-      const g = roundaboutGeometry(node, { travelWFt: travelW, returnR: classReturnRadius(cls), tessDeg: 6 });
-      if (!g) continue;
-      geoms.push({ node, geom: g, travelW });
-      for (const leg of node.legs) {
-        const t = trims.get(leg.roadId) || { start: 0, end: 0 };
-        t[leg.end] = legTrimFor(node.d, leg.half, travelW);
-        trims.set(leg.roadId, t);
-      }
-      // ONE road owns the annulus in the area ledger, so two legs can never double-count it.
-      areaById.set(owner.roadId, (areaById.get(owner.roadId) || 0) + roundaboutArea(node.d, travelW));
-      extraById.set(owner.roadId, [...(extraById.get(owner.roadId) || []), ...g.sectors, ...g.returns]);
-      for (let i = 1; i < node.roadIds.length; i++) pairs.push([node.roadIds[0], node.roadIds[i]]);
-    }
-    return { nodes, geoms, trims, areaById, pairs, extraById };
-  }, [els, settings]);
+  // The orchestration (node grouping, per-road trims, annulus area) moved to
+  // lib/siteGeometry.js's `roundaboutsForSite` (site-metrics-extraction) — SitePlanner and
+  // lib/siteMetrics.js both call it, so the drawn roundabout and the paved-area number can never
+  // describe two different circles.
+  const roundabouts = useMemo(() => roundaboutsForSite(els, settings), [els, settings]);
   const roundTrim = useCallback((el) => (el && roundabouts.trims.get(el.id)) || undefined, [roundabouts]);
 
   // (e.g. the 50′ × 12′ single-row trailer parking carries its own cfg).
@@ -11780,47 +11520,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Sutherland-Hodgman per overlapping pair, O(n²), no memo inside lib/polyClip.js). They used to
   // re-run on every render, including every frame of a vertex drag that never touched a parcel.
   const parcelOverlapPairs = useMemo(() => overlappingParcelPairs(parcels), [parcels]);
-  const siteSqft = useMemo(() => dissolvedParcelSqft(parcels, parcelOverlapPairs), [parcels, parcelOverlapPairs]);
-  let bldg = 0, paving = 0, parkArea = 0, trailArea = 0, pondArea = 0, stalls = 0, trailers = 0;
-  let bumpCount = 0, bumpArea = 0, bumpsUniform = true; // dog-ear / bump-out tally (counted within bldg)
-  let providedDetCf = 0, pondCount = 0, maxPondDepthFt = 0; // B630: provided detention across ALL ponds (cubic feet; pondGeom's Map memo keeps this cheap per render)
-  els.forEach((e) => {
-    const a = isCenterlineRoad(e) ? roadStripArea(e, settings, sharpFor(e), roundTrim(e), roundabouts.areaById.get(e.id)) : e.points ? polyArea(e.points) : e.w * e.h; // road area = its generated strip polygon (B598) + any roundabout annulus it owns (NEW-5)
-    const curb = curbAreaFrom(e, elNeighbors.get(e.id), els); // derived curbs count in the SF / impervious math (0 for non-paved types; a road's curb is already inside its strip area)
-    if (e.type === "building") {
-      bldg += a;
-      if (e.dogEar) {
-        bumpCount++; bumpArea += a;
-        // Is this bump still the 55′×60′ default (so the summary can name the size)? (B362)
-        const horiz = e.dogEar.side === "top" || e.dogEar.side === "bottom";
-        if (Math.abs((horiz ? e.w : e.h) - DOGEAR_W) > 0.5 || Math.abs((horiz ? e.h : e.w) - DOGEAR_D) > 0.5) bumpsUniform = false;
-      }
-    }
-    else if (e.type === "paving" || e.type === "sidewalk" || e.type === "road") paving += a + curb;
-    else if (e.type === "parking") { parkArea += a + curb; stalls += e.points ? estStalls(a, settings) : carStalls(e.w, e.h, cfgOf(e)).count; }
-    else if (e.type === "trailer") { trailArea += a + curb; trailers += e.points ? estTrailers(a, settings) : trailerStalls(e.w, e.h, cfgOf(e)).count; }
-    else if (e.type === "pond") {
-      pondArea += a;
-      // Provided storage = the same stage/volume calc the pond panel shows, summed
-      // site-wide. Collapsing side-slopes (daylighting) cap the integral at maxDepth
-      // inside detentionStorage — the slabs that DO exist still count (never a silent 0).
-      const det = e.det || {};
-      providedDetCf += detentionStorage(ringOf(e), det.depth ?? 8, det.freeboard ?? 1, det.slope ?? 3).vol;
-      pondCount++;
-      maxPondDepthFt = Math.max(maxPondDepthFt, det.depth ?? 8);
-    }
-  });
-  // B504: no bump/court de-double-count any more. Since B492 the truck court's wall-length
-  // span is trimmed (usableCourtSpan) to the clear face BETWEEN the corner bump-outs, so the
-  // court's paving area already excludes the bump footprint — subtracting the bump again here
-  // understated impervious/coverage (and overstated open). The bump itself is type "building",
-  // already counted in `bldg`; there is no remaining bump∩court overlap to remove.
-  const impervious = bldg + paving + parkArea + trailArea;
-  const cov = siteSqft ? (bldg / siteSqft) * 100 : 0;
-  const impPct = siteSqft ? (impervious / siteSqft) * 100 : 0;
-  const detPct = siteSqft ? (pondArea / siteSqft) * 100 : 0;
-  const ratio = bldg ? stalls / (bldg / 1000) : 0;
-  const open = Math.max(0, siteSqft - impervious - pondArea);
+  /* NEW (site-metrics-extraction) — the yield/impervious/coverage numbers are ONE pure function
+     now (lib/siteMetrics.js), so a future module (e.g. a financial model) can read the exact same
+     numbers this panel does. Previously only `siteSqft` was memoized here; the rest of this block
+     ran UNMEMOIZED in the render body, re-running the full curb scan and road-strip tessellation
+     on every render (including every pan/zoom frame). Memoizing the call cannot change any value —
+     the dependency array is exactly the function's own parameter list — and stops that redundant
+     work when nothing about the model or settings changed. */
+  const metrics = useMemo(() => siteMetrics(els, parcels, parcelOverlapPairs, settings), [els, parcels, parcelOverlapPairs, settings]);
+  // `metrics.far` (floor-area ratio, lib/siteMetrics.js) is not yet surfaced in this panel — no UI
+  // change is in scope here — but is available to any future consumer via the `metrics` object.
+  // `paving` / `parkArea` / `trailArea` / `impervious` feed `cov`/`impPct`/`detPct` inside
+  // siteMetrics() now and are not read again here, so they are deliberately not destructured
+  // (still on `metrics.paving` etc. for anyone who wants them).
+  const {
+    siteSqft, bldg, pondArea, stalls, trailers,
+    bumpCount, bumpArea, bumpsUniform, providedDetCf, pondCount, maxPondDepthFt,
+    cov, impPct, detPct, ratio, open,
+  } = metrics;
   // Parcels excluded from the math (B100); their anchored chrome inherits the state (B213).
   const inactiveParcelIds = new Set(parcels.filter((p) => p.active === false).map((p) => p.id));
   // B651 — lineage-aware display info (names + superseded flag). A "superseded" parent (one that
@@ -12348,7 +12065,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // honest 0.75–1.0 band (never a silent 0.65). The user's pick resolves it to a point.
   const outfallTypeEff = settings.drainage?.outfallType || null;
   const drainFloodOk = !!drainCtxData?.flood && drainCtxData.flood.state !== "failed";
-  const acresActive = siteSqft / SQFT_PER_ACRE;
+  const acresActive = metrics.acresActive;
   const drainCityCount = drainCtxData?.authority?.jurisdiction?.city?.length ?? 0;
   // Overriding the reviewer to City of Houston asserts city-limits jurisdiction (so the
   // >20 ac greater-of branch fires); otherwise use the detected HOUSTON membership
