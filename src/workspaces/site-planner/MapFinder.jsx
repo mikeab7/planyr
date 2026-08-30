@@ -85,13 +85,13 @@ import { statusToken, darken } from "../../shared/ui/statusTokens.js";
    SitePlanner.jsx and SitePlannerApp.jsx import it too, so moving it here alone would
    save nothing.) */
 const sharingLib = () => import("./lib/sharing.js");
-import { listMyTeams, listMembers, currentIdentity } from "./lib/teams.js";
-import { sharedWithDisplay } from "./lib/sharedWithMonogram.js";
+import { listMyTeams, currentIdentity } from "./lib/teams.js";
+import { sharedWithDisplay } from "./lib/sharedWithTeam.js";
+import { lastEditedLabel } from "./lib/siteRecency.js";
 // B855952/B855953/B855954 (NEW-1/NEW-2/NEW-3) — the Sites panel's cross-device arrangement (group
 // order, collapse state, pinned sites, row sort) lives in the SAME account-scope store Standards'
 // "Save for all projects" uses (see lib/userPrefs.js's `sitesPanel` header) — never a new mechanism.
 import { loadUserPrefs, saveUserPrefs, readMirror, setSitesPanelPref } from "./lib/userPrefs.js";
-import { AC } from "../../shared/units/areaUnits.js";
 import { adminBoundariesVisible, attachAdminBoundaries } from "./lib/adminBoundaryGate.js";
 import { compHeadline } from "../../shared/comps/lib/comps.js";
 import { compMarkerSvg, compMarkerSize } from "../../shared/comps/lib/compMarkerIcon.js";
@@ -433,20 +433,6 @@ const PinGlyph = ({ size = 12 }) => (
   </svg>
 );
 
-// B855952 (NEW-1) — the shared-with monogram cluster's initials rule. First+last initial when
-// both a first and last name are on the team roster (`listMembers`'s shape); otherwise the first
-// two letters of whatever name IS on record, so a roster with only a display name or an email
-// still renders something legible rather than "?" for every teammate who hasn't set a last name.
-function initialsOf(member) {
-  const f = (member && member.firstName || "").trim();
-  const l = (member && member.lastName || "").trim();
-  if (f && l) return (f[0] + l[0]).toUpperCase();
-  const dn = ((member && (member.displayName || f || l || member.email)) || "").trim();
-  const parts = dn.split(/\s+/).filter(Boolean);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return dn.slice(0, 2).toUpperCase() || "?";
-}
-
 /* B831776 (NEW-1) — the far-left Site/Comp switch. MODULE-SCOPE-COMPONENTS: defined here, not
  * inside MapFinder's render. Two segments, one piece of state (`mode`) — see the state's own
  * comment for why there is deliberately no second "which tab" variable. */
@@ -490,7 +476,7 @@ function RailTab({ label, count, active, onClick }) {
   );
 }
 
-export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], parcelSummary = null, activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip, onViewCenter, comps = [], onPlaceComp, onCompClick, pendingCompAnchor = null, onCompAnchorConsumed, focusCompId = null, onCompFocusHandled, onCompsChange }) {
+export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], parcelSummary = null, lastEditedByGroup = null, activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip, onViewCenter, comps = [], onPlaceComp, onCompClick, pendingCompAnchor = null, onCompAnchorConsumed, focusCompId = null, onCompFocusHandled, onCompsChange }) {
   const elRef = useRef(null);
   const mapRef = useRef(null);
   const addrTokRef = useRef(0); // B545: address-search generation — a newer search invalidates an older in-flight one
@@ -768,12 +754,16 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   // NEW-1 — largest first / A–Z / recently touched, applied WITHIN each group (and within Pinned).
   const acresOf = (s) => { const b = siteBoundaryInfo(s, parcelSummary); return b.known && b.hasBoundary ? b.acres : -1; };
   const nameOf = (s) => (s.site || s.name || "Untitled site").toLowerCase();
-  const toMsAt = (v) => (typeof v === "number" ? v : v ? new Date(v).getTime() || 0 : 0);
+  // B845089 (NEW-2) — the group's real last EDIT (max(site_elements.updated_at) across every plan
+  // in the project), never `s.updatedAt` (`sites.updated_at`) — that column only advances on a
+  // header change, not a drawing edit, so sorting by it made "Recently touched" mean "recently
+  // opened" instead. `null` (unresolved fetch) sorts as if never touched, not as most-recent.
+  const lastEditedOf = (s) => (lastEditedByGroup ? (lastEditedByGroup[s.groupId || s.id] ?? null) : null);
   const sortRows = (rows) => {
     const arr = rows.slice();
     if (sitesPanelPrefs.sort === "largest") arr.sort((a, b) => acresOf(b) - acresOf(a));
     else if (sitesPanelPrefs.sort === "az") arr.sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
-    else arr.sort((a, b) => toMsAt(b.updatedAt) - toMsAt(a.updatedAt)); // "recent"
+    else arr.sort((a, b) => (lastEditedOf(b) ?? 0) - (lastEditedOf(a) ?? 0)); // "recent"
     return arr;
   };
   const setSitesSort = (sort) => patchSitesPanel({ sort });
@@ -838,24 +828,6 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     loadUserPrefs(myUid).then((res) => { if (live) setAcctPrefs(res.prefs); });
     return () => { live = false; };
   }, [myUid]);
-  // NEW-1 — the shared-with monogram cluster reads each team's ROSTER (not just its name), so a
-  // row can show initials rather than an anonymous glyph. Fetched lazily, once per team actually
-  // referenced by a visible site, and cached for the life of this mount — a roster changes rarely
-  // enough that re-fetching on every render would be pure waste.
-  const [teamMembersByTeam, setTeamMembersByTeam] = useState({}); // teamId -> [{firstName,lastName,displayName,email}]
-  const teamIdsInSites = useMemo(() => [...new Set(sites.filter((s) => s.teamId).map((s) => s.teamId))], [sites]);
-  useEffect(() => {
-    const need = teamIdsInSites.filter((id) => !(id in teamMembersByTeam));
-    if (!need.length) return;
-    let live = true;
-    (async () => {
-      const updates = {};
-      await Promise.all(need.map(async (id) => { try { updates[id] = await listMembers(id); } catch (_) { updates[id] = []; } }));
-      if (live) setTeamMembersByTeam((m) => ({ ...m, ...updates }));
-    })();
-    return () => { live = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [teamIdsInSites]);
   // Open the per-project menu and refresh the team list so newly-created teams appear.
   const openSiteMenu = (s, x, y) => { setStatusMenu({ site: s, x, y }); refreshTeams(); };
   // Escape closes the open project menu, matching click-outside (B158 acceptance:
@@ -2399,18 +2371,17 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
    * <select> above the layer list. That control is now a row INSIDE the list (LayerPanel's basemap
    * control), styled by the panel, so the object had no reader left. */
 
-  // B855952 (NEW-1) — one left-rail site row, ONE LINE: status dot · name · shared-with · acreage.
-  // Status is carried by the dot AND the group header it sits under, so the old subtitle repeating
-  // "Pursuit · 89.8 AC" a third time is gone — inside a status group the word is noise. Shared by
-  // every status section and the Pinned section (B855953) alike.
+  // B855952 (NEW-1) — one left-rail site row, ONE LINE: status dot · name · shared-with · last
+  // edited. Status is carried by the dot AND the group header it sits under, so the old subtitle
+  // repeating "Pursuit · 89.8 AC" a third time is gone — inside a status group the word is noise.
+  // Shared by every status section and the Pinned section (B855953) alike.
   const siteRow = (s) => {
     const isActive = s.id === activeSiteId;
     const st = statusOf(s); const t = statusToken(st);
-    // B849344 — canonical boundary/acreage (see siteBoundaryInfo); an honest "…" (checking) while
+    // B849344 — canonical boundary (see siteBoundaryInfo); an honest "…" (checking) while
     // the summary hasn't loaded yet, never a confident wrong "no boundary" (LOUD-FAILURE).
     const boundary = siteBoundaryInfo(s, parcelSummary);
     const showActions = hoverRow === s.id || isActive;
-    const members = s.teamId ? teamMembersByTeam[s.teamId] : null;
     return (
       <div key={s.id} title={s.origin ? "Open site (double-click to fly here · right-click for status / pin / rename / delete)" : "Open site (right-click for status / pin / rename / delete)"}
         onClick={() => onOpenSite && onOpenSite(s.id)}
@@ -2439,46 +2410,54 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             <span style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textDecoration: t.struck ? "line-through" : "none" }}>
               {s.site || s.name || "Untitled site"}
             </span>
-            {/* B855952 — initials monogram(s), not an anonymous glyph. Owner: "a grey circle says
-                'someone', which the reader already knew." First teammate's initials + "+N" for the
-                rest, rather than stacking a third/fourth shape (illegible at this size); the full
-                roster names on hover/focus. Falls back to the plain share glyph only until the
-                roster fetch resolves (or for a legacy team this account can't roster).
-                B859504 (amendment, NEW-1) — excludes the VIEWER from the candidate list
-                via `sharedWithDisplay` (lib/sharedWithMonogram.js); see that module's header for
-                the measured production defect ("MB +2" on every one of the owner's own shared
-                rows) and why excluding the viewer is the fix rather than a team-level marker. */}
+            {/* B845089 — the "no boundary" flag used to live in the acreage column; that column is
+                now last-edited, which a boundary-less site still has, so the flag moved here instead
+                of being lost. */}
+            {boundary.known && !boundary.hasBoundary && (
+              <span title="No boundary drawn yet" style={{ flex: "none", fontSize: 9.5, fontWeight: 700, color: PAL.muted, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.pill, padding: "1px 6px", whiteSpace: "nowrap" }}>no boundary</span>
+            )}
+            {/* B845088 (NEW-1) — owner override (live review, 2026-08-30): show the TEAM a site is
+                shared with, never the people in it. Retires the roster-monogram (B859504 +
+                amendment) — see lib/sharedWithTeam.js's header for why a per-person branch isn't
+                built (no per-person sharing mechanism exists in this schema). */}
             {s.teamId && (() => {
-              const disp = sharedWithDisplay(members, myUid);
-              if (disp.kind === "none") return null; // nobody but you — no indicator needed
-              const tip = disp.kind === "monogram" ? `Shared with ${disp.others.map((m) => m.displayName).join(", ")}` : `Shared with ${teamName(s.teamId)}`;
+              const disp = sharedWithDisplay(s.teamId, myTeams);
+              if (disp.kind === "none") return null;
+              if (disp.kind === "team") {
+                return (
+                  <span tabIndex={0} title={`Shared with ${disp.name}`} aria-label={`Shared with ${disp.name}`}
+                    style={{ flex: "none", maxWidth: 84, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      fontSize: 9.5, fontWeight: 700, color: PAL.accent, background: "var(--surface-overlay)",
+                      border: `1px solid ${PAL.accent}`, borderRadius: RADIUS.pill, padding: "1px 6px", lineHeight: 1.5 }}>
+                    {disp.name}
+                  </span>
+                );
+              }
+              // "unknown" — shared, but the team no longer names anything this account can see
+              // (deleted, or the viewer left it). Still shared, so still say so — just not with whom.
               return (
-                <span title={tip} aria-label={tip} style={{ flex: "none", display: "flex", alignItems: "center", gap: 2, color: PAL.accent }}>
-                  {disp.kind === "monogram" ? (
-                    <>
-                      <span style={{ width: 15, height: 15, borderRadius: "50%", background: PAL.accent, color: "#fff", fontSize: 8, fontWeight: 700, fontFamily: NUM_FONT, display: "grid", placeItems: "center", flex: "none" }}>
-                        {initialsOf(disp.first)}
-                      </span>
-                      {disp.extra > 0 && <span style={{ fontSize: 9.5, fontWeight: 700 }}>+{disp.extra}</span>}
-                    </>
-                  ) : <ShareGlyph size={12} />}
+                <span tabIndex={0} title="Shared" aria-label="Shared" style={{ flex: "none", display: "flex", alignItems: "center", color: PAL.accent }}>
+                  <ShareGlyph size={12} />
                 </span>
               );
             })()}
           </div>
         )}
-        {/* B855952 — acreage is its OWN right-aligned column (tabular figures, so 89.8 and 573.3
-            can be compared by scanning down the list) instead of sitting mid-sentence. A site with
-            no drawn boundary gets a small flag chip here instead of a number — it used to sort to
-            the very top of the list looking like every other row; now it's marked, not privileged. */}
-        <div style={{ flex: "none", minWidth: 44, display: "flex", justifyContent: "flex-end" }}>
-          {!boundary.known ? (
-            <span title="Checking boundary…" style={{ fontSize: 11, color: PAL.muted, fontFamily: NUM_FONT }}>…</span>
-          ) : boundary.hasBoundary ? (
-            <span style={{ fontSize: 11, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{boundary.acres.toFixed(1)}</span>
-          ) : (
-            <span title="No boundary drawn yet" style={{ fontSize: 9.5, fontWeight: 700, color: PAL.muted, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.pill, padding: "1px 6px", whiteSpace: "nowrap" }}>no boundary</span>
-          )}
+        {/* B845089 (NEW-2) — the right-aligned column is now LAST EDITED, not acreage: "get rid of
+            the acreage... date last edited would be more likely to be important" (owner, live
+            review). The value is the group's real last EDIT (max across every plan's live
+            site_elements rows) — never `sites.updated_at`, which advances on a header change (a
+            rename, opening the plan) and not on a drawing edit; see lib/siteRecency.js. */}
+        <div style={{ flex: "none", minWidth: 34, display: "flex", justifyContent: "flex-end" }}>
+          {lastEditedByGroup === null ? (
+            <span title="Checking last edit…" style={{ fontSize: 11, color: PAL.muted, fontFamily: NUM_FONT }}>…</span>
+          ) : (() => {
+            const ms = lastEditedByGroup[s.groupId || s.id] ?? null;
+            const label = lastEditedLabel(ms);
+            return label ? (
+              <span title={`Last edited ${new Date(ms).toLocaleString()}`} style={{ fontSize: 11, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap" }}>{label}</span>
+            ) : <span style={{ fontSize: 11, color: PAL.muted }}>—</span>;
+          })()}
         </div>
         {/* (B168) single-click ✕ delete removed — delete lives in the right-click menu;
             only the non-destructive locate (⊕) stays here. */}
@@ -2835,7 +2814,6 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                   const rows = sites.filter((s) => statusOf(s) === st && passName(s)); // TRUE group total — pinned included
                   if (!rows.length) return null;
                   const visibleRows = sortRows(rows.filter((s) => !pinnedSet.has(s.id))); // pinned sites live in the Pinned section instead
-                  const acreTotal = rows.reduce((sum, s) => { const a = acresOf(s); return sum + (a >= 0 ? a : 0); }, 0);
                   // While a name filter is active, force matching sections open so a match in a
                   // settled (collapsed) group isn't hidden.
                   const t = statusToken(st); const collapsed = groupCollapsedFor(st) && !nf;
@@ -2851,8 +2829,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                           {/* Solid status disc, matching the map pin (B433). */}
                           <span style={{ width: 14, height: 14, flex: "none", display: "grid", placeItems: "center", borderRadius: RADIUS.pill, background: t.color, color: "#fff", fontSize: 8.5, lineHeight: 1 }}>{t.glyph}</span>
                           <span style={{ flex: 1, textAlign: "left", fontSize: 11, fontWeight: 700, color: PAL.ink, textDecoration: t.struck ? "line-through" : "none" }}>{STATUS_META[st]?.label || st}</span>
+                          {/* B845089 — the acreage total dropped from this line: "if acreage is not
+                              the criterion, a sum of it is not either" (this session's call, not the
+                              owner's words — easy to reverse if he wants it back). */}
                           <span style={{ color: PAL.muted, fontWeight: 700, fontSize: 11 }}>{rows.length}</span>
-                          {acreTotal > 0 && <span style={{ color: PAL.muted, fontSize: 10.5, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{Math.round(acreTotal).toLocaleString()} {AC}</span>}
                         </button>
                         {/* NEW-3 — the drag handle: quiet at rest, shown on hover/focus, and a
                             focusable control so arrow-key reorder doesn't need a visible drag to

@@ -18,8 +18,9 @@ import { loadUserPrefs } from "./lib/userPrefs.js";
  * static edges and add no chunk. */
 const SHARE_LOADERS = { loadPrefs: loadUserPrefs, listTeams: listMyTeams };
 import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, initHistoryStore, loadSitesList, loadPlansOfGroup, renameSiteGroup, repairSplitProjectNames, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount, stageLegacySite, discardLegacySite } from "./lib/storage.js";
-import { cloudParcelRows } from "./lib/cloudSync.js";
+import { cloudParcelRows, cloudElementRecency } from "./lib/cloudSync.js";
 import { summarizeParcelRows } from "./lib/parcelSummary.js";
+import { summarizeElementRecency, groupRecencyMs } from "./lib/siteRecency.js";
 import { STATUS_META } from "./lib/siteModel.js";
 import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
 import { idbPersist } from "./lib/localDb.js";
@@ -225,6 +226,7 @@ export default function App({
       else { setActiveSiteId(null); setMode("map"); }  // NEW-5: NOT a user exit — the URL writer keeps the route (mayWriteRouteProject)
       refreshSites();
       refreshParcelSummary(uid);
+      refreshElementRecency(uid);
     } else {
       // B326416 — the sharing context is one user's preference and one user's team list, so it
       // must not survive a sign-out into the next account. (Unlike the cloud cache below, this is
@@ -240,6 +242,7 @@ export default function App({
       if (event === "SIGNED_OUT") { userLeftProjectRef.current = true; setActiveSiteId(null); setMode("map"); }
       refreshSites();
       refreshParcelSummary(null);
+      refreshElementRecency(null);
     }
     // B471 — log the auth transition so a "saving stopped after my session changed" report is
     // diagnosable from telemetry (the cloud-save path is gated on being signed in; a silent token
@@ -296,6 +299,33 @@ export default function App({
       if (r && r.ok) { setParcelSummary(summarizeParcelRows(r.rows)); setParcelSummaryLoaded(true); }
     } finally { parcelSummaryFetching.current = false; }
   };
+
+  // B845089 (NEW-2) — the canonical "last edited" read behind the Sites panel's right-hand column
+  // + its "Recently touched" sort (see lib/siteRecency.js and MapFinder.jsx's `lastEditedByGroup`
+  // prop). Same shape and same reasoning as parcelSummary above: `elementRecencyLoaded` starts
+  // false so the panel can tell "no edits yet" apart from "haven't checked" — an unresolved
+  // last-edited must read as unknown, never as a confident (and possibly very stale) date.
+  // Signed out, there is nothing to fetch — a local-only site's own `updatedAt` IS the answer — so
+  // it flips true at once with an empty map, same as parcelSummaryLoaded's signed-out seed.
+  const [elementRecency, setElementRecency] = useState({});
+  const [elementRecencyLoaded, setElementRecencyLoaded] = useState(() => !supabaseConfigured());
+  const elementRecencyFetching = useRef(false);
+  const refreshElementRecency = async (uid) => {
+    if (!uid) { setElementRecency({}); setElementRecencyLoaded(true); return; }
+    if (elementRecencyFetching.current) return;
+    elementRecencyFetching.current = true;
+    try {
+      const r = await cloudElementRecency(uid).catch(() => ({ ok: false }));
+      // A failed fetch leaves the last-known map in place (stale-while-revalidate, same discipline
+      // as parcelSummary above) rather than blanking every site's last-edited date.
+      if (r && r.ok) { setElementRecency(summarizeElementRecency(r.rows)); setElementRecencyLoaded(true); }
+    } finally { elementRecencyFetching.current = false; }
+  };
+  // Per-PROJECT (group) max, over the FULL plan list (`sites`, not `siteGroups` — a plan the
+  // panel collapses away can still hold the group's most recent real edit). Recomputed only when
+  // its inputs actually change; a stable identity on an unchanged input set means the Sites panel
+  // doesn't re-render every plan on every unrelated `sites` update.
+  const groupRecency = useMemo(() => groupRecencyMs(sites, elementRecency), [sites, elementRecency]);
   // Bring the user's on-device (logged-out) sites into their cloud account — a one-time,
   // non-destructive copy-up. Originals are kept; any cloud copy that's already newer is left
   // alone. After it runs we re-pull + refresh so the list reflects the consolidated account.
@@ -307,6 +337,7 @@ export default function App({
       await pullCloud(signedInUid).catch(() => {});
       refreshSites();
       refreshParcelSummary(signedInUid);
+      refreshElementRecency(signedInUid);
       const parts = [];
       if (r.copied) parts.push(`${r.copied} site${r.copied === 1 ? "" : "s"} brought into your account`);
       if (r.failed) parts.push(`${r.failed} couldn't reach the cloud (kept on this device — will retry on your next edit)`);
@@ -719,7 +750,7 @@ export default function App({
   // boundary just drawn in the planner shows up on the map/list the moment you return to it.
   useEffect(() => {
     if (mode === "map") {
-      const t = setTimeout(() => { refreshSites(); if (signedInUid) refreshParcelSummary(signedInUid); }, 80);
+      const t = setTimeout(() => { refreshSites(); if (signedInUid) { refreshParcelSummary(signedInUid); refreshElementRecency(signedInUid); } }, 80);
       return () => clearTimeout(t);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -809,6 +840,7 @@ export default function App({
             setLayerStatus={setLayerStatus}
             sites={siteGroups}
             parcelSummary={parcelSummaryLoaded ? parcelSummary : null}
+            lastEditedByGroup={elementRecencyLoaded ? groupRecency : null}
             activeSiteId={activeSiteId}
             onOpenSite={openSite}
             onDeleteSite={deleteSiteGroup}
