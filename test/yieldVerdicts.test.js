@@ -102,6 +102,19 @@ describe("A2 — verdict-strip grammar: label + pill + sentence", () => {
     expect(det.sentence).toBe("not checked yet");
   });
 
+  // B854xxx/NEW-1 (Richfield live repro) — a RESOLVED requirement (from a restored `lastCheck`
+  // record whose `.ctx` rebuilt but whose `.checkedAt` did not survive) must not make the pond-
+  // volume-still-null branch claim a fetch is running when floodChecked is honestly false. This
+  // is the exact shape the owner's header read "Flood data: not checked" while Detention read
+  // "checking flood data" — nothing was fetching.
+  it("detention req RESOLVED but floodChecked FALSE (a stale/legacy restored record) → 'not checked yet', never 'checking flood data'", () => {
+    const [det] = yieldVerdictStrip({ req: detReqPoint(33.8), providedUsableCf: null, floodChecked: false });
+    expect(det.pill).toBe("…");
+    expect(det.loading).toBeFalsy();
+    expect(det.recheck).toBe(true);
+    expect(det.sentence).toBe("not checked yet");
+  });
+
   it("mitigation NOT REQUIRED → OK pill, 'not required' (requirement rounds to zero / no fill)", () => {
     const [, mit] = yieldVerdictStrip({ req: detReqPoint(33.8), providedUsableCf: 34 * AC_FT, mitigation: { intersectAcres: 0 } });
     expect(mit.pill).toBe("OK");

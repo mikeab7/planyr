@@ -44,7 +44,7 @@ import {
   listDeletedProjects, restoreDeletedProject, purgeDeletedProject, purgeExpiredDeletedProjects,
   DELETED_RETENTION_DAYS, activeUid,
 } from "../projects/projects.js";
-import { resolveCurrentName, withCurrentProject } from "../projects/projectModel.js";
+import { resolveCurrentName, withCurrentProject, unionProjectLists } from "../projects/projectModel.js";
 
 // Crumbs sit on the chrome bar, which now themes WITH the app (B318) — so these are
 // chrome tokens, not the retired warm-dark hexes (white-on-light was the B341 bug).
@@ -234,7 +234,9 @@ export default function ProjectBreadcrumb({
   // `p.name` read below — so a controlled caller (e.g. the Schedule module bridging its
   // embedded app's project list) that hasn't fully resolved its data can never trip a
   // "Cannot read properties of undefined" crash in this shared header.
-  const projects = (controlled ? controlledProjects : internalProjects).filter(Boolean);
+  // B854xxx/NEW-2 — a controlled caller (Scheduler) is UNIONED with the real, reconciled registry
+  // list below, never shown its own bridged list alone — see unionProjectLists' header.
+  const projects = (controlled ? unionProjectLists(controlledProjects, internalProjects) : internalProjects).filter(Boolean);
   const [hoverRow, setHoverRow] = useState(null);
   const [toast, setToast] = useState(null); // transient "saved on device" notice (B193)
   const [menuFor, setMenuFor] = useState(null); // {id, name, x, y, confirm} — per-row manage menu (B439)
@@ -260,8 +262,11 @@ export default function ProjectBreadcrumb({
   // a diverged pull), and until reconcileProjects() below catches up this keeps the routed project
   // visible instead of it silently reading as though it doesn't exist. Union, never a swap — every
   // other cached project stays exactly as listProjects() reports it.
+  // B854xxx/NEW-2 — this ALWAYS runs now, controlled or not: it is what feeds `internalProjects`,
+  // which a controlled caller unions into its own bridged list above. Scheduler was the one route
+  // where this whole data layer never ran at all (an early `if (controlled) return`), which is why
+  // it alone showed a static, un-reconciled six-project list with no current marker or timestamps.
   const refresh = () => {
-    if (controlled) return;
     setInternalProjects(withCurrentProject(listProjects(), currentProject));
   };
   // B475 — warm the signed-in on-device project cache (empty on a cold tab that went straight to Markup,
@@ -271,7 +276,6 @@ export default function ProjectBreadcrumb({
   // hasn't resolved yet (isCloudActive() false) and it never retried — so we ALSO warm on OPEN, by which
   // point auth has settled, which is exactly when the user clicks the switcher and saw it empty.
   const warmThenRefresh = () => {
-    if (controlled) return;
     setWarming(true);
     warmProjectsIfEmpty().then((warmed) => { if (warmed) refresh(); }).finally(() => setWarming(false));
   };
@@ -283,17 +287,16 @@ export default function ProjectBreadcrumb({
   // OPEN moment (never on mount, and throttled) so opening the switcher isn't a network hazard.
   const lastReconcileRef = useRef(0);
   const reconcileThenRefresh = () => {
-    if (controlled) return;
     const now = Date.now();
     if (now - lastReconcileRef.current < 30000) return;
     lastReconcileRef.current = now;
     setWarming(true);
     reconcileProjects().then((r) => { if (r.warmed) refresh(); }).finally(() => setWarming(false));
   };
-  // Keep the (uncontrolled) list fresh: on mount, whenever the dropdown opens, and when another tab
-  // changes the site store. Controlled mode skips this entirely — the workspace pushes updates via the prop.
+  // Keep the registry list fresh: on mount, whenever the dropdown opens, and when another tab
+  // changes the site store. B854xxx/NEW-2: this now runs in controlled mode too — a controlled
+  // caller unions this data in, so it must be kept live exactly like the uncontrolled path.
   useEffect(() => {
-    if (controlled) return;
     refresh();
     warmThenRefresh();
     const onStorage = (e) => { if (!e.key || e.key.startsWith("planarfit:sites")) refresh(); };
@@ -304,9 +307,9 @@ export default function ProjectBreadcrumb({
   // Recently deleted (NEW-1): read the bin when the dropdown opens, and take the lazy 30-day purge
   // pass at the same time (anything past retention gets the real DELETE then — the site_elements
   // cascade is correct at that point). Signed-out / pre-migration DBs report unsupported and the
-  // section simply doesn't render. Never throws into the dropdown.
+  // section simply doesn't render. Never throws into the dropdown. B854xxx/NEW-2: runs regardless
+  // of `controlled` — deleting a real project is a registry-level fact, not a route-level one.
   const refreshBin = () => {
-    if (controlled) return;
     listDeletedProjects()
       .then((r) => { if (r && r.ok && r.supported) setDeleted(r.projects || []); else setDeleted([]); })
       .catch(() => setDeleted([]));
@@ -701,8 +704,11 @@ export default function ProjectBreadcrumb({
         </div>
 
         {/* Recently deleted (NEW-1) — the restore bin. Only rendered when the account actually has
-            binned projects (signed out, or a DB without db/sites_soft_delete.sql, reports none). */}
-        {!controlled && deleted.length > 0 && (
+            binned projects (signed out, or a DB without db/sites_soft_delete.sql, reports none).
+            B854xxx/NEW-2: no longer gated on `controlled` — deleting a real registry project is a
+            fact regardless of which route's switcher you're standing in, so Scheduler shows this
+            bin exactly like every other route now that refreshBin() runs there too. */}
+        {deleted.length > 0 && (
           <>
             <div style={divider} />
             <button

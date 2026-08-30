@@ -82,6 +82,26 @@ export function withCurrentProject(projects = [], currentProject = null) {
   ];
 }
 
+// B854xxx/NEW-2 — Scheduler is the only controlled caller of the breadcrumb (its embedded Gantt
+// app bridges its OWN project list — schedule-only pseudo-projects like Pursuits/Operations that
+// carry no site id at all), and that bridged list was the WHOLE switcher on that route: no
+// timestamps, no current-project guarantee, no recently-deleted bin, because those all come from
+// the real site registry `internalProjects` builds and controlled mode skipped it entirely. This
+// is the union that makes a controlled switcher show the same real projects every other route
+// shows, while keeping the schedule-only entries a site lookup can never produce. Registry entries
+// win on a shared id (richer: name/timestamp/status); a controlled entry with no matching registry
+// id is appended after, so real projects still sort first.
+export function unionProjectLists(controlledList = [], registryList = []) {
+  const byId = new Map();
+  for (const p of registryList || []) if (p && p.id != null) byId.set(p.id, p);
+  const extra = [];
+  for (const p of controlledList || []) {
+    if (!p || p.id == null) continue;
+    if (!byId.has(p.id)) extra.push(p);
+  }
+  return [...byId.values(), ...extra];
+}
+
 // Case-insensitive name filter for the dropdown search field. Empty query → all.
 export function filterProjects(projects = [], query = "") {
   const q = String(query || "").trim().toLowerCase();
