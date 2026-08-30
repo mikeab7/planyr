@@ -73,7 +73,7 @@ import {
   basemapWrapPoint, registrationShift, sanitizeShift, tileNwFeet,
 } from "./lib/mapLock.js";
 import { overscanPx, keepBufferFor, retinaForZoom, tileWeight, tileCacheLimit } from "./lib/tileBudget.js";
-import { preserveTilesAcrossSetView, announceSetView, boundTileCache, releaseLayer } from "./lib/tileLifecycle.js";
+import { preserveTilesAcrossSetView, announceSetView, boundTileCache, releaseLayer, throttleTilePruning } from "./lib/tileLifecycle.js";
 import { buildGhost } from "./lib/ghostSnapshot.js";
 import { cullRectFor, cullToView, shouldCull } from "./lib/viewCull.js";
 /* NEW-1 — the View menu's content-visibility model. Applied ONLY at the five draw-set seams,
@@ -3082,6 +3082,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // and can be reused to STITCH the export backdrop (Esri/USGS both send Access-Control-Allow-Origin:*).
     const bf = withTileRetry(L.tileLayer(bm.tiles, { maxNativeZoom: 13, maxZoom: 24, attribution: bm.attr, keepBuffer: Math.max(2, geoKeepBuffer + 2), crossOrigin: true }));
     preserveTilesAcrossSetView(bf); // NEW-7: a same-native-zoom commit must not wipe these
+    throttleTilePruning(bf); // B854832: coalesce Leaflet's own per-tile prune into one per burst
     bf.setZIndex(0); bf.addTo(map); geoBackfillRef.current = bf;
     /* NEW-1 — CAP THE BACKFILL TOO. This layer had `preserveTilesAcrossSetView` and a keepBuffer
      * two rings LARGER than the detail layer, but no ceiling at all — so its `_tiles` map grew for
@@ -3143,6 +3144,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (!geoMapRef.current || geoBaseRef.current || geoBackfillRef.current !== bf) return;
       const t = withTileRetry(L.tileLayer(bm.tiles, { maxNativeZoom: detailMaxNative, maxZoom: 24, detectRetina: wantRetina, attribution: bm.attr, keepBuffer: geoKeepBuffer, crossOrigin: true }));
       preserveTilesAcrossSetView(t); // NEW-7: the big one — a fractional-zoom commit keeps its tiles
+      throttleTilePruning(t); // B854832: coalesce Leaflet's own per-tile prune into one per burst
       t.on("tileload", () => { if (geoBaseRef.current === t) setBasemapStatus("loaded"); });
       t.setZIndex(1); t.addTo(geoMapRef.current); geoBaseRef.current = t;
       // NEW-7 (4): an explicit ceiling, so a long session can't grow the tile cache without

@@ -2,7 +2,7 @@
  * (how much overscan, how many tiles) is pure in tileBudget.js; everything that has to
  * touch a live Leaflet layer lives here so it stays in one auditable place.
  *
- * Three jobs:
+ * Four jobs:
  *   1. preserveTilesAcrossSetView — stop a `setView` from throwing away tiles it is about
  *      to ask for again (NEW-7, the biggest single load lever).
  *   2. capTileCache — an explicit ceiling on retained tiles, so a long session can't grow
@@ -10,6 +10,8 @@
  *   3. releaseLayer — tear an overlay's RASTER down at toggle-off instead of leaving it to
  *      Leaflet's incidental pruning, and make sure a request still in flight can't
  *      resurrect the layer it belonged to (NEW-6).
+ *   4. throttleTilePruning — B854832: coalesce Leaflet's own per-tile `_pruneTiles()` calls
+ *      into one per burst instead of one per tile (see its own header below).
  */
 import { tilesToEvict } from "./tileBudget.js";
 
@@ -62,18 +64,38 @@ export function announceSetView(layers, zoom, fn) {
  * Leaflet prunes tiles to `keepBuffer` rings, but only incidentally — the measured session
  * held ~500 tile <img> and only shed them when an unrelated pan happened to prune. This is
  * an explicit ceiling: past `limit` retained tiles, drop the furthest non-current ones.
- * Current tiles are never touched, so this can't punch a hole in the visible aerial. */
+ * Current tiles are never touched, so this can't punch a hole in the visible aerial.
+ *
+ * B854832 — `map.getCenter()` and `map.project(center, z)` used to be called ONCE PER TILE
+ * inside the distance loop, even though the center is the same point for every tile in one
+ * call and `project` at a given zoom only differs when `z` differs (normally one, sometimes
+ * two, distinct zooms are retained at once). At the tile counts a real aerial re-anchor
+ * retains (250+), that was up to 250 redundant `getCenter`/`project` calls on every single
+ * "load"/"moveend" firing — real work (unprojecting a lat/lng through the map's CRS) paid
+ * for an answer that does not change within the call. Hoisted out; `project` is memoised
+ * per distinct zoom so this is now O(1) `getCenter` + O(distinct zooms) `project`. */
 export function capTileCache(layer, limit) {
   if (!layer || !layer._tiles || !layer._map) return 0;
+  const map = layer._map;
+  let center = null;
+  try { center = map.getCenter(); } catch (_) { center = null; }
+  const tileSize = (layer.getTileSize && layer.getTileSize().x) || 256;
+  const projectedAtZoom = new Map();
+  const centerTileFor = (z) => {
+    if (projectedAtZoom.has(z)) return projectedAtZoom.get(z);
+    let cp = null;
+    try { cp = center ? map.project(center, z).divideBy(tileSize) : null; } catch (_) { cp = null; }
+    projectedAtZoom.set(z, cp);
+    return cp;
+  };
   const entries = Object.keys(layer._tiles).map((key) => {
     const t = layer._tiles[key];
     const c = t && t.coords;
     let distance = 0;
-    try {
-      const center = layer._map.getCenter();
-      const cp = layer._map.project(center, c.z).divideBy(layer.getTileSize().x);
-      distance = Math.max(Math.abs(cp.x - c.x), Math.abs(cp.y - c.y));
-    } catch (_) { distance = 0; }
+    const cp = c ? centerTileFor(c.z) : null;
+    if (cp) {
+      try { distance = Math.max(Math.abs(cp.x - c.x), Math.abs(cp.y - c.y)); } catch (_) { distance = 0; }
+    }
     return { key, current: !!(t && t.current), active: !!(t && t.active), loaded: !!(t && t.loaded), distance };
   });
   const drop = tilesToEvict(entries, limit);
@@ -148,4 +170,65 @@ export function releaseLayer(map, layer) {
     layer.onAdd = function () { return this; };
     if (typeof layer._renderImage === "function") layer._renderImage = function () {};
   } catch (_) {}
+}
+
+/* ── 4. throttle Leaflet's own per-tile prune ─────────────────────────────────────────
+ * B854832 — the owner's own production perf capture (build 396be34, plan smt7q6ar8egz
+ * "Concept A"/Richfield, 2026-08-29) shows first paint of a plan whose aerial is NOT already
+ * anchored blocking the main thread across five long-animation-frame blocks (428–606ms,
+ * ~6.5s total) while the tile layers come up (2 -> 4) and retained tiles jump 90 -> 257, all
+ * five attributed to invoker "FrameRequestCallback" with an empty sourceFunctionName — an
+ * ANONYMOUS function Leaflet itself scheduled via `Util.requestAnimFrame`, never React's own
+ * MessageChannel-driven scheduler (ruled out by the invoker alone) and not contours/terrain
+ * (no terrain-tile-timing event in the episode) or a leaking cache (257 is under the cap).
+ *
+ * Read straight from `node_modules/leaflet/dist/leaflet-src.js`'s `GridLayer._tileReady`: with
+ * `fadeAnimation:false` (this map's own construction option — SitePlanner.jsx's map disables
+ * it for an unrelated flyTo reason), EVERY SINGLE TILE calls `this._pruneTiles()` the instant
+ * it finishes loading — not once per burst, once per tile:
+ *
+ *     if (this._map._fadeAnimated) { ...queue a fade... }
+ *     else { tile.active = true; this._pruneTiles(); }
+ *
+ * `_pruneTiles()` is O(retained tiles): three separate `for (key in this._tiles)` passes, the
+ * middle one walking up to 5 parent levels and down 2 child levels (`_retainParent`/
+ * `_retainChildren`) for every tile that is "current" but not yet "active" — exactly the state
+ * of every tile still loading during a burst. A re-anchor that brings up ~150+ new tiles in
+ * quick succession therefore reruns that whole O(n) pass roughly once per tile that resolves,
+ * an O(tiles-loading × tiles-retained) cost for work whose end state does not depend on how
+ * many times it ran in between — `_pruneTiles` only decides what should currently be retained,
+ * so calling it once after the burst settles instead of once per tile in the middle of it
+ * changes nothing about what is on screen (current tiles are never pruned; see `tile.retain =
+ * tile.current` at the top of the function), only how many times the decision gets repeated.
+ * Leaflet already reaches the same conclusion for the FADE-animated path (there it queues onto
+ * one shared rAF loop instead of pruning per tile); this restores that coalescing for the
+ * non-fade path this map actually uses, without touching `fadeAnimation` (which is off here
+ * for its own, unrelated, already-shipped reason).
+ *
+ * Deferred via a MessageChannel-posted macrotask rather than `requestAnimationFrame`, for the
+ * same MEASURED reason `paintSchedule.js` gives (see its header): Leaflet's own tile-ready path
+ * ALSO schedules a `requestAnimFrame(this._pruneTiles, this)` once the burst's last tile
+ * resolves, and the browser runs every rAF callback due for a frame back-to-back with no yield
+ * in between — deferring via rAF here would just line this call up alongside that one and
+ * whatever else is scheduled for the same frame, buying no separation. A macrotask genuinely
+ * hands control back to the browser between the burst and the (now singular) prune.
+ *
+ * Every call still runs `_pruneTiles` exactly once, eventually — this coalesces repeats within
+ * one burst, it never skips the work. */
+export function throttleTilePruning(layer, defer = (fn) => {
+  const ch = new MessageChannel();
+  ch.port1.onmessage = () => { try { fn(); } finally { ch.port1.close(); ch.port2.close(); } };
+  ch.port2.postMessage(0);
+}) {
+  if (!layer || layer.__pfPruneThrottled) return layer;
+  const orig = layer._pruneTiles;
+  if (typeof orig !== "function") return layer;
+  layer.__pfPruneThrottled = true;
+  let pending = false;
+  layer._pruneTiles = function () {
+    if (pending) return;
+    pending = true;
+    defer(() => { pending = false; try { orig.call(layer); } catch (_) {} });
+  };
+  return layer;
 }
