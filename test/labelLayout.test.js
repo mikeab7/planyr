@@ -158,16 +158,24 @@ describe("labelLayout — shared label level-of-detail + collision engine (B121)
     expect(rotated).toMatchObject({ x: 0, y: 0 });
   });
 
-  it("B195: a noLeader label that can't fit overflows IN PLACE instead of leadering out", () => {
+  it("a generic noLeader label that can't fit overflows IN PLACE instead of leadering out", () => {
     // A small shape (halfW/halfH = 8px) with a label too wide to fit. A normal label is pulled
     // outside with a leader; a `noLeader` label (a trailer strip sized to its own area) instead
     // stays centred on the shape and overflows — controlled overflow rather than floating away.
-    const item = { id: "t", cx: 50, cy: 50, lines: ["50′ Trailer Parking", "29 trailers"], lh: 12, charW: 6, halfW: 8, halfH: 8, importance: 1 };
+    const item = { id: "t", cx: 50, cy: 50, lines: ["Plain label", "detail"], lh: 12, charW: 6, halfW: 8, halfH: 8, importance: 1 };
     const led = layoutLabels([{ ...item }]).get("t");
     const ovf = layoutLabels([{ ...item, noLeader: true }]).get("t");
     expect(led.leader).not.toBeNull();                 // normal label escapes with a leader
     expect(ovf.leader).toBeNull();                     // noLeader: never leadered out
     expect(ovf).toMatchObject({ x: 50, y: 50 });       // overflows centred in place
+  });
+
+  it("trailer parking hides when its shortest readable label no longer fits", () => {
+    const p = layoutLabels([
+      { id: "t", cx: 50, cy: 50, lines: ["50′ Trailer Parking", "29 trailers"], lh: 12, charW: 6,
+        halfW: 8, halfH: 8, noLeader: true, importance: 1 },
+    ]).get("t");
+    expect(p).toBeUndefined();
   });
 
   it("B195: a noLeader label drops a line to fit inside before it overflows", () => {

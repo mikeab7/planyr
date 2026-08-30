@@ -80,14 +80,19 @@ test("a mustLabel element survives a fully contested field; a plain one may stil
   assert.ok(p && p.lines[0], "a mustLabel element (a pond) is never left unnamed");
 });
 
-test("noLeader keeps its B195 behaviour — overflow in place, never a leader", () => {
-  // A trailer strip is sized to its own real-world extent and must not float outside itself.
-  const it = { id: "tr", cx: 0, cy: 0, lines: ["50′ Trailer Parking", "14 trailers"],
+test("a generic noLeader label may still overflow in place, never with a leader", () => {
+  const it = { id: "tr", cx: 0, cy: 0, lines: ["Plain label", "detail"],
     lh: 6, charW: 3, halfW: 8, halfH: 4, noLeader: true, importance: 1 };
   const p = layoutLabels([it], {}).get("tr");
   assert.ok(p, "a noLeader label still renders");
   assert.equal(p.leader, null, "a noLeader label is never leadered out");
   assert.equal(p.x, 0); assert.equal(p.y, 0);
+});
+
+test("a trailer label disappears when no readable form fits", () => {
+  const it = { id: "tr", cx: 0, cy: 0, lines: ["50′ Trailer Parking", "14 trailers"],
+    lh: 6, charW: 3, halfW: 8, halfH: 4, noLeader: true, importance: 1 };
+  assert.equal(layoutLabels([it], {}).get("tr"), undefined);
 });
 
 test("the ladder REFLOWS before it DROPS information", () => {
