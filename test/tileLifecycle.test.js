@@ -11,7 +11,7 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import {
-  preserveTilesAcrossSetView, announceSetView, capTileCache, releaseLayer,
+  preserveTilesAcrossSetView, announceSetView, capTileCache, releaseLayer, throttleTilePruning,
 } from "../src/workspaces/site-planner/lib/tileLifecycle.js";
 import { coalesceRequest, clearCoalesced } from "../src/workspaces/site-planner/lib/gisFetch.js";
 
@@ -89,6 +89,123 @@ describe("capTileCache (NEW-7)", () => {
   it("is a no-op on a layer that isn't on a map", () => {
     const l = fakeGrid(); l._map = null;
     expect(capTileCache(l, 1)).toBe(0);
+  });
+
+  it("calls getCenter/project ONCE per distinct zoom, not once per tile (B854832)", () => {
+    const l = fakeGrid({ tiles: 40 });
+    let centerCalls = 0, projectCalls = 0;
+    l._map = {
+      getCenter: () => { centerCalls++; return { lat: 0, lon: 0 }; },
+      project: () => { projectCalls++; return { divideBy: () => ({ x: 0, y: 0 }) }; },
+    };
+    capTileCache(l, 20);
+    // every tile in fakeGrid() shares one zoom, so both collapse to a single call
+    expect(centerCalls).toBe(1);
+    expect(projectCalls).toBe(1);
+  });
+
+  it("still evicts correctly when getCenter throws (falls back to distance 0 for every tile)", () => {
+    const l = fakeGrid({ tiles: 10 });
+    l._map = { getCenter: () => { throw new Error("no view yet"); }, project: () => { throw new Error("unreachable"); } };
+    expect(() => capTileCache(l, 5)).not.toThrow();
+    expect(Object.keys(l._tiles).length).toBe(5);
+  });
+});
+
+describe("throttleTilePruning (B854832)", () => {
+  // A fake defer that just records the deferred callback instead of running it, so a test can
+  // assert HOW MANY were queued before choosing when (or whether) to flush one.
+  function fakeDefer() {
+    const queue = [];
+    const defer = (fn) => queue.push(fn);
+    defer.flush = () => { const fns = queue.splice(0); fns.forEach((fn) => fn()); };
+    defer.pending = () => queue.length;
+    return defer;
+  }
+
+  it("coalesces many synchronous calls within one burst into a single deferred run", () => {
+    const l = fakeGrid({ tiles: 12 });
+    let calls = 0;
+    l._pruneTiles = () => { calls++; };
+    const defer = fakeDefer();
+    throttleTilePruning(l, defer);
+    // Simulate ~150 tiles resolving in a burst, each calling `_pruneTiles()` synchronously —
+    // exactly what GridLayer._tileReady does per tile when fadeAnimation is off.
+    for (let i = 0; i < 150; i++) l._pruneTiles();
+    expect(defer.pending()).toBe(1); // ONE deferred run queued, not 150
+    expect(calls).toBe(0); // the real prune has not run yet
+    defer.flush();
+    expect(calls).toBe(1); // …and runs exactly once once the burst settles
+  });
+
+  it("still runs the real prune eventually — this coalesces, it never skips", () => {
+    const l = fakeGrid({ tiles: 5 });
+    let calls = 0;
+    l._pruneTiles = () => { calls++; };
+    const defer = fakeDefer();
+    throttleTilePruning(l, defer);
+    l._pruneTiles();
+    defer.flush();
+    expect(calls).toBe(1);
+  });
+
+  it("a call after the batch settles schedules a fresh deferred run", () => {
+    const l = fakeGrid({ tiles: 5 });
+    let calls = 0;
+    l._pruneTiles = () => { calls++; };
+    const defer = fakeDefer();
+    throttleTilePruning(l, defer);
+    l._pruneTiles();
+    defer.flush();
+    expect(calls).toBe(1);
+    l._pruneTiles(); // a later, independent burst
+    expect(defer.pending()).toBe(1);
+    defer.flush();
+    expect(calls).toBe(2);
+  });
+
+  it("is idempotent and leaves a layer with no _pruneTiles alone", () => {
+    const l = fakeGrid({ tiles: 3 });
+    let calls = 0;
+    l._pruneTiles = () => { calls++; };
+    const defer = fakeDefer();
+    throttleTilePruning(l, defer);
+    throttleTilePruning(l, defer); // wrapping twice must not double-wrap
+    l._pruneTiles();
+    expect(defer.pending()).toBe(1);
+    defer.flush();
+    expect(calls).toBe(1);
+    expect(() => throttleTilePruning({ notALayer: true })).not.toThrow();
+    expect(() => throttleTilePruning(null)).not.toThrow();
+  });
+
+  it("a throwing prune does not wedge the pending flag — the next burst still schedules", () => {
+    const l = fakeGrid({ tiles: 3 });
+    let calls = 0;
+    l._pruneTiles = () => { calls++; throw new Error("boom"); };
+    const defer = fakeDefer();
+    throttleTilePruning(l, defer);
+    l._pruneTiles();
+    expect(() => defer.flush()).not.toThrow(); // the throw is swallowed, same as every other _pf* guard here
+    expect(calls).toBe(1);
+    l._pruneTiles();
+    expect(defer.pending()).toBe(1);
+  });
+
+  it("defaults to a real MessageChannel macrotask, and the prune runs after it", async () => {
+    const l = fakeGrid({ tiles: 4 });
+    let calls = 0;
+    l._pruneTiles = () => { calls++; };
+    throttleTilePruning(l);
+    l._pruneTiles();
+    l._pruneTiles();
+    expect(calls).toBe(0); // deferred — not yet
+    await new Promise((resolve) => {
+      const ch = new MessageChannel();
+      ch.port1.onmessage = () => resolve();
+      ch.port2.postMessage(0);
+    });
+    expect(calls).toBe(1);
   });
 });
 

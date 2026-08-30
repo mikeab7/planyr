@@ -75,6 +75,25 @@ export function resolveCounty(lat, lng) {
 /* Whether the geometry is resident. Callers use this to decide whether to re-ask after the warm. */
 export const countyPolygonsReady = () => !!(INDEX && CORE);
 
+/* B853712 — the full per-county roster (state/name/fips/bbox-in-degrees), once resident, WITHOUT
+ * the ring geometry — the SAME asset `resolveCounty` already holds, exposed lightweight so a caller
+ * deriving a per-county parcel-source record (counties.js's statewide-derivation tier, all 254 TX
+ * counties from one already-fetched asset rather than 254 hand-typed literals) doesn't retain the
+ * heavy ring data a second time. `bbox` is reordered from nothing — still the asset's own
+ * [minLng, minLat, maxLng, maxLat] — the caller reorders to this app's [minLat, minLng, maxLat,
+ * maxLng] convention, the same as every other bbox in `counties.js`. Returns null before the asset
+ * lands (same "ask again later" contract as `resolveCounty`). */
+export function countyRoster() {
+  if (!INDEX) return null;
+  const scale = INDEX.scale;
+  return INDEX.counties.map((c) => ({
+    state: c.state,
+    name: c.name,
+    fips: c.fips,
+    bbox: c.bbox.map((v) => v / scale),
+  }));
+}
+
 /**
  * Fetch the asset, load the engine, decode. Idempotent and cached: concurrent callers share one
  * request, and a failure is NOT latched (a later call retries) — a transient boot-time blip must

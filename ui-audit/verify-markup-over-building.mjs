@@ -260,32 +260,58 @@ try {
   await openMenuAt(pt.x, pt.y, { deselect: false });
   rows = await readMenu();
   ok("(a) while it is selected, a right-click over the overlap still reaches the MARKUP",
-    !!(rows || []).find((r) => /Bring in front of buildings/.test(r.text)),
+    !!(rows || []).find((r) => /Bring in front of the plan/.test(r.text)),
     (rows || []).slice(0, 4).map((r) => r.text).join(" | "));
   await closeMenu();
 
-  // (b) Deselected — this is the state the owner was stuck in.
+  /* (b) Deselected — this is the state the owner was stuck in. B845584/B845585: the covering
+   * element's menu no longer carries a "Behind this" group naming what is underneath (CUT, per the
+   * owner's own context-menu rebuild brief — "NEW-2 replaces the need"); Alt+HOVER is the general
+   * replacement, reaching any buried feature whether or not it happens to be a behind-band
+   * annotation under the one thing that won the press. */
   await page.keyboard.press("Escape");
   await page.waitForTimeout(200);
   const deselStack = await stackAt(pt.x, pt.y);
   ok("(b) PRECONDITION — deselected, an ordinary press at this point reaches the BUILDING, not the markup",
     deselStack[0] === `el:${target.id}`, JSON.stringify(deselStack));
 
-  await openMenuAt(pt.x, pt.y);
-  rows = await readMenu();
-  const liftRow = (rows || []).find((r) => r.testid === "under-lift-0");
-  const selRow = (rows || []).find((r) => r.testid === "under-select-0");
-  ok("(b) the covering element's menu NAMES what is underneath", !!liftRow && !!selRow,
-    liftRow ? `"${liftRow.text}" + "${selRow?.text}"` : (rows || []).map((r) => r.text).join(" | "));
+  await page.keyboard.down("Alt");
+  await page.mouse.move(pt.x, pt.y);
+  await page.waitForTimeout(150);
+  const altRows = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-testid^="alt-stack-pick-row-"]')].map((n) => n.textContent.trim()));
+  /* ⛔ NOT `=== 2` — on the owner's real plan, "the biggest on-screen `el:` feature" (`target`,
+   * picked above) is whatever type happens to have the largest box, which here is a road aisle,
+   * not a building; the real overlap point sits over TWO road pieces plus TWO parcels as well as
+   * the markup. That richer stack is the feature working, not a defect — the assertion below
+   * checks the actual invariant (covering feature present, markup present, order preserved)
+   * rather than assuming a fixed count. */
+  ok("(b) Alt+hover NAMES what is underneath, at least the covering feature and the markup",
+    altRows.length >= 2, JSON.stringify(altRows));
+  const markupRowText = altRows.find((t) => /markup/i.test(t));
+  ok("(b) …and one of the entries is the markup", !!markupRowText, JSON.stringify(altRows));
+  const coveringIdx = altRows.findIndex((t) => !/markup|parcel/i.test(t));
+  const markupIdx = altRows.findIndex((t) => /markup/i.test(t));
+  ok("(b) …topmost first: the covering feature ranks ahead of the markup it covers",
+    coveringIdx >= 0 && markupIdx > coveringIdx, JSON.stringify(altRows));
 
-  if (liftRow) {
-    await page.evaluate(() => document.querySelector('[data-testid="under-lift-0"]')?.click());
+  if (markupRowText) {
+    await page.evaluate((want) => {
+      const row = [...document.querySelectorAll('[data-testid^="alt-stack-pick-row-"]')].find((n) => n.textContent.trim() === want);
+      if (row) row.click();
+    }, markupRowText);
+    await page.keyboard.up("Alt");
+    const stillBehind = await markupOnTop(mkId, target.id);
+    ok("(b) picking it SELECTS it without moving it — still behind the plan", stillBehind === false, `markup on top: ${stillBehind}`);
+    await openMenuAt(pt.x + 4, pt.y + 4, { deselect: false });
+    const clicked2 = await clickRow("Bring in front of the plan");
     await page.waitForTimeout(500);
     const back = await markupOnTop(mkId, target.id);
-    ok("(b) one click brings it back in front — the door is not one-way", back === true, `markup on top: ${back}`);
+    ok("(b) one click on its own menu brings it back in front — the door is not one-way",
+      clicked2 && back === true, `clicked=${clicked2} markup on top: ${back}`);
   } else {
-    ok("(b) one click brings it back in front — the door is not one-way", false, "the row was never offered");
-    await closeMenu();
+    ok("(b) one click brings it back in front — the door is not one-way", false, "Alt+hover never showed the markup");
+    await page.keyboard.up("Alt");
   }
 
   /* ── NEW-1 · THE SINGLE-STEP MODES CROSS TOO, AND THE ROUND TRIP IS EXACT ────────────────── */

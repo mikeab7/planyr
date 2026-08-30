@@ -305,37 +305,53 @@ try {
       base.indexOf(`el:${pond.id}`) < base.indexOf(bId),
       `pond ${base.indexOf(`el:${pond.id}`)}, building ${base.indexOf(bId)}`);
 
+    /* B845584 — "Force on top/underneath" moved from this menu into the Properties panel's
+     * persistent "Draw order" control (a submenu-only override left the owner able to end up stuck
+     * out of band with no visible way to see why). Reach it the same way a person would: open the
+     * pond's menu, click Properties…, then use the panel's own testids. */
     await openMenuAt(pp.x, pp.y);
-    const forceRow = page.locator(".menu button", { hasText: "Force on top of everything" }).first();
-    ok("the real plan's element menu carries the explicit cross-band row", (await forceRow.count()) > 0);
-    if (await forceRow.count()) {
-      await forceRow.click();
-      await page.waitForTimeout(700);
-      const forced = await paintOrder();
-      ok("NEW-1: forced, the pond RENDERS above his buildings on his own plan",
-        forced.indexOf(`el:${pond.id}`) > forced.indexOf(bId),
-        `pond ${forced.indexOf(`el:${pond.id}`)}, building ${forced.indexOf(bId)}`);
-      ok("…and every other element kept its relative order",
-        JSON.stringify(forced.filter((k) => k !== `el:${pond.id}`)) === JSON.stringify(base.filter((k) => k !== `el:${pond.id}`)));
-
-      const stored = await page.evaluate(() => {
-        try { return JSON.stringify(JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}")).includes('"bandForce"'); }
-        catch (e) { return null; }
+    const propsRow = page.locator(".menu button", { hasText: "Properties…" }).first();
+    ok("the real plan's element menu can open Properties", (await propsRow.count()) > 0);
+    if (await propsRow.count()) {
+      await propsRow.click();
+      await page.waitForTimeout(400);
+      const forced = await page.evaluate(() => {
+        const btn = document.querySelector('[data-testid="el-band-force"]');
+        if (!btn) return false;
+        btn.click();
+        return true;
       });
-      ok("NEW-1: the override is written into the saved plan record", stored === true, `stored=${stored}`);
-
-      const pp2 = await pointOnFeature(`el:${pond.id}`);
-      await openMenuAt(pp2.x, pp2.y);
-      const backRow = page.locator(".menu button", { hasText: "Use the normal layer order" }).first();
-      ok("the forced element offers the way back", (await backRow.count()) > 0);
-      if (await backRow.count()) {
-        await backRow.click();
+      ok("the real plan's Properties panel carries the explicit cross-band Front control", forced);
+      if (forced) {
         await page.waitForTimeout(700);
-        const restored = await paintOrder();
-        ok("NEW-1: reversible — the pond is back under his buildings, and the plan reads as it did",
-          restored.indexOf(`el:${pond.id}`) < restored.indexOf(bId)
-          && JSON.stringify(restored) === JSON.stringify(base),
-          `pond ${restored.indexOf(`el:${pond.id}`)}, building ${restored.indexOf(bId)}`);
+        const forcedOrder = await paintOrder();
+        ok("NEW-1: forced, the pond RENDERS above his buildings on his own plan",
+          forcedOrder.indexOf(`el:${pond.id}`) > forcedOrder.indexOf(bId),
+          `pond ${forcedOrder.indexOf(`el:${pond.id}`)}, building ${forcedOrder.indexOf(bId)}`);
+        ok("…and every other element kept its relative order",
+          JSON.stringify(forcedOrder.filter((k) => k !== `el:${pond.id}`)) === JSON.stringify(base.filter((k) => k !== `el:${pond.id}`)));
+
+        const stored = await page.evaluate(() => {
+          try { return JSON.stringify(JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}")).includes('"bandForce"'); }
+          catch (e) { return null; }
+        });
+        ok("NEW-1: the override is written into the saved plan record", stored === true, `stored=${stored}`);
+
+        const restoreClicked = await page.evaluate(() => {
+          const btn = document.querySelector('[data-testid="el-band-restore"]');
+          if (!btn) return false;
+          btn.click();
+          return true;
+        });
+        ok("the forced element's panel offers the way back", restoreClicked);
+        if (restoreClicked) {
+          await page.waitForTimeout(700);
+          const restored = await paintOrder();
+          ok("NEW-1: reversible — the pond is back under his buildings, and the plan reads as it did",
+            restored.indexOf(`el:${pond.id}`) < restored.indexOf(bId)
+            && JSON.stringify(restored) === JSON.stringify(base),
+            `pond ${restored.indexOf(`el:${pond.id}`)}, building ${restored.indexOf(bId)}`);
+        }
       }
     }
   }
