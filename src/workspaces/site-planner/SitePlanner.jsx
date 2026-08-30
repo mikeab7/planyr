@@ -349,7 +349,7 @@ import { rankLedgerMoves, BERM_MAX_RAISE_FT } from "./lib/ledgerBalancer.js";
 // strings (heading names its ledger; buildability + over-provision ride the qualifier line).
 import { detentionVerdict, mitigationVerdict, overdugAcFt, overProvision } from "./lib/pondVerdict.js";
 import { pondEncumbranceConflicts } from "./lib/corridorConflicts.js";
-import { envelopeOf, revalidationNeed, fetchStaleForEdit, factsFreshness, FETCH_TTL_MS, canonEnv, DRAIN_STUCK_MS, fetchWatchdogFired } from "./lib/factRevalidation.js";
+import { envelopeOf, revalidationNeed, fetchStaleForEdit, factsFreshness, FETCH_TTL_MS, canonEnv, DRAIN_STUCK_MS, fetchWatchdogFired, floodStatusLine, floodDotColorToken } from "./lib/factRevalidation.js";
 import { bulletBarLayout, stackedBarLayout, bulletBarMarks, stackedBarMarks, stormwaterBarSpecs, ACFT_EPS } from "./lib/yieldBar.js";
 import { yieldVerdictStrip, fmtAcFt, fmtSignedAcFt, TRACE_ACFT, fmtMargin } from "./lib/yieldVerdicts.js";
 // Cowork yield review (NEW-1 … NEW-10) — the ONE per-pond stage/elevation model and the checks
@@ -30455,7 +30455,7 @@ function YieldPanel({
                 title={[drainage.freshness.note || "The flood check still matches what's drawn.", drainage.groundElevNote].filter(Boolean).join("\n")}
                 data-ground-elev={drainage.groundElev?.status || undefined}
                 data-ground-cached={drainage.groundElev?.fromCache ? "1" : undefined}
-                style={{ color: drainage.freshness.state === "stale" ? Y.warnText : "var(--success-text)", fontSize: 9, lineHeight: 1, flex: "none" }}>●</span>
+                style={{ color: floodDotColorToken(drainage.freshness.state) === "warn" ? Y.warnText : "var(--success-text)", fontSize: 9, lineHeight: 1, flex: "none" }}>●</span>
             )}
             {/* NEW-2(b) / NEW-3 — the elevation leg is the ONLY part of the check that can still be
                 outstanding once the panel has published, and a failed one must never be silent. One
@@ -30475,7 +30475,7 @@ function YieldPanel({
                 of replacing it: "re-check" alone didn't say when it last ran, and he wants that date
                 visible (the amber dot above already carries the "something moved" alarm, so the text
                 doesn't have to). */}
-            <span>{drainRefreshing ? "Flood data: checking…" : !drainage.floodChecked ? "Flood data: not checked" : drainage.freshness?.state === "stale" ? (floodAgeMs != null ? `Flood data: stale — checked ${formatAge(floodAgeMs)}` : "Flood data: stale") : floodAgeMs != null ? `Flood data ${formatAge(floodAgeMs)}` : "Flood data: checked"}</span>
+            <span>{floodStatusLine({ refreshing: drainRefreshing, floodChecked: drainage.floodChecked, freshnessState: drainage.freshness?.state, floodAgeMs })}</span>
             <span aria-hidden="true" style={{ color: Y.faint }}>·</span>
             <button type="button" onClick={drainRefreshing ? undefined : drainage.onCheck} disabled={drainRefreshing} aria-busy={drainRefreshing} title={drainRefreshing ? "Re-checking the flood data…" : "Re-pull the GIS flood data for the drawn area."} style={{ border: "none", background: "none", color: verdictLoading ? Y.warnText : "var(--accent)", cursor: drainRefreshing ? "default" : "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit", padding: 0, lineHeight: 1, display: "inline-block", animation: drainRefreshing ? "spin 0.9s linear infinite" : undefined }} aria-label="Re-check flood data">↻</button>
           </span>

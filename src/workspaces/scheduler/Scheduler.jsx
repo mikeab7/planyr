@@ -258,12 +258,20 @@ export default function Scheduler({
   // Picking a schedule from the breadcrumb is a USER action: switch to it, and if it's linked to a
   // site, carry that site into the route so the Site/Review tabs follow. One-shot (not a reactive
   // effect), so it can't loop with the carry-in.
+  //
+  // ⛔ B881666 — `id` may name either one of THIS module's own schedules or a shared-header
+  // switcher ROW that is a site-registry entry for a linked project (unionProjectLists prefers
+  // that richer, timestamped row over this module's own bridged copy — see its own header). A
+  // registry row's id is the site GROUP id, not a schedule id, so resolve it back to the linked
+  // schedule before posting into the iframe (which only knows its own schedule ids) or latching
+  // `explicitPickRef` (which `isPickShowing` compares against the iframe's OWN reported activeId).
   const selectSchedule = (id) => {
+    const sch = projects.find((p) => p && p.id === id) || projects.find((p) => p && p.linkedSiteId === id);
+    if (!sch) return; // an id this module cannot resolve at all — nothing to switch to
     dashboardIntentRef.current = false; // a deliberate pick supersedes a pending Dashboard press
-    explicitPickRef.current = id; // isPickShowing() lets this override the route-derived empty state
-    post({ type: "planar:nav-select", id });
-    const sch = projects.find((p) => p && p.id === id);
-    const linked = sch && sch.linkedSiteId != null ? sch.linkedSiteId : null;
+    explicitPickRef.current = sch.id; // isPickShowing() lets this override the route-derived empty state
+    post({ type: "planar:nav-select", id: sch.id });
+    const linked = sch.linkedSiteId != null ? sch.linkedSiteId : null;
     if (linked != null && linked !== projectId) { try { onProjectChange?.(linked); } catch (_) {} }
   };
 

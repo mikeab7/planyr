@@ -67,6 +67,31 @@ export function mayWriteRouteProject({ routeProjectId, nextGroup, userLeft = fal
   return !!userLeft;                       // clearing a named project needs a deliberate act
 }
 
+/* ⛔ B881664 — "resume the last-open plan" is a ONE-SHOT boot privilege, not a standing session
+ * flag. `initialHashEmpty` (route.js's INITIAL_HASH_EMPTY) is captured once, at module load, and
+ * stays true for the rest of the tab's life — so it answers "did THIS TAB'S BOOT carry no
+ * explicit route", never "is this mount happening AS PART OF that boot". The Site Planner does
+ * not necessarily mount on the app's first render at all (a boot that resolves to Schedule or
+ * Library mounts THOSE first); it can mount much later, the first time the user navigates into
+ * it — including via the Dashboard breadcrumb, which explicitly clears the routed project. That
+ * mount also sees `projectId == null` and, with the old `resumeAllowed = initialHashEmpty` alone,
+ * read it as "an empty boot, safe to resume the last site" — silently reviving a stale
+ * `currentSite` pointer left over from an EARLIER visit and writing it straight back into the
+ * route the user just explicitly left (repro: a tab that boots on a bare domain, gets "open
+ * where I left off" resumed onto a project's Schedule tab, then clicks Dashboard — the hash
+ * lands on "#/" for a moment and then bounces to "#/project/<id>/site").
+ *
+ * The fix: a mount may only use the boot-resume fallback when its OWN projectId prop still
+ * matches what the app's boot route actually resolved to (`initialProjectId`, captured once,
+ * immediately after "open where I left off" seeding and before any user action). A later,
+ * deliberate navigation to a project-less route changes what this mount sees `projectId` as,
+ * so the mismatch alone proves it is not the boot render — no clock, no consumed-once flag,
+ * just a value comparison. Pure. */
+export function mayResumeLastSite({ initialHashEmpty, projectId, initialProjectId }) {
+  if (!initialHashEmpty) return false;
+  return (projectId || null) === (initialProjectId || null);
+}
+
 /* NEW-5 — did the route ask for a project this device cannot currently open?
  *
  * `openProjectGroup` used to `return` silently when a group had no plans locally, so a hash

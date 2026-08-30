@@ -68,10 +68,22 @@ export function isBuildSkewed(loaded, served) {
  *
  *  A dismissal is scoped to the build it was dismissed FOR. Dismissing "1.2 is out" must not
  *  also silence "1.3 is out" three deploys later — that would turn one shrug into permanent
- *  deafness, which is the failure mode this whole module exists to prevent. */
+ *  deafness, which is the failure mode this whole module exists to prevent.
+ *
+ *  ⛔ B881667 — `routeMissed` alone is NOT sufficient, and used to be treated as "the definitive
+ *  stale-build signal" on its own, with no version check. That conflates two different things
+ *  that look identical from the inside: a slug shipped in a build newer than this tab's (a
+ *  reload genuinely fixes it), and a slug that never existed in ANY build — a stale bookmark, an
+ *  old shared link, a renamed route (a reload can NEVER fix it, because the newest possible
+ *  build still won't recognize it). Owner repro: a hard-reloaded, confirmed-current tab visiting
+ *  an unrecognized `/project/<id>/review` (the real route is `/markup`) still read "That part of
+ *  Planyr is newer than the copy this tab has open" — false, since this tab already WAS the
+ *  newest build. A route miss is now reserved for cases where it's ALSO true that the served
+ *  build is confirmed to differ (`isBuildSkewed`) — the same evidence every other reason here
+ *  already requires, matching this module's own "silent when it cannot know" contract. */
 export function shouldOfferReload({ loaded, served, dismissedFor, routeMissed = false }) {
-  if (routeMissed && dismissedFor !== "route-miss") return true;
   if (!isBuildSkewed(loaded, served)) return false;
+  if (routeMissed) return dismissedFor !== "route-miss" && dismissedFor !== served;
   return dismissedFor !== served;
 }
 

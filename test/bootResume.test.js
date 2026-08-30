@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability } from "../src/workspaces/site-planner/lib/bootResume.js";
+import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability, mayResumeLastSite } from "../src/workspaces/site-planner/lib/bootResume.js";
 
 describe("initialBootResolved — the boot gate's starting value (V13)", () => {
   it("is FALSE when Supabase is configured (wait for the first auth + pull before reconciling the URL)", () => {
@@ -132,5 +132,39 @@ describe("routeProjectAvailability (NEW-5)", () => {
 
   it("no routed project is trivially open", () => {
     expect(routeProjectAvailability({ plansOfGroup: withPlans([]), groupId: null, bootResolved: true })).toBe("open");
+  });
+});
+
+describe("mayResumeLastSite (B881664) — the Site Planner's boot-resume fallback is a ONE-SHOT boot privilege", () => {
+  it("REFUSES when the tab did not boot on an empty hash at all", () => {
+    expect(mayResumeLastSite({ initialHashEmpty: false, projectId: null, initialProjectId: null })).toBe(false);
+  });
+
+  it("ALLOWS the legitimate case: the app's very first mount, boot resolved to no project, this mount's projectId still matches", () => {
+    expect(mayResumeLastSite({ initialHashEmpty: true, projectId: null, initialProjectId: null })).toBe(true);
+  });
+
+  it("ALLOWS a boot that resolved directly into a project (the routeProjectId branch in pickResumeTarget still applies)", () => {
+    expect(mayResumeLastSite({ initialHashEmpty: true, projectId: "g1", initialProjectId: "g1" })).toBe(true);
+  });
+
+  it("⛔ THE B881664 REPRO — REFUSES once a later mount's projectId no longer matches the boot route", () => {
+    // The tab booted empty-hash and "open where I left off" resumed it onto a project's
+    // Schedule tab (initialProjectId = "g1"). The Site Planner had never mounted at that
+    // point; it mounts LATER, the first time the user clicks Dashboard, with projectId
+    // already cleared to null by that navigation. The mismatch alone must refuse the resume
+    // — reviving g1's currentSite pointer here is exactly the bounce the owner reported.
+    expect(mayResumeLastSite({ initialHashEmpty: true, projectId: null, initialProjectId: "g1" })).toBe(false);
+  });
+
+  it("REFUSES an explicit '#/' dashboard link even though its parsed projectId is also null", () => {
+    // initialHashEmpty is FALSE for a literal "#/" (route.js only treats a truly blank hash
+    // as empty), so this never reaches the equality check — the explicit link always wins.
+    expect(mayResumeLastSite({ initialHashEmpty: false, projectId: null, initialProjectId: null })).toBe(false);
+  });
+
+  it("treats undefined/null projectId the same as each other on both sides", () => {
+    expect(mayResumeLastSite({ initialHashEmpty: true, projectId: undefined, initialProjectId: null })).toBe(true);
+    expect(mayResumeLastSite({ initialHashEmpty: true, projectId: null, initialProjectId: undefined })).toBe(true);
   });
 });
