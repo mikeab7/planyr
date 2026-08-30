@@ -74,7 +74,7 @@ pass.
 
 ---
 
-> **Drained → `VERIFICATION.md` by PR #(pending — filled in before merge) (2026-08-30).** All three items updated in place with the
+> **Drained → `VERIFICATION.md` by PR #1242 (2026-08-30).** All three items updated in place with the
 > partial-pass evidence above; none moved to `VERIFICATION-DONE.md` — each still names its own pending
 > steps (V490272: 3, 4 · V490273: 3, 4, 5 · V490274: 3, 4, 5). Draining is a transcription, not a rubber
 > stamp: no step is marked passed beyond what was actually driven. No source file changed as part of this
