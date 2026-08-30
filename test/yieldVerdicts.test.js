@@ -115,6 +115,37 @@ describe("A2 — verdict-strip grammar: label + pill + sentence", () => {
     expect(det.sentence).toBe("not checked yet");
   });
 
+  // ⛔ B877440 — a county the drainage identify actually RESOLVED but that carries no modeled
+  // detention authority (SitePlanner now calls computeRequiredDetention with authorityId:null
+  // for exactly this case, tagged with the resolved county). Before this branch existed, `req`
+  // stayed null forever here and — once floodChecked flipped true — fell into the numeric
+  // branches' `loadingRow`, the same permanent "checking flood data" spinner B1127 fixed for
+  // Colorado's kind:"unavailable", for a different root cause (kind:"unknown" + the
+  // no-criteria-modeled flag, computeRequiredDetention's own long-standing, correct refusal).
+  it("detention req is kind:'unknown' + no-criteria-modeled (an identified, unmodeled county) → named no-data row, never a spinner", () => {
+    const req = { kind: "unknown", requiredAcFt: null, bandAcFt: null, flags: ["no-criteria-modeled"], governingCounty: "tarrant" };
+    const [det] = yieldVerdictStrip({ req, providedUsableCf: null, floodChecked: true });
+    expect(det.pill).toBe("N/A");
+    expect(det.loading).toBeFalsy();
+    expect(det.unavailable).toBe(true);
+    expect(det.sentence).toBe("no detention criteria on file for Tarrant County");
+    expect(det.requestCriteria).toEqual({ countyKey: "tarrant", countyLabel: "Tarrant County", family: "detention" });
+  });
+  it("same kind:'unknown' row with no resolvable county name still reads honestly, with no action to file against nothing", () => {
+    const req = { kind: "unknown", requiredAcFt: null, bandAcFt: null, flags: ["no-criteria-modeled"] };
+    const [det] = yieldVerdictStrip({ req, providedUsableCf: null, floodChecked: true });
+    expect(det.sentence).toBe("no detention criteria on file for this jurisdiction");
+    expect(det.requestCriteria).toBeNull();
+  });
+  // Golden-master guard: an "unknown" requirement with NO no-criteria-modeled flag (any other
+  // refusal reason computeRequiredDetention might carry) must not be swept into this branch —
+  // it falls through to the existing numeric/loading rules exactly as before.
+  it("kind:'unknown' WITHOUT the no-criteria-modeled flag does not take the new branch", () => {
+    const req = { kind: "unknown", requiredAcFt: null, bandAcFt: null, flags: [] };
+    const [det] = yieldVerdictStrip({ req, providedUsableCf: null, floodChecked: true });
+    expect(det.sentence).not.toMatch(/no detention criteria on file/);
+  });
+
   it("mitigation NOT REQUIRED → OK pill, 'not required' (requirement rounds to zero / no fill)", () => {
     const [, mit] = yieldVerdictStrip({ req: detReqPoint(33.8), providedUsableCf: 34 * AC_FT, mitigation: { intersectAcres: 0 } });
     expect(mit.pill).toBe("OK");

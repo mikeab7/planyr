@@ -86,6 +86,7 @@ import { orderLayersByPriority, LAYER_STAGE_SIZE } from "./lib/layerSchedule.js"
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
+import { requestCriteria, wasRequested } from "./lib/criteriaRequests.js";
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
 /* ⛔ NEW-1..NEW-4 — `lib/groundElevation.js` and `lib/drainageTiming.js` are reached ONLY by the
  * dynamic import inside `checkDrainage`, never statically. Both are needed exactly when a human
@@ -2404,9 +2405,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const retryOverlay = (id) => setOverlayLoadErr((m) => { if (!(id in m)) return m; const n = { ...m }; delete n[id]; return n; });
   const [ovCalib, setOvCalib] = useState(null);         // {id, kind:'trace'|'align', pts:[]} — canvas calibration in progress
 
-  // county parcel lookup
-  const [county, setCounty] = useState("harris");
-  const [lookupUrl, setLookupUrl] = useState(COUNTIES.harris.layerUrl || COUNTIES.harris.serviceUrl);
+  // county parcel lookup — ⛔ B877440: no hard Harris/Houston seed. An unresolved county is
+  // unresolved, never Harris; the search box starts empty until `onCountyChange` (an explicit
+  // pick) sets it.
+  const [county, setCounty] = useState(null);
+  const [lookupUrl, setLookupUrl] = useState("");
   const [searchMode, setSearchMode] = useState("address"); // "address" | "id"
   const [searchVal, setSearchVal] = useState("");
   const [lookupBusy, setLookupBusy] = useState(false);
@@ -2760,7 +2763,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Wetlands presence lifted from the Site Analysis screen's own finding (B710's
   // Section-404 cross-flag consumes it — no new fetch).
   const [analysisWetlands, setAnalysisWetlands] = useState(null);
-  const [jurKey, setJurKey] = useState(() => defaultJurForCounty(restored?.county || "harris"));
+  // ⛔ B877440 — no `|| "harris"` fallback. A plan with no saved county is genuinely
+  // unresolved, so `jurKey` starts null (easementRules.defaultJurForCounty now returns null
+  // for a county with no easement record, rather than silently routing to City of Houston's
+  // placeholder width) — the Easement rules panel renders that as "no criteria on file", not
+  // as a fabricated 20 ft. The county-heal effect below re-derives this the moment a real
+  // county resolves.
+  const [jurKey, setJurKey] = useState(() => defaultJurForCounty(restored?.county));
+  // ⛔ B877440/B877441 — UI-only status for the "Request criteria" action a no-data jurisdiction
+  // state offers (the Easement rules panel below, and the Detention verdict row further down).
+  // Declared here (rather than beside its furthest consumer) so it's initialized before EITHER
+  // JSX block that reads it during render — a `useState` declared after its first reader throws
+  // (temporal dead zone), since both blocks run as plain IIFEs during the same render pass.
+  // Keyed on county:family so unrelated rows never share state; `wasRequested` (checked at each
+  // read site) seeds the "Requested ✓" read-back from localStorage after a reload.
+  const [critReqStatus, setCritReqStatus] = useState({});
+  const onRequestCriteria = async (info) => {
+    if (!info || !info.countyKey || !info.family) return;
+    const k = `${info.countyKey}:${info.family}`;
+    setCritReqStatus((s) => ({ ...s, [k]: { busy: true } }));
+    const r = await requestCriteria(supabase, { countyKey: info.countyKey, countyLabel: info.countyLabel, state: siteStateId || null, family: info.family, siteId: siteId || null });
+    setCritReqStatus((s) => ({ ...s, [k]: r.ok ? { done: true, at: r.at } : { error: r.error || "Couldn't send the request." } }));
+  };
   const [rulesOpen, setRulesOpen] = useState(false);
   const [xsecMode, setXsecMode] = useState(false);   // ditch cross-section: click two points
   const [xsecPts, setXsecPts] = useState([]);
@@ -12129,11 +12153,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     ? (a) => coTier.mhfd.computeMhfdDetention({ ...a, county: (drainCtxData?.authority?.jurisdiction?.county || [])[0] || restored?.county || null })
     : null;
   const detReqInputsCo = { ...detReqInputs, coRegime: coRegime ? coRegime.id : null, coDetention };
+  // ⛔ B877440 — a county the drainage identify actually RESOLVED but that carries no modeled
+  // authority (Tarrant, Dallas, Amarillo…) used to leave `detReq` permanently null here, which
+  // `yieldVerdicts.detentionVerdict` reads as "still loading" once a check has run — the same
+  // silent-spinner failure B1127 fixed for Colorado, for a different root cause. Calling
+  // computeRequiredDetention with authorityId:null (its own, already-correct refusal — proven to
+  // return kind:"unknown"/no-criteria-modeled, never a number) turns that into an honest,
+  // terminal state instead of an unresolved one. Every modeled authority still takes the branch
+  // above unchanged; this only reaches the case that previously produced no carrier at all.
+  const drainCountyUnmodeled = drainCtxData?.authority?.flags?.includes("no-criteria-modeled")
+    ? drainCtxData.authority.unmodeledCounty || null
+    : null;
   const detReq = siteStateId === "CO"
     ? computeRequiredDetention({ ...detReqInputsCo, authorityId: null })
     : drainCtxData && siteSqft > 0 && drainAuthorityId
       ? computeRequiredDetention({ ...detReqInputs, authorityId: drainAuthorityId })
-      : null;
+      : drainCtxData && siteSqft > 0 && drainCountyUnmodeled
+        ? { ...computeRequiredDetention({ ...detReqInputs, authorityId: null }), governingCounty: drainCountyUnmodeled }
+        : null;
   // A boundary straddle leaves primary null — compute EVERY candidate, labeled (never default).
   const detReqCandidates = siteStateId !== "CO" && drainCtxData && siteSqft > 0 && !drainAuthorityId && drainCtxData.authority?.ambiguous?.length
     ? drainCtxData.authority.ambiguous[0].candidates.filter(Boolean).map((aid) => ({ aid, r: computeRequiredDetention({ ...detReqInputs, authorityId: aid }) }))
@@ -17754,7 +17791,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   const setRule = (key, patch) => setEaseRules((r) => { const next = { ...r, [key]: { ...r[key], ...patch } }; saveEasementRules(next); return next; });
   const startWaterRoute = () => {
-    const rule = easeRules[jurKey] || easeRules.generic;
+    // ⛔ B877440 — `jurKey` is null when no easement criteria are on file (no auto-detect match,
+    // no manual pick). Never fabricate a width off `easeRules.generic`'s Houston-style placeholder
+    // — the tool declines and points at the Easement rules panel, where the user can either pick a
+    // jurisdiction by hand (still fully functional) or file a request.
+    const rule = easeRules[jurKey];
+    if (!rule) { setRulesOpen(true); flashWarn("No easement width on file for this jurisdiction — pick one under Easement rules, or request criteria.", 6000); return; }
     startRoute("water", { width: rule.waterWidth || 15, ruleNote: `${rule.label}${rule.verified ? "" : " · VERIFY"}` });
   };
 
@@ -19932,6 +19974,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             heat={{ available: !!fmHeat, on: fmHeatOn, user: fmHeatUser, onToggle: setFmHeatUser, totals: fmHeatTotals, ledgerAcFt: fmResultView?.volumeAcFt ?? null }}
             floodExposure={floodExposure} // NEW-3 — per-building floodplain exposure, rendered inside the Buildings group
             onMitOpenChange={setFmMitOpen}
+            siteId={siteId} siteState={siteStateId} // B877440/B877441 — the "Request criteria" action on a no-data detention row
           />
           {/* v3 A8 — ④ Costs: the road + earthwork cards fold into one group. Closed summary is
               "not priced yet" until unit prices are entered; once priced it shows the totals. */}
@@ -22803,24 +22846,53 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       Easement rules <span style={{ flex: 1 }} /> <span>{rulesOpen ? "▾" : "▸"}</span>
                     </button>
                     {rulesOpen && (() => {
-                      const rule = easeRules[jurKey] || easeRules.generic;
+                      // ⛔ B877440/B877441 — `jurKey` is null when nothing was auto-detected and the
+                      // user hasn't picked one: no fabricated 20 ft off `easeRules.generic`. The
+                      // select still lets a user OVERRIDE by hand (a deliberate choice, honored
+                      // exactly as before); absent that, the only affordance is "Request criteria".
+                      const rule = jurKey ? easeRules[jurKey] : null;
+                      const countyRaw = restored?.county || null;
+                      const countyLabel = countyRaw ? String(countyRaw).replace(/\b\w/g, (c) => c.toUpperCase()) + (/county$/i.test(countyRaw) ? "" : " County") : null;
                       return (
                         <div style={{ background: "var(--planner-raised)", borderRadius: 8, padding: "7px 9px", marginBottom: 2 }}>
                           <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
                             <span style={{ fontSize: 11, color: PAL.muted }}>Jurisdiction</span>
-                            <select value={jurKey} onChange={(e) => setJurKey(e.target.value)} style={{ ...numInput, flex: 1, width: "auto", fontFamily: "inherit", fontSize: 11.5 }}>
+                            <select value={jurKey || ""} onChange={(e) => setJurKey(e.target.value || null)} style={{ ...numInput, flex: 1, width: "auto", fontFamily: "inherit", fontSize: 11.5 }}>
+                              {!jurKey && <option value="">No criteria on file — pick one</option>}
                               {Object.entries(easeRules).map(([k, r]) => <option key={k} value={k}>{r.label}</option>)}
                             </select>
                           </div>
-                          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                            <span style={{ fontSize: 11, color: PAL.muted }}>Water easement</span>
-                            <NumInput style={{ ...numInput, width: 52 }} value={rule.waterWidth} min={1} onCommit={(n) => setRule(jurKey, { waterWidth: n })} /> <span style={{ fontSize: 11, color: PAL.muted }}>ft</span>
-                            <span style={{ flex: 1 }} />
-                            <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 10.5, color: rule.verified ? "var(--accent)" : "var(--warn-text)", cursor: "pointer", fontWeight: 600 }}>
-                              <input type="checkbox" checked={rule.verified} onChange={(e) => setRule(jurKey, { verified: e.target.checked })} /> {rule.verified ? "verified" : "VERIFY"}
-                            </label>
-                          </div>
-                          <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.4, marginTop: 5 }}>{rule.note}</div>
+                          {rule ? (
+                            <>
+                              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                <span style={{ fontSize: 11, color: PAL.muted }}>Water easement</span>
+                                <NumInput style={{ ...numInput, width: 52 }} value={rule.waterWidth} min={1} onCommit={(n) => setRule(jurKey, { waterWidth: n })} /> <span style={{ fontSize: 11, color: PAL.muted }}>ft</span>
+                                <span style={{ flex: 1 }} />
+                                <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 10.5, color: rule.verified ? "var(--accent)" : "var(--warn-text)", cursor: "pointer", fontWeight: 600 }}>
+                                  <input type="checkbox" checked={rule.verified} onChange={(e) => setRule(jurKey, { verified: e.target.checked })} /> {rule.verified ? "verified" : "VERIFY"}
+                                </label>
+                              </div>
+                              <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.4, marginTop: 5 }}>{rule.note}</div>
+                            </>
+                          ) : (() => {
+                            const rk = countyRaw ? `${countyRaw}:easement` : null;
+                            const status = rk ? (critReqStatus[rk] || (wasRequested(countyRaw, "easement") ? { done: true, at: wasRequested(countyRaw, "easement") } : null)) : null;
+                            return (
+                              <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4 }}>
+                                No easement criteria on file{countyLabel ? ` for ${countyLabel}` : ""}. Pick a jurisdiction above, or:
+                                <div style={{ marginTop: 5 }}>
+                                  {!countyRaw ? <span style={{ color: PAL.muted }}>Locate the site to name a county.</span>
+                                    : status && status.done ? <span style={{ fontWeight: 600 }}>Requested ✓ {new Date(status.at).toLocaleDateString()}</span>
+                                    : status && status.error ? (
+                                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                        <span style={{ color: "var(--danger-text)" }}>{status.error}</span>
+                                        <ActionLink onClick={() => onRequestCriteria({ countyKey: countyRaw, countyLabel, family: "easement" })}>Try again →</ActionLink>
+                                      </span>
+                                    ) : <ActionLink disabled={!!(status && status.busy)} onClick={() => onRequestCriteria({ countyKey: countyRaw, countyLabel, family: "easement" })}>{status && status.busy ? "Sending…" : "Request criteria for this county →"}</ActionLink>}
+                                </div>
+                              </div>
+                            );
+                          })()}
                         </div>
                       );
                     })()}
@@ -28611,8 +28683,22 @@ function YieldPanel({
   heat, // B809: { available, on, user, onToggle, totals, ledgerAcFt } — the fill-depth heat map
   onMitOpenChange, // B809: mirrors the mit group's expansion up (heat map defaults ON while open)
   floodExposure, // NEW-3: buildingFloodExposure() result — per-building footprint ∩ flood zone
+  siteId, siteState, // B877440/B877441 — for the "Request criteria" action's filed row
 }) {
   const [openPanel, setOpenPanel] = useState(!collapsed);
+  // ⛔ B877440/B877441 — YieldPanel is its own top-level component (MODULE-SCOPE-COMPONENTS), so
+  // it cannot close over SitePlanner's `critReqStatus`/`onRequestCriteria` (a real eslint no-undef
+  // caught exactly this) — this is its own, independent copy of the same small UI-status pattern
+  // the Easement rules panel keeps in SitePlanner itself. Keyed on county:family; `wasRequested`
+  // (checked at the read site) seeds the "Requested ✓" read-back from localStorage after a reload.
+  const [critReqStatus, setCritReqStatus] = useState({});
+  const onRequestCriteria = async (info) => {
+    if (!info || !info.countyKey || !info.family) return;
+    const k = `${info.countyKey}:${info.family}`;
+    setCritReqStatus((s) => ({ ...s, [k]: { busy: true } }));
+    const r = await requestCriteria(supabase, { countyKey: info.countyKey, countyLabel: info.countyLabel, state: siteState || null, family: info.family, siteId: siteId || null });
+    setCritReqStatus((s) => ({ ...s, [k]: r.ok ? { done: true, at: r.at } : { error: r.error || "Couldn't send the request." } }));
+  };
   // NEW-1 — the drainage/mitigation readout redesign: an "Advanced" fold for the expert
   // inputs, and which auto-resolved elevation field (if any) the user has tapped to edit.
   const [drainAdvOpen, setDrainAdvOpen] = useState(false);
@@ -30536,6 +30622,23 @@ function YieldPanel({
                       {v.recheck && drainage && drainage.onCheck && (
                         <button type="button" onClick={drainRefreshing ? undefined : drainage.onCheck} disabled={drainRefreshing} aria-busy={drainRefreshing} aria-label="Re-check flood data" title={drainRefreshing ? "Re-checking the flood data…" : "Re-pull the GIS flood data for the drawn area."} style={{ border: "none", background: "none", color: "var(--accent)", cursor: drainRefreshing ? "default" : "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit", padding: 0, lineHeight: 1, flex: "none", display: "inline-block", animation: drainRefreshing ? "spin 0.9s linear infinite" : undefined }}>↻</button>
                       )}
+                      {/* ⛔ B877440/B877441 — the ONE action a "no criteria on file" verdict offers.
+                          Never unlocks a number; files a request Michael can see on the admin
+                          page (B877442) and reads back "Requested ✓" — a second click never files
+                          twice (requestCriteria checks the local mark, then the server's unique
+                          index). A send that fails to reach the server says so, not "Requested". */}
+                      {v.requestCriteria && (() => {
+                        const rk = `${v.requestCriteria.countyKey}:${v.requestCriteria.family}`;
+                        const already = critReqStatus[rk] || (wasRequested(v.requestCriteria.countyKey, v.requestCriteria.family) ? { done: true, at: wasRequested(v.requestCriteria.countyKey, v.requestCriteria.family) } : null);
+                        if (already && already.done) return <span style={{ fontSize: 11, color: "var(--text-tertiary)", fontWeight: 600 }}>Requested ✓ {new Date(already.at).toLocaleDateString()}</span>;
+                        if (already && already.error) return (
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                            <span style={{ fontSize: 10.5, color: "var(--danger-text)" }}>{already.error}</span>
+                            <ActionLink onClick={() => onRequestCriteria(v.requestCriteria)}>Try again →</ActionLink>
+                          </span>
+                        );
+                        return <ActionLink disabled={!!(already && already.busy)} onClick={() => onRequestCriteria(v.requestCriteria)}>{already && already.busy ? "Sending…" : `Request criteria for ${v.requestCriteria.countyLabel || "this county"} →`}</ActionLink>;
+                      })()}
                       {/* NEW-16 — a trace mitigation requirement carries the raw ac-ft in the ⓘ,
                           so "not required (trace)" is honest, not a hidden number. */}
                       {v.trace && v.traceAcFt != null && (
