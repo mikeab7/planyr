@@ -20,7 +20,7 @@
  * rows grid instead of a task tree — no ADD to the engine, no fork of it.
  */
 import {
-  evaluateFormula, formatValue, planFormulaColumns, errVal, BLANK, DEFAULT_CALENDAR,
+  evaluateFormula, formatValue, planFormulaColumns, extractRefs, errVal, isBlank, BLANK, DEFAULT_CALENDAR,
 } from "../../../shared/formula/formula.js";
 
 const lower = (s) => String(s || "").trim().toLowerCase();
@@ -83,10 +83,23 @@ export function evaluateSheet(sheet) {
     const src = formulaSource(col.formula);
     const parseErr = plan.parseError.get(key);
     const cyclic = plan.cyclic.has(key);
+    // Which OTHER columns this formula reads, restricted to ones that actually resolve —
+    // used below to leave a row blank rather than computing (and displaying) a confident
+    // answer from nothing. Measured live: a rent-roll-style sheet with 400 rows of padding
+    // showed "$0.00" all the way down a NOI column the moment ANY column anywhere in the
+    // sheet had a value that far down (a stray note in row 380 was enough to stretch every
+    // formula column's evaluation range to match) — Revenue-minus-Cost over two blank cells
+    // is a real, intentional 0 in Excel's arithmetic, but a wall of 380 of them reads as
+    // broken, not "correct". A formula with NO column references (a constant, TODAY(), …)
+    // is never suppressed — there is nothing for it to be blank ABOUT.
+    const refKeys = [...(extractRefs(src).refs || [])].map(lower).filter((nk) => cols.some((c) => lower(c.name) === nk));
     for (let r = 0; r < rows; r++) {
+      // Error conditions come FIRST: a column not yet resolved in a genuine cycle also reads
+      // as "blank" (isBlank(undefined) is true) — the blank check must never mask a #CIRC!.
       let res;
       if (parseErr) res = { ok: false, error: "#ERROR!", detail: parseErr };
       else if (cyclic) res = { ok: false, error: "#CIRC!", detail: "circular reference between formula columns" };
+      else if (refKeys.length > 0 && refKeys.every((nk) => isBlank(rowMaps[r][nk]))) res = { ok: true, value: BLANK };
       else res = evaluateFormula(src, { columns: rowMaps[r], rows: rowMaps, rowIndex: r, calendar: DEFAULT_CALENDAR, today });
       // Store as an ERROR VALUE (never BLANK) so a downstream SUM/COUNT over this column
       // PROPAGATES the error instead of silently treating an errored row as empty.

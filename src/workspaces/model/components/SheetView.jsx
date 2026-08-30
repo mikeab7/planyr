@@ -113,6 +113,13 @@ export default function SheetView({
   const stopDrag = () => { dragRef.current = null; };
 
   const onKeyDown = (e) => {
+    // The header's rename <input> is a DESCENDANT of this div, so every key it doesn't
+    // itself consume bubbles up here — without this guard, typing a column name also fired
+    // this sheet's own type-to-edit on the active CELL for every letter, and that cell
+    // editor's `autoFocus` stole focus away from the rename box, which then blurred and
+    // committed itself shut after the very first keystroke (measured: renaming never got
+    // past its seed value because the input unmounted mid-type).
+    if (renaming != null) return;
     if (edit) {
       if (e.key === "Enter") { e.preventDefault(); commitEdit(e.shiftKey ? "up" : "down"); }
       else if (e.key === "Tab") { e.preventDefault(); commitEdit(e.shiftKey ? "left" : "right"); }
@@ -155,7 +162,10 @@ export default function SheetView({
       onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
       style={{ flex: 1, minHeight: 0, overflow: "auto", position: "relative", background: "var(--surface-page)", outline: "none" }}
     >
-      <div style={{ position: "relative", height: HEADER_H + totalRows * ROW_H, width: Math.max(totalW, "100%") }}>
+      {/* width+minWidth, not Math.max(totalW, "100%") — that mixes a number with a CSS percent
+          string, which Number("100%") coerces to NaN and React then rejects the whole style
+          ("`NaN` is an invalid value for the `width` css style property"), measured live. */}
+      <div style={{ position: "relative", height: HEADER_H + totalRows * ROW_H, width: totalW, minWidth: "100%" }}>
         {/* Header row — sticky vertically, scrolls horizontally with the body via the shared container. */}
         <div style={{ position: "sticky", top: 0, zIndex: 2, display: "flex", height: HEADER_H, width: totalW, background: "var(--surface-raised)", borderBottom: "1px solid var(--border-default)" }}>
           <div style={{ flex: `0 0 ${ROW_HEADER_W}px`, borderRight: "1px solid var(--border-default)" }} />
@@ -188,7 +198,7 @@ export default function SheetView({
               {col.formula && (
                 <span
                   title="This column is computed by a formula"
-                  style={{ flex: "none", fontSize: 8.5, fontWeight: 700, color: "var(--accent-model, #3D6FD1)", border: "1px solid currentColor", borderRadius: 3, padding: "0 3px", lineHeight: "13px" }}
+                  style={{ flex: "none", fontSize: 8.5, fontWeight: 700, color: "var(--accent-model)", border: "1px solid currentColor", borderRadius: 3, padding: "0 3px", lineHeight: "13px" }}
                 >fx</span>
               )}
             </div>
@@ -231,7 +241,7 @@ export default function SheetView({
                       padding: isEditing ? 0 : "0 8px",
                       borderRight: "1px solid var(--border-default)",
                       borderBottom: "1px solid var(--border-subtle, var(--border-default))",
-                      outline: isActive ? "2px solid var(--accent-model, #3D6FD1)" : "none",
+                      outline: isActive ? "2px solid var(--accent-model)" : "none",
                       outlineOffset: -1,
                       background: isEditing ? "var(--surface-page)" : isSel ? "var(--surface-selected, rgba(43,95,191,0.10))" : "transparent",
                       fontSize: 12.5, color: col.formula ? "var(--text-secondary)" : "var(--text-primary)",
@@ -247,7 +257,13 @@ export default function SheetView({
                         autoFocus
                         value={editValue}
                         onChange={(e) => setEditValue(e.target.value)}
-                        onFocus={(e) => { if (e.target.value) e.target.select?.(); }}
+                        // Caret at the END on focus, never select-all: type-to-edit already
+                        // seeds editValue with JUST the typed character (the "replace" half of
+                        // the contract), so selecting it here would make the VERY NEXT keystroke
+                        // replace that seed instead of continuing after it — e.g. typing
+                        // "1000000" landed as "000000" (the seed "1" selected, then "0"
+                        // overwrote it) before this was measured in a real browser.
+                        onFocus={(e) => { const len = e.target.value.length; e.target.setSelectionRange(len, len); }}
                         style={{ width: "100%", height: "100%", boxSizing: "border-box", border: "none", padding: "0 7px", font: "inherit", fontVariantNumeric: "tabular-nums", background: "transparent", color: "inherit" }}
                       />
                     ) : display}

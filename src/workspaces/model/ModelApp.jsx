@@ -55,7 +55,7 @@ function EmptyProjectState({ onGoDashboard }) {
         <button
           type="button"
           onClick={onGoDashboard}
-          style={{ height: 32, padding: "0 16px", borderRadius: 8, border: "1px solid var(--accent-model, #3D6FD1)", background: "var(--accent-model, #3D6FD1)", color: "#fff", font: "inherit", fontSize: 13.5, fontWeight: 650, cursor: "pointer" }}
+          style={{ height: 32, padding: "0 16px", borderRadius: 8, border: "1px solid var(--accent-model)", background: "var(--accent-model)", color: "var(--on-accent-model)", font: "inherit", fontSize: 13.5, fontWeight: 650, cursor: "pointer" }}
         >Go to Dashboard</button>
       </div>
     </div>

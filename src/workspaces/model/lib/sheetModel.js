@@ -25,7 +25,12 @@
 
 export const SHEET_VERSION = 1;
 const DEFAULT_COLS = 8;
-const DEFAULT_ROW_COUNT = 30;
+// A blank sheet starts with real spreadsheet-sized room, not a short list that grows one
+// keystroke past its own edge at a time — virtualization means the DOM cost of a bigger
+// blank area is ~0 (only the visible slice ever renders), so there is no reason to make it
+// feel cramped. Measured live: at 30 rows, scrolling to a row far below the visible data hit
+// the padding ceiling and simply had nowhere further to go.
+const DEFAULT_ROW_COUNT = 200;
 
 /** Excel-style column letters: A, B, … Z, AA, AB, … — used only as the default NAME for a
  *  freshly-added column. Renaming is free-text; this is just a starting point. */
@@ -202,7 +207,8 @@ export function deleteColumn(sheet, colIndex) {
 
 /** How many rows the view should render past the real data, so typing never has to "add a
  *  row" first — the Schedule GridView's emptyPad pattern (public/sequence/index.html:9706),
- *  sized to always fill at least one screen's worth. */
+ *  sized to always fill at least one screen's worth AND leave real spreadsheet-sized room
+ *  (200, matching DEFAULT_ROW_COUNT) rather than stopping a few rows past whatever's typed. */
 export function padRowCount(sheet, viewportRows) {
-  return Math.max(30, (viewportRows || 0) + 10);
+  return Math.max(200, (viewportRows || 0) + 10);
 }
