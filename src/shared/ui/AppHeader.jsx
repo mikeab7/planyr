@@ -349,7 +349,7 @@ function useMultiTab(projectId) {
 // the flex zones compressed to slivers under `overflow:hidden`, hiding reachable controls.
 // Below the breakpoint we let each row SCROLL SIDEWAYS instead (the owner's explicit ask:
 // "scroll sideways, not wrap onto two lines"), so nothing is lost — you swipe to reach it.
-function useNarrow() {
+export function useNarrow() {
   const [narrow, setNarrow] = useState(() => { try { return window.matchMedia("(max-width: 760px)").matches; } catch (_) { return false; } });
   useEffect(() => {
     let mq; try { mq = window.matchMedia("(max-width: 760px)"); } catch (_) { return undefined; }

@@ -179,6 +179,145 @@ check("left-rail panel opens as an overlay over the canvas", panelOverlay);
 // 8) no uncaught errors
 check("no uncaught page errors", errs.length === 0, errs.slice(0, 2).join(" | "));
 
+/* ════ NOTES — PHONE DRILL-IN LAYOUT (NEW-1…NEW-4, B849632–B849635) ═══════════════════════
+ *
+ * Michael's own screenshot: the desktop two-pane rail+editor split does NOT collapse on a
+ * phone — the rail takes ~60% of a 390px screen and the editor pane is squeezed into the
+ * rest, its title clipped mid-word; the formatting toolbar wraps into a column that runs the
+ * full height of the pane. This section drives the SAME iPhone-13-emulated tab against the
+ * real Notes route and asserts the fix: the page list is the full-width ROOT view, opening a
+ * page PUSHES a full-width editor over it with a Back control (Apple Notes/Bear/Notion/Craft's
+ * pattern), the toolbar is one compact scrollable row instead of a column, the search
+ * placeholder drops the keyboard-only shortcut hint, and the drill-in's own controls meet the
+ * 44px tap-target floor (WCAG 2.5.5) — the same bar B485 met for the planner body. */
+const errsBeforeNotes = errs.length;
+
+await page.goto(`${BASE}#/notes`, { waitUntil: "load" });
+await page.evaluate(() => { try { localStorage.clear(); } catch (_) {} });
+await page.reload({ waitUntil: "load" });
+await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 20000 });
+await assertMeasurable(page, "verify-phone-layout:notes");
+
+// 9) fresh/empty scope: the page LIST is the root view, full width, no Back control shown
+const emptyState = await page.evaluate(() => {
+  const tree = document.querySelector('[data-testid="notes-tree"]');
+  const back = document.querySelector('[data-testid="notes-mobile-back"]');
+  const visible = !!(tree && tree.offsetParent !== null);
+  const r = visible ? tree.getBoundingClientRect() : null;
+  return {
+    treeVisible: visible,
+    treeFullWidth: !!(r && Math.abs(r.width - window.innerWidth) < 6),
+    backShown: !!(back && back.offsetParent !== null),
+    overflow: document.documentElement.scrollWidth - window.innerWidth,
+  };
+});
+check("Notes: empty scope shows the page list as the full-width root view", emptyState.treeVisible && emptyState.treeFullWidth && !emptyState.backShown,
+  `treeVisible=${emptyState.treeVisible} fullWidth=${emptyState.treeFullWidth} backShown=${emptyState.backShown}`);
+check("Notes: no horizontal overflow on the empty list", emptyState.overflow <= 2, `overflow=${emptyState.overflow}px`);
+
+// 10) the search placeholder drops the desktop-only keyboard-shortcut hint on phone (NEW-3)
+const searchPh = await page.evaluate(() => document.querySelector('[data-testid="notes-search"]')?.placeholder || "");
+check("Notes: search placeholder drops the keyboard-shortcut hint on phone", searchPh === "Search notes", `placeholder="${searchPh}"`);
+
+// 11) "＋ Page" drills straight into a full-width editor (list hidden, Back shown) — this IS
+// the module's own "restore straight into a page" behaviour, exercised live.
+await page.locator('[data-testid="notes-new-page"]').click({ timeout: 5000 });
+await page.waitForTimeout(400);
+const afterCreate = await page.evaluate(() => {
+  const tree = document.querySelector('[data-testid="notes-tree"]');
+  const back = document.querySelector('[data-testid="notes-mobile-back"]');
+  return {
+    treeHidden: !tree || tree.offsetParent === null,
+    backShown: !!(back && back.offsetParent !== null),
+    backH: back ? Math.round(back.getBoundingClientRect().height) : 0,
+    overflow: document.documentElement.scrollWidth - window.innerWidth,
+  };
+});
+check("Notes: opening a page pushes a full-width editor (list hidden)", afterCreate.treeHidden);
+check("Notes: the editor's Back control is on screen and ≥44px tall", afterCreate.backShown && afterCreate.backH >= 44, `backH=${afterCreate.backH}`);
+check("Notes: no horizontal overflow with the editor open", afterCreate.overflow <= 2, `overflow=${afterCreate.overflow}px`);
+
+// 12) a realistically long title does not force page-level clipping/overflow
+await page.locator('[data-testid="note-title"]').fill("Entitlements and Bonding — Grand Port Phase 2 Coordination");
+await page.waitForTimeout(150);
+const titleOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+check("Notes: a long title does not force page-level overflow", titleOverflow <= 2, `overflow=${titleOverflow}px`);
+
+// 13) THE REGRESSION GUARD — the toolbar is ONE scrollable row, not a wrapped column. This is
+// exactly what the owner's screenshot showed (~35 controls stacked to the pane's full height):
+// fails on the pre-fix `flexWrap: "wrap"` bar, passes on the fix.
+const toolbarShape = await page.evaluate(() => {
+  const bar = document.querySelector('[data-testid="note-toolbar"]');
+  if (!bar) return null;
+  const cs = getComputedStyle(bar);
+  const r = bar.getBoundingClientRect();
+  return { flexWrap: cs.flexWrap, overflowX: cs.overflowX, height: Math.round(r.height), narrowAttr: bar.getAttribute("data-narrow") };
+});
+check("Notes: phone toolbar compact mode is engaged (data-narrow=1)", toolbarShape?.narrowAttr === "1", JSON.stringify(toolbarShape));
+check("Notes: phone toolbar does not wrap into a column (flex-wrap: nowrap)", toolbarShape?.flexWrap === "nowrap", `flexWrap=${toolbarShape?.flexWrap}`);
+check("Notes: phone toolbar scrolls sideways rather than growing tall", toolbarShape?.overflowX === "auto" && toolbarShape.height > 0 && toolbarShape.height <= 70,
+  `overflowX=${toolbarShape?.overflowX} height=${toolbarShape?.height}px`);
+
+// 14) the primary row holds only the owner's short list (undo/redo/bold/italic/bullet/
+// numbered/link) — everything else lives behind More, closed by default so nothing from the
+// sheet is in this DOM query yet.
+const primaryRow = await page.evaluate(() => Array.from(
+  document.querySelectorAll('[data-testid="note-toolbar"] [data-testid]'),
+).map((el) => el.getAttribute("data-testid")));
+const EXPECTED_PRIMARY = ["nt-undo", "nt-redo", "nt-bold", "nt-italic", "nt-bullet", "nt-ordered", "nt-link", "nt-more"];
+const ALWAYS_HIDDEN = ["nt-image-input"];   // the file <input type=file>, display:none, unrelated to layout
+const unexpectedOnRow = primaryRow.filter((id) => !EXPECTED_PRIMARY.includes(id) && !ALWAYS_HIDDEN.includes(id));
+check("Notes: only the common controls sit on the primary row, the rest behind More",
+  unexpectedOnRow.length === 0 && EXPECTED_PRIMARY.every((id) => primaryRow.includes(id)),
+  `row=${JSON.stringify(primaryRow)}`);
+
+// 15) tapping Back returns to the full-width list
+await page.locator('[data-testid="notes-mobile-back"]').click({ timeout: 5000 });
+await page.waitForTimeout(300);
+const afterBack = await page.evaluate(() => {
+  const tree = document.querySelector('[data-testid="notes-tree"]');
+  const r = tree && tree.offsetParent !== null ? tree.getBoundingClientRect() : null;
+  return { treeFullWidth: !!(r && Math.abs(r.width - window.innerWidth) < 6) };
+});
+check("Notes: Back returns to the full-width page list", afterBack.treeFullWidth);
+
+// 17a) the LIST's own tap targets, measured while the list is actually the visible pane —
+// a target hidden behind the OTHER pane reports a 0px rect, which is a harness bug wearing a
+// product bug's clothes (DRIVER-SCROLL-IS-NOT-APP-SCROLL's sibling: measure what's on screen).
+const listTargets = await page.evaluate(() => {
+  const ids = ["notes-new-page", "notes-view-tree", "notes-view-tasks", "notes-view-bin"];
+  return ids.map((id) => {
+    const el = document.querySelector(`[data-testid="${id}"]`);
+    if (!el) return { id, present: false };
+    const r = el.getBoundingClientRect();
+    return { id, present: true, h: Math.round(r.height) };
+  });
+});
+
+// 16) tapping a page row in the list drills back into its editor
+await page.locator('[data-testid^="notes-row-"]').first().click({ timeout: 5000 });
+await page.waitForTimeout(300);
+const afterRowTap = await page.evaluate(() => {
+  const back = document.querySelector('[data-testid="notes-mobile-back"]');
+  return !!(back && back.offsetParent !== null);
+});
+check("Notes: tapping a page in the list opens its editor (Back shown)", afterRowTap);
+
+// 17b) the EDITOR's own tap targets, measured while the editor is the visible pane
+const editorTargets = await page.evaluate(() => {
+  const ids = ["notes-mobile-back", "nt-undo", "nt-bold", "nt-more"];
+  return ids.map((id) => {
+    const el = document.querySelector(`[data-testid="${id}"]`);
+    if (!el) return { id, present: false };
+    const r = el.getBoundingClientRect();
+    return { id, present: true, h: Math.round(r.height) };
+  });
+});
+const allTargets = [...listTargets, ...editorTargets];
+check("Notes: drill-in tap targets are ≥44px tall", allTargets.every((t) => t.present && t.h >= 44), JSON.stringify(allTargets));
+
+check("Notes: no uncaught page errors", errs.length === errsBeforeNotes, errs.slice(errsBeforeNotes).slice(0, 2).join(" | "));
+
 await ctx.close();
 await browser.close();
 
