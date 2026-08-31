@@ -15,20 +15,14 @@ import { reconcileGroupNames, resolveNameFor, groupKeyOf, maxStampOf } from "./p
 import { idbGet, idbPut, idbAvailable, idbDelete, idbDeleteByPrefix } from "./localDb.js";
 import { idbKeysReleasableOnPlanDelete, idbKeysHeldByOtherPlans } from "./sharedAssetRefs.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
-
-/* Cloud backend (Phase 4). When a user is signed in, `activeUser` holds their id:
- * the working store switches to a per-user local cache (pulled from Supabase on
- * login) and writes mirror to Supabase (RLS-scoped to them). Logged out,
- * activeUser is null and everything stays 100% localStorage (the legacy store). */
-let activeUser = null;
-export function setActiveUser(uid) {
-  const next = uid || null;
-  if (next !== activeUser) clearSiteVersions(); // don't carry one user's optimistic-version tokens into another's session (B314)
-  activeUser = next;
-}
-export const isCloudActive = () => !!activeUser;
-export const activeUid = () => activeUser; // signed-in user's id, or null (B475 — warm the project cache)
-const cloudKey = (uid) => "planarfit:sites:cloud:" + uid;
+import { DELETED_RETENTION_DAYS } from "../../../shared/projects/projectModel.js";
+// B927105 — WHICH ACCOUNT the store is bound to is now a leaf module (activeUser.js) that a
+// caller who only needs to read/set it (the shell, the project breadcrumb) can import WITHOUT
+// pulling in the rest of this file's heavy siteModel/cloudSync graph. Re-exported here so every
+// existing importer of storage.js (SitePlanner.jsx, SitePlannerApp.jsx, …) is unaffected.
+import { setActiveUser, isCloudActive, activeUid, cloudSitesKey } from "./activeUser.js";
+export { setActiveUser, isCloudActive, activeUid };
+const cloudKey = cloudSitesKey;
 
 // B757 — DURABLE, per-user record-delete tombstones ({ id: ts }). The in-memory `recentlyDeleted`
 // set below (B372) is per-tab and cleared on reload, and it only guards `saveSite` — it does NOT
@@ -86,7 +80,7 @@ export function clearRecentlyDeleted(id) {
   if (id == null) recentlyDeleted.clear(); else recentlyDeleted.delete(id);
   // A deliberate re-create / re-import of a same-id record cancels the durable tombstone too (B757),
   // so the resurrected-by-the-user record isn't suppressed on the next pull.
-  if (activeUser && id != null) clearSiteTombstone(activeUser, id);
+  if (activeUid() && id != null) clearSiteTombstone(activeUid(), id);
 }
 // Pure merge of the local cache with the cloud's records (exported for tests).
 // CRITICAL (B124/B126 data-loss fix): build from the LOCAL cache first (so a site the
@@ -496,27 +490,27 @@ export async function importOneSiteToCloud(uid, siteId) {
 // Push one site (by id) to the cloud; resolves { ok }. No-op (ok:true) when logged
 // out, so the save badge can await it unconditionally.
 export async function pushSiteToCloud(id) {
-  if (!activeUser) return { ok: true, skipped: true };
+  if (!activeUid()) return { ok: true, skipped: true };
   const m = loadSite(id);
   if (!m) return { ok: false, error: "missing" };
-  return cloudUpsert(activeUser, m);
+  return cloudUpsert(activeUid(), m);
 }
 // B473 — push a LIVE in-memory model to the cloud, NOT by id. Used when the on-device write FAILED
 // (full localStorage): pushSiteToCloud→loadSite would re-read the failed store and ship a stale,
 // pre-edit copy — losing the very edit in the cloud too. The cloud has no ~5MB cap, so pushing the
 // live payload keeps the work safe in the account and a reload restores it. No-op logged out.
 export async function pushModelToCloud(model) {
-  if (!activeUser) return { ok: true, skipped: true };
+  if (!activeUid()) return { ok: true, skipped: true };
   if (!model || !model.id) return { ok: false, error: "missing" };
-  return cloudUpsert(activeUser, createSiteModel(model));
+  return cloudUpsert(activeUid(), createSiteModel(model));
 }
 // B480 — refresh THIS site's cloud version token + fetch the latest copy so "Take over editing here" can
 // reconcile a conflict IN PLACE (union the other session's content, then push at the fresh version) instead
 // of reloading (which bounced to the map + re-entered the version race → the take-over loop). No-op (null)
 // when logged out. Returns the cloud's stored model, or null.
 export async function reconcileSiteFromCloud(id) {
-  if (!activeUser || !id) return null;
-  return fetchSiteForReconcile(activeUser, id);
+  if (!activeUid() || !id) return null;
+  return fetchSiteForReconcile(activeUid(), id);
 }
 // B556 — re-export so the planner can tell the thin-clobber baseline "this deliberately-restored
 // (possibly thinner) content is authoritative" after an undo/redo/version-restore, so the next push
@@ -525,10 +519,10 @@ export async function reconcileSiteFromCloud(id) {
 // write that survives the navigation. Reads the freshly-saved local copy so the cloud
 // gets the very latest. No-op when logged out. Returns true if a request was dispatched.
 export function keepaliveFlushSite(id) {
-  if (!activeUser || !id) return false;
+  if (!activeUid() || !id) return false;
   const m = loadSite(id);
   if (!m) return false;
-  return keepaliveCloudPush(activeUser, m);
+  return keepaliveCloudPush(activeUid(), m);
 }
 // Single-slot autosave of the live working canvas (separate from named scenarios).
 export const AUTOSAVE_KEY = "planarfit:autosave:v1";
@@ -779,7 +773,7 @@ export const storage = {
 const SITES_KEY = "planarfit:sites:v1"; // legacy / logged-out store
 const CURRENT_KEY = "planarfit:currentSite:v1";
 // Active store key: the per-user cloud cache when signed in, else the legacy store.
-const sitesKey = () => (activeUser ? cloudKey(activeUser) : SITES_KEY);
+const sitesKey = () => (activeUid() ? cloudKey(activeUid()) : SITES_KEY);
 
 function readSites() {
   try { return JSON.parse(localStorage.getItem(sitesKey())) || {}; } catch (_) { return {}; }
@@ -947,10 +941,10 @@ export function renameSiteGroup(idOrGroup, site) {
   const localPlans = loadPlansOfGroup(groupId);
   const at = Math.max(Date.now(), maxStampOf(localPlans) + 1);
   localPlans.forEach((s) => saveSite({ id: s.id, site: name, siteRenamedAt: at }));
-  if (!activeUser) return Promise.resolve({ ok: true, groupId, name, at, plans: localPlans.length, cloud: { skipped: true } });
+  if (!activeUid()) return Promise.resolve({ ok: true, groupId, name, at, plans: localPlans.length, cloud: { skipped: true } });
   // LOADED ON DEMAND — see lib/cloudRename.js. A rename is rare and user-initiated, so its cloud
   // path (an RPC plus the whole un-migrated-DB degrade) stays off the chunk every page load pays for.
-  return import("./cloudRename.js").then((m) => m.cloudRenameGroup(activeUser, groupId, name, at))
+  return import("./cloudRename.js").then((m) => m.cloudRenameGroup(activeUid(), groupId, name, at))
     .then((cloud) => ({ ok: !!(cloud && cloud.ok), groupId, name, at, plans: localPlans.length, cloud, error: cloud && cloud.error }))
     .catch((e) => ({ ok: false, groupId, name, at, plans: localPlans.length, error: (e && e.message) || "rename failed" }));
 }
@@ -988,7 +982,7 @@ export function repairSplitProjectNames() {
   }
   // Push the corrections so the cloud copy stops contradicting the group as well. Fire-and-forget:
   // the local repair already stands, and the next ordinary save would carry it up regardless.
-  if (activeUser) for (const c of changes) pushSiteToCloud(c.id).catch(() => {});
+  if (activeUid()) for (const c of changes) pushSiteToCloud(c.id).catch(() => {});
   return { ok: true, changed: changes.length, groups: [...new Set(changes.map((c) => c.groupId))].length };
 }
 // Mirror the cross-module schedule link onto a site group (schema v9). The canonical pairing
@@ -1041,16 +1035,20 @@ export function deleteSiteGroup(groupId) {
  * project WHOLE (every building back), not the gutted slim header the old resurrection produced.
  *
  * The unit here is the PROJECT (a site group), matching how delete is offered in the UI: deleting
- * a project bins every plan in its group, and restoring it brings the whole group back. */
-export const DELETED_RETENTION_DAYS = 30;
+ * a project bins every plan in its group, and restoring it brings the whole group back.
+ *
+ * B927105 — the retention NUMBER is canonical in projectModel.js (pure, dependency-free) and
+ * re-exported here, so the breadcrumb's confirmation copy never has to import this engine just
+ * to say "30 days". */
+export { DELETED_RETENTION_DAYS };
 
 // Group the cloud's soft-deleted rows into projects. Returns { ok, supported, projects }:
 // supported:false = db/sites_soft_delete.sql hasn't run on this DB (there is no bin — deletes are
 // still immediate + permanent there), so the caller hides the section rather than showing it empty.
 export async function listDeletedProjects() {
-  if (!activeUser) return { ok: true, supported: false, projects: [] };
+  if (!activeUid()) return { ok: true, supported: false, projects: [] };
   let r;
-  try { r = await cloudDeletedRows(activeUser); } catch (e) { r = { ok: false, supported: true, rows: [], error: (e && e.message) || "" }; }
+  try { r = await cloudDeletedRows(activeUid()); } catch (e) { r = { ok: false, supported: true, rows: [], error: (e && e.message) || "" }; }
   if (!r.ok || !r.supported) return { ok: r.ok, supported: !!r.supported, projects: [], error: r.error };
   const by = new Map();
   for (const row of (r.rows || [])) {
@@ -1075,11 +1073,11 @@ export async function listDeletedProjects() {
 // re-pulls so the project reappears in the list/map immediately. Honest about a partial failure.
 export async function restoreDeletedProject(ids) {
   const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean);
-  if (!activeUser || !list.length) return { ok: false, restored: 0, error: "not signed in" };
-  const results = await Promise.all(list.map((id) => cloudRestore(activeUser, id).catch((e) => ({ ok: false, restored: 0, error: (e && e.message) || "restore threw" }))));
+  if (!activeUid() || !list.length) return { ok: false, restored: 0, error: "not signed in" };
+  const results = await Promise.all(list.map((id) => cloudRestore(activeUid(), id).catch((e) => ({ ok: false, restored: 0, error: (e && e.message) || "restore threw" }))));
   const restored = results.reduce((n, r) => n + ((r && r.restored) || 0), 0);
   for (const id of list) clearRecentlyDeleted(id); // lifts BOTH the per-tab set and the durable tombstone
-  await pullCloud(activeUser).catch(() => {});
+  await pullCloud(activeUid()).catch(() => {});
   const failed = results.find((r) => r && r.ok === false);
   if (restored === 0) return { ok: false, restored: 0, error: (failed && failed.error) || "Nothing was restored — it may already have been permanently removed." };
   return { ok: !failed, restored, error: failed ? failed.error : null };
@@ -1089,8 +1087,8 @@ export async function restoreDeletedProject(ids) {
 // correct: this is the point at which permanent destruction was actually asked for.
 export async function purgeDeletedProject(ids) {
   const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean);
-  if (!activeUser || !list.length) return { ok: false, purged: 0, error: "not signed in" };
-  const results = await Promise.all(list.map((id) => cloudHardDelete(activeUser, id).catch((e) => ({ ok: false, error: (e && e.message) || "purge threw" }))));
+  if (!activeUid() || !list.length) return { ok: false, purged: 0, error: "not signed in" };
+  const results = await Promise.all(list.map((id) => cloudHardDelete(activeUid(), id).catch((e) => ({ ok: false, error: (e && e.message) || "purge threw" }))));
   const failed = results.find((r) => r && r.ok === false);
   const purged = results.filter((r) => r && r.ok !== false).length;
   return { ok: !failed, purged, error: failed ? failed.error : null };
@@ -1099,16 +1097,16 @@ export async function purgeDeletedProject(ids) {
 // Lazy 30-day purge — runs when the bin is listed. Anything that has sat past the retention window
 // is hard-deleted for real. Returns { ok, purged, failed } so the caller can surface a failure.
 export async function purgeExpiredDeletedProjects({ days = DELETED_RETENTION_DAYS } = {}) {
-  if (!activeUser) return { ok: true, purged: 0, failed: 0 };
+  if (!activeUid()) return { ok: true, purged: 0, failed: 0 };
   let r;
-  try { r = await cloudDeletedRows(activeUser); } catch (_) { return { ok: false, purged: 0, failed: 0 }; }
+  try { r = await cloudDeletedRows(activeUid()); } catch (_) { return { ok: false, purged: 0, failed: 0 }; }
   if (!r.ok) return { ok: false, purged: 0, failed: 0, error: r.error };
   if (!r.supported) return { ok: true, purged: 0, failed: 0 };
   const cutoff = Date.now() - days * 86400000;
   const expired = (r.rows || []).filter((row) => row && row.id && toMs(row.deleted_at) < cutoff);
   let purged = 0, failed = 0;
   for (const row of expired) {
-    const out = await cloudHardDelete(activeUser, row.id).catch(() => ({ ok: false }));
+    const out = await cloudHardDelete(activeUid(), row.id).catch(() => ({ ok: false }));
     if (out && out.ok) purged += 1; else failed += 1;
   }
   return { ok: failed === 0, purged, failed };
@@ -1262,7 +1260,7 @@ export function saveSite(partial, { skipHistory = false } = {}) {
   // or the same tab after a reload — could re-create a deleted row locally, which the next pull
   // then healed straight back into the cloud. A deliberate re-create / re-import still works:
   // clearRecentlyDeleted() lifts both tombstones together.
-  if (!existing && (recentlyDeleted.has(partial.id) || (activeUser && partial.id in readSiteTombs(activeUser)))) return false;
+  if (!existing && (recentlyDeleted.has(partial.id) || (activeUid() && partial.id in readSiteTombs(activeUid())))) return false;
   let merged = { ...(existing || {}), ...partial };
   // Cross-tab guard (B127): if the stored record is NEWER than what THIS tab last saw, another
   // tab wrote in between — fold our change ON TOP of the store's content (union) instead of a
@@ -1340,13 +1338,13 @@ export function deleteSite(id) {
     idbDeleteByPrefix(`raster:${id}:`, { keep });
   }
   recentlyDeleted.add(id); // in-tab tombstone so no in-flight flush can resurrect it this session (B372)
-  if (activeUser && id) recordSiteTombstone(activeUser, id, Date.now()); // B757 — DURABLE tombstone: survives reload so a failed/offline cloud delete can't resurrect the plan on the next pull
+  if (activeUid() && id) recordSiteTombstone(activeUid(), id, Date.now()); // B757 — DURABLE tombstone: survives reload so a failed/offline cloud delete can't resurrect the plan on the next pull
   if (getCurrentSiteId() === id) setCurrentSiteId(null);
   // Return the cloud-removal result so the caller can report an honest failure / no-op (B372).
   // TEAM: cloudDelete scopes by id and lets RLS decide (owner or team-admin) — a regular member
   // can't delete a teammate's shared project; that surfaces as removed:0, and the row re-appears
   // on the next pull rather than being lost.
-  return activeUser ? cloudDelete(activeUser, id) : Promise.resolve({ ok: true, skipped: true });
+  return activeUid() ? cloudDelete(activeUid(), id) : Promise.resolve({ ok: true, skipped: true });
 }
 export function getCurrentSiteId() { try { return localStorage.getItem(CURRENT_KEY) || null; } catch (_) { return null; } }
 export function setCurrentSiteId(id) { try { id ? localStorage.setItem(CURRENT_KEY, id) : localStorage.removeItem(CURRENT_KEY); } catch (_) {} }

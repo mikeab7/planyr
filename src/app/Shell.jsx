@@ -6,7 +6,10 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { supabaseConfigured } from "../workspaces/site-planner/lib/supabase.js";
 import { onAuthChange } from "../workspaces/site-planner/lib/auth.js";
-import { setScheduleLink, setActiveUser } from "../workspaces/site-planner/lib/storage.js";
+// B927105 — this is the ONLY storage-adjacent thing the shell needs at boot, and it's a
+// genuinely tiny leaf (no siteModel.js/cloudSync.js imports), so it's a plain static import —
+// see the note beside its call site below for what this replaced and why.
+import { setActiveUser } from "../workspaces/site-planner/lib/activeUser.js";
 import AuthPanel from "../workspaces/site-planner/components/AuthPanel.jsx";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 import ModuleLoader from "../shared/ui/ModuleLoader.jsx";
@@ -163,7 +166,13 @@ export default function Shell() {
   // without booting the iframe. The Schedule record stays the source of truth; this is the copy.
   const scheduleLinkChanged = (groupId, info) => {
     if (!groupId) return; // a clear with no group can't be mirrored; the stale hint self-heals on relink
-    try { setScheduleLink(groupId, info || {}); } catch (_) {}
+    // B927105 — dynamic import, not a static one: storage.js pulls in the whole site model /
+    // element-sync engine (~165 KB), which otherwise rides the shared entry chunk every route
+    // downloads for the sake of these two functions. This only ever fires from a mounted
+    // Schedule embed, so the one-time chunk fetch costs nothing anyone notices.
+    import("../workspaces/site-planner/lib/storage.js")
+      .then(({ setScheduleLink }) => { try { setScheduleLink(groupId, info || {}); } catch (_) {} })
+      .catch(() => {});
   };
 
   /* ⛔ WHO THE PROJECT STORE BELONGS TO IS THE SHELL'S JOB, NOT THE SITE PLANNER'S (B482 ×2).
@@ -180,7 +189,15 @@ export default function Shell() {
    *
    * The Shell always mounts and already owns auth, so the binding lives here. The Site Planner
    * still calls it (and still runs its own pull) — the call is idempotent, and its own
-   * same-user re-emit guard is keyed on its own ref, so nothing there changes. */
+   * same-user re-emit guard is keyed on its own ref, so nothing there changes.
+   *
+   * B927105 — `setActiveUser` now comes from `activeUser.js`, a leaf split out of `storage.js`
+   * specifically so this call can stay a plain, synchronous, statically-imported function. The
+   * old `storage.js` statically pulled in the whole site-model / element-sync engine (siteModel.js,
+   * cloudSync.js, elementSync.js, roadGeometry.js, …) — about 165 KB that has nothing to do with
+   * auth and was riding the shared entry chunk every route downloads (Notes included) for the
+   * sake of this one function plus `setScheduleLink` below. `activeUser.js` has no such import,
+   * so calling it here costs none of that. */
   useEffect(() => {
     if (!supabaseConfigured()) return;
     return onAuthChange((event, u) => {
