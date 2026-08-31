@@ -15,8 +15,11 @@
  *     still surfaces (0 rows matched because another session moved the row) — this only
  *     stops a tab racing ITSELF from manufacturing a false one.
  *
- * db/model_sheets.sql mirrors doc_reviews.sql's shape exactly (id/user_id/data jsonb/version
- * int/updated_at, same RLS). It has NOT been applied to production by this session — the
+ * db/model_sheets.sql mirrors doc_reviews.sql's ORIGINAL four-column CAS shape (id/user_id/
+ * data jsonb/version int/updated_at, same plain-owner RLS) — not the live public.doc_reviews
+ * table, which has since grown team_id/project_id/etc. through later migrations; this table is
+ * deliberately private/per-user, with no team_id, matching the payload below exactly. It has
+ * NOT been applied to production by this session — the
  * house rule for this task is read-only/SELECT-only on production data, and this repo's own
  * precedent (the Comps migrations, src/shared/CLAUDE.md) is that a session with read-only
  * production access hands a migration to the owner rather than applying it. Until it runs,

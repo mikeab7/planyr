@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-31 @ `2ca292b9` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-31 @ `9445d593` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_604 source files mapped._
+_606 source files mapped._
 
 ## infra
 
@@ -95,14 +95,18 @@ _604 source files mapped._
   - _exports_: `default (NumberFormatPicker)`
 - **`src/workspaces/model/components/SheetView.jsx`** — The virtualised sheet grid: row virtualization, rectangular selection, keyboard nav and the inline cell editor, mechanism lifted from the Schedule module's GridView.
   - _exports_: `default (SheetView)`, `HEADER_H`, `ROW_H`
+- **`src/workspaces/model/lib/modelSaveState.js`** — This module's status → the shared CloudSyncBadge's vocabulary; never claims "synced" for an unprovisioned cloud table.
+  - _exports_: `modelSaveState`
 - **`src/workspaces/model/lib/modelStore.js`** — Sheet persistence: local-storage write-through save plus a guarded cloud save (serializeWrites + optimisticUpsert) against `model_sheets`.
   - _exports_: `loadCloudSheet`, `readLocalSheet`, `saveCloudSheet`, `writeLocalSheet`
 - **`src/workspaces/model/lib/numberFormats.js`** — The number-format picker's preset list, each token handed straight to the shared engine's `formatValue`.
   - _exports_: `formatLabelFor`, `NUMBER_FORMATS`
-- **`src/workspaces/model/lib/sheetEngine.js`** — Wires the sheet model to the shared formula engine: evaluates every formula column in dependency order, and renders each cell's display/formula-bar text.
-  - _exports_: `displayFor`, `evaluateSheet`, `formulaBarText`, `formulaSource`, `literalTypedValue`
+- **`src/workspaces/model/lib/sheetEngine.js`** — Wires the sheet model to the shared formula engine: evaluates a per-CELL dependency graph (A1 grid refs + same-row `[Column]` refs), and renders each cell's display/formula-bar text.
+  - _exports_: `cellAddressText`, `displayFor`, `displayKindFor`, `evaluateSheet`, `formulaBarText`, `formulaSource`, `kindOf`, `literalTypedValue`
 - **`src/workspaces/model/lib/sheetModel.js`** — The pure spreadsheet data model: columns/cells/formulas, cell addressing, and every mutator (all pure, undo-stack-ready).
-  - _exports_: `addColumn`, `blankRange`, `cellKey`, `clearColumnFormula`, `colAt`, `columnIndexByName`, `commitCellText`, `createSheet`, `deleteColumn`, `migrateSheet`, `padRowCount`, `rawAt`, `renameColumn`, `setColumnFormula`, `setNumberFormat`, `setRaw`, `SHEET_VERSION`
+  - _exports_: `addColumn`, `blankRange`, `cellKey`, `colAt`, `columnIndexByName`, `commitCellText`, `createSheet`, `deleteColumn`, `ensureColumnCount`, `formatAt`, `isFormulaText`, `migrateSheet`, `padRowCount`, `rawAt`, `renameColumn`, `setNumberFormat`, `setRaw`, `SHEET_VERSION`, `usedRangeEnd`
+- **`src/workspaces/model/lib/sheetOps.js`** — Copy/paste/fill-down and the Ctrl+Arrow block-jump target, sharing the formula engine's relative-reference rewrite.
+  - _exports_: `copyRange`, `ctrlArrowTarget`, `fillDown`, `pasteRange`
 - **`src/workspaces/model/lib/undoStack.js`** — General whole-state undo/redo: a snapshot stack keyed on committed edits, agnostic to what kind of edit each one was.
   - _exports_: `useUndoableState`
 - **`src/workspaces/model/ModelApp.jsx`** — Model workspace root: the underwriting spreadsheet — loads/saves the active project's sheet and wires the toolbar, formula bar and grid together.

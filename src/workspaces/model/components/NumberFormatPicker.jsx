@@ -11,7 +11,17 @@
  */
 import { NUMBER_FORMATS } from "../lib/numberFormats.js";
 
-export default function NumberFormatPicker({ token, onChange }) {
+// Narrow-viewport labels ONLY (item 8 — the picker's full labels, e.g. "Number (2 decimals)"
+// or "Currency (whole)", measured live at ~159 CSS px wide, is most of why the toolbar
+// overflowed a 729px window). These are shorter but still unambiguous; the CANONICAL labels
+// in numberFormats.js are untouched (formatLabelFor and the desktop picker keep the full
+// wording) — this is a presentation-only narrowing, scoped to this one component.
+const COMPACT_LABEL = {
+  general: "General", number0: "Number", number2: "Number .00", currency: "Currency",
+  currency0: "Currency 0", percent: "Percent", percent2: "Percent .00", accounting: "Accounting", sf: "$/SF",
+};
+
+export default function NumberFormatPicker({ token, onChange, compact }) {
   const current = NUMBER_FORMATS.find((f) => f.token === (token || null));
   return (
     <select
@@ -25,9 +35,10 @@ export default function NumberFormatPicker({ token, onChange }) {
       style={{
         font: "inherit", fontSize: 12.5, padding: "4px 6px", borderRadius: 6,
         border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-primary)",
+        width: compact ? 88 : undefined, flex: compact ? "0 0 88px" : undefined,
       }}
     >
-      {NUMBER_FORMATS.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+      {NUMBER_FORMATS.map((f) => <option key={f.id} value={f.id}>{compact ? (COMPACT_LABEL[f.id] || f.label) : f.label}</option>)}
     </select>
   );
 }
