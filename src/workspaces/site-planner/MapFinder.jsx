@@ -2375,31 +2375,53 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
    * <select> above the layer list. That control is now a row INSIDE the list (LayerPanel's basemap
    * control), styled by the panel, so the object had no reader left. */
 
-  // B855952 (NEW-1) — one left-rail site row, ONE LINE: status dot · name · shared-with · last
-  // edited. Status is carried by the dot AND the group header it sits under, so the old subtitle
-  // repeating "Pursuit · 89.8 AC" a third time is gone — inside a status group the word is noise.
-  // Shared by every status section and the Pinned section (B855953) alike.
-  const siteRow = (s) => {
+  // B885136 (NEW-1) — Option E ("quiet rows"), owner-approved from 5 reviewed directions
+  // (2026-08-30). Two things B855952's row still got wrong: the org/team chip outweighed the
+  // name (9.5px/700 accent-colored vs 12.5px/600 ink — the heaviest, only-colored thing in the
+  // row was the least useful fact) and cost the name real width every render; and inside a
+  // single-status group the per-row dot repeats the group header's own colour+count once per
+  // row for nothing. Fix: no per-row dot INSIDE a status group (`showStatusDot=false` — the
+  // header already carries it); the org chip renders but stays invisible (opacity, not
+  // display:none — VIEWPORT-STABLE) until the row is hovered OR focused, in a slot reserved at
+  // its full width the whole time so revealing it never shifts the name or the date; name is
+  // the one flexible element and truncates last; date is a fixed tabular-nums column.
+  // The Pinned section (below) mixes every status under one header, so IT still needs a
+  // per-row indicator — `showStatusDot=true` there is deliberate, not an oversight (see call
+  // sites). Shared by every status section and the Pinned section alike.
+  const siteRow = (s, { showStatusDot = false } = {}) => {
     const isActive = s.id === activeSiteId;
     const st = statusOf(s); const t = statusToken(st);
     // B849344 — canonical boundary (see siteBoundaryInfo); an honest "…" (checking) while
     // the summary hasn't loaded yet, never a confident wrong "no boundary" (LOUD-FAILURE).
     const boundary = siteBoundaryInfo(s, parcelSummary);
+    // Hover OR keyboard focus reveals the org chip + the locate target together (React's
+    // onFocus/onBlur bubble from focusin/focusout since React 17, so this fires for any
+    // focusable descendant — the chip, the share glyph, the locate button — without a second
+    // focus-tracking mechanism). Without this, hover-only content is unreachable by keyboard.
     const showActions = hoverRow === s.id || isActive;
+    const isRenaming = renaming && renaming.id === s.id;
+    // Touch/narrow viewport: 28px is a fine dense-desktop row but under a comfortable touch
+    // target (WCAG 2.5.5's 44×44 CSS px). This panel DOES render at the phone-narrow breakpoint
+    // (same `narrow` state the panel shell above keys off), so it gets the larger row there.
+    const rowH = narrow ? 44 : 28;
     return (
       <div key={s.id} title={s.origin ? "Open site (double-click to fly here · right-click for status / pin / rename / delete)" : "Open site (right-click for status / pin / rename / delete)"}
         onClick={() => onOpenSite && onOpenSite(s.id)}
         onDoubleClick={() => flyToSite(s)}
         onMouseEnter={() => setHoverRow(s.id)} onMouseLeave={() => setHoverRow((r) => (r === s.id ? null : r))}
+        onFocus={() => setHoverRow(s.id)}
+        onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setHoverRow((r) => (r === s.id ? null : r)); }}
         onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); openSiteMenu(s, e.clientX, e.clientY); }}
-        style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 12px", cursor: "pointer", borderLeft: `3px solid ${isActive ? PAL.accent : "transparent"}`, background: isActive ? "#fbf3ee" : "transparent" }}>
-        <button title={`Status: ${STATUS_META[st]?.label || st} — click to change`} aria-label="Set status"
-          onClick={(e) => { e.stopPropagation(); openSiteMenu(s, e.clientX, e.clientY); }}
-          style={{ width: 15, height: 15, flex: "none", display: "grid", placeItems: "center", borderRadius: RADIUS.pill, cursor: "pointer", padding: 0,
-            border: `1.5px solid ${t.color}`, background: t.hollow ? "var(--surface-raised)" : t.color, color: t.hollow ? t.color : "#fff", fontSize: 9, lineHeight: 1, fontFamily: "inherit" }}>
-          {t.glyph}
-        </button>
-        {renaming && renaming.id === s.id ? (
+        style={{ display: "flex", alignItems: "center", gap: 8, height: rowH, padding: "0 12px", cursor: "pointer", position: "relative", borderLeft: `3px solid ${isActive ? PAL.accent : "transparent"}`, background: isActive ? "#fbf3ee" : "transparent" }}>
+        {showStatusDot && (
+          <button title={`Status: ${STATUS_META[st]?.label || st} — click to change`} aria-label="Set status"
+            onClick={(e) => { e.stopPropagation(); openSiteMenu(s, e.clientX, e.clientY); }}
+            style={{ width: 15, height: 15, flex: "none", display: "grid", placeItems: "center", borderRadius: RADIUS.pill, cursor: "pointer", padding: 0,
+              border: `1.5px solid ${t.color}`, background: t.hollow ? "var(--surface-raised)" : t.color, color: t.hollow ? t.color : "#fff", fontSize: 9, lineHeight: 1, fontFamily: "inherit" }}>
+            {t.glyph}
+          </button>
+        )}
+        {isRenaming ? (
           <input autoFocus defaultValue={renaming.name}
             onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
@@ -2408,63 +2430,77 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               else if (e.key === "Escape") cancelRename();
             }}
             onBlur={(e) => { if (skipRenameBlurRef.current) { skipRenameBlurRef.current = false; return; } commitRename(s.id, e.target.value, renaming.name); }}
-            style={{ flex: 1, minWidth: 0, boxSizing: "border-box", fontSize: 12.5, fontWeight: 600, color: PAL.ink, fontFamily: "inherit", padding: "1px 4px", border: `1px solid ${PAL.accent}`, borderRadius: RADIUS.sm, outline: "none", background: "var(--surface-raised)" }} />
+            style={{ flex: 1, minWidth: 0, boxSizing: "border-box", fontSize: 12, fontWeight: 600, color: PAL.ink, fontFamily: "inherit", padding: "1px 4px", border: `1px solid ${PAL.accent}`, borderRadius: RADIUS.sm, outline: "none", background: "var(--surface-raised)" }} />
         ) : (
           <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6, overflow: "hidden" }}>
-            <span style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textDecoration: t.struck ? "line-through" : "none" }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textDecoration: t.struck ? "line-through" : "none" }}>
               {s.site || s.name || "Untitled site"}
             </span>
             {/* B845089 — the "no boundary" flag used to live in the acreage column; that column is
                 now last-edited, which a boundary-less site still has, so the flag moved here instead
-                of being lost. */}
+                of being lost. Unaffected by B885136 — it's a standing fact about the site, not a
+                hover reveal, so it stays visible at rest same as before. */}
             {boundary.known && !boundary.hasBoundary && (
               <span title="No boundary drawn yet" style={{ flex: "none", fontSize: 9.5, fontWeight: 700, color: PAL.muted, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.pill, padding: "1px 6px", whiteSpace: "nowrap" }}>no boundary</span>
             )}
-            {/* B845088 (NEW-1) — owner override (live review, 2026-08-30): show the TEAM a site is
-                shared with, never the people in it. Retires the roster-monogram (B859504 +
-                amendment) — see lib/sharedWithTeam.js's header for why a per-person branch isn't
-                built (no per-person sharing mechanism exists in this schema). */}
-            {s.teamId && (() => {
-              const disp = sharedWithDisplay(s.teamId, myTeams);
-              if (disp.kind === "none") return null;
-              if (disp.kind === "team") {
-                return (
-                  <span tabIndex={0} title={`Shared with ${disp.name}`} aria-label={`Shared with ${disp.name}`}
-                    style={{ flex: "none", maxWidth: 84, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                      fontSize: 9.5, fontWeight: 700, color: PAL.accent, background: "var(--surface-overlay)",
-                      border: `1px solid ${PAL.accent}`, borderRadius: RADIUS.pill, padding: "1px 6px", lineHeight: 1.5 }}>
-                    {disp.name}
-                  </span>
-                );
-              }
-              // "unknown" — shared, but the team no longer names anything this account can see
-              // (deleted, or the viewer left it). Still shared, so still say so — just not with whom.
-              return (
-                <span tabIndex={0} title="Shared" aria-label="Shared" style={{ flex: "none", display: "flex", alignItems: "center", color: PAL.accent }}>
-                  <ShareGlyph size={12} />
-                </span>
-              );
-            })()}
           </div>
         )}
+        {/* B885136 (NEW-1) — the org/team chip: invisible at rest, reveals on hover/focus.
+            NOT a reserved-width flex sibling — a WIDE team name (e.g. "HIP Houston") in a
+            fixed-width flex slot was measured to steal enough room to truncate even a short
+            name like "Richfield" on this panel's real (232px) width, reproducing the exact
+            defect this item exists to fix. Anchored instead on a ZERO-WIDTH relatively-
+            positioned span sitting where the chip would start (right before the locate slot):
+            the name-wrapper above always gets its full flex share regardless of hover state or
+            team presence (never a truncation "did not have to happen"), and the chip paints as
+            an absolutely-positioned overlay, growing left from that fixed anchor, which is what
+            actually satisfies "revealing it on hover does NOT shift the name or the date" —
+            an out-of-flow element cannot shift a sibling's box no matter what it renders. */}
+        {s.teamId && !isRenaming && (() => {
+          const disp = sharedWithDisplay(s.teamId, myTeams);
+          if (disp.kind === "none") return null;
+          const revealStyle = { opacity: showActions ? 1 : 0, transition: "opacity .12s", pointerEvents: showActions ? "auto" : "none" };
+          const chip = disp.kind === "team"
+            ? (
+              <span tabIndex={0} title={`Shared with ${disp.name}`} aria-label={`Shared with ${disp.name}`}
+                style={{ position: "absolute", right: 0, top: "50%", transform: "translateY(-50%)", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  fontSize: 9.5, fontWeight: 700, color: PAL.accent, background: "var(--surface-overlay)",
+                  border: `1px solid ${PAL.accent}`, borderRadius: RADIUS.pill, padding: "1px 6px", lineHeight: 1.5, ...revealStyle }}>
+                {disp.name}
+              </span>
+            )
+            // "unknown" — shared, but the team no longer names anything this account can see
+            // (deleted, or the viewer left it). Still shared, so still say so — just not with whom.
+            : (
+              <span tabIndex={0} title="Shared" aria-label="Shared"
+                style={{ position: "absolute", right: 0, top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", color: PAL.accent, ...revealStyle }}>
+                <ShareGlyph size={12} />
+              </span>
+            );
+          return <span style={{ position: "relative", width: 0, height: "100%", flex: "none" }}>{chip}</span>;
+        })()}
         {/* B845089 (NEW-2) — the right-aligned column is now LAST EDITED, not acreage: "get rid of
             the acreage... date last edited would be more likely to be important" (owner, live
             review). The value is the group's real last EDIT (max across every plan's live
             site_elements rows) — never `sites.updated_at`, which advances on a header change (a
-            rename, opening the plan) and not on a drawing edit; see lib/siteRecency.js. */}
+            rename, opening the plan) and not on a drawing edit; see lib/siteRecency.js.
+            B885136 — font/colour now match the app's own --font-sm/--text-tertiary tokens
+            exactly (was a hardcoded 11px against --text-secondary); fontVariantNumeric keeps the
+            digits tabular so "1d" and "Jul 14" don't jiggle the column width. */}
         <div style={{ flex: "none", minWidth: 34, display: "flex", justifyContent: "flex-end" }}>
           {lastEditedByGroup === null ? (
-            <span title="Checking last edit…" style={{ fontSize: 11, color: PAL.muted, fontFamily: NUM_FONT }}>…</span>
+            <span title="Checking last edit…" style={{ fontSize: 10.5, color: "var(--text-tertiary)", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>…</span>
           ) : (() => {
             const ms = lastEditedByGroup[s.groupId || s.id] ?? null;
             const label = lastEditedLabel(ms);
             return label ? (
-              <span title={`Last edited ${new Date(ms).toLocaleString()}`} style={{ fontSize: 11, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap" }}>{label}</span>
-            ) : <span style={{ fontSize: 11, color: PAL.muted }}>—</span>;
+              <span title={`Last edited ${new Date(ms).toLocaleString()}`} style={{ fontSize: 10.5, color: "var(--text-tertiary)", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap" }}>{label}</span>
+            ) : <span style={{ fontSize: 10.5, color: "var(--text-tertiary)", fontVariantNumeric: TABULAR_NUMS }}>—</span>;
           })()}
         </div>
         {/* (B168) single-click ✕ delete removed — delete lives in the right-click menu;
-            only the non-destructive locate (⊕) stays here. */}
+            only the non-destructive locate (⊕) stays here. Already reserved-width + opacity-only
+            (the B885136 pattern the org chip above now follows too). */}
         <div style={{ display: "flex", gap: 2, flex: "none", alignItems: "center", opacity: showActions ? 1 : 0, transition: "opacity .12s", pointerEvents: showActions ? "auto" : "none" }}>
           {s.origin && <button title="Show on map (zoom to the plan)" aria-label="Show on map" onClick={(e) => { e.stopPropagation(); flyToSite(s); }}
             className="gbtn" style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", lineHeight: 0, padding: 2, borderRadius: RADIUS.sm }}>
@@ -2858,7 +2894,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                           </svg>
                         </button>
                       </div>
-                      {!collapsed && visibleRows.map(siteRow)}
+                      {!collapsed && visibleRows.map((s) => siteRow(s))}
                     </div>
                   );
                 }).filter(Boolean);
@@ -2875,7 +2911,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                           <span style={{ color: PAL.muted, fontWeight: 700, fontSize: 11 }}>{pinnedRows.length}</span>
                         </div>
                         <div style={{ maxHeight: pinnedRows.length > 6 ? 192 : "none", overflowY: pinnedRows.length > 6 ? "auto" : "visible" }}>
-                          {pinnedRows.map(siteRow)}
+                          {/* B885136 — Pinned is the one FLAT/mixed-status view: a pinned Pursuit
+                              site and a pinned Active site sit under the same "Pinned" header,
+                              which carries no single status colour, so the per-row dot is the
+                              only thing here that still says which is which. */}
+                          {pinnedRows.map((s) => siteRow(s, { showStatusDot: true }))}
                         </div>
                       </div>
                     )}
