@@ -219,7 +219,12 @@ export default function ModelApp({
                 {showMore && (
                   <>
                     <div onClick={() => setShowMore(false)} style={{ position: "fixed", inset: 0, zIndex: 89 }} />
-                    <div role="menu" style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 90, minWidth: 140, padding: 4, borderRadius: 8, border: "1px solid var(--border-default)", background: "var(--surface-raised)", boxShadow: "0 8px 20px rgba(0,0,0,0.25)" }}>
+                    {/* No box-shadow: this repo has no shadow-color token yet (docs/DESIGN.md's
+                        token layer doesn't cover it — plenty of pre-existing raw-color shadow
+                        literals already carry that debt elsewhere), and this menu doesn't need
+                        to add one; the border + raised surface read as popped-over content
+                        without it. */}
+                    <div role="menu" style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 90, minWidth: 140, padding: 4, borderRadius: 8, border: "1px solid var(--border-default)", background: "var(--surface-raised)" }}>
                       <button
                         type="button"
                         onClick={() => { setShowMore(false); onDeleteColumn(); }}
