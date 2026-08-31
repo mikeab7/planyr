@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-31 @ `15297a07` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-31 @ `d0c1b3a6` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_615 source files mapped._
+_616 source files mapped._
 
 ## infra
 
@@ -391,11 +391,11 @@ _615 source files mapped._
 - **`src/shared/sitePlans/components/SitePlansSection.jsx`** — Upload a site plan (PDF/image), pick+rasterize its page, anchor it on the map, and pin comps to it — self-contained data owner rendered by MapFinder above the Comps list
   - _exports_: `default (SitePlansSection)`
 - **`src/shared/sitePlans/lib/overlayGeoref.js`** — Pure georeferencing math for a site-plan overlay: image-px <-> state-plane feet <-> lat/lon via a similarity transform solved from >=2 control points, plus the independent lat/lon distance scale-check
-  - _exports_: `imagePointToLatLon`, `invertOverlayTransform`, `latLonToImagePoint`, `measureLatLonFeet`, `overlayCornersLatLon`, `solveOverlayTransform`
+  - _exports_: `latLonToImagePoint`, `overlayCornersFromPlacement`, `rotatePlacement`, `scalePlacement`, `suggestFtPerPx`, `validPlacement`
 - **`src/shared/sitePlans/lib/overlayRasterStorage.js`** — Supabase Storage for a site-plan overlay's cached rasterized page (doc-review-files bucket, uid-first key), mirroring site-planner overlayStorage.js's shape
   - _exports_: `BUCKET`, `deleteOverlayRaster`, `downloadOverlayRasterUrl`, `MAX_BYTES`, `overlayRasterKey`, `uploadOverlayRaster`
 - **`src/shared/sitePlans/lib/sitePlanOverlays.js`** — Site-plan-overlay pure data model: control-point validation, derived transform metrics, row<->object mapping (mirrors comps.js's shape)
-  - _exports_: `deriveOverlayMetrics`, `overlayToRow`, `rowToOverlay`, `validControlPoints`, `validOverlayUpload`
+  - _exports_: `overlayPlaced`, `overlayToRow`, `rowToOverlay`, `validOverlayUpload`
 - **`src/shared/sitePlans/lib/sitePlanOverlayStore.js`** — Supabase CRUD for `public.site_plan_overlays` (team-read/owner-write RLS), mirroring compsStore.js's shape
   - _exports_: `deleteOverlay`, `fetchAllOverlays`, `insertOverlay`, `updateOverlay`
 - **`src/shared/storage/originStore.js`** — Dependency-free read/delete-by-prefix access to the origin's IndexedDB kv store, so shared chrome can census and clear it without importing a workspace module (which hoists the cache into a route chunk)
@@ -911,6 +911,8 @@ _615 source files mapped._
   - _exports_: `OVERLAY_BAND_ABOVE`, `OVERLAY_BAND_BELOW`, `overlayBand`, `overlayBandsGrouped`, `overlayDrawOrder`, `overlayOrderFlags`, `overlayPanelOrder`, `reorderOverlays`, `setOverlayBand`, `splitOverlayBands`
 - **`src/workspaces/site-planner/lib/overlayPdf.js`** — Site-plan overlay rasterizer: lazily reuses Doc Review PDF.js to render a dropped PDF/image page to a white-knockout PNG data URL, reads its scale note, classifies sheet size, rebuilds from stored bytes
   - _exports_: `baseRasterScale`, `chooseOverlayRasterScale`, `HIRES_CACHE_PER_OVERLAY`, `isDxfFile`, `isPdfFile`, `knockoutNearWhite`, `MAX_RERASTER_DIM`, `openOverlayFile`, `overlayRasterKey`, `rasterizePage`, `rasterizePageHiRes`, `rasterizeStoredDxf`, `rasterizeStoredPdf`, `RERASTER_LADDER`
+- **`src/workspaces/site-planner/lib/overlayPlacementHandles.js`** — Direct-manipulation map chrome for a site-plan overlay: move / corner-scale / rotate handles, mirroring the Site Planner's own on-canvas reference-image tool (B848496)
+  - _exports_: `createPlacementHandles`
 - **`src/workspaces/site-planner/lib/overlayPrint.js`** — Pure DOM-free print/export selection for placed site-plan overlays: filters src-bearing visible overlays, drives the 'Print overlay' checkbox visibility and the export compositing pass
   - _exports_: `hasPrintableOverlay`, `isOverlayPrintable`, `printableOverlays`
 - **`src/workspaces/site-planner/lib/overlayScale.js`** — Pure drawing-scale helpers: engineer scale-note parsing, standard sheet detection, feet-per-point conversions, viewport-sanity auto-scale guard, and Bluebeam-style page=real distance/preset scale entry

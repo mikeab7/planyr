@@ -46,7 +46,8 @@ import { siteState } from "./lib/siteRegion.js";
 import { MAP_CHROME_Z, panelMaxHeight, ZOOM_CONTROL_CLEARANCE_PX } from "./lib/mapChromeStack.js";
 // B848848 — site-plan overlays (upload a site plan, anchor it on the map, pin comps to it).
 import { useSitePlanOverlayLayers } from "./lib/useSitePlanOverlayLayers.js";
-import { latLonToImagePoint } from "../../shared/sitePlans/lib/overlayGeoref.js";
+import { latLonToImagePoint, suggestFtPerPx } from "../../shared/sitePlans/lib/overlayGeoref.js";
+import { projectToGrid } from "../../shared/coordinates/index.js";
 // Reused (never a new raw hex literal) for text on the fixed COMP_ACCENT blue below — that
 // accent doesn't change with theme, so the LIGHT palette's on-accent value is correct in both.
 import { PALETTES } from "../../shared/theme/palette.js";
@@ -567,6 +568,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const labelsRef = useRef(null);
   const selectModeRef = useRef(false); // read by the once-bound map handlers
   const placingCompPinRef = useRef(false); // NEW-COMPS: armed by "+ Comp", read by the once-bound click handler
+  const activeOverlayIdRef = useRef(null); // NEW-2 (B848496): read by the once-bound click handler, to deselect on a background click
   const selectedRef = useRef([]);
   const draggingRef = useRef(false);
   // NEW-2 — read live by the once-bound raster hover-identify handlers, so toggling a layer
@@ -643,14 +645,15 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   };
   const [zoom, setZoom] = useState(null);
 
-  // ---- Site-plan overlays (B848848) — upload a site plan, anchor it on the map, pin comps to
-  // buildings on it. The DATA (fetch/list/upload/anchor UI) is owned by SitePlansSection, the
-  // same self-contained-data-owner shape CompsPanel already uses; this component owns only what
-  // the REAL Leaflet map has to do: render the anchored overlays (useSitePlanOverlayLayers,
-  // below) and the two map-click mechanisms SitePlansSection reuses rather than re-inventing —
-  // a generic "click anywhere on the map" request (georeference control points, the scale
-  // check) and a "the next click ON one specific overlay's rendered image" mode (pinning a
-  // comp), which resolves through the EXISTING onPlaceComp/pendingCompAnchor flow.
+  // ---- Site-plan overlays (B848496) — upload a site plan, place it on the map by DIRECT
+  // MANIPULATION (drag / corner-scale / rotate, mirroring the Site Planner's own on-canvas
+  // reference-image tool — the owner rejected the original control-point wizard outright), pin
+  // comps to buildings on it. The DATA (fetch/list/upload UI) is owned by SitePlansSection, the
+  // same self-contained-data-owner shape CompsPanel already uses; this component owns what the
+  // REAL Leaflet map has to do: render the placed overlays + their live drag handles
+  // (useSitePlanOverlayLayers, below), which overlay is armed for editing, and the "the next
+  // click ON one specific overlay's rendered image" mode (pinning a comp), which resolves
+  // through the EXISTING onPlaceComp/pendingCompAnchor flow.
   const [sitePlanOverlays, setSitePlanOverlays] = useState([]);
   const overlaysById = useMemo(() => Object.fromEntries(sitePlanOverlays.map((o) => [o.id, o])), [sitePlanOverlays]);
   // Meaningless zoomed all the way out — a site plan is building-scale detail.
@@ -660,29 +663,42 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     [sitePlanOverlays, zoom]
   );
 
-  const pendingMapClickRef = useRef(null); // {resolve} while a generic map-point request is in flight, read by the once-bound click handler
-  const [mapClickPrompt, setMapClickPrompt] = useState(null);
-  const requestMapPoint = (prompt) => new Promise((resolve) => {
-    setMapClickPrompt(prompt);
-    pendingMapClickRef.current = { resolve };
-  });
-  const cancelMapPoint = () => {
-    if (pendingMapClickRef.current) { pendingMapClickRef.current.resolve(null); pendingMapClickRef.current = null; }
-    setMapClickPrompt(null);
+  const [activeOverlayId, setActiveOverlayId] = useState(null); // armed for move/scale/rotate editing
+  useEffect(() => { activeOverlayIdRef.current = activeOverlayId; }, [activeOverlayId]);
+  const commitPlacementRef = useRef(null); // set by SitePlansSection; called once per finished drag
+  const commitOverlayPlacement = (id, placement) => { commitPlacementRef.current && commitPlacementRef.current(id, placement); };
+
+  // A sensible starting size/position for a freshly placed overlay: centered on the current map
+  // view, sized to a fraction of it (mirrors the Site Planner reference-image panel's own "Size
+  // to view" button). Pure sizing math lives in overlayGeoref.js; only the live view is read here.
+  const suggestPlacement = (imgW, imgH) => {
+    const m = mapRef.current;
+    if (!m || !imgW || !imgH) return null;
+    const c = m.getCenter();
+    const size = m.getSize();
+    const midY = size.y / 2;
+    const pL = m.containerPointToLatLng([0, midY]), pR = m.containerPointToLatLng([size.x, midY]);
+    const gL = projectToGrid(pL.lat, pL.lng), gR = projectToGrid(pR.lat, pR.lng);
+    const viewWidthFt = Math.hypot(gR.x - gL.x, gR.y - gL.y);
+    return { centerLat: c.lat, centerLon: c.lng, ftPerPx: suggestFtPerPx(viewWidthFt, imgW), rotationDeg: 0 };
   };
 
   const [clickableOverlayId, setClickableOverlayId] = useState(null); // "pin a comp" mode, armed on one overlay
-  const startPinOnOverlay = (id) => setClickableOverlayId(id);
+  const startPinOnOverlay = (id) => { setActiveOverlayId(null); setClickableOverlayId(id); };
   const stopPinOnOverlay = () => setClickableOverlayId(null);
   const placeCompOnOverlay = (overlay, latlng) => {
     setClickableOverlayId(null);
-    const sitePlanPoint = latLonToImagePoint(overlay.controlPoints, latlng.lat, latlng.lng);
+    const sitePlanPoint = latLonToImagePoint(overlay, overlay.imgW, overlay.imgH, latlng.lat, latlng.lng);
     onPlaceComp && onPlaceComp({
       kind: "site_plan", lat: latlng.lat, lon: latlng.lng,
       sitePlanOverlayId: overlay.id, sitePlanPoint,
     });
   };
-  useSitePlanOverlayLayers(mapRef.current, visibleSitePlanOverlays, clickableOverlayId, placeCompOnOverlay);
+  const selectOverlay = (id) => { setClickableOverlayId(null); setActiveOverlayId(id); };
+  useSitePlanOverlayLayers(mapRef.current, visibleSitePlanOverlays, {
+    pinTargetId: clickableOverlayId, onPinClick: placeCompOnOverlay,
+    activeId: activeOverlayId, onSelect: selectOverlay, onCommitPlacement: commitOverlayPlacement,
+  });
 
   // "Open source brochure" from a comp's detail view (CompsPanel) — reuses the existing
   // cross-workspace open-review intent (Shell.openReviewInDocReview), the same one Library
@@ -715,6 +731,67 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     try { return localStorage.getItem("planarfit:sitesPanelClosed:v1") !== "1"; } catch (_) { return true; }
   });
   const toggleSitesPanel = () => setSitesPanelOpen((v) => { const n = !v; try { localStorage.setItem("planarfit:sitesPanelClosed:v1", n ? "0" : "1"); } catch (_) {} return n; });
+
+  // ---- Drag-and-drop a brochure straight onto the map (NEW-2, second amendment) ------------
+  // The owner's explicit ask: this is the PRIMARY way a brochure gets in (they arrive as email
+  // attachments dragged out of Downloads), and the file-picker inside SitePlansSection stays
+  // only as the fallback. THE GOTCHA: a browser's default reaction to a dropped file is to
+  // navigate the whole tab to it — miss the drop zone by a pixel and the app is gone, unsaved
+  // state included. `preventDefault` on a drop zone alone does not stop that; it has to happen
+  // on `dragover` AND `drop` at the WINDOW level, gated on `dataTransfer.types.includes("Files")`
+  // so a file drag is never confused with the map's own pan-by-drag, the planner's element drag,
+  // or the schedule's row drag — none of which use the browser's HTML5 Drag and Drop API, so
+  // none of them can trip this gate.
+  const dropIntakeRef = useRef(null); // set by SitePlansSection; called with (fileList, dropPlacement)
+  const [fileDragActive, setFileDragActive] = useState(false);
+  const fileDragDepth = useRef(0); // dragenter/dragleave fire per element crossed, not per drag — a counter avoids flicker
+  const onRejectDroppedFile = (name, reason) => setErr(`Couldn't add "${name}" — ${reason}.`);
+
+  useEffect(() => {
+    const isFileDrag = (e) => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files");
+    const onDragEnter = (e) => {
+      if (!visible || !isFileDrag(e)) return;
+      e.preventDefault();
+      fileDragDepth.current += 1;
+      setFileDragActive(true);
+    };
+    const onDragOver = (e) => {
+      if (!visible || !isFileDrag(e)) return;
+      e.preventDefault(); // the whole point — without this the browser navigates the tab to the file
+      e.dataTransfer.dropEffect = "copy";
+    };
+    const onDragLeave = (e) => {
+      if (!visible || !isFileDrag(e)) return;
+      e.preventDefault();
+      fileDragDepth.current = Math.max(0, fileDragDepth.current - 1);
+      if (fileDragDepth.current === 0) setFileDragActive(false);
+    };
+    const onDrop = (e) => {
+      if (!visible || !isFileDrag(e)) return;
+      e.preventDefault(); // stop the tab-navigation gotcha on the actual drop too, not just dragover
+      fileDragDepth.current = 0;
+      setFileDragActive(false);
+      const files = e.dataTransfer.files;
+      if (!files || !files.length) return;
+      setMode("comp");
+      if (!sitesPanelOpen) toggleSitesPanel();
+      let dropPlacement = null;
+      const m = mapRef.current;
+      if (m) { const ll = m.mouseEventToLatLng(e); dropPlacement = { centerLat: ll.lat, centerLon: ll.lng }; }
+      dropIntakeRef.current && dropIntakeRef.current(files, dropPlacement);
+    };
+    window.addEventListener("dragenter", onDragEnter);
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("dragleave", onDragLeave);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      window.removeEventListener("dragenter", onDragEnter);
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("dragleave", onDragLeave);
+      window.removeEventListener("drop", onDrop);
+    };
+  }, [visible, sitesPanelOpen]);
+
   // NEW-COMPS/NEW-2 — a comp pin just dropped or an existing comp's marker just got clicked: the
   // Comps tab is what should be showing to act on it, wherever the rail happened to be pointed.
   useEffect(() => {
@@ -1266,15 +1343,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     L.control.scale({ imperial: true, metric: false, position: "bottomright", maxWidth: 130 }).addTo(map); // graphic scale (B96b)
     setZoom(map.getZoom());
     const onClick = (e) => {
-      if (pendingMapClickRef.current) {
-        const { resolve } = pendingMapClickRef.current;
-        pendingMapClickRef.current = null;
-        setMapClickPrompt(null);
-        resolve({ lat: e.latlng.lat, lng: e.latlng.lng });
-        return;
-      }
       if (placingCompPinRef.current) { placeCompPinAtRef.current(e.latlng); return; }
-      if (selectModeRef.current) handleClick(e.latlng);
+      if (selectModeRef.current) { handleClick(e.latlng); return; }
+      // A background click (nothing else claimed it) deselects a site plan armed for editing —
+      // its own image click already stops propagation before this ever runs (B848496 NEW-2).
+      if (activeOverlayIdRef.current) setActiveOverlayId(null);
     };
     const onZoom = () => setZoom(map.getZoom());
     // Resolve the Layers-panel jurisdiction from the map's current area (B13): pick the
@@ -2664,12 +2737,9 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           }} />
         )}
 
-        {/* B848848 — site-plan anchoring/scale-check (a generic "click anywhere on the map"
-            request) and "pin a comp to this plan" (a click on the plan's own rendered image)
-            both need the same visible-armed-state treatment B831781 established above: a
-            prompt banner naming what to do, since the prompt text itself varies here (unlike
-            the comp-drop case, which only ever means one thing). */}
-        {(mapClickPrompt || clickableOverlayId) && (
+        {/* B848496 — "pin a comp to this plan" (a click on the plan's own rendered image) gets
+            the same visible-armed-state treatment B831781 established above for a comp drop. */}
+        {clickableOverlayId && (
           <>
             <div aria-hidden="true" data-testid="map-siteplan-armed" style={{
               position: "absolute", inset: 0, zIndex: MAP_CHROME_Z.control, pointerEvents: "none",
@@ -2680,10 +2750,26 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               background: COMP_ACCENT, color: ON_COMP_ACCENT, borderRadius: RADIUS.pill, padding: "6px 14px", fontSize: 12.5, fontWeight: 600,
               display: "flex", alignItems: "center", gap: 10, maxWidth: "calc(100% - 40px)",
             }}>
-              <span>{mapClickPrompt || "Click the plan on the map to pin a comp there"}</span>
-              <button onClick={() => { cancelMapPoint(); stopPinOnOverlay(); }} style={{ border: `1px solid ${ON_COMP_ACCENT}`, background: "transparent", color: ON_COMP_ACCENT, borderRadius: RADIUS.pill, width: 18, height: 18, lineHeight: "16px", padding: 0, cursor: "pointer", flex: "none" }} aria-label="Cancel">×</button>
+              <span>Click the plan on the map to pin a comp there</span>
+              <button onClick={() => stopPinOnOverlay()} style={{ border: `1px solid ${ON_COMP_ACCENT}`, background: "transparent", color: ON_COMP_ACCENT, borderRadius: RADIUS.pill, width: 18, height: 18, lineHeight: "16px", padding: 0, cursor: "pointer", flex: "none" }} aria-label="Cancel">×</button>
             </div>
           </>
+        )}
+
+        {/* B848496 second amendment — a real drop target: a full-area highlight naming what will
+            happen, shown the instant a file is dragged over the map (never a silent accept).
+            `pointer-events: none` throughout — the window-level listeners above own the actual
+            drag/drop events; this is feedback only and must never be able to steal a drop. */}
+        {fileDragActive && (
+          <div aria-hidden="true" data-testid="map-file-drop-active" style={{
+            position: "absolute", inset: 0, zIndex: MAP_CHROME_Z.control + 2, pointerEvents: "none",
+            boxShadow: `inset 0 0 0 3px ${COMP_ACCENT}, inset 0 0 26px -8px ${COMP_ACCENT}`,
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <div style={{ background: COMP_ACCENT, color: ON_COMP_ACCENT, borderRadius: RADIUS.lg, padding: "12px 20px", fontSize: 14, fontWeight: 700 }}>
+              Drop to add a site plan
+            </div>
+          </div>
         )}
 
         {/* Live GPS readout (B683): the cursor's WGS84 lat/long, bottom-center so it clears the
@@ -2971,14 +3057,35 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             useful with zero sites and zero comps alike — this is the one persistent place to
             browse or add either. */}
         <div style={{ position: "absolute", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, boxShadow: "0 4px 18px rgba(28,25,20,0.14)", overflow: "hidden",
+            // B831777×2/B948496 — the rail must never grow past the viewport: it can hold a
+            // long site list, several site plans, or an open comp form, and any one of those
+            // used to just push the panel off-screen with no way to reach what fell below the
+            // fold (an unusable panel, not a polish gap — the comp form's own Size row was
+            // reported cut off with no way down to it). `display:flex/flexDirection:column`
+            // pins the header row and hands the content below it ONE scrollable region (added
+            // just below). Collapsed (sitesPanelOpen false) the panel must still shrink to its
+            // small closed-tab height, not stretch to fill the available space, which is why
+            // this is a CAP (`max-height`) and not a fixed/stretched height.
+            // ⛔ THE CAP IS `calc(100% - …)`, NEVER A VIEWPORT-RELATIVE `calc(100vh - Npx)` —
+            // measured live: this panel's positioned ancestor does not start at the viewport's
+            // own top (it sits below the app header), so a viewport-relative calc silently
+            // drifts by exactly that ancestor offset — the panel's own bottom edge ran 41px past
+            // the real viewport bottom at a short (iPhone) height even though the arithmetic
+            // "looked" right. `100%` here is relative to the SAME positioned ancestor `top`
+            // already measures from, so the two can't disagree — and it rides whatever that
+            // ancestor resolves to, so it also follows a mobile browser's address-bar chrome
+            // showing/hiding automatically, which a hardcoded number cannot.
+            display: "flex", flexDirection: "column",
             // Phone: drop below the full-width search bar; a slim tap when closed, a wider
             // overlay (above the layers panel) when the user opens it.
             ...(narrow
-              ? { top: 60, left: 8, zIndex: MAP_CHROME_Z.panel, width: sitesPanelOpen ? "min(320px, calc(100vw - 16px))" : 188 }
-              : { top: 10, left: 10, zIndex: MAP_CHROME_Z.panel, width: 232 }) }}>
+              ? { top: 60, left: 8, zIndex: MAP_CHROME_Z.panel, width: sitesPanelOpen ? "min(320px, calc(100vw - 16px))" : 188, maxHeight: "calc(100% - 68px)" }
+              : { top: 10, left: 10, zIndex: MAP_CHROME_Z.panel, width: 232, maxHeight: "calc(100% - 24px)" }) }}>
             {/* collapsible header (B106) + the two tabs — one row, always visible (never buried
-                behind the collapse), so both counts stay readable even with the list folded. */}
-            <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 6px 4px" }}>
+                behind the collapse, and now PINNED — flex:"none" against the scrollable body
+                below — so both counts stay readable, and reachable, no matter how long either
+                tab's content runs). */}
+            <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, padding: "6px 6px 4px" }}>
               {/* NEW-1/NEW-3 (map landing radius audit) — nestedIn(RADIUS.lg, 6), not a bare
                   RADIUS.sm literal: this header row sits 6px in from the panel's own RADIUS.lg=12
                   edge, same reasoning as RailTab just above (docs/DESIGN.md's radius exception 3). */}
@@ -2993,6 +3100,13 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               <RailTab label="Comps" count={comps.length} active={mode === "comp"}
                 onClick={() => { setMode("comp"); if (!sitesPanelOpen) toggleSitesPanel(); }} />
             </div>
+            {/* B948496 — everything below the pinned header is ONE scrollable region, so the
+                panel itself never grows past the viewport regardless of which tab is open or
+                how much either holds (a long site list, several site plans, an open comp
+                form). Sites-tab sections keep their own bounded inner scrollers (unchanged)
+                for per-group behavior; this outer scroller is the backstop that makes the
+                WHOLE panel — not just one nested list — reachable at any viewport height. */}
+            <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflowY: "auto" }}>
             {sitesPanelOpen && mode === "site" && (<>
             {/* B855952 (NEW-1) — the name filter and the sort control share ONE line (the status
                 chip row this replaced ate two). "Delete the status filter chip row" — owner,
@@ -3101,10 +3215,15 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                     active={sitesPanelOpen && mode === "comp"}
                     projects={sites}
                     onOverlaysChange={setSitePlanOverlays}
-                    onRequestMapPoint={requestMapPoint}
+                    suggestPlacement={suggestPlacement}
+                    activeOverlayId={activeOverlayId}
+                    onActivateOverlay={selectOverlay}
                     onStartPinOnOverlay={startPinOnOverlay}
                     onStopPinOnOverlay={stopPinOnOverlay}
                     pinningOverlayId={clickableOverlayId}
+                    commitPlacementRef={commitPlacementRef}
+                    dropIntakeRef={dropIntakeRef}
+                    onRejectFile={onRejectDroppedFile}
                   />
                 </Suspense>
               </PanelErrorBoundary>
@@ -3125,6 +3244,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                 />
               </Suspense>
             </PanelErrorBoundary>
+            </div>
           </div>
 
         {/* imagery + labels + overlay layers control — on a phone this collapses to a tap

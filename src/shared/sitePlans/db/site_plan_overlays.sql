@@ -1,7 +1,9 @@
--- Site-plan overlays (B848848 — upload a site plan, place it on the map, pin comps to
--- buildings shown on it). Run once in the Supabase SQL editor (project lyeqzkuiwngunutlkkmi),
--- AFTER site-planner/db/teams.sql (needs public.is_team_member) and doc-review/db/doc_reviews.sql
--- + project_library.sql (needs public.doc_reviews with its project_id column). Idempotent.
+-- Site-plan overlays (B848496 — upload a site plan, place it on the map by direct manipulation,
+-- pin comps to buildings shown on it). Run once in the Supabase SQL editor (project
+-- lyeqzkuiwngunutlkkmi), AFTER site-planner/db/teams.sql (needs public.is_team_member) and
+-- doc-review/db/doc_reviews.sql + project_library.sql (needs public.doc_reviews with its
+-- project_id column). Idempotent. This is the CURRENT target schema — see
+-- site_plan_overlays_placement.sql for the migration that got an already-deployed table here.
 --
 -- WHAT THIS IS: a site plan is its OWN entity, mirroring comps.sql's decision for comps — it
 -- MAY optionally reference a project, but never requires one, and is visible to a team the
@@ -13,24 +15,24 @@
 -- can carry several dated brochures over time (a 2024 flyer and a 2026 flyer describe
 -- different buildings/availability) — nothing here forces either count to stay at one.
 --
--- AUDIT-FIRST NOTE (found applying this migration): the repo's own doc_reviews.sql declares
--- `primary key (user_id, id)`, but production's LIVE constraint is `PRIMARY KEY (id)` alone
--- (doc_reviews.id, text, is globally unique there, not just per-user) — the deployed schema
--- has drifted from the checked-in migration file at some point. This migration follows the
--- deployed reality: `review_id` alone is the FK to doc_reviews; `review_user_id` is kept as a
--- plain informational column (not part of any FK) rather than assumed to be needed for
+-- AUDIT-FIRST NOTE (found applying the original migration): the repo's own doc_reviews.sql
+-- declares `primary key (user_id, id)`, but production's LIVE constraint is `PRIMARY KEY (id)`
+-- alone (doc_reviews.id, text, is globally unique there, not just per-user) — the deployed
+-- schema has drifted from the checked-in migration file at some point. This migration follows
+-- the deployed reality: `review_id` alone is the FK to doc_reviews; `review_user_id` is kept
+-- as a plain informational column (not part of any FK) rather than assumed to be needed for
 -- uniqueness.
 --
--- GEOREFERENCE: `control_points` (>=2 pairs of {px,py} image-pixel <-> {lat,lon}) is the
--- SOURCE OF TRUTH — the transform itself (a rotation+scale+translation similarity fit, see
--- shared/sitePlans/lib/overlayGeoref.js, which reuses the Site Planner reference-overlay's
--- own align-mode solver) is recomputed from these points on every read, never persisted as a
--- separate serialized closure, so it can never drift out of sync with what defines it.
--- `scale_ft_per_px`/`rotation_deg`/`fit_residual_ft` are DERIVED CACHE columns for cheap
--- display/sort — a write always recomputes and overwrites them, they are never edited
--- independently. `scale_check_ft`/`scale_check_note` record the post-anchor sanity check the
--- user ran (measuring a real distance on the map against something he knows) — deliberately
--- independent of the control points, so a badly-fit georeference can't hide behind its own math.
+-- PLACEMENT (B848496 NEW-2 — replaces the original 2-control-point georeference wizard, which
+-- the owner rejected: it was friction ("a wizard demanding he find corresponding features on
+-- two images before he sees anything") AND it shipped a real defect (a plan placed upside
+-- down — two points under-constrain a similarity fit, which can silently produce a mirror).
+-- `center_lat`/`center_lon`/`ft_per_px`/`rotation_deg` are a DIRECT placement — the same three
+-- knobs (move / corner-scale about the fixed center / rotate about the center) the Site
+-- Planner's own on-canvas reference-image tool already exposes (SitePlanner.jsx
+-- `sheetOverlays`) — computed live by drag on the map (shared/sitePlans/lib/overlayGeoref.js)
+-- and written here only on release. No control points, no fitted transform, no separate scale
+-- check: a direct rotation can never come out mirrored, so nothing needs to sanity-check it.
 
 create table if not exists public.site_plan_overlays (
   id             uuid not null default gen_random_uuid(),
@@ -41,29 +43,30 @@ create table if not exists public.site_plan_overlays (
   review_id      text not null,   -- the doc_reviews row holding the WHOLE brochure
   review_user_id uuid not null,   -- doc_reviews' PK is (user_id, id); carried for the FK below
   page           integer not null check (page >= 1),  -- which page of that document this overlay is
-  doc_title      text,            -- display cache: the brochure's title/filename when anchored
+  doc_title      text,            -- human-readable, editable name shown in the panel
   doc_date       date,            -- display cache: mirrors doc_reviews.doc_date (dated brochures)
+  source_file_name text,          -- the original uploaded filename — secondary/hover display only,
+                                   -- never the primary label (doc_title is user-editable, this isn't)
 
   img_w          integer not null check (img_w > 0),   -- rasterized page size, px
   img_h          integer not null check (img_h > 0),
   raster_key     text,            -- Storage object key for the cached rasterized page (png)
 
-  control_points   jsonb not null,  -- [{px,py,lat,lon}, ...], >=2 pairs — source of truth
-  scale_ft_per_px  double precision,  -- derived cache
-  rotation_deg     double precision,  -- derived cache
-  fit_residual_ft  double precision,  -- derived cache (Procrustes fit residual, feet)
-  scale_check_ft   double precision,  -- the independent post-anchor measured check, feet
-  scale_check_note text,             -- what he compared it against (free text)
+  center_lat     double precision,  -- placement anchor point (WGS84)
+  center_lon     double precision,
+  ft_per_px      double precision,  -- real-world feet per source-image pixel (uniform scale)
+  rotation_deg   double precision not null default 0,  -- clockwise-on-screen, about the center
 
   opacity        double precision not null default 0.85 check (opacity >= 0 and opacity <= 1),
   visible        boolean not null default true,
+  locked         boolean not null default false,  -- mirrors the Site Planner reference-image "locked" flag
 
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now(),
 
   primary key (id),
   foreign key (review_id) references public.doc_reviews(id) on delete cascade,
-  constraint site_plan_overlays_control_points_shape check (jsonb_typeof(control_points) = 'array')
+  constraint site_plan_overlays_ft_per_px_positive check (ft_per_px is null or ft_per_px > 0)
 );
 
 create index if not exists site_plan_overlays_user_idx    on public.site_plan_overlays (user_id);
