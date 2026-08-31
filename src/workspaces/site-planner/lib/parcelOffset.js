@@ -11,10 +11,12 @@
  * Planar feet, the app's usual open-ring convention: edge i is pts[i] → pts[i+1].
  */
 
-/* Shoelace area magnitude — the shared one in `ringMath.js`. The component keeps its own
- * `polyArea` for its ~30 other callers; the two rings compared here are already validated
- * (n ≥ 3), so the shared guard never fires on this path. */
-import { ringArea } from "./ringMath.js";
+/* Shoelace area magnitude, point-in-ring and nearest-point-on-segment — the shared ones in
+ * `ringMath.js` (B50008–B50011's dedup: the same three loops otherwise get re-typed per module,
+ * charging the Site route's download budget once per copy — see that module's own header). The
+ * component keeps its own `polyArea` for its ~30 other callers; the two rings compared here are
+ * already validated (n ≥ 3), so the shared guard never fires on this path. */
+import { ringArea, pointInRing, projectOntoSegment } from "./ringMath.js";
 
 /* Intersection of the infinite lines through (x1,y1)→(x2,y2) and (x3,y3)→(x4,y4), or null when
  * they are parallel (within 1e-9). */
@@ -71,35 +73,17 @@ export function offsetPolygon(pts, d) {
   // vertex does, the nearest point on the source boundary is the correct bound (the true inset at
   // that corner is somewhere between the miter point and the boundary, and the boundary itself is
   // never wrong to draw at — it's the parcel's own edge). A vertex already inside is untouched.
-  return chosen ? chosen.map((p) => (pointInPolygon(p, pts) ? p : nearestPointOnBoundary(p, pts))) : chosen;
+  return chosen ? chosen.map((p) => (pointInRing(p, pts) ? p : nearestPointOnBoundary(p, pts))) : chosen;
 }
 
-/* Even-odd point-in-polygon test (Jordan curve). Boundary-inclusive is not needed here: a vertex
- * clamped onto the boundary by `nearestPointOnBoundary` reads as outside by this test's own
- * convention on some edges, which is harmless — clamping an already-boundary point to itself
- * (nearest distance ~0) is a no-op either way. */
-function pointInPolygon(pt, poly) {
-  let inside = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
-    const intersect = (yi > pt.y) !== (yj > pt.y) && pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi) + xi;
-    if (intersect) inside = !inside;
-  }
-  return inside;
-}
-
-function nearestPointOnSegment(p, a, b) {
-  const abx = b.x - a.x, aby = b.y - a.y;
-  const len2 = abx * abx + aby * aby;
-  if (len2 === 0) return { x: a.x, y: a.y };
-  const t = Math.max(0, Math.min(1, ((p.x - a.x) * abx + (p.y - a.y) * aby) / len2));
-  return { x: a.x + abx * t, y: a.y + aby * t };
-}
-
+/* Nearest point on the polygon's BOUNDARY (walks every edge via `ringMath.projectOntoSegment`,
+ * keeps the closest) — `pointInRing`'s even-odd test doesn't need re-deriving here (a vertex
+ * clamped onto the boundary reads as "outside" by that test's own convention on some edges, which
+ * is harmless: clamping an already-boundary point to itself, nearest distance ~0, is a no-op). */
 function nearestPointOnBoundary(p, poly) {
   let best = null, bestD = Infinity;
   for (let i = 0; i < poly.length; i++) {
-    const q = nearestPointOnSegment(p, poly[i], poly[(i + 1) % poly.length]);
+    const q = projectOntoSegment(poly[i], poly[(i + 1) % poly.length], p);
     const d = Math.hypot(p.x - q.x, p.y - q.y);
     if (d < bestD) { bestD = d; best = q; }
   }
