@@ -149,9 +149,14 @@ const CalendarIcon = ({ size = 12 }) => (
 // AppHeader.jsx's own note). CRUMB_MIN_W is untouched — NAVIGATION WINS is a floor on
 // character count, not on font size, and shrinking the font makes more of that floor's width
 // actually show name rather than clip it.
+// NEW-3 (design-drift merge) — borderRadius RADIUS.sm → RADIUS.md, independently of the density
+// change above: this is a standalone chip sitting directly on the header bar (its rest state is
+// transparent/borderless, but its hover/open fill is what makes the shape visible), the same
+// category as the row-2 toolbar's File ▾ / dIcon / rbtn buttons — RADIUS.md per radius.js's own
+// rule ("sm" is for a control nested inside another rounded surface, which this isn't).
 const crumbBtn = (extra) => ({
   display: "flex", alignItems: "center", gap: 5, flex: "none",
-  height: 22, padding: "0 8px", borderRadius: RADIUS.sm,
+  height: 22, padding: "0 8px", borderRadius: RADIUS.md,
   border: "none", background: "transparent", cursor: "pointer",
   fontFamily: "inherit", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap",
   ...extra,

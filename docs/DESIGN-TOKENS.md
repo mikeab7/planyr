@@ -1,9 +1,18 @@
-# Design tokens — the "design bible" (B809906, 2026-08-27)
+# Design tokens — the B809906 audit behind the token values (2026-08-27)
+
+**⛔ SUPERSEDED AS "the design bible" BY `docs/DESIGN.md` (NEW-1, 2026-08-31) — that is now the
+single normative doc; read it first.** This file predates it and used to call itself "the design
+bible" in this same line; it kept that name for four days until `docs/DESIGN.md` shipped as the
+actual normative contract (rules + full color/primitive spec) that a session reads before writing
+UI. This file is NOT superseded as a *source* — it's the one place the original 738-button audit
+and the two still-open judgment calls live, and `docs/DESIGN.md` cites it for both — only its
+claim to be *the* bible is retired, in favor of being the audit/provenance doc behind it.
 
 Owner: *"shouldn't we have some sort of bible for design definitions, we keep having different
-radii on buttons and it seems like a design bible would fix this."* This doc is that reference,
-plus the audit that backs it. Read `src/shared/ui/radius.js` and `src/shared/ui/designTokens.js`
-for the actual token values — this file explains what they're for and what they replace.
+radii on buttons and it seems like a design bible would fix this."* This doc was the first answer
+to that, plus the audit that backs it. Read `src/shared/ui/radius.js` and
+`src/shared/ui/designTokens.js` for the actual token values — this file explains what they're for
+and what they replace.
 
 ## The audit (before touching anything)
 

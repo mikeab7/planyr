@@ -13,7 +13,7 @@ import ModuleLoader from "../shared/ui/ModuleLoader.jsx";
 import AccountControl from "./AccountControl.jsx";
 import { useProfile } from "../shared/profile/useProfile.js";
 import { setTelemetryModule } from "../shared/telemetry/clientErrors.js";
-import { useHashRoute, unknownModuleSlug, isAdminRoute, readRoute, buildHash, INITIAL_HASH_EMPTY } from "./route.js";
+import { useHashRoute, unknownModuleSlug, isAdminRoute, isDesignRoute, readRoute, buildHash, INITIAL_HASH_EMPTY } from "./route.js";
 import { pageTitle } from "./pageTitle.js";
 import { writeLastRoute, seedBootRoute } from "./lastRoute.js";
 import { installBuildSkewWatch, shouldOfferReload, fetchServedBuild, isBuildSkewed, LOADED_BUILD } from "./buildSkew.js";
@@ -22,6 +22,10 @@ import { RADIUS } from "../shared/ui/radius.js";
 import { mayResumeLastSite } from "../workspaces/site-planner/lib/bootResume.js";
 
 const AdminGate = lazy(() => import("../workspaces/admin/AdminGate.jsx"));
+// NEW-4 (docs/DESIGN.md) — the `/design` primitive gallery. Same lazy/not-a-workspace shape as
+// AdminGate above: no header tab, never offered by the module switcher, costs nothing on the
+// shipped bundle until someone types the URL.
+const DesignGallery = lazy(() => import("../workspaces/design-gallery/DesignGallery.jsx"));
 
 // "Open where I left off": on an empty-hash boot, seed the URL from the stored last-route
 // pointer BEFORE the first render (so useHashRoute's initial read sees it). Runs at module
@@ -116,6 +120,12 @@ export default function Shell() {
     if (typeof window === "undefined") return;
     setIsAdminHash(isAdminRoute(window.location.hash));
   }, [route]);
+  // NEW-4 — same shape as isAdminHash above, for the `/design` gallery.
+  const [isDesignHash, setIsDesignHash] = useState(() => (typeof window !== "undefined" ? isDesignRoute(window.location.hash) : false));
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setIsDesignHash(isDesignRoute(window.location.hash));
+  }, [route]);
   const [user,      setUser]      = useState(null);
   const [authOpen,  setAuthOpen]  = useState(false);
   const [recovery,  setRecovery]  = useState(false);
@@ -205,7 +215,7 @@ export default function Shell() {
   // pointer, indistinguishable from "on the plain dashboard" — so it's excluded the same way
   // Food is: a visit to /admin must never clobber the pointer to whatever project was
   // actually open before it (B711904).
-  useEffect(() => { if (!isAdminHash) writeLastRoute(route); }, [route, isAdminHash]);
+  useEffect(() => { if (!isAdminHash && !isDesignHash) writeLastRoute(route); }, [route, isAdminHash, isDesignHash]);
 
   // Keep-alive (owner request, 2026-07-05: "cleaner/faster switch between modules"): every
   // workspace the user has VISITED stays mounted, hidden with display:none, instead of being
@@ -344,6 +354,19 @@ export default function Shell() {
           <div style={{ position: "absolute", inset: 0, zIndex: 1 }}>
             <Suspense fallback={null}>
               <AdminGate user={user} onExit={goDashboard} />
+            </Suspense>
+          </div>
+        )}
+        {isDesignHash && (
+          <div style={{ position: "absolute", inset: 0, zIndex: 1 }}>
+            <Suspense fallback={null}>
+              {/* Not `onExit={goDashboard}` — `#/design` and the plain dashboard both parse to
+                  the identical { module: "site-planner", projectId: null, cross: false } route
+                  (`design` isn't a real module slug), so `navigate`'s own same-route guard makes
+                  goDashboard() here a silent no-op (measured: click "succeeds", hash never moves).
+                  Setting the hash directly always fires a real hashchange, which is what actually
+                  needs to happen to leave this overlay. */}
+              <DesignGallery onExit={() => { window.location.hash = "#/"; }} />
             </Suspense>
           </div>
         )}

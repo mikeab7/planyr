@@ -72,6 +72,41 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 - **Guard-weakening check, per the brief's explicit instruction not to make this PR merge by editing the gate.** Nothing in this change special-cases this session's own PR number, branch, or run — the `core.notice` path fires on the diagnosed error-message pattern alone (`isForbidden`, unchanged from the pre-existing code), identically for every future claude/* PR. This PR going green is a consequence of the general fix, not a carve-out.
 - Files: `.github/workflows/pr-auto-ready.yml`, `BACKLOG.md` (B793696 reclassified + this item + B914448), `VERIFICATION.md` / `VERIFICATION-DONE.md` (V438336 closed + archived), `OWNER-TODO.md`, `BACKLOG_OPEN.md` (regenerated), `MAP.md` (regenerated).
 
+### B915536 — Clean up the 24 pre-existing UI deviations `ui-inventory.mjs` (NEW-3/B904034) finds, not fixed by that item `[global/ui]` (task) #ui  *(filed by explicit owner instruction after reviewing B904034/B904035: "give me the residual count and file it as its own follow-on item with that number on it — do not let it disappear into the summary." Minted **B915536** from this branch's reserved block B915536–B915551 against freshly-fetched `origin/main` 50c3e14. DEDUPE-FIRST — searched Open/⏳Verify/Done for `ui-inventory`, `UI-INVENTORY.md`, `off-scale fontSize`, `design-drift`: none files this residual as its own item; B904034 (Done) fixed three radius-token misclassifications but explicitly did not touch any of the below. Net-new.)*
+`docs/UI-INVENTORY.md` (`node ui-audit/ui-inventory.mjs`, re-verified against a real `git worktree`
+before/after comparison across two independent regenerations) currently reports **24 distinct
+deviating style signatures**, all pre-existing, none introduced or fixed by B904034/B904035. None
+are policy violations of `docs/DESIGN.md`'s hard rules — they are UA-default / not-yet-tokenized
+`fontSize` values, plus one still-half-fixed `ThemePicker.jsx` row. Full breakdown (both light+dark,
+so each line below is ×2 in the raw count):
+- **App header (5 signatures):** `fontSize 13.3333` (Chromium UA default — see the "Known,
+  deliberately-not-fixed findings" note at the top of `docs/UI-INVENTORY.md`) on Full screen/Settings,
+  "Dashboard: all projects", and "Cloud sync: Saved on this device"; `fontSize 15` (not
+  UA-default — an explicit but off-scale value) on Undo/Redo and Zoom to fit — **these last two were
+  never previously investigated or decided on; genuinely new to this list.**
+- **Settings gear / `ThemePicker.jsx` (3 signatures):** `fontSize 13.3333` on the Dark/System/Light
+  theme-option rows and the panel's search `INPUT`. **Note:** B904034 fixed these SAME rows'
+  `borderRadius` (7px → `RADIUS.sm`, 6px) — that fix is real and confirmed, but it only addressed the
+  radius half of what was originally a combined radius+fontSize defect; the fontSize half was not
+  touched and is still flagged here.
+- **Left rail / Yield panel (4 signatures):** `fontSize 13.3333` on the "Buildings"/"Costs" and "Land
+  use" section-toggle rows; `fontSize 16` on the real Yield-panel Zoom in/Zoom out buttons (`.gbtn`,
+  `SitePlanner.jsx`/`LayerPanel.jsx`) — **corrects an earlier, wrong report of this same control as
+  "fontSize 22 in LayerPanel.jsx," which was actually the MapFinder's own zoom control, mismeasured
+  by a since-fixed harness bug.**
+- Two further findings are already investigated, decided, and intentionally left as-is — not part of
+  this item's scope, and already documented in `docs/UI-INVENTORY.md` itself so they survive
+  regeneration rather than needing rediscovery: a `borderRadius:2px` on the map's "Find my location"
+  button (Leaflet's own third-party stylesheet, out of scope like the Scheduler iframe), and the root
+  cause of the widespread `13.3333px` reading (`index.css` sets `font-family: inherit` on form
+  controls but never `font-size`, so any control that doesn't set its own falls through to the browser
+  default).
+- Verify: sandbox — re-run `node ui-audit/ui-inventory.mjs` and check the total against this item's
+  24; a lower number without a documented reason each closed row went (fixed, or moved to Known/
+  deliberately-not-fixed) is a red flag, not automatic progress.
+- Not started this session — STANDING RULE #3, one task per session; B904034/B904035 already
+  consumed this session's scope investigating and correcting the measurement instrument itself.
+
 ### B853713 — Wire dedicated county appraisal districts (CADs) for the DFW & Austin metros `[Site Planner / map]` (feature) #gis #parcel #site-planner  *(filed 2026-06-18 as "B150" — a stale/colliding provisional number that was never actually free (B150 was already minted for an unrelated, shipped item; see BACKLOG-DONE.md — caught by test/idUniqueness.test.js before push). RE-RAISED 2026-08-29 and RENUMBERED on mint, moved here from Later/Roadmap — same owner chat block that shipped B853712, explicit instruction: "the DFW dial-in … is the owner's next ask; it needs a real probe per district and is its own session" and "STILL OUT OF SCOPE, file it, do not start it." Minted **B853713** from this branch's reserved block. Not started this session — STANDING RULE #3, one task per session.)*
 `[ ]` **Promote Dallas (DCAD), Tarrant (TAD), Collin (CCAD) and Denton (DCAD) — plus Austin's Travis/TCAD, Williamson, Hays — from the B853712 statewide-derived tier to their own dedicated, live-probed appraisal-district services**, exactly the way Montgomery/Brazoria/Galveston/Liberty/Austin-County were promoted off Waller's shape (B209503). This is the ACCURACY tier, not the coverage tier: **B853712 already closed the coverage gap** — every one of these counties (and all 254 Texas counties) now has a real, working parcel source via the universal TxGIO statewide layer, so this item is purely about first-class data (current, richer field set, faster) versus the statewide copy (can lag, thinner fields).
 - Verify: live — GIS endpoint behavior is a mandatory LIVE-VERIFY class; each promoted county needs its OWN live `/query`/`/identify` probe against its real CAD service before it ships, per this repo's own contract (`/CLAUDE.md` — "the two that could not be probed are not shipped at all").

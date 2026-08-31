@@ -134,7 +134,11 @@ function FullscreenButton({ active, onToggle }) {
          is a strict-mode failure, so this control says it a different way on purpose. */
       title={active ? "Leave full screen (Ctrl/⌘+Shift+F)" : "Full screen (Ctrl/⌘+Shift+F)"}
       style={{
-        display: "grid", placeItems: "center", width: 30, height: 26, borderRadius: RADIUS.sm,
+        // NEW-3 — was RADIUS.sm (a nested-in-panel radius); this sits directly on the chrome bar,
+        // same standalone-icon-button category as the row-2 toolbar's dIcon/rbtn, so it takes
+        // RADIUS.md per radius.js's own rule ("sm" is for a control nested inside another rounded
+        // surface — this one isn't nested in anything).
+        display: "grid", placeItems: "center", width: 30, height: 26, borderRadius: RADIUS.md,
         border: `1px solid ${LINE}`, background: "var(--chrome-bg)", color: "var(--chrome-text)",
         cursor: "pointer", flex: "none",
       }}
@@ -162,7 +166,9 @@ function SettingsMenu() {
         aria-label="Settings"
         title="Settings: display theme, smooth zoom"
         style={{
-          display: "grid", placeItems: "center", width: 30, height: 26, borderRadius: RADIUS.sm,
+          // NEW-3 — was RADIUS.sm; see the matching comment on FullscreenButton above (same
+          // standalone-icon-button category, same fix).
+          display: "grid", placeItems: "center", width: 30, height: 26, borderRadius: RADIUS.md,
           border: `1px solid ${LINE}`, background: "var(--chrome-bg)", color: "var(--chrome-text)",
           cursor: "pointer", flex: "none",
         }}
