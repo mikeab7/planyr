@@ -141,9 +141,13 @@ const CalendarIcon = ({ size = 12 }) => (
   </svg>
 );
 
+// NEW-3 — was RADIUS.sm. This is a standalone chip sitting directly on the header bar (its rest
+// state is transparent/borderless, but its hover/open fill is what makes the shape visible), the
+// same category as the row-2 toolbar's File ▾ / dIcon / rbtn buttons — RADIUS.md per radius.js's
+// own rule ("sm" is for a control nested inside another rounded surface).
 const crumbBtn = (extra) => ({
   display: "flex", alignItems: "center", gap: 5, flex: "none",
-  height: 24, padding: "0 8px", borderRadius: RADIUS.sm,
+  height: 24, padding: "0 8px", borderRadius: RADIUS.md,
   border: "none", background: "transparent", cursor: "pointer",
   fontFamily: "inherit", fontSize: 12.5, fontWeight: 600, whiteSpace: "nowrap",
   ...extra,

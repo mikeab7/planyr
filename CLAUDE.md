@@ -141,6 +141,15 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > `test/docPointers.test.js`) fails CI if a pointer names a code file that no longer exists.
 > Keep pointers short — signposts, never duplicated detail — so they don't drift.
 >
+> **🎨 ADDING OR CHANGING ANY UI? READ `docs/DESIGN.md` FIRST — before writing the first line of
+> markup.** It's the design bible: the real color tokens, the radius/spacing/type scales, and the
+> `Button`/`ToggleChip`/`IconButton`/`Field`/`Section`/`MenuItem` primitives in
+> `src/shared/ui/controls.jsx`, plus the two hard rules (components consume tokens and primitives;
+> a new control is never invented at the call site — the primitive set is extended instead). A raw
+> hex, a raw `borderRadius`, or a raw `fontSize` in a component is a defect, not a style choice, and
+> `ui-audit/design-drift-audit.mjs` fails CI on new instances of it. Preview every primitive live at
+> the `#/design` gallery route before drawing a new one.
+>
 > **🗺 Two generated, committed indexes save you from cold-searching — regenerate each in the SAME
 > commit that changes its inputs (machine-enforced, like the pointers).**
 > - **`MAP.md`** (repo root) — every source file → its module owner, one-line responsibility, and

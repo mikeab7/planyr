@@ -54,12 +54,12 @@
       "note": "Was 3094689 before NEW-9 removed the boot-time idle prefetch of the other workspaces, and 2270513 before B1042 deferred the export path + the LERC codec. Ceiling ratcheted 2400000 -> 2320000 with that landing. STILL ABOVE TARGET, and dynamic imports alone cannot close the rest \u2014 see largestChunkBytes.note for the measured floor, plus ~200 KB of Supabase client in the shared entry chunk (auth-js/realtime-js/phoenix/storage-js) that only a signed-in-verifiable change can defer. CEILING RAISED 2320000 -> 2332000 by B1130/B1131 (2026-07-30), and this is the justification the standing rule demands, stated in full because raising a ceiling is a product decision. WHAT SHIPPED: two owner-reported defects on the Electric layer \u2014 substations painting as broken-image glyphs labelled \"Mark\" (a GeoJSON point with no pointToLayer falling through to L.Icon.Default), and no way to hover a line or substation to learn what it is. WHAT WAS PAID FIRST, measured: the feature started at +20.2 KB on this metric and was cut to +7.4 KB by four optimizations before any number here was touched \u2014 (1) the raster identify glue + state machine moved behind a dynamic import (rasterIdentifyLazy.js), (2) the vector hover/identify attach layer and its wording engine likewise (featureHoverAttach.js, imported at layer-toggle time), (3) identifyCapable moved into this file so layers.js can gate on it without pulling the identify module onto the boot path, (4) the L.Icon.Default fallback rendered from a ~400-byte inline SVG pin instead of leaflet's three PNGs, which Vite base64-inlines at ~6 KB (both Vite-5 ways of emitting them as files were tried; ?no-inline is Vite 6 and new URL(...) against node_modules emits nothing). WHY A RAISE WAS STILL NEEDED: main was already at 2262.9 KB against a 2265.6 KB ceiling \u2014 2.7 KB of headroom \u2014 so this metric now trips on essentially ANY feature, which is a headroom problem rather than a regression in this PR. The residual ~7 KB is SitePlanner.jsx's hover card + effect, the geometry-aware point styling, and the per-layer hoverIdentify flags: all synchronous, all on this route, none deferrable by import(). NOTE THE CONTRAST, which is the honest read: largestChunkBytes was NOT raised \u2014 the same four optimizations brought it back under its existing ceiling (1719.5 -> 1706.8 KB). B1064 remains the metric owner for closing the real gap. NEW-1 (2026-07-30) RETIRED THE HAND-PINNED CEILING ON THIS METRIC, which is the honest fix for the paragraph immediately above: three PRs failed on 0.8-0.9% breaches of a ceiling pinned 0.06% over measured, and the answer to that is a policy, not a fourth hand-typed number. The ceiling is now DERIVED from `baseline` + the shared `headroom` band, and the baseline moves only through `npm run perf:ratchet` with a reason recorded in `ratchetLog`."
     },
     "siteRouteChunks": {
-      "ceiling": 8,
-      "target": 8,
-      "measured": 7,
+      "ceiling": 9,
+      "target": 9,
+      "measured": 8,
       "unit": "chunks",
       "what": "How many JS chunks a plain Site route pulls.",
-      "note": "THE PREFETCH GUARD. Was 11 before NEW-9. Any workspace chunk reappearing here means something warms a route-irrelevant module at boot again. NO HEADROOM BAND, deliberately: a chunk count is a structural guard, not a size, and 'four chunks plus two percent' is not a sentence. RAISED 4 -> 7 across NEW-2 and B1064(a) (2026-07-30) with the reason on the record, which is the only way this number is allowed to move: the three new members are `map-vendor`, `cjs-interop` and `teams`, each named in siteRouteAllowlist.$comment with what it contains and why. The count is the coarse guard; the ALLOWLIST is the sharp one, and it still fails by name on anything not enumerated. RAISED 7 -> 8 on 2026-08-09 (B326418), same rule, reason on the record: `userPrefs` joined siteRouteAllowlist for the identical mechanical reason `teams` did \u2014 a module with a STATIC planner consumer and a LAZY Team-tab consumer gets its own shared chunk. This ceiling tracks the allowlist LENGTH (test/perfBudgets.test.js asserts they match), so it moves whenever the allowlist does; the MEASURED count is still 7, i.e. no new chunk actually loads. Not ratchetable \u2014 a hard-ceiling metric has no baseline, so `npm run perf:ratchet` refuses it by design and a documented edit here is the sanctioned path."
+      "note": "THE PREFETCH GUARD. Was 11 before NEW-9. Any workspace chunk reappearing here means something warms a route-irrelevant module at boot again. NO HEADROOM BAND, deliberately: a chunk count is a structural guard, not a size, and 'four chunks plus two percent' is not a sentence. RAISED 4 -> 7 across NEW-2 and B1064(a) (2026-07-30) with the reason on the record, which is the only way this number is allowed to move: the three new members are `map-vendor`, `cjs-interop` and `teams`, each named in siteRouteAllowlist.$comment with what it contains and why. The count is the coarse guard; the ALLOWLIST is the sharp one, and it still fails by name on anything not enumerated. RAISED 7 -> 8 on 2026-08-09 (B326418), same rule, reason on the record: `userPrefs` joined siteRouteAllowlist for the identical mechanical reason `teams` did \u2014 a module with a STATIC planner consumer and a LAZY Team-tab consumer gets its own shared chunk. RAISED 8 -> 9 on 2026-08-31 (NEW-4, docs/DESIGN.md's `/design` gallery), the identical mechanical reason a third time: `src/shared/ui/controls.jsx` (the shared Button/ToggleChip/IconButton/Field/Section/MenuItem primitive library) has a STATIC planner consumer already and the new lazy `#/design` route is a second one, so Rollup gives it its own chunk. The gallery deliberately imports the REAL components rather than re-implementing them locally (docs/DESIGN.md's own hard rule (b) \u2014 a control is never forked, the primitive set is the one to extend/consume), which is why this is the one primitive-layer import NOT mirrored the way statusTokens.js/designTokens.js are in DesignGallery.jsx (see that file's own header for the two that WERE mirrored and why controls.jsx wasn't). This ceiling tracks the allowlist LENGTH (test/perfBudgets.test.js asserts they match), so it moves whenever the allowlist does; the MEASURED count moves 7 -> 8, one more FILE for the same bytes controls.jsx already contributed to the Site route before this split (same shape as `teams`/`userPrefs` above) \u2014 the `#/design` route itself is not on the boot path and costs nothing extra for anyone who never types that URL. Not ratchetable \u2014 a hard-ceiling metric has no baseline, so `npm run perf:ratchet` refuses it by design and a documented edit here is the sanctioned path."
     },
     "siteRouteAllowlist": {
       "$comment": [
@@ -89,6 +89,13 @@
         "                so it cannot be absorbed into map-vendor. See the trap note in",
         "                vite.config.js: without this pin every route statically pulls the map",
         "                vendor bytes to reach a few hundred bytes of interop.",
+        "  controls    \u2014 src/shared/ui/controls.jsx (~3.5 KB), added 2026-08-31 (NEW-4, the `/design`",
+        "                gallery), the identical mechanical reason `teams`/`userPrefs` were added: the",
+        "                planner already imports it statically (components/RowInfo.jsx, via",
+        "                SitePlanner.jsx), and the new lazy `#/design` route is a second consumer, so",
+        "                Rollup gives it its own chunk. The Site route downloads the same bytes it",
+        "                always did (controls.jsx was previously inlined into SitePlannerApp), in one",
+        "                more file.",
         "The guard is UNWEAKENED by this: it still fails by name on any chunk not on this list, and",
         "the NEW-9 regression it exists for (a workspace chunk warming at boot) would still be caught."
       ],
@@ -100,7 +107,8 @@
         "map-vendor",
         "cjs-interop",
         "teams",
-        "userPrefs"
+        "userPrefs",
+        "controls"
       ]
     },
     "notesRouteJsBytes": {

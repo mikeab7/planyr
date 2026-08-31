@@ -72,6 +72,9 @@ export function unknownModuleSlug(hash) {
   // the tabbed workspaces — it must never trip the "newer build" banner, which would be
   // the one signal telling a random visitor that typing this slug does something.
   if (slug === ADMIN_SLUG) return null;
+  // Same reasoning for "design" (see isDesignRoute, NEW-4) — a real, resolvable destination
+  // that isn't a tabbed workspace either.
+  if (slug === DESIGN_SLUG) return null;
   return MODULE_BY_SLUG[slug] ? null : slug;
 }
 
@@ -85,6 +88,15 @@ const ADMIN_SLUG = "admin";
 export function isAdminRoute(hash) {
   const segs = String(hash || "").replace(/^#/, "").split("/").filter(Boolean);
   return segs[0] === ADMIN_SLUG;
+}
+
+/* NEW-4 (docs/DESIGN.md) — the `/design` primitive gallery. Same shape as `isAdminRoute` above and
+ * for the same reason: a dev-facing destination that carries no header tab and is never offered by
+ * the module switcher, so it costs nothing on the shipped bundle until someone types the URL. */
+const DESIGN_SLUG = "design";
+export function isDesignRoute(hash) {
+  const segs = String(hash || "").replace(/^#/, "").split("/").filter(Boolean);
+  return segs[0] === DESIGN_SLUG;
 }
 
 /* Pure: { module, projectId, cross } -> a "#/..." hash string. */

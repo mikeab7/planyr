@@ -6,6 +6,7 @@ these up only when your task needs it.
 
 | File | What's in it | Read when |
 |------|--------------|-----------|
+| `DESIGN.md` | The design bible — normative color tokens, radius/spacing/type scales, primitive specs (Button/ToggleChip/IconButton/Field/Section/MenuItem), the canvas/SVG-vs-chrome boundary, and the CI drift guard's rules. | You're adding or changing ANY UI — read it before writing the first line of markup (see root `CLAUDE.md`). |
 | `SHIPPED.md` | Full catalog of shipped-and-verified features (Site Planner, Supabase backend, multi-workspace foundation, Document Review) + the retired GitHub-Pages deploy note. | You need the history/detail of a specific already-built feature. |
 | `ROADMAP.md` | The two-track roadmap — Site Planner maturation + Document Review buildout — and deferred/decision-gated items. | Planning new feature work. |
 | `REFERENCE.md` | Deep implementation detail: Site Model schema, map-layer/GIS plumbing, Supabase DDL/RLS, Document Review persistence internals, the sandbox Playwright quirk. | You're editing that subsystem and need the internals. |
