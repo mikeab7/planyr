@@ -107,5 +107,19 @@ jobs:
       # gate: this script never exits non-zero, and it prints why when it cannot run.
       - name: Base-ref bundle snapshot (byte attribution — NEW-3, never fatal)
         run: node scripts/perf-base-stats.mjs --out .perf/base-stats.json
+        # B927104 — THE SAME env AS THE Build STEP ABOVE, AND IT IS LOAD-BEARING, NOT TIDINESS.
+        # `import.meta.env.VITE_SUPABASE_URL` / `..._ANON_KEY` are INLINED AS STRING LITERALS at
+        # build time (site-planner/lib/supabase.js and food/lib/supabaseClient.js, both statically
+        # reachable from src/main.jsx, so they land in the shared entry chunk EVERY route
+        # downloads). Without this block the base ref was built secret-free while the head build
+        # above carries the literals, so the two sides of the comparison were never builds of the
+        # same configuration: base came out ~300 B light on every route, and the "this branch
+        # adds" figure was inflated by that constant. Measured on 2026-08-31: PR #1263 REMOVED
+        # code (true delta -65 B) and CI still reported `this branch +0.2 KB`. This changes no
+        # verdict — a push to main is judged absolutely on the head build — only whether the
+        # attribution line tells the truth.
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
       - name: Performance budget (bundle weight + Site-route chunk allowlist — NEW-8)
         run: node ui-audit/perf-bundle-audit.mjs --compare .perf/base-stats.json --emit-stats .perf/head-stats.json

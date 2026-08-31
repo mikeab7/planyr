@@ -1871,7 +1871,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // rotate/resize. The desktop layout is untouched (every mobile style is `narrow ?`-gated).
   const [narrow, setNarrow] = useState(() => { try { return window.matchMedia(`(max-width: ${FLOAT_MIN_WIDTH}px)`).matches; } catch (_) { return false; } });
   const [mobileTools, setMobileTools] = useState(false); // right tool rail open as an overlay (narrow only)
-  const [mobileSections, setMobileSections] = useState(false); // NEW-1 (B917072) — left section rail (Land/Analysis/Yield/…) summoned as an overlay (narrow only)
   const [narrowProps, setNarrowProps] = useState(false); // B656: phone-only — the ✎ Properties pill opened the companion overlay
   const [propsCollapsed, setPropsCollapsed] = useState(false); // B656: companion header fold
   /* NEW-1 — THE CLICK CONTRACT, and the state separation that makes it hold.
@@ -23015,23 +23014,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {(() => {
             const zb = { width: 30, height: 30, display: "grid", placeItems: "center", border: `1px solid ${PAL.panelLine}`, background: "var(--surface-overlay)", color: PAL.ink, cursor: "pointer", fontSize: 16, fontWeight: 600 };
             const zoomBy = (f) => setView((v) => { const nv = zoomAround({ scale: v.ppf, tx: v.offX, ty: v.offY }, f, size.w / 2, size.h / 2, 0.02, 8); return { ppf: nv.scale, offX: nv.tx, offY: nv.ty }; });
-            // ⛔ NEW-MAPCTRL-4 — this `bottom` MUST track FURNITURE_ROW's own narrow-width reserve.
-            // The comment above `calibBadgePlacement` (sheetFurniture.js) says the scale bar/north
-            // arrow/badge row "clears... the zoom controls above (they start at bottom:100)" — true
-            // on desktop, where FURNITURE_ROW is 40 and this stack's bottom:100 leaves a 60px gap.
-            // But NEW-MAPCTRL-3 raises FURNITURE_ROW by FAB_RESERVE_PX (62) on narrow (phone/tablet)
-            // to clear the "✎ Properties" / "✎ Tools" FABs — and that raise was never mirrored here.
-            // The result, measured on a real 390px phone width against the owner's real Bain plan:
-            // the scale bar's row lands at bottom:102 while this stack still starts at bottom:100 —
-            // the 60px clearance the comment above assumes is gone, and the scale bar's own plate
-            // (32px tall) sits ENTIRELY inside this stack's 120px-tall vertical span. Its right ~30px
-            // (exactly this column's width — the "◷" report-slow button) paints directly over the
-            // scale bar's highest tick label, e.g. reading "…0 FEET" for a covered "500"/"1000"/etc.
-            // Applying the SAME reserve here restores the original 28px clearance (60 − the 32px
-            // plate height) at every width, rather than inventing a second breakpoint.
-            const zoomBottom = narrow ? 100 + FAB_RESERVE_PX : 100;
             return (
-              <div data-export="skip" style={{ position: "absolute", right: 14, bottom: zoomBottom, display: "flex", flexDirection: "column", borderRadius: 9, overflow: "hidden", boxShadow: "0 4px 14px rgba(0,0,0,0.18)", zIndex: MAP_CHROME_Z.control }}>
+              <div data-export="skip" style={{ position: "absolute", right: 14, bottom: 100, display: "flex", flexDirection: "column", borderRadius: 9, overflow: "hidden", boxShadow: "0 4px 14px rgba(0,0,0,0.18)", zIndex: MAP_CHROME_Z.control }}>
                 <button className="gbtn" aria-label="Zoom in" title="Zoom in" style={{ ...zb, borderRadius: 0 }} onClick={() => zoomBy(1.25)}>＋</button>
                 <button className="gbtn" aria-label="Zoom out" title="Zoom out" style={{ ...zb, borderTop: "none", borderRadius: 0 }} onClick={() => zoomBy(1 / 1.25)}>－</button>
                 <button className="gbtn" aria-label="Zoom to fit" title="Zoom to fit" style={{ ...zb, borderTop: "none", borderRadius: 0, fontSize: 14 }} onClick={fit}>⤢</button>
@@ -23595,33 +23579,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
         {/* left side — Bluebeam-style icon rail + one open menu */}
         <div style={{ display: "flex", flex: "none", order: 1, minHeight: 0 }}>
-          {/* NEW-1 (B917072) — phone-only floating button to summon the section rail, mirroring
-              the right-side "✎ Tools" FAB (B113). Before this, the six-section rail below rendered
-              INLINE at a fixed 54px on every width, so an idle phone view paid for it on every
-              load with nothing open — the owner's "I don't even have my tool options" (the rail
-              itself IS reachable by touch; the complaint is the permanent width tax with no
-              payoff). Stacks above "✎ Properties" (B656) when both would otherwise land on the
-              same corner. */}
-          {narrow && !leftPanel && !companionOpen && !mobileSections && (
-            <button onClick={() => setMobileSections(true)} title="Show Land / Analysis / Yield / Properties / References / Standards"
-              style={{ position: "absolute", left: 12, bottom: (companionSel && !narrowProps) ? 68 : 16, zIndex: 1190, display: "flex", alignItems: "center", gap: 6, padding: "11px 16px", borderRadius: RADIUS.pill, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 800, color: "#fff", background: PAL.ember, boxShadow: "0 6px 18px rgba(0,0,0,0.45)" }}>
-              ☰ Sections
-            </button>
-          )}
-          {/* backdrop while the rail is summoned but nothing has been picked yet — tap outside
-              to dismiss, matching the right tool rail's pattern (line ~23316 below). */}
-          {narrow && mobileSections && !leftPanel && !companionOpen && (
-            <div onClick={() => setMobileSections(false)} style={{ position: "absolute", inset: 0, zIndex: 1100, background: "rgba(20,18,15,0.35)" }} />
-          )}
-          {/* the rail — on phones it overlays the canvas (slide-in from the left) instead of
-              permanently eating 54px+ of the screen (B113's right-rail pattern, extended here).
-              Stays on-screen (transform:none) while a panel/companion is open — at that point the
-              open panel is already costing far more width, and `left-menu-panel` below is
-              positioned assuming this rail's 54px, so hiding it there would leave a blank gap. */}
-          <div style={{ width: 54, flex: "none", background: PAL.chrome, borderRight: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", paddingTop: 4,
-            ...(narrow ? { position: "absolute", left: 0, top: 0, bottom: 0, zIndex: 1105,
-              transform: (mobileSections || leftPanel || companionOpen) ? "none" : "translateX(-100%)", transition: "transform 0.2s ease",
-              boxShadow: "10px 0 28px rgba(0,0,0,0.35)" } : null) }}>
+          {/* the rail */}
+          <div style={{ width: 54, flex: "none", background: PAL.chrome, borderRight: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", paddingTop: 4 }}>
             {leftTabs.map((tb) => (
               // NEW-1 — `data-rail-tab` is the stable hook the click-contract guard reads: which panel
               // (if any) the left dock holds. Asserting on it is how the regression net proves that NO
@@ -23635,9 +23594,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   // explicit open/close affordances (the other is ✕); it always shows the current selection,
                   // or the "Nothing selected" state when there isn't one.
                   if (tb.id === "properties") { setPropsCollapsed(false); }
-                  // NEW-1 (B917072) — a section pick has been made; the summon overlay's own job is
-                  // done (the rail stays visible because `leftPanel` will now be truthy, above).
-                  setMobileSections(false);
                   // NEW-1: a deliberate rail choice ends any active inspector takeover — the chosen
                   // panel wins over the restore memo, so a later deselect won't yank it back.
                   setDockMemo(null);

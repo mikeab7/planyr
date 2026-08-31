@@ -301,7 +301,36 @@ BASE_URL=https://planyr.io node ui-audit/perf-harness.mjs   # against production
 # byte attribution against the base ref (what CI runs)
 node scripts/perf-base-stats.mjs --out .perf/base-stats.json
 node ui-audit/perf-bundle-audit.mjs --compare .perf/base-stats.json
+
+# what a PUSH TO MAIN will judge (no GITHUB_BASE_REF ⇒ no attribution shield)
+node ui-audit/perf-bundle-audit.mjs --compare .perf/base-stats.json --as-main
 ```
+
+### ⛔ A LOCAL RUN UNDER-MEASURES CI BY ~300 BYTES. A MARGIN UNDER ~1 KB HERE IS NOT PROOF. (B927104, 2026-08-31)
+
+`import.meta.env.VITE_SUPABASE_URL` and `..._ANON_KEY` are **inlined as string literals at build
+time** (`site-planner/lib/supabase.js`, `food/lib/supabaseClient.js` — both statically reachable
+from `src/main.jsx`, so they sit in the shared entry chunk **every** route downloads). CI's `Build`
+step has those secrets; your checkout does not. So a local build of the *identical tree* is
+**~300 bytes lighter on every route** than the one CI judges.
+
+Measured on 2026-08-31, notes route, byte-for-byte:
+
+| commit | local build (no secrets) | CI's head build (secrets) | ceiling |
+| --- | --- | --- | --- |
+| `a85cd402` | 705,351 | ~705,65x | 706,730 |
+| `b4d65330` | 706,504 | ~706,80x — **RED on main** | 706,730 |
+| `9a5d54f3` | 706,439 — *"0.3 KB under, ship it"* | ~706,75x — **RED on main** | 706,730 |
+
+That third row is the whole lesson: a local `--as-main` run said PASS with 291 bytes to spare and
+`main` went red anyway, twice in one hour. A control build with a full-length dummy project URL +
+JWT moved the same metric **+619 B**, confirming the mechanism directly rather than by inference.
+
+**So:** a local margin **under ~1 KB is unproven** — treat it as a fail and find real headroom.
+A margin of 10 KB is not sensitive to this at all, which is the practical reason to aim there
+rather than at the ceiling. (CI's *base-ref* build was fixed to carry the same secrets in the same
+commit as this note, so CI's own attribution is now honest; that does **not** make a local run
+predictive, and closing that gap is what B927104 stays open for.)
 
 ## Attributing a BOOT — `--boot-timeline` (added 2026-07-31, speed program phase 3)
 
