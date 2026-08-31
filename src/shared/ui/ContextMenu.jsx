@@ -86,24 +86,53 @@ export default function ContextMenu({
     return () => ro && ro.disconnect();
   }, [x, y, margin, gap]);
 
-  // Escape / page-scroll / window-resize all dismiss (a scroll INSIDE the menu is exempt so a
-  // scrollable over-tall menu still works).
+  // ⛔ B735 (×2) — `onClose` is closed over by a REF, not taken as a plain effect dependency.
+  // Every consumer passes an inline arrow (`onClose={() => setMenuFor(null)}`), a fresh function
+  // identity on every render, and this component's HOST re-renders as a direct side effect of the
+  // very `hashchange` this listener exists to catch (the route change that fires it is what causes
+  // the surrounding tree to switch workspaces). Depending on `[onClose]` tears the listener down
+  // and re-adds it on every such render — and because browsers snapshot a native event's listener
+  // list at DISPATCH time, a listener removed mid-dispatch is skipped for THAT event even though
+  // it's already back by the next task, so the very re-render this handler is meant to survive was
+  // silently unregistering it first. Measured live: with a plain `[onClose]` dependency this fired
+  // 0 times per navigation, every time — deterministic, not a rare race — reading the ref instead
+  // fires it every time. The mount effect below never tears down for a re-render, only for a real
+  // unmount, so the listeners stay registered the entire time the menu is open.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; });
+
+  // Escape / page-scroll / window-resize / `hashchange` all dismiss (a scroll INSIDE the menu is
+  // exempt so a scrollable over-tall menu still works). The `hashchange` case is the fix for a
+  // menu left open across a kept-alive module switch: unlike AnchoredMenu, this primitive has no
+  // live-measured `anchorRef` at all (it opens at a fixed cursor x/y), so there is no anchor
+  // geometry to watch collapse — the ONLY signal available is that this app's ENTIRE route lives
+  // in the hash (route.js), so every module switch fires one. Measured live on the project
+  // breadcrumb's own per-row kebab (this component, not AnchoredMenu — the two are easy to
+  // conflate): opening it, then switching workspace tabs without closing it first, left its
+  // full-viewport backdrop mounted, invisible, over the newly-active workspace forever — silently
+  // eating every click there, because none of Escape/scroll/resize ever fires on a plain module
+  // switch. This primitive is reused far beyond the breadcrumb (map pins, canvas elements,
+  // parcels, markups, the Library folder tree, Doc Review markup objects), so the same trap was
+  // live everywhere a context menu is left open across a tab switch, not just here.
   useEffect(() => {
-    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); onClose?.(); } };
+    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); onCloseRef.current?.(); } };
     const onScroll = (e) => {
       if (panelRef.current && e.target instanceof Node && panelRef.current.contains(e.target)) return;
-      onClose?.();
+      onCloseRef.current?.();
     };
-    const onResize = () => onClose?.();
+    const onResize = () => onCloseRef.current?.();
+    const onNav = () => onCloseRef.current?.();
     window.addEventListener("keydown", onKey, true);
     window.addEventListener("scroll", onScroll, true); // capture: catch a scroll in any container
     window.addEventListener("resize", onResize);
+    window.addEventListener("hashchange", onNav);
     return () => {
       window.removeEventListener("keydown", onKey, true);
       window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", onResize);
+      window.removeEventListener("hashchange", onNav);
     };
-  }, [onClose]);
+  }, []);
 
   return createPortal(
     <>

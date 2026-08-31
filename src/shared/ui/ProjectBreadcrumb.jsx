@@ -498,8 +498,14 @@ export default function ProjectBreadcrumb({
     }
     // Uncontrolled (site store): optimistic local removal + an HONEST cloud-failure surface (B439) —
     // a silent zero-row delete would otherwise reappear on reload claiming it was "deleted".
+    // ⛔ B735 (×2) — LOUD-FAILURE, the other reported half: `deleteSiteGroup` (storage.js) resolves
+    // `{ ok: true, removed: 0 }`, not an error, when this DEVICE'S local cache holds no plan for the
+    // group at all (never pulled, or a stale/emptied cache) — a legitimate "nothing to delete here"
+    // outcome that used to read as a silent no-op with no message at all, indistinguishable from the
+    // menu simply being broken. Surface it the same way a real cloud failure is surfaced.
     Promise.resolve(storeDelete(id)).then((res) => {
       if (res && res.ok === false) flashToast(res.error || "That project couldn't be fully deleted — it may reappear when you reload.");
+      else if (res && res.ok && res.removed === 0) flashToast("Nothing was deleted — this device doesn't have that project's plans loaded. Reload and try again.");
       refresh();
       notifyStoreChange();
     });
