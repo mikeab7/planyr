@@ -37,12 +37,19 @@ const LayerPanel = lazy(() => import("./components/LayerPanel.jsx"));
 // B831777 (NEW-2) — the Comps tab's content. Loaded on demand, same reasoning as LayerPanel
 // above: it renders inside the left rail, not on the map's own critical path.
 const CompsPanel = lazy(() => import("../../shared/comps/components/CompsPanel.jsx"));
+const SitePlansSection = lazy(() => import("../../shared/sitePlans/components/SitePlansSection.jsx"));
 import LazyPanel from "./components/LazyPanel.jsx";
 import { siteState } from "./lib/siteRegion.js";
 // NEW-3 — the ONE map-overlay stacking model. Leaflet fixes its own control containers at
 // z-index 1000; these panels sat at 1000 too, so whether the zoom buttons and the scale bar
 // covered them came down to document order. An open panel now outranks map chrome outright.
 import { MAP_CHROME_Z, panelMaxHeight, ZOOM_CONTROL_CLEARANCE_PX, MAP_OVERLAY_TOP_PX, MAP_OVERLAY_CHIP_H_PX, MAP_OVERLAY_BAR_H_PX } from "./lib/mapChromeStack.js";
+// B848848 — site-plan overlays (upload a site plan, anchor it on the map, pin comps to it).
+import { useSitePlanOverlayLayers } from "./lib/useSitePlanOverlayLayers.js";
+import { latLonToImagePoint } from "../../shared/sitePlans/lib/overlayGeoref.js";
+// Reused (never a new raw hex literal) for text on the fixed COMP_ACCENT blue below — that
+// accent doesn't change with theme, so the LIGHT palette's on-accent value is correct in both.
+import { PALETTES } from "../../shared/theme/palette.js";
 import PlaceSearchField from "./components/PlaceSearchField.jsx";
 import { useGroundElevation } from "./components/useGroundElevation.js";
 import CursorChip from "./components/CursorChip.jsx";
@@ -117,6 +124,7 @@ const PAL = {
  * which is a costlier mistake to walk back than a site click is. Matches the leasing-comp map
  * marker's own "building sale" blue (compMarkerIcon.js) rather than inventing a fourth color. */
 const COMP_ACCENT = "#2f6fb0";
+const ON_COMP_ACCENT = PALETTES.light.onAccent; // white — see the palette.js import above
 
 // The aerial-source registry (BASEMAPS) lives in lib/basemaps.js (B693) — it's shared
 // with the planner's Basemap control so both surfaces always offer the same sources.
@@ -495,7 +503,7 @@ function RailTab({ label, count, active, onClick }) {
   );
 }
 
-export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], parcelSummary = null, lastEditedByGroup = null, activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip, comps = [], onPlaceComp, onCompClick, pendingCompAnchor = null, onCompAnchorConsumed, focusCompId = null, onCompFocusHandled, onCompsChange }) {
+export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], parcelSummary = null, lastEditedByGroup = null, activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip, comps = [], onPlaceComp, onCompClick, pendingCompAnchor = null, onCompAnchorConsumed, focusCompId = null, onCompFocusHandled, onCompsChange, onOpenReviewInDocReview }) {
   const elRef = useRef(null);
   const mapRef = useRef(null);
   const addrTokRef = useRef(0); // B545: address-search generation — a newer search invalidates an older in-flight one
@@ -616,6 +624,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // stomping on that other effect's cursor when comp-placing mode turns off.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [placingCompPin]);
+
   /* B831776 (NEW-1/NEW-2) — the Site/Comp switch and the left-rail tab are ONE piece of state,
    * never two: flipping either flips the other, which is the whole point of this design (two
    * independent modes is the failure it replaces). `mode` drives BOTH — the toolbar switch's
@@ -636,6 +645,58 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     setSelectMode(false);
   };
   const [zoom, setZoom] = useState(null);
+
+  // ---- Site-plan overlays (B848848) — upload a site plan, anchor it on the map, pin comps to
+  // buildings on it. The DATA (fetch/list/upload/anchor UI) is owned by SitePlansSection, the
+  // same self-contained-data-owner shape CompsPanel already uses; this component owns only what
+  // the REAL Leaflet map has to do: render the anchored overlays (useSitePlanOverlayLayers,
+  // below) and the two map-click mechanisms SitePlansSection reuses rather than re-inventing —
+  // a generic "click anywhere on the map" request (georeference control points, the scale
+  // check) and a "the next click ON one specific overlay's rendered image" mode (pinning a
+  // comp), which resolves through the EXISTING onPlaceComp/pendingCompAnchor flow.
+  const [sitePlanOverlays, setSitePlanOverlays] = useState([]);
+  const overlaysById = useMemo(() => Object.fromEntries(sitePlanOverlays.map((o) => [o.id, o])), [sitePlanOverlays]);
+  // Meaningless zoomed all the way out — a site plan is building-scale detail.
+  const SITE_PLAN_MIN_ZOOM = 15;
+  const visibleSitePlanOverlays = useMemo(
+    () => (zoom != null && zoom < SITE_PLAN_MIN_ZOOM ? [] : sitePlanOverlays),
+    [sitePlanOverlays, zoom]
+  );
+
+  const pendingMapClickRef = useRef(null); // {resolve} while a generic map-point request is in flight, read by the once-bound click handler
+  const [mapClickPrompt, setMapClickPrompt] = useState(null);
+  const requestMapPoint = (prompt) => new Promise((resolve) => {
+    setMapClickPrompt(prompt);
+    pendingMapClickRef.current = { resolve };
+  });
+  const cancelMapPoint = () => {
+    if (pendingMapClickRef.current) { pendingMapClickRef.current.resolve(null); pendingMapClickRef.current = null; }
+    setMapClickPrompt(null);
+  };
+
+  const [clickableOverlayId, setClickableOverlayId] = useState(null); // "pin a comp" mode, armed on one overlay
+  const startPinOnOverlay = (id) => setClickableOverlayId(id);
+  const stopPinOnOverlay = () => setClickableOverlayId(null);
+  const placeCompOnOverlay = (overlay, latlng) => {
+    setClickableOverlayId(null);
+    const sitePlanPoint = latLonToImagePoint(overlay.controlPoints, latlng.lat, latlng.lng);
+    onPlaceComp && onPlaceComp({
+      kind: "site_plan", lat: latlng.lat, lon: latlng.lng,
+      sitePlanOverlayId: overlay.id, sitePlanPoint,
+    });
+  };
+  useSitePlanOverlayLayers(mapRef.current, visibleSitePlanOverlays, clickableOverlayId, placeCompOnOverlay);
+
+  // "Open source brochure" from a comp's detail view (CompsPanel) — reuses the existing
+  // cross-workspace open-review intent (Shell.openReviewInDocReview), the same one Library
+  // uses, at the overlay's own page.
+  const openOverlayBrochure = (overlay) => {
+    onOpenReviewInDocReview && onOpenReviewInDocReview(
+      { id: overlay.reviewId, project_id: overlay.projectId || null, title: overlay.docTitle || "Site plan" },
+      { page: overlay.page }
+    );
+  };
+
   // (B167) The idle "Drag to move the map" first-run bubble was removed entirely per owner
   // request — the map loads with no instructional overlay. Only the contextual selection
   // guidance and the error toast remain in the bottom-left slot (see B21/B105).
@@ -1208,6 +1269,13 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     L.control.scale({ imperial: true, metric: false, position: "bottomright", maxWidth: 130 }).addTo(map); // graphic scale (B96b)
     setZoom(map.getZoom());
     const onClick = (e) => {
+      if (pendingMapClickRef.current) {
+        const { resolve } = pendingMapClickRef.current;
+        pendingMapClickRef.current = null;
+        setMapClickPrompt(null);
+        resolve({ lat: e.latlng.lat, lng: e.latlng.lng });
+        return;
+      }
       if (placingCompPinRef.current) { placeCompPinAtRef.current(e.latlng); return; }
       if (selectModeRef.current) handleClick(e.latlng);
     };
@@ -2599,6 +2667,28 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           }} />
         )}
 
+        {/* B848848 — site-plan anchoring/scale-check (a generic "click anywhere on the map"
+            request) and "pin a comp to this plan" (a click on the plan's own rendered image)
+            both need the same visible-armed-state treatment B831781 established above: a
+            prompt banner naming what to do, since the prompt text itself varies here (unlike
+            the comp-drop case, which only ever means one thing). */}
+        {(mapClickPrompt || clickableOverlayId) && (
+          <>
+            <div aria-hidden="true" data-testid="map-siteplan-armed" style={{
+              position: "absolute", inset: 0, zIndex: MAP_CHROME_Z.control, pointerEvents: "none",
+              boxShadow: `inset 0 0 0 3px ${COMP_ACCENT}, inset 0 0 26px -8px ${COMP_ACCENT}`,
+            }} />
+            <div style={{
+              position: "absolute", top: 10, left: "50%", transform: "translateX(-50%)", zIndex: MAP_CHROME_Z.control + 1,
+              background: COMP_ACCENT, color: ON_COMP_ACCENT, borderRadius: RADIUS.pill, padding: "6px 14px", fontSize: 12.5, fontWeight: 600,
+              display: "flex", alignItems: "center", gap: 10, maxWidth: "calc(100% - 40px)",
+            }}>
+              <span>{mapClickPrompt || "Click the plan on the map to pin a comp there"}</span>
+              <button onClick={() => { cancelMapPoint(); stopPinOnOverlay(); }} style={{ border: `1px solid ${ON_COMP_ACCENT}`, background: "transparent", color: ON_COMP_ACCENT, borderRadius: RADIUS.pill, width: 18, height: 18, lineHeight: "16px", padding: 0, cursor: "pointer", flex: "none" }} aria-label="Cancel">×</button>
+            </div>
+          </>
+        )}
+
         {/* Live GPS readout (B683): the cursor's WGS84 lat/long, bottom-center so it clears the
             zoom control (corner) and the scale bar (bottom-right). Display-only; the app's frame
             stays EPSG:2278 feet. B706 appends the ground elevation when a reading exists (cached
@@ -3021,6 +3111,22 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             {/* B831777 (NEW-2) — the Comps tab's content. Mounted whenever the map route is
                 visible (`open={visible}`) so a comp anchored while browsing Sites still loads and
                 renders as a map pin (NEW-3) — only DISPLAY is gated on the tab (`active`). */}
+            {(sitesPanelOpen && mode === "comp") && (
+              <PanelErrorBoundary name="SitePlans">
+                <Suspense fallback={<div style={{ padding: 14, fontSize: 12, color: PAL.muted }}>Loading…</div>}>
+                  <SitePlansSection
+                    open={visible}
+                    active={sitesPanelOpen && mode === "comp"}
+                    projects={sites}
+                    onOverlaysChange={setSitePlanOverlays}
+                    onRequestMapPoint={requestMapPoint}
+                    onStartPinOnOverlay={startPinOnOverlay}
+                    onStopPinOnOverlay={stopPinOnOverlay}
+                    pinningOverlayId={clickableOverlayId}
+                  />
+                </Suspense>
+              </PanelErrorBoundary>
+            )}
             <PanelErrorBoundary name="Comps">
               <Suspense fallback={sitesPanelOpen && mode === "comp" ? <div style={{ padding: 14, fontSize: 12, color: PAL.muted }}>Loading…</div> : null}>
                 <CompsPanel
@@ -3032,6 +3138,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                   onFocusHandled={onCompFocusHandled}
                   projects={sites}
                   onCompsChange={onCompsChange}
+                  overlaysById={overlaysById}
+                  onOpenBrochure={openOverlayBrochure}
                 />
               </Suspense>
             </PanelErrorBoundary>

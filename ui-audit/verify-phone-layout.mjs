@@ -286,16 +286,67 @@ check("Notes: phone toolbar scrolls sideways rather than growing tall", toolbarS
 
 // 14) the primary row holds only the owner's short list (undo/redo/bold/italic/bullet/
 // numbered/link) — everything else lives behind More, closed by default so nothing from the
-// sheet is in this DOM query yet.
+// sheet is in this DOM query yet. `notes-toolbar-back-pinned`/`notes-mobile-back` (B935968)
+// are the merged-in Back control — pinned at the left of this same row, not a band above it.
 const primaryRow = await page.evaluate(() => Array.from(
   document.querySelectorAll('[data-testid="note-toolbar"] [data-testid]'),
 ).map((el) => el.getAttribute("data-testid")));
-const EXPECTED_PRIMARY = ["nt-undo", "nt-redo", "nt-bold", "nt-italic", "nt-bullet", "nt-ordered", "nt-link", "nt-more"];
+const EXPECTED_PRIMARY = ["notes-toolbar-back-pinned", "notes-mobile-back", "nt-undo", "nt-redo", "nt-bold", "nt-italic", "nt-bullet", "nt-ordered", "nt-link", "nt-more"];
 const ALWAYS_HIDDEN = ["nt-image-input"];   // the file <input type=file>, display:none, unrelated to layout
 const unexpectedOnRow = primaryRow.filter((id) => !EXPECTED_PRIMARY.includes(id) && !ALWAYS_HIDDEN.includes(id));
 check("Notes: only the common controls sit on the primary row, the rest behind More",
   unexpectedOnRow.length === 0 && EXPECTED_PRIMARY.every((id) => primaryRow.includes(id)),
   `row=${JSON.stringify(primaryRow)}`);
+
+/* 14b) NEW-1 (B935968, owner report: "the return to notes button takes up a whole header").
+ * The old fix rendered Back as its OWN full-width band between the module tab row and this
+ * toolbar. That band is gone: Back now lives INSIDE the toolbar's row, pinned at its left
+ * (`position: sticky; left: 0`) so it survives the row's own sideways scroll, with the
+ * module tab row sitting directly above the toolbar with no gap. Measured on the unfixed
+ * build for the numbers quoted below: `titleTop` was 181px and the tab-to-toolbar gap was
+ * 54px (the band's own height) — both collapse once the band is actually gone, which is what
+ * turns this red on a reintroduction rather than merely reading well on inspection. */
+const backMerge = await page.evaluate(() => {
+  const bar = document.querySelector('[data-testid="note-toolbar"]');
+  const pinned = document.querySelector('[data-testid="notes-toolbar-back-pinned"]');
+  const back = document.querySelector('[data-testid="notes-mobile-back"]');
+  const tab = document.querySelector('[data-testid="module-tab-notes"]');
+  const title = document.querySelector('[data-testid="note-title"]');
+  if (!bar || !pinned || !back) return null;
+  const cs = getComputedStyle(pinned);
+  return {
+    backInsideToolbar: bar.contains(back),
+    pinnedPosition: cs.position,
+    pinnedLeft: parseFloat(cs.left) || 0,
+    gapAboveToolbar: tab ? Math.round(bar.getBoundingClientRect().top - tab.getBoundingClientRect().bottom) : null,
+    titleTop: title ? Math.round(title.getBoundingClientRect().top) : null,
+  };
+});
+check("Notes: band 3 is gone — Back lives INSIDE the toolbar row, not its own band above it",
+  !!backMerge?.backInsideToolbar, JSON.stringify(backMerge));
+check("Notes: Back is pinned at the left of the toolbar row (position: sticky, left: 0)",
+  backMerge?.pinnedPosition === "sticky" && backMerge?.pinnedLeft <= 1, JSON.stringify(backMerge));
+check("Notes: no gap between the module tab row and the toolbar (the old back band is gone)",
+  backMerge?.gapAboveToolbar != null && Math.abs(backMerge.gapAboveToolbar) <= 3, `gap=${backMerge?.gapAboveToolbar}px`);
+check("Notes: total chrome above the note title dropped (was 181px with band 3; well under it now)",
+  backMerge?.titleTop != null && backMerge.titleTop <= 150, `titleTop=${backMerge?.titleTop}px`);
+
+// 14c) Back survives the toolbar's own sideways scroll — the whole point of pinning it rather
+// than leaving it in the normal flow of the scrollable row.
+const scrollTest = await page.evaluate(() => {
+  const bar = document.querySelector('[data-testid="note-toolbar"]');
+  const back = document.querySelector('[data-testid="notes-mobile-back"]');
+  const before = back.getBoundingClientRect().left;
+  bar.scrollLeft = bar.scrollWidth;
+  const scrolledLeft = bar.scrollLeft;
+  const after = back.getBoundingClientRect().left;
+  bar.scrollLeft = 0;   // leave the row as found for the steps that follow
+  return { before, after, scrolledLeft, didScroll: scrolledLeft > 20 };
+});
+check("Notes: the toolbar genuinely scrolls sideways (there is something to pin Back against)",
+  scrollTest.didScroll, `scrollLeft=${scrollTest.scrolledLeft}px`);
+check("Notes: Back does not move when the rest of the toolbar scrolls sideways underneath it",
+  Math.abs(scrollTest.after - scrollTest.before) <= 1, `before=${scrollTest.before}px after=${scrollTest.after}px`);
 
 // 15) tapping Back returns to the full-width list
 await page.locator('[data-testid="notes-mobile-back"]').click({ timeout: 5000 });

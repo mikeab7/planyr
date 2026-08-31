@@ -957,6 +957,11 @@ export default function NoteEditor({
    * of the iOS home indicator). The caller (Notes.jsx) is the single source for this — see
    * its own note on reusing B113/B485's `useNarrow()` rather than a third breakpoint. */
   narrow = false,
+  /* THE WAY BACK TO THE LIST (B935968) — forwarded straight to `NoteToolbar`, which pins it
+   * at the left of its own primary row rather than this file spending a whole band on it
+   * (see Notes.jsx's note on why that band is gone). `undefined` on desktop and wherever the
+   * caller has nowhere to send it (e.g. it isn't asked for outside `narrow`). */
+  onBack,
 }) {
   /* Initial content read ONCE, here. Not in an effect — see fix (2) in the header. */
   const [initialDoc] = useState(() => readPage(pageId) || EMPTY_DOC);
@@ -2229,6 +2234,7 @@ export default function NoteEditor({
         onHistory={() => setHistoryOpen((v) => !v)}
         historyOpen={historyOpen}
         narrow={narrow}
+        onBack={onBack}
       />
       <FindBar term={find.term} count={find.count} index={find.index} onStep={stepFind} onClear={onClearSearch} />
 

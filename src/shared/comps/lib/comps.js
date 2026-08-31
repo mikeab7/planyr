@@ -15,7 +15,7 @@
 export const COMP_TYPES = ["land", "building_sale", "lease"];
 export const LEASE_PERIODS = ["annual", "monthly"];
 export const LEASE_EXPENSE_BASES = ["nnn", "gross"];
-export const ANCHOR_KINDS = ["pin", "parcel"];
+export const ANCHOR_KINDS = ["pin", "parcel", "site_plan"];
 
 const SF_PER_ACRE = 43560;
 
@@ -34,6 +34,14 @@ export function validAnchor(anchor) {
   if (!anchor || typeof anchor.lat !== "number" || typeof anchor.lon !== "number") return false;
   if (!Number.isFinite(anchor.lat) || !Number.isFinite(anchor.lon)) return false;
   if (anchor.kind === "parcel") return !!(anchor.parcelApn || anchor.parcelGeom);
+  // site_plan: a point pinned on an uploaded, georeferenced site plan (B848848) — lat/lon
+  // above is the DERIVED, authoritative position; sitePlanOverlayId + sitePlanPoint (the
+  // image-pixel point on that overlay) are the extra snapshot this anchor kind carries, the
+  // same role parcelApn/parcelGeom play for 'parcel'.
+  if (anchor.kind === "site_plan") {
+    return !!(anchor.sitePlanOverlayId && anchor.sitePlanPoint &&
+      typeof anchor.sitePlanPoint.x === "number" && typeof anchor.sitePlanPoint.y === "number");
+  }
   return anchor.kind === "pin";
 }
 
@@ -298,6 +306,8 @@ export function rowToComp(r) {
       county: r.county || null,
       parcelApn: r.parcel_apn || null,
       parcelGeom: r.parcel_geom || null,
+      sitePlanOverlayId: r.site_plan_overlay_id || null,
+      sitePlanPoint: r.site_plan_point || null,
     },
     landPrice: r.land_price != null ? Number(r.land_price) : null,
     landSizeValue: r.land_size_value != null ? Number(r.land_size_value) : null,
@@ -334,6 +344,8 @@ export function compToRow(comp) {
     county: comp.anchor?.county || null,
     parcel_apn: comp.anchor?.parcelApn || null,
     parcel_geom: comp.anchor?.parcelGeom || null,
+    site_plan_overlay_id: comp.anchor?.sitePlanOverlayId || null,
+    site_plan_point: comp.anchor?.sitePlanPoint || null,
     land_price: comp.landPrice ?? null,
     land_size_value: comp.landSizeValue ?? null,
     land_size_unit: comp.landSizeUnit ?? null,

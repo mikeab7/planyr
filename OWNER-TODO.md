@@ -7,10 +7,10 @@
 
 _Last updated: 2026-08-31._
 
-## 🔐 Two small GitHub settings — both fix the same shape of problem: a robot that can't quite finish its own job (B825232–B825234)
+## 🔐 One small GitHub setting still open, and a closed hunt for another (B825232–B825234)
 
-> **Neither is urgent, and nothing is broken while they wait — these just remove two spots where a
-> Claude session has to do by hand what a setting would let happen automatically.**
+> **Not urgent, and nothing is broken while it waits — it just removes one spot where a Claude
+> session has to do by hand what a setting would let happen automatically.**
 
 - [ ] **Authorize `mikeab7/planyr` for the Cowork session type**, so the Cowork thread (the one that
       drives your actual signed-in browser to check things a sandbox can't reach — sign-in-required
@@ -19,25 +19,15 @@ _Last updated: 2026-08-31._
       now its connection to GitHub refuses to let it save anything to this project directly, so every
       one of those checks has to be handed off and re-entered — which is exactly how **79 of those
       checks piled up waiting** before this was noticed. **Soon, not urgent.**
-- [x] **Confirm/flip the repo's "Workflow permissions" setting** — DONE 2026-08-31, confirmed by you directly
-      from `github.com/mikeab7/planyr/settings/actions` (now reads "Read and write permissions").
-      **⛔ BUT this did NOT fix the underlying problem — a new to-do replaces it below.** The live re-test
-      (`V438336`) ran right after your confirmation and got the **identical FORBIDDEN error** as before the
-      flip (`markPullRequestReadyForReview` still fails "Resource not accessible by integration" on a fresh
-      real PR, #1246). So the "Workflow permissions" ceiling was not the whole story after all.
-- [x] **Decide on the neighbouring checkbox: "Allow GitHub Actions to create and approve pull requests"**
-      — DONE 2026-08-31, you checked and saved it (confirmed by you directly from
-      `github.com/mikeab7/planyr/settings/actions` at 02:05 UTC). It did NOT fix the underlying problem —
-      the live re-test (`V438336`, third re-run) got the identical FORBIDDEN error on a fresh throwaway PR
-      with both settings on. **There is no remaining GitHub repository-settings hypothesis for this.**
-- [x] **Decide whether to add a PAT / GitHub App credential so the auto-ready workflow can actually mark a
-      PR ready and arm auto-merge itself** — DONE 2026-08-31, you declined a second time, and this time went
-      further: the workflow itself is now **deleted**, not just silenced. `.github/workflows/pr-auto-ready.yml`
-      is gone (`B934400`/`B934402` in `BACKLOG-DONE.md`) — there's no job left to "speak up on its own if it
-      ever starts working." Nothing left on your plate: sessions mark their own PRs ready and arm auto-merge
-      themselves as the standing, permanent way this gets done, every time, with no automation to fall back on.
+- **Un-drafting PRs automatically — closed, nothing left to check or flip.** Both repo settings
+  ("Workflow permissions: Read and write" and "Allow GitHub Actions to create and approve pull
+  requests") were switched on and live re-tested on real PRs (#1246, #1255) — both still came back the
+  identical FORBIDDEN error. You then declined a PAT / GitHub App credential a second time, and the
+  automation that needed one (`pr-auto-ready.yml`) is now deleted outright, not just silenced. Sessions
+  mark their own PRs ready and arm auto-merge by hand now, permanently — full record in
+  `BACKLOG-DONE.md` (B793696, B934400–B934402). Don't re-open this hunt.
 - [ ] **Check whether `main` has a branch-protection rule set** (`github.com/mikeab7/planyr/settings/branches`)
-      — a SEPARATE question from the two above (those are about un-drafting a PR; this is about arming
+      — a SEPARATE question from the note above (that one is about un-drafting a PR; this is about arming
       auto-merge on one that's already ready). Found 2026-08-31 (`B897440`) while shipping PR #1245: even
       after the Workflow-permissions flip and un-drafting the PR by hand, GitHub still refused to arm
       auto-merge — first "Protected branch rules not configured for this branch," then (once the checks

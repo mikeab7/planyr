@@ -526,6 +526,15 @@ Runtime deps are kept few and deliberate. New client dependency added 2026-07-10
   build, it passes in ~40s, and the armed auto-merge then completes on its own with zero owner
   involvement. This is a known, self-serviceable hiccup — **do the nudge automatically as part
   of shipping; do NOT report it as a blocker.** (Learned 2026-06-22 on PR #274.)
+  **⚠ THE ROOT-CAUSE EXPLANATION ABOVE — "GitHub suppresses the trigger for the automation's app
+  token" — IS UNVERIFIED, NOT RE-MEASURED SINCE THAT ONE 2026-06-22 OBSERVATION. Measure again before
+  citing it as settled fact, or before repeating it in a brief as an established second cause of a
+  stuck PR.** A brief circulating 2026-08-31 relayed exactly this claim while flagging itself that it
+  was repeating this note, not a fresh check. `docs/CI-REQUIRED-CHECK.md` separately found a case
+  where what looked like permanent suppression was actually a temporary delay (B226400) — the same
+  kind of mistake this claim invites if treated as proven. The operational fix — push the nudge commit
+  — stays safe and cheap regardless of which explanation is true, so keep doing that; just don't
+  restate the app-token-suppression mechanism itself as proven.
   **⛔ AND READ THE RIGHT ENDPOINT BEFORE CONCLUDING THE CHECK NEVER STARTED (measured 2026-08-14, and this
   session got it wrong twice before checking).** `pull_request_read method=get_status` returns the COMMIT
   STATUS API; this repo's `build` reports a **CHECK RUN**. So `{"state":"pending","total_count":0}` there is
