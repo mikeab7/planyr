@@ -148,6 +148,10 @@ export function seedSide(text) {
  *
  * Returns false when the file has no conflict stages (already resolved) — then the copy on disk is
  * left exactly as it is and only the regeneration runs, which is the pre-existing behaviour.
+ *
+ * `repo` defaults to this module's own REPO so the existing CLI call site is untouched, but is
+ * parameterised so `scripts/merge-driver-ledgers.mjs` (the git merge driver, NEW-1) can reuse this
+ * exact seeding logic against whatever repo it is merging in, without re-deriving it.
  */
 function generatedSides(file) {
   const stage = (n) => { try { return git("show", `:${n}:${file}`); } catch { return ""; } };
@@ -161,10 +165,10 @@ function generatedSides(file) {
   return { ours, theirs };
 }
 
-function seedGenerated(file, sides) {
+export function seedGenerated(file, sides, repo = REPO) {
   const { ours, theirs } = sides;
   if (!ours && !theirs) return false;
-  writeFileSync(join(REPO, file), `${seedSide(theirs)}\n${seedSide(ours)}\n`);
+  writeFileSync(join(repo, file), `${seedSide(theirs)}\n${seedSide(ours)}\n`);
   return true;
 }
 
