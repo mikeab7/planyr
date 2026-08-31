@@ -27,16 +27,15 @@ _Last updated: 2026-08-31._
       real PR, #1246). So the "Workflow permissions" ceiling was not the whole story after all.
 - [x] **Decide on the neighbouring checkbox: "Allow GitHub Actions to create and approve pull requests"**
       — DONE 2026-08-31, you checked and saved it (confirmed by you directly from
-      `github.com/mikeab7/planyr/settings/actions` at 02:05 UTC). **⛔ BUT it did NOT fix the underlying
-      problem either.** The live re-test (`V438336`, third re-run) ran right after, on a fresh throwaway
-      draft PR (#1255), and got the **identical FORBIDDEN error** as both prior attempts — un-drafting a PR
-      still fails "Resource not accessible by integration" with both settings now on. **There is no
-      remaining GitHub repository-settings hypothesis for this** — both candidates named on this list have
-      been tried and both were ruled out empirically. The actual fix is now a small implementation
-      decision, not a settings page: a fine-grained Personal Access Token (or a small dedicated GitHub App)
-      scoped to just this repo's pull-request permissions, stored as a repo secret and used in place of the
-      built-in token for this one workflow step. That needs your go-ahead before a session builds it — full
-      background: `B793696` in `BACKLOG.md`.
+      `github.com/mikeab7/planyr/settings/actions` at 02:05 UTC). It did NOT fix the underlying problem —
+      the live re-test (`V438336`, third re-run) got the identical FORBIDDEN error on a fresh throwaway PR
+      with both settings on. **There is no remaining GitHub repository-settings hypothesis for this.**
+- [x] **Decide whether to add a PAT / GitHub App credential so the auto-ready workflow can actually mark a
+      PR ready and arm auto-merge itself** — DONE 2026-08-31, you declined. Nothing left on your plate for
+      this: sessions mark their own PRs ready and arm auto-merge themselves instead (costs you nothing),
+      and the workflow no longer fails its check over it — it reports the known case quietly and will speak
+      up on its own if it ever starts working (`B793696`/`B914449` in `BACKLOG.md`, closed as a known,
+      accepted, permanent limitation with a stopping rule — it only reopens on its own if that ever changes).
 - [ ] **Check whether `main` has a branch-protection rule set** (`github.com/mikeab7/planyr/settings/branches`)
       — a SEPARATE question from the two above (those are about un-drafting a PR; this is about arming
       auto-merge on one that's already ready). Found 2026-08-31 (`B897440`) while shipping PR #1245: even
