@@ -439,6 +439,15 @@ const PinGlyph = ({ size = 12 }) => (
  * comment for why there is deliberately no second "which tab" variable. */
 const SWITCH_SEG_H = 26;
 function SiteCompSwitch({ mode, onChange }) {
+  // NEW-1/NEW-3 (map landing radius audit) — measured `nestedIn(RADIUS.sm, 2)` = 4px against this
+  // switch's own 2px padding, and a literal 4 is a genuinely NEW off-scale number (radius.js's
+  // scale is {6,8,12,999} — nestedIn() derives concentric values for a LARGER outer radius nested
+  // inside a bigger surface; at the smallest step, sm=6, a 2px inset floors below the next rung
+  // down rather than landing on one). Between "perfectly concentric but off-scale" and "on-scale
+  // but 2px shy of concentric on a 26px-tall segment" (imperceptible at working zoom —
+  // PERCEPTUAL-PARITY), the second is the one that doesn't invent a fifth radius step, so the
+  // segment stays on RADIUS.sm, matching its own shell. See docs/DESIGN.md's radius section for
+  // the rule this documents ("snap to the nearest canonical step rather than mint a derived one").
   const seg = (key, label, accent) => {
     const on = mode === key;
     return (
@@ -462,12 +471,17 @@ function SiteCompSwitch({ mode, onChange }) {
   );
 }
 
-/* B831777 (NEW-2) — one rail tab, counts included on the tab itself (never a separate badge). */
+/* B831777 (NEW-2) — one rail tab, counts included on the tab itself (never a separate badge).
+ * NEW-1/NEW-3 (map landing radius audit) — repointed from the bare `RADIUS.sm` literal to
+ * `nestedIn(RADIUS.lg, 6)` (same value, 6px, since the header row's own 6px padding is the real
+ * gap to the panel's RADIUS.lg=12 edge): a literal that already equals a token's pixel value still
+ * drifts independently of it (docs/DESIGN.md's radius section, exception 3) — this ties it to the
+ * panel it actually nests inside instead. */
 function RailTab({ label, count, active, onClick }) {
   return (
     <button type="button" role="tab" aria-selected={active} onClick={onClick} style={{
       flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
-      height: 26, padding: "0 8px", borderRadius: RADIUS.sm, border: "none",
+      height: 26, padding: "0 8px", borderRadius: nestedIn(RADIUS.lg, 6), border: "none",
       background: active ? "var(--surface-raised)" : "transparent",
       color: active ? "var(--text-primary)" : "var(--text-secondary)",
       fontSize: 11.5, fontWeight: active ? 700 : 600, cursor: "pointer", fontFamily: "inherit",
@@ -997,7 +1011,12 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // locate button above zoom's +/−, not below it), so "below" requires adding it first.
     let detachPermWatch = () => {};
     (() => {
-      const container = L.DomUtil.create("div", "leaflet-bar leaflet-control");
+      // NEW-3 (map landing radius audit) — "leaflet-control-locate" is OUR class, not Leaflet's;
+      // it exists only so index.css can give this hand-rolled control the same corner treatment as
+      // the zoom stack it sits directly above (Leaflet's generic "leaflet-bar" alone left it at the
+      // vendor default 4px while the zoom bar right next to it reads 8px — two adjacent rounded
+      // boxes with two different curves, the exact class of drift this pass exists to close).
+      const container = L.DomUtil.create("div", "leaflet-bar leaflet-control leaflet-control-locate");
       const btn = L.DomUtil.create("a", "", container);
       btn.href = "#"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn"); btn.setAttribute("data-locate-state", "idle");
       btn.style.display = "flex"; btn.style.alignItems = "center"; btn.style.justifyContent = "center"; btn.style.color = "var(--chrome-text)";
@@ -2836,10 +2855,13 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             {/* collapsible header (B106) + the two tabs — one row, always visible (never buried
                 behind the collapse), so both counts stay readable even with the list folded. */}
             <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 6px 4px" }}>
+              {/* NEW-1/NEW-3 (map landing radius audit) — nestedIn(RADIUS.lg, 6), not a bare
+                  RADIUS.sm literal: this header row sits 6px in from the panel's own RADIUS.lg=12
+                  edge, same reasoning as RailTab just above (docs/DESIGN.md's radius exception 3). */}
               <button onClick={() => { if (narrow && !sitesPanelOpen) setLayersPanelOpen(false); toggleSitesPanel(); }}
                 title={sitesPanelOpen ? "Collapse the sites panel" : "Expand the sites panel"}
                 style={{ flex: "none", width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center",
-                  background: "transparent", border: "none", cursor: "pointer", color: PAL.muted, borderRadius: RADIUS.sm }}>
+                  background: "transparent", border: "none", cursor: "pointer", color: PAL.muted, borderRadius: nestedIn(RADIUS.lg, 6) }}>
                 <span style={{ fontSize: 8, lineHeight: 1, transform: sitesPanelOpen ? "none" : "rotate(-90deg)", display: "inline-block" }}>▼</span>
               </button>
               <RailTab label="Sites" count={nf ? `${shownCount}/${sites.length}` : sites.length}

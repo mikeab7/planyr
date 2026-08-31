@@ -13,7 +13,7 @@
 | B927104 | CI's base-ref bundle snapshot builds WITHOUT the production `VITE_*` secrets the head build inlines, so every byte attribution is off by the length of those literals and no local run can predict main's verdict | [infra / perf budgets] | #infra #perf #testing | live |
 | B927105 | `bundle.notesRouteJsBytes` has ~1 KB of headroom, no named owner, and the drift is ~164 KB of Site-Planner libraries sitting in the chunk EVERY route downloads | [infra / perf budgets] | #infra #perf #notes | sandbox |
 | B917073 | The workspace tab row clips mid-word at phone width with no scroll affordance, and the ACTIVE tab can scroll out of view | [App shell / AppHeader] | #site-planner #mobile #ui | sandbox |
-| B915536 | Clean up the 24 pre-existing UI deviations `ui-inventory.mjs` (NEW-3/B904034) finds, not fixed by that item | [global/ui] | #ui | sandbox |
+| B915536 | Clean up the pre-existing UI deviations `ui-inventory.mjs` (NEW-3/B904034) finds, not fixed by that item | [global/ui] | #ui | sandbox |
 | B853713 | Wire dedicated county appraisal districts (CADs) for the DFW & Austin metros | [Site Planner / map] | #gis #parcel #site-planner | live |
 | B858384 | Fix red required `build` check on `main`: verification-queue ceiling breached by calendar drift, not by any commit | [Infra / CI] | #infra #testing | sandbox |
 | B791520 | Fix red required `build` check on `main`: Site route bundle 0.4 KB over its performance-budget ceiling | [Infra / CI] | #infra #testing | sandbox |

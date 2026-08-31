@@ -11,22 +11,61 @@
  *
  * SCOPE, deliberately: this walks the surfaces reachable LOGGED OUT with a locally-seeded demo
  * site (ATTEMPT-BEFORE-YOU-PARK — a Claude-doable check must not be deferred to a live pass) —
- * the Site Planner (header, the dropdown menus it opens, the tool rail, the left rail, the Yield
- * panel), Library, and Doc Review's empty state. It does not attempt every dialog in the app (an
- * auth-gated modal, a signed-in-only settings pane) — those stay on VERIFICATION.md's live-verify
- * list like everything else that needs a real account.
+ * the **Map landing page** (no project selected — the FIRST screen a user sees), the Site Planner
+ * (header, the dropdown menus it opens, the tool rail, the left rail, the Yield panel), Library,
+ * and Doc Review's empty state. It does not attempt every dialog in the app (an auth-gated modal,
+ * a signed-in-only settings pane) — those stay on VERIFICATION.md's live-verify list like
+ * everything else that needs a real account.
+ *
+ * ⛔ COVERAGE, STATED RATHER THAN IMPLIED (NEW-2, 2026-08-31 — the map landing page was absent from
+ * this crawl for its entire life, so every "N deviations" figure this tool ever printed was measured
+ * with the first screen a user sees simply not looked at; see B915536's amendment). Crawled today:
+ * Map landing page, App header + its four dropdown menus (File ▾ / Undo history / Settings gear /
+ * plan menu), the tool rail, the left rail + Yield panel, Library, Doc Review's empty state. NOT
+ * crawled, with the reason each is out of scope for THIS headless/logged-out tool rather than
+ * silently forgotten:
+ *   - Scheduler (`public/sequence/index.html`) — a separate, self-contained HTML document outside
+ *     the React tree this token system governs at all (see docs/DESIGN.md "The Scheduler iframe is
+ *     walled off"); a control inventory keyed on RADIUS/FONT_SIZE has nothing to check there.
+ *   - Stitcher, Notes, Model, admin (`#/admin`) — each is a real workspace this tool COULD reach by
+ *     hash the way Library/Doc Review are reached, but needs its own seed data (a stitched aerial, a
+ *     saved note, a model sheet) or an owner-only allowlist (admin) to render anything beyond an
+ *     empty shell; a future pass earns its own surface entries once that seed is built, same as this
+ *     session built the demo site MapFinder/SitePlanner already use. Left as a named gap, not folded
+ *     into "not crawled" silence.
+ *   - Doc Review WITH a document open, the Site Planner canvas chrome beyond what "App header" +
+ *     "tool rail" + "left rail" already isolate, and any dialog/modal that only opens over real
+ *     content (a delete confirmation, a share sheet) — all need a loaded document or drawn geometry
+ *     this tool's bare demo site doesn't carry yet. Same disposition as above: a named gap.
+ *   - Any auth-gated or signed-in-only surface (the account panel's Storage tab, cloud-sync states,
+ *     admin's real content) — out of scope for a logged-out tool by construction; these stay on
+ *     `VERIFICATION.md`'s live-verify list, per the ATTEMPT-BEFORE-YOU-PARK rule in root CLAUDE.md
+ *     (a logged-out check is Claude-doable and belongs here; a signed-in one does not).
  *
  * GROUPING — "Main menu" is specifically the dropdown MENU PANELS the header opens (File ▾,
  * Undo/Redo history, Settings gear), not the header bar itself. AnchoredMenu portals every open
  * panel to `document.body` stamped `[data-menu-owner]` (src/shared/ui/AnchoredMenu.jsx), so this
  * is a real, principled DOM distinction, not an arbitrary label: "App header" is what's always on
  * screen, "Main menu" is what a click reveals — and the owner's report is squarely about the
- * latter looking inconsistent with the toolbar that opens it.
+ * latter looking inconsistent with the toolbar that opens it. "Map landing page" is deliberately
+ * NOT scoped to exclude the header (unlike Library/Doc Review below) — it reports the header
+ * controls (account chip, Full screen, the top nav tabs) again, in the landing state, rather than
+ * assume they read the same as the "App header" surface's plan-open capture; the two sections can
+ * be diffed against each other for exactly that reason.
  *
  * ATTRIBUTION IS BEST-EFFORT. A computed-style walk has no source location, so `attribute()` greps
  * `src/` for the element's own visible text/aria-label/title as a literal string and reports the
  * first match. This can miss or over-match on a generic label ("▾", "File") — every row says so
  * plainly rather than pretending to a precision this method doesn't have.
+ *
+ * NESTING MISMATCHES (NEW-1) — beyond "is this radius on the scale," a second, geometric check:
+ * for every rounded element, find its nearest ROUNDED ancestor that visually contains it, and
+ * compare the child's actual radius against `nestedIn(ancestorRadius, gap)` — the exact formula
+ * radius.js already documents (a pill container's children must themselves be pills; any other
+ * container's child is the outer radius minus the real measured gap, floored at 2px). This is a
+ * check design-drift-audit.mjs cannot make: that guard is a text scan with no DOM and no geometry,
+ * so it can confirm every number is ON the scale without ever seeing that two adjacent, on-scale
+ * curves disagree with each other. See `nestingMismatches()` below.
  *
  * USAGE (preview server must be running — `npx vite build && npx vite preview --port 4173`):
  *   node ui-audit/ui-inventory.mjs                 → regenerate docs/UI-INVENTORY.md
@@ -93,7 +132,29 @@ const escAll = async (p) => { await p.keyboard.press("Escape").catch(() => {}); 
 // header bar itself is only reported under "App header"; its opened menus only under "Main
 // menu"). `menuOnly: true` means "read only currently-open [data-menu-owner] portals".
 // ------------------------------------------------------------------------------------------
+const INTERACTIVE_SEL = 'button, [role="button"], [role="menuitem"], input, select, [class*="btn" i], [class*="chip" i]';
+
+// NEW-2 — the landing page's shell CONTAINERS (the search cluster bar, the Sites/Comps rail) are
+// plain inline-styled `<div>`s with no button/role/class hook, so INTERACTIVE_SEL alone — built for
+// the other surfaces, which only ever cared about controls — never sees them. `[style*="border-radius"]`
+// widens this ONE surface to catch every rounded node, container or control alike (the very thing
+// NEW-1's nesting check needs a container FOR); the Leaflet-specific selectors add the scale bar
+// (a plain `<div>`, matched by neither clause) and make the zoom-stack/locate-button `<a>` tags
+// explicit rather than relying on their incidental `role="button"`.
+const LANDING_SEL = `${INTERACTIVE_SEL}, [style*="border-radius"], .leaflet-control-scale-line, .leaflet-bar a`;
+
 const SURFACES = [
+  {
+    // NEW-2 — the first screen a user sees, no project selected. No prep() beyond collapsing the
+    // Imagery & layers panel: default OPEN at desktop width (MapFinder's own useState initializer),
+    // but the owner's report and MAP_CORNER_CHIP_STYLE both concern the COLLAPSED corner pill, so
+    // this reads the state that's actually in question rather than the wide-open panel.
+    name: "Map landing page (no project selected)", hash: "#/site",
+    prep: async (p) => { await clickIf(p, '[title="Collapse layers"]'); await p.waitForTimeout(150); },
+    scope: "body",
+    exclude: "[data-menu-owner]",
+    directSelector: LANDING_SEL,
+  },
   {
     name: "App header", hash: "#/site",
     prep: async (p) => { await openPlan(p); await fit(p); },
@@ -144,8 +205,6 @@ const SURFACES = [
   { name: "Doc Review (empty state)", hash: "#/markup", prep: async () => {}, scope: "body", exclude: "header, [data-menu-owner]" },
 ];
 
-const INTERACTIVE_SEL = 'button, [role="button"], [role="menuitem"], input, select, [class*="btn" i], [class*="chip" i]';
-
 async function readSurface(page, surface) {
   return page.evaluate(({ interactiveSel, menuOnly, scope, exclude, directSelector }) => {
     // ⛔ Both the MapFinder and the open-plan canvas keep their own AppHeader mounted at once
@@ -186,6 +245,112 @@ async function readSurface(page, surface) {
     }
     return out;
   }, { interactiveSel: INTERACTIVE_SEL, menuOnly: !!surface.menuOnly, scope: surface.scope, exclude: surface.exclude, directSelector: surface.directSelector });
+}
+
+// NEW-1 — the nesting-family check design-drift-audit.mjs cannot make (it has no DOM, no geometry).
+// For every rounded, visible node under `surface`'s root, find its nearest ROUNDED ancestor that
+// visually CONTAINS it (not just any ancestor — a sibling shell one component over must never match),
+// and assert the child's own radius equals `nestedIn(ancestorRadius, measuredGap)` — radius.js's own
+// formula, duplicated here (not imported: this runs inside `page.evaluate`, a separate JS realm with
+// no module graph) and kept a direct transcription on purpose so a change to the real formula is easy
+// to notice as a diff between the two copies.
+async function nestingMismatches(page, surface) {
+  return page.evaluate(({ menuOnly, scope, exclude, radiusOk }) => {
+    const nestedIn = (outer, gap) => (outer >= 999 ? 999 : Math.max(2, Math.round(outer - gap)));
+    const root = menuOnly
+      ? [...document.querySelectorAll('[data-menu-owner]')]
+      : [[...document.querySelectorAll(scope)].find((el) => el.getBoundingClientRect().width > 0) || document.body];
+
+    // Candidate pool: every element with a UNIFORM (single-value), positive, on-scale computed
+    // border-radius and a non-zero rendered box. Multi-corner radii (e.g. a half-pill split-button
+    // pair) opt out of the concentric check — that shape is a different, deliberate pattern, not
+    // covered by "nested inside a rounded container".
+    const all = [];
+    for (const r of root) {
+      if (!r) continue;
+      for (const el of r.querySelectorAll("*")) {
+        if (exclude && el.closest(exclude) && el.closest(exclude) !== r) continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) continue;
+        const cs = getComputedStyle(el);
+        const parts = [...new Set(String(cs.borderRadius).split(/\s+/).map((t) => parseFloat(t)).filter((n) => !Number.isNaN(n)))];
+        if (parts.length !== 1) continue;
+        const radius = parts[0];
+        if (!radius || !radiusOk.includes(radius)) continue;
+        const label = el.getAttribute("aria-label") || el.getAttribute("title")
+          || (el.textContent || "").trim().slice(0, 30) || el.tagName;
+        all.push({ el, radius, rect, label: String(label).replace(/\s+/g, " ").trim() });
+      }
+    }
+
+    const findings = [];
+    for (const child of all) {
+      // Nearest ROUNDED ancestor in the candidate pool that visually contains this element with a
+      // real inset (strictly smaller on at least one axis — an icon/text span sharing its parent's
+      // exact box is the same shape twice, not a nested control, and must not be compared).
+      let anc = child.el.parentElement;
+      let found = null;
+      // Bounded to a few DOM hops and a real size difference — a control "nested" 6 levels deep
+      // inside a big scrollable panel (a status dot inside a list row inside a group inside the
+      // panel) is not what radius.js's nesting rule means ("an input in a panel, a button in a
+      // banner" — flush, direct nesting), and a 1px difference is antialiasing/box-model noise, not
+      // a second container. Same LABEL is the giveaway for the latter: a wrapper div measured
+      // fractionally larger than the control it wraps reads as its own "ancestor" otherwise.
+      let hops = 0;
+      while (anc && anc !== document.body && hops < 5) {
+        const cand = all.find((c) => c.el === anc);
+        if (cand && cand.label !== child.label) {
+          const r = child.rect, a = cand.rect;
+          const contained = r.left >= a.left - 0.5 && r.right <= a.right + 0.5 && r.top >= a.top - 0.5 && r.bottom <= a.bottom + 0.5;
+          const inset = r.width < a.width - 3 || r.height < a.height - 3;
+          if (contained && inset) { found = cand; break; }
+        }
+        anc = anc.parentElement;
+        hops++;
+      }
+      if (!found) continue;
+      const gapLeft = child.rect.left - found.rect.left, gapRight = found.rect.right - child.rect.right;
+      const gapTop = child.rect.top - found.rect.top, gapBottom = found.rect.bottom - child.rect.bottom;
+      const gap = Math.min(gapLeft, gapRight, gapTop, gapBottom);
+      if (gap < 1.5) continue; // sub-2px slack is box-model noise, not a second rounded surface
+      // The owner's own complaint is about a curve sitting close enough to another curve that "the
+      // eye compares the two curves directly with no gap between them" (NEW-1) — a control floating
+      // in the MIDDLE of a big panel, nowhere near an actual rounded CORNER, is never that comparison,
+      // however it scores on containment alone. Require the child to sit near one of the ancestor's
+      // four rounded corners on BOTH axes (within its radius + a little slack) before it counts.
+      const corner = found.radius + 6;
+      const nearCorner = (gapTop <= corner || gapBottom <= corner) && (gapLeft <= corner || gapRight <= corner);
+      if (!nearCorner) continue;
+      const expected = nestedIn(found.radius, Math.max(0, gap));
+      // A derived `nestedIn()` value that ISN'T itself one of the four canonical steps (this
+      // happens at small outer radii with a tight inset — nestedIn(6, 2) = 4, a fifth number
+      // nobody's scale declares) has a documented, sanctioned fallback: snap to the CONTAINER's
+      // own radius rather than mint a new one (docs/DESIGN.md's radius section) — perfectly
+      // concentric-but-off-scale is worse than 1-2px shy of concentric on an already-tiny control.
+      // So a child matching its ancestor exactly is compliant in that case, not a mismatch.
+      const compliant = Math.abs(expected - child.radius) <= 1.5
+        || (!radiusOk.includes(expected) && child.radius === found.radius);
+      // Tolerance of 1px otherwise: `gap` is measured from the ancestor's outer (border) box, so a
+      // 1px border on the ancestor reads as 1px more gap than the padding-only number a call site
+      // hands `nestedIn()` — a real, but sub-perceptual, measurement convention difference, not a
+      // second design decision to chase. A genuine family mismatch (a whole scale step, or a curve
+      // that should be a pill and isn't) is never this close.
+      if (!compliant) {
+        findings.push({
+          childLabel: child.label, childRadius: child.radius,
+          ancestorLabel: found.label, ancestorRadius: found.radius,
+          gap: Math.round(gap * 10) / 10, expected,
+        });
+      }
+    }
+    // Dedupe identical (child family, ancestor family, expected) triples — many rows share one shape.
+    const byKey = new Map();
+    for (const f of findings) {
+      const key = `${f.childRadius}|${f.ancestorRadius}|${f.expected}|${f.childLabel}|${f.ancestorLabel}`;
+      if (!byKey.has(key)) byKey.set(key, f);
+    }
+    return [...byKey.values()];
+  }, { menuOnly: !!surface.menuOnly, scope: surface.scope, exclude: surface.exclude, radiusOk: [...RADIUS_OK] });
 }
 
 // Best-effort file/line attribution: grep src/ for the element's own label as a literal string.
@@ -260,6 +425,7 @@ async function run() {
   const EXEC = process.env.PW_CHROME || undefined;
   const browser = await chromium.launch({ ...(EXEC ? { executablePath: EXEC } : {}), args: ["--no-sandbox", "--ignore-certificate-errors"] });
   const results = {}; // surface name -> { light: [...], dark: [...] }
+  const nesting = {}; // surface name -> { light: [...], dark: [...] } of nesting-mismatch findings
   try {
     for (const theme of ["light", "dark"]) {
       for (const surface of SURFACES) {
@@ -273,6 +439,7 @@ async function run() {
         await page.waitForTimeout(300);
         const rows = await readSurface(page, surface);
         (results[surface.name] ||= {})[theme] = rows;
+        (nesting[surface.name] ||= {})[theme] = await nestingMismatches(page, surface);
         await ctx.close();
       }
     }
@@ -289,6 +456,26 @@ async function run() {
     return block;
   });
 
+  let totalNestingMismatches = 0;
+  const nestingLines = ["## Nesting mismatches (NEW-1)", "",
+    "A control whose radius disagrees with `nestedIn(ancestorRadius, gap)` for its nearest rounded,",
+    "visually-containing ancestor — the geometric half design-drift-audit.mjs cannot check (see the",
+    "script header). Every row here is two on-scale radii that still don't belong next to each other.",
+    ""];
+  for (const s of SURFACES) {
+    for (const theme of ["light", "dark"]) {
+      const found = (nesting[s.name] || {})[theme] || [];
+      totalNestingMismatches += found.length;
+      if (!found.length) continue;
+      nestingLines.push(`**${s.name} — ${theme}:**`, "");
+      for (const f of found) {
+        nestingLines.push(`- "${f.childLabel}" is ${f.childRadius}px inside "${f.ancestorLabel}" (${f.ancestorRadius}px, gap ${f.gap}px) — expected ${f.expected}px.`);
+      }
+      nestingLines.push("");
+    }
+  }
+  if (!totalNestingMismatches) nestingLines.push("_None found on this run._", "");
+
   const md = [
     "# `docs/UI-INVENTORY.md` — the generated control inventory (NEW-3)",
     "",
@@ -296,18 +483,40 @@ async function run() {
     "change; `--check` fails CI on drift so this file can never go stale. See `docs/DESIGN.md` for",
     "the scale this inventory checks against (`RADIUS` / `FONT_SIZE`).",
     "",
+    "## Coverage (NEW-2, 2026-08-31)",
+    "",
+    "**Crawled:** the Map landing page (no project selected — the first screen a user sees),",
+    "App header + its four dropdown menus (File ▾ / Undo history / Settings gear / plan menu), the",
+    "tool rail, the left rail + Yield panel, Library, Doc Review's empty state.",
+    "",
+    "**Not yet crawled, named rather than silently absent:** the Scheduler (a separate HTML document",
+    "outside this token system entirely — see docs/DESIGN.md), Stitcher/Notes/Model/admin (each needs",
+    "its own seed data or an owner-only allowlist this tool doesn't build yet), Doc Review with a",
+    "document actually open, the Site Planner canvas chrome beyond header/tool-rail/left-rail, any",
+    "dialog that only opens over real content, and every auth-gated/signed-in-only surface (those stay",
+    "on `VERIFICATION.md`'s live-verify list — see the script header for the full reasoning per item).",
+    "",
     "Rows are grouped by surface, deduplicated by exact computed-style signature (so 40 identical",
     "toolbar buttons are one row, not forty), and **every deviating row is sorted to the top of its",
     "theme's table**, flagged with ⚠️ and the specific reason. Attribution is best-effort (a literal",
     "text search of `src/` for the element's own label) — see the script header for why.",
     "",
-    `**Total distinct deviating style signatures found: ${totalDeviations}.**`,
+    `**Total distinct deviating style signatures found: ${totalDeviations}.** (B915536's earlier "24"`,
+    "was measured before the Map landing page — the surface listed first above — was in this crawl at",
+    "all; see that item's amendment note for the before/after breakdown.)",
+    "",
+    `**Total nesting-family mismatches found (NEW-1): ${totalNestingMismatches}.** See the section below.`,
     "",
     "## Known, deliberately-not-fixed findings",
     "",
-    "Two classes of ⚠️ row below are investigated and intentionally left as-is, rather than",
-    "mechanically \"fixed\" — recorded here (in the generator, so it survives regeneration) instead",
-    "of silently repeated every run:",
+    "Classes of ⚠️ row below are investigated and intentionally left as-is, rather than mechanically",
+    "\"fixed\" — recorded here (in the generator, so it survives regeneration) instead of silently",
+    "repeated every run. **All are `fontSize`** — the owner's own report (\"a multitude of different",
+    "radii and fillets\") was about RADIUS, and the map landing page's `borderRadius` column is now",
+    "clean (see NEW-3): the one radius exemption this list used to carry — 2px on \"Find my location\",",
+    "Leaflet's own default — is GONE because the control now carries the same corner treatment as the",
+    "zoom stack it sits against (`.leaflet-control-locate.leaflet-bar` in index.css), not because it",
+    "was reclassified.",
     "",
     "- **A `fontSize` reading of `13.3333px`\\* is the Chromium UA stylesheet's default form-control",
     "  font-size, not a value from anywhere in this codebase.** `src/index.css` sets",
@@ -322,9 +531,21 @@ async function run() {
     "  font-size for the app is a separate, deliberately-scoped decision — the same shape as",
     "  `docs/DESIGN-TOKENS.md`'s open padding/font-size retrofit question — not a mechanical fix.",
     "  (\\*or `16px` after the reverted fix — either way, off-scale and not from this codebase.)",
-    "- **A `borderRadius` of `2px` on \"Find my location\"** comes from Leaflet's own `.leaflet-bar a`",
-    "  default stylesheet, not from any style this app authors — it's third-party map-control chrome,",
-    "  the same category as the Scheduler iframe (`docs/DESIGN.md` — out of scope for the token scale).",
+    "- **A `fontSize` of `16px` on a plain, unstyled `<div>` shell** (the map landing page's search",
+    "  cluster bar, the Site/Comp switch's own wrapping div, the Sites/Comps rail panel) is the SAME",
+    "  browser root default as the `16px` form above — a container div that sets no `fontSize` of its",
+    "  own inherits it, and every visible glyph inside these shells sets its own explicit size. Not a",
+    "  form control, but the identical root cause and the identical decision not to chase it here.",
+    "- **A `fontSize` of `22px` on the Leaflet zoom stack's `+`/`−` glyphs** is this app's own inline",
+    "  style (`SitePlanner.jsx`'s `zb`), sized to fill a 30px touch target visibly rather than read as",
+    "  a body-text size — the same \"decorative glyph, not UI text\" case FONT_SIZE's scale doesn't try",
+    "  to cover, alongside the icon-only buttons above.",
+    "- **A `fontSize` of `8.5px` on the small colored count badge inside a Sites-panel group header**",
+    "  is a deliberately tiny numeral inside a ~14px pill dot — legible at that size because it's a",
+    "  single digit, not running text, the same rationale as the zoom glyph above.",
+    "",
+    nestingLines.join("\n"),
+    "---",
     "",
     sections.join("\n\n---\n\n"),
     "",
@@ -341,7 +562,7 @@ async function run() {
   }
 
   writeFileSync(OUT_MD, md);
-  console.log(`docs/UI-INVENTORY.md written — ${totalDeviations} distinct deviating style signature(s) found.`);
+  console.log(`docs/UI-INVENTORY.md written — ${totalDeviations} distinct deviating style signature(s), ${totalNestingMismatches} nesting mismatch(es) found.`);
 }
 
 run();
