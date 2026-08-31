@@ -7,9 +7,22 @@
  * Two properties are load-bearing and both are pinned here:
  *   1. FOUR STATES, NOT THREE. "never checked" and "checked and still valid" are different facts;
  *      collapsing them makes a blank read as an all-clear, which is the silent-failure class.
- *   2. THE KEY IS LOOSE ON PURPOSE. Only the things that genuinely change the answer — the active
- *      parcels, the fill/pond envelope, the georeference — may turn it red. A light that goes red
- *      when you nudge a car park is a light he would learn to ignore, which is worse than none.
+ *   2. THE NETWORK/GEOMETRY KEY IS LOOSE ON PURPOSE. Only a move that genuinely invalidates the
+ *      FETCHED data — outgrowing the envelope, drifting the sampled anchor — turns THAT reason red;
+ *      the pure math still recomputes live off the cached facts for anything smaller, so the
+ *      network answer itself is never stale over a small in-envelope nudge.
+ *
+ * ⛔ NEW-7 (owner live pass 2026-08-31, verbatim: "if I had run it and then changed elements") —
+ * property 2 above turned out to be narrower than what he actually asked for the FIRST time
+ * (2026-08-06's own quote already says "once they're moved turn it red"). Repro: nudging one
+ * building 5 ft with the arrow keys (a real edit — Undo armed) left the light green, because the
+ * move never grew the site's overall envelope past the 2-ft tolerance. The numbers were never
+ * wrong (recompute is still live and correct) — the LIGHT just never told him the verdict he was
+ * looking at predates his edit. `editedSinceCheck` is a SEPARATE, additive trigger for exactly
+ * that — a site-element edit (SitePlanner.jsx's own undo-history counter) since the last check —
+ * checked LAST, after the two network-facing tests, and it does not loosen or replace the
+ * envelope/anchor key those two properties describe; a network re-fetch is still only requested
+ * when the geometry genuinely outgrows what was fetched.
  */
 import { describe, it, expect } from "vitest";
 import { factsFreshness, canonEnv, FRESHNESS_REASONS, ANCHOR_DRIFT_FT } from "../src/workspaces/site-planner/lib/factRevalidation.js";
@@ -83,11 +96,13 @@ describe("red means the answer no longer describes the drawing", () => {
   });
 });
 
-describe("the key is LOOSE on purpose — an unrelated edit may never turn it red", () => {
+describe("the network/geometry key is LOOSE on purpose — an in-envelope edit never needs a re-fetch", () => {
   const lc = lastCheck();
-  it("a sub-envelope move of the fill keeps it green", () => {
+  it("a sub-envelope move of the fill keeps the FETCH reason green (editedSinceCheck not asked)", () => {
     // Inside the fetched envelope and under the drift threshold: the ledgers recompute live off the
-    // cached facts, so the answer on screen IS current. Nothing to re-check.
+    // cached facts, so the NETWORK answer on screen IS current — no re-fetch is owed. This is the
+    // envelope/anchor key alone; the caller (SitePlanner.jsx) ALSO asks `editedSinceCheck` in the
+    // live app (see the NEW-7 block below), which is a separate, additive signal this call doesn't set.
     const r = factsFreshness({ lastCheck: lc, sigNow: lc.sig, ...geom, anchorNow: { x: 500 + ANCHOR_DRIFT_FT - 5, y: 500 } });
     expect(r.state).toBe("fresh");
   });
@@ -110,6 +125,42 @@ describe("the key is LOOSE on purpose — an unrelated edit may never turn it re
   });
 });
 
+// NEW-7 (owner live pass 2026-08-31, V496866 follow-on) — "if I had run it and then changed
+// elements". A site-element edit turns the light STALE even when it stays well inside the
+// fetched envelope (a small nudge, a resize) — the caller supplies this as `editedSinceCheck`
+// from its own undo-history counter; this module stays network/geometry-pure otherwise.
+describe("NEW-7 — editedSinceCheck: an element edit turns the light stale, keeping the run date", () => {
+  it("an edit since the check flips a fresh check to stale, reason 'edited'", () => {
+    const lc = lastCheck();
+    const r = factsFreshness({ lastCheck: lc, sigNow: lc.sig, ...geom, editedSinceCheck: true });
+    expect(r.state).toBe("stale");
+    expect(r.reason).toBe("edited");
+    expect(r.note).toBe(FRESHNESS_REASONS.edited);
+  });
+
+  it("with no edit since the check, an otherwise-fresh plan stays fresh", () => {
+    const lc = lastCheck();
+    const r = factsFreshness({ lastCheck: lc, sigNow: lc.sig, ...geom, editedSinceCheck: false });
+    expect(r.state).toBe("fresh");
+  });
+
+  it("a genuine env-exit/anchor-drift reason still wins its own name over the generic 'edited' one", () => {
+    // Both can be true at once (an edit that also grew the envelope) — the more specific,
+    // network-facing reason is checked first and must not be masked by the edit flag.
+    const lc = lastCheck();
+    const r = factsFreshness({ lastCheck: lc, sigNow: lc.sig, bboxNow: { mnX: -500, mnY: 0, mxX: 1000, mxY: 1000 }, anchorNow: { x: 500, y: 500 }, groundNow: { x: 500, y: 500 }, editedSinceCheck: true });
+    expect(r.reason).toBe("env-exit");
+  });
+
+  it("a busy (in-flight) check still outranks an edit flag — 'checking' wins", () => {
+    expect(factsFreshness({ busy: true, lastCheck: lastCheck(), sigNow: "moved", ...geom, editedSinceCheck: true }).state).toBe("checking");
+  });
+
+  it("an edit flag alone never fabricates a check on a plan that was never checked", () => {
+    expect(factsFreshness({ editedSinceCheck: true }).state).toBe("unchecked");
+  });
+});
+
 describe("the source wiring — the light must not be gated on the auto pass", () => {
   it("the facts pass is OPT-IN, so nothing is fetched when a plan is opened", async () => {
     const { readFileSync } = await import("node:fs");
@@ -126,5 +177,12 @@ describe("the source wiring — the light must not be gated on the auto pass", (
     const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
     expect(src).toContain("if (!origin || !drainActive.length) return { bboxNow: null, anchorNow: null, groundNow: null };");
     expect(src).toContain("const drainFreshness = factsFreshness({");
+  });
+
+  it("NEW-7 — the light actually asks editedSinceCheck, off the undo-history counter, not a rewrite of the loose key", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+    expect(src).toContain("editedSinceCheck: drainEditedSinceCheck,");
+    expect(src).toContain("drainEditStampRef.current != null && histTick !== drainEditStampRef.current");
   });
 });

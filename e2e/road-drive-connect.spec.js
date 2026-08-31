@@ -29,8 +29,9 @@ function driveRoad(page) {
 }
 
 async function drawParkingThenRoad(page, box) {
-  // Parking field (free-drag rectangle).
-  await page.getByRole("button", { name: "Car Parking", exact: true }).click();
+  // Parking field (free-drag rectangle). B900416 — Car Parking merged into the "Parking" row;
+  // a fresh session's caret default is "car", so the row body still arms it directly.
+  await page.getByRole("button", { name: "Parking", exact: true }).click();
   await page.mouse.move(box.x + 300, box.y + 450);
   await page.mouse.down();
   await page.mouse.move(box.x + 500, box.y + 520, { steps: 5 });

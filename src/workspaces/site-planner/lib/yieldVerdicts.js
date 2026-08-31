@@ -114,6 +114,18 @@ const loadingRow = (key, label) => finish({ key, label, pill: "…", tone: "neut
  * renderer swaps this text for "checking…" for the span of a REAL fetch via `v.recheck &&
  * drainRefreshing`, so the genuinely-loading case still reads as loading). */
 const notCheckedRow = (key, label) => finish({ key, label, pill: "…", tone: "neutral", sentence: "not checked yet", recheck: true, sortRank: 3 });
+/* NEW-6 — a GENUINELY unresolved mitigation state (not a fetch in progress): the
+ * flood geometry stands but a required elevation input (BFE / pad FFE / existing grade) never
+ * resolved, or the last check predates the drawn area with no last-good to hold. Mirrors the
+ * ALREADY-SHIPPED "closed face" chip (SitePlanner.jsx's own `mitVerdict`/`mitChip` derivation —
+ * "volume unknown" / "N/A") and the open detail group's "Mitigation volume UNKNOWN — {reason}"
+ * row, neither of which was ever wrong — only the top-line verdict strip fell through to the
+ * generic `loadingRow` and stuck there forever, because nothing was actually fetching. */
+const unresolvedMitigationRow = (reason) => finish({
+  key: "mit", label: "Mitigation", pill: "N/A", tone: "warn",
+  sentence: reason ? `volume unknown: ${reason}` : "volume unknown",
+  unavailable: true, loading: false, short: false, action: false, sortRank: 2.5,
+});
 const okRow = (key, label, sentence) => finish({ key, label, pill: "OK", tone: "good", sentence, sortRank: 2 });
 const pairRow = (key, label, provided, required, short, opts = {}) => {
   // NEW-16 display invariant: a SHORT pair must NEVER show two identical numbers (the
@@ -261,7 +273,11 @@ function detentionVerdict(d) {
 
 function mitigationVerdict(d) {
   const mitV = d.mitigation;
-  if (d.mitStalePending) return loadingRow("mit", "Mitigation");
+  // NEW-6 — the drawn geometry outgrew the last fetch and no last-good volume has been
+  // captured yet (see SitePlanner.jsx's `drainMitDisplay`/NEW-2). A real refresh isn't running by
+  // itself (checks are manual-only, per NEW-4) — nothing is "checking", so this must never say so;
+  // the header's own freshness line carries the re-check affordance for this exact state (B867).
+  if (d.mitStalePending) return unresolvedMitigationRow(null);
   const notRequired = () => okRow("mit", "Mitigation", "not required");
   if (mitV && mitV.intersectAcres === 0) return notRequired();
   if (d.floodGeo && d.floodGeo.state === "loaded" && d.floodGeo.zoneCount === 0) return notRequired();
@@ -311,7 +327,23 @@ function mitigationVerdict(d) {
     return row;
   }
   if (mitV && mitV.intersectAcres === 0) return notRequired();
-  if (mitV || d.mitRememberedMissing || (d.floodGeo && d.floodGeo.state === "failed")) return loadingRow("mit", "Mitigation");
+  // NEW-6 — real geometry, real intersect acreage, but the VOLUME never resolved: a
+  // missing elevation input (floodplainMitigation.js's `unknownReason` — no published BFE, no
+  // pad FFE entered, no existing-grade source), not a fetch in progress. The open detail group
+  // already says "Mitigation volume UNKNOWN — {reason}" for exactly this case; the strip is now
+  // the same honest state instead of an eternal "checking flood data".
+  if (mitV && mitV.intersectAcres > 0) return unresolvedMitigationRow(mitV.unknownReason);
+  // NEW-6 — a restored (remembered) check with no restorable mitigation ledger. Same wording
+  // as the closed-face chip's own verdict below (SitePlanner.jsx) for this exact state — a real
+  // ↻ re-check would compute it, so this row keeps the recheck affordance. (PANEL-BREVITY: the
+  // detail group's longer "not screened in this remembered view" row already exists below and
+  // is not repeated here — state a fact once.)
+  if (d.mitRememberedMissing) return finish({ key: "mit", label: "Mitigation", pill: "…", tone: "warn", sentence: "not screened", recheck: true, sortRank: 3 });
+  // NEW-6 — the flood-geometry source itself failed this check (an outage), never a
+  // fabricated all-clear. A ↻ retry can genuinely resolve it.
+  if (d.floodGeo && d.floodGeo.state === "failed") return finish({ key: "mit", label: "Mitigation", pill: "…", tone: "warn", sentence: "flood source down", recheck: true, sortRank: 3 });
+  // Defensive backstop only — every reachable `mitV` shape above already has an honest branch.
+  if (mitV) return loadingRow("mit", "Mitigation");
   return null;
 }
 

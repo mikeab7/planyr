@@ -186,9 +186,16 @@ export const FRESHNESS_REASONS = {
   "env-exit": "the drawing now reaches outside the area that was checked",
   "anchor-moved": "the fill has moved away from where it was checked",
   "ground-moved": "the parcel has moved away from where it was checked",
+  // NEW-7 — Michael's own ask (chat, 2026-08-31): a site element moved (or the plan was
+  // otherwise edited) since the last check, even one small enough to stay inside the fetched
+  // envelope. Distinct from `moved`/`env-exit`/*-moved above, which are all about the FETCHED
+  // NETWORK DATA no longer covering the drawing — this is purely "you edited after you last
+  // screened this", surfaced from the caller's own edit-history counter (never re-derived here;
+  // this module stays network/geometry-only otherwise).
+  "edited": "a site element has moved since the last check",
 };
 
-export function factsFreshness({ hasSessionCtx = false, lastCheck = null, sigNow = "", busy = false, bboxNow = null, anchorNow = null, groundNow = null } = {}) {
+export function factsFreshness({ hasSessionCtx = false, lastCheck = null, sigNow = "", busy = false, bboxNow = null, anchorNow = null, groundNow = null, editedSinceCheck = false } = {}) {
   if (busy) return { state: "checking", reason: null, note: null };
   // "Checked" means a live run this session OR a remembered one — the same ONE truth the header's
   // floodChecked uses, so the light and the numbers can never disagree about whether facts exist.
@@ -208,6 +215,10 @@ export function factsFreshness({ hasSessionCtx = false, lastCheck = null, sigNow
       : "ground-moved";
     return { state: "stale", reason, note: FRESHNESS_REASONS[reason] };
   }
+  // NEW-7 — the caller's own "has this plan been edited since the last check" signal (an
+  // undo-history counter, session-scoped). Checked LAST, after the two network-facing tests
+  // above, so a real env-exit/anchor-drift keeps its own more specific reason when both are true.
+  if (editedSinceCheck) return { state: "stale", reason: "edited", note: FRESHNESS_REASONS.edited };
   return { state: "fresh", reason: null, note: null };
 }
 

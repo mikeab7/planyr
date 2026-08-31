@@ -633,7 +633,7 @@ const ICON_PATHS = {
   deed: <><path d="M4.5 2 H9 L12 5 V13 a1 1 0 0 1-1 1 H4.5 a1 1 0 0 1-1-1 V3 a1 1 0 0 1 1-1 Z" /><path d="M9 2 V5 H12" /><path d="M5.6 8 H10 M5.6 10.2 H10 M5.6 12.2 H8.4" /></>,
 };
 const ToolIcon = ({ id, size = 15 }) => (
-  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor"
+  <svg className="rbtn-icon" width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor"
     strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" style={{ flex: "none" }} aria-hidden="true">
     {ICON_PATHS[id] || <circle cx="8" cy="8" r="5.5" />}
   </svg>
@@ -669,8 +669,7 @@ const RailIcon = ({ id, size = 17 }) => (
 
 const TOOLS = [
   { id: "select", label: "Select", hint: "Move/resize/rotate • drag to move (snap only ALIGNS to the grid/edges, never bonds; hold Alt to bypass) • Shift-click or marquee to pick several, then Group (Ctrl+G) so they move/copy/select as one unit; double-click a group member to edit it in place • on a selected parcel: drag a dot to move a corner, click a + to add one, Shift-click a dot to delete • drag empty space to pan • shortcut: V" },
-  { id: "pan", label: "Pan", hint: "Hand tool — drag anywhere to move the canvas; clicks don't select. Shortcut: H, or hold Space to pan temporarily (press V for Select)" },
-  { id: "marquee", label: "Marquee", hint: "Box-select (M): drag a box over the drawing — everything it touches is selected together, ready to move (drag any one) or delete. In the Select tool you can also Ctrl/⌘-click to toggle an object, Shift-click to add. Esc / click empty to clear" },
+  { id: "marquee", label: "Select multiple", hint: "Box-select (M): drag a box over the drawing — everything it touches is selected together, ready to move (drag any one) or delete. In the Select tool you can also Ctrl/⌘-click to toggle an object, Shift-click to add. Esc / click empty to clear" },
   { id: "parcel", label: "Parcel", hint: "Draw mode: click to drop boundary points, then click the first point (or double-click) to close — draw as many as you like • Remove mode: click a parcel to delete it • click Done (or Esc) to exit" },
   { id: "split", label: "Split", hint: "Cut a parcel: click points to draw the line across it — two points cut straight, or add as many as you like for a bent or stepped cut following a creek, a road or an easement; double-click (or Enter) to finish. A cut that leaves the lot and comes back makes more than two pieces — then delete any you don't want" },
   { id: "callout", label: "Callout", hint: "Annotation (Q): click the point you're calling out, then click where the text box goes, and type. Drag the box to move it, the dot to re-aim the leader; double-click to edit the text. Drag a side handle to set a fixed width (text wraps); Alt+Z shrinks the box back to fit its text" },
@@ -1917,6 +1916,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // (Its `lsSet` twin went with NEW-1: smooth zoom was its last caller, and that setting is now
   // written by `shared/prefs/smoothZoom.js`, which owns the same `planarfit:` prefix.)
   const [parkingRows, setParkingRows] = useState(() => lsGet("parkingRows", "free")); // drawn-parking depth preset
+  // NEW-1 (B900416) — which sub-choice the merged Parking row's caret last picked ("car"/"trailer"),
+  // so a plain press of the row body arms that one directly instead of always defaulting to car.
+  const [parkingKind, setParkingKind] = useState(() => lsGet("parkingKind", "car"));
   // Drawn-road width, in feet, as a string. NEW-3: the Road tool no longer has a "free" (drag-a-
   // rectangle) mode — a road is always a clicked centerline at a known width, preset or custom. A
   // stored "free" from before that change (or any junk) is coerced to the first preset on read, so
@@ -5805,7 +5807,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [leftPanel, narrow, companionSel, narrowProps, leftWidth, size.w]);
   // Remember the left menu width between sessions.
   useEffect(() => { try { localStorage.setItem("planarfit:leftWidth", String(leftWidth)); } catch (_) {} }, [leftWidth]);
-  useEffect(() => { try { localStorage.setItem("planarfit:parkingRows", parkingRows); localStorage.setItem("planarfit:roadWidth", roadWidth); localStorage.setItem("planarfit:roadXSection", JSON.stringify(roadXSection)); localStorage.setItem("planarfit:measureMode", measureMode); localStorage.setItem("planarfit:easeMode", easeMode); localStorage.setItem("planarfit:easeType", easeType); localStorage.setItem("planarfit:easeWidth", String(easeWidth)); } catch (_) {} }, [parkingRows, roadWidth, roadXSection, measureMode, easeMode, easeType, easeWidth]);
+  useEffect(() => { try { localStorage.setItem("planarfit:parkingRows", parkingRows); localStorage.setItem("planarfit:parkingKind", parkingKind); localStorage.setItem("planarfit:roadWidth", roadWidth); localStorage.setItem("planarfit:roadXSection", JSON.stringify(roadXSection)); localStorage.setItem("planarfit:measureMode", measureMode); localStorage.setItem("planarfit:easeMode", easeMode); localStorage.setItem("planarfit:easeType", easeType); localStorage.setItem("planarfit:easeWidth", String(easeWidth)); } catch (_) {} }, [parkingRows, parkingKind, roadWidth, roadXSection, measureMode, easeMode, easeType, easeWidth]);
   // Drag the panel's right edge to resize it.
   const startLeftResize = (e) => {
     e.preventDefault();
@@ -6110,7 +6112,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         return;
       }
       if ((e.key === "v" || e.key === "V") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("select"); return; }
-      if ((e.key === "h" || e.key === "H") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); selectTool("pan"); return; }
       if ((e.key === "m" || e.key === "M") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); selectTool("marquee"); return; } // B570 box-select tool
       if ((e.key === "s" || e.key === "S") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); setSnap(!settings.snap); return; } // toggle snap (hold Alt while dragging to bypass for one move)
       // Hold Space → temporary hand-pan over whatever tool is active (released = back to it).
@@ -6875,12 +6876,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (!b) { const builds = els.filter((e) => e.type === "building"); if (builds.length) b = builds.reduce((best, e) => _hyp(fp, centroid(ringOf(e))) < _hyp(fp, centroid(ringOf(best))) ? e : best); }
       if (!b) { flashWarn("⚠ No building to serve — draw a building first.", 0); return; }
       commitUtilRoute(routeMode, b);
-      return;
-    }
-    if (tool === "pan") { // Shift+V hand tool — drag to move the canvas, never select
-      setPanning(true);
-      drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY };
-      svgRef.current.setPointerCapture(e.pointerId);
       return;
     }
     if (tool === "marquee") { // dedicated box-select tool (B570): drag a rubber-band, no Shift needed
@@ -13162,16 +13157,40 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   //   • armed            — a refetch is wanted and its one attempt hasn't fired/been consumed yet.
   // A wanted refetch whose single attempt is spent while nothing is in flight is STALLED — a
   // terminal state that offers ↻ Re-check, never an endless spinner.
+  /* NEW-7 — Michael's own ask (chat, 2026-08-31, on top of the NEW-4 design above): "if I had
+     run it and then changed elements" — a warning that a check predates a LATER edit, even one
+     small enough to stay inside the fetched envelope (the numbers still recompute live and are
+     still correct — this is "you edited since you last screened this", not "the network answer
+     is wrong", which stays the `moved`/`env-exit` reasons the loose key already covers). Repro
+     that found the gap: nudging a building 5 ft with the arrow keys (a real edit — Undo armed)
+     left the header counting up unchanged from the original run.
+     `histTick` (declared above, bumped once per undoable action via pushHistory/undo/redo/
+     applySnapshot) is the cheapest complete "has this plan been worked" counter there is — no new
+     per-render cost, and it's the same seam NEW-4's `notePerfEdit` already counts on. The ref
+     anchors it the moment a checked state becomes known (a fresh live check completing, or a
+     restored one on load, via `drainCheckedAtNow`); any later bump means an edit — or an undo/redo
+     — happened since. Deliberately SESSION-scoped (histTick resets on reload): it never claims to
+     know about edits from a prior session, only the one Michael actually tested (run, edit, watch
+     it flip, in one sitting). */
+  const drainCheckedAtNow = drainCtx?.checkedAt ?? (Number.isFinite(settings.drainage?.lastCheck?.checkedAt) ? settings.drainage.lastCheck.checkedAt : null);
+  const drainEditStampRef = useRef(null);
+  useEffect(() => {
+    if (drainCheckedAtNow != null) drainEditStampRef.current = histTick;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drainCheckedAtNow]);
+  const drainEditedSinceCheck = drainEditStampRef.current != null && histTick !== drainEditStampRef.current;
   /* NEW-4 — THE LIGHT. Computed on every render, independently of whether anything is allowed to
      fetch, from the SAME signature the fetch has always been keyed on. Green while the parcels,
      the fill and the ponds are where they were when the check ran; red once one of them moves;
      and a distinct "never checked" that is neither. See lib/factRevalidation.js → factsFreshness
-     for why the key is deliberately loose and why there are four states rather than three. */
+     for why the key is deliberately loose and why there are four states rather than three —
+     NEW-7 above adds a fifth trigger (edited-since-check) without loosening that key itself. */
   const drainFreshness = factsFreshness({
     hasSessionCtx: !!drainReadCtx,
     lastCheck: settings.drainage?.lastCheck || null,
     sigNow: drainSigNow,
     busy: !!drainCtx?.busy,
+    editedSinceCheck: drainEditedSinceCheck,
     ...drainFactsNow,
   });
   const drainAutoInFlight = !!(drainCtx?.busy && drainCtx?.auto);
@@ -17096,6 +17115,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   /* ----------------------------- UI ----------------------------- */
   // Bluebeam-style left rail: a thin column of small buttons, each opening one menu.
   const railHdr = (t) => <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: PAL.chromeMuted, padding: "8px 4px 4px" }}>{t}</div>;
+  // NEW-1 (B900416) — one hairline between RAIL GROUPS only (never between rows inside a group,
+  // never inside a group's own dropdown) — the owner's rail-redesign brief, change 2.
+  const railDivider = () => <div data-rail-divider="1" style={{ borderTop: `1px solid ${PAL.chromeLine}`, margin: "3px 2px 1px" }} />;
   // B721 — workflow order (was build order Yield/Parcel/Analysis…): you pick the land
   // first (Parcel), screen it (Analysis), read the result (Yield), edit a selected element
   // (Properties), bring in backdrops (References), then defaults (Standards). Icons are real
@@ -17150,9 +17172,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     boxShadow: active ? "0 2px 6px rgba(0,0,0,0.16)" : "0 1px 2px rgba(0,0,0,0.05)", // neutral shadow (was the retired ember glow)
   });
   // right-side tool-rail buttons (dark chrome, icon + label, active = ember)
+  // NEW-1 (B900416) — vertical padding only, per the owner's correction: "I wasn't looking to
+  // thin it horizontally... each button for the name took up too too much space vertically."
+  // Label type size and rail WIDTH are unchanged (VIEWPORT-STABLE).
   const rbtn = (active) => ({
     display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left",
-    padding: "8px 10px", fontSize: 12.5, borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap",
+    padding: "5px 10px", fontSize: 12.5, borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap",
     border: "1px solid transparent", fontFamily: "inherit",
     background: active ? PAL.ember : "transparent",
     color: active ? PAL.onAccent : PAL.chromeInk,
@@ -17283,6 +17308,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const vSep = <span style={{ width: 1, height: 18, background: "rgba(255,255,255,0.12)", margin: "0 6px" }} />;
   // Switch tools and reset any in-progress drafting; also closes the Parcel menu.
   const selectTool = (id) => {
+    // NEW-1 (B900416) — the Pan tool is retired from the rail (Select already pans on empty
+    // canvas, Space-drag pans over anything); a leftover "pan" from anywhere must boot to a
+    // working Select rather than a dead mode, never a mode with no rail affordance.
+    if (id === "pan") id = "select";
     setTool(id);
     setParcelMode("add"); // B598 — always (re)enter the Parcel tool in Draw mode, never a stale Remove
     setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setMarquee(null);
@@ -21543,7 +21572,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             data-view-offx={view.offX} data-view-offy={view.offY} data-view-ppf={view.ppf}
             data-reg-dx={regShift.dx} data-reg-dy={regShift.dy}
             data-pan-dx={panDx} data-pan-dy={panDy} data-pan-k={panK} data-render-ppf={rppf}
-            style={{ position: "relative", zIndex: 1, transform: (regShift.dx || regShift.dy) ? `translate(${regShift.dx}px, ${regShift.dy}px)` : undefined, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : identifyMode ? ADD_CURSOR : (attachFor || alignFor || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
+            style={{ position: "relative", zIndex: 1, transform: (regShift.dx || regShift.dy) ? `translate(${regShift.dx}px, ${regShift.dy}px)` : undefined, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : identifyMode ? ADD_CURSOR : (attachFor || alignFor || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => {
               // Don't cancel the default action when the mousedown lands on an inline text
               // editor (a foreignObject <textarea>/<input> — the callout/text box, the inline
@@ -21574,7 +21603,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               e.preventDefault(); // a right-click on the map ALWAYS opens our menu, never the browser's (B627)
               if (draftRoadPts) { setDraftRoadPts(null); branchSeedRef.current = null; return; } // cancel an in-progress road draw
               // during a placement/draw mode a right-click just eats the native menu (each mode has its own Esc/exit)
-              if ((tool !== "select" && tool !== "pan") || routeMode || traceMode || xsecMode || pobMode || ovCalib || identifyMode || attachFor || alignFor) return;
+              if (tool !== "select" || routeMode || traceMode || xsecMode || pobMode || ovCalib || identifyMode || attachFor || alignFor) return;
               setParcelMenu(null); setOvMenu(null);
               setMapMenu({ x: e.clientX, y: e.clientY, kind: "empty" });
             }}>
@@ -23292,9 +23321,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           transform: narrow && !mobileTools ? "translateX(100%)" : "none", transition: "transform 0.2s ease",
           boxShadow: narrow ? "-10px 0 28px rgba(0,0,0,0.45)" : "inset 1px 0 0 rgba(0,0,0,0.3)" }}>
           {railHdr("Tools")}
-          <button className={`rbtn${tool === "select" ? " on" : ""}`} style={rbtn(tool === "select")} onClick={() => selectTool("select")} aria-pressed={tool === "select"}><ToolIcon id="select" /> Select <span style={railHint(tool === "select")}>V</span></button>
-          <button className={`rbtn${tool === "pan" ? " on" : ""}`} style={rbtn(tool === "pan")} onClick={() => selectTool("pan")} aria-pressed={tool === "pan"} title="Hand tool — or hold Space to pan temporarily"><ToolIcon id="pan" /> Pan <span style={railHint(tool === "pan")}>H</span></button>
-          <button className={`rbtn${tool === "marquee" ? " on" : ""}`} style={rbtn(tool === "marquee")} onClick={() => selectTool("marquee")} aria-pressed={tool === "marquee"} data-testid="tool-marquee" title={TOOLS.find((t) => t.id === "marquee").hint}><ToolIcon id="marquee" /> Marquee <span style={railHint(tool === "marquee")}>M</span></button>
+          <button className={`rbtn${tool === "select" ? " on" : ""}`} style={rbtn(tool === "select")} onClick={() => selectTool("select")} aria-pressed={tool === "select"}><ToolIcon id="select" /> Select <span className="rbtn-hint" style={railHint(tool === "select")}>V</span></button>
+          <button className={`rbtn${tool === "marquee" ? " on" : ""}`} style={rbtn(tool === "marquee")} onClick={() => selectTool("marquee")} aria-pressed={tool === "marquee"} data-testid="tool-marquee" title={TOOLS.find((t) => t.id === "marquee").hint}><ToolIcon id="marquee" /> Select multiple <span className="rbtn-hint" style={railHint(tool === "marquee")}>M</span></button>
 
           {/* NEW-1 — "Parcel tools": the COMPLETE answer to "what can I do to a parcel", grouped in
               the order the work happens (add land → change a parcel → remove). It carried three of
@@ -23308,7 +23336,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               The rail button is "Parcel tools" (not "Parcel") because the LEFT panel is "Land" —
               the right rail owns ACTIONS, the left panel owns ATTRIBUTES. See PARCEL_SURFACES. */}
           <div ref={boundaryAnchor} style={{ position: "relative" }}>
-            <button className={`rbtn${["parcel", "split"].includes(tool) || mergePick || boundaryEdit ? " on" : ""}`} style={rbtn(["parcel", "split"].includes(tool) || mergePick || boundaryEdit)} onClick={() => setToolMenu((o) => !o)} aria-haspopup="menu" aria-expanded={toolMenu} data-testid="rail-parcel-tools" title="Everything you can do to a parcel — draw, plot from a deed, split, combine, reshape, remove"><ToolIcon id="parcel" /> {PARCEL_SURFACES.rail.name} <span style={railHint(["parcel", "split"].includes(tool) || mergePick || boundaryEdit)}>▾</span></button>
+            <button className={`rbtn${["parcel", "split"].includes(tool) || mergePick || boundaryEdit ? " on" : ""}`} style={rbtn(["parcel", "split"].includes(tool) || mergePick || boundaryEdit)} onClick={() => setToolMenu((o) => !o)} aria-haspopup="menu" aria-expanded={toolMenu} data-testid="rail-parcel-tools" title="Everything you can do to a parcel — draw, plot from a deed, split, combine, reshape, remove"><ToolIcon id="parcel" /> {PARCEL_SURFACES.rail.name} <span className="rbtn-hint" style={railHint(["parcel", "split"].includes(tool) || mergePick || boundaryEdit)}>▾</span></button>
             <AnchoredMenu open={toolMenu} onClose={() => setToolMenu(false)} anchorRef={boundaryAnchor} placement="left" width={272} panelStyle={menuPanel}>
               {(() => {
                 const pcm = menuParcel();
@@ -23365,6 +23393,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </AnchoredMenu>
           </div>
 
+          {railDivider()}
           {railHdr("Measure")}
 
           {/* measure with line / polyline / area / count modes — promoted to sit just below Tools (B605) */}
@@ -23383,9 +23412,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </AnchoredMenu>
           </div>
 
+          {railDivider()}
           {railHdr("Site elements")}
 
-          {DRAW_TYPES.map((id) => {
+          {DRAW_TYPES.filter((id) => id !== "trailer").map((id) => {
+            // NEW-1 (B900416) — "trailer" stays in DRAW_TYPES (the canvas pointer handler's own
+            // area-draw registry, line ~7022, still needs it) but no longer renders its own rail
+            // row: it is a sub-option of the merged "parking" row's caret, below.
             const t = TOOLS.find((x) => x.id === id);
             if (id === "building") {
               return (
@@ -23406,20 +23439,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               );
             }
             if (id === "parking") {
+              // NEW-1 (B900416) — Car Parking and Trailer Parking merged into one "Parking" row;
+              // car vs trailer moves into this row's caret (owner rail-redesign brief, change 5).
+              // Both sub-options keep their existing behaviour unchanged; the dropdown remembers
+              // the last choice (`parkingKind`, persisted) so a plain press of the row body arms
+              // it directly next time.
               const sd = settings.stallDepth, ai = settings.aisle;
+              const parkingOn = tool === "parking" || tool === "trailer";
               return (
                 <div key={id} ref={parkingAnchor} style={{ position: "relative" }}>
                   <div style={{ display: "flex", gap: 2 }}>
-                    <button className={`rbtn${tool === "parking" ? " on" : ""}`} style={{ ...rbtn(tool === "parking"), flex: 1 }} onClick={() => selectTool("parking")} aria-pressed={tool === "parking"}>
-                      <ToolIcon id="parking" /> Car Parking
+                    <button className={`rbtn${parkingOn ? " on" : ""}`} style={{ ...rbtn(parkingOn), flex: 1 }} onClick={() => selectTool(parkingKind === "trailer" ? "trailer" : "parking")} aria-pressed={parkingOn} title={parkingKind === "trailer" ? "Trailer Parking" : "Car Parking"}>
+                      <ToolIcon id="parking" /> Parking
                     </button>
-                    <button className={`rbtn${tool === "parking" ? " on" : ""}`} style={{ ...rbtn(tool === "parking"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setParkingMenu((o) => !o)} aria-haspopup="menu" aria-expanded={parkingMenu} aria-label="Parking presets">▾</button>
+                    <button className={`rbtn${parkingOn ? " on" : ""}`} style={{ ...rbtn(parkingOn), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setParkingMenu((o) => !o)} aria-haspopup="menu" aria-expanded={parkingMenu} aria-label="Parking type">▾</button>
                   </div>
+                  {/* Car's own row-preset rows, then Trailer's single entry — one flat list, no
+                      divider between the two sub-options (see change 2 of the rail redesign). */}
                   <AnchoredMenu open={parkingMenu} onClose={() => setParkingMenu(false)} anchorRef={parkingAnchor} placement="left" width={248} panelStyle={menuPanel}>
-                    <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Parking rows</div>
+                    <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Car parking</div>
                     {[["free", "Free draw (any size)"], ["single", `Single row (${sd}′ + ${ai}′ = ${sd + ai}′ deep)`], ["double", `Double row (${sd}′ + ${ai}′ + ${sd}′ = ${sd * 2 + ai}′ deep)`]].map(([k, label]) => (
-                      <button key={k} style={menuItem(tool === "parking" && parkingRows === k)} onClick={() => { setParkingRows(k); selectTool("parking"); setParkingMenu(false); }}>{label}</button>
+                      <button key={k} style={menuItem(tool === "parking" && parkingRows === k)} onClick={() => { setParkingKind("car"); setParkingRows(k); selectTool("parking"); setParkingMenu(false); }}>{label}</button>
                     ))}
+                    <button style={menuItem(tool === "trailer")} onClick={() => { setParkingKind("trailer"); selectTool("trailer"); setParkingMenu(false); }}>Trailer parking</button>
                   </AnchoredMenu>
                 </div>
               );
@@ -23474,7 +23516,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               );
             }
             // paving / trailer / pond — single-line buttons; sub-label in tooltip (B604)
-            const sub = { paving: "Drive / Court", trailer: "Back-in Storage", pond: "Detention Pond" }[id];
+            const sub = { paving: "Drive / Court", pond: "Detention Pond" }[id];
             return (
               <button key={id} className={`rbtn${tool === id ? " on" : ""}`} style={rbtn(tool === id)} onClick={() => selectTool(id)} aria-pressed={tool === id} title={sub || undefined}>
                 <ToolIcon id={id} /> {t.label}
@@ -23519,14 +23561,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               is a plain button like every other draw tool — NO pre-draw popover: there is no mode to
               pick (a click vs. a drag is inferred per-gesture) and arc size lives in Properties, on
               the selected object, like every other style field. */}
-          {railHdr("Draw")}
+          {railDivider()}
+          {railHdr("Markup")}
           {MARKUP_TOOLS.map((id) => {
             const t = TOOLS.find((x) => x.id === id);
             const sc = { mline: "L", mrect: "R", mellipse: "E", mpolygon: "⇧P", mpolyline: "⇧N", mcloud: "C" }[id];
-            return <button key={id} className={`rbtn${tool === id ? " on" : ""}`} style={rbtn(tool === id)} onClick={() => selectTool(id)} aria-pressed={tool === id}><ToolIcon id={id} /> {t.label} <span style={railHint(tool === id)}>{sc}</span></button>;
+            return <button key={id} className={`rbtn${tool === id ? " on" : ""}`} style={rbtn(tool === id)} onClick={() => selectTool(id)} aria-pressed={tool === id}><ToolIcon id={id} /> {t.label} <span className="rbtn-hint" style={railHint(tool === id)}>{sc}</span></button>;
           })}
-          <button className={`rbtn${tool === "callout" ? " on" : ""}`} style={rbtn(tool === "callout")} onClick={() => selectTool("callout")} aria-pressed={tool === "callout"}><ToolIcon id="callout" /> Callout <span style={railHint(tool === "callout")}>Q</span></button>
-          <button className={`rbtn${tool === "text" ? " on" : ""}`} style={rbtn(tool === "text")} onClick={() => selectTool("text")} aria-pressed={tool === "text"}><ToolIcon id="text" /> Text <span style={railHint(tool === "text")}>T</span></button>
+          <button className={`rbtn${tool === "callout" ? " on" : ""}`} style={rbtn(tool === "callout")} onClick={() => selectTool("callout")} aria-pressed={tool === "callout"}><ToolIcon id="callout" /> Callout <span className="rbtn-hint" style={railHint(tool === "callout")}>Q</span></button>
+          <button className={`rbtn${tool === "text" ? " on" : ""}`} style={rbtn(tool === "text")} onClick={() => selectTool("text")} aria-pressed={tool === "text"}><ToolIcon id="text" /> Text <span className="rbtn-hint" style={railHint(tool === "text")}>T</span></button>
 
           <div style={{ flex: 1 }} />
           {tool === "measure" && calibrationState === "uncalibrated" && (
@@ -26352,7 +26395,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 26px" }}>
               {[
-                ["Tools", ""], ["V", "Select"], ["H", "Pan (hand)"], ["Space-drag", "Pan temporarily"], ["S", "Toggle snap"], ["L", "Line"], ["R", "Rectangle"], ["E", "Ellipse"],
+                ["Tools", ""], ["V", "Select"], ["M", "Select multiple"], ["Space-drag", "Pan temporarily"], ["S", "Toggle snap"], ["L", "Line"], ["R", "Rectangle"], ["E", "Ellipse"],
                 ["⇧P", "Polygon"], ["⇧N", "Polyline"], ["Q", "Callout"], ["T", "Text box"],
                 ["Edit", ""], ["Ctrl/⌘ Z", "Undo"], ["Ctrl/⌘ ⇧Z", "Redo"], ["Ctrl/⌘ C / X / V", "Copy / Cut / Paste"],
                 ["Ctrl/⌘ D", "Duplicate"], ["Ctrl/⌘ G", "Group selection"], ["Ctrl/⌘ ⇧G", "Ungroup"], ["Alt Z", "Fit text box / callout to its text"], ["Delete / ⌫", "Delete selection"], ["Esc", "Cancel / deselect"],
