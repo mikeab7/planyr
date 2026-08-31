@@ -47,7 +47,7 @@
       "minBytes": 32768
     },
     "siteRouteJsBytes": {
-      "baseline": 2622041,
+      "baseline": 2676157,
       "target": 1600000,
       "unit": "bytes",
       "what": "Total JS a plain Site route must download: the entry chunk plus SitePlannerApp and its static-import closure.",
@@ -647,6 +647,17 @@
           "commit": "72f20997c4e1858f078c52db11aafb58171ef1c2",
           "sourceHash": "1dfb0256eeaf61c3",
           "reason": "Split storage.js's setActiveUser/setScheduleLink and shared/projects/projects.js's storage.js edge into activeUser.js/siteListLight.js leaves and a dynamic import at the boundary, so the site-model/cloud-sync engine no longer rides the shared entry chunk or the breadcrumb's static graph on non-Site routes."
+        },
+        {
+          "metric": "bundle.siteRouteJsBytes",
+          "from": 2622041,
+          "to": 2676157,
+          "direction": "raise",
+          "item": "B966628",
+          "date": "2026-08-31",
+          "commit": "5e1ac0682ee5a0c7f5b5ad4617262e79cd6533da",
+          "sourceHash": "b6de1d85f8fcf794",
+          "reason": "Owner-requested Bain parcel fixes (B966624-B966630): merge-refusal messages, setback-default marking + offsetPolygon boundary clamp, and the sub-minimum sliver snap engine. Optimized first (deduped parcelOffset.js's point-in-polygon/nearest-point-on-segment onto the shared ringMath.js helpers per the B50008-B50011 precedent, -0.4KB); remaining ~1.6KB (0.06%) is load-bearing logic for the reported bugs with no further safe dedup found."
         }
       ]
     }
