@@ -4,6 +4,8 @@ import {
   evaluateFormula, formatValue, parseFormula, extractRefs, planFormulaColumns,
   makeDate, isoToSerial, serialToISO, BLANK, FORMULA_ERRORS, isDate,
   errVal, isErrVal, DEFAULT_CALENDAR,
+  MAX_COL, MAX_ROW, parseRefText, colLettersToNum, colNumToLetters, rewriteFormulaForCopy,
+  FUNCTION_NAMES,
 } from "../src/shared/formula/formula.js";
 
 // ── Test harness ────────────────────────────────────────────────────────────
@@ -1001,3 +1003,200 @@ describe("financial functions", () => {
     expect(err("XIRR(100,DATE(2026,1,1),200)")).toBe(FORMULA_ERRORS.VALUE);
   });
 });
+
+// ── A1 cell references (Model module support) ──────────────────────────────────
+// grid is row-major, 0-indexed: grid[0][0] is A1. Every case below is evaluated
+// against the same 3×3 grid unless a test builds its own.
+//   A1=1 B1=2 C1=3
+//   A2=4 B2=5 C2=6
+//   A3=7 B3=8 C3=9
+const GRID3 = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+const gridRun = (src, grid = GRID3, extra = {}) => evaluateFormula(src, { grid, today: isoToSerial("2026-06-29"), ...extra });
+const gridVal = (src, grid, extra) => { const r = gridRun(src, grid, extra); if (!r.ok) throw new Error(`unexpected error ${r.error} (${r.detail}) for ${src}`); return r.value; };
+const gridErr = (src, grid, extra) => { const r = gridRun(src, grid, extra); expect(r.ok, `expected ${src} to error`).toBe(false); return r.error; };
+
+describe("A1 cell references — grammar", () => {
+  it("a bare A1 reference resolves against ctx.grid", () => {
+    expect(gridVal("A1")).toBe(1);
+    expect(gridVal("B2")).toBe(5);
+    expect(gridVal("a1")).toBe(1); // case-insensitive, like [Column] refs
+  });
+  it("all four dollar-anchoring forms parse and resolve identically at rest", () => {
+    for (const ref of ["A1", "$A$1", "A$1", "$A1"]) expect(gridVal(ref)).toBe(1);
+  });
+  it("arithmetic across cells", () => {
+    expect(gridVal("A1+B1")).toBe(3);
+    expect(gridVal("C3-A1")).toBe(8);
+    expect(gridVal("(A1+B1+C1)/3")).toBe(2);
+  });
+  it("A1:B10-style ranges feed range-aware functions", () => {
+    expect(gridVal("SUM(A1:B2)")).toBe(1 + 2 + 4 + 5);
+    expect(gridVal("SUM(A1:C3)")).toBe(45);
+    expect(gridVal("SUM($A$1:$B$2)")).toBe(1 + 2 + 4 + 5); // absolute-anchored range, same grammar
+    expect(gridVal("MAX(A1:C3)")).toBe(9);
+    expect(gridVal("MIN(A1:C3)")).toBe(1);
+    expect(gridVal("AVERAGE(A1:C3)")).toBe(5);
+    expect(gridVal("COUNT(A1:C3)")).toBe(9);
+  });
+  it("a range's two corners may be given in either order (B2:A1 === A1:B2)", () => {
+    expect(gridVal("SUM(B2:A1)")).toBe(gridVal("SUM(A1:B2)"));
+  });
+  it("INDEX/MATCH/XLOOKUP over an A1 range, row-major linear order", () => {
+    expect(gridVal("INDEX(A1:C3,5)")).toBe(5);      // row 2, col 2
+    expect(gridVal("MATCH(8,A1:C3,0)")).toBe(8);
+    expect(gridVal("XLOOKUP(8,A1:C3,A1:C3)")).toBe(8);
+  });
+  it("COUNTIF/SUMIF/AVERAGEIF accept an A1 range exactly like a [Column]", () => {
+    expect(gridVal('COUNTIF(A1:C3,">5")')).toBe(4);
+    expect(gridVal('SUMIF(A1:C3,">5")')).toBe(6 + 7 + 8 + 9);
+  });
+  it("[Column] structured refs and A1 refs coexist in one formula", () => {
+    const r = evaluateFormula("[Rate]*A1", { columns: { rate: 3 }, grid: GRID3, today: isoToSerial("2026-06-29") });
+    expect(r.ok).toBe(true);
+    expect(r.value).toBe(3); // [Rate]=3 * A1=1
+  });
+  it("a bare range used as a scalar is a #VALUE!, not a crash", () => {
+    expect(gridErr("A1:B2")).toBe(FORMULA_ERRORS.VALUE);
+    expect(gridErr("A1:B2 + 5")).toBe(FORMULA_ERRORS.VALUE);
+  });
+  it("a cell beyond the grid the host provided reads as blank, never an error", () => {
+    expect(gridVal("ISBLANK(D1)")).toBe(true);
+    expect(gridVal("Z99")).toEqual(BLANK);
+    expect(gridVal("XFD1048576")).toEqual(BLANK); // the absolute max address, still just blank
+  });
+  it("no ctx.grid at all (host hasn't wired one up) reads every ref as blank, never crashes", () => {
+    const r = evaluateFormula("A1+1", { today: isoToSerial("2026-06-29") });
+    expect(r.ok).toBe(true);
+    expect(r.value).toBe(1); // BLANK + 1
+  });
+  it("a stored error value in a grid cell propagates through a ref and through a range", () => {
+    const grid = [[errVal(FORMULA_ERRORS.DIV0), 2]];
+    expect(gridErr("A1", grid)).toBe(FORMULA_ERRORS.DIV0);
+    expect(gridErr("SUM(A1:B1)", grid)).toBe(FORMULA_ERRORS.DIV0);
+  });
+  it("cross-sheet references (Sheet1!A1) are out of scope and fail loudly, not silently mis-parsed", () => {
+    expect(gridErr("Sheet1!A1")).toBe(FORMULA_ERRORS.ERR);
+  });
+});
+
+describe("A1 cell references — address bounds (XFD1048576) and the LOG10 collision", () => {
+  it("valid corners of the address space resolve as refs", () => {
+    expect(gridVal("A1")).toBe(1);
+    expect(gridVal("XFD1048576")).toEqual(BLANK);
+    expect(gridVal("A1048576")).toEqual(BLANK);
+    expect(gridVal("XFD1")).toEqual(BLANK);
+  });
+  it("XFE1 (one column past XFD) is rejected as a name, not accepted as a ref", () => {
+    expect(gridErr("XFE1")).toBe(FORMULA_ERRORS.NAME);
+  });
+  it("ABCD1 (too many letters for any real column) is rejected as a name", () => {
+    expect(gridErr("ABCD1")).toBe(FORMULA_ERRORS.NAME);
+  });
+  it("A0 (row 0 doesn't exist) is rejected as a name", () => {
+    expect(gridErr("A0")).toBe(FORMULA_ERRORS.NAME);
+  });
+  it("A1048577 (one row past the max) is rejected as a name", () => {
+    expect(gridErr("A1048577")).toBe(FORMULA_ERRORS.NAME);
+  });
+  it("parseRefText is the single source of truth for these bounds, directly", () => {
+    expect(parseRefText("XFD1048576")).toEqual({ col: 16384, row: 1048576, colAbs: false, rowAbs: false });
+    expect(parseRefText("XFE1")).toBeNull();
+    expect(parseRefText("ABCD1")).toBeNull();
+    expect(parseRefText("A0")).toBeNull();
+    expect(parseRefText("A1048577")).toBeNull();
+    expect(parseRefText("$A$1")).toEqual({ col: 1, row: 1, colAbs: true, rowAbs: true });
+  });
+  it("colLettersToNum / colNumToLetters round-trip across the full column range", () => {
+    for (const [letters, n] of [["A", 1], ["Z", 26], ["AA", 27], ["AZ", 52], ["BA", 53], ["ZZ", 702], ["AAA", 703], ["XFD", 16384]]) {
+      expect(colLettersToNum(letters)).toBe(n);
+      expect(colNumToLetters(n)).toBe(letters);
+    }
+  });
+  it("LOG10 is the ONLY function name in the current registry that also parses as a valid address (audit claim, checked live)", () => {
+    const collisions = FUNCTION_NAMES.filter(name => parseRefText(name) !== null);
+    expect(collisions).toEqual(["LOG10"]);
+  });
+  it("LOG10( is always a function call — never a reference, per Excel's own disambiguation rule", () => {
+    expect(gridVal("LOG10(100)")).toBe(2);
+    expect(gridVal("LOG10(1000)")).toBe(3);
+  });
+  it("bare LOG10 (no parens) is the reference to column LOG, row 10 — outside a 3×3 grid, so blank", () => {
+    expect(gridVal("LOG10")).toEqual(BLANK);
+    expect(parseRefText("LOG10")).toEqual({ col: 8509, row: 10, colAbs: false, rowAbs: false });
+  });
+  it("bare LOG10 resolves a real value when the grid actually reaches column LOG, row 10", () => {
+    const grid = [];
+    grid[9] = []; grid[9][8508] = 42; // row 10 (index 9), column LOG (index 8508)
+    expect(gridVal("LOG10", grid)).toBe(42);
+  });
+  it("LOG10 used as a function argument and as a bare ref in the same formula both resolve correctly", () => {
+    expect(gridVal("LOG10(100)+A1")).toBe(3); // 2 + 1
+  });
+});
+
+describe("A1 cell references — #REF! semantics", () => {
+  it('the literal "#REF!" tokenizes and evaluates to the #REF! error, never a crash', () => {
+    expect(gridErr("#REF!")).toBe(FORMULA_ERRORS.REF);
+    expect(gridErr("A1+#REF!")).toBe(FORMULA_ERRORS.REF);
+    expect(gridErr("SUM(#REF!,A1)")).toBe(FORMULA_ERRORS.REF);
+  });
+  it("case-insensitive and never a silent zero", () => {
+    expect(gridErr("#ref!")).toBe(FORMULA_ERRORS.REF);
+  });
+});
+
+// ── rewriteFormulaForCopy — the relative-reference rewrite on copy/fill ─────────
+// Pure, separately testable: (formula, sourceAddr, targetAddr) -> rewritten formula.
+describe("rewriteFormulaForCopy", () => {
+  it("a plain relative reference shifts by the same delta as the copy", () => {
+    expect(rewriteFormulaForCopy("A1+B1", "A1", "A5")).toBe("A5+B5");
+    expect(rewriteFormulaForCopy("A1", "A1", "C1")).toBe("C1"); // column-only shift
+    expect(rewriteFormulaForCopy("A1", "A1", "A5")).toBe("A5"); // row-only shift
+  });
+  it("copying onto the same cell is a byte-identical no-op", () => {
+    expect(rewriteFormulaForCopy("A1+  B1 ", "A1", "A1")).toBe("A1+  B1 ");
+  });
+  it("$A$1 (fully absolute) never moves", () => {
+    // A1 -> F20 is a delta of (+5 cols, +19 rows); B1 rides that delta to G20, $A$1 doesn't move at all.
+    expect(rewriteFormulaForCopy("$A$1+B1", "A1", "F20")).toBe("$A$1+G20");
+  });
+  it("A$1 / $A1 (mixed) move on their relative axis only", () => {
+    expect(rewriteFormulaForCopy("A$1", "A1", "C5")).toBe("C$1");   // row anchored, column shifts
+    expect(rewriteFormulaForCopy("$A1", "A1", "C5")).toBe("$A5");   // column anchored, row shifts
+  });
+  it("a range shifts both endpoints together", () => {
+    expect(rewriteFormulaForCopy("SUM(A1:B10)", "A1", "A2")).toBe("SUM(A2:B11)");
+    expect(rewriteFormulaForCopy("SUM($A$1:B10)", "A1", "C3")).toBe("SUM($A$1:D12)");
+  });
+  it("shifting a reference off the sheet (column < A) collapses it to #REF!", () => {
+    expect(rewriteFormulaForCopy("A1", "B1", "A1")).toBe("#REF!");
+  });
+  it("shifting a reference off the sheet (row < 1) collapses it to #REF!", () => {
+    expect(rewriteFormulaForCopy("A1", "A2", "A1")).toBe("#REF!");
+  });
+  it("a range with only ONE endpoint pushed off the sheet collapses the WHOLE range to #REF!, matching Excel", () => {
+    // source B3 -> target B1 is deltaRow=-2; A1:A5 -> row (1-2)=-1 invalid, row (5-2)=3 valid
+    expect(rewriteFormulaForCopy("SUM(A1:A5)", "B3", "B1")).toBe("SUM(#REF!)");
+  });
+  it("the rewritten #REF! formula evaluates loudly, never crashes and never silently zeroes", () => {
+    const rewritten = rewriteFormulaForCopy("A1", "B1", "A1");
+    expect(gridErr(rewritten)).toBe(FORMULA_ERRORS.REF);
+  });
+  it("LOG10( is never rewritten — a function call, not a reference — even though an argument beside it is", () => {
+    expect(rewriteFormulaForCopy("LOG10(A1)+A1", "A1", "A2")).toBe("LOG10(A2)+A2");
+  });
+  it("a formula with no A1 references at all (pure [Column] refs) is returned byte-identical", () => {
+    expect(rewriteFormulaForCopy("[Cost]*2 + [Qty]", "A1", "Z99")).toBe("[Cost]*2 + [Qty]");
+  });
+  it("a string literal that merely looks like a reference is never touched", () => {
+    expect(rewriteFormulaForCopy('"A1" & A1', "A1", "A5")).toBe('"A1" & A5');
+  });
+  it("throws on an invalid source/target cell address (a caller contract violation, not user formula text)", () => {
+    expect(() => rewriteFormulaForCopy("A1", "ZZZZ1", "A5")).toThrow();
+    expect(() => rewriteFormulaForCopy("A1", "A1", "A0")).toThrow();
+  });
+  it("a formula that fails to even tokenize is handed back unchanged rather than throwing", () => {
+    expect(rewriteFormulaForCopy("A1 + $", "A1", "A5")).toBe("A1 + $");
+  });
+});
+
