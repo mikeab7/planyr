@@ -13,7 +13,7 @@
  * NOT flattened; there is exactly one rule ("active control fill = the surface's interactive
  * accent, --accent unless the host overrides").
  */
-import { useState } from "react";
+import { forwardRef, useState } from "react";
 // The single source of the control scale. Radius 8 is the median of the pre-convergence
 // spread (6/7/8/9) and already the Site Planner chip/iconBtn value — the smallest net move.
 /* ⛔ B427411 — THESE THREE AGREE WITH `shared/ui/radius.js` BY VALUE, AND THEY STAY LITERAL.
@@ -79,10 +79,11 @@ export function ToggleChip({ active = false, accent = "var(--accent)", onAccent 
   );
 }
 
-/* IconButton — the square icon slot (the Site Planner iconBtn, token-only). */
-export function IconButton({ size = 30, active = false, accent = "var(--accent)", onAccent = "var(--on-accent)", style, children, ...rest }) {
+/* IconButton — the square icon slot (the Site Planner iconBtn, token-only). Ref-forwarding so
+ * it can anchor an AnchoredMenu directly, like any other trigger element. */
+export const IconButton = forwardRef(function IconButton({ size = 30, active = false, accent = "var(--accent)", onAccent = "var(--on-accent)", style, children, ...rest }, ref) {
   return (
-    <button style={{
+    <button ref={ref} style={{
       width: size, height: size, padding: 0, flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center",
       borderRadius: RADIUS.control, cursor: "pointer", boxShadow: REST_SHADOW,
       border: `1px solid ${active ? accent : "var(--border-default)"}`,
@@ -90,13 +91,30 @@ export function IconButton({ size = 30, active = false, accent = "var(--accent)"
       color: active ? onAccent : "var(--text-primary)", ...style,
     }} {...rest}>{children}</button>
   );
-}
+});
 
-/* Field — a label + control row (lifted verbatim from the Site Planner inspector; token-clean). */
-export function Field({ label, children }) {
+/* Field — a label + control row (lifted verbatim from the Site Planner inspector; token-clean).
+ * `stacked` — label ABOVE the control instead of beside it, so the control gets the panel's
+ * full width. Use in any narrow host (a rail panel) where the default label-left row leaves a
+ * field squeezed into half the available width. `required` appends a small inline marker to
+ * the label — the one convention for a required field, so a form never invents its own. */
+export function Field({ label, children, stacked = false, required = false }) {
+  const labelNode = (
+    <span style={{ fontSize: stacked ? 11 : 12, fontWeight: stacked ? 600 : 400, color: "var(--text-secondary)" }}>
+      {label}{required && <span style={{ color: "var(--danger-text)" }}> *</span>}
+    </span>
+  );
+  if (stacked) {
+    return (
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ marginBottom: 4 }}>{labelNode}</div>
+        {children}
+      </div>
+    );
+  }
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 8 }}>
-      <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{label}</span>{children}
+      {labelNode}{children}
     </div>
   );
 }

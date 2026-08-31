@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-31 @ `6d2999ca` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-31 @ `0b967476` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_618 source files mapped._
+_619 source files mapped._
 
 ## infra
 
@@ -320,7 +320,7 @@ _618 source files mapped._
   - _exports_: `BLANK`, `colLettersToNum`, `colNumToLetters`, `compareValues`, `DEFAULT_CALENDAR`, `errVal`, `evaluateFormula`, `extractRefs`, `formatValue`, `FORMULA_ERRORS`, `FormulaError`, `FUNCTION_HELP`, `FUNCTION_NAMES`, `FUNCTIONS`, `isBlank`, `isDate`, `isErrVal`, `isFormulaError`, `isoToSerial`, `makeDate`, `MAX_COL`, `MAX_ROW`, `numToGeneralStr`, `parse`, `parseFormula`, `parseLooseDate`, `parseRefText`, `planFormulaColumns`, `rewriteFormulaForCopy`, `serialToISO`, `serialToYMD`, `toBool`, `toDateSerial`, `tokenize`, `toNumber`, `toStr`, `weekdayOf`, `ymdToSerial`
 - **`src/shared/geometry/pasteGeom.js`** — Pure paste-at-cursor placement math: bbox center plus translate so a pasted copy drops centered under the cursor, shared by both canvases
   - _exports_: `bboxCenter`, `centerOn`
-- **`src/shared/geometry/similarityTransform.js`** — best-fit 2D similarity transform (uniform scale + rotation + translation) over N≥2 point pairs, shared by the Site Planner overlay aligner and the site-plan-overlay georeferencer
+- **`src/shared/geometry/similarityTransform.js`** — Best-fit 2D similarity transform (scale+rotation+translation) over N>=2 point pairs (Procrustes); promoted from site-planner overlayAlign.js so the site-plan-overlay georeferencing feature reuses the same solver
   - _exports_: `solveSimilarityLSQ`
 - **`src/shared/gis/countyKeys.js`** — county ROUTING-KEY normalisation (`normCountyKey`) + the case-insensitive map/set wrappers every county-keyed lookup goes through
   - _exports_: `byCountyKey`, `countyKeySet`, `countyLookup`, `normCountyKey`, `sameCounty`
@@ -388,15 +388,15 @@ _618 source files mapped._
   - _exports_: `activeUid`, `DELETED_RETENTION_DAYS`, `deleteProject`, `filterProjects`, `groupProjects`, `listDeletedProjects`, `listProjects`, `normalizeProjectName`, `notifyProjectsChanged`, `onProjectsChanged`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `reconcileProjects`, `relTime`, `renameProject`, `restoreDeletedProject`, `suggestNameMatch`, `warmProjects`, `warmProjectsIfEmpty`
 - **`src/shared/recents/recentDocs.js`** — Library-Home Recent list: local recently-OPENED drawings (not updated_at), per-uid, deduped by id, newest-first, capped at 15
   - _exports_: `listRecents`, `RECENTS_CAP`, `recordOpen`, `removeRecent`
-- **`src/shared/sitePlans/components/SitePlansSection.jsx`** — upload a site plan, pick which page is the site plan, anchor it on the map, and pin comps to buildings on it (rendered by MapFinder above the Comps list)
+- **`src/shared/sitePlans/components/SitePlansSection.jsx`** — Upload a site plan (PDF/image), pick+rasterize its page, anchor it on the map, and pin comps to it — self-contained data owner rendered by MapFinder above the Comps list
   - _exports_: `default (SitePlansSection)`
-- **`src/shared/sitePlans/lib/overlayGeoref.js`** — pure georeferencing math for an uploaded site-plan overlay: solves a similarity transform from image-pixel space to the project's real-world state-plane grid from ≥2 control points
-  - _exports_: `imagePointToLatLon`, `invertOverlayTransform`, `latLonToImagePoint`, `measureLatLonFeet`, `overlayCornersLatLon`, `solveOverlayTransform`
-- **`src/shared/sitePlans/lib/overlayRasterStorage.js`** — Supabase Storage for a site-plan overlay's cached rasterized page, reusing the existing private `doc-review-files` bucket
+- **`src/shared/sitePlans/lib/overlayGeoref.js`** — Pure georeferencing math for a site-plan overlay: image-px <-> state-plane feet <-> lat/lon via a similarity transform solved from >=2 control points, plus the independent lat/lon distance scale-check
+  - _exports_: `latLonToImagePoint`, `overlayCornersFromPlacement`, `rotatePlacement`, `scalePlacement`, `suggestFtPerPx`, `validPlacement`
+- **`src/shared/sitePlans/lib/overlayRasterStorage.js`** — Supabase Storage for a site-plan overlay's cached rasterized page (doc-review-files bucket, uid-first key), mirroring site-planner overlayStorage.js's shape
   - _exports_: `BUCKET`, `deleteOverlayRaster`, `downloadOverlayRasterUrl`, `MAX_BYTES`, `overlayRasterKey`, `uploadOverlayRaster`
-- **`src/shared/sitePlans/lib/sitePlanOverlays.js`** — pure data model for a site-plan overlay (an uploaded flyer page anchored to the map, referencing its whole file in the existing Review/Library document store)
-  - _exports_: `deriveOverlayMetrics`, `overlayToRow`, `rowToOverlay`, `validControlPoints`, `validOverlayUpload`
-- **`src/shared/sitePlans/lib/sitePlanOverlayStore.js`** — the Supabase CRUD seam for `public.site_plan_overlays`, mirroring `comps/lib/compsStore.js`'s `{data, error}` shape
+- **`src/shared/sitePlans/lib/sitePlanOverlays.js`** — Site-plan-overlay pure data model: control-point validation, derived transform metrics, row<->object mapping (mirrors comps.js's shape)
+  - _exports_: `overlayPlaced`, `overlayToRow`, `rowToOverlay`, `validOverlayUpload`
+- **`src/shared/sitePlans/lib/sitePlanOverlayStore.js`** — Supabase CRUD for `public.site_plan_overlays` (team-read/owner-write RLS), mirroring compsStore.js's shape
   - _exports_: `deleteOverlay`, `fetchAllOverlays`, `insertOverlay`, `updateOverlay`
 - **`src/shared/storage/originStore.js`** — Dependency-free read/delete-by-prefix access to the origin's IndexedDB kv store, so shared chrome can census and clear it without importing a workspace module (which hoists the cache into a route chunk)
   - _exports_: `deleteOriginKey`, `deleteOriginPrefix`, `originStoreAvailable`, `putOriginRecord`, `walkOriginStore`
@@ -575,7 +575,7 @@ _618 source files mapped._
   - _exports_: `default (YieldFooterDisclaimer)`
 - **`src/workspaces/site-planner/lib/accessScreen.js`** — PHASE 6 access-tier screening (pure): turns three public access datasets near the parcel into info findings — TxDOT AADT (nearest counted road's traffic as an access/visibility proxy), BTS/FRA rail lines (nearest line + owner; a crossing/abutting line flags a potential rail-served siding), and FAA airports (distance as a Part 77 height-restriction proxy, with a Form-7460 caution near a public-use airport); expands railroad reporting marks + FAA type codes to plain labels
   - _exports_: `airportTypeLabel`, `railroadName`, `summarizeAadt`, `summarizeAirports`, `summarizeRail`
-- **`src/workspaces/site-planner/lib/activeUser.js`** — B927105: which account the shared project store is bound to — split out of storage.js so a caller that only needs to read/set it doesn't load the whole site-model/cloud-sync engine
+- **`src/workspaces/site-planner/lib/activeUser.js`** — Which account the shared project store is bound to, split out of storage.js (B927105) so readers of just this state skip the full site-model/cloud-sync engine
   - _exports_: `activeUid`, `cloudSitesKey`, `isCloudActive`, `setActiveUser`
 - **`src/workspaces/site-planner/lib/adminBoundaryData.js`** — Pure decoder for the wide-zoom boundary asset (delta ints → lat/lng rings) plus the inner half of the zoom band (states join countries from zoom 5).
   - _exports_: `ADMIN1_MIN_ZOOM`, `adminBoundaryLevels`, `decodeAsset`, `decodeRing`
@@ -913,6 +913,8 @@ _618 source files mapped._
   - _exports_: `OVERLAY_BAND_ABOVE`, `OVERLAY_BAND_BELOW`, `overlayBand`, `overlayBandsGrouped`, `overlayDrawOrder`, `overlayOrderFlags`, `overlayPanelOrder`, `reorderOverlays`, `setOverlayBand`, `splitOverlayBands`
 - **`src/workspaces/site-planner/lib/overlayPdf.js`** — Site-plan overlay rasterizer: lazily reuses Doc Review PDF.js to render a dropped PDF/image page to a white-knockout PNG data URL, reads its scale note, classifies sheet size, rebuilds from stored bytes
   - _exports_: `baseRasterScale`, `chooseOverlayRasterScale`, `HIRES_CACHE_PER_OVERLAY`, `isDxfFile`, `isPdfFile`, `knockoutNearWhite`, `MAX_RERASTER_DIM`, `openOverlayFile`, `overlayRasterKey`, `rasterizePage`, `rasterizePageHiRes`, `rasterizeStoredDxf`, `rasterizeStoredPdf`, `RERASTER_LADDER`
+- **`src/workspaces/site-planner/lib/overlayPlacementHandles.js`** — Direct-manipulation map chrome for a site-plan overlay: move / corner-scale / rotate handles, mirroring the Site Planner's own on-canvas reference-image tool (B848496)
+  - _exports_: `createPlacementHandles`
 - **`src/workspaces/site-planner/lib/overlayPrint.js`** — Pure DOM-free print/export selection for placed site-plan overlays: filters src-bearing visible overlays, drives the 'Print overlay' checkbox visibility and the export compositing pass
   - _exports_: `hasPrintableOverlay`, `isOverlayPrintable`, `printableOverlays`
 - **`src/workspaces/site-planner/lib/overlayScale.js`** — Pure drawing-scale helpers: engineer scale-note parsing, standard sheet detection, feet-per-point conversions, viewport-sanity auto-scale guard, and Bluebeam-style page=real distance/preset scale entry
@@ -1053,7 +1055,7 @@ _618 source files mapped._
   - _exports_: `canRemoveRoadVertex`, `cardinalTeePoint`, `concatRoads`, `cornerApproachShortfall`, `cornerShares`, `curbStrokePx`, `dedupeRoadVertices`, `DEFAULT_ARC_RADIUS`, `DEFAULT_TESS_DEG`, `findRoadConnect`, `fitRoadCorners`, `fixRoadRadii`, `insertRoadVertex`, `minRadiusOfCurvature`, `nearestRectEdge`, `nodeJunction`, `planRoadConnect`, `polylineLength`, `projectToPolyline`, `projectToRoadCenterline`, `rectEdges`, `removeRoadVertex`, `repairBakedRadii`, `ROAD_SIMPLIFY_TOL_FT`, `ROAD_VERTEX_COLLAPSE_FT`, `roadBearingDeg`, `roadCenterline`, `roadCenterlineTagged`, `roadCornerRadii`, `roadMinRadius`, `roadRadiusConflicts`, `roadsMergeCompatible`, `simplifyRoadVertices`, `slideTeeNode`, `TEE_CARDINAL_STEP_DEG`, `teeGeometry`, `teeNodeIndex`, `weldCoverPolygon`
 - **`src/workspaces/site-planner/lib/roadNetwork.js`** — Dissolves connected road strips + curb-return wedges into ONE pavement region per cluster (clipper union, orientation-normalised, morphologically closed), and trims curb stripes at junctions. The topology replacement for the old per-junction cover patches.
   - _exports_: `clipPolylineOutside`, `clusterIds`, `dissolveRings`, `rectOutlineCutSegments`, `regionPathD`
-- **`src/workspaces/site-planner/lib/rotatedImageLayer.js`** — renders a raster image georeferenced by three corners on a real Leaflet map via a CSS `transform: matrix(...)`-driven `<img>` in its own pane
+- **`src/workspaces/site-planner/lib/rotatedImageLayer.js`** — A raster image georeferenced by three corners, rendered on the real Leaflet map via a CSS matrix transform (Leaflet has no built-in rotated-image layer) — the rendering half of the site-plan-overlay feature
   - _exports_: `createRotatedImageLayer`
 - **`src/workspaces/site-planner/lib/roundabout.js`** — NEW-5: roundabouts at a road terminus — the class→inscribed-diameter derivation (FHWA/NCHRP bands, so a WB-67 truck route and an auto aisle get different circles), the annulus emitted as union-only arc sectors so the central island is a real hole, curb returns tangent to both the leg edge and the circle, the half-chord leg trim, and the node grouping that makes a second road join as a LEG.
   - _exports_: `annulusSectors`, `circleRing`, `circulatoryWidthFt`, `legReturnWedges`, `legTrimFor`, `normalizeRoundaboutD`, `ROUNDABOUT_BANDS`, `ROUNDABOUT_MAX_D`, `ROUNDABOUT_MIN_D`, `roundaboutArea`, `roundaboutBandFor`, `roundaboutDiameterFor`, `roundaboutGeometry`, `roundaboutIslandArea`, `roundaboutNodes`, `trimPolylineEnds`
@@ -1085,7 +1087,7 @@ _618 source files mapped._
   - _exports_: `siteAcres`, `siteBoundaryInfo`, `siteDrawParcels`
 - **`src/workspaces/site-planner/lib/siteGeometry.js`** — Shared pure geometry primitives behind a site's drawn area math: element footprints, curb bands, road strip/pavement area, junction detection and the per-plan roundabout resolution
   - _exports_: `carStalls`, `CURB`, `CURB_6`, `CURB_TYPES`, `curbAreaOf`, `curbEdgesOf`, `curbHost`, `curbWidthOf`, `elCorners`, `estStalls`, `estTrailers`, `isCenterlineRoad`, `outwardCurbEdge`, `polyArea`, `ringOf`, `roadCurbLines`, `roadCurbWidth`, `roadDefaultRadius`, `roadDenseCenterline`, `roadJunctionVerticesOf`, `roadStripArea`, `roadStripRing`, `rot2`, `roundaboutsForSite`, `sidewalkBetween`, `SQFT_PER_ACRE`, `TEE_COINCIDE_FT`, `TEE_COINCIDE_MAX_FT`, `teeCoincideFt`, `teeTargetOf`, `trailerStalls`
-- **`src/workspaces/site-planner/lib/siteListLight.js`** — B927105: the lightweight project-list read (id/groupId/name/status/timestamps only, name-authority reconciled) used by the header breadcrumb, skipping storage.js's full geometry-normalization engine
+- **`src/workspaces/site-planner/lib/siteListLight.js`** — The lightweight project-list read (B927105): the six scalar fields every workspace header needs, skipping the full Site Model's geometry-healing engine that `storage.js`'s `loadSitesList()` otherwise pulls in
   - _exports_: `loadSiteSummaries`
 - **`src/workspaces/site-planner/lib/siteMetrics.js`** — Pure site yield/coverage metrics (siteSqft, bldg, coverage %, FAR, ...) as ONE function, extracted from SitePlanner.jsx's render body so a future module (e.g. a financial model) can read them
   - _exports_: `siteMetrics`
@@ -1099,7 +1101,7 @@ _618 source files mapped._
   - _exports_: `groupRecencyMs`, `lastEditedLabel`, `summarizeElementRecency`
 - **`src/workspaces/site-planner/lib/siteRegion.js`** — NEW-8 the synchronous half of the Colorado tier: geometric, network-free site→state resolution ('TX' \| 'CO' \| null) that the detention guard keys off. Its own module so the Colorado PROSE (coloradoRegions.js) can load on demand while this stays on the boot path
   - _exports_: `isColorado`, `siteState`, `STATE_ENVELOPES`
-- **`src/workspaces/site-planner/lib/siteStatus.js`** — B927105: the Site Model's schema-version + deal-status constants, split out of siteModel.js (dependency-free) so a caller that only needs a status label doesn't import the geometry engine
+- **`src/workspaces/site-planner/lib/siteStatus.js`** — The Site Model's schema-version constant + deal-status labels, split out of siteModel.js (B927105) so a status-only caller doesn't drag in the geometry engine
   - _exports_: `DEFAULT_STATUS`, `isLegacyRecord`, `LEGACY_STATUS`, `normStatus`, `SITE_MODEL_VERSION`, `STATUS_META`, `STATUSES`, `statusOf`
 - **`src/workspaces/site-planner/lib/soils.js`** — USDA SSURGO soils via Soil Data Access (NEW-B2): pure SDA SQL query builder + response parser (hydrologic soil group + seasonal-high water table) + bounded-fetch client. SDA proxy-blocked in sandbox → live-verify.
   - _exports_: `buildSdaRequest`, `buildSoilQuery`, `parseSoilResponse`, `resolveSoils`, `SDA_ENDPOINT`, `SDA_PROXY_PATH`
@@ -1149,7 +1151,7 @@ _618 source files mapped._
   - _exports_: `contributingAcres`, `delineateUpstream`, `downstreamIndex`, `flowAccumulation`, `lowestCell`, `OFFSITE_MATERIAL_RATIO`, `offsiteDrainageFlag`
 - **`src/workspaces/site-planner/lib/userPrefs.js`** — Account-level user preferences (NEW-3) — `public.profiles.prefs` jsonb with a localStorage mirror; backs the Standards "All projects" scope and publishes it into `planStyle`'s account layer.
   - _exports_: `_normalizePrefs`, `applyPrefs`, `EMPTY_PREFS`, `getStandardPref`, `loadUserPrefs`, `readMirror`, `saveUserPrefs`, `setSitesPanelPref`, `setStandardPref`
-- **`src/workspaces/site-planner/lib/useSitePlanOverlayLayers.js`** — keeps one `rotatedImageLayer` per visible site-plan overlay in sync with MapFinder's `overlays` list (mount/update/teardown)
+- **`src/workspaces/site-planner/lib/useSitePlanOverlayLayers.js`** — React hook keeping one rotatedImageLayer per visible site-plan overlay in sync with the overlay list (mount/update/teardown), so MapFinder's render stays declarative
   - _exports_: `useSitePlanOverlayLayers`
 - **`src/workspaces/site-planner/lib/vectorLayers.js`** — Pure registry-driven vector GIS engine (FEMA/NWI + county/city/ETJ boundaries): paged ArcGIS pull, detail tiers with server-side generalization, grid-snapped SWR cache keys, Esri-to-GeoJSON, Douglas-Peucker, vector-vs-image decision
   - _exports_: `buildQueryUrl`, `buildVectorQuery`, `decideVectorOrImage`, `douglasPeucker`, `featuresToGeoJson`, `fetchCached`, `fetchVectorFeatures`, `hitFeature`, `identifyRows`, `pickTier`, `simplifyGeoJson`, `snapBbox`, `styleFor`, `VECTOR_SOURCES`, `vectorKey`
