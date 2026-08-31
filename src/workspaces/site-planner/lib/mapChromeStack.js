@@ -112,3 +112,34 @@ export const ZOOM_CONTROL_CLEARANCE_PX = 128;
  * breakpoints, so the two can never overlap regardless of whether the Layers panel is collapsed
  * or open (the pill sits ABOVE it, so the panel's own height growing downward never reaches it). */
 export const COMPS_TOGGLE_CLEARANCE_PX = 38;
+
+/* ⛔ B950321 (NEW-2, map-overlay alignment audit) — THE ONE SHARED TOP EDGE + CHIP HEIGHT every
+ * desktop floating map overlay reads, instead of each one hand-picking its own number.
+ *
+ * The owner: "look at the vertical alignment for the chips/pills on the map, they don't align."
+ * Measured (not eyeballed — see the item for the harness): on a fresh desktop landing, the
+ * Sites/Comps rail panel and the Imagery & layers panel both sat at `top: 10`, but the combined
+ * search bar sat at `top: 14` — a real, if small, 4px offset a straight-line-across-the-top eye
+ * test catches instantly. Collapsed, the Layers panel was already deliberately pinned to
+ * `CONTROL_H.lg` (see `MAP_CORNER_CHIP_STYLE` in MapFinder.jsx, whose own header comment says
+ * "Applied to BOTH chips' COLLAPSED presentation" — a claim that was only ever true for one of
+ * them); the Sites panel's collapsed row had never been given the same treatment and rested at
+ * whatever height its content happened to need (38px, not 30).
+ *
+ * `MAP_OVERLAY_TOP_PX` is now the ONE top offset every desktop floating overlay over the map
+ * reads — the two corner panels AND the top-center search bar. `MAP_OVERLAY_CHIP_H_PX` is the
+ * ONE resting height a simple corner-toggle chip collapses to (mirrors `CONTROL_H.lg` exactly —
+ * re-exported here rather than re-imported at every call site, so a future corner chip reaches
+ * for ONE name instead of two). A new floating overlay reads these; it does not invent its own
+ * `top`.
+ *
+ * `MAP_OVERLAY_BAR_H_PX` is a DELIBERATELY DIFFERENT number, not a third attempt at the same one.
+ * The search bar is not a toggle chip — it is a compound cluster (the Site/Comp switch, an
+ * address combobox, one or two action buttons, `nestedIn(RADIUS.lg, 6)`-radius children) that
+ * needs real room for a text field, and shrinking it to `MAP_OVERLAY_CHIP_H_PX` would cramp
+ * every child inside it for no visual gain (a compound cluster and a single-label chip were never
+ * going to read as the same shape, only the same TOP edge). Documented, not silently exempted:
+ * see docs/UI-INVENTORY.md's "Known, deliberately-not-fixed findings". */
+export const MAP_OVERLAY_TOP_PX = 10;
+export const MAP_OVERLAY_CHIP_H_PX = 30; // == CONTROL_H.lg (src/shared/ui/designTokens.js)
+export const MAP_OVERLAY_BAR_H_PX = 42;

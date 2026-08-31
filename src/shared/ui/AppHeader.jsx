@@ -870,6 +870,15 @@ export default function AppHeader({
           <FullscreenButton active={fullscreen} onToggle={() => toggleRef.current()} />
           {/* Theme gear — signed-out only; signed-in users switch theme in account → Settings (B389) */}
           {!accountActive && <SettingsMenu />}
+          {/* B950320 (sibling-radius-consistency audit) — a hairline divider between the ICON-BUTTON
+              cluster (save badge, fullscreen, gear — all `RADIUS.md` squares) and the account/auth
+              PILL. Per docs/DESIGN.md's shape rule, `pill` is correctly reserved for a container that
+              holds several things (the account chip holds an avatar, a name and a caret) while `md` is
+              correctly the standalone-control shape (fullscreen toggles one thing) — so the fix is not
+              reclassifying either control, it's making the family boundary between the two CLUSTERS
+              visible, the same divider this header already uses between the wordmark and the
+              breadcrumb, so the eye stops comparing the two curves with nothing between them. */}
+          <span style={{ width: 1, height: 14, background: LINE, flex: "none", margin: "0 2px" }} />
           {authControl}
         </div>
       </div>

@@ -18822,12 +18822,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        could not reach. */
     <div ref={planAnchor} style={{ position: "relative", flex: "0 1 auto", minWidth: 0 }}>
       {/* Styled to match the breadcrumb crumbs (height/padding/radius) so the three
-          segments share one hit-target geometry; hierarchy is by weight, not by fading. */}
+          segments share one hit-target geometry; hierarchy is by weight, not by fading.
+          B950320 (sibling-radius-consistency audit) — was RADIUS.sm, which stopped being true the
+          moment `crumbBtn` in ProjectBreadcrumb.jsx moved sm→md (that file's own NEW-3 comment: "a
+          standalone chip sitting directly on the header bar... the same category as the row-2
+          toolbar's File ▾ / dIcon / rbtn buttons"). This chip is exactly that same category and was
+          simply never updated to match — the comment above kept claiming parity a prior edit broke. */}
       <button
         className="dbtn"
         style={{
           display: "flex", alignItems: "center", gap: 5, flex: "none",
-          height: 24, padding: "0 8px", borderRadius: RADIUS.sm, border: "none",
+          height: 24, padding: "0 8px", borderRadius: RADIUS.md, border: "none",
           background: "transparent", cursor: "pointer", fontFamily: "inherit",
           fontSize: 12.5, fontWeight: 500, color: "var(--chrome-text)",
           maxWidth: 200, minWidth: CRUMB_MIN_W, whiteSpace: "nowrap",
