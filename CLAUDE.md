@@ -532,8 +532,22 @@ Runtime deps are kept few and deliberate. New client dependency added 2026-07-10
   Nudge on the absence of a RUN, never on `total_count: 0`.
   **⚠ AND WHEN A NUDGE IS GENUINELY OWED, PREFER MERGING `origin/main` OVER AN EMPTY COMMIT** — it
   fires the same real push event AND refreshes a branch that has drifted, so it fixes the stale-merge
-  case at the same time. Resolve the inevitable `BACKLOG.md` conflict by keeping both sides, and
-  REGENERATE `BACKLOG_OPEN.md` / `MAP.md` rather than hand-merging them.
+  case at the same time. Resolve the inevitable `BACKLOG.md` conflict by keeping both sides.
+  **`MAP.md` / `BACKLOG_OPEN.md` conflicts now self-resolve automatically on `git merge` (B904992)** —
+  a committed `.gitattributes` hands both paths to a custom merge driver
+  (`scripts/merge-driver-ledgers.mjs`), backed by a `post-merge` hook
+  (`scripts/post-merge-regen.mjs`) that corrects the driver's necessarily-partial mid-merge view once
+  the working tree is complete (see that pair's own headers for why a merge driver alone cannot always
+  be correct, and why the fix is two layers). Both are wired by `npm install` /
+  `npm run hooks:install` alongside the mint-gate hook; if a conflict on either file DOES still show
+  markers, the local config is missing — run `npm run hooks:install` (or `node
+  scripts/install-hooks.mjs --check` to confirm) rather than resolving by hand. **The manual path is
+  not gone** — it is still the only route for `BACKLOG.md` / `BACKLOG-DONE.md` / `VERIFICATION.md` /
+  `VERIFICATION-DONE.md` (a merge driver is per-file and cannot run `resolve-ledgers.mjs`'s cross-file
+  duplicate-id rollback), and it is still the correct fallback if the driver itself ever refuses
+  (LOUD-FAILURE — it leaves ordinary conflict markers rather than guess): `node
+  scripts/resolve-ledgers.mjs` regenerates all four hand-merged files AND both generated ones in one
+  pass.
   **⚠ CHECK `mergeable_state` FIRST — a "dirty" (merge-conflicted) PR silently swallows EVERY nudge
   (learned 2026-07-06 on PR #518).** GitHub only creates `pull_request` build runs against the PR's
   test-MERGE ref; while the PR conflicts with `main` that ref can't exist, so nudges, close/reopen —

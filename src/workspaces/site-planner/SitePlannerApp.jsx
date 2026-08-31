@@ -480,12 +480,6 @@ export default function App({
     }
     goPlan(id);
   };
-  // NEW-4 — where the map is looking right now, so a blank plan started from the map header is
-  // born at the spot the owner is staring at rather than nowhere. A plain ref: this is read at
-  // click time only, and re-rendering the whole app on every map pan would be absurd.
-  const mapCenterRef = useRef(null);
-  const newBlankSiteHere = () => newBlankSite(mapCenterRef.current ? { origin: mapCenterRef.current } : null);
-
   // NEW-COMPS — Leasing Comps: a comp is its own entity (never a project type), so its state
   // lives here rather than inside a site record. `comps` mirrors what CompsPanel has loaded, fed
   // back up purely so MapFinder can render the same list as markers — CompsPanel remains the one
@@ -807,22 +801,11 @@ export default function App({
           onRenameProject={renameSite}
           centerContent={null}
           saveSlot={null}
-          toolbarContent={
-            <button
-              // NEW-4 — starts blank AT THE MAP'S CURRENT CENTRE, so "the county server is down,
-              // I'll just draw it" doesn't produce an unlocated plan.
-              onClick={newBlankSiteHere}
-              title="Start a plan with no parcel — it takes its location from where the map is looking, so you can draw the boundary and still get the aerial, flood layer and county rules"
-              style={{
-                padding: "4px 11px", fontSize: 12, fontWeight: 600, borderRadius: RADIUS.sm,
-                border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
-                color: "var(--chrome-text)", cursor: "pointer", fontFamily: "inherit",
-                whiteSpace: "nowrap",
-              }}
-            >
-              Start blank
-            </button>
-          }
+          // NEW-1 (owner report 2026-08-29) — the standalone "Start blank" button that lived here
+          // is gone: it duplicated MapFinder's own toolbar, at equal weight, on the same screen.
+          // "Start blank" now lives ONE place — a secondary option on MapFinder's "Select parcels"
+          // split button — so this slot is empty in map mode.
+          toolbarContent={null}
         />
         {/* NEW-5 — the URL named a project this device genuinely doesn't have (a bad id, a
             project on another account, or one that's been deleted). The old code returned
@@ -863,7 +846,6 @@ export default function App({
             // NEW-4 — the finder hands us the map's centre (and, when it could resolve one, the
             // county) so the fallback plan is located from the start.
             onSkip={newBlankSite}
-            onViewCenter={(c) => { mapCenterRef.current = c; }}
             comps={comps}
             onPlaceComp={onPlaceComp}
             onCompClick={onCompClick}

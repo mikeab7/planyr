@@ -397,6 +397,7 @@ function TreeRow({
   id, title, depth, selected, expanded, hasChildren, editing, confirming, confirmCount,
   onToggle, onSelect, onCommitRename, onCancelRename, onConfirmDelete, onCancelDelete,
   onMenu, when, dropping, onDragStart, onDragEnter, onDragOver, onDragLeave, onDrop,
+  narrow = false,
 }) {
   const [hover, setHover] = useState(false);
   const ref = useRef(null);
@@ -446,6 +447,7 @@ function TreeRow({
         background: selected ? "var(--accent-notes)" : dropping ? "var(--surface-page)" : hover ? "var(--surface-page)" : "transparent",
         color: selected ? "var(--on-accent-notes)" : "var(--text-primary)",
         borderColor: dropping ? "var(--accent-notes)" : selected ? "var(--accent-notes)" : "transparent",
+        ...(narrow ? { minHeight: 44 } : null),
       }}
     >
       {hasChildren ? (
@@ -741,7 +743,7 @@ function TaskList({ groups, onToggle, onOpen }) {
   );
 }
 
-function ViewTabs({ view, onView }) {
+function ViewTabs({ view, onView, narrow = false }) {
   return (
     <div role="tablist" aria-label="Notes view" style={{ display: "flex", gap: 3 }}>
       {VIEWS.map((v) => {
@@ -756,7 +758,7 @@ function ViewTabs({ view, onView }) {
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => onView(v.id)}
             style={{
-              flex: 1, height: 24, borderRadius: RADIUS.control, cursor: "pointer",
+              flex: 1, height: narrow ? 44 : 24, borderRadius: RADIUS.control, cursor: "pointer",
               border: `1px solid ${on ? "var(--accent-notes)" : "var(--border-default)"}`,
               background: on ? "var(--accent-notes)" : "transparent",
               color: on ? "var(--on-accent-notes)" : "var(--text-secondary)",
@@ -778,6 +780,10 @@ export default function NotesTree({
   onRename, onDelete, onExportPage, onPrintPage, onSetPageProject,
   onMovePage, onRestore, onPurge, onPurgeAll, onPeekBin, onPurgeEmpties, binFacts, onAllNotes,
   taskGroups = [], onToggleTask, onOpenTask, onViewChange,
+  /* PHONE DRILL-IN (NEW-1, B849632) — this is the ROOT view below the breakpoint, at full
+   * width, so this one flag governs the root's width/row-height/tap-target sizing throughout
+   * this file. `false` (the default) reproduces this file's pre-existing output exactly. */
+  narrow = false,
 }) {
   /* EXPANDED, not collapsed — the inverse of what this used to hold, and the whole point.
    * An empty set means everything is shut, which is the honest default for a rail whose job
@@ -943,6 +949,7 @@ export default function NotesTree({
           dropping={dropId === page.id}
           onToggle={() => toggle(page.id)}
           onSelect={() => onSelectPage(page.id)}
+          narrow={narrow}
           {...dragProps(page.id)}
           {...rowProps(page.id, { root: rootFlag })}
         />
@@ -983,7 +990,7 @@ export default function NotesTree({
     <div
       data-testid="notes-tree"
       style={{
-        width: 268, flex: "0 0 auto", display: "flex", flexDirection: "column", minHeight: 0,
+        width: narrow ? "100%" : 268, flex: narrow ? "1 1 auto" : "0 0 auto", display: "flex", flexDirection: "column", minHeight: 0,
         borderRight: "1px solid var(--border-default)", background: "var(--surface-raised)",
       }}
     >
@@ -1005,8 +1012,15 @@ export default function NotesTree({
                crowd a 268px rail for a feature the keyboard already reaches. The placeholder
                is the one surface someone looking for "how do I find a note" is already
                reading. */
-            placeholder={`Search notes — ${QUICK_OPEN_KEY} to jump`}
-            title={`Search these notes. Press ${QUICK_OPEN_KEY} to jump straight to a note by name.`}
+            /* ⛔ THE SHORTCUT HINT IS DESKTOP-ONLY (NEW-3, B849634). "⌘K to jump"/"Ctrl+K to
+               jump" names a keyboard a phone does not have, and — reported directly off the
+               owner's screenshot — a placeholder is VISIBLE (unlike a `title=` tooltip, which
+               only ever shows on hover and so is inert on a touch device and left alone
+               everywhere else in this module), so on a phone it just sat there truncated
+               mid-word in a rail with no room for it. Below the breakpoint the placeholder
+               drops the hint; the field still works exactly the same either way. */
+            placeholder={narrow ? "Search notes" : `Search notes — ${QUICK_OPEN_KEY} to jump`}
+            title={narrow ? "Search these notes." : `Search these notes. Press ${QUICK_OPEN_KEY} to jump straight to a note by name.`}
             aria-label="Search notes"
             aria-keyshortcuts={QUICK_OPEN_KEY.replace("⌘", "Meta+").replace("Ctrl+", "Control+")}
             onChange={(e) => onQueryChange(e.target.value)}
@@ -1018,7 +1032,7 @@ export default function NotesTree({
               onQueryChange("");
             }}
             style={{
-              flex: 1, minWidth: 0, height: 28, padding: "0 9px", borderRadius: RADIUS.control,
+              flex: 1, minWidth: 0, height: narrow ? 44 : 28, padding: "0 9px", borderRadius: RADIUS.control,
               border: "1px solid var(--border-default)", background: "var(--surface-page)",
               color: "var(--text-primary)", font: "inherit", fontSize: 13,
             }}
@@ -1029,7 +1043,7 @@ export default function NotesTree({
             title="New page"
             onClick={() => { setView("tree"); onViewChange?.("tree"); onAddPage(); }}
             style={{
-              flex: "0 0 auto", height: 28, padding: "0 10px", borderRadius: RADIUS.control,
+              flex: "0 0 auto", height: narrow ? 44 : 28, minWidth: narrow ? 44 : undefined, padding: "0 10px", borderRadius: RADIUS.control,
               border: "1px solid var(--border-default)", background: "var(--surface-page)",
               color: "var(--text-secondary)", font: "inherit", fontSize: 12.5, fontWeight: 650,
               cursor: "pointer", whiteSpace: "nowrap",
@@ -1038,7 +1052,7 @@ export default function NotesTree({
         </div>
         {/* The workspace root is told which view is showing, so the task rollup — which has
             to read every page BODY in scope — is computed only while it is on screen. */}
-        <ViewTabs view={view} onView={(v) => { setView(v); onQueryChange(""); onViewChange?.(v); }} />
+        <ViewTabs view={view} narrow={narrow} onView={(v) => { setView(v); onQueryChange(""); onViewChange?.(v); }} />
         <ProjectListBanner
           state={projectsState}
           error={projectsError}

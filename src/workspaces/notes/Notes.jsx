@@ -23,7 +23,7 @@
  * at delete time and every id in it is still cleared, just later and only once.
  */
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import AppHeader from "../../shared/ui/AppHeader.jsx";
+import AppHeader, { useNarrow } from "../../shared/ui/AppHeader.jsx";
 import { notesSaveState } from "./lib/notesSaveState.js";
 import NotesTree from "./components/NotesTree.jsx";
 import {
@@ -299,6 +299,35 @@ export default function Notes({
    * explicitly, in the one place someone could conclude their notes were gone. */
   const treeRef = useRef(null);   // the LIVE tree — see `persistTree` / `treeNow` for why nothing reads a render's copy
   const undoTimer = useRef(0);
+
+  /* B113/B485's existing phone breakpoint (760px, matchMedia), reused rather than a third one —
+   * see the drill-in note just below. */
+  const narrow = useNarrow();
+
+  /* ---- PHONE DRILL-IN (NEW-1, B849632) -----------------------------------------------------
+   *
+   * The desktop two-pane rail+page layout does not fit a phone: below B113/B485's existing
+   * `useNarrow()` breakpoint (760px — reused rather than inventing a third threshold; see this
+   * module's own note in BACKLOG.md about the SEPARATE 768px check baked into the standalone
+   * `public/sequence/index.html` Gantt export page, which is untouched here and stays a latent
+   * inconsistency worth its own item) the rail and the editor pane get a horizontal SLIVER
+   * each instead of the full screen.
+   *
+   * The fix is the pattern Apple Notes / Bear / Notion / Craft all use: the page list is the
+   * ROOT view, full width; opening a page PUSHES the editor over it, full width, with a way
+   * back. `mobileShowList` is the one flag that decides which of the two is on screen while
+   * `narrow` is true — desktop ignores it entirely (both panes always render), so nothing here
+   * can touch the byte-identical desktop layout.
+   *
+   * ⛔ IT STARTS `false` ON PURPOSE. This module already resumes straight into a page on every
+   * load (`firstPageId`, above) — that IS this module's "restore"/"deep link" — so opening Notes
+   * on a phone must land in the editor directly, per the owner's spec, with Back going to the
+   * list. Nothing has to special-case "was this a restore?": the normal boot behaviour already
+   * puts a page id in `activePageId`, and the default here just stops the list from shadowing it. */
+  const [mobileShowList, setMobileShowList] = useState(false);
+  /** The one way back to the list — closes a bin "peek" read if one is open, same as its own
+   *  Close button always did, and (new) returns the list to view on a phone. */
+  const backToList = useCallback(() => { setPeek(null); setMobileShowList(true); }, []);
 
   /* Scope FIRST, then read: the store keys by the signed-in user's id (or `local`), so two
    * accounts on one machine never read each other's notes. A scope change re-reads. */
@@ -773,6 +802,7 @@ export default function Notes({
     persistTree(r.tree);
     setActivePageId(r.pageId);
     setQuery("");
+    setMobileShowList(false);   // NEW-1: a new page opens straight into the editor, phone included
   }, [projectId, persistTree, treeNow]);
 
   /** A page UNDER another page — the whole point of the collapse, and reachable by direct
@@ -780,7 +810,7 @@ export default function Notes({
   const handleAddSubpage = useCallback((parentId) => {
     const r = addPage(treeNow(), { parentId });
     persistTree(r.tree);
-    if (r.pageId) setActivePageId(r.pageId);
+    if (r.pageId) { setActivePageId(r.pageId); setMobileShowList(false); }
   }, [persistTree, treeNow]);
 
   /** Re-file a TOP-LEVEL page into a project, or out of every project (B1374, B1420). */
@@ -844,6 +874,7 @@ export default function Notes({
       title: entry.title || "Untitled",
       pages: reading.length ? reading : [],
     });
+    setMobileShowList(false);   // NEW-1: reading a binned note is a drill-in too
   }, []);
 
   /** Clear every empty note in one action — sixteen of his twenty-one rows. */
@@ -975,6 +1006,7 @@ export default function Notes({
     if ((target.projectId ?? null) !== (projectId ?? null)) onNavigate?.({ projectId: target.projectId ?? null, cross: false });
     setActivePageId(target.pageId);
     setQuery("");
+    setMobileShowList(false);
   }, [projectId, onNavigate]);
 
   /* ⛔ AUTO-ADOPTION: A BODY WITH NO NODE IS GIVEN ONE, ON SIGHT (NEW-1).
@@ -1122,6 +1154,16 @@ export default function Notes({
 
   const scopeLabel = notesScopeLabel();
 
+  /* ⛔ TWO PANES, NOT EACH OTHER'S NEGATION (NEW-1). On desktop BOTH are always visible — the
+   * two-pane layout — and only below the breakpoint does exactly one show at a time. Writing
+   * `showDetail` as `!showList` looks right and is wrong: at `narrow === false` it would hide
+   * the editor outright, because `!narrow` alone (true on desktop) can't tell two "always
+   * show" clauses apart from each other. Each gets its own condition instead — caught by
+   * force-disabling `narrow` and rebuilding rather than by re-reading the JSX; see NEW-4's
+   * mutation note in ui-audit/verify-phone-layout.mjs. */
+  const showList = !narrow || mobileShowList || !(activePage || peek);
+  const showDetail = !narrow || (!mobileShowList && !!(activePage || peek));
+
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0, background: "var(--surface-page)" }}>
       <AppHeader
@@ -1177,7 +1219,14 @@ export default function Notes({
       )}
 
       <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
+        {/* ⛔ PHONE DRILL-IN (NEW-1) — the rail is hidden with `display:none`, never unmounted,
+            while the detail pane is showing. Hiding rather than unmounting keeps NotesTree's
+            own state (which branches are expanded, the Pages/Tasks/Bin tab) exactly as the
+            user left it when Back brings it into view again. Desktop is untouched: `!narrow`
+            makes this always `flex`, byte-identical to before this item. */}
+        <div style={{ display: showList ? "flex" : "none", flex: narrow ? "1 1 auto" : "0 0 auto", minWidth: 0, minHeight: 0 }}>
         <NotesTree
+          narrow={narrow}
           tree={tree}
           projectId={projectId}
           projects={projects}
@@ -1189,10 +1238,10 @@ export default function Notes({
           query={query}
           results={results}
           onQueryChange={setQuery}
-          onSelectPage={(id) => { setActivePageId(id); setQuery(""); setHighlight(""); }}
+          onSelectPage={(id) => { setActivePageId(id); setQuery(""); setHighlight(""); setMobileShowList(false); }}
           /* Opening a SEARCH HIT carries the phrase into the page, so the editor can mark
              where it actually is — the thing search used to abandon you without. */
-          onSelectHit={(id) => { setActivePageId(id); setHighlight(query); setQuery(""); }}
+          onSelectHit={(id) => { setActivePageId(id); setHighlight(query); setQuery(""); setMobileShowList(false); }}
           onAddPage={handleAddPage}
           onAddSubpage={handleAddSubpage}
           onSetPageProject={handleSetPageProject}
@@ -1218,11 +1267,38 @@ export default function Notes({
              new plumbing in the editor. */
           taskGroups={taskGroups}
           onToggleTask={handleToggleTask}
-          onOpenTask={(t) => { setActivePageId(t.pageId); setHighlight(t.text); setQuery(""); }}
+          onOpenTask={(t) => { setActivePageId(t.pageId); setHighlight(t.text); setQuery(""); setMobileShowList(false); }}
           onViewChange={(v) => { setTasksOpen(v === "tasks"); setBinOpen(v === "bin"); }}
         />
+        </div>
 
-        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <div style={{
+          flex: 1, minWidth: 0, display: showDetail ? "flex" : "none",
+          flexDirection: "column", minHeight: 0,
+        }}>
+          {/* ⛔ THE WAY BACK TO THE LIST (NEW-1), phone-only. `backToList` is the same function
+              whether a page or a bin "peek" is open, so there is exactly one way out rather
+              than two similar-looking ones. 44px tall (WCAG 2.5.5) and clear of the home
+              indicator via the safe-area inset. */}
+          {narrow ? (
+            <div style={{
+              flex: "none", display: "flex", alignItems: "center",
+              padding: "4px 6px", paddingTop: "max(4px, env(safe-area-inset-top))",
+              borderBottom: "1px solid var(--border-default)", background: "var(--surface-raised)",
+            }}>
+              <button
+                type="button"
+                data-testid="notes-mobile-back"
+                onClick={backToList}
+                aria-label="Back to the notes list"
+                style={{
+                  minWidth: 44, minHeight: 44, display: "inline-flex", alignItems: "center", gap: 4,
+                  border: "none", background: "transparent", color: "var(--accent-notes-text)",
+                  font: "inherit", fontSize: 15, fontWeight: 650, cursor: "pointer", padding: "0 10px 0 4px",
+                }}
+              >‹ Notes</button>
+            </div>
+          ) : null}
           {/* ⛔ READING A BINNED NOTE, WITHOUT RESTORING IT (NEW-3). Its own editor instance,
               keyed on the page so it mounts fresh, `readOnly` so no transaction can be
               generated at all — and a bar that says plainly what you are looking at, because a
@@ -1248,6 +1324,7 @@ export default function Notes({
                     flex: "0 0 auto", border: "1px solid var(--accent-notes)", borderRadius: RADIUS.pill,
                     background: "var(--accent-notes)", color: "var(--on-accent-notes)", font: "inherit",
                     fontSize: 11.5, fontWeight: 700, padding: "2px 12px", cursor: "pointer",
+                    minHeight: narrow ? 44 : undefined,
                   }}
                 >Restore it</button>
                 <button
@@ -1258,6 +1335,7 @@ export default function Notes({
                     flex: "0 0 auto", border: "1px solid var(--border-default)", borderRadius: RADIUS.pill,
                     background: "transparent", color: "var(--text-tertiary)", font: "inherit",
                     fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
+                    minHeight: narrow ? 44 : undefined,
                   }}
                 >Close</button>
               </div>
@@ -1279,6 +1357,7 @@ export default function Notes({
                         readOnly
                         status="saved"
                         scopeLabel={scopeLabel}
+                        narrow={narrow}
                       />
                     </Suspense>
                   </div>
@@ -1321,6 +1400,7 @@ export default function Notes({
                 onSaved={handleSaved}
                 onExportMarkdown={handleExportPage}
                 onPrintNotice={setExportNote}
+                narrow={narrow}
               />
             </Suspense>
           ) : (
@@ -1360,6 +1440,7 @@ export default function Notes({
               // search hits do — landing on the note without being shown where the words
               // are is what made search feel unfinished before B1291's find bar.
               setHighlight(hit.where === "body" ? quickQuery : "");
+              setMobileShowList(false);
             }}
           />
         </Suspense>

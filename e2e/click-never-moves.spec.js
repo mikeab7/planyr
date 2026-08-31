@@ -34,7 +34,8 @@ const canvas = (p) => p.getByTestId("planner-canvas");
 
 async function startBlank(page) {
   await page.goto("/");
-  await page.getByRole("button", { name: /Start blank/i }).click();
+  await page.getByTestId("map-start-blank-menu-btn").click();
+  await page.getByTestId("map-start-blank-menu-item").click();
   await expect(canvas(page)).toBeVisible();
   // FOREGROUND-OR-VOID: a background tab suspends rAF, so every geometry reading below would
   // describe a view the app had already left. Refuse to measure one.

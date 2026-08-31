@@ -45,7 +45,10 @@ const check = (ok, label, detail = "") => { (ok ? notes : fails).push(`${ok ? "â
 
 await page.goto(BASE, { waitUntil: "load" });
 await page.waitForTimeout(1200);
-try { await page.getByRole("button", { name: /Start blank/i }).click({ timeout: 8000 }); } catch (_) {}
+try {
+  await page.getByTestId("map-start-blank-menu-btn").click({ timeout: 8000 });
+  await page.getByTestId("map-start-blank-menu-item").click({ timeout: 8000 });
+} catch (_) {}
 await page.waitForSelector('[data-testid="planner-canvas"]', { timeout: 20000 });
 await page.waitForTimeout(600);
 const canvas = page.locator('[data-testid="planner-canvas"]');

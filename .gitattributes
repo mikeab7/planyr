@@ -1,0 +1,15 @@
+# MAP.md and BACKLOG_OPEN.md are fully GENERATED (scripts/build-map.mjs / build-backlog-index.mjs)
+# and are regenerated on nearly every PR, so they conflict by construction on a busy day (NEW-1).
+# `merge=planyr-ledger` hands any 3-way merge of these two paths to a custom driver that
+# reconciles both sides and regenerates, instead of asking a human to.
+#
+# The driver's actual COMMAND lives in local git config (`merge.planyr-ledger.driver`), not here —
+# `.gitattributes` is committed, but merge.<name>.driver is a per-clone setting git refuses to
+# store in the repo. It is wired automatically by `npm install` / `npm run hooks:install`
+# (scripts/install-hooks.mjs — the same self-installer that arms the mint-gate pre-push hook).
+#
+# If a conflict on either file ever shows ordinary git markers instead of resolving itself, the
+# local config is missing: run `npm run hooks:install` (or `node scripts/install-hooks.mjs --check`
+# to confirm) and see scripts/merge-driver-ledgers.mjs.
+MAP.md merge=planyr-ledger
+BACKLOG_OPEN.md merge=planyr-ledger

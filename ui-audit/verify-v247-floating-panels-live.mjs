@@ -22,7 +22,9 @@ const log = (ok, msg) => { console.log((ok ? "✓ " : "✗ ") + msg); if (!ok) f
 
 const openBlankPlanner = async (page) => {
   await page.goto(BASE + "#/site-planner", { waitUntil: "load" });
-  await page.getByText("Start blank", { exact: false }).first().click();
+  // NEW-1 — "Start blank" is the secondary option behind the "Select parcels" split button's caret.
+  await page.getByTestId("map-start-blank-menu-btn").first().click();
+  await page.getByTestId("map-start-blank-menu-item").first().click();
   await page.locator('button[title="Analysis"]').first().waitFor({ state: "visible", timeout: 20000 });
 };
 

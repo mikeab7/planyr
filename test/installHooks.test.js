@@ -22,7 +22,10 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync, existsSync } 
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { hooksPlan, installHooks, samePath, HOOKS_DIR, REQUIRED_HOOKS } from "../scripts/install-hooks.mjs";
+import {
+  hooksPlan, installHooks, samePath, HOOKS_DIR, REQUIRED_HOOKS,
+  mergeDriverPlan, installMergeDriver, MERGE_DRIVER_NAME, MERGE_DRIVER_COMMAND,
+} from "../scripts/install-hooks.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CLI = join(REPO, "scripts", "install-hooks.mjs");
@@ -131,7 +134,9 @@ describe("(c) it NEVER silently no-ops — every un-armed outcome is loud", () =
     const dir = scratchRepo();
     git(dir, "config", "--local", "core.hooksPath", "my-own-hooks");
     const { err, out } = cli(dir);
-    expect(out).toBe("");
+    // The hook concern reports nothing on stdout when it fails — the merge-driver concern is
+    // independent and (with a fresh repo otherwise) succeeds, so it is the only thing on stdout.
+    expect(out).not.toMatch(/Mint-gate hook/);
     expect(err).toMatch(/⚠ MINT-GATE HOOK NOT ARMED \(foreign\)/);
     expect(err).toMatch(/will NOT be stopped locally/);
     expect(err).toMatch(/required CI "Mint gate" step still blocks the merge/); // honest about the scope of the loss
@@ -181,6 +186,7 @@ describe("(c) it NEVER silently no-ops — every un-armed outcome is loud", () =
   it("`--check` passes once the clone is armed", () => {
     const dir = scratchRepo();
     installHooks(dir);
+    installMergeDriver(dir); // both concerns must be armed for `--check` to pass
     expect(cli(dir, "--check").code).toBe(0);
   });
 });
@@ -237,5 +243,67 @@ describe("hooksPlan — the pure decision, pinned branch by branch", () => {
   it("samePath resolves relative and absolute spellings of the same directory", () => {
     expect(samePath("/repo", ".githooks", "/repo/.githooks")).toBe(true);
     expect(samePath("/repo", "other", ".githooks")).toBe(false);
+  });
+});
+
+/* The ledger merge driver half (NEW-1) — same five requirements, same shape as hooksPlan/
+ * installHooks above. The full end-to-end proof that a real `git merge` actually invokes this
+ * driver and resolves MAP.md / BACKLOG_OPEN.md lives in test/mergeDriverE2E.test.js; this pins
+ * only the config-wiring decision itself. */
+describe("mergeDriverPlan — the pure decision, pinned branch by branch", () => {
+  it("unset → install", () => expect(mergeDriverPlan({ configured: null }).action).toBe("install"));
+  it("already exactly our command → already, armed", () => {
+    const p = mergeDriverPlan({ configured: MERGE_DRIVER_COMMAND });
+    expect(p.action).toBe("already");
+    expect(p.armed).toBe(true);
+  });
+  it("someone else's driver command → foreign, and NOT armed", () => {
+    const p = mergeDriverPlan({ configured: "true" }); // git's own trivial "ours" driver, say
+    expect(p.action).toBe("foreign");
+    expect(p.armed).toBe(false);
+    expect(p.message).toMatch(/LEFT UNTOUCHED/);
+  });
+});
+
+describe("installMergeDriver — real git config, same guarantees as installHooks", () => {
+  it("a fresh repo gets merge.planyr-ledger.driver wired", () => {
+    const dir = scratchRepo("merge-fresh");
+    const res = installMergeDriver(dir);
+    expect(res.ok).toBe(true);
+    expect(res.armed).toBe(true);
+    const back = execFileSync("git", ["config", "--get", `merge.${MERGE_DRIVER_NAME}.driver`], { cwd: dir, encoding: "utf8" }).trim();
+    expect(back).toBe(MERGE_DRIVER_COMMAND);
+  });
+
+  it("idempotent — a second run is a no-op", () => {
+    const dir = scratchRepo("merge-idempotent");
+    installMergeDriver(dir);
+    expect(installMergeDriver(dir).action).toBe("already");
+  });
+
+  it("a deliberate foreign driver is reported, never clobbered — only --force replaces it", () => {
+    const dir = scratchRepo("merge-foreign");
+    git(dir, "config", "--local", `merge.${MERGE_DRIVER_NAME}.driver`, "true");
+    const res = installMergeDriver(dir);
+    expect(res.action).toBe("foreign");
+    expect(res.armed).toBe(false);
+    expect(execFileSync("git", ["config", "--get", `merge.${MERGE_DRIVER_NAME}.driver`], { cwd: dir, encoding: "utf8" }).trim()).toBe("true");
+    expect(installMergeDriver(dir, { force: true }).armed).toBe(true);
+  });
+
+  it("`--check` never writes and reports NOT ARMED on an un-armed clone", () => {
+    const dir = scratchRepo("merge-check");
+    expect(installMergeDriver(dir, { write: false }).action).toBe("would-install");
+    // --check inspects, it does not install — the key stays entirely unset (a nonzero `git config
+    // --get`), not merely empty.
+    const r = spawnSync("git", ["config", "--get", `merge.${MERGE_DRIVER_NAME}.driver`], { cwd: dir, encoding: "utf8" });
+    expect(r.status).not.toBe(0);
+  });
+
+  it("the CLI arms BOTH concerns on a fresh clone and reports both", () => {
+    const { code, out } = cli(scratchRepo("merge-cli"));
+    expect(code).toBe(0);
+    expect(out).toMatch(/Mint-gate hook: wired core\.hooksPath/);
+    expect(out).toMatch(/Ledger merge driver: wired merge\.planyr-ledger\.driver/);
   });
 });

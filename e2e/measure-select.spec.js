@@ -27,7 +27,8 @@ function measureCount(page) {
 
 async function startBlank(page) {
   await page.goto("/");
-  await page.getByRole("button", { name: /Start blank/i }).click();
+  await page.getByTestId("map-start-blank-menu-btn").click();
+  await page.getByTestId("map-start-blank-menu-item").click();
   await expect(canvas(page)).toBeVisible();
 }
 

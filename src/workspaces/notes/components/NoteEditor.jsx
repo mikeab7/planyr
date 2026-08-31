@@ -952,6 +952,11 @@ export default function NoteEditor({
   pageId, title, onTitleChange, onTitleCommit, onStatus, onExportMarkdown, onPrintNotice, onSaved,
   scopeLabel, status, updatedAt, searchTerm = "", onClearSearch, notebookPageIds, trail = [],
   projectLabel = null, readOnly = false, readOnlyNote = "",
+  /* PHONE DRILL-IN (NEW-1/NEW-2, B849632/B849633) — read by the toolbar (one compact
+   * scrollable row instead of wrapping into a column) and by the sheet padding below (clear
+   * of the iOS home indicator). The caller (Notes.jsx) is the single source for this — see
+   * its own note on reusing B113/B485's `useNarrow()` rather than a third breakpoint. */
+  narrow = false,
 }) {
   /* Initial content read ONCE, here. Not in an effect — see fix (2) in the header. */
   const [initialDoc] = useState(() => readPage(pageId) || EMPTY_DOC);
@@ -2223,6 +2228,7 @@ export default function NoteEditor({
         onAttach={() => { pendingPick.current = "attachment"; pickRef.current?.click(); }}
         onHistory={() => setHistoryOpen((v) => !v)}
         historyOpen={historyOpen}
+        narrow={narrow}
       />
       <FindBar term={find.term} count={find.count} index={find.index} onStep={stepFind} onClear={onClearSearch} />
 
@@ -2355,7 +2361,13 @@ export default function NoteEditor({
              sentence is not a page. So the sheet may shrink but never below a readable column,
              and the two panels shrink before it does; if even that is not enough the ROW
              scrolls, which is honest, rather than the document quietly disappearing. */
-          style={{ maxWidth: 820, width: "100%", flex: "1 1 auto", minWidth: 260, margin: 0, padding: "22px 20px 96px 13px", zoom }}
+          style={{
+            maxWidth: 820, width: "100%", flex: "1 1 auto", minWidth: 260, margin: 0, zoom,
+            /* The bottom pad already clears the browser's own chrome (96px); on a phone it
+               must also clear the home indicator when this runs standalone (NEW-1, B849632) —
+               `env()` reads 0 in an ordinary browser tab, so this changes nothing there. */
+            padding: narrow ? "16px 14px max(96px, calc(96px + env(safe-area-inset-bottom))) 14px" : "22px 20px 96px 13px",
+          }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
             <input
@@ -2380,7 +2392,14 @@ export default function NoteEditor({
               style={{
                 flex: 1, minWidth: 0, border: "none", borderBottom: "1px solid transparent",
                 background: "transparent", color: "var(--text-primary)",
-                font: "inherit", fontSize: 27, fontWeight: 700, letterSpacing: "-0.01em",
+                /* ⛔ THE TITLE MUST NOT CLIP (NEW-1, B849632). Reported off the owner's own
+                   phone screenshot; measured, the cause wasn't the title's own size — it was
+                   this whole pane being squeezed to ~40% of a 390px screen by the desktop
+                   two-pane layout, which the drill-in above already fixes (the pane is now the
+                   full width). This is the one further step: 27px is comfortably wide on a
+                   desktop pane but a smaller size gives a real name more room to actually show
+                   on a 390px-class phone before the input's own internal scroll takes over. */
+                font: "inherit", fontSize: narrow ? 21 : 27, fontWeight: 700, letterSpacing: "-0.01em",
                 padding: "2px 0", outline: "none",
               }}
               onFocus={(e) => { e.target.style.borderBottomColor = "var(--accent-notes)"; }}
