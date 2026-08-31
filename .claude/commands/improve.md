@@ -105,6 +105,8 @@ A PR does NOT merge itself here. Two recurring stalls, both self-fixable — dri
   `Nudge CI` commits. So: push an empty nudge (`git commit --allow-empty -m "Nudge CI" && git push`),
   then **verify a run actually appeared** (`actions_list list_workflow_runs` for the branch /
   `pull_request_read get_status`). If none after the next poll, **nudge again** (≥2). Never assume.
+  (**Why this happens is unverified** — relayed from `CLAUDE.md`'s 2026-06-22 note, not independently
+  re-measured; the nudge-and-verify routine above is what to actually do regardless of the cause.)
 - **Merge conflicts with fast-moving `main`** (`mergeable_state: dirty`/`behind`) — usually in
   `BACKLOG*.md`/`VERIFICATION*.md`. Resolve: `git fetch origin main && git merge origin/main`, keep
   BOTH sides' done-entries (renumber only if you minted a NEW B#/V# that main also took), re-run the
