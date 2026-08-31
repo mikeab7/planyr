@@ -10,6 +10,7 @@
  * reads correctly on whatever surface it sits on, in either theme. (B317/B342)
  */
 import { useTheme } from "./ThemeProvider.jsx";
+import { RADIUS } from "../ui/radius.js";
 
 const THEME_OPTS = [
   { id: "light",  label: "Light",  hint: "Always light",        icon: <><circle cx="8" cy="8" r="3.1" /><path d="M8 1.6v1.5M8 12.9v1.5M1.6 8h1.5M12.9 8h1.5M3.5 3.5l1 1M11.5 11.5l1 1M12.5 3.5l-1 1M4.5 11.5l-1 1" /></> },
@@ -36,7 +37,7 @@ export default function ThemePicker({ heading = true }) {
             data-theme-opt={o.id}
             style={{
               display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left",
-              padding: "8px 9px", borderRadius: 7, border: "none", cursor: "pointer",
+              padding: "8px 9px", borderRadius: RADIUS.sm, border: "none", cursor: "pointer", // NEW-3 — was a raw 7 (off-scale); a row nested inside its RADIUS.lg menu panel is RADIUS.sm per the nesting rule
               fontFamily: "inherit", background: on ? "var(--hover-ghost)" : "transparent", color: "var(--text-primary)",
             }}
             onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = "var(--hover-ghost)"; }}
