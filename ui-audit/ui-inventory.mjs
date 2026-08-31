@@ -70,8 +70,21 @@ const seed = (theme) => `(() => { try {
   localStorage.setItem('planyr.theme', ${JSON.stringify(theme)});
 } catch (e) {} })();`;
 
-const fit = async (p) => { await p.locator('[title="Zoom to fit"]').first().click({ timeout: 5000 }).catch(() => {}); };
-const clickIf = async (p, sel) => p.locator(sel).first().click({ timeout: 4000 }).catch(() => {});
+// ⛔ CONFIRMED BUG (found auditing this script's own claims, not during the original session):
+// seeding `planarfit:currentSite:v1` does NOT open the plan into the canvas — the app still
+// boots onto the MapFinder site-picker screen (the same screen ui-audit/audit-chrome.mjs's own
+// "site-planner"/"site-planner-left-panel" scenarios silently land on; `[title="Zoom to fit"]`
+// and `button:has-text("File")` do not exist there at all, so every prep() that assumed the
+// canvas was already open was measuring the picker screen instead and finding 0 elements).
+// Clicking the seeded site's own list row is what actually opens the plan.
+const openPlan = async (p) => { await p.getByText("UI Inventory Demo").first().click({ timeout: 5000 }).catch(() => {}); await p.waitForTimeout(600); };
+const fit = async (p) => { await p.locator('[title="Zoom to fit"]:visible').first().click({ timeout: 5000 }).catch(() => {}); };
+// `.first()` picks the first DOM match, which the "both hosts stay mounted" pattern (see openPlan
+// above) can make the HIDDEN copy — Playwright's actionability check then times out waiting for
+// it to become visible and clickIf silently swallows that, so the menu never opens (confirmed:
+// `[aria-label="Settings"]` matches 2 elements once a plan is open, one hidden). `:visible` scopes
+// to only the rendered match.
+const clickIf = async (p, sel) => p.locator(`${sel}:visible`).first().click({ timeout: 4000 }).catch(() => {});
 const escAll = async (p) => { await p.keyboard.press("Escape").catch(() => {}); };
 
 // ------------------------------------------------------------------------------------------
@@ -83,38 +96,47 @@ const escAll = async (p) => { await p.keyboard.press("Escape").catch(() => {}); 
 const SURFACES = [
   {
     name: "App header", hash: "#/site",
-    prep: async (p) => { await fit(p); },
+    prep: async (p) => { await openPlan(p); await fit(p); },
     scope: "header",
   },
   {
     name: "Main menu — File ▾", hash: "#/site",
-    prep: async (p) => { await fit(p); await clickIf(p, 'button:has-text("File")'); await p.waitForTimeout(150); },
+    prep: async (p) => { await openPlan(p); await fit(p); await clickIf(p, 'button:has-text("File")'); await p.waitForTimeout(150); },
     menuOnly: true,
   },
   {
     name: "Main menu — Undo history", hash: "#/site",
-    prep: async (p) => { await fit(p); await clickIf(p, '[aria-label="Recent actions to undo"]'); await p.waitForTimeout(150); },
+    prep: async (p) => { await openPlan(p); await fit(p); await clickIf(p, '[aria-label="Recent actions to undo"]'); await p.waitForTimeout(150); },
     menuOnly: true,
   },
   {
     name: "Main menu — Settings gear", hash: "#/site",
-    prep: async (p) => { await fit(p); await clickIf(p, '[aria-label="Settings"]'); await p.waitForTimeout(150); },
+    prep: async (p) => { await openPlan(p); await fit(p); await clickIf(p, '[aria-label="Settings"]'); await p.waitForTimeout(150); },
     menuOnly: true,
   },
   {
     name: "Main menu — plan menu (▾ next to the plan name)", hash: "#/site",
-    prep: async (p) => { await fit(p); await clickIf(p, '[data-testid="plan-caret"]'); await clickIf(p, '[data-testid="plan-crumb"]'); await p.waitForTimeout(150); },
+    prep: async (p) => { await openPlan(p); await fit(p); await clickIf(p, '[data-testid="plan-caret"]'); await clickIf(p, '[data-testid="plan-crumb"]'); await p.waitForTimeout(150); },
     menuOnly: true,
   },
   {
+    // ⛔ CONFIRMED BUG (found auditing this script's own claims, not during the original
+    // session): `scope` here used to be `.rbtn, [aria-label="Parking presets"] ~ *` — a
+    // selector that matches the BUTTONS THEMSELVES, not a wrapping container. readSurface's
+    // root-resolution picks ONE match and then does `root.querySelectorAll(directSelector)`,
+    // which searches DESCENDANTS only — so `root` ended up being a single `<button class=
+    // "rbtn">`, and a button has no `.rbtn` descendants, so every run measured 0/0. `body` is
+    // the same scope the other body-rooted surfaces already use (Yield/Library/Doc Review);
+    // `directSelector: '.rbtn'` still narrows what gets read. Confirmed live: 25 `.rbtn`
+    // buttons, all with a non-zero rect, once this scope is a real container.
     name: "Tool rail", hash: "#/site",
-    prep: async (p) => { await fit(p); await clickIf(p, '[aria-label="Parking presets"]'); await p.waitForTimeout(150); },
-    scope: '.rbtn, [aria-label="Parking presets"] ~ *',
-    directSelector: '.rbtn',
+    prep: async (p) => { await openPlan(p); await fit(p); await clickIf(p, '[aria-label="Parking presets"]'); await p.waitForTimeout(150); },
+    scope: "body",
+    directSelector: '.rbtn, [aria-label="Parking presets"] ~ *',
   },
   {
     name: "Left rail + panels (Yield)", hash: "#/site",
-    prep: async (p) => { await fit(p); await clickIf(p, 'button[title="Yield"]'); await p.waitForTimeout(200); },
+    prep: async (p) => { await openPlan(p); await fit(p); await clickIf(p, 'button[title="Yield"]'); await p.waitForTimeout(200); },
     scope: 'body',
     exclude: "header, [data-menu-owner]",
   },
@@ -126,9 +148,15 @@ const INTERACTIVE_SEL = 'button, [role="button"], [role="menuitem"], input, sele
 
 async function readSurface(page, surface) {
   return page.evaluate(({ interactiveSel, menuOnly, scope, exclude, directSelector }) => {
+    // ⛔ Both the MapFinder and the open-plan canvas keep their own AppHeader mounted at once
+    // (SitePlannerApp hides the inactive one with display:none rather than unmounting it, to
+    // keep the map alive) — so `document.querySelector("header")` can silently grab the HIDDEN
+    // one, whose every child reports a zero-size rect and gets skipped below, reading as "0
+    // matched elements" for a surface that plainly has content on screen. Pick the first match
+    // that actually has a non-zero rendered box.
     const root = menuOnly
       ? [...document.querySelectorAll('[data-menu-owner]')]
-      : [document.querySelector(scope) || document.body];
+      : [[...document.querySelectorAll(scope)].find((el) => el.getBoundingClientRect().width > 0) || document.body];
     const seen = new Set();
     const out = [];
     for (const r of root) {
