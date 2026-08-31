@@ -22,6 +22,12 @@
  */
 import { Component, useEffect, useRef, useState } from "react";
 import { RADIUS } from "./radius.js";
+// NEW-2 (B915536) — a LITERAL duplicate of designTokens.js's FONT_SIZE.control, not an import:
+// this file is in the shared ENTRY chunk (AppHeader.jsx imports it directly), and importing
+// designTokens.js for the sake of one small object measurably ate the route budget —
+// bundle.notesRouteJsBytes went from 0.5 KB to 0.2 KB of headroom. Same reasoning as
+// controls.jsx's own RADIUS/FONT/PAD literal-duplicate note. Keep in sync by hand.
+const CHROME_FONT_CONTROL = 12; // design-exempt: literal duplicate of FONT_SIZE.control — see the comment above
 
 // state → presentation. Pure + exported so the truth-table is unit-locked: a future
 // edit can't silently let a failed save read the same as "all good" (cloudSyncBadge.test.js).
@@ -123,6 +129,8 @@ function Badge({ state, onRetry, detail }) {
           // quiet chrome at a glance — the rest carry no border.
           border: v.loud ? "1px solid var(--danger)" : "1px solid transparent",
           padding: 0, animation: v.pulse ? "pf-pulse 1.1s ease-in-out infinite" : "none",
+          // NEW-2 (B915536) — inert (only CloudGlyph, an icon, renders inside); on-scale anyway.
+          fontSize: CHROME_FONT_CONTROL,
         }}
       >
         <CloudGlyph variant={v.variant} />

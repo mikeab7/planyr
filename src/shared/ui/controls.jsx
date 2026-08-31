@@ -31,7 +31,13 @@ import { useState } from "react";
  * reported is scope that block did not ask for. If you change a number here, change it there. */
 export const RADIUS = { control: 8, pill: 999, panel: 12 };
 export const PAD = { sm: "5px 10px", md: "7px 12px", lg: "9px 14px" };
-export const FONT = { sm: 11.5, md: 12.5 };
+// B915536's NEW-1 (2026-08-31) reduced FONT_SIZE to 5 named roles; this pair now tracks
+// FONT_SIZE.label (compact/secondary controls: ToggleChip, Button size="sm") and
+// FONT_SIZE.control (standard controls: Button default/lg, MenuItem) — a real, deliberate
+// 1.5px gap rather than the old 1px one, so "compact" reads as genuinely smaller, not a rounding
+// difference. Kept as a literal duplicate for the same reason RADIUS above is: see that block's
+// header.
+export const FONT = { sm: 10.5, md: 12 };
 const REST_SHADOW = "0 1px 2px rgba(0,0,0,0.05)"; // neutral, token-independent — kills the stale colored ember shadows
 
 /* Button — variant primary | ghost | danger; size sm | md | lg. `active` renders a ghost as

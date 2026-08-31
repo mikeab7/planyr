@@ -18,8 +18,16 @@ import { useEffect, useState } from "react";
 import ThemePicker from "../theme/ThemePicker.jsx";
 import { readSmoothZoom, writeSmoothZoom, subscribeSmoothZoom } from "../prefs/smoothZoom.js";
 
+// NEW-2 (B915536) — LITERAL duplicates of designTokens.js's FONT_SIZE steps, not an import: this
+// file is in the shared ENTRY chunk (AppHeader.jsx's signed-out gear renders it), and importing
+// designTokens.js for the sake of a couple of values measurably ate the route budget —
+// bundle.notesRouteJsBytes went from 0.5 KB to 0.2 KB of headroom. Same reasoning as controls.jsx's
+// own RADIUS/FONT/PAD literal-duplicate note. Keep in sync by hand.
+const FONT_LABEL = 10.5; // design-exempt: literal duplicate of FONT_SIZE.label — see the comment above
+const FONT_CONTROL = 12; // design-exempt: literal duplicate of FONT_SIZE.control — see the comment above
+
 const heading = {
-  fontSize: 10.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase",
+  fontSize: FONT_LABEL, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase",
   color: "var(--text-tertiary)", padding: "0 0 6px",
 };
 
@@ -42,11 +50,12 @@ export default function InterfaceSettings() {
           type="checkbox"
           checked={!!smooth}
           onChange={(e) => setSmooth(writeSmoothZoom(e.target.checked))}
-          style={{ marginTop: 2, flex: "none" }}
+          // NEW-2 (B915536) — inert (a checkbox renders no text glyph), on-scale anyway.
+          style={{ marginTop: 2, flex: "none", fontSize: FONT_CONTROL }}
         />
         <span style={{ minWidth: 0 }}>
-          <span style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)" }}>Smooth zoom</span>
-          <span style={{ display: "block", fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.4 }}>
+          <span style={{ display: "block", fontSize: FONT_CONTROL, fontWeight: 600, color: "var(--text-primary)" }}>Smooth zoom</span>
+          <span style={{ display: "block", fontSize: FONT_LABEL, color: "var(--text-secondary)", lineHeight: 1.4 }}>
             Scales the drawing while the wheel turns, then redraws it sharp when you stop.
           </span>
         </span>

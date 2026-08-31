@@ -36,7 +36,7 @@ describe("design-drift-audit — pure scan rules", () => {
   });
 
   it("flags an off-scale fontSize but not one that matches a FONT_SIZE value", () => {
-    const { violations } = scanFile("src/fixture.jsx", `const a = { fontSize: 13.5 };\nconst b = { fontSize: 12.5 };\n`);
+    const { violations } = scanFile("src/fixture.jsx", `const a = { fontSize: 13.5 };\nconst b = { fontSize: 12 };\n`);
     expect(violations).toHaveLength(1);
     expect(violations[0].kind).toBe("fontSize");
   });

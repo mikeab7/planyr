@@ -13,12 +13,13 @@ describe("designTokens — the values are the audited modal values, not invented
     expect(CONTROL_H).toEqual({ sm: 22, md: 26, lg: 30 });
   });
 
-  it("FONT_SIZE covers the button font-size ladder, ascending", () => {
+  it("FONT_SIZE is the reduced 5-role scale (B915536's NEW-1), ascending", () => {
     const keys = Object.keys(FONT_SIZE);
     const values = Object.values(FONT_SIZE);
-    expect(values).toEqual([10, 10.5, 11, 11.5, 12, 12.5, 13, 14]);
+    expect(keys).toEqual(["micro", "label", "control", "emphasis", "display"]);
+    expect(values).toEqual([10, 10.5, 12, 13, 14]);
     expect(values.every((v, i) => i === 0 || v > values[i - 1])).toBe(true);
-    expect(keys.length).toBe(8);
+    expect(keys.length).toBe(5);
   });
 
   it("SPACE is a conventional ascending scale rooted at the app's own common padding numbers", () => {
