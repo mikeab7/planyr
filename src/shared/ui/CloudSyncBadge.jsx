@@ -110,7 +110,14 @@ function Badge({ state, onRetry, detail }) {
         aria-haspopup={canPop ? "dialog" : undefined}
         aria-expanded={canPop ? open : undefined}
         style={{
-          display: "grid", placeItems: "center", width: 26, height: 24, borderRadius: RADIUS.sm, flex: "none",
+          // B958466 (sibling-radius audit) — was RADIUS.sm. This badge sits directly in
+          // AppHeader's row-1 right zone (its own wrapper div carries no radius/background of
+          // its own — a plain positioning shell, not a rounded container), the same standalone-
+          // control category as FullscreenButton/SettingsMenu right beside it, so it takes
+          // RADIUS.md per radius.js's own rule ("sm" is for a control nested inside another
+          // rounded surface, which this isn't) — found by ui-inventory.mjs's siblingMismatches()
+          // flagging it flush against Full screen's RADIUS.md with no visual boundary between.
+          display: "grid", placeItems: "center", width: 26, height: 24, borderRadius: RADIUS.md, flex: "none",
           background: "transparent", color: v.color, cursor: canPop ? "pointer" : "default",
           // The loud failure state gets a hairline ring in its own color so it pops out of the
           // quiet chrome at a glance — the rest carry no border.
@@ -172,7 +179,7 @@ export class CloudBadgeBoundary extends Component {
         <span role="img" aria-label="Cloud sync: status unavailable"
           data-testid="cloud-sync-badge" data-sync-state="crashed"
           title="Sync status couldn't be read: your latest work is saved on this device."
-          style={{ display: "grid", placeItems: "center", width: 26, height: 24, borderRadius: RADIUS.sm,
+          style={{ display: "grid", placeItems: "center", width: 26, height: 24, borderRadius: RADIUS.md,
             color: "var(--danger)", border: "1px solid var(--danger)" }}>
           <CloudGlyph variant="cloud-slash" />
         </span>

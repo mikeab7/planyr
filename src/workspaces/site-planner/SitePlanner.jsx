@@ -17192,10 +17192,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const railHint = (active) => ({ marginLeft: "auto", flex: "none", fontSize: 10.5, fontWeight: 500, letterSpacing: "0.02em", color: active ? PAL.onAccent : PAL.chromeMuted });
   // ghost buttons on the DARK top bar
   const dGhost = { padding: "6px 11px", fontSize: 12.5, borderRadius: 8, border: "1px solid transparent", background: "transparent", color: PAL.chromeInk, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, whiteSpace: "nowrap" };
-  const dIcon = { ...dGhost, width: 30, height: 30, padding: 0, display: "grid", placeItems: "center", fontSize: 15 };
+  const dIcon = { ...dGhost, width: 30, height: CONTROL_H.md, padding: 0, display: "grid", placeItems: "center", fontSize: 15 };
   /* ⛔ B755808 — THE ONE CHROME SYSTEM for the top-right planner toolbar (File / History / View).
      Every control on this bar — text-labelled or icon-only — shares ONE height (`TB_H`, = dIcon's
-     existing 30px) and ONE corner radius (`TB_R`, = dGhost's existing 8px, already the app-wide
+     height) and ONE corner radius (`TB_R`, = dGhost's existing 8px, already the app-wide
      ghost-button default). Before this, File carried its own hand-tuned 3px radius and a ~29px
      implicit height while Undo/Redo/Zoom-to-fit carried dGhost's inherited 8px/30px — three controls,
      two silently different systems (owner: "this is horrendous UI"). A NEW control on this bar must
@@ -17203,8 +17203,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      Related rules enforced the same way here: a container may NEVER carry the disabled treatment —
      only the glyph dims (`.tb-icon-btn:disabled`, fill="currentColor" + opacity) — so a related group
      of icon buttons is never wrapped in a filled tray; group them with `vSep`, a plain 1px divider,
-     exactly like every other pair of groups on this bar. See `test/toolbarChromeSystem.test.js`. */
-  const TB_H = dIcon.height; // 30 — shared height for every top-right toolbar control
+     exactly like every other pair of groups on this bar. See `test/toolbarChromeSystem.test.js`.
+     ⛔ B958465 (toolbar-row overhang audit) — was a bare 30, i.e. `CONTROL_H.lg`. B885137
+     (2026-08-30/31) shrunk THIS ROW's own height 44px→26px (`CONTROL_H.md`) but never touched this
+     constant, so every control on the bar — File, Undo, Redo, both carets, Zoom-to-fit — rendered
+     4px taller than the row that holds them and MEASURABLY overflowed it (centered by the row's own
+     `alignItems:center`, ~1.5-2.5px above and below its box on a live build). `CONTROL_H.md` is the
+     row's real height, not a fifth number — this is a token-scale drift fix, not a redesign, and it
+     also brings these controls to the exact same 26px height as row 1's own icon buttons
+     (`FullscreenButton`/`SettingsMenu` in AppHeader.jsx are already 30×26). */
+  const TB_H = dIcon.height; // CONTROL_H.md (26) — shared height for every top-right toolbar control, matching the row it renders in
   const TB_R = dGhost.borderRadius; // 8 — shared corner radius for every top-right toolbar control
   // NEW-2 (B648353) — the small history-dropdown caret riding beside Undo/Redo, split-button style:
   // same height as its main button, half the width, flat inner corner where the two meet (so the
@@ -17306,7 +17314,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // which is exactly the kind of drift VERIFY's "no font size exceeds --font-display" check exists
   // to catch. Every row still sets its own size; this is the floor a future row inherits.
   const menuPanel = { background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, boxShadow: "0 16px 44px rgba(28,25,20,0.22), 0 3px 10px rgba(28,25,20,0.1)", padding: "4px 0", fontSize: FONT_SIZE.md };
-  const vSep = <span style={{ width: 1, height: 18, background: "rgba(255,255,255,0.12)", margin: "0 6px" }} />;
+  // ⛔ B958468 (divider-style audit) — was `background: "rgba(255,255,255,0.12)"` at `height:18`: a
+  // raw, non-token white-at-12%-opacity literal that assumes a permanently-dark row, exactly the
+  // KEY DECISIONS violation this app's chrome rule forbids ("chrome themes WITH the app"). On the
+  // light theme's near-white row-2 background that line is functionally invisible — measured:
+  // white-on-white, not merely low-contrast. Now the SAME divider row 1 already uses (AppHeader.jsx's
+  // wordmark/breadcrumb + account-chip dividers): the theme-aware `--chrome-divider` token via
+  // `PAL.chromeLine`, at `height:14` inside this row's own 26px box (a 6px inset top and bottom,
+  // docs/DESIGN.md's now-documented divider rule) rather than an invented 18px.
+  const vSep = <span style={{ width: 1, height: 14, background: PAL.chromeLine, margin: "0 6px" }} />;
   // Switch tools and reset any in-progress drafting; also closes the Parcel menu.
   const selectTool = (id) => {
     // NEW-1 (B900416) — the Pan tool is retired from the rail (Select already pans on empty

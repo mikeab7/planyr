@@ -181,22 +181,46 @@ export const RedoIcon = ({ size = 15 }) => (
   </svg>
 );
 
-// Zoom to fit — four arrows pointing OUTWARD to the corners. Deliberately not a magnifier glass
-// (which reads as "zoom", not "fit", and would be confused with the separate zoom in/out
-// controls). MDI "arrow-expand-all".
+// ⛔ B958464/B958469 (toolbar icon-weight audit) — ZOOM-TO-FIT AND LAYERS ARE NOW STROKE ICONS, NOT
+// FILLED MDI GLYPHS. B727504 (2026-08-25) drew both as filled MDI paths and B648352 (2026-08-26)
+// moved Undo/Redo OUT of that filled family into this app's own stroke idiom for exactly these two
+// — its own header comment named them "a known, reported inconsistency... not fixed here: fixing
+// all four at once was more than the owner asked for, and a toolbar-wide icon-family pass is real,
+// separate work." That pass is this one. The owner's report ("two different fullscreen controls
+// visible at the same time") was Zoom-to-fit's heavy filled weight reading as a bolder, different
+// glyph family from the thin-stroke Full screen button beside it in the row above — not actually a
+// second fullscreen control (confirmed live: the two buttons have different `title`/`aria-label`,
+// different actions, and Zoom-to-fit is disabled when there's nothing to fit). Matching the WEIGHT
+// closes that visual confusion; the SHAPES stay deliberately different (arrows-with-arrowheads vs
+// Full screen's plain corner brackets) so the two actions remain visually distinct once both are
+// legible at the same weight.
+
+// Zoom to fit — four arrows pointing OUTWARD to the corners, each with its own arrowhead (unlike
+// Full screen's plain L-shaped corner brackets — a different shape, not just a different weight,
+// so the two stay distinguishable now that both are thin strokes). Deliberately not a magnifier
+// glass (which reads as "zoom", not "fit", and would be confused with the separate zoom in/out
+// controls).
 export const ZoomFitIcon = ({ size = 20 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
     style={{ flex: "none", display: "block" }}>
-    <path d="M9.5,13.09L10.91,14.5L6.41,19H10V21H3V14H5V17.59L9.5,13.09M10.91,9.5L9.5,10.91L5,6.41V10H3V3H10V5H6.41L10.91,9.5M14.5,13.09L19,17.59V14H21V21H14V19H17.59L13.09,14.5L14.5,13.09M13.09,9.5L17.59,5H14V3H21V10H19V6.41L14.5,10.91L13.09,9.5Z" />
+    <path d="M14 10 20 4M20 4v5M20 4h-5" />
+    <path d="M10 10 4 4M4 4v5M4 4h5" />
+    <path d="M14 14 20 20M20 20v-5M20 20h-5" />
+    <path d="M10 14 4 20M4 20v-5M4 20h5" />
   </svg>
 );
 
 // Layers — two offset sheets seen in perspective, the mark Google Maps / Photoshop / Figma all
 // use, so it needs no learning. Replaces the "❖" glyph, which some fonts render as a blank tofu
-// box — indistinguishable from a shape tool, a stop button, or a crop. MDI "layers".
+// box — indistinguishable from a shape tool, a stop button, or a crop. Stroke idiom (was a filled
+// MDI "layers" glyph): a diamond outline (the top sheet) over an open chevron (the bottom sheet
+// peeking out from behind it) — same read as the filled original, drawn as strokes.
 export const LayersIcon = ({ size = 20 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
     style={{ flex: "none", display: "block" }}>
-    <path d="M12,16L19.36,10.27L21,9L12,2L3,9L4.63,10.27M12,18.54L4.62,12.81L3,14.07L12,21.07L21,14.07L19.37,12.8L12,18.54Z" />
+    <path d="M12 3 20 9 12 15 4 9Z" />
+    <path d="M4 13 12 19 20 13" />
   </svg>
 );
