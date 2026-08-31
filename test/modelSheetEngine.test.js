@@ -1,11 +1,21 @@
 /* Model workspace — wiring the sheet to the shared formula engine (src/shared/formula/
  * formula.js), imported directly — these tests exercise the REAL engine, never a stub, so a
- * change to either side of the wire shows up here. */
+ * change to either side of the wire shows up here.
+ *
+ * ⛔ B891184-FOLLOWUP (2026-08-31): rewritten for the per-cell architecture. Formulas belong to
+ * CELLS now, addressed either by A1 (grid[row][col], from the concurrent session's A1-support
+ * commit 0d2d1b3e) or by the pre-existing same-row `[Column]` structured references — a formula
+ * can use either or both. The old per-COLUMN tests (setColumnFormula, planFormulaColumns
+ * ordering across whole columns) are gone; see sheetEngine.js's header for the live-production
+ * finding ("=SUM(A1:A2)" converting a whole column) that drove this.
+ */
 import { describe, it, expect } from "vitest";
 import {
-  createSheet, setRaw, setColumnFormula, renameColumn, setNumberFormat, colAt,
+  createSheet, setRaw, commitCellText, renameColumn, setNumberFormat, colAt,
 } from "../src/workspaces/model/lib/sheetModel.js";
-import { evaluateSheet, displayFor, formulaBarText, literalTypedValue } from "../src/workspaces/model/lib/sheetEngine.js";
+import {
+  evaluateSheet, displayFor, displayKindFor, formulaBarText, literalTypedValue, kindOf, cellAddressText,
+} from "../src/workspaces/model/lib/sheetEngine.js";
 
 function sheetWithColumns(names) {
   let s = createSheet();
@@ -24,168 +34,228 @@ describe("literalTypedValue", () => {
     expect(literalTypedValue("Acme LLC")).toBe("Acme LLC");
     expect(literalTypedValue("TRUE")).toBe(true);
   });
-});
-
-describe("evaluateSheet — same-row column references", () => {
-  it("a formula column reads another column's value in the SAME row", () => {
-    let s = sheetWithColumns(["Revenue", "Cost", "NOI"]);
-    s = setRaw(s, 0, 0, "1000");
-    s = setRaw(s, 0, 1, "400");
-    s = setColumnFormula(s, 2, "=[Revenue]-[Cost]");
-    const r = evaluateSheet(s);
-    const noiCol = colAt(s, 2);
-    expect(r.get(noiCol.id, 0)).toEqual({ ok: true, value: 600 });
+  // ⛔ B891184-FOLLOWUP: date recognition was entirely missing — "1/15/2027" round-tripped as
+  // the plain STRING "1/15/2027", so date arithmetic on a typed date silently failed.
+  it("reads a typed date as a DATE typed value (k:'date'), not a string", () => {
+    const v = literalTypedValue("1/15/2027");
+    expect(v).toMatchObject({ k: "date" });
+    expect(typeof v.s).toBe("number");
   });
-
-  it("evaluates independently per row — each row sees its OWN other-column values", () => {
-    let s = sheetWithColumns(["Revenue", "Cost", "NOI"]);
-    s = setRaw(s, 0, 0, "1000"); s = setRaw(s, 0, 1, "400");
-    s = setRaw(s, 1, 0, "500"); s = setRaw(s, 1, 1, "100");
-    s = setColumnFormula(s, 2, "=[Revenue]-[Cost]");
-    const r = evaluateSheet(s);
-    const noiCol = colAt(s, 2);
-    expect(r.get(noiCol.id, 0).value).toBe(600);
-    expect(r.get(noiCol.id, 1).value).toBe(400);
+  it("an ISO date string is also recognized", () => {
+    expect(literalTypedValue("2027-01-15")).toMatchObject({ k: "date" });
   });
 });
 
-describe("evaluateSheet — whole-column aggregates and formula-of-formula ordering", () => {
-  it("SUM over a plain column totals every row, immediately", () => {
+describe("kindOf — the display-alignment vocabulary (item 5)", () => {
+  it("classifies every value shape a cell can hold", () => {
+    expect(kindOf(100)).toBe("number");
+    expect(kindOf(literalTypedValue("1/15/2027"))).toBe("date");
+    expect(kindOf(true)).toBe("bool");
+    expect(kindOf("hello")).toBe("text");
+    expect(kindOf(literalTypedValue(""))).toBe("blank");
+  });
+});
+
+describe("cellAddressText", () => {
+  it("names the A1 address a (rowIndex, colIndex) pair sits at", () => {
+    expect(cellAddressText(0, 0)).toBe("A1");
+    expect(cellAddressText(4, 2)).toBe("C5");
+    expect(cellAddressText(0, 26)).toBe("AA1");
+  });
+});
+
+describe("evaluateSheet — per-CELL formulas, the core fix", () => {
+  it("a formula in ONE cell does not spread to the rest of its column", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "500");  // A1
+    s = setRaw(s, 1, 0, "300");  // A2 — a plain, independent value
+    s = commitCellText(s, 0, 2, "=A1"); // C1
+    const r = evaluateSheet(s);
+    expect(r.get(0, 2)).toEqual({ ok: true, value: 500 });
+    // A2 is untouched — it was never converted into anything by C1's formula.
+    expect(displayFor(s, r, 1, 0)).toBe("300");
+  });
+
+  it("SUM(A1:A2) over real A1-addressed cells totals correctly — NOT a silent 0", () => {
+    // ⛔ THE EXACT LIVE-PRODUCTION REGRESSION: with no A1 grid wired, this used to read every
+    // referenced cell as blank and SUM of blanks is a genuine (and therefore misleadingly
+    // confident) 0. Wiring ctx.grid from the sheet's own cells is the fix.
+    let s = createSheet();
+    s = setRaw(s, 0, 1, "100"); // B1
+    s = setRaw(s, 1, 1, "200"); // B2
+    s = commitCellText(s, 0, 2, "=SUM(B1:B2)"); // C1
+    const r = evaluateSheet(s);
+    expect(r.get(0, 2)).toEqual({ ok: true, value: 300 });
+  });
+
+  it("a bare A1 reference to a REAL, populated cell resolves to its value, never blank", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "500"); // A1
+    s = commitCellText(s, 3, 0, "=A1"); // A4
+    const r = evaluateSheet(s);
+    expect(r.get(3, 0)).toEqual({ ok: true, value: 500 });
+  });
+
+  it("a reference to a genuinely never-written cell reads as blank — correct, not a defect", () => {
+    let s = createSheet();
+    s = commitCellText(s, 0, 0, "=A5"); // A5 was never written
+    const r = evaluateSheet(s);
+    const res = r.get(0, 0);
+    expect(res.ok).toBe(true);
+    expect(res.value).toEqual({ k: "blank" });
+  });
+
+  it("mixes [Column] same-row refs AND A1 refs in the SAME formula", () => {
+    let s = sheetWithColumns(["Revenue", "Cost"]);
+    s = setRaw(s, 0, 0, "1000"); // Revenue, row 0 -> A1
+    s = setRaw(s, 0, 1, "400");  // Cost, row 0 -> B1
+    s = commitCellText(s, 0, 2, "=[Revenue]-B1"); // C1: same-row [Revenue] minus A1-addressed B1(=Cost)
+    const r = evaluateSheet(s);
+    expect(r.get(0, 2)).toEqual({ ok: true, value: 600 });
+  });
+
+  it("evaluates independently per row — a DIFFERENT formula in each row of the same column", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "10"); s = setRaw(s, 1, 0, "20"); s = setRaw(s, 2, 0, "30");
+    s = commitCellText(s, 0, 1, "=A1*2");
+    s = commitCellText(s, 1, 1, "=A2*3");
+    s = commitCellText(s, 2, 1, "=A3+100");
+    const r = evaluateSheet(s);
+    expect(r.get(0, 1).value).toBe(20);
+    expect(r.get(1, 1).value).toBe(60);
+    expect(r.get(2, 1).value).toBe(130);
+  });
+
+  it("a formula can read ANOTHER formula cell — resolved in one dependency-ordered pass", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "100");        // A1
+    s = commitCellText(s, 0, 1, "=A1*2");   // B1 = 200
+    s = commitCellText(s, 0, 2, "=B1+1");   // C1 depends on B1
+    const r = evaluateSheet(s);
+    expect(r.get(0, 2)).toEqual({ ok: true, value: 201 });
+  });
+
+  it("a cell-level circular reference surfaces as #CIRC!, never an infinite loop", () => {
+    let s = createSheet();
+    s = commitCellText(s, 0, 0, "=B1+1"); // A1 depends on B1
+    s = commitCellText(s, 0, 1, "=A1+1"); // B1 depends on A1
+    const r = evaluateSheet(s);
+    expect(r.get(0, 0)).toEqual({ ok: false, error: "#CIRC!", detail: "circular reference between cells" });
+    expect(r.get(0, 1).error).toBe("#CIRC!");
+  });
+
+  it("a cell referencing ITSELF is a one-node cycle", () => {
+    let s = createSheet();
+    s = commitCellText(s, 0, 0, "=A1+1");
+    const r = evaluateSheet(s);
+    expect(r.get(0, 0).error).toBe("#CIRC!");
+  });
+
+  it("a [Column] aggregate can read a column where SOME rows are formulas and some are literal", () => {
     let s = sheetWithColumns(["Rent"]);
-    s = setRaw(s, 0, 0, "1000"); s = setRaw(s, 1, 0, "1500"); s = setRaw(s, 2, 0, "800");
-    s = setColumnFormula(s, 1, "=SUM([Rent])");
+    s = setRaw(s, 0, 0, "1000");
+    s = commitCellText(s, 1, 0, "=500+500"); // row 1 is itself a formula, resolves to 1000
+    s = setRaw(s, 2, 0, "800");
+    s = commitCellText(s, 0, 1, "=SUM([Rent])");
     const r = evaluateSheet(s);
-    // A whole-column aggregate must answer identically on EVERY row (it doesn't vary by row).
-    expect(r.get(colAt(s, 1).id, 0).value).toBe(3300);
-    expect(r.get(colAt(s, 1).id, 2).value).toBe(3300);
+    expect(r.get(0, 1).value).toBe(2800);
+  });
+});
+
+describe("evaluateSheet — unresolvable references error loudly, never silently (item 2/10)", () => {
+  it("an out-of-bounds / malformed token is #NAME?, not a generic #ERROR! and never a blank/0", () => {
+    let s = createSheet();
+    s = commitCellText(s, 0, 0, "=ZQXW123"); // beyond column XFD — not a valid address
+    const r = evaluateSheet(s);
+    expect(r.get(0, 0)).toMatchObject({ ok: false, error: "#NAME?" });
   });
 
-  it("a formula column can aggregate ANOTHER formula column — resolved in one pass because", () => {
-    // columns are processed in dependency order (planFormulaColumns), so by the time "Total NOI"
-    // runs, every row's "NOI" is already computed — no multi-pass / staleness question.
-    let s = sheetWithColumns(["Revenue", "Cost", "NOI", "Total NOI"]);
-    s = setRaw(s, 0, 0, "1000"); s = setRaw(s, 0, 1, "400");
-    s = setRaw(s, 1, 0, "500"); s = setRaw(s, 1, 1, "100");
-    s = setColumnFormula(s, 2, "=[Revenue]-[Cost]");
-    s = setColumnFormula(s, 3, "=SUM([NOI])");
-    const r = evaluateSheet(s);
-    expect(r.get(colAt(s, 3).id, 0).value).toBe(1000); // 600 + 400
-  });
-
-  it("a circular formula-column reference surfaces as #CIRC!, never an infinite loop", () => {
-    let s = sheetWithColumns(["A", "B"]);
-    s = setColumnFormula(s, 0, "=[B]+1");
-    s = setColumnFormula(s, 1, "=[A]+1");
-    const r = evaluateSheet(s);
-    expect(r.get(colAt(s, 0).id, 0)).toEqual({ ok: false, error: "#CIRC!", detail: "circular reference between formula columns" });
-  });
-
-  it("an unknown column reference is #REF!, not a thrown exception", () => {
+  it("an unknown [Column] name is #REF!, not a thrown exception or a blank", () => {
     let s = sheetWithColumns(["A"]);
-    s = setColumnFormula(s, 0, "=[NoSuchColumn]");
+    s = commitCellText(s, 0, 0, "=[NoSuchColumn]");
     const r = evaluateSheet(s);
-    expect(r.get(colAt(s, 0).id, 0).ok).toBe(false);
-    expect(r.get(colAt(s, 0).id, 0).error).toBe("#REF!");
+    expect(r.get(0, 0)).toMatchObject({ ok: false, error: "#REF!" });
   });
 
   it("a genuinely unparseable formula is reported, not thrown", () => {
-    let s = sheetWithColumns(["A"]);
-    s = setColumnFormula(s, 0, "=1+");
+    let s = createSheet();
+    s = commitCellText(s, 0, 0, "=1+");
     expect(() => evaluateSheet(s)).not.toThrow();
     const r = evaluateSheet(s);
-    expect(r.get(colAt(s, 0).id, 0).ok).toBe(false);
+    expect(r.get(0, 0).ok).toBe(false);
   });
 
   it("a row's #DIV/0! propagates through SUM instead of being silently skipped", () => {
-    let s = sheetWithColumns(["Rate", "PerRate"]);
-    s = setRaw(s, 0, 0, "0");
-    s = setColumnFormula(s, 1, "=1/[Rate]");
-    let r = evaluateSheet(s);
-    expect(r.get(colAt(s, 1).id, 0).error).toBe("#DIV/0!");
-
-    s = sheetWithColumns(["Rate", "PerRate", "Total"]);
+    let s = createSheet();
     s = setRaw(s, 0, 0, "0"); s = setRaw(s, 1, 0, "2");
-    s = setColumnFormula(s, 1, "=1/[Rate]");
-    s = setColumnFormula(s, 2, "=SUM([PerRate])");
-    r = evaluateSheet(s);
-    expect(r.get(colAt(s, 2).id, 0).ok).toBe(false); // the whole total is an error, not a smaller sum
+    s = commitCellText(s, 0, 1, "=1/A1");
+    s = commitCellText(s, 1, 1, "=1/A2");
+    s = commitCellText(s, 2, 1, "=SUM(B1:B2)");
+    const r = evaluateSheet(s);
+    expect(r.get(0, 1).error).toBe("#DIV/0!");
+    expect(r.get(2, 1).ok).toBe(false); // the total is an error, not a smaller sum
   });
 });
 
-describe("evaluateSheet — a formula column leaves a genuinely empty row blank", () => {
-  it("does not compute a confident 0 across hundreds of untouched padding rows", () => {
-    let s = sheetWithColumns(["Revenue", "Cost", "NOI"]);
-    s = setRaw(s, 0, 0, "1000"); s = setRaw(s, 0, 1, "400");
-    s = setColumnFormula(s, 2, "=[Revenue]-[Cost]");
-    const r = evaluateSheet(s);
-    const noiCol = colAt(s, 2);
-    expect(r.get(noiCol.id, 0)).toEqual({ ok: true, value: 600 }); // real data → real answer
-    expect(r.get(noiCol.id, 5)).toEqual({ ok: true, value: { k: "blank" } }); // no data → blank, not 0
-  });
-
-  it("a formula with NO column reference (a constant) is never suppressed — nothing to be blank about", () => {
-    let s = sheetWithColumns(["A"]);
-    s = setColumnFormula(s, 0, "=1+1");
-    const r = evaluateSheet(s);
-    expect(r.get(colAt(s, 0).id, 40)).toEqual({ ok: true, value: 2 });
-  });
-
-  it("MUTATION CHECK — the blank-suppression must never mask a genuine #CIRC!", () => {
-    // Both columns here are formula columns with no plain data at all, so every reference is
-    // "blank" by the naive reading — a check ordered wrong would report this as blank instead
-    // of the circular reference it actually is.
-    let s = sheetWithColumns(["A", "B"]);
-    s = setColumnFormula(s, 0, "=[B]+1");
-    s = setColumnFormula(s, 1, "=[A]+1");
-    const r = evaluateSheet(s);
-    expect(r.get(colAt(s, 0).id, 0).error).toBe("#CIRC!");
-  });
-});
-
-describe("displayFor — number formats route through the shared formatValue", () => {
-  it("formats a literal cell per its column's number format", () => {
-    let s = sheetWithColumns(["Rent"]);
+describe("displayFor / displayKindFor — per-CELL number format (not per-column)", () => {
+  it("formats a literal cell per ITS OWN number format", () => {
+    let s = createSheet();
     s = setRaw(s, 0, 0, "1234.5");
-    s = setNumberFormat(s, [0], "$#,##0.00");
+    s = setNumberFormat(s, 0, 0, 0, 0, "$#,##0.00");
     const r = evaluateSheet(s);
     expect(displayFor(s, r, 0, 0)).toBe("$1,234.50");
+    expect(displayKindFor(s, r, 0, 0)).toBe("number");
   });
 
-  it("formats a FORMULA cell's computed value per its column's number format", () => {
-    let s = sheetWithColumns(["Revenue", "Cost", "Margin"]);
+  // ⛔ THE PRO-FORMA REGRESSION: formatting ONE cell must not repaint every other value already
+  // sitting above it in the same column.
+  it("formatting one cell leaves a DIFFERENT cell in the same column at General", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "2500000"); // Land cost, row 0
+    s = setRaw(s, 6, 0, "0.0852207"); // Yield, row 6 — SAME column
+    s = setNumberFormat(s, 6, 6, 0, 0, "0.00%");
+    const r = evaluateSheet(s);
+    expect(displayFor(s, r, 0, 0)).toBe("2500000"); // untouched — still General
+    expect(displayFor(s, r, 6, 0)).toBe("8.52%");
+  });
+
+  it("formats a FORMULA cell's computed value per its own number format", () => {
+    let s = sheetWithColumns(["Revenue", "Cost"]);
     s = setRaw(s, 0, 0, "1000"); s = setRaw(s, 0, 1, "750");
-    s = setColumnFormula(s, 2, "=([Revenue]-[Cost])/[Revenue]");
-    s = setNumberFormat(s, [2], "0.0%");
+    s = commitCellText(s, 0, 2, "=([Revenue]-[Cost])/[Revenue]");
+    s = setNumberFormat(s, 0, 0, 2, 2, "0.0%");
     const r = evaluateSheet(s);
     expect(displayFor(s, r, 0, 2)).toBe("25.0%");
   });
 
   it("an errored formula cell displays its error code, not a formatted NaN", () => {
-    let s = sheetWithColumns(["Rate", "Answer"]);
+    let s = createSheet();
     s = setRaw(s, 0, 0, "0");
-    s = setColumnFormula(s, 1, "=1/[Rate]");
-    s = setNumberFormat(s, [1], "$#,##0.00");
+    s = commitCellText(s, 0, 1, "=1/A1");
+    s = setNumberFormat(s, 0, 0, 1, 1, "$#,##0.00");
     const r = evaluateSheet(s);
     expect(displayFor(s, r, 0, 1)).toBe("#DIV/0!");
+    expect(displayKindFor(s, r, 0, 1)).toBe("error");
   });
 
   it("an empty plain cell displays as empty, not '0' or 'General'", () => {
-    const s = sheetWithColumns(["A"]);
+    const s = createSheet();
     const r = evaluateSheet(s);
     expect(displayFor(s, r, 0, 0)).toBe("");
+    expect(displayKindFor(s, r, 0, 0)).toBe("blank");
   });
 });
 
 describe("formulaBarText — the underlying formula, never the displayed value", () => {
-  it("shows the column's formula verbatim, including its leading '='", () => {
-    let s = sheetWithColumns(["Revenue", "Cost", "NOI"]);
-    s = setColumnFormula(s, 2, "=[Revenue]-[Cost]");
-    s = setNumberFormat(s, [2], "$#,##0.00");
+  it("shows a cell's formula verbatim, including its leading '='", () => {
+    let s = sheetWithColumns(["Revenue", "Cost"]);
+    s = commitCellText(s, 0, 2, "=[Revenue]-[Cost]");
+    s = setNumberFormat(s, 0, 0, 2, 2, "$#,##0.00");
     expect(formulaBarText(s, 0, 2)).toBe("=[Revenue]-[Cost]");
   });
 
   it("shows a plain cell's raw typed text", () => {
-    let s = sheetWithColumns(["A"]);
+    let s = createSheet();
     s = setRaw(s, 0, 0, "1,234.50");
     expect(formulaBarText(s, 0, 0)).toBe("1,234.50");
   });

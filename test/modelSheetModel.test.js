@@ -4,22 +4,31 @@
  * no undo frame" guarantee true. A mutator that starts allocating on a no-op is a silent
  * regression an `toEqual` assertion would never catch, which is why these are asserted by
  * identity everywhere it matters.
+ *
+ * ⛔ B891184-FOLLOWUP (2026-08-31): rewritten for the per-cell architecture (formulas AND
+ * number formats are per-cell now, not per-column — see sheetModel.js's own header for the
+ * live-production finding that drove this). setColumnFormula/clearColumnFormula are gone;
+ * setNumberFormat now takes a rectangular range, not a list of column indexes.
  */
 import { describe, it, expect } from "vitest";
 import {
-  createSheet, migrateSheet, setRaw, blankRange, renameColumn, setNumberFormat,
-  setColumnFormula, clearColumnFormula, commitCellText, addColumn, deleteColumn,
-  colAt, cellKey, columnIndexByName,
+  createSheet, migrateSheet, setRaw, commitCellText, blankRange, renameColumn, setNumberFormat,
+  addColumn, deleteColumn, ensureColumnCount, colAt, cellKey, columnIndexByName, formatAt,
+  isFormulaText, usedRangeEnd, padRowCount,
 } from "../src/workspaces/model/lib/sheetModel.js";
 
 describe("createSheet", () => {
-  it("starts with named columns, no cells, and a real rowCount", () => {
+  it("starts with named columns, no cells, no formats, and a real rowCount", () => {
     const s = createSheet();
     expect(s.columns.length).toBeGreaterThan(0);
     expect(s.columns[0].name).toBe("A");
     expect(s.columns[1].name).toBe("B");
     expect(s.cells).toEqual({});
+    expect(s.formats).toEqual({});
     expect(s.rowCount).toBeGreaterThan(0);
+    // No `formula` or `format` field on a column any more — both are per-cell now.
+    expect(s.columns[0]).not.toHaveProperty("formula");
+    expect(s.columns[0]).not.toHaveProperty("format");
   });
 });
 
@@ -35,7 +44,17 @@ describe("cell addressing lives in the data layer", () => {
   });
 });
 
-describe("setRaw — plain-column literal edits", () => {
+describe("isFormulaText", () => {
+  it("a leading '=' (optionally after whitespace) marks formula text", () => {
+    expect(isFormulaText("=1+1")).toBe(true);
+    expect(isFormulaText("  =1+1")).toBe(true);
+    expect(isFormulaText("100")).toBe(false);
+    expect(isFormulaText("")).toBe(false);
+    expect(isFormulaText(null)).toBe(false);
+  });
+});
+
+describe("setRaw / commitCellText — per-cell, formula OR literal, uniformly", () => {
   it("writes a cell and grows rowCount when it types past the end", () => {
     const s = createSheet();
     const past = s.rowCount + 40;
@@ -63,20 +82,43 @@ describe("setRaw — plain-column literal edits", () => {
     expect(Object.prototype.hasOwnProperty.call(cleared.cells, `${colAt(s, 0).id}:0`)).toBe(false);
   });
 
-  it("refuses to write into a FORMULA column", () => {
-    const s = setColumnFormula(createSheet(), 0, "=1+1");
-    const attempted = setRaw(s, 0, 0, "hello");
-    expect(attempted).toBe(s);
+  // ⛔ THE WHOLE POINT OF THIS SESSION'S REWRITE: a formula in ONE cell must never touch its
+  // neighbours. The shipped v1 converted the entire column; this is the regression guard.
+  it("a formula in ONE cell does not touch the cell next to it in the same column", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "100"); // A1
+    s = setRaw(s, 1, 0, "200"); // A2
+    const withFormula = commitCellText(s, 3, 0, "=A1+A2"); // A4, independent
+    expect(withFormula.cells[`${colAt(s, 0).id}:0`]).toBe("100"); // A1 untouched
+    expect(withFormula.cells[`${colAt(s, 0).id}:1`]).toBe("200"); // A2 untouched
+    expect(withFormula.cells[`${colAt(s, 0).id}:3`]).toBe("=A1+A2"); // A4 holds ONLY its own formula
+  });
+
+  it("a formula cell and a literal cell can sit in the SAME column, different rows", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "100");
+    s = setRaw(s, 1, 0, "=A1*2");
+    expect(s.cells[`${colAt(s, 0).id}:0`]).toBe("100");
+    expect(s.cells[`${colAt(s, 0).id}:1`]).toBe("=A1*2");
+  });
+
+  it("commitCellText is the same path as setRaw — no column-wide promotion/demotion logic left", () => {
+    const s = commitCellText(createSheet(), 0, 0, "=[B]*2");
+    expect(s.cells[`${colAt(s, 0).id}:0`]).toBe("=[B]*2");
+    // The cell NEXT TO IT (same column, next row) is untouched and independently editable.
+    const withNeighbor = commitCellText(s, 1, 0, "plain value");
+    expect(withNeighbor.cells[`${colAt(s, 0).id}:0`]).toBe("=[B]*2");
+    expect(withNeighbor.cells[`${colAt(s, 0).id}:1`]).toBe("plain value");
   });
 });
 
 describe("blankRange — Delete over a rectangular selection", () => {
-  it("clears every plain cell in the range and leaves cells outside it alone", () => {
+  it("clears every cell in the range (formula or literal) and leaves cells outside it alone", () => {
     let s = createSheet();
-    s = setRaw(s, 0, 0, "a"); s = setRaw(s, 1, 0, "b"); s = setRaw(s, 0, 1, "c"); s = setRaw(s, 5, 5, "outside");
+    s = setRaw(s, 0, 0, "a"); s = setRaw(s, 1, 0, "=1+1"); s = setRaw(s, 0, 1, "c"); s = setRaw(s, 5, 5, "outside");
     const cleared = blankRange(s, 0, 1, 0, 1);
     expect(cleared.cells[`${colAt(s, 0).id}:0`]).toBeUndefined();
-    expect(cleared.cells[`${colAt(s, 0).id}:1`]).toBeUndefined();
+    expect(cleared.cells[`${colAt(s, 0).id}:1`]).toBeUndefined(); // a formula cell clears too — matches Excel
     expect(cleared.cells[`${colAt(s, 1).id}:0`]).toBeUndefined();
     expect(cleared.cells[`${colAt(s, 5).id}:5`]).toBe("outside");
   });
@@ -86,81 +128,57 @@ describe("blankRange — Delete over a rectangular selection", () => {
     expect(blankRange(s, 0, 5, 0, 5)).toBe(s);
   });
 
-  it("skips FORMULA-column cells — Delete over a computed column changes nothing there", () => {
+  it("a formula cell OUTSIDE the range is left alone, even in the same column", () => {
     let s = createSheet();
-    s = setColumnFormula(s, 0, "=1+1");
-    const cleared = blankRange(s, 0, 5, 0, 0);
-    expect(cleared).toBe(s); // nothing to blank: the formula itself is untouched by Delete
-    expect(colAt(cleared, 0).formula).toBe("=1+1");
+    s = setRaw(s, 0, 0, "=1+1");
+    s = setRaw(s, 5, 0, "keep-me");
+    const cleared = blankRange(s, 0, 0, 0, 0);
+    expect(cleared.cells[`${colAt(s, 0).id}:0`]).toBeUndefined();
+    expect(cleared.cells[`${colAt(s, 0).id}:5`]).toBe("keep-me");
   });
 });
 
-describe("formulas are per-column (setColumnFormula / clearColumnFormula)", () => {
-  it("setting a formula strips any existing literal cells for that column", () => {
+describe("setNumberFormat — per CELL range, not per column", () => {
+  it("applies a format token to every cell in the range, leaving cells outside it alone", () => {
+    const s = setNumberFormat(createSheet(), 0, 1, 0, 0, "$#,##0.00");
+    expect(formatAt(s, 0, 0)).toBe("$#,##0.00");
+    expect(formatAt(s, 1, 0)).toBe("$#,##0.00");
+    expect(formatAt(s, 2, 0)).toBeNull(); // row 2 outside the range
+    expect(formatAt(s, 0, 1)).toBeNull(); // column 1 outside the range
+  });
+
+  // ⛔ THE REGRESSION THIS EXISTS FOR: formatting ONE cell as a percent must never repaint the
+  // dollar amounts sitting above it in the same column — found live building this session's own
+  // verification pro-forma (a "Yield on cost" cell formatted as a percent turned "Land cost"
+  // 2500000 into "250000000.00%" under the old per-column design).
+  it("formatting one cell does not affect a DIFFERENT cell in the same column", () => {
     let s = createSheet();
-    s = setRaw(s, 0, 0, "100");
-    s = setRaw(s, 1, 0, "200");
-    const withFormula = setColumnFormula(s, 0, "=1+1");
-    expect(colAt(withFormula, 0).formula).toBe("=1+1");
-    expect(Object.keys(withFormula.cells).some((k) => k.startsWith(`${colAt(s, 0).id}:`))).toBe(false);
+    s = setRaw(s, 0, 0, "2500000");   // Land cost
+    s = setRaw(s, 6, 0, "0.0852207"); // Yield on cost
+    const formatted = setNumberFormat(s, 6, 6, 0, 0, "0.00%");
+    expect(formatAt(formatted, 0, 0)).toBeNull();      // Land cost's format is untouched
+    expect(formatAt(formatted, 6, 0)).toBe("0.00%");   // only the targeted cell changed
   });
 
-  it("is a no-op (same reference) re-setting the identical formula text", () => {
-    const s = setColumnFormula(createSheet(), 0, "=1+1");
-    expect(setColumnFormula(s, 0, "=1+1")).toBe(s); // MUTATION CHECK
-  });
-
-  it("clearing a column with no formula is a no-op", () => {
-    const s = createSheet();
-    expect(clearColumnFormula(s, 0)).toBe(s);
-  });
-
-  it("clearing a formula column turns it back into an empty plain column", () => {
-    const s = setColumnFormula(createSheet(), 0, "=1+1");
-    const cleared = clearColumnFormula(s, 0);
-    expect(colAt(cleared, 0).formula).toBeNull();
-  });
-});
-
-describe("commitCellText — the one path every cell edit goes through", () => {
-  it("typing '=…' turns the column into a formula column", () => {
-    const s = commitCellText(createSheet(), 0, 0, "=[B]*2");
-    expect(colAt(s, 0).formula).toBe("=[B]*2");
-  });
-
-  it("typing a plain value into a FORMULA column demotes it back to plain data", () => {
-    let s = setColumnFormula(createSheet(), 0, "=1+1");
-    s = commitCellText(s, 2, 0, "42");
-    expect(colAt(s, 0).formula).toBeNull();
-    expect(s.cells[`${colAt(s, 0).id}:2`]).toBe("42");
-  });
-
-  it("a plain edit to an already-plain column behaves exactly like setRaw", () => {
-    const s = commitCellText(createSheet(), 0, 0, "hello");
-    expect(s.cells[`${colAt(s, 0).id}:0`]).toBe("hello");
-  });
-});
-
-describe("setNumberFormat", () => {
-  it("applies a format token to every column index given", () => {
-    const s = setNumberFormat(createSheet(), [0, 1], "$#,##0.00");
-    expect(colAt(s, 0).format).toBe("$#,##0.00");
-    expect(colAt(s, 1).format).toBe("$#,##0.00");
-    expect(colAt(s, 2).format).toBeNull();
-  });
-
-  it("is a no-op (same reference) re-applying the format every touched column already has", () => {
-    const s = setNumberFormat(createSheet(), [0], "0.0%");
-    expect(setNumberFormat(s, [0], "0.0%")).toBe(s); // MUTATION CHECK
+  it("is a no-op (same reference) re-applying the format every touched cell already has", () => {
+    const s = setNumberFormat(createSheet(), 0, 0, 0, 0, "0.0%");
+    expect(setNumberFormat(s, 0, 0, 0, 0, "0.0%")).toBe(s); // MUTATION CHECK
   });
 
   it("null clears back to General and null == null is still a no-op", () => {
     const s = createSheet();
-    expect(setNumberFormat(s, [0], null)).toBe(s);
+    expect(setNumberFormat(s, 0, 0, 0, 0, null)).toBe(s);
+  });
+
+  it("clearing a set format actually removes the stored key (round-trips to null)", () => {
+    let s = setNumberFormat(createSheet(), 0, 0, 0, 0, "0.0%");
+    s = setNumberFormat(s, 0, 0, 0, 0, null);
+    expect(formatAt(s, 0, 0)).toBeNull();
+    expect(Object.keys(s.formats)).toHaveLength(0);
   });
 });
 
-describe("addColumn / deleteColumn", () => {
+describe("addColumn / ensureColumnCount / deleteColumn", () => {
   it("adds a column with a fresh id and a lettered default name", () => {
     const s = createSheet();
     const withCol = addColumn(s);
@@ -168,14 +186,24 @@ describe("addColumn / deleteColumn", () => {
     expect(withCol.columns.at(-1).id).not.toBe(s.columns[0].id);
   });
 
-  it("deletes a column and every cell stored under it, leaving others intact", () => {
+  it("ensureColumnCount grows to at least the given width and is a no-op once wide enough", () => {
+    const s = createSheet();
+    const wide = ensureColumnCount(s, s.columns.length + 3);
+    expect(wide.columns.length).toBe(s.columns.length + 3);
+    expect(ensureColumnCount(wide, wide.columns.length)).toBe(wide); // MUTATION CHECK
+    expect(ensureColumnCount(wide, wide.columns.length - 1)).toBe(wide); // already wide enough
+  });
+
+  it("deletes a column and every cell AND format stored under it, leaving others intact", () => {
     let s = createSheet();
     s = setRaw(s, 0, 0, "keep-col-0");
     s = setRaw(s, 0, 1, "delete-col-1");
+    s = setNumberFormat(s, 0, 0, 1, 1, "0.0%");
     const col1Id = colAt(s, 1).id;
     const next = deleteColumn(s, 1);
     expect(next.columns.length).toBe(s.columns.length - 1);
     expect(Object.keys(next.cells).some((k) => k.startsWith(`${col1Id}:`))).toBe(false);
+    expect(Object.keys(next.formats).some((k) => k.startsWith(`${col1Id}:`))).toBe(false); // TOMBSTONE-DELETES
     expect(next.cells[`${colAt(s, 0).id}:0`]).toBe("keep-col-0");
   });
 
@@ -194,16 +222,65 @@ describe("columnIndexByName", () => {
   });
 });
 
+describe("usedRangeEnd — what Ctrl+End jumps to", () => {
+  it("null on a genuinely empty sheet", () => {
+    expect(usedRangeEnd(createSheet())).toBeNull();
+  });
+
+  it("the max row and max column that actually hold something", () => {
+    let s = createSheet();
+    s = setRaw(s, 2, 0, "x");
+    s = setRaw(s, 5, 3, "y");
+    s = setRaw(s, 1, 7, "z");
+    expect(usedRangeEnd(s)).toEqual({ row: 5, col: 7 });
+  });
+
+  it("ignores a cell that was written then cleared back to empty", () => {
+    let s = createSheet();
+    s = setRaw(s, 9, 2, "gone");
+    s = setRaw(s, 9, 2, "");
+    expect(usedRangeEnd(s)).toBeNull();
+  });
+});
+
+describe("padRowCount", () => {
+  it("never drops below the 200-row floor (item 9 — no artificial ceiling)", () => {
+    expect(padRowCount(createSheet(), 5)).toBeGreaterThanOrEqual(200);
+  });
+
+  it("grows past the floor for a taller viewport", () => {
+    expect(padRowCount(createSheet(), 500)).toBeGreaterThan(200);
+  });
+});
+
 describe("migrateSheet — never guesses at a shape it does not recognize", () => {
-  it("round-trips a sheet this version already produced", () => {
-    const s = setRaw(createSheet(), 0, 0, "x");
+  it("round-trips a sheet this version already produced, formats included", () => {
+    let s = setRaw(createSheet(), 0, 0, "x");
+    s = setNumberFormat(s, 0, 0, 0, 0, "0.0%");
     const round = migrateSheet(JSON.parse(JSON.stringify(s)));
     expect(round.cells).toEqual(s.cells);
+    expect(round.formats).toEqual(s.formats);
   });
 
   it("returns a fresh empty sheet for garbage / unversioned input, never throws", () => {
     expect(() => migrateSheet(null)).not.toThrow();
     expect(() => migrateSheet({ garbage: true })).not.toThrow();
     expect(migrateSheet({ garbage: true }).columns.length).toBeGreaterThan(0);
+  });
+
+  it("drops an OLD column-level `formula`/`format` field cleanly rather than crashing on it", () => {
+    const old = createSheet();
+    old.columns[0].formula = "=1+1"; // shape from the FIRST shipped version
+    old.columns[0].format = "0.0%";
+    const migrated = migrateSheet(JSON.parse(JSON.stringify(old)));
+    expect(migrated.columns[0]).not.toHaveProperty("formula");
+    expect(migrated.columns[0]).not.toHaveProperty("format");
+  });
+
+  it("missing `formats` on an otherwise-valid old blob migrates to an empty object, not a crash", () => {
+    const old = createSheet();
+    delete old.formats;
+    const migrated = migrateSheet(JSON.parse(JSON.stringify(old)));
+    expect(migrated.formats).toEqual({});
   });
 });
