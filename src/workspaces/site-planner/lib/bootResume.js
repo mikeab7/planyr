@@ -132,3 +132,33 @@ export function pickResumeTarget({ routeProjectId, currentId, plansOfGroup, hasS
   }
   return currentId && hasSite(currentId) ? currentId : null;
 }
+
+/* ⛔ B881664 (×2) — the SAME one-shot boot-resume privilege that gates `bootActiveId`'s
+ * SYNCHRONOUS decision must also gate the ASYNC resume `applyUser` runs once a signed-in
+ * cloud pull settles — and it did not, which is why the owner's live re-verify of the first
+ * fix still bounced, and now from EVERY tab rather than only Schedule.
+ *
+ * `bootActiveId()`'s lazy initializer only ever runs at mount, so `mayResumeLastSite` closing
+ * over that render's `resumeAllowed` correctly refused a later, deliberate Dashboard navigation
+ * — but SitePlannerApp's Supabase auth subscription ALSO only ever fires once per mount
+ * (`useEffect(..., [])`), and supabase-js delivers an `INITIAL_SESSION` event the instant it is
+ * subscribed — i.e. on that SAME first mount, signed in or not. When signed in, `applyUser`
+ * awaits `pullCloud` (the ~1–3s the owner's stopwatch caught: bounces landing at 2.1–2.4s) and
+ * THEN calls `pickResumeTarget({ routeProjectId: projectIdRef.current, currentId:
+ * getCurrentSiteId(), ... })` with no privilege check at all — so any mount that happens to be
+ * signed in, on ANY project-less route (Dashboard reached from Schedule, Library, Review, Notes,
+ * or Food — the mount is what matters, not which control was clicked), silently fell back to
+ * `getCurrentSiteId()`'s last-touched-plan pointer and wrote it into the route a couple of
+ * seconds later. This is why the "logo doesn't bounce, the breadcrumb does" reading was a red
+ * herring: LOGO and the "Dashboard" crumb call the identical `onDashboard` handler
+ * (AppHeader.jsx / ProjectBreadcrumb.jsx) — the real variable was whether SitePlannerApp had
+ * already mounted ONCE before in that tab (its one-shot auth subscription having already fired
+ * and settled), not which button was pressed.
+ *
+ * The fix: apply the exact same `resumeAllowed` gate `bootActiveId` already honors. `routeProjectId`
+ * truthy is untouched (opening a real routed project always resumes correctly, signed in or not);
+ * only the "no route project → fall back to the last-touched plan" branch needs the boot privilege. */
+export function resumeTargetAfterSignIn({ routeProjectId, currentId, plansOfGroup, hasSite, resumeAllowed }) {
+  if (!routeProjectId && !resumeAllowed) return null;
+  return pickResumeTarget({ routeProjectId, currentId, plansOfGroup, hasSite });
+}

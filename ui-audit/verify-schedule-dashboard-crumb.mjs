@@ -1,6 +1,11 @@
 /**
  * B866112 — the shared header's Dashboard crumb was DEAD on Schedule.
  * B881664 — it was made to FIRE, but not to ARRIVE: it fired and then bounced back.
+ * B881664 (×2) — RECURRENCE. Owner live-verified the first fix on planyr.io and found the
+ * bounce WIDER than before: not just Schedule, but every tab (Library, Review, Notes), still
+ * landing on a project — and NOT necessarily the one the owner had been routed away from (a
+ * Library-originated click bounced to "Richfield" while the owner was actually in "Goose
+ * Creek" — the most recently TOUCHED plan, not the current one).
  *
  * Owner report (2026-08-30), live on planyr.io: "From SCHEDULE, both the global TASK REPORT
  * route and after navigating in from another module: NOTHING. No navigation, no menu, no
@@ -42,18 +47,57 @@
  * initialProjectId})` compares a later mount's own `projectId` prop against
  * `INITIAL_ROUTE.projectId` — a mismatch alone proves this mount is not the boot render, so a
  * later, deliberate navigation to a project-less route (Dashboard) can never revive a stale
- * plan pointer.
+ * plan pointer. This closed `bootActiveId()`'s SYNCHRONOUS decision — CASES A/B/C below still
+ * cover exactly that mechanism, signed OUT (this sandbox cannot reach a real Supabase session:
+ * `Blocker: auth`), which is the whole reachable surface of the original fix.
+ *
+ * B881664 (×2), ROOT CAUSE OF THE RECURRENCE: a SECOND, independent resume call site,
+ * `SitePlannerApp.jsx`'s `applyUser` (the post-sign-in cloud-pull resume), was never gated by
+ * `resumeAllowed` at all. It fires from a `useEffect(..., [])` — once per MOUNT — and
+ * supabase-js delivers `INITIAL_SESSION` the instant it subscribes, i.e. on that SAME first
+ * mount, signed in or not. When signed in, it awaits `pullCloud` (the owner's stopwatch: 2.1–
+ * 2.4s) and then unconditionally fell back to `getCurrentSiteId()`'s last-touched-plan pointer
+ * whenever the route named no project — regardless of whether this mount had any boot
+ * privilege to do so. This explains every observed detail: it fires once per FIRST mount
+ * (matching "only the first Dashboard visit in a tab bounces" — a later logo/crumb click on an
+ * ALREADY-mounted SitePlannerApp never re-triggers it, which is why "the logo doesn't bounce"
+ * read as a control-identity difference when it was actually a mount-freshness one — the logo
+ * and the "Dashboard" crumb call the IDENTICAL `onDashboard` handler, verified by direct code
+ * reading of AppHeader.jsx / ProjectBreadcrumb.jsx); it fires from EVERY tab (any workspace's
+ * first visit to Site Planner triggers the same one-shot mount); and it resumes the
+ * LAST-TOUCHED plan (`getCurrentSiteId()`), not the one the route had just been cleared from —
+ * matching the Library→Richfield report exactly.
+ *
+ * Fix: `lib/bootResume.js`'s new `resumeTargetAfterSignIn` applies the SAME `resumeAllowed`
+ * gate `bootActiveId` already honors to this second call site. This is a SIGNED-IN, ASYNC
+ * mechanism (`applyUser`'s `if (uid) {...}` branch) that this sandbox structurally cannot
+ * drive — not merely network-blocked but genuinely unreachable, since this sandbox's local
+ * build has no `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` baked in at all, so
+ * `supabaseConfigured()` is false and the entire auth-change subscription never even attaches.
+ * The fix is proven at the pure-function level instead (`test/bootResume.test.js`'s
+ * `resumeTargetAfterSignIn` suite, mutation-proven against the un-gated `pickResumeTarget` the
+ * bug's exact call site used) and remains `Verify: live` for the async leg — see V496864.
+ *
+ * CASES D–G below extend the ORIGINAL (signed-out, synchronous) coverage to every tab that
+ * carries the Dashboard crumb, not just Schedule — Library, Review (doc-review/markup), Notes,
+ * and Food — plus CASE H, the explicit logo-vs-crumb discriminator: both controls call the
+ * literal same `onDashboard` handler (proven by driving the LOGO instead of the crumb through
+ * the exact CASE-C boot-resume shape and getting an identical result), closing out that
+ * investigation even though the real recurrence lived one layer deeper, in code this sandbox
+ * cannot sign in to reach.
  *
  * This harness never touches Supabase: the /sequence/ iframe is replaced with a same-origin
  * stub (same pattern as verify-schedule-switcher-pick.mjs) that speaks the real postMessage
  * contract, so the real shell code (Shell.jsx, route.js, lastRoute.js, bootResume.js,
  * Scheduler.jsx, SitePlannerApp.jsx, ProjectBreadcrumb.jsx) is exercised end to end in a real
- * browser with no cloud write of any kind.
+ * browser with no cloud write of any kind. Library/Review/Notes/Food need no such stub — they
+ * wire `onDashboard` straight from the Shell with no embedded cross-origin app in between.
  *
  * MUTATION PROOF: run once as-is (green), then `git stash` the fix, rebuild, re-run (CASE A
  * must go RED — the hash stays on /schedule instead of moving to "#/" — and CASE C must go RED
  * — the hash bounces to "#/project/<id>/site" a moment after landing on "#/"), then
- * `git stash pop` and rebuild again.
+ * `git stash pop` and rebuild again. (CASES D–H exercise the same SYNCHRONOUS mechanism CASE C
+ * does, so they move together with it under the same stash/rebuild cycle.)
  *
  * Run:  npm run build && npx vite preview --port 4173   (then)   node ui-audit/verify-schedule-dashboard-crumb.mjs
  */
@@ -205,12 +249,120 @@ async function caseBootResumeBounce(browser) {
   await ctx.close();
 }
 
+/* CASE H — the logo-vs-crumb discriminator, driven through the EXACT boot-resume shape CASE C
+ * uses, clicking the LOGO instead of the "Dashboard" crumb text. Both must behave identically
+ * (proving they share one handler, per AppHeader.jsx / ProjectBreadcrumb.jsx) — this closes the
+ * "does the control matter" question directly rather than by code-reading alone. */
+async function clickLogo(page) {
+  const btn = page.locator('button[title="Dashboard: all projects"]').first();
+  await btn.waitFor({ state: "visible", timeout: 6000 });
+  await btn.click({ timeout: 6000 });
+}
+
+async function caseLogoControl(browser) {
+  console.log("\nCASE H — logo-vs-crumb discriminator: same boot-resume repro, click the LOGO instead of the crumb");
+  const ctx = await newCtx(browser, { initialActiveId: "1", seed: bootResumeSeedScript });
+  const page = await ctx.newPage();
+  await assertMeasurable(page, "verify-schedule-dashboard-crumb");
+  await page.goto(BASE, { waitUntil: "load" });
+  await page.waitForTimeout(2600);
+  const booted = await hashOf(page);
+  ok(booted.includes("/schedule") && booted.includes(GID), `boot resumed onto the routed Schedule project (${booted})`);
+
+  await clickLogo(page);
+  await page.waitForTimeout(800);
+  const after = await hashOf(page);
+  ok(after === "#/", `LOGO navigates to the Site Planner map home ("#/") — same handler as the crumb — got "${after}"`);
+  await page.waitForTimeout(4000);
+  const stillAfter = await hashOf(page);
+  ok(stillAfter === "#/", `LOGO click STAYS on the map home 4.8s later, matching the crumb's own CASE C result — got "${stillAfter}"`);
+  await page.screenshot({ path: new URL("./screens/schedule-dashboard-crumb-logo-control.png", import.meta.url).pathname });
+  await ctx.close();
+}
+
+/* CASES D–G — the ORIGINAL B881664 fix (bootActiveId + resumeAllowed) generalized to every
+ * OTHER tab that carries the Dashboard crumb. None of these need the postMessage iframe stub —
+ * Library/Notes/Review/Food wire `onDashboard` straight from the Shell (verified by direct code
+ * reading: `onDashboard={onGoDashboard}` in each). Same boot-resume shape as CASE C: a bare-hash
+ * boot resumes "open where I left off" onto that tab with a routed project, a stale currentSite
+ * pointer is primed, then Dashboard is clicked and must both ARRIVE and STAY. */
+function moduleBootResumeSeedScript(moduleSlug) {
+  return `(() => { try {
+    localStorage.setItem('planarfit:sites:v1', JSON.stringify(${JSON.stringify({ [GID]: site(GID, "Goose Creek") })}));
+    localStorage.setItem('planarfit:currentSite:v1', ${JSON.stringify(GID)});
+    localStorage.setItem('planyr:lastRoute:v1', JSON.stringify({ module: ${JSON.stringify(moduleSlug)}, projectId: ${JSON.stringify(GID)}, cross: false }));
+  } catch (e) {} })();`;
+}
+
+async function newPlainCtx(browser, seed) {
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  await ctx.addInitScript(seed);
+  await ctx.route(/supabase\.co/, (r) => r.abort());
+  return ctx;
+}
+
+async function caseOtherModuleBootResume(browser, { label, moduleSlug, hashModuleFragment }) {
+  console.log(`\n${label} — bare-hash boot resumes onto a project's ${moduleSlug} tab, click Dashboard`);
+  const ctx = await newPlainCtx(browser, moduleBootResumeSeedScript(moduleSlug));
+  const page = await ctx.newPage();
+  await assertMeasurable(page, "verify-schedule-dashboard-crumb");
+  await page.goto(BASE, { waitUntil: "load" });
+  await page.waitForTimeout(1200);
+  const booted = await hashOf(page);
+  ok(booted.includes(hashModuleFragment) && booted.includes(GID), `boot resumed onto the routed ${moduleSlug} project (${booted})`);
+
+  await clickDashboard(page);
+  await page.waitForTimeout(800);
+  const after = await hashOf(page);
+  ok(after === "#/", `Dashboard navigates to the Site Planner map home ("#/") from ${moduleSlug} — got "${after}"`);
+  await page.waitForTimeout(4000);
+  const stillAfter = await hashOf(page);
+  ok(stillAfter === "#/", `Dashboard STAYS on the map home 4.8s later from ${moduleSlug} — no bounce — got "${stillAfter}"`);
+  await page.screenshot({ path: new URL(`./screens/schedule-dashboard-crumb-${moduleSlug}.png`, import.meta.url).pathname });
+  await ctx.close();
+}
+
+/* Food has no project model at all (route.js/lastRoute.js's PROJECTLESS_MODULES) and can never
+ * be a boot-resume target — reached directly instead, mirroring CASE B's global-route shape.
+ * Food's own AppHeader passes no `onSelectProject` (see food/CLAUDE.md — "no projects, no
+ * cross-workspace navigation"), so `ProjectBreadcrumb` (and its "Dashboard" text crumb) never
+ * mounts there at all — the LOGO (`onDashboard={onGoDashboard}`, wired independently of the
+ * breadcrumb in AppHeader.jsx) is the ONLY way back to the dashboard from Food, which makes this
+ * case double as a second, independent logo-path proof alongside CASE H. */
+async function caseFoodToDashboard(browser) {
+  console.log("\nCASE G — Food (project-less workspace, logo-only — no Dashboard text crumb renders here)");
+  const ctx = await newPlainCtx(browser, seedScript);
+  const page = await ctx.newPage();
+  await assertMeasurable(page, "verify-schedule-dashboard-crumb");
+  await page.goto(`${BASE}#/food`, { waitUntil: "load" });
+  await page.waitForTimeout(1200);
+  const before = await hashOf(page);
+  ok(before === "#/food", `starting hash is the Food route (got "${before}")`);
+
+  await clickLogo(page);
+  await page.waitForTimeout(800);
+  const after = await hashOf(page);
+  ok(after === "#/", `Dashboard navigates to the Site Planner map home ("#/") from Food — got "${after}"`);
+  await page.waitForTimeout(4000);
+  const stillAfter = await hashOf(page);
+  ok(stillAfter === "#/", `Dashboard STAYS on the map home 4.8s later from Food — got "${stillAfter}"`);
+  await page.screenshot({ path: new URL("./screens/schedule-dashboard-crumb-food.png", import.meta.url).pathname });
+  await ctx.close();
+}
+
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
 mkdirSync(new URL("./screens/", import.meta.url).pathname, { recursive: true });
 await caseProjectScoped(browser);
 await caseGlobal(browser);
 await caseBootResumeBounce(browser);
+await caseLogoControl(browser);
+await caseOtherModuleBootResume(browser, { label: "CASE D", moduleSlug: "library", hashModuleFragment: "/library" });
+await caseOtherModuleBootResume(browser, { label: "CASE E", moduleSlug: "doc-review", hashModuleFragment: "/markup" });
+await caseOtherModuleBootResume(browser, { label: "CASE F", moduleSlug: "notes", hashModuleFragment: "/notes" });
+await caseFoodToDashboard(browser);
 await browser.close();
 
-console.log("\n" + (fails === 0 ? "✅ PASS — the Dashboard crumb navigates home from Schedule, and stays there, in all three cases" : `❌ FAIL — ${fails} assertion(s)`));
+console.log("\n" + (fails === 0
+  ? "✅ PASS — the Dashboard crumb (and the logo, its identical twin) navigate home and STAY there, from all five tabs (Schedule/Library/Review/Notes/Food)"
+  : `❌ FAIL — ${fails} assertion(s)`));
 process.exit(fails === 0 ? 0 : 1);
