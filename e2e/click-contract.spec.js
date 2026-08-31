@@ -87,9 +87,23 @@ async function draw(page, type) {
   // handle, so the second press of a double-click would grab the handle instead of the shape.
   const MID = X(0.61), NEAR = X(0.50), EDGE = X(0.53);
 
-  if (type === "pond" || type === "building" || type === "paving" || type === "trailer") {
-    const tool = { pond: "Detention Pond", building: "Building", paving: "Paving", trailer: "Trailer Parking" }[type];
+  if (type === "pond" || type === "building" || type === "paving") {
+    const tool = { pond: "Detention Pond", building: "Building", paving: "Paving" }[type];
     await dragRect(page, tool, L, T, R, B);
+    await expect.poll(() => count(page, type)).toBeGreaterThanOrEqual(1);
+    return { cx: MID, cy: Y(0.46) };
+  }
+
+  if (type === "trailer") {
+    // B900416 — Car Parking and Trailer Parking merged into one "Parking" row; Trailer is now a
+    // sub-option under its caret (car remains the row body's default arm).
+    await page.getByRole("button", { name: "Parking type" }).click();
+    await page.getByRole("button", { name: "Trailer parking", exact: true }).click();
+    await page.mouse.move(L, T);
+    await page.mouse.down();
+    await page.mouse.move(L + 60, T + 40, { steps: 5 });
+    await page.mouse.move(R, B, { steps: 8 });
+    await page.mouse.up();
     await expect.poll(() => count(page, type)).toBeGreaterThanOrEqual(1);
     return { cx: MID, cy: Y(0.46) };
   }

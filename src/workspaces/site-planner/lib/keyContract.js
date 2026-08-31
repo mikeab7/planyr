@@ -61,7 +61,6 @@ export const KEY_CONTRACT = Object.freeze([
 
   // ── canvas: tools ─────────────────────────────────────────────────────────────────────────────
   { id: "tool-select", label: "Select tool", keys: ["v", "V"], mod: M.NONE, scope: "canvas", mutates: false },
-  { id: "tool-pan", label: "Pan tool", keys: ["h", "H"], mod: M.NONE, scope: "canvas", mutates: false },
   { id: "tool-marquee", label: "Box-select tool", keys: ["m", "M"], mod: M.NONE, scope: "canvas", mutates: false },
   { id: "toggle-snap", label: "Toggle snap", keys: ["s", "S"], mod: M.NONE, scope: "canvas", mutates: false },
   { id: "tool-callout", label: "Callout tool", keys: ["q", "Q"], mod: M.NONE, scope: "canvas", mutates: false },

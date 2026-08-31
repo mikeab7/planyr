@@ -22,8 +22,11 @@ export const CLICK_CONTRACT = [
   // Site elements (`kind: "el"`)
   { type: "building", label: "Building", family: "el", opens: "inspector", draw: "rect", tool: "Building" },
   { type: "paving", label: "Paving", family: "el", opens: "inspector", draw: "rect", tool: "Paving" },
-  { type: "parking", label: "Car Parking", family: "el", opens: "inspector", draw: "rect", tool: "Car Parking" },
-  { type: "trailer", label: "Trailer Parking", family: "el", opens: "inspector", draw: "rect", tool: "Trailer Parking" },
+  // B900416 — Car Parking and Trailer Parking share one rail row ("Parking"); `tool` names the
+  // row's accessible name, not a per-kind button — click-contract.spec.js arms Trailer via the
+  // row's caret dropdown, since it is not the row body's default sub-choice.
+  { type: "parking", label: "Car Parking", family: "el", opens: "inspector", draw: "rect", tool: "Parking" },
+  { type: "trailer", label: "Trailer Parking", family: "el", opens: "inspector", draw: "rect", tool: "Parking" },
   { type: "pond", label: "Detention Pond", family: "el", opens: "inspector", draw: "rect", tool: "Detention Pond",
     note: "the owner's reported case — B875's plain-click reveal removed; the double-click still scroll-flashes the pond card, as do the map label's double-click, the right-click menu and Enter" },
   { type: "road", label: "Road", family: "el", opens: "inspector", draw: "centerline", tool: "Road" },

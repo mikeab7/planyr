@@ -47,7 +47,10 @@ const clipChildren = () => page.evaluate(() => {
 });
 
 // pan immediately + repeatedly (the "grab and move the screen during load" case)
-await page.keyboard.press("h");
+// B900416 — the rail's dedicated Pan tool is retired; the drag below starts on the seeded
+// building, so hold Space for the whole burst loop (Space-drag pans over anything, matching
+// the old hand tool's "clicks don't select" behaviour) rather than arming a tool.
+await page.keyboard.down("Space");
 const box = await page.locator("svg[role=application]").boundingBox();
 console.log("baseline clip-box children (idle):", await clipChildren());
 let maxChildren = 0, samples = 0, lingered = 0;
@@ -65,6 +68,7 @@ for (let burst = 0; burst < 4; burst++) {
   await page.mouse.up();
   await page.waitForTimeout(120);
 }
+await page.keyboard.up("Space");
 console.log(`samples=${samples}  maxContainers=${maxChildren}  framesWithSnapshot=${lingered} (${((lingered / samples) * 100).toFixed(0)}%)`);
 console.log(lingered === 0 ? "OK — no snapshot ever on top while panning" : lingered <= 2 ? "OK-ish — only a transient 1-frame blip" : "DECOUPLE RISK — snapshot persisted across multiple pan frames");
 await browser.close();

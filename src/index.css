@@ -527,6 +527,12 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }
 /* tool-rail buttons — idle hover; active state styled inline */
 .rbtn:hover:not(:disabled):not(.on) { background: var(--hover-chrome) !important; color: var(--chrome-text) !important; filter: none; }
 .rbtn.on:hover:not(:disabled) { filter: brightness(1.06); }
+/* B900416 — the owner's rail-redesign hover: the icon warms to the accent colour, the trailing
+   shortcut letter / dropdown caret lifts from muted to full ink. Geometry never changes (no lift,
+   no nudge, no size change) — colour only, on the existing background wash above. `--accent` on
+   `--chrome-bg` is the already-audited "accent stroke · chrome" pair (contrast-audit.mjs). */
+.rbtn:hover:not(:disabled):not(.on) .rbtn-icon { color: var(--accent); }
+.rbtn:hover:not(:disabled):not(.on) .rbtn-hint { color: var(--chrome-text) !important; }
 
 /* dropdown menus (floating panels) */
 .menu button:hover:not(:disabled) { background: var(--hover-menu) !important; filter: none; }
