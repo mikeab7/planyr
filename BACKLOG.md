@@ -2473,6 +2473,30 @@ rules — they are UA-default / not-yet-tokenized `fontSize` values, plus one st
 - Origin: filed 2026-07-08 from chat (provisional NEW-4)
 - **Click popup:** street name · classification · ultimate ROW · plan name + adopted date · source link · confidence.
 - DEDUPE-FIRST (net-new data layer). Reuse wholesale: **B571** (Done — road-authority rendered overlay: the exact color-coded vector overlay + legend + click popup + min-zoom gate + screening/vintage-note pattern; different dataset — thoroughfare-plan/future roads vs existing-road ownership) · register the layer into **B370/B369** (the GIS layer registry). B176 (Done — jurisdictions overlay) is the older overlay precedent.
+- **⛔ AMENDMENT 2026-08-31 — A VIEWPORT FILTER ALONE IS NOT ENOUGH, MEASURED against production.** PostgREST silently caps any `select` on `thoroughfare_segments` at **1,000 rows**. Measured live on the real table:
+  ```
+  GET /rest/v1/thoroughfare_segments?select=id,street_name,classification
+  -> HTTP 206, content-range: 0-999/26697, 1000 rows returned
+  ```
+  And — this is the part that will fool someone — an explicit client `limit` does **not** raise it:
+  ```
+  GET /rest/v1/thoroughfare_segments?select=id,geom&limit=2000
+  -> HTTP 206, content-range: 0-999/26697, STILL 1000 rows
+  ```
+  So `.limit(2000)` reads like a fix, changes nothing, and returns a success. supabase-js surfaces only `data`, so a truncated response is indistinguishable from a complete one — a partial road network draws on the map, no error, and WHICH roads are missing is arbitrary.
+  - The obvious answer — "filter to the map viewport" — is necessary but **not sufficient**. Segments intersecting a viewport, measured by `ST_Intersects` against real bounding boxes over Houston:
+    ```
+    downtown ~1.5 km  (parcel zoom)   ->    154 segments   OK, under the cap
+    city slice ~8 km  (street zoom)   ->  5,178 segments   TRUNCATED to 1,000
+    inner loop ~20 km                 -> 13,408 segments   TRUNCATED to 1,000
+    metro ~70 km      (zoomed out)    -> 26,122 segments   TRUNCATED to 1,000
+    ```
+    Only the tightest zoom stays under the cap. At every zoom where a thoroughfare-plan overlay is actually useful, a correctly bbox-filtered query STILL truncates silently.
+  - **What the item must therefore require (design constraint, not an implementation order — decide it when this is built):**
+    - a **zoom gate**, so the layer only draws where the count is sane. Precedent already in this repo: V176 records the road-maintenance-authority overlay as "minZoom-14 gated" for exactly this density reason — reuse that pattern rather than inventing one.
+    - and/or **server-side reduction** — a PostGIS RPC doing the bbox intersect plus `ST_Simplify` / classification filtering, returning far fewer rows than the raw segments. **NOTE, UNTESTED:** whether PostgREST's 1,000-row cap also applies to a set-returning RPC was not verified. Whoever builds this MUST test that before relying on an RPC to escape the cap — do not assume it does.
+    - and/or genuine **pagination**. Precedent to copy: `fetchAllPages()` in `src/workspaces/site-planner/lib/elementApi.js` (added by PR #1235, B845089 amendment / B868960) — it walks `.range()` pages until one returns short, and critically returns `ok:false` on a mid-walk error rather than a partial set reported as complete.
+  - **Whatever is chosen:** the layer must never render a silently-partial network. A truncated read has to be a loud failure or a visible "zoom in to see thoroughfares" state — never a map that looks complete and is not.
 
 ### B724 — Parcel analysis: frontage detection + ROW-dedication estimate `[Site Planner / analysis]` (feature) #thoroughfare #site-planner #yield #gis  *(filed 2026-07-08 from chat, provisional NEW-5; epic B720–B726)*
 `[ ]` For a subject parcel, spatially relate it to `thoroughfare_segments`: detect frontage/adjacency (**buffer-and-intersect** — a narrow band around the parcel and the segments touching it) and detect bisecting segments (a proposed alignment crossing the parcel interior). Compute the dedication exposure and show the math + assumptions (centerline-based estimate, needs survey confirmation).
@@ -2482,6 +2506,10 @@ rules — they are UA-default / not-yet-tokenized `fontSize` values, plus one st
 - **Bisecting-alignment case handled separately** — an interior strip sterilized by a future road.
 - Expose as parcel analysis metrics; assumptions shown inline (screening aid, not a survey).
 - DEDUPE-FIRST (net-new analysis). Build ON **B147** (the Site Analysis multi-parcel constraint surface — add a new "Thoroughfare / ROW" finding category here rather than a parallel panel). Consumes B720 data + the parcel geometry (B629 county parcel cache is the source it relates against). Feeds B725. Distinct from **B95**'s `developableArea()` synthesis (that's platting/zoning/tax authority, not thoroughfare ROW).
+- **⛔ AMENDMENT 2026-08-31 — two notes, both measured against production.**
+  1. **The 1,000-row cap noted on B723's amendment will probably not bite this item** — stated so this isn't over-engineered. B724 queries near ONE parcel, and a ~1.5 km box over downtown Houston returns 154 segments — well clear of the cap. Confirm the real count of whatever query is actually built, but do not import B723's zoom-gating complexity into a parcel-proximity lookup.
+  2. **Sliver segments will corrupt naive frontage math.** In `thoroughfare_segments` today: **697 segments are under 50 ft long, 84 segments are under 10 ft long.** These are real source artifacts — turn stubs, ramp connectors, intersection nubs — not bad data, and they are correctly ingested. But a frontage test that asks "does a thoroughfare segment touch this parcel boundary" will happily match a 6-foot stub and report the parcel as fronting a major thoroughfare, which then drives a 100 ft ROW dedication estimate off a nub. **Frontage needs a minimum shared-length threshold, not a boolean touch test.** Decide and document the threshold when this is built.
+  - **For context, also worth carrying on this item:** `classification='freeway'` deliberately includes Tollway and Frontage per the `houston.js` crosswalk, so a single corridor is represented by mainlanes AND both frontage roads. Any per-parcel "which road do I front" answer must not count that as three separate freeways.
 
 ### B725 — Auto-generated entitlement issues from thoroughfare-plan exposure `[Site Planner / entitlements]` (feature) #thoroughfare #entitlements #site-planner  *(filed 2026-07-08 from chat, provisional NEW-6; epic B720–B726)*
 `[ ]` When a parcel triggers thoroughfare-plan conditions in B724, auto-create entitlement issues/flags that update automatically when the parcel or the underlying plan data changes.
