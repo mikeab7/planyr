@@ -33,7 +33,7 @@ const SiteReviewModal = lazy(() => import("./components/SiteReviewModal.jsx").th
 import { nextConceptName } from "./lib/conceptName.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { noteLayerContext } from "../../shared/telemetry/perfRecorderHandle.js";
-import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability } from "./lib/bootResume.js";
+import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability, resumeTargetAfterSignIn } from "./lib/bootResume.js";
 import { RADIUS } from "../../shared/ui/radius.js";
 
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
@@ -211,12 +211,21 @@ export default function App({
       // synced copy rather than presenting a silent (and scary) empty library.
       setCloudError(res && res.ok === false ? "Couldn't reach the cloud — showing your last synced copy. Your saved sites are safe; reconnect to refresh." : "");
       // Resume target after the cloud pull: the URL's project wins (a deep link or a
-      // cross-module carry must survive sign-in — V13), else the last-opened site (B124/B133).
-      // projectIdRef stays the route's project because bootResolved gated the URL sync from
-      // clobbering it during the async pull (the whole point of the fix).
-      const resumeId = pickResumeTarget({
+      // cross-module carry must survive sign-in — V13), else the last-opened site (B124/B133) —
+      // but ONLY under the SAME one-shot boot-resume privilege `bootActiveId` already requires
+      // (B881664 ×2 — resumeAllowed, closed over at mount, exactly like bootActiveId's own use of
+      // it). This subscription fires once per MOUNT (`useEffect(..., [])`) and supabase-js
+      // delivers INITIAL_SESSION the instant it subscribes — i.e. on that same first mount,
+      // signed in or not — so without this gate, ANY first mount that happens to be signed in
+      // (Dashboard reached from Schedule, Library, Review, Notes, Food — whichever workspace
+      // happened to be active) silently fell back to the last-touched-plan pointer a couple of
+      // seconds later, once pullCloud settled, regardless of the route the user had just
+      // deliberately navigated to. projectIdRef stays the route's project because bootResolved
+      // gated the URL sync from clobbering it during the async pull (the whole point of that fix).
+      const resumeId = resumeTargetAfterSignIn({
         routeProjectId: projectIdRef.current, currentId: getCurrentSiteId(),
         plansOfGroup: loadPlansOfGroup, hasSite: (id) => !!loadSite(id),
+        resumeAllowed,
       });
       if (resumeId) {
         setActiveSiteId(resumeId); setCurrentSiteId(resumeId); setMode("plan"); // resume if it's one of theirs
