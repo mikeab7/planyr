@@ -52,6 +52,13 @@ const MUTED = "var(--chrome-muted)";
 const LINE = "var(--chrome-divider)";
 const INK = "var(--chrome-text)";
 
+// NEW-2 (B915536) — a LITERAL duplicate of designTokens.js's FONT_SIZE.control, not an import:
+// this file is in the shared ENTRY chunk (AppHeader.jsx imports it directly), and importing
+// designTokens.js for the sake of one small object measurably ate the route budget —
+// bundle.notesRouteJsBytes went from 0.5 KB to 0.2 KB of headroom. Same reasoning as
+// controls.jsx's own RADIUS/FONT/PAD literal-duplicate note. Keep in sync by hand.
+const CHROME_FONT_CONTROL = 12; // design-exempt: literal duplicate of FONT_SIZE.control — see the comment above
+
 // A cloud write that may not have reached the server. "saving" is in-flight (the
 // flush will complete it) so it's not surfaced as at-risk; offline/error are.
 const atRisk = (s) => s === "offline" || s === "error";
@@ -158,7 +165,7 @@ const crumbBtn = (extra) => ({
   display: "flex", alignItems: "center", gap: 5, flex: "none",
   height: 22, padding: "0 8px", borderRadius: RADIUS.md,
   border: "none", background: "transparent", cursor: "pointer",
-  fontFamily: "inherit", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap",
+  fontFamily: "inherit", fontSize: CHROME_FONT_CONTROL, fontWeight: 600, whiteSpace: "nowrap",
   ...extra,
 });
 
@@ -172,7 +179,7 @@ const row = (extra) => ({
   display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
   width: "100%", textAlign: "left", padding: "7px 9px", borderRadius: RADIUS.sm,
   border: "none", background: "transparent", cursor: "pointer",
-  fontFamily: "inherit", fontSize: 12.5, color: "var(--text-primary)", ...extra,
+  fontFamily: "inherit", fontSize: CHROME_FONT_CONTROL, color: "var(--text-primary)", ...extra,
 });
 
 const divider = { height: 1, background: "var(--border-default)", margin: "6px 4px" };
@@ -182,7 +189,7 @@ const divider = { height: 1, background: "var(--border-default)", margin: "6px 4
 const menuItem = (extra) => ({
   display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left",
   padding: "7px 9px", borderRadius: RADIUS.sm, border: "none", background: "transparent",
-  cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, color: "var(--text-primary)", ...extra,
+  cursor: "pointer", fontFamily: "inherit", fontSize: CHROME_FONT_CONTROL, color: "var(--text-primary)", ...extra,
 });
 const btnSm = {
   cursor: "pointer", border: "none", borderRadius: RADIUS.sm, padding: "5px 11px",
@@ -208,7 +215,7 @@ function RenameInput({ value, onChange, onCommit, onCancel, label, testId, style
       data-testid={testId}
       style={{
         display: "block", minWidth: 0, padding: "5px 7px", borderRadius: RADIUS.sm, outline: "none",
-        fontFamily: "inherit", fontSize: 12.5, color: "var(--text-primary)", background: "var(--surface-page)",
+        fontFamily: "inherit", fontSize: CHROME_FONT_CONTROL, color: "var(--text-primary)", background: "var(--surface-page)",
         ...style,
       }}
     />
@@ -621,13 +628,13 @@ export default function ProjectBreadcrumb({
           style={{
             width: "100%", boxSizing: "border-box", padding: "7px 9px", marginBottom: 6,
             border: "1px solid var(--border-default)", borderRadius: RADIUS.sm, outline: "none",
-            fontFamily: "inherit", fontSize: 12.5, color: "var(--text-primary)", background: "var(--surface-page)",
+            fontFamily: "inherit", fontSize: CHROME_FONT_CONTROL, color: "var(--text-primary)", background: "var(--surface-page)",
           }}
         />
 
         {atRisk(saveState) && (
           <div style={{ display: "flex", gap: 7, alignItems: "flex-start", padding: "7px 9px", marginBottom: 4,
-            borderRadius: RADIUS.sm, background: "var(--surface-page)", border: "1px solid var(--warn-text)", color: "var(--warn-text)", fontSize: 11.5, lineHeight: 1.4 }}>
+            borderRadius: RADIUS.sm, background: "var(--surface-page)", border: "1px solid var(--warn-text)", color: "var(--warn-text)", fontSize: CHROME_FONT_CONTROL, lineHeight: 1.4 }}>
             {/* B525: token-themed warn row (was a hardcoded light-amber box that became a light slab in dark mode)
                 NEW-3 — and the marker is a drawn triangle now, not a `⚠` text glyph. Same reason as the
                 menu icons: most platforms resolve U+26A0 to a COLOUR emoji, which then ignores the
@@ -778,7 +785,7 @@ export default function ProjectBreadcrumb({
                 </div>
                 {deleted.map((p) => (
                   <div key={p.id} style={row({ padding: "4px 7px 4px 11px", gap: 6, background: "transparent" })}>
-                    <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, color: "var(--text-secondary)" }} title={p.name}>
+                    <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: CHROME_FONT_CONTROL, color: "var(--text-secondary)" }} title={p.name}>
                       {p.name}
                     </span>
                     <span style={{ flex: "none", color: "var(--text-tertiary)", fontSize: 11 }}>{relTime(p.deletedAt)}</span>
@@ -930,7 +937,7 @@ export default function ProjectBreadcrumb({
           position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 9000,
           maxWidth: 520, display: "flex", alignItems: "center", gap: 10,
           background: "#1f2a44", color: "#eaf0ff", border: "1px solid #3b5bbf", borderRadius: RADIUS.md,
-          padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif",
+          padding: "9px 13px", fontSize: CHROME_FONT_CONTROL, fontWeight: 600, fontFamily: "system-ui, sans-serif",
           boxShadow: "0 10px 30px rgba(0,0,0,0.32)",
         }}>
           <span style={{ flex: 1 }}>{toast}</span>

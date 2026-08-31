@@ -31,7 +31,7 @@ import { MODULE_ACCENT } from "../../shared/ui/moduleAccent.js";
  * importing controls.jsx (see test/notesModule.test.js's header) — these are display-only preview
  * values, mirrored literally, with a guard (test/designGallery.test.js) asserting they can't
  * silently drift from the real files. */
-const FONT_SIZE = { xs: 10, sm: 10.5, base: 11, md: 11.5, lg: 12, xl: 12.5, xxl: 13, display: 14 }; // design-exempt: literal mirror of designTokens.js, guarded by test/designGallery.test.js
+const FONT_SIZE = { micro: 10, label: 10.5, control: 12, emphasis: 13, display: 14 }; // design-exempt: literal mirror of designTokens.js, guarded by test/designGallery.test.js
 const SPACE = { xxs: 2, xs: 4, sm: 6, md: 8, lg: 10, xl: 12, xxl: 16 }; // design-exempt: literal mirror of designTokens.js, guarded by test/designGallery.test.js
 const CONTROL_H = { sm: 22, md: 26, lg: 30 }; // design-exempt: literal mirror of designTokens.js, guarded by test/designGallery.test.js
 
@@ -99,7 +99,7 @@ function GalleryBody() {
   return (
     <div style={{ maxWidth: 1000, margin: "0 auto", padding: "32px 28px 80px" }}>
       <h1 style={{ fontSize: FONT_SIZE.display, fontWeight: 700, marginBottom: 4, color: "var(--text-primary)" }}>Design gallery</h1>
-      <p style={{ fontSize: FONT_SIZE.md, color: "var(--text-secondary)", marginBottom: 28, maxWidth: 640 }}>
+      <p style={{ fontSize: FONT_SIZE.control, color: "var(--text-secondary)", marginBottom: 28, maxWidth: 640 }}>
         Every shared primitive from <code>src/shared/ui/controls.jsx</code>, in every state, in this
         theme. See <code>docs/DESIGN.md</code> for the full contract. Look here before writing a new
         control — if none of these fit, extend the primitive set, don't fork a local style.

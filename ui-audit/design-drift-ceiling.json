@@ -1,7 +1,7 @@
 {
   "hexCeiling": 572,
   "radiusCeiling": 140,
-  "fontSizeCeiling": 92,
+  "fontSizeCeiling": 451,
   "writtenAt": "2026-08-31",
-  "note": "Ratchet ceiling for ui-audit/design-drift-audit.mjs --check (same shape as scripts/verification-queue-ceiling.json). Regenerate with `node ui-audit/design-drift-audit.mjs --write-ceiling` after a session genuinely lowers a count — never raise it to silence a real regression."
+  "note": "Ratchet ceiling for ui-audit/design-drift-audit.mjs --check (same shape as scripts/verification-queue-ceiling.json). Regenerate with `node ui-audit/design-drift-audit.mjs --write-ceiling` after a session genuinely lowers a count — never raise it to silence a real regression. fontSizeCeiling moved 92 -> 472 -> 451 on B915536's NEW-1/NEW-2 (2026-08-31): FONT_SIZE was reduced from 8 legal values to 5 named roles, so hundreds of PRE-EXISTING, UNCHANGED call sites that used a now-retired value (11, 11.5, or 12.5, none of which survived the cut) became off-scale by definition, not by new sloppy code (92 -> 472, measured before any source fix). NEW-2 then moved every one of ui-inventory.mjs's 44 flagged computed-style deviations onto the new scale plus the widely-shared components it exposed along the way (472 -> 451). This is the same shape as the original 996-hex ceiling this guard was built to inherit honestly rather than block on day one — real debt, now visible for the first time, to whittle down over sessions. The remaining ~440 are raw literals never reached by ui-inventory's 8-surface crawl; retrofitting the whole app is future work, not this item's scope."
 }

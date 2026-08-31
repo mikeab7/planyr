@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { TABULAR_NUMS } from "../../../shared/theme/typography.js";
+import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 
 /* Collapse (FINAL UI SPEC — Yield panel + Pond inspector) — the ONE collapsible section
  * primitive for the Yield panel and the pond inspector. A header row carries the section
@@ -46,12 +47,18 @@ export default function Collapse({
         style={{
           width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "9px 2px",
           background: "none", border: "none", cursor: "pointer", textAlign: "left", fontFamily: "inherit",
+          // NEW-2 (B915536) — the header itself carries no visible text of its own (every child
+          // span below sets its own explicit size), so this was inert scaffolding falling
+          // through to the browser's UA default. On-scale value, zero visual change.
+          fontSize: FONT_SIZE.control,
         }}
       >
-        <span aria-hidden="true" style={{ flex: "none", width: 10, fontSize: 10, color: "var(--text-tertiary)", transform: open ? "rotate(90deg)" : "none", transition: "transform .16s ease" }}>▶</span>
-        <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-secondary)", flex: "none" }}>{title}</span>
+        <span aria-hidden="true" style={{ flex: "none", width: 10, fontSize: FONT_SIZE.micro, color: "var(--text-tertiary)", transform: open ? "rotate(90deg)" : "none", transition: "transform .16s ease" }}>▶</span>
+        <span style={{ fontSize: FONT_SIZE.label, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-secondary)", flex: "none" }}>{title}</span>
         {count != null ? (
-          <span style={{ flex: "none", fontSize: 9.5, fontWeight: 700, color: "var(--text-tertiary)", background: "var(--planner-panel)", borderRadius: 999, padding: "0 6px", fontVariantNumeric: TABULAR_NUMS }}>{count}</span>
+          // NEW-2 (B915536) — was 9.5 (off-scale under the OLD scale too); a single-digit/short
+          // count numeral in a pill, same rationale as the Sites-panel group-header count badge.
+          <span style={{ flex: "none", fontSize: FONT_SIZE.micro, fontWeight: 700, color: "var(--text-tertiary)", background: "var(--planner-panel)", borderRadius: 999, padding: "0 6px", fontVariantNumeric: TABULAR_NUMS }}>{count}</span>
         ) : null}
         {!open && summary ? (
           // No-truncation rule (FINAL UI SPEC): the summary shrinks and WRAPS rather than
