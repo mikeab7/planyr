@@ -185,3 +185,6 @@ jobs:
                 throw err;
               }
             }
+
+# V438336 re-test no-op marker (2026-08-31): trivial comment appended to force a fresh commit
+# on this throwaway branch after the create-and-approve checkbox was enabled. No behavior change.
