@@ -150,9 +150,11 @@ export default function Shell() {
   // stash the requested review (token-stamped so a repeat click re-fires) for DR to open
   // once it mounts. Without this the open is dropped and DR boots to its placeholder.
   const [docIntent, setDocIntent] = useState(null);
-  const openReviewInDocReview = (row) => {
+  // `openAtPage` (B848848 — the comps "open source brochure" link) jumps to a specific page
+  // once the review has loaded, instead of resuming wherever it was last left open.
+  const openReviewInDocReview = (row, { page } = {}) => {
     const pid = row && (row.project_id ?? row.projectId ?? null);
-    setDocIntent({ kind: "open-review", row, token: Date.now() });
+    setDocIntent({ kind: "open-review", row, openAtPage: page || null, token: Date.now() });
     navigate({ module: "doc-review", projectId: pid || null, cross: false });
   };
   // Cross-module schedule link (the Schedule + the Site Planner live in SEPARATE cloud backends

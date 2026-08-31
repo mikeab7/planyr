@@ -431,6 +431,35 @@ describe("comps: anchor validation — pin OR real parcel, never a drawn rectang
     expect(validAnchor({ kind: "pin", lat: NaN, lon: -95.4 })).toBe(false);
     expect(validAnchor({ kind: "rectangle", lat: 29.7, lon: -95.4 })).toBe(false);
   });
+  it("accepts a site_plan anchor with an overlay id and an image-pixel point (B848848)", () => {
+    expect(validAnchor({
+      kind: "site_plan", lat: 29.7, lon: -95.4,
+      sitePlanOverlayId: "ov-1", sitePlanPoint: { x: 120, y: 340 },
+    })).toBe(true);
+  });
+  it("rejects a site_plan anchor missing the overlay id or the point", () => {
+    expect(validAnchor({ kind: "site_plan", lat: 29.7, lon: -95.4, sitePlanPoint: { x: 1, y: 1 } })).toBe(false);
+    expect(validAnchor({ kind: "site_plan", lat: 29.7, lon: -95.4, sitePlanOverlayId: "ov-1" })).toBe(false);
+    expect(validAnchor({ kind: "site_plan", lat: 29.7, lon: -95.4, sitePlanOverlayId: "ov-1", sitePlanPoint: {} })).toBe(false);
+  });
+  it("compToRow/rowToComp round-trip a site_plan anchor", () => {
+    const row = compToRow({
+      compType: "lease", compDate: "2026-08-01",
+      anchor: { kind: "site_plan", lat: 29.7, lon: -95.4, sitePlanOverlayId: "ov-1", sitePlanPoint: { x: 120, y: 340 } },
+    });
+    expect(row.anchor_kind).toBe("site_plan");
+    expect(row.site_plan_overlay_id).toBe("ov-1");
+    expect(row.site_plan_point).toEqual({ x: 120, y: 340 });
+    const comp = rowToComp({
+      id: "c1", user_id: "u1", comp_type: "lease", comp_date: "2026-08-01",
+      anchor_kind: "site_plan", lat: "29.7", lon: "-95.4", county: null, parcel_apn: null, parcel_geom: null,
+      site_plan_overlay_id: "ov-1", site_plan_point: { x: 120, y: 340 },
+    });
+    expect(comp.anchor).toEqual({
+      kind: "site_plan", lat: 29.7, lon: -95.4, county: null, parcelApn: null, parcelGeom: null,
+      sitePlanOverlayId: "ov-1", sitePlanPoint: { x: 120, y: 340 },
+    });
+  });
 });
 
 describe("comps: create/edit validation", () => {

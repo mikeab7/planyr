@@ -118,7 +118,28 @@ function CompRow({ comp, onOpen }) {
   );
 }
 
-function CompDetail({ comp, canEdit, onEdit, onDelete, onBack }) {
+// A comp pinned on a site plan links back to its source brochure — provenance, not just a
+// number (NEW-1/B848848: "a lease comp whose brochure is one click away is worth
+// considerably more than one with a number and no provenance"). `overlay` may be null (the
+// overlay list hasn't loaded yet, or the overlay was since removed) — the link only renders
+// once the overlay it points to is actually known.
+function SourceBrochureLink({ comp, overlaysById, onOpenBrochure }) {
+  if (comp.anchor?.kind !== "site_plan" || !comp.anchor.sitePlanOverlayId) return null;
+  const overlay = overlaysById && overlaysById[comp.anchor.sitePlanOverlayId];
+  if (!overlay || !onOpenBrochure) return null;
+  return (
+    <div style={{ marginTop: 10 }}>
+      <button
+        onClick={() => onOpenBrochure(overlay)}
+        style={{ border: "none", background: "none", color: "var(--accent)", fontSize: 12, cursor: "pointer", padding: 0, textAlign: "left" }}
+      >
+        Open source brochure{overlay.docTitle ? ` — ${overlay.docTitle}` : ""} (p.{overlay.page}) ↗
+      </button>
+    </div>
+  );
+}
+
+function CompDetail({ comp, canEdit, onEdit, onDelete, onBack, overlaysById, onOpenBrochure }) {
   const rows = compFieldRows(comp);
   return (
     <div style={{ padding: "10px 14px 14px" }}>
@@ -135,6 +156,7 @@ function CompDetail({ comp, canEdit, onEdit, onDelete, onBack }) {
           <Field key={r.key} label={r.label}><span style={{ fontSize: 12.5 }}>{r.value}</span></Field>
         ))}
       </div>
+      <SourceBrochureLink comp={comp} overlaysById={overlaysById} onOpenBrochure={onOpenBrochure} />
       {canEdit && (
         <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
           <Button size="sm" onClick={() => onEdit(comp)}>Edit</Button>
@@ -287,6 +309,9 @@ function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave
  *  - projects [{id,site|name}] — the host's already-loaded site list, for the optional
  *    project-association dropdown (cheap to pass down; no separate fetch needed)
  *  - onCompsChange(comps) — fired whenever the loaded list changes, so a map layer can render it
+ *  - overlaysById {id -> overlay} — the host's already-loaded site-plan-overlay list, keyed by
+ *    id, so a site_plan-anchored comp's detail view can show + open its source brochure
+ *  - onOpenBrochure(overlay) — open that overlay's source document in Review, at its page (B848848)
  *
  * currentUserId and the team list are fetched INTERNALLY (mirrors this module's own
  * self-contained-data-owner shape) rather than threaded through the host, since neither is
@@ -294,7 +319,7 @@ function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave
  */
 export default function CompsPanel({
   open, active = true, pendingAnchor, onAnchorConsumed, focusCompId, onFocusHandled,
-  projects, onCompsChange,
+  projects, onCompsChange, overlaysById, onOpenBrochure,
 }) {
   const [comps, setComps] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -397,7 +422,10 @@ export default function CompsPanel({
         )}
 
         {!loading && view === "detail" && activeComp && (
-          <CompDetail comp={activeComp} canEdit={activeComp.userId === currentUserId} onEdit={openEdit} onDelete={remove} onBack={() => setView("list")} />
+          <CompDetail
+            comp={activeComp} canEdit={activeComp.userId === currentUserId} onEdit={openEdit} onDelete={remove} onBack={() => setView("list")}
+            overlaysById={overlaysById} onOpenBrochure={onOpenBrochure}
+          />
         )}
 
         {!loading && view === "form" && draft && (
