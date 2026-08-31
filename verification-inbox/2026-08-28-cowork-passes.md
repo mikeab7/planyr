@@ -53,3 +53,10 @@ The item requires the arrowhead and hatch tiles measured on a **real downloaded 
 ### V438336 — B793696 — BLOCKED ON THE OWNER
 
 Needs `github.com/mikeab7/planyr/settings/actions` → Workflow permissions → "Read and write permissions". Until then `pr-auto-ready.yml` cannot un-draft a PR or arm auto-merge. Asked once; not nagging.
+
+> **Resolved outside this inbox path, not still pending.** The owner flipped this setting (confirmed
+> 2026-08-31) and it was live re-tested on a fresh real PR — still the identical FORBIDDEN error. He
+> then declined a PAT / GitHub App credential a second time, and `.github/workflows/pr-auto-ready.yml`
+> is now deleted outright. Closed 2026-08-31 in `VERIFICATION-DONE.md` as a permanent, owner-accepted
+> limitation (B793696/B934400–B934402) — not a pending owner ask. Do not re-raise the settings flip
+> with the owner; do not re-file this as "blocked on the owner."
