@@ -8,8 +8,8 @@ import { overlayToRow, rowToOverlay } from "./sitePlanOverlays.js";
 
 const TABLE = "site_plan_overlays";
 const SELECT_COLS =
-  "id,user_id,team_id,project_id,review_id,review_user_id,page,doc_title,doc_date,source_file_name," +
-  "img_w,img_h,raster_key,center_lat,center_lon,ft_per_px,rotation_deg," +
+  "id,user_id,team_id,project_id,review_id,page,doc_title,doc_date,source_file_name," +
+  "img_w,img_h,raster_key,thumb_data_url,center_lat,center_lon,ft_per_px,rotation_deg," +
   "opacity,visible,locked,created_at,updated_at";
 
 /** Every overlay the signed-in user can see (their own + their team's) — small table, no

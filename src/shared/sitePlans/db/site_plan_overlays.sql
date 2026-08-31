@@ -18,10 +18,21 @@
 -- AUDIT-FIRST NOTE (found applying the original migration): the repo's own doc_reviews.sql
 -- declares `primary key (user_id, id)`, but production's LIVE constraint is `PRIMARY KEY (id)`
 -- alone (doc_reviews.id, text, is globally unique there, not just per-user) — the deployed
--- schema has drifted from the checked-in migration file at some point. This migration follows
--- the deployed reality: `review_id` alone is the FK to doc_reviews; `review_user_id` is kept
--- as a plain informational column (not part of any FK) rather than assumed to be needed for
--- uniqueness.
+-- schema has drifted from the checked-in migration file at some point. `review_id` alone is
+-- therefore a sufficient FK to doc_reviews; no second column is needed to disambiguate it.
+--
+-- ⛔ NO "review_user_id" COLUMN (B948496 NEW-3, decided after it shipped NOT NULL with no
+-- default and broke every save). The question is "whose id would it hold, and does anything
+-- ever need it": today an overlay is created in exactly one place (SitePlansSection's upload
+-- flow), which always calls `fileNewReview` to create a BRAND NEW doc_reviews row in the SAME
+-- act — so the review's owner is, by construction, always identical to the overlay's own
+-- `user_id`. There is deliberately no "pick a page from an already-filed document" flow yet
+-- (the original PR's own flagged gap #2), so no live path lets a teammate's already-uploaded
+-- brochure become the source of someone ELSE's overlay. A column that always duplicates
+-- `user_id` is not information, it is redundancy waiting to drift — drop it rather than default
+-- it. If "pick an existing document" ever ships, the right question then is "who may SEE this
+-- review" (a join through `doc_reviews.user_id`/team, same as any other cross-table visibility
+-- check), not a second denormalized owner id carried on this table.
 --
 -- PLACEMENT (B848496 NEW-2 — replaces the original 2-control-point georeference wizard, which
 -- the owner rejected: it was friction ("a wizard demanding he find corresponding features on
@@ -41,7 +52,6 @@ create table if not exists public.site_plan_overlays (
   project_id     text references public.sites(id) on delete set null,  -- optional; never required
 
   review_id      text not null,   -- the doc_reviews row holding the WHOLE brochure
-  review_user_id uuid not null,   -- doc_reviews' PK is (user_id, id); carried for the FK below
   page           integer not null check (page >= 1),  -- which page of that document this overlay is
   doc_title      text,            -- human-readable, editable name shown in the panel
   doc_date       date,            -- display cache: mirrors doc_reviews.doc_date (dated brochures)
@@ -50,7 +60,11 @@ create table if not exists public.site_plan_overlays (
 
   img_w          integer not null check (img_w > 0),   -- rasterized page size, px
   img_h          integer not null check (img_h > 0),
-  raster_key     text,            -- Storage object key for the cached rasterized page (png)
+  raster_key     text,            -- Storage object key for the cached rasterized page (jpeg;
+                                   -- resolution-capped — see shared/sitePlans/lib/overlayRasterSize.js)
+  thumb_data_url text,            -- small INLINE thumbnail (data: URL, ~15 KB) for the site-plans
+                                   -- list row — rides along with the ordinary row fetch rather than
+                                   -- costing a second Storage round-trip per row (B972225 NEW-5)
 
   center_lat     double precision,  -- placement anchor point (WGS84)
   center_lon     double precision,
@@ -72,7 +86,7 @@ create table if not exists public.site_plan_overlays (
 create index if not exists site_plan_overlays_user_idx    on public.site_plan_overlays (user_id);
 create index if not exists site_plan_overlays_team_idx    on public.site_plan_overlays (team_id) where team_id is not null;
 create index if not exists site_plan_overlays_project_idx on public.site_plan_overlays (project_id) where project_id is not null;
-create index if not exists site_plan_overlays_review_idx  on public.site_plan_overlays (review_user_id, review_id);
+create index if not exists site_plan_overlays_review_idx  on public.site_plan_overlays (review_id);
 
 -- RLS: composed from comps.sql's precedent — team-read, owner-write only (a shared site plan
 -- is reference data other team members read and pin comps against, not jointly edit).

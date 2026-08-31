@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-31 @ `f4aae283` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-31 @ `7c52e9b7` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_619 source files mapped._
+_621 source files mapped._
 
 ## infra
 
@@ -390,8 +390,12 @@ _619 source files mapped._
   - _exports_: `listRecents`, `RECENTS_CAP`, `recordOpen`, `removeRecent`
 - **`src/shared/sitePlans/components/SitePlansSection.jsx`** — upload a site plan, pick which page is the site plan, anchor it on the map, and pin comps to buildings on it (rendered by MapFinder above the Comps list)
   - _exports_: `default (SitePlansSection)`
-- **`src/shared/sitePlans/lib/overlayGeoref.js`** — pure georeferencing math for an uploaded site-plan overlay: solves a similarity transform from image-pixel space to the project's real-world state-plane grid from ≥2 control points
+- **`src/shared/sitePlans/lib/overlayErrors.js`** — turns a raw Postgres/PostgREST save error into a plain-English sentence, passing an already-hand-written Error through unchanged
+  - _exports_: `friendlySaveError`
+- **`src/shared/sitePlans/lib/overlayGeoref.js`** — pure direct-placement math for an uploaded site-plan overlay (center/scale/rotation on the map — no control points, can't mirror)
   - _exports_: `latLonToImagePoint`, `overlayCornersFromPlacement`, `rotatePlacement`, `scalePlacement`, `suggestFtPerPx`, `validPlacement`
+- **`src/shared/sitePlans/lib/overlayRasterSize.js`** — pure sizing math for the overlay raster: caps the render DPI so a large sheet's long edge never exceeds a pixel ceiling, plus the shared thumbnail-dimension helper
+  - _exports_: `cappedRasterDims`, `effectiveRasterDpi`, `OVERLAY_RASTER_BASE_DPI`, `OVERLAY_RASTER_JPEG_QUALITY`, `OVERLAY_RASTER_MAX_LONG_EDGE_PX`, `OVERLAY_THUMB_JPEG_QUALITY`, `OVERLAY_THUMB_MAX_LONG_EDGE_PX`
 - **`src/shared/sitePlans/lib/overlayRasterStorage.js`** — Supabase Storage for a site-plan overlay's cached rasterized page, reusing the existing private `doc-review-files` bucket
   - _exports_: `BUCKET`, `deleteOverlayRaster`, `downloadOverlayRasterUrl`, `MAX_BYTES`, `overlayRasterKey`, `uploadOverlayRaster`
 - **`src/shared/sitePlans/lib/sitePlanOverlays.js`** — pure data model for a site-plan overlay (an uploaded flyer page anchored to the map, referencing its whole file in the existing Review/Library document store)
