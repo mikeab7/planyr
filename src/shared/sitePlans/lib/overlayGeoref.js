@@ -1,94 +1,97 @@
-/* Pure georeferencing math for an uploaded site-plan overlay (B848848 — comp pinning on an
- * uploaded site plan). Reuses the EXISTING machinery rather than inventing a second
- * image-anchoring system: `solveSimilarityLSQ` (shared/geometry) is the same 2-point/N-point
- * rigid-fit solver the Site Planner's own reference-overlay "align" mode already uses
- * (site-planner/lib/overlayAlign.js), and `projectToGrid`/`gridToProject` (shared/coordinates)
- * is the app's one real-world coordinate spine (EPSG:2278, Texas State Plane South Central,
- * US survey feet) — the same grid the layer-coverage engine already reprojects onto.
+/* Pure georeferencing math for an uploaded site-plan overlay (B848496 NEW-2 — the owner
+ * rejected the original 2-point control-point wizard: "just mimic the way it works on the
+ * site planner module for references" — i.e. the Site Planner's own on-canvas reference-image
+ * tool (SitePlanner.jsx `sheetOverlays` + its move/scale/rotate handles), which places an
+ * image by DIRECT MANIPULATION rather than by fitting a transform from two clicked point
+ * pairs.
  *
- * The georeference is a SIMILARITY transform (uniform scale + rotation + translation) from
- * image-pixel space to the project grid (state-plane feet), solved from >=2 control-point
- * pairs {px, py, lat, lon} — a pixel on the uploaded raster paired with the real-world point
- * it corresponds to. Control points are the source of truth (persisted on the overlay row);
- * the transform itself is cheap to resolve and is NEVER persisted as a separate serialized
- * closure — recomputing it from the control points on every read means the transform can
- * never drift out of sync with the points that define it.
+ * A placement is {centerLat, centerLon, ftPerPx, rotationDeg} — a real-world anchor point, a
+ * uniform scale (feet per source-image pixel), and a rotation in degrees. This is built
+ * DIRECTLY, never solved: the two-control-point least-squares fit this replaces was
+ * under-constrained (a similarity transform fit from two point pairs cannot distinguish a
+ * correct placement from its mirror image without a third point) and it shipped a real
+ * production defect — a plan placed upside down, every letter of its title block inverted.
+ * A direct rotation can never produce that: it is a proper rotation matrix applied to a known
+ * center, not a fit that can flip.
+ *
+ * `projectToGrid`/`gridToProject` (shared/coordinates) is the app's one real-world coordinate
+ * spine (EPSG:2278, Texas State Plane South Central, US survey feet).
  */
-import { solveSimilarityLSQ } from "../../geometry/similarityTransform.js";
 import { projectToGrid, gridToProject } from "../../coordinates/index.js";
 
-// Image-pixel space is y-DOWN (standard raster/canvas convention: py=0 at the top); the
-// project grid (and lat/lon) is y-UP (north-positive). A similarity transform is a rigid
-// rotation and cannot represent that axis flip on its own — fitting raw (px,py) against
-// (x,y) feet gets the handedness wrong for any real (non-degenerate) control-point pair, so
-// every image point is mirrored into a y-up "math" space before fitting or applying the
-// transform, and mirrored back on the way out. Purely an internal convention; every
-// exported function still takes/returns raw image px/py.
-const toMathSpace = (px, py) => ({ x: px, y: -py });
-const fromMathSpace = (pt) => ({ x: pt.x, y: -pt.y });
-
-/** >=2 control points {px, py, lat, lon} -> a similarity transform (image px, y-down) ->
- * state-plane feet, or null (fewer than 2 points, or every image point coincides).
- * `t.apply({x,y})` expects a MATH-SPACE point (use `imagePointToLatLon` for a raw pixel);
- * `t.scale` is feet per image pixel; `t.rotDeg` is the image's rotation relative to true
- * north/east; `t.residual` is the RMS fit error in feet (0 for exactly 2 points, a real
- * number for 3+ — a high residual means the control points don't agree on one rigid
- * placement, i.e. the page isn't printed to a single consistent scale). */
-export function solveOverlayTransform(controlPoints) {
-  if (!Array.isArray(controlPoints) || controlPoints.length < 2) return null;
-  const pairs = [];
-  for (const cp of controlPoints) {
-    if (!cp || typeof cp.px !== "number" || typeof cp.py !== "number") return null;
-    if (typeof cp.lat !== "number" || typeof cp.lon !== "number") return null;
-    pairs.push({ from: toMathSpace(cp.px, cp.py), to: projectToGrid(cp.lat, cp.lon) });
-  }
-  return solveSimilarityLSQ(pairs);
+/** True if `p` is a usable placement. */
+export function validPlacement(p) {
+  return !!p && Number.isFinite(p.centerLat) && Number.isFinite(p.centerLon) &&
+    Number.isFinite(p.ftPerPx) && p.ftPerPx > 0;
 }
 
-/** The inverse of a solved transform (state-plane feet -> image math-space), built by
- * sampling the forward transform at three well-spread synthetic points and re-solving — a
- * similarity's inverse is itself a similarity, so this reuses the SAME solver rather than
- * hand-deriving a second closed form. Returns null if `t` is null. */
-export function invertOverlayTransform(t) {
-  if (!t) return null;
-  const samples = [{ x: 0, y: 0 }, { x: 1000, y: 0 }, { x: 0, y: 1000 }];
-  return solveSimilarityLSQ(samples.map((s) => ({ from: t.apply(s), to: s })));
+// Image-pixel space is y-DOWN (raster/canvas/screen convention); the project grid (and
+// lat/lon) is y-UP (north-positive). `at()` below takes an offset from center in that y-down
+// "image-local" frame — the SAME frame a screen-pixel drag naturally lives in, which is what
+// lets the interactive handles feed their raw screen-pixel deltas straight into this module
+// with no sign-flip of their own (see lib/overlayPlacementDrag.js). A positive `rotationDeg`
+// rotates CLOCKWISE as drawn on screen — exactly how the Site Planner's SVG `rotate(deg)` on
+// its own reference-image handle already behaves, so a user familiar with that control feels
+// the same rotation sense here.
+function rotatedOffset(dx, dy, rotationDeg) {
+  const rad = ((rotationDeg || 0) * Math.PI) / 180;
+  const cos = Math.cos(rad), sin = Math.sin(rad);
+  return { rx: dx * cos - dy * sin, ry: dx * sin + dy * cos };
 }
 
-/** An image-pixel point on the overlay -> real-world {lat, lon}, or null if the control
- * points can't resolve a transform. */
-export function imagePointToLatLon(controlPoints, px, py) {
-  const t = solveOverlayTransform(controlPoints);
-  if (!t) return null;
-  return gridToProject(t.apply(toMathSpace(px, py)));
+/** The four image corners' real-world {lat,lon} under `placement` — what a map renderer needs
+ * to place the rotated image. Null if the placement or the image size isn't usable. */
+export function overlayCornersFromPlacement(placement, imgW, imgH) {
+  if (!validPlacement(placement) || !(imgW > 0) || !(imgH > 0)) return null;
+  const center = projectToGrid(placement.centerLat, placement.centerLon);
+  const halfW = (imgW * placement.ftPerPx) / 2, halfH = (imgH * placement.ftPerPx) / 2;
+  const at = (dx, dy) => {
+    const { rx, ry } = rotatedOffset(dx, dy, placement.rotationDeg);
+    // grid y is north-positive; a "down" (+y) image-local offset is south, so flip it going in.
+    return gridToProject({ x: center.x + rx, y: center.y - ry });
+  };
+  return {
+    topLeft: at(-halfW, -halfH), topRight: at(halfW, -halfH),
+    bottomLeft: at(-halfW, halfH), bottomRight: at(halfW, halfH),
+  };
 }
 
-/** Real-world {lat, lon} -> the image-pixel point on the overlay it corresponds to, or null.
- * Used only to snapshot a comp's position relative to the overlay for display/provenance —
- * the comp's authoritative position is always its own stored lat/lon. */
-export function latLonToImagePoint(controlPoints, lat, lon) {
-  const t = solveOverlayTransform(controlPoints);
-  const inv = invertOverlayTransform(t);
-  if (!inv) return null;
-  return fromMathSpace(inv.apply(projectToGrid(lat, lon)));
+/** Real-world {lat,lon} -> the image-pixel point it corresponds to under `placement` — the
+ * inverse of the per-corner mapping `overlayCornersFromPlacement` uses. Used only to snapshot
+ * a comp's position relative to the plan for display/provenance; a comp's authoritative
+ * position is always its own stored lat/lon, never re-derived from this. Null if the
+ * placement or image size isn't usable. */
+export function latLonToImagePoint(placement, imgW, imgH, lat, lon) {
+  if (!validPlacement(placement) || !(imgW > 0) || !(imgH > 0)) return null;
+  const center = projectToGrid(placement.centerLat, placement.centerLon);
+  const p = projectToGrid(lat, lon);
+  const rx = p.x - center.x, ry = -(p.y - center.y); // grid offset -> image-local (y-down) rotated frame
+  // Invert the rotation: [dx,dy] = R(-rotationDeg) * [rx,ry].
+  const { rx: dx, ry: dy } = rotatedOffset(rx, ry, -(placement.rotationDeg || 0));
+  const halfW = (imgW * placement.ftPerPx) / 2, halfH = (imgH * placement.ftPerPx) / 2;
+  return { x: (dx + halfW) / placement.ftPerPx, y: (dy + halfH) / placement.ftPerPx };
 }
 
-/** The four corner lat/lons of an imgW x imgH raster under the given control points — what a
- * map renderer needs to place the rotated image. Null if the control points can't resolve. */
-export function overlayCornersLatLon(controlPoints, imgW, imgH) {
-  const t = solveOverlayTransform(controlPoints);
-  if (!t) return null;
-  const at = (px, py) => gridToProject(t.apply(toMathSpace(px, py)));
-  return { topLeft: at(0, 0), topRight: at(imgW, 0), bottomLeft: at(0, imgH), bottomRight: at(imgW, imgH) };
+/** A sensible starting size for a freshly placed overlay: `ftPerPx` so the image renders at
+ * `fraction` (default 0.6, matching the Site Planner reference-image panel's own "Size to
+ * view" button) of the given real-world view width. Pure sizing math only — the caller
+ * supplies the current view width in feet (from the live map) and picks the center. */
+export function suggestFtPerPx(viewWidthFt, imgW, fraction = 0.6) {
+  if (!(viewWidthFt > 0) || !(imgW > 0)) return 1;
+  return Math.max(0.0001, (viewWidthFt * fraction) / imgW);
 }
 
-/** Straight-line real-world distance between two {lat,lon} points, in feet — via the same
- * state-plane projection used everywhere else, NOT a haversine (this app's whole coordinate
- * spine is the project grid). This is the independent "does this match a distance I know"
- * scale check: it measures whatever two points the user clicks on the real map, with no
- * reference back to the overlay's own transform, so a badly-fit georeference can't hide
- * behind a self-confirming number. */
-export function measureLatLonFeet(a, b) {
-  const pa = projectToGrid(a.lat, a.lon), pb = projectToGrid(b.lat, b.lon);
-  return Math.hypot(pa.x - pb.x, pa.y - pb.y);
+/** Corner-handle drag: uniform scale about the FIXED center. `ratio` is (current pointer
+ * distance from center) / (distance at grab) — unitless, so it's correct whether measured in
+ * screen pixels or feet, as long as both used the SAME units and the map zoom didn't change
+ * mid-drag. Mirrors the Site Planner's own `ovScale` handler exactly. */
+export function scalePlacement(placement, ratio) {
+  return { ...placement, ftPerPx: Math.max(0.0001, placement.ftPerPx * ratio) };
+}
+
+/** Rotate-handle drag: `rot0` is rotationDeg at grab, `deltaDeg` is the change in screen-pixel
+ * angle (atan2, degrees) from grab to now. Mirrors the Site Planner's own `ovRotate` handler
+ * exactly. */
+export function rotatePlacement(placement, rot0, deltaDeg) {
+  return { ...placement, rotationDeg: (((rot0 + deltaDeg) % 360) + 360) % 360 };
 }

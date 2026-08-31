@@ -1,37 +1,26 @@
-/* Site-plan overlays — pure data model (B848848). A site plan is its own entity, mirroring
- * how comps work (src/shared/comps/lib/comps.js): optionally associated with a project,
- * never requiring one, visible to the team, editable by whoever uploaded it.
+/* Site-plan overlays — pure data model (B848496 NEW-2). A site plan is its own entity,
+ * mirroring how comps work (src/shared/comps/lib/comps.js): optionally associated with a
+ * project, never requiring one, visible to the team, editable by whoever uploaded it.
  *
  * The uploaded file itself is NOT duplicated storage — the whole brochure is stored WHOLE as
  * a `doc_reviews` row (Review/Library's existing document store, reused rather than a second
- * one), and an overlay row is a reference into it: which review, which page, plus the
- * page's georeference (see lib/overlayGeoref.js) and how it renders on the map. One review
- * can hold several overlay pages (phases, multiple buildings on one flyer); a site can hold
- * several dated reviews (a 2024 flyer and a 2026 flyer describe different buildings).
+ * one), and an overlay row is a reference into it: which review, which page, plus the page's
+ * PLACEMENT on the map (see lib/overlayGeoref.js — a direct center/scale/rotation, not a
+ * fitted transform) and how it renders. One review can hold several overlay pages (phases,
+ * multiple buildings on one flyer); a site can hold several dated reviews (a 2024 flyer and a
+ * 2026 flyer describe different buildings).
  */
-import { solveOverlayTransform } from "./overlayGeoref.js";
-
-/** True if `cps` is a usable control-point array (>=2 well-formed points). */
-export function validControlPoints(cps) {
-  return Array.isArray(cps) && cps.length >= 2 && cps.every(
-    (cp) => cp && typeof cp.px === "number" && typeof cp.py === "number" &&
-      typeof cp.lat === "number" && typeof cp.lon === "number" &&
-      Number.isFinite(cp.px) && Number.isFinite(cp.py) && Number.isFinite(cp.lat) && Number.isFinite(cp.lon)
-  );
-}
-
-/** Derived, cacheable metrics from a set of control points — {scaleFtPerPx, rotationDeg,
- * fitResidualFt}, or null when the points can't resolve a transform. These are DERIVED,
- * never authoritative: recomputed from `controlPoints` any time they change, never edited
- * independently, so they can never drift out of sync with the points that define them. */
-export function deriveOverlayMetrics(controlPoints) {
-  const t = solveOverlayTransform(controlPoints);
-  if (!t) return null;
-  return { scaleFtPerPx: t.scale, rotationDeg: t.rotDeg, fitResidualFt: t.residual };
-}
+import { validPlacement } from "./overlayGeoref.js";
 
 export function validOverlayUpload({ imgW, imgH } = {}) {
   return Number.isFinite(imgW) && imgW > 0 && Number.isFinite(imgH) && imgH > 0;
+}
+
+/** Whether an overlay has ever been placed on the map — a freshly-picked page has no
+ * placement yet (it's placed the moment it's created, so in practice this is only false for a
+ * malformed/legacy row). */
+export function overlayPlaced(o) {
+  return validPlacement(o && { centerLat: o.centerLat, centerLon: o.centerLon, ftPerPx: o.ftPerPx });
 }
 
 export function rowToOverlay(r) {
@@ -45,17 +34,17 @@ export function rowToOverlay(r) {
     page: r.page,
     docTitle: r.doc_title || "",
     docDate: r.doc_date || null,
+    sourceFileName: r.source_file_name || "",
     imgW: r.img_w,
     imgH: r.img_h,
     rasterKey: r.raster_key || null,
-    controlPoints: Array.isArray(r.control_points) ? r.control_points : [],
-    scaleFtPerPx: r.scale_ft_per_px != null ? Number(r.scale_ft_per_px) : null,
-    rotationDeg: r.rotation_deg != null ? Number(r.rotation_deg) : null,
-    fitResidualFt: r.fit_residual_ft != null ? Number(r.fit_residual_ft) : null,
-    scaleCheckFt: r.scale_check_ft != null ? Number(r.scale_check_ft) : null,
-    scaleCheckNote: r.scale_check_note || null,
+    centerLat: r.center_lat != null ? Number(r.center_lat) : null,
+    centerLon: r.center_lon != null ? Number(r.center_lon) : null,
+    ftPerPx: r.ft_per_px != null ? Number(r.ft_per_px) : null,
+    rotationDeg: r.rotation_deg != null ? Number(r.rotation_deg) : 0,
     opacity: r.opacity != null ? Number(r.opacity) : 0.85,
     visible: r.visible !== false,
+    locked: !!r.locked,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -64,7 +53,6 @@ export function rowToOverlay(r) {
 // NEVER includes user_id — the column default auth.uid() stamps the owner server-side
 // (the comps.js / pinStore.js convention).
 export function overlayToRow(o) {
-  const metrics = deriveOverlayMetrics(o.controlPoints) || {};
   return {
     team_id: o.teamId || null,
     project_id: o.projectId || null,
@@ -73,17 +61,17 @@ export function overlayToRow(o) {
     page: o.page,
     doc_title: o.docTitle || null,
     doc_date: o.docDate || null,
+    source_file_name: o.sourceFileName || null,
     img_w: o.imgW,
     img_h: o.imgH,
     raster_key: o.rasterKey || null,
-    control_points: o.controlPoints || [],
-    scale_ft_per_px: metrics.scaleFtPerPx ?? null,
-    rotation_deg: metrics.rotationDeg ?? null,
-    fit_residual_ft: metrics.fitResidualFt ?? null,
-    scale_check_ft: o.scaleCheckFt ?? null,
-    scale_check_note: o.scaleCheckNote || null,
+    center_lat: o.centerLat ?? null,
+    center_lon: o.centerLon ?? null,
+    ft_per_px: o.ftPerPx ?? null,
+    rotation_deg: o.rotationDeg ?? 0,
     opacity: o.opacity ?? 0.85,
     visible: o.visible !== false,
+    locked: !!o.locked,
     updated_at: new Date().toISOString(),
   };
 }

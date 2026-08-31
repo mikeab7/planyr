@@ -176,24 +176,35 @@ function CompDetail({ comp, canEdit, onEdit, onDelete, onBack, overlaysById, onO
 function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave, onCancel, saving }) {
   const set = (k) => (e) => setDraft((d) => ({ ...d, [k]: e.target.value }));
   const { provider: providerLabel, acquirer: acquirerLabel } = partyLabels(draft.compType);
+  // NEW-9 — a parcel-anchored comp's Size arrives prefilled from the map selection; say so, and
+  // say it stops being true the moment he edits it (STANDING RULE-driven honesty, not decoration).
+  const sizeFromParcel = draft.anchor?.acreageAc != null;
+  const sizeEdited = sizeFromParcel && draft.landSizeValue !== String(Math.round(draft.anchor.acreageAc * 100) / 100);
   return (
     <div style={{ padding: "10px 14px 14px" }}>
-      <button onClick={onCancel} style={{ border: "none", background: "none", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer", padding: 0, marginBottom: 10 }}>&larr; Cancel</button>
+      {/* A real section header, not just a back-link — so this form reads as its OWN block,
+          never as though it belongs to the site-plan controls sitting above it in the rail. */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-secondary)" }}>
+          {draft.id ? "Edit comp" : "New comp"}
+        </span>
+        <button onClick={onCancel} style={{ border: "none", background: "none", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer", padding: 0 }}>&larr; Cancel</button>
+      </div>
 
-      <Field label="Type">
-        <select value={draft.compType} onChange={set("compType")} style={{ ...inputStyle, width: 160 }} disabled={!!draft.id}>
+      <Field label="Type" stacked>
+        <select value={draft.compType} onChange={set("compType")} style={inputStyle} disabled={!!draft.id}>
           {COMP_TYPES.map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}
         </select>
       </Field>
-      <Field label="Date *">
-        <input type="date" value={draft.compDate} onChange={set("compDate")} style={{ ...inputStyle, width: 160 }} />
+      <Field label="Date" stacked required>
+        <input type="date" value={draft.compDate} onChange={set("compDate")} style={inputStyle} />
       </Field>
-      <Field label="Title"><input value={draft.title} onChange={set("title")} placeholder="Property / deal name" style={{ ...inputStyle, width: 220 }} /></Field>
+      <Field label="Title" stacked><input value={draft.title} onChange={set("title")} placeholder="Property / deal name" style={inputStyle} /></Field>
 
       {/* Facts about the deal's PARTIES, not its economics — kept with Title, ahead of the
           money block, so the rate/price figures stay together and readable (NEW-7 amended).
           Labels follow the comp's own type; the two stored columns are one shared axis. */}
-      <Field label={providerLabel}>
+      <Field label={providerLabel} stacked>
         <PartyNameField
           label={providerLabel}
           value={draft.partyProvider}
@@ -202,7 +213,7 @@ function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave
           listboxId="comp-party-provider-suggest"
         />
       </Field>
-      <Field label={acquirerLabel}>
+      <Field label={acquirerLabel} stacked>
         <PartyNameField
           label={acquirerLabel}
           value={draft.partyAcquirer}
@@ -214,14 +225,19 @@ function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave
 
       {draft.compType === "land" && (
         <>
-          <Field label="Price"><input type="number" value={draft.landPrice} onChange={set("landPrice")} placeholder="optional" style={{ ...inputStyle, width: 140 }} /></Field>
-          <Field label="Size">
+          <Field label="Price" stacked><input type="number" value={draft.landPrice} onChange={set("landPrice")} placeholder="optional" style={inputStyle} /></Field>
+          <Field label="Size" stacked>
             <span style={{ display: "flex", gap: 6 }}>
-              <input type="number" value={draft.landSizeValue} onChange={set("landSizeValue")} placeholder="optional" style={{ ...inputStyle, width: 90 }} />
-              <select value={draft.landSizeUnit} onChange={set("landSizeUnit")} style={{ ...inputStyle, width: 70 }}>
+              <input type="number" value={draft.landSizeValue} onChange={set("landSizeValue")} placeholder="optional" style={{ ...inputStyle, flex: 1 }} />
+              <select value={draft.landSizeUnit} onChange={set("landSizeUnit")} style={{ ...inputStyle, width: 68, flex: "none" }}>
                 <option value="ac">AC</option><option value="sf">SF</option>
               </select>
             </span>
+            {sizeFromParcel && (
+              <div style={{ fontSize: 10.5, color: "var(--text-tertiary)", marginTop: 3 }}>
+                {sizeEdited ? "Overrides the measured parcel selection." : "From the parcels you selected on the map — edit to override."}
+              </div>
+            )}
           </Field>
           {draft.landPrice && draft.landSizeValue && (
             <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: -4, marginBottom: 8 }}>
@@ -233,8 +249,8 @@ function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave
 
       {draft.compType === "building_sale" && (
         <>
-          <Field label="Price"><input type="number" value={draft.bldgPrice} onChange={set("bldgPrice")} placeholder="optional" style={{ ...inputStyle, width: 140 }} /></Field>
-          <Field label="Building SF"><input type="number" value={draft.bldgSizeSf} onChange={set("bldgSizeSf")} placeholder="optional" style={{ ...inputStyle, width: 140 }} /></Field>
+          <Field label="Price" stacked><input type="number" value={draft.bldgPrice} onChange={set("bldgPrice")} placeholder="optional" style={inputStyle} /></Field>
+          <Field label="Building SF" stacked><input type="number" value={draft.bldgSizeSf} onChange={set("bldgSizeSf")} placeholder="optional" style={inputStyle} /></Field>
           {draft.bldgPrice && draft.bldgSizeSf && (
             <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: -4, marginBottom: 8 }}>
               {(() => { const psf = buildingPricePerSf(draftToComp(draft)); return psf != null ? `$${psf.toFixed(2)}/SF` : null; })()}
@@ -248,44 +264,44 @@ function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave
           {/* Rate + its period read as ONE quantity ("$.65 MO") — a compact MO/YR control right
               after the rate input, not a separate full-width row (NEW-1). Still a real labelled
               <select> (aria-label), just visually compact; stored values are untouched. */}
-          <Field label="Rate ($/SF)">
+          <Field label="Rate ($/SF)" stacked>
             <span style={{ display: "flex", gap: 6 }}>
-              <input type="number" value={draft.leaseRate} onChange={set("leaseRate")} placeholder="optional" style={{ ...inputStyle, width: 90 }} />
-              <select value={draft.leaseRatePeriod} onChange={set("leaseRatePeriod")} aria-label="Rate period" style={{ ...inputStyle, width: 58 }}>
+              <input type="number" value={draft.leaseRate} onChange={set("leaseRate")} placeholder="optional" style={{ ...inputStyle, flex: 1 }} />
+              <select value={draft.leaseRatePeriod} onChange={set("leaseRatePeriod")} aria-label="Rate period" style={{ ...inputStyle, width: 60, flex: "none" }}>
                 {LEASE_PERIODS.map((p) => <option key={p} value={p}>{p === "annual" ? "YR" : "MO"}</option>)}
               </select>
             </span>
           </Field>
-          <Field label="Basis">
-            <select value={draft.leaseRateExpense} onChange={set("leaseRateExpense")} style={{ ...inputStyle, width: 120 }}>
+          <Field label="Basis" stacked>
+            <select value={draft.leaseRateExpense} onChange={set("leaseRateExpense")} style={inputStyle}>
               {LEASE_EXPENSE_BASES.map((b) => <option key={b} value={b}>{b.toUpperCase()}</option>)}
             </select>
           </Field>
-          <Field label="Leased SF"><input type="number" value={draft.leaseSizeSf} onChange={set("leaseSizeSf")} placeholder="optional" style={{ ...inputStyle, width: 140 }} /></Field>
+          <Field label="Leased SF" stacked><input type="number" value={draft.leaseSizeSf} onChange={set("leaseSizeSf")} placeholder="optional" style={inputStyle} /></Field>
           {draft.leaseRate && draft.leaseSizeSf && (
             <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: -4, marginBottom: 8 }}>
               {(() => { const rent = leaseTotalAnnualRent(draftToComp(draft)); return rent != null ? `${rent.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 })}/yr total (face)` : null; })()}
             </div>
           )}
-          <Field label="TI $/SF"><input type="number" value={draft.leaseTi} onChange={set("leaseTi")} placeholder="optional" style={{ ...inputStyle, width: 120 }} /></Field>
-          <Field label="Term"><input value={draft.leaseTerm} onChange={set("leaseTerm")} placeholder="e.g. 5 yrs" style={{ ...inputStyle, width: 140 }} /></Field>
-          <Field label="Free rent (mo)"><input type="number" value={draft.leaseFreeRentMonths} onChange={set("leaseFreeRentMonths")} placeholder="optional" style={{ ...inputStyle, width: 100 }} /></Field>
+          <Field label="TI $/SF" stacked><input type="number" value={draft.leaseTi} onChange={set("leaseTi")} placeholder="optional" style={inputStyle} /></Field>
+          <Field label="Term" stacked><input value={draft.leaseTerm} onChange={set("leaseTerm")} placeholder="e.g. 5 yrs" style={inputStyle} /></Field>
+          <Field label="Free rent (mo)" stacked><input type="number" value={draft.leaseFreeRentMonths} onChange={set("leaseFreeRentMonths")} placeholder="optional" style={inputStyle} /></Field>
         </>
       )}
 
-      <Field label="Notes"><textarea value={draft.notes} onChange={set("notes")} rows={3} style={{ ...inputStyle, width: 220, resize: "vertical" }} /></Field>
+      <Field label="Notes" stacked><textarea value={draft.notes} onChange={set("notes")} rows={3} style={{ ...inputStyle, resize: "vertical" }} /></Field>
 
       {teams?.length > 0 && (
-        <Field label="Share with team">
-          <select value={draft.teamId || ""} onChange={(e) => setDraft((d) => ({ ...d, teamId: e.target.value || null }))} style={{ ...inputStyle, width: 180 }}>
+        <Field label="Share with team" stacked>
+          <select value={draft.teamId || ""} onChange={(e) => setDraft((d) => ({ ...d, teamId: e.target.value || null }))} style={inputStyle}>
             <option value="">Just me</option>
             {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         </Field>
       )}
       {projects?.length > 0 && (
-        <Field label="Project (optional)">
-          <select value={draft.projectId || ""} onChange={(e) => setDraft((d) => ({ ...d, projectId: e.target.value || null }))} style={{ ...inputStyle, width: 180 }}>
+        <Field label="Project (optional)" stacked>
+          <select value={draft.projectId || ""} onChange={(e) => setDraft((d) => ({ ...d, projectId: e.target.value || null }))} style={inputStyle}>
             <option value="">No project</option>
             {projects.map((p) => <option key={p.id} value={p.id}>{p.site || p.name}</option>)}
           </select>
@@ -420,6 +436,11 @@ export default function CompsPanel({
 
         {!loading && !loadError && view === "list" && (
           <>
+            {/* A real section label, same treatment as "Site plans" above it — the two lists
+                stacked in one rail must each say plainly which is which (NEW-3). */}
+            <div style={{ padding: "10px 14px 0" }}>
+              <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-secondary)" }}>Comps</span>
+            </div>
             <SummaryStrip comps={comps} />
             {comps.length === 0 && <div style={{ padding: 14, fontSize: 12, color: "var(--text-secondary)" }}>No comps yet. Use “Drop a pin” or “Comp from parcel” on the map to add one.</div>}
             {comps.map((c) => <CompRow key={c.id} comp={c} onOpen={openDetail} />)}

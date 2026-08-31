@@ -3,10 +3,11 @@
 -- and sitePlans/db/site_plan_overlays.sql. Idempotent.
 --
 -- `lat`/`lon` stay NOT NULL and authoritative on every comp, per the existing contract every
--- map view/list/filter already relies on (comps.sql) — a site-plan-anchored comp's lat/lon is
--- DERIVED from the overlay's georeference at save time (shared/sitePlans/lib/overlayGeoref.js
--- imagePointToLatLon), never left null. `site_plan_point` is the extra snapshot this anchor
--- kind carries (the image-pixel point on the overlay, for provenance/redraw), the same shape
+-- map view/list/filter already relies on (comps.sql) — a site-plan-anchored comp's lat/lon
+-- come straight from the real map click on the placed plan (never left null). `site_plan_point`
+-- is the extra snapshot this anchor kind carries — the click's lat/lon run back through the
+-- overlay's placement (shared/sitePlans/lib/overlayGeoref.js latLonToImagePoint) to the
+-- image-pixel point it corresponds to, for provenance/redraw — the same shape
 -- `parcel_apn`/`parcel_geom` already play for the 'parcel' anchor kind.
 --
 -- Coordination note: another session may be reworking `anchor_kind`'s switch in application
