@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-31 @ `c4565bb4` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-31 @ `aca938f3` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_618 source files mapped._
+_619 source files mapped._
 
 ## infra
 
@@ -391,11 +391,11 @@ _618 source files mapped._
 - **`src/shared/sitePlans/components/SitePlansSection.jsx`** — upload a site plan, pick which page is the site plan, anchor it on the map, and pin comps to buildings on it (rendered by MapFinder above the Comps list)
   - _exports_: `default (SitePlansSection)`
 - **`src/shared/sitePlans/lib/overlayGeoref.js`** — pure georeferencing math for an uploaded site-plan overlay: solves a similarity transform from image-pixel space to the project's real-world state-plane grid from ≥2 control points
-  - _exports_: `imagePointToLatLon`, `invertOverlayTransform`, `latLonToImagePoint`, `measureLatLonFeet`, `overlayCornersLatLon`, `solveOverlayTransform`
+  - _exports_: `latLonToImagePoint`, `overlayCornersFromPlacement`, `rotatePlacement`, `scalePlacement`, `suggestFtPerPx`, `validPlacement`
 - **`src/shared/sitePlans/lib/overlayRasterStorage.js`** — Supabase Storage for a site-plan overlay's cached rasterized page, reusing the existing private `doc-review-files` bucket
   - _exports_: `BUCKET`, `deleteOverlayRaster`, `downloadOverlayRasterUrl`, `MAX_BYTES`, `overlayRasterKey`, `uploadOverlayRaster`
 - **`src/shared/sitePlans/lib/sitePlanOverlays.js`** — pure data model for a site-plan overlay (an uploaded flyer page anchored to the map, referencing its whole file in the existing Review/Library document store)
-  - _exports_: `deriveOverlayMetrics`, `overlayToRow`, `rowToOverlay`, `validControlPoints`, `validOverlayUpload`
+  - _exports_: `overlayPlaced`, `overlayToRow`, `rowToOverlay`, `validOverlayUpload`
 - **`src/shared/sitePlans/lib/sitePlanOverlayStore.js`** — the Supabase CRUD seam for `public.site_plan_overlays`, mirroring `comps/lib/compsStore.js`'s `{data, error}` shape
   - _exports_: `deleteOverlay`, `fetchAllOverlays`, `insertOverlay`, `updateOverlay`
 - **`src/shared/storage/originStore.js`** — Dependency-free read/delete-by-prefix access to the origin's IndexedDB kv store, so shared chrome can census and clear it without importing a workspace module (which hoists the cache into a route chunk)
@@ -913,6 +913,8 @@ _618 source files mapped._
   - _exports_: `OVERLAY_BAND_ABOVE`, `OVERLAY_BAND_BELOW`, `overlayBand`, `overlayBandsGrouped`, `overlayDrawOrder`, `overlayOrderFlags`, `overlayPanelOrder`, `reorderOverlays`, `setOverlayBand`, `splitOverlayBands`
 - **`src/workspaces/site-planner/lib/overlayPdf.js`** — Site-plan overlay rasterizer: lazily reuses Doc Review PDF.js to render a dropped PDF/image page to a white-knockout PNG data URL, reads its scale note, classifies sheet size, rebuilds from stored bytes
   - _exports_: `baseRasterScale`, `chooseOverlayRasterScale`, `HIRES_CACHE_PER_OVERLAY`, `isDxfFile`, `isPdfFile`, `knockoutNearWhite`, `MAX_RERASTER_DIM`, `openOverlayFile`, `overlayRasterKey`, `rasterizePage`, `rasterizePageHiRes`, `rasterizeStoredDxf`, `rasterizeStoredPdf`, `RERASTER_LADDER`
+- **`src/workspaces/site-planner/lib/overlayPlacementHandles.js`** — TODO — describe
+  - _exports_: `createPlacementHandles`
 - **`src/workspaces/site-planner/lib/overlayPrint.js`** — Pure DOM-free print/export selection for placed site-plan overlays: filters src-bearing visible overlays, drives the 'Print overlay' checkbox visibility and the export compositing pass
   - _exports_: `hasPrintableOverlay`, `isOverlayPrintable`, `printableOverlays`
 - **`src/workspaces/site-planner/lib/overlayScale.js`** — Pure drawing-scale helpers: engineer scale-note parsing, standard sheet detection, feet-per-point conversions, viewport-sanity auto-scale guard, and Bluebeam-style page=real distance/preset scale entry
