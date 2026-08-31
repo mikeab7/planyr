@@ -33,6 +33,16 @@ _Last updated: 2026-08-31._
       exactly why past sessions were told to leave it alone until you decide it's worth it. No session should
       flip this on its own initiative; it needs your call. Once you flip it (or decide not to), say so and a
       session re-runs `V438336` again. Full background: `B793696` in `BACKLOG.md`.
+- [ ] **Check whether `main` has a branch-protection rule set** (`github.com/mikeab7/planyr/settings/branches`)
+      — a SEPARATE question from the two above (those are about un-drafting a PR; this is about arming
+      auto-merge on one that's already ready). Found 2026-08-31 (`B897440`) while shipping PR #1245: even
+      after the Workflow-permissions flip and un-drafting the PR by hand, GitHub still refused to arm
+      auto-merge — first "Protected branch rules not configured for this branch," then (once the checks
+      themselves went green) "Pull request in unstable status." GitHub's auto-merge needs a protection rule
+      (at minimum, a required status check) on `main` before it will queue anything, so either there isn't
+      one, or it exists but doesn't name `build` as required. If there's no rule: add one requiring the
+      `build` check to pass before merging. **Nothing is broken while this waits** — a session just has to
+      merge each green PR by hand instead of it happening on its own, same as before this automation existed.
 - [ ] **Two stale throwaway probe branches need deleting** — `claude/verify-pr-auto-ready-throwaway` and
       `claude/verify-pr-auto-ready-20260831-001137`. Both are closed PRs' leftover branches from testing the
       item above; no session's git credentials can delete a remote branch here (`HTTP 403`), and there's no
