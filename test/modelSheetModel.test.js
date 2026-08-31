@@ -14,7 +14,7 @@ import { describe, it, expect } from "vitest";
 import {
   createSheet, migrateSheet, setRaw, commitCellText, blankRange, renameColumn, setNumberFormat,
   addColumn, deleteColumn, ensureColumnCount, colAt, cellKey, columnIndexByName, formatAt,
-  isFormulaText, usedRangeEnd, padRowCount,
+  isFormulaText, usedRangeEnd, padRowCount, sheetsDiverge,
 } from "../src/workspaces/model/lib/sheetModel.js";
 
 describe("createSheet", () => {
@@ -282,5 +282,36 @@ describe("migrateSheet — never guesses at a shape it does not recognize", () =
     delete old.formats;
     const migrated = migrateSheet(JSON.parse(JSON.stringify(old)));
     expect(migrated.formats).toEqual({});
+  });
+});
+
+// B891184-FOLLOWUP-2 (2026-08-31) — the cross-device silent-overwrite guard. ModelApp.jsx keeps
+// showing this device's own local sheet on load even when a cloud copy also exists ("local
+// always wins on load"); this is what tells it whether that's actually SAFE (the two are the
+// same content — most opens of the SAME device that made the last save) or DANGEROUS (a second
+// device's stale copy is about to silently clobber the first device's saved cloud work).
+describe("sheetsDiverge — the cross-device divergence check", () => {
+  it("identical content (round-tripped through JSON, as the cloud row is) does not diverge", () => {
+    const s = setRaw(createSheet(), 0, 0, "100");
+    expect(sheetsDiverge(s, JSON.parse(JSON.stringify(s)))).toBe(false);
+  });
+
+  it("a real content difference (a different cell value) DOES diverge", () => {
+    const a = setRaw(createSheet(), 0, 0, "100");
+    const b = setRaw(createSheet(), 0, 0, "999");
+    expect(sheetsDiverge(a, b)).toBe(true);
+  });
+
+  it("a formula vs. its own evaluated-looking literal still diverges (raw text, not evaluated)", () => {
+    const a = setRaw(createSheet(), 0, 0, "=1+2");
+    const b = setRaw(createSheet(), 0, 0, "3");
+    expect(sheetsDiverge(a, b)).toBe(true);
+  });
+
+  it("a format-only difference (same values, different number format) diverges too", () => {
+    const base = setRaw(createSheet(), 0, 0, "100");
+    const a = setNumberFormat(base, 0, 0, 0, 0, "0.0%");
+    const b = setNumberFormat(base, 0, 0, 0, 0, "$#,##0");
+    expect(sheetsDiverge(a, b)).toBe(true);
   });
 });

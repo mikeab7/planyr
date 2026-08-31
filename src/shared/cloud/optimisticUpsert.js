@@ -119,7 +119,13 @@ export async function casUpsert(client, table, { uid, id, row, expected }) {
   try {
     if (expected == null) {
       // Insert: stamp the creator here (callers omit user_id from `row` so an UPDATE can't clobber it).
-      const { data, error } = await client.from(table).insert({ ...row, user_id: uid, version: 1 }).select("version");
+      // `id` is spread AFTER `row` (never trust the caller already put it there — B891184-FOLLOWUP-2:
+      // model_sheets shipped a caller whose `row` was just `{ data }`, so every first-ever insert hit
+      // the table's `id text not null` constraint (23502) in total silence — no console log anywhere on
+      // this path surfaced it. `id` is already a required param here; spreading it defensively into the
+      // payload costs nothing for a caller that already includes it (same value, harmless overwrite) and
+      // closes the landmine for good, rather than trusting every future caller to remember the contract.
+      const { data, error } = await client.from(table).insert({ ...row, id, user_id: uid, version: 1 }).select("version");
       return interpretInsert(data, error);
     }
     const { data, error } = await client.from(table)
