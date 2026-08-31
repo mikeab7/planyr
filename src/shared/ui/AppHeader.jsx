@@ -279,12 +279,12 @@ function ModuleTab({ m, isActive, onClick }) {
       aria-current={isActive ? "page" : undefined}
       style={{
         display: "flex", alignItems: "center", gap: 5,
-        height: "100%", padding: "0 13px",
+        height: "100%", padding: "0 9px",
         border: "none",
         borderBottom: `2px solid ${isActive ? fill : "transparent"}`,
         background: "transparent",
         color: isActive || hover ? textCol : TAB_IDLE,
-        fontFamily: "inherit", fontSize: 12.5,
+        fontFamily: "inherit", fontSize: 11.5,
         fontWeight: isActive ? 600 : 500,
         cursor: "pointer", whiteSpace: "nowrap",
         transition: "color 0.15s, border-color 0.15s",
@@ -708,8 +708,16 @@ export default function AppHeader({
       style={{ flex: "none", background: CHROME, borderBottom: `1px solid ${LINE}`, position: "relative", zIndex: 60 }}
       data-fullscreen={fullscreen ? "on" : undefined}
     >
-      {/* ── Row 1 — 35px (−20% from 44 per B169; contents stay vertically centered) ── */}
-      <div ref={rowRef} className={narrow ? "no-hscrollbar" : undefined} style={{ height: 35, display: "flex", alignItems: "center", position: "relative", ...rowScroll }}>
+      {/* ── Row 1 — 30px (B885137/NEW-2, owner-approved "Headers" artboard, 2026-08-30/31;
+           was 35px per B169). ⛔ AUDIT-FIRST: the artboard's "today" baseline (15px type, 13px
+           padding, 96px total) does NOT match what this row actually measured live — 35px tall
+           already, with the crumb/"Map" text already at 11.5–12.5px, not 15px. The one real
+           violation of "nothing above --font-display" was the WORDMARK (14.8px, BrandMark
+           size=20) — fixed below (size=19 → ~14px). 30px is not a bare padding shrink: the
+           real floor is the 26px-tall FullscreenButton/SettingsMenu icon buttons already living
+           in this row (untouched — out of this item's scope), so 30 is the smallest height that
+           doesn't clip them; contents stay vertically centered. */}
+      <div ref={rowRef} className={narrow ? "no-hscrollbar" : undefined} style={{ height: 30, display: "flex", alignItems: "center", position: "relative", ...rowScroll }}>
 
         {/* ⛔ NEW-2 — NAVIGATION WINS. Read this before changing any of the three zone flexes.
             The owner could not open the plan switcher on a laptop: "the unincorporated / city of
@@ -738,7 +746,7 @@ export default function AppHeader({
             window. That is what "navigation wins" buys. Narrow (phone) is untouched — the row
             scrolls sideways there and the zoneFixed no-shrink still applies. (Dropdowns portal to
             <body>, so overflow:hidden here never clips a menu.) */}
-        <div ref={leftZoneRef} data-header-zone="left" style={{ display: "flex", alignItems: "center", gap: 4, paddingLeft: 12, minWidth: 0, ...(narrow ? { flex: 1, ...zoneFixed } : { flex: "0 1 auto", maxWidth: "60%", overflow: "hidden" }) }}>
+        <div ref={leftZoneRef} data-header-zone="left" style={{ display: "flex", alignItems: "center", gap: 4, paddingLeft: 9, minWidth: 0, ...(narrow ? { flex: 1, ...zoneFixed } : { flex: "0 1 auto", maxWidth: "60%", overflow: "hidden" }) }}>
           {/* Logo — the Planyr brand mark + wordmark (BrandMark, theme-aware).
               Also a secondary route to the Dashboard (the labeled crumb is primary, B192). */}
           <button
@@ -751,14 +759,17 @@ export default function AppHeader({
               padding: "2px 4px", borderRadius: RADIUS.sm,
             }}
           >
-            {/* Phone: just the mark (no wordmark) — reclaims width so the breadcrumb + switcher fit. */}
-            <BrandMark size={20} tile={false} wordmark={!narrow} surface={resolved === "dark" ? "dark" : "light"} />
+            {/* Phone: just the mark (no wordmark) — reclaims width so the breadcrumb + switcher fit.
+                B885137 — size 20→19 (wordmark text ~14.8px→~14.1px, the one row-1 element that
+                was genuinely over --font-display; the icon tile shrinks with it by the same
+                coupled formula, keeping it the largest element in the row per the brief's KEEP). */}
+            <BrandMark size={19} tile={false} wordmark={!narrow} surface={resolved === "dark" ? "dark" : "light"} />
           </button>
 
           {/* Project breadcrumb / switcher (B191–B193) — immediately right of the wordmark */}
           {onSelectProject && (
             <>
-              <span style={{ width: 1, height: 18, background: LINE, flex: "none", margin: "0 4px" }} />
+              <span style={{ width: 1, height: 14, background: LINE, flex: "none", margin: "0 4px" }} />
               <ProjectBreadcrumb
                 currentProject={currentProject}
                 accent={accent}
@@ -828,7 +839,7 @@ export default function AppHeader({
           data-header-zone="right"
           style={{
             flex: narrow ? "1 0 auto" : "0 0 auto", display: "flex", alignItems: "center",
-            justifyContent: "flex-end", gap: 6, paddingRight: 12,
+            justifyContent: "flex-end", gap: 6, paddingRight: 9,
           }}
         >
           {/* The compact, app-wide save indicator (NEW-1): one shared component, driven by
@@ -855,7 +866,7 @@ export default function AppHeader({
       {toolbarCenter ? (
         // On narrow, scroll sideways (nowrap) instead of wrapping to a 2nd line — the owner's
         // explicit ask. Above the breakpoint the original wrap layout is untouched.
-        <div className={narrow ? "no-hscrollbar" : undefined} style={{ minHeight: 44, display: "flex", alignItems: "center", flexWrap: narrow ? "nowrap" : "wrap", rowGap: 2, borderTop: `1px solid ${LINE}`, ...rowScroll }}>
+        <div className={narrow ? "no-hscrollbar" : undefined} style={{ minHeight: 26, display: "flex", alignItems: "center", flexWrap: narrow ? "nowrap" : "wrap", rowGap: 2, borderTop: `1px solid ${LINE}`, ...rowScroll }}>
           {/* Left zone — module tabs (flex:1, basis 0 — mirrors Row 1 so the center is
               TRULY centered regardless of how wide the tabs vs the toolbar are). Omitted
               entirely when showModuleTabs is false (B651873) — no unrendered spacer, since
@@ -877,7 +888,12 @@ export default function AppHeader({
           </div>
         </div>
       ) : (
-        <div className={narrow ? "no-hscrollbar" : undefined} style={{ height: 44, display: "flex", alignItems: "center", borderTop: `1px solid ${LINE}`, ...rowScroll }}>
+        // B885137 (NEW-2) — 44px→26px. Every tab STRETCHES to this row's height (ModuleTab's
+        // own `height:"100%"` below) and self-centers its content, so 26 lands exactly on
+        // --control-h-md (CONTROL_H.md) with no separate padding math needed — verified against
+        // the mockup's own derived number (6px padding + an 11.5px line ≈ 26) rather than typed
+        // in blind.
+        <div className={narrow ? "no-hscrollbar" : undefined} style={{ height: 26, display: "flex", alignItems: "center", borderTop: `1px solid ${LINE}`, ...rowScroll }}>
 
           {/* Module tabs — the planner's own workspace navigation. Omitted entirely on a
               standalone route (B651873, e.g. /food): the toolbar zone below is already
