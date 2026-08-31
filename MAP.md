@@ -104,7 +104,7 @@ _618 source files mapped._
 - **`src/workspaces/model/lib/sheetEngine.js`** — Wires the sheet model to the shared formula engine: evaluates a per-CELL dependency graph (A1 grid refs + same-row `[Column]` refs), and renders each cell's display/formula-bar text.
   - _exports_: `cellAddressText`, `displayFor`, `displayKindFor`, `evaluateSheet`, `formulaBarText`, `formulaSource`, `kindOf`, `literalTypedValue`
 - **`src/workspaces/model/lib/sheetModel.js`** — The pure spreadsheet data model: columns/cells/formulas, cell addressing, and every mutator (all pure, undo-stack-ready).
-  - _exports_: `addColumn`, `blankRange`, `cellKey`, `colAt`, `columnIndexByName`, `commitCellText`, `createSheet`, `deleteColumn`, `ensureColumnCount`, `formatAt`, `isFormulaText`, `migrateSheet`, `padRowCount`, `rawAt`, `renameColumn`, `setNumberFormat`, `setRaw`, `SHEET_VERSION`, `usedRangeEnd`
+  - _exports_: `addColumn`, `blankRange`, `cellKey`, `colAt`, `columnIndexByName`, `commitCellText`, `createSheet`, `deleteColumn`, `ensureColumnCount`, `formatAt`, `isFormulaText`, `migrateSheet`, `padRowCount`, `rawAt`, `renameColumn`, `setNumberFormat`, `setRaw`, `SHEET_VERSION`, `sheetsDiverge`, `usedRangeEnd`
 - **`src/workspaces/model/lib/sheetOps.js`** — Copy/paste/fill-down and the Ctrl+Arrow block-jump target, sharing the formula engine's relative-reference rewrite.
   - _exports_: `copyRange`, `ctrlArrowTarget`, `fillDown`, `pasteRange`
 - **`src/workspaces/model/lib/undoStack.js`** — General whole-state undo/redo: a snapshot stack keyed on committed edits, agnostic to what kind of edit each one was.
