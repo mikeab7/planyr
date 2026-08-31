@@ -46,7 +46,8 @@ async function startBlank(page, { theme }) {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.addInitScript((t) => { try { localStorage.setItem("planyr.theme", t); } catch { /* ignore */ } }, theme);
   await page.goto("/");
-  await page.getByRole("button", { name: /Start blank/i }).click();
+  await page.getByTestId("map-start-blank-menu-btn").click();
+  await page.getByTestId("map-start-blank-menu-item").click();
   await expect(canvas(page)).toBeVisible();
 }
 

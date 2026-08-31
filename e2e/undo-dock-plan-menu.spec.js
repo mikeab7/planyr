@@ -16,7 +16,8 @@ const canvas = (p) => p.getByTestId("planner-canvas");
 async function startBlank(page) {
   await armPlannerHooks(page);
   await page.goto("/");
-  await page.getByRole("button", { name: /Start blank/i }).click();
+  await page.getByTestId("map-start-blank-menu-btn").click();
+  await page.getByTestId("map-start-blank-menu-item").click();
   await expect(canvas(page)).toBeVisible();
   await expect.poll(() => page.evaluate(() => (window.__plannerView ? 1 : 0)), { timeout: 20_000 }).toBe(1);
 }

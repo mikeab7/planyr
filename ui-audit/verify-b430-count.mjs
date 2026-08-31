@@ -49,10 +49,15 @@ async function run() {
   if (await spTab.count()) { await spTab.click(); await page.waitForTimeout(800); ok("Site Planner tab clicked"); }
   else fail("Site Planner tab not found");
 
-  // Open a blank site so the tool rail appears
-  const startBlank = page.locator('button:has-text("Start blank")');
-  if (await startBlank.count()) { await startBlank.click(); await page.waitForTimeout(1200); ok("Opened blank site"); }
-  else fail("Start blank button not found");
+  // Open a blank site so the tool rail appears — "Start blank" is the secondary option behind
+  // the "Select parcels" split button's caret (NEW-1).
+  const startCaret = page.locator('[data-testid="map-start-blank-menu-btn"]');
+  if (await startCaret.count()) {
+    await startCaret.click();
+    await page.locator('[data-testid="map-start-blank-menu-item"]').click();
+    await page.waitForTimeout(1200);
+    ok("Opened blank site");
+  } else fail("Start blank caret not found");
 
   // 2. No JS crashes so far
   if (errors.length === 0) ok("No JS crashes on load");

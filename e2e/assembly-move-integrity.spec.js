@@ -31,8 +31,8 @@ test.describe("bonded assembly integrity on move + undo (logged out)", () => {
 
     await page.goto("/");
     await openModule(page, "site-planner");
-    await page.getByRole("button", { name: /Start blank/i }).first().click();
-
+    await page.getByTestId("map-start-blank-menu-btn").first().click();
+    await page.getByTestId("map-start-blank-menu-item").first().click();
     const svg = page.getByTestId("planner-canvas");
     await expect(svg).toBeVisible({ timeout: 15000 });
     await page.getByRole("button", { name: /^Building$/ }).first().click();

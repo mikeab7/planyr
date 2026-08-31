@@ -34,8 +34,11 @@ was never clicked" quietly ships broken.
 > - **Logged-out only:** that proxy also CORS-blocks the Supabase auth handshake, so self-tests run in
 >   **this-device (logged-out) mode** — full coverage for the planner/drawing tools, but anything that
 >   *requires* sign-in (cloud save/sync) still needs a signed-in check elsewhere.
-> - Enter the planner via **"Start blank"**; drive the SVG canvas with `page.mouse` (CDP mouse events
->   fire React's pointer handlers); `page.screenshot({clip})` then read the PNG back to eyeball it.
+> - Enter the planner via the map toolbar's **"Select parcels ▾"** caret → **"Start blank"** (NEW-1,
+>   2026-08-29 — "Start blank" is no longer its own button; `getByTestId("map-start-blank-menu-btn")`
+>   then `getByTestId("map-start-blank-menu-item")` is the reliable two-step click); drive the SVG
+>   canvas with `page.mouse` (CDP mouse events fire React's pointer handlers); `page.screenshot({clip})`
+>   then read the PNG back to eyeball it.
 
 >
 > ### 🚚 Confirming a change is actually SERVED (B1119) — use the script, not a hand grep
@@ -112,6 +115,21 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+
+### V510400 — B922816: the FULL "Select parcels" path — clicking a real county parcel through to a working, plannable plan — still works from the new split button `Blocker: live-GIS`
+
+**Why this needs its own real pass.** B922816 restyled "Select parcels" into the map's primary action and moved "Start blank" behind a caret; the `onClick={() => setSelectMode(true)}` handler itself is byte-for-byte unchanged, and headless verification here confirmed clicking it still arms select mode (a "Cancel" affordance appears). What could NOT be driven here is the rest of that path — clicking an actual county parcel polygon, which requires reaching a live county GIS host, every one of which is egress-blocked from this sandbox (`ERR_CONNECTION_RESET`, the same wall documented throughout this file). So the piece that is genuinely unproven is: does a real parcel click still resolve to a plannable site through the new control?
+
+**What was verified here, headless, logged out, no GIS needed:** (1) the row-1 header's duplicate "Start blank" button is gone; (2) exactly one "Select parcels" control renders on the map's resting toolbar, filled with the accent (`rgb(194, 65, 12)` — matches `--accent`); (3) no bare "Start blank" button is visible anywhere at rest; (4) the caret (`data-testid="map-start-blank-menu-btn"`) opens a one-item menu holding "Start blank" (`data-testid="map-start-blank-menu-item"`); (5) clicking it lands in the planner canvas with a LOCATED record written (`origin: {lat, lon}` present in the saved site); (6) clicking "Select parcels" still arms select mode (Cancel affordance appears); (7) `#/` and `#/site-planner` both render the full app cleanly (no route broke). All of this is `e2e/parcel-outage-fallback.spec.js`'s + `test/parcelOfflineWiring.test.js`'s live/sandbox coverage now, updated for the new control.
+
+**Steps, each with a named expected result — run on planyr.io (signed in or out, either works since parcel-select needs no account):**
+1. Land on the map with no project open. **Expect:** ONE button reads "Select parcels" (accent-filled), with a small caret beside it — no second "Start blank" button anywhere on screen.
+2. Click "Select parcels". **Expect:** select mode arms (the same click-to-add-a-lot hint and Cancel control this app has always shown).
+3. Click a real parcel on the map. **Expect:** the lot highlights and adds to the selection, exactly as before this change (the underlying selection/assembly code is untouched).
+4. Click "Plan this site" (or the equivalent confirm action). **Expect:** a new plan opens, located at the parcel, with its boundary already drawn — identical to the pre-B922816 behavior.
+5. Back on the map, click the caret next to "Select parcels", then click "Start blank" in the menu that opens. **Expect:** a new, unlocated-but-anchored plan opens (born at the map's current center), same as the old standalone button gave.
+
+**Result:** ⏳ pending — needs a live pass against a real county GIS host, which this sandbox cannot reach. Everything reachable without live GIS is measured and confirmed above and in BACKLOG.md's B922816 entry.
 
 ### V495968 — B891184: the Model workspace's cloud save actually round-trips through Supabase, on a real signed-in account, after the `model_sheets` migration is applied `Blocker: auth` `Blocker: migration`
 
