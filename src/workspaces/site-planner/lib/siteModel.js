@@ -1492,7 +1492,22 @@ export function parcelDisplayInfo(parcels) {
      * `splitName` at the cut and wins here; the walked value remains for legacy plans. */
     const stampedDepth = p && p.splitName && Number.isFinite(p.splitDepth) ? p.splitDepth : depth;
     out.set(p.id, {
-      tag, depth: stampedDepth,
+      tag,
+      /* ⛔ B966625 — TWO DIFFERENT QUESTIONS WERE ANSWERED BY ONE FIELD, AND THE PANEL ASKED THE
+       * WRONG ONE. `stampedDepth` answers "how many cuts deep is this piece's LINEAGE" — the right
+       * question for naming (a re-split needs to keep alternating letters/digits even once its
+       * parent is gone). The Parcel panel asked the SAME field for how far to INDENT a row, which
+       * is a question about the CURRENT, RESOLVABLE tree: how many live ancestors does this row
+       * actually nest under, right now, in `parcels`. Those two answers agree only while every
+       * ancestor is still present — which B472049 made the uncommon case (a split tombstones its
+       * parent on purpose). So a piece born five cuts deep, now orphaned, indented 5 levels under
+       * whatever unrelated row happened to sit above it in list order, while a genuinely-nested
+       * live child two levels down indented only 2. Fixed by naming the two questions separately:
+       * `depth` (below) is the WALKED value — 0 for anything whose parent isn't a live row in this
+       * list, exactly like `isRoot` already treats it — and stays what `parcelOutline` indents by.
+       * `lineageDepth` keeps the stamped value for `parcelSplitNames`' alternation. Never read
+       * `lineageDepth` for indentation or `depth` for the next split's letter/digit choice. */
+      depth, lineageDepth: stampedDepth,
       superseded: (kids.get(p.id) || []).length > 0,
       name,
       suffixed: nameOf(p, new Set()).suffixed,   // does this name already end in a birth suffix?
@@ -1519,7 +1534,11 @@ export function parcelSplitNames(parcels, parentId, count) {
   const info = parcelDisplayInfo(parcels);
   const parent = info.get(parentId);
   const base = parent ? parent.name : "Parcel ?";
-  const depth = (parent ? parent.depth : 0) + 1;
+  // B966625 — the NEXT cut's letter/digit alternation must keep counting from the parent's
+  // LINEAGE depth (its own stamped `splitDepth`, surviving the parent's tombstone), never from
+  // `depth` (the walked, display-only value `parcelOutline` indents by — 0 for an orphaned
+  // parent, which would restart the alternation and collide with an unrelated sibling's name).
+  const depth = (parent ? parent.lineageDepth : 0) + 1;
   const sep = (parent && parent.suffixed) || /[0-9]$/.test(base) ? "" : " ";
   const names = Array.from({ length: Math.max(0, count | 0) }, (_, i) =>
     base + sep + (depth % 2 === 1 ? birthLetter(i) : String(i + 1)));

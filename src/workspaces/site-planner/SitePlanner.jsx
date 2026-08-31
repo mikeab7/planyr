@@ -7181,8 +7181,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (made.length > 2) notes.push(`Cut made ${made.length} pieces`);
         /* B520560 — a piece too small to SEE is still a parcel and still keeps its acreage (owner
          * rule: nothing discarded silently). It is named here only because an eight-square-foot lot
-         * on a hundred-acre plan is invisible, and he should know it is there to delete. */
+         * on a hundred-acre plan is invisible, and he should know it is there to delete. This ONLY
+         * fires when nothing was small enough to SNAP (below) — see B966628. */
         if (res.tiny) notes.push(`${res.tiny.count === 1 ? "one piece is" : `${res.tiny.count} pieces are`} too small to see (${Math.round(res.tiny.area).toLocaleString()} SF) — kept, not dropped`);
+        /* B966628 (NEW-5) — a fragment under threshold is fused into its neighbour rather than left
+         * as its own throwaway row; the acreage still isn't lost, it's just not a separate parcel. */
+        if (res.snapped) notes.push(`${res.snapped.count === 1 ? "a sliver" : `${res.snapped.count} slivers`} too small to be ${res.snapped.count === 1 ? "its" : "their"} own parcel (${Math.round(res.snapped.area).toLocaleString()} SF total) — merged into the piece next to it, acreage kept`);
         if (res.outlineDrift) notes.push(`this parcel's outline overlaps itself, so its stated acreage runs ${Math.round(res.outlineDrift.sqft).toLocaleString()} SF above the land it encloses`);
         /* LOUD-FAILURE on a name clash. The lineage names cannot collide with each other, but a
          * name the user TYPED on another parcel can duplicate one — so the check runs against the
@@ -7204,12 +7208,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Inactive parcels are excluded from merge candidacy (B170) — they don't participate
   // in yield/site analysis, so they shouldn't be combinable either. Allow de-selecting an
   // already-picked id (e.g. one just toggled inactive) but never adding an inactive one.
-  const toggleMerge = (id) => setCombineSel((s) => {
-    if (s.includes(id)) return s.filter((x) => x !== id);
+  // B966626 — LOUD-FAILURE: clicking an INACTIVE parcel in merge-pick mode used to be a bare
+  // silent no-op (`return s`) — no highlight, no message, nothing. The owner's Bain report ("it's
+  // not letting me merge the smaller interior parcel") traced to exactly this: that parcel was
+  // active:false, so every click on it here did nothing and the app never said why.
+  const parcelLabel = (id) => parcelDisplayInfo(parcels).get(id)?.name || "This parcel";
+  const inactiveMergeWarn = (id) => flashWarn(`⚠ "${parcelLabel(id)}" is excluded from yield totals, so it can't be picked to merge — turn its Active checkbox back on first.`, 7000);
+  const toggleMerge = (id) => {
     const pc = parcels.find((p) => p.id === id);
-    if (pc && pc.active === false) return s;
-    return [...s, id];
-  });
+    if (!combineSel.includes(id) && pc && pc.active === false) { inactiveMergeWarn(id); return; }
+    setCombineSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  };
   // B735 — Shift-click / additive merge pick. Unlike toggleMerge (used by the B720 pick MODE,
   // where the whole set is built from scratch), this SEEDS the set from the current single
   // selection first — so a plain-click A then Shift-click B accumulates [A,B] instead of
@@ -7220,6 +7229,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // otherwise the seed would resurrect it on the next Shift-click. So on removal `sel` falls back
   // to the last remaining picked parcel (or clears).
   const shiftPickParcel = (id) => {
+    // B966626 — same silent-refusal shape as `toggleMerge`: Shift-clicking an inactive parcel
+    // must say why it didn't join the pick set, not just leave the set unchanged.
+    const pc = parcels.find((p) => p.id === id);
+    if (!combineSel.includes(id) && pc && pc.active === false) { inactiveMergeWarn(id); return; }
     const next = extendMergeSelection(combineSel, id, {
       primaryId: sel?.kind === "parcel" ? sel.id : null,
       isActive: (pid) => parcels.find((p) => p.id === pid)?.active,
@@ -7247,7 +7260,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // consolidation. Merges greedily so a connected group of 2+ collapses to one.
   const mergeParcels = () => {
     const chosen = parcels.filter((p) => combineSel.includes(p.id) && p.active !== false); // inactive parcels never merge (B170)
-    if (chosen.length < 2) return;
+    if (chosen.length < 2) {
+      // B966626 — defense in depth: `toggleMerge`/`shiftPickParcel` already refuse to let an
+      // inactive parcel into `combineSel`, but a pick can still go stale (e.g. toggled inactive
+      // from the panel checkbox after being picked) — never let that combination fall through to
+      // a silent no-op on the Merge button too.
+      const droppedCount = combineSel.length - chosen.length;
+      if (droppedCount > 0) {
+        flashWarn(`⚠ ${droppedCount} of the picked parcels ${droppedCount === 1 ? "is" : "are"} excluded from yield totals, so ${droppedCount === 1 ? "it" : "they"} can't be merged — turn ${droppedCount === 1 ? "its" : "their"} Active checkbox back on first.`, 7000);
+      }
+      return;
+    }
     let result = chosen[0].points;
     let remaining = chosen.slice(1).map((p) => p.points);
     let progress = true;
@@ -16965,7 +16988,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {!ovLoading && (
               <text x={cx} y={cy + 12} textAnchor="middle" fontSize={11.5} fill={PAL.muted} textDecoration="underline"
                 onClick={(e) => { e.stopPropagation(); removeOverlay(o.id); }}>
-                ✕ remove this reference
+                ✕ remove this overlay
               </text>
             )}
           </g>);
@@ -17138,7 +17161,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     { id: "analysis", label: "Analysis" },
     { id: "yield", label: "Yield" },
     { id: "properties", label: "Properties" }, // B733: docked home for the selected-element inspector
-    { id: "references", label: "References" }, // B654: Aerial + Overlay merged into one panel
+    { id: "references", label: "Overlays" }, // B654: Aerial + Overlay merged into one panel. B966630 — user-facing label
+    // renamed References → Overlays (the panel renders ONLY sheetOverlays; V411/B952 already called
+    // this an overlay everywhere but the UI). The panel id stays `references` — it keys persisted
+    // panel state and every `setLeftPanel("references")` call site, and renaming it would orphan
+    // them for no user gain (same shape as the `parcel`/"Land" split above).
     { id: "standards", label: "Standards" }, // B653: element starting values (view toggles live in the on-canvas View menu)
   ];
   // NEW-1 (single-occupancy left dock, amends B656/B733): on DESKTOP the inspector only ever renders
@@ -18284,6 +18311,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const n = pc.points.length, base = +settings.setback || 0;
     return (Array.isArray(pc.setbacks) && pc.setbacks.length === n) ? pc.setbacks : Array.from({ length: n }, () => base);
   };
+  // B966627 — LOUD-FAILURE: `parcelSetbacks` above answers "what values to USE" and silently
+  // substitutes the project default when a parcel has never had its own setbacks written — which
+  // is exactly what every split child inherits (`remapEdgeVector` returns null when the cut
+  // parent had none). That is the right answer for EDITING (typing into a field should start from
+  // something), but the RENDER path used the same silent substitution, so a parcel with NO setback
+  // ever set drew an identical dashed ring and an identical "25′" chip to a parcel someone actually
+  // typed 25 into — the owner's Bain report: "his screenshot shows 25' dashed offsets and five 25'
+  // chips drawn around 2A1A1B" even though `2A1A1B.setbacks` is `null` in `site_elements`. This is
+  // the ONE place that answers "is this parcel's setback a value someone SET, or a number the app
+  // is quietly assuming" — the two render sites below (the dashed ring, the chip label) both ask
+  // it, so a defaulted setback reads visibly differently without inventing a wordy sentence.
+  const parcelSetbacksExplicit = (pc) => Array.isArray(pc.setbacks) && pc.setbacks.length === pc.points.length;
   const setEdgeSetback = (pc, i, v) => {
     pushHistory();
     const arr = parcelSetbacks(pc).slice(); arr[i] = Math.max(0, v);
@@ -18382,6 +18421,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const editing = sbEditMode !== "role" || !!numEdit;
     if (!setbackChipsVisible(labelPpf, { editing })) return null;
     const sb = parcelSetbacks(selParcel);
+    // B966627 — has THIS parcel ever had a setback written, or is `sb` the silent project-default
+    // fallback? Feeds a "~" onto the chip text below so a defaulted number never reads identically
+    // to one the user actually set (LOUD-FAILURE).
+    const sbExplicit = parcelSetbacksExplicit(selParcel);
     /* NEW-1 — the chip's TEXT is ALWAYS the standard high-contrast ink, whatever colour the user
        gave the setback line. Before this it was `pc.sbStroke || PAL.chipInk`, so the owner's
        bright-green setback line produced bright-green numerals on a white plate that he could not
@@ -18426,7 +18469,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
       return (
         <g key={key} style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); const fp = p2f(e.clientX, e.clientY); onEdit(fp, e.altKey, key); }}>
-          <rect data-testid="setback-chip" x={anchor.x - w / 2} y={anchor.y - CHIP_H / 2 - 1} width={w} height={CHIP_H} rx={3.5}
+          {!sbExplicit && <title>This parcel has no setback of its own — showing the project default. Click to set one for just this parcel.</title>}
+          <rect data-testid="setback-chip" data-setback-explicit={sbExplicit ? "1" : "0"} x={anchor.x - w / 2} y={anchor.y - CHIP_H / 2 - 1} width={w} height={CHIP_H} rx={3.5}
             fill={chipStyle.plate} stroke={chipStyle.stroke} strokeWidth={1} strokeOpacity={0.5} />
           <text data-testid="setback-chip-text" x={anchor.x} y={anchor.y + 3} textAnchor="middle" fontSize="9.5"
             fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={chipStyle.text} fontWeight="600">{txt}</text>
@@ -18478,7 +18522,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const words = chipRoleWords(cands);
     const labelled = cands.map((c, i) => ({
       ...c,
-      txt: `${words[i] ? `${ROLE_SHORT[c.role] || "Side"} · ` : ""}${Number.isFinite(c.value) ? `${f0(c.value)}′` : "—"}`,
+      // B966627 — a "~" ahead of the number is the ONE thing that changes when this parcel has no
+      // setback of its own: "not set for this parcel — showing the project default" is what's
+      // going on, and "~25′" says the same thing in one glyph instead of a wordy chip.
+      txt: `${words[i] ? `${ROLE_SHORT[c.role] || "Side"} · ` : ""}${sbExplicit ? "" : "~"}${Number.isFinite(c.value) ? `${f0(c.value)}′` : "—"}`,
     }));
     const shown = spaceOut(
       labelled
@@ -19151,19 +19198,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     parcel: `Parcels · ${parcels.length - supersededParcelIds.size}`,
     analysis: "Site Analysis",
     properties: "Properties", // B733 (dock-only; the companion supplies its body)
-    references: "References",
+    references: "Overlays",
     standards: "Standards",
   };
   // Render one left-rail panel's body for a given id, hosted in EITHER the docked column or a
   // floating card. A called render FUNCTION (never a mounted <Component/>) so the same JSX inlines
   // into either host with no remount on drag (MODULE-SCOPE-COMPONENTS).
   const renderPanelBody = (_pid) => (<>
-          {/* References (B654) — the merged Aerial + Overlay panel: every backdrop the plan
-              sits over, in one list with one add flow and ONE shared calibration (the
-              ovCalib trace/align flow — the old separate "calibrate" tool is gone).
-              Row #1 is the aerial (image-only, always beneath everything); the rest are
-              sheet references (site plans / surveys, PDF or image). Persisted fields are
-              UNCHANGED (`underlay` + `sheetOverlays`) — this is a UI unification. */}
+          {/* Overlays (B654; user-facing name via B966630) — the merged Aerial + Overlay panel:
+              every backdrop the plan sits over, in one list with one add flow and ONE shared
+              calibration (the ovCalib trace/align flow — the old separate "calibrate" tool is gone).
+              Row #1 is the aerial (image-only, always beneath everything); the rest are sheet
+              overlays (site plans / surveys, PDF or image). Persisted fields are UNCHANGED
+              (`underlay` + `sheetOverlays`) — this is a UI unification, then a UI rename. */}
           {_pid === "references" && (
           <Section>
             {/* The whole block is a drop target (NEW-1): drop a PDF/image here or on the map,
@@ -19174,12 +19221,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               onDragEnter={(e) => { if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return; e.preventDefault(); overlayDragDepth.current += 1; setOverlayDropOver(true); }}
               onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) e.preventDefault(); }}
               onDragLeave={(e) => { if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return; overlayDragDepth.current = Math.max(0, overlayDragDepth.current - 1); if (overlayDragDepth.current === 0) setOverlayDropOver(false); }}
-              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); overlayDragDepth.current = 0; setOverlayDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || isDxfFile(f) || isDwgFile(f) || (f.type || "").startsWith("image/"))) { if (fs.length > 1) flashWarn("Added the first file — one reference is added at a time.", 6000); addOverlayFile(f); } }}
+              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); overlayDragDepth.current = 0; setOverlayDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || isDxfFile(f) || isDwgFile(f) || (f.type || "").startsWith("image/"))) { if (fs.length > 1) flashWarn("Added the first file — one overlay is added at a time.", 6000); addOverlayFile(f); } }}
               style={{ border: `2px dashed ${overlayDropOver ? PAL.accent : PAL.panelLine}`, borderRadius: 10, padding: 12, textAlign: "center", cursor: overlayBusy ? "default" : "pointer", background: overlayDropOver ? PAL.accentSoft : SURF_RAISED, transition: "border-color 120ms, background 120ms" }}>
-              <button style={{ ...btn(false), width: "100%" }} disabled={overlayBusy} onClick={(e) => { e.stopPropagation(); overlayFileRef.current?.click(); }}>{overlayBusy ? "Loading…" : "Add reference (PDF / image / CAD)…"}</button>
+              <button style={{ ...btn(false), width: "100%" }} disabled={overlayBusy} onClick={(e) => { e.stopPropagation(); overlayFileRef.current?.click(); }}>{overlayBusy ? "Loading…" : "Add overlay (PDF / image / CAD)…"}</button>
               <input ref={overlayFileRef} type="file" accept="application/pdf,image/*,.dxf,.dwg" style={{ display: "none" }} onChange={(e) => { addOverlayFile(e.target.files?.[0]); e.target.value = ""; }} />
               <div style={{ fontSize: 11, color: PAL.muted, marginTop: 9, lineHeight: 1.5 }}>
-                {overlayDropOver ? <b style={{ color: PAL.accentText }}>Drop to add this reference</b> : <>Drop a site-plan / survey PDF or image <b>here or on the map</b> — or browse. White paper is knocked out so the map shows through (per-sheet toggle below).</>}
+                {overlayDropOver ? <b style={{ color: PAL.accentText }}>Drop to add this overlay</b> : <>Drop a site-plan / survey PDF or image <b>here or on the map</b> — or browse. White paper is knocked out so the map shows through (per-sheet toggle below).</>}
               </div>
             </div>
 
@@ -19261,14 +19308,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </div>
             {!sheetOverlays.length ? null : (
               <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-                {/* B952 — map references live ONLY in the Site Planner and are a SEPARATE feature
-                    from Library documents: the two write to disjoint stores (references → the site
+                {/* B952 — map overlays live ONLY in the Site Planner and are a SEPARATE feature
+                    from Library documents: the two write to disjoint stores (overlays → the site
                     model's sheetOverlays; Library files → doc_reviews/file_facts), with no bridge in
-                    either direction. A plain Library upload never creates a reference here, and
+                    either direction. A plain Library upload never creates an overlay here, and
                     removing a Library file never removes one from the map. This one honest line keeps
-                    a user from expecting a Library delete to clear a map backdrop (the B952 report). */}
+                    a user from expecting a Library delete to clear a map backdrop (the B952 report).
+                    B966630 — reworded the panel's old capitalized display name to "Overlays"; the
+                    independence claim is unchanged. */}
                 <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45 }}>
-                  Map references are managed here, separate from your Library documents — deleting a Library file won't remove a reference from the map, and adding a Library file won't add one.
+                  Map overlays are managed here, separate from your Library documents — deleting a Library file won't remove an overlay from the map, and adding a Library file won't add one.
                 </div>
                 {/* NEW-2 — the list IS the stacking order, front-most first (the way every layers
                     panel reads), so what draws over what is visible without opening a menu. */}
@@ -19350,14 +19399,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           {/* B654: above/below moved into the panel (the right-click menu keeps them too).
                               NEW-2 — these order a reference against the OTHER references, within its band. */}
                           <div style={{ display: "flex", gap: 6 }}>
-                            <button style={{ ...chip, flex: 1, opacity: zf.atFront ? 0.5 : 1 }} disabled={zf.atFront} title="Draw this reference above the other references" onClick={() => reorderOverlay(o.id, "front")}>Bring to front</button>
-                            <button style={{ ...chip, flex: 1, opacity: zf.atBack ? 0.5 : 1 }} disabled={zf.atBack} title="Draw this reference beneath the other references" onClick={() => reorderOverlay(o.id, "back")}>Send to back</button>
+                            <button style={{ ...chip, flex: 1, opacity: zf.atFront ? 0.5 : 1 }} disabled={zf.atFront} title="Draw this overlay above the other overlays" onClick={() => reorderOverlay(o.id, "front")}>Bring to front</button>
+                            <button style={{ ...chip, flex: 1, opacity: zf.atBack ? 0.5 : 1 }} disabled={zf.atBack} title="Draw this overlay beneath the other overlays" onClick={() => reorderOverlay(o.id, "back")}>Send to back</button>
                           </div>
                           {/* NEW-2 — the cross-layer control the owner asked for. Off by default: the usual
                               job is tracing over a scanned plan, where your own property line has to stay on
                               top. Turn it on for an exhibit you're working ON and the whole reference —
                               including its resize corners — comes over the parcel and the site elements. */}
-                          <label style={{ ...ovRow, cursor: "pointer" }} title="Draw this reference over the parcel boundary, the setback ring and the site elements instead of underneath them">
+                          <label style={{ ...ovRow, cursor: "pointer" }} title="Draw this overlay over the parcel boundary, the setback ring and the site elements instead of underneath them">
                             <input type="checkbox" data-testid={`reference-above-${o.id}`} checked={overlayBand(o) === "above"} onChange={(e) => toggleOverlayBand(o.id, e.target.checked)} />
                             <span>{CROSS_BAND_FRONT}</span>
                           </label>
@@ -19666,9 +19715,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           style={{ display: "flex", alignItems: "center", flex: "none", paddingLeft: 2, cursor: "pointer" }}
                         >
                           <input type="checkbox" checked={!inactive} onChange={() => toggleParcelActive(pc.id)}
+                            data-testid={`parcel-row-active-${pc.id}`}
                             style={{ width: 15, height: 15, cursor: "pointer" }} />
                         </label>
                         <button onClick={(e) => { if (mergePick) { toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); } else if (e.shiftKey) { shiftPickParcel(pc.id); } else { setCombineSel([]); setSel({ kind: "parcel", id: pc.id }); } }}
+                          data-testid={`parcel-row-${pc.id}`}
                           style={{ flex: 1, minWidth: 0, textAlign: "left", padding: "7px 9px", borderRadius: RADIUS.md, borderLeft: depth ? `2px solid ${PAL.panelLine || "var(--border-default)"}` : undefined, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "var(--border-default)"}`, background: picked ? "rgba(37,99,235,0.14)" : on ? PAL.accentSoft : SURF_RAISED, cursor: "pointer", fontFamily: "inherit", opacity: superseded ? 0.5 : inactive ? 0.55 : 1 }}>
                           <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}{tag}{picked ? " ✓" : ""}</div>
                           <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{f2(parcelNetSqft(pc) / SQFT_PER_ACRE)} AC{pc.acct ? ` · ${pc.acct}` : ""}</div>
@@ -21478,7 +21529,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       <div style={{ display: "flex", flex: 1, minHeight: 0, position: "relative" }}>
         {/* B784 — always-mounted re-add picker: the canvas "click to re-add" placeholder for a missing
             overlay calls reAddOverlay(id) → this input; the chosen file replaces that overlay in place
-            (transform preserved). Mounted here (not in the References panel) so its ref is live even when
+            (transform preserved). Mounted here (not in the Overlays panel) so its ref is live even when
             that panel is closed. */}
         <input ref={reAddFileRef} type="file" accept="application/pdf,image/*,.dxf,.dwg" style={{ display: "none" }}
           onChange={(e) => { const f = e.target.files?.[0]; const tid = reAddIdRef.current; reAddIdRef.current = null; if (f) addOverlayFile(f, tid); e.target.value = ""; }} />
@@ -21759,11 +21810,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // creation like the boundary's and overridable per parcel. An untouched parcel
                 // resolves to exactly the old hardcoded look (PAL.setback, 1.25, "7 6").
                 const sbs = setbackLineStyle(pc, PAL.setback);
+                // B966627 — a DEFAULTED ring (nothing stored on this parcel; drawn only because
+                // `parcelSetbacks` fell back to the project default) must not paint identically to
+                // one someone actually set. A sparser dash + a lighter stroke is the same idiom this
+                // repo already uses for "not yet confirmed" (the uncalibrated-measurement amber), and
+                // it costs no panel copy (PANEL-BREVITY: this is the canvas, not a panel sentence).
+                const explicit = parcelSetbacksExplicit(pc);
+                const dash = explicit ? sbs.dash : "2 5";
                 // NEW-2 — CASING under the ring, on the same dash so the halo dashes with it.
                 const sbCase = strokeZoom(sbs.weight + PARCEL_CASING_W, zk);
-                return <g key={`sb${pc.id}`}>
-                  <polygon data-testid="setback-casing" points={ring} fill="none" stroke={PAL.lineCasing} strokeWidth={sbCase} strokeDasharray={dashZoom(sbs.dash, zk)} strokeLinejoin="round" pointerEvents="none" />
-                  <polygon data-testid="setback-ring" points={ring} fill="none" stroke={sbs.stroke} strokeWidth={strokeZoom(sbs.weight, zk)} strokeDasharray={dashZoom(sbs.dash, zk)} pointerEvents="none" />
+                return <g key={`sb${pc.id}`} opacity={explicit ? 1 : 0.65}>
+                  <polygon data-testid="setback-casing" points={ring} fill="none" stroke={PAL.lineCasing} strokeWidth={sbCase} strokeDasharray={dashZoom(dash, zk)} strokeLinejoin="round" pointerEvents="none" />
+                  <polygon data-testid="setback-ring" data-setback-explicit={explicit ? "1" : "0"} points={ring} fill="none" stroke={sbs.stroke} strokeWidth={strokeZoom(sbs.weight, zk)} strokeDasharray={dashZoom(dash, zk)} pointerEvents="none" />
                   {/* NEW-4 — the SELECTED lot's grab band is not drawn here: it moves up into the
                       selection-chrome layer with the chips, so it isn't buried under a building
                       that sits hard against the setback line. Every other parcel keeps it here. */}
@@ -23637,7 +23695,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               payoff). Stacks above "✎ Properties" (B656) when both would otherwise land on the
               same corner. */}
           {narrow && !leftPanel && !companionOpen && !mobileSections && (
-            <button onClick={() => setMobileSections(true)} title="Show Land / Analysis / Yield / Properties / References / Standards"
+            <button onClick={() => setMobileSections(true)} title="Show Land / Analysis / Yield / Properties / Overlays / Standards"
               style={{ position: "absolute", left: 12, bottom: (companionSel && !narrowProps) ? 68 : 16, zIndex: 1190, display: "flex", alignItems: "center", gap: 6, padding: "11px 16px", borderRadius: RADIUS.pill, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 800, color: "#fff", background: PAL.ember, boxShadow: "0 6px 18px rgba(0,0,0,0.45)" }}>
               ☰ Sections
             </button>
@@ -27350,7 +27408,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <div style={hdr(true)}>Arrange</div>
             {item({ text: "Bring to front", dis: atFront, on: () => { reorderOverlay(ovMenu.id, "front"); setOvMenu(null); } })}
             {item({ text: "Send to back", dis: atBack, on: () => { reorderOverlay(ovMenu.id, "back"); setOvMenu(null); } })}
-            {item({ text: isAbove ? CROSS_BAND_BEHIND : CROSS_BAND_FRONT, title: isAbove ? "Put this reference back under the parcel and the site elements" : "Lift this reference over the parcel boundary, the setback ring and the site elements", on: () => { toggleOverlayBand(ovMenu.id, !isAbove); setOvMenu(null); } })}
+            {item({ text: isAbove ? CROSS_BAND_BEHIND : CROSS_BAND_FRONT, title: isAbove ? "Put this overlay back under the parcel and the site elements" : "Lift this overlay over the parcel boundary, the setback ring and the site elements", on: () => { toggleOverlayBand(ovMenu.id, !isAbove); setOvMenu(null); } })}
             <div style={hdr(true)}>Place</div>
             {item({ text: locked ? "Unlock" : "Lock", hint: locked ? "🔒" : "🔓", on: () => { patchOverlay(ovMenu.id, { locked: !locked }); setOvMenu(null); } })}
             {item({ text: "Align to base edge…", dis: locked || !hasParcel, title: locked ? "Unlock to align" : (!hasParcel ? "Draw or load a parcel first" : "Click a parcel edge to snap this drawing parallel to it"), on: () => { setSelOverlay(ovMenu.id); setOvAlignBase(ovMenu.id); setOvMenu(null); flashWarn("Click a parcel boundary to align this drawing parallel to it.", 6000); } })}

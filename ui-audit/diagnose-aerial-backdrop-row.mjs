@@ -85,7 +85,7 @@ for (const arm of ARMS) {
   await page.goto(BASE, { waitUntil: "load" });
   await page.waitForTimeout(1500);
 
-  await page.locator('button:has-text("References")').first().click();
+  await page.locator('button:has-text("Overlays")').first().click();
   await page.waitForTimeout(500);
 
   /* The aerial row's opacity slider renders only once the row is SELECTED (`aerialSel`), so a

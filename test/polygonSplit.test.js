@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import {
   polyArea, splitPolygonByLine, splitPolygonByPath,
   splitPolygonByCut, remapEdgeVector, CUT_REASONS,
+  snapTinyPieces, mergePieceRings, sharedBoundaryLength, SLIVER_FRACTION,
 } from "../src/workspaces/site-planner/lib/polygonSplit.js";
 
 // --- tiny local oracle helpers (independent of the implementation) ---
@@ -341,26 +342,110 @@ describe("splitPolygonByCut — the owner's real parcels", () => {
     expect(Math.abs(cutSum(r) - polyArea(SYLVESTRI)) / polyArea(SYLVESTRI)).toBeLessThan(1e-9);
   });
 
-  it("Bain (109 AC): every piece is KEPT, the tiny ones are named, and the broken outline is reported", () => {
+  it("Bain (109 AC): every crumb is SNAPPED into a neighbour, its acreage kept, and the broken outline is reported", () => {
     /* This ring runs 1,296 ft out along a zero-width prong and back, and the returning leg clips
      * the outgoing one about two tenths of an inch above its base. The quoted (shoelace) acreage
      * therefore counts an 8 SF crumb twice.
      * ⛔ B520560, owner rule: "Nothing may be discarded silently — if a cut produces a sliver, he
      * gets it as a parcel rather than losing the acreage." B455360 dropped scraps under a
-     * hundred-thousandth of the parent and reported the loss; this asserts the REVERSAL. */
+     * hundred-thousandth of the parent and reported the loss.
+     * ⛔ B966628 (owner 2026-08-31) REFINES this, it does not reverse it: a sub-threshold crumb no
+     * longer stands alone as its own throwaway parcel — it is FUSED into the piece it shares the
+     * longest boundary with, so this real 5-face cut (3 real pieces + 2 crumbs) now returns 3
+     * pieces, and the acreage is still every bit of it, provably, below. */
     const r = splitPolygonByCut(BAIN, creekCut(BAIN));
     expect(r.ok).toBe(true);
-    expect(r.pieces).toHaveLength(5);               // 3 real pieces + the 2 crumbs, all KEPT
-    expect(r.tiny).not.toBeNull();
-    expect(r.tiny.count).toBe(2);
+    expect(r.pieces).toHaveLength(3);                // 3 real pieces; the 2 crumbs are fused in
+    expect(r.tiny).toBeNull();                        // superseded by `snapped` once fusing happens
+    expect(r.snapped).not.toBeNull();
+    expect(r.snapped.count).toBe(2);
+    expect(r.snapped.area).toBeGreaterThan(0);
     expect(r.outlineDrift).not.toBeNull();
     expect(r.outlineDrift.sqft).toBeGreaterThan(0);
     expect(r.outlineDrift.sqft).toBeLessThan(polyArea(BAIN) * 1e-4);
-    // Nothing left the plan: the pieces themselves plus the reported outline drift are the parcel.
+    // Nothing left the plan: the (now-fused) pieces plus the reported outline drift are the parcel —
+    // the exact same conservation the pre-snap pieces satisfied, just fewer, larger pieces.
     expect(cutSum(r) + r.outlineDrift.sqft).toBeCloseTo(polyArea(BAIN), 3);
-    // And the tiny ones are pieces, not a subtraction — their area is inside the sum above.
-    expect(r.tiny.area).toBeGreaterThan(0);
     expect(cutSum(r)).toBeGreaterThan(polyArea(BAIN) - r.outlineDrift.sqft - 1e-6);
+  });
+});
+
+/* ⛔ B966628 (NEW-5) — the snap mechanics in isolation, on hand-built pieces rather than a traced
+ * cut, so the geometry under test is exactly what the assertions describe. Left+mid+right are
+ * three abutting strips of a 100×100 (10,000 SF) parcel: left 0–45, a 0.0005-ft-wide sliver
+ * 45–45.0005 (0.05 SF — well under the SLIVER_FRACTION threshold of 1 SF), and right 45.0005–100.
+ * The sliver shares a FULL 100 ft edge with BOTH neighbours (it is thin, not short), so a
+ * deterministic winner isn't asserted — only that it merges into a genuine neighbour and nothing
+ * is lost. */
+describe("snapTinyPieces / mergePieceRings — sub-minimum fragments fuse into a neighbour (B966628)", () => {
+  const WHOLE = 10000;
+  const leftPiece = { ring: [{ x: 0, y: 0 }, { x: 45, y: 0 }, { x: 45, y: 100 }, { x: 0, y: 100 }], edgeSrc: [10, 11, 12, 13], area: 4500 };
+  const midPiece = { ring: [{ x: 45, y: 0 }, { x: 45.0005, y: 0 }, { x: 45.0005, y: 100 }, { x: 45, y: 100 }], edgeSrc: [20, 21, 22, 23], area: 0.05 };
+  const rightPiece = { ring: [{ x: 45.0005, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 45.0005, y: 100 }], edgeSrc: [30, 31, 32, 33], area: 5499.95 };
+
+  it("mergePieceRings fuses two pieces along their cancelling (shared) boundary", () => {
+    const fused = mergePieceRings(leftPiece, midPiece, 1e-6);
+    expect(fused).not.toBeNull();
+    expect(polyArea(fused.ring)).toBeCloseTo(leftPiece.area + midPiece.area, 6);
+    // A non-shared edge of the tiny piece survives the fuse carrying ITS OWN provenance — the
+    // fused ring is not silently re-sourced to the bigger piece's edges.
+    const edgeIdx = fused.ring.findIndex((p) => Math.abs(p.x - 45.0005) < 1e-6 && Math.abs(p.y) < 1e-6);
+    expect(edgeIdx).toBeGreaterThan(-1);
+  });
+
+  it("mergePieceRings returns null for two pieces that share no boundary", () => {
+    const farPiece = { ring: [{ x: 500, y: 500 }, { x: 600, y: 500 }, { x: 600, y: 600 }, { x: 500, y: 600 }], edgeSrc: [0, 1, 2, 3] };
+    expect(mergePieceRings(leftPiece, farPiece, 1e-6)).toBeNull();
+  });
+
+  it("sharedBoundaryLength measures the cancelling edge length, 0 for pieces that don't touch", () => {
+    expect(sharedBoundaryLength(leftPiece, midPiece, 1e-6)).toBeCloseTo(100, 6);
+    expect(sharedBoundaryLength(midPiece, rightPiece, 1e-6)).toBeCloseTo(100, 6);
+    const farPiece = { ring: [{ x: 500, y: 500 }, { x: 600, y: 500 }, { x: 600, y: 600 }, { x: 500, y: 600 }], edgeSrc: [0, 1, 2, 3] };
+    expect(sharedBoundaryLength(leftPiece, farPiece, 1e-6)).toBe(0);
+  });
+
+  it("snapTinyPieces fuses the sub-threshold sliver into a genuine neighbour, conserving total area", () => {
+    const result = snapTinyPieces([leftPiece, midPiece, rightPiece], WHOLE, 1e-6);
+    expect(result).not.toBeNull();
+    expect(result.pieces).toHaveLength(2);
+    expect(result.absorbed).toBe(1);
+    const totalBefore = leftPiece.area + midPiece.area + rightPiece.area;
+    const totalAfter = result.pieces.reduce((s, p) => s + polyArea(p.ring), 0);
+    expect(totalAfter).toBeCloseTo(totalBefore, 6);
+    // The sliver is genuinely gone, not renamed: no piece left over reads as sub-threshold.
+    expect(result.pieces.every((p) => polyArea(p.ring) > WHOLE * SLIVER_FRACTION)).toBe(true);
+  });
+
+  it("returns null (refuse) when absorbing the only sliver would leave fewer than 2 pieces", () => {
+    // Only 2 pieces total — the whole cut only ever clipped off a fragment. Snapping it would
+    // leave a single, near-whole "split" that isn't a division at all; that is refused by the
+    // caller instead, never silently accepted as a near-no-op.
+    expect(snapTinyPieces([leftPiece, midPiece], WHOLE, 1e-6)).toBeNull();
+  });
+
+  it("a set with no sub-threshold piece at all is untouched (0 absorbed)", () => {
+    const bigA = { ring: [{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 50, y: 100 }, { x: 0, y: 100 }], edgeSrc: [1, 2, 3, 4], area: 5000 };
+    const bigB = { ring: [{ x: 50, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 50, y: 100 }], edgeSrc: [5, 6, 7, 8], area: 5000 };
+    const result = snapTinyPieces([bigA, bigB], WHOLE, 1e-6);
+    expect(result.pieces).toHaveLength(2);
+    expect(result.absorbed).toBe(0);
+  });
+});
+
+/* ⛔ B966628 — the REFUSAL, end to end through the real cut engine: a cut that only ever clips a
+ * sub-threshold sliver off a rectangle (nothing else divided) must be REFUSED with a real reason,
+ * never accepted as a near-whole "split." */
+describe("splitPolygonByCut — a sliver-only cut is refused, not silently accepted (B966628)", () => {
+  it("clipping a sub-threshold corner off a 100×100 parcel refuses with sliver-only", () => {
+    // RECT is 100×100 = 10,000 SF; SLIVER_FRACTION*10,000 = 0.1 SF. This cut cleaves a
+    // 0.05 × 0.05 ft corner (0.00125 SF) off the top-right — real division, but the
+    // "other side" is a rounding error, not a parcel.
+    const corner = [{ x: 99.95, y: 100 }, { x: 100, y: 99.95 }];
+    const r = splitPolygonByCut(RECT, corner);
+    expect(r.ok).toBe(false);
+    expect(r.code).toBe("sliver-only");
+    expect(r.message).toMatch(/too small to be its own parcel/);
   });
 });
 

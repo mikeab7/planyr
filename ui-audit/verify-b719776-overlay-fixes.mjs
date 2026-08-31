@@ -43,7 +43,7 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
   await openSite(site, page, ctx);
   await assertMeasurable(page, "verify-b719776-overlay-fixes");
 
-  await page.locator('[title="References"]').first().click({ timeout: 4000 }).catch(() => {});
+  await page.locator('[title="Overlays"]').first().click({ timeout: 4000 }).catch(() => {});
   await page.waitForTimeout(400);
   await page.screenshot({ path: new URL("./screens/", import.meta.url).pathname + "aerial-hidden-stale.png" });
 
@@ -100,7 +100,7 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
   await openSite(site, page, ctx, { e2e: true }); // PDF-PARITY check below needs window.__plannerExportSvg
   await assertMeasurable(page, "verify-b719776-overlay-fixes");
 
-  await page.locator('[title="References"]').first().click({ timeout: 4000 }).catch(() => {});
+  await page.locator('[title="Overlays"]').first().click({ timeout: 4000 }).catch(() => {});
   await page.waitForTimeout(400);
   await page.locator("button", { hasText: "crop-test.png" }).first().click();
   await page.waitForTimeout(400);
@@ -187,7 +187,7 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
 
   const bodyText = await page.evaluate(() => document.body.innerText || "");
   check('canvas shows the honest placeholder ("image not on this device")', bodyText.includes("Untitled picture.png") && bodyText.includes("not on this device"));
-  check('canvas placeholder ALSO offers "remove this reference" directly (not just the References panel)', bodyText.includes("remove this reference"));
+  check('canvas placeholder ALSO offers "remove this overlay" directly (not just the Overlays panel)', bodyText.includes("remove this overlay"));
 
   const before = await page.evaluate(() => JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}").BROKEN1.sheetOverlays.length);
   await page.locator("text=remove this reference").first().click({ timeout: 4000 });

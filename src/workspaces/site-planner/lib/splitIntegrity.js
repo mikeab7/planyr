@@ -71,6 +71,18 @@ export const ringAreaAcres = (pts) => ringAreaSqft(pts) / SQFT_PER_ACRE;
 export const isLiveActive = (p) => !!(p && p.active !== false && !p.deletedAt && !p.deleted_at);
 export const liveActive = (parcels) => (parcels || []).filter(isLiveActive);
 
+/* ⛔ NEW-6 (B966629, owner report 2026-08-31) — "I can't tell if the acreage is being double
+ * counted." The two lines above already answer HOW to sum correctly; this answers whether a
+ * ROLLUP FORGOT TO. `enforce_parcel_deleted_inactive` (a DB trigger, `db/parcel_active_deleted_
+ * invariant.sql`) now forces `deleted_at ⇒ active:false` at the write path — so a rollup that
+ * reads `active` ALONE (forgetting the `deletedAt` half `isLiveActive` insists on) is safe
+ * server-side from here on: the state this checks for can no longer be WRITTEN. This is the
+ * client-side twin, for anything that reasons over rows independently of that trigger — an
+ * account-wide audit script, a batch read from before the trigger existed on this connection, or
+ * a defence-in-depth self-check that the app's own math doesn't rely on the trigger alone. */
+export const deletedInactiveViolations = (parcels) =>
+  (parcels || []).filter((p) => p && (p.deletedAt || p.deleted_at) && p.active !== false).map((p) => p.id);
+
 /* Tolerance. These are surveyed rings in feet; the split engine is exact to floating point, so the
  * only legitimate residual is float noise. 1 sqft on a 100-acre tract is ~2e-7 relative — generous
  * for the arithmetic and far tighter than any real loss (the reported one is 28,178 sqft). */

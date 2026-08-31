@@ -48,7 +48,7 @@ await page.waitForTimeout(1500);
 
 // ---------- B733 — rail has a Properties tab between Yield and References ----------
 const railLabels = await page.evaluate(() => {
-  const wanted = ["Land", "Analysis", "Yield", "Properties", "References", "Standards"];
+  const wanted = ["Land", "Analysis", "Yield", "Properties", "Overlays", "Standards"];
   const seen = new Set(); const out = [];
   for (const b of document.querySelectorAll("button[title]")) {
     const t = b.getAttribute("title");
@@ -56,8 +56,8 @@ const railLabels = await page.evaluate(() => {
   }
   return out;
 });
-ok(railLabels.slice(0, 6).join(",") === "Parcel,Analysis,Yield,Properties,References,Standards",
-  `B733 rail order = Parcel,Analysis,Yield,Properties,References,Standards (got: ${railLabels.join(",")})`);
+ok(railLabels.slice(0, 6).join(",") === "Parcel,Analysis,Yield,Properties,Overlays,Standards",
+  `B733 rail order = Parcel,Analysis,Yield,Properties,Overlays,Standards (got: ${railLabels.join(",")})`);
 
 // ---------- B732 — Standards icon is sliders (3 lines + filled knobs), NOT the sun-gear ----------
 const stdSvg = await page.evaluate(() => {

@@ -416,7 +416,13 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     // setbackLineStyle (the parcel's own setback standards over the theme default), and the zoom
     // helpers still wrap the result, so B880's behaviour is unchanged.
     expect(src).toMatch(/const sbs = setbackLineStyle\(pc, PAL\.setback\);/);
-    expect(src).toMatch(/stroke=\{sbs\.stroke\} strokeWidth=\{strokeZoom\(sbs\.weight, zk\)\} strokeDasharray=\{dashZoom\(sbs\.dash, zk\)\}/);
+    // B966627 — the DASH is still zk-scaled through `dashZoom`, but its source is now `dash`, a
+    // local that reads `sbs.dash` when the parcel has its own setbacks and a sparser pattern when
+    // the ring is only ever drawn because of the silent project-default fallback (LOUD-FAILURE:
+    // a defaulted ring must not paint identically to one the user actually set).
+    expect(src).toMatch(/const explicit = parcelSetbacksExplicit\(pc\);/);
+    expect(src).toMatch(/const dash = explicit \? sbs\.dash : "2 5";/);
+    expect(src).toMatch(/stroke=\{sbs\.stroke\} strokeWidth=\{strokeZoom\(sbs\.weight, zk\)\} strokeDasharray=\{dashZoom\(dash, zk\)\}/);
     expect(src).not.toMatch(/strokeWidth=\{1\.25\} strokeDasharray="7 6"/);
     // the B617-sibling dashes fold through dashZoom too (markup source, easement/deed spines)
     expect(src).toMatch(/da = dashZoom\(dashArray\(m\.dash, sw\), zk\)/);

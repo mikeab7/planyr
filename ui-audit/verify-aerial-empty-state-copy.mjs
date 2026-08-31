@@ -90,7 +90,7 @@ for (const arm of ARMS) {
   await assertMeasurable(page, "verify-aerial-empty-state-copy");
   await page.goto(BASE, { waitUntil: "load" });
   await page.waitForTimeout(1500);
-  await page.locator('button:has-text("References")').first().click();
+  await page.locator('button:has-text("Overlays")').first().click();
   await page.waitForTimeout(500);
 
   const obs = await page.evaluate(({ invite, owned }) => {

@@ -61,9 +61,49 @@ export function offsetPolygon(pts, d) {
     return out.length >= 3 ? out : null;
   };
   const a1 = build(1);
-  if (!a1) return build(-1);
-  // Inward offset must shrink the ring; if it grew, we offset the wrong way.
-  return ringArea(a1) <= ringArea(pts) ? a1 : (build(-1) || a1);
+  const chosen = !a1 ? build(-1) : (ringArea(a1) <= ringArea(pts) ? a1 : (build(-1) || a1));
+  // B966627 — CLAMP a vertex that lands OUTSIDE the source ring. Confirmed on the owner's real
+  // Bain data (parcel `e1455090gmiinz`, a 12-vertex notch piece born from a multi-segment cut):
+  // this per-edge miter/bevel construction can push a corner PAST the source boundary when the
+  // offset distance is large relative to a short edge (here, a 25 ft setback against a 4.7 ft
+  // edge) — measured 2 of 12 vertices outside, which is exactly what put his setback dashes
+  // "outside the solid boundary" on screen. An INWARD offset must never step outward; when a
+  // vertex does, the nearest point on the source boundary is the correct bound (the true inset at
+  // that corner is somewhere between the miter point and the boundary, and the boundary itself is
+  // never wrong to draw at — it's the parcel's own edge). A vertex already inside is untouched.
+  return chosen ? chosen.map((p) => (pointInPolygon(p, pts) ? p : nearestPointOnBoundary(p, pts))) : chosen;
+}
+
+/* Even-odd point-in-polygon test (Jordan curve). Boundary-inclusive is not needed here: a vertex
+ * clamped onto the boundary by `nearestPointOnBoundary` reads as outside by this test's own
+ * convention on some edges, which is harmless — clamping an already-boundary point to itself
+ * (nearest distance ~0) is a no-op either way. */
+function pointInPolygon(pt, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
+    const intersect = (yi > pt.y) !== (yj > pt.y) && pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function nearestPointOnSegment(p, a, b) {
+  const abx = b.x - a.x, aby = b.y - a.y;
+  const len2 = abx * abx + aby * aby;
+  if (len2 === 0) return { x: a.x, y: a.y };
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * abx + (p.y - a.y) * aby) / len2));
+  return { x: a.x + abx * t, y: a.y + aby * t };
+}
+
+function nearestPointOnBoundary(p, poly) {
+  let best = null, bestD = Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const q = nearestPointOnSegment(p, poly[i], poly[(i + 1) % poly.length]);
+    const d = Math.hypot(p.x - q.x, p.y - q.y);
+    if (d < bestD) { bestD = d; best = q; }
+  }
+  return best || p;
 }
 
 /* Area of the buildable envelope a parcel's per-edge setbacks leave behind, in square feet.

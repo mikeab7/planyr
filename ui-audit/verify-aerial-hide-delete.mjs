@@ -93,7 +93,7 @@ const liveTileCount = () => page.evaluate(() => {
 });
 
 const openReferencesRow = async () => {
-  await page.locator('button:has-text("References")').first().click();
+  await page.locator('button:has-text("Overlays")').first().click();
   await page.waitForTimeout(400);
   const expander = page.locator('button:has-text("Aerial backdrop")');
   if (await expander.count()) { await expander.first().click(); await page.waitForTimeout(200); }
