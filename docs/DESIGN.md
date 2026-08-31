@@ -161,6 +161,43 @@ that two adjacent, on-scale curves disagree with each other. Findings are printe
 `docs/UI-INVENTORY.md`'s "Nesting mismatches" section, regenerated the same way as the rest of that
 file.
 
+### The sibling clause (B950320, 2026-08-31) — two correctly-shaped controls can still be wrong together
+
+The nesting rule above governs a control against its **container**; it has nothing to say about two
+controls that sit **beside** each other with no containment relationship at all. The owner found the
+gap: the row-1 account chip (a `pill` — an avatar, a name and a caret, exactly the "container that
+holds other controls" case the shape rule already blesses) sitting immediately next to the fullscreen
+button (an `md` square — exactly the "standalone actionable control" case). Both are individually
+on-scale and on-family per every rule above. The pair still reads as sloppy, because **the eye
+compares two adjacent curves directly when there is no gap between them** — the same perceptual fact
+the nesting rule's binding clause already turns on, just without a container in play.
+
+**The resolution is not reclassifying either control.** A pill genuinely is the right shape for a
+compound identity chip, and `md` genuinely is the right shape for a lone icon button — collapsing
+that distinction to make two unrelated controls match would be worse than the mismatch it fixes (see
+`controls.jsx`'s own `IconButton` primitive, which is `md` by design). **The binding rule instead:**
+
+- **Two different radius families may sit in the same control row, but only with a visible boundary
+  between them** — a divider, or genuine clear space (`docs/DESIGN.md`'s own reading of "gap" here is
+  a real gap, not the small `SPACE.sm`/`SPACE.md` a same-family row uses between its own members).
+  Flush adjacency (the app's ordinary flex `gap`, 6–8px, with nothing else between) is never
+  acceptable between two families, however individually correct each one is.
+- **The fix for the account-chip/fullscreen pair is a hairline divider** — `AppHeader.jsx`'s row-1
+  right zone now inserts the same `1px` divider this header already uses between the wordmark and the
+  breadcrumb, between the icon-button cluster (save badge, fullscreen, gear — all `md`) and the
+  identity pill. This is the general pattern: a cluster boundary is drawn where a family boundary
+  falls, not invented per pair.
+
+**Machine-enforced:** `ui-audit/ui-inventory.mjs`'s `siblingMismatches()` groups the same on-scale
+rounded-candidate pool `nestingMismatches()` builds by shared flex-row ancestor (not bare immediate
+parent — a wrapped-one-level-deeper sibling, e.g. a popover-anchor `<div>`, must still be caught),
+walks adjacent pairs left-to-right, and flags a pair whose families differ and whose gap reads as
+flush. Findings print in `docs/UI-INVENTORY.md`'s "Sibling radius mismatches" section. It found a
+second, independently pre-existing instance the owner never reported — the header's plan-name chip
+had drifted to `RADIUS.sm` after the adjacent project-breadcrumb chip moved `sm`→`md`, silently
+breaking that chip's own comment claiming they matched — fixed the same way this item shipped
+(`SitePlanner.jsx`'s plan-name chip is `RADIUS.md` again).
+
 **`src/shared/ui/controls.jsx`** declares its own literal, smaller scale —
 `RADIUS = { control: 8, pill: 999, panel: 12 }` — that predates `radius.js` and agrees with it by
 value (`control === md`, `panel === lg`). **This is a deliberate, documented duplicate, not

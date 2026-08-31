@@ -42,7 +42,7 @@ import { siteState } from "./lib/siteRegion.js";
 // NEW-3 — the ONE map-overlay stacking model. Leaflet fixes its own control containers at
 // z-index 1000; these panels sat at 1000 too, so whether the zoom buttons and the scale bar
 // covered them came down to document order. An open panel now outranks map chrome outright.
-import { MAP_CHROME_Z, panelMaxHeight, ZOOM_CONTROL_CLEARANCE_PX } from "./lib/mapChromeStack.js";
+import { MAP_CHROME_Z, panelMaxHeight, ZOOM_CONTROL_CLEARANCE_PX, MAP_OVERLAY_TOP_PX, MAP_OVERLAY_CHIP_H_PX, MAP_OVERLAY_BAR_H_PX } from "./lib/mapChromeStack.js";
 import PlaceSearchField from "./components/PlaceSearchField.jsx";
 import { useGroundElevation } from "./components/useGroundElevation.js";
 import CursorChip from "./components/CursorChip.jsx";
@@ -482,7 +482,10 @@ function RailTab({ label, count, active, onClick }) {
   return (
     <button type="button" role="tab" aria-selected={active} onClick={onClick} style={{
       flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
-      height: 26, padding: "0 8px", borderRadius: nestedIn(RADIUS.lg, 6), border: "none",
+      // NEW-2 (B950321, map-overlay alignment) — was 26; CONTROL_H.sm (22) so the rail header
+      // row's COLLAPSED total height can land on MAP_OVERLAY_CHIP_H_PX, matching the Layers
+      // panel's own collapsed chip instead of resting 8px taller for no visual reason.
+      height: CONTROL_H.sm, padding: "0 8px", borderRadius: nestedIn(RADIUS.lg, 6), border: "none",
       background: active ? "var(--surface-raised)" : "transparent",
       color: active ? "var(--text-primary)" : "var(--text-secondary)",
       fontSize: 11.5, fontWeight: active ? 700 : 600, cursor: "pointer", fontFamily: "inherit",
@@ -2622,7 +2625,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         {/* ── Combined site bar — floating pill at top-center (full-width bar on a phone) ──
             B831776 (NEW-5): the bar is RADIUS.lg, and every child button below is
             nestedIn(RADIUS.lg, 6) = RADIUS.sm — radius.js's own concentric-nesting rule applied
-            exactly as it documents, not a new value. */}
+            exactly as it documents, not a new value.
+            NEW-2 (B950321, map-overlay alignment) — height is MAP_OVERLAY_BAR_H_PX, a deliberately
+            different number from the corner chips' MAP_OVERLAY_CHIP_H_PX (this is a compound
+            cluster, not a single-label toggle — see mapChromeStack.js's own header), named so it
+            reads as an intentional choice rather than a fourth hand-picked literal. */}
         <div style={{
           position: "absolute", zIndex: narrow ? 1100 : 1000,
           display: "flex", alignItems: "center",
@@ -2630,12 +2637,14 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           borderRadius: RADIUS.lg,
           boxShadow: "0 4px 20px rgba(0,0,0,0.45), 0 1px 4px rgba(0,0,0,0.25)",
           padding: "0 6px",
-          height: 42,
+          height: MAP_OVERLAY_BAR_H_PX,
           // Phone: a full-width bar pinned to the top so the side panels (now below it) can't
-          // cover the search input or the Select-parcels button. Desktop: centered pill.
+          // cover the search input or the Select-parcels button. Desktop: centered pill, sharing
+          // the SAME top edge (MAP_OVERLAY_TOP_PX) as the two corner panels — was a bare `14` that
+          // sat 4px below their bare `10`, which is the specific misalignment the owner flagged.
           ...(narrow
             ? { top: 8, left: 8, right: 8, transform: "none", maxWidth: "none", minWidth: 0 }
-            : { top: 14, left: "50%", transform: "translateX(-50%)", maxWidth: "calc(100% - 540px)", minWidth: 300 }),
+            : { top: MAP_OVERLAY_TOP_PX, left: "50%", transform: "translateX(-50%)", maxWidth: "calc(100% - 540px)", minWidth: 300 }),
         }}>
           {/* B831776 (NEW-1) — Site/Comp switch, far left, before the search field. Sets what
               the action buttons to the right offer; the SAME state drives the rail tab below. */}
@@ -2885,10 +2894,19 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             // overlay (above the layers panel) when the user opens it.
             ...(narrow
               ? { top: 60, left: 8, zIndex: MAP_CHROME_Z.panel, width: sitesPanelOpen ? "min(320px, calc(100vw - 16px))" : 188 }
-              : { top: 10, left: 10, zIndex: MAP_CHROME_Z.panel, width: 232 }) }}>
+              // NEW-2 (B950321) — MAP_OVERLAY_TOP_PX, the one top edge every desktop overlay
+              // shares (was a bare `10` that happened to agree with the Layers panel's own bare
+              // `10` — nothing enforced that once). Collapsed, this panel now also pins to the
+              // shared MAP_OVERLAY_CHIP_H_PX, matching the Layers panel's collapsed chip instead
+              // of resting at whatever height its two-tab header row happened to need.
+              : { top: MAP_OVERLAY_TOP_PX, left: 10, zIndex: MAP_CHROME_Z.panel, width: 232, ...(sitesPanelOpen ? null : { height: MAP_OVERLAY_CHIP_H_PX }) }) }}>
             {/* collapsible header (B106) + the two tabs — one row, always visible (never buried
-                behind the collapse), so both counts stay readable even with the list folded. */}
-            <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 6px 4px" }}>
+                behind the collapse), so both counts stay readable even with the list folded.
+                NEW-2 (B950321) — desktop COLLAPSED only: tighter vertical padding so this row's
+                total height (padding + the now-22px RailTab) lands exactly on the panel's fixed
+                MAP_OVERLAY_CHIP_H_PX box rather than overflowing it; every other state (open, or
+                narrow/phone, which sets no fixed height) is untouched. */}
+            <div style={{ display: "flex", alignItems: "center", gap: 4, padding: (!narrow && !sitesPanelOpen) ? "3px 6px" : "6px 6px 4px" }}>
               {/* NEW-1/NEW-3 (map landing radius audit) — nestedIn(RADIUS.lg, 6), not a bare
                   RADIUS.sm literal: this header row sits 6px in from the panel's own RADIUS.lg=12
                   edge, same reasoning as RailTab just above (docs/DESIGN.md's radius exception 3). */}
@@ -3032,8 +3050,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           border: `1px solid ${PAL.panelLine}`, borderRadius: layersPanelOpen ? RADIUS.lg : RADIUS.md,
           padding: layersPanelOpen ? "6px 9px 8px" : 0, fontSize: 12, color: PAL.ink, boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
           // Collapsed: the DIV (not the button) owns the box-sizing:border-box height, so its own
-          // 1px border is INCLUDED rather than added on top of the button's.
-          ...(layersPanelOpen ? null : { height: CONTROL_H.lg }),
+          // 1px border is INCLUDED rather than added on top of the button's. NEW-2 (B950321) —
+          // MAP_OVERLAY_CHIP_H_PX rather than a direct CONTROL_H.lg reference, so this and the
+          // Sites panel's own collapsed height read the SAME name (they were already the same
+          // number; nothing enforced that before).
+          ...(layersPanelOpen ? null : { height: MAP_OVERLAY_CHIP_H_PX }),
           // B831777 — this corner used to reserve extra `top` room for the floating "Comps" chip
           // that stacked above it (COMPS_TOGGLE_CLEARANCE_PX); Comps moved to the left rail
           // (NEW-2), so this is topright's sole occupant again and the plain 10/60px applies.
@@ -3045,9 +3066,9 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                column) instead of staying a 268-wide block pinned over the imagery. A collapsed
                panel that still covers the map would answer the letter of the report and not the
                point of it. */
-            : { top: 10, right: 10, zIndex: MAP_CHROME_Z.panel,
+            : { top: MAP_OVERLAY_TOP_PX, right: 10, zIndex: MAP_CHROME_Z.panel,
                 ...(layersPanelOpen
-                  ? { width: 268, maxHeight: panelMaxHeight({ topPx: 10, bottomPx: 76 }), display: "flex", flexDirection: "column" }
+                  ? { width: 268, maxHeight: panelMaxHeight({ topPx: MAP_OVERLAY_TOP_PX, bottomPx: 76 }), display: "flex", flexDirection: "column" }
                   : { width: "auto" }) }),
           ...(layersPanelOpen ? null : { minWidth: MAP_CORNER_CHIP_STYLE.minWidth }),
         }}>
