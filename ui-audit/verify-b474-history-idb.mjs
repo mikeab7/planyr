@@ -56,8 +56,12 @@ await page.waitForTimeout(3500);
 check("app booted clean with initHistoryStore at module load", errs.length === 0, errs.join(" | ").slice(0, 160));
 
 // Create a new site + place several count-changing edits (each distinct shape → forces a snapshot).
-const startBtn = page.locator('text="Start blank"').first();
-if (await startBtn.isVisible().catch(() => false)) { await startBtn.click(); await page.waitForTimeout(2500); }
+const startCaret = page.getByTestId("map-start-blank-menu-btn").first();
+if (await startCaret.isVisible().catch(() => false)) {
+  await startCaret.click();
+  await page.getByTestId("map-start-blank-menu-item").first().click();
+  await page.waitForTimeout(2500);
+}
 const newId = await page.evaluate((k) => { try { return localStorage.getItem(k); } catch (_) { return null; } }, CUR_KEY);
 check("a new site was created", !!newId, `id=${newId}`);
 const box = await page.evaluate(() => { let z = null, a = 0; for (const s of document.querySelectorAll("svg")) { const r = s.getBoundingClientRect(); if (r.width * r.height > a) { a = r.width * r.height; z = r; } } return z ? { x: z.x, y: z.y, w: z.width, h: z.height } : null; });

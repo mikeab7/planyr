@@ -51,6 +51,7 @@ import { attachRasterIdentifyLazy } from "./lib/rasterIdentifyLazy.js";
 import { NUM_FONT, TABULAR_NUMS } from "../../shared/theme/typography.js";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
+import { menuPanelStyle, MenuItem } from "../../shared/ui/controls.jsx";
 import {
   resolveLayerUrl,
   identifyParcelEager,
@@ -476,7 +477,7 @@ function RailTab({ label, count, active, onClick }) {
   );
 }
 
-export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], parcelSummary = null, lastEditedByGroup = null, activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip, onViewCenter, comps = [], onPlaceComp, onCompClick, pendingCompAnchor = null, onCompAnchorConsumed, focusCompId = null, onCompFocusHandled, onCompsChange }) {
+export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], parcelSummary = null, lastEditedByGroup = null, activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip, comps = [], onPlaceComp, onCompClick, pendingCompAnchor = null, onCompAnchorConsumed, focusCompId = null, onCompFocusHandled, onCompsChange }) {
   const elRef = useRef(null);
   const mapRef = useRef(null);
   const addrTokRef = useRef(0); // B545: address-search generation — a newer search invalidates an older in-flight one
@@ -565,8 +566,6 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   // the camera. "Far" reuses the SAME 50-mile market radius `landingView` already uses to decide
   // whether two sites are the same market (CLUSTER_RADIUS_MI) — no new distance policy to keep in sync.
   const [locateFar, setLocateFar] = useState(false);
-  const onViewCenterRef = useRef(onViewCenter);
-  onViewCenterRef.current = onViewCenter;
   const failUnavailable = (msg, at) => {
     setErr(msg);
     const c = at || (mapRef.current ? mapRef.current.getCenter() : null);
@@ -580,6 +579,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   // DEFAULT is set for crispness, not for the old "context tier" quietness — see PLACE_NAMES_DEFAULT_OPACITY.
   const [labelsOpacity, setLabelsOpacity] = useState(PLACE_NAMES_DEFAULT_OPACITY);
   const [selectMode, setSelectMode] = useState(false); // off = pan only; on = add/remove parcels
+  // NEW-1 (map "Start blank" consolidation) — the secondary-action dropdown on the "Select
+  // parcels" split button, below. One state/ref pair for the one caret this toolbar now has.
+  const [startBlankMenuOpen, setStartBlankMenuOpen] = useState(false);
+  const startBlankMenuBtnRef = useRef(null);
   // NEW-COMPS: armed by "+ Comp" — the next map click drops a leasing comp anchor there. A
   // second, independent one-shot mode alongside `selectMode` (mutually exclusive in the UI,
   // never both true at once) rather than folded into it, because it needs none of selectMode's
@@ -1201,9 +1204,6 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       // math). It has to hold when every GIS endpoint is down, which is exactly when a site
       // falls through to a default — the same reason coloradoRegions.js is network-free.
       setViewState(siteState({ lat: c.lat, lng: c.lng }));
-      // NEW-4 — report the centre up so a blank plan started from the header is born LOCATED at
-      // the spot the owner is looking at, instead of nowhere.
-      onViewCenterRef.current && onViewCenterRef.current({ lat: c.lat, lon: c.lng });
     };
     onMove();
     // NEW-1 — seed the zoom too, not just the centre. `zoom` starts null and only `zoomend`
@@ -2621,42 +2621,48 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               Only Cancel and the small ✕ clear button stay fixed-width — short enough to never
               need it, and always reachable is what matters most for those two. */}
           {mode === "site" && !selectMode && !placingCompPin && selected.length === 0 && (
-            <>
+            /* NEW-1 (map "Start blank" consolidation, owner report 2026-08-29) — ONE entry point
+               for starting a plan here, not two of equal weight. "Select parcels" is the PRIMARY
+               action (almost every new plan starts from a real parcel) — filled with the accent,
+               same as any other primary button in this app. "Start blank" is still one click away,
+               but now SECONDARY: a caret on the same control opens it, rather than a second button
+               sitting beside "Select parcels" and competing with it. The row-1 header's separate
+               "Start blank" button (SitePlannerApp.jsx) is gone — this is now the only place on the
+               map that starts a blank plan. Reuses the exact fallback `startBlankHere` already gives
+               the "county service is down" banner — no second implementation. */
+            <div style={{ display: "flex", flex: "0 1 auto", minWidth: 54 }}>
               <button
                 onClick={() => setSelectMode(true)}
-                // NEW-MAPCTRL-3 — this is the primary path to starting a plan from real county
-                // parcels, not a leftover control; every other button on this bar (Layers, Imagery
-                // & layers, Start blank, Full screen…) carries a title, and this one silently
-                // didn't, which is exactly what made it read as pointless with nothing to explain it.
                 title="Click parcels on the map to select them, then start a plan from the selection"
                 style={{
-                  flex: "0 1 auto", minWidth: 44, overflow: "hidden",
-                  height: 30, padding: "0 11px", borderRadius: nestedIn(RADIUS.lg, 6),
-                  border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
-                  color: PAL.chromeInk, fontSize: 12.5, fontWeight: 600,
+                  flex: "1 1 auto", minWidth: 0, overflow: "hidden",
+                  height: 30, padding: "0 11px",
+                  borderTopLeftRadius: nestedIn(RADIUS.lg, 6), borderBottomLeftRadius: nestedIn(RADIUS.lg, 6),
+                  borderTopRightRadius: 0, borderBottomRightRadius: 0,
+                  border: "1px solid var(--accent)", borderRight: "1px solid var(--on-accent)",
+                  background: "var(--accent)", color: "var(--on-accent)", fontSize: 12.5, fontWeight: 700,
                   cursor: "pointer", fontFamily: "inherit",
                 }}
               >
                 <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Select parcels</span>
               </button>
-              {/* B831776 (NEW-1) — "Start blank" now also lives here, matching Comp mode's
-                  two-action shape; the row-1 header keeps its own copy for when the map isn't
-                  the surface on screen. Reuses the exact fallback `startBlankHere` already gives
-                  the "county service is down" banner — no second implementation. */}
               <button
-                onClick={() => startBlankHere()}
-                title="Start a plan with no parcel, located where the map is looking — draw the boundary yourself"
+                ref={startBlankMenuBtnRef}
+                onClick={() => setStartBlankMenuOpen((o) => !o)}
+                title="More ways to start a plan"
+                aria-haspopup="menu" aria-expanded={startBlankMenuOpen}
+                data-testid="map-start-blank-menu-btn"
                 style={{
-                  flex: "0 1 auto", minWidth: 40, overflow: "hidden",
-                  height: 30, padding: "0 11px", borderRadius: nestedIn(RADIUS.lg, 6),
-                  border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
-                  color: PAL.chromeInk, fontSize: 12.5, fontWeight: 600,
-                  cursor: "pointer", fontFamily: "inherit",
+                  flex: "none", width: 22,
+                  height: 30,
+                  borderTopRightRadius: nestedIn(RADIUS.lg, 6), borderBottomRightRadius: nestedIn(RADIUS.lg, 6),
+                  borderTopLeftRadius: 0, borderBottomLeftRadius: 0,
+                  border: "1px solid var(--accent)", background: "var(--accent)", color: "var(--on-accent)",
+                  fontSize: FONT_SIZE.xs, cursor: "pointer", fontFamily: "inherit",
+                  display: "flex", alignItems: "center", justifyContent: "center",
                 }}
-              >
-                <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Start blank</span>
-              </button>
-            </>
+              >▾</button>
+            </div>
           )}
           {mode === "comp" && !selectMode && !placingCompPin && selected.length === 0 && onPlaceComp && (
             <>
@@ -2783,6 +2789,19 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           )}
           <span style={{ width: 4 }} />
         </div>
+
+        {/* NEW-1 — the "Start blank" secondary option, off the "Select parcels" split button's
+            caret. One item today; a MenuItem list rather than a bare popover so a future secondary
+            option (e.g. a saved-template start) has somewhere to go without another redesign. */}
+        <AnchoredMenu open={startBlankMenuOpen} onClose={() => setStartBlankMenuOpen(false)}
+          anchorRef={startBlankMenuBtnRef} placement="below-left" width={200} gap={6}
+          zIndex={MAP_CHROME_Z.panel} panelStyle={menuPanelStyle}>
+          <MenuItem data-testid="map-start-blank-menu-item"
+            title="Start a plan with no parcel, located where the map is looking — draw the boundary yourself"
+            onClick={() => { setStartBlankMenuOpen(false); startBlankHere(); }}>
+            Start blank
+          </MenuItem>
+        </AnchoredMenu>
 
         {/* NEW-2 (B233): address-search parcel info card — drops in under the search pill
             after a "Go". The card itself lives in components/ParcelInfoCard.jsx (NEW-1),

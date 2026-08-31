@@ -46,7 +46,10 @@ test.describe("NEW-1 — three clicks make a road", () => {
   test("a draft in progress offers a finish control, and clicking it commits the road", async ({ page }) => {
     await armPlannerHooks(page);
     await page.goto("/");
-    try { await page.getByRole("button", { name: /Start blank/i }).click({ timeout: 8000 }); } catch { /* already blank */ }
+    try {
+      await page.getByTestId("map-start-blank-menu-btn").click({ timeout: 8000 });
+      await page.getByTestId("map-start-blank-menu-item").click({ timeout: 8000 });
+    } catch { /* already blank */ }
     await expect(canvas(page)).toBeVisible();
     const box = await canvas(page).boundingBox();
 

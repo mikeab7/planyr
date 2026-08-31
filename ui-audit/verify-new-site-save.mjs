@@ -52,11 +52,17 @@ await page.waitForTimeout(3500);
 const before = await storeSummary(page);
 check("clean start — no sites in the store", before.count === 0, `count=${before.count}`);
 
-// --- Create a brand-new site via the app's own "Start blank" button (the newBlankSite path). ---
-const startBtn = page.locator('text="Start blank"').first();
-const haveStart = await startBtn.isVisible().catch(() => false);
-check('"Start blank" button is reachable on boot', haveStart);
-if (haveStart) { await startBtn.click(); await page.waitForTimeout(2500); }
+// --- Create a brand-new site via the app's own "Start blank" path (the newBlankSite path). ---
+// NEW-1 (map "Start blank" consolidation) — "Start blank" is no longer a standalone button; it's
+// the secondary option behind the "Select parcels" split button's caret.
+const caretBtn = page.locator('[data-testid="map-start-blank-menu-btn"]').first();
+const haveCaret = await caretBtn.isVisible().catch(() => false);
+check('"Select parcels" caret is reachable on boot', haveCaret);
+if (haveCaret) {
+  await caretBtn.click(); await page.waitForTimeout(200);
+  const startItem = page.locator('[data-testid="map-start-blank-menu-item"]').first();
+  await startItem.click(); await page.waitForTimeout(2500);
+}
 const newId = await currentSite(page);
 check("a new site id was created + set as current", !!newId, `currentSite=${newId}`);
 

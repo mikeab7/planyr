@@ -19,8 +19,8 @@ test.describe("building footprint reshape (logged out)", () => {
 
     // Logged out the Site module opens on the map/picker; "Start blank" drops into a fresh
     // drawable canvas (the left rail with the draw tools).
-    await page.getByRole("button", { name: /Start blank/i }).first().click();
-
+    await page.getByTestId("map-start-blank-menu-btn").first().click();
+    await page.getByTestId("map-start-blank-menu-item").first().click();
     // The planner canvas is an inline SVG; the left rail carries the draw tools.
     const svg = page.getByTestId("planner-canvas");
     await expect(svg).toBeVisible({ timeout: 15000 });

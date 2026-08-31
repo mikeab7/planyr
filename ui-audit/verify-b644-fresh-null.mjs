@@ -62,9 +62,11 @@ page.on("pageerror", (e) => { if (/null \(reading 'projects'\)/.test(e.message))
 let pass = false, detail = "";
 try {
   await page.goto(BASE, { waitUntil: "load" });
-  const startBlank = page.getByRole("button", { name: "Start blank" });
-  await startBlank.waitFor({ state: "visible", timeout: 20000 });
-  await startBlank.click();
+  // NEW-1 — "Start blank" is the secondary option behind the "Select parcels" split button's caret.
+  const startCaret = page.getByTestId("map-start-blank-menu-btn");
+  await startCaret.waitFor({ state: "visible", timeout: 20000 });
+  await startCaret.click();
+  await page.getByTestId("map-start-blank-menu-item").click();
   await page.waitForTimeout(1500);
   await page.getByRole("button", { name: "Schedule", exact: true }).first().click()
     .catch(() => page.getByText("Schedule", { exact: true }).first().click());

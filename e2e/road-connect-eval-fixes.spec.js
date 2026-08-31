@@ -28,7 +28,8 @@ function roadsData(page) {
 async function startBlank(page) {
   await armPlannerHooks(page);
   await page.goto("/");
-  await page.getByRole("button", { name: /Start blank/i }).click();
+  await page.getByTestId("map-start-blank-menu-btn").click();
+  await page.getByTestId("map-start-blank-menu-item").click();
   await expect(canvas(page)).toBeVisible();
 }
 // Pick the Road tool at a specific road-width preset (or the first — 24 ft — when w is omitted).

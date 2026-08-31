@@ -41,7 +41,8 @@ const SYNTHETIC = [
 async function boot(page) {
   await page.goto(BASE);
   await page.getByTestId("module-tab-site-planner").filter({ visible: true }).click();
-  await page.getByRole("button", { name: /Start blank/i }).first().click();
+  await page.getByTestId("map-start-blank-menu-btn").first().click();
+  await page.getByTestId("map-start-blank-menu-item").first().click();
   await page.locator('[data-testid="planner-canvas"]').waitFor({ state: "visible", timeout: 30_000 });
 }
 

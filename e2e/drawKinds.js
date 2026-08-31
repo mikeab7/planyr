@@ -49,7 +49,9 @@ export async function startBlank(page) {
     await tab.click({ timeout: 3_000 });
     await expect(tab).toHaveAttribute("aria-current", "page", { timeout: 3_000 });
   }).toPass({ timeout: 30_000 });
-  await page.getByRole("button", { name: /Start blank/i }).first().click();
+  // NEW-1 — "Start blank" is the secondary option behind the "Select parcels" split button's caret.
+  await page.getByTestId("map-start-blank-menu-btn").first().click();
+  await page.getByTestId("map-start-blank-menu-item").first().click();
   await expect(canvas(page)).toBeVisible({ timeout: 15_000 });
 }
 

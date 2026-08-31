@@ -45,11 +45,13 @@ const activeCheckbox = (p) => p.locator('input[type="checkbox"]').first();
 async function startBlank(page) {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
-  // B831776's toolbar rebuild left TWO "Start blank" buttons on screen at once (the row-1 toolbar
-  // one and the SitePlannerApp landing one) — a pre-existing, unrelated defect this spec works
-  // around with `.first()` rather than fixes; several other e2e specs hit the same strict-mode
-  // violation with the un-narrowed locator this session found while verifying live.
-  await page.getByRole("button", { name: /Start blank/i }).first().click();
+  // NEW-1 (owner report 2026-08-29) — B831776's toolbar rebuild had left TWO "Start blank" buttons
+  // on screen at once (the row-1 toolbar one and the map toolbar one), which is exactly what this
+  // comment used to route `.first()` around instead of fixing. That duplicate is gone now: there is
+  // ONE entry point (the "Select parcels" split button's caret), so `.first()` is no longer load-
+  // bearing here — left in place only because it is harmless.
+  await page.getByTestId("map-start-blank-menu-btn").first().click();
+  await page.getByTestId("map-start-blank-menu-item").first().click();
   await expect(canvas(page)).toBeVisible();
 }
 

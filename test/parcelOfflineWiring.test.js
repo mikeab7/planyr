@@ -229,14 +229,42 @@ describe("NEW-4 — an outage offers the way forward instead of dead-ending", ()
     // B326416 made this path async (it awaits the default-share team before the row is created,
     // because `team_id` is written only on INSERT). The GUARD is unchanged in intent: the blank
     // path must still WRITE a located record — only the signature moved.
-    const fn = app.slice(app.indexOf("const newBlankSite = async (opts)"), app.indexOf("const mapCenterRef"));
+    const fn = app.slice(app.indexOf("const newBlankSite = async (opts)"), app.indexOf("// NEW-COMPS"));
     expect(fn).toMatch(/saveSite\(\{ id, groupId: id, site: opts\.name \|\| "Untitled site", name: "Concept A", origin: o/);
     // …and it must be born with whatever sharing the account default resolves to, stamped BEFORE
     // the write rather than patched in afterwards (an afterwards-UPDATE is refused by the DB).
     expect(fn).toMatch(/await defaultShareTeam\(/);
     expect(fn.indexOf("defaultShareTeam(")).toBeLessThan(fn.indexOf("saveSite({"));
-    expect(app).toContain("onClick={newBlankSiteHere}");
-    expect(app).toMatch(/onViewCenter=\{\(c\) => \{ mapCenterRef\.current = c; \}\}/);
-    expect(finder).toMatch(/onViewCenterRef\.current && onViewCenterRef\.current\(\{ lat: c\.lat, lon: c\.lng \}\)/);
+  });
+});
+
+describe("NEW-1 — one entry point for starting a plan, not two of equal weight (owner report 2026-08-29)", () => {
+  /* Mutation: restore the row-1 header's standalone "Start blank" button → red. It duplicated
+     MapFinder's own control, at equal visual weight, on the same screen. */
+  it("the row-1 header no longer offers its own 'Start blank' button", () => {
+    expect(app).not.toContain("newBlankSiteHere");
+    expect(app).not.toContain("mapCenterRef");
+    expect(app).toMatch(/toolbarContent=\{null\}/);
+  });
+
+  /* Mutation: make "Select parcels" and "Start blank" two same-weight buttons again → red.
+     "Select parcels" is the primary action (filled with the accent, like any other primary
+     button); "Start blank" is reachable only behind the caret, as a secondary option. */
+  it("'Select parcels' is the PRIMARY action, and 'Start blank' is secondary behind a caret", () => {
+    const block = finder.slice(finder.indexOf('mode === "site" && !selectMode && !placingCompPin && selected.length === 0'), finder.indexOf('mode === "comp" && !selectMode'));
+    // one primary button, filled with the accent
+    expect(block).toMatch(/background: "var\(--accent\)", color: "var\(--on-accent\)"/);
+    expect(block).toContain(">Select parcels</span>");
+    // …and "Start blank" is NOT a second button in this block — it is the caret's menu.
+    expect(block).not.toContain(">Start blank</span>");
+    expect(block).toContain('data-testid="map-start-blank-menu-btn"');
+  });
+
+  /* Mutation: unwire the caret's menu item, or point it at anything other than `startBlankHere` →
+     red. This is the one remaining door to a blank plan from the map's resting toolbar. */
+  it("the caret's menu item starts a blank plan the same way the old button did", () => {
+    expect(finder).toContain('data-testid="map-start-blank-menu-item"');
+    const item = finder.slice(finder.indexOf('data-testid="map-start-blank-menu-item"'), finder.indexOf('data-testid="map-start-blank-menu-item"') + 400);
+    expect(item).toMatch(/onClick=\{\(\) => \{ setStartBlankMenuOpen\(false\); startBlankHere\(\); \}\}/);
   });
 });
