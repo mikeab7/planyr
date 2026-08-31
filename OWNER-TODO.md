@@ -25,14 +25,18 @@ _Last updated: 2026-08-31._
       (`V438336`) ran right after your confirmation and got the **identical FORBIDDEN error** as before the
       flip (`markPullRequestReadyForReview` still fails "Resource not accessible by integration" on a fresh
       real PR, #1246). So the "Workflow permissions" ceiling was not the whole story after all.
-- [ ] **Decide on the neighbouring checkbox: "Allow GitHub Actions to create and approve pull requests"**
-      (same settings page, currently unchecked). It's the next empirical thing to try — `markPullRequestReadyForReview`
-      (taking a PR out of draft) may be bucketed under this PR-lifecycle permission by GitHub even though it
-      doesn't literally create or approve anything. **Tradeoff to weigh first:** checking it also lets any
-      Actions workflow approve its own pull requests, which is a real (if narrow) security loosening — that's
-      exactly why past sessions were told to leave it alone until you decide it's worth it. No session should
-      flip this on its own initiative; it needs your call. Once you flip it (or decide not to), say so and a
-      session re-runs `V438336` again. Full background: `B793696` in `BACKLOG.md`.
+- [x] **Decide on the neighbouring checkbox: "Allow GitHub Actions to create and approve pull requests"**
+      — DONE 2026-08-31, you checked and saved it (confirmed by you directly from
+      `github.com/mikeab7/planyr/settings/actions` at 02:05 UTC). **⛔ BUT it did NOT fix the underlying
+      problem either.** The live re-test (`V438336`, third re-run) ran right after, on a fresh throwaway
+      draft PR (#1255), and got the **identical FORBIDDEN error** as both prior attempts — un-drafting a PR
+      still fails "Resource not accessible by integration" with both settings now on. **There is no
+      remaining GitHub repository-settings hypothesis for this** — both candidates named on this list have
+      been tried and both were ruled out empirically. The actual fix is now a small implementation
+      decision, not a settings page: a fine-grained Personal Access Token (or a small dedicated GitHub App)
+      scoped to just this repo's pull-request permissions, stored as a repo secret and used in place of the
+      built-in token for this one workflow step. That needs your go-ahead before a session builds it — full
+      background: `B793696` in `BACKLOG.md`.
 - [ ] **Check whether `main` has a branch-protection rule set** (`github.com/mikeab7/planyr/settings/branches`)
       — a SEPARATE question from the two above (those are about un-drafting a PR; this is about arming
       auto-merge on one that's already ready). Found 2026-08-31 (`B897440`) while shipping PR #1245: even
@@ -43,10 +47,11 @@ _Last updated: 2026-08-31._
       one, or it exists but doesn't name `build` as required. If there's no rule: add one requiring the
       `build` check to pass before merging. **Nothing is broken while this waits** — a session just has to
       merge each green PR by hand instead of it happening on its own, same as before this automation existed.
-- [ ] **Two stale throwaway probe branches need deleting** — `claude/verify-pr-auto-ready-throwaway` and
-      `claude/verify-pr-auto-ready-20260831-001137`. Both are closed PRs' leftover branches from testing the
-      item above; no session's git credentials can delete a remote branch here (`HTTP 403`), and there's no
-      GitHub tool for it either. Harmless clutter, delete whenever convenient from the GitHub branches page.
+- [ ] **Three stale throwaway probe branches need deleting** — `claude/verify-pr-auto-ready-throwaway`,
+      `claude/verify-pr-auto-ready-20260831-001137`, and `claude/verify-pr-auto-ready-20260831-015902`.
+      All three are closed PRs' leftover branches from testing the item above; no session's git credentials
+      can delete a remote branch here (`HTTP 403`), and there's no GitHub tool for it either. Harmless
+      clutter, delete whenever convenient from the GitHub branches page.
 
 ## 👀 One thing only you can check: does the app actually TELL you when it has stopped saving? (V273520 / B484337)
 
