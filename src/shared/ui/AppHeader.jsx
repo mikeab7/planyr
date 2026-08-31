@@ -889,15 +889,18 @@ export default function AppHeader({
           <FullscreenButton active={fullscreen} onToggle={() => toggleRef.current()} />
           {/* Theme gear — signed-out only; signed-in users switch theme in account → Settings (B389) */}
           {!accountActive && <SettingsMenu />}
-          {/* B950320 (sibling-radius-consistency audit) — a hairline divider between the ICON-BUTTON
-              cluster (save badge, fullscreen, gear — all `RADIUS.md` squares) and the account/auth
-              PILL. Per docs/DESIGN.md's shape rule, `pill` is correctly reserved for a container that
-              holds several things (the account chip holds an avatar, a name and a caret) while `md` is
-              correctly the standalone-control shape (fullscreen toggles one thing) — so the fix is not
-              reclassifying either control, it's making the family boundary between the two CLUSTERS
-              visible, the same divider this header already uses between the wordmark and the
-              breadcrumb, so the eye stops comparing the two curves with nothing between them. */}
-          <span style={{ width: 1, height: 14, background: LINE, flex: "none", margin: "0 2px" }} />
+          {/* ⛔ B972096 (NEW-1) — THE B950320 DIVIDER IS GONE, and its own reasoning is why. That
+              divider existed only to mark a family BOUNDARY between the icon-button cluster
+              (RADIUS.md squares) and the account/auth chip (then RADIUS.pill) — the owner reported
+              the SAME "full pill next to a small square" mismatch a third time after that divider
+              and the B958466 CloudSyncBadge reclassification each made the sibling-radius CHECK
+              pass without the ROW ever reading as consistent. The real fix is upstream:
+              AccountControl.jsx's `pill` and the "Cloud off" chip, plus the presence "N here" chip
+              (SitePlanner.jsx's `saveSlot`), are now `RADIUS.md` — the same standalone-control shape
+              as every control beside them, because none of them is actually a CONTAINER (the shape
+              rule's own test). With no family boundary left to mark, a divider here would separate
+              five identically-shaped squares for no visible reason — worse than the mismatch it
+              used to bound. Do not reintroduce it without a real family split to justify it. */}
           {authControl}
         </div>
       </div>

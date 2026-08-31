@@ -21391,11 +21391,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <span
             title={peers.names.join(" · ")}
             data-testid="presence-pill"
+            // NEW-1 (B972096) — was borderRadius:999 (pill) + fontSize:11.5 (off-scale after the
+            // FONT_SIZE reduction). This is a single standalone control sitting in row-1's right
+            // zone alongside FullscreenButton/SettingsMenu/CloudSyncBadge/the account chip — not a
+            // container — so it converges to RADIUS.md with the rest of that row.
             style={{ display: "inline-flex", alignItems: "center", gap: 5, background: SURF_RAISED,
-              border: "1px solid var(--border-strong)", borderRadius: 999, padding: "2px 9px",
-              fontSize: 11.5, fontWeight: 800, color: "var(--text-primary)", whiteSpace: "nowrap" }}
+              border: "1px solid var(--border-strong)", borderRadius: RADIUS.md, padding: "2px 9px",
+              fontSize: FONT_SIZE.control, fontWeight: 800, color: "var(--text-primary)", whiteSpace: "nowrap" }}
           >
-            <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: 999, background: "var(--accent-site)" }} />
+            <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: RADIUS.pill, background: "var(--accent-site)" }} />
             {peers.label}
           </span>
         ) : undefined}

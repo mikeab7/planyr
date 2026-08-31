@@ -31,9 +31,17 @@ const MUTED = "var(--chrome-muted)";
 // ── Account pill + dropdown styling (B298). The dropdown reuses AnchoredMenu — the
 // same portal menu primitive as the project breadcrumb — so it escapes the header's
 // stacking/clipping context and lines up under the pill, consistent with that menu.
+// NEW-1 (B972096) — was RADIUS.pill. Per docs/DESIGN.md's own shape rule, `pill` is reserved for
+// a CONTAINER that holds other controls (a segmented shell, a toggle bar whose height IS its
+// shape); this chip is a single control that opens a menu, exactly like the row-1 "File ▾"
+// button — it was a pill by habit (it happens to hold an avatar + a name + a caret), not by
+// decision. `RADIUS.md` converges it with every other standalone control in row-1's right zone
+// (FullscreenButton, SettingsMenu, CloudSyncBadge, the presence chip) onto one family, closing
+// out the owner's third report of the same visual mismatch (B950320/B958466 each "fixed" their
+// own narrow pair — a divider, a token reclassification — without ever converging the row).
 const pill = {
   display: "flex", alignItems: "center", gap: 7,
-  maxWidth: 220, padding: "4px 9px 4px 5px", borderRadius: RADIUS.pill,
+  maxWidth: 220, padding: "4px 9px 4px 5px", borderRadius: RADIUS.md,
   cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
   border: `1px solid ${LINE}`, background: "var(--chrome-bg-elev)", color: "var(--chrome-text)",
 };
@@ -126,7 +134,9 @@ export default function AccountControl({ user, profileApi, onOpenAuth, onOpenAcc
           title="Cloud sync isn't set up — your work is saved on this device only"
           style={{
             display: "flex", alignItems: "center", gap: 7,
-            padding: "4px 10px 4px 6px", borderRadius: RADIUS.pill,
+            // NEW-1 (B972096) — was RADIUS.pill; same convergence as `pill` above (this is the
+            // no-Supabase-configured sibling of that same chip, not a container).
+            padding: "4px 10px 4px 6px", borderRadius: RADIUS.md,
             cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
             border: `1px solid ${LINE}`, background: "var(--chrome-bg-elev)",
             color: MUTED,

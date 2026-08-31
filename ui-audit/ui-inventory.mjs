@@ -328,7 +328,18 @@ async function nestingMismatches(page, surface) {
       // own radius rather than mint a new one (docs/DESIGN.md's radius section) — perfectly
       // concentric-but-off-scale is worse than 1-2px shy of concentric on an already-tiny control.
       // So a child matching its ancestor exactly is compliant in that case, not a mismatch.
-      const compliant = Math.abs(expected - child.radius) <= 1.5
+      // NEW-1 (B972096) — a genuinely CIRCULAR status-dot/avatar badge (999px on a roughly square
+      // box — a true circle, not an elongated pill like a toggle chip) is compliant nested in ANY
+      // container, never shrunk to the container's derived corner radius. docs/DESIGN.md's own
+      // radius table names "status dots" as their own pill category independent of nesting; the
+      // formula only ever had no case for it because every prior candidate container was ITSELF a
+      // pill (nestedIn(999, gap) trivially resolves to 999). Converging the account/cloud-off chip
+      // and the presence chip from pill to `md` (B972096's own fix) exposed it: their small round
+      // "⊘"/avatar/status-dot badges are still meant to read as circles, not shrink toward the
+      // chip's own 8px corner. Measured, not assumed: this is the exact new case B972096 created.
+      const isCircularBadge = child.radius >= 999 && Math.abs(child.rect.width - child.rect.height) <= 1.5;
+      const compliant = isCircularBadge
+        || Math.abs(expected - child.radius) <= 1.5
         || (!radiusOk.includes(expected) && child.radius === found.radius);
       // Tolerance of 1px otherwise: `gap` is measured from the ancestor's outer (border) box, so a
       // 1px border on the ancestor reads as 1px more gap than the padding-only number a call site
@@ -446,8 +457,42 @@ async function siblingMismatches(page, surface) {
       byParent.get(p).push(c);
     }
 
+    // NEW-2 (B972097) — A DIVIDER MUST NOT BE AN ESCAPE HATCH FROM "MUST AGREE". Read this before
+    // touching the gap test below. The check's own history: the account-chip/fullscreen pair was
+    // "fixed" TWICE (B950320's divider, B958466's CloudSyncBadge reclassification) without the row
+    // ever reading as consistent — the owner reported the SAME mismatch a third time. Both fixes
+    // made THIS check pass by making the pair no longer "adjacent" (gap > gapPx) or no longer a
+    // pair at all, never by making the ROW look right. The first version of this fix tried to
+    // SUBTRACT the divider's own getBoundingClientRect().width from the gap and re-test the
+    // remainder against gapPx — that is WRONG and was caught by this file's own teeth-check before
+    // it shipped: a divider's rendered box is ~1px, but its CSS margin (0 2px in this app) plus the
+    // flex row's own `gap` on both sides of it is real occupied space a partial-subtraction never
+    // credits, so a genuine divider still left an "effective" gap over threshold and the pair was
+    // STILL silently exempted — reproducing the exact loophole this item exists to close. The
+    // correct question is not "how many px does the divider account for" (a margin box has no
+    // reliable single answer), it's binary: is there a divider-SHAPED element anywhere in the span
+    // between A and B? If yes, the pair is still one visual row and must still agree, however wide
+    // the raw DOM gap measures. If no, the gap is real clear space and the pair is genuinely
+    // separated (two unrelated clusters) — that case still correctly exempts.
+    const hasDividerInSpan = (parent, leftEdge, rightEdge, centerY) => {
+      for (const el of parent.querySelectorAll("*")) {
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) continue;
+        const thin = r.width <= 2 || r.height <= 2;
+        if (!thin) continue;
+        // A stray 1x1 dot is not a divider — require the CROSS axis to be a real bar, not a speck
+        // (docs/DESIGN.md's divider spec is a hairline the height/width of the row, not a pixel).
+        const longAxis = r.width <= 2 ? r.height : r.width;
+        if (longAxis < 8) continue;
+        const withinSpan = r.left >= leftEdge - 1 && r.right <= rightEdge + 1;
+        const onRow = Math.abs((r.top + r.bottom) / 2 - centerY) <= vTolPx + 6;
+        if (withinSpan && onRow) return true;
+      }
+      return false;
+    };
+
     const findings = [];
-    for (const members of byParent.values()) {
+    for (const [parent, members] of byParent.entries()) {
       if (members.length < 2) continue;
       members.sort((a, b) => a.rect.left - b.rect.left);
       for (let i = 0; i < members.length - 1; i++) {
@@ -456,10 +501,16 @@ async function siblingMismatches(page, surface) {
         const aCenterY = (A.rect.top + A.rect.bottom) / 2, bCenterY = (B.rect.top + B.rect.bottom) / 2;
         if (Math.abs(aCenterY - bCenterY) > vTolPx) continue; // not the same visual row
         const gap = B.rect.left - A.rect.right;
-        if (gap < -2 || gap > gapPx) continue; // overlapping (a different shape entirely) or genuinely separated
+        if (gap < -2) continue; // overlapping — a different shape entirely, not a row mismatch
+        let dividerSeparated = false;
+        if (gap > gapPx) {
+          dividerSeparated = hasDividerInSpan(parent, A.rect.right, B.rect.left, (aCenterY + bCenterY) / 2);
+          if (!dividerSeparated) continue; // genuinely separated — real clear space, no divider present
+        }
         findings.push({
           aLabel: A.label, aRadius: A.radius, bLabel: B.label, bRadius: B.radius,
           gap: Math.round(gap * 10) / 10,
+          dividerSeparated,
         });
       }
     }
@@ -699,14 +750,25 @@ async function run() {
   }
   if (!totalNestingMismatches) nestingLines.push("_None found on this run._", "");
 
-  // B950320 — sibling radius-family mismatches (adjacent controls, no containment relationship).
+  // B950320/B972097 — sibling radius-family mismatches (adjacent controls, no containment relationship).
   let totalSiblingMismatches = 0;
-  const siblingLines = ["## Sibling radius mismatches (B950320)", "",
+  const siblingLines = ["## Sibling radius mismatches (B950320, tightened B972097)", "",
     "Two on-scale, differently-shaped controls sitting in the same visual row with no containment",
     "relationship between them — the axis `nestingMismatches()` above cannot see, because that check",
     "only ever compares a control to a CONTAINER. Grouped by shared flex-row ancestor, adjacent",
     `pairs only, within ${SIBLING_GAP_PX}px of clear horizontal space and ${SIBLING_VCENTER_TOL_PX}px`,
     "of shared vertical center — the same \"no gap between the two curves\" the owner's report turns on.",
+    "",
+    "**B972097 (NEW-2):** a plain gap over the threshold no longer clears a pair on its own — if a",
+    "thin (≤ 2px) element sitting between the two accounts for the excess, the pair is measured as",
+    "still adjacent and still has to agree. A finding whose gap was bridged only by real clear space",
+    "reads as an ordinary mismatch; one where a divider-sized element covers the excess is flagged",
+    "`(divider-separated)` below — that annotation is informational, not an exemption: the finding is",
+    "still reported and still fails the build. **What this still cannot check:** whether the divider",
+    "itself is `docs/DESIGN.md`'s real divider spec (1px, `--chrome-divider`) versus some other thin",
+    "element that happens to fit the width budget, and it cannot tell a genuine family boundary (two",
+    "unrelated control clusters that were never meant to match) from a loophole use of a divider. Both",
+    "read as \"divider-separated\" here; a human still judges which one it is.",
     ""];
   for (const s of SURFACES) {
     for (const theme of ["light", "dark"]) {
@@ -715,7 +777,8 @@ async function run() {
       if (!found.length) continue;
       siblingLines.push(`**${s.name} — ${theme}:**`, "");
       for (const f of found) {
-        siblingLines.push(`- "${f.aLabel}" (${f.aRadius}px) sits ${f.gap}px from "${f.bLabel}" (${f.bRadius}px) — different radius families in one row.`);
+        const tag = f.dividerSeparated ? " (divider-separated)" : "";
+        siblingLines.push(`- "${f.aLabel}" (${f.aRadius}px) sits ${f.gap}px from "${f.bLabel}" (${f.bRadius}px) — different radius families in one row${tag}.`);
       }
       siblingLines.push("");
     }
