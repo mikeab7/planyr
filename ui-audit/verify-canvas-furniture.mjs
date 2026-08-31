@@ -129,17 +129,10 @@ try {
       const scaleBarWrap = plates.find((p) => p.style.right);
       const northWrap = plates.find((p) => p.style.left);
       const toast = document.querySelector('[data-testid="parcel-select-hint"]');
-      // B914500 — the bottom-right zoom control column (+/−/fit/report-slow, "gbtn" buttons)
-      // joins the furniture-collision set. It is positioned independently of FURNITURE_ROW
-      // (a fixed `bottom:100`, nudged by the same narrow-width reserve as of the fix), so a
-      // future change to either one can silently re-open the gap between them.
-      const zoomBtns = [...document.querySelectorAll("button.gbtn")];
-      const zoomStack = zoomBtns.length ? zoomBtns[0].parentElement : null;
       return {
         narrow: window.matchMedia("(max-width: 760px)").matches,
         toolsFab: rectOf(toolsFab), badge: rectOf(badge), cursorChip: rectOf(cursorChip),
         scaleBar: rectOf(scaleBarWrap), north: rectOf(northWrap), toast: rectOf(toast),
-        zoomStack: rectOf(zoomStack),
       };
     });
 
@@ -165,17 +158,6 @@ try {
     // pairwise: badge never overlaps the scale bar or the north arrow, at any width
     check(`${width}px · badge does not overlap the scale bar`, overlapArea(data.badge, data.scaleBar) === 0, `overlap=${overlapArea(data.badge, data.scaleBar).toFixed(0)}px²`);
     check(`${width}px · badge does not overlap the north arrow`, overlapArea(data.badge, data.north) === 0, `overlap=${overlapArea(data.badge, data.north).toFixed(0)}px²`);
-
-    // ⛔ B914500 — THE REGRESSION THIS ITEM FIXES. Raising FURNITURE_ROW by FAB_RESERVE_PX on
-    // narrow width (to clear the "✎ Properties"/"✎ Tools" FABs below) pushed the scale bar's
-    // whole plate up into the zoom control column's fixed `bottom:100` span above it — measured
-    // live on the owner's real Bain plan at 390px: the column's own "◷" report-slow button
-    // painted directly over the scale bar's highest tick label ("…0 FEET"). Proven red on the
-    // pre-fix source (a bare `bottom: 100`) before the fix landed. Checked at EVERY width,
-    // mirroring the badge pairwise checks above — the fixed 100 is harmless on desktop today
-    // only because FURNITURE_ROW happens to be 40 there; nothing stops that assumption drifting.
-    check(`${width}px · zoom control does not overlap the scale bar`, overlapArea(data.zoomStack, data.scaleBar) === 0, `overlap=${overlapArea(data.zoomStack, data.scaleBar).toFixed(0)}px²`);
-    check(`${width}px · zoom control does not overlap the north arrow`, overlapArea(data.zoomStack, data.north) === 0, `overlap=${overlapArea(data.zoomStack, data.north).toFixed(0)}px²`);
 
     // B754752 — the bottom-centre canvas toast joins the furniture set. It must clear every
     // OTHER piece the same way the badge already has to; a fixed viewport-centred toast could

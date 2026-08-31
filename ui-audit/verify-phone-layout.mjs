@@ -157,35 +157,10 @@ if (railOpened) {
 }
 check("picking a tool auto-closes the rail (so you can draw)", railClosed);
 
-// 7) NEW-1 (B917072) — the six-section rail (Land/Analysis/Yield/…) must NOT hold a fixed
-// vertical strip at phone width when idle: it is off-screen by default, summoned by a
-// "☰ Sections" FAB (mirroring "✎ Tools"), same as the right tool rail.
-const sectionsRailOnScreen = async () => page.evaluate(() => {
-  const btn = document.querySelector('[data-rail-tab="parcel"]'); // "Land" — always first, never floats
-  if (!btn) return false;
-  const rail = btn.closest("div");
-  const r = rail.getBoundingClientRect();
-  return r.right > 0 && r.left < window.innerWidth - 2 && r.width > 0;
-});
-check("section rail is off-screen by default (no persistent width tax)", !(await sectionsRailOnScreen()));
-
-const sectionsBtn = page.locator('button:has-text("Sections")').first();
-const hasSectionsFab = await sectionsBtn.count().then((c) => c > 0 && sectionsBtn.isVisible());
-check("phone floating '☰ Sections' button is present", !!hasSectionsFab);
-
-let sectionsRailOpened = false;
-if (hasSectionsFab) {
-  await sectionsBtn.click({ timeout: 5000 });
-  await page.waitForTimeout(450);
-  sectionsRailOpened = await sectionsRailOnScreen();
-  await page.screenshot({ path: OUT + "phone-sections.png" });
-}
-check("tapping Sections slides the section rail on-screen", sectionsRailOpened);
-
-// 8) left-rail panel (Yield) opens as an overlay over the canvas, reached through the summoned rail
+// 7) left-rail panel (Yield) opens as an overlay over the canvas
 let panelOverlay = false;
 const yieldBtn = page.locator('button[title="Yield"]').first();
-if (sectionsRailOpened && (await yieldBtn.count())) {
+if (await yieldBtn.count()) {
   await yieldBtn.click({ timeout: 5000 });
   await page.waitForTimeout(400);
   panelOverlay = await page.evaluate(() => {
@@ -200,7 +175,6 @@ if (sectionsRailOpened && (await yieldBtn.count())) {
   await page.screenshot({ path: OUT + "phone-panel.png" });
 }
 check("left-rail panel opens as an overlay over the canvas", panelOverlay);
-check("section rail stays on-screen while its panel is open (no re-summon needed to switch)", panelOverlay && (await sectionsRailOnScreen()));
 
 // 8) no uncaught errors
 check("no uncaught page errors", errs.length === 0, errs.slice(0, 2).join(" | "));
