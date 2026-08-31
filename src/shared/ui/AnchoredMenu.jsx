@@ -56,6 +56,12 @@ export default function AnchoredMenu({
 }) {
   const menuRef = useRef(null);
   const [pos, setPos] = useState(null);
+  // B735 (×2) — read via a ref in the hashchange effect below, never as a plain dependency: every
+  // consumer passes an inline `onClose` arrow, a fresh identity each render, and the host re-renders
+  // as a direct side effect of the very `hashchange` this listener exists to catch. See that
+  // effect's own header for the measured race a bare `[onClose]` dependency produces.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; });
 
   useLayoutEffect(() => {
     if (!open) { setPos(null); return; }
@@ -63,9 +69,7 @@ export default function AnchoredMenu({
       const a = anchorRef?.current?.getBoundingClientRect();
       const m = menuRef.current;
       if (!a || !m) return;
-      // Pure, tested placement math (B734). Returns null for a zero-sized (display:none)
-      // anchor — in that case leave `pos` as-is so the menu stays hidden rather than being
-      // clamped to the top-left corner.
+      // Pure, tested placement math (B734). Returns null for a zero-sized (display:none) anchor.
       const p = placeMenu({
         anchorRect: a,
         menuW: m.offsetWidth || width,
@@ -86,11 +90,61 @@ export default function AnchoredMenu({
     place();
     window.addEventListener("resize", place);
     window.addEventListener("scroll", place, true); // capture: catch scrolls in any ancestor
+    /* ⛔ B735 (×2) — B1125's fix above (clear `pos` for a zero-sized anchor) never fired for the
+     * exact case it names in its own comment: "the host workspace was switched away while this
+     * popover was open." A keep-alive module switch hides the PREVIOUS workspace by setting
+     * `display:none` on an ANCESTOR div (Shell.jsx) — a pure CSS/React change that dispatches
+     * neither a `resize` nor a `scroll` event and touches none of this effect's deps, so `place()`
+     * never re-ran and the stale `pos` (and its full-viewport backdrop) stayed live forever,
+     * floating over every OTHER workspace. Measured live: opening the project-switcher AND a
+     * row's kebab menu, then switching module tabs, left an invisible `inset:0` interceptor over
+     * the newly-active workspace — confirmed via `elementFromPoint` at its center — that silently
+     * ate every click there, and going back left the SAME trap over the original workspace too.
+     * A `ResizeObserver` on the anchor is one trigger: its box collapses to 0×0 the instant a
+     * `display:none` ancestor hides it (and reports again if it's ever re-shown), which is exactly
+     * the signal `place()` needs and neither `resize` nor `scroll` can give it. */
+    let ro;
+    if (typeof ResizeObserver !== "undefined" && anchorRef?.current) {
+      ro = new ResizeObserver(place);
+      ro.observe(anchorRef.current);
+    }
     return () => {
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
+      ro?.disconnect();
     };
   }, [open, placement, gap, width, anchorRef]);
+
+  /* ⛔ B735 (×2), second half — the ResizeObserver above is NOT enough on its own for a NESTED
+   * menu (the project switcher's per-row kebab, anchored on a button that lives INSIDE the
+   * switcher's own already-portaled panel). That panel hides itself with `visibility:hidden`,
+   * never `display:none` — visibility:hidden keeps the box in LAYOUT, so every descendant,
+   * kebab anchor included, keeps its ordinary non-zero size the whole time. Measured live: the
+   * kebab's own anchor stayed 20×18 px, unchanged, long after its host workspace was switched
+   * away — a ResizeObserver on it has nothing to fire on, so its stale backdrop never clears.
+   * `hashchange` is the one signal every such case shares (this app's ENTIRE route lives in the
+   * hash — see route.js — so no consumer here ever needs a menu to survive one): fully CLOSE
+   * (not just visually hide) any open menu the instant the route changes, regardless of whether
+   * its anchor is a plain element or portaled inside another open menu's panel. Closing via
+   * `onClose` (not a bare `setPos(null)`) matters — merely hiding would let the ResizeObserver's
+   * own next callback silently REOPEN the menu the moment its anchor becomes measurable again
+   * (e.g. navigating back to the same workspace), which is worse than the original bug.
+   *
+   * ⛔ AND THE DEPENDENCY ARRAY MATTERS AS MUCH AS THE LISTENER: `onCloseRef` above, never a bare
+   * `onClose`. Every consumer passes an inline arrow, so this component's HOST re-renders as a
+   * direct side effect of the very `hashchange` being listened for (the route change that fires it
+   * is what makes the surrounding tree switch workspaces) — a plain `[open, onClose]` dependency
+   * tears the listener down and re-adds it on that SAME re-render, and a listener removed
+   * mid-dispatch is skipped for the event already in flight (browsers snapshot the listener list
+   * at dispatch time), so the handler silently unregistered itself moments before it needed to
+   * fire. Measured: with a bare `onClose` dependency this fired 0 times per navigation, every
+   * time — deterministic, not a rare race. */
+  useEffect(() => {
+    if (!open) return;
+    const onNav = () => onCloseRef.current?.();
+    window.addEventListener("hashchange", onNav);
+    return () => window.removeEventListener("hashchange", onNav);
+  }, [open]);
 
   // Escape closes the menu — a shared affordance for every AnchoredMenu consumer
   // (account dropdown, project breadcrumb, rail flyouts).
