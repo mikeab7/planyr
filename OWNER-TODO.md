@@ -5,7 +5,7 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-08-28._
+_Last updated: 2026-08-31._
 
 ## 🔐 Two small GitHub settings — both fix the same shape of problem: a robot that can't quite finish its own job (B825232–B825234)
 
@@ -26,6 +26,14 @@ _Last updated: 2026-08-28._
       session has to do it by hand instead. **Two-minute setting, no code, no downside** — full
       background on `B793696`; the live re-check that closes this out once you've flipped it is
       `V438336` in `VERIFICATION.md`, run by whichever Claude session is active when you confirm it's done.
+- [ ] **Check whether `main` has a branch-protection rule set** (`github.com/mikeab7/planyr/settings/branches`).
+      Found 2026-08-31 (`B897440`) while shipping PR #1245: even after working around the setting above, GitHub
+      refused to arm auto-merge with "Protected branch rules not configured for this branch" — a different
+      error from the one `B793696` already covers. GitHub's auto-merge needs a protection rule (at minimum, a
+      required status check) on `main` before it will queue anything, so either there isn't one, or it exists
+      but doesn't name `build` as required. If there's no rule: add one requiring the `build` check to pass
+      before merging. **Nothing is broken while this waits** — a session just has to merge each green PR by
+      hand instead of it happening on its own, same as before this automation existed.
 
 ## 👀 One thing only you can check: does the app actually TELL you when it has stopped saving? (V273520 / B484337)
 
