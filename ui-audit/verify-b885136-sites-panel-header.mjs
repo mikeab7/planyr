@@ -190,26 +190,31 @@ async function run() {
   console.log("Header measurement (1440px viewport):", JSON.stringify(headerData, null, 2));
   ok("header stack total height is ~57-59px (down from a measured live baseline of 80px)", headerData.totalHeight >= 55 && headerData.totalHeight <= 60, `${headerData.totalHeight}px`);
   ok("no font in the header exceeds --font-display (14px)", headerData.maxFontSize <= 14.5, `max=${headerData.maxFontSize}px`);
-  ok("all 5 module tabs render at 1440px", headerData.tabCount === 5, `${headerData.tabCount} tabs`);
+  // Tab count is READ, never hardcoded to the brief's literal "five" — B884688/B891184 (the
+  // Model spreadsheet workspace) merged a sixth module tab into this same row concurrently with
+  // this item, on `origin/main`. The property under test is "do the tabs fit," not "are there
+  // exactly five" — a hardcoded 5 would have gone stale (and falsely red) the moment that PR
+  // landed, for a reason that has nothing to do with this item's own change.
+  const expectTabs = headerData.tabCount;
+  ok(`all ${expectTabs} module tabs render at 1440px (count read from the live DOM, not assumed)`, expectTabs >= 5, `${expectTabs} tabs`);
   await hpage.screenshot({ path: OUT + "header-1440.png" });
 
-  // ---- (e) the five tabs still fit at the narrowest supported (non-"narrow") width ----
+  // ---- (e) the tabs still fit at the narrowest supported (non-"narrow") width ----
   for (const w of [1024, 900, 768]) {
     await hpage.setViewportSize({ width: w, height: 900 });
     await hpage.waitForTimeout(200);
-    const tabFit = await hpage.evaluate(() => {
+    const tabFit = await hpage.evaluate((expectTabs) => {
       const header = document.querySelector("header");
       const tabs = Array.from(header.querySelectorAll('[data-testid^="module-tab-"]'));
-      if (tabs.length !== 5) return { count: tabs.length, overlap: null, offRight: null };
+      if (tabs.length !== expectTabs) return { count: tabs.length, overlap: null, offRight: null };
       const rects = tabs.map((t) => t.getBoundingClientRect());
       let overlap = false;
       for (let i = 1; i < rects.length; i++) if (rects[i].left < rects[i - 1].right - 0.5) overlap = true;
-      const toolbarZone = header.querySelector('[data-testid^="module-tab-"]')?.closest("div")?.parentElement;
       const headerRight = header.getBoundingClientRect().right;
       const offRight = rects.some((r) => r.right > headerRight + 0.5);
-      return { count: tabs.length, overlap, offRight, lastRight: rects[4].right, headerRight };
-    });
-    ok(`at ${w}px: all 5 tabs present and not overlapping`, tabFit.count === 5 && tabFit.overlap === false, JSON.stringify(tabFit));
+      return { count: tabs.length, overlap, offRight, lastRight: rects[rects.length - 1].right, headerRight };
+    }, expectTabs);
+    ok(`at ${w}px: all ${expectTabs} tabs present and not overlapping`, tabFit.count === expectTabs && tabFit.overlap === false, JSON.stringify(tabFit));
   }
   await hpage.screenshot({ path: OUT + "header-768.png" });
 
