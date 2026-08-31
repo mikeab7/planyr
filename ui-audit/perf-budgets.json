@@ -162,8 +162,8 @@
       ]
     },
     "notesRouteJsBytes": {
-      "baseline": 673962,
-      "target": 673962,
+      "baseline": 586052,
+      "target": 586052,
       "unit": "bytes",
       "what": "Total JS a plain Notes route must download: the entry chunk plus Notes and its static-import closure.",
       "note": "Seeded at 0 so the FIRST measurement of a brand-new route lands through `npm run perf:ratchet` with a stated reason, exactly like any other baseline move \u2014 a hand-typed seed is the thing that step exists to prevent. WHAT THIS NUMBER DOES AND DOES NOT INCLUDE, because it is the whole reason the split is load-bearing: it counts the notebook TREE and its chrome, and deliberately NOT the rich-text engine. Notes.jsx pulls components/NoteEditor.jsx (and through it the only @tiptap imports in the module) via a lazy() import inside a Suspense, so the engine is a separate on-demand chunk of ~464 KB that a user pays for only when a page is actually opened, and the rail paints first. A future rise in THIS metric therefore means something moved onto the static path that belongs behind that boundary \u2014 most likely a new static import of the editor, or a shared module that got hoisted. test/notesModule.test.js source-scans for the first case; this budget is the backstop for the second."
@@ -636,6 +636,17 @@
           "commit": "0485eb197924a6006db154ac80abe554d76dcfd3",
           "sourceHash": "3012713e8187a718",
           "reason": "Model module follow-up (B891184): same rewrite -- sheetOps.js and modelSaveState.js are new files, sheetModel.js/sheetEngine.js grew substantially fixing per-cell formulas/formats"
+        },
+        {
+          "metric": "bundle.notesRouteJsBytes",
+          "from": 673962,
+          "to": 586052,
+          "direction": "ratchet",
+          "item": "B927105",
+          "date": "2026-08-31",
+          "commit": "72f20997c4e1858f078c52db11aafb58171ef1c2",
+          "sourceHash": "1dfb0256eeaf61c3",
+          "reason": "Split storage.js's setActiveUser/setScheduleLink and shared/projects/projects.js's storage.js edge into activeUser.js/siteListLight.js leaves and a dynamic import at the boundary, so the site-model/cloud-sync engine no longer rides the shared entry chunk or the breadcrumb's static graph on non-Site routes."
         }
       ]
     }
