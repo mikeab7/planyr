@@ -33,11 +33,16 @@ import { listMyTeams, currentIdentity } from "../../../workspaces/site-planner/l
 const TYPE_LABEL = { land: "Land", building_sale: "Building sale", lease: "Lease" };
 
 function emptyDraft(anchor) {
+  // B941152 — a parcel-anchored comp arrives with the acreage the map toolbar already computed
+  // (`asm.totalAc`, MapFinder.jsx); land size defaults to LAND (the default comp type) rather
+  // than forcing Michael to re-type the number he selected the parcels to get in the first place.
+  // Rounded to match the toolbar's own 2-decimal display (66.17 AC in, 66.17 out).
+  const landSizeValue = anchor?.acreageAc != null ? String(Math.round(anchor.acreageAc * 100) / 100) : "";
   return {
     compType: "land", compDate: "", title: "", notes: "", teamId: null, projectId: null,
     anchor: anchor || null,
     partyProvider: "", partyAcquirer: "",
-    landPrice: "", landSizeValue: "", landSizeUnit: "ac",
+    landPrice: "", landSizeValue, landSizeUnit: "ac",
     bldgPrice: "", bldgSizeSf: "",
     leaseRate: "", leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseTi: "", leaseTerm: "", leaseSizeSf: "",
     leaseFreeRentMonths: "",

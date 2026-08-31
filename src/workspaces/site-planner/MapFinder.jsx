@@ -77,6 +77,7 @@ import { makeParcelDisplayLayer, makeSnapshotLayer, PARCEL_MINZOOM, ADD_CURSOR, 
 import { responseWasTruncated, featureCountOf, parcelTruncationNotice } from "./lib/parcelTruncation.js";
 import { siteBoundaryInfo, siteDrawParcels } from "./lib/siteBoundary.js";
 import { geocodeAddress } from "./lib/geocode.js";
+import { compAnchorFromSelection } from "./lib/compParcelAnchor.js";
 import { statusToken, darken } from "../../shared/ui/statusTokens.js";
 /* lib/sharing.js is loaded ON DEMAND, and the reason is a budget one. This module is the
    ONLY importer of it, and both of its functions are already reached through an `await`
@@ -2324,20 +2325,46 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const placeCompPinAtRef = useRef(placeCompPinAt);
   useEffect(() => { placeCompPinAtRef.current = placeCompPinAt; });
 
-  // NEW-COMPS: anchor a comp to the currently-selected real parcel (selectMode's own selection),
-  // instead of planning a new site with it. `selected` items already carry lon/lat `rings`
-  // (MapFinder.jsx:424) — reused as-is for the map snapshot geometry, no re-derivation.
+  // NEW-COMPS: anchor a comp to the currently-selected real parcel(s) (selectMode's own
+  // selection), instead of planning a new site with it. `selected` items already carry lon/lat
+  // `rings` (MapFinder.jsx:424) — reused as-is for the map snapshot geometry, no re-derivation.
+  // B941152 — this used to read ONLY `selected[selected.length - 1]`, so a two-plus-parcel
+  // selection silently dropped every parcel but the last: it had no `parcelApn`/`parcelGeom` of
+  // its own, and the button that calls this was gated to `selected.length === 1` and simply did
+  // not render for a bigger selection — Michael's "I selected parcels and press enter but
+  // nothing happens." A multi-parcel comp now carries EVERY selected parcel's account id
+  // (joined, never just one) and EVERY selected parcel's ring(s) as one GeoJSON geometry —
+  // `Polygon` for a lone parcel (byte-identical to the old single-parcel shape), `MultiPolygon`
+  // for several — anchored at the assembly's own bbox-center (the same point a "Plan N parcels"
+  // site would open on), carrying the toolbar's own already-computed acreage so it survives into
+  // the comp instead of forcing Michael to re-type 66.17 by hand.
   const placeCompOnSelectedParcel = () => {
-    if (!asm || !selected.length) return;
-    const last = selected[selected.length - 1];
-    onPlaceComp && onPlaceComp({
-      kind: "parcel", lat: asm.origin.lat, lon: asm.origin.lon,
-      county: last?.county || null,
-      parcelApn: last?.acct || null,
-      parcelGeom: last?.rings?.length ? { type: "Polygon", coordinates: last.rings } : null,
-    });
+    const anchor = compAnchorFromSelection(selected, asm);
+    if (!anchor) return;
+    onPlaceComp && onPlaceComp(anchor);
     clearSel();
   };
+
+  // B941152 — Enter mirrors the "Comp here" button that appears the moment a parcel is selected
+  // in Comp mode. Selecting parcels is a sequence of map clicks, which leaves nothing sitting in
+  // focus (not the address field, not a button) — so before this, Michael's Enter keystroke had
+  // no listener anywhere to reach, and the toolbar's badge + ✕ were all there was to show for it.
+  // Scoped OFF whenever a real control has focus (the address search, a rename field, the ✕/Cancel
+  // buttons…) so Enter keeps doing whatever that control already does; it only fires when nothing
+  // in the toolbar has claimed the keystroke, which is exactly the state a map click leaves you in.
+  useEffect(() => {
+    if (mode !== "comp" || !selected.length) return undefined;
+    const onKey = (e) => {
+      if (e.key !== "Enter") return;
+      const ae = document.activeElement;
+      const tag = ae && ae.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "BUTTON" || (ae && ae.isContentEditable)) return;
+      e.preventDefault();
+      placeCompOnSelectedParcel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mode, selected]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const startBlankHere = async (at) => {
     const c = at || (mapRef.current ? mapRef.current.getCenter() : null);
@@ -2791,7 +2818,12 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                   </span>
                 </button>
               )}
-              {mode === "comp" && onPlaceComp && selected.length === 1 && (
+              {/* B941152 — this used to require `selected.length === 1`, so a two-plus-parcel
+                  selection (a normal industrial land comp assembled from adjoining lots) had NO
+                  primary action at all: no button to click, and Enter had nothing to reach either.
+                  Any non-empty selection now gets the same one action, worded like the Site-mode
+                  "Plan N parcels →" button beside it. */}
+              {mode === "comp" && onPlaceComp && (
                 <button
                   onClick={placeCompOnSelectedParcel}
                   style={{
@@ -2801,7 +2833,9 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                     fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
                   }}
                 >
-                  <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Comp here</span>
+                  <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    Comp {selected.length > 1 ? `${selected.length} parcels` : "here"}
+                  </span>
                 </button>
               )}
             </>
