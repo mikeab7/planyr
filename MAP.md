@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-31 @ `d0c1b3a6` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-31 @ `0b967476` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_616 source files mapped._
+_619 source files mapped._
 
 ## infra
 
@@ -104,7 +104,7 @@ _616 source files mapped._
 - **`src/workspaces/model/lib/sheetEngine.js`** — Wires the sheet model to the shared formula engine: evaluates a per-CELL dependency graph (A1 grid refs + same-row `[Column]` refs), and renders each cell's display/formula-bar text.
   - _exports_: `cellAddressText`, `displayFor`, `displayKindFor`, `evaluateSheet`, `formulaBarText`, `formulaSource`, `kindOf`, `literalTypedValue`
 - **`src/workspaces/model/lib/sheetModel.js`** — The pure spreadsheet data model: columns/cells/formulas, cell addressing, and every mutator (all pure, undo-stack-ready).
-  - _exports_: `addColumn`, `blankRange`, `cellKey`, `colAt`, `columnIndexByName`, `commitCellText`, `createSheet`, `deleteColumn`, `ensureColumnCount`, `formatAt`, `isFormulaText`, `migrateSheet`, `padRowCount`, `rawAt`, `renameColumn`, `setNumberFormat`, `setRaw`, `SHEET_VERSION`, `usedRangeEnd`
+  - _exports_: `addColumn`, `blankRange`, `cellKey`, `colAt`, `columnIndexByName`, `commitCellText`, `createSheet`, `deleteColumn`, `ensureColumnCount`, `formatAt`, `isFormulaText`, `migrateSheet`, `padRowCount`, `rawAt`, `renameColumn`, `setNumberFormat`, `setRaw`, `SHEET_VERSION`, `sheetsDiverge`, `usedRangeEnd`
 - **`src/workspaces/model/lib/sheetOps.js`** — Copy/paste/fill-down and the Ctrl+Arrow block-jump target, sharing the formula engine's relative-reference rewrite.
   - _exports_: `copyRange`, `ctrlArrowTarget`, `fillDown`, `pasteRange`
 - **`src/workspaces/model/lib/undoStack.js`** — General whole-state undo/redo: a snapshot stack keyed on committed edits, agnostic to what kind of edit each one was.
@@ -383,7 +383,7 @@ _616 source files mapped._
 - **`src/shared/profile/useProfile.js`** — useProfile hook: load signed-in user's profiles row and expose a never-blank display name / first name / org / initial fallback chain plus save+reload
   - _exports_: `default`, `displayNameFor`, `firstNameFor`, `initialFor`, `orgFor`, `useProfile`
 - **`src/shared/projects/projectModel.js`** — Pure project-model helpers: collapse site records into one project per site-group, name-match suggest, dropdown filter, and relative-time formatting for the breadcrumb switcher
-  - _exports_: `filterProjects`, `groupProjects`, `normalizeProjectName`, `relTime`, `resolveCurrentName`, `suggestNameMatch`, `unionProjectLists`, `withCurrentProject`
+  - _exports_: `DELETED_RETENTION_DAYS`, `filterProjects`, `groupProjects`, `normalizeProjectName`, `relTime`, `resolveCurrentName`, `suggestNameMatch`, `unionProjectLists`, `withCurrentProject`
 - **`src/shared/projects/projects.js`** — Live project list for the breadcrumb switcher: groups the RLS-scoped site store, warms an empty on-device cache via cloud pull, and rename/delete a site-group project
   - _exports_: `activeUid`, `DELETED_RETENTION_DAYS`, `deleteProject`, `filterProjects`, `groupProjects`, `listDeletedProjects`, `listProjects`, `normalizeProjectName`, `notifyProjectsChanged`, `onProjectsChanged`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `reconcileProjects`, `relTime`, `renameProject`, `restoreDeletedProject`, `suggestNameMatch`, `warmProjects`, `warmProjectsIfEmpty`
 - **`src/shared/recents/recentDocs.js`** — Library-Home Recent list: local recently-OPENED drawings (not updated_at), per-uid, deduped by id, newest-first, capped at 15
@@ -575,6 +575,8 @@ _616 source files mapped._
   - _exports_: `default (YieldFooterDisclaimer)`
 - **`src/workspaces/site-planner/lib/accessScreen.js`** — PHASE 6 access-tier screening (pure): turns three public access datasets near the parcel into info findings — TxDOT AADT (nearest counted road's traffic as an access/visibility proxy), BTS/FRA rail lines (nearest line + owner; a crossing/abutting line flags a potential rail-served siding), and FAA airports (distance as a Part 77 height-restriction proxy, with a Form-7460 caution near a public-use airport); expands railroad reporting marks + FAA type codes to plain labels
   - _exports_: `airportTypeLabel`, `railroadName`, `summarizeAadt`, `summarizeAirports`, `summarizeRail`
+- **`src/workspaces/site-planner/lib/activeUser.js`** — Which account the shared project store is bound to, split out of storage.js (B927105) so readers of just this state skip the full site-model/cloud-sync engine
+  - _exports_: `activeUid`, `cloudSitesKey`, `isCloudActive`, `setActiveUser`
 - **`src/workspaces/site-planner/lib/adminBoundaryData.js`** — Pure decoder for the wide-zoom boundary asset (delta ints → lat/lng rings) plus the inner half of the zoom band (states join countries from zoom 5).
   - _exports_: `ADMIN1_MIN_ZOOM`, `adminBoundaryLevels`, `decodeAsset`, `decodeRing`
 - **`src/workspaces/site-planner/lib/adminBoundaryGate.js`** — The wide-zoom gate as a leaf module (imports nothing): the zoom ceiling for political boundaries, and the cached dynamic import that keeps the layer off the boot bundle.
@@ -862,7 +864,7 @@ _616 source files mapped._
 - **`src/workspaces/site-planner/lib/locateMe.js`** — "Locate me" pure decisions: accuracy-circle honesty threshold, feet/mile accuracy formatting, GeolocationPositionError → owner-facing message
   - _exports_: `ACCURACY_CIRCLE_THRESHOLD_M`, `ACCURACY_USABLE_THRESHOLD_M`, `formatAccuracyFt`, `garbageAccuracyMessage`, `isAccuracyUsable`, `locateAvailability`, `locateErrorMessage`, `locateUnavailableTooltip`, `shouldShowAccuracyCircle`
 - **`src/workspaces/site-planner/lib/mapChromeStack.js`** — the ONE map-overlay stacking model (an open panel outranks map chrome — Leaflet controls, scale bar) plus the available-room panel height
-  - _exports_: `COMPS_TOGGLE_CLEARANCE_PX`, `LEAFLET_CONTROL_Z`, `MAP_CHROME_Z`, `panelMaxHeight`, `ZOOM_CONTROL_CLEARANCE_PX`
+  - _exports_: `COMPS_TOGGLE_CLEARANCE_PX`, `LEAFLET_CONTROL_Z`, `MAP_CHROME_Z`, `MAP_OVERLAY_BAR_H_PX`, `MAP_OVERLAY_CHIP_H_PX`, `MAP_OVERLAY_TOP_PX`, `panelMaxHeight`, `ZOOM_CONTROL_CLEARANCE_PX`
 - **`src/workspaces/site-planner/lib/mapillaryClient.js`** — Leaflet-free Mapillary request shaping: builds bbox map_features URL (same-origin token-injecting proxy, or direct Graph API with a user token) and filters to pole/hydrant detections
   - _exports_: `mapillaryRequestUrl`, `MLY_FIELDS`, `MLY_LIMIT`, `MLY_PROXY_PATH`, `pickDetections`
 - **`src/workspaces/site-planner/lib/mapLock.js`** — THE projection welding the planner's feet frame to the Web-Mercator basemap — scaled-Mercator feet↔lat/lng plus the matching ppf↔zoom, both anchored at the site origin
@@ -1085,6 +1087,8 @@ _616 source files mapped._
   - _exports_: `siteAcres`, `siteBoundaryInfo`, `siteDrawParcels`
 - **`src/workspaces/site-planner/lib/siteGeometry.js`** — Shared pure geometry primitives behind a site's drawn area math: element footprints, curb bands, road strip/pavement area, junction detection and the per-plan roundabout resolution
   - _exports_: `carStalls`, `CURB`, `CURB_6`, `CURB_TYPES`, `curbAreaOf`, `curbEdgesOf`, `curbHost`, `curbWidthOf`, `elCorners`, `estStalls`, `estTrailers`, `isCenterlineRoad`, `outwardCurbEdge`, `polyArea`, `ringOf`, `roadCurbLines`, `roadCurbWidth`, `roadDefaultRadius`, `roadDenseCenterline`, `roadJunctionVerticesOf`, `roadStripArea`, `roadStripRing`, `rot2`, `roundaboutsForSite`, `sidewalkBetween`, `SQFT_PER_ACRE`, `TEE_COINCIDE_FT`, `TEE_COINCIDE_MAX_FT`, `teeCoincideFt`, `teeTargetOf`, `trailerStalls`
+- **`src/workspaces/site-planner/lib/siteListLight.js`** — The lightweight project-list read (B927105): the six scalar fields every workspace header needs, skipping the full Site Model's geometry-healing engine that `storage.js`'s `loadSitesList()` otherwise pulls in
+  - _exports_: `loadSiteSummaries`
 - **`src/workspaces/site-planner/lib/siteMetrics.js`** — Pure site yield/coverage metrics (siteSqft, bldg, coverage %, FAR, ...) as ONE function, extracted from SitePlanner.jsx's render body so a future module (e.g. a financial model) can read them
   - _exports_: `siteMetrics`
 - **`src/workspaces/site-planner/lib/siteModel.js`** — Canonical per-plan Site Model schema v10: createSiteModel/migrate, semantic selectors, cross-copy union merge with delete-tombstones, and bonded-child/dog-ear/road-centerline load-time repairs
@@ -1097,6 +1101,8 @@ _616 source files mapped._
   - _exports_: `groupRecencyMs`, `lastEditedLabel`, `summarizeElementRecency`
 - **`src/workspaces/site-planner/lib/siteRegion.js`** — NEW-8 the synchronous half of the Colorado tier: geometric, network-free site→state resolution ('TX' \| 'CO' \| null) that the detention guard keys off. Its own module so the Colorado PROSE (coloradoRegions.js) can load on demand while this stays on the boot path
   - _exports_: `isColorado`, `siteState`, `STATE_ENVELOPES`
+- **`src/workspaces/site-planner/lib/siteStatus.js`** — The Site Model's schema-version constant + deal-status labels, split out of siteModel.js (B927105) so a status-only caller doesn't drag in the geometry engine
+  - _exports_: `DEFAULT_STATUS`, `isLegacyRecord`, `LEGACY_STATUS`, `normStatus`, `SITE_MODEL_VERSION`, `STATUS_META`, `STATUSES`, `statusOf`
 - **`src/workspaces/site-planner/lib/soils.js`** — USDA SSURGO soils via Soil Data Access (NEW-B2): pure SDA SQL query builder + response parser (hydrologic soil group + seasonal-high water table) + bounded-fetch client. SDA proxy-blocked in sandbox → live-verify.
   - _exports_: `buildSdaRequest`, `buildSoilQuery`, `parseSoilResponse`, `resolveSoils`, `SDA_ENDPOINT`, `SDA_PROXY_PATH`
 - **`src/workspaces/site-planner/lib/sourceHealth.js`** — Per-source circuit breaker for county parcel servers: track consecutive failures, open/cooldown/half-open, filter healthy candidates, and decide the honest statewide-backup badge

@@ -43,8 +43,8 @@ import { siteState } from "./lib/siteRegion.js";
 // NEW-3 — the ONE map-overlay stacking model. Leaflet fixes its own control containers at
 // z-index 1000; these panels sat at 1000 too, so whether the zoom buttons and the scale bar
 // covered them came down to document order. An open panel now outranks map chrome outright.
-import { MAP_CHROME_Z, panelMaxHeight, ZOOM_CONTROL_CLEARANCE_PX } from "./lib/mapChromeStack.js";
-// B848848 — site-plan overlays (upload a site plan, anchor it on the map, pin comps to it).
+import { MAP_CHROME_Z, panelMaxHeight, ZOOM_CONTROL_CLEARANCE_PX, MAP_OVERLAY_TOP_PX, MAP_OVERLAY_CHIP_H_PX, MAP_OVERLAY_BAR_H_PX } from "./lib/mapChromeStack.js";
+// B848496 — site-plan overlays (upload a site plan, place it on the map, pin comps to it).
 import { useSitePlanOverlayLayers } from "./lib/useSitePlanOverlayLayers.js";
 import { latLonToImagePoint, suggestFtPerPx } from "../../shared/sitePlans/lib/overlayGeoref.js";
 import { projectToGrid } from "../../shared/coordinates/index.js";
@@ -212,7 +212,7 @@ const COMPS_LAYERS_COLLAPSED_W = 152;
 const MAP_CORNER_CHIP_STYLE = {
   height: CONTROL_H.lg, minWidth: COMPS_LAYERS_COLLAPSED_W, padding: "0 12px", borderRadius: RADIUS.md,
   border: `1px solid ${PAL.panelLine}`, background: "var(--surface-raised)",
-  color: PAL.ink, fontSize: FONT_SIZE.xl, fontWeight: 600, textTransform: "none", letterSpacing: "normal",
+  color: PAL.ink, fontSize: FONT_SIZE.control, fontWeight: 600, textTransform: "none", letterSpacing: "normal",
   cursor: "pointer", fontFamily: "inherit", boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
 };
 
@@ -491,10 +491,13 @@ function RailTab({ label, count, active, onClick }) {
   return (
     <button type="button" role="tab" aria-selected={active} onClick={onClick} style={{
       flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
-      height: 26, padding: "0 8px", borderRadius: nestedIn(RADIUS.lg, 6), border: "none",
+      // NEW-2 (B950321, map-overlay alignment) — was 26; CONTROL_H.sm (22) so the rail header
+      // row's COLLAPSED total height can land on MAP_OVERLAY_CHIP_H_PX, matching the Layers
+      // panel's own collapsed chip instead of resting 8px taller for no visual reason.
+      height: CONTROL_H.sm, padding: "0 8px", borderRadius: nestedIn(RADIUS.lg, 6), border: "none",
       background: active ? "var(--surface-raised)" : "transparent",
       color: active ? "var(--text-primary)" : "var(--text-secondary)",
-      fontSize: 11.5, fontWeight: active ? 700 : 600, cursor: "pointer", fontFamily: "inherit",
+      fontSize: FONT_SIZE.control, fontWeight: active ? 700 : 600, cursor: "pointer", fontFamily: "inherit",
     }}>
       {label}<span style={{ color: active ? "var(--text-primary)" : "var(--text-tertiary)" }}>{count}</span>
     </button>
@@ -645,7 +648,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   };
   const [zoom, setZoom] = useState(null);
 
-  // ---- Site-plan overlays (B848496) — upload a site plan, place it on the map by DIRECT
+  // ---- Site-plan overlays (B948496) — upload a site plan, place it on the map by DIRECT
   // MANIPULATION (drag / corner-scale / rotate, mirroring the Site Planner's own on-canvas
   // reference-image tool — the owner rejected the original control-point wizard outright), pin
   // comps to buildings on it. The DATA (fetch/list/upload UI) is owned by SitePlansSection, the
@@ -2737,7 +2740,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           }} />
         )}
 
-        {/* B848496 — "pin a comp to this plan" (a click on the plan's own rendered image) gets
+        {/* B948496 — "pin a comp to this plan" (a click on the plan's own rendered image) gets
             the same visible-armed-state treatment B831781 established above for a comp drop. */}
         {clickableOverlayId && (
           <>
@@ -2756,7 +2759,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           </>
         )}
 
-        {/* B848496 second amendment — a real drop target: a full-area highlight naming what will
+        {/* B948496 second amendment — a real drop target: a full-area highlight naming what will
             happen, shown the instant a file is dragged over the map (never a silent accept).
             `pointer-events: none` throughout — the window-level listeners above own the actual
             drag/drop events; this is feedback only and must never be able to steal a drop. */}
@@ -2798,7 +2801,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         {/* ── Combined site bar — floating pill at top-center (full-width bar on a phone) ──
             B831776 (NEW-5): the bar is RADIUS.lg, and every child button below is
             nestedIn(RADIUS.lg, 6) = RADIUS.sm — radius.js's own concentric-nesting rule applied
-            exactly as it documents, not a new value. */}
+            exactly as it documents, not a new value.
+            NEW-2 (B950321, map-overlay alignment) — height is MAP_OVERLAY_BAR_H_PX, a deliberately
+            different number from the corner chips' MAP_OVERLAY_CHIP_H_PX (this is a compound
+            cluster, not a single-label toggle — see mapChromeStack.js's own header), named so it
+            reads as an intentional choice rather than a fourth hand-picked literal. */}
         <div style={{
           position: "absolute", zIndex: narrow ? 1100 : 1000,
           display: "flex", alignItems: "center",
@@ -2806,12 +2813,14 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           borderRadius: RADIUS.lg,
           boxShadow: "0 4px 20px rgba(0,0,0,0.45), 0 1px 4px rgba(0,0,0,0.25)",
           padding: "0 6px",
-          height: 42,
+          height: MAP_OVERLAY_BAR_H_PX,
           // Phone: a full-width bar pinned to the top so the side panels (now below it) can't
-          // cover the search input or the Select-parcels button. Desktop: centered pill.
+          // cover the search input or the Select-parcels button. Desktop: centered pill, sharing
+          // the SAME top edge (MAP_OVERLAY_TOP_PX) as the two corner panels — was a bare `14` that
+          // sat 4px below their bare `10`, which is the specific misalignment the owner flagged.
           ...(narrow
             ? { top: 8, left: 8, right: 8, transform: "none", maxWidth: "none", minWidth: 0 }
-            : { top: 14, left: "50%", transform: "translateX(-50%)", maxWidth: "calc(100% - 540px)", minWidth: 300 }),
+            : { top: MAP_OVERLAY_TOP_PX, left: "50%", transform: "translateX(-50%)", maxWidth: "calc(100% - 540px)", minWidth: 300 }),
         }}>
           {/* B831776 (NEW-1) — Site/Comp switch, far left, before the search field. Sets what
               the action buttons to the right offer; the SAME state drives the rail tab below. */}
@@ -2862,7 +2871,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                   borderTopLeftRadius: nestedIn(RADIUS.lg, 6), borderBottomLeftRadius: nestedIn(RADIUS.lg, 6),
                   borderTopRightRadius: 0, borderBottomRightRadius: 0,
                   border: "1px solid var(--accent)", borderRight: "1px solid var(--on-accent)",
-                  background: "var(--accent)", color: "var(--on-accent)", fontSize: 12.5, fontWeight: 700,
+                  background: "var(--accent)", color: "var(--on-accent)", fontSize: FONT_SIZE.control, fontWeight: 700,
                   cursor: "pointer", fontFamily: "inherit",
                 }}
               >
@@ -2880,7 +2889,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                   borderTopRightRadius: nestedIn(RADIUS.lg, 6), borderBottomRightRadius: nestedIn(RADIUS.lg, 6),
                   borderTopLeftRadius: 0, borderBottomLeftRadius: 0,
                   border: "1px solid var(--accent)", background: "var(--accent)", color: "var(--on-accent)",
-                  fontSize: FONT_SIZE.xs, cursor: "pointer", fontFamily: "inherit",
+                  fontSize: FONT_SIZE.micro, cursor: "pointer", fontFamily: "inherit",
                   display: "flex", alignItems: "center", justifyContent: "center",
                 }}
               >▾</button>
@@ -3080,19 +3089,29 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             // overlay (above the layers panel) when the user opens it.
             ...(narrow
               ? { top: 60, left: 8, zIndex: MAP_CHROME_Z.panel, width: sitesPanelOpen ? "min(320px, calc(100vw - 16px))" : 188, maxHeight: "calc(100% - 68px)" }
-              : { top: 10, left: 10, zIndex: MAP_CHROME_Z.panel, width: 232, maxHeight: "calc(100% - 24px)" }) }}>
+              // NEW-2 (B950321) — MAP_OVERLAY_TOP_PX, the one top edge every desktop overlay
+              // shares (was a bare `10` that happened to agree with the Layers panel's own bare
+              // `10` — nothing enforced that once). Collapsed, this panel now also pins to the
+              // shared MAP_OVERLAY_CHIP_H_PX, matching the Layers panel's collapsed chip instead
+              // of resting at whatever height its two-tab header row happened to need. `maxHeight`
+              // (B948496) still caps the OPEN state so the panel never grows past the viewport.
+              : { top: MAP_OVERLAY_TOP_PX, left: 10, zIndex: MAP_CHROME_Z.panel, width: 232, maxHeight: "calc(100% - 24px)", ...(sitesPanelOpen ? null : { height: MAP_OVERLAY_CHIP_H_PX }) }) }}>
             {/* collapsible header (B106) + the two tabs — one row, always visible (never buried
                 behind the collapse, and now PINNED — flex:"none" against the scrollable body
                 below — so both counts stay readable, and reachable, no matter how long either
-                tab's content runs). */}
-            <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, padding: "6px 6px 4px" }}>
+                tab's content runs). NEW-2 (B950321) — desktop COLLAPSED only: tighter vertical
+                padding so this row's total height (padding + the 22px RailTab) lands exactly on
+                the panel's fixed MAP_OVERLAY_CHIP_H_PX box rather than overflowing it; every
+                other state (open, or narrow/phone, which sets no fixed height) is untouched. */}
+            <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, padding: (!narrow && !sitesPanelOpen) ? "3px 6px" : "6px 6px 4px" }}>
               {/* NEW-1/NEW-3 (map landing radius audit) — nestedIn(RADIUS.lg, 6), not a bare
                   RADIUS.sm literal: this header row sits 6px in from the panel's own RADIUS.lg=12
                   edge, same reasoning as RailTab just above (docs/DESIGN.md's radius exception 3). */}
               <button onClick={() => { if (narrow && !sitesPanelOpen) setLayersPanelOpen(false); toggleSitesPanel(); }}
                 title={sitesPanelOpen ? "Collapse the sites panel" : "Expand the sites panel"}
                 style={{ flex: "none", width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center",
-                  background: "transparent", border: "none", cursor: "pointer", color: PAL.muted, borderRadius: nestedIn(RADIUS.lg, 6) }}>
+                  background: "transparent", border: "none", cursor: "pointer", color: PAL.muted, borderRadius: nestedIn(RADIUS.lg, 6),
+                  fontSize: FONT_SIZE.control }}>
                 <span style={{ fontSize: 8, lineHeight: 1, transform: sitesPanelOpen ? "none" : "rotate(-90deg)", display: "inline-block" }}>▼</span>
               </button>
               <RailTab label="Sites" count={nf ? `${shownCount}/${sites.length}` : sites.length}
@@ -3117,7 +3136,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                 style={{ flex: 1, minWidth: 0, boxSizing: "border-box", padding: "5px 8px", fontSize: 12, border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.sm, color: PAL.ink, background: "var(--surface-raised)", fontFamily: "inherit", outline: "none" }} />
               <select value={sitesPanelPrefs.sort} onChange={(e) => setSitesSort(e.target.value)} aria-label="Sort sites within each group"
                 title="Sort — applies within each group, not across groups"
-                style={{ flex: "none", boxSizing: "border-box", padding: "5px 6px", fontSize: 11, border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.sm, color: PAL.ink, background: "var(--surface-raised)", fontFamily: "inherit", outline: "none" }}>
+                style={{ flex: "none", boxSizing: "border-box", padding: "5px 6px", fontSize: FONT_SIZE.control, border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.sm, color: PAL.ink, background: "var(--surface-raised)", fontFamily: "inherit", outline: "none" }}>
                 <option value="largest">Largest first</option>
                 <option value="az">A–Z</option>
                 <option value="recent">Recently touched</option>
@@ -3143,15 +3162,17 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                       <div onMouseEnter={() => setHoverGroup(st)} onMouseLeave={() => setHoverGroup((g) => (g === st ? null : g))}
                         style={{ display: "flex", alignItems: "center", background: "var(--surface-raised)", borderTop: `1px solid ${PAL.panelLine}` }}>
                         <button onClick={() => toggleGroup(st)} title={collapsed ? "Expand" : "Collapse"}
-                          style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6, background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", padding: "4px 4px 4px 12px" }}>
+                          style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6, background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", padding: "4px 4px 4px 12px", fontSize: FONT_SIZE.control }}>
                           <span style={{ fontSize: 8, lineHeight: 1, transform: collapsed ? "rotate(-90deg)" : "none", display: "inline-block", color: PAL.muted }}>▼</span>
-                          {/* Solid status disc, matching the map pin (B433). */}
-                          <span style={{ width: 14, height: 14, flex: "none", display: "grid", placeItems: "center", borderRadius: RADIUS.pill, background: t.color, color: "#fff", fontSize: 8.5, lineHeight: 1 }}>{t.glyph}</span>
-                          <span style={{ flex: 1, textAlign: "left", fontSize: 11, fontWeight: 700, color: PAL.ink, textDecoration: t.struck ? "line-through" : "none" }}>{STATUS_META[st]?.label || st}</span>
+                          {/* Solid status disc, matching the map pin (B433). NEW-2 (B915536) — was
+                              8.5 (off-scale); a single-digit glyph in a ~14px pill dot, same
+                              rationale as the header account pill's own count badge. */}
+                          <span style={{ width: 14, height: 14, flex: "none", display: "grid", placeItems: "center", borderRadius: RADIUS.pill, background: t.color, color: "#fff", fontSize: FONT_SIZE.micro, lineHeight: 1 }}>{t.glyph}</span>
+                          <span style={{ flex: 1, textAlign: "left", fontSize: FONT_SIZE.control, fontWeight: 700, color: PAL.ink, textDecoration: t.struck ? "line-through" : "none" }}>{STATUS_META[st]?.label || st}</span>
                           {/* B845089 — the acreage total dropped from this line: "if acreage is not
                               the criterion, a sum of it is not either" (this session's call, not the
                               owner's words — easy to reverse if he wants it back). */}
-                          <span style={{ color: PAL.muted, fontWeight: 700, fontSize: 11 }}>{rows.length}</span>
+                          <span style={{ color: PAL.muted, fontWeight: 700, fontSize: FONT_SIZE.label }}>{rows.length}</span>
                         </button>
                         {/* NEW-3 — the drag handle: quiet at rest, shown on hover/focus, and a
                             focusable control so arrow-key reorder doesn't need a visible drag to
@@ -3165,7 +3186,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                             if (e.key === "ArrowUp") { e.preventDefault(); moveGroup(st, -1); }
                             else if (e.key === "ArrowDown") { e.preventDefault(); moveGroup(st, 1); }
                           }}
-                          style={{ flex: "none", width: 17, height: 17, marginRight: 4, display: "grid", placeItems: "center", background: "transparent", border: "none", borderRadius: RADIUS.sm, cursor: "grab", color: PAL.muted, opacity: hoverGroup === st ? 1 : 0, transition: "opacity .12s" }}>
+                          style={{ flex: "none", width: 17, height: 17, marginRight: 4, display: "grid", placeItems: "center", background: "transparent", border: "none", borderRadius: RADIUS.sm, cursor: "grab", color: PAL.muted, opacity: hoverGroup === st ? 1 : 0, transition: "opacity .12s", fontSize: FONT_SIZE.control }}>
                           <svg width="9" height="13" viewBox="0 0 9 13" fill="currentColor" aria-hidden="true">
                             <circle cx="2" cy="1.8" r="1.2" /><circle cx="7" cy="1.8" r="1.2" />
                             <circle cx="2" cy="6.5" r="1.2" /><circle cx="7" cy="6.5" r="1.2" />
@@ -3260,8 +3281,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           border: `1px solid ${PAL.panelLine}`, borderRadius: layersPanelOpen ? RADIUS.lg : RADIUS.md,
           padding: layersPanelOpen ? "6px 9px 8px" : 0, fontSize: 12, color: PAL.ink, boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
           // Collapsed: the DIV (not the button) owns the box-sizing:border-box height, so its own
-          // 1px border is INCLUDED rather than added on top of the button's.
-          ...(layersPanelOpen ? null : { height: CONTROL_H.lg }),
+          // 1px border is INCLUDED rather than added on top of the button's. NEW-2 (B950321) —
+          // MAP_OVERLAY_CHIP_H_PX rather than a direct CONTROL_H.lg reference, so this and the
+          // Sites panel's own collapsed height read the SAME name (they were already the same
+          // number; nothing enforced that before).
+          ...(layersPanelOpen ? null : { height: MAP_OVERLAY_CHIP_H_PX }),
           // B831777 — this corner used to reserve extra `top` room for the floating "Comps" chip
           // that stacked above it (COMPS_TOGGLE_CLEARANCE_PX); Comps moved to the left rail
           // (NEW-2), so this is topright's sole occupant again and the plain 10/60px applies.
@@ -3273,9 +3297,9 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                column) instead of staying a 268-wide block pinned over the imagery. A collapsed
                panel that still covers the map would answer the letter of the report and not the
                point of it. */
-            : { top: 10, right: 10, zIndex: MAP_CHROME_Z.panel,
+            : { top: MAP_OVERLAY_TOP_PX, right: 10, zIndex: MAP_CHROME_Z.panel,
                 ...(layersPanelOpen
-                  ? { width: 268, maxHeight: panelMaxHeight({ topPx: 10, bottomPx: 76 }), display: "flex", flexDirection: "column" }
+                  ? { width: 268, maxHeight: panelMaxHeight({ topPx: MAP_OVERLAY_TOP_PX, bottomPx: 76 }), display: "flex", flexDirection: "column" }
                   : { width: "auto" }) }),
           ...(layersPanelOpen ? null : { minWidth: MAP_CORNER_CHIP_STYLE.minWidth }),
         }}>

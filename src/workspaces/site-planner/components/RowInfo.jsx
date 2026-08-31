@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { menuPanelStyle } from "../../../shared/ui/controls.jsx";
+import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 
 /* RowInfo (B760) — the per-row ⓘ info affordance for the Layers panel. A real
  * <button> that opens a small popover (source · data vintage / refreshed-age ·
@@ -16,7 +17,7 @@ import { menuPanelStyle } from "../../../shared/ui/controls.jsx";
 const infoBtn = {
   flex: "none", margin: 0, padding: "0 1px", lineHeight: 1,
   border: "none", background: "transparent", color: "var(--text-tertiary)",
-  fontSize: 12.5, cursor: "pointer", display: "inline-flex", alignItems: "center",
+  fontSize: FONT_SIZE.control, cursor: "pointer", display: "inline-flex", alignItems: "center",
 };
 
 export default function RowInfo({ label, sections = [] }) {
@@ -56,8 +57,8 @@ export default function RowInfo({ label, sections = [] }) {
         className=""
       >
         <div id={descId} role="note" onMouseEnter={clearClose} onMouseLeave={armClose}
-          style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 11, lineHeight: 1.42 }}>
-          <div style={{ fontWeight: 700, fontSize: 11.5, color: "var(--text-primary)" }}>{label}</div>
+          style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: FONT_SIZE.label, lineHeight: 1.42 }}>
+          <div style={{ fontWeight: 700, fontSize: FONT_SIZE.control, color: "var(--text-primary)" }}>{label}</div>
           {rows.map((s, i) => (
             <div key={i} style={{
               color: s.tone === "warn" ? "var(--warn-text)" : "var(--text-secondary)",

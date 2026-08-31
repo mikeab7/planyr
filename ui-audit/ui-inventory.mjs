@@ -353,6 +353,225 @@ async function nestingMismatches(page, surface) {
   }, { menuOnly: !!surface.menuOnly, scope: surface.scope, exclude: surface.exclude, radiusOk: [...RADIUS_OK] });
 }
 
+// B950320 (this session's NEW-1) — THE SIBLING-CONSISTENCY CHECK nestingMismatches() cannot make.
+// That check compares a control to its CONTAINER; it has nothing to say about two controls that
+// sit beside each other with no containment relationship at all, which is exactly the owner's
+// report: the row-1 account chip (a pill) sitting immediately next to the fullscreen button (an
+// md square) — both individually on-scale, both pass nestingMismatches(), and the pair still
+// reads as sloppy because the eye compares the two curves directly. For every SURFACE, group the
+// same on-scale rounded-candidate pool nestingMismatches() builds by SHARED FLEX-ROW ANCESTOR
+// (the concrete form of "shared parent AND visual row"), sort left-to-right, and walk ADJACENT
+// pairs only. A pair counts as "the same visual row" when their vertical centers roughly agree (a
+// flex row's own alignItems:center already guarantees this for a real row) AND the horizontal gap
+// between them is small — SIBLING_GAP_PX is deliberately close to this app's own base flex `gap`
+// (6-8px almost everywhere), so two FLUSH controls trip it and two controls a real divider was
+// inserted between (a hairline + its own margins, ~20px+ of clear space) do not: that gap is the
+// same "no gap between the two curves" the owner's report turns on.
+//
+// ⛔ WHY THE ANCESTOR SEARCH, NOT A BARE "SAME IMMEDIATE PARENT" (measured, not assumed — this
+// check reported ZERO on the owner's exact header pair on its first pass). The signed-OUT "Cloud
+// off" pill (`AccountControl.jsx`, the branch this headless crawl actually reaches — Supabase
+// isn't configured in this sandbox) wraps its button in an extra `<div style={{position:
+// "relative"}}>` for its own popover anchor; the signed-IN pill does not (a bare Fragment). An
+// immediate-parent test sees two different parents for what is visually one row and finds
+// nothing — a false negative on the very case this check exists for. Walking up to the nearest
+// `display:flex` row ancestor (capped at a few hops, so it can't drift to a distant, unrelated
+// container) treats real geometry as authoritative over incidental DOM nesting depth, which is
+// what a person actually looking at the row does.
+const SIBLING_GAP_PX = 12;
+const SIBLING_VCENTER_TOL_PX = 6;
+const SIBLING_ROW_ANCESTOR_HOPS = 4;
+
+async function siblingMismatches(page, surface) {
+  return page.evaluate(({ menuOnly, scope, exclude, radiusOk, gapPx, vTolPx, rowHops }) => {
+    const root = menuOnly
+      ? [...document.querySelectorAll('[data-menu-owner]')]
+      : [[...document.querySelectorAll(scope)].find((el) => el.getBoundingClientRect().width > 0) || document.body];
+
+    // Same candidate pool as nestingMismatches(): every element with a uniform, positive,
+    // on-scale computed border-radius and a non-zero rendered box. A multi-corner radius (a
+    // half-pill split-button pair) opts out here too — it is one deliberate shape, not two
+    // controls that happen to sit beside each other.
+    const all = [];
+    for (const r of root) {
+      if (!r) continue;
+      for (const el of r.querySelectorAll("*")) {
+        if (exclude && el.closest(exclude) && el.closest(exclude) !== r) continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) continue;
+        const cs = getComputedStyle(el);
+        const parts = [...new Set(String(cs.borderRadius).split(/\s+/).map((t) => parseFloat(t)).filter((n) => !Number.isNaN(n)))];
+        if (parts.length !== 1) continue;
+        const radius = parts[0];
+        if (!radius || !radiusOk.includes(radius)) continue;
+        const label = el.getAttribute("aria-label") || el.getAttribute("title")
+          || (el.textContent || "").trim().slice(0, 30) || el.tagName;
+        all.push({ el, radius, rect, label: String(label).replace(/\s+/g, " ").trim() });
+      }
+    }
+
+    // Group by nearest FLEX-ROW ancestor (a bounded walk up from the element's own parent, never
+    // through the element itself) — the concrete "shared parent AND visual row" test. Real
+    // rendered geometry (rect) still decides adjacency below, so a candidate wrapped one extra
+    // level deep for an unrelated reason (a popover anchor div, say) is still correctly grouped
+    // with its true visual row-mates.
+    // ⛔ B958466 (row-1 header sibling audit) — MUST SKIP A SINGLE-CHILD FLEX WRAPPER, not stop at
+    // it (measured, not assumed — this check reported ZERO on a second real header pair, the same
+    // way it first reported zero on the account-chip/fullscreen pair). `CloudSyncBadge` wraps its
+    // own button in `<div style={{position:"relative", display:"flex", alignItems:"center"}}>` —
+    // a one-child flex div used purely for positioning, not a "row" laying out several controls.
+    // The original walk stopped at the FIRST flex ancestor it found and treated THAT as the shared
+    // row, so the badge's row root became its own private wrapper while its true flex row-mate
+    // (`FullscreenButton`, whose immediate parent IS the header's real right-zone row) resolved to
+    // a different root one level further up — two different "rows" for what is visibly one. A flex
+    // container with exactly one element child is never the row a person means by "this control's
+    // row"; skip it and keep climbing for a container that actually lays out more than one thing.
+    const rowRootOf = (el) => {
+      let n = el.parentElement, hops = 0;
+      while (n && n !== document.body && hops < rowHops) {
+        const cs = getComputedStyle(n);
+        if ((cs.display === "flex" || cs.display === "inline-flex") && cs.flexDirection !== "column" && cs.flexDirection !== "column-reverse") {
+          const elementChildren = [...n.children].filter((c) => c.getBoundingClientRect().width > 0 || c.getBoundingClientRect().height > 0);
+          if (elementChildren.length > 1) return n;
+        }
+        n = n.parentElement; hops++;
+      }
+      return null;
+    };
+    const byParent = new Map();
+    for (const c of all) {
+      const p = rowRootOf(c.el);
+      if (!p) continue;
+      if (!byParent.has(p)) byParent.set(p, []);
+      byParent.get(p).push(c);
+    }
+
+    const findings = [];
+    for (const members of byParent.values()) {
+      if (members.length < 2) continue;
+      members.sort((a, b) => a.rect.left - b.rect.left);
+      for (let i = 0; i < members.length - 1; i++) {
+        const A = members[i], B = members[i + 1];
+        if (A.radius === B.radius) continue; // same family — never a mismatch, whatever the gap
+        const aCenterY = (A.rect.top + A.rect.bottom) / 2, bCenterY = (B.rect.top + B.rect.bottom) / 2;
+        if (Math.abs(aCenterY - bCenterY) > vTolPx) continue; // not the same visual row
+        const gap = B.rect.left - A.rect.right;
+        if (gap < -2 || gap > gapPx) continue; // overlapping (a different shape entirely) or genuinely separated
+        findings.push({
+          aLabel: A.label, aRadius: A.radius, bLabel: B.label, bRadius: B.radius,
+          gap: Math.round(gap * 10) / 10,
+        });
+      }
+    }
+    const byKey = new Map();
+    for (const f of findings) {
+      const key = `${f.aRadius}|${f.bRadius}|${f.aLabel}|${f.bLabel}`;
+      if (!byKey.has(key)) byKey.set(key, f);
+    }
+    return [...byKey.values()];
+  }, { menuOnly: !!surface.menuOnly, scope: surface.scope, exclude: surface.exclude, radiusOk: [...RADIUS_OK], gapPx: SIBLING_GAP_PX, vTolPx: SIBLING_VCENTER_TOL_PX, rowHops: SIBLING_ROW_ANCESTOR_HOPS });
+}
+
+// B950322 (this session's NEW-3) — ALIGNMENT + SIZE, the axis neither nestingMismatches() nor
+// siblingMismatches() covers. Owner report: the map landing page's three floating overlays (the
+// Sites/Comps rail, the Imagery & layers panel, the top-center search bar) don't share a top edge
+// or a height. Those three are not DOM flex-siblings (siblingMismatches()'s grouping would never
+// find them) — they are independently `position: absolute` panels that only ever look aligned
+// because they float over the same map. So the grouping here is CSS containing-block based, not
+// DOM-parent based: every non-nested `position:absolute`/`fixed` node is grouped with its peers by
+// (a) sharing the same nearest positioned ancestor, and (b) sitting in the same rough TOP BAND
+// (peers more than ALIGN_BAND_PX apart vertically are furniture in a different corner, not a row
+// that was ever meant to line up — a bottom-right scale bar and a top-left panel are never this
+// check's business). Reports the group's own top-offset spread and height spread; a group is
+// flagged when EITHER exceeds its stated tolerance.
+const ALIGN_TOP_TOL_PX = 2;
+const ALIGN_HEIGHT_TOL_PX = 4;
+const ALIGN_BAND_PX = 60;
+
+async function alignmentMismatches(page, surface) {
+  return page.evaluate(({ menuOnly, scope, exclude, topTolPx, heightTolPx, bandPx, radiusOk }) => {
+    const root = menuOnly
+      ? [...document.querySelectorAll('[data-menu-owner]')]
+      : [[...document.querySelectorAll(scope)].find((el) => el.getBoundingClientRect().width > 0) || document.body];
+
+    // ⛔ CANDIDATES MUST HAVE A GENUINE ROUNDED CORNER (measured, not assumed — this check
+    // reported ZERO on the owner's exact three-overlay case on its first pass). Without this
+    // filter, purely structural `position:absolute` wrappers with no visual edge at all (the map
+    // container's own `inset:0` div, the page's root shell) enter the candidate pool too — and
+    // because they're large enough to CONTAIN every real panel, the "top-level only" filter below
+    // reads every real overlay as "nested inside a candidate" and throws it out, which is exactly
+    // backwards. A radius requirement is the same "is this actually a control, not scaffolding"
+    // test the other two checks already use, and it is a more honest definition of "floating
+    // overlay" anyway — the owner's report was about chips/pills, not invisible layout boxes.
+    const raw = [];
+    for (const r of root) {
+      if (!r) continue;
+      for (const el of r.querySelectorAll("*")) {
+        if (exclude && el.closest(exclude) && el.closest(exclude) !== r) continue;
+        const cs = getComputedStyle(el);
+        if (cs.position !== "absolute" && cs.position !== "fixed") continue;
+        const parts = [...new Set(String(cs.borderRadius).split(/\s+/).map((t) => parseFloat(t)).filter((n) => !Number.isNaN(n)))];
+        const radius = parts.length === 1 ? parts[0] : 0;
+        if (!radius || !radiusOk.includes(radius)) continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) continue;
+        const label = el.getAttribute("aria-label") || el.getAttribute("title")
+          || (el.textContent || "").trim().slice(0, 30) || el.tagName;
+        raw.push({ el, rect, label: String(label).replace(/\s+/g, " ").trim() });
+      }
+    }
+
+    // Top-level only: a candidate contained inside another candidate's box is that candidate's own
+    // internal chrome (e.g. an open panel's inner "collapse" button), never a floating peer of it.
+    const contains = (outer, inner) => inner.left >= outer.left - 0.5 && inner.right <= outer.right + 0.5
+      && inner.top >= outer.top - 0.5 && inner.bottom <= outer.bottom + 0.5
+      && (inner.width < outer.width - 1 || inner.height < outer.height - 1);
+    const topLevel = raw.filter((c) => !raw.some((o) => o !== c && contains(o.rect, c.rect)));
+
+    const closestPositioned = (el) => {
+      let n = el.parentElement;
+      while (n && n !== document.body) {
+        if (getComputedStyle(n).position !== "static") return n;
+        n = n.parentElement;
+      }
+      return document.body;
+    };
+    const byParent = new Map();
+    for (const c of topLevel) {
+      const p = closestPositioned(c.el);
+      if (!byParent.has(p)) byParent.set(p, []);
+      byParent.get(p).push(c);
+    }
+
+    const findings = [];
+    for (const members of byParent.values()) {
+      if (members.length < 2) continue;
+      const sorted = [...members].sort((a, b) => a.rect.top - b.rect.top);
+      // Split into top-proximity bands (a gap over ALIGN_BAND_PX starts a new band — different
+      // corners of the same map are never one "should align" group).
+      const bands = [];
+      let cur = [sorted[0]];
+      for (let i = 1; i < sorted.length; i++) {
+        if (sorted[i].rect.top - cur[cur.length - 1].rect.top > bandPx) { bands.push(cur); cur = [sorted[i]]; }
+        else cur.push(sorted[i]);
+      }
+      bands.push(cur);
+      for (const band of bands) {
+        if (band.length < 2) continue;
+        const tops = band.map((c) => c.rect.top), heights = band.map((c) => c.rect.height);
+        const topSpread = Math.max(...tops) - Math.min(...tops);
+        const heightSpread = Math.max(...heights) - Math.min(...heights);
+        if (topSpread <= topTolPx && heightSpread <= heightTolPx) continue;
+        findings.push({
+          members: band.map((c) => `${c.label} (top ${Math.round(c.rect.top)}, h ${Math.round(c.rect.height)})`),
+          topSpread: Math.round(topSpread * 10) / 10, heightSpread: Math.round(heightSpread * 10) / 10,
+        });
+      }
+    }
+    return findings;
+  }, { menuOnly: !!surface.menuOnly, scope: surface.scope, exclude: surface.exclude, topTolPx: ALIGN_TOP_TOL_PX, heightTolPx: ALIGN_HEIGHT_TOL_PX, bandPx: ALIGN_BAND_PX, radiusOk: [...RADIUS_OK] });
+}
+
 // Best-effort file/line attribution: grep src/ for the element's own label as a literal string.
 function attribute(label) {
   if (!label || label.length < 2) return "unattributed (label too short to search)";
@@ -426,6 +645,8 @@ async function run() {
   const browser = await chromium.launch({ ...(EXEC ? { executablePath: EXEC } : {}), args: ["--no-sandbox", "--ignore-certificate-errors"] });
   const results = {}; // surface name -> { light: [...], dark: [...] }
   const nesting = {}; // surface name -> { light: [...], dark: [...] } of nesting-mismatch findings
+  const sibling = {}; // surface name -> { light: [...], dark: [...] } of sibling-radius-family findings (B950320)
+  const alignment = {}; // surface name -> { light: [...], dark: [...] } of top/height alignment findings (B950322)
   try {
     for (const theme of ["light", "dark"]) {
       for (const surface of SURFACES) {
@@ -440,6 +661,8 @@ async function run() {
         const rows = await readSurface(page, surface);
         (results[surface.name] ||= {})[theme] = rows;
         (nesting[surface.name] ||= {})[theme] = await nestingMismatches(page, surface);
+        (sibling[surface.name] ||= {})[theme] = await siblingMismatches(page, surface);
+        (alignment[surface.name] ||= {})[theme] = await alignmentMismatches(page, surface);
         await ctx.close();
       }
     }
@@ -476,6 +699,52 @@ async function run() {
   }
   if (!totalNestingMismatches) nestingLines.push("_None found on this run._", "");
 
+  // B950320 — sibling radius-family mismatches (adjacent controls, no containment relationship).
+  let totalSiblingMismatches = 0;
+  const siblingLines = ["## Sibling radius mismatches (B950320)", "",
+    "Two on-scale, differently-shaped controls sitting in the same visual row with no containment",
+    "relationship between them — the axis `nestingMismatches()` above cannot see, because that check",
+    "only ever compares a control to a CONTAINER. Grouped by shared flex-row ancestor, adjacent",
+    `pairs only, within ${SIBLING_GAP_PX}px of clear horizontal space and ${SIBLING_VCENTER_TOL_PX}px`,
+    "of shared vertical center — the same \"no gap between the two curves\" the owner's report turns on.",
+    ""];
+  for (const s of SURFACES) {
+    for (const theme of ["light", "dark"]) {
+      const found = (sibling[s.name] || {})[theme] || [];
+      totalSiblingMismatches += found.length;
+      if (!found.length) continue;
+      siblingLines.push(`**${s.name} — ${theme}:**`, "");
+      for (const f of found) {
+        siblingLines.push(`- "${f.aLabel}" (${f.aRadius}px) sits ${f.gap}px from "${f.bLabel}" (${f.bRadius}px) — different radius families in one row.`);
+      }
+      siblingLines.push("");
+    }
+  }
+  if (!totalSiblingMismatches) siblingLines.push("_None found on this run._", "");
+
+  // B950322 — top-offset + height alignment mismatches among floating (position:absolute/fixed) peers.
+  let totalAlignmentMismatches = 0;
+  const alignmentLines = ["## Alignment mismatches (B950322)", "",
+    "Floating overlays (`position: absolute`/`fixed`) that share the same positioned ancestor and the",
+    "same rough top band, but disagree on their own top edge or height beyond a stated tolerance —",
+    `top-offset tolerance ${ALIGN_TOP_TOL_PX}px, height tolerance ${ALIGN_HEIGHT_TOL_PX}px. These are`,
+    "not DOM flex-siblings (`siblingMismatches()`'s grouping would never find them) — they only ever",
+    "look aligned because they float over the same surface.",
+    ""];
+  for (const s of SURFACES) {
+    for (const theme of ["light", "dark"]) {
+      const found = (alignment[s.name] || {})[theme] || [];
+      totalAlignmentMismatches += found.length;
+      if (!found.length) continue;
+      alignmentLines.push(`**${s.name} — ${theme}:**`, "");
+      for (const f of found) {
+        alignmentLines.push(`- ${f.members.join(" · ")} — top spread ${f.topSpread}px, height spread ${f.heightSpread}px.`);
+      }
+      alignmentLines.push("");
+    }
+  }
+  if (!totalAlignmentMismatches) alignmentLines.push("_None found on this run._", "");
+
   const md = [
     "# `docs/UI-INVENTORY.md` — the generated control inventory (NEW-3)",
     "",
@@ -503,9 +772,15 @@ async function run() {
     "",
     `**Total distinct deviating style signatures found: ${totalDeviations}.** (B915536's earlier "24"`,
     "was measured before the Map landing page — the surface listed first above — was in this crawl at",
-    "all; see that item's amendment note for the before/after breakdown.)",
+    "all; the amended, complete-coverage count was 44. NEW-1/NEW-2 (2026-08-31) then reduced FONT_SIZE",
+    "from 8 legal values to 5 named roles and moved every fixable one of those 44 onto it — see",
+    "\"Known, deliberately-not-fixed findings\" below for what's left and why.)",
     "",
     `**Total nesting-family mismatches found (NEW-1): ${totalNestingMismatches}.** See the section below.`,
+    "",
+    `**Total sibling radius mismatches found (B950320): ${totalSiblingMismatches}.** See the section below.`,
+    "",
+    `**Total alignment mismatches found (B950322): ${totalAlignmentMismatches}.** See the section below.`,
     "",
     "## Known, deliberately-not-fixed findings",
     "",
@@ -518,33 +793,55 @@ async function run() {
     "zoom stack it sits against (`.leaflet-control-locate.leaflet-bar` in index.css), not because it",
     "was reclassified.",
     "",
-    "- **A `fontSize` reading of `13.3333px`\\* is the Chromium UA stylesheet's default form-control",
-    "  font-size, not a value from anywhere in this codebase.** `src/index.css` sets",
-    "  `input, select, button, textarea { font-family: inherit }` but never `font-size`, so any",
-    "  control that doesn't set its own falls through to that browser default. A fix was tried —",
-    "  adding `font-size: inherit` — and measured: it changed the reading to `16px` (the browser's",
-    "  root default, since no ancestor here declares a base font-size either), which is equally",
-    "  off-scale and carries unverified reflow risk across every unstyled control in the app. **Not",
-    "  shipped.** Most instances are icon-only buttons or checkboxes where the property is visually",
-    "  inert (`Full screen`/`Settings`/`Dashboard`/the theme-picker's own `<button>` — every visible",
-    "  glyph or label inside them sets its own explicit `fontSize`). Establishing a real base",
-    "  font-size for the app is a separate, deliberately-scoped decision — the same shape as",
-    "  `docs/DESIGN-TOKENS.md`'s open padding/font-size retrofit question — not a mechanical fix.",
-    "  (\\*or `16px` after the reverted fix — either way, off-scale and not from this codebase.)",
+    "- **RESOLVED, 2026-08-31 (B915536's NEW-2) — the `13.3333px` Chromium UA form-control default",
+    "  is GONE from this list.** It was never a value from anywhere in this codebase — `src/index.css`",
+    "  sets `input, select, button, textarea { font-family: inherit }` but never `font-size`, so a",
+    "  control that set no `fontSize` of its own fell through to that browser default. A GLOBAL fix",
+    "  (adding `font-size: inherit` to that same rule) was tried once and reverted: it only moved the",
+    "  reading to `16px` (the browser's own root default, since no ancestor declares a base font-size",
+    "  either) and carried unverified reflow risk across every unstyled control in the app. Retried at",
+    "  the new, narrower scope this scale now allows: every instance (`Full screen`/`Settings`",
+    "  icon buttons, the Dashboard logo button, the Cloud-sync badge, the Sites-panel collapse/reorder",
+    "  toggles and group-header row, the Yield-panel `Collapse` header, the Settings-gear ThemePicker",
+    "  rows and its smooth-zoom checkbox) got its OWN explicit on-scale `fontSize` — most of them icon-",
+    "  only or checkbox controls where the property is visually INERT (every visible glyph or label",
+    "  inside already set its own explicit size), so this is zero-risk, targeted, and does not touch",
+    "  the global reset the reverted attempt was right to be cautious about.",
     "- **A `fontSize` of `16px` on a plain, unstyled `<div>` shell** (the map landing page's search",
     "  cluster bar, the Site/Comp switch's own wrapping div, the Sites/Comps rail panel) is the SAME",
     "  browser root default as the `16px` form above — a container div that sets no `fontSize` of its",
     "  own inherits it, and every visible glyph inside these shells sets its own explicit size. Not a",
     "  form control, but the identical root cause and the identical decision not to chase it here.",
-    "- **A `fontSize` of `22px` on the Leaflet zoom stack's `+`/`−` glyphs** is this app's own inline",
-    "  style (`SitePlanner.jsx`'s `zb`), sized to fill a 30px touch target visibly rather than read as",
-    "  a body-text size — the same \"decorative glyph, not UI text\" case FONT_SIZE's scale doesn't try",
-    "  to cover, alongside the icon-only buttons above.",
-    "- **A `fontSize` of `8.5px` on the small colored count badge inside a Sites-panel group header**",
-    "  is a deliberately tiny numeral inside a ~14px pill dot — legible at that size because it's a",
-    "  single digit, not running text, the same rationale as the zoom glyph above.",
+    "- **A `fontSize` of `22px` on the Leaflet zoom stack's `+`/`−` glyphs is LEAFLET'S OWN bundled",
+    "  CSS** (`.leaflet-touch .leaflet-control-zoom-in/-out { font-size: 22px }` in",
+    "  `node_modules/leaflet/dist/leaflet.css`), not an app literal — corrects an earlier report in",
+    "  this same list that misattributed it to `SitePlanner.jsx`'s `zb` (AUDIT-FIRST: verified against",
+    "  the real stylesheet, not re-asserted). Same category as the map landing page's scale-bar",
+    "  exception in docs/DESIGN.md — third-party chrome this token scale doesn't reach — and the same",
+    "  \"decorative glyph, not body text\" rationale as the icon-only buttons above; SitePlanner.jsx's",
+    "  OWN zoom-stack glyphs (the Yield-panel `.gbtn` +/−/⤢ trio, a genuinely app-authored style) were",
+    "  the real off-scale app literal and were fixed in the same session (B915536's NEW-2) — all three",
+    "  now render at `FONT_SIZE.display`, so the row no longer appears in the table above.",
+    "- **The \"Alignment mismatches\" section below still reports the map landing page's three floating",
+    "  overlays as a height-spread finding (B950321/B950322)** — investigated, and it is now ENTIRELY",
+    "  the Sites/Comps rail rendering OPEN by default in this crawl's seeded account (126px of real",
+    "  site-list content) against the two chip-scale siblings (the collapsed Layers panel, 30px; the",
+    "  search bar, 42px). The TOP SPREAD the owner actually reported is fixed — all three now read",
+    "  `0px` (`MAP_OVERLAY_TOP_PX`, one shared edge). Collapse both corner panels (their resting,",
+    "  \"pill\" state) and the height spread is genuinely gone too: both corner chips land on the exact",
+    "  same `MAP_OVERLAY_CHIP_H_PX` (30px) — verified directly against the real app, not just argued —",
+    "  leaving only the search bar's own `MAP_OVERLAY_BAR_H_PX` (42px), a deliberately different number",
+    "  for a compound cluster (a Site/Comp switch, an address combobox, one or two action buttons) that",
+    "  needs real room for a text field, not a fourth hand-picked literal. This crawl's default-open",
+    "  Sites panel is a legitimate, content-driven state, not the reported defect, and is left showing.",
     "",
     nestingLines.join("\n"),
+    "---",
+    "",
+    siblingLines.join("\n"),
+    "---",
+    "",
+    alignmentLines.join("\n"),
     "---",
     "",
     sections.join("\n\n---\n\n"),
@@ -562,7 +859,7 @@ async function run() {
   }
 
   writeFileSync(OUT_MD, md);
-  console.log(`docs/UI-INVENTORY.md written — ${totalDeviations} distinct deviating style signature(s), ${totalNestingMismatches} nesting mismatch(es) found.`);
+  console.log(`docs/UI-INVENTORY.md written — ${totalDeviations} distinct deviating style signature(s), ${totalNestingMismatches} nesting mismatch(es), ${totalSiblingMismatches} sibling radius mismatch(es), ${totalAlignmentMismatches} alignment mismatch(es) found.`);
 }
 
 run();

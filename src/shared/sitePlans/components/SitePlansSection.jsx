@@ -25,6 +25,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Field, IconButton, MenuItem } from "../../ui/controls.jsx";
 import { RADIUS } from "../../ui/radius.js";
+import { FONT_SIZE } from "../../ui/designTokens.js";
 import AnchoredMenu from "../../ui/AnchoredMenu.jsx";
 import {
   fetchAllOverlays, insertOverlay, updateOverlay, deleteOverlay,
@@ -35,10 +36,10 @@ import { fileNewReview, loadReview, downloadFromDrive, stripFileExt } from "../.
 import { listMyTeams, currentIdentity } from "../../../workspaces/site-planner/lib/teams.js";
 
 const inputStyle = {
-  width: "100%", boxSizing: "border-box", padding: "6px 8px", fontSize: 12.5, borderRadius: 6, fontFamily: "inherit",
+  width: "100%", boxSizing: "border-box", padding: "6px 8px", fontSize: FONT_SIZE.control, borderRadius: 6, fontFamily: "inherit",
   border: "1px solid var(--border-default)", background: "var(--surface-base)", color: "var(--text-primary)",
 };
-const metaText = { fontSize: 10.5, color: "var(--text-secondary)" };
+const metaText = { fontSize: FONT_SIZE.label, color: "var(--text-secondary)" };
 
 function imageDataToPngBlob(imageData) {
   return new Promise((resolve) => {
@@ -134,18 +135,18 @@ function OverlayRow({
     <div style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: "8px 10px", marginBottom: 8, background: isActive ? "var(--surface-raised)" : "transparent" }}>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
         <button onClick={onToggleExpand} aria-label={expanded ? "Collapse" : "Expand"} style={{ border: "none", background: "none", cursor: "pointer", color: "var(--text-secondary)", padding: "2px 0 0", flex: "none" }}>
-          <span style={{ fontSize: 10, display: "inline-block", transform: expanded ? "none" : "rotate(-90deg)" }}>▾</span>
+          <span style={{ fontSize: FONT_SIZE.micro, display: "inline-block", transform: expanded ? "none" : "rotate(-90deg)" }}>▾</span>
         </button>
         <div style={{ flex: 1, minWidth: 0 }}>
           {editingName ? (
             <input autoFocus value={nameDraft} onChange={(e) => setNameDraft(e.target.value)}
               onBlur={commitName}
               onKeyDown={(e) => { if (e.key === "Enter") commitName(); if (e.key === "Escape") { setNameDraft(o.docTitle || ""); setEditingName(false); } }}
-              style={{ ...inputStyle, fontSize: 12.5, fontWeight: 600, padding: "3px 6px" }} />
+              style={{ ...inputStyle, fontSize: FONT_SIZE.control, fontWeight: 600, padding: "3px 6px" }} />
           ) : (
             <button onClick={() => setEditingName(true)} title="Rename" style={{
               border: "none", background: "none", padding: 0, textAlign: "left", cursor: "text", fontFamily: "inherit",
-              fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)", width: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              fontSize: FONT_SIZE.control, fontWeight: 600, color: "var(--text-primary)", width: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
             }}>{o.docTitle || "Untitled site plan"}</button>
           )}
           <div style={metaText} title={o.sourceFileName || undefined}>
@@ -158,7 +159,7 @@ function OverlayRow({
             <MenuItem onClick={() => setConfirmingDelete(true)} style={{ color: "var(--danger-text)" }}>Delete site plan…</MenuItem>
           ) : (
             <div style={{ padding: "6px 10px" }}>
-              <div style={{ fontSize: 11.5, marginBottom: 8, color: "var(--text-primary)" }}>Delete “{o.docTitle || "this site plan"}”? Comps pinned to it keep their location but lose the link back.</div>
+              <div style={{ fontSize: FONT_SIZE.control, marginBottom: 8, color: "var(--text-primary)" }}>Delete “{o.docTitle || "this site plan"}”? Comps pinned to it keep their location but lose the link back.</div>
               <div style={{ display: "flex", gap: 6 }}>
                 <Button size="sm" variant="danger" onClick={() => { setMenuOpen(false); setConfirmingDelete(false); onDelete(); }}>Delete</Button>
                 <Button size="sm" variant="ghost" onClick={() => setConfirmingDelete(false)}>Cancel</Button>
@@ -168,7 +169,7 @@ function OverlayRow({
         </AnchoredMenu>
       </div>
 
-      {!placed && <div style={{ fontSize: 11, color: "var(--warn-text)", marginTop: 4 }}>Not placed yet.</div>}
+      {!placed && <div style={{ fontSize: FONT_SIZE.label, color: "var(--warn-text)", marginTop: 4 }}>Not placed yet.</div>}
 
       {expanded && (
         <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border-default)" }}>
@@ -404,12 +405,12 @@ export default function SitePlansSection({
   return (
     <div style={{ borderBottom: "1px solid var(--border-default)", padding: "10px 14px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: overlays.length ? 8 : 0 }}>
-        <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-secondary)" }}>Site plans</span>
+        <span style={{ fontSize: FONT_SIZE.label, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-secondary)" }}>Site plans</span>
         {!flow && <Button size="sm" variant="ghost" onClick={startNewUpload}>+ Upload site plan</Button>}
       </div>
 
       {!flow && overlays.length === 0 && !loading && (
-        <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
+        <div style={{ fontSize: FONT_SIZE.control, color: "var(--text-secondary)" }}>
           Upload a broker flyer or park plan — drag it into position on the map and pin comps to specific buildings on it.
         </div>
       )}
@@ -435,8 +436,8 @@ export default function SitePlansSection({
         <div style={{ marginTop: 8, padding: 10, border: "1px solid var(--border-default)", borderRadius: 8, background: "var(--surface-raised)" }}>
           {flow.step === "file" && (
             <>
-              <div style={{ fontSize: 12, marginBottom: 8 }}>Choose a PDF or image, or drag it onto the map. A multi-page brochure keeps every page — you'll pick which one to place next.</div>
-              <input type="file" accept="application/pdf,image/*" onChange={(e) => e.target.files[0] && pickFile(e.target.files[0])} style={{ fontSize: 12 }} />
+              <div style={{ fontSize: FONT_SIZE.control, marginBottom: 8 }}>Choose a PDF or image, or drag it onto the map. A multi-page brochure keeps every page — you'll pick which one to place next.</div>
+              <input type="file" accept="application/pdf,image/*" onChange={(e) => e.target.files[0] && pickFile(e.target.files[0])} style={{ fontSize: FONT_SIZE.control }} />
               <div style={{ marginTop: 8 }}><Button size="sm" variant="ghost" onClick={cancelFlow}>Cancel</Button></div>
             </>
           )}
@@ -444,7 +445,7 @@ export default function SitePlansSection({
           {flow.step === "page" && (
             <>
               {flow.queue && flow.queue.length > 0 && (
-                <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 8 }}>
+                <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginBottom: 8 }}>
                   {flow.queue.length} more file{flow.queue.length === 1 ? "" : "s"} dropped, waiting to be placed after this one.
                 </div>
               )}
@@ -486,7 +487,7 @@ export default function SitePlansSection({
 
           {flow.step === "saving" && (
             <div>
-              <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: flow.uploadProgress ? 6 : 0 }}>
+              <div style={{ fontSize: FONT_SIZE.control, color: "var(--text-secondary)", marginBottom: flow.uploadProgress ? 6 : 0 }}>
                 {flow.uploadProgress ? "Uploading the brochure…" : "Saving…"}
               </div>
               {flow.uploadProgress && flow.uploadProgress.total > 0 && (
@@ -498,7 +499,7 @@ export default function SitePlansSection({
                       transition: "width .15s linear",
                     }} />
                   </div>
-                  <div style={{ fontSize: 10.5, color: "var(--text-secondary)", marginTop: 3 }}>
+                  <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: 3 }}>
                     {(flow.uploadProgress.sent / (1024 * 1024)).toFixed(1)} of {(flow.uploadProgress.total / (1024 * 1024)).toFixed(1)} MB
                   </div>
                 </>
@@ -508,7 +509,7 @@ export default function SitePlansSection({
 
           {flow.step === "error" && (
             <>
-              <div style={{ fontSize: 12, color: "var(--danger-text)", marginBottom: 8 }}>{flow.error}</div>
+              <div style={{ fontSize: FONT_SIZE.control, color: "var(--danger-text)", marginBottom: 8 }}>{flow.error}</div>
               <Button size="sm" variant="ghost" onClick={cancelFlow}>Close</Button>
             </>
           )}

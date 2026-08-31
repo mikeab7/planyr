@@ -161,6 +161,43 @@ that two adjacent, on-scale curves disagree with each other. Findings are printe
 `docs/UI-INVENTORY.md`'s "Nesting mismatches" section, regenerated the same way as the rest of that
 file.
 
+### The sibling clause (B950320, 2026-08-31) — two correctly-shaped controls can still be wrong together
+
+The nesting rule above governs a control against its **container**; it has nothing to say about two
+controls that sit **beside** each other with no containment relationship at all. The owner found the
+gap: the row-1 account chip (a `pill` — an avatar, a name and a caret, exactly the "container that
+holds other controls" case the shape rule already blesses) sitting immediately next to the fullscreen
+button (an `md` square — exactly the "standalone actionable control" case). Both are individually
+on-scale and on-family per every rule above. The pair still reads as sloppy, because **the eye
+compares two adjacent curves directly when there is no gap between them** — the same perceptual fact
+the nesting rule's binding clause already turns on, just without a container in play.
+
+**The resolution is not reclassifying either control.** A pill genuinely is the right shape for a
+compound identity chip, and `md` genuinely is the right shape for a lone icon button — collapsing
+that distinction to make two unrelated controls match would be worse than the mismatch it fixes (see
+`controls.jsx`'s own `IconButton` primitive, which is `md` by design). **The binding rule instead:**
+
+- **Two different radius families may sit in the same control row, but only with a visible boundary
+  between them** — a divider, or genuine clear space (`docs/DESIGN.md`'s own reading of "gap" here is
+  a real gap, not the small `SPACE.sm`/`SPACE.md` a same-family row uses between its own members).
+  Flush adjacency (the app's ordinary flex `gap`, 6–8px, with nothing else between) is never
+  acceptable between two families, however individually correct each one is.
+- **The fix for the account-chip/fullscreen pair is a hairline divider** — `AppHeader.jsx`'s row-1
+  right zone now inserts the same `1px` divider this header already uses between the wordmark and the
+  breadcrumb, between the icon-button cluster (save badge, fullscreen, gear — all `md`) and the
+  identity pill. This is the general pattern: a cluster boundary is drawn where a family boundary
+  falls, not invented per pair.
+
+**Machine-enforced:** `ui-audit/ui-inventory.mjs`'s `siblingMismatches()` groups the same on-scale
+rounded-candidate pool `nestingMismatches()` builds by shared flex-row ancestor (not bare immediate
+parent — a wrapped-one-level-deeper sibling, e.g. a popover-anchor `<div>`, must still be caught),
+walks adjacent pairs left-to-right, and flags a pair whose families differ and whose gap reads as
+flush. Findings print in `docs/UI-INVENTORY.md`'s "Sibling radius mismatches" section. It found a
+second, independently pre-existing instance the owner never reported — the header's plan-name chip
+had drifted to `RADIUS.sm` after the adjacent project-breadcrumb chip moved `sm`→`md`, silently
+breaking that chip's own comment claiming they matched — fixed the same way this item shipped
+(`SitePlanner.jsx`'s plan-name chip is `RADIUS.md` again).
+
 **`src/shared/ui/controls.jsx`** declares its own literal, smaller scale —
 `RADIUS = { control: 8, pill: 999, panel: 12 }` — that predates `radius.js` and agrees with it by
 value (`control === md`, `panel === lg`). **This is a deliberate, documented duplicate, not
@@ -198,27 +235,86 @@ in the same commit (`controls.jsx`'s own header comment says the same).
    change nothing a person could see. Same category as the Scheduler iframe: out of scope for the
    token scale, but named here rather than left to look silently different.
 
+## The divider rule (B958468, 2026-08-31)
+
+A chrome row groups its controls with a plain **1px vertical divider** — never a filled tray,
+never a full-height rule. Two things make it "the same divider" everywhere it appears, and both
+are checked against the row it sits in, not picked by eye:
+
+- **Height = the row's own control height minus 12px** — a 6px inset top and bottom. In every
+  chrome row today that control height is `CONTROL_H.md` (26px), so the divider is **14px**. A row
+  built at a different `CONTROL_H` step insets the same way against that step, not a copy of `14`.
+- **Color = the theme's chrome-divider token** (`var(--chrome-divider)` in `AppHeader.jsx`,
+  `PAL.chromeLine` in `SitePlanner.jsx` — the same CSS custom property, just reached through the
+  CSS-var form or its JS mirror depending on which file you're in) — **never a raw color literal**,
+  and never an alpha-blended white/black hack that assumes one theme's background. `rgba(255,255,255,0.12)`
+  reads as a visible hairline on a dark row and is functionally **invisible on a light one** — exactly
+  the KEY DECISIONS violation the token rule exists to prevent ("a hardcoded hex... reads fine until
+  the chrome flips theme"). If a divider is disappearing in one theme, it is almost always this.
+- **Width is always 1px.** Margin/gap around the divider is a per-instance spacing choice (how much
+  air a given row wants between its groups), not part of the divider's own identity — `AppHeader.jsx`
+  uses `0 4px` between the wordmark and the breadcrumb and `0 2px` between the icon-button cluster and
+  the account pill; `SitePlanner.jsx`'s toolbar uses `0 6px` between its three control groups. All
+  three are the same divider at different insets, not three different dividers.
+
+**Worked example, from a real defect this rule closes:** the Site Planner's row-2 toolbar (`vSep`
+in `SitePlanner.jsx`) used to be its own thing — `height:18` (not derived from the row), color
+`rgba(255,255,255,0.12)` (a raw literal, invisible on the light theme's near-white row). Row 1's
+own divider (`AppHeader.jsx`, added alongside the sibling-radius fix) already had the right shape;
+row 2's was brought to match it exactly rather than staying a second, independently-invented divider
+one row down. See the sibling clause above for the companion rule this pairs with: a divider is what
+makes two different radius families sitting in one row acceptable — an invisible one doesn't count.
+
 ## Spacing, type, and control-height scales (`src/shared/ui/designTokens.js`)
 
 ```js
 export const SPACE      = { xxs: 2, xs: 4, sm: 6, md: 8, lg: 10, xl: 12, xxl: 16 };
-export const FONT_SIZE  = { xs: 10, sm: 10.5, base: 11, md: 11.5, lg: 12, xl: 12.5, xxl: 13, display: 14 };
+export const FONT_SIZE  = { micro: 10, label: 10.5, control: 12, emphasis: 13, display: 14 };
 export const CONTROL_H  = { sm: 22, md: 26, lg: 30 };
 ```
 
-CSS mirrors: `--space-*`, `--font-*`, `--control-h-*` in `index.css`. Every number is **the tree's
-own dominant value, promoted** from a 738-button audit (B809906) — never invented. `FONT_SIZE`
-deliberately keeps six-plus steps rather than force-collapsing to three or four (10/10.5/11 are
-each real, separately-used values); collapsing them is a retrofit decision explicitly **not**
-made yet (see `docs/DESIGN-TOKENS.md` for the full audit numbers and the open padding question).
+CSS mirrors: `--space-*`, `--font-*`, `--control-h-*` in `index.css`. `SPACE`/`CONTROL_H` are **the
+tree's own dominant value, promoted** from a 738-button audit (B809906) — never invented.
+
+### The type scale's five roles (B915536's NEW-1, 2026-08-31) — a role for every step, not just a rung
+
+`FONT_SIZE` used to keep the audit's raw eight-value half-point ladder (`xs 10 / sm 10.5 / base 11
+/ md 11.5 / lg 12 / xl 12.5 / xxl 13 / display 14`) on the reasoning that each value was "real,
+separately-used". That reasoning under-weighted the cost: eight values with four half-steps is
+**a menu wide enough that almost anything looks legal and nothing has a defined role** — a session
+could pick 11 or 11.5 or 12 for the same control and every choice would pass the guard. A quick
+font fix once traded one wrong size for another under exactly this scale and was correctly backed
+out rather than shipped as a wash (see `docs/UI-INVENTORY.md`'s history). The reduced scale names
+what each step is **for**, so a future session can pick the right size without guessing:
+
+| Step | Value | Role | Worked example |
+|---|---|---|---|
+| `micro` | 10 | Tiny numerals and decorative glyphs — a count badge, a single digit inside a pill dot, a compact segmented-toggle label. **Never running text.** | The Sites-panel group-header status-disc glyph (`MapFinder.jsx`); `Collapse`'s own count badge. |
+| `label` | 10.5 | Uppercase section headers (weight 700, ~0.08em letter-spacing) **and** secondary/hint text sitting under a primary control or value. The one deliberate half-step, kept because it was already the app's own text-hierarchy worked example. | `Section`'s uppercase title in `controls.jsx`; `ThemePicker`'s per-option hint line ("Always dark", "Match your computer"). |
+| `control` | 12 | The default, workhorse control/body text — buttons, menu items, field values, inputs, most running UI text. Reachable via `controls.jsx`'s `FONT.md`. | `Button`'s default/lg text; `MenuItem`; the top-row module-switcher tabs (`AppHeader.jsx`'s `ModuleTab`). |
+| `emphasis` | 13 | A step up in weight for content that should stand out without being a headline — a larger button, a panel's primary number, a callout. | `ThemePicker`'s active-option checkmark; a Yield-panel headline figure. |
+| `display` | 14 | Page/hero headlines — the one biggest size in the app. | The `/design` gallery's own `<h1>`; `SitePlanner.jsx`'s own zoom-stack `+`/`−`/`⤢` trio (a decorative glyph cluster sized to fill a 30px touch target, all three unified onto this step in the same item that shrank the scale). |
+
+**Half-steps are gone except the one named above.** `sm`/`base`/`xl`/`xxl` from the old ladder are
+retired; a future session is never asked to distinguish 10.5 from 11 from 11.5 again. Reducing the
+legal set from 8 to 5 mechanically flags hundreds of pre-existing, unchanged call sites that used a
+now-retired value — that is a redefinition of legality, not new drift, and the CI guard's own
+ratchet ceiling absorbs it the same way it already absorbs the pre-existing hex/radius debt (see
+"The CI guard" below); NEW-2 of the same item moved every one of `ui-inventory.mjs`'s computed-style
+deviations it could see onto the new scale, and the remainder is real, honestly-inherited, future
+work — see `ui-audit/design-drift-ceiling.json`'s own note for the exact numbers.
 
 `controls.jsx`'s own `PAD` / `FONT` constants are a **convenience layer built from the same
 numbers**, not a competing scale:
 
 ```js
 export const PAD  = { sm: "5px 10px", md: "7px 12px", lg: "9px 14px" };
-export const FONT = { sm: 11.5, md: 12.5 };   // FONT.sm === FONT_SIZE.md, FONT.md === FONT_SIZE.xl
+export const FONT = { sm: 10.5, md: 12 };   // FONT.sm === FONT_SIZE.label, FONT.md === FONT_SIZE.control
 ```
+
+`FONT.sm` (compact controls — `ToggleChip`, `Button size="sm"`) and `FONT.md` (standard controls —
+`Button` default/lg, `MenuItem`) now sit a full 1.5px apart rather than the old ladder's 1px, so
+"compact" reads as a real, deliberate size difference rather than a rounding artifact.
 
 Use `SPACE`/`FONT_SIZE`/`CONTROL_H` for a new gap/margin/padding/height/font-size value anywhere
 in the app; use `PAD`/`FONT` when you're building a `controls.jsx` primitive itself or something
@@ -236,12 +332,12 @@ flattened into one shared color.
 
 | Primitive | Radius | Padding / size | Type | States |
 |---|---|---|---|---|
-| **`Button`** (`variant`: primary/ghost/danger, `size`: sm/md/lg) | `RADIUS.control` (8) | `PAD[size]` | `FONT.sm` (11.5) at `size="sm"`, else `FONT.md` (12.5), weight 600 | `disabled` → `opacity: 0.5`. `active` renders a ghost as filled (a pressed toggle). `danger` (not active) → `--danger-text` border/text on `--surface-raised`. Rest shadow: a fixed neutral `0 1px 2px rgba(0,0,0,.05)` (token-independent by design — kills the old colored "ember" shadow bug). Hover/focus are inherited from the shared browser default plus the app's global keyboard-focus-ring rule; no per-component override. |
-| **`ToggleChip`** (`active`) | `RADIUS.pill` (999) | `6px 11px` | `FONT.sm` (11.5), weight 650 active / 500 rest | `active` → filled with `accent`/`onAccent`, border = accent. Rest → `--surface-raised` / `--border-default` / `--text-primary`. |
+| **`Button`** (`variant`: primary/ghost/danger, `size`: sm/md/lg) | `RADIUS.control` (8) | `PAD[size]` | `FONT.sm` (10.5, `FONT_SIZE.label`) at `size="sm"`, else `FONT.md` (12, `FONT_SIZE.control`), weight 600 | `disabled` → `opacity: 0.5`. `active` renders a ghost as filled (a pressed toggle). `danger` (not active) → `--danger-text` border/text on `--surface-raised`. Rest shadow: a fixed neutral `0 1px 2px rgba(0,0,0,.05)` (token-independent by design — kills the old colored "ember" shadow bug). Hover/focus are inherited from the shared browser default plus the app's global keyboard-focus-ring rule; no per-component override. |
+| **`ToggleChip`** (`active`) | `RADIUS.pill` (999) | `6px 11px` | `FONT.sm` (10.5, `FONT_SIZE.label`), weight 650 active / 500 rest | `active` → filled with `accent`/`onAccent`, border = accent. Rest → `--surface-raised` / `--border-default` / `--text-primary`. |
 | **`IconButton`** (`size` px, default 30, `active`) | `RADIUS.control` (8) | square `size × size`, zero padding, centered content | n/a (icon slot) | Same active/rest fill logic as `Button`. |
-| **`Field`** | n/a (row, not a control) | `gap: 10`, `marginBottom: 8` | label `12px` / `--text-secondary` | A label + control row layout only — no interactive state of its own. |
-| **`Section`** (collapsible group) | `RADIUS.panel` (12) | header `10px 12px`, body `0 12px 12px` | title `10.5px`/700/`0.09em` uppercase `--text-secondary` | `open`/`collapsed` (▶ rotates 90°, `.18s ease`). Keyboard: `role="button"` + `tabIndex={0}` + Enter/Space toggles, `aria-expanded` published. |
-| **`MenuItem`** (flyout row, `active`) | `RADIUS.control` (8) | `7px 10px` | `FONT.md` (12.5), weight 650 active / 500 rest | `active` → `--hover-menu` background. Sits inside `menuPanelStyle` (`RADIUS.panel`, `--surface-raised`, `--border-default`, a two-layer drop shadow, `padding: 6`). |
+| **`Field`** | n/a (row, not a control) | `gap: 10`, `marginBottom: 8` | label `12px` (`FONT_SIZE.control`) / `--text-secondary` | A label + control row layout only — no interactive state of its own. |
+| **`Section`** (collapsible group) | `RADIUS.panel` (12) | header `10px 12px`, body `0 12px 12px` | title `10.5px` (`FONT_SIZE.label`)/700/`0.09em` uppercase `--text-secondary` | `open`/`collapsed` (▶ rotates 90°, `.18s ease`). Keyboard: `role="button"` + `tabIndex={0}` + Enter/Space toggles, `aria-expanded` published. |
+| **`MenuItem`** (flyout row, `active`) | `RADIUS.control` (8) | `7px 10px` | `FONT.md` (12, `FONT_SIZE.control`), weight 650 active / 500 rest | `active` → `--hover-menu` background. Sits inside `menuPanelStyle` (`RADIUS.panel`, `--surface-raised`, `--border-default`, a two-layer drop shadow, `padding: 6`). |
 
 See the live `/design` gallery (NEW-4) for every one of these rendered in every state, both
 themes, side by side — use it to eyeball a new control against the existing set before writing one.
@@ -316,6 +412,30 @@ drift is blocked from day one; today's debt is inherited honestly and whittled d
 Every fix lowers the ceiling in the same commit (regenerate with `--write-ceiling`), the same
 discipline the verification-queue guard already established. NEW-3's inventory is the tool for
 finding what to fix next; this guard is what stops it from growing while that happens.
+
+### fontSize is gated the same way as hex/radius, and what "role" means for a text scan (B915536's NEW-1)
+
+**An off-scale `fontSize` already fails the build exactly the way a raw hex or raw `borderRadius`
+does** — `checkCeiling` runs the identical ratchet check over all three kinds (`hex`/`radius`/
+`fontSize`), so this was true before the type-scale reduction and remains true after it; reducing
+`FONT_SIZE` from 8 values to 5 did not change the MECHANISM, only the set of values a literal is
+checked against (which is why the ceiling jumped — see `ui-audit/design-drift-ceiling.json`'s note).
+
+**What the guard CANNOT do, stated plainly rather than implied: it cannot verify that a control's
+size matches its documented ROLE.** `scanFile` is a regex sweep over source text — it has no DOM, no
+component tree, and no idea whether a given `fontSize: 12` sits on a section header, a button, or a
+stray `<div>`. It can only ever answer **"is this number one of the five legal values"**, never
+**"is this the RIGHT one of the five for what this control is."** A session could pick `emphasis`
+(13) for a hint line or `label` (10.5) for a primary button label and the guard would stay green —
+that mistake is a design-review question, not a mechanically checkable one, the same way no guard in
+this repo can tell whether a color is the RIGHT token for its surface, only that it IS a token.
+
+The one axis this repo CAN and does check mechanically, geometrically rather than textually, is
+`ui-inventory.mjs`'s **computed-style crawl** (`docs/UI-INVENTORY.md`) — it renders the real app and
+reads what actually painted, so it catches the case a text scan structurally cannot: a control that
+inherited an off-scale value from nowhere in the source at all (a browser UA default, an unstyled
+`<div>`). It still can't judge ROLE either — it flags "off-scale", never "on-scale but the wrong
+step" — but it is real evidence a reviewer can act on, which a silent inheritance never was.
 
 ## The Scheduler iframe is walled off, and is deliberately out of scope here
 

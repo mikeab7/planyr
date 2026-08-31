@@ -68,6 +68,14 @@ import { centerSlotPlan, CENTER_SLOT_GAP } from "./headerCenterFit.js";
 const CHROME = "var(--chrome-bg-elev)";
 const LINE   = "var(--chrome-divider)";
 
+// NEW-2 (B915536) — a LITERAL duplicate of designTokens.js's FONT_SIZE.control, not an import:
+// this file is in the shared ENTRY chunk (every route downloads it, per this file's own B1429
+// note above), and importing designTokens.js for the sake of one small object measurably ate the
+// route budget — bundle.notesRouteJsBytes went from 0.5 KB to 0.2 KB of headroom against its
+// ceiling. Same reasoning, same shape as controls.jsx's own RADIUS/FONT/PAD literal-duplicate
+// note. If FONT_SIZE.control ever changes, change it here too.
+const CHROME_FONT_CONTROL = 12; // design-exempt: literal duplicate of FONT_SIZE.control — see the comment above
+
 // B1173(×2) — how long the "your browser wouldn't allow full screen" notice stays up. Long enough
 // to read, short enough that it never becomes furniture.
 const FS_NOTICE_MS = 5000;
@@ -141,6 +149,10 @@ function FullscreenButton({ active, onToggle }) {
         display: "grid", placeItems: "center", width: 30, height: 26, borderRadius: RADIUS.md,
         border: `1px solid ${LINE}`, background: "var(--chrome-bg)", color: "var(--chrome-text)",
         cursor: "pointer", flex: "none",
+        // NEW-2 (B915536) — an icon-only button rendering no text falls through to the browser's
+        // own form-control default (off-scale) with no visual effect at all; an explicit on-scale
+        // value here is a zero-risk fix (nothing reads it) rather than a documented exception.
+        fontSize: CHROME_FONT_CONTROL,
       }}
     >
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -171,6 +183,7 @@ function SettingsMenu() {
           display: "grid", placeItems: "center", width: 30, height: 26, borderRadius: RADIUS.md,
           border: `1px solid ${LINE}`, background: "var(--chrome-bg)", color: "var(--chrome-text)",
           cursor: "pointer", flex: "none",
+          fontSize: CHROME_FONT_CONTROL, // NEW-2 (B915536) — inert (icon-only), see FullscreenButton above
         }}
       >
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -274,6 +287,41 @@ const MODULES = MODULE_ICONS.map((m) => ({ ...m, label: MODULE_TAB_LABEL[m.id] }
 // The route itself is untouched (src/app/Shell.jsx's WORKSPACES + src/app/route.js's slug
 // map still resolve #/food to FoodApp) — this file is purely the header's visible tab list.
 
+// NEW-2 (B917073) — a phone header row that scrolls sideways (V11's `no-hscrollbar` — the swipe
+// IS the affordance, no visible scrollbar) gave no sign anything was hidden off either edge: the
+// owner's report was a tab row reading "Library | Notes | M…" with no hint that Site/Schedule/
+// Review existed further left. `useScrollEdges` answers "is there more this way" for one
+// scrollable row; `edgeFadeMask` turns that into a CSS mask so the row's OWN edge softens toward
+// transparent exactly where content continues past it — applied to the scrolling element itself
+// (not a sibling overlay), so it never needs its own wrapper and can never drift out of sync with
+// a resize. Absent at both edges (nothing to hint) it returns `undefined` — no mask property at
+// all, so an unaffected row is byte-identical to before this fix.
+function useScrollEdges(ref, active) {
+  const [edges, setEdges] = useState({ left: false, right: false });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || !active) { setEdges({ left: false, right: false }); return undefined; }
+    const update = () => {
+      const over = el.scrollWidth - el.clientWidth;
+      setEdges({ left: el.scrollLeft > 1, right: el.scrollLeft < over - 1 });
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    let ro;
+    if (typeof ResizeObserver === "function") { ro = new ResizeObserver(update); ro.observe(el); }
+    return () => { el.removeEventListener("scroll", update); ro?.disconnect(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ref, active]);
+  return edges;
+}
+const EDGE_FADE_PX = 20;
+function edgeFadeMask({ left, right }) {
+  if (!left && !right) return undefined;
+  const l = left ? `transparent 0, black ${EDGE_FADE_PX}px` : "black 0";
+  const r = right ? `black calc(100% - ${EDGE_FADE_PX}px), transparent 100%` : "black 100%";
+  return `linear-gradient(to right, ${l}, ${r})`;
+}
+
 // One module tab. Inactive tabs are full-opacity and legible (never dimmed/disabled);
 // the module accent reveals on hover, and the active tab keeps the accent + a 2px
 // underline indicator. Icons are crisp SVG at a fixed 13px (no bitmap scaling). (B167)
@@ -302,7 +350,10 @@ function ModuleTab({ m, isActive, onClick }) {
         borderBottom: `2px solid ${isActive ? fill : "transparent"}`,
         background: "transparent",
         color: isActive || hover ? textCol : TAB_IDLE,
-        fontFamily: "inherit", fontSize: 11.5,
+        // NEW-2 (B915536) — was 11.5, off-scale after the FONT_SIZE reduction. The top-level
+        // workspace switcher is the app's own primary navigation, so it takes CHROME_FONT_CONTROL
+        // (the same default every standard control uses) rather than a smaller, one-off value.
+        fontFamily: "inherit", fontSize: CHROME_FONT_CONTROL,
         fontWeight: isActive ? 600 : 500,
         cursor: "pointer", whiteSpace: "nowrap",
         transition: "color 0.15s, border-color 0.15s",
@@ -526,6 +577,18 @@ export default function AppHeader({
   const leftZoneRef = useRef(null);
   const rightZoneRef = useRef(null);
   const centerZoneRef = useRef(null);
+  // NEW-2 (B917073) — Row 2 (the module tab strip) scrolls sideways on a phone with no visible
+  // scrollbar (V11's swipe-is-the-affordance choice, `no-hscrollbar`). Nothing kept the scroll
+  // position honest across a MODULE CHANGE that didn't come from tapping a now-visible tab (a
+  // deep link, a restored session, `onSwitch` called some other way) — so the strip could sit
+  // scrolled to wherever it last was, with the now-ACTIVE tab off the left edge and no sign
+  // anything is hidden. The worst case named in the report: the section you are IN disappears.
+  const row2Ref = useRef(null);
+  // NEW-2 (B917073) — one edge-fade reading per scrolling row; see `useScrollEdges` above.
+  const row1Edges = useScrollEdges(rowRef, narrow);
+  const row2Edges = useScrollEdges(row2Ref, narrow);
+  const row1Mask = narrow ? edgeFadeMask(row1Edges) : undefined;
+  const row2Mask = narrow ? edgeFadeMask(row2Edges) : undefined;
   const [center, setCenter] = useState({ mode: "unmeasured", max: null });
   useLayoutEffect(() => {
     if (narrow) return undefined; // phone: the row scrolls sideways, everything stays in flow
@@ -573,6 +636,26 @@ export default function AppHeader({
   // `centered` is the only mode that leaves the flow; the other two are the row as it has always been.
   const centered = !narrow && center.mode === "centered";
   const centerMode = narrow ? "narrow" : center.mode;
+
+  // NEW-2 (B917073) — keep the ACTIVE module tab on-screen in Row 2's sideways-scrolling strip.
+  // Runs on every `module` change (a tap on a tab already visible is a no-op — it's already in
+  // view — but a programmatic switch, a restored session, or a deep link is not) and once on
+  // mount, so the strip never opens already scrolled past the tab you're standing on. `"nearest"`
+  // moves it the minimum distance rather than always snapping it to an edge, so a tab that's
+  // already fully visible never jumps.
+  useLayoutEffect(() => {
+    if (!narrow) return undefined;
+    const row = row2Ref.current;
+    if (!row) return undefined;
+    const active = row.querySelector('[aria-current="page"]');
+    if (!active) return undefined;
+    // Horizontal-only, computed by hand rather than `scrollIntoView` — this row never scrolls
+    // vertically (`rowScroll`'s `overflowY: "hidden"`), so a cross-axis nudge to some outer
+    // ancestor would be a pure side effect, never something this fix wants.
+    const rowRect = row.getBoundingClientRect(), tabRect = active.getBoundingClientRect();
+    if (tabRect.left < rowRect.left) row.scrollLeft -= (rowRect.left - tabRect.left);
+    else if (tabRect.right > rowRect.right) row.scrollLeft += (tabRect.right - rowRect.right);
+  }, [narrow, module]);
 
   /* Enter/leave. The keypress IS the user activation the Fullscreen API requires, so the request
      is made straight out of the key handler, not deferred. `requestFs()` can REJECT (a permissions
@@ -735,7 +818,7 @@ export default function AppHeader({
            real floor is the 26px-tall FullscreenButton/SettingsMenu icon buttons already living
            in this row (untouched — out of this item's scope), so 30 is the smallest height that
            doesn't clip them; contents stay vertically centered. */}
-      <div ref={rowRef} className={narrow ? "no-hscrollbar" : undefined} style={{ height: 30, display: "flex", alignItems: "center", position: "relative", ...rowScroll }}>
+      <div ref={rowRef} className={narrow ? "no-hscrollbar" : undefined} style={{ height: 30, display: "flex", alignItems: "center", position: "relative", ...rowScroll, WebkitMaskImage: row1Mask, maskImage: row1Mask }}>
 
         {/* ⛔ NEW-2 — NAVIGATION WINS. Read this before changing any of the three zone flexes.
             The owner could not open the plan switcher on a laptop: "the unincorporated / city of
@@ -775,6 +858,9 @@ export default function AppHeader({
               background: "transparent", border: "none",
               cursor: onDashboard ? "pointer" : "default",
               padding: "2px 4px", borderRadius: RADIUS.sm,
+              // NEW-2 (B915536) — inert: BrandMark's own wordmark span sets its own explicit
+              // fontSize, so this never reached the page; an on-scale value costs nothing.
+              fontSize: CHROME_FONT_CONTROL,
             }}
           >
             {/* Phone: just the mark (no wordmark) — reclaims width so the breadcrumb + switcher fit.
@@ -870,6 +956,15 @@ export default function AppHeader({
           <FullscreenButton active={fullscreen} onToggle={() => toggleRef.current()} />
           {/* Theme gear — signed-out only; signed-in users switch theme in account → Settings (B389) */}
           {!accountActive && <SettingsMenu />}
+          {/* B950320 (sibling-radius-consistency audit) — a hairline divider between the ICON-BUTTON
+              cluster (save badge, fullscreen, gear — all `RADIUS.md` squares) and the account/auth
+              PILL. Per docs/DESIGN.md's shape rule, `pill` is correctly reserved for a container that
+              holds several things (the account chip holds an avatar, a name and a caret) while `md` is
+              correctly the standalone-control shape (fullscreen toggles one thing) — so the fix is not
+              reclassifying either control, it's making the family boundary between the two CLUSTERS
+              visible, the same divider this header already uses between the wordmark and the
+              breadcrumb, so the eye stops comparing the two curves with nothing between them. */}
+          <span style={{ width: 1, height: 14, background: LINE, flex: "none", margin: "0 2px" }} />
           {authControl}
         </div>
       </div>
@@ -884,7 +979,7 @@ export default function AppHeader({
       {toolbarCenter ? (
         // On narrow, scroll sideways (nowrap) instead of wrapping to a 2nd line — the owner's
         // explicit ask. Above the breakpoint the original wrap layout is untouched.
-        <div className={narrow ? "no-hscrollbar" : undefined} style={{ minHeight: 26, display: "flex", alignItems: "center", flexWrap: narrow ? "nowrap" : "wrap", rowGap: 2, borderTop: `1px solid ${LINE}`, ...rowScroll }}>
+        <div ref={row2Ref} className={narrow ? "no-hscrollbar" : undefined} style={{ minHeight: 26, display: "flex", alignItems: "center", flexWrap: narrow ? "nowrap" : "wrap", rowGap: 2, borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
           {/* Left zone — module tabs (flex:1, basis 0 — mirrors Row 1 so the center is
               TRULY centered regardless of how wide the tabs vs the toolbar are). Omitted
               entirely when showModuleTabs is false (B651873) — no unrendered spacer, since
@@ -911,7 +1006,7 @@ export default function AppHeader({
         // --control-h-md (CONTROL_H.md) with no separate padding math needed — verified against
         // the mockup's own derived number (6px padding + an 11.5px line ≈ 26) rather than typed
         // in blind.
-        <div className={narrow ? "no-hscrollbar" : undefined} style={{ height: 26, display: "flex", alignItems: "center", borderTop: `1px solid ${LINE}`, ...rowScroll }}>
+        <div ref={row2Ref} className={narrow ? "no-hscrollbar" : undefined} style={{ height: 26, display: "flex", alignItems: "center", borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
 
           {/* Module tabs — the planner's own workspace navigation. Omitted entirely on a
               standalone route (B651873, e.g. /food): the toolbar zone below is already
@@ -952,12 +1047,12 @@ export default function AppHeader({
     {/* B1173(×2) — LOUD-FAILURE for a refused fullscreen request. With no chrome-hide fallback
         left, a rejection would otherwise be a keypress that visibly does nothing. */}
     {fsNotice && (
-      <div role="status" data-testid="fullscreen-refused" style={{ position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: "min(440px, calc(100vw - 16px))", background: "var(--surface-raised)", color: "var(--text-primary)", border: "1px solid var(--warn-text)", borderRadius: RADIUS.lg, padding: "5px 10px", fontSize: 11.5, fontFamily: "system-ui, sans-serif", boxShadow: "0 4px 16px rgba(0,0,0,0.22)" }}>
+      <div role="status" data-testid="fullscreen-refused" style={{ position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: "min(440px, calc(100vw - 16px))", background: "var(--surface-raised)", color: "var(--text-primary)", border: "1px solid var(--warn-text)", borderRadius: RADIUS.lg, padding: "5px 10px", fontSize: CHROME_FONT_CONTROL, fontFamily: "system-ui, sans-serif", boxShadow: "0 4px 16px rgba(0,0,0,0.22)" }}>
         {fsNotice}
       </div>
     )}
     {accountActive && multiTab.conflictRisk && !multiTabDismissed && (
-      <div role="status" style={{ position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: "min(440px, calc(100vw - 16px))", display: "flex", alignItems: "flex-start", gap: 7, background: "var(--surface-raised)", color: "var(--text-primary)", border: "1px solid var(--warn-text)", borderRadius: RADIUS.lg, padding: "5px 6px 5px 10px", fontSize: 11.5, fontFamily: "system-ui, sans-serif", boxShadow: "0 4px 16px rgba(0,0,0,0.22)" }}>
+      <div role="status" style={{ position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: "min(440px, calc(100vw - 16px))", display: "flex", alignItems: "flex-start", gap: 7, background: "var(--surface-raised)", color: "var(--text-primary)", border: "1px solid var(--warn-text)", borderRadius: RADIUS.lg, padding: "5px 6px 5px 10px", fontSize: CHROME_FONT_CONTROL, fontFamily: "system-ui, sans-serif", boxShadow: "0 4px 16px rgba(0,0,0,0.22)" }}>
         <span aria-hidden="true" style={{ color: "var(--warn-text)", fontWeight: 700, lineHeight: 1.5 }}>⧉</span>
         <span style={{ lineHeight: 1.4, paddingTop: 1 }}>
           Also open in <b>another tab</b> — that tab is the active editor; this one is read-only until you switch there or close it.

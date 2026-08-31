@@ -22,6 +22,12 @@
  */
 import { Component, useEffect, useRef, useState } from "react";
 import { RADIUS } from "./radius.js";
+// NEW-2 (B915536) — a LITERAL duplicate of designTokens.js's FONT_SIZE.control, not an import:
+// this file is in the shared ENTRY chunk (AppHeader.jsx imports it directly), and importing
+// designTokens.js for the sake of one small object measurably ate the route budget —
+// bundle.notesRouteJsBytes went from 0.5 KB to 0.2 KB of headroom. Same reasoning as
+// controls.jsx's own RADIUS/FONT/PAD literal-duplicate note. Keep in sync by hand.
+const CHROME_FONT_CONTROL = 12; // design-exempt: literal duplicate of FONT_SIZE.control — see the comment above
 
 // state → presentation. Pure + exported so the truth-table is unit-locked: a future
 // edit can't silently let a failed save read the same as "all good" (cloudSyncBadge.test.js).
@@ -110,12 +116,21 @@ function Badge({ state, onRetry, detail }) {
         aria-haspopup={canPop ? "dialog" : undefined}
         aria-expanded={canPop ? open : undefined}
         style={{
-          display: "grid", placeItems: "center", width: 26, height: 24, borderRadius: RADIUS.sm, flex: "none",
+          // B958466 (sibling-radius audit) — was RADIUS.sm. This badge sits directly in
+          // AppHeader's row-1 right zone (its own wrapper div carries no radius/background of
+          // its own — a plain positioning shell, not a rounded container), the same standalone-
+          // control category as FullscreenButton/SettingsMenu right beside it, so it takes
+          // RADIUS.md per radius.js's own rule ("sm" is for a control nested inside another
+          // rounded surface, which this isn't) — found by ui-inventory.mjs's siblingMismatches()
+          // flagging it flush against Full screen's RADIUS.md with no visual boundary between.
+          display: "grid", placeItems: "center", width: 26, height: 24, borderRadius: RADIUS.md, flex: "none",
           background: "transparent", color: v.color, cursor: canPop ? "pointer" : "default",
           // The loud failure state gets a hairline ring in its own color so it pops out of the
           // quiet chrome at a glance — the rest carry no border.
           border: v.loud ? "1px solid var(--danger)" : "1px solid transparent",
           padding: 0, animation: v.pulse ? "pf-pulse 1.1s ease-in-out infinite" : "none",
+          // NEW-2 (B915536) — inert (only CloudGlyph, an icon, renders inside); on-scale anyway.
+          fontSize: CHROME_FONT_CONTROL,
         }}
       >
         <CloudGlyph variant={v.variant} />
@@ -172,7 +187,7 @@ export class CloudBadgeBoundary extends Component {
         <span role="img" aria-label="Cloud sync: status unavailable"
           data-testid="cloud-sync-badge" data-sync-state="crashed"
           title="Sync status couldn't be read: your latest work is saved on this device."
-          style={{ display: "grid", placeItems: "center", width: 26, height: 24, borderRadius: RADIUS.sm,
+          style={{ display: "grid", placeItems: "center", width: 26, height: 24, borderRadius: RADIUS.md,
             color: "var(--danger)", border: "1px solid var(--danger)" }}>
           <CloudGlyph variant="cloud-slash" />
         </span>

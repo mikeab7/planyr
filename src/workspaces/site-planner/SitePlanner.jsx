@@ -17178,7 +17178,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Label type size and rail WIDTH are unchanged (VIEWPORT-STABLE).
   const rbtn = (active) => ({
     display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left",
-    padding: "5px 10px", fontSize: 12.5, borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap",
+    // NEW-2 (B915536) — was 12.5, off-scale after the FONT_SIZE reduction; the tool rail's own row
+    // label text takes FONT_SIZE.control, the app-wide default for standard control text.
+    padding: "5px 10px", fontSize: FONT_SIZE.control, borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap",
     border: "1px solid transparent", fontFamily: "inherit",
     background: active ? PAL.ember : "transparent",
     color: active ? PAL.onAccent : PAL.chromeInk,
@@ -17191,11 +17193,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // so it stays legible; the label's heavier weight keeps the hierarchy.
   const railHint = (active) => ({ marginLeft: "auto", flex: "none", fontSize: 10.5, fontWeight: 500, letterSpacing: "0.02em", color: active ? PAL.onAccent : PAL.chromeMuted });
   // ghost buttons on the DARK top bar
-  const dGhost = { padding: "6px 11px", fontSize: 12.5, borderRadius: 8, border: "1px solid transparent", background: "transparent", color: PAL.chromeInk, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, whiteSpace: "nowrap" };
-  const dIcon = { ...dGhost, width: 30, height: 30, padding: 0, display: "grid", placeItems: "center", fontSize: 15 };
+  const dGhost = { padding: "6px 11px", fontSize: FONT_SIZE.control, borderRadius: 8, border: "1px solid transparent", background: "transparent", color: PAL.chromeInk, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, whiteSpace: "nowrap" };
+  // NEW-2 (B915536) — dIcon's own fontSize override is GONE: Undo/Redo/Zoom-to-fit render only an
+  // SVG icon at its own explicit size prop (UndoIcon/RedoIcon/ZoomFitIcon never read em units), so
+  // the override was inert scaffolding sized off the pre-retrofit scale (15, now off-scale). It
+  // inherits dGhost's fontSize instead — zero visual change, one fewer off-scale literal.
+  const dIcon = { ...dGhost, width: 30, height: CONTROL_H.md, padding: 0, display: "grid", placeItems: "center" };
   /* ⛔ B755808 — THE ONE CHROME SYSTEM for the top-right planner toolbar (File / History / View).
      Every control on this bar — text-labelled or icon-only — shares ONE height (`TB_H`, = dIcon's
-     existing 30px) and ONE corner radius (`TB_R`, = dGhost's existing 8px, already the app-wide
+     height) and ONE corner radius (`TB_R`, = dGhost's existing 8px, already the app-wide
      ghost-button default). Before this, File carried its own hand-tuned 3px radius and a ~29px
      implicit height while Undo/Redo/Zoom-to-fit carried dGhost's inherited 8px/30px — three controls,
      two silently different systems (owner: "this is horrendous UI"). A NEW control on this bar must
@@ -17203,8 +17209,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      Related rules enforced the same way here: a container may NEVER carry the disabled treatment —
      only the glyph dims (`.tb-icon-btn:disabled`, fill="currentColor" + opacity) — so a related group
      of icon buttons is never wrapped in a filled tray; group them with `vSep`, a plain 1px divider,
-     exactly like every other pair of groups on this bar. See `test/toolbarChromeSystem.test.js`. */
-  const TB_H = dIcon.height; // 30 — shared height for every top-right toolbar control
+     exactly like every other pair of groups on this bar. See `test/toolbarChromeSystem.test.js`.
+     ⛔ B958465 (toolbar-row overhang audit) — was a bare 30, i.e. `CONTROL_H.lg`. B885137
+     (2026-08-30/31) shrunk THIS ROW's own height 44px→26px (`CONTROL_H.md`) but never touched this
+     constant, so every control on the bar — File, Undo, Redo, both carets, Zoom-to-fit — rendered
+     4px taller than the row that holds them and MEASURABLY overflowed it (centered by the row's own
+     `alignItems:center`, ~1.5-2.5px above and below its box on a live build). `CONTROL_H.md` is the
+     row's real height, not a fifth number — this is a token-scale drift fix, not a redesign, and it
+     also brings these controls to the exact same 26px height as row 1's own icon buttons
+     (`FullscreenButton`/`SettingsMenu` in AppHeader.jsx are already 30×26). */
+  const TB_H = dIcon.height; // CONTROL_H.md (26) — shared height for every top-right toolbar control, matching the row it renders in
   const TB_R = dGhost.borderRadius; // 8 — shared corner radius for every top-right toolbar control
   // NEW-2 (B648353) — the small history-dropdown caret riding beside Undo/Redo, split-button style:
   // same height as its main button, half the width, flat inner corner where the two meet (so the
@@ -17300,13 +17314,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // the live app, not guessed): --font-md 11.5px text, a ~22-23px row (padding + line-height), the
   // panel-tier radius (RADIUS.lg — "a surface that CONTAINS other things"). Shared by every
   // right-click menu in the file (parcel/map/vertex/overlay/element), so the fix is one place.
-  const menuItem = (on) => ({ display: "block", width: "100%", textAlign: "left", padding: "5px 10px", fontSize: FONT_SIZE.md, lineHeight: 1.15, borderRadius: RADIUS.sm, cursor: "pointer", border: "none", background: on ? PAL.accentSoft : "transparent", color: PAL.ink, fontFamily: "inherit", fontWeight: on ? 650 : 500 });
+  const menuItem = (on) => ({ display: "block", width: "100%", textAlign: "left", padding: "5px 10px", fontSize: FONT_SIZE.control, lineHeight: 1.15, borderRadius: RADIUS.sm, cursor: "pointer", border: "none", background: on ? PAL.accentSoft : "transparent", color: PAL.ink, fontFamily: "inherit", fontWeight: on ? 650 : 500 });
   // A baseline font-size on the PANEL itself (not just each row) — without it, a bare div with no
   // override (the divider before the common-actions block) computes the browser default (16px),
   // which is exactly the kind of drift VERIFY's "no font size exceeds --font-display" check exists
   // to catch. Every row still sets its own size; this is the floor a future row inherits.
-  const menuPanel = { background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, boxShadow: "0 16px 44px rgba(28,25,20,0.22), 0 3px 10px rgba(28,25,20,0.1)", padding: "4px 0", fontSize: FONT_SIZE.md };
-  const vSep = <span style={{ width: 1, height: 18, background: "rgba(255,255,255,0.12)", margin: "0 6px" }} />;
+  const menuPanel = { background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, boxShadow: "0 16px 44px rgba(28,25,20,0.22), 0 3px 10px rgba(28,25,20,0.1)", padding: "4px 0", fontSize: FONT_SIZE.control };
+  // ⛔ B958468 (divider-style audit) — was `background: "rgba(255,255,255,0.12)"` at `height:18`: a
+  // raw, non-token white-at-12%-opacity literal that assumes a permanently-dark row, exactly the
+  // KEY DECISIONS violation this app's chrome rule forbids ("chrome themes WITH the app"). On the
+  // light theme's near-white row-2 background that line is functionally invisible — measured:
+  // white-on-white, not merely low-contrast. Now the SAME divider row 1 already uses (AppHeader.jsx's
+  // wordmark/breadcrumb + account-chip dividers): the theme-aware `--chrome-divider` token via
+  // `PAL.chromeLine`, at `height:14` inside this row's own 26px box (a 6px inset top and bottom,
+  // docs/DESIGN.md's now-documented divider rule) rather than an invented 18px.
+  const vSep = <span style={{ width: 1, height: 14, background: PAL.chromeLine, margin: "0 6px" }} />;
   // Switch tools and reset any in-progress drafting; also closes the Parcel menu.
   const selectTool = (id) => {
     // NEW-1 (B900416) — the Pan tool is retired from the rail (Select already pans on empty
@@ -18822,21 +18844,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        could not reach. */
     <div ref={planAnchor} style={{ position: "relative", flex: "0 1 auto", minWidth: 0 }}>
       {/* Styled to match the breadcrumb crumbs (height/padding/radius) so the three
-          segments share one hit-target geometry; hierarchy is by weight, not by fading. */}
+          segments share one hit-target geometry; hierarchy is by weight, not by fading.
+          B950320 (sibling-radius-consistency audit) — was RADIUS.sm, which stopped being true the
+          moment `crumbBtn` in ProjectBreadcrumb.jsx moved sm→md (that file's own NEW-3 comment: "a
+          standalone chip sitting directly on the header bar... the same category as the row-2
+          toolbar's File ▾ / dIcon / rbtn buttons"). This chip is exactly that same category and was
+          simply never updated to match — the comment above kept claiming parity a prior edit broke. */}
       <button
         className="dbtn"
         style={{
           display: "flex", alignItems: "center", gap: 5, flex: "none",
-          height: 24, padding: "0 8px", borderRadius: RADIUS.sm, border: "none",
+          height: 24, padding: "0 8px", borderRadius: RADIUS.md, border: "none",
           background: "transparent", cursor: "pointer", fontFamily: "inherit",
-          fontSize: 12.5, fontWeight: 500, color: "var(--chrome-text)",
+          fontSize: FONT_SIZE.control, fontWeight: 500, color: "var(--chrome-text)",
           maxWidth: 200, minWidth: CRUMB_MIN_W, whiteSpace: "nowrap",
         }}
         onClick={() => setPlanMenu((o) => !o)}
         title="Switch or rename plan"
         data-testid="plan-crumb"
       >
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{planLabel}</span><span data-testid="plan-caret" style={{ color: "var(--chrome-muted)", fontSize: 11, flex: "none" }}>▾</span>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{planLabel}</span><span data-testid="plan-caret" style={{ color: "var(--chrome-muted)", fontSize: FONT_SIZE.label, flex: "none" }}>▾</span>
       </button>
         <AnchoredMenu open={planMenu} onClose={() => { setPlanMenu(false); setPlanDelArm(null); }} anchorRef={planAnchor} placement="below-left" gap={8} width={284} panelStyle={{ ...menuPanel, padding: 10 }}>
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Plan name</div>
@@ -22791,7 +22818,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   needs no learning; plus the aria-label + tooltip an icon alone can't provide. */}
               <button onClick={() => setLayersOpen((o) => !o)} aria-expanded={layersOpen} aria-label="Layers — map data layers (flood, utilities, parcels, aerial…)"
                 title="Layers — map data layers (flood, utilities, parcels, aerial…)"
-                style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "8px 11px", border: "none", background: "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700 }}>
+                style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "8px 11px", border: "none", background: "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 700 }}>
                 <span aria-hidden style={{ color: PAL.accent, display: "flex" }}><LayersIcon size={16} /></span> Layers <span style={{ flex: 1 }} /> <span style={{ color: PAL.muted, fontWeight: 500 }}>{layersOpen ? "▾" : "▸"}</span>
               </button>
               {layersOpen && (
@@ -23013,7 +23040,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           )}
           {/* zoom controls (bottom-right, above the scale bar) */}
           {(() => {
-            const zb = { width: 30, height: 30, display: "grid", placeItems: "center", border: `1px solid ${PAL.panelLine}`, background: "var(--surface-overlay)", color: PAL.ink, cursor: "pointer", fontSize: 16, fontWeight: 600 };
+            // NEW-2 (B915536) — was fontSize:16 (off-scale); "Zoom to fit" already rendered its own
+            // ⤢ glyph at FONT_SIZE.display (14) right beside +/−, so bringing all three to the same
+            // size unifies a group that was already inconsistent with itself, not just off-scale.
+            const zb = { width: 30, height: 30, display: "grid", placeItems: "center", border: `1px solid ${PAL.panelLine}`, background: "var(--surface-overlay)", color: PAL.ink, cursor: "pointer", fontSize: FONT_SIZE.display, fontWeight: 600 };
             const zoomBy = (f) => setView((v) => { const nv = zoomAround({ scale: v.ppf, tx: v.offX, ty: v.offY }, f, size.w / 2, size.h / 2, 0.02, 8); return { ppf: nv.scale, offX: nv.tx, offY: nv.ty }; });
             // ⛔ NEW-MAPCTRL-4 — this `bottom` MUST track FURNITURE_ROW's own narrow-width reserve.
             // The comment above `calibBadgePlacement` (sheetFurniture.js) says the scale bar/north
@@ -23034,7 +23064,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <div data-export="skip" style={{ position: "absolute", right: 14, bottom: zoomBottom, display: "flex", flexDirection: "column", borderRadius: 9, overflow: "hidden", boxShadow: "0 4px 14px rgba(0,0,0,0.18)", zIndex: MAP_CHROME_Z.control }}>
                 <button className="gbtn" aria-label="Zoom in" title="Zoom in" style={{ ...zb, borderRadius: 0 }} onClick={() => zoomBy(1.25)}>＋</button>
                 <button className="gbtn" aria-label="Zoom out" title="Zoom out" style={{ ...zb, borderTop: "none", borderRadius: 0 }} onClick={() => zoomBy(1 / 1.25)}>－</button>
-                <button className="gbtn" aria-label="Zoom to fit" title="Zoom to fit" style={{ ...zb, borderTop: "none", borderRadius: 0, fontSize: 14 }} onClick={fit}>⤢</button>
+                <button className="gbtn" aria-label="Zoom to fit" title="Zoom to fit" style={{ ...zb, borderTop: "none", borderRadius: 0 }} onClick={fit}>⤢</button>
                 {/* NEW-1 — "that felt slow just now". The one signal this whole programme has never
                     had is the owner's own perception, and it is more authoritative than any
                     threshold: the symptom has now failed to reproduce twice under instruments we
@@ -24760,7 +24790,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   while forced. */}
               {(() => {
                 const forced = bandForceOf(selEl);
-                const segBtn = (active) => ({ flex: 1, padding: "3px 0", fontSize: FONT_SIZE.xs, fontWeight: active ? 700 : 500, borderRadius: RADIUS.sm, border: `1px solid ${active ? PAL.accent : PAL.panelLine}`, background: active ? PAL.accentSoft : SURF_RAISED, color: active ? PAL.accentText : PAL.ink, cursor: "pointer", fontFamily: "inherit" });
+                const segBtn = (active) => ({ flex: 1, padding: "3px 0", fontSize: FONT_SIZE.micro, fontWeight: active ? 700 : 500, borderRadius: RADIUS.sm, border: `1px solid ${active ? PAL.accent : PAL.panelLine}`, background: active ? PAL.accentSoft : SURF_RAISED, color: active ? PAL.accentText : PAL.ink, cursor: "pointer", fontFamily: "inherit" });
                 return (
                   <div style={{ marginTop: 9 }}>
                     <Field label="Draw order">
@@ -27096,7 +27126,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               const isBuildingRect = t.type === "building" && !t.points;
               // Matches the approved mockup's `.sec` label exactly — no divider before a section;
               // the ONE rule in the whole menu is the single `<div>` ahead of the common actions.
-              const hdr = () => ({ fontSize: FONT_SIZE.xs, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", padding: "6px 10px 2px" });
+              // NEW-2 (B915536) — was FONT_SIZE.xs (10); this is the same uppercase-section-label
+              // role as Section's own title in controls.jsx (10.5/700/0.09em), so it now shares
+              // that role's value (FONT_SIZE.label) instead of a smaller, independently-picked one.
+              const hdr = () => ({ fontSize: FONT_SIZE.label, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", padding: "6px 10px 2px" });
               // B820 — Arrange (z-order) within the element's TYPE-LAYER band, so the guardrail holds
               // (a building can never drop under a road/parking).
               const band = zOrder(t);
@@ -27110,15 +27143,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               // optional right-aligned shortcut in tertiary colour. Matches the mockup's `.row`
               // (23px, 11.5px text, 8px gaps, 10px side padding) — measured off the live app's own
               // tokens, not guessed.
-              const rowBox = { display: "flex", alignItems: "center", gap: SPACE.md, width: "100%", boxSizing: "border-box", height: CONTROL_H.sm, padding: "0 10px", fontSize: FONT_SIZE.md, fontFamily: "inherit", color: PAL.ink };
+              const rowBox = { display: "flex", alignItems: "center", gap: SPACE.md, width: "100%", boxSizing: "border-box", height: CONTROL_H.sm, padding: "0 10px", fontSize: FONT_SIZE.control, fontFamily: "inherit", color: PAL.ink };
               const icoBox = { width: 16, flex: "0 0 16px", display: "flex", alignItems: "center", justifyContent: "center" };
               const miRow = ({ icon, text, hint, dis, danger, title, onClick, testId }) => (
                 <button key={testId} data-testid={testId} disabled={!!dis} title={title || ""}
-                  style={{ ...rowBox, textAlign: "left", border: "none", borderRadius: RADIUS.sm, background: "transparent", fontFamily: "inherit", fontSize: FONT_SIZE.md, fontWeight: 500, color: dis ? PAL.disabled : danger ? PAL.danger : PAL.ink, cursor: dis ? "default" : "pointer" }}
+                  style={{ ...rowBox, textAlign: "left", border: "none", borderRadius: RADIUS.sm, background: "transparent", fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 500, color: dis ? PAL.disabled : danger ? PAL.danger : PAL.ink, cursor: dis ? "default" : "pointer" }}
                   onClick={dis ? undefined : onClick}>
                   <span style={icoBox}>{icon}</span>
                   <span style={{ flex: 1, minWidth: 0 }}>{text}</span>
-                  {hint && <span style={{ fontSize: FONT_SIZE.sm, color: dis ? PAL.disabled : PAL.muted, fontWeight: 400, whiteSpace: "nowrap" }}>{hint}</span>}
+                  {hint && <span style={{ fontSize: FONT_SIZE.label, color: dis ? PAL.disabled : PAL.muted, fontWeight: 400, whiteSpace: "nowrap" }}>{hint}</span>}
                 </button>
               );
               const arrRow = (icon, text, mode, dis, hint) => miRow({
@@ -27235,7 +27268,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {[[null, "Auto"], ["detention", POND_ROLE_LABEL.detention], ["mitigation", POND_ROLE_LABEL.mitigation], ["dual", POND_ROLE_LABEL.dual]].map(([v, label]) => {
                         const active = v == null ? (t.det?.role == null) : t.det?.role === v;
                         return (
-                          <button key={String(v)} style={{ ...rowBox, textAlign: "left", border: "none", borderRadius: RADIUS.sm, background: "transparent", fontFamily: "inherit", fontSize: FONT_SIZE.md, color: PAL.ink, cursor: "pointer" }}
+                          <button key={String(v)} style={{ ...rowBox, textAlign: "left", border: "none", borderRadius: RADIUS.sm, background: "transparent", fontFamily: "inherit", fontSize: FONT_SIZE.control, color: PAL.ink, cursor: "pointer" }}
                             onClick={() => { setPondRole(t.id, v); setTypeMenu(null); }}>
                             <span style={{ flex: 1, minWidth: 0 }}>{label}{v == null ? " (from elevation)" : ""}</span>{active ? <span style={{ color: PAL.accent, fontWeight: 700 }}>✓</span> : null}
                           </button>
@@ -27339,8 +27372,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <div key={en.key} role="option" aria-selected={i === altPick.focusIndex} data-testid={`alt-stack-pick-row-${i}`}
               onMouseEnter={() => setAltPick((p) => p && { ...p, focusIndex: i })}
               onClick={() => altPickChoose(en.target)}
-              style={{ display: "flex", alignItems: "center", gap: SPACE.sm, height: 23, padding: "0 10px", fontSize: FONT_SIZE.md, color: PAL.ink, background: i === altPick.focusIndex ? PAL.accentSoft : "transparent", cursor: "pointer" }}>
-              <span style={{ flex: "0 0 14px", color: PAL.muted, fontSize: FONT_SIZE.sm, fontVariantNumeric: "tabular-nums" }}>{i + 1}</span>
+              style={{ display: "flex", alignItems: "center", gap: SPACE.sm, height: 23, padding: "0 10px", fontSize: FONT_SIZE.control, color: PAL.ink, background: i === altPick.focusIndex ? PAL.accentSoft : "transparent", cursor: "pointer" }}>
+              <span style={{ flex: "0 0 14px", color: PAL.muted, fontSize: FONT_SIZE.label, fontVariantNumeric: "tabular-nums" }}>{i + 1}</span>
               <span style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{en.label}</span>
             </div>
           ))}
