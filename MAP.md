@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-31 @ `635938aa` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-31 @ `0fbda240` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_614 source files mapped._
+_615 source files mapped._
 
 ## infra
 
@@ -633,6 +633,8 @@ _614 source files mapped._
   - _exports_: `_lastHeaderSig`, `_siteVersions`, `clearSiteVersions`, `cloudDelete`, `cloudDeletedRows`, `cloudElementRecency`, `cloudHardDelete`, `cloudList`, `cloudParcelRows`, `cloudRestore`, `cloudUpsert`, `fetchSiteForReconcile`, `headerSig`, `interpretDelete`, `keepaliveCloudPush`, `siteRowFor`, `slimForCloud`
 - **`src/workspaces/site-planner/lib/coloradoRegions.js`** — NEW-8 Colorado region model + THE CAPABILITY GUARD: network-free site→state resolution, the four drainage regimes (MHFD · Larimer · Weld · El Paso) with detention deliberately unmodeled, the CWCB 2 CCR 408-1 statewide floodplain floor, and the capability matrix that makes an unwired capability render a named 'not available in Colorado yet' state instead of a number
   - _exports_: `CAPABILITIES`, `capabilityFor`, `CO_COUNTY_REGIME`, `CO_DRAINAGE_REGIMES`, `CO_STATE_FLOOD_STANDARD`, `COLORADO_DETENTION_DETAIL`, `coloradoGaps`, `coloradoRegimeFor`, `MHFD_DETENTION_DETAIL`
+- **`src/workspaces/site-planner/lib/compParcelAnchor.js`** — B941152: the pure comp-anchor derivation for a real-parcel map selection of any size — one Polygon for a single parcel, a MultiPolygon of every selected parcel's rings for several (never just the last), every account id joined, county fallback, and the toolbar's own already-computed acreage carried through
+  - _exports_: `compAnchorFromSelection`, `parcelApnFromSelection`, `parcelCountyFromSelection`, `parcelGeomFromSelection`
 - **`src/workspaces/site-planner/lib/conceptName.js`** — Default plan naming: bijective base-26 Concept A/B/.../AA sequence continuing past the highest existing concept per site
   - _exports_: `conceptLettersToNumber`, `nextConceptName`, `numberToConcept`, `parseConceptIndex`
 - **`src/workspaces/site-planner/lib/conflictToasts.js`** — the B673 conflict policy matrix as a pure mapping: elementSync event → toast spec (who gets told what, which action rides along)
