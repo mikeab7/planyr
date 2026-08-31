@@ -1,0 +1,15 @@
+#!/bin/sh
+# Corrects MAP.md / BACKLOG_OPEN.md against the complete merged tree, right after a fully-
+# automatic merge commit is made (NEW-1) — the correctness backstop for
+# scripts/merge-driver-ledgers.mjs, which runs mid-merge and cannot always see everything the
+# merge is about to add. See scripts/post-merge-regen.mjs for why this hook point works (and why
+# it can only STAGE the correction, not fold it into the just-made commit — git still considers
+# itself "in the middle of a merge" for the hook's own duration, so `commit --amend` refuses here;
+# it works fine a moment later once `git merge` has actually returned).
+#
+# Never blocks anything — `post-merge` cannot abort a merge that already succeeded, and a
+# regeneration problem here is reported and left to CI's own drift guards
+# (`build-map.mjs --check` / `build-backlog-index.mjs --check`), the backstop of last resort.
+#
+# Install: npm run hooks:install    (sets core.hooksPath to .githooks)
+exec node "$(git rev-parse --show-toplevel)/scripts/post-merge-regen.mjs"
