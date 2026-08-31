@@ -47,7 +47,14 @@ export async function pdfPageCount(fileOrBuffer) {
  *  resolution OCR engines are tuned for — screen-scale renders measurably hurt recognition on a
  *  degraded scan, CLAUDE.md item (c)). Returns { imageData, widthPt, heightPt } (page size in PDF
  *  points, for callers that want to relate pixels back to the original page). Caller owns the
- *  transient <canvas> — this creates and discards its own. */
+ *  transient <canvas> — this creates and discards its own.
+ *
+ *  `opts.maxLongEdgePx` — optional, additive, unused by the OCR caller: caps the RENDER DPI down
+ *  (never up) so the rendered page's long edge never exceeds this many pixels — a large sheet
+ *  (e.g. a 24x36" civil site plan) renders at a lower effective DPI instead of an oversized
+ *  raster nobody's screen can show. See shared/sitePlans/lib/overlayRasterSize.js, whose
+ *  `effectiveRasterDpi` this mirrors — kept separate rather than imported, because this module
+ *  must not import anything outside `shared/files/` (see its own OCR-only header). */
 export async function renderPdfPageToImageData(fileOrBuffer, pageNum, opts = {}) {
   const targetDpi = opts.targetDpi ?? 300;
   const data = fileOrBuffer instanceof ArrayBuffer ? fileOrBuffer : await fileOrBuffer.arrayBuffer();
@@ -55,7 +62,13 @@ export async function renderPdfPageToImageData(fileOrBuffer, pageNum, opts = {})
   try {
     const page = await pdf.getPage(pageNum);
     const base = page.getViewport({ scale: 1 });
-    const scale = targetDpi / PDF_BASE_DPI;
+    let dpi = targetDpi;
+    if (opts.maxLongEdgePx) {
+      const longEdgePt = Math.max(base.width, base.height);
+      const capDpi = (opts.maxLongEdgePx / longEdgePt) * PDF_BASE_DPI;
+      dpi = Math.min(targetDpi, capDpi);
+    }
+    const scale = dpi / PDF_BASE_DPI;
     const viewport = page.getViewport({ scale });
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(viewport.width));

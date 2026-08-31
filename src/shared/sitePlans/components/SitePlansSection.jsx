@@ -31,9 +31,15 @@ import {
   fetchAllOverlays, insertOverlay, updateOverlay, deleteOverlay,
 } from "../lib/sitePlanOverlayStore.js";
 import { overlayPlaced } from "../lib/sitePlanOverlays.js";
+import { friendlySaveError } from "../lib/overlayErrors.js";
 import { uploadOverlayRaster } from "../lib/overlayRasterStorage.js";
+import {
+  OVERLAY_RASTER_BASE_DPI, OVERLAY_RASTER_MAX_LONG_EDGE_PX, OVERLAY_RASTER_JPEG_QUALITY,
+  OVERLAY_THUMB_MAX_LONG_EDGE_PX, OVERLAY_THUMB_JPEG_QUALITY, cappedRasterDims,
+} from "../lib/overlayRasterSize.js";
 import { fileNewReview, loadReview, downloadFromDrive, stripFileExt } from "../../../workspaces/doc-review/lib/reviewStore.js";
-import { listMyTeams, currentIdentity } from "../../../workspaces/site-planner/lib/teams.js";
+import { listMyTeams } from "../../../workspaces/site-planner/lib/teams.js";
+import { PALETTES } from "../../theme/palette.js";
 
 const inputStyle = {
   width: "100%", boxSizing: "border-box", padding: "6px 8px", fontSize: FONT_SIZE.control, borderRadius: 6, fontFamily: "inherit",
@@ -41,24 +47,70 @@ const inputStyle = {
 };
 const metaText = { fontSize: FONT_SIZE.label, color: "var(--text-secondary)" };
 
-function imageDataToPngBlob(imageData) {
+// The overlay raster is a MAP BACKGROUND (see this file's own header — the original brochure
+// stays untouched in Review/Library), so it's stored as a resolution-capped JPEG rather than a
+// lossless PNG (B972225 NEW-5 — measured on the owner's real Airtex flyer: rasterizing the page
+// costs ~700-1300ms, re-encoding it costs tens of ms either way, so the codec choice is nearly
+// free — the real saving from resolution capping only shows up on a page bigger than a normal
+// flyer sheet; see overlayRasterSize.js's header for the full numbers).
+function imageDataToBlob(imageData, format = "image/jpeg", quality = OVERLAY_RASTER_JPEG_QUALITY) {
   return new Promise((resolve) => {
     const canvas = document.createElement("canvas");
     canvas.width = imageData.width; canvas.height = imageData.height;
     const ctx = canvas.getContext("2d");
     ctx.putImageData(imageData, 0, 0);
-    canvas.toBlob((blob) => { canvas.width = 0; canvas.height = 0; resolve(blob); }, "image/png");
+    canvas.toBlob((blob) => { canvas.width = 0; canvas.height = 0; resolve(blob); }, format, quality);
   });
+}
+
+// A small inline thumbnail for the Site plans list row — built from the SAME already-decoded
+// pixels as the main raster (no second PDF render / image decode), so it costs one cheap canvas
+// downscale + a tiny JPEG encode, never a second expensive rasterize.
+function imageDataToThumbDataUrl(imageData) {
+  const { w, h } = cappedRasterDims(imageData.width, imageData.height, OVERLAY_THUMB_MAX_LONG_EDGE_PX);
+  const src = document.createElement("canvas");
+  src.width = imageData.width; src.height = imageData.height;
+  src.getContext("2d").putImageData(imageData, 0, 0);
+  const out = document.createElement("canvas");
+  out.width = w; out.height = h;
+  const octx = out.getContext("2d");
+  octx.drawImage(src, 0, 0, w, h);
+  src.width = 0; src.height = 0;
+  const url = out.toDataURL("image/jpeg", OVERLAY_THUMB_JPEG_QUALITY);
+  out.width = 0; out.height = 0;
+  return url;
 }
 
 function imageFileDims(file) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
-    img.onload = () => { URL.revokeObjectURL(url); resolve({ w: img.naturalWidth, h: img.naturalHeight }); };
+    img.onload = () => { URL.revokeObjectURL(url); resolve({ w: img.naturalWidth, h: img.naturalHeight, img }); };
     img.onerror = (e) => { URL.revokeObjectURL(url); reject(e); };
     img.src = url;
   });
+}
+
+// A plain image drop (not a PDF) gets the SAME resolution cap + JPEG re-encode as a rasterized
+// PDF page — previously this path used the uploaded file's own bytes untouched, so a big
+// screenshot or an exported TIFF rode straight onto the map at full size (B972225 NEW-5).
+async function capImageFile(file) {
+  const { w, h, img } = await imageFileDims(file);
+  const { w: cw, h: ch } = cappedRasterDims(w, h, OVERLAY_RASTER_MAX_LONG_EDGE_PX);
+  const canvas = document.createElement("canvas");
+  canvas.width = cw; canvas.height = ch;
+  const ctx = canvas.getContext("2d");
+  // A canvas 2D context can't read CSS var() tokens (KEY DECISIONS — the SVG/canvas JS mirror
+  // exists for exactly this), and this fill is the physical PAGE background, not app chrome, so
+  // it's a fixed white rather than theme-reactive — reusing the palette's own white constant
+  // instead of a new raw hex literal (matches overlayPlacementHandles.js's precedent).
+  ctx.fillStyle = PALETTES.light.onAccent; ctx.fillRect(0, 0, cw, ch);
+  ctx.drawImage(img, 0, 0, cw, ch);
+  const imageData = ctx.getImageData(0, 0, cw, ch);
+  const blob = await imageDataToBlob(imageData, "image/jpeg", OVERLAY_RASTER_JPEG_QUALITY);
+  const thumbDataUrl = imageDataToThumbDataUrl(imageData);
+  canvas.width = 0; canvas.height = 0;
+  return { blob, w: cw, h: ch, thumbDataUrl, url: URL.createObjectURL(blob) };
 }
 
 const isPdf = (file) => file && (file.type === "application/pdf" || /\.pdf$/i.test(file.name || ""));
@@ -101,7 +153,7 @@ function emptyFlow() {
     file: null, fileBuffer: null, overlayId: null, // overlayId set only for "Change page"
     projectId: null, teamId: null, title: "", docDate: new Date().toISOString().slice(0, 10),
     pageCount: 1, page: 1, previewUrl: null,
-    rasterBlob: null, rasterW: 0, rasterH: 0,
+    rasterBlob: null, rasterW: 0, rasterH: 0, thumbDataUrl: null,
     error: null,
     dropPlacement: null, // {centerLat,centerLon} — where a dropped file landed on the map, if any
     queue: [], // remaining File objects still to place, after this one (multi-file drop)
@@ -137,6 +189,11 @@ function OverlayRow({
         <button onClick={onToggleExpand} aria-label={expanded ? "Collapse" : "Expand"} style={{ border: "none", background: "none", cursor: "pointer", color: "var(--text-secondary)", padding: "2px 0 0", flex: "none" }}>
           <span style={{ fontSize: FONT_SIZE.micro, display: "inline-block", transform: expanded ? "none" : "rotate(-90deg)" }}>▾</span>
         </button>
+        {o.thumbDataUrl ? (
+          <img src={o.thumbDataUrl} alt="" style={{ width: 32, height: 32, objectFit: "cover", borderRadius: RADIUS.sm, border: "1px solid var(--border-default)", flex: "none" }} />
+        ) : (
+          <div aria-hidden="true" style={{ width: 32, height: 32, borderRadius: RADIUS.sm, border: "1px solid var(--border-default)", background: "var(--surface-raised)", flex: "none" }} />
+        )}
         <div style={{ flex: 1, minWidth: 0 }}>
           {editingName ? (
             <input autoFocus value={nameDraft} onChange={(e) => setNameDraft(e.target.value)}
@@ -215,8 +272,8 @@ export default function SitePlansSection({
 }) {
   const [overlays, setOverlays] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [currentUserId, setCurrentUserId] = useState(null);
   const [teams, setTeams] = useState([]);
+  const [panelError, setPanelError] = useState(null);
   const [flow, setFlow] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
   const notifiedRef = useRef(onOverlaysChange);
@@ -226,7 +283,6 @@ export default function SitePlansSection({
 
   useEffect(() => {
     if (!open) return;
-    currentIdentity().then(({ uid }) => setCurrentUserId(uid));
     listMyTeams().then(setTeams).catch(() => setTeams([]));
   }, [open]);
 
@@ -248,7 +304,12 @@ export default function SitePlansSection({
       if (!existing) return;
       const next = { ...existing, ...placement };
       setOverlays((list) => { const l = list.map((o) => (o.id === id ? next : o)); notifiedRef.current?.(l); return l; });
-      await updateOverlay(id, next);
+      const { error } = await updateOverlay(id, next);
+      if (error) {
+        console.error("[sitePlanOverlays] placement commit failed:", error);
+        setPanelError(friendlySaveError(error));
+        await reload(); // the optimistic move didn't actually save — pull the real, still-old position back
+      }
     };
     return () => { if (commitPlacementRef) commitPlacementRef.current = null; };
   }, [commitPlacementRef]);
@@ -257,12 +318,15 @@ export default function SitePlansSection({
 
   const rasterizePage = async (bytesOrFile, page) => {
     const { renderPdfPageToImageData } = await import("../../files/pdfRaster.js");
-    const { imageData } = await renderPdfPageToImageData(bytesOrFile, page, { targetDpi: 150 });
-    const blob = await imageDataToPngBlob(imageData);
-    return { blob, w: imageData.width, h: imageData.height, url: URL.createObjectURL(blob) };
+    const { imageData } = await renderPdfPageToImageData(bytesOrFile, page, {
+      targetDpi: OVERLAY_RASTER_BASE_DPI, maxLongEdgePx: OVERLAY_RASTER_MAX_LONG_EDGE_PX,
+    });
+    const blob = await imageDataToBlob(imageData, "image/jpeg", OVERLAY_RASTER_JPEG_QUALITY);
+    const thumbDataUrl = imageDataToThumbDataUrl(imageData);
+    return { blob, w: imageData.width, h: imageData.height, thumbDataUrl, url: URL.createObjectURL(blob) };
   };
 
-  const startNewUpload = () => setFlow(emptyFlow());
+  const startNewUpload = () => { setPanelError(null); setFlow(emptyFlow()); };
   const cancelFlow = () => setFlow(null);
 
   // `extra` carries what a DROP already knows that a file-picker pick doesn't: where on the
@@ -280,12 +344,11 @@ export default function SitePlansSection({
         const { pdfPageCount } = await import("../../files/pdfRaster.js");
         const pageCount = await pdfPageCount(file);
         const r = await rasterizePage(file, 1);
-        setF({ pageCount, page: 1, previewUrl: r.url, rasterBlob: r.blob, rasterW: r.w, rasterH: r.h,
+        setF({ pageCount, page: 1, previewUrl: r.url, rasterBlob: r.blob, rasterW: r.w, rasterH: r.h, thumbDataUrl: r.thumbDataUrl,
           title: stripFileExt(file.name || "Site plan"), step: "page" });
       } else {
-        const { w, h } = await imageFileDims(file);
-        const url = URL.createObjectURL(file);
-        setF({ pageCount: 1, page: 1, previewUrl: url, rasterBlob: file, rasterW: w, rasterH: h,
+        const r = await capImageFile(file);
+        setF({ pageCount: 1, page: 1, previewUrl: r.url, rasterBlob: r.blob, rasterW: r.w, rasterH: r.h, thumbDataUrl: r.thumbDataUrl,
           title: stripFileExt(file.name || "Site plan"), step: "page" });
       }
     } catch (e) {
@@ -319,9 +382,10 @@ export default function SitePlansSection({
     try {
       const src = flow.fileBuffer || flow.file;
       const r = await rasterizePage(src, n);
-      setF({ previewUrl: r.url, rasterBlob: r.blob, rasterW: r.w, rasterH: r.h });
+      setF({ previewUrl: r.url, rasterBlob: r.blob, rasterW: r.w, rasterH: r.h, thumbDataUrl: r.thumbDataUrl });
     } catch (e) {
-      setF({ error: (e && e.message) || "Couldn't render that page." });
+      console.error("[sitePlanOverlays] page render failed:", e);
+      setF({ error: friendlySaveError(e) });
     }
   };
 
@@ -339,7 +403,7 @@ export default function SitePlansSection({
       if (f.overlayId) {
         const existing = overlaysRef.current.find((o) => o.id === f.overlayId);
         const { data, error } = await updateOverlay(f.overlayId, {
-          ...existing, page: f.page, imgW: f.rasterW, imgH: f.rasterH,
+          ...existing, page: f.page, imgW: f.rasterW, imgH: f.rasterH, thumbDataUrl: f.thumbDataUrl,
           ...(placement || {}), // Change page clears the old placement's fit — re-place fresh
         });
         if (error) throw error;
@@ -354,9 +418,9 @@ export default function SitePlansSection({
         if (!uploaded.ok) throw new Error(uploaded.error || "Couldn't upload the brochure.");
         const { data, error } = await insertOverlay({
           projectId: f.projectId, teamId: f.teamId,
-          reviewId: uploaded.id, reviewUserId: currentUserId, page: f.page,
+          reviewId: uploaded.id, page: f.page,
           docTitle: f.title, docDate: f.docDate, sourceFileName: (f.file && f.file.name) || "",
-          imgW: f.rasterW, imgH: f.rasterH, opacity: 0.85, visible: true,
+          imgW: f.rasterW, imgH: f.rasterH, thumbDataUrl: f.thumbDataUrl, opacity: 0.85, visible: true,
           ...(placement || {}),
         });
         if (error) throw error;
@@ -372,7 +436,8 @@ export default function SitePlansSection({
       if (f.queue && f.queue.length) pickFile(f.queue[0], { queue: f.queue.slice(1) });
       else setFlow(null);
     } catch (e) {
-      setF({ error: (e && e.message) || "Couldn't save that site plan.", step: "error" });
+      console.error("[sitePlanOverlays] save failed:", e);
+      setF({ error: friendlySaveError(e), step: "error" });
     }
   };
 
@@ -389,18 +454,28 @@ export default function SitePlansSection({
       const { pdfPageCount } = await import("../../files/pdfRaster.js");
       const pageCount = await pdfPageCount(bytes);
       const r = await rasterizePage(bytes, 1);
-      setF({ fileBuffer: bytes, pageCount, page: 1, previewUrl: r.url, rasterBlob: r.blob, rasterW: r.w, rasterH: r.h, step: "page" });
+      setF({ fileBuffer: bytes, pageCount, page: 1, previewUrl: r.url, rasterBlob: r.blob, rasterW: r.w, rasterH: r.h, thumbDataUrl: r.thumbDataUrl, step: "page" });
     } catch (e) {
-      setF({ error: (e && e.message) || "Couldn't reopen that brochure.", step: "error" });
+      console.error("[sitePlanOverlays] reopen failed:", e);
+      setF({ error: friendlySaveError(e), step: "error" });
     }
   };
 
   // ---- simple per-item controls -----------------------------------------------------------
-  const patchAndReload = async (o, patch) => { await updateOverlay(o.id, { ...o, ...patch }); await reload(); };
+  const patchAndReload = async (o, patch) => {
+    const { error } = await updateOverlay(o.id, { ...o, ...patch });
+    if (error) { console.error("[sitePlanOverlays] update failed:", error); setPanelError(friendlySaveError(error)); }
+    await reload();
+  };
   const rename = (o, docTitle) => patchAndReload(o, { docTitle });
   const setOpacity = (o, opacity) => patchAndReload(o, { opacity });
   const toggleVisible = (o) => patchAndReload(o, { visible: !o.visible });
-  const remove = async (o) => { await deleteOverlay(o.id); if (activeOverlayId === o.id) onActivateOverlay && onActivateOverlay(null); await reload(); };
+  const remove = async (o) => {
+    const { error } = await deleteOverlay(o.id);
+    if (error) { console.error("[sitePlanOverlays] delete failed:", error); setPanelError(friendlySaveError(error)); }
+    else if (activeOverlayId === o.id) onActivateOverlay && onActivateOverlay(null);
+    await reload();
+  };
 
   return (
     <div style={{ borderBottom: "1px solid var(--border-default)", padding: "10px 14px" }}>
@@ -408,6 +483,16 @@ export default function SitePlansSection({
         <span style={{ fontSize: FONT_SIZE.label, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-secondary)" }}>Site plans</span>
         {!flow && <Button size="sm" variant="ghost" onClick={startNewUpload}>+ Upload site plan</Button>}
       </div>
+
+      {panelError && (
+        <div style={{
+          display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 8, padding: "6px 8px",
+          border: "1px solid var(--danger-text)", borderRadius: RADIUS.sm, background: "var(--surface-raised)",
+        }}>
+          <div style={{ flex: 1, minWidth: 0, fontSize: FONT_SIZE.control, color: "var(--danger-text)" }}>{panelError}</div>
+          <IconButton size={22} aria-label="Dismiss" title="Dismiss" onClick={() => setPanelError(null)}>✕</IconButton>
+        </div>
+      )}
 
       {!flow && overlays.length === 0 && !loading && (
         <div style={{ fontSize: FONT_SIZE.control, color: "var(--text-secondary)" }}>

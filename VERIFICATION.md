@@ -183,6 +183,39 @@ was never clicked" quietly ships broken.
 
 **Result:** ⏳ pending — needs a live pass on a real short-viewport device (phone and/or laptop with toolbar) with real signed-in data, neither reachable from this sandbox. The scroll CSS mechanism, including the specific wrong approach it replaced, is proven correct above.
 
+### V544256 — B972512: a real site-plan overlay save actually lands a row, and a broken save shows plain English, never raw SQL `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** The reported defect only exists at the moment of a real Supabase INSERT (`null value in column "review_user_id" ... violates not-null constraint`), which this sandbox cannot perform — it never signs in. The fix (dropping the column) was applied to and read back from production directly, but that proves the SCHEMA is right, not that the real app's real insert now succeeds end to end through RLS with a real session.
+
+**What was verified here, headless, without a signed-in session.** The schema change itself was applied to production and confirmed live (`information_schema.columns` — the column is gone) with zero rows lost (the table held 0 rows at the time, confirmed before the drop — every prior real save had been failing on this exact constraint). Every `reviewUserId`/`review_user_id` reference was grepped out of the whole tree and removed at every layer (model, store, component, the now-dead `currentUserId` state that existed only to feed it). The error-translation module (`overlayErrors.js`) is unit-tested directly against the reported message verbatim (asserting the translated text never contains "relation"/"column"/"constraint") plus every other common Postgres/PostgREST error shape, and against a battery of hand-written Errors proven to pass through UNCHANGED (so the fix doesn't trade one failure mode — raw SQL text — for another — flattening every real message to one generic sentence).
+
+**What could NOT be driven here:** the actual INSERT succeeding against production RLS with a real signed-in `auth.uid()`; the four wired-up call sites (rename, opacity/visible toggle, delete, drag-commit) each genuinely surfacing a translated error on a REAL failure rather than a fabricated one; confirming the map's displayed position never silently drifts out of sync with what's actually persisted after a failed drag-commit.
+
+**Steps, each with a named expected result — run on planyr.io, signed in, in Comp mode:**
+1. Upload any real PDF or image as a site plan (the owner's own C5LC AT AIRTEX brochure is a good repeat case). **Expect:** it saves cleanly — no error banner anywhere in the flow, and the plan appears armed for editing on the map. This is the exact step that failed with the raw constraint message before this fix.
+2. Read `public.site_plan_overlays` back (Supabase SQL editor or the MCP tool). **Expect:** the new row has no `review_user_id` column at all (it no longer exists on the table) and a real, non-null `user_id`.
+3. Rename the site plan, toggle its Opacity/Visible controls, and drag it to a new position on the map. **Expect:** each change persists across a reload.
+4. Force a save to fail (e.g. sign out in another tab first, or otherwise break the write) and repeat one of the actions in step 3. **Expect:** a short, plain-English message appears (never SQL/Postgres wording) — and for a failed drag, the map's shown position corrects itself back to the last SAVED position rather than silently keeping an unsaved move on screen.
+
+**Result:** ⏳ pending — needs a live signed-in pass, not reachable from this sandbox. The schema fix is applied to and confirmed live against production; the error-translation logic is proven correct in isolation above.
+
+### V544257 — B972513: the placed overlay still reads clearly after the JPEG/resolution change, and the list-row thumbnail actually shows `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** Whether a compressed raster still looks right ON THE MAP, at his actual working zoom, is a perceptual judgment call — the same class of check `/CLAUDE.md`'s PERCEPTUAL-PARITY rule reserves for a human eye, not an automated pixel-diff. Confirming the Storage object is genuinely smaller in production, and that the new inline thumbnail column actually rides along and renders in the real list, both need a real signed-in account.
+
+**What was verified here, headless, without a signed-in session.** The sizing math itself is unit-tested against his own real page's exact dimensions (612×792pt) and against a synthetic large-sheet case (24×36in ARCH D), proving the cap never engages for a normal flyer page and correctly engages for an oversized one. The actual byte/timing numbers are REAL measurements against his real downloaded brochure, not estimates — see B972513's own record for the full table (render ~700–1300ms, PNG encode 19ms, JPEG encode 102ms, 321KB→202KB at unchanged resolution, thumbnail 15KB/17ms). The plain-image upload path was code-reviewed to confirm it now shares the exact same `cappedRasterDims`/JPEG path rather than a second, divergent implementation. Design-drift and bundle-budget audits both re-run clean after the fix.
+
+**What could NOT be driven here:** whether the compressed plan is perceptibly different to a human eye once actually placed and viewed at working zoom on the real map (the measured renders LOOK visually identical at the sizes checked — see the before/after crops on the item — but "looks right on his screen" is his call, not an automated one); the real Storage object's actual size in production; the thumbnail actually rendering (not just being computed) in the real signed-in list; a genuinely large-format sheet, if one is available to test with, actually getting capped rather than rasterized huge.
+
+**Steps, each with a named expected result — run on planyr.io, signed in, in Comp mode:**
+1. Upload the real C5LC AT AIRTEX brochure (or any multi-page PDF) and place it on the map. **Expect:** at your normal working zoom, the plan reads exactly as clearly as it did before — no visible fuzziness, banding, or JPEG artifacting around the text/lines.
+2. Look at the site-plans list row for the plan you just placed. **Expect:** a small thumbnail image of the actual plan appears beside its name — not a blank placeholder square.
+3. Check the Storage object behind this overlay (Supabase Storage browser, or the MCP tool) against what a `.png` at the old resolution would have been. **Expect:** a `.jpg` object, comfortably under 1 MB for a normal flyer page.
+4. Drop a plain large image file (a screenshot or exported TIFF, not a PDF) as a site plan. **Expect:** it also gets capped/compressed on the way in — not stored at its original full size.
+5. If a genuinely large-format sheet (24×36" or bigger, e.g. a full civil site-plan export) is available, upload it. **Expect:** the rendered raster is capped to a reasonable size rather than rendering at several thousand pixels on a side.
+
+**Result:** ⏳ pending — needs a live signed-in pass with real placed content, not reachable from this sandbox. The sizing math and the real measured numbers behind the decision are proven correct above.
+
 ### V524448 — B941152: a real multi-parcel comp saves correctly and reads back correctly from `public.comps` `Blocker: auth` `Blocker: live-GIS`
 
 **Why this needs its own real pass.** The reported symptom is a real 2-parcel selection ("2 parcels · 66.17 AC") producing nothing on Enter. Reaching that state needs a live county parcel-identify click (every county GIS host is egress-blocked here) AND writing/reading a real `public.comps` row needs a signed-in Supabase session (CORS-blocked from this sandbox) — both named walls, not a skipped check.

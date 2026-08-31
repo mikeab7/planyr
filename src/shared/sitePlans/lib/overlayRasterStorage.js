@@ -15,19 +15,22 @@ import { getUser } from "../../../workspaces/site-planner/lib/auth.js";
 export const BUCKET = "doc-review-files";
 export const MAX_BYTES = 20 * 1024 * 1024; // a single rasterized page, generous ceiling
 
-export const overlayRasterKey = (uid, overlayId) => `${uid}/site-plan-overlays/${overlayId}.png`;
+// The overlay raster is a resolution-capped JPEG now, not a lossless PNG (B972225 NEW-5 — see
+// shared/sitePlans/lib/overlayRasterSize.js's header for why).
+export const overlayRasterKey = (uid, overlayId) => `${uid}/site-plan-overlays/${overlayId}.jpg`;
 
-/** Upload a rasterized page (a PNG Blob for a PDF-sourced page, or the original file's own
- * blob/type for a plain uploaded image) for one overlay; returns { key } or null (no client /
- * not signed in / oversize / error). Caller keeps the overlay row usable without a raster —
- * a missing raster just means nothing paints on the map until re-uploaded. */
+/** Upload a rasterized page (a resolution-capped JPEG Blob, PDF-sourced or from a plain
+ * uploaded image — see SitePlansSection.jsx's capImageFile/rasterizePage) for one overlay;
+ * returns { key } or null (no client / not signed in / oversize / error). Caller keeps the
+ * overlay row usable without a raster — a missing raster just means nothing paints on the map
+ * until re-uploaded. */
 export async function uploadOverlayRaster(overlayId, blob) {
   if (!supabase || !blob || blob.size > MAX_BYTES) return null;
   const user = await getUser();
   const uid = user && user.id;
   if (!uid) return null;
   const key = overlayRasterKey(uid, overlayId);
-  const { error } = await supabase.storage.from(BUCKET).upload(key, blob, { contentType: blob.type || "image/png", upsert: true });
+  const { error } = await supabase.storage.from(BUCKET).upload(key, blob, { contentType: blob.type || "image/jpeg", upsert: true });
   return error ? null : { key };
 }
 
