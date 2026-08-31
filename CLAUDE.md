@@ -460,38 +460,46 @@ Runtime deps are kept few and deliberate. New client dependency added 2026-07-10
   hard blocker (merge conflict, red required check, protection that rejects the merge) —
   report _that_, not a request for permission.
 - **⛔ THE CLAUDE CODE WEB SESSION HARNESS DEFAULTS EVERY NEW PR TO DRAFT — THAT DEFAULT DOES
-  NOT APPLY HERE, AND THE SESSION THAT OPENS THE PR IS THE ONE THAT MARKS IT READY, EVERY TIME
-  (B781760 → B793696 → B914448/B914449, 2026-08-26 through 2026-08-31, after #1157/#1162/#1166/
-  #1180 each sat as a green, conflict-free PR parked in draft waiting for a button the owner
-  was never going to press).** The harness instruction to open PRs as draft lives outside this
-  repo — not in `CLAUDE.md`, not in any file here, not editable from a session — so a session
-  that both reads "commit means ship it live" above AND that harness default resolves the
-  conflict inconsistently.
-  **⛔ CORRECTED 2026-08-31 (B914448) — THIS PASSAGE USED TO CLAIM THE PROBLEM WAS SOLVED
-  MECHANICALLY. IT IS NOT, AND `.github/workflows/pr-auto-ready.yml` HAS NEVER ONCE SUCCEEDED
-  ON A REAL PR.** `pr-auto-ready.yml` was built to un-draft a PR and arm squash auto-merge
-  automatically on every opened/reopened/synchronize event for a `claude/*` head branch — the
-  *intent* stands and the workflow still runs and still tries — but `GITHUB_TOKEN` cannot
-  actually perform either mutation in this repo: **confirmed FORBIDDEN ("Resource not
-  accessible by integration") on real PRs under every credential/setting combination that
-  exists to try** — "Workflow permissions: Read and write" (on), "Allow GitHub Actions to
-  create and approve pull requests" (on), and the installed "Claude" GitHub App (can't be
-  driven from a workflow at all — a workflow can only act as a GitHub App if it holds that
-  App's private key, and Anthropic, not this repo, holds this one). Owner-reviewed 2026-08-31
-  (B793696): a PAT or a self-owned GitHub App would fix it; he declined both, because the
-  manual step costs him nothing — sessions already do it as part of shipping.
-  **SO: THE AUTOMATION DOES NOT DO IT. A session opening a PR here marks it ready and arms
-  auto-merge ITSELF, every time, as a normal, expected part of shipping — not a workaround, not
-  a fallback for when the automation fails, the standing way this gets done.** Right after
-  opening the PR, call the GitHub MCP tools directly: `update_pull_request` with `draft:false`,
-  then `enable_pr_auto_merge`. Do **not** wait for `pr-auto-ready` to do it, and do not treat a
-  green `pr-auto-ready` check as proof the PR was marked ready — as of B914449 it reports the
-  known FORBIDDEN case with `core.notice` (so it no longer fails the run for a condition nobody
-  can fix from here) rather than actually succeeding at the mutation. If it ever DOES succeed,
-  it says so loudly, unprompted (a credential exists again — reopen B793696).
-  **The `hold` label (or a `<!-- keep-draft -->` marker in the PR body) is still the one
-  supported way to genuinely ask the owner to look before a PR merges** — apply either and
-  leave that PR in draft yourself too, since the workflow already stands down on it.
+  NOT APPLY HERE, AND THE SESSION THAT OPENS THE PR IS THE ONE THAT MARKS IT READY, EVERY TIME,
+  BY HAND (B781760 → B793696 → B914448/B914449 → B934400/B934401, 2026-08-26 through
+  2026-08-31).** The harness instruction to open PRs as draft lives outside this repo — not in
+  `CLAUDE.md`, not in any file here, not editable from a session — so a session that reads only
+  "commit means ship it live" above, with nothing telling it who un-drafts the PR, can stall on
+  exactly this collision.
+  **THE HISTORY, briefly, because it explains why this rule is written so bluntly.** A text rule
+  alone lost this collision four times — #1157, #1162, #1166 and #1180 each sat as a green,
+  conflict-free PR parked in draft, waiting for a button the owner was never going to press. That
+  is what `.github/workflows/pr-auto-ready.yml` was built to fix automatically (B781760), and it
+  **never once succeeded on a real PR.** `markPullRequestReadyForReview` and
+  `enablePullRequestAutoMerge` both came back FORBIDDEN ("Resource not accessible by integration")
+  for `GITHUB_TOKEN` in this repo, confirmed on real PRs under every credential/setting
+  combination there was to try (B793696): "Workflow permissions: Read and write" (on), "Allow
+  GitHub Actions to create and approve pull requests" (on), and the installed "Claude" GitHub App
+  (mechanically unusable from a workflow — it can only act as that App if it holds the App's
+  private key, and Anthropic, not this repo, holds this one). The owner reviewed the full evidence
+  2026-08-31 and declined the one remaining fix (a PAT or a self-owned GitHub App) — the manual
+  step costs him nothing, since a session already opens the PR itself. Reading that same evidence
+  again the same day, he then went further and had the workflow removed outright (B934400/
+  B934401): a permanently red job that cannot do either of its two jobs is worse than no job,
+  because it trains sessions to wave off red checks as environmental. **This was NOT the risk
+  being imagined away — it was tried for five days, confirmed dead by three separate live re-tests,
+  and removed because it never worked, not because the collision it was built for stopped
+  mattering.**
+  **`pr-auto-ready.yml` is DELETED. There is no automation here, and none is coming back without a
+  fresh, explicit owner go-ahead.** So, plainly:
+  - **The session that opens a PR is the one that marks it ready and arms the merge, every time,
+    as a normal, expected part of shipping "commit" — not a workaround, the standing way this
+    gets done.** Right after opening the PR, call the GitHub MCP tools directly:
+    `update_pull_request` with `draft:false`, then `enable_pr_auto_merge`.
+  - **The sanctioned way to ask the owner to look before a PR merges is the `hold` label (still a
+    real label in this repo's label list) or a `<!-- keep-draft -->` marker in the PR body.**
+    Nothing reads either automatically any more — the session opening the PR checks for one of
+    them itself, on its OWN PR, before calling `update_pull_request(draft:false)`, and leaves the
+    PR in draft if either is present.
+  - **If drafts start silently parking again, the fix is a DETECTOR, not another actuator and not
+    a PAT** — a read-only workflow that notices a still-draft `claude/*` PR with a green `build`
+    check and turns a check red about it needs no elevated token, because it only reads. Do not
+    rebuild `pr-auto-ready.yml`'s mutating shape without a fresh, explicit owner go-ahead.
   It only ever *enables* auto-merge; the required `build` check (below, and the nudge-commit
   note that follows it) still has to go green before anything actually merges.
 - **⛔ AFTER ANY CHANGE TO A PR TITLE — which every renumber causes — DISABLE AND RE-ENABLE
