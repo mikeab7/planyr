@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability, mayResumeLastSite } from "../src/workspaces/site-planner/lib/bootResume.js";
+import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability, mayResumeLastSite, resumeTargetAfterSignIn } from "../src/workspaces/site-planner/lib/bootResume.js";
 
 describe("initialBootResolved — the boot gate's starting value (V13)", () => {
   it("is FALSE when Supabase is configured (wait for the first auth + pull before reconciling the URL)", () => {
@@ -166,5 +166,72 @@ describe("mayResumeLastSite (B881664) — the Site Planner's boot-resume fallbac
   it("treats undefined/null projectId the same as each other on both sides", () => {
     expect(mayResumeLastSite({ initialHashEmpty: true, projectId: undefined, initialProjectId: null })).toBe(true);
     expect(mayResumeLastSite({ initialHashEmpty: true, projectId: null, initialProjectId: undefined })).toBe(true);
+  });
+});
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * B881664 (×2) — the SAME one-shot boot-resume privilege must gate the ASYNC resume
+ * `applyUser` runs after a signed-in cloud pull settles, not just `bootActiveId`'s
+ * synchronous decision. Owner live-verified the first fix on planyr.io and found the
+ * bounce WIDER than before — every tab, not just Schedule — because this second call
+ * site fell back to the last-touched-plan pointer unconditionally whenever the route
+ * named no project, with no privilege check at all. The apparent "logo doesn't bounce,
+ * breadcrumb does" discriminator was a red herring: both call the identical onDashboard
+ * handler; the real variable was whether SitePlannerApp's one-shot auth subscription had
+ * already fired on an earlier mount in that tab.
+ * ──────────────────────────────────────────────────────────────────────────── */
+describe("resumeTargetAfterSignIn (B881664 ×2) — the post-pull async resume respects the SAME boot privilege as bootActiveId", () => {
+  const plansOfGroup = (gid) => ({ g1: [{ id: "g1-newest" }, { id: "g1-older" }] }[gid] || []);
+  const has = (set) => (id) => set.has(id);
+
+  it("⛔ THE RECURRENCE REPRO — a later, deliberate Dashboard mount (resumeAllowed=false) does NOT fall back to the last-touched plan", () => {
+    // This is exactly the shape the owner measured: Dashboard reached from Library, no route
+    // project, but a stale currentSite pointer names a DIFFERENT project (Richfield) that was
+    // merely the most recently touched one, not the one the owner was routed away from.
+    expect(resumeTargetAfterSignIn({
+      routeProjectId: null, currentId: "smsdrvzr9gzx", plansOfGroup, hasSite: has(new Set(["smsdrvzr9gzx"])),
+      resumeAllowed: false,
+    })).toBe(null);
+  });
+
+  it("ALLOWS the legitimate case: a genuine cold boot onto the bare dashboard still resumes the last-open plan", () => {
+    expect(resumeTargetAfterSignIn({
+      routeProjectId: null, currentId: "last-open", plansOfGroup, hasSite: has(new Set(["last-open"])),
+      resumeAllowed: true,
+    })).toBe("last-open");
+  });
+
+  it("a routed project always resumes correctly regardless of resumeAllowed (opening a real project is always honest)", () => {
+    expect(resumeTargetAfterSignIn({
+      routeProjectId: "g1", currentId: "g1-older", plansOfGroup, hasSite: has(new Set(["g1-older"])),
+      resumeAllowed: false,
+    })).toBe("g1-older");
+    expect(resumeTargetAfterSignIn({
+      routeProjectId: "g1", currentId: "g1-older", plansOfGroup, hasSite: has(new Set(["g1-older"])),
+      resumeAllowed: true,
+    })).toBe("g1-older");
+  });
+
+  it("no route project, no privilege, no currentSite either → null either way", () => {
+    expect(resumeTargetAfterSignIn({
+      routeProjectId: null, currentId: null, plansOfGroup, hasSite: has(new Set()),
+      resumeAllowed: false,
+    })).toBe(null);
+  });
+
+  it("MUTATION PROOF — replays the exact pre-fix call (bare pickResumeTarget, no privilege gate) and shows it WOULD have resumed the stale pointer", () => {
+    // This is the defect itself, reproduced: the pre-fix code path (equivalent to
+    // resumeAllowed always true) resumes the last-touched plan even on a mount this
+    // component has no boot privilege for.
+    const preFixEquivalent = pickResumeTarget({
+      routeProjectId: null, currentId: "smsdrvzr9gzx", plansOfGroup, hasSite: has(new Set(["smsdrvzr9gzx"])),
+    });
+    expect(preFixEquivalent).toBe("smsdrvzr9gzx"); // the bug, proven present in the un-gated function
+    // The fixed call, same inputs, privilege correctly denied:
+    const fixed = resumeTargetAfterSignIn({
+      routeProjectId: null, currentId: "smsdrvzr9gzx", plansOfGroup, hasSite: has(new Set(["smsdrvzr9gzx"])),
+      resumeAllowed: false,
+    });
+    expect(fixed).toBe(null);
   });
 });
