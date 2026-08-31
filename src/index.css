@@ -670,3 +670,25 @@ kbd {
   border-top-left-radius: 0; border-top-right-radius: 0;
   border-bottom-left-radius: 0; border-bottom-right-radius: 0;
 }
+
+/* NEW-3 (map landing radius audit, 2026-08-31) — the "Find my location" control sits stacked
+ * directly above/below the zoom stack (both are `position: "bottomleft"`, and the locate control
+ * is deliberately added to the map FIRST so it renders below the zoom buttons — see its own
+ * comment in MapFinder.jsx) and is otherwise a plain Leaflet `.leaflet-bar`, so it rendered at
+ * Leaflet's vendor-default 4px while the zoom bar right beside it reads the app's 8px: two curves,
+ * touching, disagreeing. `.leaflet-control-locate` is a class MapFinder.jsx adds itself (Leaflet
+ * never names this control anything more specific than the generic "leaflet-bar leaflet-control"
+ * every control gets), so this rule is exactly as scoped as the zoom one above — Leaflet's other
+ * widgets, and any future control someone adds without this class, are untouched. */
+.leaflet-control-locate.leaflet-bar { border-radius: var(--radius-md); overflow: hidden; }
+/* Same specificity trap as the zoom control just above: Leaflet's OWN
+ * `.leaflet-touch .leaflet-bar a:first-child`/`:last-child` (2 classes + a pseudo-class + a type)
+ * outranks a plain `.leaflet-control-locate.leaflet-bar a` (2 classes + a type) — measured: without
+ * the `.leaflet-touch` variant written out here, the vendor rule kept winning and the button stayed
+ * at Leaflet's 2px touch default while the container above read the app's 8px. */
+.leaflet-touch .leaflet-control-locate.leaflet-bar a:first-child,
+.leaflet-touch .leaflet-control-locate.leaflet-bar a:last-child,
+.leaflet-control-locate.leaflet-bar a {
+  border-top-left-radius: 0; border-top-right-radius: 0;
+  border-bottom-left-radius: 0; border-bottom-right-radius: 0;
+}
