@@ -31,11 +31,11 @@ _Last updated: 2026-08-31._
       the live re-test (`V438336`, third re-run) got the identical FORBIDDEN error on a fresh throwaway PR
       with both settings on. **There is no remaining GitHub repository-settings hypothesis for this.**
 - [x] **Decide whether to add a PAT / GitHub App credential so the auto-ready workflow can actually mark a
-      PR ready and arm auto-merge itself** — DONE 2026-08-31, you declined. Nothing left on your plate for
-      this: sessions mark their own PRs ready and arm auto-merge themselves instead (costs you nothing),
-      and the workflow no longer fails its check over it — it reports the known case quietly and will speak
-      up on its own if it ever starts working (`B793696`/`B914449` in `BACKLOG.md`, closed as a known,
-      accepted, permanent limitation with a stopping rule — it only reopens on its own if that ever changes).
+      PR ready and arm auto-merge itself** — DONE 2026-08-31, you declined a second time, and this time went
+      further: the workflow itself is now **deleted**, not just silenced. `.github/workflows/pr-auto-ready.yml`
+      is gone (`B934400`/`B934402` in `BACKLOG-DONE.md`) — there's no job left to "speak up on its own if it
+      ever starts working." Nothing left on your plate: sessions mark their own PRs ready and arm auto-merge
+      themselves as the standing, permanent way this gets done, every time, with no automation to fall back on.
 - [ ] **Check whether `main` has a branch-protection rule set** (`github.com/mikeab7/planyr/settings/branches`)
       — a SEPARATE question from the two above (those are about un-drafting a PR; this is about arming
       auto-merge on one that's already ready). Found 2026-08-31 (`B897440`) while shipping PR #1245: even
