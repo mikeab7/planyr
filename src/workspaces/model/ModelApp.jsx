@@ -13,13 +13,29 @@
  * PERSISTENCE (lib/modelStore.js): local storage is the write-through save that works today,
  * signed in or not, migration or not. The cloud push rides the SAME guarded save path every
  * other cloud table in this repo uses (src/shared/cloud/serializeWrites.js +
- * optimisticUpsert.js) against a new `model_sheets` table (db/model_sheets.sql) — NOT yet
- * applied to production (this session's production access was read-only/SELECT-only), so it
- * degrades to "not-provisioned" and local storage carries the whole story until the owner
- * runs it. THERE IS NO CROSS-DEVICE MERGE IN V1: local wins whenever it exists; the cloud
+ * optimisticUpsert.js) against `model_sheets` (db/model_sheets.sql) — applied to production
+ * 2026-08-31. THERE IS NO CROSS-DEVICE MERGE IN V1: local wins whenever it exists; the cloud
  * copy is adopted only to seed a brand-new device that has never opened this project's model
- * before. A genuine two-device conflict (a version bump from elsewhere) surfaces as a small
- * banner rather than silently overwriting anything, and simply asks for a reload.
+ * before. A genuine two-device conflict DURING a save (another device bumped the version in the
+ * gap between this device's load and its own save) surfaces as a small banner rather than
+ * silently overwriting anything, and simply asks for a reload.
+ *
+ * ⛔ B891184-FOLLOWUP-2 (live production finding, 2026-08-31) — TWO further defects, both fixed
+ * here: (1) the cloud push silently failed on every first-ever save (modelStore.js's row never
+ * included `id`, a real NOT NULL violation on a table whose primary key is composite
+ * (user_id, id) — proven live against production) while the header kept showing a confident
+ * green "Synced" badge, because `modelSaveState` treated "idle" (nothing confirmed yet) the same
+ * as "confirmed synced." Fixed at the source (modelStore.js + optimisticUpsert.js) and the
+ * badge now only claims "Synced" once a real round trip (`cloudConfirmed`) has happened this
+ * session. (2) A DIFFERENT, still-open gap the CAS-conflict guard above does NOT cover: it only
+ * catches a race that happens DURING a save. If device B opens this project with its OWN older
+ * local copy while device A's newer content already sits in the cloud, B's load correctly reads
+ * cloud version N (so nothing double-books, no false conflict is raised) but then keeps
+ * SHOWING B's stale local content (by the "local always wins on load" rule above) — B's next
+ * edit saves cleanly at version N→N+1, silently overwriting A's work with no warning, since
+ * nothing in the CAS check knows the CONTENT diverged, only the version. That is now DETECTED
+ * at load (`status: "diverged"`, a loud red badge + an explicit banner) — v1 still doesn't
+ * merge, but it can no longer clobber another device's saved work in total silence.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppHeader, { useNarrow } from "../../shared/ui/AppHeader.jsx";
@@ -29,7 +45,7 @@ import NumberFormatPicker from "./components/NumberFormatPicker.jsx";
 import { useUndoableState } from "./lib/undoStack.js";
 import {
   createSheet, migrateSheet, commitCellText, blankRange, renameColumn, setNumberFormat,
-  deleteColumn, addColumn, formatAt, padRowCount,
+  deleteColumn, addColumn, formatAt, padRowCount, sheetsDiverge,
 } from "./lib/sheetModel.js";
 import { evaluateSheet } from "./lib/sheetEngine.js";
 import { copyRange, pasteRange, fillDown } from "./lib/sheetOps.js";
@@ -64,7 +80,12 @@ export default function ModelApp({
   const { value: sheet, commit, undo, redo, reset, canUndo, canRedo } = useUndoableState(createSheet());
   const [selRange, setSelRange] = useState({ r1: 0, r2: 0, c1: 0, c2: 0 });
   const [ready, setReady] = useState(false);
-  const [status, setStatus] = useState("idle"); // idle | saving | saved | error | conflict | not-provisioned
+  const [status, setStatus] = useState("idle"); // idle | saving | saved | error | conflict | not-provisioned | diverged
+  // Whether a REAL cloud round trip (a successful load or a successful save) has happened this
+  // session for the CURRENT project. Distinct from `status`, which can be "idle" — meaning
+  // nothing failed but nothing was ever confirmed either — the exact ambiguity that used to let
+  // the badge claim "Synced" for a project that had never actually reached the cloud.
+  const [cloudConfirmed, setCloudConfirmed] = useState(false);
   const cloudVersionRef = useRef(null);
   const pushTimer = useRef(0);
   const loadTokenRef = useRef(0);
@@ -93,6 +114,7 @@ export default function ModelApp({
     const token = loadTokenRef.current;
     cloudVersionRef.current = null;
     setStatus("idle");
+    setCloudConfirmed(false);
     if (!openProject) { reset(createSheet()); setReady(false); return undefined; }
     const local = readLocalSheet(userId, projectId);
     reset(local ? migrateSheet(local) : createSheet());
@@ -103,7 +125,19 @@ export default function ModelApp({
       if (!live || loadTokenRef.current !== token) return;
       if (r.ok) {
         cloudVersionRef.current = r.version;
-        if (!local && r.sheet) reset(migrateSheet(r.sheet));
+        setCloudConfirmed(true);
+        if (!local && r.sheet) {
+          reset(migrateSheet(r.sheet));
+        } else if (local && r.sheet) {
+          // Both a local copy AND a saved cloud copy exist. "Local always wins on load" (the
+          // file header) means this device keeps showing ITS content — but if that content
+          // actually differs from what's in the cloud, the very next edit will silently
+          // overwrite the cloud copy at a clean version bump (no CAS conflict, because nothing
+          // raced — this device's `cloudVersionRef` is genuinely current). That is a real
+          // second-device data-loss path, not a hypothetical one, so it is surfaced loudly
+          // rather than left to happen quietly.
+          if (sheetsDiverge(migrateSheet(local), migrateSheet(r.sheet))) setStatus("diverged");
+        }
       } else if (r.reason === "not-provisioned") {
         setStatus("not-provisioned");
       }
@@ -129,7 +163,7 @@ export default function ModelApp({
     pushTimer.current = setTimeout(async () => {
       setStatus("saving");
       const r = await saveCloudSheet({ uid: userId, projectId, sheet, expected: cloudVersionRef.current });
-      if (r.ok) { cloudVersionRef.current = r.version; setStatus("saved"); }
+      if (r.ok) { cloudVersionRef.current = r.version; setCloudConfirmed(true); setStatus("saved"); }
       else if (r.reason === "not-provisioned") setStatus("not-provisioned");
       else if (r.reason === "conflict") setStatus("conflict");
       else if (r.reason === "unavailable") setStatus("idle");
@@ -204,8 +238,13 @@ export default function ModelApp({
         onNewProject={onNewProject}
         authControl={authControl}
         accountActive={accountActive}
-        saveState={openProject ? modelSaveState(status, accountActive) : null}
-        saveDetail={status === "not-provisioned" ? "Cloud backup for Model isn't turned on yet — saved on this device only." : status === "conflict" ? "This model changed elsewhere — reload to see the latest (your edits here stayed on this device)." : undefined}
+        saveState={openProject ? modelSaveState(status, accountActive, cloudConfirmed) : null}
+        saveDetail={
+          status === "not-provisioned" ? "Cloud backup for Model isn't turned on yet — saved on this device only."
+          : status === "conflict" ? "This model changed elsewhere — reload to see the latest (your edits here stayed on this device)."
+          : status === "diverged" ? "This model has different content saved from another device or browser. What you see here is safe on this device, but saving here will overwrite that other copy. Reload without editing first if you want the other copy instead."
+          : undefined
+        }
         multiEditOk
         toolbarContent={openProject ? (
           <div style={{ display: "flex", alignItems: "center", gap: narrow ? 4 : 8 }}>

@@ -68,6 +68,14 @@ import { centerSlotPlan, CENTER_SLOT_GAP } from "./headerCenterFit.js";
 const CHROME = "var(--chrome-bg-elev)";
 const LINE   = "var(--chrome-divider)";
 
+// NEW-2 (B915536) — a LITERAL duplicate of designTokens.js's FONT_SIZE.control, not an import:
+// this file is in the shared ENTRY chunk (every route downloads it, per this file's own B1429
+// note above), and importing designTokens.js for the sake of one small object measurably ate the
+// route budget — bundle.notesRouteJsBytes went from 0.5 KB to 0.2 KB of headroom against its
+// ceiling. Same reasoning, same shape as controls.jsx's own RADIUS/FONT/PAD literal-duplicate
+// note. If FONT_SIZE.control ever changes, change it here too.
+const CHROME_FONT_CONTROL = 12; // design-exempt: literal duplicate of FONT_SIZE.control — see the comment above
+
 // B1173(×2) — how long the "your browser wouldn't allow full screen" notice stays up. Long enough
 // to read, short enough that it never becomes furniture.
 const FS_NOTICE_MS = 5000;
@@ -141,6 +149,10 @@ function FullscreenButton({ active, onToggle }) {
         display: "grid", placeItems: "center", width: 30, height: 26, borderRadius: RADIUS.md,
         border: `1px solid ${LINE}`, background: "var(--chrome-bg)", color: "var(--chrome-text)",
         cursor: "pointer", flex: "none",
+        // NEW-2 (B915536) — an icon-only button rendering no text falls through to the browser's
+        // own form-control default (off-scale) with no visual effect at all; an explicit on-scale
+        // value here is a zero-risk fix (nothing reads it) rather than a documented exception.
+        fontSize: CHROME_FONT_CONTROL,
       }}
     >
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -171,6 +183,7 @@ function SettingsMenu() {
           display: "grid", placeItems: "center", width: 30, height: 26, borderRadius: RADIUS.md,
           border: `1px solid ${LINE}`, background: "var(--chrome-bg)", color: "var(--chrome-text)",
           cursor: "pointer", flex: "none",
+          fontSize: CHROME_FONT_CONTROL, // NEW-2 (B915536) — inert (icon-only), see FullscreenButton above
         }}
       >
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -337,7 +350,10 @@ function ModuleTab({ m, isActive, onClick }) {
         borderBottom: `2px solid ${isActive ? fill : "transparent"}`,
         background: "transparent",
         color: isActive || hover ? textCol : TAB_IDLE,
-        fontFamily: "inherit", fontSize: 11.5,
+        // NEW-2 (B915536) — was 11.5, off-scale after the FONT_SIZE reduction. The top-level
+        // workspace switcher is the app's own primary navigation, so it takes CHROME_FONT_CONTROL
+        // (the same default every standard control uses) rather than a smaller, one-off value.
+        fontFamily: "inherit", fontSize: CHROME_FONT_CONTROL,
         fontWeight: isActive ? 600 : 500,
         cursor: "pointer", whiteSpace: "nowrap",
         transition: "color 0.15s, border-color 0.15s",
@@ -842,6 +858,9 @@ export default function AppHeader({
               background: "transparent", border: "none",
               cursor: onDashboard ? "pointer" : "default",
               padding: "2px 4px", borderRadius: RADIUS.sm,
+              // NEW-2 (B915536) — inert: BrandMark's own wordmark span sets its own explicit
+              // fontSize, so this never reached the page; an on-scale value costs nothing.
+              fontSize: CHROME_FONT_CONTROL,
             }}
           >
             {/* Phone: just the mark (no wordmark) — reclaims width so the breadcrumb + switcher fit.
@@ -1028,12 +1047,12 @@ export default function AppHeader({
     {/* B1173(×2) — LOUD-FAILURE for a refused fullscreen request. With no chrome-hide fallback
         left, a rejection would otherwise be a keypress that visibly does nothing. */}
     {fsNotice && (
-      <div role="status" data-testid="fullscreen-refused" style={{ position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: "min(440px, calc(100vw - 16px))", background: "var(--surface-raised)", color: "var(--text-primary)", border: "1px solid var(--warn-text)", borderRadius: RADIUS.lg, padding: "5px 10px", fontSize: 11.5, fontFamily: "system-ui, sans-serif", boxShadow: "0 4px 16px rgba(0,0,0,0.22)" }}>
+      <div role="status" data-testid="fullscreen-refused" style={{ position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: "min(440px, calc(100vw - 16px))", background: "var(--surface-raised)", color: "var(--text-primary)", border: "1px solid var(--warn-text)", borderRadius: RADIUS.lg, padding: "5px 10px", fontSize: CHROME_FONT_CONTROL, fontFamily: "system-ui, sans-serif", boxShadow: "0 4px 16px rgba(0,0,0,0.22)" }}>
         {fsNotice}
       </div>
     )}
     {accountActive && multiTab.conflictRisk && !multiTabDismissed && (
-      <div role="status" style={{ position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: "min(440px, calc(100vw - 16px))", display: "flex", alignItems: "flex-start", gap: 7, background: "var(--surface-raised)", color: "var(--text-primary)", border: "1px solid var(--warn-text)", borderRadius: RADIUS.lg, padding: "5px 6px 5px 10px", fontSize: 11.5, fontFamily: "system-ui, sans-serif", boxShadow: "0 4px 16px rgba(0,0,0,0.22)" }}>
+      <div role="status" style={{ position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: "min(440px, calc(100vw - 16px))", display: "flex", alignItems: "flex-start", gap: 7, background: "var(--surface-raised)", color: "var(--text-primary)", border: "1px solid var(--warn-text)", borderRadius: RADIUS.lg, padding: "5px 6px 5px 10px", fontSize: CHROME_FONT_CONTROL, fontFamily: "system-ui, sans-serif", boxShadow: "0 4px 16px rgba(0,0,0,0.22)" }}>
         <span aria-hidden="true" style={{ color: "var(--warn-text)", fontWeight: 700, lineHeight: 1.5 }}>⧉</span>
         <span style={{ lineHeight: 1.4, paddingTop: 1 }}>
           Also open in <b>another tab</b> — that tab is the active editor; this one is read-only until you switch there or close it.

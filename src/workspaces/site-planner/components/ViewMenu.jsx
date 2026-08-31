@@ -53,6 +53,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { RADIUS } from "../../../shared/ui/radius.js";
+import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import {
   isHidden, groupState, setVisible, setManyVisible, showAll, groupsFor, hiddenSummary,
 } from "../lib/contentVisibility.js";
@@ -99,7 +100,7 @@ function GridNumInput({ value, min = 1, max = 1000, style, onCommit }) {
 }
 
 export default function ViewMenu({ open, onToggle, settings, setSnap, patchSettings, pal, counts, elementsReady = true }) {
-  const row = { display: "flex", gap: 7, alignItems: "center", cursor: "pointer", fontSize: 12.5, color: pal.ink, padding: "3px 0" };
+  const row = { display: "flex", gap: 7, alignItems: "center", cursor: "pointer", fontSize: FONT_SIZE.control, color: pal.ink, padding: "3px 0" };
   const numInput = { width: 52, padding: "4px 6px", fontSize: 12, fontFamily: "inherit", color: pal.ink, background: "var(--surface-raised)", border: `1px solid ${pal.panelLine}`, borderRadius: RADIUS.sm };
   const sectionHead = { fontSize: 9.5, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: pal.muted, margin: "9px 0 3px" };
   const countStyle = { fontSize: 10, color: pal.muted, flex: "none", fontVariantNumeric: "tabular-nums" };
@@ -125,7 +126,7 @@ export default function ViewMenu({ open, onToggle, settings, setSnap, patchSetti
     <div data-wheelscroll="1" style={{ width: open ? 232 : "auto", background: "var(--surface-overlay)", border: `1px solid ${pal.panelLine}`, borderRadius: RADIUS.md, boxShadow: "0 2px 10px rgba(28,25,20,0.16)", overflow: "hidden" }}>
       <button data-testid="view-menu-btn" onClick={onToggle} aria-expanded={open}
         title="What's shown on this drawing — hide groups temporarily, plus grid & snap"
-        style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "8px 11px", border: "none", background: "transparent", color: pal.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700 }}>
+        style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "8px 11px", border: "none", background: "transparent", color: pal.ink, cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 700 }}>
         <span style={{ color: summary ? "var(--warn-text)" : pal.accent, display: "inline-flex" }}>{summary ? <EyeOffIcon /> : <EyeIcon />}</span> View
         {/* ⛔ THE FILTERED-VIEW CHIP. The owner's requirement: "if something is hidden, the owner
             must be able to tell at a glance that he is looking at a filtered view rather than an

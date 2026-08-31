@@ -6,6 +6,7 @@
  * zoom. Lazy-loaded by the shell.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { FONT_SIZE } from "../../shared/ui/designTokens.js";
 import { loadPdf, renderInto, extractPageItems } from "./lib/pdf.js";
 import { ocgLayerList, deriveLayerVisibility } from "./lib/ocg.js";
 import { reorderWithinPage, arrangeFlags } from "./lib/arrange.js";
@@ -2276,19 +2277,19 @@ export default function DocReview({
             <div style={{ fontSize: 12, marginBottom: 14 }}>Calibrate to scale, measure distance/area/count, redline, and roll up a takeoff.</div>
             <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
               <button data-testid="empty-open-library" onClick={() => onShellSwitch?.("library")}
-                style={{ fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer", borderRadius: RADIUS.md, padding: "7px 14px", border: "1px solid var(--accent-library)", background: "var(--accent-library)", color: "var(--on-accent-library)" }}>
+                style={{ fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 700, cursor: "pointer", borderRadius: RADIUS.md, padding: "7px 14px", border: "1px solid var(--accent-library)", background: "var(--accent-library)", color: "var(--on-accent-library)" }}>
                 🗂 Browse the Library
               </button>
               <button onClick={() => fileRef.current?.click()}
-                style={{ fontFamily: "inherit", fontSize: 12.5, fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, padding: "7px 14px", border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-secondary)" }}>
+                style={{ fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, padding: "7px 14px", border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-secondary)" }}>
                 Open PDF…
               </button>
               <button data-testid="empty-compare" onClick={() => { setErr(""); compareInputRef.current?.click(); }}
-                style={{ fontFamily: "inherit", fontSize: 12.5, fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, padding: "7px 14px", border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-secondary)" }}>
+                style={{ fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, padding: "7px 14px", border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-secondary)" }}>
                 ⇄ Compare revisions…
               </button>
             </div>
-            {err && <div style={{ color: "var(--danger-text)", marginTop: 10, fontSize: 12.5 }}>{err}</div>}
+            {err && <div style={{ color: "var(--danger-text)", marginTop: 10, fontSize: FONT_SIZE.control }}>{err}</div>}
           </div>
           {openingOverlay}
         </div>

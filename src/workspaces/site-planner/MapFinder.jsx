@@ -211,7 +211,7 @@ const COMPS_LAYERS_COLLAPSED_W = 152;
 const MAP_CORNER_CHIP_STYLE = {
   height: CONTROL_H.lg, minWidth: COMPS_LAYERS_COLLAPSED_W, padding: "0 12px", borderRadius: RADIUS.md,
   border: `1px solid ${PAL.panelLine}`, background: "var(--surface-raised)",
-  color: PAL.ink, fontSize: FONT_SIZE.xl, fontWeight: 600, textTransform: "none", letterSpacing: "normal",
+  color: PAL.ink, fontSize: FONT_SIZE.control, fontWeight: 600, textTransform: "none", letterSpacing: "normal",
   cursor: "pointer", fontFamily: "inherit", boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
 };
 
@@ -496,7 +496,7 @@ function RailTab({ label, count, active, onClick }) {
       height: CONTROL_H.sm, padding: "0 8px", borderRadius: nestedIn(RADIUS.lg, 6), border: "none",
       background: active ? "var(--surface-raised)" : "transparent",
       color: active ? "var(--text-primary)" : "var(--text-secondary)",
-      fontSize: 11.5, fontWeight: active ? 700 : 600, cursor: "pointer", fontFamily: "inherit",
+      fontSize: FONT_SIZE.control, fontWeight: active ? 700 : 600, cursor: "pointer", fontFamily: "inherit",
     }}>
       {label}<span style={{ color: active ? "var(--text-primary)" : "var(--text-tertiary)" }}>{count}</span>
     </button>
@@ -2785,7 +2785,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                   borderTopLeftRadius: nestedIn(RADIUS.lg, 6), borderBottomLeftRadius: nestedIn(RADIUS.lg, 6),
                   borderTopRightRadius: 0, borderBottomRightRadius: 0,
                   border: "1px solid var(--accent)", borderRight: "1px solid var(--on-accent)",
-                  background: "var(--accent)", color: "var(--on-accent)", fontSize: 12.5, fontWeight: 700,
+                  background: "var(--accent)", color: "var(--on-accent)", fontSize: FONT_SIZE.control, fontWeight: 700,
                   cursor: "pointer", fontFamily: "inherit",
                 }}
               >
@@ -2803,7 +2803,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                   borderTopRightRadius: nestedIn(RADIUS.lg, 6), borderBottomRightRadius: nestedIn(RADIUS.lg, 6),
                   borderTopLeftRadius: 0, borderBottomLeftRadius: 0,
                   border: "1px solid var(--accent)", background: "var(--accent)", color: "var(--on-accent)",
-                  fontSize: FONT_SIZE.xs, cursor: "pointer", fontFamily: "inherit",
+                  fontSize: FONT_SIZE.micro, cursor: "pointer", fontFamily: "inherit",
                   display: "flex", alignItems: "center", justifyContent: "center",
                 }}
               >▾</button>
@@ -3003,7 +3003,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               <button onClick={() => { if (narrow && !sitesPanelOpen) setLayersPanelOpen(false); toggleSitesPanel(); }}
                 title={sitesPanelOpen ? "Collapse the sites panel" : "Expand the sites panel"}
                 style={{ flex: "none", width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center",
-                  background: "transparent", border: "none", cursor: "pointer", color: PAL.muted, borderRadius: nestedIn(RADIUS.lg, 6) }}>
+                  background: "transparent", border: "none", cursor: "pointer", color: PAL.muted, borderRadius: nestedIn(RADIUS.lg, 6),
+                  fontSize: FONT_SIZE.control }}>
                 <span style={{ fontSize: 8, lineHeight: 1, transform: sitesPanelOpen ? "none" : "rotate(-90deg)", display: "inline-block" }}>▼</span>
               </button>
               <RailTab label="Sites" count={nf ? `${shownCount}/${sites.length}` : sites.length}
@@ -3021,7 +3022,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                 style={{ flex: 1, minWidth: 0, boxSizing: "border-box", padding: "5px 8px", fontSize: 12, border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.sm, color: PAL.ink, background: "var(--surface-raised)", fontFamily: "inherit", outline: "none" }} />
               <select value={sitesPanelPrefs.sort} onChange={(e) => setSitesSort(e.target.value)} aria-label="Sort sites within each group"
                 title="Sort — applies within each group, not across groups"
-                style={{ flex: "none", boxSizing: "border-box", padding: "5px 6px", fontSize: 11, border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.sm, color: PAL.ink, background: "var(--surface-raised)", fontFamily: "inherit", outline: "none" }}>
+                style={{ flex: "none", boxSizing: "border-box", padding: "5px 6px", fontSize: FONT_SIZE.control, border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.sm, color: PAL.ink, background: "var(--surface-raised)", fontFamily: "inherit", outline: "none" }}>
                 <option value="largest">Largest first</option>
                 <option value="az">A–Z</option>
                 <option value="recent">Recently touched</option>
@@ -3047,15 +3048,17 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                       <div onMouseEnter={() => setHoverGroup(st)} onMouseLeave={() => setHoverGroup((g) => (g === st ? null : g))}
                         style={{ display: "flex", alignItems: "center", background: "var(--surface-raised)", borderTop: `1px solid ${PAL.panelLine}` }}>
                         <button onClick={() => toggleGroup(st)} title={collapsed ? "Expand" : "Collapse"}
-                          style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6, background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", padding: "4px 4px 4px 12px" }}>
+                          style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6, background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", padding: "4px 4px 4px 12px", fontSize: FONT_SIZE.control }}>
                           <span style={{ fontSize: 8, lineHeight: 1, transform: collapsed ? "rotate(-90deg)" : "none", display: "inline-block", color: PAL.muted }}>▼</span>
-                          {/* Solid status disc, matching the map pin (B433). */}
-                          <span style={{ width: 14, height: 14, flex: "none", display: "grid", placeItems: "center", borderRadius: RADIUS.pill, background: t.color, color: "#fff", fontSize: 8.5, lineHeight: 1 }}>{t.glyph}</span>
-                          <span style={{ flex: 1, textAlign: "left", fontSize: 11, fontWeight: 700, color: PAL.ink, textDecoration: t.struck ? "line-through" : "none" }}>{STATUS_META[st]?.label || st}</span>
+                          {/* Solid status disc, matching the map pin (B433). NEW-2 (B915536) — was
+                              8.5 (off-scale); a single-digit glyph in a ~14px pill dot, same
+                              rationale as the header account pill's own count badge. */}
+                          <span style={{ width: 14, height: 14, flex: "none", display: "grid", placeItems: "center", borderRadius: RADIUS.pill, background: t.color, color: "#fff", fontSize: FONT_SIZE.micro, lineHeight: 1 }}>{t.glyph}</span>
+                          <span style={{ flex: 1, textAlign: "left", fontSize: FONT_SIZE.control, fontWeight: 700, color: PAL.ink, textDecoration: t.struck ? "line-through" : "none" }}>{STATUS_META[st]?.label || st}</span>
                           {/* B845089 — the acreage total dropped from this line: "if acreage is not
                               the criterion, a sum of it is not either" (this session's call, not the
                               owner's words — easy to reverse if he wants it back). */}
-                          <span style={{ color: PAL.muted, fontWeight: 700, fontSize: 11 }}>{rows.length}</span>
+                          <span style={{ color: PAL.muted, fontWeight: 700, fontSize: FONT_SIZE.label }}>{rows.length}</span>
                         </button>
                         {/* NEW-3 — the drag handle: quiet at rest, shown on hover/focus, and a
                             focusable control so arrow-key reorder doesn't need a visible drag to
@@ -3069,7 +3072,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                             if (e.key === "ArrowUp") { e.preventDefault(); moveGroup(st, -1); }
                             else if (e.key === "ArrowDown") { e.preventDefault(); moveGroup(st, 1); }
                           }}
-                          style={{ flex: "none", width: 17, height: 17, marginRight: 4, display: "grid", placeItems: "center", background: "transparent", border: "none", borderRadius: RADIUS.sm, cursor: "grab", color: PAL.muted, opacity: hoverGroup === st ? 1 : 0, transition: "opacity .12s" }}>
+                          style={{ flex: "none", width: 17, height: 17, marginRight: 4, display: "grid", placeItems: "center", background: "transparent", border: "none", borderRadius: RADIUS.sm, cursor: "grab", color: PAL.muted, opacity: hoverGroup === st ? 1 : 0, transition: "opacity .12s", fontSize: FONT_SIZE.control }}>
                           <svg width="9" height="13" viewBox="0 0 9 13" fill="currentColor" aria-hidden="true">
                             <circle cx="2" cy="1.8" r="1.2" /><circle cx="7" cy="1.8" r="1.2" />
                             <circle cx="2" cy="6.5" r="1.2" /><circle cx="7" cy="6.5" r="1.2" />

@@ -31,11 +31,27 @@
 // without changing what anything currently renders at: pick the tier nearest an existing height.
 export const CONTROL_H = { sm: 22, md: 26, lg: 30 };
 
-// Type scale — the app's buttons already run a fine, half-point ladder (10 through 14). The six
-// steps below are every value used 10+ times on a <button> alone, kept as six rather than forced
-// down to three or four: collapsing "10.5 vs 11 vs 11.5" onto one number is exactly the kind of
-// judgement call PANEL-BREVITY and this item's own brief say to flag rather than decide silently.
-export const FONT_SIZE = { xs: 10, sm: 10.5, base: 11, md: 11.5, lg: 12, xl: 12.5, xxl: 13, display: 14 };
+// Type scale — REDUCED to 5 named ROLES (B915536's NEW-1, 2026-08-31), superseding the previous
+// eight-value half-point ladder below. That ladder was audited-not-invented, but eight values
+// including four half-steps was "a menu wide enough that almost anything looks legal and nothing
+// has a defined role" (owner-adjacent finding after a quick font fix traded one wrong size for
+// another and was correctly backed out — see docs/UI-INVENTORY.md's history). Each step now names
+// what it is FOR, not just a rung on a ladder:
+//   micro    10    tiny numerals/decorative glyphs — count badges, a single digit in a pill dot,
+//                  a compact segmented-toggle label. Never running text.
+//   label    10.5  uppercase section headers (weight 700, ~0.08em letter-spacing — see Section's
+//                  title in controls.jsx) AND secondary/hint text under a primary control or value.
+//                  The one deliberate half-step kept: it was already the app's own worked example
+//                  for text hierarchy (root CLAUDE.md's KEY DECISIONS).
+//   control  12    the default, workhorse control/body text — buttons, menu items, field values,
+//                  inputs, most running UI text. Reachable via controls.jsx's FONT.md.
+//   emphasis 13    a step up in weight for content that needs to stand out without being a
+//                  headline — a larger button, a panel's primary number, a callout.
+//   display  14    page/hero headlines — the one biggest size in the app (e.g. the /design
+//                  gallery's own <h1>).
+// Superseded ladder (kept here for history, do not resurrect): xs 10 / sm 10.5 / base 11 /
+// md 11.5 / lg 12 / xl 12.5 / xxl 13 / display 14.
+export const FONT_SIZE = { micro: 10, label: 10.5, control: 12, emphasis: 13, display: 14 };
 
 // Spacing scale — a conventional 2px-rooted ladder matching the most common padding numbers
 // measured on <button> elements (2/3/4/6/7/8/9/10/11/12/14/16 all appear repeatedly). Use these

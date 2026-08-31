@@ -86,13 +86,10 @@
   --space-lg: 10px;
   --space-xl: 12px;
   --space-xxl: 16px;
-  --font-xs: 10px;
-  --font-sm: 10.5px;
-  --font-base: 11px;
-  --font-md: 11.5px;
-  --font-lg: 12px;
-  --font-xl: 12.5px;
-  --font-xxl: 13px;
+  --font-micro: 10px;
+  --font-label: 10.5px;
+  --font-control: 12px;
+  --font-emphasis: 13px;
   --font-display: 14px;
   --control-h-sm: 22px;
   --control-h-md: 26px;
