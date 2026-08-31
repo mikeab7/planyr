@@ -185,3 +185,5 @@ jobs:
                 throw err;
               }
             }
+
+# no-op: throwaway verification probe for V438336, 20260831-001137
