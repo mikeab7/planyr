@@ -114,6 +114,33 @@ const loadingRow = (key, label) => finish({ key, label, pill: "…", tone: "neut
  * renderer swaps this text for "checking…" for the span of a REAL fetch via `v.recheck &&
  * drainRefreshing`, so the genuinely-loading case still reads as loading). */
 const notCheckedRow = (key, label) => finish({ key, label, pill: "…", tone: "neutral", sentence: "not checked yet", recheck: true, sortRank: 3 });
+/* B853264 (×3) — the THIRD site the same "checking flood data" defect class was found at, this
+ * time via a Michael-requested dedupe search rather than a report. Proven by tracing the source,
+ * not by inference: `pondLedger.usableCf` (Detention's own provided figure) and
+ * `pondLedger.creditedMitCf` (Mitigation's provided figure) are BOTH nulled by the exact same rule
+ * in `accumulatePondLedgerUncached` (lib/pondLedger.js) — any pond whose split facts didn't survive
+ * into a restored/reloaded session (`factsKnown: false`, `SitePlanner.jsx`'s `pondSplitFor`, only
+ * reachable when a check ran, the plan was reloaded, and a pond has no persisted split record — e.g.
+ * one drawn after the last check). There is NO other way either field goes null once a requirement/
+ * ledger has resolved and `floodChecked` is true — the pond ledger is pure, synchronous math with no
+ * async gap, so `loadingRow`'s "still catching up" framing never actually applied here. Proof this
+ * is the same bug class: `SitePlanner.jsx`'s own closed-face chip ALREADY has honest, named wording
+ * for both exact states ("NEW-9 — usable split unknown on a remembered view" → `RE-CHECK` for
+ * Detention; `"provided unknown"` / `RE-CHECK` for Mitigation) while the top strip still said
+ * "checking flood data" for both. */
+const pondFactsUnknownRow = (key, label) => finish({ key, label, pill: "…", tone: "warn", sentence: "pond details unknown", recheck: true, sortRank: 3 });
+/* NEW-6 — a GENUINELY unresolved mitigation state (not a fetch in progress): the
+ * flood geometry stands but a required elevation input (BFE / pad FFE / existing grade) never
+ * resolved, or the last check predates the drawn area with no last-good to hold. Mirrors the
+ * ALREADY-SHIPPED "closed face" chip (SitePlanner.jsx's own `mitVerdict`/`mitChip` derivation —
+ * "volume unknown" / "N/A") and the open detail group's "Mitigation volume UNKNOWN — {reason}"
+ * row, neither of which was ever wrong — only the top-line verdict strip fell through to the
+ * generic `loadingRow` and stuck there forever, because nothing was actually fetching. */
+const unresolvedMitigationRow = (reason) => finish({
+  key: "mit", label: "Mitigation", pill: "N/A", tone: "warn",
+  sentence: reason ? `volume unknown: ${reason}` : "volume unknown",
+  unavailable: true, loading: false, short: false, action: false, sortRank: 2.5,
+});
 const okRow = (key, label, sentence) => finish({ key, label, pill: "OK", tone: "good", sentence, sortRank: 2 });
 const pairRow = (key, label, provided, required, short, opts = {}) => {
   // NEW-16 display invariant: a SHORT pair must NEVER show two identical numbers (the
@@ -237,11 +264,13 @@ function detentionVerdict(d) {
   // or one that otherwise lost it) resolves `requiredAcFt` while `floodChecked` correctly stays
   // false — reproducing the owner's Richfield report (header "not checked", Detention "checking
   // flood data") even though nothing was fetching. So this branch gets the same guard as the one
-  // above: only a GENUINE loading state (a check has run; the pond-volume leg is still catching
-  // up — see the LOADING test) may say "checking flood data".
+  // above.
+  // B853264 (×3) — and once `floodChecked` IS true, `usableAcFt == null` is NEVER genuine loading
+  // (see `pondFactsUnknownRow`'s header): it is exclusively a pond whose split facts didn't survive
+  // into this restored session. Honest + a real ↻ affordance, never a claimed in-flight fetch.
   if (usableAcFt == null) {
     if (!d.floodChecked) return notCheckedRow("det", "Detention");
-    return loadingRow("det", "Detention");
+    return pondFactsUnknownRow("det", "Detention");
   }
   const short = usableAcFt < requiredAcFt - EPS || inundated;
   const v = pairRow("det", "Detention", usableAcFt, requiredAcFt, short, { thinOverrides: d.thinMarginPct, pctFloorAcFt: d.marginPctFloorAcFt });
@@ -261,7 +290,11 @@ function detentionVerdict(d) {
 
 function mitigationVerdict(d) {
   const mitV = d.mitigation;
-  if (d.mitStalePending) return loadingRow("mit", "Mitigation");
+  // NEW-6 — the drawn geometry outgrew the last fetch and no last-good volume has been
+  // captured yet (see SitePlanner.jsx's `drainMitDisplay`/NEW-2). A real refresh isn't running by
+  // itself (checks are manual-only, per NEW-4) — nothing is "checking", so this must never say so;
+  // the header's own freshness line carries the re-check affordance for this exact state (B867).
+  if (d.mitStalePending) return unresolvedMitigationRow(null);
   const notRequired = () => okRow("mit", "Mitigation", "not required");
   if (mitV && mitV.intersectAcres === 0) return notRequired();
   if (d.floodGeo && d.floodGeo.state === "loaded" && d.floodGeo.zoneCount === 0) return notRequired();
@@ -276,7 +309,10 @@ function mitigationVerdict(d) {
         trace: isTrace, traceAcFt: isTrace ? mitV.volumeAcFt : null, sortRank: 2 });
     }
     const provCf = d.mitProvided ? d.mitProvided.creditedCf : 0;
-    if (provCf == null) return loadingRow("mit", "Mitigation");
+    // B908944 (×2) — same root cause as `pondFactsUnknownRow` above: `d.mitProvided.creditedCf` is
+    // `pondLedger.creditedMitCf`, nulled by the identical `factsKnown:false` rule. Never genuine
+    // loading. Matches the closed-face chip's own "provided unknown" / RE-CHECK for this state.
+    if (provCf == null) return pondFactsUnknownRow("mit", "Mitigation");
     if (mitV.flags && mitV.flags.includes("floodway_intersect")) {
       return finish({ key: "mit", label: "Mitigation", pill: "SHORT", tone: "danger", sentence: "fill in the floodway (stop)", short: true, action: true, sortRank: 0 });
     }
@@ -311,7 +347,23 @@ function mitigationVerdict(d) {
     return row;
   }
   if (mitV && mitV.intersectAcres === 0) return notRequired();
-  if (mitV || d.mitRememberedMissing || (d.floodGeo && d.floodGeo.state === "failed")) return loadingRow("mit", "Mitigation");
+  // NEW-6 — real geometry, real intersect acreage, but the VOLUME never resolved: a
+  // missing elevation input (floodplainMitigation.js's `unknownReason` — no published BFE, no
+  // pad FFE entered, no existing-grade source), not a fetch in progress. The open detail group
+  // already says "Mitigation volume UNKNOWN — {reason}" for exactly this case; the strip is now
+  // the same honest state instead of an eternal "checking flood data".
+  if (mitV && mitV.intersectAcres > 0) return unresolvedMitigationRow(mitV.unknownReason);
+  // NEW-6 — a restored (remembered) check with no restorable mitigation ledger. Same wording
+  // as the closed-face chip's own verdict below (SitePlanner.jsx) for this exact state — a real
+  // ↻ re-check would compute it, so this row keeps the recheck affordance. (PANEL-BREVITY: the
+  // detail group's longer "not screened in this remembered view" row already exists below and
+  // is not repeated here — state a fact once.)
+  if (d.mitRememberedMissing) return finish({ key: "mit", label: "Mitigation", pill: "…", tone: "warn", sentence: "not screened", recheck: true, sortRank: 3 });
+  // NEW-6 — the flood-geometry source itself failed this check (an outage), never a
+  // fabricated all-clear. A ↻ retry can genuinely resolve it.
+  if (d.floodGeo && d.floodGeo.state === "failed") return finish({ key: "mit", label: "Mitigation", pill: "…", tone: "warn", sentence: "flood source down", recheck: true, sortRank: 3 });
+  // Defensive backstop only — every reachable `mitV` shape above already has an honest branch.
+  if (mitV) return loadingRow("mit", "Mitigation");
   return null;
 }
 

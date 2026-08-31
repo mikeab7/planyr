@@ -58,9 +58,14 @@ npm run lint
 node ui-audit/gis-source-audit.mjs
 node ui-audit/doc-pointer-audit.mjs
 node ui-audit/panel-copy-budget.mjs --check
+node ui-audit/design-drift-audit.mjs --check
 npm test
 npm run build
 ```
+- `design-drift-audit --check` is the **docs/DESIGN.md** gate (NEW-2) — new UI must consume tokens
+  and primitives, never a raw hex/borderRadius/fontSize. It's a ratchet against
+  `ui-audit/design-drift-ceiling.json`, so it only fails on NEW drift; regenerate the ceiling with
+  `--write-ceiling` after a session genuinely lowers a count.
 - `panel-copy-budget --check` is the **PANEL-BREVITY** gate (`CLAUDE.md`). If you touched yield /
   pond panel copy, run it **before and after** and report both numbers on the item — a net increase
   needs explicit justification, and the fix is always to COLLAPSE, never to delete a fact.

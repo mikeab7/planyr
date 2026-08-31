@@ -141,6 +141,15 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > `test/docPointers.test.js`) fails CI if a pointer names a code file that no longer exists.
 > Keep pointers short — signposts, never duplicated detail — so they don't drift.
 >
+> **🎨 ADDING OR CHANGING ANY UI? READ `docs/DESIGN.md` FIRST — before writing the first line of
+> markup.** It's the design bible: the real color tokens, the radius/spacing/type scales, and the
+> `Button`/`ToggleChip`/`IconButton`/`Field`/`Section`/`MenuItem` primitives in
+> `src/shared/ui/controls.jsx`, plus the two hard rules (components consume tokens and primitives;
+> a new control is never invented at the call site — the primitive set is extended instead). A raw
+> hex, a raw `borderRadius`, or a raw `fontSize` in a component is a defect, not a style choice, and
+> `ui-audit/design-drift-audit.mjs` fails CI on new instances of it. Preview every primitive live at
+> the `#/design` gallery route before drawing a new one.
+>
 > **🗺 Two generated, committed indexes save you from cold-searching — regenerate each in the SAME
 > commit that changes its inputs (machine-enforced, like the pointers).**
 > - **`MAP.md`** (repo root) — every source file → its module owner, one-line responsibility, and
@@ -451,20 +460,38 @@ Runtime deps are kept few and deliberate. New client dependency added 2026-07-10
   hard blocker (merge conflict, red required check, protection that rejects the merge) —
   report _that_, not a request for permission.
 - **⛔ THE CLAUDE CODE WEB SESSION HARNESS DEFAULTS EVERY NEW PR TO DRAFT — THAT DEFAULT DOES
-  NOT APPLY HERE, AND IT IS ENFORCED MECHANICALLY, NOT BY REMEMBERING TO OVERRIDE IT (B781760,
-  2026-08-26, after #1157/#1162/#1166/#1180 each sat as a green, conflict-free PR parked in
-  draft waiting for a button the owner was never going to press).** The harness instruction
-  to open PRs as draft lives outside this repo — not in `CLAUDE.md`, not in any file here, not
-  editable from a session — so a session that both reads "commit means ship it live" above
-  AND that harness default resolves the conflict inconsistently. `.github/workflows/pr-
-  auto-ready.yml` closes it in the repo instead of in a sentence: on every
-  opened/reopened/synchronize event for a `claude/*` head branch, it marks the PR ready for
-  review and arms squash auto-merge automatically, whatever draft state the harness opened it
-  in. **A session opening a PR here should not treat draft-vs-ready as a meaningful signal —
-  don't stop because a PR reads "Draft," and don't hand-run `gh pr ready` as a workaround; the
-  automation already does it.** The one supported way to genuinely ask a human to look before
-  it merges is the **`hold` label** (or a `<!-- keep-draft -->` marker in the PR body) — apply
-  either and the workflow leaves that PR alone on every future run too, not just the next one.
+  NOT APPLY HERE, AND THE SESSION THAT OPENS THE PR IS THE ONE THAT MARKS IT READY, EVERY TIME
+  (B781760 → B793696 → B914448/B914449, 2026-08-26 through 2026-08-31, after #1157/#1162/#1166/
+  #1180 each sat as a green, conflict-free PR parked in draft waiting for a button the owner
+  was never going to press).** The harness instruction to open PRs as draft lives outside this
+  repo — not in `CLAUDE.md`, not in any file here, not editable from a session — so a session
+  that both reads "commit means ship it live" above AND that harness default resolves the
+  conflict inconsistently.
+  **⛔ CORRECTED 2026-08-31 (B914448) — THIS PASSAGE USED TO CLAIM THE PROBLEM WAS SOLVED
+  MECHANICALLY. IT IS NOT, AND `.github/workflows/pr-auto-ready.yml` HAS NEVER ONCE SUCCEEDED
+  ON A REAL PR.** `pr-auto-ready.yml` was built to un-draft a PR and arm squash auto-merge
+  automatically on every opened/reopened/synchronize event for a `claude/*` head branch — the
+  *intent* stands and the workflow still runs and still tries — but `GITHUB_TOKEN` cannot
+  actually perform either mutation in this repo: **confirmed FORBIDDEN ("Resource not
+  accessible by integration") on real PRs under every credential/setting combination that
+  exists to try** — "Workflow permissions: Read and write" (on), "Allow GitHub Actions to
+  create and approve pull requests" (on), and the installed "Claude" GitHub App (can't be
+  driven from a workflow at all — a workflow can only act as a GitHub App if it holds that
+  App's private key, and Anthropic, not this repo, holds this one). Owner-reviewed 2026-08-31
+  (B793696): a PAT or a self-owned GitHub App would fix it; he declined both, because the
+  manual step costs him nothing — sessions already do it as part of shipping.
+  **SO: THE AUTOMATION DOES NOT DO IT. A session opening a PR here marks it ready and arms
+  auto-merge ITSELF, every time, as a normal, expected part of shipping — not a workaround, not
+  a fallback for when the automation fails, the standing way this gets done.** Right after
+  opening the PR, call the GitHub MCP tools directly: `update_pull_request` with `draft:false`,
+  then `enable_pr_auto_merge`. Do **not** wait for `pr-auto-ready` to do it, and do not treat a
+  green `pr-auto-ready` check as proof the PR was marked ready — as of B914449 it reports the
+  known FORBIDDEN case with `core.notice` (so it no longer fails the run for a condition nobody
+  can fix from here) rather than actually succeeding at the mutation. If it ever DOES succeed,
+  it says so loudly, unprompted (a credential exists again — reopen B793696).
+  **The `hold` label (or a `<!-- keep-draft -->` marker in the PR body) is still the one
+  supported way to genuinely ask the owner to look before a PR merges** — apply either and
+  leave that PR in draft yourself too, since the workflow already stands down on it.
   It only ever *enables* auto-merge; the required `build` check (below, and the nudge-commit
   note that follows it) still has to go green before anything actually merges.
 - **⛔ AFTER ANY CHANGE TO A PR TITLE — which every renumber causes — DISABLE AND RE-ENABLE

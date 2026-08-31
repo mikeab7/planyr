@@ -83,11 +83,18 @@ describe("A2 — verdict-strip grammar: label + pill + sentence", () => {
     expect(short.sentence).toBe("30.0 of 33.8 AC-FT");
   });
 
-  it("detention LOADING (a check already ran, pond volume still catching up) → '…' pill, 'checking flood data', loading flag", () => {
+  // B853264 (×3) — CORRECTED: this shape was labeled "genuine loading" but never was one. The
+  // pond ledger is pure synchronous math with no async gap, so `providedUsableCf == null` while
+  // `floodChecked` is true can ONLY happen via a pond whose split facts didn't survive into a
+  // restored session (`factsKnown:false` in `pondSplitFor` — a pond drawn after the last check,
+  // plan reloaded, never re-checked). Nothing is fetching; a real ↻ resolves it.
+  it("detention with a resolved req but an UNKNOWN pond split (restored, incomplete record) → honest 'pond details unknown', never 'checking flood data'", () => {
     const [det] = yieldVerdictStrip({ req: detReqPoint(33.8), providedUsableCf: null, floodChecked: true });
     expect(det.pill).toBe("…");
-    expect(det.loading).toBe(true);
-    expect(det.sentence).toBe("checking flood data");
+    expect(det.loading).toBeFalsy();
+    expect(det.recheck).toBe(true);
+    expect(det.sentence).toBe("pond details unknown");
+    expect(det.sentence).not.toMatch(/checking flood data/);
   });
 
   // B849713/NEW-3 — a plan that has NEVER been checked (no requirement resolved at all, under
@@ -208,6 +215,108 @@ describe("A2 — verdict-strip grammar: label + pill + sentence", () => {
     expect(ffe.label).toBe("Buildability");
     expect(ffe.sentence).toBe("pads outside floodplain");
     expect(ffe.text).toBe("Buildability: pads outside floodplain");
+  });
+});
+
+// NEW-6 (owner live pass 2026-08-31, V496866/B881668) — the Mitigation row stuck on "checking
+// flood data" forever after the flood check demonstrably completed: the header went green with a
+// run date, Detention and Buildability both resolved to real verdicts off the SAME data — only
+// Mitigation kept claiming a fetch was in flight. Root cause: `mitigationVerdict` had no branch for
+// a GENUINELY unresolved mitigation ledger (real geometry, but the volume itself never priced, or a
+// stale-pending/remembered/failed state) — every one of those fell through to the generic
+// `loadingRow`, whose sentence is hardcoded to "checking flood data" regardless of whether anything
+// is actually fetching. Mirrors the class B1127 already fixed for Detention's `kind:"unavailable"`.
+describe("NEW-6 — Mitigation never claims 'checking flood data' once nothing is fetching", () => {
+  const base = { req: detReqPoint(33.8), providedUsableCf: 34 * AC_FT };
+
+  it("mitStalePending (fetch outgrown, no last-good yet) reads 'volume unknown', never 'checking flood data'", () => {
+    const [, mit] = yieldVerdictStrip({ ...base, mitStalePending: true });
+    expect(mit.sentence).toBe("volume unknown");
+    expect(mit.sentence).not.toMatch(/checking flood data/);
+    expect(mit.pill).toBe("N/A");
+    expect(mit.tone).toBe("warn");
+    expect(mit.loading).toBeFalsy();
+  });
+
+  it("real intersect acreage but an UNRESOLVED volume (unknownReason) names the reason, never 'checking'", () => {
+    const [, mit] = yieldVerdictStrip({
+      ...base,
+      mitigation: { intersectAcres: 2, volumeCf: null, unknownReason: "no published BFE on this reach — enter the BFE" },
+    });
+    expect(mit.sentence).toBe("volume unknown: no published BFE on this reach — enter the BFE");
+    expect(mit.sentence).not.toMatch(/checking flood data/);
+    expect(mit.pill).toBe("N/A");
+    expect(mit.loading).toBeFalsy();
+  });
+
+  it("an unresolved volume with no reason string still reads a bare 'volume unknown'", () => {
+    const [, mit] = yieldVerdictStrip({ ...base, mitigation: { intersectAcres: 2, volumeCf: null } });
+    expect(mit.sentence).toBe("volume unknown");
+  });
+
+  it("a restored/remembered check with no mitigation ledger offers ↻, never 'checking flood data'", () => {
+    const [, mit] = yieldVerdictStrip({ ...base, mitRememberedMissing: true });
+    expect(mit.sentence).toBe("not screened");
+    expect(mit.sentence).not.toMatch(/checking flood data/);
+    expect(mit.recheck).toBe(true);
+  });
+
+  it("a failed flood-geometry source reads 'flood source down' with ↻, never 'checking flood data'", () => {
+    const [, mit] = yieldVerdictStrip({ ...base, floodGeo: { state: "failed" } });
+    expect(mit.sentence).toBe("flood source down");
+    expect(mit.sentence).not.toMatch(/checking flood data/);
+    expect(mit.recheck).toBe(true);
+  });
+
+  it("no em dash in any of the new honest-unknown sentences (G2 house rule)", () => {
+    const cases = [
+      yieldVerdictStrip({ ...base, mitStalePending: true }),
+      yieldVerdictStrip({ ...base, mitigation: { intersectAcres: 2, volumeCf: null, unknownReason: "pad / finished-floor elevation not entered" } }),
+      yieldVerdictStrip({ ...base, mitRememberedMissing: true }),
+      yieldVerdictStrip({ ...base, floodGeo: { state: "failed" } }),
+    ];
+    for (const strip of cases) {
+      const mit = strip.find((v) => v.key === "mit");
+      expect(mit.sentence.includes(EM_DASH), mit.sentence).toBe(false);
+    }
+  });
+
+  it("a genuinely resolved mitigation ledger is unaffected (no regression on the ordinary path)", () => {
+    const [, mit] = yieldVerdictStrip({ ...base, mitigation: { intersectAcres: 2, volumeCf: 5 * AC_FT, volumeAcFt: 5 }, mitProvided: { creditedCf: 6 * AC_FT } });
+    expect(mit.sentence).toBe("6.0 of 5.0 AC-FT");
+  });
+
+  // B908944 (×2, dedupe follow-up) — a resolved requirement (real intersect acreage, real volume)
+  // whose PROVIDED figure is unknown because a pond's split facts didn't survive into this restored
+  // session (`mitProvided.creditedCf == null`, the SAME `factsKnown:false` root cause as Detention's
+  // `pondFactsUnknownRow`, below). Never a claimed in-flight fetch.
+  it("a resolved requirement but an UNKNOWN provided figure (restored, incomplete pond record) → honest 'pond details unknown'", () => {
+    const [, mit] = yieldVerdictStrip({ ...base, mitigation: { intersectAcres: 2, volumeCf: 20 * AC_FT, volumeAcFt: 20 }, mitProvided: { creditedCf: null } });
+    expect(mit.pill).toBe("…");
+    expect(mit.loading).toBeFalsy();
+    expect(mit.recheck).toBe(true);
+    expect(mit.sentence).toBe("pond details unknown");
+    expect(mit.sentence).not.toMatch(/checking flood data/);
+  });
+});
+
+// B853264 (×3, dedupe follow-up, 2026-08-31) — Detention's own sibling of the above. Same root
+// cause, same fix shape, its own describe block since it's a different verdict's row.
+describe("B853264 (×3) — Detention never claims 'checking flood data' once nothing is fetching", () => {
+  it("a resolved requirement but an UNKNOWN pond split (restored, incomplete record) → 'pond details unknown', with ↻", () => {
+    const [det] = yieldVerdictStrip({ req: detReqPoint(33.8), providedUsableCf: null, floodChecked: true });
+    expect(det.pill).toBe("…");
+    expect(det.loading).toBeFalsy();
+    expect(det.recheck).toBe(true);
+    expect(det.sentence).toBe("pond details unknown");
+  });
+  it("no em dash in the new row (G2 house rule)", () => {
+    const [det] = yieldVerdictStrip({ req: detReqPoint(33.8), providedUsableCf: null, floodChecked: true });
+    expect(det.sentence.includes(EM_DASH), det.sentence).toBe(false);
+  });
+  it("a genuinely resolved detention verdict is unaffected (no regression on the ordinary path)", () => {
+    const [det] = yieldVerdictStrip({ req: detReqPoint(33.8), providedUsableCf: 34 * AC_FT });
+    expect(det.sentence).toBe("34.0 of 33.8 AC-FT");
   });
 });
 
