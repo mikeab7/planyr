@@ -568,10 +568,12 @@ export default function AppHeader({
   // scrolled to wherever it last was, with the now-ACTIVE tab off the left edge and no sign
   // anything is hidden. The worst case named in the report: the section you are IN disappears.
   const row2Ref = useRef(null);
-  // NEW-2 (B917073) — one edge-fade reading per scrolling row; see `useScrollEdges` above.
-  const row1Edges = useScrollEdges(rowRef, narrow);
+  // NEW-2 (B917073) — the edge-fade reading for Row 2, the row the report was actually about
+  // ("Library | Notes | M…", no hint anything scrolls); see `useScrollEdges` above. Row 1 (the
+  // breadcrumb/jurisdiction row) was considered too, but its pill already asks for its full text
+  // before truncating and clips (never an ellipsis) rather than cutting a fact in half — no
+  // confirmed defect there, so it stays untouched rather than adding an unrequested mask.
   const row2Edges = useScrollEdges(row2Ref, narrow);
-  const row1Mask = narrow ? edgeFadeMask(row1Edges) : undefined;
   const row2Mask = narrow ? edgeFadeMask(row2Edges) : undefined;
   const [center, setCenter] = useState({ mode: "unmeasured", max: null });
   useLayoutEffect(() => {
@@ -802,7 +804,7 @@ export default function AppHeader({
            real floor is the 26px-tall FullscreenButton/SettingsMenu icon buttons already living
            in this row (untouched — out of this item's scope), so 30 is the smallest height that
            doesn't clip them; contents stay vertically centered. */}
-      <div ref={rowRef} className={narrow ? "no-hscrollbar" : undefined} style={{ height: 30, display: "flex", alignItems: "center", position: "relative", ...rowScroll, WebkitMaskImage: row1Mask, maskImage: row1Mask }}>
+      <div ref={rowRef} className={narrow ? "no-hscrollbar" : undefined} style={{ height: 30, display: "flex", alignItems: "center", position: "relative", ...rowScroll }}>
 
         {/* ⛔ NEW-2 — NAVIGATION WINS. Read this before changing any of the three zone flexes.
             The owner could not open the plan switcher on a laptop: "the unincorporated / city of
