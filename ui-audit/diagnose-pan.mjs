@@ -29,15 +29,19 @@ await page.goto(BASE, { waitUntil: "load" });
 await page.waitForTimeout(2800);
 
 const info = () => page.evaluate(() => ({ loaded: document.querySelectorAll(".leaflet-tile-loaded").length, tiles: document.querySelectorAll(".leaflet-tile").length }));
-await page.keyboard.press("h"); // hand/pan tool
+// B900416 — the rail's dedicated Pan tool is retired (Select already pans on empty canvas, and
+// Space-drag pans over anything, including on top of the building this fixture seeds); hold
+// Space for the drag so this still pans regardless of what is under the pointer.
 const box = await page.locator("svg[role=application]").boundingBox();
 const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
 
 const samples = [];
 const sampler = setInterval(async () => { try { samples.push((await info()).loaded); } catch (_) {} }, 25);
+await page.keyboard.down("Space");
 await page.mouse.move(cx, cy); await page.mouse.down();
 for (let i = 0; i < 12; i++) { await page.mouse.move(cx - i * 22, cy - i * 14); await page.waitForTimeout(35); }
 await page.mouse.up();
+await page.keyboard.up("Space");
 await page.waitForTimeout(500);
 clearInterval(sampler);
 const max = Math.max(...samples), min = Math.min(...samples);

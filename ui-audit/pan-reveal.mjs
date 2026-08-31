@@ -28,12 +28,15 @@ const page = await ctx.newPage();
 await assertMeasurable(page, "pan-reveal");
 await page.goto(BASE, { waitUntil: "load" });
 await page.waitForTimeout(2800);
-await page.keyboard.press("h");
+// B900416 — the rail's dedicated Pan tool is retired; the drag below starts on the seeded
+// building, so hold Space (Space-drag pans over anything) rather than arming a tool.
+await page.keyboard.down("Space");
 const box = await page.locator("svg[role=application]").boundingBox();
 const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
 await page.mouse.move(cx, cy); await page.mouse.down();
 for (let i = 0; i < 10; i++) { await page.mouse.move(cx + i * 40, cy + i * 30); await page.waitForTimeout(16); } // big fast drag down-right
 await page.screenshot({ path: OUT + "pan-reveal-MID.png" }); // captured while button still down (transform live)
 await page.mouse.up();
+await page.keyboard.up("Space");
 await browser.close();
 console.log("saved pan-reveal-MID.png");
