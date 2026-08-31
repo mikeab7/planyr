@@ -91,13 +91,36 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 
 
 
-### B915536 — Clean up the 24 pre-existing UI deviations `ui-inventory.mjs` (NEW-3/B904034) finds, not fixed by that item `[global/ui]` (task) #ui  *(filed by explicit owner instruction after reviewing B904034/B904035: "give me the residual count and file it as its own follow-on item with that number on it — do not let it disappear into the summary." Minted **B915536** from this branch's reserved block B915536–B915551 against freshly-fetched `origin/main` 50c3e14. DEDUPE-FIRST — searched Open/⏳Verify/Done for `ui-inventory`, `UI-INVENTORY.md`, `off-scale fontSize`, `design-drift`: none files this residual as its own item; B904034 (Done) fixed three radius-token misclassifications but explicitly did not touch any of the below. Net-new.)*
-`docs/UI-INVENTORY.md` (`node ui-audit/ui-inventory.mjs`, re-verified against a real `git worktree`
-before/after comparison across two independent regenerations) currently reports **24 distinct
-deviating style signatures**, all pre-existing, none introduced or fixed by B904034/B904035. None
-are policy violations of `docs/DESIGN.md`'s hard rules — they are UA-default / not-yet-tokenized
-`fontSize` values, plus one still-half-fixed `ThemePicker.jsx` row. Full breakdown (both light+dark,
-so each line below is ×2 in the raw count):
+### B915536 — Clean up the pre-existing UI deviations `ui-inventory.mjs` (NEW-3/B904034) finds, not fixed by that item `[global/ui]` (task) #ui  *(filed by explicit owner instruction after reviewing B904034/B904035: "give me the residual count and file it as its own follow-on item with that number on it — do not let it disappear into the summary." Minted **B915536** from this branch's reserved block B915536–B915551 against freshly-fetched `origin/main` 50c3e14. DEDUPE-FIRST — searched Open/⏳Verify/Done for `ui-inventory`, `UI-INVENTORY.md`, `off-scale fontSize`, `design-drift`: none files this residual as its own item; B904034 (Done) fixed three radius-token misclassifications but explicitly did not touch any of the below. Net-new.)*
+`⛔ AMENDED 2026-08-31 (B942179), owner instruction, verbatim: "the '24 pre-existing deviations' figure
+is a figure from a crawl that excluded the landing page... once coverage is complete, restate it with
+the real number... If the true number is materially larger, say so LOUDLY."` **It is materially
+larger, so: the original "24" was measured by a crawl (`ui-inventory.mjs`'s `SURFACES` list) that
+did not include the map landing page at all — the FIRST screen a user sees, no project selected
+(fixed this session by B942177). With that surface added, the corrected total is 44** (+20 net —
+22 new rows the landing page itself contributes, minus 2 the B942178 locate-button radius fix
+resolved on that very surface). **All 44, old and new, are `fontSize` — none is `borderRadius`; the
+owner's actual complaint that prompted this whole pass ("different radii and fillets") was fully
+addressed by B942178's fixes + B942176's new shape rule, not by this item.** This item's own scope
+(the `fontSize` retrofit below) is UNCHANGED and still 🔲 Open/unstarted — this amendment corrects
+the count and adds the landing page's own breakdown; it does not do the cleanup work itself
+(STANDING RULE #3 — that's its own session).
+**Landing page's own contribution (B942177/B942178), light+dark, ×2 in the raw count:** `fontSize 16`
+on three plain unstyled shell `<div>`s (the search cluster bar, the Site/Comp switch's wrapper, the
+Sites/Comps rail panel) — same browser-root-default cause as the existing `13.3333`/`16` UA-default
+note, just on a non-form-control element; `fontSize 13.3333` on three more UA-default buttons
+(Collapse-the-sites-panel toggle, a group-collapse row, a group-reorder row); `fontSize 22` on the
+Leaflet zoom stack's own `+`/`−` glyphs (this app's own inline style, sized to fill a 30px touch
+target — decorative glyph, not body text); `fontSize 8.5` on a small colored count badge in a Sites
+group header (a deliberately tiny single-digit numeral). All eight are now recorded in
+`docs/UI-INVENTORY.md`'s "Known, deliberately-not-fixed findings" so a future session doesn't
+re-investigate them from zero.
+Original filing, for the record — `docs/UI-INVENTORY.md` (`node ui-audit/ui-inventory.mjs`,
+re-verified against a real `git worktree` before/after comparison across two independent
+regenerations) reported **24 distinct deviating style signatures**, all pre-existing, none
+introduced or fixed by B904034/B904035. None are policy violations of `docs/DESIGN.md`'s hard
+rules — they are UA-default / not-yet-tokenized `fontSize` values, plus one still-half-fixed
+`ThemePicker.jsx` row. Full breakdown (both light+dark, so each line below is ×2 in the raw count):
 - **App header (5 signatures):** `fontSize 13.3333` (Chromium UA default — see the "Known,
   deliberately-not-fixed findings" note at the top of `docs/UI-INVENTORY.md`) on Full screen/Settings,
   "Dashboard: all projects", and "Cloud sync: Saved on this device"; `fontSize 15` (not
@@ -113,18 +136,20 @@ so each line below is ×2 in the raw count):
   `SitePlanner.jsx`/`LayerPanel.jsx`) — **corrects an earlier, wrong report of this same control as
   "fontSize 22 in LayerPanel.jsx," which was actually the MapFinder's own zoom control, mismeasured
   by a since-fixed harness bug.**
-- Two further findings are already investigated, decided, and intentionally left as-is — not part of
-  this item's scope, and already documented in `docs/UI-INVENTORY.md` itself so they survive
-  regeneration rather than needing rediscovery: a `borderRadius:2px` on the map's "Find my location"
-  button (Leaflet's own third-party stylesheet, out of scope like the Scheduler iframe), and the root
-  cause of the widespread `13.3333px` reading (`index.css` sets `font-family: inherit` on form
-  controls but never `font-size`, so any control that doesn't set its own falls through to the browser
-  default).
+- Two further findings were already investigated, decided, and intentionally left as-is — not part
+  of this item's scope, and documented in `docs/UI-INVENTORY.md` itself so they survive
+  regeneration rather than needing rediscovery: the root cause of the widespread `13.3333px` reading
+  (`index.css` sets `font-family: inherit` on form controls but never `font-size`, so any control
+  that doesn't set its own falls through to the browser default). **The `borderRadius:2px` on "Find
+  my location" is GONE from this list as of B942178 — the control was FIXED (given the same
+  `RADIUS.md` override the zoom stack already had), not reclassified; see that item.**
 - Verify: sandbox — re-run `node ui-audit/ui-inventory.mjs` and check the total against this item's
-  24; a lower number without a documented reason each closed row went (fixed, or moved to Known/
-  deliberately-not-fixed) is a red flag, not automatic progress.
-- Not started this session — STANDING RULE #3, one task per session; B904034/B904035 already
-  consumed this session's scope investigating and correcting the measurement instrument itself.
+  **44** (corrected 2026-08-31, was 24 — see the amendment above); a lower number without a
+  documented reason each closed row went (fixed, or moved to Known/deliberately-not-fixed) is a red
+  flag, not automatic progress.
+- Not started this session — STANDING RULE #3, one task per session; B904034/B904035 and this
+  session's B942176–B942179 already consumed their sessions' scope on the measurement instrument
+  and the radius half of this debt. The `fontSize` retrofit itself remains genuinely unstarted.
 
 ### B853713 — Wire dedicated county appraisal districts (CADs) for the DFW & Austin metros `[Site Planner / map]` (feature) #gis #parcel #site-planner  *(filed 2026-06-18 as "B150" — a stale/colliding provisional number that was never actually free (B150 was already minted for an unrelated, shipped item; see BACKLOG-DONE.md — caught by test/idUniqueness.test.js before push). RE-RAISED 2026-08-29 and RENUMBERED on mint, moved here from Later/Roadmap — same owner chat block that shipped B853712, explicit instruction: "the DFW dial-in … is the owner's next ask; it needs a real probe per district and is its own session" and "STILL OUT OF SCOPE, file it, do not start it." Minted **B853713** from this branch's reserved block. Not started this session — STANDING RULE #3, one task per session.)*
 `[ ]` **Promote Dallas (DCAD), Tarrant (TAD), Collin (CCAD) and Denton (DCAD) — plus Austin's Travis/TCAD, Williamson, Hays — from the B853712 statewide-derived tier to their own dedicated, live-probed appraisal-district services**, exactly the way Montgomery/Brazoria/Galveston/Liberty/Austin-County were promoted off Waller's shape (B209503). This is the ACCURACY tier, not the coverage tier: **B853712 already closed the coverage gap** — every one of these counties (and all 254 Texas counties) now has a real, working parcel source via the universal TxGIO statewide layer, so this item is purely about first-class data (current, richer field set, faster) versus the statewide copy (can lag, thinner fields).
@@ -2424,14 +2449,6 @@ so each line below is ×2 in the raw count):
 - **Caveat as prominent as the band:** "ASSUMED screening corridor drawn off a schematic centerline — NOT a surveyed easement. Confirm via title commitment / recorded easement instrument + 811 one-call before relying on it." Source + data-age stamp carried. Doubly approximate (schematic line × assumed width) — must never read as real.
 - V266 covers: the band renders on the live vector layer at the right offset/opacity, tint matches commodity, caveat visible, width editing works.
 
-### B735 — AnchoredMenu portal + click-away backdrop can linger over the newly-active workspace when a menu is left open and the user navigates via browser Back/Forward `[App Shell / UI]` (bug) #ui #infra  *(self-discovered 2026-07-09 during the B734 post-merge adversarial review; **B735** = highest B# across both files (B734) + 1)*
-`[ ]` Every `AnchoredMenu` consumer with LOCAL open state (the account dropdown, Site Planner rail flyouts + export/print menus, the project breadcrumb, the scheduler toolbar, the team-role menu) can be left `open` and then have its host workspace hidden by the keep-alive render (`display:none`) if the user navigates **without a click** — browser **Back/Forward** or a programmatic hash change. Because the menu renders in a **portal at `document.body`**, and the click-away backdrop (`position:fixed; inset:0`) renders whenever `open===true`, the hidden instance leaves a full-screen (invisible) click-trap — and, since `place()` doesn't re-run on the display flip so `pos` stays stale-truthy, the menu itself can even render at its stale position — hanging over the newly-active workspace until one click / Esc dismisses it. Rare and self-recovering, but a real UX trap.
-- Verify: live (timing / nav-interaction + keep-alive multi-instance class; the fix touches shared infra used by ~20 menus, so it needs a cross-consumer live pass — open each menu type, hit browser Back, confirm nothing lingers and nothing else regressed).
-- Origin: found 2026-07-09 during the B734 post-merge review (the B734 fix — self-contained per-instance `AccountControl` — surfaced it; the account dropdown itself is already handled, see below).
-- **Partial fix already shipped (B734 follow-up):** `AccountControl` closes its own dropdown on `hashchange` (fires on every nav incl. Back/Forward), so the ACCOUNT menu — the most-reachable instance, present in every header — no longer lingers. This item covers the REMAINING consumers.
-- **Correct shared fix (the real job):** in `AnchoredMenu`, make placement re-run when the anchor's box changes to zero (a `ResizeObserver`/`IntersectionObserver` on the anchor, or re-measure each render while open) **and** clear a stale position — change `if (p) setPos(p)` to `setPos(p)` so a null (unmeasurable/`display:none` anchor) result HIDES the menu instead of leaving the last position; optionally gate the backdrop on `pos` (backdrop iff visible). Watch the perf cost of per-render re-measuring across the ~20 consumers (getBoundingClientRect forces layout) — hence the live pass.
-- **DEDUPE-FIRST:** net-new. Relatives (not dupes): B734 (the corner-anchor fix + `placeMenu`; this is a different symptom — lingering-after-nav, not mis-anchored-on-open) · B127 (built `AnchoredMenu`).
-
 <!-- Thoroughfare-Plan / ROW-exposure epic — filed 2026-07-08 from chat (provisional NEW-1…NEW-7 → B720–B726).
      One cohesive feature spine: a jurisdiction-agnostic Major-Thoroughfare-Plan data model (B720) → ingestion
      (B721 Houston MTFP, B722 surrounding jurisdictions) → map overlay (B723) → parcel ROW-dedication analysis
@@ -3740,6 +3757,24 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 ---
 
 ## ⏳ Verify — awaiting live confirmation
+
+### B941152 — Creating a comp from a multi-parcel selection silently does nothing on Enter `[Site Planner / comps]` (bug) #comps #site-planner #gis  *(owner report, verbatim: "i selected parcels and press enter but nothing happens" — planyr.io, Comp mode, toolbar reading `2 parcels · 66.17 AC`, address field empty. Minted **B941152 / V524448** from this branch's reserved block B941152–B941167 · V524448–V524463 against `origin/main` 377d1e9. DEDUPE-FIRST — searched Open/⏳Verify/Done for `multi-parcel`, `parcel_apn`, `anchor_kind`, every `#comps` item (B832385/B832387/B832390/B832391/B831779/B711328/B711329, none of which touch the commit path): no prior item. Net-new.)*
+`[x]` **ROOT CAUSE, established by reading the actual code (not guessed) — NEITHER of the owner's two leading hypotheses was quite it, and neither insert was rejected: NOTHING WAS EVER SENT.**
+- **What actually happens, traced end to end:** `MapFinder.jsx`'s comp toolbar rendered its one primary action — the `onClick={placeCompOnSelectedParcel}` button — behind a literal `selected.length === 1` guard. With 2 parcels selected the button **did not render at all**: no element, no click handler, no code path to `onPlaceComp`/`insertComp`. No network request was ever attempted or rejected — the guard returned early before there was anything to send. Separately, `placeCompOnSelectedParcel` itself read only `selected[selected.length - 1]` — so even a caller that reached it (there wasn't one, for 2 parcels) would have silently dropped every parcel but the last, with no `parcelApn`/`parcelGeom` capturing the other one and no representation of the 66.17 AC total at all.
+- **The empty address field, ruled OUT as the cause but confirmed real and left alone.** `PlaceSearchField.jsx`'s Enter handler (`resolvePlaceEnter`) is a *documented, deliberate* no-op on an empty value ("with no text typed, there is nothing to search, so Enter is correctly a no-op (null)") — proven by reading `placeSuggestRows.js` directly; there is no silent failure there, no swallowed error, exactly the behavior the code comments claim. It only matters at all if the address input happens to have focus, which selecting parcels by clicking the map does not naturally produce (a map click doesn't focus a text input) — so in the owner's actual sequence (click "Comp from parcel" → click 2 parcels on the map → press Enter), focus was almost certainly on nothing at all, meaning **no listener anywhere in the app was even listening for that keystroke.** That absence — not a rejected request, not a swallowed error — is "nothing happens."
+- **What a multi-parcel comp MEANS — decided and implemented, no schema migration.** The leasing-comps spec (B711328) never addressed a multi-parcel selection; `public.comps` already supports it without a new column: `parcel_apn text` (singular) and `parcel_geom jsonb` are both nullable, and the identity check (`anchor_kind = 'pin' or parcel_apn is not null or parcel_geom is not null`) is satisfied by either alone. Chose: **every selected parcel's rings become one GeoJSON geometry** (`Polygon` for a lone parcel — byte-identical to the old single-parcel shape — `MultiPolygon` for several, never re-deriving a shape a single-parcel comp didn't need), **every selected parcel's account id joined** into `parcel_apn` (never just the last one), **the assembly's own bbox-center** (`computeAssembly`'s `asm.origin` — the same point a "Plan N parcels" site would open on) as `lat`/`lon`, and **the toolbar's own already-computed acreage carried through** and prefilled into the create form's land-size field so 66.17 survives into the comp instead of forcing a re-type. `anchor_kind` is untouched (still `'parcel'` for one or many) — left open for the third `anchor_kind` (a building-pinned comp) a separate concurrent session may be adding; nothing here switches exhaustively over its values.
+- **The control now never no-ops again, on either input.** The `selected.length === 1` gate is removed — the button (relabeled "Comp N parcels" / "Comp here" to match the Site-mode "Plan N parcels →" button beside it) now renders for ANY non-empty selection. **And Enter itself now does something in this state**: a new `window` keydown listener, scoped to `mode === "comp" && selected.length > 0`, fires the same action Enter would have reached had a control been focused — but explicitly stands down whenever a real control (the address field, a rename input, the ✕/Cancel buttons, anything focusable) has focus, so it can never hijack what Enter already does there. This directly answers the reported gesture: select parcels, press Enter, get a comp.
+- **Extracted the anchor-building logic into a pure, unit-tested module** (`compParcelAnchor.js`) rather than leaving it inline in `MapFinder.jsx` (which imports Leaflet and cannot be unit-tested directly) — `parcelGeomFromSelection` / `parcelApnFromSelection` / `parcelCountyFromSelection` / `compAnchorFromSelection`, 15 new tests in `test/compParcelAnchor.test.js` covering: a single parcel (unchanged Polygon/APN shape, regression-proof), two-plus parcels (MultiPolygon of every ring, every APN joined — the exact defect, proven against the fixture that reproduces the owner's "2 parcels · 66.17 AC"), a parcel missing rings or an account id (skipped, never crashes or renders a blank), the county fallback, and that the resulting anchor passes `comps.js`'s own `validAnchor` gate — the same gate a real save goes through.
+- **Adjacent cases, per the brief:**
+  - **One parcel** — unaffected: same Polygon/single-APN shape as before, now also gets the acreage prefill (a small, harmless extension of the same code path, not a behavior change for what was already there).
+  - **Two parcels** — fixed: button renders, click or Enter creates a comp with the MultiPolygon/joined-APN/summed-acreage anchor above.
+  - **Zero parcels, address typed only** — untouched: a different code path (`dropPinFromSearch`/`commitAddressHit`) not touched by this fix.
+  - **Address typed WITH parcels selected** — untouched: the new Enter listener stands down whenever the address input (or any control) has focus, so typing an address and pressing Enter still searches the address, never hijacked into creating a comp from a stale selection.
+  - **Pin-anchored (no parcel)** — untouched: `placeCompPinAt` is unmodified.
+- Verify: live — GIS endpoint behavior (a real multi-parcel selection needs the live county parcel-identify service, egress-blocked here) **and** the Supabase round trip (creating + reading back a `public.comps` row needs a signed-in account) are both mandatory LIVE-VERIFY classes. `Blocker: live-GIS` `Blocker: auth`. Everything drivable without those two — the pure anchor-building logic (proven, not just built), the build, the full unit suite, and the existing logged-out comps e2e coverage — was driven this session per ATTEMPT-BEFORE-YOU-PARK, not deferred. See **V524448** in `VERIFICATION.md` for the exact live steps (create a real 2-parcel comp on planyr.io, read the row straight out of `public.comps`).
+- **VERIFIED (sandbox).** `npx vitest run` — 657/657 files, 13,466/13,466 tests green (incl. the 15 new `test/compParcelAnchor.test.js` cases and the pre-existing 63 in `test/comps.test.js`, unaffected); `npm run build` clean; `npm run lint` — 0 new errors on the touched files (the same 6 pre-existing `react-hooks/exhaustive-deps` warnings elsewhere in `MapFinder.jsx`, confirmed present before this change too, nothing new); `node ui-audit/doc-pointer-audit.mjs` clean; `node scripts/build-map.mjs --check` clean (new file described). `e2e/leasing-comps.spec.js`'s pin-anchor / empty-state / lease-form coverage is unaffected by this diff (different code path) — not re-run against a live browser this session, since nothing here touches it; the parcel-anchor path itself needs the live-GIS click that spec's own header already says this sandbox cannot drive.
+- Files: `src/workspaces/site-planner/MapFinder.jsx`, `src/workspaces/site-planner/lib/compParcelAnchor.js` (new), `src/shared/comps/components/CompsPanel.jsx`, `test/compParcelAnchor.test.js` (new), `MAP.md`.
+- Base: `origin/main` @ `377d1e9`.
 
 ### B922816 — One entry point for creating a plan, with "Select parcels" as the primary action `[Site Planner / Map]` (task) #site-planner #ui  *(owner report 2026-08-29, verbatim: "I don't think we should have two areas where it says start blank. So… instead of start blank and start blank on the main mapper, it's select parcels, maybe a drop down where you can start blank instead. I don't know. Something different." He was thinking out loud; the settled spec (below) is mine, taken on his stated direction. Minted **B922816 / V510400** from this branch's reserved block B922816–B922831 · V510400–V510415 against `origin/main` 812c219a. DEDUPE-FIRST — searched Open/⏳Verify/Done for `Start blank`, `newBlankSiteHere`, `startBlankHere`, `B831776`: found the exact defect already NAMED but never filed — `BACKLOG-DONE.md:10577` (an adjacent finding on B831779, 2026-08-28) records "a recent landing-page rebuild (B831776 …) left TWO buttons on screen simultaneously both reading 'Start blank' … Not filed as a new B# here." No B# owns it. Net-new.)*
 `[x]` **THE ENUMERATION GATE (done first, per the brief, before anything was touched):**

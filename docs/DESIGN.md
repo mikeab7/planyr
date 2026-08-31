@@ -113,6 +113,54 @@ radius is the outer radius minus the gap between them, computed by `nestedIn(out
 at 2px. Inside a `pill`, a control that runs the bar's full height is itself a pill — there is no
 radius that reads as deliberate against a fully-round edge except another fully-round edge.
 
+### The shape rule (NEW-1, 2026-08-31) — which step is for what, not just "which steps exist"
+
+The table above says four values are allowed; it doesn't say **which one a given control must
+use**, and two allowed-but-different values sitting side by side is drift the raw allowed-set can't
+see — both pass, and the owner's eye still catches it (*"just on the landing page attached there
+are a multitude of different radii and fillets for chips and i'd like to fix"*). The rule:
+
+- **`pill` is reserved for a CONTAINER that holds other controls** — a segmented shell, the account
+  chip, a toggle bar whose height *is* its shape. It is never a standalone action button's own
+  resting shape; the table above already says `pill` is for "any bar whose height is its shape,"
+  this just states the converse: nothing else may claim it.
+- **`md` (8) is every standalone actionable control** — a button, a text field, a chip sitting on
+  the map by itself, not nested inside another rounded surface.
+- **`lg` (12) is every surface that contains other things** — a floating panel, a menu, a dialog.
+- **`sm` (6) is a control nested inside one of the above**, resolved through `nestedIn()`, never
+  picked by eye.
+- Nothing else exists. A fifth value is never invented because a particular control "wants" one —
+  see radius.js's own header for why that's exactly how the pre-consolidation eight got there.
+
+**The binding clause: a NESTED control must never carry a different radius family than its own
+container demands.** Not "must be on the scale somewhere" — must be the specific step `nestedIn()`
+derives from *that* container. Two on-scale curves sitting flush against each other with different
+families is the specific thing the owner sees as sloppy, because the eye compares the two curves
+directly with no gap between them; a control that merely happens to be one of the four legal
+numbers, but the wrong one for its container, reads exactly as broken as an off-scale number does.
+
+**Worked example, from a real defect this rule closes (`MapFinder.jsx`'s `SiteCompSwitch`):** a
+small Site/Comp toggle sits inset 2px inside its own switch shell. The shell is `sm` (6) — already
+the smallest standalone step — so `nestedIn(RADIUS.sm, 2)` floors out at **4px, a fifth number no
+step names.** This is the one case the rule has an explicit escape for: **when a container's own
+radius is already `sm` (the smallest non-square step), a directly-nested control snaps to the
+CONTAINER's radius instead of minting an off-scale derived value** — matching the container exactly
+is "on the scale and in the right family" in a way that a perfectly-concentric-but-invented 4px is
+not. This only fires at the bottom of the ladder; nesting inside `md`, `lg`, or `pill` always lands
+on a real step (`nestedIn(8, gap)`, `nestedIn(12, gap)` and `nestedIn(999, gap)` all resolve to
+`sm`, `sm`/`md`-range integers on the ladder, or `pill` respectively for the gaps this app actually
+uses) and never needs the fallback.
+
+**Machine-enforced (NEW-2):** `ui-audit/ui-inventory.mjs`'s `nestingMismatches()` walks the real,
+rendered DOM for every crawled surface, finds each rounded control's nearest rounded, visually-
+containing ancestor, and asserts the child's radius equals `nestedIn(ancestorRadius, measuredGap)`
+(or, per the fallback above, equals the ancestor's own radius when the derived value would be
+off-scale) — a check `design-drift-audit.mjs` cannot make, because that guard is a text scan with
+no DOM and no geometry: it can confirm every number is *somewhere* on the scale without ever seeing
+that two adjacent, on-scale curves disagree with each other. Findings are printed in
+`docs/UI-INVENTORY.md`'s "Nesting mismatches" section, regenerated the same way as the rest of that
+file.
+
 **`src/shared/ui/controls.jsx`** declares its own literal, smaller scale —
 `RADIUS = { control: 8, pill: 999, panel: 12 }` — that predates `radius.js` and agrees with it by
 value (`control === md`, `panel === lg`). **This is a deliberate, documented duplicate, not
@@ -137,6 +185,18 @@ in the same commit (`controls.jsx`'s own header comment says the same).
    zero-visual-change cleanup and is exactly the kind of drift NEW-3's inventory is for — it is not
    a "documented exception" in the sense of being allowed to stay, it is backlog debt with a known,
    safe fix.
+4. **Leaflet's own map controls (the zoom stack, the "Find my location" button, the scale bar) are
+   third-party chrome, brought onto the scale where a curve is genuinely visible.** The zoom
+   stack's own container and the locate button's own container both carry `border-radius:
+   var(--radius-md)` overrides in `index.css` (scoped to the specific class each control renders,
+   so no other Leaflet widget is touched), with a `.leaflet-touch` variant written out for each —
+   Leaflet's own `.leaflet-touch .leaflet-bar a:first-child`/`:last-child` rule outranks a plainer
+   override at equal specificity, so the touch-mode selector has to be matched explicitly or the
+   override silently loses in exactly the environment this crawler runs in. **The scale bar is the
+   deliberate exception, not an oversight:** it is a ruler (a bottom-and-side border with no fill),
+   not a chip, so there is no filled box for a corner radius to make visible — rounding it would
+   change nothing a person could see. Same category as the Scheduler iframe: out of scope for the
+   token scale, but named here rather than left to look silently different.
 
 ## Spacing, type, and control-height scales (`src/shared/ui/designTokens.js`)
 
