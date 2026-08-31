@@ -139,18 +139,25 @@
      white-on-fill clears AA at 5.47:1 and the fill itself clears the dark chrome's 3:1
      underline floor at 3.18:1. */
   --accent-food:          #BE3B22;
+  /* Model: a mid blue, distinct from every other module hue. Computed, not eyeballed, and
+     checked against BOTH chrome shades because the fill has to clear the white-on-fill AA
+     floor (4.78:1) AND the dark-chrome underline floor (3.0) at once — a first pick,
+     #2B5FBF, cleared the first (6.01) and FAILED the second (2.90 against dark chrome-elev). */
+  --accent-model:         #3D6FD1;
   --on-accent-site:       #FFFFFF;
   --on-accent-schedule:   #FFFFFF;
   --on-accent-review:     #412402;   /* dark text on amber — never white */
   --on-accent-library:    #FFFFFF;
   --on-accent-notes:      #FFFFFF;
   --on-accent-food:       #FFFFFF;
+  --on-accent-model:      #FFFFFF;
   --accent-site-text:     #0F6E56;
   --accent-schedule-text: #534AB7;
   --accent-review-text:   #8A5410;
   --accent-library-text:  #0C677E;
   --accent-notes-text:    #8C2F69;
   --accent-food-text:     #9E3019;
+  --accent-model-text:    #1A4D8F;
 
   /* Semantic TEXT colors (success / danger / info) — theme-aware so a colored label
      stays AA on a themed panel in BOTH themes. A hardcoded #15803d / #b3361b / #1d4ed8
@@ -326,6 +333,7 @@
   --accent-library-text:  #5AC4DB;   /* light cyan on dark chrome (fill + on-accent inherit from light) */
   --accent-notes-text:    #F0A6D2;   /* light pink on dark chrome (fill + on-accent inherit from light) */
   --accent-food-text:     #F0906F;   /* light salmon on dark chrome (fill + on-accent inherit from light) */
+  --accent-model-text:    #8FB3EC;   /* light blue on dark chrome (fill + on-accent inherit from light) */
 
   /* Semantic TEXT colors — lightened for legibility on the dark panels (B354). */
   --success-text: #4FBF7B;

@@ -1211,8 +1211,19 @@ The full catalog of shipped-and-verified work (Site Planner, Supabase backend, m
     is deleted and the Library tab is the one and only file browser now.
 - **Private by default.** Any future sharing or shared workspaces default to private;
   sharing is always a deliberate, explicit act — never automatic.
-- **No admin / cross-user data access.** Deliberately omitted, for customer trust and
-  liability. Do not add a "god-mode" admin view.
+- **No cross-customer admin view — amended 2026-08-30 (owner go-ahead), superseded by B711904 /
+  B877442.** The original absolute form of this line ("no admin view, do not add one") stopped being
+  true in practice once B711904 shipped Michael's own internal operator page and B877442 added a
+  section to it — the docs were catching up to reality, not granting new permission. What actually
+  holds: an **owner-only internal admin surface** exists at `#/admin` (`src/workspaces/admin/`),
+  allowlisted to a single account (Michael's) through `admin_users` + the `is_admin()` SECURITY
+  DEFINER RPC — see that workspace's `CLAUDE.md`. It may read **operational** data about how the
+  product is running (telemetry / error rows from `client_errors`, feature-request queues like
+  B877442's county criteria requests) — never a per-customer support-agent view. It still may **NOT**
+  become a cross-customer view of other users' **plans, projects, or files**, and `admin_users` still
+  **never** gets a SELECT policy — the zero-policy RLS design (client can't read/write the allowlist
+  directly; `is_admin()` is the only door) stays load-bearing. The customer-trust reasoning behind the
+  original line is unchanged; only its absoluteness was wrong.
 - **Secrets stay in env/secrets, never committed.** Covers Supabase keys, the Autodesk
   APS key, and Google Drive credentials. The Supabase **anon key is RLS-protected and
   safe to ship in the client**; the Supabase **service_role key and all third-party

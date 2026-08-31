@@ -19,8 +19,9 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { RADIUS } from "../shared/ui/radius.js";
-import { supabaseConfigured } from "../workspaces/site-planner/lib/supabase.js";
+import { supabase, supabaseConfigured } from "../workspaces/site-planner/lib/supabase.js";
 import { signOut } from "../workspaces/site-planner/lib/auth.js";
+import { checkIsAdmin } from "../workspaces/admin/lib/adminAccess.js";
 import AnchoredMenu from "../shared/ui/AnchoredMenu.jsx";
 
 // Chrome tokens (theme-aware — the account surface themes WITH the app, B318/B341).
@@ -72,6 +73,7 @@ const ICON = {
   profile:  (<><circle cx="12" cy="8" r="4" /><path d="M4 20c0-4 4-6 8-6s8 2 8 6" /></>),
   team:     (<><circle cx="9" cy="8" r="3.2" /><path d="M3 19c0-3.2 2.7-5 6-5s6 1.8 6 5" /><path d="M16 5.5a3 3 0 0 1 0 5.5M17.5 19c0-2.6-1.3-4.2-3-4.8" /></>),
   settings: (<><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2" /></>),
+  admin:    (<><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3z" /></>),
   signout:  (<><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5M21 12H9" /></>),
 };
 
@@ -80,6 +82,22 @@ export default function AccountControl({ user, profileApi, onOpenAuth, onOpenAcc
   const [cloudNote, setCloudNote] = useState(false); // "Cloud off" explainer popover
   const acctAnchor = useRef(null);
   const who = profileApi?.displayName;
+
+  // NEW-1 (B711904 follow-up) — reuses the EXISTING admin gate (checkIsAdmin / is_admin()),
+  // never a second access mechanism. Fails closed and starts false, so there is nothing to
+  // flash: the Admin row below only ever APPEARS once a confirmed `true` comes back, it is
+  // never rendered greyed/disabled/pending. This is a CONVENIENCE link, not a security
+  // boundary — the route and every RPC behind it stay server-gated (admin_users keeps its
+  // zero-policy RLS; is_admin() is the only door), so a non-admin who types #/admin still
+  // gets the ordinary app exactly as before this link existed.
+  const [isAdmin, setIsAdmin] = useState(false);
+  const userId = user?.id || null;
+  useEffect(() => {
+    let live = true;
+    if (!userId) { setIsAdmin(false); return; }
+    checkIsAdmin(supabase).then((ok) => { if (live) setIsAdmin(ok); });
+    return () => { live = false; };
+  }, [userId]);
 
   // Close the dropdown on ANY workspace navigation. Every module switch — a tab click, a
   // programmatic navigate, AND browser Back/Forward — goes through window.location.hash and
@@ -206,6 +224,19 @@ export default function AccountControl({ user, profileApi, onOpenAuth, onOpenAcc
         <button style={acctRow} onClick={() => { setAcctOpen(false); onOpenAccount("settings"); }} onMouseEnter={hoverOn} onMouseLeave={hoverOff}>
           <RowIcon d={ICON.settings} /> Settings
         </button>
+        {isAdmin && (
+          <>
+            <div style={acctDivider} />
+            <button
+              data-testid="account-admin-row"
+              style={acctRow}
+              onClick={() => { setAcctOpen(false); window.location.hash = "#/admin"; }}
+              onMouseEnter={hoverOn} onMouseLeave={hoverOff}
+            >
+              <RowIcon d={ICON.admin} /> Admin
+            </button>
+          </>
+        )}
         <div style={acctDivider} />
         <button style={acctRow} onClick={async () => { setAcctOpen(false); await signOut(); }} onMouseEnter={hoverOn} onMouseLeave={hoverOff}>
           <RowIcon d={ICON.signout} /> Sign out

@@ -5,7 +5,7 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-08-28._
+_Last updated: 2026-08-31._
 
 ## 🔐 Two small GitHub settings — both fix the same shape of problem: a robot that can't quite finish its own job (B825232–B825234)
 
@@ -19,13 +19,34 @@ _Last updated: 2026-08-28._
       now its connection to GitHub refuses to let it save anything to this project directly, so every
       one of those checks has to be handed off and re-entered — which is exactly how **79 of those
       checks piled up waiting** before this was noticed. **Soon, not urgent.**
-- [ ] **Confirm/flip the repo's "Workflow permissions" setting** (`github.com/mikeab7/planyr/settings/actions`
-      → **Workflow permissions** → select **"Read and write permissions"** → Save). This is the one
-      thing standing between "a session opens a task list for review" and "it opens ready to merge on
-      its own once it's green" — right now that last automatic step fails silently every time, and a
-      session has to do it by hand instead. **Two-minute setting, no code, no downside** — full
-      background on `B793696`; the live re-check that closes this out once you've flipped it is
-      `V438336` in `VERIFICATION.md`, run by whichever Claude session is active when you confirm it's done.
+- [x] **Confirm/flip the repo's "Workflow permissions" setting** — DONE 2026-08-31, confirmed by you directly
+      from `github.com/mikeab7/planyr/settings/actions` (now reads "Read and write permissions").
+      **⛔ BUT this did NOT fix the underlying problem — a new to-do replaces it below.** The live re-test
+      (`V438336`) ran right after your confirmation and got the **identical FORBIDDEN error** as before the
+      flip (`markPullRequestReadyForReview` still fails "Resource not accessible by integration" on a fresh
+      real PR, #1246). So the "Workflow permissions" ceiling was not the whole story after all.
+- [ ] **Decide on the neighbouring checkbox: "Allow GitHub Actions to create and approve pull requests"**
+      (same settings page, currently unchecked). It's the next empirical thing to try — `markPullRequestReadyForReview`
+      (taking a PR out of draft) may be bucketed under this PR-lifecycle permission by GitHub even though it
+      doesn't literally create or approve anything. **Tradeoff to weigh first:** checking it also lets any
+      Actions workflow approve its own pull requests, which is a real (if narrow) security loosening — that's
+      exactly why past sessions were told to leave it alone until you decide it's worth it. No session should
+      flip this on its own initiative; it needs your call. Once you flip it (or decide not to), say so and a
+      session re-runs `V438336` again. Full background: `B793696` in `BACKLOG.md`.
+- [ ] **Check whether `main` has a branch-protection rule set** (`github.com/mikeab7/planyr/settings/branches`)
+      — a SEPARATE question from the two above (those are about un-drafting a PR; this is about arming
+      auto-merge on one that's already ready). Found 2026-08-31 (`B897440`) while shipping PR #1245: even
+      after the Workflow-permissions flip and un-drafting the PR by hand, GitHub still refused to arm
+      auto-merge — first "Protected branch rules not configured for this branch," then (once the checks
+      themselves went green) "Pull request in unstable status." GitHub's auto-merge needs a protection rule
+      (at minimum, a required status check) on `main` before it will queue anything, so either there isn't
+      one, or it exists but doesn't name `build` as required. If there's no rule: add one requiring the
+      `build` check to pass before merging. **Nothing is broken while this waits** — a session just has to
+      merge each green PR by hand instead of it happening on its own, same as before this automation existed.
+- [ ] **Two stale throwaway probe branches need deleting** — `claude/verify-pr-auto-ready-throwaway` and
+      `claude/verify-pr-auto-ready-20260831-001137`. Both are closed PRs' leftover branches from testing the
+      item above; no session's git credentials can delete a remote branch here (`HTTP 403`), and there's no
+      GitHub tool for it either. Harmless clutter, delete whenever convenient from the GitHub branches page.
 
 ## 👀 One thing only you can check: does the app actually TELL you when it has stopped saving? (V273520 / B484337)
 

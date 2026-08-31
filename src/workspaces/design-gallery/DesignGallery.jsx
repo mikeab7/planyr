@@ -45,11 +45,11 @@ const STATUS_PREVIEW = {
 
 const MODULE_TEXT_TOKEN = {
   "site-planner": "--accent-site-text", "scheduler": "--accent-schedule-text", "doc-review": "--accent-review-text",
-  "library": "--accent-library-text", "notes": "--accent-notes-text",
+  "library": "--accent-library-text", "notes": "--accent-notes-text", "model": "--accent-model-text",
 };
 const MODULE_ON_ACCENT = {
   "site-planner": "--on-accent-site", "scheduler": "--on-accent-schedule", "doc-review": "--on-accent-review",
-  "library": "--on-accent-library", "notes": "--on-accent-notes",
+  "library": "--on-accent-library", "notes": "--on-accent-notes", "model": "--on-accent-model",
 };
 
 function Specimen({ label, tokens, children }) {

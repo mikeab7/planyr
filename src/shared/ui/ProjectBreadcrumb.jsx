@@ -141,15 +141,24 @@ const CalendarIcon = ({ size = 12 }) => (
   </svg>
 );
 
-// NEW-3 — was RADIUS.sm. This is a standalone chip sitting directly on the header bar (its rest
-// state is transparent/borderless, but its hover/open fill is what makes the shape visible), the
-// same category as the row-2 toolbar's File ▾ / dIcon / rbtn buttons — RADIUS.md per radius.js's
-// own rule ("sm" is for a control nested inside another rounded surface).
+// B885137 (NEW-2) — header shrink, owner-approved (2026-08-30/31, "Headers — before / after"
+// artboard). height 24→22 (--control-h-sm, matches the row's other 22-tall controls at the
+// new density) + fontSize 12.5→11.5 (--font-md) — measured against the LIVE app first (not the
+// artboard's assumed "today" baseline, which read 15px/13px vertical padding neither of which
+// this component ever had; the real defect was only the wordmark exceeding --font-display, see
+// AppHeader.jsx's own note). CRUMB_MIN_W is untouched — NAVIGATION WINS is a floor on
+// character count, not on font size, and shrinking the font makes more of that floor's width
+// actually show name rather than clip it.
+// NEW-3 (design-drift merge) — borderRadius RADIUS.sm → RADIUS.md, independently of the density
+// change above: this is a standalone chip sitting directly on the header bar (its rest state is
+// transparent/borderless, but its hover/open fill is what makes the shape visible), the same
+// category as the row-2 toolbar's File ▾ / dIcon / rbtn buttons — RADIUS.md per radius.js's own
+// rule ("sm" is for a control nested inside another rounded surface, which this isn't).
 const crumbBtn = (extra) => ({
   display: "flex", alignItems: "center", gap: 5, flex: "none",
-  height: 24, padding: "0 8px", borderRadius: RADIUS.md,
+  height: 22, padding: "0 8px", borderRadius: RADIUS.md,
   border: "none", background: "transparent", cursor: "pointer",
-  fontFamily: "inherit", fontSize: 12.5, fontWeight: 600, whiteSpace: "nowrap",
+  fontFamily: "inherit", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap",
   ...extra,
 });
 
