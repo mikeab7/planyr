@@ -26,6 +26,15 @@ import { bufferPolyline } from "./metesAndBounds.js";
 import { DEFAULT_ROAD_CLASS, roadClassOf } from "./roadClasses.js";
 import { ensureZ } from "./zOrder.js";
 import { normCountyKey } from "../../../shared/gis/countyKeys.js";
+// B927105 — the schema-version + status constants live in siteStatus.js (dependency-free) so a
+// caller that only needs a status label (doc-review/lib/reviewStore.js, siteListLight.js)
+// doesn't have to import this whole module's heavy geometry graph. Re-exported below so this
+// module's own public surface is unchanged.
+import {
+  SITE_MODEL_VERSION, STATUSES, STATUS_META, DEFAULT_STATUS, LEGACY_STATUS,
+  normStatus, isLegacyRecord, statusOf,
+} from "./siteStatus.js";
+export { SITE_MODEL_VERSION, STATUSES, STATUS_META, statusOf };
 
 // v12 (B671): every drawn element carries an explicit `z` — the within-type-layer stacking
 // tiebreak that used to be IMPLICIT array position (see planStyle.byZ). `ensureZ` assigns a gapped
@@ -40,37 +49,10 @@ import { normCountyKey } from "../../../shared/gis/countyKeys.js";
 // its plans (the `site` field), so without a stamp there is no fact that says which copy is current
 // and a stale plan re-publishes the old name over a completed rename. See lib/projectName.js.
 
-export const SITE_MODEL_VERSION = 13;
-
 // Markup `kind`s grouped by what they MEAN (used by the selectors).
 export const EASEMENT_KINDS = ["encumbrance", "easement"];        // title metes-and-bounds tracts/corridors + first-class easement objects (NEW-1)
 export const UTILITY_KINDS = ["utilRoute", "traced", "infwater"]; // service routes, traced overhead lines, inferred mains
 export const ANNOTATION_KINDS = ["line", "polyline", "rect", "ellipse", "polygon", "cloud"]; // neutral drawing markups
-
-/* Project lifecycle status — the deal stage of a site, shown on the map markers.
- * Ordered pursuit → active → onhold → complete → dead (deal funnel order). New
- * sites default to "pursuit"; pre-feature records (no status) migrate to "active"
- * (they predate the field and are presumed live). `STATUSES` is the ordered key
- * list; `STATUS_META` carries the label used across the UI (legend/menu/counts). */
-export const STATUSES = ["pursuit", "active", "onhold", "complete", "dead"];
-export const STATUS_META = {
-  pursuit: { label: "Pursuit" },
-  active: { label: "Active" },
-  onhold: { label: "On Hold" },
-  complete: { label: "Complete" },
-  dead: { label: "Dead" },
-};
-const DEFAULT_STATUS = "pursuit";       // a brand-new site
-const LEGACY_STATUS = "active";          // pre-feature records (no status yet)
-const normStatus = (s, fallback) => (STATUSES.includes(s) ? s : fallback);
-// A record already stamped with an older schemaVersion predates the status feature,
-// so a record with NO explicit status is presumed live → "active". Records v3+ carry
-// an explicit status, so the version bump (→6 B276 delete-tombstones, →7 B362/B363
-// bump-out sizing + bonded-rotation repair, →8 team sharing teamId/ownerId, →9 cross-module
-// schedule link hint scheduleProjectId/Name, →10 centerline road model B596 pts/vtx/
-// travelW/roadClass, →11 parcel split lineage `parentId` B651) doesn't disturb it. (saveSite re-normalizes
-// through this, so the status it reads back is the explicit one when a status was passed in.)
-const isLegacyRecord = (p) => typeof p.schemaVersion === "number" && p.schemaVersion < SITE_MODEL_VERSION;
 // Type-confusion guards: a tampered/legacy/bad-sync record can carry a non-array where an array is
 // expected (e.g. `parcels` as a string), which then throws on `.reduce`/`.map` and blanks the app.
 // Coerce every collection so one malformed record can't crash the planner on load.
@@ -1698,8 +1680,9 @@ export const sheetOverlaysOf = (m) => m.sheetOverlays || [];
 // Parcel-attached drawings (B67) — immutable backdrop + pixel-relative markup, per parcel.
 export const parcelDrawingsOf = (m, parcelId = null) =>
   (m.parcelDrawings || []).filter((d) => parcelId == null || d.parcelId === parcelId);
-// Deal stage, always one of STATUSES (defaults to "pursuit" if somehow unset).
-export const statusOf = (m) => normStatus(m && m.status, DEFAULT_STATUS);
+// Deal stage, always one of STATUSES (defaults to "pursuit" if somehow unset). Imported from
+// siteStatus.js and re-exported at the top of this file — kept here as a comment landmark since
+// this is where a reader would look for it.
 
 // Team sharing (team feature). `teamId` = the team this plan is shared with (null = private);
 // `ownerId` = the user who created it (set from the DB user_id column by cloudList). Returns a

@@ -7,6 +7,12 @@
  * any workspace without dragging in the localStorage/Supabase chain.
  */
 
+// How long a deleted project stays in the "Recently deleted" bin before it's purged for good.
+// Canonical here (a pure, dependency-free constant) rather than in storage.js, so a caller that
+// only needs the NUMBER — the breadcrumb's confirmation copy — never has to import the engine
+// that owns the delete itself (B927105). storage.js imports it from here.
+export const DELETED_RETENTION_DAYS = 30;
+
 // Collapse a flat list of site-model records (each: { groupId|id, site|name,
 // updatedAt, status }) into one project entry per group, sorted most-recently-edited
 // first. The group's name/status/updatedAt come from its newest record (records are
