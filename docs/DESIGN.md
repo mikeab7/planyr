@@ -172,31 +172,70 @@ on-scale and on-family per every rule above. The pair still reads as sloppy, bec
 compares two adjacent curves directly when there is no gap between them** — the same perceptual fact
 the nesting rule's binding clause already turns on, just without a container in play.
 
-**The resolution is not reclassifying either control.** A pill genuinely is the right shape for a
-compound identity chip, and `md` genuinely is the right shape for a lone icon button — collapsing
-that distinction to make two unrelated controls match would be worse than the mismatch it fixes (see
-`controls.jsx`'s own `IconButton` primitive, which is `md` by design). **The binding rule instead:**
+**⛔ SUPERSEDED FOR THIS SPECIFIC PAIR, B972096, 2026-08-31 — a divider satisfied the RULE below
+without ever converging the ROW, and the owner reported the same mismatch a third time.** The
+original resolution here was a hairline divider between the icon-button cluster and the identity
+pill (kept the pill a pill, kept the buttons `md`, drew a boundary between the two families). It
+made every check pass and the owner still saw "a full pill next to a small square" — because a
+divider makes two DIFFERENT families acceptable side by side, but it does not make the row itself
+read as one consistent thing, which is what he was actually asking for. **The corrected resolution
+for the account chip specifically: it was never really a container.** Per the shape rule below, a
+`pill` is for something that genuinely holds several sub-controls with its own internal structure (a
+segmented toggle, a bar whose height IS its shape); the account chip holds an avatar, a name and a
+caret, but it is still fundamentally ONE control that opens ONE menu — the same shape as the row's
+"File ▾" button, which nobody would call a pill. It, the "Cloud off" chip (its no-Supabase sibling),
+and the presence "N here" chip (`SitePlanner.jsx`'s `saveSlot`) are now `RADIUS.md`, matching
+`FullscreenButton`/`SettingsMenu`/`CloudSyncBadge` — one family across the whole row, no divider
+needed, because there is no family boundary left to mark. **The general rule below is unchanged and
+still governs every OTHER pair in the app**; only the specific claim that this pair's fix was "insert
+a divider" is retracted. If a future control genuinely IS a container of several sub-controls, it is
+still correctly a `pill`, and a divider is still the right way to mark it off from a `md` neighbor.
+
+**The general rule, unchanged:**
 
 - **Two different radius families may sit in the same control row, but only with a visible boundary
   between them** — a divider, or genuine clear space (`docs/DESIGN.md`'s own reading of "gap" here is
   a real gap, not the small `SPACE.sm`/`SPACE.md` a same-family row uses between its own members).
   Flush adjacency (the app's ordinary flex `gap`, 6–8px, with nothing else between) is never
   acceptable between two families, however individually correct each one is.
-- **The fix for the account-chip/fullscreen pair is a hairline divider** — `AppHeader.jsx`'s row-1
-  right zone now inserts the same `1px` divider this header already uses between the wordmark and the
-  breadcrumb, between the icon-button cluster (save badge, fullscreen, gear — all `md`) and the
-  identity pill. This is the general pattern: a cluster boundary is drawn where a family boundary
-  falls, not invented per pair.
+- A cluster boundary is drawn where a genuine family boundary falls — never invented per pair, and
+  never reached for as the first fix when the honest fix is converging one of the two controls onto
+  the other's family (as above).
 
-**Machine-enforced:** `ui-audit/ui-inventory.mjs`'s `siblingMismatches()` groups the same on-scale
-rounded-candidate pool `nestingMismatches()` builds by shared flex-row ancestor (not bare immediate
-parent — a wrapped-one-level-deeper sibling, e.g. a popover-anchor `<div>`, must still be caught),
-walks adjacent pairs left-to-right, and flags a pair whose families differ and whose gap reads as
-flush. Findings print in `docs/UI-INVENTORY.md`'s "Sibling radius mismatches" section. It found a
-second, independently pre-existing instance the owner never reported — the header's plan-name chip
-had drifted to `RADIUS.sm` after the adjacent project-breadcrumb chip moved `sm`→`md`, silently
-breaking that chip's own comment claiming they matched — fixed the same way this item shipped
+**Machine-enforced, and — per B972097's own instruction not to overclaim — stated exactly:**
+`ui-audit/ui-inventory.mjs`'s `siblingMismatches()` groups the same on-scale rounded-candidate pool
+`nestingMismatches()` builds by shared flex-row ancestor (not bare immediate parent — a
+wrapped-one-level-deeper sibling, e.g. a popover-anchor `<div>`, must still be caught), walks
+adjacent pairs left-to-right, and flags a pair whose families differ and whose gap reads as flush.
+Findings print in `docs/UI-INVENTORY.md`'s "Sibling radius mismatches" section. It found a second,
+independently pre-existing instance the owner never reported — the header's plan-name chip had
+drifted to `RADIUS.sm` after the adjacent project-breadcrumb chip moved `sm`→`md`, silently breaking
+that chip's own comment claiming they matched — fixed the same way this item shipped
 (`SitePlanner.jsx`'s plan-name chip is `RADIUS.md` again).
+
+**B972097 (NEW-2) tightened the adjacency test itself, because the ORIGINAL version of this check
+was the very thing that let the account-chip pair "pass" twice without converging:** a gap wider than
+the threshold used to exempt a pair outright, so both the B950320 divider and the B958466
+`CloudSyncBadge` token reclassification cleared the check by making the pair read as "not adjacent"
+— never by making the row look right. The check now asks, for any pair whose gap exceeds the
+threshold, whether a divider-shaped element (a real bar, not a stray pixel) sits inside that gap; if
+one does, the pair is still judged as adjacent and still has to agree, and a finding on such a pair
+is annotated `(divider-separated)` in the generated report. **Stated exactly, because a check like
+this invites overclaiming both ways:**
+- **What it now catches:** a mismatched pair separated ONLY by a divider (the literal B950320/B958466
+  shape) can no longer clear the check by that separation alone. Proven with a teeth-check before
+  shipping — reproducing the account-chip pair with a divider reinstated and its radius reverted to
+  `pill` returns 6 findings, all `(divider-separated)`, where the pre-B972097 code returned 0 on the
+  identical DOM.
+- **What it still cannot tell:** whether a divider it finds is `docs/DESIGN.md`'s real divider spec
+  (1px, the `--chrome-divider` token) or merely some other thin element that happens to fit the width
+  budget — it does not check color or token use, only shape and position. Nor can it distinguish a
+  genuine family boundary (two clusters that were never meant to visually agree — e.g. the row's
+  logo/wordmark area vs. its action buttons) from a divider being used as a loophole to silence a
+  mismatch that should have been converged instead. Both read identically as `(divider-separated)`
+  in the report; a human still has to look at the flagged pair and judge which one it is. The check's
+  job stops at "this still needs a human's attention" — it does not (and structurally cannot) decide
+  whether that attention should end in a divider staying or a radius converging.
 
 **`src/shared/ui/controls.jsx`** declares its own literal, smaller scale —
 `RADIUS = { control: 8, pill: 999, panel: 12 }` — that predates `radius.js` and agrees with it by
