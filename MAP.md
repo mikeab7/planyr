@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-31 @ `7c52e9b7` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-31 @ `77c1eed0c` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -978,7 +978,7 @@ _621 source files mapped._
 - **`src/workspaces/site-planner/lib/polyClip.js`** — Pure polygon intersection-AREA via ear-clip triangulation + Sutherland–Hodgman; pairwise active-parcel overlap detection for the B652 double-count warning; clipper-lib UNION/dissolve of overlapping active parcels for correct site acreage (B715)
   - _exports_: `dissolvedParcelSqft`, `overlappingParcelPairs`, `PARCEL_OVERLAP_TOL`, `polyIntersectArea`, `triangulate`
 - **`src/workspaces/site-planner/lib/polygonSplit.js`** — Pure parcel-split geometry: straight-line cut pairing all crossings for concave lots, plus bent-polyline path cut
-  - _exports_: `CUT_REASONS`, `nearestPointOnSeg`, `polyArea`, `polySelfIntersects`, `remapEdgeVector`, `segLineIntersect`, `signedArea`, `splitPolygonByCut`, `splitPolygonByLine`, `splitPolygonByPath`
+  - _exports_: `CUT_REASONS`, `mergePieceRings`, `nearestPointOnSeg`, `polyArea`, `polySelfIntersects`, `remapEdgeVector`, `segLineIntersect`, `sharedBoundaryLength`, `signedArea`, `SLIVER_FRACTION`, `snapTinyPieces`, `splitPolygonByCut`, `splitPolygonByLine`, `splitPolygonByPath`
 - **`src/workspaces/site-planner/lib/polylabel.js`** — pole of inaccessibility (largest inscribed circle centre) for a ring; the parcel acreage badge's anchor, always inside the polygon
   - _exports_: `polylabel`, `signedDist`
 - **`src/workspaces/site-planner/lib/pondChangeSummary.js`** — Pure "what changed" support for ⚡ Design pond (B909 round 4): plain-English before/after delta rows, the atomic infeasibility gap-proposal sentence, and schematic (not-to-scale) cross-section marks
@@ -1112,7 +1112,7 @@ _621 source files mapped._
 - **`src/workspaces/site-planner/lib/sourceHealth.js`** — Per-source circuit breaker for county parcel servers: track consecutive failures, open/cooldown/half-open, filter healthy candidates, and decide the honest statewide-backup badge
   - _exports_: `filterHealthyCandidates`, `isSourceOpen`, `isStatewideBackup`, `recordSourceResult`, `resetSourceHealth`, `SOURCE_COOLDOWN_MS`, `SOURCE_FAIL_THRESHOLD`, `sourceCooldownMs`
 - **`src/workspaces/site-planner/lib/splitIntegrity.js`** — What a parcel split must conserve, measured across the parcels that are ACTIVE **and not deleted** — reading either column alone silently passes (`active` alone balances a piece that has vanished; `!deleted` alone double-counts a superseded parent). Three checks: area conservation, union-outline equality against the parent (the owner's own argument for dropping the superseded parent — the children's union reproduces its outline, so it adds nothing but a duplicate boundary; it also catches a cut that balances area while leaving a gap), and whether a split's own emitted pieces survived its operation window. Names no culprit for a piece that did not — the rows cannot say.
-  - _exports_: `ancestorChain`, `AREA_TOLERANCE_SQFT`, `auditSplit`, `isActive`, `isLiveActive`, `lineageAudit`, `liveActive`, `liveExisting`, `OUTLINE_TOLERANCE_SQFT`, `overlappingPairs`, `parentCycles`, `ringAreaAcres`, `ringAreaSqft`, `SPLIT_SURVIVAL_WINDOW_MS`, `splitConservation`, `splitOutputsSurvived`, `SQFT_PER_ACRE`, `unionOutlineMatches`
+  - _exports_: `ancestorChain`, `AREA_TOLERANCE_SQFT`, `auditSplit`, `deletedInactiveViolations`, `isActive`, `isLiveActive`, `lineageAudit`, `liveActive`, `liveExisting`, `OUTLINE_TOLERANCE_SQFT`, `overlappingPairs`, `parentCycles`, `ringAreaAcres`, `ringAreaSqft`, `SPLIT_SURVIVAL_WINDOW_MS`, `splitConservation`, `splitOutputsSurvived`, `SQFT_PER_ACRE`, `unionOutlineMatches`
 - **`src/workspaces/site-planner/lib/stageStorageDischarge.js`** — Stage-storage-discharge curve (NEW-A3): pairs pondGeom storage (volumeBetween) with the outlet rating curve over the basin's stage range; interpolation helpers feed the reservoir routing. Anchored ponds only. Pure.
   - _exports_: `buildStageStorageDischarge`, `dischargeAtElev`, `dischargeAtStorage`, `elevAtStorage`, `storageAtElev`
 - **`src/workspaces/site-planner/lib/standardsApply.js`** — Standards "Apply now" (NEW-3): push a standard onto existing parcels (stamped → write) or existing elements (render-resolved → clear the per-element override), plus the impact counts the chip shows.

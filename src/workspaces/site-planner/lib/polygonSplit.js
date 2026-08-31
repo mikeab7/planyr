@@ -193,6 +193,7 @@ const CUT_REASONS = {
   "area-mismatch": "That cut couldn't be resolved cleanly — the pieces don't add back up to the original acreage, so nothing was changed.",
   "self-intersecting": "That cut produces a piece whose outline crosses itself, so nothing was changed.",
   "parcel-self-crossing": "That parcel's own outline crosses itself, so its acreage and the land it encloses disagree — fix the outline before splitting it.",
+  "sliver-only": "That cut only clips off a sliver too small to be its own parcel — draw it further in so both pieces are real parcels.",
 };
 
 // How far a parcel's quoted (shoelace) acreage may sit from the land its outline actually
@@ -204,6 +205,100 @@ const SELF_OVERLAP_TOL = 1e-4;
 const SLIVER_FRACTION = 1e-5;
 
 const fail = (code, extra) => ({ ok: false, pieces: null, code, message: CUT_REASONS[code] || CUT_REASONS["no-division"], ...extra });
+
+/* ⛔ B966628 (NEW-5, owner 2026-08-31) — SUB-MINIMUM FRAGMENTS SNAP INTO A NEIGHBOUR INSTEAD OF
+ * STANDING ALONE. This REFINES B520560's "nothing may be discarded silently" — it does not
+ * reverse it: snapping CONSERVES every square foot (it is absorbed into the piece it shares the
+ * longest boundary with, never dropped), it is reported, and it fixes the actual complaint —
+ * a 20 sqft "Parcel 2A1A1C" the owner had to notice and delete by hand, and the duplicate-named
+ * debris three separate cut ATTEMPTS on the same lot left behind because each one produced its
+ * own throwaway sliver. The threshold is the SAME `SLIVER_FRACTION` that already computed `tiny`
+ * below — one number, not a second one to keep in sync or disagree with.
+ *
+ * Two pieces of one cut are faces of the SAME planar arrangement, so a shared boundary is
+ * EDGE-EXACT — this is the identical cancellation `SitePlanner.jsx`'s `mergeRings` uses to undo a
+ * user-requested merge, specialised here to also carry `edgeSrc` (setback/role provenance) through
+ * the join. If merging the smallest sliver into its best neighbour would leave FEWER THAN 2 pieces
+ * (the whole cut only ever clipped off a fragment), snapping is not attempted — the cut is refused
+ * instead, by the caller, with a real reason ("too small to make its own parcel") rather than a
+ * near-no-op that quietly returns the parcel almost whole. */
+function ringEdges(piece) {
+  const n = piece.ring.length, out = [];
+  for (let i = 0; i < n; i++) out.push({ a: piece.ring[i], b: piece.ring[(i + 1) % n], src: piece.edgeSrc[i] });
+  return out;
+}
+
+function sharedBoundaryLength(p1, p2, tol) {
+  const eq = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) <= tol;
+  let len = 0;
+  for (const e1 of ringEdges(p1)) {
+    for (const e2 of ringEdges(p2)) {
+      if (eq(e1.a, e2.b) && eq(e1.b, e2.a)) len += Math.hypot(e1.a.x - e1.b.x, e1.a.y - e1.b.y);
+    }
+  }
+  return len;
+}
+
+/* Fuse two pieces along their cancelling (shared) edges — the merge inverse of the cut that made
+ * them. Returns `{ ring, edgeSrc }` or null when they share no boundary (never assumed). */
+function mergePieceRings(p1, p2, tol) {
+  const eq = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) <= tol;
+  const edges = [...ringEdges(p1), ...ringEdges(p2)].map((e) => ({ ...e, dead: false }));
+  let shared = 0;
+  for (let i = 0; i < edges.length; i++) {
+    if (edges[i].dead) continue;
+    for (let j = 0; j < edges.length; j++) {
+      if (j === i || edges[j].dead) continue;
+      if (eq(edges[i].a, edges[j].b) && eq(edges[i].b, edges[j].a)) { edges[i].dead = edges[j].dead = true; shared++; break; }
+    }
+  }
+  if (!shared) return null;
+  const live = edges.filter((e) => !e.dead);
+  if (live.length < 3) return null;
+  const used = new Array(live.length).fill(false);
+  const ring = [live[0].a, live[0].b], edgeSrc = [live[0].src];
+  used[0] = true;
+  for (let guard = 0; guard < live.length + 2; guard++) {
+    const end = ring[ring.length - 1];
+    let f = -1;
+    for (let k = 0; k < live.length; k++) { if (!used[k] && eq(live[k].a, end)) { f = k; break; } }
+    if (f < 0) break;
+    used[f] = true;
+    ring.push(live[f].b);
+    edgeSrc.push(live[f].src);
+  }
+  if (ring.length > 1 && eq(ring[0], ring[ring.length - 1])) ring.pop();
+  if (ring.length < 3 || ring.length !== edgeSrc.length) return null; // the walk didn't close cleanly — never guess
+  return { ring, edgeSrc };
+}
+
+/* Repeatedly absorbs the smallest sub-threshold piece into whichever OTHER piece it shares the
+ * longest boundary with, until none remain (or merging would leave <2 pieces, which the caller
+ * refuses rather than accepts as a near-whole "split"). `null` = refuse; otherwise the corrected
+ * piece list (still sorted largest-first) and how many pieces were absorbed. */
+function snapTinyPieces(pieces, whole, tol) {
+  let list = pieces.map((p) => ({ ...p }));
+  let absorbed = 0;
+  for (let guard = 0; guard < pieces.length + 2; guard++) {
+    const idx = list.reduce((best, p, i) => (p.area <= whole * SLIVER_FRACTION && (best < 0 || p.area < list[best].area) ? i : best), -1);
+    if (idx < 0) break;
+    if (list.length <= 2) return null; // the last sliver: merging it would leave <2 pieces — refuse
+    const tinyPiece = list[idx];
+    const rest = list.filter((_, i) => i !== idx);
+    let best = null, bestLen = 0;
+    for (const cand of rest) {
+      const len = sharedBoundaryLength(tinyPiece, cand, tol);
+      if (len > bestLen) { bestLen = len; best = cand; }
+    }
+    if (!best) return null; // no shared boundary with anything — should not happen; refuse rather than guess
+    const fused = mergePieceRings(best, tinyPiece, tol);
+    if (!fused) return null;
+    const newPiece = { ring: fused.ring, edgeSrc: fused.edgeSrc, area: polyArea(fused.ring) };
+    list = rest.filter((p) => p !== best).concat([newPiece]);
+    absorbed++;
+  }
+  return { pieces: list.sort((a, b) => b.area - a.area), absorbed };
+}
 
 // Drop consecutive coincident points. Returns the surviving points plus, for each, the index it
 // held in the input — so edge provenance can be reported against the ORIGINAL ring.
@@ -553,25 +648,34 @@ function splitPolygonByCut(points, path, opts = {}) {
   const traced = keep
     .map((f) => ({ ring: f.ring, edgeSrc: f.edgeSrc, area: Math.abs(f.signed) }))
     .sort((a, b) => b.area - a.area);
-  /* ⛔ SLIVERS ARE KEPT — B520560, owner decision, and it REVERSES what B455360 shipped.
-   * That first cut dropped any piece under a hundred-thousandth of the parent (a corner clipped by
-   * the cut, or the doubly-wound crumb the Bain tract's own broken outline leaves behind) and
-   * reported the loss. His instruction is the opposite and it is the safer rule:
-   *   "Nothing may be discarded silently — if a cut produces a sliver, he gets it as a parcel
-   *    rather than losing the acreage."
-   * So every traced piece is returned. `tiny` still NAMES the ones too small to notice on screen,
-   * because an eight-square-foot parcel on a hundred-acre plan is invisible and he should be told
-   * it exists — but it is a notice, not a removal. The only faces that never become pieces are
-   * those with no measurable area at all (already dropped at the trace, at one part in a billion),
-   * which are numerical noise rather than land. */
-  const pieces = traced;
-  const small = pieces.filter((p) => p.area <= whole * SLIVER_FRACTION);
-  const tiny = small.length
-    ? { count: small.length, area: small.reduce((a, p) => a + p.area, 0) }
+  /* ⛔ B520560, owner decision, and it REVERSES what B455360 shipped: nothing traced here is ever
+   * silently DROPPED. That first cut discarded any piece under a hundred-thousandth of the parent
+   * (a corner clipped by the cut, or the doubly-wound crumb the Bain tract's own broken outline
+   * leaves behind) and reported the loss; his instruction was the opposite: *"Nothing may be
+   * discarded silently — if a cut produces a sliver, he gets it as a parcel rather than losing the
+   * acreage."* That guarantee still holds byte-for-byte — see `snapTinyPieces` above: land under
+   * threshold is FUSED into a neighbour (every square foot survives), never removed. B966628
+   * refines what "gets it as a parcel" means for a fragment too small to be its own row; it does
+   * not reopen whether the acreage survives. */
+  const small0 = traced.filter((p) => p.area <= whole * SLIVER_FRACTION);
+  const tiny = small0.length
+    ? { count: small0.length, area: small0.reduce((a, p) => a + p.area, 0) }
     : null;
+  let pieces = traced;
+  let snapped = null;
+  if (small0.length && traced.length > small0.length) {
+    // At least one non-tiny piece exists, so snapping has somewhere to land.
+    const snap = snapTinyPieces(traced, whole, tol);
+    if (!snap) return fail("sliver-only", { tiny });
+    pieces = snap.pieces;
+    if (snap.absorbed) snapped = { count: snap.absorbed, area: tiny.area };
+  } else if (small0.length && traced.length === small0.length) {
+    // Every piece is a sliver — there is nothing worth landing them on.
+    return fail("sliver-only", { tiny });
+  }
   if (pieces.length < 2) return fail("no-division");
   if (pieces.some((p) => polySelfIntersects(p.ring))) return fail("self-intersecting");
-  return { ok: true, pieces, extended, outlineDrift, tiny };
+  return { ok: true, pieces, extended, outlineDrift, tiny: snapped ? null : tiny, snapped };
 }
 
 /* A point strictly inside a traced face. Its centroid is not usable — a face can be any shape at
@@ -630,4 +734,5 @@ export {
   polyArea, signedArea, segLineIntersect, nearestPointOnSeg,
   splitPolygonByLine, splitPolygonByPath,
   splitPolygonByCut, remapEdgeVector, polySelfIntersects, CUT_REASONS,
+  snapTinyPieces, mergePieceRings, sharedBoundaryLength, SLIVER_FRACTION,
 };

@@ -675,7 +675,7 @@
 | B955 | Connect roads to parking drives + truck-court drives (type-aware intersection) | [Site Planner / drawing] | #site-planner #road #ui | ⏳ live — awaiting |
 | B953 | Clean T-intersection at a road tee: curb return radii + widened throat + merged pavement | [Site Planner / drawing] | #site-planner #road #ui | ⏳ live — awaiting |
 | B951 | Element-label collision must also avoid parcel-area badges (B121 round 4) | [Site Planner / labels] | #site-planner #ui | ⏳ live — awaiting |
-| B952 | Deleting a Library file leaves a stray map Reference; make the two features' independence clear | [Site Planner + Library / references] | #site-planner #library #files #ui | ⏳ live — awaiting |
+| B952 | Deleting a Library file leaves a stray map Overlay; make the two features' independence clear | [Site Planner + Library / overlays] | #site-planner #library #files #ui | ⏳ live — awaiting |
 | B947 | Callout border rounds into a bubble when zoomed out; render as a rectangle at every zoom | [Site Planner + Doc Review / Callouts] | #markup #site-planner #doc-review #ui | ⏳ live — awaiting |
 | B948 | Callout double-click is now LOCATION-based: text area edits text, border opens Properties | [Site Planner + Doc Review / Callouts] | #markup #site-planner #doc-review #ui #selection | ⏳ live — awaiting |
 | B945 | Snap-and-connect road endpoints (magnet + clean junction) | [Site Planner / drawing] | #site-planner #road #ui | ⏳ live — awaiting |

@@ -78,7 +78,7 @@ async function openPlan(page) {
 
 /** Open the References panel and select the seeded reference by name. */
 async function selectReference(page) {
-  await page.locator('button[title="References"]').first().click();
+  await page.locator('button[title="Overlays"]').first().click();
   await page.getByRole("button", { name: "Land plan exhibit.png" }).first().click();
   await expect(page.locator('[data-handle="overlay-scale"]').first()).toBeVisible({ timeout: 10000 });
 }
@@ -147,7 +147,7 @@ test.describe("reference overlays: handle layer + z-order (NEW-1 / NEW-2)", () =
     expect(rel.ok, `could not find both the reference raster and the parcel (${JSON.stringify(rel)})`).toBe(true);
     expect(rel.referenceUnderParcel).toBe(true);
     // …and the panel says so.
-    await page.locator('button[title="References"]').first().click();
+    await page.locator('button[title="Overlays"]').first().click();
     await expect(page.locator('[data-reference-band="below"]')).toHaveCount(1);
   });
 

@@ -84,7 +84,7 @@ await page.waitForTimeout(500);
 
 // ---------- B: one References tab ----------
 {
-  const refTabs = await page.locator('button:has-text("References")').count();
+  const refTabs = await page.locator('button:has-text("Overlays")').count();
   const bodyTxt = await page.evaluate(() => document.body.innerText);
   log(refTabs >= 1, "B: a References rail tab exists");
   log(!/\bAerial\b(?! backdrop)/.test(bodyTxt.split("\n").slice(0, 40).join("\n")) || true, "B: (informational) chrome scan");
@@ -96,10 +96,10 @@ await page.waitForTimeout(500);
 
 // ---------- C: panel structure ----------
 {
-  await page.locator('button:has-text("References")').first().click();
+  await page.locator('button:has-text("Overlays")').first().click();
   await page.waitForTimeout(400);
   const txt = await page.evaluate(() => document.body.innerText);
-  log(txt.includes("Add reference (PDF / image / CAD)…"), "C: one \"Add reference…\" flow at the top");
+  log(txt.includes("Add overlay (PDF / image / CAD)…"), "C: one \"Add overlay…\" flow at the top");
   log(txt.includes("Aerial backdrop"), "C: the aerial is listed as \"Aerial backdrop\"");
   // expand the aerial row → NEW opacity + lock controls
   await page.locator('button:has-text("Aerial backdrop")').first().click();

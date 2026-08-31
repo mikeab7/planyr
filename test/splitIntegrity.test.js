@@ -24,7 +24,7 @@ import {
   ringAreaSqft, ringAreaAcres, SQFT_PER_ACRE, isLiveActive, liveActive,
   splitConservation, overlappingPairs, splitOutputsSurvived, auditSplit,
   lineageAudit, ancestorChain, liveExisting, isActive, parentCycles,
-  AREA_TOLERANCE_SQFT, SPLIT_SURVIVAL_WINDOW_MS,
+  AREA_TOLERANCE_SQFT, SPLIT_SURVIVAL_WINDOW_MS, deletedInactiveViolations,
 } from "../src/workspaces/site-planner/lib/splitIntegrity.js";
 import { splitPolygonByCut } from "../src/workspaces/site-planner/lib/polygonSplit.js";
 
@@ -45,6 +45,43 @@ describe("NEW-9 · the live set is ACTIVE and NOT DELETED — both halves, alway
     expect(isLiveActive({ active: true, deleted_at: "2026-08-13T18:59:49Z" })).toBe(false);
     expect(isLiveActive({})).toBe(true);          // absent `active` means active (the model default)
     expect(isLiveActive(null)).toBe(false);
+  });
+
+  /* ⛔ B966629 (NEW-6) — "I can't tell if the acreage is being double counted." The DB now
+   * enforces this state can't be WRITTEN (`db/parcel_active_deleted_invariant.sql`, a trigger
+   * that forces `deleted_at ⇒ active:false`); this is the client-side twin, both as its own
+   * checkable invariant and as proof that the rollup helpers above are safe even if a violating
+   * row somehow reaches them (a stale client cache from before the trigger, a batch read on
+   * another connection, an in-flight edit mid-flush). */
+  describe("deletedInactiveViolations — the invariant a rollup forgetting `deletedAt` would miss", () => {
+    it("flags a soft-deleted parcel that still reads active:true", () => {
+      const rows = [
+        { id: "ok1", active: true },
+        { id: "ok2", active: false, deletedAt: 123 },       // correctly inactive-and-deleted
+        { id: "bad1", active: true, deletedAt: 123 },        // the violation
+        { id: "bad2", active: true, deleted_at: "2026-08-31T00:00:00Z" }, // snake_case column too
+      ];
+      expect(deletedInactiveViolations(rows).sort()).toEqual(["bad1", "bad2"]);
+    });
+
+    it("is empty over well-formed data (nothing to flag)", () => {
+      expect(deletedInactiveViolations([{ id: "a", active: true }, { id: "b", active: false, deletedAt: 1 }])).toEqual([]);
+      expect(deletedInactiveViolations([])).toEqual([]);
+      expect(deletedInactiveViolations(null)).toEqual([]);
+    });
+
+    /* Defence in depth: even a row carrying the exact bug this whole item is about must still be
+     * excluded by the acreage rollup helpers — the app's own math has never depended on the DB
+     * guarantee alone, which is why this repo's sums were already honest before the trigger shipped. */
+    it("a violating row is still excluded from liveActive — the app's math was never the hole", () => {
+      const rows = [
+        { id: "child", points: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }], active: true },
+        { id: "deletedParentStillActive", points: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }], active: true, deletedAt: 999 },
+      ];
+      expect(deletedInactiveViolations(rows)).toEqual(["deletedParentStillActive"]);
+      const live = liveActive(rows);
+      expect(live.map((p) => p.id)).toEqual(["child"]); // the violating row never joins the live-active sum
+    });
   });
 
   /* ⛔ THE REPORTED CASE, AND THE ONE THAT PROVES THE SUITE CAN FAIL. */

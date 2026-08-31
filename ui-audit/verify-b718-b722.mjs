@@ -68,15 +68,15 @@ const railLabels = await page.evaluate(() => {
   // the rail buttons carry a title = the tab label and render a RailIcon <svg>
   const btns = [...document.querySelectorAll('button[title]')].filter((b) => {
     const t = b.getAttribute("title");
-    return ["Land", "Analysis", "Yield", "References", "Standards"].includes(t) && b.querySelector("svg");
+    return ["Land", "Analysis", "Yield", "Overlays", "Standards"].includes(t) && b.querySelector("svg");
   });
   // de-dupe by title preserving DOM order
   const seen = new Set(); const out = [];
   for (const b of btns) { const t = b.getAttribute("title"); if (!seen.has(t)) { seen.add(t); out.push(t); } }
   return out;
 });
-ok(railLabels.slice(0, 5).join(",") === "Parcel,Analysis,Yield,References,Standards",
-  `B721 rail order = Parcel,Analysis,Yield,References,Standards (got: ${railLabels.join(",")})`);
+ok(railLabels.slice(0, 5).join(",") === "Parcel,Analysis,Yield,Overlays,Standards",
+  `B721 rail order = Parcel,Analysis,Yield,Overlays,Standards (got: ${railLabels.join(",")})`);
 ok(railLabels.length >= 5, "B721 all five rail buttons render an inline SVG icon");
 
 // ---------- B732 — the B718 KPI strip was REVERTED (owner didn't want numbers on the canvas) ----------

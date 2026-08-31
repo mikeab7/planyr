@@ -103,7 +103,7 @@ test.describe("panel open must not squish the drawing (B962)", () => {
 
     // Every left panel, opened from closed with the element selected (the owner's flow), must stay
     // welded frame-by-frame — Yield was the reported case, but the squish was shared by all of them.
-    for (const title of ["Land", "Analysis", "Yield", "Properties", "References", "Standards"]) {
+    for (const title of ["Land", "Analysis", "Yield", "Properties", "Overlays", "Standards"]) {
       await closeAllPanels();
       await page.mouse.click(bx + 120, by + 85); // select the building
       await page.waitForTimeout(150);

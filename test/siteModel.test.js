@@ -438,6 +438,35 @@ describe("Parcel split lineage (B651)", () => {
     const depth = Object.fromEntries(order.map((o) => [o.pc.id, o.depth]));
     expect(depth).toEqual({ p1: 0, p2: 0, p3: 0, a: 1, a1: 2, a2: 2, b: 1 });
   });
+
+  /* ⛔ B966625 — RED PRE-FIX: an orphaned piece (its tombstoned parent is B472049-removed from
+   * `parcels` entirely, the normal case for any split under the current code) must indent as the
+   * ROOT it now is, never by its stamped lineage depth. Reproduces the owner's Bain report
+   * verbatim: a piece born 5 cuts deep (`splitDepth: 5`, matching real production rows
+   * e1455089gmiinz/e1455090gmiinz) with no live parent in the list read `depth: 5` and indented
+   * 80px under an unrelated sibling — while `lineageDepth` must still carry the stamped value, so
+   * a re-split of this same orphan keeps alternating letters/digits (parcelSplitNames). */
+  it("an orphaned split piece (tombstoned parent absent) indents as a root, but keeps its lineageDepth for naming", () => {
+    const RING = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }];
+    const orphaned = [
+      { id: "unrelated", points: RING },
+      { id: "child_a", parentId: "gone", splitName: "Parcel 2A1A1A", splitDepth: 5, points: RING },
+      { id: "child_b", parentId: "gone", splitName: "Parcel 2A1A1B", splitDepth: 5, points: RING },
+    ];
+    const info = parcelDisplayInfo(orphaned);
+    expect(info.get("child_a").depth).toBe(0);          // display/indent depth: a resolvable root
+    expect(info.get("child_b").depth).toBe(0);
+    expect(info.get("child_a").lineageDepth).toBe(5);    // naming depth: the stamp survives
+    expect(info.get("child_b").lineageDepth).toBe(5);
+    const order = parcelOutline(orphaned);
+    const depthOf = Object.fromEntries(order.map((o) => [o.pc.id, o.depth]));
+    expect(depthOf).toEqual({ unrelated: 0, child_a: 0, child_b: 0 });
+    // And the naming alternation still uses the stamped lineage depth, not the reset display
+    // depth: lineageDepth 5 is odd (child_a's own name ends in a letter), so the NEXT cut is at
+    // depth 6 (even) → digits, exactly continuing "Parcel 2A1A1A" → "…A1" / "…A2".
+    const born = parcelSplitNames(orphaned, "child_a", 2);
+    expect(born.map((b) => b.name)).toEqual(["Parcel 2A1A1A1", "Parcel 2A1A1A2"]);
+  });
 });
 
 // B682 — id-less parcels (map-finder hand-off / legacy saves) get a stable, geometry-derived id at

@@ -106,8 +106,8 @@ if (await startCaret.isVisible().catch(() => false)) {
 const siteId = await page.evaluate((k) => localStorage.getItem(k), CUR_KEY);
 check("new site created", !!siteId, `id=${siteId}`);
 
-// Open References so the panel's file input is available, then drop the valid overlay.
-const refsTab = page.locator('button', { hasText: "References" }).first();
+// Open Overlays so the panel's file input is available, then drop the valid overlay.
+const refsTab = page.locator('button', { hasText: "Overlays" }).first();
 if (await refsTab.count()) { await refsTab.click().catch(() => {}); await page.waitForTimeout(700); }
 const dropped = await dropSmallOverlay(page);
 check("valid overlay dropped", dropped);

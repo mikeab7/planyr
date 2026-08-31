@@ -6,7 +6,7 @@
  * and the light-theme fill was opaque (covered geometry). The highlight is now driven by a
  * dragenter/dragleave DEPTH COUNTER (per zone) + a window dragleave/drop safety net.
  *
- * This boots the planner logged-out (this-device mode), opens the References panel, and
+ * This boots the planner logged-out (this-device mode), opens the Overlays panel, and
  * simulates file drags (a real OS file-drag can't be fired headless, so we dispatch native
  * dragenter/dragleave/drop events carrying a DataTransfer with a real PNG File):
  *   1. dragenter on the PANEL dropzone → the "Drop to add this reference" highlight shows.
@@ -56,8 +56,8 @@ await assertMeasurable(page, "verify-overlay-dnd");
 await page.goto(BASE, { waitUntil: "load" });
 await page.waitForTimeout(1400);
 
-// Open the References panel via its rail button (B654 merged Aerial + Overlay → "References").
-try { await page.locator('[title="References"]').first().click({ timeout: 5000 }); } catch (e) { console.warn("references-tab warn", e.message); }
+// Open the Overlays panel via its rail button (B654 merged Aerial + Overlay; user-facing name "Overlays" per B966630).
+try { await page.locator('[title="Overlays"]').first().click({ timeout: 5000 }); } catch (e) { console.warn("references-tab warn", e.message); }
 await page.waitForTimeout(400);
 
 // In-page helper: dispatch a native drag event carrying a DataTransfer (+ optional PNG file)
@@ -67,7 +67,7 @@ await page.waitForTimeout(400);
 const fire = (selectorKind, type, withFile) => page.evaluate(({ selectorKind, type, withFile }) => {
   const target = selectorKind === "canvas"
     ? document.querySelector('svg[aria-label="Site plan canvas"]')?.parentElement
-    : [...document.querySelectorAll("button")].find((b) => /Add reference|Add site plan/i.test(b.textContent || ""))?.parentElement;
+    : [...document.querySelectorAll("button")].find((b) => /Add overlay|Add site plan/i.test(b.textContent || ""))?.parentElement;
   if (!target) return { ok: false, reason: "target-not-found:" + selectorKind };
   const dt = new DataTransfer();
   if (withFile) {
@@ -95,7 +95,7 @@ const fireDnD = (kind, type, opts = {}) => page.evaluate(({ kind, type, opts }) 
     kind === "window" ? window :
     kind === "svg"    ? svg :
     kind === "canvas" ? svg?.parentElement :
-    [...document.querySelectorAll("button")].find((b) => /Add reference|Add site plan/i.test(b.textContent || ""))?.parentElement;
+    [...document.querySelectorAll("button")].find((b) => /Add overlay|Add site plan/i.test(b.textContent || ""))?.parentElement;
   if (!target) return { ok: false, reason: "target-not-found:" + kind };
   const dt = new DataTransfer();
   if (opts.withFile !== false) {

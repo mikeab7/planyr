@@ -11,10 +11,12 @@
  * Planar feet, the app's usual open-ring convention: edge i is pts[i] → pts[i+1].
  */
 
-/* Shoelace area magnitude — the shared one in `ringMath.js`. The component keeps its own
- * `polyArea` for its ~30 other callers; the two rings compared here are already validated
- * (n ≥ 3), so the shared guard never fires on this path. */
-import { ringArea } from "./ringMath.js";
+/* Shoelace area magnitude, point-in-ring and nearest-point-on-segment — the shared ones in
+ * `ringMath.js` (B50008–B50011's dedup: the same three loops otherwise get re-typed per module,
+ * charging the Site route's download budget once per copy — see that module's own header). The
+ * component keeps its own `polyArea` for its ~30 other callers; the two rings compared here are
+ * already validated (n ≥ 3), so the shared guard never fires on this path. */
+import { ringArea, pointInRing, projectOntoSegment } from "./ringMath.js";
 
 /* Intersection of the infinite lines through (x1,y1)→(x2,y2) and (x3,y3)→(x4,y4), or null when
  * they are parallel (within 1e-9). */
@@ -61,9 +63,31 @@ export function offsetPolygon(pts, d) {
     return out.length >= 3 ? out : null;
   };
   const a1 = build(1);
-  if (!a1) return build(-1);
-  // Inward offset must shrink the ring; if it grew, we offset the wrong way.
-  return ringArea(a1) <= ringArea(pts) ? a1 : (build(-1) || a1);
+  const chosen = !a1 ? build(-1) : (ringArea(a1) <= ringArea(pts) ? a1 : (build(-1) || a1));
+  // B966627 — CLAMP a vertex that lands OUTSIDE the source ring. Confirmed on the owner's real
+  // Bain data (parcel `e1455090gmiinz`, a 12-vertex notch piece born from a multi-segment cut):
+  // this per-edge miter/bevel construction can push a corner PAST the source boundary when the
+  // offset distance is large relative to a short edge (here, a 25 ft setback against a 4.7 ft
+  // edge) — measured 2 of 12 vertices outside, which is exactly what put his setback dashes
+  // "outside the solid boundary" on screen. An INWARD offset must never step outward; when a
+  // vertex does, the nearest point on the source boundary is the correct bound (the true inset at
+  // that corner is somewhere between the miter point and the boundary, and the boundary itself is
+  // never wrong to draw at — it's the parcel's own edge). A vertex already inside is untouched.
+  return chosen ? chosen.map((p) => (pointInRing(p, pts) ? p : nearestPointOnBoundary(p, pts))) : chosen;
+}
+
+/* Nearest point on the polygon's BOUNDARY (walks every edge via `ringMath.projectOntoSegment`,
+ * keeps the closest) — `pointInRing`'s even-odd test doesn't need re-deriving here (a vertex
+ * clamped onto the boundary reads as "outside" by that test's own convention on some edges, which
+ * is harmless: clamping an already-boundary point to itself, nearest distance ~0, is a no-op). */
+function nearestPointOnBoundary(p, poly) {
+  let best = null, bestD = Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const q = projectOntoSegment(poly[i], poly[(i + 1) % poly.length], p);
+    const d = Math.hypot(p.x - q.x, p.y - q.y);
+    if (d < bestD) { bestD = d; best = q; }
+  }
+  return best || p;
 }
 
 /* Area of the buildable envelope a parcel's per-edge setbacks leave behind, in square feet.

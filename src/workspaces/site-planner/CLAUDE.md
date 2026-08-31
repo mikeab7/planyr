@@ -11,6 +11,19 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
 - `siteModel.js` — the per-plan schema (`createSiteModel`, `SITE_MODEL_VERSION`); read via
   selectors, persist via `storage.js`. **Additive only** — bump the version, extend `migrate`.
 - `storage.js` — thin model layer (migrate on read, merge+renormalize on save).
+- **`splitIntegrity.js` (B540768, B966624/B966629) — parcel split-lineage invariants, pure and
+  Node-testable.** `isLiveActive`/`liveActive` (a parcel counts only when active AND not soft-deleted —
+  read either half alone and a sum silently vanishes or doubles) · `lineageAudit` (account-wide: any
+  live ancestor+descendant pair = a DOUBLE COUNT, any all-inactive multi-member lineage = VANISHED
+  land) · `deletedInactiveViolations` (the client-side twin of the `parcel_deleted_inactive` DB
+  trigger, `db/parcel_active_deleted_invariant.sql`, which now forces `deleted_at ⇒ active:false` at
+  the write path). The repo-root audit-parcel-lineage script runs `lineageAudit` account-wide
+  against the real database. **`parentId` on a split child is a HISTORICAL STAMP, never a live reference**
+  (`performSplit` deletes the parent on purpose, B472048/B472049) — a child whose parent is absent or
+  tombstoned is the NORMAL post-split state, not a defect; `parcelOutline`'s indentation must walk the
+  CURRENT resolvable tree (`depth`), never the STAMPED lineage depth (`lineageDepth`, used only by
+  `parcelSplitNames` to keep the letter/digit alternation correct once the parent is gone) — read
+  `siteModel.parcelDisplayInfo`'s header before touching either field.
 - **⛔ `projectName.js` (B1415–B1418) — A PROJECT'S NAME HAS ONE AUTHORITATIVE VALUE PER GROUP, and every
   plan's `site` field is a DERIVED MIRROR of it. Read it before touching any rename path.** The name was
   denormalized across a group's plans with nothing keeping the copies in agreement, so a rename that ran

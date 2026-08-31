@@ -101,7 +101,7 @@ test.describe("floating panels", () => {
     page.on("pageerror", (e) => errors.push(String(e)));
     await openBlankPlanner(page);
 
-    for (const [title, id] of [["Yield", "yield"], ["Land", "parcel"], ["Analysis", "analysis"], ["References", "references"], ["Standards", "standards"]]) {
+    for (const [title, id] of [["Yield", "yield"], ["Land", "parcel"], ["Analysis", "analysis"], ["Overlays", "references"], ["Standards", "standards"]]) {
       await page.locator(`button[title="${title}"]`).first().click();
       await page.locator(`[data-testid="panel-chrome-${id}-detach"]`).click();
       await expect(page.locator(`[data-testid="floating-panel-${id}"]`)).toBeVisible();

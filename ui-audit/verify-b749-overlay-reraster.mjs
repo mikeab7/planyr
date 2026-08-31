@@ -45,7 +45,7 @@ const check = (name, ok, extra = "") => { console.log(`${ok ? "✓" : "✗"} ${n
 await page.goto(BASE, { waitUntil: "load" });
 await page.waitForTimeout(1800);
 
-for (const sel of ['[title="Overlay"]', '[title="References"]', 'button:has-text("References")']) {
+for (const sel of ['[title="Overlay"]', '[title="Overlays"]', 'button:has-text("Overlays")']) {
   try { await page.locator(sel).first().click({ timeout: 2500 }); break; } catch (_) {}
 }
 await page.waitForTimeout(600);
