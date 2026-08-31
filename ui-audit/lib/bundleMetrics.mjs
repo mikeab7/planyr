@@ -35,6 +35,7 @@ export const ROUTE_KEYS = {
   library: { src: "src/workspaces/library/Library.jsx", stem: "Library" },
   scheduler: { src: "src/workspaces/scheduler/Scheduler.jsx", stem: "Scheduler" },
   notes: { src: "src/workspaces/notes/Notes.jsx", stem: "Notes" },
+  model: { src: "src/workspaces/model/ModelApp.jsx", stem: "ModelApp" },
   food: { src: "src/workspaces/food/FoodApp.jsx", stem: "FoodApp" },
 };
 

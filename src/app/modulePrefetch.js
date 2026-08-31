@@ -37,6 +37,7 @@ const IMPORTERS = {
   "library":      () => import("../workspaces/library/Library.jsx"),
   "scheduler":    () => import("../workspaces/scheduler/Scheduler.jsx"),
   "notes":        () => import("../workspaces/notes/Notes.jsx"),
+  "model":        () => import("../workspaces/model/ModelApp.jsx"),
   // ⛔ NO "food" ENTRY (NEW-2) — this map is warmed only from AppHeader's tab hover/pointerdown,
   // and /food has no tab (it's an unlisted route). Nothing would ever call prefetchModule("food").
 };

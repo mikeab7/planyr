@@ -2,12 +2,22 @@
 //
 // Planyr formula engine — a small, dependency-free Excel-style expression
 // evaluator. It is the calculation core behind the scheduler's user-defined
-// "Formula" columns (and, later, Cost Estimating's). A formula is authored once
-// per column and evaluated for every row, referencing that row's other columns
-// by name with structured references — e.g.  [Finish] - [Start]  or
-// IF([% Complete] >= 100, "Done", "Open"). There are NO A1-style cell addresses:
-// schedule rows are activities that reorder/insert/delete constantly, so a
-// per-row calculated column (like an Excel table column) is the right model.
+// "Formula" columns (and Cost Estimating's), and — as of A1 cell references,
+// below — the Model module's development pro-forma spreadsheet. A structured
+// formula is authored once per column and evaluated for every row, referencing
+// that row's other columns by name — e.g.  [Finish] - [Start]  or
+// IF([% Complete] >= 100, "Done", "Open"). Schedule rows are activities that
+// reorder/insert/delete constantly, so structured [Column] refs (not A1
+// addresses) are still the right model there and are untouched by A1 support.
+//
+// A1-style cell references (A1, $A$1, A1:B10, …) address a separate, optional
+// 2D grid (ctx.grid — see the contract below) for a fixed-layout sheet like a
+// pro-forma. The two reference systems are independent and can appear in the
+// same formula; see the "A1 cell-address bounds" section and rewriteFormulaForCopy
+// (the relative-reference copy/fill transform) further down for the grammar,
+// bounds, and the one identifier/reference collision (LOG10) and how it's
+// resolved. Row/column INSERT and DELETE ref-shifting is deliberately not built —
+// a fixed-layout sheet with a fill handle doesn't need it.
 //
 // Pipeline:  tokenize → parse (precedence-climbing) → evaluate (tree walk).
 // No `eval`, no `new Function`, no regex catastrophes — a hand-written tokenizer
@@ -19,8 +29,9 @@
 //   calendar: { isWorkingDay(serial) -> bool },                   // working-day calendar
 //   today: <serial>,                                              // TODAY() (injected for determinism)
 //   formatDate(serial) -> string,                                 // how dates stringify in & / CONCAT / TEXT default
+//   grid: value[][],                                              // optional — A1 refs; grid[row-1][col-1] is that cell (grid[0][0] = A1)
 // }
-// Typed values handed in via ctx.columns and returned out are:
+// Typed values handed in via ctx.columns / ctx.grid and returned out are:
 //   number  | string | boolean | DATE {k:'date',s:serial} | BLANK | FormulaError(thrown)
 // "serial" is an integer day count since 1970-01-01 UTC (clean, DST-free).
 //
@@ -77,6 +88,44 @@ const makeDate = serial => {
   return { k: "date", s };
 };
 const isDate = v => !!v && typeof v === "object" && v.k === "date";
+
+// ── A1 cell-address bounds & pure address helpers ────────────────────────────────
+// Excel's own limits: 16,384 columns (A .. XFD), 1,048,576 rows. These gate what
+// LEXICALLY counts as a reference at all — anything beyond either bound (too many
+// column letters, row 0, a row past the max) is rejected as an unknown NAME, never
+// accepted as a ref that then errors at eval time (see parseRefText below).
+const MAX_COL = 16384;  // XFD
+const MAX_ROW = 1048576;
+function colLettersToNum(letters) {
+  let n = 0;
+  for (const ch of letters.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
+  return n;
+}
+function colNumToLetters(num) {
+  let n = num, s = "";
+  while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); }
+  return s;
+}
+// $?LETTERS$?DIGITS — the one shape every A1 address (bare or absolute-anchored)
+// takes. Returns { col, row, colAbs, rowAbs } or null when the text isn't shaped
+// like an address, has a leading-zero row (not valid address syntax), or falls
+// outside the bounds above. Case-insensitive. Shared by the parser (deciding
+// whether a bare identifier is a name or a reference), the tokenizer's "$" path,
+// and the rewrite transform below — ONE definition of "what is a valid address".
+const REF_SHAPE = /^(\$?)([A-Za-z]+)(\$?)([0-9]+)$/;
+function parseRefText(text) {
+  const m = REF_SHAPE.exec(String(text));
+  if (!m) return null;
+  const [, dollarCol, letters, dollarRow, digits] = m;
+  if (digits.length > 1 && digits[0] === "0") return null; // "A01" is not address syntax
+  const col = colLettersToNum(letters);
+  const row = parseInt(digits, 10);
+  if (col < 1 || col > MAX_COL || row < 1 || row > MAX_ROW) return null;
+  return { col, row, colAbs: dollarCol === "$", rowAbs: dollarRow === "$" };
+}
+function refToText(ref) {
+  return (ref.colAbs ? "$" : "") + colNumToLetters(ref.col) + (ref.rowAbs ? "$" : "") + ref.row;
+}
 
 // ── Serial date helpers (epoch = 1970-01-01 UTC; integer days) ──────────────────
 const MS_PER_DAY = 86400000;
@@ -194,8 +243,36 @@ function roundAwayFromZero(n, digits) {
   return n < 0 ? -r : r;
 }
 
+// Attempts a cell-address token at s[i..]: $?[A-Za-z]+$?[0-9]+, requiring a genuine
+// token boundary right after (the next char, if any, must not continue an
+// identifier or another "$") — so it never swallows part of a longer identifier.
+// "A1.5" and "A1_x" still fall through to the plain identifier scan unchanged,
+// because the boundary check rejects a match there. Letters are unbounded here
+// (bounds like "too many letters"/"beyond XFD" are a SEMANTIC check — parseRefText
+// — not a lexical one, so "ABCD1" still tokenizes; it just won't parse as a ref).
+function matchRefToken(s, i) {
+  const n = s.length;
+  let j = i;
+  let colAbs = false;
+  if (s[j] === "$") { colAbs = true; j++; }
+  const letStart = j;
+  while (j < n && /[A-Za-z]/.test(s[j])) j++;
+  if (j === letStart) return null;
+  let rowAbs = false;
+  if (s[j] === "$") { rowAbs = true; j++; }
+  const digStart = j;
+  while (j < n && s[j] >= "0" && s[j] <= "9") j++;
+  if (j === digStart) return null;
+  const after = s[j];
+  if (after !== undefined && /[A-Za-z0-9_.$]/.test(after)) return null;
+  return { text: s.slice(i, j), end: j, hasDollar: colAbs || rowAbs };
+}
+
 // ── Tokenizer ────────────────────────────────────────────────────────────────
-// Token kinds: num, str, col (bracketed reference), id (function/keyword), op, eof
+// Token kinds: num, str, col (bracketed reference), id (function/keyword),
+// ref ($A$1-shaped — only when a "$" is present; a plain "A1" stays an "id" so the
+// existing function-call lookahead in the parser keeps disambiguating it from a
+// call like LOG10( with no lexer-level special-casing), errlit (#REF!), op, eof
 const tokenize = src => {
   const s = String(src == null ? "" : src);
   const toks = [];
@@ -247,9 +324,33 @@ const tokenize = src => {
       if (!Number.isFinite(numVal)) throw ferr(FORMULA_ERRORS.NUM, "number literal out of range");
       toks.push({ t: "num", v: numVal, pos: i }); i = j; continue;
     }
-    // Identifier: function name / TRUE / FALSE. Letters, digits, _, ., and a
-    // trailing % only inside names like none — names are [A-Za-z_][A-Za-z0-9_.]*
+    // "$"-anchored cell address: $A$1 / A$1 / $A1 (a bare "A1" with no "$" stays
+    // an "id" token below — see matchRefToken's header comment). "$" has no other
+    // meaning in this grammar, so a failed match here is always an error.
+    if (c === "$") {
+      const m = matchRefToken(s, i);
+      if (!m) throw ferr(FORMULA_ERRORS.ERR, `unexpected character "$"`);
+      toks.push({ t: "ref", v: m.text, pos: i }); i = m.end; continue;
+    }
+    // "#REF!" error literal — the one error code a formula can legally embed as
+    // text (produced by rewriteFormulaForCopy when a fill/copy shifts a relative
+    // reference off the sheet; also legal to type directly, matching Excel).
+    if (c === "#") {
+      if (s.slice(i, i + 5).toUpperCase() === "#REF!") { toks.push({ t: "errlit", v: "#REF!", pos: i }); i += 5; continue; }
+      throw ferr(FORMULA_ERRORS.ERR, `unexpected character "#"`);
+    }
+    // Identifier: function name / TRUE / FALSE / bare cell address (A1, LOG10, …).
+    // Letters, digits, _, ., and a trailing % only inside names like none — names
+    // are [A-Za-z_][A-Za-z0-9_.]*. Tried first against the address shape so "A$1"
+    // (a "$" embedded before the digits, with no leading "$") still lexes as ONE
+    // ref token instead of splitting at the "$" — but only when a "$" is actually
+    // present; a plain "A1"/"LOG10"/"ABCD1" always matches the SAME boundary either
+    // way, so leaving it as "id" here is a no-op for every existing formula.
     if (/[A-Za-z_]/.test(c)) {
+      if (c !== "_") {
+        const m = matchRefToken(s, i);
+        if (m && m.hasDollar) { toks.push({ t: "ref", v: m.text, pos: i }); i = m.end; continue; }
+      }
       let j = i;
       while (j < n && /[A-Za-z0-9_.]/.test(s[j])) j++;
       toks.push({ t: "id", v: s.slice(i, j), pos: i }); i = j; continue;
@@ -257,7 +358,7 @@ const tokenize = src => {
     // Multi-char operators first
     const two = s.slice(i, i + 2);
     if (two === "<=" || two === ">=" || two === "<>") { toks.push({ t: "op", v: two, pos: i }); i += 2; continue; }
-    if ("+-*/^&=<>(),%".includes(c)) { toks.push({ t: "op", v: c, pos: i }); i++; continue; }
+    if ("+-*/^&=<>(),%:".includes(c)) { toks.push({ t: "op", v: c, pos: i }); i++; continue; }
     throw ferr(FORMULA_ERRORS.ERR, `unexpected character "${c}"`);
   }
   toks.push({ t: "eof", v: null, pos: n });
@@ -336,10 +437,34 @@ const parse = toks => {
     while (peek().t === "op" && peek().v === "%") { next(); node = { type: "percent", arg: node }; }
     return node;
   };
+  // A ref/range atom, given the FIRST endpoint's already-validated {col,row,colAbs,
+  // rowAbs}. Consumes a trailing ":" + second endpoint if present, producing a
+  // "range" node; otherwise a scalar "ref" node. Shared by the "ref"-token path and
+  // the "id"-token-that-turned-out-to-be-an-address path below, so A1:B10 parses
+  // the same way regardless of which side(s) carry a "$".
+  const finishRefOrRange = first => {
+    if (peek().t === "op" && peek().v === ":") {
+      next();
+      const t2 = peek();
+      if (t2.t !== "ref" && t2.t !== "id") throw ferr(FORMULA_ERRORS.ERR, 'expected a cell reference after ":"');
+      const second = parseRefText(t2.v);
+      if (!second) throw ferr(FORMULA_ERRORS.NAME, `unknown name "${t2.v}"`);
+      next();
+      return { type: "range", from: first, to: second };
+    }
+    return { type: "ref", ...first };
+  };
   const parseAtom = () => {
     const t = peek();
     if (t.t === "num") { next(); return { type: "num", value: t.v }; }
     if (t.t === "str") { next(); return { type: "str", value: t.v }; }
+    if (t.t === "errlit") { next(); return { type: "errLiteral", code: t.v }; }
+    if (t.t === "ref") {
+      const info = parseRefText(t.v);
+      if (!info) throw ferr(FORMULA_ERRORS.NAME, `unknown name "${t.v}"`); // e.g. $ABCD$1 — too many letters
+      next();
+      return finishRefOrRange(info);
+    }
     if (t.t === "col") {
       next();
       // Excel structured reference: [@Column] (or [@[Column]]) is the CURRENT row
@@ -371,7 +496,15 @@ const parse = toks => {
         expect(")");
         return { type: "call", name: up, args };
       }
-      // A bare identifier that is not TRUE/FALSE and not followed by "(" is unknown.
+      // Not a call, not TRUE/FALSE — Excel's own disambiguation rule: an identifier
+      // immediately followed by "(" is ALWAYS a function call (handled above, already
+      // returned), never a reference; only past that point is it worth asking whether
+      // the bare text also happens to be shaped like a cell address (LOG10 is the one
+      // name in this registry where that's true — see formula.js header note).
+      const info = parseRefText(t.v);
+      if (info) return finishRefOrRange(info);
+      // A bare identifier that is not TRUE/FALSE, not a call, and not a valid address
+      // (out-of-bounds addresses like ABCD1/XFE1/A0/A1048577 land here too) is unknown.
       throw ferr(FORMULA_ERRORS.NAME, `unknown name "${t.v}" (use [${t.v}] for a column)`);
     }
     throw ferr(FORMULA_ERRORS.ERR, "unexpected end of formula");
@@ -788,10 +921,42 @@ function cumArgs(a, name) {
 // invalidation: a fresh recalc pass builds a fresh rows array, so it can never collide
 // with an old one, and the old entry is simply garbage once nothing references it.
 const colArrayCache = new WeakMap(); // rows[] -> Map<lowerColKey, value[]>
-// A range argument must be a bare [Column] reference; it expands to that column's values
-// across every row in ctx.rows (the whole table, in display order).
+// grid[] -> Map<rangeKey, value[]>, the A1-range analogue of colArrayCache — same
+// rationale: a Model sheet can have many DIFFERENT cells each summing an
+// overlapping/identical range (e.g. several "Total" cells over the same column),
+// and re-walking ctx.grid on every one of them per pass is exactly the O(n) rebuild
+// colArrayCache already exists to avoid for [Column]. Keyed on ctx.grid's own
+// identity, so a fresh recalc pass (a fresh grid array) can never read stale data.
+const rangeArrayCache = new WeakMap();
+function rangeArray(node, ctx) {
+  const grid = ctx.grid;
+  const key = `${node.from.row},${node.from.col},${node.to.row},${node.to.col}`;
+  let byRange;
+  if (grid) {
+    byRange = rangeArrayCache.get(grid);
+    if (byRange) { const hit = byRange.get(key); if (hit) return hit; }
+  }
+  const r1 = Math.min(node.from.row, node.to.row), r2 = Math.max(node.from.row, node.to.row);
+  const c1 = Math.min(node.from.col, node.to.col), c2 = Math.max(node.from.col, node.to.col);
+  const out = [];
+  for (let r = r1; r <= r2; r++) {
+    for (let c = c1; c <= c2; c++) {
+      const v = readGridCell(ctx, r, c);
+      out.push(v === undefined ? BLANK : raiseIfErr(v));
+    }
+  }
+  if (grid) {
+    if (!byRange) { byRange = new Map(); rangeArrayCache.set(grid, byRange); }
+    byRange.set(key, out);
+  }
+  return out;
+}
+// A [Column]-shaped range argument must be a bare [Column] reference; it expands to
+// that column's values across every row in ctx.rows (the whole table, in display
+// order). An A1-shaped range argument (A1:B10) is handled by rangeArray above.
 function colArray(node, ctx) {
-  if (!node || node.type !== "col") throw ferr(FORMULA_ERRORS.VALUE, "expected a [Column] reference");
+  if (node && node.type === "range") return rangeArray(node, ctx);
+  if (!node || node.type !== "col") throw ferr(FORMULA_ERRORS.VALUE, "expected a [Column] or A1:B10 range reference");
   const key = node.name.toLowerCase();
   // [@Column] forces THIS row even inside a range function (consistent with how
   // SUM/AVERAGE treat a [@Column] arg), so it contributes a single cell. It is cheap
@@ -814,13 +979,19 @@ function colArray(node, ctx) {
   byCol.set(key, arr);
   return arr;
 }
+// A range-position argument: either a bare (non-"@") [Column] — the whole column —
+// or an A1 "range" node (A1:B10). Shared by the four collectors below, so SUM/MIN/
+// MAX/AVERAGE/COUNT/COUNTA treat "[Column]" and "A1:B10" identically wherever one
+// of them is legal — anything else (a scalar, [@Column], an expression) is a
+// per-row/per-cell scalar, handled by each collector's own `else` branch via `ev`.
+const isRangeArg = n => (n.type === "col" && !n.atRow) || n.type === "range";
 // Numbers for SUM/AVERAGE/MIN/MAX/PRODUCT: a bare [Column] arg contributes its numeric
 // (and date→serial) cells, skipping blank/text/bool (Excel range behavior); a scalar or
 // [@Column] arg is coerced via toNumber.
 function collectNums(argNodes, ctx, ev) {
   const nums = [];
   argNodes.forEach(n => {
-    if (n.type === "col" && !n.atRow) colArray(n, ctx).forEach(v => { raiseIfErr(v); if (typeof v === "number") nums.push(v); else if (isDate(v)) nums.push(v.s); });
+    if (isRangeArg(n)) colArray(n, ctx).forEach(v => { raiseIfErr(v); if (typeof v === "number") nums.push(v); else if (isDate(v)) nums.push(v.s); });
     else { const v = ev(n, ctx); if (isDate(v)) nums.push(v.s); else nums.push(toNumber(v)); }
   });
   return nums;
@@ -832,7 +1003,7 @@ function collectNumsKind(argNodes, ctx, ev) {
   const nums = []; let any = false, allDates = true;
   const take = v => { raiseIfErr(v); if (isDate(v)) { nums.push(v.s); any = true; } else if (typeof v === "number") { nums.push(v); allDates = false; } };
   argNodes.forEach(n => {
-    if (n.type === "col" && !n.atRow) colArray(n, ctx).forEach(take);
+    if (isRangeArg(n)) colArray(n, ctx).forEach(take);
     else { const v = ev(n, ctx); if (isDate(v)) { nums.push(v.s); any = true; } else { nums.push(toNumber(v)); allDates = false; } }
   });
   return { nums, allDates: any && allDates };
@@ -840,7 +1011,7 @@ function collectNumsKind(argNodes, ctx, ev) {
 function collectCountable(argNodes, ctx, ev) { // COUNT — numbers only
   let c = 0;
   argNodes.forEach(n => {
-    if (n.type === "col" && !n.atRow) colArray(n, ctx).forEach(v => { raiseIfErr(v); if (typeof v === "number" || isDate(v)) c++; });
+    if (isRangeArg(n)) colArray(n, ctx).forEach(v => { raiseIfErr(v); if (typeof v === "number" || isDate(v)) c++; });
     else { const v = ev(n, ctx); if (typeof v === "number" || isDate(v)) c++; else if (typeof v === "string") { try { toNumber(v); c++; } catch { /* non-numeric text isn't counted */ } } }
   });
   return c;
@@ -848,7 +1019,7 @@ function collectCountable(argNodes, ctx, ev) { // COUNT — numbers only
 function collectNonBlank(argNodes, ctx, ev) { // COUNTA — anything non-blank
   let c = 0;
   argNodes.forEach(n => {
-    if (n.type === "col" && !n.atRow) colArray(n, ctx).forEach(v => { raiseIfErr(v); if (!isBlank(v) && v !== "") c++; });
+    if (isRangeArg(n)) colArray(n, ctx).forEach(v => { raiseIfErr(v); if (!isBlank(v) && v !== "") c++; });
     else { const v = ev(n, ctx); if (!isBlank(v) && v !== "") c++; }
   });
   return c;
@@ -1114,6 +1285,19 @@ function formatNumberSection(n, fmt, autoSign) {
 }
 
 // ── Evaluator ────────────────────────────────────────────────────────────────
+// A1 grid access: ctx.grid is an optional 2D array, row-major, 0-indexed (grid[0][0]
+// is A1). No grid at all (a host that hasn't wired one up, or a [Column]-only table
+// context) reads every cell as blank — never a crash, and never #REF! by itself; a
+// cell simply beyond what the host populated is exactly Excel's own "blank cell"
+// case, not an error. See the "ref"/"errLiteral" cases below for where #REF! DOES
+// come from in this engine (a rewritten reference that fell off the sheet).
+function readGridCell(ctx, row, col) {
+  const grid = ctx.grid;
+  if (!grid) return undefined;
+  const r = grid[row - 1];
+  if (!r) return undefined;
+  return r[col - 1];
+}
 const evalNode = (node, ctx) => {
   switch (node.type) {
     case "num": return node.value;
@@ -1127,6 +1311,16 @@ const evalNode = (node, ctx) => {
       const v = cols[key];
       return v === undefined ? BLANK : raiseIfErr(v);   // referencing an errored cell propagates its error
     }
+    case "ref": {
+      const v = readGridCell(ctx, node.row, node.col);
+      return v === undefined ? BLANK : raiseIfErr(v);
+    }
+    // A range used where a single value is expected (INDEX/MATCH-free — e.g. a bare
+    // "=A1:B10" or "A1:B10 + 5") is a genuine type error, not engine confusion — it
+    // is valid ONLY in a range-position argument, resolved via colArray/rangeArray
+    // below, which never routes through evalNode for the range node itself.
+    case "range": throw ferr(FORMULA_ERRORS.VALUE, "a range reference cannot be used where a single value is expected");
+    case "errLiteral": throw ferr(node.code, "literal error in formula");
     case "unary": {
       if (node.op === "+") return toNumber(evalNode(node.arg, ctx));
       return -toNumber(evalNode(node.arg, ctx));
@@ -1311,6 +1505,11 @@ const evaluateFormula = (src, ctx) => {
     // evaluates one row in isolation (e.g. the editor preview, or a unit test).
     rows: (ctx && ctx.rows) || [columns],
     rowIndex: (ctx && ctx.rowIndex) || 0,
+    // grid powers A1-style cell/range references (a Model/pro-forma sheet). Optional
+    // 2D array, row-major, 0-indexed: grid[0][0] is A1. A host that never wires one up
+    // (or the Schedule module's structured-only [Column] use) reads every A1 ref as
+    // blank — see readGridCell's header note for why that's never a crash or a #REF!.
+    grid: (ctx && ctx.grid) || null,
     calendar: (ctx && ctx.calendar) || DEFAULT_CALENDAR,
     today: (ctx && ctx.today != null) ? ctx.today : Math.round(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()) / MS_PER_DAY),
     formatDate: (ctx && ctx.formatDate) || serialToISO,
@@ -1345,6 +1544,90 @@ const formatValue = (value, opts) => {
     return numToGeneralStr(value);
   }
   return String(value);
+};
+
+// rewriteFormulaForCopy: the relative-reference rewrite for copy/fill. Pure, and
+// deliberately separate from evaluateFormula's own parse/eval pipeline — given a
+// formula's source text and the cell it's being copied FROM and TO, returns the
+// rewritten formula text with every relative A1 reference shifted by the same
+// (row, column) delta an absolute ($-anchored) axis of a reference never moves.
+// A shift that would land off the sheet (column < A, row < 1, or past XFD/1048576)
+// collapses that WHOLE reference (or, for a range, the whole A1:B10 span) to the
+// literal text "#REF!" — exactly what Excel itself writes into the formula, and
+// exactly why the tokenizer above accepts "#REF!" as valid input: the very next
+// evaluateFormula() call on this rewritten text must surface it as a #REF! error,
+// per the engine's own never-crash/never-silent-zero contract, not choke on it.
+//
+// This is a TOKEN-level rewrite, not a re-serialized AST: it walks tokenize()'s
+// output and splices only the span of each reference/range, leaving every other
+// character (operators, spacing, string literals, [Column] refs, function names)
+// byte-identical. That also means it reuses the tokenizer's own — and only the
+// tokenizer's own — notion of "is this a reference": a bare identifier immediately
+// followed by "(" is a function call (LOG10(...) is never touched), exactly the
+// same rule the parser applies, so the two can never disagree about what a
+// reference is. Deliberately does NOT require the formula to fully PARSE (a
+// formula that merely tokenizes is enough to find and shift its references) —
+// but ANY malformed formula, and one with no references at all, is unaffected
+// and returned unchanged, since the loop below simply finds nothing to splice.
+//
+// Row/column INSERT and DELETE (shifting every reference on a sheet edit) is
+// deliberately NOT built here — see CLAUDE.md's engineering notes on this PR;
+// a fixed-layout pro-forma with a fill handle only ever needs copy/fill.
+const rewriteFormulaForCopy = (formulaSrc, sourceAddr, targetAddr) => {
+  const src = parseRefText(sourceAddr);
+  const tgt = parseRefText(targetAddr);
+  if (!src || !tgt) throw new Error(`rewriteFormulaForCopy: invalid cell address ("${sourceAddr}" / "${targetAddr}")`);
+  const text = String(formulaSrc == null ? "" : formulaSrc);
+  const deltaRow = tgt.row - src.row, deltaCol = tgt.col - src.col;
+  if (deltaRow === 0 && deltaCol === 0) return text; // copying onto itself — nothing moves
+  let toks;
+  try { toks = tokenize(text); }
+  catch { return text; } // doesn't even lex — nothing this transform can safely touch
+  // Shifts one address's non-absolute axis/axes by the delta; null means it fell
+  // off the sheet on at least one axis (the caller emits "#REF!" for that span).
+  const shift = ref => {
+    const info = parseRefText(ref);
+    if (!info) return null;
+    const col = info.colAbs ? info.col : info.col + deltaCol;
+    const row = info.rowAbs ? info.row : info.row + deltaRow;
+    if (col < 1 || col > MAX_COL || row < 1 || row > MAX_ROW) return null;
+    return refToText({ col, row, colAbs: info.colAbs, rowAbs: info.rowAbs });
+  };
+  // A token is reference-eligible under the exact same rule the parser uses: a
+  // "ref" token always is; a plain "id" token is UNLESS it's immediately called
+  // (LOG10(...)) or is the TRUE/FALSE literal, and only if its text is itself a
+  // valid address (rules out ordinary function names and out-of-bounds text like
+  // ABCD1, which the parser treats as an unknown name rather than a reference).
+  const isRefEligible = (t, idx) => {
+    if (t.t === "ref") return true;
+    if (t.t !== "id") return false;
+    const nextTok = toks[idx + 1];
+    if (nextTok && nextTok.t === "op" && nextTok.v === "(") return false;
+    const up = t.v.toUpperCase();
+    if (up === "TRUE" || up === "FALSE") return false;
+    return parseRefText(t.v) !== null;
+  };
+  let out = "", cursor = 0;
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i];
+    if (t.t === "eof" || !isRefEligible(t, i)) continue;
+    const isRange = toks[i + 1] && toks[i + 1].t === "op" && toks[i + 1].v === ":" &&
+      toks[i + 2] && isRefEligible(toks[i + 2], i + 2);
+    const endTok = isRange ? toks[i + 2] : t;
+    const spanStart = t.pos, spanEnd = endTok.pos + String(endTok.v).length;
+    let replacement;
+    if (isRange) {
+      const from = shift(t.v), to = shift(endTok.v);
+      replacement = (from && to) ? `${from}:${to}` : "#REF!";
+    } else {
+      replacement = shift(t.v) || "#REF!";
+    }
+    out += text.slice(cursor, spanStart) + replacement;
+    cursor = spanEnd;
+    if (isRange) i += 2;
+  }
+  out += text.slice(cursor);
+  return out;
 };
 
 // planFormulaColumns: order user formula columns so a formula that reads another
@@ -1459,4 +1742,5 @@ export {
   evaluateFormula, formatValue, planFormulaColumns,
   FUNCTIONS, FUNCTION_NAMES, FUNCTION_HELP,
   toNumber, toStr, toBool, toDateSerial, compareValues, numToGeneralStr,
+  MAX_COL, MAX_ROW, parseRefText, colLettersToNum, colNumToLetters, rewriteFormulaForCopy,
 };
