@@ -141,11 +141,19 @@ const CalendarIcon = ({ size = 12 }) => (
   </svg>
 );
 
+// B885137 (NEW-2) — header shrink, owner-approved (2026-08-30/31, "Headers — before / after"
+// artboard). height 24→22 (--control-h-sm, matches the row's other 22-tall controls at the
+// new density) + fontSize 12.5→11.5 (--font-md) — measured against the LIVE app first (not the
+// artboard's assumed "today" baseline, which read 15px/13px vertical padding neither of which
+// this component ever had; the real defect was only the wordmark exceeding --font-display, see
+// AppHeader.jsx's own note). CRUMB_MIN_W is untouched — NAVIGATION WINS is a floor on
+// character count, not on font size, and shrinking the font makes more of that floor's width
+// actually show name rather than clip it.
 const crumbBtn = (extra) => ({
   display: "flex", alignItems: "center", gap: 5, flex: "none",
-  height: 24, padding: "0 8px", borderRadius: RADIUS.sm,
+  height: 22, padding: "0 8px", borderRadius: RADIUS.sm,
   border: "none", background: "transparent", cursor: "pointer",
-  fontFamily: "inherit", fontSize: 12.5, fontWeight: 600, whiteSpace: "nowrap",
+  fontFamily: "inherit", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap",
   ...extra,
 });
 
