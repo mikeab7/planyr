@@ -415,11 +415,25 @@ async function siblingMismatches(page, surface) {
     // rendered geometry (rect) still decides adjacency below, so a candidate wrapped one extra
     // level deep for an unrelated reason (a popover anchor div, say) is still correctly grouped
     // with its true visual row-mates.
+    // ⛔ B958466 (row-1 header sibling audit) — MUST SKIP A SINGLE-CHILD FLEX WRAPPER, not stop at
+    // it (measured, not assumed — this check reported ZERO on a second real header pair, the same
+    // way it first reported zero on the account-chip/fullscreen pair). `CloudSyncBadge` wraps its
+    // own button in `<div style={{position:"relative", display:"flex", alignItems:"center"}}>` —
+    // a one-child flex div used purely for positioning, not a "row" laying out several controls.
+    // The original walk stopped at the FIRST flex ancestor it found and treated THAT as the shared
+    // row, so the badge's row root became its own private wrapper while its true flex row-mate
+    // (`FullscreenButton`, whose immediate parent IS the header's real right-zone row) resolved to
+    // a different root one level further up — two different "rows" for what is visibly one. A flex
+    // container with exactly one element child is never the row a person means by "this control's
+    // row"; skip it and keep climbing for a container that actually lays out more than one thing.
     const rowRootOf = (el) => {
       let n = el.parentElement, hops = 0;
       while (n && n !== document.body && hops < rowHops) {
         const cs = getComputedStyle(n);
-        if ((cs.display === "flex" || cs.display === "inline-flex") && cs.flexDirection !== "column" && cs.flexDirection !== "column-reverse") return n;
+        if ((cs.display === "flex" || cs.display === "inline-flex") && cs.flexDirection !== "column" && cs.flexDirection !== "column-reverse") {
+          const elementChildren = [...n.children].filter((c) => c.getBoundingClientRect().width > 0 || c.getBoundingClientRect().height > 0);
+          if (elementChildren.length > 1) return n;
+        }
         n = n.parentElement; hops++;
       }
       return null;

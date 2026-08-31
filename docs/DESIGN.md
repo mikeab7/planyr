@@ -235,6 +235,36 @@ in the same commit (`controls.jsx`'s own header comment says the same).
    change nothing a person could see. Same category as the Scheduler iframe: out of scope for the
    token scale, but named here rather than left to look silently different.
 
+## The divider rule (B958468, 2026-08-31)
+
+A chrome row groups its controls with a plain **1px vertical divider** — never a filled tray,
+never a full-height rule. Two things make it "the same divider" everywhere it appears, and both
+are checked against the row it sits in, not picked by eye:
+
+- **Height = the row's own control height minus 12px** — a 6px inset top and bottom. In every
+  chrome row today that control height is `CONTROL_H.md` (26px), so the divider is **14px**. A row
+  built at a different `CONTROL_H` step insets the same way against that step, not a copy of `14`.
+- **Color = the theme's chrome-divider token** (`var(--chrome-divider)` in `AppHeader.jsx`,
+  `PAL.chromeLine` in `SitePlanner.jsx` — the same CSS custom property, just reached through the
+  CSS-var form or its JS mirror depending on which file you're in) — **never a raw color literal**,
+  and never an alpha-blended white/black hack that assumes one theme's background. `rgba(255,255,255,0.12)`
+  reads as a visible hairline on a dark row and is functionally **invisible on a light one** — exactly
+  the KEY DECISIONS violation the token rule exists to prevent ("a hardcoded hex... reads fine until
+  the chrome flips theme"). If a divider is disappearing in one theme, it is almost always this.
+- **Width is always 1px.** Margin/gap around the divider is a per-instance spacing choice (how much
+  air a given row wants between its groups), not part of the divider's own identity — `AppHeader.jsx`
+  uses `0 4px` between the wordmark and the breadcrumb and `0 2px` between the icon-button cluster and
+  the account pill; `SitePlanner.jsx`'s toolbar uses `0 6px` between its three control groups. All
+  three are the same divider at different insets, not three different dividers.
+
+**Worked example, from a real defect this rule closes:** the Site Planner's row-2 toolbar (`vSep`
+in `SitePlanner.jsx`) used to be its own thing — `height:18` (not derived from the row), color
+`rgba(255,255,255,0.12)` (a raw literal, invisible on the light theme's near-white row). Row 1's
+own divider (`AppHeader.jsx`, added alongside the sibling-radius fix) already had the right shape;
+row 2's was brought to match it exactly rather than staying a second, independently-invented divider
+one row down. See the sibling clause above for the companion rule this pairs with: a divider is what
+makes two different radius families sitting in one row acceptable — an invisible one doesn't count.
+
 ## Spacing, type, and control-height scales (`src/shared/ui/designTokens.js`)
 
 ```js
