@@ -13157,16 +13157,40 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   //   • armed            — a refetch is wanted and its one attempt hasn't fired/been consumed yet.
   // A wanted refetch whose single attempt is spent while nothing is in flight is STALLED — a
   // terminal state that offers ↻ Re-check, never an endless spinner.
+  /* NEW-7 — Michael's own ask (chat, 2026-08-31, on top of the NEW-4 design above): "if I had
+     run it and then changed elements" — a warning that a check predates a LATER edit, even one
+     small enough to stay inside the fetched envelope (the numbers still recompute live and are
+     still correct — this is "you edited since you last screened this", not "the network answer
+     is wrong", which stays the `moved`/`env-exit` reasons the loose key already covers). Repro
+     that found the gap: nudging a building 5 ft with the arrow keys (a real edit — Undo armed)
+     left the header counting up unchanged from the original run.
+     `histTick` (declared above, bumped once per undoable action via pushHistory/undo/redo/
+     applySnapshot) is the cheapest complete "has this plan been worked" counter there is — no new
+     per-render cost, and it's the same seam NEW-4's `notePerfEdit` already counts on. The ref
+     anchors it the moment a checked state becomes known (a fresh live check completing, or a
+     restored one on load, via `drainCheckedAtNow`); any later bump means an edit — or an undo/redo
+     — happened since. Deliberately SESSION-scoped (histTick resets on reload): it never claims to
+     know about edits from a prior session, only the one Michael actually tested (run, edit, watch
+     it flip, in one sitting). */
+  const drainCheckedAtNow = drainCtx?.checkedAt ?? (Number.isFinite(settings.drainage?.lastCheck?.checkedAt) ? settings.drainage.lastCheck.checkedAt : null);
+  const drainEditStampRef = useRef(null);
+  useEffect(() => {
+    if (drainCheckedAtNow != null) drainEditStampRef.current = histTick;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drainCheckedAtNow]);
+  const drainEditedSinceCheck = drainEditStampRef.current != null && histTick !== drainEditStampRef.current;
   /* NEW-4 — THE LIGHT. Computed on every render, independently of whether anything is allowed to
      fetch, from the SAME signature the fetch has always been keyed on. Green while the parcels,
      the fill and the ponds are where they were when the check ran; red once one of them moves;
      and a distinct "never checked" that is neither. See lib/factRevalidation.js → factsFreshness
-     for why the key is deliberately loose and why there are four states rather than three. */
+     for why the key is deliberately loose and why there are four states rather than three —
+     NEW-7 above adds a fifth trigger (edited-since-check) without loosening that key itself. */
   const drainFreshness = factsFreshness({
     hasSessionCtx: !!drainReadCtx,
     lastCheck: settings.drainage?.lastCheck || null,
     sigNow: drainSigNow,
     busy: !!drainCtx?.busy,
+    editedSinceCheck: drainEditedSinceCheck,
     ...drainFactsNow,
   });
   const drainAutoInFlight = !!(drainCtx?.busy && drainCtx?.auto);

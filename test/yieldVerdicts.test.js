@@ -211,6 +211,75 @@ describe("A2 — verdict-strip grammar: label + pill + sentence", () => {
   });
 });
 
+// NEW-6 (owner live pass 2026-08-31, V496866/B881668) — the Mitigation row stuck on "checking
+// flood data" forever after the flood check demonstrably completed: the header went green with a
+// run date, Detention and Buildability both resolved to real verdicts off the SAME data — only
+// Mitigation kept claiming a fetch was in flight. Root cause: `mitigationVerdict` had no branch for
+// a GENUINELY unresolved mitigation ledger (real geometry, but the volume itself never priced, or a
+// stale-pending/remembered/failed state) — every one of those fell through to the generic
+// `loadingRow`, whose sentence is hardcoded to "checking flood data" regardless of whether anything
+// is actually fetching. Mirrors the class B1127 already fixed for Detention's `kind:"unavailable"`.
+describe("NEW-6 — Mitigation never claims 'checking flood data' once nothing is fetching", () => {
+  const base = { req: detReqPoint(33.8), providedUsableCf: 34 * AC_FT };
+
+  it("mitStalePending (fetch outgrown, no last-good yet) reads 'volume unknown', never 'checking flood data'", () => {
+    const [, mit] = yieldVerdictStrip({ ...base, mitStalePending: true });
+    expect(mit.sentence).toBe("volume unknown");
+    expect(mit.sentence).not.toMatch(/checking flood data/);
+    expect(mit.pill).toBe("N/A");
+    expect(mit.tone).toBe("warn");
+    expect(mit.loading).toBeFalsy();
+  });
+
+  it("real intersect acreage but an UNRESOLVED volume (unknownReason) names the reason, never 'checking'", () => {
+    const [, mit] = yieldVerdictStrip({
+      ...base,
+      mitigation: { intersectAcres: 2, volumeCf: null, unknownReason: "no published BFE on this reach — enter the BFE" },
+    });
+    expect(mit.sentence).toBe("volume unknown: no published BFE on this reach — enter the BFE");
+    expect(mit.sentence).not.toMatch(/checking flood data/);
+    expect(mit.pill).toBe("N/A");
+    expect(mit.loading).toBeFalsy();
+  });
+
+  it("an unresolved volume with no reason string still reads a bare 'volume unknown'", () => {
+    const [, mit] = yieldVerdictStrip({ ...base, mitigation: { intersectAcres: 2, volumeCf: null } });
+    expect(mit.sentence).toBe("volume unknown");
+  });
+
+  it("a restored/remembered check with no mitigation ledger offers ↻, never 'checking flood data'", () => {
+    const [, mit] = yieldVerdictStrip({ ...base, mitRememberedMissing: true });
+    expect(mit.sentence).toBe("not screened");
+    expect(mit.sentence).not.toMatch(/checking flood data/);
+    expect(mit.recheck).toBe(true);
+  });
+
+  it("a failed flood-geometry source reads 'flood source down' with ↻, never 'checking flood data'", () => {
+    const [, mit] = yieldVerdictStrip({ ...base, floodGeo: { state: "failed" } });
+    expect(mit.sentence).toBe("flood source down");
+    expect(mit.sentence).not.toMatch(/checking flood data/);
+    expect(mit.recheck).toBe(true);
+  });
+
+  it("no em dash in any of the new honest-unknown sentences (G2 house rule)", () => {
+    const cases = [
+      yieldVerdictStrip({ ...base, mitStalePending: true }),
+      yieldVerdictStrip({ ...base, mitigation: { intersectAcres: 2, volumeCf: null, unknownReason: "pad / finished-floor elevation not entered" } }),
+      yieldVerdictStrip({ ...base, mitRememberedMissing: true }),
+      yieldVerdictStrip({ ...base, floodGeo: { state: "failed" } }),
+    ];
+    for (const strip of cases) {
+      const mit = strip.find((v) => v.key === "mit");
+      expect(mit.sentence.includes(EM_DASH), mit.sentence).toBe(false);
+    }
+  });
+
+  it("a genuinely resolved mitigation ledger is unaffected (no regression on the ordinary path)", () => {
+    const [, mit] = yieldVerdictStrip({ ...base, mitigation: { intersectAcres: 2, volumeCf: 5 * AC_FT, volumeAcFt: 5 }, mitProvided: { creditedCf: 6 * AC_FT } });
+    expect(mit.sentence).toBe("6.0 of 5.0 AC-FT");
+  });
+});
+
 describe("B2 — buildability is a PERMANENT strip row; unassessed reads 'not checked yet' + ↻", () => {
   it("no buildability data → a neutral 'not checked yet' row carrying the recheck flag", () => {
     const strip = yieldVerdictStrip({ req: detReqPoint(33.8), providedUsableCf: 34 * AC_FT });
