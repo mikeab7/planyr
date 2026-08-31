@@ -1276,29 +1276,13 @@ export default function Notes({
           flex: 1, minWidth: 0, display: showDetail ? "flex" : "none",
           flexDirection: "column", minHeight: 0,
         }}>
-          {/* ⛔ THE WAY BACK TO THE LIST (NEW-1), phone-only. `backToList` is the same function
-              whether a page or a bin "peek" is open, so there is exactly one way out rather
-              than two similar-looking ones. 44px tall (WCAG 2.5.5) and clear of the home
-              indicator via the safe-area inset. */}
-          {narrow ? (
-            <div style={{
-              flex: "none", display: "flex", alignItems: "center",
-              padding: "4px 6px", paddingTop: "max(4px, env(safe-area-inset-top))",
-              borderBottom: "1px solid var(--border-default)", background: "var(--surface-raised)",
-            }}>
-              <button
-                type="button"
-                data-testid="notes-mobile-back"
-                onClick={backToList}
-                aria-label="Back to the notes list"
-                style={{
-                  minWidth: 44, minHeight: 44, display: "inline-flex", alignItems: "center", gap: 4,
-                  border: "none", background: "transparent", color: "var(--accent-notes-text)",
-                  font: "inherit", fontSize: 15, fontWeight: 650, cursor: "pointer", padding: "0 10px 0 4px",
-                }}
-              >‹ Notes</button>
-            </div>
-          ) : null}
+          {/* ⛔ THE WAY BACK TO THE LIST (NEW-1) USED TO BE ITS OWN FULL-WIDTH BAND HERE — a
+              whole row of chrome spent on one small link (B935968, owner report: "the return
+              to notes button takes up a whole header"). It is now MERGED into whichever row is
+              already the top of the detail pane: the toolbar's own primary row for an open
+              page (`onBack` below, rendered pinned at its left by `NoteToolbar` — see that
+              file), or the bin-peek status row a few lines down for a binned note being read.
+              `backToList` is still the one function for both paths. */}
           {/* ⛔ READING A BINNED NOTE, WITHOUT RESTORING IT (NEW-3). Its own editor instance,
               keyed on the page so it mounts fresh, `readOnly` so no transaction can be
               generated at all — and a bar that says plainly what you are looking at, because a
@@ -1313,6 +1297,23 @@ export default function Notes({
                   color: "var(--text-secondary)", fontSize: 12.5, fontWeight: 600,
                 }}
               >
+                {/* The bin-peek reader has no formatting toolbar to pin a back link inside
+                    (it renders one read-only NoteEditor per page in the cascade, so there can
+                    be more than one), so this status row — already the top chrome of THIS
+                    view, already one row — is where NEW-1's merged back link lives here. */}
+                {narrow ? (
+                  <button
+                    type="button"
+                    data-testid="notes-mobile-back"
+                    onClick={backToList}
+                    aria-label="Back to the notes list"
+                    style={{
+                      flex: "0 0 auto", minWidth: 44, minHeight: 44, display: "inline-flex", alignItems: "center", gap: 4,
+                      border: "none", background: "transparent", color: "var(--accent-notes-text)",
+                      font: "inherit", fontSize: 15, fontWeight: 650, cursor: "pointer", padding: 0, margin: "0 -6px 0 0",
+                    }}
+                  >‹ Notes</button>
+                ) : null}
                 <span style={{ flex: 1, minWidth: 0 }}>
                   Reading “{peek.title}” from the bin. Nothing you do here changes it.
                 </span>
@@ -1401,6 +1402,7 @@ export default function Notes({
                 onExportMarkdown={handleExportPage}
                 onPrintNotice={setExportNote}
                 narrow={narrow}
+                onBack={narrow ? backToList : undefined}
               />
             </Suspense>
           ) : (

@@ -606,9 +606,18 @@ const HEADING_OPTIONS = [
  * everything else behind a More SHEET (a fixed bottom panel, not the desktop popover — see
  * OverflowMenu's own note on why). Every control below still carries its original `nt-*`
  * `data-testid`, moved or not, so `verify-phone-layout.mjs` can read the live DOM for the
- * row's contents rather than a hand-typed list that could drift from this file. */
+ * row's contents rather than a hand-typed list that could drift from this file.
+ *
+ * ⛔ THE WAY BACK TO THE LIST IS PINNED AT THE LEFT OF THIS ROW, NOT ITS OWN BAND (B935968,
+ * owner report: "the return to notes button takes up a whole header"). `Notes.jsx` used to
+ * render "‹ Notes" as a full-width band above this bar — a whole row of chrome spent on one
+ * small control. `onBack`, passed only while `narrow`, renders it here instead, as the FIRST
+ * child of the row, `position: sticky; left: 0` so it stays put while the rest of the row
+ * scrolls sideways underneath it (the same technique a frozen table column uses) — no second
+ * scroll container needed, and the row's own `overflowX: auto` is untouched. It shares the
+ * row's 44px `big` sizing so it never separately grows the bar's height. */
 
-export default function NoteToolbar({ editor, onExport, onPrint, onAttach, onHistory, historyOpen, narrow = false }) {
+export default function NoteToolbar({ editor, onExport, onPrint, onAttach, onHistory, historyOpen, onBack, narrow = false }) {
   const fileRef = useRef(null);
   if (!editor) return null;
 
@@ -762,8 +771,34 @@ export default function NoteToolbar({ editor, onExport, onPrint, onAttach, onHis
     </>
   ) : null;
 
+  /* Pinned as ONE flex item (button + divider together) so the sticky offset and the
+     opaque backing that hides scrolled-under controls apply to both at once. */
+  const backControl = narrow && onBack ? (
+    <span
+      data-testid="notes-toolbar-back-pinned"
+      style={{
+        position: "sticky", left: 0, zIndex: 2, flex: "0 0 auto",
+        display: "inline-flex", alignItems: "center", background: "var(--surface-raised)",
+      }}
+    >
+      <button
+        type="button"
+        data-testid="notes-mobile-back"
+        onClick={onBack}
+        aria-label="Back to the notes list"
+        style={{
+          flex: "0 0 auto", minWidth: 44, minHeight: 44, display: "inline-flex", alignItems: "center", gap: 4,
+          border: "none", background: "transparent", color: "var(--accent-notes-text)",
+          font: "inherit", fontSize: 15, fontWeight: 650, cursor: "pointer", padding: "0 10px 0 4px",
+        }}
+      >‹ Notes</button>
+      <Sep />
+    </span>
+  ) : null;
+
   return (
     <div style={barStyle} data-testid="note-toolbar" data-narrow={narrow ? "1" : "0"} role="toolbar" aria-label="Formatting">
+      {backControl}
       <TBButton title="Undo" testid="nt-undo" big={narrow} disabled={!editor.can().undo()} onClick={() => chain().undo().run()}>
         <Icon><path d="M3 7h6.5a3 3 0 0 1 0 6H6" /><path d="M5.5 4.5L3 7l2.5 2.5" /></Icon>
       </TBButton>
