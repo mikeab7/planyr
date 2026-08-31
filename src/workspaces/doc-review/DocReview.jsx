@@ -1155,7 +1155,11 @@ export default function DocReview({
   useEffect(() => {
     if (!docIntent || docIntent.token === lastConsumedDocToken) return;
     lastConsumedDocToken = docIntent.token;
-    if (docIntent.kind === "open-review" && docIntent.row) openReview(docIntent.row);
+    if (docIntent.kind === "open-review" && docIntent.row) {
+      const targetPage = docIntent.openAtPage;
+      const opened = openReview(docIntent.row);
+      if (targetPage) opened.then(() => goToPage(targetPage));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docIntent]);
   // Resume the last review (and its mode) on mount, once — per-project first. Stitch
