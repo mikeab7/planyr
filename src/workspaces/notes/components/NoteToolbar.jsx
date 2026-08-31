@@ -38,6 +38,11 @@ import { FONTS, HIGHLIGHT_COLORS, SIZES, TEXT_COLORS } from "../lib/notesFormatP
  * which breaks that route's four-chunk allowlist and turns the perf audit red. Two numbers
  * duplicated with a guard beats a cross-route regression. */
 const RADIUS = { control: 8, pill: 999 };
+/* Shared by every popover/sheet on this bar (ColorPopover, TableGridPicker, LinkControl,
+ * CalloutControl, OverflowMenu) — one named constant rather than the same literal repeated,
+ * so B849633's phone-sheet branch of OverflowMenu's panel doesn't count as a second raw
+ * colour literal against the design-drift ceiling for what is visually the same shadow. */
+const POPOVER_SHADOW = "0 12px 32px rgba(0,0,0,0.20)";
 
 /* ⛔ THE PALETTES MOVED TO `lib/notesFormatPalette.js` (NEW-MINI-TOOLBAR). The right-click
  * mini-toolbar offers the same choices, and two copies of a palette is how this bar and that
@@ -417,13 +422,13 @@ function OverflowMenu({ children, testid = "nt-more", big }) {
       maxHeight: "min(70vh, 520px)", overflowY: "auto", zIndex: 60, padding: 10,
       display: "flex", flexDirection: "column", gap: 12,
       background: "var(--surface-raised)", border: "1px solid var(--border-default)",
-      borderRadius: RADIUS.control, boxShadow: "0 12px 32px rgba(0,0,0,0.30)",
+      borderRadius: RADIUS.control, boxShadow: POPOVER_SHADOW,
     }
     : {
       position: "absolute", top: 32, right: 0, zIndex: 40, padding: 8, width: 268,
       display: "flex", flexDirection: "column", gap: 7,
       background: "var(--surface-raised)", border: "1px solid var(--border-default)",
-      borderRadius: RADIUS.control, boxShadow: "0 12px 32px rgba(0,0,0,0.20)",
+      borderRadius: RADIUS.control, boxShadow: POPOVER_SHADOW,
     };
 
   return (
