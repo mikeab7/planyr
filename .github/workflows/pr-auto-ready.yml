@@ -24,35 +24,53 @@ name: PR auto-ready
 # (.github/required-checks.json) reports green on the head commit. A red or pending build
 # leaves the PR exactly where auto-merge already leaves every other armed PR: waiting.
 #
-# TOKEN / TRIGGER NOTE, so the next session doesn't have to re-derive this. The built-in
-# GITHUB_TOKEN is enough — markPullRequestReadyForReview and enablePullRequestAutoMerge are
-# PR-metadata mutations, not git pushes, so they don't need to (and don't) retrigger the
-# "build" check themselves; build.yml already runs on the same pull_request event
-# (opened/synchronize/reopened) this workflow reacts to, draft or not (build.yml carries no
-# draft filter). What this workflow does NOT fix is the pre-existing, already-documented gap
-# right above this file in CLAUDE.md: a PR *opened* via the Claude Code automation's own app
-# token often never fires that first pull_request "opened" trigger at all, for either
-# workflow. The routine nudge commit a shipping session already pushes (a real git push,
-# firing "synchronize") is what makes both this workflow AND the "build" check report — this
-# workflow rides the exact same fix, it does not need a second one. If GITHUB_TOKEN is ever
-# found not to fire reliably even on "synchronize", switch to a repository PAT stored as a
-# secret and update this note — do not reach for pull_request_target, since this workflow
-# never needs to run with base-branch privileges over untrusted fork content (this is a
-# private repo with no forks).
+# TOKEN / TRIGGER NOTE, so the next session doesn't have to re-derive this. GITHUB_TOKEN is
+# enough to make GitHub actually RUN this workflow — markPullRequestReadyForReview and
+# enablePullRequestAutoMerge are PR-metadata mutations, not git pushes, so they don't need to
+# (and don't) retrigger the "build" check themselves; build.yml already runs on the same
+# pull_request event (opened/synchronize/reopened) this workflow reacts to, draft or not
+# (build.yml carries no draft filter). What this workflow does NOT fix is the pre-existing,
+# already-documented gap right above this file in CLAUDE.md: a PR *opened* via the Claude Code
+# automation's own app token often never fires that first pull_request "opened" trigger at all,
+# for either workflow. The routine nudge commit a shipping session already pushes (a real git
+# push, firing "synchronize") is what makes both this workflow AND the "build" check report —
+# this workflow rides the exact same fix, it does not need a second one.
+# ⛔ BUT GITHUB_TOKEN IS **NOT** ENOUGH TO PERFORM THE TWO MUTATIONS THEMSELVES (corrected
+# 2026-08-31, B793696/B914449 — this note used to say "GITHUB_TOKEN is enough" as one claim
+# covering both triggering AND mutating; that conflated two different things and the mutation
+# half was wrong). markPullRequestReadyForReview and enablePullRequestAutoMerge both come back
+# FORBIDDEN ("Resource not accessible by integration") under GITHUB_TOKEN in this repo, proven
+# on real PRs three separate times under three different credential/setting combinations — see
+# the ⛔ PERMISSIONS block below. This is now a permanent, owner-accepted limitation, not an
+# open question: do not spend another session re-diagnosing it, and do not switch to a
+# repository PAT without a fresh, explicit owner go-ahead (he was asked and declined one on
+# 2026-08-31, because the manual step this job's FORBIDDEN branch describes costs him nothing).
 #
-# ⛔ PERMISSIONS (B793696, fixing B781760's first shipped version). The workflow/job-level
-# `permissions:` blocks below CANNOT fix a FORBIDDEN response on their own — they were
-# already present when this failed live on PR #1188 (`enablePullRequestAutoMerge`) and #1190
-# (`markPullRequestReadyForReview`, confirmed FORBIDDEN too), with GITHUB_TOKEN Permissions
-# already printing the requested scope as granted. THE ACTUAL CAUSE, measured by the repo
-# owner directly from github.com/mikeab7/planyr/settings/actions (not this file): the repo's
-# "Workflow permissions" default was set to read-only, which is a CEILING no workflow
-# `permissions:` key — at any level — can exceed. The printed `GITHUB_TOKEN Permissions` log
-# block reflects what a workflow's own key REQUESTED, not what the ceiling actually let
-# through; the two can disagree. THE FIX IS A SETTINGS CHANGE, not a YAML change — see
-# B793696/V438336 in BACKLOG.md / VERIFICATION.md for the exact setting, the live re-test
-# once it's flipped, and why a PAT is documented there only as a subordinate fallback, not
-# the recommendation. These job-level blocks stay for clarity but were never the fix.
+# ⛔ PERMISSIONS (B793696, fixing B781760's first shipped version; RECLASSIFIED as a known,
+# accepted, permanent limitation 2026-08-31 — see B793696 in BACKLOG.md for the full record).
+# The workflow/job-level `permissions:` blocks below CANNOT fix a FORBIDDEN response on their
+# own — they were already present when this failed live on PR #1188 (`enablePullRequestAuto
+# Merge`) and #1190 (`markPullRequestReadyForReview`, confirmed FORBIDDEN too), with
+# GITHUB_TOKEN Permissions already printing the requested scope as granted. TWO repository
+# settings were then tried and BOTH ruled out empirically: "Workflow permissions: Read and
+# write" (flipped 2026-08-31, re-tested on PR #1246 — still FORBIDDEN) and "Allow GitHub
+# Actions to create and approve pull requests" (flipped 2026-08-31, re-tested on PR #1255 —
+# still FORBIDDEN). A THIRD path — the installed "Claude" GitHub App acting on this workflow's
+# behalf — is not fixable at all: a workflow can only act as a GitHub App if it holds that
+# App's private key, and only the App's creator (Anthropic, not this repo) holds it. The
+# remaining fix (a fine-grained PAT or a small self-owned GitHub App) is a credential the owner
+# has to explicitly authorize; he reviewed this 2026-08-31 and declined, because a session
+# marking its own PR ready by hand costs him nothing. These job-level `permissions:` blocks
+# stay for clarity but were never the fix and are not expected to become one.
+#
+# ⛔ B914449 (2026-08-31): given the above is permanent, `auto-ready` below no longer fails the
+# job (`core.setFailed`) on the diagnosed FORBIDDEN case for EITHER mutation — it reports the
+# expected condition with `core.notice` and lets the run pass, so a known, accepted limitation
+# stops painting every claude/* PR's checks red. Any OTHER error (a different message, a
+# different failure mode) still fails the job loudly — this is a narrow, diagnosed exception,
+# not a blanket swallow. And if either mutation ever SUCCEEDS, the job says so just as loudly
+# (also `core.notice`): that would mean a credential now exists and B793696 should be reopened
+# and closed as actually fixed, so that recovery must never go unannounced.
 
 on:
   pull_request:
@@ -117,16 +135,38 @@ jobs:
               );
               return;
             }
-            // B793696: enablePullRequestAutoMerge failed FORBIDDEN on PR #1188 even though the
-            // job's OWN GITHUB_TOKEN Permissions log block printed "PullRequests: write" already
-            // granted — proven on the real run, not assumed. That is GitHub restricting this
-            // specific mutation for the default Actions token regardless of scope (the same class
-            // of restriction as "GITHUB_TOKEN cannot approve pull request reviews"), not a missing
-            // permissions grant. markPullRequestReadyForReview is a plain metadata mutation (not an
-            // approval-adjacent one) and is expected to behave differently — this run is what
-            // determines that empirically rather than by assuming it shares the same restriction.
+            // B793696, RECLASSIFIED 2026-08-31 (B914449) as a known, owner-accepted, PERMANENT
+            // limitation — not an open question, not something to re-diagnose. GITHUB_TOKEN
+            // cannot perform either mutation below in this repo: confirmed FORBIDDEN on real
+            // PRs three times, under three different credential/setting combinations (see the
+            // header comment block above for the full list). The owner reviewed this 2026-08-31
+            // and declined the two things that would actually fix it (a PAT, a self-owned
+            // GitHub App), because a session marking its own PR ready by hand costs him nothing.
+            // So: still ATTEMPT both mutations every run, in case the limitation ever lifts —
+            // but the diagnosed FORBIDDEN case is reported with core.notice and the run PASSES,
+            // not core.setFailed. Any OTHER error is still unknown and still fails the job loudly
+            // (the `throw err` branches below) — this is a narrow, diagnosed exception, not a
+            // blanket swallow. And a mutation that SUCCEEDS is reported just as loudly as one
+            // that fails FORBIDDEN — see reportRecovered — because a silent recovery is how an
+            // accepted limitation rots into a forgotten one.
             const isForbidden = (err) =>
               /resource not accessible by integration/i.test(err && err.message || "");
+            const reportForbidden = (mutation) => {
+              core.notice(
+                `${mutation} FORBIDDEN on #${pr.number} — known limitation B793696 ` +
+                  `(owner-accepted 2026-08-31; no credential currently available to GITHUB_TOKEN ` +
+                  `can perform this mutation in this repo). This is expected, not a workflow bug. ` +
+                  `The session that opened #${pr.number} marks it ready / arms auto-merge itself, ` +
+                  `directly via the GitHub MCP tools, as a normal part of shipping — see CLAUDE.md.`
+              );
+            };
+            const reportRecovered = (mutation) => {
+              core.notice(
+                `${mutation} SUCCEEDED on #${pr.number}. B793696 was accepted as a PERMANENT ` +
+                  `limitation on 2026-08-31 — if this keeps succeeding, a credential now exists. ` +
+                  `Reopen B793696 in BACKLOG.md and close it as actually fixed.`
+              );
+            };
             if (pr.draft) {
               try {
                 await github.graphql(
@@ -137,15 +177,10 @@ jobs:
                   }`,
                   { id: pr.node_id }
                 );
-                core.info(`Marked #${pr.number} ready for review.`);
+                reportRecovered("markPullRequestReadyForReview");
               } catch (err) {
                 if (isForbidden(err)) {
-                  core.setFailed(
-                    `markPullRequestReadyForReview FORBIDDEN on #${pr.number} despite granted ` +
-                      `pull-requests: write — GITHUB_TOKEN cannot perform this mutation here. ` +
-                      `See B793696 in BACKLOG.md: this needs a PAT/App token, a repo owner decision, ` +
-                      `not a workflow-only fix. #${pr.number} was NOT marked ready — mark it by hand.`
-                  );
+                  reportForbidden("markPullRequestReadyForReview");
                   return;
                 }
                 throw err;
@@ -164,23 +199,12 @@ jobs:
                 }`,
                 { id: pr.node_id }
               );
-              core.info(`Armed squash auto-merge on #${pr.number}.`);
+              reportRecovered("enablePullRequestAutoMerge");
             } catch (err) {
               if (/already enabled/i.test(err.message || "")) {
                 core.info(`#${pr.number} already has auto-merge armed — nothing to do.`);
               } else if (isForbidden(err)) {
-                // Confirmed on PR #1188 (2026-08-26): FORBIDDEN here despite granted
-                // pull-requests: write. core.warning (not setFailed) so this doesn't paint every
-                // future claude/* PR's check red for a known, human-decision-pending limitation —
-                // but it is NOT silent: it's a visible annotation on the job, and the PR is left
-                // with auto-merge un-armed for a session/owner to arm by hand until B793696 lands
-                // a fix (a PAT/App token) or this comment is proven wrong by a later run.
-                core.warning(
-                  `enablePullRequestAutoMerge FORBIDDEN on #${pr.number} despite granted ` +
-                    `pull-requests: write — this is the known B793696 GITHUB_TOKEN restriction, ` +
-                    `not a config bug in this workflow. Auto-merge was NOT armed; arm it by hand ` +
-                    `(or wait for B793696's fix) until this warning stops appearing.`
-                );
+                reportForbidden("enablePullRequestAutoMerge");
               } else {
                 throw err;
               }
