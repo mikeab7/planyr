@@ -54,12 +54,12 @@
       "note": "Was 3094689 before NEW-9 removed the boot-time idle prefetch of the other workspaces, and 2270513 before B1042 deferred the export path + the LERC codec. Ceiling ratcheted 2400000 -> 2320000 with that landing. STILL ABOVE TARGET, and dynamic imports alone cannot close the rest \u2014 see largestChunkBytes.note for the measured floor, plus ~200 KB of Supabase client in the shared entry chunk (auth-js/realtime-js/phoenix/storage-js) that only a signed-in-verifiable change can defer. CEILING RAISED 2320000 -> 2332000 by B1130/B1131 (2026-07-30), and this is the justification the standing rule demands, stated in full because raising a ceiling is a product decision. WHAT SHIPPED: two owner-reported defects on the Electric layer \u2014 substations painting as broken-image glyphs labelled \"Mark\" (a GeoJSON point with no pointToLayer falling through to L.Icon.Default), and no way to hover a line or substation to learn what it is. WHAT WAS PAID FIRST, measured: the feature started at +20.2 KB on this metric and was cut to +7.4 KB by four optimizations before any number here was touched \u2014 (1) the raster identify glue + state machine moved behind a dynamic import (rasterIdentifyLazy.js), (2) the vector hover/identify attach layer and its wording engine likewise (featureHoverAttach.js, imported at layer-toggle time), (3) identifyCapable moved into this file so layers.js can gate on it without pulling the identify module onto the boot path, (4) the L.Icon.Default fallback rendered from a ~400-byte inline SVG pin instead of leaflet's three PNGs, which Vite base64-inlines at ~6 KB (both Vite-5 ways of emitting them as files were tried; ?no-inline is Vite 6 and new URL(...) against node_modules emits nothing). WHY A RAISE WAS STILL NEEDED: main was already at 2262.9 KB against a 2265.6 KB ceiling \u2014 2.7 KB of headroom \u2014 so this metric now trips on essentially ANY feature, which is a headroom problem rather than a regression in this PR. The residual ~7 KB is SitePlanner.jsx's hover card + effect, the geometry-aware point styling, and the per-layer hoverIdentify flags: all synchronous, all on this route, none deferrable by import(). NOTE THE CONTRAST, which is the honest read: largestChunkBytes was NOT raised \u2014 the same four optimizations brought it back under its existing ceiling (1719.5 -> 1706.8 KB). B1064 remains the metric owner for closing the real gap. NEW-1 (2026-07-30) RETIRED THE HAND-PINNED CEILING ON THIS METRIC, which is the honest fix for the paragraph immediately above: three PRs failed on 0.8-0.9% breaches of a ceiling pinned 0.06% over measured, and the answer to that is a policy, not a fourth hand-typed number. The ceiling is now DERIVED from `baseline` + the shared `headroom` band, and the baseline moves only through `npm run perf:ratchet` with a reason recorded in `ratchetLog`."
     },
     "siteRouteChunks": {
-      "ceiling": 9,
-      "target": 9,
-      "measured": 8,
+      "ceiling": 17,
+      "target": 17,
+      "measured": 14,
       "unit": "chunks",
       "what": "How many JS chunks a plain Site route pulls.",
-      "note": "THE PREFETCH GUARD. Was 11 before NEW-9. Any workspace chunk reappearing here means something warms a route-irrelevant module at boot again. NO HEADROOM BAND, deliberately: a chunk count is a structural guard, not a size, and 'four chunks plus two percent' is not a sentence. RAISED 4 -> 7 across NEW-2 and B1064(a) (2026-07-30) with the reason on the record, which is the only way this number is allowed to move: the three new members are `map-vendor`, `cjs-interop` and `teams`, each named in siteRouteAllowlist.$comment with what it contains and why. The count is the coarse guard; the ALLOWLIST is the sharp one, and it still fails by name on anything not enumerated. RAISED 7 -> 8 on 2026-08-09 (B326418), same rule, reason on the record: `userPrefs` joined siteRouteAllowlist for the identical mechanical reason `teams` did \u2014 a module with a STATIC planner consumer and a LAZY Team-tab consumer gets its own shared chunk. RAISED 8 -> 9 on 2026-08-31 (NEW-4, docs/DESIGN.md's `/design` gallery), the identical mechanical reason a third time: `src/shared/ui/controls.jsx` (the shared Button/ToggleChip/IconButton/Field/Section/MenuItem primitive library) has a STATIC planner consumer already and the new lazy `#/design` route is a second one, so Rollup gives it its own chunk. The gallery deliberately imports the REAL components rather than re-implementing them locally (docs/DESIGN.md's own hard rule (b) \u2014 a control is never forked, the primitive set is the one to extend/consume), which is why this is the one primitive-layer import NOT mirrored the way statusTokens.js/designTokens.js are in DesignGallery.jsx (see that file's own header for the two that WERE mirrored and why controls.jsx wasn't). This ceiling tracks the allowlist LENGTH (test/perfBudgets.test.js asserts they match), so it moves whenever the allowlist does; the MEASURED count moves 7 -> 8, one more FILE for the same bytes controls.jsx already contributed to the Site route before this split (same shape as `teams`/`userPrefs` above) \u2014 the `#/design` route itself is not on the boot path and costs nothing extra for anyone who never types that URL. Not ratchetable \u2014 a hard-ceiling metric has no baseline, so `npm run perf:ratchet` refuses it by design and a documented edit here is the sanctioned path."
+      "note": "THE PREFETCH GUARD. Was 11 before NEW-9. Any workspace chunk reappearing here means something warms a route-irrelevant module at boot again. NO HEADROOM BAND, deliberately: a chunk count is a structural guard, not a size, and 'four chunks plus two percent' is not a sentence. RAISED 4 -> 7 across NEW-2 and B1064(a) (2026-07-30) with the reason on the record, which is the only way this number is allowed to move: the three new members are `map-vendor`, `cjs-interop` and `teams`, each named in siteRouteAllowlist.$comment with what it contains and why. The count is the coarse guard; the ALLOWLIST is the sharp one, and it still fails by name on anything not enumerated. RAISED 7 -> 8 on 2026-08-09 (B326418), same rule, reason on the record: `userPrefs` joined siteRouteAllowlist for the identical mechanical reason `teams` did \u2014 a module with a STATIC planner consumer and a LAZY Team-tab consumer gets its own shared chunk. RAISED 8 -> 9 on 2026-08-31 (NEW-4, docs/DESIGN.md's `/design` gallery), the identical mechanical reason a third time: `src/shared/ui/controls.jsx` (the shared Button/ToggleChip/IconButton/Field/Section/MenuItem primitive library) has a STATIC planner consumer already and the new lazy `#/design` route is a second one, so Rollup gives it its own chunk. RAISED 9 -> 17 on 2026-08-31 (B927105 \u2014 give the Notes route real headroom by splitting the Site Planner libraries out of the shared entry chunk): storage.js/siteModel.js/cloudSync.js/activeUser.js/projectModel.js/siteStatus.js/serializeWrites.js each gained a SECOND consumer (`shared/projects/projects.js`, which every non-Site workspace's header breadcrumb reaches, now reads a light project-list leaf instead and reaches the full engine only via a dynamic import), so each one gets its own shared chunk (or is merged with a neighbour of the same shape \u2014 see siteRouteAllowlist.$comment for which) for the identical mechanical reason `teams`/`userPrefs`/`controls` did \u2014 a module with a STATIC planner consumer and a now-DYNAMIC consumer elsewhere. The Site route downloads the SAME BYTES it always did (siteRouteJsBytes moved only the usual few KB of unrelated same-day drift), in a handful more files; the payoff is entirely on the OTHER routes, which no longer download these bytes at all (notesRouteJsBytes 689.6 -> 571.2 KB). The allowlist is deliberately sized for the WORST-CASE split (every new leaf its own chunk) since Rollup's exact grouping of the tiny activeUser/projectModel/siteStatus/projectName cluster has been observed to vary build-to-build with no source change \u2014 the measured count is usually a few below the ceiling. This ceiling tracks the allowlist LENGTH (test/perfBudgets.test.js asserts they match), so it moves whenever the allowlist does. Not ratchetable \u2014 a hard-ceiling metric has no baseline, so `npm run perf:ratchet` refuses it by design and a documented edit here is the sanctioned path."
     },
     "siteRouteAllowlist": {
       "$comment": [
@@ -96,6 +96,48 @@
         "                Rollup gives it its own chunk. The Site route downloads the same bytes it",
         "                always did (controls.jsx was previously inlined into SitePlannerApp), in one",
         "                more file.",
+        "GREW BY FIVE ON 2026-08-31 (B927105 — see docs referenced on siteRouteChunks.note), the same",
+        "mechanical reason as the three above, all at once: `shared/projects/projects.js` — read by",
+        "every workspace's header breadcrumb (AppHeader -> ProjectBreadcrumb) — used to statically",
+        "import storage.js's full surface for the sake of two symbols the SHELL needed (setActiveUser/",
+        "setScheduleLink) plus its own list/rename/delete/warm needs, which pulled the whole site-model",
+        "engine into every route's bundle. It now reads a light project-list leaf and reaches the full",
+        "engine only through a dynamic import(), so these five modules — each already a STATIC Site",
+        "Planner dependency — gained a second, now-DYNAMIC consumer and each got its own shared chunk:",
+        "  elementRows    — a Rollup-named merged chunk (~63 KB) holding siteModel.js (the geometry/",
+        "                   normalization engine: migrate/createSiteModel) plus its dogEar/dockZones/",
+        "                   roadGeometry/metesAndBounds/roadClasses/zOrder/elementRows imports. Rollup",
+        "                   picks the chunk's file-name stem from whichever of its merged modules it",
+        "                   considers representative, so this same cluster has also been observed",
+        "                   named `siteModel` across otherwise-equivalent builds — both names are",
+        "                   this cluster and either may appear; do not chase a rename as a regression.",
+        "  cloudSync      — src/workspaces/site-planner/lib/cloudSync.js (~34 KB), the Supabase",
+        "                   read/write layer (incl. its elementApi.js/elementSync.js imports for the",
+        "                   content-merge path).",
+        "  storage        — src/workspaces/site-planner/lib/storage.js itself (~27 KB): loadSite/",
+        "                   saveSite/loadSitesList and everything else that isn't in activeUser.js.",
+        "  activeUser     — src/workspaces/site-planner/lib/activeUser.js (~5 KB, NEW file): just",
+        "                   `activeUser`/setActiveUser/isCloudActive/activeUid, split out of storage.js",
+        "                   so a caller that only needs to read/set the signed-in account never has",
+        "                   to load the rest. Small enough that Rollup sometimes merges it into the",
+        "                   `projectModel` chunk below instead of keeping it separate — both shapes",
+        "                   are the same code and both are allowed.",
+        "  projectModel   — src/shared/projects/projectModel.js (~1 KB) plus whichever of",
+        "                   activeUser.js/siteStatus.js/projectName.js Rollup merges alongside it:",
+        "                   all four are tiny, dependency-free leaves reached the same way (a static",
+        "                   Shell/SitePlanner edge plus a dynamic edge from every other workspace's",
+        "                   light project-list read), so Rollup groups them together.",
+        "  siteStatus     — src/workspaces/site-planner/lib/siteStatus.js (~0.4 KB, NEW file): the",
+        "                   Site Model's schema-version + deal-status constants, split out of",
+        "                   siteModel.js so a status LABEL doesn't need the geometry engine. Small",
+        "                   enough that Rollup sometimes merges it into `projectModel` instead — see",
+        "                   that entry.",
+        "  serializeWrites — src/shared/cloud/serializeWrites.js (~2 KB), cloudSync.js's write-ordering",
+        "                   helper, following cloudSync.js into its own chunk for the same reason.",
+        "The Site route downloads the SAME BYTES it always did, in a handful more files, possibly",
+        "regrouped differently chunk-to-chunk across otherwise-equivalent builds (siteRouteJsBytes",
+        "moved only the usual few KB of unrelated same-day drift). The payoff is on every OTHER",
+        "route, which no longer downloads any of this at all.",
         "The guard is UNWEAKENED by this: it still fails by name on any chunk not on this list, and",
         "the NEW-9 regression it exists for (a workspace chunk warming at boot) would still be caught."
       ],
@@ -108,12 +150,20 @@
         "cjs-interop",
         "teams",
         "userPrefs",
-        "controls"
+        "controls",
+        "siteModel",
+        "elementRows",
+        "cloudSync",
+        "storage",
+        "activeUser",
+        "projectModel",
+        "siteStatus",
+        "serializeWrites"
       ]
     },
     "notesRouteJsBytes": {
-      "baseline": 673962,
-      "target": 673962,
+      "baseline": 586052,
+      "target": 586052,
       "unit": "bytes",
       "what": "Total JS a plain Notes route must download: the entry chunk plus Notes and its static-import closure.",
       "note": "Seeded at 0 so the FIRST measurement of a brand-new route lands through `npm run perf:ratchet` with a stated reason, exactly like any other baseline move \u2014 a hand-typed seed is the thing that step exists to prevent. WHAT THIS NUMBER DOES AND DOES NOT INCLUDE, because it is the whole reason the split is load-bearing: it counts the notebook TREE and its chrome, and deliberately NOT the rich-text engine. Notes.jsx pulls components/NoteEditor.jsx (and through it the only @tiptap imports in the module) via a lazy() import inside a Suspense, so the engine is a separate on-demand chunk of ~464 KB that a user pays for only when a page is actually opened, and the rail paints first. A future rise in THIS metric therefore means something moved onto the static path that belongs behind that boundary \u2014 most likely a new static import of the editor, or a shared module that got hoisted. test/notesModule.test.js source-scans for the first case; this budget is the backstop for the second."
@@ -586,6 +636,17 @@
           "commit": "0485eb197924a6006db154ac80abe554d76dcfd3",
           "sourceHash": "3012713e8187a718",
           "reason": "Model module follow-up (B891184): same rewrite -- sheetOps.js and modelSaveState.js are new files, sheetModel.js/sheetEngine.js grew substantially fixing per-cell formulas/formats"
+        },
+        {
+          "metric": "bundle.notesRouteJsBytes",
+          "from": 673962,
+          "to": 586052,
+          "direction": "ratchet",
+          "item": "B927105",
+          "date": "2026-08-31",
+          "commit": "72f20997c4e1858f078c52db11aafb58171ef1c2",
+          "sourceHash": "1dfb0256eeaf61c3",
+          "reason": "Split storage.js's setActiveUser/setScheduleLink and shared/projects/projects.js's storage.js edge into activeUser.js/siteListLight.js leaves and a dynamic import at the boundary, so the site-model/cloud-sync engine no longer rides the shared entry chunk or the breadcrumb's static graph on non-Site routes."
         }
       ]
     }
@@ -733,6 +794,7 @@
     "runtime.firstAerialCoverageMs": "B1040 / V477 live check (re-seed the provisional ceiling from a production run; tile hosts are unreachable from the sandbox)",
     "bundle.siteRouteJsBytes": "B1064 (extract SitePlanner's panels into lazily-loaded child components) -- B1042 did the dynamic-import half and is Done",
     "bundle.largestChunkBytes": "B1064 (extract SitePlanner's panels into lazily-loaded child components) -- B1042 did the dynamic-import half and is Done; see this metric's note for the measured floor that blocks the rest",
+    "bundle.notesRouteJsBytes": "B927105 -- Shell.jsx/shared/projects/projects.js no longer statically reach storage.js's site-model/cloud-sync engine (activeUser.js/siteListLight.js + a dynamic import at the boundary). Whoever next adds a static import from Shell.jsx or shared/projects/projects.js into storage.js/siteModel.js/cloudSync.js re-opens this — re-read that item before doing so.",
     "runtime.frameMedianMs": "V480(e) / V481(g) \u2014 a PRODUCTION frame-time reading on the real Sylvestri scenario, from an instrument with guaranteed tab visibility (NOT a Cowork browser session; see this metric's note). The reference scene already meets the 16.7ms target headless, so the remaining gap between ceiling and target is measurement headroom, not known slowness.",
     "runtime.frameP90Ms": "V480(e) / V481(g) \u2014 a PRODUCTION frame-time reading on the real Sylvestri scenario, from an instrument with guaranteed tab visibility (NOT a Cowork browser session; see this metric's note). Until that exists the ceiling describes the reference scene only.",
     "runtime.aerialTileRequests": "companion map-side perf session, 2026-07-28 nine-item run (tile-footprint reduction)"
