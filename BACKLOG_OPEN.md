@@ -245,7 +245,7 @@
 | B922816 | One entry point for creating a plan, with "Select parcels" as the primary action | [Site Planner / Map] | #site-planner #ui | ⏳ live — awaiting |
 | B849635 | Prove the Notes phone layout under emulation, and hand Michael a two-tap device check | [Notes] | #notes #mobile #ui | ⏳ live — awaiting |
 | B891184 | Build the Model module: a spreadsheet workspace for underwriting | [Model] | #model #persistence #ui #formula | ⏳ live — awaiting |
-| B881664 (×2) | Dashboard breadcrumb on Schedule reaches the dashboard route then bounces back to the project | [App shell / Site Planner boot-resume] | #site-planner #scheduler #ui | ⏳ live — awaiting |
+| B881664 (×3) | Dashboard breadcrumb on Schedule reaches the dashboard route then bounces back to the project | [App shell / Site Planner boot-resume] | #site-planner #scheduler #ui | ⏳ live — awaiting |
 | B881668 | Prove the flood-check freshness states end to end | [Site Planner / Yield] | #site-planner #yield #floodplain #testing | ⏳ live — awaiting |
 | B877440 | A jurisdiction with no criteria on file renders a NAMED no-data state, never a Houston-derived placeholder number | [Site Planner / drainage] | #site-planner #floodplain #pond | ⏳ live — awaiting |
 | B877441 | "Request criteria for this county" button on the no-data state | [Site Planner / drainage] | #site-planner #floodplain #pond #persistence | ⏳ live — awaiting |

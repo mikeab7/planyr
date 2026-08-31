@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability, mayResumeLastSite, resumeTargetAfterSignIn } from "../src/workspaces/site-planner/lib/bootResume.js";
+import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability, mayResumeLastSite, resumeTargetAfterSignIn, routeProjectJustChanged } from "../src/workspaces/site-planner/lib/bootResume.js";
 
 describe("initialBootResolved — the boot gate's starting value (V13)", () => {
   it("is FALSE when Supabase is configured (wait for the first auth + pull before reconciling the URL)", () => {
@@ -233,5 +233,26 @@ describe("resumeTargetAfterSignIn (B881664 ×2) — the post-pull async resume r
       resumeAllowed: false,
     });
     expect(fixed).toBe(null);
+  });
+});
+
+describe("routeProjectJustChanged (B881664 ×3) — the third round: a race between the two URL↔state effects", () => {
+  it("reports no change when the project id is the same both times", () => {
+    expect(routeProjectJustChanged("gid1", "gid1")).toBe(false);
+    expect(routeProjectJustChanged(null, null)).toBe(false);
+  });
+  it("reports a real transition project -> null (the Dashboard click that triggered the bounce)", () => {
+    expect(routeProjectJustChanged("gid1", null)).toBe(true);
+  });
+  it("reports a real transition null -> project, and project A -> project B", () => {
+    expect(routeProjectJustChanged(null, "gid1")).toBe(true);
+    expect(routeProjectJustChanged("gid1", "gid2")).toBe(true);
+  });
+  it("does NOT count the first-ever render as a transition, matching the URL->state effect's own exception", () => {
+    // prevPidRef starts as `undefined` (never yet observed a projectId) — this is the initial
+    // mount settle, not a user leaving a project, exactly like the "route-less render is NOT
+    // treated as a Dashboard navigation" comment on the URL->state effect this predicate mirrors.
+    expect(routeProjectJustChanged(undefined, null)).toBe(false);
+    expect(routeProjectJustChanged(undefined, "gid1")).toBe(false);
   });
 });

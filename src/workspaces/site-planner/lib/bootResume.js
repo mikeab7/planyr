@@ -162,3 +162,30 @@ export function resumeTargetAfterSignIn({ routeProjectId, currentId, plansOfGrou
   if (!routeProjectId && !resumeAllowed) return null;
   return pickResumeTarget({ routeProjectId, currentId, plansOfGroup, hasSite });
 }
+
+/* ⛔ B881664 (×3) — THIRD ROUND on the Dashboard-crumb bounce, and a DIFFERENT mechanism from
+ * the two `resumeAllowed` gates above (both of which only ever govern SitePlannerApp's FIRST
+ * MOUNT). This one fires on a mount that ALREADY EXISTS — the keep-alive case (every visited
+ * workspace stays mounted, hidden, rather than tearing down) — and needs no auth, no cloud
+ * pull, and no stale `currentSite` pointer, which is why it reproduces signed OUT and lands
+ * back on the SAME project just left rather than the most-recently-touched one.
+ *
+ * SitePlannerApp.jsx has TWO effects keeping the route and its internal `mode`/`activeSiteId`
+ * in sync: one reacts to the URL (route → state), the other publishes state back to the URL
+ * (state → route), and the second effect ALSO fires whenever `isActive` flips false → true (so
+ * reactivating a hidden tab reconciles the URL immediately). Clicking "Dashboard" from a
+ * kept-alive tab does both at once — clears the route's project AND reactivates this mount — in
+ * ONE render. On that render the URL→state effect has only *scheduled* its `mode` update; it
+ * hasn't taken effect yet, so the state→URL effect, triggered by `isActive` alone, still reads
+ * the OLD `mode`/`activeSiteId` and re-asserts the very project the click just routed away from.
+ *
+ * The fix: the state→URL effect must defer entirely on a render where the route's project
+ * itself just changed — the URL→state effect owns reconciling that transition, and the
+ * re-render it produces supplies a correct value next. `routeProjectJustChanged` is that test,
+ * pulled out as its own pure predicate (rather than inlined twice) because it has to mean
+ * EXACTLY the same thing in both places: a first-mount settle (`prevProjectId === undefined`)
+ * is not a real navigation away from a project, matching the URL→state effect's own existing
+ * "the first, route-less render is NOT treated as a Dashboard navigation" exception. Pure. */
+export function routeProjectJustChanged(prevProjectId, projectId) {
+  return prevProjectId !== undefined && prevProjectId !== projectId;
+}
