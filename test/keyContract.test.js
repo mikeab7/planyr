@@ -294,7 +294,7 @@ describe("keyScopeVerdict — what each scope may fire", () => {
 
   it("a dropdown takes arrows, Enter, Space, Escape and the type-ahead letters", () => {
     const takes = CONTROL_CONSUMES[SCOPE.PICKER];
-    for (const id of ["nudge", "commit", "hand-pan", "escape", "tool-select", "tool-pan"]) {
+    for (const id of ["nudge", "commit", "hand-pan", "escape", "tool-select"]) {
       expect(takes, id).toContain(id);
       expect(keyScopeVerdict({ entry: KEY_CONTRACT.find((k) => k.id === id), scope: SCOPE.PICKER }).allow, id).toBe(false);
     }
@@ -407,8 +407,8 @@ describe("⛔ NEW-1 — the Cloud tool ('c') bypassed the field guard; every OTH
     }
   });
 
-  it("the nine siblings from the owner's own discriminating test still resolve and still refuse", () => {
-    for (const key of ["l", "r", "e", "t", "q", "v", "m", "h", "s"]) {
+  it("the eight siblings from the owner's own discriminating test still resolve and still refuse", () => {
+    for (const key of ["l", "r", "e", "t", "q", "v", "m", "s"]) {
       const entry = resolveKeyEntry(ev({ key }));
       expect(entry, key).not.toBeNull();
       expect(keyScopeVerdict({ entry, scope: SCOPE.FIELD }).allow, key).toBe(false);
@@ -431,7 +431,7 @@ describe("⛔ NEW-1 — the Cloud tool ('c') bypassed the field guard; every OTH
    * than a hand-picked list so a FUTURE bare-letter tool with the same gap fails here too. */
   it("every declared bare-letter (mod:none, single-char) shortcut is refused out of a field", () => {
     const bareLetters = KEY_CONTRACT.filter((k) => k.mod === "none" && (k.keys || []).some((c) => c.length === 1 && /[a-zA-Z]/.test(c)));
-    expect(bareLetters.length).toBeGreaterThanOrEqual(10); // v h m s q t l r e c, at minimum
+    expect(bareLetters.length).toBeGreaterThanOrEqual(9); // v m s q t l r e c, at minimum
     for (const k of bareLetters) {
       expect(keyScopeVerdict({ entry: k, scope: SCOPE.FIELD }).allow, k.id).toBe(false);
     }

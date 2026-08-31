@@ -58,10 +58,12 @@ if (!svg) { console.log(errors); await browser.close(); process.exit(1); }
 const box = await svg.boundingBox();
 const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
 
-// Switch to the Pan tool so a drag anywhere is a pan (independent of content under the cursor).
-await page.keyboard.press("h");
+// B900416 — the rail's dedicated Pan tool is retired; Space-drag is now the way to pan a drag
+// that starts anywhere (independent of content under the cursor), so hold Space instead of
+// arming a tool.
+await page.keyboard.down("Space");
 await page.waitForTimeout(150);
-check("pan tool idle cursor is grab", (await cursorOf(page)) === "grab", await cursorOf(page));
+check("space-pan idle cursor is grab", (await cursorOf(page)) === "grab", await cursorOf(page));
 
 // ---- (1) interrupt by window blur -------------------------------------------------
 await page.mouse.move(cx, cy);
@@ -88,6 +90,7 @@ await page.evaluate(() => {
 await page.waitForTimeout(150);
 check("pointercancel recovers cursor to grab", (await cursorOf(page)) === "grab", await cursorOf(page));
 await page.mouse.up();
+await page.keyboard.up("Space");
 
 // ---- after recovery, the canvas still works (a fresh pan engages) -----------------
 await page.mouse.move(cx, cy);
