@@ -97,6 +97,18 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   **drag-to-size grid** (B1372), never a fixed 3×3 and never a dialog. It re-declares the two shared control radii locally
   instead of importing the shared `shared/ui/controls` primitives: that import makes the bundler
   hoist a third shared chunk onto the **Site** route and the perf audit goes red.
+  **Below the phone breakpoint (`narrow`, B849633) it is ONE compact scrollable row —
+  Undo/Redo/Bold/Italic/Bullet/Numbered/Link — with everything else in a fixed bottom sheet
+  (`OverflowMenu`'s `big` mode), never the wrapped multi-row column it used to become on a
+  phone. Every control that moves between the row and the sheet is defined ONCE as a JSX
+  variable and placed in exactly one of the two spots — never duplicated.
+- **PHONE DRILL-IN (B849632/B849635).** Below the same breakpoint, `Notes.jsx` shows the
+  page list (`NotesTree`) OR the open page/bin-peek reader, never both — `showList`/
+  `showDetail` are two INDEPENDENT conditions (not each other's negation: both are always
+  true on desktop, where the two-pane layout is unchanged). A phone-only "‹ Notes" control
+  (`mobileShowList`) is the one way back; opening a page anywhere (a row, a search/quick-open
+  hit, a task, a new page) clears it. `useNarrow()` is the shared AppHeader module's existing
+  760px breakpoint hook (`src/shared/ui/`), exported and reused rather than a third one.
 - **⛔ A PURGE IS A TOMBSTONED FACT, NOT AN ABSENCE (B357011, then B364016) — read this before
   touching the bin or the merge.** He emptied the bin; the cloud tree went to **rev 991** with one
   entry. A tab still on **rev 966** with unpushed edits reloaded, came back with **all 23 entries**,
