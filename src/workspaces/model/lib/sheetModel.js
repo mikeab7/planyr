@@ -92,6 +92,16 @@ export function migrateSheet(raw) {
   return createSheet();
 }
 
+/** Two ALREADY-MIGRATED sheets carry meaningfully different content (B891184-FOLLOWUP-2).
+ *  Used to detect a cross-device divergence at load: "local always wins on load" (ModelApp.jsx)
+ *  means a device with its own older local copy never shows what the cloud actually holds, so
+ *  without this check its next edit saves cleanly (no CAS conflict — nothing raced) and
+ *  silently overwrites another device's work. Both inputs are the same post-migration shape, so
+ *  a plain structural compare is exact and needs no semantic diff. */
+export function sheetsDiverge(a, b) {
+  return JSON.stringify(a) !== JSON.stringify(b);
+}
+
 export const cellKey = (colId, rowIndex) => `${colId}:${rowIndex}`;
 
 export function colAt(sheet, colIndex) { return sheet.columns[colIndex] || null; }

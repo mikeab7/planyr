@@ -79,12 +79,26 @@ export async function loadCloudSheet(projectId) {
 }
 
 async function upsertCore({ uid, projectId, sheet, expected }) {
-  const r = await casUpsert(supabase, TABLE, { uid, id: projectId, row: { data: sheet }, expected });
+  // ⛔ B891184-FOLLOWUP-2 (live production finding, 2026-08-31) — `row` must carry `id` itself,
+  // same as `sites`/`doc_reviews`' row-builders (siteRowFor/reviewRowFor) already do; casUpsert's
+  // own contract comment says so. This one didn't, so casUpsert's INSERT branch sent `{ data,
+  // user_id, version }` with no `id` at all — a real Postgres 23502 (null value in column "id"
+  // violates not-null constraint) on every first-ever save, proven live against production via a
+  // rolled-back impersonated-role insert. casUpsert is now hardened to spread `id` in defensively
+  // too (belt + suspenders — see its own comment), but the contract here is the primary fix.
+  const r = await casUpsert(supabase, TABLE, { uid, id: projectId, row: { id: projectId, data: sheet }, expected });
   if (r.degrade) {
     // The version column specifically is missing (a partially-applied migration) — never
     // regress a save into a crash; fall back to plain last-write-wins, exactly like
     // doc-review's own degrade path for the identical shape.
-    const { error } = await supabase.from(TABLE).upsert({ id: projectId, user_id: uid, data: sheet }, { onConflict: "id" });
+    // ⛔ model_sheets' PRIMARY KEY IS COMPOSITE — (user_id, id), not `id` alone (it deliberately
+    // scopes a sheet to one user × one project, so two users can each hold their own model for
+    // the same project id). `onConflict: "id"` names a column with no matching unique constraint
+    // on this table — Postgres would raise 42P10 (no unique/exclusion constraint matching the ON
+    // CONFLICT specification) had this dormant path ever run un-migrated. It has never fired in
+    // production (the version column has been present since the table was created), but it's
+    // real dead-wrong code and would break the moment a future partial migration reached it.
+    const { error } = await supabase.from(TABLE).upsert({ id: projectId, user_id: uid, data: sheet }, { onConflict: "user_id,id" });
     return error
       ? (isMissingRelation(error) ? { ok: false, reason: "not-provisioned" } : { ok: false, reason: "error", error: error.message })
       : { ok: true, version: null };
