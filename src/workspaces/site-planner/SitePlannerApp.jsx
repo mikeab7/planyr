@@ -33,7 +33,7 @@ const SiteReviewModal = lazy(() => import("./components/SiteReviewModal.jsx").th
 import { nextConceptName } from "./lib/conceptName.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { noteLayerContext } from "../../shared/telemetry/perfRecorderHandle.js";
-import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability, resumeTargetAfterSignIn } from "./lib/bootResume.js";
+import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability, resumeTargetAfterSignIn, routeProjectJustChanged } from "./lib/bootResume.js";
 import { RADIUS } from "../../shared/ui/radius.js";
 
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
@@ -530,8 +530,38 @@ export default function App({
    * not a new query) and let the effect's own `sites` dependency re-evaluate. Guarded per id
    * (`routeMissingRetryRef`) so a genuinely-gone id retries exactly once, never on every render. */
   const routeMissingRetryRef = useRef(new Set());
+  /* ⛔ B881664 (×3) — THIRD ROUND on the Dashboard-crumb bounce, and a DIFFERENT mechanism from
+   * the two already closed (B881664's `bootActiveId`/`resumeTargetAfterSignIn` mount-time gates,
+   * which only ever govern what happens when SitePlannerApp FIRST MOUNTS). This one fires on a
+   * mount that ALREADY EXISTS — the keep-alive case — and needs no auth, no cloud pull, and no
+   * stale `currentSite` pointer, which is why it reproduces signed OUT and lands back on the
+   * SAME project you just left rather than the most-recently-touched one.
+   *
+   * THE RACE: clicking "Dashboard" from a kept-alive tab (Schedule/Review/Library/Notes/Model)
+   * does two things in ONE navigate() call — it clears the route's `projectId` AND it makes
+   * THIS component active again (`isActive` false → true). Effect (2) below (state → URL) has
+   * `isActive` in its deps specifically so re-activating a hidden tab reconciles the URL right
+   * away — but the SAME render that supplies the new `projectId` prop still holds the OLD
+   * `mode`/`activeSiteId` (whatever this mount was showing before it was hidden), because effect
+   * (1) below only *schedules* `setMode("map")`; it doesn't take effect until the NEXT render.
+   * So effect (2) fires (triggered by `isActive` alone), reads `effGroup` from those stale,
+   * pre-transition values — still the project you were just on — and `mayWriteRouteProject`
+   * waves it through (`nextGroup` truthy is always honest), writing the very project the click
+   * just routed away from straight back into the URL. No network wait needed, which is why this
+   * bounce lands within about a second rather than the 2+ seconds the old cloud-pull mechanism
+   * needed.
+   *
+   * THE FIX: record whether THIS pass is the one where the route's project actually changed
+   * (mirroring effect (1)'s own "prev !== undefined && prev !== projectId" test for a real
+   * transition, so a first-mount settle is never mistaken for one). Effect (2) defers entirely
+   * on such a pass — effect (1) owns reconciling it — and the resulting re-render supplies a
+   * fresh, correct `effGroup` for effect (2) to act on next. Consumed (reset) the moment effect
+   * (2) reads it, so a LATER pass — where `effGroup` alone changes as `mode`/`activeSiteId`
+   * finish settling — is never wrongly suppressed by a flag left over from an earlier render. */
+  const routeChangedThisPassRef = useRef(false);
   useEffect(() => {
     const prev = prevPidRef.current; prevPidRef.current = projectId;
+    routeChangedThisPassRef.current = routeProjectJustChanged(prev, projectId);
     if (projectId) {
       const curGroup = groupForPlan(activeSiteId, mode);
       if (projectId !== curGroup) {
@@ -581,6 +611,15 @@ export default function App({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!isActive || !mayReconcileUrl(bootResolved)) return;
+    // B881664 (×3) — a route change and a reactivation can land in the SAME commit (the
+    // Dashboard crumb clicked from a kept-alive tab does both at once). `effGroup` above is
+    // computed from `mode`/`activeSiteId` as they stood BEFORE effect (1) has had a chance to
+    // react to the new `projectId` — writing it now would re-assert the project the user just
+    // navigated away from. Defer to effect (1) on that exact pass; it owns the transition, and
+    // the re-render it produces supplies a correct `effGroup` for this effect to act on next.
+    const deferToRouteReconcile = routeChangedThisPassRef.current;
+    routeChangedThisPassRef.current = false; // consume once — never lets a later, unrelated pass inherit it
+    if (deferToRouteReconcile) return;
     const allowed = mayWriteRouteProject({
       routeProjectId: projectIdRef.current,
       nextGroup: effGroup,

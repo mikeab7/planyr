@@ -86,6 +86,37 @@
  * investigation even though the real recurrence lived one layer deeper, in code this sandbox
  * cannot sign in to reach.
  *
+ * ⛔ B881664 (×3) — THIRD ROUND, and a genuinely DIFFERENT mechanism from the two already
+ * closed above. Both prior fixes only ever govern SitePlannerApp's FIRST MOUNT (`bootActiveId`'s
+ * lazy init, and `applyUser`'s once-per-mount auth subscription) — every case above (A/C/D-H)
+ * deliberately boots STRAIGHT onto another module's route, so SitePlannerApp never mounts until
+ * the Dashboard click itself. The owner's live report measured a bounce that reproduces even
+ * SIGNED OUT, lands back on the SAME project just left (never a different, most-recently-
+ * touched one), and fires within about a second — none of which fits the mount-time mechanism,
+ * which needs a stale `currentSite` pointer and, for the async leg, a 2+ second cloud pull.
+ *
+ * ROOT CAUSE (confirmed by reading SitePlannerApp.jsx's two URL↔state-sync effects, not
+ * guessed): the keep-alive feature (2026-07-05) means SitePlannerApp does NOT remount when you
+ * switch away from it — it stays mounted, hidden, with whatever `mode`/`activeSiteId` it held
+ * when you left. Clicking "Dashboard" from a kept-alive OTHER tab does two things in the SAME
+ * `navigate()` call: clears the route's `projectId` AND reactivates SitePlannerApp
+ * (`isActive` false → true). The state→URL sync effect has `isActive` in its deps specifically
+ * so reactivating a hidden tab reconciles the URL right away — but on the very render that
+ * supplies the new `projectId` prop, `mode`/`activeSiteId` still hold their OLD, pre-click
+ * values (the URL→state effect only *schedules* `setMode("map")`; it hasn't taken effect yet).
+ * So the state→URL effect fires — triggered by `isActive` alone — reads a STALE, still-truthy
+ * `effGroup` from those old values, and `mayWriteRouteProject` waves it through (a truthy
+ * `nextGroup` is always considered honest), writing the very project just left straight back
+ * into the URL. No network wait needed, which is exactly why this lands in under a second
+ * rather than 2+.
+ *
+ * CASES I–N below reproduce it directly: open the project on its SITE tab first (mounting
+ * SitePlannerApp for real, the ordinary way anyone reaches another tab of a project), switch
+ * to the target module via an in-app hash change (never a reload — a reload would tear down
+ * the mount this bug depends on and silently fall back to testing the ALREADY-CLOSED mount-time
+ * mechanism instead), then click Dashboard and record the hash every second for the whole
+ * window rather than a single before/after snapshot.
+ *
  * This harness never touches Supabase: the /sequence/ iframe is replaced with a same-origin
  * stub (same pattern as verify-schedule-switcher-pick.mjs) that speaks the real postMessage
  * contract, so the real shell code (Shell.jsx, route.js, lastRoute.js, bootResume.js,
@@ -97,7 +128,9 @@
  * must go RED — the hash stays on /schedule instead of moving to "#/" — and CASE C must go RED
  * — the hash bounces to "#/project/<id>/site" a moment after landing on "#/"), then
  * `git stash pop` and rebuild again. (CASES D–H exercise the same SYNCHRONOUS mechanism CASE C
- * does, so they move together with it under the same stash/rebuild cycle.)
+ * does, so they move together with it under the same stash/rebuild cycle. CASES I–N exercise
+ * the B881664 mechanism and must ALSO go red under the same stash — the bounce lands back on
+ * "#/project/<id>/site"/"#/project/<id>/markup" etc. rather than staying on "#/".)
  *
  * Run:  npm run build && npx vite preview --port 4173   (then)   node ui-audit/verify-schedule-dashboard-crumb.mjs
  */
@@ -350,6 +383,82 @@ async function caseFoodToDashboard(browser) {
   await ctx.close();
 }
 
+/* CASES I–M — B881664 (×3): SitePlannerApp already mounted+kept-alive on the SAME project as
+ * the tab you click Dashboard from. Unlike every case above, this needs no boot-resume seed and
+ * no stale currentSite pointer at all — the whole mechanism lives in SitePlannerApp's own two
+ * URL↔state-sync effects, so a plain project with nothing special primed is enough.
+ *
+ * Step 1 opens the project on its SITE tab — the ordinary way anyone reaches any other tab of a
+ * project — so SitePlannerApp genuinely mounts (mode="plan", activeSiteId=<the plan>). Step 2 is
+ * an in-app hash change (never `page.reload()` — a reload tears down the mount this bug needs
+ * and would silently fall back to exercising the already-closed mount-time mechanism instead) to
+ * the target module, same project, which keep-alive leaves SitePlannerApp mounted and hidden
+ * behind. The click then reproduces the owner's Repro B exactly: the reported bounce lands back
+ * on "#/project/<id>/site" specifically (mode="plan" survives, so `groupForPlan` still resolves
+ * the group) — not some other module's slug — which is why every one of these cases asserts the
+ * SAME bounce destination regardless of which OTHER tab the click came from.
+ *
+ * Non-negotiable per the owner's own reporting protocol: install the recorder before the click,
+ * click ONCE, and report the whole per-second trail — never a single before/after snapshot. */
+async function caseAlreadyMountedBounce(browser, { label, moduleSlug, hashModuleFragment }) {
+  console.log(`\n${label} — Site Planner already mounted+kept-alive on Goose Creek, click Dashboard from ${moduleSlug} (B881664 ×3 repro)`);
+  const ctx = await newPlainCtx(browser, seedScript);
+  const page = await ctx.newPage();
+  await assertMeasurable(page, "verify-schedule-dashboard-crumb");
+
+  await page.goto(`${BASE}#/project/${GID}/site`, { waitUntil: "load" });
+  await page.waitForTimeout(2600);
+  const onSite = await hashOf(page);
+  ok(onSite === `#/project/${GID}/site`, `starting hash is the routed Site project, mounting SitePlannerApp for real (${onSite})`);
+
+  await page.evaluate(({ gid, frag }) => { window.location.hash = `#/project/${gid}/${frag}`; }, { gid: GID, frag: hashModuleFragment });
+  await page.waitForTimeout(2600);
+  const onModule = await hashOf(page);
+  ok(onModule.includes(hashModuleFragment) && onModule.includes(GID), `moved to ${moduleSlug} with Site Planner kept alive, hidden (${onModule})`);
+
+  await clickDashboard(page);
+  const trail = [];
+  for (let i = 0; i <= 9; i++) {
+    trail.push({ t: i, hash: await hashOf(page) });
+    if (i < 9) await page.waitForTimeout(1000);
+  }
+  console.log(`  trail: ${trail.map((r) => `t+${r.t}s=${r.hash}`).join("  ")}`);
+  const reachedIdx = trail.findIndex((r) => r.hash === "#/");
+  ok(reachedIdx !== -1, `Dashboard reaches the map home ("#/") within the 9s recorded window from ${moduleSlug}`);
+  const stays = reachedIdx !== -1 && trail.slice(reachedIdx).every((r) => r.hash === "#/");
+  ok(stays, `once reached, "#/" holds for the rest of the window from ${moduleSlug} — no bounce back to a project route`);
+  await page.screenshot({ path: new URL(`./screens/schedule-dashboard-crumb-kept-alive-${moduleSlug}.png`, import.meta.url).pathname });
+  await ctx.close();
+}
+
+/* CASE N (companion to I–M) — the same tabs, but with NO project ever routed, so there is
+ * nothing for a stale `effGroup` to bounce back to. Not expected to fail even on the pre-fix
+ * build; included so the "with vs without a project" pair the owner asked for is actually on
+ * record for every tab, not inferred. */
+async function caseNoProjectToDashboard(browser, { label, moduleSlug, hashSlug }) {
+  console.log(`\n${label} — no project routed, click Dashboard from ${moduleSlug}`);
+  const ctx = await newPlainCtx(browser, seedScript);
+  const page = await ctx.newPage();
+  await assertMeasurable(page, "verify-schedule-dashboard-crumb");
+  await page.goto(`${BASE}#/${hashSlug}`, { waitUntil: "load" });
+  await page.waitForTimeout(1200);
+  const before = await hashOf(page);
+  ok(before === `#/${hashSlug}`, `starting hash is the global ${moduleSlug} route with no project (got "${before}")`);
+
+  await clickDashboard(page);
+  const trail = [];
+  for (let i = 0; i <= 9; i++) {
+    trail.push({ t: i, hash: await hashOf(page) });
+    if (i < 9) await page.waitForTimeout(1000);
+  }
+  console.log(`  trail: ${trail.map((r) => `t+${r.t}s=${r.hash}`).join("  ")}`);
+  const reachedIdx = trail.findIndex((r) => r.hash === "#/");
+  ok(reachedIdx !== -1, `Dashboard reaches the map home ("#/") within the recorded window from ${moduleSlug}`);
+  const stays = reachedIdx !== -1 && trail.slice(reachedIdx).every((r) => r.hash === "#/");
+  ok(stays, `once reached, "#/" holds for the rest of the window from ${moduleSlug} with no project routed`);
+  await ctx.close();
+}
+
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
 mkdirSync(new URL("./screens/", import.meta.url).pathname, { recursive: true });
 await caseProjectScoped(browser);
@@ -360,9 +469,21 @@ await caseOtherModuleBootResume(browser, { label: "CASE D", moduleSlug: "library
 await caseOtherModuleBootResume(browser, { label: "CASE E", moduleSlug: "doc-review", hashModuleFragment: "/markup" });
 await caseOtherModuleBootResume(browser, { label: "CASE F", moduleSlug: "notes", hashModuleFragment: "/notes" });
 await caseFoodToDashboard(browser);
+// B881664 (×3) — Site Planner already mounted+kept-alive on the SAME project, ten cases:
+// five tabs (Schedule/Library/Review/Notes/Model), each with a project routed (the actual
+// bounce mechanism) and without one (the control — nothing to bounce back to).
+await caseAlreadyMountedBounce(browser, { label: "CASE I", moduleSlug: "schedule", hashModuleFragment: "schedule" });
+await caseAlreadyMountedBounce(browser, { label: "CASE J", moduleSlug: "library", hashModuleFragment: "library" });
+await caseAlreadyMountedBounce(browser, { label: "CASE K", moduleSlug: "doc-review", hashModuleFragment: "markup" });
+await caseAlreadyMountedBounce(browser, { label: "CASE L", moduleSlug: "notes", hashModuleFragment: "notes" });
+await caseAlreadyMountedBounce(browser, { label: "CASE M", moduleSlug: "model", hashModuleFragment: "model" });
+await caseNoProjectToDashboard(browser, { label: "CASE N", moduleSlug: "library", hashSlug: "library" });
+await caseNoProjectToDashboard(browser, { label: "CASE O", moduleSlug: "doc-review", hashSlug: "markup" });
+await caseNoProjectToDashboard(browser, { label: "CASE P", moduleSlug: "notes", hashSlug: "notes" });
+await caseNoProjectToDashboard(browser, { label: "CASE Q", moduleSlug: "model", hashSlug: "model" });
 await browser.close();
 
 console.log("\n" + (fails === 0
-  ? "✅ PASS — the Dashboard crumb (and the logo, its identical twin) navigate home and STAY there, from all five tabs (Schedule/Library/Review/Notes/Food)"
+  ? "✅ PASS — the Dashboard crumb (and the logo, its identical twin) navigate home and STAY there, from every tab (Schedule/Library/Review/Notes/Model/Food), with and without a project routed, and whether or not Site Planner was already mounted+kept-alive on that project"
   : `❌ FAIL — ${fails} assertion(s)`));
 process.exit(fails === 0 ? 0 : 1);
