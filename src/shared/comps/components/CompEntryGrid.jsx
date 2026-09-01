@@ -31,14 +31,17 @@
  *
  * MODULE-SCOPE-COMPONENTS: every component here is defined at module scope.
  */
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "../../ui/controls.jsx";
 import { parsePaste, rowHasBlockingFlags, parseProseLine, splitPasteLines } from "../lib/compParse.js";
-import { emptyDraft, draftToComp, validateComp, summarizeLeaseComps, summarizeSaleComps } from "../lib/comps.js";
+import { emptyDraft, draftToComp, validateComp, summarizeLeaseComps, summarizeSaleComps, resolveCapTriangle } from "../lib/comps.js";
 import {
-  SHEET_COLUMNS, GROUPS, cellState, cellPlaceholder, applyCellEdit, fillDownColumn, spillPaste,
+  SHEET_COLUMNS, cellState, cellPlaceholder, applyCellEdit, fillDownColumn, spillPaste, visibleColumnIndices,
 } from "../lib/compSheetColumns.js";
+import { parcelLocationText, siteplanLocationText, pinFallbackText } from "../lib/compLocationText.js";
+import { reverseGeocodeLatLon } from "../../../workspaces/site-planner/lib/geocode.js";
+import { COUNTIES } from "../../../workspaces/site-planner/lib/counties.js";
 
 const ROW_H = 31;
 const GROUP_BAND_H = 22;
@@ -48,20 +51,53 @@ const REMOVE_COL_W = 32;
 let _rowSeq = 0;
 function newRowId() { return `row${Date.now()}_${_rowSeq++}`; }
 
+// B986096-HARDENING-9 — a county's own registry entry names its state, so the Location cell's
+// "County, ST" fallback never has to guess a state from how the county KEY happens to be spelled.
+function countyEntry(key) {
+  const rec = key ? COUNTIES[key] : null;
+  if (!rec) return null;
+  return { name: rec.label ? rec.label.split(" ·")[0].trim() : null, state: rec.state || null };
+}
+
+function locationCacheKey(anchor) {
+  return anchor && typeof anchor.lat === "number" && typeof anchor.lon === "number"
+    ? `${anchor.lat.toFixed(6)},${anchor.lon.toFixed(6)}`
+    : null;
+}
+
+/** The Location cell's display text for ONE row — three anchor kinds, three identities (see
+ * compLocationText.js's header). A pin resolves through the row's OWN cache
+ * (`row.locationCache = {key, text, resolving}`, populated async by the effect in
+ * CompEntryGrid), falling back to `pinFallbackText` (synchronous, never blank) while that's
+ * pending or unavailable. */
+function locationCellText(row, overlaysById) {
+  const anchor = row.draft.anchor;
+  if (!anchor) return null;
+  if (anchor.kind === "parcel") return parcelLocationText(anchor, (key) => countyEntry(key)?.name);
+  if (anchor.kind === "site_plan") return siteplanLocationText(anchor, overlaysById) || pinFallbackText(anchor, countyEntry);
+  // pin
+  const key = locationCacheKey(anchor);
+  if (row.locationCache?.key === key && row.locationCache.text) return row.locationCache.text;
+  return pinFallbackText(anchor, countyEntry);
+}
+
 export function draftFromParsedRow(parsed) {
   return { _id: newRowId(), draft: { ...emptyDraft(null), ...parsed.draft }, cellFlags: parsed.cellFlags || {} };
 }
 
-function computeGroupRuns() {
+// B986096-HARDENING-9 ("hide unused columns entirely") — the group band's colSpans must be
+// recomputed from whatever's actually VISIBLE, not the full column list, or a band would span
+// past the columns it now covers (Michael's screenshot: "PROPERTY spans past its own columns").
+function computeVisibleGroupRuns(visibleIdx) {
   const runs = [];
-  for (const col of SHEET_COLUMNS) {
+  for (const idx of visibleIdx) {
+    const col = SHEET_COLUMNS[idx];
     const last = runs[runs.length - 1];
     if (last && last.group === col.group) last.span++;
     else runs.push({ group: col.group, span: 1 });
   }
   return runs;
 }
-const GROUP_RUNS = computeGroupRuns();
 
 function colLeftOffset(col) {
   return col.frozen ? 0 : undefined;
@@ -69,15 +105,16 @@ function colLeftOffset(col) {
 
 /* ---- sticky header: group band over column labels ------------------------------------------ */
 
-function HeaderRows() {
+function HeaderRows({ visibleIdx }) {
+  const groupRuns = computeVisibleGroupRuns(visibleIdx);
   return (
     <thead>
       <tr>
-        {GROUP_RUNS.map((run, i) => (
+        {groupRuns.map((run, i) => (
           <th key={run.group + i} colSpan={run.span}
             style={{
-              position: "sticky", top: 0, zIndex: run.group === "PROPERTY" && SHEET_COLUMNS[0].group === run.group ? 3 : 2,
-              height: GROUP_BAND_H, boxSizing: "border-box", padding: "0 6px", textAlign: "left",
+              position: "sticky", top: 0, zIndex: i === 0 ? 3 : 2,
+              height: GROUP_BAND_H, boxSizing: "border-box", padding: "0 5px", textAlign: "left",
               fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em",
               color: "var(--text-secondary)", background: "var(--surface-raised)",
               borderBottom: "1px solid var(--border-default)", borderRight: "1px solid var(--border-default)",
@@ -92,20 +129,23 @@ function HeaderRows() {
         }} />
       </tr>
       <tr>
-        {SHEET_COLUMNS.map((col, i) => (
-          <th key={col.key}
-            style={{
-              position: "sticky", top: GROUP_BAND_H, zIndex: col.frozen ? 4 : 2,
-              left: colLeftOffset(col), width: col.width, minWidth: col.width, maxWidth: col.width,
-              height: COL_LABEL_H, boxSizing: "border-box", padding: "0 6px",
-              textAlign: col.align, fontSize: 10.5, fontWeight: 700, color: "var(--text-secondary)",
-              background: "var(--surface-raised)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-              borderBottom: "1px solid var(--border-default)", borderRight: "1px solid var(--border-default)",
-            }}
-            title={col.label}>
-            {col.label}{col.required ? " *" : ""}
-          </th>
-        ))}
+        {visibleIdx.map((idx, i) => {
+          const col = SHEET_COLUMNS[idx];
+          return (
+            <th key={col.key}
+              style={{
+                position: "sticky", top: GROUP_BAND_H, zIndex: col.frozen ? 4 : 2,
+                left: colLeftOffset(col), width: col.width, minWidth: col.width, maxWidth: col.width,
+                height: COL_LABEL_H, boxSizing: "border-box", padding: "0 5px",
+                textAlign: col.align, fontSize: 10, fontWeight: 700, color: "var(--text-secondary)",
+                background: "var(--surface-raised)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                borderBottom: "1px solid var(--border-default)", borderRight: "1px solid var(--border-default)",
+              }}
+              title={col.fullLabel || col.label}>
+              {col.label}
+            </th>
+          );
+        })}
       </tr>
     </thead>
   );
@@ -115,7 +155,7 @@ function HeaderRows() {
  * At rest: plain text, right-aligned + tabular-nums for numbers, no border. Selected: an outline
  * appears. Editing: a real <input> (or a native date input) fills the cell exactly. */
 function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, isEditing, editValue,
-  onMouseDown, onDoubleClick, onEditChange, onEditKeyDown, onEditBlur, editInputRef }) {
+  onMouseDown, onDoubleClick, onEditChange, onEditKeyDown, onEditBlur, editInputRef, locationText }) {
   const st = cellState(col, draft);
   const flagKey = col.flagKey ? col.flagKey(draft) : col.key;
   const flag = cellFlags[flagKey];
@@ -128,43 +168,74 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
     background: col.frozen ? "var(--surface-overlay)" : muted ? "var(--surface-raised)" : "var(--surface-overlay)",
     outline: selected ? "2px solid var(--accent)" : inRange ? "1px solid var(--accent)" : "none",
     outlineOffset: -1,
-    cursor: st.state === "na" || st.state === "action" ? "default" : "cell",
+    cursor: st.state === "na" ? "default" : st.state === "action" ? "pointer" : "cell",
   };
   if (isEditing) {
+    // B986096-HARDENING-8 (owner live-tested, "TYPE / UNIT / PER / BASIS take a SELECT") — a
+    // select-kind column used to fall through to the same plain text input as everything else,
+    // relying on `applyCellEdit`'s loose text-matching to resolve whatever was typed. A real
+    // <select> is the correct control for a closed set of options — no typing/matching needed,
+    // and it can never land on a value the column doesn't recognize.
+    const inputStyle = {
+      width: col.key === "notes" ? "max(100%, 260px)" : "100%", // NEW-3 — Notes widens while editing rather than staying pinned to its rest width
+      height: "100%", boxSizing: "border-box", padding: "0 5px", margin: 0,
+      border: "none", outline: "2px solid var(--accent)", outlineOffset: -2,
+      background: "var(--surface-base)", color: "var(--text-primary)", fontFamily: "inherit",
+      fontSize: 12, textAlign: col.align,
+    };
+    if (col.kind === "select") {
+      return (
+        <td style={tdStyle} data-cell={`${rowIdx}-${colIdx}`}>
+          <select
+            ref={editInputRef}
+            value={editValue}
+            onChange={(e) => { onEditChange(e.target.value); }}
+            onKeyDown={onEditKeyDown}
+            onBlur={onEditBlur}
+            style={{ ...inputStyle, padding: "0 2px" }}>
+            <option value="" disabled hidden>{" "}</option>
+            {col.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </td>
+      );
+    }
     return (
       <td style={tdStyle} data-cell={`${rowIdx}-${colIdx}`}>
         <input
           ref={editInputRef}
-          type={col.kind === "date" ? "date" : "text"}
+          type="text"
           value={editValue}
           onChange={(e) => onEditChange(e.target.value)}
           onKeyDown={onEditKeyDown}
           onBlur={onEditBlur}
-          style={{
-            width: "100%", height: "100%", boxSizing: "border-box", padding: "0 5px", margin: 0,
-            border: "none", outline: "2px solid var(--accent)", outlineOffset: -2,
-            background: "var(--surface-base)", color: "var(--text-primary)", fontFamily: "inherit",
-            fontSize: 10.5, textAlign: col.align,
-          }}
+          style={inputStyle}
         />
       </td>
     );
   }
   const textStyle = {
-    display: "block", height: "100%", lineHeight: `${ROW_H}px`, padding: "0 6px", boxSizing: "border-box",
-    fontSize: 10.5, textAlign: col.align, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+    display: "block", height: "100%", lineHeight: `${ROW_H}px`, padding: "0 5px", boxSizing: "border-box",
+    fontSize: 12, textAlign: col.align, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
     fontVariantNumeric: col.align === "right" ? "tabular-nums" : undefined,
     color: st.state === "na" ? "var(--text-tertiary)" : st.state === "derived" ? "var(--text-secondary)" : flag?.level === "blocking" ? "var(--danger-text)" : "var(--text-primary)",
     fontStyle: st.state === "na" ? "italic" : "normal",
   };
   const placeholder = st.state === "editable" && !st.text ? cellPlaceholder(col, draft.compType) : "";
+  // B986096-HARDENING-9 — the Location cell shows real information once an anchor is set (an
+  // address / an APN / a plan title, resolved by `locationCellText` in the parent), never a bare
+  // confirmation of the click. Empty state keeps the "Set" affordance; the whole cell is still
+  // the click target either way (no separate button — HARDENING-9's "click target is the text
+  // itself" requirement is already how every action-kind cell has always worked here).
+  const cellText = col.key === "location"
+    ? (locationText || <span style={{ color: "var(--text-tertiary)" }}>Set</span>)
+    : st.text || (placeholder ? <span style={{ color: "var(--text-tertiary)" }}>{placeholder}</span> : "");
   return (
     <td style={tdStyle} data-cell={`${rowIdx}-${colIdx}`}
       onMouseDown={(e) => onMouseDown(rowIdx, colIdx, e.shiftKey)}
       onDoubleClick={() => onDoubleClick(rowIdx, colIdx)}
-      title={flag?.reason}>
+      title={col.key === "location" ? locationText : flag?.reason}>
       <span style={textStyle}>
-        {st.text || (placeholder ? <span style={{ color: "var(--text-tertiary)" }}>{placeholder}</span> : "")}
+        {cellText}
       </span>
     </td>
   );
@@ -220,6 +291,21 @@ function ProblemsList({ rows, onResolvePeriod }) {
     if (!rowHasBlockingFlags(cellFlags) && missing.length) {
       items.push(<div key={`${row._id}-missing`} style={{ fontSize: 10.5, color: "var(--warn-text)" }}>Row {i + 1} — {missing.join(" ")}</div>);
     }
+    // B986096-HARDENING-7 — "if all three are entered and they disagree, flag it - do not
+    // silently recompute and overwrite what he typed." Live-computed every render (never stored
+    // in cellFlags — it's a fact about the CURRENT three values, not a one-time parse verdict).
+    if (draft.compType === "building_sale") {
+      const tri = resolveCapTriangle(draft);
+      if (tri.disagreement) {
+        const stated = (tri.disagreement.statedCapRate * 100).toFixed(2);
+        const implied = (tri.disagreement.impliedCapRate * 100).toFixed(2);
+        items.push(
+          <div key={`${row._id}-captri`} style={{ fontSize: 10.5, color: "var(--warn-text)" }}>
+            Row {i + 1} — Price, NOI and Cap don't reconcile: stated cap {stated}%, but NOI ÷ Price implies {implied}%. Nothing was changed automatically.
+          </div>,
+        );
+      }
+    }
   });
   if (!items.length) return null;
   return <div style={{ padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6, borderTop: "1px solid var(--border-default)", maxHeight: 120, overflowY: "auto" }}>{items}</div>;
@@ -227,13 +313,48 @@ function ProblemsList({ rows, onResolvePeriod }) {
 
 function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
 
-export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, onFocusAnchor, onSave, onCancel, saving, saveError }) {
+export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, onFocusAnchor, onSave, onCancel, saving, saveError, overlaysById }) {
   const [pasteText, setPasteText] = useState("");
   const [lastPasteText, setLastPasteText] = useState(null);
   const [lastCommitSummary, setLastCommitSummary] = useState(null);
   const [showPastedText, setShowPastedText] = useState(false);
   const [lastSingleParse, setLastSingleParse] = useState(null);
   const lastCommitRef = useRef(null); // duplicate-paste-event guard, unchanged from round 5
+
+  // B986096-HARDENING-9 — reverse-geocode a dropped pin's lat/lon into a street address, cached
+  // on the ROW (`row.locationCache = {key, text, resolving}`) rather than re-fetched on every
+  // render, and self-invalidating: `key` is the anchor's OWN lat/lon, so a re-anchored row's
+  // stale cache simply stops matching and a fresh resolve kicks off — no separate invalidation
+  // step needed. `rowsRef`/`onRowsChangeRef` stay current so the async completion patches the
+  // LATEST rows array rather than a stale closure over whatever `rows` were at effect-fire time.
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const onRowsChangeRef = useRef(onRowsChange);
+  onRowsChangeRef.current = onRowsChange;
+  useEffect(() => {
+    rows.forEach((row) => {
+      const anchor = row.draft.anchor;
+      if (!anchor || anchor.kind !== "pin") return;
+      const key = locationCacheKey(anchor);
+      if (!key || row.locationCache?.key === key) return; // already resolved, or already in flight, for this exact position
+      onRowsChangeRef.current(rowsRef.current.map((r) => (r._id === row._id ? { ...r, locationCache: { key, text: null, resolving: true } } : r)));
+      reverseGeocodeLatLon(anchor.lat, anchor.lon).then((ans) => {
+        onRowsChangeRef.current(rowsRef.current.map((r) => {
+          if (r._id !== row._id) return r;
+          // The anchor may have moved on (re-picked, or the row deleted and a new one reusing
+          // nothing) by the time this resolves — only apply a response that still matches.
+          if (r.draft.anchor?.kind !== "pin" || locationCacheKey(r.draft.anchor) !== key) return r;
+          return { ...r, locationCache: { key, text: ans?.label || null, resolving: false } };
+        }));
+      });
+    });
+  }, [rows]);
+
+  // B986096-HARDENING-9 — which columns are actually shown, given the comp types currently on
+  // the sheet. Navigation (Tab/arrows) and rendering both read this; the pure column MODEL
+  // (fillDownColumn/spillPaste/applyCellEdit/cellState) is untouched and keeps indexing the FULL
+  // SHEET_COLUMNS array, so hiding a column never changes what a cell edit or a paste means.
+  const visibleIdx = useMemo(() => visibleColumnIndices(rows), [rows]);
 
   // Sheet selection state.
   const [selection, setSelectionState] = useState(rows.length ? { row: 0, col: 0 } : null);
@@ -250,7 +371,9 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
   useEffect(() => {
     if (editing && editInputRef.current) {
       editInputRef.current.focus();
-      if (editing.selectAll) editInputRef.current.select();
+      // HTMLSelectElement has no .select() (text-selection) method — guard it, or opening a
+      // TYPE/UNIT/PER/BASIS cell via double-click/F2 throws instead of opening the dropdown.
+      if (editing.selectAll && typeof editInputRef.current.select === "function") editInputRef.current.select();
     }
   }, [editing]);
 
@@ -260,11 +383,22 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     el?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [selection]);
 
-  // Keep selection in bounds when rows are added/removed (never point at a row that no longer exists).
+  // Keep selection in bounds when rows are added/removed (never point at a row that no longer
+  // exists) AND when a column that was selected stops being visible (e.g. the only building_sale
+  // row is removed and Price/NOI/Cap disappear out from under the selection) — snap to the
+  // nearest visible column rather than pointing at a hidden one. Bails out (same `sel` reference)
+  // when nothing actually needs to change, so this never fires an extra render on every keystroke
+  // just because `rows`/`visibleIdx` are new array instances.
   useEffect(() => {
-    if (!rows.length) { setSelectionState(null); return; }
-    setSelectionState((sel) => (sel ? { row: clamp(sel.row, 0, rows.length - 1), col: sel.col } : { row: 0, col: 0 }));
-  }, [rows.length]);
+    setSelectionState((sel) => {
+      if (!rows.length) return null;
+      if (!sel) return { row: 0, col: visibleIdx[0] ?? 0 };
+      const row = clamp(sel.row, 0, rows.length - 1);
+      const col = visibleIdx.includes(sel.col) ? sel.col : (visibleIdx[0] ?? 0);
+      if (row === sel.row && col === sel.col) return sel;
+      return { row, col };
+    });
+  }, [rows.length, visibleIdx]);
 
   const setSelection = (next) => { setRangeStartRow(null); setSelectionState(next); };
 
@@ -336,7 +470,9 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     if (colDef.kind === "derived" || colDef.kind === "action") return;
     const st = cellState(colDef, rows[row].draft);
     if (st.state !== "editable") return;
-    const startValue = initial != null ? initial : (st.raw ?? "");
+    // A select's value is a fixed option, not typed text — a printable keypress opens the
+    // dropdown at its CURRENT value rather than seeding it with the pressed character.
+    const startValue = colDef.kind === "select" ? (st.raw ?? "") : initial != null ? initial : (st.raw ?? "");
     editHandledRef.current = false;
     editingRef.current = { row, col };
     editValueRef.current = startValue;
@@ -375,18 +511,22 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
   const onEditBlur = () => finishEdit(true, null);
 
   /* ---- navigation ----------------------------------------------------------------------------- */
+  // Column movement walks the VISIBLE index list, not a raw +1/-1 on SHEET_COLUMNS — a hidden
+  // column (Rule: "hide unused columns entirely") is not a stop Tab/arrows should ever land on.
   const moveSelectionFrom = (from, { axis, delta, wrap }) => {
     let { row, col } = from;
     if (axis === "row") {
       row = clamp(row + delta, 0, rows.length - 1);
     } else {
-      col += delta;
+      const pos = visibleIdx.indexOf(col);
+      let nextPos = (pos === -1 ? 0 : pos) + delta;
       if (wrap) {
-        if (col < 0) { col = SHEET_COLUMNS.length - 1; row = clamp(row - 1, 0, rows.length - 1); }
-        else if (col > SHEET_COLUMNS.length - 1) { col = 0; row = clamp(row + 1, 0, rows.length - 1); }
+        if (nextPos < 0) { nextPos = visibleIdx.length - 1; row = clamp(row - 1, 0, rows.length - 1); }
+        else if (nextPos > visibleIdx.length - 1) { nextPos = 0; row = clamp(row + 1, 0, rows.length - 1); }
       } else {
-        col = clamp(col, 0, SHEET_COLUMNS.length - 1);
+        nextPos = clamp(nextPos, 0, visibleIdx.length - 1);
       }
+      col = visibleIdx[nextPos];
     }
     setSelection({ row, col });
   };
@@ -415,6 +555,13 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
 
   const onCellMouseDown = (row, col, shiftKey) => {
     if (editing) finishEdit(true, null);
+    // B986096-HARDENING-8 (owner live-tested, "clicking a cell does not focus it") — a <td> has
+    // no default focus target, so a plain click never moved DOM focus off the paste textarea;
+    // every keystroke kept landing there instead of reaching the grid's own onKeyDown, which is
+    // what made the whole sheet read as non-editable ("type 2, it becomes 22" was literally two
+    // keystrokes accumulating in the never-blurred paste box, not a grid bug). The grid must hold
+    // real focus the instant a cell is clicked, same as finishEdit already restores it after a commit.
+    gridRef.current?.focus();
     if (shiftKey && selection && selection.col === col) { extendRangeTo(row); return; }
     setSelection({ row, col });
   };
@@ -500,14 +647,18 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     else {
       const parts = [];
       if (blockingCount > 0) parts.push(`${blockingCount} blocking`);
-      if (missingCount > 0) parts.push(`${missingCount} need${missingCount === 1 ? "s" : ""} a date or a location`);
+      // B986096-HARDENING-8 — "or" read as a choice when Executed and Location are each
+      // independently required (validateComp checks both unconditionally); a row missing either
+      // (or both) landed on the same wording. "and/or" says a row could be missing one or both,
+      // without implying only one is ever needed.
+      if (missingCount > 0) parts.push(`${missingCount} missing an Executed date and/or a Location`);
       footerMsg = `${readyRows.length} of ${rows.length} ready — ${parts.join(", ")}.`;
     }
   }
 
   const [pos, setPos] = useState(() => {
-    const w = typeof window !== "undefined" ? window.innerWidth : 1200;
-    return { x: Math.max(16, (w - 1200) / 2), y: 60 };
+    const w = typeof window !== "undefined" ? window.innerWidth : 1560;
+    return { x: Math.max(16, (w - 1560) / 2), y: 60 };
   });
   const posRef = useRef(pos);
   posRef.current = pos;
@@ -533,7 +684,10 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     <div
       onPointerDown={(e) => e.stopPropagation()}
       style={{
-        position: "fixed", left: pos.x, top: pos.y, width: "min(1200px, calc(100vw - 32px))",
+        // B986096-HARDENING-9 (owner rule, "take it to near-full viewport") — was 1200px (1191px
+        // measured on his 1600px screen after borders), 370px narrower than it needed to be for a
+        // sheet whose whole point is not scrolling sideways for important fields.
+        position: "fixed", left: pos.x, top: pos.y, width: "min(1560px, calc(100vw - 32px))",
         maxHeight: "min(88vh, 800px)", zIndex: 2600, display: "flex", flexDirection: "column",
         background: "var(--surface-overlay)", border: "1px solid var(--border-default)", borderRadius: 12,
         boxShadow: "0 16px 44px rgba(28,25,20,0.22), 0 3px 10px rgba(28,25,20,0.1)", // design-exempt: mirrors shared/ui/FloatingPanel.jsx's card shadow verbatim — no shadow token exists yet
@@ -592,11 +746,13 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
           onPaste={onGridPaste}
           style={{ flex: 1, minHeight: 0, overflow: "auto", outline: "none" }}>
           <table style={{ borderCollapse: "collapse", tableLayout: "fixed" }}>
-            <HeaderRows />
+            <HeaderRows visibleIdx={visibleIdx} />
             <tbody>
               {rows.map((row, rowIdx) => (
                 <tr key={row._id}>
-                  {SHEET_COLUMNS.map((col, colIdx) => (
+                  {visibleIdx.map((colIdx) => {
+                    const col = SHEET_COLUMNS[colIdx];
+                    return (
                     <SheetCell
                       key={col.key}
                       col={col} colIdx={colIdx} rowIdx={rowIdx}
@@ -611,8 +767,10 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
                       onEditKeyDown={onEditKeyDown}
                       onEditBlur={onEditBlur}
                       editInputRef={editInputRef}
+                      locationText={col.key === "location" ? locationCellText(row, overlaysById) : undefined}
                     />
-                  ))}
+                    );
+                  })}
                   <td style={{
                     position: "sticky", right: 0, width: REMOVE_COL_W, height: ROW_H, textAlign: "center",
                     background: "var(--surface-overlay)", borderBottom: "1px solid var(--border-default)", borderLeft: "1px solid var(--border-default)",

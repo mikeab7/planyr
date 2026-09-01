@@ -3864,6 +3864,194 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 - Files: `src/shared/comps/lib/compSheetColumns.js` (new), `src/shared/comps/components/CompEntryGrid.jsx` (full rewrite — cards → sheet), `src/shared/comps/lib/comps.js` (`leaseCommencementDate`, `landPricePerAreaUnit`, `parseLeaseTermYears`, `netEffectiveLeaseRate`; removed the short-lived `pricePerSfPerYear`), `src/shared/comps/lib/compParse.js` (commencement routed to its own field), `src/shared/comps/lib/compsStore.js`, `src/shared/comps/components/CompsPanel.jsx` (Commencement field on `CompForm`), `src/shared/comps/db/comps_lease_commencement.sql` (new, applied to production), `test/compSheetColumns.test.js` (new), `test/comps.test.js`, `test/compParse.test.js`, `MAP.md`, `src/shared/CLAUDE.md`.
 - Base: `origin/main` @ (this session's fetch of main after PR #1299 merged).
 
+**Recurrence (×7) — HARDENING PASS 6: two owner-directed decisions, THEN four rounds of live-browser bug
+reports on the shipped sheet, all fixed the same session. Ship-now directive throughout.**
+
+**=== PART A — TWO DECISIONS FROM MICHAEL ===**
+
+**1. County is derived, never typed (owner: "i dont need to input county as a default").** No county
+input anywhere in the sheet — confirmed already true by construction (no such column exists). The real gap,
+confirmed by direct code read (AUDIT-FIRST): `placeCompPinAt` (`MapFinder.jsx`) already derived county on a
+3s-race lookup, but a genuine miss (timeout, no match, a thrown error) silently produced `county: null` with
+**nothing logging or surfacing it** — comps have no load-time county self-heal the way a planned SITE does
+(B792 re-resolves a site's county from its origin on every load), so a silent miss here would persist
+forever. Fixed: `resolveCompCounty` (a small shared helper, deduped from what were briefly two separate
+copies) logs a `console.warn` naming why on any miss, and `comps.js`'s new `anchorCountyFlag(anchor)` turns
+a positioned-but-county-less anchor into a soft, non-blocking flag on the sheet's Location cell ("Couldn't
+determine the county for this location…"), cleared automatically the moment a later pick DOES carry one.
+**A second, related gap found and closed in the same pass:** the THIRD comp anchor kind, `site_plan`
+(a pin dropped on an uploaded, georeferenced site-plan overlay) never attempted county resolution at all —
+now it does, via the same shared helper. **Back-fill on a later location edit — confirmed ALREADY CORRECT
+by direct code read, no fix needed:** `county` is never stored as an independent field; `compToRow` always
+derives it fresh from `comp.anchor?.county` on every insert AND update, so attaching a location later
+(the sheet's "＋ Location" flow, which sets `draft.anchor = pendingAnchor`) automatically back-fills county
+on the next save with zero special-casing.
+**Flagged, not fixed (out of scope, judgment call):** a parcel-anchor whose identify hit the STATEWIDE
+backup layer gets an async relabel to its true county (`MapFinder.jsx`'s pre-existing `addParcelHit`) that
+is fire-and-forget with a silent `.catch(() => {})` — if a comp is anchored (button clicked) before that
+relabel completes, the placeholder `txgio_statewide` county key can persist. This is shared, general-purpose
+site-planner code (not comps-specific) and a narrow, pre-existing edge case; not touched this round.
+Similarly, a `site_plan` anchor's county is captured once at pin-drop and is NOT re-derived if the overlay
+is later moved/rescaled (unlike lat/lon, which the placement-commit RPC keeps in sync) — acceptable, low-
+stakes staleness (county is grouping/filtering metadata, not a safety-critical fact), named here rather than
+silently accepted.
+
+**2. Cap rate + NOI on building sales (owner: "lets add an option for cap on building sales").** Cap =
+NOI / price is a TRIANGLE — enter any two, the third derives. New DB columns `bldg_noi numeric` /
+`bldg_cap_rate numeric` (`db/comps_cap_triangle.sql`, applied to production, confirmed live). `bldg_cap_rate`
+is a **decimal fraction** internally (0.0575), typed/shown as a **percentage** (5.75%) — a column-level
+get/set pair does the conversion at the cell boundary so neither convention leaks past it; this is
+**deliberately different** from `lease_escalation_pct` (a raw percentage number, 3.5) — flagged explicitly
+per the owner's own analogy (monthly-vs-annual is the same failure shape) so the difference reads as a
+decision, not an inconsistency. `resolveCapTriangle(obj)` (`comps.js`) is the pure derivation: 2-of-3 given
+derives the third (never overwriting a typed value); all 3 given checks for **disagreement** (>5 bps between
+the stated cap and NOI÷price) and reports it — **never silently recomputes over what was typed.**
+Persistence: `draftToComp` back-fills the derived field into the SAVED comp (so `buildingPricePerSf` and
+any future cross-comp analysis work unchanged on a comp that was only ever given NOI+Cap), while the pure
+derivation itself always runs against the RAW draft (so the sheet can still tell which field is the
+computed one for tinting, even after a save). Sheet: PRICE is now its own band (Price · NOI · Cap — land
+and building sale; NOI/Cap grey on land, exactly as scoped — "a ground lease can carry a cap but do not
+extend it without asking"), separate from RENT (now lease-only: Rate · Per · Basis · Escalation). The
+derived-third cell renders `derived` (tinted, genuinely NOT enterable — `cellState`'s existing
+`state !== "editable"` gate already blocks entry, no new gating needed); a live disagreement sentence
+appears in `ProblemsList` ("Price, NOI and Cap don't reconcile…"). `CompForm` (the single-comp edit form)
+got matching NOI/Cap fields + the same disagreement/derived-value hint, so editing an already-saved comp
+doesn't silently drop these fields (its `compToDraft` didn't spread unlisted fields — would have nulled
+them on save without this).
+
+**=== PART B — FOUR ROUNDS OF LIVE-BROWSER BUG REPORTS, SAME SESSION ===**
+
+**B1. THE SHEET WAS NOT EDITABLE AT ALL (owner tested live on bundle `index-B4NBWwt-.js`).** Measured:
+0 `<select>`s, 0 `<input>`s besides the paste box, clicking a cell never moved `document.activeElement`
+off the paste textarea. Root cause, confirmed by direct code read: `onCellMouseDown` only called
+`setSelection` — never `gridRef.current?.focus()` — so DOM focus never left the paste box and every
+keystroke kept landing there (`handleChange`), which is the actual mechanism behind "type 2, it becomes
+22": two keystrokes accumulating in a never-blurred textarea, not a grid bug at all. Fixed: a click now
+explicitly focuses the grid (mirroring what `finishEdit` already did after a commit). **Second defect found
+in the same audit:** editing a `kind:"select"` column (Type/Unit/Per/Basis) rendered the same plain text
+`<input>` as everything else — a real `<select>` now renders for those, populated from the column's own
+`options`; the printable-character-starts-edit path now seeds a select's edit value from its CURRENT
+option rather than the typed character (a select's value is a fixed option, not typed text).
+`HTMLSelectElement` has no `.select()` method — guarded, or opening one via double-click/F2 threw.
+
+**B2. DATE FORMATTING + A REAL DATA BUG found in the same screenshot.** Dates now render **mm/dd/yy**
+everywhere in this feature (Executed, Commencement, the saved comp list, `compFieldRows`'s detail view) —
+matching the Schedule task report's own convention, never the raw ISO string; **storage stays ISO,
+always** — new pure module `lib/compDates.js` (`formatDateDisplay`/`parseTypedDate`) is the one crossing
+point. `parseTypedDate` accepts what a person actually types or pastes (ISO, slash/dash-numeric with a 2-
+or 4-digit year, a month name in several punctuations — mirroring, not duplicating, `compParse.js`'s
+`findDateToken` conventions, incl. the same 50-year pivot) — a native `<input type=date>` cannot accept
+free text like "June 1 2027", so date-kind sheet columns now use a plain text input with this parser on
+commit, never a native date picker. **The data bug: Executed and Commencement both showed the SAME date**
+on Michael's own paste, which states only a commencement, no execution date anywhere. Root cause: round 6's
+`finalizeGenericRow`/`genericToDraft` deliberately backfilled `compDate` from `commencementDate` as a
+soft-flagged "stand-in" when no real execution date was stated. **Michael reversed that decision explicitly**
+— `comp_date` drives every recency filter/sort, so the stand-in was fabricating a FUTURE execution date that
+would sort a comp ahead of every real one. **Fixed by removing the backfill entirely**, not by changing the
+flag wording: Executed now stays genuinely empty in that case; `validateComp`'s existing "Executed date is
+required." message (surfaced in `ProblemsList`) is what asks for it, in words. **Parser audit performed per
+the owner's request** ("check the whole parser for the same pattern") — swept every field-assignment site in
+`compParse.js` (label-prefix lines, unlabeled-line detectors, the spreadsheet header-alias table, the
+escalation-percent detector's existing nearby-word guard); found no other instance of one field's value
+being written into a different field's slot — this was the only one.
+
+**B3. NO DROPDOWNS / ASTERISKS WITH NO LEGEND / AMBIGUOUS FOOTER.** (The "no dropdowns" note in B1 above is
+the real fix here — Michael's original "no dropdowns" meant no clutter at rest, not "no `<select>` ever
+while editing".) Header asterisks (`Location *` / `Executed *`) dropped — `ProblemsList` already names what's
+missing in words per row, an unexplained symbol was pure redundancy. Footer wording "needs a date or a
+location" (misread as either/or, when both are independently required per `validateComp`) reworded to
+"missing an Executed date and/or a Location".
+
+**B4. COLUMN WIDTHS — "I shouldn't have to scroll to the side to enter important info" (owner: also
+explicitly REVISING his own round-6 "every column exists on every row" rule for this).** Four changes:
+**(a)** `visibleColumnIndices(rows)` (new, `compSheetColumns.js`) — a column renders on the SHEET only if
+at least one CURRENT row's comp type uses it (a lease-only sheet never shows Price/NOI/Cap at all); a cell's
+OWN em-dash-when-inapplicable behavior is unchanged — this is the opposite axis, across the sheet rather
+than within one row. Navigation (Tab/arrows) walks the visible index list, never landing on a hidden column;
+the pure column model (`fillDownColumn`/`spillPaste`/`applyCellEdit`/`cellState`) is untouched and keeps
+indexing the full `SHEET_COLUMNS` array, so hiding a column never changes what an edit or a paste means. The
+group-band header's colSpans are now computed from the same visible-index list the data row uses, in the
+same iteration — they cannot diverge, which should also close the "PROPERTY band spans past its own
+columns" alignment defect Michael's screenshot showed. **(b)** Dialog width 1200px → 1560px (was 1191px
+measured on his 1600px screen after borders — 370px recovered for nothing). **(c)** Every column resized to
+Michael's own pixel targets (content-sized, not divided evenly); freed ~70px from removing Net Effective
+(below) went into this, not padding. Cell padding 8px→5px, font 10.5px cell/header → 12px cell / 10px
+header. Headers abbreviated where the new width is tighter than the label (Commencement→Commence,
+Escal.%/yr→Escal, Free Rent(mo)→Free rent, TI $/SF→TI, Rate $/SF→Rate, Landlord/Tenant lost their spaced
+slash) — the FULL label rides the `title` attribute (hover tooltip) via a new `col.fullLabel` property, so
+nothing is lost, only the always-visible chrome shrinks. **(d)** Title/Address stays the one frozen column
+(unchanged); true CSS flex-fill for its leftover width was NOT implemented (a fixed 180px instead) — a
+deliberate, low-risk scope trim named here rather than silently done, since true flex sizing inside a
+`position:sticky` table risked the frozen-column math elsewhere.
+Also this round: Notes widens on focus (260px min while editing, back to its rest width otherwise).
+
+**Net Effective $/SF/yr removed from the SHEET entirely** (owner: "dont worry about net effective per year
+... still remove") — header, cell and the sheet-column derivation gone; the underlying inputs (Term, Free
+rent, Escalation, TI) are UNCHANGED, still enterable — `netEffectiveLeaseRate` itself stays in `comps.js`,
+still used by the (untouched) comp detail view's "Net effective" row. **Unit-duplication fixed on the two
+remaining derived columns** ("if the header states the unit, the cell shows the number only"): `$/SF/yr`'s
+header commits to one fixed unit, so its cell dropped the repeated "$" and "/yr" (kept the NNN/GROSS basis
+suffix — new information, not a repeat); `$/SF or $/AC`'s header names TWO candidate units, so its cell
+KEEPS the per-row "/AC"/"/SF" suffix (that's what disambiguates, not a repeat) but also dropped the "$".
+
+**LOCATION CELL SHOWS REAL INFORMATION, NOT A CONFIRMATION (owner: "what is the purpose of having a
+location when i placed the pin already, should this not say address??").** New pure module
+`lib/compLocationText.js`: three anchor kinds resolve to three DIFFERENT identities, never one substituted
+for another. `kind:"pin"` → a street address, **reverse-geocoded** from the stored lat/lon — new
+`reverseGeocodeLatLon(lat, lon)` in `site-planner/lib/geocode.js`, the exact reverse of the map's own
+existing `geocodeAddress` (same two providers, Esri primary / Nominatim fallback, same honest
+hit/not-found/unreachable contract — **no new dependency**, confirmed no reverse-geocode capability existed
+anywhere in the codebase before this). Resolved asynchronously and **cached on the row**
+(`row.locationCache = {key, text, resolving}`, keyed to the anchor's own lat/lon — self-invalidating: a
+re-anchored row's stale cache simply stops matching the new key, no separate invalidation step needed),
+never re-fetched on every render. **Synchronous fallback while pending/unavailable** (`pinFallbackText`):
+the county already known from pin-drop (`"County, ST"`, state read off the county's own registry entry,
+never guessed from the key's spelling) else coordinates at 4dp — a pin's Location cell can therefore never
+render blank. `kind:"parcel"` → the APN (an identity, never an address) for one parcel, `"N parcels ·
+County"` for several. `kind:"site_plan"` → the source overlay's own title (`docTitle`, falling back to its
+filename) — **confirmed by direct code research that no per-point "building" sub-label concept exists
+anywhere in this app** ("multiple buildings" = multiple separate overlay rows, each with its own title, not
+sub-locations inside one); rather than inventing a labeling scheme the app has no way to set, the cell reads
+the plan's own name alone. `overlaysById` (already loaded by `CompsPanel`'s host) threaded one level deeper
+into `CompEntryGrid` to resolve this. Empty state still reads "Set" (clickable); the whole cell has always
+been the click target (no separate button ever existed here). **Direct-code-read note (AUDIT-FIRST):** the
+PRE-fix code's Location cell rendered genuinely BLANK in every state (`cellState`'s `action` branch returned
+no `text` at all) — not "Pin"/"2 parcels" as literally described; the fix accomplishes what was asked
+either way, and this is flagged rather than silently assumed to match the report verbatim.
+
+**BUNDLE BUDGET:** `bundle.largestChunkBytes` (SitePlannerApp) breached its ceiling by ~0.6 KB after this
+round's `MapFinder.jsx` growth (the shared `resolveCompCounty` helper — deduped from two near-identical
+copies, still a net new block of logic). Ratcheted via `npm run perf:ratchet` with this item's reasoning
+recorded — see the commit for the exact before/after numbers.
+
+**VERIFIED (sandbox + live production DB).** Full `npx vitest run` green (see commit for the exact count).
+`npm run build` / `npx eslint src/shared/comps/` clean. `node ui-audit/design-drift-audit.mjs --check`
+clean. `node scripts/build-map.mjs --check` clean. New test files: `test/compDates.test.js`,
+`test/compLocationText.test.js`; substantial new coverage in `test/compSheetColumns.test.js` (the triangle
+columns' derived/editable states across every 2-of-3 combination, `visibleColumnIndices` across
+lease-only/land-only/mixed sheets) and `test/comps.test.js` (`resolveCapTriangle` incl. the disagreement
+and ordinary-rounding-tolerance cases, `anchorCountyFlag`, the draft→comp→row round-trip for
+`bldgNoi`/`bldgCapRate`). **Live production round-trip, Michael's exact paste through the real pipeline**:
+parsed `compDate` genuinely empty (no flag, no backfill) with `leaseCommencementDate` correctly flagged
+soft/estimated; `validateComp` correctly blocks the save until a real Executed date + location are
+supplied; once supplied, a real INSERT + a FRESH separate SELECT (not the INSERT's own `RETURNING`) + DELETE
+against production `public.comps` confirmed `comp_date`/`lease_commencement_date` both store as genuine
+Postgres `date` columns, `comp_date` is NOT in the future, and a second round-trip for a building_sale
+comp confirmed `bldg_noi`/`bldg_cap_rate` persist correctly (new columns, live on production).
+**NOT independently confirmed this session (no browser access):** the focus fix, the real `<select>`
+editing, keyboard nav interacting with hidden columns, and the reverse-geocode/cache behavior all need a
+live click-through — flagged as the highest-priority items in `VERIFICATION.md`'s updated entry.
+
+- Files: `src/shared/comps/components/CompEntryGrid.jsx`, `src/shared/comps/components/CompsPanel.jsx`,
+  `src/shared/comps/lib/compSheetColumns.js`, `src/shared/comps/lib/comps.js`,
+  `src/shared/comps/lib/compParse.js`, `src/shared/comps/lib/compsStore.js`,
+  `src/shared/comps/lib/compDates.js` (new), `src/shared/comps/lib/compLocationText.js` (new),
+  `src/shared/comps/db/comps_cap_triangle.sql` (new, applied to production),
+  `src/workspaces/site-planner/MapFinder.jsx`, `src/workspaces/site-planner/lib/geocode.js`,
+  `test/compDates.test.js` (new), `test/compLocationText.test.js` (new), `test/compSheetColumns.test.js`,
+  `test/comps.test.js`, `test/compParse.test.js`, `MAP.md`.
+- Base: `origin/main` @ this session's fetch after PR #1300 merged.
+
 ### B986097 — A draft staging table, reachable only by the KML import `[Site Planner / comps]` (feature) #comps #gis #persistence  *(owner chat block 2026-09-01, NEW-2, same decision doc as B986096 above. Minted **B986097 / V556721** from this branch's reserved block B986096–B986111 · V556720–V556735 against `origin/main` 8e42a14. DEDUPE-FIRST — searched Open/⏳Verify/Done for "KML", "My Maps", "import draft", "staging table", #comps: no prior item touches KML/My Maps import; net-new. Also searched for any prior `comp_import_drafts`/`comp_drafts` table — none exists.)*
 `[x]` **Shipped this session, including the schema — applied directly to production** (this session has Supabase MCP write access, unlike the read-only access a prior comps session flagged in this same module's folder pointer — that stale claim was corrected in the same commit).
 - Verify: live — GIS endpoint behavior (a real KML import, a real polygon centroid) + real production writes are mandatory LIVE-VERIFY classes. **V556721.**
