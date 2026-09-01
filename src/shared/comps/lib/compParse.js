@@ -321,17 +321,22 @@ function finalizeGenericRow(generic, rawFlags, raw) {
       mergeFlag(flags, "leaseRateExpense", "soft", "NNN vs gross wasn't given — check it.");
     }
   }
-  // A commencement date is NEVER stored as though it were the deal's real comp_date without
-  // saying so — it's always shown (soft, correctable), never silently presented as fact. Quotes
-  // the actual source line when one was captured (a mockup requirement — "Date read from
-  // '<line>' — stored as estimated, not as a signing date") so the note is provenance, not just
-  // a generic disclaimer.
+  // EXECUTION and COMMENCEMENT are different facts about different moments (B986096-HARDENING-6,
+  // owner-decided) — a commencement date lands in its OWN field (`leaseCommencementDate`,
+  // flagged soft when the text marked it estimated) rather than being folded into compDate with
+  // only a notes annotation to disambiguate it. compDate (comp_date, NOT NULL) still falls back
+  // to the commencement date ONLY when no real execution date was stated at all — never silent:
+  // flagged soft, quoting the source line, and naming that the commencement is ALSO captured in
+  // its own column, so the fallback reads as a data-entry courtesy, not a conflation.
+  if (generic.commencementDate && generic.commencementEstimated) {
+    mergeFlag(flags, "leaseCommencementDate", "soft", `Read as ESTIMATED from "${generic.commencementSourceLine}" — not a confirmed date.`);
+  }
   if (!generic.compDate && generic.commencementDate) {
     const src = generic.commencementSourceLine;
-    const disposition = generic.commencementEstimated
-      ? "stored as estimated, not as a signing date."
-      : "a commencement date, not necessarily a signing date — verify or replace.";
-    mergeFlag(flags, "compDate", "soft", src ? `Date read from "${src}" — ${disposition}` : `This is the${generic.commencementEstimated ? " ESTIMATED" : ""} commencement date, not necessarily when the deal was signed — verify or replace.`);
+    const estimatedNote = generic.commencementEstimated ? " (marked estimated)" : "";
+    mergeFlag(flags, "compDate", "soft", src
+      ? `No execution date was stated — using the commencement date${estimatedNote} as a stand-in: "${src}". The commencement date is also captured in its own column.`
+      : `No execution date was stated — using the commencement date as a stand-in${estimatedNote}.`);
   }
 
   return { draft: genericToDraft(generic), cellFlags: flags, raw };
@@ -339,12 +344,13 @@ function finalizeGenericRow(generic, rawFlags, raw) {
 
 /** Generic fields -> the string-keyed draft shape `comps.js`'s `draftToComp`/`insertComp`
  * expect. Only fields the caller actually has values for are set — an unset field stays at the
- * blank default, per the entry grid's own rule that an empty cell is just a cell. A
- * commencement date fills `compDate` only as a last resort (never overriding a real comp_date),
- * and always leaves a note behind naming it as a commencement, not a signing date. */
+ * blank default, per the entry grid's own rule that an empty cell is just a cell. A commencement
+ * date ALWAYS lands in `leaseCommencementDate` when one was found, and ALSO fills `compDate` as
+ * a last resort when no real execution date was stated (never overriding a real one) — both
+ * facts captured, never one standing in silently for the other. */
 function genericToDraft(generic) {
   const d = {
-    compType: "land", compDate: "", title: "", notes: "", teamId: null, projectId: null, anchor: null,
+    compType: "land", compDate: "", leaseCommencementDate: "", title: "", notes: "", teamId: null, projectId: null, anchor: null,
     partyProvider: "", partyAcquirer: "",
     landPrice: "", landSizeValue: "", landSizeUnit: "ac",
     bldgPrice: "", bldgSizeSf: "",
@@ -356,15 +362,13 @@ function genericToDraft(generic) {
   if (generic.partyProvider) d.partyProvider = generic.partyProvider;
   if (generic.partyAcquirer) d.partyAcquirer = generic.partyAcquirer;
 
-  let notes = generic.notes || "";
+  if (generic.commencementDate) d.leaseCommencementDate = generic.commencementDate;
   if (generic.compDate) {
     d.compDate = generic.compDate;
   } else if (generic.commencementDate) {
-    d.compDate = generic.commencementDate;
-    const note = `Commencement${generic.commencementEstimated ? " (estimated)" : ""}: ${generic.commencementDate}`;
-    notes = notes ? `${notes}; ${note}` : note;
+    d.compDate = generic.commencementDate; // stand-in only — flagged soft in finalizeGenericRow, never silent
   }
-  d.notes = notes;
+  d.notes = generic.notes || "";
 
   if (d.compType === "land") {
     if (generic.price != null) d.landPrice = String(generic.price);
