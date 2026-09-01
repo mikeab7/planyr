@@ -11,10 +11,13 @@
  * centroid pin, later offered a parcel match by the caller). The DESCRIPTION field does NOT
  * import cleanly — Jordan's My Maps descriptions are prose typed over months, often with no
  * date at all — so this module only ever PROPOSES values (by running the description through
- * `compParse.js`'s prose extractor, the exact same engine the paste-grid uses), never commits
- * them. Every placemark becomes one draft row for the caller to show and confirm.
+ * `compParse.js`'s single-record extractor, the exact same engine the paste-grid uses for a
+ * multi-line abstract), never commits them. A placemark is definitionally ONE deal, so its
+ * description is always treated as a single record regardless of how many lines it spans —
+ * never split into several rows the way a genuine per-line LIST would be. Every placemark
+ * becomes one draft row for the caller to show and confirm.
  */
-import { parseProseLine } from "./compParse.js";
+import { parseSingleRecord } from "./compParse.js";
 
 function decodeEntities(s) {
   return String(s || "")
@@ -126,15 +129,16 @@ export function parseKmlPlacemarks(kmlText) {
 }
 
 /** One parsed placemark -> the shape `comp_import_drafts` stores: the raw facts untouched, plus
- * a best-effort `proposed` extraction run over the description text through the SAME prose
- * parser the paste-grid uses (never a second, drifting extraction engine). */
+ * a best-effort `proposed` extraction run over the WHOLE description text through the SAME
+ * single-record parser the paste-grid uses for an abstract (never a second, drifting extraction
+ * engine, and never split line-by-line — one placemark is one deal). */
 export function placemarkToDraftRow(placemark, { sourceFile } = {}) {
   const rawGeometry = !placemark.geometry ? null
     : placemark.geometry.kind === "point"
       ? { kind: "point", lat: placemark.geometry.lat, lon: placemark.geometry.lon }
       : { kind: "polygon", ring: placemark.geometry.ring, centroidLat: placemark.geometry.centroid?.lat, centroidLon: placemark.geometry.centroid?.lon };
 
-  const parsed = placemark.description ? parseProseLine(placemark.description) : { draft: null, cellFlags: {} };
+  const parsed = placemark.description ? parseSingleRecord(placemark.description) : null;
 
   return {
     source: "kml",
@@ -142,7 +146,7 @@ export function placemarkToDraftRow(placemark, { sourceFile } = {}) {
     raw_name: placemark.name,
     raw_description: placemark.description || null,
     raw_geometry: rawGeometry,
-    proposed: parsed.draft ? { ...parsed.draft, title: parsed.draft.title || placemark.name || "", cellFlags: parsed.cellFlags } : { title: placemark.name || "", cellFlags: {} },
+    proposed: parsed ? { ...parsed.draft, title: parsed.draft.title || placemark.name || "", cellFlags: parsed.cellFlags } : { title: placemark.name || "", cellFlags: {} },
     status: "pending",
   };
 }

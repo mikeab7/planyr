@@ -129,23 +129,45 @@ was never clicked" quietly ships broken.
 
 **Result:** ⏳ pending — needs a real parcel click against live county GIS data; not reachable from this sandbox's logged-out headless crawl.
 
-### V556720 — B986096: paste a real broker-email block into the Comps entry grid, confirm blocking vs soft cells, save, and read the rows back from `public.comps` `Blocker: auth`
+### V556720 — B986096: paste Michael's exact lease abstract into the Comps entry grid, confirm full field coverage, save, and read the row back from `public.comps` `Blocker: auth`
 
-**Why this needs its own real pass.** The parse→render→save round trip is client-side parsing feeding a real signed-in Supabase write; a saved row and its stored values can only be confirmed against the live database under a real session.
+**Why this needs its own real pass.** The parse→render→save round trip is client-side parsing feeding a real signed-in Supabase write; a saved row and its stored values, and the actual click-through (location picker over the live map, the expand/collapse chevron), can only be confirmed against the live database and a real signed-in browser session.
 
-**What was verified here.** `node ui-audit/verify-deploy.mjs comp_import_drafts` confirms the shipped build (containing this feature) is genuinely served on `planyr.io` — `"comp_import_drafts" IS SERVED — in assets/CompsPanel-D2Ke51hs.js` — a byte-level proof, not a green-CI assumption. 26 unit tests in `test/compParse.test.js` drive the exact canonical examples from the spec directly against the parser: a multi-line prose paste produces one row per line; a tab-delimited block fills rows AND columns, both by header-name mapping and by positional fallback; `"$0.68 NNN"` parses the rate but leaves `leaseRatePeriod` blocking (`cellFlags.leaseRatePeriod.level === "blocking"`), refusing to guess a 12x-ambiguous period; `"180k SF"` expands to 180000 flagged soft, never blocking. `npm run build` / `npx eslint` / `node ui-audit/design-drift-audit.mjs --check` all clean.
-**Attempted and could NOT complete this session — a SEPARATE wall from `Blocker: auth`, worth naming so a future session doesn't waste time assuming the deploy is broken:** a headless Chromium click-through (even the logged-out-reachable half — opening the grid, pasting, and reading rendered cell state needs no sign-in) was attempted post-merge against `https://planyr.io/?cb=<ts>#/` and failed to connect (`net::ERR_CONNECTION_RESET`) on every retry. A control check ruled out planyr.io specifically: the same Playwright browser also failed to reach `https://example.com/` and `https://www.anthropic.com/` (`net::ERR_TUNNEL_CONNECTION_FAILED`) in the same run, while a plain Node HTTPS fetch (the deploy-verification script above) reached `planyr.io` fine seconds earlier. So this reads as this session's browser-automation-via-proxy path being unreachable, not a defect in the shipped code or the deploy — re-attempt the browser half fresh in a new session rather than treating this as evidence against the feature.
+**History — three owner-measured hardening rounds, all fixed and re-verified this session (do not re-diagnose any of these):**
+1. **Shape detection.** The original spec ("one pasted line = one row") was wrong for the dominant real shape — Michael's own 10-line lease abstract produced 32 junk "Land" rows. Fixed with `detectPasteShape` (spreadsheet → labeled-single-record → completeness-based single/multi default, with a visible "split into one row per line instead" escape hatch) plus a real per-line multi-fact extraction bug (`extractUnlabeledLine` used to stop at the first regex match per line).
+2. **Five owner-measured live-bundle bugs** (`elementFromPoint`/event-level proof against `index-CiTfrhIW.js`): a full-viewport modal backdrop physically blocked the map buttons it told the user to click (fixed — no more backdrop, a small draggable non-modal card); typing didn't parse, only a real paste event did (fixed — unified `onChange` handles both); the shape-detection bug was still live (fixed by #1 above); the paste box cleared itself, losing the reference for fixing a bad parse (fixed — a persistent dismissible `lastPasteText` panel); lease-row layout was broken (fixed — one shared column template + a dedicated annual column + corner-badge flag glyphs). The "613,208 SF → 61320" question was resolved: proven NOT a parse bug (full value round-trips correctly), a column-width display artifact.
+3. **Field coverage.** A column-by-column audit of `public.comps` against the form found `title` reachable NOWHERE in the UI — a real regression from the pre-rebuild single-comp form, since `title` has no NOT NULL constraint so nothing else caught it. Fixed: `title` is now an always-visible input under every row (never behind the chevron). Every other column already had an input; the "nothing suggests more lives behind the chevron" complaint is fixed with a corner badge on the expand toggle showing the count of filled hidden fields.
 
-**Steps, each with a named expected result — signed in, on `planyr.io` with a cache-busted load:**
-1. Open a site's map → Comps tab → "＋ New comps". **Expect:** an overlay card opens with an empty paste box and grid, no confirmation step anywhere yet.
-2. Paste: `3.2 AC land - $850k - Jan 2026` / `Building sale, 25,000 SF, $3.1M, closed 3/14/2026` / `12,500 SF lease at $0.68 NNN`. **Expect:** three typed rows appear immediately (no intermediate review/confirm screen) — Land/$850,000/3.2 AC, Building sale/$3,100,000/25,000 SF, Lease/$0.68.
-3. **Expect:** the third row's rate-period cell renders with the app's red/`aria-invalid` rejected-value styling and a "!" glyph naming the 12x ambiguity; the row cannot be included in Save while it stands.
-4. Pick MO or YR for that row. **Expect:** the red styling clears and the row becomes saveable; its normalized annual figure appears, labeled with its basis.
-5. Give each row a location (pin drop or parcel select via "＋ Location"). **Expect:** clicking a row with a location pans/zooms the map to it.
-6. Save. **Expect:** the panel returns to the comps list with all three new rows visible.
-7. Read `public.comps` directly for the three new rows. **Expect:** stored `land_price`/`land_size_value`/`bldg_price`/`bldg_size_sf`/`lease_rate`/`lease_rate_period` etc. match exactly what was typed/resolved on screen.
+**What was verified here (this pass).** Ran Michael's **exact** 10-line paste through the real, unmocked production pipeline (`parsePaste` → `emptyDraft`/`draftToComp`/`compToRow`) and checked all ten stated facts land in the right column: **10/10 pass.** Then performed a REAL write against production `public.comps` (project `lyeqzkuiwngunutlkkmi`) via the Supabase MCP: inserted that exact row under the owner's own account, read it back with a fresh, separate `SELECT` (proving real persistence, not an echo of the insert), confirmed every field byte-for-byte (`lease_size_sf: "613208"`, `lease_escalation_pct: "3.5"`, `title: "20320 West Hardy Road - Building A"`, all ten fields correct), then deleted the test row — no residue left on the owner's account. `npx vitest run` — 667/667 files, 13,677/13,677 tests green (134 of them comps-scoped). `npm run build` / `npx eslint` / `node ui-audit/design-drift-audit.mjs --check` / `node scripts/build-map.mjs --check` / `node ui-audit/doc-pointer-audit.mjs` all clean. `node ui-audit/verify-deploy.mjs` from the prior pass already confirmed the shipped build is genuinely served on `planyr.io`.
+**Attempted again this pass and still could NOT complete — same wall as before, re-confirmed, not re-diagnosed:** a headless Chromium request to `https://planyr.io/?cb=<ts>` failed with `net::ERR_CONNECTION_RESET` from this session's sandboxed proxy, matching the prior session's finding exactly (and that prior finding already ruled out planyr.io specifically via a control test against unrelated hosts). Per `CLAUDE.md`'s documented split, a Claude Code session cannot sign in here (the sandbox proxy CORS-blocks the Supabase auth handshake) — the actual click-through (location picker usable while armed, the title field visible without expanding, the badge count, a real Save) needs a session that CAN drive a real signed-in browser (the Cowork thread, per `verification-inbox/`) or Michael's own click-through.
 
-**Result:** ⏳ pending — needs a real signed-in browser session; this session's own headless attempt was blocked at the network layer (see above), not by the feature.
+**Steps, each with a named expected result — signed in, on `planyr.io` with a cache-busted load. Use Michael's own paste verbatim:**
+```
+TT: Modular Power Solutions
+LL: Core5 Industrial Partners
+20320 West Hardy Road - Building A
+613,208 SF
+Commencement estimated to be June 1, 2027
+126 months
+6 months base free rent
+$0.65/sf NNN
+3.50% annual increases
+TI: $13.00/sf from shell
+```
+1. Open a site's map → Comps tab → "＋ New comps". **Expect:** a small draggable card opens over the map (NOT a full-screen overlay — the map must stay clickable everywhere outside the card).
+2. Paste the block above. **Expect:** exactly ONE lease row appears — never ten "Land" rows.
+3. **Expect:** the row's Title/address field (always visible, directly under the row, no expand needed) reads "20320 West Hardy Road - Building A".
+4. **Expect:** the rate-period cell (in the Price/Rate column) renders red/`aria-invalid` with a "!" glyph — no stated period, $0.65 is ambiguous 12x either way — and the row cannot be part of Save while it stands.
+5. **Expect:** the collapsed "more fields" chevron shows a small filled-count badge (e.g. "4") before you click it, in an accent color distinct from an empty row's chevron.
+6. Click the chevron. **Expect:** Term reads "126 mo", Free rent (mo) reads "6", TI $/SF reads "13", Escalation %/yr reads "3.5", Landlord/Tenant party fields are filled, and Notes names the commencement date as ESTIMATED (not stated as fact).
+7. **Expect:** the Size cell reads the full "613208" — not truncated to "61320".
+8. Pick MO for the rate period. **Expect:** the red styling clears, the row becomes saveable, and the Annual column shows the normalized annual figure labeled NNN.
+9. Click "＋ Loc", then click a point on the map. **Expect:** the map responds to the click normally the whole time — nothing intercepts it — and the location lands on this specific row.
+10. Save. **Expect:** the panel returns to the comps list with the new row visible.
+11. Read `public.comps` directly for the new row. **Expect:** every one of the ten facts above matches exactly what was pasted/resolved on screen.
+12. Separately, paste a genuine one-per-line list (several short lines like `3.2 AC land - $850k - Jan 2026`) and confirm it still produces ONE ROW PER LINE (not treated as a single record) — and that a tab-delimited Excel block still fills rows and columns correctly.
+
+**Result:** ⏳ pending a real signed-in browser session (see wall above). Everything reachable WITHOUT a browser — the parser, the schema mapping, and a real production database round trip on the exact reported paste — is done and passed 10/10 this session.
 
 ### V556721 — B986097: import a Google My Maps KML export, confirm drafts stay invisible until promoted, promote one, dismiss another `Blocker: auth` `Blocker: real-data`
 

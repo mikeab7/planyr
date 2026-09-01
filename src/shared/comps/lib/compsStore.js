@@ -16,7 +16,7 @@ const SELECT_COLS =
   "parcel_apn,parcel_geom,site_plan_overlay_id,site_plan_point,land_price,land_size_value," +
   "land_size_unit,bldg_price,bldg_size_sf," +
   "lease_rate,lease_rate_period,lease_rate_expense,lease_ti,lease_term,lease_size_sf," +
-  "lease_free_rent_months,comp_party_provider,comp_party_acquirer,created_at,updated_at";
+  "lease_free_rent_months,lease_escalation_pct,comp_party_provider,comp_party_acquirer,created_at,updated_at";
 
 /** Every comp the signed-in user can see (their own + their team's) — small personal/team
  * table, no pagination needed at any realistic scale (mirrors fetchAllVisits). */

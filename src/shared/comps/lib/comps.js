@@ -269,6 +269,10 @@ export function compFieldRows(comp) {
     if (comp?.leaseTerm) push("term", "Term", comp.leaseTerm);
     // NEW-2: free rent sits right next to Term, the field it belongs with.
     if (comp?.leaseFreeRentMonths != null) push("freeRent", "Free rent", `${Number(comp.leaseFreeRentMonths).toLocaleString()} mo`);
+    // B986096 — annual rate escalation, a normal and materially-valuable part of an industrial
+    // lease (it changes what the deal is worth over its term); has its own column rather than
+    // being dropped into notes, matching every other structured lease term here.
+    if (comp?.leaseEscalationPct != null) push("escalation", "Escalation", `${Number(comp.leaseEscalationPct).toLocaleString()}%/yr`);
   }
 
   push("date", "Date", fmtCompDate(comp?.compDate));
@@ -343,6 +347,7 @@ export function rowToComp(r) {
     leaseTerm: r.lease_term || null,
     leaseSizeSf: r.lease_size_sf != null ? Number(r.lease_size_sf) : null,
     leaseFreeRentMonths: r.lease_free_rent_months != null ? Number(r.lease_free_rent_months) : null,
+    leaseEscalationPct: r.lease_escalation_pct != null ? Number(r.lease_escalation_pct) : null,
     partyProvider: r.comp_party_provider || null,
     partyAcquirer: r.comp_party_acquirer || null,
     createdAt: r.created_at,
@@ -371,7 +376,7 @@ export function emptyDraft(anchor) {
     landPrice: "", landSizeValue, landSizeUnit: "ac",
     bldgPrice: "", bldgSizeSf: "",
     leaseRate: "", leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseTi: "", leaseTerm: "", leaseSizeSf: "",
-    leaseFreeRentMonths: "",
+    leaseFreeRentMonths: "", leaseEscalationPct: "",
   };
 }
 
@@ -383,7 +388,7 @@ export function draftToComp(d) {
     landPrice: num(d.landPrice), landSizeValue: num(d.landSizeValue),
     bldgPrice: num(d.bldgPrice), bldgSizeSf: num(d.bldgSizeSf),
     leaseRate: num(d.leaseRate), leaseTi: num(d.leaseTi), leaseSizeSf: num(d.leaseSizeSf),
-    leaseFreeRentMonths: num(d.leaseFreeRentMonths),
+    leaseFreeRentMonths: num(d.leaseFreeRentMonths), leaseEscalationPct: num(d.leaseEscalationPct),
   };
 }
 
@@ -398,6 +403,7 @@ export function compToDraft(c) {
     leaseRate: str(c.leaseRate), leaseRatePeriod: c.leaseRatePeriod || "annual",
     leaseRateExpense: c.leaseRateExpense || "nnn", leaseTi: str(c.leaseTi), leaseTerm: c.leaseTerm || "",
     leaseSizeSf: str(c.leaseSizeSf), leaseFreeRentMonths: str(c.leaseFreeRentMonths),
+    leaseEscalationPct: str(c.leaseEscalationPct),
   };
 }
 
@@ -431,6 +437,7 @@ export function compToRow(comp) {
     lease_term: comp.leaseTerm ?? null,
     lease_size_sf: comp.leaseSizeSf ?? null,
     lease_free_rent_months: comp.leaseFreeRentMonths ?? null,
+    lease_escalation_pct: comp.leaseEscalationPct ?? null,
     comp_party_provider: comp.partyProvider || null,
     comp_party_acquirer: comp.partyAcquirer || null,
     updated_at: new Date().toISOString(),
