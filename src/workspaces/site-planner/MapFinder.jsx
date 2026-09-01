@@ -62,6 +62,7 @@ import CursorChip from "./components/CursorChip.jsx";
 import { contourHover } from "./lib/terrainLazy.js";
 import { attachRasterIdentifyLazy } from "./lib/rasterIdentifyLazy.js";
 import { NUM_FONT, TABULAR_NUMS } from "../../shared/theme/typography.js";
+import { isTextControl, PICKER_TAGS } from "../../shared/keyboard/keyScope.js";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import FloatingNotice from "../../shared/ui/FloatingNotice.jsx";
@@ -2531,7 +2532,12 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       if (e.key !== "Enter") return;
       const ae = document.activeElement;
       const tag = ae && ae.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "BUTTON" || (ae && ae.isContentEditable)) return;
+      // NEW-1 (B1012832) — the text-entry half now reads the ONE shared authority
+      // (shared/keyboard/keyScope.js) instead of its own hand-rolled INPUT/TEXTAREA/
+      // contentEditable list, so this handler cannot drift from the planner's own
+      // definition of "is the user typing". BUTTON/SELECT stay a local exclusion — this
+      // guard is broader than "typing" (it also yields to a focused control of any kind).
+      if (isTextControl(ae) || PICKER_TAGS.includes(tag) || tag === "BUTTON") return;
       e.preventDefault();
       placeCompOnSelectedParcel();
     };

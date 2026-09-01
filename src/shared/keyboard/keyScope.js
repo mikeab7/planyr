@@ -198,8 +198,15 @@ export function touchLatch({ insideCanvas, isTextEntry, inFieldGroup } = {}) {
   return TOUCH.CHROME;
 }
 
-/** Does this node accept typed text (as opposed to picking, toggling or dragging a value)? */
-const isTextControl = (el) => !!el && (
+/* ⛔ NEW-1 (B1012832) — THE ONE PREDICATE ANSWERING "IS THE USER TYPING RIGHT NOW", EXPORTED SO A
+ * HANDLER OUTSIDE THE PLANNER CAN ASK IT TOO. Before this it was `isTextControl` — correct, but
+ * module-private, so a second window/document keydown handler elsewhere in the app (MapFinder's
+ * comp-placement Enter shortcut, for one) had no way to ask this module's own answer and grew its
+ * own hand-rolled tag list instead (`INPUT`/`TEXTAREA`/`SELECT`/`BUTTON`/`isContentEditable`) —
+ * a second implementation of exactly the question this file exists to answer once. Exported under
+ * `isTextControl` (unchanged name, so every existing internal call site is untouched) — the fix is
+ * making it PUBLIC, not renaming it. */
+export const isTextControl = (el) => !!el && (
   el.isContentEditable
   || (el.tagName === "TEXTAREA")
   || (el.tagName === "INPUT" && isTextInputType(el.type))
