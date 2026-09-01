@@ -5,6 +5,7 @@ import {
   makeDate, isoToSerial, serialToISO, BLANK, FORMULA_ERRORS, isDate,
   errVal, isErrVal, DEFAULT_CALENDAR,
   MAX_COL, MAX_ROW, parseRefText, colLettersToNum, colNumToLetters, rewriteFormulaForCopy,
+  rewriteFormulaForStructuralShift,
   FUNCTION_NAMES,
 } from "../src/shared/formula/formula.js";
 
@@ -1197,6 +1198,103 @@ describe("rewriteFormulaForCopy", () => {
   });
   it("a formula that fails to even tokenize is handed back unchanged rather than throwing", () => {
     expect(rewriteFormulaForCopy("A1 + $", "A1", "A5")).toBe("A1 + $");
+  });
+});
+
+// ── rewriteFormulaForStructuralShift — row/column INSERT and DELETE ────────────
+// Distinct from rewriteFormulaForCopy: shifts EVERY reference, $-anchored or not,
+// because $ means "don't move on copy," not "don't move when the grid restructures."
+// Every case below is hand-derived against real Excel's own insert/delete semantics
+// — see the function's own header for the interval-collapse model.
+describe("rewriteFormulaForStructuralShift", () => {
+  describe("insert row (axis='row', delta=+1)", () => {
+    it("a reference below the insertion point shifts down by one", () => {
+      expect(rewriteFormulaForStructuralShift("A10", "row", 5, 1)).toBe("A11");
+    });
+    it("a reference AT the insertion point also shifts down — insert pushes what's there", () => {
+      expect(rewriteFormulaForStructuralShift("A5", "row", 5, 1)).toBe("A6");
+    });
+    it("a reference strictly above the insertion point is untouched", () => {
+      expect(rewriteFormulaForStructuralShift("A4", "row", 5, 1)).toBe("A4");
+    });
+    it("a $-anchored reference SHIFTS on structural insert (unlike copy/paste)", () => {
+      expect(rewriteFormulaForStructuralShift("$A$10", "row", 5, 1)).toBe("$A$11");
+    });
+    it("a range straddling the insertion point GROWS to include the new line", () => {
+      expect(rewriteFormulaForStructuralShift("SUM(A1:A10)", "row", 5, 1)).toBe("SUM(A1:A11)");
+    });
+    it("a range whose TOP edge sits exactly at the insertion point moves down whole (does not grow upward)", () => {
+      expect(rewriteFormulaForStructuralShift("SUM(A5:A10)", "row", 5, 1)).toBe("SUM(A6:A11)");
+    });
+    it("only the ROW axis moves — column references in the same formula are untouched", () => {
+      expect(rewriteFormulaForStructuralShift("A10+C10", "row", 5, 1)).toBe("A11+C11");
+      expect(rewriteFormulaForStructuralShift("E10", "col", 5, 1)).toBe("F10"); // sanity: col-axis case moves the column, not the row
+    });
+    it("a descending range (A10:A1) preserves which endpoint held the larger value", () => {
+      expect(rewriteFormulaForStructuralShift("SUM(A10:A1)", "row", 5, 1)).toBe("SUM(A11:A1)");
+    });
+  });
+
+  describe("delete row (axis='row', delta=-1)", () => {
+    it("a scalar reference to the DELETED row collapses to #REF!", () => {
+      expect(rewriteFormulaForStructuralShift("A5", "row", 5, -1)).toBe("#REF!");
+    });
+    it("a reference below the deleted row shifts up by one", () => {
+      expect(rewriteFormulaForStructuralShift("A10", "row", 5, -1)).toBe("A9");
+    });
+    it("a reference above the deleted row is untouched", () => {
+      expect(rewriteFormulaForStructuralShift("A4", "row", 5, -1)).toBe("A4");
+    });
+    it("a range's TOP edge exactly at the deleted row shrinks in place (does not collapse)", () => {
+      // A5:A10, delete row 5: rows 6-10 slide up to 5-9, so A5:A9.
+      expect(rewriteFormulaForStructuralShift("SUM(A5:A10)", "row", 5, -1)).toBe("SUM(A5:A9)");
+    });
+    it("a range's BOTTOM edge exactly at the deleted row shrinks in place (does not collapse)", () => {
+      // A1:A5, delete row 5: rows 1-4 unaffected, bottom edge moves to 4.
+      expect(rewriteFormulaForStructuralShift("SUM(A1:A5)", "row", 5, -1)).toBe("SUM(A1:A4)");
+    });
+    it("a range spanning past the deleted row on BOTH sides just shrinks by one row", () => {
+      expect(rewriteFormulaForStructuralShift("SUM(A1:A10)", "row", 5, -1)).toBe("SUM(A1:A9)");
+    });
+    it("a range that IS exactly the deleted row (a 1-row range) collapses the WHOLE range to #REF!", () => {
+      expect(rewriteFormulaForStructuralShift("SUM(B5:D5)", "row", 5, -1)).toBe("SUM(#REF!)");
+    });
+    it("$-anchoring never blocks a delete-driven collapse or shift", () => {
+      expect(rewriteFormulaForStructuralShift("$A$5", "row", 5, -1)).toBe("#REF!");
+      expect(rewriteFormulaForStructuralShift("$A$10", "row", 5, -1)).toBe("$A$9");
+    });
+    it("the rewritten #REF! formula evaluates loudly (never a silent zero)", () => {
+      const rewritten = rewriteFormulaForStructuralShift("A5+1", "row", 5, -1);
+      expect(gridErr(rewritten)).toBe(FORMULA_ERRORS.REF);
+    });
+  });
+
+  describe("insert/delete column (axis='col') — the mirror image on the other axis", () => {
+    it("insert: a column reference at/after the insertion point shifts right", () => {
+      expect(rewriteFormulaForStructuralShift("C1", "col", 3, 1)).toBe("D1");
+      expect(rewriteFormulaForStructuralShift("B1", "col", 3, 1)).toBe("B1"); // before, untouched
+    });
+    it("delete: a reference to the deleted column collapses; refs after it shift left", () => {
+      expect(rewriteFormulaForStructuralShift("C1", "col", 3, -1)).toBe("#REF!");
+      expect(rewriteFormulaForStructuralShift("D1", "col", 3, -1)).toBe("C1");
+      expect(rewriteFormulaForStructuralShift("B1", "col", 3, -1)).toBe("B1"); // before, untouched
+    });
+    it("a range spanning the deleted column shrinks rather than collapsing", () => {
+      expect(rewriteFormulaForStructuralShift("SUM(A1:E1)", "col", 3, -1)).toBe("SUM(A1:D1)");
+    });
+  });
+
+  it("a formula with no A1 references at all (pure [Column] refs) is returned byte-identical", () => {
+    expect(rewriteFormulaForStructuralShift("[Cost]*2 + [Qty]", "row", 5, -1)).toBe("[Cost]*2 + [Qty]");
+  });
+  it("a string literal that merely looks like a reference is never touched", () => {
+    expect(rewriteFormulaForStructuralShift('"A5" & A5', "row", 5, -1)).toBe('"A5" & #REF!');
+  });
+  it("LOG10( is never rewritten — a function call, not a reference", () => {
+    expect(rewriteFormulaForStructuralShift("LOG10(A10)+A10", "row", 5, 1)).toBe("LOG10(A11)+A11");
+  });
+  it("a formula that fails to even tokenize is handed back unchanged rather than throwing", () => {
+    expect(rewriteFormulaForStructuralShift("A1 + $", "row", 5, 1)).toBe("A1 + $");
   });
 });
 

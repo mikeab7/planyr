@@ -41,14 +41,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppHeader, { useNarrow } from "../../shared/ui/AppHeader.jsx";
 import SheetView from "./components/SheetView.jsx";
 import FormulaBar from "./components/FormulaBar.jsx";
+import FindReplaceBar from "./components/FindReplaceBar.jsx";
 import NumberFormatPicker from "./components/NumberFormatPicker.jsx";
 import { useUndoableState } from "./lib/undoStack.js";
 import {
   createSheet, migrateSheet, commitCellText, blankRange, renameColumn, setNumberFormat,
-  deleteColumn, addColumn, formatAt, padRowCount, sheetsDiverge,
+  deleteColumn, addColumn, formatAt, padRowCount, sheetsDiverge, rawAt,
+  insertRowAt, deleteRowAt, insertColumnAt, setColumnWidth, setRowHeight, setFreeze,
 } from "./lib/sheetModel.js";
 import { evaluateSheet } from "./lib/sheetEngine.js";
-import { copyRange, pasteRange, fillDown } from "./lib/sheetOps.js";
+import { copyRange, pasteRange, fillDown, replaceAll, replaceInCellText } from "./lib/sheetOps.js";
 import { modelSaveState } from "./lib/modelSaveState.js";
 import { readLocalSheet, writeLocalSheet, loadCloudSheet, saveCloudSheet } from "./lib/modelStore.js";
 import { listProjects } from "../../shared/projects/projects.js";
@@ -104,6 +106,10 @@ export default function ModelApp({
   // "⋯" popover rather than sitting in the always-visible row.
   const narrow = useNarrow();
   const [showMore, setShowMore] = useState(false);
+  // Stage 1 — Name Box (Ctrl+G focuses it) and Find/Replace (Ctrl+F / Ctrl+H).
+  const nameBoxRef = useRef(null);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findShowReplace, setFindShowReplace] = useState(false);
 
   const openProject = !crossProject && !!projectId;
 
@@ -173,10 +179,10 @@ export default function ModelApp({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sheet, ready, openProject, projectId, userId]);
 
-  // Ctrl/Cmd+Z / Ctrl/Cmd+Shift+Z (or +Y) — SheetView deliberately leaves every Ctrl/Cmd chord
-  // alone so this can own them, gated on `isActive` the same way Notes gates its own window
-  // shortcut: workspaces stay mounted-but-hidden, so an ungated listener fires from a tab
-  // nobody is looking at.
+  // Ctrl/Cmd+Z / Ctrl/Cmd+Shift+Z (or +Y), Ctrl+G (Name Box), Ctrl+F / Ctrl+H (Find/Replace) —
+  // SheetView deliberately leaves every Ctrl/Cmd chord alone so this can own them, gated on
+  // `isActive` the same way Notes gates its own window shortcut: workspaces stay
+  // mounted-but-hidden, so an ungated listener fires from a tab nobody is looking at.
   useEffect(() => {
     if (!isActive) return undefined;
     const onKey = (e) => {
@@ -184,6 +190,9 @@ export default function ModelApp({
       const k = e.key.toLowerCase();
       if (k === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
       else if ((k === "z" && e.shiftKey) || k === "y") { e.preventDefault(); redo(); }
+      else if (k === "g") { e.preventDefault(); nameBoxRef.current?.focus(); }
+      else if (k === "f") { e.preventDefault(); setFindShowReplace(false); setFindOpen(true); }
+      else if (k === "h") { e.preventDefault(); setFindShowReplace(true); setFindOpen(true); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -206,6 +215,34 @@ export default function ModelApp({
     commit((s) => pasteRange(s, targetR, targetC, clipboardRef.current, selR2, selC2));
   }, [commit]);
   const onFillDown = useCallback((r1, r2, c1, c2) => commit((s) => fillDown(s, r1, r2, c1, c2)), [commit]);
+
+  // Stage 1 structural editing (context-menu driven — see SheetView.jsx's ContextMenu). Every
+  // one of these shifts formula references sheet-wide (sheetModel.js's insertRowAt/deleteRowAt/
+  // insertColumnAt/deleteColumn), not just the cell that moved.
+  const onInsertRowAt = useCallback((rowIndex) => commit((s) => insertRowAt(s, rowIndex)), [commit]);
+  const onDeleteRowAt = useCallback((rowIndex) => commit((s) => deleteRowAt(s, rowIndex)), [commit]);
+  const onInsertColumnAt = useCallback((colIndex) => commit((s) => insertColumnAt(s, colIndex)), [commit]);
+  const onDeleteColumnAt = useCallback((colIndex) => {
+    if (sheet.columns.length <= 1) return;
+    commit((s) => deleteColumn(s, colIndex));
+  }, [commit, sheet.columns.length]);
+  const onSetColumnWidth = useCallback((colIndex, width) => commit((s) => setColumnWidth(s, colIndex, width)), [commit]);
+  const onSetRowHeight = useCallback((rowIndex, height) => commit((s) => setRowHeight(s, rowIndex, height)), [commit]);
+  // Freeze panes goes through the normal commit/undo path like every other edit here — NOT
+  // `reset` (that primitive wipes the whole undo history, meant only for adopting a load/sync
+  // result, never a user action taken mid-session).
+  const onSetFreeze = useCallback((rows, cols) => commit((s) => setFreeze(s, rows, cols)), [commit]);
+
+  // Name Box / Find navigation — a plain jump, not an edit, so it never mints an undo frame.
+  const onGoTo = useCallback((r, c) => setSelRange({ r1: r, r2: r, c1: c, c2: c }), [setSelRange]);
+  // "Replace" (singular) touches only the ONE cell the Find bar is currently sitting on — every
+  // occurrence within that cell's own text, the same substring rule replaceAll uses everywhere
+  // else, so "one cell = one match" stays consistent between the counter and the action.
+  const onReplaceOne = useCallback((match, find, replace) => {
+    const current = rawAt(sheet, match.r, match.c);
+    commit((s) => commitCellText(s, match.r, match.c, replaceInCellText(current, find, replace)));
+  }, [commit, sheet]);
+  const onReplaceAll = useCallback((find, replace) => commit((s) => replaceAll(s, find, replace)), [commit]);
 
   const activeCol = selRange.c1;
   // Per-cell format (item 4/pro-forma finding): the picker reflects and edits the ACTIVE
@@ -285,7 +322,7 @@ export default function ModelApp({
         <EmptyProjectState onGoDashboard={onGoDashboard} />
       ) : (
         <>
-          <FormulaBar sheet={sheet} row={selRange.r1} col={selRange.c1} onCommit={onCommitCell} />
+          <FormulaBar sheet={sheet} row={selRange.r1} col={selRange.c1} onCommit={onCommitCell} onGoTo={onGoTo} nameBoxRef={nameBoxRef} />
           <SheetView
             sheet={sheet}
             evalResult={evalResult}
@@ -299,6 +336,22 @@ export default function ModelApp({
             onCopy={onCopy}
             onPaste={onPaste}
             onFillDown={onFillDown}
+            onInsertRowAt={onInsertRowAt}
+            onDeleteRowAt={onDeleteRowAt}
+            onInsertColumnAt={onInsertColumnAt}
+            onDeleteColumnAt={onDeleteColumnAt}
+            onSetColumnWidth={onSetColumnWidth}
+            onSetRowHeight={onSetRowHeight}
+            onSetFreeze={onSetFreeze}
+          />
+          <FindReplaceBar
+            open={findOpen}
+            showReplace={findShowReplace}
+            sheet={sheet}
+            onClose={() => setFindOpen(false)}
+            onGoTo={onGoTo}
+            onReplaceOne={onReplaceOne}
+            onReplaceAll={onReplaceAll}
           />
         </>
       )}

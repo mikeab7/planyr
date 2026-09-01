@@ -11321,6 +11321,24 @@ _(new `Verify: live` items land here after implementation.)_
 
 *Deliberately deferred. Do **not** action these unless moved up to 🔲 Open.*
 
+*The four items below are Stages 2–5 of the owner's "make this an actual financial model" roadmap
+(same chat block that shipped Stage 1 as B979392). The owner was explicit and binding: ship in
+sequential PRs, one stage per session, never starting a stage until the previous one is merged
+AND he has confirmed it. These are filed for the record per the "diagnosis/handoff without a B#
+is itself a protocol violation" rule — they are NOT to be started without his go-ahead on Stage 1.*
+
+### B979393 — Model workspace Stage 2: a real Excel-Home-style toolbar `[Model]` (feature) #model #ui  *(owner chat block, Stage 2 of the "make this an actual financial model" roadmap. Minted **B979393** from this branch's reserved block B979392–B979407 against `origin/main` 6261f43. DEDUPE-FIRST — no prior item; Stage 1 (B979392) built grid mechanics, not formatting controls. Net-new.)*
+`[ ]` **Do NOT start without the owner's confirmation of Stage 1.** Font family/size/bold/italic/underline, fill color, borders (including a top border + double bottom border specifically for subtotal/total rows), horizontal/vertical alignment, number-format presets including domain-specific ones ($/SF, basis points), a format painter, insert/delete row-column buttons, freeze/sort/filter controls on the toolbar itself — all of it must wrap or collapse gracefully at a narrow viewport (the owner's own stated failure mode for the current toolbar: "unreachable at his actual window size and that is how it shipped"). Test narrow AND wide, screenshots in the PR, verify by building a real pro-forma and reading every number, not by asserting a control exists.
+
+### B979394 — Model workspace Stage 3: the things that make it a model rather than a grid `[Model]` (feature) #model #formula #ui  *(owner chat block, Stage 3 of the same roadmap. Minted **B979394** from the same reserved block. DEDUPE-FIRST — no prior item. Net-new.)*
+`[ ]` **Do NOT start without the owner's confirmation of Stage 1 (and, in practice, Stage 2 shipping first).** The owner named the input/formula/link cell-color convention (blue/black/green) as "the single highest-value item on this whole list" — do not bury it under the rest. Also: subtotal/total border styles (pairs with Stage 2's border work), multiple sheets with tabs, named cells/ranges, a show-formulas toggle, trace precedents/dependents, inconsistent-formula-in-a-row detection ("that single check catches the most common real modelling error there is" — the owner's words), and circular-reference detection that names the actual cells in the loop.
+
+### B979395 — Model workspace Stage 4: time and the pro-forma itself `[Model]` (feature) #model #formula #ui  *(owner chat block, Stage 4 of the same roadmap. Minted **B979395** from the same reserved block. DEDUPE-FIRST — no prior item; distinct from B891184 (built the module) and B979392 (grid mechanics) — this is the real underwriting template. Net-new.)*
+`[ ]` **Do NOT start without the owner's confirmation of Stages 1–3.** Monthly/quarterly/annual period columns generated from a start date with a draggable horizon; an S-curve draw schedule; a REAL pro-forma template (not an empty grid) — NOI build-up, land/hard/soft costs, construction interest, TI/LC, developer fee, contingency — wired to the EXISTING `siteMetrics()`/comps/schedule data rather than re-derived by hand, producing yield-on-cost (untrended and trended), spread over exit cap (in bps), profit on cost, unlevered and levered IRR, equity multiple, peak equity, debt yield, and DSCR. Two-way sensitivity tables, goal-seek, and a scenario manager. Given Stage 1's honestly-profiled finding that `evaluateSheet` recomputes the whole dependency graph from scratch on every keystroke, this stage is exactly where that scaling risk stops being theoretical — budget time to check it against a real-size pro-forma, not just Stage 1's small test sheet.
+
+### B979396 — Model workspace Stage 5: export and import `[Model]` (feature) #model #export #ui  *(owner chat block, Stage 5 of the same roadmap. Minted **B979396** from the same reserved block. DEDUPE-FIRST — no prior item. Net-new.)*
+`[ ]` **Do NOT start without the owner's confirmation of Stages 1–4.** Excel export with live formulas and formatting intact, Excel/CSV import, and print/PDF output that matches the screen (PDF-PARITY applies).
+
 *The item below is not "deferred" in the usual sense — it is a CLOSED, owner-accepted permanent
 limitation, parked here rather than in Open/⏳ Verify (which it would leave looking like pending
 work) or `BACKLOG-DONE.md` (which would misreport it as fixed). It carries its own stopping rule;
