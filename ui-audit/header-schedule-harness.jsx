@@ -1,6 +1,6 @@
-/* B1012560 — Dev-only harness (not part of the app build) for the Schedule module's Row-2
- * header layout: the ONE 3-zone (tabs | center | toolbar) case in this app, since Scheduler.jsx
- * is the only caller that passes `toolbarCenter` to AppHeader.
+/* B1012560/B1017840 — Dev-only harness (not part of the app build) for the Schedule module's
+ * Row-2 header layout: the ONE 3-zone (tabs | center | toolbar) case in this app, since
+ * Scheduler.jsx is the only caller that passes `toolbarCenter` to AppHeader.
  *
  * Mounts the REAL AppHeader with the REAL ScheduleCenter/ScheduleActions components (the actual
  * Grid/Split/Gantt segmented control, inbox, zoom cluster, Export▾, dividers, History, Contacts,
@@ -10,28 +10,26 @@
  * `Scheduler.jsx` derives from the iframe's postMessage reports) is enough to render their real,
  * on-screen widths with no auth, no network, and no iframe.
  *
+ * TWO SCOPES (B1017840) — the toolbar's real width differs by which Schedule view is active:
+ * Grid has no zoom cluster (`toolbar.zoomable: false`, the narrower real case); Split/Gantt adds
+ * one (`zoomable: true`, wider). The wrap-to-second-line threshold (see AppHeader.jsx's Row-2
+ * comment) sits at a different container width for each, so both need their own pass rather than
+ * assuming one represents the other.
+ *
  * The probe (verify-schedule-header-widths.mjs) resizes the viewport across the reported break
- * point (1108px pre-fix) and down to 1024/960/900, and sweeps every module tab with
- * `elementFromPoint` — same technique as verify-header-nav-clickable.mjs uses for Row 1.
+ * point (1108px pre-fix) and down through the width where the row wraps to a second line, and
+ * checks two things depending on whether the row is one line or two: on ONE line, every module
+ * tab must resolve to itself (elementFromPoint) and the two gaps either side of the center group
+ * must be equal; on TWO lines, the center group's content and the toolbar's content must not
+ * overlap as real 2D rectangles — never a same-line-assuming 1D left/right gap comparison, which
+ * reads a correct two-line wrap as a negative "overlap" simply because the two groups sit at
+ * different vertical positions.
  */
 import { createRoot } from "react-dom/client";
 import AppHeader from "../src/shared/ui/AppHeader.jsx";
 import { ThemeProvider } from "../src/shared/theme/ThemeProvider.jsx";
 import { ScheduleCenter, ScheduleActions } from "../src/workspaces/scheduler/components/ScheduleToolbar.jsx";
 
-// A representative reported toolbar state — Projects section, Grid view, zoomable (so the
-// zoom cluster renders, matching a Split/Gantt view's real width), a nonzero review count (so
-// the inbox badge renders at its real width too).
-const toolbar = {
-  ready: true,
-  section: "projects",
-  reviewOpen: false,
-  reviewCount: 3,
-  view: "grid",
-  zoomable: true,
-  zoomPct: 100,
-  activePanel: null,
-};
 const post = () => {};
 
 const authBtn = (
@@ -40,9 +38,19 @@ const authBtn = (
   </button>
 );
 
-function App() {
+function HeaderCase({ scope, zoomable }) {
+  const toolbar = {
+    ready: true,
+    section: "projects",
+    reviewOpen: false,
+    reviewCount: 3,
+    view: zoomable ? "split" : "grid",
+    zoomable,
+    zoomPct: 100,
+    activePanel: null,
+  };
   return (
-    <ThemeProvider>
+    <div data-scope={scope} style={{ marginBottom: 10 }}>
       <AppHeader
         module="scheduler"
         homeLabel="Dashboard"
@@ -56,6 +64,17 @@ function App() {
         toolbarCenter={<ScheduleCenter toolbar={toolbar} post={post} />}
         toolbarContent={<ScheduleActions toolbar={toolbar} post={post} />}
       />
+    </div>
+  );
+}
+
+function App() {
+  return (
+    <ThemeProvider>
+      {/* "grid" — the narrower real toolbar case (no zoom cluster) */}
+      <HeaderCase scope="grid" zoomable={false} />
+      {/* "split" — the wider real toolbar case (Split/Gantt views add the zoom cluster) */}
+      <HeaderCase scope="split" zoomable />
     </ThemeProvider>
   );
 }

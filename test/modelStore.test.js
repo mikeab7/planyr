@@ -16,15 +16,28 @@
  * their own model for the same project id) — confirmed live via `pg_constraint`. The dormant
  * degrade fallback (used only if the `version` column itself were ever un-migrated) called
  * `.upsert(..., { onConflict: "id" })`, which names a column with no matching unique constraint
- * on this table and would raise Postgres 42P10 had it ever run. Never fired in production (the
- * version column has existed since the table was created), but it's real dead-wrong code.
+ * on this table and would raise Postgres 42P10 had it ever run. Never fired in production at the
+ * time (the version column had existed since the table was created), but it's real dead-wrong code.
+ *
+ * ⛔ 2026-09-01 — every guarded write on the PRIMARY (non-degrade) path had the SAME class of bug:
+ * `casUpsert`'s CAS UPDATE filter — the real write path a live save actually takes once a row
+ * exists — filtered on `id` alone, same "id names the row" assumption. `optimisticUpsert.js` now
+ * takes an explicit `conflictTarget` (PostgREST onConflict-style, e.g. "user_id,id") instead of
+ * assuming "id" anywhere, and modelStore.js passes "user_id,id" on every write, insert, CAS
+ * update, and the degrade upsert alike (the degrade upsert now goes through the shared
+ * `degradeUpsert` helper instead of a second hand-typed literal). sites/doc_reviews/
+ * site_plan_overlays keep the "id" default untouched — see optimisticUpsert.js's own header.
  *
  * Mock the supabase client (same pattern as test/cloudListIdIntegrity.test.js /
  * test/reconcileSite.test.js) so this runs without a network/config.
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ insertResult: { data: [{ version: 1 }], error: null }, captured: {} }));
+const h = vi.hoisted(() => ({
+  insertResult: { data: [{ version: 1 }], error: null },
+  updateResult: { data: [{ version: 2 }], error: null },
+  captured: {},
+}));
 vi.mock("../src/workspaces/site-planner/lib/supabase.js", () => ({
   supabaseConfigured: () => true,
   supabase: {
@@ -39,7 +52,15 @@ vi.mock("../src/workspaces/site-planner/lib/supabase.js", () => ({
         update(v) {
           h.captured.op = "update";
           h.captured.updateValues = v;
-          return { eq: () => ({ eq: () => ({ select: () => Promise.resolve({ data: [{ version: 2 }], error: null }) }) }) };
+          h.captured.updateEq = [];
+          // A real chainable .eq() — arbitrarily many calls before .select() — so the CAS
+          // filter can name every conflict-target column (user_id AND id for model_sheets),
+          // not just a hardcoded two-deep chain.
+          const chain = {
+            eq(k, val) { h.captured.updateEq.push([k, val]); return chain; },
+            select: () => Promise.resolve(h.updateResult),
+          };
+          return chain;
         },
         upsert(v, opts) {
           h.captured.op = "degrade-upsert";
@@ -56,7 +77,11 @@ vi.mock("../src/workspaces/site-planner/lib/supabase.js", () => ({
 import { saveCloudSheet } from "../src/workspaces/model/lib/modelStore.js";
 
 describe("modelStore.saveCloudSheet — the row payload actually carries id", () => {
-  beforeEach(() => { h.captured = {}; h.insertResult = { data: [{ version: 1 }], error: null }; });
+  beforeEach(() => {
+    h.captured = {};
+    h.insertResult = { data: [{ version: 1 }], error: null };
+    h.updateResult = { data: [{ version: 2 }], error: null };
+  });
 
   it("a brand-new project's first save inserts a payload that includes id (the fix)", async () => {
     const r = await saveCloudSheet({ uid: "u1", projectId: "proj-1", sheet: { cells: {} }, expected: null });
@@ -81,6 +106,20 @@ describe("modelStore.saveCloudSheet — the row payload actually carries id", ()
     const r = await saveCloudSheet({ uid: "u1", projectId: "proj-1", sheet: { cells: { "c1:0": "1" } }, expected: 1 });
     expect(h.captured.op).toBe("update");
     expect(r).toEqual({ ok: true, version: 2 });
+  });
+
+  // ⛔ 2026-09-01 — the CAS UPDATE (the real, non-degrade write path — a PATCH, not the plain
+  // POST insert) must filter on model_sheets' REAL composite identity, user_id AND id, not just
+  // id. This is `casUpsert`'s new `conflictTarget` wired all the way through from modelStore.
+  it("the CAS update filters on BOTH user_id and id (model_sheets' real composite key), plus version", async () => {
+    await saveCloudSheet({ uid: "u1", projectId: "proj-1", sheet: { cells: { "c1:0": "1" } }, expected: 1 });
+    expect(h.captured.updateEq).toEqual([["user_id", "u1"], ["id", "proj-1"], ["version", 1]]);
+  });
+
+  it("a stale version on the CAS update is rejected as a conflict, never silently applied", async () => {
+    h.updateResult = { data: [], error: null }; // 0 rows matched — someone else advanced it
+    const r = await saveCloudSheet({ uid: "u1", projectId: "proj-1", sheet: { cells: { "c1:0": "1" } }, expected: 1 });
+    expect(r).toEqual({ ok: false, reason: "conflict" });
   });
 });
 

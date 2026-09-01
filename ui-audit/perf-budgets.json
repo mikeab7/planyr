@@ -30,7 +30,22 @@
     "page is guaranteed visible - and the harness now refuses to report a median at all when the",
     "tab is not visible or the frame rate is implausible (ui-audit/lib/frameSampling.mjs). Every",
     "OTHER metric here is a DOM / network / bundle / heap measurement and does not depend on rAF",
-    "or tab visibility, so the 2026-07-28 provenance stands for all of them."
+    "or tab visibility, so the 2026-07-28 provenance stands for all of them.",
+    "",
+    "⚙ HEADROOM WIDENED 2%->10% OF BASELINE, AND EVERY BUNDLE BASELINE RE-SEEDED (B1016816,",
+    "2026-09-01, owner decision). OWNER'S OWN FRAMING, verbatim: 'keep the gate, give it room. A",
+    "ceiling should be an alarm that something went badly wrong, not a per-byte accountant for",
+    "ordinary work.' THE CASE THAT FORCED IT: before PR #1281, notesRouteJsBytes measured 690.0 KB",
+    "against a 690.2 KB ceiling - 0.2 KB of margin, a 2% band that had already been fully consumed",
+    "by ordinary in-band merges. That is a tripwire, not a budget: it cannot tell an accidental",
+    "300 KB import from two sentences of copy. It cost two reverts (PRs #1262/#1263) and blocked",
+    "B917073 (which shipped anyway once #1281 split ~164 KB of Site-Planner libraries out of the",
+    "shared entry chunk - see the notesRouteJsBytes ratchet entry from that day). See",
+    "`bundle.headroom.$comment` below for the mechanics of the widening. IF A CEILING EVER AGAIN",
+    "SITS WITHIN ABOUT 1% OF ITS MEASURED SIZE, THAT IS A SIGNAL TO FIX THE WEIGHT (split the",
+    "chunk, defer the import, pay down the metric named in `targetOwner`) - NOT TO NUDGE THE",
+    "NUMBER. The gate itself is unweakened: it still fails a push to main that blows the new,",
+    "wider ceiling, exactly as it failed on the old, narrower one."
   ],
   "bundle": {
     "$comment": "Static, deterministic, no browser. Computed from dist/.vite/manifest.json by ui-audit/perf-bundle-audit.mjs. Gated in CI.",
@@ -41,13 +56,25 @@
         "cannot drift per-metric the way three hand-typed ceilings did. The floor exists because a",
         "percentage of a small chunk is not enough room for one honest feature; 32 KB is roughly the",
         "minified cost of a real panel, so a feature of that size annotates rather than fails.",
-        "Widening this band is a policy change and needs the same justification as any other."
+        "Widening this band is a policy change and needs the same justification as any other.",
+        "",
+        "WIDENED 2% -> 10% (B1016816, 2026-09-01, owner decision, verbatim): 'keep the gate, give it",
+        "room. A ceiling should be an alarm that something went badly wrong, not a per-byte",
+        "accountant for ordinary work.' This is a REGRESSION ALARM, NOT A BUDGET. Every baseline in",
+        "this file was re-seeded to a fresh build the same day (see `ratchetLog`), so the 10% is real",
+        "headroom above what main ACTUALLY measures today, not 10% on top of a stale number. A",
+        "single feature is expected to fit comfortably inside this band without a ratchet; only a",
+        "genuine, sizeable regression (a mis-scoped import, an un-deferred dependency) should ever",
+        "reach it. IF A CEILING EVER AGAIN SITS WITHIN ABOUT 1% OF ITS MEASURED SIZE, FIX THE",
+        "WEIGHT (split the chunk, defer the import) - DO NOT NUDGE THIS NUMBER. Narrowing the band",
+        "back down is the same class of policy change as widening it and needs the same",
+        "justification, stated as plainly, on the record."
       ],
-      "pctOfBaseline": 0.02,
+      "pctOfBaseline": 0.10,
       "minBytes": 32768
     },
     "siteRouteJsBytes": {
-      "baseline": 2676157,
+      "baseline": 2689002,
       "target": 1600000,
       "unit": "bytes",
       "what": "Total JS a plain Site route must download: the entry chunk plus SitePlannerApp and its static-import closure.",
@@ -162,35 +189,35 @@
       ]
     },
     "notesRouteJsBytes": {
-      "baseline": 586052,
-      "target": 586052,
+      "baseline": 591937,
+      "target": 591937,
       "unit": "bytes",
       "what": "Total JS a plain Notes route must download: the entry chunk plus Notes and its static-import closure.",
       "note": "Seeded at 0 so the FIRST measurement of a brand-new route lands through `npm run perf:ratchet` with a stated reason, exactly like any other baseline move \u2014 a hand-typed seed is the thing that step exists to prevent. WHAT THIS NUMBER DOES AND DOES NOT INCLUDE, because it is the whole reason the split is load-bearing: it counts the notebook TREE and its chrome, and deliberately NOT the rich-text engine. Notes.jsx pulls components/NoteEditor.jsx (and through it the only @tiptap imports in the module) via a lazy() import inside a Suspense, so the engine is a separate on-demand chunk of ~464 KB that a user pays for only when a page is actually opened, and the rail paints first. A future rise in THIS metric therefore means something moved onto the static path that belongs behind that boundary \u2014 most likely a new static import of the editor, or a shared module that got hoisted. test/notesModule.test.js source-scans for the first case; this budget is the backstop for the second."
     },
     "foodRouteJsBytes": {
-      "baseline": 958610,
-      "target": 958610,
+      "baseline": 864821,
+      "target": 864821,
       "unit": "bytes",
       "what": "Total JS a plain Food route must download: the entry chunk plus FoodApp and its static-import closure.",
       "note": "Seeded at 0 (B568400, the same precedent as notesRouteJsBytes) so the FIRST measurement of this brand-new route lands through `npm run perf:ratchet` with a stated reason, exactly like any other baseline move -- a hand-typed seed is the thing that step exists to prevent. This route is measured SEPARATELY from siteRouteJsBytes/notesRouteJsBytes/largestChunkBytes by design: the owner's explicit ask was that a personal restaurant tracker never share a metric with, or draw headroom from, the routes the actual product depends on. leaflet (the map vendor chunk) is reused from the existing shared map-vendor split -- that's what it's for -- but nothing from site-planner may come with it (this module has zero imports from src/workspaces/site-planner, source-guarded by test/foodModule.test.js)."
     },
     "modelRouteJsBytes": {
-      "baseline": 664785,
-      "target": 664785,
+      "baseline": 572614,
+      "target": 572614,
       "unit": "bytes",
       "what": "Total JS a plain Model route must download: the entry chunk plus ModelApp and its static-import closure.",
       "note": "Seeded at 0 (the notesRouteJsBytes/foodRouteJsBytes precedent) so the FIRST measurement of this brand-new route lands through `npm run perf:ratchet` with a stated reason, exactly like any other baseline move -- a hand-typed seed is the thing that step exists to prevent."
     },
     "totalJsBytes": {
-      "baseline": 5620681,
-      "target": 5620681,
+      "baseline": 5646829,
+      "target": 5646829,
       "unit": "bytes",
       "what": "Every JS chunk EMITTED into dist/assets, summed. Catches overall bundle growth even when it lands off the Site route.",
       "note": "Larger than the 3016 KB the owner's 2026-07-28 pass reported, and correctly so: that figure counted the 11 chunks a browser actually FETCHED, while this counts all 20 emitted \u2014 the extra 5 are Web Worker bundles (terrainWorker, dxfWorker) and small helper chunks that only a dynamic import ever pulls. Two different questions; the per-route budgets above answer the owner's. CEILING RAISED 3960000 -> 3985000 by B1130/B1131 (2026-07-30), stated in full because raising a ceiling is a product decision. THE KEY POINT: this metric counts EVERY emitted chunk, lazy ones included, BY DESIGN \u2014 that is exactly what makes it the honest catch-all. So the four deferrals that paid the two per-route budgets (see siteRouteJsBytes.note) move bytes OFF the critical path without reducing this number at all, and no amount of further code-splitting can. The residual is ~19 KB of genuine minified code implementing two owner-reported defects on the Electric layer: substations painting as broken-image glyphs labelled \"Mark\", and no way to hover a line or substation to learn what it is. WHAT WAS PAID ELSEWHERE FIRST, so this is not a shortcut: largestChunkBytes was brought back UNDER its existing ceiling with no raise at all (1719.5 -> 1706.8 KB), and siteRouteJsBytes was cut from +20.2 KB to +7.4 KB before its ceiling moved. HEADROOM CONTEXT: main was at 3861.4 KB against the 3867.2 KB ceiling \u2014 5.8 KB \u2014 so like the other two, this metric now trips on essentially any feature; that is a headroom problem to be closed by B1064, not a regression in this PR. Ceiling and target are kept EQUAL here, as they were before, so this metric continues to assert no known gap rather than quietly acquiring one. NEW-1 (2026-07-30): baseline and target are still kept EQUAL for exactly that reason, and the derived headroom band now applies to this metric too \u2014 it was 4.3 KB (0.11%) under its old hand-pinned ceiling and would have been the next surprise."
     },
     "largestChunkBytes": {
-      "baseline": 1679893,
+      "baseline": 1711990,
       "target": 900000,
       "unit": "bytes",
       "what": "The single biggest chunk (today SitePlannerApp).",
@@ -669,6 +696,72 @@
           "commit": "bba094b75ac90a6053dbe5ea5221f2e1dbe6c80b",
           "sourceHash": "19f8cbd37f22b978",
           "reason": "FloatingNotice.jsx shared primitive reaches every route via AppHeader.jsx"
+        },
+        {
+          "metric": "bundle.siteRouteJsBytes",
+          "from": 2676157,
+          "to": 2689002,
+          "direction": "raise",
+          "item": "B1016816",
+          "date": "2026-09-01",
+          "commit": "9f953c73364361ca09a86748d5f4274693df3187",
+          "sourceHash": "599b77609ac0e8e9",
+          "reason": "Owner-decided 2026-09-01 policy widening: measured a fresh build against CI's own push-to-main computation and re-seeded every baseline to it, ahead of widening the headroom band to 10 percent so the gate is a regression alarm, not a per-byte accountant"
+        },
+        {
+          "metric": "bundle.notesRouteJsBytes",
+          "from": 586052,
+          "to": 591937,
+          "direction": "raise",
+          "item": "B1016816",
+          "date": "2026-09-01",
+          "commit": "9f953c73364361ca09a86748d5f4274693df3187",
+          "sourceHash": "599b77609ac0e8e9",
+          "reason": "Owner-decided 2026-09-01 policy widening: measured a fresh build against CI's own push-to-main computation and re-seeded every baseline to it, ahead of widening the headroom band to 10 percent so the gate is a regression alarm, not a per-byte accountant"
+        },
+        {
+          "metric": "bundle.foodRouteJsBytes",
+          "from": 958610,
+          "to": 864821,
+          "direction": "ratchet",
+          "item": "B1016816",
+          "date": "2026-09-01",
+          "commit": "9f953c73364361ca09a86748d5f4274693df3187",
+          "sourceHash": "599b77609ac0e8e9",
+          "reason": "Owner-decided 2026-09-01 policy widening: measured a fresh build against CI's own push-to-main computation and re-seeded every baseline to it, ahead of widening the headroom band to 10 percent so the gate is a regression alarm, not a per-byte accountant"
+        },
+        {
+          "metric": "bundle.modelRouteJsBytes",
+          "from": 664785,
+          "to": 572614,
+          "direction": "ratchet",
+          "item": "B1016816",
+          "date": "2026-09-01",
+          "commit": "9f953c73364361ca09a86748d5f4274693df3187",
+          "sourceHash": "599b77609ac0e8e9",
+          "reason": "Owner-decided 2026-09-01 policy widening: measured a fresh build against CI's own push-to-main computation and re-seeded every baseline to it, ahead of widening the headroom band to 10 percent so the gate is a regression alarm, not a per-byte accountant"
+        },
+        {
+          "metric": "bundle.totalJsBytes",
+          "from": 5620681,
+          "to": 5646829,
+          "direction": "raise",
+          "item": "B1016816",
+          "date": "2026-09-01",
+          "commit": "9f953c73364361ca09a86748d5f4274693df3187",
+          "sourceHash": "599b77609ac0e8e9",
+          "reason": "Owner-decided 2026-09-01 policy widening: measured a fresh build against CI's own push-to-main computation and re-seeded every baseline to it, ahead of widening the headroom band to 10 percent so the gate is a regression alarm, not a per-byte accountant"
+        },
+        {
+          "metric": "bundle.largestChunkBytes",
+          "from": 1679893,
+          "to": 1711990,
+          "direction": "raise",
+          "item": "B1016816",
+          "date": "2026-09-01",
+          "commit": "9f953c73364361ca09a86748d5f4274693df3187",
+          "sourceHash": "599b77609ac0e8e9",
+          "reason": "Owner-decided 2026-09-01 policy widening: measured a fresh build against CI's own push-to-main computation and re-seeded every baseline to it, ahead of widening the headroom band to 10 percent so the gate is a regression alarm, not a per-byte accountant"
         }
       ]
     }

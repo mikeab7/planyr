@@ -31,11 +31,18 @@
  *      baseline matches the latest logged entry for its metric — so a hand-edited baseline
  *      with no stated reason goes red in CI.
  *
- * Count metrics (siteRouteChunks) keep a hard `ceiling` and get no band: "4 chunks + 2%" is
+ * Count metrics (siteRouteChunks) keep a hard `ceiling` and get no band: "4 chunks + 10%" is
  * not a meaningful sentence, and the chunk count is a structural guard, not a size.
+ *
+ * WIDENED 2% -> 10% (B1016816, 2026-09-01, owner decision). The 2% band still let a baseline
+ * get consumed down to near-zero margin by ordinary in-band merges — notesRouteJsBytes measured
+ * 690.0 KB against a 690.2 KB ceiling before PR #1281, 0.2 KB of margin, which cost two reverts
+ * and blocked B917073. Owner's framing, verbatim: "keep the gate, give it room. A ceiling should
+ * be an alarm that something went badly wrong, not a per-byte accountant for ordinary work." See
+ * `ui-audit/perf-budgets.json`'s `bundle.headroom.$comment` for the full rationale.
  */
 
-export const DEFAULT_HEADROOM = { pctOfBaseline: 0.02, minBytes: 32768 };
+export const DEFAULT_HEADROOM = { pctOfBaseline: 0.10, minBytes: 32768 };
 
 /** The headroom band above a baseline, in bytes. */
 export function headroomFor(baseline, headroom = DEFAULT_HEADROOM) {
