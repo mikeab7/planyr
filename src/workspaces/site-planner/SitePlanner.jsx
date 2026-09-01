@@ -70,7 +70,7 @@ import { sanitizeLayerAbove, aboveFromOverlays, applyAboveOverrides, aboveSig } 
 import { BASEMAPS } from "./lib/basemaps.js";
 import {
   ppfToZoom, zoomToPpf, exactContainerPoint,
-  basemapWrapPoint, registrationShift, sanitizeShift, tileNwFeet,
+  basemapWrapPoint, registrationShift, sanitizeShift, tileNwFeet, registrationLayoutMayHaveChanged,
 } from "./lib/mapLock.js";
 import { overscanPx, keepBufferFor, retinaForZoom, tileWeight, tileCacheLimit } from "./lib/tileBudget.js";
 import { preserveTilesAcrossSetView, announceSetView, boundTileCache, releaseLayer, throttleTilePruning } from "./lib/tileLifecycle.js";
@@ -2749,6 +2749,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const geoCommitRef = useRef(null);   // last view actually setView'd: {center, zoom, w, h}
   const geoCommitTimer = useRef(null); // debounce handle for the crisp re-render
   const geoGhostRef = useRef(null);    // frozen tile snapshot kept on-screen during a re-render
+  // B846384 — the last size/overscan combo the registration effect actually measured the
+  // container for, and what it found. Lets the effect skip the forced-layout DOM read (B1359)
+  // when neither input has moved since the last check.
+  const geoLayoutInputsRef = useRef(null);
+  // B846384 — rate-limits the map-registration-out-of-range report so a PERSISTENT disagreement
+  // (which never self-corrects — see noteReg below) doesn't re-report on every commit forever;
+  // the generic clientErrors dedup can't help here because dx/dy/ppf float noise makes every
+  // message text unique.
+  const geoRegOutOfRangeRef = useRef({ bucket: null, at: 0 });
   // Utility-evidence drawing: manual power-line trace + inferred water main.
   const [traceMode, setTraceMode] = useState(false);
   const [tracePts, setTracePts] = useState([]);
@@ -3122,13 +3131,36 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const noteReg = (imgPt, drawPt, how) => {
       const s = sanitizeShift(registrationShift(imgPt, drawPt));
       if (!s.ok) {
-        // LOUD-FAILURE: a shift past the quantisation range is a model disagreement (a scale
-        // mismatch, a stale container size, a half-applied gesture transform), not something
-        // to paper over by shoving the drawing sideways. Report it and apply nothing.
-        reportClientEvent("map-registration-out-of-range", "drawing/basemap registration shift exceeded the sub-pixel range", {
-          how, reason: s.reason, dx: Math.round((imgPt.x - drawPt.x) * 1000) / 1000, dy: Math.round((imgPt.y - drawPt.y) * 1000) / 1000,
-          w: size.w, h: size.h, ppf: view.ppf,
-        });
+        /* LOUD-FAILURE: a shift past the quantisation range is a model disagreement (a scale
+         * mismatch, a stale container size, a half-applied gesture transform), not something
+         * to paper over by shoving the drawing sideways. Report it and apply nothing.
+         *
+         * ⛔ B846384 — RATE-LIMITED, AND WITH THE FACTS A DIAGNOSIS NEEDS. Measured on the owner's
+         * real 2026-09-01 Richfield session: this condition does not self-correct (nothing here
+         * ever re-applies a refused shift), so once it starts it re-reports on EVERY subsequent
+         * commit — and because dx/dy/ppf carry float noise, the generic clientErrors dedup (which
+         * matches on exact message text) never engages. Report once per whole-pixel bucket, then
+         * at most once every 30s while the bucket holds, rather than on every commit forever.
+         * The extra fields (the container size actually measured, vs Leaflet's own, and whether
+         * this commit took the resize-resync branch) are what the next occurrence needs to be
+         * diagnosed without a fresh investigation — the constant, axis-limited, non-ppf-scaling
+         * magnitude this episode showed was never isolated to a single mechanism this session. */
+        const dx = Math.round((imgPt.x - drawPt.x) * 1000) / 1000, dy = Math.round((imgPt.y - drawPt.y) * 1000) / 1000;
+        const bucket = `${Math.round(dx)},${Math.round(dy)}`;
+        const nowMs = Date.now();
+        const rl = geoRegOutOfRangeRef.current;
+        if (bucket !== rl.bucket || nowMs - rl.at > 30000) {
+          geoRegOutOfRangeRef.current = { bucket, at: nowMs };
+          let leafletSize = null;
+          try { const sz = map.getSize(); leafletSize = { w: sz.x, h: sz.y }; } catch (_) { /* diagnostic only */ }
+          reportClientEvent("map-registration-out-of-range", "drawing/basemap registration shift exceeded the sub-pixel range", {
+            how, reason: s.reason, dx, dy,
+            w: size.w, h: size.h, ppf: view.ppf,
+            cw, ch, leafletW: leafletSize && leafletSize.w, leafletH: leafletSize && leafletSize.h, sizeChanged,
+          });
+        }
+      } else {
+        geoRegOutOfRangeRef.current = { bucket: null, at: 0 }; // registration recovered — the next failure reports fresh
       }
       const next = s.shift;
       /* NEW-3(c) — THE GUARD NOW HOLDS, so a view change commits ONE render instead of two.
@@ -3283,18 +3315,40 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      * arithmetic: the box that matters is the one the browser laid out. (Fixing it here is also
      * what keeps the registration shift below a genuinely sub-pixel correction —
      * `sanitizeShift` REFUSES a shift of this size, by design, rather than papering over it.) */
-    const cw = wrap.clientWidth, ch = wrap.clientHeight;
     // BOTH tests are needed, and each catches a case the other misses. `prev.cw/ch` catches the
     // container resizing between two commits. `cachedStale` catches the container having resized
     // BEFORE the very first commit — the map is created at one overscan, the element count
     // settles it to another a beat later, and the first commit then bakes in a cached size that
     // was already wrong with nothing left to compare against. MEASURED: that alone left the
     // basemap 86 px from the drawing on a 60-element plan, at rest, before any gesture.
-    let cachedStale = false;
-    try {
-      const cs = map.getSize();
-      cachedStale = Math.abs(cs.x - cw) > 0.5 || Math.abs(cs.y - ch) > 0.5;
-    } catch (_) { /* a size probe must never break a commit */ }
+    /* ⛔ B846384 — SHIPS B1359's COSTED, PREVIOUSLY-UNSHIPPED FIX. `wrap.clientWidth/clientHeight`
+     * and `map.getSize()` are read immediately after React has mutated the DOM (this is a layout
+     * effect), which forces a synchronous layout of the whole just-dirtied tree on EVERY commit —
+     * profiled at 9.2-13.1% of all script self-time across a 40-event wheel-zoom gesture, the
+     * largest named frame cost after V8's own `(program)` bucket (BACKLOG B1359, 2026-08-06).
+     * `cw`/`ch`/`cachedStale` exist only to decide `sizeChanged`, and every input that can change
+     * them is already known without touching the DOM: `size.w`/`size.h` and `geoOverscan`, both
+     * this effect's own deps. So the read is skipped whenever NEITHER has moved since the last
+     * time it was taken, reusing the prior verdict — the measurement itself is byte-for-byte
+     * identical wherever it IS taken, which is what keeps the weld unaffected by skipping the
+     * redundant repeats. Left unshipped in August for want of a live tile host to verify against
+     * (this sandbox has none either); the owner's real 2026-09-01 Richfield session — this same
+     * effect running for 24 minutes of active editing, not one synthetic gesture — is the live
+     * cost evidence that was missing, so this ships now under `Verify: live` (V467696). */
+    const layoutInputs = { w: size.w, h: size.h, overscan: geoOverscan };
+    const li = geoLayoutInputsRef.current;
+    let cw, ch, cachedStale;
+    if (registrationLayoutMayHaveChanged(li, layoutInputs.w, layoutInputs.h, layoutInputs.overscan)) {
+      cw = wrap.clientWidth; ch = wrap.clientHeight;
+      cachedStale = false;
+      try {
+        const cs = map.getSize();
+        cachedStale = Math.abs(cs.x - cw) > 0.5 || Math.abs(cs.y - ch) > 0.5;
+      } catch (_) { /* a size probe must never break a commit */ }
+      geoLayoutInputsRef.current = { ...layoutInputs, cw, ch, cachedStale };
+    } else {
+      cw = li.cw; ch = li.ch; cachedStale = li.cachedStale;
+    }
     const sizeChanged = !prev || prev.w !== size.w || prev.h !== size.h || prev.cw !== cw || prev.ch !== ch || cachedStale;
     // First paint (`prev` null) → a plain commit; nothing on screen yet. A RESIZE while a prior view
     // IS on screen — a docked panel / left-rail opening/closing shrinks or grows the in-flow canvas —

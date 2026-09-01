@@ -225,6 +225,17 @@ export function sanitizeShift(shift, limit = REGISTRATION_SANITY_PX) {
   return { ok: true, reason: null, shift: { dx, dy } };
 }
 
+/* ── B846384 — skip the forced-layout container read on a pure view gesture (B1359) ─────────
+ * `wrap.clientWidth`/`clientHeight` and `map.getSize()` exist only to decide whether the map
+ * container itself resized — and every input that can move it is already known without touching
+ * the DOM: the canvas size and the overscan. So the read is worth taking only when one of those
+ * has actually changed since the last time it was measured; `li` (the previous check's inputs +
+ * verdict, or null before the first one) says whether it has. Pure so the boundary conditions
+ * (no previous check, each field alone changing, nothing changing) are asserted without a DOM. */
+export function registrationLayoutMayHaveChanged(li, w, h, overscan) {
+  return !li || li.w !== w || li.h !== h || li.overscan !== overscan;
+}
+
 /* ── the lock invariant ───────────────────────────────────────────────────────────────
  * Where a feet point lands on screen, computed TWO independent ways:
  *   • the planner's own SVG transform (feet × ppf + offset), and
