@@ -43,7 +43,12 @@ import { ctrlArrowTarget } from "../lib/sheetOps.js";
 import { buildRowOffsets, visibleRowRange, rowAtOffset } from "../lib/rowLayout.js";
 import { MIN_ZOOM, MAX_ZOOM, DEFAULT_ZOOM, zoomFromWheelDelta, zoomStepButton } from "../lib/sheetZoom.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
-import { SPACE, CONTROL_H } from "../../../shared/ui/designTokens.js";
+// SPACE.sm / SPACE.md / CONTROL_H.md are used below as the LITERAL values 6 / 8 / 26
+// (src/shared/ui/designTokens.js), never imported — this file is lazy-loaded only on the
+// Model route, and a second import point into designTokens.js tips Rollup into extracting it
+// as its own shared chunk (already reachable from controls.jsx), which then rides onto every
+// OTHER route's bundle too and breaches ui-audit/perf-bundle-audit.mjs's site-route allowlist.
+// Same literal-duplicate pattern controls.jsx's own RADIUS already uses for the same reason.
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { menuPanelStyle } from "../../../shared/ui/controls.jsx";
 import ContextMenu from "./ContextMenu.jsx";
@@ -106,9 +111,10 @@ function FilterMenu({ colIndex, sheet, evalResult, allowed, onSetFilter }) {
 
 export const ROW_H = DEFAULT_ROW_H;
 // Stage 2 visual pass — the header BAND reads as its own chrome tier partly through being a
-// touch taller than a data row (CONTROL_H.md, 26, vs. the data rows' CONTROL_H.sm-matched 22) —
-// Excel's own column-header row is taller than an ordinary data row for exactly this reason.
-export const HEADER_H = CONTROL_H.md;
+// touch taller than a data row (CONTROL_H.md, 26 — literal, see the designTokens.js note at the
+// top of this file — vs. the data rows' CONTROL_H.sm-matched 22) — Excel's own column-header row
+// is taller than an ordinary data row for exactly this reason.
+export const HEADER_H = 26;
 const BUF = 6;
 const DEFAULT_COL_W = 120;
 const ROW_HEADER_W = 44;
@@ -682,7 +688,7 @@ export default function SheetView({
           onMouseLeave={() => setHoverRow((h) => (h === r ? null : h))}
           style={{
             flex: `0 0 ${rowHeaderW}px`, position: "sticky", left: 0, zIndex: 2,
-            display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: SPACE.sm,
+            display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 6, // SPACE.sm literal — see designTokens.js note above
             // Grid-line hierarchy: a STRONGER rule separates the gutter (chrome) from the data
             // grid than the hairlines BETWEEN data cells use.
             borderRight: "2px solid var(--border-strong)", borderBottom: "1px solid var(--border-default)",
@@ -767,7 +773,7 @@ export default function SheetView({
                 boxSizing: "border-box",
                 display: "flex", alignItems: vAlign,
                 justifyContent: hAlign === "right" ? "flex-end" : hAlign === "center" ? "center" : "flex-start",
-                padding: isEditing ? 0 : `0 ${(SPACE.sm + (cellStyle.indent || 0) * 14) * zoom}px`,
+                padding: isEditing ? 0 : `0 ${(6 /* SPACE.sm literal — see designTokens.js note above */ + (cellStyle.indent || 0) * 14) * zoom}px`,
                 borderTop: border.top ? edgeCSS(border.top) : undefined,
                 borderLeft: border.left ? edgeCSS(border.left) : undefined,
                 borderRight: border.right ? edgeCSS(border.right) : "1px solid var(--border-default)",
@@ -857,7 +863,8 @@ export default function SheetView({
       // — the sheet itself (and its chrome bands) sit on `--surface-raised`, one tier up.
       style={{
         flex: 1, minHeight: 0, overflow: "auto", position: "relative", outline: "none",
-        margin: SPACE.md, background: "var(--surface-raised)",
+        margin: 8, // SPACE.md literal — see designTokens.js note above
+        background: "var(--surface-raised)",
         border: "1px solid var(--border-default)", borderRadius: RADIUS.lg,
       }}
     >

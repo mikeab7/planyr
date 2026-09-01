@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-01 @ `d09a39e82` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-01 @ `5fede2537` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_635 source files mapped._
+_637 source files mapped._
 
 ## infra
 
@@ -252,18 +252,22 @@ _635 source files mapped._
   - _exports_: `default (CompsPanel)`
 - **`src/shared/comps/components/PartyNameField.jsx`** — Comp form party-name field: plain text input + a loose-match suggestion listbox (accessible combobox, independent of the map toolbar's PlaceSearchField)
   - _exports_: `default (PartyNameField)`
+- **`src/shared/comps/lib/compDates.js`** — Pure display/parse bridge between the ISO date comps always store and the mm/dd/yy a person reads and types (liberal parsing: ISO, slash/dash numeric, or a month name; never guesses)
+  - _exports_: `formatDateDisplay`, `parseTypedDate`
 - **`src/shared/comps/lib/compDrafts.js`** — pure row<->model mapping for public.comp_import_drafts (B849233), mirroring comps.js's rowToComp/compToRow shape
   - _exports_: `importDraftToInsertRow`, `rowToImportDraft`
 - **`src/shared/comps/lib/compDraftsStore.js`** — Supabase CRUD for public.comp_import_drafts (owner-only, no team visibility); promoteDraft is the moment comps' strict constraints get enforced, writing the reason back onto the row on failure
   - _exports_: `deleteDraft`, `fetchMyDrafts`, `insertDrafts`, `promoteDraft`, `updateDraftProposed`
+- **`src/shared/comps/lib/compLocationText.js`** — Pure Location-cell text for a comp's anchor: an APN for a parcel, a site-plan overlay's own title for a site_plan point, or the synchronous county/coordinate fallback for a bare pin (reverse-geocoded address is wired up async elsewhere) — never one identity substituted for another
+  - _exports_: `parcelLocationText`, `pinFallbackText`, `siteplanLocationText`
 - **`src/shared/comps/lib/compMarkerIcon.js`** — Pure map-marker spec for a comp: a small colored tag (hue per comp type), deliberately a different silhouette from sitePinIcon
   - _exports_: `compMarkerColor`, `compMarkerSize`, `compMarkerSvg`
 - **`src/shared/comps/lib/compParse.js`** — comp entry parsing (B849232): prose-line + tab-delimited spreadsheet block parsing into typed draft rows, with blocking-vs-soft uncertainty flags per cell (a lease rate with no period blocks; a k/m-suffixed number never does)
   - _exports_: `detectCompType`, `detectPasteShape`, `findDateToken`, `looksLikeSpreadsheetPaste`, `parseMagnitudeNumber`, `parsePaste`, `parsePasteBlock`, `parseProseLine`, `parseSingleRecord`, `rowHasBlockingFlags`, `splitPasteLines`
 - **`src/shared/comps/lib/comps.js`** — Leasing Comps pure model: $/SF derivation for land/building sale, lease basis normalization (annual NNN default, NNN/gross never blended), compFieldRows (the one empty-field-hides choke point), anchor validation, row<->model mapping
-  - _exports_: `ANCHOR_KINDS`, `annualLeaseRate`, `buildingPricePerSf`, `COMP_TYPES`, `compFieldRows`, `compHeadline`, `compsSummaryBits`, `compToDraft`, `compToRow`, `draftToComp`, `emptyDraft`, `isCompType`, `landPricePerAreaUnit`, `landPricePerSf`, `landSizeSf`, `LEASE_EXPENSE_BASES`, `LEASE_PERIODS`, `leaseTotalAnnualRent`, `netEffectiveLeaseRate`, `parseLeaseTermYears`, `partyLabels`, `rowToComp`, `summarizeLeaseComps`, `summarizeSaleComps`, `validAnchor`, `validateComp`
+  - _exports_: `ANCHOR_KINDS`, `anchorCountyFlag`, `annualLeaseRate`, `buildingPricePerSf`, `COMP_TYPES`, `compFieldRows`, `compHeadline`, `compsSummaryBits`, `compToDraft`, `compToRow`, `draftToComp`, `emptyDraft`, `isCompType`, `landPricePerAreaUnit`, `landPricePerSf`, `landSizeSf`, `LEASE_EXPENSE_BASES`, `LEASE_PERIODS`, `leaseTotalAnnualRent`, `netEffectiveLeaseRate`, `parseLeaseTermYears`, `partyLabels`, `resolveCapTriangle`, `rowToComp`, `summarizeLeaseComps`, `summarizeSaleComps`, `validAnchor`, `validateComp`
 - **`src/shared/comps/lib/compSheetColumns.js`** — pure column model for the comp-entry spreadsheet: per-cell get/set, polymorphic fields, display formatting, fill-down/paste-spill
-  - _exports_: `applyCellEdit`, `BASIS_OPTIONS`, `cellPlaceholder`, `cellState`, `columnIndex`, `fillDownColumn`, `formatNumberDisplay`, `GROUPS`, `PERIOD_OPTIONS`, `sanitizeNumericInput`, `SHEET_COLUMNS`, `spillPaste`, `TYPE_OPTIONS`, `UNIT_OPTIONS`
+  - _exports_: `applyCellEdit`, `BASIS_OPTIONS`, `cellPlaceholder`, `cellState`, `columnIndex`, `fillDownColumn`, `formatNumberDisplay`, `GROUPS`, `PERIOD_OPTIONS`, `sanitizeNumericInput`, `SHEET_COLUMNS`, `spillPaste`, `TYPE_OPTIONS`, `UNIT_OPTIONS`, `visibleColumnIndices`
 - **`src/shared/comps/lib/compsStore.js`** — Supabase CRUD for public.comps (team-visible read, owner-only write); every call returns {data,error}, never swallows a failure
   - _exports_: `deleteComp`, `fetchAllComps`, `insertComp`, `insertComps`, `supabase`, `updateComp`
 - **`src/shared/comps/lib/kmlImport.js`** — pure, hand-rolled KML placemark parsing (B849233): Point/Polygon geometry (a polygon's area-weighted centroid, not a vertex average), plus best-effort description extraction reusing compParse.js's prose parser
@@ -820,7 +824,7 @@ _635 source files mapped._
 - **`src/workspaces/site-planner/lib/footprintEdit.js`** — Building footprint reshape (NEW-1/B872): rect→polygon promotion + dock-frame preservation — pins loaded walls as fixed lines, projects/clips vertex drags, recomputes the dock-frame bbox, and repoints doors/grid to the true wall (pure geometry)
   - _exports_: `clipSegmentToRing`, `convertBuildingToPolygon`, `distToLine`, `dockEdgeLine`, `dockLineAt`, `dockLinesFor`, `dockSegExtent`, `frameBBox`, `pointInRing`, `projectOntoLine`, `rectRing`, `rotateDockLines`, `translateDockLines`
 - **`src/workspaces/site-planner/lib/geocode.js`** — Shared address geocoder (Esri World primary, Nominatim fallback) with honest hit/not-found/service-down return contract, used by map and planner
-  - _exports_: `geocodeAddress`
+  - _exports_: `geocodeAddress`, `reverseGeocodeLatLon`
 - **`src/workspaces/site-planner/lib/ghostSnapshot.js`** — Frozen visible-tile snapshot held over an unavoidable basemap wipe — flat, viewport-only, replacing the whole-container deep clone
   - _exports_: `buildGhost`, `visibleTiles`
 - **`src/workspaces/site-planner/lib/gisCache.js`** — Browser-local stale-while-revalidate cache for GIS responses: synchronous L1 memo over a byte-capped, oldest-evicted IndexedDB tier (moved off localStorage so cache can't crowd out saved plans), age-aware, injectable disk/clock
