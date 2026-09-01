@@ -116,6 +116,20 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V570368 — B1022960: on a never-visited place, "Log a visit" renders as the primary (filled, full-width) button and "Want to try" as the secondary (outlined) one `Blocker: auth`
+
+**Why this needs its own real pass.** The whole `ActionsRow` block (both buttons) only renders when `onSubmitVisit` is provided, and `FoodApp.jsx` only passes it when `accountActive` is true — this sandbox's egress proxy CORS-blocks the Supabase auth handshake, so there is no reachable signed-in session here to actually SEE the two buttons rendered together. A dropped/unsaved manual pin opens the panel signed out, but `onToggleWishlist` is also gated on `accountActive`, so `wishBtn` never renders there either — there is no signed-out path that shows both buttons at once.
+
+**What was verified here (sandbox).** Source-level: `ActionsRow`'s `logBtn` now uses `style={primary}` unconditionally and `wishBtn` (still only rendered on a never-visited place) uses `{...secondary, ...(wishlisted ? wishActive : {})}` unconditionally — no `everVisited`-keyed branch on either button's style remains anywhere in the file. `test/foodModule.test.js`'s ActionsRow suite was rewritten to assert exactly this (and to assert the OLD swapped behavior is gone) and passes. Full `npx vitest run` (13,940 tests), `npm run build`, and `node ui-audit/perf-bundle-audit.mjs --as-main` (the absolute push-to-main computation) are all green.
+
+**Steps, each with a named expected result — signed in, on `planyr.io/#/food`:**
+1. Search for or click a place you have never logged a visit to and have not flagged "Want to try" (a fresh, never-visited place). **Expect:** the panel's bottom action row shows "Log a visit" as a full-width, filled (accent-colored) button, and "Want to try" as a smaller, outlined button beside it — Log a visit reads as the obviously-primary action, not Want to try.
+2. Tap "Want to try" to flag the place, then re-open the same place. **Expect:** "Want to try" now shows a checkmark and fills with the accent color (its own active/toggled state) while still reading as the SMALLER, secondary control next to the still-full-width "Log a visit" button — the active fill must not make it look like the primary action.
+3. Log a visit for that place, then re-open it. **Expect:** "Want to try" is gone entirely (already-shipped B1022960-adjacent behavior from 2026-08-27's NEW-1, unchanged by this item) and "Log a visit" is the only button, full width.
+4. Repeat steps 1–3 for a manual/dropped pin (not a snapshot place). **Expect:** identical behavior — the pair's roles don't depend on whether the place came from search or a dropped pin.
+
+**Result:** ⏳ pending a real signed-in browser session (see wall above). Everything reachable without a browser — the source-level button-role invariant and its regression test — is done and passed this session.
+
 ### V571104 — B1020928: signed-in Notes org scope survives a real cross-device sync (create/rename/refile a page in Organization, confirm it merges correctly on a second client) `Blocker: auth`
 
 **Why this needs its own real pass.** `notesCloud.js`'s `mergeTrees` is the two-client merge engine, and org scope now rides through it (the `orgScope`/`projectId` pair travels together under the `filedAt` recency stamp, same as the existing project-filing rule it extends — B421493). A genuine multi-writer/concurrency scenario — two signed-in clients, one filing a page to Organization while the other has a stale copy — is a mandatory LIVE-VERIFY class per this repo's own contract; the sandbox cannot sign in (the proxy CORS-blocks the Supabase auth handshake, the standing `Blocker: auth` wall behind every item like this).
