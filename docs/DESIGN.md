@@ -381,6 +381,62 @@ flattened into one shared color.
 See the live `/design` gallery (NEW-4) for every one of these rendered in every state, both
 themes, side by side — use it to eyeball a new control against the existing set before writing one.
 
+## Floating notifications (NEW-5, B1000400, 2026-09-01)
+
+**Every FLOATING, APP-LEVEL notification — anything that overlays content to tell the user
+something happened or how to proceed — renders bottom-centered**, through the one shared
+primitive: `src/shared/ui/FloatingNotice.jsx`.
+
+**The rule, stated exactly:** `position: fixed`, `bottom` (Toast's existing `18` is the dominant
+value in this codebase — promoted, not reinvented), `left: "50%"`, `transform:
+"translateX(-50%)"`, and **one shared z-index** (`NOTICE_Z`, `6500`). Before this, three surfaces
+each invented their own position for the same job — `AppHeader.jsx`'s fullscreen-refused and
+cross-tab-conflict notices and `ProjectBreadcrumb.jsx`'s at-risk-switch toast all sat at
+`top: 84` (at three DIFFERENT z-indexes: 5999 / 6500 / 9000), and `MapFinder.jsx`'s
+select-parcels guidance sat in a hand-built top-left column. Only `Toast.jsx` already had the
+right shape. The owner's report that triggered this rule: the select-parcels guidance box sat
+oversized at the top-left of the map, covering the aerial imagery and the +/- zoom controls.
+
+**Multiple simultaneous notifications STACK vertically from the bottom, newest nearest the
+bottom edge, with a fixed gap (`NOTICE_GAP`, `8`) — they must never overlap.** `FloatingNotice`
+achieves this structurally rather than by pixel math: every mounted instance portals into ONE
+shared host `<div>` (created lazily, appended once to `document.body`) that is itself the fixed,
+bottom-centered flex column — the browser's own layout engine keeps stacked notices from ever
+landing on the same pixels, regardless of which component mounted them or when.
+
+**A max-width clamp is mandatory** (`NOTICE_MAX_WIDTH`, `"min(560px, calc(100vw - 16px))"` by
+default, overridable per call) so a long message never spans a wide monitor edge-to-edge and
+never exceeds the viewport on a phone.
+
+**It must not sit under or over a mobile bottom sheet** (`src/workspaces/food/components/
+BottomSheet.jsx`). `bottomSheetTracker.js` is a tiny module-scope publish/subscribe signal —
+`BottomSheet` publishes its live height (mount, snap, drag, and back to `0` on unmount) and
+`FloatingNotice` reads it, adding the sheet's height plus a gap to its own `bottom` offset
+whenever a sheet is open. This is a signal, not a prop thread, because a floating notice can
+mount from app-level chrome (`AppHeader`, `Shell`) that has no path down into a single
+workspace's bottom sheet.
+
+**What `FloatingNotice` owns vs. what it doesn't:** position, stacking, the max-width clamp, and
+bottom-sheet clearance — never visual style. Each caller keeps its own border/background/color/
+content layout (an amber warning and a blue info notice still read differently); only WHERE a
+notice sits is shared.
+
+**The boundary — read this before moving anything:** this rule governs **floating, app-level**
+notifications only. An **inline** message that belongs to one panel, row, or form field **stays
+exactly where it is** — floating it to the bottom would divorce the message from the thing it
+describes. Examples that must NOT move: `src/shared/storage/StoragePanel.jsx`'s `msg` (inside the
+panel), `src/workspaces/library/components/FolderTree.jsx`'s inline tree error row, and the inline
+`role="alert"` blocks in `src/workspaces/notes/` (`Notes.jsx`, `NotesTree.jsx`,
+`components/IntegrityBanner.jsx`). **`role="status"`/`role="alert"` is NOT the test —
+floating-and-app-level is.** A component can carry either role and still be correctly inline.
+
+**Machine-enforced:** `ui-audit/notification-position-audit.mjs` — a sibling of
+`design-drift-audit.mjs`, wired into the same `npm test` step via `test/notificationPosition.test.js`
+— checks a registered set of known floating-notice surfaces (by `data-testid`, immune to line
+drift) against this rule and fails the build, naming the file and the actual offending value, if
+any surface stops being bottom-centered or its `data-testid` goes missing entirely (a renamed or
+removed testid is a failure, never a silent skip).
+
 ## Canvas/SVG boundary — what is "chrome" and what isn't
 
 The Site Planner's drawing surface (parcels, buildings, roads, ponds, dimension chips, selection
@@ -506,3 +562,5 @@ before writing one — the whole point of hard rule (b) above.
 - `src/shared/ui/radius.js`, `src/shared/ui/designTokens.js`, `src/shared/ui/controls.jsx` — read
   their own headers for the full reasoning behind each number; this doc summarizes them, it doesn't
   replace them.
+- `src/shared/ui/FloatingNotice.jsx` + `src/shared/ui/bottomSheetTracker.js` — the "Floating
+  notifications" primitive above; read their own headers for the stacking/portal mechanics.

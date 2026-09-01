@@ -22,6 +22,7 @@ import { writeLastRoute, seedBootRoute } from "./lastRoute.js";
 import { installBuildSkewWatch, shouldOfferReload, fetchServedBuild, isBuildSkewed, LOADED_BUILD } from "./buildSkew.js";
 import { reloadFresh } from "./chunkReload.js";
 import { RADIUS } from "../shared/ui/radius.js";
+import FloatingNotice from "../shared/ui/FloatingNotice.jsx";
 import { mayResumeLastSite } from "../workspaces/site-planner/lib/bootResume.js";
 
 const AdminGate = lazy(() => import("../workspaces/admin/AdminGate.jsx"));
@@ -60,47 +61,55 @@ const CHROME = "var(--chrome-bg)";
 /** "A newer version of Planyr is available" (B1373) — module scope, per
  *  MODULE-SCOPE-COMPONENTS.
  *
- *  Deliberately a THIN STRIP, not a modal: it must be impossible for this to interrupt
- *  someone mid-sentence or to hide behind an overlay, and it must be dismissible in one
- *  click. It does not reload on its own — a forced reload of an app someone is typing into
- *  is a worse bug than the staleness it cures. `reloadFresh` is the same cache-busting
- *  reload the stale-chunk guard uses, so the reload actually lands on the new build rather
- *  than re-serving the cached index.html. */
+ *  It must be impossible for this to interrupt someone mid-sentence, and it must be
+ *  dismissible in one click. It does not reload on its own — a forced reload of an app
+ *  someone is typing into is a worse bug than the staleness it cures. `reloadFresh` is the
+ *  same cache-busting reload the stale-chunk guard uses, so the reload actually lands on the
+ *  new build rather than re-serving the cached index.html.
+ *
+ *  NEW-1 (B1000400) — bottom-centered via the shared FloatingNotice primitive, replacing the
+ *  old in-flow top strip (see docs/DESIGN.md "Floating notifications"). That strip could never
+ *  cover anything (it pushed content down); this floating card CAN cover a strip of whatever's
+ *  underneath, which is acceptable only because it stays dismissible, actionable (Reload), and
+ *  never traps clicks outside its own box — FloatingNotice's shared host is pointer-events:none
+ *  everywhere except each notice's own filled card. */
 function UpdateBanner({ reason, onReload, onDismiss }) {
   if (!reason) return null;
   return (
-    <div
-      role="status"
-      data-testid="app-update-banner"
-      data-reason={reason}
-      style={{
-        flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 14px",
-        background: "var(--warn-bg)", borderBottom: "1px solid var(--border-default)",
-        color: "var(--warn-text)", fontSize: 12.5, fontWeight: 600,
-      }}
-    >
-      <span style={{ flex: 1, minWidth: 0 }}>
-        {reason === "route-miss"
-          ? "That part of Planyr is newer than the copy this tab has open — reload to get it."
-          : "A newer version of Planyr is available. Reload when you're ready — your work is saved."}
-      </span>
-      <button
-        type="button" data-testid="app-update-reload" onClick={onReload}
+    <FloatingNotice maxWidth="min(480px, calc(100vw - 16px))">
+      <div
+        role="status"
+        data-testid="app-update-banner"
+        data-reason={reason}
         style={{
-          flex: "0 0 auto", border: "1px solid var(--warn-text)", borderRadius: RADIUS.pill,
-          background: "transparent", color: "var(--warn-text)", font: "inherit",
-          fontSize: 11.5, fontWeight: 700, padding: "2px 12px", cursor: "pointer",
+          display: "flex", alignItems: "center", gap: 10, padding: "8px 14px",
+          background: "var(--warn-bg)", border: "1px solid var(--warn-border)", borderRadius: RADIUS.lg,
+          color: "var(--warn-text)", fontSize: 12.5, fontWeight: 600, boxShadow: "0 4px 16px rgba(0,0,0,0.22)",
         }}
-      >Reload</button>
-      <button
-        type="button" data-testid="app-update-dismiss" onClick={onDismiss}
-        style={{
-          flex: "0 0 auto", border: "1px solid var(--border-default)", borderRadius: RADIUS.pill,
-          background: "transparent", color: "var(--text-tertiary)", font: "inherit",
-          fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
-        }}
-      >Dismiss</button>
-    </div>
+      >
+        <span style={{ flex: 1, minWidth: 0 }}>
+          {reason === "route-miss"
+            ? "That part of Planyr is newer than the copy this tab has open — reload to get it."
+            : "A newer version of Planyr is available. Reload when you're ready — your work is saved."}
+        </span>
+        <button
+          type="button" data-testid="app-update-reload" onClick={onReload}
+          style={{
+            flex: "0 0 auto", border: "1px solid var(--warn-text)", borderRadius: RADIUS.pill,
+            background: "transparent", color: "var(--warn-text)", font: "inherit",
+            fontSize: 11.5, fontWeight: 700, padding: "2px 12px", cursor: "pointer",
+          }}
+        >Reload</button>
+        <button
+          type="button" data-testid="app-update-dismiss" onClick={onDismiss}
+          style={{
+            flex: "0 0 auto", border: "1px solid var(--border-default)", borderRadius: RADIUS.pill,
+            background: "transparent", color: "var(--text-tertiary)", font: "inherit",
+            fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
+          }}
+        >Dismiss</button>
+      </div>
+    </FloatingNotice>
   );
 }
 

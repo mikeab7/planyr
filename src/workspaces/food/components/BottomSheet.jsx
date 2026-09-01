@@ -43,6 +43,7 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { resolveSnap, heightForSnap } from "../lib/bottomSheetSnap.js";
+import { publishBottomSheetHeight } from "../../../shared/ui/bottomSheetTracker.js";
 
 const TOP_INSET = 64; // px of the map always left visible above the sheet, even at "full"
 const TRANSITION_MS = 220;
@@ -102,6 +103,15 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
   // drag alike. Fires on every heightPx change (mount settle, snap change, drag, content
   // resize) — never a separate poll. Optional: only called when a parent asked for it.
   useEffect(() => { onHeightChange?.(heightPx); }, [heightPx, onHeightChange]);
+
+  // NEW-1 (B1000400) — the SAME height, published for FloatingNotice.jsx: an app-level floating
+  // notice (the update banner, a fullscreen-refused notice, …) must clear this sheet rather than
+  // sit under or over it, and it has no prop path here (it can mount from anywhere in the app).
+  // Zeroed on unmount so a closed sheet can't leave notices permanently offset.
+  useEffect(() => {
+    publishBottomSheetHeight(heightPx);
+    return () => publishBottomSheetHeight(0);
+  }, [heightPx]);
 
   const onHandlePointerDown = useCallback((e) => {
     if (e.button != null && e.button !== 0) return;

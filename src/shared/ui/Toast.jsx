@@ -15,6 +15,7 @@
  */
 import { useRef, useState, useEffect, useCallback } from "react";
 import { RADIUS } from "./radius.js";
+import FloatingNotice from "./FloatingNotice.jsx";
 
 export const TOAST_TTL_MS = 8000;
 // NEW-1 (B673 round 2, 2026-08-23) — lowered from 4. A single delete cascading across a bonded
@@ -100,16 +101,16 @@ export function ToastHost({ toasts, onDismiss }) {
   const { shown, more } = visibleToasts(toasts);
   if (!shown.length) return null;
   return (
-    <div style={{ position: "fixed", bottom: 18, left: "50%", transform: "translateX(-50%)", zIndex: 6500,
-      display: "flex", flexDirection: "column", gap: 8, alignItems: "center", pointerEvents: "none",
-      maxWidth: "min(560px, calc(100vw - 16px))" }}>
-      {shown.map((t) => <ToastItem key={t.id} toast={t} onDismiss={onDismiss} />)}
-      {more > 0 && (
-        <div style={{ background: "var(--surface-overlay)", color: "var(--text-secondary)", border: "1px solid var(--border-default)",
-          borderRadius: 8, padding: "3px 10px", fontSize: 11.5, fontWeight: 700, pointerEvents: "auto" }}>
-          +{more} more
-        </div>
-      )}
-    </div>
+    <FloatingNotice testId="sync-toast-host" pointerEvents="none">
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "center", pointerEvents: "none" }}>
+        {shown.map((t) => <ToastItem key={t.id} toast={t} onDismiss={onDismiss} />)}
+        {more > 0 && (
+          <div style={{ background: "var(--surface-overlay)", color: "var(--text-secondary)", border: "1px solid var(--border-default)",
+            borderRadius: 8, padding: "3px 10px", fontSize: 11.5, fontWeight: 700, pointerEvents: "auto" }}>
+            +{more} more
+          </div>
+        )}
+      </div>
+    </FloatingNotice>
   );
 }

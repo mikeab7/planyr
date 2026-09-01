@@ -27,8 +27,9 @@ describe("the header does not move, hide or slide in fullscreen", () => {
   it("has ONE style for the <header>, with no fullscreen branch", () => {
     expect(headerBody).toContain('style={{ flex: "none", background: CHROME, borderBottom: `1px solid ${LINE}`, position: "relative", zIndex: 60 }}');
     // The three mechanisms that used to take it off screen, each asserted absent by name. The
-    // `position: fixed` check is scoped to the <header> tag itself — the two toast pills below it
-    // are legitimately fixed and always were.
+    // `position: fixed` check is scoped to the <header> tag itself — the two banners below it
+    // (fullscreen-refused, cross-tab-conflict) are floating notices positioned by the shared
+    // FloatingNotice primitive (B1000400), not by a `position: "fixed"` literal in this file.
     const tag = headerBody.slice(headerBody.indexOf("<header"), headerBody.indexOf("data-fullscreen=") + 60);
     expect(tag).not.toContain('position: "fixed"');
     expect(headerBody).not.toContain("translateY(-100%)");
