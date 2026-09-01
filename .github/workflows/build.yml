@@ -123,3 +123,40 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
       - name: Performance budget (bundle weight + Site-route chunk allowlist — NEW-8)
         run: node ui-audit/perf-bundle-audit.mjs --compare .perf/base-stats.json --emit-stats .perf/head-stats.json
+      # Visual regression baselines (NEW-1). The one check in this job with no theory of what
+      # "wrong" looks like: render the key surfaces, diff pixel-for-pixel against a human-approved
+      # baseline in ui-audit/visual-baselines/, fail on anything that moved. See
+      # docs/VISUAL-REGRESSION.md for coverage, the masking/tolerance policy, and how to approve an
+      # intentional change. This is the FIRST browser-driven step in this job (every other check
+      # above is static analysis or a headless build) — the Playwright browser is cached below so a
+      # cache hit skips the ~150 MB re-download on every push; only the (much cheaper) OS package
+      # install still runs every time, since GitHub-hosted runners don't persist apt state.
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install Playwright chromium
+        run: npx playwright install --with-deps chromium
+      - name: Serve the built app for visual regression
+        run: npx vite preview --port 4173 --strictPort > /tmp/vite-preview.log 2>&1 &
+      - name: Wait for the preview server
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sSf http://localhost:4173/ >/dev/null 2>&1; then echo "preview server is up"; exit 0; fi
+            sleep 1
+          done
+          echo "preview server never came up — log:"; cat /tmp/vite-preview.log; exit 1
+      - name: Visual regression baselines (pixel diff against approved baselines — NEW-1)
+        env:
+          BASE_URL: "http://localhost:4173/"
+        run: node ui-audit/visual-regression.mjs --check
+      - name: Upload visual regression diffs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-regression-diffs
+          path: .perf/visual-regression/
+          if-no-files-found: ignore
+          retention-days: 14

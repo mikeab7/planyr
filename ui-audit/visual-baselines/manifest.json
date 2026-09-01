@@ -1,0 +1,56 @@
+{
+  "tolerance": {
+    "maxDiffPct": 0.02,
+    "maxChannelDelta": 8
+  },
+  "surfaces": {
+    "map-landing": {
+      "light": {
+        "approvedAt": "2026-09-01",
+        "approvedCommit": "1c0a8e60",
+        "note": "initial baseline capture (NEW-1)"
+      },
+      "dark": {
+        "approvedAt": "2026-09-01",
+        "approvedCommit": "1c0a8e60",
+        "note": "initial baseline capture (NEW-1)"
+      }
+    },
+    "site-planner-header": {
+      "light": {
+        "approvedAt": "2026-09-01",
+        "approvedCommit": "1c0a8e60",
+        "note": "initial baseline capture (NEW-1)"
+      },
+      "dark": {
+        "approvedAt": "2026-09-01",
+        "approvedCommit": "1c0a8e60",
+        "note": "initial baseline capture (NEW-1)"
+      }
+    },
+    "site-planner-left-rail": {
+      "light": {
+        "approvedAt": "2026-09-01",
+        "approvedCommit": "1c0a8e60",
+        "note": "initial baseline capture (NEW-1)"
+      },
+      "dark": {
+        "approvedAt": "2026-09-01",
+        "approvedCommit": "1c0a8e60",
+        "note": "initial baseline capture (NEW-1)"
+      }
+    },
+    "library": {
+      "light": {
+        "approvedAt": "2026-09-01",
+        "approvedCommit": "1c0a8e60",
+        "note": "initial baseline capture (NEW-1)"
+      },
+      "dark": {
+        "approvedAt": "2026-09-01",
+        "approvedCommit": "1c0a8e60",
+        "note": "initial baseline capture (NEW-1)"
+      }
+    }
+  }
+}
