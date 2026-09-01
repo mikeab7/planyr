@@ -261,6 +261,7 @@ function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave
           <Field label="TI $/SF" stacked><input type="number" value={draft.leaseTi} onChange={set("leaseTi")} placeholder="optional" style={inputStyle} /></Field>
           <Field label="Term" stacked><input value={draft.leaseTerm} onChange={set("leaseTerm")} placeholder="e.g. 5 yrs" style={inputStyle} /></Field>
           <Field label="Free rent (mo)" stacked><input type="number" value={draft.leaseFreeRentMonths} onChange={set("leaseFreeRentMonths")} placeholder="optional" style={inputStyle} /></Field>
+          <Field label="Escalation %/yr" stacked><input type="number" value={draft.leaseEscalationPct} onChange={set("leaseEscalationPct")} placeholder="optional" style={inputStyle} /></Field>
         </>
       )}
 

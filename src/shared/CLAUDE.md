@@ -318,22 +318,35 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   both reuse the SAME `pendingCompAnchor` single slot the map finder already threads through
   `CompsPanel`, plus one new small `onFocusAnchor` callback prop on `<CompsPanel>` (a
   `mapRef.current.flyTo` one-liner) — deliberately the map finder's only touch for this feature.
-  **⛔ B986096 — THREE OWNER-MEASURED HARDENING ROUNDS on `CompEntryGrid.jsx`/`compParse.js`, all
+  **⛔ B986096 — FOUR OWNER-MEASURED HARDENING ROUNDS on `CompEntryGrid.jsx`/`compParse.js`, all
   fixed; read before touching either file.** (1) Shape detection: an ambiguous multi-line paste
-  now defaults to ONE record (`detectPasteShape` — spreadsheet → labeled-single-record →
-  completeness fraction) with a visible one-per-line toggle, because "one pasted line = one row"
-  is wrong for the dominant real shape (a lease abstract spans many lines). `extractUnlabeledLine`
-  tries every detector per line rather than returning after the first match — first-match-wins is
-  per FIELD, never per LINE. (2) The entry card is NEVER a full-viewport modal — a backdrop
-  blocks `elementFromPoint` on the very map buttons its own banner tells you to click; it's a
-  small `position:fixed` draggable card only. Parsing runs on `onChange` (any value containing a
-  newline), not only on a real clipboard `paste` event, so typed Enter works too. The paste box
-  never clears itself (`lastPasteText` persists until dismissed). (3) Field coverage: EVERY column
-  in `comps.sql`/`comps_lease_escalation.sql` must be reachable somewhere in the UI — audit the
-  form against the schema before changing either. `title` is an ALWAYS-VISIBLE input under every
-  row (never behind the chevron — the DB has no NOT NULL on it, so a missing input is invisible to
-  every constraint check). The expand chevron carries a corner badge naming how many hidden fields
-  are filled, so a row is never silently hiding half a deal.
+  defaults to ONE record (`detectPasteShape` — spreadsheet → labeled-single-record → completeness
+  fraction), because "one pasted line = one row" is wrong for the dominant real shape (a lease
+  abstract spans many lines). `extractUnlabeledLine` tries every detector per line rather than
+  returning after the first match — first-match-wins is per FIELD, never per LINE. (2) The entry
+  card is NEVER a full-viewport modal — a backdrop blocks `elementFromPoint` on the very map
+  buttons its own banner tells you to click; it's a small `position:fixed` draggable card only.
+  (3) Field coverage: EVERY column in `comps.sql`/`comps_lease_escalation.sql` must be reachable
+  somewhere on the card — audit the form against the schema before changing either.
+  **(4) ⛔ ROUND 4 (owner rule, "STOP PATCHING THE GRID — the grid is the wrong container"): THE
+  SHARED-COLUMN ROW GRID IS GONE.** One CARD per comp now, laid out for its own type only — a
+  land card never renders lease-only fields. Every field carries a visible uppercase label (the
+  shared `Field` primitive, `stacked`); a derived value (Annual rent, $/SF) is its own labelled
+  READ-ONLY cell (`DerivedField`), never a floating unlabeled number. Corner-badge flag dots are
+  GONE — a blocking problem is a full-width sentence with quick-resolve buttons
+  (`BlockingPeriodNotice`), a soft one is its own amber sentence (`SoftNotices`, generic over
+  whatever `compParse.js` flagged). Numbers display comma-formatted while resting and raw while
+  focused (`NumberField`) — the stored draft value is untouched either way. **The commit path was
+  ALSO rewritten, closing a real "one record, three rows" bug**: `onChange` is now a PLAIN state
+  update — no more "parse on any embedded newline," which was the fragile mechanism a duplicate/
+  fragmented browser event (or a repeated accidental paste) could fire more than once for what the
+  user experienced as one action. There are exactly two commit paths now — a real clipboard
+  `paste`, or an explicit Add-button/Ctrl+Enter action for hand-typed text — plus a `lastCommitRef`
+  dedupe guard against a literal duplicate. A plain Enter inserts a literal newline like an
+  ordinary textarea; it no longer commits anything. `detectCompType` also gained two lease-only
+  signals that don't require an accompanying `/mo`/`/yr` — a bare `TI:`/`TI $` mention and a bare
+  `$X/SF` figure — closing the "typed Land on text that says NNN, TI and months" class at its
+  root, including for the per-line list shape, not just the single-record whole-text join.
   KML import (B849233) is a SEPARATE staging table, `db/comp_import_drafts.sql`
   (`public.comp_import_drafts`, owner-only RLS — no team visibility at all, unlike `comps` itself,
   until promoted) — `lib/kmlImport.js` is the pure, hand-rolled Placemark parser (a Point is a
