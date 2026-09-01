@@ -970,33 +970,83 @@ export default function AppHeader({
       </div>
 
       {/* ── Row 2 — 44px (taller than Row 1: the tools row earns the weight, B357) ──
-           With a center slot (B387) Row 2 is a 3-zone layout: tabs (flex:1) | center group
-           (shrink-to-content) | toolbar (flex:1, end), so the center group is optically
-           centered the same way Row 1 centers the project name. The row may wrap on a
-           too-narrow viewport (the center/toolbar flow to a second line) instead of
-           overlapping — never absolute positioning. With NO center slot (Site/Review) the
-           original 2-zone tabs|toolbar layout renders unchanged. */}
+           With a center slot (B387) Row 2 is a 3-zone layout: tabs | center group | toolbar.
+           The row may wrap on a too-narrow viewport (the center/toolbar flow to a second
+           line) instead of overlapping — never absolute positioning. With NO center slot
+           (Site/Review/Library/Notes/Model) the original 2-zone tabs|toolbar layout renders
+           unchanged.
+           ⛔ B1012560 — ONE DEFECT, TWO SYMPTOMS, reported four days apart on the SAME owner
+           Schedule header. Both traced to the same cause: the tabs zone and the toolbar zone
+           used to BOTH be `flex: 1` (basis 0%), an equal 50/50 split of the row regardless of
+           what either side's real content needed (tabs ~448px, toolbar cluster ~313px on
+           Schedule — genuinely unequal).
+           **Symptom 1 — NARROW: the tab strip clips.** Below the width where an equal split
+           gave the tabs zone less than 448px, the tab strip silently overflowed with no visible
+           sign anything was cut (measured break point: 1108px container width — a laptop
+           window half-screened on a wide monitor, or any manually narrowed window, lands below
+           it).
+           **Symptom 2 — WIDE: the center group sits permanently off-center.** Equal side BOXES
+           do not center a middle item between the two side groups' VISIBLE CONTENT when that
+           content is unequal width: with tabs content (448px) sitting flush-left in its zone
+           and the toolbar cluster (313px) sitting flush-right in its own EQUAL-width zone, the
+           gap left of the center group was always ~135px (448−313) narrower than the gap right
+           of it — a CONSTANT offset, present at every width from 1280 to 2560, that gets more
+           visually obvious (more dead space on one side) the wider the window.
+           **ONE FIX FOR BOTH:** the tabs zone is now CONTENT-SIZED and never grows or shrinks
+           (`flex:"none"`, mirroring the always-safe 2-zone layout below) — primary navigation
+           is structurally the LAST thing to lose space, which fixes symptom 1. The CENTER zone
+           is now the ONLY zone that grows (`flex:"1 1 auto"`) — it alone absorbs whatever width
+           is left over once the tabs and toolbar have taken exactly what they need, and its
+           content is centered WITHIN that zone. Because the toolbar zone no longer grows either
+           (`flex:"none"`, its own content width, flush against the right edge simply because it
+           is the last item in a fully-consumed row), the leftover width is split EXACTLY IN
+           HALF on either side of the center content — equal gaps, genuinely centered relative
+           to the two side groups' visible content, not the row's raw midpoint — which fixes
+           symptom 2. (The alternative, centering on the row's own physical midpoint, would NOT
+           equalize the gaps here, since the two side groups are different widths — this is a
+           deliberate choice, not an oversight.)
+           This also FIXES the row's own `flexWrap:"wrap"`, set below since B387 but never
+           actually able to engage: with every zone reporting a flex-basis of 0%, the wrap
+           algorithm used to see three "tiny" items that always fit on one line no matter the
+           real content, so the toolbar cluster could never flow to a second line the way the
+           layout always intended — it just silently squeezed the tabs zone down to whatever the
+           equal split left it instead. With real content-sized flex-bases, a genuine shortfall
+           (below ~977px, the tabs+center+toolbar's true combined width) now correctly wraps the
+           toolbar cluster onto its own second line — pinned to that line's right edge by the
+           row's own `justifyContent:"flex-end"` (harmless on the single-line/wide case, where
+           the center zone's growth already consumes 100% of the line's slack and leaves nothing
+           for justify-content to act on) — while the tabs stay complete on line one down to the
+           phone breakpoint (760px, where the horizontal-scroll fallback below takes over
+           instead). */}
       {toolbarCenter ? (
         // On narrow, scroll sideways (nowrap) instead of wrapping to a 2nd line — the owner's
         // explicit ask. Above the breakpoint the original wrap layout is untouched.
-        <div ref={row2Ref} className={narrow ? "no-hscrollbar" : undefined} style={{ minHeight: 26, display: "flex", alignItems: "center", flexWrap: narrow ? "nowrap" : "wrap", rowGap: 2, borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
-          {/* Left zone — module tabs (flex:1, basis 0 — mirrors Row 1 so the center is
-              TRULY centered regardless of how wide the tabs vs the toolbar are). Omitted
-              entirely when showModuleTabs is false (B651873) — no unrendered spacer, since
-              nothing currently pairs toolbarCenter with a hidden-tabs caller. */}
+        <div ref={row2Ref} className={narrow ? "no-hscrollbar" : undefined} style={{ minHeight: 26, display: "flex", alignItems: "center", flexWrap: narrow ? "nowrap" : "wrap", justifyContent: "flex-end", rowGap: 2, borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
+          {/* Left zone — module tabs. B1012560: content-sized (`"none"` = `0 0 auto`) and
+              never shrinks, same as the 2-zone layout's tabs zone below — primary navigation
+              is the last thing to lose space. Omitted entirely when showModuleTabs is false
+              (B651873) — no unrendered spacer, since nothing currently pairs toolbarCenter
+              with a hidden-tabs caller. */}
           {showModuleTabs && (
-            <div style={{ display: "flex", alignItems: "stretch", alignSelf: "stretch", paddingLeft: 4, flex: narrow ? "0 0 auto" : 1, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "stretch", alignSelf: "stretch", paddingLeft: 4, flex: "none" }}>
               {moduleTabButtons}
             </div>
           )}
-          {/* Center zone — workspace-supplied center group (shrink-to-content). Narrow: don't
-              shrink (ride the row scroll); desktop keeps its original shrinkable `0 1 auto`. */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: narrow ? "0 0 auto" : "0 1 auto", minWidth: 0, gap: 4, padding: "0 8px" }}>
+          {/* Center zone — workspace-supplied center group. B1012560: `1 1 auto` — the ONLY
+              zone that grows, so it alone absorbs the leftover width and splits it evenly on
+              both sides of its own centered content (see the header comment above for why this,
+              not the row's raw midpoint, is what "centered" has to mean when the two side groups
+              are unequal widths). Narrow: don't grow/shrink (ride the row scroll). */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: narrow ? "0 0 auto" : "1 1 auto", minWidth: 0, gap: 4, padding: "0 8px" }}>
             {toolbarCenter}
           </div>
-          {/* Right zone — toolbar slot (flex:1 end, mirrors Row 1's right zone). Narrow: keep
-              natural width + show overflow so the row scrolls rather than clipping the tools. */}
-          <div style={{ flex: narrow ? "1 0 auto" : 1, display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 6, minWidth: narrow ? "auto" : 0, gap: 4, overflow: narrow ? "visible" : "hidden" }}>
+          {/* Right zone — toolbar slot. B1012560: content-sized, no grow, no shrink on desktop
+              (`"none"`) — it must NOT grow, or it would eat a share of the leftover width that
+              belongs to centering the group beside it (that was symptom 2). It still ends up
+              flush against the right edge on a single line, because the center zone's growth
+              already consumes the row's entire slack and the toolbar is the last item. Narrow
+              (phone) is untouched — `1 0 auto`, exactly as before. */}
+          <div style={{ flex: narrow ? "1 0 auto" : "none", display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 6, minWidth: narrow ? "auto" : 0, gap: 4, overflow: narrow ? "visible" : "hidden" }}>
             {toolbarContent}
           </div>
         </div>
