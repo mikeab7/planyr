@@ -11,7 +11,7 @@
 > violates**; if none fits, the invariant list is incomplete → amend it here first, then file the bug as a
 > member of B648.
 >
-> Related: `docs/REFERENCE.md` (persistence internals), `PERSISTENCE_TEST_SCRIPT.md` (manual live script),
+> Related: `docs/REFERENCE.md` (persistence internals), `docs/testing/PERSISTENCE_TEST_SCRIPT.md` (manual live script),
 > `docs/test-data-loss.md`. Members of B648: B124, B125, B126, B134, B276, B314, B595, B596, B612.
 
 ---

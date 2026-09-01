@@ -3,7 +3,7 @@
  * next-id.mjs — print the next free backlog B# and verification V#, instantly, from the shell (B755).
  *
  * WHY THIS EXISTS: minting a new B# means "highest B# across BOTH BACKLOG.md (464 KB) and the
- * write-only BACKLOG-DONE.md (1.4 MB) + 1", and a new V# the same across VERIFICATION*.md. Every
+ * write-only docs/archive/BACKLOG-DONE.md (1.4 MB) + 1", and a new V# the same across VERIFICATION*.md. Every
  * session was doing that by reading those giant files INTO MODEL CONTEXT to eyeball the max — the
  * single biggest avoidable token burn in this repo, and the recurring "which number do we ship/merge
  * with?" tax. BACKLOG_OPEN.md didn't fix it: it lists only Open + Verify items, so the true max —
@@ -37,8 +37,8 @@ const REPO = resolve(HERE, "..");
 
 // The files each id family lives across. Open + write-only Done archive both hold `### <letter>###`
 // headings for every id ever assigned, so the union's max is the true max.
-export const B_FILES = ["BACKLOG.md", "BACKLOG-DONE.md"];
-export const V_FILES = ["VERIFICATION.md", "VERIFICATION-DONE.md"];
+export const B_FILES = ["BACKLOG.md", "docs/archive/BACKLOG-DONE.md"];
+export const V_FILES = ["VERIFICATION.md", "docs/archive/VERIFICATION-DONE.md"];
 // The LIVE (active) surfaces — where a fresh concurrent-mint collision between two currently-worked
 // items shows up, and where the uniqueness guard is enforced. The write-only *-DONE.md archives are
 // excluded on purpose: they carry ~50 historical cross-file collisions (e.g. B755, V275) + benign
@@ -142,14 +142,14 @@ export function newCrossFileCollisions(repo, files, letter, baseline = KNOWN_LEG
 /* ---- SAME-FILE duplicate headings (B308704) ----------------------------------------------
  *
  * WHY A SECOND, NARROWER GUARD WHEN THE CROSS-FILE ONE ALREADY EXISTS. The cross-pair check above
- * counts an id across BACKLOG.md ∪ BACKLOG-DONE.md, and a count of two there is AMBIGUOUS by
+ * counts an id across BACKLOG.md ∪ docs/archive/BACKLOG-DONE.md, and a count of two there is AMBIGUOUS by
  * design: it is also the shape of a legitimate DEDUPE-FIRST recurrence caught mid-move, and of the
  * live↔archive race B780 grandfathered 58 of. So its baseline had to be permissive, and 31 ids
  * that are unambiguously wrong hid inside that permission.
  *
  * TWO HEADINGS FOR ONE ID **INSIDE A SINGLE FILE** IS NEVER LEGITIMATE. A recurrence MOVES a
  * heading between files; it never leaves two in one. Measured on `main` at ed7f8d3: 24 B ids in
- * BACKLOG-DONE.md and 7 V ids in VERIFICATION-DONE.md each name two different items — B127 is both
+ * docs/archive/BACKLOG-DONE.md and 7 V ids in docs/archive/VERIFICATION-DONE.md each name two different items — B127 is both
  * "Measure-type dropdown renders behind/clipped by the rail" and "Two-tab convergence: a stale tab
  * could thin the durable store". Every one is in B127–B755, entirely below B6864, so every one
  * predates the reserved-block fix and none has occurred since. Zero live-file collisions.
@@ -158,19 +158,19 @@ export function newCrossFileCollisions(repo, files, letter, baseline = KNOWN_LEG
  * between files unnoticed, and it is SHRINK-ONLY exactly like its cross-file sibling. */
 export const SAME_FILE_LEGACY_DUPES = {
   B: {
-    "BACKLOG-DONE.md::B127": 2, "BACKLOG-DONE.md::B131": 2, "BACKLOG-DONE.md::B151": 2,
-    "BACKLOG-DONE.md::B239": 2, "BACKLOG-DONE.md::B316": 2, "BACKLOG-DONE.md::B341": 2,
-    "BACKLOG-DONE.md::B343": 2, "BACKLOG-DONE.md::B348": 2, "BACKLOG-DONE.md::B350": 2,
-    "BACKLOG-DONE.md::B360": 2, "BACKLOG-DONE.md::B417": 2, "BACKLOG-DONE.md::B418": 2,
-    "BACKLOG-DONE.md::B445": 3, "BACKLOG-DONE.md::B485": 2, "BACKLOG-DONE.md::B489": 2,
-    "BACKLOG-DONE.md::B562": 2, "BACKLOG-DONE.md::B566": 2, "BACKLOG-DONE.md::B568": 2,
-    "BACKLOG-DONE.md::B569": 2, "BACKLOG-DONE.md::B590": 2, "BACKLOG-DONE.md::B594": 2,
-    "BACKLOG-DONE.md::B597": 2, "BACKLOG-DONE.md::B717": 2, "BACKLOG-DONE.md::B755": 2,
+    "docs/archive/BACKLOG-DONE.md::B127": 2, "docs/archive/BACKLOG-DONE.md::B131": 2, "docs/archive/BACKLOG-DONE.md::B151": 2,
+    "docs/archive/BACKLOG-DONE.md::B239": 2, "docs/archive/BACKLOG-DONE.md::B316": 2, "docs/archive/BACKLOG-DONE.md::B341": 2,
+    "docs/archive/BACKLOG-DONE.md::B343": 2, "docs/archive/BACKLOG-DONE.md::B348": 2, "docs/archive/BACKLOG-DONE.md::B350": 2,
+    "docs/archive/BACKLOG-DONE.md::B360": 2, "docs/archive/BACKLOG-DONE.md::B417": 2, "docs/archive/BACKLOG-DONE.md::B418": 2,
+    "docs/archive/BACKLOG-DONE.md::B445": 3, "docs/archive/BACKLOG-DONE.md::B485": 2, "docs/archive/BACKLOG-DONE.md::B489": 2,
+    "docs/archive/BACKLOG-DONE.md::B562": 2, "docs/archive/BACKLOG-DONE.md::B566": 2, "docs/archive/BACKLOG-DONE.md::B568": 2,
+    "docs/archive/BACKLOG-DONE.md::B569": 2, "docs/archive/BACKLOG-DONE.md::B590": 2, "docs/archive/BACKLOG-DONE.md::B594": 2,
+    "docs/archive/BACKLOG-DONE.md::B597": 2, "docs/archive/BACKLOG-DONE.md::B717": 2, "docs/archive/BACKLOG-DONE.md::B755": 2,
   },
   V: {
-    "VERIFICATION-DONE.md::V45": 2, "VERIFICATION-DONE.md::V92": 2, "VERIFICATION-DONE.md::V119": 2,
-    "VERIFICATION-DONE.md::V120": 2, "VERIFICATION-DONE.md::V123": 2, "VERIFICATION-DONE.md::V130": 2,
-    "VERIFICATION-DONE.md::V275": 2,
+    "docs/archive/VERIFICATION-DONE.md::V45": 2, "docs/archive/VERIFICATION-DONE.md::V92": 2, "docs/archive/VERIFICATION-DONE.md::V119": 2,
+    "docs/archive/VERIFICATION-DONE.md::V120": 2, "docs/archive/VERIFICATION-DONE.md::V123": 2, "docs/archive/VERIFICATION-DONE.md::V130": 2,
+    "docs/archive/VERIFICATION-DONE.md::V275": 2,
   },
 };
 
@@ -253,7 +253,7 @@ export function sameHeading(a, b) {
  * backstop, and they work.
  * ========================================================================================== */
 
-/** execSync buffer for every git read. Well above BACKLOG-DONE.md (1.4 MB and growing): the
+/** execSync buffer for every git read. Well above docs/archive/BACKLOG-DONE.md (1.4 MB and growing): the
  * default 1 MB is what threw ENOBUFS in B898, and the swallowed throw degraded `--against-main`
  * to a stale local-only max that read exactly like success. Exported so the regression test can
  * assert the real value instead of scraping the source. */

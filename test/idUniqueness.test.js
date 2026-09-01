@@ -55,12 +55,12 @@ describe("cross-file collisions — live↔archive guard with a frozen legacy ba
   // session B's same-numbered item stays open (the headings land in different files). This check
   // covers the FULL live+archive pair, grandfathering the 58 audited historical collisions at their
   // exact counts — any NEW cross-file collision (unknown id, or a known id +1) fails the build.
-  it("no B# collision beyond the grandfathered baseline (BACKLOG.md + BACKLOG-DONE.md)", () => {
+  it("no B# collision beyond the grandfathered baseline (BACKLOG.md + docs/archive/BACKLOG-DONE.md)", () => {
     const fresh = newCrossFileCollisions(REPO, B_FILES, "B");
     expect(fresh, `\nNEW cross-file B# collision (not in the KNOWN_LEGACY_ID_COLLISIONS baseline) — renumber the newer item (git fetch origin main && npm run next-id -- --against-main):\n${JSON.stringify(fresh)}\n`).toEqual([]);
   });
 
-  it("no V# collision beyond the grandfathered baseline (VERIFICATION.md + VERIFICATION-DONE.md)", () => {
+  it("no V# collision beyond the grandfathered baseline (VERIFICATION.md + docs/archive/VERIFICATION-DONE.md)", () => {
     const fresh = newCrossFileCollisions(REPO, V_FILES, "V");
     expect(fresh, `\nNEW cross-file V# collision — renumber the newer item to the next free V#:\n${JSON.stringify(fresh)}\n`).toEqual([]);
   });

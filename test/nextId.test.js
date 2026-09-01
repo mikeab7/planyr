@@ -1,5 +1,5 @@
 /* next-id scanner (B755). Guards the deterministic "next free B#/V#" helper that replaces reading the
- * 464 KB BACKLOG.md + 1.4 MB BACKLOG-DONE.md into model context just to find the max. The parse must
+ * 464 KB BACKLOG.md + 1.4 MB docs/archive/BACKLOG-DONE.md into model context just to find the max. The parse must
  * (a) count the two authoritative id forms — `### B123` headings and `**B123**` bold mints, incl.
  * ranges — and (b) be IMMUNE to a stray inline prose mention inflating the max (the one dangerous
  * error is UNDER-counting, i.e. reusing a live number; over-counting from a typo is what we prevent). */
@@ -103,7 +103,7 @@ describe("maxAgainstMain — folds in origin/main (B779)", () => {
 });
 
 describe("the git reader — must not silently degrade on a large archive (B896 regression)", () => {
-  // BACKLOG-DONE.md is a write-only, ever-growing archive (1.7 MB+ as of B896) — comfortably
+  // docs/archive/BACKLOG-DONE.md is a write-only, ever-growing archive (1.7 MB+ as of B896) — comfortably
   // past Node's DEFAULT execSync maxBuffer (1 MB). Before this fix, exceeding it threw ENOBUFS,
   // which the reader's catch swallowed silently, so `--against-main` quietly fell back to a
   // stale LOCAL-ONLY max — the exact failure that let two sessions both mint B896 on 2026-07-18
@@ -114,14 +114,26 @@ describe("the git reader — must not silently degrade on a large archive (B896 
   })();
   const maybeIt = hasOriginMain ? it : it.skip; // sandboxes without a fetched origin/main skip, never false-fail
 
-  maybeIt("reads BACKLOG-DONE.md from origin/main in full, without an ENOBUFS-triggered null", () => {
-    const r = readRefFile(REPO, "refs/remotes/origin/main", "BACKLOG-DONE.md");
+  /** Find a tracked file by basename anywhere in a ref's tree. Robust to the file having moved
+   *  between HEAD and the ref being read (e.g. this very repo-root reorg, 2026-09-01) — a ref
+   *  that hasn't merged a rename yet still has the archive, just at its pre-move path, and this
+   *  guard's job is to prove the git reader handles a real oversized file, not to pin a path. */
+  function locateOnRef(repo, ref, basename) {
+    try {
+      const out = execSync(`git ls-tree -r --name-only ${ref}`, { cwd: repo, encoding: "utf8", maxBuffer: GIT_MAX_BUFFER });
+      return out.split("\n").find((p) => p === basename || p.endsWith("/" + basename)) || null;
+    } catch { return null; }
+  }
+
+  maybeIt("reads the archive from origin/main in full, without an ENOBUFS-triggered null", () => {
+    const path = locateOnRef(REPO, "refs/remotes/origin/main", "BACKLOG-DONE.md") || "docs/archive/BACKLOG-DONE.md";
+    const r = readRefFile(REPO, "refs/remotes/origin/main", path);
     expect(r.ok, r.reason).toBe(true);
     expect(r.text.length).toBeGreaterThan(1024 * 1024); // bigger than the default 1 MB buffer that used to choke
   });
 
-  it("passes an explicit maxBuffer comfortably above BACKLOG-DONE.md's on-disk size", () => {
-    const onDiskBytes = readFileSync(resolve(REPO, "BACKLOG-DONE.md")).length;
+  it("passes an explicit maxBuffer comfortably above docs/archive/BACKLOG-DONE.md's on-disk size", () => {
+    const onDiskBytes = readFileSync(resolve(REPO, "docs/archive/BACKLOG-DONE.md")).length;
     expect(GIT_MAX_BUFFER, "every git read must use an explicit maxBuffer above the archive size").toBeGreaterThan(onDiskBytes);
   });
 

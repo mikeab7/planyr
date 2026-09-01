@@ -25,7 +25,7 @@ _Last updated: 2026-08-31._
   identical FORBIDDEN error. You then declined a PAT / GitHub App credential a second time, and the
   automation that needed one (`pr-auto-ready.yml`) is now deleted outright, not just silenced. Sessions
   mark their own PRs ready and arm auto-merge by hand now, permanently — full record in
-  `BACKLOG-DONE.md` (B793696, B934400–B934402). Don't re-open this hunt.
+  `docs/archive/BACKLOG-DONE.md` (B793696, B934400–B934402). Don't re-open this hunt.
 - [ ] **Check whether `main` has a branch-protection rule set** (`github.com/mikeab7/planyr/settings/branches`)
       — a SEPARATE question from the note above (that one is about un-drafting a PR; this is about arming
       auto-merge on one that's already ready). Found 2026-08-31 (`B897440`) while shipping PR #1245: even
@@ -676,7 +676,7 @@ a look-ahead at what that study will produce, clearly labelled as screening and 
       Cowork's signed-in run in the real browser confirmed the fix holds live: attacker A denied HTTP 400 / no bytes
       when trying to read victim B's private PDF via a fabricated `sources.storageKey`; legit team-share still
       returns 200 + real PDF. `can_read_shared_review_file(text)` on `lyeqzkuiwngunutlkkmi` carries the owner-path
-      bind. Archived as V150 in `VERIFICATION-DONE.md`. (B491)
+      bind. Archived as V150 in `docs/archive/VERIFICATION-DONE.md`. (B491)
 - [x] ~~Run `db/team_rehome_guard.sql`~~ — **DONE 2026-06-26.** Closed a gap where a teammate on two teams could
       move your shared project to their other team. (B486)
 - [x] ~~**(2-min dashboard check) Confirm "Confirm email" is ON** in Supabase → Authentication → Providers → Email.~~ — **DONE (Cowork verified 2026-07-01).** Supabase Dashboard → Authentication → Sign In / Providers → Email shows **Confirm email: Enabled**. Email is the only enabled sign-in provider (Phone, SAML 2.0, Web3 Wallet, Apple, Azure, etc. all Disabled; no third-party OAuth or magic-link providers on). (B491 tail check.)

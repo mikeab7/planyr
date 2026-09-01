@@ -34,7 +34,7 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > look up one specific past ID.
 >
 > **🔢 To MINT a new B# or V#, run `npm run next-id` — never grep the archives for the max (B755).**
-> It prints `Next free → B### · V###` in one line, scanning `BACKLOG.md` + `BACKLOG-DONE.md` (and the
+> It prints `Next free → B### · V###` in one line, scanning `BACKLOG.md` + `docs/archive/BACKLOG-DONE.md` (and the
 > two `VERIFICATION*.md`) **on disk, at zero model-token cost**. This is the fix for the recurring
 > "which number do we ship/merge with?" tax: the highest id routinely lives on a *Done* item in the
 > 1.4 MB archive, so reading files into context to eyeball the max was pure waste. `--json` for a
@@ -254,7 +254,7 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > tried is an incomplete brief.
 >
 > **📋 `BACKLOG.md` = the single source of truth for open bugs & feature requests — KEEP IT LEAN.** Every run,
-> work the **🔲 Open** items. **The moment an item ships, MOVE its whole block to `BACKLOG-DONE.md` that same
+> work the **🔲 Open** items. **The moment an item ships, MOVE its whole block to `docs/archive/BACKLOG-DONE.md` that same
 > session — never mark it done in place** (marking-done-in-place is exactly what bloated this file). The next
 > B# = highest `B#` across **both** files + 1 — **get it with `npm run next-id`** (don't grep for it).
 > (Product backlog; distinct from the "Deferred / maintenance backlog" near the end of this file.)
@@ -284,7 +284,7 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > **🔍 `VERIFICATION.md` = the live-browser test checklist — KEEP IT LEAN too.** Every run, scan it and
 > **verify any ⏳/due items yourself in a headless browser** (Chromium/Playwright is in the environment — see
 > "🤖 Self-verification" there), then record the result. **The moment an item fully passes with nothing
-> pending, MOVE it to `VERIFICATION-DONE.md`** (same archiving discipline as the backlog). The session that
+> pending, MOVE it to `docs/archive/VERIFICATION-DONE.md`** (same archiving discipline as the backlog). The session that
 > ships a UI change drives the live app itself rather than defer it. **⛔ ATTEMPT-BEFORE-YOU-PARK (owner rule,
 > 2026-07-18): a logged-out, no-external-GIS UI check — draw / reshape / select / toggle / keyboard / export a
 > blank site, the landing page, a dropped LOCAL file, a boot-recovery flow — is Claude-doable HERE and must
@@ -315,14 +315,14 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > 2026-08-28. Mechanically: the Cowork thread appends a dated `verification-inbox/<date>-<label>.md` file
 > recording each live pass/fail it ran on Michael's browser (**append-only — nothing is ever deleted from
 > an inbox file**, only added); a session then drains it into `VERIFICATION.md` (⏳ → passed or ❌, per
-> what was actually found), moves any now-fully-passed item on to `VERIFICATION-DONE.md`, and marks the
+> what was actually found), moves any now-fully-passed item on to `docs/archive/VERIFICATION-DONE.md`, and marks the
 > drained inbox entry with the PR number that did the draining, so the same entry is never drained twice.
 > An item the inbox itself records as **NOT** closed (a stated residual, a leg not separately performed)
 > stays exactly as open in `VERIFICATION.md` as it was before — draining is a transcription, never a
 > rubber stamp, and a session that drains a partial pass says explicitly which parts it is accepting and
 > why (STANDING RULE #2 — no closing an owner-reported symptom on a null still applies here).
 >
-> **📦 `BACKLOG-DONE.md` / `VERIFICATION-DONE.md` are write-only archives — do NOT read them** unless looking
+> **📦 `docs/archive/BACKLOG-DONE.md` / `docs/archive/VERIFICATION-DONE.md` are write-only archives — do NOT read them** unless looking
 > up a specific past item; they are historical record only, and exist so the two live files above stay small.
 
 ## How to talk to me (Michael) — IMPORTANT, applies to every reply
@@ -559,8 +559,8 @@ Runtime deps are kept few and deliberate. New client dependency added 2026-07-10
   `npm run hooks:install` alongside the mint-gate hook; if a conflict on either file DOES still show
   markers, the local config is missing — run `npm run hooks:install` (or `node
   scripts/install-hooks.mjs --check` to confirm) rather than resolving by hand. **The manual path is
-  not gone** — it is still the only route for `BACKLOG.md` / `BACKLOG-DONE.md` / `VERIFICATION.md` /
-  `VERIFICATION-DONE.md` (a merge driver is per-file and cannot run `resolve-ledgers.mjs`'s cross-file
+  not gone** — it is still the only route for `BACKLOG.md` / `docs/archive/BACKLOG-DONE.md` / `VERIFICATION.md` /
+  `docs/archive/VERIFICATION-DONE.md` (a merge driver is per-file and cannot run `resolve-ledgers.mjs`'s cross-file
   duplicate-id rollback), and it is still the correct fallback if the driver itself ever refuses
   (LOUD-FAILURE — it leaves ordinary conflict markers rather than guess): `node
   scripts/resolve-ledgers.mjs` regenerates all four hand-merged files AND both generated ones in one

@@ -25,6 +25,14 @@ The costly habit was loading big files just to find one small thing. Two rules k
    (`^### B` / `^### V`) then `Read` only the one block you'll act on. The `*-DONE.md` archives
    are write-only — never read them except to look up one specific past ID.
 
+## Where a new document goes (repo-root reorganization, 2026-09-01)
+
+Root keeps only what's opened by name: `README.md`, `CLAUDE.md`, `MAP.md`, `BACKLOG.md`,
+`BACKLOG_OPEN.md`, `VERIFICATION.md`, `OWNER-TODO.md`. Everything else is a folder rule: write-only
+archives → `docs/archive/`, one-off session artifacts (`COWORK-*`, `HANDOFF-*`, external-tool
+briefs) → `docs/sessions/`, manual test/audit scripts → `docs/testing/`, on-demand reference docs →
+`docs/` (this table). Don't add a new root `.md` file.
+
 ## Per-folder notes
 
 Some module folders carry a short `CLAUDE.md` pointer (e.g. `src/workspaces/site-planner/`,

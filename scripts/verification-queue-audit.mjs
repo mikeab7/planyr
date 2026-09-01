@@ -65,7 +65,7 @@ const HEADING_RE = /^### (V\d+)(?:\s*\(×\d+\))?\s*—/;
 // ----------------------------------------------------------------------------------------
 // Parse VERIFICATION.md's pending queue ("## 🔲 Needs verification" through the next "## ").
 // Every V### heading up to the "## ✅ Verified / ❌ Failed — history" boundary is a pending
-// (or failed) item — anything fully passed has already moved to VERIFICATION-DONE.md.
+// (or failed) item — anything fully passed has already moved to docs/archive/VERIFICATION-DONE.md.
 // ----------------------------------------------------------------------------------------
 export function parseQueue(text) {
   const lines = text.split("\n");

@@ -14,7 +14,7 @@
  * run with NODE_USE_ENV_PROXY=1 so built-in fetch honors HTTPS_PROXY.
  *
  * If you do NOT have SUPABASE_SERVICE_ROLE_KEY, do not run this — load via the Supabase-MCP /
- * DB-native path instead (see B721 in BACKLOG-DONE.md for how the live Houston pull was run).
+ * DB-native path instead (see B721 in docs/archive/BACKLOG-DONE.md for how the live Houston pull was run).
  *
  * LOUD-FAILURE: any fetch / ArcGIS / upsert error throws with context and exits non-zero; a single
  * bad feature is skipped + counted; paging stops on the server's own `exceededTransferLimit` signal
@@ -60,7 +60,7 @@ async function ingest(name) {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) {
-    throw new Error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required (service role — server-side only). Without them, load via the Supabase-MCP / DB-native path (see B721 in BACKLOG-DONE.md).");
+    throw new Error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required (service role — server-side only). Without them, load via the Supabase-MCP / DB-native path (see B721 in docs/archive/BACKLOG-DONE.md).");
   }
   const db = createClient(url, key, { auth: { persistSession: false } });
 

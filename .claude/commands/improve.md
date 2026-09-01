@@ -18,8 +18,8 @@ Read `CLAUDE.md` first if anything below is unclear — its standing rules win o
 - **"Commit" = take it live.** stage → commit → push → open PR into `main` → nudge → auto-merge.
   Merging to `main` is what ships it to planyr.io.
 - **Move shipped items, don't mark-done-in-place.** The moment an item ships, move its WHOLE block
-  from `BACKLOG.md` → `BACKLOG-DONE.md` (and a fully-passed `VERIFICATION.md` item → `VERIFICATION-DONE.md`).
-- **Never read `BACKLOG-DONE.md` / `VERIFICATION-DONE.md`** except to look up one specific past item.
+  from `BACKLOG.md` → `docs/archive/BACKLOG-DONE.md` (and a fully-passed `VERIFICATION.md` item → `docs/archive/VERIFICATION-DONE.md`).
+- **Never read `docs/archive/BACKLOG-DONE.md` / `docs/archive/VERIFICATION-DONE.md`** except to look up one specific past item.
 - Next `B#`/`V#` = highest across BOTH the live and the done file, +1 — **get it with `npm run next-id`**
   (prints `Next free → B### · V###` from disk, zero model tokens; never grep the archives for the max).
 - **Plain-English to the owner in chat;** technical in commits/PRs/code/backlog. Never put the model
@@ -119,9 +119,9 @@ A PR does NOT merge itself here. Two recurring stalls, both self-fixable — dri
   rejecting the merge) — report *that* plainly; the nudge/conflict dance is NOT a blocker.
 
 ### 5. Bookkeeping
-- Move the shipped item's whole block from `BACKLOG.md` → `BACKLOG-DONE.md`.
+- Move the shipped item's whole block from `BACKLOG.md` → `docs/archive/BACKLOG-DONE.md`.
 - Update `VERIFICATION.md` (add the pending signed-in `V###`, or move a fully-passed item to
-  `VERIFICATION-DONE.md`).
+  `docs/archive/VERIFICATION-DONE.md`).
 - Keep `OWNER-TODO.md` current (remove anything the owner has since done).
 
 ### 6. Batch owner questions — DON'T STOP, log and continue

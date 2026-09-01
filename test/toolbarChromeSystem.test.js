@@ -3,7 +3,7 @@
  * Owner report: "this is horrendous UI" — File, the Undo/Redo pair, and Zoom-to-fit each used a
  * different container language (a 3px-radius outlined pill, a filled grey slab with its own 10px
  * radius, and a bare glyph with no container at all), so the group read as three unrelated
- * control systems rather than one toolbar. Read the full report on the shipped BACKLOG-DONE.md
+ * control systems rather than one toolbar. Read the full report on the shipped docs/archive/BACKLOG-DONE.md
  * entry for this id.
  *
  * This is a SOURCE GUARD, not a live-DOM check (that lives in
