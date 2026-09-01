@@ -128,6 +128,15 @@ function CompRow({ comp, onOpen }) {
 // considerably more than one with a number and no provenance"). `overlay` may be null (the
 // overlay list hasn't loaded yet, or the overlay was since removed) — the link only renders
 // once the overlay it points to is actually known.
+// B972512-HARDENING item 21 — DECIDED, deliberately: hiding a site-plan overlay (its own
+// Visible toggle in SitePlansSection) never hides the comps pinned to it. A comp's lat/lon is
+// real, independent, kept-in-sync data (item 1) — it stays exactly as meaningful as a plain pin
+// or a parcel anchor regardless of whether its underlying plan IMAGE happens to be showing, and
+// hiding it too would destroy information a person might specifically want (see the plan's messy
+// old flyer image, but keep seeing where the comps are). What "with no context" would actually
+// mean is fixed here instead: `overlaysById` is keyed from the FULL overlay list (not the
+// zoom/visibility-filtered one MapFinder draws), so this link — and the note below when the
+// plan itself is hidden — is always available, at any zoom, whether or not the plan is showing.
 function SourceBrochureLink({ comp, overlaysById, onOpenBrochure }) {
   if (comp.anchor?.kind !== "site_plan" || !comp.anchor.sitePlanOverlayId) return null;
   const overlay = overlaysById && overlaysById[comp.anchor.sitePlanOverlayId];
@@ -140,6 +149,11 @@ function SourceBrochureLink({ comp, overlaysById, onOpenBrochure }) {
       >
         Open source brochure{overlay.docTitle ? ` — ${overlay.docTitle}` : ""} (p.{overlay.page}) ↗
       </button>
+      {!overlay.visible && (
+        <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 3 }}>
+          This plan is currently hidden on the map.
+        </div>
+      )}
     </div>
   );
 }
@@ -340,7 +354,7 @@ function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave
  */
 export default function CompsPanel({
   open, active = true, pendingAnchor, onAnchorConsumed, focusCompId, onFocusHandled,
-  projects, onCompsChange, overlaysById, onOpenBrochure,
+  projects, onCompsChange, overlaysById, onOpenBrochure, reloadToken,
 }) {
   const [comps, setComps] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -372,6 +386,12 @@ export default function CompsPanel({
   };
 
   useEffect(() => { if (open) reload(); }, [open]);
+
+  // A site-plan overlay placement move recomputed some comps' positions server-side
+  // (B972512-HARDENING item 1) — refetch right away rather than waiting for the tab-focus
+  // refetch below to notice. Guarded on a truthy token so the initial render (token 0) doesn't
+  // double-fetch alongside the [open] effect above.
+  useEffect(() => { if (open && reloadToken) reload(); }, [reloadToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Refetch on tab focus, mirroring pinStore.js's cross-device convenience (latency-insensitive
   // reference data — no realtime channel needed for a first shipment of this feature).

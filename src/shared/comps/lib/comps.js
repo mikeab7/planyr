@@ -15,6 +15,11 @@
 export const COMP_TYPES = ["land", "building_sale", "lease"];
 export const LEASE_PERIODS = ["annual", "monthly"];
 export const LEASE_EXPENSE_BASES = ["nnn", "gross"];
+// ⛔ EXHAUSTIVE, not open to extension (B972512-HARDENING new finding 4) — the database's
+// `comps_anchor_kind_check` CHECK constraint enumerates exactly these three values. Adding a
+// fourth kind here without a matching migration (drop + recreate that constraint, and
+// comps_parcel_anchor_has_identity alongside it) fails every insert/update of that kind with a
+// raw 23514 the instant it reaches Postgres — never just a frontend change.
 export const ANCHOR_KINDS = ["pin", "parcel", "site_plan"];
 
 const SF_PER_ACRE = 43560;
@@ -34,10 +39,27 @@ export function validAnchor(anchor) {
   if (!anchor || typeof anchor.lat !== "number" || typeof anchor.lon !== "number") return false;
   if (!Number.isFinite(anchor.lat) || !Number.isFinite(anchor.lon)) return false;
   if (anchor.kind === "parcel") return !!(anchor.parcelApn || anchor.parcelGeom);
-  // site_plan: a point pinned on an uploaded, georeferenced site plan (B848848) — lat/lon
-  // above is the DERIVED, authoritative position; sitePlanOverlayId + sitePlanPoint (the
-  // image-pixel point on that overlay) are the extra snapshot this anchor kind carries, the
-  // same role parcelApn/parcelGeom play for 'parcel'.
+  // site_plan: a point pinned on an uploaded, georeferenced site plan (B848848).
+  //
+  // ⛔ B972512-HARDENING item 2 — SOURCE OF TRUTH, WRITTEN DOWN: `sitePlanPoint` ({x,y}, an
+  // image-pixel point on the overlay's own raster) is the SOURCE OF TRUTH for where this comp
+  // sits — it is what the user actually clicked, and it never changes on its own. `lat`/`lon`
+  // (every comp's one required, universally-read position — every map marker, list, filter and
+  // proximity screen in the app reads ONLY lat/lon, never anchor-kind-specific fields) is a
+  // DERIVED CACHE: `sitePlanPoint` run through the overlay's CURRENT placement transform
+  // (center/scale/rotation — shared/sitePlans/lib/overlayGeoref.js `imagePointToLatLon`). That
+  // cache is why it must be NOT NULL and always populated (a comp is otherwise unfindable on the
+  // map), and why it goes stale — silently wrong — the instant someone drags, scales, rotates or
+  // re-anchors the overlay. `SitePlansSection.jsx`'s placement-commit handler is the one place
+  // that keeps the cache honest: every placement change atomically recomputes and rewrites
+  // lat/lon for every comp referencing that overlay (via the `commit_site_plan_overlay_placement`
+  // RPC, which can reach a teammate's comp too — comps.update is owner-only RLS, but the
+  // overlay's OWNER must still be able to correct every pin on their own plan). Never treat a
+  // 'site_plan' comp's lat/lon as independently editable/authoritative the way a 'pin' comp's
+  // is — it is a computed value with exactly one legitimate writer.
+  //
+  // sitePlanOverlayId + sitePlanPoint together are the extra snapshot this anchor kind carries,
+  // the same role parcelApn/parcelGeom play for 'parcel'.
   if (anchor.kind === "site_plan") {
     return !!(anchor.sitePlanOverlayId && anchor.sitePlanPoint &&
       typeof anchor.sitePlanPoint.x === "number" && typeof anchor.sitePlanPoint.y === "number");

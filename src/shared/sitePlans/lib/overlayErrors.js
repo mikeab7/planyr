@@ -19,6 +19,29 @@ export function friendlySaveError(error) {
   const code = String(error.code || "").toLowerCase();
   const msg = String(error.message || error || "").toLowerCase();
 
+  // These two are checked BEFORE the generic SQLSTATE branches below: both raw messages also
+  // contain generic phrasing ("violates check constraint" / "violates foreign key constraint")
+  // that would otherwise match the more generic rule first and give a less specific, less
+  // actionable sentence.
+  //
+  // B972512-HARDENING item 5 — deleting a site plan that still has comps pinned to it hits this
+  // exact constraint (comps_parcel_anchor_has_identity, comps_site_plan_anchor.sql): the FK's
+  // `on delete set null` tries to null out the deleted comp's site_plan_overlay_id, which then
+  // fails the CHECK requiring a 'site_plan' anchor to carry one. The app now checks for this
+  // proactively before attempting a delete (SitePlansSection.jsx), but this stays as the honest
+  // fallback for a race (a comp pinned between the check and the delete) — never the raw
+  // "violates check constraint" text.
+  if (msg.includes("comps_parcel_anchor_has_identity")) {
+    return "Can't delete this site plan — one or more comps are still pinned to it. Remove or re-pin them first.";
+  }
+  // B972512-HARDENING new finding 2 — deleting a brochure forever ("Delete forever" in the
+  // Library, or the 30-day lazy purge) that still has a site-plan overlay built from it hits
+  // this FK (site_plan_overlays_review_id_fkey, changed CASCADE -> RESTRICT so a brochure purge
+  // can never silently destroy a placed plan or the comps pinned to it).
+  if (msg.includes("site_plan_overlays_review_id_fkey")) {
+    return "Can't delete this document forever — a site plan on the map is still built from it. Delete that site plan first, then try again.";
+  }
+
   if (code === "23502" || msg.includes("violates not-null constraint")) {
     return "Couldn't save — something needed was left blank. This looks like a bug on our end; try again, and let us know if it keeps happening.";
   }

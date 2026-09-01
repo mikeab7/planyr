@@ -15,6 +15,8 @@ import {
   createSheet, migrateSheet, setRaw, commitCellText, blankRange, renameColumn, setNumberFormat,
   addColumn, deleteColumn, ensureColumnCount, colAt, cellKey, columnIndexByName, formatAt,
   isFormulaText, usedRangeEnd, padRowCount, sheetsDiverge,
+  insertColumnAt, insertRowAt, deleteRowAt, setColumnWidth, setRowHeight, rowHeightAt, setFreeze,
+  DEFAULT_ROW_H,
 } from "../src/workspaces/model/lib/sheetModel.js";
 
 describe("createSheet", () => {
@@ -29,6 +31,30 @@ describe("createSheet", () => {
     // No `formula` or `format` field on a column any more — both are per-cell now.
     expect(s.columns[0]).not.toHaveProperty("formula");
     expect(s.columns[0]).not.toHaveProperty("format");
+  });
+
+  // ⛔ STAGE 1 (owner report, 2026-09-01, verbatim: "it's kind of embarrassing that it only
+  // goes up to H at first load … this should be a full blown model") — the regression this
+  // guards is exactly that: an 8-column, 200-row default that stopped at H on first paint.
+  it("starts at 26 columns (A..Z) and 1000+ rows — never the old 8-column/200-row ceiling", () => {
+    const s = createSheet();
+    expect(s.columns.length).toBe(26);
+    expect(s.columns[25].name).toBe("Z");
+    expect(s.rowCount).toBeGreaterThanOrEqual(1000);
+  });
+
+  it("columns extend past Z (AA, AB…) on demand — never a hard cap", () => {
+    let s = createSheet();
+    for (let i = 0; i < 5; i++) s = addColumn(s); // Z is index 25; 5 more -> AA..AE
+    expect(s.columns[26].name).toBe("AA");
+    expect(s.columns[30].name).toBe("AE");
+  });
+
+  it("freeze starts at 0/0 (no freeze) and rowHeights starts empty", () => {
+    const s = createSheet();
+    expect(s.freezeRows).toBe(0);
+    expect(s.freezeCols).toBe(0);
+    expect(s.rowHeights).toEqual({});
   });
 });
 
@@ -313,5 +339,197 @@ describe("sheetsDiverge — the cross-device divergence check", () => {
     const a = setNumberFormat(base, 0, 0, 0, 0, "0.0%");
     const b = setNumberFormat(base, 0, 0, 0, 0, "$#,##0");
     expect(sheetsDiverge(a, b)).toBe(true);
+  });
+});
+
+// ⛔ STAGE 1 — structural row/column insert & delete, WITH formula reference shifting. "This
+// is the piece you deferred; it is now required, and it is the classically underestimated one"
+// (owner brief, 2026-09-01). rewriteFormulaForStructuralShift itself is exhaustively unit-tested
+// against hand-derived Excel semantics in test/formula.test.js; these tests prove sheetModel.js
+// actually WIRES it in — relocating the right cells and touching every formula in the sheet, not
+// just the ones that moved.
+describe("insertColumnAt — columns are identity-keyed, so only formulas need rewriting", () => {
+  it("inserts a blank column at the given position, shifting later columns right", () => {
+    let s = createSheet();
+    const origB = colAt(s, 1).id;
+    s = insertColumnAt(s, 1); // insert before B
+    expect(s.columns.length).toBe(27);
+    expect(s.columns[1].name).toBe("B"); // the new column's default name reflects its position
+    expect(colAt(s, 2).id).toBe(origB); // the OLD "B" column's data is untouched by identity
+  });
+
+  it("a formula elsewhere referencing a column at/after the insertion shifts its column ref", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 3, "=D1+1"); // in column D (index 3), referencing itself
+    s = insertColumnAt(s, 1); // insert before B — D shifts to E
+    // The formula physically stayed in the SAME column object (now at index 4, still "D1+1"'s owner)
+    const dCol = colAt(s, 4);
+    expect(s.cells[`${dCol.id}:0`]).toBe("=E1+1");
+  });
+
+  it("a formula BEFORE the insertion point is untouched", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "=A1+1");
+    s = insertColumnAt(s, 5);
+    expect(s.cells[`${colAt(s, 0).id}:0`]).toBe("=A1+1");
+  });
+});
+
+describe("deleteColumn — now also shifts every remaining formula's column references", () => {
+  it("a formula referencing the DELETED column becomes #REF!", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 5, "=B1+1"); // column F (index 5) references column B
+    s = deleteColumn(s, 1); // delete column B
+    const fCol = colAt(s, 4); // F shifted to index 4
+    expect(s.cells[`${fCol.id}:0`]).toBe("=#REF!+1");
+  });
+
+  it("a formula referencing a column AFTER the deleted one shifts left", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "=D1+1"); // column A references column D
+    s = deleteColumn(s, 1); // delete column B
+    expect(s.cells[`${colAt(s, 0).id}:0`]).toBe("=C1+1");
+  });
+
+  it("still refuses to delete the last remaining column (unchanged guard)", () => {
+    let s = createSheet();
+    while (s.columns.length > 1) s = deleteColumn(s, 0);
+    const before = s;
+    expect(deleteColumn(s, 0)).toBe(before);
+  });
+});
+
+describe("insertRowAt / deleteRowAt — rows relocate storage keys AND shift formula refs", () => {
+  it("insertRowAt relocates a cell at/after the insertion point down by one", () => {
+    let s = createSheet();
+    s = setRaw(s, 4, 0, "hello");
+    s = insertRowAt(s, 2); // insert before row index 2 (row 3, 1-based)
+    expect(s.cells[`${colAt(s, 0).id}:5`]).toBe("hello"); // row 4 (0-based) -> row 5
+    expect(s.rowCount).toBe(1001);
+  });
+
+  it("insertRowAt leaves a cell BEFORE the insertion point in place", () => {
+    let s = createSheet();
+    s = setRaw(s, 1, 0, "kept");
+    s = insertRowAt(s, 5);
+    expect(s.cells[`${colAt(s, 0).id}:1`]).toBe("kept");
+  });
+
+  it("insertRowAt shifts a formula's row references sheet-wide, not just the cell that moved", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "=A10+1"); // stays at row 0, references row 10 (which moves)
+    s = insertRowAt(s, 5); // row 10 (index 9) shifts to index 10 -> A11
+    expect(s.cells[`${colAt(s, 0).id}:0`]).toBe("=A11+1");
+  });
+
+  it("deleteRowAt removes the row's own cells and shifts everything below up by one", () => {
+    let s = createSheet();
+    s = setRaw(s, 3, 0, "gone");
+    s = setRaw(s, 5, 0, "shifts up");
+    s = deleteRowAt(s, 3);
+    expect(s.cells[`${colAt(s, 0).id}:4`]).toBe("shifts up"); // was row 5, now row 4
+    expect(Object.values(s.cells)).not.toContain("gone");
+    expect(s.rowCount).toBe(999);
+  });
+
+  it("deleteRowAt turns a reference to the deleted row into #REF!, sheet-wide", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "=A6+1"); // references row index 5 (row 6, 1-based)
+    s = deleteRowAt(s, 5);
+    expect(s.cells[`${colAt(s, 0).id}:0`]).toBe("=#REF!+1");
+  });
+
+  it("a real pro-forma shape: inserting a row inside a SUM range grows the total, deleting one shrinks it", () => {
+    // A1:A3 = 10, 20, 30; A5 = SUM(A1:A3)
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "10"); s = setRaw(s, 1, 0, "20"); s = setRaw(s, 2, 0, "30");
+    s = setRaw(s, 4, 0, "=SUM(A1:A3)");
+    s = insertRowAt(s, 2); // insert before row index 2 (the "30" row) — range should grow to A1:A4
+    expect(s.cells[`${colAt(s, 0).id}:5`]).toBe("=SUM(A1:A4)"); // SUM formula shifted from row 4 to row 5
+    // Now delete the newly-inserted blank row back out — range shrinks back to A1:A3
+    const back = deleteRowAt(s, 2);
+    expect(back.cells[`${colAt(back, 0).id}:4`]).toBe("=SUM(A1:A3)");
+  });
+
+  it("deleteRowAt relocates a row-height override along with the row it belongs to", () => {
+    let s = createSheet();
+    s = setRowHeight(s, 5, 60);
+    s = deleteRowAt(s, 2); // row 5 shifts up to row 4
+    expect(rowHeightAt(s, 4)).toBe(60);
+    expect(rowHeightAt(s, 5)).toBe(DEFAULT_ROW_H);
+  });
+
+  it("insertRowAt/deleteRowAt never shrink the sheet below 1 row", () => {
+    let s = createSheet();
+    for (let i = 0; i < 2000; i++) s = deleteRowAt(s, 0);
+    expect(s.rowCount).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("setColumnWidth / setRowHeight / rowHeightAt — drag-resize", () => {
+  it("setColumnWidth clamps to a sane floor and is a pure setter", () => {
+    let s = createSheet();
+    s = setColumnWidth(s, 0, 200);
+    expect(colAt(s, 0).width).toBe(200);
+    s = setColumnWidth(s, 0, -50);
+    expect(colAt(s, 0).width).toBeGreaterThanOrEqual(24);
+  });
+
+  it("setColumnWidth is a no-op (same reference) when the width doesn't actually change", () => {
+    let s = createSheet();
+    s = setColumnWidth(s, 0, 200);
+    expect(setColumnWidth(s, 0, 200)).toBe(s);
+  });
+
+  it("rowHeightAt reads DEFAULT_ROW_H until overridden, then the override", () => {
+    let s = createSheet();
+    expect(rowHeightAt(s, 3)).toBe(DEFAULT_ROW_H);
+    s = setRowHeight(s, 3, 50);
+    expect(rowHeightAt(s, 3)).toBe(50);
+  });
+
+  it("setRowHeight back to the default REMOVES the override rather than storing it redundantly", () => {
+    let s = createSheet();
+    s = setRowHeight(s, 3, 50);
+    s = setRowHeight(s, 3, DEFAULT_ROW_H);
+    expect(s.rowHeights[3]).toBeUndefined();
+  });
+});
+
+describe("setFreeze — top rows / left columns, clamped to the sheet's real size", () => {
+  it("sets freezeRows/freezeCols and is a pure no-op setter when unchanged", () => {
+    let s = createSheet();
+    s = setFreeze(s, 1, 2);
+    expect(s.freezeRows).toBe(1);
+    expect(s.freezeCols).toBe(2);
+    expect(setFreeze(s, 1, 2)).toBe(s);
+  });
+
+  it("clamps to the sheet's actual row/column count — never freezes more than exists", () => {
+    let s = createSheet();
+    s = setFreeze(s, 99999, 99999);
+    expect(s.freezeRows).toBe(s.rowCount);
+    expect(s.freezeCols).toBe(s.columns.length);
+  });
+});
+
+describe("migrateSheet — backward compatible with a pre-Stage-1 blob", () => {
+  it("a blob with no rowHeights/freezeRows/freezeCols defaults them cleanly, never crashes", () => {
+    const old = createSheet();
+    delete old.rowHeights; delete old.freezeRows; delete old.freezeCols;
+    const migrated = migrateSheet(JSON.parse(JSON.stringify(old)));
+    expect(migrated.rowHeights).toEqual({});
+    expect(migrated.freezeRows).toBe(0);
+    expect(migrated.freezeCols).toBe(0);
+  });
+
+  it("round-trips real rowHeights/freeze state through JSON", () => {
+    let s = createSheet();
+    s = setRowHeight(s, 4, 44);
+    s = setFreeze(s, 1, 1);
+    const migrated = migrateSheet(JSON.parse(JSON.stringify(s)));
+    expect(migrated.rowHeights).toEqual({ 4: 44 });
+    expect(migrated.freezeRows).toBe(1);
+    expect(migrated.freezeCols).toBe(1);
   });
 });

@@ -1908,9 +1908,9 @@ const formatValue = (value, opts) => {
 // but ANY malformed formula, and one with no references at all, is unaffected
 // and returned unchanged, since the loop below simply finds nothing to splice.
 //
-// Row/column INSERT and DELETE (shifting every reference on a sheet edit) is
-// deliberately NOT built here — see CLAUDE.md's engineering notes on this PR;
-// a fixed-layout pro-forma with a fill handle only ever needs copy/fill.
+// Row/column INSERT and DELETE (shifting every reference on a sheet edit) is a
+// DIFFERENT transform — rewriteFormulaForStructuralShift, below — because it must
+// shift $-anchored references too (see that function's own header for why).
 const rewriteFormulaForCopy = (formulaSrc, sourceAddr, targetAddr) => {
   const src = parseRefText(sourceAddr);
   const tgt = parseRefText(targetAddr);
@@ -1959,6 +1959,116 @@ const rewriteFormulaForCopy = (formulaSrc, sourceAddr, targetAddr) => {
       replacement = (from && to) ? `${from}:${to}` : "#REF!";
     } else {
       replacement = shift(t.v) || "#REF!";
+    }
+    out += text.slice(cursor, spanStart) + replacement;
+    cursor = spanEnd;
+    if (isRange) i += 2;
+  }
+  out += text.slice(cursor);
+  return out;
+};
+
+// rewriteFormulaForStructuralShift: shift every reference in a formula's source
+// text when a row or column is INSERTED or DELETED elsewhere in the sheet
+// (Model workspace Stage 1 — this is the piece the header comment above used to
+// say was "deliberately not built" for a fixed-layout pro-forma; a real
+// underwriting model needs it).
+//
+// ⛔ THIS IS NOT rewriteFormulaForCopy WEARING A DIFFERENT NAME — it must shift
+// EVERY reference regardless of $ anchoring. "$" means "don't move this axis
+// when the FORMULA is copied/filled elsewhere" (rewriteFormulaForCopy's job); it
+// has nothing to do with the GRID's own structure changing. Inserting a row above
+// $A$1 must still turn it into $A$2, or every absolute reference in the sheet
+// would silently start pointing at the wrong cell the moment anyone inserted a
+// row above it — exactly the "wrong number that looks right" class this whole
+// engine exists to prevent.
+//
+//   axis:  "row" | "col" — which axis the structural change is on
+//   at:    1-based index of the insertion point (insert) or the deleted line (delete)
+//   delta: +1 (insert a blank line BEFORE `at`) or -1 (delete the line AT `at`)
+//
+// The interval model: treat a reference — scalar OR range — as an inclusive
+// [min,max] span on the changed axis (a scalar is the degenerate span min===max).
+// Insert: any bound >= `at` shifts +1 (a bound sitting exactly at the insertion
+// point is pushed down WITH whatever was already there, matching Excel — insert
+// never grows a range to swallow the new blank line at its own top edge, but a
+// bound strictly INSIDE the span does end up growing the range, since only that
+// bound is >= at while the other stays put). Delete: a bound > `at` shifts -1; a
+// bound === `at` collapses toward its partner (stays if it's the min, drops by 1
+// if it's the max) — after which, if min > max, the ENTIRE reference collapsed
+// (every original address on the changed axis was inside the deleted line) and
+// becomes the literal text "#REF!", same convention rewriteFormulaForCopy uses.
+// Hand-verified against real Excel's own documented insert/delete semantics for
+// every edge shape (delete a range's top/bottom edge shrinks it; delete a range
+// that IS one line collapses it; insert inside a range grows it; insert exactly
+// at a range's own top edge pushes the whole range down rather than growing it).
+//
+// Same token-level technique as rewriteFormulaForCopy (see its header) — walks
+// tokenize()'s own output and splices only each reference/range's span, so every
+// other character is untouched and the two functions can never disagree about
+// what counts as a reference.
+const rewriteFormulaForStructuralShift = (formulaSrc, axis, at, delta) => {
+  const text = String(formulaSrc == null ? "" : formulaSrc);
+  let toks;
+  try { toks = tokenize(text); }
+  catch { return text; } // doesn't even lex — nothing this transform can safely touch
+  const MAX = axis === "row" ? MAX_ROW : MAX_COL;
+  // Shift one [min,max] interval on the changed axis. null = collapsed (#REF!).
+  const shiftInterval = (min, max) => {
+    let minN, maxN;
+    if (delta > 0) {
+      minN = min >= at ? min + 1 : min;
+      maxN = max >= at ? max + 1 : max;
+    } else {
+      minN = min > at ? min - 1 : min;
+      maxN = max >= at ? max - 1 : max;
+    }
+    if (minN > maxN || minN < 1 || maxN > MAX) return null;
+    return { min: minN, max: maxN };
+  };
+  const isRefEligible = (t, idx) => {
+    if (t.t === "ref") return true;
+    if (t.t !== "id") return false;
+    const nextTok = toks[idx + 1];
+    if (nextTok && nextTok.t === "op" && nextTok.v === "(") return false;
+    const up = t.v.toUpperCase();
+    if (up === "TRUE" || up === "FALSE") return false;
+    return parseRefText(t.v) !== null;
+  };
+  // One endpoint's ref text, with its value on the CHANGED axis replaced by
+  // `axisVal`; the other axis and the $-anchoring of BOTH axes ride through
+  // completely untouched — a column insert/delete never touches row anchoring
+  // or vice versa.
+  const shiftRef = (refText, axisVal) => {
+    const info = parseRefText(refText);
+    const col = axis === "col" ? axisVal : info.col;
+    const row = axis === "row" ? axisVal : info.row;
+    return refToText({ col, row, colAbs: info.colAbs, rowAbs: info.rowAbs });
+  };
+  let out = "", cursor = 0;
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i];
+    if (t.t === "eof" || !isRefEligible(t, i)) continue;
+    const isRange = toks[i + 1] && toks[i + 1].t === "op" && toks[i + 1].v === ":" &&
+      toks[i + 2] && isRefEligible(toks[i + 2], i + 2);
+    const endTok = isRange ? toks[i + 2] : t;
+    const spanStart = t.pos, spanEnd = endTok.pos + String(endTok.v).length;
+    const info1 = parseRefText(t.v);
+    const info2 = isRange ? parseRefText(endTok.v) : info1;
+    const v1 = axis === "row" ? info1.row : info1.col;
+    const v2 = axis === "row" ? info2.row : info2.col;
+    const iv = shiftInterval(Math.min(v1, v2), Math.max(v1, v2));
+    let replacement;
+    if (!iv) {
+      replacement = "#REF!";
+    } else if (!isRange) {
+      replacement = shiftRef(t.v, iv.min);
+    } else {
+      // Preserve which endpoint held the min vs the max — a range can be
+      // written ascending (A1:A5) or descending (A5:A1) on this axis.
+      const fromVal = v1 <= v2 ? iv.min : iv.max;
+      const toVal = v1 <= v2 ? iv.max : iv.min;
+      replacement = `${shiftRef(t.v, fromVal)}:${shiftRef(endTok.v, toVal)}`;
     }
     out += text.slice(cursor, spanStart) + replacement;
     cursor = spanEnd;

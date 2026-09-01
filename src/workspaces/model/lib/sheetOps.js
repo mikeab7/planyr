@@ -19,7 +19,7 @@
  * async Clipboard-API permissions, which behave inconsistently across a real browser and a
  * headless test run — a scope call worth stating plainly rather than silently narrowing.
  */
-import { rewriteFormulaForCopy } from "../../../shared/formula/formula.js";
+import { rewriteFormulaForCopy, parseRefText } from "../../../shared/formula/formula.js";
 import { cellAddressText } from "./sheetEngine.js";
 import { ensureColumnCount, isFormulaText, rawAt, setRaw } from "./sheetModel.js";
 
@@ -118,4 +118,74 @@ export function ctrlArrowTarget(hasContent, rowCount, colCount, r, c, dr, dc) {
   let nr = nr0, nc = nc0;
   while (inBounds(nr + dr, nc + dc) && hasContent(nr + dr, nc + dc)) { nr += dr; nc += dc; }
   return { r: nr, c: nc };
+}
+
+// ── Stage 1 — the Name Box (type "C50", jump there / Ctrl+G) ───────────────────────────────
+
+/** Parse a typed Name Box address ("C50", "$C$50", lowercase "c50") into a (rowIndex, colIndex)
+ *  pair, or `null` if it isn't a valid address OR falls outside the sheet's CURRENT bounds —
+ *  the Name Box only ever jumps within the sheet as it exists today, never past it (unlike a
+ *  formula reference, which can legally name a cell that doesn't exist yet). Reuses the formula
+ *  engine's own address grammar (parseRefText) rather than a second, possibly-disagreeing regex. */
+export function parseNameBoxAddress(text, rowCount, colCount) {
+  const info = parseRefText(String(text || "").trim());
+  if (!info) return null;
+  const r = info.row - 1, c = info.col - 1; // parseRefText is 1-based
+  if (r < 0 || r >= rowCount || c < 0 || c >= colCount) return null;
+  return { r, c };
+}
+
+// ── Stage 1 — Find and Replace (Ctrl+F / Ctrl+H) ────────────────────────────────────────────
+
+/** Every cell whose RAW text (never the displayed/formatted value — same convention the
+ *  formula bar uses) contains `needle`, case-insensitive, in row-major order. `[]` for an empty
+ *  needle rather than "everything" (an empty Find box matching every cell is not a useful
+ *  answer and isn't how Excel's own Find behaves either). */
+export function findMatches(sheet, needle) {
+  const n = String(needle || "").toLowerCase();
+  if (!n) return [];
+  const matches = [];
+  for (let r = 0; r < sheet.rowCount; r++) {
+    for (let c = 0; c < sheet.columns.length; c++) {
+      const text = rawAt(sheet, r, c);
+      if (text && String(text).toLowerCase().includes(n)) matches.push({ r, c });
+    }
+  }
+  return matches;
+}
+
+// Case-insensitive substring replace, every occurrence — plain indexOf/slice rather than a
+// RegExp, so `find` never needs regex-metacharacter escaping (a literal "." or "(" in a typed
+// Find box must match itself, not be read as a pattern). Exported (as `replaceInCellText`) so
+// the "Replace" (singular — one match cell at a time) UI action can reuse the exact same
+// substring logic `replaceAll` uses internally, rather than a second, possibly-diverging copy.
+export function replaceInCellText(text, find, replace) {
+  const lower = text.toLowerCase(), needle = find.toLowerCase();
+  let out = "", i = 0;
+  for (;;) {
+    const idx = lower.indexOf(needle, i);
+    if (idx === -1) { out += text.slice(i); break; }
+    out += text.slice(i, idx) + replace;
+    i = idx + needle.length;
+  }
+  return out;
+}
+
+/** Replace every occurrence of `find` with `replace` across every cell's raw text, in ONE pure
+ *  pass — a single undo frame for the whole operation, never one per cell touched. A no-op
+ *  (nothing matched) returns `sheet` unchanged. */
+export function replaceAll(sheet, find, replace) {
+  const needle = String(find || "");
+  if (!needle) return sheet;
+  let s = sheet;
+  let changed = false;
+  for (let r = 0; r < sheet.rowCount; r++) {
+    for (let c = 0; c < sheet.columns.length; c++) {
+      const text = rawAt(s, r, c);
+      if (!text || !String(text).toLowerCase().includes(needle.toLowerCase())) continue;
+      const next = replaceInCellText(String(text), needle, replace);
+      if (next !== text) { s = setRaw(s, r, c, next); changed = true; }
+    }
+  }
+  return changed ? s : sheet;
 }

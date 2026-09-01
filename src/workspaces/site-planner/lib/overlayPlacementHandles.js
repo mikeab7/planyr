@@ -67,6 +67,7 @@ export function createPlacementHandles(map) {
 
   let current = null; // { overlay, imgW, imgH, onLive, onCommit }
   let gesture = false;
+  let cancelGesture = null; // set while a gesture is in flight — destroy()'s safety net
 
   const containerCenter = (overlay) => map.latLngToContainerPoint(L.latLng(overlay.centerLat, overlay.centerLon));
 
@@ -92,15 +93,45 @@ export function createPlacementHandles(map) {
     [tl, tr, br, bl].forEach((p, i) => { corners[i].setAttribute("x", p.x - 5.5); corners[i].setAttribute("y", p.y - 5.5); });
   };
 
+  // B972512-HARDENING item 18 — which gesture owns the touch. `L.DomEvent.stop(e)` on the
+  // handle's own pointerdown only stops THAT one pointer's event from reaching Leaflet — it does
+  // nothing about a SECOND finger landing elsewhere on the map mid-gesture, which is exactly what
+  // Leaflet's own TouchZoom handler is listening for to start a pinch. Unlike the Site Planner's
+  // own reference-image handles this mirrors (a plain canvas, not a Leaflet map — it has no
+  // competing gesture system to fight), THIS map has `dragging`/`touchZoom` enabled by default
+  // (MapFinder's `L.map(...)` passes neither `dragging` nor `touchZoom`, so both default true) —
+  // so a one-finger drag on a corner handle plus an incidental second finger anywhere else on the
+  // screen could start Leaflet's own pinch-zoom AT THE SAME TIME as this module's own scale
+  // gesture, both driving the same overlay's size from two different, uncoordinated inputs — the
+  // same species of bug as the open pinch/marker-displacement issue elsewhere in this codebase,
+  // just for this feature's own handles. Fixed the standard Leaflet way: explicitly own the map's
+  // own gesture handlers for the duration of OUR gesture, never let both be live at once.
   const runGesture = (onMoveFn) => {
     gesture = true;
+    const wasDragging = map.dragging && map.dragging.enabled();
+    const wasTouchZoom = map.touchZoom && map.touchZoom.enabled();
+    if (map.dragging) map.dragging.disable();
+    if (map.touchZoom) map.touchZoom.disable();
     const onMove = (ev) => { onMoveFn(ev); redraw(); };
     const onUp = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       gesture = false;
+      cancelGesture = null;
+      if (wasDragging && map.dragging) map.dragging.enable();
+      if (wasTouchZoom && map.touchZoom) map.touchZoom.enable();
       const done = current;
       if (done) done.onCommit(done.overlay);
+    };
+    // destroy()'s safety net for a controller torn down mid-gesture (e.g. the map unmounts
+    // while a finger is still down) — drops the in-flight commit rather than firing onCommit on
+    // a caller that's gone, but always restores the map's own gesture handlers.
+    cancelGesture = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      gesture = false;
+      if (wasDragging && map.dragging) map.dragging.enable();
+      if (wasTouchZoom && map.touchZoom) map.touchZoom.enable();
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
@@ -168,6 +199,7 @@ export function createPlacementHandles(map) {
     isActive(id) { return !!current && current.overlay.id === id; },
     startMove,
     destroy() {
+      if (cancelGesture) cancelGesture();
       map.off("move zoom viewreset", redraw);
       if (svg.parentNode) svg.parentNode.removeChild(svg);
     },

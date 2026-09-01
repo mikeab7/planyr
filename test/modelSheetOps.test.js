@@ -5,7 +5,10 @@
  */
 import { describe, it, expect } from "vitest";
 import { createSheet, setRaw, commitCellText, rawAt } from "../src/workspaces/model/lib/sheetModel.js";
-import { copyRange, pasteRange, fillDown, ctrlArrowTarget } from "../src/workspaces/model/lib/sheetOps.js";
+import {
+  copyRange, pasteRange, fillDown, ctrlArrowTarget,
+  parseNameBoxAddress, findMatches, replaceAll,
+} from "../src/workspaces/model/lib/sheetOps.js";
 
 describe("copyRange / pasteRange", () => {
   it("copies literal values verbatim to a new location", () => {
@@ -147,5 +150,81 @@ describe("ctrlArrowTarget — Excel's block-jump (Ctrl+Arrow)", () => {
     const has = gridHas(new Set(["0:0", "0:1", "0:2"])); // row 0, columns A-C occupied
     const t = ctrlArrowTarget(has, 200, 8, 0, 0, 0, 1); // right
     expect(t).toEqual({ r: 0, c: 2 });
+  });
+});
+
+// ⛔ STAGE 1 — the Name Box (owner brief: "Name box that ACCEPTS typed input to jump", Ctrl+G).
+describe("parseNameBoxAddress", () => {
+  it("parses a plain A1-style address into a 0-based (row, col) pair", () => {
+    expect(parseNameBoxAddress("C50", 1000, 26)).toEqual({ r: 49, c: 2 });
+    expect(parseNameBoxAddress("a1", 1000, 26)).toEqual({ r: 0, c: 0 }); // case-insensitive
+  });
+  it("accepts $-anchored text the same as plain (the Name Box has no concept of relative/absolute)", () => {
+    expect(parseNameBoxAddress("$C$50", 1000, 26)).toEqual({ r: 49, c: 2 });
+  });
+  it("rejects garbage rather than guessing", () => {
+    expect(parseNameBoxAddress("not an address", 1000, 26)).toBe(null);
+    expect(parseNameBoxAddress("", 1000, 26)).toBe(null);
+  });
+  it("rejects an address OUTSIDE the sheet's current bounds — Name Box jumps within today's sheet, never past it", () => {
+    expect(parseNameBoxAddress("Z1", 1000, 26)).toEqual({ r: 0, c: 25 }); // Z = col 26, within a 26-col sheet
+    expect(parseNameBoxAddress("AA1", 1000, 26)).toBe(null); // col 27, one past a 26-col sheet
+    expect(parseNameBoxAddress("A1001", 1000, 26)).toBe(null); // row 1001, one past a 1000-row sheet
+  });
+});
+
+// ⛔ STAGE 1 — Find and Replace (owner brief: "Ctrl+F and Ctrl+H").
+describe("findMatches", () => {
+  it("finds every cell whose raw text contains the needle, case-insensitive", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "Revenue");
+    s = setRaw(s, 3, 2, "revenue growth");
+    s = setRaw(s, 5, 1, "Cost");
+    expect(findMatches(s, "revenue")).toEqual([{ r: 0, c: 0 }, { r: 3, c: 2 }]);
+  });
+  it("an empty needle matches nothing (not 'everything')", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "x");
+    expect(findMatches(s, "")).toEqual([]);
+  });
+  it("matches a FORMULA cell's raw text, not its computed value", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "=SUM(A1:A2)");
+    expect(findMatches(s, "SUM")).toEqual([{ r: 0, c: 0 }]);
+  });
+});
+
+describe("replaceAll", () => {
+  it("replaces every occurrence across every matching cell in one pass", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "Revenue 2026");
+    s = setRaw(s, 1, 0, "Total Revenue");
+    const r = replaceAll(s, "Revenue", "Income");
+    expect(rawAt(r, 0, 0)).toBe("Income 2026");
+    expect(rawAt(r, 1, 0)).toBe("Total Income");
+  });
+  it("replaces MULTIPLE occurrences within the SAME cell", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "foo foo foo");
+    expect(rawAt(replaceAll(s, "foo", "bar"), 0, 0)).toBe("bar bar bar");
+  });
+  it("is case-insensitive but preserves the REPLACEMENT text's own case exactly as typed", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "REVENUE and revenue");
+    expect(rawAt(replaceAll(s, "revenue", "Income"), 0, 0)).toBe("Income and Income");
+  });
+  it("a literal regex-special character in Find matches itself, not a pattern", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "=A1*0.05");
+    expect(rawAt(replaceAll(s, "A1*0.05", "A2*0.10"), 0, 0)).toBe("=A2*0.10");
+  });
+  it("a no-op (nothing matches) returns the SAME sheet reference — no undo frame minted for nothing", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "hello");
+    expect(replaceAll(s, "nomatch", "x")).toBe(s);
+  });
+  it("an empty find is a no-op, not a crash", () => {
+    let s = createSheet();
+    expect(replaceAll(s, "", "x")).toBe(s);
   });
 });

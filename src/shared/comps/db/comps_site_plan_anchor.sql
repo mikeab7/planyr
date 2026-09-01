@@ -2,13 +2,15 @@
 -- plan (B848848). ADDITIVE migration; run once in the Supabase SQL editor AFTER comps.sql
 -- and sitePlans/db/site_plan_overlays.sql. Idempotent.
 --
--- `lat`/`lon` stay NOT NULL and authoritative on every comp, per the existing contract every
--- map view/list/filter already relies on (comps.sql) — a site-plan-anchored comp's lat/lon
--- come straight from the real map click on the placed plan (never left null). `site_plan_point`
--- is the extra snapshot this anchor kind carries — the click's lat/lon run back through the
--- overlay's placement (shared/sitePlans/lib/overlayGeoref.js latLonToImagePoint) to the
--- image-pixel point it corresponds to, for provenance/redraw — the same shape
--- `parcel_apn`/`parcel_geom` already play for the 'parcel' anchor kind.
+-- `lat`/`lon` stay NOT NULL on every comp, per the existing contract every map view/list/filter
+-- already relies on (comps.sql) — but for a 'site_plan' anchor they are a DERIVED CACHE, not the
+-- source of truth: `site_plan_point` (the {x,y} image-pixel point on the overlay the user
+-- actually clicked) is authoritative, and lat/lon is that point run through the overlay's
+-- CURRENT placement transform (shared/sitePlans/lib/overlayGeoref.js). See comps.js's
+-- `validAnchor` for the full B972512-HARDENING item 2 writeup and
+-- site_plan_overlays_comp_sync.sql for the mechanism (a SECURITY DEFINER RPC pair) that keeps
+-- lat/lon in sync every time the overlay moves, including for a comp its own owner can't
+-- normally write (comps' own UPDATE policy below is owner-only).
 --
 -- Coordination note: another session may be reworking `anchor_kind`'s switch in application
 -- code (lib/comps.js) to be open-ended rather than an exhaustive two-way branch — this

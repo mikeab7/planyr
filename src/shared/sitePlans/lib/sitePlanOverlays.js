@@ -45,6 +45,7 @@ export function rowToOverlay(r) {
     opacity: r.opacity != null ? Number(r.opacity) : 0.85,
     visible: r.visible !== false,
     locked: !!r.locked,
+    version: r.version != null ? Number(r.version) : 1, // B972512-HARDENING item 7
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };

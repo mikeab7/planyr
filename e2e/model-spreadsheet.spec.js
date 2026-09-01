@@ -292,3 +292,158 @@ test.describe("Model workspace — spreadsheet vertical slice", () => {
     await expect(page.locator('[data-testid^="model-col-header-"]')).toHaveCount(start + 2);
   });
 });
+
+/* ⛔ STAGE 1 (owner report, 2026-09-01 — "this should be a full blown model") — the grid grows
+ * up (26-column / 1000-row default, extending past both on demand) and gains real structural
+ * editing: insert/delete row AND column with formulas re-anchoring sheet-wide (not just the
+ * cells that moved — proven below by reading the actual recomputed number back, never by
+ * asserting a control exists), freeze panes, drag-resize + autofit, right-click context menus,
+ * a Name Box (type an address, jump there / Ctrl+G), and Find/Replace (Ctrl+F / Ctrl+H).
+ */
+test.describe("Model workspace — Stage 1 (grid capacity, structural editing, freeze, find/replace)", () => {
+  test("the default sheet starts at 26 columns (A..Z) and never caps at H", async ({ page }) => {
+    const id = "e2e-stage1-columns";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await expect(sheetEl(page)).toBeVisible();
+    await expect(page.locator('[data-testid^="model-col-header-"]')).toHaveCount(26);
+    await expect(page.getByTestId("model-col-header-25")).toHaveText("Z");
+  });
+
+  test("inserting a row via the row-header context menu GROWS a SUM range that spans it, and deleting it back SHRINKS the range back — read the actual number, not the control", async ({ page }) => {
+    const id = "e2e-stage1-insert-row";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await cell(page, 0, 1).click(); await typeAndEnter(page, "5000000");  // B1 Land
+    await cell(page, 1, 1).click(); await typeAndEnter(page, "20000000"); // B2 Hard costs
+    await cell(page, 2, 1).click(); await typeAndEnter(page, "3000000");  // B3 Soft costs
+    await cell(page, 4, 1).click(); await typeAndEnter(page, "=SUM(B1:B3)"); // B5 Total
+    await expect(cell(page, 4, 1)).toHaveText("28000000");
+
+    // Right-click the row-2 header ("Hard costs") — Insert row above.
+    await page.getByTestId("model-row-header-1").click({ button: "right" });
+    await page.getByText("Insert row above", { exact: true }).click();
+    await cell(page, 1, 1).click(); await typeAndEnter(page, "1000000"); // new row 2: Contingency
+    // The Total's SUM formula (now one row down, at B6) must have grown to include the new row.
+    await expect(cell(page, 5, 1)).toHaveText("29000000");
+
+    // Delete that same row back out via the row-header menu.
+    await page.getByTestId("model-row-header-1").click({ button: "right" });
+    await page.getByText("Delete row", { exact: true }).click();
+    await expect(cell(page, 4, 1)).toHaveText("28000000");
+  });
+
+  test("inserting a column via the column-header context menu shifts the cell content AND a formula's own column reference", async ({ page }) => {
+    const id = "e2e-stage1-insert-col";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await cell(page, 0, 1).click(); await typeAndEnter(page, "Amount"); // B1
+    await cell(page, 1, 1).click(); await typeAndEnter(page, "=B1");    // B2, self-referencing column B by address
+
+    await page.getByTestId("model-col-header-1").click({ button: "right" });
+    await page.getByText("Insert column left", { exact: true }).click();
+    await expect(page.locator('[data-testid^="model-col-header-"]')).toHaveCount(27);
+    // "Amount" (the row-0 cell content) followed its column from B to C.
+    await expect(cell(page, 0, 2)).toHaveText("Amount");
+    // The formula that read "B1" must now read "C1" — proven by its VALUE still resolving
+    // correctly to "Amount" at its new home (C2), not by inspecting the formula text.
+    await expect(cell(page, 1, 2)).toHaveText("Amount");
+  });
+
+  test("the Name Box accepts a typed address and jumps there; Ctrl+G focuses it", async ({ page }) => {
+    const id = "e2e-stage1-namebox";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await expect(sheetEl(page)).toBeVisible();
+
+    const nameBox = page.getByTestId("model-name-box");
+    await nameBox.click();
+    await page.keyboard.press("Control+a");
+    await page.keyboard.type("J50");
+    await page.keyboard.press("Enter");
+    const active = page.getByTestId("model-active-cell");
+    await expect(active).toHaveAttribute("data-row", "49");
+    await expect(active).toHaveAttribute("data-col", "9");
+
+    // Control+Home rather than re-clicking cell(0,0) directly: the jump to J50 scrolled row 0 /
+    // col 0 out of the virtualized window (only the visible slice of rows/cols is in the DOM), so
+    // a locator for it times out — Control+Home both scrolls back and re-establishes a known
+    // active cell in one native keystroke, same pattern the Ctrl+Home/End test above already uses.
+    await sheetEl(page).click();
+    await page.keyboard.press("Control+Home");
+    await page.keyboard.press("Control+g");
+    await expect(nameBox).toBeFocused();
+  });
+
+  test("Ctrl+F finds every cell containing the search text, case-insensitive, across the sheet", async ({ page }) => {
+    const id = "e2e-stage1-find";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await cell(page, 0, 0).click(); await typeAndEnter(page, "Revenue 2026");
+    await cell(page, 3, 2).click(); await typeAndEnter(page, "revenue growth");
+    await cell(page, 1, 0).click(); await typeAndEnter(page, "Cost");
+
+    await page.keyboard.press("Control+f");
+    await page.getByTestId("model-find-input").fill("revenue");
+    await expect(page.getByTestId("model-find-count")).toHaveText("1/2");
+  });
+
+  test("Ctrl+H Replace All rewrites every matching cell's text in one pass", async ({ page }) => {
+    const id = "e2e-stage1-replace";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await cell(page, 0, 0).click(); await typeAndEnter(page, "Land Cost");
+    await cell(page, 1, 0).click(); await typeAndEnter(page, "Total Cost");
+
+    await page.keyboard.press("Control+h");
+    await page.getByTestId("model-find-input").fill("Cost");
+    await page.getByTestId("model-replace-input").fill("Expense");
+    await page.getByTestId("model-replace-all").click();
+    await expect(cell(page, 0, 0)).toHaveText("Land Expense");
+    await expect(cell(page, 1, 0)).toHaveText("Total Expense");
+  });
+
+  test("freezing the top row keeps it visible after scrolling deep into the sheet, and Unfreeze releases it", async ({ page }) => {
+    const id = "e2e-stage1-freeze";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await cell(page, 0, 0).click(); await typeAndEnter(page, "Header Row");
+
+    await page.getByTestId("model-row-header-0").click({ button: "right" });
+    await page.getByText("Freeze top row", { exact: true }).click();
+
+    await sheetEl(page).evaluate((el) => { el.scrollTop = 8000; });
+    await expect(cell(page, 0, 0)).toBeVisible();
+    await expect(cell(page, 0, 0)).toHaveText("Header Row");
+
+    await cell(page, 0, 0).click({ button: "right" });
+    await page.getByText("Unfreeze panes", { exact: true }).click();
+    await sheetEl(page).evaluate((el) => { el.scrollTop = 0; });
+  });
+
+  test("dragging a column header's right edge resizes the column; double-click autofits it", async ({ page }) => {
+    const id = "e2e-stage1-colresize";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await cell(page, 0, 1).click(); await typeAndEnter(page, "A modestly long value for autofit");
+
+    const header = page.getByTestId("model-col-header-1");
+    const before = await header.boundingBox();
+    await page.mouse.move(before.x + before.width - 2, before.y + before.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(before.x + before.width + 100, before.y + before.height / 2);
+    await page.mouse.up();
+    const afterDrag = await header.boundingBox();
+    expect(afterDrag.width).toBeGreaterThan(before.width + 60);
+
+    // Double-click the narrow resize-handle strip at the header's right edge, not the header's
+    // center — the center has its OWN double-click (rename the column) and a plain `.dblclick()`
+    // (which targets the locator's bounding-box center) would hit that instead of autofit, same
+    // as real Excel: double-clicking a column header's body does not autofit, only its border does.
+    await page.mouse.dblclick(afterDrag.x + afterDrag.width - 2, afterDrag.y + afterDrag.height / 2);
+    const afterAutofit = await header.boundingBox();
+    // Autofit sizes to the actual rendered text, not to wherever the drag happened to land.
+    expect(afterAutofit.width).not.toBe(afterDrag.width);
+    expect(afterAutofit.width).toBeGreaterThan(40);
+  });
+});
