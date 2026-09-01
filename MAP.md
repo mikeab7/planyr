@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-01 @ `5fede2537` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-01 @ `e96f9db9a` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -182,7 +182,7 @@ _637 source files mapped._
 - **`src/workspaces/notes/lib/notesMarquee.js`** — PURE: one gesture on empty page, two meanings, decided by distance — place below the slop, marquee above it. Also the band's rectangle, which boxes it caught, shift-toggling, arrow nudges, and moving a whole set by ONE clamped delta so the arrangement cannot deform.
   - _exports_: `applyMarquee`, `boxesInMarquee`, `DRAG_SLOP`, `dragDistance`, `gestureOutcome`, `marqueeRect`, `moveSelection`, `NUDGE_STEP`, `NUDGE_STEP_FAST`, `nudgeDelta`, `rectsOverlap`, `toggleSelection`
 - **`src/workspaces/notes/lib/notesModel.js`** — PURE notebook › section › page tree schema, page timestamps, every structural op (add/rename/move/delete/search/migrate) and the 30-day BIN. `deleteNode` is a soft delete that still computes the FULL cascade of orphaned page ids and stamps it on the trash entry.
-  - _exports_: `addPage`, `adoptUnreachable`, `allPageIds`, `ancestorIds`, `boundProjectIds`, `commitTitle`, `COPY_SUFFIX`, `copyPageWithin`, `countNodes`, `DEFAULT_PAGE_TITLE`, `deleteNode`, `descendantPageIds`, `displayTitle`, `dropPages`, `emptyTree`, `expiredTrashIds`, `findPage`, `firstPageId`, `makePage`, `migrate`, `movePage`, `moveProjectNotes`, `newId`, `NO_PROJECT`, `NO_PROJECT_LABEL`, `NOTES_TREE_VERSION`, `pageProjectIndex`, `pagesInScope`, `projectGroups`, `projectNoteCensus`, `projectOfPage`, `purgeTrashEntry`, `recentPages`, `recoveredTitle`, `renameNode`, `restoreNode`, `SCOPE_ALL`, `SCOPE_PROJECT`, `searchTitles`, `setPageProject`, `subpagesPhrase`, `subtreePageIds`, `TOMB_RETENTION_DAYS`, `tombstoneIds`, `touchPage`, `TRASH_RETENTION_DAYS`, `trashEntries`, `trashPageIds`, `walkPages`, `withTombstones`
+  - _exports_: `addPage`, `adoptUnreachable`, `allPageIds`, `ancestorIds`, `boundProjectIds`, `commitTitle`, `COPY_SUFFIX`, `copyPageWithin`, `countNodes`, `DEFAULT_PAGE_TITLE`, `deleteNode`, `descendantPageIds`, `displayTitle`, `dropPages`, `emptyTree`, `expiredTrashIds`, `findPage`, `firstPageId`, `makePage`, `migrate`, `movePage`, `moveProjectNotes`, `newId`, `NO_PROJECT`, `NO_PROJECT_LABEL`, `NOTES_TREE_VERSION`, `ORG_GROUP_LABEL`, `pageProjectIndex`, `pagesInScope`, `projectGroups`, `projectNoteCensus`, `projectOfPage`, `purgeTrashEntry`, `recentPages`, `recoveredTitle`, `renameNode`, `restoreNode`, `SCOPE_ALL`, `SCOPE_ORG`, `SCOPE_PROJECT`, `searchTitles`, `setPageOrgScope`, `setPageProject`, `subpagesPhrase`, `subtreePageIds`, `TOMB_RETENTION_DAYS`, `tombstoneIds`, `touchPage`, `TRASH_RETENTION_DAYS`, `trashEntries`, `trashPageIds`, `walkPages`, `withTombstones`
 - **`src/workspaces/notes/lib/notesOutline.js`** — PURE outline of a document: headings, their ProseMirror positions, the active section, and which rows fold.
   - _exports_: `activeOutlineIndex`, `LEAF_NODES`, `nodeSize`, `outlineFromDoc`, `outlineHasChildren`, `textOfNode`, `visibleOutline`
 - **`src/workspaces/notes/lib/notesPastePlain.js`** — Word's three paste modes (keep source · merge formatting · keep text only) plus the structural sanitisation — nbsp spacer collapse, layout-table unwrap, list-lift — that runs in all three.
@@ -240,7 +240,7 @@ _637 source files mapped._
   - _exports_: `default (BrandMark)`
 - **`src/shared/brand/tokens.js`** — Planyr brand palette constants (coral tier faces, linework, surfaces, wordmark colors) mirroring the CSS --coral-* vars for inline-styled chrome
   - _exports_: `BRAND`, `default`
-- **`src/shared/cloud/optimisticUpsert.js`** — Optimistic-concurrency (id,version) compare-and-swap upsert for sites/doc_reviews: casUpsert, keepaliveCasPush, missing-column degrade, typed conflict interpreters
+- **`src/shared/cloud/optimisticUpsert.js`** — Optimistic-concurrency compare-and-swap upsert for sites/doc_reviews/model_sheets, conflict target configurable per caller (single-column id default, composite e.g. user_id,id): casUpsert, degradeUpsert, keepaliveCasPush, missing-column degrade, typed conflict interpreters
   - _exports_: `casUpsert`, `degradeUpsert`, `interpretCas`, `interpretInsert`, `isMissingColumn`, `isMissingVersionColumn`, `keepaliveCasPush`
 - **`src/shared/cloud/serializeWrites.js`** — Per-key write serializer: makeWriteSerializer chains same-key cloud writes in order so a tab can't race itself into a false version conflict
   - _exports_: `makeWriteSerializer`
@@ -252,13 +252,13 @@ _637 source files mapped._
   - _exports_: `default (CompsPanel)`
 - **`src/shared/comps/components/PartyNameField.jsx`** — Comp form party-name field: plain text input + a loose-match suggestion listbox (accessible combobox, independent of the map toolbar's PlaceSearchField)
   - _exports_: `default (PartyNameField)`
-- **`src/shared/comps/lib/compDates.js`** — Pure display/parse bridge between the ISO date comps always store and the mm/dd/yy a person reads and types (liberal parsing: ISO, slash/dash numeric, or a month name; never guesses)
+- **`src/shared/comps/lib/compDates.js`** — comp date display/parse: ISO <-> mm/dd/yy, flexible typed-date parsing (slash/dash-numeric, month-name, 2- or 4-digit year) — storage is always ISO, this is the one crossing point to what a person reads/types
   - _exports_: `formatDateDisplay`, `parseTypedDate`
 - **`src/shared/comps/lib/compDrafts.js`** — pure row<->model mapping for public.comp_import_drafts (B849233), mirroring comps.js's rowToComp/compToRow shape
   - _exports_: `importDraftToInsertRow`, `rowToImportDraft`
 - **`src/shared/comps/lib/compDraftsStore.js`** — Supabase CRUD for public.comp_import_drafts (owner-only, no team visibility); promoteDraft is the moment comps' strict constraints get enforced, writing the reason back onto the row on failure
   - _exports_: `deleteDraft`, `fetchMyDrafts`, `insertDrafts`, `promoteDraft`, `updateDraftProposed`
-- **`src/shared/comps/lib/compLocationText.js`** — Pure Location-cell text for a comp's anchor: an APN for a parcel, a site-plan overlay's own title for a site_plan point, or the synchronous county/coordinate fallback for a bare pin (reverse-geocoded address is wired up async elsewhere) — never one identity substituted for another
+- **`src/shared/comps/lib/compLocationText.js`** — pure Location-cell identity text per anchor kind: an APN (or "N parcels · County") for a parcel, a site-plan overlay's own title for a site_plan point, and the synchronous County/coords fallback for a pin while its reverse geocode is pending
   - _exports_: `parcelLocationText`, `pinFallbackText`, `siteplanLocationText`
 - **`src/shared/comps/lib/compMarkerIcon.js`** — Pure map-marker spec for a comp: a small colored tag (hue per comp type), deliberately a different silhouette from sitePinIcon
   - _exports_: `compMarkerColor`, `compMarkerSize`, `compMarkerSvg`

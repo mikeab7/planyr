@@ -55,6 +55,8 @@ paths and are noted only at the boundary.
 | **A parcel's lineage** (`parentId`) | the **stamp is historical only** — a split child's parent id is never re-read as a live pointer once `performSplit` deletes the parent (deliberately, B472048/B472049) | `lineageDepth` (only for split-letter naming) vs. `depth` (the CURRENT resolvable tree — the one indentation must walk) | `performSplit` | current resolvable tree wins for every live-facing purpose; the stamp is provenance only |
 | **A Doc Review file** | one row in `public.doc_reviews` + the byte payload in Google Drive (`server/storage/`) + a queryable fact index in `public.file_facts` | none — the Drive file id is the one pointer, held in Postgres so a stateless Cloudflare Function can't lose it | chunked upload through `/api/uploads/*`, resumable-session-backed | not multi-writer today (single uploader per file); out of this audit's depth |
 | **Account prefs / admin allowlist** | `public.profiles.prefs` (jsonb, own-row RLS) / `public.admin_users` (zero client SELECT policy, `is_admin()` RPC only) | `planStyle`'s in-memory "account layer" | direct row write / not client-writable at all | not multi-writer; out of scope here |
+| **A note page's SCOPE** (org vs. project vs. none — NEW-1, org scope) | the page's own ROOT node in the Notes tree: `orgScope: true` (omitted when false) or `projectId` (`null`/a real id) — mutually exclusive, never both, never a sentinel `projectId` value | none — a subpage's scope is derived from its root (`projectOfPage`), never stored a second time | `setPageOrgScope`/`setPageProject`/`movePage`/`addPage` (`lib/notesModel.js`), synced as part of the whole tree blob via `notesCloud.js`'s `mergeTrees` | **`filedAt` recency** — the newer side's whole filing decision (project id + org flag, together) wins when both sides are roots; on a tie, **local wins** (same rule the project half already used, B421493, now covering both destinations) |
+| **A Doc Review file's SCOPE** (org vs. project vs. unfiled — NEW-1, org scope) | the review's `orgScope` flag, carried inside `doc_reviews.data` (the record jsonb) exactly like every other record field — no new migrated column, extracted back out via `data->orgScope` (the same trick `placed`/`sfile`/`folderId` already use) | none | `fileNewReview`/`refileReview` (`doc-review/lib/reviewStore.js`); the Drive byte path is `organization/<discipline>/…`, a real top-level folder sibling to `project-*`, never folded into `project-unfiled` (which means "not yet classified", a different fact) | last write wins (same as every other `doc_reviews` field — CAS-guarded by the row's `version`, §1's existing row) |
 
 ---
 
@@ -118,6 +120,21 @@ Each is phrased as a testable sentence, followed by what proves it and its **cur
 13. **Hard row `DELETE` is never used for ordinary deletion** — deletion is a tombstone `UPDATE`
     (`deleted_at`/`deleted_by` set, `data` retained for Restore); a real `DELETE` is reserved for a
     future purge and RLS-gated to the owner/a team admin. — `db/site_elements.sql`. **✅ holds.**
+14. **A note page or a Doc Review file has exactly ONE destination — a project, the Organization,
+    or nowhere — never two at once, and Organization is never spelled as a sentinel project id.**
+    (NEW-1, org scope.) `setPageOrgScope`/`setPageProject` each clear the other's field on write;
+    `movePage`'s root-placement branch treats an explicit `orgScope:true` and an explicit
+    `projectId` as mutually exclusive destinations; `fileNewReview`/`refileReview` do the same for
+    Doc Review. Reads agree: `pagesInScope(tree, projectId, SCOPE_ORG)` and a file's `orgScope`
+    flag are checked *before* the "no project" fallback everywhere a page/file's home is
+    captioned, so an org item never reads as "Not in a project" / "unfiled" (the two are different
+    facts — the first is a deliberate destination, the second is "nobody has said yet"). **✅
+    holds** — `test/notesModel.test.js`, `test/notesSync.test.js` (the merge's `orgScope`/
+    `projectId` pair travels together under `filedAt` recency), `test/fileFacts.test.js` (`unfiled`
+    is false for an org-scoped file). No migrated column exists for either kind of content's org
+    flag by design (§1's own rows) — Notes rides the existing tree-blob sync, Doc Review rides the
+    existing `data` jsonb extraction — so there is nothing for a partial migration to disagree
+    with.
 
 ---
 

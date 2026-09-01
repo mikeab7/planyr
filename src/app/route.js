@@ -11,16 +11,22 @@
  * deploy risk. The segment SHAPE matches the spec (`/project/:id/:module`) after the
  * `#`, so swapping to real paths later (if base flips to "/") is a localized change.
  *
- * Route shape: { module, projectId, cross }
+ * Route shape: { module, projectId, cross, org }
  *   module    — workspace id ('site-planner' | 'scheduler' | 'doc-review' | 'library')
  *   projectId — active project (a Site Planner site-group id) | null
  *   cross     — cross-project mode (the tree spans all of the user's projects)
+ *   org       — ORG SCOPE (NEW-1): standing in the Organization, not any project. Mutually
+ *               exclusive with `projectId`/`cross` by construction — a route never sets more
+ *               than one of the three, and `buildHash` gives each its own grammar segment
+ *               rather than a flag riding inside another's shape (a real, distinct scope in
+ *               routing, never a sentinel `projectId`).
  *
  * Hash grammar:
  *   #/                       -> dashboard (default module, no project)
  *   #/<slug>                 -> module, no project (e.g. #/markup = pick-a-project)
  *   #/all/<slug>             -> cross-project mode for that module
  *   #/project/<id>/<slug>    -> project + module
+ *   #/org/<slug>             -> ORG SCOPE for that module (Notes, Library)
  * The URL uses friendly module slugs (site/schedule/markup), matching the header tabs.
  */
 import { useCallback, useEffect, useState } from "react";
@@ -31,21 +37,24 @@ export const SLUG_BY_MODULE = { "site-planner": "site", scheduler: "schedule", "
 
 const slugFor = (module) => SLUG_BY_MODULE[module] || SLUG_BY_MODULE[DEFAULT_MODULE];
 
-/* Pure: a location.hash string -> { module, projectId, cross }. Tolerant of junk
+/* Pure: a location.hash string -> { module, projectId, cross, org }. Tolerant of junk
  * (unknown slug -> default module) so a hand-typed / stale URL never throws. */
 export function parseRoute(hash) {
   const raw = String(hash || "").replace(/^#/, "");
   const segs = raw.split("/").filter(Boolean); // "/project/abc/markup" -> ["project","abc","markup"]
-  if (segs.length === 0) return { module: DEFAULT_MODULE, projectId: null, cross: false };
+  if (segs.length === 0) return { module: DEFAULT_MODULE, projectId: null, cross: false, org: false };
   if (segs[0] === "project" && segs.length >= 2) {
     let id = segs[1];
     try { id = decodeURIComponent(id); } catch (_) { /* keep raw on malformed escape */ }
-    return { module: MODULE_BY_SLUG[segs[2]] || DEFAULT_MODULE, projectId: id || null, cross: false };
+    return { module: MODULE_BY_SLUG[segs[2]] || DEFAULT_MODULE, projectId: id || null, cross: false, org: false };
   }
   if (segs[0] === "all") {
-    return { module: MODULE_BY_SLUG[segs[1]] || DEFAULT_MODULE, projectId: null, cross: true };
+    return { module: MODULE_BY_SLUG[segs[1]] || DEFAULT_MODULE, projectId: null, cross: true, org: false };
   }
-  return { module: MODULE_BY_SLUG[segs[0]] || DEFAULT_MODULE, projectId: null, cross: false };
+  if (segs[0] === "org") {
+    return { module: MODULE_BY_SLUG[segs[1]] || DEFAULT_MODULE, projectId: null, cross: false, org: true };
+  }
+  return { module: MODULE_BY_SLUG[segs[0]] || DEFAULT_MODULE, projectId: null, cross: false, org: false };
 }
 
 /* THE ROUTE THAT RESOLVED TO NOTHING — the definitive stale-build signal (B1373).
@@ -65,7 +74,7 @@ export function parseRoute(hash) {
 export function unknownModuleSlug(hash) {
   const segs = String(hash || "").replace(/^#/, "").split("/").filter(Boolean);
   if (segs.length === 0) return null;
-  const slug = segs[0] === "project" ? segs[2] : segs[0] === "all" ? segs[1] : segs[0];
+  const slug = segs[0] === "project" ? segs[2] : segs[0] === "all" || segs[0] === "org" ? segs[1] : segs[0];
   // "#/project/<id>" with no module segment is a legitimate shorthand, not a miss.
   if (!slug) return null;
   // "admin" is a real, resolvable destination (see isAdminRoute) that just isn't one of
@@ -99,17 +108,19 @@ export function isDesignRoute(hash) {
   return segs[0] === DESIGN_SLUG;
 }
 
-/* Pure: { module, projectId, cross } -> a "#/..." hash string. */
-export function buildHash({ module = DEFAULT_MODULE, projectId = null, cross = false } = {}) {
+/* Pure: { module, projectId, cross, org } -> a "#/..." hash string. */
+export function buildHash({ module = DEFAULT_MODULE, projectId = null, cross = false, org = false } = {}) {
   const slug = slugFor(module);
   if (cross) return `#/all/${slug}`;
+  if (org) return `#/org/${slug}`;
   if (projectId) return `#/project/${encodeURIComponent(projectId)}/${slug}`;
   // No project = dashboard. Default module gets the clean "#/" home; others name the slug.
   return module === DEFAULT_MODULE ? "#/" : `#/${slug}`;
 }
 
 export function sameRoute(a, b) {
-  return !!a && !!b && a.module === b.module && (a.projectId || null) === (b.projectId || null) && !!a.cross === !!b.cross;
+  return !!a && !!b && a.module === b.module && (a.projectId || null) === (b.projectId || null)
+    && !!a.cross === !!b.cross && !!a.org === !!b.org;
 }
 
 export function readRoute() {

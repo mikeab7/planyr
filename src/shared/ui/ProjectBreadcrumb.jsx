@@ -74,6 +74,24 @@ const DashboardIcon = ({ size = 13 }) => (
   </svg>
 );
 
+// ORG SCOPE (NEW-1) — a small building glyph for the switcher's "Organization" row, drawn in
+// this file's own idiom (stroke, currentColor) rather than a text/emoji glyph — same reasoning
+// as PencilIcon/TrashIcon/KebabIcon below.
+const OrgIcon = ({ size = 13 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    style={{ flex: "none", display: "block" }}>
+    <rect x="4" y="3" width="10" height="18" rx="1" />
+    <rect x="14" y="9" width="6" height="12" rx="1" />
+    <line x1="7.5" y1="7" x2="7.5" y2="7.01" />
+    <line x1="10.5" y1="7" x2="10.5" y2="7.01" />
+    <line x1="7.5" y1="11" x2="7.5" y2="11.01" />
+    <line x1="10.5" y1="11" x2="10.5" y2="11.01" />
+    <line x1="7.5" y1="15" x2="7.5" y2="15.01" />
+    <line x1="10.5" y1="15" x2="10.5" y2="15.01" />
+  </svg>
+);
+
 // Private-by-default lock (Work Item A gotcha): a project a user lands on is one only
 // they can see. The lock keeps that visible, so any future sharing always reads as a
 // deliberate act — never an accidental exposure.
@@ -248,6 +266,12 @@ export default function ProjectBreadcrumb({
   // Cross-project mode (Work Item A): the file tree spans ALL of the user's projects, so
   // the project crumb reads "All projects" instead of a single name. Off by default.
   cross = false,
+  // ORG SCOPE (NEW-1) — a third, real switcher destination alongside a project and the
+  // Dashboard: true while standing in the Organization (never together with `cross` or a
+  // real `currentProject`). `onSelectOrg`, when supplied, adds the entry to the dropdown; a
+  // caller that omits it (Scheduler's bridged switcher) simply doesn't offer the row.
+  org = false,
+  onSelectOrg,
   // Optional trailing crumb rendered right after the project crumb, with the SAME "/"
   // separator as the crumbs above it. The Site Planner passes its plan switcher here so the
   // project name stays in exactly one place and the plan sits beside it: Map / Project / Plan.
@@ -398,6 +422,9 @@ export default function ProjectBreadcrumb({
     onSelectProject?.(id, name);
   };
   const newProject = () => { setOpen(false); flagIfAtRisk(); onNewProject?.(); };
+  // ORG SCOPE (NEW-1) — same shape as pickProject/newProject: close the dropdown, surface an
+  // at-risk save on the way out, hand off to the caller.
+  const pickOrg = () => { setOpen(false); if (!org) flagIfAtRisk(); onSelectOrg?.(); };
 
   // A same-tab store write does NOT fire the native 'storage' event, so after an uncontrolled
   // rename/delete we nudge the app's existing planarfit:sites listeners (SitePlannerApp's site/
@@ -586,22 +613,27 @@ export default function ProjectBreadcrumb({
         ref={anchorRef}
         data-testid="project-crumb"
         onClick={() => setOpen((o) => !o)}
-        title={cross ? "Browsing all projects" : currentProject ? "Switch project" : "Choose a project"}
+        /* NEW-2 — the tooltip named only "project" outcomes; once the switcher can also open
+           the Organization, both branches of that sentence needed a third case. */
+        title={cross ? "Browsing all projects" : org ? "Browsing your organization's notes and library" : currentProject ? "Switch project" : "Choose a project or organization"}
         aria-haspopup="menu"
         aria-expanded={open}
         /* NEW-2 — shrinkable BETWEEN two bounds. The name ellipsises down to the floor and no
            further, so the lock, the ⚠ and the ▾ always have room and the crumb never becomes a
            sliver you cannot aim at. */
-        style={crumbBtn({ color: (currentProject || cross) ? INK : MUTED, flex: "0 1 auto", maxWidth: 240, minWidth: CRUMB_MIN_W })}
+        style={crumbBtn({ color: (currentProject || cross || org) ? INK : MUTED, flex: "0 1 auto", maxWidth: 240, minWidth: CRUMB_MIN_W })}
       >
-        {currentProject && !cross && (
+        {currentProject && !cross && !org && (
           <span title="Private: only you can see this project. Sharing is always a deliberate act."
             style={{ flex: "none", color: MUTED, display: "flex", alignItems: "center" }}>
             <LockIcon />
           </span>
         )}
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {cross ? "All projects" : (currentName || "Select a project")}
+          {/* NEW-2 — the same fix, on the crumb's own visible text: it used to fall straight
+              to "Select a project" whenever nothing was picked, which is wrong the moment the
+              same menu also offers the Organization. */}
+          {cross ? "All projects" : org ? "Organization" : (currentName || "Select a project")}
         </span>
         {/* NEW-3 — the at-risk marker on the crumb itself. Two fixes in one: the `⚠` text glyph
             becomes a drawn triangle (most platforms resolve U+26A0 to a colour emoji), and the
@@ -671,6 +703,26 @@ export default function ProjectBreadcrumb({
             before this crumb-level duplicate went away. One entry point, not two, and not zero.
 
             What is LEFT here is a project LIST plus a New-project action, which is what a switcher is. */}
+
+        {/* ORG SCOPE (NEW-1) — a real, distinct destination above the project list, exactly
+            where the brief asked for it. It is NOT a project row: no id it produces is ever a
+            projectId, it never appears in `projects`/`filtered` below, and picking it always
+            routes through `onSelectOrg`, never `onSelectProject`. Omitted entirely (not
+            disabled) when the caller hasn't wired `onSelectOrg` — see AppHeader's own note on
+            why Schedule doesn't offer it this round. */}
+        {onSelectOrg && (
+          <button
+            data-testid="project-org"
+            onClick={pickOrg}
+            style={row({ background: org ? "var(--hover-menu)" : "transparent", fontWeight: 700, marginBottom: 2 })}
+          >
+            <span style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--text-primary)" }}>
+              <OrgIcon />
+              Organization
+            </span>
+            {org && <span style={{ color: accent, fontSize: 10.5, fontWeight: 700 }}>current</span>}
+          </button>
+        )}
         <div style={divider} />
 
         {/* Recent projects — newest-edited first, relative timestamps */}

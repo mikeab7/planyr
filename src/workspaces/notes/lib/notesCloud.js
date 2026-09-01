@@ -245,7 +245,7 @@ export function mergeTrees(local, server, { onRescue } = {}) {
   /** Walk one side's list. `fromServer` marks a list that came from the SERVER tree — every id
    *  the LOCAL tree also holds is skipped there, because local owns the placement (rule 4)
    *  whether or not the local walk has reached it yet. Ordering must not decide that. */
-  const walk = (nodes, projectId, fromServer) => {
+  const walk = (nodes, projectId, orgScope, fromServer) => {
     const out = [];
     for (const pg of nodes || []) {
       if (!pg?.id || seen.has(pg.id)) continue;
@@ -254,11 +254,13 @@ export function mergeTrees(local, server, { onRescue } = {}) {
       // A node's own project when it has one (a root), otherwise its branch's — which is what
       // a rescued page needs in order to land somewhere real rather than nowhere.
       const branchProject = pg.projectId !== undefined ? (pg.projectId ?? null) : projectId;
+      // ORG SCOPE (NEW-1) — the same inheritance rule, one field over.
+      const branchOrg = pg.orgScope !== undefined ? !!pg.orgScope : orgScope;
       const other = (fromServer ? aIndex : bIndex).get(pg.id) || null;
       // The children are the UNION of both sides' children of THIS page, local ones first.
       const kids = fromServer
-        ? [...walk(other?.pages || [], branchProject, false), ...walk(pg.pages || [], branchProject, true)]
-        : [...walk(pg.pages || [], branchProject, false), ...walk(other?.pages || [], branchProject, true)];
+        ? [...walk(other?.pages || [], branchProject, branchOrg, false), ...walk(pg.pages || [], branchProject, branchOrg, true)]
+        : [...walk(pg.pages || [], branchProject, branchOrg, false), ...walk(other?.pages || [], branchProject, branchOrg, true)];
 
       /* ⛔ RULE 0 ON THE LIVE SIDE, AND IT SHARES RULE 5'S BODY DELIBERATELY. A page whose
        * bytes were destroyed may not come back as a node with nothing behind it — but it is
@@ -270,7 +272,13 @@ export function mergeTrees(local, server, { onRescue } = {}) {
          * the merge just built, and every one of them is a page NO bin entry names. Lift them
          * to the top level of the branch's project rather than letting the early return take
          * them with it. This is the line whose absence orphaned a real note. */
-        for (const k of kids) rescued.push({ ...k, projectId: branchProject == null ? null : String(branchProject) });
+        for (const k of kids) {
+          rescued.push({
+            ...k,
+            projectId: branchOrg ? null : (branchProject == null ? null : String(branchProject)),
+            ...(branchOrg ? { orgScope: true } : {}),
+          });
+        }
         continue;
       }
       /* ⛔ RULE 3, AMENDED: THE NAME COMES FROM WHICHEVER SIDE WAS EDITED LAST, NOT FROM
@@ -339,7 +347,12 @@ export function mergeTrees(local, server, { onRescue } = {}) {
         ? {
           ...pg,
           ...(theirsIsNewer ? { title: other.title } : null),
-          ...(theirFilingIsNewer && bothRoots ? { projectId: other.projectId ?? null } : null),
+          /* ORG SCOPE (NEW-1) travels WITH the project id, as one atomic filing decision — a
+           * page's destination is a project, Organization, or nowhere, never two of those at
+           * once, and `filedAt` already times the whole decision, not just the project half. */
+          ...(theirFilingIsNewer && bothRoots
+            ? { projectId: other.orgScope ? null : (other.projectId ?? null), orgScope: !!other.orgScope }
+            : null),
           updatedAt: laterOf(pg.updatedAt, other.updatedAt),
           createdAt: earlierOf(pg.createdAt, other.createdAt),
           /* Both stamps take the LATER of the two, or the merged node would forget that the
@@ -356,14 +369,15 @@ export function mergeTrees(local, server, { onRescue } = {}) {
     return out;
   };
 
-  // Roots also carry `projectId`, and rule 3 (the local title wins) covers it: this function
-  // is only reached when local has unpushed changes, so a re-filing done here is the one
-  // with something to say. A root only the server has keeps the server's project.
-  const pages = [...walk(L.pages || [], null, false), ...walk(S.pages || [], null, true)];
+  // Roots also carry `projectId` (and, NEW-1, `orgScope`), and rule 3 (the local title wins)
+  // covers both: this function is only reached when local has unpushed changes, so a
+  // re-filing done here is the one with something to say. A root only the server has keeps
+  // the server's filing.
+  const pages = [...walk(L.pages || [], null, false, false), ...walk(S.pages || [], null, false, true)];
 
   // Rescued pages go at the END of the top level, so nothing that was already there moves.
   if (rescued.length && typeof onRescue === "function") {
-    try { onRescue(rescued.map((p) => ({ pageId: p.id, title: p.title, projectId: p.projectId ?? null }))); }
+    try { onRescue(rescued.map((p) => ({ pageId: p.id, title: p.title, projectId: p.projectId ?? null, orgScope: !!p.orgScope }))); }
     catch (_) { /* a bad listener must not lose the pages it was told about */ }
   }
   return {

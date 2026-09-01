@@ -97,7 +97,7 @@ describe("the route itself still works (NEW-2 changes discoverability, not the r
   });
 
   it("(2b) the route round-trips: #/food -> {module:'food'} -> #/food", () => {
-    expect(parseRoute("#/food")).toEqual({ module: "food", projectId: null, cross: false });
+    expect(parseRoute("#/food")).toEqual({ module: "food", projectId: null, cross: false, org: false });
     expect(buildHash({ module: "food" })).toBe("#/food");
   });
 
@@ -154,11 +154,13 @@ describe("/food is unlisted — no discoverability surface names it", () => {
 
   it("navigating to module='food' renders NO active tab — same as any unrecognized route, no special case", () => {
     const hdr = read(REPO, "src/shared/ui/AppHeader.jsx");
-    // moduleTabButtons maps MODULES (not some food-aware superset) and marks isActive by
-    // m.id === module — with no food entry in MODULES, module="food" cannot match any tab.
-    // This asserts the MECHANISM (one map, one predicate, no branch for an unlisted module)
-    // rather than a rendered snapshot, so the property holds regardless of chrome styling.
-    expect(hdr).toMatch(/MODULES\.map\(\(m\)\s*=>\s*[\s\S]{0,80}?isActive=\{m\.id === module\}/);
+    // moduleTabButtons maps visibleModules — MODULES, or (ORG SCOPE, NEW-1) MODULES filtered to
+    // the org-capable subset while standing in Organization; never a food-aware superset — and
+    // marks isActive by m.id === module. With no food entry in MODULES (visibleModules is always
+    // a subset of it), module="food" cannot match any tab either way. This asserts the MECHANISM
+    // (one map, one predicate, no branch for an unlisted module) rather than a rendered snapshot,
+    // so the property holds regardless of chrome styling.
+    expect(hdr).toMatch(/visibleModules\.map\(\(m\)\s*=>\s*[\s\S]{0,80}?isActive=\{m\.id === module\}/);
   });
 
   it("every OTHER (listed) workspace is still fully wired — this is a food-only removal", () => {

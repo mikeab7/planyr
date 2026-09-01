@@ -262,7 +262,10 @@ export async function fetchReviews() {
   // (B685/B686) likewise pull the authoritative source filename + explicit folder pick out of
   // `data` so the Library classifies type + places the file without re-reading the record. On any
   // error we fall back to the core columns — those extras degrade to absent, never a regression.
-  const FULL = "id,title,kind,project,project_id,discipline,item,revision,doc_date,team_id,user_id,updated_at,placed:data->placed,sfile:data->>sourceFile,folderId:data->>folderId";
+  // ORG SCOPE (NEW-1) — `orgScope:data->orgScope` reads the flag straight out of the `data`
+  // jsonb, the same trick `placed`/`sfile`/`folderId` already use, so no migration is needed:
+  // `data` has carried the whole record since the very first `doc_reviews` migration.
+  const FULL = "id,title,kind,project,project_id,discipline,item,revision,doc_date,team_id,user_id,updated_at,placed:data->placed,sfile:data->>sourceFile,folderId:data->>folderId,orgScope:data->orgScope";
   // Newest tier adds the NEW-F3 soft-delete filter: a review in Recently-deleted leaves every list.
   let res = await supabase.from("doc_reviews").select(FULL).is("deleted_at", null).order("updated_at", { ascending: false });
   if (res.error) {
@@ -277,7 +280,7 @@ export async function fetchReviews() {
     res = await supabase.from("doc_reviews").select(FULL).order("updated_at", { ascending: false });
     // team_id/user_id may be un-migrated → drop to the prior column set; then the older core set.
     if (res.error) res = await supabase.from("doc_reviews")
-      .select("id,title,kind,project,project_id,discipline,item,revision,doc_date,updated_at,placed:data->placed")
+      .select("id,title,kind,project,project_id,discipline,item,revision,doc_date,updated_at,placed:data->placed,orgScope:data->orgScope")
       .order("updated_at", { ascending: false });
     if (res.error) res = await supabase.from("doc_reviews").select("id,title,kind,project,discipline,updated_at").order("updated_at", { ascending: false });
   }
@@ -296,7 +299,7 @@ export async function listReviews() {
 export async function listDeletedReviews() {
   if (!supabase || !(await currentUid())) return [];
   const { data, error } = await supabase.from("doc_reviews")
-    .select("id,title,kind,project,project_id,discipline,item,updated_at,deleted_at,sfile:data->>sourceFile")
+    .select("id,title,kind,project,project_id,discipline,item,updated_at,deleted_at,sfile:data->>sourceFile,orgScope:data->orgScope")
     .not("deleted_at", "is", null)
     .order("deleted_at", { ascending: false });
   if (error) return isMissingColumn(error, "deleted_at") ? [] : null;
@@ -447,11 +450,15 @@ export async function purgeExpiredDeleted({ days = 30 } = {}) {
 // only the filing fields, and re-upserts; the work layer + sources are untouched. (The
 // stored object path doesn't move — storageKey already encodes the prior location and
 // stays valid; re-pathing the bytes is a backend-tranche nicety, not needed to re-file.)
-export async function refileReview(id, { projectId = null, project = "", discipline, item } = {}) {
+export async function refileReview(id, { projectId = null, project = "", discipline, item, orgScope = false } = {}) {
   if (!(await cloudReady())) return { ok: false, error: "Sign in to file documents." };
   const rec = await loadReview(id);
   if (!rec) return { ok: false, error: "Review not found." };
-  const next = { ...rec, projectId: projectId || null, project: project || "" };
+  // ORG SCOPE (NEW-1) — filing into Organization clears the project, and vice versa; mirrors
+  // Notes' setPageProject/setPageOrgScope pair.
+  const next = orgScope
+    ? { ...rec, projectId: null, project: "", orgScope: true }
+    : { ...rec, projectId: projectId || null, project: project || "", orgScope: false };
   if (discipline) next.discipline = discipline;
   if (item) next.item = item;
   return upsertReview({ ...next, updatedAt: Date.now() });
@@ -565,8 +572,11 @@ export async function listFileFacts() {
  * on the source record, and new keys (containing `__` after an srcId) can't collide with them.
  * srcId charset is [a-z0-9] (newSourceId), so the key stays URL- and pattern-safe. Pure; exported
  * for tests. */
-export function buildDriveKey({ projectId = null, discipline = "Other", fileName, srcId = null } = {}) {
-  const folder = `project-${projectId ? slug(projectId) : "unfiled"}/${slug(discipline)}`;
+export function buildDriveKey({ projectId = null, discipline = "Other", fileName, srcId = null, orgScope = false } = {}) {
+  // ORG SCOPE (NEW-1) — a real, distinct top-level Drive folder, sibling to `project-*`, never
+  // folded into "unfiled" (which means "we don't know where this belongs", not "it deliberately
+  // belongs to no project" — the two must stay distinguishable).
+  const folder = orgScope ? `organization/${slug(discipline)}` : `project-${projectId ? slug(projectId) : "unfiled"}/${slug(discipline)}`;
   const name = fileName || "document.pdf";
   return `${folder}/${srcId ? `${srcId}__${name}` : name}`;
 }
@@ -582,7 +592,7 @@ export function buildDriveKey({ projectId = null, discipline = "Other", fileName
  * tray's per-file progress bar. Returns { ok, driveKey } on success (driveKey = the stable
  * key to read it back with), { ok:false, skipped:true } when Drive isn't enabled yet, or
  * { ok:false, error }. Best-effort — never throws. */
-export async function pushFileToDrive(file, { projectId = null, discipline = "Other", fileName, srcId = null, folderId = null, onProgress = null } = {}) {
+export async function pushFileToDrive(file, { projectId = null, discipline = "Other", fileName, srcId = null, folderId = null, onProgress = null, orgScope = false } = {}) {
   if (!supabase) return { ok: false, skipped: true, error: "Cloud not configured." };
   // Token as a GETTER, not a snapshot: a multi-GB upload outlives a Supabase access token
   // (~1 h), so every request re-reads the current (auto-refreshed) session token.
@@ -592,13 +602,16 @@ export async function pushFileToDrive(file, { projectId = null, discipline = "Ot
   };
   if (!(await getToken())) return { ok: false, skipped: true, error: "Not signed in." };
   const name = fileName || "document.pdf";
-  const driveKey = buildDriveKey({ projectId, discipline, fileName, srcId }); // unique per source (NEW-F1); server prefixes the uid
+  const driveKey = buildDriveKey({ projectId, discipline, fileName, srcId, orgScope }); // unique per source (NEW-F1); server prefixes the uid
   return uploadFileInChunks({
     file, token: getToken, planyrKey: driveKey, name, contentType: guessContentType(name, file.type),
     // Tree targeting (B650 follow-on): the server files the bytes into the project's standard
     // folder tree when it's mirrored; an explicit folder pick (B686) wins over the discipline
-    // route; the flat path derived from the key stays the never-blocking fallback.
-    projectId: projectId ? String(projectId) : null,
+    // route; the flat path derived from the key stays the never-blocking fallback. ORG SCOPE
+    // (NEW-1) passes no projectId — Tier A has no org folder tree yet (B# follow-on), so an org
+    // upload always takes the flat-key fallback, which is exactly what `buildDriveKey`'s
+    // `organization/…` branch above already produces a correct path for.
+    projectId: orgScope ? null : (projectId ? String(projectId) : null),
     discipline: discipline ? String(discipline) : null,
     folderId: folderId ? String(folderId) : null,
     onProgress,
@@ -658,23 +671,32 @@ export async function getShareLink(driveKey) {
 // the one home for bytes (chunked upload, any size — B409 rework); a failed upload is
 // reported loudly (uploadFailed) rather than degraded into a capped fallback store. Then
 // upsert the indexed record. Returns { ok, id }.
-export async function fileNewReview({ projectId = null, project = "", discipline = "Other", item = "", docDate = null, blob, fileName, folderId = null, onProgress = null }) {
+export async function fileNewReview({ projectId = null, project = "", discipline = "Other", item = "", docDate = null, blob, fileName, folderId = null, onProgress = null, orgScope = false }) {
   if (!(await cloudReady())) return { ok: false, error: "Sign in to file documents." };
   const id = newReviewId();
   const srcId = newSourceId();
+  // ORG SCOPE (NEW-1) — one destination, never both: a file filed to Organization carries no
+  // project, mirroring Notes' setPageOrgScope.
+  const pid = orgScope ? null : projectId;
+  const proj = orgScope ? "" : project;
   // Use the drawing's own date when auto-filing supplies one (YYYY-MM-DD); else today.
   const filedDate = (typeof docDate === "string" && /^\d{4}-\d{2}-\d{2}/.test(docDate)) ? docDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
   const itemLabel = item || stripFileExt(fileName || "Document");
   // Store the bytes Drive-first, Supabase-fallback (the one shared policy — see storeSource).
   const stored = blob
-    ? await storeSource(srcId, blob, { projectId, discipline, fileName, folderId, onProgress })
+    ? await storeSource(srcId, blob, { projectId: pid, discipline, fileName, folderId, onProgress, orgScope })
     : { ok: false, storageKey: null, driveKey: null, oversize: false, driveError: null, driveSkipped: true };
   // stored.oversize is always false on the chunked path (there is no size cap anymore);
   // the guard survives for the shape's sake — any not-ok store is a loud upload failure.
   const uploadFailed = !stored.ok && !stored.oversize;
   const record = {
-    id, kind: "single", title: composeTitle({ project, item: itemLabel, docDate: filedDate }),
-    project, projectId, discipline, item: itemLabel, revision: "", docDate: filedDate,
+    id, kind: "single", title: composeTitle({ project: proj, item: itemLabel, docDate: filedDate }),
+    project: proj, projectId: pid, discipline, item: itemLabel, revision: "", docDate: filedDate,
+    // ORG SCOPE (NEW-1) — rides inside the `data` jsonb via reviewRowFor's object spread, same
+    // as every other record field; `fetchReviews` extracts it back out with `data->orgScope`
+    // (the same trick the existing `placed`/`sfile`/`folderId` extras already use) rather than
+    // a new migrated column.
+    ...(orgScope ? { orgScope: true } : {}),
     // The original upload filename lives on the review itself (B685/B686) — AUTHORITATIVE for
     // "is this a PDF?" (listReviews surfaces it), so a missed best-effort facts write can't make a
     // non-PDF look like a PDF. folderId records an explicit folder pick so on-screen placement +
@@ -708,10 +730,10 @@ export const isStoredSource = (s) => !!(s && (s.storageKey || s.driveKey || s.ov
  * downloadSource. `srcId` rides into the driveKey's last segment (NEW-F1) so every stored
  * source gets its own key — two same-named uploads can never collide. Returns
  * { ok, storageKey:null, driveKey, oversize:false, large, driveError, driveSkipped }. Never throws. */
-export async function storeSource(srcId, blob, { projectId = null, discipline = "Other", fileName, folderId = null, onProgress = null } = {}) {
+export async function storeSource(srcId, blob, { projectId = null, discipline = "Other", fileName, folderId = null, onProgress = null, orgScope = false } = {}) {
   const isLarge = !!(blob && blob.size > MAX_BYTES);
   const drive = blob
-    ? await pushFileToDrive(blob, { projectId, discipline, fileName, srcId, folderId, onProgress })
+    ? await pushFileToDrive(blob, { projectId, discipline, fileName, srcId, folderId, onProgress, orgScope })
     : { ok: false, skipped: true, error: "No file bytes." };
   if (drive.ok) return { ok: true, storageKey: null, driveKey: drive.driveKey, oversize: false, large: isLarge, driveError: null, driveSkipped: false };
   return { ok: false, storageKey: null, driveKey: null, oversize: false, large: isLarge,
