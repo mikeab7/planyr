@@ -477,7 +477,12 @@ export function emptyDraft(anchor) {
     partyProvider: "", partyAcquirer: "",
     landPrice: "", landSizeValue, landSizeUnit: "ac",
     bldgPrice: "", bldgSizeSf: "", bldgNoi: "", bldgCapRate: "",
-    leaseRate: "", leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseTi: "", leaseTerm: "", leaseSizeSf: "",
+    // HARDENING-10 NEW-4 (owner: "an empty row must not pre-assert a basis") — Per/Basis used to
+    // default to annual/NNN, so a genuinely untouched row displayed YR/NNN as if he'd chosen them.
+    // A $7 NNN and a $7 gross are different deals; guessing the basis silently is worse than
+    // leaving it blank and making him state it. Blank also correctly keeps the derived $/SF/yr
+    // column dashed until a period is actually picked — that gate only works if "unset" is real.
+    leaseRate: "", leaseRatePeriod: "", leaseRateExpense: "", leaseTi: "", leaseTerm: "", leaseSizeSf: "",
     leaseFreeRentMonths: "", leaseEscalationPct: "",
   };
 }

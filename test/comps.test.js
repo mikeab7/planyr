@@ -8,6 +8,17 @@ import {
 } from "../src/shared/comps/lib/comps.js";
 import { collectPartyNames, matchPartyNames } from "../src/shared/comps/lib/partySuggest.js";
 
+describe("comps: emptyDraft — HARDENING-10 NEW-4, an empty row must not pre-assert a basis", () => {
+  it("Per and Basis start genuinely empty, never a guessed 'annual'/'nnn'", () => {
+    const draft = emptyDraft(null);
+    expect(draft.leaseRatePeriod).toBe("");
+    expect(draft.leaseRateExpense).toBe("");
+  });
+  it("compType still defaults to land (unrelated to the Per/Basis fix)", () => {
+    expect(emptyDraft(null).compType).toBe("land");
+  });
+});
+
 describe("comps: land $/SF derivation", () => {
   it("derives $/SF from price + acres", () => {
     expect(landSizeSf(1, "ac")).toBe(43560);

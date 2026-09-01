@@ -31,13 +31,14 @@
  *
  * MODULE-SCOPE-COMPONENTS: every component here is defined at module scope.
  */
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "../../ui/controls.jsx";
 import { parsePaste, rowHasBlockingFlags, parseProseLine, splitPasteLines } from "../lib/compParse.js";
 import { emptyDraft, draftToComp, validateComp, summarizeLeaseComps, summarizeSaleComps, resolveCapTriangle } from "../lib/comps.js";
 import {
-  SHEET_COLUMNS, cellState, cellPlaceholder, applyCellEdit, fillDownColumn, spillPaste, visibleColumnIndices,
+  SHEET_COLUMNS, cellState, applyCellEdit, fillDownColumn, spillPaste, visibleColumnIndices,
+  computeFlexWidths, widthFor, frozenLeftOffsets,
 } from "../lib/compSheetColumns.js";
 import { parcelLocationText, siteplanLocationText, pinFallbackText } from "../lib/compLocationText.js";
 import { reverseGeocodeLatLon } from "../../../workspaces/site-planner/lib/geocode.js";
@@ -99,13 +100,9 @@ function computeVisibleGroupRuns(visibleIdx) {
   return runs;
 }
 
-function colLeftOffset(col) {
-  return col.frozen ? 0 : undefined;
-}
-
 /* ---- sticky header: group band over column labels ------------------------------------------ */
 
-function HeaderRows({ visibleIdx }) {
+function HeaderRows({ visibleIdx, flexWidths, frozenOffsets }) {
   const groupRuns = computeVisibleGroupRuns(visibleIdx);
   return (
     <thead>
@@ -131,11 +128,12 @@ function HeaderRows({ visibleIdx }) {
       <tr>
         {visibleIdx.map((idx, i) => {
           const col = SHEET_COLUMNS[idx];
+          const w = widthFor(col, flexWidths);
           return (
             <th key={col.key}
               style={{
                 position: "sticky", top: GROUP_BAND_H, zIndex: col.frozen ? 4 : 2,
-                left: colLeftOffset(col), width: col.width, minWidth: col.width, maxWidth: col.width,
+                left: col.frozen ? frozenOffsets[col.key] : undefined, width: w, minWidth: w, maxWidth: w,
                 height: COL_LABEL_H, boxSizing: "border-box", padding: "0 5px",
                 textAlign: col.align, fontSize: 10, fontWeight: 700, color: "var(--text-secondary)",
                 background: "var(--surface-raised)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
@@ -155,16 +153,18 @@ function HeaderRows({ visibleIdx }) {
  * At rest: plain text, right-aligned + tabular-nums for numbers, no border. Selected: an outline
  * appears. Editing: a real <input> (or a native date input) fills the cell exactly. */
 function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, isEditing, editValue,
-  onMouseDown, onDoubleClick, onEditChange, onEditKeyDown, onEditBlur, editInputRef, locationText }) {
+  onMouseDown, onDoubleClick, onEditChange, onEditKeyDown, onEditBlur, editInputRef, locationText,
+  flexWidths, frozenOffsets }) {
   const st = cellState(col, draft);
   const flagKey = col.flagKey ? col.flagKey(draft) : col.key;
   const flag = cellFlags[flagKey];
   const muted = st.state === "na" || st.state === "derived";
+  const w = widthFor(col, flexWidths);
   const tdStyle = {
     height: ROW_H, boxSizing: "border-box", padding: 0,
-    width: col.width, minWidth: col.width, maxWidth: col.width,
+    width: w, minWidth: w, maxWidth: w,
     borderRight: "1px solid var(--border-default)", borderBottom: "1px solid var(--border-default)",
-    position: col.frozen ? "sticky" : undefined, left: colLeftOffset(col), zIndex: col.frozen ? 1 : undefined,
+    position: col.frozen ? "sticky" : undefined, left: col.frozen ? frozenOffsets[col.key] : undefined, zIndex: col.frozen ? 1 : undefined,
     background: col.frozen ? "var(--surface-overlay)" : muted ? "var(--surface-raised)" : "var(--surface-overlay)",
     outline: selected ? "2px solid var(--accent)" : inRange ? "1px solid var(--accent)" : "none",
     outlineOffset: -1,
@@ -220,20 +220,27 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
     color: st.state === "na" ? "var(--text-tertiary)" : st.state === "derived" ? "var(--text-secondary)" : flag?.level === "blocking" ? "var(--danger-text)" : "var(--text-primary)",
     fontStyle: st.state === "na" ? "italic" : "normal",
   };
-  const placeholder = st.state === "editable" && !st.text ? cellPlaceholder(col, draft.compType) : "";
   // B986096-HARDENING-9 — the Location cell shows real information once an anchor is set (an
   // address / an APN / a plan title, resolved by `locationCellText` in the parent), never a bare
   // confirmation of the click. Empty state keeps the "Set" affordance; the whole cell is still
   // the click target either way (no separate button — HARDENING-9's "click target is the text
   // itself" requirement is already how every action-kind cell has always worked here).
+  // HARDENING-10 NEW-4 — "empty means empty": a genuinely unfilled editable cell renders nothing
+  // at all now, never a grey placeholder word (`cellPlaceholder` always returns "" — see its own
+  // header in compSheetColumns.js). The em dash for a not-applicable cell is unaffected — that
+  // comes from `st.text` itself ("—", set by `cellState`), not from this placeholder path.
   const cellText = col.key === "location"
     ? (locationText || <span style={{ color: "var(--text-tertiary)" }}>Set</span>)
-    : st.text || (placeholder ? <span style={{ color: "var(--text-tertiary)" }}>{placeholder}</span> : "");
+    : st.text || "";
+  // HARDENING-10 (message B NEW-3) — Title/Address and the two party columns are the ones real
+  // values got cut off in ("Core5 Industrial Partners"); a hover reveals the untruncated value.
+  const isLongTextCol = col.key === "title" || col.key === "partyProvider" || col.key === "partyAcquirer";
+  const hoverTitle = col.key === "location" ? locationText : flag?.reason || (isLongTextCol && st.text ? st.text : undefined);
   return (
     <td style={tdStyle} data-cell={`${rowIdx}-${colIdx}`}
       onMouseDown={(e) => onMouseDown(rowIdx, colIdx, e.shiftKey)}
       onDoubleClick={() => onDoubleClick(rowIdx, colIdx)}
-      title={col.key === "location" ? locationText : flag?.reason}>
+      title={hoverTitle}>
       <span style={textStyle}>
         {cellText}
       </span>
@@ -368,12 +375,54 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
   const editInputRef = useRef(null);
   const undoStackRef = useRef([]);
 
-  useEffect(() => {
+  // HARDENING-10 NEW-5 — the sheet must fit its container with ZERO horizontal scroll rather than
+  // a hand-tuned static width budget. `gridRef` is the actual scrolling element the table sits
+  // in; its measured content width (not an assumed viewport number) is what the four `flexKey`
+  // columns divide up via `computeFlexWidths` — real measurement rather than replaying the
+  // dialog's own `min(1560px, calc(100vw - 32px))` CSS in JS, so it stays correct through any
+  // future change to that CSS, a scrollbar, or a narrower window.
+  const [containerWidth, setContainerWidth] = useState(0);
+  const gridMounted = rows.length > 0; // the grid <div> only exists once there's a row to show
+  useLayoutEffect(() => {
+    const el = gridRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect?.width;
+      if (typeof w === "number") setContainerWidth(w);
+    });
+    ro.observe(el);
+    setContainerWidth(el.clientWidth);
+    return () => ro.disconnect();
+  }, [gridMounted]);
+
+  const flexWidths = useMemo(() => {
+    const fixedTotal = visibleIdx.reduce((s, idx) => {
+      const col = SHEET_COLUMNS[idx];
+      return col.flexKey ? s : s + col.width;
+    }, 0);
+    // One hairline border per visible column + the pinned remove-row column, so the computed
+    // total lands AT the real available width rather than a hair over it.
+    const borderAllowance = visibleIdx.length + 2;
+    const availableForFlex = containerWidth - fixedTotal - REMOVE_COL_W - borderAllowance;
+    return computeFlexWidths(availableForFlex);
+  }, [containerWidth, visibleIdx]);
+  const frozenOffsets = useMemo(() => frozenLeftOffsets(visibleIdx, flexWidths), [visibleIdx, flexWidths]);
+
+  useLayoutEffect(() => {
     if (editing && editInputRef.current) {
       editInputRef.current.focus();
       // HTMLSelectElement has no .select() (text-selection) method — guard it, or opening a
       // TYPE/UNIT/PER/BASIS cell via double-click/F2 throws instead of opening the dropdown.
       if (editing.selectAll && typeof editInputRef.current.select === "function") editInputRef.current.select();
+      // HARDENING-10 NEW-3 — a single click now enters edit immediately; for a choice cell
+      // (Type/Unit/Per/Basis) "entering edit" has to mean the menu is already open, or it's still
+      // two clicks (focus, then open) to reach a value. `.showPicker()` is the real API for that —
+      // feature-detected (Safari < 16.4 lacks it; the select still works, just opens on a second
+      // click there) and wrapped, because it throws outside a user-activation window and a
+      // `useLayoutEffect` firing after an async commit is not guaranteed to still be inside one.
+      if (typeof editInputRef.current.showPicker === "function") {
+        try { editInputRef.current.showPicker(); } catch { /* not user-activated, or unsupported here — falls back to a focused, closed select */ }
+      }
     }
   }, [editing]);
 
@@ -452,7 +501,11 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
   const handleChange = (e) => setPasteText(e.target.value);
   const commitTyped = () => { if (pasteText.trim()) { commitText(pasteText); setPasteText(""); } };
   const handleKeyDown = (e) => {
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commitTyped(); }
+    // HARDENING-10 NEW-3 (owner, verbatim: "it shouldn't be type your own, then press control
+    // enter or the Apple key plus enter or click add. It should just be enter.") Shift+Enter still
+    // inserts a literal newline — the textarea's own native behavior for plain Enter, which this
+    // now intercepts instead — so a hand-typed multi-line abstract can still be entered.
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitTyped(); }
   };
   const switchToOnePerLine = () => {
     if (!lastSingleParse) return;
@@ -495,10 +548,27 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
       const flagKey = colDef.flagKey(row.draft);
       const nextFlags = { ...row.cellFlags };
       delete nextFlags[flagKey];
-      commitRows(rows.map((r, i) => (i === target.row ? { ...r, draft: newDraft, cellFlags: nextFlags } : r)));
+      const nextRows = rows.map((r, i) => (i === target.row ? { ...r, draft: newDraft, cellFlags: nextFlags } : r));
+      commitRows(nextRows);
+      if (moveDir) {
+        const dest = computeDestination({ row: target.row, col: target.col }, moveDir);
+        setSelection(dest);
+        // HARDENING-10 NEW-3 — "Enter commits and moves down [into edit]. Tab commits and moves
+        // right [into edit]." Land the NEXT cell straight into edit mode too, so a fast paste-free
+        // entry never needs a second click — mirrors `nextRows` (the just-committed values), not
+        // the stale `rows` closure, so a Type edit that changes which columns apply resolves
+        // against what the destination row now actually is.
+        const destRow = nextRows[dest.row];
+        const destColDef = SHEET_COLUMNS[dest.col];
+        if (destRow && cellState(destColDef, destRow.draft).state === "editable") beginEdit(dest.row, dest.col, null, true);
+      } else {
+        setSelection({ row: target.row, col: target.col });
+      }
+    } else if (moveDir) {
+      moveSelectionFrom({ row: target.row, col: target.col }, moveDir);
+    } else {
+      setSelection({ row: target.row, col: target.col });
     }
-    if (moveDir) moveSelectionFrom({ row: target.row, col: target.col }, moveDir);
-    else setSelection({ row: target.row, col: target.col });
     gridRef.current?.focus();
   };
 
@@ -513,7 +583,9 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
   /* ---- navigation ----------------------------------------------------------------------------- */
   // Column movement walks the VISIBLE index list, not a raw +1/-1 on SHEET_COLUMNS — a hidden
   // column (Rule: "hide unused columns entirely") is not a stop Tab/arrows should ever land on.
-  const moveSelectionFrom = (from, { axis, delta, wrap }) => {
+  // Pure (no state write) so `finishEdit` can compute where Tab/Enter is ABOUT to land and decide
+  // whether to re-enter edit mode there, before actually moving the selection.
+  const computeDestination = (from, { axis, delta, wrap }) => {
     let { row, col } = from;
     if (axis === "row") {
       row = clamp(row + delta, 0, rows.length - 1);
@@ -528,8 +600,9 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
       }
       col = visibleIdx[nextPos];
     }
-    setSelection({ row, col });
+    return { row, col };
   };
+  const moveSelectionFrom = (from, opts) => { setSelection(computeDestination(from, opts)); };
   const moveSelection = (opts) => { if (selection) moveSelectionFrom(selection, opts); };
 
   const extendRangeTo = (targetRow) => {
@@ -564,6 +637,15 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     gridRef.current?.focus();
     if (shiftKey && selection && selection.col === col) { extendRangeTo(row); return; }
     setSelection({ row, col });
+    // HARDENING-10 NEW-3 (owner measured: a single click only ever focused a bare, non-editable
+    // DIV — a double-click was needed to reach an editor at all, "four clicks for one value").
+    // ONE click now goes straight to edit for anything editable — a text cell gets a caret, a
+    // choice cell opens its menu (via the showPicker effect above). Location stays select-only on
+    // a single click (it is an ACTION cell, not text — Enter/double-click still runs the picker,
+    // unchanged) so a stray click never arms the map-pick flow by accident.
+    const colDef = SHEET_COLUMNS[col];
+    if (colDef.kind === "action") return;
+    if (cellState(colDef, rows[row].draft).state === "editable") beginEdit(row, col, null, true);
   };
   const onCellDoubleClick = (row, col) => {
     const colDef = SHEET_COLUMNS[col];
@@ -706,11 +788,10 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
             onChange={handleChange}
             onPaste={handlePaste}
             onKeyDown={handleKeyDown}
-            placeholder="Paste a broker email or an Excel block — it parses immediately. Or type your own, then press Ctrl+Enter (⌘+Enter) or click Add."
+            placeholder="Paste a broker email or an Excel block — it parses immediately. Or type your own and press Enter (Shift+Enter for a new line)."
             rows={2}
             style={{ flex: 1, boxSizing: "border-box", padding: "8px 10px", fontSize: 12, borderRadius: 8, fontFamily: "inherit", border: "1px solid var(--border-default)", background: "var(--surface-base)", color: "var(--text-primary)", resize: "vertical" }}
           />
-          <Button size="sm" onClick={commitTyped} disabled={!pasteText.trim()}>Add</Button>
         </div>
         {lastCommitSummary && (
           <div style={{ marginTop: 6, fontSize: 10.5, color: "var(--text-secondary)" }}>
@@ -746,7 +827,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
           onPaste={onGridPaste}
           style={{ flex: 1, minHeight: 0, overflow: "auto", outline: "none" }}>
           <table style={{ borderCollapse: "collapse", tableLayout: "fixed" }}>
-            <HeaderRows visibleIdx={visibleIdx} />
+            <HeaderRows visibleIdx={visibleIdx} flexWidths={flexWidths} frozenOffsets={frozenOffsets} />
             <tbody>
               {rows.map((row, rowIdx) => (
                 <tr key={row._id}>
@@ -768,6 +849,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
                       onEditBlur={onEditBlur}
                       editInputRef={editInputRef}
                       locationText={col.key === "location" ? locationCellText(row, overlaysById) : undefined}
+                      flexWidths={flexWidths} frozenOffsets={frozenOffsets}
                     />
                     );
                   })}

@@ -410,6 +410,57 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   recomputed over. `bldg_cap_rate` is a DECIMAL FRACTION internally (0.0575), typed/shown as a
   percentage (5.75%) — deliberately different from `lease_escalation_pct`'s raw-percentage
   convention (3.5); the column's own get/set pair is the one place that conversion happens.
+  **⛔ ROUND 8 (B986096-HARDENING-10) — round 7 passed every sandbox check AGAIN and the owner
+  LIVE-TESTED it AGAIN (two reports), finding the sheet still slow and visually inconsistent —
+  read this before touching column order/width/align/label or the click-to-edit model.**
+  (1) **`compType` IS NOW `SHEET_COLUMNS[0]`, `frozen: true`, its own one-column `TYPE` group** —
+  "choose deal first because it will inform the rest." Its `setValue` also defaults
+  `landSizeUnit` to `"ac"` when switching to Land and nothing was chosen yet (never overwrites an
+  existing choice); `spillPaste`'s row-extension path defaults a spilled-past-the-end blank row's
+  Type to the row above's (batch-of-one-kind). (2) **ONE alignment rule, asserted GENERICALLY in
+  the repo-root `test/` suite **compSheetColumns**, not per-column:** `kind` of `number`/`date`/`derived` → `align:
+  "right"`; everything else → `"left"`. A column violating this is a test failure, not a style
+  choice. `leaseTerm` used to render "126 mo" (a unit baked into a numeric cell, which is why it
+  was left-aligned) — its `getValue`/`setValue` now convert to/from bare months
+  (`monthsFromTermText`, module-private) at the cell boundary, mirroring `bldgCapRate`'s
+  %-vs-fraction split, while the STORED `lease_term` field stays free text (a real term can be
+  "10 yr + 2x5 options", which a bare-months field can't hold — a value that doesn't reduce to a
+  leading number shows empty, never a wrong guess). (3) **A unit lives in the HEADER, never both
+  places** — `Term (mo)`, `Free (mo)`, `Escal (%)`, `TI ($/SF)`, `Cap (%)` are the relabeled
+  headers; `bldgCapRate`'s cell dropped its inline "%" to match. (4) **`cellPlaceholder` now
+  ALWAYS returns `""`** — no more per-type party-role placeholder words ("Owner/Developer",
+  "Tenant"); the em dash for a not-applicable cell is a SEPARATE mechanism (`cellState`'s `na`
+  branch) and is untouched — kept, because blank-because-N/A must stay visually distinct from
+  blank-because-unfilled. (5) **`emptyDraft`'s `leaseRatePeriod`/`leaseRateExpense` default to
+  `""`, not `"annual"`/`"nnn"`** (`comps.js`) — a blank row must not pre-assert a basis; the
+  existing "no period blocks the derived rate" gate only works because "unset" is now genuinely
+  unset. (6) **Single click enters edit immediately** (`CompEntryGrid.jsx`'s `onCellMouseDown`
+  now calls `beginEdit` for anything `cellState` reports `editable`, not just `setSelection`) —
+  no more intermediate "selected but not editing" state, closing "four clicks for one value." A
+  select-kind cell's dropdown OPENS on that same click via a feature-detected `.showPicker()` in
+  the focus effect (now a `useLayoutEffect`, so it still runs inside the click's own user-gesture
+  window — a plain `useEffect` risks firing after that window closes and `showPicker()` throwing).
+  Tab/Enter after a commit lands the DESTINATION cell straight into edit mode too when it's
+  editable (computed against the just-committed row, not the stale pre-commit `rows` closure).
+  (7) **The sheet fits its container with ZERO horizontal scroll, COMPUTED rather than guessed —
+  two hand-tuned static width budgets were each tried and both overflowed by 170-200px.**
+  `computeFlexWidths(availableForFlex)` (pure, in `compSheetColumns.js`) divides whatever room is
+  actually left over among the four `flexKey` columns (`title`, `partyProvider`, `partyAcquirer`,
+  `notes`): Notes shrinks first, down to its own floor; only once it's at floor do the other three
+  share the remaining squeeze, proportional to their own room, Title getting the largest share of
+  any surplus. Every column has a floor it never crosses, even if that means the total exceeds a
+  genuinely tiny container (an inherent limit, not a bug). `CompEntryGrid.jsx` measures the real
+  available width via a `ResizeObserver` on the grid's own scrolling element (never assumed from
+  `window.innerWidth` or replayed from the dialog's own CSS `calc()`), and `widthFor`/
+  `frozenLeftOffsets` (also pure, also in `compSheetColumns.js`) turn that into each column's
+  actual rendered width and the two frozen columns' (Type, Title) cumulative sticky `left` offset.
+  Title/Landlord/Tenant cells additionally carry a `title=` attribute with the untruncated value.
+  (8) Plain Enter now commits the paste box (was Ctrl/Cmd+Enter); the "Add" button is gone as no
+  longer the required commit path; Shift+Enter still inserts a literal newline.
+  **⛔ NONE OF THIS WAS LIVE-BROWSER VERIFIED WHEN SHIPPED** (no reachable browser at all, signed
+  in or out, from the shipping session) — round 6 ALSO passed every sandbox check and was then
+  found non-editable on first live use, so treat round 8 as unconfirmed until `VERIFICATION.md`'s
+  `V556720` records a real pass, not as "probably fine because the tests are green."
   KML import (B849233) is a SEPARATE staging table, `db/comp_import_drafts.sql`
   (`public.comp_import_drafts`, owner-only RLS — no team visibility at all, unlike `comps` itself,
   until promoted) — `lib/kmlImport.js` is the pure, hand-rolled Placemark parser (a Point is a

@@ -4125,6 +4125,81 @@ live click-through — flagged as the highest-priority items in `VERIFICATION.md
   `test/comps.test.js`, `test/compParse.test.js`, `MAP.md`.
 - Base: `origin/main` @ this session's fetch after PR #1300 merged.
 
+**Recurrence (×8) — HARDENING PASS 7 (B986096-HARDENING-10), owner LIVE-TESTED the just-merged
+Pass-6 build (bundle `index-kb1p2xiR.js`) and sent two more measured reports (message A: 18
+rendered columns, Price/NOI/Cap absent, one click leaves `document.activeElement` a bare DIV,
+double-click needed to reach an editor; message B: computed `text-align` mixed with no rule, a
+206px-in-1191px horizontal overflow, "Free rent" header truncating its own text, three cells
+truncating real values, a blank row pre-asserting Per="YR"/Basis="NNN").** All addressed in this
+file/`CompEntryGrid.jsx`/`comps.js`:
+- **Type moved to the FIRST column, frozen alongside Title, new `TYPE` group** — "choose deal
+  first because it will inform the rest." Setting it now also defaults `landSizeUnit` to AC when
+  switching to Land and nothing was chosen yet (never clobbers an existing choice). A new blank
+  row spilled past the end of a paste inherits Type from the row above it (batch-of-one-kind).
+- **ONE alignment rule, no exceptions:** numeric/date columns right, everything else left — no
+  third value. `leaseTerm`'s cell used to read "126 mo" (a unit suffix baked into a "numeric" cell
+  is what made it left-align); its cell boundary now converts to/from bare months
+  (`monthsFromTermText`) the same way `bldgCapRate` already converts %-vs-fraction, while the
+  STORED field stays free text so a real term like "10 yr + 2x5 options" still round-trips.
+  `compDate`/`leaseCommencementDate` moved from left to right align (a bare display bug, not a
+  parse bug — dates always stored/read correctly).
+- **Units live in the header, cells hold bare digits:** `Term (mo)`, `Free (mo)`, `Escal (%)`,
+  `TI ($/SF)`, `Cap (%)` relabeled; `bldgCapRate`'s cell dropped its inline "%" (the header states
+  it now, matching the new principle) — the %-vs-fraction storage conversion is unchanged.
+- **Empty cells render truly empty — no placeholder words anywhere** (`cellPlaceholder` now always
+  returns `""`), closing the still-outstanding "Owner/Developer"/"Tenant" placeholder-word
+  complaint from message A alongside message B's reminder. The em dash for a not-applicable cell
+  (a different, still-necessary signal) is untouched.
+- **An empty row no longer pre-asserts a basis** — `emptyDraft`'s `leaseRatePeriod`/
+  `leaseRateExpense` defaults changed from `"annual"`/`"nnn"` to genuinely empty; a $7 NNN and a $7
+  gross are different deals, and defaulting the basis silently was worse than making him state it.
+  The existing "a rate with no period blocks the derived columns" gate is unaffected — it only
+  works because "unset" is now real.
+- **Single click puts a cell straight into edit** (no intermediate "selected but not editing"
+  state — `onCellMouseDown` now calls `beginEdit` for anything editable) **and a `<select>` cell's
+  dropdown opens on that same click** via a feature-detected `.showPicker()` in the existing
+  focus-effect (now a `useLayoutEffect`, so it still runs inside the click's own activation
+  window). Enter/Tab after a commit lands the destination cell straight into edit mode too when
+  it's editable, not just selected — "type, Enter, type, Enter" with no extra clicks.
+- **The sheet fits its container with zero horizontal scroll, computed rather than guessed** —
+  two static width budgets were both tried and both overflowed by 170-200px in hand arithmetic, so
+  `compSheetColumns.js`'s new `computeFlexWidths` divides whatever room is left over (measured live
+  via a `ResizeObserver` on the grid's own scrolling element, not assumed from viewport width)
+  among Title/Landlord/Tenant/Notes: Notes shrinks first down to its own floor, then the other
+  three share the remainder, Title getting the largest share of any surplus. Every column has a
+  floor it never crosses. Title/Landlord/Tenant/Notes/Type/Location cells also got a `title=`
+  attribute carrying the full value, and the Free-rent/Term/Escal/TI headers were widened enough
+  for their own (now longer) labels to fit without truncating.
+- Plain Enter now commits the paste box (was Ctrl/Cmd+Enter) — "it shouldn't be type your own,
+  then press control enter... it should just be enter," verbatim. Shift+Enter still inserts a
+  literal newline. The "Add" button is removed as no longer the required commit path.
+- **VERIFIED (sandbox only — see the honesty note below).** Full suite `npx vitest run` — 675/675
+  files, 13,881/13,881 tests green, incl. new coverage in `test/compSheetColumns.test.js` (the
+  Type-first/frozen-pair ordering, the one-alignment-rule asserted generically across every column,
+  the `leaseTerm` bare-months boundary both directions, `computeFlexWidths`/`widthFor`/
+  `frozenLeftOffsets` across every regime incl. the below-floor edge, the Type→landSizeUnit default,
+  spillPaste's Type-inheritance-with-paste-override) and `test/comps.test.js` (`emptyDraft`'s
+  Per/Basis now-empty defaults). `npm run build` clean. `npx eslint` clean on every touched file.
+  `node ui-audit/design-drift-audit.mjs --check` / `node ui-audit/doc-pointer-audit.mjs` /
+  `node scripts/build-map.mjs --check` all pass.
+- **⛔ HONESTY NOTE, per the owner's explicit instruction not to report any of this from code
+  reading alone: NONE of the click→edit DOM behavior, the computed alignment, the overflow
+  measurement, or the empty-cell text was verified against a running browser this session** — this
+  sandbox has no browser access. The specific 4-value acceptance test from message A and the
+  alignment/overflow acceptance test from message B are **NOT performed**; a live pass against the
+  deployed page (after this PR merges and the bundle hash changes) is the one thing still owed and
+  is a `V###` follow-up in `VERIFICATION.md`, not claimed here.
+- **⛔ A THIRD owner message arrived mid-session asking to collapse the map toolbar's "Comp"
+  toggle + "Drop a pin" + "Comp from parcel" into one "Place comp" split button, and to rename the
+  panel's "＋ New comps" to "Paste comps".** Partially implemented, then the owner explicitly
+  stopped it ("STOP the toolbar work... Drop it from this session entirely — I am moving it to a
+  fresh session") after live-testing the still-unshipped Pass-7 build and finding none of the
+  above on production yet. **Every toolbar-related edit (`MapFinder.jsx`, `CompsPanel.jsx`,
+  `e2e/leasing-comps.spec.js`, both touched `ui-audit/` harnesses) was reverted out of this
+  session** — none of it is in this diff. It is real, scoped follow-up work for whichever session
+  picks it up next, not filed as a separate B# here since the owner reassigned it rather than
+  deferring it.
+
 ### B986097 — A draft staging table, reachable only by the KML import `[Site Planner / comps]` (feature) #comps #gis #persistence  *(owner chat block 2026-09-01, NEW-2, same decision doc as B986096 above. Minted **B986097 / V556721** from this branch's reserved block B986096–B986111 · V556720–V556735 against `origin/main` 8e42a14. DEDUPE-FIRST — searched Open/⏳Verify/Done for "KML", "My Maps", "import draft", "staging table", #comps: no prior item touches KML/My Maps import; net-new. Also searched for any prior `comp_import_drafts`/`comp_drafts` table — none exists.)*
 `[x]` **Shipped this session, including the schema — applied directly to production** (this session has Supabase MCP write access, unlike the read-only access a prior comps session flagged in this same module's folder pointer — that stale claim was corrected in the same commit).
 - Verify: live — GIS endpoint behavior (a real KML import, a real polygon centroid) + real production writes are mandatory LIVE-VERIFY classes. **V556721.**
