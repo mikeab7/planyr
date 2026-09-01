@@ -92,6 +92,28 @@ export function semanticallyEqual(a, b, eps = 1e-6) {
   return true;
 }
 
+/* isOwnWrite(row, selfUid) — THE single, standalone answer to "did this ROW originate from my own
+ * ACCOUNT?" (see docs/DATA.md §3 "One-answer functions" for the fuller picture, incl. why the
+ * per-TAB echo question — "have I already sent these exact bytes/this exact rev?" — is a genuinely
+ * DIFFERENT question and is deliberately NOT folded in here).
+ *
+ * Extracted as a pure, module-level function (no closure state) SPECIFICALLY so it can be reused
+ * outside one engine instance — `foreignAuthor` below is this same logic, inverted and pre-bound to
+ * one engine's `selfUidNow()`, and every one of its ~10 call sites (plus the CI sweep in
+ * test/elementSyncOwnWriteGate.test.js that fails the build if a new self-attributable notice skips
+ * it) is UNCHANGED by this extraction — this is a pure refactor, verified against the full existing
+ * elementSync/conflict-matrix test suite.
+ *
+ * A tombstone's actor is `deleted_by`, never `updated_by` (site_elements sets ONE of the two per
+ * statement) — read `deleted_by` first so a delete row is judged, not silently read as "unknown".
+ * Fails OPEN toward "mine" when either side is unknown (no `selfUid`, or a row with no stamped
+ * author) — an unattributable row must never be treated as definitively foreign, which is what lets
+ * every self-echo guarantee built on this function hold with no selfUid configured at all. */
+export function isOwnWrite(row, selfUid) {
+  const author = row && (row.deleted_by || row.updated_by);
+  return !(selfUid && author && author !== selfUid);
+}
+
 const skey = (kind, id) => kind + ":" + id;
 const DEFAULT_BACKOFF = [1000, 2000, 4000, 8000, 16000, 30000];
 
@@ -418,7 +440,9 @@ export function createElementSync(opts = {}) {
   // two per statement); a `foreignAuthor` that only reads `updated_by` answers "unknown" for every
   // delete row and fails open toward "possibly ours", which is the right default but must at least
   // be ASKED. Falls back to `updated_by` when the row is not a tombstone, exactly as before.
-  const foreignAuthor = (row) => { const me = selfUidNow(); const author = row && (row.deleted_by || row.updated_by); return !!(me && author && author !== me); };
+  // This engine's own instance bound to the standalone `isOwnWrite` above — the field-reading logic
+  // lives there now (one definition), this is just `!isOwnWrite(row, selfUidNow())` pre-bound.
+  const foreignAuthor = (row) => !isOwnWrite(row, selfUidNow());
 
   let debounceHandle = null;
   let backoffHandle = null;

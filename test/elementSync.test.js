@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createElementSync, stableStringify, semanticallyEqual } from "../src/workspaces/site-planner/lib/elementSync.js";
+import { createElementSync, stableStringify, semanticallyEqual, isOwnWrite } from "../src/workspaces/site-planner/lib/elementSync.js";
 import { foldNeverSyncedLocal, reconcileSeedRows } from "../src/workspaces/site-planner/lib/elementRows.js";
 import { toastForSyncEvent } from "../src/workspaces/site-planner/lib/conflictToasts.js";
 
@@ -45,6 +45,29 @@ function makeHarness(overrides = {}) {
 }
 
 const el = (id, extra = {}) => ({ id, type: "building", cx: 0, cy: 0, w: 10, h: 10, ...extra });
+
+// NEW — isOwnWrite(row, selfUid): the standalone extraction `foreignAuthor` is now built from
+// (see elementSync.js's own header on the extraction). Pins the truth table directly, independent
+// of any engine instance, so the two can never silently diverge.
+describe("isOwnWrite(row, selfUid) — the standalone per-account ownership answer", () => {
+  it("same account (updated_by) → mine", () => {
+    expect(isOwnWrite({ updated_by: "me" }, "me")).toBe(true);
+  });
+  it("different account (updated_by) → not mine", () => {
+    expect(isOwnWrite({ updated_by: "u2" }, "me")).toBe(false);
+  });
+  it("a tombstone reads deleted_by, never updated_by", () => {
+    expect(isOwnWrite({ deleted_by: "u2", updated_by: "me" }, "me")).toBe(false);
+    expect(isOwnWrite({ deleted_by: "me", updated_by: "u2" }, "me")).toBe(true);
+  });
+  it("no selfUid known → fails OPEN toward mine (never claim a definite foreign write on no evidence)", () => {
+    expect(isOwnWrite({ updated_by: "u2" }, null)).toBe(true);
+  });
+  it("no author on the row → fails OPEN toward mine", () => {
+    expect(isOwnWrite({}, "me")).toBe(true);
+    expect(isOwnWrite(null, "me")).toBe(true);
+  });
+});
 
 describe("diff classes", () => {
   it("a brand-new element commits immediately as a create (no debounce timer)", async () => {

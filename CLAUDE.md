@@ -13,6 +13,16 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > - **`docs/ROADMAP.md`** — what's not built yet (read when planning new work).
 > - **`docs/REFERENCE.md`** — deep implementation detail (Site Model schema, layer/GIS
 >   plumbing, Supabase DDL/RLS, persistence internals, the sandbox Playwright quirk).
+> - **`docs/DATA.md`** — the data bible: entity ownership, invariants, one-answer functions,
+>   causal units, the failure contract, the destructive-action contract (read below).
+>
+> **⛔ TOUCHING PERSISTENCE, SYNC, UNDO, OR DELETE? READ `docs/DATA.md` FIRST.** It is the single
+> place that answers who owns a fact and how it may change — the entity table, the numbered
+> invariants (each with the test that proves it), the short list of "one-answer" functions
+> (`isOwnWrite`, `assemblyIntegrity`, `nameAuthority`, …) that must never grow a second
+> implementation, and why. Written 2026-09-01 after a multi-round false-conflict/data-ownership bug
+> family; §7 of that file names exactly what was already fixed by prior sessions so it is not
+> re-diagnosed a ninth time.
 >
 > **⛔ WORKING ON NOTES? READ `docs/NOTES-CARRY-FORWARD.md` FIRST — before the module pointer, before
 > the code.** It is the one file that makes starting a FRESH session on this module cheap: the eight
