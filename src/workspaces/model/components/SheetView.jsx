@@ -36,11 +36,13 @@
  * insert/delete row/column and freeze toggles — the toolbar buttons for the SAME actions are a
  * Stage 2 item, so Stage 1 exposes them here first.
  */
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { colAt, rawAt, usedRangeEnd, rowHeightAt, DEFAULT_ROW_H } from "../lib/sheetModel.js";
 import { displayFor, displayKindFor } from "../lib/sheetEngine.js";
 import { ctrlArrowTarget } from "../lib/sheetOps.js";
 import { buildRowOffsets, visibleRowRange } from "../lib/rowLayout.js";
+import { MIN_ZOOM, MAX_ZOOM, DEFAULT_ZOOM, zoomFromWheelDelta, zoomStepButton } from "../lib/sheetZoom.js";
+import { RADIUS } from "../../../shared/ui/radius.js";
 import ContextMenu from "./ContextMenu.jsx";
 
 export const ROW_H = DEFAULT_ROW_H;
@@ -55,6 +57,15 @@ const RESIZE_HANDLE_PX = 6;
 function stepCol(colCount, c, dir) { return Math.max(0, Math.min(colCount - 1, c + dir)); }
 
 const TEXT_ALIGN = { number: "right", date: "right", bool: "center", error: "left", text: "left", blank: "left" };
+
+function zoomBtnStyle(enabled) {
+  return {
+    flex: "none", height: 22, minWidth: 22, padding: "0 4px", border: "none",
+    borderRadius: RADIUS.pill, background: "transparent", font: "inherit", fontSize: 11.5,
+    fontWeight: 700, color: enabled ? "var(--text-secondary)" : "var(--text-tertiary)",
+    cursor: enabled ? "pointer" : "default",
+  };
+}
 
 // A single shared, offscreen canvas for autofit's text-width measurement — Stage 1's "double-
 // click to autofit a column" needs to know how wide the widest RENDERED value in that column
@@ -78,6 +89,7 @@ export default function SheetView({
   onCopy, onPaste, onFillDown,
   onInsertRowAt, onDeleteRowAt, onInsertColumnAt, onDeleteColumnAt,
   onSetColumnWidth, onSetRowHeight, onSetFreeze,
+  zoom = DEFAULT_ZOOM, onZoomChange,
 }) {
   const outerRef = useRef(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -93,6 +105,10 @@ export default function SheetView({
   const [colResizePreview, setColResizePreview] = useState(null); // { colIndex, width } | null
   const [rowResizePreview, setRowResizePreview] = useState(null); // { rowIndex, height } | null
   const dragStateRef = useRef(null); // the in-flight drag's own start point, read by the window listeners
+  // B1007280 — a scroll position to restore, in LOGICAL (unzoomed) coordinates plus the
+  // viewport-relative cursor point that anchored it, set by the wheel handler and consumed by
+  // the layout effect below the moment `zoom` (a prop, changed by the parent) actually lands.
+  const pendingZoomAnchorRef = useRef(null);
 
   useLayoutEffect(() => {
     const el = outerRef.current;
@@ -104,18 +120,98 @@ export default function SheetView({
     return () => ro.disconnect();
   }, []);
 
+  // Ctrl/Cmd+wheel zooms the SHEET, never the whole browser page (B1007280, owner verbatim:
+  // "ctrl zoom should be captured by the spreadsheet not the webpage"). React's own `onWheel`
+  // prop is attached PASSIVE by default (React 17+, for scroll performance), so
+  // `e.preventDefault()` inside a React wheel handler cannot actually stop the browser's
+  // native page-zoom — this has to be a real, non-passive DOM listener attached directly to
+  // the scrolling element. Scoped to the grid's own container only, so the toolbar/formula bar
+  // above it are untouched — Ctrl+wheel there still does whatever the browser normally does.
+  const zoomRef = useRef(zoom);
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+  useEffect(() => {
+    const el = outerRef.current;
+    if (!el || !onZoomChange) return undefined;
+    const onWheel = (e) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      const oldZoom = zoomRef.current;
+      const newZoom = zoomFromWheelDelta(oldZoom, e.deltaY);
+      if (newZoom === oldZoom) return;
+      // Anchor on the cursor — the LOGICAL point under it stays under it, the same feel as a
+      // map or image viewer's Ctrl/Cmd+wheel zoom, never a jump back to the top-left corner.
+      const rect = el.getBoundingClientRect();
+      const cursorX = e.clientX - rect.left, cursorY = e.clientY - rect.top;
+      pendingZoomAnchorRef.current = {
+        logicalX: (el.scrollLeft + cursorX) / oldZoom,
+        logicalY: (el.scrollTop + cursorY) / oldZoom,
+        cursorX, cursorY,
+      };
+      onZoomChange(newZoom);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [onZoomChange]);
+
+  // Correct the scroll position the moment the new `zoom` prop has actually landed and this
+  // component has re-rendered with it — synchronously, before paint (a passive `useEffect`
+  // here would run one frame too late, the same reasoning as the active-cell scroll effect
+  // below). This has to run on EVERY zoom change, not only a wheel-triggered one: zooming
+  // changes the content's total rendered size, so a raw `scrollTop` pixel value left untouched
+  // no longer points at the same LOGICAL area — at a big enough zoom-OUT it can point past the
+  // new (smaller) content entirely, which is exactly what happened before this existed: zoom
+  // in near the bottom of the sheet, then hit the 100% reset button, and row 0 vanished from
+  // the DOM because the untouched scrollTop was now far past the shrunk content's height.
+  // Two cases: the wheel handler above sets a precise CURSOR anchor (the point under the
+  // cursor stays under it); every other trigger (the +/−/reset buttons) has no cursor to
+  // anchor on, so it rescales the CURRENT scroll position by the zoom ratio instead — the
+  // top-left of what's presently on screen stays anchored, which is the closest thing to "stay
+  // where I was looking" a button click can mean.
+  const prevZoomRef = useRef(zoom);
+  useLayoutEffect(() => {
+    const el = outerRef.current;
+    const prevZoom = prevZoomRef.current;
+    prevZoomRef.current = zoom;
+    const anchor = pendingZoomAnchorRef.current;
+    pendingZoomAnchorRef.current = null;
+    if (!el || zoom === prevZoom) return;
+    if (anchor) {
+      el.scrollLeft = anchor.logicalX * zoom - anchor.cursorX;
+      el.scrollTop = anchor.logicalY * zoom - anchor.cursorY;
+    } else if (prevZoom > 0) {
+      const ratio = zoom / prevZoom;
+      el.scrollLeft = el.scrollLeft * ratio;
+      el.scrollTop = el.scrollTop * ratio;
+    }
+  }, [zoom]);
+
   const cols = sheet.columns;
   const freezeRows = Math.min(sheet.freezeRows || 0, sheet.rowCount);
   const freezeCols = Math.min(sheet.freezeCols || 0, cols.length);
 
+  // B1007280 — sheet zoom (Ctrl/Cmd+wheel, or the corner control). `colWidthAt`/`rowHAt` stay
+  // LOGICAL (the stored/dragged value, independent of zoom — exactly what a resize commit and
+  // autofit's own text measurement need); `renderColW`/`renderRowH` are the RENDERED pixel size
+  // — logical × zoom — and are the only things every offset/layout/sticky calculation below
+  // touches, so virtualization and freeze-pane positioning stay correct at any zoom level by
+  // construction (same offsets, just built from bigger or smaller numbers) rather than needing
+  // a separate scale-corrected code path. HEADER_H/ROW_HEADER_W scale too — Excel's own zoom
+  // scales its headers along with the grid, not just the cells. RESIZE_HANDLE_PX deliberately
+  // does NOT scale — a resize grab strip needs to stay a comfortably clickable target at 50%
+  // zoom, not shrink along with everything else.
+  const headerH = HEADER_H * zoom;
+  const rowHeaderW = ROW_HEADER_W * zoom;
+
   const colWidthAt = useCallback((c) => (colResizePreview && colResizePreview.colIndex === c ? colResizePreview.width : (cols[c]?.width || DEFAULT_COL_W)), [cols, colResizePreview]);
   const rowHAt = useCallback((r) => (rowResizePreview && rowResizePreview.rowIndex === r ? rowResizePreview.height : rowHeightAt(sheet, r)), [sheet, rowResizePreview]);
+  const renderColW = useCallback((c) => colWidthAt(c) * zoom, [colWidthAt, zoom]);
+  const renderRowH = useCallback((r) => rowHAt(r) * zoom, [rowHAt, zoom]);
 
   const colOffsets = useMemo(() => {
-    const offs = [ROW_HEADER_W];
-    for (let c = 0; c < cols.length; c++) offs.push(offs[offs.length - 1] + colWidthAt(c));
+    const offs = [rowHeaderW];
+    for (let c = 0; c < cols.length; c++) offs.push(offs[offs.length - 1] + renderColW(c));
     return offs;
-  }, [cols, colWidthAt]);
+  }, [cols, renderColW, rowHeaderW]);
   const totalW = colOffsets[colOffsets.length - 1];
 
   // Row offsets, honouring any live resize preview — same cumulative-offset shape colOffsets
@@ -123,11 +219,11 @@ export default function SheetView({
   const rowOffsets = useMemo(() => {
     const offs = new Array(totalRows + 1);
     let y = 0;
-    for (let r = 0; r < totalRows; r++) { offs[r] = y; y += rowHAt(r); }
+    for (let r = 0; r < totalRows; r++) { offs[r] = y; y += renderRowH(r); }
     offs[totalRows] = y;
     return offs;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sheet.rowHeights, totalRows, rowResizePreview]);
+  }, [sheet.rowHeights, totalRows, rowResizePreview, zoom]);
 
   const { startIdx, endIdx } = visibleRowRange(rowOffsets, scrollTop, viewportH, BUF, freezeRows);
   const visibleRowIdxs = [];
@@ -153,9 +249,9 @@ export default function SheetView({
     // needs a scroll. Moving into the SCROLLING region might land somewhere off-screen, so:
     // reveal it just past the frozen band's reserved space, or just inside the far edge.
     if (activeR >= freezeRows) {
-      const cellTop = HEADER_H + rowOffsets[activeR], cellBottom = HEADER_H + rowOffsets[activeR + 1];
-      const frozenBandBottom = el.scrollTop + HEADER_H + rowOffsets[freezeRows];
-      if (cellTop < frozenBandBottom) el.scrollTop = cellTop - HEADER_H - rowOffsets[freezeRows];
+      const cellTop = headerH + rowOffsets[activeR], cellBottom = headerH + rowOffsets[activeR + 1];
+      const frozenBandBottom = el.scrollTop + headerH + rowOffsets[freezeRows];
+      if (cellTop < frozenBandBottom) el.scrollTop = cellTop - headerH - rowOffsets[freezeRows];
       else if (cellBottom > el.scrollTop + el.clientHeight) el.scrollTop = cellBottom - el.clientHeight;
     }
     if (activeC >= freezeCols) {
@@ -270,6 +366,10 @@ export default function SheetView({
 
   // ---- drag-resize (column width / row height) — a live LOCAL preview while dragging; the
   // real mutator (and its one undo frame) fires ONCE, on mouseup. ----
+  // Drag deltas arrive in real SCREEN pixels (mouse movement); the stored width/height is
+  // LOGICAL (zoom-independent), so a drag at 200% zoom must add only HALF the screen-pixel
+  // delta to the logical value — otherwise resizing at a non-100% zoom would silently double
+  // or halve what a column measures at 100% the next time it's opened.
   const startColResize = useCallback((e, colIndex) => {
     e.preventDefault(); e.stopPropagation();
     const startWidth = colWidthAt(colIndex);
@@ -277,7 +377,7 @@ export default function SheetView({
     const onMove = (ev) => {
       const st = dragStateRef.current;
       if (!st) return;
-      setColResizePreview({ colIndex: st.colIndex, width: st.startWidth + (ev.clientX - st.startX) });
+      setColResizePreview({ colIndex: st.colIndex, width: st.startWidth + (ev.clientX - st.startX) / zoom });
     };
     const onUp = (ev) => {
       window.removeEventListener("mousemove", onMove);
@@ -285,11 +385,11 @@ export default function SheetView({
       const st = dragStateRef.current;
       dragStateRef.current = null;
       setColResizePreview(null);
-      if (st) onSetColumnWidth(st.colIndex, st.startWidth + (ev.clientX - st.startX));
+      if (st) onSetColumnWidth(st.colIndex, st.startWidth + (ev.clientX - st.startX) / zoom);
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
-  }, [colWidthAt, onSetColumnWidth]);
+  }, [colWidthAt, onSetColumnWidth, zoom]);
 
   const startRowResize = useCallback((e, rowIndex) => {
     e.preventDefault(); e.stopPropagation();
@@ -298,7 +398,7 @@ export default function SheetView({
     const onMove = (ev) => {
       const st = dragStateRef.current;
       if (!st) return;
-      setRowResizePreview({ rowIndex: st.rowIndex, height: st.startHeight + (ev.clientY - st.startY) });
+      setRowResizePreview({ rowIndex: st.rowIndex, height: st.startHeight + (ev.clientY - st.startY) / zoom });
     };
     const onUp = (ev) => {
       window.removeEventListener("mousemove", onMove);
@@ -306,11 +406,11 @@ export default function SheetView({
       const st = dragStateRef.current;
       dragStateRef.current = null;
       setRowResizePreview(null);
-      if (st) onSetRowHeight(st.rowIndex, st.startHeight + (ev.clientY - st.startY));
+      if (st) onSetRowHeight(st.rowIndex, st.startHeight + (ev.clientY - st.startY) / zoom);
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
-  }, [rowHAt, onSetRowHeight]);
+  }, [rowHAt, onSetRowHeight, zoom]);
 
   // Double-click autofit. Column: measure every ROW's rendered text in that column (not just
   // the visible slice — a value off-screen must still count) via canvas metrics, size to the
@@ -420,17 +520,17 @@ export default function SheetView({
   const renderRowCells = (r, posStyle, rowZ) => {
     const inRowRange = r >= r1 && r <= r2;
     const row = rowCells.get(r);
-    const h = rowHAt(r);
+    const h = renderRowH(r);
     return (
       <div key={r} style={{ ...posStyle, left: 0, display: "flex", height: h, width: totalW, zIndex: rowZ }}>
         <div
           data-testid={`model-row-header-${r}`}
           onContextMenu={(e) => openRowMenu(e, r)}
           style={{
-            flex: `0 0 ${ROW_HEADER_W}px`, position: "sticky", left: 0, zIndex: 2,
+            flex: `0 0 ${rowHeaderW}px`, position: "sticky", left: 0, zIndex: 2,
             display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 6,
             borderRight: "1px solid var(--border-default)", borderBottom: "1px solid var(--border-subtle, var(--border-default))",
-            fontSize: 11, color: "var(--text-tertiary)", background: "var(--surface-raised)",
+            fontSize: 11 * zoom, color: "var(--text-tertiary)", background: "var(--surface-raised)",
           }}
         >
           {r + 1}
@@ -457,8 +557,8 @@ export default function SheetView({
           if (row && cell.kind === "text" && !cell.empty && !isEditing) {
             for (let cc = c + 1; cc < cols.length && row[cc] && row[cc].empty; cc++) spillCols++;
           }
-          const w = colWidthAt(c);
-          const spillWidth = spillCols > 0 ? (() => { let sum = w; for (let k = 1; k <= spillCols; k++) sum += colWidthAt(c + k); return sum; })() : null;
+          const w = renderColW(c);
+          const spillWidth = spillCols > 0 ? (() => { let sum = w; for (let k = 1; k <= spillCols; k++) sum += renderColW(c + k); return sum; })() : null;
           return (
             <div
               key={col.id}
@@ -466,6 +566,7 @@ export default function SheetView({
               data-row={r}
               data-col={c}
               data-kind={cell.kind}
+              data-selected={isSel ? "true" : undefined}
               onMouseDown={(e) => { e.preventDefault(); cellClick(r, c, e); }}
               onMouseEnter={() => cellMouseEnter(r, c)}
               onDoubleClick={() => startEdit(r, c, null)}
@@ -478,13 +579,13 @@ export default function SheetView({
                 boxSizing: "border-box",
                 display: "flex", alignItems: "center",
                 justifyContent: TEXT_ALIGN[cell.kind] === "right" ? "flex-end" : TEXT_ALIGN[cell.kind] === "center" ? "center" : "flex-start",
-                padding: isEditing ? 0 : "0 8px",
+                padding: isEditing ? 0 : `0 ${8 * zoom}px`,
                 borderRight: "1px solid var(--border-default)",
                 borderBottom: "1px solid var(--border-subtle, var(--border-default))",
                 outline: isActive ? "2px solid var(--accent-model)" : "none",
                 outlineOffset: -1,
                 background: isEditing ? "var(--surface-page)" : isSel ? "var(--surface-selected, rgba(43,95,191,0.10))" : "var(--surface-page)",
-                fontSize: 12.5, color: cell.kind === "error" ? "var(--danger)" : "var(--text-primary)",
+                fontSize: 12.5 * zoom, color: cell.kind === "error" ? "var(--danger)" : "var(--text-primary)",
                 whiteSpace: "nowrap", overflow: spillCols > 0 ? "visible" : "hidden", textOverflow: "ellipsis",
                 fontVariantNumeric: "tabular-nums",
                 cursor: "cell",
@@ -507,7 +608,7 @@ export default function SheetView({
                   style={{ width: "100%", height: "100%", boxSizing: "border-box", border: "none", padding: "0 7px", font: "inherit", fontVariantNumeric: "tabular-nums", background: "transparent", color: "inherit", textAlign: "inherit" }}
                 />
               ) : spillCols > 0 ? (
-                <span style={{ position: "absolute", left: 8, top: 0, height: "100%", display: "flex", alignItems: "center", width: spillWidth - 16, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", pointerEvents: "none" }}>{cell.display}</span>
+                <span style={{ position: "absolute", left: 8 * zoom, top: 0, height: "100%", display: "flex", alignItems: "center", width: spillWidth - 16 * zoom, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", pointerEvents: "none" }}>{cell.display}</span>
               ) : cell.display}
               {c < cols.length && (
                 <div
@@ -538,14 +639,14 @@ export default function SheetView({
       {/* width+minWidth, not Math.max(totalW, "100%") — that mixes a number with a CSS percent
           string, which Number("100%") coerces to NaN and React then rejects the whole style
           ("`NaN` is an invalid value for the `width` css style property"), measured live. */}
-      <div style={{ position: "relative", height: HEADER_H + rowOffsets[totalRows], width: totalW, minWidth: "100%" }}>
+      <div style={{ position: "relative", height: headerH + rowOffsets[totalRows], width: totalW, minWidth: "100%" }}>
         {/* Header row — sticky vertically, scrolls horizontally with the body via the shared
             container; individual FROZEN-column cells within it are ALSO sticky-left (below). */}
-        <div style={{ position: "sticky", top: 0, zIndex: 3, display: "flex", height: HEADER_H, width: totalW, background: "var(--surface-raised)", borderBottom: "1px solid var(--border-default)" }}>
-          <div style={{ flex: `0 0 ${ROW_HEADER_W}px`, position: "sticky", left: 0, zIndex: 2, borderRight: "1px solid var(--border-default)", background: "var(--surface-raised)" }} />
+        <div style={{ position: "sticky", top: 0, zIndex: 3, display: "flex", height: headerH, width: totalW, background: "var(--surface-raised)", borderBottom: "1px solid var(--border-default)" }}>
+          <div style={{ flex: `0 0 ${rowHeaderW}px`, position: "sticky", left: 0, zIndex: 2, borderRight: "1px solid var(--border-default)", background: "var(--surface-raised)" }} />
           {cols.map((col, c) => {
             const frozenCol = c < freezeCols;
-            const w = colWidthAt(c);
+            const w = renderColW(c);
             return (
               <div
                 key={col.id}
@@ -558,10 +659,10 @@ export default function SheetView({
                   left: frozenCol ? colOffsets[c] : undefined,
                   zIndex: frozenCol ? 1 : "auto",
                   flex: `0 0 ${w}px`,
-                  display: "flex", alignItems: "center", gap: 4, padding: "0 8px", cursor: "pointer",
+                  display: "flex", alignItems: "center", gap: 4, padding: `0 ${8 * zoom}px`, cursor: "pointer",
                   borderRight: "1px solid var(--border-default)",
                   background: c >= c1 && c <= c2 ? "var(--surface-selected, rgba(59,107,255,0.08))" : "var(--surface-raised)",
-                  fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)",
+                  fontSize: 12.5 * zoom, fontWeight: 600, color: "var(--text-primary)",
                 }}
               >
                 {renaming === c ? (
@@ -596,15 +697,52 @@ export default function SheetView({
         {/* Frozen rows — ALWAYS rendered (never virtualized: there are only ever a handful),
             normal document flow, each sticky at its own resting top so it stays pinned right
             below the header as the body scrolls underneath it. */}
-        {frozenRowIdxs.map((r) => renderRowCells(r, { position: "sticky", top: HEADER_H + rowOffsets[r] }, 2))}
+        {frozenRowIdxs.map((r) => renderRowCells(r, { position: "sticky", top: headerH + rowOffsets[r] }, 2))}
 
         {/* Scrolling rows — the existing virtualized window, absolutely positioned at each
             row's real offset; a row past the real sheet.rowCount is blank PADDING: typing into
             it is what grows the sheet, mirroring GridView's emptyPad. */}
-        {visibleRowIdxs.map((r) => renderRowCells(r, { position: "absolute", top: HEADER_H + rowOffsets[r] }, "auto"))}
+        {visibleRowIdxs.map((r) => renderRowCells(r, { position: "absolute", top: headerH + rowOffsets[r] }, "auto"))}
       </div>
 
       {contextMenu && <ContextMenu point={contextMenu.point} items={contextMenu.items} onClose={closeMenu} />}
+
+      {/* B1007280 — the zoom control. `position: fixed` (not absolute/sticky) so it floats over
+          the corner regardless of the sheet's own scroll — a fixed-position element ignores an
+          ancestor's scroll offset entirely, which is exactly "always visible" without any of
+          freeze panes' sticky-offset bookkeeping. Excel's own zoom slider lives in the same
+          corner for the same reason: a view control, reachable without hunting through a menu,
+          that never competes with the grid it controls for space. */}
+      {onZoomChange && (
+        <div
+          data-testid="model-zoom-control"
+          style={{
+            position: "fixed", bottom: 12, right: 16, zIndex: 20,
+            display: "flex", alignItems: "center", gap: 2, padding: 3,
+            borderRadius: RADIUS.pill, border: "1px solid var(--border-default)",
+            background: "var(--surface-raised)",
+            boxShadow: "0 1px 4px rgba(0,0,0,0.16)", // design-exempt: no shadow-color token yet repo-wide (AnchoredMenu's own popPanel carries the identical gap)
+          }}
+        >
+          <button
+            type="button" data-testid="model-zoom-out" title="Zoom out"
+            disabled={zoom <= MIN_ZOOM}
+            onClick={() => onZoomChange(zoomStepButton(zoom, -1))}
+            style={zoomBtnStyle(zoom > MIN_ZOOM)}
+          >−</button>
+          <button
+            type="button" data-testid="model-zoom-level" title="Reset to 100%"
+            onClick={() => onZoomChange(DEFAULT_ZOOM)}
+            style={{ ...zoomBtnStyle(true), width: 46, fontVariantNumeric: "tabular-nums" }}
+          >{Math.round(zoom * 100)}%</button>
+          <button
+            type="button" data-testid="model-zoom-in" title="Zoom in"
+            disabled={zoom >= MAX_ZOOM}
+            onClick={() => onZoomChange(zoomStepButton(zoom, 1))}
+            style={zoomBtnStyle(zoom < MAX_ZOOM)}
+          >+</button>
+        </div>
+      )}
     </div>
   );
 }

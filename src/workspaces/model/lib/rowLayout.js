@@ -12,11 +12,18 @@ import { rowHeightAt } from "./sheetModel.js";
  *  `offsets[r]` is row r's own top (relative to the start of the row area), `offsets[n]`
  *  (n = rowCount) is the total height of all `rowCount` rows. O(rowCount); cheap even at a
  *  few thousand rows, and only recomputed when the row count or a height actually changes
- *  (never on a plain scroll). */
-export function buildRowOffsets(sheet, rowCount) {
+ *  (never on a plain scroll).
+ *
+ *  `zoom` (B1007280, default 1) scales every row's height at the SOURCE — the one place this
+ *  module needs to know about zoom at all. Everything downstream (which row is at a given
+ *  scroll position, the visible virtualization window) consumes these offsets as plain
+ *  numbers and needs no zoom-awareness of its own, because the real DOM `scrollTop` a browser
+ *  reports is already in the SAME zoomed pixel units the caller renders rows at — offsets and
+ *  scroll position agree by construction, not by a separate conversion step. */
+export function buildRowOffsets(sheet, rowCount, zoom = 1) {
   const offsets = new Array(rowCount + 1);
   let y = 0;
-  for (let r = 0; r < rowCount; r++) { offsets[r] = y; y += rowHeightAt(sheet, r); }
+  for (let r = 0; r < rowCount; r++) { offsets[r] = y; y += rowHeightAt(sheet, r) * zoom; }
   offsets[rowCount] = y;
   return offsets;
 }

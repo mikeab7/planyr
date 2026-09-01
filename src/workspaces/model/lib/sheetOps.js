@@ -122,17 +122,33 @@ export function ctrlArrowTarget(hasContent, rowCount, colCount, r, c, dr, dc) {
 
 // ── Stage 1 — the Name Box (type "C50", jump there / Ctrl+G) ───────────────────────────────
 
-/** Parse a typed Name Box address ("C50", "$C$50", lowercase "c50") into a (rowIndex, colIndex)
- *  pair, or `null` if it isn't a valid address OR falls outside the sheet's CURRENT bounds —
- *  the Name Box only ever jumps within the sheet as it exists today, never past it (unlike a
- *  formula reference, which can legally name a cell that doesn't exist yet). Reuses the formula
- *  engine's own address grammar (parseRefText) rather than a second, possibly-disagreeing regex. */
+/** Parse a typed Name Box address into a normalized rectangle `{ r1, c1, r2, c2 }` (r1<=r2,
+ *  c1<=c2 — a single cell has r1===r2 and c1===c2), or `null` if it isn't valid OR falls
+ *  outside the sheet's CURRENT bounds — the Name Box only ever jumps within the sheet as it
+ *  exists today, never past it (unlike a formula reference, which can legally name a cell that
+ *  doesn't exist yet). Accepts a bare address ("C50", "$C$50", lowercase "c50") or a RANGE
+ *  ("C50:E60", either corner first — Excel's own Name Box accepts both orders). A range is
+ *  rejected WHOLE if either side is malformed or out of bounds — never a partial best-effort
+ *  jump to just the side that happened to parse (B1007280: "silently going to the wrong cell
+ *  is worse than refusing"). Reuses the formula engine's own address grammar (parseRefText)
+ *  rather than a second, possibly-disagreeing regex. */
 export function parseNameBoxAddress(text, rowCount, colCount) {
-  const info = parseRefText(String(text || "").trim());
-  if (!info) return null;
-  const r = info.row - 1, c = info.col - 1; // parseRefText is 1-based
-  if (r < 0 || r >= rowCount || c < 0 || c >= colCount) return null;
-  return { r, c };
+  const trimmed = String(text || "").trim();
+  const parts = trimmed.split(":");
+  if (parts.length > 2) return null; // "A1:B2:C3" is not a shape the Name Box understands
+  const toCell = (part) => {
+    const info = parseRefText(part.trim());
+    if (!info) return null;
+    const r = info.row - 1, c = info.col - 1; // parseRefText is 1-based
+    if (r < 0 || r >= rowCount || c < 0 || c >= colCount) return null;
+    return { r, c };
+  };
+  const a = toCell(parts[0]);
+  if (!a) return null;
+  if (parts.length === 1) return { r1: a.r, c1: a.c, r2: a.r, c2: a.c };
+  const b = toCell(parts[1]);
+  if (!b) return null;
+  return { r1: Math.min(a.r, b.r), c1: Math.min(a.c, b.c), r2: Math.max(a.r, b.r), c2: Math.max(a.c, b.c) };
 }
 
 // ── Stage 1 — Find and Replace (Ctrl+F / Ctrl+H) ────────────────────────────────────────────

@@ -154,22 +154,47 @@ describe("ctrlArrowTarget — Excel's block-jump (Ctrl+Arrow)", () => {
 });
 
 // ⛔ STAGE 1 — the Name Box (owner brief: "Name box that ACCEPTS typed input to jump", Ctrl+G).
+// B1007280 — the return shape is now a normalized rectangle { r1, c1, r2, c2 } always (a
+// single cell has r1===r2, c1===c2), so the SAME function and the SAME caller wiring handle
+// both "go to one cell" and "select this range" — see the file header on why a range is
+// rejected WHOLE rather than partially landing on whichever side happened to parse.
 describe("parseNameBoxAddress", () => {
-  it("parses a plain A1-style address into a 0-based (row, col) pair", () => {
-    expect(parseNameBoxAddress("C50", 1000, 26)).toEqual({ r: 49, c: 2 });
-    expect(parseNameBoxAddress("a1", 1000, 26)).toEqual({ r: 0, c: 0 }); // case-insensitive
+  it("parses a plain A1-style address into a normalized single-cell rectangle", () => {
+    expect(parseNameBoxAddress("C50", 1000, 26)).toEqual({ r1: 49, c1: 2, r2: 49, c2: 2 });
+    expect(parseNameBoxAddress("a1", 1000, 26)).toEqual({ r1: 0, c1: 0, r2: 0, c2: 0 }); // case-insensitive
   });
   it("accepts $-anchored text the same as plain (the Name Box has no concept of relative/absolute)", () => {
-    expect(parseNameBoxAddress("$C$50", 1000, 26)).toEqual({ r: 49, c: 2 });
+    expect(parseNameBoxAddress("$C$50", 1000, 26)).toEqual({ r1: 49, c1: 2, r2: 49, c2: 2 });
   });
   it("rejects garbage rather than guessing", () => {
     expect(parseNameBoxAddress("not an address", 1000, 26)).toBe(null);
     expect(parseNameBoxAddress("", 1000, 26)).toBe(null);
   });
   it("rejects an address OUTSIDE the sheet's current bounds — Name Box jumps within today's sheet, never past it", () => {
-    expect(parseNameBoxAddress("Z1", 1000, 26)).toEqual({ r: 0, c: 25 }); // Z = col 26, within a 26-col sheet
+    expect(parseNameBoxAddress("Z1", 1000, 26)).toEqual({ r1: 0, c1: 25, r2: 0, c2: 25 }); // Z = col 26, within a 26-col sheet
     expect(parseNameBoxAddress("AA1", 1000, 26)).toBe(null); // col 27, one past a 26-col sheet
     expect(parseNameBoxAddress("A1001", 1000, 26)).toBe(null); // row 1001, one past a 1000-row sheet
+  });
+
+  it("parses a range in either corner order, normalized to top-left/bottom-right", () => {
+    expect(parseNameBoxAddress("C50:E60", 1000, 26)).toEqual({ r1: 49, c1: 2, r2: 59, c2: 4 });
+    // Excel's own Name Box accepts the corners in EITHER order — the bottom-right cell typed
+    // first is just as valid a range as the top-left cell typed first.
+    expect(parseNameBoxAddress("E60:C50", 1000, 26)).toEqual({ r1: 49, c1: 2, r2: 59, c2: 4 });
+  });
+  it("a single-cell range (both corners the same cell) is just that one cell", () => {
+    expect(parseNameBoxAddress("C50:C50", 1000, 26)).toEqual({ r1: 49, c1: 2, r2: 49, c2: 2 });
+  });
+  it("rejects a range WHOLE if either side is malformed — never a partial jump to the side that parsed", () => {
+    expect(parseNameBoxAddress("C50:QQ", 1000, 26)).toBe(null);
+    expect(parseNameBoxAddress("QQ:C50", 1000, 26)).toBe(null);
+  });
+  it("rejects a range WHOLE if either side is out of the sheet's current bounds", () => {
+    expect(parseNameBoxAddress("C50:AA60", 1000, 26)).toBe(null); // AA is col 27, past a 26-col sheet
+    expect(parseNameBoxAddress("A1001:C50", 1000, 26)).toBe(null); // row 1001, past a 1000-row sheet
+  });
+  it("rejects a triple-colon shape (not a range the Name Box understands)", () => {
+    expect(parseNameBoxAddress("A1:B2:C3", 1000, 26)).toBe(null);
   });
 });
 

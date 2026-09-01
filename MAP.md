@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-01 @ `d87423e97` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-01 @ `317c66ef3` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_630 source files mapped._
+_631 source files mapped._
 
 ## infra
 
@@ -113,6 +113,8 @@ _630 source files mapped._
   - _exports_: `addColumn`, `blankRange`, `cellKey`, `colAt`, `columnIndexByName`, `commitCellText`, `createSheet`, `DEFAULT_ROW_H`, `deleteColumn`, `deleteRowAt`, `ensureColumnCount`, `formatAt`, `insertColumnAt`, `insertRowAt`, `isFormulaText`, `migrateSheet`, `padRowCount`, `rawAt`, `renameColumn`, `rowHeightAt`, `setColumnWidth`, `setFreeze`, `setNumberFormat`, `setRaw`, `setRowHeight`, `SHEET_VERSION`, `sheetsDiverge`, `usedRangeEnd`
 - **`src/workspaces/model/lib/sheetOps.js`** — Copy/paste/fill-down and the Ctrl+Arrow block-jump target, sharing the formula engine's relative-reference rewrite.
   - _exports_: `copyRange`, `ctrlArrowTarget`, `fillDown`, `findMatches`, `parseNameBoxAddress`, `pasteRange`, `replaceAll`, `replaceInCellText`
+- **`src/workspaces/model/lib/sheetZoom.js`** — The sheet's own Ctrl/Cmd+wheel zoom level: pure clamp/step math plus per-project localStorage persistence (a view preference, never sheet data).
+  - _exports_: `clampZoom`, `DEFAULT_ZOOM`, `MAX_ZOOM`, `MIN_ZOOM`, `readZoom`, `writeZoom`, `zoomFromWheelDelta`, `zoomStepButton`
 - **`src/workspaces/model/lib/undoStack.js`** — General whole-state undo/redo: a snapshot stack keyed on committed edits, agnostic to what kind of edit each one was.
   - _exports_: `useUndoableState`
 - **`src/workspaces/model/ModelApp.jsx`** — Model workspace root: the underwriting spreadsheet — loads/saves the active project's sheet and wires the toolbar, formula bar and grid together.

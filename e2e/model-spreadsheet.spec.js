@@ -369,10 +369,71 @@ test.describe("Model workspace — Stage 1 (grid capacity, structural editing, f
     // col 0 out of the virtualized window (only the visible slice of rows/cols is in the DOM), so
     // a locator for it times out — Control+Home both scrolls back and re-establishes a known
     // active cell in one native keystroke, same pattern the Ctrl+Home/End test above already uses.
-    await sheetEl(page).click();
+    // Click the ACTIVE cell itself, not the whole "model-sheet" container — a blind click on the
+    // container's own bounding-box centre can land below the last virtualized row at some scroll
+    // depths/viewports, on empty space with nothing to catch focus, so Control+Home silently goes
+    // nowhere (found live by the range/invalid-input test beside this one).
+    await active.click();
     await page.keyboard.press("Control+Home");
     await page.keyboard.press("Control+g");
     await expect(nameBox).toBeFocused();
+  });
+
+  // B1007280 — owner report, relayed verbatim: "I typed C50 into the name box and pressed
+  // Enter. It selected column C and put me at C1. The row part was parsed and discarded."
+  // Extensive live testing (direct type, Ctrl+G entry, slow/paused typing, double-click and
+  // edge-click focus) could not reproduce that on current code — every path correctly landed
+  // on row 50 — so this is not a fix for a reproduced defect; it locks in the CORRECT behavior
+  // going forward, plus the two genuinely new pieces the same report asked for: range support
+  // and a visible refusal for an address that doesn't resolve.
+  test("Name Box: a range like C50:E60 selects that block; an unresolvable address refuses visibly, never silently lands wrong", async ({ page }) => {
+    const id = "e2e-stage1-namebox-range";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await expect(sheetEl(page)).toBeVisible();
+
+    const nameBox = page.getByTestId("model-name-box");
+    const active = page.getByTestId("model-active-cell");
+
+    // A range jumps to its top-left corner and selects the whole rectangle — read back an
+    // actual cell inside the range as proof, not just the anchor's own coordinates.
+    await nameBox.click();
+    await page.keyboard.type("C50:E60");
+    await page.keyboard.press("Enter");
+    await expect(active).toHaveAttribute("data-row", "49");
+    await expect(active).toHaveAttribute("data-col", "2");
+    await expect(page.locator('[data-row="55"][data-col="3"]')).toHaveAttribute("data-selected", "true");
+    await expect(page.locator('[data-row="49"][data-col="1"]')).not.toHaveAttribute("data-selected", "true");
+
+    // The corners typed in the OTHER order resolve to the identical rectangle.
+    // Click the ACTIVE cell itself (guaranteed rendered — we just navigated there) rather than
+    // blindly clicking the whole "model-sheet" container: at this scroll depth its own
+    // bounding-box centre can land below the last virtualized row, on genuinely empty space
+    // with no cell underneath to catch focus, so Control+Home would silently go nowhere (a
+    // real bug this test caught in ITSELF, not in the app — same lesson as the row-header
+    // testid needed for Stage 1's own context-menu tests).
+    await active.click();
+    await page.keyboard.press("Control+Home");
+    await nameBox.click();
+    await page.keyboard.type("E60:C50");
+    await page.keyboard.press("Enter");
+    await expect(active).toHaveAttribute("data-row", "49");
+    await expect(active).toHaveAttribute("data-col", "2");
+
+    // An address the sheet has no cell for (past its current 26-column width) refuses WHOLE —
+    // the selection stays exactly where it was, and the box visibly flags the refusal rather
+    // than silently doing nothing.
+    await active.click();
+    await page.keyboard.press("Control+Home");
+    await nameBox.click();
+    await page.keyboard.type("C50:QQ");
+    await page.keyboard.press("Enter");
+    await expect(active).toHaveAttribute("data-row", "0");
+    await expect(active).toHaveAttribute("data-col", "0");
+    await expect(nameBox).toHaveAttribute("data-invalid", "true");
+    await expect(nameBox).toHaveValue("A1");
+    await expect(nameBox).toBeFocused(); // stays focused so the user can immediately retype, like Excel
+    await expect(nameBox).not.toHaveAttribute("data-invalid", "true", { timeout: 2000 }); // clears itself
   });
 
   test("Ctrl+F finds every cell containing the search text, case-insensitive, across the sheet", async ({ page }) => {
@@ -445,5 +506,81 @@ test.describe("Model workspace — Stage 1 (grid capacity, structural editing, f
     // Autofit sizes to the actual rendered text, not to wherever the drag happened to land.
     expect(afterAutofit.width).not.toBe(afterDrag.width);
     expect(afterAutofit.width).toBeGreaterThan(40);
+  });
+
+  // B1007280 — owner verbatim: "ctrl zoom should be captured by the spreadsheet not the
+  // webpage." Covers the core guarantee (the grid scales, the page doesn't) plus the two
+  // failure modes a live-verification pass actually caught while building this: freeze-pane
+  // offsets staying correct at a non-100% zoom, and a drag-resize at a non-100% zoom storing a
+  // LOGICAL (zoom-independent) width rather than the raw screen-pixel delta.
+  test("Ctrl+wheel zooms the sheet, never the browser page; freeze offsets and drag-resize stay correct at 50%/200%", async ({ page }) => {
+    const id = "e2e-stage1-zoom";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await expect(sheetEl(page)).toBeVisible();
+
+    const zoomLevel = page.getByTestId("model-zoom-level");
+    const zoomOut = page.getByTestId("model-zoom-out");
+    const zoomIn = page.getByTestId("model-zoom-in");
+    await expect(zoomLevel).toHaveText("100%");
+
+    // Ctrl+wheel over the grid changes the SHEET's own zoom, never the browser page's.
+    const pageZoomBefore = await page.evaluate(() => window.visualViewport?.scale ?? 1);
+    await page.mouse.move(700, 400);
+    await page.keyboard.down("Control");
+    await page.mouse.wheel(0, -400);
+    await page.keyboard.up("Control");
+    const pageZoomAfter = await page.evaluate(() => window.visualViewport?.scale ?? 1);
+    expect(pageZoomAfter).toBe(pageZoomBefore);
+    await expect(async () => {
+      expect(parseInt(await zoomLevel.textContent(), 10)).toBeGreaterThan(100);
+    }).toPass();
+
+    // A plain wheel (no modifier) never zooms — it scrolls, exactly as before this feature.
+    await zoomLevel.click(); // reset to 100%
+    await page.mouse.wheel(0, 100);
+    await expect(zoomLevel).toHaveText("100%");
+    await sheetEl(page).evaluate((el) => { el.scrollTop = 0; });
+
+    // Real measured cell/header dimensions at 200% are ~2x the 100% values — not just "bigger."
+    const at100 = await cell(page, 0, 0).boundingBox();
+    for (let i = 0; i < 10; i++) await zoomIn.click(); // 100% -> 200%, the +/- buttons' own path
+    await expect(zoomLevel).toHaveText("200%");
+    const at200 = await cell(page, 0, 0).boundingBox();
+    expect(at200.width).toBeGreaterThan(at100.width * 1.9);
+    expect(at200.height).toBeGreaterThan(at100.height * 1.9);
+
+    // Freeze panes: right-click a cell BELOW/RIGHT of what should freeze (Excel's own "freeze
+    // panes" semantics — everything above/left of the clicked cell), scroll deep, and the
+    // frozen top-left cell must still sit exactly at the sheet's own header/gutter edge, not
+    // just "somewhere still visible."
+    await cell(page, 1, 1).click({ button: "right" });
+    await page.getByText("Freeze panes", { exact: true }).click();
+    await sheetEl(page).evaluate((el) => { el.scrollTop = 3000; el.scrollLeft = 500; });
+    await expect(cell(page, 0, 0)).toBeVisible();
+    const frozenBox = await cell(page, 0, 0).boundingBox();
+    const sheetBox = await sheetEl(page).boundingBox();
+    const headerH = await page.getByTestId("model-col-header-0").evaluate((el) => el.getBoundingClientRect().height);
+    const rowHeaderW = await page.getByTestId("model-row-header-0").evaluate((el) => el.getBoundingClientRect().width);
+    expect(Math.abs(frozenBox.y - (sheetBox.y + headerH))).toBeLessThan(3);
+    expect(Math.abs(frozenBox.x - (sheetBox.x + rowHeaderW))).toBeLessThan(3);
+
+    // Clean up freeze/scroll before the resize check below.
+    await cell(page, 0, 0).click({ button: "right" });
+    await page.getByText("Unfreeze panes", { exact: true }).click();
+    await sheetEl(page).evaluate((el) => { el.scrollTop = 0; el.scrollLeft = 0; });
+
+    // Drag-resize at 200% zoom: a +100 SCREEN-px drag must commit a +50 LOGICAL px change —
+    // reading back at 100% proves the stored width is zoom-independent, not the raw drag delta.
+    const headerB = page.getByTestId("model-col-header-1");
+    const beforeDrag = await headerB.boundingBox();
+    await page.mouse.move(beforeDrag.x + beforeDrag.width - 2, beforeDrag.y + beforeDrag.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(beforeDrag.x + beforeDrag.width + 100, beforeDrag.y + beforeDrag.height / 2, { steps: 5 });
+    await page.mouse.up();
+    await zoomLevel.click(); // back to 100%
+    await expect(zoomLevel).toHaveText("100%");
+    const afterDragAt100 = await headerB.boundingBox();
+    expect(Math.abs(afterDragAt100.width - (beforeDrag.width / 2 + 50))).toBeLessThan(4);
   });
 });

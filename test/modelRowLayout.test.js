@@ -21,6 +21,45 @@ describe("buildRowOffsets", () => {
     expect(offsets[3]).toBe(DEFAULT_ROW_H * 2 + DEFAULT_ROW_H * 3); // row 3 starts after row 2's extra height
     expect(offsets[5]).toBe(offsets[4] + DEFAULT_ROW_H);
   });
+
+  // B1007280 — sheet zoom. Every row's height scales by the SAME factor `zoom` multiplies in
+  // at, so the offset table is just the unzoomed one times zoom, uniformly — proven at the
+  // three levels the owner's brief named explicitly: 50%, 100% (the default, already covered
+  // above), and 200%.
+  describe("zoom (B1007280)", () => {
+    it("at 50% zoom, every offset is exactly half the unzoomed value", () => {
+      let s = createSheet();
+      s = setRowHeight(s, 2, DEFAULT_ROW_H * 3); // keep a variable-height row in the mix
+      const base = buildRowOffsets(s, 5);
+      const half = buildRowOffsets(s, 5, 0.5);
+      for (let r = 0; r <= 5; r++) expect(half[r]).toBeCloseTo(base[r] * 0.5, 10);
+    });
+
+    it("at 100% zoom (the default), passing 1 explicitly matches omitting the argument entirely", () => {
+      let s = createSheet();
+      s = setRowHeight(s, 2, DEFAULT_ROW_H * 3);
+      expect(buildRowOffsets(s, 5, 1)).toEqual(buildRowOffsets(s, 5));
+    });
+
+    it("at 200% zoom, every offset is exactly double the unzoomed value", () => {
+      let s = createSheet();
+      s = setRowHeight(s, 2, DEFAULT_ROW_H * 3);
+      const base = buildRowOffsets(s, 5);
+      const doubled = buildRowOffsets(s, 5, 2);
+      for (let r = 0; r <= 5; r++) expect(doubled[r]).toBeCloseTo(base[r] * 2, 10);
+    });
+
+    it("visibleRowRange over zoomed offsets still finds the correct row for a zoomed scrollTop — the virtualization window is never off by zoom", () => {
+      const s = createSheet();
+      // At 200% zoom every row is 2*DEFAULT_ROW_H tall; a scrollTop of exactly row 10's zoomed
+      // top must resolve to row 10, not row 5 (what it would be misread as at 1x) or row 20
+      // (double-applying the zoom).
+      const offsets = buildRowOffsets(s, 1000, 2);
+      const scrollTop = 10 * DEFAULT_ROW_H * 2;
+      const { startIdx } = visibleRowRange(offsets, scrollTop, 400, 0);
+      expect(startIdx).toBe(10);
+    });
+  });
 });
 
 describe("rowAtOffset", () => {
