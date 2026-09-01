@@ -174,7 +174,7 @@ function IconDropdownButton({ icon, title, width = 190, children }) {
     <span style={{ position: "relative", display: "inline-flex" }}>
       <button type="button" ref={anchorRef} title={title} aria-label={title} onClick={() => setOpen((o) => !o)} style={ribbonBtnStyle(open, { gap: 2 })}>
         {icon}
-        <span aria-hidden="true" style={{ fontSize: 8, opacity: 0.7 }}>▾</span>
+        <span aria-hidden="true" style={{ fontSize: 10, opacity: 0.7 }}>▾</span>
       </button>
       <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} placement="below-left" width={width} panelStyle={menuPanelStyle}>
         <div onClick={() => setOpen(false)}>{children}</div>
