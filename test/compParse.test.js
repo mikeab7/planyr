@@ -177,12 +177,18 @@ describe("compParse: Michael's exact repro — a single lease abstract must beco
     expect(draft.leaseRatePeriod).toBe("");
     expect(cellFlags.leaseRatePeriod?.level).toBe("blocking");
 
-    // The commencement date is a soft-flagged fallback for compDate, never presented as fact.
+    // The commencement date is its OWN field (B986096-HARDENING-6 — execution and commencement
+    // are different facts) AND a soft-flagged fallback for the required compDate, never
+    // presented as fact either way.
+    expect(draft.leaseCommencementDate).toBe("2027-06-01");
+    expect(cellFlags.leaseCommencementDate?.level).toBe("soft");
+    expect(cellFlags.leaseCommencementDate?.reason).toMatch(/estimated/i);
     expect(draft.compDate).toBe("2027-06-01");
     expect(cellFlags.compDate?.level).toBe("soft");
-    expect(cellFlags.compDate?.reason).toMatch(/date read from ".*commencement estimated to be june 1, 2027.*"/i);
-    expect(cellFlags.compDate?.reason).toMatch(/stored as estimated/i);
-    expect(draft.notes).toMatch(/Commencement \(estimated\): 2027-06-01/);
+    expect(cellFlags.compDate?.reason).toMatch(/no execution date was stated/i);
+    expect(cellFlags.compDate?.reason).toMatch(/commencement estimated to be june 1, 2027/i);
+    expect(cellFlags.compDate?.reason).toMatch(/captured in its own column/i);
+    expect(draft.notes).toBe(""); // no longer duplicated into notes — it's a real field now
   });
 
   it("never produces an empty or bogus 'Land' row", () => {

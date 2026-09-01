@@ -116,6 +116,77 @@ export function leaseTotalAnnualRent(comp) {
   return annual != null && sf ? annual * sf : null;
 }
 
+/** LAND's price per unit of AREA, in the SIZE'S OWN RECORDED UNIT — $/AC when `landSizeUnit` is
+ * acres, $/SF when it's square feet. ⛔ B986096-HARDENING-6, corrected TWICE in one session: a
+ * single shared "$/SF" derived slot was made to carry a lease's annualized rate AND a sale's
+ * price/size (a genuine unit conflation, not just a bad label) — and the FIRST fix only renamed
+ * the header while leaving the conflation itself intact, because industrial land is quoted BOTH
+ * ways and forcing an acre-priced deal through `landPricePerSf`'s SF conversion is the exact same
+ * class of error one level down. This function is deliberately NOT `landPricePerSf` (which always
+ * normalizes to SF, correctly for its own callers — a stated $/SF headline, sale summaries — and
+ * is unchanged): it divides by the RAW recorded size, in whatever unit the comp actually used, so
+ * an acre-quoted deal reads as a genuine $/ACRE figure. Returns `{ value, unit }` — `unit` is
+ * `"ac"` or `"sf"` — so a renderer can label the figure with the unit that is ACTUALLY true for
+ * this row, never a borrowed one. Null when price or size is missing. */
+export function landPricePerAreaUnit(comp) {
+  const price = positiveNumber(comp?.landPrice);
+  const sizeValue = positiveNumber(comp?.landSizeValue);
+  if (!price || !sizeValue) return null;
+  const unit = comp?.landSizeUnit === "ac" ? "ac" : "sf";
+  return { value: price / sizeValue, unit };
+}
+
+/** Parses this app's own normalized lease-term strings ("126 mo", "5 yrs" — `compParse.js`'s
+ * `findTermBare`) into a fractional YEAR count, and loosely accepts a hand-typed variant too
+ * ("10 years", "18 months"). Null if the text carries no recognizable duration — never guessed. */
+export function parseLeaseTermYears(text) {
+  const m = String(text || "").match(/(\d+(?:\.\d+)?)\s*(yr|year|yrs|years|mo|mos|month|months)\b/i);
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return /yr|year/i.test(m[2]) ? n : n / 12;
+}
+
+/** NET EFFECTIVE RENT ($/SF/yr) — the figure brokers actually compare, because a face rate
+ * alone hides free rent, a TI allowance, and how an escalating rate compounds over the term.
+ * ⛔ B986096-HARDENING-6, owner-decided: this is a NET-OF-CONCESSIONS annualized figure on the
+ * comp's OWN quoted basis (NNN stays NNN, gross stays gross) — deliberately NOT converted to a
+ * true NNN-equivalent for a gross-quoted comp, because that conversion needs an operating-
+ * expense figure this app doesn't capture anywhere; inventing one would be a guessed number
+ * wearing a precise decimal. True NNN normalization is future work, gated on an opex field —
+ * flagged loudly rather than silently built as if it were already handled.
+ *
+ * Method: the face rate compounds by the escalation percentage once per full year of the term
+ * (a partial final year weighted by its fraction), summed to a total $/SF over the whole term;
+ * free rent (valued at the FACE/starting rate — the standard simplification, since the
+ * escalated rate hasn't started yet during free-rent months) and the TI allowance (a one-time
+ * $/SF cost to the landlord) are both subtracted; the net total is spread evenly back across the
+ * term to one comparable annual $/SF figure. A missing escalation/free-rent/TI is treated as
+ * ZERO (its absence in a real abstract means the deal doesn't have one, not "unknown") — a
+ * missing RATE, PERIOD or TERM makes the whole figure null, the same "never guess the
+ * load-bearing inputs" rule `annualLeaseRate` already follows. */
+export function netEffectiveLeaseRate(comp) {
+  if (comp?.compType !== "lease") return null;
+  const faceAnnual = annualLeaseRate(comp);
+  const termYears = parseLeaseTermYears(comp?.leaseTerm);
+  if (faceAnnual == null || termYears == null) return null;
+  const escalation = positiveNumber(comp?.leaseEscalationPct) ? Number(comp.leaseEscalationPct) / 100 : 0;
+  const freeRentYears = positiveNumber(comp?.leaseFreeRentMonths) ? Number(comp.leaseFreeRentMonths) / 12 : 0;
+  const ti = positiveNumber(comp?.leaseTi) ? Number(comp.leaseTi) : 0;
+
+  let grossPsfOverTerm = 0;
+  let remaining = termYears;
+  let year = 0;
+  while (remaining > 1e-9) {
+    const yearFraction = Math.min(1, remaining);
+    grossPsfOverTerm += faceAnnual * (1 + escalation) ** year * yearFraction;
+    remaining -= 1;
+    year += 1;
+  }
+  const netPsfOverTerm = grossPsfOverTerm - faceAnnual * freeRentYears - ti;
+  return netPsfOverTerm / termYears;
+}
+
 /* ---- basis normalization for any list / average / sort / comparison view ---------------- */
 
 /** One NNN or one gross group's average — SF-WEIGHTED when every comp being averaged carries a
@@ -273,6 +344,9 @@ export function compFieldRows(comp) {
     // lease (it changes what the deal is worth over its term); has its own column rather than
     // being dropped into notes, matching every other structured lease term here.
     if (comp?.leaseEscalationPct != null) push("escalation", "Escalation", `${Number(comp.leaseEscalationPct).toLocaleString()}%/yr`);
+    if (comp?.leaseCommencementDate) push("commencement", "Commencement", fmtCompDate(comp.leaseCommencementDate));
+    const net = netEffectiveLeaseRate(comp);
+    if (net != null) push("netEffective", "Net effective", `$${net.toFixed(2)}/SF/yr`);
   }
 
   push("date", "Date", fmtCompDate(comp?.compDate));
@@ -306,7 +380,7 @@ export function compHeadline(comp) {
 export function validateComp(draft) {
   const errors = [];
   if (!isCompType(draft?.compType)) errors.push("Pick a comp type.");
-  if (!draft?.compDate) errors.push("Date is required.");
+  if (!draft?.compDate) errors.push("Executed date is required.");
   if (!validAnchor(draft?.anchor)) errors.push("Drop a pin or select a parcel.");
   return errors;
 }
@@ -323,6 +397,7 @@ export function rowToComp(r) {
     projectId: r.project_id || null,
     compType: r.comp_type,
     compDate: r.comp_date,
+    leaseCommencementDate: r.lease_commencement_date || null,
     title: r.title || "",
     notes: r.notes || "",
     anchor: {
@@ -370,7 +445,7 @@ export function emptyDraft(anchor) {
   // own 2-decimal display (66.17 AC in, 66.17 out).
   const landSizeValue = anchor?.acreageAc != null ? String(Math.round(anchor.acreageAc * 100) / 100) : "";
   return {
-    compType: "land", compDate: "", title: "", notes: "", teamId: null, projectId: null,
+    compType: "land", compDate: "", leaseCommencementDate: "", title: "", notes: "", teamId: null, projectId: null,
     anchor: anchor || null,
     partyProvider: "", partyAcquirer: "",
     landPrice: "", landSizeValue, landSizeUnit: "ac",
@@ -389,13 +464,15 @@ export function draftToComp(d) {
     bldgPrice: num(d.bldgPrice), bldgSizeSf: num(d.bldgSizeSf),
     leaseRate: num(d.leaseRate), leaseTi: num(d.leaseTi), leaseSizeSf: num(d.leaseSizeSf),
     leaseFreeRentMonths: num(d.leaseFreeRentMonths), leaseEscalationPct: num(d.leaseEscalationPct),
+    leaseCommencementDate: d.leaseCommencementDate || null,
   };
 }
 
 export function compToDraft(c) {
   const str = (v) => (v == null ? "" : String(v));
   return {
-    id: c.id, compType: c.compType, compDate: c.compDate || "", title: c.title || "", notes: c.notes || "",
+    id: c.id, compType: c.compType, compDate: c.compDate || "", leaseCommencementDate: c.leaseCommencementDate || "",
+    title: c.title || "", notes: c.notes || "",
     teamId: c.teamId, projectId: c.projectId, anchor: c.anchor,
     partyProvider: c.partyProvider || "", partyAcquirer: c.partyAcquirer || "",
     landPrice: str(c.landPrice), landSizeValue: str(c.landSizeValue), landSizeUnit: c.landSizeUnit || "ac",
@@ -413,6 +490,7 @@ export function compToRow(comp) {
   return {
     comp_type: comp.compType,
     comp_date: comp.compDate,
+    lease_commencement_date: comp.leaseCommencementDate || null,
     title: comp.title || null,
     notes: comp.notes || null,
     team_id: comp.teamId || null,

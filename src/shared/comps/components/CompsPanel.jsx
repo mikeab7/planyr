@@ -171,9 +171,14 @@ function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave
           {COMP_TYPES.map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}
         </select>
       </Field>
-      <Field label="Date" stacked required>
+      <Field label="Executed date" stacked required>
         <input type="date" value={draft.compDate} onChange={set("compDate")} style={inputStyle} />
       </Field>
+      {draft.compType === "lease" && (
+        <Field label="Commencement" stacked>
+          <input type="date" value={draft.leaseCommencementDate} onChange={set("leaseCommencementDate")} style={inputStyle} />
+        </Field>
+      )}
       <Field label="Title" stacked><input value={draft.title} onChange={set("title")} placeholder="Property / deal name" style={inputStyle} /></Field>
 
       {/* Facts about the deal's PARTIES, not its economics — kept with Title, ahead of the
