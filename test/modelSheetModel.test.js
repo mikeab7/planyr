@@ -533,3 +533,58 @@ describe("migrateSheet — backward compatible with a pre-Stage-1 blob", () => {
     expect(migrated.freezeCols).toBe(1);
   });
 });
+
+// B1000960 (owner report, 2026-09-01) — an EXISTING sheet saved before Stage 1 shipped (8
+// columns, 200 rows, the app's old defaults) must not stay pinned to that old shape forever.
+// Capacity is a floor derived on every load, never a stored ceiling — this is the actual
+// defect: he opened a real pre-Stage-1 sheet and saw the old 8-column grid, because the OLD
+// migrateSheet just echoed back whatever `columns`/`rowCount` the saved blob already held.
+describe("migrateSheet — an old sheet's saved capacity is a FLOOR, never a stored ceiling (B1000960)", () => {
+  function preStage1Blob(colCount, rowCount) {
+    const columns = Array.from({ length: colCount }, (_, i) => ({
+      id: `c${i + 1}`, name: String.fromCharCode(65 + i), width: 120,
+    }));
+    return { version: 1, nextColId: colCount + 1, columns, rowCount, cells: {}, formats: {} };
+  }
+
+  it("an 8-column/200-row pre-Stage-1 sheet migrates UP to the current 26-column/1000-row floor", () => {
+    const migrated = migrateSheet(preStage1Blob(8, 200));
+    expect(migrated.columns.length).toBe(26);
+    expect(migrated.rowCount).toBe(1000);
+  });
+
+  it("preserves every existing cell's data untouched by the padding — same id, same row index", () => {
+    const old = preStage1Blob(8, 200);
+    old.cells["c3:5"] = "42";
+    old.cells["c8:199"] = "=SUM(c1:c2)";
+    const migrated = migrateSheet(old);
+    expect(migrated.cells["c3:5"]).toBe("42");
+    expect(migrated.cells["c8:199"]).toBe("=SUM(c1:c2)");
+    // The old columns keep their own ids/names — padding APPENDS new columns, it never
+    // renumbers or replaces the ones that already held real data.
+    expect(migrated.columns[2].id).toBe("c3");
+    expect(migrated.columns.slice(0, 8).map((c) => c.name)).toEqual(["A", "B", "C", "D", "E", "F", "G", "H"]);
+  });
+
+  it("a sheet ALREADY at or above the floor is never truncated back down", () => {
+    const wide = preStage1Blob(30, 1200);
+    const migrated = migrateSheet(wide);
+    expect(migrated.columns.length).toBe(30);
+    expect(migrated.rowCount).toBe(1200);
+  });
+
+  it("padded columns get fresh, non-colliding ids continuing from the blob's own nextColId", () => {
+    const migrated = migrateSheet(preStage1Blob(8, 200));
+    const ids = migrated.columns.map((c) => c.id);
+    expect(new Set(ids).size).toBe(ids.length); // no id collisions
+    expect(ids.slice(8)).toEqual(["c9", "c10", "c11", "c12", "c13", "c14", "c15", "c16", "c17", "c18",
+      "c19", "c20", "c21", "c22", "c23", "c24", "c25", "c26"]);
+  });
+
+  it("migrating an already-migrated sheet a second time is a no-op (idempotent, never re-grows)", () => {
+    const once = migrateSheet(preStage1Blob(8, 200));
+    const twice = migrateSheet(JSON.parse(JSON.stringify(once)));
+    expect(twice.columns.length).toBe(26);
+    expect(twice.rowCount).toBe(1000);
+  });
+});

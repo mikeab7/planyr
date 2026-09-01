@@ -45,9 +45,14 @@ export const VERSION_URL = "/version.json";
  *  heartbeat; the visibility/focus check below is what actually catches the common case (a
  *  laptop reopened the next morning). */
 export const SKEW_POLL_MS = 15 * 60 * 1000;
-/** Long enough after boot that the check never competes with first paint or the first
- *  workspace chunk for the network. */
-export const SKEW_FIRST_CHECK_MS = 20 * 1000;
+/** After boot, short enough that someone who opens the app specifically to check "did my
+ *  change ship" sees the answer promptly rather than during the exact window they're looking
+ *  (B1000960 — the previous 20s value meant a look-then-leave inside 20 seconds NEVER saw the
+ *  banner even on a genuinely stale tab, which is exactly the shape of two separate real
+ *  reports: "he opened it and said 'it doesn't look like you did anything'" and this session's
+ *  own earlier stale-bundle re-tests). Still comfortably after first paint / the first
+ *  workspace chunk request — this is one small, cheap fetch, not a competing download. */
+export const SKEW_FIRST_CHECK_MS = 3 * 1000;
 
 /** PURE. Is the served build meaningfully different from the one this tab is running?
  *
