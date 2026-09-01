@@ -141,6 +141,12 @@
      floor (4.78:1) AND the dark-chrome underline floor (3.0) at once — a first pick,
      #2B5FBF, cleared the first (6.01) and FAILED the second (2.90 against dark chrome-elev). */
   --accent-model:         #3D6FD1;
+  /* Model workspace (Stage 2 ribbon) — the translucent selection/header-tint fill, same role as
+     --focus-ring-soft: a low-alpha wash of the module accent, never a raw literal at the call
+     site. One token reused for BOTH the multi-cell selection fill and the "you are here" tint on
+     the corresponding column-header/row-number cells — Excel uses the same blue at the same
+     intensity for both, so one token is the authentic choice, not a shortcut. */
+  --accent-model-soft:    rgba(61, 111, 209, 0.12);
   --on-accent-site:       #FFFFFF;
   --on-accent-schedule:   #FFFFFF;
   --on-accent-review:     #412402;   /* dark text on amber — never white */
@@ -331,6 +337,9 @@
   --accent-notes-text:    #F0A6D2;   /* light pink on dark chrome (fill + on-accent inherit from light) */
   --accent-food-text:     #F0906F;   /* light salmon on dark chrome (fill + on-accent inherit from light) */
   --accent-model-text:    #8FB3EC;   /* light blue on dark chrome (fill + on-accent inherit from light) */
+  /* Higher alpha than the light theme's — a translucent wash needs more opacity to read at the
+     same PERCEIVED intensity against a near-black surface. */
+  --accent-model-soft:    rgba(143, 179, 236, 0.20);
 
   /* Semantic TEXT colors — lightened for legibility on the dark panels (B354). */
   --success-text: #4FBF7B;

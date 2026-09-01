@@ -127,11 +127,11 @@ test.describe("Model workspace — spreadsheet vertical slice", () => {
     await expect(page.getByTestId("model-formula-bar")).toHaveValue("=A1+A2");
   });
 
-  test("the number-format picker applies to the CELL, not the whole column", async ({ page }) => {
+  test("the ribbon's Number group applies to the CELL, not the whole column", async ({ page }) => {
     const id = "e2e-model-format";
     await openModelWithNumbers(page, id); // A1=500 (General), A2=300 (General)
     await cell(page, 0, 0).click();
-    await page.getByTestId("model-format-picker").selectOption("currency");
+    await page.getByTestId("ribbon-currency").click();
     await expect(cell(page, 0, 0)).toHaveText("$500.00");
     await expect(cell(page, 1, 0)).toHaveText("300"); // A2, same column, untouched
   });

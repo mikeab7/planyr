@@ -1599,12 +1599,54 @@ function splitFormatSections(fmt) {
 }
 // Excel marks literal text with surrounding quotes or a leading backslash; drop the markers.
 function stripFormatLiterals(s) { return s.replace(/\\(.)/g, "$1").replace(/"/g, ""); }
+
+// ⛔ Model workspace ribbon (B1007281) — a format section can lead with a bracketed colour tag
+// ([Red], [Blue], … or an indexed [Color12]), Excel's own way of saying "render this section in
+// this colour" — most commonly "#,##0;[Red]-#,##0" for negatives. Before this, that tag was
+// invisible to the digit-placeholder search (`[` isn't `0`/`#`) so it fell into the LITERAL
+// prefix and printed verbatim — "[Red]-1,234" on screen. Stripped here, at the one place every
+// section passes through on its way to being rendered, so the fix applies uniformly regardless
+// of caller. The 8 named colours map straight onto CSS colour keywords; an indexed [ColorNN] tag
+// is stripped (never left as visible garbage) but not resolved to an actual colour — this repo's
+// palette has no defined mapping for Excel's 56-colour legacy index.
+const COLOR_TAG_RE = /^\[(black|blue|cyan|green|magenta|red|white|yellow|color\d{1,2})\]/i;
+function extractColorTag(section) {
+  const m = section.match(COLOR_TAG_RE);
+  if (!m) return { color: null, rest: section };
+  const name = m[1].toLowerCase();
+  const color = /^color\d+$/.test(name) ? null : name;
+  return { color, rest: section.slice(m[0].length) };
+}
+// Which section a value's SIGN selects — the same rule formatNumberToken applies, factored out
+// so `numberFormatColorFor` below can find a section's colour tag without re-implementing (or
+// drifting from) the sign-selection rule itself.
+function sectionForSign(n, fmt) {
+  const sections = splitFormatSections(fmt);
+  if (sections.length <= 1) return fmt;
+  if (n > 0) return sections[0];
+  if (n < 0) return sections[1];
+  return sections.length >= 3 ? sections[2] : sections[0];
+}
+/** The colour a number-format token names for `n`'s own sign section, or `null` — never throws
+ *  (a malformed token or an untagged section both just mean "no colour"). Used by the Model
+ *  workspace to render "negatives in red" (the other named ask, accounting parens, is already
+ *  covered by an ordinary 2-section format — no colour tag needed for that). */
+function numberFormatColorFor(n, fmt) {
+  try { return extractColorTag(sectionForSign(n, fmt)).color; } catch { return null; }
+}
 // Format one section as a template: the run from the first to the last digit placeholder
 // ([0#]) is the number; text before/after is emitted verbatim (so "$", "%", "(", ")" survive
 // in place). Decimal/integer placeholders are counted WITHIN this section only — never across
 // the ';' boundary, which is what made a 2-section format show 8 decimals. autoSign prefixes
 // "-" for a negative value only in the single-section case.
 function formatNumberSection(n, fmt, autoSign) {
+  fmt = extractColorTag(fmt).rest;
+  // Model workspace ribbon (B1007281) — a "bps" literal anywhere in the template scales the
+  // value ×10,000 before formatting, the same way a literal '%' just below scales ×100. Excel
+  // has no native basis-point format; this is the one small, additive extension to the shared
+  // formatter the ribbon's Basis points preset needs, not a second formatter (the digit-run /
+  // thousands / decimals machinery below is untouched and still the only place that runs).
+  if (/bps/i.test(fmt)) n *= 10000;
   const first = fmt.search(/[0#]/);
   if (first < 0) return stripFormatLiterals(fmt);   // literal-only section
   let last = first;
@@ -1868,6 +1910,11 @@ const evaluateFormula = (src, ctx) => {
   catch (e) { if (isFormulaError(e)) return { ok: false, error: e.code, detail: e.detail }; return { ok: false, error: FORMULA_ERRORS.ERR, detail: (e && e.message) || "evaluation error" }; }
 };
 
+// A numberFormat token that means "format this as a date" (mm/dd/yyyy, mmm d\, yyyy, …) — the
+// same heuristic textFormat() already uses for TEXT(): date-letter tokens present, no digit
+// placeholder. Shared here so formatValue's own date-routing agrees with TEXT()'s.
+const looksLikeDateFormat = (fmt) => /[ymd]/i.test(fmt) && !/[#0]/.test(fmt);
+
 // formatValue: turn a typed result into the string shown in a cell.
 const formatValue = (value, opts) => {
   const o = opts || {};
@@ -1875,13 +1922,37 @@ const formatValue = (value, opts) => {
   if (isErrVal(value)) return value.code;             // a stored error cell renders as its code
   if (isBlank(value)) return "";
   if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
-  if (isDate(value)) return (o.formatDate ? o.formatDate(value.s) : serialToISO(value.s));
+  // ⛔ Model workspace ribbon (B1007281) — a numberFormat naming a DATE token used to be ignored
+  // for both branches below: an actual Date value always rendered through formatDate/ISO no
+  // matter what numberFormat asked for, and a plain number paired with a date-shaped numberFormat
+  // (no [0#] placeholder for formatNumberToken to find) fell through to formatNumberSection's
+  // literal-only branch, which just printed the format STRING itself back verbatim — a cell
+  // formatted "mm/dd/yyyy" showed the literal text "mm/dd/yyyy". formatDateToken already existed
+  // and did the real work; it was simply never reached from here.
+  if (isDate(value)) {
+    if (o.numberFormat && looksLikeDateFormat(o.numberFormat)) { try { return formatDateToken(value.s, o.numberFormat); } catch { /* fall through */ } }
+    return (o.formatDate ? o.formatDate(value.s) : serialToISO(value.s));
+  }
   if (typeof value === "number") {
     if (!Number.isFinite(value)) return FORMULA_ERRORS.NUM;
-    if (o.numberFormat) { try { return formatNumberToken(value, o.numberFormat); } catch { /* fall through */ } }
+    if (o.numberFormat) {
+      if (looksLikeDateFormat(o.numberFormat)) { try { return formatDateToken(Math.trunc(value), o.numberFormat); } catch { /* fall through */ } }
+      try { return formatNumberToken(value, o.numberFormat); } catch { /* fall through */ }
+    }
     return numToGeneralStr(value);
   }
   return String(value);
+};
+
+/** The colour a numberFormat's own colour tag ([Red], …) names for this VALUE — `null` when the
+ *  value isn't a plain finite number, there's no numberFormat, or its chosen section carries no
+ *  tag. A second, narrow query beside formatValue rather than a change to its return shape: every
+ *  existing caller (the Schedule module included — see public/sequence/index.html) expects a
+ *  plain string back, so this stays additive. */
+const formatValueColor = (value, opts) => {
+  const o = opts || {};
+  if (typeof value !== "number" || !Number.isFinite(value) || !o.numberFormat) return null;
+  try { return numberFormatColorFor(value, o.numberFormat); } catch { return null; }
 };
 
 // rewriteFormulaForCopy: the relative-reference rewrite for copy/fill. Pure, and
