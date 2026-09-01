@@ -24,6 +24,7 @@ import {
   purgeExpiredDeleted, loadReview, getShareLink, DISCIPLINES,
   downloadFromDrive, downloadSource,
 } from "../../doc-review/lib/reviewStore.js";
+import { friendlySaveError } from "../../../shared/sitePlans/lib/overlayErrors.js";
 import { toFactsRow, mergeFactsIntoReviews } from "../../doc-review/lib/fileIndex.js";
 import { fileWarn } from "../../doc-review/lib/sourceState.js";
 import { buildFilingPlan } from "../../../shared/files/disciplineSplit.js";
@@ -523,10 +524,16 @@ export default function FileBrowser({
     refresh();
   };
   // "Delete forever" out of Recently deleted — the only user-facing hard delete (NEW-F3).
+  // B972512-HARDENING new finding 2 — a document with a site-plan overlay still built from it
+  // now REFUSES this delete outright (site_plan_overlays_review_id_fkey, CASCADE -> RESTRICT) —
+  // that's a real failure, not a cleanup side-effect, and it was silently dropped here before
+  // (neither `r.ok` nor `r.error` was ever checked, so the row just sat in Recently-deleted with
+  // no explanation). Checked first, before the orphaned/cleanupFailed side-effect notice.
   const purgeRow = async (id) => {
     setPendingPurge(null);
     const r = await purgeReview(id);
-    if (r && (r.orphaned || r.cleanupFailed)) setDelNotice({ orphaned: r.orphaned || 0, sharedKept: r.sharedKept || 0 });
+    if (!r || !r.ok) setDelNotice({ purgeBlocked: friendlySaveError(r && r.error) });
+    else if (r.orphaned || r.cleanupFailed) setDelNotice({ orphaned: r.orphaned || 0, sharedKept: r.sharedKept || 0 });
     refresh();
   };
   // Share-by-link: outward-facing, so confirm first, then mint a link. driveKey lives on the
@@ -761,6 +768,7 @@ export default function FileBrowser({
             <span style={{ flex: 1 }}>
               {delNotice.restoreFailed ? "Couldn’t restore that file — check your connection and try again from Recently deleted."
                 : delNotice.deleteFailed ? "Couldn’t delete that file — it may already be deleted, or the cloud is unreachable. Refresh and try again."
+                : delNotice.purgeBlocked ? delNotice.purgeBlocked
                 : delNotice.purgeFailed ? "Couldn’t fully clear expired items from Recently deleted — anything left will be retried next time this list loads."
                 : <>Deleted — but {delNotice.orphaned ? `${delNotice.orphaned} ` : ""}file{delNotice.orphaned === 1 ? "" : "s"} couldn’t be removed from storage, so a copy may linger. You can remove it directly in Google Drive.{delNotice.sharedKept ? ` ${delNotice.sharedKept} stored file${delNotice.sharedKept === 1 ? " was" : "s were"} kept because another drawing still uses ${delNotice.sharedKept === 1 ? "it" : "them"}.` : ""}</>}
             </span>

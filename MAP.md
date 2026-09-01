@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-31 @ `77c1eed0c` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-01 @ `6261f43f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -393,7 +393,7 @@ _621 source files mapped._
 - **`src/shared/sitePlans/lib/overlayErrors.js`** — turns a raw Postgres/PostgREST save error into a plain-English sentence, passing an already-hand-written Error through unchanged
   - _exports_: `friendlySaveError`
 - **`src/shared/sitePlans/lib/overlayGeoref.js`** — pure direct-placement math for an uploaded site-plan overlay (center/scale/rotation on the map — no control points, can't mirror)
-  - _exports_: `latLonToImagePoint`, `overlayCornersFromPlacement`, `rotatePlacement`, `scalePlacement`, `suggestFtPerPx`, `validPlacement`
+  - _exports_: `feetBetween`, `imagePointToLatLon`, `latLonToImagePoint`, `overlayCornersFromPlacement`, `rotatePlacement`, `scalePlacement`, `suggestFtPerPx`, `validPlacement`
 - **`src/shared/sitePlans/lib/overlayRasterSize.js`** — pure sizing math for the overlay raster: caps the render DPI so a large sheet's long edge never exceeds a pixel ceiling, plus the shared thumbnail-dimension helper
   - _exports_: `cappedRasterDims`, `effectiveRasterDpi`, `OVERLAY_RASTER_BASE_DPI`, `OVERLAY_RASTER_JPEG_QUALITY`, `OVERLAY_RASTER_MAX_LONG_EDGE_PX`, `OVERLAY_THUMB_JPEG_QUALITY`, `OVERLAY_THUMB_MAX_LONG_EDGE_PX`
 - **`src/shared/sitePlans/lib/overlayRasterStorage.js`** — Supabase Storage for a site-plan overlay's cached rasterized page, reusing the existing private `doc-review-files` bucket
@@ -401,7 +401,7 @@ _621 source files mapped._
 - **`src/shared/sitePlans/lib/sitePlanOverlays.js`** — pure data model for a site-plan overlay (an uploaded flyer page anchored to the map, referencing its whole file in the existing Review/Library document store)
   - _exports_: `overlayPlaced`, `overlayToRow`, `rowToOverlay`, `validOverlayUpload`
 - **`src/shared/sitePlans/lib/sitePlanOverlayStore.js`** — the Supabase CRUD seam for `public.site_plan_overlays`, mirroring `comps/lib/compsStore.js`'s `{data, error}` shape
-  - _exports_: `deleteOverlay`, `fetchAllOverlays`, `insertOverlay`, `updateOverlay`
+  - _exports_: `commitOverlayPlacementWithComps`, `deleteOverlay`, `fetchAllOverlays`, `fetchDeletedOverlays`, `fetchOverlayCompPoints`, `insertOverlay`, `permanentlyDeleteOverlay`, `restoreOverlay`, `updateOverlay`
 - **`src/shared/storage/originStore.js`** — Dependency-free read/delete-by-prefix access to the origin's IndexedDB kv store, so shared chrome can census and clear it without importing a workspace module (which hoists the cache into a route chunk)
   - _exports_: `deleteOriginKey`, `deleteOriginPrefix`, `originStoreAvailable`, `putOriginRecord`, `walkOriginStore`
 - **`src/shared/storage/storageCensus.js`** — Per-tier, per-class storage census: localStorage byte census + navigator.storage.estimate, key→class registry with a declared rehydration source, tier-labelled telemetry facts; the two tiers are never summed

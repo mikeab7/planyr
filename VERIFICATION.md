@@ -116,6 +116,178 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V550016 — B978272: dragging/scaling/rotating a team-shared site plan visibly moves a teammate's pinned comp too `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** The recompute is a real Supabase RPC round-trip under RLS (a teammate's own comp, updated by the overlay owner) — needs two real signed-in accounts on the same team.
+
+**What was verified here.** The RLS-crossing behavior was proven live against PRODUCTION via rolled-back SQL transactions impersonating both accounts (6/6 checks: anon refused, non-owner refused, outsider refused, owner reads a teammate's plan-space point across normal RLS, the atomic write moves BOTH the overlay and the teammate's comp in one call, an unrelated comp is left untouched). The recompute math itself (`imagePointToLatLon`) is unit-tested as the exact inverse of the existing corner/point functions. Headless, logged out: Comp mode's Site plans panel (including the new trash disclosure and upload flow) renders with zero JS errors.
+
+**Steps, each with a named expected result — signed in as the overlay's owner, on a team with a second member:**
+1. Have the teammate pin a comp to your team-shared, placed site plan. **Expect:** the comp shows correctly on your map at the pinned building.
+2. Drag/scale/rotate the plan into a new position. **Expect:** the teammate's comp marker visibly moves WITH the plan on YOUR screen too (via the reload-token refresh), landing on the same building.
+3. As the teammate, reload. **Expect:** their comp marker is now at the plan's new position, not the old one.
+4. Read `public.comps` directly for that comp's row. **Expect:** `lat`/`lon` match the recomputed position, not the pre-move one.
+
+**Result:** ⏳ pending — needs two real signed-in accounts. The RLS-crossing write mechanism is proven correct live above.
+
+### V550017 — B978273: a teammate can see a shared site plan's image and open its source brochure, even when the document itself was never separately shared `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** Needs two real accounts on the same team and a real Storage/RLS round trip.
+
+**What was verified here.** Proven live against production via rolled-back transactions: a teammate can read the raster via the overlay's own `team_id` (4/4 checks, including confirming the OLD function genuinely did not cover this case — the bug was real, not hypothetical) and can read the source `doc_reviews` row via the new derived-visibility policy (3/3 checks) even with `doc_reviews.team_id` left null.
+
+**Steps:**
+1. As team member A, upload and place a site plan, sharing it with the team (do NOT separately share the underlying document anywhere else).
+2. As teammate B, open the plan. **Expect:** the image actually renders on the map, not a blank overlay.
+3. As B, open a comp pinned to it and click "Open source brochure". **Expect:** it opens, even though the document was never separately shared.
+
+**Result:** ⏳ pending — needs two real signed-in accounts. The RLS mechanism is proven correct live above.
+
+### V550018 — B978274: deleting a site plan with pinned comps shows a clear, proactive message instead of a raw database error `Blocker: auth` `Blocker: real-data`
+
+**What was verified here.** The underlying DB behavior (delete blocked while referenced) was proven live via a rolled-back transaction in an earlier phase of this same work. The new proactive count-and-block path and the translated fallback message are covered by `overlayErrors.test.js` (14/14 passing, including the exact constraint text).
+
+**Steps:**
+1. Pin a comp to a placed site plan.
+2. Try to delete that site plan. **Expect:** a message names the comp count and blocks the delete — never a raw Postgres/constraint message, never a silent no-op.
+3. Remove the comp's pin, then delete the plan again. **Expect:** it deletes cleanly (to Recently deleted — see V550019).
+
+**Result:** ⏳ pending — needs a real signed-in account. The block mechanism is proven correct above.
+
+### V550019 — B978275: a deleted site plan is recoverable from "Recently deleted"; concurrent edits from two sessions no longer silently clobber each other `Blocker: auth` `Blocker: real-data`
+
+**What was verified here.** The version-guard conflict/success paths and the corrected team_id-mirror direction were proven live via rolled-back transactions (11/11 checks total across two proof runs). The orphaned-raster cleanup fix and the trash UI were headless-smoke-tested (Comp mode's "▸ Recently deleted" disclosure renders and is clickable, zero JS errors).
+
+**Steps:**
+1. Delete a site plan with no comps pinned. **Expect:** it moves to "Recently deleted", not gone forever.
+2. Restore it. **Expect:** it's back, still correctly placed.
+3. Open the SAME plan in two browser tabs (same account); drag it in tab A; without reloading tab B, drag it there too. **Expect:** tab B is told the plan changed elsewhere and reloads, rather than silently overwriting tab A's move.
+4. "Delete forever" a plan and check its raster's Storage object. **Expect:** the object is actually gone, not just the row.
+
+**Result:** ⏳ pending — needs a real signed-in account, ideally two tabs. The concurrency/RLS mechanisms are proven correct live above.
+
+### V550020 — B978276: "Delete forever" on a document with a live site plan is blocked with a clear message, not silently stuck `Blocker: auth` `Blocker: real-data`
+
+**What was verified here.** The FK RESTRICT (replacing CASCADE) was proven live via a rolled-back transaction (the delete now fails immediately with a foreign-key violation). The new message translation is covered by `overlayErrors.test.js`.
+
+**Steps:**
+1. Place a site plan from a brochure.
+2. Soft-delete that brochure from the Library. **Expect:** the site plan is unaffected (still shows on the map).
+3. From Recently-deleted, try "Delete forever" on the document. **Expect:** a clear message explains it's blocked by the still-existing site plan, visible in the Library's own notice rail — not a silently stuck row.
+4. Delete the site plan first, then retry. **Expect:** the document purges cleanly.
+
+**Result:** ⏳ pending — needs a real signed-in account. The FK mechanism is proven correct live above.
+
+### V550022 — B978278: a newly-uploaded, team-shared site plan stays invisible to teammates until explicitly placed and shared `Blocker: auth` `Blocker: real-data`
+
+**What was verified here.** Headless, logged out: the upload flow's form no longer shows a team picker (confirmed by screenshot — "Choose File"/"Cancel" only), zero JS errors.
+
+**Steps:**
+1. As a team member, upload a new site plan.
+2. As a teammate, check the map. **Expect:** the new plan does NOT appear yet.
+3. Position the plan, then use its row's "Share with" control to share it with the team.
+4. As the teammate, check again. **Expect:** it now appears, correctly placed.
+
+**Result:** ⏳ pending — needs two real signed-in accounts. The form change is confirmed headless above.
+
+### V550023 — B978279: a failed site-plan image upload shows a specific, clear message and the plan row still saves `Blocker: auth`
+
+**What was verified here.** The message-building logic itself has no live-only dependency; the failure path (Storage/network) needs a real account to trigger authentically.
+
+**Steps:**
+1. Upload a site plan under conditions likely to make the raster upload fail (poor connection, or simulate via devtools network throttling/blocking to the Supabase Storage host).
+2. **Expect:** the plan row still saves (findable, placed) with a "This plan doesn't have an image yet" indicator, and a specific error message naming what went wrong appeared at upload time — never silence.
+3. Use "Change page…" to retry. **Expect:** the image uploads successfully this time.
+
+**Result:** ⏳ pending — needs a real signed-in account. The message-surfacing code path is unit-inspected above (no pure-logic test needed — it's a direct message pass-through).
+
+### V550024 — B978280: a HEIC or TIFF file is rejected by name with a clear message, not a silent decode failure `Blocker: real-data`
+
+**What was verified here.** The rejection logic itself (`unsupportedImageReason`) is pure and matches on MIME type/extension; a real HEIC (from an iPhone) or TIFF (from a scanner) file is needed to fully confirm real-world MIME reporting.
+
+**Steps:**
+1. Try dropping a real HEIC photo. **Expect:** rejected immediately with a message naming HEIC/HEIF and what format IS accepted.
+2. Try dropping a real TIFF scan. **Expect:** same, naming TIFF.
+3. Try dropping/picking a real WebP image. **Expect:** accepted and processed normally.
+
+**Result:** ⏳ pending — needs real HEIC/TIFF source files. Logic verified by inspection/reasoning above; no unit test added (component-local, matches this file's existing convention).
+
+### V550025 — B978281: a rotated, encrypted, corrupt, or empty PDF each produce one clear, distinct message; a normal PDF's rotation renders correctly `Blocker: real-data`
+
+**What was verified here.** Item 11 (rotation) and item 13 (rasterize cap) were confirmed ALREADY CORRECT by reading the installed pdfjs-dist source directly (`getViewport({scale})` defaults to the page's own `/Rotate`; `maxLongEdgePx` caps the render DPI before `page.render()` runs) — not by a live click-through, since the mechanism is structural, not behavioral. Item 12's four message branches are verified against pdf.js's own real, installed exception class names.
+
+**Steps:**
+1. Upload a landscape PDF that's stored with a `/Rotate 90` tag (common from some scanners/exports). **Expect:** it places right-side-up on the map, not sideways.
+2. Try a password-protected PDF. **Expect:** a message naming that it's password-protected.
+3. Try a corrupt/truncated PDF file. **Expect:** a message naming that it looks invalid/corrupted.
+4. Try a genuinely 0-byte file. **Expect:** a message naming that it's empty.
+5. All four: no crash, no blank/frozen UI.
+
+**Result:** ⏳ pending — needs real test files of each kind. The rotation and rasterize-cap mechanisms are structurally confirmed correct above (source-verified, not behavior-guessed).
+
+### V550026 — B978282: an unplaced site plan's "Place on map" button actually places it, rather than doing nothing `Blocker: auth`
+
+**What was verified here.** This state (unplaced) is rare in normal use — every upload path already computes a placement immediately — so it mainly matters as a defensive fix for an interrupted/legacy row.
+
+**Steps:**
+1. (If an unplaced row exists — e.g. from an interrupted upload) click "Place on map" on it.
+2. **Expect:** it appears on the map, positioned and armed for editing — not a dead click.
+
+**Result:** ⏳ pending — needs a real signed-in account and, ideally, a genuinely unplaced row to test against.
+
+### V550027 — B978283: overlaying the same document+page twice shows a clear duplicate warning `Blocker: auth`
+
+**Steps:**
+1. Overlay the same document+page twice (via "Change page" pointed at an already-used page, or two separate uploads of the same file).
+2. **Expect:** both rows show a warning naming how many times that page is overlaid.
+
+**Result:** ⏳ pending — needs a real signed-in account.
+
+### V550028 — B978284: permanently deleting a site plan actually frees its Storage raster `Blocker: auth` `Blocker: real-data`
+
+**What was verified here.** The fix (calling the previously-dead `deleteOverlayRaster`) is a straightforward wiring fix; covered by the same headless trash-UI smoke test as V550019.
+
+**Steps:**
+1. Place a site plan; note its raster's Storage object key (Supabase dashboard or MCP).
+2. "Delete forever" it from Recently-deleted.
+3. **Expect:** the Storage object is gone, not just the database row.
+
+**Result:** ⏳ pending — needs a real signed-in account with Storage access to confirm.
+
+### V550029 — B978285: locking a site plan actually prevents moving it (for everyone, including the owner); a non-owner sees an inert, explained lock control `Blocker: auth` `Blocker: real-data`
+
+**What was verified here.** Headless: the lock icon renders next to the visibility toggle with zero JS errors (confirmed via the same Comp-mode smoke pass covering the rest of the panel).
+
+**Steps:**
+1. Lock a site plan you own.
+2. Try "Move / resize". **Expect:** disabled, with a tooltip explaining it's locked.
+3. As a teammate (non-owner), open the same plan. **Expect:** the lock icon is visibly greyed/inert with a tooltip explaining only the uploader can lock/unlock it — not a normal-looking clickable control.
+
+**Result:** ⏳ pending — needs two real signed-in accounts.
+
+### V550030 — B978286: a one-finger drag on a site-plan corner handle never triggers Leaflet's own pinch-zoom at the same time `Blocker: real-data`
+
+**Why this needs a real device.** This is fundamentally a two-finger touch-conflict class of bug — a mouse-only sandbox cannot reproduce it; it needs a real phone/tablet.
+
+**Steps:**
+1. On a touchscreen device, start dragging a placed site plan's corner scale handle with one finger.
+2. While still dragging, touch a second finger down elsewhere on the map.
+3. **Expect:** only the overlay's own scale gesture responds — the map does NOT also pinch-zoom during this drag.
+4. Release both fingers. **Expect:** normal pinch-zoom and pan work again immediately.
+
+**Result:** ⏳ pending — needs a real touch device. The fix (explicitly disabling `map.dragging`/`map.touchZoom` for the gesture's duration) is the standard, correct Leaflet pattern, confirmed by code reading against the actual map init options (`dragging`/`touchZoom` both default true, neither was previously disabled during a handle gesture).
+
+### V550031 — B978287: hiding a site plan leaves its pinned comps visible, with an explicit note that the plan is hidden `Blocker: auth`
+
+**What was verified here.** The `overlaysById` lookup already uses the full (not zoom/visibility-filtered) overlay list, confirmed by reading `MapFinder.jsx` directly — so the new "plan is hidden" note is reachable at any zoom or visibility state, verified structurally.
+
+**Steps:**
+1. Hide a site plan via its Visible toggle.
+2. Open a comp pinned to it. **Expect:** the comp marker is still visible on the map at its correct position.
+3. Open the comp's detail view. **Expect:** the "Open source brochure" link is still there, now with an explicit "This plan is currently hidden on the map" note underneath.
+
+**Result:** ⏳ pending — needs a real signed-in account.
+
 ### V530768 — B948496: upload a site plan, anchor it on the map, pin a comp to a building on it, reload, and confirm it all round-trips `Blocker: auth` `Blocker: real-data`
 
 **Why this needs its own real pass.** Every meaningful step here writes to Supabase (uploading the brochure, inserting the overlay, inserting the comp) under RLS, which needs a real signed-in session — CORS-blocked from this sandbox. It is also a zoom-/data-density-dependent rendering class (does the raster actually sit correctly-scaled and correctly-rotated on the real Leaflet map, at a real zoom, after a real reload) and the brief itself asks for a real multi-page PDF repro — none of which a logged-out headless pass can produce.
