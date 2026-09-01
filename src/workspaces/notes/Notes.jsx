@@ -241,7 +241,7 @@ function EmptyState({ onCreate }) {
         {/* B1020931 — one text link per registered template; blank is the button above, a
             template is the deliberately lighter-weight secondary path. */}
         {NOTE_TEMPLATES.length > 0 && (
-          <p style={{ margin: "10px 0 0", fontSize: 12.5, color: "var(--text-secondary)" }}>
+          <p style={{ margin: "10px 0 0", fontSize: 12, color: "var(--text-secondary)" }}>
             or start from a template:{" "}
             {NOTE_TEMPLATES.map((t) => (
               <button

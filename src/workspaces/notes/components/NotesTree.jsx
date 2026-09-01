@@ -1105,7 +1105,7 @@ export default function NotesTree({
               style={{
                 flex: "0 0 auto", height: narrow ? 44 : 28, width: narrow ? 44 : 22, padding: 0, borderRadius: RADIUS.control,
                 border: "1px solid var(--border-default)", background: "var(--surface-page)",
-                color: "var(--text-secondary)", font: "inherit", fontSize: 11, fontWeight: 650,
+                color: "var(--text-secondary)", font: "inherit", fontSize: 10.5, fontWeight: 650,
                 cursor: "pointer",
               }}
             >▾</button>
