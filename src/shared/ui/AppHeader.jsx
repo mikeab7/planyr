@@ -794,11 +794,13 @@ export default function AppHeader({
 
   // Module tabs — shared by both Row-2 layouts (with and without the B387 center slot)
   // so the per-tab wiring is defined once.
-  // ORG SCOPE (NEW-1) — Site/Schedule/Review/Model are not OFFERED at org scope: there is no
-  // parcel to draw, no drawing to mark up, no site to model, so their tabs simply don't
-  // appear while `org` is true. Notes/Library (and, on a route this build has never actually
-  // produced, any other slug) stay visible — the module tab strip narrows, it never empties.
-  const orgVisibleTabs = new Set(["notes", "library"]);
+  // ORG SCOPE (NEW-1, extended B1020930) — Site/Review/Model are not OFFERED at org scope:
+  // there is no parcel to draw, no drawing to mark up, no site to model, so their tabs simply
+  // don't appear while `org` is true. Notes/Library/Schedule stay visible — Schedule renders
+  // AgendaView (a lightweight local surface) instead of the embedded Gantt at org scope, never
+  // the walled `public/sequence/index.html` itself — the module tab strip narrows, it never
+  // empties.
+  const orgVisibleTabs = new Set(["notes", "library", "scheduler"]);
   const visibleModules = org ? MODULES.filter((m) => orgVisibleTabs.has(m.id)) : MODULES;
   const moduleTabButtons = visibleModules.map((m) => (
     <ModuleTab key={m.id} m={m} isActive={m.id === module} onClick={() => onSwitch && onSwitch(m.id)} />

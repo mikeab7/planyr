@@ -33,6 +33,7 @@ import {
   NO_PROJECT_LABEL, ORG_GROUP_LABEL, SCOPE_ALL, SCOPE_ORG, SCOPE_PROJECT,
 } from "./lib/notesModel.js";
 import { duplicateNotice } from "./lib/notesDuplicates.js";
+import { NOTE_TEMPLATES, templateById } from "./lib/notesTemplates.js";
 import { absoluteStamp } from "./lib/notesTime.js";
 import { isQuickOpenChord, quickOpenResults, rankQuickOpen } from "./lib/notesQuickOpen.js";
 import { groupTasksByProject } from "./lib/notesTasks.js";
@@ -230,13 +231,34 @@ function EmptyState({ onCreate }) {
         <button
           type="button"
           data-testid="notes-empty-create"
-          onClick={onCreate}
+          onClick={() => onCreate()}
           style={{
             height: 32, padding: "0 16px", borderRadius: RADIUS.control,
             border: "1px solid var(--accent-notes)", background: "var(--accent-notes)",
             color: "var(--on-accent-notes)", font: "inherit", fontSize: 13.5, fontWeight: 650, cursor: "pointer",
           }}
         >＋ New page</button>
+        {/* B1020931 — one text link per registered template; blank is the button above, a
+            template is the deliberately lighter-weight secondary path. */}
+        {NOTE_TEMPLATES.length > 0 && (
+          <p style={{ margin: "10px 0 0", fontSize: 12.5, color: "var(--text-secondary)" }}>
+            or start from a template:{" "}
+            {NOTE_TEMPLATES.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                data-testid={`notes-empty-create-${t.id}`}
+                title={t.description}
+                onClick={() => onCreate(t.id)}
+                style={{
+                  border: "none", background: "none", padding: 0, marginLeft: 2,
+                  font: "inherit", fontSize: "inherit", fontWeight: 650,
+                  color: "var(--accent-notes-text)", cursor: "pointer", textDecoration: "underline",
+                }}
+              >{t.label}</button>
+            ))}
+          </p>
+        )}
       </div>
     </div>
   );
@@ -802,8 +824,14 @@ export default function Notes({
   /* ⛔ A PAGE MADE INSIDE A PROJECT IS FILED THERE, WITH NO EXTRA STEP (B1374, kept through
    * B1420's collapse). Made from the Dashboard it belongs to no project, which is a real
    * place with the same shape — never a holding pen. */
-  const handleAddPage = useCallback(() => {
+  /* B1020931 — an optional templateId seeds the new page's body via `writePage`, the same
+   * seam every autosave uses, so the seed lands before the editor is ever mounted (or
+   * downloaded) for this page. An unknown/blank id is silently a blank page — never an error,
+   * since "no template" is the default, common case. */
+  const handleAddPage = useCallback((templateId) => {
     const r = addPage(treeNow(), { projectId: projectId || null, orgScope });
+    const tpl = templateId ? templateById(templateId) : null;
+    if (tpl) writePage(r.pageId, tpl.buildDoc());
     persistTree(r.tree);
     setActivePageId(r.pageId);
     setQuery("");

@@ -615,7 +615,7 @@ export default function ProjectBreadcrumb({
         onClick={() => setOpen((o) => !o)}
         /* NEW-2 — the tooltip named only "project" outcomes; once the switcher can also open
            the Organization, both branches of that sentence needed a third case. */
-        title={cross ? "Browsing all projects" : org ? "Browsing your organization's notes and library" : currentProject ? "Switch project" : "Choose a project or organization"}
+        title={cross ? "Browsing all projects" : org ? "Browsing your organization's notes, library and agenda" : currentProject ? "Switch project" : "Choose a project or organization"}
         aria-haspopup="menu"
         aria-expanded={open}
         /* NEW-2 — shrinkable BETWEEN two bounds. The name ellipsises down to the floor and no

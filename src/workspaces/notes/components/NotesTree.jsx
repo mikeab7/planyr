@@ -53,6 +53,7 @@ import {
 } from "../lib/notesModel.js";
 import { absoluteStamp, daysLeft } from "../lib/notesTime.js";
 import { QUICK_OPEN_KEY } from "../lib/notesQuickOpen.js";
+import { NOTE_TEMPLATES } from "../lib/notesTemplates.js";
 
 // ORG SCOPE (NEW-1) — the "file under" panel's destination for Organization. A UI-local
 // sentinel, never written into the model: `onBind` below translates it into a call to
@@ -809,6 +810,7 @@ export default function NotesTree({
   const [menu, setMenu] = useState(null);
   const [dragId, setDragId] = useState(null);
   const [dropId, setDropId] = useState(null);   // page id, or `root:<projectId>` for a group head
+  const templateTriggerRef = useRef(null);   // B1020931 — positions RowMenu below the trigger
 
   // ORG SCOPE (NEW-1) — standing in Organization is the SAME "one focused scope, ungrouped"
   // experience as standing inside a project; only the Dashboard (no project AND no org) groups
@@ -1074,6 +1076,40 @@ export default function NotesTree({
               cursor: "pointer", whiteSpace: "nowrap",
             }}
           >＋ Page</button>
+          {/* B1020931 — a template picker, additive beside the blank-page button above rather
+              than replacing its one-click behavior: the common case (a blank page) stays exactly
+              as fast as it was. Reuses RowMenu, this file's own existing small-menu idiom
+              (below), rather than the shared controls.jsx menu primitives — this file may not
+              import controls.jsx at all (see the source-guard test in notesModule.test.js: that
+              import hoists a third shared chunk onto the Site route, the same measured
+              constraint NoteToolbar.jsx documents for the same reason). Same locked height/radius
+              as the button it sits beside — no new control signature on this surface. */}
+          {NOTE_TEMPLATES.length > 0 && (
+            <button
+              ref={templateTriggerRef}
+              type="button"
+              data-testid="notes-new-from-template"
+              title="New page from template"
+              aria-haspopup="menu"
+              aria-expanded={!!menu}
+              onClick={() => {
+                const r = templateTriggerRef.current?.getBoundingClientRect();
+                setMenu({
+                  x: r ? r.left : 0, y: r ? r.bottom + 4 : 0,
+                  items: NOTE_TEMPLATES.map((t) => ({
+                    id: `tpl-${t.id}`, label: t.label,
+                    onPick: () => { setView("tree"); onViewChange?.("tree"); onAddPage(t.id); },
+                  })),
+                });
+              }}
+              style={{
+                flex: "0 0 auto", height: narrow ? 44 : 28, width: narrow ? 44 : 22, padding: 0, borderRadius: RADIUS.control,
+                border: "1px solid var(--border-default)", background: "var(--surface-page)",
+                color: "var(--text-secondary)", font: "inherit", fontSize: 11, fontWeight: 650,
+                cursor: "pointer",
+              }}
+            >▾</button>
+          )}
         </div>
         {/* The workspace root is told which view is showing, so the task rollup — which has
             to read every page BODY in scope — is computed only while it is on screen. */}

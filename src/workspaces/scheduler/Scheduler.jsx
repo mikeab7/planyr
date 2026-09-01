@@ -19,6 +19,7 @@ import { scheduleSaveState } from "./lib/saveState.js";
 import { ScheduleCenter, ScheduleActions } from "./components/ScheduleToolbar.jsx";
 import { listProjects, warmProjectsIfEmpty, suggestNameMatch } from "../../shared/projects/projects.js";
 import LinkSchedulePanel from "./components/LinkSchedulePanel.jsx";
+import AgendaView from "./components/AgendaView.jsx";
 
 export default function Scheduler({
   shellModule, onShellSwitch, authControl, accountActive = false,
@@ -36,6 +37,11 @@ export default function Scheduler({
   // crumb always means the same thing (leave this workspace, go to the Site Planner map home).
   // Scheduler used to receive it and never read it — see goDashboard's own header below.
   onGoDashboard,
+  // ORG SCOPE (B1020930) — the route's org flag, uniform with `projectId`/`crossProject` on
+  // every other workspace. `userId` scopes the local-only agenda store per account (never
+  // per project — see agendaStore.js). `onNewProject` is the same "＋ New project" the switcher
+  // already wires everywhere else; org mode still offers it.
+  org = false, onSelectOrg, onNewProject, userId = null,
 } = {}) {
   const iframeRef = useRef(null);
   const [projects, setProjects] = useState([]);   // [{id, name}] from the embedded app
@@ -364,6 +370,36 @@ export default function Scheduler({
   // a failed write is wired through onRetrySave → the embedded app's planar:save (which, in the
   // error state, re-attempts the cloud save).
   const saveState = scheduleSaveState(toolbar);
+
+  // ORG SCOPE (B1020930) — a wholly separate render branch, never the embedded iframe. Every
+  // hook above this line still runs (React's rules require it), but none of their effects can
+  // do anything: `iframeRef.current` stays null forever because the <iframe> below is simply
+  // never rendered on this path, so the postMessage bridge sits idle rather than being touched
+  // or restructured — "if you find yourself editing the scheduler, stop" is honored by never
+  // reaching the scheduler's own code at all on this branch, not by editing it carefully.
+  if (org) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#f6f8fa" }}>
+        <AppHeader
+          module={shellModule || "scheduler"}
+          onSwitch={onShellSwitch}
+          authControl={authControl}
+          accountActive={accountActive}
+          homeLabel="Dashboard"
+          org
+          onSelectOrg={onSelectOrg}
+          // Uncontrolled here (no `projects=` prop) — ProjectBreadcrumb self-loads the real
+          // Site Planner project list via listProjects(), exactly like Library/Notes at org
+          // scope. The Schedule module's OWN bridged project list (`projects` state above) is
+          // meaningless at org scope — it belongs to the walled iframe, which isn't mounted.
+          onSelectProject={(id) => onProjectChange?.(id)}
+          onDashboard={onGoDashboard}
+          onNewProject={onNewProject}
+        />
+        <AgendaView scope={userId || "local"} />
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#f6f8fa" }}>
