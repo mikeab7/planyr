@@ -22228,10 +22228,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const live = cursor ? ((shiftHeld && mkPoly.pts.length) ? (mkPoly.kind === "mpolyline" ? shiftLockPoint(mkPoly.pts[mkPoly.pts.length - 1], mkPoly.pts[0], cursor) : snapPt(snap45(mkPoly.pts[mkPoly.pts.length - 1], cursor))) : snapPt(cursor)) : null;
                 const all = live ? [...mkPoly.pts, live] : mkPoly.pts;
                 const s = all.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
-                const lp = live ? f2p(live) : null, total = pathLen(all);
                 return <>
                   <polyline points={s} fill="none" stroke={ink} strokeWidth={isCloud ? mkCloudStyle.weight : mkStyle.weight} strokeDasharray="5 4" pointerEvents="none" />
-                  {lp && all.length >= 2 && <text x={lp.x + 8} y={lp.y - 6} fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={ink} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{f0(total)}′</text>}
+                  {/* NEW-1 (B850240) — the running-length readout moved to the quiet bottom-center
+                      live-draft strip below the <svg> (liveDraftReadout). */}
                   {mkPoly.pts.map((p, i) => { const q = f2p(p); return <circle key={i} cx={q.x} cy={q.y} r={3.5} fill={ink} pointerEvents="none" />; })}
                 </>;
               })()}
@@ -22245,12 +22245,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const ghost = easeMode === "centerline" && all.length >= 2 ? bufferPolyline(all, easeWidth)
                   : (easeMode === "boundary" && all.length >= 3 ? all : null);
                 const s = all.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
-                const lp = live ? f2p(live) : null;
                 return <g data-export="skip" pointerEvents="none">
                   {ghost && <polygon points={ghost.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ")} fill={tcol} fillOpacity={0.12} stroke={tcol} strokeWidth={1.4} strokeDasharray="5 4" />}
                   <polyline points={s} fill="none" stroke={tcol} strokeWidth={2} strokeDasharray="5 4" />
                   {easeDraft.pts.map((p, i) => { const q = f2p(p); return <circle key={i} cx={q.x} cy={q.y} r={3.5} fill={tcol} />; })}
-                  {lp && all.length >= 2 && easeMode === "centerline" && <text x={lp.x + 8} y={lp.y - 6} fontSize="11" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={tcol} stroke="#fff" strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(pathLen(all))}′ · {easeWidth}′ wide</text>}
+                  {/* NEW-1 (B850240) — the length/width readout moved to the quiet bottom-center
+                      live-draft strip below the <svg> (liveDraftReadout). */}
                 </g>;
               })()}
               {/* parcel-edge picker (NEW-3): clickable edge targets, highlighted run, ghost strip */}
@@ -22503,23 +22503,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         </g>
                       ); })}
                       {live && <circle cx={lp.x} cy={lp.y} r={8} fill={PAL.accent + "14"} stroke={PAL.accent} strokeWidth={1} strokeDasharray="3 2" />}
-                      <text x={lp.x} y={lp.y - 14} textAnchor="middle" fontSize="11" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{measDraft.length} item{measDraft.length !== 1 ? "s" : ""}</text>
+                      {/* NEW-1 (B850240) — the "N items" cursor-following readout moved to the
+                          quiet bottom-center live-draft strip below the <svg> (liveDraftReadout),
+                          so it never sits over the point the user is about to click next. */}
                     </g>
                   );
                 }
                 const ptsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
                 const isArea = measureMode === "area";
-                const lp = pts[pts.length - 1];
-                const lbl = isArea
-                  ? (all.length >= 3 ? `${f0(polyArea(all))} SF` : "")
-                  : (all.length >= 2 ? `${f0(pathLen(all))}′` : "");
                 return (
                   <g data-export="skip" pointerEvents="none">
                     {isArea && all.length >= 3
                       ? <polygon points={ptsStr} fill={PAL.accent} fillOpacity={0.1} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" />
                       : <polyline points={ptsStr} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" />}
                     {measDraft.map((p, k) => { const c = f2p(p); return <circle key={k} cx={c.x} cy={c.y} r={k === 0 ? 5 : 3.5} fill={k === 0 ? PAL.paper : PAL.accent} stroke={PAL.accent} strokeWidth={1.5} />; })}
-                    {lbl && <text x={lp.x} y={lp.y - 8} textAnchor="middle" fontSize="11" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{lbl}</text>}
+                    {/* NEW-1 (B850240) — the live SF/feet readout moved to the quiet bottom-center
+                        live-draft strip below the <svg> (liveDraftReadout), so it never sits over
+                        the user's next click. */}
                   </g>
                 );
               })()}
@@ -22532,10 +22532,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               )}
               {/* draft rect */}
               {draftRect && (() => { const a = f2p({ x: draftRect.x, y: draftRect.y }), pw = draftRect.w * rppf, ph = draftRect.h * rppf;
-                const curb = +settings.roadCurb || CURB, dw = draftRect.type === "road" ? Math.max(0, Math.min(draftRect.w, draftRect.h) - 2 * curb) : 0;
                 return (
                 <g data-export="skip" pointerEvents="none"><rect x={a.x} y={a.y} width={pw} height={ph} fill={typeStyle(draftRect.type, settings).fill} fillOpacity={0.5} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" />
-                  {(draftRect.w > 2 || draftRect.h > 2) && <text x={a.x + pw + 6} y={a.y + ph + 14} fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{draftRect.type === "road" ? `${f0(dw)}′ road` : `${f0(draftRect.w)}′ × ${f0(draftRect.h)}′`}</text>}
+                  {/* NEW-1 (B850240) — the w′ × h′ readout moved to the quiet bottom-center
+                      live-draft strip below the <svg> (liveDraftReadout). */}
                 </g>
               ); })()}
               {/* centerline road preview (B596/NEW-1): live tessellated centerline + the
@@ -22586,15 +22586,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </g>
                 );
               })()}
-              {/* live dims for the markup rect/ellipse draft */}
-              {mkRect && mkRect.kind !== "mline" && (() => {
-                const a = f2p(mkRect.a), b = f2p(mkRect.b), w = Math.abs(mkRect.b.x - mkRect.a.x), h = Math.abs(mkRect.b.y - mkRect.a.y);
-                return <text x={Math.max(a.x, b.x) + 6} y={Math.max(a.y, b.y) + 14} fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{f0(w)}′ × {f0(h)}′</text>;
-              })()}
-              {mkRect && mkRect.kind === "mline" && (() => {
-                const b = f2p(mkRect.b);
-                return <text x={b.x + 8} y={b.y - 6} fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{f0(dist(mkRect.a, mkRect.b))}′</text>;
-              })()}
+              {/* NEW-1 (B850240) — the live dims for the markup rect/ellipse/line draft moved to
+                  the quiet bottom-center live-draft strip below the <svg> (liveDraftReadout). */}
               {/* draft polygon element (clicking perimeter points) */}
               {draftElPoly && (
                 <g pointerEvents="none">
@@ -22607,14 +22600,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const live = cursor ? snapSplit(cursor) : null;
                 const all = live ? [...splitPath, live] : splitPath;
                 const ptsStr = all.map((p) => { const c = f2p(p); return `${c.x},${c.y}`; }).join(" ");
-                let total = 0;
-                for (let i = 1; i < all.length; i++) total += dist(all[i - 1], all[i]);
-                const lp = f2p(all[all.length - 1]);
                 return (
                   <g pointerEvents="none">
                     <polyline points={ptsStr} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="6 5" />
                     {splitPath.map((p, i) => { const c = f2p(p); return <circle key={i} cx={c.x} cy={c.y} r={4} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5} />; })}
-                    {live && all.length >= 2 && <text x={lp.x} y={lp.y - 8} textAnchor="middle" fontSize="11" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(total)}′ cut</text>}
+                    {/* NEW-1 (B850240) — the cut-length readout moved to the quiet bottom-center
+                        live-draft strip below the <svg> (liveDraftReadout). */}
                   </g>
                 );
               })()}
@@ -22786,6 +22777,76 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               )}
             </div>
           )}
+
+          {/* NEW-1 (B850240) — Michael, screenshots on Richfield: "fix that the measurement shows
+              where my cursor is when taking measurement... it gets annoying when trying to click
+              something and there's something over what you're trying to click." Every draft
+              tool's live SF/feet readout used to render as a floating label glued to the pointer,
+              directly over the map, so the text you needed to read was also the thing sitting on
+              top of your next click target. It now renders here instead: one quiet,
+              non-interactive strip, bottom-CENTER, stacked clear of the scale bar / north arrow /
+              calibration badge by the same canvasPillBottom the road "Done" pill (below) and the
+              Standards toast (above) use — so it joins the same collision-aware furniture set
+              instead of floating free. The on-canvas geometry preview (the dashed outline) is
+              unchanged; only the NUMBER moved.
+              EXCEPTION, deliberate: the road centerline tool's own live "N′ wide · N′ long" text
+              (B750096, a few lines below) stays anchored near the cursor — CAD/Bluebeam
+              convention, already pointerEvents:none, offset up-and-right of the point rather than
+              centered on it, and it is the one surface with a prior, reasoned owner decision to
+              keep it there. Every other draft — Measure, Parcel/element rect-draw (Building,
+              Paving, Parking, Trailer, Detention Pond), Easement centerline, every Markup shape,
+              and the boundary-split cut — had no such exception, so all of those move here. */}
+          {(() => {
+            if (tool === "road") return null; // road keeps its own on-canvas dims text — see B750096 below
+            let text = null;
+            if (tool === "measure" && measDraft.length > 0) {
+              const live = cursor
+                ? (shiftHeld && measureMode !== "count" ? shiftLockPoint(measDraft[measDraft.length - 1], measDraft[0], cursor) : snapPt(cursor))
+                : null;
+              const all = live ? [...measDraft, live] : measDraft;
+              if (measureMode === "count") text = `${measDraft.length} item${measDraft.length !== 1 ? "s" : ""}`;
+              else if (measureMode === "area") text = all.length >= 3 ? `${f0(polyArea(all))} SF` : null;
+              else text = all.length >= 2 ? `${f0(pathLen(all))}′` : null;
+            } else if (draftRect && (draftRect.w > 2 || draftRect.h > 2)) {
+              if (draftRect.type === "road") {
+                const curb = +settings.roadCurb || CURB;
+                text = `${f0(Math.max(0, Math.min(draftRect.w, draftRect.h) - 2 * curb))}′ road`;
+              } else {
+                text = `${f0(draftRect.w)}′ × ${f0(draftRect.h)}′`;
+              }
+            } else if (tool === "easement" && easeMode === "centerline" && easeDraft) {
+              const live = cursor ? ((shiftHeld && easeDraft.pts.length) ? snapPt(snap45(easeDraft.pts[easeDraft.pts.length - 1], cursor)) : snapPt(cursor)) : null;
+              const all = live ? [...easeDraft.pts, live] : easeDraft.pts;
+              if (live && all.length >= 2) text = `${f0(pathLen(all))}′ · ${easeWidth}′ wide`;
+            } else if (mkRect && mkRect.kind !== "mline") {
+              text = `${f0(Math.abs(mkRect.b.x - mkRect.a.x))}′ × ${f0(Math.abs(mkRect.b.y - mkRect.a.y))}′`;
+            } else if (mkRect && mkRect.kind === "mline") {
+              text = `${f0(dist(mkRect.a, mkRect.b))}′`;
+            } else if (mkPoly) {
+              const live = cursor ? ((shiftHeld && mkPoly.pts.length) ? (mkPoly.kind === "mpolyline" ? shiftLockPoint(mkPoly.pts[mkPoly.pts.length - 1], mkPoly.pts[0], cursor) : snapPt(snap45(mkPoly.pts[mkPoly.pts.length - 1], cursor))) : snapPt(cursor)) : null;
+              const all = live ? [...mkPoly.pts, live] : mkPoly.pts;
+              if (live && all.length >= 2) text = `${f0(pathLen(all))}′`;
+            } else if (tool === "split" && splitPath.length > 0) {
+              const live = cursor ? snapSplit(cursor) : null;
+              const all = live ? [...splitPath, live] : splitPath;
+              if (live && all.length >= 2) {
+                let total = 0;
+                for (let i = 1; i < all.length; i++) total += dist(all[i - 1], all[i]);
+                text = `${f0(total)}′ cut`;
+              }
+            }
+            if (!text) return null;
+            return (
+              <div data-testid="live-draft-readout" style={{
+                position: "absolute", left: "50%", transform: "translateX(-50%)", zIndex: 2600, pointerEvents: "none",
+                bottom: canvasPillBottom({ northH: furnPlates.north.plateH, scaleBarH: furnPlates.scaleBar.plateH, calibBottom: calibrationState ? calibPlace.bottom : null, row: FURNITURE_ROW }),
+                background: "rgba(25,22,19,0.85)", color: "rgba(255,255,255,0.92)",
+                padding: "5px 13px", borderRadius: 99, fontSize: 11.5, fontWeight: 700,
+                fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS,
+                boxShadow: "0 4px 14px rgba(0,0,0,0.22)", whiteSpace: "nowrap",
+              }}>{text}</div>
+            );
+          })()}
 
           {/* B750096 — the road-draft "finish" affordance, moved OUT of the canvas.
               Owner: "there's a banner for when I am placing a road, but it kinda gets in the way of
