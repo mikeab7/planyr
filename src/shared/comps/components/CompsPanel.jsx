@@ -22,58 +22,19 @@ import { Button, Field } from "../../ui/controls.jsx";
 import {
   COMP_TYPES, LEASE_PERIODS, LEASE_EXPENSE_BASES, isCompType, partyLabels,
   landPricePerSf, buildingPricePerSf, leaseTotalAnnualRent, compFieldRows, compHeadline,
-  compsSummaryBits, validateComp,
+  compsSummaryBits, validateComp, emptyDraft, draftToComp, compToDraft,
 } from "../lib/comps.js";
 import { compMarkerColor } from "../lib/compMarkerIcon.js";
 import { collectPartyNames } from "../lib/partySuggest.js";
 import PartyNameField from "./PartyNameField.jsx";
-import { fetchAllComps, insertComp, updateComp, deleteComp } from "../lib/compsStore.js";
+import { fetchAllComps, insertComp, insertComps, updateComp, deleteComp } from "../lib/compsStore.js";
 import { listMyTeams, currentIdentity } from "../../../workspaces/site-planner/lib/teams.js";
+import CompEntryGrid, { draftFromParsedRow } from "./CompEntryGrid.jsx";
+import CompDraftsPanel from "./CompDraftsPanel.jsx";
+import { fetchMyDrafts, insertDrafts, promoteDraft, deleteDraft } from "../lib/compDraftsStore.js";
+import { kmlToDraftRows } from "../lib/kmlImport.js";
 
 const TYPE_LABEL = { land: "Land", building_sale: "Building sale", lease: "Lease" };
-
-function emptyDraft(anchor) {
-  // B941152 — a parcel-anchored comp arrives with the acreage the map toolbar already computed
-  // (`asm.totalAc`, MapFinder.jsx); land size defaults to LAND (the default comp type) rather
-  // than forcing Michael to re-type the number he selected the parcels to get in the first place.
-  // Rounded to match the toolbar's own 2-decimal display (66.17 AC in, 66.17 out).
-  const landSizeValue = anchor?.acreageAc != null ? String(Math.round(anchor.acreageAc * 100) / 100) : "";
-  return {
-    compType: "land", compDate: "", title: "", notes: "", teamId: null, projectId: null,
-    anchor: anchor || null,
-    partyProvider: "", partyAcquirer: "",
-    landPrice: "", landSizeValue, landSizeUnit: "ac",
-    bldgPrice: "", bldgSizeSf: "",
-    leaseRate: "", leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseTi: "", leaseTerm: "", leaseSizeSf: "",
-    leaseFreeRentMonths: "",
-  };
-}
-
-// Draft (form strings) -> the numeric/typed shape lib/comps.js + compsStore.js expect.
-function draftToComp(d) {
-  const num = (v) => (v === "" || v == null ? null : Number(v));
-  return {
-    ...d,
-    landPrice: num(d.landPrice), landSizeValue: num(d.landSizeValue),
-    bldgPrice: num(d.bldgPrice), bldgSizeSf: num(d.bldgSizeSf),
-    leaseRate: num(d.leaseRate), leaseTi: num(d.leaseTi), leaseSizeSf: num(d.leaseSizeSf),
-    leaseFreeRentMonths: num(d.leaseFreeRentMonths),
-  };
-}
-
-function compToDraft(c) {
-  const str = (v) => (v == null ? "" : String(v));
-  return {
-    id: c.id, compType: c.compType, compDate: c.compDate || "", title: c.title || "", notes: c.notes || "",
-    teamId: c.teamId, projectId: c.projectId, anchor: c.anchor,
-    partyProvider: c.partyProvider || "", partyAcquirer: c.partyAcquirer || "",
-    landPrice: str(c.landPrice), landSizeValue: str(c.landSizeValue), landSizeUnit: c.landSizeUnit || "ac",
-    bldgPrice: str(c.bldgPrice), bldgSizeSf: str(c.bldgSizeSf),
-    leaseRate: str(c.leaseRate), leaseRatePeriod: c.leaseRatePeriod || "annual",
-    leaseRateExpense: c.leaseRateExpense || "nnn", leaseTi: str(c.leaseTi), leaseTerm: c.leaseTerm || "",
-    leaseSizeSf: str(c.leaseSizeSf), leaseFreeRentMonths: str(c.leaseFreeRentMonths),
-  };
-}
 
 const inputStyle = {
   width: "100%", padding: "6px 8px", fontSize: 12.5, borderRadius: 6, fontFamily: "inherit",
@@ -347,6 +308,8 @@ function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave
  *  - overlaysById {id -> overlay} — the host's already-loaded site-plan-overlay list, keyed by
  *    id, so a site_plan-anchored comp's detail view can show + open its source brochure
  *  - onOpenBrochure(overlay) — open that overlay's source document in Review, at its page (B848848)
+ *  - onFocusAnchor(anchor) — pan/zoom the map to a {lat,lon} the paste-grid isn't done with yet
+ *    (B849232/NEW-1: clicking an entry-grid row highlights its location before it's even saved)
  *
  * currentUserId and the team list are fetched INTERNALLY (mirrors this module's own
  * self-contained-data-owner shape) rather than threaded through the host, since neither is
@@ -354,18 +317,37 @@ function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave
  */
 export default function CompsPanel({
   open, active = true, pendingAnchor, onAnchorConsumed, focusCompId, onFocusHandled,
-  projects, onCompsChange, overlaysById, onOpenBrochure, reloadToken,
+  projects, onCompsChange, overlaysById, onOpenBrochure, reloadToken, onFocusAnchor,
 }) {
   const [comps, setComps] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(null);
-  const [view, setView] = useState("list"); // list | detail | form
+  const [view, setView] = useState("list"); // list | detail | form | grid | drafts
   const [activeComp, setActiveComp] = useState(null);
   const [draft, setDraft] = useState(null);
   const [errors, setErrors] = useState([]);
   const [saving, setSaving] = useState(false);
   const [currentUserId, setCurrentUserId] = useState(null);
   const [teams, setTeams] = useState([]);
+  // B849232/NEW-1 — the paste-grid create surface. `gridRows` is a client-side staging array,
+  // never persisted until Save; `armedRowId` tracks which row is waiting for the NEXT map-picked
+  // anchor (set by that row's "＋ Location" button) so a plain "Drop a pin"/"Comp from parcel"
+  // click routes its result to that row instead of opening a fresh one.
+  const [gridRows, setGridRows] = useState([]);
+  const [armedRowId, setArmedRowId] = useState(null);
+  const [gridSaving, setGridSaving] = useState(false);
+  const [gridSaveError, setGridSaveError] = useState(null);
+  // B849233/NEW-2 — the KML-import draft staging area. `armedRowId` above is a SINGLE slot
+  // shared with the grid: it names either a grid row's `_id` or a draft's real uuid, and the
+  // pendingAnchor effect below checks which. `draftAnchors` is the map-picked override per draft
+  // (lifted here because only this component receives `pendingAnchor` from the map); an
+  // unpicked draft falls back to its KML geometry (a point, or a polygon's centroid) inside
+  // CompDraftsPanel itself.
+  const [drafts, setDrafts] = useState([]);
+  const [draftAnchors, setDraftAnchors] = useState({});
+  const [draftBusyId, setDraftBusyId] = useState(null);
+  const [kmlImporting, setKmlImporting] = useState(false);
+  const [kmlImportError, setKmlImportError] = useState(null);
   const notifiedRef = useRef(onCompsChange);
   notifiedRef.current = onCompsChange;
 
@@ -387,6 +369,13 @@ export default function CompsPanel({
 
   useEffect(() => { if (open) reload(); }, [open]);
 
+  // B849233/NEW-2 — pending import drafts, fetched the same way (RLS already scopes to owner).
+  const reloadDrafts = async () => {
+    const { data } = await fetchMyDrafts();
+    setDrafts((data || []).filter((d) => d.status === "pending"));
+  };
+  useEffect(() => { if (open) reloadDrafts(); }, [open]);
+
   // A site-plan overlay placement move recomputed some comps' positions server-side
   // (B972512-HARDENING item 1) — refetch right away rather than waiting for the tab-focus
   // refetch below to notice. Guarded on a truthy token so the initial render (token 0) doesn't
@@ -403,12 +392,25 @@ export default function CompsPanel({
     return () => { window.removeEventListener("focus", onVisible); document.removeEventListener("visibilitychange", onVisible); };
   }, [open]);
 
-  // A just-picked map anchor opens the create form pre-filled.
+  // A just-picked map anchor: routes to the ARMED row if one is waiting — either a grid row (a
+  // "＋ Location" pick from the paste-grid) or a draft under review (a "＋ Pick a location" /
+  // "match a parcel instead" pick from CompDraftsPanel), `armedRowId` being a single shared slot
+  // across both. With nothing armed, it opens the grid pre-seeded with one new row carrying it —
+  // the grid IS the create surface now (B849232/NEW-1 replaces the old single-comp create form;
+  // editing an already-saved comp still uses the field form below).
   useEffect(() => {
     if (!pendingAnchor) return;
-    setDraft(emptyDraft(pendingAnchor));
-    setErrors([]);
-    setView("form");
+    if (armedRowId) {
+      if (gridRows.some((r) => r._id === armedRowId)) {
+        setGridRows((rows) => rows.map((r) => (r._id === armedRowId ? { ...r, draft: { ...r.draft, anchor: pendingAnchor } } : r)));
+      } else {
+        setDraftAnchors((m) => ({ ...m, [armedRowId]: pendingAnchor }));
+      }
+      setArmedRowId(null);
+    } else {
+      setGridRows((rows) => [...rows, draftFromParsedRow({ draft: emptyDraft(pendingAnchor), cellFlags: {} })]);
+      setView("grid");
+    }
     onAnchorConsumed?.();
   }, [pendingAnchor]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -448,6 +450,62 @@ export default function CompsPanel({
     setActiveComp(null);
   };
 
+  // B849232/NEW-1 — the paste-grid create surface.
+  const openGrid = () => { setGridRows([]); setArmedRowId(null); setGridSaveError(null); setView("grid"); };
+  const closeGrid = () => { setView("list"); setArmedRowId(null); };
+  const saveGridRows = async (readyRows) => {
+    if (!readyRows.length) return;
+    setGridSaving(true);
+    setGridSaveError(null);
+    const result = await insertComps(readyRows.map((r) => draftToComp(r.draft)));
+    setGridSaving(false);
+    if (result.error) { setGridSaveError(result.error.message || "Save failed"); return; }
+    const savedIds = new Set(readyRows.map((r) => r._id));
+    const remaining = gridRows.filter((r) => !savedIds.has(r._id));
+    setGridRows(remaining);
+    await reload();
+    if (remaining.length === 0) closeGrid();
+  };
+
+  // B849233/NEW-2 — the KML-import path. Hand entry (openGrid above) never reaches this;
+  // `handleKmlFile` is the ONLY producer of a comp_import_drafts row.
+  const handleKmlFile = async (file) => {
+    setKmlImporting(true);
+    setKmlImportError(null);
+    try {
+      const text = await file.text();
+      const rows = kmlToDraftRows(text, { sourceFile: file.name });
+      if (!rows.length) { setKmlImportError("No placemarks found in that file."); return; }
+      const result = await insertDrafts(rows);
+      if (result.error) { setKmlImportError(result.error.message || "Import failed"); return; }
+      await reloadDrafts();
+      setView("drafts");
+    } catch (e) {
+      setKmlImportError(e?.message || "Couldn't read that file");
+    } finally {
+      setKmlImporting(false);
+    }
+  };
+
+  const promoteOneDraft = async (draftId, comp) => {
+    setDraftBusyId(draftId);
+    const result = await promoteDraft(draftId, comp);
+    setDraftBusyId(null);
+    if (result.error) { await reloadDrafts(); return; } // promote_error is now on the row itself
+    setDraftAnchors((m) => { const next = { ...m }; delete next[draftId]; return next; });
+    await reloadDrafts();
+    await reload(); // a new comp exists now — the list/map must see it
+  };
+
+  const dismissOneDraft = async (draftId) => {
+    setDraftBusyId(draftId);
+    await deleteDraft(draftId);
+    setDraftBusyId(null);
+    if (armedRowId === draftId) setArmedRowId(null);
+    setDraftAnchors((m) => { const next = { ...m }; delete next[draftId]; return next; });
+    await reloadDrafts();
+  };
+
   return (
     <div style={{ display: active ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden" }}>
       <div style={{ flex: 1, overflowY: "auto" }}>
@@ -458,13 +516,62 @@ export default function CompsPanel({
           <>
             {/* A real section label, same treatment as "Site plans" above it — the two lists
                 stacked in one rail must each say plainly which is which (NEW-3). */}
-            <div style={{ padding: "10px 14px 0" }}>
+            <div style={{ padding: "10px 14px 0", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
               <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-secondary)" }}>Comps</span>
+              {/* B849232/NEW-1 — the paste-grid, not the map pin tool, is the everyday way in now:
+                  Michael enters comps in batches from broker emails, most of which don't start
+                  with a map click at all. "Drop a pin"/"Comp from parcel" still work — they open
+                  the grid pre-seeded with one row (see the pendingAnchor effect above). */}
+              <span style={{ display: "flex", gap: 6, flex: "none" }}>
+                <button onClick={openGrid} title="Paste comps from a broker email or spreadsheet"
+                  style={{ border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-primary)", fontSize: 10.5, fontWeight: 700, borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontFamily: "inherit" }}>
+                  ＋ New comps
+                </button>
+                {/* B849233/NEW-2 — the ONLY door into the draft staging table; picking a file
+                    here is what creates a row, never hand entry above. */}
+                <label title="Import a Google My Maps export"
+                  style={{ border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-primary)", fontSize: 10.5, fontWeight: 700, borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontFamily: "inherit" }}>
+                  ⤒ Import (KML)
+                  <input type="file" accept=".kml" style={{ display: "none" }} disabled={kmlImporting}
+                    onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) handleKmlFile(f); }} />
+                </label>
+              </span>
             </div>
+            {drafts.length > 0 && (
+              <button onClick={() => setView("drafts")}
+                style={{
+                  display: "block", width: "calc(100% - 28px)", margin: "6px 14px 0", textAlign: "left", border: "1px solid var(--warn-border)",
+                  background: "var(--warn-bg)", color: "var(--warn-text)", fontSize: 10.5, borderRadius: 6, padding: "6px 8px", cursor: "pointer", fontWeight: 700,
+                }}>
+                {drafts.length} imported comp{drafts.length === 1 ? "" : "s"} waiting on review ▸
+              </button>
+            )}
+            {kmlImportError && <div style={{ padding: "6px 14px 0", fontSize: 10.5, color: "var(--danger-text)" }}>{kmlImportError}</div>}
             <SummaryStrip comps={comps} />
-            {comps.length === 0 && <div style={{ padding: 14, fontSize: 12, color: "var(--text-secondary)" }}>No comps yet. Use “Drop a pin” or “Comp from parcel” on the map to add one.</div>}
+            {comps.length === 0 && <div style={{ padding: 14, fontSize: 12, color: "var(--text-secondary)" }}>No comps yet. Paste a few from a broker email with “＋ New comps” above, or use “Drop a pin”/“Comp from parcel” on the map.</div>}
             {comps.map((c) => <CompRow key={c.id} comp={c} onOpen={openDetail} />)}
           </>
+        )}
+
+        {view === "drafts" && (
+          <CompDraftsPanel
+            drafts={drafts} draftAnchors={draftAnchors}
+            armedRowId={armedRowId} onArm={setArmedRowId}
+            onFocusAnchor={(anchor) => onFocusAnchor?.(anchor)}
+            onPromote={promoteOneDraft} onDismiss={dismissOneDraft} busyId={draftBusyId}
+            onImportFile={handleKmlFile} importing={kmlImporting} importError={kmlImportError}
+            onBack={() => { setView("list"); setArmedRowId(null); }}
+          />
+        )}
+
+        {view === "grid" && (
+          <CompEntryGrid
+            rows={gridRows} onRowsChange={setGridRows}
+            armedRowId={armedRowId} onArm={setArmedRowId}
+            onFocusAnchor={(anchor) => onFocusAnchor?.(anchor)}
+            onSave={saveGridRows} onCancel={closeGrid}
+            saving={gridSaving} saveError={gridSaveError}
+          />
         )}
 
         {!loading && view === "detail" && activeComp && (

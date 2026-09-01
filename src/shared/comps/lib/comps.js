@@ -350,6 +350,57 @@ export function rowToComp(r) {
   };
 }
 
+/* ---- draft <-> comp: the string-field shape every entry surface edits ------------------- */
+// Moved here from CompsPanel.jsx (B849232/NEW-1) so the paste-grid (CompEntryGrid.jsx) and the
+// single-comp edit form share ONE conversion instead of two copies that can drift. A "draft" is
+// the form-string shape (every numeric field a string, so a controlled <input> never fights
+// React over a NaN) — this module is the only place that decides how a draft becomes the typed
+// `comp` shape `compToRow`/`validateComp` expect, and back.
+
+/** A blank draft, optionally pre-filled from a just-picked map anchor (pin/parcel/site_plan). */
+export function emptyDraft(anchor) {
+  // B941152 — a parcel-anchored comp arrives with the acreage the map toolbar already computed
+  // (`asm.totalAc`); land size defaults to LAND (the default comp type) rather than forcing a
+  // re-type of the number already selected the parcels to get. Rounded to match the toolbar's
+  // own 2-decimal display (66.17 AC in, 66.17 out).
+  const landSizeValue = anchor?.acreageAc != null ? String(Math.round(anchor.acreageAc * 100) / 100) : "";
+  return {
+    compType: "land", compDate: "", title: "", notes: "", teamId: null, projectId: null,
+    anchor: anchor || null,
+    partyProvider: "", partyAcquirer: "",
+    landPrice: "", landSizeValue, landSizeUnit: "ac",
+    bldgPrice: "", bldgSizeSf: "",
+    leaseRate: "", leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseTi: "", leaseTerm: "", leaseSizeSf: "",
+    leaseFreeRentMonths: "",
+  };
+}
+
+// Draft (form strings) -> the numeric/typed shape lib/comps.js + compsStore.js expect.
+export function draftToComp(d) {
+  const num = (v) => (v === "" || v == null ? null : Number(v));
+  return {
+    ...d,
+    landPrice: num(d.landPrice), landSizeValue: num(d.landSizeValue),
+    bldgPrice: num(d.bldgPrice), bldgSizeSf: num(d.bldgSizeSf),
+    leaseRate: num(d.leaseRate), leaseTi: num(d.leaseTi), leaseSizeSf: num(d.leaseSizeSf),
+    leaseFreeRentMonths: num(d.leaseFreeRentMonths),
+  };
+}
+
+export function compToDraft(c) {
+  const str = (v) => (v == null ? "" : String(v));
+  return {
+    id: c.id, compType: c.compType, compDate: c.compDate || "", title: c.title || "", notes: c.notes || "",
+    teamId: c.teamId, projectId: c.projectId, anchor: c.anchor,
+    partyProvider: c.partyProvider || "", partyAcquirer: c.partyAcquirer || "",
+    landPrice: str(c.landPrice), landSizeValue: str(c.landSizeValue), landSizeUnit: c.landSizeUnit || "ac",
+    bldgPrice: str(c.bldgPrice), bldgSizeSf: str(c.bldgSizeSf),
+    leaseRate: str(c.leaseRate), leaseRatePeriod: c.leaseRatePeriod || "annual",
+    leaseRateExpense: c.leaseRateExpense || "nnn", leaseTi: str(c.leaseTi), leaseTerm: c.leaseTerm || "",
+    leaseSizeSf: str(c.leaseSizeSf), leaseFreeRentMonths: str(c.leaseFreeRentMonths),
+  };
+}
+
 // NEVER includes user_id — the column default auth.uid() stamps the owner server-side, so a
 // request can only ever write the signed-in user's rows (the pinStore.js pinToRow rule).
 export function compToRow(comp) {
