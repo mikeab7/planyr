@@ -157,7 +157,57 @@ const SURFACES = [
     name: "Map landing page (no project selected)", hash: "#/site",
     prep: async (p) => { await clickIf(p, '[title="Collapse layers"]'); await p.waitForTimeout(150); },
     scope: "body",
-    exclude: "[data-menu-owner]",
+    // B (map-view locked-geometry conversion) — also excludes the bottom-left network-status
+    // toast (`data-testid="map-status-toast"`): arming select mode kicks off a real GIS parcel
+    // fetch, and this sandbox's blocked/slow county-GIS egress makes WHICH of two fallback error
+    // strings wins a genuine race — content this crawl was never testing, and flaky content in a
+    // `--check` byte-diff gate is worse than no coverage. Geometry (radius/height/padding/font) is
+    // identical either way; only the label text races.
+    exclude: '[data-menu-owner], [data-testid="map-status-toast"]',
+    directSelector: LANDING_SEL,
+  },
+  {
+    // NEW-1 (map-view locked-geometry conversion) — the DEFAULT "Site" mode search bar hides
+    // over half of its own action buttons behind mode/selection state: "Drop a pin" and "Comp
+    // from parcel" render ONLY in Comp mode, and the split "Select parcels ▾" pair's own Cancel
+    // sibling renders only once selectMode is armed. The surface above never saw any of them —
+    // confirmed live: the map landing page's own signature count didn't move after converging
+    // those buttons' geometry, because the crawl never rendered them. Both states below are
+    // reachable with a plain click (no live parcel data, no network) so they cost nothing extra
+    // to cover. The "selected.length > 0" state (Plan N parcels / clear ✕) is NOT covered here —
+    // it needs a real parcel click on the live map, the same real-data wall documented on every
+    // other GIS-dependent live-verify item in this repo.
+    name: "Map landing page (comp mode)", hash: "#/site",
+    prep: async (p) => {
+      await clickIf(p, '[title="Collapse layers"]');
+      await clickIf(p, '[role="tablist"][aria-label="Site or comp"] button:has-text("Comp")');
+      await p.waitForTimeout(150);
+    },
+    scope: "body",
+    // B (map-view locked-geometry conversion) — also excludes the bottom-left network-status
+    // toast (`data-testid="map-status-toast"`): arming select mode kicks off a real GIS parcel
+    // fetch, and this sandbox's blocked/slow county-GIS egress makes WHICH of two fallback error
+    // strings wins a genuine race — content this crawl was never testing, and flaky content in a
+    // `--check` byte-diff gate is worse than no coverage. Geometry (radius/height/padding/font) is
+    // identical either way; only the label text races.
+    exclude: '[data-menu-owner], [data-testid="map-status-toast"]',
+    directSelector: LANDING_SEL,
+  },
+  {
+    name: "Map landing page (selecting parcels)", hash: "#/site",
+    prep: async (p) => {
+      await clickIf(p, '[title="Collapse layers"]');
+      await clickIf(p, 'button:has-text("Select parcels")');
+      await p.waitForTimeout(150);
+    },
+    scope: "body",
+    // B (map-view locked-geometry conversion) — also excludes the bottom-left network-status
+    // toast (`data-testid="map-status-toast"`): arming select mode kicks off a real GIS parcel
+    // fetch, and this sandbox's blocked/slow county-GIS egress makes WHICH of two fallback error
+    // strings wins a genuine race — content this crawl was never testing, and flaky content in a
+    // `--check` byte-diff gate is worse than no coverage. Geometry (radius/height/padding/font) is
+    // identical either way; only the label text races.
+    exclude: '[data-menu-owner], [data-testid="map-status-toast"]',
     directSelector: LANDING_SEL,
   },
   {
@@ -1073,13 +1123,20 @@ async function run() {
     "change; `--check` fails CI on drift so this file can never go stale. See `docs/DESIGN.md` for",
     "the scale this inventory checks against (`RADIUS` / `FONT_SIZE`).",
     "",
-    "## Coverage (NEW-2, 2026-08-31)",
+    "## Coverage (NEW-2, 2026-08-31; extended for map-view mode/selection states below)",
     "",
-    "**Crawled:** the Map landing page (no project selected — the first screen a user sees),",
-    "App header + its four dropdown menus (File ▾ / Undo history / Settings gear / plan menu), the",
-    "tool rail, the left rail + Yield panel, Library, Doc Review's empty state.",
+    "**Crawled:** the Map landing page (no project selected — the first screen a user sees) in its",
+    "default Site-mode state, PLUS its Comp-mode state (\"Drop a pin\"/\"Comp from parcel\" render only",
+    "there) and its \"selecting parcels\" state (the split \"Select parcels ▾\" button's own Cancel",
+    "sibling renders only once armed) — added because the map's own action row hides most of its",
+    "buttons behind mode/selection state, and the single default-state crawl was silently measuring",
+    "none of them. App header + its four dropdown menus (File ▾ / Undo history / Settings gear /",
+    "plan menu), the tool rail, the left rail + Yield panel, Library, Doc Review's empty state.",
     "",
-    "**Not yet crawled, named rather than silently absent:** the Scheduler (a separate HTML document",
+    "**Not yet crawled, named rather than silently absent:** the map's \"selected.length > 0\" state",
+    "(the \"Plan N parcels →\"/\"Comp N parcels\"/clear-✕ row) — it needs a real parcel click against",
+    "live GIS data, the same real-data wall as every other live-verify GIS item in this repo, so it",
+    "stays on `VERIFICATION.md` rather than this logged-out crawl. The Scheduler (a separate HTML document",
     "outside this token system entirely — see docs/DESIGN.md), Stitcher/Notes/Model/admin (each needs",
     "its own seed data or an owner-only allowlist this tool doesn't build yet), Doc Review with a",
     "document actually open, the Site Planner canvas chrome beyond header/tool-rail/left-rail, any",

@@ -4,6 +4,14 @@
       "light": 24,
       "dark": 24
     },
+    "Map landing page (comp mode)": {
+      "light": 21,
+      "dark": 21
+    },
+    "Map landing page (selecting parcels)": {
+      "light": 23,
+      "dark": 23
+    },
     "App header": {
       "light": 11,
       "dark": 11

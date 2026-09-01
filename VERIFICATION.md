@@ -116,6 +116,19 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V561696 — B989105: after selecting one or more parcels on the map, "Plan N parcels →"/"Comp N parcels" and the clear-✕ render at the same converged geometry as the rest of the search bar's action row `Blocker: live-GIS`
+
+**Why this needs its own real pass.** Reaching this state requires a real parcel click against live county GIS parcel data (a mandatory GIS-endpoint-behavior LIVE-VERIFY class) — the sandbox's headless crawl can arm Comp mode and select-mode by a plain click, but cannot click an actual parcel polygon on the map without live GIS data resolving under it.
+
+**What was verified here.** The `NESTED_ACTION_SIZE` conversion was applied to this exact code (`MapFinder.jsx`'s "Plan {N} parcels →" / "Comp {N} parcels" buttons, both `mode === "site"` and `mode === "comp"` branches) in the same edit as the buttons `ui-audit/ui-inventory.mjs` could reach (Drop a pin / Comp from parcel / both Cancel buttons) — confirmed by direct source read, not left unmeasured. `npx vitest run` is green (668/668 files) and `node ui-audit/locked-primitive-audit.mjs --check` / `node ui-audit/design-drift-audit.mjs --check` both pass on the changed file. What could NOT be confirmed here is the RENDERED result — whether the live browser actually paints these two buttons at the intended `(radius:6, height:30, padding:"0 12px", fontSize:12)` tuple once a real selection exists.
+
+**Steps, each with a named expected result — on `planyr.io`, either theme:**
+1. Open the map landing page (no project open) → click "＋ Select parcels" → click a real parcel on the map. **Expect:** the search bar's right section shows a small orange status dot, "1 parcel · N.NN AC", a small ✕ clear button, and a filled "Plan site →" button.
+2. Click a second, adjoining parcel. **Expect:** the label updates to "2 parcels · N.NN AC" and the button relabels to "Plan 2 parcels →".
+3. Measure "Plan site →" against "Drop a pin"/"Comp from parcel" (switch to Comp mode, select a parcel there to compare against "Comp N parcels"). **Expect:** all of them read as the same height and corner rounding as each other and as "Select parcels ▾" — no visible size jump when the row's content changes from the resting state to the post-selection state.
+
+**Result:** ⏳ pending — needs a real parcel click against live county GIS data; not reachable from this sandbox's logged-out headless crawl.
+
 ### V556720 — B986096: paste a real broker-email block into the Comps entry grid, confirm blocking vs soft cells, save, and read the rows back from `public.comps` `Blocker: auth`
 
 **Why this needs its own real pass.** The parse→render→save round trip is client-side parsing feeding a real signed-in Supabase write; a saved row and its stored values can only be confirmed against the live database under a real session.
