@@ -116,6 +116,19 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V467696 — B846384: a long active-editing session on a Richfield-like plan no longer shows an accelerating long-task rate, and the drawing↔basemap weld is unaffected by skipping the redundant DOM reads `Blocker: live-GIS`
+
+**Why this needs its own real pass.** Both mandatory LIVE-VERIFY classes apply — zoom/data-density-dependent rendering (the registration effect's per-commit cost) and GIS endpoint behavior (the tile-vs-drawing weld itself). This sandbox's egress blocks every basemap tile host `mapLock`'s `tileRef()` reads, so `syncReg()` always falls through with no tile to measure against here — the exact path the change touches cannot be exercised in this sandbox at all, only reasoned about from source and from the real production capture already on record.
+
+**What was verified here (sandbox).** `registrationLayoutMayHaveChanged` (the pure gate) is unit-tested for all four boundary conditions (`test/mapLock.test.js`). `npx vitest run` is green (673/673 files). `npm run build` is clean and `node ui-audit/perf-bundle-audit.mjs` reports all budgets within ceiling. What could NOT be confirmed here: that skipping the `wrap.clientWidth`/`clientHeight`/`map.getSize()` read on an unchanged size/overscan combo never misses a genuine container resize in a real browser, and that the long-task rate during a real multi-minute editing session is actually lower than the pre-fix baseline.
+
+**Steps, each with a named expected result — on `planyr.io`, either theme, signed in:**
+1. Open a plan of similar shape to the owner's Richfield capture (a modest element count, an aerial basemap on, a docked panel narrowing the canvas) and actively edit it (move/resize a handful of elements, open/close a panel a few times) for at least 10 minutes, matching the ramp window the original capture showed (166 → 335 → 1,201 long tasks between minutes 4 and 25). **Expect:** the drawing stays visibly registered on the aerial throughout every pan/zoom/resize — no visible seam between the drawn geometry and the imagery beneath it, in particular right after a docked panel opens or closes (the resize-resync path this fix's gate must still catch).
+2. With DevTools' Performance panel (or `window.pfRec.state()`) open across the same session, compare the long-task count/total blocking time against a matched-length session on the pre-fix build (or against the original capture's own numbers: 335 long tasks / 24,685 ms by minute ~10, 1,201 / 92,232 ms by minute ~25). **Expect:** a materially lower rate of accumulation over a comparable active-editing window — report the actual longTasks/longTaskMs pair, not a subjective "feels better."
+3. If `map-registration-out-of-range` fires at all during the session, confirm it does not repeat on every commit — at most once per whole-pixel bucket per 30 seconds — and that its payload now carries `cw`/`ch`/`leafletW`/`leafletH`/`sizeChanged`. **Expect:** a bounded number of reports even if the underlying disagreement persists, each carrying the new diagnostic fields.
+
+**Result:** ⏳ pending — needs a live browser against real GIS tile hosts and a real multi-minute editing session; not reachable from this sandbox (egress to every basemap tile provider is blocked here).
+
 ### V561696 — B989105: after selecting one or more parcels on the map, "Plan N parcels →"/"Comp N parcels" and the clear-✕ render at the same converged geometry as the rest of the search bar's action row `Blocker: live-GIS`
 
 **Why this needs its own real pass.** Reaching this state requires a real parcel click against live county GIS parcel data (a mandatory GIS-endpoint-behavior LIVE-VERIFY class) — the sandbox's headless crawl can arm Comp mode and select-mode by a plain click, but cannot click an actual parcel polygon on the map without live GIS data resolving under it.
