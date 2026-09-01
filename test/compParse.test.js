@@ -56,6 +56,12 @@ describe("compParse: comp type detection", () => {
     const r = detectCompType("some random line with no signal");
     expect(r).toEqual({ value: "land", soft: true });
   });
+  it("reads a bare TI mention as lease, confident — TI is lease-only vocabulary", () => {
+    expect(detectCompType("TI: $13.00/sf from shell")).toEqual({ value: "lease", soft: false });
+  });
+  it("reads a bare $/SF figure as lease, confident, with no /mo or /yr required", () => {
+    expect(detectCompType("$13.00/sf from shell")).toEqual({ value: "lease", soft: false });
+  });
 });
 
 describe("compParse: the canonical blocking case — a lease rate with no period", () => {
@@ -174,7 +180,8 @@ describe("compParse: Michael's exact repro — a single lease abstract must beco
     // The commencement date is a soft-flagged fallback for compDate, never presented as fact.
     expect(draft.compDate).toBe("2027-06-01");
     expect(cellFlags.compDate?.level).toBe("soft");
-    expect(cellFlags.compDate?.reason).toMatch(/estimated commencement/i);
+    expect(cellFlags.compDate?.reason).toMatch(/date read from ".*commencement estimated to be june 1, 2027.*"/i);
+    expect(cellFlags.compDate?.reason).toMatch(/stored as estimated/i);
     expect(draft.notes).toMatch(/Commencement \(estimated\): 2027-06-01/);
   });
 
@@ -211,6 +218,21 @@ describe("compParse: multi-line prose paste -> multiple rows (the list shape, un
     expect(rows[1].draft.compType).toBe("building_sale");
     expect(rows[2].draft.compType).toBe("lease");
     expect(rows[2].draft.leaseTerm).toBe("5 yrs");
+  });
+  it("a line with only TI/$-per-SF vocabulary still infers lease on its own, per-line", () => {
+    // Distinct from the single-record whole-text join: this proves the SAME strengthened
+    // detectCompType also protects the per-line list path, where each line is judged in
+    // isolation (a stray TI/$-per-sf line with no NNN or lease word would otherwise default to
+    // "land", exactly the class of misclassification the owner's third round flagged). Both
+    // lines carry a date so each independently reads as a complete comp (the "multi" shape).
+    const text = [
+      "Shell space, TI $13.00/sf, closed 3/1/2026",
+      "3.2 AC land - $850k - Jan 2026",
+    ].join("\n");
+    expect(detectPasteShape(text)).toBe("multi");
+    const { rows } = parsePaste(text);
+    expect(rows[0].draft.compType).toBe("lease");
+    expect(rows[1].draft.compType).toBe("land");
   });
   it("blank lines are dropped, not turned into empty rows", () => {
     const text = [

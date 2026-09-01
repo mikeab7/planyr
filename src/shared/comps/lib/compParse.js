@@ -117,12 +117,19 @@ function detectBasis(text) {
   return t.startsWith("nnn") || t.includes("triple") ? "nnn" : "gross";
 }
 
+// TI (tenant-improvement allowance) and a bare "$X/SF" figure are both lease-only vocabulary —
+// a land or building-SALE deal is never quoted per-SF and never carries a TI allowance. Neither
+// needs an accompanying /mo or /yr to count: TI's own dollar figure isn't a rate at all (so it
+// has no period to state), and "$13.00/sf from shell" reads as a lease signal on its own.
+const TI_MENTION_RE = /\bTI\b\s*(?:allowance)?\s*(?:of|:)?\s*\$/i;
+const BARE_SF_RATE_RE = /\$\s*[\d,]*\.?\d+\s*\/\s*sf\b/i;
+
 /** Best-effort comp type from wording — never blank, since every comp needs one, but flagged
  * soft whenever it was a guess rather than an explicit signal (lease words, or sale + a
  * building word). Defaults to "land", the app's own default, when nothing signals otherwise. */
 export function detectCompType(text) {
   const t = String(text || "");
-  if (LEASE_WORDS.test(t) || BASIS_RE.test(t) || /\/\s*sf\s*\/\s*(mo|yr)/i.test(t)) return { value: "lease", soft: false };
+  if (LEASE_WORDS.test(t) || BASIS_RE.test(t) || BARE_SF_RATE_RE.test(t) || TI_MENTION_RE.test(t)) return { value: "lease", soft: false };
   const sale = SALE_WORDS.test(t);
   const building = BUILDING_WORDS.test(t);
   if (sale && building) return { value: "building_sale", soft: false };
@@ -230,7 +237,7 @@ function emptyGeneric() {
     compType: null, compDate: null, title: null, partyProvider: null, partyAcquirer: null,
     price: null, sizeValue: null, sizeUnit: null, rate: null, ratePeriod: null, rateBasis: null,
     ti: null, term: null, notes: null, freeRentMonths: null, escalationPct: null,
-    commencementDate: null, commencementEstimated: false,
+    commencementDate: null, commencementEstimated: false, commencementSourceLine: null,
   };
 }
 
@@ -315,10 +322,16 @@ function finalizeGenericRow(generic, rawFlags, raw) {
     }
   }
   // A commencement date is NEVER stored as though it were the deal's real comp_date without
-  // saying so — it's always shown (soft, correctable), never silently presented as fact.
+  // saying so — it's always shown (soft, correctable), never silently presented as fact. Quotes
+  // the actual source line when one was captured (a mockup requirement — "Date read from
+  // '<line>' — stored as estimated, not as a signing date") so the note is provenance, not just
+  // a generic disclaimer.
   if (!generic.compDate && generic.commencementDate) {
-    mergeFlag(flags, "compDate", "soft",
-      `This is the${generic.commencementEstimated ? " ESTIMATED" : ""} commencement date, not necessarily when the deal was signed — verify or replace.`);
+    const src = generic.commencementSourceLine;
+    const disposition = generic.commencementEstimated
+      ? "stored as estimated, not as a signing date."
+      : "a commencement date, not necessarily a signing date — verify or replace.";
+    mergeFlag(flags, "compDate", "soft", src ? `Date read from "${src}" — ${disposition}` : `This is the${generic.commencementEstimated ? " ESTIMATED" : ""} commencement date, not necessarily when the deal was signed — verify or replace.`);
   }
 
   return { draft: genericToDraft(generic), cellFlags: flags, raw };
@@ -471,6 +484,7 @@ function extractUnlabeledLine(generic, flags, line) {
     if (d) {
       generic.commencementDate = d.iso;
       generic.commencementEstimated = /estimat/i.test(line);
+      generic.commencementSourceLine = line.trim();
       matchedAnything = true;
     }
   }
