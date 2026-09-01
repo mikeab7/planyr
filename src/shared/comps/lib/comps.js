@@ -11,6 +11,7 @@
  * them: a field left empty must never render as an empty row or an em-dash placeholder —
  * `compFieldRows` is the single place that decision is made, so no renderer has to re-derive it.
  */
+import { formatDateDisplay } from "./compDates.js";
 
 export const COMP_TYPES = ["land", "building_sale", "lease"];
 export const LEASE_PERIODS = ["annual", "monthly"];
@@ -65,6 +66,26 @@ export function validAnchor(anchor) {
       typeof anchor.sitePlanPoint.x === "number" && typeof anchor.sitePlanPoint.y === "number");
   }
   return anchor.kind === "pin";
+}
+
+// B986096-HARDENING-7 (owner rule, "i dont need to input county as a default … do not just write
+// null and move on") — county is derived from the anchor at pick time (MapFinder.jsx's
+// `placeCompPinAt`/`placeCompOnOverlay`, `compParcelAnchor.js`'s `parcelCountyFromSelection`) and
+// is NEVER a sheet input. A comp has no load-time self-heal the way a planned site does (B792
+// re-resolves a site's county from its origin on every load), so a lookup that failed silently —
+// timed out, no match, a thrown error — would leave `county: null` forever with nothing to catch
+// it. This is that catch: a positioned anchor with no county gets a soft, non-blocking flag on
+// the sheet's Location cell, naming exactly what Michael asked for ("log it and say so") without
+// blocking the row (the comp is still real and still savable; county is metadata, not a fact
+// required to record the deal). Returns null once a county IS present, or the anchor has no
+// position yet at all (nothing to flag — the row is simply not located yet).
+export function anchorCountyFlag(anchor) {
+  if (!anchor || typeof anchor.lat !== "number" || typeof anchor.lon !== "number") return null;
+  if (anchor.county) return null;
+  return {
+    level: "soft",
+    reason: "Couldn't determine the county for this location — comps are grouped and filtered by county, so this one may be missed until it resolves. Re-pick the location to try again.",
+  };
 }
 
 /* ---- LAND: $/SF headline, date required, optional price, optional size (ac or SF) ------- */
@@ -275,16 +296,14 @@ function fmtPsf(n) {
   return n == null ? null : `$${n.toFixed(2)}/SF`;
 }
 
-// A date-only ISO string ("2026-08-28") parsed as Y/M/D and re-rendered in the app's own
-// read-view date convention (FileBrowser.jsx / SiteReviewModal.jsx / MapFinder.jsx all format a
-// display date the same way) — NEW-6. Built from the parts, never `new Date(iso)` directly:
-// comp_date carries no time, so parsing the bare ISO string as UTC and displaying it in a
-// behind-UTC local zone would print the wrong day.
+// ⛔ B986096-HARDENING-8 (owner rule, "change the date formatting to something people would
+// normally see") — mm/dd/yy, the Schedule task report's own convention (08/20/26, 06/15/26),
+// never the raw ISO string. AUDIT-FIRST note: FileBrowser.jsx/SiteReviewModal.jsx/MapFinder.jsx
+// use a DIFFERENT existing convention ("Jun 1, 2027") — this app already has two date display
+// conventions, not one; this function now follows the owner's explicit instruction for comps
+// specifically (mm/dd/yy) rather than the longer form those other modules use.
 function fmtCompDate(iso) {
-  if (!iso) return null;
-  const [y, m, d] = String(iso).split("-").map(Number);
-  if (!y || !m || !d) return iso;
-  return new Date(y, m - 1, d).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  return formatDateDisplay(iso) || null;
 }
 
 /** The party-field axis, labeled per comp type (NEW-7 amended): one shared pair of columns — the
@@ -325,6 +344,11 @@ export function compFieldRows(comp) {
     push("psf", "$/SF", psf != null ? fmtPsf(psf) : null);
     push("price", "Price", comp?.bldgPrice != null ? fmtMoney(comp.bldgPrice) : null);
     if (comp?.bldgSizeSf != null) push("size", "Building size", `${Number(comp.bldgSizeSf).toLocaleString()} SF`);
+    // B986096-HARDENING-7 — Price/NOI/Cap are a triangle (any two determine the third; see
+    // resolveCapTriangle), so by the time a comp is saved all three are populated whenever at
+    // least two were ever known. Shown together, in the same order Michael specified them.
+    if (comp?.bldgNoi != null) push("noi", "NOI", fmtMoney(comp.bldgNoi));
+    if (comp?.bldgCapRate != null) push("capRate", "Cap rate", `${(Number(comp.bldgCapRate) * 100).toFixed(2)}%`);
   } else if (comp?.compType === "lease") {
     if (comp?.leaseRate != null) {
       const period = comp.leaseRatePeriod === "monthly" ? "/mo" : comp.leaseRatePeriod === "annual" ? "/yr" : "";
@@ -415,6 +439,9 @@ export function rowToComp(r) {
     landSizeUnit: r.land_size_unit || null,
     bldgPrice: r.bldg_price != null ? Number(r.bldg_price) : null,
     bldgSizeSf: r.bldg_size_sf != null ? Number(r.bldg_size_sf) : null,
+    bldgNoi: r.bldg_noi != null ? Number(r.bldg_noi) : null,
+    // Decimal fraction (0.0575), never a percentage number — see resolveCapTriangle's header.
+    bldgCapRate: r.bldg_cap_rate != null ? Number(r.bldg_cap_rate) : null,
     leaseRate: r.lease_rate != null ? Number(r.lease_rate) : null,
     leaseRatePeriod: r.lease_rate_period || null,
     leaseRateExpense: r.lease_rate_expense || null,
@@ -449,19 +476,88 @@ export function emptyDraft(anchor) {
     anchor: anchor || null,
     partyProvider: "", partyAcquirer: "",
     landPrice: "", landSizeValue, landSizeUnit: "ac",
-    bldgPrice: "", bldgSizeSf: "",
+    bldgPrice: "", bldgSizeSf: "", bldgNoi: "", bldgCapRate: "",
     leaseRate: "", leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseTi: "", leaseTerm: "", leaseSizeSf: "",
     leaseFreeRentMonths: "", leaseEscalationPct: "",
   };
 }
 
+// B986096-HARDENING-7 (owner rule, "lets add an option for cap on building sales") — three
+// quantities where any two determine the third: cap = NOI / price. Building-sale comps only
+// (land and lease are untouched — Michael scoped this to sales, "a ground lease can carry a cap
+// but do not extend it without asking"). Cap rate is stored as a DECIMAL FRACTION internally
+// (0.0575), rendered as a percentage (5.75%) — a DELIBERATE difference from `leaseEscalationPct`,
+// which stores a raw percentage number (3.5) for its own unrelated reasons; the two conventions
+// must never be read as interchangeable or "fixed" to match each other.
+//
+// Given fewer than two of {price, noi, capRate}, nothing is derivable. Given exactly two, the
+// third is derived (and reported so, `derived: true`) — never overwriting what was actually
+// typed. Given all three, nothing is derived; instead they are checked for disagreement (a
+// rounded, brokered cap next to an exact price/NOI often won't reconcile to the last basis
+// point) and a real mismatch is reported, never silently recomputed over.
+const CAP_RATE_TOLERANCE = 0.0005; // 5 basis points — past ordinary rounding, a genuine mismatch.
+
+export function resolveCapTriangle(obj) {
+  const price = positiveNumber(obj?.bldgPrice);
+  const noi = positiveNumber(obj?.bldgNoi);
+  const capRate = positiveNumber(obj?.bldgCapRate);
+  const givenCount = [price, noi, capRate].filter((v) => v != null).length;
+
+  if (givenCount === 3) {
+    const implied = noi / price;
+    const disagreement = Math.abs(implied - capRate) > CAP_RATE_TOLERANCE
+      ? { impliedCapRate: implied, statedCapRate: capRate }
+      : null;
+    return {
+      price: { value: price, derived: false }, noi: { value: noi, derived: false },
+      capRate: { value: capRate, derived: false }, disagreement,
+    };
+  }
+  if (givenCount === 2) {
+    if (price != null && noi != null) {
+      return {
+        price: { value: price, derived: false }, noi: { value: noi, derived: false },
+        capRate: { value: noi / price, derived: true }, disagreement: null,
+      };
+    }
+    if (price != null && capRate != null) {
+      return {
+        price: { value: price, derived: false }, noi: { value: price * capRate, derived: true },
+        capRate: { value: capRate, derived: false }, disagreement: null,
+      };
+    }
+    return {
+      price: { value: noi / capRate, derived: true }, noi: { value: noi, derived: false },
+      capRate: { value: capRate, derived: false }, disagreement: null,
+    };
+  }
+  return {
+    price: { value: price, derived: false }, noi: { value: noi, derived: false },
+    capRate: { value: capRate, derived: false }, disagreement: null,
+  };
+}
+
 // Draft (form strings) -> the numeric/typed shape lib/comps.js + compsStore.js expect.
+//
+// ⛔ B986096-HARDENING-7 — a building-sale draft's Price/NOI/Cap are resolved through
+// `resolveCapTriangle` BEFORE numeric conversion (on the raw string draft `d`, not the already-
+// converted comp being built) and the derived one is BACK-FILLED into the saved comp. This is
+// what keeps `bldgPrice`/`bldgNoi`/`bldgCapRate` consistently all-populated-or-all-null once at
+// least two are known — so a comp entered from NOI + Cap alone still has a real `bldgPrice`,
+// which is what lets the pre-existing `buildingPricePerSf` (and the sheet's $/SF derived column)
+// work unchanged for it, with zero knowledge of the triangle. `resolveCapTriangle` itself is
+// called on the RAW draft so it can still tell which field the user left empty — calling it on
+// the back-filled comp instead would see three populated numbers and report nothing as derived.
 export function draftToComp(d) {
   const num = (v) => (v === "" || v == null ? null : Number(v));
+  const tri = d.compType === "building_sale" ? resolveCapTriangle(d) : null;
   return {
     ...d,
     landPrice: num(d.landPrice), landSizeValue: num(d.landSizeValue),
-    bldgPrice: num(d.bldgPrice), bldgSizeSf: num(d.bldgSizeSf),
+    bldgPrice: tri ? tri.price.value : num(d.bldgPrice),
+    bldgSizeSf: num(d.bldgSizeSf),
+    bldgNoi: tri ? tri.noi.value : num(d.bldgNoi),
+    bldgCapRate: tri ? tri.capRate.value : num(d.bldgCapRate),
     leaseRate: num(d.leaseRate), leaseTi: num(d.leaseTi), leaseSizeSf: num(d.leaseSizeSf),
     leaseFreeRentMonths: num(d.leaseFreeRentMonths), leaseEscalationPct: num(d.leaseEscalationPct),
     leaseCommencementDate: d.leaseCommencementDate || null,
@@ -477,6 +573,7 @@ export function compToDraft(c) {
     partyProvider: c.partyProvider || "", partyAcquirer: c.partyAcquirer || "",
     landPrice: str(c.landPrice), landSizeValue: str(c.landSizeValue), landSizeUnit: c.landSizeUnit || "ac",
     bldgPrice: str(c.bldgPrice), bldgSizeSf: str(c.bldgSizeSf),
+    bldgNoi: str(c.bldgNoi), bldgCapRate: str(c.bldgCapRate),
     leaseRate: str(c.leaseRate), leaseRatePeriod: c.leaseRatePeriod || "annual",
     leaseRateExpense: c.leaseRateExpense || "nnn", leaseTi: str(c.leaseTi), leaseTerm: c.leaseTerm || "",
     leaseSizeSf: str(c.leaseSizeSf), leaseFreeRentMonths: str(c.leaseFreeRentMonths),
@@ -508,6 +605,8 @@ export function compToRow(comp) {
     land_size_unit: comp.landSizeUnit ?? null,
     bldg_price: comp.bldgPrice ?? null,
     bldg_size_sf: comp.bldgSizeSf ?? null,
+    bldg_noi: comp.bldgNoi ?? null,
+    bldg_cap_rate: comp.bldgCapRate ?? null,
     lease_rate: comp.leaseRate ?? null,
     lease_rate_period: comp.leaseRatePeriod ?? null,
     lease_rate_expense: comp.leaseRateExpense ?? null,
