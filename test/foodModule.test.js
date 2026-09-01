@@ -2312,21 +2312,26 @@ describe("VisitPanel — Actions row (block 4): want-to-try disappears once visi
   const actionsBlock = panel.slice(panel.indexOf("function ActionsRow"), panel.indexOf("/* Past visits"));
 
   it("everVisited: Log a visit is the ONLY button, full-width primary — Want to try is gone entirely, not just demoted", () => {
-    expect(actionsBlock).toMatch(/const logIsPrimary = everVisited \|\| !onToggleWishlist;/);
     expect(actionsBlock).toMatch(/const wishBtn = onToggleWishlist && !everVisited && \(/);
-    expect(actionsBlock).toMatch(/\{\(everVisited \? \[logBtn, wishBtn\] : \[wishBtn, logBtn\]\)\.filter\(Boolean\)\}/);
+    expect(actionsBlock).toMatch(/\{\[logBtn, wishBtn\]\.filter\(Boolean\)\}/);
     // A place-level want-to-try is meaningless once he's actually been (owner: "remove the want
     // to try option from a restaurant I've already visited") — filter(Boolean) drops the false
     // wishBtn cleanly, so the row renders Log a visit alone, full width.
   });
 
-  it("never-visited: Want to try renders as the primary (full-width) button, Log a visit as secondary — unchanged from before this item", () => {
-    // wishBtn's own style is unconditionally `primary` now (it only ever renders in the
-    // !everVisited branch, so the old everVisited-ternary on its own style was dead code once
-    // the render guard moved to the wishBtn declaration itself).
+  // B1022960 (2026-09-01 owner report, verbatim: "log a visit should be the main button, not
+  // want to try") — Log a visit is now ALWAYS the primary (full-width, filled) button and Want
+  // to try is ALWAYS the secondary (outlined) one, on every visited state. The previous version
+  // of this test pinned the exact opposite (a never-visited place swapped the roles) — that was
+  // the bug reported, not a property worth protecting.
+  it("Log a visit is unconditionally the primary (full-width) button; Want to try, when it renders, is unconditionally secondary (outlined)", () => {
+    const logBtnBlock = actionsBlock.slice(actionsBlock.indexOf("const logBtn"), actionsBlock.indexOf("const wishBtn"));
+    expect(logBtnBlock).toMatch(/style=\{primary\}/);
+    expect(actionsBlock).not.toMatch(/logIsPrimary/);
+
     const wishBtnBlock = actionsBlock.slice(actionsBlock.indexOf("const wishBtn"), actionsBlock.indexOf("return ("));
-    expect(wishBtnBlock).toMatch(/\.\.\.primary,/);
-    expect(wishBtnBlock).not.toMatch(/everVisited \? secondary : primary/);
+    expect(wishBtnBlock).toMatch(/\.\.\.secondary,/);
+    expect(wishBtnBlock).not.toMatch(/\.\.\.primary,/);
   });
 
   it("the flagged state shows a check and a filled background; unflagged is outline-only", () => {
