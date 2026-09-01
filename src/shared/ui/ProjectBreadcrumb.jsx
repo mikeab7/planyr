@@ -34,7 +34,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { RADIUS } from "./radius.js";
-import { createPortal } from "react-dom";
+import FloatingNotice from "./FloatingNotice.jsx";
 import AnchoredMenu from "./AnchoredMenu.jsx";
 import ContextMenu from "./ContextMenu.jsx";
 import { NO_AUTOFILL } from "./noAutofill.js";
@@ -939,22 +939,25 @@ export default function ProjectBreadcrumb({
         </ContextMenu>
       )}
 
-      {/* Transient at-risk-switch notice (B193) — non-blocking, auto-dismiss */}
-      {toast && createPortal(
-        <div role="status" style={{
-          position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 9000,
-          maxWidth: 520, display: "flex", alignItems: "center", gap: 10,
-          background: "#1f2a44", color: "#eaf0ff", border: "1px solid #3b5bbf", borderRadius: RADIUS.md,
-          padding: "9px 13px", fontSize: CHROME_FONT_CONTROL, fontWeight: 600, fontFamily: "system-ui, sans-serif",
-          boxShadow: "0 10px 30px rgba(0,0,0,0.32)",
-        }}>
-          <span style={{ flex: 1 }}>{toast}</span>
-          <button onClick={() => setToast(null)} title="Dismiss" style={{
-            flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.16)", color: "#fff",
-            border: "none", borderRadius: RADIUS.sm, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700,
-          }}>✕</button>
-        </div>,
-        document.body,
+      {/* Transient at-risk-switch notice (B193) — non-blocking, auto-dismiss.
+          NEW-1 (B1000400) — bottom-centered via the shared FloatingNotice primitive (was its own
+          `top:84` fixed portal to document.body, one of three surfaces that each invented this
+          position — see docs/DESIGN.md "Floating notifications"). Visual style unchanged. */}
+      {toast && (
+        <FloatingNotice testId="project-at-risk-toast" maxWidth={520}>
+          <div role="status" style={{
+            display: "flex", alignItems: "center", gap: 10,
+            background: "#1f2a44", color: "#eaf0ff", border: "1px solid #3b5bbf", borderRadius: RADIUS.md,
+            padding: "9px 13px", fontSize: CHROME_FONT_CONTROL, fontWeight: 600, fontFamily: "system-ui, sans-serif",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.32)",
+          }}>
+            <span style={{ flex: 1 }}>{toast}</span>
+            <button onClick={() => setToast(null)} title="Dismiss" style={{
+              flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.16)", color: "#fff",
+              border: "none", borderRadius: RADIUS.sm, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700,
+            }}>✕</button>
+          </div>
+        </FloatingNotice>
       )}
     </div>
   );

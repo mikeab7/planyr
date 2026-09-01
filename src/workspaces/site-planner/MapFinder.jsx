@@ -64,6 +64,7 @@ import { attachRasterIdentifyLazy } from "./lib/rasterIdentifyLazy.js";
 import { NUM_FONT, TABULAR_NUMS } from "../../shared/theme/typography.js";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
+import FloatingNotice from "../../shared/ui/FloatingNotice.jsx";
 import { menuPanelStyle, MenuItem } from "../../shared/ui/controls.jsx";
 import {
   resolveLayerUrl,
@@ -3471,35 +3472,54 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             {prefsSaveWarn}
           </div>
         )}
+        </div>
+        {/* (B167) The idle "Drag to move the map" first-run bubble was removed entirely.
+            NEW-1/NEW-2 (B1000400, owner screenshot — the guidance box sat oversized at the
+            top-left of the map, covering the aerial and the +/- zoom controls) — the
+            select-parcels tip, and the backup/cached-source notices beside it, moved OUT of the
+            top-left bottom-anchored stack above and onto the shared bottom-center FloatingNotice
+            primitive (docs/DESIGN.md "Floating notifications"). All three are transient,
+            event-triggered informational notices about what the map just did — the same shape as
+            a Toast — rather than something that belongs docked to a panel, so all three move
+            together (never half-migrated). The `err`/`shareNotice`/`prefsSaveWarn` toasts above
+            stay in the top-left stack: they're unaffected by this report and out of scope here. */}
         {/* statewide-backup notice — the clicked lot was answered by the
             all-Texas TxGIO layer because the county's own server was down; be honest
             about provenance so a possibly-staler source is never mistaken for the
             county's own record (B244). */}
         {backupNotice && !err && (
-          <div style={{ background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45 }}>
-            <b>Statewide backup source.</b> {backupNotice.county} county’s own parcel server is unavailable, so this lot came from the all-Texas TxGIO layer — accurate for selection, but it may lag recent county updates.
-          </div>
+          <FloatingNotice testId="parcel-backup-notice" maxWidth="min(420px, calc(100vw - 16px))">
+            <div style={{ background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45, pointerEvents: "none" }}>
+              <b>Statewide backup source.</b> {backupNotice.county} county’s own parcel server is unavailable, so this lot came from the all-Texas TxGIO layer — accurate for selection, but it may lag recent county updates.
+            </div>
+          </FloatingNotice>
         )}
         {/* cached-snapshot notice — the clicked lot came from Planyr's saved Drive
             snapshot because the live county server was unreachable (B629). Same honesty as the
             statewide-backup notice: a possibly-staler local copy is never mistaken for a live record. */}
         {cachedNotice && !err && !backupNotice && (
-          <div style={{ background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45 }}>
-            <b>Cached copy{fmtAsOf(cachedNotice.asOf)}.</b> {cachedNotice.county} county’s live parcel server is unavailable, so this lot came from Planyr’s saved snapshot — accurate for selection, but it may lag recent county updates.
-          </div>
+          <FloatingNotice testId="parcel-cached-notice" maxWidth="min(420px, calc(100vw - 16px))">
+            <div style={{ background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45, pointerEvents: "none" }}>
+              <b>Cached copy{fmtAsOf(cachedNotice.asOf)}.</b> {cachedNotice.county} county’s live parcel server is unavailable, so this lot came from Planyr’s saved snapshot — accurate for selection, but it may lag recent county updates.
+            </div>
+          </FloatingNotice>
         )}
         {/* contextual selection guidance — only while actively selecting (not a persistent
             fixture). This is the ONE explanation anywhere in the app for how "+ Select parcels"
-            mode works, which is exactly why it must never be the box that ends up covered. */}
+            mode works, which is exactly why it must never be the box that ends up covered — the
+            owner's report was this box burying the aerial and the zoom controls. Bottom-center
+            gives it the full viewport width to read as one compact line instead of wrapping
+            across a narrow 380px column; FONT_SIZE.control (12, on-scale) replaces the old
+            off-scale 12.5 literal. */}
         {!err && selectMode && (
-          <div data-testid="select-parcels-tip" style={{ background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12.5, color: PAL.ink, lineHeight: 1.45, pointerEvents: "none" }}>
-            {zoom != null && zoom < PARCEL_MINZOOM
-              ? "Click any lot to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines."
-              : "Click a lot to add it (＋). Hover an added lot and click to remove it (−). Add several, then Plan."}
-          </div>
+          <FloatingNotice maxWidth="min(420px, calc(100vw - 16px))">
+            <div data-testid="select-parcels-tip" style={{ background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "6px 11px", fontSize: FONT_SIZE.control, color: PAL.ink, lineHeight: 1.4, pointerEvents: "none" }}>
+              {zoom != null && zoom < PARCEL_MINZOOM
+                ? "Click any lot to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines."
+                : "Click a lot to add it (＋). Hover an added lot and click to remove it (−). Add several, then Plan."}
+            </div>
+          </FloatingNotice>
         )}
-        </div>
-        {/* (B167) The idle "Drag to move the map" first-run bubble was removed entirely. */}
 
         {/* NEW-4 — the locate button's own "blocked" message, anchored to the button itself
             (never the page-corner err banner above) so it reads as feedback on THAT control —

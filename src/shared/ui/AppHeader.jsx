@@ -63,6 +63,7 @@ import { MODULE_TAB_LABEL } from "./moduleTabLabel.js";
 import { useTheme } from "../theme/ThemeProvider.jsx";
 import InterfaceSettings from "./InterfaceSettings.jsx";
 import { centerSlotPlan, CENTER_SLOT_GAP } from "./headerCenterFit.js";
+import FloatingNotice from "./FloatingNotice.jsx";
 
 // Chrome colors are theme tokens (var(--chrome-*)) so the header themes WITH the app
 // (B318): light theme = light chrome, dark theme = dark chrome.
@@ -1044,23 +1045,30 @@ export default function AppHeader({
         (it's genuinely safe for two tabs — see multiEditOk above), so it now suppresses this
         banner entirely via multiEditOk rather than getting its own copy variant here. */}
     {/* B1173(×2) — LOUD-FAILURE for a refused fullscreen request. With no chrome-hide fallback
-        left, a rejection would otherwise be a keypress that visibly does nothing. */}
+        left, a rejection would otherwise be a keypress that visibly does nothing.
+        NEW-1 (B1000400) — bottom-centered via the shared FloatingNotice primitive (was its own
+        `top:84` fixed pair, one of three surfaces that each invented this position — see
+        docs/DESIGN.md "Floating notifications"). Visual style (border/background/copy) unchanged. */}
     {fsNotice && (
-      <div role="status" data-testid="fullscreen-refused" style={{ position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: "min(440px, calc(100vw - 16px))", background: "var(--surface-raised)", color: "var(--text-primary)", border: "1px solid var(--warn-text)", borderRadius: RADIUS.lg, padding: "5px 10px", fontSize: CHROME_FONT_CONTROL, fontFamily: "system-ui, sans-serif", boxShadow: "0 4px 16px rgba(0,0,0,0.22)" }}>
-        {fsNotice}
-      </div>
+      <FloatingNotice maxWidth="min(440px, calc(100vw - 16px))">
+        <div role="status" data-testid="fullscreen-refused" style={{ background: "var(--surface-raised)", color: "var(--text-primary)", border: "1px solid var(--warn-text)", borderRadius: RADIUS.lg, padding: "5px 10px", fontSize: CHROME_FONT_CONTROL, fontFamily: "system-ui, sans-serif", boxShadow: "0 4px 16px rgba(0,0,0,0.22)" }}>
+          {fsNotice}
+        </div>
+      </FloatingNotice>
     )}
     {accountActive && multiTab.conflictRisk && !multiTabDismissed && (
-      <div role="status" style={{ position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: "min(440px, calc(100vw - 16px))", display: "flex", alignItems: "flex-start", gap: 7, background: "var(--surface-raised)", color: "var(--text-primary)", border: "1px solid var(--warn-text)", borderRadius: RADIUS.lg, padding: "5px 6px 5px 10px", fontSize: CHROME_FONT_CONTROL, fontFamily: "system-ui, sans-serif", boxShadow: "0 4px 16px rgba(0,0,0,0.22)" }}>
-        <span aria-hidden="true" style={{ color: "var(--warn-text)", fontWeight: 700, lineHeight: 1.5 }}>⧉</span>
-        <span style={{ lineHeight: 1.4, paddingTop: 1 }}>
-          Also open in <b>another tab</b> — that tab is the active editor; this one is read-only until you switch there or close it.
-        </span>
-        <button type="button" onClick={() => setMultiTabDismissed(true)} aria-label="Dismiss"
-          style={{ flex: "none", border: "none", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 14, lineHeight: 1, padding: "1px 3px", marginLeft: 1 }}>
-          ×
-        </button>
-      </div>
+      <FloatingNotice maxWidth="min(440px, calc(100vw - 16px))">
+        <div role="status" data-testid="cross-tab-conflict" style={{ display: "flex", alignItems: "flex-start", gap: 7, background: "var(--surface-raised)", color: "var(--text-primary)", border: "1px solid var(--warn-text)", borderRadius: RADIUS.lg, padding: "5px 6px 5px 10px", fontSize: CHROME_FONT_CONTROL, fontFamily: "system-ui, sans-serif", boxShadow: "0 4px 16px rgba(0,0,0,0.22)" }}>
+          <span aria-hidden="true" style={{ color: "var(--warn-text)", fontWeight: 700, lineHeight: 1.5 }}>⧉</span>
+          <span style={{ lineHeight: 1.4, paddingTop: 1 }}>
+            Also open in <b>another tab</b> — that tab is the active editor; this one is read-only until you switch there or close it.
+          </span>
+          <button type="button" onClick={() => setMultiTabDismissed(true)} aria-label="Dismiss"
+            style={{ flex: "none", border: "none", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 14, lineHeight: 1, padding: "1px 3px", marginLeft: 1 }}>
+            ×
+          </button>
+        </div>
+      </FloatingNotice>
     )}
     </>
   );
