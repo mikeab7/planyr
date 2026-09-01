@@ -1,6 +1,6 @@
 # ui-audit — UI screenshot harness
 
-Dev tooling for the UI workstream (see `../UI_AUDIT.md`). **Not** part of the app
+Dev tooling for the UI workstream (see `../docs/testing/UI_AUDIT.md`). **Not** part of the app
 build or deploy.
 
 - `capture.mjs` — drives a headless Chromium (Playwright) over `vite preview` and

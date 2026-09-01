@@ -108,7 +108,7 @@ describe("the precondition: union is safe iff the two sides name disjoint ids", 
   it("only the HAND-MAINTAINED files are union candidates; the derived pair is regenerated", () => {
     // The asymmetry that pointed at the answer: the generated files conflicted just as violently
     // and cost nothing to resolve. Unioning them would be wrong — they are functions of the others.
-    expect(UNION_FILES).toEqual(["BACKLOG.md", "BACKLOG-DONE.md", "VERIFICATION.md", "VERIFICATION-DONE.md"]);
+    expect(UNION_FILES).toEqual(["BACKLOG.md", "docs/archive/BACKLOG-DONE.md", "VERIFICATION.md", "docs/archive/VERIFICATION-DONE.md"]);
     expect(GENERATED.map((g) => g.file)).toEqual(["BACKLOG_OPEN.md", "MAP.md"]);
     for (const g of GENERATED) expect(UNION_FILES).not.toContain(g.file);
   });

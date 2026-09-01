@@ -57,10 +57,11 @@ const git = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8",
 function writeBacklog(dir, { open = [], done = [], vOpen = [], vDone = [], own = [] }) {
   const title = (l, n) => (own.includes(`${l}${n}`) ? `THIS BRANCH'S OWN unrelated feature` : `scratch item`);
   const head = (l, ids) => ids.map((n) => `### ${l}${n} — ${title(l, n)}\n[ ] a body line\n`).join("\n");
+  mkdirSync(join(dir, "docs", "archive"), { recursive: true });
   writeFileSync(join(dir, "BACKLOG.md"), `# Backlog\n\n${head("B", open)}`);
-  writeFileSync(join(dir, "BACKLOG-DONE.md"), `# Archive\n\n${head("B", done)}`);
+  writeFileSync(join(dir, "docs", "archive", "BACKLOG-DONE.md"), `# Archive\n\n${head("B", done)}`);
   writeFileSync(join(dir, "VERIFICATION.md"), `# Verify\n\n${head("V", vOpen)}`);
-  writeFileSync(join(dir, "VERIFICATION-DONE.md"), `# Verified\n\n${head("V", vDone)}`);
+  writeFileSync(join(dir, "docs", "archive", "VERIFICATION-DONE.md"), `# Verified\n\n${head("V", vDone)}`);
 }
 
 function commitAll(dir, message) {
@@ -270,7 +271,7 @@ describe("the mint gate LETS THROUGH what it should (a gate that cries wolf gets
 describe("(f) merging main in no longer reads as minting main's ids (B290251)", () => {
   /** Resolve conflict markers by KEEPING BOTH SIDES — the resolution CLAUDE.md prescribes. */
   function keepBothSides(dir) {
-    for (const f of ["BACKLOG.md", "BACKLOG-DONE.md", "VERIFICATION.md", "VERIFICATION-DONE.md"]) {
+    for (const f of ["BACKLOG.md", "docs/archive/BACKLOG-DONE.md", "VERIFICATION.md", "docs/archive/VERIFICATION-DONE.md"]) {
       const p = join(dir, f);
       writeFileSync(p, readFileSync(p, "utf8")
         .replace(/^<<<<<<< .*\n/gm, "").replace(/^=======\n/gm, "").replace(/^>>>>>>> .*\n/gm, ""));

@@ -16,7 +16,7 @@
  * the Layers panel corner at any width, do the switch/rail-tab/checkbox radii converge, does the
  * suggestion combobox behave) are covered by `ui-audit/verify-map-toolbar-rebuild.mjs` — run that
  * instead. This file is kept (rather than deleted) only so a stale reference to it in
- * BACKLOG-DONE.md still resolves to an explanation instead of a 404.
+ * docs/archive/BACKLOG-DONE.md still resolves to an explanation instead of a 404.
  *
  *   node ui-audit/verify-map-comps-overlap.mjs   — prints this note and exits 0.
  */

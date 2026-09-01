@@ -59,7 +59,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..");
 
 /** Hand-maintained append targets — the ones a union is even a candidate for. */
-export const UNION_FILES = ["BACKLOG.md", "BACKLOG-DONE.md", "VERIFICATION.md", "VERIFICATION-DONE.md"];
+export const UNION_FILES = ["BACKLOG.md", "docs/archive/BACKLOG-DONE.md", "VERIFICATION.md", "docs/archive/VERIFICATION-DONE.md"];
 /** Derived files: never unioned, always regenerated from their inputs. */
 export const GENERATED = [
   { file: "BACKLOG_OPEN.md", build: ["scripts/build-backlog-index.mjs"] },

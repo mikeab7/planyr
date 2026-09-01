@@ -20,7 +20,7 @@
  * or stale mint fails with the exact number to renumber to.
  *
  * WHAT COUNTS AS "ADDED": an id whose `### B###` / `### V###` heading exists in this branch's
- * BACKLOG.md ∪ BACKLOG-DONE.md (resp. VERIFICATION*.md) but in NEITHER file on origin/main. The
+ * BACKLOG.md ∪ docs/archive/BACKLOG-DONE.md (resp. VERIFICATION*.md) but in NEITHER file on origin/main. The
  * union matters: re-opening an archived item (a DEDUPE-FIRST recurrence, which is the correct
  * response to a repeat report) moves its heading between the two files without minting anything,
  * and must not be flagged.

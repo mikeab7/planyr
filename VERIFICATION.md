@@ -70,8 +70,8 @@ was never clicked" quietly ships broken.
    This is the #1 reason this file bloats. Whoever runs a check (usually Claude Cowork on the live app —
    NOT Michael) archives it the SAME session, by item type:
    - **One-off item** (`Cadence: once` — a bug/feature acceptance check): once it **fully passes with
-     nothing pending**, **MOVE its whole block to `VERIFICATION-DONE.md`** — do not just mark it ✅ and
-     leave it here. (Same archiving discipline as `BACKLOG.md → BACKLOG-DONE.md`.) If it only *partly*
+     nothing pending**, **MOVE its whole block to `docs/archive/VERIFICATION-DONE.md`** — do not just mark it ✅ and
+     leave it here. (Same archiving discipline as `BACKLOG.md → docs/archive/BACKLOG-DONE.md`.) If it only *partly*
      passes (some steps still owed), it **stays** with the passed parts noted and the remainder ⏳.
    - **Recurring item** (`🌐` endpoint-liveness / any `Cadence: every N days`): it **stays here** —
      don't archive it. Just record the run: flip the status, set `Last checked`, bump `Next check` by

@@ -13,8 +13,8 @@
  * no in-flight state that produces it. That makes the rule absolute, which is what lets it be a
  * guard rather than another baseline to argue about.
  *
- * THE INHERITANCE, measured on `main` at ed7f8d3: 24 B ids in BACKLOG-DONE.md and 7 V ids in
- * VERIFICATION-DONE.md each name two different items — B127 is both "Measure-type dropdown renders
+ * THE INHERITANCE, measured on `main` at ed7f8d3: 24 B ids in docs/archive/BACKLOG-DONE.md and 7 V ids in
+ * docs/archive/VERIFICATION-DONE.md each name two different items — B127 is both "Measure-type dropdown renders
  * behind/clipped by the rail" and "Two-tab convergence: a stale tab could thin the durable store";
  * B239 is both "Schedule module still dead-ends after a deploy" and "Restore the per-zone plus to
  * add trailer parking". Every one of the 31 is in B127–B755 / V45–V275, entirely below B6864 —
@@ -43,14 +43,14 @@ const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FAMILIES = [["B", B_FILES], ["V", V_FILES]];
 
 describe("no id gets two headings inside one ledger file (B308704)", () => {
-  it("BACKLOG.md / BACKLOG-DONE.md hold no NEW same-file B# duplicate", () => {
+  it("BACKLOG.md / docs/archive/BACKLOG-DONE.md hold no NEW same-file B# duplicate", () => {
     const fresh = newSameFileDuplicates(REPO, B_FILES, "B");
     expect(fresh, `\nA B# has TWO headings inside ONE file. This is never a recurrence and never an
 archive race — the lifecycle MOVES a heading between files, it never leaves two in one.
 Renumber the newer item (git fetch origin main && npm run next-id -- --against-main):\n${JSON.stringify(fresh, null, 1)}\n`).toEqual([]);
   });
 
-  it("VERIFICATION.md / VERIFICATION-DONE.md hold no NEW same-file V# duplicate", () => {
+  it("VERIFICATION.md / docs/archive/VERIFICATION-DONE.md hold no NEW same-file V# duplicate", () => {
     const fresh = newSameFileDuplicates(REPO, V_FILES, "V");
     expect(fresh, `\nA V# has TWO headings inside ONE file:\n${JSON.stringify(fresh, null, 1)}\n`).toEqual([]);
   });
@@ -64,7 +64,7 @@ Renumber the newer item (git fetch origin main && npm run next-id -- --against-m
       expect(live, `${files[0]} has a duplicate ${letter}# heading — renumber it now, it is not grandfathered`).toEqual([]);
     }
     for (const key of Object.keys({ ...SAME_FILE_LEGACY_DUPES.B, ...SAME_FILE_LEGACY_DUPES.V })) {
-      expect(key.startsWith("BACKLOG-DONE.md::") || key.startsWith("VERIFICATION-DONE.md::"),
+      expect(key.startsWith("docs/archive/BACKLOG-DONE.md::") || key.startsWith("docs/archive/VERIFICATION-DONE.md::"),
         `${key}: the baseline may only grandfather ARCHIVE files`).toBe(true);
     }
   });
@@ -103,13 +103,13 @@ describe("MUTATION — the guard goes RED on a duplicate, and stays quiet on wha
   });
 
   it("RED on a GRANDFATHERED id collided one MORE time — the baseline is a ceiling, not a licence", () => {
-    const over = [{ file: "BACKLOG-DONE.md", id: "B127", count: 3, key: "BACKLOG-DONE.md::B127" }]
+    const over = [{ file: "docs/archive/BACKLOG-DONE.md", id: "B127", count: 3, key: "docs/archive/BACKLOG-DONE.md::B127" }]
       .filter(({ key, count }) => count > (SAME_FILE_LEGACY_DUPES.B[key] || 1));
     expect(over).toHaveLength(1);
   });
 
   it("RED on a grandfathered id appearing twice in a DIFFERENT file — the key is file-scoped", () => {
-    // B127 is allowed two headings in BACKLOG-DONE.md. Two in BACKLOG.md is a new collision, and
+    // B127 is allowed two headings in docs/archive/BACKLOG-DONE.md. Two in BACKLOG.md is a new collision, and
     // an id-only baseline would have waved it through.
     const dups = sameFileDuplicatesIn([{ file: "BACKLOG.md", text: "### B127 — a\n\n### B127 — b\n" }], "B");
     expect(dups.filter(({ key, count }) => count > (SAME_FILE_LEGACY_DUPES.B[key] || 1)))
@@ -119,7 +119,7 @@ describe("MUTATION — the guard goes RED on a duplicate, and stays quiet on wha
   it("GREEN on a RECURRENCE — one heading in each file is the lifecycle working, not a collision", () => {
     const dups = sameFileDuplicatesIn([
       { file: "BACKLOG.md", text: "### B500 — re-opened (×2)\n" },
-      { file: "BACKLOG-DONE.md", text: "### B500 — the original\n" },
+      { file: "docs/archive/BACKLOG-DONE.md", text: "### B500 — the original\n" },
     ], "B");
     expect(dups).toEqual([]);
   });
@@ -139,7 +139,7 @@ describe("MUTATION — the guard goes RED on a duplicate, and stays quiet on wha
     // The repair inserts a line naming the twin's id. If the counter ever mistook that for a
     // heading, the repair would manufacture the collisions it documents.
     const text = `### B127 — one item\n${MARKER} — B127 also names another item in this file:** “the twin”.\nbody\n`;
-    expect(sameFileDuplicatesIn([{ file: "BACKLOG-DONE.md", text }], "B")).toEqual([]);
+    expect(sameFileDuplicatesIn([{ file: "docs/archive/BACKLOG-DONE.md", text }], "B")).toEqual([]);
   });
 
   it("REFUSES to read a pass out of an empty input set (LOUD-FAILURE)", () => {
@@ -167,7 +167,7 @@ describe("MUTATION — the guard goes RED on a duplicate, and stays quiet on wha
  * ========================================================================================== */
 describe("the 31 shared ids are marked in place, and no reference resolution moved", () => {
   const READ = (f) => readFileSync(join(REPO, f), "utf8");
-  const FILES = [["B", "BACKLOG-DONE.md"], ["V", "VERIFICATION-DONE.md"]];
+  const FILES = [["B", "docs/archive/BACKLOG-DONE.md"], ["V", "docs/archive/VERIFICATION-DONE.md"]];
 
   it("every colliding heading carries a SHARED ID marker naming its twin", () => {
     for (const [letter, file] of FILES) {

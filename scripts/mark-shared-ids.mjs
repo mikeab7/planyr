@@ -3,7 +3,7 @@
  * mark-shared-ids.mjs — the REPAIR half of B308704. Idempotent, additive, and re-runnable.
  *
  * 31 ids inherited from before the reserved-block fix name two different items inside a single
- * ledger file (24 B in BACKLOG-DONE.md, 7 V in VERIFICATION-DONE.md, every one below B6864). This
+ * ledger file (24 B in docs/archive/BACKLOG-DONE.md, 7 V in docs/archive/VERIFICATION-DONE.md, every one below B6864). This
  * script stamps each colliding heading with a `> ⚠ SHARED ID` line naming its twin.
  *
  * ⛔ WHY MARK IN PLACE RATHER THAN RENUMBER, which was a real fork in the road and not a shrug.

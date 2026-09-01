@@ -8,22 +8,22 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## How this file works — Claude Code, read this first
 
-- **On each run:** address every item under **🔲 Open**. Do **not** action anything under **🕓 Later / Roadmap** unless it's been moved up to Open. **⏳ Verify** items are already implemented and only awaiting a live check — they **park**, they never block a session (see the lifecycle below). Completed items live in `BACKLOG-DONE.md` — do not read it unless looking up a specific past item.
-- **IDs are permanent.** The next B# = highest `B#` across **both** `BACKLOG.md` and `BACKLOG-DONE.md` + 1. Never renumber or reuse a number, even after items are done.
+- **On each run:** address every item under **🔲 Open**. Do **not** action anything under **🕓 Later / Roadmap** unless it's been moved up to Open. **⏳ Verify** items are already implemented and only awaiting a live check — they **park**, they never block a session (see the lifecycle below). Completed items live in `docs/archive/BACKLOG-DONE.md` — do not read it unless looking up a specific past item.
+- **IDs are permanent.** The next B# = highest `B#` across **both** `BACKLOG.md` and `docs/archive/BACKLOG-DONE.md` + 1. Never renumber or reuse a number, even after items are done.
 - **Items pasted from another chat are "blind" to this file** and may carry provisional `NEW-#` (or stale/colliding `B#`) labels — treat those as scratch references only and assign the real next `B#` when filing. When you file a chat item, add an **`Origin: filed <date> from chat`** line so its provisional `NEW-#` resolves to the real `B#` later.
 - **Owner chat blocks are SHIP ORDERS (owner rule, 2026-07-15).** Filing a pasted item is step one, never the finish line: every chat-block item is **implement-in-this-session** work — file, ship, then park per the lifecycle. An item that genuinely can't ship this session (hard unshipped dependency / true blocker) is **flagged loudly in the session reply AND on the item**, never silently filed. A diagnosis/handoff doc arriving without a B# → **mint one on sight** (DEDUPE-FIRST still applies). Full text in `CLAUDE.md` → "Owner CHAT BLOCKS are SHIP ORDERS".
 - **Before filing, DEDUPE-FIRST.** Search **Open, ⏳ Verify, AND Done** (`^### B` headings) before minting a `B#`. If an arriving report matches an existing item, do **NOT** create a new number — apply the **recurrence rule** below instead.
 - **Bracket tags** like `[Site Planner]` mark the module. `(bug)` / `(feature)` / `(task)` marks the type. **`#tags`** (from the legend below) mark the theme — every Open / ⏳ Verify item carries one or more.
 - **Always commit after editing this file or finishing a fix** — never leave the working tree dirty. A fix that isn't committed doesn't count as done.
 - **Regenerate `BACKLOG_OPEN.md` in the SAME commit as any `BACKLOG.md` edit** (`node scripts/build-backlog-index.mjs`). It is the small, committed, chat-readable index of every Open/Verify item (B#, title, module, tags, Verify status) — **derived, never hand-edited**. CI runs `--check` and fails the build if it drifts from this file.
-- **Never delete items.** Completed ones stay in `BACKLOG-DONE.md` as a record.
+- **Never delete items.** Completed ones stay in `docs/archive/BACKLOG-DONE.md` as a record.
 - **If an item is ambiguous,** don't guess. Mark it `[?]`, add your question inline, and leave it in Open.
 
 ### Item lifecycle — 🔲 Open → ⏳ Verify → ✅ Done (three states, B636)
 
 Items no longer jump straight from Open to Done on a sandbox pass — live-only bugs (dependency arrows, export furniture sizing, …) kept boomeranging back. Every item carries a **`Verify:` field**:
 
-- **`Verify: sandbox`** (the default) — a green build + the right unit/headless self-test is sufficient proof. On completion, move the whole block straight to `BACKLOG-DONE.md`.
+- **`Verify: sandbox`** (the default) — a green build + the right unit/headless self-test is sufficient proof. On completion, move the whole block straight to `docs/archive/BACKLOG-DONE.md`.
 - **`Verify: live`** — the fix can only be *confirmed* in the live app. **Mandatory `live` classes:** timing/race bugs · concurrency / multi-writer · GIS endpoint behavior · zoom- or data-density-dependent rendering · PDF / export parity · anything whose repro cites real project data. (This is the **LIVE-VERIFY** rule in `CLAUDE.md`.) After implementing, move the block to the **⏳ Verify** section with a dated note; it moves to Done **only after** a verification note is appended (date · method — Cowork or Michael on planyr.io · observed result). **Moving a `live` item straight to Done is a protocol violation.**
 
 ⏳ Verify items **park** — they never block a session; the session that implements one keeps going.
