@@ -459,6 +459,123 @@ describe("encoding — a capture must FIT the telemetry column, and say what it 
     expect(JSON.parse(enc.text).framesDropped).toBe(4096);
   });
 
+  /* ⛔ NEW-2 (B846385) — THE WORST CAPTURES USED TO LOSE THEIR LONG-TASK ATTRIBUTION FIRST, WHICH
+   * IS BACKWARDS: a frame track is mostly redundant once p50/p95/p99/jankFrames exist, but a
+   * long-task row is the only place a script gets a NAME. Measured on the owner's real 2026-09-01
+   * Richfield capture: 1,201 long tasks / 92,232 ms encoded to `framesKept:8` with NO `lt`/
+   * `ltNames` at all — not one blocking task was attributed to anything.
+   *
+   * `legacyEncodeCapture` below is the PRE-FIX shedding order, copied verbatim (counters → smallest
+   * tasks → frame ladder → wipe tasks+counters together → re-shed frames), so this test proves the
+   * regression is real on a reproducing fixture rather than trusting a description of it: the old
+   * order goes RED here, the shipped `encodeCapture` goes GREEN. */
+  function legacyEncodeCapture(cap, { maxChars = CAPTURE_MAX_CHARS } = {}) {
+    const base = { ...cap };
+    const deltas = Array.isArray(base.f) ? base.f.slice() : [];
+    delete base.f;
+    const build = (frames, tasks, counters) => {
+      const { track, spikes } = encodeFrames(frames);
+      const row = { ...base, ft: track, fx: spikes, lt: tasks, c: counters };
+      if (!row.fx.length) delete row.fx;
+      if (!row.lt.length) { delete row.lt; delete row.ltNames; }
+      if (!row.c.length) { delete row.c; delete row.cCols; }
+      return JSON.stringify(row);
+    };
+    let frames = deltas;
+    let tasks = Array.isArray(base.lt) ? base.lt.slice() : [];
+    let counters = Array.isArray(base.c) ? base.c.slice() : [];
+    let s = build(frames, tasks, counters);
+    let trimmedFrames = 0, trimmedTasks = 0, trimmedCounters = 0;
+    while (s.length > maxChars && counters.length > 6) { counters.shift(); trimmedCounters++; s = build(frames, tasks, counters); }
+    while (s.length > maxChars && tasks.length > 4) {
+      let min = 0;
+      for (let i = 1; i < tasks.length; i++) if (tasks[i][1] < tasks[min][1]) min = i;
+      tasks.splice(min, 1); trimmedTasks++; s = build(frames, tasks, counters);
+    }
+    const shedFrames = (floor) => {
+      while (s.length > maxChars && frames.length > floor) {
+        const drop = Math.max(1, Math.min(frames.length - floor, Math.ceil((s.length - maxChars) / 1.2)));
+        frames = frames.slice(drop); trimmedFrames += drop; s = build(frames, tasks, counters);
+      }
+    };
+    const shedToFit = () => { for (const floor of [60, 30, 16, 8]) { shedFrames(floor); if (s.length <= maxChars) return; } };
+    shedToFit();
+    if (trimmedFrames || trimmedTasks || trimmedCounters) {
+      base.framesKept = frames.length; base.framesDropped = trimmedFrames; base.note = "trimmed";
+      s = build(frames, tasks, counters);
+      shedToFit();
+      base.framesKept = frames.length; base.framesDropped = trimmedFrames;
+      if (s.length > maxChars) base.note = "trimmed-hard";
+      s = build(frames, tasks, counters);
+    }
+    if (s.length > maxChars) {
+      tasks = []; counters = [];
+      shedToFit();
+      base.framesKept = frames.length; base.framesDropped = trimmedFrames; base.note = "trimmed";
+      s = build(frames, tasks, counters);
+      shedToFit();
+      base.framesKept = frames.length; base.framesDropped = trimmedFrames;
+      base.note = s.length > maxChars ? "trimmed-hard" : "trimmed";
+      s = build(frames, tasks, counters);
+    }
+    if (s.length > maxChars) {
+      const bare = { ...base, note: "trimmed-hard", framesKept: 0, framesDropped: deltas.length };
+      delete bare.lt; delete bare.ltNames; delete bare.c; delete bare.cCols;
+      s = JSON.stringify(bare);
+    }
+    return { text: s, chars: s.length, trimmedFrames, trimmedTasks, trimmedCounters, fits: s.length <= maxChars };
+  }
+
+  it("a severe episode (many long tasks, a jankful frame track) keeps long-task attribution — the pre-fix order did not", () => {
+    const names = Array.from({ length: 24 }, (_, i) => `siteplanner/lib/reallyLongModuleNameXXXXXXXXXX${i}.js:8${i}12`);
+    const taskNames = ["(unknown)", "(other)", ...names];
+    const cap = buildCapture({
+      kind: "auto", atMs: 1_462_568, atWall: 1_788_283_501_338, activeMs: 1_235_651, route: "site", build: "c5da2c1",
+      baselineMs: 16.7, multiplier: 2, sustainMs: 2000, floorMs: 33,
+      // A jankful gesture: most frames blow the 63ms clamp, so nearly every one also costs an
+      // explicit `fx` [index, ms] pair — the exact mechanism B265541 already documents.
+      frameDeltas: Array.from({ length: 4096 }, (_, i) => 70 + (i % 90)),
+      counters: Array.from({ length: 96 }, (_, i) => [i * 2000, 130, 2200, 4100, 62, 9, 3, 291, 0.4, 27, 2, i]),
+      counterColumns: ["t", ...COUNTER_COLUMNS],
+      // 24 long tasks, each attributed to its OWN distinct (long) name — the shape a real session
+      // with many different slow call sites produces.
+      tasks: Array.from({ length: 24 }, (_, i) => [i * 1000, 60 + i * 90, 10 + i, 2 + i]),
+      taskNames,
+    });
+
+    const legacy = legacyEncodeCapture(cap, { maxChars: CAPTURE_MAX_CHARS });
+    const legacyParsed = JSON.parse(legacy.text);
+    expect(legacyParsed.lt).toBeUndefined();
+    expect(legacyParsed.ltNames).toBeUndefined();
+
+    const fixed = encodeCapture(cap, { maxChars: CAPTURE_MAX_CHARS });
+    expect(fixed.chars).toBeLessThanOrEqual(CAPTURE_MAX_CHARS);
+    const parsed = JSON.parse(fixed.text);
+    expect(Array.isArray(parsed.lt)).toBe(true);
+    expect(parsed.lt.length).toBeGreaterThan(0);
+    expect(Array.isArray(parsed.ltNames)).toBe(true);
+    expect(parsed.ltNames.length).toBeGreaterThan(0);
+    // Frames were cut before any task attribution was — the frame track is allowed to hit zero.
+    expect(parsed.framesKept ?? 0).toBeLessThan(60);
+  });
+
+  it("re-indexes ltNames to only the names the KEPT tasks reference, not the whole session table", () => {
+    // A session-wide string table can hold up to STRING_TABLE_MAX distinct long names; a capture
+    // that only keeps a handful of tasks must not ship all of them.
+    const names = Array.from({ length: STRING_TABLE_MAX }, (_, i) => `module${i}.js:${1000 + i}`);
+    const cap = buildCapture({
+      kind: "auto", atMs: 1, atWall: 2, route: "site", build: "abc1234",
+      frameDeltas: [16, 17, 16],
+      tasks: [[0, 200, 10, 5], [100, 300, 20, 5], [200, 250, 15, 9]], // only names[5] and names[9] used
+      taskNames: names,
+    });
+    const enc = encodeCapture(cap, { maxChars: CAPTURE_MAX_CHARS });
+    const parsed = JSON.parse(enc.text);
+    expect(parsed.ltNames.length).toBe(2);
+    expect(parsed.ltNames).toContain("module5.js:1005");
+    expect(parsed.ltNames).toContain("module9.js:1009");
+  });
+
   it("frameStats counts jank against the same bar the trigger fired on", () => {
     const fs = frameStats([16, 16, 40, 80, 16], 33);
     expect(fs.frames).toBe(5);

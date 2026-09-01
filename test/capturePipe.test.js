@@ -236,13 +236,23 @@ describe("B265541 — a capture of a BAD moment keeps its episode", () => {
     expect(row.note).not.toBe("trimmed-hard");
   });
 
-  it("the shed steps DOWN past 60 rather than falling off it", () => {
-    // Squeeze hard enough that 60 frames cannot possibly fit, and require real frames anyway.
+  /* ⛔ B846385 (NEW-2) SUPERSEDES THIS TEST'S ORIGINAL CLAIM. It asserted the shed always keeps at
+   * least 8 frames at any squeeze — correct under the priority order this file used to ship, wrong
+   * under the one that replaced it. The frame track is mostly redundant once the summary stats
+   * (p50/p95/p99/jankFrames, all in the numeric columns already) exist; a long-task row is the only
+   * place a script gets a NAME, and that is not recoverable from anything else in the payload. So
+   * frames may now fall all the way to zero on a genuine squeeze, and it is the long-task table's
+   * survival that matters here — see docs/... the owner's real 2026-09-01 Richfield capture arrived
+   * with `framesKept:8` and NO `lt`/`ltNames` at all, which is the shape this now refuses to repeat. */
+  it("frames may fall to zero, but the long-task table survives the same squeeze", () => {
+    // Squeeze hard enough that 60 frames cannot possibly fit alongside the full task/counter history.
     const enc = encodeCapture(stallCapture(), { maxChars: 900 });
     const row = JSON.parse(enc.text);
-    expect(row.ft.length).toBeGreaterThanOrEqual(8);
-    expect(row.ft.length).toBeLessThan(60);
     expect(enc.text.length).toBeLessThanOrEqual(900);
+    expect(Array.isArray(row.lt)).toBe(true);
+    expect(row.lt.length).toBeGreaterThan(0);
+    expect(Array.isArray(row.ltNames)).toBe(true);
+    expect(row.ltNames.length).toBeGreaterThan(0);
   });
 
   it("what was dropped is still stated — a shorter episode may never read as a calmer one", () => {

@@ -1017,7 +1017,25 @@ export default function AppHeader({
            the center zone's growth already consumes 100% of the line's slack and leaves nothing
            for justify-content to act on) — while the tabs stay complete on line one down to the
            phone breakpoint (760px, where the horizontal-scroll fallback below takes over
-           instead). */}
+           instead).
+           ⛔ B1017840 — A THIRD REPORT ON THE SAME HEADER, INVESTIGATED AND REFUTED. After the
+           above shipped, a probe measured the DEPLOYED build at 960px and below and reported a
+           NEGATIVE gap between the center group and the toolbar cluster — read as an overlap.
+           It is not one. Below the width where tabs+center+toolbar's real combined content
+           exceeds the container (~975–1000px depending on which Schedule view is active — Grid
+           has no zoom cluster, Split/Gantt does and so wraps a bit earlier), the row correctly
+           does exactly what this comment already says it does two paragraphs up: it WRAPS the
+           toolbar cluster onto its own second line. Verified with real screenshots and precise
+           DOM geometry — the center group's content and the toolbar's content sit on two
+           DIFFERENT vertical positions, never touching. The reported negative number was a
+           left/right-only gap measurement taken WITHOUT checking whether the two things being
+           compared were even on the same line — comparing x-coordinates across two different
+           rows always looks like a large overlap, whether or not one exists. No overlap. No
+           clipping. Confirmed at every width down to the phone breakpoint, in both real toolbar
+           widths Schedule can show. See `ui-audit/verify-schedule-header-widths.mjs`'s 2D
+           rectangle-intersection check (not a 1D gap) for the corrected, mutation-proven version
+           of this measurement — its mutation test forces `flexWrap:"nowrap"` at runtime to
+           confirm the check WOULD catch a genuine overlap if the wrap fallback above ever broke. */}
       {toolbarCenter ? (
         // On narrow, scroll sideways (nowrap) instead of wrapping to a 2nd line — the owner's
         // explicit ask. Above the breakpoint the original wrap layout is untouched.
