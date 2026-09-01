@@ -318,6 +318,22 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   both reuse the SAME `pendingCompAnchor` single slot the map finder already threads through
   `CompsPanel`, plus one new small `onFocusAnchor` callback prop on `<CompsPanel>` (a
   `mapRef.current.flyTo` one-liner) — deliberately the map finder's only touch for this feature.
+  **⛔ B986096 — THREE OWNER-MEASURED HARDENING ROUNDS on `CompEntryGrid.jsx`/`compParse.js`, all
+  fixed; read before touching either file.** (1) Shape detection: an ambiguous multi-line paste
+  now defaults to ONE record (`detectPasteShape` — spreadsheet → labeled-single-record →
+  completeness fraction) with a visible one-per-line toggle, because "one pasted line = one row"
+  is wrong for the dominant real shape (a lease abstract spans many lines). `extractUnlabeledLine`
+  tries every detector per line rather than returning after the first match — first-match-wins is
+  per FIELD, never per LINE. (2) The entry card is NEVER a full-viewport modal — a backdrop
+  blocks `elementFromPoint` on the very map buttons its own banner tells you to click; it's a
+  small `position:fixed` draggable card only. Parsing runs on `onChange` (any value containing a
+  newline), not only on a real clipboard `paste` event, so typed Enter works too. The paste box
+  never clears itself (`lastPasteText` persists until dismissed). (3) Field coverage: EVERY column
+  in `comps.sql`/`comps_lease_escalation.sql` must be reachable somewhere in the UI — audit the
+  form against the schema before changing either. `title` is an ALWAYS-VISIBLE input under every
+  row (never behind the chevron — the DB has no NOT NULL on it, so a missing input is invisible to
+  every constraint check). The expand chevron carries a corner badge naming how many hidden fields
+  are filled, so a row is never silently hiding half a deal.
   KML import (B849233) is a SEPARATE staging table, `db/comp_import_drafts.sql`
   (`public.comp_import_drafts`, owner-only RLS — no team visibility at all, unlike `comps` itself,
   until promoted) — `lib/kmlImport.js` is the pure, hand-rolled Placemark parser (a Point is a

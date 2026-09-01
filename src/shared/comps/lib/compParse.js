@@ -1,25 +1,27 @@
-/* compParse — comp entry parsing: paste text -> typed grid rows (B849232/NEW-1).
+/* compParse — comp entry parsing: paste text -> typed grid rows (B849232/NEW-1, corrected).
  *
- * Two paste shapes, detected mechanically, never guessed at: a TAB-DELIMITED block (an Excel/
- * spreadsheet paste — any pasted line containing a tab) fills rows AND columns the way a
- * spreadsheet would; everything else is PROSE — one line, one comp, broker-email style
- * ("3.2 AC land - $850k - Jan 2026"). Both funnel into the same generic extraction ->
- * type-specific draft conversion, so the two paste shapes can never drift apart on what counts
- * as a rate, a size, or a date.
+ * THREE PASTE SHAPES, and detecting WHICH one a paste is is the whole point of this module
+ * (owner correction, 2026-09-01 — the original spec said "one pasted line becomes one row,"
+ * which is wrong about how comps actually arrive and produced 10/32 junk "Land" rows out of
+ * a single ten-line lease abstract):
  *
- * UNCERTAINTY, the rule that matters (owner decision 2026-09-01): every parsed cell the parser
- * had to guess at carries a verdict, never silently — `null` (confident), `"soft"`, or
- * `"blocking"`. The line between them is NOT "how big is the risk" — it is **whether the risk
- * is visible in the cell's own shown value**:
- *   - SOFT: the parser guessed to reach the number shown, but the guess IS the shown number —
- *     "180k SF" reads as 180000 right there in the cell, so eyeballing it is enough to catch a
- *     bad guess. Never blocks a save.
- *   - BLOCKING: the shown value would be silently WRONG if the guess is wrong, because the risk
- *     lives in a field that ISN'T shown next to it. The canonical case: a lease rate with no
- *     stated period — "$0.68" reads identically whether it means $0.68/mo or $0.68/yr, and the
- *     two are 12x apart. Must be resolved before the row can save.
- * This module never resolves a blocking guess itself (never infers a period from a rate's
- * magnitude, for exactly the reason above) — it only ever refuses to guess and says why.
+ *   1. SPREADSHEET — a tab-delimited block (an Excel paste). Detected mechanically: any line
+ *      containing a tab. Fills rows AND columns.
+ *   2. SINGLE RECORD OVER MANY LINES — a lease/sale abstract, THE DOMINANT SHAPE brokers
+ *      actually send: "TT: Modular Power Solutions" / "LL: Core5 Industrial Partners" /
+ *      "20320 West Hardy Road" / "613,208 SF" / "126 months" / "$0.65/sf NNN" / etc — one deal,
+ *      its facts scattered one-per-line, often with label:value prefixes (TT/LL/TI are standard
+ *      industrial-brokerage shorthand for Tenant/Landlord/Tenant-Improvement-allowance). This is
+ *      the DEFAULT when the shape is ambiguous — see `detectPasteShape` below for why.
+ *   3. MANY RECORDS, ONE PER LINE — a real list, each line independently a complete comp
+ *      ("3.2 AC land - $850k - Jan 2026").
+ *
+ * UNCERTAINTY (unchanged from the original spec): every parsed cell that required a guess
+ * carries a verdict, never silently — `null` (confident), `"soft"`, or `"blocking"`. SOFT: the
+ * guess IS the shown value (a k/m-suffixed number, an estimated date — visible, correctable).
+ * BLOCKING: the shown value would be silently WRONG if the guess is wrong, because the risk
+ * isn't visible in the value itself — the canonical case is a lease rate with no stated period.
+ * This module never resolves a blocking guess itself — it only ever refuses to guess and says why.
  */
 
 const NUM_SUFFIX = { k: 1e3, m: 1e6, mm: 1e6, thousand: 1e3, million: 1e6 };
@@ -36,6 +38,7 @@ const SALE_WORDS = /\b(sold|sale|purchased?|closed|buyer|seller)\b/i;
 const BUILDING_WORDS = /\b(building|warehouse|industrial|office|flex|shell|facility)\b/i;
 const LAND_WORDS = /\b(land|acres?|\bac\b|\blot\b|tract|pad\s*site)\b/i;
 const PERIOD_RE = /(\/\s*mo\b|\/\s*month\b|per\s+month\b|\bmonthly\b|\/\s*yr\b|\/\s*year\b|per\s+year\b|per\s+annum\b|\bannual(?:ly)?\b|\byearly\b)/i;
+const STREET_SUFFIX_RE = /\b(road|rd|street|st|avenue|ave|drive|dr|boulevard|blvd|lane|ln|way|highway|hwy|parkway|pkwy|court|ct|circle|cir|place|pl)\b/i;
 
 function round2(n) {
   return Math.round(n * 100) / 100;
@@ -48,7 +51,7 @@ function isoFrom(y, mo, d) {
 
 /** A number token, handling comma-stripped digits and a k/m/thousand/million suffix. The
  * suffix expansion is what makes a value SOFT — the expanded number is fully shown, so it's
- * always correctable by eyeballing it, never a save-blocker. */
+ * always correctable by eyeballing it, never a save-blocker. Anchored to the WHOLE string. */
 export function parseMagnitudeNumber(raw) {
   if (raw == null) return null;
   const s = String(raw).trim();
@@ -60,6 +63,18 @@ export function parseMagnitudeNumber(raw) {
   const suffix = m[2]?.toLowerCase();
   const mult = suffix ? NUM_SUFFIX[suffix] : 1;
   return { value: n * mult, soft: !!suffix };
+}
+
+/** The first number in a string, UNANCHORED — for a labeled value that carries trailing prose
+ * ("$13.00/sf from shell" -> 13). Never used where the whole-string anchor of
+ * `parseMagnitudeNumber` is what's wanted (a bare cell value). */
+function extractLeadingNumber(text) {
+  const m = String(text || "").match(/([\d,]*\.?\d+)\s*(k|m|mm)?/i);
+  if (!m) return null;
+  const n = Number(m[1].replace(/,/g, ""));
+  if (!Number.isFinite(n)) return null;
+  const suffix = m[2]?.toLowerCase();
+  return { value: suffix ? n * NUM_SUFFIX[suffix] : n, soft: !!suffix };
 }
 
 /** Find a date anywhere in free text: ISO, M/D/YYYY (US month-first), "Month D, YYYY", or a
@@ -157,11 +172,32 @@ function findSizeToken(text) {
   return { value: n, unit, soft };
 }
 
-function findTerm(text, compType) {
-  if (compType !== "lease") return null;
-  const m = String(text || "").match(/\b(\d+)\s*[- ]?\s*(yrs?|years?|mo|mos|months?)\b(?:\s*term)?/i);
+/** A bare "<N> months/years" line — the LEASE TERM. Deliberately refuses to fire on a line that
+ * also says "free rent" (that's `findFreeRentMonths`'s field, not the term's — both match the
+ * same "<N> months" shape and would otherwise double-book one line onto two fields). */
+function findTermBare(text) {
+  const t = String(text || "");
+  if (/free\s*rent/i.test(t)) return null;
+  const m = t.match(/\b(\d+)\s*[- ]?\s*(yrs?|years?|mo|mos|months?)\b/i);
   if (!m) return null;
   return /yr|year/i.test(m[2]) ? `${m[1]} yrs` : `${m[1]} mo`;
+}
+
+/** "6 months base free rent" / "free rent: 6 months" -> 6. A dedicated detector, not a reuse of
+ * the term regex, because both match the identical "<N> months" shape. */
+function findFreeRentMonths(text) {
+  const m = String(text || "").match(/(\d+)\s*(?:mo|mos|months?)\s*(?:of\s*)?(?:base\s*)?free\s*rent|free\s*rent[^\d]{0,12}(\d+)\s*(?:mo|mos|months?)/i);
+  if (!m) return null;
+  const n = Number(m[1] || m[2]);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** "3.50% annual increases" -> 3.5. Deliberately requires BOTH a percent sign and an
+ * escalation-flavored word nearby, so a stray "%" elsewhere (occupancy, LTV, whatever) doesn't
+ * misfire. */
+function findEscalationPct(text) {
+  const m = String(text || "").match(/(\d+(?:\.\d+)?)\s*%[^.\n]{0,20}?(?:annual|escalat|increase|bump|step)/i);
+  return m ? Number(m[1]) : null;
 }
 
 function findTi(text) {
@@ -169,6 +205,13 @@ function findTi(text) {
   if (!m) return null;
   const n = Number(m[1].replace(/,/g, ""));
   return Number.isFinite(n) ? n : null;
+}
+
+/** "20320 West Hardy Road - Building A" — a leading street number plus a recognizable street
+ * suffix word. Used as a comp's Title, never fed into type/date/size detection (an address is
+ * never evidence of anything else). */
+function looksLikeAddressLine(text) {
+  return /^\s*\d+\s+\S/.test(text) && STREET_SUFFIX_RE.test(text);
 }
 
 function matchLabeled(text, re) {
@@ -186,11 +229,20 @@ function emptyGeneric() {
   return {
     compType: null, compDate: null, title: null, partyProvider: null, partyAcquirer: null,
     price: null, sizeValue: null, sizeUnit: null, rate: null, ratePeriod: null, rateBasis: null,
-    ti: null, term: null, notes: null,
+    ti: null, term: null, notes: null, freeRentMonths: null, escalationPct: null,
+    commencementDate: null, commencementEstimated: false,
   };
 }
 
-/** One prose line (broker-email style) -> generic fields + pre-remap uncertainty flags. */
+function genericHasAnything(g) {
+  return !!(g.compDate || g.title || g.partyProvider || g.partyAcquirer || g.price != null ||
+    g.rate != null || g.sizeValue != null || g.term || g.ti != null || g.freeRentMonths != null ||
+    g.escalationPct != null || g.commencementDate);
+}
+
+/** One prose line (broker-email style) -> generic fields + pre-remap uncertainty flags. Used
+ * for the MANY-RECORDS-ONE-PER-LINE shape, where each line is expected to be a complete,
+ * independent comp. */
 function extractGenericFromProse(line) {
   const text = String(line || "");
   const g = emptyGeneric();
@@ -230,8 +282,10 @@ function extractGenericFromProse(line) {
     if (sizeTok.soft) mergeFlag(flags, "sizeValue", "soft", "Had a k/m suffix — check the expanded value.");
   }
 
-  g.term = findTerm(text, g.compType);
+  g.term = findTermBare(text);
+  g.freeRentMonths = findFreeRentMonths(text);
   g.ti = findTi(text);
+  g.escalationPct = findEscalationPct(text);
 
   return { generic: g, flags };
 }
@@ -243,10 +297,10 @@ function remapFlagKey(key, compType) {
   return key;
 }
 
-/** The ONE place a lease row's period/basis ambiguity is judged, shared by both paste shapes —
- * so "does this block" can never disagree between a pasted line and a pasted spreadsheet cell.
- * Remaps the generic-level flag keys (price/sizeValue/rate) onto the type-specific field the
- * grid actually renders, so a caller never has to know the generic vocabulary. */
+/** The ONE place a lease row's period/basis ambiguity — and an estimated-commencement date —
+ * are judged, shared by every shape, so "does this block" can never disagree between a pasted
+ * line, a single-record abstract, or a spreadsheet cell. Remaps the generic-level flag keys
+ * (price/sizeValue/rate) onto the type-specific field the grid actually renders. */
 function finalizeGenericRow(generic, rawFlags, raw) {
   const flags = {};
   for (const [k, v] of Object.entries(rawFlags)) flags[remapFlagKey(k, generic.compType)] = v;
@@ -260,14 +314,21 @@ function finalizeGenericRow(generic, rawFlags, raw) {
       mergeFlag(flags, "leaseRateExpense", "soft", "NNN vs gross wasn't given — check it.");
     }
   }
+  // A commencement date is NEVER stored as though it were the deal's real comp_date without
+  // saying so — it's always shown (soft, correctable), never silently presented as fact.
+  if (!generic.compDate && generic.commencementDate) {
+    mergeFlag(flags, "compDate", "soft",
+      `This is the${generic.commencementEstimated ? " ESTIMATED" : ""} commencement date, not necessarily when the deal was signed — verify or replace.`);
+  }
 
   return { draft: genericToDraft(generic), cellFlags: flags, raw };
 }
 
 /** Generic fields -> the string-keyed draft shape `comps.js`'s `draftToComp`/`insertComp`
- * expect (the same shape `emptyDraft`/`compToDraft` produce). Only fields the caller actually
- * has values for are set — an unset field stays at the blank default, per the entry grid's own
- * rule that an empty cell is just a cell. */
+ * expect. Only fields the caller actually has values for are set — an unset field stays at the
+ * blank default, per the entry grid's own rule that an empty cell is just a cell. A
+ * commencement date fills `compDate` only as a last resort (never overriding a real comp_date),
+ * and always leaves a note behind naming it as a commencement, not a signing date. */
 function genericToDraft(generic) {
   const d = {
     compType: "land", compDate: "", title: "", notes: "", teamId: null, projectId: null, anchor: null,
@@ -275,12 +336,22 @@ function genericToDraft(generic) {
     landPrice: "", landSizeValue: "", landSizeUnit: "ac",
     bldgPrice: "", bldgSizeSf: "",
     leaseRate: "", leaseRatePeriod: "", leaseRateExpense: "", leaseTi: "", leaseTerm: "", leaseSizeSf: "",
-    leaseFreeRentMonths: "",
+    leaseFreeRentMonths: "", leaseEscalationPct: "",
   };
   d.compType = generic.compType || d.compType;
-  if (generic.compDate) d.compDate = generic.compDate;
+  if (generic.title) d.title = generic.title;
   if (generic.partyProvider) d.partyProvider = generic.partyProvider;
   if (generic.partyAcquirer) d.partyAcquirer = generic.partyAcquirer;
+
+  let notes = generic.notes || "";
+  if (generic.compDate) {
+    d.compDate = generic.compDate;
+  } else if (generic.commencementDate) {
+    d.compDate = generic.commencementDate;
+    const note = `Commencement${generic.commencementEstimated ? " (estimated)" : ""}: ${generic.commencementDate}`;
+    notes = notes ? `${notes}; ${note}` : note;
+  }
+  d.notes = notes;
 
   if (d.compType === "land") {
     if (generic.price != null) d.landPrice = String(generic.price);
@@ -295,14 +366,206 @@ function genericToDraft(generic) {
     if (generic.sizeValue != null) d.leaseSizeSf = String(generic.sizeValue);
     if (generic.ti != null) d.leaseTi = String(generic.ti);
     if (generic.term) d.leaseTerm = generic.term;
+    if (generic.freeRentMonths != null) d.leaseFreeRentMonths = String(generic.freeRentMonths);
+    if (generic.escalationPct != null) d.leaseEscalationPct = String(generic.escalationPct);
   }
   return d;
 }
 
-/** One prose line -> `{ draft, cellFlags, raw }`. */
+/** One prose line -> `{ draft, cellFlags, raw }`, or `null` if the line contributed nothing
+ * (never emit an entirely empty row). */
 export function parseProseLine(line) {
   const { generic, flags } = extractGenericFromProse(line);
+  if (!genericHasAnything(generic)) return null;
   return finalizeGenericRow(generic, flags, line);
+}
+
+/* ---- SINGLE RECORD OVER MANY LINES — the dominant shape: a lease/sale abstract ------------ */
+
+// Label:value line prefixes, industrial-brokerage shorthand included (TT=Tenant, LL=Landlord,
+// TI=Tenant Improvement allowance) — a small domain lexicon, not generic pattern matching.
+const LABEL_PREFIX_RE = /^\s*(TT|LL|TI|Landlord|Tenant|Owner|Developer|Seller|Buyer|Rate|Term|Type|Date|Notes)\s*:\s*/i;
+const LABEL_FIELD = {
+  tt: "partyAcquirer", tenant: "partyAcquirer", buyer: "partyAcquirer",
+  ll: "partyProvider", landlord: "partyProvider", owner: "partyProvider", developer: "partyProvider", seller: "partyProvider",
+  ti: "ti", term: "term", rate: "rate", type: "compTypeLabel", date: "compDate", notes: "notes",
+};
+const LEASE_LABELS = new Set(["tt", "ll"]);
+
+function hasKnownLabelPrefix(line) {
+  return LABEL_PREFIX_RE.test(line);
+}
+
+/** Does this ONE line look like a complete, independent comp on its own (a price/rate AND a
+ * size or date)? Used to detect the MANY-RECORDS-ONE-PER-LINE shape. */
+function lineLooksLikeCompleteComp(line) {
+  const hasMoney = !!(findPriceToken(line) || findRateToken(line));
+  const hasSizeOrDate = !!(findSizeToken(line) || findDateToken(line));
+  return hasMoney && hasSizeOrDate;
+}
+
+/** Detects which of the three paste shapes a block of text is. Spreadsheet (any tab) wins
+ * outright. Otherwise: ANY recognized label:value line is strong, deliberate evidence of a
+ * single multi-line record (a real per-line list essentially never starts a line with "TT:" /
+ * "LL:" / etc) — checked BEFORE the completeness heuristic, not after, because it's the more
+ * reliable signal. Failing that, if most lines independently look like a complete comp on
+ * their own, it's a list. WHEN IN DOUBT, IT'S A SINGLE RECORD — the cheap failure direction: a
+ * wrongly-split single record produces one row a user fixes in two seconds, where a wrongly-
+ * merged list used to produce a wall of junk rows (the bug this function exists to close). */
+export function detectPasteShape(text) {
+  if (looksLikeSpreadsheetPaste(text)) return "spreadsheet";
+  const lines = splitPasteLines(text);
+  if (lines.length <= 1) return "single";
+  if (lines.some(hasKnownLabelPrefix)) return "single";
+  const completeCount = lines.filter(lineLooksLikeCompleteComp).length;
+  if (completeCount / lines.length >= 0.6) return "multi";
+  return "single";
+}
+
+function applyLabeledLine(generic, flags, sawLeaseLabel, label, value) {
+  const key = LABEL_FIELD[label.toLowerCase()];
+  const v = String(value || "").trim();
+  if (!v) return;
+  if (LEASE_LABELS.has(label.toLowerCase())) sawLeaseLabel.value = true;
+  switch (key) {
+    case "partyAcquirer": generic.partyAcquirer = v; break;
+    case "partyProvider": generic.partyProvider = v; break;
+    case "ti": { const n = extractLeadingNumber(v.replace(/^\$/, "").replace(/\/\s*sf/i, "")); if (n) generic.ti = n.value; break; }
+    case "term": generic.term = v; break;
+    case "rate": {
+      const rt = findRateToken(v) || extractLeadingNumber(v.replace(/^\$/, "").replace(/\/\s*sf/i, ""));
+      if (rt) { generic.rate = rt.value; generic.ratePeriod = generic.ratePeriod || detectPeriod(v); generic.rateBasis = generic.rateBasis || detectBasis(v); }
+      break;
+    }
+    case "compTypeLabel": { const t = normalizeCompTypeToken(v); if (t) generic.compType = t; break; }
+    case "compDate": { const d = findDateToken(v); if (d) { generic.compDate = d.iso; if (d.soft) mergeFlag(flags, "compDate", "soft", "Day wasn't given — defaulted to the 1st."); } break; }
+    case "notes": generic.notes = generic.notes ? `${generic.notes}; ${v}` : v; break;
+    default: break; // an unrecognized label still gets its VALUE run through content detectors below
+  }
+}
+
+/** Runs EVERY detector against an unlabeled line, never stopping at the first match — a single
+ * sentence routinely carries more than one fact ("roughly 3.2 AC, asking $850k" is a size AND
+ * a price on ONE line), and stopping early silently dropped whichever fact wasn't checked
+ * first. "First match wins" is still the rule PER FIELD (an earlier line's value is never
+ * overwritten by a later one), just no longer per LINE. Anything the line contains that no
+ * detector recognizes is appended to notes rather than silently dropped. */
+function extractUnlabeledLine(generic, flags, line) {
+  let matchedAnything = false;
+
+  if (!generic.title && looksLikeAddressLine(line)) { generic.title = line.trim(); matchedAnything = true; }
+
+  if (generic.freeRentMonths == null) {
+    const freeRent = findFreeRentMonths(line);
+    if (freeRent != null) { generic.freeRentMonths = freeRent; matchedAnything = true; }
+  }
+
+  if (generic.escalationPct == null) {
+    const escPct = findEscalationPct(line);
+    if (escPct != null) { generic.escalationPct = escPct; matchedAnything = true; }
+  }
+
+  const isCommencementLine = /commenc/i.test(line);
+  if (isCommencementLine && generic.commencementDate == null) {
+    const d = findDateToken(line);
+    if (d) {
+      generic.commencementDate = d.iso;
+      generic.commencementEstimated = /estimat/i.test(line);
+      matchedAnything = true;
+    }
+  }
+
+  if (generic.rate == null) {
+    const rateTok = findRateToken(line);
+    if (rateTok) {
+      generic.rate = rateTok.value;
+      if (rateTok.soft) mergeFlag(flags, "rate", "soft", "Had a k/m suffix — check the expanded value.");
+      generic.ratePeriod = generic.ratePeriod || detectPeriod(line);
+      generic.rateBasis = generic.rateBasis || detectBasis(line);
+      matchedAnything = true;
+    }
+  }
+
+  if (generic.sizeValue == null) {
+    const sizeTok = findSizeToken(line);
+    if (sizeTok) {
+      generic.sizeValue = sizeTok.value;
+      generic.sizeUnit = sizeTok.unit;
+      if (sizeTok.soft) mergeFlag(flags, "sizeValue", "soft", "Had a k/m suffix — check the expanded value.");
+      matchedAnything = true;
+    }
+  }
+
+  if (generic.ti == null) {
+    const tiVal = findTi(line);
+    if (tiVal != null) { generic.ti = tiVal; matchedAnything = true; }
+  }
+
+  // Never lets a commencement line's date ALSO land in compDate directly — that date already
+  // gets the soft-flagged fallback treatment in finalizeGenericRow/genericToDraft.
+  if (!isCommencementLine && generic.compDate == null) {
+    const dateTok = findDateToken(line);
+    if (dateTok) {
+      generic.compDate = dateTok.iso;
+      if (dateTok.soft) mergeFlag(flags, "compDate", "soft", "Day of month wasn't given — defaulted to the 1st.");
+      matchedAnything = true;
+    }
+  }
+
+  if (generic.price == null && generic.rate == null) {
+    const priceTok = findPriceToken(line);
+    if (priceTok) {
+      generic.price = priceTok.value;
+      if (priceTok.soft) mergeFlag(flags, "price", "soft", "Had a k/m suffix — check the expanded value.");
+      matchedAnything = true;
+    }
+  }
+
+  if (!generic.term) {
+    const term = findTermBare(line);
+    if (term) { generic.term = term; matchedAnything = true; }
+  }
+
+  // Nothing recognized on this line — never silently dropped: appended to notes so it's still
+  // visible against the row, matching "a value the user pasted must never vanish without a word."
+  if (!matchedAnything) {
+    const trimmed = line.trim();
+    if (trimmed) generic.notes = generic.notes ? `${generic.notes}; ${trimmed}` : trimmed;
+  }
+}
+
+/** A whole block of text -> ONE record (the single-multi-line-record shape). Returns `null` if
+ * the block contributed nothing at all. Every line is either a recognized label:value pair or
+ * run through the same content detectors the per-line parser uses, merged onto ONE generic
+ * record (first match wins per field; a labeled line always takes priority since it's the
+ * higher-confidence signal). */
+export function parseSingleRecord(text) {
+  const lines = splitPasteLines(text);
+  const generic = emptyGeneric();
+  const flags = {};
+  const sawLeaseLabel = { value: false };
+
+  for (const line of lines) {
+    const m = line.match(LABEL_PREFIX_RE);
+    if (m) {
+      applyLabeledLine(generic, flags, sawLeaseLabel, m[1], line.slice(m[0].length));
+    } else {
+      extractUnlabeledLine(generic, flags, line);
+    }
+  }
+
+  if (!generic.compType) {
+    if (sawLeaseLabel.value) {
+      generic.compType = "lease";
+    } else {
+      const guess = detectCompType(lines.join(" "));
+      generic.compType = guess.value;
+      if (guess.soft) flags.compType = { level: "soft", reason: "Type guessed from the wording — check it." };
+    }
+  }
+
+  if (!genericHasAnything(generic)) return null;
+  return finalizeGenericRow(generic, flags, text);
 }
 
 /* ---- spreadsheet / Excel block paste ------------------------------------------------------ */
@@ -316,9 +579,6 @@ export function splitPasteLines(text) {
 }
 
 // Column header aliases (case-insensitive, exact cell match) -> the generic field they fill.
-// Deliberately loose but not fuzzy-matched: an unrecognized header column is simply not used to
-// fill any field (falls through to positional mapping only when NO header row is detected at
-// all), which is safer than guessing what a stray column means.
 const HEADER_ALIASES = {
   compType: ["type", "comp type", "kind"],
   compDate: ["date", "comp date", "closed", "close date"],
@@ -414,7 +674,8 @@ function parseSpreadsheetRow(cells, headerMap) {
 
 /** A tab-delimited pasted block -> one row per line. The first line is treated as a HEADER row
  * (and skipped as data) when at least two of its cells match a known column name; otherwise
- * every line is data, mapped positionally to `DEFAULT_COLUMN_ORDER`. */
+ * every line is data, mapped positionally to `DEFAULT_COLUMN_ORDER`. Rows that end up with
+ * nothing at all are dropped — never emitted empty. */
 export function parsePasteBlock(text) {
   const lines = splitPasteLines(text);
   if (!lines.length) return [];
@@ -426,12 +687,18 @@ export function parsePasteBlock(text) {
   return dataRows.map((cells) => parseSpreadsheetRow(cells, headerMap));
 }
 
-/** Top-level dispatcher: detects paste shape and returns `{ mode, rows }`, `rows` always
- * `[{ draft, cellFlags, raw }]`. */
+/** Top-level dispatcher: detects paste SHAPE (not just spreadsheet-vs-not) and returns
+ * `{ mode, rows }` — `mode` is `"empty" | "spreadsheet" | "single" | "multi"`, `rows` always
+ * `[{ draft, cellFlags, raw }]` with no entirely-empty rows. */
 export function parsePaste(text) {
   if (!String(text || "").trim()) return { mode: "empty", rows: [] };
-  if (looksLikeSpreadsheetPaste(text)) return { mode: "spreadsheet", rows: parsePasteBlock(text) };
-  return { mode: "prose", rows: splitPasteLines(text).map(parseProseLine) };
+  const shape = detectPasteShape(text);
+  if (shape === "spreadsheet") return { mode: "spreadsheet", rows: parsePasteBlock(text) };
+  if (shape === "single") {
+    const row = parseSingleRecord(text);
+    return { mode: "single", rows: row ? [row] : [] };
+  }
+  return { mode: "multi", rows: splitPasteLines(text).map(parseProseLine).filter(Boolean) };
 }
 
 /** True if any cell in the row is a save-blocker. */
