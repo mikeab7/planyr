@@ -57,16 +57,16 @@ function VersionCard({ label, when, whenExact, ops, buttonLabel, consequence, on
       }}
     >
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
-        <span style={{ fontWeight: 700, fontSize: 12.5, color: "var(--text-primary)" }}>{label}</span>
+        <span style={{ fontWeight: 700, fontSize: 12, color: "var(--text-primary)" }}>{label}</span>
         <span
           title={whenExact || undefined}
-          style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary)", flex: "0 0 auto" }}
+          style={{ fontSize: 10.5, fontWeight: 600, color: "var(--text-secondary)", flex: "0 0 auto" }}
         >{when ? `edited ${when}` : "edit time unknown"}</span>
       </div>
       <div
         data-testid={`${testId}-text`}
         style={{
-          maxHeight: 200, overflowY: "auto", fontSize: 12.5, lineHeight: 1.5, color: "var(--text-primary)",
+          maxHeight: 200, overflowY: "auto", fontSize: 12, lineHeight: 1.5, color: "var(--text-primary)",
           whiteSpace: "pre-wrap", overflowWrap: "anywhere",
           border: "1px solid var(--border-default)", borderRadius: RADIUS.control,
           padding: 8,
@@ -94,7 +94,7 @@ function VersionCard({ label, when, whenExact, ops, buttonLabel, consequence, on
           : <em style={{ color: "var(--text-secondary)" }}>This copy is empty.</em>}
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-        <span style={{ flex: "1 1 180px", fontSize: 11, color: "var(--text-secondary)" }}>{consequence}</span>
+        <span style={{ flex: "1 1 180px", fontSize: 10.5, color: "var(--text-secondary)" }}>{consequence}</span>
         <button
           type="button"
           data-testid={`${testId}-choose`}
@@ -102,7 +102,7 @@ function VersionCard({ label, when, whenExact, ops, buttonLabel, consequence, on
           style={{
             flex: "0 0 auto", border: "1px solid var(--warn-text)", borderRadius: RADIUS.pill,
             background: "transparent", color: "var(--warn-text)", font: "inherit",
-            fontSize: 11.5, fontWeight: 700, padding: "3px 12px", cursor: "pointer",
+            fontSize: 10.5, fontWeight: 700, padding: "3px 12px", cursor: "pointer",
           }}
         >{buttonLabel}</button>
       </div>
@@ -143,7 +143,7 @@ export default function ConflictCompare({
         background: "var(--warn-bg)", borderBottom: "1px solid var(--border-default)",
       }}
     >
-      <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--warn-text)" }}>{copy.text}</span>
+      <span style={{ fontSize: 12, fontWeight: 600, color: "var(--warn-text)" }}>{copy.text}</span>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 8, alignItems: "start" }}>
         <VersionCard
           label="This window"
