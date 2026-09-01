@@ -37,6 +37,17 @@ pinned CPU, not the shared `ubuntu-latest` pool.
 
 > **Changed 2026-07-30 (NEW-1).** The bundle metrics used to carry a hand-written `ceiling`.
 > They no longer do, and this section describes what replaced it and why.
+>
+> **Changed again 2026-09-01 (B1016816, owner decision).** The 2% band below is now **10%**, and
+> every baseline was re-seeded to a fresh build the same day. Owner's framing, verbatim: *"keep
+> the gate, give it room. A ceiling should be an alarm that something went badly wrong, not a
+> per-byte accountant for ordinary work."* The case that forced it: before PR #1281,
+> `notesRouteJsBytes` measured 690.0 KB against a 690.2 KB ceiling — 0.2 KB of margin, a 2% band
+> already fully consumed by ordinary in-band merges. It cost two reverts (PRs #1262/#1263) and
+> blocked B917073 (shipped anyway once #1281 split ~164 KB of Site-Planner libraries out of the
+> shared entry chunk). **This is a regression alarm, not a budget** — read that literally: if a
+> ceiling ever again sits within about 1% of its measured size, that is a signal to fix the
+> *weight* (split the chunk, defer the import), not to nudge the *number*.
 
 **What went wrong with hand-pinned ceilings.** Each one was seeded from a measurement and then
 never left it. By 30 July `largestChunkBytes` measured 1707.9 KB against a 1709.0 KB ceiling —
@@ -51,9 +62,10 @@ Bumping the three ceilings would have been the same mistake a fourth time. So th
 - **`baseline`** — the last *deliberately recorded* measurement. Only `npm run perf:ratchet`
   writes it, and only with a `--reason` and an `--item`, both of which land in
   `bundle.ratchetLog`. Nothing in an ordinary merge path can move it.
-- **`bundle.headroom`** — the band, committed **once**: `max(2% of baseline, 32 KB)`. One place,
-  not three drifting numbers. The 32 KB floor exists because 2% of a small chunk is not enough
-  room for one honest feature.
+- **`bundle.headroom`** — the band, committed **once**: `max(10% of baseline, 32 KB)`. One place,
+  not three drifting numbers. The 32 KB floor exists because a percentage of a small chunk is not
+  enough room for one honest feature; at 10% the floor rarely binds any more (see the 2026-09-01
+  note above), but it stays as a backstop for a small metric.
 - **`ceiling`** — **derived, never stored**: `baseline + band`. Breaching it still **fails the
   check**.
 - **`target`** — where the metric *should* be. Where `target` is below `baseline`, the metric is
@@ -69,7 +81,7 @@ That gives four outcomes per metric, and only the last one is red:
 | > ceiling | `✗` breach, with the derivation spelled out | **red** |
 
 `siteRouteChunks` is deliberately excluded from the band: a chunk count is a structural guard,
-not a size, and "four chunks plus two percent" is not a sentence. It keeps a hard `ceiling`.
+not a size, and "four chunks plus ten percent" is not a sentence. It keeps a hard `ceiling`.
 
 **Ratcheting is a named step.** `npm run perf:ratchet -- --metric bundle.largestChunkBytes --item
 B1064 --reason "…"` measures a fresh build itself (you cannot ratchet to a number you typed),
