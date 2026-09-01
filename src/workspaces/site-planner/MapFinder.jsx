@@ -3273,6 +3273,15 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                   overlaysById={overlaysById}
                   onOpenBrochure={openOverlayBrochure}
                   reloadToken={compsReloadToken}
+                  // B849232/NEW-1 — the paste-grid highlights a row's location before it's even
+                  // saved (no `comps`-array entry to reuse the pin-click/focusCompId path for).
+                  // Self-contained: reads the map instance already held in this component, adds
+                  // no state and touches nothing the site-plan-overlay work in this file owns.
+                  onFocusAnchor={(anchor) => {
+                    const m = mapRef.current;
+                    if (!m || !anchor || typeof anchor.lat !== "number" || typeof anchor.lon !== "number") return;
+                    m.flyTo([anchor.lat, anchor.lon], Math.max(m.getZoom(), 17));
+                  }}
                 />
               </Suspense>
             </PanelErrorBoundary>

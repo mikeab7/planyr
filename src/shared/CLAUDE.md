@@ -291,16 +291,43 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   `comp_party_acquirer` (B832390): ONE shared axis across all three comp types (never six
   per-type columns), labeled per type by `lib/comps.js`'s `partyLabels(compType)` — lease =
   Owner/Developer + Tenant, land = Seller + Buyer, building sale = Seller + Buyer/User.
-  **⛔ Both new migration files are NOT yet applied to production as of this writing** — handed to
-  the owner directly rather than applied by the shipping session (that session's production
-  access was read-only); until both run, every comp save of any type errors, loudly, not
-  silently. `lib/partySuggest.js` is the pure party-name suggestion logic
+  Every migration in `db/` (incl. the party-fields/free-rent ones this bullet used to flag as
+  unapplied) is live on production, confirmed by column read against project `lyeqzkuiwngunutlkkmi`.
+  `lib/partySuggest.js` is the pure party-name suggestion logic
   (`collectPartyNames`/`matchPartyNames` — loose substring match, suggests only, never forces or
   merges near-spellings) behind `components/PartyNameField.jsx`'s accessible combobox (B832391) —
   a DELIBERATE second, independent combobox implementation from the map toolbar's
   `PlaceSearchField` (that one drives a debounced network geocode; this one filters an in-memory
   array synchronously — reusing its plumbing would import complexity with no use here). `db/test/comps_rls.test.sql` is a self-rolling-back RLS proof, run live via the
   Supabase MCP.
+  **Entry (B849232/B849233, 2026-09-01) — paste-into-the-grid, drafts reserved for import.**
+  `lib/compParse.js` is the pure parser behind the create surface: one pasted prose line or a
+  whole tab-delimited spreadsheet block both resolve through one generic-extraction step, each
+  cell carrying a `null`/`"soft"`/`"blocking"` uncertainty verdict — soft when the guess is fully
+  visible in the shown value (a k/m-suffixed number), blocking when it isn't (a lease rate with no
+  stated period, 12x either way) — never resolved by inference, only refused with a reason.
+  `components/CompEntryGrid.jsx` is the paste-box-over-a-row-grid UI (replaces the old
+  one-comp-at-a-time create form) — a portaled overlay card, not the docked 232px rail, because
+  that's the panel's REAL measured width (not the ~380px the feature was scoped against) and a
+  multi-column grid needs more room than either widening the shared rail constant or a
+  permanently-scrolled 232px card could give it without touching the site-planner map finder's
+  own layout (owned this same week by a sibling site-plan-overlay session). `emptyDraft`/
+  `draftToComp`/`compToDraft` moved from `CompsPanel.jsx` into `lib/comps.js` so the grid and the
+  single-comp edit form (still reachable — editing one already-saved comp, as opposed to batch
+  creation) share one conversion. Row-click-highlights-map and the "＋ Location" per-row map pick
+  both reuse the SAME `pendingCompAnchor` single slot the map finder already threads through
+  `CompsPanel`, plus one new small `onFocusAnchor` callback prop on `<CompsPanel>` (a
+  `mapRef.current.flyTo` one-liner) — deliberately the map finder's only touch for this feature.
+  KML import (B849233) is a SEPARATE staging table, `db/comp_import_drafts.sql`
+  (`public.comp_import_drafts`, owner-only RLS — no team visibility at all, unlike `comps` itself,
+  until promoted) — `lib/kmlImport.js` is the pure, hand-rolled Placemark parser (a Point is a
+  point; a Polygon becomes an area-weighted centroid, `polygonCentroid`, never a vertex average)
+  feeding `lib/compDrafts.js` (row<->model) + `lib/compDraftsStore.js`
+  (`promoteDraft` — the moment `comps`' strict constraints get enforced; a draft that fails them
+  stays a draft, with the reason written back onto the row). `components/CompDraftsPanel.jsx` is
+  the review/promote surface, reachable ONLY from the KML import button — hand entry never creates
+  a row here. `db/test/comp_import_drafts_rls.test.sql` — the same self-rolling-back proof shape,
+  9/9 passed live against production.
 - `projects/`, `profile/`, `cloud/`, `presence/`, `gis/`, `geometry/`, `placement/`.
 
 **Convention:** shared logic is pure and unit-tested; per-host state/wiring stays in the workspace.
