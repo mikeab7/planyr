@@ -37,6 +37,21 @@ export async function insertComp(comp) {
   return { data: rowToComp(data), error: null };
 }
 
+/** Bulk insert for the paste-grid (B849232/NEW-1) — ONE round trip for a whole batch rather
+ * than N sequential `insertComp` calls. Postgres inserts a multi-row VALUES list atomically, so
+ * either every row lands or (on any constraint violation) none do — the caller never has to
+ * reconcile a partial batch. */
+export async function insertComps(comps) {
+  if (!supabase) return { data: null, error: new Error("Supabase not configured") };
+  if (!comps?.length) return { data: [], error: null };
+  const { data: auth } = await supabase.auth.getUser();
+  const uid = auth?.user?.id;
+  if (!uid) return { data: null, error: new Error("Sign in to add comps") };
+  const { data, error } = await supabase.from(TABLE).insert(comps.map(compToRow)).select(SELECT_COLS);
+  if (error) return { data: null, error };
+  return { data: (data || []).map(rowToComp), error: null };
+}
+
 export async function updateComp(id, comp) {
   if (!supabase) return { data: null, error: new Error("Supabase not configured") };
   // RLS scopes the write to the caller's own rows — a teammate's update affects 0 rows rather
