@@ -12,7 +12,7 @@
 |---|---|---|---|---|
 | B927104 | CI's base-ref bundle snapshot builds WITHOUT the production `VITE_*` secrets the head build inlines, so every byte attribution is off by the length of those literals and no local run can predict main's verdict | [infra / perf budgets] | #infra #perf #testing | live |
 | B853713 | Wire dedicated county appraisal districts (CADs) for the DFW & Austin metros | [Site Planner / map] | #gis #parcel #site-planner | live |
-| B858384 | Fix red required `build` check on `main`: verification-queue ceiling breached by calendar drift, not by any commit | [Infra / CI] | #infra #testing | sandbox |
+| B858384 | Fix red required `build` check on `main`: verification-queue ceiling breached by calendar drift, not by any commit (×2) | [Infra / CI] | #infra #testing | sandbox |
 | B791520 | Fix red required `build` check on `main`: Site route bundle 0.4 KB over its performance-budget ceiling | [Infra / CI] | #infra #testing | sandbox |
 | B773729 | Road cross-section: median openings (driveway/intersection breaks) | [Site Planner / road] | #site-planner #road #ui | live |
 | B773731 | Legacy free-draw POLYGON road shows 8 edit handles instead of 4 | [Site Planner / road] | #site-planner #road #ui | sandbox |
