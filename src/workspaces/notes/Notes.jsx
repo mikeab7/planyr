@@ -29,8 +29,8 @@ import NotesTree from "./components/NotesTree.jsx";
 import {
   addPage, adoptUnreachable, allPageIds, ancestorIds, commitTitle, copyPageWithin, deleteNode, displayTitle, emptyTree, expiredTrashIds, findPage,
   firstPageId, migrate, movePage, pagesInScope, purgeTrashEntry, recentPages, renameNode, restoreNode,
-  setPageProject, subpagesPhrase, subtreePageIds, touchPage, trashEntries, trashPageIds,
-  NO_PROJECT_LABEL, SCOPE_ALL, SCOPE_PROJECT,
+  setPageProject, setPageOrgScope, subpagesPhrase, subtreePageIds, touchPage, trashEntries, trashPageIds,
+  NO_PROJECT_LABEL, ORG_GROUP_LABEL, SCOPE_ALL, SCOPE_ORG, SCOPE_PROJECT,
 } from "./lib/notesModel.js";
 import { duplicateNotice } from "./lib/notesDuplicates.js";
 import { absoluteStamp } from "./lib/notesTime.js";
@@ -268,7 +268,9 @@ function downloadMarkdown(filename, markdown) {
 
 export default function Notes({
   isActive, shellModule, onShellSwitch, authControl, accountActive, userId,
-  projectId, crossProject, onNavigate, onGoDashboard, onNewProject,
+  // ORG SCOPE (NEW-1) — the route's org flag, uniform with `projectId`/`crossProject`. `org`
+  // and `projectId` are mutually exclusive by construction (Shell never routes both true).
+  projectId, crossProject, org: orgScope = false, onNavigate, onGoDashboard, onNewProject, onSelectOrg,
 }) {
   const [tree, setTree] = useState(emptyTree);
   const [activePageId, setActivePageId] = useState(null);
@@ -559,10 +561,10 @@ export default function Notes({
    * — with a page open from a notebook the rail can no longer see would otherwise leave the
    * rail and the document disagreeing about what is open. */
   useEffect(() => {
-    const roots = pagesInScope(tree, projectId, projectId == null ? SCOPE_ALL : SCOPE_PROJECT);
+    const roots = pagesInScope(tree, projectId, orgScope ? SCOPE_ORG : (projectId == null ? SCOPE_ALL : SCOPE_PROJECT));
     const visible = new Set(roots.flatMap((r) => subtreePageIds(r)));
     if (!activePageId || !visible.has(activePageId)) setActivePageId(roots[0]?.id || null);
-  }, [projectId, tree, activePageId]);
+  }, [projectId, orgScope, tree, activePageId]);
 
   const active = useMemo(() => (activePageId ? findPage(tree, activePageId) : null), [tree, activePageId]);
   const activePage = active?.page || null;
@@ -585,6 +587,9 @@ export default function Notes({
    * states, and describing the first as the second is what made a mis-filing invisible. */
   const activeProjectLabel = useMemo(() => {
     if (!active?.root) return null;
+    // ORG SCOPE (NEW-1) — checked before the "no project" fallback, since an org page also
+    // carries `projectId: null`: the two must never be captioned the same way.
+    if (active.root.orgScope) return { name: ORG_GROUP_LABEL, resolved: true, projectId: null, org: true };
     const pid = active.root.projectId ?? null;
     if (pid == null) return { name: NO_PROJECT_LABEL, resolved: true, projectId: null };
     const name = projects.find((p) => p.id === pid)?.name || null;
@@ -640,8 +645,8 @@ export default function Notes({
   }, [tree, projects, projectList.state, dupeTick]);
 
   const results = useMemo(
-    () => (query.trim() ? searchNotes(tree, query, { projectId, scope: projectId == null ? SCOPE_ALL : SCOPE_PROJECT }) : []),
-    [query, tree, projectId],
+    () => (query.trim() ? searchNotes(tree, query, { projectId, scope: orgScope ? SCOPE_ORG : (projectId == null ? SCOPE_ALL : SCOPE_PROJECT) }) : []),
+    [query, tree, projectId, orgScope],
   );
 
   /* ---- QUICK OPEN (NEW-2) ----------------------------------------------------------------
@@ -755,16 +760,16 @@ export default function Notes({
 
   const quickResults = useMemo(() => {
     if (!quickOpen) return [];
-    const scope = projectId == null ? SCOPE_ALL : SCOPE_PROJECT;
+    const scope = orgScope ? SCOPE_ORG : (projectId == null ? SCOPE_ALL : SCOPE_PROJECT);
     // Every page in scope, with its trail — the shape `rankQuickOpen` wants, and a list the
     // model already builds for its own reasons. No second index.
-    const entries = recentPages(tree, { projectId, limit: Number.MAX_SAFE_INTEGER });
+    const entries = recentPages(tree, { projectId, orgScope, limit: Number.MAX_SAFE_INTEGER });
     const titleHits = rankQuickOpen(entries, quickQuery, { limit: 12 });
     // The BODY half is the full-text index that already exists and already works — quick
     // open falls through to it rather than re-implementing it.
     const bodyHits = quickQuery.trim() ? searchNotes(tree, quickQuery, { projectId, scope }) : [];
     return quickOpenResults({ titleHits, bodyHits });
-  }, [quickOpen, quickQuery, tree, projectId]);
+  }, [quickOpen, quickQuery, tree, projectId, orgScope]);
 
   /* ---- THE TASK ROLLUP (NEW-4) ------------------------------------------------------------
    *
@@ -775,14 +780,14 @@ export default function Notes({
   const [taskTick, setTaskTick] = useState(0);
   const taskGroups = useMemo(() => {
     if (!tasksOpen) return [];
-    const scope = projectId == null ? SCOPE_ALL : SCOPE_PROJECT;
+    const scope = orgScope ? SCOPE_ORG : (projectId == null ? SCOPE_ALL : SCOPE_PROJECT);
     return groupTasksByProject(collectOpenTasks(tree, { projectId, scope }), projects);
     // `taskTick` is a deliberate dependency: ticking an item rewrites a page BODY, which the
     // tree does not change, so nothing else here would tell this memo to look again. The
     // linter cannot see that — this memo reads page bodies through the store, which is not a
     // value in its own dependency list — so the suppression is the honest form of it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tasksOpen, tree, projectId, projects, taskTick]);
+  }, [tasksOpen, tree, projectId, orgScope, projects, taskTick]);
 
   const handleToggleTask = useCallback((t) => {
     const r = toggleNoteTask(t.pageId, { index: t.index, text: t.text }, true);
@@ -798,12 +803,12 @@ export default function Notes({
    * B1420's collapse). Made from the Dashboard it belongs to no project, which is a real
    * place with the same shape — never a holding pen. */
   const handleAddPage = useCallback(() => {
-    const r = addPage(treeNow(), { projectId: projectId || null });
+    const r = addPage(treeNow(), { projectId: projectId || null, orgScope });
     persistTree(r.tree);
     setActivePageId(r.pageId);
     setQuery("");
     setMobileShowList(false);   // NEW-1: a new page opens straight into the editor, phone included
-  }, [projectId, persistTree, treeNow]);
+  }, [projectId, orgScope, persistTree, treeNow]);
 
   /** A page UNDER another page — the whole point of the collapse, and reachable by direct
    *  action (the row's menu) rather than by a mode. */
@@ -816,6 +821,12 @@ export default function Notes({
   /** Re-file a TOP-LEVEL page into a project, or out of every project (B1374, B1420). */
   const handleSetPageProject = useCallback((pageId, pid) => {
     persistTree(setPageProject(treeNow(), pageId, pid));
+  }, [persistTree, treeNow]);
+
+  /* ORG SCOPE (NEW-1) — the org-scope twin of the handler above, wired to the SAME "file
+   * under" panel in NotesTree (`ProjectPanel`'s Organization row). */
+  const handleSetPageOrgScope = useCallback((pageId, on) => {
+    persistTree(setPageOrgScope(treeNow(), pageId, on));
   }, [persistTree, treeNow]);
 
   const handleRename = useCallback((id, title) => persistTree(renameNode(treeNow(), id, title)), [persistTree, treeNow]);
@@ -979,7 +990,11 @@ export default function Notes({
           return;
         }
         persistTree(r.tree);
-        const where = r.projectId == null ? NO_PROJECT_LABEL : (projects.find((p) => p.id === r.projectId)?.name || "its project");
+        // ORG SCOPE (NEW-1) — checked first, since a copy of an org page still reports
+        // `projectId: null` and must not be captioned as "Not in a project".
+        const where = r.orgScope ? ORG_GROUP_LABEL
+          : r.projectId == null ? NO_PROJECT_LABEL
+          : (projects.find((p) => p.id === r.projectId)?.name || "its project");
         setExportNote(`Your copy was kept as “${hit ? `${hit.page.title} ${notesConflictLine().parkedSuffix}` : "a copy"}”, in ${where} — the same place as the note it came from.`);
       }
     }
@@ -1003,7 +1018,7 @@ export default function Notes({
       setExportNote(`“${target.title}” is in the bin — open the Bin view to restore or delete it for good.`);
       return;
     }
-    if ((target.projectId ?? null) !== (projectId ?? null)) onNavigate?.({ projectId: target.projectId ?? null, cross: false });
+    if ((target.projectId ?? null) !== (projectId ?? null)) onNavigate?.({ projectId: target.projectId ?? null, cross: false, org: false });
     setActivePageId(target.pageId);
     setQuery("");
     setMobileShowList(false);
@@ -1174,7 +1189,12 @@ export default function Notes({
         // other workspace. Without it the header forgot the project on the way into Notes.
         currentProject={notesProject}
         cross={crossProject}
-        onSelectProject={(id) => onNavigate?.({ projectId: id, cross: false })}
+        // ORG SCOPE (NEW-1) — the crumb reads "Organization" instead of a project name/
+        // "Select a project" while this is true; org clears whenever a real project or the
+        // Dashboard is picked (Shell's own navigate() always names org explicitly).
+        org={orgScope}
+        onSelectOrg={onSelectOrg}
+        onSelectProject={(id) => onNavigate?.({ projectId: id, cross: false, org: false })}
         onNewProject={onNewProject}
         authControl={authControl}
         accountActive={accountActive}
@@ -1229,6 +1249,7 @@ export default function Notes({
           narrow={narrow}
           tree={tree}
           projectId={projectId}
+          orgScope={orgScope}
           projects={projects}
           projectsState={projectList.state}
           projectsError={projectList.error}
@@ -1245,6 +1266,7 @@ export default function Notes({
           onAddPage={handleAddPage}
           onAddSubpage={handleAddSubpage}
           onSetPageProject={handleSetPageProject}
+          onSetPageOrgScope={handleSetPageOrgScope}
           onRename={handleRename}
           onDelete={handleDelete}
           onExportPage={handleExportPageTree}
@@ -1254,7 +1276,7 @@ export default function Notes({
              switches to the Site workspace — using it here would answer "where are my other
              notes?" by leaving the notes module entirely, which is worse than the empty rail
              it is trying to explain. This drops the project and keeps the route's module. */
-          onAllNotes={() => onNavigate?.({ projectId: null, cross: false })}
+          onAllNotes={() => onNavigate?.({ projectId: null, cross: false, org: false })}
           onRestore={handleRestore}
           onPurge={handlePurge}
           onPurgeAll={handlePurgeAll}

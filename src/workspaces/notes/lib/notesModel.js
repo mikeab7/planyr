@@ -122,21 +122,30 @@ export function dropPages(tree, ids) {
   const dead = new Set(ids || []);
   if (!dead.size) return tree;
   const rescued = [];
-  const strip = (nodes, projectId) => {
+  const strip = (nodes, projectId, orgScope) => {
     const out = [];
     for (const p of nodes || []) {
       const branchProject = p.projectId !== undefined ? (p.projectId ?? null) : projectId;
-      const kids = strip(p.pages, branchProject);
+      // ORG SCOPE (NEW-1) — mirrors branchProject exactly: a rescued page inherits its
+      // branch's org membership the same way it inherits its branch's project.
+      const branchOrg = p.orgScope !== undefined ? !!p.orgScope : orgScope;
+      const kids = strip(p.pages, branchProject, branchOrg);
       if (dead.has(p.id)) {
         // TOMBSTONE-DELETES: a purge takes what it names, never a page nobody deleted.
-        for (const k of kids) rescued.push({ ...k, projectId: branchProject == null ? null : String(branchProject) });
+        for (const k of kids) {
+          rescued.push({
+            ...k,
+            projectId: branchOrg ? null : (branchProject == null ? null : String(branchProject)),
+            ...(branchOrg ? { orgScope: true } : {}),
+          });
+        }
         continue;
       }
       out.push({ ...p, pages: kids });
     }
     return out;
   };
-  const pages = strip(tree?.pages, null);
+  const pages = strip(tree?.pages, null, false);
   return { ...tree, pages: [...pages, ...rescued] };
 }
 
@@ -175,7 +184,7 @@ export function withTombstones(tree, ids, { at = Date.now() } = {}) {
  * notesStore.js). A node whose title is null, undefined, empty or whitespace survives every
  * path in this module intact; test/notesReachability.test.js runs all five falsy values
  * through eleven of them. Nothing here may start keying, filtering or deduping on a title. */
-export function makePage({ id, title = DEFAULT_PAGE_TITLE, createdAt, updatedAt, at = Date.now(), pages, projectId } = {}) {
+export function makePage({ id, title = DEFAULT_PAGE_TITLE, createdAt, updatedAt, at = Date.now(), pages, projectId, orgScope } = {}) {
   const born = Number.isFinite(createdAt) ? createdAt : at;
   const named = String(title ?? "");
   const node = {
@@ -186,6 +195,11 @@ export function makePage({ id, title = DEFAULT_PAGE_TITLE, createdAt, updatedAt,
     pages: pages ? clone(pages) : [],
   };
   if (projectId !== undefined) node.projectId = projectId == null ? null : String(projectId);
+  // ORG SCOPE (NEW-1) — a real, distinct scope, never a sentinel projectId. Omitted unless
+  // true, same "optional boolean" idiom as every other flag in this module (`trashed`, …):
+  // absence reads as false everywhere this is checked (`!!node.orgScope`), so no existing
+  // note anywhere is rewritten by this field's mere existence.
+  if (orgScope) node.orgScope = true;
   return node;
 }
 
@@ -292,11 +306,17 @@ export function projectOfPage(tree, pageId) {
 
 export const SCOPE_PROJECT = "project";
 export const SCOPE_ALL = "all";
+/** ORG SCOPE (NEW-1) — a third, genuinely distinct scope, sitting beside SCOPE_PROJECT and
+ *  SCOPE_ALL rather than being spelled as either of them. Content here is org-wide reference
+ *  material, never tied to any project id. */
+export const SCOPE_ORG = "org";
 
 /** The ROOT pages the rail should show. Inside a project (and in the default scope) that is
- *  exactly that project's roots; `SCOPE_ALL`, or no project at all, is every root. */
+ *  exactly that project's roots; `SCOPE_ALL`, or no project at all, is every root; `SCOPE_ORG`
+ *  is every root explicitly marked `orgScope`, regardless of `projectId`. */
 export function pagesInScope(tree, projectId, scope = SCOPE_PROJECT) {
   const roots = rootsOf(tree);
+  if (scope === SCOPE_ORG) return roots.filter((p) => !!p.orgScope);
   if (scope === SCOPE_ALL || projectId == null) return roots.slice();
   return roots.filter((p) => (p.projectId ?? null) === projectId);
 }
@@ -308,6 +328,14 @@ export function pagesInScope(tree, projectId, scope = SCOPE_PROJECT) {
  *  `projects` is `[{ id, name }]`; a page bound to an id that is not in that list still gets
  *  a group — named by the caller, never silently folded into "no project", because losing
  *  the binding is how a page becomes hard to find. */
+export const ORG_GROUP_LABEL = "Organization";
+
+/** ORG SCOPE (NEW-1) — the Dashboard is where "visible from every project as reference"
+ *  actually happens: it is already one click from any project (the header crumb) and already
+ *  the place every no-project note surfaces, so an Organization group here gives org-scoped
+ *  content the same reachability guarantee B1374 gives "Not in a project" pages, with no new
+ *  UI surface. Placed FIRST — it is deliberate reference material, not a fallback bucket
+ *  like "Not in a project" (which stays LAST, unchanged). */
 export function projectGroups(tree, projects = []) {
   const byId = new Map((projects || []).filter(Boolean).map((p) => [p.id, p]));
   const order = [];
@@ -316,10 +344,13 @@ export function projectGroups(tree, projects = []) {
     if (!groups.has(key)) { groups.set(key, []); order.push(key); }
     groups.get(key).push(page);
   };
-  for (const p of rootsOf(tree)) put(p.projectId ?? " none", p);
+  for (const p of rootsOf(tree)) put(p.orgScope ? " org" : (p.projectId ?? " none"), p);
   const out = [];
+  if (groups.has(" org")) {
+    out.push({ projectId: null, org: true, name: ORG_GROUP_LABEL, resolved: true, pages: groups.get(" org") });
+  }
   for (const key of order) {
-    if (key === " none") continue;
+    if (key === " none" || key === " org") continue;
     out.push({ projectId: key, name: byId.get(key)?.name || null, resolved: byId.has(key), pages: groups.get(key) });
   }
   if (groups.has(" none")) {
@@ -345,11 +376,13 @@ export function boundProjectIds(tree) {
  *  makes "a page created inside a project is filed there automatically" true with no extra
  *  step. With a `parentId` it becomes that page's LAST child, and its project is its root's
  *  by construction (nothing to pass, nothing to get wrong). */
-export function addPage(tree, { parentId = null, projectId = null, title, id, at = Date.now() } = {}) {
+export function addPage(tree, { parentId = null, projectId = null, orgScope = false, title, id, at = Date.now() } = {}) {
   const next = clone(tree || emptyTree());
   if (!Array.isArray(next.pages)) next.pages = [];
   if (parentId == null) {
-    const pg = makePage({ id, title: title || DEFAULT_PAGE_TITLE, at, projectId });
+    // ORG SCOPE (NEW-1) — a page made while standing in Organization files itself there, no
+    // extra step, same "created here, filed here" rule B1374 already gives a project.
+    const pg = makePage({ id, title: title || DEFAULT_PAGE_TITLE, at, projectId: orgScope ? null : projectId, orgScope });
     next.pages.push(pg);
     return { tree: next, pageId: pg.id };
   }
@@ -441,7 +474,7 @@ const clampIndex = (i, len) => (Number.isFinite(i) ? Math.max(0, Math.min(Math.t
  *
  *  `toParentId === null` means root. A page moved to root needs a project: `projectId` is
  *  used when given, otherwise it keeps the project of the root it came from. */
-export function movePage(tree, pageId, toParentId = null, index, { projectId } = {}) {
+export function movePage(tree, pageId, toParentId = null, index, { projectId, orgScope } = {}) {
   const next = clone(tree);
   const from = findPage(next, pageId);
   if (!from) return next;
@@ -454,16 +487,31 @@ export function movePage(tree, pageId, toParentId = null, index, { projectId } =
   }
 
   const wasProject = from.root.projectId ?? null;
+  const wasOrg = !!from.root.orgScope;
   // Detach.
   const siblings = from.parent ? from.parent.pages : next.pages;
   siblings.splice(siblings.indexOf(from.page), 1);
   const node = from.page;
 
   if (toParentId == null) {
-    node.projectId = projectId !== undefined ? (projectId == null ? null : String(projectId)) : wasProject;
+    // ORG SCOPE (NEW-1) — `orgScope`/`projectId` are one destination, never both at once.
+    // An explicit `orgScope: true` wins; an explicit `projectId` (which may legitimately be
+    // `null`, meaning "not in a project") wins next; naming neither keeps wherever the page
+    // already was — the plain reorder-within-root-level case every existing caller uses.
+    if (orgScope === true) {
+      node.orgScope = true;
+      node.projectId = null;
+    } else if (projectId !== undefined) {
+      node.projectId = projectId == null ? null : String(projectId);
+      delete node.orgScope;
+    } else {
+      node.projectId = wasProject;
+      if (wasOrg) node.orgScope = true; else delete node.orgScope;
+    }
     next.pages.splice(clampIndex(index, next.pages.length), 0, node);
   } else {
     delete node.projectId;                       // a child's project is its root's, derived
+    delete node.orgScope;                         // …and so is its org membership
     const to = findPage(next, toParentId);
     if (!Array.isArray(to.page.pages)) to.page.pages = [];
     to.page.pages.splice(clampIndex(index, to.page.pages.length), 0, node);
@@ -479,8 +527,29 @@ export function setPageProject(tree, pageId, projectId, at = Date.now()) {
   const root = next.pages.find((p) => p.id === pageId);
   if (root) {
     root.projectId = projectId == null ? null : String(projectId);
+    delete root.orgScope;   // ORG SCOPE (NEW-1) — a page has one destination, never both
     /* Its OWN stamp too, for the same reason as `renameNode` above: moving a note between
      * projects is not writing in it, and must not make "Edited" claim otherwise. */
+    root.filedAt = at;
+  }
+  return next;
+}
+
+/** ORG SCOPE (NEW-1) — the org-scope twin of `setPageProject`. Re-bind a ROOT page to the
+ *  Organization (or off it, back to "Not in a project"). Same non-root-is-a-no-op rule, same
+ *  `filedAt` stamp (filing is filing, whichever destination it names) — this is deliberately
+ *  the SAME mechanism `setPageProject` already is, not a parallel one, which is what makes a
+ *  future "promote to standard" button a one-write affair rather than a new code path. */
+export function setPageOrgScope(tree, pageId, orgScope, at = Date.now()) {
+  const next = clone(tree);
+  const root = next.pages.find((p) => p.id === pageId);
+  if (root) {
+    if (orgScope) {
+      root.orgScope = true;
+      root.projectId = null;
+    } else {
+      delete root.orgScope;
+    }
     root.filedAt = at;
   }
   return next;
@@ -510,21 +579,22 @@ export function copyPageWithin(tree, sourcePageId, { title, id, at = Date.now() 
   const base = tree || emptyTree();
   const next = clone(base);
   const hit = findPage(next, sourcePageId);
-  if (!hit) return { tree: base, pageId: null, projectId: null, refused: "unknown-source" };
+  if (!hit) return { tree: base, pageId: null, projectId: null, orgScope: false, refused: "unknown-source" };
 
   const projectId = hit.root.projectId ?? null;
+  const orgScope = !!hit.root.orgScope;   // ORG SCOPE (NEW-1) — travels with the copy exactly like projectId does
   const name = String(title ?? "").trim() || `${hit.page.title} ${COPY_SUFFIX}`;
-  // A SUBPAGE copy carries no `projectId` at all — its root's is the only answer, and storing
-  // a second one is the redundant-state trap this model exists to avoid.
+  // A SUBPAGE copy carries no `projectId`/`orgScope` at all — its root's is the only answer,
+  // and storing a second one is the redundant-state trap this model exists to avoid.
   const pg = hit.parent
     ? makePage({ id, title: name, at })
-    : makePage({ id, title: name, at, projectId });
+    : makePage({ id, title: name, at, projectId: orgScope ? null : projectId, orgScope });
 
   const siblings = hit.parent
     ? (Array.isArray(hit.parent.pages) ? hit.parent.pages : (hit.parent.pages = []))
     : next.pages;
   siblings.splice(siblings.indexOf(hit.page) + 1, 0, pg);
-  return { tree: next, pageId: pg.id, projectId, refused: null };
+  return { tree: next, pageId: pg.id, projectId, orgScope, refused: null };
 }
 
 /* ---- nothing may exist without a home (NEW-1) -------------------------------------------
@@ -678,6 +748,7 @@ export function deleteNode(tree, id, { at = Date.now(), entryId } = {}) {
   const siblings = hit.parent ? hit.parent.pages : next.pages;
   const index = siblings.indexOf(hit.page);
   const projectId = hit.root.projectId ?? null;
+  const orgScope = !!hit.root.orgScope;   // ORG SCOPE (NEW-1) — carried on the entry, same as projectId
   siblings.splice(index, 1);
 
   const entry = {
@@ -687,6 +758,7 @@ export function deleteNode(tree, id, { at = Date.now(), entryId } = {}) {
     parentId: hit.parent ? hit.parent.id : null,
     index,
     projectId,
+    ...(orgScope ? { orgScope: true } : {}),
     title: String(hit.page.title || ""),
     deletedAt: at,
     pageIds: removedPageIds,
@@ -739,10 +811,13 @@ export function restoreNode(tree, entryId, { at = Date.now() } = {}) {
   const parent = e.parentId ? findPage(next, e.parentId) : null;
   if (parent) {
     delete node.projectId;
+    delete node.orgScope;
     if (!Array.isArray(parent.page.pages)) parent.page.pages = [];
     parent.page.pages.splice(clampIndex(e.index, parent.page.pages.length), 0, node);
   } else {
-    node.projectId = e.projectId == null ? null : String(e.projectId);
+    // ORG SCOPE (NEW-1) — restores to exactly where it was filed, same as projectId.
+    if (e.orgScope) { node.orgScope = true; node.projectId = null; }
+    else { delete node.orgScope; node.projectId = e.projectId == null ? null : String(e.projectId); }
     /* It came from root → back to its old slot. It came from a parent that is gone for good
      * → append, because its recorded index belonged to a list that no longer exists. */
     next.pages.splice(e.parentId ? next.pages.length : clampIndex(e.index, next.pages.length), 0, node);
@@ -776,9 +851,9 @@ function trailOf(tree, pageId) {
 
 /** Pages in most-recently-edited order, scoped by project. A page whose time is unknown
  *  (written before timestamps existed) sorts last rather than pretending to be old or new. */
-export function recentPages(tree, { projectId = null, limit = 40 } = {}) {
+export function recentPages(tree, { projectId = null, orgScope = false, limit = 40 } = {}) {
   const out = [];
-  for (const root of pagesInScope(tree, projectId, projectId == null ? SCOPE_ALL : SCOPE_PROJECT)) {
+  for (const root of pagesInScope(tree, projectId, orgScope ? SCOPE_ORG : (projectId == null ? SCOPE_ALL : SCOPE_PROJECT))) {
     const go = (page, trail) => {
       out.push({
         pageId: page.id, pageTitle: page.title, trail,
@@ -795,11 +870,11 @@ export function recentPages(tree, { projectId = null, limit = 40 } = {}) {
 }
 
 /** Case-insensitive page-TITLE search, scoped by project. Pure. */
-export function searchTitles(tree, query, { projectId = null } = {}) {
+export function searchTitles(tree, query, { projectId = null, orgScope = false } = {}) {
   const q = String(query || "").trim().toLowerCase();
   if (!q) return [];
   const out = [];
-  for (const root of pagesInScope(tree, projectId, projectId == null ? SCOPE_ALL : SCOPE_PROJECT)) {
+  for (const root of pagesInScope(tree, projectId, orgScope ? SCOPE_ORG : (projectId == null ? SCOPE_ALL : SCOPE_PROJECT))) {
     const go = (page, trail) => {
       if (String(page.title || "").toLowerCase().includes(q)) {
         out.push({ pageId: page.id, pageTitle: page.title, trail, projectId: root.projectId ?? null, where: "title" });
@@ -879,6 +954,11 @@ function migratePageNode(pg) {
 }
 
 const withProject = (node, projectId) => ({ ...node, projectId: projectId == null ? null : String(projectId) });
+// ORG SCOPE (NEW-1) — the same "reattach at the root only" shape as `withProject`, because
+// `migratePageNode` is deliberately blind to both fields (a subpage never carries either).
+// Only ever ADDS the field (never forces `orgScope: false` onto a legacy node that never had
+// an opinion) — consistent with `makePage`'s "omit unless true" idiom.
+const withOrgScope = (node, orgScope) => (orgScope === true ? { ...node, orgScope: true } : node);
 
 /** One legacy notebook → the top-level pages it becomes. Rules 1, 2 and 4 live here. */
 function notebookToPages(nb) {
@@ -971,6 +1051,8 @@ function migrateTrashEntry(e) {
     parentId: e.parentId == null ? null : String(e.parentId),
     index: Number.isFinite(e.index) ? e.index : 0,
     projectId: e.projectId == null ? null : String(e.projectId),
+    // ORG SCOPE (NEW-1) — read tolerantly like every other field here; absent stays absent.
+    ...(e.orgScope === true ? { orgScope: true } : {}),
     title: typeof e.title === "string" ? e.title : "",
     deletedAt: Number.isFinite(e.deletedAt) ? e.deletedAt : 0,
     pageIds,
@@ -1005,7 +1087,7 @@ export function migrate(raw) {
   const pages = [];
   for (const p of raw.pages) {
     if (!p || typeof p !== "object") continue;
-    pages.push(withProject(migratePageNode(p), p.projectId));
+    pages.push(withOrgScope(withProject(migratePageNode(p), p.projectId), p.orgScope));
   }
   const trash = [];
   for (const e of Array.isArray(raw.trash) ? raw.trash : []) {

@@ -108,7 +108,11 @@ export function toFileFact(row = {}) {
     // depending on the accessor — accept both so the on-map badge isn't dead (NEW-3).
     placed: row.placed === true || row.placed === "true",
     hasFile: !!(row.storageKey || row.hasFile) || row.oversize === false,
-    unfiled: !(row.projectId || row.project_id),
+    // ORG SCOPE (NEW-1) — checked before `unfiled`: a file filed to the Organization has no
+    // project by design (like an org-scoped note), which is a different fact from "nobody has
+    // filed this anywhere yet" and must not read as the same thing.
+    orgScope: row.orgScope === true || row.orgScope === "true",
+    unfiled: !(row.projectId || row.project_id) && !(row.orgScope === true || row.orgScope === "true"),
     // An explicit needs-filing flag from the file-facts index (low/no-confidence match).
     needsFiling: row.needsFiling === true || row.needs_filing === true,
   };

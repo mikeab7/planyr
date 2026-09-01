@@ -23,12 +23,18 @@ beforeEach(() => { globalThis.localStorage = makeStore(); });
 describe("lastRoute — write/read round-trip", () => {
   it("round-trips module + project + cross", () => {
     writeLastRoute({ module: "doc-review", projectId: "grp-1", cross: false });
-    expect(readLastRoute()).toEqual({ module: "doc-review", projectId: "grp-1", cross: false });
+    expect(readLastRoute()).toEqual({ module: "doc-review", projectId: "grp-1", cross: false, org: false });
   });
 
   it("null project persists as null; cross mode persists", () => {
     writeLastRoute({ module: "library", projectId: null, cross: true });
-    expect(readLastRoute()).toEqual({ module: "library", projectId: null, cross: true });
+    expect(readLastRoute()).toEqual({ module: "library", projectId: null, cross: true, org: false });
+  });
+
+  // ORG SCOPE (NEW-1) — a deliberate destination, persisted the same way cross is.
+  it("org mode persists", () => {
+    writeLastRoute({ module: "notes", projectId: null, cross: false, org: true });
+    expect(readLastRoute()).toEqual({ module: "notes", projectId: null, cross: false, org: true });
   });
 
   it("corrupt JSON reads null AND clears the key (one bad write can't wedge every boot)", () => {
@@ -57,12 +63,12 @@ describe("lastRoute — pickBootRoute (the boot decision)", () => {
 
   it("empty hash + stored → seeds last module + project", () => {
     expect(pickBootRoute({ initialHashEmpty: true, stored }))
-      .toEqual({ module: "doc-review", projectId: "grp-9", cross: false });
+      .toEqual({ module: "doc-review", projectId: "grp-9", cross: false, org: false });
   });
 
   it("restoreLastModule=false keeps the project but boots the default module", () => {
     expect(pickBootRoute({ initialHashEmpty: true, stored, restoreLastModule: false }))
-      .toEqual({ module: DEFAULT_MODULE, projectId: "grp-9", cross: false });
+      .toEqual({ module: DEFAULT_MODULE, projectId: "grp-9", cross: false, org: false });
   });
 
   it("a stored plain dashboard resolves to null (seeding '#/' is a no-op)", () => {
@@ -72,17 +78,23 @@ describe("lastRoute — pickBootRoute (the boot decision)", () => {
 
   it("junk module in the pointer normalizes to the default module, project preserved", () => {
     const out = pickBootRoute({ initialHashEmpty: true, stored: { module: "bogus", projectId: "p1", cross: false } });
-    expect(out).toEqual({ module: DEFAULT_MODULE, projectId: "p1", cross: false });
+    expect(out).toEqual({ module: DEFAULT_MODULE, projectId: "p1", cross: false, org: false });
   });
 
   it("cross-mode round-trips through the hash grammar (#/all/<slug> has no project)", () => {
     const out = pickBootRoute({ initialHashEmpty: true, stored: { module: "library", projectId: "p1", cross: true } });
-    expect(out).toEqual({ module: "library", projectId: null, cross: true });
+    expect(out).toEqual({ module: "library", projectId: null, cross: true, org: false });
   });
 
   it("a project id with slashes survives the encode/decode round-trip intact", () => {
     const out = pickBootRoute({ initialHashEmpty: true, stored: { module: "library", projectId: "a/b c", cross: false } });
-    expect(out).toEqual({ module: "library", projectId: "a/b c", cross: false });
+    expect(out).toEqual({ module: "library", projectId: "a/b c", cross: false, org: false });
+  });
+
+  // ORG SCOPE (NEW-1) — a deliberate destination, seeded on boot the same way cross is.
+  it("a deliberate org-scope view still seeds even though projectId is null", () => {
+    const out = pickBootRoute({ initialHashEmpty: true, stored: { module: "notes", projectId: null, cross: false, org: true } });
+    expect(out).toEqual({ module: "notes", projectId: null, cross: false, org: true });
   });
 
   /* B710736 — the food-tab bug: a module with no active project (and not in a deliberate
@@ -99,13 +111,13 @@ describe("lastRoute — pickBootRoute (the boot decision)", () => {
   it("a real project still seeds normally for every project-scoped module", () => {
     for (const module of ["doc-review", "library", "scheduler", "notes"]) {
       expect(pickBootRoute({ initialHashEmpty: true, stored: { module, projectId: "p1", cross: false } }))
-        .toEqual({ module, projectId: "p1", cross: false });
+        .toEqual({ module, projectId: "p1", cross: false, org: false });
     }
   });
 
   it("a deliberate cross-project view still seeds even though projectId is null", () => {
     expect(pickBootRoute({ initialHashEmpty: true, stored: { module: "notes", projectId: null, cross: true } }))
-      .toEqual({ module: "notes", projectId: null, cross: true });
+      .toEqual({ module: "notes", projectId: null, cross: true, org: false });
   });
 
   it("Food is NEVER seeded as the restored default — not even with a project id or cross mode", () => {

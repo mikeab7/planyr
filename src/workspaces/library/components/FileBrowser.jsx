@@ -83,6 +83,9 @@ const FileTypeIcon = ({ kind }) => (
 
 export default function FileBrowser({
   projectId = null, projectName = "", signedIn = false, cross = false, isActive = true,
+  // ORG SCOPE (NEW-1) — a real, distinct browse scope alongside a project and cross-project:
+  // files filed to the Organization, never mixed with "unfiled" project files.
+  orgScope = false,
   onOpenReview, onNavigate, indexProvider = null,
   /* Unified Library (B650 follow-on) — "folder mode": the left column shows the project's REAL
    * folder tree (the `folderRail` node, a FolderTree) instead of the derived category tree, and
@@ -201,9 +204,13 @@ export default function FileBrowser({
   // Project-scoped facts (or all, in cross-project mode). Metadata only.
   const facts = useMemo(() => {
     const all = buildFileFacts(reviews);
-    if (cross) return all;
+    // ORG SCOPE (NEW-1) — a real, separate scope: cross-project browsing spans every PROJECT
+    // (site-planner site groups), never the Organization's own files, mirroring how Notes'
+    // Dashboard keeps its Organization group distinct from the per-project ones.
+    if (cross) return all.filter((f) => !f.orgScope);
+    if (orgScope) return all.filter((f) => f.orgScope);
     return all.filter((f) => f.projectId === projectId);
-  }, [reviews, projectId, cross]);
+  }, [reviews, projectId, cross, orgScope]);
 
   const tree = useMemo(() => deriveTree(facts, { includeSuperseded: showSuperseded }), [facts, showSuperseded]);
   const holding = useMemo(() => holdingArea(facts), [facts]);
@@ -267,8 +274,8 @@ export default function FileBrowser({
   // File one blob as a review + its facts row. Returns the fileNewReview result (or null on fail).
   // `folderId` (B686) files the bytes into an explicitly-picked tree folder (Drive + on-screen).
   // `onProgress(sent,total)` surfaces the chunked upload's byte progress in the tray (B409).
-  const fileOne = async ({ pid, discipline, item_, docDate, blob, fileName, facts, needsFiling, folderId = null, onProgress = null }) => {
-    const r = await fileNewReview({ projectId: pid, project: pid ? projName(pid) : "", discipline, item: item_, docDate, blob, fileName, folderId, onProgress });
+  const fileOne = async ({ pid, discipline, item_, docDate, blob, fileName, facts, needsFiling, folderId = null, onProgress = null, org = false }) => {
+    const r = await fileNewReview({ projectId: pid, project: pid ? projName(pid) : "", discipline, item: item_, docDate, blob, fileName, folderId, onProgress, orgScope: org });
     if (!r || !r.ok) return r || null;
     const factsIn = facts ? { ...facts } : { discipline, item: item_, docDate };
     factsIn.projectId = pid; factsIn.discipline = discipline; factsIn.item = item_; factsIn.needsFiling = needsFiling;
@@ -291,6 +298,18 @@ export default function FileBrowser({
         if (!r || !r.ok) { patchItem(item.uploadId, { status: QUEUE_STATUS.FAILED, error: (r && r.error) || "Couldn’t file." }); return; }
         const warn = fileWarn({ oversize: r.oversize, uploadFailed: r.uploadFailed, driveError: r.driveError, large: r.large });
         patchItem(item.uploadId, { status: QUEUE_STATUS.NEEDS_FILING, reviewId: r.id, filedAt: Date.now(), warn, target: "Needs filing" });
+        return;
+      }
+
+      // ORG SCOPE (NEW-1) — standing in Organization is an explicit act, same as standing in a
+      // project: a drop files straight there, no title-block auto-match (there is no project
+      // list to match against) and never "needs filing". Tier A has no org folder tree yet
+      // (a real, scoped follow-on — see the item), so this is the whole of org filing today.
+      if (orgScope) {
+        const r = await fileOne({ pid: null, org: true, discipline: "Other", item_: "", docDate: null, blob: item.file, fileName: item.name, facts: null, needsFiling: false, onProgress });
+        if (!r || !r.ok) { patchItem(item.uploadId, { status: QUEUE_STATUS.FAILED, error: (r && r.error) || "Couldn’t file." }); return; }
+        const warn = fileWarn({ oversize: r.oversize, uploadFailed: r.uploadFailed, driveError: r.driveError, large: r.large });
+        patchItem(item.uploadId, { status: QUEUE_STATUS.DONE, reviewId: r.id, filedAt: Date.now(), warn, target: "Organization" });
         return;
       }
 
@@ -382,7 +401,7 @@ export default function FileBrowser({
   const dropTargetFolder = () => (folderMode ? (selectedFolderId || null) : null);
 
   const ingest = async (fileList, targetFolderId = null, opts = undefined) => {
-    if (!projectId && !cross) return; // drop gated until a project is chosen (no auto-guess)
+    if (!projectId && !cross && !orgScope) return; // drop gated until a project/scope is chosen (no auto-guess)
     const items = makeQueueItems(fileList);
     if (!items.length) return;
     setQueue((q) => [...items, ...q]);
@@ -400,7 +419,7 @@ export default function FileBrowser({
    * auto-file-by-title-block path. An explicit target (folder-row drop / selected folder)
    * still wins for the whole drop, same as B686/B687. */
   const ingestFolder = async (allFiles, targetFolderId = null) => {
-    if (!projectId && !cross) return;
+    if (!projectId && !cross && !orgScope) return;
     const { accepted, skipped } = partitionAccepted(allFiles);
     if (!accepted.length) { setFolderNote(skipped.length ? { filed: 0, skipped: skipped.length } : null); return; }
     // No explicit target + no published tree rows (still loading) → classic auto-file for
@@ -590,7 +609,7 @@ export default function FileBrowser({
     return <Centered title="Sign in to see your files"
       body="Document files live in your account (sign in from the Site Planner). Until then, open a PDF directly to mark it up." />;
   }
-  if (!projectId && !cross) {
+  if (!projectId && !cross && !orgScope) {
     return <Centered title="Pick a project to see its files"
       body="Choose a project from the breadcrumb above to open its file browser. (Dropping a file needs a project so it never has to guess where it belongs.)" />;
   }
@@ -598,7 +617,10 @@ export default function FileBrowser({
   const holdingCount = holding.length;
   // Recently-deleted rows in scope (NEW-F3): the project view shows this project's items plus
   // never-filed ones (project_id null) so nothing deleted becomes unfindable; cross shows all.
-  const deadShown = cross ? deletedRows : deletedRows.filter((d) => d.project_id === projectId || !d.project_id);
+  // ORG SCOPE (NEW-1) — Organization's own bin, same shape as a project's: its own deletes only,
+  // never the never-filed rows (those aren't org's to claim, any more than they're this project's).
+  const isOrgRow = (d) => d.orgScope === true || d.orgScope === "true";
+  const deadShown = cross ? deletedRows.filter((d) => !isOrgRow(d)) : orgScope ? deletedRows.filter(isOrgRow) : deletedRows.filter((d) => d.project_id === projectId || !d.project_id);
   // Where a drop will file (B686): the selected tree folder wins; "All files"/no selection means
   // auto-file by title block. Drives the drop-strip copy + the drop-anywhere overlay so the two
   // modes are unmistakable ("Filing into 02. Electric" vs. "auto-file drawings by title block").
@@ -623,7 +645,7 @@ export default function FileBrowser({
           <>
             <div style={{ flex: "none", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, padding: "11px 10px 7px 14px" }}>
               <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-tertiary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {cross ? "All projects" : projName(projectId) || "Project"} · Files
+                {cross ? "All projects" : orgScope ? "Organization" : projName(projectId) || "Project"} · Files
               </span>
               {/* The "⊞ All (projects)" un-scoping button is gone (B700): a project-scoped pane
                   never silently changes what "here" means. Cross-project browsing lives at the
@@ -634,7 +656,9 @@ export default function FileBrowser({
                 onClick={() => { setShowHolding(false); setSearchQ(""); setNode({ category: null, subcategory: null }); }} bold />
               {tree.length === 0 && (
                 <div style={{ fontSize: 11.5, color: "var(--text-secondary)", padding: "8px 10px", lineHeight: 1.5 }}>
-                  No filed documents yet. Drop files below — a PDF reads its own title block and files itself.
+                  {orgScope
+                    ? "No organization files yet. Drop files below — they're visible from every project as reference."
+                    : "No filed documents yet. Drop files below — a PDF reads its own title block and files itself."}
                 </div>
               )}
               {tree.map((n) => {
@@ -948,7 +972,7 @@ export default function FileBrowser({
       {dropOver && (
         <div style={{ position: "absolute", inset: 0, pointerEvents: "none", border: "2.5px dashed var(--accent-library)", borderRadius: 4, background: "rgba(14,116,144,0.06)", display: "grid", placeItems: "center" }}>
           <span style={{ background: "var(--surface-raised)", color: "var(--text-primary)", fontWeight: 700, fontSize: 13, padding: "8px 16px", borderRadius: 999, border: "1px solid var(--border-default)" }}>
-            Drop to file into {treeDragTarget || dropFolderLabel || (cross ? "the matched project" : (projName(projectId) || "this project"))}
+            Drop to file into {treeDragTarget || dropFolderLabel || (cross ? "the matched project" : orgScope ? "Organization" : (projName(projectId) || "this project"))}
           </span>
         </div>
       )}

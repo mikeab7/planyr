@@ -164,7 +164,7 @@ function cloudPath(x, y, w, h, r = 9) {
 }
 
 export default function DocReview({
-  shellModule, onShellSwitch, authControl, accountActive = false, onGoDashboard, onNewProject, docIntent = null,
+  shellModule, onShellSwitch, authControl, accountActive = false, onGoDashboard, onNewProject, onSelectOrg, docIntent = null,
   // Work Item A — the active project comes from the URL route (so it survives a module
   // switch), not module-local state. `projectId` is the route's Site-group id (null =
   // no project → pick-a-project); `onNavigate` writes the hash to change it; `crossProject`
@@ -2026,6 +2026,7 @@ export default function DocReview({
         cross={crossProject}
         onSelectProject={(id) => onNavigate?.({ projectId: id, cross: false })}
         onNewProject={onNewProject}
+        onSelectOrg={onSelectOrg}
         centerContent={
           <button onClick={() => onShellSwitch?.("library")} title="Open the Library to browse this project's files"
             style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.pill, padding: "3px 10px",
@@ -2192,6 +2193,7 @@ export default function DocReview({
         // project from the breadcrumb in "All projects" mode was a silent no-op.
         onSelectProject={(id) => onNavigate?.({ projectId: id, cross: false })}
         onNewProject={onNewProject}
+        onSelectOrg={onSelectOrg}
         // The compact Row-1 CloudSyncBadge (NEW-1) reads this normalized state; docSaveState
         // keeps the "a failed write is LOUD, never silent" contract (unit-locked).
         saveState={docSaveState(status, signedIn, isEmpty())}

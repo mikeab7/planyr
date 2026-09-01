@@ -122,6 +122,7 @@ export default function Shell() {
   const active    = route.module;     // workspace id
   const projectId = route.projectId;  // active Site-group id | null
   const cross     = route.cross;      // cross-project mode
+  const org       = route.org;        // ORG SCOPE (NEW-1) — standing in the Organization, not any project
   // B711904 (NEW-1) — "admin" is deliberately NOT a module slug (see route.js), so it never
   // shows up in `route.module`; it's read straight off the live hash instead, the same way
   // `routeMiss` below already has to be. Recomputed on every hashchange (the `route` state
@@ -148,13 +149,25 @@ export default function Shell() {
   // breadcrumb's "Dashboard" / "select project" simply change the hash; only the two
   // *side-effecting* actions still need a signal: creating a new project (born in the
   // Site Planner) and opening a specific review file (Document Review is lazy-mounted).
-  const switchModule = (id) => navigate({ module: id });
-  const goDashboard  = () => navigate({ module: "site-planner", projectId: null, cross: false });
+  // ORG SCOPE (NEW-1) — only Notes and Library are meaningful there (Site/Schedule/Review/
+  // Model have no org-scoped content to show), so switching tabs while standing in
+  // Organization keeps org scope only when the target module can actually show it; any other
+  // tab drops back to that module's plain, no-project state. Site/Schedule/Review/Model are
+  // simply never OFFERED a way into org scope in the first place (no `onSelectOrg` wiring for
+  // Schedule — see the Scheduler note below); this is what makes a stray "#/org/site" URL, if
+  // ever hand-typed, degrade harmlessly rather than needing its own guard everywhere.
+  const ORG_CAPABLE_MODULES = new Set(["notes", "library"]);
+  const switchModule = (id) => navigate({ module: id, org: org && ORG_CAPABLE_MODULES.has(id) });
+  const goDashboard  = () => navigate({ module: "site-planner", projectId: null, cross: false, org: false });
   // "New project" from anywhere: land in the Site Planner and tell it to start a blank
   // site. A monotonic tick (not a project id — the blank isn't saved yet) re-fires on
   // each click; the Site Planner writes the real id into the URL once it exists.
   const [newProjectTick, setNewProjectTick] = useState(0);
-  const newProject = () => { navigate({ module: "site-planner", projectId: null, cross: false }); setNewProjectTick((n) => n + 1); };
+  const newProject = () => { navigate({ module: "site-planner", projectId: null, cross: false, org: false }); setNewProjectTick((n) => n + 1); };
+  // ORG SCOPE (NEW-1) — the switcher's "Organization" entry, reachable from every workspace
+  // the same way "New project" is: it always lands in Notes (the first org-capable module),
+  // regardless of where it was picked from.
+  const goOrg = () => navigate({ module: "notes", projectId: null, cross: false, org: true });
   // Cross-workspace "open this file" intent (NEW-1). The global Project Files panel is
   // reachable from every workspace, but Document Review is lazy-mounted — so a file clicked
   // from the Site side can't be handed to a component that doesn't exist yet. We route to
@@ -167,7 +180,7 @@ export default function Shell() {
   const openReviewInDocReview = (row, { page } = {}) => {
     const pid = row && (row.project_id ?? row.projectId ?? null);
     setDocIntent({ kind: "open-review", row, openAtPage: page || null, token: Date.now() });
-    navigate({ module: "doc-review", projectId: pid || null, cross: false });
+    navigate({ module: "doc-review", projectId: pid || null, cross: false, org: false });
   };
   // Cross-module schedule link (the Schedule + the Site Planner live in SEPARATE cloud backends
   // and can't read each other). When the embedded Schedule app reports a link set/created, mirror
@@ -357,8 +370,13 @@ export default function Shell() {
                     userId={user?.id || null}
                     projectId={projectId}
                     crossProject={cross}
+                    // ORG SCOPE (NEW-1) — passed uniformly, like projectId/crossProject; only
+                    // Notes and Library read it. `onSelectOrg` is the switcher's "Organization"
+                    // entry point, wired the same way `onNewProject` already is everywhere.
+                    org={org}
+                    onSelectOrg={goOrg}
                     onNavigate={navigate}
-                    onProjectChange={(gid) => navigate({ projectId: gid || null, cross: false })}
+                    onProjectChange={(gid) => navigate({ projectId: gid || null, cross: false, org: false })}
                     resumeAllowed={mayResumeLastSite({ initialHashEmpty: INITIAL_HASH_EMPTY, projectId, initialProjectId: INITIAL_ROUTE.projectId })}
                     newProjectTick={newProjectTick}
                     docIntent={docIntent}

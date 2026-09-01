@@ -468,6 +468,12 @@ export default function AppHeader({
   currentProject = null,
   onSelectProject,
   onNewProject,
+  // ORG SCOPE (NEW-1) — a real, distinct scope offered from the SAME switcher, above the
+  // project list. `org` is true while standing in it (the crumb reads "Organization" instead
+  // of a project name); `onSelectOrg`, when the caller wires it, adds the entry to the
+  // dropdown — omitted (Scheduler, Food) it simply doesn't render, never a dead/disabled row.
+  org = false,
+  onSelectOrg,
   // Optional trailing breadcrumb crumb rendered right after the project crumb (e.g. the
   // Site Planner's plan switcher). Keeps the project name in ONE place — the breadcrumb —
   // while a workspace-specific sub-selector (the plan) sits beside it: Map / Project / Plan.
@@ -788,7 +794,13 @@ export default function AppHeader({
 
   // Module tabs — shared by both Row-2 layouts (with and without the B387 center slot)
   // so the per-tab wiring is defined once.
-  const moduleTabButtons = MODULES.map((m) => (
+  // ORG SCOPE (NEW-1) — Site/Schedule/Review/Model are not OFFERED at org scope: there is no
+  // parcel to draw, no drawing to mark up, no site to model, so their tabs simply don't
+  // appear while `org` is true. Notes/Library (and, on a route this build has never actually
+  // produced, any other slug) stay visible — the module tab strip narrows, it never empties.
+  const orgVisibleTabs = new Set(["notes", "library"]);
+  const visibleModules = org ? MODULES.filter((m) => orgVisibleTabs.has(m.id)) : MODULES;
+  const moduleTabButtons = visibleModules.map((m) => (
     <ModuleTab key={m.id} m={m} isActive={m.id === module} onClick={() => onSwitch && onSwitch(m.id)} />
   ));
 
@@ -883,6 +895,8 @@ export default function AppHeader({
                 projects={projects}
                 homeLabel={homeLabel}
                 cross={cross}
+                org={org}
+                onSelectOrg={onSelectOrg}
                 planSlot={planSlot}
               />
             </>
