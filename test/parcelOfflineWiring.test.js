@@ -249,11 +249,16 @@ describe("NEW-1 — one entry point for starting a plan, not two of equal weight
 
   /* Mutation: make "Select parcels" and "Start blank" two same-weight buttons again → red.
      "Select parcels" is the primary action (filled with the accent, like any other primary
-     button); "Start blank" is reachable only behind the caret, as a secondary option. */
+     button); "Start blank" is reachable only behind the caret, as a secondary option.
+     NEW-1 (map-view locked-geometry conversion) — "Select parcels" now renders through the
+     shared `Button` primitive (controls.jsx) rather than an inline `background`/`color` literal;
+     `variant="primary"` is what carries the "filled with the accent" contract now (Button's own
+     skin logic fills `accent`/`onAccent`, which default to `var(--accent)`/`var(--on-accent)` —
+     unchanged from what this test asserted before). */
   it("'Select parcels' is the PRIMARY action, and 'Start blank' is secondary behind a caret", () => {
     const block = finder.slice(finder.indexOf('mode === "site" && !selectMode && !placingCompPin && selected.length === 0'), finder.indexOf('mode === "comp" && !selectMode'));
     // one primary button, filled with the accent
-    expect(block).toMatch(/background: "var\(--accent\)", color: "var\(--on-accent\)"/);
+    expect(block).toMatch(/<Button\s+variant="primary"/);
     expect(block).toContain(">Select parcels</span>");
     // …and "Start blank" is NOT a second button in this block — it is the caret's menu.
     expect(block).not.toContain(">Start blank</span>");

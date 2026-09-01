@@ -22,6 +22,12 @@ import { PLACE_NAMES_MIN_ZOOM } from "./lib/layerZoomGate.js";
 import { RADIUS, nestedIn } from "../../shared/ui/radius.js";
 // B649136 — the control-height / type-scale siblings of RADIUS (B809906), used by MAP_CORNER_CHIP_STYLE below.
 import { CONTROL_H, FONT_SIZE } from "../../shared/ui/designTokens.js";
+// NEW-1 (map-view locked-geometry conversion, B989104-B989106 follow-up) — `Button` is the base
+// every nested search-bar action button now renders through — see NESTED_ACTION_SIZE below for
+// why its own RADIUS.control is deliberately overridden at every call site. (The collapsed
+// "Imagery & layers" corner chip is NOT rehomed onto `MenuTrigger` — measured, its own
+// MAP_CORNER_CHIP_STYLE is already byte-for-byte SIZE.md; see that constant's own note.)
+import { Button } from "../../shared/ui/controls.jsx";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 /* LAZY (B1064 tranche c). Converted in the same commit as SitePlanner.jsx's copy — see that
  * file's header comment. On THIS host the card defaults OPEN on desktop (`layersPanelOpen`'s
@@ -214,6 +220,20 @@ const MAP_CORNER_CHIP_STYLE = {
   color: PAL.ink, fontSize: FONT_SIZE.control, fontWeight: 600, textTransform: "none", letterSpacing: "normal",
   cursor: "pointer", fontFamily: "inherit", boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
 };
+
+/* NEW-2 (map-view locked-geometry conversion) — the ONE (radius, height, padding, fontSize) tuple
+ * for every labeled action button NESTED inside the top-center search bar (Select parcels, Drop a
+ * pin, Comp from parcel, Cancel, Plan N parcels →, Comp N parcels). Before this, six near-identical
+ * buttons independently picked their own padding ("0 10px"/"0 11px") and fontSize (12/12.5) — part
+ * of the owner's measured "eight distinct paddings, three font sizes" on this surface.
+ *
+ * Radius is deliberately `nestedIn(RADIUS.lg, 6)`, NOT `RADIUS.control` (the B989104-B989106 SIZE bundle's
+ * own always-8 rule) — these buttons are genuinely nested 6px inside the search bar's own
+ * RADIUS.lg=12 pill (docs/DESIGN.md's nesting rule), unlike the standalone corner chips SIZE was
+ * built for. Converging them onto SIZE.md's height/padding/fontSize (not its radius) is what
+ * closes the real reported defect (inconsistent height/padding/font) without breaking the
+ * concentric-nesting invariant `ui-inventory.mjs`'s nestingMismatches() checks for this surface. */
+const NESTED_ACTION_SIZE = { height: 30, padding: "0 12px", fontSize: FONT_SIZE.control, borderRadius: nestedIn(RADIUS.lg, 6) };
 
 /* NEW-6 — the ring count Leaflet actually uses on this map's two tile layers. Neither passes
  * `keepBuffer`, so both run on Leaflet's default of 2; the cache CEILING is sized from that same
@@ -2870,67 +2890,55 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                map that starts a blank plan. Reuses the exact fallback `startBlankHere` already gives
                the "county service is down" banner — no second implementation. */
             <div style={{ display: "flex", flex: "0 1 auto", minWidth: 54 }}>
-              <button
+              <Button
+                variant="primary"
                 onClick={() => setSelectMode(true)}
                 title="Click parcels on the map to select them, then start a plan from the selection"
                 style={{
+                  ...NESTED_ACTION_SIZE, fontWeight: 700,
                   flex: "1 1 auto", minWidth: 0, overflow: "hidden",
-                  height: 30, padding: "0 11px",
-                  borderTopLeftRadius: nestedIn(RADIUS.lg, 6), borderBottomLeftRadius: nestedIn(RADIUS.lg, 6),
+                  borderTopLeftRadius: NESTED_ACTION_SIZE.borderRadius, borderBottomLeftRadius: NESTED_ACTION_SIZE.borderRadius,
                   borderTopRightRadius: 0, borderBottomRightRadius: 0,
-                  border: "1px solid var(--accent)", borderRight: "1px solid var(--on-accent)",
-                  background: "var(--accent)", color: "var(--on-accent)", fontSize: FONT_SIZE.control, fontWeight: 700,
-                  cursor: "pointer", fontFamily: "inherit",
+                  borderRight: "1px solid var(--on-accent)", boxShadow: "none",
                 }}
               >
                 <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Select parcels</span>
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="primary"
                 ref={startBlankMenuBtnRef}
                 onClick={() => setStartBlankMenuOpen((o) => !o)}
                 title="More ways to start a plan"
                 aria-haspopup="menu" aria-expanded={startBlankMenuOpen}
                 data-testid="map-start-blank-menu-btn"
                 style={{
-                  flex: "none", width: 22,
-                  height: 30,
-                  borderTopRightRadius: nestedIn(RADIUS.lg, 6), borderBottomRightRadius: nestedIn(RADIUS.lg, 6),
+                  flex: "none", width: 22, height: NESTED_ACTION_SIZE.height, padding: 0,
+                  borderTopRightRadius: NESTED_ACTION_SIZE.borderRadius, borderBottomRightRadius: NESTED_ACTION_SIZE.borderRadius,
                   borderTopLeftRadius: 0, borderBottomLeftRadius: 0,
-                  border: "1px solid var(--accent)", background: "var(--accent)", color: "var(--on-accent)",
-                  fontSize: FONT_SIZE.micro, cursor: "pointer", fontFamily: "inherit",
+                  fontSize: FONT_SIZE.micro, boxShadow: "none",
                   display: "flex", alignItems: "center", justifyContent: "center",
                 }}
-              >▾</button>
+              >▾</Button>
             </div>
           )}
           {mode === "comp" && !selectMode && !placingCompPin && selected.length === 0 && onPlaceComp && (
             <>
-              <button
+              <Button
+                variant="ghost"
                 onClick={() => setPlacingCompPin(true)}
                 title="Click the map to drop a leasing-comp pin at that spot"
-                style={{
-                  flex: "0 1 auto", minWidth: 40, overflow: "hidden",
-                  height: 30, padding: "0 11px", borderRadius: nestedIn(RADIUS.lg, 6),
-                  border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
-                  color: PAL.chromeInk, fontSize: 12.5, fontWeight: 600,
-                  cursor: "pointer", fontFamily: "inherit",
-                }}
+                style={{ ...NESTED_ACTION_SIZE, flex: "0 1 auto", minWidth: 40, overflow: "hidden", color: PAL.chromeInk, background: "var(--chrome-bg-elev)", border: "1px solid var(--chrome-divider)", boxShadow: "none" }}
               >
                 <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Drop a pin</span>
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="ghost"
                 onClick={() => setSelectMode(true)}
                 title="Click a parcel on the map to anchor a comp to it"
-                style={{
-                  flex: "0 1 auto", minWidth: 44, overflow: "hidden",
-                  height: 30, padding: "0 11px", borderRadius: nestedIn(RADIUS.lg, 6),
-                  border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
-                  color: PAL.chromeInk, fontSize: 12.5, fontWeight: 600,
-                  cursor: "pointer", fontFamily: "inherit",
-                }}
+                style={{ ...NESTED_ACTION_SIZE, flex: "0 1 auto", minWidth: 44, overflow: "hidden", color: PAL.chromeInk, background: "var(--chrome-bg-elev)", border: "1px solid var(--chrome-divider)", boxShadow: "none" }}
               >
                 <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Comp from parcel</span>
-              </button>
+              </Button>
             </>
           )}
           {placingCompPin && (
@@ -2938,17 +2946,13 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               <span style={{ flex: "1 1 auto", minWidth: 0, color: PAL.chromeMuted, fontSize: 12.5, padding: "0 6px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 Click the map to place a comp…
               </span>
-              <button
+              <Button
+                variant="ghost"
                 onClick={() => setPlacingCompPin(false)}
-                style={{
-                  flex: "none", height: 30, padding: "0 10px", borderRadius: nestedIn(RADIUS.lg, 6),
-                  border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
-                  color: PAL.chromeInk, fontSize: 12, fontWeight: 600,
-                  cursor: "pointer", fontFamily: "inherit",
-                }}
+                style={{ ...NESTED_ACTION_SIZE, flex: "none", color: PAL.chromeInk, background: "var(--chrome-bg-elev)", border: "1px solid var(--chrome-divider)", boxShadow: "none" }}
               >
                 Cancel
-              </button>
+              </Button>
             </>
           )}
           {selectMode && selected.length === 0 && (
@@ -2959,17 +2963,13 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               }}>
                 {busy ? "Looking up lot…" : (mode === "comp" ? "Selecting a parcel for a comp…" : "Selecting…")}
               </span>
-              <button
+              <Button
+                variant="ghost"
                 onClick={() => setSelectMode(false)}
-                style={{
-                  flex: "none", height: 30, padding: "0 10px", borderRadius: nestedIn(RADIUS.lg, 6),
-                  border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
-                  color: PAL.chromeInk, fontSize: 12, fontWeight: 600,
-                  cursor: "pointer", fontFamily: "inherit",
-                }}
+                style={{ ...NESTED_ACTION_SIZE, flex: "none", color: PAL.chromeInk, background: "var(--chrome-bg-elev)", border: "1px solid var(--chrome-divider)", boxShadow: "none" }}
               >
                 Cancel
-              </button>
+              </Button>
             </>
           )}
           {selected.length > 0 && (
@@ -2997,19 +2997,15 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                   Comp mode anchors a comp to the one selected parcel. Never both at once — that
                   was the old design's own confusion (two unrelated actions on one selection). */}
               {mode === "site" && (
-                <button
+                <Button
+                  variant="primary"
                   onClick={planSelected}
-                  style={{
-                    flex: "0 1 auto", minWidth: 44, overflow: "hidden",
-                    height: 30, padding: "0 11px", borderRadius: nestedIn(RADIUS.lg, 6),
-                    border: "none", background: PAL.accent, color: "#fff",
-                    fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
-                  }}
+                  style={{ ...NESTED_ACTION_SIZE, fontWeight: 700, flex: "0 1 auto", minWidth: 44, overflow: "hidden", background: PAL.accent, border: "none", boxShadow: "none" }}
                 >
                   <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     Plan {selected.length > 1 ? `${selected.length} parcels` : "site"} →
                   </span>
-                </button>
+                </Button>
               )}
               {/* B941152 — this used to require `selected.length === 1`, so a two-plus-parcel
                   selection (a normal industrial land comp assembled from adjoining lots) had NO
@@ -3017,19 +3013,15 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                   Any non-empty selection now gets the same one action, worded like the Site-mode
                   "Plan N parcels →" button beside it. */}
               {mode === "comp" && onPlaceComp && (
-                <button
+                <Button
+                  variant="primary"
                   onClick={placeCompOnSelectedParcel}
-                  style={{
-                    flex: "0 1 auto", minWidth: 44, overflow: "hidden",
-                    height: 30, padding: "0 11px", borderRadius: nestedIn(RADIUS.lg, 6),
-                    border: "none", background: COMP_ACCENT, color: "#fff",
-                    fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
-                  }}
+                  style={{ ...NESTED_ACTION_SIZE, fontWeight: 700, flex: "0 1 auto", minWidth: 44, overflow: "hidden", background: COMP_ACCENT, border: "none", boxShadow: "none" }}
                 >
                   <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     Comp {selected.length > 1 ? `${selected.length} parcels` : "here"}
                   </span>
-                </button>
+                </Button>
               )}
             </>
           )}
@@ -3443,7 +3435,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         {/* error toast — surfaced on an error, OR on the NEW-MAPCTRL-2 "you're far
             from your sites" offer alone (STEEL-MAN ix), which can stand with no error text at all. */}
         {(err || locateFar) && (
-          <div style={{ background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45, pointerEvents: (fallbackOffer || locateFar) ? "auto" : "none" }}>
+          <div data-testid="map-status-toast" style={{ background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45, pointerEvents: (fallbackOffer || locateFar) ? "auto" : "none" }}>
             {err}
             {/* NEW-4 — the way forward rides WITH the bad news. Only on a genuine source outage:
                 "no parcel right there" is an answer, not an outage, and gets no button. */}

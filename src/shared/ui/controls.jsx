@@ -77,8 +77,10 @@ function warnLockedOverride(name, props) {
 
 /* Button — variant primary | ghost | danger; size sm | md | lg. `active` renders a ghost as
  * filled (a pressed toggle). `accent`/`onAccent` set the filled color (default: the global
- * interactive accent). */
-export function Button({ variant = "primary", size = "md", active = false, accent = "var(--accent)", onAccent = "var(--on-accent)", disabled = false, style, children, ...rest }) {
+ * interactive accent). Ref-forwarding (NEW-1, map-view conversion) so a caller can anchor a menu
+ * off it directly, like IconButton/MenuTrigger already do — a split "primary action + its own
+ * menu caret" pairing (e.g. MapFinder's "Select parcels ▾") needs the caret half's own ref. */
+export const Button = forwardRef(function Button({ variant = "primary", size = "md", active = false, accent = "var(--accent)", onAccent = "var(--on-accent)", disabled = false, style, children, ...rest }, ref) {
   const filled = variant === "primary" || active;
   const base = {
     padding: PAD[size] || PAD.md,
@@ -98,8 +100,8 @@ export function Button({ variant = "primary", size = "md", active = false, accen
   } else {
     skin = { border: `1px solid ${accent}`, background: accent, color: onAccent };
   }
-  return <button disabled={disabled} style={{ ...base, ...skin, ...style }} {...rest}>{children}</button>;
-}
+  return <button ref={ref} disabled={disabled} style={{ ...base, ...skin, ...style }} {...rest}>{children}</button>;
+});
 
 /* ToggleChip — a pill toggle (the FileBrowser / TeamPanel chip anatomy, unified). */
 export function ToggleChip({ active = false, accent = "var(--accent)", onAccent = "var(--on-accent)", style, children, ...rest }) {

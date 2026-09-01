@@ -4,13 +4,20 @@
 change; `--check` fails CI on drift so this file can never go stale. See `docs/DESIGN.md` for
 the scale this inventory checks against (`RADIUS` / `FONT_SIZE`).
 
-## Coverage (NEW-2, 2026-08-31)
+## Coverage (NEW-2, 2026-08-31; extended for map-view mode/selection states below)
 
-**Crawled:** the Map landing page (no project selected — the first screen a user sees),
-App header + its four dropdown menus (File ▾ / Undo history / Settings gear / plan menu), the
-tool rail, the left rail + Yield panel, Library, Doc Review's empty state.
+**Crawled:** the Map landing page (no project selected — the first screen a user sees) in its
+default Site-mode state, PLUS its Comp-mode state ("Drop a pin"/"Comp from parcel" render only
+there) and its "selecting parcels" state (the split "Select parcels ▾" button's own Cancel
+sibling renders only once armed) — added because the map's own action row hides most of its
+buttons behind mode/selection state, and the single default-state crawl was silently measuring
+none of them. App header + its four dropdown menus (File ▾ / Undo history / Settings gear /
+plan menu), the tool rail, the left rail + Yield panel, Library, Doc Review's empty state.
 
-**Not yet crawled, named rather than silently absent:** the Scheduler (a separate HTML document
+**Not yet crawled, named rather than silently absent:** the map's "selected.length > 0" state
+(the "Plan N parcels →"/"Comp N parcels"/clear-✕ row) — it needs a real parcel click against
+live GIS data, the same real-data wall as every other live-verify GIS item in this repo, so it
+stays on `VERIFICATION.md` rather than this logged-out crawl. The Scheduler (a separate HTML document
 outside this token system entirely — see docs/DESIGN.md), Stitcher/Notes/Model/admin (each needs
 its own seed data or an owner-only allowlist this tool doesn't build yet), Doc Review with a
 document actually open, the Site Planner canvas chrome beyond header/tool-rail/left-rail, any
@@ -37,6 +44,8 @@ genuine convergence).
 | surface | light | dark | ceiling (light/dark) |
 |---|---|---|---|
 | Map landing page (no project selected) | 24 | 24 | 24 / 24 |
+| Map landing page (comp mode) | 21 | 21 | 21 / 21 |
+| Map landing page (selecting parcels) | 23 | 23 | 23 / 23 |
 | App header | 11 | 11 | 11 / 11 |
 | Main menu — File ▾ | 1 | 1 | 1 / 1 |
 | Main menu — Undo history | 0 | 0 | 0 / 0 |
@@ -49,7 +58,7 @@ genuine convergence).
 
 ---
 
-**Total distinct deviating style signatures found: 8.** (B915536's earlier "24"
+**Total distinct deviating style signatures found: 24.** (B915536's earlier "24"
 was measured before the Map landing page — the surface listed first above — was in this crawl at
 all; the amended, complete-coverage count was 44. NEW-1/NEW-2 (2026-08-31) then reduced FONT_SIZE
 from 8 legal values to 5 named roles and moved every fixable one of those 44 onto it — see
@@ -61,9 +70,9 @@ can certify two individually-on-scale, mutually-wrong values as clean.)
 
 **Total sibling radius mismatches found (B950320): 0.** See the section below.
 
-**Total sibling height/padding mismatches found (NEW-3, B982402): 32.** See the section below.
+**Total sibling height/padding mismatches found (NEW-3, B982402): 48.** See the section below.
 
-**Total alignment mismatches found (B950322): 2.** See the section below.
+**Total alignment mismatches found (B950322): 6.** See the section below.
 
 ## Known, deliberately-not-fixed findings
 
@@ -167,7 +176,7 @@ by construction (radius 0 opts out of that check's own candidate pool).
 **Map landing page (no project selected) — light:**
 
 - "Settings" sits 6px from "Cloud sync isn't set up — your work is saved on this device only" — padding "0px" vs "0px 12px".
-- "Click parcels on the map to select them, then start a plan from the selection" sits 0px from "More ways to start a plan" — padding "0px 11px" vs "1px 6px".
+- "Click parcels on the map to select them, then start a plan from the selection" sits 0px from "More ways to start a plan" — padding "0px 12px" vs "0px".
 - "Collapse the sites panel" sits 4px from "Sites1" — padding "1px 6px" vs "0px 8px".
 - "Filter sites by name" sits 6px from "Sort sites within each group" — padding "5px 8px" vs "5px 6px".
 - "Collapse" sits 0px from "Reorder the Pursuit group" — height 23px vs 17px, padding "4px 4px 4px 12px" vs "1px 6px".
@@ -175,7 +184,35 @@ by construction (radius 0 opts out of that check's own candidate pool).
 **Map landing page (no project selected) — dark:**
 
 - "Settings" sits 6px from "Cloud sync isn't set up — your work is saved on this device only" — padding "0px" vs "0px 12px".
-- "Click parcels on the map to select them, then start a plan from the selection" sits 0px from "More ways to start a plan" — padding "0px 11px" vs "1px 6px".
+- "Click parcels on the map to select them, then start a plan from the selection" sits 0px from "More ways to start a plan" — padding "0px 12px" vs "0px".
+- "Collapse the sites panel" sits 4px from "Sites1" — padding "1px 6px" vs "0px 8px".
+- "Filter sites by name" sits 6px from "Sort sites within each group" — padding "5px 8px" vs "5px 6px".
+- "Collapse" sits 0px from "Reorder the Pursuit group" — height 23px vs 17px, padding "4px 4px 4px 12px" vs "1px 6px".
+
+**Map landing page (comp mode) — light:**
+
+- "Settings" sits 6px from "Cloud sync isn't set up — your work is saved on this device only" — padding "0px" vs "0px 12px".
+- "Search for an address or place" sits 17px from "Click the map to drop a leasing-comp pin at that spot" — height 42px vs 30px, padding "0px 10px" vs "0px 12px" (divider-separated).
+- "Collapse the sites panel" sits 4px from "Sites1" — padding "1px 6px" vs "0px 8px".
+
+**Map landing page (comp mode) — dark:**
+
+- "Settings" sits 6px from "Cloud sync isn't set up — your work is saved on this device only" — padding "0px" vs "0px 12px".
+- "Search for an address or place" sits 17px from "Click the map to drop a leasing-comp pin at that spot" — height 42px vs 30px, padding "0px 10px" vs "0px 12px" (divider-separated).
+- "Collapse the sites panel" sits 4px from "Sites1" — padding "1px 6px" vs "0px 8px".
+
+**Map landing page (selecting parcels) — light:**
+
+- "Settings" sits 6px from "Cloud sync isn't set up — your work is saved on this device only" — padding "0px" vs "0px 12px".
+- "Search for an address or place" sits 198.8px from "Cancel" — height 42px vs 30px, padding "0px 10px" vs "0px 12px" (divider-separated).
+- "Collapse the sites panel" sits 4px from "Sites1" — padding "1px 6px" vs "0px 8px".
+- "Filter sites by name" sits 6px from "Sort sites within each group" — padding "5px 8px" vs "5px 6px".
+- "Collapse" sits 0px from "Reorder the Pursuit group" — height 23px vs 17px, padding "4px 4px 4px 12px" vs "1px 6px".
+
+**Map landing page (selecting parcels) — dark:**
+
+- "Settings" sits 6px from "Cloud sync isn't set up — your work is saved on this device only" — padding "0px" vs "0px 12px".
+- "Search for an address or place" sits 198.8px from "Cancel" — height 42px vs 30px, padding "0px 10px" vs "0px 12px" (divider-separated).
 - "Collapse the sites panel" sits 4px from "Sites1" — padding "1px 6px" vs "0px 8px".
 - "Filter sites by name" sits 6px from "Sort sites within each group" — padding "5px 8px" vs "5px 6px".
 - "Collapse" sits 0px from "Reorder the Pursuit group" — height 23px vs 17px, padding "4px 4px 4px 12px" vs "1px 6px".
@@ -238,6 +275,22 @@ look aligned because they float over the same surface.
 
 - SiteCompSelect parcels▾ (top 67, h 42) · ▼Sites1Comps0Largest firstA–ZR (top 67, h 128) · ▼Imagery & layers (top 67, h 30) — top spread 0px, height spread 98px.
 
+**Map landing page (comp mode) — light:**
+
+- SiteCompDrop a pinComp from pa (top 67, h 42) · ▼Sites1Comps0Site plans+ Uploa (top 67, h 295) · ▼Imagery & layers (top 67, h 30) — top spread 0px, height spread 265px.
+
+**Map landing page (comp mode) — dark:**
+
+- SiteCompDrop a pinComp from pa (top 67, h 42) · ▼Sites1Comps0Site plans+ Uploa (top 67, h 295) · ▼Imagery & layers (top 67, h 30) — top spread 0px, height spread 265px.
+
+**Map landing page (selecting parcels) — light:**
+
+- SiteCompSelecting…Cancel (top 67, h 42) · ▼Sites1Comps0Largest firstA–ZR (top 67, h 128) · ▼Imagery & layers (top 67, h 30) — top spread 0px, height spread 98px.
+
+**Map landing page (selecting parcels) — dark:**
+
+- SiteCompSelecting…Cancel (top 67, h 42) · ▼Sites1Comps0Largest firstA–ZR (top 67, h 128) · ▼Imagery & layers (top 67, h 30) — top spread 0px, height spread 98px.
+
 ---
 
 ### Map landing page (no project selected)
@@ -248,7 +301,7 @@ look aligned because they float over the same surface.
 |---|---|---|---|---|---|---|---|
 | ⚠️ **fontSize 22 not in FONT_SIZE scale {10,10.5,12,13,14}** — 0px | 30px | 22px | 700 | `rgb(255, 255, 255)` | `0px none rgb(0, 0, 0)` | Zoom in, Zoom out ×2 | src/workspaces/site-planner/components/LayerPanel.jsx:117:   * These two are what turn a static "Zoom in to ≥ 16 to load" sentence — which reads the same (+19 more matches, best-effort) |
 | ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 42px | 16px | 400 | `rgb(234, 238, 243)` | `0px none rgb(27, 30, 38)` | SiteCompSelect parcels▾ ×1 | unattributed (no source match — best-effort text search) |
-| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 6px | 30px | 16px | 400 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Site or comp ×1 | src/workspaces/site-planner/MapFinder.jsx:473:    <div role="tablist" aria-label="Site or comp" style={{ |
+| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 6px | 30px | 16px | 400 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Site or comp ×1 | src/workspaces/site-planner/MapFinder.jsx:493:    <div role="tablist" aria-label="Site or comp" style={{ |
 | ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 128px | 16px | 400 | `rgba(255, 255, 255, 0.94)` | `1px solid rgb(225, 229, 235)` | ▼Sites1Comps0Largest firstA–ZRecently to ×1 | unattributed (no source match — best-effort text search) |
 | 0px | 25px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(69, 76, 92)` | Schedule, Review, Library (+2 more) ×5 | src/shared/ui/ModuleLoader.jsx:6: *   • Schedule  → a Gantt chart assembling: zebra row bands fade in top→bottom, (+85 more matches, best-effort) |
 | 8px | 30px | 12px | 400 | `rgb(234, 238, 243)` | `1px solid rgb(215, 221, 229)` | Full screen, Settings ×2 | src/shared/ui/AppHeader.jsx:148:      aria-label={active ? "Leave full screen" : "Full screen"} (+5 more matches, best-effort) |
@@ -257,19 +310,19 @@ look aligned because they float over the same surface.
 | 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Choose a project ×1 | src/shared/ui/ProjectBreadcrumb.jsx:589:        title={cross ? "Browsing all projects" : currentProject ? "Switch project" : "Choose a project"} (+2 more matches, best-effort) |
 | 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Cloud sync isn't set up — your work is saved on this device only ×1 | src/app/AccountControl.jsx:144:          title="Cloud sync isn't set up — your work is saved on this device only" |
 | 999px | 20px | 12px | 800 | `rgb(215, 221, 229)` | `0px none rgb(53, 59, 73)` | ⊘ ×1 | unattributed (label too short to search) |
-| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(15, 110, 86)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+478 more matches, best-effort) |
-| 0px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Find my location ×1 | src/workspaces/site-planner/MapFinder.jsx:1171:      btn.href = "#"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn"); btn.setAttribute("data-locate-state", "idle"); (+2 more matches, best-effort) |
+| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(15, 110, 86)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+479 more matches, best-effort) |
+| 0px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Find my location ×1 | src/workspaces/site-planner/MapFinder.jsx:1191:      btn.href = "#"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn"); btn.setAttribute("data-locate-state", "idle"); (+2 more matches, best-effort) |
 | 0px | 18px | 12px | 400 | `rgba(255, 255, 255, 0.8)` | `0px none rgb(51, 51, 51)` | 500 mi ×1 | unattributed (no source match — best-effort text search) |
-| 6px | 26px | 12px | 700 | `rgb(194, 65, 12)` | `0px none rgb(255, 255, 255)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+478 more matches, best-effort) |
-| 6px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Comp ×1 | src/shared/ui/CloudSyncBadge.jsx:23:import { Component, useEffect, useRef, useState } from "react"; (+197 more matches, best-effort) |
+| 6px | 26px | 12px | 700 | `rgb(194, 65, 12)` | `0px none rgb(255, 255, 255)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+479 more matches, best-effort) |
+| 6px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Comp ×1 | src/shared/ui/CloudSyncBadge.jsx:23:import { Component, useEffect, useRef, useState } from "react"; (+212 more matches, best-effort) |
 | 0px | 42px | 13px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Search for an address or place ×1 | src/workspaces/site-planner/components/PlaceSearchField.jsx:148:        aria-label="Search for an address or place" |
-| 6px 0px 0px 6px | 30px | 12px | 700 | `rgb(194, 65, 12)` | `1px solid rgb(194, 65, 12)` | Click parcels on the map to select them, then start a plan from the selection ×1 | src/workspaces/site-planner/MapFinder.jsx:2875:                title="Click parcels on the map to select them, then start a plan from the selection" |
-| 0px 6px 6px 0px | 30px | 10px | 400 | `rgb(194, 65, 12)` | `1px solid rgb(194, 65, 12)` | More ways to start a plan ×1 | src/workspaces/site-planner/MapFinder.jsx:2891:                title="More ways to start a plan" |
-| 6px | 22px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Collapse the sites panel ×1 | src/workspaces/site-planner/MapFinder.jsx:3119:                title={sitesPanelOpen ? "Collapse the sites panel" : "Expand the sites panel"} |
+| 6px 0px 0px 6px | 30px | 12px | 700 | `rgb(194, 65, 12)` | `1px solid rgb(194, 65, 12)` | Click parcels on the map to select them, then start a plan from the selection ×1 | src/workspaces/site-planner/MapFinder.jsx:2896:                title="Click parcels on the map to select them, then start a plan from the selection" |
+| 0px 6px 6px 0px | 30px | 10px | 600 | `rgb(194, 65, 12)` | `1px solid rgb(194, 65, 12)` | More ways to start a plan ×1 | src/workspaces/site-planner/MapFinder.jsx:2911:                title="More ways to start a plan" |
+| 6px | 22px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Collapse the sites panel ×1 | src/workspaces/site-planner/MapFinder.jsx:3111:                title={sitesPanelOpen ? "Collapse the sites panel" : "Expand the sites panel"} |
 | 6px | 22px | 12px | 700 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Sites1 ×1 | unattributed (no source match — best-effort text search) |
 | 6px | 22px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Comps0 ×1 | unattributed (no source match — best-effort text search) |
-| 6px | 29px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Filter sites by name ×1 | src/workspaces/site-planner/MapFinder.jsx:3143:              <input value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name" |
-| 6px | 29px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Sort sites within each group ×1 | src/workspaces/site-planner/MapFinder.jsx:3145:              <select value={sitesPanelPrefs.sort} onChange={(e) => setSitesSort(e.target.value)} aria-label="Sort sites within each group" |
+| 6px | 29px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Filter sites by name ×1 | src/workspaces/site-planner/MapFinder.jsx:3135:              <input value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name" |
+| 6px | 29px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Sort sites within each group ×1 | src/workspaces/site-planner/MapFinder.jsx:3137:              <select value={sitesPanelPrefs.sort} onChange={(e) => setSitesSort(e.target.value)} aria-label="Sort sites within each group" |
 | 0px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Collapse ×1 | src/shared/projects/projectModel.js:16:// Collapse a flat list of site-model records (each: { groupId|id, site|name, (+25 more matches, best-effort) |
 | 999px | 14px | 10px | 400 | `rgb(216, 90, 48)` | `0px none rgb(255, 255, 255)` | SPAN ×1 | src/shared/ui/AppHeader.jsx:823:            along the chip's right edge returned THE PILL'S TEXT SPAN for the last stretch of it, (+22 more matches, best-effort) |
 | 6px | 17px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Reorder the Pursuit group ×1 | unattributed (no source match — best-effort text search) |
@@ -282,7 +335,7 @@ look aligned because they float over the same surface.
 |---|---|---|---|---|---|---|---|
 | ⚠️ **fontSize 22 not in FONT_SIZE scale {10,10.5,12,13,14}** — 0px | 30px | 22px | 700 | `rgb(255, 255, 255)` | `0px none rgb(0, 0, 0)` | Zoom in, Zoom out ×2 | src/workspaces/site-planner/components/LayerPanel.jsx:117:   * These two are what turn a static "Zoom in to ≥ 16 to load" sentence — which reads the same (+19 more matches, best-effort) |
 | ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 42px | 16px | 400 | `rgb(17, 19, 25)` | `0px none rgb(232, 235, 240)` | SiteCompSelect parcels▾ ×1 | unattributed (no source match — best-effort text search) |
-| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 6px | 30px | 16px | 400 | `rgb(23, 26, 33)` | `0px none rgb(232, 235, 240)` | Site or comp ×1 | src/workspaces/site-planner/MapFinder.jsx:473:    <div role="tablist" aria-label="Site or comp" style={{ |
+| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 6px | 30px | 16px | 400 | `rgb(23, 26, 33)` | `0px none rgb(232, 235, 240)` | Site or comp ×1 | src/workspaces/site-planner/MapFinder.jsx:493:    <div role="tablist" aria-label="Site or comp" style={{ |
 | ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 128px | 16px | 400 | `rgba(24, 27, 33, 0.93)` | `1px solid rgb(42, 46, 55)` | ▼Sites1Comps0Largest firstA–ZRecently to ×1 | unattributed (no source match — best-effort text search) |
 | 0px | 25px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(194, 200, 210)` | Schedule, Review, Library (+2 more) ×5 | src/shared/ui/ModuleLoader.jsx:6: *   • Schedule  → a Gantt chart assembling: zebra row bands fade in top→bottom, (+85 more matches, best-effort) |
 | 8px | 30px | 12px | 400 | `rgb(17, 19, 25)` | `1px solid rgb(38, 42, 51)` | Full screen, Settings ×2 | src/shared/ui/AppHeader.jsx:148:      aria-label={active ? "Leave full screen" : "Full screen"} (+5 more matches, best-effort) |
@@ -291,19 +344,159 @@ look aligned because they float over the same surface.
 | 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Choose a project ×1 | src/shared/ui/ProjectBreadcrumb.jsx:589:        title={cross ? "Browsing all projects" : currentProject ? "Switch project" : "Choose a project"} (+2 more matches, best-effort) |
 | 8px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Cloud sync isn't set up — your work is saved on this device only ×1 | src/app/AccountControl.jsx:144:          title="Cloud sync isn't set up — your work is saved on this device only" |
 | 999px | 20px | 12px | 800 | `rgb(38, 42, 51)` | `0px none rgb(166, 173, 186)` | ⊘ ×1 | unattributed (label too short to search) |
-| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(93, 202, 165)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+478 more matches, best-effort) |
-| 0px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `0px none rgb(236, 239, 244)` | Find my location ×1 | src/workspaces/site-planner/MapFinder.jsx:1171:      btn.href = "#"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn"); btn.setAttribute("data-locate-state", "idle"); (+2 more matches, best-effort) |
+| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(93, 202, 165)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+479 more matches, best-effort) |
+| 0px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `0px none rgb(236, 239, 244)` | Find my location ×1 | src/workspaces/site-planner/MapFinder.jsx:1191:      btn.href = "#"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn"); btn.setAttribute("data-locate-state", "idle"); (+2 more matches, best-effort) |
 | 0px | 18px | 12px | 400 | `rgba(255, 255, 255, 0.8)` | `0px none rgb(51, 51, 51)` | 500 mi ×1 | unattributed (no source match — best-effort text search) |
-| 6px | 26px | 12px | 700 | `rgb(242, 107, 58)` | `0px none rgb(255, 255, 255)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+478 more matches, best-effort) |
-| 6px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Comp ×1 | src/shared/ui/CloudSyncBadge.jsx:23:import { Component, useEffect, useRef, useState } from "react"; (+197 more matches, best-effort) |
+| 6px | 26px | 12px | 700 | `rgb(242, 107, 58)` | `0px none rgb(255, 255, 255)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+479 more matches, best-effort) |
+| 6px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Comp ×1 | src/shared/ui/CloudSyncBadge.jsx:23:import { Component, useEffect, useRef, useState } from "react"; (+212 more matches, best-effort) |
 | 0px | 42px | 13px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | Search for an address or place ×1 | src/workspaces/site-planner/components/PlaceSearchField.jsx:148:        aria-label="Search for an address or place" |
-| 6px 0px 0px 6px | 30px | 12px | 700 | `rgb(242, 107, 58)` | `1px solid rgb(242, 107, 58)` | Click parcels on the map to select them, then start a plan from the selection ×1 | src/workspaces/site-planner/MapFinder.jsx:2875:                title="Click parcels on the map to select them, then start a plan from the selection" |
-| 0px 6px 6px 0px | 30px | 10px | 400 | `rgb(242, 107, 58)` | `1px solid rgb(242, 107, 58)` | More ways to start a plan ×1 | src/workspaces/site-planner/MapFinder.jsx:2891:                title="More ways to start a plan" |
-| 6px | 22px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Collapse the sites panel ×1 | src/workspaces/site-planner/MapFinder.jsx:3119:                title={sitesPanelOpen ? "Collapse the sites panel" : "Expand the sites panel"} |
+| 6px 0px 0px 6px | 30px | 12px | 700 | `rgb(242, 107, 58)` | `1px solid rgb(242, 107, 58)` | Click parcels on the map to select them, then start a plan from the selection ×1 | src/workspaces/site-planner/MapFinder.jsx:2896:                title="Click parcels on the map to select them, then start a plan from the selection" |
+| 0px 6px 6px 0px | 30px | 10px | 600 | `rgb(242, 107, 58)` | `1px solid rgb(242, 107, 58)` | More ways to start a plan ×1 | src/workspaces/site-planner/MapFinder.jsx:2911:                title="More ways to start a plan" |
+| 6px | 22px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Collapse the sites panel ×1 | src/workspaces/site-planner/MapFinder.jsx:3111:                title={sitesPanelOpen ? "Collapse the sites panel" : "Expand the sites panel"} |
 | 6px | 22px | 12px | 700 | `rgb(29, 32, 39)` | `0px none rgb(232, 235, 240)` | Sites1 ×1 | unattributed (no source match — best-effort text search) |
 | 6px | 22px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Comps0 ×1 | unattributed (no source match — best-effort text search) |
-| 6px | 29px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Filter sites by name ×1 | src/workspaces/site-planner/MapFinder.jsx:3143:              <input value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name" |
-| 6px | 29px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Sort sites within each group ×1 | src/workspaces/site-planner/MapFinder.jsx:3145:              <select value={sitesPanelPrefs.sort} onChange={(e) => setSitesSort(e.target.value)} aria-label="Sort sites within each group" |
+| 6px | 29px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Filter sites by name ×1 | src/workspaces/site-planner/MapFinder.jsx:3135:              <input value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name" |
+| 6px | 29px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Sort sites within each group ×1 | src/workspaces/site-planner/MapFinder.jsx:3137:              <select value={sitesPanelPrefs.sort} onChange={(e) => setSitesSort(e.target.value)} aria-label="Sort sites within each group" |
+| 0px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Collapse ×1 | src/shared/projects/projectModel.js:16:// Collapse a flat list of site-model records (each: { groupId|id, site|name, (+25 more matches, best-effort) |
+| 999px | 14px | 10px | 400 | `rgb(216, 90, 48)` | `0px none rgb(255, 255, 255)` | SPAN ×1 | src/shared/ui/AppHeader.jsx:823:            along the chip's right edge returned THE PILL'S TEXT SPAN for the last stretch of it, (+22 more matches, best-effort) |
+| 6px | 17px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Reorder the Pursuit group ×1 | unattributed (no source match — best-effort text search) |
+| 8px | 30px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
+| 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Imagery & layers ×1 | src/shared/ui/controls.jsx:44: * chip — the account pill, "Drop a pin", the collapsed "Imagery & layers" pill, the nav tabs' (+5 more matches, best-effort) |
+
+
+---
+
+### Map landing page (comp mode)
+
+**light** — 27 distinct style signature(s) over 34 matched element(s):
+
+| radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
+|---|---|---|---|---|---|---|---|
+| ⚠️ **fontSize 22 not in FONT_SIZE scale {10,10.5,12,13,14}** — 0px | 30px | 22px | 700 | `rgb(255, 255, 255)` | `0px none rgb(0, 0, 0)` | Zoom in, Zoom out ×2 | src/workspaces/site-planner/components/LayerPanel.jsx:117:   * These two are what turn a static "Zoom in to ≥ 16 to load" sentence — which reads the same (+19 more matches, best-effort) |
+| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 42px | 16px | 400 | `rgb(234, 238, 243)` | `0px none rgb(27, 30, 38)` | SiteCompDrop a pinComp from parcel ×1 | unattributed (no source match — best-effort text search) |
+| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 6px | 30px | 16px | 400 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Site or comp ×1 | src/workspaces/site-planner/MapFinder.jsx:493:    <div role="tablist" aria-label="Site or comp" style={{ |
+| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 295px | 16px | 400 | `rgba(255, 255, 255, 0.94)` | `1px solid rgb(225, 229, 235)` | ▼Sites1Comps0Site plans+ Upload site pla ×1 | unattributed (no source match — best-effort text search) |
+| 0px | 25px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(69, 76, 92)` | Schedule, Review, Library (+2 more) ×5 | src/shared/ui/ModuleLoader.jsx:6: *   • Schedule  → a Gantt chart assembling: zebra row bands fade in top→bottom, (+85 more matches, best-effort) |
+| 8px | 30px | 12px | 400 | `rgb(234, 238, 243)` | `1px solid rgb(215, 221, 229)` | Full screen, Settings ×2 | src/shared/ui/AppHeader.jsx:148:      aria-label={active ? "Leave full screen" : "Full screen"} (+5 more matches, best-effort) |
+| 6px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Click the map to drop a leasing-comp pin at that spot, Click a parcel on the map to anchor a comp to it ×2 | src/workspaces/site-planner/MapFinder.jsx:2929:                title="Click the map to drop a leasing-comp pin at that spot" |
+| 6px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Dashboard: all projects ×1 | src/shared/ui/AppHeader.jsx:851:            title={onDashboard ? "Dashboard: all projects" : undefined} |
+| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | All projects: Map ×1 | unattributed (no source match — best-effort text search) |
+| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Choose a project ×1 | src/shared/ui/ProjectBreadcrumb.jsx:589:        title={cross ? "Browsing all projects" : currentProject ? "Switch project" : "Choose a project"} (+2 more matches, best-effort) |
+| 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Cloud sync isn't set up — your work is saved on this device only ×1 | src/app/AccountControl.jsx:144:          title="Cloud sync isn't set up — your work is saved on this device only" |
+| 999px | 20px | 12px | 800 | `rgb(215, 221, 229)` | `0px none rgb(53, 59, 73)` | ⊘ ×1 | unattributed (label too short to search) |
+| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(15, 110, 86)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+479 more matches, best-effort) |
+| 0px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Find my location ×1 | src/workspaces/site-planner/MapFinder.jsx:1191:      btn.href = "#"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn"); btn.setAttribute("data-locate-state", "idle"); (+2 more matches, best-effort) |
+| 0px | 18px | 12px | 400 | `rgba(255, 255, 255, 0.8)` | `0px none rgb(51, 51, 51)` | 500 mi ×1 | unattributed (no source match — best-effort text search) |
+| 6px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+479 more matches, best-effort) |
+| 6px | 26px | 12px | 700 | `rgb(47, 111, 176)` | `0px none rgb(255, 255, 255)` | Comp ×1 | src/shared/ui/CloudSyncBadge.jsx:23:import { Component, useEffect, useRef, useState } from "react"; (+212 more matches, best-effort) |
+| 0px | 42px | 13px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Search for an address or place ×1 | src/workspaces/site-planner/components/PlaceSearchField.jsx:148:        aria-label="Search for an address or place" |
+| 6px | 22px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Collapse the sites panel ×1 | src/workspaces/site-planner/MapFinder.jsx:3111:                title={sitesPanelOpen ? "Collapse the sites panel" : "Expand the sites panel"} |
+| 6px | 22px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Sites1 ×1 | unattributed (no source match — best-effort text search) |
+| 6px | 22px | 12px | 700 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Comps0 ×1 | unattributed (no source match — best-effort text search) |
+| 8px | 25px | 10.5px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | + Upload site plan ×1 | src/shared/sitePlans/components/SitePlansSection.jsx:730:        {!flow && <Button size="sm" variant="ghost" onClick={startNewUpload}>+ Upload site plan</Button>} |
+| 0px | 21px | 10.5px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | ▾Recently deleted ×1 | unattributed (no source match — best-effort text search) |
+| 6px | 24px | 10.5px | 700 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Paste comps from a broker email or spreadsheet ×1 | src/shared/comps/components/CompsPanel.jsx:526:                <button onClick={openGrid} title="Paste comps from a broker email or spreadsheet" |
+| 6px | 24px | 10.5px | 700 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Import a Google My Maps export ×1 | src/shared/comps/components/CompsPanel.jsx:532:                <label title="Import a Google My Maps export" |
+| 8px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
+| 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Imagery & layers ×1 | src/shared/ui/controls.jsx:44: * chip — the account pill, "Drop a pin", the collapsed "Imagery & layers" pill, the nav tabs' (+5 more matches, best-effort) |
+
+**dark** — 27 distinct style signature(s) over 34 matched element(s):
+
+| radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
+|---|---|---|---|---|---|---|---|
+| ⚠️ **fontSize 22 not in FONT_SIZE scale {10,10.5,12,13,14}** — 0px | 30px | 22px | 700 | `rgb(255, 255, 255)` | `0px none rgb(0, 0, 0)` | Zoom in, Zoom out ×2 | src/workspaces/site-planner/components/LayerPanel.jsx:117:   * These two are what turn a static "Zoom in to ≥ 16 to load" sentence — which reads the same (+19 more matches, best-effort) |
+| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 42px | 16px | 400 | `rgb(17, 19, 25)` | `0px none rgb(232, 235, 240)` | SiteCompDrop a pinComp from parcel ×1 | unattributed (no source match — best-effort text search) |
+| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 6px | 30px | 16px | 400 | `rgb(23, 26, 33)` | `0px none rgb(232, 235, 240)` | Site or comp ×1 | src/workspaces/site-planner/MapFinder.jsx:493:    <div role="tablist" aria-label="Site or comp" style={{ |
+| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 295px | 16px | 400 | `rgba(24, 27, 33, 0.93)` | `1px solid rgb(42, 46, 55)` | ▼Sites1Comps0Site plans+ Upload site pla ×1 | unattributed (no source match — best-effort text search) |
+| 0px | 25px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(194, 200, 210)` | Schedule, Review, Library (+2 more) ×5 | src/shared/ui/ModuleLoader.jsx:6: *   • Schedule  → a Gantt chart assembling: zebra row bands fade in top→bottom, (+85 more matches, best-effort) |
+| 8px | 30px | 12px | 400 | `rgb(17, 19, 25)` | `1px solid rgb(38, 42, 51)` | Full screen, Settings ×2 | src/shared/ui/AppHeader.jsx:148:      aria-label={active ? "Leave full screen" : "Full screen"} (+5 more matches, best-effort) |
+| 6px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Click the map to drop a leasing-comp pin at that spot, Click a parcel on the map to anchor a comp to it ×2 | src/workspaces/site-planner/MapFinder.jsx:2929:                title="Click the map to drop a leasing-comp pin at that spot" |
+| 6px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Dashboard: all projects ×1 | src/shared/ui/AppHeader.jsx:851:            title={onDashboard ? "Dashboard: all projects" : undefined} |
+| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | All projects: Map ×1 | unattributed (no source match — best-effort text search) |
+| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Choose a project ×1 | src/shared/ui/ProjectBreadcrumb.jsx:589:        title={cross ? "Browsing all projects" : currentProject ? "Switch project" : "Choose a project"} (+2 more matches, best-effort) |
+| 8px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Cloud sync isn't set up — your work is saved on this device only ×1 | src/app/AccountControl.jsx:144:          title="Cloud sync isn't set up — your work is saved on this device only" |
+| 999px | 20px | 12px | 800 | `rgb(38, 42, 51)` | `0px none rgb(166, 173, 186)` | ⊘ ×1 | unattributed (label too short to search) |
+| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(93, 202, 165)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+479 more matches, best-effort) |
+| 0px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `0px none rgb(236, 239, 244)` | Find my location ×1 | src/workspaces/site-planner/MapFinder.jsx:1191:      btn.href = "#"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn"); btn.setAttribute("data-locate-state", "idle"); (+2 more matches, best-effort) |
+| 0px | 18px | 12px | 400 | `rgba(255, 255, 255, 0.8)` | `0px none rgb(51, 51, 51)` | 500 mi ×1 | unattributed (no source match — best-effort text search) |
+| 6px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+479 more matches, best-effort) |
+| 6px | 26px | 12px | 700 | `rgb(47, 111, 176)` | `0px none rgb(255, 255, 255)` | Comp ×1 | src/shared/ui/CloudSyncBadge.jsx:23:import { Component, useEffect, useRef, useState } from "react"; (+212 more matches, best-effort) |
+| 0px | 42px | 13px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | Search for an address or place ×1 | src/workspaces/site-planner/components/PlaceSearchField.jsx:148:        aria-label="Search for an address or place" |
+| 6px | 22px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Collapse the sites panel ×1 | src/workspaces/site-planner/MapFinder.jsx:3111:                title={sitesPanelOpen ? "Collapse the sites panel" : "Expand the sites panel"} |
+| 6px | 22px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Sites1 ×1 | unattributed (no source match — best-effort text search) |
+| 6px | 22px | 12px | 700 | `rgb(29, 32, 39)` | `0px none rgb(232, 235, 240)` | Comps0 ×1 | unattributed (no source match — best-effort text search) |
+| 8px | 25px | 10.5px | 600 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | + Upload site plan ×1 | src/shared/sitePlans/components/SitePlansSection.jsx:730:        {!flow && <Button size="sm" variant="ghost" onClick={startNewUpload}>+ Upload site plan</Button>} |
+| 0px | 21px | 10.5px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | ▾Recently deleted ×1 | unattributed (no source match — best-effort text search) |
+| 6px | 24px | 10.5px | 700 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Paste comps from a broker email or spreadsheet ×1 | src/shared/comps/components/CompsPanel.jsx:526:                <button onClick={openGrid} title="Paste comps from a broker email or spreadsheet" |
+| 6px | 24px | 10.5px | 700 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Import a Google My Maps export ×1 | src/shared/comps/components/CompsPanel.jsx:532:                <label title="Import a Google My Maps export" |
+| 8px | 30px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
+| 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Imagery & layers ×1 | src/shared/ui/controls.jsx:44: * chip — the account pill, "Drop a pin", the collapsed "Imagery & layers" pill, the nav tabs' (+5 more matches, best-effort) |
+
+
+---
+
+### Map landing page (selecting parcels)
+
+**light** — 28 distinct style signature(s) over 34 matched element(s):
+
+| radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
+|---|---|---|---|---|---|---|---|
+| ⚠️ **fontSize 22 not in FONT_SIZE scale {10,10.5,12,13,14}** — 0px | 30px | 22px | 700 | `rgb(255, 255, 255)` | `0px none rgb(0, 0, 0)` | Zoom in, Zoom out ×2 | src/workspaces/site-planner/components/LayerPanel.jsx:117:   * These two are what turn a static "Zoom in to ≥ 16 to load" sentence — which reads the same (+19 more matches, best-effort) |
+| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 42px | 16px | 400 | `rgb(234, 238, 243)` | `0px none rgb(27, 30, 38)` | SiteCompSelecting…Cancel ×1 | unattributed (no source match — best-effort text search) |
+| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 6px | 30px | 16px | 400 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Site or comp ×1 | src/workspaces/site-planner/MapFinder.jsx:493:    <div role="tablist" aria-label="Site or comp" style={{ |
+| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 128px | 16px | 400 | `rgba(255, 255, 255, 0.94)` | `1px solid rgb(225, 229, 235)` | ▼Sites1Comps0Largest firstA–ZRecently to ×1 | unattributed (no source match — best-effort text search) |
+| 0px | 25px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(69, 76, 92)` | Schedule, Review, Library (+2 more) ×5 | src/shared/ui/ModuleLoader.jsx:6: *   • Schedule  → a Gantt chart assembling: zebra row bands fade in top→bottom, (+85 more matches, best-effort) |
+| 8px | 30px | 12px | 400 | `rgb(234, 238, 243)` | `1px solid rgb(215, 221, 229)` | Full screen, Settings ×2 | src/shared/ui/AppHeader.jsx:148:      aria-label={active ? "Leave full screen" : "Full screen"} (+5 more matches, best-effort) |
+| 6px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Dashboard: all projects ×1 | src/shared/ui/AppHeader.jsx:851:            title={onDashboard ? "Dashboard: all projects" : undefined} |
+| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | All projects: Map ×1 | unattributed (no source match — best-effort text search) |
+| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Choose a project ×1 | src/shared/ui/ProjectBreadcrumb.jsx:589:        title={cross ? "Browsing all projects" : currentProject ? "Switch project" : "Choose a project"} (+2 more matches, best-effort) |
+| 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Cloud sync isn't set up — your work is saved on this device only ×1 | src/app/AccountControl.jsx:144:          title="Cloud sync isn't set up — your work is saved on this device only" |
+| 999px | 20px | 12px | 800 | `rgb(215, 221, 229)` | `0px none rgb(53, 59, 73)` | ⊘ ×1 | unattributed (label too short to search) |
+| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(15, 110, 86)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+479 more matches, best-effort) |
+| 0px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Find my location ×1 | src/workspaces/site-planner/MapFinder.jsx:1191:      btn.href = "#"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn"); btn.setAttribute("data-locate-state", "idle"); (+2 more matches, best-effort) |
+| 0px | 18px | 12px | 400 | `rgba(255, 255, 255, 0.8)` | `0px none rgb(51, 51, 51)` | 500 mi ×1 | unattributed (no source match — best-effort text search) |
+| 6px | 26px | 12px | 700 | `rgb(194, 65, 12)` | `0px none rgb(255, 255, 255)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+479 more matches, best-effort) |
+| 6px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Comp ×1 | src/shared/ui/CloudSyncBadge.jsx:23:import { Component, useEffect, useRef, useState } from "react"; (+212 more matches, best-effort) |
+| 0px | 42px | 13px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Search for an address or place ×1 | src/workspaces/site-planner/components/PlaceSearchField.jsx:148:        aria-label="Search for an address or place" |
+| 6px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Cancel ×1 | src/shared/ui/ProjectBreadcrumb.jsx:210:function RenameInput({ value, onChange, onCommit, onCancel, label, testId, style }) { (+54 more matches, best-effort) |
+| 6px | 22px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Collapse the sites panel ×1 | src/workspaces/site-planner/MapFinder.jsx:3111:                title={sitesPanelOpen ? "Collapse the sites panel" : "Expand the sites panel"} |
+| 6px | 22px | 12px | 700 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Sites1 ×1 | unattributed (no source match — best-effort text search) |
+| 6px | 22px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Comps0 ×1 | unattributed (no source match — best-effort text search) |
+| 6px | 29px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Filter sites by name ×1 | src/workspaces/site-planner/MapFinder.jsx:3135:              <input value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name" |
+| 6px | 29px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Sort sites within each group ×1 | src/workspaces/site-planner/MapFinder.jsx:3137:              <select value={sitesPanelPrefs.sort} onChange={(e) => setSitesSort(e.target.value)} aria-label="Sort sites within each group" |
+| 0px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Collapse ×1 | src/shared/projects/projectModel.js:16:// Collapse a flat list of site-model records (each: { groupId|id, site|name, (+25 more matches, best-effort) |
+| 999px | 14px | 10px | 400 | `rgb(216, 90, 48)` | `0px none rgb(255, 255, 255)` | SPAN ×1 | src/shared/ui/AppHeader.jsx:823:            along the chip's right edge returned THE PILL'S TEXT SPAN for the last stretch of it, (+22 more matches, best-effort) |
+| 6px | 17px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Reorder the Pursuit group ×1 | unattributed (no source match — best-effort text search) |
+| 8px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
+| 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Imagery & layers ×1 | src/shared/ui/controls.jsx:44: * chip — the account pill, "Drop a pin", the collapsed "Imagery & layers" pill, the nav tabs' (+5 more matches, best-effort) |
+
+**dark** — 28 distinct style signature(s) over 34 matched element(s):
+
+| radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
+|---|---|---|---|---|---|---|---|
+| ⚠️ **fontSize 22 not in FONT_SIZE scale {10,10.5,12,13,14}** — 0px | 30px | 22px | 700 | `rgb(255, 255, 255)` | `0px none rgb(0, 0, 0)` | Zoom in, Zoom out ×2 | src/workspaces/site-planner/components/LayerPanel.jsx:117:   * These two are what turn a static "Zoom in to ≥ 16 to load" sentence — which reads the same (+19 more matches, best-effort) |
+| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 42px | 16px | 400 | `rgb(17, 19, 25)` | `0px none rgb(232, 235, 240)` | SiteCompSelecting…Cancel ×1 | unattributed (no source match — best-effort text search) |
+| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 6px | 30px | 16px | 400 | `rgb(23, 26, 33)` | `0px none rgb(232, 235, 240)` | Site or comp ×1 | src/workspaces/site-planner/MapFinder.jsx:493:    <div role="tablist" aria-label="Site or comp" style={{ |
+| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 128px | 16px | 400 | `rgba(24, 27, 33, 0.93)` | `1px solid rgb(42, 46, 55)` | ▼Sites1Comps0Largest firstA–ZRecently to ×1 | unattributed (no source match — best-effort text search) |
+| 0px | 25px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(194, 200, 210)` | Schedule, Review, Library (+2 more) ×5 | src/shared/ui/ModuleLoader.jsx:6: *   • Schedule  → a Gantt chart assembling: zebra row bands fade in top→bottom, (+85 more matches, best-effort) |
+| 8px | 30px | 12px | 400 | `rgb(17, 19, 25)` | `1px solid rgb(38, 42, 51)` | Full screen, Settings ×2 | src/shared/ui/AppHeader.jsx:148:      aria-label={active ? "Leave full screen" : "Full screen"} (+5 more matches, best-effort) |
+| 6px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Dashboard: all projects ×1 | src/shared/ui/AppHeader.jsx:851:            title={onDashboard ? "Dashboard: all projects" : undefined} |
+| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | All projects: Map ×1 | unattributed (no source match — best-effort text search) |
+| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Choose a project ×1 | src/shared/ui/ProjectBreadcrumb.jsx:589:        title={cross ? "Browsing all projects" : currentProject ? "Switch project" : "Choose a project"} (+2 more matches, best-effort) |
+| 8px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Cloud sync isn't set up — your work is saved on this device only ×1 | src/app/AccountControl.jsx:144:          title="Cloud sync isn't set up — your work is saved on this device only" |
+| 999px | 20px | 12px | 800 | `rgb(38, 42, 51)` | `0px none rgb(166, 173, 186)` | ⊘ ×1 | unattributed (label too short to search) |
+| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(93, 202, 165)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+479 more matches, best-effort) |
+| 0px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `0px none rgb(236, 239, 244)` | Find my location ×1 | src/workspaces/site-planner/MapFinder.jsx:1191:      btn.href = "#"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn"); btn.setAttribute("data-locate-state", "idle"); (+2 more matches, best-effort) |
+| 0px | 18px | 12px | 400 | `rgba(255, 255, 255, 0.8)` | `0px none rgb(51, 51, 51)` | 500 mi ×1 | unattributed (no source match — best-effort text search) |
+| 6px | 26px | 12px | 700 | `rgb(242, 107, 58)` | `0px none rgb(255, 255, 255)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+479 more matches, best-effort) |
+| 6px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Comp ×1 | src/shared/ui/CloudSyncBadge.jsx:23:import { Component, useEffect, useRef, useState } from "react"; (+212 more matches, best-effort) |
+| 0px | 42px | 13px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | Search for an address or place ×1 | src/workspaces/site-planner/components/PlaceSearchField.jsx:148:        aria-label="Search for an address or place" |
+| 6px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Cancel ×1 | src/shared/ui/ProjectBreadcrumb.jsx:210:function RenameInput({ value, onChange, onCommit, onCancel, label, testId, style }) { (+54 more matches, best-effort) |
+| 6px | 22px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Collapse the sites panel ×1 | src/workspaces/site-planner/MapFinder.jsx:3111:                title={sitesPanelOpen ? "Collapse the sites panel" : "Expand the sites panel"} |
+| 6px | 22px | 12px | 700 | `rgb(29, 32, 39)` | `0px none rgb(232, 235, 240)` | Sites1 ×1 | unattributed (no source match — best-effort text search) |
+| 6px | 22px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Comps0 ×1 | unattributed (no source match — best-effort text search) |
+| 6px | 29px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Filter sites by name ×1 | src/workspaces/site-planner/MapFinder.jsx:3135:              <input value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name" |
+| 6px | 29px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Sort sites within each group ×1 | src/workspaces/site-planner/MapFinder.jsx:3137:              <select value={sitesPanelPrefs.sort} onChange={(e) => setSitesSort(e.target.value)} aria-label="Sort sites within each group" |
 | 0px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Collapse ×1 | src/shared/projects/projectModel.js:16:// Collapse a flat list of site-model records (each: { groupId|id, site|name, (+25 more matches, best-effort) |
 | 999px | 14px | 10px | 400 | `rgb(216, 90, 48)` | `0px none rgb(255, 255, 255)` | SPAN ×1 | src/shared/ui/AppHeader.jsx:823:            along the chip's right edge returned THE PILL'S TEXT SPAN for the last stretch of it, (+22 more matches, best-effort) |
 | 6px | 17px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Reorder the Pursuit group ×1 | unattributed (no source match — best-effort text search) |
@@ -329,7 +522,7 @@ look aligned because they float over the same surface.
 | 8px | 24px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Switch or rename plan ×1 | src/workspaces/site-planner/SitePlanner.jsx:18910:        title="Switch or rename plan" |
 | 8px | 24px | 12px | 400 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Cloud sync: Saved on this device ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Cloud sync isn't set up — your work is saved on this device only ×1 | src/app/AccountControl.jsx:144:          title="Cloud sync isn't set up — your work is saved on this device only" |
-| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(15, 110, 86)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+478 more matches, best-effort) |
+| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(15, 110, 86)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+479 more matches, best-effort) |
 | 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `1px solid rgb(215, 221, 229)` | File — export a PNG or print a PDF ×1 | src/workspaces/site-planner/SitePlanner.jsx:19043:            title="File — export a PNG or print a PDF" |
 | 8px | 26px | 12px | 500 | `rgba(0, 0, 0, 0.06)` | `1px solid rgba(0, 0, 0, 0)` | Zoom to fit ×1 | src/workspaces/site-planner/components/icons.jsx:198:// Zoom to fit — four arrows pointing OUTWARD to the corners, each with its own arrowhead (unlike (+5 more matches, best-effort) |
 
@@ -347,7 +540,7 @@ look aligned because they float over the same surface.
 | 8px | 24px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | Switch or rename plan ×1 | src/workspaces/site-planner/SitePlanner.jsx:18910:        title="Switch or rename plan" |
 | 8px | 24px | 12px | 400 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Cloud sync: Saved on this device ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Cloud sync isn't set up — your work is saved on this device only ×1 | src/app/AccountControl.jsx:144:          title="Cloud sync isn't set up — your work is saved on this device only" |
-| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(93, 202, 165)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+478 more matches, best-effort) |
+| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(93, 202, 165)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+479 more matches, best-effort) |
 | 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `1px solid rgb(38, 42, 51)` | File — export a PNG or print a PDF ×1 | src/workspaces/site-planner/SitePlanner.jsx:19043:            title="File — export a PNG or print a PDF" |
 | 8px | 26px | 12px | 500 | `rgba(255, 255, 255, 0.09)` | `1px solid rgba(0, 0, 0, 0)` | Zoom to fit ×1 | src/workspaces/site-planner/components/icons.jsx:198:// Zoom to fit — four arrows pointing OUTWARD to the corners, each with its own arrowhead (unlike (+5 more matches, best-effort) |
 
@@ -457,7 +650,7 @@ _(nothing matched in this theme/scenario)_
 | 0px | 15px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | [object SVGAnimatedString] ×17 | unattributed (no source match — best-effort text search) |
 | 0px | 13px | 10.5px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | M, ▾, ⇧N (+7 more) ×10 | unattributed (label too short to search) |
 | 8px | 27px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Measure modes, Dock layout, Road presets (+2 more) ×5 | src/workspaces/site-planner/SitePlanner.jsx:23513:              <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setMeasureMenu((o) => !o)} aria-haspopup="menu" aria-expanded={measureMenu} aria-label="Measure modes">▾</button> |
-| 0px | 54px | 10.5px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Land, Analysis, Overlays ×3 | src/shared/folders/folderTemplate.js:19: *    short + user-extensible — Land (01–13; 14–18 were unknown at authoring), Close-Out (+54 more matches, best-effort) |
+| 0px | 54px | 10.5px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Land, Analysis, Overlays ×3 | src/shared/folders/folderTemplate.js:19: *    short + user-extensible — Land (01–13; 14–18 were unknown at authoring), Close-Out (+58 more matches, best-effort) |
 | 0px | 30px | 14px | 600 | `rgba(255, 255, 255, 0.94)` | `0px none rgb(27, 30, 38)` | Zoom out, Zoom to fit ×2 | src/workspaces/site-planner/SitePlanner.jsx:23128:                <button className="gbtn" aria-label="Zoom out" title="Zoom out" style={{ ...zb, borderTop: "none", borderRadius: 0 }} onClick={() => zoomBy(1 / 1.25)}>－</button> (+2 more matches, best-effort) |
 | 0px | 52px | 10.5px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Properties, Standards ×2 | src/shared/ui/floatingPanel.js:69: * double-click or the Properties tab; a plain click does NOT open it), and only when the inspector (+30 more matches, best-effort) |
 | 0px | 32px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | ▶Buildings1 · 75,600 SF, ▶Costsnot priced yet ×2 | unattributed (no source match — best-effort text search) |
@@ -482,7 +675,7 @@ _(nothing matched in this theme/scenario)_
 | 0px | 15px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | [object SVGAnimatedString] ×17 | unattributed (no source match — best-effort text search) |
 | 0px | 13px | 10.5px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | M, ▾, ⇧N (+7 more) ×10 | unattributed (label too short to search) |
 | 8px | 27px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Measure modes, Dock layout, Road presets (+2 more) ×5 | src/workspaces/site-planner/SitePlanner.jsx:23513:              <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setMeasureMenu((o) => !o)} aria-haspopup="menu" aria-expanded={measureMenu} aria-label="Measure modes">▾</button> |
-| 0px | 54px | 10.5px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Land, Analysis, Overlays ×3 | src/shared/folders/folderTemplate.js:19: *    short + user-extensible — Land (01–13; 14–18 were unknown at authoring), Close-Out (+54 more matches, best-effort) |
+| 0px | 54px | 10.5px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Land, Analysis, Overlays ×3 | src/shared/folders/folderTemplate.js:19: *    short + user-extensible — Land (01–13; 14–18 were unknown at authoring), Close-Out (+58 more matches, best-effort) |
 | 0px | 30px | 14px | 600 | `rgba(24, 27, 33, 0.93)` | `0px none rgb(232, 235, 240)` | Zoom out, Zoom to fit ×2 | src/workspaces/site-planner/SitePlanner.jsx:23128:                <button className="gbtn" aria-label="Zoom out" title="Zoom out" style={{ ...zb, borderTop: "none", borderRadius: 0 }} onClick={() => zoomBy(1 / 1.25)}>－</button> (+2 more matches, best-effort) |
 | 0px | 52px | 10.5px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Properties, Standards ×2 | src/shared/ui/floatingPanel.js:69: * double-click or the Properties tab; a plain click does NOT open it), and only when the inspector (+30 more matches, best-effort) |
 | 0px | 32px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | ▶Buildings1 · 75,600 SF, ▶Costsnot priced yet ×2 | unattributed (no source match — best-effort text search) |
