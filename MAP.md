@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-01 @ `5e05c99e` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-01 @ `9f953c7` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -238,8 +238,8 @@ _634 source files mapped._
   - _exports_: `default (BrandMark)`
 - **`src/shared/brand/tokens.js`** — Planyr brand palette constants (coral tier faces, linework, surfaces, wordmark colors) mirroring the CSS --coral-* vars for inline-styled chrome
   - _exports_: `BRAND`, `default`
-- **`src/shared/cloud/optimisticUpsert.js`** — Optimistic-concurrency (id,version) compare-and-swap upsert for sites/doc_reviews: casUpsert, keepaliveCasPush, missing-column degrade, typed conflict interpreters
-  - _exports_: `casUpsert`, `interpretCas`, `interpretInsert`, `isMissingColumn`, `isMissingVersionColumn`, `keepaliveCasPush`
+- **`src/shared/cloud/optimisticUpsert.js`** — Optimistic-concurrency compare-and-swap upsert for sites/doc_reviews/model_sheets, conflict target configurable per caller (single-column id default, composite e.g. user_id,id): casUpsert, degradeUpsert, keepaliveCasPush, missing-column degrade, typed conflict interpreters
+  - _exports_: `casUpsert`, `degradeUpsert`, `interpretCas`, `interpretInsert`, `isMissingColumn`, `isMissingVersionColumn`, `keepaliveCasPush`
 - **`src/shared/cloud/serializeWrites.js`** — Per-key write serializer: makeWriteSerializer chains same-key cloud writes in order so a tab can't race itself into a false version conflict
   - _exports_: `makeWriteSerializer`
 - **`src/shared/comps/components/CompDraftsPanel.jsx`** — KML-import review/promote surface (B849233): one card per staged draft, pre-filled from best-effort description parsing, confirm-before-commit; reachable only from the KML import action

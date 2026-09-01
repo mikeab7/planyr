@@ -28,10 +28,17 @@
  * table means the feature is dormant, never a crash).
  */
 import { supabase, supabaseConfigured } from "../../site-planner/lib/supabase.js";
-import { casUpsert } from "../../../shared/cloud/optimisticUpsert.js";
+import { casUpsert, degradeUpsert } from "../../../shared/cloud/optimisticUpsert.js";
 import { makeWriteSerializer } from "../../../shared/cloud/serializeWrites.js";
 
 const TABLE = "model_sheets";
+// model_sheets' real primary key is COMPOSITE — (user_id, id), not `id` alone (db/model_sheets.sql;
+// deliberately scopes a sheet to one user × one project, so two users can each hold their own model
+// for the same project id — a real safety property, kept as-is rather than weakened to a single-
+// column key). Every guarded write below names this explicitly rather than letting optimisticUpsert
+// assume "id" — see that module's own header for the production bug this closes (HTTP 400 / Postgres
+// 42P10, "no unique or exclusion constraint matching the ON CONFLICT specification").
+const CONFLICT_TARGET = "user_id,id";
 const serializeWrite = makeWriteSerializer();
 
 const localKey = (scope, projectId) => `planyr:model:sheet:v1:${scope}:${projectId}`;
@@ -86,22 +93,25 @@ async function upsertCore({ uid, projectId, sheet, expected }) {
   // violates not-null constraint) on every first-ever save, proven live against production via a
   // rolled-back impersonated-role insert. casUpsert is now hardened to spread `id` in defensively
   // too (belt + suspenders — see its own comment), but the contract here is the primary fix.
-  const r = await casUpsert(supabase, TABLE, { uid, id: projectId, row: { id: projectId, data: sheet }, expected });
+  //
+  // ⛔ 2026-09-01 — `conflictTarget: CONFLICT_TARGET` ("user_id,id") is passed explicitly on every
+  // guarded write below, never left to optimisticUpsert's "id" default: model_sheets' real primary
+  // key is composite, and a write that targets only "id" (the CAS filter, or the degrade upsert's
+  // ON CONFLICT) either matches the wrong row or — on the degrade path — has no matching unique
+  // constraint at all (Postgres 42P10, surfaced to the client as an HTTP 400 on the write). See
+  // optimisticUpsert.js's own header for the full history.
+  const r = await casUpsert(supabase, TABLE, { uid, id: projectId, row: { id: projectId, data: sheet }, expected, conflictTarget: CONFLICT_TARGET });
   if (r.degrade) {
     // The version column specifically is missing (a partially-applied migration) — never
     // regress a save into a crash; fall back to plain last-write-wins, exactly like
-    // doc-review's own degrade path for the identical shape.
-    // ⛔ model_sheets' PRIMARY KEY IS COMPOSITE — (user_id, id), not `id` alone (it deliberately
-    // scopes a sheet to one user × one project, so two users can each hold their own model for
-    // the same project id). `onConflict: "id"` names a column with no matching unique constraint
-    // on this table — Postgres would raise 42P10 (no unique/exclusion constraint matching the ON
-    // CONFLICT specification) had this dormant path ever run un-migrated. It has never fired in
-    // production (the version column has been present since the table was created), but it's
-    // real dead-wrong code and would break the moment a future partial migration reached it.
-    const { error } = await supabase.from(TABLE).upsert({ id: projectId, user_id: uid, data: sheet }, { onConflict: "user_id,id" });
-    return error
-      ? (isMissingRelation(error) ? { ok: false, reason: "not-provisioned" } : { ok: false, reason: "error", error: error.message })
-      : { ok: true, version: null };
+    // doc-review's own degrade path for the identical shape. Routed through the shared
+    // degradeUpsert helper (optimisticUpsert.js) so the ON CONFLICT target is the SAME
+    // CONFLICT_TARGET the guarded write above used, rather than a second, independently-typed
+    // literal that can drift out of step with it.
+    const res = await degradeUpsert(supabase, TABLE, { row: { id: projectId, user_id: uid, data: sheet }, conflictTarget: CONFLICT_TARGET });
+    return res.ok
+      ? { ok: true, version: null }
+      : (isMissingRelation({ message: res.error }) ? { ok: false, reason: "not-provisioned" } : { ok: false, reason: "error", error: res.error });
   }
   if (!r.ok) {
     if (r.conflict) return { ok: false, reason: "conflict" };
