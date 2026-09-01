@@ -15,7 +15,7 @@
 import { describe, it, expect } from "vitest";
 import {
   FT_PER_DEG, mercDeg, invMercDeg, lngLatToFeet, feetToLatLngPair,
-  ppfToZoom, zoomToPpf, lockOffsetPx, exactContainerPoint,
+  ppfToZoom, zoomToPpf, lockOffsetPx, exactContainerPoint, registrationLayoutMayHaveChanged,
 } from "../src/workspaces/site-planner/lib/mapLock.js";
 import { lngLatRingToFeet, feetToLatLng } from "../src/workspaces/site-planner/lib/arcgis.js";
 
@@ -205,5 +205,31 @@ describe("the drawing stays locked to the imagery", () => {
     // The old code's scale came from the panned-to latitude; the drawing's came from lat0.
     const scaleDisagreement = Math.abs(ppfToZoom(v.ppf, cLat) - ppfToZoom(v.ppf, ORIGIN.lat));
     expect(scaleDisagreement).toBeGreaterThan(0);
+  });
+});
+
+/* B846384 — the pure gate B1359 costed and this session ships: skip the registration effect's
+ * forced-layout container read on a commit where neither the canvas size nor the overscan could
+ * have moved the container. Boundary conditions asserted here so the component's own reasoning
+ * ("React already knows every input that can change them") is a proven property, not a comment. */
+describe("registrationLayoutMayHaveChanged — B846384's forced-layout gate", () => {
+  it("says yes on the very first check (nothing to compare against yet)", () => {
+    expect(registrationLayoutMayHaveChanged(null, 800, 560, 107)).toBe(true);
+  });
+
+  it("says no once the same inputs have already been checked", () => {
+    const li = { w: 800, h: 560, overscan: 107 };
+    expect(registrationLayoutMayHaveChanged(li, 800, 560, 107)).toBe(false);
+  });
+
+  it("says yes when EITHER canvas dimension alone has moved", () => {
+    const li = { w: 800, h: 560, overscan: 107 };
+    expect(registrationLayoutMayHaveChanged(li, 801, 560, 107)).toBe(true);
+    expect(registrationLayoutMayHaveChanged(li, 800, 561, 107)).toBe(true);
+  });
+
+  it("says yes when the overscan alone has moved — the container can resize with the canvas unchanged", () => {
+    const li = { w: 800, h: 560, overscan: 107 };
+    expect(registrationLayoutMayHaveChanged(li, 800, 560, 176)).toBe(true);
   });
 });

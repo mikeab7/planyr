@@ -4,6 +4,7 @@ import {
   summarizeLeaseComps, summarizeSaleComps, compsSummaryBits, compFieldRows, compHeadline, partyLabels,
   validAnchor, validateComp, rowToComp, compToRow,
   landPricePerAreaUnit, parseLeaseTermYears, netEffectiveLeaseRate,
+  anchorCountyFlag, resolveCapTriangle, emptyDraft, draftToComp, compToDraft,
 } from "../src/shared/comps/lib/comps.js";
 import { collectPartyNames, matchPartyNames } from "../src/shared/comps/lib/partySuggest.js";
 
@@ -446,20 +447,25 @@ describe("comps: empty fields never render", () => {
 
   it("no comp type at all still only shows the required date, not blank rows for anything else", () => {
     const rows = compFieldRows({ compDate: "2026-08-01" });
-    expect(rows).toEqual([{ key: "date", label: "Date", value: "Aug 1, 2026" }]);
+    expect(rows).toEqual([{ key: "date", label: "Date", value: "08/01/26" }]);
   });
 });
 
-describe("comps: NEW-6 date rendering — matches the app's read-view convention, never raw ISO", () => {
-  it("compFieldRows formats the date like the rest of the app's read views (FileBrowser/SiteReviewModal/MapFinder), not a raw ISO string", () => {
+// B986096-HARDENING-8 (owner rule, "change the date formatting to something people would
+// normally see") — mm/dd/yy, matching the Schedule task report (08/20/26), never the raw ISO
+// string. Supersedes the earlier NEW-6 convention (a longer "Aug 28, 2026" form, still used by
+// FileBrowser/SiteReviewModal/MapFinder — this app has two date conventions now, not one; comps
+// follows the owner's explicit instruction for this feature specifically.
+describe("comps: date rendering — mm/dd/yy, never raw ISO", () => {
+  it("compFieldRows formats the date as mm/dd/yy, not a raw ISO string", () => {
     const rows = compFieldRows({ compType: "land", compDate: "2026-08-28" });
-    expect(rows.find((r) => r.key === "date").value).toBe("Aug 28, 2026");
+    expect(rows.find((r) => r.key === "date").value).toBe("08/28/26");
   });
 
   it("parses the date-only string by its Y/M/D parts, never via a UTC Date() that could shift the day", () => {
     // A date near a US-timezone UTC boundary is the case that breaks a naive `new Date(iso)`.
     const rows = compFieldRows({ compType: "land", compDate: "2026-01-01" });
-    expect(rows.find((r) => r.key === "date").value).toBe("Jan 1, 2026");
+    expect(rows.find((r) => r.key === "date").value).toBe("01/01/26");
   });
 });
 
@@ -625,5 +631,136 @@ describe("comps: row <-> model round-trip", () => {
     expect(row.lease_free_rent_months).toBeNull();
     expect(row.comp_party_provider).toBeNull();
     expect(row.comp_party_acquirer).toBeNull();
+  });
+});
+
+describe("comps: anchorCountyFlag — 'log it and say so' for a county that couldn't be resolved", () => {
+  it("is null with no anchor position at all — nothing to flag, the row is simply unlocated", () => {
+    expect(anchorCountyFlag(null)).toBeNull();
+    expect(anchorCountyFlag({ kind: "pin" })).toBeNull();
+  });
+  it("is null once a county IS present, whatever the anchor kind", () => {
+    expect(anchorCountyFlag({ kind: "pin", lat: 29.7, lon: -95.4, county: "harris" })).toBeNull();
+    expect(anchorCountyFlag({ kind: "parcel", lat: 29.7, lon: -95.4, county: "txgio_statewide" })).toBeNull();
+  });
+  it("flags a positioned anchor whose county lookup failed — soft, non-blocking, names why it matters", () => {
+    const flag = anchorCountyFlag({ kind: "pin", lat: 29.7, lon: -95.4, county: null });
+    expect(flag.level).toBe("soft");
+    expect(flag.reason).toMatch(/county/i);
+    expect(flag.reason).toMatch(/grouped and filtered/i);
+  });
+});
+
+describe("comps: resolveCapTriangle — enter any two of Price/NOI/Cap, derive the third", () => {
+  it("derives cap from price + NOI, as a decimal fraction (never a percentage number)", () => {
+    const tri = resolveCapTriangle({ bldgPrice: 38000000, bldgNoi: 2185000 });
+    expect(tri.price).toEqual({ value: 38000000, derived: false });
+    expect(tri.noi).toEqual({ value: 2185000, derived: false });
+    expect(tri.capRate.derived).toBe(true);
+    expect(tri.capRate.value).toBeCloseTo(0.0575, 6);
+    expect(tri.disagreement).toBeNull();
+  });
+  it("derives NOI from price + cap", () => {
+    const tri = resolveCapTriangle({ bldgPrice: 10000000, bldgCapRate: 0.06 });
+    expect(tri.noi.derived).toBe(true);
+    expect(tri.noi.value).toBeCloseTo(600000, 5);
+    expect(tri.price).toEqual({ value: 10000000, derived: false });
+  });
+  it("derives price from NOI + cap", () => {
+    const tri = resolveCapTriangle({ bldgNoi: 600000, bldgCapRate: 0.06 });
+    expect(tri.price.derived).toBe(true);
+    expect(tri.price.value).toBeCloseTo(10000000, 2);
+  });
+  it("derives nothing with fewer than two given — never guesses from one figure", () => {
+    const tri = resolveCapTriangle({ bldgPrice: 10000000 });
+    expect(tri.price).toEqual({ value: 10000000, derived: false });
+    expect(tri.noi).toEqual({ value: null, derived: false });
+    expect(tri.capRate).toEqual({ value: null, derived: false });
+    expect(resolveCapTriangle({})).toEqual({
+      price: { value: null, derived: false }, noi: { value: null, derived: false },
+      capRate: { value: null, derived: false }, disagreement: null,
+    });
+  });
+  it("with all three given and reconciling, nothing is derived and there is no disagreement", () => {
+    const tri = resolveCapTriangle({ bldgPrice: 38000000, bldgNoi: 2185000, bldgCapRate: 0.0575 });
+    expect(tri.price.derived).toBe(false);
+    expect(tri.noi.derived).toBe(false);
+    expect(tri.capRate.derived).toBe(false);
+    expect(tri.disagreement).toBeNull();
+  });
+  it("with all three given and a GENUINE mismatch, flags it rather than silently recomputing", () => {
+    // Stated cap 5.75%; NOI/price actually implies 6.5% — past ordinary rounding noise.
+    const tri = resolveCapTriangle({ bldgPrice: 10000000, bldgNoi: 650000, bldgCapRate: 0.0575 });
+    expect(tri.capRate.value).toBeCloseTo(0.0575, 6); // the TYPED value is never overwritten
+    expect(tri.disagreement).not.toBeNull();
+    expect(tri.disagreement.statedCapRate).toBeCloseTo(0.0575, 6);
+    expect(tri.disagreement.impliedCapRate).toBeCloseTo(0.065, 6);
+  });
+  it("tolerates ordinary broker-rounding noise without flagging a disagreement", () => {
+    // A cap stated to 2 decimals (5.75%) beside a price/NOI whose exact ratio is 5.7538...% —
+    // well inside the 5bp tolerance, not a real mismatch.
+    const tri = resolveCapTriangle({ bldgPrice: 10000000, bldgNoi: 575380, bldgCapRate: 0.0575 });
+    expect(tri.disagreement).toBeNull();
+  });
+  it("ignores non-positive/garbage inputs the same way every other comps derivation does", () => {
+    expect(resolveCapTriangle({ bldgPrice: -1, bldgNoi: 500000 }).price).toEqual({ value: null, derived: false });
+    expect(resolveCapTriangle({ bldgPrice: 0, bldgCapRate: 0.06 }).price).toEqual({ value: null, derived: false });
+  });
+});
+
+describe("comps: the cap triangle threaded through draft <-> comp <-> row", () => {
+  it("draftToComp back-fills the third field so a save never leaves two of three populated", () => {
+    const draft = { ...emptyDraft(null), compType: "building_sale", compDate: "2026-08-01", bldgPrice: "38000000", bldgNoi: "2185000" };
+    const comp = draftToComp(draft);
+    expect(comp.bldgPrice).toBe(38000000);
+    expect(comp.bldgNoi).toBe(2185000);
+    expect(comp.bldgCapRate).toBeCloseTo(0.0575, 6);
+  });
+  it("draftToComp leaves a GENUINE three-way disagreement exactly as typed — never overwrites it", () => {
+    const draft = { ...emptyDraft(null), compType: "building_sale", compDate: "2026-08-01", bldgPrice: "10000000", bldgNoi: "650000", bldgCapRate: "5.75" };
+    // (the sheet column stores the fraction directly; simulate that here)
+    draft.bldgCapRate = "0.0575";
+    const comp = draftToComp(draft);
+    expect(comp.bldgCapRate).toBeCloseTo(0.0575, 6); // untouched
+    expect(comp.bldgNoi).toBe(650000); // untouched
+  });
+  it("draftToComp does not touch bldgPrice/bldgNoi/bldgCapRate for a land or lease draft", () => {
+    const land = { ...emptyDraft(null), compType: "land", compDate: "2026-08-01" };
+    expect(draftToComp(land).bldgPrice).toBeNull();
+    expect(draftToComp(land).bldgNoi).toBeNull();
+    expect(draftToComp(land).bldgCapRate).toBeNull();
+  });
+  it("bldg_noi / bldg_cap_rate round-trip through compToRow / rowToComp like every other numeric column", () => {
+    const row = compToRow({
+      compType: "building_sale", compDate: "2026-08-01", anchor: { kind: "pin", lat: 29.7, lon: -95.4 },
+      bldgNoi: 2185000, bldgCapRate: 0.0575,
+    });
+    expect(row.bldg_noi).toBe(2185000);
+    expect(row.bldg_cap_rate).toBeCloseTo(0.0575, 6);
+
+    const comp = rowToComp({
+      id: "c1", user_id: "u1", team_id: null, project_id: null,
+      comp_type: "building_sale", comp_date: "2026-08-01", title: "", notes: "",
+      anchor_kind: "pin", lat: "29.7", lon: "-95.4", county: null, parcel_apn: null, parcel_geom: null,
+      land_price: null, land_size_value: null, land_size_unit: null,
+      bldg_price: "38000000", bldg_size_sf: null, bldg_noi: "2185000", bldg_cap_rate: "0.0575",
+      lease_rate: null, lease_rate_period: null, lease_rate_expense: null, lease_ti: null, lease_term: null,
+      lease_size_sf: null, lease_free_rent_months: null, comp_party_provider: null, comp_party_acquirer: null,
+      created_at: "2026-08-01T00:00:00Z", updated_at: "2026-08-01T00:00:00Z",
+    });
+    expect(comp.bldgNoi).toBe(2185000);
+    expect(comp.bldgCapRate).toBeCloseTo(0.0575, 6);
+  });
+  it("compToDraft round-trips bldgNoi/bldgCapRate as strings, same shape as every other numeric field", () => {
+    const draft = compToDraft({ id: "c1", compType: "building_sale", bldgNoi: 2185000, bldgCapRate: 0.0575 });
+    expect(draft.bldgNoi).toBe("2185000");
+    expect(draft.bldgCapRate).toBe("0.0575");
+  });
+  it("compFieldRows shows NOI and Cap on a building sale, cap rendered as a percentage", () => {
+    const rows = compFieldRows({ compType: "building_sale", compDate: "2026-08-01", bldgPrice: 38000000, bldgNoi: 2185000, bldgCapRate: 0.0575 });
+    const noi = rows.find((r) => r.key === "noi");
+    const cap = rows.find((r) => r.key === "capRate");
+    expect(noi.value).toMatch(/2,185,000/);
+    expect(cap.value).toBe("5.75%");
   });
 });

@@ -40,6 +40,9 @@ export const CAPTURE_MAX_CHARS = 1750;
  * `assertCaptureClean`, which is what makes the privacy claim checkable instead of asserted. */
 export const CAPTURE_NUMERIC_KEYS = [
   "v", "atMs", "atWall", "activeMs", "frames", "framesKept", "framesDropped",
+  /* NEW-2 (B846385) — the long-task/counter twin of framesKept/framesDropped: which OTHER series
+   * lost rows to the byte budget, so a reader can tell "there were none" from "some were cut". */
+  "tasksDropped", "countersDropped",
   "baselineMs", "baselineFrames", "baselineSealedAtMs", "windowMeanMs", "slowFraction",
   "ratio", "multiplier", "sustainMs", "floorMs", "fires",
   /* NEW-2 (this session) — the WORST window found anywhere in the retained frame history, not
@@ -317,14 +320,44 @@ export function decodeFrames(track, spikes) {
   return out;
 }
 
+/* ⛔ NEW-2 (B846385) — THE OLD ORDER SHED THE LONG-TASK TABLE FIRST, WHICH THREW AWAY THE MOST
+ * DIAGNOSTIC PART OF THE CAPTURE EXACTLY WHEN THE EPISODE WAS WORST. Measured on the owner's real
+ * 2026-09-01 Richfield capture: 1,201 long tasks totalling 92,232 ms, encoded to `note:"trimmed"`,
+ * `framesKept:8` — and NO `lt`/`ltNames`/`c`/`cCols` at all. Not one of the 1,201 blocking tasks
+ * was attributed to a name, file or line; the only thing that survived was 8 frame samples.
+ *
+ * A frame TRACK is mostly redundant once the summary stats exist — `frames`/`p50Ms`/`p95Ms`/
+ * `p99Ms`/`maxMs`/`jankFrames` already ride the numeric columns (`buildCapture`, above) and answer
+ * "how bad, how often" on their own. A long-task ROW is the only place a script gets a NAME
+ * (`attributionLabel`) — it is not recoverable from anything else in the payload. So on a genuine
+ * shortfall the frame track is now the first thing cut, all the way to zero if that's what it
+ * takes, and the long-task table is the LAST series touched. Counters are shed first of all (as
+ * before) because a scene snapshot is the least time-critical fact in the row. */
 export function encodeCapture(cap, { maxChars = CAPTURE_MAX_CHARS } = {}) {
   const base = { ...cap };
   const deltas = Array.isArray(base.f) ? base.f.slice() : [];
   delete base.f;
 
+  /* ⛔ NEW-2 (B846385) — `ltNames` SHIPPED THE WHOLE SESSION-WIDE STRING TABLE (up to
+   * `STRING_TABLE_MAX` = 64 entries, perfRing.js) ON EVERY CAPTURE, not just the names the kept
+   * `tasks` actually reference. A session that accumulates many distinct attributions over its
+   * life can fill that table with long strings that alone exceed `maxChars` — no amount of
+   * shedding `tasks` or `frames` helps, because the names array cost is independent of how many
+   * task ROWS survive. So every `build()` re-indexes to a table holding ONLY the names the
+   * CURRENTLY KEPT tasks reference, which is rarely more than a handful even when the session-wide
+   * table is full. */
+  const namesFull = Array.isArray(base.ltNames) ? base.ltNames : [];
   const build = (frames, tasks, counters) => {
     const { track, spikes } = encodeFrames(frames);
-    const row = { ...base, ft: track, fx: spikes, lt: tasks, c: counters };
+    const remap = new Map();
+    const names = [];
+    const lt = tasks.map((t) => {
+      const label = namesFull[t[3] | 0] || "";
+      let idx = remap.get(label);
+      if (idx == null) { idx = names.length; names.push(label); remap.set(label, idx); }
+      return [t[0], t[1], t[2], idx];
+    });
+    const row = { ...base, ft: track, fx: spikes, lt, ltNames: names, c: counters };
     if (!row.fx.length) delete row.fx;
     if (!row.lt.length) { delete row.lt; delete row.ltNames; }
     if (!row.c.length) { delete row.c; delete row.cCols; }
@@ -337,15 +370,9 @@ export function encodeCapture(cap, { maxChars = CAPTURE_MAX_CHARS } = {}) {
   let s = build(frames, tasks, counters);
   let trimmedFrames = 0, trimmedTasks = 0, trimmedCounters = 0;
 
-  /* Shed in order of what a reader can most afford to lose: the oldest counter samples first
-   * (the recent ones describe the episode), then the smallest long tasks, then the oldest
-   * frames. Frames go last because the frame track IS the episode. */
+  // Shed the oldest counter samples first — a scene snapshot is the least time-critical fact here.
   while (s.length > maxChars && counters.length > 6) { counters.shift(); trimmedCounters++; s = build(frames, tasks, counters); }
-  while (s.length > maxChars && tasks.length > 4) {
-    let min = 0;
-    for (let i = 1; i < tasks.length; i++) if (tasks[i][1] < tasks[min][1]) min = i;
-    tasks.splice(min, 1); trimmedTasks++; s = build(frames, tasks, counters);
-  }
+
   /* ⛔ B265541 — THE FRAME FLOOR IS A LADDER, NOT A WALL, AND THE OLD WALL LOST THE WHOLE EPISODE
    * ON EXACTLY THE WORST CAPTURES. This used to stop shedding at 60 frames and, if the row still
    * did not fit, fall through to the bare last-resort row — which drops EVERY series, frame track
@@ -361,8 +388,9 @@ export function encodeCapture(cap, { maxChars = CAPTURE_MAX_CHARS } = {}) {
    * this whole programme exists to collect.
    *
    * Thirty frames of a stall is half a second of evidence and is worth far more than nothing, so
-   * the floor now steps down and the bare row is reached only if even `FRAME_FLOOR_MIN` will not
-   * fit. `framesKept`/`framesDropped` still say exactly what was lost. */
+   * the floor steps down (and, per NEW-2, the ladder now runs all the way to 0 rather than
+   * stopping at 8 — see below) before the long-task table is ever touched. `framesKept`/
+   * `framesDropped` still say exactly what was lost. */
   const shedFrames = (floor) => {
     while (s.length > maxChars && frames.length > floor) {
       const drop = Math.max(1, Math.min(frames.length - floor, Math.ceil((s.length - maxChars) / 1.2)));
@@ -371,42 +399,68 @@ export function encodeCapture(cap, { maxChars = CAPTURE_MAX_CHARS } = {}) {
       s = build(frames, tasks, counters);
     }
   };
-  const shedToFit = () => { for (const floor of FRAME_FLOORS) { shedFrames(floor); if (s.length <= maxChars) return; } };
-  shedToFit();
+  const shedToFit = (floors) => { for (const floor of floors) { shedFrames(floor); if (s.length <= maxChars) return; } };
+  shedToFit(FRAME_FLOORS);
 
+  const stampFrames = () => { base.framesKept = frames.length; base.framesDropped = trimmedFrames; };
+  const stampTasksCounters = () => {
+    if (trimmedTasks) base.tasksDropped = trimmedTasks;
+    if (trimmedCounters) base.countersDropped = trimmedCounters;
+  };
   /* Stamping the trim onto the row makes the row LONGER, which can push it back over the budget —
    * so the accounting keys go on first and the frame shed runs again underneath them. Getting this
    * order wrong is what made a capture fall all the way through to the bare last-resort row while
-   * a perfectly good 1,079-frame track was available. */
+   * a perfectly good frame track was available. */
   if (trimmedFrames || trimmedTasks || trimmedCounters) {
-    base.framesKept = frames.length;
-    base.framesDropped = trimmedFrames;
+    stampFrames(); stampTasksCounters();
     base.note = "trimmed";
     s = build(frames, tasks, counters);
-    shedToFit();
-    base.framesKept = frames.length;
-    base.framesDropped = trimmedFrames;
-    if (s.length > maxChars) base.note = "trimmed-hard";
+    shedToFit(FRAME_FLOORS);
+    stampFrames(); stampTasksCounters();
     s = build(frames, tasks, counters);
   }
-  /* ⛔ B265541 — BEFORE GIVING UP THE EPISODE, GIVE UP EVERYTHING ELSE. The shed above holds a
-   * floor under the counters (6) and the long tasks (4), so on a tight budget those floors could
-   * consume the room the frame track needed and the whole thing fell to the bare row — dropping
-   * the series the file's own comment calls "the episode" in order to preserve six counter samples
-   * and four task records. So the last rung before surrender empties BOTH and re-sheds the frames.
-   * The order is the same as it always was, taken to its conclusion: frames go last. */
-  if (s.length > maxChars) {
-    tasks = []; counters = [];
-    shedToFit();
-    /* Same ordering discipline as above: the accounting keys make the row LONGER, so they go on
-     * first, the frames re-shed underneath them, and the note is decided from the FINAL length. */
-    base.framesKept = frames.length;
-    base.framesDropped = trimmedFrames;
+
+  /* ⛔ NEW-2 (B846385) — FRAMES GO TO ZERO BEFORE THE LONG-TASK TABLE LOSES A SINGLE ROW BELOW ITS
+   * OWN FLOOR. The ladder above stops at `FRAME_FLOORS`' last rung (8); if the row still does not
+   * fit, cut the frame track the rest of the way to nothing — it is the cheap, summarised part —
+   * before ever reducing `tasks` past the floor of 4 the loop below protects. */
+  if (s.length > maxChars && frames.length > 0) {
+    trimmedFrames += frames.length;
+    frames = [];
+    stampFrames(); stampTasksCounters();
     base.note = "trimmed";
     s = build(frames, tasks, counters);
-    shedToFit();
-    base.framesKept = frames.length;
-    base.framesDropped = trimmedFrames;
+  }
+
+  /* Only now, with the frame track already empty, does the long-task table give up its smallest
+   * entries — protecting a floor of 4, the smallest set still worth naming. */
+  while (s.length > maxChars && tasks.length > 4) {
+    let min = 0;
+    for (let i = 1; i < tasks.length; i++) if (tasks[i][1] < tasks[min][1]) min = i;
+    tasks.splice(min, 1); trimmedTasks++; s = build(frames, tasks, counters);
+  }
+  if (trimmedTasks) { stampFrames(); stampTasksCounters(); base.note = "trimmed"; s = build(frames, tasks, counters); }
+
+  /* ⛔ B265541 — BEFORE GIVING UP THE EPISODE, GIVE UP THE REMAINING COUNTERS. The floor under them
+   * (6) could consume room the long-task table needs on a tight budget, so drop the rest before the
+   * task table is cut below its own floor. */
+  if (s.length > maxChars && counters.length) {
+    trimmedCounters += counters.length;
+    counters = [];
+    stampFrames(); stampTasksCounters();
+    base.note = "trimmed";
+    s = build(frames, tasks, counters);
+  }
+  /* Last rung before the bare row: give up the rest of the long-task table one entry at a time
+   * (worst-first retained, smallest-dropped-first still), rather than wiping it in one step — a
+   * severely over-budget row still keeps whatever attribution it can afford. */
+  while (s.length > maxChars && tasks.length > 0) {
+    let min = 0;
+    for (let i = 1; i < tasks.length; i++) if (tasks[i][1] < tasks[min][1]) min = i;
+    tasks.splice(min, 1); trimmedTasks++; s = build(frames, tasks, counters);
+  }
+  if (s.length > maxChars || trimmedTasks) {
+    stampFrames(); stampTasksCounters();
     base.note = s.length > maxChars ? "trimmed-hard" : "trimmed";
     s = build(frames, tasks, counters);
   }

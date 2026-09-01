@@ -46,3 +46,34 @@ export async function geocodeAddress(q, center) {
   // Reached a provider but no match → genuinely not found (null). Reached NONE → service is down.
   return reachedAny ? null : { error: "Address lookup is unavailable right now — check your connection and try again, or pan the map to your site." };
 }
+
+/* B986096-HARDENING-9 (owner rule, "reverse-geocoded from the stored lat/lon... do not add a new
+ * dependency for this") — the REVERSE of `geocodeAddress` above, same two providers in the same
+ * order, same honest three-way return contract (a hit / genuinely-nothing-there / unreachable).
+ * First consumer: the comp entry sheet's Location cell, turning a dropped pin into a street
+ * address instead of a bare confirmation label. */
+export async function reverseGeocodeLatLon(lat, lon) {
+  let reachedAny = false;
+  try {
+    const u = `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/reverseGeocode` +
+      `?f=json&location=${lon},${lat}&langCode=en`;
+    const r = await fetch(u);
+    if (r.ok) {
+      reachedAny = true;
+      const j = await r.json();
+      const addr = j?.address;
+      const label = addr?.Match_addr || addr?.LongLabel || addr?.Address;
+      if (label) return { label };
+    }
+  } catch (_) { /* unreachable — fall through to Nominatim */ }
+  try {
+    const u = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18`;
+    const r = await fetch(u);
+    if (r.ok) {
+      reachedAny = true;
+      const j = await r.json();
+      if (j?.display_name) return { label: j.display_name };
+    }
+  } catch (_) { /* unreachable */ }
+  return reachedAny ? null : { error: "Reverse geocode unavailable right now." };
+}

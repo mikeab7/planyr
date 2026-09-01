@@ -321,22 +321,19 @@ function finalizeGenericRow(generic, rawFlags, raw) {
       mergeFlag(flags, "leaseRateExpense", "soft", "NNN vs gross wasn't given — check it.");
     }
   }
-  // EXECUTION and COMMENCEMENT are different facts about different moments (B986096-HARDENING-6,
-  // owner-decided) — a commencement date lands in its OWN field (`leaseCommencementDate`,
-  // flagged soft when the text marked it estimated) rather than being folded into compDate with
-  // only a notes annotation to disambiguate it. compDate (comp_date, NOT NULL) still falls back
-  // to the commencement date ONLY when no real execution date was stated at all — never silent:
-  // flagged soft, quoting the source line, and naming that the commencement is ALSO captured in
-  // its own column, so the fallback reads as a data-entry courtesy, not a conflation.
+  // ⛔ B986096-HARDENING-8 (owner correction, reversing HARDENING-6's stand-in) — EXECUTION and
+  // COMMENCEMENT are different facts about different moments, and a comp's Date column is USED:
+  // comp_date drives every recency filter and sort, so quietly writing a commencement date into
+  // it fabricates an execution date that never happened. On the owner's own real paste — a
+  // commencement-only abstract, no execution date anywhere — the old stand-in put a date in the
+  // FUTURE into comp_date, which would sort that comp ahead of every real one and land it inside
+  // any "last 12 months" window until that date arrives. A commencement date lands ONLY in its
+  // own field (`leaseCommencementDate`, flagged soft when the text marked it estimated).
+  // compDate is NEVER backfilled from it — a row with no stated execution date stays with
+  // compDate genuinely empty, and `validateComp`'s existing "Executed date is required." message
+  // (surfaced in `ProblemsList`) is what asks for it, in words, rather than a silent guess.
   if (generic.commencementDate && generic.commencementEstimated) {
     mergeFlag(flags, "leaseCommencementDate", "soft", `Read as ESTIMATED from "${generic.commencementSourceLine}" — not a confirmed date.`);
-  }
-  if (!generic.compDate && generic.commencementDate) {
-    const src = generic.commencementSourceLine;
-    const estimatedNote = generic.commencementEstimated ? " (marked estimated)" : "";
-    mergeFlag(flags, "compDate", "soft", src
-      ? `No execution date was stated — using the commencement date${estimatedNote} as a stand-in: "${src}". The commencement date is also captured in its own column.`
-      : `No execution date was stated — using the commencement date as a stand-in${estimatedNote}.`);
   }
 
   return { draft: genericToDraft(generic), cellFlags: flags, raw };
@@ -345,9 +342,8 @@ function finalizeGenericRow(generic, rawFlags, raw) {
 /** Generic fields -> the string-keyed draft shape `comps.js`'s `draftToComp`/`insertComp`
  * expect. Only fields the caller actually has values for are set — an unset field stays at the
  * blank default, per the entry grid's own rule that an empty cell is just a cell. A commencement
- * date ALWAYS lands in `leaseCommencementDate` when one was found, and ALSO fills `compDate` as
- * a last resort when no real execution date was stated (never overriding a real one) — both
- * facts captured, never one standing in silently for the other. */
+ * date lands in `leaseCommencementDate` when one was found; it NEVER also fills `compDate` — see
+ * `finalizeGenericRow`'s header for why that stand-in was removed. */
 function genericToDraft(generic) {
   const d = {
     compType: "land", compDate: "", leaseCommencementDate: "", title: "", notes: "", teamId: null, projectId: null, anchor: null,
@@ -363,11 +359,10 @@ function genericToDraft(generic) {
   if (generic.partyAcquirer) d.partyAcquirer = generic.partyAcquirer;
 
   if (generic.commencementDate) d.leaseCommencementDate = generic.commencementDate;
-  if (generic.compDate) {
-    d.compDate = generic.compDate;
-  } else if (generic.commencementDate) {
-    d.compDate = generic.commencementDate; // stand-in only — flagged soft in finalizeGenericRow, never silent
-  }
+  // ⛔ HARDENING-8 — compDate is set ONLY from a real stated execution date, never backfilled
+  // from commencementDate. See finalizeGenericRow's header for the full reasoning (a fabricated
+  // FUTURE execution date corrupts every recency filter/sort that reads comp_date).
+  if (generic.compDate) d.compDate = generic.compDate;
   d.notes = generic.notes || "";
 
   if (d.compType === "land") {
@@ -519,8 +514,9 @@ function extractUnlabeledLine(generic, flags, line) {
     if (tiVal != null) { generic.ti = tiVal; matchedAnything = true; }
   }
 
-  // Never lets a commencement line's date ALSO land in compDate directly — that date already
-  // gets the soft-flagged fallback treatment in finalizeGenericRow/genericToDraft.
+  // Never lets a commencement line's date land in compDate at all (HARDENING-8) — the two are
+  // different facts about different moments, and compDate drives recency filters/sorts, so a
+  // commencement date leaking into it fabricates an execution date that never happened.
   if (!isCommencementLine && generic.compDate == null) {
     const dateTok = findDateToken(line);
     if (dateTok) {

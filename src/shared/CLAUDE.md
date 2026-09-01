@@ -361,21 +361,55 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   for every row it is not greyed on — two comp types producing different units are two different
   columns, never one slot reused because it's usually empty.** (The first cut merged a lease's
   annualized rate and a sale's price/size into one "$/SF" slot; renaming the header fixed the
-  words and left the conflation itself intact. There are three DERIVED columns now: `$/SF or
-  $/AC` — land/building sale, following the row's OWN recorded size unit, `landPricePerAreaUnit`
-  in comps.js, never converted to SF first — `$/SF/yr` and `Net Effective $/SF/yr` — lease only,
-  BOTH printing their NNN/GROSS basis inline, because a net-effective figure on a gross lease and
-  one on an NNN lease are exactly as incomparable as the face rate is.) EXECUTION and
+  words and left the conflation itself intact. There are TWO DERIVED columns now — Net Effective
+  was removed from the sheet in ROUND 7 below: `$/SF or $/AC` — land/building sale, following the
+  row's OWN recorded size unit, `landPricePerAreaUnit` in comps.js, never converted to SF first —
+  and `$/SF/yr` — lease only, printing its NNN/GROSS basis inline, because a rate on a gross
+  lease and one on an NNN lease are exactly as incomparable as each other.) EXECUTION and
   COMMENCEMENT are two real, separate date columns (`comp_date` / `lease_commencement_date`,
-  `db/comps_lease_commencement.sql`) — a commencement-only paste still fills the required
-  `comp_date` as a soft-flagged stand-in, but the commencement itself is always captured
-  honestly in its own column too, never silently standing in with only a notes annotation.
+  `db/comps_lease_commencement.sql`) — **⛔ ROUND 7 REVERSED the round-6 "soft-flagged stand-in":
+  a commencement-only paste now leaves `comp_date` genuinely EMPTY** (owner: comp_date drives
+  every recency filter/sort, and the stand-in was fabricating a FUTURE execution date on his own
+  real paste). `validateComp`'s existing "Executed date is required." is what asks for it now.
   `netEffectiveLeaseRate` (comps.js) is computed, never stored, from rate/term/escalation/
   free-rent/TI — it parses `lease_term`'s free text via `parseLeaseTermYears` and returns null
-  (never a wrong number) when the term can't be read; a structured numeric term-months column
-  (for reliable future sort/filter) is real follow-up work, deliberately not built this round.
+  (never a wrong number) when the term can't be read; still used by the comp DETAIL view
+  (`compFieldRows`), just no longer a SHEET column (owner: "still remove"). A structured numeric
+  term-months column (for reliable future sort/filter) is real follow-up work, deliberately not
+  built this round.
   A lease comp records LEASED SF only (`lease_size_sf`) — a separate "whole building SF for
   context" field is a real, distinct idea, also deliberately not built this round.
+  **⛔ ROUND 7 (B986096-HARDENING-7/8/9) — the sheet round 6 shipped was LIVE-TESTED and found
+  COMPLETELY NON-EDITABLE, and the fix generalizes: read `CompEntryGrid.jsx`'s header before
+  trusting any sandbox-only pass on this file again.** `onCellMouseDown` never called
+  `gridRef.current?.focus()`, so DOM focus never left the paste textarea and every keystroke
+  landed there instead of the grid — the owner's "type 2, it becomes 22" was two keystrokes
+  accumulating in a never-blurred textarea, not a parser bug. **This passed every unit test, the
+  build, eslint and the design-drift audit — none of those can see that a click never moved
+  focus.** Also fixed the same pass: `kind:"select"` columns (Type/Unit/Per/Basis) now render a
+  REAL `<select>` while editing (there were previously zero `<select>` elements anywhere in the
+  dialog); dates display mm/dd/yy and accept flexible typed input (`lib/compDates.js`'s
+  `formatDateDisplay`/`parseTypedDate` — a native `<input type=date>` cannot accept "June 1
+  2027", so date cells are a plain text input with this parser on commit) while STORAGE stays
+  ISO always; `compSheetColumns.js`'s `visibleColumnIndices(rows)` hides a column from the WHOLE
+  SHEET when no current row's type uses it (Price/NOI/Cap never take up room on an all-lease
+  sheet) — this is a DIFFERENT axis from "every column exists on every ROW", which is unchanged;
+  the Location cell shows a real identity (`lib/compLocationText.js` — a reverse-geocoded
+  address for a pin via the site-planner map finder's own address-geocoder module, which grew a
+  `reverseGeocodeLatLon` sibling to its existing forward `geocodeAddress` (no new dependency),
+  cached on the row and keyed to the anchor's own lat/lon so a re-anchor self-invalidates it; an
+  APN for a parcel; a site-plan overlay's own title for a site_plan point — never one substituted
+  for another) instead of a bare "Pin"/"2 parcels" confirmation. County derivation (the map
+  finder's own `resolveCompCounty`, shared by the pin-drop AND site-plan-pin anchor paths) now
+  LOGS and FLAGS (`comps.js`'s `anchorCountyFlag`, a soft sheet warning) a genuine resolution
+  miss instead of silently persisting `county: null` forever — a comp has no load-time self-heal
+  for this the way a planned site does. Cap rate + NOI on
+  building sales (`bldg_noi`/`bldg_cap_rate`, `db/comps_cap_triangle.sql`) are a TRIANGLE — enter
+  any two of {Price, NOI, Cap}, the third derives via `comps.js`'s `resolveCapTriangle` and
+  renders read-only/tinted; all three given and disagreeing (>5bp) is flagged, never silently
+  recomputed over. `bldg_cap_rate` is a DECIMAL FRACTION internally (0.0575), typed/shown as a
+  percentage (5.75%) — deliberately different from `lease_escalation_pct`'s raw-percentage
+  convention (3.5); the column's own get/set pair is the one place that conversion happens.
   KML import (B849233) is a SEPARATE staging table, `db/comp_import_drafts.sql`
   (`public.comp_import_drafts`, owner-only RLS — no team visibility at all, unlike `comps` itself,
   until promoted) — `lib/kmlImport.js` is the pure, hand-rolled Placemark parser (a Point is a

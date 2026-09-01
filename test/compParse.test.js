@@ -178,16 +178,16 @@ describe("compParse: Michael's exact repro — a single lease abstract must beco
     expect(cellFlags.leaseRatePeriod?.level).toBe("blocking");
 
     // The commencement date is its OWN field (B986096-HARDENING-6 — execution and commencement
-    // are different facts) AND a soft-flagged fallback for the required compDate, never
-    // presented as fact either way.
+    // are different facts). ⛔ HARDENING-8 (owner correction, reversing the HARDENING-6 stand-in)
+    // — compDate is NEVER backfilled from it any more: Michael's abstract states only a
+    // commencement, no execution date anywhere, and the old stand-in fabricated a FUTURE
+    // execution date that would have corrupted every recency filter/sort. Executed stays
+    // genuinely empty; validateComp's existing message is what asks for it.
     expect(draft.leaseCommencementDate).toBe("2027-06-01");
     expect(cellFlags.leaseCommencementDate?.level).toBe("soft");
     expect(cellFlags.leaseCommencementDate?.reason).toMatch(/estimated/i);
-    expect(draft.compDate).toBe("2027-06-01");
-    expect(cellFlags.compDate?.level).toBe("soft");
-    expect(cellFlags.compDate?.reason).toMatch(/no execution date was stated/i);
-    expect(cellFlags.compDate?.reason).toMatch(/commencement estimated to be june 1, 2027/i);
-    expect(cellFlags.compDate?.reason).toMatch(/captured in its own column/i);
+    expect(draft.compDate).toBe("");
+    expect(cellFlags.compDate).toBeUndefined();
     expect(draft.notes).toBe(""); // no longer duplicated into notes — it's a real field now
   });
 
