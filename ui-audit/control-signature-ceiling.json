@@ -1,0 +1,46 @@
+{
+  "bySurface": {
+    "Map landing page (no project selected)": {
+      "light": 24,
+      "dark": 24
+    },
+    "App header": {
+      "light": 11,
+      "dark": 11
+    },
+    "Main menu — File ▾": {
+      "light": 1,
+      "dark": 1
+    },
+    "Main menu — Undo history": {
+      "light": 0,
+      "dark": 0
+    },
+    "Main menu — Settings gear": {
+      "light": 2,
+      "dark": 2
+    },
+    "Main menu — plan menu (▾ next to the plan name)": {
+      "light": 3,
+      "dark": 3
+    },
+    "Tool rail": {
+      "light": 2,
+      "dark": 2
+    },
+    "Left rail + panels (Yield)": {
+      "light": 15,
+      "dark": 15
+    },
+    "Library": {
+      "light": 0,
+      "dark": 0
+    },
+    "Doc Review (empty state)": {
+      "light": 1,
+      "dark": 1
+    }
+  },
+  "writtenAt": "2026-09-01",
+  "note": "Ratchet ceiling for ui-audit/ui-inventory.mjs's per-surface DISTINCT CONTROL SIGNATURE count (NEW-3, B982402) — same shape as design-drift-ceiling.json. A surface's count may never silently grow; regenerate with `node ui-audit/ui-inventory.mjs --write-signature-ceiling` only after a session genuinely LOWERS a surface's count (a real control-geometry convergence), or deliberately after adding a new surface to the crawl (a first measurement, not a regression). Never raise an EXISTING surface's ceiling to silence real drift."
+}

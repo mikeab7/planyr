@@ -51,6 +51,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { RADIUS } from "./radius.js";
+import { Tab, IconButton } from "./controls.jsx";
 import ProjectBreadcrumb from "./ProjectBreadcrumb.jsx";
 import CloudSyncBadge from "./CloudSyncBadge.jsx";
 import AnchoredMenu from "./AnchoredMenu.jsx";
@@ -130,9 +131,17 @@ function writeableDocumentOnScreen() {
  * B1173(×2): it is also now the ONLY exit control, and it can be, because the header it sits in
  * no longer goes anywhere — the floating "✕ Exit fullscreen" button existed solely to give a
  * hidden header a way back. */
+// NEW-1 (B982400) — was a hand-rolled 30×26 button with its own literal radius/font; now the
+// shared `IconButton` primitive (controls.jsx), whose default size (30) already squares the
+// button rather than the old 26-tall rectangle. That is a REAL, DELIBERATE height change (26→30)
+// — it converges this control's family onto SIZE.md alongside the account/menu-trigger pills
+// beside it, one of the seven signatures NEW-2 exists to collapse — and it costs nothing: Row 1
+// is 30px tall specifically because "30 is the smallest height that doesn't clip [this
+// control]" (see the row's own comment below), so a 30-tall button now fills the row exactly
+// instead of sitting inset by 2px top and bottom.
 function FullscreenButton({ active, onToggle }) {
   return (
-    <button
+    <IconButton
       onClick={onToggle}
       data-testid="toggle-fullscreen"
       aria-pressed={active}
@@ -141,19 +150,16 @@ function FullscreenButton({ active, onToggle }) {
          e2e/module-keepalive.spec.js locates it by `getByTitle(/Exit fullscreen/i)`. Two matches
          is a strict-mode failure, so this control says it a different way on purpose. */
       title={active ? "Leave full screen (Ctrl/⌘+Shift+F)" : "Full screen (Ctrl/⌘+Shift+F)"}
-      style={{
-        // NEW-3 — was RADIUS.sm (a nested-in-panel radius); this sits directly on the chrome bar,
-        // same standalone-icon-button category as the row-2 toolbar's dIcon/rbtn, so it takes
-        // RADIUS.md per radius.js's own rule ("sm" is for a control nested inside another rounded
-        // surface — this one isn't nested in anything).
-        display: "grid", placeItems: "center", width: 30, height: 26, borderRadius: RADIUS.md,
-        border: `1px solid ${LINE}`, background: "var(--chrome-bg)", color: "var(--chrome-text)",
-        cursor: "pointer", flex: "none",
-        // NEW-2 (B915536) — an icon-only button rendering no text falls through to the browser's
-        // own form-control default (off-scale) with no visual effect at all; an explicit on-scale
-        // value here is a zero-risk fix (nothing reads it) rather than a documented exception.
-        fontSize: CHROME_FONT_CONTROL,
-      }}
+      // IconButton's own rest-state tokens (--border-default/--surface-raised/--text-primary) are
+      // the general SURFACE palette; this control sits directly on the chrome bar and must keep
+      // the CHROME palette (KEY DECISIONS: "chrome themes WITH the app", its own token family) —
+      // same override AppHeader.jsx already needed before this conversion, just via `style` now
+      // instead of a fully hand-rolled button. `fontSize` here is INERT (icon-only, no text) but
+      // NOT decorative: IconButton sets no fontSize of its own, so omitting it lets the browser's
+      // UA form-control default (13.3333px) leak through — the exact regression B915536's NEW-2
+      // already fixed once (caught by this session's own ui-inventory.mjs re-run after this
+      // conversion first shipped without it).
+      style={{ border: `1px solid ${LINE}`, background: "var(--chrome-bg)", color: "var(--chrome-text)", fontSize: CHROME_FONT_CONTROL }}
     >
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
         strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ display: "block" }}>
@@ -161,7 +167,7 @@ function FullscreenButton({ active, onToggle }) {
           ? <><path d="M9 3v6H3" /><path d="M15 3v6h6" /><path d="M9 21v-6H3" /><path d="M15 21v-6h6" /></>
           : <><path d="M3 9V3h6" /><path d="M21 9V3h-6" /><path d="M3 15v6h6" /><path d="M21 15v6h-6" /></>}
       </svg>
-    </button>
+    </IconButton>
   );
 }
 
@@ -170,28 +176,23 @@ function SettingsMenu() {
   const anchor = useRef(null);
   return (
     <>
-      <button
+      {/* NEW-1 (B982400) — same IconButton convergence as FullscreenButton above (26→30 tall). */}
+      <IconButton
         ref={anchor}
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Settings"
         title="Settings: display theme, smooth zoom"
-        style={{
-          // NEW-3 — was RADIUS.sm; see the matching comment on FullscreenButton above (same
-          // standalone-icon-button category, same fix).
-          display: "grid", placeItems: "center", width: 30, height: 26, borderRadius: RADIUS.md,
-          border: `1px solid ${LINE}`, background: "var(--chrome-bg)", color: "var(--chrome-text)",
-          cursor: "pointer", flex: "none",
-          fontSize: CHROME_FONT_CONTROL, // NEW-2 (B915536) — inert (icon-only), see FullscreenButton above
-        }}
+        // Same chrome-token override as FullscreenButton above — see its comment.
+        style={{ border: `1px solid ${LINE}`, background: "var(--chrome-bg)", color: "var(--chrome-text)", fontSize: CHROME_FONT_CONTROL }}
       >
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
           strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ display: "block" }}>
           <circle cx="12" cy="12" r="3" />
           <path d="M19.4 13a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
         </svg>
-      </button>
+      </IconButton>
       <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchor}
         placement="below-right" width={230} gap={8} panelStyle={settingsPanel}>
         {/* NEW-1 — the same Interface section the signed-in Settings panel renders (theme +
@@ -325,12 +326,21 @@ function edgeFadeMask({ left, right }) {
 // One module tab. Inactive tabs are full-opacity and legible (never dimmed/disabled);
 // the module accent reveals on hover, and the active tab keeps the accent + a 2px
 // underline indicator. Icons are crisp SVG at a fixed 13px (no bitmap scaling). (B167)
+// NEW-1 (B982400) — the shape (padding/height/underline/color/font) now lives in the shared
+// `Tab` primitive (controls.jsx); this component keeps only the business logic a shared
+// primitive shouldn't own (hover-to-prefetch, aria-current, the icon). Byte-for-byte identical
+// render: `Tab`'s own geometry is a direct transcription of what this function used to inline.
 function ModuleTab({ m, isActive, onClick }) {
   const [hover, setHover] = useState(false);
   const fill = ACCENT_FILL[m.id] || "var(--accent)";
   const textCol = ACCENT_TEXT[m.id] || "var(--accent)";
   return (
-    <button
+    <Tab
+      active={isActive}
+      hover={hover}
+      fill={fill}
+      textColor={textCol}
+      idleColor={TAB_IDLE}
       onClick={onClick}
       data-testid={`module-tab-${m.id}`}
       // Hover = nav intent: warm the target workspace's chunk (and Schedule's
@@ -342,34 +352,20 @@ function ModuleTab({ m, isActive, onClick }) {
       onMouseEnter={() => { setHover(true); if (!isActive) prefetchModule(m.id); }}
       onPointerDown={() => { if (!isActive) prefetchModule(m.id); }}
       onMouseLeave={() => setHover(false)}
-      aria-current={isActive ? "page" : undefined}
-      style={{
-        display: "flex", alignItems: "center", gap: 5,
-        height: "100%", padding: "0 9px",
-        border: "none",
-        borderBottom: `2px solid ${isActive ? fill : "transparent"}`,
-        background: "transparent",
-        color: isActive || hover ? textCol : TAB_IDLE,
-        // NEW-2 (B915536) — was 11.5, off-scale after the FONT_SIZE reduction. The top-level
-        // workspace switcher is the app's own primary navigation, so it takes CHROME_FONT_CONTROL
-        // (the same default every standard control uses) rather than a smaller, one-off value.
-        fontFamily: "inherit", fontSize: CHROME_FONT_CONTROL,
-        fontWeight: isActive ? 600 : 500,
-        cursor: "pointer", whiteSpace: "nowrap",
-        transition: "color 0.15s, border-color 0.15s",
-      }}
+      icon={
+        <svg
+          width="13" height="13" viewBox="0 0 16 16"
+          fill="none" stroke="currentColor"
+          strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
+          aria-hidden="true"
+          style={{ flex: "none", display: "block", shapeRendering: "geometricPrecision" }}
+        >
+          {m.icon}
+        </svg>
+      }
     >
-      <svg
-        width="13" height="13" viewBox="0 0 16 16"
-        fill="none" stroke="currentColor"
-        strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
-        aria-hidden="true"
-        style={{ flex: "none", display: "block", shapeRendering: "geometricPrecision" }}
-      >
-        {m.icon}
-      </svg>
       {m.label}
-    </button>
+    </Tab>
   );
 }
 

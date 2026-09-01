@@ -19,18 +19,27 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { RADIUS } from "../shared/ui/radius.js";
+import { MenuTrigger } from "../shared/ui/controls.jsx";
 import { supabase, supabaseConfigured } from "../workspaces/site-planner/lib/supabase.js";
 import { signOut } from "../workspaces/site-planner/lib/auth.js";
 import { checkIsAdmin } from "../workspaces/admin/lib/adminAccess.js";
 import AnchoredMenu from "../shared/ui/AnchoredMenu.jsx";
 
 // Chrome tokens (theme-aware — the account surface themes WITH the app, B318/B341).
-const LINE  = "var(--chrome-divider)";
+// NEW-1 (B982400) — `LINE` (--chrome-divider) is now hardcoded inside the shared MenuTrigger
+// primitive every chip in this file uses, so this file no longer needs its own copy.
 const MUTED = "var(--chrome-muted)";
 
 // ── Account pill + dropdown styling (B298). The dropdown reuses AnchoredMenu — the
 // same portal menu primitive as the project breadcrumb — so it escapes the header's
 // stacking/clipping context and lines up under the pill, consistent with that menu.
+// ⛔ NEW-1 (B982400) — the hand-rolled `pill` shape this comment used to describe is GONE; the
+// account/sign-in pills below are now the shared `MenuTrigger` primitive (controls.jsx), which
+// draws the identical border/background/font this object did (still `RADIUS.control`, same value
+// as the `RADIUS.md` this history describes — see controls.jsx's own SIZE bundle header) plus a
+// LOCKED height (30) neither this object nor its B972096 predecessor ever pinned. The history
+// below is kept because it's still why the shape is what it is; the object itself is deleted
+// rather than left as dead code.
 // NEW-1 (B972096) — was RADIUS.pill. Per docs/DESIGN.md's own shape rule, `pill` is reserved for
 // a CONTAINER that holds other controls (a segmented shell, a toggle bar whose height IS its
 // shape); this chip is a single control that opens a menu, exactly like the row-1 "File ▾"
@@ -39,12 +48,6 @@ const MUTED = "var(--chrome-muted)";
 // (FullscreenButton, SettingsMenu, CloudSyncBadge, the presence chip) onto one family, closing
 // out the owner's third report of the same visual mismatch (B950320/B958466 each "fixed" their
 // own narrow pair — a divider, a token reclassification — without ever converging the row).
-const pill = {
-  display: "flex", alignItems: "center", gap: 7,
-  maxWidth: 220, padding: "4px 9px 4px 5px", borderRadius: RADIUS.md,
-  cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
-  border: `1px solid ${LINE}`, background: "var(--chrome-bg-elev)", color: "var(--chrome-text)",
-};
 const avatar = (signedIn, size = 20) => ({
   width: size, height: size, borderRadius: RADIUS.pill, flex: "none",
   display: "grid", placeItems: "center",
@@ -127,33 +130,35 @@ export default function AccountControl({ user, profileApi, onOpenAuth, onOpenAcc
     // Cloud not configured — show a "Cloud off" pill with an explanatory popover.
     return (
       <div style={{ position: "relative" }}>
-        <button
+        {/* NEW-1 (B982400) — was a hand-rolled chip (RADIUS.md, an asymmetric "4px 10px 4px 6px"
+            pad, an auto height around 30px); now the shared MenuTrigger (size="md"), which is
+            the same locked (radius, height, padding, font) bundle the account/sign-in pills below
+            use — one family for the whole "opens something" row-1 chip class, not three
+            independently hand-tuned near-matches. `caret={false}`: this opens a popover
+            explainer, not a menu. `textColor=MUTED` keeps the deliberate "quieter than an active
+            account" reading — a real, kept distinction, not a geometry override. */}
+        <MenuTrigger
           onClick={() => setCloudNote((o) => !o)}
           aria-haspopup="dialog"
           aria-expanded={cloudNote}
           title="Cloud sync isn't set up — your work is saved on this device only"
-          style={{
-            display: "flex", alignItems: "center", gap: 7,
-            // NEW-1 (B972096) — was RADIUS.pill; same convergence as `pill` above (this is the
-            // no-Supabase-configured sibling of that same chip, not a container).
-            padding: "4px 10px 4px 6px", borderRadius: RADIUS.md,
-            cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
-            border: `1px solid ${LINE}`, background: "var(--chrome-bg-elev)",
-            color: MUTED,
-          }}
+          caret={false}
+          textColor={MUTED}
+          leading={
+            <span
+              style={{
+                width: 20, height: 20, borderRadius: RADIUS.pill, flex: "none",
+                display: "grid", placeItems: "center",
+                fontSize: 12, fontWeight: 800, color: MUTED,
+                background: "var(--chrome-divider)",
+              }}
+            >
+              ⊘
+            </span>
+          }
         >
-          <span
-            style={{
-              width: 20, height: 20, borderRadius: RADIUS.pill, flex: "none",
-              display: "grid", placeItems: "center",
-              fontSize: 12, fontWeight: 800, color: MUTED,
-              background: "var(--chrome-divider)",
-            }}
-          >
-            ⊘
-          </span>
-          <span style={{ whiteSpace: "nowrap" }}>Cloud off</span>
-        </button>
+          Cloud off
+        </MenuTrigger>
         {cloudNote && (
           <>
             <div onClick={() => setCloudNote(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
@@ -183,29 +188,30 @@ export default function AccountControl({ user, profileApi, onOpenAuth, onOpenAcc
 
   if (!user) {
     // Logged out — a "Sign in" pill that opens the auth modal directly.
+    // NEW-1 (B982400) — was a hand-rolled `pill` (see the shared style object above, now unused
+    // by this file — MenuTrigger is the same shape, byte-for-byte). `caret={false}`: this opens a
+    // modal, not a menu.
     return (
-      <button onClick={onOpenAuth} title="Sign in or create an account" style={pill}>
-        <span style={avatar(false)}>›</span>
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Sign in</span>
-      </button>
+      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>}>
+        Sign in
+      </MenuTrigger>
     );
   }
 
   // Signed in — the pill shows the user's name and opens an account dropdown (B298).
+  // NEW-1 (B982400) — was the hand-rolled `pill` shape; MenuTrigger draws the same border/
+  // background/radius/font, with its own trailing ▾ caret replacing the inline one below.
   return (
     <>
-      <button
+      <MenuTrigger
         ref={acctAnchor}
         onClick={() => setAcctOpen((o) => !o)}
-        aria-haspopup="menu"
-        aria-expanded={acctOpen}
+        open={acctOpen}
         title={`Signed in as ${user?.email || "(no email)"}`}
-        style={pill}
+        leading={<span style={avatar(true)}>{profileApi.initial}</span>}
       >
-        <span style={avatar(true)}>{profileApi.initial}</span>
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{who}</span>
-        <span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>
-      </button>
+        {who}
+      </MenuTrigger>
       <AnchoredMenu
         open={acctOpen}
         onClose={() => setAcctOpen(false)}

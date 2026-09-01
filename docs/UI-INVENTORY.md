@@ -22,15 +22,46 @@ toolbar buttons are one row, not forty), and **every deviating row is sorted to 
 theme's table**, flagged with ⚠️ and the specific reason. Attribution is best-effort (a literal
 text search of `src/` for the element's own label) — see the script header for why.
 
+## Distinct control signatures per surface (NEW-3, B982402)
+
+**The headline metric.** Not "how many values deviate from the allowed list" — a 6px chip
+sitting flush beside an 8px chip is individually on-scale on BOTH sides and invisible to that
+count, which is exactly how the account-pill mismatch shipped clean through every prior check.
+This counts DISTINCT (radius, height, padding, fontSize) COMBINATIONS actually painted on each
+surface — never color, weight, background or border, which are legitimate per-role differences
+(a filled primary action SHOULD look different from an outline icon button; that is not drift).
+Ratcheted the same way `design-drift-ceiling.json` is: a surface's count may never silently
+grow (`ui-audit/control-signature-ceiling.json`, `--write-signature-ceiling` to update after a
+genuine convergence).
+
+| surface | light | dark | ceiling (light/dark) |
+|---|---|---|---|
+| Map landing page (no project selected) | 24 | 24 | 24 / 24 |
+| App header | 11 | 11 | 11 / 11 |
+| Main menu — File ▾ | 1 | 1 | 1 / 1 |
+| Main menu — Undo history | 0 | 0 | 0 / 0 |
+| Main menu — Settings gear | 2 | 2 | 2 / 2 |
+| Main menu — plan menu (▾ next to the plan name) | 3 | 3 | 3 / 3 |
+| Tool rail | 2 | 2 | 2 / 2 |
+| Left rail + panels (Yield) | 15 | 15 | 15 / 15 |
+| Library | 0 | 0 | 0 / 0 |
+| Doc Review (empty state) | 1 | 1 | 1 / 1 |
+
+---
+
 **Total distinct deviating style signatures found: 8.** (B915536's earlier "24"
 was measured before the Map landing page — the surface listed first above — was in this crawl at
 all; the amended, complete-coverage count was 44. NEW-1/NEW-2 (2026-08-31) then reduced FONT_SIZE
 from 8 legal values to 5 named roles and moved every fixable one of those 44 onto it — see
-"Known, deliberately-not-fixed findings" below for what's left and why.)
+"Known, deliberately-not-fixed findings" below for what's left and why. **This count is now the
+BACKSTOP, not the headline** — see "Distinct control signatures per surface" above for why: it
+can certify two individually-on-scale, mutually-wrong values as clean.)
 
 **Total nesting-family mismatches found (NEW-1): 0.** See the section below.
 
 **Total sibling radius mismatches found (B950320): 0.** See the section below.
+
+**Total sibling height/padding mismatches found (NEW-3, B982402): 32.** See the section below.
 
 **Total alignment mismatches found (B950322): 2.** See the section below.
 
@@ -120,6 +151,77 @@ _None found on this run._
 
 ---
 
+## Sibling height/padding mismatches (NEW-3, B982402)
+
+Two controls sitting in the same visual row with no containment relationship, disagreeing on
+HEIGHT and/or PADDING — the axis this inventory never checked before this item: "not the
+bible, not the guard, not the inventory's pass/fail." Same grouping and the same
+divider-in-span escape as "Sibling radius mismatches" above (a real divider still legitimises
+two different SIZES sitting apart; it is never an excuse for two sizes sitting flush). The
+candidate pool is wider than the radius check's, deliberately: it includes every interactive
+control this inventory reads (buttons, inputs, selects, chip-hooked elements), not only ones
+with a uniform on-scale radius — a 0px-radius nav tab disagreeing in height with its flush
+neighbour is exactly the class this check exists to catch, and the radius check is blind to it
+by construction (radius 0 opts out of that check's own candidate pool).
+
+**Map landing page (no project selected) — light:**
+
+- "Settings" sits 6px from "Cloud sync isn't set up — your work is saved on this device only" — padding "0px" vs "0px 12px".
+- "Click parcels on the map to select them, then start a plan from the selection" sits 0px from "More ways to start a plan" — padding "0px 11px" vs "1px 6px".
+- "Collapse the sites panel" sits 4px from "Sites1" — padding "1px 6px" vs "0px 8px".
+- "Filter sites by name" sits 6px from "Sort sites within each group" — padding "5px 8px" vs "5px 6px".
+- "Collapse" sits 0px from "Reorder the Pursuit group" — height 23px vs 17px, padding "4px 4px 4px 12px" vs "1px 6px".
+
+**Map landing page (no project selected) — dark:**
+
+- "Settings" sits 6px from "Cloud sync isn't set up — your work is saved on this device only" — padding "0px" vs "0px 12px".
+- "Click parcels on the map to select them, then start a plan from the selection" sits 0px from "More ways to start a plan" — padding "0px 11px" vs "1px 6px".
+- "Collapse the sites panel" sits 4px from "Sites1" — padding "1px 6px" vs "0px 8px".
+- "Filter sites by name" sits 6px from "Sort sites within each group" — padding "5px 8px" vs "5px 6px".
+- "Collapse" sits 0px from "Reorder the Pursuit group" — height 23px vs 17px, padding "4px 4px 4px 12px" vs "1px 6px".
+
+**App header — light:**
+
+- "Switch project" sits 10.7px from "Switch or rename plan" — height 26px vs 24px, padding "0px 10px" vs "0px 8px".
+- "Cloud sync: Saved on this device" sits 6px from "Full screen" — height 24px vs 30px.
+- "Settings" sits 6px from "Cloud sync isn't set up — your work is saved on this device only" — padding "0px" vs "0px 12px".
+- "File — export a PNG or print a PDF" sits 134px from "Zoom to fit" — padding "6px 11px" vs "0px" (divider-separated).
+
+**App header — dark:**
+
+- "Switch project" sits 10.7px from "Switch or rename plan" — height 26px vs 24px, padding "0px 10px" vs "0px 8px".
+- "Cloud sync: Saved on this device" sits 6px from "Full screen" — height 24px vs 30px.
+- "Settings" sits 6px from "Cloud sync isn't set up — your work is saved on this device only" — padding "0px" vs "0px 12px".
+- "File — export a PNG or print a PDF" sits 134px from "Zoom to fit" — padding "6px 11px" vs "0px" (divider-separated).
+
+**Tool rail — light:**
+
+- "Switch project" sits 10.7px from "Switch or rename plan" — height 26px vs 24px, padding "0px 10px" vs "0px 8px".
+- "Cloud sync: Saved on this device" sits 6px from "Full screen" — height 24px vs 30px.
+- "Settings" sits 6px from "Cloud sync isn't set up — your work is saved on this device only" — padding "0px" vs "0px 12px".
+- "File — export a PNG or print a PDF" sits 134px from "Zoom to fit" — padding "6px 11px" vs "0px" (divider-separated).
+- "What's shown on this drawing — hide groups temporarily, plus grid & snap" sits 10px from "Layers — map data layers (flood, utilities, parcels, aerial…)" — height 31px vs 32px.
+
+**Tool rail — dark:**
+
+- "Switch project" sits 10.7px from "Switch or rename plan" — height 26px vs 24px, padding "0px 10px" vs "0px 8px".
+- "Cloud sync: Saved on this device" sits 6px from "Full screen" — height 24px vs 30px.
+- "Settings" sits 6px from "Cloud sync isn't set up — your work is saved on this device only" — padding "0px" vs "0px 12px".
+- "File — export a PNG or print a PDF" sits 134px from "Zoom to fit" — padding "6px 11px" vs "0px" (divider-separated).
+- "What's shown on this drawing — hide groups temporarily, plus grid & snap" sits 10px from "Layers — map data layers (flood, utilities, parcels, aerial…)" — height 31px vs 32px.
+
+**Left rail + panels (Yield) — light:**
+
+- "What's shown on this drawing — hide groups temporarily, plus grid & snap" sits 10px from "Layers — map data layers (flood, utilities, parcels, aerial…)" — height 31px vs 32px.
+- "Detach panel" sits 4px from "Close panel" — height 21px vs 19px.
+
+**Left rail + panels (Yield) — dark:**
+
+- "What's shown on this drawing — hide groups temporarily, plus grid & snap" sits 10px from "Layers — map data layers (flood, utilities, parcels, aerial…)" — height 31px vs 32px.
+- "Detach panel" sits 4px from "Close panel" — height 21px vs 19px.
+
+---
+
 ## Alignment mismatches (B950322)
 
 Floating overlays (`position: absolute`/`fixed`) that share the same positioned ancestor and the
@@ -146,33 +248,33 @@ look aligned because they float over the same surface.
 |---|---|---|---|---|---|---|---|
 | ⚠️ **fontSize 22 not in FONT_SIZE scale {10,10.5,12,13,14}** — 0px | 30px | 22px | 700 | `rgb(255, 255, 255)` | `0px none rgb(0, 0, 0)` | Zoom in, Zoom out ×2 | src/workspaces/site-planner/components/LayerPanel.jsx:117:   * These two are what turn a static "Zoom in to ≥ 16 to load" sentence — which reads the same (+19 more matches, best-effort) |
 | ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 42px | 16px | 400 | `rgb(234, 238, 243)` | `0px none rgb(27, 30, 38)` | SiteCompSelect parcels▾ ×1 | unattributed (no source match — best-effort text search) |
-| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 6px | 30px | 16px | 400 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Site or comp ×1 | src/workspaces/site-planner/MapFinder.jsx:474:    <div role="tablist" aria-label="Site or comp" style={{ |
+| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 6px | 30px | 16px | 400 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Site or comp ×1 | src/workspaces/site-planner/MapFinder.jsx:473:    <div role="tablist" aria-label="Site or comp" style={{ |
 | ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 128px | 16px | 400 | `rgba(255, 255, 255, 0.94)` | `1px solid rgb(225, 229, 235)` | ▼Sites1Comps0Largest firstA–ZRecently to ×1 | unattributed (no source match — best-effort text search) |
 | 0px | 25px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(69, 76, 92)` | Schedule, Review, Library (+2 more) ×5 | src/shared/ui/ModuleLoader.jsx:6: *   • Schedule  → a Gantt chart assembling: zebra row bands fade in top→bottom, (+85 more matches, best-effort) |
-| 8px | 26px | 12px | 400 | `rgb(234, 238, 243)` | `1px solid rgb(215, 221, 229)` | Full screen, Settings ×2 | src/shared/ui/AppHeader.jsx:139:      aria-label={active ? "Leave full screen" : "Full screen"} (+5 more matches, best-effort) |
-| 6px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Dashboard: all projects ×1 | src/shared/ui/AppHeader.jsx:855:            title={onDashboard ? "Dashboard: all projects" : undefined} |
-| 8px | 22px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | All projects: Map ×1 | unattributed (no source match — best-effort text search) |
-| 8px | 22px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Choose a project ×1 | src/shared/ui/ProjectBreadcrumb.jsx:581:        title={cross ? "Browsing all projects" : currentProject ? "Switch project" : "Choose a project"} (+2 more matches, best-effort) |
-| 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Cloud sync isn't set up — your work is saved on this device only ×1 | src/app/AccountControl.jsx:134:          title="Cloud sync isn't set up — your work is saved on this device only" |
+| 8px | 30px | 12px | 400 | `rgb(234, 238, 243)` | `1px solid rgb(215, 221, 229)` | Full screen, Settings ×2 | src/shared/ui/AppHeader.jsx:148:      aria-label={active ? "Leave full screen" : "Full screen"} (+5 more matches, best-effort) |
+| 6px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Dashboard: all projects ×1 | src/shared/ui/AppHeader.jsx:851:            title={onDashboard ? "Dashboard: all projects" : undefined} |
+| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | All projects: Map ×1 | unattributed (no source match — best-effort text search) |
+| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Choose a project ×1 | src/shared/ui/ProjectBreadcrumb.jsx:589:        title={cross ? "Browsing all projects" : currentProject ? "Switch project" : "Choose a project"} (+2 more matches, best-effort) |
+| 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Cloud sync isn't set up — your work is saved on this device only ×1 | src/app/AccountControl.jsx:144:          title="Cloud sync isn't set up — your work is saved on this device only" |
 | 999px | 20px | 12px | 800 | `rgb(215, 221, 229)` | `0px none rgb(53, 59, 73)` | ⊘ ×1 | unattributed (label too short to search) |
-| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(15, 110, 86)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+470 more matches, best-effort) |
-| 0px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Find my location ×1 | src/workspaces/site-planner/MapFinder.jsx:1163:      btn.href = "#"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn"); btn.setAttribute("data-locate-state", "idle"); (+2 more matches, best-effort) |
+| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(15, 110, 86)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+478 more matches, best-effort) |
+| 0px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Find my location ×1 | src/workspaces/site-planner/MapFinder.jsx:1171:      btn.href = "#"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn"); btn.setAttribute("data-locate-state", "idle"); (+2 more matches, best-effort) |
 | 0px | 18px | 12px | 400 | `rgba(255, 255, 255, 0.8)` | `0px none rgb(51, 51, 51)` | 500 mi ×1 | unattributed (no source match — best-effort text search) |
-| 6px | 26px | 12px | 700 | `rgb(194, 65, 12)` | `0px none rgb(255, 255, 255)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+470 more matches, best-effort) |
-| 6px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Comp ×1 | src/shared/ui/CloudSyncBadge.jsx:23:import { Component, useEffect, useRef, useState } from "react"; (+195 more matches, best-effort) |
+| 6px | 26px | 12px | 700 | `rgb(194, 65, 12)` | `0px none rgb(255, 255, 255)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+478 more matches, best-effort) |
+| 6px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Comp ×1 | src/shared/ui/CloudSyncBadge.jsx:23:import { Component, useEffect, useRef, useState } from "react"; (+197 more matches, best-effort) |
 | 0px | 42px | 13px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Search for an address or place ×1 | src/workspaces/site-planner/components/PlaceSearchField.jsx:148:        aria-label="Search for an address or place" |
-| 6px 0px 0px 6px | 30px | 12px | 700 | `rgb(194, 65, 12)` | `1px solid rgb(194, 65, 12)` | Click parcels on the map to select them, then start a plan from the selection ×1 | src/workspaces/site-planner/MapFinder.jsx:2867:                title="Click parcels on the map to select them, then start a plan from the selection" |
-| 0px 6px 6px 0px | 30px | 10px | 400 | `rgb(194, 65, 12)` | `1px solid rgb(194, 65, 12)` | More ways to start a plan ×1 | src/workspaces/site-planner/MapFinder.jsx:2883:                title="More ways to start a plan" |
-| 6px | 22px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Collapse the sites panel ×1 | src/workspaces/site-planner/MapFinder.jsx:3111:                title={sitesPanelOpen ? "Collapse the sites panel" : "Expand the sites panel"} |
+| 6px 0px 0px 6px | 30px | 12px | 700 | `rgb(194, 65, 12)` | `1px solid rgb(194, 65, 12)` | Click parcels on the map to select them, then start a plan from the selection ×1 | src/workspaces/site-planner/MapFinder.jsx:2875:                title="Click parcels on the map to select them, then start a plan from the selection" |
+| 0px 6px 6px 0px | 30px | 10px | 400 | `rgb(194, 65, 12)` | `1px solid rgb(194, 65, 12)` | More ways to start a plan ×1 | src/workspaces/site-planner/MapFinder.jsx:2891:                title="More ways to start a plan" |
+| 6px | 22px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Collapse the sites panel ×1 | src/workspaces/site-planner/MapFinder.jsx:3119:                title={sitesPanelOpen ? "Collapse the sites panel" : "Expand the sites panel"} |
 | 6px | 22px | 12px | 700 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Sites1 ×1 | unattributed (no source match — best-effort text search) |
 | 6px | 22px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Comps0 ×1 | unattributed (no source match — best-effort text search) |
-| 6px | 29px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Filter sites by name ×1 | src/workspaces/site-planner/MapFinder.jsx:3135:              <input value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name" |
-| 6px | 29px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Sort sites within each group ×1 | src/workspaces/site-planner/MapFinder.jsx:3137:              <select value={sitesPanelPrefs.sort} onChange={(e) => setSitesSort(e.target.value)} aria-label="Sort sites within each group" |
+| 6px | 29px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Filter sites by name ×1 | src/workspaces/site-planner/MapFinder.jsx:3143:              <input value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name" |
+| 6px | 29px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Sort sites within each group ×1 | src/workspaces/site-planner/MapFinder.jsx:3145:              <select value={sitesPanelPrefs.sort} onChange={(e) => setSitesSort(e.target.value)} aria-label="Sort sites within each group" |
 | 0px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Collapse ×1 | src/shared/projects/projectModel.js:16:// Collapse a flat list of site-model records (each: { groupId|id, site|name, (+25 more matches, best-effort) |
-| 999px | 14px | 10px | 400 | `rgb(216, 90, 48)` | `0px none rgb(255, 255, 255)` | SPAN ×1 | src/shared/ui/AppHeader.jsx:827:            along the chip's right edge returned THE PILL'S TEXT SPAN for the last stretch of it, (+22 more matches, best-effort) |
+| 999px | 14px | 10px | 400 | `rgb(216, 90, 48)` | `0px none rgb(255, 255, 255)` | SPAN ×1 | src/shared/ui/AppHeader.jsx:823:            along the chip's right edge returned THE PILL'S TEXT SPAN for the last stretch of it, (+22 more matches, best-effort) |
 | 6px | 17px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Reorder the Pursuit group ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
-| 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Imagery & layers ×1 | src/workspaces/site-planner/MapFinder.jsx:171: * "▶ Imagery & layers" pill below it read as two unrelated floating chips: same right edge, but (+4 more matches, best-effort) |
+| 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Imagery & layers ×1 | src/shared/ui/controls.jsx:44: * chip — the account pill, "Drop a pin", the collapsed "Imagery & layers" pill, the nav tabs' (+5 more matches, best-effort) |
 
 **dark** — 29 distinct style signature(s) over 35 matched element(s):
 
@@ -180,33 +282,33 @@ look aligned because they float over the same surface.
 |---|---|---|---|---|---|---|---|
 | ⚠️ **fontSize 22 not in FONT_SIZE scale {10,10.5,12,13,14}** — 0px | 30px | 22px | 700 | `rgb(255, 255, 255)` | `0px none rgb(0, 0, 0)` | Zoom in, Zoom out ×2 | src/workspaces/site-planner/components/LayerPanel.jsx:117:   * These two are what turn a static "Zoom in to ≥ 16 to load" sentence — which reads the same (+19 more matches, best-effort) |
 | ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 42px | 16px | 400 | `rgb(17, 19, 25)` | `0px none rgb(232, 235, 240)` | SiteCompSelect parcels▾ ×1 | unattributed (no source match — best-effort text search) |
-| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 6px | 30px | 16px | 400 | `rgb(23, 26, 33)` | `0px none rgb(232, 235, 240)` | Site or comp ×1 | src/workspaces/site-planner/MapFinder.jsx:474:    <div role="tablist" aria-label="Site or comp" style={{ |
+| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 6px | 30px | 16px | 400 | `rgb(23, 26, 33)` | `0px none rgb(232, 235, 240)` | Site or comp ×1 | src/workspaces/site-planner/MapFinder.jsx:473:    <div role="tablist" aria-label="Site or comp" style={{ |
 | ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 128px | 16px | 400 | `rgba(24, 27, 33, 0.93)` | `1px solid rgb(42, 46, 55)` | ▼Sites1Comps0Largest firstA–ZRecently to ×1 | unattributed (no source match — best-effort text search) |
 | 0px | 25px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(194, 200, 210)` | Schedule, Review, Library (+2 more) ×5 | src/shared/ui/ModuleLoader.jsx:6: *   • Schedule  → a Gantt chart assembling: zebra row bands fade in top→bottom, (+85 more matches, best-effort) |
-| 8px | 26px | 12px | 400 | `rgb(17, 19, 25)` | `1px solid rgb(38, 42, 51)` | Full screen, Settings ×2 | src/shared/ui/AppHeader.jsx:139:      aria-label={active ? "Leave full screen" : "Full screen"} (+5 more matches, best-effort) |
-| 6px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Dashboard: all projects ×1 | src/shared/ui/AppHeader.jsx:855:            title={onDashboard ? "Dashboard: all projects" : undefined} |
-| 8px | 22px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | All projects: Map ×1 | unattributed (no source match — best-effort text search) |
-| 8px | 22px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Choose a project ×1 | src/shared/ui/ProjectBreadcrumb.jsx:581:        title={cross ? "Browsing all projects" : currentProject ? "Switch project" : "Choose a project"} (+2 more matches, best-effort) |
-| 8px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Cloud sync isn't set up — your work is saved on this device only ×1 | src/app/AccountControl.jsx:134:          title="Cloud sync isn't set up — your work is saved on this device only" |
+| 8px | 30px | 12px | 400 | `rgb(17, 19, 25)` | `1px solid rgb(38, 42, 51)` | Full screen, Settings ×2 | src/shared/ui/AppHeader.jsx:148:      aria-label={active ? "Leave full screen" : "Full screen"} (+5 more matches, best-effort) |
+| 6px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Dashboard: all projects ×1 | src/shared/ui/AppHeader.jsx:851:            title={onDashboard ? "Dashboard: all projects" : undefined} |
+| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | All projects: Map ×1 | unattributed (no source match — best-effort text search) |
+| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Choose a project ×1 | src/shared/ui/ProjectBreadcrumb.jsx:589:        title={cross ? "Browsing all projects" : currentProject ? "Switch project" : "Choose a project"} (+2 more matches, best-effort) |
+| 8px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Cloud sync isn't set up — your work is saved on this device only ×1 | src/app/AccountControl.jsx:144:          title="Cloud sync isn't set up — your work is saved on this device only" |
 | 999px | 20px | 12px | 800 | `rgb(38, 42, 51)` | `0px none rgb(166, 173, 186)` | ⊘ ×1 | unattributed (label too short to search) |
-| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(93, 202, 165)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+470 more matches, best-effort) |
-| 0px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `0px none rgb(236, 239, 244)` | Find my location ×1 | src/workspaces/site-planner/MapFinder.jsx:1163:      btn.href = "#"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn"); btn.setAttribute("data-locate-state", "idle"); (+2 more matches, best-effort) |
+| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(93, 202, 165)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+478 more matches, best-effort) |
+| 0px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `0px none rgb(236, 239, 244)` | Find my location ×1 | src/workspaces/site-planner/MapFinder.jsx:1171:      btn.href = "#"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn"); btn.setAttribute("data-locate-state", "idle"); (+2 more matches, best-effort) |
 | 0px | 18px | 12px | 400 | `rgba(255, 255, 255, 0.8)` | `0px none rgb(51, 51, 51)` | 500 mi ×1 | unattributed (no source match — best-effort text search) |
-| 6px | 26px | 12px | 700 | `rgb(242, 107, 58)` | `0px none rgb(255, 255, 255)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+470 more matches, best-effort) |
-| 6px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Comp ×1 | src/shared/ui/CloudSyncBadge.jsx:23:import { Component, useEffect, useRef, useState } from "react"; (+195 more matches, best-effort) |
+| 6px | 26px | 12px | 700 | `rgb(242, 107, 58)` | `0px none rgb(255, 255, 255)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+478 more matches, best-effort) |
+| 6px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Comp ×1 | src/shared/ui/CloudSyncBadge.jsx:23:import { Component, useEffect, useRef, useState } from "react"; (+197 more matches, best-effort) |
 | 0px | 42px | 13px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | Search for an address or place ×1 | src/workspaces/site-planner/components/PlaceSearchField.jsx:148:        aria-label="Search for an address or place" |
-| 6px 0px 0px 6px | 30px | 12px | 700 | `rgb(242, 107, 58)` | `1px solid rgb(242, 107, 58)` | Click parcels on the map to select them, then start a plan from the selection ×1 | src/workspaces/site-planner/MapFinder.jsx:2867:                title="Click parcels on the map to select them, then start a plan from the selection" |
-| 0px 6px 6px 0px | 30px | 10px | 400 | `rgb(242, 107, 58)` | `1px solid rgb(242, 107, 58)` | More ways to start a plan ×1 | src/workspaces/site-planner/MapFinder.jsx:2883:                title="More ways to start a plan" |
-| 6px | 22px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Collapse the sites panel ×1 | src/workspaces/site-planner/MapFinder.jsx:3111:                title={sitesPanelOpen ? "Collapse the sites panel" : "Expand the sites panel"} |
+| 6px 0px 0px 6px | 30px | 12px | 700 | `rgb(242, 107, 58)` | `1px solid rgb(242, 107, 58)` | Click parcels on the map to select them, then start a plan from the selection ×1 | src/workspaces/site-planner/MapFinder.jsx:2875:                title="Click parcels on the map to select them, then start a plan from the selection" |
+| 0px 6px 6px 0px | 30px | 10px | 400 | `rgb(242, 107, 58)` | `1px solid rgb(242, 107, 58)` | More ways to start a plan ×1 | src/workspaces/site-planner/MapFinder.jsx:2891:                title="More ways to start a plan" |
+| 6px | 22px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Collapse the sites panel ×1 | src/workspaces/site-planner/MapFinder.jsx:3119:                title={sitesPanelOpen ? "Collapse the sites panel" : "Expand the sites panel"} |
 | 6px | 22px | 12px | 700 | `rgb(29, 32, 39)` | `0px none rgb(232, 235, 240)` | Sites1 ×1 | unattributed (no source match — best-effort text search) |
 | 6px | 22px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Comps0 ×1 | unattributed (no source match — best-effort text search) |
-| 6px | 29px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Filter sites by name ×1 | src/workspaces/site-planner/MapFinder.jsx:3135:              <input value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name" |
-| 6px | 29px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Sort sites within each group ×1 | src/workspaces/site-planner/MapFinder.jsx:3137:              <select value={sitesPanelPrefs.sort} onChange={(e) => setSitesSort(e.target.value)} aria-label="Sort sites within each group" |
+| 6px | 29px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Filter sites by name ×1 | src/workspaces/site-planner/MapFinder.jsx:3143:              <input value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name" |
+| 6px | 29px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Sort sites within each group ×1 | src/workspaces/site-planner/MapFinder.jsx:3145:              <select value={sitesPanelPrefs.sort} onChange={(e) => setSitesSort(e.target.value)} aria-label="Sort sites within each group" |
 | 0px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Collapse ×1 | src/shared/projects/projectModel.js:16:// Collapse a flat list of site-model records (each: { groupId|id, site|name, (+25 more matches, best-effort) |
-| 999px | 14px | 10px | 400 | `rgb(216, 90, 48)` | `0px none rgb(255, 255, 255)` | SPAN ×1 | src/shared/ui/AppHeader.jsx:827:            along the chip's right edge returned THE PILL'S TEXT SPAN for the last stretch of it, (+22 more matches, best-effort) |
+| 999px | 14px | 10px | 400 | `rgb(216, 90, 48)` | `0px none rgb(255, 255, 255)` | SPAN ×1 | src/shared/ui/AppHeader.jsx:823:            along the chip's right edge returned THE PILL'S TEXT SPAN for the last stretch of it, (+22 more matches, best-effort) |
 | 6px | 17px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Reorder the Pursuit group ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
-| 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Imagery & layers ×1 | src/workspaces/site-planner/MapFinder.jsx:171: * "▶ Imagery & layers" pill below it read as two unrelated floating chips: same right edge, but (+4 more matches, best-effort) |
+| 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Imagery & layers ×1 | src/shared/ui/controls.jsx:44: * chip — the account pill, "Drop a pin", the collapsed "Imagery & layers" pill, the nav tabs' (+5 more matches, best-effort) |
 
 
 ---
@@ -218,17 +320,17 @@ look aligned because they float over the same surface.
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
 | 0px | 25px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(69, 76, 92)` | Schedule, Review, Library (+2 more) ×5 | src/shared/ui/ModuleLoader.jsx:6: *   • Schedule  → a Gantt chart assembling: zebra row bands fade in top→bottom, (+85 more matches, best-effort) |
-| 8px | 26px | 12px | 400 | `rgb(234, 238, 243)` | `1px solid rgb(215, 221, 229)` | Full screen, Settings ×2 | src/shared/ui/AppHeader.jsx:139:      aria-label={active ? "Leave full screen" : "Full screen"} (+5 more matches, best-effort) |
-| 8px 0px 0px 8px | 26px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Undo, Redo ×2 | src/workspaces/model/ModelApp.jsx:45:import { useUndoableState } from "./lib/undoStack.js"; (+42 more matches, best-effort) |
-| 0px 8px 8px 0px | 26px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Recent actions to undo, Recent actions to redo ×2 | src/workspaces/site-planner/SitePlanner.jsx:19045:            aria-label="Recent actions to undo" title="Recent actions to undo"> |
-| 6px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Dashboard: all projects ×1 | src/shared/ui/AppHeader.jsx:855:            title={onDashboard ? "Dashboard: all projects" : undefined} |
-| 8px | 22px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | All projects: Map ×1 | unattributed (no source match — best-effort text search) |
-| 8px | 22px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Switch project ×1 | src/shared/ui/ProjectBreadcrumb.jsx:581:        title={cross ? "Browsing all projects" : currentProject ? "Switch project" : "Choose a project"} |
-| 8px | 24px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Switch or rename plan ×1 | src/workspaces/site-planner/SitePlanner.jsx:18863:        title="Switch or rename plan" |
+| 8px | 30px | 12px | 400 | `rgb(234, 238, 243)` | `1px solid rgb(215, 221, 229)` | Full screen, Settings ×2 | src/shared/ui/AppHeader.jsx:148:      aria-label={active ? "Leave full screen" : "Full screen"} (+5 more matches, best-effort) |
+| 8px 0px 0px 8px | 26px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Undo, Redo ×2 | src/workspaces/model/ModelApp.jsx:46:import { useUndoableState } from "./lib/undoStack.js"; (+42 more matches, best-effort) |
+| 0px 8px 8px 0px | 26px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Recent actions to undo, Recent actions to redo ×2 | src/workspaces/site-planner/SitePlanner.jsx:19092:            aria-label="Recent actions to undo" title="Recent actions to undo"> |
+| 6px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Dashboard: all projects ×1 | src/shared/ui/AppHeader.jsx:851:            title={onDashboard ? "Dashboard: all projects" : undefined} |
+| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | All projects: Map ×1 | unattributed (no source match — best-effort text search) |
+| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Switch project ×1 | src/shared/ui/ProjectBreadcrumb.jsx:589:        title={cross ? "Browsing all projects" : currentProject ? "Switch project" : "Choose a project"} |
+| 8px | 24px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Switch or rename plan ×1 | src/workspaces/site-planner/SitePlanner.jsx:18910:        title="Switch or rename plan" |
 | 8px | 24px | 12px | 400 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Cloud sync: Saved on this device ×1 | unattributed (no source match — best-effort text search) |
-| 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Cloud sync isn't set up — your work is saved on this device only ×1 | src/app/AccountControl.jsx:134:          title="Cloud sync isn't set up — your work is saved on this device only" |
-| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(15, 110, 86)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+470 more matches, best-effort) |
-| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `1px solid rgb(215, 221, 229)` | File — export a PNG or print a PDF ×1 | src/workspaces/site-planner/SitePlanner.jsx:18996:            title="File — export a PNG or print a PDF" |
+| 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Cloud sync isn't set up — your work is saved on this device only ×1 | src/app/AccountControl.jsx:144:          title="Cloud sync isn't set up — your work is saved on this device only" |
+| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(15, 110, 86)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+478 more matches, best-effort) |
+| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `1px solid rgb(215, 221, 229)` | File — export a PNG or print a PDF ×1 | src/workspaces/site-planner/SitePlanner.jsx:19043:            title="File — export a PNG or print a PDF" |
 | 8px | 26px | 12px | 500 | `rgba(0, 0, 0, 0.06)` | `1px solid rgba(0, 0, 0, 0)` | Zoom to fit ×1 | src/workspaces/site-planner/components/icons.jsx:198:// Zoom to fit — four arrows pointing OUTWARD to the corners, each with its own arrowhead (unlike (+5 more matches, best-effort) |
 
 **dark** — 13 distinct style signature(s) over 20 matched element(s):
@@ -236,17 +338,17 @@ look aligned because they float over the same surface.
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
 | 0px | 25px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(194, 200, 210)` | Schedule, Review, Library (+2 more) ×5 | src/shared/ui/ModuleLoader.jsx:6: *   • Schedule  → a Gantt chart assembling: zebra row bands fade in top→bottom, (+85 more matches, best-effort) |
-| 8px | 26px | 12px | 400 | `rgb(17, 19, 25)` | `1px solid rgb(38, 42, 51)` | Full screen, Settings ×2 | src/shared/ui/AppHeader.jsx:139:      aria-label={active ? "Leave full screen" : "Full screen"} (+5 more matches, best-effort) |
-| 8px 0px 0px 8px | 26px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Undo, Redo ×2 | src/workspaces/model/ModelApp.jsx:45:import { useUndoableState } from "./lib/undoStack.js"; (+42 more matches, best-effort) |
-| 0px 8px 8px 0px | 26px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Recent actions to undo, Recent actions to redo ×2 | src/workspaces/site-planner/SitePlanner.jsx:19045:            aria-label="Recent actions to undo" title="Recent actions to undo"> |
-| 6px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Dashboard: all projects ×1 | src/shared/ui/AppHeader.jsx:855:            title={onDashboard ? "Dashboard: all projects" : undefined} |
-| 8px | 22px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | All projects: Map ×1 | unattributed (no source match — best-effort text search) |
-| 8px | 22px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | Switch project ×1 | src/shared/ui/ProjectBreadcrumb.jsx:581:        title={cross ? "Browsing all projects" : currentProject ? "Switch project" : "Choose a project"} |
-| 8px | 24px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | Switch or rename plan ×1 | src/workspaces/site-planner/SitePlanner.jsx:18863:        title="Switch or rename plan" |
+| 8px | 30px | 12px | 400 | `rgb(17, 19, 25)` | `1px solid rgb(38, 42, 51)` | Full screen, Settings ×2 | src/shared/ui/AppHeader.jsx:148:      aria-label={active ? "Leave full screen" : "Full screen"} (+5 more matches, best-effort) |
+| 8px 0px 0px 8px | 26px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Undo, Redo ×2 | src/workspaces/model/ModelApp.jsx:46:import { useUndoableState } from "./lib/undoStack.js"; (+42 more matches, best-effort) |
+| 0px 8px 8px 0px | 26px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Recent actions to undo, Recent actions to redo ×2 | src/workspaces/site-planner/SitePlanner.jsx:19092:            aria-label="Recent actions to undo" title="Recent actions to undo"> |
+| 6px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Dashboard: all projects ×1 | src/shared/ui/AppHeader.jsx:851:            title={onDashboard ? "Dashboard: all projects" : undefined} |
+| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | All projects: Map ×1 | unattributed (no source match — best-effort text search) |
+| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | Switch project ×1 | src/shared/ui/ProjectBreadcrumb.jsx:589:        title={cross ? "Browsing all projects" : currentProject ? "Switch project" : "Choose a project"} |
+| 8px | 24px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | Switch or rename plan ×1 | src/workspaces/site-planner/SitePlanner.jsx:18910:        title="Switch or rename plan" |
 | 8px | 24px | 12px | 400 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Cloud sync: Saved on this device ×1 | unattributed (no source match — best-effort text search) |
-| 8px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Cloud sync isn't set up — your work is saved on this device only ×1 | src/app/AccountControl.jsx:134:          title="Cloud sync isn't set up — your work is saved on this device only" |
-| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(93, 202, 165)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+470 more matches, best-effort) |
-| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `1px solid rgb(38, 42, 51)` | File — export a PNG or print a PDF ×1 | src/workspaces/site-planner/SitePlanner.jsx:18996:            title="File — export a PNG or print a PDF" |
+| 8px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Cloud sync isn't set up — your work is saved on this device only ×1 | src/app/AccountControl.jsx:144:          title="Cloud sync isn't set up — your work is saved on this device only" |
+| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(93, 202, 165)` | Site ×1 | src/shared/coordinates/statePlane.js:27: * SCOPE. Read-only screening use, exactly like the existing spine — the Site Planner still draws in (+478 more matches, best-effort) |
+| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `1px solid rgb(38, 42, 51)` | File — export a PNG or print a PDF ×1 | src/workspaces/site-planner/SitePlanner.jsx:19043:            title="File — export a PNG or print a PDF" |
 | 8px | 26px | 12px | 500 | `rgba(255, 255, 255, 0.09)` | `1px solid rgba(0, 0, 0, 0)` | Zoom to fit ×1 | src/workspaces/site-planner/components/icons.jsx:198:// Zoom to fit — four arrows pointing OUTWARD to the corners, each with its own arrowhead (unlike (+5 more matches, best-effort) |
 
 
@@ -258,13 +360,13 @@ look aligned because they float over the same surface.
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
-| 6px | 24px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Save the current view as a PNG image, Pick a print frame, then download a finished PDF (no browser print dialog) ×2 | src/workspaces/site-planner/SitePlanner.jsx:19009:            <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button> |
+| 6px | 24px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Save the current view as a PNG image, Pick a print frame, then download a finished PDF (no browser print dialog) ×2 | src/workspaces/site-planner/SitePlanner.jsx:19056:            <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button> |
 
 **dark** — 1 distinct style signature(s) over 2 matched element(s):
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
-| 6px | 24px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Save the current view as a PNG image, Pick a print frame, then download a finished PDF (no browser print dialog) ×2 | src/workspaces/site-planner/SitePlanner.jsx:19009:            <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button> |
+| 6px | 24px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Save the current view as a PNG image, Pick a print frame, then download a finished PDF (no browser print dialog) ×2 | src/workspaces/site-planner/SitePlanner.jsx:19056:            <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button> |
 
 
 ---
@@ -290,7 +392,7 @@ _(nothing matched in this theme/scenario)_
 |---|---|---|---|---|---|---|---|
 | 6px | 42px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | DarkAlways dark, SystemMatch your computer ×2 | unattributed (no source match — best-effort text search) |
 | 6px | 42px | 12px | 400 | `rgb(238, 241, 245)` | `0px none rgb(27, 30, 38)` | LightAlways light✓ ×1 | unattributed (no source match — best-effort text search) |
-| 0px | 13px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | INPUT ×1 | src/shared/ui/AppHeader.jsx:713:      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || e.target.isContentEditable) return; (+39 more matches, best-effort) |
+| 0px | 13px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | INPUT ×1 | src/shared/ui/AppHeader.jsx:709:      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || e.target.isContentEditable) return; (+39 more matches, best-effort) |
 
 **dark** — 3 distinct style signature(s) over 4 matched element(s):
 
@@ -298,7 +400,7 @@ _(nothing matched in this theme/scenario)_
 |---|---|---|---|---|---|---|---|
 | 6px | 42px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | LightAlways light, SystemMatch your computer ×2 | unattributed (no source match — best-effort text search) |
 | 6px | 42px | 12px | 400 | `rgba(255, 255, 255, 0.06)` | `0px none rgb(232, 235, 240)` | DarkAlways dark✓ ×1 | unattributed (no source match — best-effort text search) |
-| 0px | 13px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | INPUT ×1 | src/shared/ui/AppHeader.jsx:713:      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || e.target.isContentEditable) return; (+39 more matches, best-effort) |
+| 0px | 13px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | INPUT ×1 | src/shared/ui/AppHeader.jsx:709:      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || e.target.isContentEditable) return; (+39 more matches, best-effort) |
 
 
 ---
@@ -309,17 +411,17 @@ _(nothing matched in this theme/scenario)_
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
-| 6px | 24px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Save this plan now and confirm it actually persisted (device + cloud), Restore an earlier automatically-saved version of this plan, How much room this app is using on this device, and what's safe to clear ×3 | src/workspaces/site-planner/SitePlanner.jsx:18926:            title="Save this plan now and confirm it actually persisted (device + cloud)" data-testid="save-now"> |
-| 8px | 31px | 12px | 500 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | New layout on the same parcel, Clone this plan to iterate on ×2 | src/workspaces/site-planner/SitePlanner.jsx:18922:            <button style={{ ...chip, flex: 1 }} onClick={handleNewPlan} title="New layout on the same parcel"><span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><PlusIcon size={12} />New plan</span></button> |
-| 8px | 29px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | plan-name-input ×1 | src/workspaces/site-planner/SitePlanner.jsx:18871:            onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} style={{ ...numInput, width: "100%", fontFamily: "inherit" }} data-testid="plan-name-input" /> |
+| 6px | 24px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Save this plan now and confirm it actually persisted (device + cloud), Restore an earlier automatically-saved version of this plan, How much room this app is using on this device, and what's safe to clear ×3 | src/workspaces/site-planner/SitePlanner.jsx:18973:            title="Save this plan now and confirm it actually persisted (device + cloud)" data-testid="save-now"> |
+| 8px | 31px | 12px | 500 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | New layout on the same parcel, Clone this plan to iterate on ×2 | src/workspaces/site-planner/SitePlanner.jsx:18969:            <button style={{ ...chip, flex: 1 }} onClick={handleNewPlan} title="New layout on the same parcel"><span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><PlusIcon size={12} />New plan</span></button> |
+| 8px | 29px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | plan-name-input ×1 | src/workspaces/site-planner/SitePlanner.jsx:18918:            onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} style={{ ...numInput, width: "100%", fontFamily: "inherit" }} data-testid="plan-name-input" /> |
 
 **dark** — 3 distinct style signature(s) over 6 matched element(s):
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
-| 6px | 24px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Save this plan now and confirm it actually persisted (device + cloud), Restore an earlier automatically-saved version of this plan, How much room this app is using on this device, and what's safe to clear ×3 | src/workspaces/site-planner/SitePlanner.jsx:18926:            title="Save this plan now and confirm it actually persisted (device + cloud)" data-testid="save-now"> |
-| 8px | 31px | 12px | 500 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | New layout on the same parcel, Clone this plan to iterate on ×2 | src/workspaces/site-planner/SitePlanner.jsx:18922:            <button style={{ ...chip, flex: 1 }} onClick={handleNewPlan} title="New layout on the same parcel"><span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><PlusIcon size={12} />New plan</span></button> |
-| 8px | 29px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | plan-name-input ×1 | src/workspaces/site-planner/SitePlanner.jsx:18871:            onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} style={{ ...numInput, width: "100%", fontFamily: "inherit" }} data-testid="plan-name-input" /> |
+| 6px | 24px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Save this plan now and confirm it actually persisted (device + cloud), Restore an earlier automatically-saved version of this plan, How much room this app is using on this device, and what's safe to clear ×3 | src/workspaces/site-planner/SitePlanner.jsx:18973:            title="Save this plan now and confirm it actually persisted (device + cloud)" data-testid="save-now"> |
+| 8px | 31px | 12px | 500 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | New layout on the same parcel, Clone this plan to iterate on ×2 | src/workspaces/site-planner/SitePlanner.jsx:18969:            <button style={{ ...chip, flex: 1 }} onClick={handleNewPlan} title="New layout on the same parcel"><span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><PlusIcon size={12} />New plan</span></button> |
+| 8px | 29px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | plan-name-input ×1 | src/workspaces/site-planner/SitePlanner.jsx:18918:            onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} style={{ ...numInput, width: "100%", fontFamily: "inherit" }} data-testid="plan-name-input" /> |
 
 
 ---
@@ -331,7 +433,7 @@ _(nothing matched in this theme/scenario)_
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
 | 8px | 27px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Box-select (M): drag a box over the drawing — everything it touches is selected together, ready to move (drag any one) or delete. In the Select tool you can also Ctrl/⌘-click to toggle an object, Shift-click to add. Esc / click empty to clear, Everything you can do to a parcel — draw, plot from a deed, split, combine, reshape, remove, Measure (+14 more) ×17 | src/workspaces/site-planner/SitePlanner.jsx:672:  { id: "marquee", label: "Select multiple", hint: "Box-select (M): drag a box over the drawing — everything it touches is selected together, ready to move (drag any one) or delete. In the Select tool you can also Ctrl/⌘-click to toggle an object, Shift-click to add. Esc / click empty to clear" }, |
-| 8px | 27px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Measure modes, Dock layout, Road presets (+2 more) ×5 | src/workspaces/site-planner/SitePlanner.jsx:23455:              <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setMeasureMenu((o) => !o)} aria-haspopup="menu" aria-expanded={measureMenu} aria-label="Measure modes">▾</button> |
+| 8px | 27px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Measure modes, Dock layout, Road presets (+2 more) ×5 | src/workspaces/site-planner/SitePlanner.jsx:23513:              <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setMeasureMenu((o) => !o)} aria-haspopup="menu" aria-expanded={measureMenu} aria-label="Measure modes">▾</button> |
 | 8px | 27px | 12px | 650 | `rgb(194, 65, 12)` | `1px solid rgba(0, 0, 0, 0)` | Select V ×1 | unattributed (no source match — best-effort text search) |
 
 **dark** — 3 distinct style signature(s) over 23 matched element(s):
@@ -339,7 +441,7 @@ _(nothing matched in this theme/scenario)_
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
 | 8px | 27px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Box-select (M): drag a box over the drawing — everything it touches is selected together, ready to move (drag any one) or delete. In the Select tool you can also Ctrl/⌘-click to toggle an object, Shift-click to add. Esc / click empty to clear, Everything you can do to a parcel — draw, plot from a deed, split, combine, reshape, remove, Measure (+14 more) ×17 | src/workspaces/site-planner/SitePlanner.jsx:672:  { id: "marquee", label: "Select multiple", hint: "Box-select (M): drag a box over the drawing — everything it touches is selected together, ready to move (drag any one) or delete. In the Select tool you can also Ctrl/⌘-click to toggle an object, Shift-click to add. Esc / click empty to clear" }, |
-| 8px | 27px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Measure modes, Dock layout, Road presets (+2 more) ×5 | src/workspaces/site-planner/SitePlanner.jsx:23455:              <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setMeasureMenu((o) => !o)} aria-haspopup="menu" aria-expanded={measureMenu} aria-label="Measure modes">▾</button> |
+| 8px | 27px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Measure modes, Dock layout, Road presets (+2 more) ×5 | src/workspaces/site-planner/SitePlanner.jsx:23513:              <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setMeasureMenu((o) => !o)} aria-haspopup="menu" aria-expanded={measureMenu} aria-label="Measure modes">▾</button> |
 | 8px | 27px | 12px | 650 | `rgb(242, 107, 58)` | `1px solid rgba(0, 0, 0, 0)` | Select V ×1 | unattributed (no source match — best-effort text search) |
 
 
@@ -354,15 +456,15 @@ _(nothing matched in this theme/scenario)_
 | 8px | 27px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Box-select (M): drag a box over the drawing — everything it touches is selected together, ready to move (drag any one) or delete. In the Select tool you can also Ctrl/⌘-click to toggle an object, Shift-click to add. Esc / click empty to clear, Everything you can do to a parcel — draw, plot from a deed, split, combine, reshape, remove, Measure (+14 more) ×17 | src/workspaces/site-planner/SitePlanner.jsx:672:  { id: "marquee", label: "Select multiple", hint: "Box-select (M): drag a box over the drawing — everything it touches is selected together, ready to move (drag any one) or delete. In the Select tool you can also Ctrl/⌘-click to toggle an object, Shift-click to add. Esc / click empty to clear" }, |
 | 0px | 15px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | [object SVGAnimatedString] ×17 | unattributed (no source match — best-effort text search) |
 | 0px | 13px | 10.5px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | M, ▾, ⇧N (+7 more) ×10 | unattributed (label too short to search) |
-| 8px | 27px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Measure modes, Dock layout, Road presets (+2 more) ×5 | src/workspaces/site-planner/SitePlanner.jsx:23455:              <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setMeasureMenu((o) => !o)} aria-haspopup="menu" aria-expanded={measureMenu} aria-label="Measure modes">▾</button> |
-| 0px | 52px | 10.5px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Properties, References, Standards ×3 | src/shared/ui/floatingPanel.js:69: * double-click or the Properties tab; a plain click does NOT open it), and only when the inspector (+30 more matches, best-effort) |
-| 0px | 30px | 14px | 600 | `rgba(255, 255, 255, 0.94)` | `0px none rgb(27, 30, 38)` | Zoom out, Zoom to fit ×2 | src/workspaces/site-planner/SitePlanner.jsx:23070:                <button className="gbtn" aria-label="Zoom out" title="Zoom out" style={{ ...zb, borderTop: "none", borderRadius: 0 }} onClick={() => zoomBy(1 / 1.25)}>－</button> (+2 more matches, best-effort) |
-| 0px | 54px | 10.5px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Land, Analysis ×2 | src/shared/folders/folderTemplate.js:19: *    short + user-extensible — Land (01–13; 14–18 were unknown at authoring), Close-Out (+54 more matches, best-effort) |
+| 8px | 27px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Measure modes, Dock layout, Road presets (+2 more) ×5 | src/workspaces/site-planner/SitePlanner.jsx:23513:              <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setMeasureMenu((o) => !o)} aria-haspopup="menu" aria-expanded={measureMenu} aria-label="Measure modes">▾</button> |
+| 0px | 54px | 10.5px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Land, Analysis, Overlays ×3 | src/shared/folders/folderTemplate.js:19: *    short + user-extensible — Land (01–13; 14–18 were unknown at authoring), Close-Out (+54 more matches, best-effort) |
+| 0px | 30px | 14px | 600 | `rgba(255, 255, 255, 0.94)` | `0px none rgb(27, 30, 38)` | Zoom out, Zoom to fit ×2 | src/workspaces/site-planner/SitePlanner.jsx:23128:                <button className="gbtn" aria-label="Zoom out" title="Zoom out" style={{ ...zb, borderTop: "none", borderRadius: 0 }} onClick={() => zoomBy(1 / 1.25)}>－</button> (+2 more matches, best-effort) |
+| 0px | 52px | 10.5px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Properties, Standards ×2 | src/shared/ui/floatingPanel.js:69: * double-click or the Properties tab; a plain click does NOT open it), and only when the inspector (+30 more matches, best-effort) |
 | 0px | 32px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | ▶Buildings1 · 75,600 SF, ▶Costsnot priced yet ×2 | unattributed (no source match — best-effort text search) |
 | 0px | 31px | 12px | 700 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | What's shown on this drawing — hide groups temporarily, plus grid & snap ×1 | src/workspaces/site-planner/components/ViewMenu.jsx:128:        title="What's shown on this drawing — hide groups temporarily, plus grid & snap" |
-| 0px | 32px | 12px | 700 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Layers — map data layers (flood, utilities, parcels, aerial…) ×1 | src/workspaces/site-planner/SitePlanner.jsx:22823:              <button onClick={() => setLayersOpen((o) => !o)} aria-expanded={layersOpen} aria-label="Layers — map data layers (flood, utilities, parcels, aerial…)" (+1 more match, best-effort) |
+| 0px | 32px | 12px | 700 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Layers — map data layers (flood, utilities, parcels, aerial…) ×1 | src/workspaces/site-planner/SitePlanner.jsx:22881:              <button onClick={() => setLayersOpen((o) => !o)} aria-expanded={layersOpen} aria-label="Layers — map data layers (flood, utilities, parcels, aerial…)" (+1 more match, best-effort) |
 | 0px | 30px | 14px | 600 | `rgba(255, 255, 255, 0.94)` | `1px solid rgb(225, 229, 235)` | Zoom in ×1 | src/workspaces/site-planner/components/LayerPanel.jsx:117:   * These two are what turn a static "Zoom in to ≥ 16 to load" sentence — which reads the same (+19 more matches, best-effort) |
-| 0px | 30px | 13px | 600 | `rgba(255, 255, 255, 0.94)` | `0px none rgb(53, 59, 73)` | Report that this felt slow ×1 | src/workspaces/site-planner/SitePlanner.jsx:23093:                  aria-label="Report that this felt slow" |
+| 0px | 30px | 13px | 600 | `rgba(255, 255, 255, 0.94)` | `0px none rgb(53, 59, 73)` | Report that this felt slow ×1 | src/workspaces/site-planner/SitePlanner.jsx:23151:                  aria-label="Report that this felt slow" |
 | 8px | 27px | 12px | 650 | `rgb(194, 65, 12)` | `1px solid rgba(0, 0, 0, 0)` | Select V ×1 | unattributed (no source match — best-effort text search) |
 | 0px | 15px | 12px | 650 | `rgba(0, 0, 0, 0)` | `0px none rgb(255, 255, 255)` | [object SVGAnimatedString] ×1 | unattributed (no source match — best-effort text search) |
 | 0px | 13px | 10.5px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(255, 255, 255)` | V ×1 | unattributed (label too short to search) |
@@ -379,15 +481,15 @@ _(nothing matched in this theme/scenario)_
 | 8px | 27px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Box-select (M): drag a box over the drawing — everything it touches is selected together, ready to move (drag any one) or delete. In the Select tool you can also Ctrl/⌘-click to toggle an object, Shift-click to add. Esc / click empty to clear, Everything you can do to a parcel — draw, plot from a deed, split, combine, reshape, remove, Measure (+14 more) ×17 | src/workspaces/site-planner/SitePlanner.jsx:672:  { id: "marquee", label: "Select multiple", hint: "Box-select (M): drag a box over the drawing — everything it touches is selected together, ready to move (drag any one) or delete. In the Select tool you can also Ctrl/⌘-click to toggle an object, Shift-click to add. Esc / click empty to clear" }, |
 | 0px | 15px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | [object SVGAnimatedString] ×17 | unattributed (no source match — best-effort text search) |
 | 0px | 13px | 10.5px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | M, ▾, ⇧N (+7 more) ×10 | unattributed (label too short to search) |
-| 8px | 27px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Measure modes, Dock layout, Road presets (+2 more) ×5 | src/workspaces/site-planner/SitePlanner.jsx:23455:              <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setMeasureMenu((o) => !o)} aria-haspopup="menu" aria-expanded={measureMenu} aria-label="Measure modes">▾</button> |
-| 0px | 52px | 10.5px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Properties, References, Standards ×3 | src/shared/ui/floatingPanel.js:69: * double-click or the Properties tab; a plain click does NOT open it), and only when the inspector (+30 more matches, best-effort) |
-| 0px | 30px | 14px | 600 | `rgba(24, 27, 33, 0.93)` | `0px none rgb(232, 235, 240)` | Zoom out, Zoom to fit ×2 | src/workspaces/site-planner/SitePlanner.jsx:23070:                <button className="gbtn" aria-label="Zoom out" title="Zoom out" style={{ ...zb, borderTop: "none", borderRadius: 0 }} onClick={() => zoomBy(1 / 1.25)}>－</button> (+2 more matches, best-effort) |
-| 0px | 54px | 10.5px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Land, Analysis ×2 | src/shared/folders/folderTemplate.js:19: *    short + user-extensible — Land (01–13; 14–18 were unknown at authoring), Close-Out (+54 more matches, best-effort) |
+| 8px | 27px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Measure modes, Dock layout, Road presets (+2 more) ×5 | src/workspaces/site-planner/SitePlanner.jsx:23513:              <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setMeasureMenu((o) => !o)} aria-haspopup="menu" aria-expanded={measureMenu} aria-label="Measure modes">▾</button> |
+| 0px | 54px | 10.5px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Land, Analysis, Overlays ×3 | src/shared/folders/folderTemplate.js:19: *    short + user-extensible — Land (01–13; 14–18 were unknown at authoring), Close-Out (+54 more matches, best-effort) |
+| 0px | 30px | 14px | 600 | `rgba(24, 27, 33, 0.93)` | `0px none rgb(232, 235, 240)` | Zoom out, Zoom to fit ×2 | src/workspaces/site-planner/SitePlanner.jsx:23128:                <button className="gbtn" aria-label="Zoom out" title="Zoom out" style={{ ...zb, borderTop: "none", borderRadius: 0 }} onClick={() => zoomBy(1 / 1.25)}>－</button> (+2 more matches, best-effort) |
+| 0px | 52px | 10.5px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Properties, Standards ×2 | src/shared/ui/floatingPanel.js:69: * double-click or the Properties tab; a plain click does NOT open it), and only when the inspector (+30 more matches, best-effort) |
 | 0px | 32px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | ▶Buildings1 · 75,600 SF, ▶Costsnot priced yet ×2 | unattributed (no source match — best-effort text search) |
 | 0px | 31px | 12px | 700 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | What's shown on this drawing — hide groups temporarily, plus grid & snap ×1 | src/workspaces/site-planner/components/ViewMenu.jsx:128:        title="What's shown on this drawing — hide groups temporarily, plus grid & snap" |
-| 0px | 32px | 12px | 700 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Layers — map data layers (flood, utilities, parcels, aerial…) ×1 | src/workspaces/site-planner/SitePlanner.jsx:22823:              <button onClick={() => setLayersOpen((o) => !o)} aria-expanded={layersOpen} aria-label="Layers — map data layers (flood, utilities, parcels, aerial…)" (+1 more match, best-effort) |
+| 0px | 32px | 12px | 700 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Layers — map data layers (flood, utilities, parcels, aerial…) ×1 | src/workspaces/site-planner/SitePlanner.jsx:22881:              <button onClick={() => setLayersOpen((o) => !o)} aria-expanded={layersOpen} aria-label="Layers — map data layers (flood, utilities, parcels, aerial…)" (+1 more match, best-effort) |
 | 0px | 30px | 14px | 600 | `rgba(24, 27, 33, 0.93)` | `1px solid rgb(42, 46, 55)` | Zoom in ×1 | src/workspaces/site-planner/components/LayerPanel.jsx:117:   * These two are what turn a static "Zoom in to ≥ 16 to load" sentence — which reads the same (+19 more matches, best-effort) |
-| 0px | 30px | 13px | 600 | `rgba(24, 27, 33, 0.93)` | `0px none rgb(202, 208, 218)` | Report that this felt slow ×1 | src/workspaces/site-planner/SitePlanner.jsx:23093:                  aria-label="Report that this felt slow" |
+| 0px | 30px | 13px | 600 | `rgba(24, 27, 33, 0.93)` | `0px none rgb(202, 208, 218)` | Report that this felt slow ×1 | src/workspaces/site-planner/SitePlanner.jsx:23151:                  aria-label="Report that this felt slow" |
 | 8px | 27px | 12px | 650 | `rgb(242, 107, 58)` | `1px solid rgba(0, 0, 0, 0)` | Select V ×1 | unattributed (no source match — best-effort text search) |
 | 0px | 15px | 12px | 650 | `rgba(0, 0, 0, 0)` | `0px none rgb(21, 23, 28)` | [object SVGAnimatedString] ×1 | unattributed (no source match — best-effort text search) |
 | 0px | 13px | 10.5px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(21, 23, 28)` | V ×1 | unattributed (label too short to search) |
