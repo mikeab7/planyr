@@ -3,6 +3,7 @@ import {
   landSizeSf, landPricePerSf, buildingPricePerSf, annualLeaseRate, leaseTotalAnnualRent,
   summarizeLeaseComps, summarizeSaleComps, compsSummaryBits, compFieldRows, compHeadline, partyLabels,
   validAnchor, validateComp, rowToComp, compToRow,
+  landPricePerAreaUnit, parseLeaseTermYears, netEffectiveLeaseRate,
 } from "../src/shared/comps/lib/comps.js";
 import { collectPartyNames, matchPartyNames } from "../src/shared/comps/lib/partySuggest.js";
 
@@ -175,6 +176,64 @@ describe("comps: leaseTotalAnnualRent — the reason a lease comp needs a size a
   });
   it("normalizes a monthly rate to annual first", () => {
     expect(leaseTotalAnnualRent({ leaseRate: 1, leaseRatePeriod: "monthly", leaseSizeSf: 10000 })).toBeCloseTo(120000, 5);
+  });
+});
+
+describe("comps: landPricePerAreaUnit — $/AC or $/SF, in the size's OWN recorded unit", () => {
+  it("an acre-recorded land comp reads as a genuine $/ACRE figure — NOT converted to SF first", () => {
+    // 100 acres at $850,000 -> $8,500/AC. landPricePerSf would instead report a tiny $/SF number
+    // by converting through 43,560 SF/acre — a real, different figure, not this one.
+    expect(landPricePerAreaUnit({ compType: "land", landPrice: 850000, landSizeValue: 100, landSizeUnit: "ac" }))
+      .toEqual({ value: 8500, unit: "ac" });
+  });
+  it("an SF-recorded land comp reads as $/SF", () => {
+    expect(landPricePerAreaUnit({ compType: "land", landPrice: 100000, landSizeValue: 10000, landSizeUnit: "sf" }))
+      .toEqual({ value: 10, unit: "sf" });
+  });
+  it("null when price or size is missing", () => {
+    expect(landPricePerAreaUnit({ compType: "land", landPrice: 100000 })).toBeNull();
+    expect(landPricePerAreaUnit({ compType: "land", landSizeValue: 10 })).toBeNull();
+  });
+});
+
+describe("comps: parseLeaseTermYears", () => {
+  it("reads this app's own normalized term strings", () => {
+    expect(parseLeaseTermYears("126 mo")).toBeCloseTo(10.5, 10);
+    expect(parseLeaseTermYears("5 yrs")).toBe(5);
+  });
+  it("loosely accepts a hand-typed variant", () => {
+    expect(parseLeaseTermYears("10 years")).toBe(10);
+    expect(parseLeaseTermYears("18 months")).toBeCloseTo(1.5, 10);
+  });
+  it("is null with no recognizable duration", () => {
+    expect(parseLeaseTermYears("")).toBeNull();
+    expect(parseLeaseTermYears("TBD")).toBeNull();
+  });
+});
+
+describe("comps: netEffectiveLeaseRate — the number brokers actually compare", () => {
+  it("equals the face rate with no concessions at all (flat, no escalation)", () => {
+    expect(netEffectiveLeaseRate({ compType: "lease", leaseRate: 10, leaseRatePeriod: "annual", leaseTerm: "5 yrs" })).toBeCloseTo(10, 10);
+  });
+  it("free rent alone drags it below face — 6mo free out of a 5yr term", () => {
+    expect(netEffectiveLeaseRate({ compType: "lease", leaseRate: 10, leaseRatePeriod: "annual", leaseTerm: "5 yrs", leaseFreeRentMonths: 6 })).toBeCloseTo(9, 10);
+  });
+  it("Michael's exact deal — rate, term, escalation, free rent AND TI all combined", () => {
+    // Hand-verified independently: face $7.80/SF/yr (monthly $0.65 x12), 126mo=10.5yr term,
+    // 3.5% annual escalation compounding once per full year (partial final year weighted),
+    // 6mo free rent valued at face, $13/SF TI — net effective ≈ $7.63/SF/yr, BELOW face because
+    // the free-rent+TI drag outweighs the modest escalation benefit over the term.
+    const net = netEffectiveLeaseRate({
+      compType: "lease", leaseRate: 0.65, leaseRatePeriod: "monthly", leaseRateExpense: "nnn",
+      leaseTerm: "126 mo", leaseEscalationPct: 3.5, leaseFreeRentMonths: 6, leaseTi: 13,
+    });
+    expect(net).toBeCloseTo(7.629, 3);
+    expect(net).toBeLessThan(7.8); // below face
+  });
+  it("null for a non-lease comp, or a lease missing rate/period/term", () => {
+    expect(netEffectiveLeaseRate({ compType: "land" })).toBeNull();
+    expect(netEffectiveLeaseRate({ compType: "lease", leaseRate: 10, leaseTerm: "5 yrs" })).toBeNull(); // no period
+    expect(netEffectiveLeaseRate({ compType: "lease", leaseRate: 10, leaseRatePeriod: "annual" })).toBeNull(); // no term
   });
 });
 
@@ -464,7 +523,7 @@ describe("comps: anchor validation — pin OR real parcel, never a drawn rectang
 
 describe("comps: create/edit validation", () => {
   it("requires a type, a date, and a valid anchor", () => {
-    expect(validateComp({})).toEqual(["Pick a comp type.", "Date is required.", "Drop a pin or select a parcel."]);
+    expect(validateComp({})).toEqual(["Pick a comp type.", "Executed date is required.", "Drop a pin or select a parcel."]);
     expect(validateComp({ compType: "land", compDate: "2026-08-01", anchor: { kind: "pin", lat: 1, lon: 1 } })).toEqual([]);
   });
 });

@@ -12,7 +12,7 @@ export { supabase };
 
 const TABLE = "comps";
 const SELECT_COLS =
-  "id,user_id,team_id,project_id,comp_type,comp_date,title,notes,anchor_kind,lat,lon,county," +
+  "id,user_id,team_id,project_id,comp_type,comp_date,lease_commencement_date,title,notes,anchor_kind,lat,lon,county," +
   "parcel_apn,parcel_geom,site_plan_overlay_id,site_plan_point,land_price,land_size_value," +
   "land_size_unit,bldg_price,bldg_size_sf," +
   "lease_rate,lease_rate_period,lease_rate_expense,lease_ti,lease_term,lease_size_sf," +
