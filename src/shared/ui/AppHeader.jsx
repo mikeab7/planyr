@@ -1104,11 +1104,22 @@ export default function AppHeader({
               wider than the screen; desktop clips it with overflow:hidden + flex-shrink, which
               hid every control left of "File ▾". On narrow we instead let the row scroll: the
               slot keeps natural width (flex 1 0 auto — grows to pin right with slack, never
-              shrinks) and shows its overflow so swiping reveals the hidden tools. */}
+              shrinks) and shows its overflow so swiping reveals the hidden tools.
+
+              ⛔ B1022961 (2026-09-01) — `justify-content: flex-end` assumes something already
+              anchors the row's LEFT edge (the module tabs zone above), so the toolbar reads as
+              "the rest of one continuous strip, flush right of the tabs" — correct for every
+              existing caller. `showModuleTabs={false}` (today, only `/food`, B651873) renders no
+              tabs zone at all, so this same rule flings the toolbar all the way to the far right
+              edge and leaves the entire rest of the row empty — the "Map / List / Drop a pin"
+              strip stranded in a corner with nothing to its left. With no tabs to be flush
+              against, anchor left instead so the controls read as this row's own content. */}
           <div
             style={{
               flex: narrow ? "1 0 auto" : 1, display: "flex", alignItems: "center",
-              justifyContent: "flex-end", paddingRight: 6,
+              justifyContent: showModuleTabs ? "flex-end" : "flex-start",
+              paddingLeft: showModuleTabs ? 0 : 6,
+              paddingRight: showModuleTabs ? 6 : 0,
               minWidth: narrow ? "auto" : 0, gap: 4,
               overflow: narrow ? "visible" : "hidden",
             }}
