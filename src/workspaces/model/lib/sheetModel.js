@@ -104,7 +104,20 @@ export function createSheet() {
  *  user's DATA to carry forward from either (a display preference is not worth a lossy
  *  best-effort backfill onto up to 200 rows it may not even apply to). A pre-Stage-1 blob
  *  simply lacks `rowHeights`/`freezeRows`/`freezeCols` — defaulted here exactly like every
- *  other field a later build added, never a reason to refuse the rest of the sheet. */
+ *  other field a later build added, never a reason to refuse the rest of the sheet.
+ *
+ *  ⛔ B1000960 (owner report, 2026-09-01, relayed verbatim: he opened Stage 1 and said "it
+ *  doesn't look like you did anything" — he was looking at 8 columns and a 4-button toolbar).
+ *  Stage 1 bumped the DEFAULTS a brand-new sheet is BORN with (26 cols / 1000 rows), but a
+ *  sheet that already existed before Stage 1 shipped carries its OWN OLD `columns.length`/
+ *  `rowCount` in the saved blob, and this function used to just echo them straight back
+ *  (`rowCount: raw.rowCount || DEFAULT_ROW_COUNT` only floors an ABSENT/zero value, and the
+ *  old `columns` array was returned completely unpadded) — so the one person Stage 1 was
+ *  built for, the one with an existing sheet, was the one person who could never see it. A
+ *  saved document must never be able to pin the app to an old capacity ceiling: capacity is
+ *  now ALWAYS derived as max(whatever was saved, the current floor), on every load, columns
+ *  AND rows both — never a one-time migration flag, so a FUTURE floor increase (Stage 4's
+ *  larger pro-forma) heals every existing sheet the exact same way with no new code. */
 export function migrateSheet(raw) {
   if (!raw || typeof raw !== "object") return createSheet();
   if (raw.version === SHEET_VERSION && Array.isArray(raw.columns) && raw.cells && typeof raw.cells === "object") {
@@ -119,11 +132,15 @@ export function migrateSheet(raw) {
     const rowHeights = raw.rowHeights && typeof raw.rowHeights === "object" ? { ...raw.rowHeights } : {};
     const freezeRows = Number.isInteger(raw.freezeRows) && raw.freezeRows >= 0 ? raw.freezeRows : 0;
     const freezeCols = Number.isInteger(raw.freezeCols) && raw.freezeCols >= 0 ? raw.freezeCols : 0;
-    return {
+    const migrated = {
       version: SHEET_VERSION, nextColId: raw.nextColId || columns.length + 1, columns,
-      rowCount: raw.rowCount || DEFAULT_ROW_COUNT, cells: { ...raw.cells }, formats,
+      rowCount: Math.max(Number(raw.rowCount) || 0, DEFAULT_ROW_COUNT), cells: { ...raw.cells }, formats,
       rowHeights, freezeRows, freezeCols,
     };
+    // Always float capacity up to the current floor — never a stored ceiling. Reuses
+    // ensureColumnCount (already used by paste/fill to grow the sheet mid-session) so there is
+    // one single "grow to at least N columns" rule in the whole module, not a second copy here.
+    return ensureColumnCount(migrated, DEFAULT_COLS);
   }
   return createSheet();
 }
