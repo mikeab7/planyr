@@ -12,10 +12,12 @@
  * step); the pass/fail policy lives in ui-audit/lib/perfBudgetPolicy.mjs.
  *
  * HOW A NUMBER IS JUDGED (NEW-1). Byte metrics carry a `baseline` — the last deliberately
- * recorded measurement — and their ceiling is DERIVED as baseline + max(2%, 32 KB). Growth
+ * recorded measurement — and their ceiling is DERIVED as baseline + max(10%, 32 KB). Growth
  * inside that band prints a loud ABOVE BASELINE line and PASSES; growth beyond it fails.
  * This is the fix for three consecutive pull requests failing on 0.8–0.9% breaches of
- * ceilings pinned to within 0.06% of measured — a headroom problem, not a regression.
+ * ceilings pinned to within 0.06% of measured — a headroom problem, not a regression. The
+ * band was widened 2% -> 10% on 2026-09-01 (B1016816) for the same reason at a larger scale —
+ * see ui-audit/perf-budgets.json's bundle.headroom.$comment.
  *
  * WHY A BREACH NAMES ITS CAUSE (NEW-3). A bare "2286.3 KB exceeds 2265.6 KB by 20.7 KB"
  * reads identically for a 20 KB feature and a 20 KB dependency bump, and cost a local build

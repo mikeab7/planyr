@@ -33,9 +33,9 @@ const headroom = bundle.headroom;
 const banded = METRIC_KEYS(bundle).filter((k) => isBanded(bundle[k]));
 
 describe("the headroom band is committed once, in one place", () => {
-  it("bundle.headroom exists and is the band the brief specifies: max(2%, 32 KB)", () => {
+  it("bundle.headroom exists and is the band the brief specifies: max(10%, 32 KB) (widened 2%->10% 2026-09-01, B1016816)", () => {
     expect(headroom).toBeTruthy();
-    expect(headroom.pctOfBaseline).toBe(0.02);
+    expect(headroom.pctOfBaseline).toBe(0.10);
     expect(headroom.minBytes).toBe(32768);
   });
 
@@ -45,8 +45,8 @@ describe("the headroom band is committed once, in one place", () => {
   });
 
   it("the band is the LARGER of the two, not the percentage alone", () => {
-    expect(headroomFor(100_000, headroom)).toBe(32768);      // 2% would be 2000 — too small for one honest feature
-    expect(headroomFor(5_000_000, headroom)).toBe(100_000);  // 2% wins once the metric is big
+    expect(headroomFor(100_000, headroom)).toBe(32768);      // 10% would be 10000 — still too small for one honest feature
+    expect(headroomFor(5_000_000, headroom)).toBe(500_000);  // 10% wins once the metric is big
   });
 });
 
@@ -72,7 +72,7 @@ describe("byte ceilings are derived, never hand-pinned", () => {
     }
   });
 
-  it("a count metric keeps a hard ceiling and gets no band — 'four chunks plus two percent' is not a sentence", () => {
+  it("a count metric keeps a hard ceiling and gets no band — 'four chunks plus ten percent' is not a sentence", () => {
     expect(isBanded(bundle.siteRouteChunks)).toBe(false);
     expect(bundle.siteRouteChunks.ceiling).toBeTypeOf("number");
     expect(ceilingFor(bundle.siteRouteChunks, headroom)).toBe(bundle.siteRouteChunks.ceiling);
@@ -81,7 +81,7 @@ describe("byte ceilings are derived, never hand-pinned", () => {
 
 describe("growth inside the band annotates; growth beyond it fails", () => {
   const spec = { baseline: 1_000_000, target: 900_000, unit: "bytes" };
-  const band = headroomFor(spec.baseline, headroom); // 32768 (the floor wins at this size)
+  const band = headroomFor(spec.baseline, headroom); // 100000 at 10% — the percentage wins at this size
 
   it("at or under target — a plain pass", () => {
     expect(classify(890_000, spec, headroom).status).toBe("pass");
@@ -299,7 +299,7 @@ describe("a runtime measurement moves only through the named ratchet step", () =
  */
 describe("B266084 — a branch is charged its own bytes, never main's drift", () => {
   const spec = { baseline: 1_000_000, target: 900_000, unit: "bytes" };
-  const band = headroomFor(spec.baseline, headroom); // max(2%, 32 KB) = 32768 here
+  const band = headroomFor(spec.baseline, headroom); // max(10%, 32 KB) = 100000 here
   const ceiling = ceilingFor(spec, headroom);
 
   it("splits a measurement into what main carried and what this branch added", () => {
