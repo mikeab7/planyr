@@ -347,6 +347,35 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   signals that don't require an accompanying `/mo`/`/yr` — a bare `TI:`/`TI $` mention and a bare
   `$X/SF` figure — closing the "typed Land on text that says NNN, TI and months" class at its
   root, including for the per-line list shape, not just the single-record whole-text join.
+  **⛔ ROUND 6 (owner rule, "should read more like an excel, thats hard on my eyes"): THE CARD
+  LAYOUT IS ALSO GONE.** `CompEntryGrid.jsx` is now a real SPREADSHEET — plain-text cells on
+  hairline gridlines (no input boxes at rest, an outline only on the selected/editing cell), a
+  sticky two-row header (a group band over column labels), 31px rows, one frozen leading column
+  (Title / Address), real keyboard grid nav (Tab/Shift-Tab/Enter/arrows/typing-replaces),
+  fill-down (Ctrl/Cmd+D), Excel-style paste-and-spill into a selected cell, undo (Ctrl/Cmd+Z), and
+  a summary footer row. The pure column model — `lib/compSheetColumns.js` — is the one place that
+  decides which column means what per comp type; read ITS OWN header before touching either file,
+  because it documents a mistake made TWICE in one session and the rule that closes the whole
+  class: **EVERY column exists on EVERY row (a cell that doesn't apply renders grey with an em
+  dash, never a different column set) AND a derived column's header must be a UNIT that is true
+  for every row it is not greyed on — two comp types producing different units are two different
+  columns, never one slot reused because it's usually empty.** (The first cut merged a lease's
+  annualized rate and a sale's price/size into one "$/SF" slot; renaming the header fixed the
+  words and left the conflation itself intact. There are three DERIVED columns now: `$/SF or
+  $/AC` — land/building sale, following the row's OWN recorded size unit, `landPricePerAreaUnit`
+  in comps.js, never converted to SF first — `$/SF/yr` and `Net Effective $/SF/yr` — lease only,
+  BOTH printing their NNN/GROSS basis inline, because a net-effective figure on a gross lease and
+  one on an NNN lease are exactly as incomparable as the face rate is.) EXECUTION and
+  COMMENCEMENT are two real, separate date columns (`comp_date` / `lease_commencement_date`,
+  `db/comps_lease_commencement.sql`) — a commencement-only paste still fills the required
+  `comp_date` as a soft-flagged stand-in, but the commencement itself is always captured
+  honestly in its own column too, never silently standing in with only a notes annotation.
+  `netEffectiveLeaseRate` (comps.js) is computed, never stored, from rate/term/escalation/
+  free-rent/TI — it parses `lease_term`'s free text via `parseLeaseTermYears` and returns null
+  (never a wrong number) when the term can't be read; a structured numeric term-months column
+  (for reliable future sort/filter) is real follow-up work, deliberately not built this round.
+  A lease comp records LEASED SF only (`lease_size_sf`) — a separate "whole building SF for
+  context" field is a real, distinct idea, also deliberately not built this round.
   KML import (B849233) is a SEPARATE staging table, `db/comp_import_drafts.sql`
   (`public.comp_import_drafts`, owner-only RLS — no team visibility at all, unlike `comps` itself,
   until promoted) — `lib/kmlImport.js` is the pure, hand-rolled Placemark parser (a Point is a
