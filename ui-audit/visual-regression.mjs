@@ -22,6 +22,25 @@
  * exists to gate, so it needs its own explicit verb, not "whatever running the script with no flags
  * happens to do."
  *
+ * ⛔ THE BASELINE-CAPTURING BROWSER MUST BE THE EXACT SAME CHROMIUM BUILD CI RUNS, NOT "A" CHROMIUM
+ * (MEASURED, NOT ASSUMED — B1026272's first real CI run, 2026-09-01, failed all 8 surfaces at
+ * up to 2.9% of pixels differing, worst channel delta up to 233/255). Root cause: baselines were
+ * first approved using whatever Chromium revision happened to be pre-installed in that session's
+ * sandbox, which was NOT the revision `npx playwright install --with-deps chromium` resolves to in
+ * real CI (pinned by `playwright`'s exact version in package-lock.json — here, revision 1228, Chrome
+ * for Testing 149.0.7827.55). Downloading and using THAT exact revision to re-capture reproduced the
+ * CI failure locally byte-for-byte (confirming the cause) and, once approved with it, passed clean.
+ * Inspecting the diff images showed the mismatch was ENTIRELY on text-glyph edges (nav labels, the
+ * logo, header text) — two Chromium point releases hint/antialias text very slightly differently —
+ * never on layout, color fills, icons, or borders; still a real, silent trap, not a false alarm, so
+ * this is the rule now: **never set `PW_CHROME` to a locally-convenient alternate browser when
+ * approving a baseline.** Run `npx playwright install chromium` first (it resolves and fetches
+ * exactly the revision `playwright-core`'s installed version expects — the same one CI's `--with-deps
+ * chromium` step fetches) and let this script's default, unoverridden `chromium.launch()` resolve to
+ * it. Playwright's own resolution already fails LOUD ("Executable doesn't exist…") rather than
+ * silently substituting a nearby revision — trust that failure rather than working around it with an
+ * explicit `PW_CHROME` path, which is exactly how the original mismatch was introduced.
+ *
  * USAGE (a vite preview server must be running — `npx vite build && npx vite preview --port 4173`):
  *   node ui-audit/visual-regression.mjs                → CI mode: capture, diff against the
  *                                                          committed baselines, exit 1 on any

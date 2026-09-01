@@ -7,49 +7,49 @@
     "map-landing": {
       "light": {
         "approvedAt": "2026-09-01",
-        "approvedCommit": "1c0a8e60",
-        "note": "initial baseline capture (NEW-1)"
+        "approvedCommit": "ebbdd2c3",
+        "note": "Correct Chromium build-mismatch: re-captured with the exact playwright chromium v1228 revision CI installs (npx playwright install chromium), matching the revision playwright-core 1.61.1 pins — the original baselines were captured with a different pre-installed sandbox Chromium and differed only on text-glyph antialiasing (B1026272 first-CI-run failure)."
       },
       "dark": {
         "approvedAt": "2026-09-01",
-        "approvedCommit": "1c0a8e60",
-        "note": "initial baseline capture (NEW-1)"
+        "approvedCommit": "ebbdd2c3",
+        "note": "Correct Chromium build-mismatch: re-captured with the exact playwright chromium v1228 revision CI installs (npx playwright install chromium), matching the revision playwright-core 1.61.1 pins — the original baselines were captured with a different pre-installed sandbox Chromium and differed only on text-glyph antialiasing (B1026272 first-CI-run failure)."
       }
     },
     "site-planner-header": {
       "light": {
         "approvedAt": "2026-09-01",
-        "approvedCommit": "1c0a8e60",
-        "note": "initial baseline capture (NEW-1)"
+        "approvedCommit": "ebbdd2c3",
+        "note": "Correct Chromium build-mismatch: re-captured with the exact playwright chromium v1228 revision CI installs (npx playwright install chromium), matching the revision playwright-core 1.61.1 pins — the original baselines were captured with a different pre-installed sandbox Chromium and differed only on text-glyph antialiasing (B1026272 first-CI-run failure)."
       },
       "dark": {
         "approvedAt": "2026-09-01",
-        "approvedCommit": "1c0a8e60",
-        "note": "initial baseline capture (NEW-1)"
+        "approvedCommit": "ebbdd2c3",
+        "note": "Correct Chromium build-mismatch: re-captured with the exact playwright chromium v1228 revision CI installs (npx playwright install chromium), matching the revision playwright-core 1.61.1 pins — the original baselines were captured with a different pre-installed sandbox Chromium and differed only on text-glyph antialiasing (B1026272 first-CI-run failure)."
       }
     },
     "site-planner-left-rail": {
       "light": {
         "approvedAt": "2026-09-01",
-        "approvedCommit": "1c0a8e60",
-        "note": "initial baseline capture (NEW-1)"
+        "approvedCommit": "ebbdd2c3",
+        "note": "Correct Chromium build-mismatch: re-captured with the exact playwright chromium v1228 revision CI installs (npx playwright install chromium), matching the revision playwright-core 1.61.1 pins — the original baselines were captured with a different pre-installed sandbox Chromium and differed only on text-glyph antialiasing (B1026272 first-CI-run failure)."
       },
       "dark": {
         "approvedAt": "2026-09-01",
-        "approvedCommit": "1c0a8e60",
-        "note": "initial baseline capture (NEW-1)"
+        "approvedCommit": "ebbdd2c3",
+        "note": "Correct Chromium build-mismatch: re-captured with the exact playwright chromium v1228 revision CI installs (npx playwright install chromium), matching the revision playwright-core 1.61.1 pins — the original baselines were captured with a different pre-installed sandbox Chromium and differed only on text-glyph antialiasing (B1026272 first-CI-run failure)."
       }
     },
     "library": {
       "light": {
         "approvedAt": "2026-09-01",
-        "approvedCommit": "1c0a8e60",
-        "note": "initial baseline capture (NEW-1)"
+        "approvedCommit": "ebbdd2c3",
+        "note": "Correct Chromium build-mismatch: re-captured with the exact playwright chromium v1228 revision CI installs (npx playwright install chromium), matching the revision playwright-core 1.61.1 pins — the original baselines were captured with a different pre-installed sandbox Chromium and differed only on text-glyph antialiasing (B1026272 first-CI-run failure)."
       },
       "dark": {
         "approvedAt": "2026-09-01",
-        "approvedCommit": "1c0a8e60",
-        "note": "initial baseline capture (NEW-1)"
+        "approvedCommit": "ebbdd2c3",
+        "note": "Correct Chromium build-mismatch: re-captured with the exact playwright chromium v1228 revision CI installs (npx playwright install chromium), matching the revision playwright-core 1.61.1 pins — the original baselines were captured with a different pre-installed sandbox Chromium and differed only on text-glyph antialiasing (B1026272 first-CI-run failure)."
       }
     }
   }
