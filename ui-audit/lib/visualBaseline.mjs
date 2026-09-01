@@ -195,7 +195,7 @@ export function buildStatusMarkdown({ manifest, noiseFloor, addedCiTimeNote }) {
     "## Determinism — what's masked, and why",
     "",
     "A screenshot diff is only trustworthy if the only thing that can move it is a real code change. " +
-      "Four sources of pixel noise are neutralized before every capture, not papered over with a loose " +
+      "Five sources of pixel noise are neutralized before every capture, not papered over with a loose " +
       "tolerance:",
     "",
     "- **Map tiles.** Every basemap tile request is routed to a local, deterministic fake tile " +
@@ -213,6 +213,17 @@ export function buildStatusMarkdown({ manifest, noiseFloor, addedCiTimeNote }) {
     "- **Live/time-based data.** Every surface is reached logged out, with a local-only demo plan that " +
       "carries no cloud project and no GIS origin, so no \"saved Xs ago\"/cloud-sync-state text and no " +
       "live GIS response ever enters a captured frame.",
+    "- **Build-time Supabase-configured state (MEASURED, not assumed — B1026272's own second real CI " +
+      "failure).** `supabaseConfigured()` (`src/workspaces/site-planner/lib/supabase.js`) is a pure " +
+      "truthy-string check on `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` at BUILD time, no live " +
+      "network call — but its result changes what the header's account chip renders (\"Cloud off\" " +
+      "unconfigured vs. \"Sign in\" configured-but-signed-out), and CI's `build.yml` sets these to real " +
+      "repo secrets. A baseline built with no Supabase env vars at all mismatched CI's real build on " +
+      "every single surface, in exactly the same top-right region, confirmed byte-for-byte identical " +
+      "to CI's own failure once reproduced locally with a dummy-but-truthy value. So: **always build " +
+      "with SOME truthy `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` when capturing or approving a " +
+      "baseline** (see \"Approving an intentional change\" below) — the exact value never matters, " +
+      "only whether the check reads it as configured, matching CI's real structural state.",
     "",
     `**Noise floor, measured rather than assumed:** ${noiseFloor}`,
     "",
@@ -228,8 +239,14 @@ export function buildStatusMarkdown({ manifest, noiseFloor, addedCiTimeNote }) {
     "",
     "When a PR's diff is real and the new picture is the one you want:",
     "",
-    "1. Build and serve the app locally: `npx vite build && npx vite preview --port 4173` (in a second " +
-      "terminal, or backgrounded).",
+    "1. Build and serve the app locally with the SAME build-time Supabase-configured state CI uses " +
+      "(see \"Determinism\" below — `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` are real secrets in " +
+      "CI's build step, and their mere PRESENCE, not their value, flips the account chip from " +
+      "\"Cloud off\" to \"Sign in\"): " +
+      "`VITE_SUPABASE_URL=\"https://visual-regression.supabase.co\" " +
+      "VITE_SUPABASE_ANON_KEY=\"visual-regression-dummy-key\" npx vite build && " +
+      "npx vite preview --port 4173` (preview in a second terminal, or backgrounded). Any truthy dummy " +
+      "value works — no live Supabase call ever happens in a signed-out screenshot.",
     "2. Run `BASE_URL=http://localhost:4173/ node ui-audit/visual-regression.mjs --approve " +
       "--reason=\"why this changed\"`. This re-captures every surface/theme, overwrites the baseline " +
       "PNGs that actually changed, updates `ui-audit/visual-baselines/manifest.json` (records the " +

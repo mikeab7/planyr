@@ -36,6 +36,26 @@
   correctness depends on the exact tool version CI installs (a browser, in this case) cannot be fully proven
   in a sandbox that pre-seeds a DIFFERENT version of that same tool — that gap is real GIS/CI-environment-
   behavior, the same class LIVE-VERIFY already names, not a one-off.**
+- **⛔ SECOND CORRECTION, SAME DAY — the Chromium fix's own follow-up CI run (commit `310b04cb`, after
+  merging a real `origin/main` conflict in) FAILED AGAIN, differently.** All 8 surface/theme pairs again,
+  but this time a small top-right region only (~0.24-0.25% of pixels, delta up to 228) — the account chip.
+  Reproduced locally in seconds by inspecting the diff artifact: the chip read **"Sign in"**, not the
+  baseline's **"Cloud off."** Root cause: `supabaseConfigured()` (`site-planner/lib/supabase.js`) is a pure
+  truthy-string check on `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` at BUILD time — no live network call —
+  but CI's `build.yml` sets these to real repo secrets on every build, while every prior local approval in
+  this item's history had built with NO Supabase env vars at all. Confirmed the cause before fixing anything:
+  rebuilt locally with a dummy-but-truthy `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` (no real credentials
+  needed or available here) and reproduced CI's exact failure numbers byte-for-byte. Fix: re-approved all 8
+  baselines built with that dummy-but-truthy configuration, added a fifth masking source to
+  `docs/VISUAL-REGRESSION.md`'s own "Determinism" section, and updated both the documented approval workflow
+  and `visual-regression.mjs`'s own header so a future session cannot silently reintroduce this mismatch
+  either. **Two real environment-parity gaps found and fixed in one day on the SAME item — Chromium build,
+  then build-time secret presence — is exactly why this item's `Verify:` field reads `live` and not
+  `sandbox`: neither gap was visible from inside a sandbox that could not run the real CI configuration.**
+  Re-verified the teeth-proof fresh against the corrected build (not reused from before either fix): a
+  deliberate 1-unit `--accent` hex nudge → red, exactly 1 of 8 pairs named with a precise bounding box →
+  reverted → green, all 8 — the masking additions did not blunt the check's ability to catch a real,
+  human-invisible change.
 
 ### B1020608 — Stage 2: the Model ribbon (Font/Borders/Alignment/Number/Cells/Sort & Filter), a real per-cell look, and a genuine visual redesign `[Model]` (feature) #model #ui #testing  *(owner chat block, 2026-09-02, two messages in the same session: "GO. STAGE 2 - THE RIBBON… BUILD, modelled on Excel's Home tab" (Font, Borders — Top and double-Bottom as first-class buttons, Alignment incl. merge, Number formats incl. the [Red]/date gaps, Cells, Sort & Filter, format painter, clear formatting — all applying to a selected RANGE, persisting through save/reload/undo, and wrapping/collapsing at his real 729px working width), followed by "ADD TO STAGE 2: MAKE IT LOOK GOOD… right now it looks horrible" after seeing the first pass — grid-line hierarchy, chrome-vs-data surfaces, a real selection tint, density, tabular figures, a contained card, the fill handle, resize-handle hover, freeze-boundary depth, and a Stage-3 formula/input-colour hook. Minted **B1020608** from this branch's reserved block B1020608–B1020623 against freshly-fetched `origin/main` 1c0a8e6. **DEDUPE-FIRST** — searched Open/⏳Verify/Done for "ribbon", "number format", "border", "merge cells", "AutoFilter", "fill handle": B1000960/B1007280 (Done, same session, earlier PRs) covered the capacity-migration/stale-bundle/Name-Box/zoom items from Stage 1's own follow-up report — a disjoint set from this item's font/border/alignment/number/cells/sort-filter/visual-redesign scope. Net-new.)*
 `[x]` **SHIPPED — Verify: sandbox.**

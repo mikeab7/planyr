@@ -41,7 +41,22 @@
  * silently substituting a nearby revision — trust that failure rather than working around it with an
  * explicit `PW_CHROME` path, which is exactly how the original mismatch was introduced.
  *
- * USAGE (a vite preview server must be running — `npx vite build && npx vite preview --port 4173`):
+ * ⛔ BUILD WITH A TRUTHY VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY, EVEN A DUMMY ONE — CI ALWAYS DOES
+ * (MEASURED, NOT ASSUMED — B1026272's SECOND real CI failure, same day, right after the Chromium fix
+ * above). CI's `build.yml` sets these to real repo secrets on every build; `supabaseConfigured()`
+ * (`src/workspaces/site-planner/lib/supabase.js`) is a pure truthy-string check with no live network
+ * call, but its result changes what the header's account chip renders — "Cloud off" unconfigured vs.
+ * "Sign in" configured-but-signed-out. Baselines built with NO Supabase env vars at all (this
+ * script's own first approval pass) mismatched CI's real build in the exact same top-right region on
+ * ALL 8 surfaces at once; rebuilding locally with a dummy-but-truthy value reproduced CI's failure
+ * numbers byte-for-byte before the fix, and passed clean after re-approving with it. **Always set
+ * `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` to SOME non-empty value before `vite build`, whatever
+ * it is** — see the USAGE block below.
+ *
+ * USAGE (a vite preview server must be running):
+ *   VITE_SUPABASE_URL="https://visual-regression.supabase.co" \
+ *     VITE_SUPABASE_ANON_KEY="visual-regression-dummy-key" \
+ *     npx vite build && npx vite preview --port 4173
  *   node ui-audit/visual-regression.mjs                → CI mode: capture, diff against the
  *                                                          committed baselines, exit 1 on any
  *                                                          surface exceeding tolerance, any missing
