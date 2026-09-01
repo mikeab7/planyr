@@ -4,23 +4,30 @@ import { parseRoute, buildHash, sameRoute, unknownModuleSlug, isAdminRoute, DEFA
 describe("parseRoute", () => {
   it("empty / root hash is the dashboard (default module, no project)", () => {
     for (const h of ["", "#", "#/", "#//"]) {
-      expect(parseRoute(h)).toEqual({ module: "site-planner", projectId: null, cross: false });
+      expect(parseRoute(h)).toEqual({ module: "site-planner", projectId: null, cross: false, org: false });
     }
   });
 
   it("a bare module slug is that module with no project", () => {
-    expect(parseRoute("#/markup")).toEqual({ module: "doc-review", projectId: null, cross: false });
-    expect(parseRoute("#/schedule")).toEqual({ module: "scheduler", projectId: null, cross: false });
-    expect(parseRoute("#/site")).toEqual({ module: "site-planner", projectId: null, cross: false });
+    expect(parseRoute("#/markup")).toEqual({ module: "doc-review", projectId: null, cross: false, org: false });
+    expect(parseRoute("#/schedule")).toEqual({ module: "scheduler", projectId: null, cross: false, org: false });
+    expect(parseRoute("#/site")).toEqual({ module: "site-planner", projectId: null, cross: false, org: false });
   });
 
   it("project + module carries the id and resolves the module", () => {
-    expect(parseRoute("#/project/mesa/markup")).toEqual({ module: "doc-review", projectId: "mesa", cross: false });
-    expect(parseRoute("#/project/s123/site")).toEqual({ module: "site-planner", projectId: "s123", cross: false });
+    expect(parseRoute("#/project/mesa/markup")).toEqual({ module: "doc-review", projectId: "mesa", cross: false, org: false });
+    expect(parseRoute("#/project/s123/site")).toEqual({ module: "site-planner", projectId: "s123", cross: false, org: false });
   });
 
   it("cross-project mode sets cross and no project", () => {
-    expect(parseRoute("#/all/markup")).toEqual({ module: "doc-review", projectId: null, cross: true });
+    expect(parseRoute("#/all/markup")).toEqual({ module: "doc-review", projectId: null, cross: true, org: false });
+  });
+
+  // ORG SCOPE (NEW-1) — a real, distinct scope: its own hash segment, never spelled as a
+  // sentinel projectId, never conflated with `cross`.
+  it("org mode sets org and no project, and is never conflated with cross", () => {
+    expect(parseRoute("#/org/notes")).toEqual({ module: "notes", projectId: null, cross: false, org: true });
+    expect(parseRoute("#/org/library")).toEqual({ module: "library", projectId: null, cross: false, org: true });
   });
 
   it("decodes an encoded project id", () => {
@@ -31,6 +38,7 @@ describe("parseRoute", () => {
     expect(parseRoute("#/bogus").module).toBe(DEFAULT_MODULE);
     expect(parseRoute("#/project/x/bogus").module).toBe(DEFAULT_MODULE);
     expect(parseRoute("#/project/x").module).toBe(DEFAULT_MODULE); // missing module slug
+    expect(parseRoute("#/org/bogus").module).toBe(DEFAULT_MODULE);
   });
 });
 
@@ -76,7 +84,7 @@ describe("isAdminRoute", () => {
   });
 
   it("parseRoute treats #/admin exactly like any other unresolved slug — DEFAULT_MODULE, no project", () => {
-    expect(parseRoute("#/admin")).toEqual({ module: DEFAULT_MODULE, projectId: null, cross: false });
+    expect(parseRoute("#/admin")).toEqual({ module: DEFAULT_MODULE, projectId: null, cross: false, org: false });
   });
 });
 
@@ -100,6 +108,12 @@ describe("buildHash", () => {
     expect(buildHash({ module: "doc-review", cross: true, projectId: "mesa" })).toBe("#/all/markup");
   });
 
+  // ORG SCOPE (NEW-1) — its own segment, and it wins over a stale project id the same way cross does.
+  it("org mode wins over a project id and names the org segment", () => {
+    expect(buildHash({ module: "notes", org: true })).toBe("#/org/notes");
+    expect(buildHash({ module: "notes", org: true, projectId: "mesa" })).toBe("#/org/notes");
+  });
+
   it("encodes a project id with reserved characters", () => {
     expect(buildHash({ module: "doc-review", projectId: "a/b c" })).toBe("#/project/a%2Fb%20c/markup");
   });
@@ -107,12 +121,14 @@ describe("buildHash", () => {
 
 describe("round-trip parse <-> build", () => {
   for (const r of [
-    { module: "site-planner", projectId: null, cross: false },
-    { module: "doc-review", projectId: null, cross: false },
-    { module: "scheduler", projectId: null, cross: false },
-    { module: "doc-review", projectId: "mesa", cross: false },
-    { module: "site-planner", projectId: "s-9zx", cross: false },
-    { module: "doc-review", projectId: null, cross: true },
+    { module: "site-planner", projectId: null, cross: false, org: false },
+    { module: "doc-review", projectId: null, cross: false, org: false },
+    { module: "scheduler", projectId: null, cross: false, org: false },
+    { module: "doc-review", projectId: "mesa", cross: false, org: false },
+    { module: "site-planner", projectId: "s-9zx", cross: false, org: false },
+    { module: "doc-review", projectId: null, cross: true, org: false },
+    { module: "notes", projectId: null, cross: false, org: true },
+    { module: "library", projectId: null, cross: false, org: true },
   ]) {
     it(`${JSON.stringify(r)} survives build->parse`, () => {
       expect(parseRoute(buildHash(r))).toEqual(r);
@@ -124,9 +140,10 @@ describe("sameRoute", () => {
   it("treats null/absent project the same", () => {
     expect(sameRoute({ module: "doc-review", projectId: null, cross: false }, { module: "doc-review" })).toBe(true);
   });
-  it("distinguishes module, project, and cross", () => {
+  it("distinguishes module, project, cross, and org", () => {
     expect(sameRoute({ module: "doc-review", projectId: "a" }, { module: "doc-review", projectId: "b" })).toBe(false);
     expect(sameRoute({ module: "site-planner" }, { module: "doc-review" })).toBe(false);
     expect(sameRoute({ module: "doc-review", cross: true }, { module: "doc-review", cross: false })).toBe(false);
+    expect(sameRoute({ module: "notes", org: true }, { module: "notes", org: false })).toBe(false);
   });
 });

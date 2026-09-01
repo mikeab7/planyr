@@ -116,6 +116,35 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V571104 — B1020928: signed-in Notes org scope survives a real cross-device sync (create/rename/refile a page in Organization, confirm it merges correctly on a second client) `Blocker: auth`
+
+**Why this needs its own real pass.** `notesCloud.js`'s `mergeTrees` is the two-client merge engine, and org scope now rides through it (the `orgScope`/`projectId` pair travels together under the `filedAt` recency stamp, same as the existing project-filing rule it extends — B421493). A genuine multi-writer/concurrency scenario — two signed-in clients, one filing a page to Organization while the other has a stale copy — is a mandatory LIVE-VERIFY class per this repo's own contract; the sandbox cannot sign in (the proxy CORS-blocks the Supabase auth handshake, the standing `Blocker: auth` wall behind every item like this).
+
+**What was verified here, without a browser.** The pure merge logic is exercised by `test/notesSync.test.js` (78 tests, incl. a 6,000-merge property sweep across five seeds), `test/notesTwoClientConflict.test.js` (two real in-memory store instances against an in-memory server that owns `rev` like the deployed trigger), and `test/notesReachability.test.js` (the rescue path, `orgScope` now carried alongside `projectId` in the rule-5 rescue) — all pass. A full headless, signed-out pass drove the actual UI this session (11/11 checks): opening the switcher, picking Organization, creating a page there, confirming the empty-rail message changes to "no organization notes yet" and then clears once a page exists, switching to Library while staying in org scope, and a direct deep link to `#/org/notes` landing correctly (not bouncing to the Dashboard). What could NOT be exercised here is the actual NETWORK round trip — a real Supabase-backed sync push/pull between two authenticated sessions.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in, two windows/devices on the same account:**
+1. Window A: open the project switcher → click "🏢 Organization" → create a page titled "Design Standards" → type a paragraph. **Expect:** the page appears in the Organization rail immediately, and the header save badge shows it syncing.
+2. Window B (same account, already open or freshly loaded): open the switcher → Organization. **Expect:** "Design Standards" appears in the rail within the account's normal sync latency, with the text from step 1.
+3. Window B: rename the page to "Design Standards v2" while Window A is still open on the OLD name. **Expect:** Window A's rail updates to the new name (no stuck stale title, no duplicate page).
+4. Window A: open the page's "⋯ → Belongs to…" panel and re-file it to a real project. **Expect:** it disappears from Organization in both windows and appears under that project everywhere it's visible (that project's rail, and the Dashboard's per-project group) — never left duplicated in both places.
+5. Window A: from a real project, open a page's "Belongs to…" panel and pick "Organization". **Expect:** the page moves to Organization in both windows — this is the "promote a project note to a standard" gesture named in the design brief; confirm it actually works end to end, not just that the button exists.
+
+**Result:** ⏳ pending — needs two real signed-in browser sessions; not reachable from this sandbox.
+
+### V571105 — B1020928: signed-in Doc Review file upload to Organization lands in a real, distinct Google Drive folder and reads back correctly `Blocker: auth`
+
+**Why this needs its own real pass.** Filing a file to Organization pushes bytes through the chunked Drive upload (`/api/uploads/*`) to a NEW top-level Drive path, `organization/<discipline>/…`, sibling to `project-*` and never folded into `project-unfiled`. This is a genuine signed-in, live-endpoint path (Drive's real API) that the sandbox cannot reach (`Blocker: auth` — the same wall as every Drive-touching check in this file) and was never live-tested before this item.
+
+**What was verified here, without a browser.** Read `reviewStore.js`'s `buildDriveKey`/`pushFileToDrive`/`fileNewReview`/`refileReview`/`fetchReviews` in full and traced `orgScope` through every one of them by hand; `fetchReviews`'s `data->orgScope` extraction mirrors the exact pattern this file already uses for `placed`/`sfile`/`folderId` (no new migration, so nothing for a partial migration to disagree with). `npm run build` is clean and the full `npx vitest run` (13,806 tests) is green, including `test/fileFacts.test.js`'s `unfiled` fix (an org-scoped file no longer misreads as "unfiled"). A signed-out headless pass confirmed the Library UI reaches the org-scope upload code path (the drop-anywhere overlay reads "Drop to file into Organization" while standing there) but a signed-out session cannot actually complete an upload (Drive calls 401 with no session) — the byte path itself is untested live.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in, Google Drive connected:**
+1. Open the switcher → Organization → the Library tab. **Expect:** "No organization files yet. Drop files below — they're visible from every project as reference."
+2. Drop a real PDF onto the pane. **Expect:** it files immediately (no "needs filing" holding step — org scope has no title-block matcher to fail a match), appears in the category tree, and the upload tray shows it landing under "Organization".
+3. Open Google Drive directly (in a separate tab, the same connected account) and look for a top-level `organization` folder, sibling to the `project-*` folders. **Expect:** the file is there, under `organization/<discipline>/…` — never inside any `project-*` folder, and never inside `project-unfiled`.
+4. Open the uploaded file from the Library row. **Expect:** it opens correctly in Review (same open path as any other filed file).
+5. Delete it from the Library, then check "Recently deleted" while still standing in Organization. **Expect:** it appears there (not in a project's bin, not in the "unfiled" bin) and can be restored.
+
+**Result:** ⏳ pending — needs a real signed-in browser session with Drive connected; not reachable from this sandbox.
 ### V467696 — B846384: a long active-editing session on a Richfield-like plan no longer shows an accelerating long-task rate, and the drawing↔basemap weld is unaffected by skipping the redundant DOM reads `Blocker: live-GIS`
 
 **Why this needs its own real pass.** Both mandatory LIVE-VERIFY classes apply — zoom/data-density-dependent rendering (the registration effect's per-commit cost) and GIS endpoint behavior (the tile-vs-drawing weld itself). This sandbox's egress blocks every basemap tile host `mapLock`'s `tileRef()` reads, so `syncReg()` always falls through with no tile to measure against here — the exact path the change touches cannot be exercised in this sandbox at all, only reasoned about from source and from the real production capture already on record.

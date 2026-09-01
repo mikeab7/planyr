@@ -33,6 +33,7 @@ export function readLastRoute() {
       module: typeof v.module === "string" ? v.module : DEFAULT_MODULE,
       projectId: typeof v.projectId === "string" && v.projectId ? v.projectId : null,
       cross: !!v.cross,
+      org: !!v.org,
     };
   } catch (_) {
     // Corrupt pointer: clear it so it can't wedge every boot, and boot clean (the visible
@@ -66,6 +67,7 @@ export function writeLastRoute(route) {
       module: route.module || DEFAULT_MODULE,
       projectId: route.projectId || null,
       cross: !!route.cross,
+      org: !!route.org,
     }));
   } catch (_) { /* quota/unavailable — resume is a convenience, never blocks navigation */ }
 }
@@ -83,7 +85,8 @@ export function writeLastRoute(route) {
 function isWorthRestoring(route) {
   if (PROJECTLESS_MODULES.has(route.module)) return false;
   if (route.module === DEFAULT_MODULE) return true; // already a no-op — buildHash gives "#/"
-  return !!route.projectId || !!route.cross;
+  // ORG SCOPE (NEW-1) — a deliberate destination the user toggled on, same standing as `cross`.
+  return !!route.projectId || !!route.cross || !!route.org;
 }
 
 /* Pure boot decision: which route (if any) to seed into an empty-hash boot.

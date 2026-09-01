@@ -152,7 +152,7 @@ import { MAX_VERSIONS_PER_PAGE, planRestore, planRetention, shouldSnapshot } fro
 import { safeAttachmentName } from "./notesFileMeta.js";
 import {
   allPageIds, countNodes, dropPages, migrate, purgeTrashEntry, searchTitles, pagesInScope,
-  trashEntries, walkPages, withTombstones, SCOPE_ALL, SCOPE_PROJECT,
+  trashEntries, walkPages, withTombstones, SCOPE_ALL, SCOPE_PROJECT, SCOPE_ORG,
 } from "./notesModel.js";
 import { normalizeZoom, zoomKey, ZOOM_DEFAULT } from "./notesZoom.js";
 import { IGNORED_DUPES_KEY_BASE } from "./notesKeys.js";
@@ -1584,9 +1584,10 @@ export function registerOpenNoteDoc(pageId, { applyTaskToggle, applyDocument } =
  *  bodies, so it lives here rather than in the pure model — the roll-up itself is pure
  *  (lib/notesTasks.js) and is unit-tested there. */
 export function collectOpenTasks(tree, { projectId = null, scope: sc = SCOPE_PROJECT } = {}) {
-  const pid = sc === SCOPE_ALL ? null : projectId;
+  const org = sc === SCOPE_ORG;
+  const pid = sc === SCOPE_ALL || org ? null : projectId;
   const pages = [];
-  const scoped = { pages: pagesInScope(tree, pid, pid == null ? SCOPE_ALL : SCOPE_PROJECT) };
+  const scoped = { pages: pagesInScope(tree, pid, org ? SCOPE_ORG : (pid == null ? SCOPE_ALL : SCOPE_PROJECT)) };
   walkPages(scoped, (pg, { root, trail }) => {
     pages.push({ pageId: pg.id, pageTitle: pg.title, projectId: root.projectId ?? null, trail: trail || [] });
   });
@@ -1735,13 +1736,15 @@ export function searchNotes(tree, query, { projectId = null, scope = SCOPE_PROJE
   // Search obeys the SAME scope the rail is showing (B1374). A search that silently spans
   // notebooks the rail is hiding would answer a question the user did not ask; one that
   // could never span them would make a mis-bound note unfindable, which is the bug.
-  const pid = scope === SCOPE_ALL ? null : projectId;
-  const titleHits = searchTitles(tree, query, { projectId: pid });
+  // ORG SCOPE (NEW-1) extends this the same way: search inside Organization stays inside it.
+  const org = scope === SCOPE_ORG;
+  const pid = scope === SCOPE_ALL || org ? null : projectId;
+  const titleHits = searchTitles(tree, query, { projectId: pid, orgScope: org });
   const seen = new Set(titleHits.map((h) => h.pageId));
   const bodyHits = [];
   // The SAME scoped roots the title search walked, at every depth — a subpage's body has to
   // be as findable as a top-level one, or nesting would quietly hide notes.
-  const scoped = { pages: pagesInScope(tree, pid, pid == null ? SCOPE_ALL : SCOPE_PROJECT) };
+  const scoped = { pages: pagesInScope(tree, pid, org ? SCOPE_ORG : (pid == null ? SCOPE_ALL : SCOPE_PROJECT)) };
   walkPages(scoped, (pg, { root, depth }) => {
     if (seen.has(pg.id)) return;
     const text = docToText(readPage(pg.id));
