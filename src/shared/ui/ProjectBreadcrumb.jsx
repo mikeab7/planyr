@@ -161,9 +161,17 @@ const CalendarIcon = ({ size = 12 }) => (
 // transparent/borderless, but its hover/open fill is what makes the shape visible), the same
 // category as the row-2 toolbar's File ▾ / dIcon / rbtn buttons — RADIUS.md per radius.js's own
 // rule ("sm" is for a control nested inside another rounded surface, which this isn't).
+// NEW-1 (B982400) — height 22→26, padding "0 8px"→"0 10px": converges onto the shared
+// `SIZE.sm` bundle (controls.jsx) that every other dense row-1/row-2 chrome chip now targets,
+// closing two of the seven signatures the item measured ("Map"/"Select a project" were their own
+// 22px-tall family, distinct from everything beside them). Kept as a literal token nudge rather
+// than swapping in a `Chip`/`MenuTrigger` component: this crumb's hover-color-swap, aria-current
+// and lock/warn-icon slots are all bespoke to the breadcrumb's own controlled-vs-uncontrolled
+// project list, not a shape a shared primitive should own. Row 1 is 30px tall, so a 26-tall crumb
+// still fits with no clipping (`alignItems:"center"` centers it, same as before).
 const crumbBtn = (extra) => ({
   display: "flex", alignItems: "center", gap: 5, flex: "none",
-  height: 22, padding: "0 8px", borderRadius: RADIUS.md,
+  height: 26, padding: "0 10px", borderRadius: RADIUS.md,
   border: "none", background: "transparent", cursor: "pointer",
   fontFamily: "inherit", fontSize: CHROME_FONT_CONTROL, fontWeight: 600, whiteSpace: "nowrap",
   ...extra,

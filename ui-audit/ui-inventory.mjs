@@ -68,8 +68,12 @@
  * curves disagree with each other. See `nestingMismatches()` below.
  *
  * USAGE (preview server must be running — `npx vite build && npx vite preview --port 4173`):
- *   node ui-audit/ui-inventory.mjs                 → regenerate docs/UI-INVENTORY.md
- *   node ui-audit/ui-inventory.mjs --check          → CI drift gate (diff against the committed file)
+ *   node ui-audit/ui-inventory.mjs                        → regenerate docs/UI-INVENTORY.md
+ *   node ui-audit/ui-inventory.mjs --check                → CI drift gate (diff against the committed
+ *                                                            file, AND fails if any surface's control-
+ *                                                            signature count grew past its ceiling)
+ *   node ui-audit/ui-inventory.mjs --write-signature-ceiling → (re)write control-signature-ceiling.json
+ *                                                            to the CURRENT per-surface counts (NEW-3)
  *   BASE_URL=http://localhost:4173/ node ui-audit/ui-inventory.mjs
  */
 import { chromium } from "playwright";
@@ -84,6 +88,7 @@ import { assertMeasurable } from "./lib/tabTiming.mjs";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..");
 const OUT_MD = join(REPO, "docs", "UI-INVENTORY.md");
+const SIGNATURE_CEILING_PATH = join(HERE, "control-signature-ceiling.json");
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
 
 // Corner radii that always read as deliberate: the four RADIUS.js steps, plus 0 (a square
@@ -523,6 +528,118 @@ async function siblingMismatches(page, surface) {
   }, { menuOnly: !!surface.menuOnly, scope: surface.scope, exclude: surface.exclude, radiusOk: [...RADIUS_OK], gapPx: SIBLING_GAP_PX, vTolPx: SIBLING_VCENTER_TOL_PX, rowHops: SIBLING_ROW_ANCESTOR_HOPS });
 }
 
+/* B982402 (NEW-3) — SIBLING HEIGHT/PADDING mismatches: the axis `siblingMismatches()` above never
+ * asked. That check exists to catch two on-scale RADII sitting flush together; height and padding
+ * were "governed by NOTHING — not the bible, not the guard, not the inventory's pass/fail" (this
+ * item's own brief), and the owner's measured map-view report names SEVEN heights across the row —
+ * a worse defect than the three radii the existing check already finds. Same shape, deliberately:
+ * grouped by shared flex-row ancestor, adjacent pairs only, the same flush-gap-with-divider-escape
+ * test as `siblingMismatches()` (a divider still legitimises two DIFFERENT sizes sitting apart; it
+ * is never an excuse for two sizes sitting FLUSH).
+ *
+ * ⛔ THE CANDIDATE POOL IS DELIBERATELY WIDER than the other two checks' "uniform on-scale radius"
+ * filter. A 0px-radius control (the nav tabs) is invisible to `nestingMismatches`/`siblingMismatches`
+ * on purpose (`if (!radius || ...) continue` — radius 0 is falsy) because THOSE checks are about
+ * curve families, and 0 is not a curve. Height disagreement has no such exemption — a 0-radius tab
+ * sitting flush beside an 8-radius chip at a DIFFERENT height is exactly the "seven heights in one
+ * screen" defect, so this check's pool is every element `readSurface()`'s own `INTERACTIVE_SEL`
+ * would already report (button / [role=button] / [role=menuitem] / input / select / a class*=btn or
+ * chip hook), not just the rounded subset.
+ */
+async function siblingSizeMismatches(page, surface) {
+  return page.evaluate(({ interactiveSel, menuOnly, scope, exclude, gapPx, vTolPx, rowHops }) => {
+    const root = menuOnly
+      ? [...document.querySelectorAll('[data-menu-owner]')]
+      : [[...document.querySelectorAll(scope)].find((el) => el.getBoundingClientRect().width > 0) || document.body];
+
+    const all = [];
+    for (const r of root) {
+      if (!r) continue;
+      for (const el of r.querySelectorAll(interactiveSel)) {
+        if (exclude && el.closest(exclude) && el.closest(exclude) !== r) continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) continue;
+        const cs = getComputedStyle(el);
+        const label = el.getAttribute("aria-label") || el.getAttribute("title")
+          || (el.textContent || "").trim().slice(0, 30) || el.tagName;
+        all.push({
+          el, rect, label: String(label).replace(/\s+/g, " ").trim(),
+          height: Math.round(rect.height), padding: cs.padding,
+        });
+      }
+    }
+
+    // Same "nearest flex-row ancestor with >1 element child" walk as siblingMismatches() — see that
+    // function's own B958466 comment for why a single-child positioning wrapper must be skipped.
+    const rowRootOf = (el) => {
+      let n = el.parentElement, hops = 0;
+      while (n && n !== document.body && hops < rowHops) {
+        const cs = getComputedStyle(n);
+        if ((cs.display === "flex" || cs.display === "inline-flex") && cs.flexDirection !== "column" && cs.flexDirection !== "column-reverse") {
+          const elementChildren = [...n.children].filter((c) => c.getBoundingClientRect().width > 0 || c.getBoundingClientRect().height > 0);
+          if (elementChildren.length > 1) return n;
+        }
+        n = n.parentElement; hops++;
+      }
+      return null;
+    };
+    const byParent = new Map();
+    for (const c of all) {
+      const p = rowRootOf(c.el);
+      if (!p) continue;
+      if (!byParent.has(p)) byParent.set(p, []);
+      byParent.get(p).push(c);
+    }
+
+    // Same divider-in-span escape as siblingMismatches() (B972097) — a real divider still
+    // legitimises two DIFFERENT sizes sitting apart; it is not read here as an exemption for a
+    // flush pair, only as what turns "wide gap" into "still adjacent, still has to agree".
+    const hasDividerInSpan = (parent, leftEdge, rightEdge, centerY) => {
+      for (const el of parent.querySelectorAll("*")) {
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) continue;
+        const thin = r.width <= 2 || r.height <= 2;
+        if (!thin) continue;
+        const longAxis = r.width <= 2 ? r.height : r.width;
+        if (longAxis < 8) continue;
+        const withinSpan = r.left >= leftEdge - 1 && r.right <= rightEdge + 1;
+        const onRow = Math.abs((r.top + r.bottom) / 2 - centerY) <= vTolPx + 6;
+        if (withinSpan && onRow) return true;
+      }
+      return false;
+    };
+
+    const findings = [];
+    for (const [parent, members] of byParent.entries()) {
+      if (members.length < 2) continue;
+      members.sort((a, b) => a.rect.left - b.rect.left);
+      for (let i = 0; i < members.length - 1; i++) {
+        const A = members[i], B = members[i + 1];
+        if (A.height === B.height && A.padding === B.padding) continue; // identical size — never a mismatch
+        const aCenterY = (A.rect.top + A.rect.bottom) / 2, bCenterY = (B.rect.top + B.rect.bottom) / 2;
+        if (Math.abs(aCenterY - bCenterY) > vTolPx) continue; // not the same visual row
+        const gap = B.rect.left - A.rect.right;
+        if (gap < -2) continue; // overlapping — a different shape entirely
+        let dividerSeparated = false;
+        if (gap > gapPx) {
+          dividerSeparated = hasDividerInSpan(parent, A.rect.right, B.rect.left, (aCenterY + bCenterY) / 2);
+          if (!dividerSeparated) continue; // genuinely separated — real clear space, no divider present
+        }
+        const diffs = [];
+        if (A.height !== B.height) diffs.push(`height ${A.height}px vs ${B.height}px`);
+        if (A.padding !== B.padding) diffs.push(`padding "${A.padding}" vs "${B.padding}"`);
+        findings.push({ aLabel: A.label, bLabel: B.label, gap: Math.round(gap * 10) / 10, diffs, dividerSeparated });
+      }
+    }
+    const byKey = new Map();
+    for (const f of findings) {
+      const key = `${f.diffs.join(",")}|${f.aLabel}|${f.bLabel}`;
+      if (!byKey.has(key)) byKey.set(key, f);
+    }
+    return [...byKey.values()];
+  }, { interactiveSel: INTERACTIVE_SEL, menuOnly: !!surface.menuOnly, scope: surface.scope, exclude: surface.exclude, gapPx: SIBLING_GAP_PX, vTolPx: SIBLING_VCENTER_TOL_PX, rowHops: SIBLING_ROW_ANCESTOR_HOPS });
+}
+
 // B950322 (this session's NEW-3) — ALIGNMENT + SIZE, the axis neither nestingMismatches() nor
 // siblingMismatches() covers. Owner report: the map landing page's three floating overlays (the
 // Sites/Comps rail, the Imagery & layers panel, the top-center search bar) don't share a top edge
@@ -671,6 +788,82 @@ function dedupe(rows) {
   return [...byKey.values()];
 }
 
+/* CONTROL SIGNATURE (NEW-3, B982400/B982402) — the headline metric this item asks for, and it is
+ * a NARROWER key than `dedupe()`'s above on purpose. "24 deviations" (the old headline) counted
+ * off-scale VALUES; it was never the health metric a design system actually needs, because a 6px
+ * chip sitting flush beside an 8px chip is on-scale on BOTH sides and invisible to that count — the
+ * exact account-pill failure the item's own brief names. What the owner actually sees is HOW MANY
+ * DIFFERENT SHAPES a surface uses at once: (radius, height, padding, fontSize) — never color,
+ * weight, background or border, which are legitimate per-role differences (a filled primary button
+ * SHOULD look different from an outline icon button; that is not drift). Two elements with the same
+ * geometry but different colors are the SAME signature; two with the same color but different
+ * heights are DIFFERENT signatures. This is deliberately looser than `dedupe()`'s key, which exists
+ * for the per-row table (where color/weight/background/border still matter for attribution) — this
+ * metric answers a different question ("how many shapes"), not "how many exact renders".
+ */
+function controlSignature(row) {
+  return [row.borderRadius, row.height, row.padding, row.fontSize].join("|");
+}
+
+// { surfaceName: { light: N, dark: N } } — the count of DISTINCT control signatures per surface
+// per theme, from the same raw (undeduped) rows `readSurface` collected.
+function computeSignatureCounts(results) {
+  const counts = {};
+  for (const [name, byTheme] of Object.entries(results)) {
+    counts[name] = {};
+    for (const theme of ["light", "dark"]) {
+      const rows = byTheme[theme] || [];
+      counts[name][theme] = new Set(rows.map(controlSignature)).size;
+    }
+  }
+  return counts;
+}
+
+function loadSignatureCeiling() {
+  if (!existsSync(SIGNATURE_CEILING_PATH)) return null;
+  return JSON.parse(readFileSync(SIGNATURE_CEILING_PATH, "utf8"));
+}
+
+function writeSignatureCeiling(counts) {
+  const ceiling = {
+    bySurface: counts,
+    writtenAt: new Date().toISOString().slice(0, 10),
+    note: "Ratchet ceiling for ui-audit/ui-inventory.mjs's per-surface DISTINCT CONTROL SIGNATURE " +
+      "count (NEW-3, B982402) — same shape as design-drift-ceiling.json. A surface's count may " +
+      "never silently grow; regenerate with `node ui-audit/ui-inventory.mjs --write-signature-ceiling` " +
+      "only after a session genuinely LOWERS a surface's count (a real control-geometry " +
+      "convergence), or deliberately after adding a new surface to the crawl (a first measurement, " +
+      "not a regression). Never raise an EXISTING surface's ceiling to silence real drift.",
+  };
+  writeFileSync(SIGNATURE_CEILING_PATH, JSON.stringify(ceiling, null, 2) + "\n");
+  return ceiling;
+}
+
+// Fails when any surface (in either theme) EXCEEDS its recorded ceiling. A surface present in
+// `counts` but absent from `ceiling.bySurface` (a newly-crawled surface) is reported as missing a
+// baseline rather than silently passing — the same "no silent debt" discipline design-drift's
+// checkCeiling applies to a missing ceiling file entirely.
+export function checkSignatureCeiling(counts, ceiling) {
+  const problems = [];
+  if (!ceiling) {
+    problems.push("No ui-audit/control-signature-ceiling.json — run --write-signature-ceiling once to establish a baseline.");
+    return { ok: false, problems };
+  }
+  for (const [surface, byTheme] of Object.entries(counts)) {
+    const recorded = ceiling.bySurface[surface];
+    if (!recorded) {
+      problems.push(`"${surface}" has no recorded ceiling — run --write-signature-ceiling to add it (a new surface, not a regression, unless you did not mean to add one).`);
+      continue;
+    }
+    for (const theme of ["light", "dark"]) {
+      if (byTheme[theme] > recorded[theme]) {
+        problems.push(`"${surface}" (${theme}) grew: ${byTheme[theme]} distinct control signature(s) > ceiling ${recorded[theme]}.`);
+      }
+    }
+  }
+  return { ok: problems.length === 0, problems };
+}
+
 function renderGroup(name, themeRows) {
   const lines = [`### ${name}`, ""];
   for (const theme of ["light", "dark"]) {
@@ -697,6 +890,7 @@ async function run() {
   const results = {}; // surface name -> { light: [...], dark: [...] }
   const nesting = {}; // surface name -> { light: [...], dark: [...] } of nesting-mismatch findings
   const sibling = {}; // surface name -> { light: [...], dark: [...] } of sibling-radius-family findings (B950320)
+  const sizeSibling = {}; // surface name -> { light: [...], dark: [...] } of sibling height/padding findings (B982402)
   const alignment = {}; // surface name -> { light: [...], dark: [...] } of top/height alignment findings (B950322)
   try {
     for (const theme of ["light", "dark"]) {
@@ -713,6 +907,7 @@ async function run() {
         (results[surface.name] ||= {})[theme] = rows;
         (nesting[surface.name] ||= {})[theme] = await nestingMismatches(page, surface);
         (sibling[surface.name] ||= {})[theme] = await siblingMismatches(page, surface);
+        (sizeSibling[surface.name] ||= {})[theme] = await siblingSizeMismatches(page, surface);
         (alignment[surface.name] ||= {})[theme] = await alignmentMismatches(page, surface);
         await ctx.close();
       }
@@ -785,6 +980,36 @@ async function run() {
   }
   if (!totalSiblingMismatches) siblingLines.push("_None found on this run._", "");
 
+  // B982402 (NEW-3) — sibling HEIGHT/PADDING mismatches. Same shape as the radius check above,
+  // deliberately: it exists because that check was blind to this axis entirely.
+  let totalSizeSiblingMismatches = 0;
+  const sizeSiblingLines = ["## Sibling height/padding mismatches (NEW-3, B982402)", "",
+    "Two controls sitting in the same visual row with no containment relationship, disagreeing on",
+    "HEIGHT and/or PADDING — the axis this inventory never checked before this item: \"not the",
+    "bible, not the guard, not the inventory's pass/fail.\" Same grouping and the same",
+    "divider-in-span escape as \"Sibling radius mismatches\" above (a real divider still legitimises",
+    "two different SIZES sitting apart; it is never an excuse for two sizes sitting flush). The",
+    "candidate pool is wider than the radius check's, deliberately: it includes every interactive",
+    "control this inventory reads (buttons, inputs, selects, chip-hooked elements), not only ones",
+    "with a uniform on-scale radius — a 0px-radius nav tab disagreeing in height with its flush",
+    "neighbour is exactly the class this check exists to catch, and the radius check is blind to it",
+    "by construction (radius 0 opts out of that check's own candidate pool).",
+    ""];
+  for (const s of SURFACES) {
+    for (const theme of ["light", "dark"]) {
+      const found = (sizeSibling[s.name] || {})[theme] || [];
+      totalSizeSiblingMismatches += found.length;
+      if (!found.length) continue;
+      sizeSiblingLines.push(`**${s.name} — ${theme}:**`, "");
+      for (const f of found) {
+        const tag = f.dividerSeparated ? " (divider-separated)" : "";
+        sizeSiblingLines.push(`- "${f.aLabel}" sits ${f.gap}px from "${f.bLabel}" — ${f.diffs.join(", ")}${tag}.`);
+      }
+      sizeSiblingLines.push("");
+    }
+  }
+  if (!totalSizeSiblingMismatches) sizeSiblingLines.push("_None found on this run._", "");
+
   // B950322 — top-offset + height alignment mismatches among floating (position:absolute/fixed) peers.
   let totalAlignmentMismatches = 0;
   const alignmentLines = ["## Alignment mismatches (B950322)", "",
@@ -807,6 +1032,39 @@ async function run() {
     }
   }
   if (!totalAlignmentMismatches) alignmentLines.push("_None found on this run._", "");
+
+  // NEW-3 (B982402) — the HEADLINE metric this item asks for: not "how many deviations from a
+  // list" (a value can be individually on-scale and still be the wrong one to sit next to its
+  // neighbour — the account-pill failure this whole item is about) but "how many DIFFERENT SHAPES
+  // does this surface actually use". See controlSignature()'s own header for the precise
+  // definition (radius+height+padding+fontSize; never color/weight/background/border).
+  const signatureCounts = computeSignatureCounts(results);
+  const signatureCeiling = loadSignatureCeiling();
+  const signatureCheck = checkSignatureCeiling(signatureCounts, signatureCeiling);
+  const signatureLines = ["## Distinct control signatures per surface (NEW-3, B982402)", "",
+    "**The headline metric.** Not \"how many values deviate from the allowed list\" — a 6px chip",
+    "sitting flush beside an 8px chip is individually on-scale on BOTH sides and invisible to that",
+    "count, which is exactly how the account-pill mismatch shipped clean through every prior check.",
+    "This counts DISTINCT (radius, height, padding, fontSize) COMBINATIONS actually painted on each",
+    "surface — never color, weight, background or border, which are legitimate per-role differences",
+    "(a filled primary action SHOULD look different from an outline icon button; that is not drift).",
+    "Ratcheted the same way `design-drift-ceiling.json` is: a surface's count may never silently",
+    "grow (`ui-audit/control-signature-ceiling.json`, `--write-signature-ceiling` to update after a",
+    "genuine convergence).",
+    "",
+    "| surface | light | dark | ceiling (light/dark) |", "|---|---|---|---|"];
+  for (const s of SURFACES) {
+    const counts = signatureCounts[s.name] || { light: 0, dark: 0 };
+    const recorded = signatureCeiling?.bySurface?.[s.name];
+    const ceilingCell = recorded ? `${recorded.light} / ${recorded.dark}` : "_(none recorded)_";
+    signatureLines.push(`| ${s.name} | ${counts.light} | ${counts.dark} | ${ceilingCell} |`);
+  }
+  signatureLines.push("");
+  if (!signatureCheck.ok) {
+    signatureLines.push("**⚠️ RATCHET FAILED — a surface's signature count grew:**", "");
+    for (const p of signatureCheck.problems) signatureLines.push(`- ${p}`);
+    signatureLines.push("");
+  }
 
   const md = [
     "# `docs/UI-INVENTORY.md` — the generated control inventory (NEW-3)",
@@ -833,15 +1091,22 @@ async function run() {
     "theme's table**, flagged with ⚠️ and the specific reason. Attribution is best-effort (a literal",
     "text search of `src/` for the element's own label) — see the script header for why.",
     "",
+    signatureLines.join("\n"),
+    "---",
+    "",
     `**Total distinct deviating style signatures found: ${totalDeviations}.** (B915536's earlier "24"`,
     "was measured before the Map landing page — the surface listed first above — was in this crawl at",
     "all; the amended, complete-coverage count was 44. NEW-1/NEW-2 (2026-08-31) then reduced FONT_SIZE",
     "from 8 legal values to 5 named roles and moved every fixable one of those 44 onto it — see",
-    "\"Known, deliberately-not-fixed findings\" below for what's left and why.)",
+    "\"Known, deliberately-not-fixed findings\" below for what's left and why. **This count is now the",
+    "BACKSTOP, not the headline** — see \"Distinct control signatures per surface\" above for why: it",
+    "can certify two individually-on-scale, mutually-wrong values as clean.)",
     "",
     `**Total nesting-family mismatches found (NEW-1): ${totalNestingMismatches}.** See the section below.`,
     "",
     `**Total sibling radius mismatches found (B950320): ${totalSiblingMismatches}.** See the section below.`,
+    "",
+    `**Total sibling height/padding mismatches found (NEW-3, B982402): ${totalSizeSiblingMismatches}.** See the section below.`,
     "",
     `**Total alignment mismatches found (B950322): ${totalAlignmentMismatches}.** See the section below.`,
     "",
@@ -904,6 +1169,9 @@ async function run() {
     siblingLines.join("\n"),
     "---",
     "",
+    sizeSiblingLines.join("\n"),
+    "---",
+    "",
     alignmentLines.join("\n"),
     "---",
     "",
@@ -911,18 +1179,26 @@ async function run() {
     "",
   ].join("\n");
 
+  if (process.argv.includes("--write-signature-ceiling")) {
+    const ceiling = writeSignatureCeiling(signatureCounts);
+    console.log(`ui-audit/control-signature-ceiling.json written — ${Object.keys(ceiling.bySurface).length} surface(s) recorded.`);
+  }
+
   if (process.argv.includes("--check")) {
     const existing = existsSync(OUT_MD) ? readFileSync(OUT_MD, "utf8") : null;
-    if (existing !== md) {
-      console.error("docs/UI-INVENTORY.md is out of date — regenerate with `node ui-audit/ui-inventory.mjs`.");
-      process.exit(1);
-    }
-    console.log("docs/UI-INVENTORY.md is up to date.");
+    const docStale = existing !== md;
+    if (docStale) console.error("docs/UI-INVENTORY.md is out of date — regenerate with `node ui-audit/ui-inventory.mjs`.");
+    if (!signatureCheck.ok) console.error("Control-signature ceiling check FAILED:\n" + signatureCheck.problems.map((p) => "  • " + p).join("\n"));
+    if (docStale || !signatureCheck.ok) process.exit(1);
+    console.log("docs/UI-INVENTORY.md is up to date and no surface's control-signature count grew.");
     return;
   }
 
   writeFileSync(OUT_MD, md);
-  console.log(`docs/UI-INVENTORY.md written — ${totalDeviations} distinct deviating style signature(s), ${totalNestingMismatches} nesting mismatch(es), ${totalSiblingMismatches} sibling radius mismatch(es), ${totalAlignmentMismatches} alignment mismatch(es) found.`);
+  console.log(`docs/UI-INVENTORY.md written — ${totalDeviations} distinct deviating style signature(s), ${totalNestingMismatches} nesting mismatch(es), ${totalSiblingMismatches} sibling radius mismatch(es), ${totalSizeSiblingMismatches} sibling height/padding mismatch(es), ${totalAlignmentMismatches} alignment mismatch(es) found.`);
+  if (!signatureCheck.ok) {
+    console.warn("⚠ Control-signature ceiling check FAILED (see docs/UI-INVENTORY.md's own section):\n" + signatureCheck.problems.map((p) => "  • " + p).join("\n"));
+  }
 }
 
 run();
