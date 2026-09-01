@@ -1,0 +1,56 @@
+{
+  "tolerance": {
+    "maxDiffPct": 0.02,
+    "maxChannelDelta": 8
+  },
+  "surfaces": {
+    "map-landing": {
+      "light": {
+        "approvedAt": "2026-09-01",
+        "approvedCommit": "310b04cb",
+        "note": "Match CI's build-time Supabase-configured state: CI's build step sets real VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY secrets (see .github/workflows/build.yml), which flips the account chip from unconfigured 'Cloud off' to configured-but-signed-out 'Sign in' (supabaseConfigured() is a pure truthy-string check, no live network call). The previous baselines were captured with no Supabase env vars set at all, so they mismatched CI's real build on every surface (all 8 failed identically on this exact region, confirmed byte-for-byte before this fix). Re-captured with a dummy-but-truthy VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY, matching CI's structural (configured) state without needing the real secret values."
+      },
+      "dark": {
+        "approvedAt": "2026-09-01",
+        "approvedCommit": "310b04cb",
+        "note": "Match CI's build-time Supabase-configured state: CI's build step sets real VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY secrets (see .github/workflows/build.yml), which flips the account chip from unconfigured 'Cloud off' to configured-but-signed-out 'Sign in' (supabaseConfigured() is a pure truthy-string check, no live network call). The previous baselines were captured with no Supabase env vars set at all, so they mismatched CI's real build on every surface (all 8 failed identically on this exact region, confirmed byte-for-byte before this fix). Re-captured with a dummy-but-truthy VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY, matching CI's structural (configured) state without needing the real secret values."
+      }
+    },
+    "site-planner-header": {
+      "light": {
+        "approvedAt": "2026-09-01",
+        "approvedCommit": "310b04cb",
+        "note": "Match CI's build-time Supabase-configured state: CI's build step sets real VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY secrets (see .github/workflows/build.yml), which flips the account chip from unconfigured 'Cloud off' to configured-but-signed-out 'Sign in' (supabaseConfigured() is a pure truthy-string check, no live network call). The previous baselines were captured with no Supabase env vars set at all, so they mismatched CI's real build on every surface (all 8 failed identically on this exact region, confirmed byte-for-byte before this fix). Re-captured with a dummy-but-truthy VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY, matching CI's structural (configured) state without needing the real secret values."
+      },
+      "dark": {
+        "approvedAt": "2026-09-01",
+        "approvedCommit": "310b04cb",
+        "note": "Match CI's build-time Supabase-configured state: CI's build step sets real VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY secrets (see .github/workflows/build.yml), which flips the account chip from unconfigured 'Cloud off' to configured-but-signed-out 'Sign in' (supabaseConfigured() is a pure truthy-string check, no live network call). The previous baselines were captured with no Supabase env vars set at all, so they mismatched CI's real build on every surface (all 8 failed identically on this exact region, confirmed byte-for-byte before this fix). Re-captured with a dummy-but-truthy VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY, matching CI's structural (configured) state without needing the real secret values."
+      }
+    },
+    "site-planner-left-rail": {
+      "light": {
+        "approvedAt": "2026-09-01",
+        "approvedCommit": "310b04cb",
+        "note": "Match CI's build-time Supabase-configured state: CI's build step sets real VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY secrets (see .github/workflows/build.yml), which flips the account chip from unconfigured 'Cloud off' to configured-but-signed-out 'Sign in' (supabaseConfigured() is a pure truthy-string check, no live network call). The previous baselines were captured with no Supabase env vars set at all, so they mismatched CI's real build on every surface (all 8 failed identically on this exact region, confirmed byte-for-byte before this fix). Re-captured with a dummy-but-truthy VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY, matching CI's structural (configured) state without needing the real secret values."
+      },
+      "dark": {
+        "approvedAt": "2026-09-01",
+        "approvedCommit": "310b04cb",
+        "note": "Match CI's build-time Supabase-configured state: CI's build step sets real VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY secrets (see .github/workflows/build.yml), which flips the account chip from unconfigured 'Cloud off' to configured-but-signed-out 'Sign in' (supabaseConfigured() is a pure truthy-string check, no live network call). The previous baselines were captured with no Supabase env vars set at all, so they mismatched CI's real build on every surface (all 8 failed identically on this exact region, confirmed byte-for-byte before this fix). Re-captured with a dummy-but-truthy VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY, matching CI's structural (configured) state without needing the real secret values."
+      }
+    },
+    "library": {
+      "light": {
+        "approvedAt": "2026-09-01",
+        "approvedCommit": "310b04cb",
+        "note": "Match CI's build-time Supabase-configured state: CI's build step sets real VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY secrets (see .github/workflows/build.yml), which flips the account chip from unconfigured 'Cloud off' to configured-but-signed-out 'Sign in' (supabaseConfigured() is a pure truthy-string check, no live network call). The previous baselines were captured with no Supabase env vars set at all, so they mismatched CI's real build on every surface (all 8 failed identically on this exact region, confirmed byte-for-byte before this fix). Re-captured with a dummy-but-truthy VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY, matching CI's structural (configured) state without needing the real secret values."
+      },
+      "dark": {
+        "approvedAt": "2026-09-01",
+        "approvedCommit": "310b04cb",
+        "note": "Match CI's build-time Supabase-configured state: CI's build step sets real VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY secrets (see .github/workflows/build.yml), which flips the account chip from unconfigured 'Cloud off' to configured-but-signed-out 'Sign in' (supabaseConfigured() is a pure truthy-string check, no live network call). The previous baselines were captured with no Supabase env vars set at all, so they mismatched CI's real build on every surface (all 8 failed identically on this exact region, confirmed byte-for-byte before this fix). Re-captured with a dummy-but-truthy VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY, matching CI's structural (configured) state without needing the real secret values."
+      }
+    }
+  }
+}
