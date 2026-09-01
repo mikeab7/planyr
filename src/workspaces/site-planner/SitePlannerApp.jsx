@@ -67,6 +67,10 @@ export default function App({
   // dashboard rather than silently reviving a stale currentSite pointer;
   // `newProjectTick` increments when "New project" is clicked from any workspace.
   projectId = null, onProjectChange, resumeAllowed = true, newProjectTick = 0,
+  // ORG SCOPE (NEW-1) — the switcher's "Organization" entry, offered here purely as a way IN
+  // (this workspace never itself runs at org scope; Shell drops `org` on the way to any
+  // module but Notes/Library).
+  onSelectOrg,
   // Keep-alive: false while this workspace is mounted but hidden behind another tab.
   // Hidden = follow the route, but never WRITE to it and never own global keyboard input.
   isActive = true,
@@ -832,6 +836,7 @@ export default function App({
           currentProject={null}
           onSelectProject={openProjectGroup}
           onNewProject={newBlankSite}
+          onSelectOrg={onSelectOrg}
           // NEW-4 — the header project dropdown can rename, and it routes through the SAME single
           // write path everything else uses. Unwired, the breadcrumb fell back to its uncontrolled
           // `storeRename`, which writes only to this device — so a rename made from the map viewer

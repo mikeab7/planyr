@@ -49,10 +49,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ancestorIds, boundProjectIds, descendantPageIds, displayTitle, findPage, pagesInScope, projectGroups,
   subpagesPhrase, subtreePageIds, trashEntries,
-  NO_PROJECT_LABEL, SCOPE_ALL, SCOPE_PROJECT,
+  NO_PROJECT_LABEL, ORG_GROUP_LABEL, SCOPE_ALL, SCOPE_ORG, SCOPE_PROJECT,
 } from "../lib/notesModel.js";
 import { absoluteStamp, daysLeft } from "../lib/notesTime.js";
 import { QUICK_OPEN_KEY } from "../lib/notesQuickOpen.js";
+
+// ORG SCOPE (NEW-1) — the "file under" panel's destination for Organization. A UI-local
+// sentinel, never written into the model: `onBind` below translates it into a call to
+// `onSetPageOrgScope` rather than `onSetPageProject`, so nothing downstream ever sees it as
+// a projectId.
+const ORG_DEST = " org-dest";
 
 const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
 const INDENT = 13;
@@ -227,6 +233,11 @@ function MovePanel({ depth, destinations, onReorder, onMoveTo, onClose, testid }
 function ProjectPanel({ projects, currentProjectId, boundTo, onBind, onClose, testid }) {
   const rows = [
     { id: "__none__", label: NO_PROJECT_LABEL, current: boundTo == null, value: null },
+    // ORG SCOPE (NEW-1) — offered right beside "Not in a project": Organization is a real
+    // destination, not a project. Mechanically this same row is also, this session, the
+    // "promote a project note to a standard" gesture the design doc asked to stay possible —
+    // one pick here is one write, no separate button needed.
+    { id: "__org__", label: ORG_GROUP_LABEL, current: boundTo === ORG_DEST, value: ORG_DEST },
     ...projects.map((p) => ({
       id: p.id,
       label: p.id === currentProjectId ? `${p.name} (this project)` : (p.name || `Unknown project (${p.id})`),
@@ -488,6 +499,7 @@ function TreeRow({
  * project that no longer exists), and it is the one he can do something about: re-file them
  * from the row's own menu. So it says so, in his language, rather than in ours. */
 function groupHeading(group, projectsState) {
+  if (group.org) return ORG_GROUP_LABEL;
   if (group.projectId == null) return NO_PROJECT_LABEL;
   if (group.name) return group.name;
   if (projectsState === "failed") return "Project names didn't load";
@@ -499,7 +511,7 @@ function GroupHead({ group, projectsState, dropping, onDragEnter, onDragOver, on
   const named = groupHeading(group, projectsState);
   return (
     <div
-      data-testid={`notes-group-${group.projectId ?? "none"}`}
+      data-testid={`notes-group-${group.org ? "org" : (group.projectId ?? "none")}`}
       onDragEnter={onDragEnter}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
@@ -774,10 +786,10 @@ function ViewTabs({ view, onView, narrow = false }) {
 /* ---- the rail --------------------------------------------------------------------------- */
 
 export default function NotesTree({
-  tree, projectId, projects = [], projectsState = "ready", projectsError = "", onRetryProjects,
+  tree, projectId, orgScope = false, projects = [], projectsState = "ready", projectsError = "", onRetryProjects,
   activePageId, query, results,
   onQueryChange, onSelectPage, onSelectHit, onAddPage, onAddSubpage,
-  onRename, onDelete, onExportPage, onPrintPage, onSetPageProject,
+  onRename, onDelete, onExportPage, onPrintPage, onSetPageProject, onSetPageOrgScope,
   onMovePage, onRestore, onPurge, onPurgeAll, onPeekBin, onPurgeEmpties, binFacts, onAllNotes,
   taskGroups = [], onToggleTask, onOpenTask, onViewChange,
   /* PHONE DRILL-IN (NEW-1, B849632) — this is the ROOT view below the breakpoint, at full
@@ -798,10 +810,13 @@ export default function NotesTree({
   const [dragId, setDragId] = useState(null);
   const [dropId, setDropId] = useState(null);   // page id, or `root:<projectId>` for a group head
 
-  const grouped = projectId == null;
+  // ORG SCOPE (NEW-1) — standing in Organization is the SAME "one focused scope, ungrouped"
+  // experience as standing inside a project; only the Dashboard (no project AND no org) groups
+  // everything together.
+  const grouped = projectId == null && !orgScope;
   const roots = useMemo(
-    () => pagesInScope(tree, projectId, grouped ? SCOPE_ALL : SCOPE_PROJECT),
-    [tree, projectId, grouped],
+    () => pagesInScope(tree, projectId, grouped ? SCOPE_ALL : (orgScope ? SCOPE_ORG : SCOPE_PROJECT)),
+    [tree, projectId, grouped, orgScope],
   );
   const groups = useMemo(() => (grouped ? projectGroups(tree, projects) : []), [grouped, tree, projects]);
   /* ⛔ THE "BELONGS TO" PANEL MUST OFFER EVERY PROJECT YOU ACTUALLY HAVE NOTES IN, not only
@@ -916,8 +931,8 @@ export default function NotesTree({
     },
   });
 
-  const groupDropProps = (pid) => {
-    const key = `root:${pid ?? "none"}`;
+  const groupDropProps = (g) => {
+    const key = `root:${g?.org ? "org" : (g?.projectId ?? "none")}`;
     return {
       onDragEnter: (e) => { if (!dragId) return; e.preventDefault(); setDropId(key); },
       onDragOver: (e) => { if (!dragId) return; e.preventDefault(); setDropId(key); },
@@ -926,7 +941,9 @@ export default function NotesTree({
         e.preventDefault();
         const id = dragId;
         setDropId(null); setDragId(null);
-        if (id) onMovePage(id, null, 9999, { projectId: pid ?? null });
+        // ORG SCOPE (NEW-1) — dropping a page onto the Organization group heading files it
+        // there, the same drag-to-refile gesture a project's group heading already offers.
+        if (id) onMovePage(id, null, 9999, g?.org ? { orgScope: true } : { projectId: g?.projectId ?? null });
       },
     };
   };
@@ -971,9 +988,15 @@ export default function NotesTree({
           <ProjectPanel
             projects={fileableProjects}
             currentProjectId={projectId}
-            boundTo={page.projectId ?? null}
+            boundTo={page.orgScope ? ORG_DEST : (page.projectId ?? null)}
             testid={`notes-bind-${page.id}`}
-            onBind={(pid) => { onSetPageProject(page.id, pid); setBindingId(null); }}
+            onBind={(dest) => {
+              // ORG SCOPE (NEW-1) — one panel, two model calls: the picked destination decides
+              // which one, so the caller (Notes.jsx) never has to know this panel exists.
+              if (dest === ORG_DEST) onSetPageOrgScope(page.id, true);
+              else onSetPageProject(page.id, dest);
+              setBindingId(null);
+            }}
             onClose={() => setBindingId(null)}
           />
         )}
@@ -982,7 +1005,9 @@ export default function NotesTree({
     );
   };
 
-  const emptyLine = grouped
+  const emptyLine = orgScope
+    ? "No organization notes yet. Make a page — it's visible from every project as reference."
+    : grouped
     ? "No notes yet. Make a page — it opens ready to type in."
     : "No notes in this project yet. Make a page and it files itself here.";
 
@@ -1094,12 +1119,12 @@ export default function NotesTree({
           </div>
         ) : grouped ? (
           groups.map((g) => (
-            <div key={g.projectId ?? "none"} style={{ marginBottom: 4 }}>
+            <div key={g.org ? "org" : (g.projectId ?? "none")} style={{ marginBottom: 4 }}>
               <GroupHead
                 group={g}
                 projectsState={projectsState}
-                dropping={dropId === `root:${g.projectId ?? "none"}`}
-                {...groupDropProps(g.projectId)}
+                dropping={dropId === `root:${g.org ? "org" : (g.projectId ?? "none")}`}
+                {...groupDropProps(g)}
               />
               {g.pages.map((p) => renderPage(p, 0, true))}
             </div>

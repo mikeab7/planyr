@@ -119,7 +119,7 @@ describe("workspace registration — all EIGHT places", () => {
   it("(2b) the route round-trips, including with a project", () => {
     expect(parseRoute("#/notes").module).toBe(MODULE_ID);
     expect(buildHash({ module: MODULE_ID })).toBe("#/notes");
-    expect(parseRoute("#/project/abc/notes")).toEqual({ module: MODULE_ID, projectId: "abc", cross: false });
+    expect(parseRoute("#/project/abc/notes")).toEqual({ module: MODULE_ID, projectId: "abc", cross: false, org: false });
     expect(buildHash({ module: MODULE_ID, projectId: "abc" })).toBe("#/project/abc/notes");
   });
 

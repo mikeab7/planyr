@@ -78,7 +78,7 @@ function EmptyProjectState({ onGoDashboard }) {
 
 export default function ModelApp({
   isActive, shellModule, onShellSwitch, authControl, accountActive, userId,
-  projectId, crossProject, onNavigate, onGoDashboard, onNewProject,
+  projectId, crossProject, onNavigate, onGoDashboard, onNewProject, onSelectOrg,
 }) {
   const { value: sheet, commit, undo, redo, reset, canUndo, canRedo } = useUndoableState(createSheet());
   const [selRange, setSelRange] = useState({ r1: 0, r2: 0, c1: 0, c2: 0 });
@@ -282,6 +282,7 @@ export default function ModelApp({
         cross={crossProject}
         onSelectProject={(id) => onNavigate?.({ projectId: id, cross: false })}
         onNewProject={onNewProject}
+        onSelectOrg={onSelectOrg}
         authControl={authControl}
         accountActive={accountActive}
         saveState={openProject ? modelSaveState(status, accountActive, cloudConfirmed) : null}

@@ -56,7 +56,7 @@ describe("mergeTrees — a delete takes exactly what its entry named", () => {
     expect(allPageIds(merged)).toContain("NEW");             // ⛔ the line that was missing
     expect(trashPageIds(merged)).toEqual(["R", "old"]);      // rule 1 untouched for named ids
     expect(allPageIds(merged)).not.toContain("R");
-    expect(told).toEqual([{ pageId: "NEW", title: "Bain meeting notes", projectId: "P" }]);
+    expect(told).toEqual([{ pageId: "NEW", title: "Bain meeting notes", projectId: "P", orgScope: false }]);
   });
 
   it("…and it keeps the project of the branch it was lifted out of — never a guess", () => {

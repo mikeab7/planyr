@@ -56,6 +56,8 @@ export default function Library({
   // switch; `projectId` is the route's Site-group id (null = pick-a-project), `crossProject`
   // is the all-projects browse mode, and `onNavigate` writes the hash to change either.
   projectId = null, onNavigate, crossProject = false,
+  // ORG SCOPE (NEW-1) — the route's org flag, uniform with `projectId`/`crossProject`.
+  org: orgScope = false, onSelectOrg,
   // Keep-alive: false while mounted but hidden. Returning revalidates the file list cheaply.
   isActive = true,
 } = {}) {
@@ -168,7 +170,7 @@ export default function Library({
   const openPinnedFolder = useCallback(({ projectId: pid, folderId }) => {
     if (!pid || !folderId) return;
     pendingSelectRef.current = folderId;
-    onNavigate?.({ projectId: pid, cross: false });
+    onNavigate?.({ projectId: pid, cross: false, org: false });
   }, [onNavigate]);
 
   // A selection must never point at a deleted/vanished folder (B662 review #6): deleting the
@@ -258,10 +260,14 @@ export default function Library({
         onDashboard={onGoDashboard}
         currentProject={libraryProject}
         cross={crossProject}
+        // ORG SCOPE (NEW-1) — the crumb reads "Organization" while this is true.
+        org={orgScope}
+        onSelectOrg={onSelectOrg}
         // cross:false is load-bearing: navigate() MERGES with the live route, and
         // buildHash DROPS projectId while cross is true — without it, picking a project
-        // from the breadcrumb in "All projects" mode was a silent no-op.
-        onSelectProject={(id) => onNavigate?.({ projectId: id, cross: false })}
+        // from the breadcrumb in "All projects" mode was a silent no-op. org:false clears
+        // Organization the same way when a real project is picked instead.
+        onSelectProject={(id) => onNavigate?.({ projectId: id, cross: false, org: false })}
         onNewProject={onNewProject}
         authControl={authControl}
         accountActive={accountActive}
@@ -291,7 +297,7 @@ export default function Library({
       )}
 
       <div data-testid={folderMode ? "library-unified" : undefined} style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-        {signedIn && !projectId && !crossProject ? (
+        {signedIn && !projectId && !crossProject && !orgScope ? (
           // The Library HOME (owner request, 2026-07-05): pinned folders/files + recent
           // drawings + project cards — replaces the bare "pick a project" dead end.
           <LibraryHome
@@ -299,7 +305,7 @@ export default function Library({
             active={isActive}
             onOpenFile={(row) => onOpenReviewInDocReview?.(row)}
             onOpenFolder={openPinnedFolder}
-            onPickProject={(id) => onNavigate?.({ projectId: id, cross: false })}
+            onPickProject={(id) => onNavigate?.({ projectId: id, cross: false, org: false })}
           />
         ) : (
         <FileBrowser
@@ -308,6 +314,7 @@ export default function Library({
           signedIn={signedIn}
           isActive={isActive}
           cross={crossProject}
+          orgScope={orgScope}
           indexProvider={autofilingProvider}
           // Click a file → open it in Review (cross-workspace). The Shell intent switches the
           // tab AND hands Review the row, which DocReview's docIntent effect consumes on mount.

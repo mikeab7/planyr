@@ -57,7 +57,7 @@ describe("the header does not move, hide or slide in fullscreen", () => {
   it("both rows are still rendered unconditionally — module tabs included", () => {
     // The tabs are built once and used by both Row-2 layouts; a `fullscreen &&` anywhere near
     // them is the regression this line exists for.
-    expect(headerBody).toContain("const moduleTabButtons = MODULES.map(");
+    expect(headerBody).toContain("const moduleTabButtons = visibleModules.map(");
     expect(headerBody).not.toMatch(/\{\s*!?fullscreen\s*&&\s*moduleTabButtons/);
   });
 });

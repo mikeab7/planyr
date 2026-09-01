@@ -37,10 +37,10 @@ describe("workspace registration — all EIGHT places", () => {
   });
 
   it("(2b) the route round-trips, including with a project", () => {
-    expect(parseRoute("#/model")).toEqual({ module: MODULE_ID, projectId: null, cross: false });
+    expect(parseRoute("#/model")).toEqual({ module: MODULE_ID, projectId: null, cross: false, org: false });
     expect(buildHash({ module: MODULE_ID })).toBe("#/model");
     const withProject = parseRoute(buildHash({ module: MODULE_ID, projectId: "abc" }));
-    expect(withProject).toEqual({ module: MODULE_ID, projectId: "abc", cross: false });
+    expect(withProject).toEqual({ module: MODULE_ID, projectId: "abc", cross: false, org: false });
   });
 
   it("(2c) the Cloudflare clean-path redirect exists for the slug (bare and trailing-slash)", () => {
