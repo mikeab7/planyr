@@ -34,13 +34,40 @@
  * so it's never silently compared across NNN/gross) · `Net Effective $/SF/yr` (lease only, same
  * basis-inline rule — net effective on a gross lease and one on an NNN lease are not the same
  * number for the same reason the face rate isn't, per the owner's systematic audit finding 6).
+ *
+ * ⛔ HARDENING-7 (owner rule, "lets add an option for cap on building sales") — the money bands
+ * split by TYPE now: PRICE (Price · NOI · Cap — land and building sale; NOI/Cap grey on land) is
+ * its own group, separate from RENT (Rate · Per · Basis · Escalation — lease only). `price` moved
+ * out of RENT into PRICE; `bldgNoi`/`bldgCapRate` are new, building-sale-only, and are the first
+ * TRIANGLE columns (`triangleField: "price" | "noi" | "capRate"`): enter any two of the three,
+ * the third is computed and rendered `derived` (read-only tinted, same as any other derived
+ * cell — `cellState`'s `state !== "editable"` gate already blocks entering edit mode on it, so
+ * no new gating was needed). Typing into a derived-looking cell is impossible until one of the
+ * OTHER two is cleared, which is the deliberate "clear one to change it" shape, not an oversight.
+ * `bldgCapRate` is stored as a decimal fraction (`resolveCapTriangle`'s header explains why) but
+ * TYPED AND SHOWN as a percentage — the `bldgCapRate` column's own `getValue`/`setValue` do that
+ * conversion at the cell boundary, so the fraction convention never leaks into the sheet's UI and
+ * the percentage convention never leaks into the stored draft/comp.
+ *
+ * ⛔ HARDENING-8/9 (owner LIVE-TESTED the sheet and found it non-functional — read before touching
+ * cellState, applyCellEdit, or a column's width/label) — three separate fixes, all in this file:
+ * (1) `kind: "date"` columns now show/accept mm/dd/yy (`compDates.js`'s `formatDateDisplay`/
+ * `parseTypedDate`) instead of a native `<input type=date>` — a native picker cannot accept typed
+ * text ("June 1 2027"), which the owner explicitly required; the STORED value is still ISO, always.
+ * (2) `visibleColumnIndices(rows)` is the "hide unused columns" rule — see its own header. (3) Net
+ * Effective is GONE as a sheet column (the underlying term/free-rent/escalation/TI inputs are not
+ * touched) and the two remaining derived columns dropped the "$" and, for `$/SF/yr` specifically
+ * (one fixed unit), the "/yr" too — "if the header states the unit, the cell shows the number
+ * only." `$/SF or $/AC` keeps its per-row "/AC"/"/SF" suffix because its header names TWO
+ * candidate units, so the suffix is what disambiguates rather than a repeat.
  */
 import {
   draftToComp, buildingPricePerSf, annualLeaseRate, partyLabels,
-  landPricePerAreaUnit, netEffectiveLeaseRate,
+  landPricePerAreaUnit, resolveCapTriangle,
 } from "./comps.js";
+import { parseTypedDate, formatDateDisplay } from "./compDates.js";
 
-export const GROUPS = ["PROPERTY", "DEAL", "RENT", "CONCESSIONS", "DERIVED", "PARTIES"];
+export const GROUPS = ["PROPERTY", "DEAL", "PRICE", "RENT", "CONCESSIONS", "DERIVED", "PARTIES"];
 
 export const TYPE_OPTIONS = [
   { value: "land", label: "Land" },
@@ -114,9 +141,9 @@ function simpleColumn(base) {
 export const SHEET_COLUMNS = [
   // PROPERTY — facts about the property itself, not the deal. Title/address is the one frozen
   // column ("freeze through Title / address so it stays while the rest scrolls right").
-  simpleColumn({ key: "title", label: "Title / Address", group: "PROPERTY", width: 240, align: "left", kind: "text", frozen: true }),
+  simpleColumn({ key: "title", label: "Title / Address", group: "PROPERTY", width: 180, align: "left", kind: "text", frozen: true }),
   {
-    key: "size", label: "Size", group: "PROPERTY", width: 92, align: "right", kind: "number",
+    key: "size", label: "Size", group: "PROPERTY", width: 70, align: "right", kind: "number",
     appliesTo: () => true,
     getValue: (d) => (d.compType === "land" ? d.landSizeValue : d.compType === "building_sale" ? d.bldgSizeSf : d.leaseSizeSf),
     setValue: (d, v) => (d.compType === "land" ? { ...d, landSizeValue: v } : d.compType === "building_sale" ? { ...d, bldgSizeSf: v } : { ...d, leaseSizeSf: v }),
@@ -125,89 +152,131 @@ export const SHEET_COLUMNS = [
   {
     // Editable AC/SF only for land — building-sale and lease sizes are always SF, shown as a
     // fixed (not em-dash — it DOES apply, it's just not a choice) label.
-    key: "landSizeUnit", label: "Unit", group: "PROPERTY", width: 52, align: "left", kind: "select", options: UNIT_OPTIONS,
+    key: "landSizeUnit", label: "Unit", group: "PROPERTY", width: 42, align: "left", kind: "select", options: UNIT_OPTIONS,
     appliesTo: () => true,
     editableFor: (t) => t === "land",
     getValue: (d) => (d.compType === "land" ? d.landSizeUnit : "sf"),
     setValue: (d, v) => ({ ...d, landSizeUnit: v }),
     flagKey: () => "landSizeUnit",
   },
-  { key: "location", label: "Location", group: "PROPERTY", width: 120, align: "left", kind: "action", appliesTo: () => true, required: true },
+  { key: "location", label: "Location", group: "PROPERTY", width: 88, align: "left", kind: "action", appliesTo: () => true, required: true },
 
   // DEAL — facts about the transaction: what kind, when, how long.
-  simpleColumn({ key: "compType", label: "Type", group: "DEAL", width: 84, align: "left", kind: "select", options: TYPE_OPTIONS }),
-  simpleColumn({ key: "compDate", label: "Executed", group: "DEAL", width: 100, align: "left", kind: "date", required: true }),
-  simpleColumn({ key: "leaseCommencementDate", label: "Commencement", group: "DEAL", width: 110, align: "left", kind: "date", appliesTo: (t) => t === "lease" }),
-  simpleColumn({ key: "leaseTerm", label: "Term", group: "DEAL", width: 90, align: "left", kind: "text", appliesTo: (t) => t === "lease" }),
+  simpleColumn({ key: "compType", label: "Type", group: "DEAL", width: 62, align: "left", kind: "select", options: TYPE_OPTIONS }),
+  simpleColumn({ key: "compDate", label: "Executed", group: "DEAL", width: 74, align: "left", kind: "date", required: true }),
+  simpleColumn({ key: "leaseCommencementDate", label: "Commence", fullLabel: "Commencement", group: "DEAL", width: 74, align: "left", kind: "date", appliesTo: (t) => t === "lease" }),
+  simpleColumn({ key: "leaseTerm", label: "Term", group: "DEAL", width: 56, align: "left", kind: "text", appliesTo: (t) => t === "lease" }),
 
-  // RENT — the deal's core dollar figure: Price for a sale, Rate (+ how it's quoted) for a
-  // lease, and Escalation, because escalation IS rent, over time — never a generic "term".
+  // PRICE — land and building-sale economics: Price for either, NOI + Cap for a sale only (grey
+  // on land — Michael scoped cap rate to building sales). The three are a TRIANGLE: enter any
+  // two, the third derives (see the file header + resolveCapTriangle in comps.js).
   {
-    key: "price", label: "Price", group: "RENT", width: 100, align: "right", kind: "number",
+    key: "price", label: "Price", group: "PRICE", width: 84, align: "right", kind: "number",
     appliesTo: (t) => t === "land" || t === "building_sale",
+    triangleField: "price",
     getValue: (d) => (d.compType === "land" ? d.landPrice : d.bldgPrice),
     setValue: (d, v) => (d.compType === "land" ? { ...d, landPrice: v } : { ...d, bldgPrice: v }),
     flagKey: (d) => (d.compType === "land" ? "landPrice" : "bldgPrice"),
   },
-  simpleColumn({ key: "leaseRate", label: "Rate $/SF", group: "RENT", width: 84, align: "right", kind: "number", appliesTo: (t) => t === "lease" }),
+  {
+    key: "bldgNoi", label: "NOI", group: "PRICE", width: 84, align: "right", kind: "number",
+    appliesTo: (t) => t === "building_sale",
+    triangleField: "noi",
+    getValue: (d) => d.bldgNoi,
+    setValue: (d, v) => ({ ...d, bldgNoi: v }),
+    flagKey: () => "bldgNoi",
+  },
+  {
+    // Typed and shown as a PERCENTAGE (5.75); stored internally as a FRACTION (0.0575) — the
+    // get/set pair is the one place that conversion happens, so nothing outside this column ever
+    // sees the percentage form and nothing outside resolveCapTriangle ever sees a raw fraction
+    // typed by a human.
+    key: "bldgCapRate", label: "Cap %", fullLabel: "Cap rate (%)", group: "PRICE", width: 52, align: "right", kind: "number",
+    appliesTo: (t) => t === "building_sale",
+    triangleField: "capRate",
+    getValue: (d) => (d.bldgCapRate === "" || d.bldgCapRate == null ? "" : String(Number(d.bldgCapRate) * 100)),
+    setValue: (d, v) => ({ ...d, bldgCapRate: v === "" ? "" : String(Number(v) / 100) }),
+    flagKey: () => "bldgCapRate",
+  },
+
+  // RENT — lease-only now that Price moved to PRICE: Rate (+ how it's quoted) and Escalation,
+  // because escalation IS rent, over time — never a generic "term".
+  simpleColumn({ key: "leaseRate", label: "Rate", fullLabel: "Rate $/SF", group: "RENT", width: 56, align: "right", kind: "number", appliesTo: (t) => t === "lease" }),
   simpleColumn({ key: "leaseRatePeriod", label: "Per", group: "RENT", width: 56, align: "left", kind: "select", options: PERIOD_OPTIONS, appliesTo: (t) => t === "lease" }),
-  simpleColumn({ key: "leaseRateExpense", label: "Basis", group: "RENT", width: 68, align: "left", kind: "select", options: BASIS_OPTIONS, appliesTo: (t) => t === "lease" }),
-  simpleColumn({ key: "leaseEscalationPct", label: "Escal. %/yr", group: "RENT", width: 90, align: "right", kind: "number", appliesTo: (t) => t === "lease" }),
+  simpleColumn({ key: "leaseRateExpense", label: "Basis", group: "RENT", width: 52, align: "left", kind: "select", options: BASIS_OPTIONS, appliesTo: (t) => t === "lease" }),
+  simpleColumn({ key: "leaseEscalationPct", label: "Escal", fullLabel: "Escalation %/yr", group: "RENT", width: 56, align: "right", kind: "number", appliesTo: (t) => t === "lease" }),
 
   // CONCESSIONS — the other half of the economics: what the landlord gives up, which is exactly
   // why face rent and net-effective rent differ.
-  simpleColumn({ key: "leaseFreeRentMonths", label: "Free Rent (mo)", group: "CONCESSIONS", width: 96, align: "right", kind: "number", appliesTo: (t) => t === "lease" }),
-  simpleColumn({ key: "leaseTi", label: "TI $/SF", group: "CONCESSIONS", width: 84, align: "right", kind: "number", appliesTo: (t) => t === "lease" }),
+  simpleColumn({ key: "leaseFreeRentMonths", label: "Free rent", fullLabel: "Free rent (months)", group: "CONCESSIONS", width: 50, align: "right", kind: "number", appliesTo: (t) => t === "lease" }),
+  simpleColumn({ key: "leaseTi", label: "TI", fullLabel: "TI $/SF", group: "CONCESSIONS", width: 52, align: "right", kind: "number", appliesTo: (t) => t === "lease" }),
 
-  // DERIVED — never editable, tinted read-only. THREE columns, not one (see the file header):
+  // DERIVED — never editable, tinted read-only. TWO columns now (HARDENING-9 removed Net
+  // Effective — "dont worry about net effective per year ... still remove", the underlying
+  // inputs (term/free rent/escalation/TI) stay as enterable facts, only the derived output went):
   // a sale's price/area and a lease's annualized rate are different units and never share a slot.
+  // ⛔ HARDENING-9 — "if the header states the unit, the cell shows the number only": neither
+  // cell repeats the "$" the header already implies. `$/SF/yr`'s header commits to ONE unit, so
+  // its cell drops "/yr" too (kept only the NNN/GROSS basis, which is new information the header
+  // doesn't carry); `$/SF or $/AC` states TWO candidate units, so its cell keeps the per-row
+  // "/AC" or "/SF" — that suffix is what tells you which one applies, not a repeat of the header.
   {
     // Follows the row's OWN recorded size unit — $/AC for an acre-quoted land comp, $/SF for an
     // SF-quoted one or a building sale (which has no unit choice at all).
-    key: "salePricePerArea", label: "$/SF or $/AC", group: "DERIVED", width: 108, align: "right", kind: "derived",
+    key: "salePricePerArea", label: "$/SF or $/AC", group: "DERIVED", width: 66, align: "right", kind: "derived",
     appliesTo: (t) => t === "land" || t === "building_sale",
     derive: (comp) => {
       const fmt = (n) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       if (comp.compType === "building_sale") {
         const v = buildingPricePerSf(comp);
-        return v != null ? `$${fmt(v)}/SF` : null;
+        return v != null ? `${fmt(v)}/SF` : null;
       }
       const r = landPricePerAreaUnit(comp);
-      return r ? `$${fmt(r.value)}/${r.unit.toUpperCase()}` : null;
+      return r ? `${fmt(r.value)}/${r.unit.toUpperCase()}` : null;
     },
   },
   {
     // The lease's annualized rate on its OWN quoted basis — the basis prints inline so this is
     // never silently compared across NNN and gross (they are not the same figure).
-    key: "leaseAnnualRate", label: "$/SF/yr", group: "DERIVED", width: 108, align: "right", kind: "derived",
+    key: "leaseAnnualRate", label: "$/SF/yr", group: "DERIVED", width: 66, align: "right", kind: "derived",
     appliesTo: (t) => t === "lease",
     derive: (comp) => {
       const v = annualLeaseRate(comp);
       if (v == null) return null;
       const basis = comp.leaseRateExpense ? ` ${comp.leaseRateExpense.toUpperCase()}` : "";
-      return `$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/yr${basis}`;
-    },
-  },
-  {
-    key: "netEffective", label: "Net Effective $/SF/yr", group: "DERIVED", width: 136, align: "right", kind: "derived",
-    appliesTo: (t) => t === "lease",
-    derive: (comp) => {
-      const v = netEffectiveLeaseRate(comp);
-      if (v == null) return null;
-      const basis = comp.leaseRateExpense ? ` ${comp.leaseRateExpense.toUpperCase()}` : "";
-      return `$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/yr${basis}`;
+      return `${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${basis}`;
     },
   },
 
   // PARTIES — who the deal is between, plus notes (kept here rather than dropped — every type
   // needs somewhere for what doesn't fit a column).
-  simpleColumn({ key: "partyProvider", label: "Landlord / Seller", group: "PARTIES", width: 150, align: "left", kind: "text" }),
-  simpleColumn({ key: "partyAcquirer", label: "Tenant / Buyer", group: "PARTIES", width: 150, align: "left", kind: "text" }),
-  simpleColumn({ key: "notes", label: "Notes", group: "PARTIES", width: 220, align: "left", kind: "text" }),
+  simpleColumn({ key: "partyProvider", label: "Landlord/Seller", fullLabel: "Landlord / Seller", group: "PARTIES", width: 120, align: "left", kind: "text" }),
+  simpleColumn({ key: "partyAcquirer", label: "Tenant/Buyer", fullLabel: "Tenant / Buyer", group: "PARTIES", width: 120, align: "left", kind: "text" }),
+  simpleColumn({ key: "notes", label: "Notes", group: "PARTIES", width: 110, align: "left", kind: "text" }),
 ];
 
 export function columnIndex(key) {
   return SHEET_COLUMNS.findIndex((c) => c.key === key);
+}
+
+/** B986096-HARDENING-9 (owner rule: "hide unused columns entirely") — which of the FULL column
+ * list is worth showing given the rows actually on the sheet, as an array of indices into
+ * `SHEET_COLUMNS`. "Every column exists on every ROW" (a cell that doesn't apply renders grey
+ * with an em dash) is UNCHANGED and still what keeps a land row aligned under a lease row — this
+ * is the opposite question, across the whole sheet rather than within one row: a lease-only
+ * sheet has no use for Price/NOI/Cap, so those columns take up no horizontal room at all rather
+ * than sitting there greyed on every single row. With no rows yet (nothing to hide against) every
+ * column shows, so the sheet doesn't flicker narrower the instant the first row lands. */
+export function visibleColumnIndices(rows) {
+  if (!rows || !rows.length) return SHEET_COLUMNS.map((_, i) => i);
+  const types = new Set(rows.map((r) => r.draft.compType));
+  const out = [];
+  SHEET_COLUMNS.forEach((c, i) => {
+    for (const t of types) {
+      if (c.appliesTo(t)) { out.push(i); return; }
+    }
+  });
+  return out;
 }
 
 /** The one place a cell's rendered state is decided: applicable+editable, applicable+fixed
@@ -222,6 +291,24 @@ export function cellState(col, draft) {
   }
   if (!applies) return { state: "na", text: "—" };
   if (col.kind === "action") return { state: "action" };
+  // HARDENING-7 — Price/NOI/Cap on a building sale: whichever one the triangle computed from the
+  // OTHER two (never a genuinely-typed one, and never any of the three when land, or when a
+  // building sale has fewer than two given) renders `derived` — tinted, and NOT enterable, since
+  // every caller into edit mode (beginEdit, F2, typing a character) already gates on
+  // `state === "editable"`. Clearing one of the other two frees this cell up again.
+  if (col.triangleField && draft.compType === "building_sale") {
+    const tri = resolveCapTriangle(draft);
+    const cell = tri[col.triangleField];
+    const raw = col.getValue(draft);
+    if (cell.derived) {
+      const text = col.triangleField === "capRate"
+        ? `${(cell.value * 100).toFixed(2)}%`
+        : formatNumberDisplay(String(cell.value));
+      return { state: "derived", text };
+    }
+    const text = col.triangleField === "capRate" && raw !== "" ? `${formatNumberDisplay(raw)}%` : formatNumberDisplay(raw);
+    return { state: "editable", text, raw: raw ?? "" };
+  }
   const raw = col.getValue(draft);
   if (col.editableFor && !col.editableFor(draft.compType)) {
     // applies, but not a choice for this type (Unit is always SF outside land)
@@ -229,6 +316,13 @@ export function cellState(col, draft) {
   }
   if (col.kind === "select") return { state: "editable", text: optionLabel(col.options, raw), raw: raw || "" };
   if (col.kind === "number") return { state: "editable", text: formatNumberDisplay(raw), raw: raw ?? "" };
+  if (col.kind === "date") {
+    // HARDENING-8 — `raw` (ISO, what's actually stored) is never shown; the REST display and
+    // the edit box both use mm/dd/yy, this app's own convention, so an unchanged edit round-trips
+    // through parseTypedDate back to the identical ISO value it started as.
+    const shown = formatDateDisplay(raw);
+    return { state: "editable", text: shown, raw: shown };
+  }
   return { state: "editable", text: raw || "", raw: raw || "" };
 }
 
@@ -250,6 +344,16 @@ export function applyCellEdit(col, draft, rawInput) {
     return matched == null ? draft : col.setValue(draft, matched);
   }
   if (col.kind === "number") return col.setValue(draft, sanitizeNumericInput(rawInput));
+  if (col.kind === "date") {
+    // Accepts whatever a person typed or pasted (see compDates.js's header for the formats) and
+    // stores the canonical ISO — never the typed text. An empty cell is a deliberate clear; text
+    // that doesn't read as a date leaves the draft UNCHANGED rather than guessing or blanking a
+    // real date on a garbled edit (the same "never guess" rule `matchOption` follows for selects).
+    const trimmed = String(rawInput ?? "").trim();
+    if (!trimmed) return col.setValue(draft, "");
+    const iso = parseTypedDate(trimmed);
+    return iso ? col.setValue(draft, iso) : draft;
+  }
   return col.setValue(draft, String(rawInput ?? ""));
 }
 

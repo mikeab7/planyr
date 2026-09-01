@@ -22,9 +22,11 @@ import { Button, Field } from "../../ui/controls.jsx";
 import {
   COMP_TYPES, LEASE_PERIODS, LEASE_EXPENSE_BASES, isCompType, partyLabels,
   landPricePerSf, buildingPricePerSf, leaseTotalAnnualRent, compFieldRows, compHeadline,
-  compsSummaryBits, validateComp, emptyDraft, draftToComp, compToDraft,
+  compsSummaryBits, validateComp, emptyDraft, draftToComp, compToDraft, anchorCountyFlag,
+  resolveCapTriangle,
 } from "../lib/comps.js";
 import { compMarkerColor } from "../lib/compMarkerIcon.js";
+import { formatDateDisplay } from "../lib/compDates.js";
 import { collectPartyNames } from "../lib/partySuggest.js";
 import PartyNameField from "./PartyNameField.jsx";
 import { fetchAllComps, insertComp, insertComps, updateComp, deleteComp } from "../lib/compsStore.js";
@@ -74,7 +76,7 @@ function CompRow({ comp, onOpen }) {
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
         <span style={{ fontSize: 13, fontWeight: 650, color: "var(--text-primary)" }}>{comp.title || compHeadline(comp)}</span>
-        <span style={{ fontSize: 11, color: "var(--text-secondary)", flex: "none" }}>{comp.compDate}</span>
+        <span style={{ fontSize: 11, color: "var(--text-secondary)", flex: "none" }}>{formatDateDisplay(comp.compDate)}</span>
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 3 }}>
         <TypeChip type={comp.compType} />
@@ -229,13 +231,48 @@ function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave
 
       {draft.compType === "building_sale" && (
         <>
-          <Field label="Price" stacked><input type="number" value={draft.bldgPrice} onChange={set("bldgPrice")} placeholder="optional" style={inputStyle} /></Field>
+          <Field label="Price" stacked><input type="number" value={draft.bldgPrice} onChange={set("bldgPrice")} placeholder="optional — derives from NOI + Cap" style={inputStyle} /></Field>
           <Field label="Building SF" stacked><input type="number" value={draft.bldgSizeSf} onChange={set("bldgSizeSf")} placeholder="optional" style={inputStyle} /></Field>
           {draft.bldgPrice && draft.bldgSizeSf && (
             <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: -4, marginBottom: 8 }}>
               {(() => { const psf = buildingPricePerSf(draftToComp(draft)); return psf != null ? `$${psf.toFixed(2)}/SF` : null; })()}
             </div>
           )}
+          {/* B986096-HARDENING-7 — enter any two of Price/NOI/Cap, the third derives (never
+              overwriting a typed value). Cap is typed and shown as a percentage (5.75) but held
+              internally as a decimal fraction (0.0575) — see resolveCapTriangle's header. */}
+          <Field label="NOI ($)" stacked><input type="number" value={draft.bldgNoi} onChange={set("bldgNoi")} placeholder="optional — derives from Price + Cap" style={inputStyle} /></Field>
+          <Field label="Cap rate (%)" stacked>
+            <input
+              type="number"
+              value={draft.bldgCapRate === "" || draft.bldgCapRate == null ? "" : String(Number(draft.bldgCapRate) * 100)}
+              onChange={(e) => setDraft((d) => ({ ...d, bldgCapRate: e.target.value === "" ? "" : String(Number(e.target.value) / 100) }))}
+              placeholder="optional — derives from Price + NOI"
+              style={inputStyle}
+            />
+          </Field>
+          {(() => {
+            const tri = resolveCapTriangle(draft);
+            if (tri.disagreement) {
+              const stated = (tri.disagreement.statedCapRate * 100).toFixed(2);
+              const implied = (tri.disagreement.impliedCapRate * 100).toFixed(2);
+              return (
+                <div style={{ fontSize: 11, color: "var(--warn-text)", marginTop: -4, marginBottom: 8 }}>
+                  Price, NOI and Cap don't reconcile: stated cap {stated}%, but NOI ÷ Price implies {implied}%. Nothing changed automatically.
+                </div>
+              );
+            }
+            const derivedEntry = ["price", "noi", "capRate"].map((k) => [k, tri[k]]).find(([, v]) => v.derived && v.value != null);
+            if (!derivedEntry) return null;
+            const [key, cell] = derivedEntry;
+            const shown = key === "capRate" ? `${(cell.value * 100).toFixed(2)}%` : `$${cell.value.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+            const label = key === "capRate" ? "Cap" : key === "noi" ? "NOI" : "Price";
+            return (
+              <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: -4, marginBottom: 8 }}>
+                {label} derives to {shown}
+              </div>
+            );
+          })()}
         </>
       )}
 
@@ -406,15 +443,24 @@ export default function CompsPanel({
   // editing an already-saved comp still uses the field form below).
   useEffect(() => {
     if (!pendingAnchor) return;
+    // B986096-HARDENING-7 — "log it and say so": a location that resolved with no county gets a
+    // soft, non-blocking flag on the row's Location cell (comps.js's `anchorCountyFlag`) instead
+    // of a silent null — cleared automatically the moment a later pick DOES carry one.
+    const locFlag = anchorCountyFlag(pendingAnchor);
     if (armedRowId) {
       if (gridRows.some((r) => r._id === armedRowId)) {
-        setGridRows((rows) => rows.map((r) => (r._id === armedRowId ? { ...r, draft: { ...r.draft, anchor: pendingAnchor } } : r)));
+        setGridRows((rows) => rows.map((r) => {
+          if (r._id !== armedRowId) return r;
+          const cellFlags = { ...r.cellFlags };
+          if (locFlag) cellFlags.location = locFlag; else delete cellFlags.location;
+          return { ...r, draft: { ...r.draft, anchor: pendingAnchor }, cellFlags };
+        }));
       } else {
         setDraftAnchors((m) => ({ ...m, [armedRowId]: pendingAnchor }));
       }
       setArmedRowId(null);
     } else {
-      setGridRows((rows) => [...rows, draftFromParsedRow({ draft: emptyDraft(pendingAnchor), cellFlags: {} })]);
+      setGridRows((rows) => [...rows, draftFromParsedRow({ draft: emptyDraft(pendingAnchor), cellFlags: locFlag ? { location: locFlag } : {} })]);
       setView("grid");
     }
     onAnchorConsumed?.();
@@ -577,6 +623,7 @@ export default function CompsPanel({
             onFocusAnchor={(anchor) => onFocusAnchor?.(anchor)}
             onSave={saveGridRows} onCancel={closeGrid}
             saving={gridSaving} saveError={gridSaveError}
+            overlaysById={overlaysById}
           />
         )}
 

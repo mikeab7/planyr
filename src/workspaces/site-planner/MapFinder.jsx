@@ -713,11 +713,17 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const [clickableOverlayId, setClickableOverlayId] = useState(null); // "pin a comp" mode, armed on one overlay
   const startPinOnOverlay = (id) => { setActiveOverlayId(null); setClickableOverlayId(id); };
   const stopPinOnOverlay = () => setClickableOverlayId(null);
-  const placeCompOnOverlay = (overlay, latlng) => {
+  // B986096-HARDENING-7 — a comp pinned onto a georeferenced site-plan overlay is still a real
+  // ground position (`latLonToImagePoint` needs one to place it), so it gets the same best-effort
+  // county derivation as a bare map pin (`resolveCompCounty`, defined below) — this anchor kind
+  // used to never resolve a county at all, which `anchorCountyFlag` would otherwise flag on every
+  // such comp forever with no path to clear it.
+  const placeCompOnOverlay = async (overlay, latlng) => {
     setClickableOverlayId(null);
     const sitePlanPoint = latLonToImagePoint(overlay, overlay.imgW, overlay.imgH, latlng.lat, latlng.lng);
+    const county = await resolveCompCounty(latlng.lat, latlng.lng, "site-plan pin");
     onPlaceComp && onPlaceComp({
-      kind: "site_plan", lat: latlng.lat, lon: latlng.lng,
+      kind: "site_plan", lat: latlng.lat, lon: latlng.lng, county,
       sitePlanOverlayId: overlay.id, sitePlanPoint,
     });
   };
@@ -2481,19 +2487,26 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
    *
    * The county is resolved best-effort on the same 3s race `planSelected` uses — it is a nicety
    * (the planner re-resolves it from the origin on load), so an outage never blocks the fallback. */
+  // B986096-HARDENING-7 (owner rule, "i dont need to input county as a default … log it and say
+  // so") — county for a comp anchor is NEVER typed, only derived on this best-effort 3s race,
+  // shared by both comp anchor kinds that need it (pin, site_plan). Unlike a planned SITE, which
+  // re-resolves county from its origin on every load (B792's self-heal), a comp has no such
+  // re-check, so a miss that isn't surfaced here persists forever — logged for the trail, and
+  // handed back as `county: null` for `anchorCountyFlag` (comps.js) to turn into a sheet warning.
+  const resolveCompCounty = async (lat, lon, what) => {
+    try {
+      const ans = await Promise.race([countyAtPoint(lon, lat), new Promise((res) => setTimeout(() => res(null), 3000))]);
+      const county = ans?.name ? countyKeyForName(ans.name) : null;
+      if (!county) console.warn(`[comps] county lookup found no match for a ${what}`, { lat, lon }, ans?.error || "(timed out or unresolved)");
+      return county;
+    } catch (e) { console.warn(`[comps] county lookup failed for a ${what}`, { lat, lon }, e); return null; }
+  };
+
   // NEW-COMPS: drop a leasing comp pin at a raw clicked point — no parcel resolution needed,
-  // mirroring startBlankHere's best-effort county lookup below (same 3s race, same "don't block
-  // on an outage" shape) but handing off to `onPlaceComp` instead of creating a site.
+  // handing off to `onPlaceComp` instead of creating a site.
   const placeCompPinAt = async (latlng) => {
     setPlacingCompPin(false);
-    let county = null;
-    try {
-      const ans = await Promise.race([
-        countyAtPoint(latlng.lng, latlng.lat),
-        new Promise((res) => setTimeout(() => res(null), 3000)),
-      ]);
-      county = ans?.name ? countyKeyForName(ans.name) : null;
-    } catch (_) { /* the comp still gets created without a county; non-critical metadata */ }
+    const county = await resolveCompCounty(latlng.lat, latlng.lng, "pin");
     onPlaceComp && onPlaceComp({ kind: "pin", lat: latlng.lat, lon: latlng.lng, county });
   };
   const placeCompPinAtRef = useRef(placeCompPinAt);
