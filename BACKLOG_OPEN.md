@@ -259,7 +259,7 @@
 | B978285 | `locked` existed on the schema but had NO control anywhere in the UI, so the owner-only rule it depends on was never actually exercised | [Site Planner / comps] | #comps #site-planner | ⏳ live — awaiting |
 | B978286 | A one-finger drag on a corner scale handle plus an incidental second finger could start Leaflet's own pinch-zoom at the same time | [Site Planner / comps] | #comps #site-planner | ⏳ live — awaiting |
 | B978287 | Export/print parity, zoom-extreme rendering, and hidden-overlay comp visibility — investigated and decided | [Site Planner / comps] | #comps #site-planner | ⏳ live — awaiting |
-| B965344 | Model cloud save writes ZERO rows in total silence even after `model_sheets` is migrated and RLS-verified working | [Model / persistence] | #model #persistence #sync #testing | ⏳ live — awaiting |
+| B965344 (×2) | Model cloud save writes ZERO rows / returns HTTP 400 on every write, even after `model_sheets` is migrated and RLS-verified working | [Model / persistence] | #model #persistence #sync #testing | ⏳ live — awaiting |
 | B948496 | Upload a site plan, place it on the map, and pin comps to buildings shown on it | [Site Planner / comps] | #comps #site-planner #doc-review #files #gis | ⏳ live — awaiting |
 | B972225 | Rework B948496's site-plan placement to direct manipulation + drag-and-drop (no control-point wizard, no scale-check step) | [Site Planner / comps] | #comps #site-planner #doc-review #files #gis | ⏳ live — awaiting |
 | B972224 | Rebuild the site-plans/comps left-hand map panel — scroll, actions, layout, provenance | [Site Planner / comps] | #comps #site-planner #ui | ⏳ live — awaiting |
