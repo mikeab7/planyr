@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-01 @ `bd8596a3` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-01 @ `51e775a4` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_630 source files mapped._
+_632 source files mapped._
 
 ## infra
 
@@ -474,6 +474,8 @@ _630 source files mapped._
   - _exports_: `placeMenu`
 - **`src/shared/ui/AppHeader.jsx`** — Shared two-row chrome: Row1 brand/breadcrumb/cloud-badge/auth, Row2 module tabs+toolbar, fullscreen F-key, phone sideways-scroll, cross-tab conflict banner
   - _exports_: `default (AppHeader)`, `exitFs`, `fsElement`, `fsSupported`, `MODULE_ACCENT`, `requestFs`, `useNarrow`
+- **`src/shared/ui/bottomSheetTracker.js`** — Module-scope publish/subscribe signal: the open mobile bottom sheet's live height, so a FloatingNotice can sit above it instead of under or over it
+  - _exports_: `currentBottomSheetHeight`, `publishBottomSheetHeight`, `subscribeBottomSheetHeight`, `useBottomSheetHeight`
 - **`src/shared/ui/CloudSyncBadge.jsx`** — App-wide cloud-sync glyph driven by real saveState (synced/saving/offline/readonly/error/local); loud never-vanish error via crash boundary + retry popover
   - _exports_: `CloudBadgeBoundary`, `cloudBadgeView`, `default (CloudSyncBadge)`
 - **`src/shared/ui/ColorField.jsx`** — Color control = the native wheel + the shared recently-used swatch row (NEW-4); `ColorRecentsRow` is the row alone, for controls with a bespoke wheel.
@@ -488,6 +490,8 @@ _630 source files mapped._
   - _exports_: `Button`, `Field`, `FONT`, `IconButton`, `MenuItem`, `menuPanelStyle`, `MenuTrigger`, `PAD`, `RADIUS`, `Section`, `SIZE`, `Tab`, `ToggleChip`
 - **`src/shared/ui/designTokens.js`** — B809906 design tokens: spacing (`SPACE`), type scale (`FONT_SIZE`) and standard control heights (`CONTROL_H`) — the audited-value siblings of `radius.js`'s `RADIUS`.
   - _exports_: `CONTROL_H`, `FONT_SIZE`, `SPACE`
+- **`src/shared/ui/FloatingNotice.jsx`** — The one shared primitive owning position for every floating, app-level notification: bottom-centered, stacked via a shared portal host, max-width clamped, clears an open mobile bottom sheet
+  - _exports_: `default (FloatingNotice)`, `NOTICE_BOTTOM`, `NOTICE_GAP`, `NOTICE_MAX_WIDTH`, `NOTICE_Z`, `noticeBottomOffset`
 - **`src/shared/ui/floatingPanel.js`** — NEW-1 poppable panels: pure geometry + docked-only decision (clamp-to-map-viewport, first-open cascade, narrow reconcile) + the 760px breakpoint constant; unit-tested, shared by the live drag path and tests
   - _exports_: `clampToBounds`, `dockAfterRelinquish`, `FLOAT_MIN_WIDTH`, `FLOAT_SIZE`, `initialFloatPos`, `reconcileForNarrow`, `shouldInspectorTakeDock`
 - **`src/shared/ui/FloatingPanel.jsx`** — NEW-1 poppable panels: a left-rail panel detached into a portal-to-body draggable card over the map (drag-clamp, session-remembered position, map pan/zoom isolation); composes PanelChrome
