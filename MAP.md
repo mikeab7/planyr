@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-01 @ `e96f9db9a` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-01 @ `d0715ae9` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_637 source files mapped._
+_639 source files mapped._
 
 ## infra
 
@@ -121,6 +121,8 @@ _637 source files mapped._
   - _exports_: `useUndoableState`
 - **`src/workspaces/model/ModelApp.jsx`** — Model workspace root: the underwriting spreadsheet — loads/saves the active project's sheet and wires the toolbar, formula bar and grid together.
   - _exports_: `default (ModelApp)`
+- **`src/workspaces/notes/components/ConflictCompare.jsx`** — The Notes conflict bar shows both full versions — read-only, diff-highlighted, each timestamped — instead of asking for a blind pick; lazy chunk, rare-path only.
+  - _exports_: `default (ConflictCompare)`
 - **`src/workspaces/notes/components/IntegrityBanner.jsx`** — the bar for the two findings nothing could previously mention: one note living in two projects, and a note that had lost its place (already recovered by the time it renders, and named / openable / re-filable inline). Its own lazy chunk — it renders only when something is wrong.
   - _exports_: `default (IntegrityBanner)`
 - **`src/workspaces/notes/components/NoteEditor.jsx`** — One note page (title · toolbar · document) and the module's ONLY editor-engine import — the lazy boundary. Snapshots the document as plain JSON at edit time so the flush never queries a torn-down instance.
@@ -151,6 +153,8 @@ _637 source files mapped._
   - _exports_: `CALLOUT_TONE_IDS`, `CALLOUT_TONES`, `default`, `DEFAULT_CALLOUT_TONE`, `NoteCallout`
 - **`src/workspaces/notes/lib/notesCloud.js`** — The cloud tier under the notes storage seam: pure sync decisions (tree merge, which-copy-wins page seed, picture plan, sign-in adoption) plus the revision-guarded Supabase transport for `notes_trees` / `notes_pages` / `notes_images` and the private `notes-images` bucket. Imported only by `notesStore.js`, and only dynamically.
   - _exports_: `binPages`, `blobToDataUrl`, `cloudClient`, `dataUrlToBlob`, `emptySyncState`, `fetchImage`, `fetchImageIndex`, `fetchPageIndex`, `fetchPages`, `fetchTree`, `fetchTreeRev`, `forcePage`, `IMAGE_BUCKET`, `IMAGE_MIME_ALLOWED`, `IMAGE_TABLE`, `imagePath`, `isEmptyDoc`, `judgeConflict`, `mergeSyncState`, `mergeTrees`, `PAGE_TABLE`, `pageRev`, `planAdoption`, `planImageSync`, `planPageSeed`, `purgeImagesCloud`, `purgePagesCloud`, `pushImage`, `pushPage`, `pushTree`, `sameDoc`, `syncFailureReason`, `TREE_TABLE`
+- **`src/workspaces/notes/lib/notesConflictDiff.js`** — Pure word-level diff behind ConflictCompare, with a line-level then a linear prefix/suffix fallback so it never builds an unbounded table on an outsized document.
+  - _exports_: `diffHasChanges`, `diffNoteText`, `sideOps`
 - **`src/workspaces/notes/lib/notesDocHtml.js`** — A note's document model → HTML through the EDITOR'S OWN DOMSerializer, so the print sheet cannot drift from the screen (PDF-PARITY by construction). Inlines stored image bytes as data URLs.
   - _exports_: `docToHtml`
 - **`src/workspaces/notes/lib/notesDuplicates.js`** — pure detector for THE SAME NOTE LIVING IN TWO PROJECTS: word-pair Dice similarity over normalised text, same-project and empty pages deliberately excluded, groups (not pairs) out.

@@ -49,11 +49,16 @@ const JSX_SURFACES = [
   // theme-token and module-scope guards cover them like every other visible surface.
   "components/NoteSlashMenu.jsx", "components/NoteOutline.jsx", "components/NoteHistory.jsx",
   "components/QuickOpen.jsx",
+  // B842624 — the conflict comparison view. Squarely the surface the "no second person"
+  // scan (below) exists for, so it belongs on this list, not just ALL_NOTES_FILES.
+  "components/ConflictCompare.jsx",
 ];
 const ALL_NOTES_FILES = [
   "Notes.jsx", "components/NotesTree.jsx", "components/NoteEditor.jsx", "components/NoteToolbar.jsx",
   "components/NoteSlashMenu.jsx", "components/NoteOutline.jsx", "components/NoteHistory.jsx", "components/QuickOpen.jsx",
-  "components/IntegrityBanner.jsx",
+  "components/IntegrityBanner.jsx", "components/ConflictCompare.jsx",
+  // B842624 — the pure diff behind ConflictCompare's two readable version panes.
+  "lib/notesConflictDiff.js",
   "lib/notesModel.js", "lib/notesStore.js", "lib/notesCloud.js", "lib/notesMarkdown.js", "lib/notesExtensions.js",
   "lib/notesTime.js", "lib/notesPrint.js", "lib/notesImageDb.js", "lib/notesImageIntake.js",
   "lib/notesImageNode.js", "lib/notesSearchHighlight.js", "lib/notesDocHtml.js", "lib/notesTabKey.js",
@@ -790,13 +795,16 @@ describe("cloud sync rides the SAME one seam", () => {
     expect(store, "starting sync signed out must be a no-op").toMatch(/if \(scope === LOCAL_SCOPE\) \{ setSyncState\(\{ mode: "local" \}\)/);
   });
 
-  it("NEVER A LOST EDIT: choosing the other device's copy parks this one first", () => {
+  it("NEVER A LOST EDIT: EITHER choice parks the copy it is about to discard first (B842624 — both buttons, not just one)", () => {
     const root = code("Notes.jsx");
-    expect(root).toMatch(/if \(choice === "theirs"\)/);
-    expect(root, "the local body must be written to a NEW page before the conflict resolves")
-      .toMatch(/copyPageWithin\(base, pageId[\s\S]{0,600}writePage\(r\.pageId, localDoc\)/);
+    // The park source is picked per choice — this window's live body for "theirs", the
+    // server's for "mine" — read FRESH at click time (never off a stale render closure).
+    expect(root, "the body to park must be picked per choice, not hardcoded to one side")
+      .toMatch(/const bodyToPark = choice === "theirs" \? readPage\(pageId\) : \(notesConflictFor\(pageId\)\?\.serverDoc/);
+    expect(root, "the picked body must be written to a NEW page before the conflict resolves")
+      .toMatch(/copyPageWithin\(base, pageId[\s\S]{0,600}writePage\(r\.pageId, bodyToPark\)/);
     expect(root, "and the resolution happens after that").toMatch(/resolveNotesConflict\(pageId, choice\)/);
-    expect(root).toContain("ConflictBar");
+    expect(root).toContain("ConflictCompare");
   });
 
   /* ⛔ AND THE COPY NEVER CHANGES PROJECT (NEW-1). A note was copied into an unrelated
@@ -807,7 +815,7 @@ describe("cloud sync rides the SAME one seam", () => {
    * it off the source record and has no argument for one. */
   it("⛔ THE PARK CANNOT BE HANDED A PROJECT — the fix is the missing argument", () => {
     const root = code("Notes.jsx");
-    const park = root.slice(root.indexOf('if (choice === "theirs")'));
+    const park = root.slice(root.indexOf("const bodyToPark = choice ==="));
     const call = park.slice(0, park.indexOf("resolveNotesConflict"));
     expect(call, "the park must go through copyPageWithin, the one copy op").toContain("copyPageWithin(base, pageId");
     expect(call, "and must not file the copy by a project id of its own").not.toMatch(/projectId:/);
