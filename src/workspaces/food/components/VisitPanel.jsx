@@ -445,45 +445,48 @@ function OrderAgain({ entries }) {
 }
 
 /* Actions (block 4) — "Log a visit" full-width primary + "Want to try" secondary toggle beside
- * it; on a NEVER-VISITED place the roles swap (want-to-try becomes primary). Sticky to the
- * bottom of whichever scroll container holds it (the sheet's content area on mobile, the
- * desktop panel's own scroll region) so it stays reachable once Past visits grows past the fold
- * — NEW-2: "On mobile it stays reachable - pin it to the bottom of the sheet when the history
- * scrolls." Filled-with-a-check when the flag is on, outline when off. */
+ * it. Sticky to the bottom of whichever scroll container holds it (the sheet's content area on
+ * mobile, the desktop panel's own scroll region) so it stays reachable once Past visits grows
+ * past the fold — NEW-2: "On mobile it stays reachable - pin it to the bottom of the sheet when
+ * the history scrolls." Filled-with-a-check when the flag is on, outline when off.
+ *
+ * ⛔ B1022960 (2026-09-01 owner report, verbatim: "log a visit should be the main button, not
+ * want to try") — Log a visit is now ALWAYS the primary (full-width, filled) action; Want to try
+ * is ALWAYS the secondary (outlined) one. The previous code swapped roles on a never-visited
+ * place ("on a NEVER-VISITED place the roles swap (want-to-try becomes primary)"), which is
+ * exactly the bug he reported — logging a visit is the thing this whole panel exists for, and it
+ * should never lose top billing to a bookmark. `RADIUS.md` replaces the raw `10` literal (the
+ * shape rule reserves `md`/8 for a standalone actionable control; this pattern already matches
+ * the submit/cancel buttons above in this same file). */
 function ActionsRow({ everVisited, onOpenForm, wishlisted, onToggleWishlist, wishlistDisabled }) {
   const base = {
-    border: "1px solid var(--border-default)", borderRadius: 10, cursor: "pointer",
+    border: "1px solid var(--border-default)", borderRadius: RADIUS.md, cursor: "pointer",
     font: "inherit", fontWeight: 700, minHeight: 44,
   };
   const primary = { ...base, flex: 1, border: "none", padding: "11px 0", fontSize: 14, background: "var(--accent-food)", color: "var(--on-accent-food)" };
   const secondary = { ...base, flex: "0 0 auto", padding: "11px 16px", fontSize: 13, background: "transparent", color: "var(--text-primary)" };
+  // A toggled-on "want to try" still reads as active (the ToggleChip pattern: a ghost fills when
+  // active) without borrowing the primary button's size/weight — it stays the secondary control.
   const wishActive = { background: "var(--accent-food)", color: "var(--on-accent-food)", border: "none" };
 
-  // The wishlist toggle only renders when a handler is actually provided (signed out /
-  // not applicable) — independent of `onSubmitVisit`'s own gating one level up, so this stays
-  // true even if a future change ever lets the two diverge. When it's absent, "Log a visit"
-  // takes the full-width primary slot on its own rather than being stranded as a lone secondary.
-  const logIsPrimary = everVisited || !onToggleWishlist;
   const logBtn = (
-    <button key="log" type="button" onClick={onOpenForm} data-testid="food-log-visit-btn" style={logIsPrimary ? primary : secondary}>
+    <button key="log" type="button" onClick={onOpenForm} data-testid="food-log-visit-btn" style={primary}>
       Log a visit
     </button>
   );
   // NEW-1 (2026-08-27 owner block, part of the save-confirmation item) — a place-level "want to
   // try" is meaningless once he's actually been (owner: "remove the want to try option from a
-  // restaurant I've already visited"). Gone entirely once visited, not just demoted to secondary
-  // — a stale control here is exactly the "did this actually do something" ambiguity this same
-  // item is fixing elsewhere. `logIsPrimary` already treats `everVisited` the same as "no wishlist
-  // handler at all", so `logBtn` correctly takes the full-width primary slot the instant this
-  // disappears — no extra branch needed there. (Dish-level want-to-try on a visited place is
-  // B707842's own, separately-tracked follow-up — this only removes the now-meaningless
-  // PLACE-level control; it doesn't replace it with anything.)
+  // restaurant I've already visited"). Gone entirely once visited, not just demoted — a stale
+  // control here is exactly the "did this actually do something" ambiguity that item was fixing
+  // elsewhere. (Dish-level want-to-try on a visited place is B707842's own, separately-tracked
+  // follow-up — this only removes the now-meaningless PLACE-level control; it doesn't replace it
+  // with anything.)
   const wishBtn = onToggleWishlist && !everVisited && (
     <button
       key="wish" type="button" onClick={onToggleWishlist} disabled={wishlistDisabled} aria-pressed={wishlisted}
       data-testid="food-wishlist-toggle"
       style={{
-        ...primary,
+        ...secondary,
         ...(wishlisted ? wishActive : {}),
         opacity: wishlistDisabled ? 0.5 : 1,
         cursor: wishlistDisabled ? "default" : "pointer",
@@ -498,7 +501,7 @@ function ActionsRow({ everVisited, onOpenForm, wishlisted, onToggleWishlist, wis
       position: "sticky", bottom: 0, display: "flex", gap: 8, padding: "10px 16px",
       background: "var(--surface-raised)", borderTop: "1px solid var(--border-default)",
     }}>
-      {(everVisited ? [logBtn, wishBtn] : [wishBtn, logBtn]).filter(Boolean)}
+      {[logBtn, wishBtn].filter(Boolean)}
     </div>
   );
 }
