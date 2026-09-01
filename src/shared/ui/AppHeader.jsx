@@ -794,11 +794,13 @@ export default function AppHeader({
 
   // Module tabs — shared by both Row-2 layouts (with and without the B387 center slot)
   // so the per-tab wiring is defined once.
-  // ORG SCOPE (NEW-1) — Site/Schedule/Review/Model are not OFFERED at org scope: there is no
-  // parcel to draw, no drawing to mark up, no site to model, so their tabs simply don't
-  // appear while `org` is true. Notes/Library (and, on a route this build has never actually
-  // produced, any other slug) stay visible — the module tab strip narrows, it never empties.
-  const orgVisibleTabs = new Set(["notes", "library"]);
+  // ORG SCOPE (NEW-1, extended B1020930) — Site/Review/Model are not OFFERED at org scope:
+  // there is no parcel to draw, no drawing to mark up, no site to model, so their tabs simply
+  // don't appear while `org` is true. Notes/Library/Schedule stay visible — Schedule renders
+  // AgendaView (a lightweight local surface) instead of the embedded Gantt at org scope, never
+  // the walled `public/sequence/index.html` itself — the module tab strip narrows, it never
+  // empties.
+  const orgVisibleTabs = new Set(["notes", "library", "scheduler"]);
   const visibleModules = org ? MODULES.filter((m) => orgVisibleTabs.has(m.id)) : MODULES;
   const moduleTabButtons = visibleModules.map((m) => (
     <ModuleTab key={m.id} m={m} isActive={m.id === module} onClick={() => onSwitch && onSwitch(m.id)} />
@@ -1104,11 +1106,22 @@ export default function AppHeader({
               wider than the screen; desktop clips it with overflow:hidden + flex-shrink, which
               hid every control left of "File ▾". On narrow we instead let the row scroll: the
               slot keeps natural width (flex 1 0 auto — grows to pin right with slack, never
-              shrinks) and shows its overflow so swiping reveals the hidden tools. */}
+              shrinks) and shows its overflow so swiping reveals the hidden tools.
+
+              ⛔ B1022961 (2026-09-01) — `justify-content: flex-end` assumes something already
+              anchors the row's LEFT edge (the module tabs zone above), so the toolbar reads as
+              "the rest of one continuous strip, flush right of the tabs" — correct for every
+              existing caller. `showModuleTabs={false}` (today, only `/food`, B651873) renders no
+              tabs zone at all, so this same rule flings the toolbar all the way to the far right
+              edge and leaves the entire rest of the row empty — the "Map / List / Drop a pin"
+              strip stranded in a corner with nothing to its left. With no tabs to be flush
+              against, anchor left instead so the controls read as this row's own content. */}
           <div
             style={{
               flex: narrow ? "1 0 auto" : 1, display: "flex", alignItems: "center",
-              justifyContent: "flex-end", paddingRight: 6,
+              justifyContent: showModuleTabs ? "flex-end" : "flex-start",
+              paddingLeft: showModuleTabs ? 0 : 6,
+              paddingRight: showModuleTabs ? 6 : 0,
               minWidth: narrow ? "auto" : 0, gap: 4,
               overflow: narrow ? "visible" : "hidden",
             }}
