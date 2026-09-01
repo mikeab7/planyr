@@ -1566,18 +1566,34 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [basemap]);
 
-  /* faint labels overlay (toggle) — initial opacity set from live zoom (B162) */
+  /* faint labels overlay (toggle) — initial opacity set from live zoom (B162)
+   *
+   * ⛔ B842928 — MUST track the imagery layer's `detectRetina` treatment, not just its native
+   * ceiling. On a HiDPI display `detectRetina` makes the imagery layer fetch tiles ONE zoom
+   * level DEEPER than the map's rounded zoom (drawn at half their CSS footprint to keep the
+   * same geographic coverage — see the comment on the imagery effect above). This layer had NO
+   * `detectRetina`, so its native tile zoom was always exactly ONE LEVEL BEHIND the imagery's —
+   * road-name labels came from a coarser, half-density tile than the aerial beneath them, so
+   * every label rendered visibly larger/blurrier than the imagery at the same zoom. Under real
+   * network latency that structural one-level gap compounds: this layer's tiles are also the
+   * heavier of the two (ArcGIS composites the road/label cartography server-side, tens of KB per
+   * tile vs the imagery's pre-cached JPEGs), so a fast zoom-in can leave it several levels behind
+   * — MEASURED live on the owner's account: pinned at z9 while the imagery reached z15, unchanged
+   * across two further zoom-ins. Matching `detectRetina` (and deriving the retina-adjusted native
+   * ceiling from the ACTIVE basemap the same way the imagery effect does, rather than a bare `19`
+   * that was only ever correct for the default Esri source) removes the structural gap entirely —
+   * both layers now request the same native zoom at every step of a zoom gesture, verified by
+   * driving the real layer live (`ui-audit/verify-map-finder-labels-zoom.mjs`).
+   */
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !labels) return;
     const initOpacity = (map.getZoom() >= PLACE_NAMES_MIN_ZOOM) ? labelsOpacity : 0;
-    // Cap the reference/labels overlay at the imagery's native ceiling (z19) so the two
-    // layers don't DIVERGE at deep zoom. World_Transportation serves tiles past z19, so
-    // without this cap the labels kept rendering crisp while the imagery (clamped to its
-    // native ceiling) had nothing there — the exact "labels float over gray" diagnostic
-    // tell. No detectRetina on this overlay, so there's no retina offset to subtract.
-    // Keep this aligned with the imagery layer's native ceiling above. (B220)
-    const layer = L.tileLayer(LABELS_TILES, { maxZoom: 21, maxNativeZoom: 19, opacity: initOpacity });
+    const bm = BASEMAPS[basemap] || BASEMAPS.esri;
+    const labelsMaxNative = L.Browser.retina ? bm.maxNative - 1 : bm.maxNative;
+    const layer = withTileRetry(L.tileLayer(LABELS_TILES, {
+      maxZoom: 21, maxNativeZoom: labelsMaxNative, detectRetina: true, opacity: initOpacity,
+    }));
     layer.setZIndex(2);
     layer.addTo(map);
     labelsRef.current = layer;
@@ -1590,7 +1606,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     labelsCapRef.current = detachCap;
     return () => { detachCap(); labelsCapRef.current = null; try { map.removeLayer(layer); } catch (_) {} labelsRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [labels]);
+  }, [labels, basemap]);
 
   /* zoom-driven label opacity (B162): hide road names below PLACE_NAMES_MIN_ZOOM, otherwise use
    * the owner's own opacity (B427410 ×3) — one effect, so the zoom gate and the slider can never
