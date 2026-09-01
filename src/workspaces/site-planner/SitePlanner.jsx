@@ -16,7 +16,7 @@ import { createElementSync, stableStringify } from "./lib/elementSync.js";
 import { createOperationTracker } from "./lib/operationEnvelope.js";
 import { planDelete } from "./lib/deletePlan.js";
 import { focusScope, resolveKeyEntry, keyScopeVerdict, shouldHintRefusal, SCOPE_GUARD_HINT } from "./lib/keyContract.js";
-import { touchLatch, touchFactsOf, TOUCH } from "../../shared/keyboard/keyScope.js";
+import { touchLatch, touchFactsOf, TOUCH, isTextControl } from "../../shared/keyboard/keyScope.js";
 import { rowsToModel, KIND_TO_FIELD, foldNeverSyncedLocal, foldJournal, reconcileSeedRows } from "./lib/elementRows.js";
 import { writeJournal, readJournal, clearJournal, sweepJournals, journalSessionId } from "./lib/elementJournal.js";
 import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
@@ -6240,6 +6240,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Arrow-nudge the selection (1′, or 10′ with Shift) — group when multi-selected.
   const nudgeSel = (key, step) => {
+    /* ⛔ NEW-1 (B1012832) — A SECOND, REDUNDANT CHECK, ON PURPOSE. `onKey`'s `keyScopeVerdict` call
+     * already refuses this branch whenever `document.activeElement` is a genuine text-entry control
+     * (FIELD scope) — this should be unreachable with real focus in a text box. It is repeated here,
+     * at the one place that actually MOVES geometry, because the owner reported exactly this
+     * (arrow keys typed into the plan-name field moving a selected element instead of the caret) and
+     * no reproduction found a path through the scope check that lets it happen. LOUD-FAILURE: if some
+     * future caller or a browser quirk this repo's harnesses can't see ever DOES let a mutating arrow
+     * key reach here while a real field has focus, refuse it AND report it — a silent belt-and-braces
+     * check that never fires is free; one that fires and says nothing would just be a slower version
+     * of the same bug. */
+    const activeNow = document.activeElement;
+    if (isTextControl(activeNow)) {
+      reportClientEvent("nudge-blocked-text-focus", "arrow-key nudge reached shiftEl while a text control held focus", {
+        key, tag: activeNow?.tagName || "", testid: (activeNow?.getAttribute && activeNow.getAttribute("data-testid")) || "",
+      });
+      return;
+    }
     const dx = key === "ArrowLeft" ? -step : key === "ArrowRight" ? step : 0;
     const dy = key === "ArrowUp" ? -step : key === "ArrowDown" ? step : 0;
     if (!dx && !dy) return;

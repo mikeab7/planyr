@@ -40,6 +40,7 @@
     "verify:deployed": "PLANYR_URL=https://planyr.io/sequence/ node ui-audit/verify-grid-row-hold.mjs && PLANYR_URL=https://planyr.io/sequence/ node ui-audit/verify-grid-overlay-input.mjs && PLANYR_URL=https://planyr.io/sequence/ node ui-audit/verify-successor-complete.mjs",
     "verify:successorcomplete": "node ui-audit/verify-successor-complete.mjs",
     "verify:deletescope": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-delete-key-scope.mjs",
+    "verify:plannamearrow": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-plan-name-arrow-scope.mjs",
     "verify:hideink": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/diagnose-hide-ink.mjs",
     "verify:hiddencontent": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-hidden-content-behaviour.mjs",
     "verify:pdflayers": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-pdf-layer-hiding.mjs",

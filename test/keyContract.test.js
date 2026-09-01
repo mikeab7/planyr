@@ -15,7 +15,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { SCOPE, focusScope, touchLatch, touchFactsOf, scopeOwnsCanvas, TOUCH, FIELD_GROUP_ATTR } from "../src/shared/keyboard/keyScope.js";
+import { SCOPE, focusScope, touchLatch, touchFactsOf, scopeOwnsCanvas, TOUCH, FIELD_GROUP_ATTR, isTextControl } from "../src/shared/keyboard/keyScope.js";
 import {
   KEY_CONTRACT, resolveKeyEntry, keyScopeVerdict, shouldHintRefusal, REFUSAL, SCOPE_GUARD_HINT,
   CONTROL_CONSUMES,
@@ -530,6 +530,13 @@ describe("no component keydown handler routes around keyScope", () => {
     "../src/workspaces/site-planner/SitePlanner.jsx",
     "../src/workspaces/site-planner/components/ParcelRecordPanel.jsx",
     "../src/workspaces/site-planner/components/SetLocationDialog.jsx",
+    // NEW-1 (B1012832) — the project-breadcrumb's inline rename editor (RenameInput) and the
+    // project-switcher search box: both live inside an AnchoredMenu portal, and neither had ever
+    // been swept for this shape before. Widening the FILE LIST is the fix the 2026-08-20 diagnosis
+    // asked for — the earlier sweep answered "is SitePlanner.jsx's own handler safe", never "is
+    // every text-entry surface in the app safe", which is why a fourth instance of this family (a
+    // portalled input during an open popover) could still slip past it undetected.
+    "../src/shared/ui/ProjectBreadcrumb.jsx",
   ];
 
   it("no onKeyDown handler stops propagation before looking at the key", () => {
@@ -551,5 +558,86 @@ describe("no component keydown handler routes around keyScope", () => {
     const body = s.slice(editorStart, editorStart + 2600);
     expect(body).toMatch(/if \(e\.key === "Escape"\) \{ e\.stopPropagation\(\); e\.preventDefault\(\); commitEditCallout\(\); \}/);
     expect(body).toMatch(/e\.altKey && e\.code === "KeyZ"/);
+  });
+});
+
+/* ⛔ B1012832 (recurrence of the B464048 family, ×4) — THE OWNER'S REPORT: arrow keys typed into
+ * the plan-switcher's PLAN NAME field also moved a selected element on the canvas, with the caret
+ * NOT moving in the field. AUDIT-FIRST, and the finding has to be stated plainly rather than glossed
+ * over: this exact input — `SitePlanner.jsx`'s `data-testid="plan-name-input"`, inside the plan
+ * crumb's AnchoredMenu — could NOT be made to reproduce it, on real Chromium, across every variant
+ * this sweep and its sibling ui-audit harness try (manual click, typed characters first, rapid
+ * presses, Shift+Arrow, Home/End). Runtime instrumentation of the real handler confirmed why: its
+ * `onKeyDown` never calls `stopPropagation` (asserted below), so the keydown bubbles to the
+ * planner's `window` listener untouched, which correctly resolves FIELD scope off
+ * `document.activeElement` (a real DOM fact, unaffected by the input being portalled) and refuses
+ * the nudge branch before it can call `preventDefault` — so the browser's own caret-move default
+ * action is left alone. Both halves of the reported symptom were independently re-verified live
+ * (caret position via `selectionStart`, element position via its rendered box) and both were correct.
+ *
+ * ⛔ WHAT *WAS* FOUND, and it is the SAME general defect class the report predicted (a portalled
+ * surface silently failing to hold the keyboard the way its own code assumes it does) — just in the
+ * OTHER, adjacent AnchoredMenu-hosted input rather than this one. `AnchoredMenu.jsx` hid its panel
+ * before placement with `visibility: pos ? "visible" : "hidden"`, and `visibility:hidden` makes an
+ * element (and every descendant) UNFOCUSABLE per spec. React applies a JSX `autoFocus` prop with one
+ * synchronous `.focus()` call at the render that inserts the node — which, on first mount, is
+ * exactly the render where `pos` is still null. So every `autoFocus` consumer of this component (the
+ * project switcher's "Search projects…" box, confirmed live; the project breadcrumb's inline rename
+ * editor, by the same mechanism) silently left real DOM focus on the TRIGGER BUTTON, and a `<button>`
+ * carries no field-latch at all — so an Arrow key (or, unexercised but structurally identical,
+ * Delete) reached the canvas as CHROME scope with `fieldEdit:false`. Confirmed with the guard proven
+ * RED on the reverted source (the building moved) and GREEN restored (2026-09-01 session log).
+ *
+ * ANSWERING THE 2026-08-20 OPEN QUESTION LEFT ON THIS FAMILY: keyScope's OWN sweep (this file) never
+ * had a chance to catch either the parcels-panel case or this one, because until now it only ever
+ * read ONE handler's source (`plannerKeyHandlerSource`) or a short, hand-picked file list (the
+ * `stopPropagation` sweep above) — it answers "is the declared handler correct", never "does every
+ * text-entry SURFACE in the app actually hold real focus the way the handler assumes". The former is
+ * necessary and was already fully answered; the latter is the actual gap, and it is a DOM-timing /
+ * focusability property no static source sweep can see — it needs a browser, which is why the durable
+ * fix is `ui-audit/verify-plan-name-arrow-scope.mjs` (drives the real popover, the real portal, the
+ * real focus) rather than a wider regex here. What THIS file adds is (a) the file-list widening above,
+ * every text-entry surface reachable via AnchoredMenu; (b) the redundant, LOUD-FAILURE safety net at
+ * the one place geometry actually moves (`nudgeSel`, see its own header) so a path neither this sweep
+ * nor the harness anticipates still cannot move a selected element while real focus is genuinely on a
+ * text control, and reports itself if it ever does. */
+describe("⛔ B1012832 — the plan-name field and every AnchoredMenu-portalled text input", () => {
+  it("isTextControl — the one authority other window-keydown handlers may consult — is public", () => {
+    expect(typeof isTextControl).toBe("function");
+    expect(isTextControl({ tagName: "INPUT", type: "text" })).toBe(true);
+    expect(isTextControl({ tagName: "BUTTON" })).toBe(false);
+  });
+
+  it("MapFinder's Enter-driven comp-placement guard now consults the shared authority, not its own tag list", () => {
+    const mf = src("../src/workspaces/site-planner/MapFinder.jsx");
+    expect(mf, "MapFinder must import the shared keyScope authority").toMatch(
+      /import\s*\{\s*isTextControl,\s*PICKER_TAGS\s*\}\s*from\s*"\.\.\/\.\.\/shared\/keyboard\/keyScope\.js"/);
+    expect(mf, "the old hand-rolled INPUT/TEXTAREA tag check must be gone — one authority, not two")
+      .not.toMatch(/tag === "INPUT" \|\| tag === "TEXTAREA" \|\| tag === "SELECT" \|\| tag === "BUTTON" \|\| \(ae && ae\.isContentEditable\)/);
+  });
+
+  it("the plan-name field's own onKeyDown never stops propagation — the guard depends on it reaching window", () => {
+    const s = src("../src/workspaces/site-planner/SitePlanner.jsx");
+    const i = s.indexOf('data-testid="plan-name-input"');
+    expect(i, "the plan-name input moved — re-point this test").toBeGreaterThan(0);
+    const nearby = s.slice(Math.max(0, i - 400), i + 40);
+    expect(nearby).toMatch(/onKeyDown=\{\(e\) => \{ if \(e\.key === "Enter"\) e\.target\.blur\(\); \}\}/);
+    expect(nearby).not.toMatch(/stopPropagation/);
+  });
+
+  it("AnchoredMenu hides an unplaced panel with opacity, never visibility — visibility:hidden is unfocusable", () => {
+    const am = src("../src/shared/ui/AnchoredMenu.jsx");
+    expect(am, "a visibility toggle on the panel silently breaks every autoFocus child again").not.toMatch(
+      /visibility:\s*pos \? "visible" : "hidden"/);
+    expect(am).toMatch(/opacity:\s*pos \? 1 : 0/);
+  });
+
+  it("nudgeSel refuses (and reports) a mutating arrow if a real text control somehow still has focus", () => {
+    const s = src("../src/workspaces/site-planner/SitePlanner.jsx");
+    const i = s.indexOf("const nudgeSel = (key, step) => {");
+    expect(i).toBeGreaterThan(0);
+    const body = s.slice(i, i + 1600);
+    expect(body).toMatch(/isTextControl\(activeNow\)/);
+    expect(body).toMatch(/reportClientEvent\("nudge-blocked-text-focus"/);
   });
 });

@@ -56,6 +56,23 @@ export default function AnchoredMenu({
 }) {
   const menuRef = useRef(null);
   const [pos, setPos] = useState(null);
+  // ⛔ NEW-1 (B1012832) — `autoFocus` ON A CHILD OF THIS PORTAL NEVER WORKED, and that is what let a
+  // keydown reach whatever the TRIGGER BUTTON does with it instead of the field the user believes
+  // they are typing into. React applies `autoFocus` (a synchronous `.focus()` in the commit/mutation
+  // phase) on the SAME render that inserts the node — which, on first mount, is the render where
+  // `pos` is still null and (below) the panel used to be hidden with `visibility:hidden` so it can't
+  // flash at the wrong spot before `place()` has measured it. A `visibility:hidden` ancestor is NOT a
+  // focusable area per spec, so the `.focus()` call was a silent no-op: focus stayed on the anchor
+  // button. Confirmed live (the project switcher's "Search projects…" box, which carries `autoFocus`):
+  // `document.activeElement` stayed the trigger `<button>` after opening it, and a `<button>` has no
+  // text-entry state at all — so an Arrow (or Delete) that would have been swallowed by a genuinely
+  // focused field instead read as CHROME scope with nothing latched to a field, and reached the
+  // canvas. React never re-tries `autoFocus` on a later render, so there is no DOM marker left behind
+  // to re-focus after the fact either (React does not set an `autofocus` attribute for the JSX prop —
+  // confirmed by reading the live DOM). The fix has to be that the FIRST `.focus()` call succeeds, so
+  // the panel is hidden with `opacity` below instead — `opacity:0` (unlike `visibility:hidden`) does
+  // not remove an element from the focusable area, so React's own one-shot autoFocus works exactly as
+  // every other consumer of it already assumes it does.
   // B735 (×2) — read via a ref in the hashchange effect below, never as a plain dependency: every
   // consumer passes an inline `onClose` arrow, a fresh identity each render, and the host re-renders
   // as a direct side effect of the very `hashchange` this listener exists to catch. See that
@@ -206,8 +223,13 @@ export default function AnchoredMenu({
           zIndex: zIndex + 1,
           left: pos ? pos.left : -9999,
           top: pos ? pos.top : 0,
-          // hide until measured+placed so it never flashes at the wrong spot
-          visibility: pos ? "visible" : "hidden",
+          // Hide until measured+placed so it never flashes at the wrong spot — `opacity`, not
+          // `visibility` (B1012832): a `visibility:hidden` ancestor is unfocusable, which silently
+          // broke every consumer's `autoFocus` child (React's one-shot commit-time `.focus()` landed
+          // on a hidden node and never retried). `opacity:0` hides the same way without that trap;
+          // the off-screen `left:-9999` above still keeps it visually and pointer-wise out of the way.
+          opacity: pos ? 1 : 0,
+          pointerEvents: pos ? "auto" : "none",
         }}
       >
         {children}

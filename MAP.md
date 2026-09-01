@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-01 @ `e3a67474` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-01 @ `c5da2c11` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -357,7 +357,7 @@ _633 source files mapped._
 - **`src/shared/ids.js`** — Collision-resistant element-id minter: per-tab random letter salt + seedAbove counter so no two tabs mint a tombstoned id (B591)
   - _exports_: `createIdMinter`, `randomIdSalt`
 - **`src/shared/keyboard/keyScope.js`** — which surface owns the keyboard: the four scopes, and the three-valued last-touched latch that answers when focus has fallen to `<body>`
-  - _exports_: `FIELD_GROUP_ATTR`, `focusScope`, `NON_TEXT_INPUT_TYPES`, `PICKER_TAGS`, `SCOPE`, `scopeOwnsCanvas`, `SLIDER_TYPES`, `TEXT_ENTRY_TAGS`, `TOUCH`, `touchFactsOf`, `touchLatch`
+  - _exports_: `FIELD_GROUP_ATTR`, `focusScope`, `isTextControl`, `NON_TEXT_INPUT_TYPES`, `PICKER_TAGS`, `SCOPE`, `scopeOwnsCanvas`, `SLIDER_TYPES`, `TEXT_ENTRY_TAGS`, `TOUCH`, `touchFactsOf`, `touchLatch`
 - **`src/shared/markup/geometry.js`** — Pure unit-agnostic point math for all markup surfaces: length, shoelace area, arc-midpoint, point-in-poly, clamped centroid, snap45, projToSeg, bbox
   - _exports_: `bboxOf`, `CALLOUT_CORNER_FRAC`, `calloutCornerRadius`, `centroidOf`, `dist`, `midOfPath`, `nearestRectPerimeterPoint`, `pathLength`, `pointInPoly`, `polyArea`, `projToSeg`, `rot2`, `snap45`
 - **`src/shared/markup/hitTest.js`** — Shared JS-picker hit-testing: pickMarkup click selection (nearest, smallest-interior-wins) and hitEditPath vertex/edge grab for the selected markup
