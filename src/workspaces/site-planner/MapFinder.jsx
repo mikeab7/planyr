@@ -46,8 +46,7 @@ import { siteState } from "./lib/siteRegion.js";
 import { MAP_CHROME_Z, panelMaxHeight, ZOOM_CONTROL_CLEARANCE_PX, MAP_OVERLAY_TOP_PX, MAP_OVERLAY_CHIP_H_PX, MAP_OVERLAY_BAR_H_PX } from "./lib/mapChromeStack.js";
 // B848496 — site-plan overlays (upload a site plan, place it on the map, pin comps to it).
 import { useSitePlanOverlayLayers } from "./lib/useSitePlanOverlayLayers.js";
-import { latLonToImagePoint, suggestFtPerPx } from "../../shared/sitePlans/lib/overlayGeoref.js";
-import { projectToGrid } from "../../shared/coordinates/index.js";
+import { latLonToImagePoint, suggestFtPerPx, feetBetween } from "../../shared/sitePlans/lib/overlayGeoref.js";
 // Reused (never a new raw hex literal) for text on the fixed COMP_ACCENT blue below — that
 // accent doesn't change with theme, so the LIGHT palette's on-accent value is correct in both.
 import { PALETTES } from "../../shared/theme/palette.js";
@@ -666,6 +665,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     [sitePlanOverlays, zoom]
   );
 
+  // Bumped whenever a placement commit recomputes pinned comps' positions (B972512-HARDENING
+  // item 1), so the open comps panel/map markers refetch immediately instead of waiting for its
+  // own tab-focus refetch to notice the DB changed underneath it.
+  const [compsReloadToken, setCompsReloadToken] = useState(0);
   const [activeOverlayId, setActiveOverlayId] = useState(null); // armed for move/scale/rotate editing
   useEffect(() => { activeOverlayIdRef.current = activeOverlayId; }, [activeOverlayId]);
   const commitPlacementRef = useRef(null); // set by SitePlansSection; called once per finished drag
@@ -681,8 +684,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     const size = m.getSize();
     const midY = size.y / 2;
     const pL = m.containerPointToLatLng([0, midY]), pR = m.containerPointToLatLng([size.x, midY]);
-    const gL = projectToGrid(pL.lat, pL.lng), gR = projectToGrid(pR.lat, pR.lng);
-    const viewWidthFt = Math.hypot(gR.x - gL.x, gR.y - gL.y);
+    const viewWidthFt = feetBetween(pL.lat, pL.lng, pR.lat, pR.lng);
     return { centerLat: c.lat, centerLon: c.lng, ftPerPx: suggestFtPerPx(viewWidthFt, imgW), rotationDeg: 0 };
   };
 
@@ -698,9 +700,15 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     });
   };
   const selectOverlay = (id) => { setClickableOverlayId(null); setActiveOverlayId(id); };
+  // B972512-HARDENING item 4: a raster that fails to load (permission, network, a deleted
+  // object) used to just paint nothing on the map with no indication why — surfaced here as a
+  // set of overlay ids so the site-plans list can show something legible on the affected row.
+  const [rasterFailedIds, setRasterFailedIds] = useState(() => new Set());
+  const onRasterUnavailable = (id) => setRasterFailedIds((s) => (s.has(id) ? s : new Set(s).add(id)));
   useSitePlanOverlayLayers(mapRef.current, visibleSitePlanOverlays, {
     pinTargetId: clickableOverlayId, onPinClick: placeCompOnOverlay,
     activeId: activeOverlayId, onSelect: selectOverlay, onCommitPlacement: commitOverlayPlacement,
+    onRasterUnavailable,
   });
 
   // "Open source brochure" from a comp's detail view (CompsPanel) — reuses the existing
@@ -3245,6 +3253,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                     commitPlacementRef={commitPlacementRef}
                     dropIntakeRef={dropIntakeRef}
                     onRejectFile={onRejectDroppedFile}
+                    onCompPositionsChanged={() => setCompsReloadToken((t) => t + 1)}
+                    rasterFailedIds={rasterFailedIds}
                   />
                 </Suspense>
               </PanelErrorBoundary>
@@ -3262,6 +3272,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                   onCompsChange={onCompsChange}
                   overlaysById={overlaysById}
                   onOpenBrochure={openOverlayBrochure}
+                  reloadToken={compsReloadToken}
                 />
               </Suspense>
             </PanelErrorBoundary>

@@ -21,17 +21,28 @@ export const overlayRasterKey = (uid, overlayId) => `${uid}/site-plan-overlays/$
 
 /** Upload a rasterized page (a resolution-capped JPEG Blob, PDF-sourced or from a plain
  * uploaded image — see SitePlansSection.jsx's capImageFile/rasterizePage) for one overlay;
- * returns { key } or null (no client / not signed in / oversize / error). Caller keeps the
- * overlay row usable without a raster — a missing raster just means nothing paints on the map
- * until re-uploaded. */
+ * returns `{ key, error }` — `error` is null on success. Caller keeps the overlay row usable
+ * without a raster — a missing raster just means nothing paints on the map until re-uploaded —
+ * but B972512-HARDENING item 9 found that path was going COMPLETELY SILENT: the old bare-`null`
+ * return gave the caller (`if (up) {...}`, no `else`) nothing to distinguish "worked" from "the
+ * upload failed" from "you're not signed in" from "the compressed page is still over the size
+ * cap" — every failure looked identical to a slow-but-successful save, and the overlay row saved
+ * fine with `raster_key: null`, so the plan was placed but invisible with zero indication why.
+ * Every branch now returns a specific Error so the caller can show something real. */
 export async function uploadOverlayRaster(overlayId, blob) {
-  if (!supabase || !blob || blob.size > MAX_BYTES) return null;
+  if (!supabase) return { key: null, error: new Error("Sign in to add a site plan.") };
+  if (!blob) return { key: null, error: new Error("No image to upload.") };
+  if (blob.size > MAX_BYTES) {
+    const mb = Math.round(MAX_BYTES / (1024 * 1024));
+    return { key: null, error: new Error(`This page's image is too large to save (over ${mb} MB even after compression) — try a lower-resolution source, or crop the page.`) };
+  }
   const user = await getUser();
   const uid = user && user.id;
-  if (!uid) return null;
+  if (!uid) return { key: null, error: new Error("Sign in to add a site plan.") };
   const key = overlayRasterKey(uid, overlayId);
   const { error } = await supabase.storage.from(BUCKET).upload(key, blob, { contentType: blob.type || "image/jpeg", upsert: true });
-  return error ? null : { key };
+  if (error) return { key: null, error };
+  return { key, error: null };
 }
 
 /** Download a stored overlay raster as an object URL usable in an <img>/canvas, or null. */

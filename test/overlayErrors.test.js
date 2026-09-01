@@ -31,6 +31,21 @@ describe("overlayErrors — friendlySaveError", () => {
     expect(msg).toMatch(/isn't valid/i);
   });
 
+  it("translates the delete-blocked-by-referencing-comps constraint specifically (B972512-HARDENING item 5)", () => {
+    const raw = 'new row for relation "comps" violates check constraint "comps_parcel_anchor_has_identity"';
+    const msg = friendlySaveError({ code: "23514", message: raw });
+    expect(msg.toLowerCase()).not.toContain("relation");
+    expect(msg.toLowerCase()).not.toContain("comps_parcel_anchor_has_identity");
+    expect(msg).toMatch(/pinned to it/i);
+  });
+
+  it("translates the brochure-purge-blocked-by-overlay FK specifically (B972512-HARDENING new finding 2)", () => {
+    const raw = 'update or delete on table "doc_reviews" violates foreign key constraint "site_plan_overlays_review_id_fkey" on table "site_plan_overlays"';
+    const msg = friendlySaveError(raw);
+    expect(msg.toLowerCase()).not.toContain("constraint");
+    expect(msg).toMatch(/site plan.*still built from it/i);
+  });
+
   it("translates a row-level-security / permission denial", () => {
     const msg = friendlySaveError({ code: "42501", message: "new row violates row-level security policy" });
     expect(msg).toMatch(/permission/i);

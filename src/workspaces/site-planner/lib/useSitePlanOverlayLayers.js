@@ -17,14 +17,21 @@ import { overlayPlaced } from "../../../shared/sitePlans/lib/sitePlanOverlays.js
 import { downloadOverlayRasterUrl } from "../../../shared/sitePlans/lib/overlayRasterStorage.js";
 
 // Resolved raster object URLs, cached by Storage key for the tab's lifetime — a raster's
-// bytes don't change once placed, so there is nothing to invalidate here.
+// bytes don't change once placed, so a SUCCESSFUL resolve is never invalidated. A FAILED
+// resolve (403 from a since-fixed RLS gap, a dropped connection, a genuinely deleted object) is
+// deliberately NOT cached (B972512-HARDENING item 4) — caching a null would have made every
+// future reference to that same key fail forever for the rest of the tab's life, including
+// right after a real fix (e.g. the team-read storage policy this item adds) lands and a reload
+// would otherwise have picked it up.
 const rasterUrlCache = new Map();
 async function resolveRasterUrl(key) {
   if (!key) return null;
   if (rasterUrlCache.has(key)) return rasterUrlCache.get(key);
   const p = downloadOverlayRasterUrl(key);
   rasterUrlCache.set(key, p);
-  return p;
+  const url = await p;
+  if (!url) rasterUrlCache.delete(key);
+  return url;
 }
 
 /** `map` — the Leaflet map instance (may be null before it's created). `overlays` — the
@@ -32,12 +39,15 @@ async function resolveRasterUrl(key) {
  * here" clicks; `onPinClick(overlay, latlng)` fires for it. `activeId` — the overlay currently
  * armed for move/scale/rotate editing; `onSelect(id)` fires when the user clicks an inactive
  * overlay's image (to select it); `onCommitPlacement(id, {centerLat,centerLon,ftPerPx,
- * rotationDeg})` fires once per drag gesture, on release. */
-export function useSitePlanOverlayLayers(map, overlays, { pinTargetId, onPinClick, activeId, onSelect, onCommitPlacement } = {}) {
+ * rotationDeg})` fires once per drag gesture, on release. `onRasterUnavailable(id)` fires once
+ * per overlay whose raster failed to load (permission, network, or a deleted object) — so the
+ * caller can surface something legible instead of the map just silently showing nothing where
+ * a plan should be (B972512-HARDENING item 4). */
+export function useSitePlanOverlayLayers(map, overlays, { pinTargetId, onPinClick, activeId, onSelect, onCommitPlacement, onRasterUnavailable } = {}) {
   const layersRef = useRef(new Map()); // overlay id -> layer handle
   const handlesRef = useRef(null);
   const cbRef = useRef({});
-  cbRef.current = { pinTargetId, onPinClick, activeId, onSelect, onCommitPlacement };
+  cbRef.current = { pinTargetId, onPinClick, activeId, onSelect, onCommitPlacement, onRasterUnavailable };
   const stateRef = useRef({ overlays, activeId }); // latest, read by the async-loaded handles controller
   stateRef.current = { overlays, activeId };
 
@@ -107,7 +117,10 @@ export function useSitePlanOverlayLayers(map, overlays, { pinTargetId, onPinClic
       }
       if (o.rasterKey && !handle._srcSet) {
         handle._srcSet = true;
-        resolveRasterUrl(o.rasterKey).then((url) => { if (url) handle.setImage(url); });
+        resolveRasterUrl(o.rasterKey).then((url) => {
+          if (url) handle.setImage(url);
+          else cbRef.current.onRasterUnavailable && cbRef.current.onRasterUnavailable(o.id);
+        });
       }
     }
     for (const [id, handle] of layers) {

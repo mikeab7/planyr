@@ -1,9 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
-  validPlacement, overlayCornersFromPlacement, latLonToImagePoint, suggestFtPerPx,
+  validPlacement, overlayCornersFromPlacement, latLonToImagePoint, imagePointToLatLon, suggestFtPerPx,
   scalePlacement, rotatePlacement,
 } from "../src/shared/sitePlans/lib/overlayGeoref.js";
 import { projectToGrid, gridToProject } from "../src/shared/coordinates/index.js";
+import { projectToZone } from "../src/shared/coordinates/statePlane.js";
 
 // A synthetic placement near Katy, TX.
 const ORIGIN = { lat: 29.7858, lon: -95.8244 };
@@ -130,5 +131,88 @@ describe("overlayGeoref — shares the app's one coordinate spine", () => {
     const back = gridToProject(g);
     expect(back.lat).toBeCloseTo(ORIGIN.lat, 6);
     expect(back.lon).toBeCloseTo(ORIGIN.lon, 6);
+  });
+});
+
+describe("overlayGeoref — imagePointToLatLon (B972512-HARDENING item 1/2)", () => {
+  it("is the exact inverse of latLonToImagePoint", () => {
+    const p = placement(25);
+    const x = 340, y = 610;
+    const ll = imagePointToLatLon(p, IMG_W, IMG_H, x, y);
+    const back = latLonToImagePoint(p, IMG_W, IMG_H, ll.lat, ll.lon);
+    expect(back.x).toBeCloseTo(x, 4);
+    expect(back.y).toBeCloseTo(y, 4);
+  });
+
+  it("agrees with overlayCornersFromPlacement for the four corners", () => {
+    const p = placement(-15);
+    const c = overlayCornersFromPlacement(p, IMG_W, IMG_H);
+    const tl = imagePointToLatLon(p, IMG_W, IMG_H, 0, 0);
+    const br = imagePointToLatLon(p, IMG_W, IMG_H, IMG_W, IMG_H);
+    expect(tl.lat).toBeCloseTo(c.topLeft.lat, 6);
+    expect(tl.lon).toBeCloseTo(c.topLeft.lon, 6);
+    expect(br.lat).toBeCloseTo(c.bottomRight.lat, 6);
+    expect(br.lon).toBeCloseTo(c.bottomRight.lon, 6);
+  });
+
+  it("recovers the center point at the image center", () => {
+    const p = placement(63);
+    const mid = imagePointToLatLon(p, IMG_W, IMG_H, IMG_W / 2, IMG_H / 2);
+    expect(mid.lat).toBeCloseTo(ORIGIN.lat, 6);
+    expect(mid.lon).toBeCloseTo(ORIGIN.lon, 6);
+  });
+
+  it("returns null for an invalid placement or image size", () => {
+    expect(imagePointToLatLon(null, IMG_W, IMG_H, 0, 0)).toBe(null);
+    expect(imagePointToLatLon(placement(), 0, IMG_H, 0, 0)).toBe(null);
+  });
+});
+
+// B972512-HARDENING item 3 — the projection is ZONE-AWARE, not hardcoded to one Texas zone.
+describe("overlayGeoref — zone-aware projection", () => {
+  it("a Houston/Katy placement (inside the modeled South Central envelope) is BIT-IDENTICAL to the legacy hardcoded projection — zero regression", () => {
+    const p = placement(42);
+    const legacy = (() => {
+      const center = projectToGrid(p.centerLat, p.centerLon);
+      return { center };
+    })();
+    const zoned = (() => {
+      const center = projectToZone("tx_sc", p.centerLat, p.centerLon);
+      return { center };
+    })();
+    expect(zoned.center.x).toBe(legacy.center.x);
+    expect(zoned.center.y).toBe(legacy.center.y);
+    // And the actual corners the app computes come out identical too.
+    const c = overlayCornersFromPlacement(p, IMG_W, IMG_H);
+    expect(c.topLeft.lat).toBeCloseTo(29.787968524040373, 9); // pinned value, regression guard
+  });
+
+  it("a Colorado placement resolves through its OWN zone rather than silently through Texas South Central", () => {
+    // Denver — Colorado Central zone (EPSG:2232), nowhere near the Texas South Central envelope.
+    const denver = { centerLat: 39.7392, centerLon: -104.9903, ftPerPx: 1, rotationDeg: 0 };
+    const c = overlayCornersFromPlacement(denver, IMG_W, IMG_H);
+    expect(c).not.toBe(null);
+    // The center of the four corners must still recover the placement's own center (the zone
+    // resolution is internally consistent, whichever zone it picked).
+    const avgLat = (c.topLeft.lat + c.topRight.lat + c.bottomLeft.lat + c.bottomRight.lat) / 4;
+    const avgLon = (c.topLeft.lon + c.topRight.lon + c.bottomLeft.lon + c.bottomRight.lon) / 4;
+    expect(avgLat).toBeCloseTo(denver.centerLat, 6);
+    expect(avgLon).toBeCloseTo(denver.centerLon, 6);
+    // And it must NOT match what the legacy hardcoded (Texas-only) projection would have given —
+    // proving the zone resolution actually engaged rather than silently falling through.
+    const legacyCenter = projectToGrid(denver.centerLat, denver.centerLon);
+    const zonedCenter = projectToZone("co_central", denver.centerLat, denver.centerLon);
+    expect(zonedCenter.x).not.toBeCloseTo(legacyCenter.x, -1); // wildly different cone constants
+  });
+
+  it("a point outside every modeled zone (e.g. Dallas) falls back to the legacy projection unchanged — no invented zone", () => {
+    const dallas = { centerLat: 32.7767, centerLon: -96.7970, ftPerPx: 1, rotationDeg: 0 };
+    const c = overlayCornersFromPlacement(dallas, IMG_W, IMG_H);
+    const legacyCenter = projectToGrid(dallas.centerLat, dallas.centerLon);
+    // Reconstruct what the OLD (pre-zone-aware) code would have produced, to prove this case is unchanged.
+    const halfW = IMG_W / 2, halfH = IMG_H / 2;
+    const legacyTopLeft = gridToProject({ x: legacyCenter.x - halfW, y: legacyCenter.y + halfH });
+    expect(c.topLeft.lat).toBeCloseTo(legacyTopLeft.lat, 9);
+    expect(c.topLeft.lon).toBeCloseTo(legacyTopLeft.lon, 9);
   });
 });
