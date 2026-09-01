@@ -52,6 +52,7 @@ import {
 import { evaluateSheet } from "./lib/sheetEngine.js";
 import { copyRange, pasteRange, fillDown, replaceAll, replaceInCellText } from "./lib/sheetOps.js";
 import { modelSaveState } from "./lib/modelSaveState.js";
+import { readZoom, writeZoom } from "./lib/sheetZoom.js";
 import { readLocalSheet, writeLocalSheet, loadCloudSheet, saveCloudSheet } from "./lib/modelStore.js";
 import { listProjects } from "../../shared/projects/projects.js";
 
@@ -110,6 +111,12 @@ export default function ModelApp({
   const nameBoxRef = useRef(null);
   const [findOpen, setFindOpen] = useState(false);
   const [findShowReplace, setFindShowReplace] = useState(false);
+  // B1007280 — sheet zoom is a per-project VIEW preference (like a browser's own zoom level),
+  // never sheet DATA: it doesn't ride the undo stack and doesn't sync to the cloud, so two
+  // people (or two tabs) looking at the same model have no reason to share a zoom level.
+  const [zoom, setZoom] = useState(() => readZoom(projectId));
+  useEffect(() => { setZoom(readZoom(projectId)); }, [projectId]);
+  const onZoomChange = useCallback((z) => { setZoom(z); writeZoom(projectId, z); }, [projectId]);
 
   const openProject = !crossProject && !!projectId;
 
@@ -234,7 +241,9 @@ export default function ModelApp({
   const onSetFreeze = useCallback((rows, cols) => commit((s) => setFreeze(s, rows, cols)), [commit]);
 
   // Name Box / Find navigation — a plain jump, not an edit, so it never mints an undo frame.
-  const onGoTo = useCallback((r, c) => setSelRange({ r1: r, r2: r, c1: c, c2: c }), [setSelRange]);
+  // r2/c2 default to r1/c1 so Find's own single-cell `onGoTo(r, c)` call needs no change;
+  // the Name Box (B1007280 — "C50:E60" range support) passes all four for a real range.
+  const onGoTo = useCallback((r1, c1, r2 = r1, c2 = c1) => setSelRange({ r1, r2, c1, c2 }), [setSelRange]);
   // "Replace" (singular) touches only the ONE cell the Find bar is currently sitting on — every
   // occurrence within that cell's own text, the same substring rule replaceAll uses everywhere
   // else, so "one cell = one match" stays consistent between the counter and the action.
@@ -343,6 +352,8 @@ export default function ModelApp({
             onSetColumnWidth={onSetColumnWidth}
             onSetRowHeight={onSetRowHeight}
             onSetFreeze={onSetFreeze}
+            zoom={zoom}
+            onZoomChange={onZoomChange}
           />
           <FindReplaceBar
             open={findOpen}
