@@ -46,6 +46,31 @@
  * not "don't move when the grid itself restructures"). Rows are the opposite: `cellKey` embeds
  * the raw row INDEX directly (there is no stable row id), so inserting/deleting a row DOES have
  * to relocate every affected cell's storage key, on top of the same formula-reference shift.
+ *
+ * ⛔ STAGE 2 — THE RIBBON (owner brief, 2026-09-02): a real look, not just values and one number
+ * format. `styles[key]` is a NEW per-cell map, same `cellKey` shape as `cells`/`formats`, holding
+ * everything font/fill/alignment: `{ bold, italic, underline, strike, fontFamily, fontSize,
+ * color, fill, align, valign, wrap, indent, border: {top,right,bottom,left} }` — every field
+ * OPTIONAL (absent = inherit the sheet's plain default), so an unformatted cell costs nothing in
+ * storage, exactly like `formats` already works for number format. `border`'s four edges are
+ * each independently `"thin" | "double" | undefined` — a cell OWNS its own edges rather than
+ * sharing them with its neighbour, which keeps every border operation a plain per-cell write (no
+ * "which cell does this shared line belong to" bookkeeping) at the cost of a double-drawn line
+ * where two adjacent cells both set the same edge — invisible in practice since both draw
+ * identical 1px lines in the same place.
+ *
+ * `merges` is a NEW array of HORIZONTAL-ONLY spans — `{ r, c1Id, c2Id }`, one row, two or more
+ * COLUMNS (never rows). ⛔ Scope decision, stated plainly rather than silently shipped thin: a
+ * cell spanning multiple ROWS needs a render layer OUTSIDE SheetView's per-row virtualization
+ * loop (every row today is an independently absolutely-positioned band — see SheetView.jsx's own
+ * header on why sticky/absolute don't compose — so a block spanning several of those bands is
+ * real, separate work, not a small extension of the column-spanning case). Horizontal merge
+ * (merging a title across several columns, or a section-header row across the model) is the
+ * dominant real underwriting pattern and reuses the SAME absolute-span-over-siblings mechanism
+ * the existing text-spill rendering already proved out; vertical merge is explicit, tracked
+ * follow-up (B1007283), not a silent gap. Anchored on COLUMN ID (stable across insert/delete of
+ * OTHER columns, the same reasoning `cells`/`formats`/`styles` already rely on) and the raw ROW
+ * INDEX (relocated on row insert/delete exactly like `rowHeights` is).
  */
 import { rewriteFormulaForStructuralShift } from "../../../shared/formula/formula.js";
 
@@ -77,7 +102,12 @@ const makeColumn = (id, name) => ({ id, name, width: 120 });
 // off of the way a column does (see the file header), and freeze is a simple COUNT of
 // leftmost/topmost lines, not tied to any particular row/column's identity — which is exactly
 // why insert/delete never needs to adjust it (see insertRowAt/deleteRowAt below).
-export const DEFAULT_ROW_H = 26;
+// ⛔ STAGE 2 VISUAL PASS (owner, "make it visually appealing... right now it looks horrible"):
+// 26 → 22. A financial model is read in blocks, not skimmed — density beats airiness. 22 is a
+// LITERAL, deliberate match to CONTROL_H.sm (src/shared/ui/designTokens.js) — not an import
+// (this module stays pure/DOM-free by design, no UI-layer dependency), the same "duplicate the
+// number, document why" pattern controls.jsx's own RADIUS already uses for the identical reason.
+export const DEFAULT_ROW_H = 22;
 
 export function createSheet() {
   const columns = Array.from({ length: DEFAULT_COLS }, (_, i) => makeColumn(`c${i + 1}`, colLetterName(i)));
@@ -88,9 +118,11 @@ export function createSheet() {
     rowCount: DEFAULT_ROW_COUNT,
     cells: {},       // "colId:rowIndex" -> raw typed text, a literal value OR a formula ("=" prefix)
     formats: {},     // "colId:rowIndex" -> a number-format token, or absent = General
+    styles: {},      // "colId:rowIndex" -> a per-cell look object (font/fill/alignment/border), absent = plain
     rowHeights: {},  // rowIndex -> px override, absent = DEFAULT_ROW_H
     freezeRows: 0,   // count of frozen TOP rows
     freezeCols: 0,   // count of frozen LEFT columns
+    merges: [],      // [{ r, c1Id, c2Id }] — horizontal-only spans, see file header
   };
 }
 
@@ -129,13 +161,20 @@ export function migrateSheet(raw) {
       return merged;
     });
     const formats = raw.formats && typeof raw.formats === "object" ? { ...raw.formats } : {};
+    // STAGE 2 — a pre-ribbon blob simply has no `styles`/`merges` at all, same as a pre-Stage-1
+    // blob had no `rowHeights`/`freezeRows`/`freezeCols` above: defaulted here like every other
+    // field a later build added, never a reason to refuse the rest of the sheet.
+    const styles = raw.styles && typeof raw.styles === "object" ? { ...raw.styles } : {};
+    const merges = Array.isArray(raw.merges)
+      ? raw.merges.filter((m) => m && typeof m.r === "number" && typeof m.c1Id === "string" && typeof m.c2Id === "string")
+      : [];
     const rowHeights = raw.rowHeights && typeof raw.rowHeights === "object" ? { ...raw.rowHeights } : {};
     const freezeRows = Number.isInteger(raw.freezeRows) && raw.freezeRows >= 0 ? raw.freezeRows : 0;
     const freezeCols = Number.isInteger(raw.freezeCols) && raw.freezeCols >= 0 ? raw.freezeCols : 0;
     const migrated = {
       version: SHEET_VERSION, nextColId: raw.nextColId || columns.length + 1, columns,
-      rowCount: Math.max(Number(raw.rowCount) || 0, DEFAULT_ROW_COUNT), cells: { ...raw.cells }, formats,
-      rowHeights, freezeRows, freezeCols,
+      rowCount: Math.max(Number(raw.rowCount) || 0, DEFAULT_ROW_COUNT), cells: { ...raw.cells }, formats, styles,
+      rowHeights, freezeRows, freezeCols, merges,
     };
     // Always float capacity up to the current floor — never a stored ceiling. Reuses
     // ensureColumnCount (already used by paste/fill to grow the sheet mid-session) so there is
@@ -171,6 +210,20 @@ export function formatAt(sheet, rowIndex, colIndex) {
   const col = colAt(sheet, colIndex);
   if (!col) return null;
   return sheet.formats[cellKey(col.id, rowIndex)] ?? null;
+}
+
+// A frozen empty object — every unformatted cell shares this ONE instance rather than each
+// getting its own `{}` (styleAt is called once per rendered cell every render; avoiding an
+// allocation there is free and keeps identity-based checks, if a caller ever adds one, cheap).
+const EMPTY_STYLE = Object.freeze({});
+
+/** A cell's own look — bold/italic/fill/border/alignment/etc — or the shared EMPTY_STYLE object
+ *  when the cell carries no override (see the file header for the field shape). Per-cell, same
+ *  reasoning as formatAt above. */
+export function styleAt(sheet, rowIndex, colIndex) {
+  const col = colAt(sheet, colIndex);
+  if (!col) return EMPTY_STYLE;
+  return (sheet.styles && sheet.styles[cellKey(col.id, rowIndex)]) || EMPTY_STYLE;
 }
 
 /** A row's rendered height in px — an explicit override, or DEFAULT_ROW_H (Excel's own
@@ -309,6 +362,299 @@ export function setNumberFormat(sheet, r1, r2, c1, c2, format) {
   return changed ? { ...sheet, formats } : sheet;
 }
 
+// ---- STAGE 2 — per-cell look: font/fill/alignment/border, format painter, merge, sort -------
+
+const STYLE_KEYS = ["bold", "italic", "underline", "strike", "fontFamily", "fontSize", "color", "fill", "align", "valign", "wrap", "indent"];
+
+/** Merge a style PATCH into an existing per-cell style object. Every top-level key follows the
+ *  same convention `formats` already uses at the cell level: `null` in the patch REMOVES that
+ *  key (falls back to the sheet's plain default — how a toggle button un-bolds/un-italicizes),
+ *  any other value SETS it. `border` is the one nested field — its four edges get the identical
+ *  null-removes/value-sets treatment one level down, so setting just `{border:{top:"thin"}}`
+ *  never disturbs an existing bottom/left/right edge already on the cell. Returns `{next,
+ *  changed}` rather than mutating — every caller below folds `changed` into its own "did
+ *  anything actually move" tracking so a no-op patch across a big range never mints a stray
+ *  identical-content style entry (matching setNumberFormat's own no-op contract). */
+function mergeStylePatch(existing, patch) {
+  let next = existing ? { ...existing } : {};
+  let changed = false;
+  for (const [k, v] of Object.entries(patch)) {
+    if (k === "border") {
+      const nextBorder = next.border ? { ...next.border } : {};
+      let borderChanged = false;
+      for (const [edge, val] of Object.entries(v)) {
+        if (val === null || val === undefined) { if (edge in nextBorder) { delete nextBorder[edge]; borderChanged = true; } }
+        else if (nextBorder[edge] !== val) { nextBorder[edge] = val; borderChanged = true; }
+      }
+      if (borderChanged) {
+        if (Object.keys(nextBorder).length) next.border = nextBorder; else delete next.border;
+        changed = true;
+      }
+      continue;
+    }
+    if (v === null) { if (k in next) { delete next[k]; changed = true; } continue; }
+    if (v === undefined) continue;
+    if (next[k] !== v) { next[k] = v; changed = true; }
+  }
+  return { next, changed };
+}
+
+/** The one low-level per-cell style writer every mutator below (font/fill/alignment toggles,
+ *  border, clear formatting, format painter) funnels through, so "how a style patch merges into
+ *  an existing cell" is decided in exactly one place. `patchFor(r, c)` lets a caller vary the
+ *  patch per cell (applyBorder needs a different edge set on a perimeter cell than an interior
+ *  one) while still sharing the same range-walk/no-op/empty-object-cleanup plumbing. */
+function walkAndPatchStyles(sheet, r1, r2, c1, c2, patchFor) {
+  const rr1 = Math.max(0, Math.min(r1, r2)), rr2 = Math.max(r1, r2);
+  const cc1 = Math.max(0, Math.min(c1, c2)), cc2 = Math.min(sheet.columns.length - 1, Math.max(c1, c2));
+  let styles = sheet.styles;
+  let changed = false;
+  for (let c = cc1; c <= cc2; c++) {
+    const col = sheet.columns[c];
+    if (!col) continue;
+    for (let r = rr1; r <= rr2; r++) {
+      const patch = patchFor(r, c, rr1, rr2, cc1, cc2);
+      if (!patch) continue;
+      const key = cellKey(col.id, r);
+      const { next, changed: cellChanged } = mergeStylePatch(styles[key], patch);
+      if (cellChanged) {
+        if (!changed) styles = { ...styles };
+        if (Object.keys(next).length) styles[key] = next; else delete styles[key];
+        changed = true;
+      }
+    }
+  }
+  return changed ? { ...sheet, styles } : sheet;
+}
+
+/** Apply a style patch (any mix of font/fill/alignment/wrap/indent/border — see the file header
+ *  for the full field list) to every cell in a rectangular range. The ONE setter the ribbon's
+ *  Font and Alignment groups both call — border has its own `applyBorder` below because its
+ *  edges depend on WHERE a cell sits in the range (outline vs. every-cell), which a flat patch
+ *  can't express. */
+export function setCellStyle(sheet, r1, r2, c1, c2, patch) {
+  return walkAndPatchStyles(sheet, r1, r2, c1, c2, () => patch);
+}
+
+/** Border — the Borders group. `edges` is the subset of top/right/bottom/left to touch;
+ *  `style` is `"thin" | "double" | null` (null clears); `mode` is `"outline"` (only the
+ *  PERIMETER of the range gets that edge — what "Top Border" / "Bottom Border (double)" / a
+ *  single-edge toggle / the 4-edge "Outline" button all are) or `"all"` (every cell in the range
+ *  gets every requested edge — the "All borders"/grid button; also how "No border" clears
+ *  everything, since a border anywhere in the range needs removing regardless of position). */
+export function applyBorder(sheet, r1, r2, c1, c2, { edges, style, mode }) {
+  return walkAndPatchStyles(sheet, r1, r2, c1, c2, (r, c, rr1, rr2, cc1, cc2) => {
+    const border = {};
+    for (const edge of edges) {
+      const onPerimeter = edge === "top" ? r === rr1 : edge === "bottom" ? r === rr2 : edge === "left" ? c === cc1 : c === cc2;
+      if (mode === "all" || onPerimeter) border[edge] = style;
+    }
+    return Object.keys(border).length ? { border } : null;
+  });
+}
+
+/** Clear Formatting — wipes both the per-cell STYLE and the number FORMAT for a range, leaving
+ *  every cell's actual VALUE (and any merge framing it) untouched — Excel's own Clear > Formats
+ *  scope exactly: contents and merges are separate concerns from how a cell is drawn. */
+export function clearFormatting(sheet, r1, r2, c1, c2) {
+  const rr1 = Math.max(0, Math.min(r1, r2)), rr2 = Math.max(r1, r2);
+  const cc1 = Math.max(0, Math.min(c1, c2)), cc2 = Math.min(sheet.columns.length - 1, Math.max(c1, c2));
+  let styles = sheet.styles, formats = sheet.formats, changed = false;
+  for (let c = cc1; c <= cc2; c++) {
+    const col = sheet.columns[c];
+    if (!col) continue;
+    for (let r = rr1; r <= rr2; r++) {
+      const key = cellKey(col.id, r);
+      if (Object.prototype.hasOwnProperty.call(styles, key)) { if (styles === sheet.styles) styles = { ...styles }; delete styles[key]; changed = true; }
+      if (Object.prototype.hasOwnProperty.call(formats, key)) { if (formats === sheet.formats) formats = { ...formats }; delete formats[key]; changed = true; }
+    }
+  }
+  return changed ? { ...sheet, styles, formats } : sheet;
+}
+
+/** Format Painter — capture (item: the number format + the full style, never the cell's VALUE)
+ *  and apply. Applying REPLACES the target's whole look (clearing anything the source didn't
+ *  carry, border edges included) rather than layering on top — "paint this cell's look onto
+ *  that one" means the target ends up looking like the source, not like a merge of the two. */
+export function paintedStyleAt(sheet, rowIndex, colIndex) {
+  return { format: formatAt(sheet, rowIndex, colIndex), style: styleAt(sheet, rowIndex, colIndex) };
+}
+export function applyPaintedStyle(sheet, r1, r2, c1, c2, painted) {
+  if (!painted) return sheet;
+  let next = setNumberFormat(sheet, r1, r2, c1, c2, painted.format);
+  const clearAll = {};
+  for (const k of STYLE_KEYS) clearAll[k] = null;
+  const border = { top: null, right: null, bottom: null, left: null, ...(painted.style.border || {}) };
+  next = setCellStyle(next, r1, r2, c1, c2, { ...clearAll, ...painted.style, border });
+  return next;
+}
+
+/** The horizontal span (see file header) containing (rowIndex, colIndex), resolved to CURRENT
+ *  column positions — `{r, c1, c2}` (indices, not ids) — or `null`. Every merge-aware caller
+ *  (click resolution, arrow-key nav, rendering) goes through this rather than reading `merges`
+ *  directly, so "which columns a merge covers right now" is decided in exactly one place. */
+export function mergeAt(sheet, rowIndex, colIndex) {
+  const col = colAt(sheet, colIndex);
+  if (!col) return null;
+  for (const m of sheet.merges || []) {
+    if (m.r !== rowIndex) continue;
+    const i1 = sheet.columns.findIndex((cc) => cc.id === m.c1Id);
+    const i2 = sheet.columns.findIndex((cc) => cc.id === m.c2Id);
+    if (i1 < 0 || i2 < 0) continue; // a dangling reference (shouldn't happen — defensive)
+    if (colIndex >= i1 && colIndex <= i2) return { r: m.r, c1: i1, c2: i2 };
+  }
+  return null;
+}
+
+/** Merge every cell in one ROW across c1..c2 into a single visual block, anchored at the
+ *  leftmost cell (its value/format/style are what render for the whole span — the OTHER cells'
+ *  own content is left completely untouched in storage, deliberately: unmerging restores exactly
+ *  what was there before, no Excel-style "merging discards every value but the first" data loss,
+ *  and no confirmation dialog is needed for something that loses nothing). A no-op unless the
+ *  range is exactly one row and at least two columns — vertical merge isn't supported (file
+ *  header) and a single column can't "merge" with itself. */
+export function mergeRange(sheet, r1, r2, c1, c2) {
+  if (r1 !== r2) return sheet;
+  const row = r1;
+  const cc1 = Math.min(c1, c2), cc2 = Math.max(c1, c2);
+  if (cc2 <= cc1) return sheet;
+  const c1Id = sheet.columns[cc1]?.id, c2Id = sheet.columns[cc2]?.id;
+  if (!c1Id || !c2Id) return sheet;
+  // Replace any existing merge(s) the new range overlaps on this row — a cell never belongs to
+  // two merges at once.
+  const merges = (sheet.merges || []).filter((m) => {
+    if (m.r !== row) return true;
+    const i1 = sheet.columns.findIndex((cc) => cc.id === m.c1Id);
+    const i2 = sheet.columns.findIndex((cc) => cc.id === m.c2Id);
+    return i2 < cc1 || i1 > cc2;
+  });
+  merges.push({ r: row, c1Id, c2Id });
+  return { ...sheet, merges };
+}
+
+/** Unmerge the span (if any) containing (rowIndex, colIndex) — every other cell's own stored
+ *  content (preserved untouched by mergeRange above) simply becomes visible again. */
+export function unmergeAt(sheet, rowIndex, colIndex) {
+  const found = mergeAt(sheet, rowIndex, colIndex);
+  if (!found) return sheet;
+  const dropC1Id = sheet.columns[found.c1]?.id, dropC2Id = sheet.columns[found.c2]?.id;
+  const merges = (sheet.merges || []).filter((m) => !(m.r === found.r && m.c1Id === dropC1Id && m.c2Id === dropC2Id));
+  return { ...sheet, merges };
+}
+
+/** How `merges` reacts to a column being deleted (called from deleteColumn below, on the
+ *  columns array as it stood BEFORE removal). A merge entirely outside the deleted column is
+ *  untouched (ids are stable). A merge whose ANCHOR (c1Id) or far edge (c2Id) IS the deleted
+ *  column shrinks in from that side — collapsing to (or past) a single column drops the merge
+ *  entirely, since a one-column "merge" is meaningless. A merge with the deleted column merely
+ *  INTERIOR to its span needs no id change at all — its rendered width just shrinks by one
+ *  column next paint, exactly like any other column delete inside a wide span. */
+function mergesAfterColumnDelete(sheet, colIndex) {
+  const columns = sheet.columns;
+  const out = [];
+  for (const m of sheet.merges || []) {
+    const i1 = columns.findIndex((cc) => cc.id === m.c1Id);
+    const i2 = columns.findIndex((cc) => cc.id === m.c2Id);
+    if (i1 < 0 || i2 < 0) continue;
+    if (colIndex < i1 || colIndex > i2) { out.push(m); continue; }
+    let nc1Id = m.c1Id, nc2Id = m.c2Id;
+    if (colIndex === i1) {
+      const next2 = columns[i1 + 1];
+      if (!next2 || i1 + 1 >= i2) continue; // collapses to <=1 column — drop the merge
+      nc1Id = next2.id;
+    } else if (colIndex === i2) {
+      const prev = columns[i2 - 1];
+      if (!prev || i2 - 1 <= i1) continue;
+      nc2Id = prev.id;
+    }
+    out.push({ r: m.r, c1Id: nc1Id, c2Id: nc2Id });
+  }
+  return out;
+}
+
+/** How `merges` reacts to a row being inserted/deleted (called from insertRowAt/deleteRowAt
+ *  below) — the exact same relocation `rowHeights` already gets via `relocateRowMap`, just over
+ *  an array of `{r, ...}` objects instead of a `rowIndex -> value` map. A merge ON the deleted
+ *  row is dropped (its anchor row is gone); every merge below it shifts by `delta`. */
+function relocateMergeRows(merges, at, delta) {
+  const out = [];
+  for (const m of merges || []) {
+    if (delta < 0 && m.r === at) continue;
+    out.push({ ...m, r: m.r >= at ? m.r + delta : m.r });
+  }
+  return out;
+}
+
+/** Sort — the Sort & Filter group. Reorders ROWS r1..r2 by the value in `colIndex`, moving each
+ *  row's FULL content (every column's cell text/format/style, plus its own row height) together
+ *  as one unit, matching Excel. Blanks always sort to the bottom regardless of direction (Excel's
+ *  own rule — so toggling A→Z/Z→A doesn't fling every gap to the top). Numbers sort before text.
+ *  ⛔ Sorts on each cell's RAW text, never a formula's computed result — sheetModel is
+ *  deliberately evaluator-free (it has no dependency on sheetEngine.js, by design, the same
+ *  layering `usedRangeEnd`/every other pure query here already respects), so a column of
+ *  FORMULAS sorts by formula TEXT, not value — a real, known limitation shared with Excel itself
+ *  (which also doesn't rewrite/re-resolve formula references on a plain sort). Refuses (no-op)
+ *  if any merge touches the range — sorting rows out from under a horizontal merge would detach
+ *  it from the content it was framing (NO-ONE-OWNS-A-COMPOSITE: a merge is a composite surface a
+ *  per-row move can corrupt without any single per-cell check noticing). */
+export function sortRange(sheet, r1, r2, colIndex, direction) {
+  const rr1 = Math.max(0, Math.min(r1, r2)), rr2 = Math.max(r1, r2);
+  if (rr2 <= rr1) return sheet;
+  for (const m of sheet.merges || []) if (m.r >= rr1 && m.r <= rr2) return sheet;
+  const col = sheet.columns[colIndex];
+  if (!col) return sheet;
+
+  const rows = [];
+  for (let r = rr1; r <= rr2; r++) {
+    const rowCells = {}, rowFormats = {}, rowStyles = {};
+    for (const c of sheet.columns) {
+      const key = cellKey(c.id, r);
+      if (Object.prototype.hasOwnProperty.call(sheet.cells, key)) rowCells[c.id] = sheet.cells[key];
+      if (Object.prototype.hasOwnProperty.call(sheet.formats, key)) rowFormats[c.id] = sheet.formats[key];
+      if (Object.prototype.hasOwnProperty.call(sheet.styles, key)) rowStyles[c.id] = sheet.styles[key];
+    }
+    rows.push({ cells: rowCells, formats: rowFormats, styles: rowStyles, height: sheet.rowHeights[r], sortKey: sortKeyFor(sheet.cells[cellKey(col.id, r)]) });
+  }
+  const dir = direction === "desc" ? -1 : 1;
+  // Blank-last is a property of the DATA, not the direction — it must NOT be inside the part of
+  // the comparator that gets sign-flipped for descending, or "descending" would fling every
+  // blank to the top instead of keeping it at the bottom (measured: it did, before this split).
+  const sorted = [...rows].sort((a, b) => {
+    if (a.sortKey.kind === "blank" && b.sortKey.kind === "blank") return 0;
+    if (a.sortKey.kind === "blank") return 1;
+    if (b.sortKey.kind === "blank") return -1;
+    return compareSortKeys(a.sortKey, b.sortKey) * dir;
+  });
+
+  const cells = { ...sheet.cells }, formats = { ...sheet.formats }, styles = { ...sheet.styles }, rowHeights = { ...sheet.rowHeights };
+  for (let i = 0; i < sorted.length; i++) {
+    const r = rr1 + i, row = sorted[i];
+    for (const c of sheet.columns) {
+      const key = cellKey(c.id, r);
+      if (Object.prototype.hasOwnProperty.call(row.cells, c.id)) cells[key] = row.cells[c.id]; else delete cells[key];
+      if (Object.prototype.hasOwnProperty.call(row.formats, c.id)) formats[key] = row.formats[c.id]; else delete formats[key];
+      if (Object.prototype.hasOwnProperty.call(row.styles, c.id)) styles[key] = row.styles[c.id]; else delete styles[key];
+    }
+    if (row.height != null) rowHeights[r] = row.height; else delete rowHeights[r];
+  }
+  return { ...sheet, cells, formats, styles, rowHeights };
+}
+function sortKeyFor(raw) {
+  if (raw == null || raw === "") return { kind: "blank", v: null };
+  const s = String(raw);
+  const n = Number(s);
+  if (s.trim() !== "" && !Number.isNaN(n)) return { kind: "num", v: n };
+  return { kind: "text", v: s.toLowerCase() };
+}
+// Only ever called with two NON-blank keys — blank ordering is decided by the caller above,
+// outside the part of the comparator direction flips.
+function compareSortKeys(a, b) {
+  if (a.kind === "num" && b.kind === "num") return a.v - b.v;
+  if (a.kind === "num") return -1; // numbers before text — Excel's own rule
+  if (b.kind === "num") return 1;
+  return a.v < b.v ? -1 : a.v > b.v ? 1 : 0;
+}
+
 export function addColumn(sheet) {
   const id = `c${sheet.nextColId}`;
   const columns = [...sheet.columns, makeColumn(id, colLetterName(sheet.columns.length))];
@@ -375,7 +721,11 @@ export function deleteColumn(sheet, colIndex) {
   // reuse the same id (TOMBSTONE-DELETES).
   const formats = {};
   for (const [k, v] of Object.entries(sheet.formats)) if (!k.startsWith(prefix)) formats[k] = v;
-  return { ...sheet, columns, cells, formats };
+  // Same TOMBSTONE-DELETES cascade for the STAGE 2 per-cell style map.
+  const styles = {};
+  for (const [k, v] of Object.entries(sheet.styles || {})) if (!k.startsWith(prefix)) styles[k] = v;
+  const merges = mergesAfterColumnDelete(sheet, colIndex);
+  return { ...sheet, columns, cells, formats, styles, merges };
 }
 
 // Relocate a rowIndex-keyed map's entries (rowHeights) by the same rule cells/formats use
@@ -410,8 +760,15 @@ export function insertRowAt(sheet, rowIndex) {
     const colId = k.slice(0, sep), r = Number(k.slice(sep + 1));
     formats[cellKey(colId, r >= at ? r + 1 : r)] = v;
   }
+  const styles = {};
+  for (const [k, v] of Object.entries(sheet.styles || {})) {
+    const sep = k.lastIndexOf(":");
+    const colId = k.slice(0, sep), r = Number(k.slice(sep + 1));
+    styles[cellKey(colId, r >= at ? r + 1 : r)] = v;
+  }
   const rowHeights = relocateRowMap(sheet.rowHeights, at, 1);
-  return { ...sheet, cells, formats, rowHeights, rowCount: sheet.rowCount + 1 };
+  const merges = relocateMergeRows(sheet.merges, at, 1);
+  return { ...sheet, cells, formats, styles, rowHeights, merges, rowCount: sheet.rowCount + 1 };
 }
 
 /** STAGE 1 — delete the row at `rowIndex` entirely (every cell/format stored on it), then
@@ -440,8 +797,16 @@ export function deleteRowAt(sheet, rowIndex) {
     if (r === at) continue;
     formats[cellKey(colId, r > at ? r - 1 : r)] = v;
   }
+  const styles = {};
+  for (const [k, v] of Object.entries(sheet.styles || {})) {
+    const sep = k.lastIndexOf(":");
+    const colId = k.slice(0, sep), r = Number(k.slice(sep + 1));
+    if (r === at) continue;
+    styles[cellKey(colId, r > at ? r - 1 : r)] = v;
+  }
   const rowHeights = relocateRowMap(sheet.rowHeights, at, -1);
-  return { ...sheet, cells, formats, rowHeights, rowCount: Math.max(1, sheet.rowCount - 1) };
+  const merges = relocateMergeRows(sheet.merges, at, -1);
+  return { ...sheet, cells, formats, styles, rowHeights, merges, rowCount: Math.max(1, sheet.rowCount - 1) };
 }
 
 /** How many rows the view should render past the real data, so typing never has to "add a

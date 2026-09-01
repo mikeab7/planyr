@@ -42,15 +42,18 @@ import AppHeader, { useNarrow } from "../../shared/ui/AppHeader.jsx";
 import SheetView from "./components/SheetView.jsx";
 import FormulaBar from "./components/FormulaBar.jsx";
 import FindReplaceBar from "./components/FindReplaceBar.jsx";
-import NumberFormatPicker from "./components/NumberFormatPicker.jsx";
+import Ribbon from "./components/Ribbon.jsx";
 import { useUndoableState } from "./lib/undoStack.js";
 import {
   createSheet, migrateSheet, commitCellText, blankRange, renameColumn, setNumberFormat,
   deleteColumn, addColumn, formatAt, padRowCount, sheetsDiverge, rawAt,
   insertRowAt, deleteRowAt, insertColumnAt, setColumnWidth, setRowHeight, setFreeze,
+  styleAt, setCellStyle, applyBorder, clearFormatting,
+  paintedStyleAt, applyPaintedStyle, mergeAt, mergeRange, unmergeAt, sortRange, usedRangeEnd,
 } from "./lib/sheetModel.js";
-import { evaluateSheet } from "./lib/sheetEngine.js";
+import { evaluateSheet, displayFor } from "./lib/sheetEngine.js";
 import { copyRange, pasteRange, fillDown, replaceAll, replaceInCellText } from "./lib/sheetOps.js";
+import { increaseDecimals, decreaseDecimals, toggleThousands } from "./lib/numberFormats.js";
 import { modelSaveState } from "./lib/modelSaveState.js";
 import { readZoom, writeZoom } from "./lib/sheetZoom.js";
 import { readLocalSheet, writeLocalSheet, loadCloudSheet, saveCloudSheet } from "./lib/modelStore.js";
@@ -97,16 +100,12 @@ export default function ModelApp({
   const clipboardRef = useRef(null);
   // ⛔ B891184-FOLLOWUP (live production finding, 2026-08-31): the toolbar overflowed a 729px
   // window — measured, the number-format picker's own box sat 22.7px past the viewport edge,
-  // reachable to a script but not to a real click. AppHeader's shared "narrow" mode (≤760px)
-  // already turns the toolbar row into a horizontal-scroll strip, but with NO visible
-  // scrollbar and no drag affordance for a mouse — undiscoverable on a resized desktop window
-  // (as opposed to a touch phone, where a swipe is the obvious first thing to try). So Model's
-  // own toolbar shrinks itself at the SAME breakpoint instead of leaning on that scroll strip:
-  // icon-only Undo/Redo, a narrower format-picker (NumberFormatPicker's own `compact` prop),
-  // and "Delete column" — the one rare, borderline-destructive action — tucked behind a small
-  // "⋯" popover rather than sitting in the always-visible row.
+  // reachable to a script but not to a real click. Row 1 (AppHeader.toolbarContent) now keeps
+  // only Undo/Redo, which its shared "narrow" mode (≤760px) already collapses to icon-only —
+  // everything else that used to crowd this row (number format, delete column, and now font/
+  // borders/alignment/cells/sort-filter) lives in the Ribbon below instead, which does its OWN
+  // width-aware collapsing (lib/ribbonLayout.js) rather than reusing this flag.
   const narrow = useNarrow();
-  const [showMore, setShowMore] = useState(false);
   // Stage 1 — Name Box (Ctrl+G focuses it) and Find/Replace (Ctrl+F / Ctrl+H).
   const nameBoxRef = useRef(null);
   const [findOpen, setFindOpen] = useState(false);
@@ -117,6 +116,24 @@ export default function ModelApp({
   const [zoom, setZoom] = useState(() => readZoom(projectId));
   useEffect(() => { setZoom(readZoom(projectId)); }, [projectId]);
   const onZoomChange = useCallback((z) => { setZoom(z); writeZoom(projectId, z); }, [projectId]);
+
+  // STAGE 2 — THE RIBBON (B1007281). Format Painter's captured source ({format, style} — see
+  // sheetModel.js's paintedStyleAt) while armed, or null. AutoFilter's on/off switch and its
+  // per-column choices (colIndex -> Set of allowed display values; a column absent from the map
+  // is unfiltered). All THREE are plain view state — like zoom, never through undo/redo, never
+  // synced — but UNLIKE zoom, deliberately NOT persisted across a reload either: a stray armed
+  // painter or an active filter surviving a reload would be confusing ("why did my cells just
+  // repaint themselves") in a way an unchanged zoom level never is, so both simply reset with
+  // the project.
+  const [painter, setPainter] = useState(null); // { source: {format, style} } | null
+  const [filterOn, setFilterOn] = useState(false);
+  const [columnFilters, setColumnFilters] = useState(() => new Map());
+  useEffect(() => { setPainter(null); setFilterOn(false); setColumnFilters(new Map()); }, [projectId]);
+  // Format Painter needs the CURRENT selection at the moment a click/drag settles (SheetView's
+  // onSelectionSettled), not the value selRange held when the painter was armed — a ref mirror,
+  // the same pattern zoomRef (SheetView.jsx) already uses for exactly this reason.
+  const selRangeRef = useRef(selRange);
+  useEffect(() => { selRangeRef.current = selRange; }, [selRange]);
 
   const openProject = !crossProject && !!projectId;
 
@@ -268,6 +285,92 @@ export default function ModelApp({
     setSelRange({ r1: 0, r2: 0, c1: 0, c2: 0 });
   }, [commit, activeCol, sheet.columns.length]);
 
+  // ---- STAGE 2 — THE RIBBON (B1007281) — every handler below acts on the current SELECTION
+  // RANGE, not just the active cell (select B2:D40, hit currency, all of them change), the same
+  // contract onApplyFormat above already established.
+  const activeStyle = styleAt(sheet, selRange.r1, selRange.c1);
+  const mergedHere = !!mergeAt(sheet, selRange.r1, selRange.c1);
+
+  const onSetCellStyle = useCallback((patch) => {
+    commit((s) => setCellStyle(s, selRange.r1, selRange.r2, selRange.c1, selRange.c2, patch));
+  }, [commit, selRange]);
+  const onApplyBorderCmd = useCallback(({ edges, style, mode }) => {
+    commit((s) => applyBorder(s, selRange.r1, selRange.r2, selRange.c1, selRange.c2, { edges, style, mode }));
+  }, [commit, selRange]);
+  const onClearFormattingCmd = useCallback(() => {
+    commit((s) => clearFormatting(s, selRange.r1, selRange.r2, selRange.c1, selRange.c2));
+  }, [commit, selRange]);
+  const onNumberFormatOp = useCallback((op) => {
+    const fn = op === "increaseDecimals" ? increaseDecimals : op === "decreaseDecimals" ? decreaseDecimals : toggleThousands;
+    commit((s) => setNumberFormat(s, selRange.r1, selRange.r2, selRange.c1, selRange.c2, fn(activeFormat)));
+  }, [commit, selRange, activeFormat]);
+
+  // Format Painter — arm/disarm on click (capturing the CURRENT active cell's format+style);
+  // applying happens in onSelectionSettled below, fired by SheetView the moment the user's next
+  // click or drag actually settles on a target — see that prop's own header note for why.
+  const onFormatPainterToggle = useCallback(() => {
+    setPainter((p) => (p ? null : { source: paintedStyleAt(sheet, selRange.r1, selRange.c1) }));
+  }, [sheet, selRange]);
+  const onSelectionSettled = useCallback(() => {
+    setPainter((p) => {
+      if (!p) return p;
+      const sr = selRangeRef.current;
+      commit((s) => applyPaintedStyle(s, sr.r1, sr.r2, sr.c1, sr.c2, p.source));
+      return null;
+    });
+  }, [commit]);
+
+  const onMergeToggle = useCallback(() => {
+    commit((s) => {
+      const m = mergeAt(s, selRange.r1, selRange.c1);
+      return m ? unmergeAt(s, selRange.r1, selRange.c1) : mergeRange(s, selRange.r1, selRange.r2, selRange.c1, selRange.c2);
+    });
+  }, [commit, selRange]);
+
+  // Insert/Delete (Cells group) act on the single active row/column — the right-click context
+  // menu (SheetView.jsx) is the multi-row/column-aware path; the ribbon mirrors Excel's own
+  // ribbon behavior for a plain cell selection.
+  const onRibbonInsertRow = useCallback(() => onInsertRowAt(selRange.r1), [onInsertRowAt, selRange]);
+  const onRibbonInsertColumn = useCallback(() => onInsertColumnAt(selRange.c1), [onInsertColumnAt, selRange]);
+  const onRibbonDeleteRow = useCallback(() => onDeleteRowAt(selRange.r1), [onDeleteRowAt, selRange]);
+
+  const onSetFreezeTopRow = useCallback(() => onSetFreeze(1, sheet.freezeCols), [onSetFreeze, sheet.freezeCols]);
+  const onSetFreezeFirstColumn = useCallback(() => onSetFreeze(sheet.freezeRows, 1), [onSetFreeze, sheet.freezeRows]);
+  const onSetFreezeAtSelection = useCallback(() => onSetFreeze(selRange.r1, selRange.c1), [onSetFreeze, selRange]);
+  const onUnfreeze = useCallback(() => onSetFreeze(0, 0), [onSetFreeze]);
+
+  // Sort (Sort & Filter). A one-row/one-cell selection sorts the WHOLE contiguous used range of
+  // the active column instead of no-op'ing — Excel's own "select one cell, hit Sort" behavior,
+  // and far more useful on a real pro-forma than requiring an exact range be dragged first.
+  const onSort = useCallback((direction) => {
+    let r1 = selRange.r1, r2 = selRange.r2;
+    if (r1 === r2) { const used = usedRangeEnd(sheet); r1 = 0; r2 = used ? used.row : 0; }
+    commit((s) => sortRange(s, r1, r2, selRange.c1, direction));
+  }, [commit, selRange, sheet]);
+
+  const onFilterToggle = useCallback(() => setFilterOn((v) => !v), []);
+  const onSetColumnFilter = useCallback((colIndex, allowedOrNull) => {
+    setColumnFilters((prev) => {
+      const next = new Map(prev);
+      if (allowedOrNull) next.set(colIndex, allowedOrNull); else next.delete(colIndex);
+      return next;
+    });
+  }, []);
+  // The WHOLE AutoFilter mechanism on the reading side is "which rows does the active filter set
+  // hide" — SheetView/rowLayout.js do the rest (a hidden row renders at zero height, see
+  // rowLayout.js's own header). Skipped entirely (null) the moment no column has an active
+  // filter, so a sheet that never uses AutoFilter pays nothing for it.
+  const hiddenRows = useMemo(() => {
+    if (columnFilters.size === 0) return null;
+    const hidden = new Set();
+    for (let r = 0; r < sheet.rowCount; r++) {
+      for (const [colIndex, allowed] of columnFilters) {
+        if (!allowed.has(displayFor(sheet, evalResult, r, colIndex))) { hidden.add(r); break; }
+      }
+    }
+    return hidden;
+  }, [sheet, evalResult, columnFilters]);
+
   let projectName = "";
   if (projectId) { try { const p = listProjects().find((pp) => pp.id === projectId); if (p) projectName = p.name; } catch (_) {} }
   const currentProject = projectId ? { id: projectId, name: projectName || "Project" } : null;
@@ -293,37 +396,13 @@ export default function ModelApp({
           : undefined
         }
         multiEditOk
+        // STAGE 2 — the ribbon (below) is now the home for number format / column delete /
+        // every other formatting control; row 1 keeps only Undo/Redo, which AppHeader's own
+        // narrow handling already collapses to icon-only with no menu needed.
         toolbarContent={openProject ? (
           <div style={{ display: "flex", alignItems: "center", gap: narrow ? 4 : 8 }}>
             <button type="button" onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)" style={toolbarBtnStyle(canUndo, narrow)}>{narrow ? "↶" : "↶ Undo"}</button>
             <button type="button" onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)" style={toolbarBtnStyle(canRedo, narrow)}>{narrow ? "↷" : "↷ Redo"}</button>
-            <span style={{ width: 1, alignSelf: "stretch", background: "var(--border-default)" }} />
-            <NumberFormatPicker token={activeFormat} onChange={onApplyFormat} compact={narrow} />
-            {narrow ? (
-              <div style={{ position: "relative" }}>
-                <button type="button" onClick={() => setShowMore((v) => !v)} title="More" aria-label="More column actions" aria-haspopup="menu" aria-expanded={showMore} style={toolbarBtnStyle(true, true)}>⋯</button>
-                {showMore && (
-                  <>
-                    <div onClick={() => setShowMore(false)} style={{ position: "fixed", inset: 0, zIndex: 89 }} />
-                    {/* No box-shadow: this repo has no shadow-color token yet (docs/DESIGN.md's
-                        token layer doesn't cover it — plenty of pre-existing raw-color shadow
-                        literals already carry that debt elsewhere), and this menu doesn't need
-                        to add one; the border + raised surface read as popped-over content
-                        without it. */}
-                    <div role="menu" style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 90, minWidth: 140, padding: 4, borderRadius: 8, border: "1px solid var(--border-default)", background: "var(--surface-raised)" }}>
-                      <button
-                        type="button"
-                        onClick={() => { setShowMore(false); onDeleteColumn(); }}
-                        disabled={sheet.columns.length <= 1}
-                        style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", borderRadius: 6, border: "none", background: "transparent", color: sheet.columns.length > 1 ? "var(--text-primary)" : "var(--text-tertiary)", font: "inherit", fontSize: 12.5, cursor: sheet.columns.length > 1 ? "pointer" : "default" }}
-                      >Delete column</button>
-                    </div>
-                  </>
-                )}
-              </div>
-            ) : (
-              <button type="button" onClick={onDeleteColumn} disabled={sheet.columns.length <= 1} title="Delete this column" style={toolbarBtnStyle(sheet.columns.length > 1)}>Delete column</button>
-            )}
           </div>
         ) : null}
       />
@@ -332,6 +411,32 @@ export default function ModelApp({
         <EmptyProjectState onGoDashboard={onGoDashboard} />
       ) : (
         <>
+          <Ribbon
+            activeFormat={activeFormat}
+            activeStyle={activeStyle}
+            mergedHere={mergedHere}
+            freezeRows={sheet.freezeRows}
+            freezeCols={sheet.freezeCols}
+            painterArmed={!!painter}
+            filterOn={filterOn}
+            onSetCellStyle={onSetCellStyle}
+            onApplyBorder={onApplyBorderCmd}
+            onApplyFormat={onApplyFormat}
+            onNumberFormatOp={onNumberFormatOp}
+            onClearFormatting={onClearFormattingCmd}
+            onFormatPainterToggle={onFormatPainterToggle}
+            onMergeToggle={onMergeToggle}
+            onInsertRow={onRibbonInsertRow}
+            onInsertColumn={onRibbonInsertColumn}
+            onDeleteRow={onRibbonDeleteRow}
+            onDeleteColumn={onDeleteColumn}
+            onSetFreezeTopRow={onSetFreezeTopRow}
+            onSetFreezeFirstColumn={onSetFreezeFirstColumn}
+            onSetFreezeAtSelection={onSetFreezeAtSelection}
+            onUnfreeze={onUnfreeze}
+            onSort={onSort}
+            onFilterToggle={onFilterToggle}
+          />
           <FormulaBar sheet={sheet} row={selRange.r1} col={selRange.c1} onCommit={onCommitCell} onGoTo={onGoTo} nameBoxRef={nameBoxRef} />
           <SheetView
             sheet={sheet}
@@ -355,6 +460,11 @@ export default function ModelApp({
             onSetFreeze={onSetFreeze}
             zoom={zoom}
             onZoomChange={onZoomChange}
+            hiddenRows={hiddenRows}
+            onSelectionSettled={onSelectionSettled}
+            filterOn={filterOn}
+            columnFilters={columnFilters}
+            onSetColumnFilter={onSetColumnFilter}
           />
           <FindReplaceBar
             open={findOpen}

@@ -14,7 +14,7 @@ import {
   createSheet, setRaw, commitCellText, renameColumn, setNumberFormat, colAt,
 } from "../src/workspaces/model/lib/sheetModel.js";
 import {
-  evaluateSheet, displayFor, displayKindFor, formulaBarText, literalTypedValue, kindOf, cellAddressText,
+  evaluateSheet, displayFor, displayKindFor, displayColorFor, formulaBarText, literalTypedValue, kindOf, cellAddressText,
 } from "../src/workspaces/model/lib/sheetEngine.js";
 
 function sheetWithColumns(names) {
@@ -243,6 +243,47 @@ describe("displayFor / displayKindFor — per-CELL number format (not per-column
     const r = evaluateSheet(s);
     expect(displayFor(s, r, 0, 0)).toBe("");
     expect(displayKindFor(s, r, 0, 0)).toBe("blank");
+  });
+});
+
+// Stage 2 ribbon (B1007281) — "negatives in red", wired through the number format's own colour
+// tag rather than a second per-cell "text color" field: the Accounting preset (numberFormats.js)
+// carries [Red] on its negative section, and displayColorFor surfaces it so SheetView can
+// actually paint the text.
+describe("displayColorFor — the number format's own colour tag ([Red] etc)", () => {
+  it("a literal cell's negative value picks up its format's [Red] tag; the positive doesn't", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "-1234.5");
+    s = setRaw(s, 1, 0, "1234.5");
+    s = setNumberFormat(s, 0, 1, 0, 0, "#,##0.00;[Red](#,##0.00)");
+    const r = evaluateSheet(s);
+    expect(displayColorFor(s, r, 0, 0)).toBe("red");
+    expect(displayColorFor(s, r, 1, 0)).toBe(null);
+  });
+  it("a FORMULA cell's negative computed result picks up the colour too", () => {
+    let s = sheetWithColumns(["Revenue", "Cost"]);
+    s = setRaw(s, 0, 0, "100"); s = setRaw(s, 0, 1, "900");
+    s = commitCellText(s, 0, 2, "=[Revenue]-[Cost]");
+    s = setNumberFormat(s, 0, 0, 2, 2, "#,##0;[Red](#,##0)");
+    const r = evaluateSheet(s);
+    expect(displayColorFor(s, r, 0, 2)).toBe("red");
+  });
+  it("no number format at all, or a format with no colour tag, is null — never a crash", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "-5");
+    const r = evaluateSheet(s);
+    expect(displayColorFor(s, r, 0, 0)).toBe(null);
+    s = setNumberFormat(s, 0, 0, 0, 0, "#,##0");
+    const r2 = evaluateSheet(s);
+    expect(displayColorFor(s, r2, 0, 0)).toBe(null);
+  });
+  it("an errored formula cell has no colour (the error code isn't a formatted number)", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "0");
+    s = commitCellText(s, 0, 1, "=1/A1");
+    s = setNumberFormat(s, 0, 0, 1, 1, "#,##0;[Red](#,##0)");
+    const r = evaluateSheet(s);
+    expect(displayColorFor(s, r, 0, 1)).toBe(null);
   });
 });
 

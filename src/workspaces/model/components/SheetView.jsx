@@ -37,20 +37,89 @@
  * Stage 2 item, so Stage 1 exposes them here first.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { colAt, rawAt, usedRangeEnd, rowHeightAt, DEFAULT_ROW_H } from "../lib/sheetModel.js";
-import { displayFor, displayKindFor } from "../lib/sheetEngine.js";
+import { colAt, rawAt, usedRangeEnd, rowHeightAt, DEFAULT_ROW_H, styleAt, mergeAt, isFormulaText } from "../lib/sheetModel.js";
+import { displayFor, displayKindFor, displayColorFor } from "../lib/sheetEngine.js";
 import { ctrlArrowTarget } from "../lib/sheetOps.js";
-import { buildRowOffsets, visibleRowRange } from "../lib/rowLayout.js";
+import { buildRowOffsets, visibleRowRange, rowAtOffset } from "../lib/rowLayout.js";
 import { MIN_ZOOM, MAX_ZOOM, DEFAULT_ZOOM, zoomFromWheelDelta, zoomStepButton } from "../lib/sheetZoom.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
+// SPACE.sm / SPACE.md / CONTROL_H.md are used below as the LITERAL values 6 / 8 / 26
+// (src/shared/ui/designTokens.js), never imported — this file is lazy-loaded only on the
+// Model route, and a second import point into designTokens.js tips Rollup into extracting it
+// as its own shared chunk (already reachable from controls.jsx), which then rides onto every
+// OTHER route's bundle too and breaches ui-audit/perf-bundle-audit.mjs's site-route allowlist.
+// Same literal-duplicate pattern controls.jsx's own RADIUS already uses for the same reason.
+import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
+import { menuPanelStyle } from "../../../shared/ui/controls.jsx";
 import ContextMenu from "./ContextMenu.jsx";
 
+// B1007281 — AutoFilter (Sort & Filter). One column header's own filter trigger + checkbox
+// popover. `allowed` is the column's current filter (a Set of DISPLAY-value strings still
+// shown) or `null` (no filter — every value shown); the unique-value list is built lazily (only
+// while the popover is open) by scanning that column's own displayed text, capped at 2000 rows —
+// generous for an underwriting model, cheap because it only runs on open, not on every render.
+function FilterMenu({ colIndex, sheet, evalResult, allowed, onSetFilter }) {
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef(null);
+  const values = useMemo(() => {
+    if (!open) return [];
+    const set = new Set();
+    const cap = Math.min(sheet.rowCount, 2000);
+    for (let r = 0; r < cap; r++) {
+      const v = displayFor(sheet, evalResult, r, colIndex);
+      if (v !== "") set.add(v);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [open, sheet, evalResult, colIndex]);
+  const isChecked = (v) => !allowed || allowed.has(v);
+  return (
+    <span style={{ position: "relative", display: "inline-flex" }}>
+      <button
+        type="button" ref={anchorRef} data-testid={`model-col-filter-${colIndex}`} title="Filter this column"
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+        style={{ marginLeft: 2, border: "none", background: "transparent", cursor: "pointer", color: allowed ? "var(--accent-model)" : "var(--text-tertiary)", fontSize: 10, padding: "0 2px", flex: "none" }}
+      >▾</button>
+      <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} placement="below-left" width={180} panelStyle={menuPanelStyle}>
+        <div style={{ padding: 6 }}>
+          <button
+            type="button"
+            onClick={() => onSetFilter(colIndex, null)}
+            style={{ display: "block", width: "100%", textAlign: "left", padding: "4px 6px", border: "none", background: "transparent", cursor: "pointer", font: "inherit", fontSize: 11.5, fontWeight: 700, color: "var(--accent-model)" }}
+          >Select all</button>
+          <div style={{ maxHeight: 220, overflowY: "auto", marginTop: 2 }}>
+            {values.map((v) => (
+              <label key={v} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 6px", fontSize: 12, cursor: "pointer" }}>
+                <input
+                  type="checkbox" checked={isChecked(v)}
+                  onChange={() => {
+                    const next = new Set(allowed || values);
+                    if (next.has(v)) next.delete(v); else next.add(v);
+                    onSetFilter(colIndex, next.size >= values.length ? null : next);
+                  }}
+                />
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v}</span>
+              </label>
+            ))}
+            {values.length === 0 && <div style={{ padding: "4px 6px", fontSize: 11.5, color: "var(--text-tertiary)" }}>No values</div>}
+          </div>
+        </div>
+      </AnchoredMenu>
+    </span>
+  );
+}
+
 export const ROW_H = DEFAULT_ROW_H;
-export const HEADER_H = 30;
+// Stage 2 visual pass — the header BAND reads as its own chrome tier partly through being a
+// touch taller than a data row (CONTROL_H.md, 26 — literal, see the designTokens.js note at the
+// top of this file — vs. the data rows' CONTROL_H.sm-matched 22) — Excel's own column-header row
+// is taller than an ordinary data row for exactly this reason.
+export const HEADER_H = 26;
 const BUF = 6;
 const DEFAULT_COL_W = 120;
 const ROW_HEADER_W = 44;
 const RESIZE_HANDLE_PX = 6;
+const FILL_HANDLE_PX = 7;
 
 /** Move a column index by `dir`, never past the sheet's bounds — Tab/Shift+Tab and the
  *  Right/Left arrows all share this so wrapping to the next/previous row stays consistent. */
@@ -90,6 +159,16 @@ export default function SheetView({
   onInsertRowAt, onDeleteRowAt, onInsertColumnAt, onDeleteColumnAt,
   onSetColumnWidth, onSetRowHeight, onSetFreeze,
   zoom = DEFAULT_ZOOM, onZoomChange,
+  // B1007282 — AutoFilter (Sort & Filter). A Set of row indices to render at ZERO height — see
+  // rowLayout.js's buildRowOffsets for why this is the whole filter mechanism, no second
+  // "which rows are visible" system. `null`/omitted (the vast majority of renders — filtering is
+  // opt-in) behaves exactly as before.
+  hiddenRows = null,
+  onSelectionSettled,
+  // B1007281 — AutoFilter. `filterOn` shows a filter trigger on every column header;
+  // `columnFilters` is a Map<colIndex, Set<allowed display values>> (a column absent from the
+  // map is unfiltered); `onSetColumnFilter(colIndex, allowedOrNull)` commits one column's choice.
+  filterOn = false, columnFilters = null, onSetColumnFilter,
 }) {
   const outerRef = useRef(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -109,6 +188,21 @@ export default function SheetView({
   // viewport-relative cursor point that anchored it, set by the wheel handler and consumed by
   // the layout effect below the moment `zoom` (a prop, changed by the parent) actually lands.
   const pendingZoomAnchorRef = useRef(null);
+  // Stage 2 visual pass — which column/row HEADER the pointer is over, for a hover affordance on
+  // chrome (owner: "the row-number gutter and column-header band... should read as chrome — a
+  // subtly different surface, muted text... and a hover state"). Bounded to one row + one column
+  // of header cells (never O(rows×cols) — data cells don't get this treatment), so plain React
+  // state is cheap here where it would not be for a per-DATA-cell hover.
+  const [hoverCol, setHoverCol] = useState(null);
+  const [hoverRow, setHoverRow] = useState(null);
+  // The fill handle (the small grabbable square at the selection's bottom-right corner) — drag
+  // downward to extend the TOP row of the current selection down through the rows the drag
+  // covers, reusing the exact same fillDown the Ctrl+D shortcut already calls. `fillTo` is the
+  // live target row while dragging, for the handle's own visual feedback; the drag never touches
+  // the sheet model until mouseup, same discipline as the column/row resize drags above.
+  const fillDragRef = useRef(null); // { r1, c1, c2 } — the SOURCE range's top row + column span
+  const [fillTo, setFillTo] = useState(null); // target row index while dragging, or null
+  const fillToRef = useRef(null); // mirrors fillTo — read at drag-end, where React state would be stale
 
   useLayoutEffect(() => {
     const el = outerRef.current;
@@ -203,7 +297,10 @@ export default function SheetView({
   const rowHeaderW = ROW_HEADER_W * zoom;
 
   const colWidthAt = useCallback((c) => (colResizePreview && colResizePreview.colIndex === c ? colResizePreview.width : (cols[c]?.width || DEFAULT_COL_W)), [cols, colResizePreview]);
-  const rowHAt = useCallback((r) => (rowResizePreview && rowResizePreview.rowIndex === r ? rowResizePreview.height : rowHeightAt(sheet, r)), [sheet, rowResizePreview]);
+  // A filtered-out row is height 0 regardless of any stored/dragged height — checked FIRST, so
+  // a resize preview mid-drag on a row that's simultaneously hidden (can't happen via the UI
+  // today, but the precedence should still be unambiguous) never un-hides it.
+  const rowHAt = useCallback((r) => (hiddenRows && hiddenRows.has(r) ? 0 : (rowResizePreview && rowResizePreview.rowIndex === r ? rowResizePreview.height : rowHeightAt(sheet, r))), [sheet, rowResizePreview, hiddenRows]);
   const renderColW = useCallback((c) => colWidthAt(c) * zoom, [colWidthAt, zoom]);
   const renderRowH = useCallback((r) => rowHAt(r) * zoom, [rowHAt, zoom]);
 
@@ -215,7 +312,9 @@ export default function SheetView({
   const totalW = colOffsets[colOffsets.length - 1];
 
   // Row offsets, honouring any live resize preview — same cumulative-offset shape colOffsets
-  // already used for columns, now needed for rows too since a row's height can vary.
+  // already used for columns, now needed for rows too since a row's height can vary. Built from
+  // the LOCAL renderRowH (already hiddenRows-aware, see above) so a filtered row's zero height
+  // is reflected here too — offsets and rendering must never disagree about a row's height.
   const rowOffsets = useMemo(() => {
     const offs = new Array(totalRows + 1);
     let y = 0;
@@ -223,7 +322,7 @@ export default function SheetView({
     offs[totalRows] = y;
     return offs;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sheet.rowHeights, totalRows, rowResizePreview, zoom]);
+  }, [sheet.rowHeights, totalRows, rowResizePreview, zoom, hiddenRows]);
 
   const { startIdx, endIdx } = visibleRowRange(rowOffsets, scrollTop, viewportH, BUF, freezeRows);
   const visibleRowIdxs = [];
@@ -296,7 +395,11 @@ export default function SheetView({
     dragRef.current = { r, c };
   };
   const cellMouseEnter = (r, c) => { if (dragRef.current) setSelRange({ r1: dragRef.current.r, r2: r, c1: dragRef.current.c, c2: c }); };
-  const stopDrag = () => { dragRef.current = null; };
+  // B1007281 — Format Painter. `stopDrag` is the one place every click-OR-drag selection on the
+  // sheet finishes (a plain click and a drag-to-select both end here), so it's the natural hook
+  // for "a new selection just settled" — ModelApp uses it to apply an armed painter's captured
+  // look to whatever the user just clicked or dragged across, a no-op otherwise.
+  const stopDrag = () => { dragRef.current = null; onSelectionSettled?.(); };
 
   const jumpTo = (r, c) => setSelRange({ r1: r, r2: r, c1: c, c2: c });
 
@@ -412,6 +515,43 @@ export default function SheetView({
     window.addEventListener("mouseup", onUp);
   }, [rowHAt, onSetRowHeight, zoom]);
 
+  // The fill handle (Stage 2 visual pass — owner: "the little square at the selection's
+  // bottom-right... must be visible and grabbable"). Drag DOWN from the selection's current
+  // bottom-right corner; on release, fillDown copies the selection's TOP row down through
+  // wherever the drag ended — the exact same mutator Ctrl+D already calls, so there is only ever
+  // one "fill down" behavior in this app, reached two ways. No live dashed-outline preview (a
+  // real Excel affordance) — the target row highlights instead, a smaller but still genuinely
+  // informative "this is where it'll land" cue while dragging; a live full preview is real,
+  // scoped follow-up, not required for the handle to be functional.
+  const startFillDrag = useCallback((e) => {
+    e.preventDefault(); e.stopPropagation();
+    const source = { r1, c1, c2 };
+    fillDragRef.current = source;
+    fillToRef.current = r2;
+    setFillTo(r2);
+    const el = outerRef.current;
+    const onMove = (ev) => {
+      if (!fillDragRef.current || !el) return;
+      const rect = el.getBoundingClientRect();
+      const y = ev.clientY - rect.top + el.scrollTop - headerH;
+      const row = Math.max(source.r1, Math.min(totalRows - 1, rowAtOffset(rowOffsets, y)));
+      fillToRef.current = row;
+      setFillTo(row);
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      const src = fillDragRef.current;
+      const target = fillToRef.current;
+      fillDragRef.current = null;
+      fillToRef.current = null;
+      setFillTo(null);
+      if (src && target != null && target > r2) onFillDown(src.r1, target, src.c1, src.c2);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, [r1, r2, c1, c2, rowOffsets, headerH, totalRows, onFillDown]);
+
   // Double-click autofit. Column: measure every ROW's rendered text in that column (not just
   // the visible slice — a value off-screen must still count) via canvas metrics, size to the
   // widest plus padding. Row: reset to the default height — every cell here is single-line
@@ -505,7 +645,14 @@ export default function SheetView({
       const row = cols.map((col, c) => {
         const display = displayFor(sheet, evalResult, r, c);
         const kind = displayKindFor(sheet, evalResult, r, c);
-        return { display, kind, empty: display === "" };
+        const color = displayColorFor(sheet, evalResult, r, c);
+        const style = styleAt(sheet, r, c);
+        // Stage 2 visual pass — a HOOK for Stage 3's formula/input colour convention (blue =
+        // input, black = plain, green = cross-sheet reference): a `data-formula` marker on every
+        // cell now, so that work drops in as a style-only change with no new plumbing. Not yet
+        // consumed for colour here — cellStyle.color (an explicit user override) still wins.
+        const isFormula = isFormulaText(sheet.cells[`${col.id}:${r}`]);
+        return { display, kind, empty: display === "", color, style, isFormula };
       });
       map.set(r, row);
     }
@@ -521,20 +668,41 @@ export default function SheetView({
     const inRowRange = r >= r1 && r <= r2;
     const row = rowCells.get(r);
     const h = renderRowH(r);
+    // B1007282 — a filtered-out row renders NOTHING (rowOffsets already gave it zero pixels of
+    // space, so there is nowhere for a DOM node to go, and building one would be pure waste).
+    if (h === 0) return null;
+    // Stage 2 visual pass — the freeze-pane BOUNDARY needs to be visible on its own (owner:
+    // "you can tell the frozen region from the scrolling one"), not just inferred from content
+    // no longer moving. A shadow reads as "this edge sits ABOVE the layer below it," which a
+    // plain border line doesn't convey — exactly the depth cue Excel's own freeze line uses.
+    const isLastFrozenRow = freezeRows > 0 && r === freezeRows - 1;
+    // The fill handle's own live feedback (Stage 2 visual pass) — a dashed outline around the
+    // row the drag currently targets, in place of a full live-preview of the values themselves.
+    const isFillTarget = fillTo != null && r === fillTo;
     return (
-      <div key={r} style={{ ...posStyle, left: 0, display: "flex", height: h, width: totalW, zIndex: rowZ }}>
+      <div key={r} style={{ ...posStyle, left: 0, display: "flex", height: h, width: totalW, zIndex: rowZ, boxShadow: isLastFrozenRow ? "0 2px 4px -1px rgba(0,0,0,0.18)" : undefined, outline: isFillTarget ? "2px dashed var(--accent-model)" : undefined, outlineOffset: -1 }}> {/* design-exempt: no shadow-color token yet repo-wide (matches the zoom control's own shadow below) */}
         <div
           data-testid={`model-row-header-${r}`}
           onContextMenu={(e) => openRowMenu(e, r)}
+          onMouseEnter={() => setHoverRow(r)}
+          onMouseLeave={() => setHoverRow((h) => (h === r ? null : h))}
           style={{
             flex: `0 0 ${rowHeaderW}px`, position: "sticky", left: 0, zIndex: 2,
-            display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 6,
-            borderRight: "1px solid var(--border-default)", borderBottom: "1px solid var(--border-subtle, var(--border-default))",
-            fontSize: 11 * zoom, color: "var(--text-tertiary)", background: "var(--surface-raised)",
+            display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 6, // SPACE.sm literal — see designTokens.js note above
+            // Grid-line hierarchy: a STRONGER rule separates the gutter (chrome) from the data
+            // grid than the hairlines BETWEEN data cells use.
+            borderRight: "2px solid var(--border-strong)", borderBottom: "1px solid var(--border-default)",
+            fontSize: 11 * zoom, fontWeight: inRowRange ? 700 : 400,
+            // "You are here": the row(s) inside the current selection tint, the same accent wash
+            // the data cells themselves carry, so the eye can find the active row without hunting.
+            color: inRowRange ? "var(--accent-model-text)" : "var(--text-tertiary)",
+            background: inRowRange ? "var(--accent-model-soft)" : (hoverRow === r ? "var(--hover-chrome)" : "var(--surface-page)"),
+            cursor: "default",
           }}
         >
           {r + 1}
           <div
+            className="model-resize-handle"
             onMouseDown={(e) => startRowResize(e, r)}
             onDoubleClick={() => autofitRow(r)}
             title="Drag to resize, double-click to autofit"
@@ -542,23 +710,43 @@ export default function SheetView({
           />
         </div>
         {cols.map((col, c) => {
+          // STAGE 2 — horizontal merge (B1007281; see sheetModel.js's file header for the scope
+          // decision). A cell inside a merge's span that ISN'T the anchor renders NOTHING: the
+          // anchor's own box below is widened to cover the whole span, so it visually occupies
+          // exactly the space these cells would have — no separate "merged placeholder" element,
+          // and no special click-resolution needed either (there's simply nothing else there to
+          // click; a mousedown anywhere in the span lands on the anchor's own div).
+          const merge = mergeAt(sheet, r, c);
+          if (merge && merge.c1 !== c) return null;
           const isActive = r === activeR && c === activeC;
           const isSel = inRowRange && c >= c1 && c <= c2;
           const isEditing = edit && edit.r === r && edit.c === c;
-          const cell = row ? row[c] : { display: "", kind: "blank", empty: true };
+          const cell = row ? row[c] : { display: "", kind: "blank", empty: true, style: {} };
+          const cellStyle = cell.style || {};
           const frozenCol = c < freezeCols;
           // Text spill: a left-aligned (text) cell whose content overflows its own column
           // extends visually across consecutive EMPTY cells to its right — Excel's rule for a
           // long row label beside blank cells. Numbers/dates never spill (they right-align and
           // clip instead, matching Excel). The spilled span is `pointer-events: none` so the
           // empty cells underneath stay their own real click targets — spilling is purely
-          // visual, never a merge.
+          // visual, never a merge. A merged anchor never spills — it already owns real width.
           let spillCols = 0;
-          if (row && cell.kind === "text" && !cell.empty && !isEditing) {
+          if (!merge && row && cell.kind === "text" && !cell.empty && !isEditing) {
             for (let cc = c + 1; cc < cols.length && row[cc] && row[cc].empty; cc++) spillCols++;
           }
-          const w = renderColW(c);
+          const w = merge ? (() => { let sum = 0; for (let k = merge.c1; k <= merge.c2; k++) sum += renderColW(k); return sum; })() : renderColW(c);
           const spillWidth = spillCols > 0 ? (() => { let sum = w; for (let k = 1; k <= spillCols; k++) sum += renderColW(c + k); return sum; })() : null;
+          // Explicit style overrides the kind-based default alignment; an ABSENT valign still
+          // means vertically CENTERED — this app's own existing default for every cell, not
+          // Excel's "bottom" (see Ribbon.jsx's AlignmentGroup for why that distinction matters).
+          const hAlign = cellStyle.align || TEXT_ALIGN[cell.kind];
+          const vAlign = cellStyle.valign === "top" ? "flex-start" : cellStyle.valign === "bottom" ? "flex-end" : "center";
+          const border = cellStyle.border || {};
+          const edgeCSS = (token) => (token === "double" ? `${3 * zoom}px double var(--text-primary)` : token === "thin" ? `${1.5 * zoom}px solid var(--text-primary)` : "1px solid var(--border-default)");
+          // Explicit colour wins outright; an erroring cell always reads as danger regardless of
+          // any number-format colour; otherwise the number format's own colour tag (negative
+          // red) applies; the plain default last.
+          const textColor = cellStyle.color || (cell.kind === "error" ? "var(--danger)" : (cell.color || "var(--text-primary)"));
           return (
             <div
               key={col.id}
@@ -567,6 +755,8 @@ export default function SheetView({
               data-col={c}
               data-kind={cell.kind}
               data-selected={isSel ? "true" : undefined}
+              data-merged={merge ? "true" : undefined}
+              data-formula={cell.isFormula ? "true" : undefined}
               onMouseDown={(e) => { e.preventDefault(); cellClick(r, c, e); }}
               onMouseEnter={() => cellMouseEnter(r, c)}
               onDoubleClick={() => startEdit(r, c, null)}
@@ -574,19 +764,35 @@ export default function SheetView({
               style={{
                 position: frozenCol ? "sticky" : "relative",
                 left: frozenCol ? colOffsets[c] : undefined,
-                zIndex: frozenCol ? 1 : (spillCols > 0 ? 1 : "auto"),
+                zIndex: frozenCol ? 1 : (spillCols > 0 || merge ? 1 : "auto"),
+                // Freeze-pane BOUNDARY (Stage 2 visual pass) — see the row-boundary shadow above
+                // for why a shadow, not a border line, is the right depth cue; this is the same
+                // treatment on the last frozen COLUMN's own right edge.
+                boxShadow: (freezeCols > 0 && c === freezeCols - 1) ? "2px 0 4px -1px rgba(0,0,0,0.18)" : undefined, // design-exempt: no shadow-color token yet repo-wide
                 flex: `0 0 ${w}px`,
                 boxSizing: "border-box",
-                display: "flex", alignItems: "center",
-                justifyContent: TEXT_ALIGN[cell.kind] === "right" ? "flex-end" : TEXT_ALIGN[cell.kind] === "center" ? "center" : "flex-start",
-                padding: isEditing ? 0 : `0 ${8 * zoom}px`,
-                borderRight: "1px solid var(--border-default)",
-                borderBottom: "1px solid var(--border-subtle, var(--border-default))",
+                display: "flex", alignItems: vAlign,
+                justifyContent: hAlign === "right" ? "flex-end" : hAlign === "center" ? "center" : "flex-start",
+                padding: isEditing ? 0 : `0 ${(6 /* SPACE.sm literal — see designTokens.js note above */ + (cellStyle.indent || 0) * 14) * zoom}px`,
+                borderTop: border.top ? edgeCSS(border.top) : undefined,
+                borderLeft: border.left ? edgeCSS(border.left) : undefined,
+                borderRight: border.right ? edgeCSS(border.right) : "1px solid var(--border-default)",
+                borderBottom: border.bottom ? edgeCSS(border.bottom) : "1px solid var(--border-default)",
                 outline: isActive ? "2px solid var(--accent-model)" : "none",
                 outlineOffset: -1,
-                background: isEditing ? "var(--surface-page)" : isSel ? "var(--surface-selected, rgba(43,95,191,0.10))" : "var(--surface-page)",
-                fontSize: 12.5 * zoom, color: cell.kind === "error" ? "var(--danger)" : "var(--text-primary)",
-                whiteSpace: "nowrap", overflow: spillCols > 0 ? "visible" : "hidden", textOverflow: "ellipsis",
+                // Stage 2 visual pass — a crisp 2px accent border on the ACTIVE cell (above) plus
+                // a soft translucent accent wash across the REST of a multi-cell selection, the
+                // same two-layer convention Excel/Sheets use. `--accent-model-soft` (index.css)
+                // replaces the old rgba() fallback that was never actually a token.
+                background: isEditing ? "var(--surface-raised)" : isSel ? "var(--accent-model-soft)" : (cellStyle.fill || "var(--surface-raised)"),
+                fontSize: (cellStyle.fontSize || 12.5) * zoom, color: textColor,
+                fontFamily: cellStyle.fontFamily || undefined,
+                fontWeight: cellStyle.bold ? 700 : undefined,
+                fontStyle: cellStyle.italic ? "italic" : undefined,
+                textDecoration: [cellStyle.underline && "underline", cellStyle.strike && "line-through"].filter(Boolean).join(" ") || undefined,
+                whiteSpace: cellStyle.wrap ? "normal" : "nowrap",
+                wordBreak: cellStyle.wrap ? "break-word" : undefined,
+                overflow: spillCols > 0 ? "visible" : "hidden", textOverflow: "ellipsis",
                 fontVariantNumeric: "tabular-nums",
                 cursor: "cell",
                 userSelect: isEditing ? "text" : "none",
@@ -612,10 +818,27 @@ export default function SheetView({
               ) : cell.display}
               {c < cols.length && (
                 <div
+                  className="model-resize-handle"
                   onMouseDown={(e) => startColResize(e, c)}
                   onDoubleClick={() => autofitColumn(c)}
                   title="Drag to resize, double-click to autofit"
                   style={{ position: "absolute", top: 0, bottom: 0, right: -RESIZE_HANDLE_PX / 2, width: RESIZE_HANDLE_PX, cursor: "col-resize" }}
+                />
+              )}
+              {/* The fill handle — Stage 2 visual pass. Lives at the SELECTION's bottom-right
+                  corner (r2,c2), not every cell's, and only when nothing is being edited (a live
+                  edit has its own input box occupying the cell). */}
+              {r === r2 && c === c2 && !edit && (
+                <div
+                  data-testid="model-fill-handle"
+                  onMouseDown={startFillDrag}
+                  title="Drag to fill down"
+                  style={{
+                    position: "absolute", right: -FILL_HANDLE_PX / 2 - 1, bottom: -FILL_HANDLE_PX / 2 - 1,
+                    width: FILL_HANDLE_PX, height: FILL_HANDLE_PX,
+                    background: "var(--accent-model)", border: "1px solid var(--surface-raised)",
+                    cursor: "crosshair", zIndex: 3,
+                  }}
                 />
               )}
             </div>
@@ -634,19 +857,40 @@ export default function SheetView({
       onMouseLeave={stopDrag}
       onKeyDown={onKeyDown}
       onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
-      style={{ flex: 1, minHeight: 0, overflow: "auto", position: "relative", background: "var(--surface-page)", outline: "none" }}
+      // Stage 2 visual pass (owner: "the whole thing floats edge to edge with no framing... it
+      // should read as a document inside the app"). A contained card: the panel radius + a
+      // border + a margin against the app's own page backdrop (ModelApp's root, `--surface-page`)
+      // — the sheet itself (and its chrome bands) sit on `--surface-raised`, one tier up.
+      style={{
+        flex: 1, minHeight: 0, overflow: "auto", position: "relative", outline: "none",
+        margin: 8, // SPACE.md literal — see designTokens.js note above
+        background: "var(--surface-raised)",
+        border: "1px solid var(--border-default)", borderRadius: RADIUS.lg,
+      }}
     >
+      {/* Stage 2 visual pass — resize-handle hover affordance. A plain inline `style` prop can't
+          express `:hover`; this is the one static, render-once stylesheet for it (never a
+          per-handle React state, which would cost nothing per hover but is still the wrong tool
+          for a purely decorative cue on what can be hundreds of resize strips). Token-driven
+          (`var(--accent-model)`/`var(--hover-chrome)`), so it stays theme-correct without being
+          scanned as a raw literal (there is no color HERE — the class only selects, the token
+          reference lives in the CSS value, exactly like index.css's own `.gbtn:hover` family). */}
+      <style>{`
+        .model-resize-handle:hover { background: var(--hover-chrome); }
+      `}</style>
       {/* width+minWidth, not Math.max(totalW, "100%") — that mixes a number with a CSS percent
           string, which Number("100%") coerces to NaN and React then rejects the whole style
           ("`NaN` is an invalid value for the `width` css style property"), measured live. */}
       <div style={{ position: "relative", height: headerH + rowOffsets[totalRows], width: totalW, minWidth: "100%" }}>
         {/* Header row — sticky vertically, scrolls horizontally with the body via the shared
-            container; individual FROZEN-column cells within it are ALSO sticky-left (below). */}
-        <div style={{ position: "sticky", top: 0, zIndex: 3, display: "flex", height: headerH, width: totalW, background: "var(--surface-raised)", borderBottom: "1px solid var(--border-default)" }}>
-          <div style={{ flex: `0 0 ${rowHeaderW}px`, position: "sticky", left: 0, zIndex: 2, borderRight: "1px solid var(--border-default)", background: "var(--surface-raised)" }} />
+            container; individual FROZEN-column cells within it are ALSO sticky-left (below).
+            Grid-line hierarchy (Stage 2 visual pass): a STRONGER rule under the whole band. */}
+        <div style={{ position: "sticky", top: 0, zIndex: 3, display: "flex", height: headerH, width: totalW, background: "var(--surface-page)", borderBottom: "2px solid var(--border-strong)" }}>
+          <div style={{ flex: `0 0 ${rowHeaderW}px`, position: "sticky", left: 0, zIndex: 2, borderRight: "2px solid var(--border-strong)", background: "var(--surface-page)" }} />
           {cols.map((col, c) => {
             const frozenCol = c < freezeCols;
             const w = renderColW(c);
+            const inColRange = c >= c1 && c <= c2;
             return (
               <div
                 key={col.id}
@@ -654,6 +898,8 @@ export default function SheetView({
                 onDoubleClick={() => setRenaming(c)}
                 onClick={() => setSelRange({ r1: 0, r2: totalRows - 1, c1: c, c2: c })}
                 onContextMenu={(e) => openColMenu(e, c)}
+                onMouseEnter={() => setHoverCol(c)}
+                onMouseLeave={() => setHoverCol((h) => (h === c ? null : h))}
                 style={{
                   position: frozenCol ? "sticky" : "relative",
                   left: frozenCol ? colOffsets[c] : undefined,
@@ -661,8 +907,11 @@ export default function SheetView({
                   flex: `0 0 ${w}px`,
                   display: "flex", alignItems: "center", gap: 4, padding: `0 ${8 * zoom}px`, cursor: "pointer",
                   borderRight: "1px solid var(--border-default)",
-                  background: c >= c1 && c <= c2 ? "var(--surface-selected, rgba(59,107,255,0.08))" : "var(--surface-raised)",
-                  fontSize: 12.5 * zoom, fontWeight: 600, color: "var(--text-primary)",
+                  // "You are here" tint (same accent wash as the data cells + row gutter) beats
+                  // a chrome hover, which beats the plain muted chrome resting state.
+                  background: inColRange ? "var(--accent-model-soft)" : (hoverCol === c ? "var(--hover-chrome)" : "var(--surface-page)"),
+                  fontSize: 12.5 * zoom, fontWeight: 600,
+                  color: inColRange ? "var(--accent-model-text)" : "var(--text-secondary)",
                 }}
               >
                 {renaming === c ? (
@@ -671,12 +920,22 @@ export default function SheetView({
                     defaultValue={col.name}
                     onBlur={(e) => renameCommit(c, e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); renameCommit(c, e.target.value); } if (e.key === "Escape") setRenaming(null); }}
-                    style={{ width: "100%", font: "inherit", fontWeight: 600, border: "1px solid var(--accent)", borderRadius: 4, padding: "1px 4px" }}
+                    style={{ width: "100%", font: "inherit", fontWeight: 600, border: "1px solid var(--accent)", borderRadius: RADIUS.sm, padding: "1px 4px" }}
                   />
                 ) : (
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{col.name}</span>
+                  <>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{col.name}</span>
+                    {filterOn && (
+                      <FilterMenu
+                        colIndex={c} sheet={sheet} evalResult={evalResult}
+                        allowed={columnFilters ? columnFilters.get(c) : null}
+                        onSetFilter={onSetColumnFilter}
+                      />
+                    )}
+                  </>
                 )}
                 <div
+                  className="model-resize-handle"
                   onMouseDown={(e) => startColResize(e, c)}
                   onDoubleClick={() => autofitColumn(c)}
                   title="Drag to resize, double-click to autofit"

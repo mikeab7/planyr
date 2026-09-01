@@ -33,7 +33,7 @@
  * names, which the address itself already gives precisely.
  */
 import {
-  evaluateFormula, formatValue, parseFormula, errVal, isErrVal, isFormulaError, isBlank, BLANK, isDate,
+  evaluateFormula, formatValue, formatValueColor, parseFormula, errVal, isErrVal, isFormulaError, isBlank, BLANK, isDate,
   DEFAULT_CALENDAR, parseLooseDate, makeDate, colNumToLetters,
 } from "../../../shared/formula/formula.js";
 import { formatAt, isFormulaText } from "./sheetModel.js";
@@ -252,6 +252,24 @@ export function displayFor(sheet, evalResult, rowIndex, colIndex) {
   if (raw == null || raw === "") return "";
   const v = literalTypedValue(raw);
   return typeof v === "number" && format ? formatValue(v, { numberFormat: format }) : raw;
+}
+
+/** The colour a cell's own number format wants for what's currently showing there ([Red] etc —
+ *  "negatives in red"), or `null`. Mirrors displayFor's own two branches (formula result vs.
+ *  literal) exactly, since the colour has to agree with whichever VALUE actually got formatted. */
+export function displayColorFor(sheet, evalResult, rowIndex, colIndex) {
+  const col = sheet.columns[colIndex];
+  if (!col) return null;
+  const raw = sheet.cells[`${col.id}:${rowIndex}`];
+  const format = formatAt(sheet, rowIndex, colIndex);
+  if (!format) return null;
+  if (raw != null && isFormulaText(raw)) {
+    const r = evalResult.get(rowIndex, colIndex);
+    return r && r.ok ? formatValueColor(r.value, { numberFormat: format }) : null;
+  }
+  if (raw == null || raw === "") return null;
+  const v = literalTypedValue(raw);
+  return formatValueColor(v, { numberFormat: format });
 }
 
 /** The resolved typed-value KIND for a cell — drives right/left alignment (item 5). */
