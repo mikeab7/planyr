@@ -19,11 +19,19 @@ import { rowHeightAt } from "./sheetModel.js";
  *  scroll position, the visible virtualization window) consumes these offsets as plain
  *  numbers and needs no zoom-awareness of its own, because the real DOM `scrollTop` a browser
  *  reports is already in the SAME zoomed pixel units the caller renders rows at — offsets and
- *  scroll position agree by construction, not by a separate conversion step. */
-export function buildRowOffsets(sheet, rowCount, zoom = 1) {
+ *  scroll position agree by construction, not by a separate conversion step.
+ *
+ *  `hiddenRows` (B1007282, default none — Sort & Filter's AutoFilter) is an optional Set of row
+ *  indices to give ZERO height, rather than their real height. This is the WHOLE filter
+ *  mechanism, deliberately: a filtered-out row still exists (still has an index, still
+ *  participates in this same offset table), it just takes no visual space, so the exact same
+ *  virtualization window / sticky-freeze / scroll math every other row already uses handles a
+ *  filtered row for free — no second "which rows are visible" system, no persistence of filter
+ *  state needed here (it's a plain React state Set in ModelApp, gone on reload like zoom). */
+export function buildRowOffsets(sheet, rowCount, zoom = 1, hiddenRows = null) {
   const offsets = new Array(rowCount + 1);
   let y = 0;
-  for (let r = 0; r < rowCount; r++) { offsets[r] = y; y += rowHeightAt(sheet, r) * zoom; }
+  for (let r = 0; r < rowCount; r++) { offsets[r] = y; y += hiddenRows && hiddenRows.has(r) ? 0 : rowHeightAt(sheet, r) * zoom; }
   offsets[rowCount] = y;
   return offsets;
 }

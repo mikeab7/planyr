@@ -60,6 +60,45 @@ describe("buildRowOffsets", () => {
       expect(startIdx).toBe(10);
     });
   });
+
+  // B1007282 — AutoFilter (Sort & Filter). A filtered-out row gets ZERO height rather than being
+  // removed from the offset table entirely — this IS the whole filter mechanism (see the
+  // function's own header): every row still has an index, it just takes no space.
+  describe("hiddenRows (B1007282 — AutoFilter)", () => {
+    it("a hidden row contributes zero height — the next row's top is unchanged", () => {
+      const s = createSheet();
+      const offsets = buildRowOffsets(s, 5, 1, new Set([2]));
+      expect(offsets[2]).toBe(offsets[3]); // row 2 takes no space at all
+      expect(offsets[3]).toBe(2 * DEFAULT_ROW_H); // rows 0,1 still counted normally
+    });
+    it("hiding several rows compounds — the total height drops by exactly their combined height", () => {
+      const s = createSheet();
+      const base = buildRowOffsets(s, 10);
+      const filtered = buildRowOffsets(s, 10, 1, new Set([1, 3, 5]));
+      expect(filtered[10]).toBe(base[10] - 3 * DEFAULT_ROW_H);
+    });
+    it("no hiddenRows argument (the default) behaves exactly as before — every row its own height", () => {
+      const s = createSheet();
+      expect(buildRowOffsets(s, 10, 1, null)).toEqual(buildRowOffsets(s, 10));
+    });
+    it("hiding works together with zoom — a hidden row is zero regardless of zoom level", () => {
+      const s = createSheet();
+      const offsets = buildRowOffsets(s, 5, 2, new Set([0]));
+      expect(offsets[0]).toBe(0);
+      expect(offsets[1]).toBe(0); // row 0 hidden — row 1 still starts at the very top
+      expect(offsets[2]).toBe(DEFAULT_ROW_H * 2); // row 1 alone, at its real zoomed height
+    });
+    it("visibleRowRange skips straight past a run of hidden rows with no gap in the visible window", () => {
+      const s = createSheet();
+      const hidden = new Set([2, 3, 4]);
+      const offsets = buildRowOffsets(s, 20, 1, hidden);
+      // Scrolled to the very top: rows 0,1 visible, then 2-4 take zero space, then row 5 sits
+      // right where row 2 would otherwise have started.
+      const { startIdx, endIdx } = visibleRowRange(offsets, 0, DEFAULT_ROW_H * 3, 0);
+      expect(offsets[startIdx]).toBe(0);
+      expect(endIdx).toBeGreaterThan(5); // the window reaches real (non-hidden) rows past the hidden run
+    });
+  });
 });
 
 describe("rowAtOffset", () => {
@@ -88,9 +127,10 @@ describe("visibleRowRange — the buffered virtualization window", () => {
     const s = createSheet();
     const offsets = buildRowOffsets(s, 1000);
     const buf = 6;
-    const { startIdx, endIdx } = visibleRowRange(offsets, 260, 400, buf);
-    // scrollTop=260 -> row 10 (260/26); viewport 400px -> ~15.4 rows -> row ~25
-    expect(startIdx).toBe(Math.max(0, 10 - buf));
+    const targetRow = 10;
+    const scrollTop = targetRow * DEFAULT_ROW_H;
+    const { startIdx, endIdx } = visibleRowRange(offsets, scrollTop, 400, buf);
+    expect(startIdx).toBe(Math.max(0, targetRow - buf));
     expect(endIdx).toBeGreaterThan(startIdx);
     expect(endIdx).toBeLessThanOrEqual(1000);
   });

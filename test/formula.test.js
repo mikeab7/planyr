@@ -1,7 +1,7 @@
 // test/formula.test.js — exhaustive coverage of the pure formula engine.
 import { describe, it, expect } from "vitest";
 import {
-  evaluateFormula, formatValue, parseFormula, extractRefs, planFormulaColumns,
+  evaluateFormula, formatValue, formatValueColor, parseFormula, extractRefs, planFormulaColumns,
   makeDate, isoToSerial, serialToISO, BLANK, FORMULA_ERRORS, isDate,
   errVal, isErrVal, DEFAULT_CALENDAR,
   MAX_COL, MAX_ROW, parseRefText, colLettersToNum, colNumToLetters, rewriteFormulaForCopy,
@@ -283,6 +283,61 @@ describe("formatValue", () => {
     const r = run("1/0");
     // host typically formats from r.error; ensure code text is stable
     expect(r.error).toBe("#DIV/0!");
+  });
+
+  // Model workspace ribbon (B1007281) — formatValue({numberFormat}) is the ONE formatter the
+  // ribbon's Number group wires up (never a second implementation). These pin the presets
+  // numberFormats.js ships plus the two gaps closed this round.
+  describe("numberFormat", () => {
+    it("basic presets", () => {
+      expect(formatValue(1234, { numberFormat: "#,##0" })).toBe("1,234");
+      expect(formatValue(1234.5, { numberFormat: "$#,##0.00" })).toBe("$1,234.50");
+      expect(formatValue(0.256, { numberFormat: "0.0%" })).toBe("25.6%");
+      expect(formatValue(4.5, { numberFormat: '0.00"/SF"' })).toBe("4.50/SF");
+    });
+    it("accounting parens: negative gets its own section, no double sign", () => {
+      const fmt = "#,##0.00;(#,##0.00)";
+      expect(formatValue(1234.5, { numberFormat: fmt })).toBe("1,234.50");
+      expect(formatValue(-1234.5, { numberFormat: fmt })).toBe("(1,234.50)");
+    });
+    it("[Red] no longer leaks into the displayed text (was: literal '[Red]-1,234')", () => {
+      const fmt = "#,##0;[Red]-#,##0";
+      expect(formatValue(1234, { numberFormat: fmt })).toBe("1,234");
+      expect(formatValue(-1234, { numberFormat: fmt })).toBe("-1,234");
+      expect(formatValue(-1234, { numberFormat: fmt })).not.toMatch(/\[/);
+    });
+    it("formatValueColor reports the sign-appropriate section's colour tag, and null otherwise", () => {
+      const fmt = "#,##0;[Red](#,##0)";
+      expect(formatValueColor(1234, { numberFormat: fmt })).toBe(null);
+      expect(formatValueColor(-1234, { numberFormat: fmt })).toBe("red");
+      expect(formatValueColor(1234, { numberFormat: "#,##0" })).toBe(null); // no tag at all
+      expect(formatValueColor(1234, {})).toBe(null);                        // no numberFormat
+      expect(formatValueColor("text", { numberFormat: fmt })).toBe(null);   // not a number
+    });
+    it("an indexed [ColorNN] tag is stripped from the text but resolves to no colour", () => {
+      const fmt = "[Color12]#,##0";
+      expect(formatValue(1234, { numberFormat: fmt })).toBe("1,234");
+      expect(formatValueColor(1234, { numberFormat: fmt })).toBe(null);
+    });
+    it("a date-shaped numberFormat now actually renders the date (was: the literal format string)", () => {
+      expect(formatValue(D("2026-07-04"), { numberFormat: "mm/dd/yyyy" })).toBe("07/04/2026");
+      expect(formatValue(D("2026-07-04"), { numberFormat: "mmm d, yyyy" })).toBe("Jul 4, 2026");
+      // a plain NUMBER (a date serial, not a Date-typed value) paired with a date numberFormat
+      // routes to formatDateToken too — this is the exact gap: previously fell through to
+      // formatNumberSection's literal-only branch and printed "mm/dd/yyyy" verbatim.
+      expect(formatValue(D("2026-07-04").s, { numberFormat: "mm/dd/yyyy" })).toBe("07/04/2026");
+    });
+    it("a Date value with a non-date numberFormat, or none, is unaffected (still formatDate/ISO)", () => {
+      expect(formatValue(D("2026-07-04"))).toBe("2026-07-04");
+      expect(formatValue(D("2026-07-04"), { formatDate: serialToISO })).toBe("2026-07-04");
+    });
+    it("basis points: a literal 'bps' scales the value ×10,000 (Excel has no native bps format)", () => {
+      expect(formatValue(0.0025, { numberFormat: '0" bps"' })).toBe("25 bps");
+      expect(formatValue(0, { numberFormat: '0" bps"' })).toBe("0 bps");
+    });
+    it('multiple (x): an ordinary decimal format with an "x" suffix, no special scaling', () => {
+      expect(formatValue(2.3, { numberFormat: '0.00"x"' })).toBe("2.30x");
+    });
   });
 });
 
