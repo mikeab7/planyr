@@ -149,14 +149,17 @@ export default function Shell() {
   // breadcrumb's "Dashboard" / "select project" simply change the hash; only the two
   // *side-effecting* actions still need a signal: creating a new project (born in the
   // Site Planner) and opening a specific review file (Document Review is lazy-mounted).
-  // ORG SCOPE (NEW-1) — only Notes and Library are meaningful there (Site/Schedule/Review/
-  // Model have no org-scoped content to show), so switching tabs while standing in
-  // Organization keeps org scope only when the target module can actually show it; any other
-  // tab drops back to that module's plain, no-project state. Site/Schedule/Review/Model are
-  // simply never OFFERED a way into org scope in the first place (no `onSelectOrg` wiring for
-  // Schedule — see the Scheduler note below); this is what makes a stray "#/org/site" URL, if
-  // ever hand-typed, degrade harmlessly rather than needing its own guard everywhere.
-  const ORG_CAPABLE_MODULES = new Set(["notes", "library"]);
+  // ORG SCOPE (NEW-1, extended B1020930) — Notes, Library and now Schedule are meaningful
+  // there (Site/Review/Model have no org-scoped content to show), so switching tabs while
+  // standing in Organization keeps org scope only when the target module can actually show it;
+  // any other tab drops back to that module's plain, no-project state. Schedule at org scope
+  // renders `AgendaView` (a lightweight local surface Scheduler.jsx renders INSTEAD of the
+  // embedded Gantt iframe — never a route into the walled `public/sequence/index.html`), so it
+  // was safe to add here without touching the embedded scheduler at all. Site/Review/Model
+  // are still simply never OFFERED a way into org scope (no `onSelectOrg` wiring for them);
+  // this is what makes a stray "#/org/site" URL, if ever hand-typed, degrade harmlessly rather
+  // than needing its own guard everywhere.
+  const ORG_CAPABLE_MODULES = new Set(["notes", "library", "scheduler"]);
   const switchModule = (id) => navigate({ module: id, org: org && ORG_CAPABLE_MODULES.has(id) });
   const goDashboard  = () => navigate({ module: "site-planner", projectId: null, cross: false, org: false });
   // "New project" from anywhere: land in the Site Planner and tell it to start a blank
