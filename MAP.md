@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-01 @ `9f2bfb6f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-01 @ `8e42a142` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -744,7 +744,7 @@ _624 source files mapped._
 - **`src/workspaces/site-planner/lib/elementRows.js`** — pure JS mirror of the site_elements explode/rebuild (B670): model⇄rows for the 5 vector collections, tombstone-aware, keyed by (kind,id)
   - _exports_: `byRowOrder`, `ELEMENT_FIELDS`, `explodeModel`, `FIELD_TO_KIND`, `foldJournal`, `foldNeverSyncedLocal`, `KIND_TO_FIELD`, `reconcileSeedRows`, `rowsToModel`, `Z_GAP`
 - **`src/workspaces/site-planner/lib/elementSync.js`** — the per-element write engine (B671): diffs live collections vs a shadow map, batches rev-guarded commits, LWW conflict events, dirty-queue backoff
-  - _exports_: `createElementSync`, `semanticallyEqual`, `stableStringify`
+  - _exports_: `createElementSync`, `isOwnWrite`, `semanticallyEqual`, `stableStringify`
 - **`src/workspaces/site-planner/lib/elevation.js`** — USGS 3DEP bare-earth DEM sampling: profile elevations along a polyline (metres to survey-ft) plus ditch-depth screening stats
   - _exports_: `DEFAULT_INTERPOLATION`, `DEP_SERVICE_LABEL`, `DEP_URL`, `ditchStats`, `M_TO_FT`, `profileQuery`, `samplePoint`, `sampleProfile`
 - **`src/workspaces/site-planner/lib/estimateChallenge.js`** — the "challenge the estimate" engine (B882, pure): sanity-check the estimated WSE vs site grade (`sanityCheckEstimate`), the BFE ±1 ft sensitivity band (`sensitivityBand`), and the estimate-vs-estimate disagreement (`compareEstimates`).
