@@ -116,6 +116,41 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V556720 — B986096: paste a real broker-email block into the Comps entry grid, confirm blocking vs soft cells, save, and read the rows back from `public.comps` `Blocker: auth`
+
+**Why this needs its own real pass.** The parse→render→save round trip is client-side parsing feeding a real signed-in Supabase write; a saved row and its stored values can only be confirmed against the live database under a real session.
+
+**What was verified here.** `node ui-audit/verify-deploy.mjs comp_import_drafts` confirms the shipped build (containing this feature) is genuinely served on `planyr.io` — `"comp_import_drafts" IS SERVED — in assets/CompsPanel-D2Ke51hs.js` — a byte-level proof, not a green-CI assumption. 26 unit tests in `test/compParse.test.js` drive the exact canonical examples from the spec directly against the parser: a multi-line prose paste produces one row per line; a tab-delimited block fills rows AND columns, both by header-name mapping and by positional fallback; `"$0.68 NNN"` parses the rate but leaves `leaseRatePeriod` blocking (`cellFlags.leaseRatePeriod.level === "blocking"`), refusing to guess a 12x-ambiguous period; `"180k SF"` expands to 180000 flagged soft, never blocking. `npm run build` / `npx eslint` / `node ui-audit/design-drift-audit.mjs --check` all clean.
+**Attempted and could NOT complete this session — a SEPARATE wall from `Blocker: auth`, worth naming so a future session doesn't waste time assuming the deploy is broken:** a headless Chromium click-through (even the logged-out-reachable half — opening the grid, pasting, and reading rendered cell state needs no sign-in) was attempted post-merge against `https://planyr.io/?cb=<ts>#/` and failed to connect (`net::ERR_CONNECTION_RESET`) on every retry. A control check ruled out planyr.io specifically: the same Playwright browser also failed to reach `https://example.com/` and `https://www.anthropic.com/` (`net::ERR_TUNNEL_CONNECTION_FAILED`) in the same run, while a plain Node HTTPS fetch (the deploy-verification script above) reached `planyr.io` fine seconds earlier. So this reads as this session's browser-automation-via-proxy path being unreachable, not a defect in the shipped code or the deploy — re-attempt the browser half fresh in a new session rather than treating this as evidence against the feature.
+
+**Steps, each with a named expected result — signed in, on `planyr.io` with a cache-busted load:**
+1. Open a site's map → Comps tab → "＋ New comps". **Expect:** an overlay card opens with an empty paste box and grid, no confirmation step anywhere yet.
+2. Paste: `3.2 AC land - $850k - Jan 2026` / `Building sale, 25,000 SF, $3.1M, closed 3/14/2026` / `12,500 SF lease at $0.68 NNN`. **Expect:** three typed rows appear immediately (no intermediate review/confirm screen) — Land/$850,000/3.2 AC, Building sale/$3,100,000/25,000 SF, Lease/$0.68.
+3. **Expect:** the third row's rate-period cell renders with the app's red/`aria-invalid` rejected-value styling and a "!" glyph naming the 12x ambiguity; the row cannot be included in Save while it stands.
+4. Pick MO or YR for that row. **Expect:** the red styling clears and the row becomes saveable; its normalized annual figure appears, labeled with its basis.
+5. Give each row a location (pin drop or parcel select via "＋ Location"). **Expect:** clicking a row with a location pans/zooms the map to it.
+6. Save. **Expect:** the panel returns to the comps list with all three new rows visible.
+7. Read `public.comps` directly for the three new rows. **Expect:** stored `land_price`/`land_size_value`/`bldg_price`/`bldg_size_sf`/`lease_rate`/`lease_rate_period` etc. match exactly what was typed/resolved on screen.
+
+**Result:** ⏳ pending — needs a real signed-in browser session; this session's own headless attempt was blocked at the network layer (see above), not by the feature.
+
+### V556721 — B986097: import a Google My Maps KML export, confirm drafts stay invisible until promoted, promote one, dismiss another `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** A real KML file import + a real signed-in promote (writes into `public.comps`) + confirming a second team member genuinely cannot see a pre-promotion draft.
+
+**What was verified here.** `db/test/comp_import_drafts_rls.test.sql` — a self-rolling-back proof run live against production via the Supabase MCP: **9/9 passed**, including the specific case this feature exists to guarantee (a teammate on a shared team CANNOT see another member's draft — `PASS 3`), with a follow-up read confirming zero residual fixture rows. `lib/kmlImport.js` has 11 unit tests against a realistic sample KML document (a Point placemark with a CDATA description, a Polygon placemark, and a geometry-less placemark), including a targeted check that `polygonCentroid` is area-weighted rather than a vertex average (a ring with one artificially dense edge still centers correctly). `node ui-audit/verify-deploy.mjs comp_import_drafts` confirms the shipped code is live on `planyr.io`.
+**Attempted and could NOT complete this session, same wall as V556720 above** (headless Chromium unreachable via this session's proxy on every host tested, confirmed not planyr.io-specific) — the actual file-picker → draft-list → promote/dismiss click-through needs a fresh session's browser.
+
+**Steps, each with a named expected result:**
+1. Export a small Google My Maps layer to KML with at least one Point placemark (a dated, priced description) and one Polygon placemark (an undated prose description).
+2. Sign in · Comps tab → "⤒ Import (KML)" → pick the file. **Expect:** both placemarks land as drafts; neither appears in the main comps list, on the map, or in any average.
+3. Open the review view. **Expect:** the point placemark's proposed values are pre-filled from its description; the polygon placemark shows a centroid pin option and a "match a parcel instead" pick.
+4. Promote the point placemark. **Expect:** it becomes a real, visible comp; the review list drops to one.
+5. Dismiss the polygon placemark. **Expect:** it's gone from the review list, never became a comp.
+6. As a teammate on a shared team, before step 4, confirm neither draft was ever visible to them.
+
+**Result:** ⏳ pending — needs a real signed-in browser session; this session's own headless attempt was blocked at the network layer (see above), not by the feature.
+
 ### V550016 — B978272: dragging/scaling/rotating a team-shared site plan visibly moves a teammate's pinned comp too `Blocker: auth` `Blocker: real-data`
 
 **Why this needs its own real pass.** The recompute is a real Supabase RPC round-trip under RLS (a teammate's own comp, updated by the overlay owner) — needs two real signed-in accounts on the same team.
