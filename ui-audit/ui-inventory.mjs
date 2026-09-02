@@ -474,7 +474,14 @@ async function nestingMismatches(page, surface) {
         findings.push({
           childLabel: child.label, childRadius: child.radius,
           ancestorLabel: found.label, ancestorRadius: found.radius,
-          gap: Math.round(gap * 10) / 10, expected,
+          // B986096-HARDENING-17 — whole-pixel, not 0.1px: this value is TEXT-REPORT only (the
+          // compliance decision above already happened), and 0.1px is finer than this headless
+          // measurement reproduces byte-for-byte across machines — a fresh regen of this exact
+          // doc from a clean origin/main worktree, in this same sandbox, already disagreed with
+          // main's own committed file on a sibling gap reading by 0.8px with zero code change
+          // anywhere near it. Same class as the 1.5px tolerance two lines up; PERCEPTUAL-PARITY's
+          // rationale for the analogous image-diff problem.
+          gap: Math.round(gap), expected,
         });
       }
     }
@@ -633,7 +640,7 @@ async function siblingMismatches(page, surface) {
         }
         findings.push({
           aLabel: A.label, aRadius: A.radius, bLabel: B.label, bRadius: B.radius,
-          gap: Math.round(gap * 10) / 10,
+          gap: Math.round(gap), // whole-pixel — see the B986096-HARDENING-17 note on the sibling gap above
           dividerSeparated,
         });
       }
@@ -747,7 +754,7 @@ async function siblingSizeMismatches(page, surface) {
         const diffs = [];
         if (A.height !== B.height) diffs.push(`height ${A.height}px vs ${B.height}px`);
         if (A.padding !== B.padding) diffs.push(`padding "${A.padding}" vs "${B.padding}"`);
-        findings.push({ aLabel: A.label, bLabel: B.label, gap: Math.round(gap * 10) / 10, diffs, dividerSeparated });
+        findings.push({ aLabel: A.label, bLabel: B.label, gap: Math.round(gap), diffs, dividerSeparated }); // whole-pixel — B986096-HARDENING-17
       }
     }
     const byKey = new Map();

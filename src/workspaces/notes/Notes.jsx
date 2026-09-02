@@ -62,7 +62,7 @@ const IntegrityBanner = lazy(() => import("./components/IntegrityBanner.jsx"));
 /* Same reasoning as IntegrityBanner — a real conflict is rare, and its comparison view (the
  * diff engine + two full-text panes) has no business on every load's critical path. See its
  * own header (B842624). */
-const ConflictCompare = lazy(() => import("./components/ConflictCompare.jsx"));
+const ConflictNotice = lazy(() => import("./components/ConflictNotice.jsx"));
 
 const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
 /* ⛔ THE FOOTER'S TONE MAP IS GONE WITH THE FOOTER (B539649). It coloured a sync line that no
@@ -176,10 +176,12 @@ function UndoBar({ deleted, onUndo, onDismiss }) {
 }
 
 /* ⛔ THE INLINE ConflictBar THAT USED TO LIVE HERE IS GONE (B842624) — replaced by the lazy
- * `ConflictCompare` component (see its own header). Two verbs and no content is the exact bug
+ * `ConflictNotice` component (see its own header). Two verbs and no content is the exact bug
  * the owner reported; the comparison view that replaces it needs the diff engine and both full
  * documents, which have no business on this route's first paint, so it moved to its own lazy
- * chunk the same way `IntegrityBanner` already does. */
+ * chunk the same way `IntegrityBanner` already does. `ConflictNotice` itself is now a COMPACT
+ * bar (the follow-up brief's NEW-3) that opens a full-screen `ConflictReview` on demand rather
+ * than rendering both full versions inline. */
 
 function EmptyState({ onCreate }) {
   return (
@@ -941,7 +943,7 @@ export default function Notes({
    * shown — a queue of conflict bars would be its own kind of noise, and resolving one
    * reveals the next.
    *
-   * `ConflictCompare` needs BOTH full documents to show the owner what he's actually
+   * `ConflictNotice`/`ConflictReview` need BOTH full documents to show the owner what he's actually
    * choosing between (see its own header) — `localDoc`/`localUpdatedAt` come from this
    * window's own storage and tree, `serverDoc`/`serverUpdatedAt` from the store's conflict
    * entry (`notesConflictFor`, populated by `notesStore.js`'s `fetchPages`). */
@@ -1229,7 +1231,7 @@ export default function Notes({
       <UndoBar deleted={deleted} onUndo={() => handleRestore(deleted.id)} onDismiss={() => setDeleted(null)} />
       {conflict ? (
         <Suspense fallback={null}>
-          <ConflictCompare
+          <ConflictNotice
             title={conflict.title}
             localDoc={conflict.localDoc}
             serverDoc={conflict.serverDoc}

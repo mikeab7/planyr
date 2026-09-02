@@ -3891,6 +3891,40 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 - Guards: `test/notesConflictDiff.test.js` (16, new) · `test/notesModule.test.js` (updated: the park-symmetry source scan, the RADIUS mirror, the folder-pointer sweep, the no-second-person scan now covering `ConflictCompare.jsx`) · `test/notesSync.test.js` (unchanged, still green against the revised `notesConflictLine` copy) · full suite green, lint 0, build green (`ConflictCompare` confirmed as its own ~5 KB lazy chunk, off the Notes route's first paint).
 - Files: `src/workspaces/notes/components/ConflictCompare.jsx` (new), `src/workspaces/notes/lib/notesConflictDiff.js` (new), `src/workspaces/notes/lib/notesStore.js`, `src/workspaces/notes/lib/notesCloud.js`, `src/workspaces/notes/Notes.jsx`, `src/workspaces/notes/CLAUDE.md`, `test/notesConflictDiff.test.js` (new), `test/notesModule.test.js`.
 - Base: `origin/main` @ `5d7251b5`.
+
+### B1053568 — The B1023120 compare surface's two buttons read as one instruction and its opposite, never a symmetric pair `[notes/ui]` (bug) #notes #ui #compare  *(owner chat block 2026-09-02, NEW-1, from a screenshot of the B1023120 compare bar that shipped earlier the same day: **"why does the right one only have an option to use the other, think through how stupid this is."** OBSERVED, per his screenshot: the left card ("This window") read **"Keep this one"** (self-referential) and the right card ("The other window") read **"Use the other"** (other-referential) — mechanically the same action (keep the version the card sits under), phrased from the LEFT card's own fixed vantage point, so standing on the right card "the other" most naturally reads as "go back to the left one" — backwards from what the button does. Minted **B1053568** from this branch's reserved block B1053568–B1053583 against freshly-fetched `origin/main` 8f09df1. DEDUPE-FIRST — searched Open/⏳Verify/Done for "Keep this one", "Use the other", "notesConflictLine", "ConflictCompare", "symmetric label": only B1023120/B842624 built the buttons being amended here; no prior item questioned their symmetry. Net-new.)*
+`[x]` **SHIPPED THIS SESSION.** Both buttons now read the identical string, **"Keep this version"** — `notesConflictLine` (`lib/notesStore.js`) returns one label for both `keepMine`/`keepTheirs` instead of a self-referential verb on one side and an other-referential verb on the other, following the Google Drive version-history precedent named in the brief's own reference set (every version's own restore control reads identically; which version it acts on is purely positional — the card it sits under). Each button keeps a distinguishing `aria-label` ("Keep this window's version" / "Keep the other window's version") for a screen-reader user who loses the positional cue a sighted reader gets for free. The supporting consequence line under each card (what is kept, and that the un-picked copy is saved and nothing is lost) is unchanged in substance, exactly as the brief asked.
+- Verify: **live** — **V590160**, shared with B1053569/B1053570 (one review surface, one real two-window check). `Blocker: auth`.
+- Origin: owner chat block, 2026-09-02
+- Guards: `test/notesModule.test.js` (the RADIUS/module-scope/no-second-person scans extended to the new file set), full suite green (14,178 tests), lint 0, build green.
+- Files: `src/workspaces/notes/lib/notesStore.js`, `src/workspaces/notes/components/ConflictSideBySide.jsx` (new, see B1053569), `src/workspaces/notes/components/ConflictReview.jsx` (new, see B1053570).
+- Base: `origin/main` @ `8f09df1`.
+
+### B1053569 — Two side-by-side text blocks make the owner diff a barely-changed note by eye; he asked for a redline instead `[notes/ui]` (feature) #notes #ui #compare  *(owner chat block 2026-09-02, NEW-2: **"wouldn't a redline be better, so I can see the differences over each other."** He is a real-estate developer — Word's Track Changes / Compare Documents and a redlined lease are his native document-review idiom, not a side-by-side diff. His own screenshot showed two versions that are almost entirely identical text, which is exactly the case side-by-side handles worst: the real difference (a word or two) is buried in two full columns instead of marked in place. Minted **B1053569** from this branch's reserved block, same as B1053568, against the same `origin/main` 8f09df1. DEDUPE-FIRST — searched Open/⏳Verify/Done for "redline", "track changes", "word diff", "notesConflictDiff": B842624/B1023120 built the word-LEVEL diff engine this reuses (`lcsAlign`, factored out in this item so both diffs share one DP rather than two copies) but never a single-document, in-place rendering of it. Net-new.)*
+`[x]` **SHIPPED THIS SESSION.** `ConflictReview.jsx`'s comparison view now opens on a REDLINE by default — one document, insertions underlined, deletions struck through, in place — with the original two-card side-by-side (renamed `ConflictSideBySide.jsx`) one toggle away for the rare case a full rewrite reads easier as two independent columns.
+  - **THE ANTI-PATTERNS, named in the brief, each closed:** *a developer diff* (+/- gutters, monospace, line numbers) — avoided; the redline renders the note's own tags (heading levels, bullets, a colored callout) in the app's own type scale, never a code font. *Character-level noise* — the diff runs at WORD granularity (never a single re-typed character flagged); *"prefer whole changed phrases"* — a block that is wholly added or removed (not just edited) renders as one whole inserted/deleted unit, never fragmented. *Losing the note's own formatting* — the redline walks the raw ProseMirror document model directly (never `docToText`, which flattens on purpose for search) and keeps headings, bullet/ordered lists, blockquotes, colored callouts, collapsible toggles, and every inline mark (bold/italic/underline/color/highlight/link) all the way to the screen. *Colour as the only signal* — an insertion is underlined AND green, a deletion is struck through AND red; either signal alone still identifies which is which.
+  - **SCOPE, stated rather than silently mishandled:** a picture, attachment, sketch, placed box, or table is treated as one OPAQUE unit — diffed for equality (identical → unchanged; different → shown removed+added, each labelled by name/kind) but never diffed word-by-word inside itself. The owner's own named case (headings/bullets/a contact block) is all running text, which is what this scope covers; nothing throws or silently drops content on the excluded kinds.
+  - **THE ENGINE — `lib/notesRedline.js` (new, PURE, unit-tested) + `components/NoteRedline.jsx` (new, the renderer).** Flattens each side's document into leaf blocks carrying a structural nesting PATH (list/blockquote/callout/toggle, never an instance id — matching is on TYPE and attributes, so an insertion or deletion in the middle of an otherwise-unchanged list still renders as one `<ul>`, not two fragments); block-matches the two sides with `notesConflictDiff.js`'s `lcsAlign` (extracted from `lcsDiff` as the shared LCS primitive rather than a second copy); and runs a word-level diff, MARKS preserved, inside every matched pair — so a one-word edit inside a long paragraph marks exactly that word, never the whole paragraph twice over. 15 new cases in `test/notesRedline.test.js`, including the owner's own named shape (a heading + bullets + a contact block, one differing word buried in a long sentence) and a mutation-relevant case proving a structural change (a paragraph promoted to a heading) is shown as a clean add+remove rather than merged into a nonsensical word diff.
+  - **THE CRITIQUE LOOP, screenshotted at 1400×900 and 390×844, both themes, via a throwaway local harness (never shipped) — two rounds, not one, per the brief's explicit instruction not to stop at a first pass that already looks fine:**
+    - Round 1 found the redline's reading column floating on the bare page background read as sparse/unfinished at desktop width, and — a real functional defect — switching to "Side by side" showed the SAME two "Keep this version" buttons twice on screen at once (once inside each card, once again in the review's own footer). Fixed: the redline sits inside a bordered "page" card (a document-reading width, not empty chrome), and the footer's resolve row now renders only in redline view — side-by-side's own per-card buttons are the only copy on screen there.
+    - Round 2 found the compact notice's message truncating to unreadable ("…also cha…") at a phone width, because it was forced onto one line. Fixed: the notice wraps onto a second/third line on a narrow screen instead of hiding its own words — still far more compact than the banner it replaces, just not force-fit to one line at any cost.
+    - Final honest answers: (1) under three seconds, using only what's on screen — yes, the one changed word sits underlined/struck-through in the middle of an otherwise-plain sentence; (2) symmetric pair, not instruction-and-opposite — yes (B1053568); (3) resting notice calm and small — yes (B1053570); (4) at home next to Word's Compare Documents — yes, inline colour + underline/strikethrough on the note's own formatting, no diff gutters; (5) ship to a paying customer — yes.
+- Verify: **live** — **V590160**, shared with B1053568/B1053570. `Blocker: auth`.
+- Origin: owner chat block, 2026-09-02
+- Guards: `test/notesRedline.test.js` (15, new) · `test/notesConflictDiff.test.js` (16, unchanged, still green against the `lcsAlign` refactor) · `test/notesModule.test.js` (file lists + guards extended) · `test/mapDrift.test.js` (MAP.md regenerated) · `test/designDrift.test.js` (within the existing ceiling — no raw hex/off-scale radius or font size in any new file) · full suite green (14,178 tests) · lint 0 · build green.
+- Files: `src/workspaces/notes/lib/notesRedline.js` (new), `src/workspaces/notes/components/NoteRedline.jsx` (new), `src/workspaces/notes/lib/notesConflictDiff.js` (the `lcsAlign` extraction), `test/notesRedline.test.js` (new), `MAP.md`.
+- Base: `origin/main` @ `8f09df1`.
+
+### B1053570 — The conflict compare surface seizes the top third of the window instead of a quiet notice you open on demand `[notes/ui]` (feature) #notes #ui #compare  *(owner chat block 2026-09-02, NEW-3: **"it shouldn't just pop up with this massive banner, i should be able to click something that takes me to this but on full screen for review."** OBSERVED, per his screenshot: the B1023120 compare bar rendered as a very tall inline banner, roughly the top third of the window, pushing the note he was actually working in down out of the way — urgency mismatched to the actual stakes, which are low (neither choice ever destroys anything). Minted **B1053570** from this branch's reserved block, same as B1053568/B1053569, against `origin/main` 8f09df1. DEDUPE-FIRST — searched Open/⏳Verify/Done for "conflict bar height", "full screen review", "compact notice": B1023120/B842624 built the tall bar being replaced; no prior item asked for a compact/full-screen split. Net-new.)*
+`[x]` **SHIPPED THIS SESSION.** The inline banner is now `ConflictNotice.jsx` — one line of text plus a "Review changes →" button, `role="alert"`, inline and never floated (per `docs/DESIGN.md`'s floating-notifications rule, which names this module's `role="alert"` blocks as chrome that must not move) — carrying no resolve choices of its own. Clicking it opens `ConflictReview.jsx`, a full-screen surface (the same category as the existing `QuickOpen.jsx` overlay: explicitly opened by the user, not an ambient notification) with room to actually read the redline (B1053569) or the side-by-side view.
+  - **BOTH PROPERTIES NAMED IN THE BRIEF AS MUST-NOT-REGRESS, kept:** resolving is reachable — both "Keep this version" buttons live in the full-screen review, one click from the notice, never more; and the footer's unresolved-vs-resolved indicator (`notesStorageLine`'s "Synced · one note also changed in another window" → "Synced to your account") is untouched — it reads off the same `syncState`/`conflicts` map this change never touches.
+  - Closing the review (Esc or ✕) does NOT resolve anything — it returns to the compact notice, unresolved, confirmed by driving a real Escape key press against the live component and reading the DOM before/after.
+  - Guards: `test/notesModule.test.js` (extended file lists/guards) · full suite green · lint 0 · build green (`ConflictNotice`'s own lazy chunk — off the Notes route's first paint, same as its predecessor).
+- Verify: **live** — **V590160**, shared with B1053568/B1053569 (the notice's resting state and the review's full-screen open both need a real two-window screenshot pass; the Esc/resolve behaviour is already confirmed headless, see below). `Blocker: auth`.
+- Origin: owner chat block, 2026-09-02
+- Files: `src/workspaces/notes/components/ConflictNotice.jsx` (new), `src/workspaces/notes/components/ConflictReview.jsx` (new), `src/workspaces/notes/Notes.jsx`, `src/workspaces/notes/CLAUDE.md`.
+- Base: `origin/main` @ `8f09df1`.
+
 ### B842928 — Map finder road-name labels render oversized/blurry: the Reference layer lacked `detectRetina`, so it fetched tiles one native zoom level (and under real latency, several more) behind the aerial `[Site Planner / map]` (bug) #site-planner #gis #ui  *(owner report, 2026-09-01, with screenshot: street names ("Fuqua St", "Sem Houston", "I-45 HOV Ln", "Telephone Rd") render gigantic and blurry on the map finder. MEASURED LIVE on his browser (planyr.io/#/map): the Reference/World_Transportation tile layer sat at z9 (18 tiles, zero load errors) while the World_Imagery aerial reached z10/z13/z15, unchanged across two further zoom-ins; Reference tiles also rendered at 256 CSS px vs the aerial's 128 CSS px (half density). Minted **B842928 / V464240** from this branch's reserved block B842928–B842943 · V464240–V464255 against `origin/main` 7a64249. DEDUPE-FIRST — searched Open/⏳Verify/Done for `LABELS_TILES`, `World_Transportation`, `Reference layer`, `PLACE_NAMES_MIN_ZOOM`, `road name label`: B427410(×3) touched this same layer (naming/opacity/rename, 2026-08-29) but never its zoom/density behaviour; B1161 is a *different* MapFinder tile-cap defect (a second Leaflet map missing the B1121 cap). Net-new.)*
 `[x]` **SHIPPED THIS SESSION — root mechanism found, fixed, and mutation-proven (red on the pre-fix build, green on the fix) against a real ArcGIS tile host.**
 - Verify: live — zoom-/data-density-dependent rendering is a mandatory LIVE-VERIFY class. **V464240.** `Blocker: live-GIS` for the one remaining leg — Chromium in this sandbox cannot reach `planyr.io` itself (`ERR_CONNECTION_RESET` on every attempt; plain `curl`/Node `https.get` reach it fine, so this is the sandbox's Chromium egress allowlist, not a real outage) — see what WAS verified below, which is everything short of driving the actual production page.
@@ -4929,6 +4963,125 @@ rather than reasoning about the code — every prior round's structural analysis
   — 0 errors. `node ui-audit/design-drift-audit.mjs --check` / `node ui-audit/doc-pointer-audit.mjs`
   / `node scripts/build-map.mjs --check` all pass.
 - Files: `src/shared/comps/components/CompEntryGrid.jsx`, `ui-audit/verify-comp-entry-p0.mjs`.
+
+**⛔ ROUND 25 (B986096-HARDENING-25, owner chat block 2026-09-02) — VISUAL CONSISTENCY: the owner
+pointed at a 4×4 crop of the deployed sheet and it contained fourteen defects across eleven
+categories, all measured live (`getComputedStyle`/`getBoundingClientRect`) against deployed build
+`8f09df1` and handed over as literal numbers rather than a fresh discovery pass.** Every prior round
+fixed FUNCTION (keyboard commit, focus, field coverage); this is the first round to audit the sheet's
+own visual consistency as its own category, and it found a real, previously-unknown, REPO-WIDE latent
+defect along the way.
+1. **THE ROOT CAUSE BEHIND THE "MAP SHOWS THROUGH THE GRID" REPORT: `--surface-base` was referenced
+   by ~10 components (this file's own cell/select editors + paste box, `PartyNameField.jsx`,
+   `CompDraftsPanel.jsx`, `CompsPanel.jsx`, `SitePlansSection.jsx`, `NoteEditor.jsx`,
+   `RoadCrossSectionDialog.jsx`, `SetLocationDialog.jsx`) but was NEVER DEFINED anywhere in
+   `index.css`.** An unresolved CSS custom property with no fallback computes to fully transparent —
+   every one of those inputs was rendering with a see-through background, which is exactly why
+   satellite imagery and street labels showed through an actively-edited cell. Fixed by defining
+   `--surface-base` (light `#F3F5F8` / dark `#14161B`, an alias of `--surface-page` — an opaque
+   "recessed field on a raised panel" surface, distinct from `--surface-raised`) in `index.css` +
+   `docs/DESIGN.md`'s token table. Fixes all ~10 call sites at once; none of them ever intended
+   transparency. Separately, the SHEET's own resting cells used `--surface-overlay` (the app's
+   "frosted floating panel" token, deliberately translucent .94/.93 alpha everywhere else it's used)
+   for most cells and the opaque `--surface-raised` only for na/derived ones — backwards for a
+   DATA-DENSE GRID, where the whole point is reading every cell without the map bleeding through. Every
+   `<td>`/`<th>` (and the panel behind the table) now uses an opaque surface unconditionally
+   (`--surface-raised` at rest, `--surface-page` for na/derived), regardless of `col.frozen`.
+2. **Group-header alignment now matches the column(s) it spans, and a one-column "group" is blank
+   rather than doubled.** A group band's `textAlign` was hardcoded `"left"` regardless of what's
+   beneath it — DEAL/PRICE/DERIVED are frequently exactly one column wide (a land-only sheet hides
+   every lease/building-sale column), and a left-aligned label over a right-aligned numeric/date
+   column reads as belonging to the column to its LEFT. `computeVisibleGroupRuns` (`CompEntryGrid.jsx`)
+   now takes a single-column run's own column alignment; a multi-column run stays left (matches the
+   two multi-column groups, PROPERTY and PARTIES, which the owner's own table already marked "ok").
+   The SAME function collapses a one-column group's LABEL to blank (background/border kept, so the
+   ruling stays unbroken) — a group of one repeats its lone column's header almost verbatim (PRICE
+   atop Price, TYPE atop Type) with nothing else to justify the band. This is generic and reapplies
+   live: the moment a second column joins a group (a building-sale row adds NOI/Cap to PRICE, a lease
+   row turns DEAL/RENT/CONCESSIONS into real multi-column groups), its label reappears automatically —
+   confirmed live for both the land-only AND lease column sets.
+3. **Notes moved out of PARTIES into its own one-column NOTES group** (`compSheetColumns.js`) — a
+   note isn't a party, it's freeform commentary on the whole comp; nesting it under PARTIES was a
+   membership error, not a layout choice. (Its group band is blank per point 2 above, same as any
+   other one-column group — the fix is the membership, not a new visible label.)
+4. **Row heights + baselines unified to one deterministic recipe.** Every `<td>` and its inner
+   content (span/button/input/select) now share an explicit `height`/`verticalAlign: middle`/
+   `boxSizing: border-box` — no more `height: "100%"` on an intrinsic element like the Location
+   `<button>`, which is a classic cross-browser inconsistency (percentage height inside a `<td>` is
+   not reliably resolved against a table-cell containing block) and is what produced the owner's
+   measured 2px-taller rows. Confirmed live across a 2-row sheet: both rows render at the identical
+   height, and every td/span/button in a row reports the identical `verticalAlign` (a stray "Set"
+   placeholder span and the blocking-flag glyph span — see point 6 — both lacked `verticalAlign` and
+   were the last two "baseline" outliers; fixed).
+5. **Ruling made complete and symmetric.** Every `<td>`/`<th>` (data cells, both header rows, the
+   frozen columns, the sticky remove-row corner) now declares all FOUR border sides explicitly and
+   IDENTICALLY (`border: "1px solid var(--border-default)"`) instead of only ever declaring
+   right+bottom. The un-declared top/left sides were exactly the owner's "dark on two sides, light on
+   two" finding: `border-color`'s CSS-spec initial value is `currentColor`, so an un-set side reports
+   the cell's own TEXT color regardless of whether anything actually paints there (`border-style` was
+   never set for those sides either, so nothing rendered — but the computed style read as though it
+   might). Declaring identical borders on every side removes the ambiguity outright; under
+   `border-collapse` two adjacent cells declaring the same border merge into one line, so this never
+   doubles a seam, and it closes the grid in a clean full frame rather than an implicitly-unbordered
+   edge. (The report's separate observation that the deployed hairline computed to a non-integer
+   `0.930233px` is a devicePixelRatio/zoom rendering artifact — this repo's own
+   `PERCEPTUAL-PARITY`/`FOREGROUND-OR-VOID` rules already document that class of measurement quirk;
+   it is not something a plain `1px` CSS declaration can chase further, and is unrelated to the actual
+   asymmetric-color defect this round fixed.)
+6. **Selection vs. a blocking error now differ by more than hue, per this repo's own standing
+   precedent — `--accent` and `--danger-text` are UNCHANGED.** `index.css`'s B464049 note is explicit,
+   after an earlier session's live-tested and owner-corrected mistake, that the brand accent stays the
+   accent (it's the SAME orange used for every active control app-wide) and the fix for "an error
+   color reads too close to it" is never to re-tune either token — it's to add a channel other than
+   hue (an icon, weight, a message), the same WCAG 1.4.1 reasoning that note already applies to
+   form-field errors. A blocking-flagged cell (the lease-rate-with-no-period case) now renders bold
+   (`fontWeight: 700`) with a small ⚠ glyph ahead of its value, in addition to its existing
+   `--danger-text` color — never confusable with the plain accent selection outline, which carries
+   neither.
+7. **Padding singletons closed.** The Type/Unit/Per/Basis `<select>` editor's padding override
+   (`"0 2px"`, the report's own named "Type SELECT editor" singleton) is gone — it now matches every
+   other cell's `"0 5px"`, so a cell's text no longer visibly shifts between resting and editing.
+   The sticky remove-column header (a content-less rowSpan-2 spacer) and the remove-row data cell
+   previously left padding/border/fontWeight/textAlign to the browser's own `<th>`/`<td>` UA defaults
+   (1px padding, centered, bold) — now explicit (`padding: 0`, matching every structural td/th; the
+   header spacer's `fontWeight`/`textAlign` pinned rather than left to inherit), closing the "1px on
+   one, 2px on one" singletons the report measured. (The one KNOWN remaining low-population value —
+   the delete/remove ✕ column's own `textAlign: "center"` — is a deliberate exception: it's a utility
+   icon column, not a data column, and centering its single glyph is the correct, common convention.)
+8. **Header weight hierarchy made real.** Column-label weight dropped from 700 to 600 (the group
+   band stays 800) — a 100-unit gap is imperceptible at 10px, so the hierarchy was actually being
+   carried entirely by case (CAPS vs. Title Case); a 200-unit gap using a value already on this app's
+   own type scale (`Button`/`ToggleChip`'s own weight, per `docs/DESIGN.md`) is genuinely visible,
+   confirmed live (`fontWeight: "800"` vs `"600"`, was `"800"` vs `"700"`).
+9. **An empty date cell now shows a format-hint placeholder while editing.** A new `editHint` field
+   on the two date columns (Executed, Commencement — `compSheetColumns.js`) becomes the native
+   `<input placeholder>` ONLY while the cell is actively being edited — deliberately NOT the same
+   thing as HARDENING-10 NEW-4's resting `cellPlaceholder`, which stays "always empty" on purpose (a
+   value-shaped word sitting in an unfilled cell at rest reads as data). A format hint that only
+   appears once you're already focused and typing can never be mistaken for a real stored value.
+   Confirmed live: an emptied Executed cell shows "mm/dd/yy" the instant it's opened for edit.
+- **Verify: sandbox.** Every check above was proven live against the real, unmocked dev build (not
+  from code reading) via a new permanent regression harness,
+  `ui-audit/verify-comp-entry-grid-consistency.mjs` (`npm run verify:compentrygrid`) — a real
+  Chromium session against a fixture-seeded local plan, signed out, no network needed (matches
+  ATTEMPT-BEFORE-YOU-PARK: this whole check is Claude-doable headless and was done this session, not
+  filed as a live-only follow-up). It runs the SAME property sweep the owner's own brief specified
+  (bucket every th/td and its inner span/button/input/select by fontSize/fontWeight/lineHeight/
+  letterSpacing/textAlign/verticalAlign/color/backgroundColor/opacity/padding/height/border-*-width/
+  border-*-color/outlineColor/textTransform) for BOTH deal-type column sets (land-only and a lease
+  row with Rate/Basis/Escal/TI/Per/$-SF-yr all visible) — 15/15 targeted checks pass, and the raw
+  sweep's remaining population-≤2 values are all named exceptions: the Location cell's 16px font and
+  the delete-row ✕'s 13px font (explicitly out of scope this round — owned by a sibling session), and
+  the delete column's own centered alignment (point 7 above). Full `npx vitest run` — 687 files,
+  14,153 tests green (161 in `compSheetColumns.test.js`/`comps.test.js` directly touched). `npx
+  eslint src/shared/comps/components/CompEntryGrid.jsx src/shared/comps/lib/compSheetColumns.js` — 0
+  errors. `npm run build` clean. `node ui-audit/contrast-audit.mjs` — every token pair still clears
+  its WCAG floor (unaffected — no token's hex value changed, `--surface-base` is a same-value alias
+  of the already-audited `--surface-page`). `node ui-audit/design-drift-audit.mjs --check` /
+  `node scripts/build-map.mjs --check` clean.
+- Files: `src/index.css`, `docs/DESIGN.md`, `src/shared/comps/components/CompEntryGrid.jsx`,
+  `src/shared/comps/lib/compSheetColumns.js`, `ui-audit/verify-comp-entry-grid-consistency.mjs` (new),
+  `package.json` (`verify:compentrygrid`).
 
 ### B986097 — A draft staging table, reachable only by the KML import `[Site Planner / comps]` (feature) #comps #gis #persistence  *(owner chat block 2026-09-01, NEW-2, same decision doc as B986096 above. Minted **B986097 / V556721** from this branch's reserved block B986096–B986111 · V556720–V556735 against `origin/main` 8e42a14. DEDUPE-FIRST — searched Open/⏳Verify/Done for "KML", "My Maps", "import draft", "staging table", #comps: no prior item touches KML/My Maps import; net-new. Also searched for any prior `comp_import_drafts`/`comp_drafts` table — none exists.)*
 `[x]` **Shipped this session, including the schema — applied directly to production** (this session has Supabase MCP write access, unlike the read-only access a prior comps session flagged in this same module's folder pointer — that stale claim was corrected in the same commit).
