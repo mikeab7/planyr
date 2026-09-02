@@ -1744,7 +1744,8 @@ const XIcon = () => (
 const trimNum = (n) => String(Math.round(n * 1000) / 1000);
 const fmtScaleNum = (n) => { const r = Math.round(n * 10) / 10; return Number.isInteger(r) ? String(r) : r.toFixed(1); };
 
-export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, cloud = null, layerStatus = {}, setLayerStatus, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onDeletePlan, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved, shellModule, onShellSwitch, onOpenReviewInDocReview, authControl, accountActive = false } = {}) {
+export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, cloud = null, layerStatus = {}, setLayerStatus, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onDeletePlan, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved, shellModule, onShellSwitch, onOpenReviewInDocReview, authControl, accountActive = false,
+  backgroundPushFailed = false, backgroundPushDetail, onRetryBackgroundPush } = {}) {
   // Theme palette as real hexes (canvas = SVG + PNG/PDF export, where var() can't be
   // used). Maps the active theme's tokens onto this file's existing PAL keys, so the
   // ~70 canvas color usages below stay untouched. (B317/B319)
@@ -19258,6 +19259,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (saveStatus === "saving" || (cloudActive && (elemSync.state === "syncing" || elemSync.state === "retrying"))) return "saving";
     if (cloudSaveFailed) return "error";
     if (cloudActive && !connOk) return "offline";
+    // NEW-1 — a background push OUTSIDE this open plan's own save (a rename, a status change, a
+    // new-site mirror) can fail while everything about THIS plan looks fine. The badge is the
+    // one always-visible truth about whether the account is caught up with the cloud, so it must
+    // not read "Synced" while one of those sits unretried — see SitePlannerApp's pushError.
+    if (cloudActive && backgroundPushFailed) return "error";
     return cloudActive ? "synced" : "local";
   })();
 
@@ -21527,9 +21533,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         ) : undefined}
         // Conflict needs a reload, not a blind retry — so only offer "Retry now" for a plain
         // failed write; the conflict case gets its own explanation (the loud banner handles reload).
-        onRetrySave={() => { retryCloudSave(); retryElems(); }}
+        // NEW-1 — also retries a failed BACKGROUND push (rename/status/new-site) when that's what's
+        // driving the badge; harmless to include when it isn't (onRetryBackgroundPush is then unset).
+        onRetrySave={() => { retryCloudSave(); retryElems(); onRetryBackgroundPush?.(); }}
         saveDetail={elemSync.state === "stale" ? "This tab is out of date — reload to keep saving" :
-          elemSync.state === "failed" ? "Some changes haven't reached the cloud — Retry" : elemSync.pending > 0 && (elemSync.state === "syncing" || elemSync.state === "retrying") ? `Syncing ${elemSync.pending} change${elemSync.pending === 1 ? "" : "s"}…` : undefined}
+          elemSync.state === "failed" ? "Some changes haven't reached the cloud — Retry" : elemSync.pending > 0 && (elemSync.state === "syncing" || elemSync.state === "retrying") ? `Syncing ${elemSync.pending} change${elemSync.pending === 1 ? "" : "s"}…` :
+          backgroundPushFailed ? backgroundPushDetail : undefined}
         centerContent={<JurisdictionBadge badge={jurBadge} />}
         planSlot={plannerPlanCrumb}
         authControl={authControl}
