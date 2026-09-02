@@ -83,6 +83,27 @@ export const RECOVERY_EPISODE_MAX_MS = 30 * 60_000;
 
 const BUILD = typeof __BUILD_ID__ !== "undefined" ? __BUILD_ID__ : "dev";
 
+/* NEW-2 (B######) — "stuck" used to be silent: the auto-reload recovers a stale chunk, but a
+ * chunk that is STILL missing after a fresh reload (a mid-propagating deploy) falls through with
+ * only a telemetry row. Nothing told the user the app needed a moment and a manual reload — a
+ * background write gated on that chunk (a rename, a lock toggle) just kept failing with no visible
+ * explanation of WHY retrying wouldn't help. This is a tiny module-scope pub-sub (no React import
+ * needed here) so any always-mounted shell component can show one banner regardless of which
+ * write or route tripped the failure. Cleared only by a real page load — there is no "un-stuck"
+ * short of a reload actually landing on a build that has the chunk. */
+let _stuck = false;
+const _stuckListeners = new Set();
+function markChunkRecoveryStuck() {
+  if (_stuck) return;
+  _stuck = true;
+  for (const fn of _stuckListeners) { try { fn(true); } catch { /* listener must not break the guard */ } }
+}
+export function isChunkRecoveryStuck() { return _stuck; }
+export function subscribeChunkRecoveryStuck(fn) {
+  _stuckListeners.add(fn);
+  return () => { _stuckListeners.delete(fn); };
+}
+
 /* The failing chunk's filename, out of whatever the preloadError carried. Reported instead of the
  * full URL because the FILENAME is the identity (`terrainLayers-aE2wQGtV.js` — module + content
  * hash), and it is what makes two rows the same episode or different ones. Never throws. */
@@ -325,6 +346,11 @@ export function installChunkReloadGuard(win = typeof window !== "undefined" ? wi
       if (stage === "reload" || shouldReportFailure(rec.f)) {
         reportClientEvent("chunk-recovery", recoveryLine(stage, { n: rec.n, f: rec.f, c: chunk, b: BUILD }));
       }
+      // NEW-2 — "stuck" is the one outcome that used to end here, silently: the ErrorBoundary
+      // only ever sees this if the failing import happened to be on a Suspense-wrapped render
+      // path, but the same chunk can gate a background WRITE (a rename, a plan lock) that has no
+      // render boundary to fall into at all. Tell every mounted surface the app needs a reload.
+      if (stage === "stuck") markChunkRecoveryStuck();
     } catch { /* telemetry must never throw into the app */ }
     // Only "reload" auto-recovers; "stuck" (still failing after a fresh reload) and
     // "cooldown" (just reloaded) fall through to the ErrorBoundary instead of looping.

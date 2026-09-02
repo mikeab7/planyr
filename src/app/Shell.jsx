@@ -20,7 +20,7 @@ import { useHashRoute, unknownModuleSlug, isAdminRoute, isDesignRoute, readRoute
 import { pageTitle } from "./pageTitle.js";
 import { writeLastRoute, seedBootRoute } from "./lastRoute.js";
 import { installBuildSkewWatch, shouldOfferReload, fetchServedBuild, isBuildSkewed, LOADED_BUILD } from "./buildSkew.js";
-import { reloadFresh } from "./chunkReload.js";
+import { reloadFresh, isChunkRecoveryStuck, subscribeChunkRecoveryStuck } from "./chunkReload.js";
 import { RADIUS } from "../shared/ui/radius.js";
 import FloatingNotice from "../shared/ui/FloatingNotice.jsx";
 import { mayResumeLastSite } from "../workspaces/site-planner/lib/bootResume.js";
@@ -90,6 +90,8 @@ function UpdateBanner({ reason, onReload, onDismiss }) {
         <span style={{ flex: 1, minWidth: 0 }}>
           {reason === "route-miss"
             ? "That part of Planyr is newer than the copy this tab has open — reload to get it."
+            : reason === "chunk-stuck"
+            ? "Planyr couldn't finish loading part of the app just now (likely mid-deploy) — a reload should fix it. Anything you were changing is saved on this device."
             : "A newer version of Planyr is available. Reload when you're ready — your work is saved."}
         </span>
         <button
@@ -279,6 +281,11 @@ export default function Shell() {
    *  parseRoute has already resolved the miss away by then. */
   const [servedBuild, setServedBuild] = useState(null);
   const [dismissedFor, setDismissedFor] = useState(null);
+  // NEW-2 — a chunk that is STILL missing after the auto-reload already tried once (a
+  // mid-propagating deploy). Independent of the build-skew signals below: this is a CONFIRMED
+  // current failure, not a heuristic, so it wins whenever both are true. See chunkReload.js.
+  const [chunkStuck, setChunkStuck] = useState(() => isChunkRecoveryStuck());
+  useEffect(() => subscribeChunkRecoveryStuck(setChunkStuck), []);
   const [routeMiss, setRouteMiss] = useState(() => (typeof window !== "undefined" ? !!unknownModuleSlug(window.location.hash) : false));
   useEffect(() => installBuildSkewWatch({ onServed: setServedBuild }), []);
   useEffect(() => {
@@ -314,7 +321,9 @@ export default function Shell() {
     setRouteMiss(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeMiss, servedBuild]);
-  const updateReason = shouldOfferReload({ loaded: LOADED_BUILD, served: servedBuild, dismissedFor, routeMissed: routeMiss })
+  const updateReason = chunkStuck && dismissedFor !== "chunk-stuck"
+    ? "chunk-stuck"
+    : shouldOfferReload({ loaded: LOADED_BUILD, served: servedBuild, dismissedFor, routeMissed: routeMiss })
     ? (routeMiss && dismissedFor !== "route-miss" ? "route-miss" : "newer-build")
     : null;
 
@@ -345,7 +354,7 @@ export default function Shell() {
       <UpdateBanner
         reason={updateReason}
         onReload={() => reloadFresh()}
-        onDismiss={() => setDismissedFor(updateReason === "route-miss" ? "route-miss" : servedBuild)}
+        onDismiss={() => setDismissedFor(updateReason === "route-miss" ? "route-miss" : updateReason === "chunk-stuck" ? "chunk-stuck" : servedBuild)}
       />
       <main style={{ flex: 1, minHeight: 0, position: "relative", zIndex: 0, background: "var(--surface-page)" }}>
         {/* Keep-alive render: every visited workspace stays mounted in an absolutely-

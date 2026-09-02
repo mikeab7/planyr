@@ -19,6 +19,7 @@ import { planAutosave } from "./autosavePlan.js";
 import { onAuthChange } from "../../site-planner/lib/auth.js";
 import { registerFlush } from "../../../app/flushRegistry.js";
 import { createEditorLock } from "../../../shared/presence/editorLock.js";
+import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 
 const DEBOUNCE_MS = 600;
 
@@ -155,7 +156,10 @@ export function useReviewPersistence({ buildSnapshot, isEmpty, deps, enabled = t
   useEffect(() => {
     const flush = () => {
       const snap = flushLocal();
-      if (snap && readyRef.current && dirtyRef.current) upsertReview({ ...snap, updatedAt: Date.now() }).catch(() => {}); // best-effort, only when there's an unsaved edit — a mode toggle no longer re-upserts unchanged data (B44)
+      // NEW-1 audit: best-effort by design (B44) — the synchronous local mirror above already ran,
+      // the debounce window is short, and B452's keepaliveFlushReview below is the LOUD path for a
+      // forced reload specifically. Telemetry only, so a recurring miss is still visible.
+      if (snap && readyRef.current && dirtyRef.current) upsertReview({ ...snap, updatedAt: Date.now() }).catch((e) => reportClientEvent("cloud-write-failed", "review unload-flush didn't reach the cloud (local mirror is safe)", { error: (e && e.message) || "" }));
     };
     const onVis = () => { if (document.visibilityState === "hidden") flush(); };
     window.addEventListener("beforeunload", flush);
