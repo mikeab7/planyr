@@ -35,7 +35,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "../../ui/controls.jsx";
 import { parsePaste, rowHasBlockingFlags, parseProseLine, splitPasteLines } from "../lib/compParse.js";
-import { emptyDraft, draftToComp, validateComp, summarizeLeaseComps, summarizeSaleComps, resolveCapTriangle } from "../lib/comps.js";
+import { emptyDraft, draftToComp, validateComp, validAnchor, summarizeLeaseComps, summarizeSaleComps, resolveCapTriangle } from "../lib/comps.js";
 import {
   SHEET_COLUMNS, cellState, applyCellEdit, fillDownColumn, spillPaste, visibleColumnIndices,
   computeFlexWidths, widthFor, frozenLeftOffsets,
@@ -981,17 +981,26 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
   // WHAT was blocking; there is currently exactly one blocking case (a lease rate with no stated
   // period, the 12x ambiguity) so the count now names it directly.
   const missingCount = rows.filter((r) => validateComp(draftToComp(r.draft)).length > 0).length;
+  // B986096-HARDENING-22 (owner live-report, 2026-09-02 — a row correctly missing ONLY a Location
+  // read as "did my typed Executed date not save?", costing a real diagnostic round before an
+  // instrumented trace showed compDate had been correct the whole time) — the combined "and/or"
+  // count named EITHER cause for every row, so a row missing just one read identically to a row
+  // missing both. Split into the two independent, single-cause counts HARDENING-8's own comment
+  // already established validateComp checks unconditionally, and name each on its own — never
+  // combined into one ambiguous phrase — falling back to the original "and/or" wording only for
+  // the genuinely-ambiguous case (rows missing both, mixed with rows missing just one).
+  const missingDateOnly = rows.filter((r) => !r.draft?.compDate && validAnchor(r.draft?.anchor)).length;
+  const missingLocationOnly = rows.filter((r) => r.draft?.compDate && !validAnchor(r.draft?.anchor)).length;
+  const missingBoth = missingCount - missingDateOnly - missingLocationOnly;
   let footerMsg = "";
   if (rows.length > 0) {
     if (blockingCount === 0 && missingCount === 0) footerMsg = `${readyRows.length} comp${readyRows.length === 1 ? "" : "s"} ready.`;
     else {
       const parts = [];
       if (blockingCount > 0) parts.push(`${blockingCount} rate${blockingCount === 1 ? "" : "s"} need${blockingCount === 1 ? "s" : ""} a period`);
-      // B986096-HARDENING-8 — "or" read as a choice when Executed and Location are each
-      // independently required (validateComp checks both unconditionally); a row missing either
-      // (or both) landed on the same wording. "and/or" says a row could be missing one or both,
-      // without implying only one is ever needed.
-      if (missingCount > 0) parts.push(`${missingCount} missing an Executed date and/or a Location`);
+      if (missingBoth > 0) parts.push(`${missingBoth} missing an Executed date and/or a Location`);
+      if (missingDateOnly > 0) parts.push(`${missingDateOnly} missing an Executed date`);
+      if (missingLocationOnly > 0) parts.push(`${missingLocationOnly} missing a Location`);
       footerMsg = `${readyRows.length} of ${rows.length} ready — ${parts.join(", ")}.`;
     }
   }
