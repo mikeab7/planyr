@@ -2992,6 +2992,25 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               <span style={{ flex: "1 1 auto", minWidth: 0, color: PAL.chromeMuted, fontSize: 12.5, padding: "0 6px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 Click the map to place a comp…
               </span>
+              {/* B986096 (NEW-2) — arming a row's Location cell only ever arms PIN mode
+                  (CompsPanel's `armRow` calls `onArmMapPin`, never anything parcel-related), which
+                  used to make "Comp from parcel" vanish from this toolbar entirely (it rendered only
+                  when `!placingCompPin`) — directly contradicting the entry grid's own banner, which
+                  promises the parcel option "stays a real alternative … reached the same way it
+                  always was, from the map's own toolbar." A row armed this way had NO reachable path
+                  to a parcel anchor at all. Switching modes here leaves the armed row untouched, so
+                  whichever pick lands still fills it (CompsPanel's pendingAnchor effect keys off
+                  `armedRowId`, not off which mode produced the anchor). */}
+              {mode === "comp" && onPlaceComp && (
+                <Button
+                  variant="ghost"
+                  onClick={() => { setPlacingCompPin(false); setSelectMode(true); }}
+                  title="Anchor to a parcel instead of a raw pin"
+                  style={{ ...NESTED_ACTION_SIZE, flex: "0 1 auto", minWidth: 44, overflow: "hidden", color: PAL.chromeInk, background: "var(--chrome-bg-elev)", border: "1px solid var(--chrome-divider)", boxShadow: "none" }}
+                >
+                  <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Comp from parcel</span>
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 onClick={() => setPlacingCompPin(false)}
@@ -3009,6 +3028,17 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               }}>
                 {busy ? "Looking up lot…" : (mode === "comp" ? "Selecting a parcel for a comp…" : "Selecting…")}
               </span>
+              {/* Symmetric switch back to a pin — same reasoning as above, the other direction. */}
+              {mode === "comp" && onPlaceComp && (
+                <Button
+                  variant="ghost"
+                  onClick={() => { setSelectMode(false); setPlacingCompPin(true); }}
+                  title="Drop a pin instead of anchoring to a parcel"
+                  style={{ ...NESTED_ACTION_SIZE, flex: "0 1 auto", minWidth: 40, overflow: "hidden", color: PAL.chromeInk, background: "var(--chrome-bg-elev)", border: "1px solid var(--chrome-divider)", boxShadow: "none" }}
+                >
+                  <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Drop a pin</span>
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 onClick={() => setSelectMode(false)}

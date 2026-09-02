@@ -511,6 +511,60 @@ console.log("\n=== CYCLE 6 (B986096-HARDENING-16) — NEW-1 re-investigation: ev
   check("rapid type-then-click-away (zero delay), 3 trials, none discard", allPassed);
 }
 
+console.log("\n=== CYCLE 7 (B986096-HARDENING-17, NEW-2) — arming a row for a pin must not hide the parcel alternative ===");
+{
+  // The owner reported PARCEL anchoring never once completed across 11 live cycles. Root cause:
+  // a row's Location button only ever arms PIN mode (CompsPanel's armRow -> onArmMapPin), and the
+  // map toolbar's "Comp from parcel" button rendered ONLY when `!placingCompPin` — so the instant
+  // a row was armed the way the owner already knew worked for pins, the parcel entry point the
+  // panel's own banner promises ("...or click Comp from parcel on the map toolbar...") vanished
+  // from the toolbar entirely. This cycle proves it no longer does, and that the armed row survives
+  // switching between the two modes (the pendingAnchor effect keys off armedRowId, not off which
+  // mode produced the anchor, so whichever pick lands still fills THIS row and never appends).
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 }, ignoreHTTPSErrors: true });
+  await ctx.addInitScript(fixtureSeed(fixture, { id: "p0h17a" }));
+  await ctx.route("**/*", (route) => (route.request().url().startsWith(BASE) ? route.continue() : route.abort()));
+  const page = await ctx.newPage();
+  await openEntrySheet(page);
+
+  const locCell = page.locator('td[data-cell^="0-"]').filter({ hasText: "Set" }).first();
+  const btn = locCell.locator("button");
+  await btn.click();
+  await pacedWait(page, 300);
+  check("arming the row's Location cell shows the amber banner",
+    await page.getByText("Click the map above", { exact: false }).count() > 0);
+  check("arming the row shows the pin-armed toolbar hint (\"Click the map to place a comp…\")",
+    await page.getByText("Click the map to place a comp", { exact: false }).count() > 0);
+
+  // The panel's own amber banner ALSO contains the words "Comp from parcel" (inside a <strong>,
+  // as part of its promise text) — scope to the toolbar's real <button>, not the banner's prose.
+  const parcelSwitch = page.getByRole("button", { name: "Comp from parcel" });
+  check("⛔ REGRESSION GUARD — \"Comp from parcel\" is REACHABLE on the toolbar while the row is pin-armed (used to vanish entirely)",
+    await parcelSwitch.count() > 0);
+
+  await parcelSwitch.click();
+  await pacedWait(page, 300);
+  check("clicking it switches the toolbar into parcel-select mode",
+    await page.getByText("Selecting a parcel for a comp", { exact: false }).count() > 0);
+  check("the pin-armed hint is gone now that we're in parcel mode",
+    await page.getByText("Click the map to place a comp", { exact: false }).count() === 0);
+  check("the row is STILL armed after switching modes (banner still visible)",
+    await page.getByText("Click the map above", { exact: false }).count() > 0);
+
+  const pinSwitch = page.getByRole("button", { name: "Drop a pin" });
+  check("the symmetric switch back to \"Drop a pin\" is offered from parcel-select mode",
+    await pinSwitch.count() > 0);
+  await pinSwitch.click();
+  await pacedWait(page, 300);
+  check("switching back to pin mode restores the pin-armed hint",
+    await page.getByText("Click the map to place a comp", { exact: false }).count() > 0);
+  check("the row is STILL armed after switching back (banner still visible)",
+    await page.getByText("Click the map above", { exact: false }).count() > 0);
+  check("row count never changed across either mode switch (no orphan rows)", (await rowCount(page)) === 1);
+
+  await ctx.close();
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`);

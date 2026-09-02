@@ -4823,6 +4823,57 @@ session's whole scope, worked in the owner's stated priority order.
   all pass.
 - Files: `ui-audit/verify-comp-entry-p0.mjs`. (No `src/` change this round — every item was either
   already fixed, re-confirmed correctly blocked, or investigated with no reproducible defect found.)
+**Recurrence (×14) — HARDENING PASS 13 (B986096-HARDENING-17), owner cycle-7: "the parcel path has
+NEVER once produced a saved comp across 11 live cycles — the pin path is the only one that has ever
+worked."** Per STANDING RULE #2, an owner's own live-tested report overrides HARDENING-16's
+`Blocker: live-GIS` disposition for NEW-2 — that disposition was a misdiagnosis, not just an honest
+null. **Root cause found and fixed, no touch to the escalated Enter/blur/tabindex code.**
+- **The defect: the toolbar's ONLY entry point into parcel-select mode disappeared the instant a row
+  was armed the way the owner already knew worked for pins.** A row's Location-cell button only ever
+  arms PIN mode (`CompsPanel.jsx`'s `armRow` calls `onArmMapPin` alone, never anything
+  parcel-related) — and `MapFinder.jsx`'s "Comp from parcel" toolbar button rendered ONLY when
+  `!placingCompPin`. So arming a row via the button the owner already uses for pins silently removed
+  the map's ONLY parcel-select affordance from the screen, directly contradicting the entry grid's
+  own amber banner, which promises "...or click **Comp from parcel** on the map toolbar to anchor to
+  a lot instead" — reachable "the same way it always was." It never was, once a row was armed. The
+  same asymmetry held in reverse (arming parcel-select hid "Drop a pin"). This is not a live-GIS
+  connectivity problem — it is a UI affordance that vanished before the owner could ever reach the
+  identify call that live-GIS gating actually concerns.
+- **Fix: both toolbar options stay reachable regardless of which is currently armed** — a
+  "Comp from parcel"/"Drop a pin" switch button now renders beside each mode's own hint+Cancel row,
+  swapping `placingCompPin`/`selectMode` without touching `armedRowId` (owned entirely by
+  `CompsPanel.jsx`, never read or written by this change) or `CompsPanel.jsx`'s `pendingAnchor`
+  effect. **`pendingAnchor` was re-read in full this round and already keys off `armedRowId` alone,
+  never off which mode produced the anchor** — so a parcel-kind anchor fills the ARMED row exactly
+  like a pin-kind one already does, and never appends a duplicate; that part of the machinery needed
+  no change, only a reachable door to it. `compAnchorFromSelection`/`parcelApnFromSelection`/
+  `parcelGeomFromSelection` (`lib/compParcelAnchor.js`, unchanged since #1309) were re-checked
+  against the DB schema's `comps_parcel_anchor_has_identity` CHECK constraint
+  (`db/comps.sql`: `anchor_kind = 'pin' or parcel_apn is not null or parcel_geom is not null`) —
+  they already derive a non-null `parcelApn` (joined `.acct`) and/or `parcelGeom` from the
+  selection, so the constraint is satisfied by construction; no schema or derivation change needed.
+- **What is STILL genuinely `Blocker: live-GIS`, unchanged by this fix:** the actual parcel-identify
+  click against the county's live ArcGIS service (`identifyParcelEager`/`queryAtPoint`) needs a real
+  external GIS host this sandbox's Chromium cannot reach, so `selected` can never be populated from
+  a genuine map click here — the six literal acceptance values (Location cell text, row count,
+  footer line, Save's disabled state, the Comps counter before/after save/reload) the owner asked
+  for still need his own live click-through once this ships. What this round closes is the part that
+  was blocking him from ever REACHING that identify call in the first place.
+- **VERIFIED (sandbox, structural).** New "CYCLE 7 (HARDENING-17)" block in the permanent regression
+  harness proves the toolbar switch is reachable in both directions, that the armed row survives
+  both mode switches (the banner stays visible throughout), and that row count never changes across
+  either switch — **53/53 checks green** (44 prior + 9 new), zero regressions.
+  **Mutation-proven**: the new regression-guard check was re-run against the pre-fix code (the
+  `MapFinder.jsx` change reverted, harness kept) and failed exactly as expected — the "Comp from
+  parcel" button was unreachable within the 30s locator timeout — then re-verified green with the
+  fix restored. `npx vitest run test/compParcelAnchor.test.js test/compLocationText.test.js
+  test/mapModeDecoupling.test.js test/comps.test.js test/bugHuntGuards.test.js` — 320/320 green
+  (unaffected; none of this touches the derivation or DB layer). `npx eslint
+  src/workspaces/site-planner/MapFinder.jsx ui-audit/verify-comp-entry-p0.mjs` — 0 errors. `npm run
+  build` clean. **Not verifiable from this sandbox: the real signed-in end-to-end save** (a real
+  parcel click, a real Save, a reload, a delete) — parked below in `## ⏳ Verify` as its own line
+  under the shared V556720 heading, naming exactly the six values still pending.
+- Files: `src/workspaces/site-planner/MapFinder.jsx`, `ui-audit/verify-comp-entry-p0.mjs`.
 
 ### B986097 — A draft staging table, reachable only by the KML import `[Site Planner / comps]` (feature) #comps #gis #persistence  *(owner chat block 2026-09-01, NEW-2, same decision doc as B986096 above. Minted **B986097 / V556721** from this branch's reserved block B986096–B986111 · V556720–V556735 against `origin/main` 8e42a14. DEDUPE-FIRST — searched Open/⏳Verify/Done for "KML", "My Maps", "import draft", "staging table", #comps: no prior item touches KML/My Maps import; net-new. Also searched for any prior `comp_import_drafts`/`comp_drafts` table — none exists.)*
 `[x]` **Shipped this session, including the schema — applied directly to production** (this session has Supabase MCP write access, unlike the read-only access a prior comps session flagged in this same module's folder pointer — that stale claim was corrected in the same commit).
