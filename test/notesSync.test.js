@@ -261,6 +261,53 @@ describe("planPageSeed — which copy wins", () => {
     expect(plan.purged).toEqual(["purgedOne"]);
     expect(plan.upload).toEqual([{ id: "brandNew", base: null }]);
   });
+
+  /* ⛔ NEW-1/B1055088 — AN `auto`-DIRTY PAGE (a housekeeping write, e.g. the empty-anchor
+   * litter sweep — nobody typed this, nothing here is worth interrupting the user over) never
+   * raises a conflict, even when its base rev has genuinely moved on the server: the row wins
+   * in silence exactly as an untouched page's would. See the header note above this function. */
+  describe("an `auto`-dirty page never raises a conflict — housekeeping has nothing to defend", () => {
+    it("BOTH MOVED, but this device's dirty flag is auto-only: the ROW wins (adopt), not a conflict", () => {
+      const plan = planPageSeed({
+        index: [{ id: "p1", rev: 9 }],
+        state: state({ pages: { p1: { rev: 4, dirty: true, purged: false, auto: true } } }),
+        localIds: ["p1"],
+      });
+      expect(plan.adopt).toEqual(["p1"]);
+      expect(plan.conflicts).toEqual([]);
+      expect(plan.upload).toEqual([]);
+    });
+
+    it("an UNMOVED base with an auto-dirty flag still just uploads — nothing to reconcile", () => {
+      const plan = planPageSeed({
+        index: [{ id: "p1", rev: 4 }],
+        state: state({ pages: { p1: { rev: 4, dirty: true, purged: false, auto: true } } }),
+        localIds: ["p1"],
+      });
+      expect(plan.upload).toEqual([{ id: "p1", base: 4 }]);
+      expect(plan.conflicts).toEqual([]);
+    });
+
+    it("a GENUINE (non-auto) dirty page is unaffected — this narrows WHO is asked, not what a real edit is owed", () => {
+      const plan = planPageSeed({
+        index: [{ id: "p1", rev: 9 }],
+        state: state({ pages: { p1: { rev: 4, dirty: true, purged: false, auto: false } } }),
+        localIds: ["p1"],
+      });
+      expect(plan.conflicts).toEqual(["p1"]);
+      expect(plan.adopt).toEqual([]);
+    });
+
+    it("a binned row still rebases and uploads even when auto — a delete is not a conflict either way", () => {
+      const plan = planPageSeed({
+        index: [{ id: "p1", rev: 9, binned: true }],
+        state: state({ pages: { p1: { rev: 4, dirty: true, purged: false, auto: true } } }),
+        localIds: ["p1"],
+      });
+      expect(plan.conflicts).toEqual([]);
+      expect(plan.upload).toEqual([{ id: "p1", base: 9 }]);
+    });
+  });
 });
 
 /* ════════════════════════════════════════════════════════════════════════════════════════
@@ -630,6 +677,86 @@ describe("mergeSyncState — two windows of one browser converge instead of over
     const disk = ledger({ treeRev: 12, pages: { p1: { rev: 3, dirty: false, purged: false } } });
     expect(mergeSyncState(null, disk).treeRev).toBe(12);
     expect(mergeSyncState(null, disk).pages.p1.rev).toBe(3);
+  });
+
+  /* ⛔ NEW-1/B1055088 — THE SELF-RESURRECTION BUG BEHIND THE 2026-09-02 INCIDENT. `saveSyncState`
+   * calls this merge on EVERY write, including ones where there is no sibling window at all.
+   * `pushPending` updates `sync` IN MEMORY the instant a push succeeds but does not write that
+   * success to disk until its own trailing `saveSyncState()` call — which then merges against
+   * whatever is STILL on disk from BEFORE the push (nothing else touched it in between). A blind
+   * `dirty: mine.dirty || disk.dirty` cannot tell that apart from a genuine sibling's still-
+   * pending edit, so a page that was EVER typed into never actually left the dirty set: every
+   * `refreshNotesSync()` (every tab focus, every 60s poll) re-pushed it forever, bumping the
+   * server `rev` on a page nobody touched. Reproduced end to end with no sibling window at all:
+   * one push, then four `refreshNotesSync()` calls, and the row's rev climbed 1→2→3→4→5. */
+  describe("a stale on-disk snapshot of THIS SAME WINDOW's own earlier state must never resurrect dirty", () => {
+    it("disk's dirty is STALE (an older rev than mine already confirmed) — must NOT resurrect", () => {
+      // The exact shape `pushPending`'s trailing saveSyncState hits: mine just cleared dirty and
+      // moved the rev forward (a confirmed push); disk still shows the PRE-push snapshot.
+      const mine = ledger({ pages: { p1: { rev: 1, dirty: false, purged: false, auto: false } } });
+      const disk = ledger({ pages: { p1: { rev: null, dirty: true, purged: false, auto: false } } });
+      const out = mergeSyncState(mine, disk).pages.p1;
+      expect(out.dirty).toBe(false);
+      expect(out.rev).toBe(1);
+    });
+
+    it("…and the same for the TREE — treeDirty must not resurrect from a pre-push disk snapshot", () => {
+      const mine = ledger({ treeRev: 1, treeDirty: false });
+      const disk = ledger({ treeRev: null, treeDirty: true });
+      expect(mergeSyncState(mine, disk).treeDirty).toBe(false);
+    });
+
+    it("a GENUINE sibling edit at the SAME confirmed base still resurrects — the B1391 guarantee is untouched", () => {
+      // This is the case an earlier test above already pins ("an unpushed edit in EITHER window
+      // is still owed to the cloud") — restated here beside its near-identical-looking bug twin,
+      // because the two differ only in one field (disk's rev) and must not be conflated again.
+      const mine = ledger({ pages: { p1: { rev: 2, dirty: false, purged: false } } });
+      const disk = ledger({ pages: { p1: { rev: 2, dirty: true, purged: false } } });
+      expect(mergeSyncState(mine, disk).pages.p1.dirty).toBe(true);
+    });
+
+    it("a sibling that has moved PAST mine with its own still-unpushed edit also resurrects", () => {
+      const mine = ledger({ pages: { p1: { rev: 4, dirty: false, purged: false } } });
+      const disk = ledger({ pages: { p1: { rev: 9, dirty: true, purged: false } } });
+      const out = mergeSyncState(mine, disk).pages.p1;
+      expect(out.dirty).toBe(true);
+      expect(out.rev).toBe(9);
+    });
+
+    it("mine's OWN still-genuinely-dirty state is never affected by this rule either way", () => {
+      const mine = ledger({ pages: { p1: { rev: 1, dirty: true, purged: false } } });
+      const disk = ledger({ pages: { p1: { rev: null, dirty: false, purged: false } } });
+      expect(mergeSyncState(mine, disk).pages.p1.dirty).toBe(true);
+    });
+  });
+
+  /* ⛔ NEW-1/B1055088 — `auto` merges CONSERVATIVELY: it is auto-only when EVERY dirty side
+   * agrees it is housekeeping. A genuine edit on either side must never be downgraded to
+   * "safe to drop silently" just because it merged with a sibling window's litter sweep. */
+  describe("auto — a genuine edit on EITHER side always wins the merge", () => {
+    it("both sides auto-dirty stays auto", () => {
+      const mine = ledger({ pages: { p1: { rev: 4, dirty: true, purged: false, auto: true } } });
+      const disk = ledger({ pages: { p1: { rev: 4, dirty: true, purged: false, auto: true } } });
+      expect(mergeSyncState(mine, disk).pages.p1.auto).toBe(true);
+    });
+
+    it("this window auto, the sibling genuinely dirty: NOT auto — a real edit must not be lost", () => {
+      const mine = ledger({ pages: { p1: { rev: 4, dirty: true, purged: false, auto: true } } });
+      const disk = ledger({ pages: { p1: { rev: 4, dirty: true, purged: false, auto: false } } });
+      expect(mergeSyncState(mine, disk).pages.p1.auto).toBe(false);
+    });
+
+    it("the sibling auto, this window genuinely dirty: NOT auto", () => {
+      const mine = ledger({ pages: { p1: { rev: 4, dirty: true, purged: false, auto: false } } });
+      const disk = ledger({ pages: { p1: { rev: 4, dirty: true, purged: false, auto: true } } });
+      expect(mergeSyncState(mine, disk).pages.p1.auto).toBe(false);
+    });
+
+    it("a side that isn't dirty at all doesn't count against auto", () => {
+      const mine = ledger({ pages: { p1: { rev: 4, dirty: true, purged: false, auto: true } } });
+      const disk = ledger({ pages: { p1: { rev: 4, dirty: false, purged: false } } });
+      expect(mergeSyncState(mine, disk).pages.p1.auto).toBe(true);
+    });
   });
 });
 
