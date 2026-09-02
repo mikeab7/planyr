@@ -4235,6 +4235,77 @@ file/`CompEntryGrid.jsx`/`comps.js`:
   picks it up next, not filed as a separate B# here since the owner reassigned it rather than
   deferring it.
 
+**Recurrence (×9) — PARSER SCAVENGER REWRITE, owner report 2026-09-01, measured on the live deployed
+page (bundle `index-ChNZKmVA.js`) by dispatching real `ClipboardEvent` pastes into the paste box and
+reading the rendered row back.** Michael pasted `.56/SF , 12 TI, 3% bumps` — three real facts on one
+line — and got one row: Type guessed "Land", Unit "AC", every economic field empty. Isolated by the
+report to exactly three defects, all in `compParse.js` (parser only this pass — `CompEntryGrid.jsx`'s
+rendering/column-widths/toolbar were explicitly out of scope, owned by a sibling session shipping
+concurrently):
+  1. **A blank/wrong type guess silently threw away already-extracted fields.** `detectCompType` had a
+     bare `return {value:"land", soft:true}` when nothing signalled a type, and `genericToDraft` only
+     ever writes economic fields into the RESOLVED type's own slots — so a rate/TI/escalation that WAS
+     correctly parsed had nowhere to land the moment the guess landed on "Land". Fixed: `detectCompType`
+     now returns `{value: null, soft:true}` when nothing signals a type — never a guessed "Land" — and
+     a new `inferTypeFromCapturedFields` gives the resolver one more chance reading what was actually
+     captured (a rate/TI/free-rent → lease; a cap rate or NOI → building sale; an acre size → land; a
+     price + non-acre size → building sale) before finally leaving `compType` genuinely BLANK. A blank
+     type saves nothing (`validateComp`'s existing "Pick a comp type." fires), which is correct — a
+     wrong guess presented as a value is worse than asking.
+  2. **Every labelled field only ever matched label-then-value.** "TI $12" worked, "12 TI" silently
+     didn't. `scanField` now tries a value-then-label pattern and a label-then-value pattern for TI,
+     free rent, term, escalation, cap rate, and NOI (price and size were already direction-agnostic by
+     shape). New `bldgNoi`/`bldgCapRate` extraction was added to the parser to close a real coverage
+     gap this surfaced — the schema and sheet column already existed, the parser just never filled them.
+  3. **Money required a literal "$".** `.56/SF` (no dollar sign) matched nothing. `findRateToken` now
+     accepts an explicit `/SF`/`psf` marker with `$` optional, "65 cents"/"65c"/"65¢", a bare decimal
+     directly adjacent to a monthly period word, and — last resort, only when nothing else claims the
+     number and nothing contradicts it (an area unit, a `%`, a term-duration word) — a genuinely bare
+     decimal read by MAGNITUDE (0.10–5.00 defaults to a monthly $/SF rate, the industry's own
+     convention). The rate PERIOD is never invented from magnitude — that stays a `blocking` cell,
+     unchanged. A parallel gap in `findTermBare`/`SIZE_RE` (a `$`-prefixed number could be misread as a
+     term or a size once the "no $ required" relaxation landed) is closed with the same lookbehind
+     guard on both.
+  The architecture is now a genuine SCAVENGER (the file's own new header names it): highly specific
+  fields (TI, escalation, cap, NOI, free rent, term) claim their own token first and blank it out of a
+  working copy of the line, so the generic/ambiguous detectors that run after (rate, price, size) can
+  never re-read or misinterpret a token another field already owns; whatever's left over once every
+  detector has run is preserved verbatim in `notes` rather than dropped (previously an entire line was
+  dumped to notes as all-or-nothing; it's now per-fragment). A recognized fact with no structured slot
+  to live in (a "turnkey" TI mention, a CPI-indexed escalation, a dollar-denominated escalation, an
+  unmatched unit price) still anchors a row via its note — it just isn't pure unrecognized noise.
+  Also closed: date parsing gained `Jun-27`/`6/27` (bare month/year, no day), `Q2 2027` and `mid-2027`
+  (approximate, flagged soft with a stated reason); RCD/LCD now read as COMMENCEMENT synonyms (never
+  Executed); basis words gained NN/N/abs net/IG/MG/base year (both mapped onto the schema's two
+  buckets); party detection gained `T:`, `Purchaser:`/`Grantor`/`Grantee`, `"tenant is X"`/`"landlord is
+  X"` phrasing, and a bare `"Core5 / Modular Power"` slash-line; a land/building unit price
+  (`$62,700/ac`, `$92.40 psf`) now computes a total when a matching size is known and holds as a note
+  when it isn't. 92 tests in `test/compParse.test.js` (up from 38), organized as the owner's own
+  acceptance corpus — RATE+BASIS, SIZE, TERM, FREE RENT, TI, ESCALATION, DATES, PARTIES, PRICE/SALE,
+  TYPE INFERENCE — plus the headline repro asserting the exact reported string produces Rate 0.56 / TI
+  12 / Escal 3 / Type lease / period correctly BLOCKING. Full suite green (14,000 tests), build green,
+  `eslint` 0 errors.
+  **⛔ SAME-DAY AMENDMENT (owner, after the report above) — BASIS now DEFAULTS TO NNN when the text
+  doesn't say, industrial leases being overwhelmingly triple-net.** No basis word at all → `nnn`; any
+  gross-family word (gross/full service/FS/IG/industrial gross/MG/modified gross/base year) still wins
+  outright; net-family words (NNN/nnn/triple net/tripple net/NN/N/abs net/absolute net) still map to
+  `nnn` as before. Deliberately NOT extended to the rate PERIOD, which stays genuinely blank/`blocking`
+  when unstated — the owner's own distinction: basis has one answer that's nearly always right (a
+  helpful default), period has two answers 12x apart (a guess there corrupts every comparison in the
+  sheet). No flag, no note, no marker on a defaulted NNN — renders identically to a stated one (the
+  owner has already rejected an unexplained asterisk/badge once). Headline repro updated: the reported
+  string now reads Rate 0.56 / Unit SF / **Basis NNN (defaulted, unmarked)** / TI 12 / Escal 3 / Type
+  lease / Per still blank+blocking. 93 tests, full suite still green (14,000+), build green, eslint clean.
+- Verify: live — **V575120.** The report's own acceptance bar: after merge/deploy, paste
+  `.56/SF , 12 TI, 3% bumps` into the LIVE comp paste box and read the rendered row back verbatim,
+  confirming the served bundle hash changed from `index-ChNZKmVA.js` first. `Blocker: auth` — the comp
+  paste box is reachable only inside a signed-in Site Planner project (`compsStore.js`'s owner-write
+  RLS), which this session's sandboxed browser cannot reach (the proxy CORS-blocks the Supabase auth
+  handshake, the same wall behind every other `Blocker: auth` item in this file) — attempted and
+  confirmed live, see V575120's own entry (updated for the Basis-NNN amendment).
+- Files (this pass): `src/shared/comps/lib/compParse.js`, `test/compParse.test.js`.
+- Base: `origin/main` @ `63def61` (merged into this branch after this pass's local work).
+
 ### B986097 — A draft staging table, reachable only by the KML import `[Site Planner / comps]` (feature) #comps #gis #persistence  *(owner chat block 2026-09-01, NEW-2, same decision doc as B986096 above. Minted **B986097 / V556721** from this branch's reserved block B986096–B986111 · V556720–V556735 against `origin/main` 8e42a14. DEDUPE-FIRST — searched Open/⏳Verify/Done for "KML", "My Maps", "import draft", "staging table", #comps: no prior item touches KML/My Maps import; net-new. Also searched for any prior `comp_import_drafts`/`comp_drafts` table — none exists.)*
 `[x]` **Shipped this session, including the schema — applied directly to production** (this session has Supabase MCP write access, unlike the read-only access a prior comps session flagged in this same module's folder pointer — that stale claim was corrected in the same commit).
 - Verify: live — GIS endpoint behavior (a real KML import, a real polygon centroid) + real production writes are mandatory LIVE-VERIFY classes. **V556721.**
