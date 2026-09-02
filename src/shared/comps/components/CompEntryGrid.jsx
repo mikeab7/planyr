@@ -480,7 +480,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
   const [lastCommitSummary, setLastCommitSummary] = useState(null);
   const [showPastedText, setShowPastedText] = useState(false);
   const [lastSingleParse, setLastSingleParse] = useState(null);
-  // B845648 — a merge the parser refused because two lines disagreed on a field (MERGE SAFETY).
+  // B1063904 — a merge the parser refused because two lines disagreed on a field (MERGE SAFETY).
   // Distinct from `lastSingleParse`: that one offers "Split one row per line" as the escape hatch
   // from a DEFAULT merge; this one offers the inverse — "Merge into one comp" — because the
   // default here was already NOT to merge, and the user may still want to override it.
@@ -669,7 +669,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     if (mode === "single" && newRows.length === 1) {
       setLastCommitSummary(`Read 1 comp from ${lineCount} pasted line${lineCount === 1 ? "" : "s"}`);
     } else if (mode === "split") {
-      // B845648 — MERGE SAFETY refused to merge because two lines disagreed on a field; say
+      // B1063904 — MERGE SAFETY refused to merge because two lines disagreed on a field; say
       // exactly which one, so the user knows why they got several rows instead of one.
       setLastCommitSummary(splitReason);
     } else {
@@ -703,7 +703,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     commitRows([...remaining, ...multiRows]);
     setLastSingleParse(null);
   };
-  // B845648 — the inverse of a MERGE-SAFETY split: forces the same raw paste through
+  // B1063904 — the inverse of a MERGE-SAFETY split: forces the same raw paste through
   // `parseSingleRecord` (bypassing the collision check), replacing the split rows with one merged
   // row. Only reachable from a split the parser itself just produced, so `raw` is always the exact
   // text that was refused — never a re-guess.

@@ -363,7 +363,7 @@ describe("compParse: THE HEADLINE TEST — Michael's exact repro that started th
   });
 });
 
-describe("compParse: B845648 — MERGE SAFETY, DATA CORRUPTION on paste (5 AC silently became 5 SF)", () => {
+describe("compParse: B1063904 — MERGE SAFETY, DATA CORRUPTION on paste (5 AC silently became 5 SF)", () => {
   it("a) '5 AC land sale' + '.56/SF , 12 TI, 3% bumps' -> TWO rows, never a hybrid merge", () => {
     const text = "5 AC land sale\n.56/SF , 12 TI, 3% bumps";
     const { mode, rows, splitReason } = parsePaste(text);

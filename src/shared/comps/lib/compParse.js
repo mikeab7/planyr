@@ -51,7 +51,7 @@
  *     the line contradicts it — see `findRateToken`. The parser never invents a RATE PERIOD from
  *     magnitude alone; that stays a `blocking` cell exactly as before.
  *
- * ⛔ B845648 (owner report, 2026-09-02) — DATA CORRUPTION: "5 AC land sale" + ".56/SF , 12 TI, 3%
+ * ⛔ B1063904 (owner report, 2026-09-02) — DATA CORRUPTION: "5 AC land sale" + ".56/SF , 12 TI, 3%
  * bumps" merged into ONE hybrid row that kept line 1's Size (5) and let line 2's type flip the
  * row to Lease, which has no acre unit — 5 ACRES silently became 5 SQUARE FEET, wrong by a factor
  * of 43,560, invisible because "5" still looks plausible. MERGE SAFETY closes this: `parsePaste`
@@ -867,7 +867,7 @@ function genericToDraft(generic) {
 
 /** One line -> `{ generic, flags }`, never finalized to a draft. Shared by `parseProseLine` (the
  * per-line-list shape, where every line is judged fully in isolation) and `detectFieldCollisions`
- * below (B845648 — the merge-safety check needs each line's OWN read of every field, independent
+ * below (B1063904 — the merge-safety check needs each line's OWN read of every field, independent
  * of what any other line claims, which is exactly what this builds). `respectLabels` makes a
  * label-prefixed line ("TT: Acme" / "Rate: $0.65/SF") resolve through `applyLabeledLine` instead
  * of the generic scavenger — this is what `parseSingleRecord`'s own per-line loop does, so the
@@ -913,7 +913,7 @@ export function parseProseLine(line) {
   return finalizeGenericRow(generic, flags, line);
 }
 
-/* ---- MERGE SAFETY — B845648 (owner report, 2026-09-02): "5 AC land sale" + ".56/SF , 12 TI, 3%
+/* ---- MERGE SAFETY — B1063904 (owner report, 2026-09-02): "5 AC land sale" + ".56/SF , 12 TI, 3%
  * bumps" merged into ONE row that kept line 1's Size (5) and let line 2 overwrite the Unit to SF —
  * 5 ACRES silently became 5 SQUARE FEET, wrong by a factor of 43,560, and invisible because "5"
  * still looks plausible. Root cause: `parseSingleRecord` resolves `compType` ONCE, from the whole
@@ -1198,7 +1198,7 @@ export function parsePasteBlock(text) {
 
 /** Top-level dispatcher: detects paste SHAPE (not just spreadsheet-vs-not) and returns
  * `{ mode, rows, splitReason? }` — `mode` is `"empty" | "spreadsheet" | "single" | "split" |
- * "multi"`, `rows` always `[{ draft, cellFlags, raw }]` with no entirely-empty rows. B845648 —
+ * "multi"`, `rows` always `[{ draft, cellFlags, raw }]` with no entirely-empty rows. B1063904 —
  * before merging a shape the detector called "single", MERGE SAFETY gets a veto: every line is
  * parsed on its own (`detectFieldCollisions`) and, if any two disagree on the same field, the
  * merge is refused in favor of `"split"` (one row per line, same as `"multi"`) — `splitReason` is
