@@ -669,7 +669,18 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
         // React commits it, so this trailing focus-the-grid call was never needed on a reopen in the
         // first place — skipping it here removes the only thing that blurred the old input
         // synchronously, closing the whole class rather than special-casing "same cell."
-        if (destRow && cellState(destColDef, destRow.draft).state === "editable") {
+        // B986096-HARDENING-23 (owner live-report, 2026-09-02) — "Enter does not close the
+        // editor" on a single-row grid, or on the last row: reported as low-severity but real —
+        // "it makes the grid feel broken because nothing visibly happens." The clamp itself
+        // (computeDestination's row-axis has nowhere else to go) is correct and necessary; the
+        // defect is reopening the SAME cell with the value that was just typed INTO it — there is
+        // nothing left to enter, so the reopen buys nothing HARDENING-10 NEW-3's "land the next
+        // cell in edit mode" was actually for (a genuinely different destination), and it makes a
+        // successful commit look like a no-op. Only reopen when the destination is a different
+        // cell; a same-cell clamp now closes normally, exactly like Tab wrapping to a non-editable
+        // destination or Escape already do.
+        const samecell = dest.row === target.row && dest.col === target.col;
+        if (!samecell && destRow && cellState(destColDef, destRow.draft).state === "editable") {
           beginEdit(dest.row, dest.col, null, true, destRow.draft);
           reopened = true;
         }
