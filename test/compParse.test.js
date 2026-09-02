@@ -52,9 +52,9 @@ describe("compParse: comp type detection", () => {
   it("reads acreage/land words as land, confident", () => {
     expect(detectCompType("3.2 AC land - $850k")).toEqual({ value: "land", soft: false });
   });
-  it("falls back to land, flagged soft, when nothing signals a type", () => {
+  it("B986096 x8 — never defaults to land any more; a genuinely blank signal is null", () => {
     const r = detectCompType("some random line with no signal");
-    expect(r).toEqual({ value: "land", soft: true });
+    expect(r).toEqual({ value: null, soft: true });
   });
   it("reads a bare TI mention as lease, confident — TI is lease-only vocabulary", () => {
     expect(detectCompType("TI: $13.00/sf from shell")).toEqual({ value: "lease", soft: false });
@@ -316,5 +316,397 @@ describe("compParse: spreadsheet (tab-delimited) block paste — DIFFERENT from 
 describe("compParse: splitPasteLines", () => {
   it("normalizes CRLF and drops blank lines", () => {
     expect(splitPasteLines("a\r\nb\r\n\r\nc")).toEqual(["a", "b", "c"]);
+  });
+});
+
+/* ============================================================================================
+ * B986096 x8 (owner report, 2026-09-01) — THE SCAVENGER REWRITE.
+ * "the one that started it" is the headline test: every other test below is one of the isolated
+ * defects that combined to produce it. See compParse.js's file header for the two named defects
+ * (A: one unrecognized token must never suppress a recognized one, and a row with no type signal
+ * must never default to Land; B: every labelled field scans both directions; C: money doesn't
+ * require a literal "$").
+ * ============================================================================================ */
+
+describe("compParse: THE HEADLINE TEST — Michael's exact repro that started this rewrite", () => {
+  it("'.56/SF , 12 TI, 3% bumps' -> one row, Rate 0.56 / TI 12 / Escal 3 / Type lease, period BLOCKING (never guessed)", () => {
+    const { mode, rows } = parsePaste(".56/SF , 12 TI, 3% bumps");
+    expect(mode).toBe("single");
+    expect(rows).toHaveLength(1);
+    const { draft, cellFlags } = rows[0];
+    expect(draft.compType).toBe("lease");
+    expect(draft.leaseRate).toBe("0.56");
+    expect(draft.leaseTi).toBe("12");
+    expect(draft.leaseEscalationPct).toBe("3");
+    // The rate has no stated period — this must still BLOCK, never be guessed away, even though
+    // three other facts on the same line were correctly captured (DEFECT A).
+    expect(draft.leaseRatePeriod).toBe("");
+    expect(cellFlags.leaseRatePeriod?.level).toBe("blocking");
+    expect(rowHasBlockingFlags(cellFlags)).toBe(true);
+  });
+});
+
+describe("compParse: DEFECT A — a wrong/blank type guess must never suppress a captured field", () => {
+  it("a rate found via the magnitude fallback (zero lease wording, zero /SF marker) still keeps the rate, type inferred from what was captured", () => {
+    const { draft, cellFlags } = parseProseLine(".72");
+    expect(draft.compType).toBe("lease");
+    expect(draft.leaseRate).toBe("0.72");
+    expect(cellFlags.compType?.level).toBe("soft");
+  });
+
+  it("an input with genuinely no type signal and no captured field at all produces no row — never a bogus Land row", () => {
+    expect(parseProseLine("Talked to the broker again, still no number")).toBeNull();
+  });
+
+  it("an unrecognized fragment on an otherwise-readable line is preserved in notes, never silently dropped", () => {
+    const { draft } = parseProseLine("$0.65/SF NNN, mumbojumbo xyz123");
+    expect(draft.leaseRate).toBe("0.65");
+    expect(draft.notes).toMatch(/mumbojumbo xyz123/);
+  });
+});
+
+describe("compParse: DEFECT B — every labelled field scans both directions", () => {
+  it("TI: label-before-value AND value-before-label", () => {
+    expect(parseSingleRecord("$0.65/SF NNN\nTI $12").draft.leaseTi).toBe("12");
+    expect(parseSingleRecord("$0.65/SF NNN\nTI: 12").draft.leaseTi).toBe("12");
+    expect(parseSingleRecord("$0.65/SF NNN\n12 TI").draft.leaseTi).toBe("12");
+  });
+  it("free rent: label-before-value AND value-before-label", () => {
+    expect(parseSingleRecord("$0.65/SF NNN\n6 months free").draft.leaseFreeRentMonths).toBe("6");
+    expect(parseSingleRecord("$0.65/SF NNN\nfree rent: 6 months").draft.leaseFreeRentMonths).toBe("6");
+  });
+  it("escalation: label-before-value AND value-before-label", () => {
+    expect(parseSingleRecord("$0.65/SF NNN\n3% bumps").draft.leaseEscalationPct).toBe("3");
+    expect(parseSingleRecord("$0.65/SF NNN\nbumps: 3%").draft.leaseEscalationPct).toBe("3");
+  });
+  it("cap: label-before-value AND value-before-label", () => {
+    expect(parseSingleRecord("Building sold, NOI $2,600,000\n6.25% cap").draft.bldgCapRate).toBe("0.0625");
+    expect(parseSingleRecord("Building sold, NOI $2,600,000\ncap: 6.25").draft.bldgCapRate).toBe("0.0625");
+  });
+  it("NOI: label-before-value AND value-before-label", () => {
+    expect(parseSingleRecord("Building sold\nNOI $2,600,000").draft.bldgNoi).toBe("2600000");
+    expect(parseSingleRecord("Building sold\n$2,600,000 NOI").draft.bldgNoi).toBe("2600000");
+  });
+  it("term: label-before-value AND value-before-label", () => {
+    expect(parseSingleRecord("$0.65/SF NNN\n126 months").draft.leaseTerm).toBe("126 mo");
+    expect(parseSingleRecord("$0.65/SF NNN\nterm: 126").draft.leaseTerm).toBe("126 mo");
+  });
+  it("price: label-before-value AND value-before-label (unit price, land)", () => {
+    expect(parseSingleRecord("66 ac land\n$62,700/ac").draft.landPrice).toBe(String(62700 * 66));
+  });
+  it("size: unit-adjacent works regardless of surrounding word order", () => {
+    expect(parseProseLine("Sold for $3.1M, 25,000 SF building, closed 3/14/2026").draft.bldgSizeSf).toBe("25000");
+  });
+});
+
+describe("compParse: DEFECT C — money without a literal dollar sign", () => {
+  it("a bare '.56/SF' (no $) reads as a rate", () => {
+    expect(parseProseLine(".56/SF NNN").draft.leaseRate).toBe("0.56");
+  });
+  it("'0.65 mo' (no $) reads as a monthly rate", () => {
+    const { draft } = parseProseLine("0.65 mo, NNN, 5 yr term");
+    expect(draft.leaseRate).toBe("0.65");
+  });
+  it("'65 cents' / '65c' / '65¢' all read as $0.65", () => {
+    expect(parseProseLine("65 cents NNN monthly").draft.leaseRate).toBe("0.65");
+    expect(parseProseLine("65c NNN monthly").draft.leaseRate).toBe("0.65");
+    expect(parseProseLine("65¢ NNN monthly").draft.leaseRate).toBe("0.65");
+  });
+  it("'7.80 nnn' (bare decimal, basis word for context) reads as a rate", () => {
+    expect(parseProseLine("7.80 nnn").draft.leaseRate).toBe("7.8");
+  });
+  it("a bare decimal with NO context at all is read by MAGNITUDE (0.10-5.00 -> monthly rate)", () => {
+    const { draft, cellFlags } = parseProseLine(".65");
+    expect(draft.compType).toBe("lease");
+    expect(draft.leaseRate).toBe("0.65");
+    expect(cellFlags.leaseRate?.level).toBe("soft");
+  });
+  it("that same magnitude fallback never steals a number that's actually a SIZE", () => {
+    const { draft } = parseProseLine("3.2 AC land - $850k - Jan 2026");
+    expect(draft.compType).toBe("land");
+    expect(draft.landSizeValue).toBe("3.2");
+    expect(draft.landPrice).toBe("850000");
+  });
+  it("rate period is NEVER invented from magnitude alone — still blocks", () => {
+    const { cellFlags } = parseProseLine(".65");
+    expect(cellFlags.leaseRatePeriod?.level).toBe("blocking");
+  });
+});
+
+/* ---- THE LAZY-INPUT ACCEPTANCE CORPUS ------------------------------------------------------
+ * Every line below is drawn straight from the owner's report. Each must extract the field
+ * named — a line that produces zero fields is a failure. */
+
+describe("compParse corpus: RATE + BASIS", () => {
+  const rate = (line) => parseProseLine(line)?.draft.leaseRate;
+  it("explicit $/SF forms", () => {
+    expect(rate("$0.65/sf/mo")).toBe("0.65");
+    expect(rate("$0.65 psf")).toBe("0.65");
+    expect(rate("$.65")).toBe("0.65");
+    expect(rate("$7.80/sf/yr")).toBe("7.8");
+    expect(rate("$7.80 annual")).toBe("7.8");
+    expect(rate("6.72/sf")).toBe("6.72");
+    expect(rate("$6.72 yr")).toBe("6.72");
+    expect(rate(".56/SF")).toBe("0.56");
+    expect(rate("$0.65 sf/mo")).toBe("0.65");
+  });
+  it("cents forms", () => {
+    expect(rate("65 cents")).toBe("0.65");
+    expect(rate("65c NNN")).toBe("0.65");
+    expect(rate("65 cents nnn monthly")).toBe("0.65");
+  });
+  it("bare-decimal-plus-period forms", () => {
+    expect(rate("0.65 mo")).toBe("0.65");
+  });
+  it("basis words normalize to the two schema buckets (nnn/gross)", () => {
+    const basis = (line) => parseProseLine(`$0.65/sf ${line}`)?.draft.leaseRateExpense;
+    expect(basis("NNN")).toBe("nnn");
+    expect(basis("nnn")).toBe("nnn");
+    expect(basis("triple net")).toBe("nnn");
+    expect(basis("tripple net")).toBe("nnn");
+    expect(basis("NN")).toBe("nnn");
+    expect(basis("abs net")).toBe("nnn");
+    expect(basis("absolute net")).toBe("nnn");
+    expect(basis("gross")).toBe("gross");
+    expect(basis("full service")).toBe("gross");
+    expect(basis("FS")).toBe("gross");
+    expect(basis("IG")).toBe("gross");
+    expect(basis("industrial gross")).toBe("gross");
+    expect(basis("MG")).toBe("gross");
+    expect(basis("modified gross")).toBe("gross");
+    expect(basis("base year")).toBe("gross");
+  });
+  it("period words normalize to monthly/annual", () => {
+    const period = (line) => parseProseLine(`$0.65/sf ${line}`)?.draft.leaseRatePeriod;
+    expect(period("/mo")).toBe("monthly");
+    expect(period("/month")).toBe("monthly");
+    expect(period("monthly")).toBe("monthly");
+    expect(period("per month")).toBe("monthly");
+    expect(period("/yr")).toBe("annual");
+    expect(period("/year")).toBe("annual");
+    expect(period("annual")).toBe("annual");
+    expect(period("annually")).toBe("annual");
+    expect(period("pa")).toBe("annual");
+    expect(period("per annum")).toBe("annual");
+  });
+});
+
+describe("compParse corpus: SIZE", () => {
+  const size = (line) => { const d = parseProseLine(line)?.draft; return d && [d.landSizeValue || d.bldgSizeSf, d.landSizeUnit]; };
+  it("SF forms", () => {
+    expect(parseProseLine("Building sale, 613,208 SF, $3.1M, closed 3/14/2026").draft.bldgSizeSf).toBe("613208");
+    expect(parseProseLine("Building sale, 613208 sf, $3.1M, closed 3/14/2026").draft.bldgSizeSf).toBe("613208");
+    expect(parseProseLine("Building sale, 613k sf, $3.1M, closed 3/14/2026").draft.bldgSizeSf).toBe("613000");
+    expect(parseProseLine("Building sale, 613.2k SF, $3.1M, closed 3/14/2026").draft.bldgSizeSf).toBe("613200");
+    expect(parseProseLine("Building sale, ~613k SF, $3.1M, closed 3/14/2026").draft.bldgSizeSf).toBe("613000");
+    expect(parseProseLine("Building sale, +/- 613,208 SF, $3.1M, closed 3/14/2026").draft.bldgSizeSf).toBe("613208");
+    expect(parseProseLine("Building sale, 2.88M SF, $3.1M, closed 3/14/2026").draft.bldgSizeSf).toBe("2880000");
+  });
+  it("acreage forms", () => {
+    expect(parseProseLine("66.17 ac land, $850k, Jan 2026").draft.landSizeValue).toBe("66.17");
+    expect(parseProseLine("66 acres land, $850k, Jan 2026").draft.landSizeValue).toBe("66");
+    expect(parseProseLine("66.17 AC land, $850k, Jan 2026").draft.landSizeValue).toBe("66.17");
+    expect(parseProseLine("66.17ac land, $850k, Jan 2026").draft.landSizeValue).toBe("66.17");
+    expect(parseProseLine("+/- 66 ac land, $850k, Jan 2026").draft.landSizeValue).toBe("66");
+  });
+});
+
+describe("compParse corpus: TERM", () => {
+  const term = (line) => parseSingleRecord(`$0.65/sf NNN\n${line}`)?.draft.leaseTerm;
+  it("month forms", () => {
+    expect(term("126 months")).toBe("126 mo");
+    expect(term("126 mo")).toBe("126 mo");
+    expect(term("126 mos")).toBe("126 mo");
+    expect(term("126mo")).toBe("126 mo");
+    expect(term("126-month")).toBe("126 mo");
+    expect(term("126 month term")).toBe("126 mo");
+  });
+  it("year forms", () => {
+    expect(term("10.5 yr")).toBe("10.5 yrs");
+    expect(term("10.5 years")).toBe("10.5 yrs");
+    expect(term("10-year term")).toBe("10 yrs");
+  });
+  it("combined yr+mo normalizes to total months", () => {
+    expect(term("10 yr 6 mo")).toBe("126 mo");
+  });
+  it("a labelled bare number defaults to months", () => {
+    expect(term("term: 126")).toBe("126 mo");
+  });
+});
+
+describe("compParse corpus: FREE RENT", () => {
+  const freeRent = (line) => parseSingleRecord(`$0.65/sf NNN\n${line}`)?.draft.leaseFreeRentMonths;
+  it("value-then-label forms", () => {
+    expect(freeRent("6 months free")).toBe("6");
+    expect(freeRent("6 mo free rent")).toBe("6");
+    expect(freeRent("6 free")).toBe("6");
+    expect(freeRent("6mo FR")).toBe("6");
+    expect(freeRent("six months free")).toBe("6");
+    expect(freeRent("6 months abated")).toBe("6");
+    expect(freeRent("6 mo abatement")).toBe("6");
+    expect(freeRent("6 months base free rent")).toBe("6");
+  });
+  it("label-then-value forms", () => {
+    expect(freeRent("free rent: 6")).toBe("6");
+    expect(freeRent("abatement of 6 months")).toBe("6");
+  });
+});
+
+describe("compParse corpus: TI", () => {
+  const ti = (line) => parseSingleRecord(`$0.65/sf NNN\n${line}`)?.draft.leaseTi;
+  it("label-then-value forms", () => {
+    expect(ti("TI: $13.00/sf")).toBe("13");
+    expect(ti("TIA $13")).toBe("13");
+    expect(ti("TI allowance of $13.00/SF")).toBe("13");
+    expect(ti("TI/LL work $13")).toBe("13");
+  });
+  it("value-then-label forms", () => {
+    expect(ti("$13 TI")).toBe("13");
+    expect(ti("13 TI")).toBe("13");
+    expect(ti("13 TIA")).toBe("13");
+    expect(ti("$13.00 psf TI")).toBe("13");
+    expect(ti("13.00/sf TI from shell")).toBe("13");
+  });
+  it("turnkey (a flag, no number) is preserved as a note, never a fabricated $ value", () => {
+    const { draft } = parseSingleRecord("$0.65/sf NNN\nturnkey buildout");
+    expect(draft.leaseTi).toBe("");
+    expect(draft.notes).toMatch(/turnkey/i);
+  });
+});
+
+describe("compParse corpus: ESCALATION", () => {
+  const escal = (line) => parseSingleRecord(`$0.65/sf NNN\n${line}`)?.draft.leaseEscalationPct;
+  it("value-then-label forms", () => {
+    expect(escal("3.5% annual increases")).toBe("3.5");
+    expect(escal("3% bumps")).toBe("3");
+    expect(escal("3.5%/yr")).toBe("3.5");
+    expect(escal("3.5% escalations")).toBe("3.5");
+    expect(escal("3.5% per year")).toBe("3.5");
+    expect(escal("3% ann")).toBe("3");
+    expect(escal("fixed 3%")).toBe("3");
+  });
+  it("label-then-value forms", () => {
+    expect(escal("annual escalations of 3.5%")).toBe("3.5");
+    expect(escal("bumps: 3%")).toBe("3");
+  });
+  it("a DOLLAR escalation (not percent) is captured as a note, never miscoded as a percentage", () => {
+    const { draft } = parseSingleRecord("$0.65/sf NNN\n$0.02/yr bumps");
+    expect(draft.leaseEscalationPct).toBe("");
+    expect(draft.notes).toMatch(/\$0\.02\/SF\/yr/);
+  });
+  it("CPI / CPI-based (a flag, no number) is captured as a note", () => {
+    expect(parseSingleRecord("$0.65/sf NNN\nCPI").draft.notes).toMatch(/CPI/);
+    expect(parseSingleRecord("$0.65/sf NNN\nCPI-based").draft.notes).toMatch(/CPI/);
+  });
+});
+
+describe("compParse corpus: DATES", () => {
+  it("standalone formats all resolve", () => {
+    expect(findDateToken("6/1/27")).toEqual({ iso: "2027-06-01", soft: false });
+    expect(findDateToken("06/01/2027")).toEqual({ iso: "2027-06-01", soft: false });
+    expect(findDateToken("June 1, 2027")).toEqual({ iso: "2027-06-01", soft: false });
+    expect(findDateToken("Jun-27")).toEqual({ iso: "2027-06-01", soft: true });
+    expect(findDateToken("6/27")).toEqual({ iso: "2027-06-01", soft: true });
+    expect(findDateToken("Q2 2027").iso).toBe("2027-04-01");
+    expect(findDateToken("Q2 2027").soft).toBe(true);
+    expect(findDateToken("mid-2027").iso).toBe("2027-07-01");
+  });
+  it("RCD/LCD are COMMENCEMENT, never Executed", () => {
+    const rcd = parseSingleRecord("$0.65/sf NNN\nRCD 6/1/27").draft;
+    expect(rcd.leaseCommencementDate).toBe("2027-06-01");
+    expect(rcd.compDate).toBe("");
+    const lcd = parseSingleRecord("$0.65/sf NNN\nLCD 6/1/27").draft;
+    expect(lcd.leaseCommencementDate).toBe("2027-06-01");
+    expect(lcd.compDate).toBe("");
+    const commencing = parseSingleRecord("$0.65/sf NNN\ncommencing 6/1/27").draft;
+    expect(commencing.leaseCommencementDate).toBe("2027-06-01");
+    expect(commencing.compDate).toBe("");
+  });
+  it("a bare date with no qualifier is EXECUTED, never Commencement", () => {
+    const executed = parseSingleRecord("$0.65/sf NNN\nexecuted 3/14/26").draft;
+    expect(executed.compDate).toBe("2026-03-14");
+    expect(executed.leaseCommencementDate).toBe("");
+    const signed = parseSingleRecord("$0.65/sf NNN\nsigned March 2026").draft;
+    expect(signed.compDate).toBe("2026-03-01");
+    expect(signed.leaseCommencementDate).toBe("");
+  });
+});
+
+describe("compParse corpus: PARTIES", () => {
+  it("TT:/Tenant:/T:/'tenant is' all read as the acquirer", () => {
+    expect(parseSingleRecord("TT: Acme\n$0.65/sf NNN").draft.partyAcquirer).toBe("Acme");
+    expect(parseSingleRecord("Tenant: Acme\n$0.65/sf NNN").draft.partyAcquirer).toBe("Acme");
+    expect(parseSingleRecord("T: Acme\n$0.65/sf NNN").draft.partyAcquirer).toBe("Acme");
+    expect(parseSingleRecord("$0.65/sf NNN\ntenant is Acme").draft.partyAcquirer).toBe("Acme");
+  });
+  it("LL:/Landlord:/'LL -'/'landlord is' all read as the provider", () => {
+    expect(parseSingleRecord("LL: Beta\n$0.65/sf NNN").draft.partyProvider).toBe("Beta");
+    expect(parseSingleRecord("Landlord: Beta\n$0.65/sf NNN").draft.partyProvider).toBe("Beta");
+    expect(parseSingleRecord("LL - Beta\n$0.65/sf NNN").draft.partyProvider).toBe("Beta");
+    expect(parseSingleRecord("$0.65/sf NNN\nlandlord is Beta").draft.partyProvider).toBe("Beta");
+  });
+  it("Seller:/Buyer:/Purchaser:/Grantor/Grantee read as the sale pair", () => {
+    expect(parseSingleRecord("Seller: Acme\nBuilding sold, $3.1M").draft.partyProvider).toBe("Acme");
+    expect(parseSingleRecord("Buyer: Acme\nBuilding sold, $3.1M").draft.partyAcquirer).toBe("Acme");
+    expect(parseSingleRecord("Purchaser: Acme\nBuilding sold, $3.1M").draft.partyAcquirer).toBe("Acme");
+    expect(parseSingleRecord("Grantor: Acme\nBuilding sold, $3.1M").draft.partyProvider).toBe("Acme");
+    expect(parseSingleRecord("Grantee: Acme\nBuilding sold, $3.1M").draft.partyAcquirer).toBe("Acme");
+  });
+  it("a slash between two proper nouns on a party line reads as landlord/tenant in order", () => {
+    const { draft } = parseSingleRecord("Core5 / Modular Power\n$0.65/sf NNN");
+    expect(draft.partyProvider).toBe("Core5");
+    expect(draft.partyAcquirer).toBe("Modular Power");
+  });
+});
+
+describe("compParse corpus: PRICE / SALE", () => {
+  it("price forms", () => {
+    expect(parseProseLine("Sold for $4,150,000, 25,000 SF, closed 3/14/2026").draft.bldgPrice).toBe("4150000");
+    expect(parseProseLine("Sold for $4.15M, 25,000 SF, closed 3/14/2026").draft.bldgPrice).toBe("4150000");
+    expect(parseProseLine("Sold for 4.15mm, 25,000 SF building, closed 3/14/2026").draft.bldgPrice).toBe("4150000");
+    expect(parseProseLine("Sold for $4,150,000.00, 25,000 SF, closed 3/14/2026").draft.bldgPrice).toBe("4150000");
+  });
+  it("a unit price ($/AC) WITH a size computes and stores the total, flagged derived", () => {
+    const { draft, cellFlags } = parseSingleRecord("66 ac land\n$62,700/ac");
+    expect(draft.landPrice).toBe(String(round2Helper(62700 * 66)));
+    expect(cellFlags.landPrice?.level).toBe("soft");
+  });
+  it("a unit price ($ psf) WITH NO size holds as a note, Price left blank", () => {
+    const { draft } = parseSingleRecord("Building sold\n$92.40 psf");
+    expect(draft.bldgPrice).toBe("");
+    expect(draft.notes).toMatch(/\$92\.4\/SF/);
+  });
+  it("cap rate + NOI", () => {
+    expect(parseSingleRecord("Building sold\n6.25% cap").draft.bldgCapRate).toBe("0.0625");
+    expect(parseSingleRecord("Building sold\ncap: 6.25").draft.bldgCapRate).toBe("0.0625");
+    expect(parseSingleRecord("Building sold\n6.25 cap").draft.bldgCapRate).toBe("0.0625");
+    expect(parseSingleRecord("Building sold\ngoing-in cap of 6.25%").draft.bldgCapRate).toBe("0.0625");
+    expect(parseSingleRecord("Building sold\nNOI $2,600,000").draft.bldgNoi).toBe("2600000");
+    expect(parseSingleRecord("Building sold\nNOI: 2.6M").draft.bldgNoi).toBe("2600000");
+  });
+});
+function round2Helper(n) { return Math.round(n * 100) / 100; }
+
+describe("compParse corpus: TYPE INFERENCE (only when the text doesn't say outright)", () => {
+  it("lease vocabulary -> lease", () => {
+    for (const line of ["NNN lease", "gross lease", "TI $13/sf", "6 months free rent", "abatement of 6 months", "tenant: Acme", "landlord: Beta", "126 month term", "RCD 6/1/27"]) {
+      expect(detectCompType(line).value).toBe("lease");
+    }
+  });
+  it("land vocabulary -> land", () => {
+    for (const line of ["66 acres", "66 AC", "per acre pricing", "raw land tract", "dirt for sale", "unimproved lot"]) {
+      expect(detectCompType(line).value).toBe("land");
+    }
+  });
+  it("cap / NOI / buyer / seller / (price + building size) -> building sale", () => {
+    expect(detectCompType("6.25% cap").value).toBe("building_sale");
+    expect(detectCompType("NOI $2,600,000").value).toBe("building_sale");
+    expect(detectCompType("Buyer: Acme").value).toBe("building_sale");
+    expect(detectCompType("Seller: Acme").value).toBe("building_sale");
+    const { draft } = parseProseLine("$4,150,000, 25,000 SF building");
+    expect(draft.compType).toBe("building_sale");
+  });
+  it("conflicting or no signals -> Type BLANK, never defaults to Land", () => {
+    expect(detectCompType("nothing recognizable here at all").value).toBeNull();
   });
 });
