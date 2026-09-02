@@ -69,12 +69,20 @@
  *
  * USAGE (preview server must be running — `npx vite build && npx vite preview --port 4173`):
  *   node ui-audit/ui-inventory.mjs                        → regenerate docs/UI-INVENTORY.md
- *   node ui-audit/ui-inventory.mjs --check                → CI drift gate (diff against the committed
- *                                                            file, AND fails if any surface's control-
- *                                                            signature count grew past its ceiling)
- *   node ui-audit/ui-inventory.mjs --write-signature-ceiling → (re)write control-signature-ceiling.json
- *                                                            to the CURRENT per-surface counts (NEW-3)
+ *   node ui-audit/ui-inventory.mjs --check                → CI gate (diff against the committed file,
+ *                                                            AND fails if any surface's signature count
+ *                                                            exceeds its BUDGET — see signature-budget.json,
+ *                                                            NEW-1/B1038016)
  *   BASE_URL=http://localhost:4173/ node ui-audit/ui-inventory.mjs
+ *   DUMP_SIGNATURES=<path> node ui-audit/ui-inventory.mjs → also write the full per-surface signature
+ *                                                            list (radius/height/padding/fontSize +
+ *                                                            example labels) as JSON, for investigating
+ *                                                            further convergence — a diagnostic only,
+ *                                                            inert unless the env var is set.
+ *
+ * A surface's BUDGET is a deliberately chosen number in `signature-budget.json`, never
+ * auto-derived from a measurement — see that file's own `note`. There is no `--write-*` flag to
+ * regenerate it from the current count; a budget is a decision, not a snapshot.
  */
 import { chromium } from "playwright";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
@@ -88,7 +96,7 @@ import { assertMeasurable } from "./lib/tabTiming.mjs";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..");
 const OUT_MD = join(REPO, "docs", "UI-INVENTORY.md");
-const SIGNATURE_CEILING_PATH = join(HERE, "control-signature-ceiling.json");
+const SIGNATURE_BUDGET_PATH = join(HERE, "signature-budget.json");
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
 
 // Corner radii that always read as deliberate: the four RADIUS.js steps, plus 0 (a square
@@ -130,6 +138,55 @@ const fit = async (p) => { await p.locator('[title="Zoom to fit"]:visible').firs
 // to only the rendered match.
 const clickIf = async (p, sel) => p.locator(`${sel}:visible`).first().click({ timeout: 4000 }).catch(() => {});
 const escAll = async (p) => { await p.keyboard.press("Escape").catch(() => {}); };
+
+// B1038016 (2nd correction) — DETERMINISTIC MOCK for the two surfaces whose control set depends on
+// a real network call settling: CompsPanel.jsx's `reload()` (a real Supabase `fetchAllComps()` call
+// gates its "＋ New comps"/"⤒ Import (KML)" buttons) and MapFinder.jsx's parcel-layer fetch (a real
+// county/statewide ArcGIS request; a `requesterror` on ANY of them sets `err`, which also hides the
+// `select-parcels-tip` tooltip). This crawl runs inside an environment whose egress proxy allowlists
+// only a few hosts — Supabase and every county/statewide GIS host used here are NOT on it, so both
+// calls fail INSTANTLY every time, and no amount of waiting changes that (confirmed: `curl` to
+// Supabase and to a real county ArcGIS host both return a 403 from the proxy in well under a
+// second). A real browser with real network access — CI's GitHub Actions runner included — resolves
+// both successfully, revealing one more control each; wiring the CI-vs-local mismatch shut by
+// waiting longer was tried and measured to make zero difference (see the surfaces' own history
+// below), because the cause was never timing. Rather than depend on which hosts a given runner's
+// egress policy happens to allow — which is itself not a promise CI makes — this makes the crawl's
+// own OUTCOME network-environment-independent: every external request is intercepted and answered
+// with a generic, minimally-valid SUCCESSFUL response, so both surfaces settle to the same state
+// (buttons rendered, tooltip rendered, no error) in every environment, deterministically, forever.
+// Verified empirically (ui-audit/tmp-diag-*.mjs, since deleted) to reproduce CI's exact rendered
+// text byte-for-byte on both surfaces before this was wired in here.
+const mockExternalNetwork = async (ctx) => {
+  await ctx.route((url) => !url.toString().startsWith(BASE), async (route) => {
+    const url = route.request().url();
+    if (url.includes("rest/v1/")) {
+      // Supabase PostgREST — an empty, successful result set (matches `fetchAllComps`'s
+      // `{ data: [], error: null }` un-configured-client fallback, which is the shape every
+      // consumer already handles).
+      await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+      return;
+    }
+    if (url.includes("f=json") && !url.includes("/query")) {
+      // Esri ArcGIS Server layer/service metadata request (esri-leaflet's FeatureLayer fetches this
+      // before it will fire 'load') — minimal but structurally valid so esri-leaflet doesn't choke
+      // parsing it.
+      await route.fulfill({
+        status: 200, contentType: "application/json", body: JSON.stringify({
+          currentVersion: 10.81, id: 0, name: "mock", type: "Feature Layer",
+          geometryType: "esriGeometryPolygon", objectIdField: "OBJECTID",
+          fields: [{ name: "OBJECTID", type: "esriFieldTypeOID", alias: "OBJECTID" }],
+          drawingInfo: { renderer: { type: "simple", symbol: {} } },
+          extent: { xmin: -180, ymin: -90, xmax: 180, ymax: 90, spatialReference: { wkid: 4326 } },
+          capabilities: "Query", maxRecordCount: 1000,
+        }),
+      });
+      return;
+    }
+    // Any other Esri query/export/identify request — an empty, successful feature set.
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ features: [], exceededTransferLimit: false }) });
+  });
+};
 
 // ------------------------------------------------------------------------------------------
 // SURFACES. Each opens a scenario, then reads computed style from a scoped selector.
@@ -178,10 +235,16 @@ const SURFACES = [
     // it needs a real parcel click on the live map, the same real-data wall documented on every
     // other GIS-dependent live-verify item in this repo.
     name: "Map landing page (comp mode)", hash: "#/site",
+    // B1038016 (2nd correction) — `mockExternalNetwork` makes `CompsPanel.jsx`'s `reload()`
+    // (`fetchAllComps()`, a real Supabase call gating the "＋ New comps"/"⤒ Import (KML)" buttons)
+    // settle SUCCESSFULLY and deterministically, in every environment — see that function's own
+    // header for the full story (an earlier fix here tried a longer wait time and measured zero
+    // effect on the real CI mismatch, because the cause was never timing).
+    mockNetwork: true,
     prep: async (p) => {
       await clickIf(p, '[title="Collapse layers"]');
       await clickIf(p, '[role="tablist"][aria-label="Site or comp"] button:has-text("Comp")');
-      await p.waitForTimeout(150);
+      await p.waitForTimeout(300);
     },
     scope: "body",
     // B (map-view locked-geometry conversion) — also excludes the bottom-left network-status
@@ -195,10 +258,16 @@ const SURFACES = [
   },
   {
     name: "Map landing page (selecting parcels)", hash: "#/site",
+    // B1038016 (2nd correction) — `mockExternalNetwork` makes MapFinder.jsx's parcel-layer fetch
+    // settle SUCCESSFULLY, so `err` stays unset and the selection-guidance tooltip
+    // (`data-testid="select-parcels-tip"`) renders deterministically in every environment — see
+    // that function's own header. Same fix as comp mode above; the two surfaces share the same
+    // network-dependent-rendering root cause.
+    mockNetwork: true,
     prep: async (p) => {
       await clickIf(p, '[title="Collapse layers"]');
       await clickIf(p, 'button:has-text("Select parcels")');
-      await p.waitForTimeout(150);
+      await p.waitForTimeout(300);
     },
     scope: "body",
     // B (map-view locked-geometry conversion) — also excludes the bottom-left network-status
@@ -791,6 +860,19 @@ async function alignmentMismatches(page, surface) {
 }
 
 // Best-effort file/line attribution: grep src/ for the element's own label as a literal string.
+//
+// ⛔ B1038016 (4th correction) — SORT BEFORE TAKING "FIRST MATCH", OR "FIRST" IS A COIN FLIP.
+// `grep -r`'s file-visitation order follows filesystem readdir order, which is NOT alphabetical
+// and NOT guaranteed to agree between two machines — measured directly: the identical committed
+// tree, searched from this sandbox vs. from a real GitHub Actions runner, picked a DIFFERENT
+// "first" file for the same label whenever more than one source file contained the same literal
+// text (confirmed via a CI diagnostic diff: "Zoom to fit" resolved to icons.jsx here and to
+// MapFinder.jsx there; five more labels the same way), so docs/UI-INVENTORY.md's embedded
+// attribution column — and therefore the file's byte content — differed between environments even
+// though every actual signature COUNT (the thing the budget gate cares about) was identical both
+// times. Sorting the raw grep output by (file, line) before taking the first entry makes "first
+// match" a property of the CONTENT, never of readdir order, so the choice is now the same on any
+// machine that has the same source tree.
 function attribute(label) {
   if (!label || label.length < 2) return "unattributed (label too short to search)";
   const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -800,7 +882,11 @@ function attribute(label) {
       { cwd: REPO, encoding: "utf8" },
     ).trim();
     if (!out) return "unattributed (no source match — best-effort text search)";
-    const lines = out.split("\n");
+    const lines = out.split("\n").sort((a, b) => {
+      const [fa, la] = [a.slice(0, a.indexOf(":")), Number(a.slice(a.indexOf(":") + 1, a.indexOf(":", a.indexOf(":") + 1)))];
+      const [fb, lb] = [b.slice(0, b.indexOf(":")), Number(b.slice(b.indexOf(":") + 1, b.indexOf(":", b.indexOf(":") + 1)))];
+      return fa < fb ? -1 : fa > fb ? 1 : la - lb;
+    });
     const first = lines[0];
     const extra = lines.length > 1 ? ` (+${lines.length - 1} more match${lines.length > 2 ? "es" : ""}, best-effort)` : "";
     return first.replace(REPO + "/", "") + extra;
@@ -869,49 +955,54 @@ function computeSignatureCounts(results) {
   return counts;
 }
 
-function loadSignatureCeiling() {
-  if (!existsSync(SIGNATURE_CEILING_PATH)) return null;
-  return JSON.parse(readFileSync(SIGNATURE_CEILING_PATH, "utf8"));
+function loadSignatureBudget() {
+  if (!existsSync(SIGNATURE_BUDGET_PATH)) return null;
+  return JSON.parse(readFileSync(SIGNATURE_BUDGET_PATH, "utf8"));
 }
 
-function writeSignatureCeiling(counts) {
-  const ceiling = {
-    bySurface: counts,
-    writtenAt: new Date().toISOString().slice(0, 10),
-    note: "Ratchet ceiling for ui-audit/ui-inventory.mjs's per-surface DISTINCT CONTROL SIGNATURE " +
-      "count (NEW-3, B982402) — same shape as design-drift-ceiling.json. A surface's count may " +
-      "never silently grow; regenerate with `node ui-audit/ui-inventory.mjs --write-signature-ceiling` " +
-      "only after a session genuinely LOWERS a surface's count (a real control-geometry " +
-      "convergence), or deliberately after adding a new surface to the crawl (a first measurement, " +
-      "not a regression). Never raise an EXISTING surface's ceiling to silence real drift.",
-  };
-  writeFileSync(SIGNATURE_CEILING_PATH, JSON.stringify(ceiling, null, 2) + "\n");
-  return ceiling;
+// Every exemption entry that names `surface` contributes its `count` toward that surface's
+// EFFECTIVE ceiling (budget + exemptions) — never toward reducing the raw reported count. See
+// signature-budget.json's own `note` for why: an exemption documents a NAMED, DATED, permanently
+// printed reason a specific extra shape exists; it must never be a quiet way to raise the number.
+function exemptionsFor(surface, exemptions) {
+  return (exemptions || []).filter((e) => (e.surfaces || []).includes(surface));
 }
 
-// Fails when any surface (in either theme) EXCEEDS its recorded ceiling. A surface present in
-// `counts` but absent from `ceiling.bySurface` (a newly-crawled surface) is reported as missing a
-// baseline rather than silently passing — the same "no silent debt" discipline design-drift's
-// checkCeiling applies to a missing ceiling file entirely.
-export function checkSignatureCeiling(counts, ceiling) {
+// NEW-1 (B1038016) — THE HARD BUDGET. Unlike the ratchet this replaces (control-signature-ceiling.json,
+// B982402 — which only ever forbade a surface's count from GROWING past whatever it happened to
+// measure the day it was written, so "deliberately left, here is why" was always an available and
+// always-passing answer), a surface's raw signature count must be AT OR UNDER a deliberately chosen
+// budget — exceeding it fails CI regardless of what the count "always was". A budget may be lifted
+// above the raw count only through a NAMED, DATED, always-printed exemption (see
+// signature-budget.json's own entries) — never by editing the number to match reality.
+export function checkSignatureBudget(counts, budgetDoc) {
   const problems = [];
-  if (!ceiling) {
-    problems.push("No ui-audit/control-signature-ceiling.json — run --write-signature-ceiling once to establish a baseline.");
-    return { ok: false, problems };
+  const report = [];
+  if (!budgetDoc) {
+    problems.push("No ui-audit/signature-budget.json — every crawled surface must declare a budget.");
+    return { ok: false, problems, report };
   }
   for (const [surface, byTheme] of Object.entries(counts)) {
-    const recorded = ceiling.bySurface[surface];
-    if (!recorded) {
-      problems.push(`"${surface}" has no recorded ceiling — run --write-signature-ceiling to add it (a new surface, not a regression, unless you did not mean to add one).`);
+    const budget = budgetDoc.bySurface[surface];
+    const exemptions = exemptionsFor(surface, budgetDoc.exemptions);
+    const exemptCount = exemptions.reduce((sum, e) => sum + e.count, 0);
+    if (budget === undefined) {
+      problems.push(`"${surface}" has no budget declared in ui-audit/signature-budget.json — every crawled surface must carry one (NEW-1).`);
+      report.push({ surface, budget: null, exemptCount, effective: null, light: byTheme.light, dark: byTheme.dark, exemptions });
       continue;
     }
+    const effective = budget + exemptCount;
+    report.push({ surface, budget, exemptCount, effective, light: byTheme.light, dark: byTheme.dark, exemptions });
     for (const theme of ["light", "dark"]) {
-      if (byTheme[theme] > recorded[theme]) {
-        problems.push(`"${surface}" (${theme}) grew: ${byTheme[theme]} distinct control signature(s) > ceiling ${recorded[theme]}.`);
+      if (byTheme[theme] > effective) {
+        problems.push(
+          `"${surface}" (${theme}): ${byTheme[theme]} distinct control signature(s) exceeds its budget ` +
+          `(${budget}${exemptCount ? ` + ${exemptCount} exempted = ${effective}` : ""}).`
+        );
       }
     }
   }
-  return { ok: problems.length === 0, problems };
+  return { ok: problems.length === 0, problems, report };
 }
 
 function renderGroup(name, themeRows) {
@@ -946,6 +1037,7 @@ async function run() {
     for (const theme of ["light", "dark"]) {
       for (const surface of SURFACES) {
         const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
+        if (surface.mockNetwork) await mockExternalNetwork(ctx);
         await ctx.addInitScript(seed(theme));
         const page = await ctx.newPage();
         await assertMeasurable(page, "ui-inventory");
@@ -964,6 +1056,24 @@ async function run() {
     }
   } finally {
     await browser.close();
+  }
+
+  if (process.env.DUMP_SIGNATURES) {
+    const dump = {};
+    for (const [name, byTheme] of Object.entries(results)) {
+      dump[name] = {};
+      for (const theme of ["light", "dark"]) {
+        const rows = byTheme[theme] || [];
+        const bySig = new Map();
+        for (const r of rows) {
+          const sig = controlSignature(r);
+          if (!bySig.has(sig)) bySig.set(sig, { radius: r.borderRadius, height: r.height, padding: r.padding, fontSize: r.fontSize, labels: new Set() });
+          bySig.get(sig).labels.add(r.label);
+        }
+        dump[name][theme] = [...bySig.values()].map((v) => ({ radius: v.radius, height: v.height, padding: v.padding, fontSize: v.fontSize, labels: [...v.labels] }));
+      }
+    }
+    writeFileSync(process.env.DUMP_SIGNATURES, JSON.stringify(dump, null, 2));
   }
 
   let totalDeviations = 0;
@@ -1083,37 +1193,58 @@ async function run() {
   }
   if (!totalAlignmentMismatches) alignmentLines.push("_None found on this run._", "");
 
-  // NEW-3 (B982402) — the HEADLINE metric this item asks for: not "how many deviations from a
-  // list" (a value can be individually on-scale and still be the wrong one to sit next to its
-  // neighbour — the account-pill failure this whole item is about) but "how many DIFFERENT SHAPES
-  // does this surface actually use". See controlSignature()'s own header for the precise
-  // definition (radius+height+padding+fontSize; never color/weight/background/border).
+  // NEW-1/NEW-2 (B1038016) — THE headline metric, now BOUND rather than merely reported. Not "how
+  // many values deviate from a list" (a value can be individually on-scale and still be the wrong
+  // one to sit next to its neighbour — the account-pill failure this whole item is about), and not
+  // just "how many different shapes does this surface use" either (B982402 reported that number but
+  // never bound it, so "deliberately left, here is why" was always an available, always-passing
+  // answer). See controlSignature()'s own header for the precise definition
+  // (radius+height+padding+fontSize; never color/weight/background/border).
   const signatureCounts = computeSignatureCounts(results);
-  const signatureCeiling = loadSignatureCeiling();
-  const signatureCheck = checkSignatureCeiling(signatureCounts, signatureCeiling);
-  const signatureLines = ["## Distinct control signatures per surface (NEW-3, B982402)", "",
-    "**The headline metric.** Not \"how many values deviate from the allowed list\" — a 6px chip",
-    "sitting flush beside an 8px chip is individually on-scale on BOTH sides and invisible to that",
-    "count, which is exactly how the account-pill mismatch shipped clean through every prior check.",
-    "This counts DISTINCT (radius, height, padding, fontSize) COMBINATIONS actually painted on each",
-    "surface — never color, weight, background or border, which are legitimate per-role differences",
-    "(a filled primary action SHOULD look different from an outline icon button; that is not drift).",
-    "Ratcheted the same way `design-drift-ceiling.json` is: a surface's count may never silently",
-    "grow (`ui-audit/control-signature-ceiling.json`, `--write-signature-ceiling` to update after a",
-    "genuine convergence).",
+  const signatureBudget = loadSignatureBudget();
+  const signatureCheck = checkSignatureBudget(signatureCounts, signatureBudget);
+  const signatureLines = ["## Distinct control signatures per surface — signatures / BUDGET (NEW-1, B1038016)", "",
+    "**The headline metric, and it is now a BOUND, not a report.** A 6px chip sitting flush beside an",
+    "8px chip is individually on-scale on BOTH sides and invisible to a \"deviations from the allowed",
+    "list\" count — exactly how the account-pill mismatch shipped clean through every prior check. This",
+    "counts DISTINCT (radius, height, padding, fontSize) COMBINATIONS actually painted on each surface",
+    "— never color, weight, background or border, which are legitimate per-role differences (a filled",
+    "primary action SHOULD look different from an outline icon button; that is not drift). Each",
+    "surface carries a hard BUDGET in `ui-audit/signature-budget.json`; exceeding it — budget plus any",
+    "named, dated exemption — fails CI. Every exemption is printed below, every run, whether or not",
+    "any surface is currently over: an exemption is a permanent, visible cost, never a quiet way to",
+    "raise a number. The old \"N deviations from the allowed list\" count is kept below as a named",
+    "backstop, not the headline — see \"Known, deliberately-not-fixed findings\".",
     "",
-    "| surface | light | dark | ceiling (light/dark) |", "|---|---|---|---|"];
+    "| surface | light | dark | budget | exemptions | effective ceiling |", "|---|---|---|---|---|---|"];
   for (const s of SURFACES) {
     const counts = signatureCounts[s.name] || { light: 0, dark: 0 };
-    const recorded = signatureCeiling?.bySurface?.[s.name];
-    const ceilingCell = recorded ? `${recorded.light} / ${recorded.dark}` : "_(none recorded)_";
-    signatureLines.push(`| ${s.name} | ${counts.light} | ${counts.dark} | ${ceilingCell} |`);
+    const row = signatureCheck.report.find((r) => r.surface === s.name);
+    const budgetCell = row && row.budget !== null ? row.budget : "_(none declared)_";
+    const exemptCell = row && row.exemptCount ? row.exemptCount : "—";
+    const effectiveCell = row && row.effective !== null ? row.effective : "_(n/a)_";
+    signatureLines.push(`| ${s.name} | ${counts.light} | ${counts.dark} | ${budgetCell} | ${exemptCell} | ${effectiveCell} |`);
   }
   signatureLines.push("");
   if (!signatureCheck.ok) {
-    signatureLines.push("**⚠️ RATCHET FAILED — a surface's signature count grew:**", "");
+    signatureLines.push("**⚠️ BUDGET EXCEEDED:**", "");
     for (const p of signatureCheck.problems) signatureLines.push(`- ${p}`);
     signatureLines.push("");
+  } else {
+    signatureLines.push("**✅ Every crawled surface is within its budget.**", "");
+  }
+  // NEW-1 — the exemption ledger prints IN FULL every run, pass or fail (design-drift-audit.mjs's
+  // own pattern for its `// design-exempt:` comments) — an exemption that only appears when it's
+  // the reason for a failure would be invisible on every green run, which is exactly the "quietly
+  // accumulating" failure mode this mechanism exists to prevent.
+  const allExemptions = (signatureBudget?.exemptions) || [];
+  signatureLines.push("**Named, dated exemptions (printed every run — this is the permanent cost of every signature", "left outside its surface's own budget):**", "");
+  if (!allExemptions.length) {
+    signatureLines.push("_None declared._", "");
+  } else {
+    for (const e of allExemptions) {
+      signatureLines.push(`- **${e.id}** (${e.date}) — +${e.count} on ${e.surfaces.map((s) => `"${s}"`).join(", ")}: ${e.reason}`, "");
+    }
   }
 
   const md = [
@@ -1236,25 +1367,22 @@ async function run() {
     "",
   ].join("\n");
 
-  if (process.argv.includes("--write-signature-ceiling")) {
-    const ceiling = writeSignatureCeiling(signatureCounts);
-    console.log(`ui-audit/control-signature-ceiling.json written — ${Object.keys(ceiling.bySurface).length} surface(s) recorded.`);
-  }
-
   if (process.argv.includes("--check")) {
     const existing = existsSync(OUT_MD) ? readFileSync(OUT_MD, "utf8") : null;
     const docStale = existing !== md;
     if (docStale) console.error("docs/UI-INVENTORY.md is out of date — regenerate with `node ui-audit/ui-inventory.mjs`.");
-    if (!signatureCheck.ok) console.error("Control-signature ceiling check FAILED:\n" + signatureCheck.problems.map((p) => "  • " + p).join("\n"));
+    if (!signatureCheck.ok) console.error("Signature BUDGET check FAILED (NEW-1, B1038016):\n" + signatureCheck.problems.map((p) => "  • " + p).join("\n"));
     if (docStale || !signatureCheck.ok) process.exit(1);
-    console.log("docs/UI-INVENTORY.md is up to date and no surface's control-signature count grew.");
+    console.log("docs/UI-INVENTORY.md is up to date and every surface is within its signature budget.");
     return;
   }
 
   writeFileSync(OUT_MD, md);
   console.log(`docs/UI-INVENTORY.md written — ${totalDeviations} distinct deviating style signature(s), ${totalNestingMismatches} nesting mismatch(es), ${totalSiblingMismatches} sibling radius mismatch(es), ${totalSizeSiblingMismatches} sibling height/padding mismatch(es), ${totalAlignmentMismatches} alignment mismatch(es) found.`);
   if (!signatureCheck.ok) {
-    console.warn("⚠ Control-signature ceiling check FAILED (see docs/UI-INVENTORY.md's own section):\n" + signatureCheck.problems.map((p) => "  • " + p).join("\n"));
+    console.warn("⚠ Signature BUDGET check FAILED (see docs/UI-INVENTORY.md's own section):\n" + signatureCheck.problems.map((p) => "  • " + p).join("\n"));
+  } else {
+    console.log("✅ Every crawled surface is within its signature budget.");
   }
 }
 

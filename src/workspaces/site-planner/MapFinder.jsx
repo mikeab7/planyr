@@ -3180,9 +3180,14 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             <div style={{ display: "flex", gap: 6, padding: "0 8px 8px" }}>
               <input value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name"
                 style={{ flex: 1, minWidth: 0, boxSizing: "border-box", padding: "5px 8px", fontSize: 12, border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.sm, color: PAL.ink, background: "var(--surface-raised)", fontFamily: "inherit", outline: "none" }} />
+              {/* NEW-1 (signature-budget convergence, B1038016) — padding "5px 6px" → "5px 8px",
+                  matching the filter input beside it exactly (was the flagged sibling mismatch
+                  "Filter sites by name sits 6px from Sort sites within each group — padding
+                  5px 8px vs 5px 6px"); the native select arrow already reserves its own room
+                  inside that padding, so the wider box costs nothing but 2px of breathing room. */}
               <select value={sitesPanelPrefs.sort} onChange={(e) => setSitesSort(e.target.value)} aria-label="Sort sites within each group"
                 title="Sort — applies within each group, not across groups"
-                style={{ flex: "none", boxSizing: "border-box", padding: "5px 6px", fontSize: FONT_SIZE.control, border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.sm, color: PAL.ink, background: "var(--surface-raised)", fontFamily: "inherit", outline: "none" }}>
+                style={{ flex: "none", boxSizing: "border-box", padding: "5px 8px", fontSize: FONT_SIZE.control, border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.sm, color: PAL.ink, background: "var(--surface-raised)", fontFamily: "inherit", outline: "none" }}>
                 <option value="largest">Largest first</option>
                 <option value="az">A–Z</option>
                 <option value="recent">Recently touched</option>

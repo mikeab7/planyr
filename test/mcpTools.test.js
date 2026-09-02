@@ -110,21 +110,15 @@ describe("get_site_layout / get_schedule", () => {
 
   it("summarizes a schedule with overdue/upcoming and tolerates both predecessor shapes", async () => {
     // "Overdue" is computed against the real wall clock (functions/api/mcp/_tools.js calls
-    // `new Date()` at the two get_schedule call sites), so this fixture's own "Paving" task
-    // (end 2026-09-01) was always going to cross into "overdue" once the wall clock passed
-    // that date — which it since has. Freeze "today" to a fixed point between Utilities'
-    // end (2026-06-25) and Paving's end (2026-09-01), matching what this test always assumed.
+    // `new Date()` at the two get_schedule call sites, rather than threading an injectable
+    // "today" through the way the pure `summarizeScheduleProject(sp, todayIso)` it calls already
+    // does), so this fixture's own "Paving" task (end 2026-09-01) was always going to cross into
+    // "overdue" once the wall clock passed that date — which it since has (found independently
+    // twice, 2026-09-02). Freeze "today" to a fixed point between Utilities' end (2026-06-25) and
+    // Paving's end (2026-09-01), matching what this test always assumed, so it can't drift again.
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-15T00:00:00Z"));
     vi.stubGlobal("fetch", makeFetch());
-    // "Overdue" is computed against the REAL wall-clock date (functions/api/mcp/_tools.js passes
-    // `new Date().toISOString()` into summarizeScheduleProject), so a fixture asserting on it must
-    // pin "today" or it silently breaks once real time crosses a fixture date — exactly what
-    // happened here once real time passed Paving's 2026-09-01 end date, newly making it overdue
-    // too. Pinned between Utilities' end (2026-06-25) and Paving's start (2026-08-01) so the test
-    // can never drift again.
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-15T00:00:00Z"));
     let out;
     try {
       out = parse(await callTool(ENV, { name: "get_schedule", arguments: { project: "goose" } }));
