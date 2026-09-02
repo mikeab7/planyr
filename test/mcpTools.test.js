@@ -54,7 +54,7 @@ function makeFetch(overrides = {}) {
 const textOf = (r) => r.content[0].text;
 const parse = (r) => JSON.parse(textOf(r));
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("list_projects", () => {
   it("groups sites into projects with drawing counts and scheduler-only projects", async () => {
@@ -109,6 +109,13 @@ describe("get_site_layout / get_schedule", () => {
   });
 
   it("summarizes a schedule with overdue/upcoming and tolerates both predecessor shapes", async () => {
+    // "Overdue" is computed against the real wall clock (functions/api/mcp/_tools.js calls
+    // `new Date()` at the two get_schedule call sites), so this fixture's own "Paving" task
+    // (end 2026-09-01) was always going to cross into "overdue" once the wall clock passed
+    // that date — which it since has. Freeze "today" to a fixed point between Utilities'
+    // end (2026-06-25) and Paving's end (2026-09-01), matching what this test always assumed.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-15T00:00:00Z"));
     vi.stubGlobal("fetch", makeFetch());
     const out = parse(await callTool(ENV, { name: "get_schedule", arguments: { project: "goose" } }));
     expect(out).toMatchObject({ id: 3, name: "Goose Creek", taskCount: 3 });
