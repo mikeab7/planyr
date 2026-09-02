@@ -217,7 +217,13 @@ export const SHEET_COLUMNS = [
     setValue: (d, v) => ({ ...d, landSizeUnit: v }),
     flagKey: () => "landSizeUnit",
   },
-  { key: "location", label: "Location", group: "PROPERTY", width: 84, align: "left", kind: "action", appliesTo: () => true, required: true },
+  // B986096-HARDENING-24 (owner live-test, "truncated to about 8 characters, which makes the one
+  // field that identifies a comp unreadable") — 84px showed only the first ~8 characters of a real
+  // street address; the value itself is already reordered street-first (geocode.js), so the fix
+  // here is purely more room. Not a `flexKey` grower: Location's content (an address/APN/plan
+  // title) doesn't benefit from unbounded growth the way Notes/Title text does, so a wider static
+  // width — still with the existing `title=` hover for the untruncated value — is the right shape.
+  { key: "location", label: "Location", group: "PROPERTY", width: 150, align: "left", kind: "action", appliesTo: () => true, required: true },
 
   // DEAL — facts about the transaction: when, how long.
   simpleColumn({ key: "compDate", label: "Executed", group: "DEAL", width: 74, align: "right", kind: "date", required: true }),
