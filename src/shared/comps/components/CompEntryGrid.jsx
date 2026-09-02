@@ -170,6 +170,20 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
   const tdStyle = {
     height: ROW_H, boxSizing: "border-box", padding: 0,
     width: w, minWidth: w, maxWidth: w,
+    // B986096-HARDENING-20 — the two-row sticky header (HeaderRows, GROUP_BAND_H + COL_LABEL_H
+    // tall) sits on top of the scroll container's content, not inside its scrollable flow. Any
+    // scroll-into-view — the browser's own for a focused/clicked cell near the top, or a script's
+    // — only knows the container's raw client area, not that the header visually covers the top
+    // slice of it, so it can (and, measured, reliably does) land a target row with its top edge
+    // hidden BEHIND the sticky header while still reporting itself "in view." A click landing in
+    // that band then hits the header, not the cell, with no error anywhere — reproduced with a
+    // plain Playwright `.click()` (its own standard actionability scroll, not a synthetic one)
+    // timing out after retrying against "<th title=\"Executed\">…</th> intercepts pointer events"
+    // on a grid tall enough to need scrolling. `scroll-margin-top` is the standard fix for exactly
+    // this sticky-header class of bug: it tells every scroll-into-view mechanism (native focus,
+    // keyboard nav, Tab, or an automation driver) to leave clearance for the header rather than
+    // scrolling a row flush to the container's raw top edge.
+    scrollMarginTop: GROUP_BAND_H + COL_LABEL_H,
     borderRight: "1px solid var(--border-default)", borderBottom: "1px solid var(--border-default)",
     position: col.frozen ? "sticky" : undefined, left: col.frozen ? frozenOffsets[col.key] : undefined, zIndex: col.frozen ? 1 : undefined,
     background: col.frozen ? "var(--surface-overlay)" : muted ? "var(--surface-raised)" : "var(--surface-overlay)",
@@ -1070,6 +1084,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
                   <td style={{
                     position: "sticky", right: 0, width: REMOVE_COL_W, height: ROW_H, textAlign: "center",
                     background: "var(--surface-overlay)", borderBottom: "1px solid var(--border-default)", borderLeft: "1px solid var(--border-default)",
+                    scrollMarginTop: GROUP_BAND_H + COL_LABEL_H,
                   }}>
                     <button onClick={() => removeRow(row._id)} title="Remove" aria-label="Remove comp"
                       style={{ border: "none", background: "transparent", color: "var(--danger-text)", cursor: "pointer", fontSize: 13, padding: 0, lineHeight: `${ROW_H}px` }}>✕</button>
