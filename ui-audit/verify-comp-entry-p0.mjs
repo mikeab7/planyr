@@ -73,6 +73,19 @@ async function openEntrySheet(page) {
   await pacedWait(page, 400);
 }
 
+async function findExecCell(page) {
+  const headerCells = await page.locator("th").allTextContents();
+  const execColIdx = headerCells.findIndex((t) => t.trim() === "Executed");
+  const hb = await page.locator("th").nth(execColIdx).boundingBox();
+  const rowTds = page.locator('td[data-cell^="0-"]');
+  const n = await rowTds.count();
+  for (let i = 0; i < n; i++) {
+    const b = await rowTds.nth(i).boundingBox();
+    if (b && hb && Math.abs(b.x - hb.x) < 3) return rowTds.nth(i);
+  }
+  return null;
+}
+
 const browser = await chromium.launch({ executablePath: EXEC, headless: true });
 const fixture = readFixture("bain");
 
@@ -294,6 +307,139 @@ console.log("\n=== KEYBOARD-ONLY PATH — Tab into the grid, arrow to Location, 
     check("Enter on the selected Location cell arms it (keyboard-only, no mouse)",
       await page.getByText("Click the map above", { exact: false }).count() > 0);
   }
+  await ctx.close();
+}
+
+console.log("\n=== CYCLE 4 (B986096-HARDENING-14) — roving tabindex: every cell is a real focus stop ===");
+{
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 }, ignoreHTTPSErrors: true });
+  await ctx.addInitScript(fixtureSeed(fixture, { id: "p0h14a" }));
+  await ctx.route("**/*", (route) => (route.request().url().startsWith(BASE) ? route.continue() : route.abort()));
+  const page = await ctx.newPage();
+  await openEntrySheet(page);
+
+  // Open cell 0-1 (a plain text cell), then Escape back to "selected, not editing" — the state
+  // roving tabindex actually governs (a single click on an editable cell enters edit mode
+  // straight away, per HARDENING-10, and focus correctly lands on the real <input> there; roving
+  // tabindex is what makes focus follow a NON-editing selection, e.g. after Escape or on a
+  // read-only/na cell, and what makes plain Tab/arrow-key traversal reach a real DOM node).
+  await page.locator('td[data-cell="0-1"]').click();
+  await pacedWait(page, 200);
+  await page.keyboard.press("Escape");
+  await pacedWait(page, 200);
+  const afterEscape = await page.evaluate(() => {
+    const el = document.activeElement;
+    return { tag: el.tagName, dataCell: el.dataset?.cell, tabIndex: el.tabIndex };
+  });
+  check("selecting a cell (not editing) gives it real DOM focus, not just the grid container",
+    afterEscape.tag === "TD" && afterEscape.dataCell === "0-1" && afterEscape.tabIndex === 0, JSON.stringify(afterEscape));
+
+  await page.keyboard.press("ArrowRight");
+  await pacedWait(page, 150);
+  const afterArrow = await page.evaluate(() => {
+    const el = document.activeElement;
+    return { tag: el.tagName, dataCell: el.dataset?.cell };
+  });
+  check("ArrowRight moves DOM focus to the newly-selected cell", afterArrow.dataCell === "0-2", JSON.stringify(afterArrow));
+
+  const rovingCount = await page.evaluate(() => {
+    const focusable = document.querySelectorAll('[role="grid"] [tabindex], [role="grid"] button, [role="grid"] input, [role="grid"] select');
+    const tabIndex0 = [...document.querySelectorAll('[role="grid"] [tabindex]')].filter((el) => el.tabIndex === 0);
+    return { totalFocusable: focusable.length, tabIndex0Count: tabIndex0.length };
+  });
+  check("the grid carries many real focusable/tabindexed elements, not 1-2",
+    rovingCount.totalFocusable > 10, `totalFocusable=${rovingCount.totalFocusable}`);
+  check("exactly ONE cell is a real Tab stop at a time (roving tabindex, not every cell a stop)",
+    rovingCount.tabIndex0Count === 1, `tabIndex0Count=${rovingCount.tabIndex0Count}`);
+
+  // Arrow-navigate to the Location action cell and confirm DOM focus lands on the real <button>.
+  let onLocation = false;
+  for (let i = 0; i < 6 && !onLocation; i++) {
+    const el = await page.evaluate(() => {
+      const active = document.activeElement;
+      return { tag: active.tagName, text: active.textContent };
+    });
+    if (el.text === "Set") { onLocation = true; break; }
+    await page.keyboard.press("ArrowRight");
+    await pacedWait(page, 80);
+  }
+  const locFocus = await page.evaluate(() => ({ tag: document.activeElement.tagName, text: document.activeElement.textContent }));
+  check("arrow-navigating onto the Location cell focuses its real <button>", locFocus.tag === "BUTTON" && locFocus.text === "Set", JSON.stringify(locFocus));
+  await ctx.close();
+}
+
+console.log("\n=== CYCLE 5 (B986096-HARDENING-15) — Enter commits via a non-bubbling synthetic dispatch; a raw-set value still commits on blur ===");
+{
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 }, ignoreHTTPSErrors: true });
+  await ctx.addInitScript(fixtureSeed(fixture, { id: "p0h15a" }));
+  await ctx.route("**/*", (route) => (route.request().url().startsWith(BASE) ? route.continue() : route.abort()));
+  const page = await ctx.newPage();
+  await openEntrySheet(page);
+
+  // Reproduces the owner's own cycle-5 isolation exactly: type via execCommand, then dispatch a
+  // NON-bubbling KeyboardEvent (the constructor's own default) directly on the input — the same
+  // dispatch that reached React's bubble-phase onKeyDown 0% of the time before HARDENING-15's
+  // native, target-attached listener (which fires at AT_TARGET regardless of `bubbles`).
+  const target = await findExecCell(page);
+  await target.click();
+  await pacedWait(page, 250);
+  const input = target.locator("input");
+  await input.evaluate((el) => { el.focus(); document.execCommand("insertText", false, "1/11/26"); });
+  const result = await input.evaluate((el) => {
+    let observedByCapture = false;
+    const cap = () => { observedByCapture = true; };
+    document.addEventListener("keydown", cap, true);
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter" })); // bubbles: false, the constructor default
+    el.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", code: "Enter" }));
+    document.removeEventListener("keydown", cap, true);
+    return { observedByCapture, activeIsInput: document.activeElement === el };
+  });
+  check("a capture-phase listener still observes the non-bubbling dispatch (as it always did)", result.observedByCapture);
+  check("focus leaves the input — Enter was actually handled, not just observed upstream", !result.activeIsInput);
+  await pacedWait(page, 300);
+  check("Enter commits via a non-bubbling synthetic dispatch (the exact owner reproduction)",
+    (await target.innerText()).trim() === "01/11/26", `got ${JSON.stringify((await target.innerText()).trim())}`);
+  await ctx.close();
+}
+{
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 }, ignoreHTTPSErrors: true });
+  await ctx.addInitScript(fixtureSeed(fixture, { id: "p0h15b" }));
+  await ctx.route("**/*", (route) => (route.request().url().startsWith(BASE) ? route.continue() : route.abort()));
+  const page = await ctx.newPage();
+  await openEntrySheet(page);
+
+  // A real click on another cell must still commit an in-progress edit (the reported "click to
+  // keep going" data-loss path) — genuine mouse interaction, no synthetic events at all.
+  const target = await findExecCell(page);
+  await target.click();
+  await pacedWait(page, 250);
+  const input = target.locator("input");
+  await input.selectText().catch(() => {});
+  await page.keyboard.type("2/22/26");
+  await page.locator('td[data-cell="0-1"]').click();
+  await pacedWait(page, 300);
+  check("a real click on another cell commits the just-typed value (no silent discard)",
+    (await target.innerText()).trim() === "02/22/26", `got ${JSON.stringify((await target.innerText()).trim())}`);
+  await ctx.close();
+}
+{
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 }, ignoreHTTPSErrors: true });
+  await ctx.addInitScript(fixtureSeed(fixture, { id: "p0h15c" }));
+  await ctx.route("**/*", (route) => (route.request().url().startsWith(BASE) ? route.continue() : route.abort()));
+  const page = await ctx.newPage();
+  await openEntrySheet(page);
+  const target = await findExecCell(page);
+  await target.click();
+  await pacedWait(page, 250);
+  const input = target.locator("input");
+  await input.evaluate((el) => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    setter.call(el, "4/09/26"); // raw value set, no `input` event dispatched — bypasses React's onChange
+  });
+  await input.evaluate((el) => el.blur());
+  await pacedWait(page, 300);
+  check("a raw-set value (no React onChange) still commits correctly on blur",
+    (await target.innerText()).trim() === "04/09/26", `got ${JSON.stringify((await target.innerText()).trim())}`);
   await ctx.close();
 }
 

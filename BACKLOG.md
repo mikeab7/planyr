@@ -4495,6 +4495,183 @@ concurrently):
 - Files (this pass): `src/shared/comps/lib/compParse.js`, `test/compParse.test.js`.
 - Base: `origin/main` @ `63def61` (merged into this branch after this pass's local work).
 
+**Recurrence (×11) — HARDENING PASS 10 (B986096-HARDENING-14), owner cycle-4 P0 LIVE-TEST: A COMP
+SAVED FOR THE FIRST TIME, full round trip confirmed (paste → parse → Location arm+map-click →
+Executed committed via Tab → Save → counter 0→1 → survived a hard reload → detail view correct →
+Delete → counter back to 0).** Four items reported STILL FAILING, priority order given verbatim:
+"Enter commit, then focusable cells, then parcel and site-plan anchors, then the Edit round-trip."
+Plus two MINOR (non-Tier-0) notes. All four Tier-0 items investigated this pass; two fixed, two
+genuinely blocked with a named `Blocker:` (ATTEMPT-BEFORE-YOU-PARK — attempted first, not deferred
+on sight). Both minors also fixed.
+  1. **Item 1 — "Enter still discards a committed edit," reported a 4th time with an exact
+     reproduction (synthetic `keydown`/`keyup` KeyboardEvents dispatched without `bubbles: true`).**
+     Reproduced the OWNER'S EXACT methodology, side by side: the same dispatch WITH
+     `bubbles: true` explicitly set correctly committed the edit (input removed, cell text
+     "03/14/26", focus moved away); the identical dispatch relying on the `KeyboardEvent`
+     constructor's `bubbles: false` DEFAULT reproduced his exact symptom — cell reads "", focus
+     stays on the input. This is SYNTHETIC-KEYS-DONT-EDIT (this repo's own already-named trap, hit
+     before on a different feature): a non-bubbling synthetic event never reaches the app's own
+     keydown handling the same way a real keypress does. **The app's own Enter-commit code is
+     UNCHANGED from HARDENING-12's fix and was already independently proven correct via a REAL
+     `page.keyboard.press("Enter")`** in the permanent harness (`verify-comp-entry-p0.mjs`'s
+     "BLOCKER 3" block, passing every run since HARDENING-12, incl. this one). **Disposition, per
+     STANDING RULE #2 (never close an owner-reported symptom on a null): this is disposition #1
+     (reproduce-and-explain) plus #3 (ask him / take the evidence as the answer)** — reported to him
+     directly this session with the side-by-side reproduction, rather than silently marked done. The
+     one-line fix to HIS test script, if he wrote one: add `bubbles: true` to the `KeyboardEvent`
+     constructor (every real keypress bubbles; only a hand-built synthetic one needs to be told to).
+  2. **Item 2 — "Cells need to be focusable so the grid can be driven from the keyboard end to
+     end," `querySelectorAll('[tabindex]')` counted 2 in the whole table.** Genuine gap, fixed: a
+     roving tabindex (`CompEntryGrid.jsx`) — the SELECTED cell carries `tabIndex={0}` (a real Tab
+     stop), every other cell carries `tabIndex={-1}` (programmatically focusable, never a stop in
+     the page's own Tab order — the Excel Online / Google Sheets pattern this app's `role="grid"` +
+     internal arrow-key model already followed structurally but never gave real DOM focus to). A
+     new effect (extending the existing selection-scroll-into-view effect) calls `.focus()` on the
+     selected cell's real node — the Location cell's inner `<button>` for that column, the `<td>`
+     itself for every other. **⛔ A real side effect caught before shipping, not after:** naively
+     focusing on every `selection` change also fires right after a paste creates rows (which sets
+     `selection` while DOM focus is still on the paste textarea) — yanking focus into the grid
+     mid-paste would route a SECOND clipboard paste through the grid's own Excel-style spill-paste
+     instead of the textarea's smart-parse, silently breaking "paste several comps in a row." Fixed
+     by gating the focus move on `gridRef.current?.contains(document.activeElement)` — it only
+     steals focus when focus is ALREADY somewhere inside the grid (a click, an arrow/Tab press, or
+     `finishEdit`'s own existing `.focus()` call after a commit), never when an external control
+     like the paste textarea holds it. Live-proven both ways: a fresh two-paste sequence still
+     produces two independently-parsed rows (not a grid spill), and clicking a cell → Escape →
+     ArrowRight correctly moves real DOM focus cell to cell, landing on the Location button's real
+     `<button>` node when navigated there.
+  3. **Item 3 — parcel and site-plan anchor kinds untested.** Investigated, not fixable
+     client-side-only: a parcel anchor requires selecting a real parcel on the map, which calls the
+     county's live ArcGIS parcel-identify service (`identifyParcelEager`/`queryAtPoint`) — an
+     EXTERNAL host, the same wall this session's own `docs/REFERENCE.md` correction already names
+     (Chromium here reaches `localhost` only). A site-plan anchor requires an already-uploaded,
+     placed site-plan overlay, which needs a signed-in account with Drive-backed storage. **Named
+     blockers, per ATTEMPT-BEFORE-YOU-PARK — attempted first:** the pure derivation
+     (`compParcelAnchor.js`'s `compAnchorFromSelection`/`parcelGeomFromSelection`/
+     `parcelApnFromSelection`/`parcelCountyFromSelection`) and the downstream Location-cell
+     rendering for both anchor kinds (`compLocationText.js`'s `parcelLocationText`/
+     `siteplanLocationText`) are ALREADY solidly unit-tested (`test/compParcelAnchor.test.js` — 15
+     tests, `test/compLocationText.test.js` — 11 tests, both pre-existing and re-confirmed green
+     this pass) — what's untested is the INTERACTIVE gesture (click a real parcel / click a real
+     placed overlay) and the SAVE round trip, both of which need `Blocker: live-GIS` (parcel) /
+     `Blocker: auth` + `Blocker: real-data` (site-plan) respectively. Filed as new steps on
+     `V556720` for a signed-in pass to close.
+  4. **Item 4 — Edit round-trip on a saved comp untested.** Investigated by code reading (a live
+     signed-in Supabase write is required to genuinely confirm this, `Blocker: auth`): the edit
+     path (`CompsPanel.jsx`'s `openEdit`/`save`) correctly branches `draft.id ? updateComp(...) :
+     insertComp(...)`, reloads, and shows the updated detail view — this is PRE-EXISTING code from
+     an earlier round, untouched by any HARDENING pass, and reads correctly. This is a genuine
+     "confirm it," not "find the bug" ask (Michael's own framing: "nobody has confirmed"). Filed as
+     a new step on `V556720`.
+  **MINOR (both fixed this pass, not Tier-0):**
+  - **Comp list row title fell back to the rate ("$0.65/SF/yr NNN") when Title was blank — should
+    fall back to the comp's real Location instead** (an address is a better name for a deal than
+    its price). `CompsPanel.jsx` gained `useCompLocationText` — mirrors `CompEntryGrid.jsx`'s own
+    Location-cell resolution (parcel APN / site-plan title synchronously, a pin's reverse-geocoded
+    street address once resolved, same `compLocationText.js` pure functions) but is a DELIBERATELY
+    SEPARATE, self-contained module-scope cache from `CompEntryGrid.jsx`'s own per-draft-row one —
+    that file is a cycle-4 GATE ("do not touch again except for regression-checking") and this fix
+    never touches it. `CompRow`'s title now reads `comp.title || locationText || compHeadline(comp)`.
+  - **Comp detail view showed every structured field except where the comp actually IS.** Same
+    `useCompLocationText` hook adds a "Location" `<Field>` row to `CompDetail`, right above the
+    existing field list.
+  - New tests: `test/compsPanelLocation.test.js` (4, `renderToStaticMarkup`-based — no DOM/Leaflet
+    needed, same pattern as `test/parcelCard.test.js`) — proves an untitled comp's row/detail both
+    show its Location (never the bare rate), a titled comp is unaffected, and no anchor renders no
+    Location row (never a blank one).
+- **VERIFIED.** Roving tabindex + the multi-paste focus-guard both proven live against
+  `ui-audit/verify-comp-entry-p0.mjs`'s new "CYCLE 4 (HARDENING-14)" block (34/34 checks green,
+  including every pre-existing check — the pre-existing "Tab into the grid" keyboard-only-path
+  check needed no change, since the focus-guard keeps the textarea's own Tab-in behavior intact).
+  Full `npx vitest run` — 685/685 files, 14,116/14,116 tests green (incl. the new
+  `test/compsPanelLocation.test.js`). `npm run build` clean. `npx eslint
+  src/shared/comps/components/CompEntryGrid.jsx src/shared/comps/components/CompsPanel.jsx
+  ui-audit/verify-comp-entry-p0.mjs test/compsPanelLocation.test.js` — 0 errors. `node
+  ui-audit/design-drift-audit.mjs --check` / `node ui-audit/doc-pointer-audit.mjs` / `node
+  scripts/build-map.mjs --check` / `node scripts/build-backlog-index.mjs --check` / `node
+  scripts/verification-queue-audit.mjs --check` all pass.
+- Files: `src/shared/comps/components/CompEntryGrid.jsx`, `src/shared/comps/components/CompsPanel.jsx`,
+  `ui-audit/verify-comp-entry-p0.mjs`, `test/compsPanelLocation.test.js`, `MAP.md`.
+
+**Recurrence (×12) — HARDENING PASS 11 (B986096-HARDENING-15), owner cycle-5 P0: Enter STILL
+discarding on its 5th cycle, root-caused this time via the owner's own controlled A/B/C isolation —
+plus a NEW, higher-severity finding (blur silently discarding a committed edit) found while the
+owner was validating his own test harness.** Both genuinely fixed this pass, not re-documented.
+  1. **THE ROOT CAUSE, finally isolated.** The owner ran three controlled tests on the same
+     Executed cell, same bundle: (A) a Tab keydown alone (no blur) → commits correctly; (B) a
+     direct `.blur()` call alone (no key event) → discards; (C) an Enter keydown+keyup alone (no
+     blur) → discards. His conclusion — "synthetic key events DO reach your handler, Tab proves
+     it" — was the one wrong inference in an otherwise correct isolation. **What's actually
+     happening: Run A never goes through the Enter/Tab keydown branch at all.** React's `onKeyDown`
+     prop is bubble-phase and root-delegated (React 17+ attaches one native listener at the app
+     root, not per element), so it only fires once a keydown ACTUALLY BUBBLES back up to that root
+     — and the `KeyboardEvent` constructor's own default is `bubbles: false`. A real keypress always
+     bubbles; a hand-built synthetic one built without explicitly setting `bubbles: true` never
+     reaches it (SYNTHETIC-KEYS-DONT-EDIT, already named in this repo, hit before on a different
+     feature — and the reason 4 prior "add an Enter branch" rounds never moved his own
+     reproduction, because there was never anything wrong with the branch). Tab's own commit comes
+     from a COMPLETELY DIFFERENT mechanism: the native Tab keydown's DEFAULT ACTION (the browser's
+     own built-in "move focus to the next tabbable element") fires regardless of `bubbles` — default
+     actions occur at dispatch time, independent of the bubble phase — and the resulting focus loss
+     fires a genuine native `focusout`, which (unlike a hand-built KeyboardEvent) bubbles
+     UNCONDITIONALLY by spec no matter what caused it. So Run A commits through `onEditBlur`, not
+     through the keydown handler's Tab branch — and Run C (Enter) has no equivalent native
+     side-effect to fall back on, so it silently reaches nothing. The owner's own "a capture-phase
+     listener confirmed the synthetic keydowns are observed" check is fully CONSISTENT with this,
+     not evidence against it: capture-phase dispatch walks DOWN to the target regardless of
+     `bubbles` (only the BUBBLE-phase return trip is skipped for a non-bubbling event), so an
+     ancestor capture listener sees the event while React's root-delegated bubble-phase listener on
+     that same target never does.
+  2. **THE FIX, closing the class rather than re-explaining it a 6th time.** `CompEntryGrid.jsx`
+     now attaches a plain NATIVE `addEventListener("keydown", …)` directly on the editing input/
+     select element itself (via a `useEffect` keyed on `editing`, calling through a ref so it can
+     never act on a stale `rows` closure if the row set changes mid-edit — same `*Ref` pattern this
+     file already uses for `rowsRef`/`onRowsChangeRef`). Per the DOM dispatch algorithm, a listener
+     registered directly on the TARGET element fires at the AT_TARGET phase unconditionally —
+     regardless of `bubbles` and regardless of the `capture` flag it was registered with, because
+     AT_TARGET always happens; only the phases before/after it depend on the event's own bubbling.
+     This makes Enter/Tab/Escape work correctly for ANY dispatch, synthetic or real. **Zero behavior
+     change for a genuine keypress**: it already reached the handler via React's normal bubble
+     delegation, so the new native listener simply fires FIRST (AT_TARGET precedes the later bubble
+     phase) and `finishEdit`'s existing `editHandledRef` guard — already present, built for exactly
+     this class of double-invocation — makes the ensuing second (React) call from that same real
+     keypress a safe no-op.
+  3. **NEW-1 — "blur discards the edit," found by the owner while validating his own instrument,
+     correctly flagged as worse than the Enter bug** (a user types a rate, clicks the next cell to
+     keep going, and the value silently vanishes with no visible sign anything went wrong — Michael
+     enters comps in batches, so this would bite the very first real session). **Investigated live
+     under every realistic interaction this session could construct** (a real click on another
+     cell, a real click on the map, typing via `execCommand('insertText', …)` — the same technique
+     his own prior cycles used — then a JS `.blur()` call, both as separate steps and in one
+     synchronous block) — **none reproduced a discard; every one committed the typed value
+     correctly.** The one thing that DID reproduce it: setting the input's `.value` through the raw
+     property setter WITHOUT dispatching a real `input` event first, bypassing React's `onChange`
+     entirely — `editValueRef.current` (populated only by `onChange`) then stays at whatever it was
+     before, and the blur commits THAT stale value. That specific technique is inconsistent with
+     this cycle's own Run A/C setup (which read back the CORRECTLY typed value via the same
+     "type, then a differentiated final action" pattern), so it doesn't fully explain the report as
+     given — but the CLASS of bug it describes (a value entered without React ever observing it) is
+     real regardless of which exact technique produced it here, and cheap to close outright:
+     `onEditBlur` now reads the input's own live DOM value at the moment of blur and uses it if it
+     disagrees with the tracked ref, rather than trusting the ref unconditionally — belt-and-
+     suspenders, zero behavior change for the (already-working) real-typing / real-click-away /
+     real-blur-call paths measured live this pass.
+- **VERIFIED LIVE**, against the owner's own exact reproduction methodology, not from code reading:
+  a fresh check reproduces his precise A/B/C setup (execCommand typing + a non-bubbling
+  `KeyboardEvent("keydown"/"keyup", {key:"Enter"})` dispatch, with a capture-phase listener
+  confirming dispatch the same way his did) and now shows the cell correctly committing
+  ("01/11/26"), focus correctly leaving the input, and — the previously-reproduced discard case — a
+  raw-set value (bypassing React's onChange entirely) now also commits correctly on blur. All
+  folded into the permanent regression harness, `ui-audit/verify-comp-entry-p0.mjs`'s new
+  "CYCLE 5 (HARDENING-15)" block — **39/39 checks green**, including every pre-existing check from
+  every prior round (no regressions). Full `npx vitest run` — 685/685 files, 14,116/14,116 tests
+  green. `npm run build` clean. `npx eslint src/shared/comps/components/CompEntryGrid.jsx
+  ui-audit/verify-comp-entry-p0.mjs` — 0 errors. `node ui-audit/design-drift-audit.mjs --check` /
+  `node ui-audit/doc-pointer-audit.mjs` / `node scripts/build-map.mjs --check` / `node
+  scripts/build-backlog-index.mjs --check` / `node scripts/verification-queue-audit.mjs --check`
+  all pass.
+- Files: `src/shared/comps/components/CompEntryGrid.jsx`, `ui-audit/verify-comp-entry-p0.mjs`.
+
 ### B986097 — A draft staging table, reachable only by the KML import `[Site Planner / comps]` (feature) #comps #gis #persistence  *(owner chat block 2026-09-01, NEW-2, same decision doc as B986096 above. Minted **B986097 / V556721** from this branch's reserved block B986096–B986111 · V556720–V556735 against `origin/main` 8e42a14. DEDUPE-FIRST — searched Open/⏳Verify/Done for "KML", "My Maps", "import draft", "staging table", #comps: no prior item touches KML/My Maps import; net-new. Also searched for any prior `comp_import_drafts`/`comp_drafts` table — none exists.)*
 `[x]` **Shipped this session, including the schema — applied directly to production** (this session has Supabase MCP write access, unlike the read-only access a prior comps session flagged in this same module's folder pointer — that stale claim was corrected in the same commit).
 - Verify: live — GIS endpoint behavior (a real KML import, a real polygon centroid) + real production writes are mandatory LIVE-VERIFY classes. **V556721.**

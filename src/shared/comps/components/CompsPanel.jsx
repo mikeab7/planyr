@@ -35,6 +35,51 @@ import CompEntryGrid, { draftFromParsedRow } from "./CompEntryGrid.jsx";
 import CompDraftsPanel from "./CompDraftsPanel.jsx";
 import { fetchMyDrafts, insertDrafts, promoteDraft, deleteDraft } from "../lib/compDraftsStore.js";
 import { kmlToDraftRows } from "../lib/kmlImport.js";
+import { parcelLocationText, siteplanLocationText, pinFallbackText } from "../lib/compLocationText.js";
+import { reverseGeocodeLatLon } from "../../../workspaces/site-planner/lib/geocode.js";
+import { COUNTIES } from "../../../workspaces/site-planner/lib/counties.js";
+
+// B986096-HARDENING-14 (owner cycle-4 report, minor: "comp list titles a row by rate when Title
+// is empty — should fall back to the reverse-geocoded address instead" + "comp detail view
+// doesn't show Location at all despite having a real street address") — a comp's real identity,
+// once anchored, is WHERE it is, not its rate; falling back to the rate when Title is blank reads
+// as though the deal's price IS its name. This mirrors CompEntryGrid.jsx's own Location cell
+// (compLocationText.js's three-anchor-kind split) rather than duplicating a second reverse-geocode
+// caller — deliberately a SEPARATE, self-contained cache from CompEntryGrid's per-draft-row one
+// (CompEntryGrid is a HARDENING-12/13 gate closed this session; this never touches that file).
+function countyEntry(key) {
+  const rec = key ? COUNTIES[key] : null;
+  if (!rec) return null;
+  return { name: rec.label ? rec.label.split(" ·")[0].trim() : null, state: rec.state || null };
+}
+const _pinAddrCache = new Map(); // "lat,lon" -> resolved address string | null, shared across every mounted row/detail view this session
+const _pinAddrInflight = new Map();
+function pinCacheKey(anchor) {
+  return anchor && typeof anchor.lat === "number" && typeof anchor.lon === "number"
+    ? `${anchor.lat.toFixed(6)},${anchor.lon.toFixed(6)}`
+    : null;
+}
+/** A saved comp's Location text — parcel APN / site-plan title synchronously, a pin's reverse-
+ * geocoded street address once resolved (the synchronous county/coordinate fallback until then). */
+function useCompLocationText(anchor, overlaysById) {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    if (!anchor || anchor.kind !== "pin") return;
+    const key = pinCacheKey(anchor);
+    if (!key || _pinAddrCache.has(key) || _pinAddrInflight.has(key)) return;
+    const p = reverseGeocodeLatLon(anchor.lat, anchor.lon)
+      .then((ans) => { _pinAddrCache.set(key, ans?.label || null); })
+      .catch(() => { _pinAddrCache.set(key, null); })
+      .finally(() => { _pinAddrInflight.delete(key); bump((n) => n + 1); });
+    _pinAddrInflight.set(key, p);
+  }, [anchor]);
+  if (!anchor) return null;
+  if (anchor.kind === "parcel") return parcelLocationText(anchor, (k) => countyEntry(k)?.name);
+  if (anchor.kind === "site_plan") return siteplanLocationText(anchor, overlaysById) || pinFallbackText(anchor, countyEntry);
+  const key = pinCacheKey(anchor);
+  const resolved = key ? _pinAddrCache.get(key) : null;
+  return resolved || pinFallbackText(anchor, countyEntry);
+}
 
 const TYPE_LABEL = { land: "Land", building_sale: "Building sale", lease: "Lease" };
 
@@ -68,19 +113,23 @@ function SummaryStrip({ comps }) {
   );
 }
 
-function CompRow({ comp, onOpen }) {
+export function CompRow({ comp, onOpen, overlaysById }) {
+  // HARDENING-14 — a comp's own title wins; absent that, its LOCATION (a real identity — an
+  // address, an APN, a plan name) is a better row title than its rate, which is what used to show.
+  const locationText = useCompLocationText(comp.anchor, overlaysById);
+  const primary = comp.title || locationText;
   return (
     <button onClick={() => onOpen(comp)} style={{
       display: "block", width: "100%", textAlign: "left", padding: "9px 14px", border: "none",
       borderBottom: "1px solid var(--border-default)", background: "transparent", cursor: "pointer", fontFamily: "inherit",
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-        <span style={{ fontSize: 13, fontWeight: 650, color: "var(--text-primary)" }}>{comp.title || compHeadline(comp)}</span>
+        <span style={{ fontSize: 13, fontWeight: 650, color: "var(--text-primary)" }}>{primary || compHeadline(comp)}</span>
         <span style={{ fontSize: 11, color: "var(--text-secondary)", flex: "none" }}>{formatDateDisplay(comp.compDate)}</span>
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 3 }}>
         <TypeChip type={comp.compType} />
-        {comp.title && <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{compHeadline(comp)}</span>}
+        {primary && <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{compHeadline(comp)}</span>}
       </div>
     </button>
   );
@@ -121,8 +170,11 @@ function SourceBrochureLink({ comp, overlaysById, onOpenBrochure }) {
   );
 }
 
-function CompDetail({ comp, canEdit, onEdit, onDelete, onBack, overlaysById, onOpenBrochure }) {
+export function CompDetail({ comp, canEdit, onEdit, onDelete, onBack, overlaysById, onOpenBrochure }) {
   const rows = compFieldRows(comp);
+  // HARDENING-14 — the detail view showed every structured field EXCEPT where the comp actually
+  // is, despite that being real, already-resolved information (an address, an APN, a plan name).
+  const locationText = useCompLocationText(comp.anchor, overlaysById);
   return (
     <div style={{ padding: "10px 14px 14px" }}>
       {/* Two distinct things, spaced as such (NEW-4) — a real flex gap, with wrap so a long
@@ -134,6 +186,7 @@ function CompDetail({ comp, canEdit, onEdit, onDelete, onBack, overlaysById, onO
       </div>
       {comp.title && <div style={{ fontSize: 15, fontWeight: 700, marginTop: 6 }}>{comp.title}</div>}
       <div style={{ marginTop: 10 }}>
+        {locationText && <Field label="Location"><span style={{ fontSize: 12.5 }}>{locationText}</span></Field>}
         {rows.map((r) => (
           <Field key={r.key} label={r.label}><span style={{ fontSize: 12.5 }}>{r.value}</span></Field>
         ))}
@@ -641,7 +694,7 @@ export default function CompsPanel({
             {kmlImportError && <div style={{ padding: "6px 14px 0", fontSize: 10.5, color: "var(--danger-text)" }}>{kmlImportError}</div>}
             <SummaryStrip comps={comps} />
             {comps.length === 0 && <div style={{ padding: 14, fontSize: 12, color: "var(--text-secondary)" }}>No comps yet. Paste a few from a broker email with “＋ New comps” above, or use “Drop a pin”/“Comp from parcel” on the map.</div>}
-            {comps.map((c) => <CompRow key={c.id} comp={c} onOpen={openDetail} />)}
+            {comps.map((c) => <CompRow key={c.id} comp={c} onOpen={openDetail} overlaysById={overlaysById} />)}
           </>
         )}
 
