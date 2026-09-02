@@ -147,14 +147,14 @@ console.log("\n=== BLOCKER 3 — Enter commits a date-cell edit ===");
         check("typed text lands in the input before Enter", (await input.inputValue()) === "3/14/26");
         await page.keyboard.press("Enter");
         await pacedWait(page, 300);
-        // B986096-HARDENING-19 — on a single-row grid, Enter's destination clamps back to the SAME
-        // cell (nowhere else to move), so HARDENING-10 NEW-3's "land the next cell in edit mode"
-        // feature correctly REOPENS this cell rather than leaving it as committed plain text — read
-        // the reopened input's value (never `innerText`, which never includes an `<input>`'s value).
-        const reopened = target.locator("input");
-        check("Enter commits the value and reopens the SAME cell for fast re-entry (single-row grid)",
-          (await reopened.count()) > 0 && (await reopened.inputValue()) === "03/14/26",
-          `got ${JSON.stringify(await reopened.count() > 0 ? await reopened.inputValue() : (await target.innerText()).trim())}`);
+        // B986096-HARDENING-23 — on a single-row grid, Enter's destination clamps back to the SAME
+        // cell (nowhere else to move). HARDENING-19 made that reopen the same cell (matching
+        // HARDENING-10 NEW-3's "land the next cell in edit mode" for a genuinely different
+        // destination); HARDENING-23 found that reopening the SAME cell with the value just typed
+        // into it reads as "nothing happened" and closes normally instead, like Tab/Escape do.
+        check("Enter commits the value and closes normally (single-row grid, same-cell clamp)",
+          (await target.locator("input").count()) === 0 && (await target.innerText()).trim() === "03/14/26",
+          `got ${JSON.stringify((await target.innerText()).trim())}, input mounted: ${await target.locator("input").count() > 0}`);
       }
     }
   }
@@ -403,18 +403,16 @@ console.log("\n=== CYCLE 5 (B986096-HARDENING-15) — Enter commits via a non-bu
   });
   check("a capture-phase listener still observes the non-bubbling dispatch (as it always did)", result.observedByCapture);
   await pacedWait(page, 300);
-  // B986096-HARDENING-19 — this fixture is a single-row grid, so Enter's destination clamps back
-  // to the SAME cell and HARDENING-10 NEW-3 correctly reopens it (focus stays in an <input>, which
-  // is now the right outcome, not evidence Enter went unhandled — see the reused input's actual
-  // committed VALUE below for the real "was it handled" signal: an unhandled Enter never reformats
-  // "1/11/26" into "01/11/26").
-  const reopened = target.locator("input");
-  const reopenedCount = await reopened.count();
+  // B986096-HARDENING-23 — this fixture is a single-row grid, so Enter's destination clamps back
+  // to the SAME cell; HARDENING-23 made that case close normally (not reopen) since there is
+  // nothing left to type into the cell that was just committed. The real "was it handled" signal
+  // is still the committed VALUE: an unhandled Enter never reformats "1/11/26" into "01/11/26".
+  const reopenedCount = await target.locator("input").count();
   check("Enter was actually handled, not just observed upstream — value reformatted to 01/11/26",
-    reopenedCount > 0 && (await reopened.inputValue()) === "01/11/26",
-    `got ${JSON.stringify(reopenedCount > 0 ? await reopened.inputValue() : (await target.innerText()).trim())}`);
-  check("Enter commits via a non-bubbling synthetic dispatch, then reopens the same cell (the exact owner reproduction)",
-    reopenedCount > 0, `input still mounted after Enter: ${reopenedCount > 0}`);
+    reopenedCount === 0 && (await target.innerText()).trim() === "01/11/26",
+    `got ${JSON.stringify((await target.innerText()).trim())}, input still mounted: ${reopenedCount > 0}`);
+  check("Enter commits via a non-bubbling synthetic dispatch, then closes normally (same-cell clamp, the exact owner reproduction)",
+    reopenedCount === 0, `input still mounted after Enter: ${reopenedCount > 0}`);
   await ctx.close();
 }
 {
