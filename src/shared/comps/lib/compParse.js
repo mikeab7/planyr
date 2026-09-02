@@ -707,9 +707,18 @@ function extractUnlabeledLine(generic, flags, rawLine, recordContext) {
       if (rateHit.soft) mergeFlag(flags, "rate", "soft", rateHit.reason || "Had a k/m suffix — check the expanded value.");
       generic.ratePeriod = generic.ratePeriod || detectPeriod(line);
       const basisWord = generic.rateBasis ? null : working.match(BASIS_NNN_RE) || working.match(BASIS_GROSS_RE);
+      // B986096 (owner report, 2026-09-02) — detectPeriod reads the ORIGINAL `line` to set
+      // ratePeriod, but that alone never removes the matched word from `working`. When the period
+      // is part of a COMPOUND rate match (".56/SF/mo") it's already blanked via `rateHit.working`
+      // below; a STANDALONE period word elsewhere on the line (".56/SF NNN annual") never was,
+      // and leaked verbatim into Notes even though it was genuinely recognized and consumed. Same
+      // "claim it, blank it" contract as basisWord right above — a consumed token must not also
+      // survive in Notes.
+      const periodWord = working.match(PERIOD_RE);
       generic.rateBasis = generic.rateBasis || detectBasis(line);
       working = rateHit.working;
       if (basisWord) working = blank(working, basisWord);
+      if (periodWord) working = blank(working, periodWord);
       claimedAnything = true;
     }
   }
@@ -756,7 +765,10 @@ function extractUnlabeledLine(generic, flags, rawLine, recordContext) {
   }
   // Partial claim: whatever's left in `working` after every detector had its turn is real
   // unrecognized content (not just the punctuation/glue the claims left behind) — keep it too.
-  const leftover = working.replace(/[,;|]+/g, " ").trim();
+  // B986096 (owner report, 2026-09-02) — stripping "," left the space that FOLLOWED it behind
+  // ("Houston, TX 77073" -> "Houston  TX 77073", a double space) — collapse any run of whitespace
+  // the comma-strip produces down to one, same as every other leftover-text normalization here.
+  const leftover = working.replace(/[,;|]+/g, " ").replace(/\s+/g, " ").trim();
   if (leftover) addNote(generic, leftover);
 }
 

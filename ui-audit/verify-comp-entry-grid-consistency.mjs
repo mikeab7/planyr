@@ -44,7 +44,7 @@ async function openEntrySheet(page) {
   await assertMeasurable(page, "verify-comp-entry-grid-consistency");
   await page.getByRole("tab", { name: /^Comps/ }).first().click();
   await pacedWait(page, 400);
-  await page.getByText("＋ New comps", { exact: true }).click();
+  await page.getByText("＋ Paste comps", { exact: true }).click(); // B848304 renamed this button; this harness had drifted
   await pacedWait(page, 300);
 }
 

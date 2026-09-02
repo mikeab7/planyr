@@ -172,9 +172,9 @@ function simpleColumn(base) {
 
 export const SHEET_COLUMNS = [
   // TYPE — the classifier every other column's meaning depends on ("choose deal first because it
-  // will inform the rest"). Frozen alongside Title so it never scrolls out of view.
+  // will inform the rest"). Frozen alongside Location (see below) so it never scrolls out of view.
   {
-    key: "compType", label: "Type", group: "TYPE", width: 66, align: "left", kind: "select", options: TYPE_OPTIONS, frozen: true,
+    key: "compType", label: "Type", group: "TYPE", width: 58, align: "left", kind: "select", options: TYPE_OPTIONS, frozen: true,
     appliesTo: () => true,
     getValue: (d) => d.compType,
     setValue: (d, v) => {
@@ -197,11 +197,26 @@ export const SHEET_COLUMNS = [
     flagKey: () => "compType",
   },
 
-  // PROPERTY — facts about the property itself, not the deal. Title/address is the second frozen
-  // column ("freeze through Title / address so it stays while the rest scrolls right").
-  simpleColumn({ key: "title", label: "Title / Address", group: "PROPERTY", width: 170, flexKey: "title", align: "left", kind: "text", frozen: true }),
+  // PROPERTY — facts about the property itself, not the deal.
+  // ⛔ B986096-HARDENING-27 (NEW-4, owner report, 2026-09-02 — "widths are inverted... give the
+  // space to the column that holds content") — Location, not Title, is the SECOND frozen column
+  // now. Measured on his own plan: Title/Address sits empty on nearly every real row (a broker
+  // paste rarely names the property), while Location ALWAYS carries a real identity once a row is
+  // anchored (an address, an APN, a plan title — HARDENING-9/24's own reverse-geocoded text). A
+  // frozen Title next to an unfrozen Location meant the one column that actually says WHICH comp
+  // this row is scrolled out of view the moment the sheet scrolled right — exactly the "can't tell
+  // which comp I'm editing" failure this freeze exists to prevent. Location moves up here (right
+  // after Type) and is now frozen; Title drops its freeze and its width, since it no longer has
+  // to carry the row's identity on its own. Frozen columns must be CONTIGUOUS in visible order —
+  // a scrollable column sandwiched between two sticky ones would scroll UNDER them, not past them
+  // — which is why Location is reordered here rather than just re-flagged in place.
   {
-    key: "size", label: "Size", group: "PROPERTY", width: 70, align: "right", kind: "number",
+    key: "location", label: "Location", group: "PROPERTY", width: 188, align: "left", kind: "action",
+    appliesTo: () => true, required: true, frozen: true,
+  },
+  simpleColumn({ key: "title", label: "Title / Address", group: "PROPERTY", width: 108, flexKey: "title", align: "left", kind: "text" }),
+  {
+    key: "size", label: "Size", group: "PROPERTY", width: 62, align: "right", kind: "number",
     appliesTo: () => true,
     getValue: (d) => (d.compType === "land" ? d.landSizeValue : d.compType === "building_sale" ? d.bldgSizeSf : d.leaseSizeSf),
     setValue: (d, v) => (d.compType === "land" ? { ...d, landSizeValue: v } : d.compType === "building_sale" ? { ...d, bldgSizeSf: v } : { ...d, leaseSizeSf: v }),
@@ -210,20 +225,13 @@ export const SHEET_COLUMNS = [
   {
     // Editable AC/SF only for land — building-sale and lease sizes are always SF, shown as a
     // fixed (not em-dash — it DOES apply, it's just not a choice) label.
-    key: "landSizeUnit", label: "Unit", group: "PROPERTY", width: 42, align: "left", kind: "select", options: UNIT_OPTIONS,
+    key: "landSizeUnit", label: "Unit", group: "PROPERTY", width: 40, align: "left", kind: "select", options: UNIT_OPTIONS,
     appliesTo: () => true,
     editableFor: (t) => t === "land",
     getValue: (d) => (d.compType === "land" ? d.landSizeUnit : "sf"),
     setValue: (d, v) => ({ ...d, landSizeUnit: v }),
     flagKey: () => "landSizeUnit",
   },
-  // B986096-HARDENING-24 (owner live-test, "truncated to about 8 characters, which makes the one
-  // field that identifies a comp unreadable") — 84px showed only the first ~8 characters of a real
-  // street address; the value itself is already reordered street-first (geocode.js), so the fix
-  // here is purely more room. Not a `flexKey` grower: Location's content (an address/APN/plan
-  // title) doesn't benefit from unbounded growth the way Notes/Title text does, so a wider static
-  // width — still with the existing `title=` hover for the untruncated value — is the right shape.
-  { key: "location", label: "Location", group: "PROPERTY", width: 150, align: "left", kind: "action", appliesTo: () => true, required: true },
 
   // DEAL — facts about the transaction: when, how long.
   // B986096-HARDENING-25 — `editHint` becomes the edit `<input>`'s native `placeholder` while a
@@ -233,8 +241,8 @@ export const SHEET_COLUMNS = [
   // real data) — a date's own format (mm/dd/yy) isn't a guessed value, it's the format the cell
   // will parse, and it only shows once you're already mid-edit, so it can never be mistaken for a
   // real stored value while scanning the sheet at rest.
-  simpleColumn({ key: "compDate", label: "Executed", group: "DEAL", width: 74, align: "right", kind: "date", required: true, editHint: "mm/dd/yy" }),
-  simpleColumn({ key: "leaseCommencementDate", label: "Commence", fullLabel: "Commencement", group: "DEAL", width: 74, align: "right", kind: "date", appliesTo: (t) => t === "lease", editHint: "mm/dd/yy" }),
+  simpleColumn({ key: "compDate", label: "Executed", group: "DEAL", width: 68, align: "right", kind: "date", required: true, editHint: "mm/dd/yy" }),
+  simpleColumn({ key: "leaseCommencementDate", label: "Commence", fullLabel: "Commencement", group: "DEAL", width: 68, align: "right", kind: "date", appliesTo: (t) => t === "lease", editHint: "mm/dd/yy" }),
   {
     // HARDENING-10 — the STORED field stays free text (a real term can be "10 yr + 2x5 options",
     // which a bare-months field can't hold) but the CELL only ever shows/accepts a bare month
@@ -254,7 +262,7 @@ export const SHEET_COLUMNS = [
   // on land — Michael scoped cap rate to building sales). The three are a TRIANGLE: enter any
   // two, the third derives (see the file header + resolveCapTriangle in comps.js).
   {
-    key: "price", label: "Price", group: "PRICE", width: 84, align: "right", kind: "number",
+    key: "price", label: "Price", group: "PRICE", width: 76, align: "right", kind: "number",
     appliesTo: (t) => t === "land" || t === "building_sale",
     triangleField: "price",
     getValue: (d) => (d.compType === "land" ? d.landPrice : d.bldgPrice),
@@ -262,7 +270,7 @@ export const SHEET_COLUMNS = [
     flagKey: (d) => (d.compType === "land" ? "landPrice" : "bldgPrice"),
   },
   {
-    key: "bldgNoi", label: "NOI", group: "PRICE", width: 84, align: "right", kind: "number",
+    key: "bldgNoi", label: "NOI", group: "PRICE", width: 76, align: "right", kind: "number",
     appliesTo: (t) => t === "building_sale",
     triangleField: "noi",
     getValue: (d) => d.bldgNoi,
@@ -284,9 +292,9 @@ export const SHEET_COLUMNS = [
 
   // RENT — lease-only now that Price moved to PRICE: Rate (+ how it's quoted) and Escalation,
   // because escalation IS rent, over time — never a generic "term".
-  simpleColumn({ key: "leaseRate", label: "Rate", fullLabel: "Rate $/SF", group: "RENT", width: 56, align: "right", kind: "number", appliesTo: (t) => t === "lease" }),
-  simpleColumn({ key: "leaseRatePeriod", label: "Per", group: "RENT", width: 56, align: "left", kind: "select", options: PERIOD_OPTIONS, appliesTo: (t) => t === "lease" }),
-  simpleColumn({ key: "leaseRateExpense", label: "Basis", group: "RENT", width: 52, align: "left", kind: "select", options: BASIS_OPTIONS, appliesTo: (t) => t === "lease" }),
+  simpleColumn({ key: "leaseRate", label: "Rate", fullLabel: "Rate $/SF", group: "RENT", width: 50, align: "right", kind: "number", appliesTo: (t) => t === "lease" }),
+  simpleColumn({ key: "leaseRatePeriod", label: "Per", group: "RENT", width: 42, align: "left", kind: "select", options: PERIOD_OPTIONS, appliesTo: (t) => t === "lease" }),
+  simpleColumn({ key: "leaseRateExpense", label: "Basis", group: "RENT", width: 48, align: "left", kind: "select", options: BASIS_OPTIONS, appliesTo: (t) => t === "lease" }),
   simpleColumn({ key: "leaseEscalationPct", label: "Escal (%)", fullLabel: "Escalation %/yr", group: "RENT", width: 60, align: "right", kind: "number", appliesTo: (t) => t === "lease" }),
 
   // CONCESSIONS — the other half of the economics: what the landlord gives up, which is exactly
@@ -306,7 +314,7 @@ export const SHEET_COLUMNS = [
   {
     // Follows the row's OWN recorded size unit — $/AC for an acre-quoted land comp, $/SF for an
     // SF-quoted one or a building sale (which has no unit choice at all).
-    key: "salePricePerArea", label: "$/SF or $/AC", group: "DERIVED", width: 90, align: "right", kind: "derived",
+    key: "salePricePerArea", label: "$/SF or $/AC", group: "DERIVED", width: 84, align: "right", kind: "derived",
     appliesTo: (t) => t === "land" || t === "building_sale",
     derive: (comp) => {
       const fmt = (n) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -321,7 +329,7 @@ export const SHEET_COLUMNS = [
   {
     // The lease's annualized rate on its OWN quoted basis — the basis prints inline so this is
     // never silently compared across NNN and gross (they are not the same figure).
-    key: "leaseAnnualRate", label: "$/SF/yr", group: "DERIVED", width: 66, align: "right", kind: "derived",
+    key: "leaseAnnualRate", label: "$/SF/yr", group: "DERIVED", width: 58, align: "right", kind: "derived",
     appliesTo: (t) => t === "lease",
     derive: (comp) => {
       const v = annualLeaseRate(comp);
@@ -337,9 +345,9 @@ export const SHEET_COLUMNS = [
   // group now. All three `flexKey` columns here (plus Title above) share the dialog's leftover
   // horizontal space — see CompEntryGrid.jsx's `computeFlexWidths`. `width` here is only the
   // STATIC fallback (tests, no-DOM contexts); the live sheet always uses the computed value.
-  simpleColumn({ key: "partyProvider", label: "Landlord/Seller", fullLabel: "Landlord / Seller", group: "PARTIES", width: 125, flexKey: "partyProvider", align: "left", kind: "text" }),
-  simpleColumn({ key: "partyAcquirer", label: "Tenant/Buyer", fullLabel: "Tenant / Buyer", group: "PARTIES", width: 125, flexKey: "partyAcquirer", align: "left", kind: "text" }),
-  simpleColumn({ key: "notes", label: "Notes", group: "NOTES", width: 90, flexKey: "notes", align: "left", kind: "text" }),
+  simpleColumn({ key: "partyProvider", label: "Landlord/Seller", fullLabel: "Landlord / Seller", group: "PARTIES", width: 110, flexKey: "partyProvider", align: "left", kind: "text" }),
+  simpleColumn({ key: "partyAcquirer", label: "Tenant/Buyer", fullLabel: "Tenant / Buyer", group: "PARTIES", width: 110, flexKey: "partyAcquirer", align: "left", kind: "text" }),
+  simpleColumn({ key: "notes", label: "Notes", group: "NOTES", width: 80, flexKey: "notes", align: "left", kind: "text" }),
 ];
 
 export function columnIndex(key) {
@@ -519,12 +527,17 @@ export function spillPaste(rows, startRow, startCol, clipboardText, emptyDraftFn
  * separately: it alone absorbs a squeeze up to its own floor, and only once it's AT that floor do
  * the three growers give up any of their own room. ------------------------------------------- */
 
+// B986096-HARDENING-27 (NEW-4) — Title's nominal/floor/weight all shrank alongside its column
+// definition above: it no longer carries the row's identity (Location, now frozen, does), so it
+// no longer needs the largest guaranteed share of leftover space either. The three growers now
+// share weight EQUALLY — a broker paste is as likely to fill in a landlord/tenant name as a
+// property title, so there's no longer a reason to bias toward Title specifically.
 const FLEX_GROWERS = [
-  { key: "title", nominal: 170, floor: 90, weight: 2 }, // "Title gets the largest share"
-  { key: "partyProvider", nominal: 125, floor: 65, weight: 1 },
-  { key: "partyAcquirer", nominal: 125, floor: 65, weight: 1 },
+  { key: "title", nominal: 108, floor: 46, weight: 1 },
+  { key: "partyProvider", nominal: 110, floor: 46, weight: 1 },
+  { key: "partyAcquirer", nominal: 110, floor: 46, weight: 1 },
 ];
-const FLEX_NOTES = { key: "notes", nominal: 90, floor: 55 };
+const FLEX_NOTES = { key: "notes", nominal: 80, floor: 40 };
 
 /** Pure: given the horizontal space left over after every FIXED-width visible column (and the
  * remove-row column, and borders — the caller's job to subtract those), returns

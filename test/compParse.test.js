@@ -617,6 +617,24 @@ describe("compParse corpus: RATE + BASIS", () => {
     expect(draft(".56/SF/mo NNN , 12 TI, 3% bumps").leaseRatePeriod).toBe("monthly");
     expect(draft(".56/SF/mo NNN , 12 TI, 3% bumps").leaseTi).toBe("12");
   });
+  // B986096 (owner report, 2026-09-02) — a STANDALONE period word (not part of a compound
+  // "/SF/mo" match) never got blanked out of `working`, so it leaked into Notes even though it
+  // was genuinely read and consumed for ratePeriod.
+  it("a standalone period word (not part of a compound rate match) never leaks into Notes", () => {
+    const draft = (line) => parseProseLine(line)?.draft;
+    expect(draft(".56/SF NNN annual").notes).toBe("");
+    expect(draft(".56/SF NNN annual").leaseRate).toBe("0.56");
+    expect(draft(".56/SF NNN annual").leaseRatePeriod).toBe("annual");
+    expect(draft(".56/SF NNN monthly").notes).toBe("");
+    expect(draft(".56/SF NNN monthly").leaseRatePeriod).toBe("monthly");
+  });
+  // B986096 (owner report, 2026-09-02) — stripping a "," out of unrecognized leftover text left
+  // the space that followed it behind, doubling up ("Houston, TX 77073" -> "Houston  TX 77073").
+  it("stripping a comma out of leftover Notes text never leaves a double space", () => {
+    const draft = (line) => parseProseLine(line)?.draft;
+    expect(draft("6.72/SF/yr NNN Houston, TX 77073").notes).toBe("Houston TX 77073");
+    expect(draft("6.72/SF/yr NNN Houston, TX 77073").notes).not.toMatch(/ {2}/);
+  });
   it("basis words normalize to the two schema buckets (nnn/gross)", () => {
     const basis = (line) => parseProseLine(`$0.65/sf ${line}`)?.draft.leaseRateExpense;
     expect(basis("NNN")).toBe("nnn");

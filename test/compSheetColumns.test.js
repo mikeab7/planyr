@@ -19,10 +19,16 @@ describe("compSheetColumns: column list sanity", () => {
   it("every column belongs to a real group", () => {
     for (const c of SHEET_COLUMNS) expect(GROUPS).toContain(c.group);
   });
-  it("HARDENING-10 — Type and Title / Address are the two frozen columns, Type first", () => {
+  // B986096-HARDENING-27 (NEW-4) — Location replaced Title as the second frozen column: a broker
+  // paste rarely fills in Title, but Location always carries a real identity once a row is
+  // anchored, so IT is what has to survive a horizontal scroll, not an often-empty Title. The two
+  // frozen columns must also be CONTIGUOUS in visible order (a scrollable column between them
+  // would scroll under, not past, the sticky ones) — asserted here too.
+  it("HARDENING-27 (NEW-4) — Type and Location are the two frozen columns, Type first and adjacent", () => {
     const frozen = SHEET_COLUMNS.filter((c) => c.frozen);
-    expect(frozen.map((c) => c.key)).toEqual(["compType", "title"]);
+    expect(frozen.map((c) => c.key)).toEqual(["compType", "location"]);
     expect(SHEET_COLUMNS[0].key).toBe("compType"); // "choose deal first because it will inform the rest"
+    expect(SHEET_COLUMNS[1].key).toBe("location"); // adjacent to Type — no scrollable column sandwiched between them
   });
   it("HARDENING-10 — one alignment rule: numeric/date columns are right, everything else is left, never a third value", () => {
     const NUMERIC_OR_DATE_KINDS = new Set(["number", "date", "derived"]);
@@ -183,34 +189,37 @@ describe("compSheetColumns: HARDENING-11 — Type drives the sheet, Basis half",
   });
 });
 
-describe("compSheetColumns: HARDENING-10 NEW-5 — computeFlexWidths / widthFor / frozenLeftOffsets", () => {
-  it("plenty of room: the three growers share the surplus beyond everyone's nominal, Title getting the largest share; Notes never grows past its own nominal", () => {
+// B986096-HARDENING-27 (NEW-4) — Title's nominal/floor/weight all shrank (it no longer carries
+// the row's identity — Location, frozen now, does) and the three growers share weight EQUALLY,
+// so "Title gets the largest share" is no longer the rule; see FLEX_GROWERS's own header.
+describe("compSheetColumns: HARDENING-10 NEW-5 / HARDENING-27 — computeFlexWidths / widthFor / frozenLeftOffsets", () => {
+  it("plenty of room: the three growers share the surplus equally beyond everyone's nominal; Notes never grows past its own nominal", () => {
     const w = computeFlexWidths(10000);
-    expect(w.title).toBeGreaterThan(w.partyProvider);
-    expect(w.title).toBeGreaterThan(w.partyAcquirer);
-    expect(w.notes).toBe(90);
+    expect(Math.abs(w.title - w.partyProvider)).toBeLessThanOrEqual(2); // equal weight — same additive share, off by rounding only
+    expect(Math.abs(w.partyProvider - w.partyAcquirer)).toBeLessThanOrEqual(2);
+    expect(w.notes).toBe(80);
   });
   it("moderate squeeze: Notes alone absorbs it first, growers stay at nominal", () => {
-    const w = computeFlexWidths(500); // full nominal total is 510; 10px short
-    expect(w.notes).toBe(80);
-    expect(w.title).toBe(170);
-    expect(w.partyProvider).toBe(125);
-    expect(w.partyAcquirer).toBe(125);
+    const w = computeFlexWidths(400); // full nominal total is 408; 8px short
+    expect(w.notes).toBe(72);
+    expect(w.title).toBe(108);
+    expect(w.partyProvider).toBe(110);
+    expect(w.partyAcquirer).toBe(110);
   });
   it("severe squeeze: Notes is pinned at its own floor, the three growers then shrink together, never below their own floor", () => {
     const w = computeFlexWidths(0);
-    expect(w.notes).toBe(55);
-    expect(w.title).toBe(90);
-    expect(w.partyProvider).toBe(65);
-    expect(w.partyAcquirer).toBe(65);
+    expect(w.notes).toBe(40);
+    expect(w.title).toBe(46);
+    expect(w.partyProvider).toBe(46);
+    expect(w.partyAcquirer).toBe(46);
   });
   it("every regime keeps every column at or above its own floor, and never returns a negative width", () => {
-    for (const avail of [-50, 0, 100, 275, 320, 510, 900, 5000]) {
+    for (const avail of [-50, 0, 100, 178, 220, 408, 900, 5000]) {
       const w = computeFlexWidths(avail);
-      expect(w.title).toBeGreaterThanOrEqual(90);
-      expect(w.partyProvider).toBeGreaterThanOrEqual(65);
-      expect(w.partyAcquirer).toBeGreaterThanOrEqual(65);
-      expect(w.notes).toBeGreaterThanOrEqual(55);
+      expect(w.title).toBeGreaterThanOrEqual(46);
+      expect(w.partyProvider).toBeGreaterThanOrEqual(46);
+      expect(w.partyAcquirer).toBeGreaterThanOrEqual(46);
+      expect(w.notes).toBeGreaterThanOrEqual(40);
     }
   });
   it("widthFor returns the column's static width when there's no flexKey, or an unmeasured flex column falls back to its own static width", () => {
@@ -220,12 +229,12 @@ describe("compSheetColumns: HARDENING-10 NEW-5 — computeFlexWidths / widthFor 
     expect(widthFor(titleCol, {})).toBe(titleCol.width); // {} — no measurement yet
     expect(widthFor(titleCol, { title: 200 })).toBe(200);
   });
-  it("frozenLeftOffsets puts Type at 0 and Title right after Type's own (possibly flexed) width", () => {
+  it("frozenLeftOffsets puts Type at 0 and Location right after Type's own width — Location is fixed (never a flexKey), so nothing else can move its offset", () => {
     const idx = SHEET_COLUMNS.map((_, i) => i); // every column visible
     const flexWidths = { title: 150, partyProvider: 100, partyAcquirer: 100, notes: 70 };
     const offsets = frozenLeftOffsets(idx, flexWidths);
     expect(offsets.compType).toBe(0);
-    expect(offsets.title).toBe(SHEET_COLUMNS[columnIndex("compType")].width);
+    expect(offsets.location).toBe(SHEET_COLUMNS[columnIndex("compType")].width);
   });
 });
 
