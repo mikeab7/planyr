@@ -4,7 +4,7 @@
  *  massive banner, i should be able to click something that takes me to this but on full
  *  screen for review."*
  *
- *  Opens on the REDLINE (`NoteRedline.jsx`) by default — NEW-2's ask, "wouldn't a redline be
+ *  Opens on the REDLINE (`NoteRedline.jsx`) by default — the owner's ask, "wouldn't a redline be
  *  better, so I can see the differences over each other" — with the original two-card
  *  side-by-side (`ConflictSideBySide.jsx`) one click away for the rare case a full rewrite
  *  reads easier as two independent columns.
@@ -14,30 +14,65 @@
  *  user explicitly opened by pressing a button, the same category as `QuickOpen.jsx`'s overlay
  *  — so it takes the whole viewport rather than sitting bottom-centered over other content.
  *
- *  Resolving (either "Keep this version" button) is reachable from here and ONLY from here —
- *  the compact notice carries no choices of its own, by design (see that file's header) — so
- *  this is where NEW-3's "resolution must still be reachable" promise is kept. Closing (Esc or
- *  ✕) does NOT resolve anything; it just returns to the compact notice, unresolved. */
+ *  Resolving (either "Keep the older/newer version" button) is reachable from here and ONLY
+ *  from here — the compact notice carries no choices of its own, by design (see that file's
+ *  header) — so this is where NEW-3's "resolution must still be reachable" promise is kept.
+ *  Closing (Esc or the "Decide later" button) does NOT resolve anything; it just returns to the
+ *  compact notice, unresolved, and the SAME comparison reopens next time — see B849106.
+ *
+ *  ⛔ B849104/B849105/B849107 — A SECOND FOLLOW-UP BRIEF, AFTER THE FIRST ONE'S OWN FIX MADE
+ *  THINGS WORSE. B842624's original bar had two DIFFERENT verbs ("Keep this one" / "Use the
+ *  other") for the identical action; the first fix (still visible in this file's git history)
+ *  made both buttons read the IDENTICAL string "Keep this version" — and the owner came right
+ *  back: *"the two buttons... doing opposite things... say the same thing."* Identical was
+ *  exactly as unhelpful as asymmetric, just unhelpful in the other direction. The fix this time
+ *  orients on a fact a reader can actually use — WHICH COPY IS NEWER (`lib/notesVersionOrder.js`)
+ *  — matching the reference the owner named, Google Docs' version history: each version is
+ *  identified by WHEN, and the action names what it does. See `docs/notes-conflict-critique.md`
+ *  for the critique-loop screenshots this design passed before shipping.
+ */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { buildRedline } from "../lib/notesRedline.js";
-import NoteRedline from "./NoteRedline.jsx";
+import { orderConflictVersions } from "../lib/notesVersionOrder.js";
+import NoteRedline, { ChangeTag } from "./NoteRedline.jsx";
 import ConflictSideBySide from "./ConflictSideBySide.jsx";
-import { stampLabel } from "../lib/notesTime.js";
+import { stampLabel, absoluteStamp } from "../lib/notesTime.js";
 
 const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
 
+/** The visible HEADING name for one slot ("newer"/"older") — recency-based whenever it's known,
+ *  and a plain, honest window fallback when it isn't (see `notesVersionOrder.js`'s header for
+ *  why an unranked pair must never be LABELLED as ranked). Shared by the footer's two columns
+ *  and the redline's own key so the two "speak the same language" (NEW-4). */
+function roleLabel(comparable, isNewer, which) {
+  if (comparable) return isNewer ? "Newer version" : "Older version";
+  return which === "mine" ? "This window’s version" : "The other window’s version";
+}
+
+/** The MID-SENTENCE form of the same slot, for the legend's own prose ("is only in ⟨phrase⟩" /
+ *  "keeping ⟨phrase⟩ loses it"). Deliberately NOT just `roleLabel(...).toLowerCase()` wrapped in
+ *  an external "the": "this window's version" takes no article and "the other window's
+ *  version" already carries its own, so a template that prepends "the" to both produces "the
+ *  this window's version" / "the the other window's version" — caught in the critique loop's
+ *  second pass, on the very fallback path this whole rule exists to keep honest. Each phrase
+ *  here is total and self-contained; a caller never adds its own article. */
+function rolePhrase(comparable, isNewer, which) {
+  if (comparable) return isNewer ? "the newer version" : "the older version";
+  return which === "mine" ? "this window’s version" : "the other window’s version";
+}
+
 /** One resolve choice, in the footer — the condensed sibling of `ConflictSideBySide`'s
- *  `VersionCard`: same symmetric "Keep this version" text (NEW-1), no text pane (the redline or
- *  side-by-side view above already shows the content), just enough context to know which
- *  window this button acts on. MODULE-SCOPE, not a closure per render. */
-function ChoiceColumn({ label, when, buttonLabel, buttonAriaLabel, consequence, onChoose, testId }) {
+ *  `VersionCard`: no text pane (the redline above already shows the content), just enough to
+ *  identify and act on ONE specific copy. MODULE-SCOPE, not a closure per render. */
+function ChoiceColumn({ roleText, when, whenExact, buttonLabel, buttonAriaLabel, onChoose, testId }) {
   return (
-    <div style={{ minWidth: 0, flex: "1 1 220px", display: "flex", flexDirection: "column", gap: 3 }}>
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
-        <span style={{ fontWeight: 700, fontSize: 12, color: "var(--text-primary)" }}>{label}</span>
-        <span style={{ fontSize: 10.5, fontWeight: 600, color: "var(--text-secondary)" }}>{when ? `edited ${when}` : "edit time unknown"}</span>
+    <div style={{ minWidth: 0, flex: "1 1 220px", display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+        <span style={{ fontWeight: 700, fontSize: 12, color: "var(--text-primary)" }}>{roleText}</span>
+        <span title={whenExact || undefined} style={{ fontSize: 10.5, fontWeight: 600, color: "var(--text-secondary)" }}>
+          {when ? `edited ${when}` : "edit time unknown"}
+        </span>
       </div>
-      <span style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>{consequence}</span>
       <button
         type="button"
         data-testid={testId}
@@ -54,13 +89,21 @@ function ChoiceColumn({ label, when, buttonLabel, buttonAriaLabel, consequence, 
 }
 
 export default function ConflictReview({
-  title, localDoc, serverDoc, localUpdatedAt, serverUpdatedAt, keepMine, keepTheirs,
+  title, localDoc, serverDoc, localUpdatedAt, serverUpdatedAt,
   onKeepMine, onKeepTheirs, onClose,
 }) {
   const [view, setView] = useState("redline");
   const panelRef = useRef(null);
   const name = String(title || "").trim() || "Untitled";
-  const redline = useMemo(() => buildRedline(localDoc, serverDoc), [localDoc, serverDoc]);
+
+  const order = useMemo(
+    () => orderConflictVersions({ localDoc, serverDoc, localUpdatedAt, serverUpdatedAt }),
+    [localDoc, serverDoc, localUpdatedAt, serverUpdatedAt],
+  );
+  // ⛔ THE REDLINE IS BUILT NEWER-FIRST, NEVER LOCAL-FIRST (B849105) — `buildRedline`'s first
+  // argument is always its REVISED side, so passing `order.newer` there is what makes "added"
+  // mean "added going from old to new" instead of "added in whichever tab you're reading from".
+  const redline = useMemo(() => buildRedline(order.newer.doc, order.older.doc), [order]);
 
   useEffect(() => {
     const opener = document.activeElement;
@@ -73,6 +116,18 @@ export default function ConflictReview({
   }, []);
 
   const keys = (e) => { if (e.key === "Escape") { e.preventDefault(); onClose?.(); } };
+
+  const newerWhen = stampLabel(order.newer.updatedAt);
+  const olderWhen = stampLabel(order.older.updatedAt);
+  const newerLabel = roleLabel(order.comparable, true, order.newer.which);
+  const olderLabel = roleLabel(order.comparable, false, order.older.which);
+  const newerPhrase = rolePhrase(order.comparable, true, order.newer.which);
+  const olderPhrase = rolePhrase(order.comparable, false, order.older.which);
+  const chooseFor = (w) => (w === "mine" ? onKeepMine : onKeepTheirs);
+  /** A screen-reader loses the sighted reader's positional/labelling cues entirely, so its own
+   *  label restates BOTH facts a sighted person gets for free — which window, and when. */
+  const ariaFor = (slot, roleText, when) =>
+    `${roleText} — edited ${when || "an unknown time"}, from ${slot.which === "mine" ? "this window" : "the other window"}`;
 
   return (
     <div
@@ -89,57 +144,90 @@ export default function ConflictReview({
       }}
     >
       <div style={{
-        flex: "0 0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
-        padding: "10px 14px", borderBottom: "1px solid var(--border-default)", flexWrap: "wrap",
+        flex: "0 0 auto", display: "flex", flexDirection: "column", gap: 2,
+        padding: "10px 14px", borderBottom: "1px solid var(--border-default)",
       }}
       >
-        <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>Compare versions — {name}</span>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <div style={{ display: "flex", border: "1px solid var(--border-default)", borderRadius: RADIUS.pill, overflow: "hidden" }}>
-            {[["redline", "Redline"], ["sidebyside", "Side by side"]].map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                data-testid={`notes-conflict-view-${id}`}
-                onClick={() => setView(id)}
-                aria-pressed={view === id}
-                style={{
-                  border: "none", cursor: "pointer", font: "inherit", fontSize: 10.5, fontWeight: 700,
-                  padding: "5px 12px", color: view === id ? "var(--on-accent-notes)" : "var(--text-secondary)",
-                  background: view === id ? "var(--accent-notes)" : "transparent",
-                }}
-              >{label}</button>
-            ))}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>Compare versions — {name}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <div style={{ display: "flex", border: "1px solid var(--border-default)", borderRadius: RADIUS.pill, overflow: "hidden" }}>
+              {[["redline", "Redline"], ["sidebyside", "Side by side"]].map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  data-testid={`notes-conflict-view-${id}`}
+                  onClick={() => setView(id)}
+                  aria-pressed={view === id}
+                  style={{
+                    border: "none", cursor: "pointer", font: "inherit", fontSize: 10.5, fontWeight: 700,
+                    padding: "5px 12px", color: view === id ? "var(--on-accent-notes)" : "var(--text-secondary)",
+                    background: view === id ? "var(--accent-notes)" : "transparent",
+                  }}
+                >{label}</button>
+              ))}
+            </div>
+            {/* NEW-3 — NOT A BARE "✕". A close icon alone reads as "cancel/discard" to a person
+             * deciding whether it's safe to walk away without picking a version; this button
+             * says in words that it is. It does exactly what Esc/the old ✕ did — nothing is
+             * resolved, the compact notice's "Review changes →" button reopens this exact
+             * comparison later — the change is only that it now SAYS so. */}
+            <button
+              type="button"
+              data-testid="notes-conflict-review-close"
+              aria-label="Decide later — closes this comparison without choosing; both versions stay safe and you can reopen it anytime from the notice"
+              onClick={onClose}
+              style={{
+                border: "1px solid var(--border-default)", borderRadius: RADIUS.pill, background: "transparent",
+                color: "var(--text-secondary)", font: "inherit", fontSize: 10.5, fontWeight: 700,
+                padding: "5px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: 5,
+              }}
+            ><span aria-hidden="true">✕</span> Decide later</button>
           </div>
-          <button
-            type="button"
-            data-testid="notes-conflict-review-close"
-            aria-label="Close review"
-            onClick={onClose}
-            style={{
-              border: "1px solid var(--border-default)", borderRadius: RADIUS.control, background: "transparent",
-              color: "var(--text-secondary)", font: "inherit", fontSize: 13, fontWeight: 700,
-              width: 26, height: 26, lineHeight: "24px", cursor: "pointer",
-            }}
-          >✕</button>
         </div>
+        <span style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>
+          Both copies are safe either way — pick a version below, or close this and decide later.
+        </span>
       </div>
 
       <div style={{ flex: "1 1 auto", overflowY: "auto", padding: "14px 16px" }}>
         {view === "redline" ? (
           <div style={{ maxWidth: 820, margin: "0 auto" }}>
-            <p style={{ fontSize: 10.5, color: "var(--text-secondary)", margin: "0 0 10px" }}>
-              <span style={{ color: "var(--success-text)", textDecoration: "underline" }}>Underlined</span> text is only in
-              {" "}<strong>This window</strong>. <span style={{ color: "var(--danger-text)", textDecoration: "line-through" }}>Struck-through</span> text
-              {" "}is only in <strong>the other window</strong>.
-            </p>
+            {/* NEW-4 — STICKY, so the key is still on screen once he's scrolled into a long
+             * note (the exact spot he was looking at when he couldn't find one), and it now
+             * covers BOTH encodings the renderer actually uses: inline underline/strikethrough
+             * for a word-level edit, and the block-level "+ Added"/"− Removed" tag for a whole
+             * item (table, picture, paragraph) that only exists on one side. Framed by WHICH
+             * VERSION IS NEWER, matching the footer below, and stated as a CONSEQUENCE — which
+             * button loses which text — rather than bare set membership. */}
+            <div style={{
+              position: "sticky", top: 0, zIndex: 1, background: "var(--surface-page)",
+              paddingBottom: 8, marginBottom: 2,
+            }}
+            >
+              <p style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-primary)", margin: "0 0 4px" }}>
+                {order.comparable
+                  ? <>{olderLabel} (edited {olderWhen}) → {newerLabel} (edited {newerWhen})</>
+                  : <>{newerLabel} ↔ {olderLabel} — edit time unknown, so we can’t say which is newer</>}
+              </p>
+              <p style={{ fontSize: 10.5, color: "var(--text-secondary)", margin: 0 }}>
+                <span style={{ color: "var(--success-text)", textDecoration: "underline" }}>Underlined</span> text
+                {" "}or a <ChangeTag status="inserted" /> tag is only in <strong>{newerPhrase}</strong> —
+                {" "}keeping {olderPhrase} loses it.{" "}
+                <span style={{ color: "var(--danger-text)", textDecoration: "line-through" }}>Struck-through</span> text
+                {" "}or a <ChangeTag status="deleted" /> tag is only in <strong>{olderPhrase}</strong> —
+                {" "}keeping {newerPhrase} loses it.
+              </p>
+            </div>
             {/* A bordered "page" rather than text floating on the bare background — the
              * empty margin either side is a document-reading width, not unfinished chrome
              * (round 1 of the critique loop read this as sparse without the card). */}
-            <div style={{
-              background: "var(--surface-raised)", border: "1px solid var(--border-default)",
-              borderRadius: RADIUS.control, padding: "18px 24px",
-            }}
+            <div
+              data-testid="notes-redline-body"
+              style={{
+                background: "var(--surface-raised)", border: "1px solid var(--border-default)",
+                borderRadius: RADIUS.control, padding: "18px 24px",
+              }}
             >
               <NoteRedline blocks={redline.blocks} />
               {!redline.changed ? (
@@ -151,35 +239,42 @@ export default function ConflictReview({
           <ConflictSideBySide
             title={title} localDoc={localDoc} serverDoc={serverDoc}
             localUpdatedAt={localUpdatedAt} serverUpdatedAt={serverUpdatedAt}
-            keepMine={keepMine} keepTheirs={keepTheirs}
             onKeepMine={onKeepMine} onKeepTheirs={onKeepTheirs}
           />
         )}
       </div>
 
       {/* ⛔ ONLY THE REDLINE NEEDS A FOOTER. The side-by-side view already carries both
-       * "Keep this version" buttons — one per card, right next to that card's own text — so
-       * a second, identical pair of buttons down here would be the exact redundancy
-       * PANEL-BREVITY forbids (found in round 1 of the critique loop: both surfaces on
-       * screen at once). Redline has no per-card buttons to reuse, so it alone needs this. */}
+       * resolve buttons — one per card, right next to that card's own text — so a second,
+       * identical pair down here would be redundant (found in round 1 of the critique loop:
+       * both surfaces on screen at once). Redline has no per-card buttons to reuse, so it
+       * alone needs this. */}
       {view === "redline" ? (
         <div style={{
-          flex: "0 0 auto", display: "flex", gap: 16, flexWrap: "wrap",
+          flex: "0 0 auto", display: "flex", flexDirection: "column", gap: 8,
           padding: "10px 14px", borderTop: "1px solid var(--border-default)", background: "var(--warn-bg)",
         }}
         >
-          <ChoiceColumn
-            label="This window" when={stampLabel(localUpdatedAt)}
-            buttonLabel={keepMine} buttonAriaLabel="Keep this window’s version"
-            consequence={`The other window’s version is saved as “${name} (the other window’s copy)” — nothing is lost.`}
-            onChoose={onKeepMine} testId="notes-conflict-review-keep-mine"
-          />
-          <ChoiceColumn
-            label="The other window" when={stampLabel(serverUpdatedAt)}
-            buttonLabel={keepTheirs} buttonAriaLabel="Keep the other window’s version"
-            consequence={`This window’s version is saved as “${name} (this window’s copy)” — nothing is lost.`}
-            onChoose={onKeepTheirs} testId="notes-conflict-review-keep-theirs"
-          />
+          {/* NEW-1 — THE REASSURANCE IS STATED ONCE, HERE, NOT REPEATED PER BUTTON. It used to
+           * be a near-mirror sentence under EACH button, competing with the choice instead of
+           * supporting it. */}
+          <p style={{ fontSize: 10.5, color: "var(--text-secondary)", margin: 0 }}>
+            Nothing is lost either way — the version you don’t keep is saved as a copy next to “{name}”.
+          </p>
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+            <ChoiceColumn
+              roleText={newerLabel} when={newerWhen} whenExact={absoluteStamp(order.newer.updatedAt)}
+              buttonLabel={order.comparable ? "Keep the newer version" : `Keep ${order.newer.which === "mine" ? "this window’s" : "the other window’s"} version`}
+              buttonAriaLabel={ariaFor(order.newer, newerLabel, newerWhen)}
+              onChoose={chooseFor(order.newer.which)} testId="notes-conflict-review-keep-newer"
+            />
+            <ChoiceColumn
+              roleText={olderLabel} when={olderWhen} whenExact={absoluteStamp(order.older.updatedAt)}
+              buttonLabel={order.comparable ? "Keep the older version" : `Keep ${order.older.which === "mine" ? "this window’s" : "the other window’s"} version`}
+              buttonAriaLabel={ariaFor(order.older, olderLabel, olderWhen)}
+              onChoose={chooseFor(order.older.which)} testId="notes-conflict-review-keep-older"
+            />
+          </div>
         </div>
       ) : null}
     </div>

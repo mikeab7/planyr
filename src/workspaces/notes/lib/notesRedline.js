@@ -34,13 +34,20 @@
  * "Attachment: <name>", "Table", "Sketch", "Box") carrying the same same/inserted/deleted/
  * changed status as any text block. Nothing throws on one; nothing is silently dropped.
  *
- * ⛔ WHICH SIDE IS "REVISED". Neither copy is more authoritative than the other (that is the
- * whole reason a conflict was raised), so a direction has to be picked to talk about insertions
- * vs deletions at all — this file always treats `localDoc` ("this window") as the REVISED
- * document and `serverDoc` ("the other window") as the ORIGINAL, matching Word's Compare
- * Documents convention (original → revised). A word present only in the local copy is an
- * INSERTION; a word present only in the server copy is a DELETION. The caller decides how to
- * caption that (see `ConflictReview.jsx`) — this file only computes it.
+ * ⛔ WHICH SIDE IS "REVISED" — DECIDED BY THE CALLER, ON RECENCY, NEVER BY THIS FILE (B849105,
+ * corrected from an earlier version that got this wrong). Neither copy is more authoritative
+ * than the other (that is the whole reason a conflict was raised), so a direction has to be
+ * picked to talk about insertions vs deletions at all — but the direction has to mean something
+ * a reader can trust. It used to always be "whichever copy is open in THIS browser tab", which
+ * silently inverts the moment that tab happens to hold the OLDER edit: the owner watched a
+ * table that had genuinely been converted-to-text (removed) render as "Table — added", because
+ * his "this window" copy was the one still holding the old table. `buildRedline`'s first
+ * argument is always treated as REVISED and its second as ORIGINAL (Word's Compare Documents
+ * convention) — it is purely positional and knows nothing about "local"/"server". The caller
+ * orders the two copies by recency first (`lib/notesVersionOrder.js`'s `orderConflictVersions`)
+ * and passes the NEWER one first, so "added"/"removed" reads as a true old → new story whenever
+ * that ordering is knowable. A word present only in the first (revised) argument is an
+ * INSERTION; a word present only in the second (original) argument is a DELETION.
  */
 import { lcsAlign } from "./notesConflictDiff.js";
 
