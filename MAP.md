@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-02 @ `319e4ec7` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-02 @ `2550e465` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_641 source files mapped._
+_643 source files mapped._
 
 ## infra
 
@@ -121,6 +121,8 @@ _641 source files mapped._
   - _exports_: `useUndoableState`
 - **`src/workspaces/model/ModelApp.jsx`** — Model workspace root: the underwriting spreadsheet — loads/saves the active project's sheet and wires the toolbar, formula bar and grid together.
   - _exports_: `default (ModelApp)`
+- **`src/workspaces/notes/components/ConflictCompare.jsx`** — The Notes conflict bar shows both full versions — read-only, diff-highlighted, each timestamped — instead of asking for a blind pick; lazy chunk, rare-path only.
+  - _exports_: `default (ConflictCompare)`
 - **`src/workspaces/notes/components/IntegrityBanner.jsx`** — the bar for the two findings nothing could previously mention: one note living in two projects, and a note that had lost its place (already recovered by the time it renders, and named / openable / re-filable inline). Its own lazy chunk — it renders only when something is wrong.
   - _exports_: `default (IntegrityBanner)`
 - **`src/workspaces/notes/components/NoteEditor.jsx`** — One note page (title · toolbar · document) and the module's ONLY editor-engine import — the lazy boundary. Snapshots the document as plain JSON at edit time so the flush never queries a torn-down instance.
@@ -151,6 +153,8 @@ _641 source files mapped._
   - _exports_: `CALLOUT_TONE_IDS`, `CALLOUT_TONES`, `default`, `DEFAULT_CALLOUT_TONE`, `NoteCallout`
 - **`src/workspaces/notes/lib/notesCloud.js`** — The cloud tier under the notes storage seam: pure sync decisions (tree merge, which-copy-wins page seed, picture plan, sign-in adoption) plus the revision-guarded Supabase transport for `notes_trees` / `notes_pages` / `notes_images` and the private `notes-images` bucket. Imported only by `notesStore.js`, and only dynamically.
   - _exports_: `binPages`, `blobToDataUrl`, `cloudClient`, `dataUrlToBlob`, `emptySyncState`, `fetchImage`, `fetchImageIndex`, `fetchPageIndex`, `fetchPages`, `fetchTree`, `fetchTreeRev`, `forcePage`, `IMAGE_BUCKET`, `IMAGE_MIME_ALLOWED`, `IMAGE_TABLE`, `imagePath`, `isEmptyDoc`, `judgeConflict`, `mergeSyncState`, `mergeTrees`, `PAGE_TABLE`, `pageRev`, `planAdoption`, `planImageSync`, `planPageSeed`, `purgeImagesCloud`, `purgePagesCloud`, `pushImage`, `pushPage`, `pushTree`, `sameDoc`, `syncFailureReason`, `TREE_TABLE`
+- **`src/workspaces/notes/lib/notesConflictDiff.js`** — Pure word-level diff behind ConflictCompare, with a line-level then a linear prefix/suffix fallback so it never builds an unbounded table on an outsized document.
+  - _exports_: `diffHasChanges`, `diffNoteText`, `sideOps`
 - **`src/workspaces/notes/lib/notesDocHtml.js`** — A note's document model → HTML through the EDITOR'S OWN DOMSerializer, so the print sheet cannot drift from the screen (PDF-PARITY by construction). Inlines stored image bytes as data URLs.
   - _exports_: `docToHtml`
 - **`src/workspaces/notes/lib/notesDuplicates.js`** — pure detector for THE SAME NOTE LIVING IN TWO PROJECTS: word-pair Dice similarity over normalised text, same-project and empty pages deliberately excluded, groups (not pairs) out.
@@ -221,7 +225,7 @@ _641 source files mapped._
   - _exports_: `cellLineSpec`, `default`, `rowLineSpec`, `tableToBlockSpecs`
 - **`src/workspaces/notes/lib/notesTasks.js`** — PURE checklist reading and writing over a document — the task rollup's whole decision layer.
   - _exports_: `groupTasksByProject`, `openTasksInDoc`, `rollUpOpenTasks`, `setTaskCheckedInDoc`, `tasksInDoc`
-- **`src/workspaces/notes/lib/notesTemplates.js`** — Note-creation templates (a seed-content registry): a template id maps to a buildDoc() returning a ready-made ProseMirror document, e.g. the Project Contacts labelled-rows sheet.
+- **`src/workspaces/notes/lib/notesTemplates.js`** — Extensible page-creation templates (plain data, no editor-engine import) written straight through the storage seam so a template never has to mount the editor.
   - _exports_: `NOTE_TEMPLATES`, `templateById`
 - **`src/workspaces/notes/lib/notesTime.js`** — How a note's age is written, in one place — relative ("5h"), absolute, edited-label and bin countdown. `null` means unknown and renders as nothing, so a migrated page never claims a time it does not have.
   - _exports_: `absoluteStamp`, `daysLeft`, `editedLabel`, `relativeTime`, `stampLabel`
@@ -1220,15 +1224,15 @@ _641 source files mapped._
 
 - **`public/sequence/index.html`** — Self-contained Sequence/Schedule iframe app: spreadsheet with an Excel-like formula engine, dependency-graph task scheduling, Gantt + PDF export, Supabase cloud-save/history, suggestions review queue, site-linked
   - _exports_: `_cpMeasure`, `_deepClone`, `_formulaBuiltinMap`, `_mEq`, `_mIdArr`, `_mIsObj`, `_mStripRev`, `_pfCostRef`, `_pfDateRef`, `_pfNumOrBlank`, `activeEffectiveCols`, `addBD`, `addCalendarMonths`, `addD`, `addMonths`, `AddNoteComposer`, `addWorkdays`, `agendaDeadline`, `agendaLeadSummary`, `App`, `applyMeetingBinding`, `approxTextPx`, `AutomationPanel`, `avatarColor`, `balOf`, `barLabelText`, `buildFormulaRowColumns`, `buildGanttSVG`, `buildHolidaySet`, `buildPDFHtml`, `cadenceSummary`, `calcEnd`, `cascadeDates`, `celebrateTaskComplete`, `Cell`, `cleanEmailBody`, `colArray`, `colLabel`, `collectCountable`, `collectNonBlank`, `collectNums`, `collectNumsKind`, `collectRefs`, `colLettersToNum`, `colNumToLetters`, `compareValues`, `compareValuesSafe`, `computeDisplayHealth`, `computeFormulaValues`, `computeRolledHealth`, `ConditionGroup`, `ConditionRow`, `constrainedStartFrom`, `ContactPicker`, `ContactsPanel`, `cumArgs`, `datedif`, `defaultStartFor`, `DeleteChildrenModal`, `depAnchors`, `DepCell`, `depCellFullTitle`, `detectCascadeDrift`, `dif`, `difBD`, `durTooltip`, `effectiveColsOf`, `ErrorBoundary`, `errVal`, `escapeHtml`, `escapeRegExp`, `estLabelWidth`, `evalBinary`, `evalCall`, `evalConditionGroup`, `evalFieldCondition`, `evalHealthCondition`, `evalHealthRules`, `evalNode`, `evalRule`, `evaluateFormula`, `extractColorTag`, `extractRefs`, `extraHolidaySet`, `fd`, `fdLocal`, `ferr`, `Field`, `findSignChange`, `finishCallResult`, `fitCaptionFs`, `flatOrderWithLevel`, `fmtBarDate`, `fmtD`, `fmtPreds`, `fmtTaskDuration`, `formatDateToken`, `formatNumberSection`, `formatNumberToken`, `FormatPanel`, `formatValue`, `formatValueColor`, `formulaCalendar`, `formulaColsOf`, `formulaColToColDef`, `FormulaColumnEditor`, `formulaColumnNames`, `FormulaError`, `formulaToday`, `fvOf`, `ganttNameWeight`, `GanttView`, `getHealthRules`, `getInitials`, `GridColumnsChooser`, `GridHeaderMenu`, `GridView`, `HealthColHeader`, `HealthColHeaderIcon`, `HealthDropMenu`, `HealthPicker`, `HistoryPanel`, `indentSelection`, `InlineDate`, `ipmtOf`, `irrOf`, `isBlank`, `isBuiltinFormulaName`, `isCallInvariant`, `isDate`, `isErrVal`, `isFormulaError`, `isLeap`, `isoToSerial`, `isoWeekNum`, `isRangeArg`, `isRowInvariant`, `isValidColor`, `isWorkingSerial`, `layoutExhibitCols`, `loadExportPrefs`, `looksLikeDateFormat`, `looseEqual`, `makeDate`, `MasterView`, `matchesCriteria`, `matchIndex`, `matchRefToken`, `mbFmt`, `mbOrdinal`, `mbRuleSummary`, `measuredColWidth`, `meetingBoundInfo`, `MeetingCalendarsModal`, `meetingCostDays`, `meetingDatesInRange`, `meetingFloatBD`, `mergeCloudDoc`, `migrateCfRulesToHealthRules`, `migrateRule`, `mirrOf`, `mkt`, `moveSelectionToDestination`, `MoveToModal`, `need`, `networkDays`, `newMeetingBody`, `nextEligibleMeeting`, `normPreds`, `noteISO`, `NoteRow`, `NotesColHeader`, `noteShortMD`, `NotesModal`, `notifyRowsDeleted`, `nperOf`, `nthWeekday`, `nthWeekdayOfMonth`, `nthWeekdayOnOrAfter`, `num1`, `numberFormatColorFor`, `numToGeneralStr`, `opsForField`, `outdentSelection`, `parse`, `parseCriteriaOperand`, `parseDurationInput`, `parseFlexDate`, `parseFormula`, `parseFormulaUncached`, `parseLooseDate`, `parsePreds`, `parseRefText`, `pd`, `PDFExportModal`, `placeGanttLabel`, `planFormulaColumns`, `pmtOf`, `PredEditor`, `predLagPlainEnglish`, `ProjContextMenu`, `ProjDropdown`, `promoteChildrenAndDelete`, `pvOf`, `raiseIfErr`, `rangeArray`, `rateOf`, `readGridCell`, `readGridCfg`, `rebuildHEALTH`, `rebuildMeetingBodyIndex`, `recascadeWithDrift`, `recomputeAfterStructureChange`, `recomputeSchedule`, `refToText`, `RenameModal`, `renumberTasks`, `resolveDuration`, `resolveLabelAlign`, `resolveTaskSpan`, `rewriteFormulaForCopy`, `rewriteFormulaForStructuralShift`, `rollForwardToWorkday`, `rollupParentDates`, `roundAwayFromZero`, `Row`, `RuleColorPicker`, `sameFamily`, `saveExportPrefs`, `sectionForSign`, `SegBtn`, `serialToISO`, `serialToYMD`, `SettingsPanel`, `sgqAvatarColor`, `SgqCascadePicker`, `SgqChangeRow`, `sgqChildrenOf`, `sgqConfClass`, `SgqCrumb`, `sgqCrumbOf`, `SgqDot`, `sgqFmtDate`, `sgqInitials`, `showToast`, `solveRoot`, `sortByVisualOrder`, `splitFormatSections`, `SplitView`, `startForEnd`, `StatusHeaderDropdown`, `StatusPicker`, `stepVisibleColIdx`, `stripFormatLiterals`, `subBD`, `SuccessorPromptModal`, `SuggestionsView`, `TaskContextMenu`, `taskDurUnit`, `taskDurValue`, `textFormat`, `toBool`, `toDateSerial`, `Toggle`, `tokenize`, `toNumber`, `toShortDate`, `toStr`, `touchesSchedule`, `TYPE_RANK`, `validatePredEdit`, `valueFamily`, `weekdayOf`, `weekNum`, `wildcardToRegExp`, `workdaysBetween`, `writeGridCfg`, `writeLabelAlign`, `xirrOf`, `xnpvPairs`, `yearFrac`, `ymdToSerial`
-- **`src/workspaces/scheduler/components/AgendaView.jsx`** — The org-scoped agenda body: dated/recurring operational items, grouped Overdue/Today/Upcoming/Someday, with a collapsed Done section. Rendered by Scheduler.jsx instead of the embedded Gantt at org scope.
+- **`src/workspaces/scheduler/components/AgendaView.jsx`** — The org-scoped agenda body (date/recurrence-only operational items, no Gantt dependencies) — native write-through controls, no dialog box.
   - _exports_: `default (AgendaView)`
 - **`src/workspaces/scheduler/components/LinkSchedulePanel.jsx`** — Suggest-and-confirm panel to create-or-link a schedule to an unlinked Site Planner project; never auto-links
   - _exports_: `default (LinkSchedulePanel)`
 - **`src/workspaces/scheduler/components/ScheduleToolbar.jsx`** — Lifted embedded-Gantt action toolbar (view toggle, review inbox, zoom, export, panels) that displays iframe-reported state and posts planar:* commands
   - _exports_: `ScheduleActions`, `ScheduleCenter`
-- **`src/workspaces/scheduler/lib/agendaModel.js`** — Pure model for the org-scoped agenda: item CRUD, the bounded recurrence grammar (daily/weekly/every-2-weeks/monthly/yearly) and its date-advance math, bucketing and sort order.
+- **`src/workspaces/scheduler/lib/agendaModel.js`** — Pure data model for the org-scoped agenda: dated, optionally-recurring items with no dependency/critical-path shape, deliberately separate from the project Gantt.
   - _exports_: `bucketFor`, `createAgendaItem`, `deleteAgendaItem`, `describeRecurrence`, `nextOccurrence`, `presetIdFor`, `RECURRENCE_PRESETS`, `recurrenceForPresetId`, `sortAgendaItems`, `todayISO`, `toggleAgendaItem`, `updateAgendaItem`
-- **`src/workspaces/scheduler/lib/agendaStore.js`** — Local-only per-account storage for the org-scoped agenda (`planyr:agenda:v1:<scope>`) — no cloud table yet, a stated and flagged scope cut (see B1020930).
+- **`src/workspaces/scheduler/lib/agendaStore.js`** — Local-only (device-scoped, no cloud sync yet) storage for the org-scoped agenda, one localStorage list per account.
   - _exports_: `readAgenda`, `writeAgenda`
 - **`src/workspaces/scheduler/lib/gridColNav.js`** — Pure keyboard column-navigation that steps the grid cursor across VISIBLE columns in display order, skipping hidden ones
   - _exports_: `snapToVisible`, `stepVisibleCol`, `stepVisibleColByIdx`, `visibleColMasterIdxs`
