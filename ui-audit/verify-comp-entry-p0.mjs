@@ -225,6 +225,23 @@ console.log("\n=== CYCLE 2 (B986096-HARDENING-13) — Type reactivity + one-clic
   check("switching to Lease immediately rebuilds the column set (Rate/Per/Basis/Term/TI appear)",
     wantLease.every((w) => headers.some((h) => h.trim() === w)), `headers=${JSON.stringify(headers.filter((h) => h.trim()))}`);
 
+  // The SYMMETRIC direction — Lease back to Land — since the owner's own report found it broken
+  // both ways ("typeBefore lease -> typeAfter land, headers unchanged"). onSelectEditChange fixes
+  // both by construction (it commits on ANY change, direction-agnostic), but that's a claim worth
+  // proving rather than assuming.
+  await typeCell.click();
+  await pacedWait(page, 200);
+  await typeCell.locator("select").selectOption("land");
+  await pacedWait(page, 300);
+  const headersBackToLand = (await page.locator("th").allTextContents()).filter((h) => h.trim());
+  check("switching BACK to Land immediately drops the lease columns (Rate gone, Price back)",
+    !headersBackToLand.includes("Rate") && headersBackToLand.includes("Price"), `headers=${JSON.stringify(headersBackToLand)}`);
+  // Re-arm Lease for the rest of this block, which expects a lease row.
+  await typeCell.click();
+  await pacedWait(page, 200);
+  await typeCell.locator("select").selectOption("lease");
+  await pacedWait(page, 300);
+
   // FINDING 2's fix — clicking Location alone (no separate "Drop a pin" toolbar click) is enough;
   // it arms the map's own pin-drop mode too.
   const locCell = page.locator('td[data-cell^="0-"]').filter({ hasText: "Set" }).first();

@@ -776,13 +776,21 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
   }
   const readyRows = rows.filter(rowIsReady);
   const blockingCount = rows.filter((r) => rowHasBlockingFlags(r.cellFlags)).length;
-  const missingCount = rows.filter((r) => !rowHasBlockingFlags(r.cellFlags) && validateComp(draftToComp(r.draft)).length > 0).length;
+  // ⛔ HARDENING-13 (B986096, owner P0 live-test, "the footer used to name the reason, now it
+  // just says '1 blocking'") — two fixes. (1) `missingCount` used to EXCLUDE a blocking row, so a
+  // row that was BOTH missing a period AND missing Executed/Location silently dropped the second
+  // problem from the footer's own summary line entirely (still visible in `ProblemsList` below,
+  // but the one-line count is what's glanced at). It now counts ANY row with a validateComp
+  // error, blocking or not — a row can appear in both counts. (2) "N blocking" said nothing about
+  // WHAT was blocking; there is currently exactly one blocking case (a lease rate with no stated
+  // period, the 12x ambiguity) so the count now names it directly.
+  const missingCount = rows.filter((r) => validateComp(draftToComp(r.draft)).length > 0).length;
   let footerMsg = "";
   if (rows.length > 0) {
     if (blockingCount === 0 && missingCount === 0) footerMsg = `${readyRows.length} comp${readyRows.length === 1 ? "" : "s"} ready.`;
     else {
       const parts = [];
-      if (blockingCount > 0) parts.push(`${blockingCount} blocking`);
+      if (blockingCount > 0) parts.push(`${blockingCount} rate${blockingCount === 1 ? "" : "s"} need${blockingCount === 1 ? "s" : ""} a period`);
       // B986096-HARDENING-8 — "or" read as a choice when Executed and Location are each
       // independently required (validateComp checks both unconditionally); a row missing either
       // (or both) landed on the same wording. "and/or" says a row could be missing one or both,
