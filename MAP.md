@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-02 @ `781117d9d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-02 @ `5498e53a` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -437,7 +437,7 @@ _648 source files mapped._
 - **`src/shared/sitePlans/lib/overlayErrors.js`** — turns a raw Postgres/PostgREST save error into a plain-English sentence, passing an already-hand-written Error through unchanged
   - _exports_: `friendlySaveError`
 - **`src/shared/sitePlans/lib/overlayGeoref.js`** — pure direct-placement math for an uploaded site-plan overlay (center/scale/rotation on the map — no control points, can't mirror)
-  - _exports_: `feetBetween`, `imagePointToLatLon`, `latLonToImagePoint`, `overlayCornersFromPlacement`, `rotatePlacement`, `scalePlacement`, `suggestFtPerPx`, `validPlacement`
+  - _exports_: `feetBetween`, `imagePointToLatLon`, `latLonToImagePoint`, `OVERLAY_SUGGEST_MAX_WIDTH_FT`, `OVERLAY_SUGGEST_MIN_WIDTH_FT`, `overlayCornersFromPlacement`, `rotatePlacement`, `scalePlacement`, `suggestFtPerPx`, `validPlacement`
 - **`src/shared/sitePlans/lib/overlayRasterSize.js`** — pure sizing math for the overlay raster: caps the render DPI so a large sheet's long edge never exceeds a pixel ceiling, plus the shared thumbnail-dimension helper
   - _exports_: `cappedRasterDims`, `effectiveRasterDpi`, `OVERLAY_RASTER_BASE_DPI`, `OVERLAY_RASTER_JPEG_QUALITY`, `OVERLAY_RASTER_MAX_LONG_EDGE_PX`, `OVERLAY_THUMB_JPEG_QUALITY`, `OVERLAY_THUMB_MAX_LONG_EDGE_PX`
 - **`src/shared/sitePlans/lib/overlayRasterStorage.js`** — Supabase Storage for a site-plan overlay's cached rasterized page, reusing the existing private `doc-review-files` bucket

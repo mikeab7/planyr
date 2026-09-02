@@ -215,7 +215,7 @@ function emptyFlow() {
 function OverlayRow({
   o, expanded, onToggleExpand, isActive, onActivate, pinning, onStartPin, onStopPin,
   onSetOpacity, onToggleVisible, onRename, onConfirmChangePage, onDelete, rasterFailed,
-  teams, onShareTeam, duplicateCount, isOwner, onToggleLocked,
+  teams, onShareTeam, duplicateCount, isOwner, onToggleLocked, zoomBelowGate, onZoomToOverlay,
 }) {
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(o.docTitle || "");
@@ -302,6 +302,17 @@ function OverlayRow({
           This plan doesn't have an image yet — try “Change page…” to add one.
         </div>
       )}
+      {/* B850432/NEW-1 — a site plan is gated off the map below a real building-scale zoom (a
+          site plan is meaningless zoomed out to a metro or country view), and that gate used to
+          be completely silent — the row above reads opacity/eye-toggle state exactly as if the
+          plan were on screen, with nothing telling you it isn't. Mirrors the Layers-panel
+          zoom-gate convention (layerZoomGate.js): say so, and offer the one click that fixes it. */}
+      {placed && o.visible && zoomBelowGate && (
+        <div style={{ fontSize: FONT_SIZE.label, color: "var(--warn-text)", marginTop: 4, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <span>Zoomed out too far to see this on the map.</span>
+          <Button size="sm" variant="ghost" onClick={() => onZoomToOverlay(o)}>Zoom in</Button>
+        </div>
+      )}
 
       {expanded && (
         <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border-default)" }}>
@@ -381,6 +392,7 @@ export default function SitePlansSection({
   suggestPlacement, activeOverlayId, onActivateOverlay,
   onStartPinOnOverlay, onStopPinOnOverlay, pinningOverlayId,
   commitPlacementRef, dropIntakeRef, onRejectFile, onCompPositionsChanged, rasterFailedIds,
+  zoomBelowGate, onZoomToOverlay,
 }) {
   const [overlays, setOverlays] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -776,6 +788,8 @@ export default function SitePlansSection({
           onShareTeam={(teamId) => shareOverlay(o, teamId)}
           isOwner={o.userId === currentUserId}
           onToggleLocked={() => toggleLocked(o)}
+          zoomBelowGate={zoomBelowGate}
+          onZoomToOverlay={onZoomToOverlay}
         />
         );
       })}

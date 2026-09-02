@@ -116,6 +116,38 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V471744 — B850432: a placed site plan overlay actually renders, sizes plausibly, and survives a reload, on the deployed page `Blocker: auth`
+
+**Why this needs its own real pass.** Zoom-dependent map rendering is a mandatory LIVE-VERIFY class, and the round trip needs a real Supabase-backed upload — this sandbox's egress proxy CORS-blocks the Supabase auth handshake, so no real `site_plan_overlays` row can be created here.
+
+**What was verified here, without a signed-in browser.** The exact triggering circumstance (a fresh/empty account's map defaulting to the whole-continental-US landing view, nowhere near the zoom the overlay render gate requires) was reproduced live, headless, logged out, against a local dev build — confirmed the map lands at "500 mi" scale with no located sites. The fix's two mechanisms were verified by code trace against that reproduction: the new `activeOverlayId` effect in `MapFinder.jsx` calls `map.flyTo` to the overlay's own center at zoom 17 whenever the live zoom is below `SITE_PLAN_MIN_ZOOM` (15), covering both a fresh "Place on map" and "Move / resize" on an existing plan; the passive "Zoomed out too far to see this on the map." + Zoom-in row in `SitePlansSection.jsx` only renders for a placed, visible, zoom-gated overlay (mirrors the file's existing "Not placed yet"/"Image didn't load" warning rows). The companion size fix (**B850433**) is separately unit-tested and needs no live pass. The schema hazard named in the report's acceptance criteria (deleting an overlay while a comp is pinned to it) was proven safe directly against **production** via a self-rolling-back SQL test through the Supabase MCP — see B850432's own write-up for the 4/4 result; nothing here depends on a live browser pass to close that specific question.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in:**
+1. Open the Comp map (any account state, including one with no sites yet). Comps panel → "+ Upload site plan" → pick any PDF or image → fill in a title (auto-filled from the filename) → click "Place on map". **Expect:** the plan appears in the Site plans list AND, within under a second, the image itself is visible on the map (a real picture, not a blank rectangle) — if the map was zoomed out, it should visibly fly/zoom in to show it.
+2. In the browser console, run `document.querySelectorAll('.leaflet-image-layer, img').length` scoped to `.leaflet-container` (or simply confirm visually) — **expect** at least one non-tile `<img>` painted at the plan's location, not zero.
+3. Expand the row and read the size readout. **Expect:** a plausible number — hundreds to a few thousand feet on a side — never anything reading in the hundreds of thousands of feet or "miles".
+4. Click "Pin comp here", then click ON the visible plan image. **Expect:** the Comps counter increments by 1 and a new comp row appears — not silently nothing.
+5. Save, reload the page, and confirm the comp still shows and still resolves to the site plan (its detail view can still open the plan / the map marker still renders in the right place).
+6. Pan/zoom the map away from the plan until it drops below the render gate, then return to the Site plans list. **Expect:** the row now shows "Zoomed out too far to see this on the map." with a "Zoom in" button; clicking it flies the map back to the plan and it becomes visible again.
+7. Optional, matching the report's own acceptance ask: with a comp still pinned to a site plan, try "Delete site plan…". **Expect (already proven at the DB level this session):** the app refuses with "Can't delete "…" — 1 comp is still pinned to it. Remove or re-pin it first." — never a raw error, never a partial/corrupted state.
+
+**Result:** ⏳ pending — needs a real signed-in browser session on the live production app; not reachable from this sandbox.
+
+### V471745 — B850434: Edit / Delete (comp detail) and "Place on map" each commit on a single real click on the deployed page `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** The report describes a symptom (first click does nothing, second click works) reproduced on the DEPLOYED, SIGNED-IN page against REAL saved data — this sandbox cannot sign in, and cannot hold a real saved comp to open a detail view for in the first place, so the exact conditions cannot be assembled here.
+
+**What was verified here, without the real conditions.** Two independent, real (not mocked) tests both showed correct single-click behavior in every case this sandbox CAN construct: driving the actual `SitePlansSection` "Place on map" button in a live, logged-out local build (one real Playwright click fired `confirmPage` immediately — it reached the network call and surfaced the auth wall, rather than needing a second click), and mounting the real `CompDetail` component in isolation with a fake comp (one real click on "Edit" and on "Delete" each fired its callback exactly once). Neither test found a defect in the button wiring itself (plain `<button onClick>` via the shared `Button` primitive, no debounce, no focus-stealing, no wrapping menu). This does not clear the specific state the report was actually in — see B850434's own write-up for the named, un-excluded possibilities (a `focus`/`visibilitychange`-triggered comps refetch racing a click, since `CompsPanel.jsx` does refetch on tab focus; a stale cached JS chunk; something else specific to real network/auth timing).
+
+**Steps, each with a named expected result — on `planyr.io`, signed in, with at least one saved comp:**
+1. Open the Comps list, click into a comp's detail view. Without scrolling or any other interaction, click "Edit" ONCE. **Expect:** the edit form opens immediately — not on a second click.
+2. From a comp's detail view, click "Delete" ONCE. **Expect:** the delete confirmation (or the delete itself) fires immediately.
+3. Comps panel → "+ Upload site plan" → pick a file → fill the form → click "Place on map" ONCE, without scrolling the page first. **Expect:** the flow advances (to "Saving…" then the placed plan) immediately — not on a second click.
+4. If any of the three needs a second click to work: before filing it as confirmed, check whether the tab had just come back into focus / visibility right before the click (open devtools Performance or just note if you'd recently switched tabs or windows) — this is the one concrete mechanism this session could name but not test locally (`CompsPanel.jsx`'s tab-focus refetch). Also check for a "reload available" banner (a stale cached build) at the moment of the failure.
+5. Report which, if any, of the three needed a second click, and whether step 4's focus/stale-build conditions were present at the time — this is what lets a future session either close this on your confirmation (all three work) or reproduce and fix it with a real trigger in hand.
+
+**Result:** ⏳ pending — needs a real signed-in browser session with real saved data on the live production app; not reachable from this sandbox.
+
 ### V571200 — B1023120: the Notes conflict comparison bar, on a real two-window divergence `Blocker: auth`
 
 **Why this needs its own real pass.** The comparison view only ever renders when a REAL revision conflict is raised by the server's guarded push — a genuine two-signed-in-window race is a mandatory LIVE-VERIFY class (concurrency/multi-writer), and the sandbox cannot sign in (the proxy CORS-blocks the Supabase auth handshake — the same `Blocker: auth` wall behind V680, which this item amends).

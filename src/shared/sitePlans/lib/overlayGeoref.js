@@ -130,13 +130,30 @@ export function feetBetween(lat1, lon1, lat2, lon2) {
   return Math.hypot(b.x - a.x, b.y - a.y);
 }
 
+// A site plan or broker flyer is realistically a couple hundred to a few thousand feet across —
+// never a sliver of a foot, and never tens of miles. `suggestFtPerPx` used to size the overlay
+// PURELY off the live map viewport (`viewWidthFt * fraction`, with no floor or ceiling), so
+// opening the upload flow while the map sat at a wide zoom — the default landing view for an
+// account with no located sites yet is the whole continental US, or simply wherever the map was
+// last left — produced a placement the owner measured at "622,346 x 466,759 ft": 118 x 88 MILES
+// for an ordinary 800x600 image (B850432/NEW-2). These bounds clamp the suggested width into a
+// plausible range regardless of the current viewport, so a fresh placement always reads sane on
+// sight — "Move / resize" still lets the user scale it to whatever the real plan needs.
+export const OVERLAY_SUGGEST_MIN_WIDTH_FT = 150;
+export const OVERLAY_SUGGEST_MAX_WIDTH_FT = 3000;
+
 /** A sensible starting size for a freshly placed overlay: `ftPerPx` so the image renders at
  * `fraction` (default 0.6, matching the Site Planner reference-image panel's own "Size to
- * view" button) of the given real-world view width. Pure sizing math only — the caller
- * supplies the current view width in feet (from the live map) and picks the center. */
+ * view" button) of the given real-world view width, clamped to
+ * [OVERLAY_SUGGEST_MIN_WIDTH_FT, OVERLAY_SUGGEST_MAX_WIDTH_FT] so an extreme viewport (zoomed
+ * to a metro, a state, or a single parcel) can never produce an implausible size. Pure sizing
+ * math only — the caller supplies the current view width in feet (from the live map) and picks
+ * the center. */
 export function suggestFtPerPx(viewWidthFt, imgW, fraction = 0.6) {
-  if (!(viewWidthFt > 0) || !(imgW > 0)) return 1;
-  return Math.max(0.0001, (viewWidthFt * fraction) / imgW);
+  if (!(imgW > 0)) return 1;
+  const rawWidthFt = viewWidthFt > 0 ? viewWidthFt * fraction : OVERLAY_SUGGEST_MIN_WIDTH_FT;
+  const widthFt = Math.min(OVERLAY_SUGGEST_MAX_WIDTH_FT, Math.max(OVERLAY_SUGGEST_MIN_WIDTH_FT, rawWidthFt));
+  return Math.max(0.0001, widthFt / imgW);
 }
 
 /** Corner-handle drag: uniform scale about the FIXED center. `ratio` is (current pointer
