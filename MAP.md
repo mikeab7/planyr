@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-02 @ `029b402d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-02 @ `623c6898` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -986,7 +986,7 @@ _648 source files mapped._
 - **`src/workspaces/site-planner/lib/parcelDisplay.js`** — Shared parcel-outline display layers for map and planner: styleable esri vector layer, image-export layer for query-disabled TxGIO, Drive-snapshot geoJSON layer, add/remove cursors
   - _exports_: `ADD_CURSOR`, `makeParcelDisplayLayer`, `makeParcelImageLayer`, `makeParcelLayer`, `makeSnapshotLayer`, `PARCEL_MINZOOM`, `parcelDisplayIsImageOnly`, `REMOVE_CURSOR`
 - **`src/workspaces/site-planner/lib/parcelOffset.js`** — the setback ring's inward polygon offset (miter with bevel fallback) plus the buildable-envelope area it encloses; lifted out of SitePlanner so the envelope is provable in a unit test
-  - _exports_: `lineIntersect`, `offsetPolygon`, `setbackRingArea`
+  - _exports_: `lineIntersect`, `offsetPolygon`, `outsetPolygon`, `setbackRingArea`
 - **`src/workspaces/site-planner/lib/parcelQuery.js`** — Shared parcel ID/address lookup: SQL-injection-safe where-clause builder with county scoping and primary-CAD to statewide-TxGIO outage fallback plus circuit-breaker health recording
   - _exports_: `buildParcelWhere`, `isDefaultLookupUrl`, `lookupParcels`, `okField`
 - **`src/workspaces/site-planner/lib/parcelRecord.js`** — the parcel RECORD's vocabulary: provenance (county / deed / drawn) and the typed-field list. Read only by the lazy panel; the AREA tier lives in parcelArea.js.
