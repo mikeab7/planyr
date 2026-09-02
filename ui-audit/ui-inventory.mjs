@@ -189,7 +189,13 @@ const SURFACES = [
     prep: async (p) => {
       await clickIf(p, '[title="Collapse layers"]');
       await clickIf(p, '[role="tablist"][aria-label="Site or comp"] button:has-text("Comp")');
-      await p.waitForTimeout(150);
+      // B1038016 — 150ms → 500ms. CI's real run measured ONE extra signature on this surface
+      // that never reproduced locally (comp mode renders the lazy-loaded CompsPanel/
+      // SitePlansSection chunks — `const CompsPanel = lazy(() => import(...))` — and a slower/
+      // busier CI runner can still be mid-Suspense-fallback at 150ms where a local run already
+      // settled). Same class of fix as "selecting parcels" below, applied here too rather than
+      // guessed at from one red run.
+      await p.waitForTimeout(500);
     },
     scope: "body",
     // B (map-view locked-geometry conversion) — also excludes the bottom-left network-status
@@ -206,12 +212,13 @@ const SURFACES = [
     prep: async (p) => {
       await clickIf(p, '[title="Collapse layers"]');
       await clickIf(p, 'button:has-text("Select parcels")');
-      // B1038016 (signature-budget) — 150ms → 300ms. Observed ONE flaky extra signature (22 vs the
-      // stable 21) across ~6 runs while proving the new budget gate — arming select mode kicks off
-      // the real (sandbox-blocked) GIS fetch noted below, and this state's own re-render can still
-      // be settling at 150ms. A required CI gate cannot carry even a rare false-red; the extra 150ms
-      // costs nothing (this step already excludes the one label that legitimately races).
-      await p.waitForTimeout(300);
+      // B1038016 (signature-budget) — 150ms → 300ms locally, then → 500ms after the REAL CI run
+      // (a slower/busier runner than this repo's own sandbox) reproduced the same extra-signature
+      // read this comment already predicted for the identical reason: arming select mode kicks off
+      // the real GIS fetch noted below, and this state's own re-render can still be settling. A
+      // required CI gate cannot carry even a rare false-red; the extra time costs nothing (this
+      // step already excludes the one label that legitimately races).
+      await p.waitForTimeout(500);
     },
     scope: "body",
     // B (map-view locked-geometry conversion) — also excludes the bottom-left network-status
