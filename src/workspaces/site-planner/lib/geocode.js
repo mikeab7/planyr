@@ -47,6 +47,22 @@ export async function geocodeAddress(q, center) {
   return reachedAny ? null : { error: "Address lookup is unavailable right now — check your connection and try again, or pan the map to your site." };
 }
 
+/* B986096-HARDENING-24 (owner live-test, "Location shows a ZIP first... A reverse-geocoded address
+ * must be ordered street-first") — a US postal address is always STREET, CITY, STATE ZIP; neither
+ * provider's raw label string is trustworthy for that order. ArcGIS's `Match_addr`/`LongLabel`
+ * usually already read street-first for a rooftop match, but Nominatim's `display_name` is built
+ * from whatever administrative level its best match actually resolved to — a coarse match (no
+ * nearby building in OSM, common on newly-developed industrial land) resolves to a POSTCODE
+ * feature, whose own "name" IS the ZIP code, so `display_name` reads "77073, Houston, ...". Build
+ * the label from each provider's own STRUCTURED address fields instead of trusting either raw
+ * string's component order. */
+function usAddressLabel({ street, city, state, zip }) {
+  const cityState = [city, state].filter(Boolean).join(", ");
+  let label = [street, cityState].filter(Boolean).join(", ");
+  if (zip) label = label ? `${label} ${zip}` : zip;
+  return label || null;
+}
+
 /* B986096-HARDENING-9 (owner rule, "reverse-geocoded from the stored lat/lon... do not add a new
  * dependency for this") — the REVERSE of `geocodeAddress` above, same two providers in the same
  * order, same honest three-way return contract (a hit / genuinely-nothing-there / unreachable).
@@ -62,17 +78,31 @@ export async function reverseGeocodeLatLon(lat, lon) {
       reachedAny = true;
       const j = await r.json();
       const addr = j?.address;
-      const label = addr?.Match_addr || addr?.LongLabel || addr?.Address;
+      // ArcGIS's reverse-geocode response carries structured fields alongside the concatenated
+      // Match_addr/LongLabel — build street-first from those rather than trusting the string's
+      // own order (HARDENING-24).
+      const structured = addr && (addr.Address || addr.City || addr.Postal)
+        ? usAddressLabel({ street: addr.Address, city: addr.City, state: addr.RegionAbbr || addr.Region, zip: addr.Postal })
+        : null;
+      const label = structured || addr?.Match_addr || addr?.LongLabel || addr?.Address;
       if (label) return { label };
     }
   } catch (_) { /* unreachable — fall through to Nominatim */ }
   try {
-    const u = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18`;
+    const u = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`;
     const r = await fetch(u);
     if (r.ok) {
       reachedAny = true;
       const j = await r.json();
-      if (j?.display_name) return { label: j.display_name };
+      const a = j?.address;
+      // HARDENING-24 — the defect's actual case: Nominatim's `display_name` leads with whatever
+      // feature it matched (a postcode centroid reads "77073, Houston, ..."). `addressdetails=1`
+      // returns the same fields broken out, so build street-first from THOSE instead.
+      const street = a ? [a.house_number, a.road].filter(Boolean).join(" ") : "";
+      const city = a && (a.city || a.town || a.village || a.hamlet || a.suburb);
+      const structured = a ? usAddressLabel({ street, city, state: a.state, zip: a.postcode }) : null;
+      const label = structured || j?.display_name;
+      if (label) return { label };
     }
   } catch (_) { /* unreachable */ }
   return reachedAny ? null : { error: "Reverse geocode unavailable right now." };

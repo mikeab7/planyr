@@ -524,6 +524,17 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   server-owned** — a `notes_touch_rev` trigger bumps it, so a push sends the GUARD `.eq("rev", base)`
   and never a rev of its own; zero rows back is a CONFLICT, never a retry. Nothing hard-deletes:
   `deleted_at` = binned (body intact, so a restore works on the other machine), `purged_at` = gone.
+  **⛔ `mergeSyncState` COULD RESURRECT A PAGE'S OWN `dirty` FLAG FOREVER (B1055088) — read
+  `docs/NOTES-CARRY-FORWARD.md` §5.8 before touching this function.** Its blind
+  `dirty: mine.dirty || disk.dirty` couldn't tell a genuine sibling window's still-pending edit
+  from THIS SAME WINDOW's own stale pre-push disk snapshot, so a page ever edited never actually
+  left the dirty set — proved on unmodified code with no sibling at all, one page's server `rev`
+  climbing 1→2→3→4→5 across four idle `refreshNotesSync()` calls. Fixed by honouring disk's
+  `dirty` only when disk's own `rev` is at least as current as `mine`'s. The ledger also grew a
+  fourth per-page fact, `auto` (a write with no per-document user intent — `sweepEmptyAnchors`'s
+  litter cleanup today), so an automatic rewrite adopts a moved server row in silence instead of
+  naming a conflict over content nobody touched; route any FUTURE automatic body rewrite through
+  the same `auto` path, never straight through `writePage`.
 - `db/notes_cloud_sync.sql` — the APPLIED DDL, committed as a record (production, 2026-07-31,
   migration `notes_cloud_sync_b1291`). Three own-row-RLS tables + the private `notes-images` bucket.
 - `lib/notesImageDb.js` — the raw IndexedDB tier under the image store, and the local CACHE in front

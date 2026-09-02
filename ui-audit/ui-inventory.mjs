@@ -1025,6 +1025,52 @@ function renderGroup(name, themeRows) {
   return lines.join("\n");
 }
 
+// B986096-HARDENING-21 (NEW-1 item 3, owner-directed 2026-09-02 after main went red on this exact
+// gate with a one-line, undiagnosable failure) — `--check` used to print only "out of date", no
+// diff, no line numbers: every red run cost a full ~9-minute CI round to even find out WHICH line
+// changed, turning every fix attempt into a guess (twice, on two different PRs, in one night). A
+// plain line-diff (no dependency — this repo's own convention for small tools) against the
+// committed file, capped so a wholesale content change can't flood the log. Deliberately the ONLY
+// change in this pass — it records no different geometry and changes no pass/fail verdict, only
+// what gets printed when one already failed, so it can ship and be trusted on its own before the
+// next step (reading its real, CI-native output, not a local guess) decides what to fix next.
+function diffLines(expected, actual, maxHunks = 200) {
+  const a = expected.split("\n");
+  const b = actual.split("\n");
+  const hunks = [];
+  let i = 0, j = 0;
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && a[i] === b[j]) { i++; j++; continue; }
+    // Find the next matching line within a small lookahead window so a single insertion/deletion
+    // doesn't desync every subsequent line into a wall of noise.
+    const WINDOW = 20;
+    let matched = false;
+    for (let k = 1; k <= WINDOW && !matched; k++) {
+      if (j + k < b.length && a[i] === b[j + k]) {
+        for (let x = 0; x < k; x++) hunks.push({ line: j + x + 1, expected: null, actual: b[j + x] });
+        j += k; matched = true;
+      } else if (i + k < a.length && a[i + k] === b[j]) {
+        for (let x = 0; x < k; x++) hunks.push({ line: i + x + 1, expected: a[i + x], actual: null });
+        i += k; matched = true;
+      }
+    }
+    if (!matched) {
+      hunks.push({ line: j + 1, expected: i < a.length ? a[i] : null, actual: j < b.length ? b[j] : null });
+      i++; j++;
+    }
+    if (hunks.length > maxHunks) break;
+  }
+  if (!hunks.length) return "(files differ only in trailing whitespace/newline)";
+  const shown = hunks.slice(0, maxHunks);
+  const lines = shown.map((h) => {
+    if (h.expected != null && h.actual != null) return `  line ${h.line}:\n    - committed: ${JSON.stringify(h.expected)}\n    - built now: ${JSON.stringify(h.actual)}`;
+    if (h.expected != null) return `  line ${h.line}: removed from committed file:\n    - committed: ${JSON.stringify(h.expected)}`;
+    return `  line ${h.line}: added by this build:\n    - built now: ${JSON.stringify(h.actual)}`;
+  });
+  const truncated = hunks.length > maxHunks ? `\n  … ${hunks.length - maxHunks} more difference(s) not shown` : "";
+  return `Diff (committed docs/UI-INVENTORY.md vs this build), ${hunks.length} line difference(s):\n${lines.join("\n")}${truncated}`;
+}
+
 async function run() {
   const EXEC = process.env.PW_CHROME || undefined;
   const browser = await chromium.launch({ ...(EXEC ? { executablePath: EXEC } : {}), args: ["--no-sandbox", "--ignore-certificate-errors"] });
@@ -1370,7 +1416,10 @@ async function run() {
   if (process.argv.includes("--check")) {
     const existing = existsSync(OUT_MD) ? readFileSync(OUT_MD, "utf8") : null;
     const docStale = existing !== md;
-    if (docStale) console.error("docs/UI-INVENTORY.md is out of date — regenerate with `node ui-audit/ui-inventory.mjs`.");
+    if (docStale) {
+      console.error("docs/UI-INVENTORY.md is out of date — regenerate with `node ui-audit/ui-inventory.mjs`.");
+      console.error(diffLines(existing ?? "", md, 400));
+    }
     if (!signatureCheck.ok) console.error("Signature BUDGET check FAILED (NEW-1, B1038016):\n" + signatureCheck.problems.map((p) => "  • " + p).join("\n"));
     if (docStale || !signatureCheck.ok) process.exit(1);
     console.log("docs/UI-INVENTORY.md is up to date and every surface is within its signature budget.");

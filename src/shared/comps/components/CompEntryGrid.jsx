@@ -35,7 +35,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "../../ui/controls.jsx";
 import { parsePaste, rowHasBlockingFlags, parseProseLine, splitPasteLines } from "../lib/compParse.js";
-import { emptyDraft, draftToComp, validateComp, summarizeLeaseComps, summarizeSaleComps, resolveCapTriangle } from "../lib/comps.js";
+import { emptyDraft, draftToComp, validateComp, validAnchor, summarizeLeaseComps, summarizeSaleComps, resolveCapTriangle } from "../lib/comps.js";
 import {
   SHEET_COLUMNS, cellState, applyCellEdit, fillDownColumn, spillPaste, visibleColumnIndices,
   computeFlexWidths, widthFor, frozenLeftOffsets,
@@ -185,6 +185,20 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
   const tdStyle = {
     height: ROW_H, boxSizing: "border-box", padding: 0,
     width: w, minWidth: w, maxWidth: w,
+    // B986096-HARDENING-20 — the two-row sticky header (HeaderRows, GROUP_BAND_H + COL_LABEL_H
+    // tall) sits on top of the scroll container's content, not inside its scrollable flow. Any
+    // scroll-into-view — the browser's own for a focused/clicked cell near the top, or a script's
+    // — only knows the container's raw client area, not that the header visually covers the top
+    // slice of it, so it can (and, measured, reliably does) land a target row with its top edge
+    // hidden BEHIND the sticky header while still reporting itself "in view." A click landing in
+    // that band then hits the header, not the cell, with no error anywhere — reproduced with a
+    // plain Playwright `.click()` (its own standard actionability scroll, not a synthetic one)
+    // timing out after retrying against "<th title=\"Executed\">…</th> intercepts pointer events"
+    // on a grid tall enough to need scrolling. `scroll-margin-top` is the standard fix for exactly
+    // this sticky-header class of bug: it tells every scroll-into-view mechanism (native focus,
+    // keyboard nav, Tab, or an automation driver) to leave clearance for the header rather than
+    // scrolling a row flush to the container's raw top edge.
+    scrollMarginTop: GROUP_BAND_H + COL_LABEL_H,
     borderRight: "1px solid var(--border-default)", borderBottom: "1px solid var(--border-default)",
     position: col.frozen ? "sticky" : undefined, left: col.frozen ? frozenOffsets[col.key] : undefined, zIndex: col.frozen ? 1 : undefined,
     background: col.frozen ? "var(--surface-overlay)" : muted ? "var(--surface-raised)" : "var(--surface-overlay)",
@@ -989,17 +1003,26 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
   // WHAT was blocking; there is currently exactly one blocking case (a lease rate with no stated
   // period, the 12x ambiguity) so the count now names it directly.
   const missingCount = rows.filter((r) => validateComp(draftToComp(r.draft)).length > 0).length;
+  // B986096-HARDENING-22 (owner live-report, 2026-09-02 — a row correctly missing ONLY a Location
+  // read as "did my typed Executed date not save?", costing a real diagnostic round before an
+  // instrumented trace showed compDate had been correct the whole time) — the combined "and/or"
+  // count named EITHER cause for every row, so a row missing just one read identically to a row
+  // missing both. Split into the two independent, single-cause counts HARDENING-8's own comment
+  // already established validateComp checks unconditionally, and name each on its own — never
+  // combined into one ambiguous phrase — falling back to the original "and/or" wording only for
+  // the genuinely-ambiguous case (rows missing both, mixed with rows missing just one).
+  const missingDateOnly = rows.filter((r) => !r.draft?.compDate && validAnchor(r.draft?.anchor)).length;
+  const missingLocationOnly = rows.filter((r) => r.draft?.compDate && !validAnchor(r.draft?.anchor)).length;
+  const missingBoth = missingCount - missingDateOnly - missingLocationOnly;
   let footerMsg = "";
   if (rows.length > 0) {
     if (blockingCount === 0 && missingCount === 0) footerMsg = `${readyRows.length} comp${readyRows.length === 1 ? "" : "s"} ready.`;
     else {
       const parts = [];
       if (blockingCount > 0) parts.push(`${blockingCount} rate${blockingCount === 1 ? "" : "s"} need${blockingCount === 1 ? "s" : ""} a period`);
-      // B986096-HARDENING-8 — "or" read as a choice when Executed and Location are each
-      // independently required (validateComp checks both unconditionally); a row missing either
-      // (or both) landed on the same wording. "and/or" says a row could be missing one or both,
-      // without implying only one is ever needed.
-      if (missingCount > 0) parts.push(`${missingCount} missing an Executed date and/or a Location`);
+      if (missingBoth > 0) parts.push(`${missingBoth} missing an Executed date and/or a Location`);
+      if (missingDateOnly > 0) parts.push(`${missingDateOnly} missing an Executed date`);
+      if (missingLocationOnly > 0) parts.push(`${missingLocationOnly} missing a Location`);
       footerMsg = `${readyRows.length} of ${rows.length} ready — ${parts.join(", ")}.`;
     }
   }
@@ -1150,6 +1173,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
                   <td style={{
                     position: "sticky", right: 0, width: REMOVE_COL_W, height: ROW_H, textAlign: "center",
                     background: "var(--surface-overlay)", borderBottom: "1px solid var(--border-default)", borderLeft: "1px solid var(--border-default)",
+                    scrollMarginTop: GROUP_BAND_H + COL_LABEL_H,
                   }}>
                     <button onClick={() => removeRow(row._id)} title="Remove" aria-label="Remove comp"
                       style={{ border: "none", background: "transparent", color: "var(--danger-text)", fontFamily: "inherit", cursor: "pointer", fontSize: CLOSE_ICON_FONT_SIZE, padding: 0, lineHeight: CELL_LINE_HEIGHT }}>✕</button>

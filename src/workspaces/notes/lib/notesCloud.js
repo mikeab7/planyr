@@ -74,12 +74,17 @@ export const IMAGE_MIME_ALLOWED = ["image/png", "image/jpeg", "image/gif", "imag
 
 /* ---- the per-scope sync state (persisted BY THE STORE, shaped here) ------------------
  *
- * `pages[id]` carries three facts and no more:
+ * `pages[id]` carries four facts and no more:
  *   rev        the server revision this device's body is BASED ON (null = never synced)
  *   dirty      there is a local edit that has not landed in the cloud
  *   purged     this page was purged (here or elsewhere) — never upload it again
- * That last flag is TOMBSTONE-DELETES at the DEVICE level: without it, a body written back
- * by a flush that lost a race with a purge would look like a brand-new page and resurrect.
+ *   auto       (NEW-1, B1055088) this `dirty` was set by AUTOMATIC HOUSEKEEPING — a
+ *              write nobody typed, made on the user's behalf (today: the empty-anchor
+ *              litter sweep) — never by a live editor save. See the header note below
+ *              `planPageSeed` for why this exists and what it changes.
+ * That `purged` flag is TOMBSTONE-DELETES at the DEVICE level: without it, a body written
+ * back by a flush that lost a race with a purge would look like a brand-new page and
+ * resurrect.
  *
  * The ledger is PERSISTED by the store (it is device state, so it lives beside the device's
  * own keys); this file owns only its SHAPE and its empty value, so the pure planners below
@@ -412,7 +417,19 @@ const earlierOf = (a, b) => (Number.isFinite(a) && Number.isFinite(b) ? Math.min
  *  bumps `rev` through the server trigger — so a page sitting in the bin with an unflushed
  *  local edit would otherwise report "changed on another device" for a change that was only
  *  ever a delete. That is the false conflict this rule exists to rule out: a binned page's
- *  dirty body simply REBASES onto the server rev and pushes, and a purged page is dropped. */
+ *  dirty body simply REBASES onto the server rev and pushes, and a purged page is dropped.
+ *
+ *  ⛔ AND NEITHER DOES AN `auto`-DIRTY ROW (NEW-1, B1055088). `dirty` used to mean exactly
+ *  one thing — "a live editor save landed here" — but the empty-anchor litter sweep
+ *  (`sweepEmptyAnchors`, run on every load) writes a CLEANED copy of whatever this device
+ *  happens to be holding through the SAME `writePage` path a real edit uses, with nothing
+ *  behind it that the user chose. `state.pages[id].auto` marks that: a write with no
+ *  per-document user intent to defend. So when an `auto`-dirty page's base rev has moved,
+ *  there is nothing here worth asking about — the server's row simply WINS, exactly as it
+ *  would if this device were not dirty at all, and the local housekeeping write is dropped
+ *  (harmless: the sweep is idempotent and will run again next load against the freshly
+ *  adopted row). A genuinely dirty (non-`auto`) page keeps raising a real conflict — this
+ *  narrows WHO gets asked, it does not touch what a real edit is owed. */
 export function planPageSeed({ index = [], state = emptySyncState(), localIds = [] } = {}) {
   const have = new Set(localIds);
   const seen = new Set();
@@ -433,6 +450,7 @@ export function planPageSeed({ index = [], state = emptySyncState(), localIds = 
     if (st?.dirty) {
       if (base === row.rev) upload.push({ id, base });
       else if (row.binned) upload.push({ id, base: row.rev });   // a delete is not a conflict
+      else if (st.auto) adopt.push(id);        // housekeeping only — the server's row wins
       else conflicts.push(id);
     } else if (base !== row.rev || !have.has(id)) {
       adopt.push(id);                                            // rows are canonical on seed
@@ -557,13 +575,42 @@ export function isEmptyDoc(doc) {
  * window's fresher rev as the base for a body this window edited from an OLDER one would
  * let a stale document commit CLEANLY, past a guard that is doing its job. The guard must
  * still refuse — and `judgeConflict` above is what then decides, cheaply, whether the
- * refusal was worth a word to the user. */
+ * refusal was worth a word to the user.
+ *
+ * ⛔ AND DISK'S "STILL DIRTY" CLAIM IS ONLY HONOURED WHEN IT KNOWS SOMETHING `mine` DOESN'T
+ * (NEW-1, B1055088 — THE SELF-RESURRECTION BUG BEHIND THE 2026-09-02 INCIDENT). `saveSyncState`
+ * calls this on EVERY write, including ones where there is no sibling window at all — and a
+ * blind `dirty: mine.dirty || disk.dirty` cannot tell "disk knows about a sibling's still-
+ * pending edit" from "disk is simply THIS SAME WINDOW's own snapshot from a moment ago, since
+ * superseded by a push that already landed." Measured: `pushPending` updates `sync` in MEMORY
+ * the instant a push succeeds, but does not write that success to disk until its own trailing
+ * `saveSyncState()` — which then merges against whatever is STILL on disk from BEFORE the
+ * push (nothing else wrote it in between). Every single time, `mine.dirty` (false, just
+ * cleared) ORs with the stale `disk.dirty` (true, pre-push) and comes back TRUE — so a page,
+ * once ever edited, never actually leaves the dirty set. Reproduced with NO sibling window
+ * whatsoever: one page, one push, four subsequent `refreshNotesSync()` calls, and the server
+ * row's `rev` climbed 1→2→3→4→5 — an unconditional, permanent, silent re-push loop, running on
+ * every focus/visibility/online event and the 60s poll (`POLL_MS`) for as long as the tab
+ * stays open. This is almost certainly the actual mechanism behind "eleven pages committed in
+ * one second, with unrelated rev values, from a client that made no edit": once ANY page has
+ * ever been typed into, this bug never lets it go, and a poll cycle re-pushes every such page
+ * a device is holding in a single burst.
+ *
+ * THE FIX: `mine`'s rev is the freshest confirmed truth THIS window has. Disk's dirty flag is
+ * stale — and must not resurrect anything — whenever disk's own rev is no NEWER than what
+ * `mine` already knows (disk is describing a moment mine has already moved past). It is only
+ * fresh evidence of a genuinely different writer when disk's rev is AT LEAST as current as the
+ * rev a real pending edit would be based on — which is exactly the shape of a sibling's own
+ * still-unpushed edit sharing (or exceeding) mine's last confirmed base. */
 export function mergeSyncState(mine, disk) {
   const a = mine || emptySyncState();
   const b = disk || emptySyncState();
+  const mineTreeRev = Number.isFinite(a.treeRev) ? a.treeRev : -1;
+  const diskTreeRev = Number.isFinite(b.treeRev) ? b.treeRev : -1;
+  const diskTreeDirtyIsFresh = !!b.treeDirty && diskTreeRev >= mineTreeRev;
   const out = {
     treeRev: higherRev(a.treeRev, b.treeRev),
-    treeDirty: !!a.treeDirty || !!b.treeDirty,     // an unpushed change on either side is still owed
+    treeDirty: !!a.treeDirty || diskTreeDirtyIsFresh,
     pages: {},
     images: {},
     adopted: [...new Set([...(a.adopted || []), ...(b.adopted || [])])],
@@ -571,12 +618,22 @@ export function mergeSyncState(mine, disk) {
   for (const id of new Set([...Object.keys(a.pages || {}), ...Object.keys(b.pages || {})])) {
     const m = a.pages?.[id] || null;
     const d = b.pages?.[id] || null;
-    const dirty = !!m?.dirty || !!d?.dirty;
+    const mineRev = Number.isFinite(m?.rev) ? m.rev : -1;
+    const diskRev = Number.isFinite(d?.rev) ? d.rev : -1;
+    const diskDirtyIsFresh = !!d?.dirty && diskRev >= mineRev;
+    const dirty = !!m?.dirty || diskDirtyIsFresh;
+    // ⛔ auto (NEW-1): "no window here has a REAL edit to defend" — so it is auto only when
+    // every side that GENUINELY contributes to `dirty` above says it is auto too. A stale
+    // disk entry contributes nothing (see `diskDirtyIsFresh`), so it cannot drag this down
+    // to auto either; a genuine edit on either FRESH side must never be silently downgraded
+    // to "housekeeping, safe to drop" by merging with a sweep's flag.
+    const auto = (!m?.dirty || !!m?.auto) && (!diskDirtyIsFresh || !!d?.auto);
     out.pages[id] = {
       // Dirty HERE → keep this window's base (see the rule above). Otherwise a revision only
       // ever moves forward, so the higher of the two is the current one.
       rev: m?.dirty ? (Number.isFinite(m.rev) ? m.rev : null) : higherRev(m?.rev, d?.rev),
       dirty,
+      auto,
       purged: !!m?.purged || !!d?.purged,          // a tombstone from either window stands
     };
   }
