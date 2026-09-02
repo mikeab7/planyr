@@ -591,6 +591,16 @@ Runtime deps are kept few and deliberate. New client dependency added 2026-07-10
   — resolve by merging `origin/main` in (keep both sides' done-entries; renumber only a genuinely
   colliding new B#/V#), re-run the gate, push. **Poll every ~150s while a PR is open** (webhooks do
   NOT deliver CI-success / merge / conflict transitions — always re-fetch), never on a 20-min idle tick.
+- **⛔ BEFORE PUSHING A FIX FOR A CI FAILURE, RUN `npm run ci-parity` — NEVER APPROXIMATE CI BY HAND
+  (2026-09-02, owner-approved after the third CI-vs-local mismatch in a week: B927104, the
+  2026-08-31 bundle night, PR #1323).** It runs every gate the required `build` check runs, in the
+  same order, reading them from `.github/ci-gates.yml` (which `.github/workflows/build.yml` itself
+  calls via this same command — one list, not two that can drift). It reproduces CI's environment
+  too — the same build-time env vars, the pinned Chromium revision for the visual-regression gate —
+  and if a real secret (`VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`) is absent locally it says so
+  LOUDLY and substitutes the documented dummy rather than silently measuring something CI doesn't.
+  `--list` shows the gate order with nothing run; `--skip-install` skips `npm ci` (loud, deviates).
+  See `scripts/ci-parity.mjs`'s own header for what it deliberately doesn't cover and why.
 - **Deploy = Cloudflare Pages (production), serving planyr.io.** Because the suite is one
   app with an in-app workspace switcher, "seeing both live" is one URL — you switch tabs
   inside it. (The old GitHub Pages deploy was retired — see "Retire the old GitHub Pages
