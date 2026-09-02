@@ -7,6 +7,18 @@ name: Build
 # Production is served by Cloudflare Pages via its own GitHub App connection (there is
 # no Cloudflare workflow file in this repo). The old GitHub Pages deploy job was
 # retired once Cloudflare became production — one host, one deploy.
+#
+# ⛔ THE GATES THEMSELVES LIVE IN .github/ci-gates.yml, NOT HERE (2026-09-02, owner-approved after
+# the third CI-vs-local mismatch in a week — B927104 / the 2026-08-31 bundle night / PR #1323).
+# `npm run ci-parity` (scripts/ci-parity.mjs) reads that sibling file's ordered step list at run
+# time (ui-audit/lib/workflowContract.mjs's jobSteps() — the same parser used on THIS file, below)
+# and runs exactly what it says, so there is exactly ONE list of "what the required build check
+# runs" — never a copy here and a copy there that can silently drift apart. A developer runs
+# `npm run ci-parity` on their own machine and gets the SAME verdict this job does, gate by gate,
+# including the same handling of a missing Supabase secret (see that script's own header). This
+# file keeps only what genuinely can't move into the script: real GitHub Actions (a runner-only
+# cache, an artifact upload) and the toolchain setup those gates assume has already happened — see
+# scripts/ci-parity.mjs's own header for the full "not covered, and why" list.
 on:
   push:
     branches:
@@ -40,118 +52,33 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Install dependencies
-        run: npm ci
-      - name: Lint (fails the build on a dangling/undefined identifier)
-        run: npm run lint
-      # Scheduler syntax guard (B643105). `public/sequence/index.html` — the single largest
-      # surface in this app, ~13,900 lines — is invisible to BOTH of the checks above it: ESLint's
-      # `files:` glob is `**/*.{js,jsx}` and never matches an `.html` file, and its
-      # `<script type="text/babel">` content is transformed at RUNTIME in the browser via
-      # `@babel/standalone` loaded from a CDN — Vite copies the file verbatim as a static asset and
-      # never parses it. So a hard syntax error here previously passed every check in this job and
-      # shipped, failing silently in the first browser that opened the Scheduler tab. This walks
-      # both `<script type="text/babel">` blocks through esbuild's JSX transform — syntax only, the
-      # same class of check as the lint step above it, not a logic or type check.
-      - name: Scheduler syntax guard (public/sequence/index.html — B643105)
-        run: node ui-audit/stress/check-babel.mjs
-      # Required-check contract guard (NEW-2). On 2026-08-06 seven PRs were stuck at
-      # "build — Expected — Waiting for status to be reported" with nothing red anywhere, and GitHub
-      # offers no merge control at all in that state. This asserts that every context the ruleset
-      # requires is actually produced by a job here AND still reports on a docs-only change — the
-      # renumber push that caused it. Cheap, no network, and it goes red before it can wedge merges.
-      - name: Required-check contract guard (a required check must always be able to report — NEW-2)
-        run: node ui-audit/required-check-audit.mjs
-      - name: GIS source registry guard (no test/non-authoritative endpoint, no inline URLs — B369)
-        run: node ui-audit/gis-source-audit.mjs
-      - name: MAP.md drift guard (regenerate with `node scripts/build-map.mjs` — B637)
-        run: node scripts/build-map.mjs --check
-      - name: BACKLOG_OPEN.md drift + tag-legend guard (regenerate with `node scripts/build-backlog-index.mjs` — B638)
-        run: node scripts/build-backlog-index.mjs --check
-      # Verification-queue ceiling guard (B825233). CLAUDE.md already said a pending V# with no
-      # Blocker: wall is a mis-classification, not a to-do — nothing ever checked it. This is a
-      # ratchet, not a retroactive fail: it only reds out if the no-Blocker or stale-pending count
-      # GROWS past today's recorded ceiling (scripts/verification-queue-ceiling.json), so today's
-      # existing debt doesn't wedge every future PR. Regenerate the ceiling with
-      # `node scripts/verification-queue-audit.mjs --write-ceiling` once the counts genuinely improve.
-      - name: Verification-queue ceiling guard (no-Blocker / stale V# items — B825233)
-        run: node scripts/verification-queue-audit.mjs --check
-      - name: e2e fixture drift guard (regenerate with `node scripts/build-fixtures.mjs` — B278/B280 harness)
-        run: node scripts/build-fixtures.mjs --check
-      - name: Landing coverage drift guard (regenerate with `node scripts/build-landing-coverage.mjs` — B1385)
-        run: node scripts/build-landing-coverage.mjs --check
-      # Mint gate (B779 second pass). The uniqueness tests below catch a collision once both items
-      # are in the same tree; this catches one whose twin is still on an UNMERGED branch, which no
-      # static check of this repo can see. A proven collision fails the build (renumbering is a
-      # few heading lines); an infrastructure problem warns loudly rather than wedging merges —
-      # `--ci` draws exactly that line, and the pre-push hook is the strict first line of defence.
-      - name: Mint gate (new B#/V# unclaimed on main and on in-flight branches — B779)
-        run: node scripts/check-mint.mjs --ci
-      - name: Test (pure-logic smoke tests)
-        run: npm test
-      - name: Build
-        run: npm run build
-        env:
-          # Supabase connection (Phase 1). Set these as repository secrets:
-          # Settings → Secrets and variables → Actions. Safe to be absent — the app
-          # runs fine un-configured (the cloud chip just shows "Cloud off").
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-      # Performance budget gate (NEW-8). Deterministic half only — bundle weight and the
-      # Site-route chunk allowlist, computed from dist/.vite/manifest.json with no browser.
-      # A breach names the metric and its delta. The runtime half (frame time, heap, tiles)
-      # is deliberately NOT gated here: it is too sensitive to shared-runner CPU contention
-      # to gate a merge on. See docs/PERF-BUDGETS.md.
-      # NEW-3 — build the base ref and snapshot its bundle, so the budget step below can name
-      # WHICH modules and packages moved rather than only that a number did. Diagnosis, not a
-      # gate: this script never exits non-zero, and it prints why when it cannot run.
-      - name: Base-ref bundle snapshot (byte attribution — NEW-3, never fatal)
-        run: node scripts/perf-base-stats.mjs --out .perf/base-stats.json
-        # B927104 — THE SAME env AS THE Build STEP ABOVE, AND IT IS LOAD-BEARING, NOT TIDINESS.
-        # `import.meta.env.VITE_SUPABASE_URL` / `..._ANON_KEY` are INLINED AS STRING LITERALS at
-        # build time (site-planner/lib/supabase.js and food/lib/supabaseClient.js, both statically
-        # reachable from src/main.jsx, so they land in the shared entry chunk EVERY route
-        # downloads). Without this block the base ref was built secret-free while the head build
-        # above carries the literals, so the two sides of the comparison were never builds of the
-        # same configuration: base came out ~300 B light on every route, and the "this branch
-        # adds" figure was inflated by that constant. Measured on 2026-08-31: PR #1263 REMOVED
-        # code (true delta -65 B) and CI still reported `this branch +0.2 KB`. This changes no
-        # verdict — a push to main is judged absolutely on the head build — only whether the
-        # attribution line tells the truth.
-        env:
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-      - name: Performance budget (bundle weight + Site-route chunk allowlist — NEW-8)
-        run: node ui-audit/perf-bundle-audit.mjs --compare .perf/base-stats.json --emit-stats .perf/head-stats.json
-      # Visual regression baselines (NEW-1). The one check in this job with no theory of what
-      # "wrong" looks like: render the key surfaces, diff pixel-for-pixel against a human-approved
-      # baseline in ui-audit/visual-baselines/, fail on anything that moved. See
-      # docs/VISUAL-REGRESSION.md for coverage, the masking/tolerance policy, and how to approve an
-      # intentional change. This is the FIRST browser-driven step in this job (every other check
-      # above is static analysis or a headless build) — the Playwright browser is cached below so a
-      # cache hit skips the ~150 MB re-download on every push; only the (much cheaper) OS package
-      # install still runs every time, since GitHub-hosted runners don't persist apt state.
+      # Visual regression baselines (further down the gate list, inside npm run ci-parity) need the exact
+      # Chromium revision `npx playwright install --with-deps chromium` resolves to. Restoring this
+      # cache BEFORE the gates run is what makes that install a ~10s cache hit instead of a ~290 MB
+      # download on every push; only the (much cheaper) OS package install still runs every time,
+      # since GitHub-hosted runners don't persist apt state.
       - name: Cache Playwright browsers
         id: pw-cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-      - name: Install Playwright chromium
-        run: npx playwright install --with-deps chromium
-      - name: Serve the built app for visual regression
-        run: npx vite preview --port 4173 --strictPort > /tmp/vite-preview.log 2>&1 &
-      - name: Wait for the preview server
-        run: |
-          for i in $(seq 1 30); do
-            if curl -sSf http://localhost:4173/ >/dev/null 2>&1; then echo "preview server is up"; exit 0; fi
-            sleep 1
-          done
-          echo "preview server never came up — log:"; cat /tmp/vite-preview.log; exit 1
-      - name: Visual regression baselines (pixel diff against approved baselines — NEW-1)
+      - name: Run CI gates (scripts/ci-parity.mjs — the single source of truth for what this build checks)
+        run: npm run ci-parity
         env:
-          BASE_URL: "http://localhost:4173/"
-        run: node ui-audit/visual-regression.mjs --check
+          # Supabase connection (Phase 1). Set these as repository secrets:
+          # Settings → Secrets and variables → Actions. Safe to be absent — the app runs fine
+          # un-configured (the cloud chip just shows "Cloud off") — but ci-parity.mjs's own build
+          # and its base-ref/visual-regression comparisons need the SAME truthy-or-not value on
+          # every gate that touches it, which is why there is exactly one place these are set now
+          # (B927104: two different truthy-nesses on the two sides of a byte comparison is a
+          # permanent phantom delta) — see scripts/ci-parity.mjs / ui-audit/lib/ciGates.mjs.
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+      # Visual regression diffs (NEW-1). ci-parity.mjs's own visual-regression.mjs gate writes its
+      # failure diffs to .perf/visual-regression/ (gitignored) — this is the one thing about a
+      # failure a local run doesn't need (the files are already on disk) that CI does: a
+      # downloadable copy for whoever is looking at the failed run in the GitHub UI.
       - name: Upload visual regression diffs
         if: failure()
         uses: actions/upload-artifact@v4
