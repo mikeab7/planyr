@@ -465,9 +465,17 @@ function ActionsRow({ everVisited, onOpenForm, wishlisted, onToggleWishlist, wis
   };
   const primary = { ...base, flex: 1, border: "none", padding: "11px 0", fontSize: 14, background: "var(--accent-food)", color: "var(--on-accent-food)" };
   const secondary = { ...base, flex: "0 0 auto", padding: "11px 16px", fontSize: 13, background: "transparent", color: "var(--text-primary)" };
-  // A toggled-on "want to try" still reads as active (the ToggleChip pattern: a ghost fills when
-  // active) without borrowing the primary button's size/weight — it stays the secondary control.
-  const wishActive = { background: "var(--accent-food)", color: "var(--on-accent-food)", border: "none" };
+  // ⛔ B1022960 round 2 (2026-09-02, live-verified by Cowork on Xochi — the one already-flagged
+  // place in the account) — the PREVIOUS wishActive filled the button with the exact same
+  // background/color/border-none as `primary`, so an already-wanted place showed TWO same-height,
+  // same-radius, borderless, identically-filled buttons side by side — differing only by width,
+  // which is not enough to read as "one primary, one secondary" (Cowork's measurement: both
+  // buttons carried the identical computed fill/text color with no border at all). Never filled
+  // now — mirrors the SAME "want to try" flag's
+  // OWN established look elsewhere in this module (SearchBox.jsx's result badge, VisitList.jsx's
+  // row chip and shortlist filter: outlined, transparent, accent text/border) so the active state
+  // reads as "flagged" without ever competing with the primary CTA's fill.
+  const wishActive = { background: "transparent", color: "var(--accent-food)", border: "1px solid var(--accent-food)" };
 
   const logBtn = (
     <button key="log" type="button" onClick={onOpenForm} data-testid="food-log-visit-btn" style={primary}>
