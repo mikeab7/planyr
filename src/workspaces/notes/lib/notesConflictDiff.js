@@ -1,6 +1,6 @@
 /* notesConflictDiff — a readable, word-level diff between two note bodies (B842624).
  *
- * PURE. Built for the conflict-resolution comparison bar (ConflictCompare.jsx): the owner
+ * PURE. Built for the conflict-resolution side-by-side comparison (ConflictSideBySide.jsx): the owner
  * could not decide "Keep this one" vs "Use the other" because the bar showed neither version's
  * content — this is the piece that lets both be shown in full, with only the words that
  * genuinely differ marked, the way Google Docs' version history marks a changed passage rather
@@ -30,12 +30,16 @@ function tokenizeLines(text) {
   return parts.map((line, i) => (i < parts.length - 1 ? `${line}\n` : line));
 }
 
-/** Longest-common-subsequence diff over two token arrays, generic over the token shape (words
- *  or lines) since both tokenizers hand back self-delimiting strings. Returns ops merged into
- *  runs: `{ type: "same" | "a" | "b", text }` — "a" is a run found only in `a` (i.e. lost if
- *  `b` is chosen), "b" only in `b`. Concatenating every op's `text` in order reconstructs `a`
- *  if you keep "same"+"a" ops, or `b` if you keep "same"+"b" — see `sideText`. */
-function lcsDiff(a, b) {
+/** Longest-common-subsequence ALIGNMENT over two arbitrary token arrays, compared by `===`.
+ *  Returns the raw, UNMERGED alignment in order — `{ type: "same" | "a" | "b", ai?, bj? }`,
+ *  carrying INDEXES rather than the token values themselves, so a caller can map back to
+ *  whatever richer object each side's array actually held (a word, a line, or — see
+ *  `notesRedline.js` — a whole formatted block). "a"-only means the token exists only in `a`
+ *  (lost if `b` is chosen), "b"-only only in `b`. This is the shared primitive under BOTH
+ *  `lcsDiff` below (which merges consecutive same-type STRING tokens by concatenation) and the
+ *  redline's block/word matching (which cannot concatenate — a block is an object, not a
+ *  string — and needs the index to recover it). One DP, two consumers, never two copies. */
+export function lcsAlign(a, b) {
   const n = a.length, m = b.length;
   const dp = new Array(n + 1);
   for (let i = 0; i <= n; i += 1) dp[i] = new Int32Array(m + 1);
@@ -48,18 +52,28 @@ function lcsDiff(a, b) {
   const raw = [];
   let i = 0, j = 0;
   while (i < n && j < m) {
-    if (a[i] === b[j]) { raw.push({ type: "same", token: a[i] }); i += 1; j += 1; }
-    else if (dp[i + 1][j] >= dp[i][j + 1]) { raw.push({ type: "a", token: a[i] }); i += 1; }
-    else { raw.push({ type: "b", token: b[j] }); j += 1; }
+    if (a[i] === b[j]) { raw.push({ type: "same", ai: i, bj: j }); i += 1; j += 1; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { raw.push({ type: "a", ai: i }); i += 1; }
+    else { raw.push({ type: "b", bj: j }); j += 1; }
   }
-  while (i < n) { raw.push({ type: "a", token: a[i] }); i += 1; }
-  while (j < m) { raw.push({ type: "b", token: b[j] }); j += 1; }
+  while (i < n) { raw.push({ type: "a", ai: i }); i += 1; }
+  while (j < m) { raw.push({ type: "b", bj: j }); j += 1; }
+  return raw;
+}
 
+/** Longest-common-subsequence diff over two token arrays, generic over the token shape (words
+ *  or lines) since both tokenizers hand back self-delimiting strings. Returns ops merged into
+ *  runs: `{ type: "same" | "a" | "b", text }` — "a" is a run found only in `a` (i.e. lost if
+ *  `b` is chosen), "b" only in `b`. Concatenating every op's `text` in order reconstructs `a`
+ *  if you keep "same"+"a" ops, or `b` if you keep "same"+"b" — see `sideText`. */
+function lcsDiff(a, b) {
+  const raw = lcsAlign(a, b);
   const ops = [];
   for (const r of raw) {
+    const token = r.type === "b" ? b[r.bj] : a[r.ai];
     const last = ops[ops.length - 1];
-    if (last && last.type === r.type) last.text += r.token;
-    else ops.push({ type: r.type, text: r.token });
+    if (last && last.type === r.type) last.text += token;
+    else ops.push({ type: r.type, text: token });
   }
   return ops;
 }

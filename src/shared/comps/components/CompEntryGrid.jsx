@@ -49,7 +49,7 @@ const GROUP_BAND_H = 22;
 const COL_LABEL_H = 26;
 const REMOVE_COL_W = 32;
 
-// B986096-HARDENING-20 — the ONE type scale every grid CELL's text-bearing element reads: the
+// B986096-HARDENING-24 — the ONE type scale every grid CELL's text-bearing element reads: the
 // display span, the Location action button, and every open editor (input/select). A <span>
 // naturally inherits font from its ancestors; a bare <button>/<input>/<select> does NOT (the
 // browser gives form controls their own UA font), so before this constant existed the Location
@@ -111,15 +111,36 @@ export function draftFromParsedRow(parsed) {
 // B986096-HARDENING-9 ("hide unused columns entirely") — the group band's colSpans must be
 // recomputed from whatever's actually VISIBLE, not the full column list, or a band would span
 // past the columns it now covers (Michael's screenshot: "PROPERTY spans past its own columns").
+//
+// ⛔ HARDENING-25 (owner audit, 14 defects in one 4x4 crop) — two corrections to the group band
+// itself, both computed here so HeaderRows stays pure rendering:
+// (1) ALIGNMENT: a group label's textAlign used to be hardcoded "left" regardless of what it
+// sits over — DEAL/PRICE/DERIVED are frequently exactly ONE column wide (a land-only sheet hides
+// every lease/building-sale column, e.g. leaving DEAL as just "Executed"), and a left-aligned
+// label over a right-aligned numeric/date column reads as belonging to the column to ITS LEFT.
+// A single-column run takes that column's own alignment; a multi-column run stays "left" (every
+// multi-column group here — PROPERTY, PARTIES — already reads correctly left-aligned).
+// (2) LABEL COLLAPSE: a one-column "group" is not a group — it repeats the column header below it
+// almost verbatim (PRICE atop Price, TYPE atop Type) with no other member to justify the band.
+// Rather than special-case which groups this applies to (it depends on which comp types are on
+// the sheet at all, not a fixed set), the rule is generic and reapplied on every render: a run
+// spanning exactly one VISIBLE column renders as a blank band (background/border kept, for
+// unbroken ruling) instead of a doubled label. The moment a second column joins that group (e.g.
+// a building-sale row adds NOI/Cap to PRICE), the label reappears automatically.
 function computeVisibleGroupRuns(visibleIdx) {
   const runs = [];
   for (const idx of visibleIdx) {
     const col = SHEET_COLUMNS[idx];
     const last = runs[runs.length - 1];
-    if (last && last.group === col.group) last.span++;
-    else runs.push({ group: col.group, span: 1 });
+    if (last && last.group === col.group) { last.span++; last.cols.push(col); }
+    else runs.push({ group: col.group, span: 1, cols: [col] });
   }
-  return runs;
+  return runs.map((run) => ({
+    group: run.group,
+    span: run.span,
+    align: run.span === 1 ? run.cols[0].align : "left",
+    showLabel: run.span > 1,
+  }));
 }
 
 /* ---- sticky header: group band over column labels ------------------------------------------ */
@@ -133,18 +154,28 @@ function HeaderRows({ visibleIdx, flexWidths, frozenOffsets }) {
           <th key={run.group + i} colSpan={run.span}
             style={{
               position: "sticky", top: 0, zIndex: i === 0 ? 3 : 2,
-              height: GROUP_BAND_H, boxSizing: "border-box", padding: "0 5px", textAlign: "left",
+              height: GROUP_BAND_H, boxSizing: "border-box", padding: "0 5px", textAlign: run.align,
               fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em",
               color: "var(--text-secondary)", background: "var(--surface-raised)",
-              borderBottom: "1px solid var(--border-default)", borderRight: "1px solid var(--border-default)",
+              // HARDENING-25 item 6 — all FOUR sides explicit and identical (never a `"none"` side
+              // left to fall back to `currentColor`, which is the exact dark rgb the owner's own
+              // sweep caught on two sides while the other two correctly read the border token).
+              // Under `border-collapse`, two adjacent cells declaring the identical border merge
+              // into one painted line, so this never doubles a seam — it only removes the
+              // ambiguity of a side nobody declared.
+              border: "1px solid var(--border-default)",
               left: i === 0 ? 0 : undefined,
             }}>
-            {run.group}
+            {run.showLabel ? run.group : null}
           </th>
         ))}
         <th rowSpan={2} style={{
-          position: "sticky", top: 0, right: 0, zIndex: 4, width: REMOVE_COL_W,
-          background: "var(--surface-raised)", borderBottom: "1px solid var(--border-default)", borderLeft: "1px solid var(--border-default)",
+          position: "sticky", top: 0, right: 0, zIndex: 4, width: REMOVE_COL_W, padding: 0,
+          background: "var(--surface-raised)", border: "1px solid var(--border-default)",
+          // Content-less spacer cell — pinned explicitly rather than left to the browser's own
+          // `<th>` UA defaults (bold, centered), which otherwise show up as their own accidental
+          // singletons in a property sweep even though nothing ever renders inside this cell.
+          fontWeight: 600, textAlign: "left",
         }} />
       </tr>
       <tr>
@@ -157,9 +188,13 @@ function HeaderRows({ visibleIdx, flexWidths, frozenOffsets }) {
                 position: "sticky", top: GROUP_BAND_H, zIndex: col.frozen ? 4 : 2,
                 left: col.frozen ? frozenOffsets[col.key] : undefined, width: w, minWidth: w, maxWidth: w,
                 height: COL_LABEL_H, boxSizing: "border-box", padding: "0 5px",
-                textAlign: col.align, fontSize: 10, fontWeight: 700, color: "var(--text-secondary)",
+                // HARDENING-25 item 10 — 700 vs the group band's 800 is imperceptible at 10px; the
+                // hierarchy was really being carried by case (CAPS vs Title Case) alone. Widening
+                // the gap to 600 makes the weight difference genuinely visible, using a value
+                // (600) already on this app's own type scale (Button/ToggleChip's own weight).
+                textAlign: col.align, fontSize: 10, fontWeight: 600, color: "var(--text-secondary)",
                 background: "var(--surface-raised)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                borderBottom: "1px solid var(--border-default)", borderRight: "1px solid var(--border-default)",
+                border: "1px solid var(--border-default)",
               }}
               title={col.fullLabel || col.label}>
               {col.label}
@@ -181,10 +216,32 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
   const flagKey = col.flagKey ? col.flagKey(draft) : col.key;
   const flag = cellFlags[flagKey];
   const muted = st.state === "na" || st.state === "derived";
+  // B986096-HARDENING-25 item 8 — a blocking flag on this cell (a lease rate with no stated
+  // period, the 12x-ambiguity case) needs a channel OTHER than hue to read as "wrong," never
+  // recolored-and-hope: index.css's B464049 note is explicit that the brand accent (the SAME
+  // selection-outline color every cell in this sheet already uses) stays the accent, full stop —
+  // the fix for "an error color reads too close to the selection color" is never to re-tune
+  // --accent or --danger-text, it's to add weight/an icon so the two never depend on hue alone
+  // (the identical WCAG 1.4.1 reasoning that note already applies to form-field errors app-wide).
+  const blockingFlag = flag?.level === "blocking";
   const w = widthFor(col, flexWidths);
+  // HARDENING-25 items 1/5/6/7 — one deterministic cell recipe, applied to every td regardless of
+  // `col.frozen`: a real, OPAQUE background (muted/na/derived cells get the page tint, everything
+  // else the same opaque white/near-black every header cell already uses — never the translucent
+  // "frosted panel" surface, which is what let the map bleed through a data-dense grid), an
+  // explicit height/verticalAlign/box-sizing so every row lands on the identical pixel height
+  // (a percentage height inside a `<td>` is a classic cross-browser inconsistency — an intrinsic
+  // element like the Location `<button>` doesn't reliably resolve `height:100%` against a
+  // table-cell containing block, which is what produced the 2px-taller rows the owner measured),
+  // and all four border sides explicit and IDENTICAL — never a side left undeclared, which is
+  // what let `border-collapse` fall back to `currentColor` (the exact dark text color the owner's
+  // sweep caught on two sides while the other two read the real border token). Two adjacent cells
+  // declaring the same border merge into one painted line under collapse, so this never doubles a
+  // seam — it only removes the ambiguity of a side nobody used to declare.
   const tdStyle = {
-    height: ROW_H, boxSizing: "border-box", padding: 0,
+    height: ROW_H, boxSizing: "border-box", padding: 0, verticalAlign: "middle",
     width: w, minWidth: w, maxWidth: w,
+    border: "1px solid var(--border-default)",
     // B986096-HARDENING-20 — the two-row sticky header (HeaderRows, GROUP_BAND_H + COL_LABEL_H
     // tall) sits on top of the scroll container's content, not inside its scrollable flow. Any
     // scroll-into-view — the browser's own for a focused/clicked cell near the top, or a script's
@@ -199,9 +256,8 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
     // keyboard nav, Tab, or an automation driver) to leave clearance for the header rather than
     // scrolling a row flush to the container's raw top edge.
     scrollMarginTop: GROUP_BAND_H + COL_LABEL_H,
-    borderRight: "1px solid var(--border-default)", borderBottom: "1px solid var(--border-default)",
     position: col.frozen ? "sticky" : undefined, left: col.frozen ? frozenOffsets[col.key] : undefined, zIndex: col.frozen ? 1 : undefined,
-    background: col.frozen ? "var(--surface-overlay)" : muted ? "var(--surface-raised)" : "var(--surface-overlay)",
+    background: muted ? "var(--surface-page)" : "var(--surface-raised)",
     outline: selected ? "2px solid var(--accent)" : inRange ? "1px solid var(--accent)" : "none",
     outlineOffset: -1,
     cursor: st.state === "na" ? "default" : st.state === "action" ? "pointer" : "cell",
@@ -214,10 +270,10 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
     // and it can never land on a value the column doesn't recognize.
     const inputStyle = {
       width: col.key === "notes" ? "max(100%, 260px)" : "100%", // NEW-3 — Notes widens while editing rather than staying pinned to its rest width
-      height: "100%", boxSizing: "border-box", padding: "0 5px", margin: 0,
+      height: ROW_H, boxSizing: "border-box", padding: "0 5px", margin: 0, verticalAlign: "middle",
       border: "none", outline: "2px solid var(--accent)", outlineOffset: -2,
       background: "var(--surface-base)", color: "var(--text-primary)", fontFamily: "inherit",
-      fontSize: CELL_FONT_SIZE, textAlign: col.align,
+      fontSize: CELL_FONT_SIZE, textAlign: col.align, lineHeight: CELL_LINE_HEIGHT,
     };
     if (col.kind === "select") {
       return (
@@ -231,7 +287,10 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
             onChange={(e) => { onSelectEditChange(e.target.value); }}
             onKeyDown={onEditKeyDown}
             onBlur={(e) => onEditBlur(e, rowIdx, colIdx)}
-            style={{ ...inputStyle, padding: "0 2px" }}>
+            // HARDENING-25 item 9 — this used to override padding to "0 2px" (the report's own
+            // named "Type SELECT editor" singleton), so the same cell's text sat ~3px off between
+            // its resting position and its editing position. Same padding as every other cell now.
+            style={inputStyle}>
             <option value="" disabled hidden>{" "}</option>
             {col.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
@@ -247,17 +306,26 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
           onChange={(e) => onEditChange(e.target.value)}
           onKeyDown={onEditKeyDown}
           onBlur={(e) => onEditBlur(e, rowIdx, colIdx)}
+          // HARDENING-25 item 11 — a per-column format hint (currently the two date columns'
+          // "mm/dd/yy"), shown ONLY while actively editing via the native `placeholder` attribute —
+          // deliberately not the same thing as HARDENING-10 NEW-4's resting `cellPlaceholder`
+          // (which stays "always empty," on purpose: a value-shaped word sitting in an unfilled
+          // cell at REST reads as data). A format hint that only appears once you're already
+          // focused and typing can never be mistaken for a real stored value.
+          placeholder={col.editHint || undefined}
           style={inputStyle}
         />
       </td>
     );
   }
   const textStyle = {
-    display: "block", height: "100%", lineHeight: CELL_LINE_HEIGHT, padding: "0 5px", boxSizing: "border-box",
-    fontSize: CELL_FONT_SIZE, fontWeight: 400, textAlign: col.align, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+    display: "block", height: ROW_H, lineHeight: CELL_LINE_HEIGHT, padding: "0 5px", boxSizing: "border-box",
+    verticalAlign: "middle",
+    fontSize: CELL_FONT_SIZE, textAlign: col.align, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
     fontVariantNumeric: col.align === "right" ? "tabular-nums" : undefined,
-    color: st.state === "na" ? "var(--text-tertiary)" : st.state === "derived" ? "var(--text-secondary)" : flag?.level === "blocking" ? "var(--danger-text)" : "var(--text-primary)",
+    color: st.state === "na" ? "var(--text-tertiary)" : st.state === "derived" ? "var(--text-secondary)" : blockingFlag ? "var(--danger-text)" : "var(--text-primary)",
     fontStyle: st.state === "na" ? "italic" : "normal",
+    fontWeight: blockingFlag ? 700 : undefined,
   };
   // B986096-HARDENING-9 — the Location cell shows real information once an anchor is set (an
   // address / an APN / a plan title, resolved by `locationCellText` in the parent), never a bare
@@ -267,8 +335,14 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
   // header in compSheetColumns.js). The em dash for a not-applicable cell is unaffected — that
   // comes from `st.text` itself ("—", set by `cellState`), not from this placeholder path.
   const cellText = col.key === "location"
-    ? (locationText || <span style={{ color: "var(--text-tertiary)" }}>Set</span>)
+    ? (locationText || <span style={{ color: "var(--text-tertiary)", verticalAlign: "middle" }}>Set</span>)
     : st.text || "";
+  // HARDENING-25 item 8 (continued) — the non-hue channel itself: a small glyph ahead of the
+  // value, present only on a genuinely blocking cell. `aria-hidden` because `hoverTitle` below
+  // already carries the same reason as accessible text.
+  const cellContent = blockingFlag
+    ? (<><span aria-hidden="true" style={{ marginRight: 3, verticalAlign: "middle" }}>⚠</span>{cellText}</>)
+    : cellText;
   // HARDENING-10 (message B NEW-3) — Title/Address and the two party columns are the ones real
   // values got cut off in ("Core5 Industrial Partners"); a hover reveals the untruncated value.
   const isLongTextCol = col.key === "title" || col.key === "partyProvider" || col.key === "partyAcquirer";
@@ -290,16 +364,19 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
           tabIndex={selected ? 0 : -1}
           onMouseDown={(e) => onMouseDown(rowIdx, colIdx, e.shiftKey)}
           onDoubleClick={() => onDoubleClick(rowIdx, colIdx)}
-          // B986096-HARDENING-20 — `...textStyle` carries the grid's real font-size/line-height/
-          // color; a trailing `font: "inherit"` shorthand used to run AFTER that spread and reset
-          // every one of those longhand properties back to "inherit from the ancestor <td>" — which
-          // has no font-size of its own, so it kept climbing the tree to the bare <table> (16px).
-          // Only `fontFamily` needs the explicit "inherit" a <span> gets for free (a <button> is a
-          // form control and does not inherit it by default); `fontWeight` is spelled out too so
-          // nothing here depends on the browser's own form-control default agreeing with the grid.
-          style={{ ...textStyle, width: "100%", border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontWeight: 400 }}
+          // B986096-HARDENING-24 — `...textStyle` carries the grid's real font-size/line-height/
+          // color/fontWeight; a trailing `font: "inherit"` shorthand here used to run AFTER that
+          // spread and reset every one of those longhand properties back to "inherit from the
+          // ancestor <td>" — which has no font-size of its own, so it kept climbing the tree to the
+          // bare <table> (16px). PR #1349/HARDENING-25 independently touched this same line but its
+          // `font: "inherit"` survived the merge with only `color`/`fontWeight` patched back
+          // afterward — fontSize/lineHeight were still silently reset. Only `fontFamily` needs the
+          // explicit "inherit" a <span> gets for free (a <button> is a form control and does not
+          // inherit it by default) — textStyle's own fontWeight (now blockingFlag-driven) rides
+          // through the spread unmodified, so it never needs restating here.
+          style={{ ...textStyle, width: "100%", border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit" }}
         >
-          {cellText}
+          {cellContent}
         </button>
       </td>
     );
@@ -319,7 +396,7 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
       onDoubleClick={() => onDoubleClick(rowIdx, colIdx)}
       title={hoverTitle}>
       <span style={textStyle}>
-        {cellText}
+        {cellContent}
       </span>
     </td>
   );
@@ -691,7 +768,18 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
         // React commits it, so this trailing focus-the-grid call was never needed on a reopen in the
         // first place — skipping it here removes the only thing that blurred the old input
         // synchronously, closing the whole class rather than special-casing "same cell."
-        if (destRow && cellState(destColDef, destRow.draft).state === "editable") {
+        // B986096-HARDENING-23 (owner live-report, 2026-09-02) — "Enter does not close the
+        // editor" on a single-row grid, or on the last row: reported as low-severity but real —
+        // "it makes the grid feel broken because nothing visibly happens." The clamp itself
+        // (computeDestination's row-axis has nowhere else to go) is correct and necessary; the
+        // defect is reopening the SAME cell with the value that was just typed INTO it — there is
+        // nothing left to enter, so the reopen buys nothing HARDENING-10 NEW-3's "land the next
+        // cell in edit mode" was actually for (a genuinely different destination), and it makes a
+        // successful commit look like a no-op. Only reopen when the destination is a different
+        // cell; a same-cell clamp now closes normally, exactly like Tab wrapping to a non-editable
+        // destination or Escape already do.
+        const samecell = dest.row === target.row && dest.col === target.col;
+        if (!samecell && destRow && cellState(destColDef, destRow.draft).state === "editable") {
           beginEdit(dest.row, dest.col, null, true, destRow.draft);
           reopened = true;
         }
@@ -1075,9 +1163,15 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
         // sheet whose whole point is not scrolling sideways for important fields.
         // HARDENING-12 — docked to the BOTTOM edge (see dockHeight's own comment above) rather
         // than floating near the top, so the map above it stays clickable at any height.
+        // HARDENING-25 item 1 — this used to be `--surface-overlay`, the app's "frosted floating
+        // panel" surface (rgba .94, deliberately translucent everywhere else it's used). That's
+        // right for a legend or a toolbar, but this panel's whole content IS a dense data grid —
+        // the point of a grid is that you can read every cell without the map's own imagery/street
+        // labels bleeding through it. `--surface-raised` is the same token every header cell in
+        // the grid already uses, opaque in both themes.
         position: "fixed", left: 16, right: 16, bottom: 12, width: "auto",
         height: dockHeight, zIndex: 2600, display: "flex", flexDirection: "column",
-        background: "var(--surface-overlay)", border: "1px solid var(--border-default)", borderRadius: 12,
+        background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: 12,
         boxShadow: "0 -8px 28px rgba(28,25,20,0.18), 0 -2px 8px rgba(28,25,20,0.08)", // design-exempt: shadow points UP (the panel sits at the bottom of the viewport) — no shadow token exists yet
       }}>
       <div onPointerDown={startResize} title="Drag to resize"
@@ -1171,12 +1265,13 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
                     );
                   })}
                   <td style={{
-                    position: "sticky", right: 0, width: REMOVE_COL_W, height: ROW_H, textAlign: "center",
-                    background: "var(--surface-overlay)", borderBottom: "1px solid var(--border-default)", borderLeft: "1px solid var(--border-default)",
+                    position: "sticky", right: 0, width: REMOVE_COL_W, height: ROW_H, boxSizing: "border-box",
+                    padding: 0, textAlign: "center", verticalAlign: "middle",
+                    background: "var(--surface-raised)", border: "1px solid var(--border-default)",
                     scrollMarginTop: GROUP_BAND_H + COL_LABEL_H,
                   }}>
                     <button onClick={() => removeRow(row._id)} title="Remove" aria-label="Remove comp"
-                      style={{ border: "none", background: "transparent", color: "var(--danger-text)", fontFamily: "inherit", cursor: "pointer", fontSize: CLOSE_ICON_FONT_SIZE, padding: 0, lineHeight: CELL_LINE_HEIGHT }}>✕</button>
+                      style={{ border: "none", background: "transparent", color: "var(--danger-text)", fontFamily: "inherit", cursor: "pointer", fontSize: CLOSE_ICON_FONT_SIZE, padding: 0, height: ROW_H, lineHeight: CELL_LINE_HEIGHT, verticalAlign: "middle" }}>✕</button>
                   </td>
                 </tr>
               ))}

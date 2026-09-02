@@ -626,7 +626,7 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   replaced it. Guard: the repo-root `ui-audit/` harness **verify-comp-entry-p0**'s CYCLE 7 block, teeth-proven (reverting
   the fix turns it red: Executed stays at its pre-edit value, Price shows "7,426"; two live checks,
   single-row Tab-to-Price and two-row Enter-to-next-row, both now proven clean).
-  **⛔ ROUND 15 (B986096-HARDENING-20, owner report 2026-09-02) — THE GRID'S TYPE SCALE HAD ONE
+  **⛔ ROUND 15 (B986096-HARDENING-24, owner report 2026-09-02) — THE GRID'S TYPE SCALE HAD ONE
   UNGOVERNED CELL: the Location action `<button>`, `getComputedStyle`'d live at 16px against every
   other cell's 12px.** Root cause: `SheetCell`'s action-cell `<button>` spread `textStyle` (which
   carries `fontSize: 12`/`lineHeight: "31px"`) but then set a trailing `font: "inherit"` shorthand —

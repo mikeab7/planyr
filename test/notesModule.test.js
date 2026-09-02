@@ -49,16 +49,22 @@ const JSX_SURFACES = [
   // theme-token and module-scope guards cover them like every other visible surface.
   "components/NoteSlashMenu.jsx", "components/NoteOutline.jsx", "components/NoteHistory.jsx",
   "components/QuickOpen.jsx",
-  // B842624 — the conflict comparison view. Squarely the surface the "no second person"
-  // scan (below) exists for, so it belongs on this list, not just ALL_NOTES_FILES.
-  "components/ConflictCompare.jsx",
+  // B842624, extended by the follow-up brief's NEW-1/NEW-2/NEW-3 — the conflict comparison
+  // surfaces. Squarely what the "no second person" scan (below) exists for, so all four belong
+  // on this list, not just ALL_NOTES_FILES.
+  "components/ConflictNotice.jsx", "components/ConflictReview.jsx", "components/ConflictSideBySide.jsx",
+  "components/NoteRedline.jsx",
 ];
 const ALL_NOTES_FILES = [
   "Notes.jsx", "components/NotesTree.jsx", "components/NoteEditor.jsx", "components/NoteToolbar.jsx",
   "components/NoteSlashMenu.jsx", "components/NoteOutline.jsx", "components/NoteHistory.jsx", "components/QuickOpen.jsx",
-  "components/IntegrityBanner.jsx", "components/ConflictCompare.jsx",
-  // B842624 — the pure diff behind ConflictCompare's two readable version panes.
+  "components/IntegrityBanner.jsx",
+  "components/ConflictNotice.jsx", "components/ConflictReview.jsx", "components/ConflictSideBySide.jsx",
+  "components/NoteRedline.jsx",
+  // B842624 — the pure diff behind ConflictSideBySide's two readable version panes.
   "lib/notesConflictDiff.js",
+  // The follow-up brief's NEW-2 — the block-aware, formatting-preserving redline.
+  "lib/notesRedline.js",
   "lib/notesModel.js", "lib/notesStore.js", "lib/notesCloud.js", "lib/notesMarkdown.js", "lib/notesExtensions.js",
   "lib/notesTime.js", "lib/notesPrint.js", "lib/notesImageDb.js", "lib/notesImageIntake.js",
   "lib/notesImageNode.js", "lib/notesSearchHighlight.js", "lib/notesDocHtml.js", "lib/notesTabKey.js",
@@ -804,7 +810,7 @@ describe("cloud sync rides the SAME one seam", () => {
     expect(root, "the picked body must be written to a NEW page before the conflict resolves")
       .toMatch(/copyPageWithin\(base, pageId[\s\S]{0,600}writePage\(r\.pageId, bodyToPark\)/);
     expect(root, "and the resolution happens after that").toMatch(/resolveNotesConflict\(pageId, choice\)/);
-    expect(root).toContain("ConflictCompare");
+    expect(root).toContain("ConflictNotice");
   });
 
   /* ⛔ AND THE COPY NEVER CHANGES PROJECT (NEW-1). A note was copied into an unrelated
