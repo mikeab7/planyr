@@ -269,7 +269,7 @@ import { setbackChipRuns, setbackChipsVisible, chipRoleWords, CHIP_MIN_EDGE_PX, 
 // NEW-1 — the setback ring's inward offset (and the line-intersection primitive it is built on)
 // moved out of this file unchanged, so the buildable envelope a parcel's setbacks produce can be
 // proven in a unit test against real production geometry instead of only by rendering.
-import { offsetPolygon, lineIntersect } from "./lib/parcelOffset.js";
+import { offsetPolygon, outsetPolygon, lineIntersect } from "./lib/parcelOffset.js";
 // NEW-1 — the REGULATORY tier above the two geometric ones: a zoning ordinance names four
 // setbacks (Front / Side / Street side / Rear), not fifteen digitized sides. Pure + unit-tested;
 // roles are labels over edges and never an input to a measurement, so the canonical per-edge
@@ -741,6 +741,15 @@ const dashArray = (d, w) => d === "dashed" ? `${w * 3} ${w * 2.4}` : d === "dott
 // lands in an exported exhibit. (Generalizes the B231 pond / B567 neutral-markup no-recolor rule.)
 const SEL_BLUE = "#2563eb";
 const SEL_HANDLE_FILL = "#ffffff";
+// B848720 — the selection outline for a box-kind markup / a selected element must sit OUTSIDE
+// the feature's own stroke, never traced exactly over it: a thin blue line drawn on the SAME
+// path as the user's own coloured outline reads as "a blue line painted on my shape", not as a
+// selection cue (owner report — an orange-outlined markup rect read as a blue line drawn on an
+// orange shape). Both elSelOutline and markupHandles' box-kind branch grow the outline outward
+// by this many screen px (constant regardless of zoom, matching every other handle in this
+// file) via outsetPolygon / a local half-extent expansion, so the outline can never repaint a
+// feature's own colour however the user set it.
+const SEL_OUTLINE_GAP_PX = 4;
 // B617 — hold a line's on-screen weight CONSTANT RELATIVE TO THE DRAWING across zoom. A stroke drawn
 // in fixed screen px balloons on zoom-out (the geometry shrinks but the stroke doesn't) and hairlines
 // on zoom-in. Multiplying the base weight by the SAME zoom factor the callouts use (zk = view.ppf /
@@ -16882,6 +16891,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return <g>{decimatedHandles(el.points, on).map((h) => vtxRect(`epv${h.i}`, { x: h.x, y: h.y }, on(h.i), "move", (e) => startElVertex(e, el.id, h.i)))}</g>;
   })();
 
+  // B848720 — grow a SCREEN-SPACE ring outward by SEL_OUTLINE_GAP_PX before drawing the
+  // selection outline over it, so the outline can never trace the exact same path as the
+  // element's own (possibly user-recoloured, via elStyle's el.stroke override) boundary
+  // stroke. Falls back to the un-grown ring when there aren't enough vertices to offset
+  // (n<3) or the construction degenerates — an outline one step late beats none at all.
+  const outlineRing = (screenPts) => (screenPts.length >= 3 ? (outsetPolygon(screenPts, SEL_OUTLINE_GAP_PX) || screenPts) : screenPts);
+
   // B619 — the ONE thin blue selection outline for a selected element (never recolors the element
   // itself). Covers rect (rotated corners), polygon (its ring), AND locked elements — the single
   // place the outline lives, so it can't double up with handleNodes/elPolyHandles. Roads are linear
@@ -16901,12 +16917,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (pts.length < 2) return null;
         return <polyline data-export="skip" points={pts.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={SEL_BLUE} strokeWidth={2} strokeOpacity={0.5} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />;
       }
-      const rc = elCorners(el).map(f2p);
+      const rc = outlineRing(elCorners(el).map(f2p));
       return <polygon data-export="skip" points={rc.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={SEL_BLUE} strokeWidth={1.25} pointerEvents="none" />;
     }
     const pts = el.points ? el.points.map(f2p) : elCorners(el).map(f2p);
     if (!pts || pts.length < 2) return null;
-    return <polygon data-export="skip" points={pts.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={SEL_BLUE} strokeWidth={1} pointerEvents="none" />;
+    return <polygon data-export="skip" points={outlineRing(pts).map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={SEL_BLUE} strokeWidth={1} pointerEvents="none" />;
   })();
 
   // Bluebeam-style editing chrome on a selected markup (select tool):
@@ -16926,10 +16942,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const topMid = at(0, -m.h / 2);
       let ux = topMid.x - cpx.x, uy = topMid.y - cpx.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
       const rotPos = { x: topMid.x + ux * 26, y: topMid.y + uy * 26 };
+      // B848720 — the outline is grown OUTWARD by a constant screen-px gap (converted to feet
+      // via rppf, then rotated through the same `at()` every handle uses) so it never lands on
+      // the exact path of the markup's own coloured stroke — the reported "blue line painted on
+      // an orange shape". Only the outline itself moves; the resize/rotate handles below stay at
+      // the markup's TRUE corners/edges, where a drag actually needs to grab.
+      const outlineGapFt = SEL_OUTLINE_GAP_PX / (rppf || 1);
       return (
         <g data-export="skip">
-          {/* B619 — thin blue bounding outline through the (rotated) corners. */}
-          <polygon points={corners.map(([sx, sy]) => { const p = at(sx * m.w / 2, sy * m.h / 2); return `${p.x},${p.y}`; }).join(" ")} fill="none" stroke={SEL_BLUE} strokeWidth={1} pointerEvents="none" />
+          {/* B619/B848720 — thin blue bounding outline through the (rotated) corners, offset
+              outward so it can't repaint the markup's own outline colour. */}
+          <polygon points={corners.map(([sx, sy]) => { const p = at(sx * (m.w / 2 + outlineGapFt), sy * (m.h / 2 + outlineGapFt)); return `${p.x},${p.y}`; }).join(" ")} fill="none" stroke={SEL_BLUE} strokeWidth={1.25} pointerEvents="none" />
           <line x1={topMid.x} y1={topMid.y} x2={rotPos.x} y2={rotPos.y} stroke={SEL_BLUE} strokeWidth={1.25} />
           <circle cx={rotPos.x} cy={rotPos.y} r={6} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.5}
             style={{ cursor: "grab" }} onPointerDown={(e) => startMarkupRotate(e, m.id)} />
