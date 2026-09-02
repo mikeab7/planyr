@@ -1378,7 +1378,24 @@ async function run() {
   if (process.argv.includes("--check")) {
     const existing = existsSync(OUT_MD) ? readFileSync(OUT_MD, "utf8") : null;
     const docStale = existing !== md;
-    if (docStale) console.error("docs/UI-INVENTORY.md is out of date — regenerate with `node ui-audit/ui-inventory.mjs`.");
+    if (docStale) {
+      console.error("docs/UI-INVENTORY.md is out of date — regenerate with `node ui-audit/ui-inventory.mjs`.");
+      // B986096-HARDENING-17 (2026-09-02) — this gate failed three times in a row on this exact
+      // check with no way to see WHAT differed (the message above is the whole of it), which turned
+      // every fix attempt into a guess. Print the actual differing lines on --check failure so a
+      // real mismatch is diagnosable from the CI log in one round trip instead of several.
+      const existingLines = (existing || "").split("\n");
+      const freshLines = md.split("\n");
+      const maxLines = Math.max(existingLines.length, freshLines.length);
+      let shown = 0;
+      for (let i = 0; i < maxLines && shown < 20; i++) {
+        if (existingLines[i] !== freshLines[i]) {
+          console.error(`  line ${i + 1}:\n    committed: ${JSON.stringify(existingLines[i] ?? "(missing)")}\n    fresh:     ${JSON.stringify(freshLines[i] ?? "(missing)")}`);
+          shown++;
+        }
+      }
+      if (shown === 20) console.error("  … more differing lines not shown (first 20 only).");
+    }
     if (!signatureCheck.ok) console.error("Signature BUDGET check FAILED (NEW-1, B1038016):\n" + signatureCheck.problems.map((p) => "  • " + p).join("\n"));
     if (docStale || !signatureCheck.ok) process.exit(1);
     console.log("docs/UI-INVENTORY.md is up to date and every surface is within its signature budget.");
