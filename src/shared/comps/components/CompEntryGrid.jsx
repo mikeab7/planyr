@@ -49,6 +49,21 @@ const GROUP_BAND_H = 22;
 const COL_LABEL_H = 26;
 const REMOVE_COL_W = 32;
 
+// B986096-HARDENING-20 — the ONE type scale every grid CELL's text-bearing element reads: the
+// display span, the Location action button, and every open editor (input/select). A <span>
+// naturally inherits font from its ancestors; a bare <button>/<input>/<select> does NOT (the
+// browser gives form controls their own UA font), so before this constant existed the Location
+// button silently fell through to the ancestor <table>'s own default (16px, since nothing between
+// them ever set a font-size) instead of the grid's 12px. Every cell reads this constant now, so
+// the value can't drift out of step with itself a second time.
+const CELL_FONT_SIZE = 12;
+const CELL_LINE_HEIGHT = `${ROW_H}px`;
+// The row-remove icon and the panel's own header Close icon are chrome (not a grid cell), sized
+// deliberately larger than body text for a comfortable click target — but still ONE named
+// constant, so the two ✕ glyphs in this panel share a real decision instead of two independently
+// hand-typed literals (13 and 14) that had drifted apart with nothing tying them together.
+const CLOSE_ICON_FONT_SIZE = 13;
+
 // HARDENING-12 — the bottom-docked panel's remembered height (device-local, not per-plan; see
 // the dockHeight state in CompEntryGrid for why this is a dock rather than a free x/y position).
 const DOCK_HEIGHT_KEY = "planyr:compEntryDockHeight";
@@ -188,7 +203,7 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
       height: "100%", boxSizing: "border-box", padding: "0 5px", margin: 0,
       border: "none", outline: "2px solid var(--accent)", outlineOffset: -2,
       background: "var(--surface-base)", color: "var(--text-primary)", fontFamily: "inherit",
-      fontSize: 12, textAlign: col.align,
+      fontSize: CELL_FONT_SIZE, textAlign: col.align,
     };
     if (col.kind === "select") {
       return (
@@ -224,8 +239,8 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
     );
   }
   const textStyle = {
-    display: "block", height: "100%", lineHeight: `${ROW_H}px`, padding: "0 5px", boxSizing: "border-box",
-    fontSize: 12, textAlign: col.align, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+    display: "block", height: "100%", lineHeight: CELL_LINE_HEIGHT, padding: "0 5px", boxSizing: "border-box",
+    fontSize: CELL_FONT_SIZE, fontWeight: 400, textAlign: col.align, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
     fontVariantNumeric: col.align === "right" ? "tabular-nums" : undefined,
     color: st.state === "na" ? "var(--text-tertiary)" : st.state === "derived" ? "var(--text-secondary)" : flag?.level === "blocking" ? "var(--danger-text)" : "var(--text-primary)",
     fontStyle: st.state === "na" ? "italic" : "normal",
@@ -261,7 +276,14 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
           tabIndex={selected ? 0 : -1}
           onMouseDown={(e) => onMouseDown(rowIdx, colIdx, e.shiftKey)}
           onDoubleClick={() => onDoubleClick(rowIdx, colIdx)}
-          style={{ ...textStyle, width: "100%", border: "none", background: "transparent", cursor: "pointer", font: "inherit", color: textStyle.color }}
+          // B986096-HARDENING-20 — `...textStyle` carries the grid's real font-size/line-height/
+          // color; a trailing `font: "inherit"` shorthand used to run AFTER that spread and reset
+          // every one of those longhand properties back to "inherit from the ancestor <td>" — which
+          // has no font-size of its own, so it kept climbing the tree to the bare <table> (16px).
+          // Only `fontFamily` needs the explicit "inherit" a <span> gets for free (a <button> is a
+          // form control and does not inherit it by default); `fontWeight` is spelled out too so
+          // nothing here depends on the browser's own form-control default agreeing with the grid.
+          style={{ ...textStyle, width: "100%", border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontWeight: 400 }}
         >
           {cellText}
         </button>
@@ -1040,7 +1062,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: "1px solid var(--border-default)" }}>
         <span style={{ fontSize: 13, fontWeight: 700 }}>New comps</span>
         <button onClick={onCancel} aria-label="Close"
-          style={{ border: "none", background: "transparent", color: "var(--text-secondary)", fontSize: 14, cursor: "pointer", padding: 2 }}>✕</button>
+          style={{ border: "none", background: "transparent", color: "var(--text-secondary)", fontFamily: "inherit", fontSize: CLOSE_ICON_FONT_SIZE, cursor: "pointer", padding: 2 }}>✕</button>
       </div>
 
       <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border-default)" }}>
@@ -1130,7 +1152,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
                     background: "var(--surface-overlay)", borderBottom: "1px solid var(--border-default)", borderLeft: "1px solid var(--border-default)",
                   }}>
                     <button onClick={() => removeRow(row._id)} title="Remove" aria-label="Remove comp"
-                      style={{ border: "none", background: "transparent", color: "var(--danger-text)", cursor: "pointer", fontSize: 13, padding: 0, lineHeight: `${ROW_H}px` }}>✕</button>
+                      style={{ border: "none", background: "transparent", color: "var(--danger-text)", fontFamily: "inherit", cursor: "pointer", fontSize: CLOSE_ICON_FONT_SIZE, padding: 0, lineHeight: CELL_LINE_HEIGHT }}>✕</button>
                   </td>
                 </tr>
               ))}

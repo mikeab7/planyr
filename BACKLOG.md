@@ -4930,6 +4930,79 @@ rather than reasoning about the code — every prior round's structural analysis
   / `node scripts/build-map.mjs --check` all pass.
 - Files: `src/shared/comps/components/CompEntryGrid.jsx`, `ui-audit/verify-comp-entry-p0.mjs`.
 
+**Recurrence (×17) — HARDENING PASS 15 (B986096-HARDENING-20), owner report 2026-09-02, measured
+live on deployed build `8f09df1` with `getComputedStyle`: the Location cell's text was the only
+16px element in the whole grid, everything else is 12px.** Michael's own sweep of every
+text-bearing element in the New comps sheet: every data cell's display `<span>` reads
+`font-size: 12px` / `line-height: 31px`; every open editor (`<input>`/`<select>`) reads
+`font-size: 12px`; the Location cell's `<button>` alone read `font-size: 16px, line-height:
+normal` — his words, verbatim: *"you see how big the location text is? all the input text should
+be the same size."* The row delete `✕` button read a second, unrelated `font-size: 13px`.
+  1. **ROOT CAUSE.** `SheetCell`'s action-cell `<button>` (the Location cell — the ONLY column with
+     `kind: "action"`, confirmed against `compSheetColumns.js`) spread the same `textStyle` object
+     the display `<span>` uses (which carries `fontSize: 12`, `lineHeight: "31px"`) but then set a
+     trailing `font: "inherit"` shorthand AFTER that spread. In a JS style object, later keys win —
+     and the CSS `font` shorthand, when set to `"inherit"`, resets EVERY one of its longhands
+     (font-size, line-height, font-family, font-weight, font-style, font-variant) to inherit from
+     the ancestor, discarding the spread's `fontSize`/`lineHeight` outright. The immediate ancestor
+     (`<td>`) sets no font-size of its own, so it kept climbing — `<tr>` → `<tbody>` → `<table>`,
+     none of which set one either — landing on the browser's root default, 16px. A `<span>` never
+     hits this: it is not a form control, so it inherits font naturally with no shorthand needed,
+     which is exactly why every OTHER cell (including the ones Michael measured as already-correct)
+     never showed the bug. The row delete `✕` and the panel's own header Close `✕` were a second,
+     unrelated case: two independently hand-typed literals (`fontSize: 13` and `fontSize: 14`) with
+     nothing tying them together — not inheriting anything, just two undocumented one-off numbers.
+  2. **THE FIX.** Two new module-scope constants — `CELL_FONT_SIZE` (12) / `CELL_LINE_HEIGHT`
+     (`"31px"`, derived from `ROW_H`) — are now the ONE place a grid cell's type scale lives;
+     `textStyle` (the display span) and `inputStyle` (the open editor) both read them instead of
+     each separately hardcoding `12`. The Location button's trailing `font: "inherit"` was removed
+     — the `...textStyle` spread now carries the real font-size/line-height/color through
+     untouched — and replaced with an explicit `fontFamily: "inherit"` + `fontWeight: 400` (a
+     `<button>` needs the family spelled out the way a `<span>` doesn't; the weight is now
+     deliberate rather than relying on the browser's own form-control default agreeing with the
+     grid by luck). The two `✕` icons (row delete + panel header Close) now share one named
+     `CLOSE_ICON_FONT_SIZE` (13) constant instead of two undocumented literals — a real, deliberate
+     icon-size decision per the task's own instruction ("if it needs to be a different size that is
+     fine, but it must be a deliberate token, not an inherited accident"), distinct from the grid's
+     `CELL_FONT_SIZE` because these sit in panel chrome, not a 31px data row.
+  3. **AUDITED THE REST OF THE GRID** — every other column (incl. the full lease set: Rate, Basis,
+     Escal, TI, Per, $/SF/yr, and both derived cells, `$/SF or $/AC` and `$/SF/yr`) renders through
+     this SAME `SheetCell` display-span/input path; `"location"` is the only `kind: "action"` column
+     in `SHEET_COLUMNS`, so no other cell was ever exposed to the `font: "inherit"` clobber. The
+     10px/700 (10px/800 for group headers) header row was left untouched, per the task's own
+     instruction and Michael's own sweep confirming it's the correct, deliberate header scale.
+- **VERIFIED LIVE**, not just in a test, per the task's own instruction. Ran `npm ci` (Chromium
+  already present at `/opt/pw-browsers`), `npm run dev` on `localhost:4319`, and drove a real,
+  unmocked headless Chromium session (reusing the existing `verify-comp-entry-p0.mjs`
+  fixture-seeded-`bain`-plan pattern, signed out, no network) through the exact repro: opened the
+  New comps sheet, pasted a land comp, and ran Michael's own literal verification snippet
+  (`getComputedStyle` over `row.cells`) against the live, post-fix app — twice, once with the
+  Location cell unfilled ("Set") and once after arming it and dropping a map pin so it read a real
+  resolved address ("Harris County, TX"). Literal output, both states identical:
+  ```
+  0 SPAN 12px lh31px      (Type)
+  1 SPAN 12px lh31px      (party role)
+  2 SPAN 12px lh31px      (Size)
+  3 SPAN 12px lh31px      (Unit)
+  4 BUTTON 12px lh31px    (Location — was "4 BUTTON 16px lh normal")
+  5 SPAN 12px lh31px      (Executed)
+  6 SPAN 12px lh31px      (Price)
+  7 SPAN 12px lh31px      ($/SF or $/AC, derived)
+  8 SPAN 12px lh31px      (party role)
+  9 SPAN 12px lh31px      (party role)
+  10 SPAN 12px lh31px     (Title/Address)
+  11 BUTTON 13px lh31px   (row ✕ — the one deliberate, named icon exception)
+  ```
+  Every entry shows the same 12px/31px font-size and line-height, on the same baseline, except the
+  row's own remove icon at a deliberately larger 13px (`CLOSE_ICON_FONT_SIZE`) — the one named
+  exception Michael's own acceptance criterion allows for. Full `npx vitest run` — 687/687 files,
+  14,153/14,153 tests green (no new unit tests needed — a pure JSX style-object fix, not new
+  business logic). `npx eslint src/shared/comps/components/CompEntryGrid.jsx` — 0 errors. `npm run
+  build` clean. `node ui-audit/design-drift-audit.mjs --check` passes (446 raw `fontSize` literals
+  ≤ ceiling — this fix nets one line REMOVED, `font: "inherit"`, and does not raise the count).
+  `node ui-audit/doc-pointer-audit.mjs` / `node scripts/build-map.mjs --check` both clean.
+- Files: `src/shared/comps/components/CompEntryGrid.jsx`.
+
 ### B986097 — A draft staging table, reachable only by the KML import `[Site Planner / comps]` (feature) #comps #gis #persistence  *(owner chat block 2026-09-01, NEW-2, same decision doc as B986096 above. Minted **B986097 / V556721** from this branch's reserved block B986096–B986111 · V556720–V556735 against `origin/main` 8e42a14. DEDUPE-FIRST — searched Open/⏳Verify/Done for "KML", "My Maps", "import draft", "staging table", #comps: no prior item touches KML/My Maps import; net-new. Also searched for any prior `comp_import_drafts`/`comp_drafts` table — none exists.)*
 `[x]` **Shipped this session, including the schema — applied directly to production** (this session has Supabase MCP write access, unlike the read-only access a prior comps session flagged in this same module's folder pointer — that stale claim was corrected in the same commit).
 - Verify: live — GIS endpoint behavior (a real KML import, a real polygon centroid) + real production writes are mandatory LIVE-VERIFY classes. **V556721.**

@@ -626,6 +626,19 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   replaced it. Guard: the repo-root `ui-audit/` harness **verify-comp-entry-p0**'s CYCLE 7 block, teeth-proven (reverting
   the fix turns it red: Executed stays at its pre-edit value, Price shows "7,426"; two live checks,
   single-row Tab-to-Price and two-row Enter-to-next-row, both now proven clean).
+  **⛔ ROUND 15 (B986096-HARDENING-20, owner report 2026-09-02) — THE GRID'S TYPE SCALE HAD ONE
+  UNGOVERNED CELL: the Location action `<button>`, `getComputedStyle`'d live at 16px against every
+  other cell's 12px.** Root cause: `SheetCell`'s action-cell `<button>` spread `textStyle` (which
+  carries `fontSize: 12`/`lineHeight: "31px"`) but then set a trailing `font: "inherit"` shorthand —
+  in a JS style object later keys win, and the `font` shorthand resets ALL its longhands to inherit
+  from the ancestor, discarding the spread values; the immediate `<td>`/`<tr>`/`<table>` chain sets
+  no font-size of its own, so it climbed to the browser's 16px root default. A `<span>` never hits
+  this (it inherits font naturally, no shorthand needed), which is why every other cell read
+  correctly. Fixed by removing the clobbering `font: "inherit"` and adding two new module-scope
+  constants, `CELL_FONT_SIZE`/`CELL_LINE_HEIGHT`, that `textStyle` and `inputStyle` both read now
+  instead of each separately hardcoding `12` — one source, so it can't drift a second time. The row
+  delete `✕` and the panel's own header Close `✕` (13px/14px, two independent hand-typed literals)
+  now share one named `CLOSE_ICON_FONT_SIZE` token instead.
   KML import (B849233) is a SEPARATE staging table, `db/comp_import_drafts.sql`
   (`public.comp_import_drafts`, owner-only RLS — no team visibility at all, unlike `comps` itself,
   until promoted) — `lib/kmlImport.js` is the pure, hand-rolled Placemark parser (a Point is a
