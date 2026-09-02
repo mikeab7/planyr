@@ -443,6 +443,74 @@ console.log("\n=== CYCLE 5 (B986096-HARDENING-15) — Enter commits via a non-bu
   await ctx.close();
 }
 
+console.log("\n=== CYCLE 6 (B986096-HARDENING-16) — NEW-1 re-investigation: every click-away target + rapid typing, none discard ===");
+{
+  // The owner's three named click-away targets ("another cell, the map, the panel background")
+  // — "another cell" and "the map" were already covered above; the panel HEADER and FOOTER
+  // (genuinely non-interactive chrome, no cell, no button, no map underneath) had never been
+  // isolated separately. Both commit correctly.
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 }, ignoreHTTPSErrors: true });
+  await ctx.addInitScript(fixtureSeed(fixture, { id: "p0h16a" }));
+  await ctx.route("**/*", (route) => (route.request().url().startsWith(BASE) ? route.continue() : route.abort()));
+  const page = await ctx.newPage();
+  await openEntrySheet(page);
+  const target = await findExecCell(page);
+  await target.click();
+  await pacedWait(page, 250);
+  const input = target.locator("input");
+  await input.selectText().catch(() => {});
+  await page.keyboard.type("2/22/26");
+  await page.getByText("New comps", { exact: true }).click(); // the panel's own header chrome
+  await pacedWait(page, 300);
+  check("clicking the panel HEADER (non-interactive chrome) commits the just-typed value",
+    (await target.innerText()).trim() === "02/22/26", `got ${JSON.stringify((await target.innerText()).trim())}`);
+  await ctx.close();
+}
+{
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 }, ignoreHTTPSErrors: true });
+  await ctx.addInitScript(fixtureSeed(fixture, { id: "p0h16b" }));
+  await ctx.route("**/*", (route) => (route.request().url().startsWith(BASE) ? route.continue() : route.abort()));
+  const page = await ctx.newPage();
+  await openEntrySheet(page);
+  const target = await findExecCell(page);
+  await target.click();
+  await pacedWait(page, 250);
+  const input = target.locator("input");
+  await input.selectText().catch(() => {});
+  await page.keyboard.type("5/17/26");
+  const footerMsg = page.locator("text=/comps? ready|missing|need/").first();
+  const box = await footerMsg.boundingBox().catch(() => null);
+  check("found the footer status text to click near", !!box);
+  if (box) await page.mouse.click(box.x > 5 ? box.x - 5 : box.x, box.y);
+  await pacedWait(page, 300);
+  check("clicking the panel FOOTER background commits the just-typed value",
+    (await target.innerText()).trim() === "05/17/26", `got ${JSON.stringify((await target.innerText()).trim())}`);
+  await ctx.close();
+}
+{
+  // A fast real typist, zero artificial delay between the last keystroke and the click-away —
+  // the one dimension no prior round isolated. 3 trials, each a fresh context.
+  let allPassed = true;
+  for (let trial = 1; trial <= 3; trial++) {
+    const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 }, ignoreHTTPSErrors: true });
+    await ctx.addInitScript(fixtureSeed(fixture, { id: `p0h16c${trial}` }));
+    await ctx.route("**/*", (route) => (route.request().url().startsWith(BASE) ? route.continue() : route.abort()));
+    const page = await ctx.newPage();
+    await openEntrySheet(page);
+    const target = await findExecCell(page);
+    await target.click();
+    const input = target.locator("input");
+    await input.selectText().catch(() => {});
+    await page.keyboard.type(`6/0${trial}/26`, { delay: 0 });
+    await page.locator('td[data-cell="0-1"]').click(); // immediately, no wait
+    await pacedWait(page, 300);
+    const text = (await target.innerText()).trim();
+    if (text !== `06/0${trial}/26`) allPassed = false;
+    await ctx.close();
+  }
+  check("rapid type-then-click-away (zero delay), 3 trials, none discard", allPassed);
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`);

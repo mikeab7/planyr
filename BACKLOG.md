@@ -3864,6 +3864,20 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 - Files: `src/app/chunkReload.js`, `src/app/Shell.jsx`, `ui-audit/verify-chunk-stuck-banner.mjs` (new).
 - Base: `origin/main` @ `1a6a7c2c`.
 
+### B1048400 — "Retry now" replayed a queued group-scoped rename against ONE row instead of the whole group `[Site Planner]` (bug) #persistence #sync #ui  *(owner chat block 2026-09-02 — a live Cowork verification of PR #1325 on planyr.io production, run to close V577312/V577313's remaining `Blocker: auth` leg. The deploy-skew condition was REAL, not simulated: a tab left loaded since 03:30Z survived a real deploy at ~03:56Z (`SitePlannerApp-1wnCFlaw.js` → `-Csn6hLDF.js`, confirmed by console still executing the old bundle) — no synthetic `vite:preloadError`. On the throwaway project smtjb0lrexb3 (plans smtjb0lrexb3/smtjb115rzjl/smtjb1gkb1fr): renaming produced the write-failure banner + red Cloud-sync badge + warning triangle correctly (PASS — B1037952's mechanism holds), and a full reload onto the new build correctly brought all three back (PASS — the durable log survives the exact navigation race B1037952 fixed). Clicking **Retry now**, though, updated EXACTLY ONE row in `public.sites` — `smtjb0lrexb3` (the group's own id) — while `smtjb115rzjl`/`smtjb1gkb1fr` kept the old name and old `siteRenamedAt`, still unchanged 45s later (not eventual consistency); the banner, triangle and badge then ALL cleared and the header showed the new name — the ORIGINAL B1037952 bug ("a write that looks like it succeeded") reappearing inside its own fix. RULED OUT: `rename_site_group()` and the group-rename write path are correct — a normal rename on a healthy tab, immediately after, wrote 3/3 rows with an identical stamp to the microsecond. Minted **B1048400** from this branch's reserved block B1048400–B1048415 against freshly-fetched `origin/main` `8086849`. DEDUPE-FIRST — searched Open/⏳Verify/Done for "writeFailureLog", "pushLoud", "cloudWriteFailures", "B1037952", "B1037953": B1037952 built the durable queue AND its direct in-tab retry closures (the ones `renameSite`/`setSiteStatus` set inline while the tab is still live), and those ARE correctly group-scoped. This bug is isolated to the SEPARATE generic boot-drain replay B1037952 also shipped (`SitePlannerApp.jsx`'s one-time drain effect) — it only fires after a page RELOAD, which is exactly the leg V577312/V577313 were parked on and had never been live-exercised until this pass. Net-new, not a duplicate — but flagged as the same reported symptom recurring inside code B1037952 itself shipped.)*
+`[x]` **SHIPPED THIS SESSION.** Root cause: the durable failure queue (`writeFailureLog.js`) is GENERIC over every kind of background push failure `SitePlannerApp.jsx` can queue (a project rename, a site-status change, a new site/plan/duplicate/plan-rename), and its boot-time drain replayed every entry the SAME way — `pushLoud(id, what)`, a single-row cloud push addressed at whatever id the entry carried. A rename failure is recorded with `groupId` (the whole point being "this touched every plan in the group"), so the drain pushed just the group id's own row and silently dropped every sibling plan while reporting success.
+- Enumerated every action type the queue can hold, per the block's explicit ask:
+  - **Project rename** (`renameSite`/`renameSiteGroup`) — GROUP-scoped (every plan in the group). Recorded with `groupId`. **Was broken** — replayed as a single row. **Fixed.**
+  - **Site-status change** (`setSiteStatus`) — GROUP-scoped (every plan in the group, via `Promise.all`). Was recorded with `siteId` (a single representative id) even though the write touches the whole group — a second, independent instance of the same mis-scoping, caught by the same audit. **Fixed**: now records `groupId`.
+  - **New site** (`newSiteFromMap`/`newBlankSite`), **new plan**, **duplicated plan**, **plan rename** (`renamePlan`) — all genuinely single-row actions, recorded with `siteId`. Correct today; unchanged.
+- Fix: `writeFailureLog.js` gained `replayCloudWriteFailures(pending, { loadPlansOfGroup, pushLoud })` — a `groupId` entry expands to `loadPlansOfGroup(groupId)` and pushes EVERY live plan the local store currently holds for that group; a `siteId` entry still replays against just that one row. `SitePlannerApp.jsx`'s boot-drain effect now calls it instead of the old generic `forEach`.
+- Test that FAILS on the pre-fix behaviour, then passes on the fix — mutation-proven both ways by literally swapping in the pre-fix drain logic and re-running: `test/writeFailureLog.test.js` — a pure-mock proof (`replayCloudWriteFailures` given a 3-plan group pushes all 3, never degrades to 1) and an end-to-end proof against the REAL local store (`storage.js`'s real `saveSite`/`loadSite`/`loadPlansOfGroup`/`renameSiteGroup`): queues a failed group rename the way the production repro produced one, replays it, and asserts EVERY live row in the group carries the new name AND the same `siteRenamedAt` stamp — not just the active row that the pre-fix shape happened to touch.
+- Also fixed, same files, folded into this item: the write-failure banner's wording no longer implies the cloud is untouched — see sibling item **B1048401**.
+- **Self-verified this session:** `npx vitest run` — 686/686 files, 14,147/14,147 tests green (incl. the 8 new tests above). `npm run lint` — 0 errors. `npm run build` — clean. `node scripts/build-map.mjs` regenerated for the new `replayCloudWriteFailures` export.
+- Verify: **live** — this is exactly the concurrency/real-project-data class the original bug was found under. **V584992** gives a stageable check (DevTools network-block, no real deploy needed) to confirm the fix live. `Blocker: auth`.
+- Files: `src/shared/cloud/writeFailureLog.js`, `src/workspaces/site-planner/SitePlannerApp.jsx`, `test/writeFailureLog.test.js` (new), `ui-audit/verify-write-failure-banner-copy.mjs` (new, covers B1048401's text).
+- Base: `origin/main` @ `8086849`.
+
 ### B1023120 — The Notes conflict bar asked the owner to choose between two versions he could not see `[notes/sync · ui]` (bug) #notes #sync #ui  *(owner report, 2026-09-01, with screenshot: the amber bar read "'Utility' also changed in another of your windows. Nothing was overwritten - pick which to keep. [Keep this one] [Use the other]" — verbatim: "this warning banner about utilities does nothing for me, i have no clue which one to choose, i should be able to decide which one i should by at least looking at it." Minted **B1023120 / V571200** from this branch's reserved block B1023120–B1023135 · V571200–V571215 against `origin/main` 5d7251b5. **DEDUPE-FIRST — searched Open/⏳Verify/Done for `conflict`, `ConflictBar`, `notesConflictLine`, `B1391`, `V680`, `V640`, `cross-tab-conflict`, `B673`:** this is an **amendment-in-spirit to B1391/V680**, not a duplicate — B1391 made the choice SAFE (a moved revision alone no longer raises the bar, and nothing is destroyed by either button) but never gave the bar any CONTENT to decide from; this item adds the comparison surface B1391 never built. The site-planner's `cross-tab-conflict` banner (`AppHeader.jsx`, B313) is a *different class of problem* — a read-only-editor-lock notice ("that tab is the active editor"), never a "two versions diverged, pick one" decision, and is unaffected. The site-planner's own content-conflict handling (**B673**, element-level sync) is also a different model by design — non-blocking last-write-wins with a named toast + Restore, never a forced binary choice — so nothing there needed to change either. Net-new.)*
 `[x]` **SHIPPED THIS SESSION.** The bar now shows BOTH full versions, read-only, side by side on a wide screen and stacked on a phone, each stamped with when it was last saved and with the genuinely differing words marked — and each button now states, in the same breath, exactly what happens to the copy it doesn't pick.
 - Verify: **live** — V571200 (concurrency/multi-writer is a mandatory LIVE-VERIFY class; the sandbox is `Blocker: auth`, the same wall V680 hit).
@@ -4703,6 +4717,66 @@ owner was validating his own test harness.** Both genuinely fixed this pass, not
   scripts/build-backlog-index.mjs --check` / `node scripts/verification-queue-audit.mjs --check`
   all pass.
 - Files: `src/shared/comps/components/CompEntryGrid.jsx`, `ui-audit/verify-comp-entry-p0.mjs`.
+
+**Recurrence (×13) — HARDENING PASS 12 (B986096-HARDENING-16), owner cycle-6 handoff: Enter and
+grid keyboard navigation ESCALATED OFF this session to a dedicated root-cause hunt** (five
+consecutive deployed bundles, per this repo's own STANDING RULE #3(C) that is the trigger for
+escalation, not a sixth attempt at the same fix) — **do not touch `onEditKeyDown`/`onGridKeyDown`/
+tabindex wiring; that is explicitly out of scope for this session.** Six items handed over as this
+session's whole scope, worked in the owner's stated priority order.
+  1. **NEW-1 — blur discards the edit, re-investigated exhaustively, no reproduction found on the
+     current merged code (post-`259b0392a`).** Extended well beyond the prior round's coverage,
+     specifically to close the gap the owner's own three named click-away targets ("another cell,
+     the map, the panel background") left untested: clicking the panel's own HEADER chrome and its
+     FOOTER/status-line area (both genuinely non-interactive `<div>`s, distinct from a cell click
+     and a map click, and never isolated as their own test before this round) — both commit
+     correctly. Also tested a real fast typist's worst case — zero artificial delay between the
+     last keystroke and the click-away (3 trials) — all committed correctly. Combined with the
+     prior round's coverage (real click-away, real map click, `execCommand` typing + a JS `.blur()`
+     call, both separately and in one synchronous block, and the raw-property-setter edge case
+     already hardened against), this is now nine distinct realistic reproduction attempts across
+     two rounds, all committing correctly. **Disposition per STANDING RULE #2: this is
+     reproduce-and-fix for the raw-setter class (already shipped in HARDENING-15) plus
+     instrument-it (all nine scenarios are now permanent regression checks) — not a claim the
+     report is wrong.** If it recurs, the next session needs the exact bundle hash and timestamp
+     to rule out a stale/pre-merge build, since every realistic interaction this session could
+     construct now commits correctly.
+  2. **NEW-2 — the PARCEL anchor kind has never completed end to end.** Re-confirmed
+     `Blocker: live-GIS` still holds and is not a stale classification: `identifyParcelEager`/
+     `queryAtPoint` (`MapFinder.jsx`) calls the county's live ArcGIS parcel-identify service, an
+     external host this sandbox's Chromium cannot reach. Checked specifically for a workaround
+     this round that wasn't checked before — the B629 Drive PARCEL SNAPSHOT fallback (a
+     county-wide cached copy used when the live server is down) — and it doesn't help here either:
+     hydrating that snapshot is itself a network call through the Cloudflare Pages Functions
+     backend, which isn't present when running the plain Vite dev server this sandbox uses for
+     signed-out local testing. No code change; `compParcelAnchor.js` (the pure derivation) is
+     unchanged since #1309 and remains solidly unit-tested.
+  3. **NEW-3 — the SITE PLAN anchor kind has never completed end to end.** Re-confirmed
+     `Blocker: auth` + `Blocker: real-data` still holds: a site-plan anchor requires clicking an
+     already-uploaded, already-placed overlay image, which needs a signed-in account with Drive-
+     backed storage — both unreachable from this sandbox. No code change.
+  4. **NEW-4 — the Edit path on a saved comp has never been round-tripped.** Re-read
+     `CompsPanel.jsx`'s `save()` (unchanged since prior review): correctly branches
+     `draft.id ? updateComp(draft.id, comp) : insertComp(comp)`, awaits, reloads, shows the
+     updated detail view. Confirming the actual persistence needs a genuine signed-in Supabase
+     write — `Blocker: auth`. No code change; this is a confirmation request per the owner's own
+     framing ("nobody has confirmed"), not a diagnosed bug.
+  5. **NEW-5 — comp list titles a row by its rate when Title is empty.** Already fixed in
+     HARDENING-14 (`useCompLocationText` in `CompsPanel.jsx`) and confirmed still live and correct
+     on the current merged code this round (`test/compsPanelLocation.test.js` re-run, 4/4 green).
+     No further action needed — flagged here so it isn't re-diagnosed as still open.
+  6. **NEW-6 — the comp detail view shows no Location.** Same fix, same file, same confirmation —
+     already shipped in HARDENING-14, re-verified green this round.
+- **VERIFIED.** Nine total realistic reproduction scenarios for NEW-1 (six from HARDENING-15, three
+  new this round) folded into the permanent regression harness's new "CYCLE 6 (HARDENING-16)"
+  block — **43/43 checks green**, every prior round included, zero regressions. Full
+  `npx vitest run` — 686/686 files, 14,144/14,144 tests green. `npm run build` clean. `npx eslint
+  ui-audit/verify-comp-entry-p0.mjs` — 0 errors. `node ui-audit/design-drift-audit.mjs --check` /
+  `node ui-audit/doc-pointer-audit.mjs` / `node scripts/build-map.mjs --check` / `node
+  scripts/build-backlog-index.mjs --check` / `node scripts/verification-queue-audit.mjs --check`
+  all pass.
+- Files: `ui-audit/verify-comp-entry-p0.mjs`. (No `src/` change this round — every item was either
+  already fixed, re-confirmed correctly blocked, or investigated with no reproducible defect found.)
 
 ### B986097 — A draft staging table, reachable only by the KML import `[Site Planner / comps]` (feature) #comps #gis #persistence  *(owner chat block 2026-09-01, NEW-2, same decision doc as B986096 above. Minted **B986097 / V556721** from this branch's reserved block B986096–B986111 · V556720–V556735 against `origin/main` 8e42a14. DEDUPE-FIRST — searched Open/⏳Verify/Done for "KML", "My Maps", "import draft", "staging table", #comps: no prior item touches KML/My Maps import; net-new. Also searched for any prior `comp_import_drafts`/`comp_drafts` table — none exists.)*
 `[x]` **Shipped this session, including the schema — applied directly to production** (this session has Supabase MCP write access, unlike the read-only access a prior comps session flagged in this same module's folder pointer — that stale claim was corrected in the same commit).
