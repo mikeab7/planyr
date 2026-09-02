@@ -100,6 +100,7 @@ export default function Scheduler({
           reviewCount: Number(m.reviewCount) || 0, reviewOpen: !!m.reviewOpen,
           saveStatus: m.saveStatus, savePulse: !!m.savePulse, fileLinked: !!m.fileLinked,
           offlineFallback: !!m.offlineFallback, // B566 — cloud-unreachable → badge shows honest "offline", not a false "synced"
+          authRequired: !!m.authRequired, // B778/NEW-1 — signed-out (or not on the schedule's team)
           activePanel: m.activePanel || null,
         });
         return;
