@@ -312,10 +312,14 @@ export async function pullCloud(uid) {
   for (const id of (tombClear || [])) clearSiteTombstone(uid, id);
   // NEW-1 — a confirmed removal no longer clears the tombstone: it now expires on the grace window
   // in mergePulledSites, so this client stays armed against another client's late re-push.
-  for (const id of (deleteRetry || [])) cloudDelete(uid, id).catch(() => {});
+  // NEW-1 audit: these two are LAZY-RETRY writes, not one-shot user actions — a failure here is
+  // retried automatically on the next pull/save, so it is deliberately left non-blocking rather
+  // than banner'd (a banner for every background retry would be noise). Telemetry only, so a
+  // recurring failure is still visible rather than perfectly silent.
+  for (const id of (deleteRetry || [])) cloudDelete(uid, id).catch((e) => reportClientEvent("cloud-write-failed", "delete-retry didn't land (retried on next pull)", { id, error: (e && e.message) || "" }));
   // Heal the split: re-push anything the cloud is missing / older on, so a push that didn't
   // land doesn't strand work on this device (fire-and-forget; the next autosave would too).
-  for (const id of toPush) cloudUpsert(uid, map[id]).catch(() => {});
+  for (const id of toPush) cloudUpsert(uid, map[id]).catch((e) => reportClientEvent("cloud-write-failed", "split-heal push didn't land (retried on next pull/save)", { id, error: (e && e.message) || "" }));
   // NEW-3 — the pull is exactly when a group can arrive split (a plan this device has never seen
   // showing up still carrying a pre-rename name), so converge it here as well as at boot.
   // Idempotent: a coherent store writes and pushes nothing.
@@ -982,7 +986,9 @@ export function repairSplitProjectNames() {
   }
   // Push the corrections so the cloud copy stops contradicting the group as well. Fire-and-forget:
   // the local repair already stands, and the next ordinary save would carry it up regardless.
-  if (activeUid()) for (const c of changes) pushSiteToCloud(c.id).catch(() => {});
+  // NEW-1 audit: same shape as the two retries above — the local repair already stands and the
+  // next ordinary save re-pushes it regardless, so this is telemetry-only, not banner'd.
+  if (activeUid()) for (const c of changes) pushSiteToCloud(c.id).catch((e) => reportClientEvent("cloud-write-failed", "name-reconcile push didn't land (retried on next save)", { id: c.id, error: (e && e.message) || "" }));
   return { ok: true, changed: changes.length, groups: [...new Set(changes.map((c) => c.groupId))].length };
 }
 // Mirror the cross-module schedule link onto a site group (schema v9). The canonical pairing

@@ -32,6 +32,7 @@ import { idbPersist } from "./lib/localDb.js";
 const SiteReviewModal = lazy(() => import("./components/SiteReviewModal.jsx").then((m) => ({ default: m.SiteReviewModal })));
 import { nextConceptName } from "./lib/conceptName.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
+import { recordCloudWriteFailure, readCloudWriteFailures, clearAllCloudWriteFailures } from "../../shared/cloud/writeFailureLog.js";
 import { noteLayerContext } from "../../shared/telemetry/perfRecorderHandle.js";
 import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability, resumeTargetAfterSignIn, routeProjectJustChanged } from "./lib/bootResume.js";
 import { RADIUS } from "../../shared/ui/radius.js";
@@ -151,6 +152,27 @@ export default function App({
   const [cloudError, setCloudError] = useState(""); // "couldn't load from cloud" — shown instead of silently wiping to empty (B54)
   const [deleteError, setDeleteError] = useState(""); // a cloud DELETE that actually failed — loud, never a phantom success (B372)
   const [pushError, setPushError] = useState("");     // a background cloud-mirror push failed (NEW-F6) — device copy is safe; heals on next push/pull
+  // NEW-1 (B######) — a callback that re-attempts whatever produced the CURRENT pushError, wired
+  // up by whichever writer set it. Cleared alongside pushError so a stale retry can never fire.
+  const pushErrorRetryRef = useRef(null);
+  const setPushErrorWithRetry = (msg, retry) => { setPushError(msg); pushErrorRetryRef.current = retry || null; };
+  const dismissPushError = () => { setPushError(""); pushErrorRetryRef.current = null; clearAllCloudWriteFailures(); };
+  // NEW-1 (B######) — LOUD-FAILURE must survive the SAME navigation that can cause the failure
+  // (see shared/cloud/writeFailureLog.js's header). Drain any failure a prior page-load recorded
+  // but never got to show — this is what makes "the page reloaded mid-write" recoverable instead
+  // of silently losing the notice.
+  useEffect(() => {
+    const pending = readCloudWriteFailures();
+    if (!pending.length) return;
+    const last = pending[pending.length - 1];
+    const summary = pending.length === 1
+      ? `${last.what} didn't reach the cloud earlier — it's saved on this device, but please check and redo it if needed.`
+      : `${pending.length} changes didn't reach the cloud earlier (most recently: ${last.what}) — they're saved on this device, but please check and redo them if needed.`;
+    setPushErrorWithRetry(summary, () => {
+      clearAllCloudWriteFailures();
+      pending.forEach((e) => { if (e.groupId) pushLoud(e.groupId, e.what); else if (e.siteId) pushLoud(e.siteId, e.what); });
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- one-time boot drain, before pushLoud exists as a stable ref is fine (it's stable across renders here)
   // NEW-1 — a site-status change (incl. "Dead") is a header write outside the planner's
   // element-level undo stack (Ctrl+Z can't reach it — different component, sometimes not even
   // mounted). This toast is the "obvious, working undo" for it instead, reusing the shared B673
@@ -201,12 +223,15 @@ export default function App({
       // TEAM: activate any invites waiting on this user's email (an existing account invited
       // after signup) BEFORE pulling, so a freshly-joined team's shared projects come down in
       // the same pull. Best-effort — never blocks loading the user's own sites.
-      await claimInvites().catch(() => {});
+      // NEW-1 audit: both catches below are reviewed and left non-blocking on purpose — neither
+      // is a one-shot user action, and both re-run on this device's every sign-in, so a failure
+      // here self-heals rather than strands anything. Telemetry only, no banner.
+      await claimInvites().catch((e) => reportClientEvent("cloud-write-failed", "claiming pending team invites failed (retried on next sign-in)", { error: (e && e.message) || "" }));
       // B326416 — warm the default-sharing answer (account preference + your teams) right after
       // invites are claimed, so the FIRST project created in this session already knows whether it
       // is born shared. Best-effort: a failure leaves the context unset, and an unset context
       // resolves to "private" rather than guessing.
-      primeShareContext(uid, SHARE_LOADERS).catch(() => {});
+      primeShareContext(uid, SHARE_LOADERS).catch((e) => reportClientEvent("cloud-write-failed", "priming default-sharing context failed (falls back to private)", { error: (e && e.message) || "" }));
       if (seq !== applySeq.current) return; // superseded by a newer auth event
       const res = await pullCloud(uid).catch(() => ({ ok: false }));
       if (seq !== applySeq.current) return; // superseded by a newer auth event — don't apply stale cloud/view state (B43)
@@ -429,7 +454,12 @@ export default function App({
       if (r && r.ok === false) throw new Error(r.error || "push failed");
       return true;
     } catch (e) {
-      setPushError(`${what} is saved on this device but couldn't sync to the cloud — it'll catch up on your next edit or reload.`);
+      // NEW-1 — persist BEFORE anything else: a lazy-chunk failure here can also trigger
+      // chunkReload's auto-reload, which may navigate away before this banner ever paints. The
+      // durable log (shared/cloud/writeFailureLog.js) is what makes that recoverable.
+      recordCloudWriteFailure({ what, siteId: id, error: (e && e.message) || "" });
+      setPushErrorWithRetry(`${what} is saved on this device but couldn't sync to the cloud — it'll catch up on your next edit or reload.`,
+        () => pushLoud(id, what));
       reportClientEvent("cloud-push-failed", `background push failed (${what})`, { id, error: (e && e.message) || "" });
       return false;
     }
@@ -454,9 +484,13 @@ export default function App({
     // Seed this new project's standard folder tree + mirror it to Google Drive (B650). Idempotent
     // and graceful (no-op signed-out / Drive off); a dynamic import keeps the folder code off the
     // planner chunk, and folder rows are independent of the sites row so ordering doesn't matter.
+    // NEW-2 audit: this IS a lazy chunk gating a write (the folder-seed rows + their Drive mirror),
+    // reviewed and left self-healing-silent on purpose — FolderTree.jsx (Library tab) calls the
+    // same ensureSeeded/syncFoldersToDrive the moment the user opens that project's Library, so a
+    // failure here isn't a dead end, only a deferred one. Telemetry added so it's not INVISIBLE.
     import("../library/lib/folders.js")
       .then((m) => m.ensureSeeded(id).then((r) => { if (r && r.ok && r.seeded) m.syncFoldersToDrive(id); }))
-      .catch(() => {});
+      .catch((e) => reportClientEvent("cloud-write-failed", "folder-tree seed didn't reach the cloud (self-heals on next Library visit)", { id, error: (e && e.message) || "" }));
     refreshSites();
     goPlan(id);
   };
@@ -725,7 +759,11 @@ export default function App({
     return Promise.resolve(done).then((res) => {
       refreshSites(); // authoritative — rebuilt only AFTER the cloud write settled
       if (res && res.ok === false) {
-        setPushError(`“${site}” is saved on this device, but the rename couldn't be saved to the cloud — it may come back under its old name when you reload. Check your connection and try again.`);
+        // NEW-1 — see pushLoud's comment: this must be recorded BEFORE anything else in case the
+        // same chunk-load failure that caused this also triggers an auto-reload out from under it.
+        recordCloudWriteFailure({ what: "The project rename", groupId, error: (res && res.error) || "" });
+        setPushErrorWithRetry(`“${site}” is saved on this device, but the rename couldn't be saved to the cloud — it may come back under its old name when you reload. Check your connection and try again.`,
+          () => renameSite(groupId, (loadSite(groupId) || {}).site || site));
         reportClientEvent("cloud-push-failed", "project rename did not reach the cloud", { id: groupId, error: (res && res.error) || "" });
       }
       return res;
@@ -770,7 +808,14 @@ export default function App({
     const plans = loadPlansOfGroup(groupOf(rec));
     plans.forEach((s) => saveSite({ id: s.id, status }));
     Promise.all(plans.map((s) => pushSiteToCloud(s.id).then((r) => !(r && r.ok === false)).catch(() => false)))
-      .then((oks) => { if (oks.some((ok) => !ok)) { setPushError("The status change is saved on this device but couldn't sync to the cloud — it'll catch up on your next edit or reload."); reportClientEvent("cloud-push-failed", "background push failed (site status)", { id }); } });
+      .then((oks) => {
+        if (oks.some((ok) => !ok)) {
+          recordCloudWriteFailure({ what: "The status change", siteId: id, error: "background push failed (site status)" });
+          setPushErrorWithRetry("The status change is saved on this device but couldn't sync to the cloud — it'll catch up on your next edit or reload.",
+            () => setSiteStatus(id, status));
+          reportClientEvent("cloud-push-failed", "background push failed (site status)", { id });
+        }
+      });
     refreshSites();
     // NEW-1 — a status change has no home on the planner's Ctrl+Z stack (it's a site-header
     // write, not an element edit, and can fire from the map with no plan even open), so an
@@ -929,6 +974,12 @@ export default function App({
             onRenamePlan={renamePlan}
             onSiteDropped={handleSiteDropped}
             onSiteSaved={refreshSites}
+            // NEW-1 — the Cloud-sync badge is load-bearing and must not read "Synced" while a
+            // background push (rename / status / new-site mirror) has failed and not been
+            // retried, even though the failure isn't about the CURRENTLY open plan's own save.
+            backgroundPushFailed={!!pushError}
+            backgroundPushDetail={pushError || undefined}
+            onRetryBackgroundPush={pushErrorRetryRef.current ? () => { const retry = pushErrorRetryRef.current; dismissPushError(); retry?.(); } : undefined}
             shellModule={shellModule}
             onShellSwitch={onShellSwitch}
             onOpenReviewInDocReview={onOpenReviewInDocReview}
@@ -962,7 +1013,13 @@ export default function App({
       {pushError && (
         <div role="alert" style={{ position: "fixed", top: (cloudError ? 57 : 0) + (deleteError ? 57 : 0) + 79, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 560, display: "flex", alignItems: "center", gap: 10, background: "var(--warn-bg, #fef3c7)", color: "var(--warn-text)", border: "1px solid var(--warn-border, #d6a64a)", borderRadius: 10, padding: "8px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
           <span style={{ flex: 1 }}>{pushError}</span>
-          <button onClick={() => setPushError("")} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "transparent", color: "var(--warn-text)", border: "none", borderRadius: RADIUS.sm, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+          {/* NEW-1 — an actual retry, not just "it'll catch up eventually": re-attempts whatever
+              write this banner is reporting, wired up by the writer that set it. */}
+          {pushErrorRetryRef.current && (
+            <button onClick={() => { const retry = pushErrorRetryRef.current; dismissPushError(); retry?.(); }} title="Try again now"
+              style={{ flex: "none", cursor: "pointer", background: "var(--warn-text)", color: "var(--warn-bg)", border: "none", borderRadius: RADIUS.sm, padding: "2px 9px", fontFamily: "inherit", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>Retry now</button>
+          )}
+          <button onClick={dismissPushError} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "transparent", color: "var(--warn-text)", border: "none", borderRadius: RADIUS.sm, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
         </div>
       )}
 
