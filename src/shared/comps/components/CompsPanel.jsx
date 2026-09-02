@@ -361,6 +361,7 @@ function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave
 export default function CompsPanel({
   open, active = true, pendingAnchor, onAnchorConsumed, focusCompId, onFocusHandled,
   projects, onCompsChange, overlaysById, onOpenBrochure, reloadToken, onFocusAnchor,
+  onArmMapPin, onDisarmMapPin,
 }) {
   const [comps, setComps] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -380,6 +381,14 @@ export default function CompsPanel({
   const [armedRowId, setArmedRowId] = useState(null);
   const [gridSaving, setGridSaving] = useState(false);
   const [gridSaveError, setGridSaveError] = useState(null);
+  // ⛔ HARDENING-13 (B986096, owner P0 live-test, "clicking [Location] arms pin placement") —
+  // arming a row used to only set `armedRowId`; the map's OWN "am I placing a pin right now" state
+  // (`placingCompPin`, owned entirely inside MapFinder) was a SEPARATE switch the user still had to
+  // flip by hand via the toolbar's "Drop a pin" button — so "click Location, then click the map"
+  // silently did nothing, because the map was never told to start listening for that click. This
+  // wrapper arms BOTH in one call; disarming (id === null, the Escape/Cancel path) only clears the
+  // row side — the map's own Cancel/Escape already owns turning `placingCompPin` back off.
+  const armRow = (id) => { setArmedRowId(id); if (id) onArmMapPin?.(); else onDisarmMapPin?.(); };
   // B849233/NEW-2 — the KML-import draft staging area. `armedRowId` above is a SINGLE slot
   // shared with the grid: it names either a grid row's `_id` or a draft's real uuid, and the
   // pendingAnchor effect below checks which. `draftAnchors` is the map-picked override per draft
@@ -441,6 +450,14 @@ export default function CompsPanel({
   // across both. With nothing armed, it opens the grid pre-seeded with one new row carrying it —
   // the grid IS the create surface now (B849232/NEW-1 replaces the old single-comp create form;
   // editing an already-saved comp still uses the field form below).
+  // ⛔ HARDENING-12 (B986096, owner P0 live-test) — "the toolbar pin ignores the row and makes a
+  // new one." The map toolbar's "Drop a pin"/"Comp from parcel" buttons arm the MAP directly, a
+  // SEPARATE mechanism from the grid's own per-row arming above (`armedRowId`) — a user reaching
+  // for the toolbar while a pasted row is still waiting for a location never touched a row's
+  // Location cell, so `armedRowId` was null and every pick appended a fresh orphan row instead of
+  // answering the one already waiting. Now: with nothing explicitly armed, the grid open, and at
+  // least one row genuinely missing a location, the pick fills the TOPMOST such row — only a
+  // fully-answered sheet (or the grid being closed) still appends a new row.
   useEffect(() => {
     if (!pendingAnchor) return;
     // B986096-HARDENING-7 — "log it and say so": a location that resolved with no county gets a
@@ -460,11 +477,34 @@ export default function CompsPanel({
       }
       setArmedRowId(null);
     } else {
-      setGridRows((rows) => [...rows, draftFromParsedRow({ draft: emptyDraft(pendingAnchor), cellFlags: locFlag ? { location: locFlag } : {} })]);
-      setView("grid");
+      const openTarget = view === "grid" ? gridRows.find((r) => !r.draft.anchor) : null;
+      if (openTarget) {
+        setGridRows((rows) => rows.map((r) => {
+          if (r._id !== openTarget._id) return r;
+          const cellFlags = { ...r.cellFlags };
+          if (locFlag) cellFlags.location = locFlag; else delete cellFlags.location;
+          return { ...r, draft: { ...r.draft, anchor: pendingAnchor }, cellFlags };
+        }));
+      } else {
+        setGridRows((rows) => [...rows, draftFromParsedRow({ draft: emptyDraft(pendingAnchor), cellFlags: locFlag ? { location: locFlag } : {} })]);
+        setView("grid");
+      }
     }
     onAnchorConsumed?.();
   }, [pendingAnchor]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ⛔ HARDENING-12 (B986096, owner P0 live-test, "Disarm on Escape and say so in the hint") —
+  // a row armed for a map pick (the amber "Now click Drop a pin…" banner) had no keyboard way out
+  // short of clicking its own "Cancel" link. Escape now disarms it from anywhere on the page.
+  // HARDENING-13 — goes through `armRow(null)`, not the raw setter, so it also turns the map's
+  // OWN pin-drop mode back off (armed together by HARDENING-13's `onArmMapPin`; disarmed together
+  // here rather than leaving the map listening for a click nobody asked for any more).
+  useEffect(() => {
+    if (!armedRowId) return undefined;
+    const onKeyDown = (e) => { if (e.key === "Escape") armRow(null); };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [armedRowId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Clicking a comp's map marker opens its detail view.
   useEffect(() => {
@@ -608,7 +648,7 @@ export default function CompsPanel({
         {view === "drafts" && (
           <CompDraftsPanel
             drafts={drafts} draftAnchors={draftAnchors}
-            armedRowId={armedRowId} onArm={setArmedRowId}
+            armedRowId={armedRowId} onArm={armRow}
             onFocusAnchor={(anchor) => onFocusAnchor?.(anchor)}
             onPromote={promoteOneDraft} onDismiss={dismissOneDraft} busyId={draftBusyId}
             onImportFile={handleKmlFile} importing={kmlImporting} importError={kmlImportError}
@@ -619,7 +659,7 @@ export default function CompsPanel({
         {view === "grid" && (
           <CompEntryGrid
             rows={gridRows} onRowsChange={setGridRows}
-            armedRowId={armedRowId} onArm={setArmedRowId}
+            armedRowId={armedRowId} onArm={armRow}
             onFocusAnchor={(anchor) => onFocusAnchor?.(anchor)}
             onSave={saveGridRows} onCancel={closeGrid}
             saving={gridSaving} saveError={gridSaveError}

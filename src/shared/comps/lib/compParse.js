@@ -61,6 +61,10 @@ const MONTHS = {
 };
 
 const LEASE_WORDS = /\b(lease|leased|leasing|tenant|landlord|rent(?:ed|al)?|abat[a-z]*|term|RCD|LCD)\b/i;
+// HARDENING-11 (owner correction, 2026-09-02) — the gross-family list Michael named explicitly:
+// gross, full service, FS, IG, industrial gross, MG, modified gross, base year. Any of these
+// still WINS over the NNN default (see finalizeGenericRow's own basis-default logic below) —
+// this module never silently drops an explicit basis.
 const BASIS_NNN_RE = /\b(nnn|tri+p+le\s*net|nn|abs(?:olute)?\s*net)\b/i;
 const BASIS_GROSS_RE = /\b(gross|full\s*service|fs|ig|industrial\s*gross|mg|modified\s*gross|base\s*year)\b/i;
 const BASIS_RE = new RegExp(`(?:${BASIS_NNN_RE.source})|(?:${BASIS_GROSS_RE.source})`, "i");
@@ -765,7 +769,8 @@ function finalizeGenericRow(generic, rawFlags, raw) {
     // has two common answers 12x apart (a guess there corrupts every comparison in the sheet) —
     // collapsing the two into one rule would be exactly the mistake this distinction exists to
     // prevent. No flag, no note, no marker: a defaulted NNN renders identically to a stated one
-    // (the owner has already rejected an unexplained asterisk/badge once).
+    // (the owner has already rejected an unexplained asterisk/badge once, and a live soft flag
+    // here would render exactly the tooltip/ProblemsList sentence he ruled out).
     if (!generic.rateBasis) generic.rateBasis = "nnn";
   }
   // ⛔ B986096-HARDENING-8 (owner correction, reversing HARDENING-6's stand-in) — EXECUTION and
@@ -827,7 +832,11 @@ function genericToDraft(generic) {
   } else if (d.compType === "lease") {
     if (generic.rate != null) d.leaseRate = String(generic.rate);
     if (generic.ratePeriod) d.leaseRatePeriod = generic.ratePeriod;
-    if (generic.rateBasis) d.leaseRateExpense = generic.rateBasis;
+    // HARDENING-11 — `generic.rateBasis` already defaults to "nnn" by the time this runs
+    // (`finalizeGenericRow`'s own basis-default, which fires before it calls `genericToDraft`),
+    // unless the pasted text stated a gross-family term (`detectBasis`/`BASIS_RE` wins outright).
+    // Per (leaseRatePeriod, above) gets NO such default — see this file's header.
+    d.leaseRateExpense = generic.rateBasis;
     if (generic.sizeValue != null) d.leaseSizeSf = String(generic.sizeValue);
     if (generic.ti != null) d.leaseTi = String(generic.ti);
     if (generic.term) d.leaseTerm = generic.term;
@@ -1052,7 +1061,7 @@ function assignGenericCell(generic, flags, key, val) {
       break;
     }
     case "ratePeriod": generic.ratePeriod = /mo/i.test(val) ? "monthly" : /yr|year|annual/i.test(val) ? "annual" : null; break;
-    case "rateBasis": generic.rateBasis = /nnn|net/i.test(val) ? "nnn" : /gross|fs|full/i.test(val) ? "gross" : null; break;
+    case "rateBasis": generic.rateBasis = /nnn|net/i.test(val) ? "nnn" : /gross|fs|full|\big\b|\bmg\b|base\s*year/i.test(val) ? "gross" : null; break;
     case "ti": { const n = parseMagnitudeNumber(val.replace(/^\$/, "")); if (n) generic.ti = n.value; break; }
     case "term": { const termHit = findTermBare(val); generic.term = termHit ? termHit.text : val; break; }
     case "noi": { const n = parseMagnitudeNumber(val.replace(/^\$/, "")); if (n) generic.noi = n.value; break; }

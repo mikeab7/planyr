@@ -26,6 +26,25 @@ seeding localStorage for verification, put `status: "active"` directly on the si
 object. Sites loaded through `loadSitesList()` → `createSiteModel()` get the field
 normalized automatically, but raw localStorage seeds bypass that path.
 
+**⛔ B986096-HARDENING-12 (2026-09-02) — "no browser reachable" sessions: try `npm run dev` on
+`localhost` before concluding a live pass is impossible.** A session working in the "Claude Code
+Remote" cloud environment (a managed container, distinct from the local CLI sandbox this section's
+cert-proxy note above describes) found Chromium there could not reach ANY external host at all
+(`net::ERR_CONNECTION_RESET`/`ERR_TUNNEL_CONNECTION_FAILED` against a Cloudflare Pages preview,
+`example.com`, and `planyr.io` alike) and, on that evidence, wrote off every live-browser check as
+unreachable for several rounds — including rounds that had already shipped and were later found
+broken on first real use. **What was never separately tried in that environment: `npm run dev` +
+Chromium pointed at `http://localhost:<port>` — localhost traffic never leaves the container, so it
+is unaffected by whatever blocks external egress.** Paired with `ui-audit/lib/fixtureSeeding.mjs`
+(`readFixture`/`fixtureSeed`, seeds a real plan into `localStorage` via `page.addInitScript` — no
+Supabase round trip needed to reach a signed-out route), this reaches most of the app with a real
+rendered page, real clicks, and real keyboard input. The remaining genuine wall is anything that
+needs a real EXTERNAL service — a true signed-in Supabase session, a live GIS endpoint — which stays
+unreachable regardless. Full writeup: `BACKLOG.md`'s `B986096` Recurrence ×10 block and
+`ui-audit/verify-comp-entry-p0.mjs`. **Before writing off a whole round as unverifiable-without-a-
+browser, try localhost first** — it may answer most of what's needed even when every external host
+is dark.
+
 ## Stack
 Vite + React 18, plain JS/JSX, inline styles, the `PAL` drafting palette, terse
 comments. Map = Leaflet + esri-leaflet. Planner canvas = hand-rolled SVG. **Units:
