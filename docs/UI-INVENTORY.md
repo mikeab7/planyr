@@ -46,8 +46,8 @@ backstop, not the headline — see "Known, deliberately-not-fixed findings".
 | surface | light | dark | budget | exemptions | effective ceiling |
 |---|---|---|---|---|---|
 | Map landing page (no project selected) | 22 | 22 | 18 | 4 | 22 |
-| Map landing page (comp mode) | 19 | 19 | 16 | 4 | 20 |
-| Map landing page (selecting parcels) | 21 | 21 | 18 | 4 | 22 |
+| Map landing page (comp mode) | 20 | 20 | 16 | 4 | 20 |
+| Map landing page (selecting parcels) | 22 | 22 | 18 | 4 | 22 |
 | App header | 8 | 8 | 7 | 1 | 8 |
 | Main menu — File ▾ | 1 | 1 | 1 | — | 1 |
 | Main menu — Undo history | 0 | 0 | 0 | — | 0 |
@@ -276,11 +276,11 @@ look aligned because they float over the same surface.
 
 **Map landing page (comp mode) — light:**
 
-- SiteCompDrop a pinComp from pa (top 67, h 42) · ▼Sites1Comps0Site plans+ Uploa (top 67, h 154) · ▼Imagery & layers (top 67, h 30) — top spread 0px, height spread 124px.
+- SiteCompDrop a pinComp from pa (top 67, h 42) · ▼Sites1Comps0Site plans+ Uploa (top 67, h 295) · ▼Imagery & layers (top 67, h 30) — top spread 0px, height spread 265px.
 
 **Map landing page (comp mode) — dark:**
 
-- SiteCompDrop a pinComp from pa (top 67, h 42) · ▼Sites1Comps0Site plans+ Uploa (top 67, h 154) · ▼Imagery & layers (top 67, h 30) — top spread 0px, height spread 124px.
+- SiteCompDrop a pinComp from pa (top 67, h 42) · ▼Sites1Comps0Site plans+ Uploa (top 67, h 295) · ▼Imagery & layers (top 67, h 30) — top spread 0px, height spread 265px.
 
 **Map landing page (selecting parcels) — light:**
 
@@ -367,14 +367,14 @@ look aligned because they float over the same surface.
 
 ### Map landing page (comp mode)
 
-**light** — 25 distinct style signature(s) over 32 matched element(s):
+**light** — 27 distinct style signature(s) over 34 matched element(s):
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
 | ⚠️ **fontSize 22 not in FONT_SIZE scale {10,10.5,12,13,14}** — 0px | 30px | 22px | 700 | `rgb(255, 255, 255)` | `0px none rgb(0, 0, 0)` | Zoom in, Zoom out ×2 | src/workspaces/model/components/SheetView.jsx:998:            type="button" data-testid="model-zoom-in" title="Zoom in" (+20 more matches, best-effort) |
 | ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 42px | 16px | 400 | `rgb(234, 238, 243)` | `0px none rgb(27, 30, 38)` | SiteCompDrop a pinComp from parcel ×1 | unattributed (no source match — best-effort text search) |
 | ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 6px | 30px | 16px | 400 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Site or comp ×1 | src/workspaces/site-planner/MapFinder.jsx:495:    <div role="tablist" aria-label="Site or comp" style={{ |
-| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 154px | 16px | 400 | `rgba(255, 255, 255, 0.94)` | `1px solid rgb(225, 229, 235)` | ▼Sites1Comps0Site plans+ Upload site pla ×1 | unattributed (no source match — best-effort text search) |
+| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 295px | 16px | 400 | `rgba(255, 255, 255, 0.94)` | `1px solid rgb(225, 229, 235)` | ▼Sites1Comps0Site plans+ Upload site pla ×1 | unattributed (no source match — best-effort text search) |
 | 0px | 25px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(69, 76, 92)` | Schedule, Review, Library (+2 more) ×5 | src/shared/ui/ModuleLoader.jsx:6: *   • Schedule  → a Gantt chart assembling: zebra row bands fade in top→bottom, (+89 more matches, best-effort) |
 | 8px | 30px | 12px | 400 | `rgb(234, 238, 243)` | `1px solid rgb(215, 221, 229)` | Full screen, Settings ×2 | src/shared/ui/AppHeader.jsx:149:      aria-label={active ? "Leave full screen" : "Full screen"} (+6 more matches, best-effort) |
 | 6px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Click the map to drop a leasing-comp pin at that spot, Click a parcel on the map to anchor a comp to it ×2 | src/workspaces/site-planner/MapFinder.jsx:2965:                title="Click the map to drop a leasing-comp pin at that spot" |
@@ -394,17 +394,19 @@ look aligned because they float over the same surface.
 | 6px | 22px | 12px | 700 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Comps0 ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 25px | 10.5px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | + Upload site plan ×1 | src/shared/sitePlans/components/SitePlansSection.jsx:730:        {!flow && <Button size="sm" variant="ghost" onClick={startNewUpload}>+ Upload site plan</Button>} |
 | 0px | 21px | 10.5px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | ▾Recently deleted ×1 | unattributed (no source match — best-effort text search) |
+| 6px | 24px | 10.5px | 700 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Paste comps from a broker email or spreadsheet ×1 | src/shared/comps/components/CompsPanel.jsx:578:                <button onClick={openGrid} title="Paste comps from a broker email or spreadsheet" |
+| 6px | 24px | 10.5px | 700 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Import a Google My Maps export ×1 | src/shared/comps/components/CompsPanel.jsx:584:                <label title="Import a Google My Maps export" |
 | 8px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Imagery & layers ×1 | src/shared/ui/controls.jsx:44: * chip — the account pill, "Drop a pin", the collapsed "Imagery & layers" pill, the nav tabs' (+5 more matches, best-effort) |
 
-**dark** — 25 distinct style signature(s) over 32 matched element(s):
+**dark** — 27 distinct style signature(s) over 34 matched element(s):
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
 | ⚠️ **fontSize 22 not in FONT_SIZE scale {10,10.5,12,13,14}** — 0px | 30px | 22px | 700 | `rgb(255, 255, 255)` | `0px none rgb(0, 0, 0)` | Zoom in, Zoom out ×2 | src/workspaces/model/components/SheetView.jsx:998:            type="button" data-testid="model-zoom-in" title="Zoom in" (+20 more matches, best-effort) |
 | ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 42px | 16px | 400 | `rgb(17, 19, 25)` | `0px none rgb(232, 235, 240)` | SiteCompDrop a pinComp from parcel ×1 | unattributed (no source match — best-effort text search) |
 | ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 6px | 30px | 16px | 400 | `rgb(23, 26, 33)` | `0px none rgb(232, 235, 240)` | Site or comp ×1 | src/workspaces/site-planner/MapFinder.jsx:495:    <div role="tablist" aria-label="Site or comp" style={{ |
-| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 154px | 16px | 400 | `rgba(24, 27, 33, 0.93)` | `1px solid rgb(42, 46, 55)` | ▼Sites1Comps0Site plans+ Upload site pla ×1 | unattributed (no source match — best-effort text search) |
+| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 295px | 16px | 400 | `rgba(24, 27, 33, 0.93)` | `1px solid rgb(42, 46, 55)` | ▼Sites1Comps0Site plans+ Upload site pla ×1 | unattributed (no source match — best-effort text search) |
 | 0px | 25px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(194, 200, 210)` | Schedule, Review, Library (+2 more) ×5 | src/shared/ui/ModuleLoader.jsx:6: *   • Schedule  → a Gantt chart assembling: zebra row bands fade in top→bottom, (+89 more matches, best-effort) |
 | 8px | 30px | 12px | 400 | `rgb(17, 19, 25)` | `1px solid rgb(38, 42, 51)` | Full screen, Settings ×2 | src/shared/ui/AppHeader.jsx:149:      aria-label={active ? "Leave full screen" : "Full screen"} (+6 more matches, best-effort) |
 | 6px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Click the map to drop a leasing-comp pin at that spot, Click a parcel on the map to anchor a comp to it ×2 | src/workspaces/site-planner/MapFinder.jsx:2965:                title="Click the map to drop a leasing-comp pin at that spot" |
@@ -424,6 +426,8 @@ look aligned because they float over the same surface.
 | 6px | 22px | 12px | 700 | `rgb(29, 32, 39)` | `0px none rgb(232, 235, 240)` | Comps0 ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 25px | 10.5px | 600 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | + Upload site plan ×1 | src/shared/sitePlans/components/SitePlansSection.jsx:730:        {!flow && <Button size="sm" variant="ghost" onClick={startNewUpload}>+ Upload site plan</Button>} |
 | 0px | 21px | 10.5px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | ▾Recently deleted ×1 | unattributed (no source match — best-effort text search) |
+| 6px | 24px | 10.5px | 700 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Paste comps from a broker email or spreadsheet ×1 | src/shared/comps/components/CompsPanel.jsx:578:                <button onClick={openGrid} title="Paste comps from a broker email or spreadsheet" |
+| 6px | 24px | 10.5px | 700 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Import a Google My Maps export ×1 | src/shared/comps/components/CompsPanel.jsx:584:                <label title="Import a Google My Maps export" |
 | 8px | 30px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Imagery & layers ×1 | src/shared/ui/controls.jsx:44: * chip — the account pill, "Drop a pin", the collapsed "Imagery & layers" pill, the nav tabs' (+5 more matches, best-effort) |
 
@@ -432,7 +436,7 @@ look aligned because they float over the same surface.
 
 ### Map landing page (selecting parcels)
 
-**light** — 28 distinct style signature(s) over 34 matched element(s):
+**light** — 29 distinct style signature(s) over 35 matched element(s):
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
@@ -464,8 +468,9 @@ look aligned because they float over the same surface.
 | 6px | 17px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Reorder the Pursuit group ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Imagery & layers ×1 | src/shared/ui/controls.jsx:44: * chip — the account pill, "Drop a pin", the collapsed "Imagery & layers" pill, the nav tabs' (+5 more matches, best-effort) |
+| 12px | 48px | 12px | 400 | `rgba(255, 255, 255, 0.94)` | `1px solid rgb(225, 229, 235)` | Click any lot to add it (＋) — it works e ×1 | src/workspaces/site-planner/MapFinder.jsx:3558:                ? "Click any lot to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines." |
 
-**dark** — 28 distinct style signature(s) over 34 matched element(s):
+**dark** — 29 distinct style signature(s) over 35 matched element(s):
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
@@ -497,6 +502,7 @@ look aligned because they float over the same surface.
 | 6px | 17px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Reorder the Pursuit group ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Imagery & layers ×1 | src/shared/ui/controls.jsx:44: * chip — the account pill, "Drop a pin", the collapsed "Imagery & layers" pill, the nav tabs' (+5 more matches, best-effort) |
+| 12px | 48px | 12px | 400 | `rgba(24, 27, 33, 0.93)` | `1px solid rgb(42, 46, 55)` | Click any lot to add it (＋) — it works e ×1 | src/workspaces/site-planner/MapFinder.jsx:3558:                ? "Click any lot to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines." |
 
 
 ---

@@ -139,6 +139,55 @@ const fit = async (p) => { await p.locator('[title="Zoom to fit"]:visible').firs
 const clickIf = async (p, sel) => p.locator(`${sel}:visible`).first().click({ timeout: 4000 }).catch(() => {});
 const escAll = async (p) => { await p.keyboard.press("Escape").catch(() => {}); };
 
+// B1038016 (2nd correction) — DETERMINISTIC MOCK for the two surfaces whose control set depends on
+// a real network call settling: CompsPanel.jsx's `reload()` (a real Supabase `fetchAllComps()` call
+// gates its "＋ New comps"/"⤒ Import (KML)" buttons) and MapFinder.jsx's parcel-layer fetch (a real
+// county/statewide ArcGIS request; a `requesterror` on ANY of them sets `err`, which also hides the
+// `select-parcels-tip` tooltip). This crawl runs inside an environment whose egress proxy allowlists
+// only a few hosts — Supabase and every county/statewide GIS host used here are NOT on it, so both
+// calls fail INSTANTLY every time, and no amount of waiting changes that (confirmed: `curl` to
+// Supabase and to a real county ArcGIS host both return a 403 from the proxy in well under a
+// second). A real browser with real network access — CI's GitHub Actions runner included — resolves
+// both successfully, revealing one more control each; wiring the CI-vs-local mismatch shut by
+// waiting longer was tried and measured to make zero difference (see the surfaces' own history
+// below), because the cause was never timing. Rather than depend on which hosts a given runner's
+// egress policy happens to allow — which is itself not a promise CI makes — this makes the crawl's
+// own OUTCOME network-environment-independent: every external request is intercepted and answered
+// with a generic, minimally-valid SUCCESSFUL response, so both surfaces settle to the same state
+// (buttons rendered, tooltip rendered, no error) in every environment, deterministically, forever.
+// Verified empirically (ui-audit/tmp-diag-*.mjs, since deleted) to reproduce CI's exact rendered
+// text byte-for-byte on both surfaces before this was wired in here.
+const mockExternalNetwork = async (ctx) => {
+  await ctx.route((url) => !url.toString().startsWith(BASE), async (route) => {
+    const url = route.request().url();
+    if (url.includes("rest/v1/")) {
+      // Supabase PostgREST — an empty, successful result set (matches `fetchAllComps`'s
+      // `{ data: [], error: null }` un-configured-client fallback, which is the shape every
+      // consumer already handles).
+      await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+      return;
+    }
+    if (url.includes("f=json") && !url.includes("/query")) {
+      // Esri ArcGIS Server layer/service metadata request (esri-leaflet's FeatureLayer fetches this
+      // before it will fire 'load') — minimal but structurally valid so esri-leaflet doesn't choke
+      // parsing it.
+      await route.fulfill({
+        status: 200, contentType: "application/json", body: JSON.stringify({
+          currentVersion: 10.81, id: 0, name: "mock", type: "Feature Layer",
+          geometryType: "esriGeometryPolygon", objectIdField: "OBJECTID",
+          fields: [{ name: "OBJECTID", type: "esriFieldTypeOID", alias: "OBJECTID" }],
+          drawingInfo: { renderer: { type: "simple", symbol: {} } },
+          extent: { xmin: -180, ymin: -90, xmax: 180, ymax: 90, spatialReference: { wkid: 4326 } },
+          capabilities: "Query", maxRecordCount: 1000,
+        }),
+      });
+      return;
+    }
+    // Any other Esri query/export/identify request — an empty, successful feature set.
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ features: [], exceededTransferLimit: false }) });
+  });
+};
+
 // ------------------------------------------------------------------------------------------
 // SURFACES. Each opens a scenario, then reads computed style from a scoped selector.
 // `scope` narrows the query to avoid the same element being reported under two surfaces (the
@@ -186,20 +235,16 @@ const SURFACES = [
     // it needs a real parcel click on the live map, the same real-data wall documented on every
     // other GIS-dependent live-verify item in this repo.
     name: "Map landing page (comp mode)", hash: "#/site",
+    // B1038016 (2nd correction) — `mockExternalNetwork` makes `CompsPanel.jsx`'s `reload()`
+    // (`fetchAllComps()`, a real Supabase call gating the "＋ New comps"/"⤒ Import (KML)" buttons)
+    // settle SUCCESSFULLY and deterministically, in every environment — see that function's own
+    // header for the full story (an earlier fix here tried a longer wait time and measured zero
+    // effect on the real CI mismatch, because the cause was never timing).
+    mockNetwork: true,
     prep: async (p) => {
       await clickIf(p, '[title="Collapse layers"]');
       await clickIf(p, '[role="tablist"][aria-label="Site or comp"] button:has-text("Comp")');
-      // B1038016 — 150ms → 500ms, kept as headroom but NOT the actual fix (see the budget note
-      // below): `CompsPanel.jsx`'s `reload()` awaits a real Supabase `fetchAllComps()` call before
-      // its "＋ New comps"/"⤒ Import (KML)" buttons render (`{!loading && !loadError && …}`). This
-      // sandbox's egress proxy cannot reach Supabase at all (a structural limit documented
-      // throughout this repo — see /CLAUDE.md's "sandbox blocks sign-in"), so `loading` never
-      // resolves here and those two buttons never render locally, at ANY wait time. A real browser
-      // — CI included — reaches a real network and resolves the fetch (success or a fast DNS-fail
-      // on the dummy CI secret) well inside this wait, so CI's own crawl sees one more signature
-      // than this sandbox ever can. `signature-budget.json`'s budget for this surface is set from
-      // CI's measured count for exactly this reason.
-      await p.waitForTimeout(500);
+      await p.waitForTimeout(300);
     },
     scope: "body",
     // B (map-view locked-geometry conversion) — also excludes the bottom-left network-status
@@ -213,19 +258,16 @@ const SURFACES = [
   },
   {
     name: "Map landing page (selecting parcels)", hash: "#/site",
+    // B1038016 (2nd correction) — `mockExternalNetwork` makes MapFinder.jsx's parcel-layer fetch
+    // settle SUCCESSFULLY, so `err` stays unset and the selection-guidance tooltip
+    // (`data-testid="select-parcels-tip"`) renders deterministically in every environment — see
+    // that function's own header. Same fix as comp mode above; the two surfaces share the same
+    // network-dependent-rendering root cause.
+    mockNetwork: true,
     prep: async (p) => {
       await clickIf(p, '[title="Collapse layers"]');
       await clickIf(p, 'button:has-text("Select parcels")');
-      // B1038016 — 150ms → 500ms, kept as headroom but NOT the actual fix (see the budget note
-      // below): the selection-guidance tooltip (`data-testid="select-parcels-tip"` in
-      // MapFinder.jsx) is gated `!err && selectMode` — arming select mode kicks off a real county
-      // GIS parcel-layer fetch, and this sandbox's egress cannot reach it, so a `requesterror`/
-      // "layer failed" handler sets `err` almost immediately and the tooltip never renders here, at
-      // ANY wait time (same structural sandbox limit as the comp-mode note above, and the same one
-      // the network-status-toast exclusion below already exists for). CI's real network resolves
-      // the fetch (or fails later, past this wait) so the tooltip renders there. This surface's
-      // budget is set from CI's measured count for exactly this reason.
-      await p.waitForTimeout(500);
+      await p.waitForTimeout(300);
     },
     scope: "body",
     // B (map-view locked-geometry conversion) — also excludes the bottom-left network-status
@@ -978,6 +1020,7 @@ async function run() {
     for (const theme of ["light", "dark"]) {
       for (const surface of SURFACES) {
         const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
+        if (surface.mockNetwork) await mockExternalNetwork(ctx);
         await ctx.addInitScript(seed(theme));
         const page = await ctx.newPage();
         await assertMeasurable(page, "ui-inventory");
