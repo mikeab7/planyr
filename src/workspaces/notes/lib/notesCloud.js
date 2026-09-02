@@ -694,15 +694,28 @@ export async function fetchPageIndex(client) {
 
 const CHUNK = 120;
 
-/** Documents for a set of page ids, chunked so a long id list cannot blow the URL limit. */
+/** Documents for a set of page ids, chunked so a long id list cannot blow the URL limit.
+ *
+ *  `updatedAt` (ms epoch, from the server-owned `updated_at` trigger column — see
+ *  `notes_pages_touch` in `db/notes_cloud_sync.sql`) rides along so a conflict raised from
+ *  this row can say WHEN the other window last saved, not just what it saved (B842624). It is
+ *  read-only telemetry: nothing here writes it, and its absence (a malformed timestamp) reads
+ *  as `null` rather than throwing — a comparison bar that cannot show a time still shows the
+ *  text. */
 export async function fetchPages(client, pageIds) {
   const ids = [...new Set((pageIds || []).filter(Boolean))];
   const out = {};
   for (let i = 0; i < ids.length; i += CHUNK) {
     const { data, error } = await client.from(PAGE_TABLE)
-      .select("id,doc,rev,deleted_at,purged_at").in("id", ids.slice(i, i + CHUNK));
+      .select("id,doc,rev,deleted_at,purged_at,updated_at").in("id", ids.slice(i, i + CHUNK));
     if (error) return { ok: false, error: error.message, pages: out };
-    for (const r of data || []) out[r.id] = { doc: r.doc, rev: Number(r.rev), binned: !!r.deleted_at, purged: !!r.purged_at };
+    for (const r of data || []) {
+      const updatedAt = r.updated_at ? Date.parse(r.updated_at) : NaN;
+      out[r.id] = {
+        doc: r.doc, rev: Number(r.rev), binned: !!r.deleted_at, purged: !!r.purged_at,
+        updatedAt: Number.isFinite(updatedAt) ? updatedAt : null,
+      };
+    }
   }
   return { ok: true, pages: out };
 }

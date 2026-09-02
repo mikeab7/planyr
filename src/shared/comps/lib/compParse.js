@@ -1,5 +1,5 @@
 /* compParse — comp entry parsing: paste text -> typed grid rows (B849232/NEW-1; B986096 recurrence
- * ×8, 2026-09-01, owner report — read this header before touching a detector).
+ * ×9, 2026-09-01, owner report — read this header before touching a detector).
  *
  * THREE PASTE SHAPES, and detecting WHICH one a paste is is the whole point of this module
  * (owner correction, 2026-09-01 — the original spec said "one pasted line becomes one row,"
@@ -24,7 +24,7 @@
  * isn't visible in the value itself — the canonical case is a lease rate with no stated period.
  * This module never resolves a blocking guess itself — it only ever refuses to guess and says why.
  *
- * ⛔ B986096 ×8 (owner report, 2026-09-01) — THE SCAVENGER REWRITE. Michael pasted
+ * ⛔ B986096 ×9 (owner report, 2026-09-01) — THE SCAVENGER REWRITE. Michael pasted
  * ".56/SF , 12 TI, 3% bumps" — three real facts — and got one bare "Land" row with nothing
  * filled in. Two separate defects, both closed here:
  *
@@ -195,7 +195,7 @@ function detectBasis(text) {
   return null;
 }
 
-/** Best-effort comp type from wording — NEVER blank-defaults to "land" any more (B986096 ×8):
+/** Best-effort comp type from wording — NEVER blank-defaults to "land" any more (B986096 ×9):
  * returns `{ value: null, soft: true }` when nothing signals a type at all, so a caller with
  * more information (what fields were actually extracted — `inferTypeFromCapturedFields`) gets
  * one more chance before the row is left genuinely untyped. Flagged soft whenever it was a
@@ -215,7 +215,7 @@ export function detectCompType(text) {
 /** The type resolver's LAST resort, tried only once wording has said nothing at all: reads what
  * was actually captured rather than re-scanning text for keywords. Rate/TI/free-rent is
  * lease-only vocabulary; a cap rate or NOI is sale-only; an acre-denominated size is land; a
- * price alongside a non-acre size reads as a building sale (TYPE INFERENCE table, B986096 ×8).
+ * price alongside a non-acre size reads as a building sale (TYPE INFERENCE table, B986096 ×9).
  * Returns null — never a type — when even the captured fields don't say. */
 function inferTypeFromCapturedFields(g) {
   if (g.rate != null || g.ti != null || g.freeRentMonths != null) return "lease";
@@ -786,7 +786,7 @@ function finalizeGenericRow(generic, rawFlags, raw) {
 /** Generic fields -> the string-keyed draft shape `comps.js`'s `draftToComp`/`insertComp`
  * expect. Only fields the caller actually has values for are set — an unset field stays at the
  * blank default, per the entry grid's own rule that an empty cell is just a cell.
- * ⛔ B986096 ×8 — `compType` defaults to `""` (BLANK), never `"land"` any more: a row whose type
+ * ⛔ B986096 ×9 — `compType` defaults to `""` (BLANK), never `"land"` any more: a row whose type
  * could not be determined must say so rather than guess, and guessing wrong is exactly what
  * used to throw away every economic field a correctly-typed row would have kept (see the file
  * header, DEFECT A). A commencement date lands in `leaseCommencementDate` when one was found;
@@ -840,7 +840,7 @@ function genericToDraft(generic) {
 /** One prose line (broker-email style) -> `{ draft, cellFlags, raw }`, or `null` if the line
  * contributed nothing (never emit an entirely empty row). Used for the MANY-RECORDS-ONE-PER-LINE
  * shape, where each line is expected to be a complete, independent comp — runs the SAME
- * scavenger `extractUnlabeledLine` the single-record shape uses (B986096 ×8 — previously a
+ * scavenger `extractUnlabeledLine` the single-record shape uses (B986096 ×9 — previously a
  * separate, simpler extractor that only tried one match per field and only one label direction). */
 export function parseProseLine(line) {
   const generic = emptyGeneric();

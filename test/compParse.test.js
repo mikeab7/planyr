@@ -52,7 +52,7 @@ describe("compParse: comp type detection", () => {
   it("reads acreage/land words as land, confident", () => {
     expect(detectCompType("3.2 AC land - $850k")).toEqual({ value: "land", soft: false });
   });
-  it("B986096 x8 — never defaults to land any more; a genuinely blank signal is null", () => {
+  it("B986096 x9 — never defaults to land any more; a genuinely blank signal is null", () => {
     const r = detectCompType("some random line with no signal");
     expect(r).toEqual({ value: null, soft: true });
   });
@@ -326,7 +326,7 @@ describe("compParse: splitPasteLines", () => {
 });
 
 /* ============================================================================================
- * B986096 x8 (owner report, 2026-09-01) — THE SCAVENGER REWRITE.
+ * B986096 x9 (owner report, 2026-09-01) — THE SCAVENGER REWRITE.
  * "the one that started it" is the headline test: every other test below is one of the isolated
  * defects that combined to produce it. See compParse.js's file header for the two named defects
  * (A: one unrecognized token must never suppress a recognized one, and a row with no type signal

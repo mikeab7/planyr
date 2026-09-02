@@ -38,7 +38,7 @@
  * merge, but it can no longer clobber another device's saved work in total silence.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import AppHeader, { useNarrow } from "../../shared/ui/AppHeader.jsx";
+import AppHeader from "../../shared/ui/AppHeader.jsx";
 import SheetView from "./components/SheetView.jsx";
 import FormulaBar from "./components/FormulaBar.jsx";
 import FindReplaceBar from "./components/FindReplaceBar.jsx";
@@ -100,12 +100,10 @@ export default function ModelApp({
   const clipboardRef = useRef(null);
   // ⛔ B891184-FOLLOWUP (live production finding, 2026-08-31): the toolbar overflowed a 729px
   // window — measured, the number-format picker's own box sat 22.7px past the viewport edge,
-  // reachable to a script but not to a real click. Row 1 (AppHeader.toolbarContent) now keeps
-  // only Undo/Redo, which its shared "narrow" mode (≤760px) already collapses to icon-only —
-  // everything else that used to crowd this row (number format, delete column, and now font/
-  // borders/alignment/cells/sort-filter) lives in the Ribbon below instead, which does its OWN
-  // width-aware collapsing (lib/ribbonLayout.js) rather than reusing this flag.
-  const narrow = useNarrow();
+  // reachable to a script but not to a real click. Every formatting control (incl. Undo/Redo,
+  // since the ICONOGRAPHY pass) now lives in the Ribbon below, which does its own width-aware
+  // collapsing (lib/ribbonLayout.js) — row 1 (AppHeader) carries no toolbarContent for this
+  // workspace at all any more.
   // Stage 1 — Name Box (Ctrl+G focuses it) and Find/Replace (Ctrl+F / Ctrl+H).
   const nameBoxRef = useRef(null);
   const [findOpen, setFindOpen] = useState(false);
@@ -396,15 +394,10 @@ export default function ModelApp({
           : undefined
         }
         multiEditOk
-        // STAGE 2 — the ribbon (below) is now the home for number format / column delete /
-        // every other formatting control; row 1 keeps only Undo/Redo, which AppHeader's own
-        // narrow handling already collapses to icon-only with no menu needed.
-        toolbarContent={openProject ? (
-          <div style={{ display: "flex", alignItems: "center", gap: narrow ? 4 : 8 }}>
-            <button type="button" onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)" style={toolbarBtnStyle(canUndo, narrow)}>{narrow ? "↶" : "↶ Undo"}</button>
-            <button type="button" onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)" style={toolbarBtnStyle(canRedo, narrow)}>{narrow ? "↷" : "↷ Redo"}</button>
-          </div>
-        ) : null}
+        // STAGE 2 ICONOGRAPHY PASS — Undo/Redo moved OUT of row 1 and into the Ribbon's own
+        // leading "Actions" group (icon buttons, matching Google Sheets' own toolbar, where
+        // Undo/Redo open the row rather than living in a separate header bar). Row 1 no longer
+        // needs a toolbarContent at all for this workspace.
       />
 
       {!openProject ? (
@@ -419,6 +412,10 @@ export default function ModelApp({
             freezeCols={sheet.freezeCols}
             painterArmed={!!painter}
             filterOn={filterOn}
+            canUndo={canUndo}
+            canRedo={canRedo}
+            onUndo={undo}
+            onRedo={redo}
             onSetCellStyle={onSetCellStyle}
             onApplyBorder={onApplyBorderCmd}
             onApplyFormat={onApplyFormat}
@@ -479,12 +476,4 @@ export default function ModelApp({
       )}
     </div>
   );
-}
-
-function toolbarBtnStyle(enabled, narrow) {
-  return {
-    height: 26, padding: narrow ? "0 7px" : "0 10px", borderRadius: 6, border: "1px solid var(--border-default)",
-    background: "var(--surface-page)", color: enabled ? "var(--text-primary)" : "var(--text-tertiary)",
-    font: "inherit", fontSize: 12, cursor: enabled ? "pointer" : "default", opacity: enabled ? 1 : 0.55,
-  };
 }
