@@ -104,15 +104,19 @@ const NOISE_FLOOR_NOTE =
   "0 differing pixels on all 8 surface/theme baselines, captured twice in a row against the " +
   "identical build with nothing changed (`node ui-audit/measure-visual-noise.mjs`, 2026-09-01).";
 const ADDED_CI_TIME_NOTE =
-  "locally measured (this session's sandbox, not yet confirmed against a real GitHub Actions run — " +
-  "see the item's BACKLOG note for the update once one has run): preview-server startup ~3s + the " +
-  "8-capture check itself ~21s ≈ ~24s on top of a build.yml job that already runs ~15 other steps. " +
-  "Plus the new Playwright-chromium install step, cached via actions/cache on " +
-  "~/.cache/ms-playwright: ~15s on a cache HIT (OS package install only — GitHub-hosted runners " +
-  "don't persist apt state, so this part runs even on a cache hit) vs. ~50-70s on a cache MISS " +
-  "(the browser binary itself, ~290 MB across chromium/ffmpeg/headless-shell, plus the same OS " +
-  "packages) — a miss happens only on the first run or when package-lock.json's playwright version " +
-  "changes. Steady-state total: **~40s added per PR**; worst case (cold cache): **~95s**.";
+  "MEASURED against a real GitHub Actions run, not estimated (PR #1311, run 33572020616, job " +
+  "100067828486, 2026-09-01 — corrects the sandbox-only guess this note originally carried). Per-step, " +
+  "read from the job's own timestamped log: **Cache Playwright browsers ~11.1s** (a cache HIT — " +
+  "\"Cache hit occurred on the primary key playwright-chromium-Linux-…, not saving cache\") · " +
+  "**Install Playwright chromium ~24.4s** (the `--with-deps` OS package install runs even on a cache " +
+  "hit, since GitHub-hosted runners don't persist apt state between jobs — this is the steady-state " +
+  "floor, not a fluke) · **serve + wait-for-preview ~1.1s** · **the visual-regression check itself " +
+  "~19.2s** (8 captures + diff). **Steady-state (cache hit) total: ~56s added**, against a `build.yml` " +
+  "job whose full run (checkout through the bundle-budget check) took 6m02s end to end — roughly a " +
+  "15% addition to an already-substantial job. A cache MISS (first run, or whenever " +
+  "package-lock.json's playwright version changes) adds the ~290 MB browser download on top — not yet " +
+  "measured against real CI, so the prior estimate (~50-70s for that download alone, ~95s worst-case " +
+  "total) stands as an estimate until a real cache-miss run is observed.";
 
 /* ---------------------------------------------------------------------------------------------
  * A local, GIS-free demo plan — deliberately its own fixture rather than importing ui-inventory.mjs's
