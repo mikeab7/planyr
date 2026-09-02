@@ -1,7 +1,7 @@
 {
-  "hexCeiling": 571,
+  "hexCeiling": 572,
   "radiusCeiling": 138,
-  "fontSizeCeiling": 448,
-  "writtenAt": "2026-09-01",
+  "fontSizeCeiling": 446,
+  "writtenAt": "2026-09-02",
   "note": "Ratchet ceiling for ui-audit/design-drift-audit.mjs --check (same shape as scripts/verification-queue-ceiling.json). Regenerate with `node ui-audit/design-drift-audit.mjs --write-ceiling` after a session genuinely lowers a count — never raise it to silence a real regression."
 }

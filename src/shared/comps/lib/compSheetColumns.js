@@ -84,7 +84,7 @@ import {
 } from "./comps.js";
 import { parseTypedDate, formatDateDisplay } from "./compDates.js";
 
-export const GROUPS = ["TYPE", "PROPERTY", "DEAL", "PRICE", "RENT", "CONCESSIONS", "DERIVED", "PARTIES"];
+export const GROUPS = ["TYPE", "PROPERTY", "DEAL", "PRICE", "RENT", "CONCESSIONS", "DERIVED", "PARTIES", "NOTES"];
 
 // HARDENING-10 — leaseTerm's cell boundary: the stored field stays free text (a real deal can be
 // "10 yr + 2x5 options", which a bare-months cell can't hold) but the SHEET CELL itself only ever
@@ -226,8 +226,15 @@ export const SHEET_COLUMNS = [
   { key: "location", label: "Location", group: "PROPERTY", width: 150, align: "left", kind: "action", appliesTo: () => true, required: true },
 
   // DEAL — facts about the transaction: when, how long.
-  simpleColumn({ key: "compDate", label: "Executed", group: "DEAL", width: 74, align: "right", kind: "date", required: true }),
-  simpleColumn({ key: "leaseCommencementDate", label: "Commence", fullLabel: "Commencement", group: "DEAL", width: 74, align: "right", kind: "date", appliesTo: (t) => t === "lease" }),
+  // B986096-HARDENING-25 — `editHint` becomes the edit `<input>`'s native `placeholder` while a
+  // date cell is being typed into, and ONLY then (SheetCell never reads it at rest). This is
+  // deliberately a different thing from the resting-state `cellPlaceholder`, which HARDENING-10
+  // NEW-4 correctly killed everywhere ("empty means empty," no placeholder WORDS standing in for
+  // real data) — a date's own format (mm/dd/yy) isn't a guessed value, it's the format the cell
+  // will parse, and it only shows once you're already mid-edit, so it can never be mistaken for a
+  // real stored value while scanning the sheet at rest.
+  simpleColumn({ key: "compDate", label: "Executed", group: "DEAL", width: 74, align: "right", kind: "date", required: true, editHint: "mm/dd/yy" }),
+  simpleColumn({ key: "leaseCommencementDate", label: "Commence", fullLabel: "Commencement", group: "DEAL", width: 74, align: "right", kind: "date", appliesTo: (t) => t === "lease", editHint: "mm/dd/yy" }),
   {
     // HARDENING-10 — the STORED field stays free text (a real term can be "10 yr + 2x5 options",
     // which a bare-months field can't hold) but the CELL only ever shows/accepts a bare month
@@ -324,14 +331,15 @@ export const SHEET_COLUMNS = [
     },
   },
 
-  // PARTIES — who the deal is between, plus notes (kept here rather than dropped — every type
-  // needs somewhere for what doesn't fit a column). All four `flexKey` columns (title above,
-  // these three) share the dialog's leftover horizontal space — see CompEntryGrid.jsx's
-  // `computeFlexWidths`. `width` here is only the STATIC fallback (tests, no-DOM contexts); the
-  // live sheet always uses the computed value.
+  // PARTIES — who the deal is between. Notes used to live in this group too (B986096-HARDENING-25
+  // correction: a note isn't a party — it's freeform commentary on the whole comp, and nesting it
+  // under PARTIES read as a membership error, not a layout choice) — it's its own one-column NOTES
+  // group now. All three `flexKey` columns here (plus Title above) share the dialog's leftover
+  // horizontal space — see CompEntryGrid.jsx's `computeFlexWidths`. `width` here is only the
+  // STATIC fallback (tests, no-DOM contexts); the live sheet always uses the computed value.
   simpleColumn({ key: "partyProvider", label: "Landlord/Seller", fullLabel: "Landlord / Seller", group: "PARTIES", width: 125, flexKey: "partyProvider", align: "left", kind: "text" }),
   simpleColumn({ key: "partyAcquirer", label: "Tenant/Buyer", fullLabel: "Tenant / Buyer", group: "PARTIES", width: 125, flexKey: "partyAcquirer", align: "left", kind: "text" }),
-  simpleColumn({ key: "notes", label: "Notes", group: "PARTIES", width: 90, flexKey: "notes", align: "left", kind: "text" }),
+  simpleColumn({ key: "notes", label: "Notes", group: "NOTES", width: 90, flexKey: "notes", align: "left", kind: "text" }),
 ];
 
 export function columnIndex(key) {
