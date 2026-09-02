@@ -9,6 +9,15 @@
  * renamed to "Drop a pin"/"Comp from parcel". Every locator below targets that shape — there is
  * no more "Leasing Comps" title or "＋ Comp" button anywhere in the app.
  *
+ * ⛔ B848304 (2026-09-02) touched only the ONE assumption this file's `openCompCreateForm` made
+ * about the map's ENTRY POINT — the resting "Drop a pin" button is now the "Place comp" split
+ * button's primary segment (same arm, same default anchor) — and is fixed below. Everything past
+ * that click (a "Type" field + a "Save comp" button opening directly) predates B849232/B849233
+ * (2026-09-01), which replaced that single-comp create form with the CompEntryGrid paste sheet as
+ * the one create surface; a map pick now opens that grid pre-seeded with one row, not a field
+ * form. This file was not brought forward for that rework (owned by the comps-grid sessions, out
+ * of scope here) — treat every assertion past the first two per test as STALE until it is.
+ *
  * The signed-in round trip (insert/update/delete actually landing in Supabase, team-visibility,
  * and everything the DETAIL view renders) is `Blocker: auth` — parked as V### items (see
  * BACKLOG.md/VERIFICATION.md) — Supabase sign-in is CORS-blocked from this sandbox. This spec
@@ -29,7 +38,9 @@ async function openCompsTab(page) {
 
 async function openCompCreateForm(page) {
   await openCompsTab(page);
-  await page.getByRole("button", { name: "Drop a pin" }).click();
+  // B848304 — "Drop a pin" is now "Place comp" (its primary click defaults to the same map-pin
+  // anchor on a fresh session).
+  await page.getByRole("button", { name: "Place comp", exact: true }).click();
   // Armed: the map shows the "click to place" prompt instead of the action buttons.
   await expect(page.getByText("Click the map to place a comp…")).toBeVisible();
   const mapBox = await page.locator(".leaflet-container").first().boundingBox();
@@ -60,7 +71,8 @@ test("the Drop-a-pin flow arms, opens the create form pre-filled, and a signed-o
 
 test("the Comps tab opens an honest empty list when signed out", async ({ page }) => {
   await openCompsTab(page);
-  await expect(page.getByText("No comps yet. Use “Drop a pin” or “Comp from parcel” on the map to add one.")).toBeVisible({ timeout: 10_000 });
+  // B848304 — the empty-state copy now names the collapsed toolbar entry point.
+  await expect(page.getByText("No comps yet. Paste a few from a broker email with “＋ Paste comps” above, or use “Place comp” on the map.")).toBeVisible({ timeout: 10_000 });
 });
 
 test("lease rate + period render inline on one row, as a compact labelled MO/YR control — no separate Period row", async ({ page }) => {

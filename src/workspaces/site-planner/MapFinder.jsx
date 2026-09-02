@@ -134,6 +134,12 @@ const PAL = {
 const COMP_ACCENT = "#2f6fb0";
 const ON_COMP_ACCENT = PALETTES.light.onAccent; // white — see the palette.js import above
 
+// B848304 — the "Place comp" split button's three anchor kinds, each a prepositional phrase that
+// grammatically completes "Place comp / …" (the caret's own menu item text, verbatim). Also what
+// the primary button appends to its own label once a kind has been chosen this session, so the
+// armed anchor reads without opening the menu.
+const COMP_ANCHOR_PHRASE = { map: "on the map", parcel: "on a parcel", site_plan: "on a site plan" };
+
 // The aerial-source registry (BASEMAPS) lives in lib/basemaps.js (B693) — it's shared
 // with the planner's Basemap control so both surfaces always offer the same sources.
 // Its B220 rule travels with it: every source carries `maxNative`, and the imagery
@@ -467,7 +473,19 @@ const PinGlyph = ({ size = 12 }) => (
 
 /* B831776 (NEW-1) — the far-left Site/Comp switch. MODULE-SCOPE-COMPONENTS: defined here, not
  * inside MapFinder's render. Two segments, one piece of state (`mode`) — see the state's own
- * comment for why there is deliberately no second "which tab" variable. */
+ * comment for why there is deliberately no second "which tab" variable.
+ * ⛔ B848304 — RENAMED, not removed: read this before "simplifying" it away. Once the map
+ * toolbar's placement buttons collapsed into the "Place comp" split button, this switch stopped
+ * being about arming a click at all — it never was ONLY that, which is why it stays. It still
+ * does a real, distinct job the split button cannot: it picks which list the left rail shows
+ * (Sites or Comps — B831777, the SAME `mode` state, no second variable) and which toolbar
+ * workflow is active (the Select-parcels flow vs. the Place-comp flow). The RENAME lives in the
+ * accessible name ("Browse sites or comps") and each segment's own tooltip — precisely so this
+ * no longer READS as a second way to say "place a comp" (the duplication the owner flagged) —
+ * without touching the terse visible glyph, which stays "Site"/"Comp" on purpose: a segmented
+ * toggle this narrow keeps PANEL-BREVITY's short label, and pluralizing it to "Comps" collides
+ * with the rail tab's own accessible name ("Comps 0") for any locator that doesn't disambiguate
+ * — tried, reverted, see this item's PR history. */
 const SWITCH_SEG_H = 26;
 function SiteCompSwitch({ mode, onChange }) {
   // NEW-1/NEW-3 (map landing radius audit) — measured `nestedIn(RADIUS.sm, 2)` = 4px against this
@@ -479,10 +497,10 @@ function SiteCompSwitch({ mode, onChange }) {
   // PERCEPTUAL-PARITY), the second is the one that doesn't invent a fifth radius step, so the
   // segment stays on RADIUS.sm, matching its own shell. See docs/DESIGN.md's radius section for
   // the rule this documents ("snap to the nearest canonical step rather than mint a derived one").
-  const seg = (key, label, accent) => {
+  const seg = (key, label, accent, title) => {
     const on = mode === key;
     return (
-      <button key={key} type="button" role="tab" aria-selected={on} onClick={() => onChange(key)}
+      <button key={key} type="button" role="tab" aria-selected={on} title={title} onClick={() => onChange(key)}
         style={{
           flex: "none", height: SWITCH_SEG_H, padding: "0 8px", borderRadius: RADIUS.sm, border: "none",
           background: on ? accent : "transparent", color: on ? "#fff" : "var(--chrome-muted)",
@@ -492,12 +510,12 @@ function SiteCompSwitch({ mode, onChange }) {
     );
   };
   return (
-    <div role="tablist" aria-label="Site or comp" style={{
+    <div role="tablist" aria-label="Browse sites or comps" style={{
       flex: "none", display: "flex", gap: 2, padding: 2, marginRight: 6,
       height: SWITCH_SEG_H + 4, borderRadius: RADIUS.sm, background: "var(--chrome-bg-elev)",
     }}>
-      {seg("site", "Site", PAL.accent)}
-      {seg("comp", "Comp", COMP_ACCENT)}
+      {seg("site", "Site", PAL.accent, "Browse your sites and start new plans")}
+      {seg("comp", "Comp", COMP_ACCENT, "Browse your leasing comps and place new ones")}
     </div>
   );
 }
@@ -638,6 +656,21 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   // parcel-identify machinery — just a raw point.
   const [placingCompPin, setPlacingCompPin] = useState(false);
   useEffect(() => { placingCompPinRef.current = placingCompPin; }, [placingCompPin]);
+  // B848304 (map toolbar "Place comp" split button) — which anchor kind the primary click uses,
+  // STICKY FOR THE SESSION (sessionStorage, not localStorage — a fresh tab starts over, matching
+  // the owner's spec: "first use of the session defaults to On the map"). Null until the user's
+  // first real choice this session (either the primary click's own default, or an explicit caret
+  // pick); the button's own label reads it back so the armed anchor is visible without opening
+  // the menu.
+  const [lastCompAnchorKind, setLastCompAnchorKindRaw] = useState(() => {
+    try { return sessionStorage.getItem("planarfit:compAnchorKind:v1") || null; } catch (_) { return null; }
+  });
+  const setLastCompAnchorKind = (kind) => {
+    setLastCompAnchorKindRaw(kind);
+    try { sessionStorage.setItem("planarfit:compAnchorKind:v1", kind); } catch (_) { /* private mode */ }
+  };
+  const [placeCompMenuOpen, setPlaceCompMenuOpen] = useState(false);
+  const placeCompMenuBtnRef = useRef(null);
   useEffect(() => {
     if (!mapRef.current) return;
     if (placingCompPin) mapRef.current.getContainer().style.cursor = ADD_CURSOR;
@@ -680,6 +713,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   // through the EXISTING onPlaceComp/pendingCompAnchor flow.
   const [sitePlanOverlays, setSitePlanOverlays] = useState([]);
   const overlaysById = useMemo(() => Object.fromEntries(sitePlanOverlays.map((o) => [o.id, o])), [sitePlanOverlays]);
+  // B848304 — reachability for the "Place comp" caret's "On a site plan" item: whether ANY
+  // overlay has been uploaded on this site. Deliberately not `visibleSitePlanOverlays` below —
+  // that's zoom-gated for on-screen rendering, a different question from "does this flow exist
+  // at all right now", which is what the menu item's disabled state answers.
+  const hasSitePlanOverlay = sitePlanOverlays.length > 0;
   // Meaningless zoomed all the way out — a site plan is building-scale detail.
   const SITE_PLAN_MIN_ZOOM = 15;
   const visibleSitePlanOverlays = useMemo(
@@ -711,7 +749,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   };
 
   const [clickableOverlayId, setClickableOverlayId] = useState(null); // "pin a comp" mode, armed on one overlay
-  const startPinOnOverlay = (id) => { setActiveOverlayId(null); setClickableOverlayId(id); };
+  // B848304 — every entry point that arms a site-plan pin (the "Place comp" caret's "On a site
+  // plan" item, AND the Site plans panel's own per-overlay "Pin a comp here" button) routes
+  // through here, so stickiness records the real choice regardless of which door was used.
+  const startPinOnOverlay = (id) => { setActiveOverlayId(null); setClickableOverlayId(id); setLastCompAnchorKind("site_plan"); };
   const stopPinOnOverlay = () => setClickableOverlayId(null);
   // B986096-HARDENING-7 — a comp pinned onto a georeferenced site-plan overlay is still a real
   // ground position (`latLonToImagePoint` needs one to place it), so it gets the same best-effort
@@ -2548,6 +2589,23 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     clearSel();
   };
 
+  // B848304 — the ONE arming function behind the "Place comp" split button, for all three anchor
+  // kinds. Called both by the primary click (with the last-used kind, defaulting to "map" on a
+  // fresh session) and by each caret menu item (an explicit pick, which becomes the new last-used
+  // kind). "site_plan" resolves to a real overlay itself — the ACTIVE one if there is one, else
+  // the first uploaded — and falls back to "map" if none exists, so a stale sticky choice (an
+  // overlay deleted since it was last used) can never arm a dead menu action from the primary click.
+  const armCompAnchor = (kind) => {
+    if (kind === "site_plan") {
+      const target = (activeOverlayId && overlaysById[activeOverlayId]) ? activeOverlayId : sitePlanOverlays[0]?.id;
+      if (!target) { armCompAnchor("map"); return; }
+      startPinOnOverlay(target); // also records the "site_plan" stickiness itself
+      return;
+    }
+    setLastCompAnchorKind(kind);
+    if (kind === "parcel") setSelectMode(true); else setPlacingCompPin(true);
+  };
+
   // B941152 — Enter mirrors the "Comp here" button that appears the moment a parcel is selected
   // in Comp mode. Selecting parcels is a sequence of map clicks, which leaves nothing sitting in
   // focus (not the address field, not a button) — so before this, Michael's Enter keystroke had
@@ -2967,25 +3025,48 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               >▾</Button>
             </div>
           )}
+          {/* B848304 — the mode toggle's old "Comp" segment plus these two buttons said the same
+              thing three times ("Drop a pin" / "Comp from parcel"); collapsed into ONE split
+              button. Primary click uses the LAST-USED anchor (defaulting to "On the map" the
+              first time this session); the caret opens the three named ways to anchor a comp,
+              each a prepositional phrase completing "Place comp / …". */}
           {mode === "comp" && !selectMode && !placingCompPin && selected.length === 0 && onPlaceComp && (
-            <>
+            <div style={{ display: "flex", flex: "0 1 auto", minWidth: 54 }}>
               <Button
-                variant="ghost"
-                onClick={() => setPlacingCompPin(true)}
-                title="Click the map to drop a leasing-comp pin at that spot"
-                style={{ ...NESTED_ACTION_SIZE, flex: "0 1 auto", minWidth: 40, overflow: "hidden", color: PAL.chromeInk, background: "var(--chrome-bg-elev)", border: "1px solid var(--chrome-divider)", boxShadow: "none" }}
+                variant="primary"
+                onClick={() => armCompAnchor(lastCompAnchorKind || "map")}
+                title={`Click the map to place a comp ${COMP_ANCHOR_PHRASE[lastCompAnchorKind || "map"]}`}
+                data-testid="map-place-comp-btn"
+                style={{
+                  ...NESTED_ACTION_SIZE, fontWeight: 700,
+                  flex: "1 1 auto", minWidth: 0, overflow: "hidden",
+                  background: COMP_ACCENT, border: "none",
+                  borderTopLeftRadius: NESTED_ACTION_SIZE.borderRadius, borderBottomLeftRadius: NESTED_ACTION_SIZE.borderRadius,
+                  borderTopRightRadius: 0, borderBottomRightRadius: 0,
+                  borderRight: `1px solid ${ON_COMP_ACCENT}`, boxShadow: "none",
+                }}
               >
-                <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Drop a pin</span>
+                <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {lastCompAnchorKind ? `Place comp ${COMP_ANCHOR_PHRASE[lastCompAnchorKind]}` : "Place comp"}
+                </span>
               </Button>
               <Button
-                variant="ghost"
-                onClick={() => setSelectMode(true)}
-                title="Click a parcel on the map to anchor a comp to it"
-                style={{ ...NESTED_ACTION_SIZE, flex: "0 1 auto", minWidth: 44, overflow: "hidden", color: PAL.chromeInk, background: "var(--chrome-bg-elev)", border: "1px solid var(--chrome-divider)", boxShadow: "none" }}
-              >
-                <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Comp from parcel</span>
-              </Button>
-            </>
+                variant="primary"
+                ref={placeCompMenuBtnRef}
+                onClick={() => setPlaceCompMenuOpen((o) => !o)}
+                title="More ways to anchor a comp"
+                aria-haspopup="menu" aria-expanded={placeCompMenuOpen}
+                data-testid="map-place-comp-menu-btn"
+                style={{
+                  flex: "none", width: 22, height: NESTED_ACTION_SIZE.height, padding: 0,
+                  background: COMP_ACCENT, border: "none",
+                  borderTopRightRadius: NESTED_ACTION_SIZE.borderRadius, borderBottomRightRadius: NESTED_ACTION_SIZE.borderRadius,
+                  borderTopLeftRadius: 0, borderBottomLeftRadius: 0,
+                  fontSize: FONT_SIZE.micro, boxShadow: "none",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+              >▾</Button>
+            </div>
           )}
           {placingCompPin && (
             <>
@@ -3004,7 +3085,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               {mode === "comp" && onPlaceComp && (
                 <Button
                   variant="ghost"
-                  onClick={() => { setPlacingCompPin(false); setSelectMode(true); }}
+                  onClick={() => { setPlacingCompPin(false); setSelectMode(true); setLastCompAnchorKind("parcel"); }}
                   title="Anchor to a parcel instead of a raw pin"
                   style={{ ...NESTED_ACTION_SIZE, flex: "0 1 auto", minWidth: 44, overflow: "hidden", color: PAL.chromeInk, background: "var(--chrome-bg-elev)", border: "1px solid var(--chrome-divider)", boxShadow: "none" }}
                 >
@@ -3032,7 +3113,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               {mode === "comp" && onPlaceComp && (
                 <Button
                   variant="ghost"
-                  onClick={() => { setSelectMode(false); setPlacingCompPin(true); }}
+                  onClick={() => { setSelectMode(false); setPlacingCompPin(true); setLastCompAnchorKind("map"); }}
                   title="Drop a pin instead of anchoring to a parcel"
                   style={{ ...NESTED_ACTION_SIZE, flex: "0 1 auto", minWidth: 40, overflow: "hidden", color: PAL.chromeInk, background: "var(--chrome-bg-elev)", border: "1px solid var(--chrome-divider)", boxShadow: "none" }}
                 >
@@ -3114,6 +3195,34 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             title="Start a plan with no parcel, located where the map is looking — draw the boundary yourself"
             onClick={() => { setStartBlankMenuOpen(false); startBlankHere(); }}>
             Start blank
+          </MenuItem>
+        </AnchoredMenu>
+
+        {/* B848304 — the "Place comp" split button's caret. Three prepositional phrases, each
+            grammatically completing "Place comp / …" — never rewritten as verbs (that reads as
+            three unrelated commands instead of one action with three ways to anchor it). "On a
+            site plan" always renders, never omitted, even when unreachable: a missing item
+            teaches the user the capability doesn't exist, a disabled one with a reason teaches
+            them how to get it. */}
+        <AnchoredMenu open={placeCompMenuOpen} onClose={() => setPlaceCompMenuOpen(false)}
+          anchorRef={placeCompMenuBtnRef} placement="below-left" width={200} gap={6}
+          zIndex={MAP_CHROME_Z.panel} panelStyle={menuPanelStyle}>
+          <MenuItem data-testid="map-place-comp-menu-item-map"
+            title="Place a comp anywhere you click on the map"
+            onClick={() => { setPlaceCompMenuOpen(false); armCompAnchor("map"); }}>
+            On the map
+          </MenuItem>
+          <MenuItem data-testid="map-place-comp-menu-item-parcel"
+            title="Anchor the comp to a real parcel you select on the map"
+            onClick={() => { setPlaceCompMenuOpen(false); armCompAnchor("parcel"); }}>
+            On a parcel
+          </MenuItem>
+          <MenuItem data-testid="map-place-comp-menu-item-site-plan"
+            aria-disabled={hasSitePlanOverlay ? undefined : "true"}
+            title={hasSitePlanOverlay ? "Anchor the comp to a point on an uploaded site plan" : "Upload a site plan first (Site plans panel below) — then this anchors a comp to it"}
+            style={hasSitePlanOverlay ? undefined : { opacity: 0.45, cursor: "not-allowed" }}
+            onClick={() => { if (!hasSitePlanOverlay) return; setPlaceCompMenuOpen(false); armCompAnchor("site_plan"); }}>
+            On a site plan
           </MenuItem>
         </AnchoredMenu>
 

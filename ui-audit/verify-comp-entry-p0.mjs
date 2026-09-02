@@ -64,7 +64,7 @@ async function openEntrySheet(page) {
   await assertMeasurable(page, "verify-comp-entry-p0");
   await page.getByRole("tab", { name: /^Comps/ }).first().click();
   await pacedWait(page, 400);
-  await page.getByText("＋ New comps", { exact: true }).click();
+  await page.getByText("＋ Paste comps", { exact: true }).click();
   await pacedWait(page, 300);
   const textarea = page.locator("textarea").first();
   await textarea.click();
@@ -173,9 +173,13 @@ console.log("\n=== BLOCKER 2 — the toolbar pin fills the open row, never appen
   check("Location still 'Set' (genuinely unarmed) before the pick",
     await page.locator('td[data-cell^="0-"]').filter({ hasText: "Set" }).count() > 0);
 
-  const dropPinBtn = page.getByText("Drop a pin", { exact: true });
-  await dropPinBtn.waitFor({ state: "visible", timeout: 8000 });
-  await dropPinBtn.click();
+  // B848304 — the resting-state "Drop a pin"/"Comp from parcel" pair collapsed into ONE
+  // "Place comp" split button; the primary click uses the last-used anchor, defaulting to
+  // "On the map" on a fresh session (which every context in this file is), so this is the exact
+  // functional equivalent of the old "Drop a pin" click.
+  const placeCompBtn = page.getByRole("button", { name: "Place comp", exact: true });
+  await placeCompBtn.waitFor({ state: "visible", timeout: 8000 });
+  await placeCompBtn.click();
   await pacedWait(page, 300);
 
   const mapBox = await page.locator(".leaflet-container").first().boundingBox();
@@ -200,7 +204,7 @@ console.log("\n=== DOCKING — the panel sits at the bottom; the map above it st
   await openEntrySheet(page);
 
   const rects = await page.evaluate(() => {
-    const header = [...document.querySelectorAll("span")].find((s) => s.textContent === "New comps");
+    const header = [...document.querySelectorAll("span")].find((s) => s.textContent === "Paste comps");
     let node = header, fixedWrap = null;
     while (node) { if (getComputedStyle(node).position === "fixed") { fixedWrap = node; break; } node = node.parentElement; }
     const leaflet = document.querySelector(".leaflet-container");
@@ -474,7 +478,7 @@ console.log("\n=== CYCLE 6 (B986096-HARDENING-16) — NEW-1 re-investigation: ev
   const input = target.locator("input");
   await input.selectText().catch(() => {});
   await page.keyboard.type("2/22/26");
-  await page.getByText("New comps", { exact: true }).click(); // the panel's own header chrome
+  await page.getByText("Paste comps", { exact: true }).click(); // the panel's own header chrome
   await pacedWait(page, 300);
   check("clicking the panel HEADER (non-interactive chrome) commits the just-typed value",
     (await target.innerText()).trim() === "02/22/26", `got ${JSON.stringify((await target.innerText()).trim())}`);

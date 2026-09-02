@@ -243,7 +243,9 @@ const SURFACES = [
     mockNetwork: true,
     prep: async (p) => {
       await clickIf(p, '[title="Collapse layers"]');
-      await clickIf(p, '[role="tablist"][aria-label="Site or comp"] button:has-text("Comp")');
+      // B848304 — the toggle's aria-label was renamed to "Browse sites or comps" (the visible
+      // segment text stays "Comp" on purpose; see MapFinder.jsx's SiteCompSwitch header).
+      await clickIf(p, '[role="tablist"][aria-label="Browse sites or comps"] button:has-text("Comp")');
       await p.waitForTimeout(300);
     },
     scope: "body",
