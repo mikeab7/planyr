@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-02 @ `a0804994` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-02 @ `56b460d6` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_643 source files mapped._
+_644 source files mapped._
 
 ## infra
 
@@ -24,7 +24,7 @@ _643 source files mapped._
 - **`src/app/buildSkew.js`** — Notices when this tab is running an older deploy than the one the server is serving, and says so without reloading anything itself
   - _exports_: `fetchServedBuild`, `installBuildSkewWatch`, `isBuildSkewed`, `LOADED_BUILD`, `shouldOfferReload`, `SKEW_FIRST_CHECK_MS`, `SKEW_POLL_MS`, `VERSION_URL`
 - **`src/app/chunkReload.js`** — Stale-chunk-after-deploy recovery: vite:preloadError listener, cache-busting reloadFresh, cooldown/stuck loop guard, flushAll on unload
-  - _exports_: `arrivedViaFreshReload`, `chunkNameOf`, `clearRecovery`, `clearReloadGuard`, `hasReloadParam`, `installChunkReloadGuard`, `isChunkLoadError`, `landingReport`, `noteRecoveryAttempt`, `readRecovery`, `RECOVERY_EPISODE_MAX_MS`, `RECOVERY_KEY`, `RECOVERY_SETTLE_MS`, `recoveryLine`, `recoveryStage`, `RELOAD_COOLDOWN_MS`, `RELOAD_GUARD_KEY`, `RELOAD_PARAM`, `reloadFresh`, `shouldReloadAfterPreloadError`, `shouldReportFailure`, `stripReloadParam`, `writeRecovery`
+  - _exports_: `arrivedViaFreshReload`, `chunkNameOf`, `clearRecovery`, `clearReloadGuard`, `hasReloadParam`, `installChunkReloadGuard`, `isChunkLoadError`, `isChunkRecoveryStuck`, `landingReport`, `noteRecoveryAttempt`, `readRecovery`, `RECOVERY_EPISODE_MAX_MS`, `RECOVERY_KEY`, `RECOVERY_SETTLE_MS`, `recoveryLine`, `recoveryStage`, `RELOAD_COOLDOWN_MS`, `RELOAD_GUARD_KEY`, `RELOAD_PARAM`, `reloadFresh`, `shouldReloadAfterPreloadError`, `shouldReportFailure`, `stripReloadParam`, `subscribeChunkRecoveryStuck`, `writeRecovery`
 - **`src/app/ErrorBoundary.jsx`** — Per-workspace React class error boundary: contains render crashes, detects chunk-load errors, offers cache-busting reload vs mid-deploy 'try again'
   - _exports_: `default (ErrorBoundary)`
 - **`src/app/flushRegistry.js`** — Cross-workspace flush-before-navigate registry: registerFlush/flushAll give each live workspace one synchronous local-save + keepalive cloud push before a forced reload
@@ -121,7 +121,7 @@ _643 source files mapped._
   - _exports_: `useUndoableState`
 - **`src/workspaces/model/ModelApp.jsx`** — Model workspace root: the underwriting spreadsheet — loads/saves the active project's sheet and wires the toolbar, formula bar and grid together.
   - _exports_: `default (ModelApp)`
-- **`src/workspaces/notes/components/ConflictCompare.jsx`** — the Notes sync-conflict comparison bar: shows both saved versions in full, word-diffed, each with a "keep this / use the other" choice that names what happens to the copy not picked (B842624)
+- **`src/workspaces/notes/components/ConflictCompare.jsx`** — The Notes conflict bar shows both full versions — read-only, diff-highlighted, each timestamped — instead of asking for a blind pick; lazy chunk, rare-path only.
   - _exports_: `default (ConflictCompare)`
 - **`src/workspaces/notes/components/IntegrityBanner.jsx`** — the bar for the two findings nothing could previously mention: one note living in two projects, and a note that had lost its place (already recovered by the time it renders, and named / openable / re-filable inline). Its own lazy chunk — it renders only when something is wrong.
   - _exports_: `default (IntegrityBanner)`
@@ -153,7 +153,7 @@ _643 source files mapped._
   - _exports_: `CALLOUT_TONE_IDS`, `CALLOUT_TONES`, `default`, `DEFAULT_CALLOUT_TONE`, `NoteCallout`
 - **`src/workspaces/notes/lib/notesCloud.js`** — The cloud tier under the notes storage seam: pure sync decisions (tree merge, which-copy-wins page seed, picture plan, sign-in adoption) plus the revision-guarded Supabase transport for `notes_trees` / `notes_pages` / `notes_images` and the private `notes-images` bucket. Imported only by `notesStore.js`, and only dynamically.
   - _exports_: `binPages`, `blobToDataUrl`, `cloudClient`, `dataUrlToBlob`, `emptySyncState`, `fetchImage`, `fetchImageIndex`, `fetchPageIndex`, `fetchPages`, `fetchTree`, `fetchTreeRev`, `forcePage`, `IMAGE_BUCKET`, `IMAGE_MIME_ALLOWED`, `IMAGE_TABLE`, `imagePath`, `isEmptyDoc`, `judgeConflict`, `mergeSyncState`, `mergeTrees`, `PAGE_TABLE`, `pageRev`, `planAdoption`, `planImageSync`, `planPageSeed`, `purgeImagesCloud`, `purgePagesCloud`, `pushImage`, `pushPage`, `pushTree`, `sameDoc`, `syncFailureReason`, `TREE_TABLE`
-- **`src/workspaces/notes/lib/notesConflictDiff.js`** — pure word-level diff between two note bodies (capped LCS, falling back to line- then linear-anchor diffing on huge input) feeding `ConflictCompare.jsx` (B842624)
+- **`src/workspaces/notes/lib/notesConflictDiff.js`** — Pure word-level diff behind ConflictCompare, with a line-level then a linear prefix/suffix fallback so it never builds an unbounded table on an outsized document.
   - _exports_: `diffHasChanges`, `diffNoteText`, `sideOps`
 - **`src/workspaces/notes/lib/notesDocHtml.js`** — A note's document model → HTML through the EDITOR'S OWN DOMSerializer, so the print sheet cannot drift from the screen (PDF-PARITY by construction). Inlines stored image bytes as data URLs.
   - _exports_: `docToHtml`
@@ -225,7 +225,7 @@ _643 source files mapped._
   - _exports_: `cellLineSpec`, `default`, `rowLineSpec`, `tableToBlockSpecs`
 - **`src/workspaces/notes/lib/notesTasks.js`** — PURE checklist reading and writing over a document — the task rollup's whole decision layer.
   - _exports_: `groupTasksByProject`, `openTasksInDoc`, `rollUpOpenTasks`, `setTaskCheckedInDoc`, `tasksInDoc`
-- **`src/workspaces/notes/lib/notesTemplates.js`** — Note templates (project-contacts, etc.): {id, label, description, buildDoc()} seeding a plain ProseMirror doc, hand-built with no editor-engine import so it stays on the static page-creation path
+- **`src/workspaces/notes/lib/notesTemplates.js`** — Extensible page-creation templates (plain data, no editor-engine import) written straight through the storage seam so a template never has to mount the editor.
   - _exports_: `NOTE_TEMPLATES`, `templateById`
 - **`src/workspaces/notes/lib/notesTime.js`** — How a note's age is written, in one place — relative ("5h"), absolute, edited-label and bin countdown. `null` means unknown and renders as nothing, so a migrated page never claims a time it does not have.
   - _exports_: `absoluteStamp`, `daysLeft`, `editedLabel`, `relativeTime`, `stampLabel`
@@ -246,10 +246,12 @@ _643 source files mapped._
   - _exports_: `default (BrandMark)`
 - **`src/shared/brand/tokens.js`** — Planyr brand palette constants (coral tier faces, linework, surfaces, wordmark colors) mirroring the CSS --coral-* vars for inline-styled chrome
   - _exports_: `BRAND`, `default`
-- **`src/shared/cloud/optimisticUpsert.js`** — Optimistic-concurrency (id,version) compare-and-swap upsert for sites/doc_reviews: casUpsert, keepaliveCasPush, missing-column degrade, typed conflict interpreters
+- **`src/shared/cloud/optimisticUpsert.js`** — Optimistic-concurrency compare-and-swap upsert for sites/doc_reviews/model_sheets, conflict target configurable per caller (single-column id default, composite e.g. user_id,id): casUpsert, degradeUpsert, keepaliveCasPush, missing-column degrade, typed conflict interpreters
   - _exports_: `casUpsert`, `degradeUpsert`, `interpretCas`, `interpretInsert`, `isMissingColumn`, `isMissingVersionColumn`, `keepaliveCasPush`
 - **`src/shared/cloud/serializeWrites.js`** — Per-key write serializer: makeWriteSerializer chains same-key cloud writes in order so a tab can't race itself into a false version conflict
   - _exports_: `makeWriteSerializer`
+- **`src/shared/cloud/writeFailureLog.js`** — Durable (localStorage) record of a cloud write that failed, surviving a same-event auto-reload that can outrun an in-memory banner before it paints
+  - _exports_: `clearAllCloudWriteFailures`, `clearCloudWriteFailure`, `readCloudWriteFailures`, `recordCloudWriteFailure`
 - **`src/shared/comps/components/CompDraftsPanel.jsx`** — KML-import review/promote surface (B849233): one card per staged draft, pre-filled from best-effort description parsing, confirm-before-commit; reachable only from the KML import action
   - _exports_: `anchorFromGeometry`, `default (CompDraftsPanel)`
 - **`src/shared/comps/components/CompEntryGrid.jsx`** — the paste-box-over-a-row-grid comp entry surface (B849232): parsed values land directly in typed, editable cells with blocking (red) vs soft (amber) uncertainty; replaces the old single-comp create form
@@ -258,13 +260,13 @@ _643 source files mapped._
   - _exports_: `default (CompsPanel)`
 - **`src/shared/comps/components/PartyNameField.jsx`** — Comp form party-name field: plain text input + a loose-match suggestion listbox (accessible combobox, independent of the map toolbar's PlaceSearchField)
   - _exports_: `default (PartyNameField)`
-- **`src/shared/comps/lib/compDates.js`** — Pure display/parse bridge between the ISO date comps always store and the mm/dd/yy a person reads and types (liberal parsing: ISO, slash/dash numeric, or a month name; never guesses)
+- **`src/shared/comps/lib/compDates.js`** — comp date display/parse: ISO <-> mm/dd/yy, flexible typed-date parsing (slash/dash-numeric, month-name, 2- or 4-digit year) — storage is always ISO, this is the one crossing point to what a person reads/types
   - _exports_: `formatDateDisplay`, `parseTypedDate`
 - **`src/shared/comps/lib/compDrafts.js`** — pure row<->model mapping for public.comp_import_drafts (B849233), mirroring comps.js's rowToComp/compToRow shape
   - _exports_: `importDraftToInsertRow`, `rowToImportDraft`
 - **`src/shared/comps/lib/compDraftsStore.js`** — Supabase CRUD for public.comp_import_drafts (owner-only, no team visibility); promoteDraft is the moment comps' strict constraints get enforced, writing the reason back onto the row on failure
   - _exports_: `deleteDraft`, `fetchMyDrafts`, `insertDrafts`, `promoteDraft`, `updateDraftProposed`
-- **`src/shared/comps/lib/compLocationText.js`** — Pure Location-cell text for a comp's anchor: an APN for a parcel, a site-plan overlay's own title for a site_plan point, or the synchronous county/coordinate fallback for a bare pin (reverse-geocoded address is wired up async elsewhere) — never one identity substituted for another
+- **`src/shared/comps/lib/compLocationText.js`** — pure Location-cell identity text per anchor kind: an APN (or "N parcels · County") for a parcel, a site-plan overlay's own title for a site_plan point, and the synchronous County/coords fallback for a pin while its reverse geocode is pending
   - _exports_: `parcelLocationText`, `pinFallbackText`, `siteplanLocationText`
 - **`src/shared/comps/lib/compMarkerIcon.js`** — Pure map-marker spec for a comp: a small colored tag (hue per comp type), deliberately a different silhouette from sitePinIcon
   - _exports_: `compMarkerColor`, `compMarkerSize`, `compMarkerSvg`
@@ -1224,15 +1226,15 @@ _643 source files mapped._
 
 - **`public/sequence/index.html`** — Self-contained Sequence/Schedule iframe app: spreadsheet with an Excel-like formula engine, dependency-graph task scheduling, Gantt + PDF export, Supabase cloud-save/history, suggestions review queue, site-linked
   - _exports_: `_cpMeasure`, `_deepClone`, `_formulaBuiltinMap`, `_mEq`, `_mIdArr`, `_mIsObj`, `_mStripRev`, `_pfCostRef`, `_pfDateRef`, `_pfNumOrBlank`, `activeEffectiveCols`, `addBD`, `addCalendarMonths`, `addD`, `addMonths`, `AddNoteComposer`, `addWorkdays`, `agendaDeadline`, `agendaLeadSummary`, `App`, `applyMeetingBinding`, `approxTextPx`, `AutomationPanel`, `avatarColor`, `balOf`, `barLabelText`, `buildFormulaRowColumns`, `buildGanttSVG`, `buildHolidaySet`, `buildPDFHtml`, `cadenceSummary`, `calcEnd`, `cascadeDates`, `celebrateTaskComplete`, `Cell`, `cleanEmailBody`, `colArray`, `colLabel`, `collectCountable`, `collectNonBlank`, `collectNums`, `collectNumsKind`, `collectRefs`, `colLettersToNum`, `colNumToLetters`, `compareValues`, `compareValuesSafe`, `computeDisplayHealth`, `computeFormulaValues`, `computeRolledHealth`, `ConditionGroup`, `ConditionRow`, `constrainedStartFrom`, `ContactPicker`, `ContactsPanel`, `cumArgs`, `datedif`, `defaultStartFor`, `DeleteChildrenModal`, `depAnchors`, `DepCell`, `depCellFullTitle`, `detectCascadeDrift`, `dif`, `difBD`, `durTooltip`, `effectiveColsOf`, `ErrorBoundary`, `errVal`, `escapeHtml`, `escapeRegExp`, `estLabelWidth`, `evalBinary`, `evalCall`, `evalConditionGroup`, `evalFieldCondition`, `evalHealthCondition`, `evalHealthRules`, `evalNode`, `evalRule`, `evaluateFormula`, `extractColorTag`, `extractRefs`, `extraHolidaySet`, `fd`, `fdLocal`, `ferr`, `Field`, `findSignChange`, `finishCallResult`, `fitCaptionFs`, `flatOrderWithLevel`, `fmtBarDate`, `fmtD`, `fmtPreds`, `fmtTaskDuration`, `formatDateToken`, `formatNumberSection`, `formatNumberToken`, `FormatPanel`, `formatValue`, `formatValueColor`, `formulaCalendar`, `formulaColsOf`, `formulaColToColDef`, `FormulaColumnEditor`, `formulaColumnNames`, `FormulaError`, `formulaToday`, `fvOf`, `ganttNameWeight`, `GanttView`, `getHealthRules`, `getInitials`, `GridColumnsChooser`, `GridHeaderMenu`, `GridView`, `HealthColHeader`, `HealthColHeaderIcon`, `HealthDropMenu`, `HealthPicker`, `HistoryPanel`, `indentSelection`, `InlineDate`, `ipmtOf`, `irrOf`, `isBlank`, `isBuiltinFormulaName`, `isCallInvariant`, `isDate`, `isErrVal`, `isFormulaError`, `isLeap`, `isoToSerial`, `isoWeekNum`, `isRangeArg`, `isRowInvariant`, `isValidColor`, `isWorkingSerial`, `layoutExhibitCols`, `loadExportPrefs`, `looksLikeDateFormat`, `looseEqual`, `makeDate`, `MasterView`, `matchesCriteria`, `matchIndex`, `matchRefToken`, `mbFmt`, `mbOrdinal`, `mbRuleSummary`, `measuredColWidth`, `meetingBoundInfo`, `MeetingCalendarsModal`, `meetingCostDays`, `meetingDatesInRange`, `meetingFloatBD`, `mergeCloudDoc`, `migrateCfRulesToHealthRules`, `migrateRule`, `mirrOf`, `mkt`, `moveSelectionToDestination`, `MoveToModal`, `need`, `networkDays`, `newMeetingBody`, `nextEligibleMeeting`, `normPreds`, `noteISO`, `NoteRow`, `NotesColHeader`, `noteShortMD`, `NotesModal`, `notifyRowsDeleted`, `nperOf`, `nthWeekday`, `nthWeekdayOfMonth`, `nthWeekdayOnOrAfter`, `num1`, `numberFormatColorFor`, `numToGeneralStr`, `opsForField`, `outdentSelection`, `parse`, `parseCriteriaOperand`, `parseDurationInput`, `parseFlexDate`, `parseFormula`, `parseFormulaUncached`, `parseLooseDate`, `parsePreds`, `parseRefText`, `pd`, `PDFExportModal`, `placeGanttLabel`, `planFormulaColumns`, `pmtOf`, `PredEditor`, `predLagPlainEnglish`, `ProjContextMenu`, `ProjDropdown`, `promoteChildrenAndDelete`, `pvOf`, `raiseIfErr`, `rangeArray`, `rateOf`, `readGridCell`, `readGridCfg`, `rebuildHEALTH`, `rebuildMeetingBodyIndex`, `recascadeWithDrift`, `recomputeAfterStructureChange`, `recomputeSchedule`, `refToText`, `RenameModal`, `renumberTasks`, `resolveDuration`, `resolveLabelAlign`, `resolveTaskSpan`, `rewriteFormulaForCopy`, `rewriteFormulaForStructuralShift`, `rollForwardToWorkday`, `rollupParentDates`, `roundAwayFromZero`, `Row`, `RuleColorPicker`, `sameFamily`, `saveExportPrefs`, `sectionForSign`, `SegBtn`, `serialToISO`, `serialToYMD`, `SettingsPanel`, `sgqAvatarColor`, `SgqCascadePicker`, `SgqChangeRow`, `sgqChildrenOf`, `sgqConfClass`, `SgqCrumb`, `sgqCrumbOf`, `SgqDot`, `sgqFmtDate`, `sgqInitials`, `showToast`, `solveRoot`, `sortByVisualOrder`, `splitFormatSections`, `SplitView`, `startForEnd`, `StatusHeaderDropdown`, `StatusPicker`, `stepVisibleColIdx`, `stripFormatLiterals`, `subBD`, `SuccessorPromptModal`, `SuggestionsView`, `TaskContextMenu`, `taskDurUnit`, `taskDurValue`, `textFormat`, `toBool`, `toDateSerial`, `Toggle`, `tokenize`, `toNumber`, `toShortDate`, `toStr`, `touchesSchedule`, `TYPE_RANK`, `validatePredEdit`, `valueFamily`, `weekdayOf`, `weekNum`, `wildcardToRegExp`, `workdaysBetween`, `writeGridCfg`, `writeLabelAlign`, `xirrOf`, `xnpvPairs`, `yearFrac`, `ymdToSerial`
-- **`src/workspaces/scheduler/components/AgendaView.jsx`** — The org-scoped agenda body (operational items with a date and optional recurrence, no dependencies/roll-ups) — renders beside the shared AppHeader, never inside the embedded Gantt iframe
+- **`src/workspaces/scheduler/components/AgendaView.jsx`** — The org-scoped agenda body (date/recurrence-only operational items, no Gantt dependencies) — native write-through controls, no dialog box.
   - _exports_: `default (AgendaView)`
 - **`src/workspaces/scheduler/components/LinkSchedulePanel.jsx`** — Suggest-and-confirm panel to create-or-link a schedule to an unlinked Site Planner project; never auto-links
   - _exports_: `default (LinkSchedulePanel)`
 - **`src/workspaces/scheduler/components/ScheduleToolbar.jsx`** — Lifted embedded-Gantt action toolbar (view toggle, review inbox, zoom, export, panels) that displays iframe-reported state and posts planar:* commands
   - _exports_: `ScheduleActions`, `ScheduleCenter`
-- **`src/workspaces/scheduler/lib/agendaModel.js`** — Pure data model for the org-scoped agenda: CRUD + a bounded recurrence grammar (daily/weekly/every-2-weeks/monthly/yearly), never touches the embedded scheduler
+- **`src/workspaces/scheduler/lib/agendaModel.js`** — Pure data model for the org-scoped agenda: dated, optionally-recurring items with no dependency/critical-path shape, deliberately separate from the project Gantt.
   - _exports_: `bucketFor`, `createAgendaItem`, `deleteAgendaItem`, `describeRecurrence`, `nextOccurrence`, `presetIdFor`, `RECURRENCE_PRESETS`, `recurrenceForPresetId`, `sortAgendaItems`, `todayISO`, `toggleAgendaItem`, `updateAgendaItem`
-- **`src/workspaces/scheduler/lib/agendaStore.js`** — localStorage read/write for the org-scoped agenda, one list per account (or signed-out device) — device-local only, no cloud table, a stated scope cut
+- **`src/workspaces/scheduler/lib/agendaStore.js`** — Local-only (device-scoped, no cloud sync yet) storage for the org-scoped agenda, one localStorage list per account.
   - _exports_: `readAgenda`, `writeAgenda`
 - **`src/workspaces/scheduler/lib/gridColNav.js`** — Pure keyboard column-navigation that steps the grid cursor across VISIBLE columns in display order, skipping hidden ones
   - _exports_: `snapToVisible`, `stepVisibleCol`, `stepVisibleColByIdx`, `visibleColMasterIdxs`
