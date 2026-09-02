@@ -217,10 +217,16 @@ export const SHEET_COLUMNS = [
     setValue: (d, v) => ({ ...d, landSizeUnit: v }),
     flagKey: () => "landSizeUnit",
   },
-  { key: "location", label: "Location", group: "PROPERTY", width: 84, align: "left", kind: "action", appliesTo: () => true, required: true },
+  // B986096-HARDENING-24 (owner live-test, "truncated to about 8 characters, which makes the one
+  // field that identifies a comp unreadable") — 84px showed only the first ~8 characters of a real
+  // street address; the value itself is already reordered street-first (geocode.js), so the fix
+  // here is purely more room. Not a `flexKey` grower: Location's content (an address/APN/plan
+  // title) doesn't benefit from unbounded growth the way Notes/Title text does, so a wider static
+  // width — still with the existing `title=` hover for the untruncated value — is the right shape.
+  { key: "location", label: "Location", group: "PROPERTY", width: 150, align: "left", kind: "action", appliesTo: () => true, required: true },
 
   // DEAL — facts about the transaction: when, how long.
-  // B986096-HARDENING-20 — `editHint` becomes the edit `<input>`'s native `placeholder` while a
+  // B986096-HARDENING-25 — `editHint` becomes the edit `<input>`'s native `placeholder` while a
   // date cell is being typed into, and ONLY then (SheetCell never reads it at rest). This is
   // deliberately a different thing from the resting-state `cellPlaceholder`, which HARDENING-10
   // NEW-4 correctly killed everywhere ("empty means empty," no placeholder WORDS standing in for
@@ -325,7 +331,7 @@ export const SHEET_COLUMNS = [
     },
   },
 
-  // PARTIES — who the deal is between. Notes used to live in this group too (B986096-HARDENING-20
+  // PARTIES — who the deal is between. Notes used to live in this group too (B986096-HARDENING-25
   // correction: a note isn't a party — it's freeform commentary on the whole comp, and nesting it
   // under PARTIES read as a membership error, not a layout choice) — it's its own one-column NOTES
   // group now. All three `flexKey` columns here (plus Title above) share the dialog's leftover

@@ -65,7 +65,7 @@
   --surface-page:   #F3F5F8;
   --surface-raised: #FFFFFF;
   --surface-overlay: rgba(255, 255, 255, 0.94); /* frosted floating panels over the map */
-  /* B986096-HARDENING-20 — `--surface-base` was referenced by ~10 components (form inputs inside
+  /* B986096-HARDENING-25 — `--surface-base` was referenced by ~10 components (form inputs inside
      dialogs/panels: CompEntryGrid's cell editors + paste box, PartyNameField, CompDraftsPanel,
      CompsPanel, SitePlansSection, NoteEditor, RoadCrossSectionDialog, SetLocationDialog) but was
      never DEFINED anywhere in this file — every one of those inputs was rendering with a fully

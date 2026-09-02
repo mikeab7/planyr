@@ -97,7 +97,7 @@ export function draftFromParsedRow(parsed) {
 // recomputed from whatever's actually VISIBLE, not the full column list, or a band would span
 // past the columns it now covers (Michael's screenshot: "PROPERTY spans past its own columns").
 //
-// ⛔ HARDENING-20 (owner audit, 14 defects in one 4x4 crop) — two corrections to the group band
+// ⛔ HARDENING-25 (owner audit, 14 defects in one 4x4 crop) — two corrections to the group band
 // itself, both computed here so HeaderRows stays pure rendering:
 // (1) ALIGNMENT: a group label's textAlign used to be hardcoded "left" regardless of what it
 // sits over — DEAL/PRICE/DERIVED are frequently exactly ONE column wide (a land-only sheet hides
@@ -142,7 +142,7 @@ function HeaderRows({ visibleIdx, flexWidths, frozenOffsets }) {
               height: GROUP_BAND_H, boxSizing: "border-box", padding: "0 5px", textAlign: run.align,
               fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em",
               color: "var(--text-secondary)", background: "var(--surface-raised)",
-              // HARDENING-20 item 6 — all FOUR sides explicit and identical (never a `"none"` side
+              // HARDENING-25 item 6 — all FOUR sides explicit and identical (never a `"none"` side
               // left to fall back to `currentColor`, which is the exact dark rgb the owner's own
               // sweep caught on two sides while the other two correctly read the border token).
               // Under `border-collapse`, two adjacent cells declaring the identical border merge
@@ -173,7 +173,7 @@ function HeaderRows({ visibleIdx, flexWidths, frozenOffsets }) {
                 position: "sticky", top: GROUP_BAND_H, zIndex: col.frozen ? 4 : 2,
                 left: col.frozen ? frozenOffsets[col.key] : undefined, width: w, minWidth: w, maxWidth: w,
                 height: COL_LABEL_H, boxSizing: "border-box", padding: "0 5px",
-                // HARDENING-20 item 10 — 700 vs the group band's 800 is imperceptible at 10px; the
+                // HARDENING-25 item 10 — 700 vs the group band's 800 is imperceptible at 10px; the
                 // hierarchy was really being carried by case (CAPS vs Title Case) alone. Widening
                 // the gap to 600 makes the weight difference genuinely visible, using a value
                 // (600) already on this app's own type scale (Button/ToggleChip's own weight).
@@ -201,7 +201,7 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
   const flagKey = col.flagKey ? col.flagKey(draft) : col.key;
   const flag = cellFlags[flagKey];
   const muted = st.state === "na" || st.state === "derived";
-  // B986096-HARDENING-20 item 8 — a blocking flag on this cell (a lease rate with no stated
+  // B986096-HARDENING-25 item 8 — a blocking flag on this cell (a lease rate with no stated
   // period, the 12x-ambiguity case) needs a channel OTHER than hue to read as "wrong," never
   // recolored-and-hope: index.css's B464049 note is explicit that the brand accent (the SAME
   // selection-outline color every cell in this sheet already uses) stays the accent, full stop —
@@ -210,7 +210,7 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
   // (the identical WCAG 1.4.1 reasoning that note already applies to form-field errors app-wide).
   const blockingFlag = flag?.level === "blocking";
   const w = widthFor(col, flexWidths);
-  // HARDENING-20 items 1/5/6/7 — one deterministic cell recipe, applied to every td regardless of
+  // HARDENING-25 items 1/5/6/7 — one deterministic cell recipe, applied to every td regardless of
   // `col.frozen`: a real, OPAQUE background (muted/na/derived cells get the page tint, everything
   // else the same opaque white/near-black every header cell already uses — never the translucent
   // "frosted panel" surface, which is what let the map bleed through a data-dense grid), an
@@ -227,6 +227,20 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
     height: ROW_H, boxSizing: "border-box", padding: 0, verticalAlign: "middle",
     width: w, minWidth: w, maxWidth: w,
     border: "1px solid var(--border-default)",
+    // B986096-HARDENING-20 — the two-row sticky header (HeaderRows, GROUP_BAND_H + COL_LABEL_H
+    // tall) sits on top of the scroll container's content, not inside its scrollable flow. Any
+    // scroll-into-view — the browser's own for a focused/clicked cell near the top, or a script's
+    // — only knows the container's raw client area, not that the header visually covers the top
+    // slice of it, so it can (and, measured, reliably does) land a target row with its top edge
+    // hidden BEHIND the sticky header while still reporting itself "in view." A click landing in
+    // that band then hits the header, not the cell, with no error anywhere — reproduced with a
+    // plain Playwright `.click()` (its own standard actionability scroll, not a synthetic one)
+    // timing out after retrying against "<th title=\"Executed\">…</th> intercepts pointer events"
+    // on a grid tall enough to need scrolling. `scroll-margin-top` is the standard fix for exactly
+    // this sticky-header class of bug: it tells every scroll-into-view mechanism (native focus,
+    // keyboard nav, Tab, or an automation driver) to leave clearance for the header rather than
+    // scrolling a row flush to the container's raw top edge.
+    scrollMarginTop: GROUP_BAND_H + COL_LABEL_H,
     position: col.frozen ? "sticky" : undefined, left: col.frozen ? frozenOffsets[col.key] : undefined, zIndex: col.frozen ? 1 : undefined,
     background: muted ? "var(--surface-page)" : "var(--surface-raised)",
     outline: selected ? "2px solid var(--accent)" : inRange ? "1px solid var(--accent)" : "none",
@@ -258,7 +272,7 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
             onChange={(e) => { onSelectEditChange(e.target.value); }}
             onKeyDown={onEditKeyDown}
             onBlur={(e) => onEditBlur(e, rowIdx, colIdx)}
-            // HARDENING-20 item 9 — this used to override padding to "0 2px" (the report's own
+            // HARDENING-25 item 9 — this used to override padding to "0 2px" (the report's own
             // named "Type SELECT editor" singleton), so the same cell's text sat ~3px off between
             // its resting position and its editing position. Same padding as every other cell now.
             style={inputStyle}>
@@ -277,7 +291,7 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
           onChange={(e) => onEditChange(e.target.value)}
           onKeyDown={onEditKeyDown}
           onBlur={(e) => onEditBlur(e, rowIdx, colIdx)}
-          // HARDENING-20 item 11 — a per-column format hint (currently the two date columns'
+          // HARDENING-25 item 11 — a per-column format hint (currently the two date columns'
           // "mm/dd/yy"), shown ONLY while actively editing via the native `placeholder` attribute —
           // deliberately not the same thing as HARDENING-10 NEW-4's resting `cellPlaceholder`
           // (which stays "always empty," on purpose: a value-shaped word sitting in an unfilled
@@ -308,7 +322,7 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
   const cellText = col.key === "location"
     ? (locationText || <span style={{ color: "var(--text-tertiary)", verticalAlign: "middle" }}>Set</span>)
     : st.text || "";
-  // HARDENING-20 item 8 (continued) — the non-hue channel itself: a small glyph ahead of the
+  // HARDENING-25 item 8 (continued) — the non-hue channel itself: a small glyph ahead of the
   // value, present only on a genuinely blocking cell. `aria-hidden` because `hoverTitle` below
   // already carries the same reason as accessible text.
   const cellContent = blockingFlag
@@ -1104,7 +1118,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
         // sheet whose whole point is not scrolling sideways for important fields.
         // HARDENING-12 — docked to the BOTTOM edge (see dockHeight's own comment above) rather
         // than floating near the top, so the map above it stays clickable at any height.
-        // HARDENING-20 item 1 — this used to be `--surface-overlay`, the app's "frosted floating
+        // HARDENING-25 item 1 — this used to be `--surface-overlay`, the app's "frosted floating
         // panel" surface (rgba .94, deliberately translucent everywhere else it's used). That's
         // right for a legend or a toolbar, but this panel's whole content IS a dense data grid —
         // the point of a grid is that you can read every cell without the map's own imagery/street
@@ -1209,6 +1223,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
                     position: "sticky", right: 0, width: REMOVE_COL_W, height: ROW_H, boxSizing: "border-box",
                     padding: 0, textAlign: "center", verticalAlign: "middle",
                     background: "var(--surface-raised)", border: "1px solid var(--border-default)",
+                    scrollMarginTop: GROUP_BAND_H + COL_LABEL_H,
                   }}>
                     <button onClick={() => removeRow(row._id)} title="Remove" aria-label="Remove comp"
                       style={{ border: "none", background: "transparent", color: "var(--danger-text)", cursor: "pointer", fontSize: 13, padding: 0, height: ROW_H, lineHeight: `${ROW_H}px`, verticalAlign: "middle" }}>✕</button>

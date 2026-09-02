@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* verify-comp-entry-grid-consistency — B986096-HARDENING-20: the owner pointed at a 4x4 crop of
+/* verify-comp-entry-grid-consistency — B986096-HARDENING-25: the owner pointed at a 4x4 crop of
  * the comp entry sheet and found fourteen visual-consistency defects (opacity, group-header
  * alignment, single-column "groups," Notes misfiled under Parties, five row heights, ragged
  * ruling, near-identical selection/error oranges, padding singletons, an invisible header-weight
@@ -17,7 +17,8 @@ import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
 import { readFixture } from "./lib/fixtureSeeding.mjs";
 import { fixtureSeed } from "./lib/planFixture.mjs";
-import { assertMeasurable, pacedWait } from "./lib/tabTiming.mjs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { pacedWait } from "./lib/tabTiming.mjs";
 
 const arg = (f, d) => { const i = process.argv.indexOf(f); return i > -1 ? process.argv[i + 1] : d; };
 const BASE = arg("--url", "http://localhost:4319/");
