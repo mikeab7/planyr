@@ -27,6 +27,15 @@
 -- drift from the jsonb (the e2e fixture rows disagree today), so matching on it would rename the
 -- wrong set. Do not "optimise" this onto the column.
 --
+-- ⛔ DELIBERATE SCOPE, STATED HERE SO IT ISN'T ONLY IMPLICIT IN THE WHERE CLAUSE: this UPDATE
+-- carries `and s.deleted_at is null` — an ordinary interactive rename never reaches into the
+-- caller's trash. That is correct, but it means a row soft-deleted moments before a group rename
+-- keeps its stale name FOREVER, invisible everywhere in the product yet still readable by any
+-- query that doesn't filter `deleted_at` (group `smsrpaiqu5sv`'s anchor row sat this way for
+-- weeks, B1037954/B1060784). The sibling function `reconcile_site_group_name()`
+-- (db/reconcile_site_group_name.sql) is the trash-inclusive twin for exactly that cleanup — never
+-- called from the app, only from the account-wide reconciliation script.
+--
 -- BEFORE THIS RUNS the client degrades to a fetch-the-group-then-write-each-row fallback, which
 -- still reaches every plan (fixing the split) but is not atomic — so saving and renaming are never
 -- blocked by the migration being un-run; the rename simply isn't atomic yet.
