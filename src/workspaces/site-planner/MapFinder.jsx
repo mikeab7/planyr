@@ -3310,6 +3310,13 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                     if (!m || !anchor || typeof anchor.lat !== "number" || typeof anchor.lon !== "number") return;
                     m.flyTo([anchor.lat, anchor.lon], Math.max(m.getZoom(), 17));
                   }}
+                  // ⛔ HARDENING-13 (B986096, owner P0 live-test) — arming a row's Location cell
+                  // used to leave `placingCompPin` (this component's own "is the next map click a
+                  // pin drop" switch) untouched, so "click Location, then click the map" did
+                  // nothing until the user ALSO separately clicked the toolbar's "Drop a pin" —
+                  // a third, undocumented step. Clicking Location now engages this directly.
+                  onArmMapPin={() => setPlacingCompPin(true)}
+                  onDisarmMapPin={() => setPlacingCompPin(false)}
                 />
               </Suspense>
             </PanelErrorBoundary>

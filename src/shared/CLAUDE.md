@@ -461,6 +461,58 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   in or out, from the shipping session) — round 6 ALSO passed every sandbox check and was then
   found non-editable on first live use, so treat round 8 as unconfirmed until `VERIFICATION.md`'s
   `V556720` records a real pass, not as "probably fine because the tests are green."
+  **⛔ ROUND 9 (B986096-HARDENING-11, owner correction, 2026-09-02) — round 8's Per/Basis fix
+  (item 5 above) was HALF right and the owner corrected it.** Per (monthly vs annual) is unchanged
+  — genuinely blank, no default, because both answers are common and a wrong guess is a silent
+  12x error with no safe default. **Basis is different and was over-corrected**: this is an
+  industrial product, industrial leases are overwhelmingly triple-net, and a gross deal is the
+  exception a broker states explicitly — not the baseline. So `emptyDraft`'s `leaseRateExpense`
+  now defaults to `"nnn"` (comps.js), `compSheetColumns.js`'s Type column defaults it to `"nnn"`
+  on switching TO lease (mirroring the existing Land→AC default, only-if-unset), and
+  `compParse.js`'s `genericToDraft` defaults a parsed lease row's basis to `"nnn"` when the pasted
+  text named no basis at all. A gross-family term in the pasted text still wins outright —
+  `BASIS_RE` now also catches the acronym/phrase forms the owner named (IG, MG, base year; "modified
+  gross"/"industrial gross" were already caught by the bare "gross" alternative) — and the parser
+  never resolves an EXPLICIT basis by inference, only ever a genuinely-unstated one by this
+  business default. The `leaseRateExpense` "soft" flag that used to render "NNN vs gross wasn't
+  given — check it." (a tooltip + a `ProblemsList` sentence) is GONE — the owner was explicit that
+  a defaulted NNN gets no marker of any kind, rendered exactly like a typed value, so the flag and
+  the default had to move together (a live soft flag would have kept showing the tooltip the
+  default was supposed to remove).
+  **⛔ ROUND 10 (B986096-HARDENING-12/13, owner P0 LIVE-TESTED the deployed sheet end to end for
+  the FIRST time and found a comp could NOT be saved at all — the "no browser reachable" claim
+  behind every prior round's disclosure was scoped too broadly; read this before trusting a future
+  round's sandbox-only pass again.** `npm run dev` + this repo's own ui-audit fixture-seeding
+  helpers (`readFixture`/`fixtureSeed`) reach this whole sheet signed-out with zero network
+  egress — the prior "Chromium can't reach any external host" finding is real but is about
+  EXTERNAL hosts; `localhost` was never separately tried. Every fix below is proven live by the
+  repo-root `ui-audit/` harness **verify-comp-entry-p0** (`npm run verify:compentryp0`), not from
+  code reading.
+  **Five real defects, five fixes:** (1) the Location cell was a bare `<span>` (no button, no role,
+  no tabindex; a DOUBLE click armed it with no visible sign a second click was needed) — now a real
+  `<button>` that arms on the FIRST click and gets the repo's global `button:focus-visible` ring for
+  free. (2) The map toolbar's "Drop a pin" is a SEPARATE arm mechanism from a row's own Location
+  cell — a toolbar pick while a row still needed a location always APPENDED AN ORPHAN ROW; fixed by
+  filling the topmost unlocated row first (`CompsPanel.jsx`'s `pendingAnchor` effect), and Location
+  now auto-arms the map's own pin-drop mode too (`onArmMapPin`/`onDisarmMapPin`, threaded through
+  the site-planner workspace's map finder) so a genuine two-click flow (Location, then the map)
+  works — no separate toolbar step required. (3) **The real mechanism under "Enter discards, Tab commits":** a `<td>`'s content
+  isn't natively focusable, so an un-prevented `mousedown` let the BROWSER'S OWN default
+  focus-clearing action steal focus back from the just-mounted `<input>` inside the SAME click —
+  the input's `onBlur` closed the edit before any typed character could land, and Tab only
+  "worked" because ITS OWN native focus-move triggered the identical blur-commit by a different
+  route. Fixed with `e.preventDefault()` on the cell's `mousedown` — standard for this class of
+  click-to-edit grid bug. (4) The panel now DOCKS to the bottom edge (drag-to-resize, remembered
+  height in `localStorage`) instead of floating over the top 72% of the map. (5) **A `<select>`
+  cell's value change never committed until a SEPARATE blur/Tab** (which can itself get swallowed
+  by the still-open native `.showPicker()` overlay) — so switching Type to Lease could silently
+  leave the sheet on land columns with nowhere to enter rent. A select now commits the instant its
+  value changes (`onSelectEditChange`) — picking an option IS the complete action, there's nothing
+  further to type, unlike a text field mid-typing. **Keyboard nav was already fine and untouched**
+  — `role="grid"` + an internal arrow-key model (Tab reaches the grid in 3 tabs from the paste box,
+  arrows move a selection, Enter arms an action cell) already worked; the owner's own
+  `querySelectorAll('button,[tabindex],...')` count undercounts this pattern by construction
+  (same shape as Excel Online / Google Sheets), so it's recorded here as checked, not as a gap.
   KML import (B849233) is a SEPARATE staging table, `db/comp_import_drafts.sql`
   (`public.comp_import_drafts`, owner-only RLS — no team visibility at all, unlike `comps` itself,
   until promoted) — `lib/kmlImport.js` is the pure, hand-rolled Placemark parser (a Point is a

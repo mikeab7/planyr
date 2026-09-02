@@ -44,6 +44,7 @@
     "verify:hideink": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/diagnose-hide-ink.mjs",
     "verify:hiddencontent": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-hidden-content-behaviour.mjs",
     "verify:pdflayers": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-pdf-layer-hiding.mjs",
+    "verify:compentryp0": "node ui-audit/verify-comp-entry-p0.mjs",
     "audit:hiddenreads": "node ui-audit/audit-hidden-content-reads.mjs",
     "verify:gridrowhold": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-grid-row-hold.mjs",
     "verify:jurbadge": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-jurisdiction-badge-shapes.mjs",

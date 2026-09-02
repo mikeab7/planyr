@@ -477,12 +477,17 @@ export function emptyDraft(anchor) {
     partyProvider: "", partyAcquirer: "",
     landPrice: "", landSizeValue, landSizeUnit: "ac",
     bldgPrice: "", bldgSizeSf: "", bldgNoi: "", bldgCapRate: "",
-    // HARDENING-10 NEW-4 (owner: "an empty row must not pre-assert a basis") — Per/Basis used to
-    // default to annual/NNN, so a genuinely untouched row displayed YR/NNN as if he'd chosen them.
-    // A $7 NNN and a $7 gross are different deals; guessing the basis silently is worse than
-    // leaving it blank and making him state it. Blank also correctly keeps the derived $/SF/yr
-    // column dashed until a period is actually picked — that gate only works if "unset" is real.
-    leaseRate: "", leaseRatePeriod: "", leaseRateExpense: "", leaseTi: "", leaseTerm: "", leaseSizeSf: "",
+    // HARDENING-11 (owner correction, 2026-09-02, amending HARDENING-10 NEW-4) — Per and Basis
+    // are NOT the same kind of guess and don't get the same treatment. Per (monthly vs annual)
+    // stays genuinely blank: both answers are common and a wrong guess is a silent 12x error, so
+    // there is no safe default and the derived $/SF/yr column correctly stays dashed until a
+    // period is actually picked. Basis (NNN vs gross) is different — this is an industrial
+    // product and industrial leases are overwhelmingly triple-net; a gross deal is the exception
+    // a broker states explicitly, not the baseline, so defaulting to NNN is right nearly every
+    // time and asking him to type it on every comp is friction that buys nothing. A pasted
+    // gross-family term (gross, full service, FS, IG, MG, modified gross, base year) still wins
+    // over this default — see compParse.js's BASIS_RE/genericToDraft.
+    leaseRate: "", leaseRatePeriod: "", leaseRateExpense: "nnn", leaseTi: "", leaseTerm: "", leaseSizeSf: "",
     leaseFreeRentMonths: "", leaseEscalationPct: "",
   };
 }
