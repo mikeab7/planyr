@@ -100,6 +100,8 @@ const ALL_NOTES_FILES = [
   "lib/notesFormatPalette.js",
   // NEW-2 — "Convert table to text": pulls a table's rows out as plain lines / sibling list items.
   "lib/notesTableToText.js",
+  // B849105 — orders a conflict's two copies by recency, never by which browser window they came from.
+  "lib/notesVersionOrder.js",
 ];
 const SKETCH_FILES = ALL_NOTES_FILES.filter((f) => f.includes("Sketch"));
 
