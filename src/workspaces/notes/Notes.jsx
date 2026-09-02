@@ -59,6 +59,10 @@ const QuickOpen = lazy(() => import("./components/QuickOpen.jsx"));
 /* The integrity bar renders only when something is actually wrong, so its bytes have no
  * business on the rail's first paint either — see its own header. */
 const IntegrityBanner = lazy(() => import("./components/IntegrityBanner.jsx"));
+/* Same reasoning as IntegrityBanner — a real conflict is rare, and its comparison view (the
+ * diff engine + two full-text panes) has no business on every load's critical path. See its
+ * own header (B842624). */
+const ConflictCompare = lazy(() => import("./components/ConflictCompare.jsx"));
 
 const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
 /* ⛔ THE FOOTER'S TONE MAP IS GONE WITH THE FOOTER (B539649). It coloured a sync line that no
@@ -171,53 +175,11 @@ function UndoBar({ deleted, onUndo, onDismiss }) {
   );
 }
 
-/** TWO WINDOWS, ONE PAGE, BOTH EDITED — named, never resolved behind your back.
- *
- *  This is the visible half of the concurrency rule: a push refused because the revision
- *  moved does NOT overwrite and does NOT get thrown away. Both copies exist, this bar says
- *  so in as many words, and the two buttons are the only ways out. "Use the other" parks
- *  this window's text as a page beside it first, so choosing cannot lose the copy you did
- *  not pick either.
- *
- *  ⛔ IT REACHES THE SCREEN FAR LESS OFTEN NOW, AND IT NAMES NOBODY (B1391). A moved
- *  revision is no longer enough to raise it: the store compares the two documents first and
- *  reconciles in silence when they say the same thing (`judgeConflict`), so the ordinary
- *  same-account, two-window race resolves without a word. When it IS raised the divergence
- *  is real — and the words come from `notesConflictLine`, which may only ever say WINDOW or
- *  COMPUTER. These notes are private to one account; there is no other person to name. */
-function ConflictBar({ conflict, onKeepMine, onKeepTheirs }) {
-  if (!conflict) return null;
-  const copy = notesConflictLine(conflict.title);
-  return (
-    <div
-      role="alert"
-      data-testid="notes-conflict-bar"
-      style={{
-        flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 14px",
-        background: "var(--warn-bg)", borderBottom: "1px solid var(--border-default)",
-        color: "var(--warn-text)", fontSize: 12.5, fontWeight: 600,
-      }}
-    >
-      <span style={{ flex: 1, minWidth: 0 }}>{copy.text}</span>
-      <button
-        type="button" data-testid="notes-conflict-mine" onClick={onKeepMine}
-        style={{
-          flex: "0 0 auto", border: "1px solid var(--warn-text)", borderRadius: RADIUS.pill,
-          background: "transparent", color: "var(--warn-text)", font: "inherit",
-          fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
-        }}
-      >{copy.keepMine}</button>
-      <button
-        type="button" data-testid="notes-conflict-theirs" onClick={onKeepTheirs}
-        style={{
-          flex: "0 0 auto", border: "1px solid var(--warn-text)", borderRadius: RADIUS.pill,
-          background: "transparent", color: "var(--warn-text)", font: "inherit",
-          fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
-        }}
-      >{copy.keepTheirs}</button>
-    </div>
-  );
-}
+/* ⛔ THE INLINE ConflictBar THAT USED TO LIVE HERE IS GONE (B842624) — replaced by the lazy
+ * `ConflictCompare` component (see its own header). Two verbs and no content is the exact bug
+ * the owner reported; the comparison view that replaces it needs the diff engine and both full
+ * documents, which have no business on this route's first paint, so it moved to its own lazy
+ * chunk the same way `IntegrityBanner` already does. */
 
 function EmptyState({ onCreate }) {
   return (
@@ -973,21 +935,44 @@ export default function Notes({
     if (next !== base) persistTree(next);
   }, [persistTree, treeNow]);
 
-  /* ---- conflicts (B1291) ----
+  /* ---- conflicts (B1291, extended B842624) ----
    *
    * The store hands over page ids; the titles live here, in the tree. Only the first is
    * shown — a queue of conflict bars would be its own kind of noise, and resolving one
-   * reveals the next. */
+   * reveals the next.
+   *
+   * `ConflictCompare` needs BOTH full documents to show the owner what he's actually
+   * choosing between (see its own header) — `localDoc`/`localUpdatedAt` come from this
+   * window's own storage and tree, `serverDoc`/`serverUpdatedAt` from the store's conflict
+   * entry (`notesConflictFor`, populated by `notesStore.js`'s `fetchPages`). */
   const conflict = useMemo(() => {
     const id = conflictIds.find((pid) => findPage(tree, pid)) || conflictIds[0];
     if (!id) return null;
-    return { pageId: id, title: findPage(tree, id)?.page?.title || "" };
+    const entry = notesConflictFor(id);
+    return {
+      pageId: id,
+      title: findPage(tree, id)?.page?.title || "",
+      localDoc: readPage(id),
+      localUpdatedAt: findPage(tree, id)?.page?.updatedAt ?? null,
+      serverDoc: entry?.serverDoc ?? null,
+      serverUpdatedAt: entry?.serverUpdatedAt ?? null,
+    };
   }, [conflictIds, tree]);
 
   const handleConflict = useCallback(async (pageId, choice) => {
-    /* ⛔ "Use the other" PARKS THIS WINDOW'S TEXT FIRST, as a page beside the
-     * one being replaced. Without that step the choice would destroy an edit the user made
-     * — and "never a lost edit" would be a slogan rather than a property.
+    /* ⛔ EITHER CHOICE PARKS THE COPY IT IS ABOUT TO DISCARD FIRST, AS A SIBLING PAGE
+     * (B842624 — extends B1391's guarantee to BOTH buttons). Before this, only "Use the
+     * other" protected the text it was about to replace; "Keep this one" force-pushed
+     * straight over the other window's already-saved text with nothing kept anywhere. That
+     * asymmetry would have made the new comparison bar's own "nothing is lost" promise false
+     * for half its buttons, which is worse than the vague bar it replaces — so it is fixed
+     * here, not just described. Without this step the choice would destroy real, committed
+     * text, and "never a lost edit" would be true of only one button.
+     *
+     * `notesConflictFor(pageId)` is read FRESH here, at click time, rather than off the
+     * `conflict` object the render closed over — the same freshness `readPage(pageId)`
+     * already gets for the "theirs" side, so neither side of the park can go stale between
+     * the bar painting and the click landing.
      *
      * ⛔ AND THE PARKED COPY NEVER CHANGES PROJECT (NEW-1). `copyPageWithin` takes the source
      * page id and NOTHING ELSE — there is no project argument to hand it, so there is no way
@@ -997,34 +982,33 @@ export default function Notes({
      *
      * ⛔ AND IT IS SAID OUT LOUD, AT THE MOMENT IT HAPPENS. A copy discovered a week later
      * under a "from a project you deleted" heading is the failure this item is named for. */
-    if (choice === "theirs") {
+    const bodyToPark = choice === "theirs" ? readPage(pageId) : (notesConflictFor(pageId)?.serverDoc ?? null);
+    if (bodyToPark != null) {
       const base = treeRef.current || tree;
-      const localDoc = readPage(pageId);
-      if (localDoc != null) {
-        const hit = findPage(base, pageId);
-        const r = copyPageWithin(base, pageId, {
-          title: hit ? `${hit.page.title} ${notesConflictLine().parkedSuffix}` : undefined,
-        });
-        /* A SOURCE THIS WINDOW CANNOT SEE IS A REFUSAL, NOT A GUESS. There is no honest
-         * project for a copy whose source is unknown, so nothing is filed anywhere — and
-         * because parking is what makes "never a lost edit" true, the choice does not
-         * proceed either. Both halves are named (LOUD-FAILURE). */
-        if (r.refused || !r.pageId) {
-          setExportNote("That note is not in this window’s list, so your copy of it could not be kept safely — nothing was changed. Reload and try again.");
-          return;
-        }
-        if (!writePage(r.pageId, localDoc)) {
-          setExportNote("Your copy of that note could not be saved here, so nothing was changed.");
-          return;
-        }
-        persistTree(r.tree);
-        // ORG SCOPE (NEW-1) — checked first, since a copy of an org page still reports
-        // `projectId: null` and must not be captioned as "Not in a project".
-        const where = r.orgScope ? ORG_GROUP_LABEL
-          : r.projectId == null ? NO_PROJECT_LABEL
-          : (projects.find((p) => p.id === r.projectId)?.name || "its project");
-        setExportNote(`Your copy was kept as “${hit ? `${hit.page.title} ${notesConflictLine().parkedSuffix}` : "a copy"}”, in ${where} — the same place as the note it came from.`);
+      const hit = findPage(base, pageId);
+      const suffix = choice === "theirs" ? notesConflictLine().parkedSuffix : notesConflictLine().otherParkedSuffix;
+      const r = copyPageWithin(base, pageId, {
+        title: hit ? `${hit.page.title} ${suffix}` : undefined,
+      });
+      /* A SOURCE THIS WINDOW CANNOT SEE IS A REFUSAL, NOT A GUESS. There is no honest
+       * project for a copy whose source is unknown, so nothing is filed anywhere — and
+       * because parking is what makes "never a lost edit" true, the choice does not
+       * proceed either. Both halves are named (LOUD-FAILURE). */
+      if (r.refused || !r.pageId) {
+        setExportNote("That note is not in this window’s list, so the version you didn’t pick could not be kept safely — nothing was changed. Reload and try again.");
+        return;
       }
+      if (!writePage(r.pageId, bodyToPark)) {
+        setExportNote("The version you didn’t pick could not be saved here, so nothing was changed.");
+        return;
+      }
+      persistTree(r.tree);
+      // ORG SCOPE (NEW-1) — checked first, since a copy of an org page still reports
+      // `projectId: null` and must not be captioned as "Not in a project".
+      const where = r.orgScope ? ORG_GROUP_LABEL
+        : r.projectId == null ? NO_PROJECT_LABEL
+        : (projects.find((p) => p.id === r.projectId)?.name || "its project");
+      setExportNote(`The version you didn’t pick was kept as “${hit ? `${hit.page.title} ${suffix}` : "a copy"}”, in ${where} — the same place as the note it came from.`);
     }
     const res = await resolveNotesConflict(pageId, choice);
     if (!res.ok) setExportNote(res.error || "That copy could not be saved — nothing was changed.");
@@ -1243,11 +1227,19 @@ export default function Notes({
       <StorageBanner error={storageError} onDismiss={() => { clearNotesStorageError(); setStorageError(null); }} />
       <ExportNotice note={exportNote} onDismiss={() => setExportNote(null)} />
       <UndoBar deleted={deleted} onUndo={() => handleRestore(deleted.id)} onDismiss={() => setDeleted(null)} />
-      <ConflictBar
-        conflict={conflict}
-        onKeepMine={() => handleConflict(conflict.pageId, "mine")}
-        onKeepTheirs={() => handleConflict(conflict.pageId, "theirs")}
-      />
+      {conflict ? (
+        <Suspense fallback={null}>
+          <ConflictCompare
+            title={conflict.title}
+            localDoc={conflict.localDoc}
+            serverDoc={conflict.serverDoc}
+            localUpdatedAt={conflict.localUpdatedAt}
+            serverUpdatedAt={conflict.serverUpdatedAt}
+            onKeepMine={() => handleConflict(conflict.pageId, "mine")}
+            onKeepTheirs={() => handleConflict(conflict.pageId, "theirs")}
+          />
+        </Suspense>
+      ) : null}
       {integrityHidden ? null : (
         <Suspense fallback={null}>
         <IntegrityBanner
