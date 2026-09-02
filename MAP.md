@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-02 @ `e60bb6e0` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-02 @ `d1bd4c1e` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_648 source files mapped._
+_649 source files mapped._
 
 ## infra
 
@@ -136,7 +136,7 @@ _648 source files mapped._
 - **`src/workspaces/notes/components/NoteOutline.jsx`** — Outline pane derived from the open note's headings — click to go, caret section highlighted, collapsible, absent with no headings.
   - _exports_: `default (NoteOutline)`
 - **`src/workspaces/notes/components/NoteRedline.jsx`** — renders notesRedline.js's diff as one document with insertions/deletions marked in place
-  - _exports_: `default (NoteRedline)`
+  - _exports_: `ChangeTag`, `default (NoteRedline)`
 - **`src/workspaces/notes/components/NoteSlashMenu.jsx`** — The command list drawn at the caret when `/` opens it; renders only — every decision is the plugin's.
   - _exports_: `default (NoteSlashMenu)`
 - **`src/workspaces/notes/components/NotesTree.jsx`** — Notes left rail in three views (Notebooks · Recent · Bin) — inline rename (Enter/Esc), an inline delete confirmation and an inline Move panel that finally reaches the model's move ops, never a dialog box.
@@ -241,6 +241,8 @@ _648 source files mapped._
   - _exports_: `default`, `NoteToggle`, `NoteToggleTitle`, `TOGGLE_TITLE_PLACEHOLDER`, `toggleClickKey`
 - **`src/workspaces/notes/lib/notesToolbarDiag.js`** — Read-only, call-time-gated diagnostic for B831600 ×3 (the table-toolbar-jump bug): records every `applyToolbarDelta` call so the owner can capture the real production call sequence. Off by default, no telemetry leaves the browser.
   - _exports_: `isToolbarDiagArmed`, `latchToolbarDiag`, `recordToolbarDiag`, `TOOLBAR_DIAG_LOG_KEY`, `TOOLBAR_DIAG_PARAM`, `TOOLBAR_DIAG_STORAGE_KEY`
+- **`src/workspaces/notes/lib/notesVersionOrder.js`** — PURE: orders a conflict's two copies by recency (never by which browser window they came from), telling the caller whether that ordering is actually known.
+  - _exports_: `orderConflictVersions`
 - **`src/workspaces/notes/lib/notesVersions.js`** — PURE version-history policy: when a snapshot is due, which are kept, and the restore plan that never destroys history.
   - _exports_: `MAX_VERSIONS_PER_PAGE`, `planRestore`, `planRetention`, `RETENTION_TIERS`, `shouldSnapshot`, `SNAPSHOT_MIN_GAP_MS`, `versionReasonLabel`
 - **`src/workspaces/notes/lib/notesZoom.js`** — PURE document-zoom rules: the step ladder, the clamp, what a Ctrl+wheel notch and each Ctrl key mean, the per-scope storage key, and the scroll arithmetic that keeps the same writing under the eye across a step (VIEWPORT-STABLE).
