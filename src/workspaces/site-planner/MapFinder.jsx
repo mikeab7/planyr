@@ -53,6 +53,7 @@ import { MAP_CHROME_Z, panelMaxHeight, ZOOM_CONTROL_CLEARANCE_PX, MAP_OVERLAY_TO
 // B848496 — site-plan overlays (upload a site plan, place it on the map, pin comps to it).
 import { useSitePlanOverlayLayers } from "./lib/useSitePlanOverlayLayers.js";
 import { latLonToImagePoint, suggestFtPerPx, feetBetween } from "../../shared/sitePlans/lib/overlayGeoref.js";
+import { overlayPlaced } from "../../shared/sitePlans/lib/sitePlanOverlays.js";
 // Reused (never a new raw hex literal) for text on the fixed COMP_ACCENT blue below — that
 // accent doesn't change with theme, so the LIGHT palette's on-accent value is correct in both.
 import { PALETTES } from "../../shared/theme/palette.js";
@@ -779,6 +780,37 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     activeId: activeOverlayId, onSelect: selectOverlay, onCommitPlacement: commitOverlayPlacement,
     onRasterUnavailable,
   });
+
+  // B850432/NEW-1 — a site plan is gated off the map entirely below SITE_PLAN_MIN_ZOOM (it's
+  // meaningless zoomed all the way out), so ARMING an overlay for editing (a fresh "Place on
+  // map", or "Move / resize" on an existing one — both route through onActivateOverlay/
+  // selectOverlay) used to leave the map exactly where it was. On the owner's first try — the
+  // landing view defaults to the whole continental US for an account with no located sites yet
+  // — the plan was placed, armed, and permanently invisible: the Site plans list read opacity
+  // 0.85 / "Hide on map" (i.e. currently shown) while zero image layers ever reached the DOM,
+  // and "Pin comp here" had nothing rendered to click. Jump the map to the overlay's own anchor
+  // at a real site-plan viewing zoom whenever the live zoom can't show it, so arming a plan for
+  // editing always makes it visible immediately — this is the general fix; the SitePlansSection
+  // row also carries a passive "zoomed out too far" note + Zoom-in control (below) for the case
+  // where the map is later panned/zoomed back out from an already-placed, non-active plan.
+  const SITE_PLAN_VIEW_ZOOM = 17;
+  useEffect(() => {
+    if (!activeOverlayId) return;
+    const m = mapRef.current;
+    const o = overlaysById[activeOverlayId];
+    if (!m || !o || !overlayPlaced(o)) return;
+    if (zoom != null && zoom < SITE_PLAN_MIN_ZOOM) {
+      m.flyTo([o.centerLat, o.centerLon], SITE_PLAN_VIEW_ZOOM, { duration: 0.7 });
+    }
+  }, [activeOverlayId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Same jump, on demand — the Site plans list's own "Zoom in" control for a placed-but-not-
+  // active overlay the user has panned/zoomed away from (the passive half of the fix above).
+  const zoomToOverlay = (o) => {
+    const m = mapRef.current;
+    if (!m || !o || !overlayPlaced(o)) return;
+    m.flyTo([o.centerLat, o.centerLon], SITE_PLAN_VIEW_ZOOM, { duration: 0.7 });
+  };
 
   // "Open source brochure" from a comp's detail view (CompsPanel) — reuses the existing
   // cross-workspace open-review intent (Shell.openReviewInDocReview), the same one Library
@@ -3437,6 +3469,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                     onRejectFile={onRejectDroppedFile}
                     onCompPositionsChanged={() => setCompsReloadToken((t) => t + 1)}
                     rasterFailedIds={rasterFailedIds}
+                    zoomBelowGate={zoom != null && zoom < SITE_PLAN_MIN_ZOOM}
+                    onZoomToOverlay={zoomToOverlay}
                   />
                 </Suspense>
               </PanelErrorBoundary>
