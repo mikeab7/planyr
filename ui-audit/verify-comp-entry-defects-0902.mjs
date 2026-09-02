@@ -95,17 +95,24 @@ console.log("=== NEW-1 — dialog height grows with the viewport; ≥8 rows visi
   await ctx.close();
 }
 {
-  // The "≥8 rows before scrolling" bar from the brief, at a realistic full-size laptop browser
-  // window (900px tall). ⛔ HONEST RESULT, NOT A SILENTLY LOWERED BAR: this does NOT reach 8 —
-  // see DOCK_HEIGHT_DEFAULT_MAX's own header in CompEntryGrid.jsx for the measured reason
-  // (HARDENING-12's own pre-existing "map must stay clickable above the panel" requirement caps
-  // how tall the panel may grow by default, and every freshly pasted row starts without a picked
-  // Location, so ProblemsList is essentially always populated and eating into the grid's share).
-  // What IS asserted and true: a real, large improvement over the reported 2.4 rows.
+  // B986096-HARDENING-28 — the owner's OWN follow-up measurement, reproduced exactly: 3 rows in
+  // the sheet, then 8, same session, same page, at a realistic full-size laptop window (900px
+  // tall). Before this fix: 3 rows -> grid 154px (no scroll); 8 rows -> grid SHRANK to 101px and
+  // started scrolling, because 8 untouched rows each stacked their own quiet line in ProblemsList,
+  // eating the grid's only flex share. The defect was "more content -> LESS of the grid visible,"
+  // not merely "not 8 rows" — this asserts the grid's height now holds steady or grows as rows are
+  // added, never shrinks.
   const ctx = await newCtx(browser, { width: 1400, height: 900 }, "n1b");
   const page = await ctx.newPage();
   await openEntrySheet(page);
-  for (let i = 1; i <= 8; i++) {
+  for (let i = 1; i <= 3; i++) {
+    await pasteViaTextarea(page, `Tract ${i}, ${i}.0 AC, $${i}00,000, closed 1/${i}/2026`);
+  }
+  const geom3 = await page.evaluate(() => {
+    const scroller = document.querySelector('[data-comp-entry-panel] [role="grid"]');
+    return { clientH: scroller.clientHeight, scrollH: scroller.scrollHeight, rows: scroller.querySelectorAll("tbody tr").length };
+  });
+  for (let i = 4; i <= 8; i++) {
     await pasteViaTextarea(page, `Tract ${i}, ${i}.0 AC, $${i}00,000, closed 1/${i}/2026`);
   }
   const geom8 = await page.evaluate(() => {
@@ -113,10 +120,12 @@ console.log("=== NEW-1 — dialog height grows with the viewport; ≥8 rows visi
     return { clientH: scroller.clientHeight, scrollH: scroller.scrollHeight, rows: scroller.querySelectorAll("tbody tr").length };
   });
   const visibleRows8 = geom8.rows ? geom8.clientH / (geom8.scrollH / geom8.rows) : 0;
-  console.log(`  8 rows (all still missing Location — the worst case) @ 1400x900: clientH=${geom8.clientH} scrollH=${geom8.scrollH} rows=${geom8.rows} ~visibleRows=${visibleRows8.toFixed(1)}`);
-  console.log(`  [honest gap vs the brief's "≥8 rows" bar: reached ${visibleRows8.toFixed(1)}, a real improvement on the reported 2.4 — see DOCK_HEIGHT_DEFAULT_MAX's own header for why 8 isn't reached, and the trade-off made instead]`);
-  check("a real improvement over the reported 2.4 rows, worst case (~1.7x)", visibleRows8 >= 4.0,
-    `clientH=${geom8.clientH} scrollH=${geom8.scrollH} visibleRows=${visibleRows8.toFixed(1)}`);
+  console.log(`  [owner's own repro] 3 rows @ 1400x900: clientH=${geom3.clientH} scrollH=${geom3.scrollH} (before fix: 154/154)`);
+  console.log(`  [owner's own repro] 8 rows @ 1400x900: clientH=${geom8.clientH} scrollH=${geom8.scrollH} ~visibleRows=${visibleRows8.toFixed(1)} (before fix: 101/304, 3.2 rows)`);
+  check("the grid's client height does NOT shrink as rows grow (3 rows -> 8 rows)", geom8.clientH >= geom3.clientH,
+    `3 rows clientH=${geom3.clientH}, 8 rows clientH=${geom8.clientH}`);
+  check("the grid never drops below its own minimum floor regardless of row count", geom8.clientH >= 200, `clientH=${geom8.clientH}`);
+  console.log(`  [gap vs the brief's aspirational "≥8 rows" bar, reported honestly: ${visibleRows8.toFixed(1)} rows visible at 8 rows — see GRID_MIN_HEIGHT's own header in CompEntryGrid.jsx]`);
   if (SHOTS) await page.screenshot({ path: `${SHOT_DIR}/new1-dialog-height-8rows.png` });
   await ctx.close();
 }
@@ -133,13 +142,22 @@ console.log("\n=== NEW-2 — no per-row error text before the row is touched or 
     return { hasRequiredText: /is required/i.test(text), hasRowError: /Row 1 —/.test(text) };
   });
   check("NO 'Row N — ... is required' text present before any touch", !beforeTouch.hasRequiredText, JSON.stringify(beforeTouch));
-  // A quiet affordance should still exist, naming the row's incompleteness without alarm colour.
-  const quiet = await page.evaluate(() => {
-    const panel = document.querySelector("[data-comp-entry-panel]");
-    const el = [...panel.querySelectorAll("div")].find((d) => /Row 1 —/.test(d.textContent || ""));
-    return el ? { text: el.textContent, color: getComputedStyle(el).color } : null;
-  });
-  check("a quiet per-row note exists pre-touch, not in the warn/error colour", !!quiet, JSON.stringify(quiet));
+  check("NO per-row line at all before any touch (ProblemsList stays empty — the footer carries the count)",
+    !beforeTouch.hasRowError, JSON.stringify(beforeTouch));
+  // B986096-HARDENING-28 — the quiet affordance moved OFF the growing list and ONTO the row
+  // itself: a muted dot in the (empty, untouched) Executed cell, never a line in ProblemsList.
+  const headerCellsPre = await page.locator("th").allTextContents();
+  const execColIdxPre = headerCellsPre.findIndex((t) => t.trim() === "Executed");
+  const hbPre = await page.locator("th").nth(execColIdxPre).boundingBox();
+  const rowTdsPre = page.locator('td[data-cell^="0-"]');
+  const nPre = await rowTdsPre.count();
+  let execCellPre = null;
+  for (let i = 0; i < nPre; i++) {
+    const b = await rowTdsPre.nth(i).boundingBox();
+    if (b && hbPre && Math.abs(b.x - hbPre.x) < 3) { execCellPre = rowTdsPre.nth(i); break; }
+  }
+  const execCellText = execCellPre ? (await execCellPre.innerText()).trim() : null;
+  check("the untouched, empty Executed cell shows the quiet dot marker (its own quiet affordance)", execCellText === "•", `got ${JSON.stringify(execCellText)}`);
 
   // Now touch the row: click the Executed date cell and commit an edit.
   const headerCells = await page.locator("th").allTextContents();
@@ -306,6 +324,91 @@ async function sweepRestingRow(page) {
   check("Unit is a <SPAN> at rest, never a live <SELECT>", unitRow?.inner === "SPAN", JSON.stringify(unitRow));
   check("Unit shows the grid's normal 'cell' cursor at rest (not 'default')", unitRow?.cursor === "cell", JSON.stringify(unitRow));
   if (SHOTS) await page.screenshot({ path: `${SHOT_DIR}/new6-carets-land.png` });
+  await ctx.close();
+}
+
+console.log("\n=== NEW-5 — Executed date optional: Today button, save not blocked by a missing date ===");
+{
+  // The Today control only renders while the Executed cell is actively being edited (it lives
+  // beside the text input in SheetCell's compDate editing branch) — click into the cell first.
+  const ctx = await newCtx(browser, { width: 1400, height: 900 }, "n5a");
+  const page = await ctx.newPage();
+  await openEntrySheet(page);
+  await pasteViaTextarea(page, "West Hardy tract, 3.2 AC, $850,000");
+  const headerCells = await page.locator("th").allTextContents();
+  const execColIdx = headerCells.findIndex((t) => t.trim() === "Executed");
+  const hb = await page.locator("th").nth(execColIdx).boundingBox();
+  const rowTds = page.locator('td[data-cell^="0-"]');
+  const n = await rowTds.count();
+  let execCell = null;
+  for (let i = 0; i < n; i++) {
+    const b = await rowTds.nth(i).boundingBox();
+    if (b && hb && Math.abs(b.x - hb.x) < 3) { execCell = rowTds.nth(i); break; }
+  }
+  check("found the Executed cell", !!execCell);
+  if (execCell) {
+    const preText = (await execCell.innerText()).trim();
+    check("Executed cell shows the quiet dot before any edit (untouched, blank)", preText === "•", `got ${JSON.stringify(preText)}`);
+    await execCell.click();
+    await pacedWait(page, 200);
+    const todayBtn = page.getByRole("button", { name: "Tdy", exact: true });
+    check("a one-click 'Today' control is offered while editing the Executed cell", await todayBtn.count() > 0);
+    if (await todayBtn.count()) {
+      await todayBtn.click();
+      await pacedWait(page, 300);
+      const postText = (await execCell.innerText()).trim();
+      const today = new Date();
+      const mmddyy = `${String(today.getMonth() + 1).padStart(2, "0")}/${String(today.getDate()).padStart(2, "0")}/${String(today.getFullYear()).slice(-2)}`;
+      check("clicking Today commits today's date into the cell, in the sheet's mm/dd/yy display format", postText === mmddyy, `got ${JSON.stringify(postText)} expected ${mmddyy}`);
+    }
+  }
+  if (SHOTS) await page.screenshot({ path: `${SHOT_DIR}/new5-today-button.png` });
+  await ctx.close();
+}
+{
+  const ctx = await newCtx(browser, { width: 1400, height: 900 }, "n5b");
+  const page = await ctx.newPage();
+  await openEntrySheet(page);
+  await pasteViaTextarea(page, "West Hardy tract, 3.2 AC, $850,000");
+  const panelTextNoLoc = await page.evaluate(() => document.querySelector("[data-comp-entry-panel]").innerText);
+  check("with no Location set, the footer names ONLY the Location gap — never an Executed-date requirement",
+    /missing a Location/i.test(panelTextNoLoc) && !/Executed date/i.test(panelTextNoLoc), panelTextNoLoc.match(/\d+ of \d+ ready[^.]*\./)?.[0]);
+
+  // Set a Location via the map (the same "Place comp" flow verify-comp-entry-p0.mjs uses) — the
+  // row is left with NO Executed date the whole time, proving date is genuinely non-blocking.
+  const placeCompBtn = page.getByRole("button", { name: "Place comp", exact: true });
+  if (await placeCompBtn.count()) {
+    await placeCompBtn.click();
+    await pacedWait(page, 300);
+    const mapBox = await page.locator(".leaflet-container").first().boundingBox();
+    if (mapBox) {
+      await page.mouse.click(mapBox.x + mapBox.width / 2, mapBox.y + 150);
+      await pacedWait(page, 3500);
+    }
+  }
+  const headerCellsAfter = await page.locator("th").allTextContents();
+  const execColIdxAfter = headerCellsAfter.findIndex((t) => t.trim() === "Executed");
+  const hbAfter = await page.locator("th").nth(execColIdxAfter).boundingBox();
+  const rowTdsAfter = page.locator('td[data-cell^="0-"]');
+  const nAfter = await rowTdsAfter.count();
+  let execCellAfter = null;
+  for (let i = 0; i < nAfter; i++) {
+    const b = await rowTdsAfter.nth(i).boundingBox();
+    if (b && hbAfter && Math.abs(b.x - hbAfter.x) < 3) { execCellAfter = rowTdsAfter.nth(i); break; }
+  }
+  // Setting Location marks the whole row `touched` (CompsPanel.jsx's pending-anchor apply) — the
+  // quiet DOT is only for a row nobody has touched AT ALL, so once touched the Executed cell
+  // correctly renders genuinely empty (no dot, no value, no error) rather than the pre-touch dot.
+  const execStillBlankText = execCellAfter ? (await execCellAfter.innerText()).trim() : "(cell not found)";
+  check("Executed reads genuinely empty once the row is touched via Location — still no value, no error, no stale dot",
+    execStillBlankText === "", `got ${JSON.stringify(execStillBlankText)}`);
+
+  const saveBtn = page.getByRole("button", { name: /^Save \d+ comp/ });
+  check("the Save button reports 1 ready comp with a real Location and NO Executed date", await saveBtn.count() > 0, await saveBtn.count() ? await saveBtn.first().innerText() : "not found");
+  if (await saveBtn.count()) check("Save is enabled (not disabled) for a dated-blank-but-located row", await saveBtn.first().isEnabled());
+  const panelTextReady = await page.evaluate(() => document.querySelector("[data-comp-entry-panel]").innerText);
+  check("footer now reads 'ready' with no Location or Executed-date complaint", /1 comp ready/i.test(panelTextReady), panelTextReady.match(/\d+ comps? ready[^.]*\./)?.[0]);
+  if (SHOTS) await page.screenshot({ path: `${SHOT_DIR}/new5-save-without-date.png` });
   await ctx.close();
 }
 
