@@ -12,7 +12,9 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   preserveTilesAcrossSetView, announceSetView, capTileCache, releaseLayer, throttleTilePruning,
+  sweepBlankTiles, armBlankTileHeal,
 } from "../src/workspaces/site-planner/lib/tileLifecycle.js";
+import { STUCK_TILE_GRACE_MS } from "../src/workspaces/site-planner/lib/tileBudget.js";
 import { coalesceRequest, clearCoalesced } from "../src/workspaces/site-planner/lib/gisFetch.js";
 
 // A stand-in for Leaflet's GridLayer, with just the internals tileLifecycle touches.
@@ -303,5 +305,125 @@ describe("request coalescing (NEW-6)", () => {
     const a = await coalesceRequest("layer:a", () => Promise.resolve("A"));
     const b = await coalesceRequest("layer:b", () => Promise.resolve("B"));
     expect([a, b]).toEqual(["A", "B"]);
+  });
+});
+
+/* B844704 — the owner reported a lingering light-grey square over the dashboard aerial. Traced
+ * through Leaflet's own source: a tile that errors is marked `loaded` (so Leaflet's own grid
+ * update never asks for it again) but never gains `leaflet-tile-loaded` — the one class that
+ * takes it out of `visibility:hidden` (leaflet.css) — so it stays invisible forever, revealing
+ * the map's own flat `#ddd` background. `withTileRetry` gives up after two quick tries. This is
+ * the backstop: a periodic sweep that finds a retained tile still unpainted past a grace period
+ * and forces a fresh, cache-busted reload — regardless of why it never painted. */
+function fakeTileImg({ painted = false } = {}) {
+  return {
+    parentNode: {}, // truthy = still attached to the DOM
+    _src: "https://example.test/tiles/1/2/3.png",
+    get src() { return this._src; },
+    set src(v) { this._src = v; },
+    getAttribute(name) { return name === "src" ? this._src : null; },
+    classList: { contains: (cls) => (cls === "leaflet-tile-loaded" ? painted : false) },
+    getBoundingClientRect: () => ({ x: 100, y: 200, width: 256, height: 256 }),
+  };
+}
+
+function fakeGridWithEls(specs) {
+  // specs: [{ key, painted, current }]
+  const layer = { _tiles: {} };
+  specs.forEach(({ key, painted = false, current = true }) => {
+    layer._tiles[key] = { el: fakeTileImg({ painted }), coords: { x: 1, y: 2, z: 3 }, current };
+  });
+  return layer;
+}
+
+describe("sweepBlankTiles (B844704 — blank-tile self-heal)", () => {
+  it("does nothing when every retained tile has already painted", () => {
+    const l = fakeGridWithEls([{ key: "a", painted: true }, { key: "b", painted: true }]);
+    expect(sweepBlankTiles(l, { now: 0 })).toBe(0);
+  });
+
+  it("leaves a freshly-added unpainted tile alone — it may just be loading", () => {
+    const l = fakeGridWithEls([{ key: "a", painted: false }]);
+    expect(sweepBlankTiles(l, { now: 0 })).toBe(0); // first sighting, age 0
+  });
+
+  it("heals a tile that has sat unpainted past the grace period, and reports it", () => {
+    const l = fakeGridWithEls([{ key: "a", painted: false }]);
+    const el = l._tiles.a.el;
+    const originalSrc = el.src;
+    sweepBlankTiles(l, { now: 0 }); // first sighting — starts the clock
+    const healed = [];
+    const count = sweepBlankTiles(l, { now: STUCK_TILE_GRACE_MS + 1, onHeal: (info) => healed.push(info) });
+    expect(count).toBe(1);
+    expect(el.src).not.toBe(originalSrc); // reassigned, cache-busted
+    expect(el.src.startsWith(originalSrc)).toBe(true);
+    expect(healed).toHaveLength(1);
+    expect(healed[0]).toMatchObject({ key: "a", coords: { x: 1, y: 2, z: 3 } });
+    expect(healed[0].ageMs).toBeGreaterThanOrEqual(STUCK_TILE_GRACE_MS);
+    expect(healed[0].rect).toEqual({ x: 100, y: 200, w: 256, h: 256 });
+  });
+
+  it("never touches a tile that is not part of the current view", () => {
+    const l = fakeGridWithEls([{ key: "a", painted: false, current: false }]);
+    const el = l._tiles.a.el;
+    const originalSrc = el.src;
+    sweepBlankTiles(l, { now: 0 });
+    sweepBlankTiles(l, { now: STUCK_TILE_GRACE_MS + 1 });
+    expect(el.src).toBe(originalSrc);
+  });
+
+  it("stops tracking a tile the instant it paints — a later error restarts its clock", () => {
+    const l = fakeGridWithEls([{ key: "a", painted: false }]);
+    sweepBlankTiles(l, { now: 0 });
+    l._tiles.a.el.classList.contains = () => true; // painted between sweeps
+    expect(sweepBlankTiles(l, { now: STUCK_TILE_GRACE_MS + 1 })).toBe(0);
+  });
+
+  it("restarts the clock on heal, so it isn't reloaded again every sweep tick", () => {
+    const l = fakeGridWithEls([{ key: "a", painted: false }]);
+    sweepBlankTiles(l, { now: 0 });
+    expect(sweepBlankTiles(l, { now: STUCK_TILE_GRACE_MS + 1 })).toBe(1); // healed once
+    expect(sweepBlankTiles(l, { now: STUCK_TILE_GRACE_MS + 100 })).toBe(0); // too soon to be "stuck" again
+  });
+
+  it("never throws on a layer with no retained tiles, or no tiles at all", () => {
+    expect(() => sweepBlankTiles(null)).not.toThrow();
+    expect(sweepBlankTiles({ _tiles: {} }, { now: 0 })).toBe(0);
+  });
+});
+
+describe("armBlankTileHeal (B844704)", () => {
+  it("sweeps on a timer and heals a tile once it clears the grace period", () => {
+    vi.useFakeTimers();
+    try {
+      const l = fakeGridWithEls([{ key: "a", painted: false }]);
+      const healed = [];
+      const detach = armBlankTileHeal(l, { sweepMs: 1000, onHeal: (info) => healed.push(info) });
+      vi.advanceTimersByTime(1000); // first sweep — starts the clock, nothing to heal yet
+      expect(healed).toHaveLength(0);
+      vi.advanceTimersByTime(STUCK_TILE_GRACE_MS);
+      expect(healed).toHaveLength(1);
+      detach();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("the returned detach function stops the sweep for good", () => {
+    vi.useFakeTimers();
+    try {
+      const l = fakeGridWithEls([{ key: "a", painted: false }]);
+      const healed = [];
+      const detach = armBlankTileHeal(l, { sweepMs: 1000, onHeal: (info) => healed.push(info) });
+      detach();
+      vi.advanceTimersByTime(60_000);
+      expect(healed).toHaveLength(0); // never armed again — the interval genuinely stopped
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("never throws when armed on nothing", () => {
+    expect(() => armBlankTileHeal(null)()).not.toThrow();
   });
 });

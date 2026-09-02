@@ -73,7 +73,7 @@ import {
   basemapWrapPoint, registrationShift, sanitizeShift, tileNwFeet, registrationLayoutMayHaveChanged,
 } from "./lib/mapLock.js";
 import { overscanPx, keepBufferFor, retinaForZoom, tileWeight, tileCacheLimit } from "./lib/tileBudget.js";
-import { preserveTilesAcrossSetView, announceSetView, boundTileCache, releaseLayer, throttleTilePruning } from "./lib/tileLifecycle.js";
+import { preserveTilesAcrossSetView, announceSetView, boundTileCache, releaseLayer, throttleTilePruning, armBlankTileHeal } from "./lib/tileLifecycle.js";
 import { buildGhost } from "./lib/ghostSnapshot.js";
 import { cullRectFor, cullToView, shouldCull } from "./lib/viewCull.js";
 /* NEW-1 — the View menu's content-visibility model. Applied ONLY at the five draw-set seams,
@@ -2744,6 +2744,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const geoBackfillRef = useRef(null); // coarse low-zoom layer for instant blurry coverage
   const geoCapRef = useRef(null);      // detach fn for the bounded tile cache (NEW-7)
   const geoBfCapRef = useRef(null);    // NEW-1 — the same ceiling for the COARSE BACKFILL layer, which had none
+  const geoHealRef = useRef(null);     // B844704 — detach fn for the detail layer's blank-tile self-heal
+  const geoBfHealRef = useRef(null);   // B844704 — ditto for the coarse backfill layer
   const overlayStagedRef = useRef(false); // has the staged first-load pass finished? (NEW-3)
   const overlayRefs = useRef({});
   const [coverage, setCoverage] = useState({}); // id -> "in"|"out"|"unknown" (NEW-1; picker-only)
@@ -2865,9 +2867,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // E2E-only hook (never runs in production): expose the backdrop map so the panel-toggle
     // flash spec can count Leaflet `viewreset` events — a tile-wipe fires one, a panBy doesn't.
     if (typeof window !== "undefined" && window.__PLANYR_E2E) window.__geoMap = map;
-    return () => { try { map.remove(); } catch (_) {} geoMapRef.current = null; geoBaseRef.current = null; geoBackfillRef.current = null; overlayRefs.current = {}; geoCommitRef.current = null; setGeoZoom(null); if (typeof window !== "undefined" && window.__geoMap === map) window.__geoMap = null; };
+    return () => {
+      // B844704 — unlike the Leaflet event listeners boundTileCache registers (inert the moment
+      // the layer stops receiving events), armBlankTileHeal holds a real setInterval that keeps
+      // firing on a stale layer forever unless explicitly cleared — must be detached on EVERY
+      // path that can end this map's life, not just the source-change branch above.
+      try { if (geoHealRef.current) geoHealRef.current(); } catch (_) {}
+      try { if (geoBfHealRef.current) geoBfHealRef.current(); } catch (_) {}
+      geoHealRef.current = null; geoBfHealRef.current = null;
+      try { map.remove(); } catch (_) {}
+      geoMapRef.current = null; geoBaseRef.current = null; geoBackfillRef.current = null; overlayRefs.current = {}; geoCommitRef.current = null; setGeoZoom(null); if (typeof window !== "undefined" && window.__geoMap === map) window.__geoMap = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [origin]);
+
+  /* B844704 — reports a tile armBlankTileHeal (tileLifecycle.js) had to force back to life on
+   * THIS canvas's own basemap (the adjacent case to the dashboard map-finder aerial, which uses
+   * the same withTileRetry/leaflet.css mechanism and the same fix). */
+  const reportGeoTileHealed = (layerId) => ({ key, ageMs, coords, rect }) => {
+    let zoom = null;
+    try { zoom = geoMapRef.current && geoMapRef.current.getZoom(); } catch (_) {}
+    reportClientEvent("map-tile-blank-self-heal", `${layerId} tile blank ${ageMs}ms — reloaded`, {
+      layerId, key, coords: coords ? { x: coords.x, y: coords.y, z: coords.z } : null, rect, zoom, blankMs: ageMs,
+    });
+  };
 
   /* aerial basemap tile layer (toggle + source switch, B693) */
   useEffect(() => {
@@ -2886,7 +2909,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // waiting for an incidental prune, and detach the cache-cap listeners with them.
       try { if (geoCapRef.current) geoCapRef.current(); } catch (_) {}
       try { if (geoBfCapRef.current) geoBfCapRef.current(); } catch (_) {}
+      try { if (geoHealRef.current) geoHealRef.current(); } catch (_) {}
+      try { if (geoBfHealRef.current) geoBfHealRef.current(); } catch (_) {}
       geoCapRef.current = null; geoBfCapRef.current = null;
+      geoHealRef.current = null; geoBfHealRef.current = null;
       if (geoBaseRef.current) releaseLayer(map, geoBaseRef.current);
       if (geoBackfillRef.current) releaseLayer(map, geoBackfillRef.current);
       geoBaseRef.current = null; geoBackfillRef.current = null;
@@ -2926,6 +2952,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       tileSizePx: (bf.getTileSize && bf.getTileSize().x) || 256,
       keepBuffer: Math.max(2, geoKeepBuffer + 2),
     }));
+    // B844704 — see tileLifecycle.js armBlankTileHeal: a tile that errors past withTileRetry's
+    // own retry budget is left permanently invisible by Leaflet itself; this notices and reloads it.
+    geoBfHealRef.current = armBlankTileHeal(bf, { onHeal: reportGeoTileHealed("planner-basemap-backfill") });
     // Honest status dot for the Basemap row: "loaded" only on a REAL painted tile
     // (`tileload`) — Leaflet's layer-level `load` fires even when every tile errored
     // (errored tiles count as settled), which would show a green dot over a gray
@@ -2979,6 +3008,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         tileSizePx: (t.getTileSize && t.getTileSize().x) || 256,
         keepBuffer: geoKeepBuffer,
       }));
+      // B844704 — same self-heal as the backfill layer above; this one errors independently
+      // and is the layer that's actually on top at working zoom.
+      geoHealRef.current = armBlankTileHeal(t, { onHeal: reportGeoTileHealed("planner-basemap-detail") });
     };
     bf.once("load", addDetail);
     setTimeout(addDetail, 600); // fallback in case `load` is slow/never fires

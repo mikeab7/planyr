@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   tileWeight, overscanPx, keepBufferFor, retinaForZoom, tileCacheLimit, tilesToEvict,
+  stuckTiles, STUCK_TILE_GRACE_MS,
   OVERSCAN_FULL, OVERSCAN_REDUCED, RETINA_MIN_ZOOM,
 } from "../src/workspaces/site-planner/lib/tileBudget.js";
 import { visibleTiles } from "../src/workspaces/site-planner/lib/ghostSnapshot.js";
@@ -203,5 +204,50 @@ describe("NEW-1 — the coarse backfill layer's ceiling", () => {
     expect(caps.length, "detail AND backfill must each be capped").toBeGreaterThanOrEqual(2);
     expect(src).toMatch(/geoBfCapRef\.current = boundTileCache\(bf,/);
     expect(src).toMatch(/geoBfCapRef\.current\(\)/);   // and detached on teardown
+  });
+});
+
+/* B844704 — a tile Leaflet marks `loaded` on error but never `leaflet-tile-loaded` (see
+ * tileLifecycle.js's armBlankTileHeal header for the full trace through leaflet-src.js /
+ * leaflet.css) stays permanently `visibility:hidden`, revealing the map's own flat #ddd
+ * container background — the owner's reported lingering grey square. `stuckTiles` is the pure
+ * decision behind the self-heal sweep: which retained-but-unpainted tiles are old enough to be
+ * genuinely stuck rather than merely still loading. */
+describe("stuckTiles (B844704 — blank-tile self-heal)", () => {
+  it("flags a retained tile that has sat unpainted past the grace period", () => {
+    const tiles = [{ key: "a", current: true, painted: false, ageMs: STUCK_TILE_GRACE_MS + 1 }];
+    expect(stuckTiles(tiles)).toEqual(["a"]);
+  });
+
+  it("leaves an ordinary still-loading tile alone — must not interrupt a merely slow fetch", () => {
+    const tiles = [{ key: "a", current: true, painted: false, ageMs: 200 }];
+    expect(stuckTiles(tiles)).toEqual([]);
+  });
+
+  it("never touches a tile that already painted, however old", () => {
+    const tiles = [{ key: "a", current: true, painted: true, ageMs: STUCK_TILE_GRACE_MS * 10 }];
+    expect(stuckTiles(tiles)).toEqual([]);
+  });
+
+  it("ignores a stuck tile that is not CURRENT — nothing the user can see is there", () => {
+    const tiles = [{ key: "a", current: false, painted: false, ageMs: STUCK_TILE_GRACE_MS + 1 }];
+    expect(stuckTiles(tiles)).toEqual([]);
+  });
+
+  it("respects a caller-supplied grace period", () => {
+    const tiles = [{ key: "a", current: true, painted: false, ageMs: 1000 }];
+    expect(stuckTiles(tiles, 500)).toEqual(["a"]);
+    expect(stuckTiles(tiles, 2000)).toEqual([]);
+  });
+
+  it("handles a mixed batch, picking out only the genuinely stuck ones", () => {
+    const tiles = [
+      { key: "loading", current: true, painted: false, ageMs: 100 },
+      { key: "stuck1", current: true, painted: false, ageMs: STUCK_TILE_GRACE_MS + 500 },
+      { key: "painted", current: true, painted: true, ageMs: STUCK_TILE_GRACE_MS + 500 },
+      { key: "offscreen", current: false, painted: false, ageMs: STUCK_TILE_GRACE_MS + 500 },
+      { key: "stuck2", current: true, painted: false, ageMs: STUCK_TILE_GRACE_MS * 3 },
+    ];
+    expect(stuckTiles(tiles)).toEqual(["stuck1", "stuck2"]);
   });
 });
