@@ -28,6 +28,26 @@ on:
       - main
   workflow_dispatch:
 
+# ⛔ COST CUT (2026-09-02). The repo went private on 2026-08-31; Actions minutes went from
+# unlimited-and-free to metered, and nothing about the build got slower — the same run volume
+# simply started counting. Measured 2026-09-01→09-02: ~100 runs/day at ~8.35 min average, 94% of
+# all usage, mostly PR branches pushed to repeatedly while iterating (every push re-runs the FULL
+# build even after a newer commit supersedes it). Two independent fixes below; see each for why.
+concurrency:
+  # Cancel a SUPERSEDED run so an iterating branch only ever finishes paying for its NEWEST push —
+  # keyed on the ref, so every push to the same PR/branch shares one group and a later push cancels
+  # whatever of an earlier one is still in flight for that same group.
+  #
+  # ⛔ MAIN IS EXCLUDED ON PURPOSE, not merely narrowed. `github.ref` for a push to main is always
+  # `refs/heads/main`, so every main push shares this SAME group too — but cancel-in-progress is
+  # false for it, which makes a second push QUEUE behind an in-flight one rather than cancel it.
+  # Main's build is the absolute-ceiling gate (as opposed to the PR job's base-branch comparison —
+  # stabilised deliberately in B927105/#1305) and every merged commit needs its own reported
+  # verdict; cancelling it to save minutes would let a broken commit sit on main with nothing red
+  # to say so.
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 permissions:
   contents: read
 
@@ -47,6 +67,55 @@ jobs:
           #    against and that step degrades to "unavailable" — honestly reported, but the
           #    diagnosis is the point, so pay for the history.
           fetch-depth: 0
+      # ⛔ COST CUT, part 2 (2026-09-02). A large share of recent merges changed only Markdown, and
+      # every one still ran the FULL build — lint, the whole app test suite, a Vite build, a
+      # Playwright install, visual regression — none of which can find anything wrong when no
+      # source file changed. THIS DELIBERATELY DOES NOT SKIP THE JOB (no `paths-ignore` on the
+      # triggers above): a required status check that a path filter can skip is exactly the outage
+      # ui-audit/required-check-audit.mjs exists to catch (2026-08-06 — seven PRs stuck at
+      # "Expected — Waiting for status to be reported", no merge control available to anyone). The
+      # `build` job here ALWAYS runs and ALWAYS reports; only which STEPS inside it do real work
+      # varies. See ui-audit/lib/ciGates.mjs's DOCS_ONLY_GATE_NAMES for exactly what still runs and
+      # why each one earns its place — the generated-index drift guards, the per-folder CLAUDE.md
+      # pointer guard, and the backlog/verification id checks all read content a docs-only push can
+      # actually touch; nothing else can.
+      - name: Detect docs-only change (a pull_request whose diff is Markdown only)
+        id: docs_only
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            echo "Not a pull_request event (push to main / workflow_dispatch) — every merged commit gets its own full verdict, unconditionally."
+            exit 0
+          fi
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          set +e
+          git fetch --no-tags --quiet origin "$BASE" "$HEAD" 2>/dev/null
+          CHANGED="$(git diff --name-only "$BASE...$HEAD" 2>/dev/null)"
+          DIFF_STATUS=$?
+          set -e
+          if [ $DIFF_STATUS -ne 0 ]; then
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            echo "Could not compute the PR diff (git exit $DIFF_STATUS) — falling back to the full build, never to the fast path."
+            exit 0
+          fi
+          echo "Changed files:"
+          echo "$CHANGED"
+          # docs/UI-INVENTORY.md is Markdown by EXTENSION but not by CONTENT — ui-audit/ui-inventory.mjs
+          # generates it from a live Playwright crawl of the built app, and only the (expensive,
+          # browser-based) Signature-budget gate can tell whether it's still accurate. A change confined
+          # to this one file is a real, observed pattern (a line-number-attribution correction after a
+          # merge) — treating it as "docs-only" would skip the one check that verifies it. So it's
+          # excluded from the Markdown-only test below, same as any other non-.md file would be.
+          NON_DOCS="$(echo "$CHANGED" | grep -Ev '\.md$' || true)"
+          UI_INVENTORY="$(echo "$CHANGED" | grep -x 'docs/UI-INVENTORY.md' || true)"
+          if [ -n "$CHANGED" ] && [ -z "$NON_DOCS" ] && [ -z "$UI_INVENTORY" ]; then
+            echo "docs_only=true" >> "$GITHUB_OUTPUT"
+            echo "Every changed file is Markdown (.md), and none is the generated docs/UI-INVENTORY.md — running the docs-only gate subset."
+          else
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            echo "A non-Markdown file changed, or docs/UI-INVENTORY.md changed, or nothing changed — running the full build."
+          fi
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
@@ -56,9 +125,11 @@ jobs:
       # Chromium revision `npx playwright install --with-deps chromium` resolves to. Restoring this
       # cache BEFORE the gates run is what makes that install a ~10s cache hit instead of a ~290 MB
       # download on every push; only the (much cheaper) OS package install still runs every time,
-      # since GitHub-hosted runners don't persist apt state.
+      # since GitHub-hosted runners don't persist apt state. Skipped outright on the docs-only path —
+      # that path never reaches the Playwright install gate, so there's nothing to warm the cache for.
       - name: Cache Playwright browsers
         id: pw-cache
+        if: steps.docs_only.outputs.docs_only != 'true'
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
@@ -75,12 +146,17 @@ jobs:
           # permanent phantom delta) — see scripts/ci-parity.mjs / ui-audit/lib/ciGates.mjs.
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          # Told apart from a --docs-only CLI flag only by how it's set — this env is what a
+          # developer's own local `npm run ci-parity` (no env, no flag) can't reach by accident,
+          # keeping the default full-parity run the default. See ci-parity.mjs's own USAGE block.
+          CI_DOCS_ONLY: ${{ steps.docs_only.outputs.docs_only }}
       # Visual regression diffs (NEW-1). ci-parity.mjs's own visual-regression.mjs gate writes its
       # failure diffs to .perf/visual-regression/ (gitignored) — this is the one thing about a
       # failure a local run doesn't need (the files are already on disk) that CI does: a
-      # downloadable copy for whoever is looking at the failed run in the GitHub UI.
+      # downloadable copy for whoever is looking at the failed run in the GitHub UI. Skipped on the
+      # docs-only path — that gate never runs there, so there's never a diff to upload.
       - name: Upload visual regression diffs
-        if: failure()
+        if: failure() && steps.docs_only.outputs.docs_only != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: visual-regression-diffs
