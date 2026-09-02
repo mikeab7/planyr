@@ -474,6 +474,23 @@ describe("compParse corpus: RATE + BASIS", () => {
   it("bare-decimal-plus-period forms", () => {
     expect(rate("0.65 mo")).toBe("0.65");
   });
+  // B986096-HARDENING-23 (owner live-report) — RATE_SF_RE's "/\s*sf\b" alternative used to stop
+  // matching right after "SF", so a compound "/SF/mo" unit only consumed "/SF" and left "/mo" as
+  // an unrecognized fragment that fell through into Notes — a real value correctly captured
+  // (leaseRate: "0.56") sitting next to a garbage leftover in the one field meant for genuinely
+  // uncaptured text.
+  it("a compound /SF/period unit never leaks its period suffix into Notes", () => {
+    const draft = (line) => parseProseLine(line)?.draft;
+    expect(draft(".56/SF/mo NNN , 12 TI, 3% bumps").notes).toBe("");
+    expect(draft("$0.65/SF/mo NNN").notes).toBe("");
+    expect(draft("$7.80/SF/yr NNN").notes).toBe("");
+    expect(draft("$0.65/SF/month NNN").notes).toBe("");
+    expect(draft("$7.80/SF/year NNN").notes).toBe("");
+    // and the rate/period themselves are still read correctly, unchanged by the wider match
+    expect(draft(".56/SF/mo NNN , 12 TI, 3% bumps").leaseRate).toBe("0.56");
+    expect(draft(".56/SF/mo NNN , 12 TI, 3% bumps").leaseRatePeriod).toBe("monthly");
+    expect(draft(".56/SF/mo NNN , 12 TI, 3% bumps").leaseTi).toBe("12");
+  });
   it("basis words normalize to the two schema buckets (nnn/gross)", () => {
     const basis = (line) => parseProseLine(`$0.65/sf ${line}`)?.draft.leaseRateExpense;
     expect(basis("NNN")).toBe("nnn");

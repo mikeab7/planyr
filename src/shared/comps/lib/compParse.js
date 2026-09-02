@@ -430,7 +430,14 @@ const CENTS_RE = /\b(\d+(?:\.\d+)?)\s*(?:cents?\b|¢|c\b)/i;
 // The unit is usually "/SF" (slash-prefixed) or "psf", but also shows up as a bare "sf"
 // directly chained into a following period ("$0.65 sf/mo") — that compound shape is unambiguous
 // enough to accept without requiring its own leading slash.
-const RATE_SF_RE = /\$?\s*([\d,]*\.?\d+)\s*(k|m)?\s*(?:\/\s*sf\b|psf\b|sf\s*\/\s*(?:mo|month|yr|year)\b)/i;
+// B986096-HARDENING-23 (owner live-report) — the "/\s*sf\b" alternative used to stop matching
+// right after "SF", so ".56/SF/mo" only consumed ".56/SF" — regex alternation tries alternatives
+// in order and takes the first that matches, not the longest, so this one always won before the
+// engine could ever reach the "sf\s*\/\s*(?:mo|...)" alternative below it. The leftover "/mo"
+// fell through as an unrecognized fragment and landed in Notes. detectPeriod (the caller, above)
+// reads the ORIGINAL line independently, never this regex's own capture, so consuming the period
+// suffix here loses no information — it only stops it leaking downstream.
+const RATE_SF_RE = /\$?\s*([\d,]*\.?\d+)\s*(k|m)?\s*(?:\/\s*sf\b(?:\s*\/\s*(?:mo|month|yr|year)\b)?|psf\b|sf\s*\/\s*(?:mo|month|yr|year)\b)/i;
 // A bare decimal directly followed by a MONTHLY period word, no $ needed — small magnitude, so
 // it can never collide with a lease TERM ("10 yr"/"10 years" stay term-shaped; a term is never
 // stated in fractional months this small).
