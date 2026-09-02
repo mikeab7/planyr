@@ -919,17 +919,31 @@ export function notesScopeLabel() { return notesStorageLine().text; }
  *  ⛔ B842624 — THE BAR USED TO ASK FOR A DECISION WITH ZERO CONTENT TO DECIDE FROM: two verbs,
  *  no text, no timestamps, no visible difference. The owner: "i have no clue which one to
  *  choose, i should be able to decide which one i should by at least looking at it." The words
- *  here still name the choice; `ConflictCompare.jsx` is what now shows the two versions
- *  themselves, read-only, with the differing words marked — this function only had to say
- *  "read both below" instead of "pick", and gain a second parked-copy suffix so BOTH buttons
- *  can truthfully promise nothing is lost (see `handleConflict` in `Notes.jsx`: choosing
- *  either side now parks the OTHER side as a sibling page first). */
+ *  here still name the choice; `ConflictReview.jsx` is what now shows the two versions
+ *  themselves (a redline by default), with the differing words marked — this function only had
+ *  to say "read both below" instead of "pick", and gain a second parked-copy suffix so BOTH
+ *  buttons can truthfully promise nothing is lost (see `handleConflict` in `Notes.jsx`: choosing
+ *  either side now parks the OTHER side as a sibling page first).
+ *
+ *  ⛔ NEW-1 (the follow-up brief) — BOTH BUTTONS SAY THE SAME THING, ON PURPOSE. They used to
+ *  read "Keep this one" under "This window" and "Use the other" under "The other window" — one
+ *  self-referential verb and one OTHER-referential verb for what is mechanically the identical
+ *  action (keep the version the card you're reading shows). The owner, verbatim: "why does the
+ *  right one only have an option to use the other, think through how stupid this is." Standing
+ *  on the right card, "the other" reads as "go back to the left one" — backwards from what the
+ *  button actually does. `keepMine`/`keepTheirs` are now the SAME string, "Keep this version" —
+ *  the Google Drive version-history precedent (every version's own restore button reads
+ *  identically; which version it acts on is entirely positional, the card it sits under) — so
+ *  the pair reads as a genuinely symmetric choice rather than one instruction and its opposite.
+ *  Screen-reader users, who lose that positional cue, get the disambiguation in the button's
+ *  `aria-label` instead (see `ConflictSideBySide.jsx`/`ConflictReview.jsx`), never in the
+ *  visible text. */
 export function notesConflictLine(title) {
   const name = String(title || "").trim() || "Untitled";
   return {
-    text: `“${name}” also changed in another of your windows. Nothing was overwritten — read both below and pick which to keep.`,
-    keepMine: "Keep this one",
-    keepTheirs: "Use the other",
+    text: `“${name}” also changed in another of your windows. Nothing was overwritten — read both and pick which to keep.`,
+    keepMine: "Keep this version",
+    keepTheirs: "Keep this version",
     /** What the un-picked copy is parked as, so choosing can never lose the other text. */
     parkedSuffix: "(this window’s copy)",
     /** The mirror suffix, for the copy parked when "Keep this one" wins instead. */
