@@ -4235,6 +4235,47 @@ file/`CompEntryGrid.jsx`/`comps.js`:
   picks it up next, not filed as a separate B# here since the owner reassigned it rather than
   deferring it.
 
+**Recurrence (×9) — HARDENING PASS 8 (B986096-HARDENING-11), owner RETRACTION correcting the
+round-7/HARDENING-10 empty-row Per/Basis fix (which had already merged to `main` via #1315 by the
+time this correction arrived — this is a fresh follow-up on top of shipped work, not a fold-in).**
+The round-8 change made BOTH Per (rate period) and Basis (NNN/gross) default to genuinely empty on
+a blank row. The owner corrected that: it was only half right.
+- **Per is unchanged** — stays genuinely empty. Both monthly and annual are common in real
+  industrial quotes and a wrong guess is a silent 12x error with no safe default; the existing
+  "no period blocks the derived $/SF/yr column" gate is untouched.
+- **Basis now defaults to NNN**, reversing round-8's blank default for this one field. Owner's own
+  reasoning, verbatim in substance: this is an industrial product, industrial leases are
+  overwhelmingly triple-net, and a gross deal is the exception a broker calls out explicitly, not
+  the baseline — asking him to type "NNN" on every single comp was friction that bought nothing.
+  His original "$7 NNN and $7 gross are different deals, don't guess" principle is still correct;
+  it was just applied to the wrong field (Basis has one dominant right answer visible in a column
+  he can see and change; Per has two equally common answers and a 12x invisible error).
+- Three places now default an unset Basis to `"nnn"`: `comps.js`'s `emptyDraft` (a brand-new
+  blank row), `compSheetColumns.js`'s Type column `setValue` (switching an existing row TO lease,
+  mirroring the pre-existing Land→AC unit default — only-if-unset, never clobbers a real choice),
+  and `compParse.js`'s `genericToDraft` (a pasted lease row that named no basis at all).
+- **A gross-family term in the pasted text still wins outright over the default** —
+  `compParse.js`'s `BASIS_RE` now also matches the acronym/phrase forms the owner named (IG, MG,
+  "base year"; "modified gross"/"industrial gross" were already covered by the bare "gross"
+  alternative) alongside the pre-existing nnn/triple net/gross/full service/FS.
+- **No marker of any kind on a defaulted NNN** — no asterisk, badge, tooltip, or "assumed" note;
+  it renders exactly like a typed value, same as every other cell. This required removing the
+  `leaseRateExpense` "soft" flag round-7 raised when a basis was unstated (it drove a hover
+  tooltip and a `ProblemsList` sentence, "NNN vs gross wasn't given — check it.") — a live
+  default and a live "check it" flag on the same field would have contradicted each other, so the
+  flag had to go, not just the visible marker.
+- **VERIFIED (sandbox only).** `npx vitest run test/comps.test.js test/compParse.test.js
+  test/compSheetColumns.test.js test/compDrafts.test.js` — 203/203 green, incl. new coverage for
+  the NNN default at all three sites, the never-clobbers-an-existing-choice guard, the untouched
+  Per behavior, and every named gross-family term (gross/full service/FS/IG/industrial gross/
+  MG/modified gross/base year) still winning over the default. Full `npx vitest run` — 682/682
+  files green. `npm run build` clean. `npx eslint src/shared/comps/` clean.
+  `node ui-audit/design-drift-audit.mjs --check` / `node ui-audit/doc-pointer-audit.mjs` /
+  `node scripts/build-map.mjs --check` / `node scripts/build-backlog-index.mjs --check` /
+  `node scripts/verification-queue-audit.mjs --check` all pass. **No live-browser pass performed
+  this session (same sandbox-cannot-reach-any-external-host wall already recorded against
+  `V556720` above)** — treat as unconfirmed until a real signed-in pass records it.
+
 ### B986097 — A draft staging table, reachable only by the KML import `[Site Planner / comps]` (feature) #comps #gis #persistence  *(owner chat block 2026-09-01, NEW-2, same decision doc as B986096 above. Minted **B986097 / V556721** from this branch's reserved block B986096–B986111 · V556720–V556735 against `origin/main` 8e42a14. DEDUPE-FIRST — searched Open/⏳Verify/Done for "KML", "My Maps", "import draft", "staging table", #comps: no prior item touches KML/My Maps import; net-new. Also searched for any prior `comp_import_drafts`/`comp_drafts` table — none exists.)*
 `[x]` **Shipped this session, including the schema — applied directly to production** (this session has Supabase MCP write access, unlike the read-only access a prior comps session flagged in this same module's folder pointer — that stale claim was corrected in the same commit).
 - Verify: live — GIS endpoint behavior (a real KML import, a real polygon centroid) + real production writes are mandatory LIVE-VERIFY classes. **V556721.**

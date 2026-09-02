@@ -461,6 +461,24 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   in or out, from the shipping session) — round 6 ALSO passed every sandbox check and was then
   found non-editable on first live use, so treat round 8 as unconfirmed until `VERIFICATION.md`'s
   `V556720` records a real pass, not as "probably fine because the tests are green."
+  **⛔ ROUND 9 (B986096-HARDENING-11, owner correction, 2026-09-02) — round 8's Per/Basis fix
+  (item 5 above) was HALF right and the owner corrected it.** Per (monthly vs annual) is unchanged
+  — genuinely blank, no default, because both answers are common and a wrong guess is a silent
+  12x error with no safe default. **Basis is different and was over-corrected**: this is an
+  industrial product, industrial leases are overwhelmingly triple-net, and a gross deal is the
+  exception a broker states explicitly — not the baseline. So `emptyDraft`'s `leaseRateExpense`
+  now defaults to `"nnn"` (comps.js), `compSheetColumns.js`'s Type column defaults it to `"nnn"`
+  on switching TO lease (mirroring the existing Land→AC default, only-if-unset), and
+  `compParse.js`'s `genericToDraft` defaults a parsed lease row's basis to `"nnn"` when the pasted
+  text named no basis at all. A gross-family term in the pasted text still wins outright —
+  `BASIS_RE` now also catches the acronym/phrase forms the owner named (IG, MG, base year; "modified
+  gross"/"industrial gross" were already caught by the bare "gross" alternative) — and the parser
+  never resolves an EXPLICIT basis by inference, only ever a genuinely-unstated one by this
+  business default. The `leaseRateExpense` "soft" flag that used to render "NNN vs gross wasn't
+  given — check it." (a tooltip + a `ProblemsList` sentence) is GONE — the owner was explicit that
+  a defaulted NNN gets no marker of any kind, rendered exactly like a typed value, so the flag and
+  the default had to move together (a live soft flag would have kept showing the tooltip the
+  default was supposed to remove).
   KML import (B849233) is a SEPARATE staging table, `db/comp_import_drafts.sql`
   (`public.comp_import_drafts`, owner-only RLS — no team visibility at all, unlike `comps` itself,
   until promoted) — `lib/kmlImport.js` is the pure, hand-rolled Placemark parser (a Point is a

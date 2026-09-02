@@ -185,6 +185,13 @@ export const SHEET_COLUMNS = [
       // re-picking Land after picking something else never clobbers a choice the user already made.
       const next = { ...d, compType: v };
       if (v === "land" && !d.landSizeUnit) next.landSizeUnit = "ac";
+      // HARDENING-11 (owner correction, 2026-09-02) — switching TO lease defaults Basis to NNN,
+      // the same "only if unset" guard as the Land/AC default above. Industrial leases are
+      // overwhelmingly triple-net; the exception (gross/full-service/etc.) is what a paste or a
+      // typed override states explicitly, not the common case. Per (rate period, monthly vs
+      // annual) is NOT given a default here or anywhere else — that ambiguity is a real 12x
+      // error risk with no safe guess, unlike Basis, so it stays genuinely blank.
+      if (v === "lease" && !d.leaseRateExpense) next.leaseRateExpense = "nnn";
       return next;
     },
     flagKey: () => "compType",

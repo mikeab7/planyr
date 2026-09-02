@@ -33,7 +33,12 @@ const MONTHS = {
 };
 
 const LEASE_WORDS = /\b(lease|leased|leasing|tenant|landlord|rent(?:ed|al)?)\b/i;
-const BASIS_RE = /\b(nnn|triple\s*net|gross|full\s*service|\bfs\b)\b/i;
+// HARDENING-11 (owner correction, 2026-09-02) — the gross-family list Michael named explicitly:
+// gross, full service, FS, IG, industrial gross, MG, modified gross, base year. "industrial
+// gross"/"modified gross" are already caught by the bare "gross" alternative; ig/mg/base year
+// are the acronym/phrase forms that aren't. Any of these still WINS over the NNN default
+// (see genericToDraft's lease branch) — this module never silently drops an explicit basis.
+const BASIS_RE = /\b(nnn|triple\s*net|gross|full\s*service|fs|ig|mg|base\s*year)\b/i;
 const SALE_WORDS = /\b(sold|sale|purchased?|closed|buyer|seller)\b/i;
 const BUILDING_WORDS = /\b(building|warehouse|industrial|office|flex|shell|facility)\b/i;
 const LAND_WORDS = /\b(land|acres?|\bac\b|\blot\b|tract|pad\s*site)\b/i;
@@ -317,9 +322,13 @@ function finalizeGenericRow(generic, rawFlags, raw) {
       mergeFlag(flags, "leaseRatePeriod", "blocking",
         `No monthly/annual period was given — $${generic.rate} means something 12x different either way. Pick one before saving.`);
     }
-    if (!generic.rateBasis) {
-      mergeFlag(flags, "leaseRateExpense", "soft", "NNN vs gross wasn't given — check it.");
-    }
+    // HARDENING-11 (owner correction, 2026-09-02) — a missing basis used to be flagged soft
+    // ("NNN vs gross wasn't given — check it."). It no longer is: `genericToDraft` now defaults
+    // an unstated basis to NNN, the same product default `emptyDraft` uses for a blank row, and
+    // the owner was explicit that a defaulted NNN gets NO marker of any kind — no asterisk, no
+    // badge, no tooltip. A soft flag here would render exactly the tooltip/ProblemsList sentence
+    // he ruled out, so the two changes have to move together: no flag, because it is no longer an
+    // unresolved ambiguity — it's a confident default a gross-family term still overrides.
   }
   // ⛔ B986096-HARDENING-8 (owner correction, reversing HARDENING-6's stand-in) — EXECUTION and
   // COMMENCEMENT are different facts about different moments, and a comp's Date column is USED:
@@ -374,7 +383,10 @@ function genericToDraft(generic) {
   } else if (d.compType === "lease") {
     if (generic.rate != null) d.leaseRate = String(generic.rate);
     if (generic.ratePeriod) d.leaseRatePeriod = generic.ratePeriod;
-    if (generic.rateBasis) d.leaseRateExpense = generic.rateBasis;
+    // HARDENING-11 — Basis defaults to NNN, the same product default `emptyDraft` uses, unless
+    // the pasted text stated a gross-family term (`detectBasis`/`BASIS_RE` still wins outright).
+    // Per (leaseRatePeriod, above) gets NO such default — see this file's header.
+    d.leaseRateExpense = generic.rateBasis || "nnn";
     if (generic.sizeValue != null) d.leaseSizeSf = String(generic.sizeValue);
     if (generic.ti != null) d.leaseTi = String(generic.ti);
     if (generic.term) d.leaseTerm = generic.term;
@@ -660,7 +672,7 @@ function assignGenericCell(generic, flags, key, val) {
       break;
     }
     case "ratePeriod": generic.ratePeriod = /mo/i.test(val) ? "monthly" : /yr|year|annual/i.test(val) ? "annual" : null; break;
-    case "rateBasis": generic.rateBasis = /nnn|net/i.test(val) ? "nnn" : /gross|fs|full/i.test(val) ? "gross" : null; break;
+    case "rateBasis": generic.rateBasis = /nnn|net/i.test(val) ? "nnn" : /gross|fs|full|\big\b|\bmg\b|base\s*year/i.test(val) ? "gross" : null; break;
     case "ti": { const n = parseMagnitudeNumber(val.replace(/^\$/, "")); if (n) generic.ti = n.value; break; }
     case "term": generic.term = val; break;
     case "notes": generic.notes = val; break;

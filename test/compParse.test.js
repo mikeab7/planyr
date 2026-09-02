@@ -82,10 +82,21 @@ describe("compParse: the canonical blocking case — a lease rate with no period
     expect(cellFlags.leaseRatePeriod).toBeUndefined();
     expect(rowHasBlockingFlags(cellFlags)).toBe(false);
   });
-  it("basis (NNN vs gross) missing is SOFT, never blocking — it never scales the shown number", () => {
-    const { cellFlags } = parseProseLine("$8.50/SF/yr");
-    expect(cellFlags.leaseRateExpense?.level).toBe("soft");
+  it("HARDENING-11: basis missing defaults to NNN, silently — no flag, no marker, industrial's own default", () => {
+    const { draft, cellFlags } = parseProseLine("$8.50/SF/yr");
+    expect(draft.leaseRateExpense).toBe("nnn");
+    expect(cellFlags.leaseRateExpense).toBeUndefined();
     expect(rowHasBlockingFlags(cellFlags)).toBe(false);
+  });
+  it("HARDENING-11: a stated gross-family term still wins over the NNN default", () => {
+    expect(parseProseLine("$8.50/SF/yr gross").draft.leaseRateExpense).toBe("gross");
+    expect(parseProseLine("$8.50/SF/yr full service").draft.leaseRateExpense).toBe("gross");
+    expect(parseProseLine("$8.50/SF/yr FS").draft.leaseRateExpense).toBe("gross");
+    expect(parseProseLine("$8.50/SF/yr IG").draft.leaseRateExpense).toBe("gross");
+    expect(parseProseLine("$8.50/SF/yr industrial gross").draft.leaseRateExpense).toBe("gross");
+    expect(parseProseLine("$8.50/SF/yr MG").draft.leaseRateExpense).toBe("gross");
+    expect(parseProseLine("$8.50/SF/yr modified gross").draft.leaseRateExpense).toBe("gross");
+    expect(parseProseLine("$8.50/SF/yr base year").draft.leaseRateExpense).toBe("gross");
   });
 });
 

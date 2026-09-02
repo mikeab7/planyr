@@ -160,6 +160,29 @@ describe("compSheetColumns: HARDENING-10 NEW-1 — Type drives the sheet", () =>
   });
 });
 
+describe("compSheetColumns: HARDENING-11 — Type drives the sheet, Basis half", () => {
+  const typeCol = SHEET_COLUMNS[columnIndex("compType")];
+  it("switching a row TO lease defaults Basis to NNN when it wasn't already set", () => {
+    // A row parsed/created as land or building sale never touched leaseRateExpense, so it can
+    // still be genuinely "" here even though emptyDraft itself now starts at "nnn" — this is the
+    // "user hand-flips Type after the fact" path the Land/AC default above already covers.
+    const draft = { ...emptyDraft(null), compType: "land", leaseRateExpense: "" };
+    const next = typeCol.setValue(draft, "lease");
+    expect(next.compType).toBe("lease");
+    expect(next.leaseRateExpense).toBe("nnn");
+  });
+  it("never clobbers a Basis the user (or a paste) already set", () => {
+    const draft = { ...emptyDraft(null), compType: "land", leaseRateExpense: "gross" };
+    const next = typeCol.setValue(draft, "lease");
+    expect(next.leaseRateExpense).toBe("gross");
+  });
+  it("switching away from lease doesn't touch leaseRateExpense at all", () => {
+    const draft = { ...emptyDraft(null), compType: "lease", leaseRateExpense: "gross" };
+    const next = typeCol.setValue(draft, "land");
+    expect(next.leaseRateExpense).toBe("gross"); // untouched (irrelevant for land — Basis column doesn't apply)
+  });
+});
+
 describe("compSheetColumns: HARDENING-10 NEW-5 — computeFlexWidths / widthFor / frozenLeftOffsets", () => {
   it("plenty of room: the three growers share the surplus beyond everyone's nominal, Title getting the largest share; Notes never grows past its own nominal", () => {
     const w = computeFlexWidths(10000);
