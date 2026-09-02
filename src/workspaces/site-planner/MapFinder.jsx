@@ -2567,6 +2567,16 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       // definition of "is the user typing". BUTTON/SELECT stay a local exclusion — this
       // guard is broader than "typing" (it also yields to a focused control of any kind).
       if (isTextControl(ae) || PICKER_TAGS.includes(tag) || tag === "BUTTON") return;
+      // B986096-HARDENING-16 — the comp entry sheet (CompEntryGrid) gives every cell real DOM
+      // focus (a roving tabindex, HARDENING-14), and a selected-but-not-editing cell is a `<td>`
+      // — none of INPUT/TEXTAREA/contentEditable/SELECT/BUTTON above, so this handler's own
+      // guard let it straight through. A parcel selected on the map (e.g. from a prior "Comp
+      // from parcel" pick) plus the entry sheet open meant an Enter meant for the grid — move
+      // selection down, or open that cell's editor — instead fired an unrelated comp placement
+      // and ate the keystroke the grid never got a chance to act on. This is the same window-
+      // level "who owns Enter" collision the grid's own keyboard-commit fix (HARDENING-14/15)
+      // was built to survive; excluding the panel here is the other half of that same fix.
+      if (ae && ae.closest && ae.closest("[data-comp-entry-panel]")) return;
       e.preventDefault();
       placeCompOnSelectedParcel();
     };

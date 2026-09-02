@@ -828,7 +828,19 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     if (e.key === "Enter") {
       const colDef = SHEET_COLUMNS[selection.col];
       if (colDef.kind === "action") { triggerAction(selection.row, selection.col); return; }
-      e.preventDefault(); moveSelection({ axis: "row", delta: 1 }); return;
+      e.preventDefault();
+      // HARDENING-16 — a cell reached by keyboard (Tab into the grid, then arrows) and never
+      // clicked is SELECTED but not editing, and Enter here used to only move the selection down
+      // — silently doing nothing else, which read as "Enter is dead" to a keyboard-only user who
+      // had not yet discovered F2. A click already opens the editor immediately (HARDENING-10), so
+      // this makes Enter reach the same first-touch state F2 does, rather than requiring a second,
+      // undiscoverable key just to start typing.
+      if (cellState(colDef, rows[selection.row].draft).state === "editable") {
+        beginEdit(selection.row, selection.col, null, true);
+      } else {
+        moveSelection({ axis: "row", delta: 1 });
+      }
+      return;
     }
     if (e.key === "ArrowDown") { e.preventDefault(); if (e.shiftKey) extendRangeTo(selection.row + 1); else moveSelection({ axis: "row", delta: 1 }); return; }
     if (e.key === "ArrowUp") { e.preventDefault(); if (e.shiftKey) extendRangeTo(selection.row - 1); else moveSelection({ axis: "row", delta: -1 }); return; }
@@ -930,6 +942,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
 
   return createPortal(
     <div
+      data-comp-entry-panel="1"
       onPointerDown={(e) => e.stopPropagation()}
       style={{
         // B986096-HARDENING-9 (owner rule, "take it to near-full viewport") — was 1200px (1191px

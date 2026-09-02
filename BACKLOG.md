@@ -4658,6 +4658,53 @@ owner was validating his own test harness.** Both genuinely fixed this pass, not
   all pass.
 - Files: `src/shared/comps/components/CompEntryGrid.jsx`, `ui-audit/verify-comp-entry-p0.mjs`.
 
+**Recurrence (×13) — HARDENING PASS 12 (B986096-HARDENING-16), a 6th owner report of "Enter does
+not commit" — and this time the dominant cause was the DEPLOY, not the code.** The report arrived
+with a specific deployed bundle hash (`index-CTHuFzv3.js`) and a demand to confirm that hash
+changed before trusting anything else. It hadn't: `curl https://planyr.io/` still served
+`index-CTHuFzv3.js` at investigation time, and the LIVE symptom set matched — 17 grid cells all
+`tabindex="-1"`, zero at `tabindex="0"` — which is flatly impossible against the checked-out
+source (HARDENING-14's roving tabindex, `tabIndex={selected ? 0 : -1}`, guarantees exactly one).
+**Proven, not inferred:** the HARDENING-14/15 commit (`259b039`, PR #1328) was confirmed merged to
+`origin/main`; a clean local `npm run build` from that same commit produced
+`SitePlannerApp-DruEACd6.js`, a DIFFERENT chunk hash than production's `SitePlannerApp-CFJDSH8v.js`
+— proof the deployed build predates the merge, not a rendering of the same code. There is no
+separate "deploy" GitHub Actions job in this repo (Cloudflare Pages deploys off its own GitHub
+integration on a push to `main`, per `/CLAUDE.md`); the merge was only ~13 minutes old when
+checked, consistent with ordinary Cloudflare build/deploy lag rather than a stuck pipeline — no
+action was needed or taken to unstick it, only to wait, which is outside a code fix's reach.
+**Two genuine residual code gaps were still found and fixed this pass, independent of the deploy
+gap:**
+  1. **Enter on a cell reached by keyboard (Tab into the grid, then arrows) — never clicked — did
+     nothing but move the selection down; no editor opened.** `onGridKeyDown`'s Enter branch now
+     opens the cell's editor (matching F2) when the selected cell is editable, falling back to the
+     prior move-down behavior only for non-editable cells. A single click already opens the editor
+     immediately (HARDENING-10); this makes Enter reach the same first-touch state for a
+     keyboard-only user who has not discovered F2, closing exactly the "focus a cell, press Enter
+     — no editor opens" case the report measured.
+  2. **A second, unrelated window keydown listener could eat the grid's Enter outright.**
+     `MapFinder.jsx`'s B941152 "Enter arms the selected parcel as a comp" shortcut (active whenever
+     `mode === "comp"` and a parcel is selected on the map) excluded INPUT/TEXTAREA/SELECT/BUTTON
+     from `document.activeElement`, but not a `<td>` — and HARDENING-14 gave every grid cell real
+     DOM focus via a roving tabindex, so a selected-but-not-editing grid cell is exactly a
+     focused `<td>`. With a parcel selected from a prior "Comp from parcel" pick and the entry
+     sheet open, an Enter meant for the grid instead fired an unrelated comp placement and
+     `preventDefault()`'d the keystroke before the grid's own handler ran. Fixed by tagging the
+     entry panel's portal root (`data-comp-entry-panel`) and excluding any focus inside it from
+     MapFinder's handler — the same "who owns Enter" collision class HARDENING-14/15 closed inside
+     the grid, closed here at its other end. Flagged loudly per the task brief: this touches the
+     Location/parcel-anchor wiring another session owns, but the fix is a narrow exclusion on an
+     existing guard, not a redesign of that flow.
+- **VERIFIED (sandbox).** `ui-audit/verify-comp-entry-p0.mjs` — 39/39 green, no regressions. A new
+  ad hoc Playwright check (Tab into the grid, arrow off the paste box, press Enter with nothing
+  clicked) now reads `activeElement.tagName === "SELECT"` on the Type cell where it previously read
+  `"TD"`. Full `npx vitest run` — 686/686 files, 14,144/14,144 tests green. `npx eslint
+  src/shared/comps/components/CompEntryGrid.jsx src/workspaces/site-planner/MapFinder.jsx` — 0
+  errors. `npm run build` clean. **Not independently verifiable from this session: the deploy
+  itself finishing catching up on `planyr.io`** — that is Cloudflare's own pipeline, outside any
+  code change; re-check the served bundle hash after this PR merges.
+- Files: `src/shared/comps/components/CompEntryGrid.jsx`, `src/workspaces/site-planner/MapFinder.jsx`.
+
 ### B986097 — A draft staging table, reachable only by the KML import `[Site Planner / comps]` (feature) #comps #gis #persistence  *(owner chat block 2026-09-01, NEW-2, same decision doc as B986096 above. Minted **B986097 / V556721** from this branch's reserved block B986096–B986111 · V556720–V556735 against `origin/main` 8e42a14. DEDUPE-FIRST — searched Open/⏳Verify/Done for "KML", "My Maps", "import draft", "staging table", #comps: no prior item touches KML/My Maps import; net-new. Also searched for any prior `comp_import_drafts`/`comp_drafts` table — none exists.)*
 `[x]` **Shipped this session, including the schema — applied directly to production** (this session has Supabase MCP write access, unlike the read-only access a prior comps session flagged in this same module's folder pointer — that stale claim was corrected in the same commit).
 - Verify: live — GIS endpoint behavior (a real KML import, a real polygon centroid) + real production writes are mandatory LIVE-VERIFY classes. **V556721.**
