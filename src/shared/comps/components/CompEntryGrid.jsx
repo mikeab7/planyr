@@ -49,6 +49,13 @@ const GROUP_BAND_H = 22;
 const COL_LABEL_H = 26;
 const REMOVE_COL_W = 32;
 
+// HARDENING-12 — the bottom-docked panel's remembered height (device-local, not per-plan; see
+// the dockHeight state in CompEntryGrid for why this is a dock rather than a free x/y position).
+const DOCK_HEIGHT_KEY = "planyr:compEntryDockHeight";
+const DOCK_HEIGHT_DEFAULT = 340;
+const DOCK_HEIGHT_MIN = 200;
+const DOCK_HEIGHT_MAX = 760;
+
 let _rowSeq = 0;
 function newRowId() { return `row${Date.now()}_${_rowSeq++}`; }
 
@@ -153,7 +160,7 @@ function HeaderRows({ visibleIdx, flexWidths, frozenOffsets }) {
  * At rest: plain text, right-aligned + tabular-nums for numbers, no border. Selected: an outline
  * appears. Editing: a real <input> (or a native date input) fills the cell exactly. */
 function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, isEditing, editValue,
-  onMouseDown, onDoubleClick, onEditChange, onEditKeyDown, onEditBlur, editInputRef, locationText,
+  onMouseDown, onDoubleClick, onEditChange, onSelectEditChange, onEditKeyDown, onEditBlur, editInputRef, locationText,
   flexWidths, frozenOffsets }) {
   const st = cellState(col, draft);
   const flagKey = col.flagKey ? col.flagKey(draft) : col.key;
@@ -189,7 +196,10 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
           <select
             ref={editInputRef}
             value={editValue}
-            onChange={(e) => { onEditChange(e.target.value); }}
+            // HARDENING-13 — a select commits the instant its value changes; see
+            // onSelectEditChange's own header in the parent for why this differs from the plain
+            // text/number input's onEditChange (which only tracks in-progress typing).
+            onChange={(e) => { onSelectEditChange(e.target.value); }}
             onKeyDown={onEditKeyDown}
             onBlur={onEditBlur}
             style={{ ...inputStyle, padding: "0 2px" }}>
@@ -222,9 +232,7 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
   };
   // B986096-HARDENING-9 — the Location cell shows real information once an anchor is set (an
   // address / an APN / a plan title, resolved by `locationCellText` in the parent), never a bare
-  // confirmation of the click. Empty state keeps the "Set" affordance; the whole cell is still
-  // the click target either way (no separate button — HARDENING-9's "click target is the text
-  // itself" requirement is already how every action-kind cell has always worked here).
+  // confirmation of the click. Empty state keeps the "Set" affordance.
   // HARDENING-10 NEW-4 — "empty means empty": a genuinely unfilled editable cell renders nothing
   // at all now, never a grey placeholder word (`cellPlaceholder` always returns "" — see its own
   // header in compSheetColumns.js). The em dash for a not-applicable cell is unaffected — that
@@ -236,9 +244,40 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
   // values got cut off in ("Core5 Industrial Partners"); a hover reveals the untruncated value.
   const isLongTextCol = col.key === "title" || col.key === "partyProvider" || col.key === "partyAcquirer";
   const hoverTitle = col.key === "location" ? locationText : flag?.reason || (isLongTextCol && st.text ? st.text : undefined);
+  // ⛔ HARDENING-12 (B986096, owner P0 live-test) — an ACTION cell (Location) is a real, focusable
+  // `<button>` now, not a bare `<span>` inside a `<td>` — the owner tested it with
+  // `cell.querySelector('button')` and `role`/`tabindex` reads, and it was none of those. A real
+  // button gets Tab-reachability, Enter/Space activation, and the repo's global
+  // `button:focus-visible` ring (index.css) for free — no bespoke focus styling needed here.
+  // `onMouseDown` (renamed `onMouseDown` prop) already arms the row on the FIRST click as of this
+  // round (`onCellMouseDown` in the parent) — a double-click still works too (`onDoubleClick`
+  // below), since re-arming an already-armed row, or re-focusing an already-anchored one, is a
+  // harmless no-op.
+  if (st.state === "action") {
+    return (
+      <td style={{ ...tdStyle, padding: 0 }} data-cell={`${rowIdx}-${colIdx}`} title={hoverTitle}>
+        <button
+          type="button"
+          onMouseDown={(e) => onMouseDown(rowIdx, colIdx, e.shiftKey)}
+          onDoubleClick={() => onDoubleClick(rowIdx, colIdx)}
+          style={{ ...textStyle, width: "100%", border: "none", background: "transparent", cursor: "pointer", font: "inherit", color: textStyle.color }}
+        >
+          {cellText}
+        </button>
+      </td>
+    );
+  }
   return (
     <td style={tdStyle} data-cell={`${rowIdx}-${colIdx}`}
-      onMouseDown={(e) => onMouseDown(rowIdx, colIdx, e.shiftKey)}
+      // ⛔ HARDENING-12 (B986096, owner P0 live-test) — a `<td>`'s content (a plain `<span>`) is
+      // not focusable, so on an unmodified mousedown the BROWSER'S OWN default focus behavior
+      // (clearing focus, since the mousedown target isn't a focusable element) ran immediately
+      // after `beginEdit` mounted the cell's `<input>` and moved focus there — the input's own
+      // `onBlur` then fired `finishEdit`, closing the edit the same click opened it, before any
+      // typed character could land. `preventDefault()` here is the standard fix (every grid
+      // library with click-to-edit cells does this) — it suppresses the browser's own default
+      // mousedown action WITHOUT touching our own explicit `.focus()` calls, which still run.
+      onMouseDown={(e) => { e.preventDefault(); onMouseDown(rowIdx, colIdx, e.shiftKey); }}
       onDoubleClick={() => onDoubleClick(rowIdx, colIdx)}
       title={hoverTitle}>
       <span style={textStyle}>
@@ -573,6 +612,19 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
   };
 
   const onEditChange = (v) => { editValueRef.current = v; setEditValue(v); };
+  // ⛔ HARDENING-13 (B986096, owner P0 live-test, "changing Type does not rebuild the column
+  // set") — the column-set reactivity itself was never broken (`visibleColumnIndices` already
+  // recomputes off `rows` on every change); a SELECT cell's change never actually REACHED `rows`
+  // until something else blurred it, because `onEditChange` alone only updates the in-progress
+  // edit value, same as a text field mid-typing. That's the right contract for a text field (more
+  // characters may still be coming) but wrong for a select — picking an option IS the complete,
+  // deliberate action, there's nothing further to type. Measured live: Tab immediately after
+  // picking an option (a natural next move) failed to commit at all — the native OS picker
+  // `.showPicker()` opens on entry apparently still owns the keystroke — so a real next action
+  // could silently leave the picked value uncommitted with no visible sign anything was wrong.
+  // A select now commits the instant its value changes, closing that gap outright rather than
+  // depending on whatever the user happens to do next.
+  const onSelectEditChange = (v) => { editValueRef.current = v; setEditValue(v); finishEdit(true, null); };
   const onEditKeyDown = (e) => {
     if (e.key === "Enter") { e.preventDefault(); finishEdit(true, { axis: "row", delta: 1 }); }
     else if (e.key === "Tab") { e.preventDefault(); finishEdit(true, { axis: "col", delta: e.shiftKey ? -1 : 1, wrap: true }); }
@@ -640,11 +692,13 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     // HARDENING-10 NEW-3 (owner measured: a single click only ever focused a bare, non-editable
     // DIV — a double-click was needed to reach an editor at all, "four clicks for one value").
     // ONE click now goes straight to edit for anything editable — a text cell gets a caret, a
-    // choice cell opens its menu (via the showPicker effect above). Location stays select-only on
-    // a single click (it is an ACTION cell, not text — Enter/double-click still runs the picker,
-    // unchanged) so a stray click never arms the map-pick flow by accident.
+    // choice cell opens its menu (via the showPicker effect above).
+    // ⛔ HARDENING-12 (owner P0 live-test) — Location used to stay select-only on a single click,
+    // requiring a double-click to arm the map-pick flow. The owner clicked it four times across
+    // two page loads and nothing happened, because there was no visible affordance telling him a
+    // SECOND click was needed. A single click now arms immediately, matching every other cell.
     const colDef = SHEET_COLUMNS[col];
-    if (colDef.kind === "action") return;
+    if (colDef.kind === "action") { triggerAction(row, col); return; }
     if (cellState(colDef, rows[row].draft).state === "editable") beginEdit(row, col, null, true);
   };
   const onCellDoubleClick = (row, col) => {
@@ -738,23 +792,37 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     }
   }
 
-  const [pos, setPos] = useState(() => {
-    const w = typeof window !== "undefined" ? window.innerWidth : 1560;
-    return { x: Math.max(16, (w - 1560) / 2), y: 60 };
+  // ⛔ HARDENING-12 (B986096, owner P0 live-test) — this used to float near the TOP of the
+  // viewport at near-full width and up to 88% of the viewport height, which is exactly where the
+  // map needs to be clickable for the "arm a row, then click the map" workflow this panel exists
+  // to drive. Measured on the owner's own page: the card covered 72% of the map, all of it the
+  // TOP, leaving only a sliver at the bottom reachable. It now DOCKS to the bottom edge instead
+  // of floating — the map above it stays clickable at any panel height — and the height is a
+  // resize handle (drag the top edge) rather than free x/y positioning, since a docked panel has
+  // nothing to reposition horizontally. The height is remembered per device (not per plan) so it
+  // doesn't reset every time the panel reopens.
+  const [dockHeight, setDockHeight] = useState(() => {
+    if (typeof window === "undefined") return DOCK_HEIGHT_DEFAULT;
+    const saved = Number(window.localStorage?.getItem(DOCK_HEIGHT_KEY));
+    return Number.isFinite(saved) && saved > 0 ? saved : DOCK_HEIGHT_DEFAULT;
   });
-  const posRef = useRef(pos);
-  posRef.current = pos;
-  const startDrag = (e) => {
+  const dockHeightRef = useRef(dockHeight);
+  dockHeightRef.current = dockHeight;
+  const startResize = (e) => {
     if (e.button != null && e.button !== 0) return;
     e.preventDefault();
-    const sx = e.clientX, sy = e.clientY;
-    const ox = posRef.current.x, oy = posRef.current.y;
+    const sy = e.clientY;
+    const startH = dockHeightRef.current;
     const move = (ev) => {
-      const w = typeof window !== "undefined" ? window.innerWidth : 1200;
       const h = typeof window !== "undefined" ? window.innerHeight : 800;
-      setPos({ x: Math.max(4, Math.min(w - 60, ox + ev.clientX - sx)), y: Math.max(4, Math.min(h - 40, oy + ev.clientY - sy)) });
+      const next = clamp(startH + (sy - ev.clientY), DOCK_HEIGHT_MIN, Math.min(DOCK_HEIGHT_MAX, h - 80));
+      setDockHeight(next);
     };
-    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      try { window.localStorage?.setItem(DOCK_HEIGHT_KEY, String(dockHeightRef.current)); } catch { /* private mode / quota — height just won't persist */ }
+    };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
@@ -769,15 +837,18 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
         // B986096-HARDENING-9 (owner rule, "take it to near-full viewport") — was 1200px (1191px
         // measured on his 1600px screen after borders), 370px narrower than it needed to be for a
         // sheet whose whole point is not scrolling sideways for important fields.
-        position: "fixed", left: pos.x, top: pos.y, width: "min(1560px, calc(100vw - 32px))",
-        maxHeight: "min(88vh, 800px)", zIndex: 2600, display: "flex", flexDirection: "column",
+        // HARDENING-12 — docked to the BOTTOM edge (see dockHeight's own comment above) rather
+        // than floating near the top, so the map above it stays clickable at any height.
+        position: "fixed", left: 16, right: 16, bottom: 12, width: "auto",
+        height: dockHeight, zIndex: 2600, display: "flex", flexDirection: "column",
         background: "var(--surface-overlay)", border: "1px solid var(--border-default)", borderRadius: 12,
-        boxShadow: "0 16px 44px rgba(28,25,20,0.22), 0 3px 10px rgba(28,25,20,0.1)", // design-exempt: mirrors shared/ui/FloatingPanel.jsx's card shadow verbatim — no shadow token exists yet
+        boxShadow: "0 -8px 28px rgba(28,25,20,0.18), 0 -2px 8px rgba(28,25,20,0.08)", // design-exempt: shadow points UP (the panel sits at the bottom of the viewport) — no shadow token exists yet
       }}>
-      <div onPointerDown={startDrag}
-        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: "1px solid var(--border-default)", cursor: "move", userSelect: "none" }}>
+      <div onPointerDown={startResize} title="Drag to resize"
+        style={{ height: 6, margin: "-1px -1px 0", borderRadius: "12px 12px 0 0", cursor: "ns-resize", background: "var(--border-default)" }} />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: "1px solid var(--border-default)" }}>
         <span style={{ fontSize: 13, fontWeight: 700 }}>New comps</span>
-        <button onPointerDown={(e) => e.stopPropagation()} onClick={onCancel} aria-label="Close"
+        <button onClick={onCancel} aria-label="Close"
           style={{ border: "none", background: "transparent", color: "var(--text-secondary)", fontSize: 14, cursor: "pointer", padding: 2 }}>✕</button>
       </div>
 
@@ -809,8 +880,17 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
 
       {armedRowId && (
         <div style={{ fontSize: 12, color: "var(--warn-text)", background: "var(--warn-bg)", borderBottom: "1px solid var(--warn-border)", padding: "6px 14px" }}>
-          Now click <strong>Drop a pin</strong> or <strong>Comp from parcel</strong> on the map, then click the map — the location lands on the comp you picked. The map stays fully usable while you do this.{" "}
+          {/* HARDENING-12 — "the map stays fully usable" was true only once the panel stopped
+              covering the top of it (see the dock change above); now docked to the bottom, the
+              map above this panel is clickable. Escape is now a real way out, not just Cancel.
+              HARDENING-13 — arming Location now also arms the map's own pin-drop mode (the
+              parent's `onArmMapPin`), so the NEXT click on the map is already listening — no
+              separate "Drop a pin" click needed first. "Comp from parcel" stays a real
+              alternative (anchor to an actual lot instead of a raw point), reached the same way
+              it always was, from the map's own toolbar. */}
+          Click the map above to drop the pin — or click <strong>Comp from parcel</strong> on the map toolbar to anchor to a lot instead.{" "}
           <button onClick={() => onArm(null)} style={{ border: "none", background: "none", color: "inherit", textDecoration: "underline", cursor: "pointer", padding: 0, marginLeft: 4 }}>Cancel</button>
+          {" "}or press Esc.
         </div>
       )}
 
@@ -845,6 +925,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
                       onMouseDown={onCellMouseDown}
                       onDoubleClick={onCellDoubleClick}
                       onEditChange={onEditChange}
+                      onSelectEditChange={onSelectEditChange}
                       onEditKeyDown={onEditKeyDown}
                       onEditBlur={onEditBlur}
                       editInputRef={editInputRef}

@@ -4276,6 +4276,103 @@ a blank row. The owner corrected that: it was only half right.
   this session (same sandbox-cannot-reach-any-external-host wall already recorded against
   `V556720` above)** — treat as unconfirmed until a real signed-in pass records it.
 
+**Recurrence (×10) — HARDENING PASS 9 (B986096-HARDENING-12/13), owner P0 LIVE-TESTED the
+deployed sheet end to end for the FIRST time and found a comp could not be saved at all — two
+consecutive owner messages, cycle 1 and cycle 2, both addressed in this pass.** ⛔ **CORRECTION TO
+EVERY PRIOR ROUND'S "NO BROWSER REACHABLE" DISCLOSURE: it was wrong in scope, not in fact.** The
+earlier finding — confirmed multiple times, written into `VERIFICATION.md` and `/CLAUDE.md` — is
+that Chromium in this sandbox cannot reach ANY EXTERNAL host (the PR's own Cloudflare preview,
+example.com, and planyr.io itself all `ERR_CONNECTION_RESET`). That is real and unchanged. What was
+never previously tried: **the local Vite dev server (`npm run dev`) is `localhost`, not external —
+Chromium reaches it fine**, and a fixture-seeded signed-out plan (this repo's own established
+`ui-audit/lib/fixtureSeeding.mjs`/`planFixture.mjs` pattern) reaches the Comps entry sheet with zero
+network dependency. Every fix below was proven against a REAL rendered page, real mouse clicks, real
+keyboard input (`page.keyboard.press`/`.type`, never a synthetic dispatched event —
+SYNTHETIC-KEYS-DONT-EDIT) and a real Leaflet map click, not code-reading. The one thing still
+unreachable is a genuine signed-in Supabase write (Save → the comps counter incrementing) — Supabase
+is an external host too — so the client-side path is now proven all the way to "Save is enabled and
+the row is genuinely valid," and the final database round trip remains the one thing this session
+cannot self-serve.
+- **CYCLE 1, FOUR FINDINGS, ALL FIXED:**
+  1. **Location cell was a bare `<span>` in a `<td>`** — no `<button>`, no `role`, no `tabindex`,
+     required a DOUBLE click with no visible sign a second click was needed (`onCellMouseDown`
+     deliberately special-cased action-kind cells to select-only on a single click). The owner
+     clicked it four times across two page loads and nothing happened. Now a real `<button>`
+     (`CompEntryGrid.jsx`'s `SheetCell`) that arms on the FIRST click, gets the repo's existing
+     global `button:focus-visible` ring for free, and is genuinely Tab-reachable.
+  2. **The map toolbar's "Drop a pin"/"Comp from parcel" is a SEPARATE arm mechanism from a row's
+     own Location cell (`armedRowId`)** — picking a location via the toolbar while a pasted row
+     still needed one always APPENDED A NEW ORPHAN ROW instead of answering the one waiting; three
+     toolbar picks left three unsaveable rows. `CompsPanel.jsx`'s `pendingAnchor` effect now fills
+     the topmost row missing a location before ever appending, and only appends when every open row
+     already has one (or the grid is closed).
+  3. **The real defect under "Enter discards, Tab commits."** A `<td>`'s plain-text content isn't
+     natively focusable, so an un-prevented `mousedown` let the BROWSER'S OWN default focus-clearing
+     action fire immediately after `beginEdit` moved focus to the freshly-mounted `<input>` — the
+     input's own `onBlur` closed the edit inside the same click, before any typed character could
+     land. Invisible to a `document.activeElement` read taken after the blur has already settled,
+     which is exactly why it read as "Enter discards" rather than "the input never really stuck
+     around" — Tab happened to move focus natively regardless, so ITS OWN blur-commit looked like
+     success. Fixed with a plain `e.preventDefault()` on the cell's `mousedown` — the standard fix
+     for this class of click-to-edit grid bug, used by essentially every spreadsheet UI library.
+  4. **Docking.** The entry panel floated near the TOP of the viewport at up to 88% of its height —
+     72% of the map on the owner's own 1191×521 measurement, all of it the TOP, the exact area
+     "arm a row, then click the map" needs. It now DOCKS to the bottom edge (`bottom:12, left:16,
+     right:16`) with a drag-to-resize top edge and a remembered height (`localStorage`, device-local,
+     `planyr:compEntryDockHeight`, default 340px, floor 200/ceiling 760), so the map above it stays
+     clickable at any panel height instead of fighting it for the top of the screen.
+- **CYCLE 2, THREE MORE FINDINGS — arrived while cycle 1 was still shipping, on the SAME deployed
+  (pre-fix) bundle, folded into this same pass rather than started fresh:**
+  1. **⛔ THE WORST ONE — changing Type did not rebuild the column set.** The reactivity itself
+     was never broken (`visibleColumnIndices(rows)` already recomputes off `rows` via `useMemo`
+     with every change) — the real gap was COMMIT TIMING: a `<select>` cell's `onChange` only
+     updated the in-progress edit value (`onEditChange`), same contract as a text field mid-typing,
+     and nothing committed it into `rows` until a SEPARATE blur/Tab/Enter. Measured live: Tab
+     immediately after picking an option — a completely natural next move — failed to commit at
+     all (the native OS picker `.showPicker()` opens on entry and appears to still own the
+     keystroke), so a real user's next action could silently leave a picked Type uncommitted with
+     no visible sign anything was wrong. A `<select>`'s change IS the complete, deliberate action —
+     there's nothing further to type — so it now commits the instant the value changes
+     (`onSelectEditChange`, `CompEntryGrid.jsx`), closing the gap outright rather than depending on
+     whatever the user happens to do next. Proven live: switching Type to Lease with NO subsequent
+     click/Tab immediately shows Rate/Per/Basis/Term/TI/Escal/Free rent — the full lease column set.
+  2. **Location cell re-confirmed styled-clickable-with-no-handler** on the pre-fix bundle
+     (`cursor:pointer` on both the cell and its span, `querySelector('button') → null`) — already
+     covered by cycle 1 fix #1 above; no separate work needed.
+  3. **"Clicking Location arms pin placement" was only half true** — it armed the ROW
+     (`armedRowId`) but left the MAP's own "am I placing a pin right now" switch
+     (`placingCompPin`, owned entirely inside `MapFinder.jsx`) untouched, so a subsequent map click
+     did nothing until the user ALSO separately clicked the toolbar's "Drop a pin" — an undocumented
+     third step the owner's own acceptance scenario ("click Location, then click the map") never
+     asked for. `CompsPanel.jsx`'s `armRow` wrapper now arms both together (`onArmMapPin`,
+     new prop threaded from `MapFinder.jsx`) and disarms both together (Escape/Cancel →
+     `onDisarmMapPin`) — a genuine two-click flow now, not three.
+- **Keyboard nav was ALREADY present and untouched — checked, not fixed.** The owner's separate
+  finding (`table.querySelectorAll('button,[tabindex],input,select,a[href],[role="button"]').length
+  === 1`) undercounts a `role="grid"` custom keyboard pattern (Excel Online / Google Sheets shape:
+  one native tab-stop, arrow keys move an internal selection) by construction — it was already
+  proven live this pass: Tab from the paste textarea reaches the grid container in 3 tabs, 4×
+  ArrowRight from Type lands on Location, and Enter on the selected Location cell arms it, all with
+  zero mouse clicks. No code change; recorded here so it isn't re-diagnosed as broken.
+- **VERIFIED LIVE (not sandbox-only — see the correction above).** A new permanent regression
+  harness, `ui-audit/verify-comp-entry-p0.mjs` (`npm run verify:compentryp0`, needs `npm run dev` on
+  port 4319 first), drives all of the above against a real fixture-seeded plan: 28/28 checks green,
+  incl. the owner's own full acceptance scenario end to end (paste → switch Type to Lease → confirm
+  the lease columns appear → click Location → click the map → Location fills → row count stays 1 →
+  Save button is enabled) and the keyboard-only path. Full `npx vitest run` — 683/683 files,
+  14,053/14,053 tests green (incl. `test/tabTiming.test.js`'s FOREGROUND-OR-VOID self-test, which
+  the new harness must satisfy like every other browser-driving harness in this repo). `npm run
+  build` clean. `npx eslint src/shared/comps/ src/workspaces/site-planner/MapFinder.jsx
+  ui-audit/verify-comp-entry-p0.mjs` clean (the 6 pre-existing `MapFinder.jsx` lint warnings are
+  unrelated dead `eslint-disable` comments, confirmed far from this diff). `node
+  ui-audit/design-drift-audit.mjs --check` / `node ui-audit/doc-pointer-audit.mjs` / `node
+  scripts/build-map.mjs --check` / `node scripts/build-backlog-index.mjs --check` / `node
+  scripts/verification-queue-audit.mjs --check` all pass.
+- **Still genuinely open: the actual database write.** Save button reaching `disabled: false` and a
+  real `INSERT` into `public.comps` succeeding (the comps counter 0→1) are different claims — Supabase
+  is an external host, unreachable from this sandbox same as before. `V556720` carries this as the
+  one remaining live-verify step.
+
 ### B986097 — A draft staging table, reachable only by the KML import `[Site Planner / comps]` (feature) #comps #gis #persistence  *(owner chat block 2026-09-01, NEW-2, same decision doc as B986096 above. Minted **B986097 / V556721** from this branch's reserved block B986096–B986111 · V556720–V556735 against `origin/main` 8e42a14. DEDUPE-FIRST — searched Open/⏳Verify/Done for "KML", "My Maps", "import draft", "staging table", #comps: no prior item touches KML/My Maps import; net-new. Also searched for any prior `comp_import_drafts`/`comp_drafts` table — none exists.)*
 `[x]` **Shipped this session, including the schema — applied directly to production** (this session has Supabase MCP write access, unlike the read-only access a prior comps session flagged in this same module's folder pointer — that stale claim was corrected in the same commit).
 - Verify: live — GIS endpoint behavior (a real KML import, a real polygon centroid) + real production writes are mandatory LIVE-VERIFY classes. **V556721.**
