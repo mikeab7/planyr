@@ -97,22 +97,54 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   small. **Its own lazy chunk**, same reasoning as `IntegrityBanner.jsx` — a real conflict is rare
   and the diff engine has no business on the route's critical path.
 - **`components/ConflictReview.jsx` — THE FULL-SCREEN REVIEW.** Opens on a REDLINE
-  (`components/NoteRedline.jsx` + `lib/notesRedline.js`) by default — NEW-2's ask, *"wouldn't a
+  (`components/NoteRedline.jsx` + `lib/notesRedline.js`) by default — the owner's ask, *"wouldn't a
   redline be better, so I can see the differences over each other"* — with the original two-card
   `components/ConflictSideBySide.jsx` one toggle away for a rewrite big enough that two
-  independent columns read easier. This is the ONLY place either "Keep this version" button
-  lives; closing (Esc/✕) never resolves anything, it just returns to the compact notice.
+  independent columns read easier. This is the ONLY place either resolve button lives; closing
+  (Esc / the "✕ Decide later" button) never resolves anything, it just returns to the compact
+  notice — see B849106 and the repo-root `test/` suite **notesConflictDefer** for the proof that
+  the SAME conflict, with both copies intact, reappears on a real reload.
   ⛔ **NEITHER CHOICE DESTROYS THE COPY IT DISCARDS, AND THAT IS SYMMETRIC.** B1391 only
   protected "Use the other" (parked this window's text first); "Keep this one" force-pushed
   straight over the other window's already-saved text with nothing kept. `Notes.jsx`'s
   `handleConflict` now parks whichever body is ABOUT to be discarded — read fresh via
   `notesConflictFor(pageId)` at click time, never off a stale render closure — for BOTH buttons.
-  ⛔ **NEW-1 — BOTH BUTTONS SAY "Keep this version", THE SAME STRING.** They used to read "Keep
-  this one" / "Use the other" — one self-referential verb and one other-referential verb for the
-  mechanically identical action. The owner: *"why does the right one only have an option to use
-  the other, think through how stupid this is."* `notesConflictLine` (`lib/notesStore.js`) now
-  returns one label for both; each button's `aria-label` still disambiguates which window it acts
-  on, for a screen reader.
+  ⛔ **SUPERSEDED TWICE OVER (B849104) — the buttons are no longer fixed strings at all.** Round
+  one had two DIFFERENT verbs ("Keep this one" / "Use the other") for one mechanical action; round
+  two "fixed" that by making both read the IDENTICAL "Keep this version" — and the owner came right
+  back: *"the two buttons... say the same thing... doing opposite things."* The button text is now
+  computed from `lib/notesVersionOrder.js`'s recency ordering ("Keep the newer version" / "Keep the
+  older version", with a window-based fallback only when neither copy's edit time is known) —
+  `notesConflictLine` no longer mints button text at all. `aria-label` still separately names the
+  window, for a screen reader.
+  ⛔ **AND THE REDLINE'S DIFF DIRECTION WAS BOUND TO THE WRONG AXIS (B849105) — data-safety, not
+  cosmetic.** `buildRedline` used to always treat `localDoc` as "revised" (green/added) — i.e.
+  whichever copy this browser tab happens to hold — regardless of which one was actually edited
+  more recently. The owner hit exactly the case that breaks: his older tab's copy still had a
+  table his newer tab had already converted to text (B649377), and the panel showed "Table —
+  added", backwards from what really happened. `ConflictReview.jsx` now orders the two copies by
+  recency FIRST and always passes the newer one as revised, so "added"/"removed" reads as a true
+  old → new story whenever recency is knowable — see `lib/notesVersionOrder.js`'s header for the
+  full mechanism and `docs/archive/BACKLOG-DONE.md`'s B1076177 for the reproduction.
+  ⛔ **AND THE LEGEND ONLY DOCUMENTED HALF THE ENCODINGS THE RENDERER EMITS (B849107).**
+  `NoteRedline.jsx`'s whole-block insert/delete already got a tint + border; an OPAQUE block (a
+  table) additionally carried a text suffix ("— added"/"— removed") but a whole PLAIN-TEXT
+  paragraph did not — colour and shape only, a WCAG 1.4.1 gap the owner hit directly. Fixed with a
+  shared `ChangeTag` ("+ Added"/"− Removed") used identically on every whole-block change, and a
+  rebuilt legend that is STICKY (stays on screen once scrolled into a long note), states the
+  old→new direction with real timestamps, covers both the inline underline/strikethrough AND the
+  block-level tag encoding, and states the CONSEQUENCE of each ("keeping the older version loses
+  it") rather than bare set membership. Two-round screenshot critique loop recorded in
+  `docs/notes-conflict-critique.md` — round 2 caught a real doubled-article grammar bug in the
+  edit-time-unknown fallback sentence, fixed by `rolePhrase()` (a mid-sentence-safe phrase form,
+  separate from the heading-form `roleLabel()`, so no caller ever wraps a label in its own
+  external article again).
+- `lib/notesVersionOrder.js` — PURE: `orderConflictVersions()` decides which of the two
+  conflicting copies is NEWER (both timestamps known and different), returning `{comparable,
+  newer, older}` with `which: "mine"|"theirs"` on each side so a caller can still wire the right
+  resolve callback. `comparable: false` (a tie, or either timestamp missing) is a real return
+  value a caller MUST check before rendering "newer"/"older" in a word a person reads — see its
+  own header for why an unranked pair must never be labelled as ranked.
 - `lib/notesRedline.js` — PURE: flattens a document's raw ProseMirror JSON into leaf blocks
   (paragraph/heading/code, plus an OPAQUE placeholder for a picture/attachment/sketch/box/table —
   diffing inside one of those is out of scope, and it says so rather than silently mishandling

@@ -54,8 +54,30 @@ function Span({ kind, text, marks }) {
   return <Tag style={{ ...style, textDecoration: "none" }}>{text}</Tag>;
 }
 
+/** The word/symbol NEW-4 asks for on every whole-block insert/delete — colour is never the only
+ *  carrier of "what changed" (WCAG 1.4.1; the owner hit this directly: a table's own opaque
+ *  placeholder said "— added" in words, but the four plain-text contact lines removed right
+ *  below it were "red and nothing else"). One small component, used identically whether the
+ *  block is opaque (a table/picture/…) or ordinary text, so the two encodings the renderer uses
+ *  — inline underline/strikethrough for a word-level edit, this tag for a whole added/removed
+ *  block — are never one labelled and the other silent. */
+export function ChangeTag({ status }) {
+  if (status !== "inserted" && status !== "deleted") return null;
+  const added = status === "inserted";
+  return (
+    <span
+      data-testid="notes-redline-change-tag"
+      style={{
+        display: "inline-block", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.3,
+        color: added ? "var(--success-text)" : "var(--danger-text)", marginRight: 6, verticalAlign: "middle",
+      }}
+    >{added ? "+ Added" : "− Removed"}</span>
+  );
+}
+
 /** A whole leaf block — a paragraph, heading, or code line — with its own tag and, for a
- *  wholly inserted/deleted block, a left border bar as a SECOND, non-colour signal. */
+ *  wholly inserted/deleted block, a left border bar as a THIRD, non-colour signal (alongside
+ *  the underline/strikethrough on its own text and the `ChangeTag` word). */
 function Leaf({ block }) {
   if (block.opaque) {
     const tint = block.status === "inserted" ? "var(--success-bg)" : block.status === "deleted" ? "var(--danger-bg)" : "var(--surface-page)";
@@ -65,7 +87,7 @@ function Leaf({ block }) {
         margin: "4px 0", padding: "4px 8px", fontSize: 12, fontStyle: "italic", color: "var(--text-secondary)",
         background: tint, borderLeft: `3px solid ${edge}`, borderRadius: RADIUS.control,
       }}
-      >{block.label}{block.status === "inserted" ? " — added" : block.status === "deleted" ? " — removed" : ""}</div>
+      ><ChangeTag status={block.status} />{block.label}</div>
     );
   }
 
@@ -77,16 +99,17 @@ function Leaf({ block }) {
     background: tint, borderLeft: tint === "transparent" ? "none" : `3px solid ${edge}`,
     borderRadius: tint === "transparent" ? 0 : RADIUS.control,
   };
+  const tag = <ChangeTag status={block.status} />;
 
   if (block.tag === "h") {
     const level = block.attrs?.level || 1;
     const Tag = `h${Math.min(4, Math.max(1, level))}`;
-    return <Tag style={{ ...wrapStyle, margin: `6px 0 3px`, fontSize: HEADING_SIZE[level] || 13, fontWeight: 700, color: "var(--text-primary)" }}>{spans}</Tag>;
+    return <Tag style={{ ...wrapStyle, margin: `6px 0 3px`, fontSize: HEADING_SIZE[level] || 13, fontWeight: 700, color: "var(--text-primary)" }}>{tag}{spans}</Tag>;
   }
   if (block.tag === "code") {
-    return <pre style={{ ...wrapStyle, fontFamily: "ui-monospace, Menlo, Consolas, monospace", fontSize: 12, whiteSpace: "pre-wrap", overflowWrap: "anywhere", background: tint === "transparent" ? "var(--surface-page)" : tint }}>{spans}</pre>;
+    return <pre style={{ ...wrapStyle, fontFamily: "ui-monospace, Menlo, Consolas, monospace", fontSize: 12, whiteSpace: "pre-wrap", overflowWrap: "anywhere", background: tint === "transparent" ? "var(--surface-page)" : tint }}>{tag}{spans}</pre>;
   }
-  return <p style={{ ...wrapStyle, fontSize: 12, lineHeight: 1.5, color: "var(--text-primary)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{spans}</p>;
+  return <p style={{ ...wrapStyle, fontSize: 12, lineHeight: 1.5, color: "var(--text-primary)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{tag}{spans}</p>;
 }
 
 /** A wrapper node (list, blockquote, callout, toggle) around its already-nested children. */
