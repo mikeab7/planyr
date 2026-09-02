@@ -563,11 +563,14 @@ export default function CompsPanel({
     const locFlag = anchorCountyFlag(pendingAnchor);
     if (armedRowId) {
       if (gridRows.some((r) => r._id === armedRowId)) {
+        // NEW-2 — picking a location for an armed row is a real edit to that row; mark it
+        // `touched` here too so the quiet pre-touch validation message (CompEntryGrid.jsx's
+        // ProblemsList) upgrades to the real one once the row genuinely has been acted on.
         setGridRows((rows) => rows.map((r) => {
           if (r._id !== armedRowId) return r;
           const cellFlags = { ...r.cellFlags };
           if (locFlag) cellFlags.location = locFlag; else delete cellFlags.location;
-          return { ...r, draft: { ...r.draft, anchor: pendingAnchor }, cellFlags };
+          return { ...r, draft: { ...r.draft, anchor: pendingAnchor }, cellFlags, touched: true };
         }));
       } else {
         setDraftAnchors((m) => ({ ...m, [armedRowId]: pendingAnchor }));
@@ -580,7 +583,7 @@ export default function CompsPanel({
           if (r._id !== openTarget._id) return r;
           const cellFlags = { ...r.cellFlags };
           if (locFlag) cellFlags.location = locFlag; else delete cellFlags.location;
-          return { ...r, draft: { ...r.draft, anchor: pendingAnchor }, cellFlags };
+          return { ...r, draft: { ...r.draft, anchor: pendingAnchor }, cellFlags, touched: true };
         }));
       } else {
         setGridRows((rows) => [...rows, draftFromParsedRow({ draft: emptyDraft(pendingAnchor), cellFlags: locFlag ? { location: locFlag } : {} })]);

@@ -307,12 +307,20 @@ console.log("\n=== KEYBOARD-ONLY PATH — Tab into the grid, arrow to Location, 
   }
   check("the grid itself is reachable via plain Tab (no click needed to start)", reachedGrid);
   if (reachedGrid) {
-    for (let i = 0; i < 4; i++) { await page.keyboard.press("ArrowRight"); await pacedWait(page, 50); }
-    const selCell = await page.evaluate(() => {
-      const td = [...document.querySelectorAll("td[data-cell]")].find((t) => t.style.outline?.includes("2px"));
-      return td ? { cell: td.dataset.cell, text: td.textContent } : null;
-    });
-    check("4 ArrowRight from Type lands on the Location cell", selCell?.text === "Set", `got ${JSON.stringify(selCell)}`);
+    // B986096-HARDENING-27 (NEW-4) moved Location to be the column right after Type (both frozen,
+    // so the row's identity survives a horizontal scroll) — searching for it rather than hardcoding
+    // a step count keeps this test correct regardless of exactly how many columns sit between them.
+    let selCell = null;
+    for (let i = 0; i < 5; i++) {
+      await page.keyboard.press("ArrowRight");
+      await pacedWait(page, 50);
+      selCell = await page.evaluate(() => {
+        const td = [...document.querySelectorAll("td[data-cell]")].find((t) => t.style.outline?.includes("2px"));
+        return td ? { cell: td.dataset.cell, text: td.textContent } : null;
+      });
+      if (selCell?.text === "Set") break;
+    }
+    check("ArrowRight from Type reaches the Location cell", selCell?.text === "Set", `got ${JSON.stringify(selCell)}`);
     await page.keyboard.press("Enter");
     await pacedWait(page, 300);
     check("Enter on the selected Location cell arms it (keyboard-only, no mouse)",
@@ -329,12 +337,14 @@ console.log("\n=== CYCLE 4 (B986096-HARDENING-14) — roving tabindex: every cel
   const page = await ctx.newPage();
   await openEntrySheet(page);
 
-  // Open cell 0-1 (a plain text cell), then Escape back to "selected, not editing" — the state
+  // Open cell 0-2 (Title/Address — a plain text cell; B986096-HARDENING-27/NEW-4 moved Location,
+  // an action cell, into column 1, right after Type, so the plain-text stand-in this check needs
+  // is now one column further right), then Escape back to "selected, not editing" — the state
   // roving tabindex actually governs (a single click on an editable cell enters edit mode
   // straight away, per HARDENING-10, and focus correctly lands on the real <input> there; roving
   // tabindex is what makes focus follow a NON-editing selection, e.g. after Escape or on a
   // read-only/na cell, and what makes plain Tab/arrow-key traversal reach a real DOM node).
-  await page.locator('td[data-cell="0-1"]').click();
+  await page.locator('td[data-cell="0-2"]').click();
   await pacedWait(page, 200);
   await page.keyboard.press("Escape");
   await pacedWait(page, 200);
@@ -343,7 +353,7 @@ console.log("\n=== CYCLE 4 (B986096-HARDENING-14) — roving tabindex: every cel
     return { tag: el.tagName, dataCell: el.dataset?.cell, tabIndex: el.tabIndex };
   });
   check("selecting a cell (not editing) gives it real DOM focus, not just the grid container",
-    afterEscape.tag === "TD" && afterEscape.dataCell === "0-1" && afterEscape.tabIndex === 0, JSON.stringify(afterEscape));
+    afterEscape.tag === "TD" && afterEscape.dataCell === "0-2" && afterEscape.tabIndex === 0, JSON.stringify(afterEscape));
 
   await page.keyboard.press("ArrowRight");
   await pacedWait(page, 150);
@@ -351,7 +361,7 @@ console.log("\n=== CYCLE 4 (B986096-HARDENING-14) — roving tabindex: every cel
     const el = document.activeElement;
     return { tag: el.tagName, dataCell: el.dataset?.cell };
   });
-  check("ArrowRight moves DOM focus to the newly-selected cell", afterArrow.dataCell === "0-2", JSON.stringify(afterArrow));
+  check("ArrowRight moves DOM focus to the newly-selected cell", afterArrow.dataCell === "0-3", JSON.stringify(afterArrow));
 
   const rovingCount = await page.evaluate(() => {
     const focusable = document.querySelectorAll('[role="grid"] [tabindex], [role="grid"] button, [role="grid"] input, [role="grid"] select');
@@ -364,6 +374,8 @@ console.log("\n=== CYCLE 4 (B986096-HARDENING-14) — roving tabindex: every cel
     rovingCount.tabIndex0Count === 1, `tabIndex0Count=${rovingCount.tabIndex0Count}`);
 
   // Arrow-navigate to the Location action cell and confirm DOM focus lands on the real <button>.
+  // Current position is column 3 (Size) — B986096-HARDENING-27/NEW-4 put Location at column 1,
+  // to its LEFT now (frozen right after Type), so this searches leftward.
   let onLocation = false;
   for (let i = 0; i < 6 && !onLocation; i++) {
     const el = await page.evaluate(() => {
@@ -371,7 +383,7 @@ console.log("\n=== CYCLE 4 (B986096-HARDENING-14) — roving tabindex: every cel
       return { tag: active.tagName, text: active.textContent };
     });
     if (el.text === "Set") { onLocation = true; break; }
-    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowLeft");
     await pacedWait(page, 80);
   }
   const locFocus = await page.evaluate(() => ({ tag: document.activeElement.tagName, text: document.activeElement.textContent }));
