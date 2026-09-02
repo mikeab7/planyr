@@ -860,6 +860,19 @@ async function alignmentMismatches(page, surface) {
 }
 
 // Best-effort file/line attribution: grep src/ for the element's own label as a literal string.
+//
+// ⛔ B1038016 (4th correction) — SORT BEFORE TAKING "FIRST MATCH", OR "FIRST" IS A COIN FLIP.
+// `grep -r`'s file-visitation order follows filesystem readdir order, which is NOT alphabetical
+// and NOT guaranteed to agree between two machines — measured directly: the identical committed
+// tree, searched from this sandbox vs. from a real GitHub Actions runner, picked a DIFFERENT
+// "first" file for the same label whenever more than one source file contained the same literal
+// text (confirmed via a CI diagnostic diff: "Zoom to fit" resolved to icons.jsx here and to
+// MapFinder.jsx there; five more labels the same way), so docs/UI-INVENTORY.md's embedded
+// attribution column — and therefore the file's byte content — differed between environments even
+// though every actual signature COUNT (the thing the budget gate cares about) was identical both
+// times. Sorting the raw grep output by (file, line) before taking the first entry makes "first
+// match" a property of the CONTENT, never of readdir order, so the choice is now the same on any
+// machine that has the same source tree.
 function attribute(label) {
   if (!label || label.length < 2) return "unattributed (label too short to search)";
   const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -869,7 +882,11 @@ function attribute(label) {
       { cwd: REPO, encoding: "utf8" },
     ).trim();
     if (!out) return "unattributed (no source match — best-effort text search)";
-    const lines = out.split("\n");
+    const lines = out.split("\n").sort((a, b) => {
+      const [fa, la] = [a.slice(0, a.indexOf(":")), Number(a.slice(a.indexOf(":") + 1, a.indexOf(":", a.indexOf(":") + 1)))];
+      const [fb, lb] = [b.slice(0, b.indexOf(":")), Number(b.slice(b.indexOf(":") + 1, b.indexOf(":", b.indexOf(":") + 1)))];
+      return fa < fb ? -1 : fa > fb ? 1 : la - lb;
+    });
     const first = lines[0];
     const extra = lines.length > 1 ? ` (+${lines.length - 1} more match${lines.length > 2 ? "es" : ""}, best-effort)` : "";
     return first.replace(REPO + "/", "") + extra;
