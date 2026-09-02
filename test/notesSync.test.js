@@ -763,7 +763,7 @@ describe("mergeSyncState — two windows of one browser converge instead of over
 describe("the conflict copy may never name a PERSON (B1391)", () => {
   it("says WINDOW, never a someone — these notes are private to one account", () => {
     const copy = notesConflictLine("Site notes");
-    const all = `${copy.text} ${copy.keepMine} ${copy.keepTheirs} ${copy.parkedSuffix}`;
+    const all = `${copy.text} ${copy.parkedSuffix} ${copy.otherParkedSuffix}`;
     expect(copy.text).toContain("Site notes");
     expect(all).toMatch(/window/i);
     expect(all).not.toMatch(/person|someone|somebody|else's|another user|colleague/i);
