@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-02 @ `be01e66b` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-02 @ `e6efe871` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_648 source files mapped._
+_649 source files mapped._
 
 ## infra
 
@@ -502,6 +502,8 @@ _648 source files mapped._
   - _exports_: `default (AppHeader)`, `exitFs`, `fsElement`, `fsSupported`, `MODULE_ACCENT`, `requestFs`, `useNarrow`
 - **`src/shared/ui/bottomSheetTracker.js`** — Module-scope publish/subscribe signal: the open mobile bottom sheet's live height, so a FloatingNotice can sit above it instead of under or over it
   - _exports_: `currentBottomSheetHeight`, `publishBottomSheetHeight`, `subscribeBottomSheetHeight`, `useBottomSheetHeight`
+- **`src/shared/ui/clickDiag.js`** — Always-on, silent-by-construction diagnostic (B1066370): reports a button press with no matching click via client_errors, so a reported "first click does nothing" bug can capture itself in the wild
+  - _exports_: `describeSuspect`, `installClickDiag`, `labelFor`
 - **`src/shared/ui/CloudSyncBadge.jsx`** — App-wide cloud-sync glyph driven by real saveState (synced/saving/offline/readonly/error/local); loud never-vanish error via crash boundary + retry popover
   - _exports_: `CloudBadgeBoundary`, `cloudBadgeView`, `default (CloudSyncBadge)`
 - **`src/shared/ui/ColorField.jsx`** — Color control = the native wheel + the shared recently-used swatch row (NEW-4); `ColorRecentsRow` is the row alone, for controls with a bespoke wheel.

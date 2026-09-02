@@ -63,6 +63,20 @@ if (perfRecorderEnabled(window)) {
   else setTimeout(armRec, 4500);
 }
 
+/* B1066370 — a real press on a plain button reportedly did nothing on the first click on three
+ * different controls, with the owner's own scrollIntoView confound eliminated on the third; every
+ * isolated reproduction attempted from this sandbox found the click firing correctly, so the next
+ * occurrence has to capture itself (STANDING RULE #2, disposition 3). Silent by construction (a
+ * real click always clears its own timer) — reports only the rare suspect case, through the same
+ * client_errors channel as every other diagnosable-without-a-live-session event.
+ *
+ * DYNAMIC IMPORT, DEFERRED TO IDLE, UNCONDITIONAL — the same shape as the always-on performance
+ * recorder above and for the same reason: `main.jsx` is on the critical path of every route, and
+ * this needs to be always-on (a sampled instrument would miss the one session that has it). */
+const armClickDiag = () => import("./shared/ui/clickDiag.js").then((m) => m.installClickDiag(window)).catch(() => {});
+if (typeof requestIdleCallback === "function") requestIdleCallback(armClickDiag, { timeout: 9000 });
+else setTimeout(armClickDiag, 4500);
+
 // Recover from "stale chunk after deploy" failures (B221): when a new build ships
 // while this tab is open, switching to a not-yet-loaded workspace would otherwise
 // fail to fetch its now-replaced hashed chunk. Reload once to pick up the fresh
