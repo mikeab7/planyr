@@ -4335,13 +4335,12 @@ concurrently):
   owner has already rejected an unexplained asterisk/badge once). Headline repro updated: the reported
   string now reads Rate 0.56 / Unit SF / **Basis NNN (defaulted, unmarked)** / TI 12 / Escal 3 / Type
   lease / Per still blank+blocking. 93 tests, full suite still green (14,000+), build green, eslint clean.
-- Verify: live — **V575120.** The report's own acceptance bar: after merge/deploy, paste
-  `.56/SF , 12 TI, 3% bumps` into the LIVE comp paste box and read the rendered row back verbatim,
-  confirming the served bundle hash changed from `index-ChNZKmVA.js` first. `Blocker: auth` — the comp
-  paste box is reachable only inside a signed-in Site Planner project (`compsStore.js`'s owner-write
-  RLS), which this session's sandboxed browser cannot reach (the proxy CORS-blocks the Supabase auth
-  handshake, the same wall behind every other `Blocker: auth` item in this file) — attempted and
-  confirmed live, see V575120's own entry (updated for the Basis-NNN amendment).
+- Verify: live — **V575120 — ✅ PASSED 2026-09-02, Michael himself, signed in, deployed build
+  `index-Dkrwi1Fe.js`.** He pasted the exact reported string and read back Type Lease · Unit SF ·
+  Rate 0.56 · Basis NNN · Escal 3 · TI ($/SF) 12 · Per BLANK · $/SF/yr — matching the report's own
+  acceptance bar verbatim; moved to `docs/archive/VERIFICATION-DONE.md`. This pass's *own* row (the
+  parser) is closed — the shared B986096 heading stays parked in ⏳ Verify below because V556720/
+  V556721 (the sibling sheet-editability and KML-import passes) are still pending.
 - Files (this pass): `src/shared/comps/lib/compParse.js`, `test/compParse.test.js`.
 - Base: `origin/main` @ `63def61` (merged into this branch after this pass's local work).
 

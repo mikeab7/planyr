@@ -1,3 +1,19 @@
+### V575120 — B986096 (×8/×9): paste `.56/SF , 12 TI, 3% bumps` into the LIVE deployed comp paste box and confirm the rendered row matches Rate 0.56 / Basis NNN (defaulted) / TI 12 / Escal 3 / Type lease / period BLOCKING ✅ **PASSED 2026-09-02 — Michael, signed in, on the deployed build (`index-Dkrwi1Fe.js`), on his own real account**
+
+**Why this needed its own real pass.** This was the report's own literal acceptance test — the exact string Michael pasted that started this rewrite (three real facts on one line, previously producing a bare "Land" row with everything empty), driven against the SERVED bundle after merge, not against source code or local unit tests. The comp paste box (`CompEntryGrid.jsx`) only mounts inside a signed-in Site Planner project, which this session's sandbox cannot reach (`Blocker: auth`, plus a separately-measured `ERR_CONNECTION_RESET` reaching `planyr.io` at all from this sandbox's Chromium).
+
+**What was verified without a browser, this session.** `compParse.js`'s `parsePaste(".56/SF , 12 TI, 3% bumps")` was driven directly and asserted to produce exactly the row the report specifies, as `test/compParse.test.js`'s own headline test; the full corpus the report specified (RATE+BASIS, SIZE, TERM, FREE RENT, TI, ESCALATION, DATES, PARTIES, PRICE/SALE, TYPE INFERENCE) was likewise driven as 93 tests, all green; full suite (14,000+ tests), `eslint`, and `npm run build` were all green.
+
+**THE LIVE PASS THAT CLOSES THIS (2026-09-02, Michael himself).** Confirmed the bundle hash changed from the reported `index-ChNZKmVA.js` to `index-Dkrwi1Fe.js` first, per the report's own instruction, then pasted the literal string and read the rendered row back:
+```
+Type Lease · Unit SF · Rate 0.56 · Basis NNN · Escal 3 · TI ($/SF) 12 · Per BLANK · $/SF/yr —
+```
+All three original defects confirmed closed on the real page (the bare leading decimal no longer aborts the parse; "12 TI" value-before-label reads; "3% bumps" survives alongside the rest instead of dragging the whole line down), plus the same-day Basis-NNN amendment confirmed (Basis reads NNN, unmarked, while Per correctly stays blank so the derived `$/SF/yr` column stays blank too — the default was never extended to period).
+
+**Residual, not blocking this result:** the two secondary spot-checks this item's pending version also listed (label-before-value `TI $12`, and an explicit `gross` word overriding the NNN default) were not separately called out in the owner's live report — only the headline string itself, which is this item's actual acceptance bar. Both are covered by the 93-test suite; neither is a live-verify class (no auth/GIS/timing dependency), so nothing further is owed here.
+
+**Result:** ✅ PASSED. The headline repro — the report's stated acceptance bar — confirmed live, verbatim.
+
 ### V570368 — B1022960: "Log a visit" renders as the primary (filled, full-width) button and "Want to try" as the secondary (outlined) one, on EVERY wishlisted state — never two filled buttons at once ✅ **PASSED 2026-09-02 — Michael, signed in, on the deployed build (`index-H_bzlufS.js`), on his own real account**
 
 **Why this needed its own real pass.** The whole `ActionsRow` block (both buttons) only renders when `onSubmitVisit` is provided, and `FoodApp.jsx` only passes it when `accountActive` is true — the sandbox's egress proxy CORS-blocks the Supabase auth handshake, so no session in this repo's own sandbox can ever see the two buttons rendered together; this could only be closed by a real signed-in look.
