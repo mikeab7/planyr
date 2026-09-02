@@ -5,14 +5,17 @@
  *  review's header) because two full, independently-scrollable copies are still occasionally
  *  the easier read for a genuinely large rewrite — but it is no longer the resting view.
  *
- *  ⛔ NEW-1 — BOTH BUTTONS READ THE SAME VISIBLE TEXT, "Keep this version" (see
- *  `notesConflictLine`'s header for the full argument). Each button's `aria-label` still
- *  disambiguates which card it acts on, for a screen-reader user who loses the positional cue
- *  a sighted reader gets for free.
+ *  ⛔ B849104 — CARDS AND BUTTONS ARE ORDERED AND LABELLED BY RECENCY, MATCHING
+ *  `ConflictReview.jsx`'s footer (`lib/notesVersionOrder.js`), NOT by "This window"/"the other
+ *  window" and never two identical "Keep this version" buttons — see that file's header for the
+ *  full argument (both the original asymmetric verbs AND the first fix's identical ones read as
+ *  unclear to the owner). Each button's `aria-label` still separately names the window, for a
+ *  screen-reader user who loses the positional cue a sighted reader gets for free.
  */
 import { useMemo } from "react";
 import { docToText } from "../lib/notesMarkdown.js";
 import { diffNoteText, sideOps } from "../lib/notesConflictDiff.js";
+import { orderConflictVersions } from "../lib/notesVersionOrder.js";
 import { stampLabel, absoluteStamp } from "../lib/notesTime.js";
 
 const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
@@ -31,7 +34,7 @@ function DiffRun({ text, changed }) {
 }
 
 /** One version, read-only and in full. */
-function VersionCard({ label, when, whenExact, ops, buttonLabel, buttonAriaLabel, consequence, onChoose, testId }) {
+function VersionCard({ label, when, whenExact, ops, buttonLabel, buttonAriaLabel, onChoose, testId }) {
   return (
     <div
       data-testid={testId}
@@ -73,8 +76,7 @@ function VersionCard({ label, when, whenExact, ops, buttonLabel, buttonAriaLabel
           ? ops.map((op, i) => <DiffRun key={i} text={op.text} changed={op.changed} />)
           : <em style={{ color: "var(--text-secondary)" }}>This copy is empty.</em>}
       </div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-        <span style={{ flex: "1 1 180px", fontSize: 10.5, color: "var(--text-secondary)" }}>{consequence}</span>
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <button
           type="button"
           data-testid={`${testId}-choose`}
@@ -91,10 +93,18 @@ function VersionCard({ label, when, whenExact, ops, buttonLabel, buttonAriaLabel
   );
 }
 
+/** The visible name for one slot — same recency-first framing as `ConflictReview.jsx`'s
+ *  `roleLabel` (kept as a sibling copy rather than a shared import: the two files' JSX shapes
+ *  differ enough that a shared component would need its own prop surface for no real reuse). */
+function roleLabel(comparable, isNewer, which) {
+  if (comparable) return isNewer ? "Newer version" : "Older version";
+  return which === "mine" ? "This window’s version" : "The other window’s version";
+}
+
 /** THE TWO CARDS SIT SIDE BY SIDE ON A WIDE SCREEN, STACKED ON A NARROW ONE — see the
  *  original B842624 header for why this is a CSS grid question, never a JS breakpoint. */
 export default function ConflictSideBySide({
-  title, localDoc, serverDoc, localUpdatedAt, serverUpdatedAt, keepMine, keepTheirs, onKeepMine, onKeepTheirs,
+  title, localDoc, serverDoc, localUpdatedAt, serverUpdatedAt, onKeepMine, onKeepTheirs,
 }) {
   const localText = useMemo(() => docToText(localDoc), [localDoc]);
   const serverText = useMemo(() => docToText(serverDoc), [serverDoc]);
@@ -103,30 +113,38 @@ export default function ConflictSideBySide({
   const theirsOps = useMemo(() => sideOps(ops, "b"), [ops]);
   const name = String(title || "").trim() || "Untitled";
 
+  const order = useMemo(
+    () => orderConflictVersions({ localDoc, serverDoc, localUpdatedAt, serverUpdatedAt }),
+    [localDoc, serverDoc, localUpdatedAt, serverUpdatedAt],
+  );
+  const newerLabel = roleLabel(order.comparable, true, order.newer.which);
+  const olderLabel = roleLabel(order.comparable, false, order.older.which);
+  const cardFor = (which) => (which === "mine"
+    ? { when: stampLabel(localUpdatedAt), whenExact: absoluteStamp(localUpdatedAt), ops: mineOps, onChoose: onKeepMine, testId: "notes-conflict-mine" }
+    : { when: stampLabel(serverUpdatedAt), whenExact: absoluteStamp(serverUpdatedAt), ops: theirsOps, onChoose: onKeepTheirs, testId: "notes-conflict-theirs" });
+  const newerCard = cardFor(order.newer.which);
+  const olderCard = cardFor(order.older.which);
+
   return (
-    <div data-testid="notes-conflict-sidebyside" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 8, alignItems: "start" }}>
-      <VersionCard
-        label="This window"
-        when={stampLabel(localUpdatedAt)}
-        whenExact={absoluteStamp(localUpdatedAt)}
-        ops={mineOps}
-        buttonLabel={keepMine}
-        buttonAriaLabel="Keep this window’s version"
-        consequence={`Keeps this text. The other window’s version is saved as “${name} (the other window’s copy)” — nothing is lost.`}
-        onChoose={onKeepMine}
-        testId="notes-conflict-mine"
-      />
-      <VersionCard
-        label="The other window"
-        when={stampLabel(serverUpdatedAt)}
-        whenExact={absoluteStamp(serverUpdatedAt)}
-        ops={theirsOps}
-        buttonLabel={keepTheirs}
-        buttonAriaLabel="Keep the other window’s version"
-        consequence={`Keeps this text. This window’s version is saved as “${name} (this window’s copy)” — nothing is lost.`}
-        onChoose={onKeepTheirs}
-        testId="notes-conflict-theirs"
-      />
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {/* NEW-1 — stated once, above both cards, not repeated per card. */}
+      <p style={{ fontSize: 10.5, color: "var(--text-secondary)", margin: 0 }}>
+        Nothing is lost either way — the version you don’t keep is saved as a copy next to “{name}”.
+      </p>
+      <div data-testid="notes-conflict-sidebyside" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 8, alignItems: "start" }}>
+        <VersionCard
+          label={newerLabel} when={newerCard.when} whenExact={newerCard.whenExact} ops={newerCard.ops}
+          buttonLabel={order.comparable ? "Keep the newer version" : `Keep ${order.newer.which === "mine" ? "this window’s" : "the other window’s"} version`}
+          buttonAriaLabel={`Keep the version edited ${newerCard.when || "at an unknown time"}, from ${order.newer.which === "mine" ? "this window" : "the other window"}`}
+          onChoose={newerCard.onChoose} testId={newerCard.testId}
+        />
+        <VersionCard
+          label={olderLabel} when={olderCard.when} whenExact={olderCard.whenExact} ops={olderCard.ops}
+          buttonLabel={order.comparable ? "Keep the older version" : `Keep ${order.older.which === "mine" ? "this window’s" : "the other window’s"} version`}
+          buttonAriaLabel={`Keep the version edited ${olderCard.when || "at an unknown time"}, from ${order.older.which === "mine" ? "this window" : "the other window"}`}
+          onChoose={olderCard.onChoose} testId={olderCard.testId}
+        />
+      </div>
     </div>
   );
 }
