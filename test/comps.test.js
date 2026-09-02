@@ -5,8 +5,10 @@ import {
   validAnchor, validateComp, rowToComp, compToRow,
   landPricePerAreaUnit, parseLeaseTermYears, netEffectiveLeaseRate,
   anchorCountyFlag, resolveCapTriangle, emptyDraft, draftToComp, compToDraft,
+  sortCompsByRecency, compDateLabel,
 } from "../src/shared/comps/lib/comps.js";
 import { collectPartyNames, matchPartyNames } from "../src/shared/comps/lib/partySuggest.js";
+import { todayIso } from "../src/shared/comps/lib/compDates.js";
 
 describe("comps: emptyDraft — HARDENING-11, Per stays empty but Basis defaults to NNN", () => {
   it("Per starts genuinely empty — a monthly/annual guess is a silent 12x error, no safe default", () => {
@@ -73,10 +75,10 @@ describe("comps: lease annual normalization", () => {
 
 describe("comps: basis normalization never blends NNN and gross", () => {
   const comps = [
-    { compType: "lease", leaseRate: 7, leaseRatePeriod: "annual", leaseRateExpense: "nnn" },
-    { compType: "lease", leaseRate: 9, leaseRatePeriod: "annual", leaseRateExpense: "nnn" },
-    { compType: "lease", leaseRate: 15, leaseRatePeriod: "annual", leaseRateExpense: "gross" },
-    { compType: "lease", leaseRate: 1, leaseRatePeriod: "monthly", leaseRateExpense: "nnn" }, // -> 12 annual
+    { compType: "lease", compDate: "2026-08-01", leaseRate: 7, leaseRatePeriod: "annual", leaseRateExpense: "nnn" },
+    { compType: "lease", compDate: "2026-08-01", leaseRate: 9, leaseRatePeriod: "annual", leaseRateExpense: "nnn" },
+    { compType: "lease", compDate: "2026-08-01", leaseRate: 15, leaseRatePeriod: "annual", leaseRateExpense: "gross" },
+    { compType: "lease", compDate: "2026-08-01", leaseRate: 1, leaseRatePeriod: "monthly", leaseRateExpense: "nnn" }, // -> 12 annual
     { compType: "lease", leaseRate: 5 }, // no period/basis -> unknown
     { compType: "land" }, // non-lease, ignored entirely
   ];
@@ -97,7 +99,7 @@ describe("comps: basis normalization never blends NNN and gross", () => {
   });
 
   it("falls back to gross as the headline only when no NNN comps exist", () => {
-    const grossOnly = [{ compType: "lease", leaseRate: 15, leaseRatePeriod: "annual", leaseRateExpense: "gross" }];
+    const grossOnly = [{ compType: "lease", compDate: "2026-08-01", leaseRate: 15, leaseRatePeriod: "annual", leaseRateExpense: "gross" }];
     const s = summarizeLeaseComps(grossOnly);
     expect(s.headlineBasis).toBe("gross");
     expect(s.nnn).toBeNull();
@@ -111,7 +113,7 @@ describe("comps: basis normalization never blends NNN and gross", () => {
   });
 
   it("handles an empty or missing list", () => {
-    expect(summarizeLeaseComps([])).toEqual({ headlineBasis: null, headline: null, nnn: null, gross: null, unknownCount: 0 });
+    expect(summarizeLeaseComps([])).toEqual({ headlineBasis: null, headline: null, nnn: null, gross: null, unknownCount: 0, undatedCount: 0 });
     expect(summarizeLeaseComps(undefined).headlineBasis).toBeNull();
   });
 
@@ -124,8 +126,8 @@ describe("comps: basis normalization never blends NNN and gross", () => {
 
   it("weights the average by leased SF when EVERY comp in the group has it — a big cheap deal and a small expensive one average toward the big one's rate", () => {
     const sized = [
-      { compType: "lease", leaseRate: 6, leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseSizeSf: 90000 },
-      { compType: "lease", leaseRate: 10, leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseSizeSf: 10000 },
+      { compType: "lease", compDate: "2026-08-01", leaseRate: 6, leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseSizeSf: 90000 },
+      { compType: "lease", compDate: "2026-08-01", leaseRate: 10, leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseSizeSf: 10000 },
     ];
     const s = summarizeLeaseComps(sized);
     // unweighted mean would be 8; SF-weighted should pull toward the 90k-SF deal's rate of 6.
@@ -138,8 +140,8 @@ describe("comps: basis normalization never blends NNN and gross", () => {
 
   it("normalizes a monthly rate to annual BEFORE weighting by size", () => {
     const sized = [
-      { compType: "lease", leaseRate: 1, leaseRatePeriod: "monthly", leaseRateExpense: "nnn", leaseSizeSf: 10000 }, // -> 12/yr
-      { compType: "lease", leaseRate: 12, leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseSizeSf: 10000 },
+      { compType: "lease", compDate: "2026-08-01", leaseRate: 1, leaseRatePeriod: "monthly", leaseRateExpense: "nnn", leaseSizeSf: 10000 }, // -> 12/yr
+      { compType: "lease", compDate: "2026-08-01", leaseRate: 12, leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseSizeSf: 10000 },
     ];
     const s = summarizeLeaseComps(sized);
     expect(s.nnn.weighted).toBe(true);
@@ -148,8 +150,8 @@ describe("comps: basis normalization never blends NNN and gross", () => {
 
   it("falls back to an unweighted average, explicitly flagged, when ONLY SOME comps in the group have size — never silently mixes weighted and unweighted", () => {
     const mixed = [
-      { compType: "lease", leaseRate: 6, leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseSizeSf: 90000 },
-      { compType: "lease", leaseRate: 10, leaseRatePeriod: "annual", leaseRateExpense: "nnn" }, // no size
+      { compType: "lease", compDate: "2026-08-01", leaseRate: 6, leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseSizeSf: 90000 },
+      { compType: "lease", compDate: "2026-08-01", leaseRate: 10, leaseRatePeriod: "annual", leaseRateExpense: "nnn" }, // no size
     ];
     const s = summarizeLeaseComps(mixed);
     expect(s.nnn.weighted).toBe(false);
@@ -159,8 +161,8 @@ describe("comps: basis normalization never blends NNN and gross", () => {
 
   it("a non-positive or zero leaseSizeSf counts as missing, never as a zero weight", () => {
     const zeroSize = [
-      { compType: "lease", leaseRate: 6, leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseSizeSf: 0 },
-      { compType: "lease", leaseRate: 10, leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseSizeSf: 10000 },
+      { compType: "lease", compDate: "2026-08-01", leaseRate: 6, leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseSizeSf: 0 },
+      { compType: "lease", compDate: "2026-08-01", leaseRate: 10, leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseSizeSf: 10000 },
     ];
     const s = summarizeLeaseComps(zeroSize);
     expect(s.nnn.weighted).toBe(false);
@@ -169,9 +171,9 @@ describe("comps: basis normalization never blends NNN and gross", () => {
 
   it("NNN and gross groups are weighted independently", () => {
     const comps2 = [
-      { compType: "lease", leaseRate: 6, leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseSizeSf: 90000 },
-      { compType: "lease", leaseRate: 10, leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseSizeSf: 10000 },
-      { compType: "lease", leaseRate: 20, leaseRatePeriod: "annual", leaseRateExpense: "gross" }, // no size
+      { compType: "lease", compDate: "2026-08-01", leaseRate: 6, leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseSizeSf: 90000 },
+      { compType: "lease", compDate: "2026-08-01", leaseRate: 10, leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseSizeSf: 10000 },
+      { compType: "lease", compDate: "2026-08-01", leaseRate: 20, leaseRatePeriod: "annual", leaseRateExpense: "gross" }, // no size
     ];
     const s = summarizeLeaseComps(comps2);
     expect(s.nnn.weighted).toBe(true);
@@ -253,10 +255,10 @@ describe("comps: netEffectiveLeaseRate — the number brokers actually compare",
 describe("comps: sale $/SF summary (land / building_sale)", () => {
   it("averages only comps with a computable $/SF, by type", () => {
     const comps = [
-      { compType: "land", landPrice: 435600, landSizeValue: 1, landSizeUnit: "ac" }, // 10
-      { compType: "land", landPrice: 87120, landSizeValue: 1, landSizeUnit: "ac" }, // 2
+      { compType: "land", compDate: "2026-08-01", landPrice: 435600, landSizeValue: 1, landSizeUnit: "ac" }, // 10
+      { compType: "land", compDate: "2026-08-01", landPrice: 87120, landSizeValue: 1, landSizeUnit: "ac" }, // 2
       { compType: "land" }, // no price/size -> excluded
-      { compType: "building_sale", bldgPrice: 1000000, bldgSizeSf: 50000 }, // 20
+      { compType: "building_sale", compDate: "2026-08-01", bldgPrice: 1000000, bldgSizeSf: 50000 }, // 20
     ];
     const land = summarizeSaleComps(comps, "land");
     expect(land.count).toBe(2);
@@ -269,12 +271,12 @@ describe("comps: sale $/SF summary (land / building_sale)", () => {
 
 describe("comps: NEW-1 rail summary strip — lease dropped, sale averages kept", () => {
   it("includes a land avg bit when land comps have a computable $/SF", () => {
-    const comps = [{ compType: "land", landPrice: 435600, landSizeValue: 1, landSizeUnit: "ac" }];
+    const comps = [{ compType: "land", compDate: "2026-08-01", landPrice: 435600, landSizeValue: 1, landSizeUnit: "ac" }];
     expect(compsSummaryBits(comps)).toEqual(["Land avg $10.00/SF (1)"]);
   });
 
   it("includes a building-sale avg bit when building-sale comps have a computable $/SF", () => {
-    const comps = [{ compType: "building_sale", bldgPrice: 1000000, bldgSizeSf: 50000 }];
+    const comps = [{ compType: "building_sale", compDate: "2026-08-01", bldgPrice: 1000000, bldgSizeSf: 50000 }];
     expect(compsSummaryBits(comps)).toEqual(["Bldg sale avg $20.00/SF (1)"]);
   });
 
@@ -540,9 +542,15 @@ describe("comps: anchor validation — pin OR real parcel, never a drawn rectang
 });
 
 describe("comps: create/edit validation", () => {
-  it("requires a type, a date, and a valid anchor", () => {
-    expect(validateComp({})).toEqual(["Pick a comp type.", "Executed date is required.", "Drop a pin or select a parcel."]);
+  it("requires a type and a valid anchor", () => {
+    expect(validateComp({})).toEqual(["Pick a comp type.", "Drop a pin or select a parcel."]);
     expect(validateComp({ compType: "land", compDate: "2026-08-01", anchor: { kind: "pin", lat: 1, lon: 1 } })).toEqual([]);
+  });
+
+  it("NEW-5: an Executed date is no longer required to save — a comp with type + anchor and no date validates clean (owner decision 2026-09-02)", () => {
+    expect(validateComp({ compType: "land", anchor: { kind: "pin", lat: 1, lon: 1 } })).toEqual([]);
+    expect(validateComp({ compType: "land", compDate: "", anchor: { kind: "pin", lat: 1, lon: 1 } })).toEqual([]);
+    expect(validateComp({ compType: "land", compDate: null, anchor: { kind: "pin", lat: 1, lon: 1 } })).toEqual([]);
   });
 });
 
@@ -774,5 +782,111 @@ describe("comps: the cap triangle threaded through draft <-> comp <-> row", () =
     const cap = rows.find((r) => r.key === "capRate");
     expect(noi.value).toMatch(/2,185,000/);
     expect(cap.value).toBe("5.75%");
+  });
+});
+
+describe("comps: NEW-5 — Executed date optional, Date entered fallback (owner decision 2026-09-02)", () => {
+  it("todayIso returns today's date as YYYY-MM-DD, matching the app's own ISO storage format", () => {
+    const iso = todayIso();
+    expect(iso).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(iso).toBe(new Date().toISOString().slice(0, 10));
+  });
+
+  it("compDateLabel shows the formatted date when present, and a neutral 'Date unknown' when not — never blank", () => {
+    expect(compDateLabel("2026-08-01")).toBe("08/01/26");
+    expect(compDateLabel(null)).toBe("Date unknown");
+    expect(compDateLabel(undefined)).toBe("Date unknown");
+    expect(compDateLabel("")).toBe("Date unknown");
+  });
+
+  it("draftToComp converts an empty/blank compDate to null, never the literal empty string a date column would reject", () => {
+    expect(draftToComp({ ...emptyDraft(null), compDate: "" }).compDate).toBeNull();
+    expect(draftToComp({ ...emptyDraft(null), compDate: undefined }).compDate).toBeNull();
+    expect(draftToComp({ ...emptyDraft(null), compDate: "2026-08-01" }).compDate).toBe("2026-08-01");
+  });
+
+  it("summarizeLeaseComps excludes an undated comp from its averages and reports how many, distinct from unknownCount", () => {
+    const comps = [
+      { compType: "lease", compDate: "2026-08-01", leaseRate: 10, leaseRatePeriod: "annual", leaseRateExpense: "nnn" },
+      { compType: "lease", leaseRate: 20, leaseRatePeriod: "annual", leaseRateExpense: "nnn" }, // no compDate -> excluded, counted
+      { compType: "lease", leaseRate: 5 }, // no basis/period at all -> unknownCount, unrelated to date
+    ];
+    const s = summarizeLeaseComps(comps);
+    expect(s.nnn.count).toBe(1);
+    expect(s.nnn.avg).toBe(10);
+    expect(s.undatedCount).toBe(1);
+    expect(s.unknownCount).toBe(1);
+  });
+
+  it("summarizeSaleComps excludes an undated comp from its average and reports undatedCount separately from the pre-existing no-$/SF exclusion", () => {
+    const comps = [
+      { compType: "land", compDate: "2026-08-01", landPrice: 435600, landSizeValue: 1, landSizeUnit: "ac" }, // 10, counted
+      { compType: "land", landPrice: 87120, landSizeValue: 1, landSizeUnit: "ac" }, // 2, undated -> excluded
+      { compType: "land" }, // no price/size at all -> excluded, NOT counted as undated
+    ];
+    const land = summarizeSaleComps(comps, "land");
+    expect(land.count).toBe(1);
+    expect(land.avg).toBeCloseTo(10, 5);
+    expect(land.undatedCount).toBe(1);
+  });
+
+  it("compsSummaryBits appends the undated-exclusion count in the same parenthetical style as the existing unweighted note", () => {
+    const comps = [
+      { compType: "land", compDate: "2026-08-01", landPrice: 435600, landSizeValue: 1, landSizeUnit: "ac" },
+      { compType: "land", landPrice: 87120, landSizeValue: 1, landSizeUnit: "ac" }, // undated, excluded
+    ];
+    expect(compsSummaryBits(comps)).toEqual(["Land avg $10.00/SF (1, 1 undated excluded)"]);
+  });
+
+  it("compsSummaryBits omits the undated note entirely when nothing was excluded", () => {
+    const comps = [{ compType: "land", compDate: "2026-08-01", landPrice: 435600, landSizeValue: 1, landSizeUnit: "ac" }];
+    expect(compsSummaryBits(comps)).toEqual(["Land avg $10.00/SF (1)"]);
+  });
+
+  it("compFieldRows shows 'Date unknown' for a saved comp with no Executed date, rather than hiding the row", () => {
+    const rows = compFieldRows({ compType: "land", compDate: null, landPrice: 100000, landSizeValue: 1, landSizeUnit: "ac" });
+    const dateRow = rows.find((r) => r.key === "date" || r.label === "Executed");
+    expect(dateRow).toBeTruthy();
+    expect(dateRow.value).toBe("Date unknown");
+  });
+
+  it("compFieldRows shows a separate 'Date entered' row from createdAt — metadata, never editable, distinct from Executed", () => {
+    const rows = compFieldRows({ compType: "land", compDate: null, createdAt: "2026-09-01T12:00:00Z", landPrice: 100000, landSizeValue: 1, landSizeUnit: "ac" });
+    const entered = rows.find((r) => r.key === "dateEntered");
+    expect(entered).toBeTruthy();
+    expect(entered.label).toBe("Date entered");
+  });
+
+  describe("sortCompsByRecency", () => {
+    it("sorts dated comps newest-Executed-first", () => {
+      const comps = [
+        { id: "a", compDate: "2026-01-01" },
+        { id: "b", compDate: "2026-08-01" },
+        { id: "c", compDate: "2026-05-01" },
+      ];
+      expect(sortCompsByRecency(comps).map((c) => c.id)).toEqual(["b", "c", "a"]);
+    });
+
+    it("falls back to Date entered (createdAt) for an undated comp, interleaving it by when it was added — never bucketed at either end", () => {
+      const comps = [
+        { id: "dated-mid", compDate: "2026-05-01" },
+        { id: "undated-newest", createdAt: "2026-09-01T00:00:00Z" }, // no compDate -> falls back, sorts as if "2026-09-01"
+        { id: "dated-newest", compDate: "2026-08-01" },
+        { id: "undated-oldest", createdAt: "2026-02-01T00:00:00Z" },
+      ];
+      expect(sortCompsByRecency(comps).map((c) => c.id)).toEqual(["undated-newest", "dated-newest", "dated-mid", "undated-oldest"]);
+    });
+
+    it("never mutates the input array", () => {
+      const comps = [{ id: "a", compDate: "2026-01-01" }, { id: "b", compDate: "2026-08-01" }];
+      const original = [...comps];
+      sortCompsByRecency(comps);
+      expect(comps).toEqual(original);
+    });
+
+    it("handles an empty or missing list", () => {
+      expect(sortCompsByRecency([])).toEqual([]);
+      expect(sortCompsByRecency(undefined)).toEqual([]);
+    });
   });
 });
