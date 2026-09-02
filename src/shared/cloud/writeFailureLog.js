@@ -61,3 +61,24 @@ export function clearAllCloudWriteFailures(win) {
   if (!w) return;
   try { w.localStorage.removeItem(KEY); } catch { /* storage blocked */ }
 }
+
+/* B1048400 (NEW-1) — replay every pending failure against the CURRENT local truth, never against
+ * a single representative row. This log cannot serialize a closure across the reload it exists to
+ * survive, so a drained entry is replayed generically from its recorded `groupId`/`siteId` alone —
+ * and that generic replay is exactly where the original "looks like it worked" bug came back inside
+ * its own fix. A `groupId` entry names a GROUP-SCOPED action: a project rename or a site-status
+ * change writes EVERY plan in the group in one action, so it must replay against every plan
+ * `loadPlansOfGroup` currently returns for that group — pushing just the group id's own row (which
+ * happens to also be one plan id) silently leaves every sibling plan on its old value while the UI
+ * reports success. A `siteId` entry names a genuinely single-row action (a new site/plan, a
+ * duplicated plan, a plan's own name) and replays against just that row. */
+export function replayCloudWriteFailures(pending, { loadPlansOfGroup, pushLoud }) {
+  for (const e of pending || []) {
+    if (!e) continue;
+    if (e.groupId) {
+      for (const p of loadPlansOfGroup(e.groupId) || []) pushLoud(p.id, e.what);
+    } else if (e.siteId) {
+      pushLoud(e.siteId, e.what);
+    }
+  }
+}

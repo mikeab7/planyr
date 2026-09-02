@@ -32,7 +32,7 @@ import { idbPersist } from "./lib/localDb.js";
 const SiteReviewModal = lazy(() => import("./components/SiteReviewModal.jsx").then((m) => ({ default: m.SiteReviewModal })));
 import { nextConceptName } from "./lib/conceptName.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
-import { recordCloudWriteFailure, readCloudWriteFailures, clearAllCloudWriteFailures } from "../../shared/cloud/writeFailureLog.js";
+import { recordCloudWriteFailure, readCloudWriteFailures, clearAllCloudWriteFailures, replayCloudWriteFailures } from "../../shared/cloud/writeFailureLog.js";
 import { noteLayerContext } from "../../shared/telemetry/perfRecorderHandle.js";
 import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability, resumeTargetAfterSignIn, routeProjectJustChanged } from "./lib/bootResume.js";
 import { RADIUS } from "../../shared/ui/radius.js";
@@ -165,12 +165,19 @@ export default function App({
     const pending = readCloudWriteFailures();
     if (!pending.length) return;
     const last = pending[pending.length - 1];
+    // B1048400 (NEW-2) — do not claim the cloud is untouched: a group-scoped write (a rename,
+    // a status change) can have landed on SOME of the group's rows before the failure, so "saved
+    // on this device, please redo it" overstates how clean the starting point is. Say it may only
+    // be PARTLY synced instead — true whether the original action touched one row or many.
     const summary = pending.length === 1
-      ? `${last.what} didn't reach the cloud earlier — it's saved on this device, but please check and redo it if needed.`
-      : `${pending.length} changes didn't reach the cloud earlier (most recently: ${last.what}) — they're saved on this device, but please check and redo them if needed.`;
+      ? `${last.what} may not have fully synced to the cloud earlier. It's saved on this device — please check it and try again if anything looks off online.`
+      : `${pending.length} changes may not have fully synced to the cloud earlier (most recently: ${last.what}). They're saved on this device — please check them and try again if anything looks off online.`;
     setPushErrorWithRetry(summary, () => {
       clearAllCloudWriteFailures();
-      pending.forEach((e) => { if (e.groupId) pushLoud(e.groupId, e.what); else if (e.siteId) pushLoud(e.siteId, e.what); });
+      // B1048400 (NEW-1) — a `groupId` entry (a project rename, a status change) touched EVERY
+      // plan in the group, not just one; replaying it against a single representative row is the
+      // "looks like it worked" bug reappearing inside its own fix. See writeFailureLog.js's header.
+      replayCloudWriteFailures(pending, { loadPlansOfGroup, pushLoud });
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps -- one-time boot drain, before pushLoud exists as a stable ref is fine (it's stable across renders here)
   // NEW-1 — a site-status change (incl. "Dead") is a header write outside the planner's
@@ -762,7 +769,11 @@ export default function App({
         // NEW-1 — see pushLoud's comment: this must be recorded BEFORE anything else in case the
         // same chunk-load failure that caused this also triggers an auto-reload out from under it.
         recordCloudWriteFailure({ what: "The project rename", groupId, error: (res && res.error) || "" });
-        setPushErrorWithRetry(`“${site}” is saved on this device, but the rename couldn't be saved to the cloud — it may come back under its old name when you reload. Check your connection and try again.`,
+        // B1048400 (NEW-2) — the group's cloud rows can be PARTLY renamed at this point (the
+        // non-atomic fallback path writes one row at a time and can fail partway through), so
+        // don't claim the cloud side is simply untouched — some plans could already show the new
+        // name online and others the old one.
+        setPushErrorWithRetry(`“${site}” is saved on this device, but the rename may not have fully reached the cloud — some plans in this project could still show the old name online until this succeeds. Check your connection and try again.`,
           () => renameSite(groupId, (loadSite(groupId) || {}).site || site));
         reportClientEvent("cloud-push-failed", "project rename did not reach the cloud", { id: groupId, error: (res && res.error) || "" });
       }
@@ -805,13 +816,19 @@ export default function App({
     const rec = loadSite(id); if (!rec) return;
     const prevStatus = rec.status; // NEW-1 — captured BEFORE the write, for the undo toast below
     // NEW-F6 — save every plan locally first, then aggregate the pushes to ONE banner.
-    const plans = loadPlansOfGroup(groupOf(rec));
+    const groupId = groupOf(rec);
+    const plans = loadPlansOfGroup(groupId);
     plans.forEach((s) => saveSite({ id: s.id, status }));
     Promise.all(plans.map((s) => pushSiteToCloud(s.id).then((r) => !(r && r.ok === false)).catch(() => false)))
       .then((oks) => {
         if (oks.some((ok) => !ok)) {
-          recordCloudWriteFailure({ what: "The status change", siteId: id, error: "background push failed (site status)" });
-          setPushErrorWithRetry("The status change is saved on this device but couldn't sync to the cloud — it'll catch up on your next edit or reload.",
+          // B1048400 (NEW-1) — record the GROUP, not one representative plan: this write touched
+          // every plan in the group, and a `siteId` entry replays against only one row (see
+          // writeFailureLog.js's replayCloudWriteFailures header).
+          recordCloudWriteFailure({ what: "The status change", groupId, error: "background push failed (site status)" });
+          // B1048400 (NEW-2) — some plans in the group may already have the new status in the
+          // cloud even though this push reports a failure; don't claim the cloud is untouched.
+          setPushErrorWithRetry("The status change may not have fully synced to the cloud — it's saved on this device, and it'll catch up on your next edit or reload.",
             () => setSiteStatus(id, status));
           reportClientEvent("cloud-push-failed", "background push failed (site status)", { id });
         }
@@ -1011,12 +1028,12 @@ export default function App({
       {/* NEW-F6 — a background cloud-mirror push failed. Informational (the device copy is safe
           and the next push/pull heals), so warn styling, stacked under the harder alerts. */}
       {pushError && (
-        <div role="alert" style={{ position: "fixed", top: (cloudError ? 57 : 0) + (deleteError ? 57 : 0) + 79, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 560, display: "flex", alignItems: "center", gap: 10, background: "var(--warn-bg, #fef3c7)", color: "var(--warn-text)", border: "1px solid var(--warn-border, #d6a64a)", borderRadius: 10, padding: "8px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
+        <div role="alert" data-testid="cloud-write-failure-banner" style={{ position: "fixed", top: (cloudError ? 57 : 0) + (deleteError ? 57 : 0) + 79, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 560, display: "flex", alignItems: "center", gap: 10, background: "var(--warn-bg, #fef3c7)", color: "var(--warn-text)", border: "1px solid var(--warn-border, #d6a64a)", borderRadius: 10, padding: "8px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
           <span style={{ flex: 1 }}>{pushError}</span>
           {/* NEW-1 — an actual retry, not just "it'll catch up eventually": re-attempts whatever
               write this banner is reporting, wired up by the writer that set it. */}
           {pushErrorRetryRef.current && (
-            <button onClick={() => { const retry = pushErrorRetryRef.current; dismissPushError(); retry?.(); }} title="Try again now"
+            <button data-testid="cloud-write-failure-retry" onClick={() => { const retry = pushErrorRetryRef.current; dismissPushError(); retry?.(); }} title="Try again now"
               style={{ flex: "none", cursor: "pointer", background: "var(--warn-text)", color: "var(--warn-bg)", border: "none", borderRadius: RADIUS.sm, padding: "2px 9px", fontFamily: "inherit", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>Retry now</button>
           )}
           <button onClick={dismissPushError} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "transparent", color: "var(--warn-text)", border: "none", borderRadius: RADIUS.sm, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
