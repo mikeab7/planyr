@@ -85,7 +85,7 @@ describe("jobSteps() against .github/ci-gates.yml — the actual gate list", () 
   it("parses without refusing, and every step is a plain run: gate (no uses:)", () => {
     const res = jobSteps(readGates(), "build");
     expect(res.ok, res.unparsed.join("; ")).toBe(true);
-    expect(res.steps.length).toBe(19);
+    expect(res.steps.length).toBe(20);
     expect(res.steps.every((s) => s.run != null && s.uses == null)).toBe(true);
   });
 
@@ -97,6 +97,8 @@ describe("jobSteps() against .github/ci-gates.yml — the actual gate list", () 
     expect(idx("Lint")).toBeLessThan(idx("Mint gate"));
     expect(idx("Mint gate")).toBeLessThan(idx("Test ("));
     expect(idx("Build")).toBeLessThan(idx("Performance budget"));
+    expect(idx("Wait for the preview server")).toBeLessThan(idx("Signature-budget gate"));
+    expect(idx("Signature-budget gate")).toBeLessThan(idx("Visual regression baselines"));
     expect(idx("Visual regression baselines")).toBeGreaterThan(idx("Wait for the preview server"));
   });
 
@@ -133,10 +135,10 @@ describe("splitSteps / classifyInfra — gates vs CI-only plumbing", () => {
     ]);
   });
 
-  it("ci-gates.yml's real steps split into 19 gates + 0 infra", () => {
+  it("ci-gates.yml's real steps split into 20 gates + 0 infra", () => {
     const { steps } = jobSteps(readGates(), "build");
     const { gates, infra } = splitSteps(steps);
-    expect(gates.length).toBe(19);
+    expect(gates.length).toBe(20);
     expect(infra.length).toBe(0);
   });
 
@@ -241,9 +243,9 @@ describe("resolveStepEnv — one gate's env:, given the global secret resolution
 });
 
 describe("scripts/ci-parity.mjs --list — the two files actually wire together (integration, no gates run)", () => {
-  it("reports 19 gates from ci-gates.yml and 4 infra steps from build.yml", () => {
+  it("reports 20 gates from ci-gates.yml and 4 infra steps from build.yml", () => {
     const out = execFileSync("node", ["scripts/ci-parity.mjs", "--list"], { cwd: REPO, encoding: "utf8" });
-    expect(out).toContain("Gates (19), in order, read from .github/ci-gates.yml:");
+    expect(out).toContain("Gates (20), in order, read from .github/ci-gates.yml:");
     expect(out).toContain("Infra steps NOT covered (4)");
     expect(out).toContain("Checkout (actions/checkout)");
     expect(out).toContain("Upload visual regression diffs (actions/upload-artifact)");

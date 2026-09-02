@@ -123,7 +123,13 @@ function Badge({ state, onRetry, detail }) {
           // RADIUS.md per radius.js's own rule ("sm" is for a control nested inside another
           // rounded surface, which this isn't) — found by ui-inventory.mjs's siblingMismatches()
           // flagging it flush against Full screen's RADIUS.md with no visual boundary between.
-          display: "grid", placeItems: "center", width: 26, height: 24, borderRadius: RADIUS.md, flex: "none",
+          // ⛔ NEW-1 (signature-budget convergence, B1038016) — width/height 26×24 → 30×30: the
+          // radius fix above closed the SHAPE mismatch and left the SIZE one standing — this was
+          // still docs/UI-INVENTORY.md's own flagged sibling finding ("Cloud sync: Saved on this
+          // device sits 6px from Full screen — height 24px vs 30px"). FullscreenButton/SettingsMenu
+          // are IconButton's default 30×30 square; matching it exactly merges this icon-only badge
+          // into that one shared signature instead of carrying its own.
+          display: "grid", placeItems: "center", width: 30, height: 30, borderRadius: RADIUS.md, flex: "none",
           background: "transparent", color: v.color, cursor: canPop ? "pointer" : "default",
           // The loud failure state gets a hairline ring in its own color so it pops out of the
           // quiet chrome at a glance — the rest carry no border.
@@ -187,7 +193,10 @@ export class CloudBadgeBoundary extends Component {
         <span role="img" aria-label="Cloud sync: status unavailable"
           data-testid="cloud-sync-badge" data-sync-state="crashed"
           title="Sync status couldn't be read: your latest work is saved on this device."
-          style={{ display: "grid", placeItems: "center", width: 26, height: 24, borderRadius: RADIUS.md,
+          // NEW-1 (signature-budget convergence, B1038016) — 30×30, matching the live badge's own
+          // fix above, so the rare crash fallback doesn't reintroduce the 26×24 signature it exists
+          // to prevent from ever wedging into this row.
+          style={{ display: "grid", placeItems: "center", width: 30, height: 30, borderRadius: RADIUS.md,
             color: "var(--danger)", border: "1px solid var(--danger)" }}>
           <CloudGlyph variant="cloud-slash" />
         </span>

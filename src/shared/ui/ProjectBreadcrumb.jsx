@@ -187,9 +187,18 @@ const CalendarIcon = ({ size = 12 }) => (
 // and lock/warn-icon slots are all bespoke to the breadcrumb's own controlled-vs-uncontrolled
 // project list, not a shape a shared primitive should own. Row 1 is 30px tall, so a 26-tall crumb
 // still fits with no clipping (`alignItems:"center"` centers it, same as before).
+// ⛔ NEW-2 (signature-budget convergence, B1038016) — height 26→30, padding "0 10px"→"0 12px":
+// SIZE.sm was itself a DIFFERENT height family from the row's own MenuTrigger-built chips (the
+// signed-out "Cloud off" trigger, `SIZE.md` = height 30 / padding "0 12px") sitting right beside
+// it, and ui-inventory.mjs's own signature count still carried both as distinct shapes — a
+// smaller version of the exact account-pill mismatch this whole design system exists to prevent.
+// Bumping the crumb onto SIZE.md merges it with that trigger's signature outright (measured:
+// still fits inside the 30px row with room to spare, `alignItems:"center"` keeps it centred) and,
+// together with the plan-name chip's matching move (SitePlanner.jsx's `.dbtn` plan crumb), turns
+// three previously-distinct chip families (crumb / plan-chip / cloud-off trigger) into one.
 const crumbBtn = (extra) => ({
   display: "flex", alignItems: "center", gap: 5, flex: "none",
-  height: 26, padding: "0 10px", borderRadius: RADIUS.md,
+  height: 30, padding: "0 12px", borderRadius: RADIUS.md,
   border: "none", background: "transparent", cursor: "pointer",
   fontFamily: "inherit", fontSize: CHROME_FONT_CONTROL, fontWeight: 600, whiteSpace: "nowrap",
   ...extra,
