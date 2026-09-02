@@ -11,30 +11,29 @@
  *  full argument (both the original asymmetric verbs AND the first fix's identical ones read as
  *  unclear to the owner). Each button's `aria-label` still separately names the window, for a
  *  screen-reader user who loses the positional cue a sighted reader gets for free.
+ *
+ *  ⛔ B1077681/NEW-2 — EACH CARD NOW RENDERS ITS PANE'S REAL FORMATTED CONTENT, NOT A PLAIN-TEXT
+ *  WORD-HIGHLIGHT DIFF. The old body diffed `docToText(doc)` — a flatten that cannot tell "a
+ *  table" from "the same words typed as running text" — so a table on one side and the
+ *  equivalent plain paragraphs on the other rendered as two IDENTICAL-looking panes with no
+ *  table anywhere (the owner's own screenshot: "here's the side by side but where is the
+ *  table"). `panes.newer`/`panes.older` (`lib/notesRedline.js`'s `buildComparison`, computed
+ *  once by the parent and passed down here) are two fully-formatted block trees — the newer
+ *  document's own shape with insertions, and the older document's own shape with deletions —
+ *  built from the SAME alignment the unified redline uses, and rendered here through the SAME
+ *  `NoteRedline` component. A table, a picture, a list all render as themselves in both panes,
+ *  so the two can only look alike when the documents genuinely do. See
+ *  `test/notesRedline.test.js` for the regression fixture (a table on one side, the same
+ *  content as plain paragraphs on the other) asserting the two panes now differ.
  */
-import { useMemo } from "react";
-import { docToText } from "../lib/notesMarkdown.js";
-import { diffNoteText, sideOps } from "../lib/notesConflictDiff.js";
-import { orderConflictVersions } from "../lib/notesVersionOrder.js";
+import NoteRedline from "./NoteRedline.jsx";
 import { stampLabel, absoluteStamp } from "../lib/notesTime.js";
 
 const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
 
-/** One run of a side's text, plain or highlighted. MODULE-SCOPE, not a closure per render. */
-function DiffRun({ text, changed }) {
-  if (!changed) return text;
-  return (
-    <mark
-      style={{
-        background: "var(--warn-bg)", color: "var(--text-primary)",
-        boxDecorationBreak: "clone", WebkitBoxDecorationBreak: "clone",
-      }}
-    >{text}</mark>
-  );
-}
-
-/** One version, read-only and in full. */
-function VersionCard({ label, when, whenExact, ops, buttonLabel, buttonAriaLabel, onChoose, testId }) {
+/** One version, read-only and in full — the pane's real formatted content (`NoteRedline`) in
+ *  place of the old plain-text diff highlight. */
+function VersionCard({ label, when, whenExact, blocks, images, buttonLabel, buttonAriaLabel, onChoose, testId }) {
   return (
     <div
       data-testid={testId}
@@ -54,8 +53,7 @@ function VersionCard({ label, when, whenExact, ops, buttonLabel, buttonAriaLabel
       <div
         data-testid={`${testId}-text`}
         style={{
-          maxHeight: 320, overflowY: "auto", fontSize: 12, lineHeight: 1.5, color: "var(--text-primary)",
-          whiteSpace: "pre-wrap", overflowWrap: "anywhere",
+          maxHeight: 320, overflowY: "auto", minWidth: 0,
           border: "1px solid var(--border-default)", borderRadius: RADIUS.control,
           padding: 8,
           /* The standard background-attachment scroll-shadow — two solid layers riding the
@@ -72,8 +70,8 @@ function VersionCard({ label, when, whenExact, ops, buttonLabel, buttonAriaLabel
           backgroundAttachment: "local, local, scroll, scroll",
         }}
       >
-        {ops.length
-          ? ops.map((op, i) => <DiffRun key={i} text={op.text} changed={op.changed} />)
+        {blocks.length
+          ? <NoteRedline blocks={blocks} images={images} />
           : <em style={{ color: "var(--text-secondary)" }}>This copy is empty.</em>}
       </div>
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
@@ -102,28 +100,27 @@ function roleLabel(comparable, isNewer, which) {
 }
 
 /** THE TWO CARDS SIT SIDE BY SIDE ON A WIDE SCREEN, STACKED ON A NARROW ONE — see the
- *  original B842624 header for why this is a CSS grid question, never a JS breakpoint. */
-export default function ConflictSideBySide({
-  title, localDoc, serverDoc, localUpdatedAt, serverUpdatedAt, onKeepMine, onKeepTheirs,
-}) {
-  const localText = useMemo(() => docToText(localDoc), [localDoc]);
-  const serverText = useMemo(() => docToText(serverDoc), [serverDoc]);
-  const { ops } = useMemo(() => diffNoteText(localText, serverText), [localText, serverText]);
-  const mineOps = useMemo(() => sideOps(ops, "a"), [ops]);
-  const theirsOps = useMemo(() => sideOps(ops, "b"), [ops]);
+ *  original B842624 header for why this is a CSS grid question, never a JS breakpoint.
+ *
+ *  `order` is `lib/notesVersionOrder.js`'s `orderConflictVersions` result (computed once by
+ *  `ConflictReview.jsx`, not re-derived here); `panes` is `lib/notesRedline.js`'s
+ *  `buildComparison(...).panes` — `panes.newer` pairs with `order.newer`, `panes.older` with
+ *  `order.older`, by construction (both come from the same caller, in the same order). */
+export default function ConflictSideBySide({ title, order, panes, images, onKeepMine, onKeepTheirs }) {
   const name = String(title || "").trim() || "Untitled";
+  const chooseFor = (which) => (which === "mine" ? onKeepMine : onKeepTheirs);
 
-  const order = useMemo(
-    () => orderConflictVersions({ localDoc, serverDoc, localUpdatedAt, serverUpdatedAt }),
-    [localDoc, serverDoc, localUpdatedAt, serverUpdatedAt],
-  );
+  const cardFor = (slot, blocks) => ({
+    when: stampLabel(slot.updatedAt),
+    whenExact: absoluteStamp(slot.updatedAt),
+    blocks,
+    onChoose: chooseFor(slot.which),
+    testId: slot.which === "mine" ? "notes-conflict-mine" : "notes-conflict-theirs",
+  });
+  const newerCard = cardFor(order.newer, panes.newer);
+  const olderCard = cardFor(order.older, panes.older);
   const newerLabel = roleLabel(order.comparable, true, order.newer.which);
   const olderLabel = roleLabel(order.comparable, false, order.older.which);
-  const cardFor = (which) => (which === "mine"
-    ? { when: stampLabel(localUpdatedAt), whenExact: absoluteStamp(localUpdatedAt), ops: mineOps, onChoose: onKeepMine, testId: "notes-conflict-mine" }
-    : { when: stampLabel(serverUpdatedAt), whenExact: absoluteStamp(serverUpdatedAt), ops: theirsOps, onChoose: onKeepTheirs, testId: "notes-conflict-theirs" });
-  const newerCard = cardFor(order.newer.which);
-  const olderCard = cardFor(order.older.which);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -133,13 +130,13 @@ export default function ConflictSideBySide({
       </p>
       <div data-testid="notes-conflict-sidebyside" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 8, alignItems: "start" }}>
         <VersionCard
-          label={newerLabel} when={newerCard.when} whenExact={newerCard.whenExact} ops={newerCard.ops}
+          label={newerLabel} when={newerCard.when} whenExact={newerCard.whenExact} blocks={newerCard.blocks} images={images}
           buttonLabel={order.comparable ? "Keep the newer version" : `Keep ${order.newer.which === "mine" ? "this window’s" : "the other window’s"} version`}
           buttonAriaLabel={`Keep the version edited ${newerCard.when || "at an unknown time"}, from ${order.newer.which === "mine" ? "this window" : "the other window"}`}
           onChoose={newerCard.onChoose} testId={newerCard.testId}
         />
         <VersionCard
-          label={olderLabel} when={olderCard.when} whenExact={olderCard.whenExact} ops={olderCard.ops}
+          label={olderLabel} when={olderCard.when} whenExact={olderCard.whenExact} blocks={olderCard.blocks} images={images}
           buttonLabel={order.comparable ? "Keep the older version" : `Keep ${order.older.which === "mine" ? "this window’s" : "the other window’s"} version`}
           buttonAriaLabel={`Keep the version edited ${olderCard.when || "at an unknown time"}, from ${order.older.which === "mine" ? "this window" : "the other window"}`}
           onChoose={olderCard.onChoose} testId={olderCard.testId}

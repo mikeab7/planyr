@@ -78,6 +78,15 @@ async function openReview(page) {
   ok("a contact line ('Executive Assistant') appears as added text, not removed",
     bodyText.includes("Executive Assistant"));
 
+  // ---- B1077680/NEW-1: the removed TABLE must render its real content, not a bare "Table" pill ----
+  const redlineTableRows = await page.locator('[data-testid="notes-redline-body"] table tr').count();
+  ok("the redline body contains a real <table> with more than one row (not just the word 'Table')",
+    redlineTableRows > 1, `rows=${redlineTableRows}`);
+  const redlineTableText = await page.locator('[data-testid="notes-redline-body"] table').innerText();
+  for (const line of ["Executive Assistant", "281-305-1115"]) {
+    ok(`the redline's real table cell text includes "${line}"`, redlineTableText.includes(line));
+  }
+
   // ---- B849104: the two footer buttons must have DIFFERENT, recency-based labels ----
   const newerBtn = await page.locator('[data-testid="notes-conflict-review-keep-newer"]').textContent();
   const olderBtn = await page.locator('[data-testid="notes-conflict-review-keep-older"]').textContent();
@@ -145,7 +154,106 @@ async function openReview(page) {
   const reassuranceCount = (await page.locator('[data-testid="notes-conflict-review"]').innerText()).match(/nothing is lost/gi) || [];
   ok("the 'nothing is lost' reassurance appears exactly once, not per-card", reassuranceCount.length === 1, `count=${reassuranceCount.length}`);
 
+  // ---- B1077681/NEW-2: the two panes must NOT render identically — one holds a real table,
+  // the other holds the same content as plain paragraphs ("main" fixture: local=OLDER/table,
+  // server=NEWER/plain lines, so "mine" is the older/table side). ----
+  const mineText = await page.locator('[data-testid="notes-conflict-mine-text"]').innerText();
+  const theirsText = await page.locator('[data-testid="notes-conflict-theirs-text"]').innerText();
+  ok("the two panes' rendered text is NOT identical (the old bug: both read as flat, matching text)",
+    mineText.trim() !== theirsText.trim(), `mine="${mineText.slice(0, 80)}" theirs="${theirsText.slice(0, 80)}"`);
+  const mineTableRows = await page.locator('[data-testid="notes-conflict-mine-text"] table tr').count();
+  const theirsTableRows = await page.locator('[data-testid="notes-conflict-theirs-text"] table tr').count();
+  ok("the OLDER pane ('mine' in this fixture) contains a real <table>", mineTableRows > 1, `rows=${mineTableRows}`);
+  ok("the NEWER pane ('theirs') contains NO table at all — it never had one", theirsTableRows === 0, `rows=${theirsTableRows}`);
+  ok("the older pane's table carries the real contact text", mineText.includes("Executive Assistant") && mineText.includes("281-305-1115"));
+  ok("the newer pane carries the same contact text as plain lines", theirsText.includes("Executive Assistant") && theirsText.includes("281-305-1115"));
+
   await ctx.close();
+}
+
+/* ---- 3a) NEW-3 stress case: a long unbroken sentence must WRAP inside its card, never force
+ * the pane or the page to scroll sideways (echoes the reported clip: "…SHOULD BE ABLE TO
+ * PROVIDE BY T"). */
+{
+  const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 2 });
+  const page = await ctx.newPage();
+  await assertMeasurable(page, "verify-notes-conflict-review:longtext");
+  await page.goto(`${HARNESS}?fixture=longtext`, { waitUntil: "load" });
+  await openReview(page);
+  await page.locator('[data-testid="notes-conflict-view-sidebyside"]').click();
+  await page.waitForSelector('[data-testid="notes-conflict-sidebyside"]');
+  await page.waitForTimeout(100);
+
+  const mineCardBox = await page.locator('[data-testid="notes-conflict-mine"]').boundingBox();
+  const mineBtnBox = await page.locator('[data-testid="notes-conflict-mine-choose"]').boundingBox();
+  const theirsBtnBox = await page.locator('[data-testid="notes-conflict-theirs-choose"]').boundingBox();
+  ok("[longtext] the long-line card stays within the viewport (the long sentence wraps, it doesn't push the card wide)",
+    mineCardBox && mineCardBox.x + mineCardBox.width <= 1601, JSON.stringify(mineCardBox));
+  ok("[longtext] 'Keep the older version' is still visible and reachable", mineBtnBox && mineBtnBox.x >= 0 && mineBtnBox.x + mineBtnBox.width <= 1601, JSON.stringify(mineBtnBox));
+  ok("[longtext] 'Keep the newer version' is still visible and reachable", theirsBtnBox && theirsBtnBox.x >= 0 && theirsBtnBox.x + theirsBtnBox.width <= 1601, JSON.stringify(theirsBtnBox));
+  const overflowsX = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
+  ok("[longtext] the page does not overflow horizontally even with a long unbroken sentence", !overflowsX);
+
+  await ctx.close();
+}
+
+/* ---- 3a-2) a real multi-column table WITH a header row (critique-loop round 2 — the other
+ * fixtures only exercise single-cell signature-block rows) ---------------------------------- */
+{
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 700 } });
+  const page = await ctx.newPage();
+  await assertMeasurable(page, "verify-notes-conflict-review:multitable");
+  await page.goto(`${HARNESS}?fixture=multitable`, { waitUntil: "load" });
+  await openReview(page);
+
+  const headerCells = await page.locator('[data-testid="notes-redline-body"] table th').allTextContents();
+  ok("the header row renders as real <th> cells, not flattened into a data row", headerCells.map((t) => t.trim()).sort().join(",") === "Due,Item,Status");
+  const dataRows = await page.locator('[data-testid="notes-redline-body"] table tbody tr').count();
+  ok("the table keeps all its rows (header + 2 data rows)", dataRows === 3, `rows=${dataRows}`);
+  const bodyText = await page.locator('[data-testid="notes-redline-body"] table').innerText();
+  ok("a data cell from the second column ('Sep 22') survived", bodyText.includes("Sep 22"));
+
+  await ctx.close();
+}
+
+/* ---- 3b) NEW-3: side-by-side layout at the owner's reported viewport and narrower widths --- */
+{
+  // His reported viewport: ~1600 CSS px wide, devicePixelRatio ~2.15, Windows. Playwright caps
+  // deviceScaleFactor well under that in practice, but the CSS width is what layout depends on —
+  // dpr only affects raster sharpness, not CSS box geometry — so we reproduce the width exactly
+  // and use a representative (allowed) dpr rather than his literal 2.15.
+  for (const [label, viewport] of [
+    ["owner-viewport", { width: 1600, height: 900 }],
+    ["narrow-tablet", { width: 768, height: 900 }],
+    ["narrow-phone", { width: 390, height: 800 }],
+  ]) {
+    const ctx = await browser.newContext({ viewport, deviceScaleFactor: 2 });
+    const page = await ctx.newPage();
+    await assertMeasurable(page, `verify-notes-conflict-review:sidebyside-layout:${label}`);
+    await page.goto(`${HARNESS}?fixture=main`, { waitUntil: "load" });
+    await openReview(page);
+    await page.locator('[data-testid="notes-conflict-view-sidebyside"]').click();
+    await page.waitForSelector('[data-testid="notes-conflict-sidebyside"]');
+    await page.waitForTimeout(100);
+
+    const vw = viewport.width;
+    const mineBox = await page.locator('[data-testid="notes-conflict-mine"]').boundingBox();
+    const theirsBox = await page.locator('[data-testid="notes-conflict-theirs"]').boundingBox();
+    const mineBtnBox = await page.locator('[data-testid="notes-conflict-mine-choose"]').boundingBox();
+    const theirsBtnBox = await page.locator('[data-testid="notes-conflict-theirs-choose"]').boundingBox();
+    const fits = (box) => box && box.x >= 0 && box.x + box.width <= vw + 1;
+
+    ok(`[${label}] the older ("mine") card fits within the viewport width (no horizontal clip)`, fits(mineBox), JSON.stringify(mineBox));
+    ok(`[${label}] the newer ("theirs") card fits within the viewport width (no horizontal clip)`, fits(theirsBox), JSON.stringify(theirsBox));
+    ok(`[${label}] "Keep the older version" button is visible and within the viewport`, fits(mineBtnBox), JSON.stringify(mineBtnBox));
+    ok(`[${label}] "Keep the newer version" button is visible and within the viewport`, fits(theirsBtnBox), JSON.stringify(theirsBtnBox));
+
+    // No element anywhere forces the PAGE itself to scroll sideways.
+    const pageOverflowsX = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
+    ok(`[${label}] the page does not overflow horizontally`, !pageOverflowsX);
+
+    await ctx.close();
+  }
 }
 
 /* ---- 4) fallback fixture: timestamps unknown — must NOT claim a false direction ------------ */
