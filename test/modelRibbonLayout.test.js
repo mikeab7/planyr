@@ -86,9 +86,10 @@ describe("computeRibbonLayout — generic algorithm", () => {
 });
 
 describe("RIBBON_GROUPS — the real inventory at the brief's own checkpoints", () => {
-  it("729px (the owner's real window): Font stays visible — a spreadsheet needs Bold reachable without a menu", () => {
+  it("729px (the owner's real window): Actions and Font style stay visible — Undo/Redo and Bold reachable without a menu", () => {
     const { visibleKeys } = computeRibbonLayout(700, RIBBON_GROUPS, MORE_BUTTON_WIDTH);
-    expect(visibleKeys).toContain("font");
+    expect(visibleKeys).toContain("actions");
+    expect(visibleKeys).toContain("fontstyle");
   });
   it("1024px: strictly more groups are visible than at 729px", () => {
     const at729 = computeRibbonLayout(700, RIBBON_GROUPS, MORE_BUTTON_WIDTH).visibleKeys;

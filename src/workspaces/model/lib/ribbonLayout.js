@@ -1,11 +1,15 @@
-/* Model workspace — the ribbon's responsive collapse math (Stage 2, B1007281).
+/* Model workspace — the ribbon's responsive collapse math (Stage 2, B1007281; re-grouped for the
+ * Stage 2 ICONOGRAPHY pass, B1020608-FOLLOWUP).
  *
  * The owner's brief, verbatim: his real window is ~729 CSS px wide (he browses at ~215% page
- * zoom), and "a ribbon that only works at 1400px is a ribbon he cannot use." A real Excel-style
- * Home tab (Clipboard/Font/Borders/Alignment/Number/Cells/Sort&Filter) simply doesn't fit in
- * 729px of anything but icons — so GROUPS collapse into a trailing "More ▾" popover as the
- * available width shrinks, lowest-priority group first, exactly how Excel's own ribbon degrades
- * a window narrower than its groups' gallery of buttons.
+ * zoom), and "a ribbon that only works at 1400px is a ribbon he cannot use." A real Excel/Sheets-
+ * style Home tab simply doesn't fit in 729px of anything but icons — so GROUPS collapse into ONE
+ * trailing "…" popover as the available width shrinks, lowest-priority group first, exactly how
+ * Excel's own ribbon degrades a window narrower than its groups' gallery of buttons. The owner's
+ * follow-up correction: the old collapse rendered one small trigger PER collapsed group (several
+ * ragged little icon buttons trailing the row); it now collapses into a SINGLE "…" trigger whose
+ * one popover stacks every collapsed group's own content — Ribbon.jsx's job, this file only says
+ * which groups are in vs. out.
  *
  * Kept pure and DOM-free so the collapse decision is provable without mounting anything —
  * Ribbon.jsx (the component) does nothing but measure its own container width and hand it here.
@@ -43,22 +47,32 @@ export function computeRibbonLayout(containerWidth, groups, reserveForMore = 0) 
   };
 }
 
-// The real Home-tab groups, in display order. `width` is a generous estimate of the group's own
-// natural inline width (icon buttons ~26px, dropdown triggers wider — see Ribbon.jsx for the
-// actual controls each renders); `priority` decides collapse order, LOWEST collapsing first.
-// Font and Clipboard are the two things kept visible the longest — a spreadsheet with no Bold
-// button at all reads as broken in a way a spreadsheet with no visible Sort button does not.
-// Display order matches the owner's own reading order (Stage 2 visual pass): Clipboard, Font,
-// Alignment, Number, Borders, Cells, Sort & Filter — Borders sits AFTER Number here (display),
-// while its `priority` still keeps it visible longer than Cells/Sort&Filter as width shrinks
-// (collapse order and display order are independently decided — see computeRibbonLayout above).
+// The real Home-tab groups, in display order (the owner's own grouping, verbatim from the
+// ICONOGRAPHY brief): Actions (undo/redo + paint/clear) | Font face (family+size) | Font style
+// (B/I/U/S) | Colour (text+fill) | Alignment (incl. wrap/indent/merge) | Number | Borders |
+// Cells (insert/delete/freeze) | Sort & Filter. `width` is a generous estimate of the group's own
+// natural inline width PLUS its own leading divider (icon buttons are a uniform 26px now —
+// CONTROL_H.md — so a group's own content is close to `26 * buttonCount + 3 * (buttonCount-1)`
+// gaps; dropdown triggers with a text label are wider; every visible group after the first is
+// preceded by a divider — 1px rule + 8px margin each side, DIVIDER_FOOTPRINT below — so each
+// width folds that in too rather than let computeRibbonLayout under-count the real rendered row
+// and risk the exact overflow this mechanism exists to prevent; see Ribbon.jsx for the actual
+// controls each renders). `priority` decides collapse order, LOWEST collapsing first. Font style
+// (Bold/Italic/Underline/Strike) and Actions are kept visible longest — a spreadsheet with no
+// Bold button at all reads as broken, and Undo/Redo are the two controls used every single edit.
+// Number and Borders (currency/% and the subtotal/total border convention) are the next to go,
+// ahead of the geometry-only groups (Font face, Colour, Alignment, Cells, Sort & Filter) that a
+// narrow window can live without for a moment behind "…".
+const DIVIDER_FOOTPRINT = 17; // 1px rule + 8px margin each side (docs/DESIGN.md's divider rule)
 export const RIBBON_GROUPS = [
-  { key: "clipboard", label: "Clipboard", width: 62, priority: 6 },
-  { key: "font", label: "Font", width: 300, priority: 7 },
-  { key: "alignment", label: "Alignment", width: 288, priority: 3 },
-  { key: "number", label: "Number", width: 268, priority: 4 },
-  { key: "borders", label: "Borders", width: 112, priority: 5 },
-  { key: "cells", label: "Cells", width: 238, priority: 2 },
-  { key: "sortfilter", label: "Sort & Filter", width: 124, priority: 1 },
+  { key: "actions", label: "Actions", width: 116 + DIVIDER_FOOTPRINT, priority: 9 },
+  { key: "fontface", label: "Font", width: 166 + DIVIDER_FOOTPRINT, priority: 4 },
+  { key: "fontstyle", label: "Bold / Italic / Underline / Strike", width: 116 + DIVIDER_FOOTPRINT, priority: 8 },
+  { key: "color", label: "Colour", width: 59 + DIVIDER_FOOTPRINT, priority: 3 },
+  { key: "alignment", label: "Alignment", width: 233 + DIVIDER_FOOTPRINT, priority: 2 },
+  { key: "number", label: "Number", width: 237 + DIVIDER_FOOTPRINT, priority: 6 },
+  { key: "borders", label: "Borders", width: 87 + DIVIDER_FOOTPRINT, priority: 5 },
+  { key: "cells", label: "Cells", width: 90 + DIVIDER_FOOTPRINT, priority: 1 },
+  { key: "sortfilter", label: "Sort & Filter", width: 87 + DIVIDER_FOOTPRINT, priority: 0 },
 ];
-export const MORE_BUTTON_WIDTH = 46;
+export const MORE_BUTTON_WIDTH = 26 + DIVIDER_FOOTPRINT;
