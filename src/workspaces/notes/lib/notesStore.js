@@ -768,7 +768,7 @@ async function setBinned(pageIds, binned) {
 let sync = { treeRev: null, treeDirty: false, pages: {}, images: {}, adopted: [] };  // see blankSync()
 let syncState = { mode: "local", at: null, reason: null };
 let cloudClient = null;
-const conflicts = new Map();          // pageId → { serverDoc, serverRev, at }
+const conflicts = new Map();          // pageId → { serverDoc, serverRev, serverUpdatedAt, at }
 const cloudImagePages = new Map();    // imageId → pageId, from the last seed's index
 let busy = false;
 let pushTimer = 0;
@@ -914,15 +914,26 @@ export function notesScopeLabel() { return notesStorageLine().text; }
  *
  *  It lives HERE, beside `notesStorageLine`, because this file already owns the product's
  *  sentences about where a note lives — and because a pure function is something a test can
- *  hold to the rule, which a string inlined in JSX is not. */
+ *  hold to the rule, which a string inlined in JSX is not.
+ *
+ *  ⛔ B842624 — THE BAR USED TO ASK FOR A DECISION WITH ZERO CONTENT TO DECIDE FROM: two verbs,
+ *  no text, no timestamps, no visible difference. The owner: "i have no clue which one to
+ *  choose, i should be able to decide which one i should by at least looking at it." The words
+ *  here still name the choice; `ConflictCompare.jsx` is what now shows the two versions
+ *  themselves, read-only, with the differing words marked — this function only had to say
+ *  "read both below" instead of "pick", and gain a second parked-copy suffix so BOTH buttons
+ *  can truthfully promise nothing is lost (see `handleConflict` in `Notes.jsx`: choosing
+ *  either side now parks the OTHER side as a sibling page first). */
 export function notesConflictLine(title) {
   const name = String(title || "").trim() || "Untitled";
   return {
-    text: `“${name}” also changed in another of your windows. Nothing was overwritten — pick which to keep.`,
+    text: `“${name}” also changed in another of your windows. Nothing was overwritten — read both below and pick which to keep.`,
     keepMine: "Keep this one",
     keepTheirs: "Use the other",
     /** What the un-picked copy is parked as, so choosing can never lose the other text. */
     parkedSuffix: "(this window’s copy)",
+    /** The mirror suffix, for the copy parked when "Keep this one" wins instead. */
+    otherParkedSuffix: "(the other window’s copy)",
   };
 }
 
@@ -1018,13 +1029,16 @@ function settleQuietly(pageId, row) {
   return true;
 }
 
-/** Resolve one conflict. `"mine"` forces this device's body up (guarded against whatever the
- *  server holds right now, so it is a checked update and not a blind overwrite). `"theirs"`
- *  writes the other device's body down.
+/** Resolve one conflict. `"mine"` force-pushes this window's body (guarded against whatever the
+ *  server holds right now, so it is a checked update and not a blind overwrite, and it
+ *  DISCARDS the server's current row). `"theirs"` writes the other window's body down here
+ *  (DISCARDING this window's unpushed text).
  *
- *  ⛔ "theirs" DOES NOT DESTROY THE LOCAL COPY BY ITSELF. The workspace parks this device's
- *  text as a sibling page first and only then calls this — so "never a lost edit" holds
- *  literally, not approximately. */
+ *  ⛔ NEITHER CHOICE DESTROYS THE COPY IT DISCARDS, AND THAT IS ENFORCED ONE LAYER UP, NOT
+ *  HERE (B842624, extending B1391's original "theirs" guarantee to both directions). The
+ *  workspace (`Notes.jsx`'s `handleConflict`) parks whichever body THIS call is about to
+ *  overwrite as a sibling page BEFORE calling this — this function itself has no memory of
+ *  the side it just replaced, so the parking has to happen first or not at all. */
 export async function resolveNotesConflict(pageId, choice) {
   const entry = conflicts.get(pageId);
   if (!entry || !syncOn()) return { ok: false, error: "nothing to resolve" };
@@ -1313,7 +1327,7 @@ async function seed({ full }) {
         // A MOVED REVISION IS NOT YET A DISAGREEMENT (B1391). Only a real divergence may
         // interrupt; identical text, or nothing here to lose, reconciles in silence.
         if (settleQuietly(id, row)) { changed = true; continue; }
-        conflicts.set(id, { serverDoc: row.doc, serverRev: row.rev, at: Date.now() });
+        conflicts.set(id, { serverDoc: row.doc, serverRev: row.rev, serverUpdatedAt: row.updatedAt ?? null, at: Date.now() });
         changed = true;
       }
       if (changed) emitConflicts();
@@ -1381,7 +1395,7 @@ async function pushPending() {
       // THE REFUSAL IS NOT THE BUG REPORT (B1391). The guard did its job — now find out
       // whether the two copies actually differ before saying a word to anyone.
       if (row && settleQuietly(id, row)) { emitConflicts(); continue; }
-      if (row) { conflicts.set(id, { serverDoc: row.doc, serverRev: row.rev, at: Date.now() }); emitConflicts(); }
+      if (row) { conflicts.set(id, { serverDoc: row.doc, serverRev: row.rev, serverUpdatedAt: row.updatedAt ?? null, at: Date.now() }); emitConflicts(); }
       ok = false;
       continue;
     }
