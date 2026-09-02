@@ -665,12 +665,16 @@ export default function CompsPanel({
               <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-secondary)" }}>Comps</span>
               {/* B849232/NEW-1 — the paste-grid, not the map pin tool, is the everyday way in now:
                   Michael enters comps in batches from broker emails, most of which don't start
-                  with a map click at all. "Drop a pin"/"Comp from parcel" still work — they open
-                  the grid pre-seeded with one row (see the pendingAnchor effect above). */}
+                  with a map click at all. The map's "Place comp" split button still works — it
+                  opens the grid pre-seeded with one row (see the pendingAnchor effect above).
+                  B848304 — renamed from "＋ New comps": that name read as the primary CREATE
+                  action and competed with the map's own comp-placement entry point for the same
+                  job. This button's real job is bulk paste from a broker email or a spreadsheet
+                  block, which "Paste comps" says outright. */}
               <span style={{ display: "flex", gap: 6, flex: "none" }}>
                 <button onClick={openGrid} title="Paste comps from a broker email or spreadsheet"
                   style={{ border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-primary)", fontSize: 10.5, fontWeight: 700, borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontFamily: "inherit" }}>
-                  ＋ New comps
+                  ＋ Paste comps
                 </button>
                 {/* B849233/NEW-2 — the ONLY door into the draft staging table; picking a file
                     here is what creates a row, never hand entry above. */}
@@ -693,7 +697,7 @@ export default function CompsPanel({
             )}
             {kmlImportError && <div style={{ padding: "6px 14px 0", fontSize: 10.5, color: "var(--danger-text)" }}>{kmlImportError}</div>}
             <SummaryStrip comps={comps} />
-            {comps.length === 0 && <div style={{ padding: 14, fontSize: 12, color: "var(--text-secondary)" }}>No comps yet. Paste a few from a broker email with “＋ New comps” above, or use “Drop a pin”/“Comp from parcel” on the map.</div>}
+            {comps.length === 0 && <div style={{ padding: 14, fontSize: 12, color: "var(--text-secondary)" }}>No comps yet. Paste a few from a broker email with “＋ Paste comps” above, or use “Place comp” on the map.</div>}
             {comps.map((c) => <CompRow key={c.id} comp={c} onOpen={openDetail} overlaysById={overlaysById} />)}
           </>
         )}

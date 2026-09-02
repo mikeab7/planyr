@@ -1202,7 +1202,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
       <div onPointerDown={startResize} title="Drag to resize"
         style={{ height: 6, margin: "-1px -1px 0", borderRadius: "12px 12px 0 0", cursor: "ns-resize", background: "var(--border-default)" }} />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: "1px solid var(--border-default)" }}>
-        <span style={{ fontSize: 13, fontWeight: 700 }}>New comps</span>
+        <span style={{ fontSize: 13, fontWeight: 700 }}>Paste comps</span>
         <button onClick={onCancel} aria-label="Close"
           style={{ border: "none", background: "transparent", color: "var(--text-secondary)", fontFamily: "inherit", fontSize: CLOSE_ICON_FONT_SIZE, cursor: "pointer", padding: 2 }}>✕</button>
       </div>

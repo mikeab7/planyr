@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-02 @ `0feeb639` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-02 @ `781117d9d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -121,11 +121,11 @@ _648 source files mapped._
   - _exports_: `useUndoableState`
 - **`src/workspaces/model/ModelApp.jsx`** — Model workspace root: the underwriting spreadsheet — loads/saves the active project's sheet and wires the toolbar, formula bar and grid together.
   - _exports_: `default (ModelApp)`
-- **`src/workspaces/notes/components/ConflictNotice.jsx`** — The compact, inline conflict notice (role=alert) — one line plus a "Review changes →" button that opens `ConflictReview` full-screen; carries no resolve choices of its own.
+- **`src/workspaces/notes/components/ConflictNotice.jsx`** — the quiet one-line conflict notice — one click opens the full-screen ConflictReview
   - _exports_: `default (ConflictNotice)`
-- **`src/workspaces/notes/components/ConflictReview.jsx`** — The full-screen conflict review: redline by default (toggle to side-by-side), both symmetric "Keep this version" resolve buttons live only here.
+- **`src/workspaces/notes/components/ConflictReview.jsx`** — full-screen conflict review — opens on the redline (NoteRedline.jsx) by default, side-by-side one click away
   - _exports_: `default (ConflictReview)`
-- **`src/workspaces/notes/components/ConflictSideBySide.jsx`** — The two-card, word-highlight version comparison (B842624's original layout), now `ConflictReview`'s secondary view.
+- **`src/workspaces/notes/components/ConflictSideBySide.jsx`** — the two-card side-by-side conflict comparison, now the secondary view inside ConflictReview
   - _exports_: `default (ConflictSideBySide)`
 - **`src/workspaces/notes/components/IntegrityBanner.jsx`** — the bar for the two findings nothing could previously mention: one note living in two projects, and a note that had lost its place (already recovered by the time it renders, and named / openable / re-filable inline). Its own lazy chunk — it renders only when something is wrong.
   - _exports_: `default (IntegrityBanner)`
@@ -135,7 +135,7 @@ _648 source files mapped._
   - _exports_: `default (NoteHistory)`
 - **`src/workspaces/notes/components/NoteOutline.jsx`** — Outline pane derived from the open note's headings — click to go, caret section highlighted, collapsible, absent with no headings.
   - _exports_: `default (NoteOutline)`
-- **`src/workspaces/notes/components/NoteRedline.jsx`** — Renders `lib/notesRedline.js`'s output as one document with insertions underlined and deletions struck through, formatting (headings/lists/marks) preserved.
+- **`src/workspaces/notes/components/NoteRedline.jsx`** — renders notesRedline.js's diff as one document with insertions/deletions marked in place
   - _exports_: `default (NoteRedline)`
 - **`src/workspaces/notes/components/NoteSlashMenu.jsx`** — The command list drawn at the caret when `/` opens it; renders only — every decision is the plugin's.
   - _exports_: `default (NoteSlashMenu)`
@@ -205,7 +205,7 @@ _648 source files mapped._
   - _exports_: `moveNotesBetweenProjects`, `projectNotes`
 - **`src/workspaces/notes/lib/notesQuickOpen.js`** — PURE fuzzy ranking for quick open, plus the shortcut's spelling and chord test.
   - _exports_: `fuzzyScore`, `isQuickOpenChord`, `QUICK_OPEN_KEY`, `quickOpenResults`, `rankQuickOpen`, `stepIndex`
-- **`src/workspaces/notes/lib/notesRedline.js`** — PURE: flattens two document models into leaf blocks, block-matches them, and word-diffs each matched pair with marks preserved — the data behind `NoteRedline.jsx`.
+- **`src/workspaces/notes/lib/notesRedline.js`** — pure redline diff between two note bodies — one document, changes marked in place
   - _exports_: `buildRedline`, `flattenBlocks`, `nestByPath`
 - **`src/workspaces/notes/lib/notesSaveState.js`** — this module status → the ONE app-wide CloudSyncBadge state. Notes was the last module rendering its own save chips; this is it joining the convention.
   - _exports_: `notesSaveState`

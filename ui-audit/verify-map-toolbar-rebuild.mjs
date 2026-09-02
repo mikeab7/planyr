@@ -58,7 +58,7 @@ try {
     await pacedWait(page, 800);
 
     // ── shape presence ──────────────────────────────────────────────────────────
-    const switchSel = 'div[role="tablist"][aria-label="Site or comp"]';
+    const switchSel = 'div[role="tablist"][aria-label="Browse sites or comps"]'; // B848304 — renamed (see MapFinder.jsx's SiteCompSwitch header)
     const hasSwitch = await page.locator(switchSel).count();
     check(`${width}px · Site/Comp switch renders`, hasSwitch === 1);
     const hasCombobox = await page.locator('input[role="combobox"]').count();
@@ -109,10 +109,12 @@ try {
     await pacedWait(page, 150);
     const armedIdleComp = await page.locator('[data-testid="map-comp-armed"]').count();
     check(`${width}px · no armed ring in Comp mode until an action is armed`, armedIdleComp === 0);
-    await page.locator("button", { hasText: "Drop a pin" }).click();
+    // B848304 — the resting "Drop a pin" button is now the "Place comp" split button's primary
+    // segment; its default arm (nothing chosen yet this session) is the same "on the map" pin.
+    await page.locator('[data-testid="map-place-comp-btn"]').click();
     await pacedWait(page, 150);
     const armedAfterDropPin = await page.locator('[data-testid="map-comp-armed"]').count();
-    check(`${width}px · armed ring appears once "Drop a pin" is pressed`, armedAfterDropPin === 1);
+    check(`${width}px · armed ring appears once "Place comp" is pressed`, armedAfterDropPin === 1);
     await page.locator("button", { hasText: "Cancel" }).click();
     await pacedWait(page, 150);
     const armedAfterCancel = await page.locator('[data-testid="map-comp-armed"]').count();
