@@ -581,10 +581,20 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
   };
 
   /* ---- sheet cell editing -------------------------------------------------------------------- */
-  const beginEdit = (row, col, initial, selectAll) => {
+  // B986096-HARDENING-19 — `draftOverride` lets a caller that already holds a FRESHER draft than
+  // `rows` (the render closure) seed the editor from it. `finishEdit`'s own auto-reopen is exactly
+  // that caller: it just committed `nextRows` via `commitRows`, but `commitRows` is a `setState` —
+  // `rows` itself won't reflect it until the next render — so reading `rows[row].draft` here would
+  // seed the freshly reopened editor from the STALE, pre-commit value. That was invisible whenever
+  // the reopened destination was a genuinely different cell (its own value never changed by this
+  // commit), but for a REOPEN ONTO THE SAME CELL — Enter on a single-row grid, or on the last row,
+  // where `computeDestination`'s row-axis clamp has nowhere else to go — it silently redisplayed
+  // the value the user had just typed OVER, and a subsequent click-away (a natural next action once
+  // the value already looks committed) recommitted that stale value, reverting the edit outright.
+  const beginEdit = (row, col, initial, selectAll, draftOverride) => {
     const colDef = SHEET_COLUMNS[col];
     if (colDef.kind === "derived" || colDef.kind === "action") return;
-    const st = cellState(colDef, rows[row].draft);
+    const st = cellState(colDef, draftOverride || rows[row].draft);
     if (st.state !== "editable") return;
     // A select's value is a fixed option, not typed text — a printable keypress opens the
     // dropdown at its CURRENT value rather than seeding it with the pressed character.
@@ -604,6 +614,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     setEditing(null);
     setEditValue("");
     if (!target) return;
+    let reopened = false;
     if (commit) {
       const colDef = SHEET_COLUMNS[target.col];
       const row = rows[target.row];
@@ -620,10 +631,34 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
         // right [into edit]." Land the NEXT cell straight into edit mode too, so a fast paste-free
         // entry never needs a second click — mirrors `nextRows` (the just-committed values), not
         // the stale `rows` closure, so a Type edit that changes which columns apply resolves
-        // against what the destination row now actually is.
+        // against what the destination row now actually is. (HARDENING-19: this eligibility check
+        // always read `nextRows` correctly — it's `beginEdit`'s own VALUE SEEDING below that read
+        // stale `rows` until now; see `draftOverride`.)
         const destRow = nextRows[dest.row];
         const destColDef = SHEET_COLUMNS[dest.col];
-        if (destRow && cellState(destColDef, destRow.draft).state === "editable") beginEdit(dest.row, dest.col, null, true);
+        // B986096-HARDENING-19 — WHEN `dest` CLAMPS BACK TO THE SAME CELL (a single-row grid, or
+        // Enter on the LAST row — computeDestination's row-axis clamp has nowhere else to go), the
+        // trailing `gridRef.current?.focus()` below used to run unconditionally, synchronously
+        // stealing DOM focus from the OLD, still-mounted `<input>` before React ever committed this
+        // reopen. That synchronous focus-out fires the old input's real `onBlur` — bound to this
+        // exact (row, col) — INSIDE this same call stack, and because HARDENING-17's guard only
+        // checks "does this blur's (row, col) still match the current session", a same-cell reopen
+        // is a false positive: it looks current (same coordinates) but is actually the brand-new
+        // session `beginEdit` just opened. That let a second `finishEdit` fire re-entrantly, closing
+        // the reopen it was nested inside and — via HARDENING-15/16's own "trust the blurring
+        // input's live DOM value" fallback — re-committing whatever the OLD input's DOM still held.
+        // Root-caused with an instrumented `editing`-state trace: the destination showed "editable",
+        // `beginEdit` genuinely ran, `setEditing({...})` was genuinely called — and the cell still
+        // rendered closed, because a second, re-entrant `setEditing(null)` from that nested
+        // `finishEdit` call was the LAST write in the same React 18 batch. `beginEdit`'s own
+        // `useEffect([editing])` already focuses (and selects) the freshly reopened input the moment
+        // React commits it, so this trailing focus-the-grid call was never needed on a reopen in the
+        // first place — skipping it here removes the only thing that blurred the old input
+        // synchronously, closing the whole class rather than special-casing "same cell."
+        if (destRow && cellState(destColDef, destRow.draft).state === "editable") {
+          beginEdit(dest.row, dest.col, null, true, destRow.draft);
+          reopened = true;
+        }
       } else {
         setSelection({ row: target.row, col: target.col });
       }
@@ -632,7 +667,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     } else {
       setSelection({ row: target.row, col: target.col });
     }
-    gridRef.current?.focus();
+    if (!reopened) gridRef.current?.focus();
   };
 
   const onEditChange = (v) => { editValueRef.current = v; setEditValue(v); };
@@ -650,6 +685,29 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
   // depending on whatever the user happens to do next.
   const onSelectEditChange = (v) => { editValueRef.current = v; setEditValue(v); finishEdit(true, null); };
   const onEditKeyDown = (e) => {
+    // B986096-HARDENING-19 — a REAL, trusted Enter/Tab is dispatched to `onEditKeyDown` TWICE: once
+    // by HARDENING-15's native, target-attached listener (AT_TARGET, fires first) and once by
+    // React's own `onKeyDown` prop below (bubble phase, fires after — a real keypress genuinely
+    // bubbles). `finishEdit`'s `editHandledRef` guard was meant to make the second call a safe
+    // no-op, but `beginEdit`'s auto-reopen (HARDENING-10 NEW-3) resets that SAME ref to `false` for
+    // the freshly-opened session — so whenever the first call's commit lands on an editable
+    // destination (the common case), the guard is disarmed again before the second call arrives,
+    // and that second call re-fires `finishEdit` for the NEW session with `editValueRef.current`
+    // still holding whatever `beginEdit` just seeded it with, silently overwriting the value the
+    // user just typed. Measured with an instrumented trace: typing "5/1/26" over an existing
+    // "3/14/26", pressing Enter once, produced TWO `finishEdit` commits — the second re-applying a
+    // stale value onto the row the first commit had just corrected. Deduping on `editHandledRef`
+    // can't fix this without breaking the reopen's own future commit (that ref legitimately needs
+    // to be armed again for the NEW session). The actual duplicate is two listeners observing the
+    // SAME physical key event, so dedupe on the EVENT itself — `e.nativeEvent` for React's call and
+    // the bare event for the native listener's call are the identical underlying object for a real
+    // dispatch, so stamping it here makes the second call a genuine no-op regardless of what
+    // `editHandledRef` does in between. A synthetic, non-bubbling dispatch (SYNTHETIC-KEYS-DONT-EDIT
+    // territory, and CYCLE 5's own reproduction) only ever reaches one listener, so it stamps and
+    // returns exactly once — zero behavior change there.
+    const native = e.nativeEvent || e;
+    if (native.__compGridKeyHandled) return;
+    native.__compGridKeyHandled = true;
     if (e.key === "Enter") { e.preventDefault(); finishEdit(true, { axis: "row", delta: 1 }); }
     else if (e.key === "Tab") { e.preventDefault(); finishEdit(true, { axis: "col", delta: e.shiftKey ? -1 : 1, wrap: true }); }
     else if (e.key === "Escape") { e.preventDefault(); finishEdit(false, null); }
