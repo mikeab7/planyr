@@ -4824,6 +4824,57 @@ session's whole scope, worked in the owner's stated priority order.
 - Files: `ui-audit/verify-comp-entry-p0.mjs`. (No `src/` change this round — every item was either
   already fixed, re-confirmed correctly blocked, or investigated with no reproducible defect found.)
 
+**Recurrence (×15) — HARDENING PASS 13 (B986096-HARDENING-17), the escalated root-cause session
+(per ROUND 13's handoff above): a GENUINELY NEW defect, found by GROUND-TRUTH INSTRUMENTED TRACING
+rather than reasoning about the code — every prior round's structural analysis missed it.**
+  1. **THE METHOD.** Rather than continue reasoning about `onEditKeyDown`/`finishEdit`/`beginEdit`
+     from source, temporarily instrumented all three with `console.log`s (row/col/value/ref state
+     at each call), reproduced a Tab press after typing a date, and read the actual browser console
+     output. The trace immediately named the mechanism; the instrumentation was removed once the
+     fix was verified.
+  2. **THE MECHANISM.** Tab/Enter with a `moveDir` commits the current cell, then — per
+     HARDENING-10's "land the next cell in edit mode" feature — immediately calls `beginEdit` on the
+     DESTINATION cell, resetting the SHARED `editingRef`/`editHandledRef`/`editValueRef` refs to the
+     new session. React then unmounts the OLD `<input>` (replaced by the new one), and the browser
+     fires a native `blur` on it — AFTER `beginEdit` already repointed the shared refs.
+     HARDENING-15's own stale-value safety net in `onEditBlur` (added to recover a value React's
+     `onChange` never observed) then read the OLD input's leftover DOM text, saw it disagreed with
+     the ALREADY-RESET `editValueRef`, wrote it back, and committed it — into whatever cell the refs
+     NOW pointed at, not the one that was actually blurring. Measured live: typing "7/4/26" into
+     Executed then pressing Tab landed "7,426" on Price (the auto-opened destination column) while
+     Executed itself reverted to empty; the row-wise Enter equivalent (destination = next row, same
+     column) is the identical race.
+  3. **WHY IT SURVIVED FIVE OWNER REPORTS AS "ENTER/TAB DISCARDS."** It needs the moveDir
+     auto-reopen to land on a DIFFERENT, EDITABLE cell to manifest at all — a single commit tested in
+     isolation (every prior round's own verification), or a destination that clamps back to the SAME
+     cell (a one-row grid, which is what every automated check here happened to use), never triggers
+     a real unmount/blur and so never shows it. This is also why a captured DOCUMENT-level trace
+     (`defaultPrevented === true`, `cancelBubble === false`, observed at the Enter/Tab keydown) reads
+     as "something calls preventDefault and does not commit" without further isolation: the FIRST,
+     legitimate `finishEdit` call really does preventDefault and really does commit correctly — it
+     is a SECOND, stale `finishEdit` call (from the late blur) that silently misapplies the value
+     afterward, and a document-level keydown trace cannot see a blur that fires later, on a
+     different element, as part of the same interaction.
+  4. **THE FIX.** Each cell's `onBlur` is now bound with the `(row, col)` it was rendered for
+     (`SheetCell`'s own `rowIdx`/`colIdx` props, already in scope) — `onEditBlur` checks that pair
+     against the CURRENTLY active `editingRef.current` before doing anything, so a blur belonging to
+     an already-superseded session is a pure no-op instead of committing into whatever replaced it.
+     Zero behavior change for a genuine, still-current blur (the common case, and every existing
+     CYCLE 5/6 blur-discard regression check still passes).
+- **VERIFIED, including a teeth-proof.** New `ui-audit/verify-comp-entry-p0.mjs` CYCLE 7 block
+  (single-row Tab-to-Price, asserting BOTH that Executed committed correctly AND that Price stayed
+  empty) — reverting the fix and re-running turns it red exactly as expected (Executed reverts to
+  its pre-edit value, Price shows "7,426"), restoring it turns it green — proving the check would
+  have caught this defect, not just that it currently passes. Also manually verified live (not
+  folded into the permanent harness, since it needs a 2-row fixture the harness doesn't build) that
+  the row-wise Enter equivalent (2-row grid, Enter on row 0's Executed cell) now correctly commits
+  row 0 and opens row 1's Executed cell for edit, with no misattribution. **45/45 checks green** in
+  the full harness, zero regressions. Full `npx vitest run` — 687/687 files, 14,153/14,153 tests
+  green. `npx eslint src/shared/comps/components/CompEntryGrid.jsx ui-audit/verify-comp-entry-p0.mjs`
+  — 0 errors. `node ui-audit/design-drift-audit.mjs --check` / `node ui-audit/doc-pointer-audit.mjs`
+  / `node scripts/build-map.mjs --check` all pass.
+- Files: `src/shared/comps/components/CompEntryGrid.jsx`, `ui-audit/verify-comp-entry-p0.mjs`.
+
 ### B986097 — A draft staging table, reachable only by the KML import `[Site Planner / comps]` (feature) #comps #gis #persistence  *(owner chat block 2026-09-01, NEW-2, same decision doc as B986096 above. Minted **B986097 / V556721** from this branch's reserved block B986096–B986111 · V556720–V556735 against `origin/main` 8e42a14. DEDUPE-FIRST — searched Open/⏳Verify/Done for "KML", "My Maps", "import draft", "staging table", #comps: no prior item touches KML/My Maps import; net-new. Also searched for any prior `comp_import_drafts`/`comp_drafts` table — none exists.)*
 `[x]` **Shipped this session, including the schema — applied directly to production** (this session has Supabase MCP write access, unlike the read-only access a prior comps session flagged in this same module's folder pointer — that stale claim was corrected in the same commit).
 - Verify: live — GIS endpoint behavior (a real KML import, a real polygon centroid) + real production writes are mandatory LIVE-VERIFY classes. **V556721.**
