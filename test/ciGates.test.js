@@ -19,6 +19,7 @@ import { jobSteps } from "../ui-audit/lib/workflowContract.mjs";
 import {
   KNOWN_DUMMY_SECRETS, KNOWN_INFRA_USES, secretRefName, isUnsupportedExpression,
   splitSteps, classifyInfra, resolveSecretEnv, resolveStepEnv,
+  DOCS_ONLY_GATE_NAMES, selectDocsOnlyGates,
 } from "../ui-audit/lib/ciGates.mjs";
 
 const REPO = process.cwd();
@@ -36,23 +37,39 @@ describe("jobSteps() against build.yml — the CI-only plumbing that calls the s
   it("keeps exactly the steps that can't move into the script, in order", () => {
     const { steps } = jobSteps(readBuild(), "build");
     expect(steps.map((s) => s.name)).toEqual([
-      "Checkout", "Setup Node", "Cache Playwright browsers",
+      "Checkout",
+      "Detect docs-only change (a pull_request whose diff is Markdown only)",
+      "Setup Node", "Cache Playwright browsers",
       "Run CI gates (scripts/ci-parity.mjs — the single source of truth for what this build checks)",
       "Upload visual regression diffs",
     ]);
   });
 
-  it("the one run: step delegates to the script and nothing else", () => {
+  it("has exactly two run: steps — the docs-only detector and the delegator — and nothing else", () => {
+    // Two, not one, since B927104 shipped: the detector needs GitHub Actions' own event context
+    // (github.event_name, the PR base/head SHAs) that scripts/ci-parity.mjs has no local
+    // equivalent for, so it can't move into the script the way every actual GATE did. The
+    // delegator step's run: text stays the exact literal "npm run ci-parity" — never a
+    // conditional expression — specifically so it's unambiguous which step is the one whose
+    // gates.length ci-parity.mjs's own loadPlan() must not mistake the detector for.
     const { steps } = jobSteps(readBuild(), "build");
     const runSteps = steps.filter((s) => s.run != null);
-    expect(runSteps.length).toBe(1);
-    expect(runSteps[0].run).toBe("npm run ci-parity");
-    // Both secrets flow into that one call, so every gate that needs them sees the same values —
-    // the B927104 property, enforced structurally: there's nowhere left for them to disagree.
-    expect(runSteps[0].env).toEqual({
+    expect(runSteps.map((s) => s.name)).toEqual([
+      "Detect docs-only change (a pull_request whose diff is Markdown only)",
+      "Run CI gates (scripts/ci-parity.mjs — the single source of truth for what this build checks)",
+    ]);
+    const delegator = runSteps.find((s) => s.name.startsWith("Run CI gates"));
+    expect(delegator.run).toBe("npm run ci-parity");
+    // Both secrets (plus the docs-only signal) flow into that one call, so every gate that needs
+    // them sees the same values — the B927104 property, enforced structurally: there's nowhere
+    // left for them to disagree.
+    expect(delegator.env).toEqual({
       VITE_SUPABASE_URL: "${{ secrets.VITE_SUPABASE_URL }}",
       VITE_SUPABASE_ANON_KEY: "${{ secrets.VITE_SUPABASE_ANON_KEY }}",
+      CI_DOCS_ONLY: "${{ steps.docs_only.outputs.docs_only }}",
     });
+    const detector = runSteps.find((s) => s.name.startsWith("Detect docs-only"));
+    expect(detector.id).toBe("docs_only");
   });
 
   it("reads the setup-node pin ci-parity.mjs checks itself against", () => {
@@ -85,7 +102,7 @@ describe("jobSteps() against .github/ci-gates.yml — the actual gate list", () 
   it("parses without refusing, and every step is a plain run: gate (no uses:)", () => {
     const res = jobSteps(readGates(), "build");
     expect(res.ok, res.unparsed.join("; ")).toBe(true);
-    expect(res.steps.length).toBe(20);
+    expect(res.steps.length).toBe(21);
     expect(res.steps.every((s) => s.run != null && s.uses == null)).toBe(true);
   });
 
@@ -126,19 +143,19 @@ describe("jobSteps() against .github/ci-gates.yml — the actual gate list", () 
 });
 
 describe("splitSteps / classifyInfra — gates vs CI-only plumbing", () => {
-  it("build.yml's real steps split into 1 run-step (the delegator) + 4 infra", () => {
+  it("build.yml's real steps split into 2 run-steps (the detector + the delegator) + 4 infra", () => {
     const { steps } = jobSteps(readBuild(), "build");
     const { gates, infra } = splitSteps(steps);
-    expect(gates.length).toBe(1);
+    expect(gates.length).toBe(2);
     expect(infra.map((s) => s.uses.split("@")[0])).toEqual([
       "actions/checkout", "actions/setup-node", "actions/cache", "actions/upload-artifact",
     ]);
   });
 
-  it("ci-gates.yml's real steps split into 20 gates + 0 infra", () => {
+  it("ci-gates.yml's real steps split into 21 gates + 0 infra", () => {
     const { steps } = jobSteps(readGates(), "build");
     const { gates, infra } = splitSteps(steps);
-    expect(gates.length).toBe(20);
+    expect(gates.length).toBe(21);
     expect(infra.length).toBe(0);
   });
 
@@ -243,13 +260,57 @@ describe("resolveStepEnv — one gate's env:, given the global secret resolution
 });
 
 describe("scripts/ci-parity.mjs --list — the two files actually wire together (integration, no gates run)", () => {
-  it("reports 20 gates from ci-gates.yml and 4 infra steps from build.yml", () => {
+  it("reports 21 gates from ci-gates.yml and 4 infra steps from build.yml", () => {
     const out = execFileSync("node", ["scripts/ci-parity.mjs", "--list"], { cwd: REPO, encoding: "utf8" });
-    expect(out).toContain("Gates (20), in order, read from .github/ci-gates.yml:");
+    expect(out).toContain("Gates (21), in order, read from .github/ci-gates.yml:");
     expect(out).toContain("Infra steps NOT covered (4)");
     expect(out).toContain("Checkout (actions/checkout)");
     expect(out).toContain("Upload visual regression diffs (actions/upload-artifact)");
     // the delegator step itself must never be listed as a gate to run — that would recurse
     expect(out).not.toContain("Run CI gates (scripts/ci-parity.mjs");
+    // nor the docs-only detector, which also lives in build.yml, not the gate manifest
+    expect(out).not.toContain("Detect docs-only change");
+  });
+
+  it("--docs-only --list reports only the DOCS_ONLY_GATE_NAMES subset, and names the total it's drawn from", () => {
+    const out = execFileSync("node", ["scripts/ci-parity.mjs", "--list", "--docs-only"], { cwd: REPO, encoding: "utf8" });
+    expect(out).toContain(`Gates (${DOCS_ONLY_GATE_NAMES.length} of 21, docs-only mode)`);
+    for (const name of DOCS_ONLY_GATE_NAMES) expect(out).toContain(name);
+    // a full-build-only gate must NOT show up in the docs-only listing
+    expect(out).not.toContain("Lint (fails the build");
+    expect(out).not.toContain('"Build"');
+  });
+
+  it("CI_DOCS_ONLY=true has the same effect as --docs-only (build.yml sets the env, not the flag)", () => {
+    const out = execFileSync("node", ["scripts/ci-parity.mjs", "--list"], {
+      cwd: REPO, encoding: "utf8", env: { ...process.env, CI_DOCS_ONLY: "true" },
+    });
+    expect(out).toContain(`Gates (${DOCS_ONLY_GATE_NAMES.length} of 21, docs-only mode)`);
+  });
+});
+
+describe("DOCS_ONLY_GATE_NAMES / selectDocsOnlyGates — the docs-only subset (2026-09-02 cost cut)", () => {
+  it("every name in the allowlist matches a real gate in .github/ci-gates.yml", () => {
+    const { steps: gates } = jobSteps(readGates(), "build");
+    const sel = selectDocsOnlyGates(gates);
+    expect(sel.ok, `missing: ${JSON.stringify(sel.missing)}`).toBe(true);
+    expect(sel.selected.length).toBe(DOCS_ONLY_GATE_NAMES.length);
+  });
+
+  it("preserves the gates' original order, not the allowlist's declaration order", () => {
+    const gates = [
+      { name: "z" }, { name: DOCS_ONLY_GATE_NAMES[1] }, { name: "y" }, { name: DOCS_ONLY_GATE_NAMES[0] },
+    ];
+    const sel = selectDocsOnlyGates(gates, [DOCS_ONLY_GATE_NAMES[0], DOCS_ONLY_GATE_NAMES[1]]);
+    expect(sel.ok).toBe(true);
+    expect(sel.selected.map((g) => g.name)).toEqual([DOCS_ONLY_GATE_NAMES[1], DOCS_ONLY_GATE_NAMES[0]]);
+  });
+
+  it("REFUSES rather than silently running fewer gates when a name no longer matches (manifest/allowlist drift)", () => {
+    const gates = [{ name: "some real gate" }];
+    const sel = selectDocsOnlyGates(gates, ["a gate that got renamed"]);
+    expect(sel.ok).toBe(false);
+    expect(sel.missing).toEqual(["a gate that got renamed"]);
+    expect(sel.selected).toEqual([]);
   });
 });

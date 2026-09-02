@@ -64,6 +64,50 @@ export function isUnsupportedExpression(value) {
   return /^\$\{\{.*\}\}$/.test(v) && secretRefName(v) == null;
 }
 
+/**
+ * The gate NAMES (must match `.github/ci-gates.yml`'s `name:` fields verbatim) that still have
+ * something to check when a pull request changes ONLY Markdown (`.github/workflows/build.yml`'s
+ * "Detect docs-only change" step — 2026-09-02, the GitHub Actions cost cut: the repo went private
+ * on 2026-08-31, Actions minutes started being metered, and ~100 runs/day at ~8.35 min each were
+ * mostly full builds answering a docs-only push that has no code to lint, test, or build).
+ *
+ * Deliberately narrow, and each entry earns its place by reading content a docs-only change can
+ * actually touch: the two generated indexes (MAP.md, BACKLOG_OPEN.md), the per-folder CLAUDE.md
+ * pointers, the backlog/verification id space (a docs-only push is exactly how a BACKLOG.md/
+ * VERIFICATION.md hand-edit ships), and the required-check contract itself — which is also the
+ * guard that would catch THIS list ever drifting into unreachability (see
+ * ui-audit/required-check-audit.mjs). Every one of the six runs on nothing but Node built-ins and
+ * the `git` CLI — no `npm ci` needed — which is why the docs-only path in scripts/ci-parity.mjs
+ * skips dependency install entirely rather than merely skipping the heavy gates.
+ *
+ * Deliberately EXCLUDED: lint / the scheduler syntax guard / the GIS source registry guard / the
+ * e2e + landing-coverage fixture guards / `npm test` / the Vite build / the performance budget /
+ * Playwright + visual regression — none of them can find anything wrong in a change that touches
+ * no source file, and they are the entire cost this fast path exists to avoid paying twice.
+ */
+export const DOCS_ONLY_GATE_NAMES = [
+  "Required-check contract guard (a required check must always be able to report — NEW-2)",
+  "MAP.md drift guard (regenerate with `node scripts/build-map.mjs` — B637)",
+  "BACKLOG_OPEN.md drift + tag-legend guard (regenerate with `node scripts/build-backlog-index.mjs` — B638)",
+  "Doc pointer freshness guard (per-folder CLAUDE.md references — ui-audit/doc-pointer-audit.mjs)",
+  "Verification-queue ceiling guard (no-Blocker / stale V# items — B825233)",
+  "Mint gate (new B#/V# unclaimed on main and on in-flight branches — B779)",
+];
+
+/**
+ * Filter parsed `gates` (from `splitSteps`) down to the docs-only subset, preserving their
+ * original order. REFUSES (never silently runs zero) if a name in `DOCS_ONLY_GATE_NAMES` doesn't
+ * match any real gate — that means the manifest and this allowlist drifted apart, which is exactly
+ * the class of silent gap this repo's LOUD-FAILURE convention exists to catch.
+ */
+export function selectDocsOnlyGates(gates, names = DOCS_ONLY_GATE_NAMES) {
+  const present = new Set(gates.map((g) => g.name));
+  const missing = names.filter((n) => !present.has(n));
+  if (missing.length) return { ok: false, missing, selected: [] };
+  const wanted = new Set(names);
+  return { ok: true, missing: [], selected: gates.filter((g) => wanted.has(g.name)) };
+}
+
 /** Split build.yml's parsed `build`-job steps into gates (have a `run:`) and infra (`uses:` only,
  *  no `run:`). `jobSteps()` already refuses any step shape that is neither. */
 export function splitSteps(steps) {
