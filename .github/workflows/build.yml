@@ -155,6 +155,16 @@ jobs:
       # required `build` check on purpose — "~15 minutes on every pull request... a gate people
       # route around is worse than one that runs nightly"): this crawl only reads computed style
       # off 12 already-known surfaces, no login, no schedule wait — measured at ~90s on its own.
+      # TEMPORARY diagnostic (B1038016) — --check has now failed on "docs/UI-INVENTORY.md is out of
+      # date" on a CONFIRMED NON-DIRTY, fully-run build (ruling out the earlier dirty-PR/stale-merge-
+      # ref explanation), so this is a real, reproducible CI-vs-local discrepancy. Regenerate without
+      # --check and diff against the committed file to see EXACTLY what differs.
+      - name: TEMP — diff CI's regenerated docs/UI-INVENTORY.md against the committed one
+        run: |
+          node ui-audit/ui-inventory.mjs
+          git diff --stat docs/UI-INVENTORY.md || true
+          git diff docs/UI-INVENTORY.md | head -400 || true
+          git checkout -- docs/UI-INVENTORY.md
       - name: Signature-budget gate (per-surface distinct control shapes — NEW-1, B1038016)
         run: node ui-audit/ui-inventory.mjs --check
       - name: Visual regression baselines (pixel diff against approved baselines — NEW-1)
