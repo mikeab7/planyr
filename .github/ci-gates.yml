@@ -51,6 +51,12 @@ jobs:
         run: node scripts/build-map.mjs --check
       - name: BACKLOG_OPEN.md drift + tag-legend guard (regenerate with `node scripts/build-backlog-index.mjs` — B638)
         run: node scripts/build-backlog-index.mjs --check
+      # Per-folder CLAUDE.md pointer freshness (CLAUDE.md's "Keep the per-folder pointers fresh").
+      # Previously reachable only through `npm test` (test/docPointers.test.js) — pulled out as its
+      # own gate (2026-09-02, the GitHub Actions cost cut) so the docs-only fast path below can run
+      # it directly without paying for the whole app test suite just to reach this one check.
+      - name: Doc pointer freshness guard (per-folder CLAUDE.md references — ui-audit/doc-pointer-audit.mjs)
+        run: node ui-audit/doc-pointer-audit.mjs
       # Verification-queue ceiling guard (B825233). CLAUDE.md already said a pending V# with no
       # Blocker: wall is a mis-classification, not a to-do — nothing ever checked it. This is a
       # ratchet, not a retroactive fail: it only reds out if the no-Blocker or stale-pending count

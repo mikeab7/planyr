@@ -42,6 +42,11 @@
  *   npm run ci-parity -- --list           print the parsed gate/infra list and exit; runs nothing
  *   npm run ci-parity -- --skip-install   skip `npm ci` — LOUD warning, deliberately deviates from CI
  *   npm run ci-parity -- --json           print the final summary as JSON (in addition to the human report)
+ *   npm run ci-parity -- --docs-only      run only ui-audit/lib/ciGates.mjs's DOCS_ONLY_GATE_NAMES subset
+ *                                         — what build.yml runs for a pull request that changes only
+ *                                         Markdown (its "Detect docs-only change" step sets CI_DOCS_ONLY=true,
+ *                                         which this flag mirrors locally). Skips `npm ci` too: every gate
+ *                                         in that subset runs on Node built-ins + `git` alone.
  *
  * WHAT THIS DOES NOT COVER, AND WHY (all four are `uses:`-only steps in build.yml — see
  * `ui-audit/lib/ciGates.mjs`'s `KNOWN_INFRA_USES`): actions/checkout (you already have a checkout —
@@ -57,7 +62,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { jobSteps } from "../ui-audit/lib/workflowContract.mjs";
-import { splitSteps, classifyInfra, resolveSecretEnv, resolveStepEnv } from "../ui-audit/lib/ciGates.mjs";
+import { splitSteps, classifyInfra, resolveSecretEnv, resolveStepEnv, selectDocsOnlyGates } from "../ui-audit/lib/ciGates.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..");
@@ -66,8 +71,23 @@ const GATES_MANIFEST = join(REPO, ".github", "ci-gates.yml");
 const JOB_ID = "build";
 const GATE_TIMEOUT_MS = 20 * 60 * 1000; // safety net only — no gate this repo runs is expected to near it
 
+// build.yml's "Detect docs-only change" step is a second `run:` step alongside the "npm run
+// ci-parity" delegator — necessary because the decision needs GitHub Actions' own event context
+// (github.event_name, the PR's base/head SHAs), which has no local equivalent for this script to
+// re-run. It sets CI_DOCS_ONLY as an env on the delegator step rather than baking a conditional
+// into that step's `run:` text, specifically so the delegator stays the exact literal string
+// "npm run ci-parity" that loadPlan()'s stray-step check (below) and test/ciGates.test.js both
+// assert on. Named here, once, so that check can allow it without also blinding itself to a
+// genuinely new stray step.
+const KNOWN_NON_GATE_RUN_STEPS = new Set(["Detect docs-only change (a pull_request whose diff is Markdown only)"]);
+
 const argv = process.argv.slice(2);
-const FLAGS = { list: argv.includes("--list"), json: argv.includes("--json"), skipInstall: argv.includes("--skip-install") };
+const FLAGS = {
+  list: argv.includes("--list"),
+  json: argv.includes("--json"),
+  skipInstall: argv.includes("--skip-install"),
+  docsOnly: argv.includes("--docs-only") || process.env.CI_DOCS_ONLY === "true",
+};
 
 const say = (s = "") => process.stdout.write(s + "\n");
 const warn = (s) => process.stderr.write(`⚠ ${s}\n`);
@@ -150,7 +170,9 @@ function loadPlan() {
   // exists to prevent — so that's a loud warning, not a silent extra gate to run (running it would
   // also risk recursing into `npm run ci-parity` itself for the delegator step).
   const { gates: workflowRunSteps, infra } = splitSteps(workflow.steps);
-  const strayRunSteps = workflowRunSteps.filter((s) => s.run.trim() !== "npm run ci-parity");
+  const strayRunSteps = workflowRunSteps.filter(
+    (s) => s.run.trim() !== "npm run ci-parity" && !KNOWN_NON_GATE_RUN_STEPS.has(s.name),
+  );
   if (strayRunSteps.length) {
     warn(`build.yml has ${strayRunSteps.length} run: step(s) besides the "npm run ci-parity" delegator — ` +
       `${strayRunSteps.map((s) => `"${s.name}"`).join(", ")}. These are NOT being run by this script ` +
@@ -173,17 +195,40 @@ function loadPlan() {
 function main() {
   const plan = loadPlan();
   if (!plan) { process.exitCode = 2; return; }
-  const { gates, infra } = plan;
+  let { gates, infra } = plan;
+  const totalGateCount = gates.length;
+
+  if (FLAGS.docsOnly) {
+    const sel = selectDocsOnlyGates(gates);
+    if (!sel.ok) {
+      process.stderr.write(
+        `\n⛔ ci-parity REFUSES --docs-only — ui-audit/lib/ciGates.mjs's DOCS_ONLY_GATE_NAMES names ` +
+          `${sel.missing.length} gate(s) .github/ci-gates.yml no longer has:\n` +
+          `   ${sel.missing.map((n) => `"${n}"`).join("\n   ")}\n` +
+          `   A gate was renamed or removed in the manifest without updating the docs-only allowlist ` +
+          `to match — fix DOCS_ONLY_GATE_NAMES rather than skip this.\n\n`,
+      );
+      process.exitCode = 2;
+      return;
+    }
+    gates = sel.selected;
+  }
 
   if (FLAGS.list) {
-    say(`Gates (${gates.length}), in order, read from .github/ci-gates.yml:`);
+    say(`Gates (${gates.length}${FLAGS.docsOnly ? ` of ${totalGateCount}, docs-only mode` : ""}), in order, read from .github/ci-gates.yml:`);
     gates.forEach((g, i) => say(`  ${i + 1}. ${g.name}`));
     say(`\nInfra steps NOT covered (${infra.length}) — why: see the header of this file / ui-audit/lib/ciGates.mjs`);
     for (const s of infra) { const c = classifyInfra(s); say(`  - ${s.name} (${c.action}): ${c.reason}`); }
     return;
   }
 
-  say(`ci-parity — running the ${gates.length} gates .github/ci-gates.yml declares, in order.\n`);
+  if (FLAGS.docsOnly) {
+    say(`ci-parity — DOCS-ONLY MODE: running ${gates.length} of ${totalGateCount} gates (the ` +
+      `ui-audit/lib/ciGates.mjs DOCS_ONLY_GATE_NAMES subset). No node_modules needed — "Install ` +
+      `dependencies" isn't in that subset, so npm ci never runs.\n`);
+  } else {
+    say(`ci-parity — running the ${gates.length} gates .github/ci-gates.yml declares, in order.\n`);
+  }
 
   // ---- preflight, all reported before a single gate runs -------------------------------------
   const nodeCheck = preflightNode(infra);
