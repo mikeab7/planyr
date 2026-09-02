@@ -50,6 +50,18 @@
  *     rate, the industry's own convention) only when nothing else claims it and nothing else in
  *     the line contradicts it — see `findRateToken`. The parser never invents a RATE PERIOD from
  *     magnitude alone; that stays a `blocking` cell exactly as before.
+ *
+ * ⛔ B1063904 (owner report, 2026-09-02) — DATA CORRUPTION: "5 AC land sale" + ".56/SF , 12 TI, 3%
+ * bumps" merged into ONE hybrid row that kept line 1's Size (5) and let line 2's type flip the
+ * row to Lease, which has no acre unit — 5 ACRES silently became 5 SQUARE FEET, wrong by a factor
+ * of 43,560, invisible because "5" still looks plausible. MERGE SAFETY closes this: `parsePaste`
+ * parses every line of a would-be single record fully independently first
+ * (`detectFieldCollisions`) and refuses to merge — falling back to one row per line, `mode:
+ * "split"` — the moment two lines disagree on the same field. Type and Unit are never mergeable on
+ * a collision, full stop, because they change the meaning of every other number on the row; every
+ * other field currently gets the same treatment. Complementary lines (disjoint fields — an address
+ * on one line, a rate on the next) are unaffected and still merge exactly as before. See
+ * `buildLineGeneric`/`detectFieldCollisions` below.
  */
 
 const NUM_SUFFIX = { k: 1e3, m: 1e6, mm: 1e6, thousand: 1e3, million: 1e6 };
@@ -853,29 +865,97 @@ function genericToDraft(generic) {
   return d;
 }
 
+/** One line -> `{ generic, flags }`, never finalized to a draft. Shared by `parseProseLine` (the
+ * per-line-list shape, where every line is judged fully in isolation) and `detectFieldCollisions`
+ * below (B1063904 — the merge-safety check needs each line's OWN read of every field, independent
+ * of what any other line claims, which is exactly what this builds). `respectLabels` makes a
+ * label-prefixed line ("TT: Acme" / "Rate: $0.65/SF") resolve through `applyLabeledLine` instead
+ * of the generic scavenger — this is what `parseSingleRecord`'s own per-line loop does, so the
+ * collision check reads each line the SAME way the merge it's guarding actually reads it (a
+ * `parseProseLine` caller never wants this — a bare per-line list has no labels to respect, and
+ * changing that behavior would be a second regression, not a fix). */
+function buildLineGeneric(line, { respectLabels } = {}) {
+  const generic = emptyGeneric();
+  const flags = {};
+  const sawLeaseLabel = { value: false };
+  const labelMatch = respectLabels ? line.match(LABEL_PREFIX_RE) : null;
+  if (labelMatch) {
+    applyLabeledLine(generic, flags, sawLeaseLabel, labelMatch[1], line.slice(labelMatch[0].length));
+  } else {
+    extractUnlabeledLine(generic, flags, line);
+  }
+
+  if (!generic.compType) {
+    if (sawLeaseLabel.value) {
+      generic.compType = "lease";
+    } else {
+      const guess = detectCompType(line);
+      if (guess.value) {
+        generic.compType = guess.value;
+        if (guess.soft) flags.compType = { level: "soft", reason: "Type guessed from the wording — check it." };
+      } else {
+        const inferred = inferTypeFromCapturedFields(generic);
+        if (inferred) { generic.compType = inferred; flags.compType = { level: "soft", reason: "Type guessed from which figures were given — check it." }; }
+      }
+    }
+  }
+  return { generic, flags };
+}
+
 /** One prose line (broker-email style) -> `{ draft, cellFlags, raw }`, or `null` if the line
  * contributed nothing (never emit an entirely empty row). Used for the MANY-RECORDS-ONE-PER-LINE
  * shape, where each line is expected to be a complete, independent comp — runs the SAME
  * scavenger `extractUnlabeledLine` the single-record shape uses (B986096 ×9 — previously a
  * separate, simpler extractor that only tried one match per field and only one label direction). */
 export function parseProseLine(line) {
-  const generic = emptyGeneric();
-  const flags = {};
-  extractUnlabeledLine(generic, flags, line);
-
-  if (!generic.compType) {
-    const guess = detectCompType(line);
-    if (guess.value) {
-      generic.compType = guess.value;
-      if (guess.soft) flags.compType = { level: "soft", reason: "Type guessed from the wording — check it." };
-    } else {
-      const inferred = inferTypeFromCapturedFields(generic);
-      if (inferred) { generic.compType = inferred; flags.compType = { level: "soft", reason: "Type guessed from which figures were given — check it." }; }
-    }
-  }
-
+  const { generic, flags } = buildLineGeneric(line);
   if (!genericHasAnything(generic)) return null;
   return finalizeGenericRow(generic, flags, line);
+}
+
+/* ---- MERGE SAFETY — B1063904 (owner report, 2026-09-02): "5 AC land sale" + ".56/SF , 12 TI, 3%
+ * bumps" merged into ONE row that kept line 1's Size (5) and let line 2 overwrite the Unit to SF —
+ * 5 ACRES silently became 5 SQUARE FEET, wrong by a factor of 43,560, and invisible because "5"
+ * still looks plausible. Root cause: `parseSingleRecord` resolves `compType` ONCE, from the whole
+ * JOINED text, so a lease word anywhere in a multi-line paste can flip the type away from what an
+ * earlier line's own size unit assumed, and `genericToDraft` only ever writes a size into the
+ * field the FINAL resolved type owns (`leaseSizeSf` has no unit — it's always SF) — an acre-unit
+ * size captured under a different type has nowhere safe to land.
+ *
+ * The fix is not a smarter merge — it's knowing WHEN NOT TO MERGE. Merging multiple lines into one
+ * comp is only safe when the lines are COMPLEMENTARY (disjoint fields — a broker email where the
+ * address is on one line and the rate is on the next, which is the shape the merge exists for).
+ * The moment two lines independently parse to DIFFERENT values for the same field, merging is a
+ * guess, and for Type/Unit specifically a wrong guess changes the MEANING of every other number on
+ * the row — so those two are never mergeable, full stop, and every other field currently follows
+ * the same rule (a future relaxation of the general case must not touch Type/Unit). */
+
+// Fields compared for a collision, paired with the label shown on the panel when they disagree.
+// Free-text fields (notes/title/parties/dates) are deliberately excluded: two lines legitimately
+// naming two different facts there is the COMPLEMENTARY case this rule exists to keep merging.
+// Type and Unit lead the list because they are NEVER mergeable (see header) — every other field
+// currently gets the same treatment, but if that's ever relaxed, these two must stay absolute.
+const COLLISION_FIELDS = [
+  ["compType", "Type"], ["sizeUnit", "Unit"],
+  ["sizeValue", "Size"], ["rate", "Rate"], ["price", "Price"], ["ratePeriod", "Rate period"],
+  ["rateBasis", "Basis"], ["ti", "TI"], ["noi", "NOI"], ["capRate", "Cap rate"], ["escalationPct", "Escalation"],
+];
+
+/** Parses every line fully independently (each reads only itself, `respectLabels: true` so a
+ * label-prefixed line is read the same way the merge it's guarding reads it — see
+ * `buildLineGeneric`) and returns the display names of every field two or more lines disagree on,
+ * or `[]` when the lines are complementary. A field only one line claims — or that every line
+ * claiming it agrees on — is not a collision; that's the normal, safe merge case. */
+function detectFieldCollisions(lines) {
+  if (lines.length < 2) return [];
+  const generics = lines.map((line) => buildLineGeneric(line, { respectLabels: true }).generic);
+  const collided = [];
+  for (const [key, label] of COLLISION_FIELDS) {
+    const values = generics.map((g) => g[key]).filter((v) => v != null && v !== "");
+    const distinct = new Set(values.map((v) => String(v).toLowerCase()));
+    if (distinct.size > 1) collided.push(label);
+  }
+  return collided;
 }
 
 /* ---- SINGLE RECORD OVER MANY LINES — the dominant shape: a lease/sale abstract ------------ */
@@ -1117,13 +1197,25 @@ export function parsePasteBlock(text) {
 }
 
 /** Top-level dispatcher: detects paste SHAPE (not just spreadsheet-vs-not) and returns
- * `{ mode, rows }` — `mode` is `"empty" | "spreadsheet" | "single" | "multi"`, `rows` always
- * `[{ draft, cellFlags, raw }]` with no entirely-empty rows. */
+ * `{ mode, rows, splitReason? }` — `mode` is `"empty" | "spreadsheet" | "single" | "split" |
+ * "multi"`, `rows` always `[{ draft, cellFlags, raw }]` with no entirely-empty rows. B1063904 —
+ * before merging a shape the detector called "single", MERGE SAFETY gets a veto: every line is
+ * parsed on its own (`detectFieldCollisions`) and, if any two disagree on the same field, the
+ * merge is refused in favor of `"split"` (one row per line, same as `"multi"`) — `splitReason` is
+ * the human sentence naming which field(s) disagreed, e.g. "2 lines disagreed on Type — split
+ * into 2 comps.", so the panel can say why the user got two rows instead of one. */
 export function parsePaste(text) {
   if (!String(text || "").trim()) return { mode: "empty", rows: [] };
   const shape = detectPasteShape(text);
   if (shape === "spreadsheet") return { mode: "spreadsheet", rows: parsePasteBlock(text) };
   if (shape === "single") {
+    const lines = splitPasteLines(text);
+    const collisions = detectFieldCollisions(lines);
+    if (collisions.length) {
+      const rows = lines.map(parseProseLine).filter(Boolean);
+      const splitReason = `${lines.length} lines disagreed on ${collisions.join(", ")} — split into ${rows.length} comp${rows.length === 1 ? "" : "s"}.`;
+      return { mode: "split", rows, splitReason };
+    }
     const row = parseSingleRecord(text);
     return { mode: "single", rows: row ? [row] : [] };
   }
