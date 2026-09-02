@@ -12,7 +12,8 @@ import { recordSourceResult, filterHealthyCandidates, isSourceOpen, isStatewideB
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
 import { PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL } from "./lib/mapStack.js";
 import { tileCacheLimit } from "./lib/tileBudget.js";
-import { boundTileCache, capTileCache, releaseLayer } from "./lib/tileLifecycle.js";
+import { boundTileCache, capTileCache, releaseLayer, armBlankTileHeal } from "./lib/tileLifecycle.js";
+import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { BASEMAPS, FINDER_BASEMAP_CHOICES } from "./lib/basemaps.js";
 // B427410 (×2) — the ONE gate for the "Road names" overlay below, shared with LayerPanel's
 // dormant note so the map's opacity switch and the panel's explanation can't disagree.
@@ -253,6 +254,20 @@ const MAP_KEEP_BUFFER = 2;
  * under display:none). A hidden map needs no ring of look-ahead tiles at all, and everything shed
  * re-fetches the moment it is shown again — the visible result is identical. */
 const HIDDEN_TILE_CAP = 16;
+
+/* B844704 — the onHeal callback armBlankTileHeal fires for this map's tile layers. Reports the
+ * layer, the tile's on-screen rect, the live zoom and how long it sat blank, via the same
+ * `event:` channel every other non-error telemetry note here uses (public.client_errors). Kept as
+ * one small factory so the imagery and labels layers report identically. */
+function reportBlankTileHealed(map, layerId) {
+  return ({ key, ageMs, coords, rect }) => {
+    let zoom = null;
+    try { zoom = map && map.getZoom(); } catch (_) {}
+    reportClientEvent("map-tile-blank-self-heal", `${layerId} tile blank ${ageMs}ms — reloaded`, {
+      layerId, key, coords: coords ? { x: coords.x, y: coords.y, z: coords.z } : null, rect, zoom, blankMs: ageMs,
+    });
+  };
+}
 
 // Parcel-outline display + the +/− cursors are shared with the in-planner "Add parcel"
 // tool (lib/parcelDisplay.js) so both surfaces light up parcels identically.
@@ -550,6 +565,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const addrTokRef = useRef(0); // B545: address-search generation — a newer search invalidates an older in-flight one
   const imageryCapRef = useRef(null); // NEW-6 — detach fn for the imagery layer's tile-cache cap
   const labelsCapRef = useRef(null);  // NEW-6 — ditto for the labels overlay
+  const imageryHealRef = useRef(null); // B844704 — detach fn for the imagery layer's blank-tile self-heal
+  const labelsHealRef = useRef(null);  // B844704 — ditto for the labels overlay
   const displaysRef = useRef({});    // county -> visible parcel-line layer (all CAD counties)
   /* NEW-2 — county -> { url, owner }: the RESOLVED endpoint behind that county's on-map layer, and
      which county key actually CREATED it. Two keys that resolve to the same endpoint (a county
@@ -1635,7 +1652,15 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       keepBuffer: MAP_KEEP_BUFFER,
     }));
     imageryCapRef.current = detachCap;
-    return () => { detachCap(); imageryCapRef.current = null; try { map.removeLayer(layer); } catch (_) {} };
+    // B844704 — see tileLifecycle.js armBlankTileHeal: a tile that errors past withTileRetry's
+    // own budget is left permanently invisible by Leaflet itself; this notices and reloads it.
+    const detachHeal = armBlankTileHeal(layer, { onHeal: reportBlankTileHealed(map, "map-finder-imagery") });
+    imageryHealRef.current = detachHeal;
+    return () => {
+      detachCap(); imageryCapRef.current = null;
+      detachHeal(); imageryHealRef.current = null;
+      try { map.removeLayer(layer); } catch (_) {}
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [basemap]);
 
@@ -1677,7 +1702,14 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       keepBuffer: MAP_KEEP_BUFFER,
     }));
     labelsCapRef.current = detachCap;
-    return () => { detachCap(); labelsCapRef.current = null; try { map.removeLayer(layer); } catch (_) {} labelsRef.current = null; };
+    // B844704 — same self-heal as the imagery layer above; this layer errors independently.
+    const detachHeal = armBlankTileHeal(layer, { onHeal: reportBlankTileHealed(map, "map-finder-labels") });
+    labelsHealRef.current = detachHeal;
+    return () => {
+      detachCap(); labelsCapRef.current = null;
+      detachHeal(); labelsHealRef.current = null;
+      try { map.removeLayer(layer); } catch (_) {} labelsRef.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [labels, basemap]);
 

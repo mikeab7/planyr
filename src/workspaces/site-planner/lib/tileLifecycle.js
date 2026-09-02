@@ -2,7 +2,7 @@
  * (how much overscan, how many tiles) is pure in tileBudget.js; everything that has to
  * touch a live Leaflet layer lives here so it stays in one auditable place.
  *
- * Four jobs:
+ * Five jobs:
  *   1. preserveTilesAcrossSetView — stop a `setView` from throwing away tiles it is about
  *      to ask for again (NEW-7, the biggest single load lever).
  *   2. capTileCache — an explicit ceiling on retained tiles, so a long session can't grow
@@ -12,8 +12,11 @@
  *      resurrect the layer it belonged to (NEW-6).
  *   4. throttleTilePruning — B854832: coalesce Leaflet's own per-tile `_pruneTiles()` calls
  *      into one per burst instead of one per tile (see its own header below).
+ *   5. armBlankTileHeal — B844704: notice a tile that is retained but permanently blank
+ *      (errored past `withTileRetry`'s own budget) and force it back to life, on a timer,
+ *      for as long as the layer lives. See its own header below for the full mechanism.
  */
-import { tilesToEvict } from "./tileBudget.js";
+import { tilesToEvict, stuckTiles, STUCK_TILE_GRACE_MS } from "./tileBudget.js";
 
 /* ── 1. keep tiles across a same-grid setView ─────────────────────────────────────────
  * Leaflet's Map._resetView fires `viewprereset` on EVERY setView, and GridLayer's handler
@@ -231,4 +234,103 @@ export function throttleTilePruning(layer, defer = (fn) => {
     defer(() => { pending = false; try { orig.call(layer); } catch (_) {} });
   };
   return layer;
+}
+
+/* ── 5. blank-tile self-heal (B844704) ────────────────────────────────────────────────
+ * Owner report: a flat, opaque, light-grey square lingering over the dashboard map's aerial
+ * (planyr.io/#/, Sites list, zoomed out over Houston) with no border/text/spinner, still there
+ * unchanged after 45+ seconds. Root cause, traced through Leaflet's own source
+ * (node_modules/leaflet/dist/leaflet-src.js): `GridLayer._tileReady` stamps `tile.loaded` on
+ * EVERY outcome (so Leaflet's own grid update never revisits that tile again) but adds the
+ * `leaflet-tile-loaded` class — the only thing `leaflet.css`'s `.leaflet-tile { visibility:
+ * hidden }` / `.leaflet-tile-loaded { visibility: inherit }` pair ever un-hides — ONLY when the
+ * load did not error. `withTileRetry` (layers.js) gives an errored tile two quick retries
+ * (~1.5 s total) and then stops listening entirely. A tile whose retries ALSO fail (a rate
+ * limit, a DNS hiccup, a cold host — nothing exotic) is therefore invisible FOREVER and Leaflet
+ * itself will never ask for it again: `.leaflet-container`'s own flat, hardcoded light-grey
+ * background (leaflet.css) shows through the gap — a borderless, tile-sized square. On a static
+ * camera (the dashboard map isn't being panned) nothing ever gives the grid a reason to reset,
+ * so it can sit there indefinitely, matching the report exactly.
+ *
+ * THE FIX HAS TWO HALVES ON PURPOSE. `withTileRetry`'s own budget stays deliberately small — a
+ * genuinely dead host should not be hammered on every tile forever. This is the backstop: a slow,
+ * bounded sweep of the SAME tile pane that finds any RETAINED ("current") tile still missing
+ * `leaflet-tile-loaded` after `STUCK_TILE_GRACE_MS` — regardless of why, so it also covers a
+ * future bug that leaves a tile in the same state — and forces one more real reload by
+ * reassigning a cache-busted `src`. That reassignment re-enters Leaflet's own `load`/`error`
+ * handlers (already bound at tile creation), so a reload that succeeds is indistinguishable from
+ * an ordinary tile load: `leaflet-tile-loaded` gets added the normal way and the sweep leaves it
+ * alone from then on. This is therefore the generic, "whatever the cause" self-heal the standing
+ * guarantee requires for THIS surface (a Leaflet `<img>` tile grid) — it does not, and cannot,
+ * cover a different painting mechanism (an offscreen `<canvas>` release, for instance); see
+ * BACKLOG.md B844704 for what was checked and ruled out there.
+ *
+ * `graceMs` must clear ordinary load time by a wide margin so a merely-slow tile is never
+ * interrupted mid-flight — 5 s is generous even on a poor connection (a real fetch here settles
+ * in well under a second in practice). `sweepMs` is how often the pane is checked. Track "how
+ * long has THIS tile been unpainted" in a WeakMap keyed on the `<img>` itself (not on Leaflet's
+ * own tile record, which is reused/mutated) so GC reclaims the bookkeeping the moment a tile is
+ * pruned — no manual cleanup needed. */
+const _tileStuckSince = new WeakMap(); // <img> element -> ms timestamp first seen unpainted
+
+function cacheBustedSrc(src) {
+  const s = String(src || "");
+  if (!s) return s;
+  const sep = s.indexOf("?") === -1 ? "?" : "&";
+  return s + sep + "_heal=" + Date.now().toString(36);
+}
+
+/* One pass over a layer's retained tiles: heal anything stuck, report what was healed. Pure
+ * side-effecting DOM work over `layer._tiles` (Leaflet's own live map) — never throws. Returns
+ * the number of tiles reloaded this pass. `onHeal({ key, coords, ageMs, rect })` fires once per
+ * healed tile, `rect` being the tile's own on-screen box (`getBoundingClientRect`) at heal time —
+ * everything a report needs to name what was blank and where. */
+export function sweepBlankTiles(layer, { graceMs = STUCK_TILE_GRACE_MS, now = Date.now(), onHeal } = {}) {
+  if (!layer || !layer._tiles) return 0;
+  const t = typeof now === "function" ? now() : now;
+  const records = [];
+  const byKey = {};
+  Object.keys(layer._tiles).forEach((key) => {
+    const rec = layer._tiles[key];
+    const el = rec && rec.el;
+    if (!el || !el.parentNode) { return; }
+    const painted = !!(el.classList && el.classList.contains("leaflet-tile-loaded"));
+    if (painted) { _tileStuckSince.delete(el); return; }
+    let since = _tileStuckSince.get(el);
+    if (since == null) { since = t; _tileStuckSince.set(el, since); }
+    byKey[key] = { rec, el };
+    records.push({ key, current: !!rec.current, painted: false, ageMs: t - since });
+  });
+  const heal = stuckTiles(records, graceMs);
+  heal.forEach((key) => {
+    const found = byKey[key];
+    if (!found) return;
+    const { rec, el } = found;
+    try {
+      const ageMs = (records.find((r) => r.key === key) || {}).ageMs || 0;
+      const rect = (typeof el.getBoundingClientRect === "function") ? el.getBoundingClientRect() : null;
+      el.src = cacheBustedSrc(el.getAttribute ? el.getAttribute("src") : el.src);
+      _tileStuckSince.set(el, t); // restart this tile's clock so a repeat failure re-grace-periods rather than reload every sweep tick
+      if (onHeal) {
+        onHeal({
+          key, ageMs, coords: rec && rec.coords,
+          rect: rect ? { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) } : null,
+        });
+      }
+    } catch (_) {}
+  });
+  return heal.length;
+}
+
+/* Arm the sweep on a live tile layer for as long as it stays on the map. Returns a detach fn —
+ * callers tear it down alongside their other per-layer listeners (`boundTileCache`'s own detach,
+ * `releaseLayer`). `sweepMs` is deliberately independent of the map's `visible`/active state: the
+ * scan is a handful of cheap DOM reads over an already-small retained set, so there is no reason
+ * to gate it the way the heavier GIS-overlay re-probe is gated — a tile that went stuck while the
+ * view was hidden is exactly the kind of thing that should already be fixed by the time the user
+ * comes back to look at it. */
+export function armBlankTileHeal(layer, { sweepMs = 2500, graceMs = STUCK_TILE_GRACE_MS, onHeal } = {}) {
+  if (!layer) return () => {};
+  const iv = setInterval(() => { try { sweepBlankTiles(layer, { graceMs, onHeal }); } catch (_) {} }, sweepMs);
+  return () => clearInterval(iv);
 }

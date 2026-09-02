@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-02 @ `fdbc7a04` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-02 @ `0ffdd874` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -1188,9 +1188,9 @@ _648 source files mapped._
 - **`src/workspaces/site-planner/lib/terrainWorker.js`** — Terrain Web Worker (B704/B705): LERC decode -> masked smooth -> contours + flow arrows off the main thread; imports pure modules only (guarded by test/terrainWorker.test.js)
   - _exports_: _(none)_
 - **`src/workspaces/site-planner/lib/tileBudget.js`** — Pure tile/overscan budget: how much basemap is held off-screen, how many tiles are retained, and when the retina uplift is worth its cost
-  - _exports_: `keepBufferFor`, `OVERSCAN_FULL`, `OVERSCAN_MIN`, `OVERSCAN_REDUCED`, `overscanPx`, `RETINA_MIN_ZOOM`, `retinaForZoom`, `tileCacheLimit`, `tilesToEvict`, `tileWeight`
+  - _exports_: `keepBufferFor`, `OVERSCAN_FULL`, `OVERSCAN_MIN`, `OVERSCAN_REDUCED`, `overscanPx`, `RETINA_MIN_ZOOM`, `retinaForZoom`, `STUCK_TILE_GRACE_MS`, `stuckTiles`, `tileCacheLimit`, `tilesToEvict`, `tileWeight`
 - **`src/workspaces/site-planner/lib/tileLifecycle.js`** — Leaflet-bound tile + overlay lifecycle — keep tiles across a same-grid setView, bound the tile cache, and release a toggled-off overlay for real
-  - _exports_: `announceSetView`, `boundTileCache`, `capTileCache`, `preserveTilesAcrossSetView`, `releaseLayer`, `throttleTilePruning`
+  - _exports_: `announceSetView`, `armBlankTileHeal`, `boundTileCache`, `capTileCache`, `preserveTilesAcrossSetView`, `releaseLayer`, `sweepBlankTiles`, `throttleTilePruning`
 - **`src/workspaces/site-planner/lib/timeOfConcentration.js`** — Computed time of concentration (B905, CE roadmap #3): Kirpich formula + a criteria-configurable urban adjustment/floor, with an area-based flow-path-length fallback and a default-slope fallback when real geometry/grade aren't resolved — replaces the flat 15-min screening assumption everywhere Tc feeds the routing chain.
   - _exports_: `computeTimeOfConcentration`, `DEFAULT_FLOW_PATH_K_FACTOR`, `DEFAULT_KIRPICH_URBAN_ADJUSTMENT`, `DEFAULT_TC_DEFAULT_SLOPE_PCT`, `DEFAULT_TC_FLOOR_MIN`, `estimateFlowPathLengthFt`, `kirpichTcMin`
 - **`src/workspaces/site-planner/lib/titleKey.js`** — The title reader's stored Anthropic key (`KEY_LS`/`getKey`/`setKey`), split out of `titleReader.js` so the planner can read it synchronously without pulling the reader's multi-KB schema + prompt onto the site route.
