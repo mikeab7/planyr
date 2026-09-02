@@ -60,14 +60,46 @@
  * (one fixed unit), the "/yr" too — "if the header states the unit, the cell shows the number
  * only." `$/SF or $/AC` keeps its per-row "/AC"/"/SF" suffix because its header names TWO
  * candidate units, so the suffix is what disambiguates rather than a repeat.
+ *
+ * ⛔ HARDENING-10 (owner LIVE-TESTED AGAIN, two rounds of measured DOM/CSS facts) — read before
+ * touching column order, width, align, or label:
+ * (1) TYPE IS NOW THE FIRST COLUMN, frozen alongside Title ("choose deal first because it will
+ * inform the rest"). Its own group is `TYPE`, a deliberate one-column band — Type isn't a
+ * PROPERTY or DEAL fact, it's the classifier every other column's meaning depends on.
+ * (2) ALIGNMENT IS ONE RULE, NOT A PER-COLUMN CALL: NUMERIC or DATE -> right, everything else ->
+ * left, period. `col.align` below encodes exactly that — never right-align a text/select/action
+ * column, never left-align a number/date one, and never introduce a third alignment.
+ * (3) A CELL HOLDS ITS BARE VALUE; A UNIT GOES IN THE HEADER, NEVER BOTH. `leaseTerm`'s cell used
+ * to read "126 mo" — a unit suffix baked into a "numeric" cell is what made it read as text and
+ * left-align inconsistently with its neighbors. `col.get/setValue` below strip the unit at the
+ * cell boundary (mirroring `bldgCapRate`'s %-vs-fraction split) so the cell is bare digits and
+ * the header states what they mean (`Term (mo)`, `Free (mo)`, `Escal (%)`, `TI ($/SF)`, `Cap
+ * (%)`) — `Size` keeps its own separate Unit column instead, because THAT unit varies per row.
+ * (4) NO COLUMN'S WIDTH MAY LET ITS OWN HEADER TRUNCATE — every label below was sized against its
+ * column's width by hand; if you touch one, re-check the other.
  */
 import {
-  draftToComp, buildingPricePerSf, annualLeaseRate, partyLabels,
+  draftToComp, buildingPricePerSf, annualLeaseRate,
   landPricePerAreaUnit, resolveCapTriangle,
 } from "./comps.js";
 import { parseTypedDate, formatDateDisplay } from "./compDates.js";
 
-export const GROUPS = ["PROPERTY", "DEAL", "PRICE", "RENT", "CONCESSIONS", "DERIVED", "PARTIES"];
+export const GROUPS = ["TYPE", "PROPERTY", "DEAL", "PRICE", "RENT", "CONCESSIONS", "DERIVED", "PARTIES"];
+
+// HARDENING-10 — leaseTerm's cell boundary: the stored field stays free text (a real deal can be
+// "10 yr + 2x5 options", which a bare-months cell can't hold) but the SHEET CELL itself only ever
+// shows/accepts a bare month count, mirroring bldgCapRate's %-vs-fraction split. This reads only
+// the LEADING quantity — "10 yr + 2x5 options" is the 10-year BASE term with renewal options
+// described after it, so 120 is the correct reduction, not a guess. A stored value with no
+// leading number/unit at all ("See Section 4.2") shows empty rather than a wrong number.
+function monthsFromTermText(text) {
+  const s = String(text || "");
+  let m = s.match(/(\d+(?:\.\d+)?)\s*(mo|mos|month|months)\b/i);
+  if (m) return Number(m[1]);
+  m = s.match(/(\d+(?:\.\d+)?)\s*(yr|yrs|year|years)\b/i);
+  if (m) return Number(m[1]) * 12;
+  return null;
+}
 
 export const TYPE_OPTIONS = [
   { value: "land", label: "Land" },
@@ -139,9 +171,28 @@ function simpleColumn(base) {
 }
 
 export const SHEET_COLUMNS = [
-  // PROPERTY — facts about the property itself, not the deal. Title/address is the one frozen
+  // TYPE — the classifier every other column's meaning depends on ("choose deal first because it
+  // will inform the rest"). Frozen alongside Title so it never scrolls out of view.
+  {
+    key: "compType", label: "Type", group: "TYPE", width: 66, align: "left", kind: "select", options: TYPE_OPTIONS, frozen: true,
+    appliesTo: () => true,
+    getValue: (d) => d.compType,
+    setValue: (d, v) => {
+      // HARDENING-10 NEW-1 — "setting Type ... sets that row's Unit default: Land -> AC,
+      // Building sale -> SF, Lease -> SF." Building sale / lease never read `landSizeUnit` at all
+      // (their Size column is fixed to SF, see below) so there is nothing to default for them —
+      // only switching TO land needs a starting value, and only if one isn't already set, so
+      // re-picking Land after picking something else never clobbers a choice the user already made.
+      const next = { ...d, compType: v };
+      if (v === "land" && !d.landSizeUnit) next.landSizeUnit = "ac";
+      return next;
+    },
+    flagKey: () => "compType",
+  },
+
+  // PROPERTY — facts about the property itself, not the deal. Title/address is the second frozen
   // column ("freeze through Title / address so it stays while the rest scrolls right").
-  simpleColumn({ key: "title", label: "Title / Address", group: "PROPERTY", width: 180, align: "left", kind: "text", frozen: true }),
+  simpleColumn({ key: "title", label: "Title / Address", group: "PROPERTY", width: 170, flexKey: "title", align: "left", kind: "text", frozen: true }),
   {
     key: "size", label: "Size", group: "PROPERTY", width: 70, align: "right", kind: "number",
     appliesTo: () => true,
@@ -159,13 +210,25 @@ export const SHEET_COLUMNS = [
     setValue: (d, v) => ({ ...d, landSizeUnit: v }),
     flagKey: () => "landSizeUnit",
   },
-  { key: "location", label: "Location", group: "PROPERTY", width: 88, align: "left", kind: "action", appliesTo: () => true, required: true },
+  { key: "location", label: "Location", group: "PROPERTY", width: 84, align: "left", kind: "action", appliesTo: () => true, required: true },
 
-  // DEAL — facts about the transaction: what kind, when, how long.
-  simpleColumn({ key: "compType", label: "Type", group: "DEAL", width: 62, align: "left", kind: "select", options: TYPE_OPTIONS }),
-  simpleColumn({ key: "compDate", label: "Executed", group: "DEAL", width: 74, align: "left", kind: "date", required: true }),
-  simpleColumn({ key: "leaseCommencementDate", label: "Commence", fullLabel: "Commencement", group: "DEAL", width: 74, align: "left", kind: "date", appliesTo: (t) => t === "lease" }),
-  simpleColumn({ key: "leaseTerm", label: "Term", group: "DEAL", width: 56, align: "left", kind: "text", appliesTo: (t) => t === "lease" }),
+  // DEAL — facts about the transaction: when, how long.
+  simpleColumn({ key: "compDate", label: "Executed", group: "DEAL", width: 74, align: "right", kind: "date", required: true }),
+  simpleColumn({ key: "leaseCommencementDate", label: "Commence", fullLabel: "Commencement", group: "DEAL", width: 74, align: "right", kind: "date", appliesTo: (t) => t === "lease" }),
+  {
+    // HARDENING-10 — the STORED field stays free text (a real term can be "10 yr + 2x5 options",
+    // which a bare-months field can't hold) but the CELL only ever shows/accepts a bare month
+    // count, mirroring bldgCapRate's %-vs-fraction split below. A stored term this can't reduce to
+    // one number shows empty rather than a wrong guess.
+    key: "leaseTerm", label: "Term (mo)", fullLabel: "Term (months)", group: "DEAL", width: 60, align: "right", kind: "number",
+    appliesTo: (t) => t === "lease",
+    getValue: (d) => {
+      const months = monthsFromTermText(d.leaseTerm);
+      return months == null ? "" : String(months);
+    },
+    setValue: (d, v) => ({ ...d, leaseTerm: v === "" ? "" : `${v} mo` }),
+    flagKey: () => "leaseTerm",
+  },
 
   // PRICE — land and building-sale economics: Price for either, NOI + Cap for a sale only (grey
   // on land — Michael scoped cap rate to building sales). The three are a TRIANGLE: enter any
@@ -190,8 +253,8 @@ export const SHEET_COLUMNS = [
     // Typed and shown as a PERCENTAGE (5.75); stored internally as a FRACTION (0.0575) — the
     // get/set pair is the one place that conversion happens, so nothing outside this column ever
     // sees the percentage form and nothing outside resolveCapTriangle ever sees a raw fraction
-    // typed by a human.
-    key: "bldgCapRate", label: "Cap %", fullLabel: "Cap rate (%)", group: "PRICE", width: 52, align: "right", kind: "number",
+    // typed by a human. The "%" itself lives in the HEADER now, not the cell (HARDENING-10).
+    key: "bldgCapRate", label: "Cap (%)", fullLabel: "Cap rate (%)", group: "PRICE", width: 58, align: "right", kind: "number",
     appliesTo: (t) => t === "building_sale",
     triangleField: "capRate",
     getValue: (d) => (d.bldgCapRate === "" || d.bldgCapRate == null ? "" : String(Number(d.bldgCapRate) * 100)),
@@ -204,12 +267,12 @@ export const SHEET_COLUMNS = [
   simpleColumn({ key: "leaseRate", label: "Rate", fullLabel: "Rate $/SF", group: "RENT", width: 56, align: "right", kind: "number", appliesTo: (t) => t === "lease" }),
   simpleColumn({ key: "leaseRatePeriod", label: "Per", group: "RENT", width: 56, align: "left", kind: "select", options: PERIOD_OPTIONS, appliesTo: (t) => t === "lease" }),
   simpleColumn({ key: "leaseRateExpense", label: "Basis", group: "RENT", width: 52, align: "left", kind: "select", options: BASIS_OPTIONS, appliesTo: (t) => t === "lease" }),
-  simpleColumn({ key: "leaseEscalationPct", label: "Escal", fullLabel: "Escalation %/yr", group: "RENT", width: 56, align: "right", kind: "number", appliesTo: (t) => t === "lease" }),
+  simpleColumn({ key: "leaseEscalationPct", label: "Escal (%)", fullLabel: "Escalation %/yr", group: "RENT", width: 60, align: "right", kind: "number", appliesTo: (t) => t === "lease" }),
 
   // CONCESSIONS — the other half of the economics: what the landlord gives up, which is exactly
   // why face rent and net-effective rent differ.
-  simpleColumn({ key: "leaseFreeRentMonths", label: "Free rent", fullLabel: "Free rent (months)", group: "CONCESSIONS", width: 50, align: "right", kind: "number", appliesTo: (t) => t === "lease" }),
-  simpleColumn({ key: "leaseTi", label: "TI", fullLabel: "TI $/SF", group: "CONCESSIONS", width: 52, align: "right", kind: "number", appliesTo: (t) => t === "lease" }),
+  simpleColumn({ key: "leaseFreeRentMonths", label: "Free (mo)", fullLabel: "Free rent (months)", group: "CONCESSIONS", width: 60, align: "right", kind: "number", appliesTo: (t) => t === "lease" }),
+  simpleColumn({ key: "leaseTi", label: "TI ($/SF)", fullLabel: "TI $/SF", group: "CONCESSIONS", width: 60, align: "right", kind: "number", appliesTo: (t) => t === "lease" }),
 
   // DERIVED — never editable, tinted read-only. TWO columns now (HARDENING-9 removed Net
   // Effective — "dont worry about net effective per year ... still remove", the underlying
@@ -223,7 +286,7 @@ export const SHEET_COLUMNS = [
   {
     // Follows the row's OWN recorded size unit — $/AC for an acre-quoted land comp, $/SF for an
     // SF-quoted one or a building sale (which has no unit choice at all).
-    key: "salePricePerArea", label: "$/SF or $/AC", group: "DERIVED", width: 66, align: "right", kind: "derived",
+    key: "salePricePerArea", label: "$/SF or $/AC", group: "DERIVED", width: 90, align: "right", kind: "derived",
     appliesTo: (t) => t === "land" || t === "building_sale",
     derive: (comp) => {
       const fmt = (n) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -249,10 +312,13 @@ export const SHEET_COLUMNS = [
   },
 
   // PARTIES — who the deal is between, plus notes (kept here rather than dropped — every type
-  // needs somewhere for what doesn't fit a column).
-  simpleColumn({ key: "partyProvider", label: "Landlord/Seller", fullLabel: "Landlord / Seller", group: "PARTIES", width: 120, align: "left", kind: "text" }),
-  simpleColumn({ key: "partyAcquirer", label: "Tenant/Buyer", fullLabel: "Tenant / Buyer", group: "PARTIES", width: 120, align: "left", kind: "text" }),
-  simpleColumn({ key: "notes", label: "Notes", group: "PARTIES", width: 110, align: "left", kind: "text" }),
+  // needs somewhere for what doesn't fit a column). All four `flexKey` columns (title above,
+  // these three) share the dialog's leftover horizontal space — see CompEntryGrid.jsx's
+  // `computeFlexWidths`. `width` here is only the STATIC fallback (tests, no-DOM contexts); the
+  // live sheet always uses the computed value.
+  simpleColumn({ key: "partyProvider", label: "Landlord/Seller", fullLabel: "Landlord / Seller", group: "PARTIES", width: 125, flexKey: "partyProvider", align: "left", kind: "text" }),
+  simpleColumn({ key: "partyAcquirer", label: "Tenant/Buyer", fullLabel: "Tenant / Buyer", group: "PARTIES", width: 125, flexKey: "partyAcquirer", align: "left", kind: "text" }),
+  simpleColumn({ key: "notes", label: "Notes", group: "PARTIES", width: 90, flexKey: "notes", align: "left", kind: "text" }),
 ];
 
 export function columnIndex(key) {
@@ -301,13 +367,13 @@ export function cellState(col, draft) {
     const cell = tri[col.triangleField];
     const raw = col.getValue(draft);
     if (cell.derived) {
+      // HARDENING-10 — bare digits only; "Cap (%)" in the header already says what they mean.
       const text = col.triangleField === "capRate"
-        ? `${(cell.value * 100).toFixed(2)}%`
+        ? (cell.value * 100).toFixed(2)
         : formatNumberDisplay(String(cell.value));
       return { state: "derived", text };
     }
-    const text = col.triangleField === "capRate" && raw !== "" ? `${formatNumberDisplay(raw)}%` : formatNumberDisplay(raw);
-    return { state: "editable", text, raw: raw ?? "" };
+    return { state: "editable", text: formatNumberDisplay(raw), raw: raw ?? "" };
   }
   const raw = col.getValue(draft);
   if (col.editableFor && !col.editableFor(draft.compType)) {
@@ -326,11 +392,15 @@ export function cellState(col, draft) {
   return { state: "editable", text: raw || "", raw: raw || "" };
 }
 
-/** The placeholder a text/select cell shows when it's genuinely empty — the party columns use
- * the comp type's own role name ("Seller", "Tenant") rather than a generic "optional". */
-export function cellPlaceholder(col, compType) {
-  if (col.key === "partyProvider") return partyLabels(compType).provider;
-  if (col.key === "partyAcquirer") return partyLabels(compType).acquirer;
+/** HARDENING-10 NEW-4 — "empty means empty." A cell that hasn't been filled in renders truly
+ * empty, never a grey placeholder word ("Seller", "Tenant") standing in for it — in a grid, grey
+ * text inside a cell reads as data, not as a hint, and the column header already says what the
+ * column is. The only surviving muted mark is the em dash `cellState` renders for a cell that is
+ * genuinely NOT APPLICABLE to the row's type, which is a different, still-necessary signal
+ * (blank-because-N/A vs. blank-because-unfilled) and lives in `cellState`, not here. This
+ * function now always returns "" — kept (rather than deleted at every call site) so a future
+ * column-specific hint has exactly one place to be added back, deliberately, if ever needed. */
+export function cellPlaceholder() {
   return "";
 }
 
@@ -393,7 +463,16 @@ export function spillPaste(rows, startRow, startCol, clipboardText, emptyDraftFn
   const next = rows.slice();
   grid.forEach((cells, rOffset) => {
     const rIdx = startRow + rOffset;
-    while (rIdx >= next.length) next.push({ _id: newRowIdFn(), draft: emptyDraftFn(), cellFlags: {} });
+    while (rIdx >= next.length) {
+      // HARDENING-10 NEW-1 — "a new empty row defaults Type to whatever the row above it is,
+      // since people enter comps in batches of one kind." Only a genuine DEFAULT: the paste's own
+      // cells (below) are applied on top in the normal way and win outright if the pasted block
+      // itself carries a Type column.
+      const above = next[next.length - 1];
+      const draft = emptyDraftFn();
+      if (above?.draft.compType) draft.compType = above.draft.compType;
+      next.push({ _id: newRowIdFn(), draft, cellFlags: {} });
+    }
     let row = next[rIdx];
     cells.forEach((cellText, cOffset) => {
       const col = SHEET_COLUMNS[startCol + cOffset];
@@ -407,4 +486,97 @@ export function spillPaste(rows, startRow, startCol, clipboardText, emptyDraftFn
     next[rIdx] = row;
   });
   return next;
+}
+
+/* ---- dynamic column width — the four `flexKey` columns share whatever horizontal space is left
+ * after every fixed-width visible column, so the sheet fits its container with ZERO horizontal
+ * scroll rather than a hand-tuned static budget (two static attempts both overflowed the target
+ * by 170-200px — a computed-to-fit approach is the only one that's correct regardless of an
+ * imprecise per-column guess). HARDENING-10 NEW-5 (message A) said Notes shrinks first; NEW-3
+ * (message B, later and more specific) said Title/Landlord/Tenant share leftover space growing,
+ * Title getting the largest share, and said nothing about Notes growing — so Notes is modeled
+ * separately: it alone absorbs a squeeze up to its own floor, and only once it's AT that floor do
+ * the three growers give up any of their own room. ------------------------------------------- */
+
+const FLEX_GROWERS = [
+  { key: "title", nominal: 170, floor: 90, weight: 2 }, // "Title gets the largest share"
+  { key: "partyProvider", nominal: 125, floor: 65, weight: 1 },
+  { key: "partyAcquirer", nominal: 125, floor: 65, weight: 1 },
+];
+const FLEX_NOTES = { key: "notes", nominal: 90, floor: 55 };
+
+/** Pure: given the horizontal space left over after every FIXED-width visible column (and the
+ * remove-row column, and borders — the caller's job to subtract those), returns
+ * `{title, partyProvider, partyAcquirer, notes}` widths — never negative, and NEVER below a
+ * column's own floor, full stop. The floors are chosen (see the sum at the top of this file's
+ * HARDENING-10 note) so that even the narrowest realistic dialog never has to cross one; if
+ * `availableForFlex` is ever smaller than the floor sum anyway (an extreme window), every column
+ * still holds its floor and the table is left to overflow by that difference — a readable column
+ * that causes a little horizontal scroll beats an unreadable one that doesn't. Three regimes, in
+ * order of how tight things are: everyone gets more than nominal (surplus shared by the three
+ * growers, weighted) · notes alone shrinks to absorb the squeeze · notes is already at floor and
+ * the three growers now shrink together, proportional to their own room. */
+export function computeFlexWidths(availableForFlex) {
+  const avail = Math.max(0, availableForFlex);
+  const growerNominalTotal = FLEX_GROWERS.reduce((s, g) => s + g.nominal, 0);
+  const growerFloorTotal = FLEX_GROWERS.reduce((s, g) => s + g.floor, 0);
+  const fullNominalTotal = growerNominalTotal + FLEX_NOTES.nominal;
+
+  if (avail >= fullNominalTotal) {
+    const surplus = avail - fullNominalTotal;
+    const weightTotal = FLEX_GROWERS.reduce((s, g) => s + g.weight, 0);
+    const widths = { notes: FLEX_NOTES.nominal };
+    FLEX_GROWERS.forEach((g) => { widths[g.key] = Math.round(g.nominal + surplus * (g.weight / weightTotal)); });
+    return widths;
+  }
+
+  const notesShrinkRoom = FLEX_NOTES.nominal - FLEX_NOTES.floor;
+  const deficitFromFullNominal = fullNominalTotal - avail;
+  if (deficitFromFullNominal <= notesShrinkRoom) {
+    const widths = { notes: FLEX_NOTES.nominal - deficitFromFullNominal };
+    FLEX_GROWERS.forEach((g) => { widths[g.key] = g.nominal; });
+    return widths;
+  }
+
+  const remainingForGrowers = Math.max(0, avail - FLEX_NOTES.floor);
+  const widths = { notes: FLEX_NOTES.floor };
+  if (remainingForGrowers >= growerNominalTotal) {
+    FLEX_GROWERS.forEach((g) => { widths[g.key] = g.nominal; });
+    return widths;
+  }
+  if (remainingForGrowers <= growerFloorTotal) {
+    FLEX_GROWERS.forEach((g) => { widths[g.key] = g.floor; });
+    return widths;
+  }
+  const growerDeficit = growerNominalTotal - remainingForGrowers;
+  const shrinkRoom = FLEX_GROWERS.reduce((s, g) => s + (g.nominal - g.floor), 0);
+  FLEX_GROWERS.forEach((g) => {
+    const share = shrinkRoom > 0 ? (g.nominal - g.floor) / shrinkRoom : 0;
+    widths[g.key] = Math.round(g.nominal - growerDeficit * share);
+  });
+  return widths;
+}
+
+/** A column's actual rendered width — its own fixed `width`, or the computed flex width when it
+ * carries a `flexKey`. `flexWidths` is a `computeFlexWidths(...)` result (or `{}` before the
+ * first measurement, in which case every flex column falls back to its own static `width`). */
+export function widthFor(col, flexWidths) {
+  if (!col.flexKey) return col.width;
+  return flexWidths[col.flexKey] ?? col.width;
+}
+
+/** Cumulative `left` offset for each FROZEN visible column, in `visibleIdx` order (Type at 0,
+ * Title immediately after Type's own width, ...) — pure so the sticky-column math is one tested
+ * place rather than re-derived inline in the header and every cell. Returns `{[colKey]: leftPx}`
+ * for frozen columns only. */
+export function frozenLeftOffsets(visibleIdx, flexWidths) {
+  let left = 0;
+  const offsets = {};
+  for (const idx of visibleIdx) {
+    const col = SHEET_COLUMNS[idx];
+    if (!col.frozen) continue;
+    offsets[col.key] = left;
+    left += widthFor(col, flexWidths);
+  }
+  return offsets;
 }
