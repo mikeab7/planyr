@@ -65,6 +65,16 @@
   --surface-page:   #F3F5F8;
   --surface-raised: #FFFFFF;
   --surface-overlay: rgba(255, 255, 255, 0.94); /* frosted floating panels over the map */
+  /* B986096-HARDENING-25 — `--surface-base` was referenced by ~10 components (form inputs inside
+     dialogs/panels: CompEntryGrid's cell editors + paste box, PartyNameField, CompDraftsPanel,
+     CompsPanel, SitePlansSection, NoteEditor, RoadCrossSectionDialog, SetLocationDialog) but was
+     never DEFINED anywhere in this file — every one of those inputs was rendering with a fully
+     TRANSPARENT background (the CSS default for an unresolved custom property), which is exactly
+     why the comps entry grid's own cell editors let the map show through. Aliasing the existing
+     `--surface-page` value gives every one of those inputs a real, opaque, "recessed field on a
+     raised panel" surface — distinct from `--surface-raised` (cards) without inventing a new hex.
+     Fixes every call site at once; none of them ever intended transparency. */
+  --surface-base: #F3F5F8;
 
   /* B427411 — the corner-radius scale. JS mirror: src/shared/ui/radius.js (keep in step, the
      way palette.js mirrors the colour tokens). Four steps and no more: pill for fully-round
@@ -308,6 +318,7 @@
   --surface-page:   #14161B;
   --surface-raised: #1D2027;
   --surface-overlay: rgba(24, 27, 33, 0.93); /* frosted floating panels over the map */
+  --surface-base: #14161B; /* see the light-theme definition's header for why this alias exists */
   --border-default: #2A2E37;
   --border-strong:  #3A3F4B;
   --text-primary:   #E8EBF0;
