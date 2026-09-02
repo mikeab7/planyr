@@ -581,6 +581,25 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   `onEditBlur` now reads the input's own live DOM value at blur time rather than trusting only the
   tracked ref. Both proven live against his exact reproduction methodology (a non-bubbling dispatch
   + the same capture-phase confirmation check), not from code reading.
+  **⛔ ROUND 13 (B986096-HARDENING-16, owner cycle-6 handoff) — ENTER + GRID KEYBOARD NAVIGATION ARE
+  ESCALATED OFF THIS MODULE TO A DEDICATED ROOT-CAUSE SESSION — DO NOT TOUCH
+  `onEditKeyDown`/`onGridKeyDown`/tabindex WIRING HERE.** Five consecutive deployed bundles reported
+  Enter still broken, which is this repo's own STANDING RULE #3(C) trigger for escalating to a
+  fresh root-cause hunt rather than a sixth attempt at the same class of fix — read that owner
+  handoff in full before touching keyboard commit logic in this file again. What DID stay in scope
+  and was reworked this round: **NEW-1 (blur discards)** — re-investigated far more exhaustively
+  than ROUND 12, specifically closing the gap the owner's own three named click-away targets left:
+  clicking the panel's own HEADER and FOOTER chrome (genuinely non-interactive `<div>`s, distinct
+  from a cell click and a map click, never isolated separately before) both commit correctly, as
+  does a zero-artificial-delay rapid-typist click-away (3 trials). Nine total realistic
+  reproduction attempts across two rounds now find nothing — every one is a permanent regression
+  check. **NEW-2/NEW-3 (parcel/site-plan anchor round trips)** — re-confirmed genuinely blocked;
+  checked specifically for a workaround this round (the B629 Drive parcel-snapshot cache) and it
+  doesn't help in this sandbox either, since hydrating it is itself a network call through
+  infrastructure the local dev server doesn't run. **NEW-4 (edit round-trip)** — re-read
+  `CompsPanel.jsx`'s `save()`, unchanged and still correct; still needs a live signed-in pass to
+  CONFIRM, not because a defect is suspected. **NEW-5/NEW-6 (list-title/detail-view Location
+  fallbacks)** — both were already shipped in ROUND 11, re-confirmed still correct this round.
   KML import (B849233) is a SEPARATE staging table, `db/comp_import_drafts.sql`
   (`public.comp_import_drafts`, owner-only RLS — no team visibility at all, unlike `comps` itself,
   until promoted) — `lib/kmlImport.js` is the pure, hand-rolled Placemark parser (a Point is a
