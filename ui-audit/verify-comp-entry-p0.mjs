@@ -147,7 +147,14 @@ console.log("\n=== BLOCKER 3 — Enter commits a date-cell edit ===");
         check("typed text lands in the input before Enter", (await input.inputValue()) === "3/14/26");
         await page.keyboard.press("Enter");
         await pacedWait(page, 300);
-        check("Enter commits the value (cell shows 03/14/26, not empty)", (await target.innerText()).trim() === "03/14/26");
+        // B986096-HARDENING-19 — on a single-row grid, Enter's destination clamps back to the SAME
+        // cell (nowhere else to move), so HARDENING-10 NEW-3's "land the next cell in edit mode"
+        // feature correctly REOPENS this cell rather than leaving it as committed plain text — read
+        // the reopened input's value (never `innerText`, which never includes an `<input>`'s value).
+        const reopened = target.locator("input");
+        check("Enter commits the value and reopens the SAME cell for fast re-entry (single-row grid)",
+          (await reopened.count()) > 0 && (await reopened.inputValue()) === "03/14/26",
+          `got ${JSON.stringify(await reopened.count() > 0 ? await reopened.inputValue() : (await target.innerText()).trim())}`);
       }
     }
   }
@@ -395,10 +402,19 @@ console.log("\n=== CYCLE 5 (B986096-HARDENING-15) — Enter commits via a non-bu
     return { observedByCapture, activeIsInput: document.activeElement === el };
   });
   check("a capture-phase listener still observes the non-bubbling dispatch (as it always did)", result.observedByCapture);
-  check("focus leaves the input — Enter was actually handled, not just observed upstream", !result.activeIsInput);
   await pacedWait(page, 300);
-  check("Enter commits via a non-bubbling synthetic dispatch (the exact owner reproduction)",
-    (await target.innerText()).trim() === "01/11/26", `got ${JSON.stringify((await target.innerText()).trim())}`);
+  // B986096-HARDENING-19 — this fixture is a single-row grid, so Enter's destination clamps back
+  // to the SAME cell and HARDENING-10 NEW-3 correctly reopens it (focus stays in an <input>, which
+  // is now the right outcome, not evidence Enter went unhandled — see the reused input's actual
+  // committed VALUE below for the real "was it handled" signal: an unhandled Enter never reformats
+  // "1/11/26" into "01/11/26").
+  const reopened = target.locator("input");
+  const reopenedCount = await reopened.count();
+  check("Enter was actually handled, not just observed upstream — value reformatted to 01/11/26",
+    reopenedCount > 0 && (await reopened.inputValue()) === "01/11/26",
+    `got ${JSON.stringify(reopenedCount > 0 ? await reopened.inputValue() : (await target.innerText()).trim())}`);
+  check("Enter commits via a non-bubbling synthetic dispatch, then reopens the same cell (the exact owner reproduction)",
+    reopenedCount > 0, `input still mounted after Enter: ${reopenedCount > 0}`);
   await ctx.close();
 }
 {
