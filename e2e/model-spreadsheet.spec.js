@@ -584,3 +584,253 @@ test.describe("Model workspace — Stage 1 (grid capacity, structural editing, f
     expect(Math.abs(afterDragAt100.width - (beforeDrag.width / 2 + 50))).toBeLessThan(4);
   });
 });
+
+/* ⛔ B1076480 (owner report, 2026-09-02 — "USE THE MODULE LIKE A PERSON") — three real bugs found
+ * by clicking the live module in a non-resting state, none of which any prior test in this file
+ * could have caught (every context-menu test above only asserts an item's CLICK fires, never that
+ * the menu itself is visible/positioned/dismissible correctly) — plus a fourth found while fixing
+ * the first: the "keep the active cell on screen" auto-scroll can immediately close a context menu
+ * it never should have touched. Raw `page.mouse` coordinate clicks are used for the "menu already
+ * open" cases deliberately, not `locator.click({button:"right"})` — Playwright's own actionability
+ * check refuses to even attempt a click through an existing backdrop (a real DIFFERENT question
+ * from what a genuine right-click does, since the browser hit-tests mousedown and contextmenu
+ * separately, at their own dispatch times — see DRIVER-SCROLL-IS-NOT-APP-SCROLL in CLAUDE.md).
+ */
+test.describe("Model workspace — B1076480 (context-menu chrome, positioning, dead-click, self-dismiss)", () => {
+  async function rightClickAt(page, locator) {
+    const box = await locator.boundingBox();
+    const x = box.x + box.width / 2, y = box.y + box.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down({ button: "right" });
+    await page.mouse.up({ button: "right" });
+    return box;
+  }
+
+  test("a right-click context menu renders opaque chrome — background, border, shadow — never bare text floating over the grid", async ({ page }) => {
+    const id = "e2e-b1032840-chrome";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await page.getByTestId("model-row-header-5").click({ button: "right" });
+    const menu = page.locator(".menu");
+    await expect(menu).toBeVisible();
+    const style = await menu.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { background: cs.backgroundColor, border: cs.borderStyle, boxShadow: cs.boxShadow };
+    });
+    expect(style.background).not.toBe("rgba(0, 0, 0, 0)");
+    expect(style.border).not.toBe("none");
+    expect(style.boxShadow).not.toBe("none");
+  });
+
+  test("the menu opens anchored at the click point, not hard-pinned to the viewport's left edge", async ({ page }) => {
+    const id = "e2e-b1032840-position";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    // A ROW header sits at the sticky-left gutter (~9px from the edge) — indistinguishable by
+    // x-position alone from the regression's hard clamp to the ~8px viewport margin. Column F
+    // (index 5) sits several hundred px in, so a clamp-to-margin regression is unmissable here.
+    const colHeader = page.getByTestId("model-col-header-5");
+    const box = await colHeader.boundingBox();
+    expect(box.x).toBeGreaterThan(300); // sanity: this target really is far from the left edge
+    await colHeader.click({ button: "right" });
+    const menu = page.locator(".menu");
+    await expect(menu).toBeVisible();
+    const menuBox = await menu.boundingBox();
+    // The regression pinned the menu to the ~8px viewport margin regardless of click position;
+    // a correctly anchored menu opens within a small gap of the actual header's left edge.
+    expect(Math.abs(menuBox.x - box.x)).toBeLessThan(250);
+  });
+
+  test("right-clicking a DIFFERENT header while a menu is already open opens the new menu — not a dead click swallowed by the old menu's backdrop", async ({ page }) => {
+    const id = "e2e-b1032840-deadclick";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await rightClickAt(page, page.getByTestId("model-row-header-5"));
+    const menu = page.locator(".menu");
+    await expect(menu).toBeVisible();
+    await expect(menu).toContainText("Insert row above"); // the ROW menu opened
+    await rightClickAt(page, page.getByTestId("model-col-header-1"));
+    // The regression left the STALE row menu standing (its backdrop silently ate the second
+    // right-click — a real click event target check, not a position heuristic that a stale
+    // menu near the left gutter could satisfy by coincidence): the menu must now show the
+    // COLUMN items, proving it genuinely reopened rather than surviving untouched.
+    await expect(menu).toContainText("Insert column left");
+    await expect(menu).not.toContainText("Insert row above");
+  });
+
+  test("the same header right-clicked twice in a row keeps showing a menu, never hangs", async ({ page }) => {
+    const id = "e2e-b1032840-doubleclick";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    const colB = page.getByTestId("model-col-header-1");
+    await rightClickAt(page, colB);
+    await expect(page.locator(".menu")).toBeVisible();
+    await rightClickAt(page, colB);
+    await expect(page.locator(".menu")).toBeVisible();
+  });
+
+  test("a context menu near a viewport edge FLIPS to stay fully on screen, rather than merely clamping over the click point", async ({ page }) => {
+    const id = "e2e-b1032840-flip";
+    await page.setViewportSize({ width: 900, height: 500 });
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    // Row 15 (index 14) sits right at the bottom edge of this small viewport.
+    const rowHeader = page.getByTestId("model-row-header-14");
+    const box = await rowHeader.boundingBox();
+    await rightClickAt(page, rowHeader);
+    const menu = page.locator(".menu");
+    await expect(menu).toBeVisible();
+    const menuBox = await menu.boundingBox();
+    expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(500);
+    expect(menuBox.y).toBeLessThan(box.y); // opened ABOVE the click point — a real flip, not a clamp
+  });
+
+  test("right-clicking a row that requires auto-scrolling itself into view does not immediately self-dismiss the menu it just opened", async ({ page }) => {
+    const id = "e2e-b1032840-selfscroll";
+    await page.setViewportSize({ width: 900, height: 500 });
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    const rowHeader = page.getByTestId("model-row-header-14"); // the last partially-cut row
+    await rightClickAt(page, rowHeader);
+    // Give the "keep active cell on screen" auto-scroll (and the deferred scroll-dismiss arm) a
+    // full beat to fire — the regression closed the menu within ~10-15ms of it opening.
+    await page.waitForTimeout(300);
+    await expect(page.locator(".menu")).toBeVisible();
+
+    // And a GENUINE later scroll still dismisses it — the fix must not disable real dismissal.
+    await sheetEl(page).evaluate((el) => {
+      el.scrollTop += 200;
+      el.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    await expect(page.locator(".menu")).toBeHidden();
+  });
+
+  // ⛔ MUTATION-TESTED HONESTLY, per the owner's explicit instruction that a check proving nothing
+  // must be labelled as such: this spec stays GREEN even with ModelApp.jsx's own fix fully reverted
+  // — `ProjectBreadcrumb.jsx` (the shared component ModelApp feeds `currentProject` into) already
+  // warms and self-heals its OWN internal project list independently on mount + on any `storage`
+  // event, so simulating "the cache got updated" here is satisfied by ProjectBreadcrumb alone and
+  // cannot isolate ModelApp's own contribution. It IS still a real, valid regression guard for the
+  // USER-VISIBLE symptom (the breadcrumb must not stay stuck on "Project" forever once the device's
+  // project cache catches up) — just not proof that THIS file's change specifically matters.
+  // ModelApp's own contribution (why warmProjectsIfEmpty alone, what Notes/Scheduler use, is not
+  // enough — B853266's documented "diverged but non-empty cache" gap) is mutation-proven instead by
+  // the source guard in test/modelBreadcrumbWarm.test.js.
+  test("the breadcrumb does not stay stuck on 'Project' forever — it self-heals once the on-device project cache catches up", async ({ page }) => {
+    // ⛔ Pre-seeding localStorage via addInitScript BEFORE navigation (as every other test in this
+    // file does, and as this test itself originally did) makes the on-device cache warm from the
+    // very first render — the exact condition the real bug needed to be ABSENT to reproduce.
+    // Every prior manual repro attempt against this bug made the identical mistake (see the
+    // session's repro-bugs.mjs). The real failure is a COLD cache at mount: nothing seeded yet,
+    // so listProjects() returns nothing for this id and the breadcrumb falls back to "Project" —
+    // then a cache warm (a cloud pull in production; here, a same-tab write + the same synthetic
+    // `storage` event notifyProjectsChanged() dispatches) must update the breadcrumb WITHOUT a
+    // reload.
+    const id = "e2e-b1032840-breadcrumb";
+    await page.goto(`/#/project/${id}/model`); // no seed — the cache for this id is genuinely cold
+    await expect(sheetEl(page)).toBeVisible();
+    await expect(page.getByText("Project", { exact: true }).first()).toBeVisible();
+
+    const site = {
+      id, groupId: id, site: "Goose Creek", name: "Goose Creek", origin: null, county: "harris",
+      parcels: [], els: [], markups: [], measures: [], callouts: [], settings: {}, underlay: null,
+      parcelDrawings: [], updatedAt: Date.now(),
+    };
+    await page.evaluate(([siteId, rec]) => {
+      localStorage.setItem("planarfit:sites:v1", JSON.stringify({ [siteId]: rec }));
+      window.dispatchEvent(new StorageEvent("storage", { key: "planarfit:sites:v1" }));
+    }, [id, site]);
+    await expect(page.getByText("Goose Creek", { exact: true })).toBeVisible();
+    await expect(page.getByText("Project", { exact: true })).not.toBeVisible();
+  });
+
+  test("right-clicking INSIDE an existing multi-cell selection preserves it — the context menu acts on the whole range, not just the clicked cell", async ({ page }) => {
+    // Found while screenshotting every transient surface open (not at rest): a multi-cell drag
+    // selection collapsed to a single cell the instant it was right-clicked, because the cell's
+    // onMouseDown handler ran cellClick() unconditionally for ANY button — so "Delete rows" from
+    // the menu that followed would have silently acted on one cell instead of the range the user
+    // deliberately built.
+    const id = "e2e-b1032840-preserve-multiselect";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await cell(page, 1, 1).click();
+    await page.keyboard.down("Shift");
+    await cell(page, 3, 3).click();
+    await page.keyboard.up("Shift");
+    await expect(cell(page, 2, 2)).toHaveAttribute("data-selected", "true");
+    await expect(cell(page, 1, 1)).toHaveAttribute("data-selected", "true");
+    await expect(cell(page, 3, 3)).toHaveAttribute("data-selected", "true");
+    await cell(page, 2, 2).click({ button: "right" }); // inside the B2:D4 range
+    // Still the whole range, not collapsed to just (2,2):
+    await expect(cell(page, 1, 1)).toHaveAttribute("data-selected", "true");
+    await expect(cell(page, 3, 3)).toHaveAttribute("data-selected", "true");
+    const menu = page.locator(".menu");
+    await expect(menu).toContainText("Delete rows"); // plural — proves the menu saw the range
+    await expect(menu).toContainText("Delete columns");
+  });
+
+  test("dragging the fill handle straight down fills every cell it passes over — not just the neighboring column", async ({ page }) => {
+    // Found while screenshotting the fill-handle mid-drag: the handle sits at the cell's own
+    // bottom-right corner, straddling the border with the NEXT column by design (so it renders
+    // in the right visual spot) — but the cell's own `overflow: hidden` (needed to ellipsis-clip
+    // long text against an occupied neighbor) also clipped the handle out of HIT-TESTING at that
+    // same boundary, so a press on the handle's own visible right/bottom half silently landed on
+    // the next column's cell instead of starting the fill drag. A straight-down drag from the
+    // handle filled nothing at all.
+    const id = "e2e-b1032840-fillhandle";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await cell(page, 0, 4).click(); // E1
+    await typeAndEnter(page, "10");
+    await cell(page, 0, 4).click();
+    const fillHandle = page.getByTestId("model-fill-handle");
+    const fhBox = await fillHandle.boundingBox();
+    const startX = fhBox.x + fhBox.width / 2, startY = fhBox.y + fhBox.height / 2;
+    const e4Box = await cell(page, 3, 4).boundingBox();
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    for (let i = 1; i <= 5; i++) {
+      const y = startY + (e4Box.y + e4Box.height / 2 - startY) * (i / 5);
+      await page.mouse.move(startX, y); // purely vertical — same X throughout
+    }
+    await page.mouse.up();
+    await expect(cell(page, 1, 4)).toHaveText("10"); // E2
+    await expect(cell(page, 2, 4)).toHaveText("10"); // E3
+    await expect(cell(page, 3, 4)).toHaveText("10"); // E4
+    await expect(cell(page, 0, 5)).toHaveText(""); // F1 — the neighboring column untouched
+  });
+
+  test("freezing BOTH rows and columns together, then scrolling deep, never lets a scrolled-past row's number overpaint a frozen row's own label", async ({ page }) => {
+    // Found while screenshotting the frozen-pane boundary scrolled away from the top-left (the
+    // sweep's #21): the frozen rows' data stayed correct and visible, but their OWN row-number
+    // labels in the left gutter got silently overpainted by whatever row had scrolled underneath
+    // — e.g. frozen row 1 (holding real data) displaying the label "37". Root cause: the row-
+    // header gutter cell's z-index was a flat 2 for every row, frozen or scrolling; a frozen
+    // row's `position:sticky` + explicit z-index makes it a real stacking context, trapping that
+    // z-index:2 inside it, while a SCROLLING row (`position:absolute`, wrapper z-index:"auto")
+    // has no such context, so ITS z-index:2 header escapes to compete directly against the
+    // frozen row's own wrapper z-index — a tie broken by DOM order, which scrolling rows always
+    // win since they render after the frozen band. A user could easily edit the wrong row while
+    // believing its label.
+    const id = "e2e-b1032840-freeze-both";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await cell(page, 0, 0).click(); await typeAndEnter(page, "ROW0");
+    await cell(page, 1, 0).click(); await typeAndEnter(page, "ROW1");
+    await cell(page, 2, 2).click({ button: "right" }); // freezes rows 0-1 AND columns A-B
+    await page.getByText("Freeze panes", { exact: true }).click();
+    await sheetEl(page).evaluate((el) => { el.scrollTop = 800; el.scrollLeft = 400; });
+    await page.waitForTimeout(200);
+    await expect(page.getByTestId("model-row-header-0")).toHaveText("1");
+    await expect(page.getByTestId("model-row-header-1")).toHaveText("2");
+    // The frozen row's own header must win the hit-test at its own screen position — not
+    // whatever scrolling row's raw (freeze-unaware) absolute position happens to land there.
+    const topmostAtFrozenHeader = await page.evaluate(() => {
+      const el = document.getElementById("model-row-header-0") || document.querySelector('[data-testid="model-row-header-0"]');
+      const r = el.getBoundingClientRect();
+      const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return top ? top.getAttribute("data-testid") : null;
+    });
+    expect(topmostAtFrozenHeader).toBe("model-row-header-0");
+  });
+});

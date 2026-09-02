@@ -388,6 +388,15 @@ export default function SheetView({
   }, [sheet, setSelRange]);
 
   const cellClick = (r, c, e) => {
+    // B1076480 — a RIGHT mousedown landing INSIDE an already-selected multi-cell range must
+    // never collapse it to the single cell under the cursor. This handler fires on every
+    // mousedown (any button) so the context menu that follows always has a settled selection
+    // to read, but it used to unconditionally re-select just (r,c) — so right-clicking anywhere
+    // inside a deliberate rectangular selection silently shrank it to one cell BEFORE
+    // openCellMenu's own "act on the selection" logic ever saw it, and "Delete rows"/"Clear
+    // contents" from that menu then hit the wrong range. Matches Excel/Sheets: a right-click
+    // outside the current selection still starts a fresh single-cell one, same as a left-click.
+    if (e.button === 2 && r >= r1 && r <= r2 && c >= c1 && c <= c2) return;
     outerRef.current?.focus();
     if (edit) commitEdit(null);
     if (e.shiftKey && selRange) setSelRange({ r1: selRange.r1, r2: r, c1: selRange.c1, c2: c });
@@ -790,9 +799,18 @@ export default function SheetView({
                 fontWeight: cellStyle.bold ? 700 : undefined,
                 fontStyle: cellStyle.italic ? "italic" : undefined,
                 textDecoration: [cellStyle.underline && "underline", cellStyle.strike && "line-through"].filter(Boolean).join(" ") || undefined,
-                whiteSpace: cellStyle.wrap ? "normal" : "nowrap",
-                wordBreak: cellStyle.wrap ? "break-word" : undefined,
-                overflow: spillCols > 0 ? "visible" : "hidden", textOverflow: "ellipsis",
+                // B1076480 — this cell's own `overflow` used to be "hidden" whenever it wasn't
+                // spilling, so it could clip long text against an occupied neighbor. But overflow
+                // clips EVERY descendant past the box edge, including the fill handle and the
+                // column-resize strip below — both deliberately positioned HALF outside this
+                // cell's own bounds (straddling the border, matching Excel's own corner-anchored
+                // handles). Measured live: `elementsFromPoint` at the fill handle's own reported
+                // center found no trace of it at all — clipped out of hit-testing entirely — so a
+                // press there silently landed on the NEXT column's cell instead, collapsing the
+                // selection and making the fill-handle drag do nothing. Overflow now stays
+                // visible on this outer box; the text itself gets its own clipping wrapper below,
+                // so long text still ellipsis-clips against an occupied neighbor exactly as
+                // before — only the CLIPPING BOUNDARY moved, not the visual result.
                 fontVariantNumeric: "tabular-nums",
                 cursor: "cell",
                 userSelect: isEditing ? "text" : "none",
@@ -815,7 +833,12 @@ export default function SheetView({
                 />
               ) : spillCols > 0 ? (
                 <span style={{ position: "absolute", left: 8 * zoom, top: 0, height: "100%", display: "flex", alignItems: "center", width: spillWidth - 16 * zoom, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", pointerEvents: "none" }}>{cell.display}</span>
-              ) : cell.display}
+              ) : (
+                // B1076480 — this cell's own text-clipping wrapper (see the outer box's `overflow`
+                // comment above): `minWidth: 0` is required for a flex child to actually shrink
+                // and ellipsis-clip instead of forcing the flex row to overflow at content size.
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", minWidth: 0, maxHeight: "100%", whiteSpace: cellStyle.wrap ? "normal" : "nowrap", wordBreak: cellStyle.wrap ? "break-word" : undefined }}>{cell.display}</span>
+              )}
               {c < cols.length && (
                 <div
                   className="model-resize-handle"
@@ -955,8 +978,23 @@ export default function SheetView({
 
         {/* Frozen rows — ALWAYS rendered (never virtualized: there are only ever a handful),
             normal document flow, each sticky at its own resting top so it stays pinned right
-            below the header as the body scrolls underneath it. */}
-        {frozenRowIdxs.map((r) => renderRowCells(r, { position: "sticky", top: headerH + rowOffsets[r] }, 2))}
+            below the header as the body scrolls underneath it.
+            ⛔ B1076480 — this row's own z-index (below, on the OUTER wrapper) must beat not just
+            a scrolling row's OWN z-index ("auto") but also anything a scrolling row's CHILDREN
+            can escape upward to. `position:sticky` + an explicit z-index makes a row a genuine
+            stacking context, so a FROZEN row's children (its z-index:2 row-header gutter cell,
+            needed to sit above the row's own data cells when scrolled horizontally) are trapped
+            inside that context and cannot help this row win against a SIBLING row. A scrolling
+            row's wrapper is `zIndex:"auto"` (no stacking context of its own), so ITS children's
+            z-index values escape straight to this level instead — and once scrolled far enough,
+            a scrolling row's `position:absolute` top (raw, freeze-unaware) can coincide with a
+            frozen row's sticky-held viewport position. Measured live: with the old flat z-index
+            of 2 here, a scrolled-past row's escaped z-index:2 header TIED with this wrapper's own
+            2, and the later-in-DOM scrolling row won — a frozen row's "1"/"2" label was silently
+            overpainted by whatever row happened to scroll into the same pixels ("37"). 3 clears
+            every value a scrolling row's children can reach (2 from the header gutter, 1 from a
+            spilling/merged cell). */}
+        {frozenRowIdxs.map((r) => renderRowCells(r, { position: "sticky", top: headerH + rowOffsets[r] }, 3))}
 
         {/* Scrolling rows — the existing virtualized window, absolutely positioned at each
             row's real offset; a row past the real sheet.rowCount is blank PADDING: typing into
