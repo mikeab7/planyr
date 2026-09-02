@@ -189,12 +189,16 @@ const SURFACES = [
     prep: async (p) => {
       await clickIf(p, '[title="Collapse layers"]');
       await clickIf(p, '[role="tablist"][aria-label="Site or comp"] button:has-text("Comp")');
-      // B1038016 — 150ms → 500ms. CI's real run measured ONE extra signature on this surface
-      // that never reproduced locally (comp mode renders the lazy-loaded CompsPanel/
-      // SitePlansSection chunks — `const CompsPanel = lazy(() => import(...))` — and a slower/
-      // busier CI runner can still be mid-Suspense-fallback at 150ms where a local run already
-      // settled). Same class of fix as "selecting parcels" below, applied here too rather than
-      // guessed at from one red run.
+      // B1038016 — 150ms → 500ms, kept as headroom but NOT the actual fix (see the budget note
+      // below): `CompsPanel.jsx`'s `reload()` awaits a real Supabase `fetchAllComps()` call before
+      // its "＋ New comps"/"⤒ Import (KML)" buttons render (`{!loading && !loadError && …}`). This
+      // sandbox's egress proxy cannot reach Supabase at all (a structural limit documented
+      // throughout this repo — see /CLAUDE.md's "sandbox blocks sign-in"), so `loading` never
+      // resolves here and those two buttons never render locally, at ANY wait time. A real browser
+      // — CI included — reaches a real network and resolves the fetch (success or a fast DNS-fail
+      // on the dummy CI secret) well inside this wait, so CI's own crawl sees one more signature
+      // than this sandbox ever can. `signature-budget.json`'s budget for this surface is set from
+      // CI's measured count for exactly this reason.
       await p.waitForTimeout(500);
     },
     scope: "body",
@@ -212,12 +216,15 @@ const SURFACES = [
     prep: async (p) => {
       await clickIf(p, '[title="Collapse layers"]');
       await clickIf(p, 'button:has-text("Select parcels")');
-      // B1038016 (signature-budget) — 150ms → 300ms locally, then → 500ms after the REAL CI run
-      // (a slower/busier runner than this repo's own sandbox) reproduced the same extra-signature
-      // read this comment already predicted for the identical reason: arming select mode kicks off
-      // the real GIS fetch noted below, and this state's own re-render can still be settling. A
-      // required CI gate cannot carry even a rare false-red; the extra time costs nothing (this
-      // step already excludes the one label that legitimately races).
+      // B1038016 — 150ms → 500ms, kept as headroom but NOT the actual fix (see the budget note
+      // below): the selection-guidance tooltip (`data-testid="select-parcels-tip"` in
+      // MapFinder.jsx) is gated `!err && selectMode` — arming select mode kicks off a real county
+      // GIS parcel-layer fetch, and this sandbox's egress cannot reach it, so a `requesterror`/
+      // "layer failed" handler sets `err` almost immediately and the tooltip never renders here, at
+      // ANY wait time (same structural sandbox limit as the comp-mode note above, and the same one
+      // the network-status-toast exclusion below already exists for). CI's real network resolves
+      // the fetch (or fails later, past this wait) so the tooltip renders there. This surface's
+      // budget is set from CI's measured count for exactly this reason.
       await p.waitForTimeout(500);
     },
     scope: "body",

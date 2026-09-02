@@ -156,27 +156,7 @@ jobs:
       # route around is worse than one that runs nightly"): this crawl only reads computed style
       # off 12 already-known surfaces, no login, no schedule wait — measured at ~90s on its own.
       - name: Signature-budget gate (per-surface distinct control shapes — NEW-1, B1038016)
-        env:
-          DUMP_SIGNATURES: /tmp/ci-signature-dump.json
         run: node ui-audit/ui-inventory.mjs --check
-      # TEMPORARY diagnostic (B1038016) — CI measures one more signature than a local CI-parity
-      # run on "comp mode" and "selecting parcels" and it has been byte-identical across two runs,
-      # ruling out a timing flake. This prints the exact signature list so the extra one can be
-      # named instead of guessed at. Remove once diagnosed.
-      - name: TEMP — dump CI signature lists for comp mode / selecting parcels
-        if: always()
-        run: |
-          node -e '
-            const fs = require("fs");
-            const d = JSON.parse(fs.readFileSync("/tmp/ci-signature-dump.json", "utf8"));
-            for (const name of ["Map landing page (comp mode)", "Map landing page (selecting parcels)"]) {
-              console.log("===", name, "===");
-              for (const theme of ["light"]) {
-                console.log(" theme:", theme, "count:", d[name][theme].length);
-                for (const sig of d[name][theme]) console.log("  ", JSON.stringify(sig));
-              }
-            }
-          '
       - name: Visual regression baselines (pixel diff against approved baselines — NEW-1)
         env:
           BASE_URL: "http://localhost:4173/"
