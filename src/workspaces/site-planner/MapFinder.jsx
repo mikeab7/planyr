@@ -3776,9 +3776,12 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         {!err && selectMode && (
           <FloatingNotice maxWidth="min(420px, calc(100vw - 16px))">
             <div data-testid="select-parcels-tip" style={{ background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "6px 11px", fontSize: FONT_SIZE.control, color: PAL.ink, lineHeight: 1.4, pointerEvents: "none" }}>
+              {/* NEW-5 (B849588) — "Click a lot on the map" is the same phrase the Site Planner's
+                  empty state and its Parcel tools ▾ menu use for this same job (get a parcel from
+                  county records), so it reads as one door with one name across all three surfaces. */}
               {zoom != null && zoom < PARCEL_MINZOOM
-                ? "Click any lot to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines."
-                : "Click a lot to add it (＋). Hover an added lot and click to remove it (−). Add several, then Plan."}
+                ? "Click any lot on the map to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines."
+                : "Click a lot on the map to add it (＋). Hover an added lot and click to remove it (−). Add several, then Plan."}
             </div>
           </FloatingNotice>
         )}
