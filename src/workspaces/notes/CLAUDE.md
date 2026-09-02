@@ -87,23 +87,44 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   path. There must never be a "sync content on pageId change" effect; the search effect there is
   decorations-only and guards `isDestroyed`, which is the bar any new effect has to clear.
 - `components/IntegrityBanner.jsx` — the bar for the two findings nothing could previously mention (a note in two projects; a note that had lost its place). **Its own lazy chunk** — it renders only when something is actually wrong, so its bytes have no business on the rail's first paint.
-- **`components/ConflictCompare.jsx` — THE CONFLICT BAR SHOWS BOTH VERSIONS INSTEAD OF ASKING FOR A
-  BLIND PICK (B842624, amending B1391/V680).** The owner: *"i have no clue which one to choose, i
-  should be able to decide which one i should by at least looking at it."* Replaces the old
-  two-verbs-no-content `ConflictBar`. Two full, read-only, stacked version panes ("This window" /
-  "The other window"), each stamped with WHEN it was last saved (`lib/notesTime.js`'s
-  `stampLabel`) and with the genuinely differing words marked (a plain highlight, never a raw
-  +/- diff — the reference is Google Docs' version history, not a developer tool). **Its own lazy
-  chunk**, same reasoning as `IntegrityBanner.jsx` — a real conflict is rare and the diff engine
-  has no business on the route's critical path. ⛔ **NEITHER CHOICE DESTROYS THE COPY IT
-  DISCARDS, AND THAT IS NOW SYMMETRIC.** B1391 only protected "Use the other" (parked this
-  window's text first); "Keep this one" force-pushed straight over the other window's
-  already-saved text with nothing kept. `Notes.jsx`'s `handleConflict` now parks whichever body
-  is ABOUT to be discarded — read fresh via `notesConflictFor(pageId)` at click time, never off a
-  stale render closure — for BOTH buttons, so the comparison view's own "nothing is lost" promise
-  is true of both. The diff itself is `lib/notesConflictDiff.js` — PURE, unit-tested, a capped
-  word-level LCS with a line-level and then a linear prefix/suffix fallback so it can never build
-  an unbounded table on an outsized document.
+- **`components/ConflictNotice.jsx` — THE COMPACT NOTICE (NEW-3 of the follow-up brief, amending
+  B842624).** The owner: *"it shouldn't just pop up with this massive banner, i should be able to
+  click something that takes me to this but on full screen for review."* One line of text plus a
+  "Review changes →" button, `role="alert"`, inline and never floated (docs/DESIGN.md's floating-
+  notifications rule names this module's `role="alert"` blocks as chrome that must not move) —
+  it owns the open/closed state for `ConflictReview.jsx` and carries NO resolve choices itself,
+  on purpose: stacking a second decision surface on the notice would undo the point of it being
+  small. **Its own lazy chunk**, same reasoning as `IntegrityBanner.jsx` — a real conflict is rare
+  and the diff engine has no business on the route's critical path.
+- **`components/ConflictReview.jsx` — THE FULL-SCREEN REVIEW.** Opens on a REDLINE
+  (`components/NoteRedline.jsx` + `lib/notesRedline.js`) by default — NEW-2's ask, *"wouldn't a
+  redline be better, so I can see the differences over each other"* — with the original two-card
+  `components/ConflictSideBySide.jsx` one toggle away for a rewrite big enough that two
+  independent columns read easier. This is the ONLY place either "Keep this version" button
+  lives; closing (Esc/✕) never resolves anything, it just returns to the compact notice.
+  ⛔ **NEITHER CHOICE DESTROYS THE COPY IT DISCARDS, AND THAT IS SYMMETRIC.** B1391 only
+  protected "Use the other" (parked this window's text first); "Keep this one" force-pushed
+  straight over the other window's already-saved text with nothing kept. `Notes.jsx`'s
+  `handleConflict` now parks whichever body is ABOUT to be discarded — read fresh via
+  `notesConflictFor(pageId)` at click time, never off a stale render closure — for BOTH buttons.
+  ⛔ **NEW-1 — BOTH BUTTONS SAY "Keep this version", THE SAME STRING.** They used to read "Keep
+  this one" / "Use the other" — one self-referential verb and one other-referential verb for the
+  mechanically identical action. The owner: *"why does the right one only have an option to use
+  the other, think through how stupid this is."* `notesConflictLine` (`lib/notesStore.js`) now
+  returns one label for both; each button's `aria-label` still disambiguates which window it acts
+  on, for a screen reader.
+- `lib/notesRedline.js` — PURE: flattens a document's raw ProseMirror JSON into leaf blocks
+  (paragraph/heading/code, plus an OPAQUE placeholder for a picture/attachment/sketch/box/table —
+  diffing inside one of those is out of scope, and it says so rather than silently mishandling
+  it), block-matches the two sides with `lib/notesConflictDiff.js`'s `lcsAlign` (the shared LCS
+  primitive both files now use — one DP, not two copies), and runs a WORD-level diff (marks
+  preserved) inside a matched pair so a one-word edit inside a long paragraph reads as one
+  underlined/struck-through word, never the whole paragraph replaced twice over.
+- `components/ConflictSideBySide.jsx` — the original B842624 two-card layout (word-highlight
+  diff over `docToText`, not the redline's rich formatting), now `ConflictReview`'s secondary
+  view. The diff itself is `lib/notesConflictDiff.js` — PURE, unit-tested, a capped word-level
+  LCS with a line-level and then a linear prefix/suffix fallback so it can never build an
+  unbounded table on an outsized document.
 - `components/NoteToolbar.jsx` — formatting bar, **grouped by frequency**: what you reach for while
   writing on the row, the long tail behind **More**. Every active state is read from
   `editor.isActive(...)`, never mirrored into React state; every control cancels `mousedown` so the
