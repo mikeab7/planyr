@@ -511,7 +511,53 @@ console.log("\n=== CYCLE 6 (B986096-HARDENING-16) — NEW-1 re-investigation: ev
   check("rapid type-then-click-away (zero delay), 3 trials, none discard", allPassed);
 }
 
-console.log("\n=== CYCLE 7 (B986096-HARDENING-17, NEW-2) — arming a row for a pin must not hide the parcel alternative ===");
+console.log("\n=== CYCLE 7 (B986096-HARDENING-17) — Tab-to-an-editable-destination never misattributes the just-typed value to the wrong cell ===");
+{
+  // Root-caused via a ground-truth instrumented trace (console logs on beginEdit/finishEdit/
+  // onEditKeyDown), not guessed: Tab commits Executed, then (HARDENING-10's "land the next cell
+  // in edit mode" feature) immediately calls beginEdit on the destination — which resets the
+  // SHARED editingRef/editHandledRef/editValueRef refs for that new session. React then unmounts
+  // the old Executed <input>, and the browser fires a native blur on it — but AFTER those refs
+  // already point at the new cell. The blur handler's own stale-value safety net (HARDENING-15)
+  // then read the OLD input's leftover DOM text and committed it into whatever session the refs
+  // NOW pointed at: Price, not Executed. Measured live: typing "7/4/26" into Executed then
+  // pressing Tab landed "7,426" on Price while Executed itself reverted to empty. Never
+  // reproducible testing a single commit in isolation — it needs the moveDir auto-reopen to land
+  // on a DIFFERENT, EDITABLE cell to manifest at all.
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 }, ignoreHTTPSErrors: true });
+  await ctx.addInitScript(fixtureSeed(fixture, { id: "p0h17a" }));
+  await ctx.route("**/*", (route) => (route.request().url().startsWith(BASE) ? route.continue() : route.abort()));
+  const page = await ctx.newPage();
+  await openEntrySheet(page);
+
+  const target = await findExecCell(page);
+  await target.click();
+  await pacedWait(page, 250);
+  const input = target.locator("input");
+  await input.selectText().catch(() => {});
+  await page.keyboard.type("7/4/26");
+  await page.keyboard.press("Tab"); // Executed's next visible column for a Land row is Price — editable, so it auto-reopens
+  await pacedWait(page, 300);
+
+  const execText = (await target.innerText()).trim();
+  check("Tab commits the typed date into the cell that was actually being edited (Executed)",
+    execText === "07/04/26", `got ${JSON.stringify(execText)}`);
+
+  const priceCellText = await page.evaluate(() => {
+    const headers = [...document.querySelectorAll("thead tr")[1].querySelectorAll("th")];
+    const priceIdx = headers.findIndex((h) => h.textContent.trim() === "Price");
+    if (priceIdx < 0) return "(Price column not found)";
+    const priceHb = headers[priceIdx].getBoundingClientRect();
+    const rowTds = [...document.querySelectorAll('td[data-cell^="0-"]')];
+    const match = rowTds.find((td) => Math.abs(td.getBoundingClientRect().x - priceHb.x) < 3);
+    return match ? match.innerText.trim() : "(cell not found)";
+  });
+  check("Price (the auto-opened destination cell) stays empty — the typed value did not leak into it",
+    priceCellText === "", `got ${JSON.stringify(priceCellText)}`);
+  await ctx.close();
+}
+
+console.log("\n=== CYCLE 8 (B986096-HARDENING-18, NEW-2) — arming a row for a pin must not hide the parcel alternative ===");
 {
   // The owner reported PARCEL anchoring never once completed across 11 live cycles. Root cause:
   // a row's Location button only ever arms PIN mode (CompsPanel's armRow -> onArmMapPin), and the
@@ -522,7 +568,7 @@ console.log("\n=== CYCLE 7 (B986096-HARDENING-17, NEW-2) — arming a row for a 
   // switching between the two modes (the pendingAnchor effect keys off armedRowId, not off which
   // mode produced the anchor, so whichever pick lands still fills THIS row and never appends).
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 }, ignoreHTTPSErrors: true });
-  await ctx.addInitScript(fixtureSeed(fixture, { id: "p0h17a" }));
+  await ctx.addInitScript(fixtureSeed(fixture, { id: "p0h18a" }));
   await ctx.route("**/*", (route) => (route.request().url().startsWith(BASE) ? route.continue() : route.abort()));
   const page = await ctx.newPage();
   await openEntrySheet(page);
