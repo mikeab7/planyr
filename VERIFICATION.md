@@ -116,6 +116,20 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V602256 — B778: after tightening the `planar_*` RLS to owner-only, Michael's real schedule still loads and still saves, signed in `Blocker: auth`
+
+**Why this needs its own real pass.** B778 replaced the Scheduler's wide-open anon read/write policies with owner-scoped RLS (`user_id = auth.uid()`, private by default — no team sharing). The one thing that cannot be proven from this sandbox is the thing the item's own acceptance bar names explicitly: "verify the app still loads schedules AFTER the policy change, signed in." This sandbox's egress proxy CORS-blocks the Supabase auth handshake, so no real signed-in session can be established here to drive the actual Schedule tab.
+
+**What was verified here, without a signed-in browser.** The exact RLS behavior a signed-in request will hit was proven directly against production via Postgres role + JWT-claim simulation — the same mechanism PostgREST itself uses to enforce RLS (not a mock, not a weaker proxy): with the role set to `authenticated` and the JWT `sub` claim set to Michael's real account id (`b147d90d-b610-423d-af65-7e004f0ad72f`), `select * from planar_data` returns his row and `update planar_data set value = value where key = 'hs-v1'` succeeds — both inside a rolled-back transaction so nothing was actually written by the test. The anonymous path (what every visitor used before this fix, and what a signed-out tab would hit after it) now returns `42501 permission denied` instead of the data. `npm run build` is clean and the full `npx vitest run` suite (688/688 files, 14,251/14,251 tests) passes, including the pre-existing MCP owner-scoping invariant test, which now correctly covers the schedule read too (it previously missed it entirely — see B778's write-up). The client's actual save/read code path (`public/sequence/index.html`'s `window.storage`) was not touched at the wire-protocol level — same `{key, value}` upsert, same `.select().eq("key",k).single()` read — only the RLS predicate on the server side changed, and `planar_data.user_id` defaults to `auth.uid()` so a first-time write from a signed-in user needs no new client code to acquire a real owner.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as Michael:**
+1. Open the Schedule tab. **Expect:** it loads exactly as before — his real projects (Goose Creek, Kilgore, etc.) and their tasks, unchanged from before this fix. No "Cloud unreachable" banner, no blank/seed schedule.
+2. Make a small edit (rename a task, or just let an autosave fire) and reload. **Expect:** the edit is still there — the save round-trip still works.
+3. Open the Schedule tab **signed OUT** (or in a private/incognito window with no session). **Expect:** a calm amber "Sign in to see this schedule." banner (not the red "Cloud unreachable — fix the connection" banner) and a blank starter schedule — never Michael's real data.
+4. If Michael's two Hillwood teammates (michael.butler@hillwood.com, bryndan.nerren@hillwood.com) previously used the shared schedule: confirm with Michael whether they need it back — if so, that is exactly what **B1080976** (the blocked sharing feature) is for; this fix deliberately does not restore their access on its own (see B778's write-up, "let me decide when i share").
+
+**Result:** ⏳ pending — needs a real signed-in browser session on the live production app; not reachable from this sandbox.
+
 ### V471744 — B850432: a placed site plan overlay actually renders, sizes plausibly, and survives a reload, on the deployed page `Blocker: auth`
 
 **Why this needs its own real pass.** Zoom-dependent map rendering is a mandatory LIVE-VERIFY class, and the round trip needs a real Supabase-backed upload — this sandbox's egress proxy CORS-blocks the Supabase auth handshake, so no real `site_plan_overlays` row can be created here.

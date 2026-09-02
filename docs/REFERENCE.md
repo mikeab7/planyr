@@ -185,19 +185,35 @@ after a post-deploy delta re-sync + live check it is safe to delete**, freeing t
 slot (the owner is repurposing it for a personal, non-Planyr database). If any doc still says "TWO live
 projects," it predates this. `planyr-staging` remains reserved as a name for a future second environment.
 
-**Follow-up worth knowing (not urgent):** the migrated `planar_*` RLS policies are wide-open anon
-read/write — exact parity with how the scheduler has always worked, but now those tables sit in the
-production project. Tightening them to authenticated/owner-scoped access is a future item; it requires
-scheduler auth work, not just a policy flip.
+**⛔ CLOSED (B778/NEW-1, 2026-09-02) — the `planar_*` tables are NO LONGER anon read/write, and a
+schedule is PRIVATE BY DEFAULT.** The paragraph below described the wide-open state as "not urgent"
+and the acceptance under it called the anon policies deliberate; both were true until a live security
+audit (prompted by the owner asking for schedule sharing) found the exposure was real and current: an
+unauthenticated request with only the public anon key could read Michael's live schedule, and an
+unauthenticated write succeeded too (live-verified against production, both before and after). Every
+schedule now has a real owner (`user_id`, backfilled to Michael alone) and RLS requires an
+authenticated request from that exact owner — see
+`src/workspaces/scheduler/db/planar_tables_owner_scoped_rls.sql` +
+`planar_tables_owner_only_no_team_default.sql` and `BACKLOG.md` **B778**.
+**⛔ Unlike `public.sites`, this is deliberately NOT team-shared.** A first pass defaulted the
+policy to "owner OR same team" (mirroring `sites`' `is_team_member()` model) and backfilled
+`team_id` to the HIP Houston team; the owner overrode that same session, verbatim: *"let me decide
+when i share."* `team_id` stays on all three tables for a future explicit-share feature (**NEW-2**,
+blocked, not designed yet) but participates in **no** policy — not select, not insert, not update.
+Do not re-add a team clause to any of these policies without a fresh, explicit owner go-ahead, and
+do not re-add an anon policy to any of the three tables; the text below is kept as history, not
+guidance.
 
-**Supabase security-advisor ACCEPTANCES (audited 2026-07-12, delete-safety batch — don't re-litigate
-these on the next advisor sweep):**
-- `planar_data` / `planar_history` / `planar_suggestions` **anon INSERT/UPDATE policies are flagged by
-  the linter but DELIBERATE** — the standalone scheduler page (`public/sequence/index.html`) saves
-  signed-out by design. The protection layers are already in place: every save also snapshots to
-  `planar_history` (so an overwrite is recoverable), and **anon DELETE is blocked by policy**. Do NOT
-  "fix" these policies without doing the scheduler-auth work above first — a naive tightening breaks
-  the owner's scheduler saves. (Tracked as open item **B778**.)
+**Follow-up worth knowing (HISTORICAL — resolved above, kept for context):** the migrated `planar_*`
+RLS policies were wide-open anon read/write — exact parity with how the scheduler had always worked,
+but sitting in the production project once B408 consolidated it there. Tightening them to
+authenticated/owner-scoped access needed scheduler auth work, not just a policy flip — which is
+exactly what B778/NEW-1 did.
+
+**Supabase security-advisor ACCEPTANCES (audited 2026-07-12, delete-safety batch — SUPERSEDED for the
+`planar_*` row below by B778/NEW-1 above; the rest still stand, don't re-litigate on the next sweep):**
+- ~~`planar_data` / `planar_history` / `planar_suggestions` anon INSERT/UPDATE policies are flagged by
+  the linter but DELIBERATE~~ — **no longer true.** These policies are gone; see the CLOSED note above.
 - The `anon/authenticated can execute SECURITY DEFINER function` warnings on the team helpers
   (`is_team_member`, `list_my_teams`, `create_team`, `claim_team_invites`, …) are the working team
   RPC surface — each is internally scoped to `auth.uid()`.
