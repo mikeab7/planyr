@@ -654,7 +654,73 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     else if (e.key === "Tab") { e.preventDefault(); finishEdit(true, { axis: "col", delta: e.shiftKey ? -1 : 1, wrap: true }); }
     else if (e.key === "Escape") { e.preventDefault(); finishEdit(false, null); }
   };
-  const onEditBlur = () => finishEdit(true, null);
+  // ⛔ HARDENING-15 (B986096, owner cycle-5 P0, "Enter still discards, 5th cycle — root-caused
+  // this time") — React's `onKeyDown` prop is BUBBLE-PHASE and ROOT-DELEGATED (React 17+ attaches
+  // one native listener at the app root, not on each element), so it only fires once the native
+  // keydown event actually BUBBLES back up to that root. A real keypress always bubbles; the
+  // `KeyboardEvent` constructor's OWN default is `bubbles: false`, so a synthetic test event built
+  // without explicitly setting `bubbles: true` never reaches `onEditKeyDown` at all — the
+  // already-named SYNTHETIC-KEYS-DONT-EDIT trap, and the reason 4 prior rounds' "add an Enter
+  // branch" fixes never moved the owner's own reproduction. **The owner's cycle-5 A/B/C isolation
+  // is the proof, read precisely: Tab (Run A) "commits" NOT via this handler's Tab branch — the
+  // native Tab keydown's DEFAULT ACTION (browser-built-in focus-move to the next tabbable element)
+  // fires regardless of `bubbles` (default actions occur at dispatch time, independent of the
+  // bubble phase), and THAT focus loss fires a genuine native `focusout`, which — unlike a
+  // synthetic KeyboardEvent — bubbles UNCONDITIONALLY by spec no matter what caused it. So Run A
+  // actually commits through `onEditBlur`, not through this Enter/Tab branch at all — and Run C
+  // (Enter) has no such native side-effect to fall back on, so it silently reaches nothing.** A
+  // capture-phase listener on an ancestor "confirming the keydown is observed" is fully consistent
+  // with this, not evidence against it: capture-phase dispatch walks DOWN to the target regardless
+  // of `bubbles` (only the BUBBLE-phase return trip is skipped for a non-bubbling event), so an
+  // ancestor capture listener sees the event while React's root-delegated bubble-phase listener on
+  // the same target never does.
+  // THE FIX: a plain native `addEventListener("keydown", ...)` attached DIRECTLY on the editing
+  // input/select element itself. Per the DOM dispatch algorithm, a listener registered on the
+  // TARGET element fires at the AT_TARGET phase unconditionally — regardless of `bubbles` and
+  // regardless of the `capture` flag used to register it — because AT_TARGET always happens; only
+  // the phases before/after it (capturing down from the root, bubbling back up) depend on the
+  // event's own properties. This makes Enter/Tab/Escape work correctly for ANY dispatch, synthetic
+  // or real, closing the class outright rather than re-explaining it a sixth time. Zero behavior
+  // change for a genuine keypress: it already reached `onEditKeyDown` via React's normal bubble
+  // delegation, so this listener fires FIRST (AT_TARGET precedes the later bubble phase) and
+  // `finishEdit`'s existing `editHandledRef` guard makes the ensuing second (React) call from that
+  // same real keypress a safe no-op — the guard already existed for exactly this kind of
+  // double-invocation, unrelated to this fix.
+  // A ref, not the function itself, is what the listener below actually calls — attaching the
+  // listener only happens when `editing` toggles, but `rows` (and anything else `onEditKeyDown`/
+  // `finishEdit` close over) can change WHILE a cell stays open (e.g. an unrelated row's
+  // reverse-geocode resolving mid-edit); routing every call through this ref, reassigned on every
+  // render, keeps the native listener from ever acting on a stale closure — the same `*Ref` pattern
+  // this file already uses for `rowsRef`/`onRowsChangeRef` above.
+  const onEditKeyDownRef = useRef(onEditKeyDown);
+  onEditKeyDownRef.current = onEditKeyDown;
+  useEffect(() => {
+    const el = editInputRef.current;
+    if (!editing || !el) return undefined;
+    const handler = (e) => onEditKeyDownRef.current(e);
+    el.addEventListener("keydown", handler);
+    return () => el.removeEventListener("keydown", handler);
+  }, [editing]);
+  // ⛔ HARDENING-15 (NEW-1, "blur discards the edit") — investigated live under every realistic
+  // interaction (a real click on another cell, a real click on the map, a JS `.blur()` call after
+  // `execCommand('insertText', …)` typing, both as separate steps and in one synchronous block) and
+  // none reproduced a discard — every one committed the typed value correctly. The one thing that
+  // DID reproduce it: setting the input's `.value` through the raw property setter WITHOUT
+  // dispatching a real `input` event first (bypassing React's `onChange` entirely, so
+  // `editValueRef.current` — populated only by `onEditChange` — stays at whatever it was before,
+  // and blur commits THAT stale value). That specific technique is inconsistent with this cycle's
+  // own Run A (which read back the CORRECTLY typed value via the same "type, then a differentiated
+  // final action" setup), so it does not fully explain the report as given — but the class of bug
+  // it describes (a value entered without React ever observing it) is real and worth closing
+  // regardless of which exact technique produced it here. `onEditBlur` now reads the input's own
+  // live DOM value at the moment of blur as a fallback should it ever disagree with the tracked
+  // ref, rather than trusting the ref unconditionally — belt-and-suspenders, zero behavior change
+  // for the (already-working) real-typing / real-click-away / real-blur-call paths measured above.
+  const onEditBlur = (e) => {
+    const domVal = e?.target?.value;
+    if (typeof domVal === "string" && domVal !== editValueRef.current) editValueRef.current = domVal;
+    finishEdit(true, null);
+  };
 
   /* ---- navigation ----------------------------------------------------------------------------- */
   // Column movement walks the VISIBLE index list, not a raw +1/-1 on SHEET_COLUMNS — a hidden

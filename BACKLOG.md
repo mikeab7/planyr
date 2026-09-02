@@ -4579,6 +4579,85 @@ on sight). Both minors also fixed.
 - Files: `src/shared/comps/components/CompEntryGrid.jsx`, `src/shared/comps/components/CompsPanel.jsx`,
   `ui-audit/verify-comp-entry-p0.mjs`, `test/compsPanelLocation.test.js`, `MAP.md`.
 
+**Recurrence (×12) — HARDENING PASS 11 (B986096-HARDENING-15), owner cycle-5 P0: Enter STILL
+discarding on its 5th cycle, root-caused this time via the owner's own controlled A/B/C isolation —
+plus a NEW, higher-severity finding (blur silently discarding a committed edit) found while the
+owner was validating his own test harness.** Both genuinely fixed this pass, not re-documented.
+  1. **THE ROOT CAUSE, finally isolated.** The owner ran three controlled tests on the same
+     Executed cell, same bundle: (A) a Tab keydown alone (no blur) → commits correctly; (B) a
+     direct `.blur()` call alone (no key event) → discards; (C) an Enter keydown+keyup alone (no
+     blur) → discards. His conclusion — "synthetic key events DO reach your handler, Tab proves
+     it" — was the one wrong inference in an otherwise correct isolation. **What's actually
+     happening: Run A never goes through the Enter/Tab keydown branch at all.** React's `onKeyDown`
+     prop is bubble-phase and root-delegated (React 17+ attaches one native listener at the app
+     root, not per element), so it only fires once a keydown ACTUALLY BUBBLES back up to that root
+     — and the `KeyboardEvent` constructor's own default is `bubbles: false`. A real keypress always
+     bubbles; a hand-built synthetic one built without explicitly setting `bubbles: true` never
+     reaches it (SYNTHETIC-KEYS-DONT-EDIT, already named in this repo, hit before on a different
+     feature — and the reason 4 prior "add an Enter branch" rounds never moved his own
+     reproduction, because there was never anything wrong with the branch). Tab's own commit comes
+     from a COMPLETELY DIFFERENT mechanism: the native Tab keydown's DEFAULT ACTION (the browser's
+     own built-in "move focus to the next tabbable element") fires regardless of `bubbles` — default
+     actions occur at dispatch time, independent of the bubble phase — and the resulting focus loss
+     fires a genuine native `focusout`, which (unlike a hand-built KeyboardEvent) bubbles
+     UNCONDITIONALLY by spec no matter what caused it. So Run A commits through `onEditBlur`, not
+     through the keydown handler's Tab branch — and Run C (Enter) has no equivalent native
+     side-effect to fall back on, so it silently reaches nothing. The owner's own "a capture-phase
+     listener confirmed the synthetic keydowns are observed" check is fully CONSISTENT with this,
+     not evidence against it: capture-phase dispatch walks DOWN to the target regardless of
+     `bubbles` (only the BUBBLE-phase return trip is skipped for a non-bubbling event), so an
+     ancestor capture listener sees the event while React's root-delegated bubble-phase listener on
+     that same target never does.
+  2. **THE FIX, closing the class rather than re-explaining it a 6th time.** `CompEntryGrid.jsx`
+     now attaches a plain NATIVE `addEventListener("keydown", …)` directly on the editing input/
+     select element itself (via a `useEffect` keyed on `editing`, calling through a ref so it can
+     never act on a stale `rows` closure if the row set changes mid-edit — same `*Ref` pattern this
+     file already uses for `rowsRef`/`onRowsChangeRef`). Per the DOM dispatch algorithm, a listener
+     registered directly on the TARGET element fires at the AT_TARGET phase unconditionally —
+     regardless of `bubbles` and regardless of the `capture` flag it was registered with, because
+     AT_TARGET always happens; only the phases before/after it depend on the event's own bubbling.
+     This makes Enter/Tab/Escape work correctly for ANY dispatch, synthetic or real. **Zero behavior
+     change for a genuine keypress**: it already reached the handler via React's normal bubble
+     delegation, so the new native listener simply fires FIRST (AT_TARGET precedes the later bubble
+     phase) and `finishEdit`'s existing `editHandledRef` guard — already present, built for exactly
+     this class of double-invocation — makes the ensuing second (React) call from that same real
+     keypress a safe no-op.
+  3. **NEW-1 — "blur discards the edit," found by the owner while validating his own instrument,
+     correctly flagged as worse than the Enter bug** (a user types a rate, clicks the next cell to
+     keep going, and the value silently vanishes with no visible sign anything went wrong — Michael
+     enters comps in batches, so this would bite the very first real session). **Investigated live
+     under every realistic interaction this session could construct** (a real click on another
+     cell, a real click on the map, typing via `execCommand('insertText', …)` — the same technique
+     his own prior cycles used — then a JS `.blur()` call, both as separate steps and in one
+     synchronous block) — **none reproduced a discard; every one committed the typed value
+     correctly.** The one thing that DID reproduce it: setting the input's `.value` through the raw
+     property setter WITHOUT dispatching a real `input` event first, bypassing React's `onChange`
+     entirely — `editValueRef.current` (populated only by `onChange`) then stays at whatever it was
+     before, and the blur commits THAT stale value. That specific technique is inconsistent with
+     this cycle's own Run A/C setup (which read back the CORRECTLY typed value via the same
+     "type, then a differentiated final action" pattern), so it doesn't fully explain the report as
+     given — but the CLASS of bug it describes (a value entered without React ever observing it) is
+     real regardless of which exact technique produced it here, and cheap to close outright:
+     `onEditBlur` now reads the input's own live DOM value at the moment of blur and uses it if it
+     disagrees with the tracked ref, rather than trusting the ref unconditionally — belt-and-
+     suspenders, zero behavior change for the (already-working) real-typing / real-click-away /
+     real-blur-call paths measured live this pass.
+- **VERIFIED LIVE**, against the owner's own exact reproduction methodology, not from code reading:
+  a fresh check reproduces his precise A/B/C setup (execCommand typing + a non-bubbling
+  `KeyboardEvent("keydown"/"keyup", {key:"Enter"})` dispatch, with a capture-phase listener
+  confirming dispatch the same way his did) and now shows the cell correctly committing
+  ("01/11/26"), focus correctly leaving the input, and — the previously-reproduced discard case — a
+  raw-set value (bypassing React's onChange entirely) now also commits correctly on blur. All
+  folded into the permanent regression harness, `ui-audit/verify-comp-entry-p0.mjs`'s new
+  "CYCLE 5 (HARDENING-15)" block — **39/39 checks green**, including every pre-existing check from
+  every prior round (no regressions). Full `npx vitest run` — 685/685 files, 14,116/14,116 tests
+  green. `npm run build` clean. `npx eslint src/shared/comps/components/CompEntryGrid.jsx
+  ui-audit/verify-comp-entry-p0.mjs` — 0 errors. `node ui-audit/design-drift-audit.mjs --check` /
+  `node ui-audit/doc-pointer-audit.mjs` / `node scripts/build-map.mjs --check` / `node
+  scripts/build-backlog-index.mjs --check` / `node scripts/verification-queue-audit.mjs --check`
+  all pass.
+- Files: `src/shared/comps/components/CompEntryGrid.jsx`, `ui-audit/verify-comp-entry-p0.mjs`.
+
 ### B986097 — A draft staging table, reachable only by the KML import `[Site Planner / comps]` (feature) #comps #gis #persistence  *(owner chat block 2026-09-01, NEW-2, same decision doc as B986096 above. Minted **B986097 / V556721** from this branch's reserved block B986096–B986111 · V556720–V556735 against `origin/main` 8e42a14. DEDUPE-FIRST — searched Open/⏳Verify/Done for "KML", "My Maps", "import draft", "staging table", #comps: no prior item touches KML/My Maps import; net-new. Also searched for any prior `comp_import_drafts`/`comp_drafts` table — none exists.)*
 `[x]` **Shipped this session, including the schema — applied directly to production** (this session has Supabase MCP write access, unlike the read-only access a prior comps session flagged in this same module's folder pointer — that stale claim was corrected in the same commit).
 - Verify: live — GIS endpoint behavior (a real KML import, a real polygon centroid) + real production writes are mandatory LIVE-VERIFY classes. **V556721.**

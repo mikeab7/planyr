@@ -548,6 +548,39 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   logic (same `compLocationText.js` pure functions) but is a DELIBERATELY SEPARATE, self-contained
   cache — `CompEntryGrid.jsx`'s own reverse-geocode cache is a cycle-4 gate ("do not touch again
   except regression-checking") and this fix never touches that file.
+  **⛔ ROUND 12 (B986096-HARDENING-15, owner cycle-5 P0) — ENTER ROOT-CAUSED AND GENUINELY FIXED
+  AFTER 4 PRIOR ROUNDS, via the owner's own controlled Tab/blur/Enter isolation — read this before
+  touching `onEditKeyDown`/`onEditBlur` or dismissing a future keyboard-commit report as a test
+  artifact again.** His A/B/C test (Tab-keydown-alone commits, blur-alone discards, Enter-alone
+  discards) looked like it disproved SYNTHETIC-KEYS-DONT-EDIT — "synthetic key events DO reach your
+  handler, Tab proves it" — but Tab's own "commit" never goes through the keydown handler at all:
+  React's `onKeyDown` is bubble-phase and root-delegated, so it needs the native keydown to actually
+  BUBBLE to fire, and the `KeyboardEvent` constructor's own default is `bubbles: false`. Tab commits
+  anyway because the browser's own DEFAULT ACTION for Tab (native focus-move to the next tabbable
+  element) fires regardless of bubbling — default actions happen at dispatch time, independent of
+  the bubble phase — and the resulting focus loss fires a genuine `focusout`, which bubbles
+  UNCONDITIONALLY by spec no matter what caused it, landing on the SAME `onEditBlur` commit path a
+  real blur uses. Enter has no such native side-effect to fall back on, so a non-bubbling dispatch
+  genuinely never reaches anything. His own "a capture-phase listener confirmed the dispatch is
+  observed" check is CONSISTENT with this, not a refutation: capture-phase dispatch reaches every
+  ancestor on the way DOWN to the target regardless of `bubbles`; only the BUBBLE-phase return trip
+  (which React's root-delegated listener depends on) is skipped. **The fix closes the class rather
+  than re-adding an Enter branch a 5th time:** a plain native `addEventListener("keydown", …)` now
+  sits directly on the editing input/select element (a ref-indirected handler, so it can't act on a
+  stale `rows` closure mid-edit) — a listener on the TARGET fires at the DOM's AT_TARGET phase
+  unconditionally, regardless of bubbling, so this catches Enter/Tab/Escape from ANY dispatch, real
+  or synthetic. Zero behavior change for a genuine keypress (it still reaches the handler via normal
+  bubbling too; `finishEdit`'s pre-existing `editHandledRef` guard absorbs the resulting harmless
+  double-call). **Separately, a NEW "blur discards" finding — surfaced while the owner was
+  validating his own A/B/C harness, correctly flagged as worse than Enter (silent data loss) — could
+  NOT be reproduced under any realistic interaction tried this round** (a real click-away, a real
+  map click, `execCommand` typing + a JS `.blur()` call, both as separate steps and synchronously);
+  only a raw DOM-property-setter value assignment bypassing React's `onChange` entirely reproduced
+  it, which is inconsistent with his own Tab run reading back the correctly-typed value — but the
+  underlying class (a value entered without React ever observing it) was closed anyway, cheaply:
+  `onEditBlur` now reads the input's own live DOM value at blur time rather than trusting only the
+  tracked ref. Both proven live against his exact reproduction methodology (a non-bubbling dispatch
+  + the same capture-phase confirmation check), not from code reading.
   KML import (B849233) is a SEPARATE staging table, `db/comp_import_drafts.sql`
   (`public.comp_import_drafts`, owner-only RLS — no team visibility at all, unlike `comps` itself,
   until promoted) — `lib/kmlImport.js` is the pure, hand-rolled Placemark parser (a Point is a
