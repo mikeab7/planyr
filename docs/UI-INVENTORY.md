@@ -276,11 +276,11 @@ look aligned because they float over the same surface.
 
 **Map landing page (comp mode) — light:**
 
-- SiteCompPlace comp▾ (top 67, h 42) · ▼Sites1Comps0Site plans+ Uploa (top 67, h 295) · ▼Imagery & layers (top 67, h 30) — top spread 0px, height spread 265px.
+- SiteCompPlace comp▾ (top 67, h 42) · ▼Sites1Comps0Site plans+ Uploa (top 67, h 334) · ▼Imagery & layers (top 67, h 30) — top spread 0px, height spread 304px.
 
 **Map landing page (comp mode) — dark:**
 
-- SiteCompPlace comp▾ (top 67, h 42) · ▼Sites1Comps0Site plans+ Uploa (top 67, h 295) · ▼Imagery & layers (top 67, h 30) — top spread 0px, height spread 265px.
+- SiteCompPlace comp▾ (top 67, h 42) · ▼Sites1Comps0Site plans+ Uploa (top 67, h 334) · ▼Imagery & layers (top 67, h 30) — top spread 0px, height spread 304px.
 
 **Map landing page (selecting parcels) — light:**
 
@@ -367,16 +367,17 @@ look aligned because they float over the same surface.
 
 ### Map landing page (comp mode)
 
-**light** — 28 distinct style signature(s) over 34 matched element(s):
+**light** — 28 distinct style signature(s) over 35 matched element(s):
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
 | ⚠️ **fontSize 22 not in FONT_SIZE scale {10,10.5,12,13,14}** — 0px | 30px | 22px | 700 | `rgb(255, 255, 255)` | `0px none rgb(0, 0, 0)` | Zoom in, Zoom out ×2 | src/workspaces/doc-review/DocReview.jsx:1998:    { kind: "tool", id: "zoomIn", label: "In", title: "Zoom in (or scroll the wheel over the sheet)", icon: <MkIcon id="zoomIn" />, onClick: () => zoom(1.2) }, (+20 more matches, best-effort) |
 | ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 42px | 16px | 400 | `rgb(234, 238, 243)` | `0px none rgb(27, 30, 38)` | SiteCompPlace comp▾ ×1 | unattributed (no source match — best-effort text search) |
 | ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 6px | 30px | 16px | 400 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Browse sites or comps ×1 | src/workspaces/site-planner/MapFinder.jsx:483: * accessible name ("Browse sites or comps") and each segment's own tooltip — precisely so this (+1 more match, best-effort) |
-| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 295px | 16px | 400 | `rgba(255, 255, 255, 0.94)` | `1px solid rgb(225, 229, 235)` | ▼Sites1Comps0Site plans+ Upload site pla ×1 | unattributed (no source match — best-effort text search) |
+| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 334px | 16px | 400 | `rgba(255, 255, 255, 0.94)` | `1px solid rgb(225, 229, 235)` | ▼Sites1Comps0Site plans+ Upload site pla ×1 | unattributed (no source match — best-effort text search) |
 | 0px | 25px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(69, 76, 92)` | Schedule, Review, Library (+2 more) ×5 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+89 more matches, best-effort) |
 | 8px | 30px | 12px | 400 | `rgb(234, 238, 243)` | `1px solid rgb(215, 221, 229)` | Full screen, Settings ×2 | src/shared/ui/AppHeader.jsx:149:      aria-label={active ? "Leave full screen" : "Full screen"} (+6 more matches, best-effort) |
+| 0px | 21px | 10.5px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | ▾Recently deleted ×2 | unattributed (no source match — best-effort text search) |
 | 6px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Dashboard: all projects ×1 | src/shared/ui/AppHeader.jsx:866:            title={onDashboard ? "Dashboard: all projects" : undefined} |
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | All projects: Map ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Choose a project or organization ×1 | src/shared/ui/ProjectBreadcrumb.jsx:627:        title={cross ? "Browsing all projects" : org ? "Browsing your organization's notes, library and agenda" : currentProject ? "Switch project" : "Choose a project or organization"} |
@@ -394,22 +395,22 @@ look aligned because they float over the same surface.
 | 6px | 22px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Sites1 ×1 | unattributed (no source match — best-effort text search) |
 | 6px | 22px | 12px | 700 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Comps0 ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 25px | 10.5px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | + Upload site plan ×1 | src/shared/sitePlans/components/SitePlansSection.jsx:730:        {!flow && <Button size="sm" variant="ghost" onClick={startNewUpload}>+ Upload site plan</Button>} |
-| 0px | 21px | 10.5px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | ▾Recently deleted ×1 | unattributed (no source match — best-effort text search) |
-| 6px | 24px | 10.5px | 700 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Paste comps from a broker email or spreadsheet ×1 | src/shared/comps/components/CompsPanel.jsx:675:                <button onClick={openGrid} title="Paste comps from a broker email or spreadsheet" |
-| 6px | 24px | 10.5px | 700 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Import a Google My Maps export ×1 | src/shared/comps/components/CompsPanel.jsx:681:                <label title="Import a Google My Maps export" |
+| 6px | 24px | 10.5px | 700 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Paste comps from a broker email or spreadsheet ×1 | src/shared/comps/components/CompsPanel.jsx:745:                <button onClick={openGrid} title="Paste comps from a broker email or spreadsheet" |
+| 6px | 24px | 10.5px | 700 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Import a Google My Maps export ×1 | src/shared/comps/components/CompsPanel.jsx:751:                <label title="Import a Google My Maps export" |
 | 8px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Imagery & layers ×1 | src/shared/ui/controls.jsx:44: * chip — the account pill, "Drop a pin", the collapsed "Imagery & layers" pill, the nav tabs' (+5 more matches, best-effort) |
 
-**dark** — 28 distinct style signature(s) over 34 matched element(s):
+**dark** — 28 distinct style signature(s) over 35 matched element(s):
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
 | ⚠️ **fontSize 22 not in FONT_SIZE scale {10,10.5,12,13,14}** — 0px | 30px | 22px | 700 | `rgb(255, 255, 255)` | `0px none rgb(0, 0, 0)` | Zoom in, Zoom out ×2 | src/workspaces/doc-review/DocReview.jsx:1998:    { kind: "tool", id: "zoomIn", label: "In", title: "Zoom in (or scroll the wheel over the sheet)", icon: <MkIcon id="zoomIn" />, onClick: () => zoom(1.2) }, (+20 more matches, best-effort) |
 | ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 42px | 16px | 400 | `rgb(17, 19, 25)` | `0px none rgb(232, 235, 240)` | SiteCompPlace comp▾ ×1 | unattributed (no source match — best-effort text search) |
 | ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 6px | 30px | 16px | 400 | `rgb(23, 26, 33)` | `0px none rgb(232, 235, 240)` | Browse sites or comps ×1 | src/workspaces/site-planner/MapFinder.jsx:483: * accessible name ("Browse sites or comps") and each segment's own tooltip — precisely so this (+1 more match, best-effort) |
-| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 295px | 16px | 400 | `rgba(24, 27, 33, 0.93)` | `1px solid rgb(42, 46, 55)` | ▼Sites1Comps0Site plans+ Upload site pla ×1 | unattributed (no source match — best-effort text search) |
+| ⚠️ **fontSize 16 not in FONT_SIZE scale {10,10.5,12,13,14}** — 12px | 334px | 16px | 400 | `rgba(24, 27, 33, 0.93)` | `1px solid rgb(42, 46, 55)` | ▼Sites1Comps0Site plans+ Upload site pla ×1 | unattributed (no source match — best-effort text search) |
 | 0px | 25px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(194, 200, 210)` | Schedule, Review, Library (+2 more) ×5 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+89 more matches, best-effort) |
 | 8px | 30px | 12px | 400 | `rgb(17, 19, 25)` | `1px solid rgb(38, 42, 51)` | Full screen, Settings ×2 | src/shared/ui/AppHeader.jsx:149:      aria-label={active ? "Leave full screen" : "Full screen"} (+6 more matches, best-effort) |
+| 0px | 21px | 10.5px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | ▾Recently deleted ×2 | unattributed (no source match — best-effort text search) |
 | 6px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Dashboard: all projects ×1 | src/shared/ui/AppHeader.jsx:866:            title={onDashboard ? "Dashboard: all projects" : undefined} |
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | All projects: Map ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Choose a project or organization ×1 | src/shared/ui/ProjectBreadcrumb.jsx:627:        title={cross ? "Browsing all projects" : org ? "Browsing your organization's notes, library and agenda" : currentProject ? "Switch project" : "Choose a project or organization"} |
@@ -427,9 +428,8 @@ look aligned because they float over the same surface.
 | 6px | 22px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Sites1 ×1 | unattributed (no source match — best-effort text search) |
 | 6px | 22px | 12px | 700 | `rgb(29, 32, 39)` | `0px none rgb(232, 235, 240)` | Comps0 ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 25px | 10.5px | 600 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | + Upload site plan ×1 | src/shared/sitePlans/components/SitePlansSection.jsx:730:        {!flow && <Button size="sm" variant="ghost" onClick={startNewUpload}>+ Upload site plan</Button>} |
-| 0px | 21px | 10.5px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | ▾Recently deleted ×1 | unattributed (no source match — best-effort text search) |
-| 6px | 24px | 10.5px | 700 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Paste comps from a broker email or spreadsheet ×1 | src/shared/comps/components/CompsPanel.jsx:675:                <button onClick={openGrid} title="Paste comps from a broker email or spreadsheet" |
-| 6px | 24px | 10.5px | 700 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Import a Google My Maps export ×1 | src/shared/comps/components/CompsPanel.jsx:681:                <label title="Import a Google My Maps export" |
+| 6px | 24px | 10.5px | 700 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Paste comps from a broker email or spreadsheet ×1 | src/shared/comps/components/CompsPanel.jsx:745:                <button onClick={openGrid} title="Paste comps from a broker email or spreadsheet" |
+| 6px | 24px | 10.5px | 700 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Import a Google My Maps export ×1 | src/shared/comps/components/CompsPanel.jsx:751:                <label title="Import a Google My Maps export" |
 | 8px | 30px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Imagery & layers ×1 | src/shared/ui/controls.jsx:44: * chip — the account pill, "Drop a pin", the collapsed "Imagery & layers" pill, the nav tabs' (+5 more matches, best-effort) |
 
