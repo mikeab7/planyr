@@ -758,9 +758,15 @@ function finalizeGenericRow(generic, rawFlags, raw) {
       mergeFlag(flags, "leaseRatePeriod", "blocking",
         `No monthly/annual period was given — $${generic.rate} means something 12x different either way. Pick one before saving.`);
     }
-    if (!generic.rateBasis) {
-      mergeFlag(flags, "leaseRateExpense", "soft", "NNN vs gross wasn't given — check it.");
-    }
+    // ⛔ B986096 ×9 (owner amendment, 2026-09-02) — BASIS defaults to NNN when the text doesn't
+    // say, because industrial leases are overwhelmingly triple-net and a gross deal is the
+    // exception a broker names explicitly. This is DELIBERATELY NOT the same treatment as
+    // PERIOD above: basis has one answer that is nearly always right (a helpful default), period
+    // has two common answers 12x apart (a guess there corrupts every comparison in the sheet) —
+    // collapsing the two into one rule would be exactly the mistake this distinction exists to
+    // prevent. No flag, no note, no marker: a defaulted NNN renders identically to a stated one
+    // (the owner has already rejected an unexplained asterisk/badge once).
+    if (!generic.rateBasis) generic.rateBasis = "nnn";
   }
   // ⛔ B986096-HARDENING-8 (owner correction, reversing HARDENING-6's stand-in) — EXECUTION and
   // COMMENCEMENT are different facts about different moments, and a comp's Date column is USED:

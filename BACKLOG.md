@@ -4196,13 +4196,24 @@ concurrently):
   TYPE INFERENCE — plus the headline repro asserting the exact reported string produces Rate 0.56 / TI
   12 / Escal 3 / Type lease / period correctly BLOCKING. Full suite green (14,000 tests), build green,
   `eslint` 0 errors.
+  **⛔ SAME-DAY AMENDMENT (owner, after the report above) — BASIS now DEFAULTS TO NNN when the text
+  doesn't say, industrial leases being overwhelmingly triple-net.** No basis word at all → `nnn`; any
+  gross-family word (gross/full service/FS/IG/industrial gross/MG/modified gross/base year) still wins
+  outright; net-family words (NNN/nnn/triple net/tripple net/NN/N/abs net/absolute net) still map to
+  `nnn` as before. Deliberately NOT extended to the rate PERIOD, which stays genuinely blank/`blocking`
+  when unstated — the owner's own distinction: basis has one answer that's nearly always right (a
+  helpful default), period has two answers 12x apart (a guess there corrupts every comparison in the
+  sheet). No flag, no note, no marker on a defaulted NNN — renders identically to a stated one (the
+  owner has already rejected an unexplained asterisk/badge once). Headline repro updated: the reported
+  string now reads Rate 0.56 / Unit SF / **Basis NNN (defaulted, unmarked)** / TI 12 / Escal 3 / Type
+  lease / Per still blank+blocking. 93 tests, full suite still green (14,000+), build green, eslint clean.
 - Verify: live — **V575120.** The report's own acceptance bar: after merge/deploy, paste
   `.56/SF , 12 TI, 3% bumps` into the LIVE comp paste box and read the rendered row back verbatim,
   confirming the served bundle hash changed from `index-ChNZKmVA.js` first. `Blocker: auth` — the comp
   paste box is reachable only inside a signed-in Site Planner project (`compsStore.js`'s owner-write
   RLS), which this session's sandboxed browser cannot reach (the proxy CORS-blocks the Supabase auth
   handshake, the same wall behind every other `Blocker: auth` item in this file) — attempted and
-  confirmed live, see V575120's own entry.
+  confirmed live, see V575120's own entry (updated for the Basis-NNN amendment).
 - Files (this pass): `src/shared/comps/lib/compParse.js`, `test/compParse.test.js`.
 - Base: `origin/main` @ `63def61` (merged into this branch after this pass's local work).
 

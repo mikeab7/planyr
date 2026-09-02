@@ -82,10 +82,16 @@ describe("compParse: the canonical blocking case — a lease rate with no period
     expect(cellFlags.leaseRatePeriod).toBeUndefined();
     expect(rowHasBlockingFlags(cellFlags)).toBe(false);
   });
-  it("basis (NNN vs gross) missing is SOFT, never blocking — it never scales the shown number", () => {
-    const { cellFlags } = parseProseLine("$8.50/SF/yr");
-    expect(cellFlags.leaseRateExpense?.level).toBe("soft");
+  it("B986096 x9 (owner amendment) — basis with no stated term DEFAULTS to NNN, no flag at all — industrial leases are overwhelmingly triple-net", () => {
+    const { draft, cellFlags } = parseProseLine("$8.50/SF/yr");
+    expect(draft.leaseRateExpense).toBe("nnn");
+    expect(cellFlags.leaseRateExpense).toBeUndefined(); // no marker — renders like any other value
     expect(rowHasBlockingFlags(cellFlags)).toBe(false);
+  });
+  it("an explicit gross-family term still wins over the NNN default", () => {
+    const { draft, cellFlags } = parseProseLine("$8.50/SF/yr gross");
+    expect(draft.leaseRateExpense).toBe("gross");
+    expect(cellFlags.leaseRateExpense).toBeUndefined();
   });
 });
 
@@ -329,7 +335,7 @@ describe("compParse: splitPasteLines", () => {
  * ============================================================================================ */
 
 describe("compParse: THE HEADLINE TEST — Michael's exact repro that started this rewrite", () => {
-  it("'.56/SF , 12 TI, 3% bumps' -> one row, Rate 0.56 / TI 12 / Escal 3 / Type lease, period BLOCKING (never guessed)", () => {
+  it("'.56/SF , 12 TI, 3% bumps' -> one row, Rate 0.56 / Unit SF / Basis NNN (defaulted) / TI 12 / Escal 3 / Type lease, Per BLANK (blocking, never guessed)", () => {
     const { mode, rows } = parsePaste(".56/SF , 12 TI, 3% bumps");
     expect(mode).toBe("single");
     expect(rows).toHaveLength(1);
@@ -338,8 +344,13 @@ describe("compParse: THE HEADLINE TEST — Michael's exact repro that started th
     expect(draft.leaseRate).toBe("0.56");
     expect(draft.leaseTi).toBe("12");
     expect(draft.leaseEscalationPct).toBe("3");
-    // The rate has no stated period — this must still BLOCK, never be guessed away, even though
-    // three other facts on the same line were correctly captured (DEFECT A).
+    // B986096 x9 (owner amendment) — no stated basis defaults to NNN, silently (no flag, no
+    // marker) — industrial leases are overwhelmingly triple-net.
+    expect(draft.leaseRateExpense).toBe("nnn");
+    expect(cellFlags.leaseRateExpense).toBeUndefined();
+    // The rate PERIOD has no stated value — this must still BLOCK, never be guessed away
+    // (unlike basis, two common period answers are 12x apart), even though three other facts
+    // on the same line were correctly captured (DEFECT A).
     expect(draft.leaseRatePeriod).toBe("");
     expect(cellFlags.leaseRatePeriod?.level).toBe("blocking");
     expect(rowHasBlockingFlags(cellFlags)).toBe(true);
