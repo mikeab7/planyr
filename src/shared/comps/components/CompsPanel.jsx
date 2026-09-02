@@ -29,7 +29,10 @@ import { compMarkerColor } from "../lib/compMarkerIcon.js";
 import { formatDateDisplay } from "../lib/compDates.js";
 import { collectPartyNames } from "../lib/partySuggest.js";
 import PartyNameField from "./PartyNameField.jsx";
-import { fetchAllComps, insertComp, insertComps, updateComp, deleteComp } from "../lib/compsStore.js";
+import {
+  fetchAllComps, insertComp, insertComps, updateComp, deleteComp,
+  fetchDeletedComps, restoreComp, permanentlyDeleteComp,
+} from "../lib/compsStore.js";
 import { listMyTeams, currentIdentity } from "../../../workspaces/site-planner/lib/teams.js";
 import CompEntryGrid, { draftFromParsedRow } from "./CompEntryGrid.jsx";
 import CompDraftsPanel from "./CompDraftsPanel.jsx";
@@ -135,6 +138,23 @@ export function CompRow({ comp, onOpen, overlaysById }) {
   );
 }
 
+// B1066368 — one row in the "Recently deleted" trash list, mirroring SitePlansSection.jsx's own
+// trash row shape (identity + Restore + Delete forever). Reuses the same identity resolution as
+// CompRow (title, else a real Location, else the rate headline) rather than a bare id or type.
+function TrashRow({ comp, overlaysById, onRestore, onPurge }) {
+  const locationText = useCompLocationText(comp.anchor, overlaysById);
+  const primary = comp.title || locationText || compHeadline(comp);
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 0", borderTop: "1px solid var(--border-default)" }}>
+      <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={primary || undefined}>
+        {primary} <span style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>· {formatDateDisplay(comp.compDate)}</span>
+      </div>
+      <Button size="sm" variant="ghost" onClick={() => onRestore(comp)}>Restore</Button>
+      <Button size="sm" variant="ghost" style={{ color: "var(--danger-text)" }} onClick={() => onPurge(comp)}>Delete forever</Button>
+    </div>
+  );
+}
+
 // A comp pinned on a site plan links back to its source brochure — provenance, not just a
 // number (NEW-1/B848848: "a lease comp whose brochure is one click away is worth
 // considerably more than one with a number and no provenance"). `overlay` may be null (the
@@ -175,6 +195,13 @@ export function CompDetail({ comp, canEdit, onEdit, onDelete, onBack, overlaysBy
   // HARDENING-14 — the detail view showed every structured field EXCEPT where the comp actually
   // is, despite that being real, already-resolved information (an address, an APN, a plan name).
   const locationText = useCompLocationText(comp.anchor, overlaysById);
+  // B1066369 (owner live-drive report — "delete has no confirmation step") — a comp used to be
+  // destroyed on the click that registers, with no way to back out. An inline "Delete? Confirm /
+  // Cancel" on the button itself, per the no-dialog-box-edits rule, rather than a modal. Resets
+  // whenever a different comp is opened, so leaving this comp's detail view (or landing on
+  // another one) never carries an armed confirm forward.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  useEffect(() => { setConfirmingDelete(false); }, [comp.id]);
   return (
     <div style={{ padding: "10px 14px 14px" }}>
       {/* Two distinct things, spaced as such (NEW-4) — a real flex gap, with wrap so a long
@@ -193,9 +220,19 @@ export function CompDetail({ comp, canEdit, onEdit, onDelete, onBack, overlaysBy
       </div>
       <SourceBrochureLink comp={comp} overlaysById={overlaysById} onOpenBrochure={onOpenBrochure} />
       {canEdit && (
-        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-          <Button size="sm" onClick={() => onEdit(comp)}>Edit</Button>
-          <Button size="sm" variant="danger" onClick={() => onDelete(comp)}>Delete</Button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+          {confirmingDelete ? (
+            <>
+              <span style={{ fontSize: 12, color: "var(--danger-text)" }}>Delete this comp?</span>
+              <Button size="sm" variant="danger" onClick={() => onDelete(comp)}>Confirm</Button>
+              <Button size="sm" variant="ghost" onClick={() => setConfirmingDelete(false)}>Cancel</Button>
+            </>
+          ) : (
+            <>
+              <Button size="sm" onClick={() => onEdit(comp)}>Edit</Button>
+              <Button size="sm" variant="danger" onClick={() => setConfirmingDelete(true)}>Delete</Button>
+            </>
+          )}
         </div>
       )}
       {!canEdit && <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 10 }}>Entered by a teammate — only they can edit or remove this comp.</div>}
@@ -453,6 +490,13 @@ export default function CompsPanel({
   const [draftBusyId, setDraftBusyId] = useState(null);
   const [kmlImporting, setKmlImporting] = useState(false);
   const [kmlImportError, setKmlImportError] = useState(null);
+  // B1066368 (owner live-drive report — "deleting a comp destroys it with no confirmation and no way
+  // back") — "Recently deleted", mirroring SitePlansSection.jsx's own trash disclosure over
+  // site_plan_overlays: fetched lazily, only once the disclosure is opened.
+  const [trash, setTrash] = useState([]);
+  const [trashOpen, setTrashOpen] = useState(false);
+  const [trashLoading, setTrashLoading] = useState(false);
+  const [trashError, setTrashError] = useState(null);
   const notifiedRef = useRef(onCompsChange);
   notifiedRef.current = onCompsChange;
 
@@ -593,6 +637,32 @@ export default function CompsPanel({
     await reload();
     setView("list");
     setActiveComp(null);
+    if (trashOpen) await loadTrash();
+  };
+
+  // B1066368 — the "Recently deleted" trash list's three actions, mirroring
+  // SitePlansSection.jsx's loadTrash/toggleTrash/restore/purgeForever exactly.
+  const loadTrash = async () => {
+    setTrashLoading(true);
+    const { data, error } = await fetchDeletedComps();
+    setTrashLoading(false);
+    if (error) { setTrashError(error.message || "Failed to load Recently deleted"); return; }
+    setTrashError(null);
+    setTrash(data || []);
+  };
+  const toggleTrash = () => {
+    setTrashOpen((was) => { if (!was) loadTrash(); return !was; });
+  };
+  const restoreOne = async (c) => {
+    const { error } = await restoreComp(c.id);
+    if (error) { setTrashError(error.message || "Restore failed"); }
+    await reload();
+    await loadTrash();
+  };
+  const purgeForever = async (c) => {
+    const { error } = await permanentlyDeleteComp(c.id);
+    if (error) { setTrashError(error.message || "Delete failed"); }
+    await loadTrash();
   };
 
   // B849232/NEW-1 — the paste-grid create surface.
@@ -695,6 +765,30 @@ export default function CompsPanel({
             <SummaryStrip comps={comps} />
             {comps.length === 0 && <div style={{ padding: 14, fontSize: 12, color: "var(--text-secondary)" }}>No comps yet. Paste a few from a broker email with “＋ New comps” above, or use “Drop a pin”/“Comp from parcel” on the map.</div>}
             {comps.map((c) => <CompRow key={c.id} comp={c} onOpen={openDetail} overlaysById={overlaysById} />)}
+
+            {/* B1066368 — "Recently deleted", mirroring SitePlansSection.jsx's own trash disclosure
+                exactly (collapsed by default, fetched lazily on first open). */}
+            <div style={{ margin: "6px 14px 10px" }}>
+              <button onClick={toggleTrash} style={{
+                border: "none", background: "none", padding: "4px 0", cursor: "pointer", fontFamily: "inherit",
+                fontSize: 10.5, color: "var(--text-secondary)", display: "inline-flex", alignItems: "center", gap: 4,
+              }}>
+                <span style={{ display: "inline-block", transform: trashOpen ? "none" : "rotate(-90deg)" }}>▾</span>
+                Recently deleted{trashOpen && trash.length ? ` (${trash.length})` : ""}
+              </button>
+              {trashError && <div style={{ fontSize: 10.5, color: "var(--danger-text)", padding: "4px 0" }}>{trashError}</div>}
+              {trashOpen && (
+                trashLoading ? (
+                  <div style={{ fontSize: 10.5, color: "var(--text-secondary)", padding: "4px 0" }}>Loading…</div>
+                ) : trash.length === 0 ? (
+                  <div style={{ fontSize: 10.5, color: "var(--text-secondary)", padding: "4px 0" }}>Nothing here.</div>
+                ) : (
+                  trash.map((c) => (
+                    <TrashRow key={c.id} comp={c} overlaysById={overlaysById} onRestore={restoreOne} onPurge={purgeForever} />
+                  ))
+                )
+              )}
+            </div>
           </>
         )}
 

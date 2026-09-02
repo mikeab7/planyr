@@ -116,6 +116,21 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V597264 — B1066368/B1066369: a deleted comp is recoverable from "Recently deleted", and Delete asks for confirmation first, on a real signed-in account `Blocker: auth`
+
+**Why this needs its own real pass.** `comps` is a signed-in-only Supabase table (RLS `for … to authenticated`) — there is no logged-out comp to delete/restore/purge in this sandbox, so the full click-through (place a comp, delete it with the new confirm step, find it in Recently deleted, restore it, then permanently delete it) needs a real account. What COULD be proven without one already was: the migration (`comps.deleted_at`, applied live to production project `lyeqzkuiwngunutlkkmi`, confirmed via a direct schema read) and the entire RLS boundary the store functions depend on — soft-delete/restore/permanent-delete all proven against REAL policies via a self-rolling-back transaction (9/9 checks passed, zero residue left on production: owner soft-delete works, a teammate's restore/purge attempt affects 0 rows, the owner's restore/purge succeed). Separately, `CompDetail`'s Edit/Delete button wiring (the new inline confirm step) was proven with 5/5 checks against the real, unmocked component driven by REAL Playwright clicks in an isolated mount (no Supabase involved — see B1066370 below for why this was necessary and sufficient for that half).
+
+**Steps:**
+1. Place a comp (Location cell → click the map), fill Executed date, Save. **Expect:** it saves and appears in the comps list, same as before.
+2. Open it, click **Delete**. **Expect:** it does NOT disappear immediately — the button row instead reads "Delete this comp?" with **Confirm**/**Cancel**.
+3. Click **Cancel**. **Expect:** back to the plain Edit/Delete row, comp untouched, still in the list.
+4. Click **Delete** again, then **Confirm**. **Expect:** the comp disappears from the list (comps counter decrements), and a reload does not bring it back.
+5. In the comps list, expand **Recently deleted**. **Expect:** the comp just deleted is there (not "Nothing here"), showing its title/location and date.
+6. Click **Restore**. **Expect:** the comp reappears in the main list; Recently deleted no longer shows it.
+7. Delete it again (steps 2–4), expand Recently deleted, click **Delete forever** on it. **Expect:** it's gone from Recently deleted permanently — a reload of the trash disclosure shows "Nothing here" for it.
+
+**Result:** ⏳ pending — needs a real signed-in account. The persistence/RLS layer and the confirm-button wiring are both proven correct live above; this step is the final click-through tying them together in the real app.
+
 ### V571200 — B1023120: the Notes conflict comparison bar, on a real two-window divergence `Blocker: auth`
 
 **Why this needs its own real pass.** The comparison view only ever renders when a REAL revision conflict is raised by the server's guarded push — a genuine two-signed-in-window race is a mandatory LIVE-VERIFY class (concurrency/multi-writer), and the sandbox cannot sign in (the proxy CORS-blocks the Supabase auth handshake — the same `Blocker: auth` wall behind V680, which this item amends).
