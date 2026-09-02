@@ -4658,6 +4658,66 @@ owner was validating his own test harness.** Both genuinely fixed this pass, not
   all pass.
 - Files: `src/shared/comps/components/CompEntryGrid.jsx`, `ui-audit/verify-comp-entry-p0.mjs`.
 
+**Recurrence (×13) — HARDENING PASS 12 (B986096-HARDENING-16), owner cycle-6 handoff: Enter and
+grid keyboard navigation ESCALATED OFF this session to a dedicated root-cause hunt** (five
+consecutive deployed bundles, per this repo's own STANDING RULE #3(C) that is the trigger for
+escalation, not a sixth attempt at the same fix) — **do not touch `onEditKeyDown`/`onGridKeyDown`/
+tabindex wiring; that is explicitly out of scope for this session.** Six items handed over as this
+session's whole scope, worked in the owner's stated priority order.
+  1. **NEW-1 — blur discards the edit, re-investigated exhaustively, no reproduction found on the
+     current merged code (post-`259b0392a`).** Extended well beyond the prior round's coverage,
+     specifically to close the gap the owner's own three named click-away targets ("another cell,
+     the map, the panel background") left untested: clicking the panel's own HEADER chrome and its
+     FOOTER/status-line area (both genuinely non-interactive `<div>`s, distinct from a cell click
+     and a map click, and never isolated as their own test before this round) — both commit
+     correctly. Also tested a real fast typist's worst case — zero artificial delay between the
+     last keystroke and the click-away (3 trials) — all committed correctly. Combined with the
+     prior round's coverage (real click-away, real map click, `execCommand` typing + a JS `.blur()`
+     call, both separately and in one synchronous block, and the raw-property-setter edge case
+     already hardened against), this is now nine distinct realistic reproduction attempts across
+     two rounds, all committing correctly. **Disposition per STANDING RULE #2: this is
+     reproduce-and-fix for the raw-setter class (already shipped in HARDENING-15) plus
+     instrument-it (all nine scenarios are now permanent regression checks) — not a claim the
+     report is wrong.** If it recurs, the next session needs the exact bundle hash and timestamp
+     to rule out a stale/pre-merge build, since every realistic interaction this session could
+     construct now commits correctly.
+  2. **NEW-2 — the PARCEL anchor kind has never completed end to end.** Re-confirmed
+     `Blocker: live-GIS` still holds and is not a stale classification: `identifyParcelEager`/
+     `queryAtPoint` (`MapFinder.jsx`) calls the county's live ArcGIS parcel-identify service, an
+     external host this sandbox's Chromium cannot reach. Checked specifically for a workaround
+     this round that wasn't checked before — the B629 Drive PARCEL SNAPSHOT fallback (a
+     county-wide cached copy used when the live server is down) — and it doesn't help here either:
+     hydrating that snapshot is itself a network call through the Cloudflare Pages Functions
+     backend, which isn't present when running the plain Vite dev server this sandbox uses for
+     signed-out local testing. No code change; `compParcelAnchor.js` (the pure derivation) is
+     unchanged since #1309 and remains solidly unit-tested.
+  3. **NEW-3 — the SITE PLAN anchor kind has never completed end to end.** Re-confirmed
+     `Blocker: auth` + `Blocker: real-data` still holds: a site-plan anchor requires clicking an
+     already-uploaded, already-placed overlay image, which needs a signed-in account with Drive-
+     backed storage — both unreachable from this sandbox. No code change.
+  4. **NEW-4 — the Edit path on a saved comp has never been round-tripped.** Re-read
+     `CompsPanel.jsx`'s `save()` (unchanged since prior review): correctly branches
+     `draft.id ? updateComp(draft.id, comp) : insertComp(comp)`, awaits, reloads, shows the
+     updated detail view. Confirming the actual persistence needs a genuine signed-in Supabase
+     write — `Blocker: auth`. No code change; this is a confirmation request per the owner's own
+     framing ("nobody has confirmed"), not a diagnosed bug.
+  5. **NEW-5 — comp list titles a row by its rate when Title is empty.** Already fixed in
+     HARDENING-14 (`useCompLocationText` in `CompsPanel.jsx`) and confirmed still live and correct
+     on the current merged code this round (`test/compsPanelLocation.test.js` re-run, 4/4 green).
+     No further action needed — flagged here so it isn't re-diagnosed as still open.
+  6. **NEW-6 — the comp detail view shows no Location.** Same fix, same file, same confirmation —
+     already shipped in HARDENING-14, re-verified green this round.
+- **VERIFIED.** Nine total realistic reproduction scenarios for NEW-1 (six from HARDENING-15, three
+  new this round) folded into the permanent regression harness's new "CYCLE 6 (HARDENING-16)"
+  block — **43/43 checks green**, every prior round included, zero regressions. Full
+  `npx vitest run` — 686/686 files, 14,144/14,144 tests green. `npm run build` clean. `npx eslint
+  ui-audit/verify-comp-entry-p0.mjs` — 0 errors. `node ui-audit/design-drift-audit.mjs --check` /
+  `node ui-audit/doc-pointer-audit.mjs` / `node scripts/build-map.mjs --check` / `node
+  scripts/build-backlog-index.mjs --check` / `node scripts/verification-queue-audit.mjs --check`
+  all pass.
+- Files: `ui-audit/verify-comp-entry-p0.mjs`. (No `src/` change this round — every item was either
+  already fixed, re-confirmed correctly blocked, or investigated with no reproducible defect found.)
+
 ### B986097 — A draft staging table, reachable only by the KML import `[Site Planner / comps]` (feature) #comps #gis #persistence  *(owner chat block 2026-09-01, NEW-2, same decision doc as B986096 above. Minted **B986097 / V556721** from this branch's reserved block B986096–B986111 · V556720–V556735 against `origin/main` 8e42a14. DEDUPE-FIRST — searched Open/⏳Verify/Done for "KML", "My Maps", "import draft", "staging table", #comps: no prior item touches KML/My Maps import; net-new. Also searched for any prior `comp_import_drafts`/`comp_drafts` table — none exists.)*
 `[x]` **Shipped this session, including the schema — applied directly to production** (this session has Supabase MCP write access, unlike the read-only access a prior comps session flagged in this same module's folder pointer — that stale claim was corrected in the same commit).
 - Verify: live — GIS endpoint behavior (a real KML import, a real polygon centroid) + real production writes are mandatory LIVE-VERIFY classes. **V556721.**
