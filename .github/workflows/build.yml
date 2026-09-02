@@ -148,6 +148,15 @@ jobs:
             sleep 1
           done
           echo "preview server never came up — log:"; cat /tmp/vite-preview.log; exit 1
+      # Signature-budget gate (NEW-1, B1038016). "Nothing anywhere says a surface may contain at
+      # most N distinct control shapes" — this is that bound. Reuses the browser install/cache and
+      # the preview server just brought up above rather than paying for a second copy of either —
+      # deliberately narrow versus the full Playwright e2e suite (e2e.yml keeps that OUT of the
+      # required `build` check on purpose — "~15 minutes on every pull request... a gate people
+      # route around is worse than one that runs nightly"): this crawl only reads computed style
+      # off 12 already-known surfaces, no login, no schedule wait — measured at ~90s on its own.
+      - name: Signature-budget gate (per-surface distinct control shapes — NEW-1, B1038016)
+        run: node ui-audit/ui-inventory.mjs --check
       - name: Visual regression baselines (pixel diff against approved baselines — NEW-1)
         env:
           BASE_URL: "http://localhost:4173/"

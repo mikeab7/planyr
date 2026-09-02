@@ -18967,12 +18967,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           moment `crumbBtn` in ProjectBreadcrumb.jsx moved sm→md (that file's own NEW-3 comment: "a
           standalone chip sitting directly on the header bar... the same category as the row-2
           toolbar's File ▾ / dIcon / rbtn buttons"). This chip is exactly that same category and was
-          simply never updated to match — the comment above kept claiming parity a prior edit broke. */}
+          simply never updated to match — the comment above kept claiming parity a prior edit broke.
+          ⛔ NEW-4 (signature-budget convergence, B1038016) — height 24→30, padding "0 8px"→"0 12px":
+          the SAME drift recurred one level up. `crumbBtn` moved again (SIZE.sm→SIZE.md, this
+          chip's own sibling fix) and this one again fell behind — exactly the flagged
+          "Switch project sits 10.7px from Switch or rename plan — height 26px vs 24px" sibling
+          mismatch in docs/UI-INVENTORY.md. Matched byte-for-byte to `crumbBtn` this time so the
+          three header segments (project / plan / the signed-out cloud trigger) share ONE signature
+          rather than needing a third catch-up pass the next time `crumbBtn` moves. */}
       <button
         className="dbtn"
         style={{
           display: "flex", alignItems: "center", gap: 5, flex: "none",
-          height: 24, padding: "0 8px", borderRadius: RADIUS.md, border: "none",
+          height: 30, padding: "0 12px", borderRadius: RADIUS.md, border: "none",
           background: "transparent", cursor: "pointer", fontFamily: "inherit",
           fontSize: FONT_SIZE.control, fontWeight: 500, color: "var(--chrome-text)",
           maxWidth: 200, minWidth: CRUMB_MIN_W, whiteSpace: "nowrap",
