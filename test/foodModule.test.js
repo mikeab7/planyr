@@ -2334,9 +2334,41 @@ describe("VisitPanel — Actions row (block 4): want-to-try disappears once visi
     expect(wishBtnBlock).not.toMatch(/\.\.\.primary,/);
   });
 
-  it("the flagged state shows a check and a filled background; unflagged is outline-only", () => {
+  it("the flagged state is an outlined accent chip (check + accent border/text, transparent background) — never a filled background", () => {
     expect(actionsBlock).toMatch(/\{wishlisted \? "✓ Want to try" : "Want to try"\}/);
-    expect(actionsBlock).toMatch(/const wishActive = \{ background: "var\(--accent-food\)", color: "var\(--on-accent-food\)", border: "none" \};/);
+    expect(actionsBlock).toMatch(/const wishActive = \{ background: "transparent", color: "var\(--accent-food\)", border: "1px solid var\(--accent-food\)" \};/);
+  });
+
+  // ⛔ B1022960 round 2 (2026-09-02, Cowork live-verify on Xochi — the account's one flagged
+  // place) — the PREVIOUS wishActive filled the toggle with the exact same background/color/
+  // border-none as `primary`, so an already-flagged place showed two identically-filled,
+  // identically-shaped, borderless buttons (Cowork's measurement: both rgb(190,59,34)/white/0px
+  // border), differing only by width — not enough to read as "one primary, one secondary."
+  it("wishActive can never again match the primary button's fill+borderless signature, in any wishlisted state", () => {
+    const wishActiveBlock = actionsBlock.slice(actionsBlock.indexOf("const wishActive"), actionsBlock.indexOf("const logBtn"));
+    // Never filled with the primary's own accent-fill token…
+    expect(wishActiveBlock).not.toMatch(/background:\s*"var\(--accent-food\)"/);
+    // …and never borderless — a real border is what keeps it visually "secondary" no matter what
+    // color it takes on.
+    expect(wishActiveBlock).not.toMatch(/border:\s*"none"/);
+    // The old, reported-as-a-bug literal must not reappear verbatim.
+    const OLD_BUGGY_WISH_ACTIVE = 'const wishActive = { background: "var(--accent-food)", color: "var(--on-accent-food)", border: "none" };';
+    expect(actionsBlock).not.toContain(OLD_BUGGY_WISH_ACTIVE);
+    // Prove this check has teeth: the OLD literal WOULD have failed both assertions above, had it
+    // still been present — the check can actually distinguish old-bad from new-good, not just
+    // agree with whatever ships.
+    expect(OLD_BUGGY_WISH_ACTIVE).toMatch(/background:\s*"var\(--accent-food\)"/);
+    expect(OLD_BUGGY_WISH_ACTIVE).toMatch(/border:\s*"none"/);
+  });
+
+  it("the active want-to-try chip matches the SAME outlined convention this module already uses elsewhere for the identical fact (SearchBox's result badge, VisitList's row chip) — one visual language for 'flagged,' not a second one", () => {
+    const searchBox = src("components/SearchBox.jsx");
+    const visitList = src("components/VisitList.jsx");
+    for (const file of [searchBox, visitList]) {
+      expect(file).toMatch(/background:\s*"transparent"/);
+      expect(file).toMatch(/color:\s*"var\(--accent-food\)"/);
+      expect(file).toMatch(/border:\s*"1px solid var\(--accent-food\)"/);
+    }
   });
 
   it("is pinned (sticky) to the bottom of whichever scroll container holds it, so it stays reachable once Past visits grows past the fold", () => {
