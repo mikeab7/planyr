@@ -34,7 +34,7 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "../../ui/controls.jsx";
-import { parsePaste, rowHasBlockingFlags, parseProseLine, splitPasteLines } from "../lib/compParse.js";
+import { parsePaste, rowHasBlockingFlags, parseProseLine, parseSingleRecord, splitPasteLines } from "../lib/compParse.js";
 import { emptyDraft, draftToComp, validateComp, validAnchor, summarizeLeaseComps, summarizeSaleComps, resolveCapTriangle } from "../lib/comps.js";
 import {
   SHEET_COLUMNS, cellState, applyCellEdit, fillDownColumn, spillPaste, visibleColumnIndices,
@@ -381,6 +381,11 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
   const [lastCommitSummary, setLastCommitSummary] = useState(null);
   const [showPastedText, setShowPastedText] = useState(false);
   const [lastSingleParse, setLastSingleParse] = useState(null);
+  // B845648 — a merge the parser refused because two lines disagreed on a field (MERGE SAFETY).
+  // Distinct from `lastSingleParse`: that one offers "Split one row per line" as the escape hatch
+  // from a DEFAULT merge; this one offers the inverse — "Merge into one comp" — because the
+  // default here was already NOT to merge, and the user may still want to override it.
+  const [lastSplitParse, setLastSplitParse] = useState(null);
   const lastCommitRef = useRef(null); // duplicate-paste-event guard, unchanged from round 5
 
   // B986096-HARDENING-9 — reverse-geocode a dropped pin's lat/lon into a street address, cached
@@ -548,20 +553,26 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     if (last && last.text === text && now - last.time < 800) return; // duplicate event guard
     lastCommitRef.current = { text, time: now };
 
-    const { rows: parsedRows, mode } = parsePaste(text);
+    const { rows: parsedRows, mode, splitReason } = parsePaste(text);
     setLastPasteText(text);
     setShowPastedText(false);
     const lineCount = splitPasteLines(text).length;
     if (!parsedRows.length) {
       setLastSingleParse(null);
+      setLastSplitParse(null);
       setLastCommitSummary(`Nothing recognized in ${lineCount} pasted line${lineCount === 1 ? "" : "s"}.`);
       return;
     }
     const newRows = parsedRows.map(draftFromParsedRow);
     commitRows([...rows, ...newRows]);
     setLastSingleParse(mode === "single" ? { raw: text, rowIds: newRows.map((r) => r._id) } : null);
+    setLastSplitParse(mode === "split" ? { raw: text, rowIds: newRows.map((r) => r._id) } : null);
     if (mode === "single" && newRows.length === 1) {
       setLastCommitSummary(`Read 1 comp from ${lineCount} pasted line${lineCount === 1 ? "" : "s"}`);
+    } else if (mode === "split") {
+      // B845648 — MERGE SAFETY refused to merge because two lines disagreed on a field; say
+      // exactly which one, so the user knows why they got several rows instead of one.
+      setLastCommitSummary(splitReason);
     } else {
       setLastCommitSummary(`Read ${newRows.length} comp${newRows.length === 1 ? "" : "s"} from ${lineCount} pasted line${lineCount === 1 ? "" : "s"}`);
     }
@@ -592,6 +603,20 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     const multiRows = splitPasteLines(raw).map(parseProseLine).filter(Boolean).map(draftFromParsedRow);
     commitRows([...remaining, ...multiRows]);
     setLastSingleParse(null);
+  };
+  // B845648 — the inverse of a MERGE-SAFETY split: forces the same raw paste through
+  // `parseSingleRecord` (bypassing the collision check), replacing the split rows with one merged
+  // row. Only reachable from a split the parser itself just produced, so `raw` is always the exact
+  // text that was refused — never a re-guess.
+  const mergeIntoOneComp = () => {
+    if (!lastSplitParse) return;
+    const { raw, rowIds } = lastSplitParse;
+    const idSet = new Set(rowIds);
+    const remaining = rows.filter((r) => !idSet.has(r._id));
+    const merged = parseSingleRecord(raw);
+    if (!merged) return;
+    commitRows([...remaining, draftFromParsedRow(merged)]);
+    setLastSplitParse(null);
   };
 
   /* ---- sheet cell editing -------------------------------------------------------------------- */
@@ -1094,6 +1119,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
             {lastCommitSummary}
             {lastPasteText && (<> · <button onClick={() => setShowPastedText((v) => !v)} style={linkBtnStyle}>{showPastedText ? "Hide pasted text" : "Show pasted text"}</button></>)}
             {lastSingleParse && (<> · <button onClick={switchToOnePerLine} style={linkBtnStyle}>Split one row per line</button></>)}
+            {lastSplitParse && (<> · <button onClick={mergeIntoOneComp} style={linkBtnStyle}>Merge into one comp</button></>)}
           </div>
         )}
         {showPastedText && lastPasteText && (

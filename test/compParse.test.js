@@ -4,6 +4,7 @@ import {
   parsePaste, rowHasBlockingFlags, looksLikeSpreadsheetPaste, splitPasteLines,
   detectPasteShape, parseSingleRecord,
 } from "../src/shared/comps/lib/compParse.js";
+import { draftToComp, compToDraft, compToRow } from "../src/shared/comps/lib/comps.js";
 
 describe("compParse: magnitude numbers", () => {
   it("expands a k suffix and flags it soft — the guess is fully shown", () => {
@@ -359,6 +360,131 @@ describe("compParse: THE HEADLINE TEST — Michael's exact repro that started th
     expect(draft.leaseRatePeriod).toBe("");
     expect(cellFlags.leaseRatePeriod?.level).toBe("blocking");
     expect(rowHasBlockingFlags(cellFlags)).toBe(true);
+  });
+});
+
+describe("compParse: B845648 — MERGE SAFETY, DATA CORRUPTION on paste (5 AC silently became 5 SF)", () => {
+  it("a) '5 AC land sale' + '.56/SF , 12 TI, 3% bumps' -> TWO rows, never a hybrid merge", () => {
+    const text = "5 AC land sale\n.56/SF , 12 TI, 3% bumps";
+    const { mode, rows, splitReason } = parsePaste(text);
+    expect(mode).toBe("split");
+    expect(rows).toHaveLength(2);
+    expect(splitReason).toMatch(/disagreed on Type/i);
+    expect(splitReason).toMatch(/split into 2 comps/i);
+
+    const land = rows.find((r) => r.draft.compType === "land");
+    const lease = rows.find((r) => r.draft.compType === "lease");
+    expect(land).toBeDefined();
+    expect(lease).toBeDefined();
+
+    // The land row keeps its real unit — 5 ACRES, never reinterpreted as 5 SF.
+    expect(land.draft.landSizeValue).toBe("5");
+    expect(land.draft.landSizeUnit).toBe("ac");
+    expect(land.draft.notes).toMatch(/land sale/);
+
+    // The lease row keeps its own facts, untouched by line 1.
+    expect(lease.draft.leaseRate).toBe("0.56");
+    expect(lease.draft.leaseTi).toBe("12");
+    expect(lease.draft.leaseEscalationPct).toBe("3");
+    expect(lease.draft.leaseRateExpense).toBe("nnn");
+    // Never a leftover 5 masquerading as square feet on the lease row.
+    expect(lease.draft.leaseSizeSf).toBe("");
+  });
+
+  it("b) two lease lines that disagree on Rate -> two rows, never averaged or overwritten", () => {
+    const text = "$0.65/SF NNN, 5 yr term\n$0.85/SF NNN, 5 yr term";
+    const { mode, rows, splitReason } = parsePaste(text);
+    expect(mode).toBe("split");
+    expect(rows).toHaveLength(2);
+    expect(splitReason).toMatch(/disagreed on Rate/i);
+    const rates = rows.map((r) => r.draft.leaseRate).sort();
+    expect(rates).toEqual(["0.65", "0.85"]);
+  });
+
+  it("c) complementary lines with NO field collision still merge into ONE row (do not over-correct)", () => {
+    const text = "1115 E Main St\n.56/SF NNN";
+    const { mode, rows } = parsePaste(text);
+    expect(mode).toBe("single");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].draft.title).toBe("1115 E Main St");
+    expect(rows[0].draft.leaseRate).toBe("0.56");
+    expect(rows[0].draft.leaseRateExpense).toBe("nnn");
+  });
+
+  it("d) a single line is unaffected — one row, unchanged", () => {
+    const { mode, rows } = parsePaste(".56/SF , 12 TI, 3% bumps");
+    expect(mode).toBe("single");
+    expect(rows).toHaveLength(1);
+  });
+
+  it("e) 'Merge into one comp' is the stated inverse — parseSingleRecord still merges the SAME raw text on demand", () => {
+    const text = "5 AC land sale\n.56/SF , 12 TI, 3% bumps";
+    const merged = parseSingleRecord(text);
+    expect(merged).not.toBeNull();
+    expect(merged.draft.compType).toBe("lease"); // the pre-fix (corrupting) merge outcome, still reachable as an explicit override
+  });
+
+  it("Michael's 10-line lease abstract (MICHAEL_PASTE) still merges to ONE row — no false-positive split", () => {
+    const text = [
+      "TT: Modular Power Solutions",
+      "LL: Core5 Industrial Partners",
+      "20320 West Hardy Road - Building A",
+      "613,208 SF",
+      "Commencement estimated to be June 1, 2027",
+      "126 months",
+      "6 months base free rent",
+      "$0.65/sf NNN",
+      "3.50% annual increases",
+      "TI: $13.00/sf from shell",
+    ].join("\n");
+    const { mode, rows } = parsePaste(text);
+    expect(mode).toBe("single");
+    expect(rows).toHaveLength(1);
+  });
+
+  it("a genuine per-line list (already 'multi') is unaffected by the collision check", () => {
+    const text = [
+      "3.2 AC land - $850k - Jan 2026",
+      "Building sale, 25,000 SF, $3.1M, closed 3/14/2026",
+    ].join("\n");
+    const { mode, rows } = parsePaste(text);
+    expect(mode).toBe("multi");
+    expect(rows).toHaveLength(2);
+  });
+
+  it("a Unit collision alone (both lines agree on Type=land) still forces a split — rule 4", () => {
+    const text = "Land parcel, 5 acres\nLand parcel, 200,000 SF";
+    const { mode, rows, splitReason } = parsePaste(text);
+    expect(mode).toBe("split");
+    expect(rows).toHaveLength(2);
+    expect(splitReason).toMatch(/disagreed on Unit/i);
+    expect(splitReason).not.toMatch(/Type/i);
+  });
+
+  it("e) the split rows round-trip through the SAME conversion a real save/reload uses, unit intact", () => {
+    // draftToComp/compToDraft/compToRow are the exact pipeline CompsPanel.jsx runs on every real
+    // save (comp -> DB row) and every real load (DB row -> comp -> draft); this proves the split
+    // rows survive it with their units intact, not just that the GRID displays them right.
+    const { rows } = parsePaste("5 AC land sale\n.56/SF , 12 TI, 3% bumps");
+    const land = rows.find((r) => r.draft.compType === "land");
+    const lease = rows.find((r) => r.draft.compType === "lease");
+
+    const landComp = draftToComp(land.draft);
+    const landRow = compToRow(landComp);
+    expect(landRow.land_size_value).toBe(5);
+    expect(landRow.land_size_unit).toBe("ac"); // never "sf" — the exact corruption this item exists to fix
+    const landRoundTrip = compToDraft(landComp);
+    expect(landRoundTrip.landSizeValue).toBe("5");
+    expect(landRoundTrip.landSizeUnit).toBe("ac");
+
+    const leaseComp = draftToComp(lease.draft);
+    const leaseRow = compToRow(leaseComp);
+    expect(leaseRow.lease_rate).toBe(0.56);
+    expect(leaseRow.lease_ti).toBe(12);
+    const leaseRoundTrip = compToDraft(leaseComp);
+    expect(leaseRoundTrip.leaseRate).toBe("0.56");
+    expect(leaseRoundTrip.leaseTi).toBe("12");
+    expect(leaseRoundTrip.leaseRateExpense).toBe("nnn");
   });
 });
 
