@@ -513,6 +513,74 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   arrows move a selection, Enter arms an action cell) already worked; the owner's own
   `querySelectorAll('button,[tabindex],...')` count undercounts this pattern by construction
   (same shape as Excel Online / Google Sheets), so it's recorded here as checked, not as a gap.
+  **⛔ ROUND 11 (B986096-HARDENING-14, owner cycle-4 P0 LIVE-TEST) — A COMP SAVED FOR THE FIRST TIME
+  (full round trip, Michael himself, signed in), plus four remaining Tier-0 items in his own priority
+  order: "Enter commit, then focusable cells, then parcel and site-plan anchors, then the Edit
+  round-trip."** Enter turned out to be a TEST-METHODOLOGY artifact, not an app bug: his own
+  reproduction used a synthetic `KeyboardEvent` dispatched WITHOUT `bubbles: true` (the constructor's
+  default), which never reaches the app's delegated keydown handling the way a real keypress does
+  (SYNTHETIC-KEYS-DONT-EDIT) — the identical dispatch WITH `bubbles: true` committed correctly, and
+  the app's own Enter-commit code is unchanged from ROUND 10 and already proven live via a REAL
+  `page.keyboard.press("Enter")`. **Focusable cells (genuinely fixed):** `CompEntryGrid.jsx` now
+  implements a real roving tabindex — the selected cell gets `tabIndex={0}`, every other cell
+  `{-1}`, and a new effect gives the selected cell (or the Location cell's own `<button>`) real DOM
+  focus, extending the existing selection-scroll-into-view effect. **A genuine side effect was caught
+  before shipping:** naively focusing on every selection change also fires right after a paste
+  creates rows — since `selection` changes then too, while DOM focus is still on the paste
+  textarea — which would yank focus into the grid mid-paste and route a SECOND clipboard paste
+  through the grid's own spill-paste instead of the textarea's smart-parse, breaking "paste several
+  comps in a row." Fixed by gating the focus move on `gridRef.current?.contains(document.activeElement)`
+  — it only steals focus when focus is ALREADY inside the grid (a click, an arrow/Tab press, or
+  `finishEdit`'s own existing post-commit focus call), never when an external control like the paste
+  textarea holds it. **Parcel and site-plan anchor kinds, and the Edit round-trip on a saved comp,
+  are genuinely blocked, not un-investigated** — a parcel anchor needs a live external ArcGIS
+  parcel-identify call (`Blocker: live-GIS`), a site-plan anchor needs a signed-in account with an
+  already-placed overlay (`Blocker: auth` + `Blocker: real-data`), and confirming an edit persists
+  needs a real signed-in write (`Blocker: auth`); the pure derivations and downstream rendering for
+  all three were already solidly unit-tested before this round (the repo-root `test/` suites for the
+  parcel-anchor derivation and for the location-text formatter) and the edit path's code was read and
+  traces correctly — filed as new
+  `VERIFICATION.md` steps rather than silently deferred. **Two minor fixes, same pass:** the comp
+  LIST row's title, and the comp DETAIL view, both now show a comp's real Location (address / APN /
+  plan title) as their identity when Title is blank — previously the list fell back to the deal's
+  bare RATE, and the detail view showed no Location at all despite having a real, already-resolved
+  one. `CompsPanel.jsx` gained its own `useCompLocationText` — mirrors `CompEntryGrid.jsx`'s Location
+  logic (same `compLocationText.js` pure functions) but is a DELIBERATELY SEPARATE, self-contained
+  cache — `CompEntryGrid.jsx`'s own reverse-geocode cache is a cycle-4 gate ("do not touch again
+  except regression-checking") and this fix never touches that file.
+  **⛔ ROUND 12 (B986096-HARDENING-15, owner cycle-5 P0) — ENTER ROOT-CAUSED AND GENUINELY FIXED
+  AFTER 4 PRIOR ROUNDS, via the owner's own controlled Tab/blur/Enter isolation — read this before
+  touching `onEditKeyDown`/`onEditBlur` or dismissing a future keyboard-commit report as a test
+  artifact again.** His A/B/C test (Tab-keydown-alone commits, blur-alone discards, Enter-alone
+  discards) looked like it disproved SYNTHETIC-KEYS-DONT-EDIT — "synthetic key events DO reach your
+  handler, Tab proves it" — but Tab's own "commit" never goes through the keydown handler at all:
+  React's `onKeyDown` is bubble-phase and root-delegated, so it needs the native keydown to actually
+  BUBBLE to fire, and the `KeyboardEvent` constructor's own default is `bubbles: false`. Tab commits
+  anyway because the browser's own DEFAULT ACTION for Tab (native focus-move to the next tabbable
+  element) fires regardless of bubbling — default actions happen at dispatch time, independent of
+  the bubble phase — and the resulting focus loss fires a genuine `focusout`, which bubbles
+  UNCONDITIONALLY by spec no matter what caused it, landing on the SAME `onEditBlur` commit path a
+  real blur uses. Enter has no such native side-effect to fall back on, so a non-bubbling dispatch
+  genuinely never reaches anything. His own "a capture-phase listener confirmed the dispatch is
+  observed" check is CONSISTENT with this, not a refutation: capture-phase dispatch reaches every
+  ancestor on the way DOWN to the target regardless of `bubbles`; only the BUBBLE-phase return trip
+  (which React's root-delegated listener depends on) is skipped. **The fix closes the class rather
+  than re-adding an Enter branch a 5th time:** a plain native `addEventListener("keydown", …)` now
+  sits directly on the editing input/select element (a ref-indirected handler, so it can't act on a
+  stale `rows` closure mid-edit) — a listener on the TARGET fires at the DOM's AT_TARGET phase
+  unconditionally, regardless of bubbling, so this catches Enter/Tab/Escape from ANY dispatch, real
+  or synthetic. Zero behavior change for a genuine keypress (it still reaches the handler via normal
+  bubbling too; `finishEdit`'s pre-existing `editHandledRef` guard absorbs the resulting harmless
+  double-call). **Separately, a NEW "blur discards" finding — surfaced while the owner was
+  validating his own A/B/C harness, correctly flagged as worse than Enter (silent data loss) — could
+  NOT be reproduced under any realistic interaction tried this round** (a real click-away, a real
+  map click, `execCommand` typing + a JS `.blur()` call, both as separate steps and synchronously);
+  only a raw DOM-property-setter value assignment bypassing React's `onChange` entirely reproduced
+  it, which is inconsistent with his own Tab run reading back the correctly-typed value — but the
+  underlying class (a value entered without React ever observing it) was closed anyway, cheaply:
+  `onEditBlur` now reads the input's own live DOM value at blur time rather than trusting only the
+  tracked ref. Both proven live against his exact reproduction methodology (a non-bubbling dispatch
+  + the same capture-phase confirmation check), not from code reading.
   KML import (B849233) is a SEPARATE staging table, `db/comp_import_drafts.sql`
   (`public.comp_import_drafts`, owner-only RLS — no team visibility at all, unlike `comps` itself,
   until promoted) — `lib/kmlImport.js` is the pure, hand-rolled Placemark parser (a Point is a
