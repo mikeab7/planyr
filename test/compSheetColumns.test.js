@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   SHEET_COLUMNS, GROUPS, columnIndex, cellState, cellPlaceholder, applyCellEdit,
   fillDownColumn, spillPaste, formatNumberDisplay, sanitizeNumericInput, visibleColumnIndices,
+  computeFlexWidths, widthFor, frozenLeftOffsets,
 } from "../src/shared/comps/lib/compSheetColumns.js";
 import { emptyDraft } from "../src/shared/comps/lib/comps.js";
 
@@ -18,9 +19,18 @@ describe("compSheetColumns: column list sanity", () => {
   it("every column belongs to a real group", () => {
     for (const c of SHEET_COLUMNS) expect(GROUPS).toContain(c.group);
   });
-  it("Title / Address is the only frozen column — 'freeze through Title / address'", () => {
+  it("HARDENING-10 — Type and Title / Address are the two frozen columns, Type first", () => {
     const frozen = SHEET_COLUMNS.filter((c) => c.frozen);
-    expect(frozen.map((c) => c.key)).toEqual(["title"]);
+    expect(frozen.map((c) => c.key)).toEqual(["compType", "title"]);
+    expect(SHEET_COLUMNS[0].key).toBe("compType"); // "choose deal first because it will inform the rest"
+  });
+  it("HARDENING-10 — one alignment rule: numeric/date columns are right, everything else is left, never a third value", () => {
+    const NUMERIC_OR_DATE_KINDS = new Set(["number", "date", "derived"]);
+    for (const c of SHEET_COLUMNS) {
+      expect(["left", "right"]).toContain(c.align);
+      if (NUMERIC_OR_DATE_KINDS.has(c.kind)) expect(c.align).toBe("right");
+      else expect(c.align).toBe("left");
+    }
   });
   it("columnIndex finds a real column and -1 for a bogus key", () => {
     expect(columnIndex("leaseRate")).toBeGreaterThanOrEqual(0);
@@ -60,10 +70,13 @@ describe("compSheetColumns: cellState — EVERY column exists on EVERY row (neve
     // ISO the draft actually stores.
     expect(cellState(commCol, draftOf("lease", { leaseCommencementDate: "2027-06-01" })).text).toBe("06/01/27");
   });
-  it("placeholder text uses the comp type's own party role name", () => {
+  it("HARDENING-10 NEW-4 — cellPlaceholder always returns empty; 'empty means empty', no placeholder words anywhere", () => {
     const providerCol = SHEET_COLUMNS[columnIndex("partyProvider")];
-    expect(cellPlaceholder(providerCol, "land")).toBe("Seller");
-    expect(cellPlaceholder(providerCol, "lease")).toBe("Owner/Developer");
+    const acquirerCol = SHEET_COLUMNS[columnIndex("partyAcquirer")];
+    expect(cellPlaceholder(providerCol, "land")).toBe("");
+    expect(cellPlaceholder(providerCol, "lease")).toBe("");
+    expect(cellPlaceholder(acquirerCol, "building_sale")).toBe("");
+    expect(cellPlaceholder()).toBe("");
   });
 });
 
@@ -97,6 +110,99 @@ describe("compSheetColumns: TWO derived columns (HARDENING-9 removed Net Effecti
     expect(columnIndex("leaseFreeRentMonths")).toBeGreaterThanOrEqual(0);
     expect(columnIndex("leaseEscalationPct")).toBeGreaterThanOrEqual(0);
     expect(columnIndex("leaseTi")).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("compSheetColumns: HARDENING-10 — leaseTerm's cell boundary is bare months, stored value stays free text", () => {
+  const termCol = SHEET_COLUMNS[columnIndex("leaseTerm")];
+  it("a plain '126 mo' stored value reads as the bare number 126 in the cell", () => {
+    expect(cellState(termCol, draftOf("lease", { leaseTerm: "126 mo" })).text).toBe("126");
+  });
+  it("a 'N yr' stored value converts to months in the cell", () => {
+    expect(cellState(termCol, draftOf("lease", { leaseTerm: "10 yr" })).text).toBe("120");
+  });
+  it("a base term with trailing renewal options still reduces to the BASE term's months", () => {
+    // "10 yr + 2x5 options" — the initial term is 10 years; the options describe renewals beyond
+    // it, not part of the initial term, so 120 is the correct reduction, not a guess.
+    expect(cellState(termCol, draftOf("lease", { leaseTerm: "10 yr + 2x5 options" })).text).toBe("120");
+  });
+  it("a stored term with no parseable number/unit at all shows empty, never a wrong guess", () => {
+    expect(cellState(termCol, draftOf("lease", { leaseTerm: "See Section 4.2" })).text).toBe("");
+  });
+  it("typing a bare number into the cell stores it as 'N mo' free text", () => {
+    const next = applyCellEdit(termCol, draftOf("lease"), "126");
+    expect(next.leaseTerm).toBe("126 mo");
+    // Round-trips back through the same cell boundary.
+    expect(cellState(termCol, next).text).toBe("126");
+  });
+  it("Term is right-aligned like every other numeric column (HARDENING-10 message B smoking gun)", () => {
+    expect(termCol.align).toBe("right");
+  });
+});
+
+describe("compSheetColumns: HARDENING-10 NEW-1 — Type drives the sheet", () => {
+  const typeCol = SHEET_COLUMNS[columnIndex("compType")];
+  it("switching a row TO land defaults Unit to AC when it wasn't already set", () => {
+    const draft = { ...emptyDraft(null), compType: "lease", landSizeUnit: "" };
+    const next = typeCol.setValue(draft, "land");
+    expect(next.compType).toBe("land");
+    expect(next.landSizeUnit).toBe("ac");
+  });
+  it("never clobbers a Unit the user already chose", () => {
+    const draft = { ...emptyDraft(null), compType: "building_sale", landSizeUnit: "sf" };
+    const next = typeCol.setValue(draft, "land");
+    expect(next.landSizeUnit).toBe("sf");
+  });
+  it("switching away from land doesn't touch landSizeUnit at all — Building sale / Lease size is always fixed SF regardless", () => {
+    const draft = { ...emptyDraft(null), compType: "land", landSizeUnit: "ac" };
+    const next = typeCol.setValue(draft, "lease");
+    expect(next.landSizeUnit).toBe("ac"); // untouched (irrelevant for lease — Unit column shows fixed SF)
+  });
+});
+
+describe("compSheetColumns: HARDENING-10 NEW-5 — computeFlexWidths / widthFor / frozenLeftOffsets", () => {
+  it("plenty of room: the three growers share the surplus beyond everyone's nominal, Title getting the largest share; Notes never grows past its own nominal", () => {
+    const w = computeFlexWidths(10000);
+    expect(w.title).toBeGreaterThan(w.partyProvider);
+    expect(w.title).toBeGreaterThan(w.partyAcquirer);
+    expect(w.notes).toBe(90);
+  });
+  it("moderate squeeze: Notes alone absorbs it first, growers stay at nominal", () => {
+    const w = computeFlexWidths(500); // full nominal total is 510; 10px short
+    expect(w.notes).toBe(80);
+    expect(w.title).toBe(170);
+    expect(w.partyProvider).toBe(125);
+    expect(w.partyAcquirer).toBe(125);
+  });
+  it("severe squeeze: Notes is pinned at its own floor, the three growers then shrink together, never below their own floor", () => {
+    const w = computeFlexWidths(0);
+    expect(w.notes).toBe(55);
+    expect(w.title).toBe(90);
+    expect(w.partyProvider).toBe(65);
+    expect(w.partyAcquirer).toBe(65);
+  });
+  it("every regime keeps every column at or above its own floor, and never returns a negative width", () => {
+    for (const avail of [-50, 0, 100, 275, 320, 510, 900, 5000]) {
+      const w = computeFlexWidths(avail);
+      expect(w.title).toBeGreaterThanOrEqual(90);
+      expect(w.partyProvider).toBeGreaterThanOrEqual(65);
+      expect(w.partyAcquirer).toBeGreaterThanOrEqual(65);
+      expect(w.notes).toBeGreaterThanOrEqual(55);
+    }
+  });
+  it("widthFor returns the column's static width when there's no flexKey, or an unmeasured flex column falls back to its own static width", () => {
+    const sizeCol = SHEET_COLUMNS[columnIndex("size")];
+    expect(widthFor(sizeCol, {})).toBe(sizeCol.width);
+    const titleCol = SHEET_COLUMNS[columnIndex("title")];
+    expect(widthFor(titleCol, {})).toBe(titleCol.width); // {} — no measurement yet
+    expect(widthFor(titleCol, { title: 200 })).toBe(200);
+  });
+  it("frozenLeftOffsets puts Type at 0 and Title right after Type's own (possibly flexed) width", () => {
+    const idx = SHEET_COLUMNS.map((_, i) => i); // every column visible
+    const flexWidths = { title: 150, partyProvider: 100, partyAcquirer: 100, notes: 70 };
+    const offsets = frozenLeftOffsets(idx, flexWidths);
+    expect(offsets.compType).toBe(0);
+    expect(offsets.title).toBe(SHEET_COLUMNS[columnIndex("compType")].width);
   });
 });
 
@@ -169,6 +275,23 @@ describe("compSheetColumns: spillPaste — Excel-style paste into the selected c
     const next = spillPaste(rows, 0, columnIndex("leaseRate"), "0.65", () => draftOf("land"), newId);
     expect(next[0].draft.landPrice).toBe(""); // leaseRate doesn't apply to a land row — silently skipped, not an error
   });
+  it("HARDENING-10 NEW-1 — a new blank row created by an overrun paste defaults Type to the row above's", () => {
+    const rows = [rowOf("building_sale")];
+    // emptyDraftFn mirrors the real caller: () => emptyDraft(null), always compType 'land'.
+    const next = spillPaste(rows, 0, columnIndex("partyProvider"), "Acme\nBeta\nGamma", () => emptyDraft(null), newId);
+    expect(next).toHaveLength(3);
+    expect(next[1].draft.compType).toBe("building_sale");
+    expect(next[2].draft.compType).toBe("building_sale");
+  });
+  it("the paste's own Type cell still wins over the inherited default when the pasted block carries one", () => {
+    const rows = [rowOf("lease")];
+    const typeIdx = columnIndex("compType");
+    // A one-column paste (Type only) spilling down two rows — row 2's own "Land" cell must win
+    // over whatever it would otherwise have inherited from row 1 ("lease").
+    const next = spillPaste(rows, 0, typeIdx, "Lease\nLand", () => emptyDraft(null), newId);
+    expect(next).toHaveLength(2);
+    expect(next[1].draft.compType).toBe("land");
+  });
 });
 
 describe("compSheetColumns: number formatting helpers", () => {
@@ -209,7 +332,8 @@ describe("compSheetColumns: PRICE band (B986096-HARDENING-7) — Price/NOI/Cap, 
     const draft = draftOf("building_sale", { bldgPrice: "38000000", bldgNoi: "2185000" });
     const capCell = cellState(SHEET_COLUMNS[columnIndex("bldgCapRate")], draft);
     expect(capCell.state).toBe("derived");
-    expect(capCell.text).toBe("5.75%");
+    // HARDENING-10 — bare digits only; the header ("Cap (%)") states the unit now, not the cell.
+    expect(capCell.text).toBe("5.75");
     // The two GIVEN cells stay editable, showing exactly what was typed.
     expect(cellState(SHEET_COLUMNS[columnIndex("price")], draft)).toEqual({ state: "editable", text: "38,000,000", raw: "38000000" });
     expect(cellState(SHEET_COLUMNS[columnIndex("bldgNoi")], draft)).toEqual({ state: "editable", text: "2,185,000", raw: "2185000" });
@@ -221,7 +345,7 @@ describe("compSheetColumns: PRICE band (B986096-HARDENING-7) — Price/NOI/Cap, 
     expect(noiCell.text).toBe("600,000");
     const capCell = cellState(SHEET_COLUMNS[columnIndex("bldgCapRate")], draft);
     expect(capCell.state).toBe("editable");
-    expect(capCell.text).toBe("6%"); // formatNumberDisplay("6") — no forced trailing zeros on a typed value
+    expect(capCell.text).toBe("6"); // formatNumberDisplay("6") — bare digits, header states "(%)"
     expect(capCell.raw).toBe("6"); // the EDIT box shows the percentage form, never the raw 0.06 fraction
   });
   it("enter NOI + Cap — Price renders derived", () => {
@@ -242,7 +366,7 @@ describe("compSheetColumns: PRICE band (B986096-HARDENING-7) — Price/NOI/Cap, 
     expect(cellState(SHEET_COLUMNS[columnIndex("bldgNoi")], draft).state).toBe("editable");
     const capCell = cellState(SHEET_COLUMNS[columnIndex("bldgCapRate")], draft);
     expect(capCell.state).toBe("editable");
-    expect(capCell.text).toBe("5.75%"); // the TYPED value, unmodified
+    expect(capCell.text).toBe("5.75"); // the TYPED value, unmodified, bare digits
   });
   it("a derived triangle cell is NOT enterable — beginEdit's own gate reads exactly this state", () => {
     const draft = draftOf("building_sale", { bldgPrice: "38000000", bldgNoi: "2185000" });
