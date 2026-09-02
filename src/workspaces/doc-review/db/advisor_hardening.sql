@@ -10,11 +10,14 @@
 -- Re-running CREATE OR REPLACE does not touch the triggers that call these. Idempotent.
 --
 -- NOT addressed here, deliberately:
---   • planar_data / planar_history / planar_suggestions anon-write policies — the standalone
---     scheduler page saves signed-out BY DESIGN; planar_history snapshots every save (its own
---     recovery layer) and anon DELETE is already blocked. Documented as an accepted advisor
---     finding in docs/REFERENCE.md.
 --   • Leaked-password protection — an Auth dashboard toggle, not SQL (OWNER-TODO.md).
+--
+-- ⛔ UPDATE (B778/NEW-1, 2026-09-02): the planar_data / planar_history / planar_suggestions
+-- anon read/write policies this file used to describe as an accepted, deliberate finding are
+-- CLOSED — see src/workspaces/scheduler/db/planar_tables_owner_scoped_rls.sql and BACKLOG.md
+-- B778. The "scheduler saves signed-out by design" rationale is gone: a schedule now has a
+-- real owner (user_id/team_id) and requires an authenticated, owner-or-team-scoped request,
+-- same as every other table in this app. Do not re-add an anon policy to any of the three.
 
 create or replace function public.project_folders_guard_drive_cols()
 returns trigger language plpgsql set search_path = pg_catalog as $$

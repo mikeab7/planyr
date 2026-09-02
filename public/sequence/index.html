@@ -6487,6 +6487,10 @@ function App() {
   }, []);
   const [goToFocus,      setGoToFocus]      = useState(null); // {taskId, n} — grid scrolls to + pulses this row after a cross-view jump
   const [offlineFallback, setOfflineFallback] = useState(false);
+  // B778/NEW-1 — planar_data now requires sign-in + schedule ownership (RLS), so a signed-out
+  // visitor gets denied (42501), not a connectivity failure. Distinct from offlineFallback's
+  // "cloud unreachable" so the banner doesn't wrongly tell them to check their connection.
+  const [authRequired, setAuthRequired] = useState(false);
   const [driftNotice, setDriftNotice] = useState(null);   // B836 — non-pinned tasks whose saved start the load re-cascade corrected; surfaced loudly (banner)
   const [staleNotice, setStaleNotice] = useState(false);
   const didInitialLoad = useRef(false);
@@ -6793,6 +6797,7 @@ function App() {
             d.projects[pid] = {...d.projects[pid], tasks};
           });
         if (window.__planarCloudError) setOfflineFallback(true);
+        else if (window.__planarAuthRequired) setAuthRequired(true);
         setData(d);
       } catch {
         const d = normalizeToV8(ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(window.__PLANAR_DATA__ || SEED))))));
@@ -8377,6 +8382,8 @@ function App() {
       // on a failed initial cloud READ, offlineFallback is set while saveStatus still reads its
       // initial "saved" (no write has been attempted yet), which would otherwise map to synced.
       offlineFallback: !!offlineFallback,
+      // B778/NEW-1 — signed-out (or not on the schedule's team), distinct from offlineFallback.
+      authRequired: !!authRequired,
       activePanel: settingsOpen ? "settings" : automationOpen ? "automation"
         : contactsOpen ? "contacts" : formatOpen ? "format" : historyOpen ? "history" : null,
     };
@@ -8387,7 +8394,7 @@ function App() {
       window.parent.postMessage({ source: "planar-seq", type: "planar:toolbar-state", ...state }, window.location.origin);
     } catch (_) {}
   }, [inShell, data, isMobile, ganttPPD, reviewRows, reviewOpen, saveStatus, savePulse, fileLinked,
-      offlineFallback, settingsOpen, automationOpen, contactsOpen, formatOpen, historyOpen]);
+      offlineFallback, authRequired, settingsOpen, automationOpen, contactsOpen, formatOpen, historyOpen]);
 
   useEffect(() => {
     if (!inShell) return;
@@ -8660,7 +8667,17 @@ function App() {
           </button>
         </div>
       )}
-      {staleNotice && !offlineFallback && (
+      {authRequired && !offlineFallback && (
+        <div style={{background:"#fffbeb",borderBottom:"1px solid #fde68a",color:"#92400e",padding:"7px 14px",
+          display:"flex",alignItems:"center",gap:10,fontSize:12.5,lineHeight:1.45,flexShrink:0,zIndex:31}}>
+          <span style={{fontSize:14,flexShrink:0}}>🔒</span>
+          <span style={{flex:1}}>
+            <strong>Sign in to see this schedule.</strong>{" "}
+            Showing a blank starter copy — sign in above, then reload.
+          </span>
+        </div>
+      )}
+      {staleNotice && !offlineFallback && !authRequired && (
         <div style={{background:"#fffbeb",borderBottom:"1px solid #fde68a",color:"#92400e",padding:"7px 14px",
           display:"flex",alignItems:"center",gap:10,fontSize:12.5,lineHeight:1.45,flexShrink:0,zIndex:31}}>
           <span style={{fontSize:14,flexShrink:0}}>&#8635;</span>
@@ -16139,8 +16156,12 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
       try {
         const { data, error } = await sb.from(TABLE).select("value").eq("key", k).single();
         if (error || !data) {
-          // PGRST116 = "no rows" — a clean empty table, not an outage
-          if (error && error.code !== "PGRST116") window.__planarCloudError = true;
+          // PGRST116 = "no rows" — a clean empty table, not an outage.
+          // 42501 = RLS/grant denied this request — signed out or not on the schedule's
+          // team, not a connectivity problem (B778/NEW-1: planar_data now requires an
+          // authenticated, owner-or-team-scoped request).
+          if (error && error.code === "42501") window.__planarAuthRequired = true;
+          else if (error && error.code !== "PGRST116") window.__planarCloudError = true;
           return null;
         }
         const val = typeof data.value === "string" ? data.value : JSON.stringify(data.value);
