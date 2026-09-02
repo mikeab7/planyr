@@ -348,6 +348,26 @@ position**.
    built only through `addPage`/`writePage` never touches the tree's own timestamps, and reads as
    "never written" under this rule (which is correct: that IS what makes a body absent honest to
    call "empty" rather than "gone").
+8. **A PAGE, ONCE EVER EDITED, COULD NEVER LEAVE THE DIRTY SET (B1055088, 2026-09-02) — found only
+   by reproducing the shape end to end, not by reading `mergeSyncState` and reasoning about it.**
+   `pushPending()` clears a page's `dirty` flag IN MEMORY the instant a push succeeds, but doesn't
+   write that to disk until its own trailing `saveSyncState()` — which merges the now-clean memory
+   against whatever is STILL on disk from BEFORE the push (nothing else touched it in between).
+   `mergeSyncState`'s blind `dirty: mine.dirty || disk.dirty` can't tell "disk knows about a
+   genuinely different window's still-pending edit" (the real B1391 case) from "disk is just this
+   SAME window's own stale pre-push snapshot." **Proof, not inference:** one page, no sibling
+   window, four `refreshNotesSync()` calls after the first sync — the server's `rev` climbed
+   1→2→3→4→5 on the UNMODIFIED shipped code. This runs on every tab focus/visibility/online event
+   and the 60-second poll, forever, for any page ever typed into. **Fix:** disk's `dirty` claim
+   only counts when disk's own `rev` is at least as current as what memory already confirmed —
+   otherwise disk is describing a moment memory has already moved past. **The neighbouring trap it
+   exposed:** `sweepEmptyAnchors` (the empty-anchor litter cleanup, runs on every load) writes
+   through the exact same `writePage` path a live keystroke does, so an automatic, no-user-intent
+   rewrite could raise a conflict bar over content the user never touched. Every sync-ledger entry
+   now carries a fourth fact, `auto`, and an `auto`-dirty page whose base has moved silently adopts
+   the server's row instead of naming a conflict — a genuinely dirty page is unaffected. **When
+   adding ANY future automatic (non-interactive) body rewrite, route it through the SAME `auto`
+   path — never straight through `writePage`**, or it inherits this exact false-conflict class.
 
 ---
 

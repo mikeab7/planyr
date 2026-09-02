@@ -186,6 +186,96 @@ const seedTree = () => ({
 
 afterEach(() => { vi.doUnmock("../src/workspaces/site-planner/lib/supabase.js"); });
 
+/* ⛔ NEW-1/B1055088 — THE SELF-RESURRECTION BUG, END TO END, WITH NO SIBLING WINDOW AT ALL.
+ * `saveSyncState`'s merge-with-disk (built for the genuine B1391 two-window case) could not
+ * tell a sibling's still-pending edit from THIS SAME WINDOW's own stale pre-push snapshot, so
+ * a page that was EVER typed into never actually left the dirty ledger: every subsequent
+ * `refreshNotesSync()` — every tab focus, every 60s poll — silently re-pushed it, bumping the
+ * server's `rev` on a page nobody had touched since. This is a single client, no sibling,
+ * proving the loop is gone rather than merely disguised by a two-window scenario. */
+describe("a single window never keeps re-pushing a page it already synced (NEW-1/B1055088)", () => {
+  it("dirty settles to false and stays false across repeated refreshes — the rev does not keep climbing", async () => {
+    const server = fakeServer();
+    const A = await openWindow(server);
+    focus(A);
+    A.store.setNotesScope(UID);
+    A.store.writeTree(seedTree());
+    A.store.writePage("gp_coord", doc("Original words"));
+    A.store.writePage("co_page1", doc("Weld County — dead pursuit"));
+    await A.store.startNotesSync({});
+
+    const revAfterFirstSync = server.pages.get("gp_coord").rev;
+    const coRevAfterFirstSync = server.pages.get("co_page1").rev;
+    const treeRevAfterFirstSync = server.treeRev;
+
+    await A.store.refreshNotesSync();
+    await A.store.refreshNotesSync();
+    await A.store.refreshNotesSync();
+    await A.store.refreshNotesSync();
+
+    // ⛔ THE ASSERTION: nothing kept re-pushing. A page nobody touched again must show the
+    // SAME server revision it landed on the first time — not one that climbs with every poll.
+    expect(server.pages.get("gp_coord").rev).toBe(revAfterFirstSync);
+    expect(server.pages.get("co_page1").rev).toBe(coRevAfterFirstSync);
+    expect(server.treeRev).toBe(treeRevAfterFirstSync);
+
+    // And a genuine edit made AFTER those idle refreshes still syncs normally — the fix does
+    // not make the ledger permanently inert, only stops it resurrecting dirty from nothing.
+    A.store.writePage("gp_coord", doc("A real edit, later"));
+    await A.store.refreshNotesSync();
+    expect(server.pages.get("gp_coord").doc).toEqual(doc("A real edit, later"));
+    expect(server.pages.get("gp_coord").rev).toBe(revAfterFirstSync + 1);
+  });
+});
+
+/* ⛔ NEW-1/B1055088 — THE DETECTOR. Nothing anywhere previously noticed that a client had just
+ * committed a burst of page bodies with no per-document user intent behind most of them — the
+ * 2026-09-02 incident was found only by a SQL query run by hand, after the fact. A single
+ * client committing at least `BULK_PUSH_ALERT_THRESHOLD` page bodies in one push cycle now
+ * reports itself, by name, with the count and the ids, so the next one shows up in
+ * `client_errors` instead of requiring another manual database hunt. */
+describe("the bulk-push detector reports itself (NEW-1/B1055088)", () => {
+  it("fires when a single push cycle commits at least the alert threshold of pages", async () => {
+    const events = [];
+    vi.doMock("../src/shared/telemetry/clientErrors.js", () => ({
+      reportClientEvent: (kind, message, extra) => { events.push({ kind, message, extra }); },
+    }));
+    const server = fakeServer();
+    const A = await openWindow(server);
+    focus(A);
+    A.store.setNotesScope(UID);
+    const many = Array.from({ length: 6 }, (_, i) => ({ id: `p${i}`, title: `P${i}`, createdAt: 1, updatedAt: 1, pages: [], projectId: null }));
+    A.store.writeTree({ v: 3, pages: many, trash: [] });
+    for (const p of many) A.store.writePage(p.id, doc(p.title));
+    await A.store.startNotesSync({});
+
+    expect(events.some((e) => e.kind === "notes_bulk_page_push")).toBe(true);
+    const fired = events.find((e) => e.kind === "notes_bulk_page_push");
+    expect(fired.extra.count).toBe(6);
+    expect(fired.extra.ids).toEqual(expect.arrayContaining(many.map((p) => p.id)));
+
+    vi.doUnmock("../src/shared/telemetry/clientErrors.js");
+  });
+
+  it("stays silent for an ordinary, small edit", async () => {
+    const events = [];
+    vi.doMock("../src/shared/telemetry/clientErrors.js", () => ({
+      reportClientEvent: (kind, message, extra) => { events.push({ kind, message, extra }); },
+    }));
+    const server = fakeServer();
+    const A = await openWindow(server);
+    focus(A);
+    A.store.setNotesScope(UID);
+    A.store.writeTree(seedTree());
+    A.store.writePage("gp_coord", doc("just the one page"));
+    await A.store.startNotesSync({});
+
+    expect(events.some((e) => e.kind === "notes_bulk_page_push")).toBe(false);
+
+    vi.doUnmock("../src/shared/telemetry/clientErrors.js");
+  });
+});
+
 describe("a real conflict between two clients", () => {
   it("⛔ ends with the EXACT page count on both clients, and every page in its source's project", async () => {
     const server = fakeServer();
@@ -347,6 +437,95 @@ describe("a real conflict between two clients", () => {
     // An EMPTY stray is still swept — an interrupted delete leaves no words behind.
     A.store.writePage("junk", { type: "doc", content: [] });
     expect(A.store.sweepOrphans(["co_page1", "gp_coord"]).removed).toEqual(["junk"]);
+  });
+});
+
+/* ⛔ NEW-1/B1055088 — A HOUSEKEEPING WRITE MUST NEVER RAISE A CONFLICT BAR OVER CONTENT THE
+ * USER NEVER TOUCHED. Reproduces the shape of the owner's 2026-09-02 report at the store level:
+ * a device holding a STALE local copy runs the empty-anchor litter sweep (an automatic pass,
+ * not something anyone typed), which marks the page dirty — and if the SAME page was genuinely,
+ * separately edited elsewhere in the meantime, the old code would surface that collision as a
+ * named conflict ("also changed in another of your windows") over a body the user on THIS
+ * device never consciously touched. The fix: the server's real edit simply wins in silence, and
+ * the litter cleanup this device attempted is dropped (harmless — idempotent, re-tried next load
+ * against the now-current row). */
+describe("a housekeeping write never raises a conflict (NEW-1/B1055088)", () => {
+  const anchorEmpty = () => ({ type: "noteAnchor", attrs: { x: 100, y: 200, w: 180 }, content: [{ type: "paragraph" }] });
+  const docWithLitter = (text) => ({
+    type: "doc",
+    content: [{ type: "paragraph", content: [{ type: "text", text }] }, anchorEmpty()],
+  });
+
+  it("A's stale litter sweep loses silently to B's real edit — no conflict, no lost text", async () => {
+    const server = fakeServer();
+
+    // A publishes a CLEAN page (a real editor save never produces litter — `writePage` itself
+    // prunes an empty anchor on every write; the litter this test exercises is the kind that
+    // predates that protection and is already sitting on disk).
+    const A = await openWindow(server);
+    focus(A);
+    A.store.setNotesScope(UID);
+    A.store.writeTree(seedTree());
+    A.store.writePage("gp_coord", doc("Original words"));
+    A.store.writePage("co_page1", doc("Weld County — dead pursuit"));
+    await A.store.startNotesSync({});
+
+    // B picks up the same account, then makes a REAL, separate edit and pushes it — A has not
+    // seen this yet.
+    const B = await openWindow(server);
+    focus(B);
+    B.store.setNotesScope(UID);
+    await B.store.startNotesSync({});
+    B.store.writePage("gp_coord", doc("B's genuine edit"));
+    await B.store.refreshNotesSync();
+    expect(server.pages.get("gp_coord").doc).toEqual(doc("B's genuine edit"));
+
+    // A's OWN on-disk copy is corrupted with an abandoned empty anchor box — simulating a body
+    // written by an app version that predates the on-write pruning, exactly what
+    // `sweepEmptyAnchors`'s one-time cleanup exists for. Poking storage directly (rather than
+    // through `writePage`) is deliberate: `writePage` itself would strip the litter immediately,
+    // which is not the case this test is about.
+    focus(A);
+    A.mem.set(A.store.pageKey("gp_coord"), JSON.stringify(docWithLitter("Original words")));
+
+    // A now runs the one-time litter sweep against its stale, corrupted copy — an AUTOMATIC
+    // write, not a keystroke — with no idea B has already moved the page on.
+    const swept = A.store.sweepEmptyAnchors(["gp_coord"]);
+    expect(swept.pages).toBe(1);       // it found and cleaned the litter A's copy was still holding
+    await A.store.refreshNotesSync();
+
+    // ⛔ THE ASSERTION: no conflict bar, and the server's genuine edit is what A ends up
+    // holding — not A's stale, auto-cleaned copy, and not a silently discarded real edit.
+    expect(A.store.notesConflicts()).toEqual([]);
+    expect(A.store.readPage("gp_coord")).toEqual(doc("B's genuine edit"));
+    expect(server.pages.get("gp_coord").doc).toEqual(doc("B's genuine edit"));
+  });
+
+  it("…but a GENUINE edit on this device still raises a real conflict against the same collision", async () => {
+    const server = fakeServer();
+    const A = await openWindow(server);
+    focus(A);
+    A.store.setNotesScope(UID);
+    A.store.writeTree(seedTree());
+    A.store.writePage("gp_coord", doc("Original words"));
+    A.store.writePage("co_page1", doc("Weld County — dead pursuit"));
+    await A.store.startNotesSync({});
+    await A.store.refreshNotesSync();
+
+    const B = await openWindow(server);
+    focus(B);
+    B.store.setNotesScope(UID);
+    await B.store.startNotesSync({});
+    B.store.writePage("gp_coord", doc("B's genuine edit"));
+    await B.store.refreshNotesSync();
+
+    // A makes its OWN real, divergent edit — not a housekeeping pass — against its stale copy.
+    focus(A);
+    A.store.writePage("gp_coord", doc("A's own divergent edit"));
+    await A.store.refreshNotesSync();
+
+    // This is the genuine case the feature must never suppress: two real edits, named.
+    expect(A.store.notesConflicts()).toEqual(["gp_coord"]);
   });
 });
 

@@ -64,6 +64,19 @@
  *      stale copy that the next keystroke wrote straight back — cleanly, past a guard this
  *      window legitimately satisfied. Silent loss, no conflict, nothing to notice.
  *
+ * ⛔ AND #2 ITSELF HID A SECOND BUG, FOUND LATER (B1055088): the merge in #2 is "mine.dirty
+ * OR disk.dirty", which is right for a genuine sibling but cannot tell that apart from THIS
+ * SAME WINDOW's own now-stale pre-push snapshot — `pushPending` clears `dirty` in memory the
+ * instant a push succeeds but doesn't write that to disk until its trailing `saveSyncState()`,
+ * which then merges against disk from BEFORE the push. Proved on unmodified code with NO
+ * sibling window at all: one page, four `refreshNotesSync()` calls, server `rev` climbed
+ * 1→2→3→4→5 forever. Fixed by only honouring disk's `dirty` when disk's own `rev` is at least
+ * as current as memory's — see `mergeSyncState`'s header in notesCloud.js. The same pass also
+ * gave the ledger a fourth fact, `auto` (a write with no per-document user intent — today only
+ * `sweepEmptyAnchors`'s litter cleanup), so an automatic rewrite can adopt a moved server row
+ * in silence instead of raising a conflict over content nobody touched. Full incident:
+ * `docs/NOTES-CARRY-FORWARD.md` §5.8.
+ *
  * ═══════════════════════════════════════════════════════════════════════════════════════
  * WHICH PAGES A PROJECT SHOWS — DECIDED, NOT LEFT ACCIDENTAL (B1374, AMENDED BY B1420)
  * ═══════════════════════════════════════════════════════════════════════════════════════
@@ -158,6 +171,7 @@ import { normalizeZoom, zoomKey, ZOOM_DEFAULT } from "./notesZoom.js";
 import { IGNORED_DUPES_KEY_BASE } from "./notesKeys.js";
 import { countEmptyAnchors, pruneEmptyAnchors } from "./notesAnchorPrune.js";
 import { relativeTime } from "./notesTime.js";
+import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 
 /* The key strings live in `notesKeys.js` — a leaf with no dependencies — so the ONE other
  * module allowed to touch these keys (`notesProjectLink.js`, which answers "what is this
@@ -343,7 +357,13 @@ function writePageLocal(pageId, doc, s = scope) {
 }
 
 /** Persist one page's document model. Returns true only when the bytes actually landed —
- *  and, when signed in, marks THAT page as owing the cloud a push. */
+ *  and, when signed in, marks THAT page as owing the cloud a push.
+ *
+ *  ⛔ THIS IS "A HUMAN MEANT TO CHANGE THIS DOCUMENT" (NEW-1, B1055088). Every call site is
+ *  the editor's own save, a restore, a task toggle, a template stamp — something a person on
+ *  THIS device asked for. It marks the page `auto: false`: a real conflict is allowed to name
+ *  it. An automatic pass that rewrites bodies on the user's behalf (nobody asked, nobody is
+ *  watching) must NEVER go through here — see `writePageHousekeeping` below. */
 export function writePage(pageId, doc) {
   if (!pageId) return false;
   /* ⛔ AN EMPTY ANCHORED BLOCK IS PROVISIONAL AND NEVER LEAVES THE SESSION. Read the header of
@@ -354,12 +374,31 @@ export function writePage(pageId, doc) {
    * through here. This is a discard of something nobody has put anything in, not a deletion of
    * data, which is why it is silent; the bar for "empty" is a whitelist and refuses to guess. */
   const clean = pruneEmptyAnchors(doc).doc;
+  return commitPageWrite(pageId, clean, { auto: false });
+}
+
+/** The housekeeping twin of `writePage` — same write, same "the cleaned copy still owes the
+ *  cloud a push" contract, but marked `auto: true`: THIS write has no user behind it, so if
+ *  it collides with a real edit made elsewhere, the server's row simply wins in silence
+ *  (`planPageSeed`/`pushPending`, notesCloud.js) rather than surfacing a conflict bar over
+ *  content the user never touched. Today's one caller is `sweepEmptyAnchors`; any FUTURE
+ *  automatic body rewrite (a schema migration, another one-time cleanup) belongs here too —
+ *  never through `writePage`, and never inventing a THIRD, unmarked dirty path. */
+function writePageHousekeeping(pageId, doc) {
+  const clean = pruneEmptyAnchors(doc).doc;   // idempotent — callers already clean, kept for safety
+  return commitPageWrite(pageId, clean, { auto: true });
+}
+
+/** The one place a cleaned body actually lands on disk and (signed in) marks the sync
+ *  ledger — shared by `writePage` and `writePageHousekeeping` so there is exactly one dirty-
+ *  marking rule, not two that can drift. */
+function commitPageWrite(pageId, clean, { auto }) {
   const ok = writePageLocal(pageId, clean);
   if (ok && scoped()) {
     const prev = sync.pages[pageId] || {};
     // A deliberate write clears the device-level tombstone: only a real body write can, and
     // it keeps the revision it was based on so the push stays a guarded update.
-    sync.pages[pageId] = { rev: Number.isFinite(prev.rev) ? prev.rev : null, dirty: true, purged: false };
+    sync.pages[pageId] = { rev: Number.isFinite(prev.rev) ? prev.rev : null, dirty: true, purged: false, auto };
     saveSyncState();
     schedulePush();
   }
@@ -463,7 +502,11 @@ export function sweepEmptyAnchors(pageIds) {
     const n = countEmptyAnchors(doc);
     if (!n) continue;
     const { doc: clean } = pruneEmptyAnchors(doc);
-    if (!writePage(id, clean)) continue;    // LOUD-FAILURE: a refused write is not counted
+    // ⛔ NEW-1/B1055088 — HOUSEKEEPING, NOT AN EDIT. This runs on every load, unconditionally,
+    // over every page this device happens to be holding a (possibly stale) body for — nobody
+    // asked for THIS write, so it must never be able to raise a conflict bar over a note the
+    // user never touched. See `writePageHousekeeping`'s header.
+    if (!writePageHousekeeping(id, clean)) continue;   // LOUD-FAILURE: a refused write is not counted
     pages += 1;
     removed += n;
   }
@@ -719,7 +762,7 @@ export async function purgePages(pageIds) {
   // snapshots of the deleted note on the device would be a bin with a hole in it.
   await deletePageVersions(ids);
   if (scoped()) {
-    for (const id of ids) sync.pages[id] = { rev: sync.pages[id]?.rev ?? null, dirty: false, purged: true };
+    for (const id of ids) sync.pages[id] = { rev: sync.pages[id]?.rev ?? null, dirty: false, purged: true, auto: false };
     for (const id of imageIds) sync.images[id] = { up: false, purged: true };
     saveSyncState();
   }
@@ -754,7 +797,7 @@ async function setBinned(pageIds, binned) {
   // next body push would be refused and reported as a conflict that was only ever a delete.
   for (const [id, rev] of Object.entries(r.revs || {})) {
     const prev = sync.pages[id] || {};
-    sync.pages[id] = { rev, dirty: !!prev.dirty, purged: !!prev.purged };
+    sync.pages[id] = { rev, dirty: !!prev.dirty, purged: !!prev.purged, auto: !!prev.auto };
   }
   saveSyncState();
   if (!r.ok) reportSyncFailure(r.error);
@@ -813,7 +856,7 @@ function readSyncState() {
   out.treeDirty = !!raw.treeDirty;
   out.adopted = (Array.isArray(raw.adopted) ? raw.adopted : []).filter((x) => typeof x === "string");
   for (const [id, v] of Object.entries(raw.pages || {})) {
-    if (v && typeof v === "object") out.pages[id] = { rev: Number.isFinite(v.rev) ? v.rev : null, dirty: !!v.dirty, purged: !!v.purged };
+    if (v && typeof v === "object") out.pages[id] = { rev: Number.isFinite(v.rev) ? v.rev : null, dirty: !!v.dirty, purged: !!v.purged, auto: !!v.auto };
   }
   for (const [id, v] of Object.entries(raw.images || {})) {
     if (v && typeof v === "object") out.images[id] = { up: !!v.up, purged: !!v.purged };
@@ -1019,12 +1062,15 @@ function settleQuietly(pageId, row) {
     const { doc: clean } = pruneEmptyAnchors(localDoc);
     if (!writePageLocal(pageId, clean)) return false;
     emitPagesChanged([pageId]);
-    sync.pages[pageId] = { rev: row.rev, dirty: true, purged: false };
+    // ⛔ auto:true (NEW-1/B1055088) — this re-push is the litter cleanup, not a user edit, so
+    // a future race on it must resolve exactly like any other housekeeping write: server wins,
+    // never a conflict bar.
+    sync.pages[pageId] = { rev: row.rev, dirty: true, purged: false, auto: true };
     conflicts.delete(pageId);
     schedulePush();
     return true;
   }
-  sync.pages[pageId] = { rev: row.rev, dirty: false, purged: false };
+  sync.pages[pageId] = { rev: row.rev, dirty: false, purged: false, auto: false };
   conflicts.delete(pageId);
   return true;
 }
@@ -1045,7 +1091,7 @@ export async function resolveNotesConflict(pageId, choice) {
   const c = await cloud();
   if (choice === "theirs") {
     if (!writePageLocal(pageId, entry.serverDoc)) return { ok: false, error: "the other window’s copy could not be saved here" };
-    sync.pages[pageId] = { rev: entry.serverRev, dirty: false, purged: false };
+    sync.pages[pageId] = { rev: entry.serverRev, dirty: false, purged: false, auto: false };
     saveSyncState();
     conflicts.delete(pageId);
     emitPagesChanged([pageId]);   // the editor must show the copy that was just chosen
@@ -1055,7 +1101,7 @@ export async function resolveNotesConflict(pageId, choice) {
   }
   const r = await c.forcePage(client(), pageId, readPage(pageId));
   if (!r.ok) return { ok: false, error: reportSyncFailure(r.error) || r.error || "the push was refused" };
-  sync.pages[pageId] = { rev: r.rev, dirty: false, purged: false };
+  sync.pages[pageId] = { rev: r.rev, dirty: false, purged: false, auto: false };
   saveSyncState();
   conflicts.delete(pageId);
   emitConflicts();
@@ -1093,7 +1139,7 @@ async function adoptLocalNotes() {
   }
   if (!writeTreeLocal(merged, scope)) return { adopted: 0, error: "the adopted notes could not be saved" };
   sync.treeDirty = true;
-  for (const id of plan.pageIds) sync.pages[id] = { rev: null, dirty: true, purged: false };
+  for (const id of plan.pageIds) sync.pages[id] = { rev: null, dirty: true, purged: false, auto: false };
   // ADOPTED-ONCE, EVER. Recorded before the push, so a notebook the user later deletes from
   // the account is not copied back in on the next sign-in (see planAdoption's header).
   sync.adopted = [...new Set([...(sync.adopted || []), ...plan.pages.map((n) => n.id)])];
@@ -1271,7 +1317,7 @@ async function seed({ full }) {
       for (const id of plan.purged) for (const imgId of imageIdsInDoc(readPage(id))) imgs.push(imgId);
       deletePages(plan.purged);
       if (imgs.length) await deleteNoteImages(imgs);
-      for (const id of plan.purged) sync.pages[id] = { rev: sync.pages[id]?.rev ?? null, dirty: false, purged: true };
+      for (const id of plan.purged) sync.pages[id] = { rev: sync.pages[id]?.rev ?? null, dirty: false, purged: true, auto: false };
       for (const id of imgs) sync.images[id] = { up: false, purged: true };
     }
 
@@ -1315,7 +1361,7 @@ async function seed({ full }) {
       for (const id of plan.adopt) {
         const row = got.pages[id];
         if (!row || row.purged) continue;
-        if (writePageLocal(id, row.doc)) { sync.pages[id] = { rev: row.rev, dirty: false, purged: false }; adopted.push(id); }
+        if (writePageLocal(id, row.doc)) { sync.pages[id] = { rev: row.rev, dirty: false, purged: false, auto: false }; adopted.push(id); }
       }
       // An adopted body under an OPEN editor is the self-race, not a background detail —
       // the workspace re-reads it rather than letting a stale document commit cleanly.
@@ -1334,7 +1380,11 @@ async function seed({ full }) {
     }
 
     // Whatever the plan says local wins on, carry the rev it must be guarded against.
-    for (const u of plan.upload) sync.pages[u.id] = { rev: u.base, dirty: true, purged: false };
+    // ⛔ `auto` is CARRIED FORWARD, never reset here (NEW-1/B1055088) — this is a re-plan of a
+    // page that was ALREADY dirty (that's how it reached `plan.upload`), and resetting it to
+    // "genuine" on every seed would quietly undo the housekeeping-never-conflicts guarantee
+    // the very next time this same page's rev moves on the server.
+    for (const u of plan.upload) sync.pages[u.id] = { rev: u.base, dirty: true, purged: false, auto: !!sync.pages[u.id]?.auto };
     saveSyncState();
 
     /* ---- pictures: eager UP, lazy DOWN (see planImageSync) ---------------------------- */
@@ -1374,6 +1424,16 @@ async function seed({ full }) {
   } finally { busy = false; }
 }
 
+/* ⛔ THE BULK-PUSH DETECTOR (NEW-1, B1055088). Eleven pages committed by one client inside
+ * ~1 second — unprecedented in this table's history — surfaced only because someone happened
+ * to go and read `notes_pages` by hand. A silent bulk overwrite must never again be something
+ * only a SQL query after the fact can find: any single push cycle that commits at least this
+ * many page bodies is reported by name, with the ids and whether each was a real editor edit
+ * or an automatic housekeeping write, so the NEXT one shows up in `client_errors` instead of a
+ * SQL detective hunt. Chosen well above an ordinary "typed in three tabs, switched away" burst
+ * and well below what a genuinely-stale device reconnecting after days away would produce. */
+const BULK_PUSH_ALERT_THRESHOLD = 5;
+
 /** Push everything this device owes, each write guarded on the revision it was based on.
  *  A refusal is a CONFLICT, never a retry that clobbers. */
 async function pushPending() {
@@ -1383,18 +1443,38 @@ async function pushPending() {
 
   const dirtyPages = Object.keys(sync.pages).filter((id) => sync.pages[id].dirty && !sync.pages[id].purged && !conflicts.has(id));
   if (dirtyPages.length || sync.treeDirty) setSyncState({ mode: "syncing" });
+  if (dirtyPages.length >= BULK_PUSH_ALERT_THRESHOLD) {
+    const autoCount = dirtyPages.filter((id) => sync.pages[id]?.auto).length;
+    reportClientEvent("notes_bulk_page_push",
+      `${dirtyPages.length} page bodies committing in one cycle (${autoCount} housekeeping, ${dirtyPages.length - autoCount} editor-marked)`,
+      { count: dirtyPages.length, auto: autoCount, editorMarked: dirtyPages.length - autoCount, ids: dirtyPages.slice(0, 20) });
+  }
   for (const id of dirtyPages) {
+    const wasAuto = !!sync.pages[id]?.auto;
     const doc = readPage(id);
-    if (doc == null) { sync.pages[id] = { ...sync.pages[id], dirty: false }; continue; }
+    if (doc == null) { sync.pages[id] = { ...sync.pages[id], dirty: false, auto: false }; continue; }
     const r = await c.pushPage(client(), id, doc, sync.pages[id].rev);
-    if (r.ok) { sync.pages[id] = { rev: r.rev, dirty: false, purged: false }; continue; }
+    if (r.ok) { sync.pages[id] = { rev: r.rev, dirty: false, purged: false, auto: false }; continue; }
     if (r.conflict) {
       const got = await c.fetchPages(client(), [id]);
       const row = got.pages?.[id];
-      if (row?.purged) { deletePages([id]); sync.pages[id] = { rev: row.rev, dirty: false, purged: true }; continue; }
+      if (row?.purged) { deletePages([id]); sync.pages[id] = { rev: row.rev, dirty: false, purged: true, auto: false }; continue; }
       // THE REFUSAL IS NOT THE BUG REPORT (B1391). The guard did its job — now find out
       // whether the two copies actually differ before saying a word to anyone.
       if (row && settleQuietly(id, row)) { emitConflicts(); continue; }
+      /* ⛔ NEW-1/B1055088 — A HOUSEKEEPING-ONLY WRITE NEVER SURFACES A CONFLICT, EVEN ON A RACE.
+       * `planPageSeed` already keeps an `auto`-dirty page out of `plan.conflicts` at PLAN time;
+       * this is the narrow race where the row moved between that plan and this push actually
+       * landing. Same rule, same reason: nothing here is a real user edit to defend, so the
+       * server's row simply wins and the local cleanup is dropped (harmless — idempotent, and
+       * the sweep runs again next load against the freshly adopted row). */
+      if (row && wasAuto) {
+        if (writePageLocal(id, row.doc)) {
+          sync.pages[id] = { rev: row.rev, dirty: false, purged: false, auto: false };
+          emitPagesChanged([id]);
+        }
+        continue;
+      }
       if (row) { conflicts.set(id, { serverDoc: row.doc, serverRev: row.rev, serverUpdatedAt: row.updatedAt ?? null, at: Date.now() }); emitConflicts(); }
       ok = false;
       continue;
