@@ -2992,7 +2992,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               <span style={{ flex: "1 1 auto", minWidth: 0, color: PAL.chromeMuted, fontSize: 12.5, padding: "0 6px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 Click the map to place a comp…
               </span>
-              {/* B986096-HARDENING-17 (owner P0 live-test, "parcel path has never once been carried
+              {/* B986096-HARDENING-18 (owner P0 live-test, "parcel path has never once been carried
                   through") — arming a row's Location cell (HARDENING-13's `onArmMapPin`) put the map
                   into placingCompPin, and the pair of buttons that offer "Comp from parcel" is gated
                   on `!placingCompPin` (a few lines above), so it disappeared the instant a row armed —

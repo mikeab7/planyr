@@ -201,7 +201,7 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
             // text/number input's onEditChange (which only tracks in-progress typing).
             onChange={(e) => { onSelectEditChange(e.target.value); }}
             onKeyDown={onEditKeyDown}
-            onBlur={onEditBlur}
+            onBlur={(e) => onEditBlur(e, rowIdx, colIdx)}
             style={{ ...inputStyle, padding: "0 2px" }}>
             <option value="" disabled hidden>{" "}</option>
             {col.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -217,7 +217,7 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
           value={editValue}
           onChange={(e) => onEditChange(e.target.value)}
           onKeyDown={onEditKeyDown}
-          onBlur={onEditBlur}
+          onBlur={(e) => onEditBlur(e, rowIdx, colIdx)}
           style={inputStyle}
         />
       </td>
@@ -716,7 +716,29 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
   // live DOM value at the moment of blur as a fallback should it ever disagree with the tracked
   // ref, rather than trusting the ref unconditionally — belt-and-suspenders, zero behavior change
   // for the (already-working) real-typing / real-click-away / real-blur-call paths measured above.
-  const onEditBlur = (e) => {
+  //
+  // ⛔ B986096-HARDENING-17 — A LATE BLUR FROM AN ALREADY-SUPERSEDED SESSION MUST NOT COMMIT INTO
+  // WHATEVER SESSION REPLACED IT. Root-caused via a ground-truth instrumented trace (console logs
+  // on beginEdit/finishEdit/onEditKeyDown, not guessing), not reproducible from code reading alone.
+  // Tab/Enter with a `moveDir` commits the current cell, then — per the HARDENING-10 "land the next
+  // cell in edit mode" feature — immediately calls `beginEdit` on the DESTINATION cell, which resets
+  // the shared `editingRef`/`editHandledRef`/`editValueRef` for the NEW session. React then unmounts
+  // the OLD input (replaced by the new one), and the browser fires a native `blur` on it — but that
+  // blur fires AFTER `beginEdit` already repointed the shared refs to the new cell. The safety net
+  // above (read the blurring input's own live DOM value if it disagrees with the ref) then read the
+  // OLD input's leftover typed text, wrote it into `editValueRef` — which `finishEdit` now applies to
+  // the NEW session's cell, not the one that was actually blurring. Measured: typing "7/4/26" into
+  // Executed, pressing Tab, landed "7,426" on Price (the auto-opened destination) while Executed
+  // itself reverted to empty. This is a DIFFERENT defect from every "Enter discards" report this
+  // module's history documents — it needs a `moveDir`-triggered auto-reopen onto an EDITABLE
+  // destination cell to manifest at all, so it never showed up testing a single commit in isolation.
+  // Fix: each `<input>`/`<select>`'s `onBlur` is bound with the (row, col) it was rendered for
+  // (`SheetCell`'s own `rowIdx`/`colIdx` props, fixed for that render) — a blur whose (row, col)
+  // no longer matches the CURRENTLY active `editingRef.current` belongs to a session that has
+  // already been closed and superseded, and is now a pure no-op: no ref mutation, no commit. A
+  // genuine, still-current blur (row/col still matches) is untouched — same behavior as before.
+  const onEditBlur = (e, forRow, forCol) => {
+    if (!editingRef.current || editingRef.current.row !== forRow || editingRef.current.col !== forCol) return;
     const domVal = e?.target?.value;
     if (typeof domVal === "string" && domVal !== editValueRef.current) editValueRef.current = domVal;
     finishEdit(true, null);
