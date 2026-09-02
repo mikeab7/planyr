@@ -2992,6 +2992,24 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               <span style={{ flex: "1 1 auto", minWidth: 0, color: PAL.chromeMuted, fontSize: 12.5, padding: "0 6px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 Click the map to place a comp…
               </span>
+              {/* B986096-HARDENING-17 (owner P0 live-test, "parcel path has never once been carried
+                  through") — arming a row's Location cell (HARDENING-13's `onArmMapPin`) put the map
+                  into placingCompPin, and the pair of buttons that offer "Comp from parcel" is gated
+                  on `!placingCompPin` (a few lines above), so it disappeared the instant a row armed —
+                  there was no way to reach parcel selection from an armed row, only a raw pin, no
+                  matter what the grid's own banner text claimed. This button is the fix: it switches
+                  the map from "armed for a pin" to "armed for a parcel" (selectMode) WITHOUT touching
+                  `armedRowId` in the parent — CompsPanel's `pendingAnchor` effect already routes any
+                  anchor kind to the still-armed row generically, so the parcel path lands on the same
+                  row the pin path would have. */}
+              <Button
+                variant="ghost"
+                onClick={() => { setPlacingCompPin(false); setSelectMode(true); }}
+                title="Click a parcel on the map to anchor a comp to it"
+                style={{ ...NESTED_ACTION_SIZE, flex: "0 1 auto", minWidth: 44, overflow: "hidden", color: PAL.chromeInk, background: "var(--chrome-bg-elev)", border: "1px solid var(--chrome-divider)", boxShadow: "none" }}
+              >
+                <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Comp from parcel</span>
+              </Button>
               <Button
                 variant="ghost"
                 onClick={() => setPlacingCompPin(false)}

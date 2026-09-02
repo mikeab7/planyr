@@ -4824,6 +4824,83 @@ session's whole scope, worked in the owner's stated priority order.
 - Files: `ui-audit/verify-comp-entry-p0.mjs`. (No `src/` change this round — every item was either
   already fixed, re-confirmed correctly blocked, or investigated with no reproducible defect found.)
 
+**Recurrence (×14) — HARDENING PASS 13 (B986096-HARDENING-17), owner P0: the PARCEL anchor path
+ROOT-CAUSED — it was never a live-GIS reachability question, it was a UI wiring bug that made the
+parcel path unreachable from the row's own Location cell regardless of whether GIS answers.**
+Prior rounds (HARDENING-14/16, NEW-2 above) correctly re-confirmed `Blocker: live-GIS` on the
+*data* call but never drove the interaction far enough to find that the *control* offering it was
+gone. Owner: *"I have driven this feature end to end twelve times over the last few hours and the
+parcel path has never once been carried from arming through to a saved row."*
+- **ROOT CAUSE, found by reading the exact click path, not by re-testing the same blocked call.**
+  Arming a row's Location cell (`CompsPanel.jsx`'s `armRow`) calls HARDENING-13's `onArmMapPin`,
+  which sets `MapFinder.jsx`'s `placingCompPin` true. Two consequences of that single flag, neither
+  previously traced together: **(a)** the toolbar block offering "Drop a pin" **and** "Comp from
+  parcel" as a pair is gated on `!placingCompPin` (`MapFinder.jsx` ~L2970) — so the instant a row
+  arms, that block, "Comp from parcel" included, disappears; and **(b)** the map's own click handler
+  checks `placingCompPinRef.current` FIRST (~L1385), before ever asking `selectModeRef` — so even if
+  `selectMode` had somehow been reached, every click still resolves to a raw pin drop while
+  `placingCompPin` is true. Net effect: **from an armed row there was no path to `selectMode` at
+  all** — the grid's own banner text ("…or click **Comp from parcel** on the map toolbar to anchor
+  to a lot instead," written for HARDENING-13) named a button that could not exist in that state.
+  This is a pure interaction-wiring defect, present with or without a live GIS answer — it explains
+  why the reported symptom held across every one of the owner's twelve attempts regardless of
+  network conditions.
+- **FIX.** `MapFinder.jsx`'s `placingCompPin` banner (the "Click the map to place a comp…" strip)
+  gained its own **"Comp from parcel"** button, calling `setPlacingCompPin(false); setSelectMode(true)`
+  — switching the map from armed-for-a-pin to armed-for-a-parcel **without touching `armedRowId` in
+  the parent**. `CompsPanel.jsx`'s `pendingAnchor` effect was already anchor-kind-agnostic (it fills
+  whichever row `armedRowId` names, or the topmost unlocated grid row, regardless of whether the
+  resulting anchor is `kind:"pin"` or `kind:"parcel"`) — that part needed no change and is the same
+  code the pin path already exercises successfully. One file touched
+  (`src/workspaces/site-planner/MapFinder.jsx`); `compParcelAnchor.js`/`comps.js`/`compLocationText.js`
+  (the parcel-anchor derivation, the DB-shape mapping, and the APN/"N parcels · County" display rule)
+  were read and confirmed already correct — untouched.
+- **⛔ THE MAP TOOLBAR'S OWN STANDALONE "Comp from parcel" PATH (not through a row) IS A DIFFERENT
+  CODE PATH AND WAS NOT TOUCHED.** Clicking it directly from the unarmed default toolbar
+  (`mode==="comp" && !placingCompPin && !selectMode && selected.length===0`) was always reachable —
+  that is the path a prior session's documentation-only pass verified. The bug this round fixes is
+  specific to the **sheet's own Location cell**, whose arming mechanism (HARDENING-13) hard-switches
+  the map into pin-only mode with no way back to parcel selection. Both paths route through the same
+  `placeCompOnSelectedParcel` → `compAnchorFromSelection` → `onPlaceComp` → `pendingCompAnchor` chain
+  once a parcel selection exists, so the fix does not duplicate or diverge from the toolbar path —
+  it restores the ONE missing transition between the two.
+- **PROVEN LOCALLY, before/after, with the working tree itself as the control — not inferred.**
+  This sandbox's Chromium cannot reach ANY external host (re-confirmed this session, see below), so
+  a real parcel click is still unreachable here — but the DEFECT was never about GIS reachability,
+  so it is fully provable against `npm run dev` on `localhost` (no egress needed) by asserting on
+  button visibility through the real rendered app: paste one row into the "＋ New comps" grid, click
+  its Location cell to arm it (`armedRowId` set, `placingCompPin` true, the row's own amber banner
+  visible) — **`git stash` the fix and the "Comp from parcel" button count while armed is 0** (the
+  reported defect, reproduced); **`git stash pop` and it is 1**, clicking it correctly shows
+  "Selecting a parcel for a comp…" and the row's own armed banner is STILL present afterward,
+  confirming `armedRowId` survives the mode switch as designed. Also independently verified through
+  the map toolbar's own "Drop a pin" button (bypassing the row entirely) with the identical
+  before/after result — the fix is in the shared `placingCompPin` state, not something arming-path-
+  specific.
+- **VERIFIED (sandbox).** Full `npx vitest run` — 687/687 files, 14,153/14,153 tests green (incl.
+  `test/compParcelAnchor.test.js` 15/15, `test/comps.test.js` 96/96, `test/compLocationText.test.js`
+  11/11, `test/compsPanelLocation.test.js` 4/4, `test/compSheetColumns.test.js` 65/65 — all untouched
+  and all still green). `npx eslint src/workspaces/site-planner/MapFinder.jsx` — 0 errors (6
+  pre-existing unrelated warnings, unchanged). `npm run build` clean.
+- **⛔ RE-CONFIRMED THIS SESSION, freshly measured, not cited from prior rounds: Chromium in this
+  environment cannot reach ANY external host at all, so the actual parcel-selection + save round
+  trip against real county GIS + Supabase still needs a live pass and could not be completed here.**
+  `curl` through this session's own configured proxy DOES reach `planyr.io` (200) and
+  `services.arcgis.com` (200), but is refused for `*.supabase.co` (403, policy denial) — yet
+  headless Chromium (`page.goto`) gets `net::ERR_CONNECTION_RESET` against every one of
+  `planyr.io`, `services.arcgis.com`, and a neutral control (`example.com`), with and without
+  `--disable-http2` and an explicit `proxy:` launch option. This reproduces, independently and this
+  session, the exact "Chromium-originated HTTPS to ANY external host is blocked here, full stop"
+  finding already on record in `VERIFICATION.md`'s V556720 (its "PROVEN, not just assumed"
+  paragraph under step 22) — so the remedy is unchanged: `verification-inbox/` (the Cowork-thread
+  live pass), not a retry from a Claude Code session at any point in the cycle.
+- **Verify: live** — `Blocker: live-GIS` unchanged, carried forward on `V556720` step 22 (updated in
+  the same commit with this fix's build and what is now specifically left to confirm: the real
+  parcel click, the Location cell's literal text for one vs. several parcels, the row count, the
+  footer ready line, Save's disabled state, and the Comps counter before/after save + reload).
+- Files: `src/workspaces/site-planner/MapFinder.jsx`.
+- Base: `origin/main` @ `58da75b5`.
+
 ### B986097 — A draft staging table, reachable only by the KML import `[Site Planner / comps]` (feature) #comps #gis #persistence  *(owner chat block 2026-09-01, NEW-2, same decision doc as B986096 above. Minted **B986097 / V556721** from this branch's reserved block B986096–B986111 · V556720–V556735 against `origin/main` 8e42a14. DEDUPE-FIRST — searched Open/⏳Verify/Done for "KML", "My Maps", "import draft", "staging table", #comps: no prior item touches KML/My Maps import; net-new. Also searched for any prior `comp_import_drafts`/`comp_drafts` table — none exists.)*
 `[x]` **Shipped this session, including the schema — applied directly to production** (this session has Supabase MCP write access, unlike the read-only access a prior comps session flagged in this same module's folder pointer — that stale claim was corrected in the same commit).
 - Verify: live — GIS endpoint behavior (a real KML import, a real polygon centroid) + real production writes are mandatory LIVE-VERIFY classes. **V556721.**

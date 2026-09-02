@@ -224,6 +224,28 @@ was never clicked" quietly ships broken.
 11. **⛔ CYCLE 5 (HARDENING-15) — ENTER GENUINELY FIXED, PLUS A NEW HIGHER-SEVERITY FINDING (blur silently discarding), ALSO FIXED.** The owner ran his own controlled A/B/C isolation (Tab-alone commits, blur-alone discards, Enter-alone discards) and correctly proved his synthetic dispatches reach *some* listener via a capture-phase check — but the right read of that evidence is the opposite of his stated conclusion: Tab's "commit" never goes through the keydown handler at all — it comes from the browser's own native Tab-focus-move (a default action, independent of event bubbling) triggering a genuine `focusout`, which bubbles unconditionally regardless of how the triggering keydown was dispatched, landing on the SAME `onEditBlur` commit path as a real blur. Enter has no such native fallback, so a non-bubbling synthetic dispatch (the `KeyboardEvent` constructor's own default) genuinely never reached React's bubble-phase, root-delegated `onKeyDown`. **Fixed at the root, not re-documented a 6th time:** a native `addEventListener("keydown", …)` now sits directly on the editing input/select element, which the DOM dispatch algorithm fires at AT_TARGET regardless of bubbling — closing the class outright, zero behavior change for a real keypress. Separately, **his own blur-discard finding (found while validating his A/B/C harness) was investigated live under every realistic interaction this session could construct and none reproduced it** — real click-away, real map click, and `execCommand` typing + a JS `.blur()` call all committed correctly; only a raw DOM-property-setter value assignment (bypassing React's `onChange` entirely) reproduced a discard, which is inconsistent with his own Run A/C setup reading back the correct value, so it doesn't fully explain the report as given. The underlying CLASS of bug (a value entered without React ever observing it) was closed anyway, cheaply and with no downside: `onEditBlur` now reads the input's own live DOM value at blur time. Both fixes proven live against his exact reproduction methodology (a non-bubbling `KeyboardEvent` dispatch with a capture-phase confirmation check, matching his own script) — the permanent harness's new "CYCLE 5" block is 5/5 green, 39/39 overall including every prior round with zero regressions. Full detail: `BACKLOG.md`'s `B986096` Recurrence ×12 block.
 12. **⛔ CYCLE 6 (HARDENING-16) — ENTER + GRID KEYBOARD NAV ESCALATED OFF THIS SESSION to a dedicated root-cause hunt (five consecutive bundles, this repo's own STANDING RULE #3(C) escalation trigger) — NOT touched this round.** The owner's remaining six-item handoff was worked instead. **NEW-1 (blur discards) re-investigated exhaustively**: the owner's three named click-away targets ("another cell, the map, the panel background") had two of three already covered; this round isolated the panel's own HEADER and FOOTER chrome as genuinely distinct non-interactive click targets (never tested separately before) plus a zero-delay rapid-typist scenario — nine total realistic reproduction attempts across two rounds, all committing correctly on the current merged code. No reproduction found; every scenario is now a permanent regression check so a real recurrence would be caught immediately rather than requiring a fresh investigation. **NEW-2/NEW-3 (parcel/site-plan anchor round trips) re-confirmed still genuinely blocked** — checked specifically for a workaround this round (the B629 Drive parcel-snapshot cache) and it doesn't help in this sandbox either (its own hydration is a network call through infrastructure the local dev server doesn't run). **NEW-4 (edit round-trip) re-confirmed correct by code reading**, unchanged since the prior round — still needs a live signed-in pass to CONFIRM, not because a defect is suspected. **NEW-5/NEW-6 (list-title and detail-view Location fallbacks) were already fixed in HARDENING-14** and are confirmed still live and correct on the current code (re-ran `test/compsPanelLocation.test.js`, 4/4 green) — flagged so they are not mistaken for open work. Full detail: `BACKLOG.md`'s `B986096` Recurrence ×13 block.
 
+13. **⛔ CYCLE 7 (HARDENING-17) — THE PARCEL ANCHOR PATH ROOT-CAUSED: NOT A LIVE-GIS QUESTION, A
+    WIRING BUG THAT MADE "COMP FROM PARCEL" UNREACHABLE FROM AN ARMED ROW.** Owner: *"I have driven
+    this feature end to end twelve times over the last few hours and the parcel path has never once
+    been carried from arming through to a saved row."* Prior rounds (HARDENING-14/16) re-confirmed
+    `Blocker: live-GIS` on the parcel-IDENTIFY call but never found that the CONTROL offering the
+    parcel path disappears the moment a row is armed: arming a row's Location cell sets
+    `MapFinder.jsx`'s `placingCompPin` true, and the toolbar block offering "Comp from parcel" is
+    gated on `!placingCompPin` — so an armed row had literally no button and no click path to
+    `selectMode` (the map's click handler checks `placingCompPin` before `selectMode` too). **Fixed:**
+    the armed-for-a-pin banner now carries its own "Comp from parcel" button, switching to
+    `selectMode` without clearing `armedRowId` — the still-armed row is what receives the eventual
+    parcel anchor, through the SAME generic `pendingAnchor` routing the pin path already uses,
+    unchanged. **Proven locally** (`npm run dev` on `localhost`, no egress needed, since the defect
+    is a control-visibility bug, not a data-reachability one): `git stash`/`stash pop` around the
+    fix on the real rendered app shows the "Comp from parcel" button going 0 → 1 while a row is
+    armed, and the row's own armed banner survives the switch into `selectMode`. **The parcel
+    *data* round trip is still `Blocker: live-GIS`, re-confirmed freshly this round** (Chromium
+    here gets `net::ERR_CONNECTION_RESET` against `planyr.io`, `services.arcgis.com` and a neutral
+    control alike, matching the "PROVEN" finding below) — the map-toolbar-only path (not through a
+    row) was traced and confirmed already structurally correct and was not touched. Full detail:
+    `BACKLOG.md`'s `B986096` Recurrence ×14 block.
+
 **What was verified here (this pass, without a browser).** Ran Michael's **exact** 10-line paste through the real, unmocked production pipeline: `compDate` parses genuinely EMPTY (no backfill, no flag) with `leaseCommencementDate` correctly flagged soft/estimated; `validateComp` correctly blocks the save until a real Executed date + location are supplied (matching the owner's explicit "the row asks for it in words" requirement). Once supplied, a REAL INSERT against production `public.comps` (project `lyeqzkuiwngunutlkkmi`), a FRESH separate `SELECT` (not the insert's own echo), and a `DELETE` confirmed `comp_date`/`lease_commencement_date` both store as genuine Postgres `date` columns, `comp_date` is NOT in the future, and county round-trips. A second insert/select/delete pass confirmed the new `bldg_noi`/`bldg_cap_rate` columns persist correctly for a building-sale comp. **Round 7 (HARDENING-10) touches ONLY column presentation/interaction, not the DB write path or field mapping, so that round-trip was not re-run — nothing about it changed.** Full `npx vitest run` green (675/675 files, 13,881/13,881 tests as of round 7 — new coverage for the Type-first/frozen-pair ordering, the one-alignment-rule asserted generically across every column, the `leaseTerm` bare-months boundary, `computeFlexWidths`/`widthFor`/`frozenLeftOffsets` across every regime, and `emptyDraft`'s new Per/Basis defaults). `npm run build` / `npx eslint src/shared/comps/` / `node ui-audit/design-drift-audit.mjs --check` / `node ui-audit/doc-pointer-audit.mjs` / `node scripts/build-map.mjs --check` all clean, round 7 included.
 **Still could NOT complete this pass — same wall as every prior round:** no reachable signed-in browser from this session (Chromium here cannot complete the Supabase auth handshake), **and round 7 additionally could not reach ANY browser at all, signed in or not** — none of round 7's fixes (single-click-to-edit, `.showPicker()`, the alignment rule, the computed flex widths / zero-scroll claim, the bare-digit cells, the empty-row/empty-cell claims) have been confirmed against a running page. This is worse coverage than prior rounds, stated plainly rather than implied: **round 6's sheet passed every sandbox check and was then found non-functional on first live use, and round 7 has not been live-tested at all yet — it carries the SAME risk, unconfirmed.**
 
@@ -280,7 +302,22 @@ TI: $13.00/sf from shell
 19. Save. **Expect:** the panel returns to the comps list; the saved comp's Executed date shows mm/dd/yy in the list row, never ISO.
 20. Read `public.comps` directly for the new row(s). **Expect:** `comp_date` matches what was typed (never the commencement date), `lease_commencement_date` populated separately, `bldg_noi`/`bldg_cap_rate` populated for the building-sale row, `lease_term` still stores the free-text form (e.g. `"126 mo"`), never a bare number.
 21. Select a parcel via the map's parcel-pick flow instead of a bare pin, anchor a comp to it. **Expect:** its Location cell shows the parcel's APN (or "N parcels · County" for a multi-parcel pick) — never an address, never "2 parcels" with nothing else.
-22. **⛔ NEW (HARDENING-14, `Blocker: live-GIS`) — anchor a comp via "Comp from parcel" (select one or more real parcels on the map, not a bare pin).** **Expect:** Location cell shows the APN (or "N parcels · County"), row count stays unchanged (no orphan row), Save enables, the counter increments on save, and the comp survives a reload.
+22. **⛔ HARDENING-17 fixed the CONTROL (the "Comp from parcel" path is now reachable from an armed
+    row's Location cell — proven locally, see history item 13); the DATA round trip below remains
+    `Blocker: live-GIS`.** Anchor a comp via the sheet's own Location cell: click a row's Location
+    cell (arms the map for a pin) → click the map's new **"Comp from parcel"** button (switches to
+    parcel-select mode, the row stays armed) → select one real parcel on the map, then Save; repeat
+    selecting three real parcels for a second row. **Expect, and report each as a literal value:**
+    (1) the Location cell text after selecting ONE parcel — the bare APN, never an address; (2) the
+    Location cell text after selecting THREE parcels — `"3 parcels · <County>"`; (3) row count
+    immediately before and after selecting parcels — unchanged, no orphan row; (4) the footer's
+    ready line; (5) the Save button's `.disabled` state; (6) the Comps counter before save, after
+    save, and after a hard reload — then delete the test comp(s) and confirm the counter returns to
+    its starting value. Also separately confirm the MAP TOOLBAR's own standalone "Comp from parcel"
+    (clicked directly, not through a row) still works for a multi-parcel selection — this path was
+    traced as already-correct and untouched this round, but has not itself been live-clicked.
+    Throwaway comps only, on the `e2e@planyr.test` account or another disposable project — never one
+    of Michael's real projects.
 23. **⛔ NEW (HARDENING-14, `Blocker: auth` + `Blocker: real-data` — needs a signed-in account with at least one uploaded, placed site-plan overlay) — anchor a comp by clicking a placed site-plan overlay's own image on the map.** **Expect:** Location cell shows the overlay's document title (or filename), row count stays unchanged, Save enables, the counter increments on save, and the comp survives a reload.
 24. **⛔ NEW (HARDENING-14, `Blocker: auth`) — open an already-saved comp, click Edit, change one value (e.g. the rate), Save, then hard-reload.** **Expect:** the changed value persists after reload — confirming `updateComp` genuinely round-trips rather than silently no-op'ing or creating a duplicate row.
 
@@ -303,8 +340,10 @@ asserts.
 item 10 above): paste → parse → pin-anchor Location fill → Executed commit → Save → counter 0→1 →
 survives a hard reload → detail view correct → Delete → counter back to 0.** Steps 1–3, 11, 17, 19
 are closed on that basis. **Still ⏳ pending, three genuinely distinct scenarios, each with a named
-blocker (steps 22–24 above, all new this pass):** the PARCEL-anchor round trip (`Blocker: live-GIS`
-— needs a real parcel click, unreachable from this sandbox), the SITE-PLAN-anchor round trip
+blocker (steps 22–24 above):** the PARCEL-anchor round trip (`Blocker: live-GIS` — the CONTROL that
+was blocking every attempt is now fixed and proven locally — HARDENING-17, history item 13 — but
+the actual parcel click against live county GIS is still unreachable from this sandbox), the
+SITE-PLAN-anchor round trip
 (`Blocker: auth` + `Blocker: real-data` — needs a signed-in account with a placed overlay already
 uploaded), and the EDIT round trip on an already-saved comp (`Blocker: auth`). Every client-side-only
 path — the parser, the cap-triangle math, the date parsing, the reactive column-visibility logic,
