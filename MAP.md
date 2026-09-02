@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-02 @ `b9c9f262a` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-02 @ `80868499` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -251,7 +251,7 @@ _644 source files mapped._
 - **`src/shared/cloud/serializeWrites.js`** — Per-key write serializer: makeWriteSerializer chains same-key cloud writes in order so a tab can't race itself into a false version conflict
   - _exports_: `makeWriteSerializer`
 - **`src/shared/cloud/writeFailureLog.js`** — Durable (localStorage) record of a cloud write that failed, surviving a same-event auto-reload that can outrun an in-memory banner before it paints
-  - _exports_: `clearAllCloudWriteFailures`, `clearCloudWriteFailure`, `readCloudWriteFailures`, `recordCloudWriteFailure`
+  - _exports_: `clearAllCloudWriteFailures`, `clearCloudWriteFailure`, `readCloudWriteFailures`, `recordCloudWriteFailure`, `replayCloudWriteFailures`
 - **`src/shared/comps/components/CompDraftsPanel.jsx`** — KML-import review/promote surface (B849233): one card per staged draft, pre-filled from best-effort description parsing, confirm-before-commit; reachable only from the KML import action
   - _exports_: `anchorFromGeometry`, `default (CompDraftsPanel)`
 - **`src/shared/comps/components/CompEntryGrid.jsx`** — the paste-box-over-a-row-grid comp entry surface (B849232): parsed values land directly in typed, editable cells with blocking (red) vs soft (amber) uncertainty; replaces the old single-comp create form
