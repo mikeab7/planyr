@@ -201,9 +201,15 @@ describe("(e) it can never be the reason a build fails to install its dependenci
 
   it("the CI required step is untouched by this: the gate itself is still what blocks a merge", () => {
     // Guards the one way this change could quietly weaken the mechanism — by becoming the
-    // guarantee instead of the fast local warning. The workflow must keep running the gate itself.
+    // guarantee instead of the fast local warning. The required build must keep running the gate
+    // itself. Since B927104's ci-parity.mjs rework (2026-09-02) `build.yml` no longer lists gate
+    // commands directly — it calls `npm run ci-parity`, which runs the ordered list declared in
+    // `.github/ci-gates.yml` — so the real invariant is checked at both ends: build.yml still
+    // delegates to the script, and that script's gate manifest still runs the mint gate itself.
     const wf = execFileSync("cat", [join(REPO, ".github", "workflows", "build.yml")], { encoding: "utf8" });
-    expect(wf).toMatch(/node scripts\/check-mint\.mjs --ci/);
+    expect(wf).toMatch(/npm run ci-parity/);
+    const gates = execFileSync("cat", [join(REPO, ".github", "ci-gates.yml")], { encoding: "utf8" });
+    expect(gates).toMatch(/node scripts\/check-mint\.mjs --ci/);
   });
 });
 
