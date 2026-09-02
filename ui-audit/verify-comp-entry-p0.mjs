@@ -297,6 +297,64 @@ console.log("\n=== KEYBOARD-ONLY PATH — Tab into the grid, arrow to Location, 
   await ctx.close();
 }
 
+console.log("\n=== CYCLE 4 (B986096-HARDENING-14) — roving tabindex: every cell is a real focus stop ===");
+{
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 }, ignoreHTTPSErrors: true });
+  await ctx.addInitScript(fixtureSeed(fixture, { id: "p0h14a" }));
+  await ctx.route("**/*", (route) => (route.request().url().startsWith(BASE) ? route.continue() : route.abort()));
+  const page = await ctx.newPage();
+  await openEntrySheet(page);
+
+  // Open cell 0-1 (a plain text cell), then Escape back to "selected, not editing" — the state
+  // roving tabindex actually governs (a single click on an editable cell enters edit mode
+  // straight away, per HARDENING-10, and focus correctly lands on the real <input> there; roving
+  // tabindex is what makes focus follow a NON-editing selection, e.g. after Escape or on a
+  // read-only/na cell, and what makes plain Tab/arrow-key traversal reach a real DOM node).
+  await page.locator('td[data-cell="0-1"]').click();
+  await pacedWait(page, 200);
+  await page.keyboard.press("Escape");
+  await pacedWait(page, 200);
+  const afterEscape = await page.evaluate(() => {
+    const el = document.activeElement;
+    return { tag: el.tagName, dataCell: el.dataset?.cell, tabIndex: el.tabIndex };
+  });
+  check("selecting a cell (not editing) gives it real DOM focus, not just the grid container",
+    afterEscape.tag === "TD" && afterEscape.dataCell === "0-1" && afterEscape.tabIndex === 0, JSON.stringify(afterEscape));
+
+  await page.keyboard.press("ArrowRight");
+  await pacedWait(page, 150);
+  const afterArrow = await page.evaluate(() => {
+    const el = document.activeElement;
+    return { tag: el.tagName, dataCell: el.dataset?.cell };
+  });
+  check("ArrowRight moves DOM focus to the newly-selected cell", afterArrow.dataCell === "0-2", JSON.stringify(afterArrow));
+
+  const rovingCount = await page.evaluate(() => {
+    const focusable = document.querySelectorAll('[role="grid"] [tabindex], [role="grid"] button, [role="grid"] input, [role="grid"] select');
+    const tabIndex0 = [...document.querySelectorAll('[role="grid"] [tabindex]')].filter((el) => el.tabIndex === 0);
+    return { totalFocusable: focusable.length, tabIndex0Count: tabIndex0.length };
+  });
+  check("the grid carries many real focusable/tabindexed elements, not 1-2",
+    rovingCount.totalFocusable > 10, `totalFocusable=${rovingCount.totalFocusable}`);
+  check("exactly ONE cell is a real Tab stop at a time (roving tabindex, not every cell a stop)",
+    rovingCount.tabIndex0Count === 1, `tabIndex0Count=${rovingCount.tabIndex0Count}`);
+
+  // Arrow-navigate to the Location action cell and confirm DOM focus lands on the real <button>.
+  let onLocation = false;
+  for (let i = 0; i < 6 && !onLocation; i++) {
+    const el = await page.evaluate(() => {
+      const active = document.activeElement;
+      return { tag: active.tagName, text: active.textContent };
+    });
+    if (el.text === "Set") { onLocation = true; break; }
+    await page.keyboard.press("ArrowRight");
+    await pacedWait(page, 80);
+  }
+  const locFocus = await page.evaluate(() => ({ tag: document.activeElement.tagName, text: document.activeElement.textContent }));
+  check("arrow-navigating onto the Location cell focuses its real <button>", locFocus.tag === "BUTTON" && locFocus.text === "Set", JSON.stringify(locFocus));
+  await ctx.close();
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`);

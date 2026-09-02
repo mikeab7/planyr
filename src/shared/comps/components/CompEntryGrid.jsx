@@ -258,6 +258,7 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
       <td style={{ ...tdStyle, padding: 0 }} data-cell={`${rowIdx}-${colIdx}`} title={hoverTitle}>
         <button
           type="button"
+          tabIndex={selected ? 0 : -1}
           onMouseDown={(e) => onMouseDown(rowIdx, colIdx, e.shiftKey)}
           onDoubleClick={() => onDoubleClick(rowIdx, colIdx)}
           style={{ ...textStyle, width: "100%", border: "none", background: "transparent", cursor: "pointer", font: "inherit", color: textStyle.color }}
@@ -277,6 +278,7 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
       // typed character could land. `preventDefault()` here is the standard fix (every grid
       // library with click-to-edit cells does this) — it suppresses the browser's own default
       // mousedown action WITHOUT touching our own explicit `.focus()` calls, which still run.
+      tabIndex={selected ? 0 : -1}
       onMouseDown={(e) => { e.preventDefault(); onMouseDown(rowIdx, colIdx, e.shiftKey); }}
       onDoubleClick={() => onDoubleClick(rowIdx, colIdx)}
       title={hoverTitle}>
@@ -465,11 +467,33 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     }
   }, [editing]);
 
+  // ⛔ HARDENING-14 (B986096, owner P0 live-test, "focusable elements in the entire table: 2 ...
+  // Cells need to be focusable so the grid can be driven from the keyboard end to end") — a roving
+  // tabindex: the SELECTED cell carries `tabIndex={0}` (a real Tab stop), every other cell carries
+  // `tabIndex={-1}` (programmatically focusable, never a stop on the page's own Tab order — the
+  // same pattern Excel Online / Google Sheets use, so Tab still only needs to move focus INTO and
+  // OUT OF the grid as one stop; arrow keys move the selection). This effect is what makes DOM
+  // focus actually FOLLOW selection rather than staying on the grid's outer container `<div>` —
+  // `onGridKeyDown` still fires regardless of which descendant holds focus (keydown bubbles), so
+  // this changes what `document.activeElement` reports, not what arrow/Tab/Enter already did.
   useEffect(() => {
     if (!selection) return;
-    const el = gridRef.current?.querySelector(`[data-cell="${selection.row}-${selection.col}"]`);
-    el?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [selection]);
+    const cellEl = gridRef.current?.querySelector(`[data-cell="${selection.row}-${selection.col}"]`);
+    cellEl?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    // Only steal DOM focus when it's already somewhere INSIDE the grid (a click on a cell, an
+    // arrow/Tab keypress, or finishEdit's own `gridRef.current?.focus()` after a commit) — never
+    // when a fresh paste just created rows while the paste textarea still holds focus. Without this
+    // guard, committing a paste (which sets `selection` but leaves focus in the textarea) yanked
+    // focus into the sheet, so a SECOND paste landed on the grid's own Excel-style spill-paste
+    // instead of the textarea's smart-parse — breaking "paste several comps in a row."
+    if (!editing && gridRef.current?.contains(document.activeElement)) {
+      // The Location cell's focusable element is the <button> nested inside its <td> (buttons are
+      // natively focusable without a tabIndex prop); every other cell's tabIndex lives on the <td>
+      // itself.
+      const focusEl = cellEl?.querySelector("button") || cellEl;
+      focusEl?.focus?.();
+    }
+  }, [selection, editing]);
 
   // Keep selection in bounds when rows are added/removed (never point at a row that no longer
   // exists) AND when a column that was selected stops being visible (e.g. the only building_sale

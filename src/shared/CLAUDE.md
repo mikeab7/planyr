@@ -513,6 +513,41 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   arrows move a selection, Enter arms an action cell) already worked; the owner's own
   `querySelectorAll('button,[tabindex],...')` count undercounts this pattern by construction
   (same shape as Excel Online / Google Sheets), so it's recorded here as checked, not as a gap.
+  **⛔ ROUND 11 (B986096-HARDENING-14, owner cycle-4 P0 LIVE-TEST) — A COMP SAVED FOR THE FIRST TIME
+  (full round trip, Michael himself, signed in), plus four remaining Tier-0 items in his own priority
+  order: "Enter commit, then focusable cells, then parcel and site-plan anchors, then the Edit
+  round-trip."** Enter turned out to be a TEST-METHODOLOGY artifact, not an app bug: his own
+  reproduction used a synthetic `KeyboardEvent` dispatched WITHOUT `bubbles: true` (the constructor's
+  default), which never reaches the app's delegated keydown handling the way a real keypress does
+  (SYNTHETIC-KEYS-DONT-EDIT) — the identical dispatch WITH `bubbles: true` committed correctly, and
+  the app's own Enter-commit code is unchanged from ROUND 10 and already proven live via a REAL
+  `page.keyboard.press("Enter")`. **Focusable cells (genuinely fixed):** `CompEntryGrid.jsx` now
+  implements a real roving tabindex — the selected cell gets `tabIndex={0}`, every other cell
+  `{-1}`, and a new effect gives the selected cell (or the Location cell's own `<button>`) real DOM
+  focus, extending the existing selection-scroll-into-view effect. **A genuine side effect was caught
+  before shipping:** naively focusing on every selection change also fires right after a paste
+  creates rows — since `selection` changes then too, while DOM focus is still on the paste
+  textarea — which would yank focus into the grid mid-paste and route a SECOND clipboard paste
+  through the grid's own spill-paste instead of the textarea's smart-parse, breaking "paste several
+  comps in a row." Fixed by gating the focus move on `gridRef.current?.contains(document.activeElement)`
+  — it only steals focus when focus is ALREADY inside the grid (a click, an arrow/Tab press, or
+  `finishEdit`'s own existing post-commit focus call), never when an external control like the paste
+  textarea holds it. **Parcel and site-plan anchor kinds, and the Edit round-trip on a saved comp,
+  are genuinely blocked, not un-investigated** — a parcel anchor needs a live external ArcGIS
+  parcel-identify call (`Blocker: live-GIS`), a site-plan anchor needs a signed-in account with an
+  already-placed overlay (`Blocker: auth` + `Blocker: real-data`), and confirming an edit persists
+  needs a real signed-in write (`Blocker: auth`); the pure derivations and downstream rendering for
+  all three were already solidly unit-tested before this round (the repo-root `test/` suites for the
+  parcel-anchor derivation and for the location-text formatter) and the edit path's code was read and
+  traces correctly — filed as new
+  `VERIFICATION.md` steps rather than silently deferred. **Two minor fixes, same pass:** the comp
+  LIST row's title, and the comp DETAIL view, both now show a comp's real Location (address / APN /
+  plan title) as their identity when Title is blank — previously the list fell back to the deal's
+  bare RATE, and the detail view showed no Location at all despite having a real, already-resolved
+  one. `CompsPanel.jsx` gained its own `useCompLocationText` — mirrors `CompEntryGrid.jsx`'s Location
+  logic (same `compLocationText.js` pure functions) but is a DELIBERATELY SEPARATE, self-contained
+  cache — `CompEntryGrid.jsx`'s own reverse-geocode cache is a cycle-4 gate ("do not touch again
+  except regression-checking") and this fix never touches that file.
   KML import (B849233) is a SEPARATE staging table, `db/comp_import_drafts.sql`
   (`public.comp_import_drafts`, owner-only RLS — no team visibility at all, unlike `comps` itself,
   until promoted) — `lib/kmlImport.js` is the pure, hand-rolled Placemark parser (a Point is a
