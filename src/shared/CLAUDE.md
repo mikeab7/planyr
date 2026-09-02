@@ -600,32 +600,6 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   `CompsPanel.jsx`'s `save()`, unchanged and still correct; still needs a live signed-in pass to
   CONFIRM, not because a defect is suspected. **NEW-5/NEW-6 (list-title/detail-view Location
   fallbacks)** — both were already shipped in ROUND 11, re-confirmed still correct this round.
-  **⛔ ROUND 14 (B986096-HARDENING-17, the escalated root-cause session ROUND 13 handed off to) —
-  A GENUINELY NEW DEFECT, FOUND BY GROUND-TRUTH INSTRUMENTED TRACING, NOT BY GUESSING. Read this
-  before touching `onEditBlur`/`beginEdit`/`finishEdit` again.** Root-caused with temporary
-  `console.log`s inside the three functions (removed after), not from reading the code — every
-  prior round's reasoning about this class was structurally plausible and still missed it. The
-  mechanism: Tab/Enter with a `moveDir` commits the current cell, then — per HARDENING-10's "land
-  the next cell in edit mode" feature — immediately calls `beginEdit` on the DESTINATION cell,
-  which resets the SHARED `editingRef`/`editHandledRef`/`editValueRef` refs to the new session.
-  React then unmounts the OLD `<input>` (replaced by the new one), and the browser fires a native
-  `blur` on it — but that fires AFTER `beginEdit` already repointed the shared refs. HARDENING-15's
-  own stale-value safety net in `onEditBlur` (added to recover a value React's `onChange` never
-  observed) then read the OLD input's leftover DOM text, saw it disagreed with the ALREADY-RESET
-  `editValueRef`, wrote it back, and committed it — into whatever cell the refs NOW pointed at, not
-  the one that was actually blurring. Measured live: typing "7/4/26" into Executed then pressing
-  Tab landed "7,426" on Price (the auto-opened destination column) while Executed itself reverted
-  to empty; the row-wise Enter equivalent (destination = next row, same column) is the same race.
-  **This is why it survived five prior owner reports as "Enter/Tab discard": it needs the moveDir
-  auto-reopen to land on a DIFFERENT, EDITABLE cell to manifest at all** — a single commit tested in
-  isolation, or a destination that clamps back to the SAME cell (a one-row grid), never triggers a
-  real unmount/blur and so never shows it. Fix: each cell's `onBlur` is now bound with the
-  `(row, col)` it was rendered for (`SheetCell`'s own `rowIdx`/`colIdx` props) — `onEditBlur` checks
-  that pair against the CURRENTLY active `editingRef.current` before doing anything, so a blur
-  belonging to an already-superseded session is a pure no-op instead of committing into whatever
-  replaced it. Guard: the repo-root `ui-audit/` harness **verify-comp-entry-p0**'s CYCLE 7 block, teeth-proven (reverting
-  the fix turns it red: Executed stays at its pre-edit value, Price shows "7,426"; two live checks,
-  single-row Tab-to-Price and two-row Enter-to-next-row, both now proven clean).
   KML import (B849233) is a SEPARATE staging table, `db/comp_import_drafts.sql`
   (`public.comp_import_drafts`, owner-only RLS — no team visibility at all, unlike `comps` itself,
   until promoted) — `lib/kmlImport.js` is the pure, hand-rolled Placemark parser (a Point is a
