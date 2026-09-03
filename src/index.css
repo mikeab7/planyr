@@ -544,6 +544,16 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }
 /* tool-rail buttons — idle hover; active state styled inline */
 .rbtn:hover:not(:disabled):not(.on) { background: var(--hover-chrome) !important; color: var(--chrome-text) !important; filter: none; }
 .rbtn.on:hover:not(:disabled) { filter: brightness(1.06); }
+/* NEW-1 (B849584, hardened after a live-verify pass reported the inline-style open state absent
+   on the deployed build) — a REAL CSS rule, independent of the JS-driven inline `rbtn(active,open)`
+   wash, so an open flyout's trigger reads as menu-open through two structurally separate
+   mechanisms rather than one. `[aria-expanded="true"]` is the one fact every AnchoredMenu trigger
+   on this rail already publishes correctly (confirmed live); `:not(.on)` keeps this from ever
+   fighting the orange active-tool fill, which stays inline-only and must never be reused here.
+   `!important`, matching the hover rule right above it: a plain-specificity rule can never win
+   against an inline style, so without it this can only ever agree with a working inline value,
+   never actually STAND IN for a broken one — which is the entire point of a second mechanism. */
+.rbtn[aria-expanded="true"]:not(.on) { background: var(--hover-chrome) !important; border-color: var(--chrome-muted) !important; }
 /* B900416 — the owner's rail-redesign hover: the icon warms to the accent colour, the trailing
    shortcut letter / dropdown caret lifts from muted to full ink. Geometry never changes (no lift,
    no nudge, no size change) — colour only, on the existing background wash above. `--accent` on
