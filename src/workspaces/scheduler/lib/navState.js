@@ -227,9 +227,26 @@ export function shouldAdoptLinkedSiteIntoRoute({
  * cross-cutting one — Pursuits/Operations, via isPickShowing), the iframe is HIDDEN and a brief
  * "switching" state shows instead — so a mismatch can never be visibly rendered, only ever a
  * transitional loader, regardless of what caused `aPid` to drift or how long the fix takes to
- * re-converge it. */
-export function isGridMismatched(projects, siteId, activeId, pickShowing) {
+ * re-converge it.
+ *
+ * ⛔ B851 ×4 (NEW-1) — the gate above compared route-vs-BELIEF, not route-vs-GRID, and the belief
+ * (`activeId`) is only ever updated when the embedded app POSTS a fresh `planar:nav-state`. Reproduced
+ * live: the embedded app silently self-reloads a backgrounded tab (B850's 20s/focus/reconnect poll —
+ * `public/sequence/index.html`'s `if (saveStatusRef.current === "saved" && document.hidden)
+ * window.location.reload()`), the reloaded document boots showing whatever the shared `aPid` field
+ * now says (which can have drifted while this tab was reloading/backgrounded), and — until IT
+ * announces itself — the shell's `activeId` still holds the PRE-RELOAD value. That stale value can
+ * happen to already equal the routed site's linked schedule id, so the gate read "matched" while the
+ * grid underneath had already repainted with a different project's tasks. `navConfirmed` closes this:
+ * it must be true only when the shell has heard a genuine `planar:nav-state` announcement SINCE the
+ * iframe's most recent `load` event (Scheduler.jsx resets it to false in `onIframeLoad`, before
+ * anything else, and sets it true only inside the nav-state message handler). An un-announced grid —
+ * `navConfirmed === false` — is ALWAYS treated as mismatched, fail CLOSED, never matched-by-default,
+ * regardless of what the stale `projects`/`activeId` belief says. Defaults to `true` so every existing
+ * caller (and every pre-×4 unit test) keeps its prior meaning unchanged. */
+export function isGridMismatched(projects, siteId, activeId, pickShowing, navConfirmed = true) {
   if (siteId == null || pickShowing) return false;
+  if (!navConfirmed) return true; // fail closed: no confirmation from THIS load yet
   const linked = findAllBySiteId(projects, siteId);
   if (linked.length === 0) return false; // nothing linked yet — the empty state (not this gate) applies
   return !linked.some((p) => p.id === activeId);
