@@ -12,8 +12,8 @@
  */
 
 const LIGHT = {
-  /* Surfaces */
-  surfacePage: "#F3F5F8", surfaceRaised: "#FFFFFF",
+  /* Surfaces — kept in step with src/index.css's Model Round 4 move (see that file's header) */
+  surfacePage: "#E7EBF0", surfaceRaised: "#FFFFFF",
   borderDefault: "#E1E5EB", borderStrong: "#CDD3DC",
   textPrimary: "#1B1E26", textSecondary: "#353B49", textTertiary: "#4B5263",
   /* Chrome (themes with the app) */
@@ -46,12 +46,12 @@ const LIGHT = {
   accentStrong: "#9A3412",
   /* Semantic TEXT colors (mirror of the --success/danger/info/warn-text tokens) for the
      canvas-adjacent inline styles that read PAL instead of var(). */
-  warnText: "#8A5410", successText: "#15803D", dangerText: "#B3361B", infoText: "#1D4ED8", purpleText: "#534AB7",
+  warnText: "#8A5410", successText: "#12722F", dangerText: "#B3361B", infoText: "#1D4ED8", purpleText: "#534AB7",
 };
 
 const DARK = {
-  /* Surfaces */
-  surfacePage: "#14161B", surfaceRaised: "#1D2027",
+  /* Surfaces — kept in step with src/index.css's Model Round 4 move (see that file's header) */
+  surfacePage: "#0A0C0F", surfaceRaised: "#1D2027",
   borderDefault: "#2A2E37", borderStrong: "#3A3F4B",
   textPrimary: "#E8EBF0", textSecondary: "#CAD0DA", textTertiary: "#A4ABB8",
   /* Chrome */

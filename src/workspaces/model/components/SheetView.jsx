@@ -885,7 +885,7 @@ export default function SheetView({
       // border + a margin against the app's own page backdrop (ModelApp's root, `--surface-page`)
       // — the sheet itself (and its chrome bands) sit on `--surface-raised`, one tier up.
       // ⛔ Round 3 (B1087904) — MEASURED live that this alone did not read as a card: the
-      // page/raised surface pair (`--surface-page` vs `--surface-raised`) is only ~4% apart in
+      // page/raised surface pair (`--surface-page` vs `--surface-raised`) was only ~4% apart in
       // lightness in the light theme, so an 8px
       // margin + a 1px border in that same near-white-on-near-white range was genuinely
       // imperceptible in a real screenshot at working zoom (confirmed via computed-style — the
@@ -895,14 +895,26 @@ export default function SheetView({
       // contrast — the same "design-exempt, no shadow-color token yet repo-wide" language this
       // file's own zoom control already uses below, at half its strength (a floating control
       // needs to visibly separate from the page it's ON TOP of; a panel just needs to look SET
-      // INTO the page, not hover above it). No top margin — it sits directly below the toolbar
-      // card (ModelApp.jsx) with one shared 8px gap between them, not two stacked ones.
+      // INTO the page, not hover above it).
+      // ⛔ Round 4 — the token pair above is now separated further (index.css), so the card reads
+      // without a shadow assist alone. No top margin here — MEASURED live that Round 3's "one
+      // shared 8px gap" between this card and the toolbar card (ModelApp.jsx) was actually a
+      // real, visible 0px seam: these two cards are siblings in a flex column, and flex items
+      // never collapse margins the way ordinary block siblings do, so a 0 bottom margin up there
+      // plus this 0 top margin summed to a literal 0, not a shared 8. The gap is now carried
+      // entirely by the toolbar card's own bottom margin — this card's top margin stays 0 so the
+      // two contributions are never summed into a doubled gap.
+      // ⛔ Round 4 — this is now the STRONGER of the module's two card shadow levels (design-exempt:
+      // no shadow-color token yet repo-wide). Round 3 gave this card and the toolbar card
+      // (ModelApp.jsx) the identical shadow, which read as one flat weight everywhere rather than
+      // "the paper sits heavier than the tools held above it" — the toolbar card keeps the lighter
+      // of the two, unchanged.
       style={{
         flex: 1, minHeight: 0, overflow: "auto", position: "relative", outline: "none",
         margin: "0 8px 8px", // SPACE.md literal — see designTokens.js note above
         background: "var(--surface-raised)",
         border: "1px solid var(--border-default)", borderRadius: RADIUS.lg,
-        boxShadow: "0 1px 3px rgba(0,0,0,0.07)", // design-exempt: no shadow-color token yet repo-wide (matches the zoom control's own shadow below, at half strength)
+        boxShadow: "0 2px 6px rgba(0,0,0,0.10)", // design-exempt: no shadow-color token yet repo-wide
       }}
     >
       {/* Stage 2 visual pass — resize-handle hover affordance. A plain inline `style` prop can't
@@ -981,12 +993,30 @@ export default function SheetView({
               </div>
             );
           })}
+          {/* Round 4 (measured live: at the default 26-column sheet this button's true flow
+              position sits ~2000px past the visible viewport — reachable only by scrolling the
+              grid almost its full width, effectively unreachable at a normal window size). Sticky
+              to the RIGHT edge of the scrolling viewport, mirroring the row-header gutter's own
+              `position:sticky; left:0` a few lines up — same mechanism, opposite edge: it stays
+              pinned near the visible right edge while the columns scroll underneath it, and only
+              settles into its true resting place (right after the last column) once you actually
+              scroll there. Still an ordinary flex child for width/scrollWidth purposes — sticky
+              never removes it from flow — so nothing about the grid's total scroll extent changes.
+              A faint edge shadow (design-exempt: no shadow-color token yet repo-wide — the mirror
+              of this file's own frozen-COLUMN shadow a few lines up, same reasoning: chrome that
+              stays fixed while content scrolls past it reads as "docked" rather than "the next
+              column" only if it visibly sits above that content, not flush with it). */}
           <button
             type="button"
             data-testid="model-add-column"
             onClick={onAddColumn}
             title="Add column"
-            style={{ flex: "0 0 34px", border: "none", borderRight: "1px solid var(--border-default)", background: "transparent", color: "var(--text-tertiary)", fontSize: 16, cursor: "pointer" }}
+            style={{
+              position: "sticky", right: 0, zIndex: 2,
+              flex: "0 0 34px", border: "none", borderLeft: "1px solid var(--border-default)",
+              background: "var(--surface-page)", color: "var(--text-tertiary)", fontSize: 16, cursor: "pointer",
+              boxShadow: "-2px 0 4px -1px rgba(0,0,0,0.18)", // design-exempt: no shadow-color token yet repo-wide
+            }}
           >+</button>
         </div>
 

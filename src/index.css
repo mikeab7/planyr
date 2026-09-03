@@ -61,8 +61,23 @@
      attributes / canvas export). Keep the two in sync. (B316/B317/B318/B319)
      ============================================================================ */
 
-  /* Surfaces */
-  --surface-page:   #F3F5F8;
+  /* Surfaces
+     ⛔ Model Round 4 — `--surface-page` was moved DARKER (was #F3F5F8, ~3.8% below
+     `--surface-raised` #FFFFFF by plain average-channel lightness). MEASURED live: every rule for
+     a raised card over the page ground was correctly applied (radius/border/margin/shadow, see
+     Model's own SheetView.jsx card) and still read as flat at working zoom, because the two
+     surfaces were too close together to see the edge between them. Moved to roughly double the
+     separation (~7.7%) — enough to read without hunting, still a light, low-saturation cool gray,
+     not a heavier "dashboard" tint. Text-on-page contrast only ever IMPROVES from darkening the
+     page under dark text (checked: `ui-audit/contrast-audit.mjs` — every page-surface pair still
+     clears its floor). Audited before moving: nothing in this app relies on the two surfaces being
+     near-identical — `--border-strong` vs `--surface-page` is an already-documented low-contrast
+     EXCEPTION (borders are allowed to be subtle by the KEY DECISIONS rule), and the one place that
+     fades content INTO `--surface-page` via a gradient (Notes' `ConflictSideBySide.jsx`) fades to
+     its own matching background, not to `--surface-raised`, so it is unaffected by exactly how far
+     apart the two tokens sit. Kept in the token layer, never a per-component override — every
+     consumer of the pair (cards throughout the app) picks up the wider separation for free. */
+  --surface-page:   #E7EBF0;
   --surface-raised: #FFFFFF;
   --surface-overlay: rgba(255, 255, 255, 0.94); /* frosted floating panels over the map */
   /* B986096-HARDENING-25 — `--surface-base` was referenced by ~10 components (form inputs inside
@@ -73,8 +88,10 @@
      why the comps entry grid's own cell editors let the map show through. Aliasing the existing
      `--surface-page` value gives every one of those inputs a real, opaque, "recessed field on a
      raised panel" surface — distinct from `--surface-raised` (cards) without inventing a new hex.
-     Fixes every call site at once; none of them ever intended transparency. */
-  --surface-base: #F3F5F8;
+     Fixes every call site at once; none of them ever intended transparency. Kept numerically equal
+     to `--surface-page` through the Round 4 move above — same reasoning, same value, still a plain
+     literal (not `var(--surface-page)`) matching how this pair was originally declared. */
+  --surface-base: #E7EBF0;
 
   /* B427411 — the corner-radius scale. JS mirror: src/shared/ui/radius.js (keep in step, the
      way palette.js mirrors the colour tokens). Four steps and no more: pill for fully-round
@@ -176,7 +193,13 @@
      stays AA on a themed panel in BOTH themes. A hardcoded #15803d / #b3361b / #1d4ed8
      reads fine on a light card but drops to ~2.5–3.2:1 on a dark card (B354 sweep).
      (--warn-text above is the amber member of this set.) */
-  --success-text: #15803D;
+  /* Model Round 4 — darkened one notch from #15803D. The light-theme page/raised move above
+     (surface-page darker, for real card separation) left success-text's contrast on the PAGE
+     surface at 4.19:1, just under the 4.5 AA floor it was previously clearing at 4.59:1 with no
+     headroom to spare — this text color, not the page move, is what was fragile. Every OTHER
+     surface success-text sits on (card, planner card, its own success-bg tint) is lighter than
+     the new page and gains contrast from the same darkening; none needed a separate change. */
+  --success-text: #12722F;
   --danger-text:  #B3361B;
   --info-text:    #1D4ED8;
   /* Vivid alert/error FILL (icons · borders · the cloud-off badge · a failed layer
@@ -319,11 +342,20 @@
 }
 
 [data-theme="dark"] {
-  /* Surfaces */
-  --surface-page:   #14161B;
+  /* Surfaces — Model Round 4: moved darker in step with the light theme's move (see that
+     definition's header), keeping the two themes' page/card separation proportionally matched
+     rather than fixing only the theme the live report happened to measure.
+     ⛔ Round 4, second pass — a first move to #0E1014 cleared the same relative-lightness gap as
+     the light theme's move, but MEASURED (screenshot crop, not just computed style) it still read
+     weaker than light theme's fix: the shadow that helps carry the light-theme edge contributes
+     almost nothing on a dark ground (a black shadow over a near-black page is nearly invisible),
+     so dark theme leans on the token gap + the border alone. Moved further, to a real but still
+     dark, low-saturation gray-navy — not pure black, which would read as a hole rather than a
+     ground. */
+  --surface-page:   #0A0C0F;
   --surface-raised: #1D2027;
   --surface-overlay: rgba(24, 27, 33, 0.93); /* frosted floating panels over the map */
-  --surface-base: #14161B; /* see the light-theme definition's header for why this alias exists */
+  --surface-base: #0A0C0F; /* see the light-theme definition's header for why this alias exists */
   --border-default: #2A2E37;
   --border-strong:  #3A3F4B;
   --text-primary:   #E8EBF0;
