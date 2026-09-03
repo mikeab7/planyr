@@ -606,6 +606,19 @@ Runtime deps are kept few and deliberate. New client dependency added 2026-07-10
   inside it. (The old GitHub Pages deploy was retired — see "Retire the old GitHub Pages
   deploy pipeline — ✅ DONE" near the end of this file; GitHub Actions now only runs the
   build status check, it doesn't publish.)
+- **⛔ A LIVE MEASUREMENT ON planyr.io IS ONLY VALID IF THE DEPLOYED CHUNK HASH IS READ IN THE SAME
+  CALL AS THE ASSERTION (owner correction, 2026-09-03, B1112449/B1112450 false-alarm recurrence).**
+  A browser tab can silently keep serving a pre-deploy cached bundle — content-hashed chunk
+  filenames (`AppHeader-<hash>.js`) are meant to be cached long-term, so a STALE tab's own reload
+  can reload the SAME stale chunks rather than fetch the new deploy; two tabs opened at different
+  times can each be on a genuinely different build with no visible sign of it. The case this
+  produced: a "still broken after the fix shipped" report was measured in a tab on the pre-fix
+  bundle, while a DIFFERENT tab (used minutes earlier to confirm an unrelated part of the same fix)
+  was already on the new one — the mismatch went unnoticed because neither check read its own chunk
+  hash. **The fix is procedural, not architectural: whenever a live check's PASS/FAIL claim matters,
+  read the served chunk hash (Network tab, or `document.querySelectorAll('script[src]')`) in the
+  SAME observation as the behavior being asserted** — never assume a reload guarantees a fresh
+  bundle, and never let one tab's confirmed-fresh reading vouch for a different tab.
 - **Per-branch preview URLs** (seeing an unmerged branch live without merging to `main`)
   are a separate, optional Cloudflare concern — not required to build or to see both
   workspaces. (Don't conflate this with PR status checks, which are a separate GitHub
