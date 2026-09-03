@@ -116,6 +116,24 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V625008 — B1123425: Leased SF / Price / NOI / etc. inputs show comma-grouped digits and persist correctly, on a real signed-in comp `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** `CompForm` (the single-comp edit form) is reached only from an already-saved comp's "Edit" button — reaching it at all requires a signed-in account with at least one comp on file. This sandbox's egress proxy CORS-blocks the Supabase auth handshake, so no signed-in session — and therefore no saved comp — is reachable here.
+
+**What was verified here, without a signed-in browser — and it is a live-Chromium run against the real exported component, not a code read.** A throwaway Vite entry (discarded after use) rendered the real `NumField` component straight out of `CompsPanel.jsx` in a live headless Chromium session: typing `613208` then blurring shows `613,208`; while focused it shows the raw `613208`; clicking to place the caret between "613" and "208" (index 3) and typing "9" produces `6139208` with the caret at index 4 (no jump) and the underlying committed state (what would reach the draft/database) reads the plain number `6139208`, never `6,139,208`; a simulated paste of `613,208` lands as `613208` in both the field and the committed state. The two pure formatting functions it's built on (`formatNumberDisplay`/`sanitizeNumericInput`, `compSheetColumns.js`) are separately unit-tested (`test/compSheetColumns.test.js`) and already proven in production via the paste-grid's own sheet cells.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in, on a throwaway project's comp (or a real one — this is read-only-safe, since re-saving the same value changes nothing):**
+1. Open a comp with a Leased SF value (or create one via "＋ Paste comps") and click **Edit**. **Expect:** Leased SF shows the value comma-grouped (e.g. `613,208`), not raw digits.
+2. Click into Leased SF. **Expect:** it switches to raw digits (no comma) while focused.
+3. Click to place the caret in the MIDDLE of the number (not at the end) and type a digit. **Expect:** the digit lands exactly where the caret was, with no jump and no doubled/dropped characters.
+4. Tab or click away (blur). **Expect:** the field re-groups with commas, matching the derived "…/yr total (face)" line beneath it.
+5. Select all in the field and paste `613,208` (with commas, copied from elsewhere). **Expect:** the field accepts it and, once blurred, shows `613,208` — not an error, not `613208,`.
+6. Save the comp, then reload the page and re-open it for editing. **Expect:** Leased SF still reads the correct number, comma-grouped — confirming the value round-tripped through Supabase as a plain number, not a string containing commas.
+7. Repeat steps 1–4 on Price (land or building sale), Building SF, NOI, and TI $/SF. **Expect:** identical comma-grouping behavior on each.
+8. Check Rate ($/SF), Cap rate (%), Free rent (mo), and Escalation (%/yr) are UNCHANGED — plain digits, no commas, exactly as before. **Expect:** no separators on these (by design — see B1123425).
+
+**Result:** ⏳ pending — needs a real signed-in browser session; not reachable from this sandbox. The field's own formatting/parsing/caret mechanics (above) are fully proven live in headless Chromium against the real component, not sandbox-simulated guesswork.
+
 ### V620144 — B1114992: deleting a site plan with a pinned comp succeeds and the comp reverts to a plain pin, on a real signed-in account `Blocker: auth`
 
 **Why this needs its own real pass.** This is a real-project-data / signed-in destructive-action class (delete a database row through the actual UI, then read the result back) — mandatory-live per `CLAUDE.md`. This sandbox's egress proxy CORS-blocks the Supabase auth handshake, so no signed-in write of any kind is reachable here.
