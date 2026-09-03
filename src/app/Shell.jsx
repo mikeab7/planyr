@@ -58,6 +58,25 @@ const WORKSPACES = [
 // pill/dropdown styling moved into AccountControl.jsx with the control itself — B734.)
 const CHROME = "var(--chrome-bg)";
 
+// B113/B485's existing phone breakpoint (760px, matchMedia), reused verbatim rather than a
+// third one — same value AppHeader.jsx's own `useNarrow` and Notes.jsx/FoodMap.jsx's local
+// mirrors of it already use. A LOCAL copy rather than importing AppHeader.jsx: that file pulls
+// in ProjectBreadcrumb/CloudSyncBadge/AnchoredMenu/BrandMark/InterfaceSettings and more, and
+// Shell.jsx sits in the entry chunk every route downloads — FoodMap.jsx's own `useCoarsePointer`
+// comment documents the same tradeoff for the same reason (bundle weight on chrome every route
+// pays for, not the workspace-lazy chunks that already import AppHeader.jsx directly).
+function useNarrow() {
+  const [narrow, setNarrow] = useState(() => { try { return window.matchMedia("(max-width: 760px)").matches; } catch (_) { return false; } });
+  useEffect(() => {
+    let mq; try { mq = window.matchMedia("(max-width: 760px)"); } catch (_) { return undefined; }
+    const on = () => setNarrow(mq.matches);
+    on();
+    mq.addEventListener ? mq.addEventListener("change", on) : mq.addListener(on);
+    return () => { mq.removeEventListener ? mq.removeEventListener("change", on) : mq.removeListener(on); };
+  }, []);
+  return narrow;
+}
+
 /** "A newer version of Planyr is available" (B1373) — module scope, per
  *  MODULE-SCOPE-COMPONENTS.
  *
@@ -73,16 +92,49 @@ const CHROME = "var(--chrome-bg)";
  *  underneath, which is acceptable only because it stays dismissible, actionable (Reload), and
  *  never traps clicks outside its own box — FloatingNotice's shared host is pointer-events:none
  *  everywhere except each notice's own filled card. */
+const UPDATE_BANNER_MAX_WIDTH = "min(480px, calc(100vw - 16px))";
+
 function UpdateBanner({ reason, onReload, onDismiss }) {
+  // B113/B485's existing phone breakpoint (760px, matchMedia), reused rather than a third one —
+  // same convention Notes.jsx's phone drill-in cites. Hook runs unconditionally (Rules of Hooks),
+  // ahead of the `reason` early-return below.
+  const narrow = useNarrow();
   if (!reason) return null;
+  const actions = (
+    <>
+      <button
+        type="button" data-testid="app-update-reload" onClick={onReload}
+        style={{
+          flex: "0 0 auto", border: "1px solid var(--warn-text)", borderRadius: RADIUS.pill,
+          background: "transparent", color: "var(--warn-text)", font: "inherit",
+          fontSize: 11.5, fontWeight: 700, padding: "2px 12px", cursor: "pointer",
+        }}
+      >Reload</button>
+      <button
+        type="button" data-testid="app-update-dismiss" onClick={onDismiss}
+        style={{
+          flex: "0 0 auto", border: "1px solid var(--border-default)", borderRadius: RADIUS.pill,
+          background: "transparent", color: "var(--text-tertiary)", font: "inherit",
+          fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
+        }}
+      >Dismiss</button>
+    </>
+  );
   return (
-    <FloatingNotice maxWidth="min(480px, calc(100vw - 16px))">
+    <FloatingNotice maxWidth={UPDATE_BANNER_MAX_WIDTH}>
       <div
         role="status"
         data-testid="app-update-banner"
         data-reason={reason}
         style={{
-          display: "flex", alignItems: "center", gap: 10, padding: "8px 14px",
+          // FloatingNotice's wrapper only CAPS width (maxWidth) — it never forces its child to
+          // actually USE the available room, so a shrink-to-fit column collapses to whatever its
+          // narrowest content demands (measured: a bare flexDirection:"column" switch alone
+          // produced a 165px-wide message column, four lines, narrower than the unfixed bug).
+          // Setting the SAME width the FloatingNotice cap uses is what actually claims the room.
+          width: narrow ? UPDATE_BANNER_MAX_WIDTH : undefined,
+          display: "flex", flexDirection: narrow ? "column" : "row", alignItems: narrow ? "stretch" : "center",
+          gap: 10, padding: "8px 14px",
           background: "var(--warn-bg)", border: "1px solid var(--warn-border)", borderRadius: RADIUS.lg,
           color: "var(--warn-text)", fontSize: 12.5, fontWeight: 600, boxShadow: "0 4px 16px rgba(0,0,0,0.22)",
         }}
@@ -94,22 +146,9 @@ function UpdateBanner({ reason, onReload, onDismiss }) {
             ? "Planyr couldn't finish loading part of the app just now (likely mid-deploy) — a reload should fix it. Anything you were changing is saved on this device."
             : "A newer version of Planyr is available. Reload when you're ready — your work is saved."}
         </span>
-        <button
-          type="button" data-testid="app-update-reload" onClick={onReload}
-          style={{
-            flex: "0 0 auto", border: "1px solid var(--warn-text)", borderRadius: RADIUS.pill,
-            background: "transparent", color: "var(--warn-text)", font: "inherit",
-            fontSize: 11.5, fontWeight: 700, padding: "2px 12px", cursor: "pointer",
-          }}
-        >Reload</button>
-        <button
-          type="button" data-testid="app-update-dismiss" onClick={onDismiss}
-          style={{
-            flex: "0 0 auto", border: "1px solid var(--border-default)", borderRadius: RADIUS.pill,
-            background: "transparent", color: "var(--text-tertiary)", font: "inherit",
-            fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
-          }}
-        >Dismiss</button>
+        {narrow
+          ? <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>{actions}</div>
+          : actions}
       </div>
     </FloatingNotice>
   );
