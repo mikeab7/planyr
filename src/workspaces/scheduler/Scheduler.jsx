@@ -93,6 +93,20 @@ export default function Scheduler({
   // let a deliberate pick of a cross-cutting unlinked schedule (Operations/Pursuits) show its grid
   // even on a routed project with no schedule of its own — see navState.js for the full story.
   const explicitPickRef = useRef(null);
+  // ⛔ B1112449/B1112450 ×2 (NEW-1, 2026-09-03) — owner-verified live that the switcher still shows
+  // one row and the breadcrumb still doesn't disambiguate for a site with two linked schedules,
+  // AFTER the fix that should cover it merged (unionProjectLists' multi-link branch). Every static
+  // read of unionProjectLists/ProjectBreadcrumb/this bridge traces correctly, and a live e2e drive
+  // of the REAL Scheduler→AppHeader→ProjectBreadcrumb chain (e2e/scheduler-multi-schedule-switcher.spec.js)
+  // posting the EXACT shape the owner's production row held — two entries, matching linkedSiteId,
+  // both string/number types as minted — renders two rows and a disambiguated crumb correctly. So
+  // the defect, if it's still live, is in data this sandbox cannot produce (no live signed-in
+  // browser reaches planyr.io from here) — DANGEROUS-MEANS-UNOBSERVABLE: the honest fix is the
+  // missing instrument, not another guess. This captures the RAW bridged payload the very next time
+  // any tab observes a site with 2+ linked schedules, so a recurrence report comes with ground
+  // truth (exact ids/types/linkedSiteId values as posted) instead of another blind reproduction.
+  // Fires once per distinct multi-link snapshot (never a spam loop) via the signature ref below.
+  const multiLinkTelemetrySigRef = useRef("");
 
   // Receive the embedded scheduler's nav state (its own projects — not the Site
   // Planner's). It re-emits on load and on every project add/rename/delete/switch.
@@ -141,6 +155,32 @@ export default function Scheduler({
       // `section` above are no longer a stale pre-reload belief.
       setNavConfirmedBoth(true);
       markReady();   // first nav-state ⇒ the embedded app is interactive
+      // See multiLinkTelemetrySigRef's header above. Group the RAW (already-sanitized) list by
+      // linkedSiteId; a group of 2+ is exactly the shape unionProjectLists' multi-link branch is
+      // supposed to fan out into distinct switcher rows. Report the ids/types as posted (never
+      // just a count) — the whole point is to catch a type or field difference no static read found.
+      try {
+        const bySite = new Map();
+        for (const p of nav.projects) {
+          if (p && p.linkedSiteId != null) {
+            const key = p.linkedSiteId;
+            if (!bySite.has(key)) bySite.set(key, []);
+            bySite.get(key).push({ id: p.id, idType: typeof p.id, name: p.name });
+          }
+        }
+        const multi = [...bySite.entries()].filter(([, list]) => list.length > 1);
+        if (multi.length) {
+          const sig = JSON.stringify(multi);
+          if (sig !== multiLinkTelemetrySigRef.current) {
+            multiLinkTelemetrySigRef.current = sig;
+            reportClientEvent(
+              "schedule-multi-link-payload",
+              "site with 2+ linked schedules observed in the bridged nav-state",
+              { activeId: nav.activeId, activeIdType: typeof nav.activeId, sites: multi.map(([siteId, list]) => ({ siteId, siteIdType: typeof siteId, schedules: list })) },
+            );
+          }
+        }
+      } catch (_) { /* telemetry must never throw into the app */ }
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
