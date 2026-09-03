@@ -89,7 +89,12 @@ console.log("=== NEW-1 — dialog height grows with the viewport; ≥8 rows visi
   const visibleRows2 = geom2.rowH ? geom2.clientH / geom2.rowH : 0;
   console.log(`  [before-fix reference: owner measured clientH=76 scrollH=113 panelH=340 at this exact 1191x521 viewport]`);
   console.log(`  now: panelH=${geom2.panelH} clientH=${geom2.clientH} scrollH=${geom2.scrollH} rowH=${geom2.rowH} visibleRows=${visibleRows2.toFixed(2)}`);
-  check("panel no longer pinned to the old flat 340px default", geom2.panelH > 340, `panelH=${geom2.panelH}`);
+  // B844400/NEW-2 (2026-09-03) AMENDS this assertion: the panel is no longer forced tall — it now
+  // shrinks to fit its own content (up to the viewport-derived ceiling), so a genuinely SMALL
+  // panel height for a 2-row sheet is the CORRECT outcome, not a regression back to the old flat
+  // 340px. The meaningful claim is "not pinned to that one specific stale number" plus "no vertical
+  // scroll" — dead-space-below-the-table is asserted directly by verify-comp-entry-b844400.mjs.
+  check("panel is no longer the old flat 340px (now sized to its own content)", geom2.panelH !== 340, `panelH=${geom2.panelH}`);
   check("2 rows fit with NO vertical scroll (clientH >= scrollH)", geom2.clientH >= geom2.scrollH - 1, `clientH=${geom2.clientH} scrollH=${geom2.scrollH}`);
   if (SHOTS) await page.screenshot({ path: `${SHOT_DIR}/new1-dialog-height-1191x521.png` });
   await ctx.close();
@@ -225,7 +230,11 @@ console.log("\n=== NEW-3 — every paste announces itself, and Undo removes exac
 }
 
 console.log("\n=== NEW-4 — horizontal fit at common widths, both column sets; row identity while scrolled ===");
-const WIDTHS = [1440, 1280, 1191, 1024, 768];
+// B844400 fix — 768 sat BELOW MOBILE_BREAKPOINT_PX (820, compMobileLayout.js), so this desktop-grid
+// sweep crashed there every run (CompEntryMobileSheet renders instead, no `[role="grid"]` to find).
+// Narrow-desktop coverage stays at 1024; the mobile layout has its own dedicated harness,
+// verify-comp-entry-mobile.mjs.
+const WIDTHS = [1440, 1280, 1191, 1024];
 for (const setName of ["lease", "land"]) {
   for (const w of WIDTHS) {
     const ctx = await newCtx(browser, { width: w, height: 900 }, `n4-${setName}-${w}`);
@@ -299,20 +308,28 @@ async function sweepRestingRow(page) {
   await pasteViaTextarea(page, "Sugarbun Way industrial, 25,000 SF lease, $6.50/SF/yr NNN, 5 yr term, executed 1/15/2026");
   const leaseSweep = await sweepRestingRow(page);
   console.log("  lease row: " + JSON.stringify(leaseSweep));
-  for (const name of ["Type", "Per", "Basis"]) {
+  // B844400/NEW-4 (owner report, 2026-09-03) — AMENDS this block: Unit on a non-land row is
+  // `state === "fixed"` (always SF, never a real per-row choice), and it used to be the one
+  // choice column with no caret at rest — inconsistent next to Type/Per/Basis, which is exactly
+  // what the owner flagged. Unit now carries the same caret on EVERY row type (a visual-parity
+  // signal that it's drawn from a fixed option set, not a claim of editability — clicking a fixed
+  // Unit cell still does nothing, checked separately below), so it joins this loop.
+  for (const name of ["Type", "Unit", "Per", "Basis"]) {
     const row = leaseSweep.find((r) => r.col === name);
     check(`${name} shows a caret at rest`, !!row?.caret, JSON.stringify(row));
     check(`${name} is a <SPAN> at rest, never a live <SELECT>`, row?.inner === "SPAN", JSON.stringify(row));
     check(`${name} shows the grid's normal 'cell' cursor at rest (not 'default')`, row?.cursor === "cell", JSON.stringify(row));
   }
-  const nonChoice = leaseSweep.filter((r) => !["Type", "Per", "Basis"].includes(r.col) && r.col !== "Location");
+  const nonChoice = leaseSweep.filter((r) => !["Type", "Unit", "Per", "Basis"].includes(r.col) && r.col !== "Location");
   check("free-text/numeric/date cells carry NO caret (lease row)", nonChoice.every((r) => !r.caret), JSON.stringify(nonChoice.filter((r) => r.caret)));
   if (SHOTS) await page.screenshot({ path: `${SHOT_DIR}/new6-carets-lease.png` });
   await ctx.close();
 }
 {
-  // Unit (AC/SF) is a real choice ONLY on a LAND row — it's fixed to SF (not a genuine per-row
-  // choice) everywhere else, which is why it correctly shows no caret on a lease/building-sale row.
+  // Unit (AC/SF) is a genuine, clickable CHOICE only on a LAND row — fixed to SF everywhere else.
+  // Confirm the land case is unchanged (still a real editable choice, caret included) AND that a
+  // fixed Unit cell's caret (added above) never makes it clickable: clicking a lease/building-sale
+  // row's Unit cell must still mount no editor at all.
   const ctx = await newCtx(browser, { width: 1600, height: 900 }, "n67b");
   const page = await ctx.newPage();
   await openEntrySheet(page);
@@ -324,6 +341,20 @@ async function sweepRestingRow(page) {
   check("Unit is a <SPAN> at rest, never a live <SELECT>", unitRow?.inner === "SPAN", JSON.stringify(unitRow));
   check("Unit shows the grid's normal 'cell' cursor at rest (not 'default')", unitRow?.cursor === "cell", JSON.stringify(unitRow));
   if (SHOTS) await page.screenshot({ path: `${SHOT_DIR}/new6-carets-land.png` });
+  await ctx.close();
+}
+{
+  const ctx = await newCtx(browser, { width: 1600, height: 900 }, "n844400-unitfixed");
+  const page = await ctx.newPage();
+  await openEntrySheet(page);
+  await pasteViaTextarea(page, "Sugarbun Way industrial, 25,000 SF lease, $6.50/SF/yr NNN, 5 yr term, executed 1/15/2026");
+  const unitCell = page.locator('td[data-cell="0-4"]'); // Unit column index (see compSheetColumns.js SHEET_COLUMNS order)
+  const beforeText = (await unitCell.innerText()).trim();
+  check("a FIXED Unit cell (non-land) still shows the caret glyph alongside its value", /[▾▼⌄˅⋁]/.test(beforeText) && /SF/.test(beforeText), JSON.stringify(beforeText));
+  await unitCell.click();
+  await pacedWait(page, 200);
+  const mounted = await unitCell.evaluate((el) => !!el.querySelector("input,select"));
+  check("clicking a FIXED Unit cell still mounts NO editor (the caret is decorative there, not a claim of editability)", !mounted, `mounted=${mounted}`);
   await ctx.close();
 }
 
