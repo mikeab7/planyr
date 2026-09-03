@@ -14,6 +14,16 @@
         "approvedAt": "2026-09-02",
         "approvedCommit": "a90e0c37",
         "note": "B1074770 (map-finder split-button caret audit) — the Select-parcels/Place-comp split-button carets now render via the same aria-hidden, opacity-0.6 caret span controls.jsx's MenuTrigger primitive uses everywhere else in the app (was full-opacity bare text), and the Select-parcels menu panel is intentionally narrower (148px vs 200px, B1074769). Both are deliberate, requested visual changes to the map-landing toolbar."
+      },
+      "light--phone": {
+        "approvedAt": "2026-09-03",
+        "approvedCommit": "eafd8f31",
+        "note": "NEW-2: re-approve after fixing openPlan() prep to expand MapFinder's Sites panel at phone width first (it defaults collapsed under 760px) — first pass silently captured the map-landing screen instead of the opened demo plan."
+      },
+      "dark--phone": {
+        "approvedAt": "2026-09-03",
+        "approvedCommit": "eafd8f31",
+        "note": "NEW-2: re-approve after fixing openPlan() prep to expand MapFinder's Sites panel at phone width first (it defaults collapsed under 760px) — first pass silently captured the map-landing screen instead of the opened demo plan."
       }
     },
     "site-planner-header": {
@@ -26,6 +36,16 @@
         "approvedAt": "2026-09-02",
         "approvedCommit": "a90e0c37",
         "note": "B1074770 (map-finder split-button caret audit) — the Select-parcels/Place-comp split-button carets now render via the same aria-hidden, opacity-0.6 caret span controls.jsx's MenuTrigger primitive uses everywhere else in the app (was full-opacity bare text), and the Select-parcels menu panel is intentionally narrower (148px vs 200px, B1074769). Both are deliberate, requested visual changes to the map-landing toolbar."
+      },
+      "light--phone": {
+        "approvedAt": "2026-09-03",
+        "approvedCommit": "eafd8f31",
+        "note": "NEW-2: re-approve after fixing openPlan() prep to expand MapFinder's Sites panel at phone width first (it defaults collapsed under 760px) — first pass silently captured the map-landing screen instead of the opened demo plan."
+      },
+      "dark--phone": {
+        "approvedAt": "2026-09-03",
+        "approvedCommit": "eafd8f31",
+        "note": "NEW-2: re-approve after fixing openPlan() prep to expand MapFinder's Sites panel at phone width first (it defaults collapsed under 760px) — first pass silently captured the map-landing screen instead of the opened demo plan."
       }
     },
     "site-planner-left-rail": {
@@ -38,6 +58,16 @@
         "approvedAt": "2026-09-02",
         "approvedCommit": "a90e0c37",
         "note": "B1074770 (map-finder split-button caret audit) — the Select-parcels/Place-comp split-button carets now render via the same aria-hidden, opacity-0.6 caret span controls.jsx's MenuTrigger primitive uses everywhere else in the app (was full-opacity bare text), and the Select-parcels menu panel is intentionally narrower (148px vs 200px, B1074769). Both are deliberate, requested visual changes to the map-landing toolbar."
+      },
+      "light--phone": {
+        "approvedAt": "2026-09-03",
+        "approvedCommit": "eafd8f31",
+        "note": "NEW-2: re-approve after fixing left-rail prep to tap the phone-only 'Show Land/Analysis/Yield/...' Sections pill before selecting Yield — the rail itself is off-screen (translateX(-100%)) at narrow width until summoned."
+      },
+      "dark--phone": {
+        "approvedAt": "2026-09-03",
+        "approvedCommit": "eafd8f31",
+        "note": "NEW-2: re-approve after fixing left-rail prep to tap the phone-only 'Show Land/Analysis/Yield/...' Sections pill before selecting Yield — the rail itself is off-screen (translateX(-100%)) at narrow width until summoned."
       }
     },
     "library": {
@@ -50,6 +80,16 @@
         "approvedAt": "2026-09-02",
         "approvedCommit": "a90e0c37",
         "note": "B1074770 (map-finder split-button caret audit) — the Select-parcels/Place-comp split-button carets now render via the same aria-hidden, opacity-0.6 caret span controls.jsx's MenuTrigger primitive uses everywhere else in the app (was full-opacity bare text), and the Select-parcels menu panel is intentionally narrower (148px vs 200px, B1074769). Both are deliberate, requested visual changes to the map-landing toolbar."
+      },
+      "light--phone": {
+        "approvedAt": "2026-09-03",
+        "approvedCommit": "eafd8f31",
+        "note": "NEW-2: re-approve after fixing openPlan() prep to expand MapFinder's Sites panel at phone width first (it defaults collapsed under 760px) — first pass silently captured the map-landing screen instead of the opened demo plan."
+      },
+      "dark--phone": {
+        "approvedAt": "2026-09-03",
+        "approvedCommit": "eafd8f31",
+        "note": "NEW-2: re-approve after fixing openPlan() prep to expand MapFinder's Sites panel at phone width first (it defaults collapsed under 760px) — first pass silently captured the map-landing screen instead of the opened demo plan."
       }
     }
   }
