@@ -287,6 +287,56 @@ console.log("\n=== NEW-8 — Close arms a discard confirmation when the sheet ho
   await ctx.close();
 }
 
+console.log("\n=== NEW-8 — Escape follows the SAME confirm-before-discard path as the header ✕/footer Close ===");
+{
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 }, ignoreHTTPSErrors: true });
+  await ctx.addInitScript(fixtureSeed(fixture, { id: "a11y8esc" }));
+  await ctx.route("**/*", (route) => (route.request().url().startsWith(BASE) ? route.continue() : route.abort()));
+  const page = await ctx.newPage();
+  await openEntrySheet(page);
+  await pasteOneLine(page, "West Hardy tract, 3.2 AC, $850,000, closed 3/14/2026");
+  check("1 row on the sheet", (await rowCount(page)) === 1);
+
+  // A real key press, not a synthetic dispatch — bubbles natively from wherever focus sits (the
+  // paste textarea, right after the paste commit).
+  await page.keyboard.press("Escape");
+  await pacedWait(page, 200);
+  const promptText = await page.evaluate(() => document.body.innerText);
+  check("Escape arms the SAME discard confirmation as the ✕/Close buttons", /Discard 1 unsaved comp\?/.test(promptText), promptText.match(/Discard[^\n]*/)?.[0]);
+
+  // Escape again while the prompt is already up is treated as "Keep editing" — the safe default.
+  await page.keyboard.press("Escape");
+  await pacedWait(page, 200);
+  check("a second Escape while confirming keeps editing (no discard)", (await rowCount(page)) === 1 && (await page.locator("[data-comp-entry-panel]").count()) === 1);
+
+  // Confirm Escape genuinely reaches Discard too, via the real button (not just Keep-editing).
+  await page.keyboard.press("Escape");
+  await pacedWait(page, 200);
+  await page.getByRole("button", { name: "Discard", exact: true }).click();
+  await pacedWait(page, 300);
+  check("Discard reached via Escape's own confirmation closes the panel", (await page.locator("[data-comp-entry-panel]").count()) === 0);
+  await ctx.close();
+}
+
+console.log("\n=== NEW-8 — Escape on the MOBILE sheet follows the same path ===");
+{
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, ignoreHTTPSErrors: true });
+  await ctx.addInitScript(fixtureSeed(fixture, { id: "a11y8escmobile" }));
+  await ctx.route("**/*", (route) => (route.request().url().startsWith(BASE) ? route.continue() : route.abort()));
+  const page = await ctx.newPage();
+  await openEntrySheet(page);
+  await pasteOneLine(page, "West Hardy tract, 3.2 AC, $850,000, closed 3/14/2026");
+  check("mobile sheet mounted", (await page.evaluate(() => !!document.querySelector('[data-comp-entry-mobile="1"]'))));
+  await page.keyboard.press("Escape");
+  await pacedWait(page, 200);
+  const promptText = await page.evaluate(() => document.body.innerText);
+  check("Escape arms the discard confirmation on mobile too", /Discard 1 unsaved comp\?/.test(promptText), promptText.match(/Discard[^\n]*/)?.[0]);
+  await page.getByRole("button", { name: "Keep editing" }).click();
+  await pacedWait(page, 200);
+  check("Keep editing (from an Escape-armed prompt) leaves the mobile sheet open", (await page.evaluate(() => !!document.querySelector('[data-comp-entry-mobile="1"]'))));
+  await ctx.close();
+}
+
 console.log("\n=== NEW-8 — Close on an EMPTY sheet stays instant and silent ===");
 {
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 }, ignoreHTTPSErrors: true });

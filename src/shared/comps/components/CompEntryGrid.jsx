@@ -1618,7 +1618,20 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
 
   if (isMobile) {
     return createPortal(
-      <>
+      // NEW-8 — same whole-panel Escape-to-close path as the desktop sheet (see its own comment):
+      // bubbles up from anywhere in the mobile sheet, guarded off while a row is armed for a map
+      // pin (CompsPanel.jsx's own window-level Escape-disarm owns that case) or while a field is
+      // mid-edit (`editing` is the DESKTOP grid's own cell-editor state, always null on mobile —
+      // included for the same belt-and-suspenders reason as the desktop handler, harmless here).
+      // While the discard prompt is already up, Escape means "Keep editing," never a second
+      // discard attempt. This wrapping `<div>` is purely a keydown-catching container — both
+      // children keep their own `position: fixed` layout, unaffected by it.
+      <div onKeyDown={(e) => {
+        if (e.key !== "Escape" || editing || armedRowId) return;
+        e.preventDefault();
+        if (confirmingClose) keepEditing();
+        else requestClose();
+      }}>
         <CompEntryMobileSheet
           rows={rows}
           overlaysById={overlaysById}
@@ -1640,7 +1653,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
         {confirmingClose && (
           <DiscardCloseConfirm rowCount={rows.length} onDiscard={confirmDiscard} onKeepEditing={keepEditing} fullScreen />
         )}
-      </>,
+      </div>,
       document.body,
     );
   }
@@ -1649,6 +1662,22 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     <div
       data-comp-entry-panel="1"
       onPointerDown={(e) => e.stopPropagation()}
+      // NEW-8 — Escape on the whole panel follows the SAME path the header ✕ and footer Close
+      // already share (`requestClose`), rather than doing nothing (its prior behavior — there was
+      // no panel-level Escape handler at all). Bubble-phase, so it fires after any more specific
+      // Escape handling already claimed the key: a cell mid-edit (`onEditKeyDown`'s native
+      // AT_TARGET listener) cancels just that edit and this never runs (`editing` guards it too,
+      // belt-and-suspenders); a row armed for a map pin is `CompsPanel.jsx`'s own window-level
+      // Escape-disarm (fires AFTER this, since window is outermost) — `armedRowId` guards this one
+      // off so the two don't both act on the same keypress. While the discard prompt is already up,
+      // Escape is treated as "Keep editing" (the safe default for a confirm dialog), never a second
+      // discard attempt.
+      onKeyDown={(e) => {
+        if (e.key !== "Escape" || editing || armedRowId) return;
+        e.preventDefault();
+        if (confirmingClose) keepEditing();
+        else requestClose();
+      }}
       style={{
         // B986096-HARDENING-9 (owner rule, "take it to near-full viewport") — was 1200px (1191px
         // measured on his 1600px screen after borders), 370px narrower than it needed to be for a
