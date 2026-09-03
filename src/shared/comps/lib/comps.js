@@ -476,6 +476,27 @@ export function validateComp(draft) {
   return errors;
 }
 
+/** NEW-5 (adversarial review, 2026-09-02) — `team_id` is independent on `comps` and
+ * `site_plan_overlays`, and nothing kept them in step: a comp shared to a team whose underlying
+ * site plan is NOT shared to that same team rendered for a teammate as a point on an invisible
+ * plan (they can see the comp via comps' own team RLS, but not the overlay it's pinned to).
+ * REFUSAL, not cascade: this app's own standing rule is "sharing is always a deliberate, explicit
+ * act — never automatic" (KEY DECISIONS, /CLAUDE.md) — silently sharing someone's site plan as a
+ * side effect of sharing a comp would violate that outright, so the fix is to block the comp
+ * share and say why, not to auto-share the plan underneath it.
+ * `overlaysById` is the host's already-loaded `{id -> overlay}` map (the same one `CompsPanel`
+ * already threads through for location text) — a comp anchored to an overlay this map doesn't
+ * know about is never blocked here (never guess at a conflict from missing information; the DB
+ * FK/CHECK pair already guarantees the anchor itself is real). Returns a message string, or null
+ * when there's no conflict. */
+export function anchorTeamConflict(comp, overlaysById) {
+  if (!comp?.teamId || comp?.anchor?.kind !== "site_plan") return null;
+  const overlay = overlaysById?.[comp.anchor.sitePlanOverlayId];
+  if (!overlay) return null;
+  if (overlay.teamId === comp.teamId) return null;
+  return "This comp is pinned to a site plan that isn't shared with that team. Share the site plan itself first, or leave this comp unshared.";
+}
+
 /* ---- row <-> model, mirroring shared/pins/pinStore.js's rowToPin/pinToRow shape ---------- */
 
 // numeric columns round-trip as JSON STRINGS over PostgREST (preserves precision) — Number()

@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-03 @ `624086046` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-03 @ `b1ca3977` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_649 source files mapped._
+_653 source files mapped._
 
 ## infra
 
@@ -265,7 +265,9 @@ _649 source files mapped._
 - **`src/shared/comps/components/CompDraftsPanel.jsx`** — KML-import review/promote surface (B849233): one card per staged draft, pre-filled from best-effort description parsing, confirm-before-commit; reachable only from the KML import action
   - _exports_: `anchorFromGeometry`, `default (CompDraftsPanel)`
 - **`src/shared/comps/components/CompEntryGrid.jsx`** — the paste-box-over-a-row-grid comp entry surface (B849232): parsed values land directly in typed, editable cells with blocking (red) vs soft (amber) uncertainty; replaces the old single-comp create form
-  - _exports_: `default (CompEntryGrid)`, `draftFromParsedRow`
+  - _exports_: `default (CompEntryGrid)`, `draftFromParsedRow`, `locationCellText`
+- **`src/shared/comps/components/CompEntryMobileSheet.jsx`** — the TRANSPOSED comp entry layout below MOBILE_BREAKPOINT_PX: pager + status dots, sticky identity strip, one-comp-per-screen field list grouped by compMobileLayout.js, a jump sheet for the whole batch
+  - _exports_: `default (CompEntryMobileSheet)`
 - **`src/shared/comps/components/CompsPanel.jsx`** — Leasing Comps right-side panel (B711328): list/detail/create-edit for land, building-sale and lease comps; owner-only Edit/Delete, empty fields never render
   - _exports_: `CompDetail`, `CompRow`, `default (CompsPanel)`
 - **`src/shared/comps/components/PartyNameField.jsx`** — Comp form party-name field: plain text input + a loose-match suggestion listbox (accessible combobox, independent of the map toolbar's PlaceSearchField)
@@ -280,10 +282,12 @@ _649 source files mapped._
   - _exports_: `parcelLocationText`, `pinFallbackText`, `siteplanLocationText`
 - **`src/shared/comps/lib/compMarkerIcon.js`** — Pure map-marker spec for a comp: a small colored tag (hue per comp type), deliberately a different silhouette from sitePinIcon
   - _exports_: `compMarkerColor`, `compMarkerSize`, `compMarkerSvg`
+- **`src/shared/comps/lib/compMobileLayout.js`** — pure model behind the mobile transposed sheet: which fields show in which section per comp type (filtered off SHEET_COLUMNS' own appliesTo), the pinned "needed to save" fields, and a row's short status text
+  - _exports_: `isRequiredColEmpty`, `MOBILE_BREAKPOINT_PX`, `mobileLabel`, `mobileSections`, `neededToSaveColumns`, `neededToSaveRemaining`, `rowStatusText`
 - **`src/shared/comps/lib/compParse.js`** — comp entry parsing (B849232): prose-line + tab-delimited spreadsheet block parsing into typed draft rows, with blocking-vs-soft uncertainty flags per cell (a lease rate with no period blocks; a k/m-suffixed number never does)
   - _exports_: `detectCompType`, `detectPasteShape`, `findDateToken`, `looksLikeSpreadsheetPaste`, `parseMagnitudeNumber`, `parsePaste`, `parsePasteBlock`, `parseProseLine`, `parseSingleRecord`, `rowHasBlockingFlags`, `splitPasteLines`
 - **`src/shared/comps/lib/comps.js`** — Leasing Comps pure model: $/SF derivation for land/building sale, lease basis normalization (annual NNN default, NNN/gross never blended), compFieldRows (the one empty-field-hides choke point), anchor validation, row<->model mapping
-  - _exports_: `ANCHOR_KINDS`, `anchorCountyFlag`, `annualLeaseRate`, `buildingPricePerSf`, `COMP_TYPES`, `compDateLabel`, `compFieldRows`, `compHeadline`, `compsSummaryBits`, `compToDraft`, `compToRow`, `draftToComp`, `emptyDraft`, `isCompType`, `landPricePerAreaUnit`, `landPricePerSf`, `landSizeSf`, `LEASE_EXPENSE_BASES`, `LEASE_PERIODS`, `leaseTotalAnnualRent`, `netEffectiveLeaseRate`, `parseLeaseTermYears`, `partyLabels`, `resolveCapTriangle`, `rowToComp`, `sortCompsByRecency`, `summarizeLeaseComps`, `summarizeSaleComps`, `validAnchor`, `validateComp`
+  - _exports_: `ANCHOR_KINDS`, `anchorCountyFlag`, `anchorTeamConflict`, `annualLeaseRate`, `buildingPricePerSf`, `COMP_TYPES`, `compDateLabel`, `compFieldRows`, `compHeadline`, `compsSummaryBits`, `compToDraft`, `compToRow`, `draftToComp`, `emptyDraft`, `isCompType`, `landPricePerAreaUnit`, `landPricePerSf`, `landSizeSf`, `LEASE_EXPENSE_BASES`, `LEASE_PERIODS`, `leaseTotalAnnualRent`, `netEffectiveLeaseRate`, `parseLeaseTermYears`, `partyLabels`, `resolveCapTriangle`, `rowToComp`, `sortCompsByRecency`, `summarizeLeaseComps`, `summarizeSaleComps`, `validAnchor`, `validateComp`
 - **`src/shared/comps/lib/compSheetColumns.js`** — pure column model for the comp-entry spreadsheet: per-cell get/set, polymorphic fields, display formatting, fill-down/paste-spill
   - _exports_: `applyCellEdit`, `BASIS_OPTIONS`, `cellPlaceholder`, `cellState`, `columnIndex`, `computeFlexWidths`, `fillDownColumn`, `formatNumberDisplay`, `frozenLeftOffsets`, `GROUPS`, `PERIOD_OPTIONS`, `sanitizeNumericInput`, `SHEET_COLUMNS`, `spillPaste`, `TYPE_OPTIONS`, `UNIT_OPTIONS`, `visibleColumnIndices`, `widthFor`
 - **`src/shared/comps/lib/compsStore.js`** — Supabase CRUD for public.comps (team-visible read, owner-only write); every call returns {data,error}, never swallows a failure
@@ -504,6 +508,8 @@ _649 source files mapped._
   - _exports_: `default (AppHeader)`, `exitFs`, `fsElement`, `fsSupported`, `MODULE_ACCENT`, `requestFs`, `useNarrow`
 - **`src/shared/ui/bottomSheetTracker.js`** — Module-scope publish/subscribe signal: the open mobile bottom sheet's live height, so a FloatingNotice can sit above it instead of under or over it
   - _exports_: `currentBottomSheetHeight`, `publishBottomSheetHeight`, `subscribeBottomSheetHeight`, `useBottomSheetHeight`
+- **`src/shared/ui/clickDiag.js`** — B1066370 self-instrumenting click diagnostic: a capture-phase listener flags a press with no matching click within a short window, so a "worked on the second click" report captures itself when the owner hits it live
+  - _exports_: `describeSuspect`, `installClickDiag`, `labelFor`
 - **`src/shared/ui/CloudSyncBadge.jsx`** — App-wide cloud-sync glyph driven by real saveState (synced/saving/offline/readonly/error/local); loud never-vanish error via crash boundary + retry popover
   - _exports_: `CloudBadgeBoundary`, `cloudBadgeView`, `default (CloudSyncBadge)`
 - **`src/shared/ui/ColorField.jsx`** — Color control = the native wheel + the shared recently-used swatch row (NEW-4); `ColorRecentsRow` is the row alone, for controls with a bespoke wheel.
@@ -640,7 +646,7 @@ _649 source files mapped._
 - **`src/workspaces/site-planner/lib/aerialVisibility.js`** — persisted aerial-backdrop visibility (`settings.aerialHidden`) and whether the live basemap tile layer should render, gating both the static underlay image and the Leaflet aerial on one fact so Hide/Remove actually take effect and persist.
   - _exports_: `isAerialTileActive`, `isAerialVisible`, `wantBasemapSrc`, `withAerialVisible`
 - **`src/workspaces/site-planner/lib/appraisal.js`** — Pure CAD-attribute curation: regex-maps raw county/TxGIO parcel columns to labelled owner/value/acreage/use rows for both panels
-  - _exports_: `ADDR_LINE_RE`, `APPR_FIELDS`, `apprAll`, `apprRows`, `apprVal`, `findAttr`, `MAILING_KEY_RE`, `mailingAddressValues`, `ownerName`, `PARCEL_CARD_PRIMARY_LABELS`, `PARCEL_PANEL_PRIMARY_LABELS`, `parcelCardRows`, `parcelPanelRows`, `prettyKey`, `siteNameFromParcel`, `SITUS_FIELD`, `SITUS_LADDER`, `situsAddress`, `situsKey`, `splitCuratedRows`
+  - _exports_: `ADDR_LINE_RE`, `APPR_FIELDS`, `apprAll`, `apprRows`, `apprVal`, `findAttr`, `isPlaceholderValue`, `MAILING_KEY_RE`, `mailingAddressValues`, `ownerName`, `PARCEL_CARD_PRIMARY_LABELS`, `PARCEL_PANEL_PRIMARY_LABELS`, `parcelCardRows`, `parcelPanelRows`, `prettyKey`, `siteNameFromParcel`, `SITUS_FIELD`, `SITUS_LADDER`, `situsAddress`, `situsKey`, `splitCuratedRows`
 - **`src/workspaces/site-planner/lib/apronElevation.js`** — NEW-9 dock apron / truck court elevation checked separately from the building pad: apron elevation from FFE + dock drop, exposure banding against the governing flood elevation (exposure language, never code language), and the pavement/court fill set the mitigation demand must include
   - _exports_: `APRON_FILL_TYPES`, `apronElevFt`, `apronFillIncluded`, `assessApron`, `DEFAULT_DOCK_DROP_FT`
 - **`src/workspaces/site-planner/lib/arcgis.js`** — Esri ArcGIS REST client: bounded parcel identify (query+identify fallback, multi-county eager race) and lon/lat↔State-Plane-feet conversion
@@ -859,6 +865,8 @@ _649 source files mapped._
   - _exports_: `combineDepthToWater`, `pondGroundwaterScreen`
 - **`src/workspaces/site-planner/lib/groupCas.js`** — B1341 stage 2: the group-CAS kill switch (ships OFF; `VITE_GROUP_CAS` or the `planarfit:groupCas` device key, read at call time).
   - _exports_: `GROUP_CAS_KEY`, `groupCasEnabled`
+- **`src/workspaces/site-planner/lib/harrisTaxRates.js`** — Harris County's real tax-rate source (NEW-1): combines `/api/taxrates` (the Comptroller's published rates) with `identifyJurisdiction`'s live city/ISD lookup into a dated, coverage-noted total. Never sums a MUD/special district it can't match to a rate.
+  - _exports_: `resolveHarrisTaxRates`
 - **`src/workspaces/site-planner/lib/hcfcdWse.js`** — HCFCD MAAPnext model WSE sampler (B882, Harris County): registry-driven ImageServer getSamples for the 1% + 0.2% WSE rasters; no-op until the provisional endpoints are confirmed live. `sampleMaapnextWse`/`maapnextEndpoints`/`clearMaapnextCache`.
   - _exports_: `clearMaapnextCache`, `maapnextEndpoints`, `maapnextOutage`, `sampleMaapnextWse`
 - **`src/workspaces/site-planner/lib/hiddenContentReads.js`** — the declaration table for every read of the raw element/parcel/markup/measure/callout collections: which call sites MUST filter by visibility (pictures, merged surfaces, the print crop, click targets, snap magnets, extents) and which are deliberately correct unfiltered (counts, saves, undo, ledgers, regulatory inferences), each with its reason. Plus `visibleEls`/`visibleParcels`/`visibleMeasures` consumers.
