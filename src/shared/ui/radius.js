@@ -1,3 +1,5 @@
+import { strictScale } from "./strictScale.js";
+
 /* B427411 — THE CORNER-RADIUS SCALE. One place, four values, and a rule for nesting.
  *
  * ─── WHY THIS EXISTS ─────────────────────────────────────────────────────────────────────────
@@ -37,12 +39,15 @@
  * `--radius-*` in `src/index.css`; keep the two in step, the way `palette.js` and its tokens are.
  */
 
-export const RADIUS = {
+/* NEW-1 — wrapped in a dev-only Proxy (strictScale.js) that throws on an unknown key (e.g. the
+ * `.control`/`.panel` keys that belong to controls.jsx's own CONTROL_RADIUS scale, not this one)
+ * instead of silently returning `undefined`. Zero cost in production; see that file's header. */
+export const RADIUS = strictScale("RADIUS", {
   pill: 999,
   sm: 6,
   md: 8,
   lg: 12,
-};
+});
 
 /* ⚠ THESE NUMBERS ARE NOT INVENTED — they are the tree's own dominant values, promoted.
  * `8` was already the single most common radius in `MapFinder.jsx` (9 of its 23 sites) and

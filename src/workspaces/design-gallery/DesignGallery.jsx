@@ -14,8 +14,8 @@
  */
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { Button, ToggleChip, IconButton, Field, Section, MenuItem, menuPanelStyle, RADIUS, PAD, FONT } from "../../shared/ui/controls.jsx";
-import { RADIUS as RADIUS_SCALE } from "../../shared/ui/radius.js";
+import { Button, ToggleChip, IconButton, Field, Section, MenuItem, menuPanelStyle, CONTROL_RADIUS, PAD, FONT } from "../../shared/ui/controls.jsx";
+import { RADIUS } from "../../shared/ui/radius.js";
 import { MODULE_ACCENT } from "../../shared/ui/moduleAccent.js";
 
 /* ⛔ Deliberately NOT `import { STATUS_TOKENS } from "../../shared/ui/statusTokens.js"`, and NOT
@@ -82,7 +82,7 @@ function ScaleTable({ title, entries }) {
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
         {entries.map(([name, value]) => (
           <div key={name} style={{
-            display: "flex", alignItems: "center", gap: 6, padding: "4px 9px", borderRadius: RADIUS.control,
+            display: "flex", alignItems: "center", gap: 6, padding: "4px 9px", borderRadius: CONTROL_RADIUS.control,
             border: "1px solid var(--border-default)", background: "var(--surface-raised)", fontSize: 11.5,
           }}>
             <code style={{ color: "var(--accent-site-text)" }}>{name}</code>
@@ -105,14 +105,15 @@ function GalleryBody() {
         control — if none of these fit, extend the primitive set, don't fork a local style.
       </p>
 
-      <ScaleTable title="RADIUS (src/shared/ui/radius.js)" entries={Object.entries(RADIUS_SCALE)} />
+      <ScaleTable title="RADIUS (src/shared/ui/radius.js)" entries={Object.entries(RADIUS)} />
+      <ScaleTable title="CONTROL_RADIUS (src/shared/ui/controls.jsx)" entries={Object.entries(CONTROL_RADIUS)} />
       <ScaleTable title="FONT_SIZE (src/shared/ui/designTokens.js)" entries={Object.entries(FONT_SIZE)} />
       <ScaleTable title="SPACE (src/shared/ui/designTokens.js)" entries={Object.entries(SPACE)} />
       <ScaleTable title="CONTROL_H (src/shared/ui/designTokens.js)" entries={Object.entries(CONTROL_H)} />
 
       <Row title="Button — variant × size × state">
         {["primary", "ghost", "danger"].flatMap((variant) => ["sm", "md", "lg"].map((size) => (
-          <Specimen key={`${variant}-${size}`} label={`${variant} / ${size}`} tokens={`RADIUS.control, PAD.${size}, FONT.${size === "sm" ? "sm" : "md"}`}>
+          <Specimen key={`${variant}-${size}`} label={`${variant} / ${size}`} tokens={`CONTROL_RADIUS.control, PAD.${size}, FONT.${size === "sm" ? "sm" : "md"}`}>
             <Button variant={variant} size={size}>Label</Button>
           </Specimen>
         )))}
@@ -123,12 +124,12 @@ function GalleryBody() {
       </Row>
 
       <Row title="ToggleChip — active × rest">
-        <Specimen label="rest" tokens="RADIUS.pill"><ToggleChip>Off</ToggleChip></Specimen>
+        <Specimen label="rest" tokens="CONTROL_RADIUS.pill"><ToggleChip>Off</ToggleChip></Specimen>
         <Specimen label="active" tokens="accent fill"><ToggleChip active>On</ToggleChip></Specimen>
       </Row>
 
       <Row title="IconButton — active × rest × size">
-        <Specimen label="rest, 30px (default)" tokens="RADIUS.control"><IconButton>★</IconButton></Specimen>
+        <Specimen label="rest, 30px (default)" tokens="CONTROL_RADIUS.control"><IconButton>★</IconButton></Specimen>
         <Specimen label="active, 30px" tokens="accent fill"><IconButton active>★</IconButton></Specimen>
         <Specimen label="rest, 22px (size=22)" tokens="CONTROL_H.sm-scale"><IconButton size={22}>★</IconButton></Specimen>
       </Row>
@@ -140,7 +141,7 @@ function GalleryBody() {
       </Row>
 
       <Row title="Section — collapsible group">
-        <Specimen label={`Section (${collapsed ? "collapsed" : "open"} — click to toggle)`} tokens="RADIUS.panel">
+        <Specimen label={`Section (${collapsed ? "collapsed" : "open"} — click to toggle)`} tokens="CONTROL_RADIUS.panel">
           <div style={{ width: 260 }}>
             <Section title="Assumptions & method" collapsed={collapsed} accent="var(--accent)">
               <div style={{ fontSize: 12 }} onClick={() => setCollapsed((c) => !c)}>Body content goes here.</div>
@@ -150,7 +151,7 @@ function GalleryBody() {
       </Row>
 
       <Row title="MenuItem — inside menuPanelStyle">
-        <Specimen label="Menu panel (RADIUS.panel) + items (RADIUS.control)" tokens="menuPanelStyle, MenuItem">
+        <Specimen label="Menu panel (CONTROL_RADIUS.panel) + items (CONTROL_RADIUS.control)" tokens="menuPanelStyle, MenuItem">
           <div style={{ ...menuPanelStyle, width: 200 }}>
             <MenuItem>Open…</MenuItem>
             <MenuItem active>Active row</MenuItem>
@@ -163,7 +164,7 @@ function GalleryBody() {
         {Object.entries(STATUS_PREVIEW).map(([key, t]) => (
           <Specimen key={key} label={key} tokens={`color ${t.color}${t.glyph ? `, glyph "${t.glyph}"` : ""}`}>
             <div aria-hidden style={{
-              width: 22, height: 22, borderRadius: RADIUS.pill, background: t.color, color: "#fff", // design-exempt: white glyph on a status dot, matching statusTokens.js's own map-pin convention
+              width: 22, height: 22, borderRadius: CONTROL_RADIUS.pill, background: t.color, color: "#fff", // design-exempt: white glyph on a status dot, matching statusTokens.js's own map-pin convention
               display: "grid", placeItems: "center", fontSize: 12, fontWeight: 700, opacity: t.dim ? 0.7 : 1,
             }}>{t.glyph}</div>
           </Specimen>

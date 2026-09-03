@@ -9,7 +9,7 @@
  * negligible — Notes' own measurement of the identical pattern is in that file's header).
  */
 import { useEffect, useMemo, useState } from "react";
-import { Button, IconButton, RADIUS } from "../../../shared/ui/controls.jsx";
+import { Button, IconButton, CONTROL_RADIUS } from "../../../shared/ui/controls.jsx";
 import {
   RECURRENCE_PRESETS, presetIdFor, recurrenceForPresetId, todayISO, bucketFor,
   createAgendaItem, toggleAgendaItem, updateAgendaItem, deleteAgendaItem, sortAgendaItems,
@@ -41,7 +41,7 @@ function TextField({ value, onCommit, placeholder }) {
         if (e.key === "Escape") { setDraft(value); e.currentTarget.blur(); }
       }}
       style={{
-        flex: "1 1 auto", minWidth: 0, height: 28, padding: "0 8px", borderRadius: RADIUS.control,
+        flex: "1 1 auto", minWidth: 0, height: 28, padding: "0 8px", borderRadius: CONTROL_RADIUS.control,
         border: "1px solid var(--border-default)", background: "var(--surface-page)",
         color: "var(--text-primary)", font: "inherit", fontSize: 13,
       }}
@@ -65,7 +65,7 @@ function AgendaRow({ item, onToggle, onEdit, onDelete }) {
         value={item.date || ""}
         onChange={(e) => onEdit({ date: e.target.value || null })}
         style={{
-          flex: "0 0 auto", height: 28, padding: "0 6px", borderRadius: RADIUS.control,
+          flex: "0 0 auto", height: 28, padding: "0 6px", borderRadius: CONTROL_RADIUS.control,
           border: "1px solid var(--border-default)", background: "var(--surface-page)",
           color: "var(--text-primary)", font: "inherit", fontSize: 12,
         }}
@@ -75,7 +75,7 @@ function AgendaRow({ item, onToggle, onEdit, onDelete }) {
         onChange={(e) => onEdit({ recurrence: recurrenceForPresetId(e.target.value) })}
         title="How often this repeats"
         style={{
-          flex: "0 0 auto", height: 28, padding: "0 6px", borderRadius: RADIUS.control,
+          flex: "0 0 auto", height: 28, padding: "0 6px", borderRadius: CONTROL_RADIUS.control,
           border: "1px solid var(--border-default)", background: "var(--surface-page)",
           color: "var(--text-secondary)", font: "inherit", fontSize: 12,
         }}
@@ -137,7 +137,7 @@ export default function AgendaView({ scope }) {
             onChange={(e) => setDraftText(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") addItem(); }}
             style={{
-              flex: "1 1 auto", minWidth: 0, height: 32, padding: "0 10px", borderRadius: RADIUS.control,
+              flex: "1 1 auto", minWidth: 0, height: 32, padding: "0 10px", borderRadius: CONTROL_RADIUS.control,
               border: "1px solid var(--border-default)", background: "var(--surface-raised)",
               color: "var(--text-primary)", font: "inherit", fontSize: 13,
             }}
@@ -148,7 +148,7 @@ export default function AgendaView({ scope }) {
             value={draftDate}
             onChange={(e) => setDraftDate(e.target.value)}
             style={{
-              flex: "0 0 auto", height: 32, padding: "0 8px", borderRadius: RADIUS.control,
+              flex: "0 0 auto", height: 32, padding: "0 8px", borderRadius: CONTROL_RADIUS.control,
               border: "1px solid var(--border-default)", background: "var(--surface-raised)",
               color: "var(--text-primary)", font: "inherit", fontSize: 13,
             }}
@@ -158,7 +158,7 @@ export default function AgendaView({ scope }) {
             value={draftRecurrence}
             onChange={(e) => setDraftRecurrence(e.target.value)}
             style={{
-              flex: "0 0 auto", height: 32, padding: "0 8px", borderRadius: RADIUS.control,
+              flex: "0 0 auto", height: 32, padding: "0 8px", borderRadius: CONTROL_RADIUS.control,
               border: "1px solid var(--border-default)", background: "var(--surface-raised)",
               color: "var(--text-secondary)", font: "inherit", fontSize: 13,
             }}

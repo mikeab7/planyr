@@ -28,8 +28,20 @@ import { forwardRef, useState } from "react";
  * from shared/ui/controls" comment. An identifier where a number was leaves that contract with
  * nothing to read. Repointing those seven copies is the real fix and is a known follow-up on
  * B427411 — Notes is neither the map chrome nor the header, and re-styling a workspace nobody
- * reported is scope that block did not ask for. If you change a number here, change it there. */
-export const RADIUS = { control: 8, pill: 999, panel: 12 };
+ * reported is scope that block did not ask for. If you change a number here, change it there.
+ *
+ * ⛔ RENAMED FROM `RADIUS` TO `CONTROL_RADIUS` (NEW-1, design-token collision fix). This object
+ * and `shared/ui/radius.js`'s own `RADIUS` (keys `pill`/`sm`/`md`/`lg`) were BOTH exported under
+ * the identical name `RADIUS` from two different modules — which key set was valid depended
+ * entirely on which module a file happened to import from, and a miss (`RADIUS.control` against
+ * `radius.js`'s scale) silently evaluated to `undefined`, which React drops from a style object
+ * and ships as a flat 0-radius corner (exactly what shipped on every ribbon button in the Model
+ * module — fixed in `Ribbon.jsx` by importing `radius.js`'s `RADIUS.sm` instead). Renaming this
+ * one export — not `radius.js`'s, which is the real general-purpose scale documented in that
+ * file's own header — resolves the collision while keeping every value, every key, and this
+ * file's own literal-duplicate contract (above) untouched. Every importer was updated in the same
+ * commit; `test/notesModule.test.js`'s regex now reads `CONTROL_RADIUS`. */
+export const CONTROL_RADIUS = { control: 8, pill: 999, panel: 12 };
 export const PAD = { sm: "5px 10px", md: "7px 12px", lg: "9px 14px" };
 // B915536's NEW-1 (2026-08-31) reduced FONT_SIZE to 5 named roles; this pair now tracks
 // FONT_SIZE.label (compact/secondary controls: ToggleChip, Button size="sm") and
@@ -47,15 +59,16 @@ const REST_SHADOW = "0 1px 2px rgba(0,0,0,0.05)"; // neutral, token-independent 
  * which is why seven different (radius, height, padding, font) combinations coexisted in one
  * screen with nobody having chosen that on purpose. SIZE collapses it to ONE decision: `sm` or
  * `md`. Values are literal duplicates of `designTokens.js`'s CONTROL_H.md/lg and
- * FONT_SIZE.control — not an import, for the same reason RADIUS/PAD/FONT above are literal
- * duplicates (see that block's header): this file is in the shared entry chunk. Change one,
- * change both.
+ * FONT_SIZE.control — not an import, for the same reason CONTROL_RADIUS/PAD/FONT above are
+ * literal duplicates (see that block's header): this file is in the shared entry chunk. Change
+ * one, change both.
  *   sm  height 26 (CONTROL_H.md) — dense/toolbar/map chrome. The nav tabs are the one deliberate
  *       exception (their own `Tab` primitive below, not this bundle — see its header).
  *   md  height 30 (CONTROL_H.lg) — primary standalone actions: the account pill, a menu trigger,
  *       an icon button (IconButton's own default size, unchanged, already agrees with this).
- * Radius is always `RADIUS.control` (8) for both steps — a chip built from this bundle is always
- * a STANDALONE control per docs/DESIGN.md's shape rule, never nested, so it never takes `sm`(6).
+ * Radius is always `CONTROL_RADIUS.control` (8) for both steps — a chip built from this bundle is
+ * always a STANDALONE control per docs/DESIGN.md's shape rule, never nested, so it never takes
+ * `sm`(6).
  */
 export const SIZE = {
   sm: { height: 26, padding: "0 10px", fontSize: 12 },
@@ -85,7 +98,7 @@ export const Button = forwardRef(function Button({ variant = "primary", size = "
   const base = {
     padding: PAD[size] || PAD.md,
     fontSize: size === "sm" ? FONT.sm : FONT.md,
-    borderRadius: RADIUS.control,
+    borderRadius: CONTROL_RADIUS.control,
     cursor: disabled ? "default" : "pointer",
     fontFamily: "inherit",
     fontWeight: 600,
@@ -107,7 +120,7 @@ export const Button = forwardRef(function Button({ variant = "primary", size = "
 export function ToggleChip({ active = false, accent = "var(--accent)", onAccent = "var(--on-accent)", style, children, ...rest }) {
   return (
     <button style={{
-      padding: "6px 11px", fontSize: FONT.sm, borderRadius: RADIUS.pill, cursor: "pointer", fontFamily: "inherit", fontWeight: active ? 650 : 500,
+      padding: "6px 11px", fontSize: FONT.sm, borderRadius: CONTROL_RADIUS.pill, cursor: "pointer", fontFamily: "inherit", fontWeight: active ? 650 : 500,
       border: `1px solid ${active ? accent : "var(--border-default)"}`,
       background: active ? accent : "var(--surface-raised)",
       color: active ? onAccent : "var(--text-primary)",
@@ -122,7 +135,7 @@ export const IconButton = forwardRef(function IconButton({ size = 30, active = f
   return (
     <button ref={ref} style={{
       width: size, height: size, padding: 0, flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center",
-      borderRadius: RADIUS.control, cursor: "pointer", boxShadow: REST_SHADOW,
+      borderRadius: CONTROL_RADIUS.control, cursor: "pointer", boxShadow: REST_SHADOW,
       border: `1px solid ${active ? accent : "var(--border-default)"}`,
       background: active ? accent : "var(--surface-raised)",
       color: active ? onAccent : "var(--text-primary)", ...style,
@@ -162,11 +175,11 @@ export function Field({ label, children, stacked = false, required = false }) {
 export function Section({ title, children, collapsed, accent }) {
   const [open, setOpen] = useState(!collapsed);
   return (
-    <div style={{ marginBottom: 9, background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: RADIUS.panel, boxShadow: REST_SHADOW, overflow: "hidden" }}>
+    <div style={{ marginBottom: 9, background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: CONTROL_RADIUS.panel, boxShadow: REST_SHADOW, overflow: "hidden" }}>
       <div onClick={() => setOpen((o) => !o)} role="button" tabIndex={0} aria-expanded={open} aria-label={title}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((o) => !o); } }}
         style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "10px 12px", userSelect: "none" }}>
-        {accent && <span style={{ width: 6, height: 6, borderRadius: RADIUS.pill, background: accent, flex: "none" }} />}
+        {accent && <span style={{ width: 6, height: 6, borderRadius: CONTROL_RADIUS.pill, background: accent, flex: "none" }} />}
         <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: "var(--text-secondary)", flex: 1 }}>{title}</span>
         <span style={{ fontSize: 10.5, color: "var(--text-secondary)", transform: open ? "rotate(90deg)" : "none", transition: "transform .18s ease", width: 9 }}>▶</span>
       </div>
@@ -244,7 +257,7 @@ export const MenuTrigger = forwardRef(function MenuTrigger({
       style={{
         display: "flex", alignItems: "center", gap: 7,
         height: s.height, padding: s.padding, maxWidth: 220,
-        borderRadius: RADIUS.control, border: "1px solid var(--chrome-divider)",
+        borderRadius: CONTROL_RADIUS.control, border: "1px solid var(--chrome-divider)",
         background: "var(--chrome-bg-elev)", color: textColor,
         cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: s.fontSize,
         whiteSpace: "nowrap",
@@ -259,14 +272,14 @@ export const MenuTrigger = forwardRef(function MenuTrigger({
 });
 
 /* Menu primitives — a token-only flyout panel + item (the Site Planner menuPanel/menuItem). */
-export const menuPanelStyle = { background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: RADIUS.panel, boxShadow: "0 16px 44px rgba(0,0,0,0.22), 0 3px 10px rgba(0,0,0,0.1)", padding: 6 };
+export const menuPanelStyle = { background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: CONTROL_RADIUS.panel, boxShadow: "0 16px 44px rgba(0,0,0,0.22), 0 3px 10px rgba(0,0,0,0.1)", padding: 6 };
 // NEW-2 (B849585) — `disabled` gets a real, unmistakable treatment (opacity, matching Button's/
 // IconButton's own `disabled → opacity: 0.5`), not just a `cursor` change: a disabled row that
 // only differs from an enabled one by cursor is invisible until you try to click it.
 export function MenuItem({ active = false, disabled = false, style, children, ...rest }) {
   return (
     <button disabled={disabled} style={{
-      display: "block", width: "100%", textAlign: "left", padding: "7px 10px", fontSize: FONT.md, borderRadius: RADIUS.control,
+      display: "block", width: "100%", textAlign: "left", padding: "7px 10px", fontSize: FONT.md, borderRadius: CONTROL_RADIUS.control,
       border: "none", background: active ? "var(--hover-menu)" : "transparent", color: "var(--text-primary)", fontFamily: "inherit", fontWeight: active ? 650 : 500,
       cursor: disabled ? "default" : "pointer", ...(disabled ? { opacity: 0.5 } : {}), ...style,
     }} {...rest}>{children}</button>
